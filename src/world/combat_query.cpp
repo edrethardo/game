@@ -92,16 +92,20 @@ CombatHit CombatQuery::raycast(const LevelGrid& grid, const EntityPool& pool,
         result.type     = CombatHit::WORLD;
     }
 
-    // 2. Test all active entities
+    // 2. Test all active entities — inflate hitboxes slightly for forgiving hitscan
+    static constexpr f32 HITSCAN_PADDING = 0.15f;
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         const Entity& e = pool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
 
         AABB box = entityAABB(e);
+        // Pad the AABB so near-misses still register
+        box.min = box.min - Vec3{HITSCAN_PADDING, HITSCAN_PADDING, HITSCAN_PADDING};
+        box.max = box.max + Vec3{HITSCAN_PADDING, HITSCAN_PADDING, HITSCAN_PADDING};
         f32 t;
         Vec3 n;
-        if (rayVsAABB(origin, dir, box, t, n) && t < bestDist && t >= 0.0f) {
+        if (rayVsAABB(origin, dir, box, t, n) && t < bestDist && t > 0.01f) {
             bestDist         = t;
             result.hit       = true;
             result.position  = origin + dir * t;

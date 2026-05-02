@@ -295,6 +295,9 @@ namespace Inventory {
     ItemInstance dropFromBackpack(PlayerInventory& inv, u8 backpackIndex);
     WeaponDef    getEffectiveWeapon(const PlayerInventory& inv,
                                     const ItemDef* itemDefs, const WeaponDef& baseWeapon);
+    // Build a WeaponDef from a specific item instance + inventory bonuses
+    WeaponDef    getWeaponFromItem(const PlayerInventory& inv,
+                                   const ItemDef* itemDefs, const ItemInstance& item);
     f32          getEffectiveMaxHealth(const PlayerInventory& inv, f32 baseMaxHealth);
 }
 

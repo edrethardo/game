@@ -101,7 +101,11 @@ RayHit Raycast::cast(const LevelGrid& grid,
             return hit;
         }
 
-        // Empty cell — check floor/ceiling intersection for looking up/down
+        // Empty cell — check floor/ceiling intersection for looking up/down.
+        // tNext is when we leave this cell; floor/ceiling hits must be within [0, tNext].
+        f32 tNext = (tMaxX < tMaxZ) ? tMaxX : tMaxZ;
+        if (tNext > maxDistance) tNext = maxDistance;
+
         if (dir.y != 0.0f) {
             f32 floorH = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
             f32 ceilH  = LevelGridSystem::getCeilingHeight(grid, (u32)cx, (u32)cz);
@@ -109,9 +113,8 @@ RayHit Raycast::cast(const LevelGrid& grid,
             // Floor hit (ray going down)
             if (dir.y < 0.0f) {
                 f32 tFloor = (floorH - origin.y) / dir.y;
-                if (tFloor > 0.0f && tFloor < t && tFloor <= maxDistance) {
+                if (tFloor > 0.0f && tFloor <= tNext) {
                     Vec3 hitPos = origin + dir * tFloor;
-                    // Check the hit position is inside this cell
                     s32 hcx = static_cast<s32>(std::floor(hitPos.x / cs));
                     s32 hcz = static_cast<s32>(std::floor(hitPos.z / cs));
                     if (hcx == cx && hcz == cz) {
@@ -130,7 +133,7 @@ RayHit Raycast::cast(const LevelGrid& grid,
             // Ceiling hit (ray going up)
             if (dir.y > 0.0f) {
                 f32 tCeil = (ceilH - origin.y) / dir.y;
-                if (tCeil > 0.0f && tCeil < t && tCeil <= maxDistance) {
+                if (tCeil > 0.0f && tCeil <= tNext) {
                     Vec3 hitPos = origin + dir * tCeil;
                     s32 hcx = static_cast<s32>(std::floor(hitPos.x / cs));
                     s32 hcz = static_cast<s32>(std::floor(hitPos.z / cs));

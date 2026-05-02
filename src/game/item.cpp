@@ -653,6 +653,30 @@ WeaponDef Inventory::getEffectiveWeapon(const PlayerInventory& inv,
     return wd;
 }
 
+WeaponDef Inventory::getWeaponFromItem(const PlayerInventory& inv,
+                                       const ItemDef* itemDefs,
+                                       const ItemInstance& item) {
+    const ItemDef& def = itemDefs[item.defId];
+
+    WeaponDef wd;
+    wd.name            = def.name;
+    wd.type            = def.weaponType;
+
+    f32 rawDamage      = item.damage + inv.bonusDamageFlat;
+    wd.damage          = rawDamage * (1.0f + inv.bonusDamagePct / 100.0f);
+
+    wd.cooldown        = def.baseCooldown * (1.0f - inv.bonusCooldownReduction);
+    if (wd.cooldown < 0.05f) wd.cooldown = 0.05f;
+
+    wd.range           = def.baseRange + inv.bonusRange;
+    wd.coneAngleDeg    = def.baseConeAngle + inv.bonusConeAngle;
+    wd.projectileSpeed = def.baseProjectileSpeed * (1.0f + inv.bonusProjectileSpeedPct / 100.0f);
+    wd.projectileRadius = def.baseProjectileRadius;
+    wd.recoilKick      = def.baseRecoil;
+
+    return wd;
+}
+
 f32 Inventory::getEffectiveMaxHealth(const PlayerInventory& inv, f32 baseMaxHealth) {
     // Include bonusHealth contributions from each equipped item's rolled base stat
     f32 totalHealthFlat = inv.bonusHealthFlat;
@@ -793,12 +817,13 @@ void Quickbar::assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 back
 
     // Check if already assigned — avoid duplicate entries
     for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
-        if (qb.slots[i].type == QuickbarSlot::BACKPACK_REF &&
+        if ((qb.slots[i].type == QuickbarSlot::BACKPACK_REF ||
+             qb.slots[i].type == QuickbarSlot::EQUIPPED_REF) &&
             qb.slots[i].itemUid == item.uid) return;
     }
 
-    // Find first free slot (skip slot 0 which is weapon)
-    for (u32 i = 1; i < QUICKBAR_SLOTS; i++) {
+    // Find first free slot — any slot can hold any item type
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
         if (qb.slots[i].type == QuickbarSlot::EMPTY) {
             qb.slots[i].type = QuickbarSlot::BACKPACK_REF;
             qb.slots[i].sourceIndex = backpackIdx;
@@ -809,20 +834,52 @@ void Quickbar::assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 back
 }
 
 void Quickbar::removeItem(QuickbarState& qb, u8 slotIdx) {
-    if (slotIdx >= QUICKBAR_SLOTS || slotIdx == 0) return; // slot 0 (weapon) is protected
+    if (slotIdx >= QUICKBAR_SLOTS) return;
     qb.slots[slotIdx] = {};
 }
 
 void Quickbar::syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv) {
-    // Slot 0 always mirrors the equipped weapon
     const ItemInstance& wpn = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
-    if (!isItemEmpty(wpn)) {
-        qb.slots[0].type = QuickbarSlot::EQUIPPED_REF;
-        qb.slots[0].sourceIndex = static_cast<u8>(ItemSlot::WEAPON);
-        qb.slots[0].itemUid = wpn.uid;
-    } else {
-        qb.slots[0] = {};
+
+    // If weapon slot is empty, clear any EQUIPPED_REF slots pointing to it
+    if (isItemEmpty(wpn)) {
+        for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+            if (qb.slots[i].type == QuickbarSlot::EQUIPPED_REF &&
+                qb.slots[i].sourceIndex == static_cast<u8>(ItemSlot::WEAPON)) {
+                qb.slots[i] = {};
+            }
+        }
+        return;
     }
+
+    // Check if any slot already references this weapon (by UID)
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+        if (qb.slots[i].itemUid == wpn.uid && qb.slots[i].type != QuickbarSlot::EMPTY) {
+            // Convert backpack ref to equipped ref (item moved from backpack to equipped)
+            qb.slots[i].type = QuickbarSlot::EQUIPPED_REF;
+            qb.slots[i].sourceIndex = static_cast<u8>(ItemSlot::WEAPON);
+            qb.slots[i].itemUid = wpn.uid;
+            return;
+        }
+    }
+
+    // No slot references this weapon — assign it to the first free slot
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+        if (qb.slots[i].type == QuickbarSlot::EMPTY) {
+            qb.slots[i].type = QuickbarSlot::EQUIPPED_REF;
+            qb.slots[i].sourceIndex = static_cast<u8>(ItemSlot::WEAPON);
+            qb.slots[i].itemUid = wpn.uid;
+            // Auto-select this slot so the player immediately uses the equipped weapon
+            qb.activeSlot = static_cast<u8>(i);
+            return;
+        }
+    }
+
+    // All slots full — overwrite slot 0 as last resort
+    qb.slots[0].type = QuickbarSlot::EQUIPPED_REF;
+    qb.slots[0].sourceIndex = static_cast<u8>(ItemSlot::WEAPON);
+    qb.slots[0].itemUid = wpn.uid;
+    qb.activeSlot = 0;
 }
 
 const ItemInstance* Quickbar::resolveSlot(const QuickbarState& qb, const PlayerInventory& inv, u8 slot) {

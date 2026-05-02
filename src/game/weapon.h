@@ -54,6 +54,7 @@ struct ViewmodelState {
     f32 swayPitch   = 0.0f;
     f32 recoilKick  = 0.0f;  // decays after fire
     f32 attackAnimT = 0.0f;  // melee swing countdown
+    f32 fireShakeTimer = 0.0f; // ranged weapon vibration countdown
 };
 
 static constexpr u32 MAX_WEAPON_DEFS = 16;

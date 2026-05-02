@@ -403,6 +403,32 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
             f32 textX = x0 + (SLOT_SIZE - textW) * 0.5f;
             FontSystem::drawText(sw, sh, textX, y0 - 10, abbrev, rc, 1);
 
+            // Hand marker on the currently equipped weapon's slot (bottom-right corner)
+            // Check if this item matches the equipped weapon by UID
+            const ItemInstance& eqWpn = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
+            if (!isItemEmpty(eqWpn) && item->uid == eqWpn.uid) {
+                Vec3 hc = {1.0f, 0.9f, 0.6f}; // warm white
+                f32 hx = x1 - 12.0f;
+                f32 hy = y0 + 2.0f;
+                // Palm
+                pushLine(hx + 2, hy,     hx + 8, hy,     hc);
+                pushLine(hx + 2, hy + 1, hx + 8, hy + 1, hc);
+                pushLine(hx + 2, hy + 2, hx + 8, hy + 2, hc);
+                pushLine(hx + 1, hy + 3, hx + 9, hy + 3, hc);
+                // Fingers
+                pushLine(hx + 2, hy + 4, hx + 3, hy + 4, hc);
+                pushLine(hx + 4, hy + 4, hx + 5, hy + 4, hc);
+                pushLine(hx + 6, hy + 4, hx + 7, hy + 4, hc);
+                pushLine(hx + 8, hy + 4, hx + 9, hy + 4, hc);
+                pushLine(hx + 2, hy + 5, hx + 3, hy + 5, hc);
+                pushLine(hx + 4, hy + 5, hx + 5, hy + 5, hc);
+                pushLine(hx + 6, hy + 5, hx + 7, hy + 5, hc);
+                pushLine(hx + 8, hy + 5, hx + 9, hy + 5, hc);
+                // Thumb
+                pushLine(hx,     hy + 1, hx + 1, hy + 1, hc);
+                pushLine(hx,     hy + 2, hx + 1, hy + 2, hc);
+            }
+
             // Cooldown darkening overlay sweeps from top (only on active weapon slot)
             if (active && cooldownPct > 0.0f) {
                 f32 darkH = (y1 - y0 - 4) * cooldownPct;

@@ -20,6 +20,15 @@ enum struct AIState : u8 {
     DEAD,
 };
 
+// Enemy type determines limb configuration and animation behavior
+enum struct EnemyType : u8 {
+    GENERIC = 0,  // no limbs, single mesh
+    SKELETON,     // 2 legs, 2 arms, weapon carrying
+    BAT,          // 2 wings, 2 claws
+    SPIDER,       // 8 legs, 2 mandibles
+    COUNT
+};
+
 struct Entity {
     // Identity
     u16 generation = 0;
@@ -52,6 +61,8 @@ struct Entity {
     // Rendering
     u8  meshId     = 0;  // index into Engine::m_meshDefs
     u8  materialId = 0;  // index into MaterialSystem
+    EnemyType enemyType = EnemyType::GENERIC;
+    u8 weaponMeshId = 0;  // skeleton weapon mesh index (0 = none)
 
     // Animation
     f32  animTimer    = 0.0f;  // continuous timer for procedural animation

@@ -30,6 +30,7 @@
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
+#include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/skill.h"
@@ -160,6 +161,7 @@ void Engine::init() {
     HUD::init();
     FontSystem::init();
     ItemIconSystem::init();
+    LimbSystem::init(m_meshDefs, m_meshDefCount);
 
     // Shaders
     m_basicShader = ShaderSystem::load("assets/shaders/basic.vert",
@@ -388,6 +390,22 @@ void Engine::startGame() {
                 if (ent) {
                     ent->meshId = meshId;
                     ent->materialId = matId;
+
+                    // Set enemy type for limb animation (matches kEnemies[] order)
+                    static const EnemyType kEnemyTypes[] = {EnemyType::SKELETON, EnemyType::BAT, EnemyType::SPIDER};
+                    ent->enemyType = kEnemyTypes[typeIdx];
+
+                    // Skeletons carry random melee weapons (sword/dagger/axe mesh looked up by name)
+                    if (ent->enemyType == EnemyType::SKELETON) {
+                        static const char* skelWeapons[] = {"sword", "dagger", "axe"};
+                        u32 weapIdx = static_cast<u32>(std::rand()) % 3;
+                        for (u32 m = 1; m < m_meshDefCount; m++) {
+                            if (std::strcmp(m_meshDefs[m].name, skelWeapons[weapIdx]) == 0) {
+                                ent->weaponMeshId = static_cast<u8>(m);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -753,6 +771,8 @@ void Engine::singleplayerUpdate(f32 dt) {
         if (m_viewmodelState.recoilKick < 0.001f) m_viewmodelState.recoilKick = 0.0f;
         // Count down melee swing animation
         if (m_viewmodelState.attackAnimT > 0.0f) m_viewmodelState.attackAnimT -= dt;
+        // Count down ranged fire shake
+        if (m_viewmodelState.fireShakeTimer > 0.0f) m_viewmodelState.fireShakeTimer -= dt;
     }
 
     // Enemy AI
@@ -874,12 +894,14 @@ void Engine::singleplayerUpdate(f32 dt) {
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
 
-    // Recoil decay
-    ws.recoilOffset *= 0.85f;
-
     // Camera
     PlayerController::applyToCamera(m_localPlayer, m_camera);
-    m_camera.pitch += ws.recoilOffset;
+    // Screen shake only from enemy hits, not weapon fire
+    if (m_localPlayer.hitShakeTimer > 0.0f) {
+        m_localPlayer.hitShakeTimer -= dt;
+        f32 shake = m_localPlayer.hitShakeTimer * 0.08f;
+        m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
+    }
 
     // Player-enemy push collision
     AABB playerBox = {
@@ -997,13 +1019,15 @@ void Engine::serverUpdate(f32 dt) {
 
     if (m_hitMarkerTimer > 0.0f) m_hitMarkerTimer -= dt;
 
-    // Recoil decay
-    ws.recoilOffset *= 0.85f;
-
     // Camera from local player
     syncNetPlayerToLocalPlayer();
     PlayerController::applyToCamera(m_localPlayer, m_camera);
-    m_camera.pitch += ws.recoilOffset;
+    // Screen shake only from enemy hits, not weapon fire
+    if (m_localPlayer.hitShakeTimer > 0.0f) {
+        m_localPlayer.hitShakeTimer -= dt;
+        f32 shake = m_localPlayer.hitShakeTimer * 0.08f;
+        m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
+    }
 
     // Player-enemy push for local player
     AABB playerBox = {
@@ -1089,13 +1113,15 @@ void Engine::clientUpdate(f32 dt) {
     // Hit marker decay
     if (m_hitMarkerTimer > 0.0f) m_hitMarkerTimer -= dt;
 
-    // Recoil decay
-    ws.recoilOffset *= 0.85f;
-
     // Camera from predicted local player
     syncNetPlayerToLocalPlayer();
     PlayerController::applyToCamera(m_localPlayer, m_camera);
-    m_camera.pitch += ws.recoilOffset;
+    // Screen shake only from enemy hits, not weapon fire
+    if (m_localPlayer.hitShakeTimer > 0.0f) {
+        m_localPlayer.hitShakeTimer -= dt;
+        f32 shake = m_localPlayer.hitShakeTimer * 0.08f;
+        m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1109,18 +1135,17 @@ void Engine::handleWeaponFire(f32 dt) {
     if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
-    // Resolve weapon from active quickbar slot, fallback to base weapon def
+    // Resolve weapon from the actual quickbar item, not the equipped slot
     const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[m_localPlayerIndex],
                                                        m_inventories[m_localPlayerIndex],
                                                        m_quickbars[m_localPlayerIndex].activeSlot);
     WeaponDef wpn;
     if (qbItem && !isItemEmpty(*qbItem) &&
         m_itemDefs[qbItem->defId].slot == ItemSlot::WEAPON) {
-        // Active quickbar slot holds a weapon item — merge its affixes into the WeaponDef
-        wpn = Inventory::getEffectiveWeapon(m_inventories[m_localPlayerIndex],
-                                             m_itemDefs, m_weaponDefs[ws.currentWeapon]);
+        // Build WeaponDef from the specific quickbar item's stats
+        wpn = Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex],
+                                            m_itemDefs, *qbItem);
     } else {
-        // No weapon item in active slot — use base weapon def directly
         wpn = m_weaponDefs[ws.currentWeapon];
     }
     ws.cooldownTimer = wpn.cooldown;
@@ -1149,9 +1174,10 @@ void Engine::handleWeaponFire(f32 dt) {
         break;
     }
 
-    ws.recoilOffset += wpn.recoilKick;
     // Amplified kick for viewmodel so the visual response is clearly visible
-    m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f; // gentle viewmodel kick
+    m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
+    // Ranged weapons get rapid vibration while firing
+    if (wpn.type != WeaponType::MELEE) m_viewmodelState.fireShakeTimer = 0.15f;
     // Melee fires a swing animation of fixed duration
     if (wpn.type == WeaponType::MELEE) m_viewmodelState.attackAnimT = 0.3f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
@@ -1193,8 +1219,6 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
         break;
     }
-
-    ws.recoilOffset += wpn.recoilKick;
 
     // If this is the local player, trigger hit marker
     if (np.slotIndex == m_localPlayerIndex) {
@@ -1260,97 +1284,138 @@ void Engine::updateTargetLock(f32 dt) {
 // Viewmodel — renders first-person hand + equipped weapon over everything
 // ---------------------------------------------------------------------------
 void Engine::renderViewmodel() {
-    // Skip when inventory is open or not in gameplay
     if (m_inventoryOpen) return;
     if (m_gameState != GameState::IN_GAME) return;
 
-    // Resolve the weapon mesh from the currently equipped item
+    // Resolve equipped weapon mesh
     const ItemInstance& equipped = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-    u8 weaponMeshId = 0;
-    if (!isItemEmpty(equipped)) {
-        weaponMeshId = m_itemDefs[equipped.defId].meshId;
-    }
+    if (isItemEmpty(equipped)) return;
 
-    // Clear depth buffer so the viewmodel always draws on top of world geometry
+    u8 weaponMeshId = m_itemDefs[equipped.defId].meshId;
+    if (weaponMeshId == 0 || weaponMeshId >= m_meshDefCount) return;
+
+    const ItemDef& def = m_itemDefs[equipped.defId];
+
+    // Clear depth so viewmodel renders on top of everything
     glClear(GL_DEPTH_BUFFER_BIT);
 
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
     f32 aspect = static_cast<f32>(sw) / static_cast<f32>(sh);
 
-    // Tight near plane avoids clipping the hand mesh at close range
+    // Tight near plane for viewmodel
     Mat4 proj = Mat4::perspective(70.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
 
-    // Sine-wave bob in two axes tied to walk speed and timer
-    // Subtle bob — low amplitude to avoid seasick feel
-    f32 bobX = sinf(m_viewmodelState.bobTimer * 6.0f)  * 0.004f;
+    // Subtle walk bob
+    f32 bobX = sinf(m_viewmodelState.bobTimer * 6.0f) * 0.004f;
     f32 bobY = sinf(m_viewmodelState.bobTimer * 12.0f) * 0.003f;
 
-    // Downward pitch on recoil (negative = tilt up after firing)
-    f32 recoilPitch = -m_viewmodelState.recoilKick * 0.12f; // subtle recoil
+    // Viewmodel-only recoil (doesn't affect camera)
+    f32 recoilPitch = -m_viewmodelState.recoilKick * 0.12f;
 
-    // Melee swing: a half-sine arc over the 0.3 s window
-    f32 swingAngle = 0.0f;
+    // Attack animation — per-subtype melee, generic recoil for ranged
+    f32 attackPitch = 0.0f;  // X rotation (pitch forward/back)
+    f32 attackYaw   = 0.0f;  // Y rotation (swing left/right)
+    f32 attackZ     = 0.0f;  // Z offset (thrust forward/back)
+
     if (m_viewmodelState.attackAnimT > 0.0f) {
-        f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1 -> 0
-        swingAngle = -0.6f * sinf(t * 3.14159f);    // gentle swing arc
+        f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1→0
+
+        if (def.weaponType == WeaponType::MELEE) {
+            switch (def.weaponSubtype) {
+                case WeaponSubtype::DAGGER:
+                case WeaponSubtype::THROWING_KNIFE:
+                    // Stab: thrust forward then retract
+                    attackZ = -0.25f * sinf(t * 3.14159f);
+                    attackPitch = -0.15f * t; // slight downward angle during stab
+                    break;
+                case WeaponSubtype::AXE:
+                    // Heavy overhead chop: big downward arc
+                    attackPitch = -0.9f * sinf(t * 3.14159f);
+                    break;
+                case WeaponSubtype::SWORD:
+                default:
+                    // Horizontal slash: sweep from right to left
+                    attackYaw = -0.8f * sinf(t * 3.14159f);
+                    attackPitch = -0.15f * t; // slight lean into swing
+                    break;
+            }
+        }
     }
 
-    // Camera-local position: right-side, below center, pushed back
-    Vec3 handOffset = {0.35f + bobX, -0.30f + bobY, -0.55f};
+    // Per-weapon-type positioning
+    Vec3 offset;
+    f32 holdYaw = 0.0f;
+    f32 holdPitch = 0.0f;
+    switch (def.weaponType) {
+        case WeaponType::MELEE:
+            offset = {0.35f + bobX, -0.35f + bobY, -0.45f + attackZ};
+            holdYaw = 0.4f;
+            holdPitch = -0.2f;
+            break;
+        case WeaponType::HITSCAN:
+            offset = {0.40f + bobX, -0.30f + bobY, -0.50f};
+            holdYaw = 0.1f;
+            holdPitch = 0.0f;
+            break;
+        case WeaponType::PROJECTILE:
+            offset = {0.30f + bobX, -0.35f + bobY, -0.50f};
+            holdYaw = 0.2f;
+            holdPitch = -0.1f;
+            break;
+    }
 
-    // Build hand model matrix in camera-local (view) space
-    Mat4 handModel = Mat4::translate(handOffset)
-                   * Mat4::rotateX(recoilPitch + swingAngle)
-                   * Mat4::rotateY(0.3f); // slight yaw so fingers point forward-left
+    // Rapid vibration while firing ranged weapons
+    if (m_viewmodelState.fireShakeTimer > 0.0f) {
+        f32 intensity = m_viewmodelState.fireShakeTimer / 0.15f;
+        f32 phase = m_viewmodelState.fireShakeTimer * 60.0f;
+        offset.x += sinf(phase * 7.3f) * 0.003f * intensity;
+        offset.y += sinf(phase * 11.1f) * 0.002f * intensity;
+    }
 
-    Mat4 handMVP = proj * handModel;
+    // Scale weapon mesh to fill viewmodel area (~0.8 units)
+    const AABB& wb = m_meshDefs[weaponMeshId].bounds;
+    f32 meshH = wb.max.y - wb.min.y;
+    f32 meshW = wb.max.x - wb.min.x;
+    f32 meshD = wb.max.z - wb.min.z;
+    f32 maxDim = meshH;
+    if (meshW > maxDim) maxDim = meshW;
+    if (meshD > maxDim) maxDim = meshD;
+    f32 weaponScale = (maxDim > 0.001f) ? (0.8f / maxDim) : 0.8f;
 
+    // Center the mesh at origin before scaling (offset by mesh center)
+    Vec3 meshCenter = {
+        (wb.min.x + wb.max.x) * 0.5f,
+        (wb.min.y + wb.max.y) * 0.5f,
+        (wb.min.z + wb.max.z) * 0.5f
+    };
+
+    Mat4 weaponModel = Mat4::translate(offset)
+                     * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
+                     * Mat4::rotateY(holdYaw + attackYaw)
+                     * Mat4::scale({weaponScale, weaponScale, weaponScale})
+                     * Mat4::translate({-meshCenter.x, -meshCenter.y, -meshCenter.z});
+
+    Mat4 weaponMVP = proj * weaponModel;
+
+    // Draw weapon mesh with material tint
     glUseProgram(m_unlitShader.program);
-    glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, handMVP.m);
+    glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, weaponMVP.m);
 
-    // Skin tone tint for the hand
-    Vec4 skinTint = {0.85f, 0.70f, 0.55f, 1.0f};
-    glUniform4f(m_unlitShader.loc_color, skinTint.x, skinTint.y, skinTint.z, skinTint.w);
+    const Material* wpnMat = MaterialSystem::get(def.materialId);
+    Vec4 wpnTint = wpnMat ? wpnMat->tint : Vec4{0.7f, 0.7f, 0.7f, 1.0f};
+    glUniform4f(m_unlitShader.loc_color, wpnTint.x, wpnTint.y, wpnTint.z, wpnTint.w);
 
-    // Bind white fallback texture (material 0) so unlit color is unmodulated
     glActiveTexture(GL_TEXTURE0);
-    const Material* fallback = MaterialSystem::get(0);
-    if (fallback) {
-        glBindTexture(GL_TEXTURE_2D, fallback->texture.handle);
+    if (wpnMat) {
+        glBindTexture(GL_TEXTURE_2D, wpnMat->texture.handle);
     } else {
-        glBindTexture(GL_TEXTURE_2D, 0);
+        const Material* fallback = MaterialSystem::get(0);
+        if (fallback) glBindTexture(GL_TEXTURE_2D, fallback->texture.handle);
     }
     glUniform1i(m_unlitShader.loc_texture0, 0);
 
-    MeshSystem::draw(m_handMesh);
-
-    // Draw weapon mesh attached to the hand if one is equipped
-    if (weaponMeshId > 0 && weaponMeshId < m_meshDefCount) {
-        // Normalise weapon mesh to ~0.35 units tall so all weapons look consistent
-        const AABB& wb = m_meshDefs[weaponMeshId].bounds;
-        f32 meshH = wb.max.y - wb.min.y;
-        f32 weaponScale = (meshH > 0.001f) ? (0.35f / meshH) : 0.35f;
-
-        // Offset forward and up from the palm centre
-        Mat4 weaponOffset = Mat4::translate({0.0f, 0.04f, -0.15f})
-                          * Mat4::scale({weaponScale, weaponScale, weaponScale});
-        Mat4 weaponModel = handModel * weaponOffset;
-        Mat4 weaponMVP   = proj * weaponModel;
-
-        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, weaponMVP.m);
-
-        // Use the weapon item's material tint; grey fallback if none assigned
-        const ItemDef& def = m_itemDefs[equipped.defId];
-        const Material* wpnMat = MaterialSystem::get(def.materialId);
-        Vec4 wpnTint = wpnMat ? wpnMat->tint : Vec4{0.7f, 0.7f, 0.7f, 1.0f};
-        glUniform4f(m_unlitShader.loc_color, wpnTint.x, wpnTint.y, wpnTint.z, wpnTint.w);
-        if (wpnMat) {
-            glBindTexture(GL_TEXTURE_2D, wpnMat->texture.handle);
-        }
-
-        MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
-    }
+    MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
 }
 
 // ---------------------------------------------------------------------------
@@ -1498,17 +1563,107 @@ void Engine::render(f32 alpha) {
         const Material* entMat = MaterialSystem::get(e.materialId);
         const Texture& entTex = (e.materialId > 0) ? entMat->texture : defaultTex;
 
+        // Resolve tint once so it's available for both body and limb rendering
+        Vec4 tint = (e.materialId > 0) ? entMat->tint : (
+            (e.flags & ENT_FLYING)
+                ? Vec4{0.4f, 0.5f, 1.0f, 1.0f}
+                : Vec4{0.8f, 0.5f, 0.3f, 1.0f}
+        );
         if (e.flashTimer > 0.0f) {
             f32 flash = e.flashTimer / 0.12f;
             Vec4 flashColor = {1.0f, 0.3f * flash, 0.3f * flash, 1.0f};
             Renderer::submit(m_basicShader, entTex, entMesh, model, bounds, flashColor);
         } else {
-            Vec4 tint = (e.materialId > 0) ? entMat->tint : (
-                (e.flags & ENT_FLYING)
-                    ? Vec4{0.4f, 0.5f, 1.0f, 1.0f}
-                    : Vec4{0.8f, 0.5f, 0.3f, 1.0f}
-            );
             Renderer::submit(m_basicShader, entTex, entMesh, model, bounds, tint);
+        }
+
+        // Render articulated limbs (LOD: only when close enough to camera)
+        if (e.enemyType != EnemyType::GENERIC && !(e.flags & ENT_DEAD)) {
+            Vec3 toCamera = m_camera.position - e.position;
+            if (lengthSq(toCamera) < LIMB_LOD_DIST_SQ) {
+                const LimbConfig& limbCfg = LimbSystem::getConfig(e.enemyType);
+                for (u32 li = 0; li < limbCfg.limbCount; li++) {
+                    u8 limbMesh = LimbSystem::getLimbMeshId(e.enemyType, li);
+                    if (limbMesh == 0 || limbMesh >= m_meshDefCount) continue;
+
+                    const LimbDef& ld = limbCfg.limbs[li];
+                    f32 angle = LimbSystem::computeAngle(e, li, e.enemyType);
+                    if (ld.mirrored) angle = -angle;
+                    angle += ld.restAngle;
+
+                    // Build limb transform: entity feet position → pivot offset → rotation → box
+                    Vec3 limbPivot = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                                   + Vec3{0, animBobY, 0}
+                                   + ld.pivotOffset;
+
+                    Mat4 limbRot;
+                    switch (ld.pivotAxis) {
+                        case 0: limbRot = Mat4::rotateX(angle); break;
+                        case 1: limbRot = Mat4::rotateY(angle); break;
+                        case 2: limbRot = Mat4::rotateZ(angle); break;
+                        default: limbRot = Mat4::identity(); break;
+                    }
+
+                    // Scale limb proportionally to entity's rendered height
+                    f32 limbScale = 1.0f;
+                    if (meshId > 0 && meshId < m_meshDefCount) {
+                        const AABB& meshBounds = m_meshDefs[meshId].bounds;
+                        f32 meshH = meshBounds.max.y - meshBounds.min.y;
+                        f32 targetH = e.halfExtents.y * 2.0f * scaleY;
+                        limbScale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
+                    }
+
+                    Mat4 limbModel = Mat4::translate(limbPivot)
+                                   * Mat4::rotateY(e.yaw)
+                                   * limbRot
+                                   * Mat4::scale(ld.meshHalfSize * 2.0f * limbScale);
+
+                    AABB limbBounds = {limbPivot - Vec3{0.5f,0.5f,0.5f},
+                                       limbPivot + Vec3{0.5f,0.5f,0.5f}};
+
+                    // Propagate hit flash to limbs to keep visual feedback consistent
+                    Renderer::submit(m_basicShader, entTex, m_meshDefs[limbMesh].mesh,
+                                     limbModel, limbBounds,
+                                     (e.flashTimer > 0.0f)
+                                         ? Vec4{1.0f, 0.3f * (e.flashTimer/0.12f), 0.3f * (e.flashTimer/0.12f), 1.0f}
+                                         : tint);
+                }
+
+                // Skeleton weapon: rendered at right-hand position, rotated with arm swing
+                if (e.enemyType == EnemyType::SKELETON && e.weaponMeshId > 0 && e.weaponMeshId < m_meshDefCount) {
+                    f32 armAngle = LimbSystem::computeAngle(e, 2, EnemyType::SKELETON); // right upper arm
+
+                    Vec3 weaponPivot = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                                    + Vec3{0, animBobY, 0}
+                                    + Vec3{-0.35f, 0.30f, 0.0f}; // right hand position
+
+                    f32 limbScale = 1.0f;
+                    if (meshId > 0 && meshId < m_meshDefCount) {
+                        const AABB& meshBounds = m_meshDefs[meshId].bounds;
+                        f32 meshH = meshBounds.max.y - meshBounds.min.y;
+                        f32 targetH = e.halfExtents.y * 2.0f * scaleY;
+                        limbScale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
+                    }
+
+                    // Scale weapon proportionally to limb size
+                    const AABB& wb = m_meshDefs[e.weaponMeshId].bounds;
+                    f32 wH = wb.max.y - wb.min.y;
+                    f32 wScale = (wH > 0.001f) ? (0.5f * limbScale / wH) : 0.3f;
+
+                    Mat4 weaponModel = Mat4::translate(weaponPivot)
+                                     * Mat4::rotateY(e.yaw)
+                                     * Mat4::rotateX(-armAngle)
+                                     * Mat4::scale({wScale, wScale, wScale});
+
+                    AABB wBounds = {weaponPivot - Vec3{0.5f,0.5f,0.5f},
+                                    weaponPivot + Vec3{0.5f,0.5f,0.5f}};
+
+                    // Steel tint for skeleton weapons
+                    Renderer::submit(m_basicShader, entTex, m_meshDefs[e.weaponMeshId].mesh,
+                                     weaponModel, wBounds,
+                                     Vec4{0.7f, 0.7f, 0.8f, 1.0f});
+                }
+            }
         }
     }
 

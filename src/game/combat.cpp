@@ -34,6 +34,7 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
 void Combat::applyDamageToPlayer(Player& player, f32 damage) {
     player.health -= damage;
     player.damageFlashTimer = 0.15f;
+    player.hitShakeTimer = 0.15f;  // brief screen shake on hit
     if (player.health <= 0.0f) {
         player.health = 0.0f;
         // TODO: death state

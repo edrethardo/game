@@ -10,6 +10,7 @@
 #include "world/combat_query.h"
 #include "game/player.h"
 #include "game/entity.h"
+#include "game/limb_system.h"
 #include "game/weapon.h"
 #include "game/projectile.h"
 #include "game/item.h"
@@ -81,9 +82,8 @@ private:
     Shader  m_unlitShader;
     Mesh    m_cubeMesh;
 
-    // Mesh registry for entities
-    static constexpr u32 MAX_MESH_DEFS = 32;
-    struct MeshDef { Mesh mesh; AABB bounds; char name[32]; };
+    // Mesh registry for entities (MeshDef struct defined in limb_system.h)
+    static constexpr u32 MAX_MESH_DEFS = 40;
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
 

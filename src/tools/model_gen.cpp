@@ -73,11 +73,14 @@ static const WeaponModelGen::WeaponDef s_builtinDefs[] = {
         }, 3
     },
     {
-        "crossbow", "T-shape stock + arms",
+        "crossbow", "Crossbow with limbs, groove, and trigger grip",
         {
-            {{-0.015f, -0.015f, -0.075f}, {0.015f, 0.015f, 0.175f}}, // stock
-            {{-0.15f,   0.0f,    0.16f},  {0.15f,  0.02f,  0.18f}},  // arms
-        }, 2
+            {{-0.015f, -0.015f, -0.10f},  {0.015f, 0.015f, 0.18f}},  // stock/tiller
+            {{-0.12f,   0.01f,   0.12f},  {-0.02f, 0.03f,  0.16f}},  // left limb (angled)
+            {{ 0.02f,   0.01f,   0.12f},  {0.12f,  0.03f,  0.16f}},  // right limb (angled)
+            {{-0.008f,  0.015f, -0.02f},  {0.008f, 0.025f, 0.14f}},  // flight groove (rail on top)
+            {{-0.02f,  -0.08f, -0.06f},  {0.02f, -0.015f, -0.02f}},  // trigger grip
+        }, 5
     },
     {
         "throwing_knife", "Tiny blade + handle",

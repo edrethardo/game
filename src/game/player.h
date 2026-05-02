@@ -23,6 +23,7 @@ struct Player {
     f32  health         = 100.0f;
     f32  maxHealth      = 100.0f;
     f32  damageFlashTimer = 0.0f;
+    f32  hitShakeTimer    = 0.0f;  // screen shake on taking damage
 
     // Soft target lock
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)
