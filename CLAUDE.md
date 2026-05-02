@@ -1,36 +1,192 @@
 # DungeonEngine
 
+Custom C++17 dungeon-crawler engine. Barony-style low-poly visuals, Hellgate-London-style loot/skills.
+Targets: Nintendo Switch + low-end PC (Core 2 Quad). 60 FPS, 16.6 ms budget, OpenGL 3.3, 300–500 draw calls max.
+
 ## Build
+
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 ./build/dungeon_game
 ```
 
+Release: `cmake -B build-rel -DCMAKE_BUILD_TYPE=Release && cmake --build build-rel`.
+SDL2 is fetched via `fetch_sdl2.sh` if missing. Single binary, no install step.
+
 ## Architecture
-Data-driven hybrid: JSON configs (`assets/config/`) define game data, C++ systems consume them at runtime. Pool-based allocation for entities, projectiles, world items. Namespace-based systems (ItemLoader, ItemGen, Combat, etc.) with stateless functions + state objects.
+
+**Data-driven hybrid.** JSON in `assets/config/` defines content (items, affixes, skills, enemies, weapons, materials). C++ systems load defs at startup into fixed-size arrays and consume them at runtime. Asset name strings are resolved to integer IDs (mesh IDs, material IDs) once after init — runtime code never touches strings.
+
+**Pool allocation, no heap in hot paths.** Entities, projectiles, world items, materials, meshes all live in static arrays sized by `MAX_*` constants in their headers. No `new`/`delete` per frame. A 1 MB `FrameAllocator` (`src/core/frame_allocator.h`) is reset each frame for transient scratch.
+
+**Namespace + struct.** Systems are namespaces of free functions (`Combat`, `EntitySystem`, `ItemGen`, `Net`, `Renderer`, ...). State lives in plain structs that callers pass in. No singletons except a couple of file-scope globals (logger, profiler, frame allocator, MaterialSystem table).
+
+**Fixed-timestep dispatch.** `Engine::run` (`src/engine/engine.cpp:417`) accumulates real frame time and steps `update(1/60)` up to 4 times per frame, then renders once with an `alpha` interpolation factor. `update()` switches on `GameState` (`MENU`, `LOBBY_*`, `IN_GAME`), and inside `IN_GAME` switches on `NetRole` (`NONE`/`SERVER`/`CLIENT`) into `singleplayerUpdate` / `serverUpdate` / `clientUpdate`. All three live in `engine.cpp`.
+
+**Authoritative server.** Listen-server model: host runs the full simulation in `serverUpdate` and is also player slot 0. Clients send `NetInput` packets at 60 Hz, server broadcasts `WorldSnapshot` at 20 Hz (every 3 ticks). Clients run prediction + reconciliation on the local player (`Client::reconcile`) and interpolate remote players/entities/projectiles with a 100 ms delay. Singleplayer (`NetRole::NONE`) is just the same loop without packets.
 
 ## Directory Map
-- `src/core/` — Types, math, memory, logging
-- `src/renderer/` — OpenGL 3.3 rendering, materials, meshes, shaders, camera
-- `src/engine/` — Main engine class, game loop, system orchestration
-- `src/game/` — Gameplay: items, weapons, combat, projectiles, entities, skills, AI
-- `src/world/` — Level grid, collision, raycasting, level generation
-- `src/net/` — ENet networking, packets, snapshots
-- `src/platform/` — SDL2 abstraction
-- `assets/config/` — JSON definitions (items, weapons, affixes, skills, enemies)
-- `assets/meshes/` — OBJ models
-- `assets/textures/` — PNG textures (42px tiles)
-- `assets/shaders/` — GLSL vertex/fragment shaders
+
+| Dir | Role |
+|---|---|
+| `src/core/` | Types (`u8`/`f32` aliases), math (Vec/Mat4), pools, logging, profiler, frame allocator, asserts |
+| `src/platform/` | SDL2 abstraction: window, input (kb/mouse/gamepad), wall-clock |
+| `src/renderer/` | OpenGL 3.3: shaders, meshes, OBJ loader, materials/textures, camera, frustum, debug-draw, HUD, font, minimap |
+| `src/world/` | Cell grid, BSP level gen, geometry meshing, raycast (DDA), collision (move-and-slide), combat queries (cone/raycast/AABB) |
+| `src/game/` | Player, entities (enemy NPCs), projectiles, weapons, combat resolution, items+affixes+inventory, skills, enemy AI FSM |
+| `src/engine/` | Top-level `Engine` class, game loop, system orchestration, mode/lobby/menu logic |
+| `src/net/` | ENet wrapper, packet read/write, input ring buffer, snapshot serialization, server, client (prediction + interpolation) |
+| `assets/config/` | JSON content: `items.json`, `affixes.json`, `skills.json`, `weapons.json`, `enemies.json` |
+| `assets/materials.json` | Material → texture+tint table (loaded at init) |
+| `assets/meshes/` | Wavefront `.obj` (low-poly enemies, weapons, props) |
+| `assets/textures/` | 42×42 PNG tiles (suffix `_42`); a few non-tile textures (skins) |
+| `assets/shaders/` | GLSL: `basic` (lit textured), `unlit` (HUD/debug), `debug` |
+| `tools/` | Auxiliary scripts/utilities |
+| `phase*.md`, `plan.md` | Design docs (historical) |
+
+## Key Types and Constants (cheat sheet)
+
+| Type | Header | Notes |
+|---|---|---|
+| `Engine` | `engine/engine.h` | Owns all pools, defs, networking state |
+| `Player` | `game/player.h` | Local-only struct (camera, lock, health). Singleplayer authority |
+| `NetPlayer` | `net/net_player.h` | Server-authoritative player. Slot 0 = host. `eyePos()` adds eyeHeight |
+| `Entity` | `game/entity.h` | Enemy NPC. `flags` bitmask: `ENT_ACTIVE/FLYING/DEAD`. `aiState`: `IDLE/CHASE/ATTACK/FLYBY/DEAD` |
+| `Projectile` | `game/projectile.h` | `projFlags`: `PROJ_ORB/ORB_SHARD/GRAVITY/SPLASH` |
+| `ItemDef` / `ItemInstance` | `game/item.h` | Static template vs rolled runtime item. `defId == 0xFFFF` ⇒ empty |
+| `AffixDef` / `Affix` | `game/item.h` | `validSlots` is a bitmask of `ItemSlot` values |
+| `WeaponDef` / `WeaponState` | `game/weapon.h` | `WeaponType`: MELEE/HITSCAN/PROJECTILE selects path in `Combat` |
+| `SkillDef` / `SkillState` | `game/item.h` | One `SkillState` per player (cooldown + energy) |
+| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING`. Heights in quarter-units |
+| `WorldSnapshot`, `SnapPlayer/Entity/Projectile` | `net/snapshot.h` | Quantized server-to-client state |
+| `NetInput` | `net/net_player.h` | Client→server input: `INPUT_FORWARD/BACKWARD/LEFT/RIGHT/JUMP/FIRE/LOCK` flags |
+| `AABB` | `renderer/frustum.h` | Min/max box for collision and frustum culling |
+
+Important caps (search the header for the constant if you need to grow it):
+`MAX_PLAYERS=4`, `MAX_ENTITIES=128`, `MAX_PROJECTILES=128`, `MAX_ITEM_DEFS=64`,
+`MAX_AFFIX_DEFS=32`, `MAX_AFFIXES_PER_ITEM=4`, `MAX_INVENTORY_ITEMS=24`,
+`MAX_SKILL_DEFS=16`, `MAX_WORLD_ITEMS=32`, `MAX_WEAPON_DEFS=16`, `MAX_MATERIALS=64`,
+`MAX_MESH_DEFS=32` (Engine-local), `MAX_LEVEL_SECTIONS=64`, `MAX_DUNGEON_ROOMS=32`,
+`SECTION_SIZE=16` cells, `NET_TICK_RATE=60`, `SNAPSHOT_RATE=20`, `INPUT_BUFFER_SIZE=64`.
+
+## Game Loop (per frame)
+
+1. `Clock::update`, reset frame allocator + alloc tracker.
+2. `Window::pollEvents` → SDL pump.
+3. `Net::poll` (if networked) — fires `onSnapshot`/`onInput`/`onEvent`/`onPlayerJoin`/`onPlayerLeft` callbacks set during `Engine::init`.
+4. While `accumulator >= 1/60`: `Input::update`, then `update(1/60)` — dispatches by `GameState`/`NetRole`.
+5. `render(alpha)` — single render pass with interpolation alpha for visual smoothing.
+6. Profiler frame record + per-second stats log.
+
+`update` steps (in `singleplayerUpdate`, with server/client variants similar):
+`PlayerController` → `Collision::moveAndSlide` → target lock → weapon fire → `EnemyAI::update` → `ProjectileSystem::update` → `EntitySystem::tickTimers` → `WorldItemSystem::update` → `SkillSystem::update`/`updateOrbProjectiles`/`updateMeteors` → skill activation → pickup checks → `Minimap::updateVisited`.
+
+## Data Lifecycles
+
+**Entity.** `EntitySystem::spawn` returns `EntityHandle{index, generation}`. Use `handleValid` / `handleGet` (free helpers in `entity.h`) — never index the pool directly across frames; entity slots get reused and `generation` invalidates stale handles. `Combat::applyDamage` flips `ENT_DEAD` and starts `deathTimer`; `tickTimers` later calls the death callback (`Combat::setDeathCallback`) and frees the slot. The engine sets a callback in `Engine::init` that rolls a 40% loot drop via `ItemGen::rollItem` and spawns a `WorldItem`.
+
+**Projectile.** `Combat::fireProjectile` reserves a slot in `ProjectilePool`. `ProjectileSystem::update` integrates motion (with optional gravity), DDA-collides against the grid, and AABB-tests every active entity (and the player if `!fromPlayer`). On hit, applies damage + splash if `PROJ_SPLASH`. Frozen-Orb projectiles are special-cased: `SkillSystem::updateOrbProjectiles` ticks `subTimer` and spawns shards.
+
+**Item drop.** Enemy dies → death callback rolls `ItemInstance` (via `ItemGen::rollRarity` then `rollAffixes` filtered by `ItemSlot`) → `WorldItemSystem::spawn` puts it in the world with `ownerSlot` (the killer) for 3 s then free-for-all. `Inventory::addToBackpack` moves it to backpack on pickup; `Inventory::equip` swaps backpack ↔ slot and calls `recalculateStats`. Stats are cached on `PlayerInventory.bonus*` fields and consumed by `Inventory::getEffectiveWeapon` (which builds a per-call `WeaponDef` merging base + affixes) and `Inventory::getEffectiveMaxHealth`.
+
+**Networking (server tick).** Receive `NetInput` from clients into per-slot `InputRingBuffer`. For each player slot, apply latest input via `PlayerController::updateNetPlayerFromInput` → `Collision::moveAndSlide` → handle weapon fire/skills against authoritative state. Update entities and projectiles. Every 3rd tick (20 Hz), `Server::sendSnapshot` builds and broadcasts a `WorldSnapshot`. `lastInputTick[slot]` rides along so clients know which input has been processed.
+
+**Networking (client tick).** Capture local input (`Client::captureAndSendInput`) → store in prediction history → run local sim on the local player only (entities/projectiles wait for the next snapshot). When a snapshot arrives (`Client::receiveSnapshot`), `reconcile` compares server position vs predicted — if delta exceeds threshold, snap and replay buffered inputs. `interpolateRemotePlayers/Entities/Projectiles` lerp between two recent snapshots with a 100 ms delay for smooth remote motion.
+
+**Snapshot quantization.** `SnapPlayer`=20 B, `SnapEntity`=16 B, `SnapProjectile`=14 B. Positions packed to u16 over [-128, 128] m (~4 mm precision); velocities over [-30, 30] m/s; angles over [-π, π]. See `Quantize::pack*/unpack*` in `net/packet.h`.
+
+## Asset Conventions
+
+- **Textures**: tile textures end in `_42.png` (42×42 px), e.g. `stone_wall_42.png`. Skins/non-tile textures are exceptions (e.g. `bat_skin_42.png` is also 42 but "skin" naming).
+- **Materials** (`assets/materials.json`): each entry has `id` (must match array index), `name`, optional `texture` (path under `assets/textures/`), optional `tint` `[r,g,b,a]`. Material 0 is the default fallback. Code looks up by name via `MaterialSystem::getIdByName`.
+- **Meshes** (`assets/meshes/*.obj`): triangulated, +Y up, units in metres. Loaded at engine init by name into the `Engine::m_meshDefs` registry; mesh 0 is always a unit cube fallback. Names referenced from JSON (item `mesh` field, enemy `meshName`).
+- **Shaders** (`assets/shaders/*.{vert,frag}`): `basic` is the lit textured shader for level/entities/items. `unlit` is for HUD/billboards. `debug` for `DebugDraw`.
+
+## JSON Config Schemas
+
+`assets/config/items.json` — array under `"items"`. Per entry:
+```
+name (str), slot ("weapon"|"offhand"|"helmet"|"armor"|"boots"|"ring"),
+weaponType ("melee"|"hitscan"|"projectile"), weaponSubtype (e.g. "sword"),
+mesh (mesh registry name), material (material name),
+baseDamage, baseRange, baseCooldown, baseConeAngle, baseProjectileSpeed,
+baseProjectileRadius, baseRecoil, baseHealth,
+minLevel, maxLevel, maxRarity ("common"|"magic"|"rare"|"legendary"),
+legendarySkill ("frozen_orb"|"chain_lightning"|"meteor_strike"|"blood_nova"|"phase_dash"),
+dropWeight (float, default 1.0)
+```
+Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strings are resolved to IDs after init by `ItemLoader::resolveVisuals` and a loop in `Engine::init`.
+
+`assets/config/affixes.json` — array under `"affixes"`. Per entry: `type` (one of the `AffixType` enum values, snake_case), `name`, `slots` (array of slot strings — converted to bitmask), `minValue`, `maxValue`. Loader: `ItemLoader::loadAffixDefs`.
+
+`assets/config/skills.json` — array under `"skills"`. Common fields: `id` (matches `SkillId` enum), `name`, `cooldown`, `energyCost`, `damage`. Per-skill specifics: orb (`orbDamage`/`shardDamage`/`shardCount`/`shardInterval`/`orbSpeed`/`shardSpeed`/`orbRadius`/`shardRadius`/`duration`/`angleStepDeg`), chain (`bounces`/`bounceRange`/`damageFalloff`), nova (`healthCostPct`/`radius`), meteor (`delay`/`radius`), dash (`distance`/`corridorWidth`/`invulnDuration`).
+
+`assets/config/weapons.json` — currently a static fallback table; the live weapon table is built in code by `initWeaponTable` in `game/weapon.h`. Weapon stats actually used in-game come from equipped `ItemInstance`s via `Inventory::getEffectiveWeapon`.
+
+`assets/config/enemies.json` — array under `"enemies"`. Fields: `name`, `meshName`, `health`, `moveSpeed`, `detectionRange`, `attackRange`, `attackCooldown`, `damage`, `flying` (bool), `halfExtents` `[x,y,z]`. *Currently the engine spawns enemies via a hardcoded `kEnemies` table in `Engine::startGame` (`engine.cpp:286`); `enemies.json` is the parallel data source you'd promote to be the single source.*
+
+## How to Add Things
+
+**New item**: append to `assets/config/items.json`. If it needs a new mesh, drop the `.obj` into `assets/meshes/` and add it to the `kMeshes` table in `Engine::init` (`engine.cpp:175`). If it needs a new material, add an entry in `assets/materials.json`. Increase `MAX_ITEM_DEFS` if you exceed 64.
+
+**New affix type**: add to `AffixType` enum in `game/item.h`, parse it in `loadAffixDefs` (`game/item.cpp`), wire it into `Inventory::recalculateStats` so the bonus actually applies, and consume the bonus where relevant (e.g. `getEffectiveWeapon`, `getEffectiveMaxHealth`).
+
+**New weapon type/subtype**: add subtype enum value in `game/weapon.h`. To affect combat behavior beyond the three existing `WeaponType`s (MELEE/HITSCAN/PROJECTILE), modify `Combat::fireMelee`/`fireHitscan`/`fireProjectile` and the dispatch in `Engine::handleWeaponFireForPlayer`.
+
+**New enemy type**: add mesh/skin assets, register the mesh in `Engine::init`'s `kMeshes`, add a material in `materials.json` (skin), and add a row to the `kEnemies` template table in `Engine::startGame`. AI behavior is in `EnemyAI::update` (`game/enemy_ai.cpp`) — `flying` entities use `FLYBY`/swooping logic; ground use `CHASE`/`ATTACK`.
+
+**New skill**: add to `SkillId` in `game/item.h`, add fields to `SkillDef` if needed, parse in `loadSkillDefs`, add an activation branch in `SkillSystem::tryActivate` (`game/skill.cpp`). Per-tick logic that needs to persist (orb shards, meteor delay) goes in `updateOrbProjectiles` / `updateMeteors`. Add an entry in `assets/config/skills.json` and reference from a legendary item via `legendarySkill`.
+
+**New material**: edit `assets/materials.json`. ID must equal array index. Look up at runtime by name with `MaterialSystem::getIdByName`. Tint blends with sampled texture color (1,1,1,1 = unmodified).
+
+**New level layout**: procedural BSP gen in `LevelGen::generate` (`world/level_gen.cpp`) is the production path — pass a seed and grid dimensions. `LevelGen::generateTestDungeon` is a hardcoded fallback. Hand-authored levels can be loaded via `LevelLoader::loadFromJson` (`world/level_loader.h`) but no level JSON files ship by default.
+
+## Networking Quick Reference
+
+- **ENet** under the hood (`src/net/net.cpp`). Default port 7777. Protocol version is checked on `CL_JOIN_REQUEST`.
+- Packets prefixed with `PacketHeader{type, flags, seq}`. Types in `NetPacketType`: `CL_INPUT`, `CL_JOIN_REQUEST`, `SV_JOIN_ACCEPT/REJECT/SNAPSHOT/EVENT/PLAYER_LEFT/LEVEL_SEED`.
+- Server seeds clients with the dungeon seed (`SV_LEVEL_SEED`) so both ends generate the identical level. Hosts and clients regenerate locally — the level itself is never sent over the wire.
+- Use `PacketWriter`/`PacketReader` (`net/packet.h`) for serialization. `Quantize::*` for bounded floats.
+- Register Engine static callbacks via `Net::setOn*` before `Net::poll`.
 
 ## Conventions
-- C++17, no exceptions in hot paths
-- Structs for data, enums for types, namespaces for system functions
-- Static arrays with max constants (MAX_ENTITIES, MAX_PROJECTILES, etc.)
-- All code changes must include inline comments for non-obvious logic
-- When adding/modifying structs, keep JSON schema and loader in sync
 
-## Targets
-- Nintendo Switch + low-end PC (Core 2 Quad baseline)
-- 60 FPS, 16.6ms frame budget
-- OpenGL 3.3, max 300-500 draw calls
-- Visual style: Barony-like low-poly
+- **Always document code changes.** Every code change must include inline comments explaining non-obvious logic, and the top of each substantive `.cpp` should have a brief block describing what the file is for and how it fits into the systems described in this file. Update CLAUDE.md whenever you change the architecture, add a subsystem, or change a JSON schema.
+- **C++17**, no exceptions in hot paths (the JSON loaders catch and log).
+- Plain structs for data, enums for types (`enum struct ... : u8` with `COUNT` sentinel where useful), namespaces for systems.
+- Static arrays sized by `MAX_*` constants — bump the constant rather than allocating dynamically.
+- `u8`/`u16`/`u32`/`f32` aliases from `core/types.h` are used everywhere — avoid raw `int`/`float` in new code.
+- All code changes must include inline comments for **non-obvious** logic only — don't re-document what the names already say. The "why" matters, not the "what".
+- Keep JSON schema and loader in sync when you add or modify a struct field.
+- Prefer `Vec3` math operators in `core/math.h` over manual component arithmetic.
+- For new GPU resources, pair `init`/`shutdown` (or `create`/`destroy`) and call them from `Engine::init`/`Engine::shutdown`.
+- Profiling: wrap a section with `PROFILE_SCOPE(idx, "name")` from `core/profiler.h`. Indices 0–15.
+
+## Debug Keys (in-game, singleplayer + listen-server host)
+
+| Key | Action |
+|---|---|
+| `Esc` | Back to menu (in lobby) / quit (in-game) |
+| `1`/`2`/`3` | Select weapon (legacy slots; 1=Sword, 2=Pistol, 3=Fireball) |
+| `Tab` | Toggle inventory screen (releases mouse) |
+| `E` | Pickup nearest world item |
+| `Right click` | Activate equipped legendary skill |
+| `F1` | Toggle `DebugDraw` overlay (entity AABBs, rays) |
+| `F2` | Toggle noclip |
+| `F3` | Toggle profiler overlay |
+| `F4` | Spawn 10 enemies in a ring around player |
+| `F5` | Spawn 50 enemies |
+| `F6` | Toggle Switch constraint mode (60 m far plane, 960×540) |
+| `F7` | (see `engine.cpp:770` — engine-version-dependent dev toggle) |
+
+## Pitfalls / Gotchas
+
+- **Entity handles vs raw indices.** Always use `EntityHandle` + `handleValid`/`handleGet` for cross-frame references. Indices alone go stale when slots get reused.
+- **Item visual resolution timing.** `ItemDef.meshId`/`materialId` are zero until `ItemLoader::resolveVisuals` runs *after* `MaterialSystem::init` and the mesh registry is filled. Don't render items earlier in init.
+- **`enemies.json` is currently inert** for the live spawn loop — production spawns use the inline `kEnemies` table in `Engine::startGame`. Promoting JSON is a known TODO.
+- **Death callback drops loot** via a global `s_engine` pointer (file-scope in `engine.cpp`). If you swap the singleton or move loot-drop, update both.
+- **Listen-server host plays as slot 0.** `Engine::onPlayerJoin` is not called for the host; slot 0 is initialised inside `startGame`. Don't put host-init logic in the join callback.
+- **Snapshot quantization range** clamps positions to ±128 m. Keep level/grid bounds inside that range or clients see jitter.
+- **`assets/config/weapons.json` is shadowed** by the inline `initWeaponTable` (`game/weapon.h`). Editing the JSON alone has no effect; either remove the inline table or load JSON in `Engine::init`.
+- **Legendary skills require equipping the right item** — `legendarySkillId` on the equipped weapon's `ItemDef` becomes the player's `activeSkill`; without a matching item, right-click does nothing.
+- **OBJ loader expects triangles + per-vertex normals.** Quad meshes will load with garbage normals. Triangulate on export.

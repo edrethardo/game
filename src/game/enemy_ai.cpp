@@ -1,3 +1,10 @@
+// Enemy AI: per-tick FSM (IDLE -> CHASE -> ATTACK; FLYBY for flying enemies)
+// driven from EnemyAI::update. Handles LOS checks (staggered by aiCheckIdx for
+// budget), grid-axis-separated movement (flying ignores floor/ceiling unless
+// blocked), and attack execution against the player. Death is routed through
+// Combat::applyDamage; this file does not free entities directly. See
+// CLAUDE.md "Data Lifecycles" for the entity handle/death flow.
+
 #include "game/enemy_ai.h"
 #include "game/player.h"
 #include "game/combat.h"

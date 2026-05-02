@@ -15,6 +15,7 @@ add_executable(DungeonEngine
     renderer/renderer.cpp
     renderer/debug_draw.cpp
     renderer/font.cpp
+    renderer/item_icons.cpp
     renderer/hud.cpp
     renderer/minimap.cpp
     world/level_grid.cpp

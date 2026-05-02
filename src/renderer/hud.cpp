@@ -6,6 +6,7 @@
 #include "game/item.h"
 #include <glad/glad.h>
 #include <cstdio>
+#include <cstring>
 
 // Simple 2D line renderer for HUD elements (crosshair, hit markers).
 // Uses a small dynamic VBO with position+color, drawn with the debug shader
@@ -337,6 +338,76 @@ void HUD::drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct) {
     Vec3 fillColor = (cooldownPct == 0.0f) ? Vec3{0.0f, 1.0f, 1.0f} : Vec3{0.2f, 0.2f, 0.3f};
     for (f32 y = y0 + 2; y < y0 + 2 + fillH - 2; y += 1.0f) {
         pushLine(x0 + 2, y, x0 + size - 2, y, fillColor);
+    }
+
+    flushHUD(sw, sh);
+}
+
+void HUD::drawQuickbar(u32 sw, u32 sh,
+                        const QuickbarState& qb,
+                        const PlayerInventory& inv,
+                        const ItemDef* itemDefs,
+                        f32 cooldownPct) {
+    static constexpr f32 SLOT_SIZE = 40.0f;
+    static constexpr f32 SLOT_GAP  = 4.0f;
+    // Total width of all 8 slots plus gaps between them
+    static constexpr f32 TOTAL_W   = QUICKBAR_SLOTS * SLOT_SIZE + (QUICKBAR_SLOTS - 1) * SLOT_GAP;
+    static constexpr f32 Y_OFFSET  = 20.0f; // distance from bottom edge
+
+    f32 startX = (static_cast<f32>(sw) - TOTAL_W) * 0.5f;
+    f32 baseY  = Y_OFFSET;
+
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+        f32 x0 = startX + static_cast<f32>(i) * (SLOT_SIZE + SLOT_GAP);
+        f32 y0 = baseY;
+        f32 x1 = x0 + SLOT_SIZE;
+        f32 y1 = y0 + SLOT_SIZE;
+
+        bool active = (i == qb.activeSlot);
+
+        // Slot background — dark fill, warmer tint for active slot
+        Vec3 bgColor = active ? Vec3{0.25f, 0.22f, 0.15f} : Vec3{0.1f, 0.1f, 0.12f};
+        for (f32 fy = y0 + 1; fy < y1 - 1; fy += 2.0f) {
+            pushLine(x0 + 1, fy, x1 - 1, fy, bgColor);
+        }
+
+        // Border — gold for active, grey for inactive
+        Vec3 borderColor = active ? Vec3{1.0f, 0.85f, 0.3f} : Vec3{0.35f, 0.35f, 0.4f};
+        pushQuad(x0, y0, x1, y1, borderColor);
+
+        // Slot number label (top-left corner of slot, 1-indexed)
+        char numStr[4];
+        std::snprintf(numStr, sizeof(numStr), "%u", i + 1);
+        FontSystem::drawText(sw, sh, x0 + 2, y1 - 10, numStr,
+                             active ? Vec3{1.0f, 0.9f, 0.5f} : Vec3{0.5f, 0.5f, 0.5f}, 1);
+
+        // Resolve the item currently assigned to this slot
+        const ItemInstance* item = Quickbar::resolveSlot(qb, inv, static_cast<u8>(i));
+        if (item && !isItemEmpty(*item)) {
+            const ItemDef& def = itemDefs[item->defId];
+            Vec3 rc = rarityColor(item->rarity);
+
+            // Rarity-colored fill in the inner area (above the number label)
+            for (f32 fy = y0 + 4; fy < y1 - 12; fy += 2.0f) {
+                pushLine(x0 + 4, fy, x1 - 4, fy, rc * 0.5f);
+            }
+
+            // Abbreviated item name below the slot (first 5 chars)
+            char abbrev[6] = {};
+            std::strncpy(abbrev, def.name, 5);
+            f32 textW = FontSystem::textWidth(abbrev, 1);
+            f32 textX = x0 + (SLOT_SIZE - textW) * 0.5f;
+            FontSystem::drawText(sw, sh, textX, y0 - 10, abbrev, rc, 1);
+
+            // Cooldown darkening overlay sweeps from top (only on active weapon slot)
+            if (active && cooldownPct > 0.0f) {
+                f32 darkH = (y1 - y0 - 4) * cooldownPct;
+                Vec3 darkColor = {0.05f, 0.05f, 0.08f};
+                for (f32 fy = y0 + 2; fy < y0 + 2 + darkH; fy += 2.0f) {
+                    pushLine(x0 + 2, fy, x1 - 2, fy, darkColor);
+                }
+            }
+        }
     }
 
     flushHUD(sw, sh);

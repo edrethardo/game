@@ -68,6 +68,7 @@ private:
     SkillState      m_skillStates[MAX_PLAYERS];
     WorldItemPool   m_worldItems;
     bool       m_inventoryOpen = false;
+    QuickbarState   m_quickbars[MAX_PLAYERS];
 
     // Legacy single-player compat
     Player     m_localPlayer;  // used for singleplayer mode camera/movement

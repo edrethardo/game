@@ -6,6 +6,7 @@
 struct PlayerInventory;
 struct ItemDef;
 struct ItemInstance;
+struct QuickbarState;
 
 namespace HUD {
     void init();
@@ -55,4 +56,11 @@ namespace HUD {
     // Item tooltip — drawn near the hovered item slot
     void drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
                          const ItemInstance& item, const ItemDef& def);
+
+    // Quickbar — 8 slots at bottom-center of screen
+    void drawQuickbar(u32 sw, u32 sh,
+                      const QuickbarState& qb,
+                      const PlayerInventory& inv,
+                      const ItemDef* itemDefs,
+                      f32 cooldownPct);
 }

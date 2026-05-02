@@ -775,3 +775,76 @@ bool WorldItemSystem::tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSl
 
     return false;
 }
+
+// ============================================================
+//  Quickbar
+// ============================================================
+
+void Quickbar::init(QuickbarState& qb, const PlayerInventory& inv) {
+    qb = {};
+    // Slot 0 always references equipped weapon
+    syncWeaponSlot(qb, inv);
+}
+
+void Quickbar::assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 backpackIdx) {
+    if (backpackIdx >= MAX_INVENTORY_ITEMS) return;
+    const ItemInstance& item = inv.backpack[backpackIdx];
+    if (isItemEmpty(item)) return;
+
+    // Check if already assigned — avoid duplicate entries
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+        if (qb.slots[i].type == QuickbarSlot::BACKPACK_REF &&
+            qb.slots[i].itemUid == item.uid) return;
+    }
+
+    // Find first free slot (skip slot 0 which is weapon)
+    for (u32 i = 1; i < QUICKBAR_SLOTS; i++) {
+        if (qb.slots[i].type == QuickbarSlot::EMPTY) {
+            qb.slots[i].type = QuickbarSlot::BACKPACK_REF;
+            qb.slots[i].sourceIndex = backpackIdx;
+            qb.slots[i].itemUid = item.uid;
+            return;
+        }
+    }
+}
+
+void Quickbar::removeItem(QuickbarState& qb, u8 slotIdx) {
+    if (slotIdx >= QUICKBAR_SLOTS || slotIdx == 0) return; // slot 0 (weapon) is protected
+    qb.slots[slotIdx] = {};
+}
+
+void Quickbar::syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv) {
+    // Slot 0 always mirrors the equipped weapon
+    const ItemInstance& wpn = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
+    if (!isItemEmpty(wpn)) {
+        qb.slots[0].type = QuickbarSlot::EQUIPPED_REF;
+        qb.slots[0].sourceIndex = static_cast<u8>(ItemSlot::WEAPON);
+        qb.slots[0].itemUid = wpn.uid;
+    } else {
+        qb.slots[0] = {};
+    }
+}
+
+const ItemInstance* Quickbar::resolveSlot(const QuickbarState& qb, const PlayerInventory& inv, u8 slot) {
+    if (slot >= QUICKBAR_SLOTS) return nullptr;
+    const QuickbarSlot& qs = qb.slots[slot];
+
+    switch (qs.type) {
+        case QuickbarSlot::EQUIPPED_REF: {
+            if (qs.sourceIndex >= static_cast<u8>(ItemSlot::COUNT)) return nullptr;
+            const ItemInstance& item = inv.equipped[qs.sourceIndex];
+            // Validate UID to catch stale references (e.g. item was unequipped)
+            if (isItemEmpty(item) || item.uid != qs.itemUid) return nullptr;
+            return &item;
+        }
+        case QuickbarSlot::BACKPACK_REF: {
+            if (qs.sourceIndex >= MAX_INVENTORY_ITEMS) return nullptr;
+            const ItemInstance& item = inv.backpack[qs.sourceIndex];
+            // Validate UID to catch stale references (e.g. item was dropped/used)
+            if (isItemEmpty(item) || item.uid != qs.itemUid) return nullptr;
+            return &item;
+        }
+        default:
+            return nullptr;
+    }
+}

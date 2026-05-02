@@ -1,3 +1,11 @@
+// Top-level engine: owns all pools, defs, and networking state.
+// Drives the fixed-timestep loop in run() (60 Hz update, render once per frame).
+// update() dispatches by GameState (MENU / LOBBY_* / IN_GAME) and, in-game,
+// by NetRole (NONE -> singleplayerUpdate, SERVER -> serverUpdate, CLIENT -> clientUpdate).
+// init() loads shaders/meshes/materials/JSON defs, registers Combat death callback
+// (rolls loot drop), and sets up Net callbacks. startGame() generates the dungeon
+// and spawns enemies. See CLAUDE.md for the full subsystem map and lifecycles.
+
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 
@@ -11,6 +19,7 @@
 #include "renderer/hud.h"
 #include "renderer/minimap.h"
 #include "renderer/font.h"
+#include "renderer/item_icons.h"
 #include "renderer/material.h"
 #include "renderer/obj_loader.h"
 #include "world/level_gen.h"
@@ -150,6 +159,7 @@ void Engine::init() {
     DebugDraw::init();
     HUD::init();
     FontSystem::init();
+    ItemIconSystem::init();
 
     // Shaders
     m_basicShader = ShaderSystem::load("assets/shaders/basic.vert",
@@ -340,6 +350,8 @@ void Engine::startGame() {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         Inventory::init(m_inventories[i]);
         m_skillStates[i] = {};
+        // Quickbar init after inventory so weapon slot sync is correct
+        Quickbar::init(m_quickbars[i], m_inventories[i]);
     }
 
     // Init players
@@ -400,6 +412,7 @@ void Engine::shutdown() {
     ShaderSystem::destroy(m_unlitShader);
 
     FontSystem::shutdown();
+    ItemIconSystem::shutdown();
     HUD::shutdown();
     Minimap::shutdown();
     DebugDraw::shutdown();
@@ -650,13 +663,11 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
-    // Weapon switching
+    // Quickbar slot switching (keys 1-8)
     WeaponState& ws = m_players[0].weaponState;
-    for (u32 i = 0; i < m_weaponDefCount && i < 3; i++) {
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
         if (Input::isKeyPressed(SDL_SCANCODE_1 + i)) {
-            ws.currentWeapon = static_cast<u8>(i);
-            ws.cooldownTimer = 0.0f;
-            LOG_INFO("Weapon: %s", m_weaponDefs[i].name);
+            m_quickbars[0].activeSlot = static_cast<u8>(i);
         }
     }
 
@@ -759,6 +770,8 @@ void Engine::singleplayerUpdate(f32 dt) {
                     if (!isItemEmpty(m_inventories[0].backpack[i])) {
                         Inventory::equip(m_inventories[0], static_cast<u8>(i), m_itemDefs);
                         LOG_INFO("Equipped item from slot %u", i);
+                        // Keep quickbar slot 0 in sync with the newly equipped weapon
+                        Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
                     }
                     break;
                 }
@@ -1019,8 +1032,20 @@ void Engine::handleWeaponFire(f32 dt) {
     if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
-    WeaponDef wpn = Inventory::getEffectiveWeapon(m_inventories[m_localPlayerIndex],
-                                                    m_itemDefs, m_weaponDefs[ws.currentWeapon]);
+    // Resolve weapon from active quickbar slot, fallback to base weapon def
+    const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[m_localPlayerIndex],
+                                                       m_inventories[m_localPlayerIndex],
+                                                       m_quickbars[m_localPlayerIndex].activeSlot);
+    WeaponDef wpn;
+    if (qbItem && !isItemEmpty(*qbItem) &&
+        m_itemDefs[qbItem->defId].slot == ItemSlot::WEAPON) {
+        // Active quickbar slot holds a weapon item — merge its affixes into the WeaponDef
+        wpn = Inventory::getEffectiveWeapon(m_inventories[m_localPlayerIndex],
+                                             m_itemDefs, m_weaponDefs[ws.currentWeapon]);
+    } else {
+        // No weapon item in active slot — use base weapon def directly
+        wpn = m_weaponDefs[ws.currentWeapon];
+    }
     ws.cooldownTimer = wpn.cooldown;
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
@@ -1476,7 +1501,7 @@ void Engine::render(f32 alpha) {
 
         HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
 
-        HUD::drawWeaponIndicator(sw, sh, m_players[m_localPlayerIndex].weaponState.currentWeapon);
+        HUD::drawWeaponIndicator(sw, sh, m_quickbars[m_localPlayerIndex].activeSlot);
 
         // Energy bar and skill cooldown
         const SkillState& ss = m_skillStates[m_localPlayerIndex];
@@ -1498,6 +1523,25 @@ void Engine::render(f32 alpha) {
 
         // Minimap (top-right corner)
         Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw);
+    }
+
+    // Quickbar — always visible at bottom of screen
+    {
+        f32 cdPct = 0.0f;
+        WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
+        // Get cooldown percentage for active quickbar weapon
+        const ItemInstance* activeItem = Quickbar::resolveSlot(
+            m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex],
+            m_quickbars[m_localPlayerIndex].activeSlot);
+        if (activeItem && !isItemEmpty(*activeItem)) {
+            const ItemDef& def = m_itemDefs[activeItem->defId];
+            if (def.baseCooldown > 0.0f && ws.cooldownTimer > 0.0f) {
+                cdPct = ws.cooldownTimer / def.baseCooldown;
+                if (cdPct > 1.0f) cdPct = 1.0f;
+            }
+        }
+        HUD::drawQuickbar(sw, sh, m_quickbars[m_localPlayerIndex],
+                           m_inventories[m_localPlayerIndex], m_itemDefs, cdPct);
     }
 
     // Profiler overlay (F3)

@@ -250,6 +250,22 @@ struct WorldItemPool {
     u32       nextUid     = 1;           // server assigns unique IDs
 };
 
+// ---- Quickbar (8 assignable hotbar slots, keys 1-8) ----
+
+static constexpr u32 QUICKBAR_SLOTS = 8;
+
+struct QuickbarSlot {
+    enum Type : u8 { EMPTY, BACKPACK_REF, EQUIPPED_REF };
+    Type type = EMPTY;
+    u8   sourceIndex = 0;  // backpack index or ItemSlot index
+    u32  itemUid = 0;      // validates reference hasn't gone stale
+};
+
+struct QuickbarState {
+    QuickbarSlot slots[QUICKBAR_SLOTS] = {};
+    u8 activeSlot = 0;  // 0-7, selected via keys 1-8
+};
+
 // ---- System namespaces ----
 
 namespace ItemLoader {
@@ -289,4 +305,16 @@ namespace WorldItemSystem {
     // Returns true if pickup succeeded, fills outItem
     bool tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
                    ItemInstance& outItem);
+}
+
+namespace Quickbar {
+    void init(QuickbarState& qb, const PlayerInventory& inv);
+    // Assign item from backpack to first free slot (slot 0 is reserved for weapon)
+    void assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 backpackIdx);
+    // Remove item from a slot (slot 0 protected)
+    void removeItem(QuickbarState& qb, u8 slotIdx);
+    // Keep slot 0 in sync with equipped weapon
+    void syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv);
+    // Returns pointer to the ItemInstance for a slot, or nullptr if empty/stale
+    const ItemInstance* resolveSlot(const QuickbarState& qb, const PlayerInventory& inv, u8 slot);
 }

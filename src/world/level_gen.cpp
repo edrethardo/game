@@ -1,3 +1,11 @@
+// Procedural dungeon generation via recursive BSP partitioning.
+// LevelGen::generate(grid, seed, w, d) initializes the grid, splits the area
+// into rooms, carves corridors between sibling partitions, writes cell flags +
+// floor/ceiling heights + material IDs into the grid, and returns the player
+// spawn (room 0 centre) plus the room list (used by Engine::startGame to place
+// enemies). RNG is a local LCG (GenRNG) seeded by the caller — independent of
+// the item-roll RNG so loot is not coupled to map layout.
+
 #include "world/level_gen.h"
 #include "core/log.h"
 #include <cstring>
