@@ -25,6 +25,7 @@ enum struct GameState : u8 {
     LOBBY_JOIN,
     CONNECTING,
     IN_GAME,
+    GAME_OVER,  // player died, show death screen
 };
 
 class Engine {
@@ -93,6 +94,8 @@ private:
     u32          m_sectionCount = 0;
     u32          m_levelSeed    = 42;
     u32          m_currentFloor = 1;  // current dungeon floor (increases each descent)
+    u32          m_savedFloor   = 1;  // last saved floor for death respawn
+    u32          m_savedSeed    = 0;  // saved RNG seed for that floor
 
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
@@ -151,6 +154,8 @@ private:
     void updateMenu(f32 dt);
     void updateLobby(f32 dt);
     void startGame();
+    void saveGame();
+    bool loadGame();
 
     // Net player helpers
     void syncLocalPlayerToNetPlayer();

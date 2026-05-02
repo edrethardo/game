@@ -253,6 +253,7 @@ void Engine::init() {
             {"ring",           "assets/meshes/ring.obj"},
             {"shield",         "assets/meshes/shield.obj"},
             {"human",          "assets/meshes/human.obj"},
+            {"wand",           "assets/meshes/wand.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -362,6 +363,25 @@ void Engine::init() {
     m_frameCount = 0;
 
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
+}
+
+void Engine::saveGame() {
+    FILE* f = std::fopen("save.dat", "wb");
+    if (!f) { LOG_WARN("Failed to save game"); return; }
+    std::fwrite(&m_savedFloor, sizeof(u32), 1, f);
+    std::fwrite(&m_savedSeed, sizeof(u32), 1, f);
+    std::fclose(f);
+    LOG_INFO("Game saved at floor %u", m_savedFloor);
+}
+
+bool Engine::loadGame() {
+    FILE* f = std::fopen("save.dat", "rb");
+    if (!f) return false;
+    bool ok = std::fread(&m_savedFloor, sizeof(u32), 1, f) == 1 &&
+              std::fread(&m_savedSeed, sizeof(u32), 1, f) == 1;
+    std::fclose(f);
+    if (ok) LOG_INFO("Game loaded: floor %u", m_savedFloor);
+    return ok;
 }
 
 void Engine::startGame() {
@@ -515,6 +535,45 @@ void Engine::startGame() {
         m_floorDoorPos    = {doorX, doorY, doorZ};
         m_floorDoorActive = true;
         LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_currentFloor, doorX, doorY, doorZ);
+
+        // Spawn 2 friendly NPCs near the floor exit (guards at the stairs)
+        static const char* exitGreetings[] = {"This way!", "Hurry!"};
+        for (u32 n = 0; n < 2; n++) {
+            f32 offsetX = (n == 0) ? -1.5f : 1.5f;
+            Vec3 npcPos = {m_floorDoorPos.x + offsetX,
+                           m_floorDoorPos.y + 0.9f,
+                           m_floorDoorPos.z - 1.0f};
+
+            EntityHandle npcHandle = EntitySystem::spawn(m_entities, npcPos,
+                {0.4f, 0.9f, 0.4f}, false,
+                50.0f, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
+
+            Entity* npc = handleGet(m_entities, npcHandle);
+            if (npc) {
+                npc->flags |= ENT_FRIENDLY;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState = AIState::IDLE;
+                npc->speechText = exitGreetings[n];
+                npc->speechTimer = 5.0f;
+
+                for (u32 m = 0; m < m_meshDefCount; m++) {
+                    if (std::strcmp(m_meshDefs[m].name, "human") == 0) {
+                        npc->meshId = static_cast<u8>(m);
+                        break;
+                    }
+                }
+                npc->materialId = MaterialSystem::getIdByName("human_skin");
+
+                static const char* exitWeapons[] = {"sword", "axe"};
+                for (u32 m = 1; m < m_meshDefCount; m++) {
+                    if (std::strcmp(m_meshDefs[m].name, exitWeapons[n % 2]) == 0) {
+                        npc->weaponMeshId = static_cast<u8>(m);
+                        break;
+                    }
+                }
+            }
+        }
+        LOG_INFO("Spawned 2 exit NPCs near floor door");
     }
 
     // Spawn 2 friendly NPC allies in the spawn room, offset to either side of the player
@@ -731,10 +790,33 @@ void Engine::syncNetPlayerToLocalPlayer() {
 // Update (60 Hz fixed timestep) — dispatches based on role
 // ---------------------------------------------------------------------------
 void Engine::update(f32 dt) {
+    // Death screen input — handle before the generic ESC check so ESC goes to menu
+    if (m_gameState == GameState::GAME_OVER) {
+        if (Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            // Restart from saved floor; fall back to floor 1 if no save exists
+            if (loadGame()) {
+                m_currentFloor = m_savedFloor;
+            } else {
+                m_currentFloor = 1;
+            }
+            m_localPlayer.health = m_localPlayer.maxHealth;
+            startGame();
+            m_gameState = GameState::IN_GAME;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            m_currentFloor = 1;
+            m_gameState = GameState::MENU;
+        }
+        return;
+    }
+
     if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-        if (m_gameState == GameState::IN_GAME) {
-            m_running = false;
-        } else if (m_gameState != GameState::MENU) {
+        if (m_gameState == GameState::MENU) {
+            m_running = false; // ESC on menu exits the game
+        } else if (m_gameState == GameState::IN_GAME) {
+            m_gameState = GameState::MENU; // ESC in game returns to menu
+            Input::setRelativeMouseMode(false);
+        } else if (m_gameState != GameState::GAME_OVER) {
             Net::disconnect();
             m_netRole = NetRole::NONE;
             m_gameState = GameState::MENU;
@@ -759,6 +841,8 @@ void Engine::update(f32 dt) {
         case NetRole::CLIENT: clientUpdate(dt);       break;
         }
         break;
+    case GameState::GAME_OVER:
+        break; // handled above
     }
 }
 
@@ -771,13 +855,18 @@ void Engine::updateMenu(f32 dt) {
         if (m_menuSelection > 0) m_menuSelection--;
     }
     if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-        if (m_menuSelection < 2) m_menuSelection++;
+        if (m_menuSelection < 3) m_menuSelection++;
     }
     if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
         switch (m_menuSelection) {
-        case 0: // Singleplayer
+        case 0: // Singleplayer — try loading save, else start fresh from floor 1
             m_netRole = NetRole::NONE;
             m_localPlayerIndex = 0;
+            if (loadGame()) {
+                m_currentFloor = m_savedFloor;
+            } else {
+                m_currentFloor = 1;
+            }
             startGame();
             break;
         case 1: // Host
@@ -795,6 +884,9 @@ void Engine::updateMenu(f32 dt) {
                 m_gameState = GameState::CONNECTING;
                 LOG_INFO("Connecting to %s...", m_connectAddress);
             }
+            break;
+        case 3: // Exit
+            m_running = false;
             break;
         }
     }
@@ -820,6 +912,12 @@ void Engine::updateLobby(f32 dt) {
 // Singleplayer update (unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::singleplayerUpdate(f32 dt) {
+    // Check for player death — transition to GAME_OVER immediately
+    if (m_localPlayer.health <= 0.0f) {
+        m_gameState = GameState::GAME_OVER;
+        return;
+    }
+
     PROFILE_SCOPE(0, "Update");
 
     // Toggle debug overlay
@@ -1048,6 +1146,10 @@ void Engine::singleplayerUpdate(f32 dt) {
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isKeyPressed(SDL_SCANCODE_E)) {
                 m_currentFloor++;
+                // Save progress before descending so death respawn returns here
+                m_savedFloor = m_currentFloor;
+                m_savedSeed = static_cast<u32>(std::rand());
+                saveGame();
                 LOG_INFO("Descending to floor %u", m_currentFloor);
                 startGame(); // regenerate dungeon with new floor seed
                 return;      // don't process remainder of this frame
@@ -1397,8 +1499,8 @@ void Engine::handleWeaponFire(f32 dt) {
     case WeaponType::PROJECTILE: {
         bool isMolotov = qbItem && !isItemEmpty(*qbItem) &&
                          m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::MOLOTOV;
-        bool isBow = qbItem && !isItemEmpty(*qbItem) &&
-                     m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::BOW;
+        bool isWand = qbItem && !isItemEmpty(*qbItem) &&
+                      m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::WAND;
 
         if (isMolotov) {
             Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
@@ -1406,13 +1508,12 @@ void Engine::handleWeaponFire(f32 dt) {
         } else {
             Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
         }
-        // Bow weapons (wands/staves) shoot lightning spark projectiles
-        if (isBow) {
+        // Wand weapons shoot lightning spark projectiles
+        if (isWand) {
             // Tag the most recently spawned projectile at eyePos
             for (u32 pi = MAX_PROJECTILES; pi-- > 0;) {
                 Projectile& proj = m_projectiles.projectiles[pi];
-                if (proj.active && proj.fromPlayer && !(proj.projFlags & ~0u)) {
-                    // Check if this is the one we just spawned (at eye position)
+                if (proj.active && proj.fromPlayer && proj.projFlags == 0) {
                     Vec3 d = proj.position - eyePos;
                     if (lengthSq(d) < 0.1f) {
                         proj.projFlags |= PROJ_SPARK;
@@ -1714,6 +1815,29 @@ void Engine::render(f32 alpha) {
         return;
     }
 
+    if (m_gameState == GameState::GAME_OVER) {
+        // --- Death screen ---
+        const char* deathTitle = "YOU DIED";
+        f32 titleW = FontSystem::textWidth(deathTitle, 4);
+        FontSystem::drawText(sw, sh, (sw - titleW) * 0.5f, sh * 0.6f, deathTitle, {0.8f, 0.1f, 0.1f}, 4);
+
+        char floorStr[48];
+        std::snprintf(floorStr, sizeof(floorStr), "Reached Floor %u", m_currentFloor);
+        f32 floorW = FontSystem::textWidth(floorStr, 2);
+        FontSystem::drawText(sw, sh, (sw - floorW) * 0.5f, sh * 0.45f, floorStr, {0.7f, 0.7f, 0.7f}, 2);
+
+        const char* restartText = "Press ENTER to restart from last save";
+        f32 restartW = FontSystem::textWidth(restartText, 1);
+        FontSystem::drawText(sw, sh, (sw - restartW) * 0.5f, sh * 0.3f, restartText, {0.5f, 0.5f, 0.6f}, 1);
+
+        const char* menuText = "Press ESC for main menu";
+        f32 menuW = FontSystem::textWidth(menuText, 1);
+        FontSystem::drawText(sw, sh, (sw - menuW) * 0.5f, sh * 0.22f, menuText, {0.4f, 0.4f, 0.5f}, 1);
+
+        GLContext::swapBuffers(Window::getHandle());
+        return;
+    }
+
     if (m_gameState != GameState::IN_GAME) {
         GLContext::swapBuffers(Window::getHandle());
         return;
@@ -2011,22 +2135,38 @@ void Engine::render(f32 alpha) {
         }
     }
 
-    // --- Floor door indicator (glowing portal in last room) ---
+    // --- Floor door — stairway down to next level ---
     if (m_floorDoorActive) {
         Vec3 dp = m_floorDoorPos;
         f32 pulse = 0.5f + 0.5f * sinf(static_cast<f32>(m_statsTimer) * 3.0f);
-        // Vertical beam (three offset lines for thickness)
-        DebugDraw::line(dp, dp + Vec3{0, 3.0f, 0}, {0.2f * pulse, 1.0f * pulse, 0.3f * pulse});
-        DebugDraw::line(dp + Vec3{0.1f, 0, 0}, dp + Vec3{0.1f, 3.0f, 0}, {0.1f, 0.8f * pulse, 0.2f});
-        DebugDraw::line(dp + Vec3{-0.1f, 0, 0}, dp + Vec3{-0.1f, 3.0f, 0}, {0.1f, 0.8f * pulse, 0.2f});
-        // Base circle (octagon approximation at floor level)
-        for (u32 s = 0; s < 8; s++) {
-            f32 a0 = s * (6.28318f / 8.0f);
-            f32 a1 = (s + 1) * (6.28318f / 8.0f);
-            Vec3 p0 = dp + Vec3{cosf(a0) * 0.5f, 0.05f, sinf(a0) * 0.5f};
-            Vec3 p1 = dp + Vec3{cosf(a1) * 0.5f, 0.05f, sinf(a1) * 0.5f};
-            DebugDraw::line(p0, p1, {0.2f, 0.9f * pulse, 0.3f});
+
+        // Draw stairway steps descending into the ground
+        for (u32 step = 0; step < 5; step++) {
+            f32 s = static_cast<f32>(step);
+            f32 y = dp.y - s * 0.15f;       // each step goes down
+            f32 z = dp.z + s * 0.25f;       // each step goes forward
+            f32 w = 0.5f - s * 0.03f;       // steps narrow slightly
+
+            Vec3 col = {0.3f * pulse, 0.25f * pulse, 0.15f * pulse}; // stone color
+            // Step top surface (2 horizontal lines)
+            DebugDraw::line({dp.x - w, y, z}, {dp.x + w, y, z}, col);
+            DebugDraw::line({dp.x - w, y, z + 0.2f}, {dp.x + w, y, z + 0.2f}, col);
+            // Step sides
+            DebugDraw::line({dp.x - w, y, z}, {dp.x - w, y, z + 0.2f}, col);
+            DebugDraw::line({dp.x + w, y, z}, {dp.x + w, y, z + 0.2f}, col);
+            // Step riser (vertical face connecting this step to the one above)
+            if (step > 0) {
+                f32 prevY = dp.y - (s - 1) * 0.15f;
+                DebugDraw::line({dp.x - w, prevY, z}, {dp.x - w, y, z}, col);
+                DebugDraw::line({dp.x + w, prevY, z}, {dp.x + w, y, z}, col);
+            }
         }
+
+        // Glowing portal indicator at the top of the stairs
+        Vec3 portalCol = {0.2f * pulse, 0.8f * pulse, 0.3f * pulse};
+        DebugDraw::line(dp + Vec3{-0.3f, 0, dp.z > 0 ? 0.05f : -0.05f},
+                        dp + Vec3{ 0.3f, 0, dp.z > 0 ? 0.05f : -0.05f}, portalCol);
+        DebugDraw::line(dp + Vec3{0, 0, 0}, dp + Vec3{0, 1.5f, 0}, portalCol);
     }
 
     // --- World items (rendered with weapon-specific meshes when available) ---
@@ -2411,15 +2551,16 @@ void Engine::renderMenu() {
     }
 
     // Menu options with text labels
-    static const char* labels[] = {"Single Player", "Host Game", "Join Game"};
+    static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Exit Game"};
     Vec3 colors[] = {
         {0.2f, 0.9f, 0.2f}, // singleplayer - green
         {0.2f, 0.5f, 1.0f}, // host - blue
         {1.0f, 0.7f, 0.2f}, // join - orange
+        {0.7f, 0.2f, 0.2f}, // exit - red
     };
 
-    for (u32 i = 0; i < 3; i++) {
-        f32 y = sh * 0.35f + (2 - i) * 55.0f;
+    for (u32 i = 0; i < 4; i++) {
+        f32 y = sh * 0.25f + (3 - i) * 50.0f;
         Vec3 color = colors[i];
         bool selected = (i == m_menuSelection);
         if (!selected) {

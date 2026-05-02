@@ -22,7 +22,7 @@ enum struct WeaponSubtype : u8 {
     // Hitscan subtypes
     PISTOL, SMG, CARBINE, REVOLVER,
     // Projectile subtypes
-    BOW, CROSSBOW, THROWING_KNIFE, MOLOTOV,
+    BOW, CROSSBOW, THROWING_KNIFE, MOLOTOV, WAND,
     COUNT
 };
 

@@ -97,7 +97,14 @@ static const u16 s_iconData[][16] = {
         0x07E0, 0x07E0, 0x07E0, 0x07E0,
         0x07E0, 0x07E0, 0x03C0, 0x03C0,
     },
-    // 12: SHIELD (offhand) — classic kite shield silhouette
+    // 12: WAND — thin stick with glowing crystal tip
+    {
+        0x0180, 0x03C0, 0x03C0, 0x0180,
+        0x0080, 0x0080, 0x0080, 0x0080,
+        0x0080, 0x0080, 0x0080, 0x0080,
+        0x0080, 0x0080, 0x00C0, 0x0000,
+    },
+    // 13: SHIELD (offhand) — classic kite shield silhouette
     {
         0x0000, 0x3FFC, 0x7FFE, 0x7FFE,
         0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
@@ -228,6 +235,7 @@ static u32 subtypeToIconIndex(WeaponSubtype st) {
         case WeaponSubtype::CROSSBOW:       return 9;
         case WeaponSubtype::THROWING_KNIFE: return 10;
         case WeaponSubtype::MOLOTOV:        return 11;
+        case WeaponSubtype::WAND:           return 12;
         default:                            return 0;
     }
 }
@@ -236,11 +244,11 @@ static u32 subtypeToIconIndex(WeaponSubtype st) {
 static u32 slotToIconIndex(ItemSlot slot) {
     switch (slot) {
         case ItemSlot::WEAPON:  return 1;   // sword icon as generic weapon fallback
-        case ItemSlot::OFFHAND: return 12;  // shield
-        case ItemSlot::HELMET:  return 13;
-        case ItemSlot::ARMOR:   return 14;
-        case ItemSlot::BOOTS:   return 15;
-        case ItemSlot::RING:    return 16;
+        case ItemSlot::OFFHAND: return 13;  // shield (shifted +1 for wand icon)
+        case ItemSlot::HELMET:  return 14;
+        case ItemSlot::ARMOR:   return 15;
+        case ItemSlot::BOOTS:   return 16;
+        case ItemSlot::RING:    return 17;
         default:                return 0;
     }
 }

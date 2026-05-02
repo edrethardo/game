@@ -96,6 +96,14 @@ static const WeaponModelGen::WeaponDef s_builtinDefs[] = {
             {{-0.015f,  0.06f, -0.015f},  {0.015f, 0.12f,  0.015f}},  // neck
         }, 2
     },
+    {
+        "wand", "Magic wand with crystal tip",
+        {
+            {{-0.015f, -0.25f, -0.015f}, {0.015f,  0.20f,  0.015f}},  // shaft (thin stick)
+            {{-0.025f,  0.20f, -0.025f}, {0.025f,  0.30f,  0.025f}},  // crystal head
+            {{-0.02f,  -0.28f, -0.02f},  {0.02f,  -0.22f,  0.02f}},   // pommel
+        }, 3
+    },
 
     // ---- ARMOR / EQUIPMENT ----
     {

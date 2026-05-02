@@ -50,6 +50,7 @@ static WeaponSubtype weaponSubtypeFromString(const std::string& s) {
     if (s == "crossbow"       || s == "CROSSBOW")       return WeaponSubtype::CROSSBOW;
     if (s == "throwing_knife" || s == "THROWING_KNIFE") return WeaponSubtype::THROWING_KNIFE;
     if (s == "molotov"        || s == "MOLOTOV")        return WeaponSubtype::MOLOTOV;
+    if (s == "wand"           || s == "WAND")           return WeaponSubtype::WAND;
     return WeaponSubtype::NONE;
 }
 
