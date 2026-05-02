@@ -28,4 +28,7 @@ namespace HUD {
     // Network stats overlay
     void drawNetStats(u32 screenWidth, u32 screenHeight,
                       u32 playerCount, u32 ping, const char* role);
+
+    // Profiler overlay (F3)
+    void drawProfiler(u32 screenWidth, u32 screenHeight);
 }

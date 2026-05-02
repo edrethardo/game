@@ -90,6 +90,13 @@ private:
     CombatHit   m_lastCombatHit;
     f32         m_hitMarkerTimer = 0.0f;
 
+    // Switch constraint mode
+    bool m_switchMode = false;
+    static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;
+    static constexpr u32 SWITCH_MAX_ENTITIES  = 64;
+    static constexpr u32 SWITCH_RES_W         = 960;
+    static constexpr u32 SWITCH_RES_H         = 540;
+
     // Core update paths
     void update(f32 dt);
     void serverUpdate(f32 dt);

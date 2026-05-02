@@ -105,8 +105,7 @@ void DebugDraw::flush(const Mat4& viewProjection) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, s_lineCount * 2 * sizeof(DebugVertex), s_verts);
 
     glUseProgram(s_shader.program);
-    s32 locVP = glGetUniformLocation(s_shader.program, "u_vp");
-    if (locVP >= 0) glUniformMatrix4fv(locVP, 1, GL_FALSE, viewProjection.ptr());
+    if (s_shader.loc_vp >= 0) glUniformMatrix4fv(s_shader.loc_vp, 1, GL_FALSE, viewProjection.ptr());
 
     glBindVertexArray(s_vao);
     glDrawArrays(GL_LINES, 0, s_lineCount * 2);

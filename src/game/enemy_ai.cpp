@@ -96,9 +96,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 {
     Vec3 playerEye = player.position + Vec3{0, player.eyeHeight, 0};
 
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        u32 i = pool.activeList[a];
         Entity& e = pool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
 
         Vec3 toPlayer = playerEye - e.position;

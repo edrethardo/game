@@ -89,6 +89,7 @@ Shader ShaderSystem::load(const char* vertPath, const char* fragPath) {
         shader.loc_ambientColor = glGetUniformLocation(shader.program, "u_ambientColor");
         shader.loc_texture0     = glGetUniformLocation(shader.program, "u_texture0");
         shader.loc_color        = glGetUniformLocation(shader.program, "u_color");
+        shader.loc_vp           = glGetUniformLocation(shader.program, "u_vp");
 
         LOG_INFO("Shader loaded: %s + %s (program=%u)", vertPath, fragPath, shader.program);
     }

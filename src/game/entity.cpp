@@ -3,9 +3,10 @@
 
 void EntitySystem::init(EntityPool& pool) {
     pool.freeCount = MAX_ENTITIES;
+    pool.activeCount = 0;
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         pool.entities[i] = {};
-        pool.freeList[i] = static_cast<u16>(MAX_ENTITIES - 1 - i); // stack: pop gives 0 first
+        pool.freeList[i] = static_cast<u16>(MAX_ENTITIES - 1 - i);
     }
     LOG_INFO("EntityPool initialized (%u slots)", MAX_ENTITIES);
 }
@@ -40,38 +41,53 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.flashTimer   = 0.0f;
     e.deathTimer   = 0.0f;
 
+    // Add to active list
+    pool.activeList[pool.activeCount++] = idx;
+
     return {idx, e.generation};
+}
+
+static void removeFromActiveList(EntityPool& pool, u16 idx) {
+    for (u32 i = 0; i < pool.activeCount; i++) {
+        if (pool.activeList[i] == idx) {
+            // Swap with last
+            pool.activeList[i] = pool.activeList[pool.activeCount - 1];
+            pool.activeCount--;
+            return;
+        }
+    }
 }
 
 void EntitySystem::despawn(EntityPool& pool, EntityHandle handle) {
     if (!handleValid(pool, handle)) return;
     Entity& e = pool.entities[handle.index];
     e.flags = 0;
+    removeFromActiveList(pool, handle.index);
     pool.freeList[pool.freeCount++] = handle.index;
 }
 
 void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < pool.activeCount; ) {
+        u32 i = pool.activeList[a];
         Entity& e = pool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
 
         if (e.flashTimer > 0.0f) e.flashTimer -= dt;
 
         if (e.flags & ENT_DEAD) {
             e.deathTimer -= dt;
             if (e.deathTimer <= 0.0f) {
-                // Despawn
                 e.flags = 0;
                 pool.freeList[pool.freeCount++] = static_cast<u16>(i);
+                // Swap-remove from active list
+                pool.activeList[a] = pool.activeList[pool.activeCount - 1];
+                pool.activeCount--;
+                continue; // re-check same index
             }
         }
+        a++;
     }
 }
 
 u32 EntitySystem::activeCount(const EntityPool& pool) {
-    u32 count = 0;
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
-        if (pool.entities[i].flags & ENT_ACTIVE) count++;
-    }
-    return count;
+    return pool.activeCount;
 }

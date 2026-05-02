@@ -1,0 +1,102 @@
+# PolyForm Noncommercial License 1.0.0
+
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
+
+## Acceptance
+
+In order to get any license under these terms, you must agree
+to them as both strict obligations and conditions to all your
+licenses.
+
+## Copyright License
+
+The licensor grants you a copyright license for the software
+to do everything you might do with the software that would
+otherwise infringe the licensor's copyright in it for any
+permitted purpose.  However, you may only distribute the
+software according to [Distribution License](#distribution-license)
+and make changes or new works based on the software according to
+[Changes and New Works License](#changes-and-new-works-license).
+
+## Distribution License
+
+The licensor grants you an additional copyright license to
+distribute copies of the software.  Your license to distribute
+covers distributing the software with changes and new works
+permitted by [Changes and New Works License](#changes-and-new-works-license).
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to
+make changes and new works based on the software for any
+permitted purpose.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+A purpose is commercial when it involves any of the following
+on behalf of you or another:
+
+1. Selling, offering to sell, or licensing the software or
+   derivatives of it.
+
+2. Receiving payment or financial benefit from the use of the
+   software or derivatives of it.
+
+Personal use, academic research, and educational purposes are
+always noncommercial.
+
+## Fair Credit
+
+You must give the licensor credit for the software, and keep
+intact all licensing, copyright, and other notices of the
+licensor in the software.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of
+your licenses to anyone else, or prevent the licensor from
+granting licenses to anyone else.  These terms do not imply
+any other licenses.
+
+## Patent and Trademark
+
+This license does not grant you any rights under the licensor's
+patents or trademarks.
+
+## Termination
+
+If you violate any of these terms, your licenses under them
+terminate immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without
+any warranty or condition, and the licensor will not be liable
+to you for any damages arising out of these terms or the use
+or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these
+terms, and the **software** is the software the licensor makes
+available under these terms, including any portion of it.
+
+**You** refers to the individual or entity agreeing to these
+terms.
+
+**Your company** is any legal entity, sole proprietorship, or
+other kind of organization that you work for, plus all
+organizations that have control over, are under the control of,
+or are under common control with that organization.
+
+---
+
+Licensor: Aaron (GitHub: edrethardo)
+
+Software: DungeonEngine — all files in this repository except
+those in `external/` (which retain their own licenses) and
+`assets/` (which are covered by LICENSE-ASSETS).
+
+For commercial licensing inquiries, contact the licensor via GitHub.

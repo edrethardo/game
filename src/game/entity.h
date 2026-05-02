@@ -60,6 +60,10 @@ struct EntityPool {
     Entity entities[MAX_ENTITIES];
     u16    freeList[MAX_ENTITIES];
     u32    freeCount = 0;
+
+    // Active entity indices for fast iteration
+    u32    activeList[MAX_ENTITIES];
+    u32    activeCount = 0;
 };
 
 inline bool handleValid(const EntityPool& pool, EntityHandle h) {

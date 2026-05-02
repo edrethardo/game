@@ -1,6 +1,7 @@
 #include "renderer/hud.h"
 #include "renderer/shader.h"
 #include "core/log.h"
+#include "core/profiler.h"
 #include <glad/glad.h>
 
 // Simple 2D line renderer for HUD elements (crosshair, hit markers).
@@ -56,8 +57,7 @@ static void flushHUD(u32 screenWidth, u32 screenHeight) {
     ortho.m[12] = -1.0f;
     ortho.m[13] = -1.0f;
 
-    s32 locVP = glGetUniformLocation(s_shader.program, "u_vp");
-    if (locVP >= 0) glUniformMatrix4fv(locVP, 1, GL_FALSE, ortho.ptr());
+    if (s_shader.loc_vp >= 0) glUniformMatrix4fv(s_shader.loc_vp, 1, GL_FALSE, ortho.ptr());
 
     glBindVertexArray(s_vao);
     glLineWidth(2.0f);
@@ -189,6 +189,77 @@ void HUD::drawMenuOption(u32 screenWidth, u32 screenHeight,
         pushLine(x1 + 15, y + height * 0.5f, x1 + 5, y + height * 0.3f, color);
         pushLine(x1 + 15, y + height * 0.5f, x1 + 5, y + height * 0.7f, color);
     }
+
+    flushHUD(screenWidth, screenHeight);
+}
+
+void HUD::drawProfiler(u32 screenWidth, u32 screenHeight) {
+    Profiler& prof = getProfiler();
+    if (!prof.enabled) return;
+
+    f32 x0 = 20.0f;
+    f32 y0 = static_cast<f32>(screenHeight) - 30.0f;
+
+    // Frame time summary bar
+    f32 barMaxMs = 33.3f; // 30 FPS reference
+    f32 barW = 300.0f;
+    f32 barH = 12.0f;
+
+    // Background bar (full budget = 16.67ms reference)
+    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.2f, 0.2f, 0.2f});
+
+    // 16.67ms marker line (60 FPS target)
+    f32 targetX = x0 + (16.67f / barMaxMs) * barW;
+    pushLine(targetX, y0 - 2, targetX, y0 + barH + 2, {0.0f, 0.8f, 0.0f});
+
+    // Per-scope timing bars (stacked)
+    f32 xCur = x0;
+    Vec3 scopeColors[] = {
+        {0.2f, 0.5f, 1.0f}, // Update (blue)
+        {1.0f, 0.4f, 0.2f}, // AI (red-orange)
+        {0.8f, 0.2f, 1.0f}, // Projectiles (purple)
+        {0.2f, 0.8f, 0.4f}, // Render (green)
+        {1.0f, 0.8f, 0.2f}, // Flush (yellow)
+        {0.6f, 0.6f, 0.6f}, // Other (grey)
+        {0.4f, 0.8f, 0.8f}, // Scope 6
+        {0.8f, 0.4f, 0.4f}, // Scope 7
+    };
+
+    for (u32 i = 0; i < prof.scopeCount && i < 8; i++) {
+        f32 w = static_cast<f32>(prof.scopes[i].elapsedMs / barMaxMs) * barW;
+        if (w < 1.0f) w = 1.0f;
+        Vec3 c = scopeColors[i];
+
+        // Draw filled bar segment
+        for (f32 y = y0 + 2; y < y0 + barH - 2; y += 2.0f) {
+            pushLine(xCur, y, xCur + w, y, c);
+        }
+        xCur += w;
+    }
+
+    // Scope legend below the bar
+    f32 legendY = y0 - 18.0f;
+    f32 legendX = x0;
+    for (u32 i = 0; i < prof.scopeCount && i < 8; i++) {
+        if (!prof.scopes[i].name) continue;
+        Vec3 c = scopeColors[i];
+        // Small color indicator
+        pushLine(legendX, legendY, legendX + 8, legendY, c);
+        pushLine(legendX, legendY + 2, legendX + 8, legendY + 2, c);
+        legendX += 50.0f;
+    }
+
+    // Frame time text-like indicators
+    f32 infoY = y0 - 38.0f;
+    // Avg frame time bar (scaled)
+    f32 avgW = static_cast<f32>(prof.frameTimeAvg / barMaxMs) * barW;
+    pushLine(x0, infoY, x0 + avgW, infoY, {0.8f, 0.8f, 0.8f});
+    // Min bar
+    f32 minW = static_cast<f32>(prof.frameTimeMin / barMaxMs) * barW;
+    pushLine(x0, infoY - 4, x0 + minW, infoY - 4, {0.2f, 0.8f, 0.2f});
+    // Max bar
+    f32 maxW = static_cast<f32>(prof.frameTimeMax / barMaxMs) * barW;
+    pushLine(x0, infoY - 8, x0 + maxW, infoY - 8, {0.8f, 0.2f, 0.2f});
 
     flushHUD(screenWidth, screenHeight);
 }

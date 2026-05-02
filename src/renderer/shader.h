@@ -17,6 +17,7 @@ struct Shader {
     s32 loc_ambientColor = -1;
     s32 loc_texture0 = -1;
     s32 loc_color = -1;
+    s32 loc_vp = -1;       // for debug/HUD shaders that use u_vp
 };
 
 namespace ShaderSystem {

@@ -29,6 +29,9 @@ struct Player {
     u16  lockGeneration = 0;
     bool lockActive     = false;
     f32  lockLosTimer   = 0.0f;   // time since LOS was broken
+
+    // Cached forward vector (computed once per frame in update)
+    Vec3 forward = {0.0f, 0.0f, -1.0f};
 };
 
 namespace PlayerController {

@@ -26,6 +26,7 @@
 #include "core/math.h"
 #include "core/frame_allocator.h"
 #include "core/allocation_tracker.h"
+#include "core/profiler.h"
 
 #include <glad/glad.h>
 #include <cmath>
@@ -274,6 +275,9 @@ void Engine::run() {
         render(static_cast<f32>(m_accumulator / FIXED_DT));
         m_frameCount++;
 
+        // Record frame time for profiler
+        profilerRecordFrame(frameTime * 1000.0);
+
         m_statsTimer += frameTime;
         if (m_statsTimer >= 1.0) {
             if (m_gameState == GameState::IN_GAME) logStats();
@@ -412,6 +416,8 @@ void Engine::updateLobby(f32 dt) {
 // Singleplayer update (unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::singleplayerUpdate(f32 dt) {
+    PROFILE_SCOPE(0, "Update");
+
     // Toggle debug overlay
     if (Input::isKeyPressed(SDL_SCANCODE_F1)) {
         DebugDraw::setEnabled(!DebugDraw::isEnabled());
@@ -421,6 +427,57 @@ void Engine::singleplayerUpdate(f32 dt) {
     if (Input::isKeyPressed(SDL_SCANCODE_F2)) {
         m_localPlayer.noclip = !m_localPlayer.noclip;
         LOG_INFO("Noclip: %s", m_localPlayer.noclip ? "ON" : "OFF");
+    }
+
+    // Toggle profiler overlay
+    if (Input::isKeyPressed(SDL_SCANCODE_F3)) {
+        Profiler& prof = getProfiler();
+        prof.enabled = !prof.enabled;
+        LOG_INFO("Profiler: %s", prof.enabled ? "ON" : "OFF");
+    }
+
+    // Stress spawner: F4 = 10 enemies, F5 = 50 enemies
+    if (Input::isKeyPressed(SDL_SCANCODE_F4)) {
+        u32 spawned = 0;
+        for (u32 s = 0; s < 10 && m_entities.freeCount > 0; s++) {
+            f32 angle = (s / 10.0f) * 6.28f;
+            Vec3 pos = m_localPlayer.position + Vec3{cosf(angle) * 5.0f, 0.5f, sinf(angle) * 5.0f};
+            bool flying = (s % 3 == 0);
+            Vec3 half = flying ? Vec3{0.3f, 0.3f, 0.3f} : Vec3{0.4f, 0.5f, 0.4f};
+            EntitySystem::spawn(m_entities, pos, half, flying,
+                flying ? 30.0f : 50.0f, flying ? 4.0f : 2.5f,
+                15.0f, flying ? 8.0f : 2.5f, flying ? 1.5f : 1.0f, flying ? 8.0f : 10.0f);
+            spawned++;
+        }
+        LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
+    }
+
+    if (Input::isKeyPressed(SDL_SCANCODE_F5)) {
+        u32 spawned = 0;
+        for (u32 s = 0; s < 50 && m_entities.freeCount > 0; s++) {
+            f32 angle = (s / 50.0f) * 6.28f;
+            f32 radius = 4.0f + (s % 5) * 2.0f;
+            Vec3 pos = m_localPlayer.position + Vec3{cosf(angle) * radius, 0.5f, sinf(angle) * radius};
+            bool flying = (s % 4 == 0);
+            Vec3 half = flying ? Vec3{0.3f, 0.3f, 0.3f} : Vec3{0.4f, 0.5f, 0.4f};
+            EntitySystem::spawn(m_entities, pos, half, flying,
+                flying ? 30.0f : 50.0f, flying ? 4.0f : 2.5f,
+                15.0f, flying ? 8.0f : 2.5f, flying ? 1.5f : 1.0f, flying ? 8.0f : 10.0f);
+            spawned++;
+        }
+        LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
+    }
+
+    // Switch constraint mode (F6)
+    if (Input::isKeyPressed(SDL_SCANCODE_F6)) {
+        m_switchMode = !m_switchMode;
+        if (m_switchMode) {
+            m_camera.farPlane = SWITCH_FAR_PLANE;
+            LOG_INFO("[SWITCH] Mode ON — far=%.0f, res=%ux%u", SWITCH_FAR_PLANE, SWITCH_RES_W, SWITCH_RES_H);
+        } else {
+            m_camera.farPlane = 200.0f;
+            LOG_INFO("[SWITCH] Mode OFF");
+        }
     }
 
     // Weapon switching
@@ -449,10 +506,14 @@ void Engine::singleplayerUpdate(f32 dt) {
     handleWeaponFire(dt);
 
     // Enemy AI
+    { PROFILE_SCOPE(1, "AI");
     EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+    }
 
     // Projectiles
+    { PROFILE_SCOPE(2, "Projectiles");
     ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+    }
 
     // Entity timers
     EntitySystem::tickTimers(m_entities, dt);
@@ -699,11 +760,7 @@ void Engine::handleWeaponFire(f32 dt) {
     ws.cooldownTimer = wpn.cooldown;
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-    Vec3 forward = normalize(Vec3{
-        -sinf(m_localPlayer.yaw) * cosf(m_localPlayer.pitch),
-         sinf(m_localPlayer.pitch),
-        -cosf(m_localPlayer.yaw) * cosf(m_localPlayer.pitch)
-    });
+    Vec3 forward = m_localPlayer.forward;
 
     AttackResult result;
     switch (wpn.type) {
@@ -779,11 +836,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
 // ---------------------------------------------------------------------------
 void Engine::updateTargetLock(f32 dt) {
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-    Vec3 forward = normalize(Vec3{
-        -sinf(m_localPlayer.yaw) * cosf(m_localPlayer.pitch),
-         sinf(m_localPlayer.pitch),
-        -cosf(m_localPlayer.yaw) * cosf(m_localPlayer.pitch)
-    });
+    Vec3 forward = m_localPlayer.forward;
 
     if (Input::isMouseButtonDown(SDL_BUTTON_MIDDLE)) {
         if (!m_localPlayer.lockActive) {
@@ -861,6 +914,15 @@ void Engine::render(f32 alpha) {
     if (m_gameState != GameState::IN_GAME) {
         GLContext::swapBuffers(Window::getHandle());
         return;
+    }
+
+    PROFILE_SCOPE(3, "Render");
+
+    // Switch mode: reduced viewport
+    if (m_switchMode) {
+        sw = SWITCH_RES_W;
+        sh = SWITCH_RES_H;
+        glViewport(0, 0, sw, sh);
     }
 
     f32 aspect = static_cast<f32>(sw) / static_cast<f32>(sh);
@@ -972,7 +1034,9 @@ void Engine::render(f32 alpha) {
         }
     }
 
+    { PROFILE_SCOPE(4, "Flush");
     Renderer::flush();
+    }
 
     // --- Debug overlay ---
     DebugDraw::clear();
@@ -1031,6 +1095,9 @@ void Engine::render(f32 alpha) {
 
     HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
     HUD::drawWeaponIndicator(sw, sh, m_players[m_localPlayerIndex].weaponState.currentWeapon);
+
+    // Profiler overlay (F3)
+    HUD::drawProfiler(sw, sh);
 
     // Net stats overlay in multiplayer
     if (m_netRole != NetRole::NONE) {

@@ -11,6 +11,8 @@ static constexpr f32 MAX_PITCH = 89.0f * 3.14159265f / 180.0f;
 // ---------------------------------------------------------------------------
 // Shared movement logic (operates on raw values, shared by Player & NetPlayer)
 // ---------------------------------------------------------------------------
+static Vec3 s_lastForward = {0, 0, -1};
+
 static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
                            bool& onGround, bool noclip,
                            f32 moveSpeed, f32 sensitivity,
@@ -24,12 +26,15 @@ static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
     if (pitch >  MAX_PITCH) pitch =  MAX_PITCH;
     if (pitch < -MAX_PITCH) pitch = -MAX_PITCH;
 
-    Vec3 forward = normalize(Vec3{
-        -sinf(yaw) * cosf(pitch),
-         sinf(pitch),
-        -cosf(yaw) * cosf(pitch)
-    });
-    Vec3 flatForward = normalize(Vec3{-sinf(yaw), 0.0f, -cosf(yaw)});
+    f32 cosP = cosf(pitch);
+    f32 sinP = sinf(pitch);
+    f32 cosY = cosf(yaw);
+    f32 sinY = sinf(yaw);
+
+    Vec3 forward = normalize(Vec3{-sinY * cosP, sinP, -cosY * cosP});
+    s_lastForward = forward; // cache for retrieval
+
+    Vec3 flatForward = normalize(Vec3{-sinY, 0.0f, -cosY});
     Vec3 right       = normalize(cross(flatForward, {0.0f, 1.0f, 0.0f}));
 
     Vec3 move = {0, 0, 0};
@@ -78,6 +83,7 @@ void PlayerController::update(Player& player, f32 dt) {
                   Input::isKeyDown(SDL_SCANCODE_D),
                   Input::isKeyPressed(SDL_SCANCODE_SPACE),
                   dt);
+    player.forward = s_lastForward;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +100,7 @@ void PlayerController::updateFromInput(Player& player, const NetInput& input, f3
                   (input.moveFlags & INPUT_RIGHT)    != 0,
                   (input.moveFlags & INPUT_JUMP)     != 0,
                   dt);
+    player.forward = s_lastForward;
 }
 
 // ---------------------------------------------------------------------------

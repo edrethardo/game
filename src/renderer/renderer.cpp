@@ -9,14 +9,14 @@
 #include <algorithm>
 
 struct RenderCommand {
-    u64       sortKey;      // packed: (shader << 42) | (texture << 21) | mesh
-    u32       shaderProg;
-    u32       texHandle;
-    u32       meshVAO;
-    u32       meshIndexCount;
-    Mat4      mvp;
-    Mat4      model;
-    Vec4      color;        // per-object tint (passed as u_color if shader has it)
+    u64           sortKey;      // packed: (shader << 42) | (texture << 21) | mesh
+    const Shader* shader;       // pointer to shader (stable lifetime) for cached locs
+    u32           texHandle;
+    u32           meshVAO;
+    u32           meshIndexCount;
+    Mat4          mvp;
+    Mat4          model;
+    Vec4          color;        // per-object tint (passed as u_color if shader has it)
 };
 
 static constexpr u32 MAX_COMMANDS = 4096;
@@ -75,7 +75,7 @@ void Renderer::submit(const Shader& shader, const Texture& texture,
     cmd.sortKey   = (static_cast<u64>(shader.program & 0x1FFFFF) << 42)
                   | (static_cast<u64>(texture.handle & 0x1FFFFF) << 21)
                   | (static_cast<u64>(mesh.vao       & 0x3FFFFF));
-    cmd.shaderProg     = shader.program;
+    cmd.shader         = &shader;
     cmd.texHandle      = texture.handle;
     cmd.meshVAO        = mesh.vao;
     cmd.meshIndexCount = mesh.indexCount;
@@ -98,21 +98,22 @@ void Renderer::flush() {
 
     for (u32 i = 0; i < s_commandCount; i++) {
         const RenderCommand& cmd = s_commands[i];
+        const Shader& sh = *cmd.shader;
 
-        if (cmd.shaderProg != boundShader) {
-            glUseProgram(cmd.shaderProg);
-            boundShader = cmd.shaderProg;
-            lightSet    = false; // re-set light uniforms for new shader
+        if (sh.program != boundShader) {
+            glUseProgram(sh.program);
+            boundShader = sh.program;
+            lightSet    = false;
         }
 
         if (!lightSet) {
-            // Light uniforms (same for all objects, set once per shader bind)
-            s32 locLD = glGetUniformLocation(cmd.shaderProg, "u_lightDir");
-            s32 locLC = glGetUniformLocation(cmd.shaderProg, "u_lightColor");
-            s32 locAC = glGetUniformLocation(cmd.shaderProg, "u_ambientColor");
-            if (locLD >= 0) glUniform3f(locLD, s_lightDir.x, s_lightDir.y, s_lightDir.z);
-            if (locLC >= 0) glUniform3f(locLC, s_lightColor.x, s_lightColor.y, s_lightColor.z);
-            if (locAC >= 0) glUniform3f(locAC, s_lightAmbient.x, s_lightAmbient.y, s_lightAmbient.z);
+            // Light uniforms — use cached locations, zero glGetUniformLocation calls
+            if (sh.loc_lightDir >= 0)
+                glUniform3f(sh.loc_lightDir, s_lightDir.x, s_lightDir.y, s_lightDir.z);
+            if (sh.loc_lightColor >= 0)
+                glUniform3f(sh.loc_lightColor, s_lightColor.x, s_lightColor.y, s_lightColor.z);
+            if (sh.loc_ambientColor >= 0)
+                glUniform3f(sh.loc_ambientColor, s_lightAmbient.x, s_lightAmbient.y, s_lightAmbient.z);
             lightSet = true;
         }
 
@@ -120,17 +121,16 @@ void Renderer::flush() {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, cmd.texHandle);
             boundTex = cmd.texHandle;
-            s32 locTex = glGetUniformLocation(cmd.shaderProg, "u_texture0");
-            if (locTex >= 0) glUniform1i(locTex, 0);
+            if (sh.loc_texture0 >= 0) glUniform1i(sh.loc_texture0, 0);
         }
 
-        // Per-object uniforms
-        s32 locMVP   = glGetUniformLocation(cmd.shaderProg, "u_mvp");
-        s32 locModel = glGetUniformLocation(cmd.shaderProg, "u_model");
-        s32 locColor = glGetUniformLocation(cmd.shaderProg, "u_color");
-        if (locMVP   >= 0) glUniformMatrix4fv(locMVP,   1, GL_FALSE, cmd.mvp.ptr());
-        if (locModel >= 0) glUniformMatrix4fv(locModel, 1, GL_FALSE, cmd.model.ptr());
-        if (locColor >= 0) glUniform4f(locColor, cmd.color.x, cmd.color.y, cmd.color.z, cmd.color.w);
+        // Per-object uniforms — all cached, zero lookups
+        if (sh.loc_mvp >= 0)
+            glUniformMatrix4fv(sh.loc_mvp, 1, GL_FALSE, cmd.mvp.ptr());
+        if (sh.loc_model >= 0)
+            glUniformMatrix4fv(sh.loc_model, 1, GL_FALSE, cmd.model.ptr());
+        if (sh.loc_color >= 0)
+            glUniform4f(sh.loc_color, cmd.color.x, cmd.color.y, cmd.color.z, cmd.color.w);
 
         if (cmd.meshVAO != boundVAO) {
             glBindVertexArray(cmd.meshVAO);
