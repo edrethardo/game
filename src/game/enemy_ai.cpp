@@ -114,15 +114,175 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         e.animTimer += dt;
         if (e.attackAnimT > 0.0f) e.attackAnimT -= dt;
 
+        // Determine if this entity is a friendly NPC ally
+        bool isFriendly = (e.flags & ENT_FRIENDLY) != 0;
+
+        // ---------------------------------------------------------------------------
+        // Friendly NPC AI — follows player, attacks nearest hostile enemy
+        // ---------------------------------------------------------------------------
+        if (isFriendly) {
+            // Find closest hostile enemy within detection range
+            f32 bestEnemyDist = e.detectionRange;
+            u16 bestEnemyIdx = 0xFFFF;
+            Vec3 enemyPos = {0,0,0};
+
+            for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                u32 nIdx = pool.activeList[ni];
+                const Entity& enemy = pool.entities[nIdx];
+                if (enemy.flags & ENT_FRIENDLY) continue;  // skip other friendlies
+                if (enemy.flags & ENT_DEAD) continue;
+                if (!(enemy.flags & ENT_ACTIVE)) continue;
+
+                Vec3 toEnemy = enemy.position - e.position;
+                f32 eDist = length(toEnemy);
+                if (eDist < bestEnemyDist) {
+                    bestEnemyDist = eDist;
+                    bestEnemyIdx = static_cast<u16>(nIdx);
+                    enemyPos = enemy.position;
+                }
+            }
+
+            e.targetEntityIdx = bestEnemyIdx;
+
+            if (bestEnemyIdx != 0xFFFF) {
+                // Chase and attack the nearest hostile enemy
+                Vec3 toEnemy = enemyPos - e.position;
+                f32 eDist = length(toEnemy);
+                Vec3 dirToEnemy = (eDist > 0.001f) ? toEnemy * (1.0f / eDist) : Vec3{0,0,0};
+
+                // Face the enemy
+                if (eDist > 0.001f) {
+                    e.yaw = atan2f(-dirToEnemy.x, -dirToEnemy.z);
+                }
+
+                if (eDist > e.attackRange) {
+                    // Chase: move toward enemy on XZ plane
+                    Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0.0f, dirToEnemy.z});
+                    e.velocity.x = flatDir.x * e.moveSpeed;
+                    e.velocity.z = flatDir.z * e.moveSpeed;
+                    entityMoveAndSlide(e, grid, dt);
+                } else {
+                    // Attack: stand still and swing
+                    e.velocity = {0, 0, 0};
+                    e.attackTimer -= dt;
+                    if (e.attackTimer <= 0.0f) {
+                        e.attackTimer = e.attackCooldown;
+                        e.attackAnimT = 0.3f;
+
+                        // Deal damage to the enemy entity
+                        Entity& target = pool.entities[bestEnemyIdx];
+                        if (!(target.flags & ENT_DEAD)) {
+                            EntityHandle th = {bestEnemyIdx, target.generation};
+                            Combat::applyDamage(pool, th, e.damage);
+
+                            // Random attack speech (1-in-5 chance)
+                            if ((std::rand() % 5) == 0) {
+                                static const char* attackLines[] = {"Take that!", "Die, beast!", "For glory!"};
+                                e.speechText = attackLines[std::rand() % 3];
+                                e.speechTimer = 2.5f;
+                            }
+                        }
+                    }
+                }
+
+                // Snap Y to floor height
+                u32 gx, gz;
+                if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
+                    !LevelGridSystem::isSolid(grid, gx, gz)) {
+                    f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
+                    e.position.y = floorH + e.halfExtents.y;
+                }
+            } else {
+                // No enemies nearby — follow the player at a comfortable distance
+                Vec3 toPlayer = playerEye - e.position;
+                f32 pDist = length(toPlayer);
+
+                if (pDist > 4.0f) {
+                    // Too far from player: move toward them
+                    Vec3 flatDir = normalize(Vec3{toPlayer.x, 0.0f, toPlayer.z});
+                    e.velocity.x = flatDir.x * e.moveSpeed;
+                    e.velocity.z = flatDir.z * e.moveSpeed;
+                    e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                    entityMoveAndSlide(e, grid, dt);
+                } else {
+                    // Close enough to player: idle in place
+                    e.velocity = {0, 0, 0};
+                }
+
+                // Snap Y to floor height
+                u32 gx, gz;
+                if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
+                    !LevelGridSystem::isSolid(grid, gx, gz)) {
+                    f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
+                    e.position.y = floorH + e.halfExtents.y;
+                }
+            }
+
+            // Speech timer decay (clears bubble when expired)
+            if (e.speechTimer > 0.0f) {
+                e.speechTimer -= dt;
+                if (e.speechTimer <= 0.0f) {
+                    e.speechText = nullptr;
+                }
+            }
+
+            // Low health desperate speech (random ~2-second cadence)
+            if (e.health < e.maxHealth * 0.3f && e.health > 0 && e.speechTimer <= 0.0f) {
+                if ((std::rand() % 120) == 0) {
+                    static const char* hurtLines[] = {"I'm hurt...", "Help!", "Can't... hold on..."};
+                    e.speechText = hurtLines[std::rand() % 3];
+                    e.speechTimer = 3.0f;
+                }
+            }
+
+            continue; // skip hostile AI path for friendly NPCs
+        }
+
+        // ---------------------------------------------------------------------------
+        // Hostile enemy AI — targets friendly NPCs first, then player
+        // ---------------------------------------------------------------------------
         Vec3 toPlayer = playerEye - e.position;
         f32  dist     = length(toPlayer);
-        Vec3 dirToPlayer = (dist > 0.001f) ? toPlayer * (1.0f / dist) : Vec3{0,0,0};
+
+        // Default target is the player
+        Vec3 targetPos = playerEye;
+        f32  targetDist = dist;
+        bool targetIsNPC = false;
+
+        // Search for closer friendly NPCs to target instead of the player
+        {
+            f32 bestNpcDist = dist; // only retarget if NPC is closer than the player
+            for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                u32 nIdx = pool.activeList[ni];
+                const Entity& npc = pool.entities[nIdx];
+                if (!(npc.flags & ENT_FRIENDLY)) continue;
+                if (npc.flags & ENT_DEAD) continue;
+
+                Vec3 toNpc = npc.position - e.position;
+                f32 npcDist = length(toNpc);
+                if (npcDist < bestNpcDist && npcDist <= e.detectionRange) {
+                    bestNpcDist = npcDist;
+                    targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
+                    targetDist = npcDist;
+                    targetIsNPC = true;
+                    e.targetEntityIdx = static_cast<u16>(nIdx);
+                }
+            }
+            if (!targetIsNPC) {
+                e.targetEntityIdx = 0xFFFF;
+            }
+        }
+
+        // Direction toward current target (NPC or player)
+        Vec3 toTarget = targetPos - e.position;
+        f32  tDist = length(toTarget);
+        Vec3 dirToTarget = (tDist > 0.001f) ? toTarget * (1.0f / tDist) : Vec3{0,0,0};
 
         bool isBat = (e.flags & ENT_FLYING) != 0;
 
-        // Face toward player (yaw only) — except during flyby
-        if (dist > 0.001f && e.aiState != AIState::FLYBY) {
-            e.yaw = atan2f(-dirToPlayer.x, -dirToPlayer.z);
+        // Face toward target (yaw only) — except during flyby
+        if (tDist > 0.001f && e.aiState != AIState::FLYBY) {
+            e.yaw = atan2f(-dirToTarget.x, -dirToTarget.z);
         }
 
         switch (e.aiState) {
@@ -143,7 +303,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             u16 checkFreq = isBat ? 4 : 8;
             if (e.aiCheckIdx >= checkFreq) {
                 e.aiCheckIdx = 0;
-                if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
+                // Trigger on NPC target or player within detection range
+                if (targetIsNPC && targetDist <= e.detectionRange) {
+                    e.aiState = AIState::CHASE;
+                } else if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
                     e.aiState = AIState::CHASE;
                 }
             }
@@ -151,9 +314,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         case AIState::CHASE: {
             if (isBat) {
-                // Aggressive flying chase — target position above the player
-                Vec3 abovePlayer = playerEye + Vec3{0, 1.8f, 0}; // hover well above head
-                Vec3 toAbove = abovePlayer - e.position;
+                // Aggressive flying chase — target position above the target
+                Vec3 aboveTarget = targetPos + Vec3{0, 1.8f, 0}; // hover well above target
+                Vec3 toAbove = aboveTarget - e.position;
                 f32 aboveDist = length(toAbove);
                 Vec3 dirAbove = (aboveDist > 0.01f) ? toAbove * (1.0f / aboveDist) : Vec3{0,1,0};
 
@@ -167,8 +330,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.velocity.z += perp.z * wobbleX;
                 e.velocity.y += wobbleY;
             } else {
-                // Ground movement: XZ only
-                Vec3 flatDir = normalize(Vec3{dirToPlayer.x, 0.0f, dirToPlayer.z});
+                // Ground movement: XZ only toward target
+                Vec3 flatDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
                 if (lengthSq(flatDir) > 0.001f) {
                     e.velocity.x = flatDir.x * e.moveSpeed;
                     e.velocity.z = flatDir.z * e.moveSpeed;
@@ -184,8 +347,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             entityMoveAndSlide(e, grid, dt);
 
-            // Transition to attack if close enough
-            if (dist <= e.attackRange) {
+            // Transition to attack if close enough to target
+            if (targetDist <= e.attackRange) {
                 if (isBat) {
                     // Aggressive bat attacks — more dive attacks, faster timers
                     if ((std::rand() % 100) < 40) {
@@ -206,19 +369,19 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.attackTimer = e.attackCooldown * 0.5f;
                 }
             }
-            // Lost interest
-            if (dist > e.detectionRange * 1.5f) {
+            // Lost interest: fall back to idle if target is far away
+            if (targetDist > e.detectionRange * 1.5f) {
                 e.aiState = AIState::IDLE;
             }
         } break;
 
         case AIState::FLYBY: {
-            // Bat swoop attack — fly toward target, damage on contact
-            Vec3 toTarget = e.flybyTarget - e.position;
-            f32 targetDist = length(toTarget);
+            // Bat swoop attack — fly toward flyby waypoint, damage on contact with player
+            Vec3 toFlybyTarget = e.flybyTarget - e.position;
+            f32 flybyTargetDist = length(toFlybyTarget);
 
-            if (targetDist > 0.3f) {
-                Vec3 flyDir = toTarget * (1.0f / targetDist);
+            if (flybyTargetDist > 0.3f) {
+                Vec3 flyDir = toFlybyTarget * (1.0f / flybyTargetDist);
                 f32 speed = e.moveSpeed * 2.2f; // aggressive fast dive
                 e.velocity = flyDir * speed;
 
@@ -234,23 +397,35 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             entityMoveAndSlide(e, grid, dt);
 
-            // Deal damage when passing close to player
-            if (dist <= e.attackRange * 0.8f && hasLOS(e, player, grid)) {
-                Combat::applyDamageToPlayer(player, e.damage);
-                e.attackAnimT = 0.3f;
+            // Deal damage when passing close to target
+            if (dist <= e.attackRange * 0.8f) {
+                if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
+                    // Damage the NPC target during flyby
+                    Entity& npcTarget = pool.entities[e.targetEntityIdx];
+                    if (!(npcTarget.flags & ENT_DEAD)) {
+                        EntityHandle th = {e.targetEntityIdx, npcTarget.generation};
+                        Combat::applyDamage(pool, th, e.damage);
+                        e.attackAnimT = 0.3f;
+                    }
+                } else if (hasLOS(e, player, grid)) {
+                    // Damage the player if no NPC target
+                    Combat::applyDamageToPlayer(player, e.damage);
+                    e.attackAnimT = 0.3f;
+                }
 
-                // After hitting: pull up and circle back
-                // Pick a retreat point above and behind the bat's current direction
-                Vec3 retreatDir = e.velocity * (-1.0f);
-                if (lengthSq(retreatDir) > 0.01f) retreatDir = normalize(retreatDir);
-                else retreatDir = {0, 1, 0};
-                e.flybyTarget = e.position + retreatDir * 3.0f + Vec3{0, 2.5f, 0};
-                e.flybyTimer = 1.0f; // quick retreat, return to attack faster
-                // Stay in FLYBY to fly to retreat point, then will expire to CHASE
+                if (e.attackAnimT > 0.0f) {
+                    // After hitting: pull up and circle back
+                    Vec3 retreatDir = e.velocity * (-1.0f);
+                    if (lengthSq(retreatDir) > 0.01f) retreatDir = normalize(retreatDir);
+                    else retreatDir = {0, 1, 0};
+                    e.flybyTarget = e.position + retreatDir * 3.0f + Vec3{0, 2.5f, 0};
+                    e.flybyTimer = 1.0f; // quick retreat, return to attack faster
+                    // Stay in FLYBY to fly to retreat point, then expire to CHASE
+                }
             }
 
             e.flybyTimer -= dt;
-            if (targetDist < 0.3f || e.flybyTimer <= 0.0f) {
+            if (flybyTargetDist < 0.3f || e.flybyTimer <= 0.0f) {
                 e.aiState = AIState::CHASE;
             }
         } break;
@@ -264,13 +439,22 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.attackTimer = e.attackCooldown;
                 e.attackAnimT = 0.3f; // trigger attack animation
 
-                if (dist <= e.attackRange * 1.1f && hasLOS(e, player, grid)) {
-                    Combat::applyDamageToPlayer(player, e.damage);
+                // Damage NPC target if we're targeting one, otherwise damage player
+                if (targetDist <= e.attackRange * 1.1f) {
+                    if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
+                        Entity& npcTarget = pool.entities[e.targetEntityIdx];
+                        if (!(npcTarget.flags & ENT_DEAD)) {
+                            EntityHandle th = {e.targetEntityIdx, npcTarget.generation};
+                            Combat::applyDamage(pool, th, e.damage);
+                        }
+                    } else if (hasLOS(e, player, grid)) {
+                        Combat::applyDamageToPlayer(player, e.damage);
+                    }
                 }
             }
 
             // Transition back to chase if out of range
-            if (dist > e.attackRange * 1.3f) {
+            if (targetDist > e.attackRange * 1.3f) {
                 e.aiState = AIState::CHASE;
             }
         } break;

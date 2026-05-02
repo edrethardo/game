@@ -98,6 +98,7 @@ CombatHit CombatQuery::raycast(const LevelGrid& grid, const EntityPool& pool,
         const Entity& e = pool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
+        if (e.flags & ENT_FRIENDLY) continue;  // don't shoot allies
 
         AABB box = entityAABB(e);
         // Pad the AABB so near-misses still register
@@ -135,6 +136,7 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
         const Entity& e = pool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
+        if (e.flags & ENT_FRIENDLY) continue;  // don't hit allies with melee cone
 
         Vec3 toEntity = e.position - origin;
         f32 dist = length(toEntity);

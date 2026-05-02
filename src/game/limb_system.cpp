@@ -195,9 +195,10 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
             }
 
             if (limbIdx < 4) {
-                // Arms swing opposite to legs for natural counter-rotation
+                // Arms swing opposite to legs + gentle idle sway when still
                 f32 armPhase = phase + 3.14159f;
-                return sinf(armPhase) * 0.4f * speed01;
+                f32 idleSway = sinf(e.animTimer * 2.0f) * 0.08f; // subtle idle movement
+                return sinf(armPhase) * 0.5f * speed01 + idleSway;
             } else {
                 // Legs
                 bool isLower = (limbIdx == 5 || limbIdx == 7);

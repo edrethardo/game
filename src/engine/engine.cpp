@@ -293,10 +293,15 @@ void Engine::init() {
     }
 
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
-        (void)pool; (void)entityIndex;
         if (!s_engine) return;
-        // 40% base drop chance
-        if ((std::rand() % 100) < 40) {
+        // Friendly NPC death speech — set before loot drop so it's visible
+        if (pool.entities[entityIndex].flags & ENT_FRIENDLY) {
+            pool.entities[entityIndex].speechText = "Avenge... me...";
+            pool.entities[entityIndex].speechTimer = 4.0f;
+        }
+        // 40% base drop chance (hostile enemies only drop loot)
+        if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY) &&
+            (std::rand() % 100) < 40) {
             u8 enemyLevel = 1; // TODO: derive from entity or dungeon depth
             ItemInstance item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
                                                    s_engine->m_itemDefCount,
@@ -307,6 +312,7 @@ void Engine::init() {
                                        position + Vec3{0, 0.5f, 0});
             }
         }
+        (void)position;
     });
 
     // Init networking
@@ -412,6 +418,53 @@ void Engine::startGame() {
     }
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
+
+    // Spawn 2 friendly NPC allies in the spawn room, offset to either side of the player
+    {
+        static const char* npcGreetings[] = {"Stay close!", "Let's go!"};
+        for (u32 n = 0; n < 2; n++) {
+            // Offset NPCs left/right of the spawn position so they don't overlap
+            f32 offsetX = (n == 0) ? -1.5f : 1.5f;
+            f32 npcHalfY = 0.9f; // skeleton half-height
+            Vec3 npcPos = {dungeon.spawnPos.x + offsetX,
+                           dungeon.spawnPos.y + npcHalfY, // center above floor
+                           dungeon.spawnPos.z + 1.0f};
+
+            EntityHandle npcHandle = EntitySystem::spawn(m_entities, npcPos,
+                {0.4f, 0.9f, 0.4f}, false,  // skeleton-sized half-extents
+                40.0f, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
+
+            Entity* npc = handleGet(m_entities, npcHandle);
+            if (npc) {
+                npc->flags |= ENT_FRIENDLY;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState   = AIState::IDLE;
+                npc->speechText  = npcGreetings[n];
+                npc->speechTimer = 4.0f; // greeting fades after 4 seconds
+
+                // Give the NPC a skeleton mesh and skin material
+                for (u32 m = 0; m < m_meshDefCount; m++) {
+                    if (std::strcmp(m_meshDefs[m].name, "skeleton") == 0) {
+                        npc->meshId = static_cast<u8>(m);
+                        break;
+                    }
+                }
+                npc->materialId = MaterialSystem::getIdByName("skeleton_skin");
+
+                // Give NPC a weapon (alternating sword/axe)
+                static const char* npcWeapons[] = {"sword", "axe"};
+                const char* wpnName = npcWeapons[n % 2];
+                for (u32 m = 1; m < m_meshDefCount; m++) {
+                    if (std::strcmp(m_meshDefs[m].name, wpnName) == 0) {
+                        npc->weaponMeshId = static_cast<u8>(m);
+                        break;
+                    }
+                }
+            }
+        }
+        LOG_INFO("Spawned 2 friendly NPCs in spawn room");
+    }
+
     ProjectileSystem::init(m_projectiles);
 
     // Init inventory & world items
@@ -778,6 +831,20 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Enemy AI
     { PROFILE_SCOPE(1, "AI");
     EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+    }
+
+    // Decay speech timers for all entities (handles death speech and any
+    // speech set outside the AI loop, e.g. from the death callback)
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if (e.speechTimer > 0.0f) {
+            e.speechTimer -= dt;
+            if (e.speechTimer <= 0.0f) {
+                e.speechText  = nullptr;
+                e.speechTimer = 0.0f;
+            }
+        }
     }
 
     // Projectiles
@@ -1325,9 +1392,9 @@ void Engine::renderViewmodel() {
             switch (def.weaponSubtype) {
                 case WeaponSubtype::DAGGER:
                 case WeaponSubtype::THROWING_KNIFE:
-                    // Stab: thrust forward then retract
-                    attackZ = -0.25f * sinf(t * 3.14159f);
-                    attackPitch = -0.15f * t; // slight downward angle during stab
+                    // Stab: strong forward thrust then retract
+                    attackZ = -0.45f * sinf(t * 3.14159f);
+                    attackPitch = -0.3f * sinf(t * 3.14159f); // punch forward
                     break;
                 case WeaponSubtype::AXE:
                     // Heavy overhead chop: big downward arc
@@ -1350,8 +1417,15 @@ void Engine::renderViewmodel() {
     switch (def.weaponType) {
         case WeaponType::MELEE:
             offset = {0.35f + bobX, -0.35f + bobY, -0.45f + attackZ};
-            holdYaw = 0.4f;
-            holdPitch = -0.2f;
+            if (def.weaponSubtype == WeaponSubtype::DAGGER ||
+                def.weaponSubtype == WeaponSubtype::THROWING_KNIFE) {
+                // Dagger: held forward for stabbing, blade pointing at target
+                holdYaw = 0.1f;
+                holdPitch = -0.5f; // angled forward like an icepick grip
+            } else {
+                holdYaw = 0.4f;
+                holdPitch = -0.2f;
+            }
             break;
         case WeaponType::HITSCAN:
             offset = {0.40f + bobX, -0.30f + bobY, -0.50f};
@@ -1563,12 +1637,17 @@ void Engine::render(f32 alpha) {
         const Material* entMat = MaterialSystem::get(e.materialId);
         const Texture& entTex = (e.materialId > 0) ? entMat->texture : defaultTex;
 
-        // Resolve tint once so it's available for both body and limb rendering
-        Vec4 tint = (e.materialId > 0) ? entMat->tint : (
-            (e.flags & ENT_FLYING)
-                ? Vec4{0.4f, 0.5f, 1.0f, 1.0f}
-                : Vec4{0.8f, 0.5f, 0.3f, 1.0f}
-        );
+        // Resolve tint — friendly NPCs get a distinct blue-green tint
+        Vec4 tint;
+        if (e.flags & ENT_FRIENDLY) {
+            tint = {0.4f, 0.8f, 0.6f, 1.0f}; // ally blue-green
+        } else if (e.materialId > 0) {
+            tint = entMat->tint;
+        } else if (e.flags & ENT_FLYING) {
+            tint = {0.4f, 0.5f, 1.0f, 1.0f};
+        } else {
+            tint = {0.8f, 0.5f, 0.3f, 1.0f};
+        }
         if (e.flashTimer > 0.0f) {
             f32 flash = e.flashTimer / 0.12f;
             Vec4 flashColor = {1.0f, 0.3f * flash, 0.3f * flash, 1.0f};
@@ -1629,36 +1708,51 @@ void Engine::render(f32 alpha) {
                                          : tint);
                 }
 
-                // Skeleton weapon: rendered at right-hand position, rotated with arm swing
+                // Skeleton weapon: attached to right arm, hilt in hand, swings with arm
                 if (e.enemyType == EnemyType::SKELETON && e.weaponMeshId > 0 && e.weaponMeshId < m_meshDefCount) {
-                    f32 armAngle = LimbSystem::computeAngle(e, 2, EnemyType::SKELETON); // right upper arm
+                    f32 armAngle = LimbSystem::computeAngle(e, 2, EnemyType::SKELETON);
+                    // Mirror the angle (right side is mirrored in LimbConfig)
+                    armAngle = -armAngle;
 
-                    Vec3 weaponPivot = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
-                                    + Vec3{0, animBobY, 0}
-                                    + Vec3{-0.35f, 0.30f, 0.0f}; // right hand position
+                    // Entity base (feet position)
+                    Vec3 entBase = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                                 + Vec3{0, animBobY, 0};
 
                     f32 limbScale = 1.0f;
                     if (meshId > 0 && meshId < m_meshDefCount) {
                         const AABB& meshBounds = m_meshDefs[meshId].bounds;
-                        f32 meshH = meshBounds.max.y - meshBounds.min.y;
+                        f32 mH = meshBounds.max.y - meshBounds.min.y;
                         f32 targetH = e.halfExtents.y * 2.0f * scaleY;
-                        limbScale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
+                        limbScale = (mH > 0.001f) ? (targetH / mH) : 1.0f;
                     }
 
-                    // Scale weapon proportionally to limb size
+                    // Right arm pivot (shoulder), scaled to entity
+                    Vec3 shoulder = {-0.35f * limbScale, 0.70f * limbScale, 0.0f};
+                    // Arm length (upper + lower arm combined)
+                    f32 armLen = 0.52f * limbScale;
+                    // Hand position = shoulder + arm rotated by armAngle around X
+                    // Arm hangs down by default, swings with angle
+                    f32 handY = shoulder.y - armLen * cosf(armAngle);
+                    f32 handZ = -armLen * sinf(armAngle);
+
+                    // Scale weapon to fit in hand
                     const AABB& wb = m_meshDefs[e.weaponMeshId].bounds;
                     f32 wH = wb.max.y - wb.min.y;
-                    f32 wScale = (wH > 0.001f) ? (0.5f * limbScale / wH) : 0.3f;
+                    f32 wScale = (wH > 0.001f) ? (0.45f * limbScale / wH) : 0.3f;
 
-                    Mat4 weaponModel = Mat4::translate(weaponPivot)
+                    // Weapon position: entity base + rotated hand offset
+                    // The weapon's hilt (bottom) should be at the hand
+                    Vec3 weaponPos = entBase + Vec3{shoulder.x, handY, handZ};
+
+                    Mat4 weaponModel = Mat4::translate(weaponPos)
                                      * Mat4::rotateY(e.yaw)
-                                     * Mat4::rotateX(-armAngle)
-                                     * Mat4::scale({wScale, wScale, wScale});
+                                     * Mat4::rotateX(armAngle) // weapon follows arm swing
+                                     * Mat4::scale({wScale, wScale, wScale})
+                                     * Mat4::translate({0, wH * 0.5f, 0}); // offset so hilt is at hand
 
-                    AABB wBounds = {weaponPivot - Vec3{0.5f,0.5f,0.5f},
-                                    weaponPivot + Vec3{0.5f,0.5f,0.5f}};
+                    AABB wBounds = {weaponPos - Vec3{0.5f,0.5f,0.5f},
+                                    weaponPos + Vec3{0.5f,0.5f,0.5f}};
 
-                    // Steel tint for skeleton weapons
                     Renderer::submit(m_basicShader, entTex, m_meshDefs[e.weaponMeshId].mesh,
                                      weaponModel, wBounds,
                                      Vec4{0.7f, 0.7f, 0.8f, 1.0f});
@@ -1843,6 +1937,48 @@ void Engine::render(f32 alpha) {
     }
 
     DebugDraw::flush(m_camera.viewProjection);
+
+    // --- Speech bubbles above entities ---
+    // Uses the render entity pool (client uses interpolated snapshot, SP uses live pool)
+    {
+        const EntityPool& speechPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
+        for (u32 a = 0; a < speechPool.activeCount; a++) {
+            u32 idx = speechPool.activeList[a];
+            const Entity& e = speechPool.entities[idx];
+            if (!e.speechText || e.speechTimer <= 0.0f) continue;
+
+            // Project a point above the entity's head into clip space
+            Vec3 headPos = e.position + Vec3{0, e.halfExtents.y * 2.0f + 0.3f, 0};
+
+            // Manual column-major Mat4 * Vec4 (no operator overload assumed)
+            const f32* vp = m_camera.viewProjection.m;
+            f32 cx = vp[0]*headPos.x + vp[4]*headPos.y + vp[8]*headPos.z  + vp[12];
+            f32 cy = vp[1]*headPos.x + vp[5]*headPos.y + vp[9]*headPos.z  + vp[13];
+            f32 cw = vp[3]*headPos.x + vp[7]*headPos.y + vp[11]*headPos.z + vp[15];
+
+            if (cw <= 0.01f) continue; // behind the camera
+
+            // NDC to pixel screen coords (y is flipped: NDC +1 = screen top)
+            f32 ndcX = cx / cw;
+            f32 ndcY = cy / cw;
+            f32 screenX = (ndcX + 1.0f) * 0.5f * static_cast<f32>(sw);
+            f32 screenY = (1.0f - ndcY) * 0.5f * static_cast<f32>(sh);
+
+            // Cull bubbles that are well off-screen
+            if (screenX < -100.0f || screenX > static_cast<f32>(sw) + 100.0f) continue;
+            if (screenY < -50.0f  || screenY > static_cast<f32>(sh) + 50.0f)  continue;
+
+            // Fade alpha in the last second of the timer
+            f32 alpha = (e.speechTimer < 1.0f) ? e.speechTimer : 1.0f;
+
+            // Green for allies, red for hostile entities
+            Vec3 textColor = (e.flags & ENT_FRIENDLY)
+                ? Vec3{0.4f, 1.0f, 0.5f}   // ally green
+                : Vec3{1.0f, 0.4f, 0.4f};  // enemy red
+
+            HUD::drawSpeechBubble(sw, sh, screenX, screenY, e.speechText, textColor, alpha);
+        }
+    }
 
     // First-person viewmodel (hand + weapon) — drawn after world, before HUD
     renderViewmodel();

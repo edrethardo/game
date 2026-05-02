@@ -617,6 +617,43 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     flushHUD(sw, sh);
 }
 
+void HUD::drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,
+                            const char* text, Vec3 textColor, f32 alpha) {
+    if (!text || alpha <= 0.0f) return;
+
+    f32 textW = FontSystem::textWidth(text, 1);
+    f32 textH = FontSystem::textHeight(1);
+    f32 padX = 6.0f, padY = 4.0f;
+    f32 bgX0 = x - textW * 0.5f - padX;
+    f32 bgY0 = y - padY;
+    f32 bgX1 = x + textW * 0.5f + padX;
+    f32 bgY1 = y + textH + padY;
+
+    // Semi-transparent dark background drawn as filled horizontal lines
+    Vec3 bgColor = {0.06f * alpha, 0.06f * alpha, 0.1f * alpha};
+    for (f32 fy = bgY0; fy < bgY1; fy += 1.0f) {
+        pushLine(bgX0, fy, bgX1, fy, bgColor);
+    }
+
+    // Border in a dimmed version of the text color
+    Vec3 borderColor = {textColor.x * 0.5f * alpha,
+                        textColor.y * 0.5f * alpha,
+                        textColor.z * 0.5f * alpha};
+    pushQuad(bgX0, bgY0, bgX1, bgY1, borderColor);
+
+    // Small triangle pointer below bubble pointing toward the entity head
+    f32 triX = x;
+    f32 triY = bgY0 - 4.0f;
+    pushLine(triX - 3.0f, bgY0, triX,        triY, borderColor);
+    pushLine(triX,        triY, triX + 3.0f, bgY0, borderColor);
+
+    flushHUD(sw, sh);
+
+    // Text centered inside the bubble
+    Vec3 tc = {textColor.x * alpha, textColor.y * alpha, textColor.z * alpha};
+    FontSystem::drawText(sw, sh, x - textW * 0.5f, y, text, tc, 1);
+}
+
 // Helper: get string name for affix type
 static const char* affixTypeName(AffixType type) {
     switch (type) {

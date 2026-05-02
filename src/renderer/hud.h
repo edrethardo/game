@@ -63,4 +63,9 @@ namespace HUD {
                       const PlayerInventory& inv,
                       const ItemDef* itemDefs,
                       f32 cooldownPct);
+
+    // Speech bubble — dark background with text, rendered at screen position (x,y).
+    // textColor is pre-chosen (green for allies, red for enemies); alpha for fade-out.
+    void drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,
+                          const char* text, Vec3 textColor, f32 alpha);
 }

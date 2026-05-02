@@ -7,9 +7,10 @@
 static constexpr u32 MAX_ENTITIES = 128;
 
 enum EntityFlags : u8 {
-    ENT_ACTIVE  = 1 << 0,
-    ENT_FLYING  = 1 << 1,
-    ENT_DEAD    = 1 << 2,
+    ENT_ACTIVE   = 1 << 0,
+    ENT_FLYING   = 1 << 1,
+    ENT_DEAD     = 1 << 2,
+    ENT_FRIENDLY = 1 << 3,  // allied NPC, not targeted by player weapons
 };
 
 enum struct AIState : u8 {
@@ -63,6 +64,13 @@ struct Entity {
     u8  materialId = 0;  // index into MaterialSystem
     EnemyType enemyType = EnemyType::GENERIC;
     u8 weaponMeshId = 0;  // skeleton weapon mesh index (0 = none)
+
+    // NPC speech bubble
+    const char* speechText = nullptr;  // current speech (nullptr = no bubble)
+    f32 speechTimer = 0.0f;            // countdown, bubble fades and clears at 0
+
+    // NPC combat targeting (index into entity pool, 0xFFFF = no target)
+    u16 targetEntityIdx = 0xFFFF;
 
     // Animation
     f32  animTimer    = 0.0f;  // continuous timer for procedural animation
