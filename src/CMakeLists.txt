@@ -26,13 +26,17 @@ add_executable(DungeonEngine
     game/combat.cpp
     game/projectile.cpp
     game/enemy_ai.cpp
+    net/net.cpp
+    net/snapshot.cpp
+    net/server.cpp
+    net/client.cpp
 )
 
 target_include_directories(DungeonEngine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external
 )
-target_link_libraries(DungeonEngine PRIVATE SDL2-static glad)
+target_link_libraries(DungeonEngine PRIVATE SDL2-static glad enet)
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(DungeonEngine PRIVATE dl)

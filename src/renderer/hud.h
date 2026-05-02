@@ -19,4 +19,13 @@ namespace HUD {
 
     // Render weapon name text indicator (just a colored bar placeholder).
     void drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot);
+
+    // Menu elements
+    void drawMenuOption(u32 screenWidth, u32 screenHeight,
+                        f32 y, f32 width, f32 height,
+                        Vec3 color, bool selected);
+
+    // Network stats overlay
+    void drawNetStats(u32 screenWidth, u32 screenHeight,
+                      u32 playerCount, u32 ping, const char* role);
 }

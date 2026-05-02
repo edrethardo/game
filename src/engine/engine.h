@@ -12,8 +12,18 @@
 #include "game/entity.h"
 #include "game/weapon.h"
 #include "game/projectile.h"
+#include "net/net.h"
+#include "net/net_player.h"
 
 static constexpr u32 MAX_LEVEL_SECTIONS = 64;
+
+enum struct GameState : u8 {
+    MENU,
+    LOBBY_HOST,
+    LOBBY_JOIN,
+    CONNECTING,
+    IN_GAME,
+};
 
 class Engine {
 public:
@@ -31,6 +41,24 @@ private:
     u32  m_updateCount = 0;
     u32  m_frameCount  = 0;
 
+    // Game state
+    GameState m_gameState = GameState::MENU;
+    u8        m_menuSelection = 0;
+    char      m_connectAddress[64] = "127.0.0.1";
+
+    // Networking
+    NetRole    m_netRole = NetRole::NONE;
+    u8         m_localPlayerIndex = 0;
+    u32        m_serverTick = 0;
+
+    // Players (networked)
+    NetPlayer  m_players[MAX_PLAYERS];
+    WeaponDef  m_weaponDefs[MAX_WEAPON_DEFS];
+    u32        m_weaponDefCount = 0;
+
+    // Legacy single-player compat
+    Player     m_localPlayer;  // used for singleplayer mode camera/movement
+
     // Rendering
     Camera  m_camera;
     Shader  m_basicShader;
@@ -42,24 +70,56 @@ private:
     LevelGrid    m_grid;
     LevelSection m_sections[MAX_LEVEL_SECTIONS];
     u32          m_sectionCount = 0;
+    u32          m_levelSeed    = 42;
 
-    // Player + combat
-    Player         m_player;
-    WeaponDef      m_weaponDefs[MAX_WEAPON_DEFS];
-    u32            m_weaponDefCount = 0;
-    WeaponState    m_weaponState;
-
-    // Entities + projectiles
+    // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
     ProjectilePool m_projectiles;
+
+    // Render copies for client interpolation
+    EntityPool     m_renderEntities;
+    ProjectilePool m_renderProjectiles;
+    Vec3           m_renderPlayerPositions[MAX_PLAYERS];
+    f32            m_renderPlayerYaws[MAX_PLAYERS];
+    f32            m_renderPlayerPitches[MAX_PLAYERS];
+    bool           m_renderPlayerActive[MAX_PLAYERS];
+    f32            m_renderPlayerHealth[MAX_PLAYERS];
+    f32            m_renderPlayerMaxHealth[MAX_PLAYERS];
 
     // Combat feedback
     CombatHit   m_lastCombatHit;
     f32         m_hitMarkerTimer = 0.0f;
 
+    // Core update paths
     void update(f32 dt);
+    void serverUpdate(f32 dt);
+    void clientUpdate(f32 dt);
+    void singleplayerUpdate(f32 dt);
+
+    // Shared logic
+    void handleWeaponFireForPlayer(NetPlayer& np, f32 dt);
+    void updateTargetLockForPlayer(NetPlayer& np, f32 dt);
+    void handleWeaponFire(f32 dt); // singleplayer legacy
+    void updateTargetLock(f32 dt); // singleplayer legacy
+
     void render(f32 alpha);
-    void handleWeaponFire(f32 dt);
-    void updateTargetLock(f32 dt);
+    void renderMenu();
+    void renderLobby();
     void logStats();
+
+    // Menu/lobby
+    void updateMenu(f32 dt);
+    void updateLobby(f32 dt);
+    void startGame();
+
+    // Net player helpers
+    void syncLocalPlayerToNetPlayer();
+    void syncNetPlayerToLocalPlayer();
+
+    // Net callbacks (static, forwarded to engine instance)
+    static void onSnapshot(const u8* data, u32 size);
+    static void onInput(u8 playerSlot, const u8* data, u32 size);
+    static void onEvent(const u8* data, u32 size);
+    static void onPlayerJoin(u8 playerSlot);
+    static void onPlayerLeft(u8 playerSlot);
 };

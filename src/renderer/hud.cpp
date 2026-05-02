@@ -166,3 +166,55 @@ void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) 
 
     flushHUD(screenWidth, screenHeight);
 }
+
+void HUD::drawMenuOption(u32 screenWidth, u32 screenHeight,
+                          f32 y, f32 width, f32 height,
+                          Vec3 color, bool selected)
+{
+    f32 cx = screenWidth * 0.5f;
+    f32 x0 = cx - width * 0.5f;
+    f32 x1 = cx + width * 0.5f;
+
+    // Outer box
+    pushQuad(x0, y, x1, y + height, color);
+
+    if (selected) {
+        // Fill with horizontal lines to show selection
+        for (f32 fy = y + 2; fy < y + height - 2; fy += 2.0f) {
+            pushLine(x0 + 2, fy, x1 - 2, fy, color);
+        }
+        // Selection arrows
+        pushLine(x0 - 15, y + height * 0.5f, x0 - 5, y + height * 0.3f, color);
+        pushLine(x0 - 15, y + height * 0.5f, x0 - 5, y + height * 0.7f, color);
+        pushLine(x1 + 15, y + height * 0.5f, x1 + 5, y + height * 0.3f, color);
+        pushLine(x1 + 15, y + height * 0.5f, x1 + 5, y + height * 0.7f, color);
+    }
+
+    flushHUD(screenWidth, screenHeight);
+}
+
+void HUD::drawNetStats(u32 screenWidth, u32 screenHeight,
+                        u32 playerCount, u32 ping, const char* role)
+{
+    (void)role;
+    // Top-right corner: small bars indicating player count and ping
+    f32 x0 = static_cast<f32>(screenWidth) - 150.0f;
+    f32 y0 = static_cast<f32>(screenHeight) - 40.0f;
+
+    // Player count indicator (bars for each player)
+    for (u32 i = 0; i < playerCount && i < 4; i++) {
+        f32 bx = x0 + i * 15.0f;
+        Vec3 c = {0.2f, 0.8f, 0.2f};
+        pushQuad(bx, y0, bx + 10, y0 + 20, c);
+    }
+
+    // Ping indicator (bar height proportional to ping)
+    f32 pingH = (ping < 200) ? (ping / 200.0f) * 20.0f : 20.0f;
+    Vec3 pingColor = (ping < 50) ? Vec3{0.2f, 0.8f, 0.2f}
+                   : (ping < 100) ? Vec3{0.8f, 0.8f, 0.2f}
+                   : Vec3{0.8f, 0.2f, 0.2f};
+    pushLine(x0 + 80, y0, x0 + 80, y0 + pingH, pingColor);
+    pushLine(x0 + 82, y0, x0 + 82, y0 + pingH, pingColor);
+
+    flushHUD(screenWidth, screenHeight);
+}

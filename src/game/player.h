@@ -5,6 +5,8 @@
 #include "renderer/camera.h"
 
 struct EntityHandle;
+struct NetInput;
+struct NetPlayer;
 
 struct Player {
     Vec3 position   = {0.0f, 0.0f, 0.0f}; // feet position (bottom of collider)
@@ -30,6 +32,17 @@ struct Player {
 };
 
 namespace PlayerController {
+    // Original: reads Input:: directly (used for singleplayer and local capture)
     void update(Player& player, f32 dt);
+
+    // Network-aware: applies a NetInput struct instead of reading Input::
+    void updateFromInput(Player& player, const NetInput& input, f32 dt);
+
+    // Apply to NetPlayer (same logic, different struct)
+    void updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt);
+
     void applyToCamera(const Player& player, Camera& cam);
+
+    // Capture current Input:: state into a NetInput
+    NetInput captureLocalInput(u32 tick, u8 weaponId);
 }
