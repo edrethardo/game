@@ -18,6 +18,7 @@ enum struct AIState : u8 {
     CHASE,
     ATTACK,
     FLYBY,   // bat swoops past player to attack from behind
+    DORMANT, // mimic: looks like a chest until player approaches
     DEAD,
 };
 
@@ -27,6 +28,7 @@ enum struct EnemyType : u8 {
     SKELETON,     // 2 legs, 2 arms, weapon carrying
     BAT,          // 2 wings, 2 claws
     SPIDER,       // 8 legs, 2 mandibles
+    MIMIC,        // disguised as chest, attacks when approached
     COUNT
 };
 

@@ -286,11 +286,18 @@ def gen_humanoid(height=1.8):
     fill_box(-2, 12, -2, 5, 4, 4)
     # Jaw — 3x1x3, slightly narrower
     fill_box(-1, 11, -2, 3, 1, 3)
-    # Hollow out eye sockets (remove 2 voxels from front face)
+    # Hollow out eye sockets — deep tunnels through the skull (2 voxels deep)
     filled.discard((-1, 14, -2))
+    filled.discard((-1, 14, -1))
     filled.discard((1, 14, -2))
-    # Hollow out nose
+    filled.discard((1, 14, -1))
+    # Hollow out nose — goes through 2 layers
     filled.discard((0, 13, -2))
+    filled.discard((0, 13, -1))
+    # Mouth opening — wide gap in the jaw
+    filled.discard((-1, 11, -2))
+    filled.discard((0, 11, -2))
+    filled.discard((1, 11, -2))
 
     # Neck — 1x1x1
     fill_box(0, 10, 0, 1, 1, 1)
@@ -415,8 +422,10 @@ def gen_spider(radius=0.6):
 
 
 def gen_bat(wingspan=1.0):
-    """Barony-style chunky voxel bat. Big ears, wing fingers, clawed feet.
+    """Barony-style chunky voxel bat. Body + head + ears only.
 
+    Wings and claws are handled by the LimbSystem at runtime, so they
+    are NOT included in this body mesh to avoid doubling up.
     Origin at center-bottom.
     """
     mb = MeshBuilder()
@@ -437,9 +446,13 @@ def gen_bat(wingspan=1.0):
     # Snout — 1 voxel protruding from front
     filled.add((0, 6, -2))
     filled.add((0, 7, -2))
-    # Hollow out eyes
+    # Hollow out eyes (deep — remove front AND second layer for see-through)
     filled.discard((-1, 8, -1))
     filled.discard((1, 8, -1))
+    filled.discard((-1, 8, 0))
+    filled.discard((1, 8, 0))
+    # Mouth opening
+    filled.discard((0, 6, -1))
 
     # --- Big pointy ears ---
     filled.add((-1, 9, 0))
@@ -449,47 +462,12 @@ def gen_bat(wingspan=1.0):
     filled.add((1, 10, 0))
     filled.add((1, 11, 0))
 
-    # --- Clawed feet hanging down ---
-    filled.add((-1, 1, 0))
-    filled.add((1, 1, 0))
-    filled.add((-1, 0, 0))  # claws
-    filled.add((1, 0, 0))
-    filled.add((-1, 0, -1))  # front claws
-    filled.add((1, 0, -1))
+    # --- Small shoulder stubs where wings attach (visual anchor) ---
+    filled.add((-2, 4, 0))
+    filled.add((2, 4, 0))
 
-    # --- Wings with finger bones ---
-    # Wing membrane: 2 voxels tall, extends wide
-    # Left wing
-    # Upper edge (finger bone) — single row at y=5
-    for x in range(-8, -1):
-        filled.add((x, 5, 0))
-    # Membrane — fills between finger bone and body
-    for x in range(-7, -1):
-        filled.add((x, 4, 0))
-    for x in range(-6, -1):
-        filled.add((x, 3, 0))
-    for x in range(-4, -1):
-        filled.add((x, 2, 0))
-    # Wing tip — finger points down
-    filled.add((-8, 4, 0))
-    filled.add((-8, 3, 0))
-    # Second finger
-    filled.add((-6, 2, 0))
-    filled.add((-6, 1, 0))
-
-    # Right wing (mirror)
-    for x in range(2, 9):
-        filled.add((x, 5, 0))
-    for x in range(2, 8):
-        filled.add((x, 4, 0))
-    for x in range(2, 7):
-        filled.add((x, 3, 0))
-    for x in range(2, 5):
-        filled.add((x, 2, 0))
-    filled.add((8, 4, 0))
-    filled.add((8, 3, 0))
-    filled.add((6, 2, 0))
-    filled.add((6, 1, 0))
+    # NOTE: Wings and claws are NOT generated here — they are rendered
+    # as separate animated limbs by LimbSystem at runtime.
 
     ox = -0.5 * vs
     oz = -0.5 * vs
@@ -530,6 +508,67 @@ def gen_chest(width=0.6):
     return mb
 
 
+def gen_human(height=1.8):
+    """Barony-style chunky human NPC. Origin at feet (Y=0).
+
+    Broader build than skeleton, solid face with eyes/mouth indentations,
+    thicker limbs. Meant for friendly NPC allies wearing armor.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0  # voxel size — 16 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Head (round, solid) ---
+    fill_box(-2, 13, -2, 5, 3, 4)  # main head block
+    fill_box(-1, 12, -1, 3, 1, 3)  # chin
+    # Hollow out eyes (front face only)
+    filled.discard((-1, 14, -2))
+    filled.discard((1, 14, -2))
+    # Mouth indent
+    filled.discard((0, 12, -2))
+
+    # --- Neck ---
+    fill_box(0, 11, 0, 1, 1, 1)
+
+    # --- Torso (broad, solid — like a breastplate) ---
+    fill_box(-2, 6, -1, 5, 5, 3)  # main chest
+    fill_box(-3, 9, -1, 1, 2, 3)  # left shoulder pad
+    fill_box(3, 9, -1, 1, 2, 3)   # right shoulder pad
+
+    # Belt
+    fill_box(-2, 5, -1, 5, 1, 3)
+
+    # --- Arms (thick, 2 voxels) ---
+    fill_box(-4, 7, 0, 1, 3, 1)   # left upper arm
+    fill_box(4, 7, 0, 1, 3, 1)    # right upper arm
+    fill_box(-4, 4, 0, 1, 3, 1)   # left lower arm
+    fill_box(4, 4, 0, 1, 3, 1)    # right lower arm
+    # Hands
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box(4, 3, -1, 1, 1, 2)
+
+    # --- Legs (thick) ---
+    fill_box(-2, 2, -1, 2, 3, 2)  # left thigh
+    fill_box(1, 2, -1, 2, 3, 2)   # right thigh
+    fill_box(-2, 0, -1, 2, 2, 2)  # left shin
+    fill_box(1, 0, -1, 2, 2, 2)   # right shin
+    # Boots
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box(1, 0, -2, 2, 1, 3)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+
+    return mb
+
+
 # ---------------------------------------------------------------------------
 # Type registry
 # ---------------------------------------------------------------------------
@@ -539,6 +578,11 @@ MESH_TYPES = {
         "func": gen_humanoid,
         "desc": "Barony-style voxel humanoid. Params: --height",
         "default_file": "humanoid.obj",
+    },
+    "human": {
+        "func": gen_human,
+        "desc": "Barony-style voxel human NPC. Params: --height",
+        "default_file": "human.obj",
     },
     "spider": {
         "func": gen_spider,
@@ -618,7 +662,7 @@ def main():
     kwargs = {}
     mtype = args.type
 
-    if mtype == "humanoid":
+    if mtype == "humanoid" or mtype == "human":
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "spider":

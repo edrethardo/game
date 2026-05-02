@@ -5,6 +5,12 @@
 #include "world/raycast.h"
 #include "world/collision.h"
 
+static ProjectileSystem::SplashCallback s_splashCallback = nullptr;
+
+void ProjectileSystem::setSplashCallback(SplashCallback cb) {
+    s_splashCallback = cb;
+}
+
 void ProjectileSystem::init(ProjectilePool& pool) {
     pool.activeCount = 0;
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
@@ -81,6 +87,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         Combat::applyDamage(entities, h, p.splashDamage);
                     }
                 }
+                if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);
             }
             destroyProjectile(pool, i);
             continue;
@@ -126,10 +133,10 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         f32 dist = length(delta);
                         if (dist < p.splashRadius) {
                             EntityHandle h2 = {static_cast<u16>(e2), ent2.generation};
-                            // Don't double-damage the direct hit target
                             Combat::applyDamage(entities, h2, p.splashDamage);
                         }
                     }
+                    if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);
                 }
                 destroyProjectile(pool, i);
                 continue;

@@ -290,12 +290,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         case AIState::IDLE: {
             e.velocity = {0, 0, 0};
 
-            // Bats hover erratically even when idle
+            // Bats hold position when idle — no position wobble
             if (isBat) {
-                // More erratic idle hovering
-                e.position.y += sinf(e.animTimer * 4.0f) * 0.4f * dt;
-                e.position.x += sinf(e.animTimer * 2.3f) * 0.2f * dt;
-                e.position.z += cosf(e.animTimer * 1.9f) * 0.15f * dt;
+                (void)0; // wings flap via LimbSystem, body stays still
             }
 
             // Staggered LOS check — bats check more frequently (every 4 frames)
@@ -314,21 +311,14 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         case AIState::CHASE: {
             if (isBat) {
-                // Aggressive flying chase — target position above the target
-                Vec3 aboveTarget = targetPos + Vec3{0, 1.8f, 0}; // hover well above target
-                Vec3 toAbove = aboveTarget - e.position;
-                f32 aboveDist = length(toAbove);
-                Vec3 dirAbove = (aboveDist > 0.01f) ? toAbove * (1.0f / aboveDist) : Vec3{0,1,0};
-
-                // Faster erratic weave
-                f32 wobbleX = sinf(e.animTimer * 7.0f) * e.moveSpeed * 0.5f;
-                f32 wobbleY = sinf(e.animTimer * 4.0f) * e.moveSpeed * 0.2f;
-
-                e.velocity = dirAbove * e.moveSpeed;
-                Vec3 perp = {-dirAbove.z, 0.0f, dirAbove.x};
-                e.velocity.x += perp.x * wobbleX;
-                e.velocity.z += perp.z * wobbleX;
-                e.velocity.y += wobbleY;
+                // Fly directly toward target at a slight height offset
+                Vec3 flyTarget = targetPos + Vec3{0, 0.5f, 0};
+                Vec3 toFly = flyTarget - e.position;
+                f32 flyDist = length(toFly);
+                if (flyDist > 0.01f) {
+                    Vec3 flyDir = toFly * (1.0f / flyDist);
+                    e.velocity = flyDir * e.moveSpeed;
+                }
             } else {
                 // Ground movement: XZ only toward target
                 Vec3 flatDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
@@ -350,20 +340,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Transition to attack if close enough to target
             if (targetDist <= e.attackRange) {
                 if (isBat) {
-                    // Aggressive bat attacks — more dive attacks, faster timers
-                    if ((std::rand() % 100) < 40) {
-                        // FLYBY: fast swoop past player to behind them
-                        Vec3 playerFwd = {-sinf(player.yaw), 0.0f, -cosf(player.yaw)};
-                        e.flybyTarget = playerEye + playerFwd * 5.0f + Vec3{0, 2.0f, 0};
-                        e.flybyTimer = 1.8f;
-                        e.aiState = AIState::FLYBY;
-                    } else {
-                        // Direct dive attack: steep dive from above
-                        e.flybyTarget = playerEye + Vec3{0, -0.5f, 0};
-                        e.flybyTimer = 1.0f;
-                        e.aiState = AIState::FLYBY;
-                    }
-                    e.attackAnimT = 0.4f; // longer swipe animation
+                    // Bats use ATTACK state directly — no complex FLYBY
+                    e.aiState = AIState::ATTACK;
+                    e.attackTimer = e.attackCooldown * 0.5f;
                 } else {
                     e.aiState     = AIState::ATTACK;
                     e.attackTimer = e.attackCooldown * 0.5f;
@@ -385,9 +364,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 f32 speed = e.moveSpeed * 2.2f; // aggressive fast dive
                 e.velocity = flyDir * speed;
 
-                // Wobble during swoop
-                e.velocity.x += sinf(e.flybyTimer * 10.0f) * e.moveSpeed * 0.2f;
-                e.velocity.y += sinf(e.flybyTimer * 7.0f) * 0.3f;
+                // Fly straight during swoop — no wobble
             }
 
             // Face movement direction
@@ -431,7 +408,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::ATTACK: {
-            // Ground enemies only — bats never enter this state
+            // Stand and attack (ground enemies stop; bats hover in place)
             e.velocity = {0, 0, 0};
 
             e.attackTimer -= dt;
@@ -456,6 +433,18 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Transition back to chase if out of range
             if (targetDist > e.attackRange * 1.3f) {
                 e.aiState = AIState::CHASE;
+            }
+        } break;
+
+        case AIState::DORMANT: {
+            // Mimic: sits still disguised as a chest until player gets close
+            e.velocity = {0, 0, 0};
+            if (dist <= 2.5f) {
+                // Player is trying to loot — spring to life!
+                e.aiState = AIState::CHASE;
+                e.attackAnimT = 0.4f; // surprise attack animation
+                e.speechText = "*CHOMP*";
+                e.speechTimer = 2.0f;
             }
         } break;
 

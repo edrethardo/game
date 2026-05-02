@@ -80,10 +80,10 @@ static const LimbConfig s_skeletonConfig = {
 static const LimbConfig s_batConfig = {
     4,
     {
-        {{0.30f, 0.15f, 0.0f},  {0.28f, 0.02f, 0.18f}, 0.0f, 2, false},  // left wing (Z-axis)
-        {{-0.30f, 0.15f, 0.0f}, {0.28f, 0.02f, 0.18f}, 0.0f, 2, true},   // right wing
-        {{0.08f, -0.20f, 0.0f}, {0.03f, 0.08f, 0.03f}, 0.0f, 0, false},  // left claw
-        {{-0.08f, -0.20f, 0.0f},{0.03f, 0.08f, 0.03f}, 0.0f, 0, true},   // right claw
+        {{0.15f, 0.18f, 0.0f},  {0.45f, 0.03f, 0.28f}, 0.0f, 2, false},  // left wing — big, prominent
+        {{-0.15f, 0.18f, 0.0f},{0.45f, 0.03f, 0.28f}, 0.0f, 2, true},   // right wing
+        {{0.08f, -0.15f, 0.0f}, {0.03f, 0.10f, 0.03f}, 0.0f, 0, false},  // left claw
+        {{-0.08f, -0.15f, 0.0f},{0.03f, 0.10f, 0.03f}, 0.0f, 0, true},   // right claw
     }
 };
 
@@ -135,7 +135,7 @@ void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount) {
     s_legMeshId       = registerMesh("limb_leg",        {0.05f, 0.20f, 0.05f});
     s_spiderLegMeshId = registerMesh("limb_spider_leg", {0.03f, 0.22f, 0.03f});
     s_mandibleMeshId  = registerMesh("limb_mandible",   {0.04f, 0.05f, 0.02f});
-    s_wingMeshId      = registerMesh("limb_wing",       {0.28f, 0.02f, 0.18f});
+    s_wingMeshId      = registerMesh("limb_wing",       {0.45f, 0.03f, 0.28f});
     s_clawMeshId      = registerMesh("limb_claw",       {0.03f, 0.08f, 0.03f});
 
     LOG_INFO("LimbSystem: registered %u limb meshes (arm=%u leg=%u spider=%u mand=%u wing=%u claw=%u)",
@@ -212,20 +212,23 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
         }
 
         case EnemyType::BAT: {
-            f32 flapSpeed = isMoving ? 16.0f : 8.0f;
+            // Steady, calm flapping
+            f32 flapSpeed = isMoving ? 8.0f : 4.0f;
 
             if (limbIdx < 2) {
-                // Wings: Z-axis rotation for up/down flap
-                f32 angle = sinf(e.animTimer * flapSpeed) * 0.7f;
+                // Wings: gentle sinusoidal flap
+                f32 angle = sinf(e.animTimer * flapSpeed) * 0.5f;
+
                 if (e.attackAnimT > 0.0f) {
-                    // Swoop dive: wings fold then snap wide
+                    // Attack: wings sweep wide
                     f32 t = e.attackAnimT / 0.4f;
-                    angle = -0.3f + sinf(t * 3.14159f) * 1.0f;
+                    angle = -0.4f + sinf(t * 3.14159f) * 1.2f;
                 }
                 return angle;
             } else {
-                // Claws: idle pendulum sway, attack swipe downward
-                f32 angle = sinf(e.animTimer * 3.0f) * 0.1f;
+                // Claws: gentle dangle, reach forward when chasing
+                f32 angle = sinf(e.animTimer * 2.0f) * 0.1f;
+                if (isMoving) angle -= 0.2f;
                 if (e.attackAnimT > 0.0f) {
                     f32 t = e.attackAnimT / 0.4f;
                     angle = -0.8f * sinf(t * 3.14159f);

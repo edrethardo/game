@@ -10,6 +10,7 @@ static constexpr u8 PROJ_ORB       = 1 << 0;  // Frozen Orb skill projectile
 static constexpr u8 PROJ_ORB_SHARD = 1 << 1;  // Frozen Orb sub-shard
 static constexpr u8 PROJ_GRAVITY   = 1 << 2;  // Affected by gravity (arcing trajectory)
 static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
+static constexpr u8 PROJ_SPARK     = 1 << 4;  // Lightning bolt visual (jagged line)
 
 static constexpr u32 MAX_PROJECTILES = 128;
 
@@ -39,6 +40,10 @@ struct ProjectilePool {
 struct Player;
 
 namespace ProjectileSystem {
+    // Callback when a splash projectile explodes (for visual effects)
+    using SplashCallback = void(*)(Vec3 position, f32 radius);
+    void setSplashCallback(SplashCallback cb);
+
     void init(ProjectilePool& pool);
 
     void spawn(ProjectilePool& pool,

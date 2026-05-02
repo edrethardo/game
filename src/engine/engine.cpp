@@ -161,7 +161,7 @@ void Engine::init() {
     HUD::init();
     FontSystem::init();
     ItemIconSystem::init();
-    LimbSystem::init(m_meshDefs, m_meshDefCount);
+    // NOTE: LimbSystem::init is called later, after OBJ meshes are loaded
 
     // Shaders
     m_basicShader = ShaderSystem::load("assets/shaders/basic.vert",
@@ -252,6 +252,7 @@ void Engine::init() {
             {"boots",          "assets/meshes/boots.obj"},
             {"ring",           "assets/meshes/ring.obj"},
             {"shield",         "assets/meshes/shield.obj"},
+            {"human",          "assets/meshes/human.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -266,6 +267,9 @@ void Engine::init() {
             }
         }
     }
+
+    // Build limb meshes AFTER OBJ meshes are loaded (needs valid meshDefCount)
+    LimbSystem::init(m_meshDefs, m_meshDefCount);
 
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
@@ -313,6 +317,17 @@ void Engine::init() {
             }
         }
         (void)position;
+    });
+
+    // Splash effect callback — spawns fire VFX at impact point
+    ProjectileSystem::setSplashCallback([](Vec3 position, f32 radius) {
+        if (!s_engine) return;
+        for (u32 i = 0; i < Engine::MAX_FIRE_FX; i++) {
+            if (!s_engine->m_fireFX[i].active) {
+                s_engine->m_fireFX[i] = {position, radius, 1.0f, true};
+                break;
+            }
+        }
     });
 
     // Init networking
@@ -417,6 +432,50 @@ void Engine::startGame() {
         }
     }
 
+    // Spawn chests and mimics (1 per room, 20% chance mimic)
+    {
+        u8 chestMeshId = 0;
+        for (u32 m = 0; m < m_meshDefCount; m++) {
+            if (std::strcmp(m_meshDefs[m].name, "chest") == 0) {
+                chestMeshId = static_cast<u8>(m);
+                break;
+            }
+        }
+
+        for (u32 r = 1; r < dungeon.roomCount; r++) {
+            if ((std::rand() % 2) != 0) continue; // 50% of rooms get a chest
+            const DungeonRoom& room = dungeon.rooms[r];
+
+            // Center of room (use float division for accurate centering)
+            f32 cx = (room.x + room.w * 0.5f) * m_grid.cellSize;
+            f32 cz = (room.z + room.d * 0.5f) * m_grid.cellSize;
+            f32 cy = room.floorHeight;
+
+            bool isMimic = (std::rand() % 5) == 0; // 20% of chests are mimics
+
+            if (isMimic) {
+                // Mimic: enemy disguised as chest
+                EntityHandle h = EntitySystem::spawn(m_entities,
+                    Vec3{cx, cy + 0.25f, cz}, {0.3f, 0.25f, 0.3f}, false,
+                    60.0f, 4.0f, 3.0f, 2.0f, 0.6f, 20.0f);
+                Entity* ent = handleGet(m_entities, h);
+                if (ent) {
+                    ent->meshId = chestMeshId;
+                    ent->enemyType = EnemyType::MIMIC;
+                    ent->aiState = AIState::DORMANT;
+                }
+            } else {
+                // Real chest: spawn a world item with good loot at this position
+                ItemInstance item = ItemGen::rollItem(
+                    static_cast<u8>(2 + r / 3), // higher level deeper in dungeon
+                    m_itemDefs, m_itemDefCount, m_affixDefs, m_affixDefCount);
+                if (!isItemEmpty(item)) {
+                    WorldItemSystem::spawn(m_worldItems, item, Vec3{cx, cy + 0.3f, cz});
+                }
+            }
+        }
+    }
+
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
 
     // Spawn 2 friendly NPC allies in the spawn room, offset to either side of the player
@@ -437,19 +496,19 @@ void Engine::startGame() {
             Entity* npc = handleGet(m_entities, npcHandle);
             if (npc) {
                 npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
+                npc->enemyType = EnemyType::SKELETON; // uses skeleton limb rig (arms + legs)
                 npc->aiState   = AIState::IDLE;
                 npc->speechText  = npcGreetings[n];
                 npc->speechTimer = 4.0f; // greeting fades after 4 seconds
 
-                // Give the NPC a skeleton mesh and skin material
+                // Use the human mesh (broader, solid face) instead of skeleton
                 for (u32 m = 0; m < m_meshDefCount; m++) {
-                    if (std::strcmp(m_meshDefs[m].name, "skeleton") == 0) {
+                    if (std::strcmp(m_meshDefs[m].name, "human") == 0) {
                         npc->meshId = static_cast<u8>(m);
                         break;
                     }
                 }
-                npc->materialId = MaterialSystem::getIdByName("skeleton_skin");
+                npc->materialId = MaterialSystem::getIdByName("human_skin");
 
                 // Give NPC a weapon (alternating sword/axe)
                 static const char* npcWeapons[] = {"sword", "axe"};
@@ -858,6 +917,14 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Update world items
     WorldItemSystem::update(m_worldItems, dt);
 
+    // Decay fire AoE effects
+    for (u32 i = 0; i < MAX_FIRE_FX; i++) {
+        if (m_fireFX[i].active) {
+            m_fireFX[i].timer -= dt;
+            if (m_fireFX[i].timer <= 0.0f) m_fireFX[i].active = false;
+        }
+    }
+
     // Update skill state (energy regen, cooldowns)
     SkillSystem::update(m_skillStates[0], dt);
 
@@ -1235,10 +1302,35 @@ void Engine::handleWeaponFire(f32 dt) {
             m_lastCombatHit.type     = result.hitEntity ? CombatHit::ENTITY : CombatHit::WORLD;
         }
         break;
-    case WeaponType::PROJECTILE:
-        Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
+    case WeaponType::PROJECTILE: {
+        bool isMolotov = qbItem && !isItemEmpty(*qbItem) &&
+                         m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::MOLOTOV;
+        bool isBow = qbItem && !isItemEmpty(*qbItem) &&
+                     m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::BOW;
+
+        if (isMolotov) {
+            Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
+                                    9.8f, 3.0f, wpn.damage * 0.6f);
+        } else {
+            Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
+        }
+        // Bow weapons (wands/staves) shoot lightning spark projectiles
+        if (isBow) {
+            // Tag the most recently spawned projectile at eyePos
+            for (u32 pi = MAX_PROJECTILES; pi-- > 0;) {
+                Projectile& proj = m_projectiles.projectiles[pi];
+                if (proj.active && proj.fromPlayer && !(proj.projFlags & ~0u)) {
+                    // Check if this is the one we just spawned (at eye position)
+                    Vec3 d = proj.position - eyePos;
+                    if (lengthSq(d) < 0.1f) {
+                        proj.projFlags |= PROJ_SPARK;
+                        break;
+                    }
+                }
+            }
+        }
         result.didFire = true;
-        break;
+    } break;
     }
 
     // Amplified kick for viewmodel so the visual response is clearly visible
@@ -1354,14 +1446,18 @@ void Engine::renderViewmodel() {
     if (m_inventoryOpen) return;
     if (m_gameState != GameState::IN_GAME) return;
 
-    // Resolve equipped weapon mesh
+    // Resolve equipped weapon mesh — show fist if unarmed
     const ItemInstance& equipped = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-    if (isItemEmpty(equipped)) return;
+    bool hasWeapon = !isItemEmpty(equipped) &&
+                     m_itemDefs[equipped.defId].meshId > 0 &&
+                     m_itemDefs[equipped.defId].meshId < m_meshDefCount;
 
-    u8 weaponMeshId = m_itemDefs[equipped.defId].meshId;
-    if (weaponMeshId == 0 || weaponMeshId >= m_meshDefCount) return;
-
-    const ItemDef& def = m_itemDefs[equipped.defId];
+    u8 weaponMeshId = hasWeapon ? m_itemDefs[equipped.defId].meshId : 0;
+    // Use a dummy ItemDef for unarmed (melee type)
+    ItemDef unarmedDef = {};
+    unarmedDef.weaponType = WeaponType::MELEE;
+    unarmedDef.weaponSubtype = WeaponSubtype::NONE;
+    const ItemDef& def = hasWeapon ? m_itemDefs[equipped.defId] : unarmedDef;
 
     // Clear depth so viewmodel renders on top of everything
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -1489,7 +1585,15 @@ void Engine::renderViewmodel() {
     }
     glUniform1i(m_unlitShader.loc_texture0, 0);
 
-    MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
+    if (hasWeapon) {
+        MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
+    } else {
+        // Unarmed: draw fist (hand mesh) with skin tone
+        glUniform4f(m_unlitShader.loc_color, 0.85f, 0.70f, 0.55f, 1.0f);
+        const Material* fallback = MaterialSystem::get(0);
+        if (fallback) glBindTexture(GL_TEXTURE_2D, fallback->texture.handle);
+        MeshSystem::draw(m_handMesh);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1580,25 +1684,16 @@ void Engine::render(f32 alpha) {
 
         if (!(e.flags & ENT_DEAD)) {
             if (isBat) {
-                // Wing flap: dramatic X+Z scale pulsing
-                f32 flapSpeed = isMoving ? 16.0f : 8.0f;
-                f32 flapAmp = isMoving ? 0.35f : 0.25f;
-                animScaleX = 1.0f + sinf(e.animTimer * flapSpeed) * flapAmp;
-                // Z-axis wing tilt for depth
-                f32 animScaleZ = 1.0f + cosf(e.animTimer * flapSpeed) * flapAmp * 0.5f;
-                renderHalf.z *= animScaleZ;
-                // Hover bob — more pronounced
-                animBobY = sinf(e.animTimer * 5.0f) * 0.08f;
+                // No body bob — bat body stays steady, only wings move
                 // Lean into dive during flyby
                 if (e.aiState == AIState::FLYBY) {
-                    animLean = -0.5f; // steep nose-down dive
+                    animLean = -0.5f;
                 }
-                // Attack swipe: rapid wing fold + body roll
+                // Attack: body lunges forward
                 if (e.attackAnimT > 0.0f) {
-                    f32 t = e.attackAnimT / 0.4f; // 0→1
-                    animScaleX = 0.5f + 0.5f * (1.0f - t); // wings fold in then snap out
-                    animLean = -0.6f * t; // aggressive forward lunge
-                    animBobY += 0.12f * t; // hop upward during swipe
+                    f32 t = e.attackAnimT / 0.4f;
+                    animLean = -0.6f * t;
+                    animBobY += 0.12f * t;
                 }
             } else if (isMoving) {
                 // Ground enemies: walking bob
@@ -1641,6 +1736,13 @@ void Engine::render(f32 alpha) {
         Vec4 tint;
         if (e.flags & ENT_FRIENDLY) {
             tint = {0.4f, 0.8f, 0.6f, 1.0f}; // ally blue-green
+        } else if (e.enemyType == EnemyType::MIMIC) {
+            // Dormant mimics look like normal chests; active ones turn red
+            if (e.aiState == AIState::DORMANT) {
+                tint = {0.6f, 0.4f, 0.2f, 1.0f}; // chest brown
+            } else {
+                tint = {0.9f, 0.3f, 0.2f, 1.0f}; // angry red
+            }
         } else if (e.materialId > 0) {
             tint = entMat->tint;
         } else if (e.flags & ENT_FLYING) {
@@ -1936,6 +2038,32 @@ void Engine::render(f32 alpha) {
         }
     }
 
+    // --- Fire AoE effects (molotov splash) ---
+    for (u32 i = 0; i < MAX_FIRE_FX; i++) {
+        if (!m_fireFX[i].active) continue;
+        const FireFX& fx = m_fireFX[i];
+        f32 t = 1.0f - fx.timer; // 0→1 over lifetime
+        f32 alpha = fx.timer;    // fades out
+        f32 r = fx.radius * (0.3f + t * 0.7f); // expands outward
+
+        // Draw radiating lines from center (fire burst pattern)
+        static constexpr u32 FIRE_RAYS = 12;
+        for (u32 ray = 0; ray < FIRE_RAYS; ray++) {
+            f32 angle = static_cast<f32>(ray) * (6.28318f / FIRE_RAYS) + t * 2.0f;
+            f32 dx = cosf(angle) * r;
+            f32 dz = sinf(angle) * r;
+            // Flame color: orange core, red tips
+            Vec3 col = {1.0f * alpha, (0.4f + 0.3f * sinf(angle * 3.0f)) * alpha, 0.1f * alpha};
+            // Ground-level radiating lines
+            DebugDraw::line(fx.pos, fx.pos + Vec3{dx, 0.1f, dz}, col);
+            // Upward flame wisps
+            f32 h = 0.5f + sinf(angle * 2.0f + t * 8.0f) * 0.3f;
+            DebugDraw::line(fx.pos + Vec3{dx * 0.5f, 0, dz * 0.5f},
+                            fx.pos + Vec3{dx * 0.3f, h * alpha, dz * 0.3f},
+                            {1.0f * alpha, 0.6f * alpha, 0.0f});
+        }
+    }
+
     DebugDraw::flush(m_camera.viewProjection);
 
     // --- Speech bubbles above entities ---
@@ -2069,11 +2197,17 @@ void Engine::renderMenu() {
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
 
-    // Menu title indicator (top area)
-    Vec3 titleColor = {0.8f, 0.8f, 0.8f};
-    HUD::drawMenuOption(sw, sh, sh * 0.6f, 280, 20, titleColor, false);
+    // Title text
+    {
+        const char* title = "DUNGEON ENGINE";
+        f32 titleW = FontSystem::textWidth(title, 3);
+        f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;
+        f32 titleY = sh * 0.65f;
+        FontSystem::drawText(sw, sh, titleX, titleY, title, {0.9f, 0.85f, 0.7f}, 3);
+    }
 
-    // Draw 3 options as colored bars
+    // Menu options with text labels
+    static const char* labels[] = {"Single Player", "Host Game", "Join Game"};
     Vec3 colors[] = {
         {0.2f, 0.9f, 0.2f}, // singleplayer - green
         {0.2f, 0.5f, 1.0f}, // host - blue
@@ -2081,12 +2215,28 @@ void Engine::renderMenu() {
     };
 
     for (u32 i = 0; i < 3; i++) {
-        f32 y = sh * 0.35f + (2 - i) * 55.0f; // bottom-up (HUD Y=0 is bottom)
+        f32 y = sh * 0.35f + (2 - i) * 55.0f;
         Vec3 color = colors[i];
-        if (i != m_menuSelection) {
-            color = color * 0.4f; // dim unselected
+        bool selected = (i == m_menuSelection);
+        if (!selected) {
+            color = color * 0.4f;
         }
-        HUD::drawMenuOption(sw, sh, y, 250, 35, color, i == m_menuSelection);
+        HUD::drawMenuOption(sw, sh, y, 250, 35, color, selected);
+
+        // Text label centered on the bar
+        f32 textW = FontSystem::textWidth(labels[i], 2);
+        f32 textX = (static_cast<f32>(sw) - textW) * 0.5f;
+        f32 textY = y + 10.0f;
+        Vec3 textColor = selected ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.6f, 0.6f, 0.6f};
+        FontSystem::drawText(sw, sh, textX, textY, labels[i], textColor, 2);
+    }
+
+    // Controls hint at bottom
+    {
+        const char* hint = "Up/Down to select, Enter to confirm";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        f32 hintX = (static_cast<f32>(sw) - hintW) * 0.5f;
+        FontSystem::drawText(sw, sh, hintX, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 }
 

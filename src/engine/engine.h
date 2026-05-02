@@ -111,6 +111,11 @@ private:
     CombatHit   m_lastCombatHit;
     f32         m_hitMarkerTimer = 0.0f;
 
+    // AoE fire effect (cheap visual for molotov splash)
+    static constexpr u32 MAX_FIRE_FX = 8;
+    struct FireFX { Vec3 pos; f32 radius; f32 timer; bool active; };
+    FireFX m_fireFX[MAX_FIRE_FX] = {};
+
     // Switch constraint mode
     bool m_switchMode = false;
     static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;
