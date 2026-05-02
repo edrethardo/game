@@ -30,6 +30,9 @@ add_executable(DungeonEngine
     net/snapshot.cpp
     net/server.cpp
     net/client.cpp
+    renderer/material.cpp
+    renderer/obj_loader.cpp
+    world/level_loader.cpp
 )
 
 target_include_directories(DungeonEngine PRIVATE

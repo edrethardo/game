@@ -16,6 +16,7 @@ enum struct AIState : u8 {
     IDLE,
     CHASE,
     ATTACK,
+    FLYBY,   // bat swoops past player to attack from behind
     DEAD,
 };
 
@@ -45,6 +46,16 @@ struct Entity {
     // AI
     AIState aiState    = AIState::IDLE;
     u16     aiCheckIdx = 0;  // staggered LOS frame counter
+    Vec3    flybyTarget = {0,0,0};  // waypoint for FLYBY state
+    f32     flybyTimer  = 0.0f;     // time left in flyby maneuver
+
+    // Rendering
+    u8  meshId     = 0;  // index into Engine::m_meshDefs
+    u8  materialId = 0;  // index into MaterialSystem
+
+    // Animation
+    f32  animTimer    = 0.0f;  // continuous timer for procedural animation
+    f32  attackAnimT  = 0.0f;  // brief attack animation countdown
 
     // Feedback
     f32  flashTimer = 0.0f;

@@ -1,5 +1,6 @@
 #include "world/level_mesh.h"
 #include "renderer/renderer.h"
+#include "renderer/material.h"
 #include "core/log.h"
 #include "core/assert.h"
 
@@ -7,59 +8,68 @@
 #include <cstring>
 
 // -------------------------------------------------------------------------
-// Scratch buffer — allocated once, reused each buildAll call.
-// Worst case for one 16x16 section:
-//   Each cell can emit at most 5 quads (4 walls + floor or ceiling).
-//   Each quad = 4 vertices + 6 indices.
-//   16*16 = 256 cells * 5 quads * 4 verts = 5120 verts; * 6 idx = 7680 idx.
-//   Use 2x headroom: 12288 verts, 16384 indices.
+// Scratch buffer per material bucket
 // -------------------------------------------------------------------------
 static constexpr u32 SCRATCH_VERTS   = 12288;
 static constexpr u32 SCRATCH_INDICES = 16384;
 
-static Vertex* s_verts   = nullptr;
-static u32*    s_indices = nullptr;
-static bool    s_scratchInit = false;
-
-static void ensureScratch() {
-    if (s_scratchInit) return;
-    s_verts   = static_cast<Vertex*>(std::malloc(SCRATCH_VERTS   * sizeof(Vertex)));
-    s_indices = static_cast<u32*>   (std::malloc(SCRATCH_INDICES * sizeof(u32)));
-    ENGINE_ASSERT(s_verts && s_indices, "Level mesh scratch allocation failed");
-    s_scratchInit = true;
-}
-
-// -------------------------------------------------------------------------
-// Helpers to push quads into scratch buffers
-// -------------------------------------------------------------------------
-struct QuadContext {
-    Vertex* verts;
-    u32*    indices;
-    u32     vertCount;
-    u32     indexCount;
+struct MaterialBucket {
+    Vertex verts[SCRATCH_VERTS];
+    u32    indices[SCRATCH_INDICES];
+    u32    vertCount  = 0;
+    u32    indexCount = 0;
+    u8     materialId = 0;
+    bool   used       = false;
 };
 
-// Emit a single quad: four vertices (already filled) + 6 indices (two triangles).
-static void pushQuad(QuadContext& ctx,
+// We keep a small static pool of buckets
+static MaterialBucket s_buckets[MAX_SUBMESHES_PER_SECTION];
+
+static void resetBuckets() {
+    for (u32 i = 0; i < MAX_SUBMESHES_PER_SECTION; i++) {
+        s_buckets[i].vertCount  = 0;
+        s_buckets[i].indexCount = 0;
+        s_buckets[i].materialId = 0;
+        s_buckets[i].used       = false;
+    }
+}
+
+static MaterialBucket* getBucket(u8 matId) {
+    // Find existing bucket for this material
+    for (u32 i = 0; i < MAX_SUBMESHES_PER_SECTION; i++) {
+        if (s_buckets[i].used && s_buckets[i].materialId == matId)
+            return &s_buckets[i];
+    }
+    // Allocate new bucket
+    for (u32 i = 0; i < MAX_SUBMESHES_PER_SECTION; i++) {
+        if (!s_buckets[i].used) {
+            s_buckets[i].used = true;
+            s_buckets[i].materialId = matId;
+            return &s_buckets[i];
+        }
+    }
+    // All buckets full — use first bucket as fallback
+    return &s_buckets[0];
+}
+
+static void pushQuad(MaterialBucket& bkt,
                      Vertex v0, Vertex v1, Vertex v2, Vertex v3)
 {
-    ENGINE_ASSERT(ctx.vertCount  + 4 <= SCRATCH_VERTS,   "Vertex scratch overflow");
-    ENGINE_ASSERT(ctx.indexCount + 6 <= SCRATCH_INDICES, "Index scratch overflow");
+    if (bkt.vertCount + 4 > SCRATCH_VERTS || bkt.indexCount + 6 > SCRATCH_INDICES) return;
 
-    u32 base = ctx.vertCount;
-    ctx.verts[base+0] = v0;
-    ctx.verts[base+1] = v1;
-    ctx.verts[base+2] = v2;
-    ctx.verts[base+3] = v3;
-    ctx.vertCount += 4;
+    u32 base = bkt.vertCount;
+    bkt.verts[base+0] = v0;
+    bkt.verts[base+1] = v1;
+    bkt.verts[base+2] = v2;
+    bkt.verts[base+3] = v3;
+    bkt.vertCount += 4;
 
-    // CCW winding when viewed from outside
-    ctx.indices[ctx.indexCount++] = base+0;
-    ctx.indices[ctx.indexCount++] = base+1;
-    ctx.indices[ctx.indexCount++] = base+2;
-    ctx.indices[ctx.indexCount++] = base+0;
-    ctx.indices[ctx.indexCount++] = base+2;
-    ctx.indices[ctx.indexCount++] = base+3;
+    bkt.indices[bkt.indexCount++] = base+0;
+    bkt.indices[bkt.indexCount++] = base+1;
+    bkt.indices[bkt.indexCount++] = base+2;
+    bkt.indices[bkt.indexCount++] = base+0;
+    bkt.indices[bkt.indexCount++] = base+2;
+    bkt.indices[bkt.indexCount++] = base+3;
 }
 
 // -------------------------------------------------------------------------
@@ -70,13 +80,7 @@ static void buildSection(const LevelGrid& grid,
                          u32 endX,   u32 endZ,
                          LevelSection& out)
 {
-    ensureScratch();
-
-    QuadContext ctx;
-    ctx.verts      = s_verts;
-    ctx.indices    = s_indices;
-    ctx.vertCount  = 0;
-    ctx.indexCount = 0;
+    resetBuckets();
 
     f32 cs = grid.cellSize;
 
@@ -92,116 +96,82 @@ static void buildSection(const LevelGrid& grid,
 
     for (u32 z = startZ; z < endZ; z++) {
         for (u32 x = startX; x < endX; x++) {
-            f32 wx = x * cs;  // world X of cell origin (min corner)
-            f32 wz = z * cs;  // world Z of cell origin (min corner)
+            f32 wx = x * cs;
+            f32 wz = z * cs;
 
-            bool solid = LevelGridSystem::isSolid(grid, x, z);
+            const GridCell& cell = LevelGridSystem::getCell(grid, x, z);
+            bool solid = (cell.flags & CELL_SOLID) != 0;
 
             if (solid) {
                 // Emit wall quads facing empty neighbours
-                f32 floorH   = LevelGridSystem::getFloorHeight(grid,   x, z);
-                f32 ceilH    = LevelGridSystem::getCeilingHeight(grid,  x, z);
-                // For solid cells treat floor=0, ceiling=ceilH (wall height)
-                // We emit visible wall faces outward toward empty neighbours.
-
-                // North face (toward -Z): visible if cell at (x, z-1) is empty
-                // South face (toward +Z): visible if cell at (x, z+1) is empty
-                // West  face (toward -X): visible if cell at (x-1, z) is empty
-                // East  face (toward +X): visible if cell at (x+1, z) is empty
-                //
-                // Wall extends from floor to ceiling of the solid cell.
-                // If the neighbour is an open cell we use the higher of the two
-                // floor heights as the wall bottom, and the lower ceiling as top.
-
                 struct WallNeighbour { s32 dx, dz; Vec3 normal; };
                 static constexpr WallNeighbour kNeighbours[4] = {
-                    {  0, -1, { 0, 0, -1} }, // North
-                    {  0,  1, { 0, 0,  1} }, // South
-                    { -1,  0, {-1, 0,  0} }, // West
-                    {  1,  0, { 1, 0,  0} }, // East
+                    {  0, -1, { 0, 0, -1} },
+                    {  0,  1, { 0, 0,  1} },
+                    { -1,  0, {-1, 0,  0} },
+                    {  1,  0, { 1, 0,  0} },
                 };
 
                 for (auto& nb : kNeighbours) {
                     s32 nx = (s32)x + nb.dx;
                     s32 nz = (s32)z + nb.dz;
-                    // Skip if out of bounds (OOB treated as solid — no face needed)
                     if (!LevelGridSystem::isInBounds(grid, (u32)nx, (u32)nz)) continue;
                     if (LevelGridSystem::isSolid(grid, (u32)nx, (u32)nz)) continue;
 
-                    // Open neighbour: compute wall extent
-                    f32 nbFloor = LevelGridSystem::getFloorHeight(grid,   (u32)nx, (u32)nz);
-                    f32 nbCeil  = LevelGridSystem::getCeilingHeight(grid,  (u32)nx, (u32)nz);
+                    const GridCell& nbCell = LevelGridSystem::getCell(grid, (u32)nx, (u32)nz);
+                    f32 nbFloor = LevelGridSystem::getFloorHeight(grid, (u32)nx, (u32)nz);
+                    f32 nbCeil  = LevelGridSystem::getCeilingHeight(grid, (u32)nx, (u32)nz);
 
-                    f32 wallBot = nbFloor;  // bottom of visible wall
-                    f32 wallTop = nbCeil;   // top of visible wall
-                    if (wallTop <= wallBot) continue; // degenerate
+                    f32 wallBot = nbFloor;
+                    f32 wallTop = nbCeil;
+                    if (wallTop <= wallBot) continue;
 
-                    // Four corners of the wall quad (viewed from outside the solid cell)
+                    // Use the wall material from the neighbour's open cell
+                    u8 wallMat = nbCell.wallMaterialId;
+                    MaterialBucket* bkt = getBucket(wallMat);
+
                     Vec3 n = nb.normal;
-                    // Build two axes in the wall plane
-                    // For N/S walls: right axis = +X; for E/W walls: right axis = +Z
-                    Vec3 right = (nb.dx == 0)
-                        ? Vec3{cs, 0.0f, 0.0f}
-                        : Vec3{0.0f, 0.0f, cs};
-
-                    // Origin of the face (corner of the solid cell on the side facing nb)
-                    Vec3 faceOrigin;
-                    if (nb.dx ==  1) faceOrigin = {wx + cs, 0.0f, wz};        // East face
-                    else if (nb.dx == -1) faceOrigin = {wx,       0.0f, wz};  // West face (right = +Z from this side, need to flip to face outward)
-                    else if (nb.dz ==  1) faceOrigin = {wx,       0.0f, wz + cs}; // South face
-                    else                  faceOrigin = {wx,       0.0f, wz};       // North face
-
-                    // West and North faces need right axis reversed so winding faces outward
-                    if (nb.dx == -1) right = {0.0f, 0.0f, cs};  // already correct
-                    if (nb.dz == -1) right = {cs,   0.0f, 0.0f}; // already correct
-
-                    // Winding: CCW when seen from outside (away from solid cell)
-                    // For +X normal: right=+Z, from (face, bot, wz) going to (face, top, wz+cs)
-                    // Simplify: build 4 corner positions then choose winding per face direction.
-
                     Vec3 p0, p1, p2, p3;
-                    if (nb.dz == -1) { // North: normal -Z, face at wz
+                    if (nb.dz == -1) {
                         p0 = {wx + cs, wallBot, wz};
                         p1 = {wx,      wallBot, wz};
                         p2 = {wx,      wallTop, wz};
                         p3 = {wx + cs, wallTop, wz};
-                    } else if (nb.dz == 1) { // South: normal +Z, face at wz+cs
+                    } else if (nb.dz == 1) {
                         p0 = {wx,      wallBot, wz + cs};
                         p1 = {wx + cs, wallBot, wz + cs};
                         p2 = {wx + cs, wallTop, wz + cs};
                         p3 = {wx,      wallTop, wz + cs};
-                    } else if (nb.dx == -1) { // West: normal -X, face at wx
+                    } else if (nb.dx == -1) {
                         p0 = {wx, wallBot, wz};
                         p1 = {wx, wallBot, wz + cs};
                         p2 = {wx, wallTop, wz + cs};
                         p3 = {wx, wallTop, wz};
-                    } else { // East: normal +X, face at wx+cs
+                    } else {
                         p0 = {wx + cs, wallBot, wz + cs};
                         p1 = {wx + cs, wallBot, wz};
                         p2 = {wx + cs, wallTop, wz};
                         p3 = {wx + cs, wallTop, wz + cs};
                     }
 
-                    f32 uSpan = (nb.dz == 0) ? cs : cs; // texture repeat per cell
+                    f32 uSpan = cs;
                     f32 vSpan = wallTop - wallBot;
-                    Vertex v0{p0, n, {0.0f,    0.0f   }};
-                    Vertex v1{p1, n, {uSpan,   0.0f   }};
-                    Vertex v2{p2, n, {uSpan,   vSpan  }};
-                    Vertex v3{p3, n, {0.0f,    vSpan  }};
+                    Vertex v0{p0, n, {0.0f,  0.0f  }};
+                    Vertex v1{p1, n, {uSpan, 0.0f  }};
+                    Vertex v2{p2, n, {uSpan, vSpan }};
+                    Vertex v3{p3, n, {0.0f,  vSpan }};
 
-                    pushQuad(ctx, v0, v1, v2, v3);
+                    pushQuad(*bkt, v0, v1, v2, v3);
                     expand(p0.x, p0.y, p0.z); expand(p1.x, p1.y, p1.z);
                     expand(p2.x, p2.y, p2.z); expand(p3.x, p3.y, p3.z);
                 }
-
-                (void)floorH; // used indirectly via nbFloor/nbCeil
             } else {
-                // Empty cell: emit floor quad and ceiling quad
-                f32 floorH = LevelGridSystem::getFloorHeight(grid,   x, z);
-                f32 ceilH  = LevelGridSystem::getCeilingHeight(grid,  x, z);
+                f32 floorH = LevelGridSystem::getFloorHeight(grid, x, z);
+                f32 ceilH  = LevelGridSystem::getCeilingHeight(grid, x, z);
 
-                // Floor quad (normal = +Y)
-                if (LevelGridSystem::getCell(grid, x, z).flags & CELL_FLOOR) {
+                // Floor quad
+                if (cell.flags & CELL_FLOOR) {
+                    MaterialBucket* bkt = getBucket(cell.floorMaterialId);
                     Vec3 n{0.0f, 1.0f, 0.0f};
                     Vec3 p0{wx,      floorH, wz + cs};
                     Vec3 p1{wx + cs, floorH, wz + cs};
@@ -211,12 +181,13 @@ static void buildSection(const LevelGrid& grid,
                     Vertex v1{p1, n, {cs,   cs  }};
                     Vertex v2{p2, n, {cs,   0.0f}};
                     Vertex v3{p3, n, {0.0f, 0.0f}};
-                    pushQuad(ctx, v0, v1, v2, v3);
+                    pushQuad(*bkt, v0, v1, v2, v3);
                     expand(wx, floorH, wz); expand(wx+cs, floorH, wz+cs);
                 }
 
-                // Ceiling quad (normal = -Y, flipped winding)
-                if (LevelGridSystem::getCell(grid, x, z).flags & CELL_CEILING) {
+                // Ceiling quad
+                if (cell.flags & CELL_CEILING) {
+                    MaterialBucket* bkt = getBucket(cell.ceilMaterialId);
                     Vec3 n{0.0f, -1.0f, 0.0f};
                     Vec3 p0{wx,      ceilH, wz};
                     Vec3 p1{wx + cs, ceilH, wz};
@@ -226,25 +197,35 @@ static void buildSection(const LevelGrid& grid,
                     Vertex v1{p1, n, {cs,   0.0f}};
                     Vertex v2{p2, n, {cs,   cs  }};
                     Vertex v3{p3, n, {0.0f, cs  }};
-                    pushQuad(ctx, v0, v1, v2, v3);
+                    pushQuad(*bkt, v0, v1, v2, v3);
                     expand(wx, ceilH, wz); expand(wx+cs, ceilH, wz+cs);
                 }
             }
         }
     }
 
-    if (ctx.indexCount == 0) {
-        out.mesh   = {};
-        out.bounds = {{0,0,0},{0,0,0}};
-        out.model  = Mat4::identity();
-        return;
+    // Build submeshes from used buckets
+    out.submeshCount = 0;
+    bool anyGeometry = false;
+
+    for (u32 i = 0; i < MAX_SUBMESHES_PER_SECTION; i++) {
+        if (!s_buckets[i].used || s_buckets[i].indexCount == 0) continue;
+
+        SectionSubmesh& sm = out.submeshes[out.submeshCount];
+        sm.mesh = MeshSystem::create(s_buckets[i].verts, s_buckets[i].vertCount,
+                                     s_buckets[i].indices, s_buckets[i].indexCount);
+        sm.materialId = s_buckets[i].materialId;
+        out.submeshCount++;
+        anyGeometry = true;
     }
 
-    out.mesh   = MeshSystem::create(ctx.verts, ctx.vertCount,
-                                    ctx.indices, ctx.indexCount);
-    out.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
-    out.model  = Mat4::identity();
-    out.dirty  = false;
+    if (anyGeometry) {
+        out.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
+    } else {
+        out.bounds = {{0,0,0},{0,0,0}};
+    }
+    out.model = Mat4::identity();
+    out.dirty = false;
 }
 
 // -------------------------------------------------------------------------
@@ -275,19 +256,26 @@ u32 LevelMeshSystem::buildAll(const LevelGrid& grid,
 }
 
 void LevelMeshSystem::submitAll(const LevelSection* sections, u32 count,
-                                 const Shader& shader, const Texture& texture)
+                                 const Shader& shader)
 {
     for (u32 i = 0; i < count; i++) {
-        if (sections[i].mesh.indexCount == 0) continue;
-        Renderer::submit(shader, texture, sections[i].mesh,
-                         sections[i].model, sections[i].bounds);
+        for (u32 j = 0; j < sections[i].submeshCount; j++) {
+            const SectionSubmesh& sm = sections[i].submeshes[j];
+            if (sm.mesh.indexCount == 0) continue;
+            const Material* mat = MaterialSystem::get(sm.materialId);
+            Renderer::submit(shader, mat->texture, sm.mesh,
+                             sections[i].model, sections[i].bounds, mat->tint);
+        }
     }
 }
 
 void LevelMeshSystem::destroyAll(LevelSection* sections, u32 count) {
     for (u32 i = 0; i < count; i++) {
-        if (sections[i].mesh.vao) {
-            MeshSystem::destroy(sections[i].mesh);
+        for (u32 j = 0; j < sections[i].submeshCount; j++) {
+            if (sections[i].submeshes[j].mesh.vao) {
+                MeshSystem::destroy(sections[i].submeshes[j].mesh);
+            }
         }
+        sections[i].submeshCount = 0;
     }
 }

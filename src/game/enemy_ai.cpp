@@ -4,6 +4,7 @@
 #include "world/raycast.h"
 #include "world/level_grid.h"
 #include <cmath>
+#include <cstdlib>
 
 // ---------------------------------------------------------------------------
 // Grid collision for entities (simplified axis-separated slide)
@@ -94,6 +95,7 @@ static bool hasLOS(const Entity& e, const Player& player,
 void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       Player& player, ProjectilePool& projectiles, f32 dt)
 {
+    (void)projectiles;
     Vec3 playerEye = player.position + Vec3{0, player.eyeHeight, 0};
 
     for (u32 a = 0; a < pool.activeCount; a++) {
@@ -101,12 +103,18 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         Entity& e = pool.entities[i];
         if (e.flags & ENT_DEAD) continue;
 
+        // Tick animation timer
+        e.animTimer += dt;
+        if (e.attackAnimT > 0.0f) e.attackAnimT -= dt;
+
         Vec3 toPlayer = playerEye - e.position;
         f32  dist     = length(toPlayer);
         Vec3 dirToPlayer = (dist > 0.001f) ? toPlayer * (1.0f / dist) : Vec3{0,0,0};
 
-        // Face toward player (yaw only)
-        if (dist > 0.001f) {
+        bool isBat = (e.flags & ENT_FLYING) != 0;
+
+        // Face toward player (yaw only) — except during flyby
+        if (dist > 0.001f && e.aiState != AIState::FLYBY) {
             e.yaw = atan2f(-dirToPlayer.x, -dirToPlayer.z);
         }
 
@@ -114,6 +122,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         case AIState::IDLE: {
             e.velocity = {0, 0, 0};
+
+            // Bats hover erratically even when idle
+            if (isBat) {
+                e.position.y += sinf(e.animTimer * 3.0f) * 0.3f * dt;
+                e.position.x += sinf(e.animTimer * 1.7f) * 0.1f * dt;
+            }
 
             // Staggered LOS check: only check every 8 frames
             e.aiCheckIdx++;
@@ -126,10 +140,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::CHASE: {
-            // Move toward player
-            if (e.flags & ENT_FLYING) {
-                // Full 3D chase
+            if (isBat) {
+                // Erratic flying chase — weave side to side
+                f32 wobbleX = sinf(e.animTimer * 5.0f) * e.moveSpeed * 0.4f;
+                f32 wobbleY = sinf(e.animTimer * 3.0f) * e.moveSpeed * 0.3f;
+
                 e.velocity = dirToPlayer * e.moveSpeed;
+                Vec3 perp = {-dirToPlayer.z, 0.0f, dirToPlayer.x};
+                e.velocity.x += perp.x * wobbleX;
+                e.velocity.z += perp.z * wobbleX;
+                e.velocity.y += wobbleY;
             } else {
                 // Ground movement: XZ only
                 Vec3 flatDir = normalize(Vec3{dirToPlayer.x, 0.0f, dirToPlayer.z});
@@ -150,8 +170,25 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             // Transition to attack if close enough
             if (dist <= e.attackRange) {
-                e.aiState     = AIState::ATTACK;
-                e.attackTimer = e.attackCooldown * 0.5f; // first attack faster
+                if (isBat) {
+                    // Bats always do a movement-based attack
+                    if ((std::rand() % 100) < 30) {
+                        // FLYBY: swoop past player to behind them
+                        Vec3 playerFwd = {-sinf(player.yaw), 0.0f, -cosf(player.yaw)};
+                        e.flybyTarget = playerEye + playerFwd * 6.0f + Vec3{0, 1.5f, 0};
+                        e.flybyTimer = 2.5f;
+                        e.aiState = AIState::FLYBY;
+                    } else {
+                        // Direct dive attack: swoop through player position
+                        e.flybyTarget = playerEye + Vec3{0, -0.3f, 0};
+                        e.flybyTimer = 1.5f;
+                        e.aiState = AIState::FLYBY;
+                    }
+                    e.attackAnimT = 0.3f;
+                } else {
+                    e.aiState     = AIState::ATTACK;
+                    e.attackTimer = e.attackCooldown * 0.5f;
+                }
             }
             // Lost interest
             if (dist > e.detectionRange * 1.5f) {
@@ -159,19 +196,58 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             }
         } break;
 
-        case AIState::ATTACK: {
-            e.velocity = {0, 0, 0};
+        case AIState::FLYBY: {
+            // Bat swoop attack — fly toward target, damage on contact
+            Vec3 toTarget = e.flybyTarget - e.position;
+            f32 targetDist = length(toTarget);
 
-            // Flying enemies bob gently
-            if (e.flags & ENT_FLYING) {
-                e.position.y += sinf(e.attackTimer * 4.0f) * 0.3f * dt;
+            if (targetDist > 0.3f) {
+                Vec3 flyDir = toTarget * (1.0f / targetDist);
+                f32 speed = e.moveSpeed * 1.8f; // fast dive
+                e.velocity = flyDir * speed;
+
+                // Wobble during swoop
+                e.velocity.x += sinf(e.flybyTimer * 10.0f) * e.moveSpeed * 0.2f;
+                e.velocity.y += sinf(e.flybyTimer * 7.0f) * 0.3f;
             }
+
+            // Face movement direction
+            if (lengthSq(e.velocity) > 0.01f) {
+                e.yaw = atan2f(-e.velocity.x, -e.velocity.z);
+            }
+
+            entityMoveAndSlide(e, grid, dt);
+
+            // Deal damage when passing close to player
+            if (dist <= e.attackRange * 0.8f && hasLOS(e, player, grid)) {
+                Combat::applyDamageToPlayer(player, e.damage);
+                e.attackAnimT = 0.3f;
+
+                // After hitting: pull up and circle back
+                // Pick a retreat point above and behind the bat's current direction
+                Vec3 retreatDir = e.velocity * (-1.0f);
+                if (lengthSq(retreatDir) > 0.01f) retreatDir = normalize(retreatDir);
+                else retreatDir = {0, 1, 0};
+                e.flybyTarget = e.position + retreatDir * 4.0f + Vec3{0, 2.0f, 0};
+                e.flybyTimer = 1.5f;
+                // Stay in FLYBY to fly to retreat point, then will expire to CHASE
+            }
+
+            e.flybyTimer -= dt;
+            if (targetDist < 0.3f || e.flybyTimer <= 0.0f) {
+                e.aiState = AIState::CHASE;
+            }
+        } break;
+
+        case AIState::ATTACK: {
+            // Ground enemies only — bats never enter this state
+            e.velocity = {0, 0, 0};
 
             e.attackTimer -= dt;
             if (e.attackTimer <= 0.0f) {
                 e.attackTimer = e.attackCooldown;
+                e.attackAnimT = 0.3f; // trigger attack animation
 
-                // Deal damage to player if in range and LOS
                 if (dist <= e.attackRange * 1.1f && hasLOS(e, player, grid)) {
                     Combat::applyDamageToPlayer(player, e.damage);
                 }
@@ -184,7 +260,6 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::DEAD:
-            // Handled by EntitySystem::tickTimers
             break;
         }
     }

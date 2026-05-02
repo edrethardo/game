@@ -1,0 +1,37 @@
+{
+  "weapons": [
+    {
+      "name": "Sword",
+      "type": "melee",
+      "damage": 25.0,
+      "range": 2.5,
+      "cooldown": 0.4,
+      "coneAngleDeg": 70.0,
+      "projectileSpeed": 0.0,
+      "projectileRadius": 0.0,
+      "recoilKick": 0.01
+    },
+    {
+      "name": "Pistol",
+      "type": "hitscan",
+      "damage": 15.0,
+      "range": 50.0,
+      "cooldown": 0.2,
+      "coneAngleDeg": 0.0,
+      "projectileSpeed": 0.0,
+      "projectileRadius": 0.0,
+      "recoilKick": 0.015
+    },
+    {
+      "name": "Fireball",
+      "type": "projectile",
+      "damage": 30.0,
+      "range": 0.0,
+      "cooldown": 0.6,
+      "coneAngleDeg": 0.0,
+      "projectileSpeed": 15.0,
+      "projectileRadius": 0.15,
+      "recoilKick": 0.02
+    }
+  ]
+}

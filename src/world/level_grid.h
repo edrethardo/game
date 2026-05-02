@@ -9,10 +9,12 @@ static constexpr u8 CELL_FLOOR   = 1 << 1;
 static constexpr u8 CELL_CEILING = 1 << 2;
 
 struct GridCell {
-    u8 flags;          // CELL_SOLID / CELL_FLOOR / CELL_CEILING
-    u8 floorHeight;    // quarter-units (multiply by 0.25 for metres)
-    u8 ceilingHeight;  // quarter-units
-    u8 materialId;     // texture index for meshing
+    u8 flags;            // CELL_SOLID / CELL_FLOOR / CELL_CEILING
+    u8 floorHeight;      // quarter-units (multiply by 0.25 for metres)
+    u8 ceilingHeight;    // quarter-units
+    u8 wallMaterialId;   // material for wall surfaces
+    u8 floorMaterialId;  // material for floor surface
+    u8 ceilMaterialId;   // material for ceiling surface
 };
 
 struct LevelGrid {

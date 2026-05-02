@@ -1,0 +1,11 @@
+{
+  "materials": [
+    { "id": 0, "name": "stone_wall",    "texture": "stone_wall_42.png" },
+    { "id": 1, "name": "stone_floor",   "texture": "stone_floor_42.png", "tint": [0.9, 0.9, 0.95, 1.0] },
+    { "id": 2, "name": "stone_ceiling", "texture": "stone_ceiling_42.png", "tint": [0.7, 0.7, 0.75, 1.0] },
+    { "id": 3, "name": "brick_wall",    "texture": "brick_wall_42.png" },
+    { "id": 4, "name": "skeleton_skin", "texture": "skeleton_skin_42.png" },
+    { "id": 5, "name": "spider_skin",   "texture": "spider_skin_42.png" },
+    { "id": 6, "name": "bat_skin",      "texture": "bat_skin_42.png" }
+  ]
+}

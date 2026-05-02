@@ -1,0 +1,58 @@
+{
+  "width": 32,
+  "depth": 32,
+  "cellSize": 1.0,
+  "defaultCeiling": 3.0,
+  "rooms": [
+    {
+      "x": 2, "z": 2, "w": 8, "d": 6,
+      "floorHeight": 0.0, "ceilingHeight": 3.0,
+      "wallMaterial": "stone_wall", "floorMaterial": "stone_floor", "ceilMaterial": "stone_ceiling"
+    },
+    {
+      "x": 13, "z": 2, "w": 7, "d": 7,
+      "floorHeight": 0.0, "ceilingHeight": 3.0,
+      "wallMaterial": "stone_wall", "floorMaterial": "stone_floor", "ceilMaterial": "stone_ceiling"
+    },
+    {
+      "x": 22, "z": 2, "w": 8, "d": 6,
+      "floorHeight": 0.0, "ceilingHeight": 3.0,
+      "wallMaterial": "stone_wall", "floorMaterial": "stone_floor", "ceilMaterial": "stone_ceiling"
+    },
+    {
+      "x": 2, "z": 12, "w": 6, "d": 8,
+      "floorHeight": 0.0, "ceilingHeight": 3.0,
+      "wallMaterial": "stone_wall", "floorMaterial": "stone_floor", "ceilMaterial": "stone_ceiling"
+    },
+    {
+      "x": 14, "z": 13, "w": 8, "d": 6,
+      "floorHeight": 0.5, "ceilingHeight": 3.0,
+      "wallMaterial": "brick_wall", "floorMaterial": "stone_floor", "ceilMaterial": "stone_ceiling"
+    }
+  ],
+  "corridors": [
+    { "x0": 6, "z0": 5, "x1": 16, "z1": 5 },
+    { "x0": 16, "z0": 5, "x1": 26, "z1": 5 },
+    { "x0": 6, "z0": 5, "x1": 5, "z1": 16 },
+    { "x0": 5, "z0": 16, "x1": 18, "z1": 16 },
+    { "x0": 16, "z0": 5, "x1": 18, "z1": 16 }
+  ],
+  "spawns": {
+    "player": { "room": 0 },
+    "enemies": [
+      { "type": "skeleton", "x": 15.5, "z": 4.5 },
+      { "type": "skeleton", "x": 17.5, "z": 6.5 },
+      { "type": "skeleton", "x": 19.0, "z": 4.0 },
+      { "type": "skeleton", "x": 24.5, "z": 4.5 },
+      { "type": "skeleton", "x": 26.5, "z": 5.5 },
+      { "type": "bat",      "x": 25.5, "z": 4.5 },
+      { "type": "spider",   "x": 4.5,  "z": 14.5 },
+      { "type": "skeleton", "x": 6.0,  "z": 17.0 },
+      { "type": "bat",      "x": 5.0,  "z": 15.5 },
+      { "type": "skeleton", "x": 16.5, "z": 15.5 },
+      { "type": "spider",   "x": 19.5, "z": 16.5 },
+      { "type": "bat",      "x": 17.5, "z": 15.0 },
+      { "type": "bat",      "x": 20.0, "z": 17.0 }
+    ]
+  }
+}

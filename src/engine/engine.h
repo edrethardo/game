@@ -63,8 +63,13 @@ private:
     Camera  m_camera;
     Shader  m_basicShader;
     Shader  m_unlitShader;
-    Texture m_wallTexture;
     Mesh    m_cubeMesh;
+
+    // Mesh registry for entities
+    static constexpr u32 MAX_MESH_DEFS = 16;
+    struct MeshDef { Mesh mesh; AABB bounds; char name[32]; };
+    MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
+    u32      m_meshDefCount = 0;
 
     // Level
     LevelGrid    m_grid;

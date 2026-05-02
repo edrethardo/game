@@ -9,8 +9,11 @@
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
 #include "renderer/hud.h"
+#include "renderer/material.h"
+#include "renderer/obj_loader.h"
 #include "world/level_gen.h"
 #include "world/level_mesh.h"
+#include "world/level_loader.h"
 #include "world/collision.h"
 #include "world/combat_query.h"
 #include "game/player.h"
@@ -146,8 +149,42 @@ void Engine::init() {
                                        "assets/shaders/basic.frag");
     m_unlitShader = ShaderSystem::load("assets/shaders/unlit.vert",
                                        "assets/shaders/unlit.frag");
-    m_wallTexture = TextureSystem::createWhite();
-    m_cubeMesh    = MeshSystem::createCube();
+
+    // Materials (loads textures from assets/materials.json)
+    MaterialSystem::init("assets/materials.json");
+
+    // Meshes
+    m_cubeMesh = MeshSystem::createCube();
+
+    // Register cube as mesh 0 (fallback)
+    std::strncpy(m_meshDefs[0].name, "cube", sizeof(m_meshDefs[0].name) - 1);
+    m_meshDefs[0].mesh = m_cubeMesh;
+    m_meshDefs[0].bounds = {{-0.5f,-0.5f,-0.5f},{0.5f,0.5f,0.5f}};
+    m_meshDefCount = 1;
+
+    // Load OBJ meshes if they exist
+    {
+        struct MeshEntry { const char* name; const char* path; };
+        static constexpr MeshEntry kMeshes[] = {
+            {"skeleton", "assets/meshes/skeleton.obj"},
+            {"spider",   "assets/meshes/spider.obj"},
+            {"bat",      "assets/meshes/bat.obj"},
+            {"pillar",   "assets/meshes/pillar.obj"},
+            {"chest",    "assets/meshes/chest.obj"},
+        };
+        for (auto& entry : kMeshes) {
+            if (m_meshDefCount >= MAX_MESH_DEFS) break;
+            AABB bounds;
+            Mesh mesh = ObjLoader::load(entry.path, &bounds);
+            if (mesh.vao != 0) {
+                MeshDef& def = m_meshDefs[m_meshDefCount];
+                std::strncpy(def.name, entry.name, sizeof(def.name) - 1);
+                def.mesh = mesh;
+                def.bounds = bounds;
+                m_meshDefCount++;
+            }
+        }
+    }
 
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
@@ -168,14 +205,82 @@ void Engine::init() {
 }
 
 void Engine::startGame() {
-    // Build level
+    // Build level — try JSON first, fall back to procedural
     LevelGridSystem::init(m_grid, 32, 32, 1.0f);
-    Vec3 spawnPos = LevelGen::generateTestDungeon(m_grid);
+
+    LevelLoader::EnemySpawn jsonSpawns[LevelLoader::MAX_ENEMY_SPAWNS];
+    u32 jsonSpawnCount = 0;
+    Vec3 spawnPos = LevelLoader::loadFromJson("assets/levels/test_dungeon.json",
+                                               m_grid, jsonSpawns, jsonSpawnCount,
+                                               LevelLoader::MAX_ENEMY_SPAWNS);
+    bool usedJson = (spawnPos.x != 0 || spawnPos.z != 0);
+    if (!usedJson) {
+        spawnPos = LevelGen::generateTestDungeon(m_grid);
+    }
+
     m_sectionCount = LevelMeshSystem::buildAll(m_grid, m_sections, MAX_LEVEL_SECTIONS);
 
     // Init entities
     EntitySystem::init(m_entities);
-    spawnTestEnemies(m_entities, m_grid);
+
+    if (usedJson && jsonSpawnCount > 0) {
+        // Spawn enemies from JSON level
+        for (u32 i = 0; i < jsonSpawnCount; i++) {
+            LevelLoader::EnemySpawn& es = jsonSpawns[i];
+
+            // Determine enemy properties based on type name
+            bool flying = (std::strcmp(es.type, "bat") == 0);
+            f32 health = 50.0f, moveSpeed = 2.5f, detRange = 15.0f;
+            f32 atkRange = 2.5f, atkCool = 1.0f, damage = 10.0f;
+            Vec3 halfExtents = {0.4f, 0.5f, 0.4f};
+            u8 meshId = 0;
+            u8 matId = 0;
+
+            if (std::strcmp(es.type, "skeleton") == 0) {
+                halfExtents = {0.4f, 0.9f, 0.4f};
+                matId = MaterialSystem::getIdByName("skeleton_skin");
+            } else if (std::strcmp(es.type, "bat") == 0) {
+                health = 30.0f; moveSpeed = 5.0f; atkRange = 6.0f;
+                atkCool = 1.5f; damage = 8.0f;
+                halfExtents = {0.5f, 0.4f, 0.4f};
+                matId = MaterialSystem::getIdByName("bat_skin");
+            } else if (std::strcmp(es.type, "spider") == 0) {
+                health = 40.0f; moveSpeed = 3.5f; detRange = 12.0f;
+                atkRange = 2.0f; atkCool = 0.8f; damage = 12.0f;
+                halfExtents = {0.5f, 0.3f, 0.5f};
+                matId = MaterialSystem::getIdByName("spider_skin");
+            }
+
+            // Find mesh by name
+            for (u32 m = 0; m < m_meshDefCount; m++) {
+                if (std::strcmp(m_meshDefs[m].name, es.type) == 0) {
+                    meshId = static_cast<u8>(m);
+                    break;
+                }
+            }
+
+            u32 gx = static_cast<u32>(es.x);
+            u32 gz = static_cast<u32>(es.z);
+            f32 floorH = 0.0f;
+            if (LevelGridSystem::isInBounds(m_grid, gx, gz) &&
+                !LevelGridSystem::isSolid(m_grid, gx, gz)) {
+                floorH = LevelGridSystem::getFloorHeight(m_grid, gx, gz);
+            }
+
+            f32 spawnY = flying ? (floorH + 1.5f) : (floorH + halfExtents.y);
+            EntityHandle h = EntitySystem::spawn(m_entities,
+                Vec3{es.x, spawnY, es.z}, halfExtents, flying,
+                health, moveSpeed, detRange, atkRange, atkCool, damage);
+            Entity* e = handleGet(m_entities, h);
+            if (e) {
+                e->meshId = meshId;
+                e->materialId = matId;
+            }
+        }
+    } else {
+        spawnTestEnemies(m_entities, m_grid);
+    }
+
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
     ProjectileSystem::init(m_projectiles);
 
@@ -223,13 +328,18 @@ void Engine::shutdown() {
 
     Net::shutdown();
 
+    // Destroy loaded OBJ meshes (skip index 0 = cube, destroyed below)
+    for (u32 i = 1; i < m_meshDefCount; i++) {
+        if (m_meshDefs[i].mesh.vao) MeshSystem::destroy(m_meshDefs[i].mesh);
+    }
+
     MeshSystem::destroy(m_cubeMesh);
     LevelMeshSystem::destroyAll(m_sections, m_sectionCount);
     LevelGridSystem::shutdown(m_grid);
 
+    MaterialSystem::shutdown();
     ShaderSystem::destroy(m_basicShader);
     ShaderSystem::destroy(m_unlitShader);
-    TextureSystem::destroy(m_wallTexture);
 
     HUD::shutdown();
     DebugDraw::shutdown();
@@ -936,14 +1046,14 @@ void Engine::render(f32 alpha) {
     );
 
     // Level geometry
-    LevelMeshSystem::submitAll(m_sections, m_sectionCount,
-                               m_basicShader, m_wallTexture);
+    LevelMeshSystem::submitAll(m_sections, m_sectionCount, m_basicShader);
 
     // Choose entity/projectile source based on role
     const EntityPool& entPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
     const ProjectilePool& projPool = (m_netRole == NetRole::CLIENT) ? m_renderProjectiles : m_projectiles;
 
     // Entities
+    const Texture& defaultTex = MaterialSystem::get(0)->texture;
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         const Entity& e = entPool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
@@ -960,20 +1070,76 @@ void Engine::render(f32 alpha) {
             renderPos.y -= e.halfExtents.y * (1.0f - scaleY);
         }
 
-        Mat4 model = Mat4::translate(renderPos)
-                   * Mat4::rotateY(e.yaw)
-                   * Mat4::scale(renderHalf * 2.0f);
+        // Use mesh from registry if available
+        u8 meshId = e.meshId;
+        const Mesh& entMesh = (meshId < m_meshDefCount) ? m_meshDefs[meshId].mesh : m_cubeMesh;
+
+        // --- Procedural animation ---
+        f32 animBobY = 0.0f;
+        f32 animLean = 0.0f;   // forward tilt (pitch) in radians
+        f32 animScaleX = 1.0f; // wing flap for bats
+        bool isMoving = (lengthSq(e.velocity) > 0.1f);
+        bool isBat = (e.flags & ENT_FLYING) != 0;
+
+        if (!(e.flags & ENT_DEAD)) {
+            if (isBat) {
+                // Wing flap: pulse X scale
+                f32 flapSpeed = isMoving ? 12.0f : 6.0f;
+                animScaleX = 1.0f + sinf(e.animTimer * flapSpeed) * 0.15f;
+                // Constant hover bob
+                animBobY = sinf(e.animTimer * 4.0f) * 0.05f;
+                // Lean into dive during flyby
+                if (e.aiState == AIState::FLYBY) {
+                    animLean = -0.4f; // nose down
+                }
+            } else if (isMoving) {
+                // Ground enemies: walking bob
+                animBobY = sinf(e.animTimer * 10.0f) * 0.04f;
+            }
+
+            // Attack lunge — brief forward lean
+            if (e.attackAnimT > 0.0f) {
+                f32 t = e.attackAnimT / 0.3f; // 0→1
+                animLean = -0.3f * t; // lean forward
+                animBobY += 0.05f * t; // slight hop
+            }
+        }
+
+        Mat4 model;
+        if (meshId > 0 && meshId < m_meshDefCount) {
+            const AABB& meshBounds = m_meshDefs[meshId].bounds;
+            f32 meshH = meshBounds.max.y - meshBounds.min.y;
+            f32 targetH = e.halfExtents.y * 2.0f * scaleY;
+            f32 uniformScale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
+            Vec3 basePos = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                         + Vec3{0, animBobY, 0};
+            model = Mat4::translate(basePos)
+                  * Mat4::rotateY(e.yaw)
+                  * Mat4::rotateX(animLean)
+                  * Mat4::scale({uniformScale * animScaleX, uniformScale, uniformScale});
+        } else {
+            model = Mat4::translate(renderPos + Vec3{0, animBobY, 0})
+                  * Mat4::rotateY(e.yaw)
+                  * Mat4::rotateX(animLean)
+                  * Mat4::scale(renderHalf * 2.0f);
+        }
         AABB bounds = {renderPos - renderHalf, renderPos + renderHalf};
+
+        // Use entity's material texture if assigned, otherwise fallback
+        const Material* entMat = MaterialSystem::get(e.materialId);
+        const Texture& entTex = (e.materialId > 0) ? entMat->texture : defaultTex;
 
         if (e.flashTimer > 0.0f) {
             f32 flash = e.flashTimer / 0.12f;
             Vec4 flashColor = {1.0f, 0.3f * flash, 0.3f * flash, 1.0f};
-            Renderer::submit(m_unlitShader, m_wallTexture, m_cubeMesh, model, bounds, flashColor);
+            Renderer::submit(m_basicShader, entTex, entMesh, model, bounds, flashColor);
         } else {
-            Vec4 entColor = (e.flags & ENT_FLYING)
-                ? Vec4{0.4f, 0.5f, 1.0f, 1.0f}
-                : Vec4{0.8f, 0.5f, 0.3f, 1.0f};
-            Renderer::submit(m_unlitShader, m_wallTexture, m_cubeMesh, model, bounds, entColor);
+            Vec4 tint = (e.materialId > 0) ? entMat->tint : (
+                (e.flags & ENT_FLYING)
+                    ? Vec4{0.4f, 0.5f, 1.0f, 1.0f}
+                    : Vec4{0.8f, 0.5f, 0.3f, 1.0f}
+            );
+            Renderer::submit(m_basicShader, entTex, entMesh, model, bounds, tint);
         }
     }
 
@@ -992,7 +1158,7 @@ void Engine::render(f32 alpha) {
         Vec4 projColor = p.fromPlayer
             ? Vec4{1.0f, 0.5f, 0.1f, 1.0f}
             : Vec4{0.8f, 0.2f, 1.0f, 1.0f};
-        Renderer::submit(m_unlitShader, m_wallTexture, m_cubeMesh, model, bounds, projColor);
+        Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
     }
 
     // Remote players (multiplayer only)
@@ -1030,7 +1196,7 @@ void Engine::render(f32 alpha) {
                 {1.0f, 0.8f, 0.2f, 1.0f}, // yellow
                 {1.0f, 0.3f, 0.3f, 1.0f}, // red
             };
-            Renderer::submit(m_unlitShader, m_wallTexture, m_cubeMesh, model, bounds, colors[i]);
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, colors[i]);
         }
     }
 

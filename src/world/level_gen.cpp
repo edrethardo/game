@@ -15,7 +15,8 @@ static constexpr u32 k_roomCount = 5;
 
 // Carve a rectangular room into the grid
 static void carveRoom(LevelGrid& grid, const Room& r,
-                      f32 floorH, f32 ceilH)
+                      f32 floorH, f32 ceilH,
+                      u8 wallMat = 0, u8 floorMat = 1, u8 ceilMat = 2)
 {
     u8 floorEnc = static_cast<u8>(floorH / 0.25f);
     u8 ceilEnc  = static_cast<u8>(ceilH  / 0.25f);
@@ -24,10 +25,12 @@ static void carveRoom(LevelGrid& grid, const Room& r,
         for (u32 x = r.x; x < r.x + r.w; x++) {
             if (!LevelGridSystem::isInBounds(grid, x, z)) continue;
             GridCell& cell = LevelGridSystem::getCell(grid, x, z);
-            cell.flags        = CELL_FLOOR | CELL_CEILING; // open
-            cell.floorHeight   = floorEnc;
-            cell.ceilingHeight = ceilEnc;
-            cell.materialId    = 0;
+            cell.flags           = CELL_FLOOR | CELL_CEILING;
+            cell.floorHeight     = floorEnc;
+            cell.ceilingHeight   = ceilEnc;
+            cell.wallMaterialId  = wallMat;
+            cell.floorMaterialId = floorMat;
+            cell.ceilMaterialId  = ceilMat;
         }
     }
 }
@@ -50,11 +53,13 @@ static void carveCorridor(LevelGrid& grid,
             if (cz < 0) continue;
             if (!LevelGridSystem::isInBounds(grid, x, (u32)cz)) continue;
             GridCell& cell = LevelGridSystem::getCell(grid, x, (u32)cz);
-            if (cell.flags & CELL_SOLID) { // only carve solid cells
-                cell.flags         = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight   = floorEnc;
-                cell.ceilingHeight = ceilEnc;
-                cell.materialId    = 0;
+            if (cell.flags & CELL_SOLID) {
+                cell.flags           = CELL_FLOOR | CELL_CEILING;
+                cell.floorHeight     = floorEnc;
+                cell.ceilingHeight   = ceilEnc;
+                cell.wallMaterialId  = 0;
+                cell.floorMaterialId = 1;
+                cell.ceilMaterialId  = 2;
             }
         }
     }
@@ -68,10 +73,12 @@ static void carveCorridor(LevelGrid& grid,
             if (!LevelGridSystem::isInBounds(grid, (u32)cx, z)) continue;
             GridCell& cell = LevelGridSystem::getCell(grid, (u32)cx, z);
             if (cell.flags & CELL_SOLID) {
-                cell.flags         = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight   = floorEnc;
-                cell.ceilingHeight = ceilEnc;
-                cell.materialId    = 0;
+                cell.flags           = CELL_FLOOR | CELL_CEILING;
+                cell.floorHeight     = floorEnc;
+                cell.ceilingHeight   = ceilEnc;
+                cell.wallMaterialId  = 0;
+                cell.floorMaterialId = 1;
+                cell.ceilMaterialId  = 2;
             }
         }
     }
@@ -82,20 +89,25 @@ Vec3 LevelGen::generateTestDungeon(LevelGrid& grid) {
     for (u32 z = 0; z < grid.depth; z++) {
         for (u32 x = 0; x < grid.width; x++) {
             GridCell& c = LevelGridSystem::getCell(grid, x, z);
-            c.flags         = CELL_SOLID;
-            c.floorHeight   = 0;
-            c.ceilingHeight = 0;
-            c.materialId    = 0;
+            c.flags           = CELL_SOLID;
+            c.floorHeight     = 0;
+            c.ceilingHeight   = 0;
+            c.wallMaterialId  = 0;
+            c.floorMaterialId = 0;
+            c.ceilMaterialId  = 0;
         }
     }
 
     constexpr f32 FLOOR  = 0.0f;
     constexpr f32 CEIL   = 3.0f;   // 3m ceiling (12 quarter-units)
 
-    // Carve rooms (room 4 has raised floor)
+    // Carve rooms (room 4 has raised floor + brick walls)
     for (u32 i = 0; i < k_roomCount; i++) {
         f32 floorH = (i == 4) ? 0.5f : FLOOR;
-        carveRoom(grid, k_rooms[i], floorH, CEIL);
+        u8 wallMat  = (i == 4) ? 3 : 0; // brick_wall for room 4
+        u8 floorMat = 1;
+        u8 ceilMat  = 2;
+        carveRoom(grid, k_rooms[i], floorH, CEIL, wallMat, floorMat, ceilMat);
     }
 
     // Connect rooms with L-corridors (centre-to-centre)
