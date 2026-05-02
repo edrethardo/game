@@ -306,7 +306,9 @@ void Engine::init() {
         // 40% base drop chance (hostile enemies only drop loot)
         if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY) &&
             (std::rand() % 100) < 40) {
-            u8 enemyLevel = 1; // TODO: derive from entity or dungeon depth
+            // Derive level from the entity so loot scales with floor depth
+            u8 enemyLevel = pool.entities[entityIndex].level;
+            if (enemyLevel < 1) enemyLevel = 1;
             ItemInstance item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
                                                    s_engine->m_itemDefCount,
                                                    s_engine->m_affixDefs,
@@ -314,6 +316,23 @@ void Engine::init() {
             if (!isItemEmpty(item)) {
                 WorldItemSystem::spawn(s_engine->m_worldItems, item,
                                        position + Vec3{0, 0.5f, 0});
+            }
+
+            // 30% chance to drop a health globe (instant heal on pickup)
+            if ((std::rand() % 100) < 30) {
+                ItemInstance globe;
+                globe.defId = GLOBE_HEALTH_ID;
+                globe.uid   = s_engine->m_worldItems.nextUid++;
+                WorldItemSystem::spawn(s_engine->m_worldItems, globe,
+                                       position + Vec3{0.3f, 0.5f, 0.0f});
+            }
+            // 20% chance to drop an energy globe (instant energy restore on pickup)
+            if ((std::rand() % 100) < 20) {
+                ItemInstance globe;
+                globe.defId = GLOBE_ENERGY_ID;
+                globe.uid   = s_engine->m_worldItems.nextUid++;
+                WorldItemSystem::spawn(s_engine->m_worldItems, globe,
+                                       position + Vec3{-0.3f, 0.5f, 0.0f});
             }
         }
         (void)position;
@@ -347,7 +366,8 @@ void Engine::init() {
 
 void Engine::startGame() {
     // Build level — use BSP procedural generation with random seed
-    u32 dungeonSeed = static_cast<u32>(std::rand());
+    // Mix floor number into seed so each floor has unique layout
+    u32 dungeonSeed = static_cast<u32>(std::rand()) + m_currentFloor * 7919;
     LevelGridSystem::init(m_grid, 48, 48, 1.0f);
     DungeonResult dungeon = LevelGen::generate(m_grid, dungeonSeed, 48, 48);
     Vec3 spawnPos = dungeon.spawnPos;
@@ -416,6 +436,13 @@ void Engine::startGame() {
                     static const EnemyType kEnemyTypes[] = {EnemyType::SKELETON, EnemyType::BAT, EnemyType::SPIDER};
                     ent->enemyType = kEnemyTypes[typeIdx];
 
+                    // Scale enemy stats by floor level (+25% per floor beyond first)
+                    ent->level = static_cast<u8>(m_currentFloor);
+                    f32 floorMult = 1.0f + (m_currentFloor - 1) * 0.25f;
+                    ent->health    *= floorMult;
+                    ent->maxHealth  = ent->health;
+                    ent->damage    *= floorMult;
+
                     // Skeletons carry random melee weapons (sword/dagger/axe mesh looked up by name)
                     if (ent->enemyType == EnemyType::SKELETON) {
                         static const char* skelWeapons[] = {"sword", "dagger", "axe"};
@@ -477,6 +504,18 @@ void Engine::startGame() {
     }
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
+
+    // Spawn a floor exit portal in the last room (farthest from spawn room 0)
+    m_floorDoorActive = false;
+    if (dungeon.roomCount > 1) {
+        const DungeonRoom& lastRoom = dungeon.rooms[dungeon.roomCount - 1];
+        f32 doorX = (lastRoom.x + lastRoom.w * 0.5f) * m_grid.cellSize;
+        f32 doorZ = (lastRoom.z + lastRoom.d * 0.5f) * m_grid.cellSize;
+        f32 doorY = lastRoom.floorHeight;
+        m_floorDoorPos    = {doorX, doorY, doorZ};
+        m_floorDoorActive = true;
+        LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_currentFloor, doorX, doorY, doorZ);
+    }
 
     // Spawn 2 friendly NPC allies in the spawn room, offset to either side of the player
     {
@@ -853,6 +892,17 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
+    // Healing potion (Q key, 15 second cooldown — heals 40% of max HP)
+    if (m_potionCooldown > 0.0f) m_potionCooldown -= dt;
+    if (Input::isKeyPressed(SDL_SCANCODE_Q) && m_potionCooldown <= 0.0f) {
+        f32 healAmount = m_localPlayer.maxHealth * 0.4f;
+        m_localPlayer.health += healAmount;
+        if (m_localPlayer.health > m_localPlayer.maxHealth)
+            m_localPlayer.health = m_localPlayer.maxHealth;
+        m_potionCooldown = 15.0f;
+        LOG_INFO("Used healing potion: +%.0f HP (cooldown 15s)", healAmount);
+    }
+
     // Player movement
     PlayerController::update(m_localPlayer, dt);
     if (!m_localPlayer.noclip) {
@@ -953,12 +1003,54 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
-    // Item pickup (E key)
+    // Auto-pickup health/energy globes (no key press needed, walk-over activation)
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = m_worldItems.items[i];
+        if (!wi.active) continue;
+        if (!isGlobe(wi.item)) continue;
+
+        Vec3 delta = m_localPlayer.position - wi.position;
+        f32 dist = length(delta);
+        if (dist < 2.5f) {
+            if (wi.item.defId == GLOBE_HEALTH_ID) {
+                // Restore 20 HP, capped at max
+                m_localPlayer.health += 20.0f;
+                if (m_localPlayer.health > m_localPlayer.maxHealth)
+                    m_localPlayer.health = m_localPlayer.maxHealth;
+            } else if (wi.item.defId == GLOBE_ENERGY_ID) {
+                // Restore 25 energy, capped at max
+                SkillState& ss = m_skillStates[m_localPlayerIndex];
+                ss.energy += 25.0f;
+                if (ss.energy > ss.maxEnergy)
+                    ss.energy = ss.maxEnergy;
+            }
+            wi.active = false;
+            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        }
+    }
+
+    // Item pickup (E key) — globes are consumed above and never reach here
     if (Input::isKeyPressed(SDL_SCANCODE_E)) {
         ItemInstance picked;
         if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
-            if (Inventory::addToBackpack(m_inventories[0], picked)) {
-                LOG_INFO("Picked up item (defId=%u, rarity=%u)", picked.defId, (u32)picked.rarity);
+            // Safety: skip any globe that slipped through auto-pickup
+            if (!isGlobe(picked)) {
+                if (Inventory::addToBackpack(m_inventories[0], picked)) {
+                    LOG_INFO("Picked up item (defId=%u, rarity=%u)", picked.defId, (u32)picked.rarity);
+                }
+            }
+        }
+    }
+
+    // Floor door — descend to next floor when player walks near and presses E
+    if (m_floorDoorActive) {
+        Vec3 toDoor = m_floorDoorPos - m_localPlayer.position;
+        if (lengthSq(toDoor) < 4.0f) {
+            if (Input::isKeyPressed(SDL_SCANCODE_E)) {
+                m_currentFloor++;
+                LOG_INFO("Descending to floor %u", m_currentFloor);
+                startGame(); // regenerate dungeon with new floor seed
+                return;      // don't process remainder of this frame
             }
         }
     }
@@ -1868,17 +1960,73 @@ void Engine::render(f32 alpha) {
         const Projectile& p = projPool.projectiles[i];
         if (!p.active) continue;
 
-        Mat4 model = Mat4::translate(p.position)
-                   * Mat4::scale({p.radius * 2.0f, p.radius * 2.0f, p.radius * 2.0f});
-        AABB bounds = {
-            p.position - Vec3{p.radius, p.radius, p.radius},
-            p.position + Vec3{p.radius, p.radius, p.radius}
-        };
+        if (p.projFlags & PROJ_SPARK) {
+            // Lightning bolt: jagged line segments along the velocity direction
+            Vec3 vel = p.velocity;
+            f32 spd = length(vel);
+            Vec3 dir = (spd > 0.01f) ? vel * (1.0f / spd) : Vec3{0, 0, -1};
+            // Perpendicular axes for jitter
+            Vec3 up = {0, 1, 0};
+            Vec3 right = normalize(cross(dir, up));
+            Vec3 perpUp = cross(right, dir);
 
-        Vec4 projColor = p.fromPlayer
-            ? Vec4{1.0f, 0.5f, 0.1f, 1.0f}
-            : Vec4{0.8f, 0.2f, 1.0f, 1.0f};
-        Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
+            // Draw 4-segment jagged bolt from projectile tail to head
+            static constexpr u32 BOLT_SEGS = 4;
+            f32 boltLen = 0.8f;
+            Vec3 prev = p.position - dir * boltLen * 0.5f;
+            // Use position as seed for consistent jitter per bolt
+            u32 seed = static_cast<u32>(p.position.x * 100 + p.position.z * 73 + p.lifetime * 200);
+            for (u32 s = 1; s <= BOLT_SEGS; s++) {
+                f32 t = static_cast<f32>(s) / BOLT_SEGS;
+                Vec3 base = p.position - dir * boltLen * 0.5f + dir * (boltLen * t);
+                if (s < BOLT_SEGS) {
+                    // Jitter sideways for zigzag look
+                    seed = seed * 1103515245u + 12345u;
+                    f32 jx = (static_cast<f32>((seed >> 8) & 0xFF) / 128.0f - 1.0f) * 0.12f;
+                    seed = seed * 1103515245u + 12345u;
+                    f32 jy = (static_cast<f32>((seed >> 8) & 0xFF) / 128.0f - 1.0f) * 0.12f;
+                    base = base + right * jx + perpUp * jy;
+                }
+                // Core bolt: bright white-blue
+                DebugDraw::line(prev, base, {0.6f, 0.7f, 1.0f});
+                // Glow: slightly offset second line
+                DebugDraw::line(prev + right * 0.02f, base + right * 0.02f, {0.3f, 0.4f, 1.0f});
+                prev = base;
+            }
+            // Small bright core at the tip
+            DebugDraw::line(p.position - dir * 0.05f, p.position + dir * 0.05f, {1.0f, 1.0f, 1.0f});
+        } else {
+            // Normal projectile: colored cube
+            Mat4 model = Mat4::translate(p.position)
+                       * Mat4::scale({p.radius * 2.0f, p.radius * 2.0f, p.radius * 2.0f});
+            AABB bounds = {
+                p.position - Vec3{p.radius, p.radius, p.radius},
+                p.position + Vec3{p.radius, p.radius, p.radius}
+            };
+
+            Vec4 projColor = p.fromPlayer
+                ? Vec4{1.0f, 0.5f, 0.1f, 1.0f}
+                : Vec4{0.8f, 0.2f, 1.0f, 1.0f};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
+        }
+    }
+
+    // --- Floor door indicator (glowing portal in last room) ---
+    if (m_floorDoorActive) {
+        Vec3 dp = m_floorDoorPos;
+        f32 pulse = 0.5f + 0.5f * sinf(static_cast<f32>(m_statsTimer) * 3.0f);
+        // Vertical beam (three offset lines for thickness)
+        DebugDraw::line(dp, dp + Vec3{0, 3.0f, 0}, {0.2f * pulse, 1.0f * pulse, 0.3f * pulse});
+        DebugDraw::line(dp + Vec3{0.1f, 0, 0}, dp + Vec3{0.1f, 3.0f, 0}, {0.1f, 0.8f * pulse, 0.2f});
+        DebugDraw::line(dp + Vec3{-0.1f, 0, 0}, dp + Vec3{-0.1f, 3.0f, 0}, {0.1f, 0.8f * pulse, 0.2f});
+        // Base circle (octagon approximation at floor level)
+        for (u32 s = 0; s < 8; s++) {
+            f32 a0 = s * (6.28318f / 8.0f);
+            f32 a1 = (s + 1) * (6.28318f / 8.0f);
+            Vec3 p0 = dp + Vec3{cosf(a0) * 0.5f, 0.05f, sinf(a0) * 0.5f};
+            Vec3 p1 = dp + Vec3{cosf(a1) * 0.5f, 0.05f, sinf(a1) * 0.5f};
+            DebugDraw::line(p0, p1, {0.2f, 0.9f * pulse, 0.3f});
+        }
     }
 
     // --- World items (rendered with weapon-specific meshes when available) ---
@@ -1896,18 +2044,28 @@ void Engine::render(f32 alpha) {
             floorY = LevelGridSystem::getFloorHeight(m_grid, gx, gz);
         }
 
-        // Hover bob just above the floor
+        // Hover bob just above the floor (globes float lower and use smaller scale)
         static constexpr f32 ITEM_SCALE = 1.4f;
+        bool isGlobeItem = isGlobe(wi.item);
+        f32 renderScale = isGlobeItem ? 0.4f : ITEM_SCALE; // globes are small orbs
         f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
-        Vec3 pos = {wi.position.x, floorY + ITEM_SCALE * 0.5f + bobY, wi.position.z};
+        Vec3 pos = {wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
         f32 spin = wi.bobTimer * 2.0f;
 
-        // Use weapon-specific mesh if available, otherwise cube fallback
+        // Globes render as small colored cubes; regular items use their mesh
         const Mesh* itemMesh = &m_cubeMesh;
         Texture itemTex = defaultTex;
         Vec4 tint = {color.x, color.y, color.z, 1.0f};
 
-        if (wi.item.defId < m_itemDefCount) {
+        if (isGlobeItem) {
+            // Health globe: bright green; energy globe: bright blue
+            if (wi.item.defId == GLOBE_HEALTH_ID) {
+                tint = {0.2f, 1.0f, 0.3f, 1.0f};
+            } else {
+                tint = {0.3f, 0.5f, 1.0f, 1.0f};
+            }
+        } else if (wi.item.defId < m_itemDefCount) {
+            // Use weapon-specific mesh and material if available
             const ItemDef& def = m_itemDefs[wi.item.defId];
             if (def.meshId > 0 && def.meshId < m_meshDefCount) {
                 itemMesh = &m_meshDefs[def.meshId].mesh;
@@ -1926,29 +2084,42 @@ void Engine::render(f32 alpha) {
         Mat4 model;
         if (itemMesh != &m_cubeMesh) {
             // Fit mesh into ITEM_SCALE box using its actual bounds
-            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({ITEM_SCALE, ITEM_SCALE, ITEM_SCALE});
+            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({renderScale, renderScale, renderScale});
         } else {
-            // Cube fallback — smaller so it doesn't look like a block
-            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({0.3f, 0.3f, 0.3f});
+            // Cube fallback — globes use renderScale (0.4), other items use smaller 0.3 cube
+            f32 cubeS = isGlobeItem ? renderScale : 0.3f;
+            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({cubeS, cubeS, cubeS});
         }
-        AABB bounds = {pos - Vec3{ITEM_SCALE,ITEM_SCALE,ITEM_SCALE}, pos + Vec3{ITEM_SCALE,ITEM_SCALE,ITEM_SCALE}};
+        AABB bounds = {pos - Vec3{renderScale,renderScale,renderScale},
+                       pos + Vec3{renderScale,renderScale,renderScale}};
         Renderer::submit(m_unlitShader, itemTex, *itemMesh, model, bounds, tint);
 
-        // Rarity glow — pulsing cross of debug lines radiating from item center
-        f32 glowPulse = 0.6f + 0.4f * sinf(wi.bobTimer * 4.0f);
-        Vec3 gc = color * glowPulse;
-        f32 gr = 0.4f + glowPulse * 0.2f; // glow radius
-        DebugDraw::line(pos - Vec3{gr, 0, 0}, pos + Vec3{gr, 0, 0}, gc);
-        DebugDraw::line(pos - Vec3{0, gr, 0}, pos + Vec3{0, gr, 0}, gc);
-        DebugDraw::line(pos - Vec3{0, 0, gr}, pos + Vec3{0, 0, gr}, gc);
-        // Diagonal cross for more glow volume
-        f32 gd = gr * 0.7f;
-        DebugDraw::line(pos - Vec3{gd, gd, 0}, pos + Vec3{gd, gd, 0}, gc);
-        DebugDraw::line(pos - Vec3{gd, 0, gd}, pos + Vec3{gd, 0, gd}, gc);
-        DebugDraw::line(pos - Vec3{0, gd, gd}, pos + Vec3{0, gd, gd}, gc);
-
-        // Loot beam from floor upward
-        DebugDraw::line({pos.x, floorY, pos.z}, {pos.x, floorY + 4.0f, pos.z}, color);
+        if (!isGlobeItem) {
+            // Rarity glow — pulsing cross of debug lines radiating from item center
+            f32 glowPulse = 0.6f + 0.4f * sinf(wi.bobTimer * 4.0f);
+            Vec3 gc = color * glowPulse;
+            f32 gr = 0.4f + glowPulse * 0.2f; // glow radius
+            DebugDraw::line(pos - Vec3{gr, 0, 0}, pos + Vec3{gr, 0, 0}, gc);
+            DebugDraw::line(pos - Vec3{0, gr, 0}, pos + Vec3{0, gr, 0}, gc);
+            DebugDraw::line(pos - Vec3{0, 0, gr}, pos + Vec3{0, 0, gr}, gc);
+            // Diagonal cross for more glow volume
+            f32 gd = gr * 0.7f;
+            DebugDraw::line(pos - Vec3{gd, gd, 0}, pos + Vec3{gd, gd, 0}, gc);
+            DebugDraw::line(pos - Vec3{gd, 0, gd}, pos + Vec3{gd, 0, gd}, gc);
+            DebugDraw::line(pos - Vec3{0, gd, gd}, pos + Vec3{0, gd, gd}, gc);
+            // Loot beam from floor upward
+            DebugDraw::line({pos.x, floorY, pos.z}, {pos.x, floorY + 4.0f, pos.z}, color);
+        } else {
+            // Globe glow — simple pulsing cross of colored lines
+            f32 glowPulse = 0.5f + 0.5f * sinf(wi.bobTimer * 6.0f);
+            Vec3 gc = (wi.item.defId == GLOBE_HEALTH_ID)
+                ? Vec3{0.1f, glowPulse, 0.15f}
+                : Vec3{0.15f, 0.25f, glowPulse};
+            f32 gr = 0.3f;
+            DebugDraw::line(pos - Vec3{gr, 0, 0}, pos + Vec3{gr, 0, 0}, gc);
+            DebugDraw::line(pos - Vec3{0, gr, 0}, pos + Vec3{0, gr, 0}, gc);
+            DebugDraw::line(pos - Vec3{0, 0, gr}, pos + Vec3{0, 0, gr}, gc);
+        }
     }
 
     // Remote players (multiplayer only)
@@ -2108,6 +2279,20 @@ void Engine::render(f32 alpha) {
         }
     }
 
+    // Floor door interaction prompt — shown when player is within trigger range
+    if (m_floorDoorActive && m_gameState == GameState::IN_GAME) {
+        Vec3 toDoor = m_floorDoorPos - m_localPlayer.position;
+        if (lengthSq(toDoor) < 4.0f) {
+            char doorStr[48];
+            std::snprintf(doorStr, sizeof(doorStr), "Press E to descend to Floor %u", m_currentFloor + 1);
+            f32 textW = FontSystem::textWidth(doorStr, 1);
+            FontSystem::drawText(sw, sh,
+                (static_cast<f32>(sw) - textW) * 0.5f,
+                static_cast<f32>(sh) * 0.4f,
+                doorStr, {0.3f, 1.0f, 0.4f}, 1);
+        }
+    }
+
     // First-person viewmodel (hand + weapon) — drawn after world, before HUD
     renderViewmodel();
 
@@ -2152,6 +2337,25 @@ void Engine::render(f32 alpha) {
 
         // Minimap (top-right corner)
         Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw);
+
+        // Floor indicator (top-left)
+        {
+            char floorStr[32];
+            std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_currentFloor);
+            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 20.0f,
+                                 floorStr, {0.7f, 0.7f, 0.7f}, 1);
+        }
+
+        // Potion cooldown indicator (below floor text, Q key binding hint)
+        if (m_potionCooldown > 0.0f) {
+            char potStr[32];
+            std::snprintf(potStr, sizeof(potStr), "Potion: %.0fs", m_potionCooldown);
+            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 35.0f,
+                                 potStr, {0.8f, 0.3f, 0.3f}, 1);
+        } else {
+            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 35.0f,
+                                 "Q: Potion", {0.3f, 0.8f, 0.3f}, 1);
+        }
     }
 
     // Quickbar — always visible at bottom of screen

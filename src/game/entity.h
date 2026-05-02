@@ -52,6 +52,7 @@ struct Entity {
     f32  attackCooldown = 1.0f;
     f32  attackTimer    = 0.0f;
     f32  damage         = 10.0f;
+    u8   level          = 1;   // entity level (scales with dungeon floor)
     f32  moveSpeed      = 3.0f;
     f32  detectionRange = 15.0f;
 

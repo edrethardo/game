@@ -92,6 +92,7 @@ private:
     LevelSection m_sections[MAX_LEVEL_SECTIONS];
     u32          m_sectionCount = 0;
     u32          m_levelSeed    = 42;
+    u32          m_currentFloor = 1;  // current dungeon floor (increases each descent)
 
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
@@ -110,6 +111,11 @@ private:
     // Combat feedback
     CombatHit   m_lastCombatHit;
     f32         m_hitMarkerTimer = 0.0f;
+    f32         m_potionCooldown = 0.0f;  // healing potion cooldown (15s)
+
+    // Floor door — portal to next dungeon level
+    Vec3 m_floorDoorPos    = {0, 0, 0};
+    bool m_floorDoorActive = false;
 
     // AoE fire effect (cheap visual for molotov splash)
     static constexpr u32 MAX_FIRE_FX = 8;

@@ -148,6 +148,14 @@ inline bool isItemEmpty(const ItemInstance& item) {
     return item.defId == 0xFFFF;
 }
 
+// Special defId values for globe drops (not real items — auto-pickup, instant effect)
+static constexpr u16 GLOBE_HEALTH_ID = 0xFFFE;
+static constexpr u16 GLOBE_ENERGY_ID = 0xFFFD;
+
+inline bool isGlobe(const ItemInstance& item) {
+    return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
+}
+
 // ---- Rarity color lookup ----
 
 inline Vec3 rarityColor(Rarity r) {
