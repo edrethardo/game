@@ -69,6 +69,8 @@ private:
     WorldItemPool   m_worldItems;
     bool       m_inventoryOpen = false;
     QuickbarState   m_quickbars[MAX_PLAYERS];
+    ViewmodelState  m_viewmodelState;  // first-person hand/weapon animation
+    Mesh            m_handMesh;        // procedural hand geometry
 
     // Legacy single-player compat
     Player     m_localPlayer;  // used for singleplayer mode camera/movement
@@ -129,6 +131,7 @@ private:
     void updateTargetLock(f32 dt); // singleplayer legacy
 
     void render(f32 alpha);
+    void renderViewmodel();  // draws first-person hand + equipped weapon
     void renderMenu();
     void renderLobby();
     void logStats();

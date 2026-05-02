@@ -1,6 +1,7 @@
 #include "renderer/hud.h"
 #include "renderer/shader.h"
 #include "renderer/font.h"
+#include "renderer/item_icons.h"
 #include "core/log.h"
 #include "core/profiler.h"
 #include "game/item.h"
@@ -391,6 +392,9 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
             for (f32 fy = y0 + 4; fy < y1 - 12; fy += 2.0f) {
                 pushLine(x0 + 4, fy, x1 - 4, fy, rc * 0.5f);
             }
+
+            // Item icon centered within the slot, inset by 4px on each side
+            ItemIconSystem::drawIcon(sw, sh, x0 + 4, y0 + 4, SLOT_SIZE - 8, def, item->rarity);
 
             // Abbreviated item name below the slot (first 5 chars)
             char abbrev[6] = {};

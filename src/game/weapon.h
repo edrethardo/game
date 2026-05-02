@@ -47,6 +47,15 @@ struct WeaponState {
     f32 recoilOffset  = 0.0f; // current recoil (decays per frame)
 };
 
+// First-person viewmodel animation state
+struct ViewmodelState {
+    f32 bobTimer    = 0.0f;  // increments while walking
+    f32 swayYaw     = 0.0f;  // camera look sway (lerps toward 0)
+    f32 swayPitch   = 0.0f;
+    f32 recoilKick  = 0.0f;  // decays after fire
+    f32 attackAnimT = 0.0f;  // melee swing countdown
+};
+
 static constexpr u32 MAX_WEAPON_DEFS = 16;
 
 // Predefined weapon table

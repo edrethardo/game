@@ -173,6 +173,52 @@ void Engine::init() {
     // Meshes
     m_cubeMesh = MeshSystem::createCube();
 
+    // Build procedural hand mesh for viewmodel (palm + 4 fingers)
+    {
+        // Helper to accumulate box faces into flat vertex/index arrays
+        struct BoxBuilder {
+            Vertex verts[200];
+            u32 indices[360];
+            u32 vc = 0, ic = 0;
+
+            void addBox(Vec3 min, Vec3 max) {
+                u32 base = vc;
+                Vec3 corners[8] = {
+                    {min.x, min.y, min.z}, {max.x, min.y, min.z},
+                    {max.x, max.y, min.z}, {min.x, max.y, min.z},
+                    {min.x, min.y, max.z}, {max.x, min.y, max.z},
+                    {max.x, max.y, max.z}, {min.x, max.y, max.z},
+                };
+                Vec3 normals[6] = {
+                    {0,0,-1}, {0,0,1}, {-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}
+                };
+                // Each face: 4 corners in CCW winding, 2 triangles
+                u32 faceIndices[6][4] = {
+                    {0,1,2,3}, {5,4,7,6}, {4,0,3,7}, {1,5,6,2}, {4,5,1,0}, {3,2,6,7}
+                };
+                for (u32 f = 0; f < 6; f++) {
+                    for (u32 v = 0; v < 4; v++) {
+                        verts[vc++] = {corners[faceIndices[f][v]], normals[f], {0,0}};
+                    }
+                    // Two triangles per quad: (0,1,2) and (0,2,3)
+                    u32 b = base + f * 4;
+                    indices[ic++] = b; indices[ic++] = b+1; indices[ic++] = b+2;
+                    indices[ic++] = b; indices[ic++] = b+2; indices[ic++] = b+3;
+                }
+            }
+        };
+
+        BoxBuilder bb;
+        // Palm block (centered, slightly flattened)
+        bb.addBox({-0.07f, -0.04f, -0.10f}, {0.07f, 0.04f, 0.10f});
+        // 4 fingers extending forward (+Z), spaced along X
+        for (int i = 0; i < 4; i++) {
+            f32 fx = -0.06f + i * 0.035f;
+            bb.addBox({fx, -0.02f, 0.10f}, {fx + 0.025f, 0.02f, 0.22f});
+        }
+        m_handMesh = MeshSystem::create(bb.verts, bb.vc, bb.indices, bb.ic);
+    }
+
     // Register cube as mesh 0 (fallback)
     std::strncpy(m_meshDefs[0].name, "cube", sizeof(m_meshDefs[0].name) - 1);
     m_meshDefs[0].mesh = m_cubeMesh;
@@ -404,6 +450,7 @@ void Engine::shutdown() {
     }
 
     MeshSystem::destroy(m_cubeMesh);
+    MeshSystem::destroy(m_handMesh);
     LevelMeshSystem::destroyAll(m_sections, m_sectionCount);
     LevelGridSystem::shutdown(m_grid);
 
@@ -686,6 +733,23 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Weapon fire
     handleWeaponFire(dt);
 
+    // Update viewmodel animation timers
+    {
+        // Use XZ speed to drive walk bob — ignore vertical velocity
+        f32 playerSpeed = length(Vec3{m_localPlayer.velocity.x, 0, m_localPlayer.velocity.z});
+        if (playerSpeed > 0.5f) {
+            m_viewmodelState.bobTimer += playerSpeed * dt;
+        } else {
+            // Smoothly decay bob amplitude when stopped
+            m_viewmodelState.bobTimer *= 0.95f;
+        }
+        // Exponential recoil decay each tick
+        m_viewmodelState.recoilKick *= 0.85f;
+        if (m_viewmodelState.recoilKick < 0.001f) m_viewmodelState.recoilKick = 0.0f;
+        // Count down melee swing animation
+        if (m_viewmodelState.attackAnimT > 0.0f) m_viewmodelState.attackAnimT -= dt;
+    }
+
     // Enemy AI
     { PROFILE_SCOPE(1, "AI");
     EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
@@ -754,6 +818,8 @@ void Engine::singleplayerUpdate(f32 dt) {
         my = static_cast<s32>(Window::getHeight()) - my;
 
         if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+            // Detect shift modifier for quickbar assignment vs. equip
+            bool shiftHeld = Input::isKeyDown(SDL_SCANCODE_LSHIFT) || Input::isKeyDown(SDL_SCANCODE_RSHIFT);
             f32 bpX      = Window::getWidth()  * 0.55f;
             f32 bpStartY = Window::getHeight() * 0.5f + 60.0f;
             f32 cellSize = 26.0f;
@@ -768,10 +834,16 @@ void Engine::singleplayerUpdate(f32 dt) {
                 if (mx >= static_cast<s32>(x) && mx <= static_cast<s32>(x + cellSize) &&
                     my >= static_cast<s32>(y) && my <= static_cast<s32>(y + cellSize)) {
                     if (!isItemEmpty(m_inventories[0].backpack[i])) {
-                        Inventory::equip(m_inventories[0], static_cast<u8>(i), m_itemDefs);
-                        LOG_INFO("Equipped item from slot %u", i);
-                        // Keep quickbar slot 0 in sync with the newly equipped weapon
-                        Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                        if (shiftHeld) {
+                            // Shift+Click: assign item to quickbar without equipping
+                            Quickbar::assignItem(m_quickbars[0], m_inventories[0], static_cast<u8>(i));
+                            LOG_INFO("Assigned item to quickbar from slot %u", i);
+                        } else {
+                            // Normal click: equip item and sync quickbar weapon slot
+                            Inventory::equip(m_inventories[0], static_cast<u8>(i), m_itemDefs);
+                            Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                            LOG_INFO("Equipped item from slot %u", i);
+                        }
                     }
                     break;
                 }
@@ -1073,6 +1145,10 @@ void Engine::handleWeaponFire(f32 dt) {
     }
 
     ws.recoilOffset += wpn.recoilKick;
+    // Amplified kick for viewmodel so the visual response is clearly visible
+    m_viewmodelState.recoilKick += wpn.recoilKick * 3.0f;
+    // Melee fires a swing animation of fixed duration
+    if (wpn.type == WeaponType::MELEE) m_viewmodelState.attackAnimT = 0.3f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
 }
 
@@ -1172,6 +1248,102 @@ void Engine::updateTargetLock(f32 dt) {
         }
     } else {
         m_localPlayer.lockActive = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Viewmodel — renders first-person hand + equipped weapon over everything
+// ---------------------------------------------------------------------------
+void Engine::renderViewmodel() {
+    // Skip when inventory is open or not in gameplay
+    if (m_inventoryOpen) return;
+    if (m_gameState != GameState::IN_GAME) return;
+
+    // Resolve the weapon mesh from the currently equipped item
+    const ItemInstance& equipped = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+    u8 weaponMeshId = 0;
+    if (!isItemEmpty(equipped)) {
+        weaponMeshId = m_itemDefs[equipped.defId].meshId;
+    }
+
+    // Clear depth buffer so the viewmodel always draws on top of world geometry
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    u32 sw = Window::getWidth();
+    u32 sh = Window::getHeight();
+    f32 aspect = static_cast<f32>(sw) / static_cast<f32>(sh);
+
+    // Tight near plane avoids clipping the hand mesh at close range
+    Mat4 proj = Mat4::perspective(70.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
+
+    // Sine-wave bob in two axes tied to walk speed and timer
+    f32 bobX = sinf(m_viewmodelState.bobTimer * 8.0f)  * 0.012f;
+    f32 bobY = sinf(m_viewmodelState.bobTimer * 16.0f) * 0.008f;
+
+    // Downward pitch on recoil (negative = tilt up after firing)
+    f32 recoilPitch = -m_viewmodelState.recoilKick * 0.3f;
+
+    // Melee swing: a half-sine arc over the 0.3 s window
+    f32 swingAngle = 0.0f;
+    if (m_viewmodelState.attackAnimT > 0.0f) {
+        f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1 -> 0
+        swingAngle = -1.2f * sinf(t * 3.14159f);    // smooth arc swing
+    }
+
+    // Camera-local position: right-side, below center, pushed back
+    Vec3 handOffset = {0.35f + bobX, -0.30f + bobY, -0.55f};
+
+    // Build hand model matrix in camera-local (view) space
+    Mat4 handModel = Mat4::translate(handOffset)
+                   * Mat4::rotateX(recoilPitch + swingAngle)
+                   * Mat4::rotateY(0.3f); // slight yaw so fingers point forward-left
+
+    Mat4 handMVP = proj * handModel;
+
+    glUseProgram(m_unlitShader.program);
+    glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, handMVP.m);
+
+    // Skin tone tint for the hand
+    Vec4 skinTint = {0.85f, 0.70f, 0.55f, 1.0f};
+    glUniform4f(m_unlitShader.loc_color, skinTint.x, skinTint.y, skinTint.z, skinTint.w);
+
+    // Bind white fallback texture (material 0) so unlit color is unmodulated
+    glActiveTexture(GL_TEXTURE0);
+    const Material* fallback = MaterialSystem::get(0);
+    if (fallback) {
+        glBindTexture(GL_TEXTURE_2D, fallback->texture.handle);
+    } else {
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glUniform1i(m_unlitShader.loc_texture0, 0);
+
+    MeshSystem::draw(m_handMesh);
+
+    // Draw weapon mesh attached to the hand if one is equipped
+    if (weaponMeshId > 0 && weaponMeshId < m_meshDefCount) {
+        // Normalise weapon mesh to ~0.35 units tall so all weapons look consistent
+        const AABB& wb = m_meshDefs[weaponMeshId].bounds;
+        f32 meshH = wb.max.y - wb.min.y;
+        f32 weaponScale = (meshH > 0.001f) ? (0.35f / meshH) : 0.35f;
+
+        // Offset forward and up from the palm centre
+        Mat4 weaponOffset = Mat4::translate({0.0f, 0.04f, -0.15f})
+                          * Mat4::scale({weaponScale, weaponScale, weaponScale});
+        Mat4 weaponModel = handModel * weaponOffset;
+        Mat4 weaponMVP   = proj * weaponModel;
+
+        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, weaponMVP.m);
+
+        // Use the weapon item's material tint; grey fallback if none assigned
+        const ItemDef& def = m_itemDefs[equipped.defId];
+        const Material* wpnMat = MaterialSystem::get(def.materialId);
+        Vec4 wpnTint = wpnMat ? wpnMat->tint : Vec4{0.7f, 0.7f, 0.7f, 1.0f};
+        glUniform4f(m_unlitShader.loc_color, wpnTint.x, wpnTint.y, wpnTint.z, wpnTint.w);
+        if (wpnMat) {
+            glBindTexture(GL_TEXTURE_2D, wpnMat->texture.handle);
+        }
+
+        MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
     }
 }
 
@@ -1481,6 +1653,9 @@ void Engine::render(f32 alpha) {
     }
 
     DebugDraw::flush(m_camera.viewProjection);
+
+    // First-person viewmodel (hand + weapon) — drawn after world, before HUD
+    renderViewmodel();
 
     // --- HUD ---
     if (m_inventoryOpen) {
