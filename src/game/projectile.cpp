@@ -1,0 +1,116 @@
+#include "game/projectile.h"
+#include "game/player.h"
+#include "game/combat.h"
+#include "world/combat_query.h"
+#include "world/raycast.h"
+#include "world/collision.h"
+
+void ProjectileSystem::init(ProjectilePool& pool) {
+    pool.activeCount = 0;
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        pool.projectiles[i].active = false;
+    }
+}
+
+void ProjectileSystem::spawn(ProjectilePool& pool,
+                              Vec3 origin, Vec3 direction, f32 speed,
+                              f32 damage, f32 radius, f32 lifetime,
+                              bool fromPlayer)
+{
+    // Find first inactive slot
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        if (!pool.projectiles[i].active) {
+            Projectile& p = pool.projectiles[i];
+            p.position   = origin;
+            p.velocity   = normalize(direction) * speed;
+            p.radius     = radius;
+            p.damage     = damage;
+            p.lifetime   = lifetime;
+            p.active     = true;
+            p.fromPlayer = fromPlayer;
+            pool.activeCount++;
+            return;
+        }
+    }
+}
+
+static void destroyProjectile(ProjectilePool& pool, u32 idx) {
+    pool.projectiles[idx].active = false;
+    if (pool.activeCount > 0) pool.activeCount--;
+}
+
+void ProjectileSystem::update(ProjectilePool& pool,
+                               const LevelGrid& grid,
+                               EntityPool& entities,
+                               Player& player,
+                               f32 dt)
+{
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile& p = pool.projectiles[i];
+        if (!p.active) continue;
+
+        // Lifetime
+        p.lifetime -= dt;
+        if (p.lifetime <= 0.0f) {
+            destroyProjectile(pool, i);
+            continue;
+        }
+
+        // Compute travel this frame
+        f32 speed = length(p.velocity);
+        f32 travel = speed * dt;
+        if (travel < 0.0001f) {
+            destroyProjectile(pool, i);
+            continue;
+        }
+        Vec3 dir = p.velocity * (1.0f / speed);
+
+        // Wall collision via short raycast
+        RayHit wallHit = Raycast::cast(grid, p.position, dir, travel + p.radius);
+        if (wallHit.hit && wallHit.distance <= travel + p.radius) {
+            destroyProjectile(pool, i);
+            continue;
+        }
+
+        // Move
+        p.position += p.velocity * dt;
+
+        // Entity collision (AABB overlap)
+        AABB projBox = {
+            p.position - Vec3{p.radius, p.radius, p.radius},
+            p.position + Vec3{p.radius, p.radius, p.radius}
+        };
+
+        if (p.fromPlayer) {
+            // Hit enemies
+            bool hit = false;
+            for (u32 e = 0; e < MAX_ENTITIES; e++) {
+                Entity& ent = entities.entities[e];
+                if (!(ent.flags & ENT_ACTIVE)) continue;
+                if (ent.flags & ENT_DEAD) continue;
+
+                if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
+                    EntityHandle h = {static_cast<u16>(e), ent.generation};
+                    Combat::applyDamage(entities, h, p.damage);
+                    hit = true;
+                    break; // one hit per projectile
+                }
+            }
+            if (hit) {
+                destroyProjectile(pool, i);
+                continue;
+            }
+        } else {
+            // Hit player
+            AABB playerBox = {
+                player.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
+                player.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
+            };
+            if (CombatQuery::aabbOverlap(projBox, playerBox)) {
+                Combat::applyDamageToPlayer(player, p.damage);
+                destroyProjectile(pool, i);
+                continue;
+            }
+        }
+    }
+}

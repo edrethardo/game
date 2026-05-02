@@ -1,0 +1,10 @@
+build/
+build-rel/
+*.o
+*.obj
+*.exe
+.cache/
+compile_commands.json
+.vscode/
+*.swp
+*.swo

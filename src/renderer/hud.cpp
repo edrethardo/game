@@ -1,0 +1,168 @@
+#include "renderer/hud.h"
+#include "renderer/shader.h"
+#include "core/log.h"
+#include <glad/glad.h>
+
+// Simple 2D line renderer for HUD elements (crosshair, hit markers).
+// Uses a small dynamic VBO with position+color, drawn with the debug shader
+// but with an orthographic VP matrix mapping pixels to NDC.
+
+struct HudVertex {
+    Vec3 pos;
+    Vec3 color;
+};
+
+static constexpr u32 MAX_HUD_VERTS = 256;
+
+static u32    s_vao = 0;
+static u32    s_vbo = 0;
+static Shader s_shader;
+static HudVertex s_verts[MAX_HUD_VERTS];
+static u32 s_vertCount = 0;
+
+static void pushLine(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
+    if (s_vertCount + 2 > MAX_HUD_VERTS) return;
+    s_verts[s_vertCount++] = {{x0, y0, 0.0f}, color};
+    s_verts[s_vertCount++] = {{x1, y1, 0.0f}, color};
+}
+
+static void pushQuad(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
+    // Draw as 3 lines forming a filled-looking outline
+    pushLine(x0, y0, x1, y0, color);
+    pushLine(x0, y1, x1, y1, color);
+    pushLine(x0, y0, x0, y1, color);
+    pushLine(x1, y0, x1, y1, color);
+}
+
+static void flushHUD(u32 screenWidth, u32 screenHeight) {
+    if (s_vertCount == 0 || !s_vao) return;
+
+    glDisable(GL_DEPTH_TEST);
+
+    glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, s_vertCount * sizeof(HudVertex), s_verts);
+
+    glUseProgram(s_shader.program);
+
+    // Build ortho projection: (0,0) = bottom-left, (w,h) = top-right
+    Mat4 ortho;
+    f32 w = static_cast<f32>(screenWidth);
+    f32 h = static_cast<f32>(screenHeight);
+    // Simple orthographic: map [0,w] x [0,h] to [-1,1] x [-1,1]
+    ortho = Mat4::identity();
+    ortho.m[0]  =  2.0f / w;
+    ortho.m[5]  =  2.0f / h;
+    ortho.m[10] = -1.0f;
+    ortho.m[12] = -1.0f;
+    ortho.m[13] = -1.0f;
+
+    s32 locVP = glGetUniformLocation(s_shader.program, "u_vp");
+    if (locVP >= 0) glUniformMatrix4fv(locVP, 1, GL_FALSE, ortho.ptr());
+
+    glBindVertexArray(s_vao);
+    glLineWidth(2.0f);
+    glDrawArrays(GL_LINES, 0, s_vertCount);
+    glLineWidth(1.0f);
+    glBindVertexArray(0);
+
+    glEnable(GL_DEPTH_TEST);
+
+    s_vertCount = 0;
+}
+
+void HUD::init() {
+    s_shader = ShaderSystem::load("assets/shaders/debug.vert", "assets/shaders/debug.frag");
+
+    glGenVertexArrays(1, &s_vao);
+    glBindVertexArray(s_vao);
+
+    glGenBuffers(1, &s_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(s_verts), nullptr, GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(HudVertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(HudVertex), (void*)(sizeof(Vec3)));
+    glEnableVertexAttribArray(1);
+
+    glBindVertexArray(0);
+    LOG_INFO("HUD initialized");
+}
+
+void HUD::shutdown() {
+    if (s_vao) { glDeleteVertexArrays(1, &s_vao); s_vao = 0; }
+    if (s_vbo) { glDeleteBuffers(1, &s_vbo); s_vbo = 0; }
+    ShaderSystem::destroy(s_shader);
+}
+
+void HUD::drawCrosshair(u32 screenWidth, u32 screenHeight, Vec3 color) {
+    f32 cx = screenWidth  * 0.5f;
+    f32 cy = screenHeight * 0.5f;
+    f32 gap  = 4.0f;
+    f32 size = 12.0f;
+
+    // Four lines with a gap in the centre
+    pushLine(cx - size, cy, cx - gap, cy, color);  // left
+    pushLine(cx + gap,  cy, cx + size, cy, color);  // right
+    pushLine(cx, cy - size, cx, cy - gap, color);   // bottom
+    pushLine(cx, cy + gap,  cx, cy + size, color);  // top
+
+    flushHUD(screenWidth, screenHeight);
+}
+
+void HUD::drawHitMarker(u32 screenWidth, u32 screenHeight, f32 alpha) {
+    f32 cx = screenWidth  * 0.5f;
+    f32 cy = screenHeight * 0.5f;
+    f32 size = 8.0f;
+    Vec3 color = {alpha, alpha, alpha};
+
+    // X shape
+    pushLine(cx - size, cy - size, cx - 3, cy - 3, color);
+    pushLine(cx + 3,    cy + 3,    cx + size, cy + size, color);
+    pushLine(cx + size, cy - size, cx + 3, cy - 3, color);
+    pushLine(cx - 3,    cy + 3,    cx - size, cy + size, color);
+
+    flushHUD(screenWidth, screenHeight);
+}
+
+void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
+                         f32 health, f32 maxHealth)
+{
+    f32 barW = 200.0f;
+    f32 barH = 16.0f;
+    f32 x0 = 20.0f;
+    f32 y0 = 20.0f;
+
+    f32 frac = (maxHealth > 0.0f) ? health / maxHealth : 0.0f;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+
+    // Background outline
+    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.3f, 0.3f, 0.3f});
+
+    // Filled portion (draw as horizontal lines to simulate fill)
+    Vec3 barColor = (frac > 0.3f) ? Vec3{0.2f, 0.8f, 0.2f} : Vec3{0.9f, 0.2f, 0.2f};
+    f32 fillW = barW * frac;
+    for (f32 y = y0 + 2; y < y0 + barH - 2; y += 2.0f) {
+        pushLine(x0 + 2, y, x0 + 2 + fillW - 4, y, barColor);
+    }
+
+    flushHUD(screenWidth, screenHeight);
+}
+
+void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) {
+    f32 x0 = static_cast<f32>(screenWidth) - 120.0f;
+    f32 y0 = 20.0f;
+
+    // Color per weapon type
+    Vec3 colors[3] = {
+        {0.7f, 0.7f, 0.7f}, // 0: melee (grey)
+        {1.0f, 0.8f, 0.2f}, // 1: hitscan (gold)
+        {0.3f, 0.5f, 1.0f}, // 2: projectile (blue)
+    };
+
+    Vec3 c = (weaponSlot < 3) ? colors[weaponSlot] : Vec3{1,1,1};
+    pushQuad(x0, y0, x0 + 100, y0 + 16, c);
+
+    flushHUD(screenWidth, screenHeight);
+}
