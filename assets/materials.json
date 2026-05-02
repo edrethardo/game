@@ -6,6 +6,10 @@
     { "id": 3, "name": "brick_wall",    "texture": "brick_wall_42.png" },
     { "id": 4, "name": "skeleton_skin", "texture": "skeleton_skin_42.png" },
     { "id": 5, "name": "spider_skin",   "texture": "spider_skin_42.png" },
-    { "id": 6, "name": "bat_skin",      "texture": "bat_skin_42.png" }
+    { "id": 6, "name": "bat_skin",      "texture": "bat_skin_42.png" },
+    { "id": 7, "name": "weapon_melee",      "tint": [0.7, 0.7, 0.8, 1.0] },
+    { "id": 8, "name": "weapon_hitscan",     "tint": [0.3, 0.3, 0.35, 1.0] },
+    { "id": 9, "name": "weapon_projectile",  "tint": [0.6, 0.4, 0.2, 1.0] },
+    { "id": 10, "name": "weapon_molotov",    "tint": [0.8, 0.3, 0.1, 1.0] }
   ]
 }

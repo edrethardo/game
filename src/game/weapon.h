@@ -2,12 +2,32 @@
 
 #include "core/types.h"
 
+// --- Weapon classification ---
+// WeaponType determines attack execution path in Combat namespace:
+//   MELEE      -> cone AoE check via fireMelee()
+//   HITSCAN    -> raycast trace via fireHitscan()
+//   PROJECTILE -> spawns flying projectile via fireProjectile()
 enum struct WeaponType : u8 {
     MELEE,
     HITSCAN,
     PROJECTILE,
 };
 
+// Weapon subtype determines visual identity and stat profile within each WeaponType.
+// Each subtype maps to a distinct mesh + material for rendering.
+enum struct WeaponSubtype : u8 {
+    NONE = 0,
+    // Melee subtypes
+    SWORD, DAGGER, AXE,
+    // Hitscan subtypes
+    PISTOL, SMG, CARBINE, REVOLVER,
+    // Projectile subtypes
+    BOW, CROSSBOW, THROWING_KNIFE, MOLOTOV,
+    COUNT
+};
+
+// Static weapon template. For items, the effective weapon is computed at runtime
+// by Inventory::getEffectiveWeapon() which applies item affixes to base stats.
 struct WeaponDef {
     const char* name;
     WeaponType  type;
@@ -20,13 +40,14 @@ struct WeaponDef {
     f32  recoilKick;      // pitch kick on fire (radians)
 };
 
+// Per-player mutable weapon state (cooldown tracking, recoil decay)
 struct WeaponState {
     u8  currentWeapon = 0;
     f32 cooldownTimer = 0.0f;
     f32 recoilOffset  = 0.0f; // current recoil (decays per frame)
 };
 
-static constexpr u32 MAX_WEAPON_DEFS = 8;
+static constexpr u32 MAX_WEAPON_DEFS = 16;
 
 // Predefined weapon table
 inline void initWeaponTable(WeaponDef* defs, u32& count) {

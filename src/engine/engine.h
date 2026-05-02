@@ -79,7 +79,7 @@ private:
     Mesh    m_cubeMesh;
 
     // Mesh registry for entities
-    static constexpr u32 MAX_MESH_DEFS = 16;
+    static constexpr u32 MAX_MESH_DEFS = 32;
     struct MeshDef { Mesh mesh; AABB bounds; char name[32]; };
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;

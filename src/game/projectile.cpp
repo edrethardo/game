@@ -68,8 +68,27 @@ void ProjectileSystem::update(ProjectilePool& pool,
         // Wall collision via short raycast
         RayHit wallHit = Raycast::cast(grid, p.position, dir, travel + p.radius);
         if (wallHit.hit && wallHit.distance <= travel + p.radius) {
+            // AoE splash on wall impact
+            if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
+                for (u32 e = 0; e < MAX_ENTITIES; e++) {
+                    Entity& ent = entities.entities[e];
+                    if (!(ent.flags & ENT_ACTIVE)) continue;
+                    if (ent.flags & ENT_DEAD) continue;
+                    Vec3 delta = ent.position - p.position;
+                    f32 dist = length(delta);
+                    if (dist < p.splashRadius) {
+                        EntityHandle h = {static_cast<u16>(e), ent.generation};
+                        Combat::applyDamage(entities, h, p.splashDamage);
+                    }
+                }
+            }
             destroyProjectile(pool, i);
             continue;
+        }
+
+        // Apply gravity for arcing projectiles (e.g., molotov)
+        if (p.projFlags & PROJ_GRAVITY) {
+            p.velocity.y -= p.gravity * dt;
         }
 
         // Move
@@ -97,6 +116,21 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 }
             }
             if (hit) {
+                // AoE splash on entity impact
+                if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
+                    for (u32 e2 = 0; e2 < MAX_ENTITIES; e2++) {
+                        Entity& ent2 = entities.entities[e2];
+                        if (!(ent2.flags & ENT_ACTIVE)) continue;
+                        if (ent2.flags & ENT_DEAD) continue;
+                        Vec3 delta = ent2.position - p.position;
+                        f32 dist = length(delta);
+                        if (dist < p.splashRadius) {
+                            EntityHandle h2 = {static_cast<u16>(e2), ent2.generation};
+                            // Don't double-damage the direct hit target
+                            Combat::applyDamage(entities, h2, p.splashDamage);
+                        }
+                    }
+                }
                 destroyProjectile(pool, i);
                 continue;
             }

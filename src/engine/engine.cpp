@@ -9,6 +9,8 @@
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
 #include "renderer/hud.h"
+#include "renderer/minimap.h"
+#include "renderer/font.h"
 #include "renderer/material.h"
 #include "renderer/obj_loader.h"
 #include "world/level_gen.h"
@@ -36,6 +38,8 @@
 #include <glad/glad.h>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 
 static FrameAllocator s_frameAllocator;
 
@@ -145,6 +149,7 @@ void Engine::init() {
     Renderer::init();
     DebugDraw::init();
     HUD::init();
+    FontSystem::init();
 
     // Shaders
     m_basicShader = ShaderSystem::load("assets/shaders/basic.vert",
@@ -168,11 +173,22 @@ void Engine::init() {
     {
         struct MeshEntry { const char* name; const char* path; };
         static constexpr MeshEntry kMeshes[] = {
-            {"skeleton", "assets/meshes/skeleton.obj"},
-            {"spider",   "assets/meshes/spider.obj"},
-            {"bat",      "assets/meshes/bat.obj"},
-            {"pillar",   "assets/meshes/pillar.obj"},
-            {"chest",    "assets/meshes/chest.obj"},
+            {"skeleton",       "assets/meshes/skeleton.obj"},
+            {"spider",         "assets/meshes/spider.obj"},
+            {"bat",            "assets/meshes/bat.obj"},
+            {"pillar",         "assets/meshes/pillar.obj"},
+            {"chest",          "assets/meshes/chest.obj"},
+            {"sword",          "assets/meshes/sword.obj"},
+            {"dagger",         "assets/meshes/dagger.obj"},
+            {"axe",            "assets/meshes/axe.obj"},
+            {"pistol",         "assets/meshes/pistol.obj"},
+            {"smg",            "assets/meshes/smg.obj"},
+            {"carbine",        "assets/meshes/carbine.obj"},
+            {"revolver",       "assets/meshes/revolver.obj"},
+            {"bow",            "assets/meshes/bow.obj"},
+            {"crossbow",       "assets/meshes/crossbow.obj"},
+            {"throwing_knife", "assets/meshes/throwing_knife.obj"},
+            {"molotov",        "assets/meshes/molotov.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -197,6 +213,21 @@ void Engine::init() {
     ItemLoader::loadSkillDefs("assets/config/skills.json", m_skillDefs, m_skillDefCount);
     SkillSystem::init();
     ItemGen::init(42);
+
+    // Resolve item visual references (material names -> IDs)
+    ItemLoader::resolveVisuals(m_itemDefs, m_itemDefCount);
+
+    // Resolve mesh names to mesh registry IDs
+    for (u32 i = 0; i < m_itemDefCount; i++) {
+        if (m_itemDefs[i].meshName[0] != '\0') {
+            for (u32 m = 0; m < m_meshDefCount; m++) {
+                if (std::strcmp(m_itemDefs[i].meshName, m_meshDefs[m].name) == 0) {
+                    m_itemDefs[i].meshId = static_cast<u8>(m);
+                    break;
+                }
+            }
+        }
+    }
 
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
         (void)pool; (void)entityIndex;
@@ -231,80 +262,74 @@ void Engine::init() {
 }
 
 void Engine::startGame() {
-    // Build level — try JSON first, fall back to procedural
-    LevelGridSystem::init(m_grid, 32, 32, 1.0f);
-
-    LevelLoader::EnemySpawn jsonSpawns[LevelLoader::MAX_ENEMY_SPAWNS];
-    u32 jsonSpawnCount = 0;
-    Vec3 spawnPos = LevelLoader::loadFromJson("assets/levels/test_dungeon.json",
-                                               m_grid, jsonSpawns, jsonSpawnCount,
-                                               LevelLoader::MAX_ENEMY_SPAWNS);
-    bool usedJson = (spawnPos.x != 0 || spawnPos.z != 0);
-    if (!usedJson) {
-        spawnPos = LevelGen::generateTestDungeon(m_grid);
-    }
+    // Build level — use BSP procedural generation with random seed
+    u32 dungeonSeed = static_cast<u32>(std::rand());
+    LevelGridSystem::init(m_grid, 48, 48, 1.0f);
+    DungeonResult dungeon = LevelGen::generate(m_grid, dungeonSeed, 48, 48);
+    Vec3 spawnPos = dungeon.spawnPos;
 
     m_sectionCount = LevelMeshSystem::buildAll(m_grid, m_sections, MAX_LEVEL_SECTIONS);
+    Minimap::init(m_grid.width, m_grid.depth);
 
     // Init entities
     EntitySystem::init(m_entities);
 
-    if (usedJson && jsonSpawnCount > 0) {
-        // Spawn enemies from JSON level
-        for (u32 i = 0; i < jsonSpawnCount; i++) {
-            LevelLoader::EnemySpawn& es = jsonSpawns[i];
+    // Spawn enemies procedurally in each room (skip room 0 = spawn room)
+    {
+        // Enemy type templates
+        struct EnemyTemplate {
+            const char* type;
+            f32 health, moveSpeed, detRange, atkRange, atkCool, damage;
+            Vec3 halfExtents;
+            bool flying;
+        };
+        static constexpr EnemyTemplate kEnemies[] = {
+            {"skeleton", 50.0f, 2.5f, 15.0f, 2.5f, 1.0f, 10.0f, {0.4f, 0.9f, 0.4f}, false},
+            {"bat",      30.0f, 7.0f, 18.0f, 8.0f, 0.8f, 12.0f, {0.5f, 0.4f, 0.4f}, true},
+            {"spider",   40.0f, 3.5f, 12.0f, 2.0f, 0.8f, 12.0f, {0.5f, 0.3f, 0.5f}, false},
+        };
 
-            // Determine enemy properties based on type name
-            bool flying = (std::strcmp(es.type, "bat") == 0);
-            f32 health = 50.0f, moveSpeed = 2.5f, detRange = 15.0f;
-            f32 atkRange = 2.5f, atkCool = 1.0f, damage = 10.0f;
-            Vec3 halfExtents = {0.4f, 0.5f, 0.4f};
-            u8 meshId = 0;
-            u8 matId = 0;
+        for (u32 r = 1; r < dungeon.roomCount; r++) {
+            const DungeonRoom& room = dungeon.rooms[r];
 
-            if (std::strcmp(es.type, "skeleton") == 0) {
-                halfExtents = {0.4f, 0.9f, 0.4f};
-                matId = MaterialSystem::getIdByName("skeleton_skin");
-            } else if (std::strcmp(es.type, "bat") == 0) {
-                health = 30.0f; moveSpeed = 5.0f; atkRange = 6.0f;
-                atkCool = 1.5f; damage = 8.0f;
-                halfExtents = {0.5f, 0.4f, 0.4f};
-                matId = MaterialSystem::getIdByName("bat_skin");
-            } else if (std::strcmp(es.type, "spider") == 0) {
-                health = 40.0f; moveSpeed = 3.5f; detRange = 12.0f;
-                atkRange = 2.0f; atkCool = 0.8f; damage = 12.0f;
-                halfExtents = {0.5f, 0.3f, 0.5f};
-                matId = MaterialSystem::getIdByName("spider_skin");
-            }
+            // 1-3 enemies per room, scaled by room area
+            u32 area = room.w * room.d;
+            u32 enemyCount = 1 + (area / 20);
+            if (enemyCount > 3) enemyCount = 3;
 
-            // Find mesh by name
-            for (u32 m = 0; m < m_meshDefCount; m++) {
-                if (std::strcmp(m_meshDefs[m].name, es.type) == 0) {
-                    meshId = static_cast<u8>(m);
-                    break;
+            for (u32 e = 0; e < enemyCount; e++) {
+                // Pick random enemy type
+                u32 typeIdx = static_cast<u32>(std::rand()) % 3;
+                const EnemyTemplate& tmpl = kEnemies[typeIdx];
+
+                // Random position within room bounds
+                f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
+                f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
+                f32 spawnY = tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y);
+
+                // Find mesh and material by enemy type name
+                u8 meshId = 0, matId = 0;
+                for (u32 m = 0; m < m_meshDefCount; m++) {
+                    if (std::strcmp(m_meshDefs[m].name, tmpl.type) == 0) {
+                        meshId = static_cast<u8>(m);
+                        break;
+                    }
+                }
+                char skinName[64];
+                std::snprintf(skinName, sizeof(skinName), "%s_skin", tmpl.type);
+                matId = MaterialSystem::getIdByName(skinName);
+
+                EntityHandle h = EntitySystem::spawn(m_entities,
+                    Vec3{ex, spawnY, ez}, tmpl.halfExtents, tmpl.flying,
+                    tmpl.health, tmpl.moveSpeed, tmpl.detRange,
+                    tmpl.atkRange, tmpl.atkCool, tmpl.damage);
+                Entity* ent = handleGet(m_entities, h);
+                if (ent) {
+                    ent->meshId = meshId;
+                    ent->materialId = matId;
                 }
             }
-
-            u32 gx = static_cast<u32>(es.x);
-            u32 gz = static_cast<u32>(es.z);
-            f32 floorH = 0.0f;
-            if (LevelGridSystem::isInBounds(m_grid, gx, gz) &&
-                !LevelGridSystem::isSolid(m_grid, gx, gz)) {
-                floorH = LevelGridSystem::getFloorHeight(m_grid, gx, gz);
-            }
-
-            f32 spawnY = flying ? (floorH + 1.5f) : (floorH + halfExtents.y);
-            EntityHandle h = EntitySystem::spawn(m_entities,
-                Vec3{es.x, spawnY, es.z}, halfExtents, flying,
-                health, moveSpeed, detRange, atkRange, atkCool, damage);
-            Entity* e = handleGet(m_entities, h);
-            if (e) {
-                e->meshId = meshId;
-                e->materialId = matId;
-            }
         }
-    } else {
-        spawnTestEnemies(m_entities, m_grid);
     }
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
@@ -374,7 +399,9 @@ void Engine::shutdown() {
     ShaderSystem::destroy(m_basicShader);
     ShaderSystem::destroy(m_unlitShader);
 
+    FontSystem::shutdown();
     HUD::shutdown();
+    Minimap::shutdown();
     DebugDraw::shutdown();
     Renderer::shutdown();
     s_frameAllocator.shutdown();
@@ -785,6 +812,9 @@ void Engine::singleplayerUpdate(f32 dt) {
             }
         }
     }
+
+    // Update fog-of-war
+    Minimap::updateVisited(m_grid, m_localPlayer.position);
 
     syncLocalPlayerToNetPlayer();
 }
@@ -1208,22 +1238,33 @@ void Engine::render(f32 alpha) {
 
         if (!(e.flags & ENT_DEAD)) {
             if (isBat) {
-                // Wing flap: pulse X scale
-                f32 flapSpeed = isMoving ? 12.0f : 6.0f;
-                animScaleX = 1.0f + sinf(e.animTimer * flapSpeed) * 0.15f;
-                // Constant hover bob
-                animBobY = sinf(e.animTimer * 4.0f) * 0.05f;
+                // Wing flap: dramatic X+Z scale pulsing
+                f32 flapSpeed = isMoving ? 16.0f : 8.0f;
+                f32 flapAmp = isMoving ? 0.35f : 0.25f;
+                animScaleX = 1.0f + sinf(e.animTimer * flapSpeed) * flapAmp;
+                // Z-axis wing tilt for depth
+                f32 animScaleZ = 1.0f + cosf(e.animTimer * flapSpeed) * flapAmp * 0.5f;
+                renderHalf.z *= animScaleZ;
+                // Hover bob — more pronounced
+                animBobY = sinf(e.animTimer * 5.0f) * 0.08f;
                 // Lean into dive during flyby
                 if (e.aiState == AIState::FLYBY) {
-                    animLean = -0.4f; // nose down
+                    animLean = -0.5f; // steep nose-down dive
+                }
+                // Attack swipe: rapid wing fold + body roll
+                if (e.attackAnimT > 0.0f) {
+                    f32 t = e.attackAnimT / 0.4f; // 0→1
+                    animScaleX = 0.5f + 0.5f * (1.0f - t); // wings fold in then snap out
+                    animLean = -0.6f * t; // aggressive forward lunge
+                    animBobY += 0.12f * t; // hop upward during swipe
                 }
             } else if (isMoving) {
                 // Ground enemies: walking bob
                 animBobY = sinf(e.animTimer * 10.0f) * 0.04f;
             }
 
-            // Attack lunge — brief forward lean
-            if (e.attackAnimT > 0.0f) {
+            // Attack lunge for non-bat enemies
+            if (!isBat && e.attackAnimT > 0.0f) {
                 f32 t = e.attackAnimT / 0.3f; // 0→1
                 animLean = -0.3f * t; // lean forward
                 animBobY += 0.05f * t; // slight hop
@@ -1286,7 +1327,7 @@ void Engine::render(f32 alpha) {
         Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
     }
 
-    // --- World items ---
+    // --- World items (rendered with weapon-specific meshes when available) ---
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& wi = m_worldItems.items[i];
         if (!wi.active) continue;
@@ -1296,11 +1337,32 @@ void Engine::render(f32 alpha) {
         Vec3 pos = wi.position + Vec3{0, bobY, 0};
         f32 spin = wi.bobTimer * 2.0f;  // slow spin
 
+        // Use weapon-specific mesh if available, otherwise cube fallback
+        const Mesh* itemMesh = &m_cubeMesh;
+        Texture itemTex = defaultTex;
+        Vec4 tint = {color.x, color.y, color.z, 1.0f};
+
+        if (wi.item.defId < m_itemDefCount) {
+            const ItemDef& def = m_itemDefs[wi.item.defId];
+            if (def.meshId > 0 && def.meshId < m_meshDefCount) {
+                itemMesh = &m_meshDefs[def.meshId].mesh;
+            }
+            if (def.materialId > 0) {
+                const Material* mat = MaterialSystem::get(def.materialId);
+                if (mat) {
+                    itemTex = mat->texture;
+                    // Blend material tint with rarity color
+                    tint = {color.x * mat->tint.x, color.y * mat->tint.y,
+                            color.z * mat->tint.z, 1.0f};
+                }
+            }
+        }
+
         Mat4 model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({0.25f, 0.25f, 0.25f});
         AABB bounds = {pos - Vec3{0.25f,0.25f,0.25f}, pos + Vec3{0.25f,0.25f,0.25f}};
 
-        Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh,
-                         model, bounds, {color.x, color.y, color.z, 1.0f});
+        Renderer::submit(m_unlitShader, itemTex, *itemMesh,
+                         model, bounds, tint);
 
         // Loot beam
         DebugDraw::line(wi.position, wi.position + Vec3{0, 3.0f, 0}, color);
@@ -1398,8 +1460,11 @@ void Engine::render(f32 alpha) {
     // --- HUD ---
     if (m_inventoryOpen) {
         // Inventory screen replaces normal HUD elements
+        s32 invMX, invMY;
+        Input::getMousePosition(invMX, invMY);
+        invMY = static_cast<s32>(sh) - invMY; // flip to HUD coords
         HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
-                                  m_itemDefs, 0, false);
+                                  m_itemDefs, 0, false, invMX, invMY);
     } else {
         Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
                         ? Vec3{1.0f, 0.3f, 0.3f}
@@ -1430,6 +1495,9 @@ void Engine::render(f32 alpha) {
                 HUD::drawSkillCooldown(sw, sh, 0.0f);
             }
         }
+
+        // Minimap (top-right corner)
+        Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw);
     }
 
     // Profiler overlay (F3)

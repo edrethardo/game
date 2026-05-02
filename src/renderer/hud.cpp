@@ -1,9 +1,11 @@
 #include "renderer/hud.h"
 #include "renderer/shader.h"
+#include "renderer/font.h"
 #include "core/log.h"
 #include "core/profiler.h"
 #include "game/item.h"
 #include <glad/glad.h>
+#include <cstdio>
 
 // Simple 2D line renderer for HUD elements (crosshair, hit markers).
 // Uses a small dynamic VBO with position+color, drawn with the debug shader
@@ -366,9 +368,9 @@ void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
 void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                const PlayerInventory& inv,
                                const ItemDef* itemDefs,
-                               u8 selectedSlot, bool selectedIsEquipped)
+                               u8 selectedSlot, bool selectedIsEquipped,
+                               s32 mouseX, s32 mouseY)
 {
-    (void)itemDefs; // reserved for future tooltip stat lookups
 
     f32 centerY = static_cast<f32>(sh) * 0.5f;
 
@@ -462,5 +464,212 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         }
     }
 
+    // --- Tooltip on hover ---
+    if (mouseX >= 0 && mouseY >= 0) {
+        f32 mx = static_cast<f32>(mouseX);
+        f32 my = static_cast<f32>(mouseY);
+
+        // Check equipment slots
+        for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++) {
+            f32 y = eqStartY - static_cast<f32>(i) * (slotH + slotGap);
+            if (mx >= eqX && mx <= eqX + slotW && my >= y && my <= y + slotH) {
+                if (!isItemEmpty(inv.equipped[i])) {
+                    drawItemTooltip(sw, sh, eqX + slotW + 8.0f, y,
+                                    inv.equipped[i], itemDefs[inv.equipped[i].defId]);
+                }
+                break;
+            }
+        }
+
+        // Check backpack slots
+        for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
+            u32 col = i % 6;
+            u32 row = i / 6;
+            f32 x = bpX + static_cast<f32>(col) * (cellSize + cellGap);
+            f32 y = bpStartY - static_cast<f32>(row) * (cellSize + cellGap);
+
+            if (mx >= x && mx <= x + cellSize && my >= y && my <= y + cellSize) {
+                if (!isItemEmpty(inv.backpack[i])) {
+                    drawItemTooltip(sw, sh, x + cellSize + 8.0f, y,
+                                    inv.backpack[i], itemDefs[inv.backpack[i].defId]);
+                }
+                break;
+            }
+        }
+    }
+
     flushHUD(sw, sh);
+}
+
+// Helper: get string name for affix type
+static const char* affixTypeName(AffixType type) {
+    switch (type) {
+        case AffixType::DAMAGE_FLAT:        return "+Damage";
+        case AffixType::HEALTH_FLAT:        return "+Health";
+        case AffixType::MOVE_SPEED_FLAT:    return "+Move Speed";
+        case AffixType::DAMAGE_PCT:         return "+Damage %";
+        case AffixType::COOLDOWN_REDUCTION: return "Cooldown Reduction";
+        case AffixType::HEALTH_PCT:         return "+Health %";
+        case AffixType::LIFE_ON_HIT:        return "Life on Hit";
+        case AffixType::PROJECTILE_SPEED:   return "+Proj Speed";
+        case AffixType::CONE_ANGLE:         return "+Swing Arc";
+        case AffixType::RANGE_BONUS:        return "+Range";
+        case AffixType::DAMAGE_TO_FLYING:   return "+Dmg vs Flying";
+        default:                            return "Unknown";
+    }
+}
+
+static const char* rarityName(Rarity r) {
+    switch (r) {
+        case Rarity::COMMON:    return "Common";
+        case Rarity::MAGIC:     return "Magic";
+        case Rarity::RARE:      return "Rare";
+        case Rarity::LEGENDARY: return "Legendary";
+        default:                return "";
+    }
+}
+
+static const char* slotName(ItemSlot slot) {
+    switch (slot) {
+        case ItemSlot::WEAPON:  return "Weapon";
+        case ItemSlot::OFFHAND: return "Offhand";
+        case ItemSlot::HELMET:  return "Helmet";
+        case ItemSlot::ARMOR:   return "Armor";
+        case ItemSlot::BOOTS:   return "Boots";
+        case ItemSlot::RING:    return "Ring";
+        default:                return "";
+    }
+}
+
+static const char* subtypeName(WeaponSubtype st) {
+    switch (st) {
+        case WeaponSubtype::SWORD:          return "Sword";
+        case WeaponSubtype::DAGGER:         return "Dagger";
+        case WeaponSubtype::AXE:            return "Axe";
+        case WeaponSubtype::PISTOL:         return "Pistol";
+        case WeaponSubtype::SMG:            return "SMG";
+        case WeaponSubtype::CARBINE:        return "Carbine";
+        case WeaponSubtype::REVOLVER:       return "Revolver";
+        case WeaponSubtype::BOW:            return "Bow";
+        case WeaponSubtype::CROSSBOW:       return "Crossbow";
+        case WeaponSubtype::THROWING_KNIFE: return "Throwing Knife";
+        case WeaponSubtype::MOLOTOV:        return "Molotov";
+        default:                            return "";
+    }
+}
+
+void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
+                            const ItemInstance& item, const ItemDef& def)
+{
+    if (isItemEmpty(item)) return;
+
+    Vec3 rColor = rarityColor(item.rarity);
+
+    // Calculate tooltip dimensions
+    u32 nameScale = 2;
+    u32 bodyScale = 1;
+    f32 lineH = FontSystem::textHeight(bodyScale) + 3.0f;
+    f32 nameH = FontSystem::textHeight(nameScale) + 4.0f;
+    f32 padX = 8.0f;
+    f32 padY = 6.0f;
+
+    // Count lines for sizing
+    u32 lineCount = 3; // rarity, slot, blank separator
+    if (def.slot == ItemSlot::WEAPON) {
+        lineCount += 1; // subtype
+        lineCount += 3; // damage, cooldown, range
+    } else {
+        lineCount += 1; // health
+    }
+    lineCount += item.affixCount; // affix lines
+    if (def.legendarySkillId != SkillId::NONE) lineCount += 1;
+
+    f32 tooltipW = 180.0f;
+    f32 tooltipH = padY * 2 + nameH + lineCount * lineH;
+
+    // Clamp tooltip to screen bounds
+    if (tipX + tooltipW > static_cast<f32>(sw)) tipX = static_cast<f32>(sw) - tooltipW - 4.0f;
+    if (tipY + tooltipH > static_cast<f32>(sh)) tipY = static_cast<f32>(sh) - tooltipH - 4.0f;
+    if (tipX < 0) tipX = 4.0f;
+    if (tipY < 0) tipY = 4.0f;
+
+    // Draw dark background
+    Vec3 bgColor = {0.08f, 0.08f, 0.12f};
+    for (f32 y = tipY; y < tipY + tooltipH; y += 1.0f) {
+        pushLine(tipX, y, tipX + tooltipW, y, bgColor);
+    }
+
+    // Border in rarity color
+    Vec3 borderColor = {rColor.x * 0.6f, rColor.y * 0.6f, rColor.z * 0.6f};
+    pushQuad(tipX, tipY, tipX + tooltipW, tipY + tooltipH, borderColor);
+
+    flushHUD(sw, sh);
+
+    // Draw text content
+    f32 textX = tipX + padX;
+    f32 curY = tipY + tooltipH - padY - nameH; // start from top (y increases upward)
+
+    // Item name
+    FontSystem::drawText(sw, sh, textX, curY, def.name, rColor, nameScale);
+    curY -= nameH;
+
+    // Rarity
+    FontSystem::drawText(sw, sh, textX, curY, rarityName(item.rarity), rColor, bodyScale);
+    curY -= lineH;
+
+    // Slot type
+    FontSystem::drawText(sw, sh, textX, curY, slotName(def.slot), {0.8f, 0.8f, 0.8f}, bodyScale);
+    curY -= lineH;
+
+    // Weapon subtype
+    if (def.slot == ItemSlot::WEAPON && def.weaponSubtype != WeaponSubtype::NONE) {
+        FontSystem::drawText(sw, sh, textX, curY, subtypeName(def.weaponSubtype), {0.6f, 0.6f, 0.6f}, bodyScale);
+        curY -= lineH;
+    }
+
+    // Separator line
+    curY -= lineH * 0.5f;
+
+    // Stats
+    char buf[64];
+    if (def.slot == ItemSlot::WEAPON) {
+        std::snprintf(buf, sizeof(buf), "Damage: %.0f", item.damage);
+        FontSystem::drawText(sw, sh, textX, curY, buf, {1.0f, 0.9f, 0.7f}, bodyScale);
+        curY -= lineH;
+
+        std::snprintf(buf, sizeof(buf), "Speed: %.2fs", def.baseCooldown);
+        FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 0.9f, 0.7f}, bodyScale);
+        curY -= lineH;
+
+        if (def.weaponType == WeaponType::MELEE) {
+            std::snprintf(buf, sizeof(buf), "Range: %.1fm", def.baseRange);
+        } else if (def.weaponType == WeaponType::HITSCAN) {
+            std::snprintf(buf, sizeof(buf), "Range: %.0fm", def.baseRange);
+        } else {
+            std::snprintf(buf, sizeof(buf), "Proj Speed: %.0f", def.baseProjectileSpeed);
+        }
+        FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 0.7f, 0.9f}, bodyScale);
+        curY -= lineH;
+    } else {
+        if (item.bonusHealth > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "+%.0f Health", item.bonusHealth);
+            FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 1.0f, 0.7f}, bodyScale);
+            curY -= lineH;
+        }
+    }
+
+    // Affixes
+    for (u8 a = 0; a < item.affixCount; a++) {
+        const Affix& affix = item.affixes[a];
+        const char* name = affixTypeName(affix.type);
+        std::snprintf(buf, sizeof(buf), "%s: %.1f", name, affix.value);
+        FontSystem::drawText(sw, sh, textX, curY, buf, {0.4f, 0.8f, 1.0f}, bodyScale);
+        curY -= lineH;
+    }
+
+    // Legendary skill
+    if (def.legendarySkillId != SkillId::NONE) {
+        FontSystem::drawText(sw, sh, textX, curY, "* Legendary Power *", {1.0f, 0.5f, 0.0f}, bodyScale);
+        curY -= lineH;
+    }
 }

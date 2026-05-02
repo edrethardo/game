@@ -125,13 +125,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             // Bats hover erratically even when idle
             if (isBat) {
-                e.position.y += sinf(e.animTimer * 3.0f) * 0.3f * dt;
-                e.position.x += sinf(e.animTimer * 1.7f) * 0.1f * dt;
+                // More erratic idle hovering
+                e.position.y += sinf(e.animTimer * 4.0f) * 0.4f * dt;
+                e.position.x += sinf(e.animTimer * 2.3f) * 0.2f * dt;
+                e.position.z += cosf(e.animTimer * 1.9f) * 0.15f * dt;
             }
 
-            // Staggered LOS check: only check every 8 frames
+            // Staggered LOS check — bats check more frequently (every 4 frames)
             e.aiCheckIdx++;
-            if (e.aiCheckIdx >= 8) {
+            u16 checkFreq = isBat ? 4 : 8;
+            if (e.aiCheckIdx >= checkFreq) {
                 e.aiCheckIdx = 0;
                 if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
                     e.aiState = AIState::CHASE;
@@ -141,12 +144,18 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         case AIState::CHASE: {
             if (isBat) {
-                // Erratic flying chase — weave side to side
-                f32 wobbleX = sinf(e.animTimer * 5.0f) * e.moveSpeed * 0.4f;
-                f32 wobbleY = sinf(e.animTimer * 3.0f) * e.moveSpeed * 0.3f;
+                // Aggressive flying chase — target position above the player
+                Vec3 abovePlayer = playerEye + Vec3{0, 1.8f, 0}; // hover well above head
+                Vec3 toAbove = abovePlayer - e.position;
+                f32 aboveDist = length(toAbove);
+                Vec3 dirAbove = (aboveDist > 0.01f) ? toAbove * (1.0f / aboveDist) : Vec3{0,1,0};
 
-                e.velocity = dirToPlayer * e.moveSpeed;
-                Vec3 perp = {-dirToPlayer.z, 0.0f, dirToPlayer.x};
+                // Faster erratic weave
+                f32 wobbleX = sinf(e.animTimer * 7.0f) * e.moveSpeed * 0.5f;
+                f32 wobbleY = sinf(e.animTimer * 4.0f) * e.moveSpeed * 0.2f;
+
+                e.velocity = dirAbove * e.moveSpeed;
+                Vec3 perp = {-dirAbove.z, 0.0f, dirAbove.x};
                 e.velocity.x += perp.x * wobbleX;
                 e.velocity.z += perp.z * wobbleX;
                 e.velocity.y += wobbleY;
@@ -171,20 +180,20 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Transition to attack if close enough
             if (dist <= e.attackRange) {
                 if (isBat) {
-                    // Bats always do a movement-based attack
-                    if ((std::rand() % 100) < 30) {
-                        // FLYBY: swoop past player to behind them
+                    // Aggressive bat attacks — more dive attacks, faster timers
+                    if ((std::rand() % 100) < 40) {
+                        // FLYBY: fast swoop past player to behind them
                         Vec3 playerFwd = {-sinf(player.yaw), 0.0f, -cosf(player.yaw)};
-                        e.flybyTarget = playerEye + playerFwd * 6.0f + Vec3{0, 1.5f, 0};
-                        e.flybyTimer = 2.5f;
+                        e.flybyTarget = playerEye + playerFwd * 5.0f + Vec3{0, 2.0f, 0};
+                        e.flybyTimer = 1.8f;
                         e.aiState = AIState::FLYBY;
                     } else {
-                        // Direct dive attack: swoop through player position
-                        e.flybyTarget = playerEye + Vec3{0, -0.3f, 0};
-                        e.flybyTimer = 1.5f;
+                        // Direct dive attack: steep dive from above
+                        e.flybyTarget = playerEye + Vec3{0, -0.5f, 0};
+                        e.flybyTimer = 1.0f;
                         e.aiState = AIState::FLYBY;
                     }
-                    e.attackAnimT = 0.3f;
+                    e.attackAnimT = 0.4f; // longer swipe animation
                 } else {
                     e.aiState     = AIState::ATTACK;
                     e.attackTimer = e.attackCooldown * 0.5f;
@@ -203,7 +212,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             if (targetDist > 0.3f) {
                 Vec3 flyDir = toTarget * (1.0f / targetDist);
-                f32 speed = e.moveSpeed * 1.8f; // fast dive
+                f32 speed = e.moveSpeed * 2.2f; // aggressive fast dive
                 e.velocity = flyDir * speed;
 
                 // Wobble during swoop
@@ -228,8 +237,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 Vec3 retreatDir = e.velocity * (-1.0f);
                 if (lengthSq(retreatDir) > 0.01f) retreatDir = normalize(retreatDir);
                 else retreatDir = {0, 1, 0};
-                e.flybyTarget = e.position + retreatDir * 4.0f + Vec3{0, 2.0f, 0};
-                e.flybyTimer = 1.5f;
+                e.flybyTarget = e.position + retreatDir * 3.0f + Vec3{0, 2.5f, 0};
+                e.flybyTimer = 1.0f; // quick retreat, return to attack faster
                 // Stay in FLYBY to fly to retreat point, then will expire to CHASE
             }
 

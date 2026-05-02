@@ -14,7 +14,9 @@ add_executable(DungeonEngine
     renderer/camera.cpp
     renderer/renderer.cpp
     renderer/debug_draw.cpp
+    renderer/font.cpp
     renderer/hud.cpp
+    renderer/minimap.cpp
     world/level_grid.cpp
     world/level_mesh.cpp
     world/level_gen.cpp

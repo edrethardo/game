@@ -5,6 +5,7 @@
 
 struct PlayerInventory;
 struct ItemDef;
+struct ItemInstance;
 
 namespace HUD {
     void init();
@@ -39,7 +40,8 @@ namespace HUD {
     void drawInventoryScreen(u32 sw, u32 sh,
                               const PlayerInventory& inv,
                               const ItemDef* itemDefs,
-                              u8 selectedSlot, bool selectedIsEquipped);
+                              u8 selectedSlot, bool selectedIsEquipped,
+                              s32 mouseX = -1, s32 mouseY = -1);
 
     // Energy bar (blue bar below health bar)
     void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
@@ -49,4 +51,8 @@ namespace HUD {
 
     // Loot notification bar (center-top, fades out)
     void drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha);
+
+    // Item tooltip — drawn near the hovered item slot
+    void drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
+                         const ItemInstance& item, const ItemDef& def);
 }

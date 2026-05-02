@@ -9,6 +9,8 @@
 struct Player;
 struct ProjectilePool;
 
+// Result of a player attack. Melee can hit multiple entities (cone query);
+// hitscan hits first entity or wall (raycast); projectile spawns are fire-and-forget.
 // Combat hit result from last player attack (for feedback)
 struct AttackResult {
     bool  didFire     = false;
@@ -42,6 +44,12 @@ namespace Combat {
     bool fireProjectile(const WeaponDef& weapon,
                         Vec3 eyePos, Vec3 forward,
                         ProjectilePool& projectiles);
+
+    // Spawn a projectile with gravity and/or splash behavior (for molotov etc.)
+    bool fireProjectile(const WeaponDef& weapon,
+                        Vec3 eyePos, Vec3 forward,
+                        ProjectilePool& projectiles,
+                        f32 gravity, f32 splashRadius, f32 splashDamage);
 
     // Death callback — called when an entity dies, before pool cleanup
     using DeathCallback = void(*)(EntityPool& pool, u16 entityIndex, Vec3 position);

@@ -5,8 +5,16 @@
 #include "game/entity.h"
 #include "world/level_grid.h"
 
+// Projectile behavior flags (stored in projFlags bitmask)
+static constexpr u8 PROJ_ORB       = 1 << 0;  // Frozen Orb skill projectile
+static constexpr u8 PROJ_ORB_SHARD = 1 << 1;  // Frozen Orb sub-shard
+static constexpr u8 PROJ_GRAVITY   = 1 << 2;  // Affected by gravity (arcing trajectory)
+static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
+
 static constexpr u32 MAX_PROJECTILES = 128;
 
+// Active projectile instance. Moves each frame, collides with walls and entities.
+// projFlags bits: 0=isOrb (Frozen Orb skill), 1=isOrbShard (sub-projectile)
 struct Projectile {
     Vec3 position   = {0,0,0};
     Vec3 velocity   = {0,0,0};
@@ -18,6 +26,9 @@ struct Projectile {
     u8   projFlags  = 0;       // bit 0: isOrb, bit 1: isOrbShard
     f32  subTimer   = 0.0f;    // orb shard spawn interval timer
     f32  orbAngle   = 0.0f;    // current rotation angle for shard spawning
+    f32  gravity      = 0.0f;   // downward acceleration in units/s^2 (0 = straight line)
+    f32  splashRadius = 0.0f;   // AoE radius on impact (0 = single target)
+    f32  splashDamage = 0.0f;   // damage dealt in splash zone
 };
 
 struct ProjectilePool {

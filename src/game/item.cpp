@@ -38,6 +38,21 @@ static WeaponType weaponTypeFromString(const std::string& s) {
     return WeaponType::MELEE;
 }
 
+static WeaponSubtype weaponSubtypeFromString(const std::string& s) {
+    if (s == "sword"          || s == "SWORD")          return WeaponSubtype::SWORD;
+    if (s == "dagger"         || s == "DAGGER")         return WeaponSubtype::DAGGER;
+    if (s == "axe"            || s == "AXE")            return WeaponSubtype::AXE;
+    if (s == "pistol"         || s == "PISTOL")         return WeaponSubtype::PISTOL;
+    if (s == "smg"            || s == "SMG")            return WeaponSubtype::SMG;
+    if (s == "carbine"        || s == "CARBINE")        return WeaponSubtype::CARBINE;
+    if (s == "revolver"       || s == "REVOLVER")       return WeaponSubtype::REVOLVER;
+    if (s == "bow"            || s == "BOW")            return WeaponSubtype::BOW;
+    if (s == "crossbow"       || s == "CROSSBOW")       return WeaponSubtype::CROSSBOW;
+    if (s == "throwing_knife" || s == "THROWING_KNIFE") return WeaponSubtype::THROWING_KNIFE;
+    if (s == "molotov"        || s == "MOLOTOV")        return WeaponSubtype::MOLOTOV;
+    return WeaponSubtype::NONE;
+}
+
 static SkillId skillIdFromString(const std::string& s) {
     if (s == "frozen_orb"      || s == "FROZEN_ORB")      return SkillId::FROZEN_ORB;
     if (s == "chain_lightning" || s == "CHAIN_LIGHTNING") return SkillId::CHAIN_LIGHTNING;
@@ -132,6 +147,18 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
 
             def.minLevel = static_cast<u8>(entry.value("minLevel", 1));
             def.maxLevel = static_cast<u8>(entry.value("maxLevel", 10));
+
+            std::string subtypeStr = entry.value("weaponSubtype", "NONE");
+            def.weaponSubtype = weaponSubtypeFromString(subtypeStr);
+
+            def.dropWeight = entry.value("dropWeight", 1.0f);
+
+            // Store mesh/material names for deferred resolution
+            std::string meshStr = entry.value("mesh", "");
+            std::strncpy(def.meshName, meshStr.c_str(), sizeof(def.meshName) - 1);
+
+            std::string matStr = entry.value("material", "");
+            std::strncpy(def.materialName, matStr.c_str(), sizeof(def.materialName) - 1);
 
             count++;
         }
@@ -419,7 +446,21 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
         return {};
     }
 
-    u32 pick = validIndices[randU32(validCount)];
+    // Weighted random selection using dropWeight
+    f32 totalWeight = 0.0f;
+    for (u32 i = 0; i < validCount; i++)
+        totalWeight += defs[validIndices[i]].dropWeight;
+
+    f32 roll = randF01() * totalWeight;
+    u32 pick = validIndices[0]; // fallback
+    f32 cumulative = 0.0f;
+    for (u32 i = 0; i < validCount; i++) {
+        cumulative += defs[validIndices[i]].dropWeight;
+        if (roll < cumulative) {
+            pick = validIndices[i];
+            break;
+        }
+    }
     const ItemDef& def = defs[pick];
 
     ItemInstance item;
@@ -621,6 +662,34 @@ f32 Inventory::getEffectiveMaxHealth(const PlayerInventory& inv, f32 baseMaxHeal
             totalHealthFlat += eq.bonusHealth;
     }
     return (baseMaxHealth + totalHealthFlat) * (1.0f + inv.bonusHealthPct / 100.0f);
+}
+
+// ============================================================
+//  ItemLoader::resolveVisuals
+// ============================================================
+
+#include "renderer/material.h"
+
+// Forward declaration — Engine provides mesh name lookup
+// Called from Engine::init() after meshes and materials are loaded
+void ItemLoader::resolveVisuals(ItemDef* defs, u32 count) {
+    for (u32 i = 0; i < count; i++) {
+        ItemDef& def = defs[i];
+
+        // Resolve material name to ID
+        if (def.materialName[0] != '\0') {
+            s32 matId = MaterialSystem::getIdByName(def.materialName);
+            if (matId >= 0) {
+                def.materialId = static_cast<u8>(matId);
+            } else {
+                LOG_WARN("ItemLoader: material '%s' not found for item '%s'", def.materialName, def.name);
+            }
+        }
+
+        // meshId resolution requires Engine's mesh registry — handled by Engine::init()
+        // after calling this function, engine resolves meshName -> meshId separately
+    }
+    LOG_INFO("ItemLoader: resolved visuals for %u item defs", count);
 }
 
 // ============================================================

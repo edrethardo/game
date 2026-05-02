@@ -83,6 +83,8 @@ struct AffixDef {
 
 // ---- Item definition (template loaded from JSON) ----
 
+// Static item template loaded from assets/config/items.json via ItemLoader.
+// Each entry defines base stats; actual items are ItemInstance with rolled values.
 struct ItemDef {
     char     name[32] = {};
     ItemSlot slot     = ItemSlot::WEAPON;
@@ -107,10 +109,26 @@ struct ItemDef {
     // Drop level range
     u8 minLevel = 1;
     u8 maxLevel = 10;
+
+    // Weapon subtype for visual/gameplay identity (NONE for non-weapons)
+    WeaponSubtype weaponSubtype = WeaponSubtype::NONE;
+
+    // Visual identity — resolved at init from mesh/material name strings
+    u8  meshId     = 0;   // index into Engine::m_meshDefs (0 = cube fallback)
+    u8  materialId = 0;   // index into MaterialSystem
+
+    // Loot generation weight (higher = more likely to drop)
+    f32 dropWeight = 1.0f;
+
+    // Mesh/material name strings for deferred resolution (not serialized at runtime)
+    char meshName[32]     = {};
+    char materialName[32] = {};
 };
 
 // ---- Item instance (actual rolled item at runtime) ----
 
+// Runtime item instance with rolled rarity, affixes, and level-scaled stats.
+// defId indexes into the ItemDef table; 0xFFFF = empty/invalid slot.
 struct ItemInstance {
     u16    defId      = 0xFFFF;        // index into ItemDef table (0xFFFF = empty)
     Rarity rarity     = Rarity::COMMON;
@@ -191,6 +209,8 @@ struct SkillState {
 
 // ---- Player inventory ----
 
+// Player equipment + backpack. Stat bonuses are cached and recalculated on equip/unequip.
+// getEffectiveWeapon() merges equipped weapon's ItemDef + affixes into a WeaponDef.
 struct PlayerInventory {
     ItemInstance equipped[static_cast<u32>(ItemSlot::COUNT)] = {};
     ItemInstance backpack[MAX_INVENTORY_ITEMS] = {};
@@ -212,6 +232,8 @@ struct PlayerInventory {
 
 // ---- World item (dropped loot on the ground) ----
 
+// Dropped loot in the world. Bobs and spins, has exclusive ownership timer
+// before becoming free-for-all pickup. Lifetime-limited (60s default).
 struct WorldItem {
     ItemInstance item;
     Vec3         position      = {0, 0, 0};
@@ -235,6 +257,8 @@ namespace ItemLoader {
     bool loadItemDefs (const char* path, ItemDef*   defs, u32& count);
     bool loadAffixDefs(const char* path, AffixDef*  defs, u32& count);
     bool loadSkillDefs(const char* path, SkillDef*  defs, u32& count);
+    // Resolve mesh/material name strings to runtime IDs. Call after mesh + material systems init.
+    void resolveVisuals(ItemDef* defs, u32 count);
 }
 
 namespace ItemGen {
