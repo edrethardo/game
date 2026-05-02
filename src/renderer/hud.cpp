@@ -478,14 +478,26 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         pushLine(eqX + slotW,  y + slotH, eqX,         y + slotH, color);
         pushLine(eqX,          y + slotH, eqX,         y,         color);
 
-        // Power fill bar inside slot
+        // Item icon and name inside equipment slot
         if (!isItemEmpty(item)) {
-            f32 fillW = slotW * 0.9f * (item.damage / 80.0f);
-            if (fillW > slotW * 0.9f) fillW = slotW * 0.9f;
-            f32 barY = y + 4.0f;
-            for (f32 line = 0; line < 4.0f; line += 1.0f) {
-                pushLine(eqX + 4.0f, barY + line, eqX + 4.0f + fillW, barY + line, color);
+            const ItemDef& def = itemDefs[item.defId];
+            // Dark fill behind icon
+            Vec3 fillColor = {color.x * 0.3f, color.y * 0.3f, color.z * 0.3f};
+            for (f32 line = 2.0f; line < slotH - 2.0f; line += 1.0f) {
+                pushLine(eqX + 2.0f, y + line, eqX + slotW - 2.0f, y + line, fillColor);
             }
+            flushHUD(sw, sh);
+            // Icon on left side of slot
+            ItemIconSystem::drawIcon(sw, sh, eqX + 3.0f, y + 2.0f, slotH - 4.0f, def, item.rarity);
+            // Item name to the right of icon
+            FontSystem::drawText(sw, sh, eqX + slotH + 2.0f, y + 8.0f,
+                                 def.name, rarityColor(item.rarity), 1);
+        } else {
+            // Slot type label for empty slots
+            static const char* slotLabels[] = {"Weapon", "Offhand", "Helmet", "Armor", "Boots", "Ring"};
+            Vec3 dimColor = {0.25f, 0.25f, 0.3f};
+            FontSystem::drawText(sw, sh, eqX + 6.0f, y + 8.0f,
+                                 slotLabels[i], dimColor, 1);
         }
 
         // Selection arrow
@@ -521,12 +533,15 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         pushLine(x + cellSize, y + cellSize, x,           y + cellSize, color);
         pushLine(x,           y + cellSize, x,           y,           color);
 
-        // Fill filled slots
+        // Fill + icon for occupied slots
         if (!isItemEmpty(item)) {
-            Vec3 fillColor = {color.x * 0.5f, color.y * 0.5f, color.z * 0.5f};
+            Vec3 fillColor = {color.x * 0.3f, color.y * 0.3f, color.z * 0.3f};
             for (f32 line = 2.0f; line < cellSize - 2.0f; line += 1.0f) {
                 pushLine(x + 2.0f, y + line, x + cellSize - 2.0f, y + line, fillColor);
             }
+            flushHUD(sw, sh);
+            const ItemDef& def = itemDefs[item.defId];
+            ItemIconSystem::drawIcon(sw, sh, x + 3.0f, y + 3.0f, cellSize - 6.0f, def, item.rarity);
         }
 
         // Selection highlight

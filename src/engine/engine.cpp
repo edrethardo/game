@@ -245,6 +245,11 @@ void Engine::init() {
             {"crossbow",       "assets/meshes/crossbow.obj"},
             {"throwing_knife", "assets/meshes/throwing_knife.obj"},
             {"molotov",        "assets/meshes/molotov.obj"},
+            {"helmet",         "assets/meshes/helmet.obj"},
+            {"armor",          "assets/meshes/armor.obj"},
+            {"boots",          "assets/meshes/boots.obj"},
+            {"ring",           "assets/meshes/ring.obj"},
+            {"shield",         "assets/meshes/shield.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -744,7 +749,7 @@ void Engine::singleplayerUpdate(f32 dt) {
             m_viewmodelState.bobTimer *= 0.95f;
         }
         // Exponential recoil decay each tick
-        m_viewmodelState.recoilKick *= 0.85f;
+        m_viewmodelState.recoilKick *= 0.92f; // slower decay = smoother
         if (m_viewmodelState.recoilKick < 0.001f) m_viewmodelState.recoilKick = 0.0f;
         // Count down melee swing animation
         if (m_viewmodelState.attackAnimT > 0.0f) m_viewmodelState.attackAnimT -= dt;
@@ -1146,7 +1151,7 @@ void Engine::handleWeaponFire(f32 dt) {
 
     ws.recoilOffset += wpn.recoilKick;
     // Amplified kick for viewmodel so the visual response is clearly visible
-    m_viewmodelState.recoilKick += wpn.recoilKick * 3.0f;
+    m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f; // gentle viewmodel kick
     // Melee fires a swing animation of fixed duration
     if (wpn.type == WeaponType::MELEE) m_viewmodelState.attackAnimT = 0.3f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
@@ -1277,17 +1282,18 @@ void Engine::renderViewmodel() {
     Mat4 proj = Mat4::perspective(70.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
 
     // Sine-wave bob in two axes tied to walk speed and timer
-    f32 bobX = sinf(m_viewmodelState.bobTimer * 8.0f)  * 0.012f;
-    f32 bobY = sinf(m_viewmodelState.bobTimer * 16.0f) * 0.008f;
+    // Subtle bob — low amplitude to avoid seasick feel
+    f32 bobX = sinf(m_viewmodelState.bobTimer * 6.0f)  * 0.004f;
+    f32 bobY = sinf(m_viewmodelState.bobTimer * 12.0f) * 0.003f;
 
     // Downward pitch on recoil (negative = tilt up after firing)
-    f32 recoilPitch = -m_viewmodelState.recoilKick * 0.3f;
+    f32 recoilPitch = -m_viewmodelState.recoilKick * 0.12f; // subtle recoil
 
     // Melee swing: a half-sine arc over the 0.3 s window
     f32 swingAngle = 0.0f;
     if (m_viewmodelState.attackAnimT > 0.0f) {
         f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1 -> 0
-        swingAngle = -1.2f * sinf(t * 3.14159f);    // smooth arc swing
+        swingAngle = -0.6f * sinf(t * 3.14159f);    // gentle swing arc
     }
 
     // Camera-local position: right-side, below center, pushed back
@@ -1530,9 +1536,20 @@ void Engine::render(f32 alpha) {
         if (!wi.active) continue;
 
         Vec3 color = rarityColor(wi.item.rarity);
-        f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.15f;
-        Vec3 pos = wi.position + Vec3{0, bobY, 0};
-        f32 spin = wi.bobTimer * 2.0f;  // slow spin
+
+        // Snap item to floor level of its grid cell
+        f32 floorY = 0.0f;
+        u32 gx, gz;
+        if (LevelGridSystem::worldToGrid(m_grid, wi.position, gx, gz) &&
+            !LevelGridSystem::isSolid(m_grid, gx, gz)) {
+            floorY = LevelGridSystem::getFloorHeight(m_grid, gx, gz);
+        }
+
+        // Gentle hover bob just above the floor
+        static constexpr f32 ITEM_SCALE = 1.0f;
+        f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
+        Vec3 pos = {wi.position.x, floorY + ITEM_SCALE * 0.5f + bobY, wi.position.z};
+        f32 spin = wi.bobTimer * 2.0f;
 
         // Use weapon-specific mesh if available, otherwise cube fallback
         const Mesh* itemMesh = &m_cubeMesh;
@@ -1548,21 +1565,21 @@ void Engine::render(f32 alpha) {
                 const Material* mat = MaterialSystem::get(def.materialId);
                 if (mat) {
                     itemTex = mat->texture;
-                    // Blend material tint with rarity color
                     tint = {color.x * mat->tint.x, color.y * mat->tint.y,
                             color.z * mat->tint.z, 1.0f};
                 }
             }
         }
 
-        Mat4 model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({0.25f, 0.25f, 0.25f});
-        AABB bounds = {pos - Vec3{0.25f,0.25f,0.25f}, pos + Vec3{0.25f,0.25f,0.25f}};
+        // Large scale so items are easy to spot on the ground
+        Mat4 model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({ITEM_SCALE, ITEM_SCALE, ITEM_SCALE});
+        AABB bounds = {pos - Vec3{ITEM_SCALE,ITEM_SCALE,ITEM_SCALE}, pos + Vec3{ITEM_SCALE,ITEM_SCALE,ITEM_SCALE}};
 
         Renderer::submit(m_unlitShader, itemTex, *itemMesh,
                          model, bounds, tint);
 
-        // Loot beam
-        DebugDraw::line(wi.position, wi.position + Vec3{0, 3.0f, 0}, color);
+        // Loot beam from floor to ceiling for visibility
+        DebugDraw::line({pos.x, floorY, pos.z}, {pos.x, floorY + 4.0f, pos.z}, color);
     }
 
     // Remote players (multiplayer only)

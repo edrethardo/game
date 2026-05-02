@@ -10,6 +10,11 @@
     { "id": 7, "name": "weapon_melee",      "tint": [0.7, 0.7, 0.8, 1.0] },
     { "id": 8, "name": "weapon_hitscan",     "tint": [0.3, 0.3, 0.35, 1.0] },
     { "id": 9, "name": "weapon_projectile",  "tint": [0.6, 0.4, 0.2, 1.0] },
-    { "id": 10, "name": "weapon_molotov",    "tint": [0.8, 0.3, 0.1, 1.0] }
+    { "id": 10, "name": "weapon_molotov",    "tint": [0.8, 0.3, 0.1, 1.0] },
+    { "id": 11, "name": "armor_plate",        "tint": [0.55, 0.55, 0.6, 1.0] },
+    { "id": 12, "name": "armor_leather",      "tint": [0.5, 0.35, 0.2, 1.0] },
+    { "id": 13, "name": "armor_cloth",        "tint": [0.45, 0.4, 0.55, 1.0] },
+    { "id": 14, "name": "accessory_bone",     "tint": [0.75, 0.7, 0.6, 1.0] },
+    { "id": 15, "name": "accessory_gold",     "tint": [0.85, 0.75, 0.3, 1.0] }
   ]
 }

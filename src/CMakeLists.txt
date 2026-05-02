@@ -53,3 +53,6 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
     target_compile_definitions(DungeonEngine PRIVATE ENGINE_DEBUG=1)
 endif()
+
+# Standalone weapon model generator tool
+add_subdirectory(tools)
