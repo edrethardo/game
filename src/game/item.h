@@ -152,10 +152,10 @@ inline bool isItemEmpty(const ItemInstance& item) {
 
 inline Vec3 rarityColor(Rarity r) {
     switch (r) {
-        case Rarity::COMMON:    return {0.7f, 0.7f, 0.7f};
-        case Rarity::MAGIC:     return {0.3f, 0.5f, 1.0f};
-        case Rarity::RARE:      return {1.0f, 0.85f, 0.1f};
-        case Rarity::LEGENDARY: return {1.0f, 0.5f, 0.0f};
+        case Rarity::COMMON:    return {0.9f, 0.9f, 0.9f};   // white
+        case Rarity::MAGIC:     return {0.2f, 0.9f, 0.3f};   // green
+        case Rarity::RARE:      return {0.3f, 0.5f, 1.0f};   // blue
+        case Rarity::LEGENDARY: return {1.0f, 0.82f, 0.2f};  // gold
         default:                return {1.0f, 1.0f, 1.0f};
     }
 }

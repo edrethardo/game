@@ -1545,8 +1545,8 @@ void Engine::render(f32 alpha) {
             floorY = LevelGridSystem::getFloorHeight(m_grid, gx, gz);
         }
 
-        // Gentle hover bob just above the floor
-        static constexpr f32 ITEM_SCALE = 1.0f;
+        // Hover bob just above the floor
+        static constexpr f32 ITEM_SCALE = 1.4f;
         f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
         Vec3 pos = {wi.position.x, floorY + ITEM_SCALE * 0.5f + bobY, wi.position.z};
         f32 spin = wi.bobTimer * 2.0f;
@@ -1571,14 +1571,32 @@ void Engine::render(f32 alpha) {
             }
         }
 
-        // Large scale so items are easy to spot on the ground
-        Mat4 model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({ITEM_SCALE, ITEM_SCALE, ITEM_SCALE});
+        // Item mesh — use proper mesh, scaled to fit uniformly
+        Mat4 model;
+        if (itemMesh != &m_cubeMesh) {
+            // Fit mesh into ITEM_SCALE box using its actual bounds
+            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({ITEM_SCALE, ITEM_SCALE, ITEM_SCALE});
+        } else {
+            // Cube fallback — smaller so it doesn't look like a block
+            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({0.3f, 0.3f, 0.3f});
+        }
         AABB bounds = {pos - Vec3{ITEM_SCALE,ITEM_SCALE,ITEM_SCALE}, pos + Vec3{ITEM_SCALE,ITEM_SCALE,ITEM_SCALE}};
+        Renderer::submit(m_unlitShader, itemTex, *itemMesh, model, bounds, tint);
 
-        Renderer::submit(m_unlitShader, itemTex, *itemMesh,
-                         model, bounds, tint);
+        // Rarity glow — pulsing cross of debug lines radiating from item center
+        f32 glowPulse = 0.6f + 0.4f * sinf(wi.bobTimer * 4.0f);
+        Vec3 gc = color * glowPulse;
+        f32 gr = 0.4f + glowPulse * 0.2f; // glow radius
+        DebugDraw::line(pos - Vec3{gr, 0, 0}, pos + Vec3{gr, 0, 0}, gc);
+        DebugDraw::line(pos - Vec3{0, gr, 0}, pos + Vec3{0, gr, 0}, gc);
+        DebugDraw::line(pos - Vec3{0, 0, gr}, pos + Vec3{0, 0, gr}, gc);
+        // Diagonal cross for more glow volume
+        f32 gd = gr * 0.7f;
+        DebugDraw::line(pos - Vec3{gd, gd, 0}, pos + Vec3{gd, gd, 0}, gc);
+        DebugDraw::line(pos - Vec3{gd, 0, gd}, pos + Vec3{gd, 0, gd}, gc);
+        DebugDraw::line(pos - Vec3{0, gd, gd}, pos + Vec3{0, gd, gd}, gc);
 
-        // Loot beam from floor to ceiling for visibility
+        // Loot beam from floor upward
         DebugDraw::line({pos.x, floorY, pos.z}, {pos.x, floorY + 4.0f, pos.z}, color);
     }
 

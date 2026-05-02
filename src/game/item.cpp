@@ -746,7 +746,7 @@ bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 
 
 bool WorldItemSystem::tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
                                   ItemInstance& outItem) {
-    static constexpr f32 PICKUP_RADIUS = 2.0f;
+    static constexpr f32 PICKUP_RADIUS = 3.5f;
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = pool.items[i];
