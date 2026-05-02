@@ -20,6 +20,8 @@
 #include "game/combat.h"
 #include "game/enemy_ai.h"
 #include "game/projectile.h"
+#include "game/item.h"
+#include "game/skill.h"
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -189,6 +191,30 @@ void Engine::init() {
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
 
+    // Item/loot system
+    ItemLoader::loadItemDefs("assets/config/items.json", m_itemDefs, m_itemDefCount);
+    ItemLoader::loadAffixDefs("assets/config/affixes.json", m_affixDefs, m_affixDefCount);
+    ItemLoader::loadSkillDefs("assets/config/skills.json", m_skillDefs, m_skillDefCount);
+    SkillSystem::init();
+    ItemGen::init(42);
+
+    Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
+        (void)pool; (void)entityIndex;
+        if (!s_engine) return;
+        // 40% base drop chance
+        if ((std::rand() % 100) < 40) {
+            u8 enemyLevel = 1; // TODO: derive from entity or dungeon depth
+            ItemInstance item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
+                                                   s_engine->m_itemDefCount,
+                                                   s_engine->m_affixDefs,
+                                                   s_engine->m_affixDefCount);
+            if (!isItemEmpty(item)) {
+                WorldItemSystem::spawn(s_engine->m_worldItems, item,
+                                       position + Vec3{0, 0.5f, 0});
+            }
+        }
+    });
+
     // Init networking
     Net::init();
 
@@ -283,6 +309,13 @@ void Engine::startGame() {
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
     ProjectileSystem::init(m_projectiles);
+
+    // Init inventory & world items
+    WorldItemSystem::init(m_worldItems);
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        Inventory::init(m_inventories[i]);
+        m_skillStates[i] = {};
+    }
 
     // Init players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
@@ -628,6 +661,96 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Entity timers
     EntitySystem::tickTimers(m_entities, dt);
 
+    // Update world items
+    WorldItemSystem::update(m_worldItems, dt);
+
+    // Update skill state (energy regen, cooldowns)
+    SkillSystem::update(m_skillStates[0], dt);
+
+    // Update orb projectiles (spawn ice shards for Frozen Orb)
+    SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
+
+    // Update pending meteors
+    SkillSystem::updateMeteors(m_entities, dt);
+
+    // Skill activation (right mouse button)
+    if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) && !m_inventoryOpen) {
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        SkillSystem::tryActivate(m_skillStates[0], m_skillDefs, m_skillDefCount,
+                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+    }
+
+    // Update active skill from equipped legendary weapon
+    {
+        const ItemInstance& wpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        if (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY) {
+            SkillId skillId = m_itemDefs[wpn.defId].legendarySkillId;
+            m_skillStates[0].activeSkill = skillId;
+        } else {
+            m_skillStates[0].activeSkill = SkillId::NONE;
+        }
+    }
+
+    // Item pickup (E key)
+    if (Input::isKeyPressed(SDL_SCANCODE_E)) {
+        ItemInstance picked;
+        if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
+            if (Inventory::addToBackpack(m_inventories[0], picked)) {
+                LOG_INFO("Picked up item (defId=%u, rarity=%u)", picked.defId, (u32)picked.rarity);
+            }
+        }
+    }
+
+    // Toggle inventory (Tab key)
+    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
+        m_inventoryOpen = !m_inventoryOpen;
+        Input::setRelativeMouseMode(!m_inventoryOpen);
+    }
+
+    // Inventory mouse interaction
+    if (m_inventoryOpen) {
+        s32 mx, my;
+        Input::getMousePosition(mx, my);
+        // Convert from top-left origin (SDL) to bottom-left origin (HUD)
+        my = static_cast<s32>(Window::getHeight()) - my;
+
+        if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+            f32 bpX      = Window::getWidth()  * 0.55f;
+            f32 bpStartY = Window::getHeight() * 0.5f + 60.0f;
+            f32 cellSize = 26.0f;
+            f32 cellGap  = 3.0f;
+
+            for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
+                u32 col = i % 6;
+                u32 row = i / 6;
+                f32 x = bpX + static_cast<f32>(col) * (cellSize + cellGap);
+                f32 y = bpStartY - static_cast<f32>(row) * (cellSize + cellGap);
+
+                if (mx >= static_cast<s32>(x) && mx <= static_cast<s32>(x + cellSize) &&
+                    my >= static_cast<s32>(y) && my <= static_cast<s32>(y + cellSize)) {
+                    if (!isItemEmpty(m_inventories[0].backpack[i])) {
+                        Inventory::equip(m_inventories[0], static_cast<u8>(i), m_itemDefs);
+                        LOG_INFO("Equipped item from slot %u", i);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // Debug: F7 gives random item
+    if (Input::isKeyPressed(SDL_SCANCODE_F7)) {
+        ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
+                                              m_affixDefs, m_affixDefCount);
+        if (!isItemEmpty(item)) {
+            if (Inventory::addToBackpack(m_inventories[0], item)) {
+                LOG_INFO("Debug: gave %s (rarity %u, damage %.1f)",
+                         m_itemDefs[item.defId].name, (u32)item.rarity, item.damage);
+            }
+        }
+    }
+
     // Damage flash decay
     if (m_localPlayer.damageFlashTimer > 0.0f)
         m_localPlayer.damageFlashTimer -= dt;
@@ -866,7 +989,8 @@ void Engine::handleWeaponFire(f32 dt) {
     if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
-    const WeaponDef& wpn = m_weaponDefs[ws.currentWeapon];
+    WeaponDef wpn = Inventory::getEffectiveWeapon(m_inventories[m_localPlayerIndex],
+                                                    m_itemDefs, m_weaponDefs[ws.currentWeapon]);
     ws.cooldownTimer = wpn.cooldown;
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
@@ -911,7 +1035,8 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     if (!(input->moveFlags & INPUT_FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
-    const WeaponDef& wpn = m_weaponDefs[ws.currentWeapon];
+    WeaponDef wpn = Inventory::getEffectiveWeapon(m_inventories[np.slotIndex],
+                                                    m_itemDefs, m_weaponDefs[ws.currentWeapon]);
     ws.cooldownTimer = wpn.cooldown;
 
     Vec3 eyePos = np.eyePos();
@@ -1161,6 +1286,26 @@ void Engine::render(f32 alpha) {
         Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
     }
 
+    // --- World items ---
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        const WorldItem& wi = m_worldItems.items[i];
+        if (!wi.active) continue;
+
+        Vec3 color = rarityColor(wi.item.rarity);
+        f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.15f;
+        Vec3 pos = wi.position + Vec3{0, bobY, 0};
+        f32 spin = wi.bobTimer * 2.0f;  // slow spin
+
+        Mat4 model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({0.25f, 0.25f, 0.25f});
+        AABB bounds = {pos - Vec3{0.25f,0.25f,0.25f}, pos + Vec3{0.25f,0.25f,0.25f}};
+
+        Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh,
+                         model, bounds, {color.x, color.y, color.z, 1.0f});
+
+        // Loot beam
+        DebugDraw::line(wi.position, wi.position + Vec3{0, 3.0f, 0}, color);
+    }
+
     // Remote players (multiplayer only)
     if (m_netRole != NetRole::NONE) {
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
@@ -1251,16 +1396,41 @@ void Engine::render(f32 alpha) {
     DebugDraw::flush(m_camera.viewProjection);
 
     // --- HUD ---
-    Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
-                    ? Vec3{1.0f, 0.3f, 0.3f}
-                    : Vec3{1.0f, 1.0f, 1.0f};
-    HUD::drawCrosshair(sw, sh, crossColor);
+    if (m_inventoryOpen) {
+        // Inventory screen replaces normal HUD elements
+        HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
+                                  m_itemDefs, 0, false);
+    } else {
+        Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
+                        ? Vec3{1.0f, 0.3f, 0.3f}
+                        : Vec3{1.0f, 1.0f, 1.0f};
+        HUD::drawCrosshair(sw, sh, crossColor);
 
-    if (m_hitMarkerTimer > 0.0f)
-        HUD::drawHitMarker(sw, sh, m_hitMarkerTimer / 0.2f);
+        if (m_hitMarkerTimer > 0.0f)
+            HUD::drawHitMarker(sw, sh, m_hitMarkerTimer / 0.2f);
 
-    HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
-    HUD::drawWeaponIndicator(sw, sh, m_players[m_localPlayerIndex].weaponState.currentWeapon);
+        HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
+
+        HUD::drawWeaponIndicator(sw, sh, m_players[m_localPlayerIndex].weaponState.currentWeapon);
+
+        // Energy bar and skill cooldown
+        const SkillState& ss = m_skillStates[m_localPlayerIndex];
+        if (ss.activeSkill != SkillId::NONE) {
+            HUD::drawEnergyBar(sw, sh, ss.energy, ss.maxEnergy);
+            if (ss.cooldownTimer > 0.0f) {
+                f32 maxCd = 1.0f;
+                for (u32 i = 0; i < m_skillDefCount; i++) {
+                    if (m_skillDefs[i].id == ss.activeSkill) {
+                        maxCd = m_skillDefs[i].cooldown;
+                        break;
+                    }
+                }
+                HUD::drawSkillCooldown(sw, sh, ss.cooldownTimer / maxCd);
+            } else {
+                HUD::drawSkillCooldown(sw, sh, 0.0f);
+            }
+        }
+    }
 
     // Profiler overlay (F3)
     HUD::drawProfiler(sw, sh);

@@ -1,0 +1,199 @@
+{
+  "items": [
+    {
+      "name": "Iron Sword",
+      "slot": "weapon",
+      "weaponType": "melee",
+      "baseDamage": 22.0,
+      "baseRange": 2.5,
+      "baseCooldown": 0.4,
+      "baseConeAngle": 70.0,
+      "baseRecoil": 0.01,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Bone Cleaver",
+      "slot": "weapon",
+      "weaponType": "melee",
+      "baseDamage": 30.0,
+      "baseRange": 2.2,
+      "baseCooldown": 0.5,
+      "baseConeAngle": 60.0,
+      "baseRecoil": 0.015,
+      "minLevel": 3,
+      "maxLevel": 8,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Vampiric Blade",
+      "slot": "weapon",
+      "weaponType": "melee",
+      "baseDamage": 26.0,
+      "baseRange": 2.5,
+      "baseCooldown": 0.45,
+      "baseConeAngle": 70.0,
+      "baseRecoil": 0.01,
+      "minLevel": 5,
+      "maxLevel": 10,
+      "maxRarity": "legendary",
+      "legendarySkill": "blood_nova"
+    },
+    {
+      "name": "Revolver",
+      "slot": "weapon",
+      "weaponType": "hitscan",
+      "baseDamage": 18.0,
+      "baseRange": 50.0,
+      "baseCooldown": 0.25,
+      "baseRecoil": 0.02,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Lightning Rifle",
+      "slot": "weapon",
+      "weaponType": "hitscan",
+      "baseDamage": 22.0,
+      "baseRange": 50.0,
+      "baseCooldown": 0.3,
+      "baseRecoil": 0.025,
+      "minLevel": 4,
+      "maxLevel": 10,
+      "maxRarity": "legendary",
+      "legendarySkill": "chain_lightning"
+    },
+    {
+      "name": "Wand of Sparks",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "baseDamage": 15.0,
+      "baseCooldown": 0.3,
+      "baseProjectileSpeed": 12.0,
+      "baseProjectileRadius": 0.1,
+      "baseRecoil": 0.01,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "magic"
+    },
+    {
+      "name": "Frost Staff",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "baseDamage": 28.0,
+      "baseCooldown": 0.5,
+      "baseProjectileSpeed": 14.0,
+      "baseProjectileRadius": 0.15,
+      "baseRecoil": 0.015,
+      "minLevel": 3,
+      "maxLevel": 10,
+      "maxRarity": "legendary",
+      "legendarySkill": "frozen_orb"
+    },
+    {
+      "name": "Hellfire Launcher",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "baseDamage": 40.0,
+      "baseCooldown": 0.7,
+      "baseProjectileSpeed": 10.0,
+      "baseProjectileRadius": 0.2,
+      "baseRecoil": 0.03,
+      "minLevel": 6,
+      "maxLevel": 10,
+      "maxRarity": "legendary",
+      "legendarySkill": "meteor_strike"
+    },
+    {
+      "name": "Chain Helmet",
+      "slot": "helmet",
+      "baseHealth": 15.0,
+      "minLevel": 1,
+      "maxLevel": 10,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Iron Crown",
+      "slot": "helmet",
+      "baseHealth": 20.0,
+      "minLevel": 4,
+      "maxLevel": 10,
+      "maxRarity": "legendary"
+    },
+    {
+      "name": "Leather Vest",
+      "slot": "armor",
+      "baseHealth": 20.0,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Plate Armor",
+      "slot": "armor",
+      "baseHealth": 35.0,
+      "minLevel": 3,
+      "maxLevel": 10,
+      "maxRarity": "legendary"
+    },
+    {
+      "name": "Cloth Boots",
+      "slot": "boots",
+      "baseHealth": 8.0,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "magic"
+    },
+    {
+      "name": "Swift Boots",
+      "slot": "boots",
+      "baseHealth": 12.0,
+      "minLevel": 3,
+      "maxLevel": 10,
+      "maxRarity": "legendary",
+      "legendarySkill": "phase_dash"
+    },
+    {
+      "name": "Iron Greaves",
+      "slot": "boots",
+      "baseHealth": 18.0,
+      "minLevel": 5,
+      "maxLevel": 10,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Bone Ring",
+      "slot": "ring",
+      "baseHealth": 5.0,
+      "minLevel": 1,
+      "maxLevel": 10,
+      "maxRarity": "rare"
+    },
+    {
+      "name": "Sigil of Power",
+      "slot": "ring",
+      "baseHealth": 8.0,
+      "minLevel": 4,
+      "maxLevel": 10,
+      "maxRarity": "legendary"
+    },
+    {
+      "name": "Wooden Shield",
+      "slot": "offhand",
+      "baseHealth": 25.0,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "magic"
+    },
+    {
+      "name": "Tower Shield",
+      "slot": "offhand",
+      "baseHealth": 40.0,
+      "minLevel": 3,
+      "maxLevel": 10,
+      "maxRarity": "rare"
+    }
+  ]
+}

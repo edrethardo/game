@@ -12,6 +12,7 @@
 #include "game/entity.h"
 #include "game/weapon.h"
 #include "game/projectile.h"
+#include "game/item.h"
 #include "net/net.h"
 #include "net/net_player.h"
 
@@ -55,6 +56,18 @@ private:
     NetPlayer  m_players[MAX_PLAYERS];
     WeaponDef  m_weaponDefs[MAX_WEAPON_DEFS];
     u32        m_weaponDefCount = 0;
+
+    // Item/loot system
+    ItemDef    m_itemDefs[MAX_ITEM_DEFS];
+    u32        m_itemDefCount = 0;
+    AffixDef   m_affixDefs[MAX_AFFIX_DEFS];
+    u32        m_affixDefCount = 0;
+    SkillDef   m_skillDefs[MAX_SKILL_DEFS];
+    u32        m_skillDefCount = 0;
+    PlayerInventory m_inventories[MAX_PLAYERS];
+    SkillState      m_skillStates[MAX_PLAYERS];
+    WorldItemPool   m_worldItems;
+    bool       m_inventoryOpen = false;
 
     // Legacy single-player compat
     Player     m_localPlayer;  // used for singleplayer mode camera/movement

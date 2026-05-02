@@ -1,0 +1,81 @@
+{
+  "affixes": [
+    {
+      "type": "damage_flat",
+      "name": "of Striking",
+      "slots": ["weapon"],
+      "minValue": 2.0,
+      "maxValue": 15.0
+    },
+    {
+      "type": "damage_pct",
+      "name": "of Fury",
+      "slots": ["weapon", "ring"],
+      "minValue": 5.0,
+      "maxValue": 25.0
+    },
+    {
+      "type": "health_flat",
+      "name": "of Vitality",
+      "slots": ["helmet", "armor", "boots", "ring", "offhand"],
+      "minValue": 5.0,
+      "maxValue": 40.0
+    },
+    {
+      "type": "health_pct",
+      "name": "of the Titan",
+      "slots": ["armor", "ring"],
+      "minValue": 5.0,
+      "maxValue": 20.0
+    },
+    {
+      "type": "cooldown_reduction",
+      "name": "of Haste",
+      "slots": ["weapon", "helmet", "ring"],
+      "minValue": 3.0,
+      "maxValue": 15.0
+    },
+    {
+      "type": "move_speed_flat",
+      "name": "of the Wind",
+      "slots": ["boots"],
+      "minValue": 0.3,
+      "maxValue": 1.5
+    },
+    {
+      "type": "life_on_hit",
+      "name": "of Leeching",
+      "slots": ["weapon", "ring"],
+      "minValue": 1.0,
+      "maxValue": 5.0
+    },
+    {
+      "type": "projectile_speed",
+      "name": "of Velocity",
+      "slots": ["weapon"],
+      "minValue": 10.0,
+      "maxValue": 40.0
+    },
+    {
+      "type": "cone_angle",
+      "name": "of Sweep",
+      "slots": ["weapon"],
+      "minValue": 5.0,
+      "maxValue": 25.0
+    },
+    {
+      "type": "range_bonus",
+      "name": "of Reach",
+      "slots": ["weapon"],
+      "minValue": 1.0,
+      "maxValue": 5.0
+    },
+    {
+      "type": "damage_to_flying",
+      "name": "of the Hawk",
+      "slots": ["weapon", "ring"],
+      "minValue": 10.0,
+      "maxValue": 40.0
+    }
+  ]
+}

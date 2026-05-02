@@ -3,6 +3,9 @@
 #include "core/types.h"
 #include "core/math.h"
 
+struct PlayerInventory;
+struct ItemDef;
+
 namespace HUD {
     void init();
     void shutdown();
@@ -31,4 +34,19 @@ namespace HUD {
 
     // Profiler overlay (F3)
     void drawProfiler(u32 screenWidth, u32 screenHeight);
+
+    // Inventory screen (replaces normal HUD when Tab is open)
+    void drawInventoryScreen(u32 sw, u32 sh,
+                              const PlayerInventory& inv,
+                              const ItemDef* itemDefs,
+                              u8 selectedSlot, bool selectedIsEquipped);
+
+    // Energy bar (blue bar below health bar)
+    void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
+
+    // Skill cooldown indicator (small square near weapon indicator)
+    void drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct);
+
+    // Loot notification bar (center-top, fades out)
+    void drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha);
 }

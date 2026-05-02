@@ -2,6 +2,7 @@
 #include "renderer/shader.h"
 #include "core/log.h"
 #include "core/profiler.h"
+#include "game/item.h"
 #include <glad/glad.h>
 
 // Simple 2D line renderer for HUD elements (crosshair, hit markers).
@@ -13,7 +14,7 @@ struct HudVertex {
     Vec3 color;
 };
 
-static constexpr u32 MAX_HUD_VERTS = 256;
+static constexpr u32 MAX_HUD_VERTS = 1024;
 
 static u32    s_vao = 0;
 static u32    s_vbo = 0;
@@ -288,4 +289,178 @@ void HUD::drawNetStats(u32 screenWidth, u32 screenHeight,
     pushLine(x0 + 82, y0, x0 + 82, y0 + pingH, pingColor);
 
     flushHUD(screenWidth, screenHeight);
+}
+
+void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
+    f32 barW = 200.0f;
+    f32 barH = 10.0f;
+    f32 x0 = 20.0f;
+    // Health bar sits at y0=20 with barH=16, so place energy bar 22px above it
+    f32 y0 = 20.0f + 16.0f + 6.0f; // = 42px from bottom
+
+    f32 frac = (maxEnergy > 0.0f) ? energy / maxEnergy : 0.0f;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+
+    // Background outline
+    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.3f, 0.3f, 0.3f});
+
+    // Filled portion in blue
+    Vec3 barColor = {0.2f, 0.4f, 1.0f};
+    f32 fillW = barW * frac;
+    for (f32 y = y0 + 2; y < y0 + barH - 2; y += 2.0f) {
+        pushLine(x0 + 2, y, x0 + 2 + fillW - 4, y, barColor);
+    }
+
+    flushHUD(sw, sh);
+}
+
+void HUD::drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct) {
+    // Weapon indicator is at (sw - 120, 20) with size 100x16.
+    // Place the skill cooldown square just below it.
+    f32 x0 = static_cast<f32>(sw) - 120.0f;
+    f32 y0 = 20.0f + 16.0f + 6.0f; // below weapon indicator
+    f32 size = 16.0f;
+
+    if (cooldownPct < 0.0f) cooldownPct = 0.0f;
+    if (cooldownPct > 1.0f) cooldownPct = 1.0f;
+
+    // Outline
+    Vec3 outlineColor = (cooldownPct == 0.0f) ? Vec3{0.0f, 1.0f, 1.0f} : Vec3{0.2f, 0.2f, 0.3f};
+    pushQuad(x0, y0, x0 + size, y0 + size, outlineColor);
+
+    // Fill from bottom to top proportional to (1 - cooldownPct)
+    f32 fillAmount = 1.0f - cooldownPct;
+    f32 fillH = size * fillAmount;
+    Vec3 fillColor = (cooldownPct == 0.0f) ? Vec3{0.0f, 1.0f, 1.0f} : Vec3{0.2f, 0.2f, 0.3f};
+    for (f32 y = y0 + 2; y < y0 + 2 + fillH - 2; y += 1.0f) {
+        pushLine(x0 + 2, y, x0 + size - 2, y, fillColor);
+    }
+
+    flushHUD(sw, sh);
+}
+
+void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
+    // Center-top of screen
+    f32 barW = 160.0f;
+    f32 barH = 8.0f;
+    f32 x0 = static_cast<f32>(sw) * 0.5f - barW * 0.5f;
+    f32 y0 = static_cast<f32>(sh) - 60.0f;
+
+    Vec3 c = {color.x * alpha, color.y * alpha, color.z * alpha};
+
+    // Outline
+    pushLine(x0,        y0,        x0 + barW, y0,        c);
+    pushLine(x0 + barW, y0,        x0 + barW, y0 + barH, c);
+    pushLine(x0 + barW, y0 + barH, x0,        y0 + barH, c);
+    pushLine(x0,        y0 + barH, x0,        y0,        c);
+
+    // Fill
+    for (f32 y = y0 + 1; y < y0 + barH; y += 1.0f) {
+        pushLine(x0 + 1, y, x0 + barW - 1, y, c);
+    }
+
+    flushHUD(sw, sh);
+}
+
+void HUD::drawInventoryScreen(u32 sw, u32 sh,
+                               const PlayerInventory& inv,
+                               const ItemDef* itemDefs,
+                               u8 selectedSlot, bool selectedIsEquipped)
+{
+    (void)itemDefs; // reserved for future tooltip stat lookups
+
+    f32 centerY = static_cast<f32>(sh) * 0.5f;
+
+    // --- Equipment panel (left side) ---
+    f32 eqX      = static_cast<f32>(sw) * 0.15f;
+    f32 eqStartY = centerY + 100.0f;
+    f32 slotW    = 140.0f;
+    f32 slotH    = 26.0f;
+    f32 slotGap  = 4.0f;
+
+    for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++) {
+        f32 y = eqStartY - static_cast<f32>(i) * (slotH + slotGap);
+        const ItemInstance& item = inv.equipped[i];
+        bool selected = selectedIsEquipped && (selectedSlot == static_cast<u8>(i));
+
+        Vec3 color = {0.3f, 0.3f, 0.3f};
+        if (!isItemEmpty(item)) {
+            color = rarityColor(item.rarity);
+        }
+
+        if (selected) {
+            color.x = color.x * 1.5f; if (color.x > 1.0f) color.x = 1.0f;
+            color.y = color.y * 1.5f; if (color.y > 1.0f) color.y = 1.0f;
+            color.z = color.z * 1.5f; if (color.z > 1.0f) color.z = 1.0f;
+        }
+
+        // Slot outline
+        pushLine(eqX,          y,         eqX + slotW, y,         color);
+        pushLine(eqX + slotW,  y,         eqX + slotW, y + slotH, color);
+        pushLine(eqX + slotW,  y + slotH, eqX,         y + slotH, color);
+        pushLine(eqX,          y + slotH, eqX,         y,         color);
+
+        // Power fill bar inside slot
+        if (!isItemEmpty(item)) {
+            f32 fillW = slotW * 0.9f * (item.damage / 80.0f);
+            if (fillW > slotW * 0.9f) fillW = slotW * 0.9f;
+            f32 barY = y + 4.0f;
+            for (f32 line = 0; line < 4.0f; line += 1.0f) {
+                pushLine(eqX + 4.0f, barY + line, eqX + 4.0f + fillW, barY + line, color);
+            }
+        }
+
+        // Selection arrow
+        if (selected) {
+            Vec3 hi = {1.0f, 1.0f, 1.0f};
+            pushLine(eqX - 10.0f, y + slotH * 0.5f, eqX - 4.0f, y + slotH * 0.5f, hi);
+        }
+    }
+
+    // --- Backpack panel (right side, 6 columns x 4 rows) ---
+    f32 bpX      = static_cast<f32>(sw) * 0.55f;
+    f32 bpStartY = centerY + 60.0f;
+    f32 cellSize = 26.0f;
+    f32 cellGap  = 3.0f;
+
+    for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
+        u32 col = i % 6;
+        u32 row = i / 6;
+        f32 x = bpX + static_cast<f32>(col) * (cellSize + cellGap);
+        f32 y = bpStartY - static_cast<f32>(row) * (cellSize + cellGap);
+
+        const ItemInstance& item = inv.backpack[i];
+        bool selected = !selectedIsEquipped && (selectedSlot == static_cast<u8>(i));
+
+        Vec3 color = {0.2f, 0.2f, 0.2f};
+        if (!isItemEmpty(item)) {
+            color = rarityColor(item.rarity);
+        }
+
+        // Slot outline
+        pushLine(x,           y,           x + cellSize, y,           color);
+        pushLine(x + cellSize, y,           x + cellSize, y + cellSize, color);
+        pushLine(x + cellSize, y + cellSize, x,           y + cellSize, color);
+        pushLine(x,           y + cellSize, x,           y,           color);
+
+        // Fill filled slots
+        if (!isItemEmpty(item)) {
+            Vec3 fillColor = {color.x * 0.5f, color.y * 0.5f, color.z * 0.5f};
+            for (f32 line = 2.0f; line < cellSize - 2.0f; line += 1.0f) {
+                pushLine(x + 2.0f, y + line, x + cellSize - 2.0f, y + line, fillColor);
+            }
+        }
+
+        // Selection highlight
+        if (selected) {
+            Vec3 hi = {1.0f, 1.0f, 1.0f};
+            pushLine(x - 1, y - 1,           x + cellSize + 1, y - 1,           hi);
+            pushLine(x + cellSize + 1, y - 1, x + cellSize + 1, y + cellSize + 1, hi);
+            pushLine(x + cellSize + 1, y + cellSize + 1, x - 1, y + cellSize + 1, hi);
+            pushLine(x - 1, y + cellSize + 1, x - 1, y - 1,                       hi);
+        }
+    }
+
+    flushHUD(sw, sh);
 }

@@ -42,4 +42,8 @@ namespace Combat {
     bool fireProjectile(const WeaponDef& weapon,
                         Vec3 eyePos, Vec3 forward,
                         ProjectilePool& projectiles);
+
+    // Death callback — called when an entity dies, before pool cleanup
+    using DeathCallback = void(*)(EntityPool& pool, u16 entityIndex, Vec3 position);
+    void setDeathCallback(DeathCallback cb);
 }

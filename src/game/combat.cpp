@@ -5,6 +5,12 @@
 #include "core/log.h"
 #include <cmath>
 
+static Combat::DeathCallback s_deathCallback = nullptr;
+
+void Combat::setDeathCallback(DeathCallback cb) {
+    s_deathCallback = cb;
+}
+
 void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
     Entity* e = handleGet(pool, target);
     if (!e) return;
@@ -19,6 +25,9 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
         e->aiState    = AIState::DEAD;
         e->deathTimer = 1.0f;
         e->velocity   = {0,0,0};
+        if (s_deathCallback) {
+            s_deathCallback(pool, target.index, e->position);
+        }
     }
 }
 

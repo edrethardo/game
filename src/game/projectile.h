@@ -5,7 +5,7 @@
 #include "game/entity.h"
 #include "world/level_grid.h"
 
-static constexpr u32 MAX_PROJECTILES = 64;
+static constexpr u32 MAX_PROJECTILES = 128;
 
 struct Projectile {
     Vec3 position   = {0,0,0};
@@ -15,6 +15,9 @@ struct Projectile {
     f32  lifetime   = 3.0f;
     bool active     = false;
     bool fromPlayer = true; // false = enemy projectile
+    u8   projFlags  = 0;       // bit 0: isOrb, bit 1: isOrbShard
+    f32  subTimer   = 0.0f;    // orb shard spawn interval timer
+    f32  orbAngle   = 0.0f;    // current rotation angle for shard spawning
 };
 
 struct ProjectilePool {

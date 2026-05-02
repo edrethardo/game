@@ -1,0 +1,57 @@
+{
+  "skills": [
+    {
+      "id": "frozen_orb",
+      "name": "Frozen Orb",
+      "cooldown": 4.0,
+      "energyCost": 35.0,
+      "orbDamage": 20.0,
+      "shardDamage": 8.0,
+      "shardCount": 6,
+      "shardInterval": 0.1,
+      "orbSpeed": 5.0,
+      "shardSpeed": 15.0,
+      "orbRadius": 0.4,
+      "shardRadius": 0.06,
+      "duration": 2.5,
+      "angleStepDeg": 22.0
+    },
+    {
+      "id": "chain_lightning",
+      "name": "Chain Lightning",
+      "cooldown": 3.0,
+      "energyCost": 25.0,
+      "damage": 35.0,
+      "bounces": 3,
+      "bounceRange": 8.0,
+      "damageFalloff": 0.8
+    },
+    {
+      "id": "blood_nova",
+      "name": "Blood Nova",
+      "cooldown": 5.0,
+      "healthCostPct": 0.2,
+      "damage": 40.0,
+      "radius": 5.0
+    },
+    {
+      "id": "meteor_strike",
+      "name": "Meteor Strike",
+      "cooldown": 6.0,
+      "energyCost": 50.0,
+      "damage": 60.0,
+      "radius": 3.0,
+      "delay": 0.8
+    },
+    {
+      "id": "phase_dash",
+      "name": "Phase Dash",
+      "cooldown": 3.0,
+      "energyCost": 20.0,
+      "damage": 15.0,
+      "distance": 6.0,
+      "corridorWidth": 1.0,
+      "invulnDuration": 0.3
+    }
+  ]
+}

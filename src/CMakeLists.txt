@@ -26,6 +26,8 @@ add_executable(DungeonEngine
     game/combat.cpp
     game/projectile.cpp
     game/enemy_ai.cpp
+    game/item.cpp
+    game/skill.cpp
     net/net.cpp
     net/snapshot.cpp
     net/server.cpp
