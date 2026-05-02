@@ -368,8 +368,26 @@ void Engine::init() {
 void Engine::saveGame() {
     FILE* f = std::fopen("save.dat", "wb");
     if (!f) { LOG_WARN("Failed to save game"); return; }
+
+    // Header: floor + seed
     std::fwrite(&m_savedFloor, sizeof(u32), 1, f);
     std::fwrite(&m_savedSeed, sizeof(u32), 1, f);
+
+    // Player health
+    f32 hp = m_localPlayer.health;
+    f32 maxHp = m_localPlayer.maxHealth;
+    std::fwrite(&hp, sizeof(f32), 1, f);
+    std::fwrite(&maxHp, sizeof(f32), 1, f);
+
+    // Inventory (equipment + backpack)
+    std::fwrite(&m_inventories[0], sizeof(PlayerInventory), 1, f);
+
+    // Quickbar
+    std::fwrite(&m_quickbars[0], sizeof(QuickbarState), 1, f);
+
+    // Skill state
+    std::fwrite(&m_skillStates[0], sizeof(SkillState), 1, f);
+
     std::fclose(f);
     LOG_INFO("Game saved at floor %u", m_savedFloor);
 }
@@ -377,10 +395,38 @@ void Engine::saveGame() {
 bool Engine::loadGame() {
     FILE* f = std::fopen("save.dat", "rb");
     if (!f) return false;
-    bool ok = std::fread(&m_savedFloor, sizeof(u32), 1, f) == 1 &&
-              std::fread(&m_savedSeed, sizeof(u32), 1, f) == 1;
+
+    bool ok = true;
+    ok = ok && std::fread(&m_savedFloor, sizeof(u32), 1, f) == 1;
+    ok = ok && std::fread(&m_savedSeed, sizeof(u32), 1, f) == 1;
+
+    // Player health
+    f32 hp = 100.0f, maxHp = 100.0f;
+    ok = ok && std::fread(&hp, sizeof(f32), 1, f) == 1;
+    ok = ok && std::fread(&maxHp, sizeof(f32), 1, f) == 1;
+
+    // Inventory
+    PlayerInventory loadedInv = {};
+    ok = ok && std::fread(&loadedInv, sizeof(PlayerInventory), 1, f) == 1;
+
+    // Quickbar
+    QuickbarState loadedQb = {};
+    ok = ok && std::fread(&loadedQb, sizeof(QuickbarState), 1, f) == 1;
+
+    // Skill state
+    SkillState loadedSkill = {};
+    ok = ok && std::fread(&loadedSkill, sizeof(SkillState), 1, f) == 1;
+
     std::fclose(f);
-    if (ok) LOG_INFO("Game loaded: floor %u", m_savedFloor);
+
+    if (ok) {
+        m_localPlayer.health = hp;
+        m_localPlayer.maxHealth = maxHp;
+        m_inventories[0] = loadedInv;
+        m_quickbars[0] = loadedQb;
+        m_skillStates[0] = loadedSkill;
+        LOG_INFO("Game loaded: floor %u, HP %.0f/%.0f", m_savedFloor, hp, maxHp);
+    }
     return ok;
 }
 
@@ -408,17 +454,17 @@ void Engine::startGame() {
             bool flying;
         };
         static constexpr EnemyTemplate kEnemies[] = {
-            {"skeleton", 50.0f, 2.5f, 15.0f, 2.5f, 1.0f, 10.0f, {0.4f, 0.9f, 0.4f}, false},
-            {"bat",      30.0f, 7.0f, 18.0f, 8.0f, 0.8f, 12.0f, {0.5f, 0.4f, 0.4f}, true},
-            {"spider",   40.0f, 3.5f, 12.0f, 2.0f, 0.8f, 12.0f, {0.5f, 0.3f, 0.5f}, false},
+            {"skeleton", 40.0f, 2.5f, 12.0f, 2.5f, 1.2f,  8.0f, {0.4f, 0.9f, 0.4f}, false},
+            {"bat",      25.0f, 4.5f, 12.0f, 2.5f, 1.0f,  6.0f, {0.5f, 0.4f, 0.4f}, true},
+            {"spider",   35.0f, 3.0f, 10.0f, 2.0f, 1.0f,  8.0f, {0.5f, 0.3f, 0.5f}, false},
         };
 
         for (u32 r = 1; r < dungeon.roomCount; r++) {
             const DungeonRoom& room = dungeon.rooms[r];
 
-            // 1-3 enemies per room, scaled by room area
+            // Fewer enemies on floor 1, more on deeper floors
             u32 area = room.w * room.d;
-            u32 enemyCount = 1 + (area / 20);
+            u32 enemyCount = (m_currentFloor == 1) ? 1 : (1 + (area / 20));
             if (enemyCount > 3) enemyCount = 3;
 
             for (u32 e = 0; e < enemyCount; e++) {
@@ -626,11 +672,13 @@ void Engine::startGame() {
 
     // Init inventory & world items
     WorldItemSystem::init(m_worldItems);
-    for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        Inventory::init(m_inventories[i]);
-        m_skillStates[i] = {};
-        // Quickbar init after inventory so weapon slot sync is correct
-        Quickbar::init(m_quickbars[i], m_inventories[i]);
+    // Only reset inventory on floor 1 — preserve gear when descending
+    if (m_currentFloor <= 1) {
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            Inventory::init(m_inventories[i]);
+            m_skillStates[i] = {};
+            Quickbar::init(m_quickbars[i], m_inventories[i]);
+        }
     }
 
     // Init players
@@ -643,8 +691,11 @@ void Engine::startGame() {
     m_players[m_localPlayerIndex].slotIndex = m_localPlayerIndex;
     m_players[m_localPlayerIndex].position = spawnPos;
     m_players[m_localPlayerIndex].spawnPosition = spawnPos;
-    m_players[m_localPlayerIndex].health = 100.0f;
-    m_players[m_localPlayerIndex].maxHealth = 100.0f;
+    // Only reset health on floor 1 — keep current HP when descending
+    if (m_currentFloor <= 1) {
+        m_players[m_localPlayerIndex].health = 100.0f;
+        m_players[m_localPlayerIndex].maxHealth = 100.0f;
+    }
     m_players[m_localPlayerIndex].weaponState.currentWeapon = 0;
 
     // Also set legacy player for singleplayer compat
@@ -1526,12 +1577,16 @@ void Engine::handleWeaponFire(f32 dt) {
     } break;
     }
 
-    // Amplified kick for viewmodel so the visual response is clearly visible
+    // Viewmodel animation per weapon type
+    if (wpn.type == WeaponType::MELEE) {
+        m_viewmodelState.attackAnimT = 0.3f;
+    } else if (wpn.type == WeaponType::HITSCAN) {
+        m_viewmodelState.attackAnimT = 0.2f; // shorter recoil snap
+        m_viewmodelState.fireShakeTimer = 0.1f;
+    } else {
+        m_viewmodelState.fireShakeTimer = 0.12f;
+    }
     m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
-    // Ranged weapons get rapid vibration while firing
-    if (wpn.type != WeaponType::MELEE) m_viewmodelState.fireShakeTimer = 0.15f;
-    // Melee fires a swing animation of fixed duration
-    if (wpn.type == WeaponType::MELEE) m_viewmodelState.attackAnimT = 0.3f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
 }
 
@@ -1659,8 +1714,8 @@ void Engine::renderViewmodel() {
     u32 sh = Window::getHeight();
     f32 aspect = static_cast<f32>(sw) / static_cast<f32>(sh);
 
-    // Tight near plane for viewmodel
-    Mat4 proj = Mat4::perspective(70.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
+    // Wide FOV for viewmodel so arm/hand are visible in peripheral vision
+    Mat4 proj = Mat4::perspective(85.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
 
     // Subtle walk bob
     f32 bobX = sinf(m_viewmodelState.bobTimer * 6.0f) * 0.004f;
@@ -1675,25 +1730,49 @@ void Engine::renderViewmodel() {
     f32 attackZ     = 0.0f;  // Z offset (thrust forward/back)
 
     if (m_viewmodelState.attackAnimT > 0.0f) {
-        f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1→0
-
         if (def.weaponType == WeaponType::MELEE) {
+            f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1→0
             switch (def.weaponSubtype) {
                 case WeaponSubtype::DAGGER:
                 case WeaponSubtype::THROWING_KNIFE:
-                    // Stab: strong forward thrust then retract
                     attackZ = -0.45f * sinf(t * 3.14159f);
-                    attackPitch = -0.3f * sinf(t * 3.14159f); // punch forward
+                    attackPitch = -0.3f * sinf(t * 3.14159f);
                     break;
                 case WeaponSubtype::AXE:
-                    // Heavy overhead chop: big downward arc
                     attackPitch = -0.9f * sinf(t * 3.14159f);
                     break;
                 case WeaponSubtype::SWORD:
                 default:
-                    // Horizontal slash: sweep from right to left
                     attackYaw = -0.8f * sinf(t * 3.14159f);
-                    attackPitch = -0.15f * t; // slight lean into swing
+                    attackPitch = -0.15f * t;
+                    break;
+            }
+        } else if (def.weaponType == WeaponType::HITSCAN) {
+            f32 t = m_viewmodelState.attackAnimT / 0.2f; // faster snap-back
+            switch (def.weaponSubtype) {
+                case WeaponSubtype::PISTOL:
+                    // Quick upward kick, snaps back
+                    attackPitch = 0.25f * t;
+                    attackZ = 0.04f * t; // slight pushback
+                    break;
+                case WeaponSubtype::SMG:
+                    // Rapid small jitter — high frequency, low amplitude
+                    attackPitch = 0.12f * t + sinf(t * 40.0f) * 0.03f;
+                    attackYaw = sinf(t * 30.0f) * 0.02f;
+                    break;
+                case WeaponSubtype::CARBINE:
+                    // Heavy shoulder kick — big pitch, slow return
+                    attackPitch = 0.4f * t;
+                    attackZ = 0.08f * t;
+                    break;
+                case WeaponSubtype::REVOLVER:
+                    // Strong upward flip with yaw torque
+                    attackPitch = 0.35f * t;
+                    attackYaw = 0.1f * t;
+                    attackZ = 0.06f * t;
+                    break;
+                default:
+                    attackPitch = 0.2f * t;
                     break;
             }
         }
@@ -1717,7 +1796,7 @@ void Engine::renderViewmodel() {
             }
             break;
         case WeaponType::HITSCAN:
-            offset = {0.40f + bobX, -0.30f + bobY, -0.50f};
+            offset = {0.40f + bobX, -0.30f + bobY, -0.50f + attackZ};
             holdYaw = 0.1f;
             holdPitch = 0.0f;
             break;
@@ -1780,12 +1859,36 @@ void Engine::renderViewmodel() {
 
     if (hasWeapon) {
         MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
-    } else {
-        // Unarmed: draw fist (hand mesh) with skin tone
-        glUniform4f(m_unlitShader.loc_color, 0.85f, 0.70f, 0.55f, 1.0f);
+    }
+
+    // Draw hand gripping the weapon (or fist if unarmed)
+    // Hand sits at the weapon's base, rotated to wrap around the grip
+    {
         const Material* fallback = MaterialSystem::get(0);
+        Vec4 skinTint = {0.85f, 0.70f, 0.55f, 1.0f};
+        glUniform4f(m_unlitShader.loc_color, skinTint.x, skinTint.y, skinTint.z, skinTint.w);
         if (fallback) glBindTexture(GL_TEXTURE_2D, fallback->texture.handle);
+
+        // Hand at weapon grip — offset down from weapon center
+        Mat4 handModel = Mat4::translate(offset)
+                       * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
+                       * Mat4::rotateY(holdYaw + attackYaw)
+                       * Mat4::translate({0.0f, -0.12f, 0.05f}) // below weapon, slightly back
+                       * Mat4::scale({1.2f, 1.2f, 1.2f});       // slightly larger than default
+        Mat4 handMVP = proj * handModel;
+        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, handMVP.m);
         MeshSystem::draw(m_handMesh);
+
+        // Forearm extending back from the hand toward the camera
+        Mat4 armModel = Mat4::translate(offset)
+                      * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
+                      * Mat4::rotateY(holdYaw + attackYaw)
+                      * Mat4::translate({0.02f, -0.18f, 0.25f}) // behind and below hand
+                      * Mat4::rotateX(0.15f)  // slight angle following arm
+                      * Mat4::scale({0.08f, 0.07f, 0.30f});     // elongated arm shape
+        Mat4 armMVP = proj * armModel;
+        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, armMVP.m);
+        MeshSystem::draw(m_cubeMesh);
     }
 }
 
@@ -2135,38 +2238,63 @@ void Engine::render(f32 alpha) {
         }
     }
 
-    // --- Floor door — stairway down to next level ---
+    // --- Floor door — prominent glowing portal to next level ---
     if (m_floorDoorActive) {
         Vec3 dp = m_floorDoorPos;
-        f32 pulse = 0.5f + 0.5f * sinf(static_cast<f32>(m_statsTimer) * 3.0f);
+        f32 t = static_cast<f32>(m_statsTimer);
+        f32 pulse = 0.5f + 0.5f * sinf(t * 3.0f);
+        f32 fastPulse = 0.5f + 0.5f * sinf(t * 8.0f);
 
-        // Draw stairway steps descending into the ground
-        for (u32 step = 0; step < 5; step++) {
-            f32 s = static_cast<f32>(step);
-            f32 y = dp.y - s * 0.15f;       // each step goes down
-            f32 z = dp.z + s * 0.25f;       // each step goes forward
-            f32 w = 0.5f - s * 0.03f;       // steps narrow slightly
-
-            Vec3 col = {0.3f * pulse, 0.25f * pulse, 0.15f * pulse}; // stone color
-            // Step top surface (2 horizontal lines)
-            DebugDraw::line({dp.x - w, y, z}, {dp.x + w, y, z}, col);
-            DebugDraw::line({dp.x - w, y, z + 0.2f}, {dp.x + w, y, z + 0.2f}, col);
-            // Step sides
-            DebugDraw::line({dp.x - w, y, z}, {dp.x - w, y, z + 0.2f}, col);
-            DebugDraw::line({dp.x + w, y, z}, {dp.x + w, y, z + 0.2f}, col);
-            // Step riser (vertical face connecting this step to the one above)
-            if (step > 0) {
-                f32 prevY = dp.y - (s - 1) * 0.15f;
-                DebugDraw::line({dp.x - w, prevY, z}, {dp.x - w, y, z}, col);
-                DebugDraw::line({dp.x + w, prevY, z}, {dp.x + w, y, z}, col);
-            }
+        // Tall vertical beam (bright green, visible from far away)
+        Vec3 beamCol = {0.1f, 0.9f * pulse, 0.2f};
+        for (f32 ox = -0.08f; ox <= 0.08f; ox += 0.04f) {
+            DebugDraw::line(dp + Vec3{ox, 0, 0}, dp + Vec3{ox, 4.0f, 0}, beamCol);
+            DebugDraw::line(dp + Vec3{0, 0, ox}, dp + Vec3{0, 4.0f, ox}, beamCol);
         }
 
-        // Glowing portal indicator at the top of the stairs
-        Vec3 portalCol = {0.2f * pulse, 0.8f * pulse, 0.3f * pulse};
-        DebugDraw::line(dp + Vec3{-0.3f, 0, dp.z > 0 ? 0.05f : -0.05f},
-                        dp + Vec3{ 0.3f, 0, dp.z > 0 ? 0.05f : -0.05f}, portalCol);
-        DebugDraw::line(dp + Vec3{0, 0, 0}, dp + Vec3{0, 1.5f, 0}, portalCol);
+        // Spinning portal ring at waist height
+        f32 ringY = dp.y + 1.0f;
+        f32 ringR = 0.6f + fastPulse * 0.1f;
+        Vec3 ringCol = {0.3f * pulse, 1.0f * pulse, 0.4f * pulse};
+        for (u32 s = 0; s < 12; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / 12.0f) + t * 2.0f;
+            f32 a1 = a0 + (6.28318f / 12.0f);
+            Vec3 p0 = dp + Vec3{cosf(a0) * ringR, ringY - dp.y, sinf(a0) * ringR};
+            Vec3 p1 = dp + Vec3{cosf(a1) * ringR, ringY - dp.y, sinf(a1) * ringR};
+            DebugDraw::line(p0, p1, ringCol);
+        }
+
+        // Second ring at head height
+        f32 ringY2 = dp.y + 2.0f;
+        for (u32 s = 0; s < 12; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / 12.0f) - t * 1.5f;
+            f32 a1 = a0 + (6.28318f / 12.0f);
+            Vec3 p0 = dp + Vec3{cosf(a0) * ringR * 0.7f, ringY2 - dp.y, sinf(a0) * ringR * 0.7f};
+            Vec3 p1 = dp + Vec3{cosf(a1) * ringR * 0.7f, ringY2 - dp.y, sinf(a1) * ringR * 0.7f};
+            DebugDraw::line(p0, p1, {0.2f, 0.8f * pulse, 0.3f});
+        }
+
+        // Ground circle (large, static)
+        for (u32 s = 0; s < 16; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / 16.0f);
+            f32 a1 = a0 + (6.28318f / 16.0f);
+            Vec3 p0 = dp + Vec3{cosf(a0) * 0.8f, 0.02f, sinf(a0) * 0.8f};
+            Vec3 p1 = dp + Vec3{cosf(a1) * 0.8f, 0.02f, sinf(a1) * 0.8f};
+            DebugDraw::line(p0, p1, {0.15f, 0.5f, 0.2f});
+        }
+
+        // Stairway steps descending
+        for (u32 step = 0; step < 4; step++) {
+            f32 s = static_cast<f32>(step);
+            f32 y = dp.y - s * 0.2f;
+            f32 z = dp.z + s * 0.3f;
+            f32 w = 0.45f;
+            Vec3 stepCol = {0.35f, 0.3f, 0.2f};
+            DebugDraw::line({dp.x - w, y, z}, {dp.x + w, y, z}, stepCol);
+            DebugDraw::line({dp.x - w, y, z + 0.25f}, {dp.x + w, y, z + 0.25f}, stepCol);
+            DebugDraw::line({dp.x - w, y, z}, {dp.x - w, y, z + 0.25f}, stepCol);
+            DebugDraw::line({dp.x + w, y, z}, {dp.x + w, y, z + 0.25f}, stepCol);
+        }
     }
 
     // --- World items (rendered with weapon-specific meshes when available) ---
@@ -2477,6 +2605,27 @@ void Engine::render(f32 alpha) {
 
         // Minimap (top-right corner)
         Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw);
+
+        // Door marker on minimap (pulsing green "V" symbol at door grid position)
+        if (m_floorDoorActive) {
+            u32 doorGx, doorGz;
+            if (LevelGridSystem::worldToGrid(m_grid, m_floorDoorPos, doorGx, doorGz)) {
+                // Convert grid coords to minimap screen position
+                // Minimap: top-right, 150x150px, 10px margin
+                f32 mapSize = 150.0f;
+                f32 margin = 10.0f;
+                f32 mapX = static_cast<f32>(sw) - mapSize - margin;
+                f32 mapY = static_cast<f32>(sh) - mapSize - margin;
+                f32 normX = (static_cast<f32>(doorGx) + 0.5f) / static_cast<f32>(m_grid.width);
+                f32 normZ = (static_cast<f32>(doorGz) + 0.5f) / static_cast<f32>(m_grid.depth);
+                f32 dotX = mapX + normX * mapSize;
+                f32 dotY = mapY + (1.0f - normZ) * mapSize; // Z flipped
+
+                f32 doorPulse = 0.7f + 0.3f * sinf(m_statsTimer * 5.0f);
+                Vec3 doorCol = {0.2f * doorPulse, 1.0f * doorPulse, 0.3f * doorPulse};
+                FontSystem::drawText(sw, sh, dotX - 3.0f, dotY - 4.0f, "V", doorCol, 1);
+            }
+        }
 
         // Floor indicator (top-left)
         {
