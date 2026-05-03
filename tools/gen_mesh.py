@@ -180,28 +180,39 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
     offset: world-space offset applied to all voxels
 
     Only emits faces at filled/empty boundaries (internal faces culled).
+
+    UVs are computed per-voxel: each voxel maps to a unique region of a skin
+    texture based on its (gx, gy) grid position. The front face (-Z) uses
+    the (gx, gy) position directly; side/top/bottom faces use the same UV
+    so the texture colors the entire voxel consistently. The skin texture
+    is expected to be a grid where pixel (x, y) colors voxel (x, height-1-y).
     """
     ox, oy, oz = offset
     hs = voxel_size * 0.5
 
-    # Pre-compute shared UVs
-    uv0 = mb.add_uv(0.0, 0.0)
-    uv1 = mb.add_uv(1.0, 0.0)
-    uv2 = mb.add_uv(1.0, 1.0)
-    uv3 = mb.add_uv(0.0, 1.0)
+    # Compute grid bounds for UV normalization
+    if not filled:
+        return
+    min_gx = min(p[0] for p in filled)
+    max_gx = max(p[0] for p in filled)
+    min_gy = min(p[1] for p in filled)
+    max_gy = max(p[1] for p in filled)
+    grid_w = max_gx - min_gx + 1
+    grid_h = max_gy - min_gy + 1
+    # Add 1-pixel margin to avoid bleeding at edges
+    tex_w = max(grid_w, 1)
+    tex_h = max(grid_h, 1)
 
     # 6 face definitions: (dx,dy,dz), normal, 4 corner offsets from cell center
     face_defs = [
-        # dir,     normal,     corners (CCW from outside)
-        ((0, 1, 0),  (0, 1, 0),  [(-1,1,-1), (1,1,-1), (1,1,1), (-1,1,1)]),     # +Y top
-        ((0,-1, 0),  (0,-1, 0),  [(-1,-1,1), (1,-1,1), (1,-1,-1), (-1,-1,-1)]),  # -Y bottom
-        ((1, 0, 0),  (1, 0, 0),  [(1,-1,-1), (1,1,-1), (1,1,1), (1,-1,1)]),      # +X right
-        ((-1,0, 0),  (-1,0, 0),  [(-1,-1,1), (-1,1,1), (-1,1,-1), (-1,-1,-1)]),  # -X left
-        ((0, 0, 1),  (0, 0, 1),  [(-1,-1,1), (-1,1,1), (1,1,1), (1,-1,1)]),      # +Z front
-        ((0, 0,-1),  (0, 0,-1),  [(1,-1,-1), (1,1,-1), (-1,1,-1), (-1,-1,-1)]),   # -Z back
+        ((0, 1, 0),  (0, 1, 0),  [(-1,1,-1), (1,1,-1), (1,1,1), (-1,1,1)]),
+        ((0,-1, 0),  (0,-1, 0),  [(-1,-1,1), (1,-1,1), (1,-1,-1), (-1,-1,-1)]),
+        ((1, 0, 0),  (1, 0, 0),  [(1,-1,-1), (1,1,-1), (1,1,1), (1,-1,1)]),
+        ((-1,0, 0),  (-1,0, 0),  [(-1,-1,1), (-1,1,1), (-1,1,-1), (-1,-1,-1)]),
+        ((0, 0, 1),  (0, 0, 1),  [(-1,-1,1), (-1,1,1), (1,1,1), (1,-1,1)]),
+        ((0, 0,-1),  (0, 0,-1),  [(1,-1,-1), (1,1,-1), (-1,1,-1), (-1,-1,-1)]),
     ]
 
-    # Cache normals
     normal_cache = {}
     for _, norm, _ in face_defs:
         if norm not in normal_cache:
@@ -212,10 +223,21 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
         cy = oy + gy * voxel_size + hs
         cz = oz + gz * voxel_size + hs
 
+        # UV: map this voxel's (gx, gy) to a pixel center in the skin texture
+        # Pixel center avoids bleeding with GL_NEAREST
+        u_center = (gx - min_gx + 0.5) / tex_w
+        v_center = (gy - min_gy + 0.5) / tex_h
+        # Small inset so all 4 corners of the quad map to the same pixel
+        eps = 0.01 / tex_w
+        uv0 = mb.add_uv(u_center - eps, v_center - eps)
+        uv1 = mb.add_uv(u_center + eps, v_center - eps)
+        uv2 = mb.add_uv(u_center + eps, v_center + eps)
+        uv3 = mb.add_uv(u_center - eps, v_center + eps)
+
         for (dx, dy, dz), norm, corners in face_defs:
             neighbor = (gx + dx, gy + dy, gz + dz)
             if neighbor in filled:
-                continue  # internal face — skip
+                continue
 
             ni = normal_cache[norm]
             vis = []
@@ -224,6 +246,13 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
 
             mb.add_tri(vis[0], vis[1], vis[2], uv0, uv1, uv2, ni, ni, ni)
             mb.add_tri(vis[0], vis[2], vis[3], uv0, uv2, uv3, ni, ni, ni)
+
+    # Store grid info for skin texture generation
+    mb.grid_min_x = min_gx
+    mb.grid_min_y = min_gy
+    mb.grid_w = grid_w
+    mb.grid_h = grid_h
+    mb.filled = filled
 
 
 # ---------------------------------------------------------------------------

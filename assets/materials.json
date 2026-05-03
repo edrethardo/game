@@ -16,9 +16,9 @@
     { "id": 13, "name": "armor_cloth",        "tint": [0.45, 0.4, 0.55, 1.0] },
     { "id": 14, "name": "accessory_bone",     "tint": [0.75, 0.7, 0.6, 1.0] },
     { "id": 15, "name": "accessory_gold",     "tint": [0.85, 0.75, 0.3, 1.0] },
-    { "id": 16, "name": "human_skin",          "tint": [0.82, 0.65, 0.50, 1.0] },
-    { "id": 17, "name": "cleric_skin",         "tint": [0.85, 0.75, 0.55, 1.0] },
-    { "id": 18, "name": "archer_skin",         "tint": [0.78, 0.58, 0.42, 1.0] },
-    { "id": 19, "name": "butcher_skin",        "tint": [0.7, 0.15, 0.1, 1.0] }
+    { "id": 16, "name": "human_skin",          "texture": "human_skin_42.png" },
+    { "id": 17, "name": "cleric_skin",         "texture": "cleric_skin_42.png" },
+    { "id": 18, "name": "archer_skin",         "texture": "archer_skin_42.png" },
+    { "id": 19, "name": "butcher_skin",        "texture": "butcher_skin_42.png" }
   ]
 }
