@@ -18,6 +18,7 @@ static s32 s_mouseDX = 0;
 static s32 s_mouseDY = 0;
 static s32 s_mouseX = 0;
 static s32 s_mouseY = 0;
+static s32 s_mouseWheelY = 0; // accumulated wheel delta this frame
 
 static SDL_GameController* s_controllers[Input::MAX_GAMEPADS] = {};
 
@@ -57,6 +58,9 @@ void Input::update() {
     // Copy current state to previous
     memcpy(s_previousKeys, s_currentKeys, sizeof(s_currentKeys));
     memcpy(s_previousMouseButtons, s_currentMouseButtons, sizeof(s_currentMouseButtons));
+
+    // Reset per-frame accumulators
+    s_mouseWheelY = 0;
 
     // Snapshot keyboard
     int numKeys = 0;
@@ -117,6 +121,10 @@ bool Input::isMouseButtonReleased(u8 button) {
 void Input::setRelativeMouseMode(bool enabled) {
     SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
 }
+
+s32 Input::getMouseWheelDelta() { return s_mouseWheelY; }
+
+void Input::handleMouseWheel(s32 y) { s_mouseWheelY += y; }
 
 // Gamepad
 f32 Input::getAxis(s32 gamepadIndex, s32 axis) {

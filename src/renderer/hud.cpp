@@ -429,14 +429,23 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
                 pushLine(hx,     hy + 2, hx + 1, hy + 2, hc);
             }
 
-            // Cooldown darkening overlay sweeps from top (only on active weapon slot)
-            if (active && cooldownPct > 0.0f) {
-                f32 darkH = (y1 - y0 - 4) * cooldownPct;
-                Vec3 darkColor = {0.05f, 0.05f, 0.08f};
-                for (f32 fy = y0 + 2; fy < y0 + 2 + darkH; fy += 2.0f) {
-                    pushLine(x0 + 2, fy, x1 - 2, fy, darkColor);
-                }
-            }
+        }
+    }
+
+    // Attack cooldown bar — vertical bar to the left of the quickbar
+    if (cooldownPct > 0.0f) {
+        f32 barW = 6.0f;
+        f32 barH = SLOT_SIZE;
+        f32 barX = startX - barW - 8.0f;  // 8px gap left of first slot
+        f32 barY = baseY;
+
+        // Background
+        pushQuad(barX, barY, barX + barW, barY + barH, {0.15f, 0.15f, 0.2f});
+        // Fill from bottom up (remaining cooldown)
+        f32 fillH = barH * (1.0f - cooldownPct);
+        Vec3 fillColor = {0.8f, 0.6f, 0.1f}; // gold
+        for (f32 fy = barY + 1; fy < barY + 1 + fillH; fy += 1.0f) {
+            pushLine(barX + 1, fy, barX + barW - 1, fy, fillColor);
         }
     }
 

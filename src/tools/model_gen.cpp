@@ -23,11 +23,12 @@ static const WeaponModelGen::WeaponDef s_builtinDefs[] = {
         }, 2
     },
     {
-        "axe", "Wedge head on stick",
+        "axe", "Asymmetric axe blade on shaft",
         {
-            {{-0.10f,  0.125f, -0.015f}, {0.10f,  0.275f,  0.015f}},  // head
-            {{-0.015f,-0.30f,  -0.015f}, {0.015f, 0.20f,   0.015f}},  // shaft
-        }, 2
+            {{-0.12f,  0.15f,  -0.015f}, {0.0f,   0.30f,  0.015f}},   // blade (extends left only)
+            {{ 0.0f,   0.18f,  -0.02f},  {0.04f,  0.26f,  0.02f}},    // poll (small block opposite)
+            {{-0.015f,-0.30f,  -0.015f}, {0.015f,  0.18f,  0.015f}},   // shaft
+        }, 3
     },
 
     // ---- HITSCAN ----
@@ -103,6 +104,16 @@ static const WeaponModelGen::WeaponDef s_builtinDefs[] = {
             {{-0.025f,  0.20f, -0.025f}, {0.025f,  0.30f,  0.025f}},  // crystal head
             {{-0.02f,  -0.28f, -0.02f},  {0.02f,  -0.22f,  0.02f}},   // pommel
         }, 3
+    },
+
+    {
+        "mace", "Flanged mace with shaft",
+        {
+            {{-0.015f, -0.25f, -0.015f}, {0.015f,  0.15f,  0.015f}},  // shaft
+            {{-0.04f,   0.15f, -0.04f},  {0.04f,   0.25f,  0.04f}},   // head (cube)
+            {{-0.05f,   0.17f, -0.01f},  {0.05f,   0.23f,  0.01f}},   // flange X
+            {{-0.01f,   0.17f, -0.05f},  {0.01f,   0.23f,  0.05f}},   // flange Z
+        }, 4
     },
 
     // ---- ARMOR / EQUIPMENT ----

@@ -569,6 +569,141 @@ def gen_human(height=1.8):
     return mb
 
 
+def gen_cleric(height=1.8):
+    """Male cleric NPC. Broad build, hooded head, robes, short blonde hair.
+
+    Origin at feet (Y=0). Heavier torso for priestly armor look.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head (round)
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)  # chin
+    # Eyes
+    filled.discard((-1, 14, -2))
+    filled.discard((1, 14, -2))
+    # Mouth
+    filled.discard((0, 12, -2))
+    # Short blonde hair (top of head, slightly wider)
+    fill_box(-2, 16, -2, 5, 1, 4)
+    fill_box(-2, 15, -2, 5, 1, 1)  # front fringe
+
+    # Hood/collar
+    fill_box(-2, 11, -1, 5, 2, 3)
+
+    # Torso (priestly robes — wide, flowing)
+    fill_box(-3, 5, -1, 7, 6, 3)
+    # Shoulder guards
+    fill_box(-4, 9, -1, 1, 2, 3)
+    fill_box(4, 9, -1, 1, 2, 3)
+    # Holy symbol on chest (small bump)
+    filled.add((0, 8, -2))
+
+    # Belt/sash
+    fill_box(-3, 4, -1, 7, 1, 3)
+
+    # Arms
+    fill_box(-4, 7, 0, 1, 3, 1)
+    fill_box(4, 7, 0, 1, 3, 1)
+    fill_box(-4, 4, 0, 1, 3, 1)
+    fill_box(4, 4, 0, 1, 3, 1)
+    # Hands
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box(4, 3, -1, 1, 1, 2)
+
+    # Legs (hidden under robes — thicker)
+    fill_box(-2, 2, -1, 2, 2, 2)
+    fill_box(1, 2, -1, 2, 2, 2)
+    fill_box(-2, 0, -1, 2, 2, 2)
+    fill_box(1, 0, -1, 2, 2, 2)
+    # Boots
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box(1, 0, -2, 2, 1, 3)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_archer(height=1.7):
+    """Female archer NPC. Leaner build, ponytail, lighter armor.
+
+    Origin at feet (Y=0). Slimmer than cleric, with a ponytail.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head (slightly smaller)
+    fill_box(-2, 13, -2, 4, 3, 4)
+    fill_box(-1, 12, -1, 2, 1, 3)  # chin (narrower)
+    # Eyes (green — just the sockets, tint does the color)
+    filled.discard((-1, 14, -2))
+    filled.discard((1, 14, -2))
+    # Mouth
+    filled.discard((0, 12, -2))
+
+    # Fox-red/brown ponytail (extends behind head and down)
+    fill_box(-1, 15, -2, 3, 2, 4)   # top hair
+    fill_box(0, 14, 2, 1, 1, 1)     # ponytail start
+    fill_box(0, 13, 2, 1, 1, 1)     # ponytail mid
+    fill_box(0, 12, 2, 1, 1, 1)     # ponytail mid
+    fill_box(0, 11, 2, 1, 1, 1)     # ponytail end
+    fill_box(0, 10, 2, 1, 1, 1)     # ponytail tip
+
+    # Neck
+    fill_box(0, 11, 0, 1, 1, 1)
+
+    # Torso (slimmer, leather armor)
+    fill_box(-2, 6, -1, 4, 5, 3)
+    # Light shoulder pads
+    fill_box(-3, 9, 0, 1, 1, 1)
+    fill_box(2, 9, 0, 1, 1, 1)
+
+    # Belt with quiver strap
+    fill_box(-2, 5, -1, 4, 1, 3)
+    # Quiver on back (tall thin box)
+    fill_box(1, 6, 2, 1, 5, 1)
+
+    # Arms (slimmer)
+    fill_box(-3, 7, 0, 1, 3, 1)
+    fill_box(2, 7, 0, 1, 3, 1)
+    fill_box(-3, 4, 0, 1, 3, 1)
+    fill_box(2, 4, 0, 1, 3, 1)
+    # Hands
+    fill_box(-3, 3, -1, 1, 1, 2)
+    fill_box(2, 3, -1, 1, 1, 2)
+
+    # Legs (slim)
+    fill_box(-2, 2, 0, 1, 2, 1)
+    fill_box(1, 2, 0, 1, 2, 1)
+    fill_box(-2, 0, 0, 1, 2, 1)
+    fill_box(1, 0, 0, 1, 2, 1)
+    # Light boots
+    fill_box(-2, 0, -1, 1, 1, 2)
+    fill_box(1, 0, -1, 1, 1, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
 # ---------------------------------------------------------------------------
 # Type registry
 # ---------------------------------------------------------------------------
@@ -583,6 +718,16 @@ MESH_TYPES = {
         "func": gen_human,
         "desc": "Barony-style voxel human NPC. Params: --height",
         "default_file": "human.obj",
+    },
+    "cleric": {
+        "func": gen_cleric,
+        "desc": "Male cleric NPC with hood and robes. Params: --height",
+        "default_file": "cleric.obj",
+    },
+    "archer": {
+        "func": gen_archer,
+        "desc": "Female archer NPC with ponytail and quiver. Params: --height",
+        "default_file": "archer.obj",
     },
     "spider": {
         "func": gen_spider,
@@ -662,7 +807,7 @@ def main():
     kwargs = {}
     mtype = args.type
 
-    if mtype == "humanoid" or mtype == "human":
+    if mtype in ("humanoid", "human", "cleric", "archer"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "spider":

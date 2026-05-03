@@ -77,6 +77,10 @@ void Window::pollEvents() {
             case SDL_CONTROLLERDEVICEREMOVED:
                 Input::handleControllerEvent(event);
                 break;
+
+            case SDL_MOUSEWHEEL:
+                Input::handleMouseWheel(event.wheel.y);
+                break;
         }
     }
 }

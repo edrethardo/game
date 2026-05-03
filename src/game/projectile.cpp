@@ -39,6 +39,7 @@ void ProjectileSystem::spawn(ProjectilePool& pool,
             p.splashDamage = 0.0f;
             p.subTimer   = 0.0f;
             p.orbAngle   = 0.0f;
+            p.meshId     = 0;
             p.fromPlayer = fromPlayer;
             pool.activeCount++;
             return;

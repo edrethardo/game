@@ -21,6 +21,8 @@ namespace Input {
     bool isMouseButtonPressed(u8 button);
     bool isMouseButtonReleased(u8 button); // True only the frame it was released
     void setRelativeMouseMode(bool enabled);
+    s32  getMouseWheelDelta();  // +1 scroll up, -1 scroll down, 0 no scroll
+    void handleMouseWheel(s32 y); // called from window event loop
 
     // Gamepad
     static constexpr s32 MAX_GAMEPADS = 4;

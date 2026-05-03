@@ -134,6 +134,7 @@ private:
     u8 m_meshIdSkeleton = 0, m_meshIdBat = 0, m_meshIdSpider = 0;
     u8 m_meshIdChest = 0, m_meshIdHuman = 0;
     u8 m_meshIdSword = 0, m_meshIdDagger = 0, m_meshIdAxe = 0;
+    u8 m_meshIdMace = 0, m_meshIdCleric = 0, m_meshIdArcher = 0, m_meshIdBow = 0;
 
     // Switch constraint mode
     bool m_switchMode = false;

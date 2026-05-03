@@ -269,6 +269,9 @@ void Engine::init() {
             {"shield",         "assets/meshes/shield.obj"},
             {"human",          "assets/meshes/human.obj"},
             {"wand",           "assets/meshes/wand.obj"},
+            {"mace",           "assets/meshes/mace.obj"},
+            {"cleric",         "assets/meshes/cleric.obj"},
+            {"archer",         "assets/meshes/archer.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -296,6 +299,10 @@ void Engine::init() {
     m_meshIdSword    = findMeshByName("sword");
     m_meshIdDagger   = findMeshByName("dagger");
     m_meshIdAxe      = findMeshByName("axe");
+    m_meshIdMace     = findMeshByName("mace");
+    m_meshIdCleric   = findMeshByName("cleric");
+    m_meshIdArcher   = findMeshByName("archer");
+    m_meshIdBow      = findMeshByName("bow");
 
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
@@ -621,68 +628,81 @@ void Engine::startGame() {
         m_floorDoorActive = true;
         LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_currentFloor, doorX, doorY, doorZ);
 
-        // Spawn 2 friendly NPCs near the floor exit (guards at the stairs)
-        static const char* exitGreetings[] = {"This way!", "Hurry!"};
-        for (u32 n = 0; n < 2; n++) {
-            f32 offsetX = (n == 0) ? -1.5f : 1.5f;
-            Vec3 npcPos = {m_floorDoorPos.x + offsetX,
-                           m_floorDoorPos.y + 0.9f,
-                           m_floorDoorPos.z - 1.0f};
-
-            EntityHandle npcHandle = EntitySystem::spawn(m_entities, npcPos,
-                {0.4f, 0.9f, 0.4f}, false,
-                50.0f, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
-
-            Entity* npc = handleGet(m_entities, npcHandle);
+        // Spawn cleric + archer guards near the floor exit
+        {
+            Vec3 npcPos = {m_floorDoorPos.x - 1.5f, m_floorDoorPos.y + 0.9f, m_floorDoorPos.z - 1.0f};
+            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
+                {0.4f, 0.9f, 0.4f}, false, 50.0f, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
+            Entity* npc = handleGet(m_entities, h);
             if (npc) {
                 npc->flags |= ENT_FRIENDLY;
                 npc->enemyType = EnemyType::SKELETON;
                 npc->aiState = AIState::IDLE;
-                npc->speechText = exitGreetings[n];
+                npc->speechText = "The way is clear!";
                 npc->speechTimer = 5.0f;
-
-                npc->meshId = m_meshIdHuman;
-                npc->materialId = MaterialSystem::getIdByName("human_skin");
-
-                // Alternate weapon between sword and axe for visual variety
-                npc->weaponMeshId = (n % 2 == 0) ? m_meshIdSword : m_meshIdAxe;
+                npc->meshId = m_meshIdCleric;
+                npc->materialId = MaterialSystem::getIdByName("cleric_skin");
+                npc->weaponMeshId = m_meshIdMace;
             }
         }
-        LOG_INFO("Spawned 2 exit NPCs near floor door");
-    }
-
-    // Spawn 2 friendly NPC allies in the spawn room, offset to either side of the player
-    {
-        static const char* npcGreetings[] = {"Stay close!", "Let's go!"};
-        for (u32 n = 0; n < 2; n++) {
-            // Offset NPCs left/right of the spawn position so they don't overlap
-            f32 offsetX = (n == 0) ? -1.5f : 1.5f;
-            f32 npcHalfY = 0.9f; // skeleton half-height
-            Vec3 npcPos = {dungeon.spawnPos.x + offsetX,
-                           dungeon.spawnPos.y + npcHalfY, // center above floor
-                           dungeon.spawnPos.z + 1.0f};
-
-            EntityHandle npcHandle = EntitySystem::spawn(m_entities, npcPos,
-                {0.4f, 0.9f, 0.4f}, false,  // skeleton-sized half-extents
-                GameConst::NPC_HEALTH, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
-
-            Entity* npc = handleGet(m_entities, npcHandle);
+        {
+            Vec3 npcPos = {m_floorDoorPos.x + 1.5f, m_floorDoorPos.y + 0.9f, m_floorDoorPos.z - 1.0f};
+            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
+                {0.35f, 0.85f, 0.35f}, false, 50.0f, 3.5f, 15.0f, 2.5f, 0.7f, 12.0f);
+            Entity* npc = handleGet(m_entities, h);
             if (npc) {
                 npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON; // uses skeleton limb rig (arms + legs)
-                npc->aiState   = AIState::IDLE;
-                npc->speechText  = npcGreetings[n];
-                npc->speechTimer = 4.0f; // greeting fades after 4 seconds
-
-                // Use the human mesh (broader, solid face) instead of skeleton
-                npc->meshId = m_meshIdHuman;
-                npc->materialId = MaterialSystem::getIdByName("human_skin");
-
-                // Give NPC a weapon (alternating sword/axe for visual variety)
-                npc->weaponMeshId = (n % 2 == 0) ? m_meshIdSword : m_meshIdAxe;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState = AIState::IDLE;
+                npc->speechText = "Hurry, more coming!";
+                npc->speechTimer = 5.0f;
+                npc->meshId = m_meshIdArcher;
+                npc->materialId = MaterialSystem::getIdByName("archer_skin");
+                npc->weaponMeshId = m_meshIdBow;
             }
         }
-        LOG_INFO("Spawned 2 friendly NPCs in spawn room");
+        LOG_INFO("Spawned cleric and archer guards near floor door");
+    }
+
+    // Spawn 2 distinct friendly NPCs in the spawn room
+    {
+        // NPC 0: Male Cleric — blonde hair, blue eyes, mace, heavier build
+        {
+            Vec3 npcPos = {dungeon.spawnPos.x - 1.5f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z + 1.0f};
+            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
+                {0.4f, 0.9f, 0.4f}, false,
+                GameConst::NPC_HEALTH, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
+            Entity* npc = handleGet(m_entities, h);
+            if (npc) {
+                npc->flags |= ENT_FRIENDLY;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState = AIState::IDLE;
+                npc->speechText = "The light protects!";
+                npc->speechTimer = 4.0f;
+                npc->meshId = m_meshIdCleric;
+                npc->materialId = MaterialSystem::getIdByName("cleric_skin");
+                npc->weaponMeshId = m_meshIdMace;
+            }
+        }
+        // NPC 1: Female Archer — fox-red ponytail, green eyes, bow, lean build
+        {
+            Vec3 npcPos = {dungeon.spawnPos.x + 1.5f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z + 1.0f};
+            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
+                {0.35f, 0.85f, 0.35f}, false, // slightly smaller
+                GameConst::NPC_HEALTH, 3.5f, 15.0f, 2.5f, 0.7f, 12.0f);
+            Entity* npc = handleGet(m_entities, h);
+            if (npc) {
+                npc->flags |= ENT_FRIENDLY;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState = AIState::IDLE;
+                npc->speechText = "Ready when you are!";
+                npc->speechTimer = 4.0f;
+                npc->meshId = m_meshIdArcher;
+                npc->materialId = MaterialSystem::getIdByName("archer_skin");
+                npc->weaponMeshId = m_meshIdBow;
+            }
+        }
+        LOG_INFO("Spawned cleric and archer NPCs in spawn room");
     }
 
     ProjectileSystem::init(m_projectiles);
@@ -1050,12 +1070,20 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
-    // Quickbar slot switching (keys 1-8)
+    // Quickbar slot switching (keys 1-8 or mouse wheel)
     WeaponState& ws = m_players[0].weaponState;
     for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
         if (Input::isKeyPressed(SDL_SCANCODE_1 + i)) {
             m_quickbars[0].activeSlot = static_cast<u8>(i);
         }
+    }
+    s32 wheel = Input::getMouseWheelDelta();
+    if (wheel != 0) {
+        s32 slot = static_cast<s32>(m_quickbars[0].activeSlot);
+        slot -= wheel; // scroll up = previous slot, down = next
+        if (slot < 0) slot = QUICKBAR_SLOTS - 1;
+        if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0;
+        m_quickbars[0].activeSlot = static_cast<u8>(slot);
     }
 
     // Healing potion (Q key, 15 second cooldown — heals 40% of max HP)
@@ -1716,9 +1744,30 @@ void Engine::handleWeaponFire(f32 dt) {
             Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
                                     9.8f, 3.0f, wpn.damage * 0.6f);
         } else {
-            // Wand weapons get PROJ_SPARK flag for lightning bolt rendering
             u8 flags = isWand ? PROJ_SPARK : 0;
             Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
+        }
+        // Set weapon mesh on the projectile for throwing weapons (knife, molotov, bow, crossbow)
+        if (qbItem && !isItemEmpty(*qbItem)) {
+            u8 wpnMesh = m_itemDefs[qbItem->defId].meshId;
+            WeaponSubtype sub = m_itemDefs[qbItem->defId].weaponSubtype;
+            bool isThrown = (sub == WeaponSubtype::THROWING_KNIFE ||
+                             sub == WeaponSubtype::MOLOTOV ||
+                             sub == WeaponSubtype::BOW ||
+                             sub == WeaponSubtype::CROSSBOW);
+            if (isThrown && wpnMesh > 0) {
+                // Find the just-spawned projectile and set its meshId
+                for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+                    Projectile& proj = m_projectiles.projectiles[pi];
+                    if (proj.active && proj.fromPlayer && proj.meshId == 0) {
+                        Vec3 d = proj.position - eyePos;
+                        if (lengthSq(d) < 0.5f) {
+                            proj.meshId = wpnMesh;
+                            break;
+                        }
+                    }
+                }
+            }
         }
         result.didFire = true;
     } break;
@@ -2245,10 +2294,10 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         const Material* entMat = MaterialSystem::get(e.materialId);
         const Texture& entTex = (e.materialId > 0) ? entMat->texture : defaultTex;
 
-        // Resolve tint — friendly NPCs get a distinct blue-green tint
+        // Resolve tint — friendly NPCs use their material skin tint
         Vec4 tint;
         if (e.flags & ENT_FRIENDLY) {
-            tint = {0.4f, 0.8f, 0.6f, 1.0f}; // ally blue-green
+            tint = (e.materialId > 0) ? entMat->tint : Vec4{0.8f, 0.7f, 0.55f, 1.0f};
         } else if (e.enemyType == EnemyType::MIMIC) {
             // Dormant mimics look like normal chests; active ones turn red
             if (e.aiState == AIState::DORMANT) {
@@ -2425,18 +2474,44 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                                  {0.3f, 0.4f, 1.0f, 1.0f});
             }
         } else {
-            // Normal projectile: colored cube
-            Mat4 model = Mat4::translate(p.position)
-                       * Mat4::scale({p.radius * 2.0f, p.radius * 2.0f, p.radius * 2.0f});
-            AABB bounds = {
-                p.position - Vec3{p.radius, p.radius, p.radius},
-                p.position + Vec3{p.radius, p.radius, p.radius}
-            };
+            if (p.meshId > 0 && p.meshId < m_meshDefCount) {
+                // Thrown weapon: render the weapon mesh, spinning in flight
+                Vec3 vel = p.velocity;
+                f32 spd = length(vel);
+                f32 flyYaw = (spd > 0.01f) ? atan2f(-vel.x, -vel.z) : 0.0f;
+                f32 spinAngle = p.lifetime * 15.0f; // rapid tumble
 
-            Vec4 projColor = p.fromPlayer
-                ? Vec4{1.0f, 0.5f, 0.1f, 1.0f}
-                : Vec4{0.8f, 0.2f, 1.0f, 1.0f};
-            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
+                const AABB& mb = m_meshDefs[p.meshId].bounds;
+                f32 maxDim = mb.max.y - mb.min.y;
+                f32 mw = mb.max.x - mb.min.x;
+                f32 md = mb.max.z - mb.min.z;
+                if (mw > maxDim) maxDim = mw;
+                if (md > maxDim) maxDim = md;
+                f32 projScale = (maxDim > 0.001f) ? (0.4f / maxDim) : 0.4f;
+
+                Mat4 model = Mat4::translate(p.position)
+                           * Mat4::rotateY(flyYaw)
+                           * Mat4::rotateX(spinAngle)
+                           * Mat4::scale({projScale, projScale, projScale});
+                AABB bounds = {p.position - Vec3{0.3f,0.3f,0.3f},
+                               p.position + Vec3{0.3f,0.3f,0.3f}};
+
+                Vec4 tint = {0.8f, 0.8f, 0.8f, 1.0f};
+                Renderer::submit(m_basicShader, defaultTex, m_meshDefs[p.meshId].mesh, model, bounds, tint);
+            } else {
+                // Default projectile: colored cube
+                Mat4 model = Mat4::translate(p.position)
+                           * Mat4::scale({p.radius * 2.0f, p.radius * 2.0f, p.radius * 2.0f});
+                AABB bounds = {
+                    p.position - Vec3{p.radius, p.radius, p.radius},
+                    p.position + Vec3{p.radius, p.radius, p.radius}
+                };
+
+                Vec4 projColor = p.fromPlayer
+                    ? Vec4{1.0f, 0.5f, 0.1f, 1.0f}
+                    : Vec4{0.8f, 0.2f, 1.0f, 1.0f};
+                Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
+            }
         }
     }
 
