@@ -34,6 +34,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/skill.h"
+#include "game/inventory_ui.h"
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -1059,20 +1060,22 @@ void Engine::singleplayerUpdate(f32 dt) {
         LOG_INFO("Used healing potion: +%.0f HP (cooldown 15s)", healAmount);
     }
 
-    // Player movement
-    PlayerController::update(m_localPlayer, dt);
-    if (!m_localPlayer.noclip) {
-        Collision::moveAndSlide(m_localPlayer, m_grid, dt);
+    // Player movement — disable look and movement while inventory is open
+    if (!m_inventoryOpen) {
+        PlayerController::update(m_localPlayer, dt);
+        if (!m_localPlayer.noclip) {
+            Collision::moveAndSlide(m_localPlayer, m_grid, dt);
+        }
     }
 
     // Sync to NetPlayer for consistent rendering
     syncLocalPlayerToNetPlayer();
 
-    // Target lock
-    updateTargetLock(dt);
-
-    // Weapon fire
-    handleWeaponFire(dt);
+    // Target lock and weapon fire — disabled while inventory is open
+    if (!m_inventoryOpen) {
+        updateTargetLock(dt);
+        handleWeaponFire(dt);
+    }
 
     // Update viewmodel animation timers
     {
@@ -1191,8 +1194,11 @@ void Engine::singleplayerUpdate(f32 dt) {
         if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
             // Safety: skip any globe that slipped through auto-pickup
             if (!isGlobe(picked)) {
-                if (Inventory::addToBackpack(m_inventories[0], picked)) {
-                    LOG_INFO("Picked up item (defId=%u, rarity=%u)", picked.defId, (u32)picked.rarity);
+                if (!Inventory::addToBackpack(m_inventories[0], picked)) {
+                    // Backpack full: drop item at player's feet
+                    WorldItemSystem::spawn(m_worldItems, picked,
+                        m_localPlayer.position + Vec3{0, 0.5f, 0});
+                    m_fullBackpackNotifyTimer = 2.0f;
                 }
             }
         }
@@ -1219,45 +1225,164 @@ void Engine::singleplayerUpdate(f32 dt) {
     if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
         m_inventoryOpen = !m_inventoryOpen;
         Input::setRelativeMouseMode(!m_inventoryOpen);
+        // Reset drag/click state when toggling inventory
+        m_dragState = {};
+        m_dblClickState = {};
     }
 
-    // Inventory mouse interaction
+    // Inventory drag-and-drop interaction
     if (m_inventoryOpen) {
         s32 mx, my;
         Input::getMousePosition(mx, my);
-        // Convert from top-left origin (SDL) to bottom-left origin (HUD)
-        my = static_cast<s32>(Window::getHeight()) - my;
+        my = static_cast<s32>(Window::getHeight()) - my; // flip to HUD coords
 
-        if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
-            // Detect shift modifier for quickbar assignment vs. equip
-            bool shiftHeld = Input::isKeyDown(SDL_SCANCODE_LSHIFT) || Input::isKeyDown(SDL_SCANCODE_RSHIFT);
-            f32 bpX      = Window::getWidth()  * 0.55f;
-            f32 bpStartY = Window::getHeight() * 0.5f + 60.0f;
-            f32 cellSize = 26.0f;
-            f32 cellGap  = 3.0f;
+        u32 sw = Window::getWidth();
+        u32 sh = Window::getHeight();
 
-            for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
-                u32 col = i % 6;
-                u32 row = i / 6;
-                f32 x = bpX + static_cast<f32>(col) * (cellSize + cellGap);
-                f32 y = bpStartY - static_cast<f32>(row) * (cellSize + cellGap);
+        // Tick double-click timer
+        m_dblClickState.timer += dt;
 
-                if (mx >= static_cast<s32>(x) && mx <= static_cast<s32>(x + cellSize) &&
-                    my >= static_cast<s32>(y) && my <= static_cast<s32>(y + cellSize)) {
-                    if (!isItemEmpty(m_inventories[0].backpack[i])) {
-                        if (shiftHeld) {
-                            // Shift+Click: assign item to quickbar without equipping
-                            Quickbar::assignItem(m_quickbars[0], m_inventories[0], static_cast<u8>(i));
-                            LOG_INFO("Assigned item to quickbar from slot %u", i);
-                        } else {
-                            // Normal click: equip item and sync quickbar weapon slot
-                            Inventory::equip(m_inventories[0], static_cast<u8>(i), m_itemDefs);
-                            Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
-                            LOG_INFO("Equipped item from slot %u", i);
-                        }
+        if (m_dragState.source == DragSource::NONE) {
+            // --- No drag active ---
+
+            // Left mouse pressed: detect double-click or begin potential drag
+            if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+                InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+
+                if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
+                    hit.index < MAX_INVENTORY_ITEMS &&
+                    !isItemEmpty(m_inventories[0].backpack[hit.index])) {
+
+                    // Double-click detection: same backpack slot within 0.3s
+                    if (m_dblClickState.wasBackpack &&
+                        m_dblClickState.lastSlot == hit.index &&
+                        m_dblClickState.timer < 0.3f) {
+                        // Double-click: equip directly
+                        Inventory::equip(m_inventories[0], hit.index, m_itemDefs);
+                        Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                        m_dblClickState = {};
+                    } else {
+                        // Record for potential double-click and begin potential drag
+                        m_dblClickState.timer = 0.0f;
+                        m_dblClickState.lastSlot = hit.index;
+                        m_dblClickState.wasBackpack = true;
+
+                        const ItemInstance& item = m_inventories[0].backpack[hit.index];
+                        m_dragState.source = DragSource::BACKPACK;
+                        m_dragState.sourceIndex = hit.index;
+                        m_dragState.itemUid = item.uid;
+                        m_dragState.itemDefId = item.defId;
+                        m_dragState.startX = mx;
+                        m_dragState.startY = my;
+                        m_dragState.dragging = false;
                     }
-                    break;
+                } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
+                           hit.index < static_cast<u8>(ItemSlot::COUNT) &&
+                           !isItemEmpty(m_inventories[0].equipped[hit.index])) {
+                    // Begin drag from equipment slot
+                    const ItemInstance& item = m_inventories[0].equipped[hit.index];
+                    m_dragState.source = DragSource::EQUIPMENT;
+                    m_dragState.sourceIndex = hit.index;
+                    m_dragState.itemUid = item.uid;
+                    m_dragState.itemDefId = item.defId;
+                    m_dragState.startX = mx;
+                    m_dragState.startY = my;
+                    m_dragState.dragging = false;
+                    m_dblClickState = {};
+                } else if (hit.panel == InventoryUI::SlotHit::QUICKBAR &&
+                           hit.index < QUICKBAR_SLOTS) {
+                    const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[0], m_inventories[0], hit.index);
+                    if (qbItem && !isItemEmpty(*qbItem)) {
+                        m_dragState.source = DragSource::QUICKBAR;
+                        m_dragState.sourceIndex = hit.index;
+                        m_dragState.itemUid = qbItem->uid;
+                        m_dragState.itemDefId = qbItem->defId;
+                        m_dragState.startX = mx;
+                        m_dragState.startY = my;
+                        m_dragState.dragging = false;
+                    }
+                    m_dblClickState = {};
+                } else {
+                    m_dblClickState = {};
                 }
+            }
+
+            // Middle mouse: equip from quickbar (item stays in quickbar as EQUIPPED_REF)
+            if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
+                InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+                if (hit.panel == InventoryUI::SlotHit::QUICKBAR) {
+                    QuickbarSlot& qs = m_quickbars[0].slots[hit.index];
+                    if (qs.type == QuickbarSlot::BACKPACK_REF &&
+                        qs.sourceIndex < MAX_INVENTORY_ITEMS &&
+                        !isItemEmpty(m_inventories[0].backpack[qs.sourceIndex])) {
+                        u32 uid = qs.itemUid;
+                        ItemSlot itemSlot = m_itemDefs[m_inventories[0].backpack[qs.sourceIndex].defId].slot;
+                        Inventory::equip(m_inventories[0], qs.sourceIndex, m_itemDefs);
+                        // Update this quickbar slot to point to the equipment slot
+                        qs.type = QuickbarSlot::EQUIPPED_REF;
+                        qs.sourceIndex = static_cast<u8>(itemSlot);
+                        qs.itemUid = uid;
+                        Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                    }
+                }
+            }
+
+        } else if (!m_dragState.dragging) {
+            // --- Potential drag (mouse pressed but not moved far enough) ---
+
+            if (Input::isMouseButtonDown(SDL_BUTTON_LEFT)) {
+                s32 dx = mx - m_dragState.startX;
+                s32 dy = my - m_dragState.startY;
+                if (dx * dx + dy * dy > 9) { // > 3px dead zone
+                    m_dragState.dragging = true;
+                }
+            }
+            if (Input::isMouseButtonReleased(SDL_BUTTON_LEFT)) {
+                // Single click within dead zone — cancel drag, click was recorded for double-click
+                m_dragState = {};
+            }
+
+        } else {
+            // --- Active drag ---
+
+            if (Input::isMouseButtonReleased(SDL_BUTTON_LEFT)) {
+                InventoryUI::SlotHit drop = InventoryUI::hitTest(sw, sh, mx, my);
+
+                if (drop.panel == InventoryUI::SlotHit::QUICKBAR) {
+                    // Drop on quickbar slot
+                    if (m_dragState.source == DragSource::QUICKBAR) {
+                        Quickbar::swapSlots(m_quickbars[0], m_dragState.sourceIndex, drop.index);
+                    } else {
+                        Quickbar::assignToSlot(m_quickbars[0], m_inventories[0],
+                                                drop.index, m_dragState.source, m_dragState.sourceIndex);
+                    }
+                } else if (drop.panel == InventoryUI::SlotHit::EQUIPMENT &&
+                           m_dragState.source == DragSource::BACKPACK) {
+                    // Drop backpack item on equipment slot — equip it
+                    Inventory::equip(m_inventories[0], m_dragState.sourceIndex, m_itemDefs);
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                } else if (drop.panel == InventoryUI::SlotHit::NONE) {
+                    // Drop outside all panels — drop item to world
+                    Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};
+                    if (m_dragState.source == DragSource::BACKPACK) {
+                        ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], m_dragState.sourceIndex);
+                        if (!isItemEmpty(dropped)) {
+                            WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                        }
+                    } else if (m_dragState.source == DragSource::EQUIPMENT) {
+                        ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                            static_cast<ItemSlot>(m_dragState.sourceIndex));
+                        if (!isItemEmpty(dropped)) {
+                            WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                            Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                        }
+                    } else if (m_dragState.source == DragSource::QUICKBAR) {
+                        // Remove from quickbar only (item stays in backpack)
+                        Quickbar::removeItem(m_quickbars[0], m_dragState.sourceIndex);
+                    }
+                }
+                // Reset drag state
+                m_dragState = {};
             }
         }
     }
@@ -1279,6 +1404,7 @@ void Engine::singleplayerUpdate(f32 dt) {
         m_localPlayer.damageFlashTimer -= dt;
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
+    if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
 
     // Camera
     PlayerController::applyToCamera(m_localPlayer, m_camera);
@@ -1538,19 +1664,17 @@ void Engine::handleWeaponFire(f32 dt) {
     if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
-    // Resolve weapon from the actual quickbar item, not the equipped slot
-    const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[m_localPlayerIndex],
-                                                       m_inventories[m_localPlayerIndex],
-                                                       m_quickbars[m_localPlayerIndex].activeSlot);
+    // Always fire with the equipped weapon (not the active quickbar slot)
+    const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
     WeaponDef wpn;
-    if (qbItem && !isItemEmpty(*qbItem) &&
-        m_itemDefs[qbItem->defId].slot == ItemSlot::WEAPON) {
-        // Build WeaponDef from the specific quickbar item's stats
+    if (!isItemEmpty(eqWpn)) {
         wpn = Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex],
-                                            m_itemDefs, *qbItem);
+                                            m_itemDefs, eqWpn);
     } else {
         wpn = m_weaponDefs[ws.currentWeapon];
     }
+    // Track subtype for projectile flags (molotov/wand detection)
+    const ItemInstance* qbItem = &eqWpn;
     ws.cooldownTimer = wpn.cooldown;
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
@@ -1649,54 +1773,25 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
 // Soft target lock (singleplayer — unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::updateTargetLock(f32 dt) {
-    Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-    Vec3 forward = m_localPlayer.forward;
-
-    if (Input::isMouseButtonDown(SDL_BUTTON_MIDDLE)) {
-        if (!m_localPlayer.lockActive) {
-            EntityHandle hits[8];
-            f32 distances[8];
-            f32 coneCos = cosf(radians(30.0f));
-            u32 count = CombatQuery::queryConeSorted(m_entities, eyePos, forward,
-                                                      coneCos, 30.0f,
-                                                      hits, distances, 8);
-            if (count > 0) {
-                m_localPlayer.lockIndex      = hits[0].index;
-                m_localPlayer.lockGeneration = hits[0].generation;
-                m_localPlayer.lockActive     = true;
-                m_localPlayer.lockLosTimer   = 0.0f;
-            }
+    (void)dt;
+    // Middle-click outside inventory: equip active quickbar item (keeps ref in quickbar)
+    if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
+        u8 slot = m_quickbars[0].activeSlot;
+        QuickbarSlot& qs = m_quickbars[0].slots[slot];
+        if (qs.type == QuickbarSlot::BACKPACK_REF &&
+            qs.sourceIndex < MAX_INVENTORY_ITEMS &&
+            !isItemEmpty(m_inventories[0].backpack[qs.sourceIndex])) {
+            u32 uid = qs.itemUid;
+            ItemSlot itemSlot = m_itemDefs[m_inventories[0].backpack[qs.sourceIndex].defId].slot;
+            Inventory::equip(m_inventories[0], qs.sourceIndex, m_itemDefs);
+            // Convert quickbar ref from backpack to equipment so it stays valid
+            qs.type = QuickbarSlot::EQUIPPED_REF;
+            qs.sourceIndex = static_cast<u8>(itemSlot);
+            qs.itemUid = uid;
+            Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
         }
-
-        if (m_localPlayer.lockActive) {
-            EntityHandle h = {m_localPlayer.lockIndex, m_localPlayer.lockGeneration};
-            Entity* target = handleGet(m_entities, h);
-
-            if (!target || (target->flags & ENT_DEAD)) {
-                m_localPlayer.lockActive = false;
-            } else {
-                Vec3 toTarget = target->position - eyePos;
-                f32 dist = length(toTarget);
-
-                if (dist > 40.0f) {
-                    m_localPlayer.lockActive = false;
-                } else if (dist > 0.001f) {
-                    Vec3 dirToTarget = toTarget * (1.0f / dist);
-                    f32 d = dot(dirToTarget, forward);
-                    if (d < cosf(radians(45.0f))) {
-                        m_localPlayer.lockActive = false;
-                    } else {
-                        f32 lockStrength = 0.05f;
-                        Vec3 biased = normalize(forward + (dirToTarget - forward) * lockStrength);
-                        m_localPlayer.yaw   = atan2f(-biased.x, -biased.z);
-                        m_localPlayer.pitch = asinf(biased.y);
-                    }
-                }
-            }
-        }
-    } else {
-        m_localPlayer.lockActive = false;
     }
+    m_localPlayer.lockActive = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -2600,6 +2695,29 @@ void Engine::render(f32 alpha) {
         invMY = static_cast<s32>(sh) - invMY; // flip to HUD coords
         HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
                                   m_itemDefs, 0, false, invMX, invMY);
+
+        // Draw dragged item icon at cursor position
+        if (isDragActive(m_dragState)) {
+            s32 dmx, dmy;
+            Input::getMousePosition(dmx, dmy);
+            dmy = static_cast<s32>(sh) - dmy;
+            if (m_dragState.itemDefId < m_itemDefCount) {
+                const ItemDef& dragDef = m_itemDefs[m_dragState.itemDefId];
+                // Find the rarity of the dragged item
+                Rarity dragRarity = Rarity::COMMON;
+                if (m_dragState.source == DragSource::BACKPACK &&
+                    m_dragState.sourceIndex < MAX_INVENTORY_ITEMS) {
+                    dragRarity = m_inventories[0].backpack[m_dragState.sourceIndex].rarity;
+                } else if (m_dragState.source == DragSource::EQUIPMENT &&
+                           m_dragState.sourceIndex < static_cast<u8>(ItemSlot::COUNT)) {
+                    dragRarity = m_inventories[0].equipped[m_dragState.sourceIndex].rarity;
+                }
+                ItemIconSystem::drawIcon(sw, sh,
+                    static_cast<f32>(dmx) - 16.0f,
+                    static_cast<f32>(dmy) - 16.0f,
+                    32.0f, dragDef, dragRarity);
+            }
+        }
     } else {
         Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
                         ? Vec3{1.0f, 0.3f, 0.3f}
@@ -2673,6 +2791,16 @@ void Engine::render(f32 alpha) {
             FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 35.0f,
                                  "Q: Potion", {0.3f, 0.8f, 0.3f}, 1);
         }
+    }
+
+    // Backpack full notification — shown centered at 70% screen height, fades out
+    if (m_fullBackpackNotifyTimer > 0.0f) {
+        const char* fullText = "Backpack Full!";
+        f32 fullW = FontSystem::textWidth(fullText, 2);
+        f32 alpha = (m_fullBackpackNotifyTimer < 0.5f) ? m_fullBackpackNotifyTimer * 2.0f : 1.0f;
+        Vec3 fullColor = {0.9f * alpha, 0.2f * alpha, 0.2f * alpha};
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - fullW) * 0.5f,
+                             static_cast<f32>(sh) * 0.7f, fullText, fullColor, 2);
     }
 
     // Quickbar — always visible at bottom of screen

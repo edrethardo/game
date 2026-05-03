@@ -30,6 +30,7 @@ add_executable(DungeonEngine
     game/projectile.cpp
     game/enemy_ai.cpp
     game/item.cpp
+    game/inventory_ui.cpp
     game/limb_system.cpp
     game/skill.cpp
     net/net.cpp

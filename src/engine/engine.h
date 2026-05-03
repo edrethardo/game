@@ -116,6 +116,11 @@ private:
     f32         m_hitMarkerTimer = 0.0f;
     f32         m_potionCooldown = 0.0f;  // healing potion cooldown (15s)
 
+    // Inventory UI state
+    InventoryDragState m_dragState;
+    DoubleClickState   m_dblClickState;
+    f32 m_fullBackpackNotifyTimer = 0.0f;
+
     // Floor door — portal to next dungeon level
     Vec3 m_floorDoorPos    = {0, 0, 0};
     bool m_floorDoorActive = false;

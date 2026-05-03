@@ -19,6 +19,7 @@ namespace Input {
     void getMousePosition(s32& x, s32& y);
     bool isMouseButtonDown(u8 button);
     bool isMouseButtonPressed(u8 button);
+    bool isMouseButtonReleased(u8 button); // True only the frame it was released
     void setRelativeMouseMode(bool enabled);
 
     // Gamepad

@@ -109,6 +109,11 @@ bool Input::isMouseButtonPressed(u8 button) {
     return s_currentMouseButtons[button - 1] && !s_previousMouseButtons[button - 1];
 }
 
+bool Input::isMouseButtonReleased(u8 button) {
+    if (button == 0 || button > NUM_MOUSE_BUTTONS) return false;
+    return !s_currentMouseButtons[button - 1] && s_previousMouseButtons[button - 1];
+}
+
 void Input::setRelativeMouseMode(bool enabled) {
     SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
 }

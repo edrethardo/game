@@ -274,6 +274,31 @@ struct QuickbarState {
     u8 activeSlot = 0;  // 0-7, selected via keys 1-8
 };
 
+// ---- Inventory drag-and-drop state ----
+
+enum struct DragSource : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR };
+
+// Transient UI state tracking an active drag operation
+struct InventoryDragState {
+    DragSource source = DragSource::NONE;
+    u8  sourceIndex = 0;       // backpack/equipment/quickbar slot index
+    u32 itemUid = 0;           // UID of dragged item (stale detection)
+    u16 itemDefId = 0xFFFF;    // cached defId for rendering drag icon
+    s32 startX = 0, startY = 0; // mouse pos at drag start (HUD coords)
+    bool dragging = false;     // true once mouse moves > 3px from start
+};
+
+// Tracks last click for double-click detection
+struct DoubleClickState {
+    f32 timer = 0.0f;          // seconds since last click
+    u8  lastSlot = 0xFF;       // slot index of last click
+    bool wasBackpack = false;  // true if last click was backpack (vs equipment)
+};
+
+inline bool isDragActive(const InventoryDragState& ds) {
+    return ds.source != DragSource::NONE && ds.dragging;
+}
+
 // ---- System namespaces ----
 
 namespace ItemLoader {
@@ -301,6 +326,8 @@ namespace Inventory {
     void equip(PlayerInventory& inv, u8 backpackIndex, const ItemDef* itemDefs);
     bool unequip(PlayerInventory& inv, ItemSlot slot);
     ItemInstance dropFromBackpack(PlayerInventory& inv, u8 backpackIndex);
+    // Remove item from an equipment slot and return it (clears slot, recalculates stats)
+    ItemInstance dropFromEquipment(PlayerInventory& inv, ItemSlot slot);
     WeaponDef    getEffectiveWeapon(const PlayerInventory& inv,
                                     const ItemDef* itemDefs, const WeaponDef& baseWeapon);
     // Build a WeaponDef from a specific item instance + inventory bonuses
@@ -328,4 +355,9 @@ namespace Quickbar {
     void syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv);
     // Returns pointer to the ItemInstance for a slot, or nullptr if empty/stale
     const ItemInstance* resolveSlot(const QuickbarState& qb, const PlayerInventory& inv, u8 slot);
+    // Assign an item from a drag source to a specific quickbar slot (deduplicates)
+    void assignToSlot(QuickbarState& qb, const PlayerInventory& inv,
+                      u8 targetSlot, DragSource source, u8 sourceIndex);
+    // Swap two quickbar slots
+    void swapSlots(QuickbarState& qb, u8 a, u8 b);
 }
