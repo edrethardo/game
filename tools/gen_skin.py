@@ -204,8 +204,8 @@ def skin_cleric():
 
 
 def skin_archer():
-    """Grid: approx w=6, h=18."""
-    w, h = 6, 18
+    """Grid: approx w=6, h=17."""
+    w, h = 6, 17
     p = {}
     hair = (170, 80, 30, 255)
     for py in range(h):

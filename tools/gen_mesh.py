@@ -158,26 +158,31 @@ def add_cylinder(mb, base_center, radius, height, sides):
     for i in range(sides):
         j = (i + 1) % sides
         sn = side_normals[i]
-        mb.add_tri(bottom_vis[i], bottom_vis[j], top_vis[j],
-                   uv00, uv10, uv11, sn, sn, sn)
-        mb.add_tri(bottom_vis[i], top_vis[j], top_vis[i],
-                   uv00, uv11, uv01, sn, sn, sn)
-        mb.add_tri(bot_center, bottom_vis[j], bottom_vis[i],
-                   uv_center, uv10, uv00, bottom_n, bottom_n, bottom_n)
-        mb.add_tri(top_center, top_vis[i], top_vis[j],
-                   uv_center, uv00, uv10, top_n, top_n, top_n)
+        # CCW winding when viewed from outside
+        mb.add_tri(bottom_vis[i], top_vis[j], bottom_vis[j],
+                   uv00, uv11, uv10, sn, sn, sn)
+        mb.add_tri(bottom_vis[i], top_vis[i], top_vis[j],
+                   uv00, uv01, uv11, sn, sn, sn)
+        mb.add_tri(bot_center, bottom_vis[i], bottom_vis[j],
+                   uv_center, uv00, uv10, bottom_n, bottom_n, bottom_n)
+        mb.add_tri(top_center, top_vis[j], top_vis[i],
+                   uv_center, uv10, uv00, top_n, top_n, top_n)
 
 
 # ---------------------------------------------------------------------------
 # Voxel model builder — Barony-style chunky cube models
 # ---------------------------------------------------------------------------
 
-def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
+def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0),
+                    uv_overrides=None):
     """Build optimized mesh from a set of filled voxel positions.
 
     filled: set of (gx, gy, gz) integer grid positions that are filled
     voxel_size: world-space size of each cube
     offset: world-space offset applied to all voxels
+    uv_overrides: optional dict {(gx,gy,gz): (alt_gx, alt_gy)} — remap
+        specific voxels to a different skin pixel, e.g. to prevent eye
+        color bleeding to back-of-head voxels in the same (gx,gy) column.
 
     Only emits faces at filled/empty boundaries (internal faces culled).
 
@@ -198,13 +203,14 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
     tex_w = max(grid_w, 1)
     tex_h = max(grid_h, 1)
 
+    # Each entry: (neighbour offset, face normal, quad corners in CCW order from outside)
     face_defs = [
-        ((0, 1, 0),  (0, 1, 0),  [(-1,1,-1), (1,1,-1), (1,1,1), (-1,1,1)]),
-        ((0,-1, 0),  (0,-1, 0),  [(-1,-1,1), (1,-1,1), (1,-1,-1), (-1,-1,-1)]),
+        ((0, 1, 0),  (0, 1, 0),  [(-1,1,-1), (-1,1,1), (1,1,1), (1,1,-1)]),
+        ((0,-1, 0),  (0,-1, 0),  [(-1,-1,1), (-1,-1,-1), (1,-1,-1), (1,-1,1)]),
         ((1, 0, 0),  (1, 0, 0),  [(1,-1,-1), (1,1,-1), (1,1,1), (1,-1,1)]),
         ((-1,0, 0),  (-1,0, 0),  [(-1,-1,1), (-1,1,1), (-1,1,-1), (-1,-1,-1)]),
-        ((0, 0, 1),  (0, 0, 1),  [(-1,-1,1), (-1,1,1), (1,1,1), (1,-1,1)]),
-        ((0, 0,-1),  (0, 0,-1),  [(1,-1,-1), (1,1,-1), (-1,1,-1), (-1,-1,-1)]),
+        ((0, 0, 1),  (0, 0, 1),  [(-1,-1,1), (1,-1,1), (1,1,1), (-1,1,1)]),
+        ((0, 0,-1),  (0, 0,-1),  [(1,-1,-1), (-1,-1,-1), (-1,1,-1), (1,1,-1)]),
     ]
 
     normal_cache = {}
@@ -217,9 +223,13 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
         cy = oy + gy * voxel_size + hs
         cz = oz + gz * voxel_size + hs
 
-        # One pixel per voxel column — all faces share the same UV
-        u_center = (gx - min_gx + 0.5) / tex_w
-        v_center = (gy - min_gy + 0.5) / tex_h
+        # UV defaults to (gx, gy) pixel; per-voxel override remaps to a
+        # different pixel (e.g. skin color instead of eye color at back of head)
+        ugx, ugy = gx, gy
+        if uv_overrides and (gx, gy, gz) in uv_overrides:
+            ugx, ugy = uv_overrides[(gx, gy, gz)]
+        u_center = (ugx - min_gx + 0.5) / tex_w
+        v_center = (ugy - min_gy + 0.5) / tex_h
         eps = 0.01 / tex_w
         uv0 = mb.add_uv(u_center - eps, v_center - eps)
         uv1 = mb.add_uv(u_center + eps, v_center - eps)
@@ -644,9 +654,17 @@ def gen_cleric(height=1.8):
     fill_box(-2, 0, -2, 2, 1, 3)
     fill_box(1, 0, -2, 2, 1, 3)
 
+    # Remap back-of-head voxels in eye columns to skin color so the eye
+    # pixel doesn't bleed through to the back of the head.  gz=-1 is the
+    # visible eyeball behind the socket — keep that as eye color.
+    uv_fix = {}
+    for gz in range(0, 2):      # gz=0 and gz=1
+        uv_fix[(-1, 14, gz)] = (0, 14)   # center column = skin pixel
+        uv_fix[(1, 14, gz)]  = (0, 14)
+
     ox = -0.5 * vs
     oz = -0.5 * vs
-    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
     return mb
 
 
@@ -665,9 +683,9 @@ def gen_archer(height=1.7):
                 for z in range(z0, z0 + d):
                     filled.add((x, y, z))
 
-    # Head (slightly smaller)
-    fill_box(-2, 13, -2, 4, 3, 4)
-    fill_box(-1, 12, -1, 2, 1, 3)  # chin (narrower)
+    # Head (slightly smaller, 5 wide to center eye sockets properly)
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)  # chin
     # Eyes (green — just the sockets, tint does the color)
     filled.discard((-1, 14, -2))
     filled.discard((1, 14, -2))
@@ -675,7 +693,7 @@ def gen_archer(height=1.7):
     filled.discard((0, 12, -2))
 
     # Fox-red/brown ponytail (extends behind head and down)
-    fill_box(-1, 15, -2, 3, 2, 4)   # top hair
+    fill_box(-2, 15, -2, 5, 2, 4)   # top hair (matches head width)
     fill_box(0, 14, 2, 1, 1, 1)     # ponytail start
     fill_box(0, 13, 2, 1, 1, 1)     # ponytail mid
     fill_box(0, 12, 2, 1, 1, 1)     # ponytail mid
@@ -720,9 +738,19 @@ def gen_archer(height=1.7):
     fill_box(-2, 0, -1, 1, 1, 2)
     fill_box(1, 0, -1, 1, 1, 2)
 
+    # Remap back-of-head voxels in eye columns to skin so eye color
+    # doesn't bleed to the back.  Also remap ponytail voxels at face gy
+    # levels to hair color so they don't pick up skin/face texture.
+    uv_fix = {}
+    for gz in range(0, 2):
+        uv_fix[(-1, 14, gz)] = (0, 14)   # skin pixel
+        uv_fix[(1, 14, gz)]  = (0, 14)
+    for gy in range(10, 15):              # ponytail spans gy 10-14
+        uv_fix[(0, gy, 2)] = (0, 16)     # hair pixel (top of head)
+
     ox = -0.5 * vs
     oz = -0.5 * vs
-    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
     return mb
 
 
