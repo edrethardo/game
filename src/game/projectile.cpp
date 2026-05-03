@@ -156,6 +156,8 @@ void ProjectileSystem::update(ProjectilePool& pool,
             };
             if (CombatQuery::aabbOverlap(projBox, playerBox)) {
                 Combat::applyDamageToPlayer(player, p.damage);
+                // Enemy projectiles apply a slow debuff to the player
+                player.slowTimer = 2.5f;
                 destroyProjectile(pool, i);
                 continue;
             }

@@ -47,6 +47,8 @@ private:
     // Game state
     GameState m_gameState = GameState::MENU;
     u8        m_menuSelection = 0;
+    u8        m_menuSubState = 0;  // 0=main menu, 1=singleplayer sub-menu (new/continue)
+    u8        m_menuSubSelection = 0;
     char      m_connectAddress[64] = "127.0.0.1";
 
     // Networking
@@ -125,6 +127,13 @@ private:
     Vec3 m_floorDoorPos    = {0, 0, 0};
     bool m_floorDoorActive = false;
 
+    // Chat log — displays NPC speech and game events on the left side of the screen
+    static constexpr u32 MAX_CHAT_LINES = 8;
+    static constexpr u32 CHAT_LINE_LEN = 48;
+    struct ChatLine { char text[CHAT_LINE_LEN]; Vec3 color; f32 timer; };
+    ChatLine m_chatLog[MAX_CHAT_LINES] = {};
+    void addChatMessage(const char* speaker, const char* msg, Vec3 color);
+
     // AoE fire effect (cheap visual for molotov splash)
     static constexpr u32 MAX_FIRE_FX = 8;
     struct FireFX { Vec3 pos; f32 radius; f32 timer; bool active; };
@@ -135,6 +144,7 @@ private:
     u8 m_meshIdChest = 0, m_meshIdHuman = 0;
     u8 m_meshIdSword = 0, m_meshIdDagger = 0, m_meshIdAxe = 0;
     u8 m_meshIdMace = 0, m_meshIdCleric = 0, m_meshIdArcher = 0, m_meshIdBow = 0;
+    u8 m_meshIdButcher = 0, m_meshIdCleaver = 0;
 
     // Switch constraint mode
     bool m_switchMode = false;

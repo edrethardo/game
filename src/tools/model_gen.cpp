@@ -107,6 +107,14 @@ static const WeaponModelGen::WeaponDef s_builtinDefs[] = {
     },
 
     {
+        "cleaver", "Large butcher cleaver",
+        {
+            {{-0.15f,  0.10f,  -0.01f}, {0.02f,   0.35f,  0.01f}},   // wide blade
+            {{-0.02f, -0.20f,  -0.02f}, {0.02f,   0.12f,  0.02f}},   // handle
+            {{-0.03f,  0.08f,  -0.015f},{0.03f,   0.12f,  0.015f}},  // guard
+        }, 3
+    },
+    {
         "mace", "Flanged mace with shaft",
         {
             {{-0.015f, -0.25f, -0.015f}, {0.015f,  0.15f,  0.015f}},  // shaft

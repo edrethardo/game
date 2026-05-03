@@ -29,6 +29,7 @@ enum struct EnemyType : u8 {
     BAT,          // 2 wings, 2 claws
     SPIDER,       // 8 legs, 2 mandibles
     MIMIC,        // disguised as chest, attacks when approached
+    BOSS,         // large boss enemy (uses skeleton rig, oversized)
     COUNT
 };
 

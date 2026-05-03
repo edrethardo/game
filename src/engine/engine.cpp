@@ -137,6 +137,17 @@ void Engine::onPlayerLeft(u8 playerSlot) {
 // ---------------------------------------------------------------------------
 // Linear scan over the mesh registry. Only called during init/startGame, so
 // O(n) cost is acceptable — runtime hot paths use the pre-cached m_meshId* IDs.
+void Engine::addChatMessage(const char* speaker, const char* msg, Vec3 color) {
+    // Shift existing lines up (oldest at top falls off)
+    for (u32 i = MAX_CHAT_LINES - 1; i > 0; i--) {
+        m_chatLog[i] = m_chatLog[i - 1];
+    }
+    // Format "Speaker: message" into line 0
+    std::snprintf(m_chatLog[0].text, CHAT_LINE_LEN, "%s: %s", speaker, msg);
+    m_chatLog[0].color = color;
+    m_chatLog[0].timer = 10.0f; // visible for 10 seconds
+}
+
 u8 Engine::findMeshByName(const char* name) const {
     for (u32 m = 0; m < m_meshDefCount; m++) {
         if (std::strcmp(m_meshDefs[m].name, name) == 0)
@@ -272,6 +283,8 @@ void Engine::init() {
             {"mace",           "assets/meshes/mace.obj"},
             {"cleric",         "assets/meshes/cleric.obj"},
             {"archer",         "assets/meshes/archer.obj"},
+            {"butcher",        "assets/meshes/butcher.obj"},
+            {"cleaver",        "assets/meshes/cleaver.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -303,6 +316,8 @@ void Engine::init() {
     m_meshIdCleric   = findMeshByName("cleric");
     m_meshIdArcher   = findMeshByName("archer");
     m_meshIdBow      = findMeshByName("bow");
+    m_meshIdButcher  = findMeshByName("butcher");
+    m_meshIdCleaver  = findMeshByName("cleaver");
 
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
@@ -615,6 +630,31 @@ void Engine::startGame() {
         }
     }
 
+    // Boss enemy on every 5th floor — The Butcher, in the room before the exit
+    if ((m_currentFloor % 5) == 0 && dungeon.roomCount > 2) {
+        const DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
+        f32 bx = (bossRoom.x + bossRoom.w * 0.5f) * m_grid.cellSize;
+        f32 bz = (bossRoom.z + bossRoom.d * 0.5f) * m_grid.cellSize;
+        f32 by = bossRoom.floorHeight;
+
+        // The Butcher: massive HP, high damage, large, slow but deadly
+        f32 floorMult = 1.0f + (m_currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
+        EntityHandle bh = EntitySystem::spawn(m_entities,
+            Vec3{bx, by + 1.25f, bz}, {0.8f, 1.25f, 0.8f}, false,
+            300.0f * floorMult, 2.0f, 20.0f, 3.0f, 0.6f, 30.0f * floorMult);
+        Entity* boss = handleGet(m_entities, bh);
+        if (boss) {
+            boss->meshId = m_meshIdButcher;
+            boss->materialId = MaterialSystem::getIdByName("butcher_skin");
+            boss->enemyType = EnemyType::BOSS;
+            boss->level = static_cast<u8>(m_currentFloor);
+            boss->weaponMeshId = m_meshIdCleaver;
+            boss->speechText = "FRESH MEAT!";
+            boss->speechTimer = 6.0f;
+        }
+        LOG_INFO("Spawned The Butcher on floor %u", m_currentFloor);
+    }
+
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
 
     // Spawn a floor exit portal in the last room (farthest from spawn room 0)
@@ -702,7 +742,43 @@ void Engine::startGame() {
                 npc->weaponMeshId = m_meshIdBow;
             }
         }
-        LOG_INFO("Spawned cleric and archer NPCs in spawn room");
+        // NPC 2: Second Cleric — behind player left
+        {
+            Vec3 npcPos = {dungeon.spawnPos.x - 1.0f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z - 1.0f};
+            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
+                {0.4f, 0.9f, 0.4f}, false,
+                GameConst::NPC_HEALTH, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
+            Entity* npc = handleGet(m_entities, h);
+            if (npc) {
+                npc->flags |= ENT_FRIENDLY;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState = AIState::IDLE;
+                npc->speechText = "Blessings upon you!";
+                npc->speechTimer = 4.0f;
+                npc->meshId = m_meshIdCleric;
+                npc->materialId = MaterialSystem::getIdByName("cleric_skin");
+                npc->weaponMeshId = m_meshIdMace;
+            }
+        }
+        // NPC 3: Second Archer — behind player right
+        {
+            Vec3 npcPos = {dungeon.spawnPos.x + 1.0f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z - 1.0f};
+            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
+                {0.35f, 0.85f, 0.35f}, false,
+                GameConst::NPC_HEALTH, 3.5f, 15.0f, 2.5f, 0.7f, 12.0f);
+            Entity* npc = handleGet(m_entities, h);
+            if (npc) {
+                npc->flags |= ENT_FRIENDLY;
+                npc->enemyType = EnemyType::SKELETON;
+                npc->aiState = AIState::IDLE;
+                npc->speechText = "I've got your back!";
+                npc->speechTimer = 4.0f;
+                npc->meshId = m_meshIdArcher;
+                npc->materialId = MaterialSystem::getIdByName("archer_skin");
+                npc->weaponMeshId = m_meshIdBow;
+            }
+        }
+        LOG_INFO("Spawned 4 friendly NPCs in spawn room");
     }
 
     ProjectileSystem::init(m_projectiles);
@@ -939,6 +1015,39 @@ void Engine::update(f32 dt) {
 // ---------------------------------------------------------------------------
 void Engine::updateMenu(f32 dt) {
     (void)dt;
+
+    // Sub-menu for single player: New Game / Continue
+    if (m_menuSubState == 1) {
+        if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menuSubSelection > 0) m_menuSubSelection--;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menuSubSelection < 1) m_menuSubSelection++;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            m_menuSubState = 0; // back to main menu
+            return;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            m_netRole = NetRole::NONE;
+            m_localPlayerIndex = 0;
+            if (m_menuSubSelection == 0) {
+                // New Game — fresh start
+                m_currentFloor = 1;
+            } else {
+                // Continue — load save
+                if (loadGame()) {
+                    m_currentFloor = m_savedFloor;
+                } else {
+                    m_currentFloor = 1;
+                }
+            }
+            m_menuSubState = 0;
+            startGame();
+        }
+        return;
+    }
+
     if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
         if (m_menuSelection > 0) m_menuSelection--;
     }
@@ -947,15 +1056,9 @@ void Engine::updateMenu(f32 dt) {
     }
     if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
         switch (m_menuSelection) {
-        case 0: // Singleplayer — try loading save, else start fresh from floor 1
-            m_netRole = NetRole::NONE;
-            m_localPlayerIndex = 0;
-            if (loadGame()) {
-                m_currentFloor = m_savedFloor;
-            } else {
-                m_currentFloor = 1;
-            }
-            startGame();
+        case 0: // Singleplayer — show sub-menu
+            m_menuSubState = 1;
+            m_menuSubSelection = 0;
             break;
         case 1: // Host
             m_netRole = NetRole::SERVER;
@@ -1138,18 +1241,38 @@ void Engine::singleplayerUpdate(f32 dt) {
     EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
     }
 
-    // Decay speech timers for all entities (handles death speech and any
-    // speech set outside the AI loop, e.g. from the death callback)
+    // Decay speech timers + log new speech to chat
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         u32 idx = m_entities.activeList[a];
         Entity& e = m_entities.entities[idx];
         if (e.speechTimer > 0.0f) {
+            // Log to chat on the first frame of a new speech (timer near max)
+            if (e.speechText && e.speechTimer > 3.5f) {
+                const char* name = "???";
+                if (e.flags & ENT_FRIENDLY) {
+                    if (e.meshId == m_meshIdCleric) name = "Cleric";
+                    else if (e.meshId == m_meshIdArcher) name = "Archer";
+                    else name = "Ally";
+                } else if (e.enemyType == EnemyType::BOSS) {
+                    name = "Butcher";
+                }
+                Vec3 chatCol = (e.flags & ENT_FRIENDLY)
+                    ? Vec3{0.4f, 1.0f, 0.5f}
+                    : Vec3{1.0f, 0.3f, 0.3f};
+                addChatMessage(name, e.speechText, chatCol);
+                e.speechTimer = 3.4f; // prevent re-logging
+            }
             e.speechTimer -= dt;
             if (e.speechTimer <= 0.0f) {
                 e.speechText  = nullptr;
                 e.speechTimer = 0.0f;
             }
         }
+    }
+
+    // Decay chat line timers
+    for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
+        if (m_chatLog[i].timer > 0.0f) m_chatLog[i].timer -= dt;
     }
 
     // Projectiles
@@ -2970,6 +3093,19 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         HUD::drawNetStats(sw, sh, Net::getConnectedCount(), ping,
                           m_netRole == NetRole::SERVER ? "HOST" : "CLIENT");
     }
+
+    // Chat log — left side of screen, above the quickbar
+    {
+        f32 chatX = 15.0f;
+        f32 chatY = 80.0f; // above quickbar (which is at Y=20)
+        for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
+            if (m_chatLog[i].timer <= 0.0f || m_chatLog[i].text[0] == '\0') continue;
+            f32 alpha = (m_chatLog[i].timer < 2.0f) ? m_chatLog[i].timer * 0.5f : 1.0f;
+            Vec3 col = m_chatLog[i].color * alpha;
+            f32 lineY = chatY + static_cast<f32>(i) * 12.0f;
+            FontSystem::drawText(sw, sh, chatX, lineY, m_chatLog[i].text, col, 1);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2988,38 +3124,57 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, titleX, titleY, title, {0.9f, 0.85f, 0.7f}, 3);
     }
 
-    // Menu options with text labels
-    static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Exit Game"};
-    Vec3 colors[] = {
-        {0.2f, 0.9f, 0.2f}, // singleplayer - green
-        {0.2f, 0.5f, 1.0f}, // host - blue
-        {1.0f, 0.7f, 0.2f}, // join - orange
-        {0.7f, 0.2f, 0.2f}, // exit - red
-    };
+    if (m_menuSubState == 1) {
+        // Single player sub-menu — replaces main menu options
+        const char* subTitle = "Single Player";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
 
-    for (u32 i = 0; i < 4; i++) {
-        f32 y = sh * 0.25f + (3 - i) * 50.0f;
-        Vec3 color = colors[i];
-        bool selected = (i == m_menuSelection);
-        if (!selected) {
-            color = color * 0.4f;
+        bool hasSave = false;
+        { FILE* f = std::fopen("save.dat", "rb"); if (f) { hasSave = true; std::fclose(f); } }
+
+        static const char* subLabels[] = {"New Game", "Continue"};
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = sh * 0.38f + (1 - i) * 50.0f;
+            bool sel = (i == m_menuSubSelection);
+            bool available = (i == 0) || hasSave;
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
+            if (!available) col = {0.2f, 0.2f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 250, 35, col, sel && available);
+            Vec3 tc = available ? (sel ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}) : Vec3{0.35f,0.35f,0.35f};
+            f32 tw = FontSystem::textWidth(subLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f, subLabels[i], tc, 2);
         }
-        HUD::drawMenuOption(sw, sh, y, 250, 35, color, selected);
 
-        // Text label centered on the bar
-        f32 textW = FontSystem::textWidth(labels[i], 2);
-        f32 textX = (static_cast<f32>(sw) - textW) * 0.5f;
-        f32 textY = y + 10.0f;
-        Vec3 textColor = selected ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.6f, 0.6f, 0.6f};
-        FontSystem::drawText(sw, sh, textX, textY, labels[i], textColor, 2);
-    }
+        const char* hint = "Up/Down, Enter to confirm, ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else {
+        // Main menu options
+        static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Exit Game"};
+        Vec3 colors[] = {
+            {0.2f, 0.9f, 0.2f},
+            {0.2f, 0.5f, 1.0f},
+            {1.0f, 0.7f, 0.2f},
+            {0.7f, 0.2f, 0.2f},
+        };
 
-    // Controls hint at bottom
-    {
+        for (u32 i = 0; i < 4; i++) {
+            f32 y = sh * 0.25f + (3 - i) * 50.0f;
+            Vec3 color = colors[i];
+            bool selected = (i == m_menuSelection);
+            if (!selected) color = color * 0.4f;
+            HUD::drawMenuOption(sw, sh, y, 250, 35, color, selected);
+
+            f32 textW = FontSystem::textWidth(labels[i], 2);
+            f32 textX = (static_cast<f32>(sw) - textW) * 0.5f;
+            FontSystem::drawText(sw, sh, textX, y + 10.0f, labels[i],
+                selected ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}, 2);
+        }
+
         const char* hint = "Up/Down to select, Enter to confirm";
         f32 hintW = FontSystem::textWidth(hint, 1);
-        f32 hintX = (static_cast<f32>(sw) - hintW) * 0.5f;
-        FontSystem::drawText(sw, sh, hintX, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 }
 

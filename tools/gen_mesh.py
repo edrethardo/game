@@ -669,14 +669,20 @@ def gen_archer(height=1.7):
     # Neck
     fill_box(0, 11, 0, 1, 1, 1)
 
-    # Torso (slimmer, leather armor)
-    fill_box(-2, 6, -1, 4, 5, 3)
+    # Upper torso — narrower waist, wider chest
+    fill_box(-2, 8, -1, 4, 3, 3)   # upper chest
+    fill_box(-2, 8, -2, 4, 2, 1)   # bust (front protrusion)
     # Light shoulder pads
     fill_box(-3, 9, 0, 1, 1, 1)
     fill_box(2, 9, 0, 1, 1, 1)
 
+    # Narrow waist
+    fill_box(-1, 6, -1, 3, 2, 3)
+
+    # Wider hips
+    fill_box(-2, 4, -1, 5, 2, 3)
     # Belt with quiver strap
-    fill_box(-2, 5, -1, 4, 1, 3)
+    fill_box(-2, 5, -1, 5, 1, 3)
     # Quiver on back (tall thin box)
     fill_box(1, 6, 2, 1, 5, 1)
 
@@ -689,14 +695,86 @@ def gen_archer(height=1.7):
     fill_box(-3, 3, -1, 1, 1, 2)
     fill_box(2, 3, -1, 1, 1, 2)
 
-    # Legs (slim)
-    fill_box(-2, 2, 0, 1, 2, 1)
-    fill_box(1, 2, 0, 1, 2, 1)
+    # Legs (shapely — wider thigh, narrower shin)
+    fill_box(-2, 2, -1, 2, 2, 2)
+    fill_box(1, 2, -1, 2, 2, 2)
     fill_box(-2, 0, 0, 1, 2, 1)
     fill_box(1, 0, 0, 1, 2, 1)
     # Light boots
     fill_box(-2, 0, -1, 1, 1, 2)
     fill_box(1, 0, -1, 1, 1, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_butcher(height=2.5):
+    """Large demon boss — The Butcher. Massive build, horns, red-tinted.
+
+    Origin at feet (Y=0). Much larger than normal humanoids.
+    """
+    mb = MeshBuilder()
+    vs = height / 20.0  # 20 voxels tall for more detail at large scale
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Massive head ---
+    fill_box(-3, 16, -3, 6, 4, 5)
+    # Jaw (wide)
+    fill_box(-2, 15, -3, 4, 1, 4)
+    # Deep eye sockets
+    filled.discard((-2, 18, -3))
+    filled.discard((1, 18, -3))
+    filled.discard((-2, 18, -2))
+    filled.discard((1, 18, -2))
+    # Mouth snarl
+    filled.discard((-1, 15, -3))
+    filled.discard((0, 15, -3))
+
+    # Horns (curving up and out)
+    fill_box(-4, 19, -1, 1, 2, 1)  # left horn base
+    filled.add((-5, 20, -1))        # left horn tip
+    fill_box(3, 19, -1, 1, 2, 1)   # right horn base
+    filled.add((4, 20, -1))         # right horn tip
+
+    # Neck (thick)
+    fill_box(-1, 14, -1, 3, 2, 2)
+
+    # --- Massive torso ---
+    fill_box(-4, 8, -2, 8, 6, 4)
+    # Barrel chest protrusion
+    fill_box(-3, 10, -3, 6, 3, 1)
+    # Huge shoulder mounds
+    fill_box(-5, 12, -1, 1, 2, 3)
+    fill_box(4, 12, -1, 1, 2, 3)
+
+    # Belt / waist
+    fill_box(-4, 7, -2, 8, 1, 4)
+
+    # --- Thick arms ---
+    fill_box(-5, 9, 0, 1, 4, 1)   # left upper arm
+    fill_box(4, 9, 0, 1, 4, 1)    # right upper arm
+    fill_box(-5, 5, 0, 1, 4, 1)   # left lower arm
+    fill_box(4, 5, 0, 1, 4, 1)    # right lower arm
+    # Big fists
+    fill_box(-6, 4, -1, 2, 2, 2)
+    fill_box(4, 4, -1, 2, 2, 2)
+
+    # --- Powerful legs ---
+    fill_box(-3, 3, -1, 3, 4, 3)  # left thigh
+    fill_box(1, 3, -1, 3, 4, 3)   # right thigh
+    fill_box(-3, 0, -1, 3, 3, 3)  # left shin
+    fill_box(1, 0, -1, 3, 3, 3)   # right shin
+    # Hooves
+    fill_box(-3, 0, -2, 3, 1, 4)
+    fill_box(1, 0, -2, 3, 1, 4)
 
     ox = -0.5 * vs
     oz = -0.5 * vs
@@ -718,6 +796,11 @@ MESH_TYPES = {
         "func": gen_human,
         "desc": "Barony-style voxel human NPC. Params: --height",
         "default_file": "human.obj",
+    },
+    "butcher": {
+        "func": lambda height=2.5: gen_butcher(height),
+        "desc": "Large demon boss with horns. Params: --height",
+        "default_file": "butcher.obj",
     },
     "cleric": {
         "func": gen_cleric,
@@ -807,7 +890,7 @@ def main():
     kwargs = {}
     mtype = args.type
 
-    if mtype in ("humanoid", "human", "cleric", "archer"):
+    if mtype in ("humanoid", "human", "cleric", "archer", "butcher"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "spider":

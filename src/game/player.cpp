@@ -73,9 +73,16 @@ void PlayerController::update(Player& player, f32 dt) {
     s32 mx, my;
     Input::getMouseDelta(mx, my);
 
+    // Apply slow debuff (e.g., from boss cleaver hit)
+    f32 effectiveSpeed = player.moveSpeed;
+    if (player.slowTimer > 0.0f) {
+        effectiveSpeed *= 0.4f; // 60% slow
+        player.slowTimer -= dt;
+    }
+
     applyMovement(player.position, player.velocity, player.yaw, player.pitch,
                   player.onGround, player.noclip,
-                  player.moveSpeed, player.sensitivity,
+                  effectiveSpeed, player.sensitivity,
                   mx, my,
                   Input::isKeyDown(SDL_SCANCODE_W),
                   Input::isKeyDown(SDL_SCANCODE_S),

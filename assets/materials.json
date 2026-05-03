@@ -18,6 +18,7 @@
     { "id": 15, "name": "accessory_gold",     "tint": [0.85, 0.75, 0.3, 1.0] },
     { "id": 16, "name": "human_skin",          "tint": [0.82, 0.65, 0.50, 1.0] },
     { "id": 17, "name": "cleric_skin",         "tint": [0.85, 0.75, 0.55, 1.0] },
-    { "id": 18, "name": "archer_skin",         "tint": [0.78, 0.58, 0.42, 1.0] }
+    { "id": 18, "name": "archer_skin",         "tint": [0.78, 0.58, 0.42, 1.0] },
+    { "id": 19, "name": "butcher_skin",        "tint": [0.7, 0.15, 0.1, 1.0] }
   ]
 }

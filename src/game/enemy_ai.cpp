@@ -8,6 +8,7 @@
 #include "game/enemy_ai.h"
 #include "game/player.h"
 #include "game/combat.h"
+#include "game/projectile.h"
 #include "game/game_constants.h"
 #include "world/raycast.h"
 #include "world/level_grid.h"
@@ -114,7 +115,6 @@ static bool hasLOS(const Entity& e, const Player& player,
 void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       Player& player, ProjectilePool& projectiles, f32 dt)
 {
-    (void)projectiles;
     Vec3 playerEye = player.position + Vec3{0, player.eyeHeight, 0};
 
     for (u32 a = 0; a < pool.activeCount; a++) {
@@ -285,6 +285,51 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             e.yaw = atan2f(-dirToTarget.x, -dirToTarget.z);
         }
 
+        // Boss behavior — cleaver throw + aggressive chase after 1.5s LOS
+        if (e.enemyType == EnemyType::BOSS) {
+            bool bossLOS = dist < 20.0f && hasLOS(e, player, grid);
+
+            // Track LOS duration (repurpose flybyTarget.x as timer)
+            if (bossLOS) {
+                e.flybyTarget.x += dt;
+            } else {
+                e.flybyTarget.x = 0.0f;
+            }
+
+            // After 1.5s of LOS, force CHASE if still idle and sprint
+            if (e.flybyTarget.x > 1.5f && e.aiState == AIState::IDLE) {
+                e.aiState = AIState::CHASE;
+                e.speechText = "FRESH MEAT!";
+                e.speechTimer = 2.0f;
+            }
+
+            // Cleaver throw on cooldown
+            e.flybyTimer -= dt;
+            if (e.flybyTimer <= 0.0f && bossLOS) {
+                e.flybyTimer = 4.0f;
+                Vec3 throwOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
+                Vec3 throwDir = normalize(playerEye - throwOrigin);
+                // Set cleaver mesh on the projectile
+                u8 cleaverMesh = e.weaponMeshId; // boss carries cleaver
+                ProjectileSystem::spawn(projectiles, throwOrigin,
+                    throwDir, 18.0f, e.damage * 0.8f, 0.15f, 3.0f, false);
+                // Tag the just-spawned projectile with the cleaver mesh
+                for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+                    Projectile& proj = projectiles.projectiles[pi];
+                    if (proj.active && !proj.fromPlayer && proj.meshId == 0) {
+                        Vec3 d = proj.position - throwOrigin;
+                        if (lengthSq(d) < 0.5f) {
+                            proj.meshId = cleaverMesh;
+                            break;
+                        }
+                    }
+                }
+                e.attackAnimT = 0.4f;
+                e.speechText = "DIE!";
+                e.speechTimer = 1.5f;
+            }
+        }
+
         switch (e.aiState) {
 
         case AIState::IDLE: {
@@ -323,8 +368,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // Ground movement: XZ only toward target
                 Vec3 flatDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
                 if (lengthSq(flatDir) > 0.001f) {
-                    e.velocity.x = flatDir.x * e.moveSpeed;
-                    e.velocity.z = flatDir.z * e.moveSpeed;
+                    // Boss sprints 2.5x faster after 1.5s LOS
+                    f32 speed = e.moveSpeed;
+                    if (e.enemyType == EnemyType::BOSS && e.flybyTarget.x > 1.5f) {
+                        speed *= 2.5f;
+                    }
+                    e.velocity.x = flatDir.x * speed;
+                    e.velocity.z = flatDir.z * speed;
                 }
                 snapEntityToFloor(e, grid);
             }

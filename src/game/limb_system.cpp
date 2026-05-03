@@ -148,6 +148,7 @@ void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount) {
 const LimbConfig& LimbSystem::getConfig(EnemyType type) {
     switch (type) {
         case EnemyType::SKELETON: return s_skeletonConfig;
+        case EnemyType::BOSS:    return s_skeletonConfig; // boss uses same limb rig
         case EnemyType::BAT:     return s_batConfig;
         case EnemyType::SPIDER:  return s_spiderConfig;
         default:                 return s_genericConfig;
@@ -160,6 +161,7 @@ const LimbConfig& LimbSystem::getConfig(EnemyType type) {
 u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
     switch (type) {
         case EnemyType::SKELETON:
+        case EnemyType::BOSS:
             // 0-3 = arms, 4-7 = legs
             return (limbIdx < 4) ? s_armMeshId : s_legMeshId;
         case EnemyType::BAT:
@@ -183,7 +185,8 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
     bool isMoving = speed01 > 0.05f;
 
     switch (type) {
-        case EnemyType::SKELETON: {
+        case EnemyType::SKELETON:
+        case EnemyType::BOSS: {
             f32 walkPhase = e.animTimer * 8.0f;
             bool isRight = (limbIdx == 2 || limbIdx == 3 || limbIdx == 6 || limbIdx == 7);
             f32 phase = isRight ? (walkPhase + 3.14159f) : walkPhase;
