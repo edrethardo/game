@@ -22,6 +22,13 @@ struct LevelGrid {
     u32 width  = 0;   // X cells
     u32 depth  = 0;   // Z cells
     f32 cellSize = 1.0f;
+
+    // Flow field for NPC pathfinding toward the floor exit.
+    // Each cell stores a direction index (0-7) pointing to the next cell
+    // toward the exit, or 0xFF if unreachable.  Computed via BFS once
+    // per floor after level generation.
+    //   Directions: 0=+X, 1=+X+Z, 2=+Z, 3=-X+Z, 4=-X, 5=-X-Z, 6=-Z, 7=+X-Z
+    u8* flowDir = nullptr;
 };
 
 namespace LevelGridSystem {
@@ -38,4 +45,12 @@ namespace LevelGridSystem {
     f32  getFloorHeight(const LevelGrid& grid, u32 x, u32 z);
     f32  getCeilingHeight(const LevelGrid& grid, u32 x, u32 z);
     bool isInBounds(const LevelGrid& grid, u32 x, u32 z);
+
+    // Build BFS flow field from exitWorldPos toward all reachable cells.
+    // Each cell gets a direction (0-7) pointing one step closer to the exit.
+    void buildFlowField(LevelGrid& grid, Vec3 exitWorldPos);
+
+    // Get the world-space direction an NPC at worldPos should move to follow
+    // the flow field.  Returns zero vector if already at exit or unreachable.
+    Vec3 flowDirection(const LevelGrid& grid, Vec3 worldPos);
 }

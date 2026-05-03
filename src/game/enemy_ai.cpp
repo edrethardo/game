@@ -136,109 +136,99 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
         if (isFriendly) {
-            // Freeze halves friendly NPC speed too
+            // Freeze halves friendly NPC speed
             f32 npcSpeed = e.moveSpeed;
             if (e.freezeTimer > 0.0f) npcSpeed *= 0.5f;
 
-            // Find closest hostile enemy within detection range
+            // ---------------------------------------------------------------
+            // Friendly NPC AI: pathfind toward the exit AND fight enemies
+            // encountered along the way.  Each class has a distinct combat
+            // style:
+            //   Paladin — charges melee enemies, frontline tank
+            //   Cleric  — stays back, heals allies, only melees if cornered
+            //   Archer  — shoots from range, kites backward if enemies close
+            //   Mage    — stands at range, fires splash projectiles
+            //   Rogue   — quick hit-and-run, then resumes pathing
+            // ---------------------------------------------------------------
+
+            // --- 1. Find closest hostile enemy within detection range ---
             f32 bestEnemyDist = e.detectionRange;
             u16 bestEnemyIdx = 0xFFFF;
             Vec3 enemyPos = {0,0,0};
-
             for (u32 ni = 0; ni < pool.activeCount; ni++) {
                 u32 nIdx = pool.activeList[ni];
                 const Entity& enemy = pool.entities[nIdx];
-                if (enemy.flags & ENT_FRIENDLY) continue;  // skip other friendlies
+                if (enemy.flags & ENT_FRIENDLY) continue;
                 if (enemy.flags & ENT_DEAD) continue;
                 if (!(enemy.flags & ENT_ACTIVE)) continue;
-
-                Vec3 toEnemy = enemy.position - e.position;
-                f32 eDist = length(toEnemy);
-                if (eDist < bestEnemyDist) {
-                    bestEnemyDist = eDist;
+                if (enemy.enemyType == EnemyType::PROP) continue;
+                Vec3 toE = enemy.position - e.position;
+                f32 d2 = length(toE);
+                if (d2 < bestEnemyDist) {
+                    bestEnemyDist = d2;
                     bestEnemyIdx = static_cast<u16>(nIdx);
                     enemyPos = enemy.position;
                 }
             }
-
             e.targetEntityIdx = bestEnemyIdx;
 
-            // ---------------------------------------------------------------
-            // Cleric special: prioritize healing wounded allies over fighting.
-            // Scan for any friendly entity (or player) below 50% HP.
-            // ---------------------------------------------------------------
-            bool doingHeal = false;
+            // --- 2. Cleric healing (always runs, even during combat) ---
             if (e.npcClass == NpcClass::CLERIC) {
-                // Check player health
-                f32 healRange = 6.0f;
-                Vec3 healTarget = {0,0,0};
-                u16  healIdx = 0xFFFF;
-                bool healPlayer = false;
-
-                if (player.health < player.maxHealth * 0.5f) {
-                    f32 pDist = length(playerEye - e.position);
-                    if (pDist < e.detectionRange) {
-                        healTarget = playerEye;
-                        healPlayer = true;
+                e.attackTimer -= dt;
+                if (e.attackTimer <= 0.0f) {
+                    f32 healRange = 6.0f;
+                    bool healed = false;
+                    // Heal player first
+                    if (player.health < player.maxHealth * 0.5f &&
+                        length(playerEye - e.position) < healRange) {
+                        f32 amt = 8.0f + e.level * 0.5f;
+                        player.health += amt;
+                        if (player.health > player.maxHealth) player.health = player.maxHealth;
+                        healed = true;
                     }
-                }
-                // Check friendly NPCs
-                if (!healPlayer) {
-                    f32 bestHurt = 999.0f;
-                    for (u32 ni = 0; ni < pool.activeCount; ni++) {
-                        u32 nIdx = pool.activeList[ni];
-                        Entity& npc2 = pool.entities[nIdx];
-                        if (nIdx == i) continue; // skip self
-                        if (!(npc2.flags & ENT_FRIENDLY)) continue;
-                        if (npc2.flags & ENT_DEAD) continue;
-                        if (npc2.health >= npc2.maxHealth * 0.5f) continue;
-                        f32 d2 = length(npc2.position - e.position);
-                        if (d2 < bestHurt && d2 < e.detectionRange) {
-                            bestHurt = d2;
-                            healIdx = static_cast<u16>(nIdx);
-                            healTarget = npc2.position + Vec3{0, npc2.halfExtents.y, 0};
+                    // Then check other NPCs
+                    if (!healed) {
+                        for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                            u32 nIdx = pool.activeList[ni];
+                            Entity& npc2 = pool.entities[nIdx];
+                            if (nIdx == i) continue;
+                            if (!(npc2.flags & ENT_FRIENDLY) || (npc2.flags & ENT_DEAD)) continue;
+                            if (npc2.health >= npc2.maxHealth * 0.5f) continue;
+                            if (length(npc2.position - e.position) > healRange) continue;
+                            f32 amt = 8.0f + e.level * 0.5f;
+                            npc2.health += amt;
+                            if (npc2.health > npc2.maxHealth) npc2.health = npc2.maxHealth;
+                            healed = true;
+                            break;
                         }
                     }
-                }
-
-                if (healPlayer || healIdx != 0xFFFF) {
-                    doingHeal = true;
-                    f32 hDist = length(healTarget - e.position);
-                    if (hDist > 0.001f) e.yaw = atan2f(-(healTarget.x - e.position.x), -(healTarget.z - e.position.z));
-
-                    if (hDist > healRange) {
-                        // Move toward heal target
-                        Vec3 flatDir = normalize(Vec3{healTarget.x - e.position.x, 0, healTarget.z - e.position.z});
-                        e.velocity.x = flatDir.x * npcSpeed;
-                        e.velocity.z = flatDir.z * npcSpeed;
-                        entityMoveAndSlide(e, grid, dt);
-                    } else {
-                        // In range — heal on cooldown
-                        e.velocity = {0,0,0};
-                        e.attackTimer -= dt;
-                        if (e.attackTimer <= 0.0f) {
-                            e.attackTimer = 3.0f; // heal cooldown
-                            e.attackAnimT = 0.3f;
-                            f32 healAmt = 8.0f + e.level * 0.5f;
-                            if (healPlayer) {
-                                player.health += healAmt;
-                                if (player.health > player.maxHealth) player.health = player.maxHealth;
-                            } else if (healIdx < MAX_ENTITIES) {
-                                Entity& ht = pool.entities[healIdx];
-                                ht.health += healAmt;
-                                if (ht.health > ht.maxHealth) ht.health = ht.maxHealth;
-                            }
-                            static const char* healLines[] = {"Heal!", "Light guide you!", "Hold on!"};
-                            e.speechText = healLines[std::rand() % 3];
-                            e.speechTimer = 2.5f;
-                        }
+                    if (healed) {
+                        e.attackTimer = 3.0f;
+                        e.attackAnimT = 0.3f;
+                        static const char* hl[] = {"Heal!", "Light guide you!", "Hold on!"};
+                        e.speechText = hl[std::rand() % 3];
+                        e.speechTimer = 2.5f;
                     }
-                    snapEntityToFloor(e, grid);
                 }
             }
 
-            if (!doingHeal && bestEnemyIdx != 0xFFFF) {
-                // Chase and attack the nearest hostile enemy
+            // --- 3. Determine behavior: combat vs pathfind ---
+            // Each class has an engagement range — enemies closer than this
+            // trigger combat; otherwise the NPC follows the flow field.
+            f32 engageDist = 0.0f;
+            switch (e.npcClass) {
+                case NpcClass::PALADIN: engageDist = 8.0f;  break; // charges in aggressively
+                case NpcClass::CLERIC:  engageDist = 3.0f;  break; // only fights if cornered
+                case NpcClass::ARCHER:  engageDist = 12.0f; break; // shoots from far
+                case NpcClass::MAGE:    engageDist = 14.0f; break; // casts from far
+                case NpcClass::ROGUE:   engageDist = 6.0f;  break; // quick strikes then moves
+                default:                engageDist = 6.0f;  break;
+            }
+
+            bool inCombat = (bestEnemyIdx != 0xFFFF && bestEnemyDist < engageDist);
+
+            if (inCombat) {
+                // --- COMBAT MODE: class-specific behavior ---
                 Vec3 toEnemy = enemyPos - e.position;
                 f32 eDist = length(toEnemy);
                 Vec3 dirToEnemy = (eDist > 0.001f) ? toEnemy * (1.0f / eDist) : Vec3{0,0,0};
@@ -248,123 +238,171 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.yaw = atan2f(-dirToEnemy.x, -dirToEnemy.z);
                 }
 
-                f32 engageRange = e.attackRange;
-
-                // Archer kiting: if enemy is too close, back away while shooting
-                bool kiting = false;
-                if (e.npcClass == NpcClass::ARCHER && eDist < 4.0f && eDist > 0.1f) {
-                    Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
-                    e.velocity.x = awayDir.x * npcSpeed;
-                    e.velocity.z = awayDir.z * npcSpeed;
-                    entityMoveAndSlide(e, grid, dt);
-                    kiting = true;
-                    // Still fire while retreating (fall through to attack below)
-                }
-
-                // Rogue flanking: offset approach by 90° from player→enemy line
-                Vec3 moveTarget = enemyPos;
-                if (e.npcClass == NpcClass::ROGUE && eDist > engageRange * 0.5f) {
+                // -- Movement by class --
+                if (e.npcClass == NpcClass::PALADIN) {
+                    // Paladin: charge toward enemies, get in melee range
+                    if (eDist > e.attackRange) {
+                        Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0, dirToEnemy.z});
+                        e.velocity.x = flatDir.x * npcSpeed;
+                        e.velocity.z = flatDir.z * npcSpeed;
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                } else if (e.npcClass == NpcClass::ARCHER) {
+                    // Archer: kite — back away if enemies get within 5 units
+                    if (eDist < 5.0f) {
+                        Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
+                        e.velocity.x = awayDir.x * npcSpeed;
+                        e.velocity.z = awayDir.z * npcSpeed;
+                    } else if (eDist > e.attackRange) {
+                        Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0, dirToEnemy.z});
+                        e.velocity.x = flatDir.x * npcSpeed * 0.5f;
+                        e.velocity.z = flatDir.z * npcSpeed * 0.5f;
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                } else if (e.npcClass == NpcClass::MAGE) {
+                    // Mage: stand at range, back up if too close
+                    if (eDist < 6.0f) {
+                        Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
+                        e.velocity.x = awayDir.x * npcSpeed * 0.7f;
+                        e.velocity.z = awayDir.z * npcSpeed * 0.7f;
+                    } else if (eDist > e.attackRange) {
+                        Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0, dirToEnemy.z});
+                        e.velocity.x = flatDir.x * npcSpeed * 0.5f;
+                        e.velocity.z = flatDir.z * npcSpeed * 0.5f;
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                } else if (e.npcClass == NpcClass::CLERIC) {
+                    // Cleric: stay back, only engage in melee if cornered
+                    if (eDist < 3.0f && eDist > e.attackRange) {
+                        // Too close — back away slowly
+                        Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
+                        e.velocity.x = awayDir.x * npcSpeed * 0.5f;
+                        e.velocity.z = awayDir.z * npcSpeed * 0.5f;
+                    } else if (eDist <= e.attackRange) {
+                        e.velocity = {0, 0, 0}; // cornered — stand and fight
+                    } else {
+                        // Continue pathing if enemy is far
+                        Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                        if (lengthSq(flowDir) > 0.001f) {
+                            e.velocity.x = flowDir.x * npcSpeed;
+                            e.velocity.z = flowDir.z * npcSpeed;
+                            e.yaw = atan2f(-flowDir.x, -flowDir.z);
+                        } else {
+                            e.velocity = {0, 0, 0};
+                        }
+                    }
+                } else if (e.npcClass == NpcClass::ROGUE) {
+                    // Rogue: flank from the side, quick hit then disengage
                     Vec3 playerToEnemy = normalize(Vec3{enemyPos.x - playerEye.x, 0, enemyPos.z - playerEye.z});
-                    // Perpendicular offset
                     Vec3 flankOffset = {-playerToEnemy.z, 0, playerToEnemy.x};
-                    moveTarget = enemyPos + flankOffset * 2.0f;
+                    Vec3 flankTarget = enemyPos + flankOffset * 2.0f;
+                    Vec3 toFlank = flankTarget - e.position;
+                    f32 fDist = length(toFlank);
+                    if (fDist > e.attackRange) {
+                        Vec3 flatDir = normalize(Vec3{toFlank.x, 0, toFlank.z});
+                        e.velocity.x = flatDir.x * npcSpeed;
+                        e.velocity.z = flatDir.z * npcSpeed;
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                } else {
+                    // Default: approach enemy
+                    if (eDist > e.attackRange) {
+                        Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0, dirToEnemy.z});
+                        e.velocity.x = flatDir.x * npcSpeed;
+                        e.velocity.z = flatDir.z * npcSpeed;
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
                 }
 
-                if (!kiting && eDist > engageRange) {
-                    // Chase toward target (or flank position for rogues)
-                    Vec3 toMoveTarget = moveTarget - e.position;
-                    Vec3 flatDir = normalize(Vec3{toMoveTarget.x, 0.0f, toMoveTarget.z});
-                    e.velocity.x = flatDir.x * npcSpeed;
-                    e.velocity.z = flatDir.z * npcSpeed;
-                    entityMoveAndSlide(e, grid, dt);
-                } else if (!kiting) {
-                    // In range — attack using weapon type
-                    e.velocity = {0, 0, 0};
-                }
+                entityMoveAndSlide(e, grid, dt);
 
-                // Attack on cooldown (archers attack while kiting too)
-                if (eDist <= engageRange || kiting) {
-                    e.attackTimer -= dt;
-                    if (e.attackTimer <= 0.0f) {
-                        e.attackTimer = e.attackCooldown;
-                        e.attackAnimT = 0.3f;
+                // -- Attack on cooldown --
+                if (e.npcClass != NpcClass::CLERIC || eDist <= e.attackRange) {
+                    // Cleric only attacks if cornered; everyone else attacks freely
+                    if (eDist <= e.attackRange ||
+                        (e.npcWeaponType == WeaponType::PROJECTILE && eDist <= engageDist)) {
+                        e.attackTimer -= dt;
+                        if (e.attackTimer <= 0.0f) {
+                            e.attackTimer = e.attackCooldown;
+                            e.attackAnimT = 0.3f;
 
-                        Entity& target = pool.entities[bestEnemyIdx];
-                        if (!(target.flags & ENT_DEAD)) {
-                            Vec3 eyePos = e.position + Vec3{0, e.halfExtents.y, 0};
+                            Entity& target = pool.entities[bestEnemyIdx];
+                            if (!(target.flags & ENT_DEAD)) {
+                                Vec3 eyePos = e.position + Vec3{0, e.halfExtents.y, 0};
 
-                            if (e.npcWeaponType == WeaponType::PROJECTILE) {
-                                Vec3 targetCenter = target.position + Vec3{0, target.halfExtents.y, 0};
-                                Vec3 fireDir = normalize(targetCenter - eyePos);
-                                f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
-                                f32 radius = e.npcProjectileRadius > 0.0f ? e.npcProjectileRadius : 0.1f;
-                                // Mage projectiles get splash for area denial
-                                u8 extraFlags = (e.npcClass == NpcClass::MAGE) ? PROJ_SPLASH : 0;
-                                ProjectileSystem::spawn(projectiles, eyePos,
-                                    fireDir, speed, e.damage, radius, 3.0f, true, extraFlags);
-                                // Set splash params for mage projectiles
-                                if (e.npcClass == NpcClass::MAGE) {
-                                    for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                                        Projectile& proj = projectiles.projectiles[pi];
-                                        if (proj.active && proj.fromPlayer &&
-                                            (proj.projFlags & PROJ_SPLASH) && proj.splashRadius == 0.0f) {
-                                            Vec3 d = proj.position - eyePos;
-                                            if (lengthSq(d) < 0.5f) {
-                                                proj.splashRadius = 1.5f;
-                                                proj.splashDamage = e.damage * 0.5f;
-                                                break;
+                                if (e.npcWeaponType == WeaponType::PROJECTILE) {
+                                    Vec3 targetCenter = target.position + Vec3{0, target.halfExtents.y, 0};
+                                    Vec3 fireDir = normalize(targetCenter - eyePos);
+                                    f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
+                                    f32 radius = e.npcProjectileRadius > 0.0f ? e.npcProjectileRadius : 0.1f;
+                                    u8 extraFlags = (e.npcClass == NpcClass::MAGE) ? PROJ_SPLASH : 0;
+                                    ProjectileSystem::spawn(projectiles, eyePos,
+                                        fireDir, speed, e.damage, radius, 3.0f, true, extraFlags);
+                                    if (e.npcClass == NpcClass::MAGE) {
+                                        for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+                                            Projectile& proj = projectiles.projectiles[pi];
+                                            if (proj.active && proj.fromPlayer &&
+                                                (proj.projFlags & PROJ_SPLASH) && proj.splashRadius == 0.0f) {
+                                                Vec3 dd = proj.position - eyePos;
+                                                if (lengthSq(dd) < 0.5f) {
+                                                    proj.splashRadius = 1.5f;
+                                                    proj.splashDamage = e.damage * 0.5f;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
+                                } else {
+                                    EntityHandle th = {bestEnemyIdx, target.generation};
+                                    Combat::applyDamage(pool, th, e.damage);
                                 }
-                            } else {
-                                EntityHandle th = {bestEnemyIdx, target.generation};
-                                Combat::applyDamage(pool, th, e.damage);
-                            }
 
-                            if ((std::rand() % 5) == 0) {
-                                static const char* attackLines[] = {"Take that!", "Die, beast!", "For glory!"};
-                                e.speechText = attackLines[std::rand() % 3];
-                                e.speechTimer = 2.5f;
+                                if ((std::rand() % 5) == 0) {
+                                    static const char* atk[] = {"Take that!", "Die, beast!", "For glory!"};
+                                    e.speechText = atk[std::rand() % 3];
+                                    e.speechTimer = 2.5f;
+                                }
                             }
                         }
                     }
                 }
+            } else {
+                // --- PATHFIND MODE: follow flow field toward exit ---
+                Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                bool atExit = (lengthSq(flowDir) < 0.001f);
 
-                snapEntityToFloor(e, grid);
-            } else if (!doingHeal) {
-                // No enemies nearby — follow the player at a comfortable distance
-                Vec3 toPlayer = playerEye - e.position;
-                f32 pDist = length(toPlayer);
-
-                if (pDist > GameConst::NPC_FOLLOW_DIST) {
-                    // Too far from player: move toward them
-                    Vec3 flatDir = normalize(Vec3{toPlayer.x, 0.0f, toPlayer.z});
-                    e.velocity.x = flatDir.x * npcSpeed;
-                    e.velocity.z = flatDir.z * npcSpeed;
-                    e.yaw = atan2f(-flatDir.x, -flatDir.z);
-                    entityMoveAndSlide(e, grid, dt);
-                } else {
-                    // Close enough to player: idle in place
+                if (atExit) {
                     e.velocity = {0, 0, 0};
+                    if (e.speechTimer <= 0.0f && (std::rand() % 300) == 0) {
+                        static const char* wl[] = {"Over here!", "This way!", "Found the exit!"};
+                        e.speechText = wl[std::rand() % 3];
+                        e.speechTimer = 3.0f;
+                    }
+                } else {
+                    e.velocity.x = flowDir.x * npcSpeed;
+                    e.velocity.z = flowDir.z * npcSpeed;
+                    e.yaw = atan2f(-flowDir.x, -flowDir.z);
+                    entityMoveAndSlide(e, grid, dt);
                 }
-
-                snapEntityToFloor(e, grid);
             }
 
-            // Speech timer decay (clears bubble when expired)
+            snapEntityToFloor(e, grid);
+
+            // Speech timer decay
             if (e.speechTimer > 0.0f) {
                 e.speechTimer -= dt;
-                if (e.speechTimer <= 0.0f) {
-                    e.speechText = nullptr;
-                }
+                if (e.speechTimer <= 0.0f) e.speechText = nullptr;
             }
-
-            // Low health desperate speech (random ~2-second cadence)
+            // Low health speech
             if (e.health < e.maxHealth * 0.3f && e.health > 0 && e.speechTimer <= 0.0f) {
                 if ((std::rand() % 120) == 0) {
-                    static const char* hurtLines[] = {"I'm hurt...", "Help!", "Can't... hold on..."};
-                    e.speechText = hurtLines[std::rand() % 3];
+                    static const char* hl[] = {"I'm hurt...", "Help!", "Can't... hold on..."};
+                    e.speechText = hl[std::rand() % 3];
                     e.speechTimer = 3.0f;
                 }
             }

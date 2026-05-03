@@ -1255,7 +1255,8 @@ void Engine::startGame() {
         m_floorDoorActive = true;
         LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_currentFloor, doorX, doorY, doorZ);
 
-        // No guards near exit — all NPCs spawn with the player in the spawn room
+        // Build BFS flow field so NPCs can pathfind toward the exit
+        LevelGridSystem::buildFlowField(m_grid, m_floorDoorPos);
     }
 
     // Spawn 4 friendly NPCs in the spawn room — one of each class
@@ -2076,6 +2077,44 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 m_dblClickState = {};
             } else {
                 m_dblClickState = {};
+            }
+        }
+
+        // Right-click: drop item to world (backpack or equipment)
+        if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) {
+            InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+            Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
+            if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
+                hit.index < MAX_INVENTORY_ITEMS &&
+                !isItemEmpty(m_inventories[0].backpack[hit.index])) {
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], hit.index);
+                if (!isItemEmpty(dropped)) {
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                }
+            } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
+                       hit.index < static_cast<u8>(ItemSlot::COUNT) &&
+                       !isItemEmpty(m_inventories[0].equipped[hit.index])) {
+                ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                    static_cast<ItemSlot>(hit.index));
+                if (!isItemEmpty(dropped)) {
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                }
+            }
+        }
+
+        // Q key: drop all backpack items to world
+        if (Input::isKeyPressed(SDL_SCANCODE_Q)) {
+            Vec3 dropBase = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
+            for (u8 si = 0; si < MAX_INVENTORY_ITEMS; si++) {
+                if (isItemEmpty(m_inventories[0].backpack[si])) continue;
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], si);
+                if (!isItemEmpty(dropped)) {
+                    // Spread items in a small arc so they don't stack
+                    f32 angle = si * 0.4f;
+                    Vec3 offset = {sinf(angle) * 0.5f, 0, cosf(angle) * 0.5f};
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropBase + offset);
+                }
             }
         }
 
