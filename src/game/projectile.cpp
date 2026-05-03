@@ -82,9 +82,9 @@ void ProjectileSystem::update(ProjectilePool& pool,
         if (wallHit.hit && wallHit.distance <= travel + p.radius) {
             // AoE splash on wall impact
             if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
-                for (u32 e = 0; e < MAX_ENTITIES; e++) {
+                for (u32 a = 0; a < entities.activeCount; a++) {
+                    u32 e = entities.activeList[a];
                     Entity& ent = entities.entities[e];
-                    if (!(ent.flags & ENT_ACTIVE)) continue;
                     if (ent.flags & ENT_DEAD) continue;
                     Vec3 delta = ent.position - p.position;
                     f32 dist = length(delta);
@@ -116,9 +116,9 @@ void ProjectileSystem::update(ProjectilePool& pool,
         if (p.fromPlayer) {
             // Hit enemies
             bool hit = false;
-            for (u32 e = 0; e < MAX_ENTITIES; e++) {
+            for (u32 a = 0; a < entities.activeCount; a++) {
+                u32 e = entities.activeList[a];
                 Entity& ent = entities.entities[e];
-                if (!(ent.flags & ENT_ACTIVE)) continue;
                 if (ent.flags & ENT_DEAD) continue;
 
                 if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
@@ -131,9 +131,9 @@ void ProjectileSystem::update(ProjectilePool& pool,
             if (hit) {
                 // AoE splash on entity impact
                 if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
-                    for (u32 e2 = 0; e2 < MAX_ENTITIES; e2++) {
+                    for (u32 a2 = 0; a2 < entities.activeCount; a2++) {
+                        u32 e2 = entities.activeList[a2];
                         Entity& ent2 = entities.entities[e2];
-                        if (!(ent2.flags & ENT_ACTIVE)) continue;
                         if (ent2.flags & ENT_DEAD) continue;
                         Vec3 delta = ent2.position - p.position;
                         f32 dist = length(delta);

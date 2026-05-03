@@ -94,9 +94,9 @@ CombatHit CombatQuery::raycast(const LevelGrid& grid, const EntityPool& pool,
 
     // 2. Test all active entities — inflate hitboxes slightly for forgiving hitscan
     static constexpr f32 HITSCAN_PADDING = 0.15f;
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        u32 i = pool.activeList[a];
         const Entity& e = pool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;  // don't shoot allies
 
@@ -131,10 +131,10 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
 {
     u32 count = 0;
 
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < pool.activeCount; a++) {
         if (count >= maxResults) break;
+        u32 i = pool.activeList[a];
         const Entity& e = pool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;  // don't hit allies with melee cone
 

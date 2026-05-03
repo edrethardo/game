@@ -35,6 +35,7 @@
 #include "game/item.h"
 #include "game/skill.h"
 #include "game/inventory_ui.h"
+#include "game/game_constants.h"
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -129,6 +130,19 @@ void Engine::onPlayerLeft(u8 playerSlot) {
         s_engine->m_players[playerSlot].active = false;
         LOG_INFO("Engine: player %u left", playerSlot);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Mesh name lookup helper
+// ---------------------------------------------------------------------------
+// Linear scan over the mesh registry. Only called during init/startGame, so
+// O(n) cost is acceptable — runtime hot paths use the pre-cached m_meshId* IDs.
+u8 Engine::findMeshByName(const char* name) const {
+    for (u32 m = 0; m < m_meshDefCount; m++) {
+        if (std::strcmp(m_meshDefs[m].name, name) == 0)
+            return static_cast<u8>(m);
+    }
+    return 0; // fallback to cube mesh (index 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -273,13 +287,32 @@ void Engine::init() {
     // Build limb meshes AFTER OBJ meshes are loaded (needs valid meshDefCount)
     LimbSystem::init(m_meshDefs, m_meshDefCount);
 
+    // Cache mesh IDs for fast lookup in startGame — avoids repeated strcmp loops
+    m_meshIdSkeleton = findMeshByName("skeleton");
+    m_meshIdBat      = findMeshByName("bat");
+    m_meshIdSpider   = findMeshByName("spider");
+    m_meshIdChest    = findMeshByName("chest");
+    m_meshIdHuman    = findMeshByName("human");
+    m_meshIdSword    = findMeshByName("sword");
+    m_meshIdDagger   = findMeshByName("dagger");
+    m_meshIdAxe      = findMeshByName("axe");
+
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
 
-    // Item/loot system
-    ItemLoader::loadItemDefs("assets/config/items.json", m_itemDefs, m_itemDefCount);
-    ItemLoader::loadAffixDefs("assets/config/affixes.json", m_affixDefs, m_affixDefCount);
-    ItemLoader::loadSkillDefs("assets/config/skills.json", m_skillDefs, m_skillDefCount);
+    // Item/loot system — log warnings and zero out tables rather than crashing on bad JSON
+    if (!ItemLoader::loadItemDefs("assets/config/items.json", m_itemDefs, m_itemDefCount)) {
+        LOG_WARN("Failed to load item defs — using empty table");
+        m_itemDefCount = 0;
+    }
+    if (!ItemLoader::loadAffixDefs("assets/config/affixes.json", m_affixDefs, m_affixDefCount)) {
+        LOG_WARN("Failed to load affix defs — using empty table");
+        m_affixDefCount = 0;
+    }
+    if (!ItemLoader::loadSkillDefs("assets/config/skills.json", m_skillDefs, m_skillDefCount)) {
+        LOG_WARN("Failed to load skill defs — using empty table");
+        m_skillDefCount = 0;
+    }
     SkillSystem::init();
     ItemGen::init(42);
 
@@ -305,9 +338,9 @@ void Engine::init() {
             pool.entities[entityIndex].speechText = "Avenge... me...";
             pool.entities[entityIndex].speechTimer = 4.0f;
         }
-        // 40% base drop chance (hostile enemies only drop loot)
+        // Hostile enemies only drop loot; chance defined by LOOT_DROP_CHANCE
         if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY) &&
-            (std::rand() % 100) < 40) {
+            (std::rand() % 100) < static_cast<int>(GameConst::LOOT_DROP_CHANCE * 100.0f)) {
             // Derive level from the entity so loot scales with floor depth
             u8 enemyLevel = pool.entities[entityIndex].level;
             if (enemyLevel < 1) enemyLevel = 1;
@@ -320,16 +353,16 @@ void Engine::init() {
                                        position + Vec3{0, 0.5f, 0});
             }
 
-            // 30% chance to drop a health globe (instant heal on pickup)
-            if ((std::rand() % 100) < 30) {
+            // Chance to drop a health globe (instant heal on pickup)
+            if ((std::rand() % 100) < static_cast<int>(GameConst::HEALTH_GLOBE_CHANCE * 100.0f)) {
                 ItemInstance globe;
                 globe.defId = GLOBE_HEALTH_ID;
                 globe.uid   = s_engine->m_worldItems.nextUid++;
                 WorldItemSystem::spawn(s_engine->m_worldItems, globe,
                                        position + Vec3{0.3f, 0.5f, 0.0f});
             }
-            // 20% chance to drop an energy globe (instant energy restore on pickup)
-            if ((std::rand() % 100) < 20) {
+            // Chance to drop an energy globe (instant energy restore on pickup)
+            if ((std::rand() % 100) < static_cast<int>(GameConst::ENERGY_GLOBE_CHANCE * 100.0f)) {
                 ItemInstance globe;
                 globe.defId = GLOBE_ENERGY_ID;
                 globe.uid   = s_engine->m_worldItems.nextUid++;
@@ -462,9 +495,21 @@ void Engine::startGame() {
             bool flying;
         };
         static constexpr EnemyTemplate kEnemies[] = {
-            {"skeleton", 40.0f, 2.5f, 12.0f, 2.5f, 1.2f,  8.0f, {0.4f, 0.9f, 0.4f}, false},
-            {"bat",      25.0f, 4.5f, 12.0f, 2.5f, 1.0f,  6.0f, {0.5f, 0.4f, 0.4f}, true},
-            {"spider",   35.0f, 3.0f, 10.0f, 2.0f, 1.0f,  8.0f, {0.5f, 0.3f, 0.5f}, false},
+            {"skeleton",
+             GameConst::SKELETON_HEALTH, GameConst::SKELETON_SPEED,
+             GameConst::SKELETON_DET_RANGE, GameConst::SKELETON_ATK_RANGE,
+             GameConst::SKELETON_ATK_COOL,  GameConst::SKELETON_DAMAGE,
+             {0.4f, 0.9f, 0.4f}, false},
+            {"bat",
+             GameConst::BAT_HEALTH,      GameConst::BAT_SPEED,
+             GameConst::BAT_DET_RANGE,   GameConst::BAT_ATK_RANGE,
+             GameConst::BAT_ATK_COOL,    GameConst::BAT_DAMAGE,
+             {0.5f, 0.4f, 0.4f}, true},
+            {"spider",
+             GameConst::SPIDER_HEALTH,   GameConst::SPIDER_SPEED,
+             GameConst::SPIDER_DET_RANGE, GameConst::SPIDER_ATK_RANGE,
+             GameConst::SPIDER_ATK_COOL,  GameConst::SPIDER_DAMAGE,
+             {0.5f, 0.3f, 0.5f}, false},
         };
 
         for (u32 r = 1; r < dungeon.roomCount; r++) {
@@ -485,14 +530,11 @@ void Engine::startGame() {
                 f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
                 f32 spawnY = tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y);
 
-                // Find mesh and material by enemy type name
+                // Resolve mesh ID using pre-cached IDs (avoids strcmp per spawn)
                 u8 meshId = 0, matId = 0;
-                for (u32 m = 0; m < m_meshDefCount; m++) {
-                    if (std::strcmp(m_meshDefs[m].name, tmpl.type) == 0) {
-                        meshId = static_cast<u8>(m);
-                        break;
-                    }
-                }
+                if (typeIdx == 0)      meshId = m_meshIdSkeleton;
+                else if (typeIdx == 1) meshId = m_meshIdBat;
+                else if (typeIdx == 2) meshId = m_meshIdSpider;
                 char skinName[64];
                 std::snprintf(skinName, sizeof(skinName), "%s_skin", tmpl.type);
                 matId = MaterialSystem::getIdByName(skinName);
@@ -510,23 +552,17 @@ void Engine::startGame() {
                     static const EnemyType kEnemyTypes[] = {EnemyType::SKELETON, EnemyType::BAT, EnemyType::SPIDER};
                     ent->enemyType = kEnemyTypes[typeIdx];
 
-                    // Scale enemy stats by floor level (+25% per floor beyond first)
+                    // Scale enemy stats by floor level (GameConst::FLOOR_STAT_MULT per floor beyond first)
                     ent->level = static_cast<u8>(m_currentFloor);
-                    f32 floorMult = 1.0f + (m_currentFloor - 1) * 0.25f;
+                    f32 floorMult = 1.0f + (m_currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
                     ent->health    *= floorMult;
                     ent->maxHealth  = ent->health;
                     ent->damage    *= floorMult;
 
-                    // Skeletons carry random melee weapons (sword/dagger/axe mesh looked up by name)
+                    // Skeletons carry random melee weapons (sword/dagger/axe)
                     if (ent->enemyType == EnemyType::SKELETON) {
-                        static const char* skelWeapons[] = {"sword", "dagger", "axe"};
-                        u32 weapIdx = static_cast<u32>(std::rand()) % 3;
-                        for (u32 m = 1; m < m_meshDefCount; m++) {
-                            if (std::strcmp(m_meshDefs[m].name, skelWeapons[weapIdx]) == 0) {
-                                ent->weaponMeshId = static_cast<u8>(m);
-                                break;
-                            }
-                        }
+                        u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};
+                        ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
                     }
                 }
             }
@@ -535,13 +571,7 @@ void Engine::startGame() {
 
     // Spawn chests and mimics (1 per room, 20% chance mimic)
     {
-        u8 chestMeshId = 0;
-        for (u32 m = 0; m < m_meshDefCount; m++) {
-            if (std::strcmp(m_meshDefs[m].name, "chest") == 0) {
-                chestMeshId = static_cast<u8>(m);
-                break;
-            }
-        }
+        u8 chestMeshId = m_meshIdChest;
 
         for (u32 r = 1; r < dungeon.roomCount; r++) {
             if ((std::rand() % 2) != 0) continue; // 50% of rooms get a chest
@@ -555,10 +585,11 @@ void Engine::startGame() {
             bool isMimic = (std::rand() % 5) == 0; // 20% of chests are mimics
 
             if (isMimic) {
-                // Mimic: enemy disguised as chest
+                // Mimic: enemy disguised as chest; springs to life within MIMIC_TRIGGER_DIST
                 EntityHandle h = EntitySystem::spawn(m_entities,
                     Vec3{cx, cy + 0.25f, cz}, {0.3f, 0.25f, 0.3f}, false,
-                    60.0f, 4.0f, 3.0f, 2.0f, 0.6f, 20.0f);
+                    GameConst::MIMIC_HEALTH, 4.0f, GameConst::MIMIC_TRIGGER_DIST,
+                    2.0f, 0.6f, GameConst::MIMIC_DAMAGE);
                 Entity* ent = handleGet(m_entities, h);
                 if (ent) {
                     ent->meshId = chestMeshId;
@@ -610,21 +641,11 @@ void Engine::startGame() {
                 npc->speechText = exitGreetings[n];
                 npc->speechTimer = 5.0f;
 
-                for (u32 m = 0; m < m_meshDefCount; m++) {
-                    if (std::strcmp(m_meshDefs[m].name, "human") == 0) {
-                        npc->meshId = static_cast<u8>(m);
-                        break;
-                    }
-                }
+                npc->meshId = m_meshIdHuman;
                 npc->materialId = MaterialSystem::getIdByName("human_skin");
 
-                static const char* exitWeapons[] = {"sword", "axe"};
-                for (u32 m = 1; m < m_meshDefCount; m++) {
-                    if (std::strcmp(m_meshDefs[m].name, exitWeapons[n % 2]) == 0) {
-                        npc->weaponMeshId = static_cast<u8>(m);
-                        break;
-                    }
-                }
+                // Alternate weapon between sword and axe for visual variety
+                npc->weaponMeshId = (n % 2 == 0) ? m_meshIdSword : m_meshIdAxe;
             }
         }
         LOG_INFO("Spawned 2 exit NPCs near floor door");
@@ -643,7 +664,7 @@ void Engine::startGame() {
 
             EntityHandle npcHandle = EntitySystem::spawn(m_entities, npcPos,
                 {0.4f, 0.9f, 0.4f}, false,  // skeleton-sized half-extents
-                40.0f, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
+                GameConst::NPC_HEALTH, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
 
             Entity* npc = handleGet(m_entities, npcHandle);
             if (npc) {
@@ -654,23 +675,11 @@ void Engine::startGame() {
                 npc->speechTimer = 4.0f; // greeting fades after 4 seconds
 
                 // Use the human mesh (broader, solid face) instead of skeleton
-                for (u32 m = 0; m < m_meshDefCount; m++) {
-                    if (std::strcmp(m_meshDefs[m].name, "human") == 0) {
-                        npc->meshId = static_cast<u8>(m);
-                        break;
-                    }
-                }
+                npc->meshId = m_meshIdHuman;
                 npc->materialId = MaterialSystem::getIdByName("human_skin");
 
-                // Give NPC a weapon (alternating sword/axe)
-                static const char* npcWeapons[] = {"sword", "axe"};
-                const char* wpnName = npcWeapons[n % 2];
-                for (u32 m = 1; m < m_meshDefCount; m++) {
-                    if (std::strcmp(m_meshDefs[m].name, wpnName) == 0) {
-                        npc->weaponMeshId = static_cast<u8>(m);
-                        break;
-                    }
-                }
+                // Give NPC a weapon (alternating sword/axe for visual variety)
+                npc->weaponMeshId = (n % 2 == 0) ? m_meshIdSword : m_meshIdAxe;
             }
         }
         LOG_INFO("Spawned 2 friendly NPCs in spawn room");
@@ -1162,6 +1171,65 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
+    updatePlayerPickup();
+
+    // updateFloorDoor returns true when the player descends — skip remainder of tick
+    if (updateFloorDoor()) return;
+
+    // Toggle inventory (Tab key)
+    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
+        m_inventoryOpen = !m_inventoryOpen;
+        Input::setRelativeMouseMode(!m_inventoryOpen);
+        // Reset drag/click state when toggling inventory
+        m_dragState = {};
+        m_dblClickState = {};
+    }
+
+    updateInventoryInteraction(dt);
+
+    // Debug: F7 gives random item
+    if (Input::isKeyPressed(SDL_SCANCODE_F7)) {
+        ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
+                                              m_affixDefs, m_affixDefCount);
+        if (!isItemEmpty(item)) {
+            if (Inventory::addToBackpack(m_inventories[0], item)) {
+                LOG_INFO("Debug: gave %s (rarity %u, damage %.1f)",
+                         m_itemDefs[item.defId].name, (u32)item.rarity, item.damage);
+            }
+        }
+    }
+
+    // Damage flash decay
+    if (m_localPlayer.damageFlashTimer > 0.0f)
+        m_localPlayer.damageFlashTimer -= dt;
+    if (m_hitMarkerTimer > 0.0f)
+        m_hitMarkerTimer -= dt;
+    if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
+
+    // Camera
+    PlayerController::applyToCamera(m_localPlayer, m_camera);
+    // Screen shake only from enemy hits, not weapon fire
+    if (m_localPlayer.hitShakeTimer > 0.0f) {
+        m_localPlayer.hitShakeTimer -= dt;
+        f32 shake = m_localPlayer.hitShakeTimer * 0.08f;
+        m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
+    }
+
+    pushPlayerFromEntities();
+
+    // Update fog-of-war
+    Minimap::updateVisited(m_grid, m_localPlayer.position);
+
+    syncLocalPlayerToNetPlayer();
+}
+
+// ---------------------------------------------------------------------------
+// singleplayerUpdate sub-functions
+// ---------------------------------------------------------------------------
+
+// Auto-pickup health/energy globes (walk-over) and E-key item pickup.
+// Globes are consumed immediately; regular items go to the backpack.
+void Engine::updatePlayerPickup() {
     // Auto-pickup health/energy globes (no key press needed, walk-over activation)
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = m_worldItems.items[i];
@@ -1203,8 +1271,12 @@ void Engine::singleplayerUpdate(f32 dt) {
             }
         }
     }
+}
 
-    // Floor door — descend to next floor when player walks near and presses E
+// Floor door interaction — descend to next floor when near and E is pressed.
+// Returns true if the player descended (caller must return immediately to skip
+// the rest of the tick with the now-regenerated level state).
+bool Engine::updateFloorDoor() {
     if (m_floorDoorActive) {
         Vec3 toDoor = m_floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
@@ -1216,206 +1288,177 @@ void Engine::singleplayerUpdate(f32 dt) {
                 saveGame();
                 LOG_INFO("Descending to floor %u", m_currentFloor);
                 startGame(); // regenerate dungeon with new floor seed
-                return;      // don't process remainder of this frame
+                return true; // skip the remainder of this tick
             }
         }
     }
+    return false;
+}
 
-    // Toggle inventory (Tab key)
-    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
-        m_inventoryOpen = !m_inventoryOpen;
-        Input::setRelativeMouseMode(!m_inventoryOpen);
-        // Reset drag/click state when toggling inventory
-        m_dragState = {};
-        m_dblClickState = {};
-    }
+// Inventory drag-and-drop state machine — handles click, double-click, and drag
+// across backpack, equipment, and quickbar panels.
+void Engine::updateInventoryInteraction(f32 dt) {
+    if (!m_inventoryOpen) return;
 
-    // Inventory drag-and-drop interaction
-    if (m_inventoryOpen) {
-        s32 mx, my;
-        Input::getMousePosition(mx, my);
-        my = static_cast<s32>(Window::getHeight()) - my; // flip to HUD coords
+    s32 mx, my;
+    Input::getMousePosition(mx, my);
+    my = static_cast<s32>(Window::getHeight()) - my; // flip to HUD coords
 
-        u32 sw = Window::getWidth();
-        u32 sh = Window::getHeight();
+    u32 sw = Window::getWidth();
+    u32 sh = Window::getHeight();
 
-        // Tick double-click timer
-        m_dblClickState.timer += dt;
+    // Tick double-click timer
+    m_dblClickState.timer += dt;
 
-        if (m_dragState.source == DragSource::NONE) {
-            // --- No drag active ---
+    if (m_dragState.source == DragSource::NONE) {
+        // --- No drag active ---
 
-            // Left mouse pressed: detect double-click or begin potential drag
-            if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
-                InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+        // Left mouse pressed: detect double-click or begin potential drag
+        if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+            InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
 
-                if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
-                    hit.index < MAX_INVENTORY_ITEMS &&
-                    !isItemEmpty(m_inventories[0].backpack[hit.index])) {
+            if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
+                hit.index < MAX_INVENTORY_ITEMS &&
+                !isItemEmpty(m_inventories[0].backpack[hit.index])) {
 
-                    // Double-click detection: same backpack slot within 0.3s
-                    if (m_dblClickState.wasBackpack &&
-                        m_dblClickState.lastSlot == hit.index &&
-                        m_dblClickState.timer < 0.3f) {
-                        // Double-click: equip directly
-                        Inventory::equip(m_inventories[0], hit.index, m_itemDefs);
-                        Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
-                        m_dblClickState = {};
-                    } else {
-                        // Record for potential double-click and begin potential drag
-                        m_dblClickState.timer = 0.0f;
-                        m_dblClickState.lastSlot = hit.index;
-                        m_dblClickState.wasBackpack = true;
+                // Double-click detection: same backpack slot within 0.3s
+                if (m_dblClickState.wasBackpack &&
+                    m_dblClickState.lastSlot == hit.index &&
+                    m_dblClickState.timer < 0.3f) {
+                    // Double-click: equip directly
+                    Inventory::equip(m_inventories[0], hit.index, m_itemDefs);
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                    m_dblClickState = {};
+                } else {
+                    // Record for potential double-click and begin potential drag
+                    m_dblClickState.timer = 0.0f;
+                    m_dblClickState.lastSlot = hit.index;
+                    m_dblClickState.wasBackpack = true;
 
-                        const ItemInstance& item = m_inventories[0].backpack[hit.index];
-                        m_dragState.source = DragSource::BACKPACK;
-                        m_dragState.sourceIndex = hit.index;
-                        m_dragState.itemUid = item.uid;
-                        m_dragState.itemDefId = item.defId;
-                        m_dragState.startX = mx;
-                        m_dragState.startY = my;
-                        m_dragState.dragging = false;
-                    }
-                } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
-                           hit.index < static_cast<u8>(ItemSlot::COUNT) &&
-                           !isItemEmpty(m_inventories[0].equipped[hit.index])) {
-                    // Begin drag from equipment slot
-                    const ItemInstance& item = m_inventories[0].equipped[hit.index];
-                    m_dragState.source = DragSource::EQUIPMENT;
+                    const ItemInstance& item = m_inventories[0].backpack[hit.index];
+                    m_dragState.source = DragSource::BACKPACK;
                     m_dragState.sourceIndex = hit.index;
                     m_dragState.itemUid = item.uid;
                     m_dragState.itemDefId = item.defId;
                     m_dragState.startX = mx;
                     m_dragState.startY = my;
                     m_dragState.dragging = false;
-                    m_dblClickState = {};
-                } else if (hit.panel == InventoryUI::SlotHit::QUICKBAR &&
-                           hit.index < QUICKBAR_SLOTS) {
-                    const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[0], m_inventories[0], hit.index);
-                    if (qbItem && !isItemEmpty(*qbItem)) {
-                        m_dragState.source = DragSource::QUICKBAR;
-                        m_dragState.sourceIndex = hit.index;
-                        m_dragState.itemUid = qbItem->uid;
-                        m_dragState.itemDefId = qbItem->defId;
-                        m_dragState.startX = mx;
-                        m_dragState.startY = my;
-                        m_dragState.dragging = false;
-                    }
-                    m_dblClickState = {};
-                } else {
-                    m_dblClickState = {};
+                }
+            } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
+                       hit.index < static_cast<u8>(ItemSlot::COUNT) &&
+                       !isItemEmpty(m_inventories[0].equipped[hit.index])) {
+                // Begin drag from equipment slot
+                const ItemInstance& item = m_inventories[0].equipped[hit.index];
+                m_dragState.source = DragSource::EQUIPMENT;
+                m_dragState.sourceIndex = hit.index;
+                m_dragState.itemUid = item.uid;
+                m_dragState.itemDefId = item.defId;
+                m_dragState.startX = mx;
+                m_dragState.startY = my;
+                m_dragState.dragging = false;
+                m_dblClickState = {};
+            } else if (hit.panel == InventoryUI::SlotHit::QUICKBAR &&
+                       hit.index < QUICKBAR_SLOTS) {
+                const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[0], m_inventories[0], hit.index);
+                if (qbItem && !isItemEmpty(*qbItem)) {
+                    m_dragState.source = DragSource::QUICKBAR;
+                    m_dragState.sourceIndex = hit.index;
+                    m_dragState.itemUid = qbItem->uid;
+                    m_dragState.itemDefId = qbItem->defId;
+                    m_dragState.startX = mx;
+                    m_dragState.startY = my;
+                    m_dragState.dragging = false;
+                }
+                m_dblClickState = {};
+            } else {
+                m_dblClickState = {};
+            }
+        }
+
+        // Middle mouse: equip from quickbar (item stays in quickbar as EQUIPPED_REF)
+        if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
+            InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+            if (hit.panel == InventoryUI::SlotHit::QUICKBAR) {
+                QuickbarSlot& qs = m_quickbars[0].slots[hit.index];
+                if (qs.type == QuickbarSlot::BACKPACK_REF &&
+                    qs.sourceIndex < MAX_INVENTORY_ITEMS &&
+                    !isItemEmpty(m_inventories[0].backpack[qs.sourceIndex])) {
+                    u32 uid = qs.itemUid;
+                    ItemSlot itemSlot = m_itemDefs[m_inventories[0].backpack[qs.sourceIndex].defId].slot;
+                    Inventory::equip(m_inventories[0], qs.sourceIndex, m_itemDefs);
+                    // Update this quickbar slot to point to the equipment slot
+                    qs.type = QuickbarSlot::EQUIPPED_REF;
+                    qs.sourceIndex = static_cast<u8>(itemSlot);
+                    qs.itemUid = uid;
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
                 }
             }
+        }
 
-            // Middle mouse: equip from quickbar (item stays in quickbar as EQUIPPED_REF)
-            if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
-                InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
-                if (hit.panel == InventoryUI::SlotHit::QUICKBAR) {
-                    QuickbarSlot& qs = m_quickbars[0].slots[hit.index];
-                    if (qs.type == QuickbarSlot::BACKPACK_REF &&
-                        qs.sourceIndex < MAX_INVENTORY_ITEMS &&
-                        !isItemEmpty(m_inventories[0].backpack[qs.sourceIndex])) {
-                        u32 uid = qs.itemUid;
-                        ItemSlot itemSlot = m_itemDefs[m_inventories[0].backpack[qs.sourceIndex].defId].slot;
-                        Inventory::equip(m_inventories[0], qs.sourceIndex, m_itemDefs);
-                        // Update this quickbar slot to point to the equipment slot
-                        qs.type = QuickbarSlot::EQUIPPED_REF;
-                        qs.sourceIndex = static_cast<u8>(itemSlot);
-                        qs.itemUid = uid;
+    } else if (!m_dragState.dragging) {
+        // --- Potential drag (mouse pressed but not moved far enough) ---
+
+        if (Input::isMouseButtonDown(SDL_BUTTON_LEFT)) {
+            s32 dx = mx - m_dragState.startX;
+            s32 dy = my - m_dragState.startY;
+            if (dx * dx + dy * dy > 9) { // > 3px dead zone
+                m_dragState.dragging = true;
+            }
+        }
+        if (Input::isMouseButtonReleased(SDL_BUTTON_LEFT)) {
+            // Single click within dead zone — cancel drag, click was recorded for double-click
+            m_dragState = {};
+        }
+
+    } else {
+        // --- Active drag ---
+
+        if (Input::isMouseButtonReleased(SDL_BUTTON_LEFT)) {
+            InventoryUI::SlotHit drop = InventoryUI::hitTest(sw, sh, mx, my);
+
+            if (drop.panel == InventoryUI::SlotHit::QUICKBAR) {
+                // Drop on quickbar slot
+                if (m_dragState.source == DragSource::QUICKBAR) {
+                    Quickbar::swapSlots(m_quickbars[0], m_dragState.sourceIndex, drop.index);
+                } else {
+                    Quickbar::assignToSlot(m_quickbars[0], m_inventories[0],
+                                            drop.index, m_dragState.source, m_dragState.sourceIndex);
+                }
+            } else if (drop.panel == InventoryUI::SlotHit::EQUIPMENT &&
+                       m_dragState.source == DragSource::BACKPACK) {
+                // Drop backpack item on equipment slot — equip it
+                Inventory::equip(m_inventories[0], m_dragState.sourceIndex, m_itemDefs);
+                Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+            } else if (drop.panel == InventoryUI::SlotHit::NONE) {
+                // Drop outside all panels — drop item to world
+                Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};
+                if (m_dragState.source == DragSource::BACKPACK) {
+                    ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], m_dragState.sourceIndex);
+                    if (!isItemEmpty(dropped)) {
+                        WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    }
+                } else if (m_dragState.source == DragSource::EQUIPMENT) {
+                    ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                        static_cast<ItemSlot>(m_dragState.sourceIndex));
+                    if (!isItemEmpty(dropped)) {
+                        WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                         Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
                     }
+                } else if (m_dragState.source == DragSource::QUICKBAR) {
+                    // Remove from quickbar only (item stays in backpack)
+                    Quickbar::removeItem(m_quickbars[0], m_dragState.sourceIndex);
                 }
             }
-
-        } else if (!m_dragState.dragging) {
-            // --- Potential drag (mouse pressed but not moved far enough) ---
-
-            if (Input::isMouseButtonDown(SDL_BUTTON_LEFT)) {
-                s32 dx = mx - m_dragState.startX;
-                s32 dy = my - m_dragState.startY;
-                if (dx * dx + dy * dy > 9) { // > 3px dead zone
-                    m_dragState.dragging = true;
-                }
-            }
-            if (Input::isMouseButtonReleased(SDL_BUTTON_LEFT)) {
-                // Single click within dead zone — cancel drag, click was recorded for double-click
-                m_dragState = {};
-            }
-
-        } else {
-            // --- Active drag ---
-
-            if (Input::isMouseButtonReleased(SDL_BUTTON_LEFT)) {
-                InventoryUI::SlotHit drop = InventoryUI::hitTest(sw, sh, mx, my);
-
-                if (drop.panel == InventoryUI::SlotHit::QUICKBAR) {
-                    // Drop on quickbar slot
-                    if (m_dragState.source == DragSource::QUICKBAR) {
-                        Quickbar::swapSlots(m_quickbars[0], m_dragState.sourceIndex, drop.index);
-                    } else {
-                        Quickbar::assignToSlot(m_quickbars[0], m_inventories[0],
-                                                drop.index, m_dragState.source, m_dragState.sourceIndex);
-                    }
-                } else if (drop.panel == InventoryUI::SlotHit::EQUIPMENT &&
-                           m_dragState.source == DragSource::BACKPACK) {
-                    // Drop backpack item on equipment slot — equip it
-                    Inventory::equip(m_inventories[0], m_dragState.sourceIndex, m_itemDefs);
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
-                } else if (drop.panel == InventoryUI::SlotHit::NONE) {
-                    // Drop outside all panels — drop item to world
-                    Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};
-                    if (m_dragState.source == DragSource::BACKPACK) {
-                        ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], m_dragState.sourceIndex);
-                        if (!isItemEmpty(dropped)) {
-                            WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
-                        }
-                    } else if (m_dragState.source == DragSource::EQUIPMENT) {
-                        ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
-                            static_cast<ItemSlot>(m_dragState.sourceIndex));
-                        if (!isItemEmpty(dropped)) {
-                            WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
-                            Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
-                        }
-                    } else if (m_dragState.source == DragSource::QUICKBAR) {
-                        // Remove from quickbar only (item stays in backpack)
-                        Quickbar::removeItem(m_quickbars[0], m_dragState.sourceIndex);
-                    }
-                }
-                // Reset drag state
-                m_dragState = {};
-            }
+            // Reset drag state
+            m_dragState = {};
         }
     }
+}
 
-    // Debug: F7 gives random item
-    if (Input::isKeyPressed(SDL_SCANCODE_F7)) {
-        ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
-                                              m_affixDefs, m_affixDefCount);
-        if (!isItemEmpty(item)) {
-            if (Inventory::addToBackpack(m_inventories[0], item)) {
-                LOG_INFO("Debug: gave %s (rarity %u, damage %.1f)",
-                         m_itemDefs[item.defId].name, (u32)item.rarity, item.damage);
-            }
-        }
-    }
-
-    // Damage flash decay
-    if (m_localPlayer.damageFlashTimer > 0.0f)
-        m_localPlayer.damageFlashTimer -= dt;
-    if (m_hitMarkerTimer > 0.0f)
-        m_hitMarkerTimer -= dt;
-    if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
-
-    // Camera
-    PlayerController::applyToCamera(m_localPlayer, m_camera);
-    // Screen shake only from enemy hits, not weapon fire
-    if (m_localPlayer.hitShakeTimer > 0.0f) {
-        m_localPlayer.hitShakeTimer -= dt;
-        f32 shake = m_localPlayer.hitShakeTimer * 0.08f;
-        m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
-    }
-
-    // Player-enemy push collision
+// Pushes the local player out of all active hostile entity AABBs.
+// Uses the minimal-penetration axis to avoid tunneling on corners.
+// Reverts push if it would land the player inside solid geometry.
+void Engine::pushPlayerFromEntities() {
     AABB playerBox = {
         m_localPlayer.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
         m_localPlayer.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
@@ -1446,11 +1489,6 @@ void Engine::singleplayerUpdate(f32 dt) {
             }
         }
     }
-
-    // Update fog-of-war
-    Minimap::updateVisited(m_grid, m_localPlayer.position);
-
-    syncLocalPlayerToNetPlayer();
 }
 
 // ---------------------------------------------------------------------------
@@ -1551,34 +1589,7 @@ void Engine::serverUpdate(f32 dt) {
         m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
     }
 
-    // Player-enemy push for local player
-    AABB playerBox = {
-        m_localPlayer.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
-        m_localPlayer.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
-    };
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
-        Entity& e = m_entities.entities[i];
-        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-        if (e.flags & ENT_FRIENDLY) continue;
-        AABB entBox = entityAABB(e);
-        if (CombatQuery::aabbOverlap(playerBox, entBox)) {
-            Vec3 toPlayer = m_localPlayer.position - e.position;
-            f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
-            f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
-            if (pushX > 0.0f && pushZ > 0.0f) {
-                Vec3 saved = m_localPlayer.position;
-                if (pushX < pushZ)
-                    m_localPlayer.position.x += (toPlayer.x > 0) ? pushX : -pushX;
-                else
-                    m_localPlayer.position.z += (toPlayer.z > 0) ? pushZ : -pushZ;
-                u32 gx, gz;
-                if (LevelGridSystem::worldToGrid(m_grid, m_localPlayer.position, gx, gz) &&
-                    LevelGridSystem::isSolid(m_grid, gx, gz)) {
-                    m_localPlayer.position = saved;
-                }
-            }
-        }
-    }
+    pushPlayerFromEntities();
     syncLocalPlayerToNetPlayer();
 
     // Broadcast snapshot every TICKS_PER_SNAP ticks
@@ -2075,12 +2086,88 @@ void Engine::render(f32 alpha) {
     // Level geometry
     LevelMeshSystem::submitAll(m_sections, m_sectionCount, m_basicShader);
 
-    // Choose entity/projectile source based on role
+    // Choose entity source based on role (also used by debug overlay below)
     const EntityPool& entPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
-    const ProjectilePool& projPool = (m_netRole == NetRole::CLIENT) ? m_renderProjectiles : m_projectiles;
 
-    // Entities
+    renderEntities(sw, sh);
+
+    // Clear debug lines before game effects — portal, fire, sparks, loot glow
+    // all use DebugDraw::line and must not be wiped before flush
+    DebugDraw::clear();
+
+    renderProjectilesAndEffects(sw, sh);
+    renderWorldItems(sw, sh);
+
+    { PROFILE_SCOPE(4, "Flush");
+    Renderer::flush();
+    }
+
+    // --- Debug overlay (F1 toggle — boxes only, lines already accumulated above) ---
+    if (DebugDraw::isEnabled()) {
+        Vec3 feet = m_localPlayer.position;
+        AABB playerBox = {
+            feet + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
+            feet + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
+        };
+        Vec3 boxColor = m_localPlayer.onGround ? Vec3{0,1,0} : Vec3{1,1,0};
+        DebugDraw::box(playerBox, boxColor);
+
+        for (u32 i = 0; i < MAX_ENTITIES; i++) {
+            const Entity& e = entPool.entities[i];
+            if (!(e.flags & ENT_ACTIVE)) continue;
+            Vec3 c = (e.flags & ENT_DEAD) ? Vec3{0.5f,0.5f,0.5f}
+                   : (e.flags & ENT_FLYING) ? Vec3{0.3f,0.3f,1.0f}
+                   : Vec3{1.0f,0.3f,0.3f};
+            DebugDraw::box(entityAABB(e), c);
+        }
+
+        if (m_lastCombatHit.hit) {
+            Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+            DebugDraw::line(eyePos, m_lastCombatHit.position, {1,0,0});
+            DebugDraw::cross(m_lastCombatHit.position, 0.15f, {1,0.5f,0});
+            DebugDraw::ray(m_lastCombatHit.position, m_lastCombatHit.normal, 0.5f, {1,1,0});
+        }
+    }
+
+    // Target lock indicator
+    if (m_localPlayer.lockActive) {
+        const EntityPool& lockPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
+        EntityHandle h = {m_localPlayer.lockIndex, m_localPlayer.lockGeneration};
+        Entity* target = handleGet(const_cast<EntityPool&>(lockPool), h);
+        if (target) {
+            AABB lockBox = entityAABB(*target);
+            lockBox.min = lockBox.min - Vec3{0.05f, 0.05f, 0.05f};
+            lockBox.max = lockBox.max + Vec3{0.05f, 0.05f, 0.05f};
+            bool wasEnabled = DebugDraw::isEnabled();
+            DebugDraw::setEnabled(true);
+            DebugDraw::box(lockBox, {0.0f, 1.0f, 1.0f});
+            DebugDraw::setEnabled(wasEnabled);
+        }
+    }
+
+    DebugDraw::flush(m_camera.viewProjection);
+
+    renderSpeechBubbles(sw, sh);
+
+    // First-person viewmodel (hand + weapon) — drawn after world, before HUD
+    renderViewmodel();
+
+    renderHUD(sw, sh);
+
+    GLContext::swapBuffers(Window::getHandle());
+}
+
+// ---------------------------------------------------------------------------
+// renderEntities — entity body + limb rendering loop with procedural animation.
+// Submits to the shared Renderer batch; caller flushes (Renderer::flush) after
+// all world geometry and effects have been submitted.
+// ---------------------------------------------------------------------------
+void Engine::renderEntities(u32 sw, u32 sh) {
+    (void)sw; (void)sh; // sw/sh reserved for future use
+
+    const EntityPool& entPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
+
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         const Entity& e = entPool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
@@ -2288,10 +2375,18 @@ void Engine::render(f32 alpha) {
             }
         }
     }
+}
 
-    // Clear debug lines before game effects — portal, fire, sparks, loot glow
-    // all use DebugDraw::line and must not be wiped before flush
-    DebugDraw::clear();
+// ---------------------------------------------------------------------------
+// renderProjectilesAndEffects — projectile cubes + spark orbs, floor door portal
+// debug lines, and fire AoE effects (molotov splash). All DebugDraw::line calls
+// here are accumulated before DebugDraw::flush in render().
+// ---------------------------------------------------------------------------
+void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
+    (void)sw; (void)sh; // sw/sh reserved for future use
+
+    const ProjectilePool& projPool = (m_netRole == NetRole::CLIENT) ? m_renderProjectiles : m_projectiles;
+    const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
     // Projectiles
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
@@ -2404,7 +2499,42 @@ void Engine::render(f32 alpha) {
         }
     }
 
-    // --- World items (rendered with weapon-specific meshes when available) ---
+    // --- Fire AoE effects (molotov splash) ---
+    for (u32 i = 0; i < MAX_FIRE_FX; i++) {
+        if (!m_fireFX[i].active) continue;
+        const FireFX& fx = m_fireFX[i];
+        f32 t = 1.0f - fx.timer; // 0→1 over lifetime
+        f32 alpha = fx.timer;    // fades out
+        f32 r = fx.radius * (0.3f + t * 0.7f); // expands outward
+
+        // Draw radiating lines from center (fire burst pattern)
+        static constexpr u32 FIRE_RAYS = 12;
+        for (u32 ray = 0; ray < FIRE_RAYS; ray++) {
+            f32 angle = static_cast<f32>(ray) * (6.28318f / FIRE_RAYS) + t * 2.0f;
+            f32 dx = cosf(angle) * r;
+            f32 dz = sinf(angle) * r;
+            // Flame color: orange core, red tips
+            Vec3 col = {1.0f * alpha, (0.4f + 0.3f * sinf(angle * 3.0f)) * alpha, 0.1f * alpha};
+            // Ground-level radiating lines
+            DebugDraw::line(fx.pos, fx.pos + Vec3{dx, 0.1f, dz}, col);
+            // Upward flame wisps
+            f32 h = 0.5f + sinf(angle * 2.0f + t * 8.0f) * 0.3f;
+            DebugDraw::line(fx.pos + Vec3{dx * 0.5f, 0, dz * 0.5f},
+                            fx.pos + Vec3{dx * 0.3f, h * alpha, dz * 0.3f},
+                            {1.0f * alpha, 0.6f * alpha, 0.0f});
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// renderWorldItems — dropped items with mesh normalization + rarity glow lines,
+// plus remote player models (multiplayer only)
+// ---------------------------------------------------------------------------
+void Engine::renderWorldItems(u32 sw, u32 sh) {
+    (void)sw; (void)sh; // sw/sh reserved for future use (e.g. distance-based culling)
+
+    const Texture& defaultTex = MaterialSystem::get(0)->texture;
+
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& wi = m_worldItems.items[i];
         if (!wi.active) continue;
@@ -2552,122 +2682,50 @@ void Engine::render(f32 alpha) {
             Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, colors[i]);
         }
     }
+}
 
-    { PROFILE_SCOPE(4, "Flush");
-    Renderer::flush();
-    }
-
-    // --- Debug overlay (F1 toggle — boxes only, lines already accumulated above) ---
-    if (DebugDraw::isEnabled()) {
-        Vec3 feet = m_localPlayer.position;
-        AABB playerBox = {
-            feet + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
-            feet + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
-        };
-        Vec3 boxColor = m_localPlayer.onGround ? Vec3{0,1,0} : Vec3{1,1,0};
-        DebugDraw::box(playerBox, boxColor);
-
-        for (u32 i = 0; i < MAX_ENTITIES; i++) {
-            const Entity& e = entPool.entities[i];
-            if (!(e.flags & ENT_ACTIVE)) continue;
-            Vec3 c = (e.flags & ENT_DEAD) ? Vec3{0.5f,0.5f,0.5f}
-                   : (e.flags & ENT_FLYING) ? Vec3{0.3f,0.3f,1.0f}
-                   : Vec3{1.0f,0.3f,0.3f};
-            DebugDraw::box(entityAABB(e), c);
-        }
-
-        if (m_lastCombatHit.hit) {
-            Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-            DebugDraw::line(eyePos, m_lastCombatHit.position, {1,0,0});
-            DebugDraw::cross(m_lastCombatHit.position, 0.15f, {1,0.5f,0});
-            DebugDraw::ray(m_lastCombatHit.position, m_lastCombatHit.normal, 0.5f, {1,1,0});
-        }
-    }
-
-    // Target lock indicator
-    if (m_localPlayer.lockActive) {
-        const EntityPool& lockPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
-        EntityHandle h = {m_localPlayer.lockIndex, m_localPlayer.lockGeneration};
-        Entity* target = handleGet(const_cast<EntityPool&>(lockPool), h);
-        if (target) {
-            AABB lockBox = entityAABB(*target);
-            lockBox.min = lockBox.min - Vec3{0.05f, 0.05f, 0.05f};
-            lockBox.max = lockBox.max + Vec3{0.05f, 0.05f, 0.05f};
-            bool wasEnabled = DebugDraw::isEnabled();
-            DebugDraw::setEnabled(true);
-            DebugDraw::box(lockBox, {0.0f, 1.0f, 1.0f});
-            DebugDraw::setEnabled(wasEnabled);
-        }
-    }
-
-    // --- Fire AoE effects (molotov splash) ---
-    for (u32 i = 0; i < MAX_FIRE_FX; i++) {
-        if (!m_fireFX[i].active) continue;
-        const FireFX& fx = m_fireFX[i];
-        f32 t = 1.0f - fx.timer; // 0→1 over lifetime
-        f32 alpha = fx.timer;    // fades out
-        f32 r = fx.radius * (0.3f + t * 0.7f); // expands outward
-
-        // Draw radiating lines from center (fire burst pattern)
-        static constexpr u32 FIRE_RAYS = 12;
-        for (u32 ray = 0; ray < FIRE_RAYS; ray++) {
-            f32 angle = static_cast<f32>(ray) * (6.28318f / FIRE_RAYS) + t * 2.0f;
-            f32 dx = cosf(angle) * r;
-            f32 dz = sinf(angle) * r;
-            // Flame color: orange core, red tips
-            Vec3 col = {1.0f * alpha, (0.4f + 0.3f * sinf(angle * 3.0f)) * alpha, 0.1f * alpha};
-            // Ground-level radiating lines
-            DebugDraw::line(fx.pos, fx.pos + Vec3{dx, 0.1f, dz}, col);
-            // Upward flame wisps
-            f32 h = 0.5f + sinf(angle * 2.0f + t * 8.0f) * 0.3f;
-            DebugDraw::line(fx.pos + Vec3{dx * 0.5f, 0, dz * 0.5f},
-                            fx.pos + Vec3{dx * 0.3f, h * alpha, dz * 0.3f},
-                            {1.0f * alpha, 0.6f * alpha, 0.0f});
-        }
-    }
-
-    DebugDraw::flush(m_camera.viewProjection);
-
-    // --- Speech bubbles above entities ---
+// ---------------------------------------------------------------------------
+// renderSpeechBubbles — world-to-screen projection for entity speech text,
+// plus the floor-door interaction prompt when the player is in range
+// ---------------------------------------------------------------------------
+void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
     // Uses the render entity pool (client uses interpolated snapshot, SP uses live pool)
-    {
-        const EntityPool& speechPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
-        for (u32 a = 0; a < speechPool.activeCount; a++) {
-            u32 idx = speechPool.activeList[a];
-            const Entity& e = speechPool.entities[idx];
-            if (!e.speechText || e.speechTimer <= 0.0f) continue;
+    const EntityPool& speechPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
+    for (u32 a = 0; a < speechPool.activeCount; a++) {
+        u32 idx = speechPool.activeList[a];
+        const Entity& e = speechPool.entities[idx];
+        if (!e.speechText || e.speechTimer <= 0.0f) continue;
 
-            // Project a point above the entity's head into clip space
-            Vec3 headPos = e.position + Vec3{0, e.halfExtents.y * 2.0f + 0.3f, 0};
+        // Project a point above the entity's head into clip space
+        Vec3 headPos = e.position + Vec3{0, e.halfExtents.y * 2.0f + 0.3f, 0};
 
-            // Manual column-major Mat4 * Vec4 (no operator overload assumed)
-            const f32* vp = m_camera.viewProjection.m;
-            f32 cx = vp[0]*headPos.x + vp[4]*headPos.y + vp[8]*headPos.z  + vp[12];
-            f32 cy = vp[1]*headPos.x + vp[5]*headPos.y + vp[9]*headPos.z  + vp[13];
-            f32 cw = vp[3]*headPos.x + vp[7]*headPos.y + vp[11]*headPos.z + vp[15];
+        // Manual column-major Mat4 * Vec4 (no operator overload assumed)
+        const f32* vp = m_camera.viewProjection.m;
+        f32 cx = vp[0]*headPos.x + vp[4]*headPos.y + vp[8]*headPos.z  + vp[12];
+        f32 cy = vp[1]*headPos.x + vp[5]*headPos.y + vp[9]*headPos.z  + vp[13];
+        f32 cw = vp[3]*headPos.x + vp[7]*headPos.y + vp[11]*headPos.z + vp[15];
 
-            if (cw <= 0.01f) continue; // behind the camera
+        if (cw <= 0.01f) continue; // behind the camera
 
-            // NDC to pixel screen coords (y is flipped: NDC +1 = screen top)
-            f32 ndcX = cx / cw;
-            f32 ndcY = cy / cw;
-            f32 screenX = (ndcX + 1.0f) * 0.5f * static_cast<f32>(sw);
-            f32 screenY = (1.0f - ndcY) * 0.5f * static_cast<f32>(sh);
+        // NDC to pixel screen coords (y is flipped: NDC +1 = screen top)
+        f32 ndcX = cx / cw;
+        f32 ndcY = cy / cw;
+        f32 screenX = (ndcX + 1.0f) * 0.5f * static_cast<f32>(sw);
+        f32 screenY = (1.0f - ndcY) * 0.5f * static_cast<f32>(sh);
 
-            // Cull bubbles that are well off-screen
-            if (screenX < -100.0f || screenX > static_cast<f32>(sw) + 100.0f) continue;
-            if (screenY < -50.0f  || screenY > static_cast<f32>(sh) + 50.0f)  continue;
+        // Cull bubbles that are well off-screen
+        if (screenX < -100.0f || screenX > static_cast<f32>(sw) + 100.0f) continue;
+        if (screenY < -50.0f  || screenY > static_cast<f32>(sh) + 50.0f)  continue;
 
-            // Fade alpha in the last second of the timer
-            f32 alpha = (e.speechTimer < 1.0f) ? e.speechTimer : 1.0f;
+        // Fade alpha in the last second of the timer
+        f32 alpha = (e.speechTimer < 1.0f) ? e.speechTimer : 1.0f;
 
-            // Green for allies, red for hostile entities
-            Vec3 textColor = (e.flags & ENT_FRIENDLY)
-                ? Vec3{0.4f, 1.0f, 0.5f}   // ally green
-                : Vec3{1.0f, 0.4f, 0.4f};  // enemy red
+        // Green for allies, red for hostile entities
+        Vec3 textColor = (e.flags & ENT_FRIENDLY)
+            ? Vec3{0.4f, 1.0f, 0.5f}   // ally green
+            : Vec3{1.0f, 0.4f, 0.4f};  // enemy red
 
-            HUD::drawSpeechBubble(sw, sh, screenX, screenY, e.speechText, textColor, alpha);
-        }
+        HUD::drawSpeechBubble(sw, sh, screenX, screenY, e.speechText, textColor, alpha);
     }
 
     // Floor door interaction prompt — shown when player is within trigger range
@@ -2683,11 +2741,13 @@ void Engine::render(f32 alpha) {
                 doorStr, {0.3f, 1.0f, 0.4f}, 1);
         }
     }
+}
 
-    // First-person viewmodel (hand + weapon) — drawn after world, before HUD
-    renderViewmodel();
-
-    // --- HUD ---
+// ---------------------------------------------------------------------------
+// renderHUD — all 2D HUD elements: inventory screen or normal HUD
+// (health bar, crosshair, quickbar, minimap, skill bars, net stats, profiler)
+// ---------------------------------------------------------------------------
+void Engine::renderHUD(u32 sw, u32 sh) {
     if (m_inventoryOpen) {
         // Inventory screen replaces normal HUD elements
         s32 invMX, invMY;
@@ -2835,8 +2895,6 @@ void Engine::render(f32 alpha) {
         HUD::drawNetStats(sw, sh, Net::getConnectedCount(), ping,
                           m_netRole == NetRole::SERVER ? "HOST" : "CLIENT");
     }
-
-    GLContext::swapBuffers(Window::getHandle());
 }
 
 // ---------------------------------------------------------------------------

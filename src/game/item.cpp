@@ -624,58 +624,42 @@ ItemInstance Inventory::dropFromBackpack(PlayerInventory& inv, u8 backpackIndex)
     return copy;
 }
 
-WeaponDef Inventory::getEffectiveWeapon(const PlayerInventory& inv,
-                                         const ItemDef* itemDefs,
-                                         const WeaponDef& baseWeapon) {
-    const ItemInstance& equipped = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
-    if (isItemEmpty(equipped)) return baseWeapon;
-
-    const ItemDef& def = itemDefs[equipped.defId];
-
+// Shared core: builds a WeaponDef from a definition + inventory bonuses + a pre-rolled damage value.
+// Both getEffectiveWeapon and getWeaponFromItem delegate here to avoid duplicate logic.
+static WeaponDef buildWeaponDef(const ItemDef& def, const PlayerInventory& inv, f32 baseDamage) {
     WeaponDef wd;
     wd.name            = def.name;
     wd.type            = def.weaponType;
 
     // Base damage from the rolled item, plus flat bonus from affixes
-    f32 rawDamage      = equipped.damage + inv.bonusDamageFlat;
+    f32 rawDamage      = baseDamage + inv.bonusDamageFlat;
     // Apply percentage bonus (stored as a raw multiplier addition, e.g. 10 = +10%)
     wd.damage          = rawDamage * (1.0f + inv.bonusDamagePct / 100.0f);
 
     // Cooldown reduced by cooldownReduction (0.0–0.5)
     wd.cooldown        = def.baseCooldown * (1.0f - inv.bonusCooldownReduction);
-    if (wd.cooldown < 0.05f) wd.cooldown = 0.05f; // hard minimum
+    if (wd.cooldown < 0.05f) wd.cooldown = 0.05f; // hard minimum to prevent division by zero
 
     wd.range           = def.baseRange + inv.bonusRange;
     wd.coneAngleDeg    = def.baseConeAngle + inv.bonusConeAngle;
     wd.projectileSpeed = def.baseProjectileSpeed * (1.0f + inv.bonusProjectileSpeedPct / 100.0f);
     wd.projectileRadius = def.baseProjectileRadius;
     wd.recoilKick      = def.baseRecoil;
-
     return wd;
+}
+
+WeaponDef Inventory::getEffectiveWeapon(const PlayerInventory& inv,
+                                         const ItemDef* itemDefs,
+                                         const WeaponDef& baseWeapon) {
+    const ItemInstance& equipped = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
+    if (isItemEmpty(equipped)) return baseWeapon;
+    return buildWeaponDef(itemDefs[equipped.defId], inv, equipped.damage);
 }
 
 WeaponDef Inventory::getWeaponFromItem(const PlayerInventory& inv,
                                        const ItemDef* itemDefs,
                                        const ItemInstance& item) {
-    const ItemDef& def = itemDefs[item.defId];
-
-    WeaponDef wd;
-    wd.name            = def.name;
-    wd.type            = def.weaponType;
-
-    f32 rawDamage      = item.damage + inv.bonusDamageFlat;
-    wd.damage          = rawDamage * (1.0f + inv.bonusDamagePct / 100.0f);
-
-    wd.cooldown        = def.baseCooldown * (1.0f - inv.bonusCooldownReduction);
-    if (wd.cooldown < 0.05f) wd.cooldown = 0.05f;
-
-    wd.range           = def.baseRange + inv.bonusRange;
-    wd.coneAngleDeg    = def.baseConeAngle + inv.bonusConeAngle;
-    wd.projectileSpeed = def.baseProjectileSpeed * (1.0f + inv.bonusProjectileSpeedPct / 100.0f);
-    wd.projectileRadius = def.baseProjectileRadius;
-    wd.recoilKick      = def.baseRecoil;
-
-    return wd;
+    return buildWeaponDef(itemDefs[item.defId], inv, item.damage);
 }
 
 f32 Inventory::getEffectiveMaxHealth(const PlayerInventory& inv, f32 baseMaxHealth) {

@@ -130,6 +130,11 @@ private:
     struct FireFX { Vec3 pos; f32 radius; f32 timer; bool active; };
     FireFX m_fireFX[MAX_FIRE_FX] = {};
 
+    // Pre-cached mesh IDs (resolved once in init, avoids strcmp in startGame)
+    u8 m_meshIdSkeleton = 0, m_meshIdBat = 0, m_meshIdSpider = 0;
+    u8 m_meshIdChest = 0, m_meshIdHuman = 0;
+    u8 m_meshIdSword = 0, m_meshIdDagger = 0, m_meshIdAxe = 0;
+
     // Switch constraint mode
     bool m_switchMode = false;
     static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;
@@ -153,6 +158,25 @@ private:
     void renderViewmodel();  // draws first-person hand + equipped weapon
     void renderMenu();
     void renderLobby();
+
+    // Update sub-functions (called from singleplayerUpdate())
+    void updateInventoryInteraction(f32 dt);
+    void updatePlayerPickup();
+    // Returns true if the player descended (caller should return immediately)
+    bool updateFloorDoor();
+
+    // Player-entity push collision (shared between singleplayer and server paths)
+    void pushPlayerFromEntities();
+
+    // Mesh ID lookup helper — linear scan over m_meshDefs by name
+    u8 findMeshByName(const char* name) const;
+
+    // Render sub-functions (called from render())
+    void renderEntities(u32 sw, u32 sh);
+    void renderProjectilesAndEffects(u32 sw, u32 sh);
+    void renderWorldItems(u32 sw, u32 sh);
+    void renderSpeechBubbles(u32 sw, u32 sh);
+    void renderHUD(u32 sw, u32 sh);
     void logStats();
 
     // Menu/lobby

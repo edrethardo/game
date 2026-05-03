@@ -8,6 +8,7 @@
 #include "game/enemy_ai.h"
 #include "game/player.h"
 #include "game/combat.h"
+#include "game/game_constants.h"
 #include "world/raycast.h"
 #include "world/level_grid.h"
 #include <cmath>
@@ -36,6 +37,17 @@ static bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents,
         }
     }
     return false;
+}
+
+// Snap a ground entity's Y to the floor height of its current grid cell.
+// Called after XZ movement to keep entities from floating or sinking.
+static void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
+    u32 gx, gz;
+    if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
+        !LevelGridSystem::isSolid(grid, gx, gz)) {
+        f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
+        e.position.y = floorH + e.halfExtents.y;
+    }
 }
 
 static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt) {
@@ -185,19 +197,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     }
                 }
 
-                // Snap Y to floor height
-                u32 gx, gz;
-                if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
-                    !LevelGridSystem::isSolid(grid, gx, gz)) {
-                    f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
-                    e.position.y = floorH + e.halfExtents.y;
-                }
+                snapEntityToFloor(e, grid);
             } else {
                 // No enemies nearby — follow the player at a comfortable distance
                 Vec3 toPlayer = playerEye - e.position;
                 f32 pDist = length(toPlayer);
 
-                if (pDist > 4.0f) {
+                if (pDist > GameConst::NPC_FOLLOW_DIST) {
                     // Too far from player: move toward them
                     Vec3 flatDir = normalize(Vec3{toPlayer.x, 0.0f, toPlayer.z});
                     e.velocity.x = flatDir.x * e.moveSpeed;
@@ -209,13 +215,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.velocity = {0, 0, 0};
                 }
 
-                // Snap Y to floor height
-                u32 gx, gz;
-                if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
-                    !LevelGridSystem::isSolid(grid, gx, gz)) {
-                    f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
-                    e.position.y = floorH + e.halfExtents.y;
-                }
+                snapEntityToFloor(e, grid);
             }
 
             // Speech timer decay (clears bubble when expired)
@@ -326,13 +326,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.velocity.x = flatDir.x * e.moveSpeed;
                     e.velocity.z = flatDir.z * e.moveSpeed;
                 }
-                // Snap Y to floor
-                u32 gx, gz;
-                if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
-                    !LevelGridSystem::isSolid(grid, gx, gz)) {
-                    f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
-                    e.position.y = floorH + e.halfExtents.y;
-                }
+                snapEntityToFloor(e, grid);
             }
 
             entityMoveAndSlide(e, grid, dt);
@@ -439,7 +433,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         case AIState::DORMANT: {
             // Mimic: sits still disguised as a chest until player gets close
             e.velocity = {0, 0, 0};
-            if (dist <= 2.5f) {
+            if (dist <= GameConst::MIMIC_TRIGGER_DIST) {
                 // Player is trying to loot — spring to life!
                 e.aiState = AIState::CHASE;
                 e.attackAnimT = 0.4f; // surprise attack animation
