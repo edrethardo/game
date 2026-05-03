@@ -30,11 +30,16 @@ Texture TextureSystem::create(const u8* pixels, s32 width, s32 height, s32 chann
     glGenTextures(1, &tex.handle);
     glBindTexture(GL_TEXTURE_2D, tex.handle);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, fmt, GL_UNSIGNED_BYTE, pixels);
-    glGenerateMipmap(GL_TEXTURE_2D);
 
     // Nearest-neighbour for Barony pixel style
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    // Skip mipmaps for small textures (character skins) — mip blending destroys them
+    if (width >= 32 && height >= 32) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    } else {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 

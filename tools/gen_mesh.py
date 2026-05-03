@@ -181,16 +181,12 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
 
     Only emits faces at filled/empty boundaries (internal faces culled).
 
-    UVs are computed per-voxel: each voxel maps to a unique region of a skin
-    texture based on its (gx, gy) grid position. The front face (-Z) uses
-    the (gx, gy) position directly; side/top/bottom faces use the same UV
-    so the texture colors the entire voxel consistently. The skin texture
-    is expected to be a grid where pixel (x, y) colors voxel (x, height-1-y).
+    UVs map each voxel to a pixel based on (gx, gy). All faces of the same
+    voxel share the same color. Simple, stable, agent-friendly.
     """
     ox, oy, oz = offset
     hs = voxel_size * 0.5
 
-    # Compute grid bounds for UV normalization
     if not filled:
         return
     min_gx = min(p[0] for p in filled)
@@ -199,11 +195,9 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
     max_gy = max(p[1] for p in filled)
     grid_w = max_gx - min_gx + 1
     grid_h = max_gy - min_gy + 1
-    # Add 1-pixel margin to avoid bleeding at edges
     tex_w = max(grid_w, 1)
     tex_h = max(grid_h, 1)
 
-    # 6 face definitions: (dx,dy,dz), normal, 4 corner offsets from cell center
     face_defs = [
         ((0, 1, 0),  (0, 1, 0),  [(-1,1,-1), (1,1,-1), (1,1,1), (-1,1,1)]),
         ((0,-1, 0),  (0,-1, 0),  [(-1,-1,1), (1,-1,1), (1,-1,-1), (-1,-1,-1)]),
@@ -223,11 +217,9 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
         cy = oy + gy * voxel_size + hs
         cz = oz + gz * voxel_size + hs
 
-        # UV: map this voxel's (gx, gy) to a pixel center in the skin texture
-        # Pixel center avoids bleeding with GL_NEAREST
+        # One pixel per voxel column — all faces share the same UV
         u_center = (gx - min_gx + 0.5) / tex_w
         v_center = (gy - min_gy + 0.5) / tex_h
-        # Small inset so all 4 corners of the quad map to the same pixel
         eps = 0.01 / tex_w
         uv0 = mb.add_uv(u_center - eps, v_center - eps)
         uv1 = mb.add_uv(u_center + eps, v_center - eps)
@@ -235,8 +227,7 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0)):
         uv3 = mb.add_uv(u_center - eps, v_center + eps)
 
         for (dx, dy, dz), norm, corners in face_defs:
-            neighbor = (gx + dx, gy + dy, gz + dz)
-            if neighbor in filled:
+            if (gx + dx, gy + dy, gz + dz) in filled:
                 continue
 
             ni = normal_cache[norm]
@@ -315,18 +306,14 @@ def gen_humanoid(height=1.8):
     fill_box(-2, 12, -2, 5, 4, 4)
     # Jaw — 3x1x3, slightly narrower
     fill_box(-1, 11, -2, 3, 1, 3)
-    # Hollow out eye sockets — deep tunnels through the skull (2 voxels deep)
-    filled.discard((-1, 14, -2))
-    filled.discard((-1, 14, -1))
-    filled.discard((1, 14, -2))
-    filled.discard((1, 14, -1))
-    # Hollow out nose — goes through 2 layers
+    # Eye sockets — remove only front layer so the back is colored by skin texture
+    filled.discard((-1, 14, -2))  # left eye front
+    filled.discard((1, 14, -2))   # right eye front
+    # Keep (-1,14,-1) and (1,14,-1) — these are the visible eye voxels
+    # Nose — remove only front
     filled.discard((0, 13, -2))
-    filled.discard((0, 13, -1))
-    # Mouth opening — wide gap in the jaw
-    filled.discard((-1, 11, -2))
-    filled.discard((0, 11, -2))
-    filled.discard((1, 11, -2))
+    # Mouth — remove front layer only, back voxels stay for teeth coloring
+    filled.discard((0, 11, -2))   # center mouth gap
 
     # Neck — 1x1x1
     fill_box(0, 10, 0, 1, 1, 1)
@@ -404,9 +391,13 @@ def gen_spider(radius=0.6):
 
     # --- Head — 3x3x3 with eye bumps ---
     fill_box(-1, 1, -6, 3, 3, 3)
-    # Eye bumps on top
+    # Eye bumps on top of head
     filled.add((-1, 4, -5))
     filled.add((1, 4, -5))
+    # Eye stalks above head at UNIQUE (gx,gy) — gy=6 has no abdomen overlap
+    # so the eye color only shows on these voxels, not on the back
+    filled.add((-1, 6, -5))
+    filled.add((1, 6, -5))
 
     # --- Fangs — 2 voxels hanging down from head front ---
     filled.add((-1, 0, -7))
@@ -475,13 +466,9 @@ def gen_bat(wingspan=1.0):
     # Snout — 1 voxel protruding from front
     filled.add((0, 6, -2))
     filled.add((0, 7, -2))
-    # Hollow out eyes (deep — remove front AND second layer for see-through)
-    filled.discard((-1, 8, -1))
-    filled.discard((1, 8, -1))
-    filled.discard((-1, 8, 0))
-    filled.discard((1, 8, 0))
-    # Mouth opening
-    filled.discard((0, 6, -1))
+    # Eyes stay filled — colored bright by the skin texture instead of hollow
+    # (hollow sockets are invisible in dark dungeons)
+    # Mouth stays filled too — skin texture handles the color
 
     # --- Big pointy ears ---
     filled.add((-1, 9, 0))

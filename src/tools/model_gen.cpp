@@ -124,6 +124,17 @@ static const WeaponModelGen::WeaponDef s_builtinDefs[] = {
         }, 4
     },
 
+    {
+        "iron_maiden", "Iron maiden torture device",
+        {
+            {{-0.15f, 0.0f,  -0.12f}, {0.15f, 0.90f, 0.12f}},   // main body (coffin shape)
+            {{-0.17f, 0.0f,  -0.14f}, {-0.15f, 0.90f, 0.14f}},  // left hinge side
+            {{ 0.15f, 0.0f,  -0.14f}, { 0.17f, 0.90f, 0.14f}},  // right hinge side
+            {{-0.15f, 0.90f, -0.12f}, {0.15f, 0.95f, 0.12f}},   // top cap
+            {{-0.10f, 0.30f, -0.13f}, {0.10f, 0.70f, -0.12f}},  // front face (slightly protruding)
+        }, 5
+    },
+
     // ---- ARMOR / EQUIPMENT ----
     {
         "helmet", "Dome helm with brim",

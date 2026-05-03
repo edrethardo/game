@@ -285,6 +285,7 @@ void Engine::init() {
             {"archer",         "assets/meshes/archer.obj"},
             {"butcher",        "assets/meshes/butcher.obj"},
             {"cleaver",        "assets/meshes/cleaver.obj"},
+            {"iron_maiden",    "assets/meshes/iron_maiden.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -316,8 +317,9 @@ void Engine::init() {
     m_meshIdCleric   = findMeshByName("cleric");
     m_meshIdArcher   = findMeshByName("archer");
     m_meshIdBow      = findMeshByName("bow");
-    m_meshIdButcher  = findMeshByName("butcher");
-    m_meshIdCleaver  = findMeshByName("cleaver");
+    m_meshIdButcher    = findMeshByName("butcher");
+    m_meshIdCleaver    = findMeshByName("cleaver");
+    m_meshIdIronMaiden = findMeshByName("iron_maiden");
 
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
@@ -630,14 +632,77 @@ void Engine::startGame() {
         }
     }
 
-    // Boss enemy on every 5th floor — The Butcher, in the room before the exit
+    // Boss enemy on every 5th floor — The Butcher in a bloody expanded arena
     if ((m_currentFloor % 5) == 0 && dungeon.roomCount > 2) {
-        const DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
+        DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
+
+        // Expand the boss room to ~3x size by carving surrounding cells
+        u32 expandW = bossRoom.w * 3;
+        u32 expandD = bossRoom.d * 3;
+        // Center the expansion around the original room
+        s32 startX = static_cast<s32>(bossRoom.x) - static_cast<s32>(bossRoom.w);
+        s32 startZ = static_cast<s32>(bossRoom.z) - static_cast<s32>(bossRoom.d);
+        u8 bloodFloor = MaterialSystem::getIdByName("blood_floor");
+        u8 bloodWall  = MaterialSystem::getIdByName("blood_wall");
+        u8 bloodCeil  = MaterialSystem::getIdByName("blood_ceiling");
+        u8 floorQH = static_cast<u8>(bossRoom.floorHeight / 0.25f);
+
+        for (u32 ez = 0; ez < expandD; ez++) {
+            for (u32 ex = 0; ex < expandW; ex++) {
+                s32 gx = startX + static_cast<s32>(ex);
+                s32 gz = startZ + static_cast<s32>(ez);
+                if (gx < 1 || gz < 1 || static_cast<u32>(gx) >= m_grid.width - 1 ||
+                    static_cast<u32>(gz) >= m_grid.depth - 1) continue;
+                GridCell& cell = LevelGridSystem::getCell(m_grid, static_cast<u32>(gx), static_cast<u32>(gz));
+                // Carve out the cell (make it walkable)
+                cell.flags = CELL_FLOOR | CELL_CEILING;
+                cell.floorHeight = floorQH;
+                cell.ceilingHeight = 16; // 4.0m ceiling for tall boss
+                cell.floorMaterialId = bloodFloor;
+                cell.wallMaterialId = bloodWall;
+                cell.ceilMaterialId = bloodCeil;
+            }
+        }
+
+        // Update the room metadata to reflect expanded size
+        bossRoom.x = (startX > 0) ? static_cast<u32>(startX) : 1;
+        bossRoom.z = (startZ > 0) ? static_cast<u32>(startZ) : 1;
+        bossRoom.w = expandW;
+        bossRoom.d = expandD;
+
+        // Rebuild level mesh to include the expanded bloody room
+        m_sectionCount = LevelMeshSystem::buildAll(m_grid, m_sections, MAX_LEVEL_SECTIONS);
+
+        // Spawn iron maidens in the corners of the boss room
+        u8 ironMaidenMesh = m_meshIdIronMaiden;
+        if (ironMaidenMesh > 0) {
+            Vec3 corners[] = {
+                {(bossRoom.x + 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_grid.cellSize},
+                {(bossRoom.x + bossRoom.w - 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_grid.cellSize},
+                {(bossRoom.x + 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + bossRoom.d - 2) * m_grid.cellSize},
+                {(bossRoom.x + bossRoom.w - 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + bossRoom.d - 2) * m_grid.cellSize},
+            };
+            for (u32 c = 0; c < 4; c++) {
+                // Iron maidens as static entities (no AI, no movement)
+                EntityHandle ih = EntitySystem::spawn(m_entities,
+                    corners[c] + Vec3{0, 0.45f, 0}, {0.2f, 0.45f, 0.15f}, false,
+                    9999.0f, 0.0f, 0.0f, 0.0f, 999.0f, 0.0f);
+                Entity* prop = handleGet(m_entities, ih);
+                if (prop) {
+                    prop->meshId = ironMaidenMesh;
+                    prop->materialId = MaterialSystem::getIdByName("blood_wall");
+                    prop->enemyType = EnemyType::GENERIC;
+                    prop->aiState = AIState::DEAD; // never moves or attacks
+                    prop->flags &= ~ENT_DEAD;      // but don't trigger death behavior
+                    prop->deathTimer = 999.0f;      // never despawn
+                }
+            }
+        }
+
+        // Spawn The Butcher in the center
         f32 bx = (bossRoom.x + bossRoom.w * 0.5f) * m_grid.cellSize;
         f32 bz = (bossRoom.z + bossRoom.d * 0.5f) * m_grid.cellSize;
         f32 by = bossRoom.floorHeight;
-
-        // The Butcher: massive HP, high damage, large, slow but deadly
         f32 floorMult = 1.0f + (m_currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
         EntityHandle bh = EntitySystem::spawn(m_entities,
             Vec3{bx, by + 1.25f, bz}, {0.8f, 1.25f, 0.8f}, false,
@@ -652,7 +717,7 @@ void Engine::startGame() {
             boss->speechText = "FRESH MEAT!";
             boss->speechTimer = 6.0f;
         }
-        LOG_INFO("Spawned The Butcher on floor %u", m_currentFloor);
+        LOG_INFO("Spawned The Butcher in bloody arena on floor %u (%ux%u cells)", m_currentFloor, expandW, expandD);
     }
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
