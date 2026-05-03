@@ -1476,9 +1476,32 @@ void Engine::updatePlayerPickup() {
     if (Input::isKeyPressed(SDL_SCANCODE_E)) {
         ItemInstance picked;
         if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
-            // Safety: skip any globe that slipped through auto-pickup
             if (!isGlobe(picked)) {
-                if (!Inventory::addToBackpack(m_inventories[0], picked)) {
+                if (Inventory::addToBackpack(m_inventories[0], picked)) {
+                    // Auto-equip first weapon; assign subsequent weapons to quickbar
+                    if (picked.defId < m_itemDefCount &&
+                        m_itemDefs[picked.defId].slot == ItemSlot::WEAPON) {
+                        // Find which backpack slot it landed in
+                        u8 bpIdx = 0xFF;
+                        for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+                            if (m_inventories[0].backpack[bi].uid == picked.uid) {
+                                bpIdx = bi;
+                                break;
+                            }
+                        }
+                        if (bpIdx != 0xFF) {
+                            const ItemInstance& eqWpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                            if (isItemEmpty(eqWpn)) {
+                                // No weapon equipped — auto-equip and assign to slot 0
+                                Inventory::equip(m_inventories[0], bpIdx, m_itemDefs);
+                                Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                            } else {
+                                // Already have a weapon — assign to quickbar
+                                Quickbar::assignItem(m_quickbars[0], m_inventories[0], bpIdx);
+                            }
+                        }
+                    }
+                } else {
                     // Backpack full: drop item at player's feet
                     WorldItemSystem::spawn(m_worldItems, picked,
                         m_localPlayer.position + Vec3{0, 0.5f, 0});
