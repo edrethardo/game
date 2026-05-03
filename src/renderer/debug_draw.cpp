@@ -62,13 +62,15 @@ void DebugDraw::clear() {
 }
 
 void DebugDraw::line(Vec3 start, Vec3 end, Vec3 color) {
-    if (!s_enabled || s_lineCount >= MAX_DEBUG_LINES) return;
+    // Always accept lines — game effects (portals, fire, sparks) need this
+    if (s_lineCount >= MAX_DEBUG_LINES) return;
     s_verts[s_lineCount * 2 + 0] = {start, color};
     s_verts[s_lineCount * 2 + 1] = {end,   color};
     s_lineCount++;
 }
 
 void DebugDraw::box(const AABB& b, Vec3 color) {
+    if (!s_enabled) return; // boxes are debug-only, toggled by F1
     Vec3 mn = b.min, mx = b.max;
     // Bottom face
     line({mn.x,mn.y,mn.z},{mx.x,mn.y,mn.z},color);
@@ -99,7 +101,7 @@ void DebugDraw::cross(Vec3 pos, f32 size, Vec3 color) {
 }
 
 void DebugDraw::flush(const Mat4& viewProjection) {
-    if (!s_enabled || !s_vao || !s_shader.program || s_lineCount == 0) return;
+    if (!s_vao || !s_shader.program || s_lineCount == 0) return;
 
     glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, s_lineCount * 2 * sizeof(DebugVertex), s_verts);

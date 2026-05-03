@@ -342,9 +342,16 @@ void Engine::init() {
     // Splash effect callback — spawns fire VFX at impact point
     ProjectileSystem::setSplashCallback([](Vec3 position, f32 radius) {
         if (!s_engine) return;
+        // Snap fire effect to floor level so it doesn't render underground
+        u32 gx, gz;
+        Vec3 fxPos = position;
+        if (LevelGridSystem::worldToGrid(s_engine->m_grid, position, gx, gz) &&
+            !LevelGridSystem::isSolid(s_engine->m_grid, gx, gz)) {
+            fxPos.y = LevelGridSystem::getFloorHeight(s_engine->m_grid, gx, gz) + 0.1f;
+        }
         for (u32 i = 0; i < Engine::MAX_FIRE_FX; i++) {
             if (!s_engine->m_fireFX[i].active) {
-                s_engine->m_fireFX[i] = {position, radius, 1.0f, true};
+                s_engine->m_fireFX[i] = {fxPos, radius, 1.0f, true};
                 break;
             }
         }
@@ -1290,16 +1297,26 @@ void Engine::singleplayerUpdate(f32 dt) {
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         Entity& e = m_entities.entities[i];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        // Friendly NPCs don't push the player — they yield instead
+        if (e.flags & ENT_FRIENDLY) continue;
         AABB entBox = entityAABB(e);
         if (CombatQuery::aabbOverlap(playerBox, entBox)) {
             Vec3 toPlayer = m_localPlayer.position - e.position;
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
+                // Try the push, but reject it if it lands inside a wall
+                Vec3 saved = m_localPlayer.position;
                 if (pushX < pushZ)
                     m_localPlayer.position.x += (toPlayer.x > 0) ? pushX : -pushX;
                 else
                     m_localPlayer.position.z += (toPlayer.z > 0) ? pushZ : -pushZ;
+                // Validate — revert if new position is inside solid geometry
+                u32 gx, gz;
+                if (LevelGridSystem::worldToGrid(m_grid, m_localPlayer.position, gx, gz) &&
+                    LevelGridSystem::isSolid(m_grid, gx, gz)) {
+                    m_localPlayer.position = saved;
+                }
             }
         }
     }
@@ -1416,16 +1433,23 @@ void Engine::serverUpdate(f32 dt) {
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         Entity& e = m_entities.entities[i];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
         AABB entBox = entityAABB(e);
         if (CombatQuery::aabbOverlap(playerBox, entBox)) {
             Vec3 toPlayer = m_localPlayer.position - e.position;
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
+                Vec3 saved = m_localPlayer.position;
                 if (pushX < pushZ)
                     m_localPlayer.position.x += (toPlayer.x > 0) ? pushX : -pushX;
                 else
                     m_localPlayer.position.z += (toPlayer.z > 0) ? pushZ : -pushZ;
+                u32 gx, gz;
+                if (LevelGridSystem::worldToGrid(m_grid, m_localPlayer.position, gx, gz) &&
+                    LevelGridSystem::isSolid(m_grid, gx, gz)) {
+                    m_localPlayer.position = saved;
+                }
             }
         }
     }
@@ -1557,21 +1581,9 @@ void Engine::handleWeaponFire(f32 dt) {
             Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
                                     9.8f, 3.0f, wpn.damage * 0.6f);
         } else {
-            Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
-        }
-        // Wand weapons shoot lightning spark projectiles
-        if (isWand) {
-            // Tag the most recently spawned projectile at eyePos
-            for (u32 pi = MAX_PROJECTILES; pi-- > 0;) {
-                Projectile& proj = m_projectiles.projectiles[pi];
-                if (proj.active && proj.fromPlayer && proj.projFlags == 0) {
-                    Vec3 d = proj.position - eyePos;
-                    if (lengthSq(d) < 0.1f) {
-                        proj.projFlags |= PROJ_SPARK;
-                        break;
-                    }
-                }
-            }
+            // Wand weapons get PROJ_SPARK flag for lightning bolt rendering
+            u8 flags = isWand ? PROJ_SPARK : 0;
+            Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
         }
         result.didFire = true;
     } break;
@@ -2182,46 +2194,46 @@ void Engine::render(f32 alpha) {
         }
     }
 
+    // Clear debug lines before game effects — portal, fire, sparks, loot glow
+    // all use DebugDraw::line and must not be wiped before flush
+    DebugDraw::clear();
+
     // Projectiles
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = projPool.projectiles[i];
         if (!p.active) continue;
 
         if (p.projFlags & PROJ_SPARK) {
-            // Lightning bolt: jagged line segments along the velocity direction
+            // Lightning orb: bright glowing cube with pulsing size
+            f32 pulse = 0.8f + 0.2f * sinf(p.lifetime * 20.0f);
+            f32 orbSize = p.radius * 3.0f * pulse; // larger than normal projectiles
+            Mat4 model = Mat4::translate(p.position)
+                       * Mat4::rotateY(p.lifetime * 12.0f) // spinning
+                       * Mat4::rotateX(p.lifetime * 8.0f)
+                       * Mat4::scale({orbSize, orbSize, orbSize});
+            AABB bounds = {
+                p.position - Vec3{orbSize, orbSize, orbSize},
+                p.position + Vec3{orbSize, orbSize, orbSize}
+            };
+            // Bright electric blue-white color
+            Vec4 sparkColor = {0.5f + pulse * 0.5f, 0.7f + pulse * 0.3f, 1.0f, 1.0f};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, sparkColor);
+
+            // Second smaller trailing orb behind the main one
             Vec3 vel = p.velocity;
             f32 spd = length(vel);
-            Vec3 dir = (spd > 0.01f) ? vel * (1.0f / spd) : Vec3{0, 0, -1};
-            // Perpendicular axes for jitter
-            Vec3 up = {0, 1, 0};
-            Vec3 right = normalize(cross(dir, up));
-            Vec3 perpUp = cross(right, dir);
-
-            // Draw 4-segment jagged bolt from projectile tail to head
-            static constexpr u32 BOLT_SEGS = 4;
-            f32 boltLen = 0.8f;
-            Vec3 prev = p.position - dir * boltLen * 0.5f;
-            // Use position as seed for consistent jitter per bolt
-            u32 seed = static_cast<u32>(p.position.x * 100 + p.position.z * 73 + p.lifetime * 200);
-            for (u32 s = 1; s <= BOLT_SEGS; s++) {
-                f32 t = static_cast<f32>(s) / BOLT_SEGS;
-                Vec3 base = p.position - dir * boltLen * 0.5f + dir * (boltLen * t);
-                if (s < BOLT_SEGS) {
-                    // Jitter sideways for zigzag look
-                    seed = seed * 1103515245u + 12345u;
-                    f32 jx = (static_cast<f32>((seed >> 8) & 0xFF) / 128.0f - 1.0f) * 0.12f;
-                    seed = seed * 1103515245u + 12345u;
-                    f32 jy = (static_cast<f32>((seed >> 8) & 0xFF) / 128.0f - 1.0f) * 0.12f;
-                    base = base + right * jx + perpUp * jy;
-                }
-                // Core bolt: bright white-blue
-                DebugDraw::line(prev, base, {0.6f, 0.7f, 1.0f});
-                // Glow: slightly offset second line
-                DebugDraw::line(prev + right * 0.02f, base + right * 0.02f, {0.3f, 0.4f, 1.0f});
-                prev = base;
+            if (spd > 0.01f) {
+                Vec3 dir = vel * (1.0f / spd);
+                Vec3 trailPos = p.position - dir * orbSize * 2.0f;
+                f32 trailSize = orbSize * 0.6f;
+                Mat4 trailModel = Mat4::translate(trailPos)
+                                * Mat4::rotateY(-p.lifetime * 15.0f)
+                                * Mat4::scale({trailSize, trailSize, trailSize});
+                AABB trailBounds = {trailPos - Vec3{trailSize,trailSize,trailSize},
+                                    trailPos + Vec3{trailSize,trailSize,trailSize}};
+                Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, trailModel, trailBounds,
+                                 {0.3f, 0.4f, 1.0f, 1.0f});
             }
-            // Small bright core at the tip
-            DebugDraw::line(p.position - dir * 0.05f, p.position + dir * 0.05f, {1.0f, 1.0f, 1.0f});
         } else {
             // Normal projectile: colored cube
             Mat4 model = Mat4::translate(p.position)
@@ -2348,13 +2360,30 @@ void Engine::render(f32 alpha) {
             }
         }
 
-        // Item mesh — use proper mesh, scaled to fit uniformly
+        // Item mesh — normalize size so all items render at consistent visual scale
         Mat4 model;
-        if (itemMesh != &m_cubeMesh) {
-            // Fit mesh into ITEM_SCALE box using its actual bounds
-            model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({renderScale, renderScale, renderScale});
+        if (itemMesh != &m_cubeMesh && !isGlobeItem && wi.item.defId < m_itemDefCount) {
+            const ItemDef& idef = m_itemDefs[wi.item.defId];
+            if (idef.meshId > 0 && idef.meshId < m_meshDefCount) {
+                // Scale mesh so its largest axis fills 0.6 units, then multiply by ITEM_SCALE
+                const AABB& mb = m_meshDefs[idef.meshId].bounds;
+                f32 maxDim = mb.max.y - mb.min.y;
+                f32 mw = mb.max.x - mb.min.x;
+                f32 md = mb.max.z - mb.min.z;
+                if (mw > maxDim) maxDim = mw;
+                if (md > maxDim) maxDim = md;
+                f32 normScale = (maxDim > 0.001f) ? (0.6f / maxDim) : 1.0f;
+                f32 finalScale = normScale * renderScale;
+                Vec3 mc = {(mb.min.x + mb.max.x) * 0.5f,
+                           (mb.min.y + mb.max.y) * 0.5f,
+                           (mb.min.z + mb.max.z) * 0.5f};
+                model = Mat4::translate(pos) * Mat4::rotateY(spin)
+                      * Mat4::scale({finalScale, finalScale, finalScale})
+                      * Mat4::translate({-mc.x, -mc.y, -mc.z});
+            } else {
+                model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({renderScale, renderScale, renderScale});
+            }
         } else {
-            // Cube fallback — globes use renderScale (0.4), other items use smaller 0.3 cube
             f32 cubeS = isGlobeItem ? renderScale : 0.3f;
             model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({cubeS, cubeS, cubeS});
         }
@@ -2433,8 +2462,7 @@ void Engine::render(f32 alpha) {
     Renderer::flush();
     }
 
-    // --- Debug overlay ---
-    DebugDraw::clear();
+    // --- Debug overlay (F1 toggle — boxes only, lines already accumulated above) ---
     if (DebugDraw::isEnabled()) {
         Vec3 feet = m_localPlayer.position;
         AABB playerBox = {

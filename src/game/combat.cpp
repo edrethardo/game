@@ -103,12 +103,13 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
 
 bool Combat::fireProjectile(const WeaponDef& weapon,
                              Vec3 eyePos, Vec3 forward,
-                             ProjectilePool& projectiles)
+                             ProjectilePool& projectiles,
+                             u8 extraFlags)
 {
-    f32 lifetime = 3.0f; // 3 second lifetime
+    f32 lifetime = 3.0f;
     ProjectileSystem::spawn(projectiles, eyePos, forward,
                             weapon.projectileSpeed, weapon.damage,
-                            weapon.projectileRadius, lifetime, true);
+                            weapon.projectileRadius, lifetime, true, extraFlags);
     return true;
 }
 

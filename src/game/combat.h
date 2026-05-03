@@ -40,10 +40,11 @@ namespace Combat {
                              const LevelGrid& grid,
                              EntityPool& pool);
 
-    // Spawn a projectile (returns true if spawned).
+    // Spawn a projectile (returns true if spawned). extraFlags sets projFlags bits (e.g. PROJ_SPARK).
     bool fireProjectile(const WeaponDef& weapon,
                         Vec3 eyePos, Vec3 forward,
-                        ProjectilePool& projectiles);
+                        ProjectilePool& projectiles,
+                        u8 extraFlags = 0);
 
     // Spawn a projectile with gravity and/or splash behavior (for molotov etc.)
     bool fireProjectile(const WeaponDef& weapon,

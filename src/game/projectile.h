@@ -49,7 +49,7 @@ namespace ProjectileSystem {
     void spawn(ProjectilePool& pool,
                Vec3 origin, Vec3 direction, f32 speed,
                f32 damage, f32 radius, f32 lifetime,
-               bool fromPlayer);
+               bool fromPlayer, u8 extraFlags = 0);
 
     // Update all projectiles: move, collide with grid and entities/player.
     void update(ProjectilePool& pool,

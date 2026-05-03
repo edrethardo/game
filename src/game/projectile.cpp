@@ -21,7 +21,7 @@ void ProjectileSystem::init(ProjectilePool& pool) {
 void ProjectileSystem::spawn(ProjectilePool& pool,
                               Vec3 origin, Vec3 direction, f32 speed,
                               f32 damage, f32 radius, f32 lifetime,
-                              bool fromPlayer)
+                              bool fromPlayer, u8 extraFlags)
 {
     // Find first inactive slot
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
@@ -33,6 +33,12 @@ void ProjectileSystem::spawn(ProjectilePool& pool,
             p.damage     = damage;
             p.lifetime   = lifetime;
             p.active     = true;
+            p.projFlags  = extraFlags;  // caller can set PROJ_SPARK etc.
+            p.gravity    = 0.0f;
+            p.splashRadius = 0.0f;
+            p.splashDamage = 0.0f;
+            p.subTimer   = 0.0f;
+            p.orbAngle   = 0.0f;
             p.fromPlayer = fromPlayer;
             pool.activeCount++;
             return;
