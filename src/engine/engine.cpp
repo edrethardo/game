@@ -818,59 +818,103 @@ void Engine::startGame() {
     // Init entities
     EntitySystem::init(m_entities);
 
-    // Spawn enemies procedurally in each room (skip room 0 = spawn room)
+    // Spawn enemies procedurally — themed variants + unique monsters per tier
     {
-        // Enemy type templates
         struct EnemyTemplate {
-            const char* type;
             f32 health, moveSpeed, detRange, atkRange, atkCool, damage;
             Vec3 halfExtents;
             bool flying;
+            u8 meshIdx;       // 0=skeleton, 1=bat, 2=spider, 3=human
+            EnemyType etype;
+            const char* matName;
+            u8 onHitEffect;   // 0=none, 1=poison, 2=slow, 3=burn, 4=freeze
+            f32 onHitDuration;
+            f32 onHitDps;     // for poison/burn
         };
-        static constexpr EnemyTemplate kEnemies[] = {
-            {"skeleton",
-             GameConst::SKELETON_HEALTH, GameConst::SKELETON_SPEED,
-             GameConst::SKELETON_DET_RANGE, GameConst::SKELETON_ATK_RANGE,
-             GameConst::SKELETON_ATK_COOL,  GameConst::SKELETON_DAMAGE,
-             {0.4f, 0.9f, 0.4f}, false},
-            {"bat",
-             GameConst::BAT_HEALTH,      GameConst::BAT_SPEED,
-             GameConst::BAT_DET_RANGE,   GameConst::BAT_ATK_RANGE,
-             GameConst::BAT_ATK_COOL,    GameConst::BAT_DAMAGE,
-             {0.5f, 0.4f, 0.4f}, true},
-            {"spider",
-             GameConst::SPIDER_HEALTH,   GameConst::SPIDER_SPEED,
-             GameConst::SPIDER_DET_RANGE, GameConst::SPIDER_ATK_RANGE,
-             GameConst::SPIDER_ATK_COOL,  GameConst::SPIDER_DAMAGE,
-             {0.5f, 0.3f, 0.5f}, false},
+
+        static constexpr u32 ENEMIES_PER_TIER = 5;
+
+        // Tier 1 (floors 1-10): Dungeon — standard + zombie (Diablo 1) + imp (Barony)
+        static const EnemyTemplate kTier1[] = {
+            {GameConst::SKELETON_HEALTH, GameConst::SKELETON_SPEED, GameConst::SKELETON_DET_RANGE,
+             GameConst::SKELETON_ATK_RANGE, GameConst::SKELETON_ATK_COOL, GameConst::SKELETON_DAMAGE,
+             {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "skeleton_skin", 0, 0, 0},
+            {GameConst::BAT_HEALTH, GameConst::BAT_SPEED, GameConst::BAT_DET_RANGE,
+             GameConst::BAT_ATK_RANGE, GameConst::BAT_ATK_COOL, GameConst::BAT_DAMAGE,
+             {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "bat_skin",      0, 0, 0},
+            {GameConst::SPIDER_HEALTH, GameConst::SPIDER_SPEED, GameConst::SPIDER_DET_RANGE,
+             GameConst::SPIDER_ATK_RANGE, GameConst::SPIDER_ATK_COOL, GameConst::SPIDER_DAMAGE,
+             {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "spider_skin",   0, 0, 0},
+            // Zombie (Diablo 1) — slow, tanky, human mesh
+            {70,  1.8f, 10, 2.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
+            // Imp (Barony) — small fast flying nuisance
+            {20,  7.0f, 16, 2.5f, 0.6f,  5, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
         };
+        // Tier 2 (floors 11-20): Catacombs — poison + ghoul (D2) + bone mage (Barony)
+        static const EnemyTemplate kTier2[] = {
+            {60, 3.0f, 14, 2.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
+            {35, 6.5f, 14, 2.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
+            {48, 4.2f, 12, 2.0f, 0.8f, 11, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
+            // Ghoul (D2) — fast melee, high damage, lower HP
+            {40, 4.5f, 14, 2.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
+            // Bone Mage (Barony) — ranged skeleton caster
+            {35, 2.5f, 16, 10.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
+        };
+        // Tier 3 (floors 21-30): Caverns — slow + broodmother (Barony) + stalker (HGL)
+        static const EnemyTemplate kTier3[] = {
+            {65, 3.2f, 15, 2.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
+            {38, 7.0f, 15, 2.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
+            {52, 4.8f, 13, 2.0f, 0.7f, 12, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
+            // Broodmother (Barony) — large slow spider, extra tanky
+            {90, 2.5f, 12, 2.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
+            // Stalker (HGL) — fast, stealthy humanoid
+            {45, 5.0f, 18, 2.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
+        };
+        // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
+        static const EnemyTemplate kTier4[] = {
+            {70, 3.5f, 16, 2.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
+            {40, 7.5f, 16, 2.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
+            {58, 5.0f, 14, 2.0f, 0.6f, 14, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
+            // Hellhound (D2) — fast charging beast, spider rig
+            {50, 6.0f, 16, 2.5f, 0.5f, 16, {0.5f,0.35f,0.5f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
+            // Demon (HGL) — ranged fire caster, humanoid
+            {55, 3.0f, 18, 12.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
+        };
+        // Tier 5 (floors 41-50): Void — freeze + shade (Barony) + void demon (HGL)
+        static const EnemyTemplate kTier5[] = {
+            {80, 3.8f, 18, 2.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
+            {45, 8.0f, 18, 2.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
+            {65, 5.5f, 16, 2.0f, 0.5f, 15, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
+            // Shade (Barony) — fast phasing humanoid, semi-transparent
+            {40, 5.5f, 20, 2.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
+            // Void Demon (HGL) — heavy tanky skeleton, high damage
+            {100, 2.5f, 16, 3.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
+        };
+
+        // Select tier based on current floor
+        const EnemyTemplate* tier = kTier1;
+        if      (m_currentFloor >= 41) tier = kTier5;
+        else if (m_currentFloor >= 31) tier = kTier4;
+        else if (m_currentFloor >= 21) tier = kTier3;
+        else if (m_currentFloor >= 11) tier = kTier2;
+
+        // meshIdx 3 = human mesh (used by zombies, ghouls, stalkers, demons, shades)
+        u8 meshLookup[] = {m_meshIdSkeleton, m_meshIdBat, m_meshIdSpider, m_meshIdHuman};
 
         for (u32 r = 1; r < dungeon.roomCount; r++) {
             const DungeonRoom& room = dungeon.rooms[r];
 
-            // Fewer enemies on floor 1, more on deeper floors
             u32 area = room.w * room.d;
             u32 enemyCount = (m_currentFloor == 1) ? 1 : (1 + (area / 20));
             if (enemyCount > 3) enemyCount = 3;
 
             for (u32 e = 0; e < enemyCount; e++) {
-                // Pick random enemy type
-                u32 typeIdx = static_cast<u32>(std::rand()) % 3;
-                const EnemyTemplate& tmpl = kEnemies[typeIdx];
+                u32 typeIdx = static_cast<u32>(std::rand()) % ENEMIES_PER_TIER;
+                const EnemyTemplate& tmpl = tier[typeIdx];
 
-                // Random position within room bounds
                 f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
                 f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
                 f32 spawnY = tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y);
-
-                // Resolve mesh ID using pre-cached IDs (avoids strcmp per spawn)
-                u8 meshId = 0, matId = 0;
-                if (typeIdx == 0)      meshId = m_meshIdSkeleton;
-                else if (typeIdx == 1) meshId = m_meshIdBat;
-                else if (typeIdx == 2) meshId = m_meshIdSpider;
-                char skinName[64];
-                std::snprintf(skinName, sizeof(skinName), "%s_skin", tmpl.type);
-                matId = MaterialSystem::getIdByName(skinName);
 
                 EntityHandle h = EntitySystem::spawn(m_entities,
                     Vec3{ex, spawnY, ez}, tmpl.halfExtents, tmpl.flying,
@@ -878,24 +922,31 @@ void Engine::startGame() {
                     tmpl.atkRange, tmpl.atkCool, tmpl.damage);
                 Entity* ent = handleGet(m_entities, h);
                 if (ent) {
-                    ent->meshId = meshId;
-                    ent->materialId = matId;
-
-                    // Set enemy type for limb animation (matches kEnemies[] order)
-                    static const EnemyType kEnemyTypes[] = {EnemyType::SKELETON, EnemyType::BAT, EnemyType::SPIDER};
-                    ent->enemyType = kEnemyTypes[typeIdx];
-
-                    // Scale enemy stats by floor level (GameConst::FLOOR_STAT_MULT per floor beyond first)
+                    ent->meshId = meshLookup[tmpl.meshIdx];
+                    ent->materialId = MaterialSystem::getIdByName(tmpl.matName);
+                    ent->enemyType = tmpl.etype;
                     ent->level = static_cast<u8>(m_currentFloor);
+
+                    // Floor scaling
                     f32 floorMult = 1.0f + (m_currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
                     ent->health    *= floorMult;
                     ent->maxHealth  = ent->health;
                     ent->damage    *= floorMult;
 
-                    // Skeletons carry random melee weapons (sword/dagger/axe)
+                    // On-hit status effect
+                    ent->onHitEffect   = tmpl.onHitEffect;
+                    ent->onHitDuration = tmpl.onHitDuration;
+                    ent->onHitDps      = tmpl.onHitDps * floorMult;
+
+                    // Weapon assignment — ranged enemies get staves/bows, melee get blades
                     if (ent->enemyType == EnemyType::SKELETON) {
-                        u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};
-                        ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
+                        if (ent->attackRange > 5.0f) {
+                            // Ranged caster — give a staff or wand
+                            ent->weaponMeshId = m_meshIdStaff;
+                        } else {
+                            u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};
+                            ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
+                        }
                     }
                 }
             }
@@ -1557,6 +1608,19 @@ void Engine::updateLobby(f32 dt) {
 // Singleplayer update (unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::singleplayerUpdate(f32 dt) {
+    // Tick player status effects (poison, burn, freeze)
+    if (m_localPlayer.poisonTimer > 0.0f) {
+        m_localPlayer.poisonTimer -= dt;
+        m_localPlayer.health -= m_localPlayer.poisonDps * dt;
+    }
+    if (m_localPlayer.burnTimer > 0.0f) {
+        m_localPlayer.burnTimer -= dt;
+        m_localPlayer.health -= m_localPlayer.burnDps * dt;
+    }
+    if (m_localPlayer.freezeTimer > 0.0f) {
+        m_localPlayer.freezeTimer -= dt;
+    }
+
     // Check for player death — transition to GAME_OVER immediately
     if (m_localPlayer.health <= 0.0f) {
         m_gameState = GameState::GAME_OVER;

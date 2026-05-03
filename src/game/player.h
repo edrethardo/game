@@ -25,6 +25,11 @@ struct Player {
     f32  damageFlashTimer = 0.0f;
     f32  hitShakeTimer    = 0.0f;  // screen shake on taking damage
     f32  slowTimer        = 0.0f;  // movement speed debuff countdown
+    f32  poisonTimer      = 0.0f;
+    f32  poisonDps        = 0.0f;
+    f32  burnTimer        = 0.0f;
+    f32  burnDps          = 0.0f;
+    f32  freezeTimer      = 0.0f;  // halves movement speed
 
     // Soft target lock
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)

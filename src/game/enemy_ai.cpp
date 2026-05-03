@@ -136,6 +136,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
         if (isFriendly) {
+            // Freeze halves friendly NPC speed too
+            f32 npcSpeed = e.moveSpeed;
+            if (e.freezeTimer > 0.0f) npcSpeed *= 0.5f;
+
             // Find closest hostile enemy within detection range
             f32 bestEnemyDist = e.detectionRange;
             u16 bestEnemyIdx = 0xFFFF;
@@ -159,7 +163,81 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             e.targetEntityIdx = bestEnemyIdx;
 
-            if (bestEnemyIdx != 0xFFFF) {
+            // ---------------------------------------------------------------
+            // Cleric special: prioritize healing wounded allies over fighting.
+            // Scan for any friendly entity (or player) below 50% HP.
+            // ---------------------------------------------------------------
+            bool doingHeal = false;
+            if (e.npcClass == NpcClass::CLERIC) {
+                // Check player health
+                f32 healRange = 6.0f;
+                Vec3 healTarget = {0,0,0};
+                u16  healIdx = 0xFFFF;
+                bool healPlayer = false;
+
+                if (player.health < player.maxHealth * 0.5f) {
+                    f32 pDist = length(playerEye - e.position);
+                    if (pDist < e.detectionRange) {
+                        healTarget = playerEye;
+                        healPlayer = true;
+                    }
+                }
+                // Check friendly NPCs
+                if (!healPlayer) {
+                    f32 bestHurt = 999.0f;
+                    for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                        u32 nIdx = pool.activeList[ni];
+                        Entity& npc2 = pool.entities[nIdx];
+                        if (nIdx == i) continue; // skip self
+                        if (!(npc2.flags & ENT_FRIENDLY)) continue;
+                        if (npc2.flags & ENT_DEAD) continue;
+                        if (npc2.health >= npc2.maxHealth * 0.5f) continue;
+                        f32 d2 = length(npc2.position - e.position);
+                        if (d2 < bestHurt && d2 < e.detectionRange) {
+                            bestHurt = d2;
+                            healIdx = static_cast<u16>(nIdx);
+                            healTarget = npc2.position + Vec3{0, npc2.halfExtents.y, 0};
+                        }
+                    }
+                }
+
+                if (healPlayer || healIdx != 0xFFFF) {
+                    doingHeal = true;
+                    f32 hDist = length(healTarget - e.position);
+                    if (hDist > 0.001f) e.yaw = atan2f(-(healTarget.x - e.position.x), -(healTarget.z - e.position.z));
+
+                    if (hDist > healRange) {
+                        // Move toward heal target
+                        Vec3 flatDir = normalize(Vec3{healTarget.x - e.position.x, 0, healTarget.z - e.position.z});
+                        e.velocity.x = flatDir.x * npcSpeed;
+                        e.velocity.z = flatDir.z * npcSpeed;
+                        entityMoveAndSlide(e, grid, dt);
+                    } else {
+                        // In range — heal on cooldown
+                        e.velocity = {0,0,0};
+                        e.attackTimer -= dt;
+                        if (e.attackTimer <= 0.0f) {
+                            e.attackTimer = 3.0f; // heal cooldown
+                            e.attackAnimT = 0.3f;
+                            f32 healAmt = 8.0f + e.level * 0.5f;
+                            if (healPlayer) {
+                                player.health += healAmt;
+                                if (player.health > player.maxHealth) player.health = player.maxHealth;
+                            } else if (healIdx < MAX_ENTITIES) {
+                                Entity& ht = pool.entities[healIdx];
+                                ht.health += healAmt;
+                                if (ht.health > ht.maxHealth) ht.health = ht.maxHealth;
+                            }
+                            static const char* healLines[] = {"Heal!", "Light guide you!", "Hold on!"};
+                            e.speechText = healLines[std::rand() % 3];
+                            e.speechTimer = 2.5f;
+                        }
+                    }
+                    snapEntityToFloor(e, grid);
+                }
+            }
+
+            if (!doingHeal && bestEnemyIdx != 0xFFFF) {
                 // Chase and attack the nearest hostile enemy
                 Vec3 toEnemy = enemyPos - e.position;
                 f32 eDist = length(toEnemy);
@@ -170,18 +248,42 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.yaw = atan2f(-dirToEnemy.x, -dirToEnemy.z);
                 }
 
-                // Ranged NPCs stop further away than melee
                 f32 engageRange = e.attackRange;
 
-                if (eDist > engageRange) {
-                    // Chase: move toward enemy on XZ plane
-                    Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0.0f, dirToEnemy.z});
-                    e.velocity.x = flatDir.x * e.moveSpeed;
-                    e.velocity.z = flatDir.z * e.moveSpeed;
+                // Archer kiting: if enemy is too close, back away while shooting
+                bool kiting = false;
+                if (e.npcClass == NpcClass::ARCHER && eDist < 4.0f && eDist > 0.1f) {
+                    Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
+                    e.velocity.x = awayDir.x * npcSpeed;
+                    e.velocity.z = awayDir.z * npcSpeed;
                     entityMoveAndSlide(e, grid, dt);
-                } else {
+                    kiting = true;
+                    // Still fire while retreating (fall through to attack below)
+                }
+
+                // Rogue flanking: offset approach by 90° from player→enemy line
+                Vec3 moveTarget = enemyPos;
+                if (e.npcClass == NpcClass::ROGUE && eDist > engageRange * 0.5f) {
+                    Vec3 playerToEnemy = normalize(Vec3{enemyPos.x - playerEye.x, 0, enemyPos.z - playerEye.z});
+                    // Perpendicular offset
+                    Vec3 flankOffset = {-playerToEnemy.z, 0, playerToEnemy.x};
+                    moveTarget = enemyPos + flankOffset * 2.0f;
+                }
+
+                if (!kiting && eDist > engageRange) {
+                    // Chase toward target (or flank position for rogues)
+                    Vec3 toMoveTarget = moveTarget - e.position;
+                    Vec3 flatDir = normalize(Vec3{toMoveTarget.x, 0.0f, toMoveTarget.z});
+                    e.velocity.x = flatDir.x * npcSpeed;
+                    e.velocity.z = flatDir.z * npcSpeed;
+                    entityMoveAndSlide(e, grid, dt);
+                } else if (!kiting) {
                     // In range — attack using weapon type
                     e.velocity = {0, 0, 0};
+                }
+
+                // Attack on cooldown (archers attack while kiting too)
+                if (eDist <= engageRange || kiting) {
                     e.attackTimer -= dt;
                     if (e.attackTimer <= 0.0f) {
                         e.attackTimer = e.attackCooldown;
@@ -192,21 +294,34 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             Vec3 eyePos = e.position + Vec3{0, e.halfExtents.y, 0};
 
                             if (e.npcWeaponType == WeaponType::PROJECTILE) {
-                                // Ranged NPCs fire projectiles toward the enemy
                                 Vec3 targetCenter = target.position + Vec3{0, target.halfExtents.y, 0};
                                 Vec3 fireDir = normalize(targetCenter - eyePos);
                                 f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
                                 f32 radius = e.npcProjectileRadius > 0.0f ? e.npcProjectileRadius : 0.1f;
-                                // Spawn a projectile (fromPlayer=false so it hits enemies)
+                                // Mage projectiles get splash for area denial
+                                u8 extraFlags = (e.npcClass == NpcClass::MAGE) ? PROJ_SPLASH : 0;
                                 ProjectileSystem::spawn(projectiles, eyePos,
-                                    fireDir, speed, e.damage, radius, 3.0f, true);
+                                    fireDir, speed, e.damage, radius, 3.0f, true, extraFlags);
+                                // Set splash params for mage projectiles
+                                if (e.npcClass == NpcClass::MAGE) {
+                                    for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+                                        Projectile& proj = projectiles.projectiles[pi];
+                                        if (proj.active && proj.fromPlayer &&
+                                            (proj.projFlags & PROJ_SPLASH) && proj.splashRadius == 0.0f) {
+                                            Vec3 d = proj.position - eyePos;
+                                            if (lengthSq(d) < 0.5f) {
+                                                proj.splashRadius = 1.5f;
+                                                proj.splashDamage = e.damage * 0.5f;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
-                                // Melee: direct damage like before
                                 EntityHandle th = {bestEnemyIdx, target.generation};
                                 Combat::applyDamage(pool, th, e.damage);
                             }
 
-                            // Random attack speech (1-in-5 chance)
                             if ((std::rand() % 5) == 0) {
                                 static const char* attackLines[] = {"Take that!", "Die, beast!", "For glory!"};
                                 e.speechText = attackLines[std::rand() % 3];
@@ -217,7 +332,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
 
                 snapEntityToFloor(e, grid);
-            } else {
+            } else if (!doingHeal) {
                 // No enemies nearby — follow the player at a comfortable distance
                 Vec3 toPlayer = playerEye - e.position;
                 f32 pDist = length(toPlayer);
@@ -225,8 +340,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 if (pDist > GameConst::NPC_FOLLOW_DIST) {
                     // Too far from player: move toward them
                     Vec3 flatDir = normalize(Vec3{toPlayer.x, 0.0f, toPlayer.z});
-                    e.velocity.x = flatDir.x * e.moveSpeed;
-                    e.velocity.z = flatDir.z * e.moveSpeed;
+                    e.velocity.x = flatDir.x * npcSpeed;
+                    e.velocity.z = flatDir.z * npcSpeed;
                     e.yaw = atan2f(-flatDir.x, -flatDir.z);
                     entityMoveAndSlide(e, grid, dt);
                 } else {
@@ -279,7 +394,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
                 Vec3 toNpc = npc.position - e.position;
                 f32 npcDist = length(toNpc);
-                if (npcDist < bestNpcDist && npcDist <= e.detectionRange) {
+                // Paladin taunt: appears half as far away so enemies prefer targeting them
+                f32 effectiveDist = (npc.npcClass == NpcClass::PALADIN) ? npcDist * 0.5f : npcDist;
+                if (effectiveDist < bestNpcDist && npcDist <= e.detectionRange) {
                     bestNpcDist = npcDist;
                     targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
                     targetDist = npcDist;
@@ -298,6 +415,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         Vec3 dirToTarget = (tDist > 0.001f) ? toTarget * (1.0f / tDist) : Vec3{0,0,0};
 
         bool isBat = (e.flags & ENT_FLYING) != 0;
+
+        // Effective speed (halved by freeze)
+        f32 effectiveSpeed = e.moveSpeed;
+        if (e.freezeTimer > 0.0f) effectiveSpeed *= 0.5f;
 
         // Face toward target (yaw only) — except during flyby
         if (tDist > 0.001f && e.aiState != AIState::FLYBY) {
@@ -613,14 +734,14 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 f32 flyDist = length(toFly);
                 if (flyDist > 0.01f) {
                     Vec3 flyDir = toFly * (1.0f / flyDist);
-                    e.velocity = flyDir * e.moveSpeed;
+                    e.velocity = flyDir * effectiveSpeed;
                 }
             } else {
                 // Ground movement: XZ only toward target
                 Vec3 flatDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
                 if (lengthSq(flatDir) > 0.001f) {
                     // Boss sprints 2.5x faster after 1.5s LOS
-                    f32 speed = e.moveSpeed;
+                    f32 speed = effectiveSpeed;
                     if (e.enemyType == EnemyType::BOSS && e.flybyTarget.x > 1.5f) {
                         speed *= 2.5f;
                     }
@@ -711,16 +832,26 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.attackTimer = e.attackCooldown;
                 e.attackAnimT = 0.3f; // trigger attack animation
 
-                // Damage NPC target if we're targeting one, otherwise damage player
+                // Damage NPC target if we're targeting one, otherwise damage player.
+                // Also apply on-hit status effects (poison/slow/burn/freeze).
                 if (targetDist <= e.attackRange * 1.1f) {
                     if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
                         Entity& npcTarget = pool.entities[e.targetEntityIdx];
                         if (!(npcTarget.flags & ENT_DEAD)) {
                             EntityHandle th = {e.targetEntityIdx, npcTarget.generation};
                             Combat::applyDamage(pool, th, e.damage);
+                            // Apply on-hit effect to NPC
+                            if (e.onHitEffect == 1) { npcTarget.poisonTimer = e.onHitDuration; npcTarget.poisonDps = e.onHitDps; }
+                            if (e.onHitEffect == 3) { npcTarget.burnTimer   = e.onHitDuration; npcTarget.burnDps   = e.onHitDps; }
+                            if (e.onHitEffect == 4) { npcTarget.freezeTimer = e.onHitDuration; }
                         }
                     } else if (hasLOS(e, player, grid)) {
                         Combat::applyDamageToPlayer(player, e.damage);
+                        // Apply on-hit effect to player
+                        if (e.onHitEffect == 1) { player.poisonTimer = e.onHitDuration; player.poisonDps = e.onHitDps; }
+                        if (e.onHitEffect == 2) { player.slowTimer   = e.onHitDuration; }
+                        if (e.onHitEffect == 3) { player.burnTimer   = e.onHitDuration; player.burnDps   = e.onHitDps; }
+                        if (e.onHitEffect == 4) { player.freezeTimer = e.onHitDuration; }
                     }
                 }
             }

@@ -73,6 +73,31 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
 
         if (e.flashTimer > 0.0f) e.flashTimer -= dt;
 
+        // Tick status effects (poison/burn deal DoT, freeze checked at move time)
+        if (e.poisonTimer > 0.0f) {
+            e.poisonTimer -= dt;
+            e.health -= e.poisonDps * dt;
+            if (e.health <= 0.0f && !(e.flags & ENT_DEAD)) {
+                e.health = 0.0f;
+                e.flags |= ENT_DEAD;
+                e.aiState = AIState::DEAD;
+                e.deathTimer = 1.0f;
+                e.velocity = {0,0,0};
+            }
+        }
+        if (e.burnTimer > 0.0f) {
+            e.burnTimer -= dt;
+            e.health -= e.burnDps * dt;
+            if (e.health <= 0.0f && !(e.flags & ENT_DEAD)) {
+                e.health = 0.0f;
+                e.flags |= ENT_DEAD;
+                e.aiState = AIState::DEAD;
+                e.deathTimer = 1.0f;
+                e.velocity = {0,0,0};
+            }
+        }
+        if (e.freezeTimer > 0.0f) e.freezeTimer -= dt;
+
         if (e.flags & ENT_DEAD) {
             e.deathTimer -= dt;
             if (e.deathTimer <= 0.0f) {

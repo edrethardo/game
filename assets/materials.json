@@ -58,6 +58,30 @@
     { "id": 50, "name": "prop_bone",              "tint": [0.80, 0.75, 0.65, 1.0] },
     { "id": 51, "name": "prop_web",               "tint": [0.85, 0.85, 0.80, 0.7] },
     { "id": 52, "name": "prop_brazier",           "tint": [0.70, 0.40, 0.15, 1.0] },
-    { "id": 53, "name": "prop_brazier_fire",      "tint": [1.00, 0.55, 0.10, 1.0] }
+    { "id": 53, "name": "prop_brazier_fire",      "tint": [1.00, 0.55, 0.10, 1.0] },
+
+    { "id": 54, "name": "catacomb_skeleton",      "tint": [0.55, 0.65, 0.40, 1.0] },
+    { "id": 55, "name": "catacomb_bat",            "tint": [0.45, 0.55, 0.35, 1.0] },
+    { "id": 56, "name": "catacomb_spider",         "tint": [0.50, 0.60, 0.38, 1.0] },
+    { "id": 57, "name": "cavern_skeleton",         "tint": [0.50, 0.40, 0.60, 1.0] },
+    { "id": 58, "name": "cavern_bat",              "tint": [0.40, 0.30, 0.55, 1.0] },
+    { "id": 59, "name": "cavern_spider",           "tint": [0.45, 0.35, 0.58, 1.0] },
+    { "id": 60, "name": "hellforge_skeleton",      "tint": [0.85, 0.40, 0.15, 1.0] },
+    { "id": 61, "name": "hellforge_bat",           "tint": [0.80, 0.35, 0.10, 1.0] },
+    { "id": 62, "name": "hellforge_spider",        "tint": [0.75, 0.30, 0.12, 1.0] },
+    { "id": 63, "name": "void_skeleton",           "tint": [0.20, 0.18, 0.35, 1.0] },
+    { "id": 64, "name": "void_bat",                "tint": [0.15, 0.15, 0.30, 1.0] },
+    { "id": 65, "name": "void_spider",             "tint": [0.18, 0.16, 0.32, 1.0] },
+
+    { "id": 66, "name": "zombie_skin",             "tint": [0.40, 0.50, 0.35, 1.0] },
+    { "id": 67, "name": "imp_skin",                "tint": [0.70, 0.30, 0.25, 1.0] },
+    { "id": 68, "name": "ghoul_skin",              "tint": [0.50, 0.55, 0.40, 1.0] },
+    { "id": 69, "name": "bone_mage_skin",          "tint": [0.60, 0.55, 0.80, 1.0] },
+    { "id": 70, "name": "broodmother_skin",        "tint": [0.35, 0.55, 0.25, 1.0] },
+    { "id": 71, "name": "stalker_skin",            "tint": [0.30, 0.28, 0.40, 1.0] },
+    { "id": 72, "name": "hellhound_skin",          "tint": [0.80, 0.35, 0.10, 1.0] },
+    { "id": 73, "name": "demon_skin",              "tint": [0.75, 0.20, 0.15, 1.0] },
+    { "id": 74, "name": "shade_skin",              "tint": [0.15, 0.15, 0.25, 0.8] },
+    { "id": 75, "name": "void_demon_skin",         "tint": [0.25, 0.20, 0.45, 1.0] }
   ]
 }

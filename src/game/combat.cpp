@@ -16,6 +16,9 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
     if (!e) return;
     if (e->flags & ENT_DEAD) return;
 
+    // Paladin passive: 25% damage reduction
+    if (e->npcClass == NpcClass::PALADIN) damage *= 0.75f;
+
     e->health -= damage;
     e->flashTimer = 0.12f;
 

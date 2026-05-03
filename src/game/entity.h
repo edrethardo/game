@@ -103,6 +103,19 @@ struct Entity {
     f32  animTimer    = 0.0f;  // continuous timer for procedural animation
     f32  attackAnimT  = 0.0f;  // brief attack animation countdown
 
+    // Status effects (timer > 0 = active, ticked down each frame)
+    f32  poisonTimer    = 0.0f;
+    f32  poisonDps      = 0.0f;  // damage per second while poisoned
+    f32  burnTimer      = 0.0f;
+    f32  burnDps        = 0.0f;
+    f32  freezeTimer    = 0.0f;  // halves movement speed
+
+    // On-hit status effect this entity applies to targets (0=none)
+    // 1=poison, 2=slow, 3=burn, 4=freeze
+    u8   onHitEffect    = 0;
+    f32  onHitDuration  = 0.0f;
+    f32  onHitDps       = 0.0f;  // for poison/burn
+
     // Feedback
     f32  flashTimer = 0.0f;
     f32  deathTimer = 0.0f;
