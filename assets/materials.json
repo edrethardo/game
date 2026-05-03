@@ -26,6 +26,38 @@
     { "id": 23, "name": "mage_skin",            "texture": "mage_skin_42.png" },
     { "id": 24, "name": "rogue_skin",           "texture": "rogue_skin_42.png" },
     { "id": 25, "name": "weapon_staff",          "tint": [0.45, 0.3, 0.15, 1.0] },
-    { "id": 26, "name": "paladin_skin",          "texture": "paladin_skin_42.png" }
+    { "id": 26, "name": "paladin_skin",          "texture": "paladin_skin_42.png" },
+    { "id": 27, "name": "boss_lich",             "tint": [0.35, 0.25, 0.70, 1.0] },
+    { "id": 28, "name": "boss_spider_queen",     "tint": [0.20, 0.55, 0.15, 1.0] },
+    { "id": 29, "name": "boss_demon_knight",     "tint": [0.75, 0.25, 0.10, 1.0] },
+    { "id": 30, "name": "boss_arch_mage",        "tint": [0.50, 0.20, 0.80, 1.0] },
+    { "id": 31, "name": "boss_andariel",         "tint": [0.30, 0.65, 0.20, 1.0] },
+    { "id": 32, "name": "boss_mephisto",         "tint": [0.25, 0.40, 0.85, 1.0] },
+    { "id": 33, "name": "boss_baal",             "tint": [0.80, 0.60, 0.20, 1.0] },
+    { "id": 34, "name": "boss_diablo",           "tint": [0.90, 0.20, 0.05, 1.0] },
+    { "id": 35, "name": "boss_reaper",           "tint": [0.10, 0.10, 0.12, 1.0] },
+
+    { "id": 36, "name": "catacomb_wall",          "texture": "stone_wall_42.png",    "tint": [0.55, 0.65, 0.45, 1.0] },
+    { "id": 37, "name": "catacomb_floor",         "texture": "stone_floor_42.png",   "tint": [0.50, 0.60, 0.40, 1.0] },
+    { "id": 38, "name": "catacomb_ceiling",       "texture": "stone_ceiling_42.png", "tint": [0.40, 0.50, 0.35, 1.0] },
+
+    { "id": 39, "name": "cavern_wall",            "texture": "stone_wall_42.png",    "tint": [0.45, 0.35, 0.55, 1.0] },
+    { "id": 40, "name": "cavern_floor",           "texture": "stone_floor_42.png",   "tint": [0.40, 0.32, 0.50, 1.0] },
+    { "id": 41, "name": "cavern_ceiling",         "texture": "stone_ceiling_42.png", "tint": [0.35, 0.28, 0.45, 1.0] },
+
+    { "id": 42, "name": "hellforge_wall",         "texture": "brick_wall_42.png",    "tint": [0.85, 0.35, 0.15, 1.0] },
+    { "id": 43, "name": "hellforge_floor",        "texture": "stone_floor_42.png",   "tint": [0.75, 0.30, 0.10, 1.0] },
+    { "id": 44, "name": "hellforge_ceiling",      "texture": "stone_ceiling_42.png", "tint": [0.60, 0.20, 0.08, 1.0] },
+
+    { "id": 45, "name": "void_wall",              "texture": "stone_wall_42.png",    "tint": [0.15, 0.15, 0.25, 1.0] },
+    { "id": 46, "name": "void_floor",             "texture": "stone_floor_42.png",   "tint": [0.12, 0.12, 0.22, 1.0] },
+    { "id": 47, "name": "void_ceiling",           "texture": "stone_ceiling_42.png", "tint": [0.08, 0.08, 0.18, 1.0] },
+
+    { "id": 48, "name": "prop_wood",              "tint": [0.55, 0.38, 0.20, 1.0] },
+    { "id": 49, "name": "prop_iron",              "tint": [0.45, 0.45, 0.50, 1.0] },
+    { "id": 50, "name": "prop_bone",              "tint": [0.80, 0.75, 0.65, 1.0] },
+    { "id": 51, "name": "prop_web",               "tint": [0.85, 0.85, 0.80, 0.7] },
+    { "id": 52, "name": "prop_brazier",           "tint": [0.70, 0.40, 0.15, 1.0] },
+    { "id": 53, "name": "prop_brazier_fire",      "tint": [1.00, 0.55, 0.10, 1.0] }
   ]
 }

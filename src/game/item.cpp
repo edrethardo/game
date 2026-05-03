@@ -348,10 +348,11 @@ Rarity ItemGen::rollRarity(u8 enemyLevel) {
     f32 rarePct      = 10.0f;
     f32 legendaryPct =  2.0f;
 
-    // Per level above 1: -1% common, +0.5% legendary, rest absorbed by magic/rare
+    // Per level above 1: common drops faster, legendary rises faster so deep
+    // floors feel rewarding.  At floor 10 legendary is ~11%, floor 25 ~26%.
     f32 levelsAbove1 = static_cast<f32>(enemyLevel > 1 ? enemyLevel - 1 : 0);
-    commonPct    -= levelsAbove1 * 1.0f;
-    legendaryPct += levelsAbove1 * 0.5f;
+    commonPct    -= levelsAbove1 * 1.5f;
+    legendaryPct += levelsAbove1 * 1.0f;
 
     // Clamp to sane ranges
     if (commonPct    < 0.0f)   commonPct    = 0.0f;
@@ -405,7 +406,7 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
     // Track which AffixTypes have already been assigned (no duplicate types)
     bool usedTypes[static_cast<u32>(AffixType::COUNT)] = {};
 
-    f32 levelScale = 1.0f + 0.1f * static_cast<f32>(itemLevel);
+    f32 levelScale = 1.0f + 0.15f * static_cast<f32>(itemLevel);
 
     for (u8 a = 0; a < affixCount && item.affixCount < MAX_AFFIXES_PER_ITEM; a++) {
         // Shuffle-pick a random candidate that has an unused type
@@ -475,7 +476,7 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     item.rarity = rolled;
 
     // Scale base stats
-    f32 levelMult = 1.0f + 0.15f * static_cast<f32>(enemyLevel);
+    f32 levelMult = 1.0f + 0.20f * static_cast<f32>(enemyLevel);
     item.damage      = def.baseDamage  * levelMult;
     item.bonusHealth = def.baseHealth  * levelMult;
 

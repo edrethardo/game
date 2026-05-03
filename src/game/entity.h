@@ -31,6 +31,7 @@ enum struct EnemyType : u8 {
     SPIDER,       // 8 legs, 2 mandibles
     MIMIC,        // disguised as chest, attacks when approached
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
+    PROP,         // static decoration — no AI, no collision response, no animation
     COUNT
 };
 

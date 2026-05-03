@@ -29,8 +29,8 @@ namespace GameConst {
     static constexpr f32 SPIDER_ATK_RANGE    = 2.0f;
     static constexpr f32 SPIDER_ATK_COOL     = 0.8f;    // was 1.0, faster attacks
 
-    // Floor scaling
-    static constexpr f32 FLOOR_STAT_MULT     = 0.25f;
+    // Floor scaling — 10% per floor so difficulty ramps steadily to floor 50
+    static constexpr f32 FLOOR_STAT_MULT     = 0.10f;
 
     // Combat
     static constexpr f32 LOOT_DROP_CHANCE    = 0.40f;

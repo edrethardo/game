@@ -287,6 +287,12 @@ void Engine::init() {
             {"rogue",          "assets/meshes/rogue.obj"},
             {"paladin",        "assets/meshes/paladin.obj"},
             {"staff",          "assets/meshes/staff.obj"},
+            {"web",            "assets/meshes/web.obj"},
+            {"shackles",       "assets/meshes/shackles.obj"},
+            {"barrel",         "assets/meshes/barrel.obj"},
+            {"cage",           "assets/meshes/cage.obj"},
+            {"bones",          "assets/meshes/bones.obj"},
+            {"brazier",        "assets/meshes/brazier.obj"},
             {"butcher",        "assets/meshes/butcher.obj"},
             {"cleaver",        "assets/meshes/cleaver.obj"},
             {"iron_maiden",    "assets/meshes/iron_maiden.obj"},
@@ -371,11 +377,13 @@ void Engine::init() {
             pool.entities[entityIndex].speechText = "Avenge... me...";
             pool.entities[entityIndex].speechTimer = 4.0f;
         }
-        // Hostile enemies only drop loot; chance defined by LOOT_DROP_CHANCE
+        // Hostile enemies only drop loot; chance scales with floor depth
+        // (40% at floor 1, +1% per floor, capped at 70%)
+        u8 enemyLevel = pool.entities[entityIndex].level;
+        f32 dropChance = GameConst::LOOT_DROP_CHANCE + enemyLevel * 0.01f;
+        if (dropChance > 0.70f) dropChance = 0.70f;
         if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY) &&
-            (std::rand() % 100) < static_cast<int>(GameConst::LOOT_DROP_CHANCE * 100.0f)) {
-            // Derive level from the entity so loot scales with floor depth
-            u8 enemyLevel = pool.entities[entityIndex].level;
+            (std::rand() % 100) < static_cast<int>(dropChance * 100.0f)) {
             if (enemyLevel < 1) enemyLevel = 1;
             ItemInstance item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
                                                    s_engine->m_itemDefCount,
@@ -754,6 +762,56 @@ void Engine::startGame() {
     DungeonResult dungeon = LevelGen::generate(m_grid, dungeonSeed, 48, 48);
     Vec3 spawnPos = dungeon.spawnPos;
 
+    // ---------------------------------------------------------------------------
+    // Floor theme — retheme all cells based on the current depth tier.
+    //   1-10: Stone Dungeon (default materials, no change)
+    //  11-20: Catacombs    (mossy green/brown)
+    //  21-30: Spider Caverns (dark purple)
+    //  31-40: Hellforge     (red/orange fire)
+    //  41-50: Void          (black/dark blue)
+    // ---------------------------------------------------------------------------
+    {
+        u8 themeWall = 0, themeFloor = 0, themeCeil = 0;
+        bool applyTheme = false;
+
+        if (m_currentFloor >= 41) {
+            themeWall  = MaterialSystem::getIdByName("void_wall");
+            themeFloor = MaterialSystem::getIdByName("void_floor");
+            themeCeil  = MaterialSystem::getIdByName("void_ceiling");
+            applyTheme = true;
+        } else if (m_currentFloor >= 31) {
+            themeWall  = MaterialSystem::getIdByName("hellforge_wall");
+            themeFloor = MaterialSystem::getIdByName("hellforge_floor");
+            themeCeil  = MaterialSystem::getIdByName("hellforge_ceiling");
+            applyTheme = true;
+        } else if (m_currentFloor >= 21) {
+            themeWall  = MaterialSystem::getIdByName("cavern_wall");
+            themeFloor = MaterialSystem::getIdByName("cavern_floor");
+            themeCeil  = MaterialSystem::getIdByName("cavern_ceiling");
+            applyTheme = true;
+        } else if (m_currentFloor >= 11) {
+            themeWall  = MaterialSystem::getIdByName("catacomb_wall");
+            themeFloor = MaterialSystem::getIdByName("catacomb_floor");
+            themeCeil  = MaterialSystem::getIdByName("catacomb_ceiling");
+            applyTheme = true;
+        }
+
+        if (applyTheme) {
+            for (u32 z = 0; z < m_grid.depth; z++) {
+                for (u32 x = 0; x < m_grid.width; x++) {
+                    GridCell& cell = LevelGridSystem::getCell(m_grid, x, z);
+                    if (!(cell.flags & CELL_FLOOR)) continue; // skip solid cells
+                    // Replace default stone/brick with theme, preserve blood (boss arenas)
+                    if (cell.wallMaterialId <= 3) cell.wallMaterialId = themeWall;
+                    if (cell.floorMaterialId <= 2) cell.floorMaterialId = themeFloor;
+                    if (cell.ceilMaterialId <= 2) cell.ceilMaterialId = themeCeil;
+                }
+            }
+            LOG_INFO("Applied floor theme for depth tier %u-%u",
+                     (m_currentFloor / 10) * 10 + 1, ((m_currentFloor / 10) + 1) * 10);
+        }
+    }
+
     m_sectionCount = LevelMeshSystem::buildAll(m_grid, m_sections, MAX_LEVEL_SECTIONS);
     Minimap::init(m_grid.width, m_grid.depth);
 
@@ -883,95 +941,257 @@ void Engine::startGame() {
         }
     }
 
-    // Boss enemy on every 5th floor — The Butcher in a bloody expanded arena
-    if ((m_currentFloor % 5) == 0 && dungeon.roomCount > 2) {
-        DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
+    // ---------------------------------------------------------------------------
+    // Boss roster — unique encounters on milestone floors.
+    // Mini-bosses on 5/15/25/35/45, major bosses on 10/20/30/40/50.
+    // ---------------------------------------------------------------------------
+    {
+        struct BossTemplate {
+            u8 floor;
+            const char* name;
+            const char* speech;
+            f32 baseHp, baseDmg, speed, atkRange, atkCooldown;
+            Vec3 halfExtents;
+            bool isMajor;       // major = bigger arena + iron maidens
+            const char* meshName;   // reuse existing mesh
+            const char* matName;    // tint material
+            const char* weaponName; // weapon mesh (nullptr = none)
+        };
 
-        // Expand the boss room to ~3x size by carving surrounding cells
-        u32 expandW = bossRoom.w * 3;
-        u32 expandD = bossRoom.d * 3;
-        // Center the expansion around the original room
-        s32 startX = static_cast<s32>(bossRoom.x) - static_cast<s32>(bossRoom.w);
-        s32 startZ = static_cast<s32>(bossRoom.z) - static_cast<s32>(bossRoom.d);
-        u8 bloodFloor = MaterialSystem::getIdByName("blood_floor");
-        u8 bloodWall  = MaterialSystem::getIdByName("blood_wall");
-        u8 bloodCeil  = MaterialSystem::getIdByName("blood_ceiling");
-        u8 floorQH = static_cast<u8>(bossRoom.floorHeight / 0.25f);
+        static constexpr u32 BOSS_COUNT = 10;
+        static const BossTemplate kBosses[BOSS_COUNT] = {
+            // Mini-bosses (floors 5, 15, 25, 35, 45)
+            {  5, "The Butcher",   "FRESH MEAT!",         300, 30, 2.0f, 3.0f, 0.6f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
+            { 15, "Lich Lord",     "Your soul is MINE!",  250, 28, 2.5f, 12.f, 0.8f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
+            { 25, "Spider Queen",  "*HISSSS*",            350, 25, 4.5f, 2.5f, 0.6f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
+            { 35, "Demon Knight",  "Kneel before me!",    400, 32, 3.0f, 3.0f, 0.7f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
+            { 45, "Arch Mage",     "Feel the arcane!",    280, 35, 2.8f, 14.f, 0.5f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
+            // Major bosses (floors 10, 20, 30, 40, 50)
+            { 10, "Andariel",      "Die, insect!",        500, 35, 3.5f, 3.0f, 0.5f, {0.7f,1.1f, 0.7f}, true,  "human",    "boss_andariel",     nullptr},
+            { 20, "Mephisto",      "You cannot stop me.", 600, 40, 2.0f, 14.f, 0.7f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
+            { 30, "Baal",          "I am undefeated!",    800, 38, 2.5f, 3.5f, 0.6f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
+            { 40, "Diablo",        "NOT EVEN DEATH...",   750, 50, 3.0f, 3.5f, 0.5f, {0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
+            { 50, "Grim Reaper",   "YOUR TIME HAS COME.",1000, 60, 3.5f, 3.5f, 0.4f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
+        };
 
-        for (u32 ez = 0; ez < expandD; ez++) {
-            for (u32 ex = 0; ex < expandW; ex++) {
-                s32 gx = startX + static_cast<s32>(ex);
-                s32 gz = startZ + static_cast<s32>(ez);
-                if (gx < 1 || gz < 1 || static_cast<u32>(gx) >= m_grid.width - 1 ||
-                    static_cast<u32>(gz) >= m_grid.depth - 1) continue;
-                GridCell& cell = LevelGridSystem::getCell(m_grid, static_cast<u32>(gx), static_cast<u32>(gz));
-                // Carve out the cell (make it walkable)
-                cell.flags = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight = floorQH;
-                cell.ceilingHeight = 16; // 4.0m ceiling for tall boss
-                cell.floorMaterialId = bloodFloor;
-                cell.wallMaterialId = bloodWall;
-                cell.ceilMaterialId = bloodCeil;
-            }
+        // Find boss for this floor
+        const BossTemplate* bt = nullptr;
+        for (u32 b = 0; b < BOSS_COUNT; b++) {
+            if (kBosses[b].floor == m_currentFloor) { bt = &kBosses[b]; break; }
         }
 
-        // Update the room metadata to reflect expanded size
-        bossRoom.x = (startX > 0) ? static_cast<u32>(startX) : 1;
-        bossRoom.z = (startZ > 0) ? static_cast<u32>(startZ) : 1;
-        bossRoom.w = expandW;
-        bossRoom.d = expandD;
+        if (bt && dungeon.roomCount > 2) {
+            DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
 
-        // Rebuild level mesh to include the expanded bloody room
-        m_sectionCount = LevelMeshSystem::buildAll(m_grid, m_sections, MAX_LEVEL_SECTIONS);
+            // Arena size: major bosses get a larger arena
+            u32 arenaScale = bt->isMajor ? 4 : 3;
+            u32 expandW = bossRoom.w * arenaScale;
+            u32 expandD = bossRoom.d * arenaScale;
+            s32 startX = static_cast<s32>(bossRoom.x) - static_cast<s32>(bossRoom.w * (arenaScale / 2));
+            s32 startZ = static_cast<s32>(bossRoom.z) - static_cast<s32>(bossRoom.d * (arenaScale / 2));
+            u8 bloodFloor = MaterialSystem::getIdByName("blood_floor");
+            u8 bloodWall  = MaterialSystem::getIdByName("blood_wall");
+            u8 bloodCeil  = MaterialSystem::getIdByName("blood_ceiling");
+            u8 floorQH = static_cast<u8>(bossRoom.floorHeight / 0.25f);
 
-        // Spawn iron maidens in the corners of the boss room
-        u8 ironMaidenMesh = m_meshIdIronMaiden;
-        if (ironMaidenMesh > 0) {
-            Vec3 corners[] = {
-                {(bossRoom.x + 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_grid.cellSize},
-                {(bossRoom.x + bossRoom.w - 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_grid.cellSize},
-                {(bossRoom.x + 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + bossRoom.d - 2) * m_grid.cellSize},
-                {(bossRoom.x + bossRoom.w - 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + bossRoom.d - 2) * m_grid.cellSize},
-            };
-            for (u32 c = 0; c < 4; c++) {
-                // Iron maidens as static entities (no AI, no movement)
-                EntityHandle ih = EntitySystem::spawn(m_entities,
-                    corners[c] + Vec3{0, 0.45f, 0}, {0.2f, 0.45f, 0.15f}, false,
-                    9999.0f, 0.0f, 0.0f, 0.0f, 999.0f, 0.0f);
-                Entity* prop = handleGet(m_entities, ih);
-                if (prop) {
-                    prop->meshId = ironMaidenMesh;
-                    prop->materialId = MaterialSystem::getIdByName("blood_wall");
-                    prop->enemyType = EnemyType::GENERIC;
-                    prop->aiState = AIState::DEAD; // never moves or attacks
-                    prop->flags &= ~ENT_DEAD;      // but don't trigger death behavior
-                    prop->deathTimer = 999.0f;      // never despawn
+            for (u32 ez = 0; ez < expandD; ez++) {
+                for (u32 ex = 0; ex < expandW; ex++) {
+                    s32 gx = startX + static_cast<s32>(ex);
+                    s32 gz = startZ + static_cast<s32>(ez);
+                    if (gx < 1 || gz < 1 || static_cast<u32>(gx) >= m_grid.width - 1 ||
+                        static_cast<u32>(gz) >= m_grid.depth - 1) continue;
+                    GridCell& cell = LevelGridSystem::getCell(m_grid, static_cast<u32>(gx), static_cast<u32>(gz));
+                    cell.flags = CELL_FLOOR | CELL_CEILING;
+                    cell.floorHeight = floorQH;
+                    cell.ceilingHeight = 16;
+                    cell.floorMaterialId = bloodFloor;
+                    cell.wallMaterialId = bloodWall;
+                    cell.ceilMaterialId = bloodCeil;
                 }
             }
-        }
 
-        // Spawn The Butcher in the center
-        f32 bx = (bossRoom.x + bossRoom.w * 0.5f) * m_grid.cellSize;
-        f32 bz = (bossRoom.z + bossRoom.d * 0.5f) * m_grid.cellSize;
-        f32 by = bossRoom.floorHeight;
-        f32 floorMult = 1.0f + (m_currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
-        EntityHandle bh = EntitySystem::spawn(m_entities,
-            Vec3{bx, by + 1.25f, bz}, {0.8f, 1.25f, 0.8f}, false,
-            300.0f * floorMult, 2.0f, 20.0f, 3.0f, 0.6f, 30.0f * floorMult);
-        Entity* boss = handleGet(m_entities, bh);
-        if (boss) {
-            boss->meshId = m_meshIdButcher;
-            boss->materialId = MaterialSystem::getIdByName("butcher_skin");
-            boss->enemyType = EnemyType::BOSS;
-            boss->level = static_cast<u8>(m_currentFloor);
-            boss->weaponMeshId = m_meshIdCleaver;
-            boss->speechText = "FRESH MEAT!";
-            boss->speechTimer = 6.0f;
+            bossRoom.x = (startX > 0) ? static_cast<u32>(startX) : 1;
+            bossRoom.z = (startZ > 0) ? static_cast<u32>(startZ) : 1;
+            bossRoom.w = expandW;
+            bossRoom.d = expandD;
+
+            m_sectionCount = LevelMeshSystem::buildAll(m_grid, m_sections, MAX_LEVEL_SECTIONS);
+
+            // Iron maidens in corners for major bosses
+            if (bt->isMajor && m_meshIdIronMaiden > 0) {
+                Vec3 corners[] = {
+                    {(bossRoom.x + 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_grid.cellSize},
+                    {(bossRoom.x + bossRoom.w - 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_grid.cellSize},
+                    {(bossRoom.x + 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + bossRoom.d - 2) * m_grid.cellSize},
+                    {(bossRoom.x + bossRoom.w - 2) * m_grid.cellSize, bossRoom.floorHeight, (bossRoom.z + bossRoom.d - 2) * m_grid.cellSize},
+                };
+                for (u32 c = 0; c < 4; c++) {
+                    EntityHandle ih = EntitySystem::spawn(m_entities,
+                        corners[c] + Vec3{0, 0.45f, 0}, {0.2f, 0.45f, 0.15f}, false,
+                        9999.0f, 0.0f, 0.0f, 0.0f, 999.0f, 0.0f);
+                    Entity* prop = handleGet(m_entities, ih);
+                    if (prop) {
+                        prop->meshId = m_meshIdIronMaiden;
+                        prop->materialId = bloodWall;
+                        prop->enemyType = EnemyType::PROP;
+                    }
+                }
+            }
+
+            // Spawn the boss in the center of the arena
+            f32 bx = (bossRoom.x + bossRoom.w * 0.5f) * m_grid.cellSize;
+            f32 bz = (bossRoom.z + bossRoom.d * 0.5f) * m_grid.cellSize;
+            f32 by = bossRoom.floorHeight;
+            f32 floorMult = 1.0f + (m_currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
+
+            EntityHandle bh = EntitySystem::spawn(m_entities,
+                Vec3{bx, by + bt->halfExtents.y, bz}, bt->halfExtents, false,
+                bt->baseHp * floorMult, bt->speed, 20.0f,
+                bt->atkRange, bt->atkCooldown, bt->baseDmg * floorMult);
+            Entity* boss = handleGet(m_entities, bh);
+            if (boss) {
+                boss->meshId = findMeshByName(bt->meshName);
+                boss->materialId = MaterialSystem::getIdByName(bt->matName);
+                boss->enemyType = EnemyType::BOSS;
+                boss->level = static_cast<u8>(m_currentFloor);
+                if (bt->weaponName) {
+                    boss->weaponMeshId = findMeshByName(bt->weaponName);
+                }
+                boss->speechText = bt->speech;
+                boss->speechTimer = 6.0f;
+
+                // Ranged bosses (Lich Lord, Arch Mage, Mephisto) use projectile attacks
+                // via the boss AI cleaver-throw mechanic — their weapon mesh rides the
+                // projectile for visual consistency
+                if (bt->atkRange > 5.0f) {
+                    boss->npcWeaponType = WeaponType::PROJECTILE;
+                    boss->npcProjectileSpeed = 18.0f;
+                    boss->npcProjectileRadius = 0.15f;
+                }
+            }
+            LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u)",
+                     bt->name, m_currentFloor, bt->baseHp * floorMult,
+                     bt->baseDmg * floorMult, expandW, expandD);
         }
-        LOG_INFO("Spawned The Butcher in bloody arena on floor %u (%ux%u cells)", m_currentFloor, expandW, expandD);
     }
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
+
+    // ---------------------------------------------------------------------------
+    // Themed decorations — scatter props that fit the current depth tier.
+    //   1-10 Dungeon:  barrels, shackles, cages, bones
+    //  11-20 Catacombs: bones, shackles, braziers
+    //  21-30 Caverns:   webs, bones, barrels
+    //  31-40 Hellforge:  braziers, cages, shackles, bones
+    //  41-50 Void:       bones, cages, braziers
+    // Each room (except spawn room 0) gets 0-3 random decorations.
+    // ---------------------------------------------------------------------------
+    {
+        // Resolve decoration mesh IDs once
+        u8 mWeb      = findMeshByName("web");
+        u8 mShackles = findMeshByName("shackles");
+        u8 mBarrel   = findMeshByName("barrel");
+        u8 mCage     = findMeshByName("cage");
+        u8 mBones    = findMeshByName("bones");
+        u8 mBrazier  = findMeshByName("brazier");
+        u8 matWood   = MaterialSystem::getIdByName("prop_wood");
+        u8 matIron   = MaterialSystem::getIdByName("prop_iron");
+        u8 matBone   = MaterialSystem::getIdByName("prop_bone");
+        u8 matWeb    = MaterialSystem::getIdByName("prop_web");
+        u8 matBrazier = MaterialSystem::getIdByName("prop_brazier");
+
+        // Each tier defines which props can appear and their materials.
+        // wallOnly = true places props against room edges so they don't block movement.
+        struct PropDef { u8 meshId; u8 matId; Vec3 halfExt; f32 yOff; bool wallOnly; };
+
+        // Build tier-specific prop lists
+        PropDef dungeonProps[] = {
+            {mBarrel,   matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
+            {mShackles, matIron, {0.15f, 0.40f, 0.05f}, 0.40f, true},
+            {mCage,     matIron, {0.40f, 0.75f, 0.40f}, 0.75f, true},
+            {mBones,    matBone, {0.15f, 0.06f, 0.15f}, 0.06f, false},
+        };
+        PropDef catacombProps[] = {
+            {mBones,    matBone,    {0.15f, 0.06f, 0.15f}, 0.06f, false},
+            {mShackles, matIron,    {0.15f, 0.40f, 0.05f}, 0.40f, true},
+            {mBrazier,  matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
+        };
+        PropDef cavernProps[] = {
+            {mWeb,    matWeb,  {0.50f, 0.02f, 0.50f}, 1.80f, false},  // webs near ceiling
+            {mBones,  matBone, {0.15f, 0.06f, 0.15f}, 0.06f, false},
+            {mBarrel, matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
+        };
+        PropDef hellforgeProps[] = {
+            {mBrazier,  matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
+            {mCage,     matIron,    {0.40f, 0.75f, 0.40f}, 0.75f, true},
+            {mShackles, matIron,    {0.15f, 0.40f, 0.05f}, 0.40f, true},
+            {mBones,    matBone,    {0.15f, 0.06f, 0.15f}, 0.06f, false},
+        };
+        PropDef voidProps[] = {
+            {mBones,   matBone,    {0.15f, 0.06f, 0.15f}, 0.06f, false},
+            {mCage,    matIron,    {0.40f, 0.75f, 0.40f}, 0.75f, true},
+            {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
+        };
+
+        // Select the right prop list for the current tier
+        const PropDef* props = dungeonProps;
+        u32 propCount = 4;
+        if (m_currentFloor >= 41)      { props = voidProps;      propCount = 3; }
+        else if (m_currentFloor >= 31) { props = hellforgeProps;  propCount = 4; }
+        else if (m_currentFloor >= 21) { props = cavernProps;     propCount = 3; }
+        else if (m_currentFloor >= 11) { props = catacombProps;   propCount = 3; }
+
+        u32 decoCount = 0;
+        for (u32 r = 1; r < dungeon.roomCount; r++) {
+            const DungeonRoom& room = dungeon.rooms[r];
+            // 0-3 decorations per room, biased by room area
+            u32 area = room.w * room.d;
+            u32 numDecos = (area > 20) ? 3 : (area > 10) ? 2 : 1;
+            if ((std::rand() % 3) == 0) numDecos = 0; // 33% chance for empty room
+
+            for (u32 d = 0; d < numDecos; d++) {
+                // Pick a random prop from the tier list
+                const PropDef& prop = props[std::rand() % propCount];
+
+                f32 px, pz;
+                if (prop.wallOnly) {
+                    // Place against a room edge so it doesn't block movement.
+                    // Pick a random wall (0=north, 1=south, 2=west, 3=east) and
+                    // a random position along that wall.
+                    u32 wall = std::rand() % 4;
+                    if (wall < 2) {
+                        // North/south wall: fixed z, random x
+                        px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
+                        pz = (wall == 0 ? room.z : room.z + room.d - 1) * m_grid.cellSize;
+                    } else {
+                        // West/east wall: fixed x, random z
+                        px = (wall == 2 ? room.x : room.x + room.w - 1) * m_grid.cellSize;
+                        pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
+                    }
+                } else {
+                    // Small/flat props (bones, webs) can go anywhere in the room
+                    px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
+                    pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
+                }
+                f32 py = room.floorHeight;
+
+                EntityHandle dh = EntitySystem::spawn(m_entities,
+                    Vec3{px, py + prop.yOff, pz}, prop.halfExt, false,
+                    9999.0f, 0.0f, 0.0f, 0.0f, 999.0f, 0.0f);
+                Entity* deco = handleGet(m_entities, dh);
+                if (deco) {
+                    deco->meshId = prop.meshId;
+                    deco->materialId = prop.matId;
+                    deco->enemyType = EnemyType::PROP;
+                    // Random rotation for variety
+                    deco->yaw = (std::rand() % 628) * 0.01f;
+                    decoCount++;
+                }
+            }
+        }
+        LOG_INFO("Spawned %u themed decorations for tier %u-%u",
+                 decoCount, (m_currentFloor / 10) * 10 + 1, ((m_currentFloor / 10) + 1) * 10);
+    }
 
     // Spawn a floor exit portal in the last room (farthest from spawn room 0)
     m_floorDoorActive = false;

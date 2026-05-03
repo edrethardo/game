@@ -1001,6 +1001,76 @@ def gen_staff(height=1.2):
     return mb
 
 
+def gen_web(size=1.0):
+    """Flat spider web decoration — thin diamond in XZ plane."""
+    mb = MeshBuilder()
+    hs = size * 0.5
+    add_box(mb, center=(0.0, 0.0, 0.0), half_extents=(hs, 0.02, hs))
+    return mb
+
+
+def gen_shackles(height=0.8):
+    """Wall shackles — bar with two hanging chain links and cuffs."""
+    mb = MeshBuilder()
+    # Horizontal bar
+    add_box(mb, center=(0.0, height, 0.0), half_extents=(0.15, 0.015, 0.015))
+    # Left/right chain links
+    add_box(mb, center=(-0.08, height * 0.7, 0.0), half_extents=(0.01, height * 0.15, 0.01))
+    add_box(mb, center=( 0.08, height * 0.7, 0.0), half_extents=(0.01, height * 0.15, 0.01))
+    # Left/right cuffs
+    add_box(mb, center=(-0.08, height * 0.5, 0.0), half_extents=(0.025, 0.015, 0.02))
+    add_box(mb, center=( 0.08, height * 0.5, 0.0), half_extents=(0.025, 0.015, 0.02))
+    return mb
+
+
+def gen_barrel(radius=0.25, height=0.7):
+    """Simple barrel — octagonal cylinder with rim bands."""
+    mb = MeshBuilder()
+    add_cylinder(mb, base_center=(0, 0, 0), radius=radius, height=height, sides=8)
+    add_cylinder(mb, base_center=(0, height * 0.85, 0), radius=radius * 1.05, height=height * 0.05, sides=8)
+    add_cylinder(mb, base_center=(0, height * 0.05, 0), radius=radius * 1.05, height=height * 0.05, sides=8)
+    return mb
+
+
+def gen_cage(width=0.8, height=1.5):
+    """Hanging cage with vertical bars — semi-transparent look."""
+    mb = MeshBuilder()
+    hw = width * 0.5
+    barR = 0.015
+    # Top and bottom rings
+    add_box(mb, center=(0.0, height, 0.0), half_extents=(hw, 0.02, hw))
+    add_box(mb, center=(0.0, 0.0, 0.0), half_extents=(hw, 0.02, hw))
+    # 8 vertical bars around perimeter
+    for i in range(8):
+        angle = i * math.pi * 2.0 / 8.0
+        bx = math.sin(angle) * (hw - barR)
+        bz = math.cos(angle) * (hw - barR)
+        add_box(mb, center=(bx, height * 0.5, bz), half_extents=(barR, height * 0.5, barR))
+    # Chain link hanging from top
+    add_box(mb, center=(0.0, height + 0.15, 0.0), half_extents=(0.01, 0.15, 0.01))
+    return mb
+
+
+def gen_bones(spread=0.4):
+    """Pile of bones on the ground."""
+    mb = MeshBuilder()
+    add_box(mb, center=(-0.1, 0.02, 0.0), half_extents=(0.15, 0.02, 0.02))
+    add_box(mb, center=(0.05, 0.02, 0.08), half_extents=(0.02, 0.02, 0.12))
+    add_box(mb, center=(0.0, 0.04, -0.05), half_extents=(0.12, 0.02, 0.02))
+    # Skull
+    add_box(mb, center=(0.08, 0.06, 0.0), half_extents=(0.04, 0.04, 0.04))
+    return mb
+
+
+def gen_brazier(height=0.6):
+    """Standing brazier/fire bowl on a thin post."""
+    mb = MeshBuilder()
+    add_cylinder(mb, base_center=(0, 0, 0), radius=0.04, height=height * 0.75, sides=6)
+    add_cylinder(mb, base_center=(0, 0, 0), radius=0.12, height=0.04, sides=6)
+    add_cylinder(mb, base_center=(0, height * 0.7, 0), radius=0.1, height=height * 0.2, sides=6)
+    return mb
+
+
 def gen_butcher(height=2.5):
     """Large demon boss — The Butcher. Massive build, horns, red-tinted.
 
@@ -1123,6 +1193,36 @@ MESH_TYPES = {
         "desc": "Staff weapon — thin rod with crystal tip. Params: --height",
         "default_file": "staff.obj",
     },
+    "web": {
+        "func": gen_web,
+        "desc": "Flat spider web decoration. Params: --radius (used as size)",
+        "default_file": "web.obj",
+    },
+    "shackles": {
+        "func": gen_shackles,
+        "desc": "Wall shackles with chains and cuffs. Params: --height",
+        "default_file": "shackles.obj",
+    },
+    "barrel": {
+        "func": gen_barrel,
+        "desc": "Simple barrel with rim bands. Params: --radius --height",
+        "default_file": "barrel.obj",
+    },
+    "cage": {
+        "func": gen_cage,
+        "desc": "Hanging cage with vertical bars. Params: --width --height",
+        "default_file": "cage.obj",
+    },
+    "bones": {
+        "func": gen_bones,
+        "desc": "Pile of bones on the ground.",
+        "default_file": "bones.obj",
+    },
+    "brazier": {
+        "func": gen_brazier,
+        "desc": "Standing brazier/fire bowl. Params: --height",
+        "default_file": "brazier.obj",
+    },
     "spider": {
         "func": gen_spider,
         "desc": "Barony-style voxel spider. Params: --radius",
@@ -1221,6 +1321,23 @@ def main():
     elif mtype == "chest":
         if args.width is not None:
             kwargs["width"] = args.width
+    elif mtype in ("shackles", "brazier"):
+        if args.height is not None:
+            kwargs["height"] = args.height
+    elif mtype == "web":
+        if args.radius is not None:
+            kwargs["size"] = args.radius
+    elif mtype == "barrel":
+        if args.radius is not None:
+            kwargs["radius"] = args.radius
+        if args.height is not None:
+            kwargs["height"] = args.height
+    elif mtype == "cage":
+        if args.width is not None:
+            kwargs["width"] = args.width
+        if args.height is not None:
+            kwargs["height"] = args.height
+    # bones and brazier use defaults — no special args needed
 
     mb = MESH_TYPES[mtype]["func"](**kwargs)
     write_obj(out_path, mb)
