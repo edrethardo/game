@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include "core/math.h"
+#include "game/weapon.h"
 #include "renderer/frustum.h"
 
 static constexpr u32 MAX_ENTITIES = 128;
@@ -32,6 +33,20 @@ enum struct EnemyType : u8 {
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
     COUNT
 };
+
+// NPC class determines base stats, AI behavior, and starting equipment
+enum struct NpcClass : u8 {
+    NONE = 0,   // not an NPC (hostile enemy)
+    CLERIC,     // melee healer, mace, heavy armor
+    ARCHER,     // ranged, bow, light armor, less HP
+    MAGE,       // ranged, staff projectiles, robes
+    ROGUE,      // ranged, throwing knives, fast, leather
+    PALADIN,    // melee tank, mace, heavy plate
+    COUNT
+};
+
+// Max friendly NPCs that can carry equipment simultaneously
+static constexpr u32 MAX_NPC_EQUIP = 8;
 
 struct Entity {
     // Identity
@@ -68,6 +83,13 @@ struct Entity {
     u8  materialId = 0;  // index into MaterialSystem
     EnemyType enemyType = EnemyType::GENERIC;
     u8 weaponMeshId = 0;  // skeleton weapon mesh index (0 = none)
+
+    // NPC equipment and class (friendly NPCs only)
+    NpcClass npcClass   = NpcClass::NONE;
+    u8 npcEquipIdx      = 0xFF;  // index into NpcEquipment pool (0xFF = none)
+    WeaponType npcWeaponType = WeaponType::MELEE;  // attack method for friendly AI
+    f32 npcProjectileSpeed  = 0.0f;  // projectile speed (PROJECTILE type only)
+    f32 npcProjectileRadius = 0.0f;
 
     // NPC speech bubble
     const char* speechText = nullptr;  // current speech (nullptr = no bubble)

@@ -283,6 +283,10 @@ void Engine::init() {
             {"mace",           "assets/meshes/mace.obj"},
             {"cleric",         "assets/meshes/cleric.obj"},
             {"archer",         "assets/meshes/archer.obj"},
+            {"mage",           "assets/meshes/mage.obj"},
+            {"rogue",          "assets/meshes/rogue.obj"},
+            {"paladin",        "assets/meshes/paladin.obj"},
+            {"staff",          "assets/meshes/staff.obj"},
             {"butcher",        "assets/meshes/butcher.obj"},
             {"cleaver",        "assets/meshes/cleaver.obj"},
             {"iron_maiden",    "assets/meshes/iron_maiden.obj"},
@@ -317,6 +321,11 @@ void Engine::init() {
     m_meshIdCleric   = findMeshByName("cleric");
     m_meshIdArcher   = findMeshByName("archer");
     m_meshIdBow      = findMeshByName("bow");
+    m_meshIdMage       = findMeshByName("mage");
+    m_meshIdRogue      = findMeshByName("rogue");
+    m_meshIdPaladin    = findMeshByName("paladin");
+    m_meshIdStaff      = findMeshByName("staff");
+    m_meshIdThrowingKnife = findMeshByName("throwing_knife");
     m_meshIdButcher    = findMeshByName("butcher");
     m_meshIdCleaver    = findMeshByName("cleaver");
     m_meshIdIronMaiden = findMeshByName("iron_maiden");
@@ -493,6 +502,248 @@ bool Engine::loadGame() {
         LOG_INFO("Game loaded: floor %u, HP %.0f/%.0f", m_savedFloor, hp, maxHp);
     }
     return ok;
+}
+
+// ---------------------------------------------------------------------------
+// NPC equipment and spawning helpers
+// ---------------------------------------------------------------------------
+
+void Engine::rollNpcEquipment(NpcEquipment& equip, NpcClass npcClass, u8 floor) {
+    // Clear all slots
+    for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
+        equip.equipped[s] = {};
+    }
+
+    // Roll a weapon appropriate for the class
+    auto rollSlot = [&](ItemSlot slot, const char* subtypeHint) {
+        // Try up to 20 times to find a matching item
+        for (u32 attempt = 0; attempt < 20; attempt++) {
+            ItemInstance item = ItemGen::rollItem(floor, m_itemDefs, m_itemDefCount,
+                                                   m_affixDefs, m_affixDefCount);
+            if (isItemEmpty(item)) continue;
+            const ItemDef& def = m_itemDefs[item.defId];
+            if (def.slot != slot) continue;
+            // If caller specified a subtype hint, filter for it
+            if (subtypeHint && subtypeHint[0]) {
+                if (std::strstr(def.name, subtypeHint) == nullptr) continue;
+            }
+            equip.equipped[static_cast<u32>(slot)] = item;
+            return;
+        }
+        // Fallback: just roll any item of the right slot
+        for (u32 attempt = 0; attempt < 40; attempt++) {
+            ItemInstance item = ItemGen::rollItem(floor, m_itemDefs, m_itemDefCount,
+                                                   m_affixDefs, m_affixDefCount);
+            if (isItemEmpty(item)) continue;
+            const ItemDef& def = m_itemDefs[item.defId];
+            if (def.slot != slot) continue;
+            equip.equipped[static_cast<u32>(slot)] = item;
+            return;
+        }
+    };
+
+    // Class-specific weapon
+    switch (npcClass) {
+        case NpcClass::CLERIC:  rollSlot(ItemSlot::WEAPON, "Mace"); break;
+        case NpcClass::ARCHER:  rollSlot(ItemSlot::WEAPON, "Bow");  break;
+        case NpcClass::MAGE:    rollSlot(ItemSlot::WEAPON, "Staff"); break;
+        case NpcClass::ROGUE:   rollSlot(ItemSlot::WEAPON, "Kniv"); break;
+        case NpcClass::PALADIN: rollSlot(ItemSlot::WEAPON, "Mace"); break;
+        default: rollSlot(ItemSlot::WEAPON, nullptr); break;
+    }
+
+    // Roll armor pieces for all NPCs
+    rollSlot(ItemSlot::ARMOR, nullptr);
+    rollSlot(ItemSlot::HELMET, nullptr);
+    rollSlot(ItemSlot::BOOTS, nullptr);
+
+    // Recalculate cached stat bonuses from equipped items
+    Inventory::recalculateNpcStats(equip);
+    equip.active = true;
+}
+
+void Engine::applyNpcEquipmentStats(Entity& e, const NpcEquipment& equip) {
+    // Get effective weapon stats from equipped weapon
+    const ItemInstance& wpn = equip.equipped[static_cast<u32>(ItemSlot::WEAPON)];
+    if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
+        const ItemDef& def = m_itemDefs[wpn.defId];
+        // Base damage from rolled item + flat bonus
+        f32 rawDmg = wpn.damage + equip.bonusDamageFlat;
+        e.damage = rawDmg * (1.0f + equip.bonusDamagePct / 100.0f);
+        e.npcWeaponType = def.weaponType;
+
+        // Attack range depends on weapon type
+        if (def.weaponType == WeaponType::PROJECTILE) {
+            e.attackRange = 12.0f + equip.bonusRange;
+            e.npcProjectileSpeed = def.baseProjectileSpeed * (1.0f + equip.bonusProjectileSpeedPct / 100.0f);
+            if (e.npcProjectileSpeed < 8.0f) e.npcProjectileSpeed = 12.0f;
+            e.npcProjectileRadius = def.baseProjectileRadius;
+            if (e.npcProjectileRadius < 0.05f) e.npcProjectileRadius = 0.1f;
+        } else {
+            e.attackRange = def.baseRange + equip.bonusRange;
+            if (e.attackRange < 2.0f) e.attackRange = 2.5f;
+        }
+
+        // Cooldown with reduction
+        e.attackCooldown = def.baseCooldown * (1.0f - equip.bonusCooldownReduction);
+        if (e.attackCooldown < 0.1f) e.attackCooldown = 0.1f;
+
+        // Visual: set weapon mesh from item def
+        e.weaponMeshId = def.meshId;
+    }
+
+    // Apply health bonuses from armor
+    f32 baseHp = e.maxHealth;
+    f32 totalFlat = equip.bonusHealthFlat;
+    e.maxHealth = (baseHp + totalFlat) * (1.0f + equip.bonusHealthPct / 100.0f);
+    e.health = e.maxHealth;
+
+    // Apply move speed bonus
+    e.moveSpeed += equip.bonusMoveSpeed;
+}
+
+EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
+    // Determine base stats from class
+    f32 baseHp = 40.0f;
+    f32 speed  = 3.0f;
+    f32 detRange = 15.0f;
+    f32 atkRange = 2.5f;
+    f32 atkCool = 0.8f;
+    f32 baseDmg = 10.0f;
+    Vec3 halfExt = {0.4f, 0.9f, 0.4f};
+    u8 meshId = m_meshIdHuman;
+    const char* matName = "human_skin";
+    u8 weaponMesh = 0;
+    const char* speech = "Ready!";
+
+    switch (npcClass) {
+        case NpcClass::CLERIC:
+            baseHp = GameConst::NPC_HEALTH_CLERIC;
+            speed = 3.0f;
+            atkRange = 2.5f;
+            atkCool = 0.9f;
+            baseDmg = 8.0f;
+            meshId = m_meshIdCleric;
+            matName = "cleric_skin";
+            weaponMesh = m_meshIdMace;
+            speech = "The light protects!";
+            break;
+        case NpcClass::ARCHER:
+            baseHp = GameConst::NPC_HEALTH_ARCHER;
+            speed = 3.5f;
+            halfExt = {0.35f, 0.85f, 0.35f};
+            atkRange = 12.0f;
+            atkCool = 0.8f;
+            baseDmg = 6.0f;
+            meshId = m_meshIdArcher;
+            matName = "archer_skin";
+            weaponMesh = m_meshIdBow;
+            speech = "Ready when you are!";
+            break;
+        case NpcClass::MAGE:
+            baseHp = GameConst::NPC_HEALTH_MAGE;
+            speed = 2.8f;
+            atkRange = 14.0f;
+            atkCool = 1.1f;
+            baseDmg = 10.0f;
+            meshId = m_meshIdMage;
+            matName = "mage_skin";
+            weaponMesh = m_meshIdStaff;
+            speech = "Knowledge is power.";
+            break;
+        case NpcClass::ROGUE:
+            baseHp = GameConst::NPC_HEALTH_ROGUE;
+            speed = 4.0f;
+            halfExt = {0.35f, 0.85f, 0.35f};
+            atkRange = 10.0f;
+            atkCool = 0.5f;
+            baseDmg = 5.0f;
+            meshId = m_meshIdRogue;
+            matName = "rogue_skin";
+            weaponMesh = m_meshIdThrowingKnife;
+            speech = "Stick to the shadows.";
+            break;
+        case NpcClass::PALADIN:
+            baseHp = GameConst::NPC_HEALTH_PALADIN;
+            speed = 2.5f;  // slowest — heavy armor
+            halfExt = {0.45f, 0.95f, 0.45f};  // bigger collision
+            atkRange = 2.5f;
+            atkCool = 0.9f;
+            baseDmg = 9.0f;
+            meshId = m_meshIdPaladin;
+            matName = "paladin_skin";
+            weaponMesh = m_meshIdMace;
+            speech = "By the light!";
+            break;
+        default: break;
+    }
+
+    EntityHandle h = EntitySystem::spawn(m_entities, pos,
+        halfExt, false, baseHp, speed, detRange, atkRange, atkCool, baseDmg);
+    Entity* npc = handleGet(m_entities, h);
+    if (!npc) return h;
+
+    npc->flags |= ENT_FRIENDLY;
+    npc->enemyType = EnemyType::SKELETON;
+    npc->aiState = AIState::IDLE;
+    npc->meshId = meshId;
+    npc->materialId = MaterialSystem::getIdByName(matName);
+    npc->weaponMeshId = weaponMesh;
+    npc->npcClass = npcClass;
+    npc->speechText = speech;
+    npc->speechTimer = 4.0f;
+
+    // Set weapon type defaults (overridden by equipment if available)
+    if (npcClass == NpcClass::ARCHER || npcClass == NpcClass::MAGE || npcClass == NpcClass::ROGUE) {
+        npc->npcWeaponType = WeaponType::PROJECTILE;
+        npc->npcProjectileSpeed = 15.0f;
+        npc->npcProjectileRadius = 0.1f;
+    }
+
+    // Allocate equipment slot and roll starting gear
+    for (u32 ei = 0; ei < MAX_NPC_EQUIP; ei++) {
+        if (!m_npcEquip[ei].active) {
+            npc->npcEquipIdx = static_cast<u8>(ei);
+            rollNpcEquipment(m_npcEquip[ei], npcClass, floor);
+            applyNpcEquipmentStats(*npc, m_npcEquip[ei]);
+            break;
+        }
+    }
+
+    return h;
+}
+
+void Engine::upgradeNpcEquipment(u8 newFloor) {
+    // Find surviving friendly NPCs and upgrade their equipment
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if (!(e.flags & ENT_FRIENDLY)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        if (e.npcEquipIdx >= MAX_NPC_EQUIP) continue;
+
+        NpcEquipment& equip = m_npcEquip[e.npcEquipIdx];
+        equip.floorsSurvived++;
+
+        // Re-roll equipment at the new floor level for better stats
+        rollNpcEquipment(equip, e.npcClass, newFloor);
+        // Apply a per-floor bonus multiplier on top of the new gear
+        f32 survivalBonus = 1.0f + equip.floorsSurvived * GameConst::NPC_EQUIP_UPGRADE_MULT;
+        for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
+            if (!isItemEmpty(equip.equipped[s])) {
+                equip.equipped[s].damage *= survivalBonus;
+                equip.equipped[s].bonusHealth *= survivalBonus;
+            }
+        }
+        Inventory::recalculateNpcStats(equip);
+        applyNpcEquipmentStats(e, equip);
+
+        // Heal surviving NPCs fully
+        e.health = e.maxHealth;
+
+        LOG_INFO("NPC (class %u) survived floor — equipment upgraded to floor %u (survival bonus %.0f%%)",
+                 static_cast<u32>(e.npcClass), newFloor, (survivalBonus - 1.0f) * 100.0f);
+    }
 }
 
 void Engine::startGame() {
@@ -733,117 +984,35 @@ void Engine::startGame() {
         m_floorDoorActive = true;
         LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_currentFloor, doorX, doorY, doorZ);
 
-        // Spawn cleric + archer guards near the floor exit
-        {
-            Vec3 npcPos = {m_floorDoorPos.x - 1.5f, m_floorDoorPos.y + 0.9f, m_floorDoorPos.z - 1.0f};
-            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
-                {0.4f, 0.9f, 0.4f}, false, 50.0f, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
-            Entity* npc = handleGet(m_entities, h);
-            if (npc) {
-                npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
-                npc->aiState = AIState::IDLE;
-                npc->speechText = "The way is clear!";
-                npc->speechTimer = 5.0f;
-                npc->meshId = m_meshIdCleric;
-                npc->materialId = MaterialSystem::getIdByName("cleric_skin");
-                npc->weaponMeshId = m_meshIdMace;
-            }
-        }
-        {
-            Vec3 npcPos = {m_floorDoorPos.x + 1.5f, m_floorDoorPos.y + 0.9f, m_floorDoorPos.z - 1.0f};
-            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
-                {0.35f, 0.85f, 0.35f}, false, 50.0f, 3.5f, 15.0f, 2.5f, 0.7f, 12.0f);
-            Entity* npc = handleGet(m_entities, h);
-            if (npc) {
-                npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
-                npc->aiState = AIState::IDLE;
-                npc->speechText = "Hurry, more coming!";
-                npc->speechTimer = 5.0f;
-                npc->meshId = m_meshIdArcher;
-                npc->materialId = MaterialSystem::getIdByName("archer_skin");
-                npc->weaponMeshId = m_meshIdBow;
-            }
-        }
-        LOG_INFO("Spawned cleric and archer guards near floor door");
+        // No guards near exit — all NPCs spawn with the player in the spawn room
     }
 
-    // Spawn 2 distinct friendly NPCs in the spawn room
+    // Spawn 4 friendly NPCs in the spawn room — one of each class
     {
-        // NPC 0: Male Cleric — blonde hair, blue eyes, mace, heavier build
-        {
-            Vec3 npcPos = {dungeon.spawnPos.x - 1.5f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z + 1.0f};
-            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
-                {0.4f, 0.9f, 0.4f}, false,
-                GameConst::NPC_HEALTH, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
-            Entity* npc = handleGet(m_entities, h);
-            if (npc) {
-                npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
-                npc->aiState = AIState::IDLE;
-                npc->speechText = "The light protects!";
-                npc->speechTimer = 4.0f;
-                npc->meshId = m_meshIdCleric;
-                npc->materialId = MaterialSystem::getIdByName("cleric_skin");
-                npc->weaponMeshId = m_meshIdMace;
-            }
+        // Clear NPC equipment pool on floor 1, preserve on descent
+        if (m_currentFloor <= 1) {
+            for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = {};
         }
-        // NPC 1: Female Archer — fox-red ponytail, green eyes, bow, lean build
-        {
-            Vec3 npcPos = {dungeon.spawnPos.x + 1.5f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z + 1.0f};
-            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
-                {0.35f, 0.85f, 0.35f}, false, // slightly smaller
-                GameConst::NPC_HEALTH, 3.5f, 15.0f, 2.5f, 0.7f, 12.0f);
-            Entity* npc = handleGet(m_entities, h);
-            if (npc) {
-                npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
-                npc->aiState = AIState::IDLE;
-                npc->speechText = "Ready when you are!";
-                npc->speechTimer = 4.0f;
-                npc->meshId = m_meshIdArcher;
-                npc->materialId = MaterialSystem::getIdByName("archer_skin");
-                npc->weaponMeshId = m_meshIdBow;
-            }
-        }
-        // NPC 2: Second Cleric — behind player left
-        {
-            Vec3 npcPos = {dungeon.spawnPos.x - 1.0f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z - 1.0f};
-            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
-                {0.4f, 0.9f, 0.4f}, false,
-                GameConst::NPC_HEALTH, 3.0f, 15.0f, 2.5f, 0.8f, 15.0f);
-            Entity* npc = handleGet(m_entities, h);
-            if (npc) {
-                npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
-                npc->aiState = AIState::IDLE;
-                npc->speechText = "Blessings upon you!";
-                npc->speechTimer = 4.0f;
-                npc->meshId = m_meshIdCleric;
-                npc->materialId = MaterialSystem::getIdByName("cleric_skin");
-                npc->weaponMeshId = m_meshIdMace;
-            }
-        }
-        // NPC 3: Second Archer — behind player right
-        {
-            Vec3 npcPos = {dungeon.spawnPos.x + 1.0f, dungeon.spawnPos.y + 0.9f, dungeon.spawnPos.z - 1.0f};
-            EntityHandle h = EntitySystem::spawn(m_entities, npcPos,
-                {0.35f, 0.85f, 0.35f}, false,
-                GameConst::NPC_HEALTH, 3.5f, 15.0f, 2.5f, 0.7f, 12.0f);
-            Entity* npc = handleGet(m_entities, h);
-            if (npc) {
-                npc->flags |= ENT_FRIENDLY;
-                npc->enemyType = EnemyType::SKELETON;
-                npc->aiState = AIState::IDLE;
-                npc->speechText = "I've got your back!";
-                npc->speechTimer = 4.0f;
-                npc->meshId = m_meshIdArcher;
-                npc->materialId = MaterialSystem::getIdByName("archer_skin");
-                npc->weaponMeshId = m_meshIdBow;
-            }
-        }
-        LOG_INFO("Spawned 4 friendly NPCs in spawn room");
+
+        u8 floor = static_cast<u8>(m_currentFloor);
+        f32 sy = dungeon.spawnPos.y + 0.9f;
+
+        // NPC 0: Cleric — front left
+        spawnFriendlyNpc({dungeon.spawnPos.x - 1.5f, sy, dungeon.spawnPos.z + 1.0f},
+                          NpcClass::CLERIC, floor);
+        // NPC 1: Archer — front right
+        spawnFriendlyNpc({dungeon.spawnPos.x + 1.5f, sy, dungeon.spawnPos.z + 1.0f},
+                          NpcClass::ARCHER, floor);
+        // NPC 2: Mage — back left
+        spawnFriendlyNpc({dungeon.spawnPos.x - 1.0f, sy, dungeon.spawnPos.z - 1.0f},
+                          NpcClass::MAGE, floor);
+        // NPC 3: Rogue — back right
+        spawnFriendlyNpc({dungeon.spawnPos.x + 1.0f, sy, dungeon.spawnPos.z - 1.0f},
+                          NpcClass::ROGUE, floor);
+        // NPC 4: Paladin — center back
+        spawnFriendlyNpc({dungeon.spawnPos.x, sy, dungeon.spawnPos.z - 1.5f},
+                          NpcClass::PALADIN, floor);
+        LOG_INFO("Spawned 5 friendly NPCs (cleric, archer, mage, rogue, paladin) in spawn room");
     }
 
     ProjectileSystem::init(m_projectiles);
@@ -1311,13 +1480,23 @@ void Engine::singleplayerUpdate(f32 dt) {
         u32 idx = m_entities.activeList[a];
         Entity& e = m_entities.entities[idx];
         if (e.speechTimer > 0.0f) {
-            // Log to chat on the first frame of a new speech (timer near max)
-            if (e.speechText && e.speechTimer > 3.5f) {
+            // Log new speech to the chat log. We detect "first frame" by
+            // checking a negative-flag trick: aiCheckIdx bit 15 is set once logged,
+            // cleared when speechText changes. Simpler: just compare last-logged
+            // pointer. Use the animTimer trick: if speechTimer > 2.0 it's fresh spawn
+            // speech, otherwise it's combat/hurt speech that may repeat.
+            // Simplest: always log, but cap speechTimer to prevent re-entry.
+            if (e.speechText && e.speechTimer > 1.9f) {
                 const char* name = "???";
                 if (e.flags & ENT_FRIENDLY) {
-                    if (e.meshId == m_meshIdCleric) name = "Cleric";
-                    else if (e.meshId == m_meshIdArcher) name = "Archer";
-                    else name = "Ally";
+                    switch (e.npcClass) {
+                        case NpcClass::CLERIC:  name = "Cleric";  break;
+                        case NpcClass::ARCHER:  name = "Archer";  break;
+                        case NpcClass::MAGE:    name = "Mage";    break;
+                        case NpcClass::ROGUE:   name = "Rogue";   break;
+                        case NpcClass::PALADIN: name = "Paladin"; break;
+                        default:                name = "Ally";     break;
+                    }
                 } else if (e.enemyType == EnemyType::BOSS) {
                     name = "Butcher";
                 }
@@ -1325,7 +1504,7 @@ void Engine::singleplayerUpdate(f32 dt) {
                     ? Vec3{0.4f, 1.0f, 0.5f}
                     : Vec3{1.0f, 0.3f, 0.3f};
                 addChatMessage(name, e.speechText, chatCol);
-                e.speechTimer = 3.4f; // prevent re-logging
+                e.speechTimer = 1.8f; // prevent re-logging on next tick
             }
             e.speechTimer -= dt;
             if (e.speechTimer <= 0.0f) {
@@ -1521,6 +1700,8 @@ bool Engine::updateFloorDoor() {
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isKeyPressed(SDL_SCANCODE_E)) {
                 m_currentFloor++;
+                // Upgrade equipment for NPCs that survived this floor
+                upgradeNpcEquipment(static_cast<u8>(m_currentFloor));
                 // Save progress before descending so death respawn returns here
                 m_savedFloor = m_currentFloor;
                 m_savedSeed = static_cast<u32>(std::rand());
@@ -2982,8 +3163,11 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
         const Entity& e = speechPool.entities[idx];
         if (!e.speechText || e.speechTimer <= 0.0f) continue;
 
-        // Project a point above the entity's head into clip space
-        Vec3 headPos = e.position + Vec3{0, e.halfExtents.y * 2.0f + 0.3f, 0};
+        // Project a point above the entity's head into clip space.
+        // The mesh is rendered with feet at (position.y - halfExtents.y) and the
+        // top at (position.y + halfExtents.y), so the bubble sits 0.5m above that.
+        f32 topOfHead = e.position.y + e.halfExtents.y;
+        Vec3 headPos = {e.position.x, topOfHead + 0.5f, e.position.z};
 
         // Manual column-major Mat4 * Vec4 (no operator overload assumed)
         const f32* vp = m_camera.viewProjection.m;
@@ -3002,6 +3186,12 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
         // Cull bubbles that are well off-screen
         if (screenX < -100.0f || screenX > static_cast<f32>(sw) + 100.0f) continue;
         if (screenY < -50.0f  || screenY > static_cast<f32>(sh) + 50.0f)  continue;
+
+        // drawSpeechBubble places text starting at y going downward, so shift
+        // the screen position up by the bubble height so it appears ABOVE the head
+        f32 textH = FontSystem::textHeight(1);
+        f32 bubbleH = textH + 8.0f + 6.0f; // text + padding + triangle
+        screenY -= bubbleH;
 
         // Fade alpha in the last second of the timer
         f32 alpha = (e.speechTimer < 1.0f) ? e.speechTimer : 1.0f;

@@ -167,25 +167,41 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.yaw = atan2f(-dirToEnemy.x, -dirToEnemy.z);
                 }
 
-                if (eDist > e.attackRange) {
+                // Ranged NPCs stop further away than melee
+                f32 engageRange = e.attackRange;
+
+                if (eDist > engageRange) {
                     // Chase: move toward enemy on XZ plane
                     Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0.0f, dirToEnemy.z});
                     e.velocity.x = flatDir.x * e.moveSpeed;
                     e.velocity.z = flatDir.z * e.moveSpeed;
                     entityMoveAndSlide(e, grid, dt);
                 } else {
-                    // Attack: stand still and swing
+                    // In range — attack using weapon type
                     e.velocity = {0, 0, 0};
                     e.attackTimer -= dt;
                     if (e.attackTimer <= 0.0f) {
                         e.attackTimer = e.attackCooldown;
                         e.attackAnimT = 0.3f;
 
-                        // Deal damage to the enemy entity
                         Entity& target = pool.entities[bestEnemyIdx];
                         if (!(target.flags & ENT_DEAD)) {
-                            EntityHandle th = {bestEnemyIdx, target.generation};
-                            Combat::applyDamage(pool, th, e.damage);
+                            Vec3 eyePos = e.position + Vec3{0, e.halfExtents.y, 0};
+
+                            if (e.npcWeaponType == WeaponType::PROJECTILE) {
+                                // Ranged NPCs fire projectiles toward the enemy
+                                Vec3 targetCenter = target.position + Vec3{0, target.halfExtents.y, 0};
+                                Vec3 fireDir = normalize(targetCenter - eyePos);
+                                f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
+                                f32 radius = e.npcProjectileRadius > 0.0f ? e.npcProjectileRadius : 0.1f;
+                                // Spawn a projectile (fromPlayer=false so it hits enemies)
+                                ProjectileSystem::spawn(projectiles, eyePos,
+                                    fireDir, speed, e.damage, radius, 3.0f, true);
+                            } else {
+                                // Melee: direct damage like before
+                                EntityHandle th = {bestEnemyIdx, target.generation};
+                                Combat::applyDamage(pool, th, e.damage);
+                            }
 
                             // Random attack speech (1-in-5 chance)
                             if ((std::rand() % 5) == 0) {

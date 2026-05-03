@@ -542,6 +542,49 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
         inv.bonusCooldownReduction = 0.5f;
 }
 
+void Inventory::recalculateNpcStats(NpcEquipment& equip) {
+    // Same logic as recalculateStats but operates on the NPC equipment struct
+    equip.bonusDamageFlat         = 0.0f;
+    equip.bonusDamagePct          = 0.0f;
+    equip.bonusHealthFlat         = 0.0f;
+    equip.bonusHealthPct          = 0.0f;
+    equip.bonusMoveSpeed          = 0.0f;
+    equip.bonusCooldownReduction  = 0.0f;
+    equip.bonusLifeOnHit          = 0.0f;
+    equip.bonusProjectileSpeedPct = 0.0f;
+    equip.bonusConeAngle          = 0.0f;
+    equip.bonusRange              = 0.0f;
+    equip.bonusDamageToFlying     = 0.0f;
+
+    for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
+        const ItemInstance& equipped = equip.equipped[s];
+        if (isItemEmpty(equipped)) continue;
+
+        // Add health from armor items
+        equip.bonusHealthFlat += equipped.bonusHealth;
+
+        for (u8 a = 0; a < equipped.affixCount; a++) {
+            const Affix& affix = equipped.affixes[a];
+            switch (affix.type) {
+                case AffixType::DAMAGE_FLAT:        equip.bonusDamageFlat         += affix.value; break;
+                case AffixType::HEALTH_FLAT:        equip.bonusHealthFlat         += affix.value; break;
+                case AffixType::MOVE_SPEED_FLAT:    equip.bonusMoveSpeed          += affix.value; break;
+                case AffixType::DAMAGE_PCT:         equip.bonusDamagePct          += affix.value; break;
+                case AffixType::COOLDOWN_REDUCTION: equip.bonusCooldownReduction  += affix.value; break;
+                case AffixType::HEALTH_PCT:         equip.bonusHealthPct          += affix.value; break;
+                case AffixType::LIFE_ON_HIT:        equip.bonusLifeOnHit          += affix.value; break;
+                case AffixType::PROJECTILE_SPEED:   equip.bonusProjectileSpeedPct += affix.value; break;
+                case AffixType::CONE_ANGLE:         equip.bonusConeAngle          += affix.value; break;
+                case AffixType::RANGE_BONUS:        equip.bonusRange              += affix.value; break;
+                case AffixType::DAMAGE_TO_FLYING:   equip.bonusDamageToFlying     += affix.value; break;
+                default: break;
+            }
+        }
+    }
+    if (equip.bonusCooldownReduction > 0.5f)
+        equip.bonusCooldownReduction = 0.5f;
+}
+
 bool Inventory::addToBackpack(PlayerInventory& inv, const ItemInstance& item) {
     // First look for an empty slot among already-used slots
     for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++) {

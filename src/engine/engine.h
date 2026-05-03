@@ -103,6 +103,18 @@ private:
     EntityPool     m_entities;
     ProjectilePool m_projectiles;
 
+    // NPC equipment pool — persistent across floor transitions for surviving NPCs
+    NpcEquipment   m_npcEquip[MAX_NPC_EQUIP] = {};
+
+    // Spawn a friendly NPC with class-appropriate equipment, returns entity handle
+    EntityHandle spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor);
+    // Roll class-appropriate starting equipment for an NPC at the given floor level
+    void rollNpcEquipment(NpcEquipment& equip, NpcClass npcClass, u8 floor);
+    // Recalculate NPC stats from equipment (mirrors Inventory::recalculateStats)
+    void applyNpcEquipmentStats(Entity& e, const NpcEquipment& equip);
+    // Upgrade equipment for NPCs that survived the floor
+    void upgradeNpcEquipment(u8 newFloor);
+
     // Render copies for client interpolation
     EntityPool     m_renderEntities;
     ProjectilePool m_renderProjectiles;
@@ -144,6 +156,7 @@ private:
     u8 m_meshIdChest = 0, m_meshIdHuman = 0;
     u8 m_meshIdSword = 0, m_meshIdDagger = 0, m_meshIdAxe = 0;
     u8 m_meshIdMace = 0, m_meshIdCleric = 0, m_meshIdArcher = 0, m_meshIdBow = 0;
+    u8 m_meshIdMage = 0, m_meshIdRogue = 0, m_meshIdPaladin = 0, m_meshIdStaff = 0, m_meshIdThrowingKnife = 0;
     u8 m_meshIdButcher = 0, m_meshIdCleaver = 0, m_meshIdIronMaiden = 0;
 
     // Switch constraint mode

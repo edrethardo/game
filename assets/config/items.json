@@ -820,6 +820,58 @@
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
       "dropWeight": 0.5
+    },
+    {
+      "name": "Apprentice Staff",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "weaponSubtype": "wand",
+      "mesh": "staff",
+      "material": "weapon_staff",
+      "baseDamage": 18.0,
+      "baseCooldown": 0.55,
+      "baseProjectileSpeed": 14.0,
+      "baseProjectileRadius": 0.12,
+      "baseRecoil": 0.01,
+      "minLevel": 1,
+      "maxLevel": 5,
+      "maxRarity": "rare",
+      "dropWeight": 0.8
+    },
+    {
+      "name": "Arcane Staff",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "weaponSubtype": "wand",
+      "mesh": "staff",
+      "material": "weapon_staff",
+      "baseDamage": 28.0,
+      "baseCooldown": 0.50,
+      "baseProjectileSpeed": 16.0,
+      "baseProjectileRadius": 0.14,
+      "baseRecoil": 0.012,
+      "minLevel": 3,
+      "maxLevel": 8,
+      "maxRarity": "rare",
+      "dropWeight": 0.7
+    },
+    {
+      "name": "Staff of the Void",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "weaponSubtype": "wand",
+      "mesh": "staff",
+      "material": "weapon_staff",
+      "baseDamage": 38.0,
+      "baseCooldown": 0.45,
+      "baseProjectileSpeed": 18.0,
+      "baseProjectileRadius": 0.16,
+      "baseRecoil": 0.015,
+      "minLevel": 6,
+      "maxLevel": 10,
+      "maxRarity": "legendary",
+      "legendarySkill": "meteor_strike",
+      "dropWeight": 0.5
     }
   ]
 }

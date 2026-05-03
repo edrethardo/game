@@ -754,6 +754,253 @@ def gen_archer(height=1.7):
     return mb
 
 
+def gen_mage(height=1.8):
+    """Male mage NPC. Robed spellcaster with a pointed wizard hat.
+
+    Origin at feet (Y=0). Slightly narrower build than cleric, tall hat adds
+    height above gy=15. Long robes hide the legs.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)  # chin
+    # Eye sockets (front face only)
+    filled.discard((-1, 14, -2))
+    filled.discard((1, 14, -2))
+    # Mouth
+    filled.discard((0, 12, -2))
+
+    # Pointed wizard hat — wide brim narrows to a tip
+    fill_box(-2, 16, -2, 5, 1, 4)  # brim, gy=16, 5 wide
+    fill_box(-1, 17, -2, 3, 1, 4)  # middle, gy=17, 3 wide
+    fill_box(0, 18, -1, 1, 1, 2)   # pointed tip, gy=18, 1 wide
+
+    # Hood/collar
+    fill_box(-2, 11, -1, 5, 2, 3)
+
+    # Torso — narrower robe than cleric (gx -3 to 3, 7 wide)
+    fill_box(-3, 5, -1, 7, 6, 3)
+    # Slight shoulder guards
+    fill_box(-4, 9, 0, 1, 2, 1)
+    fill_box(4, 9, 0, 1, 2, 1)
+
+    # Belt/sash
+    fill_box(-3, 4, -1, 7, 1, 3)
+
+    # Arms (sleeves, same width as cleric)
+    fill_box(-4, 7, 0, 1, 3, 1)
+    fill_box(4, 7, 0, 1, 3, 1)
+    fill_box(-4, 4, 0, 1, 3, 1)
+    fill_box(4, 4, 0, 1, 3, 1)
+    # Hands
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box(4, 3, -1, 1, 1, 2)
+
+    # Legs hidden under robes
+    fill_box(-2, 2, -1, 2, 2, 2)
+    fill_box(1, 2, -1, 2, 2, 2)
+    fill_box(-2, 0, -1, 2, 2, 2)
+    fill_box(1, 0, -1, 2, 2, 2)
+    # Boots
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box(1, 0, -2, 2, 1, 3)
+
+    # Remap back-of-head voxels in eye columns so eye pixel doesn't bleed
+    # through to the rear faces.
+    uv_fix = {}
+    for gz in range(0, 2):
+        uv_fix[(-1, 14, gz)] = (0, 14)
+        uv_fix[(1, 14, gz)]  = (0, 14)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
+    return mb
+
+
+def gen_rogue(height=1.7):
+    """Male rogue NPC. Lean hooded figure with cape, lean armor.
+
+    Origin at feet (Y=0). Similar proportions to archer but darker and
+    with a hood and a thin back cape.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)  # chin
+    # Eye sockets (front face only)
+    filled.discard((-1, 14, -2))
+    filled.discard((1, 14, -2))
+    # Mouth
+    filled.discard((0, 12, -2))
+
+    # Hood — covers top and wraps down sides of head
+    fill_box(-2, 15, -2, 5, 2, 4)  # top of hood
+    fill_box(-2, 13, 1, 1, 3, 1)   # left side drape
+    fill_box(2, 13, 1, 1, 3, 1)    # right side drape
+
+    # Neck
+    fill_box(0, 11, 0, 1, 1, 1)
+
+    # Slim torso
+    fill_box(-2, 8, -1, 4, 3, 3)   # upper chest (lean)
+
+    # Narrow waist/belt
+    fill_box(-1, 6, -1, 3, 2, 3)
+    fill_box(-2, 5, -1, 5, 1, 3)   # belt row
+
+    # Hips
+    fill_box(-2, 4, -1, 5, 1, 3)
+
+    # Cape at back — thin voxels along gz=2 from gy=4 to gy=10
+    for gy in range(4, 11):
+        filled.add((-1, gy, 2))
+        filled.add((0, gy, 2))
+        filled.add((1, gy, 2))
+
+    # Arms (lean, gx=-3 and gx=2 like archer)
+    fill_box(-3, 7, 0, 1, 3, 1)
+    fill_box(2, 7, 0, 1, 3, 1)
+    fill_box(-3, 4, 0, 1, 3, 1)
+    fill_box(2, 4, 0, 1, 3, 1)
+    # Hands
+    fill_box(-3, 3, -1, 1, 1, 2)
+    fill_box(2, 3, -1, 1, 1, 2)
+
+    # Legs
+    fill_box(-2, 2, -1, 2, 2, 2)
+    fill_box(1, 2, -1, 2, 2, 2)
+    fill_box(-2, 0, 0, 1, 2, 1)
+    fill_box(1, 0, 0, 1, 2, 1)
+    # Boots
+    fill_box(-2, 0, -1, 1, 1, 2)
+    fill_box(1, 0, -1, 1, 1, 2)
+
+    # Remap back-of-head voxels in eye columns to skin color.
+    uv_fix = {}
+    for gz in range(0, 2):
+        uv_fix[(-1, 14, gz)] = (0, 14)
+        uv_fix[(1, 14, gz)]  = (0, 14)
+    # Remap cape voxels at face gy levels to avoid picking up face texture.
+    for gy in range(4, 11):
+        uv_fix[(-1, gy, 2)] = (0, 8)   # leather armor pixel
+        uv_fix[(0, gy, 2)]  = (0, 8)
+        uv_fix[(1, gy, 2)]  = (0, 8)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
+    return mb
+
+
+def gen_paladin(height=1.85):
+    """Male paladin NPC. Heavy plate armor, broad build, flat-top helm.
+
+    Origin at feet (Y=0). Stockier and wider than the cleric — full plate
+    coverage with large pauldrons and thick armored limbs. No hair visible.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head (same width as cleric — 5 wide)
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)  # chin
+    # Eye sockets (front face only — visor opening)
+    filled.discard((-1, 14, -2))
+    filled.discard((1, 14, -2))
+    # Mouth/chin slot
+    filled.discard((0, 12, -2))
+
+    # Flat-top great helm — full coverage, no hair
+    fill_box(-2, 15, -2, 5, 2, 4)  # helm main block (gy=15-16)
+    # Visor slit: remove front row at gy=15 to create a narrow eye opening
+    for gx in range(-2, 3):
+        filled.discard((gx, 15, -2))
+
+    # Wide torso — heavier plate than cleric (gx -3 to 3, 7 wide)
+    fill_box(-3, 5, -1, 7, 6, 3)
+    # Large pauldrons (shoulder armor — gx -4 with w=2, gx 3 with w=2)
+    fill_box(-4, 9, -1, 2, 2, 3)   # left pauldron
+    fill_box(3, 9, -1, 2, 2, 3)    # right pauldron
+
+    # Belt/tassets row
+    fill_box(-3, 4, -1, 7, 1, 3)
+
+    # Thick armored arms (2 voxels each side: gx=-4,-5 left, gx=4,5 right,
+    # but pauldrons only go to gx=-4 so arms are at gx=-4 only — keep
+    # consistent with pauldron width; arms attach below pauldron at gy=7-8)
+    fill_box(-4, 7, 0, 1, 2, 1)    # left upper arm
+    fill_box(4, 7, 0, 1, 2, 1)     # right upper arm
+    fill_box(-4, 4, 0, 1, 3, 1)    # left lower arm
+    fill_box(4, 4, 0, 1, 3, 1)     # right lower arm
+    # Gauntlets
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box(4, 3, -1, 1, 1, 2)
+
+    # Thick armored legs
+    fill_box(-2, 2, -1, 2, 2, 2)   # left thigh
+    fill_box(1, 2, -1, 2, 2, 2)    # right thigh
+    fill_box(-2, 0, -1, 2, 2, 2)   # left greave
+    fill_box(1, 0, -1, 2, 2, 2)    # right greave
+    # Armored sabatons (boots with extra front coverage)
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box(1, 0, -2, 2, 1, 3)
+
+    # Remap back-of-head voxels at eye-column gy=14 to skin color so eye
+    # glow doesn't bleed to the rear helmet faces.  gz=-1 (eyeball behind
+    # the visor slot) keeps the eye color; gz=0 and gz=1 are remapped.
+    uv_fix = {}
+    for gz in range(0, 2):      # gz=0 and gz=1 (behind front face)
+        uv_fix[(-1, 14, gz)] = (0, 14)   # center column = skin/neutral pixel
+        uv_fix[(1, 14, gz)]  = (0, 14)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
+    return mb
+
+
+def gen_staff(height=1.2):
+    """Staff weapon mesh — tall thin rod with crystal tip.
+
+    Origin at base (Y=0). About 1.2 units tall, 0.06 wide shaft with a
+    slightly larger crystal orb at the top.
+    """
+    mb = MeshBuilder()
+    # Shaft — thin rod for most of the height
+    add_box(mb, center=(0.0, height * 0.85 * 0.5, 0.0),
+            half_extents=(0.03, height * 0.85 * 0.5, 0.03))
+    # Crystal/orb on top — slightly larger box
+    add_box(mb, center=(0.0, height * 0.82 + 0.09, 0.0),
+            half_extents=(0.06, 0.09, 0.06))
+    return mb
+
+
 def gen_butcher(height=2.5):
     """Large demon boss — The Butcher. Massive build, horns, red-tinted.
 
@@ -856,6 +1103,26 @@ MESH_TYPES = {
         "desc": "Female archer NPC with ponytail and quiver. Params: --height",
         "default_file": "archer.obj",
     },
+    "mage": {
+        "func": gen_mage,
+        "desc": "Male mage NPC with wizard hat and robes. Params: --height",
+        "default_file": "mage.obj",
+    },
+    "rogue": {
+        "func": gen_rogue,
+        "desc": "Male rogue NPC with hood and cape. Params: --height",
+        "default_file": "rogue.obj",
+    },
+    "paladin": {
+        "func": gen_paladin,
+        "desc": "Male paladin NPC with heavy plate armor and helm. Params: --height",
+        "default_file": "paladin.obj",
+    },
+    "staff": {
+        "func": gen_staff,
+        "desc": "Staff weapon — thin rod with crystal tip. Params: --height",
+        "default_file": "staff.obj",
+    },
     "spider": {
         "func": gen_spider,
         "desc": "Barony-style voxel spider. Params: --radius",
@@ -934,7 +1201,8 @@ def main():
     kwargs = {}
     mtype = args.type
 
-    if mtype in ("humanoid", "human", "cleric", "archer", "butcher"):
+    if mtype in ("humanoid", "human", "cleric", "archer", "butcher",
+                 "mage", "rogue", "paladin", "staff"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "spider":

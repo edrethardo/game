@@ -225,6 +225,117 @@ def skin_archer():
     return w, h, p
 
 
+def skin_mage():
+    """Grid: gx=-4..4 (w=9), gy=0..18 (h=19). Hat adds rows above 15."""
+    w, h = 9, 19
+    p = {}
+    for py in range(h):
+        for px in range(w):
+            if py >= 16:
+                p[(px, py)] = (60, 30, 100, 255)    # hat — deep purple
+            elif py == 15:
+                p[(px, py)] = (60, 40, 25, 255)     # hair under hat brim
+            elif py >= 13:
+                p[(px, py)] = (200, 175, 155, 255)  # skin (pale)
+            elif py >= 11:
+                p[(px, py)] = (70, 40, 110, 255)    # hood/collar — dark purple
+            elif py >= 5:
+                p[(px, py)] = (50, 35, 90, 255)     # robes — dark blue/purple
+            elif py >= 4:
+                p[(px, py)] = (160, 130, 50, 255)   # belt — gold
+            elif py >= 1:
+                p[(px, py)] = (50, 35, 90, 255)     # lower robe
+            else:
+                p[(px, py)] = (50, 40, 35, 255)     # boots
+    # Arcane purple eyes: gx offsets relative to min_gx=-4, so px = gx+4
+    # Left eye at gx=-1 -> px=3, right eye at gx=1 -> px=5
+    p[(3, 14)] = (140, 60, 200, 255)
+    p[(5, 14)] = (140, 60, 200, 255)
+    return w, h, p
+
+
+def skin_rogue():
+    """Grid: gx=-3..2 (w=6), gy=0..16 (h=17). Hood adds rows above 14."""
+    w, h = 6, 17
+    p = {}
+    for py in range(h):
+        for px in range(w):
+            if py >= 15:
+                p[(px, py)] = (40, 35, 35, 255)    # hood — very dark gray
+            elif py >= 13:
+                p[(px, py)] = (195, 165, 130, 255)  # skin — slightly tanned
+            elif py >= 11:
+                p[(px, py)] = (50, 45, 45, 255)    # hood sides — dark gray
+            elif py >= 8:
+                p[(px, py)] = (60, 45, 30, 255)    # leather armor
+            elif py >= 6:
+                p[(px, py)] = (35, 30, 25, 255)    # black belt/narrow waist
+            elif py >= 4:
+                p[(px, py)] = (55, 50, 45, 255)    # pants — dark gray
+            elif py >= 2:
+                p[(px, py)] = (50, 45, 40, 255)    # legs — dark
+            else:
+                p[(px, py)] = (30, 25, 22, 255)    # boots — black
+    # Amber/yellow eyes: gx offsets relative to min_gx=-3, so px = gx+3
+    # Left eye at gx=-1 -> px=2, right eye at gx=1 -> px=4
+    p[(2, 14)] = (200, 170, 40, 255)
+    p[(4, 14)] = (200, 170, 40, 255)
+    return w, h, p
+
+
+def skin_paladin():
+    """Grid: gx=-4..4 (w=9), gy=0..16 (h=17). Pauldrons reach gx=-4/4.
+
+    Full plate armor — silvery steel head to toe with gold trim at belt
+    and a holy cross on the chest. Warm gold eyes visible through the
+    visor slit (gy=14 is the eye row).
+    """
+    w, h = 9, 17
+    # px = gx - min_gx = gx + 4,  py = gy
+    p = {}
+    for py in range(h):
+        for px in range(w):
+            if py >= 15:
+                # Flat-top helm — silvery steel
+                p[(px, py)] = (160, 160, 170, 255)
+            elif py >= 13:
+                # Face/skin visible through visor (gy=13-14)
+                p[(px, py)] = (210, 180, 150, 255)
+            elif py >= 11:
+                # Gorget / neck armor — slightly darker steel
+                p[(px, py)] = (130, 130, 140, 255)
+            elif py >= 5:
+                # Plate breastplate + pauldrons (gy=5-10)
+                p[(px, py)] = (150, 150, 160, 255)
+            elif py >= 4:
+                # Belt/tassets — gold/brass
+                p[(px, py)] = (170, 145, 60, 255)
+            elif py >= 1:
+                # Leg armor — slightly warmer steel
+                p[(px, py)] = (140, 140, 150, 255)
+            else:
+                # Sabatons (armored boots) — dark steel
+                p[(px, py)] = (90, 90, 100, 255)
+
+    # Warm gold eyes through visor slit — gx=-1 -> px=3, gx=1 -> px=5
+    p[(3, 14)] = (200, 180, 60, 255)
+    p[(5, 14)] = (200, 180, 60, 255)
+
+    # Holy cross on breastplate at gy=8 (center column px=4 = gx=0)
+    p[(4, 8)] = (170, 145, 60, 255)   # cross center — gold
+    p[(4, 9)] = (170, 145, 60, 255)   # cross vertical arm up
+    p[(4, 7)] = (170, 145, 60, 255)   # cross vertical arm down
+    p[(3, 8)] = (170, 145, 60, 255)   # cross horizontal arm left
+    p[(5, 8)] = (170, 145, 60, 255)   # cross horizontal arm right
+
+    # Pauldron highlight — slightly brighter on outer columns
+    for py in range(9, 11):
+        p[(0, py)] = (175, 175, 185, 255)   # left pauldron outer (gx=-4 -> px=0)
+        p[(8, py)] = (175, 175, 185, 255)   # right pauldron outer (gx=4 -> px=8)
+
+    return w, h, p
+
+
 def skin_butcher():
     """Grid: approx w=11, h=21."""
     w, h = 11, 21
@@ -260,6 +371,9 @@ SKIN_TYPES = {
     "human":    ("human_skin_42.png",    skin_human),
     "cleric":   ("cleric_skin_42.png",   skin_cleric),
     "archer":   ("archer_skin_42.png",   skin_archer),
+    "mage":     ("mage_skin_42.png",     skin_mage),
+    "rogue":    ("rogue_skin_42.png",    skin_rogue),
+    "paladin":  ("paladin_skin_42.png",  skin_paladin),
     "butcher":  ("butcher_skin_42.png",  skin_butcher),
 }
 

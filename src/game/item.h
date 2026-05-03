@@ -215,6 +215,26 @@ struct SkillState {
     f32     maxEnergy      = 100.0f;
 };
 
+// ---- NPC equipment (simplified — no backpack, just 6 equipped slots) ----
+
+struct NpcEquipment {
+    ItemInstance equipped[static_cast<u32>(ItemSlot::COUNT)] = {};
+    // Cached stat bonuses (same layout as PlayerInventory)
+    f32 bonusDamageFlat         = 0.0f;
+    f32 bonusDamagePct          = 0.0f;
+    f32 bonusHealthFlat         = 0.0f;
+    f32 bonusHealthPct          = 0.0f;
+    f32 bonusMoveSpeed          = 0.0f;
+    f32 bonusCooldownReduction  = 0.0f;
+    f32 bonusLifeOnHit          = 0.0f;
+    f32 bonusProjectileSpeedPct = 0.0f;
+    f32 bonusConeAngle          = 0.0f;
+    f32 bonusRange              = 0.0f;
+    f32 bonusDamageToFlying     = 0.0f;
+    bool active = false;
+    u8   floorsSurvived = 0;  // how many floors this NPC has survived (for upgrades)
+};
+
 // ---- Player inventory ----
 
 // Player equipment + backpack. Stat bonuses are cached and recalculated on equip/unequip.
@@ -322,6 +342,8 @@ namespace ItemGen {
 namespace Inventory {
     void init(PlayerInventory& inv);
     void recalculateStats(PlayerInventory& inv);
+    // Recalculate cached stat bonuses for NPC equipment (same logic, different struct)
+    void recalculateNpcStats(NpcEquipment& equip);
     bool addToBackpack(PlayerInventory& inv, const ItemInstance& item);
     void equip(PlayerInventory& inv, u8 backpackIndex, const ItemDef* itemDefs);
     bool unequip(PlayerInventory& inv, ItemSlot slot);

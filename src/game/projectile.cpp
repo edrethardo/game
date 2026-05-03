@@ -115,12 +115,14 @@ void ProjectileSystem::update(ProjectilePool& pool,
         };
 
         if (p.fromPlayer) {
-            // Hit enemies
+            // Hit hostile enemies only (skip friendlies so NPC projectiles
+            // don't damage allies)
             bool hit = false;
             for (u32 a = 0; a < entities.activeCount; a++) {
                 u32 e = entities.activeList[a];
                 Entity& ent = entities.entities[e];
                 if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
 
                 if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                     EntityHandle h = {static_cast<u16>(e), ent.generation};
@@ -136,6 +138,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         u32 e2 = entities.activeList[a2];
                         Entity& ent2 = entities.entities[e2];
                         if (ent2.flags & ENT_DEAD) continue;
+                        if (ent2.flags & ENT_FRIENDLY) continue;
                         Vec3 delta = ent2.position - p.position;
                         f32 dist = length(delta);
                         if (dist < p.splashRadius) {
