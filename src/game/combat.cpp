@@ -124,7 +124,9 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
                             ProjectilePool& projectiles,
                             u8 extraFlags)
 {
-    return ProjectileSystem::spawn(projectiles, eyePos, forward,
+    // Spawn 1m ahead of the camera so the projectile doesn't clip the viewmodel
+    Vec3 spawnPos = eyePos + forward * 1.0f;
+    return ProjectileSystem::spawn(projectiles, spawnPos, forward,
                                     weapon.projectileSpeed, weapon.damage,
                                     weapon.projectileRadius, 3.0f, true, extraFlags);
 }
@@ -134,7 +136,8 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
                             ProjectilePool& projectiles,
                             f32 gravity, f32 splashRadius, f32 splashDamage)
 {
-    u16 idx = ProjectileSystem::spawn(projectiles, eyePos, forward,
+    Vec3 spawnPos = eyePos + forward * 1.0f;
+    u16 idx = ProjectileSystem::spawn(projectiles, spawnPos, forward,
                                        weapon.projectileSpeed, weapon.damage,
                                        weapon.projectileRadius, 5.0f, true);
     if (idx != 0xFFFF) {
