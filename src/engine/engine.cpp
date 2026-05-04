@@ -658,8 +658,13 @@ void Engine::saveGame() {
     // Skill state
     std::fwrite(&m_skillStates[0], sizeof(SkillState), 1, f);
 
+    // Player class
+    std::fwrite(&m_playerClass, sizeof(m_playerClass), 1, f);
+    std::fwrite(&m_activeClassSkill, sizeof(m_activeClassSkill), 1, f);
+    std::fwrite(m_classSkillStates, sizeof(m_classSkillStates), 1, f);
+
     std::fclose(f);
-    LOG_INFO("Game saved at floor %u", m_savedFloor);
+    LOG_INFO("Game saved at floor %u (class %u)", m_savedFloor, static_cast<u32>(m_playerClass));
 }
 
 bool Engine::loadGame() {
@@ -687,6 +692,15 @@ bool Engine::loadGame() {
     SkillState loadedSkill = {};
     ok = ok && std::fread(&loadedSkill, sizeof(SkillState), 1, f) == 1;
 
+    // Player class (may not exist in old saves — defaults to WARRIOR)
+    PlayerClass loadedClass = PlayerClass::WARRIOR;
+    u8 loadedActiveSkill = 0;
+    SkillState loadedClassSkills[4] = {};
+    if (std::fread(&loadedClass, sizeof(loadedClass), 1, f) == 1) {
+        std::fread(&loadedActiveSkill, sizeof(loadedActiveSkill), 1, f);
+        std::fread(loadedClassSkills, sizeof(loadedClassSkills), 1, f);
+    }
+
     std::fclose(f);
 
     if (ok) {
@@ -695,7 +709,24 @@ bool Engine::loadGame() {
         m_inventories[0] = loadedInv;
         m_quickbars[0] = loadedQb;
         m_skillStates[0] = loadedSkill;
-        LOG_INFO("Game loaded: floor %u, HP %.0f/%.0f", m_savedFloor, hp, maxHp);
+
+        // Restore player class and re-apply class-specific stats
+        m_playerClass = loadedClass;
+        m_activeClassSkill = loadedActiveSkill;
+        for (u32 s = 0; s < 4; s++) m_classSkillStates[s] = loadedClassSkills[s];
+
+        if (static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+            m_localPlayer.moveSpeed = cls.baseMoveSpeed;
+            m_skillStates[0].maxEnergy = cls.baseEnergy;
+            // Re-sync class skill active IDs
+            for (u32 s = 0; s < 4; s++) {
+                m_classSkillStates[s].activeSkill = cls.skills[s];
+            }
+        }
+
+        LOG_INFO("Game loaded: floor %u, class %u, HP %.0f/%.0f",
+                 m_savedFloor, static_cast<u32>(m_playerClass), hp, maxHp);
     }
     return ok;
 }
@@ -1690,12 +1721,38 @@ void Engine::update(f32 dt) {
         return;
     }
 
+    // Pause/quit selection menu
+    if (m_confirmQuit) {
+        if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menuSubSelection > 0) m_menuSubSelection--;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menuSubSelection < 1) m_menuSubSelection++;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            m_confirmQuit = false; // ESC again = resume
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            if (m_menuSubSelection == 0) {
+                // Continue Playing
+                m_confirmQuit = false;
+            } else {
+                // Save and Quit
+                m_confirmQuit = false;
+                saveGame();
+                m_gameState = GameState::MENU;
+                Input::setRelativeMouseMode(false);
+            }
+        }
+        return;
+    }
+
     if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
         if (m_gameState == GameState::MENU) {
-            m_running = false; // ESC on menu exits the game
+            m_running = false;
         } else if (m_gameState == GameState::IN_GAME) {
-            m_gameState = GameState::MENU; // ESC in game returns to menu
-            Input::setRelativeMouseMode(false);
+            m_confirmQuit = true;
+            m_menuSubSelection = 0; // default to "Continue Playing"
         } else if (m_gameState != GameState::GAME_OVER) {
             Net::disconnect();
             m_netRole = NetRole::NONE;
@@ -4603,6 +4660,31 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 35.0f,
                                  "Q: Potion", {0.3f, 0.8f, 0.3f}, 1);
         }
+    }
+
+    // Pause menu overlay
+    if (m_confirmQuit) {
+        f32 cx = static_cast<f32>(sw) * 0.5f;
+        f32 cy = static_cast<f32>(sh) * 0.5f;
+
+        const char* title = "PAUSED";
+        f32 titleW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, cx - titleW * 0.5f, cy + 50.0f, title, {0.9f, 0.85f, 0.7f}, 3);
+
+        static const char* options[] = {"Continue Playing", "Save and Quit"};
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = cy + 10.0f - i * 35.0f;
+            bool sel = (i == m_menuSubSelection);
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.4f, 0.4f, 0.5f};
+            HUD::drawMenuOption(sw, sh, y, 250, 28, col, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 tw = FontSystem::textWidth(options[i], 2);
+            FontSystem::drawText(sw, sh, cx - tw * 0.5f, y + 7.0f, options[i], tc, 2);
+        }
+
+        const char* hint = "Up/Down, Enter to select, ESC to resume";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, cx - hintW * 0.5f, cy - 50.0f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 
     // Backpack full notification — shown centered at 70% screen height, fades out

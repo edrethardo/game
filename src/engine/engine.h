@@ -49,6 +49,7 @@ private:
     u8        m_menuSelection = 0;
     u8        m_menuSubState = 0;  // 0=main, 1=singleplayer, 2=class selection
     u8        m_menuSubSelection = 0;
+    bool      m_confirmQuit = false;  // "are you sure?" overlay when pressing ESC in-game
     char      m_connectAddress[64] = "127.0.0.1";
 
     // Player class system
