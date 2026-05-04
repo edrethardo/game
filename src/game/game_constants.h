@@ -48,11 +48,11 @@ namespace GameConst {
 
     // NPC base health by class (before equipment bonuses) — kept modest
     // so the player is clearly the strongest party member
-    static constexpr f32 NPC_HEALTH_CLERIC   = 25.0f;
-    static constexpr f32 NPC_HEALTH_ARCHER   = 15.0f;   // glass cannon
-    static constexpr f32 NPC_HEALTH_MAGE     = 16.0f;
-    static constexpr f32 NPC_HEALTH_ROGUE    = 18.0f;
-    static constexpr f32 NPC_HEALTH_PALADIN  = 35.0f;   // tankiest NPC
+    static constexpr f32 NPC_HEALTH_CLERIC   = 22.0f;
+    static constexpr f32 NPC_HEALTH_ARCHER   = 13.0f;   // glass cannon
+    static constexpr f32 NPC_HEALTH_MAGE     = 14.0f;
+    static constexpr f32 NPC_HEALTH_ROGUE    = 16.0f;
+    static constexpr f32 NPC_HEALTH_PALADIN  = 32.0f;   // tankiest NPC
     static constexpr f32 NPC_FOLLOW_DIST     = 4.0f;
     // Per-floor equipment upgrade multiplier for surviving NPCs
     static constexpr f32 NPC_EQUIP_UPGRADE_MULT = 0.20f;

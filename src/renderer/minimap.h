@@ -3,25 +3,26 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "world/level_grid.h"
+#include "game/entity.h"
 
 // Minimap with fog-of-war. Renders a top-down view of the dungeon
-// in the top-right corner of the screen. Only cells the player has
-// visited (or nearby) are revealed.
+// in the top-right corner of the screen. Cells visited by the player
+// or friendly NPCs are revealed (NPC-revealed cells shown dimmer).
 
-static constexpr u32 MAX_MINIMAP_CELLS  = 64 * 64; // max grid size supported
-static constexpr f32 MINIMAP_REVEAL_RADIUS = 6.0f;  // cells around player to reveal
+static constexpr u32 MAX_MINIMAP_CELLS  = 64 * 64;
+static constexpr f32 MINIMAP_REVEAL_RADIUS = 6.0f;  // cells around player
+static constexpr f32 NPC_REVEAL_RADIUS     = 4.0f;  // cells around each NPC
 
 namespace Minimap {
-    // Initialize minimap state for a new level. Call after level generation.
     void init(u32 gridWidth, u32 gridDepth);
     void shutdown();
 
-    // Update fog-of-war based on player position. Call each frame.
-    void updateVisited(const LevelGrid& grid, Vec3 playerPos);
+    // Update fog-of-war. NPCs also reveal cells (shown dimmer than player-explored).
+    void updateVisited(const LevelGrid& grid, Vec3 playerPos,
+                       const EntityPool& entities);
 
-    // Render the minimap. Draws in top-right corner of screen.
-    // playerPos: world position for centering the player marker
-    // playerYaw: player facing direction for the arrow indicator
+    // Render minimap with NPC dots.
     void draw(u32 screenWidth, u32 screenHeight,
-              const LevelGrid& grid, Vec3 playerPos, f32 playerYaw);
+              const LevelGrid& grid, Vec3 playerPos, f32 playerYaw,
+              const EntityPool& entities);
 }

@@ -10,7 +10,8 @@
 // ---------------------------------------------------------------------------
 
 // Visited cell tracking (fog-of-war)
-static bool s_visited[MAX_MINIMAP_CELLS] = {};
+// 0 = unexplored, 1 = NPC-revealed (dimmer), 2 = player-revealed (full)
+static u8   s_visited[MAX_MINIMAP_CELLS] = {};
 static u32  s_gridW = 0;
 static u32  s_gridD = 0;
 
@@ -105,35 +106,52 @@ void Minimap::shutdown() {
 // ---------------------------------------------------------------------------
 // Minimap::updateVisited  (fog-of-war reveal)
 // ---------------------------------------------------------------------------
-void Minimap::updateVisited(const LevelGrid& grid, Vec3 playerPos) {
-    u32 px, pz;
-    if (!LevelGridSystem::worldToGrid(grid, playerPos, px, pz)) return;
+// Helper: reveal cells around a world position at given radius with given visit level
+static bool revealAround(const LevelGrid& grid, Vec3 worldPos, f32 radius, u8 visitLevel) {
+    u32 cx, cz;
+    if (!LevelGridSystem::worldToGrid(grid, worldPos, cx, cz)) return false;
 
-    u32 radius = static_cast<u32>(MINIMAP_REVEAL_RADIUS);
+    u32 r = static_cast<u32>(radius);
     bool anyNew = false;
 
-    for (u32 dz = 0; dz <= radius * 2; dz++) {
-        for (u32 dx = 0; dx <= radius * 2; dx++) {
-            s32 gx = static_cast<s32>(px) - static_cast<s32>(radius) + static_cast<s32>(dx);
-            s32 gz = static_cast<s32>(pz) - static_cast<s32>(radius) + static_cast<s32>(dz);
+    for (u32 dz = 0; dz <= r * 2; dz++) {
+        for (u32 dx = 0; dx <= r * 2; dx++) {
+            s32 gx = static_cast<s32>(cx) - static_cast<s32>(r) + static_cast<s32>(dx);
+            s32 gz = static_cast<s32>(cz) - static_cast<s32>(r) + static_cast<s32>(dz);
             if (gx < 0 || gz < 0) continue;
 
             u32 ugx = static_cast<u32>(gx);
             u32 ugz = static_cast<u32>(gz);
             if (!LevelGridSystem::isInBounds(grid, ugx, ugz)) continue;
 
-            // Circular reveal — skip corners
-            f32 distX = static_cast<f32>(gx) - static_cast<f32>(px);
-            f32 distZ = static_cast<f32>(gz) - static_cast<f32>(pz);
-            if (distX * distX + distZ * distZ >
-                MINIMAP_REVEAL_RADIUS * MINIMAP_REVEAL_RADIUS) continue;
+            f32 distX = static_cast<f32>(gx) - static_cast<f32>(cx);
+            f32 distZ = static_cast<f32>(gz) - static_cast<f32>(cz);
+            if (distX * distX + distZ * distZ > radius * radius) continue;
 
             u32 idx = ugz * s_gridW + ugx;
-            if (idx < MAX_MINIMAP_CELLS && !s_visited[idx]) {
-                s_visited[idx] = true;
+            if (idx < MAX_MINIMAP_CELLS && s_visited[idx] < visitLevel) {
+                s_visited[idx] = visitLevel;
                 anyNew = true;
             }
         }
+    }
+    return anyNew;
+}
+
+void Minimap::updateVisited(const LevelGrid& grid, Vec3 playerPos,
+                             const EntityPool& entities) {
+    bool anyNew = false;
+
+    // Player reveals at full visibility (level 2)
+    if (revealAround(grid, playerPos, MINIMAP_REVEAL_RADIUS, 2)) anyNew = true;
+
+    // Friendly NPCs reveal at dimmer visibility (level 1) with smaller radius
+    for (u32 a = 0; a < entities.activeCount; a++) {
+        u32 idx = entities.activeList[a];
+        const Entity& e = entities.entities[idx];
+        if (!(e.flags & ENT_FRIENDLY)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        if (revealAround(grid, e.position, NPC_REVEAL_RADIUS, 1)) anyNew = true;
     }
 
     if (anyNew) s_dirty = true;
@@ -149,8 +167,10 @@ static void rebuildTexture(const LevelGrid& grid) {
             if (idx >= MAX_MINIMAP_CELLS) continue;
             u32 pIdx = idx * 4;
 
-            if (!s_visited[idx]) {
-                // Unexplored fog: very dark with slight blue tint, semi-transparent
+            u8 vis = s_visited[idx]; // 0=fog, 1=NPC-revealed (dim), 2=player-revealed
+
+            if (vis == 0) {
+                // Full fog of war
                 s_pixelData[pIdx + 0] = 10;
                 s_pixelData[pIdx + 1] = 10;
                 s_pixelData[pIdx + 2] = 15;
@@ -158,39 +178,34 @@ static void rebuildTexture(const LevelGrid& grid) {
                 continue;
             }
 
+            // Dimming factor: NPC-revealed cells are shown at 50% brightness
+            f32 dim = (vis == 1) ? 0.5f : 1.0f;
+
             const GridCell& cell = LevelGridSystem::getCell(grid, x, z);
 
             if (cell.flags & CELL_SOLID) {
-                // Wall: dark grey with a blue tint
-                s_pixelData[pIdx + 0] = 55;
-                s_pixelData[pIdx + 1] = 55;
-                s_pixelData[pIdx + 2] = 65;
+                s_pixelData[pIdx + 0] = static_cast<u8>(55 * dim);
+                s_pixelData[pIdx + 1] = static_cast<u8>(55 * dim);
+                s_pixelData[pIdx + 2] = static_cast<u8>(65 * dim);
                 s_pixelData[pIdx + 3] = 255;
             } else if (cell.flags & CELL_FLOOR) {
-                // Floor: colour by material / height
                 f32 floorH = static_cast<f32>(cell.floorHeight) * 0.25f;
+                u8 r, g, b;
                 if (cell.wallMaterialId == 3) {
-                    // Brick room: warm brown
-                    s_pixelData[pIdx + 0] = 130;
-                    s_pixelData[pIdx + 1] = 90;
-                    s_pixelData[pIdx + 2] = 70;
+                    r = 130; g = 90; b = 70;
                 } else if (floorH > 0.1f) {
-                    // Raised stone floor: lighter
-                    s_pixelData[pIdx + 0] = 130;
-                    s_pixelData[pIdx + 1] = 125;
-                    s_pixelData[pIdx + 2] = 115;
+                    r = 130; g = 125; b = 115;
                 } else {
-                    // Normal stone floor
-                    s_pixelData[pIdx + 0] = 110;
-                    s_pixelData[pIdx + 1] = 105;
-                    s_pixelData[pIdx + 2] = 100;
+                    r = 110; g = 105; b = 100;
                 }
+                s_pixelData[pIdx + 0] = static_cast<u8>(r * dim);
+                s_pixelData[pIdx + 1] = static_cast<u8>(g * dim);
+                s_pixelData[pIdx + 2] = static_cast<u8>(b * dim);
                 s_pixelData[pIdx + 3] = 255;
             } else {
-                // Void / ceiling-only cells
-                s_pixelData[pIdx + 0] = 5;
-                s_pixelData[pIdx + 1] = 5;
-                s_pixelData[pIdx + 2] = 8;
+                s_pixelData[pIdx + 0] = static_cast<u8>(5 * dim);
+                s_pixelData[pIdx + 1] = static_cast<u8>(5 * dim);
+                s_pixelData[pIdx + 2] = static_cast<u8>(8 * dim);
                 s_pixelData[pIdx + 3] = 200;
             }
         }
@@ -222,7 +237,8 @@ static Mat4 buildOrtho(f32 w, f32 h) {
 // Minimap::draw
 // ---------------------------------------------------------------------------
 void Minimap::draw(u32 screenWidth, u32 screenHeight,
-                   const LevelGrid& grid, Vec3 playerPos, f32 playerYaw)
+                   const LevelGrid& grid, Vec3 playerPos, f32 playerYaw,
+                   const EntityPool& entities)
 {
     if (s_gridW == 0 || s_gridD == 0) return;
     if (s_dirty) rebuildTexture(grid);
@@ -381,6 +397,42 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
 
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 4. Friendly NPC dots: pale green squares on the minimap
+    // ------------------------------------------------------------------
+    for (u32 a = 0; a < entities.activeCount; a++) {
+        u32 eidx = entities.activeList[a];
+        const Entity& ent = entities.entities[eidx];
+        if (!(ent.flags & ENT_FRIENDLY)) continue;
+        if (ent.flags & ENT_DEAD) continue;
+
+        u32 nx, nz;
+        if (!LevelGridSystem::worldToGrid(grid, ent.position, nx, nz)) continue;
+
+        f32 normX = (static_cast<f32>(nx) + 0.5f) / static_cast<f32>(s_gridW);
+        f32 normZ = (static_cast<f32>(nz) + 0.5f) / static_cast<f32>(s_gridD);
+
+        f32 ndX = mapX + normX * MAP_SIZE;
+        f32 ndY = mapY + (1.0f - normZ) * MAP_SIZE;
+
+        static constexpr f32 NPC_DOT = 2.0f;
+        MinimapVertex npcDot[6];
+        npcDot[0] = {{ndX - NPC_DOT, ndY - NPC_DOT, 0}, {0, 0}};
+        npcDot[1] = {{ndX + NPC_DOT, ndY - NPC_DOT, 0}, {1, 0}};
+        npcDot[2] = {{ndX + NPC_DOT, ndY + NPC_DOT, 0}, {1, 1}};
+        npcDot[3] = {{ndX - NPC_DOT, ndY - NPC_DOT, 0}, {0, 0}};
+        npcDot[4] = {{ndX + NPC_DOT, ndY + NPC_DOT, 0}, {1, 1}};
+        npcDot[5] = {{ndX - NPC_DOT, ndY + NPC_DOT, 0}, {0, 1}};
+
+        glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), npcDot);
+
+        glBindTexture(GL_TEXTURE_2D, s_whiteTex);
+        if (s_minimapShader.loc_color >= 0)
+            glUniform4f(s_minimapShader.loc_color, 0.4f, 0.9f, 0.5f, 0.85f);
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 
     // Restore GL state

@@ -372,32 +372,32 @@ def skin_imp():
     """Bat-rig imp: red-brown body, yellow eyes, darker red wings."""
     w, h = 5, 10
     p = {}
-    fur = (150, 60, 45, 255)
+    fur = (210, 60, 30, 255)  # vivid bright red-orange
     for py in range(h):
         for px in range(w):
             p[(px, py)] = fur
 
-    # Lighter belly
+    # Lighter belly — hot orange
     for py in range(0, 4):
-        for px in range(1, 4): p[(px, py)] = (160, 70, 50, 255)
-    # Eyes — bright yellow
-    p[(1, 6)] = (230, 210, 40, 255)
-    p[(3, 6)] = (230, 210, 40, 255)
-    # Ears — small pointed reddish
-    p[(1, 8)] = (140, 50, 35, 255)
-    p[(3, 8)] = (140, 50, 35, 255)
-    p[(1, 9)] = (130, 45, 32, 255)
-    p[(3, 9)] = (130, 45, 32, 255)
-    # Snout
-    p[(2, 4)] = (155, 65, 48, 255)
-    p[(2, 5)] = (145, 58, 42, 255)
-    # Claws — dark
+        for px in range(1, 4): p[(px, py)] = (230, 100, 40, 255)
+    # Eyes — bright glowing yellow
+    p[(1, 6)] = (255, 240, 40, 255)
+    p[(3, 6)] = (255, 240, 40, 255)
+    # Ears — pointed crimson
+    p[(1, 8)] = (190, 40, 25, 255)
+    p[(3, 8)] = (190, 40, 25, 255)
+    p[(1, 9)] = (180, 35, 22, 255)
+    p[(3, 9)] = (180, 35, 22, 255)
+    # Snout — bright
+    p[(2, 4)] = (220, 80, 35, 255)
+    p[(2, 5)] = (200, 70, 30, 255)
+    # Claws — dark contrast
     for px in [1, 3]:
-        p[(px, 0)] = (80, 30, 25, 255)
-        p[(px, 1)] = (80, 30, 25, 255)
-    # Wing shoulders — darker red
-    p[(0, 2)] = (120, 40, 30, 255)
-    p[(4, 2)] = (120, 40, 30, 255)
+        p[(px, 0)] = (60, 20, 15, 255)
+        p[(px, 1)] = (60, 20, 15, 255)
+    # Wing shoulders — deep crimson
+    p[(0, 2)] = (170, 30, 20, 255)
+    p[(4, 2)] = (170, 30, 20, 255)
     return w, h, p
 
 
@@ -405,7 +405,7 @@ def skin_catacomb_bat():
     """Bat-rig catacomb bat: sickly green fur, green eyes, mossy body."""
     w, h = 5, 10
     p = {}
-    fur = (100, 120, 80, 255)
+    fur = (130, 155, 90, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = fur
@@ -435,10 +435,10 @@ def skin_catacomb_bat():
 
 
 def skin_cavern_bat():
-    """Bat-rig cavern bat: dark purple fur, purple eyes."""
+    """Bat-rig cavern bat: brighter purple fur, purple eyes."""
     w, h = 5, 10
     p = {}
-    fur = (70, 50, 100, 255)
+    fur = (95, 70, 140, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = fur
@@ -504,7 +504,7 @@ def skin_void_bat():
     """Bat-rig void bat: deep dark blue-black, pale ice-blue eyes."""
     w, h = 5, 10
     p = {}
-    fur = (30, 30, 55, 255)
+    fur = (55, 50, 90, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = fur
@@ -621,7 +621,7 @@ def skin_catacomb_spider():
     """Spider-rig catacomb spider: mossy green-brown, green glow eyes."""
     w, h = 15, 7
     p = {}
-    body = (70, 80, 45, 255)
+    body = (100, 115, 55, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = body
@@ -658,10 +658,10 @@ def skin_catacomb_spider():
 
 
 def skin_cavern_spider():
-    """Spider-rig cavern spider: dark purple, purple glow eyes."""
+    """Spider-rig cavern spider: brighter purple, purple glow eyes."""
     w, h = 15, 7
     p = {}
-    body = (50, 35, 70, 255)
+    body = (80, 55, 110, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = body
@@ -741,7 +741,7 @@ def skin_void_spider():
     """Spider-rig void spider: deep blue-black, pale blue eyes."""
     w, h = 15, 7
     p = {}
-    body = (22, 22, 40, 255)
+    body = (45, 40, 75, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = body
@@ -782,50 +782,23 @@ def skin_void_spider():
 # ---------------------------------------------------------------------------
 
 def skin_zombie():
-    """Skeleton-rig zombie: rotting gray-green flesh, dull red eyes, muddy feet."""
-    w, h = 7, 16
+    """Human-mesh zombie (9x17 grid): vivid sickly green flesh, bright red eyes."""
+    w, h = 9, 17
     p = {}
-    base = (110, 120, 85, 255)  # rotting gray-green flesh
+    # Fill by body region (same layout as skin_human but zombie colors)
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = base
-
-    # Skull/face — sickly pale
-    for py in [14, 15]:
-        for px in range(1, 6): p[(px, py)] = (140, 145, 105, 255)
-    # Eyes — dull red (dead, bloodshot look)
-    p[(2, 14)] = (160, 40, 30, 255)
-    p[(4, 14)] = (160, 40, 30, 255)
-    # Nose socket
-    p[(3, 13)] = (80, 75, 55, 255)
-    # Jaw — dark rotted mouth
-    p[(2, 11)] = (120, 125, 95, 255)   # discolored teeth
-    p[(3, 11)] = (50, 40, 30, 255)     # dark mouth gap
-    p[(4, 11)] = (120, 125, 95, 255)
-    # Skull sides
-    p[(1, 13)] = (115, 120, 88, 255)
-    p[(5, 13)] = (115, 120, 88, 255)
-    # Spine
-    for py in range(5, 10): p[(3, py)] = (95, 100, 72, 255)
-    p[(3, 10)] = (95, 100, 72, 255)
-    # Ribs — tattered brown-green torso
-    for py in [6, 7, 9]:
-        for px in [1, 2, 4, 5]: p[(px, py)] = (90, 95, 65, 255)
-    # Rib gaps — dark decay
-    for px in [1, 2, 4, 5]: p[(px, 8)] = (50, 45, 30, 255)
-    # Shoulders
-    p[(0, 9)] = (100, 110, 78, 255)
-    p[(6, 9)] = (100, 110, 78, 255)
-    # Arms
-    for py in range(3, 9):
-        p[(0, py)] = (105, 115, 82, 255)
-        p[(6, py)] = (105, 115, 82, 255)
-    # Pelvis
-    for px in range(2, 5): p[(px, 4)] = (95, 100, 70, 255)
-    # Legs — darker rotted flesh
-    for px in [1, 4]:
-        p[(px, 2)] = (70, 80, 55, 255); p[(px, 3)] = (70, 80, 55, 255)
-        p[(px, 0)] = (60, 50, 35, 255); p[(px, 1)] = (65, 55, 38, 255)  # muddy feet
+            if py >= 13:   p[(px, py)] = (80, 165, 70, 255)    # green flesh (face)
+            elif py >= 11: p[(px, py)] = (70, 150, 60, 255)    # neck
+            elif py >= 6:  p[(px, py)] = (55, 130, 50, 255)    # torso (tattered rags)
+            elif py >= 5:  p[(px, py)] = (45, 100, 40, 255)    # belt/waist
+            elif py >= 2:  p[(px, py)] = (50, 110, 45, 255)    # legs
+            else:          p[(px, py)] = (40, 70, 30, 255)     # muddy feet
+    # Hair — stringy dark patches
+    for px in range(1, 5): p[(px, 16)] = (50, 70, 35, 255)
+    # Eyes — bright glowing red (high visibility)
+    p[(3, 14)] = (240, 40, 20, 255)
+    p[(5, 14)] = (240, 40, 20, 255)
     return w, h, p
 
 
@@ -929,7 +902,7 @@ def skin_stalker():
     """Skeleton-rig stalker: dark charcoal undead assassin, amber hunter eyes."""
     w, h = 7, 16
     p = {}
-    base = (55, 50, 65, 255)  # dark charcoal
+    base = (75, 65, 100, 255)  # lighter purple-gray (contrasts cavern walls)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = base
@@ -1025,7 +998,7 @@ def skin_shade():
     """Skeleton-rig shade: near-black blue-black shadow wraith, cold white-blue eyes."""
     w, h = 7, 16
     p = {}
-    base = (25, 25, 45, 255)  # very dark blue-black
+    base = (40, 35, 70, 255)  # dark purple-blue (brighter to contrast void walls)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = base

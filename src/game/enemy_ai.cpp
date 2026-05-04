@@ -285,15 +285,37 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.velocity = {0, 0, 0};
                     }
                 } else if (e.npcClass == NpcClass::ARCHER) {
-                    // Archer: kite — back away if enemies get within 5 units
-                    if (eDist < 5.0f) {
+                    // Archer: only kite if has LOS (can actually shoot).
+                    // Without LOS, rejoin the group instead.
+                    Vec3 grpC = {0,0,0}; u32 grpN = 0;
+                    for (u32 gi = 0; gi < pool.activeCount; gi++) {
+                        u32 gIdx = pool.activeList[gi];
+                        const Entity& gn = pool.entities[gIdx];
+                        if ((gn.flags & ENT_FRIENDLY) && !(gn.flags & ENT_DEAD)) {
+                            grpC = grpC + gn.position; grpN++;
+                        }
+                    }
+                    if (grpN > 1) grpC = grpC * (1.0f / static_cast<f32>(grpN));
+                    f32 distToGrp = (grpN > 1) ? length(e.position - grpC) : 0.0f;
+
+                    if (!e.hasTargetLOS) {
+                        // No line of sight — move toward the group
+                        if (grpN > 1 && distToGrp > 2.0f) {
+                            Vec3 toGrp = normalize(Vec3{grpC.x - e.position.x, 0, grpC.z - e.position.z});
+                            e.velocity.x = toGrp.x * npcSpeed;
+                            e.velocity.z = toGrp.z * npcSpeed;
+                            e.yaw = atan2f(-toGrp.x, -toGrp.z);
+                        } else {
+                            e.velocity = {0, 0, 0};
+                        }
+                    } else if (eDist < 5.0f && distToGrp < 6.0f) {
+                        // Has LOS and enemy close: kite at half speed
                         Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
-                        e.velocity.x = awayDir.x * npcSpeed;
-                        e.velocity.z = awayDir.z * npcSpeed;
-                    } else if (eDist > e.attackRange) {
-                        Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0, dirToEnemy.z});
-                        e.velocity.x = flatDir.x * npcSpeed * 0.5f;
-                        e.velocity.z = flatDir.z * npcSpeed * 0.5f;
+                        e.velocity.x = awayDir.x * npcSpeed * 0.5f;
+                        e.velocity.z = awayDir.z * npcSpeed * 0.5f;
+                    } else if (eDist < 5.0f) {
+                        // Too far from group to kite — hold position
+                        e.velocity = {0, 0, 0};
                     } else {
                         e.velocity = {0, 0, 0};
                     }
@@ -358,10 +380,31 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 entityMoveAndSlide(e, grid, dt);
 
                 // -- Attack on cooldown --
+                // Ranged NPCs ALWAYS require LOS to fire (prevents shooting walls)
                 if (e.npcClass != NpcClass::CLERIC || eDist <= e.attackRange) {
-                    // Cleric only attacks if cornered; everyone else attacks freely
-                    if (eDist <= e.attackRange ||
-                        (e.npcWeaponType == WeaponType::PROJECTILE && eDist <= engageDist && e.hasTargetLOS)) {
+                    bool canAttack = false;
+                    if (e.npcWeaponType == WeaponType::PROJECTILE) {
+                        // Projectile: must have LOS regardless of distance
+                        canAttack = (eDist <= engageDist && e.hasTargetLOS);
+                    } else {
+                        // Melee: just needs to be in range
+                        canAttack = (eDist <= e.attackRange);
+                    }
+
+                    // If ranged and no LOS, move toward enemy to get a clear shot
+                    if (e.npcWeaponType == WeaponType::PROJECTILE && !e.hasTargetLOS && eDist <= engageDist) {
+                        Vec3 toTarget = e.lastSeenPos - e.position;
+                        f32 tDist = length(toTarget);
+                        if (tDist > 1.0f) {
+                            Vec3 flatDir = normalize(Vec3{toTarget.x, 0, toTarget.z});
+                            e.velocity.x = flatDir.x * npcSpeed;
+                            e.velocity.z = flatDir.z * npcSpeed;
+                            e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                            entityMoveAndSlide(e, grid, dt);
+                        }
+                    }
+
+                    if (canAttack) {
                         e.attackTimer -= dt;
                         if (e.attackTimer <= 0.0f) {
                             e.attackTimer = e.attackCooldown;
@@ -399,6 +442,20 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
             } else {
                 // --- PATHFIND MODE: follow flow field toward exit ---
+                // Party cohesion: always walk toward exit, but frontrunners slow
+                // down and stragglers speed up so the group stays together.
+                Vec3 groupCenter = {0, 0, 0};
+                u32 groupCount = 0;
+                for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                    u32 nIdx = pool.activeList[ni];
+                    const Entity& npc2 = pool.entities[nIdx];
+                    if (!(npc2.flags & ENT_FRIENDLY)) continue;
+                    if (npc2.flags & ENT_DEAD) continue;
+                    groupCenter = groupCenter + npc2.position;
+                    groupCount++;
+                }
+                if (groupCount > 1) groupCenter = groupCenter * (1.0f / static_cast<f32>(groupCount));
+
                 Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
                 bool atExit = (lengthSq(flowDir) < 0.001f);
 
@@ -410,8 +467,31 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.speechTimer = 3.0f;
                     }
                 } else {
-                    e.velocity.x = flowDir.x * npcSpeed;
-                    e.velocity.z = flowDir.z * npcSpeed;
+                    // Speed scales with distance from group center:
+                    //   ahead of group → slower (0.4x)
+                    //   behind group   → faster (1.3x)
+                    //   near center    → normal (0.7x base — always a slow walk)
+                    f32 speedMult = 0.7f;
+                    if (groupCount > 1) {
+                        Vec3 toGroup = groupCenter - e.position;
+                        f32 distToGroup = length(toGroup);
+                        // Check if this NPC is ahead or behind the group along the flow direction
+                        f32 dotAhead = toGroup.x * flowDir.x + toGroup.z * flowDir.z;
+                        // dotAhead < 0 means NPC is ahead of group center (flow points away from group)
+                        if (dotAhead < -2.0f) {
+                            // Ahead: slow down proportionally
+                            speedMult = 0.35f;
+                        } else if (dotAhead > 2.0f) {
+                            // Behind: speed up to catch up
+                            speedMult = 1.3f;
+                        } else if (distToGroup > 6.0f) {
+                            // Far from group in any direction: move toward group
+                            speedMult = 0.9f;
+                        }
+                    }
+
+                    e.velocity.x = flowDir.x * npcSpeed * speedMult;
+                    e.velocity.z = flowDir.z * npcSpeed * speedMult;
                     e.yaw = atan2f(-flowDir.x, -flowDir.z);
                     entityMoveAndSlide(e, grid, dt);
                 }

@@ -697,7 +697,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 3.0f;
             atkRange = 2.5f;
             atkCool = 1.0f;
-            baseDmg = 5.0f;
+            baseDmg = 4.0f;
             meshId = m_meshIdCleric;
             matName = "cleric_skin";
             weaponMesh = m_meshIdMace;
@@ -708,8 +708,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 3.5f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 12.0f;
-            atkCool = 0.9f;
-            baseDmg = 4.0f;
+            atkCool = 1.0f;
+            baseDmg = 3.0f;
             meshId = m_meshIdArcher;
             matName = "archer_skin";
             weaponMesh = m_meshIdBow;
@@ -720,7 +720,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 2.8f;
             atkRange = 14.0f;
             atkCool = 1.2f;
-            baseDmg = 6.0f;
+            baseDmg = 5.0f;
             meshId = m_meshIdMage;
             matName = "mage_skin";
             weaponMesh = m_meshIdStaff;
@@ -732,7 +732,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 10.0f;
             atkCool = 0.6f;
-            baseDmg = 3.0f;
+            baseDmg = 2.5f;
             meshId = m_meshIdRogue;
             matName = "rogue_skin";
             weaponMesh = m_meshIdThrowingKnife;
@@ -744,7 +744,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             halfExt = {0.45f, 0.95f, 0.45f};
             atkRange = 2.5f;
             atkCool = 1.0f;
-            baseDmg = 6.0f;
+            baseDmg = 5.0f;
             meshId = m_meshIdPaladin;
             matName = "paladin_skin";
             weaponMesh = m_meshIdMace;
@@ -1080,7 +1080,7 @@ void Engine::startGame() {
         static const BossTemplate kBosses[BOSS_COUNT] = {
             // Mini-bosses (floors 5, 15, 25, 35, 45) — should shred NPCs in 1-2 hits
             //                                          HP   DMG  SPD  RNG  COOL  halfExtents
-            {  5, "The Butcher",   "FRESH MEAT!",         600, 55, 2.5f, 3.5f, 0.5f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
+            {  5, "The Butcher",   "FRESH MEAT!",         800, 80, 3.0f, 3.5f, 0.4f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
             { 15, "Lich Lord",     "Your soul is MINE!",  500, 50, 2.8f, 12.f, 0.6f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
             { 25, "Spider Queen",  "*HISSSS*",            700, 45, 5.0f, 3.0f, 0.4f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
             { 35, "Demon Knight",  "Kneel before me!",    800, 60, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
@@ -2089,7 +2089,7 @@ void Engine::singleplayerUpdate(f32 dt) {
     pushPlayerFromEntities();
 
     // Update fog-of-war
-    Minimap::updateVisited(m_grid, m_localPlayer.position);
+    Minimap::updateVisited(m_grid, m_localPlayer.position, m_entities);
 
     syncLocalPlayerToNetPlayer();
 }
@@ -4213,7 +4213,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         }
 
         // Minimap (top-right corner)
-        Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw);
+        Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw, m_entities);
 
         // Door marker on minimap (pulsing green "V" symbol at door grid position)
         if (m_floorDoorActive) {
