@@ -157,27 +157,34 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
         if (isFriendly) {
-            // Stuck detection: if NPC hasn't moved more than 0.1 units in 2 seconds,
-            // nudge it toward the next flow field cell center to unstick
+            // Stuck detection: if NPC hasn't moved 0.15 units in 1 second, unstick
             f32 movedDist = length(e.position - e.lastSeenPos);
-            if (movedDist < 0.1f) {
-                e.flybyTimer += dt; // reuse as stuck timer for friendlies
-                if (e.flybyTimer > 2.0f) {
-                    // Teleport to the center of the next flow field cell
+            if (movedDist < 0.15f) {
+                e.flybyTimer += dt;
+                if (e.flybyTimer > 1.0f) {
+                    // Jump to the center of the next flow cell to break free
                     Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
                     if (lengthSq(flowDir) > 0.001f) {
-                        e.position = e.position + flowDir * 1.0f;
+                        // Move to center of the target cell
+                        u32 gx, gz;
+                        if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
+                            Vec3 cellCenter = LevelGridSystem::gridToWorld(grid, gx, gz);
+                            cellCenter.y = e.position.y;
+                            e.position = cellCenter + flowDir * grid.cellSize * 0.5f;
+                        }
                     }
                     e.flybyTimer = 0.0f;
+                    e.lastSeenPos = e.position;
                 }
             } else {
                 e.flybyTimer = 0.0f;
-                e.lastSeenPos = e.position; // update last known good position
+                e.lastSeenPos = e.position;
             }
 
-            // Shrink collision by 15% for movement so NPCs fit through tight corridors
+            // Shrink collision by 25% for movement — NPCs must fit through
+            // 1-cell corridors without catching on wall edges
             Vec3 savedHalf = e.halfExtents;
-            e.halfExtents = e.halfExtents * 0.85f;
+            e.halfExtents = e.halfExtents * 0.75f;
 
             // Freeze halves friendly NPC speed
             f32 npcSpeed = e.moveSpeed;
@@ -576,7 +583,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 f32 dist2 = lengthSq(diff);
                 f32 minDist = e.halfExtents.x + other.halfExtents.x;
                 if (dist2 < minDist * minDist && dist2 > 0.001f) {
-                    Vec3 push = normalize(diff) * 0.05f; // gentle push
+                    // Stronger push proportional to overlap
+                    f32 overlap = minDist - sqrtf(dist2);
+                    Vec3 push = normalize(diff) * (overlap * 0.5f + 0.02f);
                     e.position = e.position + push;
                 }
             }

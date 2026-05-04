@@ -1150,15 +1150,26 @@ void Engine::startGame() {
             if ((std::rand() % 2) != 0) continue; // 50% of rooms get a chest
             const DungeonRoom& room = dungeon.rooms[r];
 
-            // Center of room (use float division for accurate centering)
-            f32 cx = (room.x + room.w * 0.5f) * m_grid.cellSize;
-            f32 cz = (room.z + room.d * 0.5f) * m_grid.cellSize;
+            // Place chests against inner wall face, 1 cell in from boundary
+            // so they don't block corridor entrances
+            if (room.w < 4 || room.d < 4) continue; // skip tiny rooms
+            f32 cs = m_grid.cellSize;
             f32 cy = room.floorHeight;
+            f32 cx, cz;
+            u32 chestWall = std::rand() % 4;
+            if (chestWall < 2) {
+                cx = (room.x + 2 + std::rand() % (room.w > 4 ? room.w - 4 : 1)) * cs;
+                cz = (chestWall == 0) ? (room.z + 1) * cs + 0.35f
+                                       : (room.z + room.d - 2) * cs + cs - 0.35f;
+            } else {
+                cz = (room.z + 2 + std::rand() % (room.d > 4 ? room.d - 4 : 1)) * cs;
+                cx = (chestWall == 2) ? (room.x + 1) * cs + 0.35f
+                                       : (room.x + room.w - 2) * cs + cs - 0.35f;
+            }
 
-            bool isMimic = (std::rand() % 5) == 0; // 20% of chests are mimics
+            bool isMimic = (std::rand() % 5) == 0;
 
             if (isMimic) {
-                // Mimic: enemy disguised as chest; springs to life within MIMIC_TRIGGER_DIST
                 EntityHandle h = EntitySystem::spawn(m_entities,
                     Vec3{cx, cy + 0.25f, cz}, {0.3f, 0.25f, 0.3f}, false,
                     GameConst::MIMIC_HEALTH, 4.0f, GameConst::MIMIC_TRIGGER_DIST,
@@ -1396,24 +1407,27 @@ void Engine::startGame() {
 
                 f32 px, pz;
                 if (prop.wallOnly) {
-                    // Place flush against room walls — offset by halfExtents so
-                    // the prop's edge touches the wall, not its center.
+                    // Place inside the room against the inner face of walls.
+                    // Use (room + 1) as the first walkable cell — props go at the
+                    // edge of this cell, flush with the wall but inside the room.
+                    // Skip rooms too small to have wall space.
+                    if (room.w < 4 || room.d < 4) continue;
                     u32 wall = std::rand() % 4;
                     f32 cs = m_grid.cellSize;
                     if (wall < 2) {
-                        // North/south wall: fixed z, random x along wall
-                        px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * cs;
+                        // North/south wall: random x along interior, z at inner wall face
+                        px = (room.x + 2 + std::rand() % (room.w > 4 ? room.w - 4 : 1)) * cs;
                         if (wall == 0)
-                            pz = room.z * cs + prop.halfExt.z;                  // north: push inward
+                            pz = (room.z + 1) * cs + prop.halfExt.z;       // 1 cell in from north
                         else
-                            pz = (room.z + room.d) * cs - prop.halfExt.z;       // south: push inward
+                            pz = (room.z + room.d - 2) * cs + cs - prop.halfExt.z; // 1 cell in from south
                     } else {
-                        // West/east wall: fixed x, random z along wall
-                        pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * cs;
+                        // West/east wall: random z along interior, x at inner wall face
+                        pz = (room.z + 2 + std::rand() % (room.d > 4 ? room.d - 4 : 1)) * cs;
                         if (wall == 2)
-                            px = room.x * cs + prop.halfExt.x;                  // west: push inward
+                            px = (room.x + 1) * cs + prop.halfExt.x;           // 1 cell in from west
                         else
-                            px = (room.x + room.w) * cs - prop.halfExt.x;       // east: push inward
+                            px = (room.x + room.w - 2) * cs + cs - prop.halfExt.x; // 1 cell in from east
                     }
                 } else {
                     // Small/flat props (bones, webs) can go anywhere in the room
@@ -4148,8 +4162,16 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 const Material* mat = MaterialSystem::get(def.materialId);
                 if (mat) {
                     itemTex = mat->texture;
-                    tint = {color.x * mat->tint.x, color.y * mat->tint.y,
-                            color.z * mat->tint.z, 1.0f};
+                    // Use the material's natural tint as base — higher rarity items
+                    // get a subtle colored hue blended in instead of full color override
+                    Vec3 baseTint = {mat->tint.x, mat->tint.y, mat->tint.z};
+                    f32 hueStrength = 0.0f;
+                    if (wi.item.rarity == Rarity::MAGIC)     hueStrength = 0.15f;
+                    else if (wi.item.rarity == Rarity::RARE) hueStrength = 0.20f;
+                    // Legendary handled separately below
+                    tint = {baseTint.x * (1.0f - hueStrength) + color.x * hueStrength,
+                            baseTint.y * (1.0f - hueStrength) + color.y * hueStrength,
+                            baseTint.z * (1.0f - hueStrength) + color.z * hueStrength, 1.0f};
                 }
             }
             // Legendary items override with glowing legendary material
