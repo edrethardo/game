@@ -69,7 +69,11 @@ private:
     SkillDef   m_skillDefs[MAX_SKILL_DEFS];
     u32        m_skillDefCount = 0;
     PlayerInventory m_inventories[MAX_PLAYERS];
-    SkillState      m_skillStates[MAX_PLAYERS];
+    SkillState      m_skillStates[MAX_PLAYERS];   // ring (right-click)
+    SkillState      m_bootSkillStates[MAX_PLAYERS];  // boots (F key)
+    SkillState      m_helmetSkillStates[MAX_PLAYERS]; // helmet (G key)
+    SkillId         m_armorAura = SkillId::NONE;      // passive armor legendary
+    SkillId         m_weaponProc = SkillId::NONE;     // weapon on-hit proc
     WorldItemPool   m_worldItems;
     bool       m_inventoryOpen = false;
     QuickbarState   m_quickbars[MAX_PLAYERS];

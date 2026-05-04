@@ -6,9 +6,14 @@
 #include <cmath>
 
 static Combat::DeathCallback s_deathCallback = nullptr;
+static Combat::PerfectBlockCallback s_perfectBlockCallback = nullptr;
 
 void Combat::setDeathCallback(DeathCallback cb) {
     s_deathCallback = cb;
+}
+
+void Combat::setPerfectBlockCallback(PerfectBlockCallback cb) {
+    s_perfectBlockCallback = cb;
 }
 
 void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
@@ -35,12 +40,22 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
 }
 
 void Combat::applyDamageToPlayer(Player& player, f32 damage) {
+    if (player.blocking) {
+        if (player.blockTimer < 0.2f) {
+            // Perfect block — negate all damage, trigger shield bash via callback
+            damage = 0.0f;
+            if (s_perfectBlockCallback) s_perfectBlockCallback(player);
+        } else {
+            // Normal block — halve damage
+            damage *= 0.5f;
+        }
+    }
+
     player.health -= damage;
     player.damageFlashTimer = 0.15f;
-    player.hitShakeTimer = 0.15f;  // brief screen shake on hit
+    player.hitShakeTimer = 0.15f;
     if (player.health <= 0.0f) {
         player.health = 0.0f;
-        // TODO: death state
     }
 }
 

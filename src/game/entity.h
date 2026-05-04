@@ -98,6 +98,8 @@ struct Entity {
 
     // NPC combat targeting (index into entity pool, 0xFFFF = no target)
     u16 targetEntityIdx = 0xFFFF;
+    Vec3 lastSeenPos    = {0,0,0};  // last position where target had LOS (for move-to when blocked)
+    bool hasTargetLOS   = false;    // whether current target is visible this frame
 
     // Animation
     f32  animTimer    = 0.0f;  // continuous timer for procedural animation

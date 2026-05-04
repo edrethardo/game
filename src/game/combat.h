@@ -55,4 +55,8 @@ namespace Combat {
     // Death callback — called when an entity dies, before pool cleanup
     using DeathCallback = void(*)(EntityPool& pool, u16 entityIndex, Vec3 position);
     void setDeathCallback(DeathCallback cb);
+
+    // Perfect block callback — called when player executes a perfect block
+    using PerfectBlockCallback = void(*)(Player& player);
+    void setPerfectBlockCallback(PerfectBlockCallback cb);
 }

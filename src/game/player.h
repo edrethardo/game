@@ -31,6 +31,10 @@ struct Player {
     f32  burnDps          = 0.0f;
     f32  freezeTimer      = 0.0f;  // halves movement speed
 
+    // Shield blocking (Ctrl/Shift)
+    bool blocking         = false;
+    f32  blockTimer        = 0.0f;  // time since block started (for perfect block window)
+
     // Soft target lock
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)
     u16  lockGeneration = 0;

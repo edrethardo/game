@@ -94,7 +94,7 @@ static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Line-of-sight check (world only — ignores other entities)
+// Line-of-sight checks (world only — ignores other entities)
 // ---------------------------------------------------------------------------
 static bool hasLOS(const Entity& e, const Player& player,
                    const LevelGrid& grid)
@@ -106,6 +106,17 @@ static bool hasLOS(const Entity& e, const Player& player,
 
     Vec3 dir = toPlayer * (1.0f / dist);
     RayHit hit = Raycast::cast(grid, e.position, dir, dist);
+    return !hit.hit || hit.distance >= dist - 0.1f;
+}
+
+// General point-to-point LOS check (used for NPC→enemy and enemy→NPC)
+static bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
+{
+    Vec3 delta = to - from;
+    f32 dist = length(delta);
+    if (dist < 0.001f) return true;
+    Vec3 dir = delta * (1.0f / dist);
+    RayHit hit = Raycast::cast(grid, from, dir, dist);
     return !hit.hit || hit.distance >= dist - 0.1f;
 }
 
@@ -236,6 +247,31 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // Face the enemy
                 if (eDist > 0.001f) {
                     e.yaw = atan2f(-dirToEnemy.x, -dirToEnemy.z);
+                }
+
+                // LOS check — ranged NPCs can only fire if they can see the target
+                Vec3 npcEye = e.position + Vec3{0, e.halfExtents.y, 0};
+                Vec3 enemyCenter = enemyPos + Vec3{0, 0.5f, 0};
+                e.hasTargetLOS = hasLOSToPoint(npcEye, enemyCenter, grid);
+                if (e.hasTargetLOS) {
+                    e.lastSeenPos = enemyPos;
+                }
+
+                // If ranged and no LOS, move toward last seen position instead
+                if (!e.hasTargetLOS && e.npcWeaponType == WeaponType::PROJECTILE) {
+                    Vec3 toLastSeen = e.lastSeenPos - e.position;
+                    f32 lsDist = length(toLastSeen);
+                    if (lsDist > 1.0f) {
+                        Vec3 flatDir = normalize(Vec3{toLastSeen.x, 0, toLastSeen.z});
+                        e.velocity.x = flatDir.x * npcSpeed;
+                        e.velocity.z = flatDir.z * npcSpeed;
+                        e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                    entityMoveAndSlide(e, grid, dt);
+                    snapEntityToFloor(e, grid);
+                    goto npc_speech; // skip attack, go to speech handling
                 }
 
                 // -- Movement by class --
@@ -393,6 +429,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             snapEntityToFloor(e, grid);
 
+            npc_speech:
             // Speech timer decay
             if (e.speechTimer > 0.0f) {
                 e.speechTimer -= dt;
@@ -865,23 +902,49 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Stand and attack (ground enemies stop; bats hover in place)
             e.velocity = {0, 0, 0};
 
+            // Ranged enemies: check LOS before attacking. If blocked, move toward
+            // last-seen position to regain line of sight.
+            bool hostileIsRanged = (e.attackRange > 5.0f && e.enemyType != EnemyType::BOSS);
+            if (hostileIsRanged) {
+                Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
+                bool canSee = hasLOSToPoint(atkEye, targetPos, grid);
+                if (canSee) {
+                    e.lastSeenPos = targetPos;
+                    e.hasTargetLOS = true;
+                } else {
+                    e.hasTargetLOS = false;
+                    // Move toward last seen position to regain LOS
+                    Vec3 toLS = e.lastSeenPos - e.position;
+                    f32 lsDist = length(toLS);
+                    if (lsDist > 1.0f) {
+                        Vec3 flatDir = normalize(Vec3{toLS.x, 0, toLS.z});
+                        e.velocity.x = flatDir.x * effectiveSpeed;
+                        e.velocity.z = flatDir.z * effectiveSpeed;
+                        entityMoveAndSlide(e, grid, dt);
+                        if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+                    } else {
+                        // Reached last-seen spot but still no LOS — switch back to chase
+                        e.aiState = AIState::CHASE;
+                    }
+                    break; // skip attack this frame
+                }
+            }
+
             e.attackTimer -= dt;
             if (e.attackTimer <= 0.0f) {
                 e.attackTimer = e.attackCooldown;
                 e.attackAnimT = 0.3f; // trigger attack animation
 
-                // Ranged enemies (attackRange > 5) fire projectiles; melee do direct damage.
+                // Ranged enemies fire projectiles; melee do direct damage.
                 // Also apply on-hit status effects (poison/slow/burn/freeze).
                 if (targetDist <= e.attackRange * 1.1f) {
-                    bool isRanged = (e.attackRange > 5.0f && e.enemyType != EnemyType::BOSS);
 
-                    if (isRanged) {
+                    if (hostileIsRanged) {
                         // Ranged hostile (imp, bone mage, demon): fire projectile at target
                         Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
                         Vec3 atkDir = normalize(targetPos - atkOrigin);
                         f32 projSpeed = 14.0f;
                         f32 projRadius = 0.08f;
-                        // Imps fire weaker, slower projectiles
                         if (e.flags & ENT_FLYING) { projSpeed = 10.0f; projRadius = 0.06f; }
                         ProjectileSystem::spawn(projectiles, atkOrigin,
                             atkDir, projSpeed, e.damage, projRadius, 3.0f, false);

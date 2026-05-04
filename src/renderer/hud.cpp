@@ -720,6 +720,28 @@ static const char* subtypeName(WeaponSubtype st) {
     }
 }
 
+// Skill name + description for legendary tooltip display
+static const char* skillDisplayName(SkillId id) {
+    switch (id) {
+        case SkillId::FROZEN_ORB:      return "Frozen Orb";
+        case SkillId::CHAIN_LIGHTNING: return "Chain Lightning";
+        case SkillId::METEOR_STRIKE:   return "Meteor Strike";
+        case SkillId::BLOOD_NOVA:      return "Blood Nova";
+        case SkillId::PHASE_DASH:      return "Phase Dash";
+        default: return "Unknown";
+    }
+}
+static const char* skillDescription(SkillId id) {
+    switch (id) {
+        case SkillId::FROZEN_ORB:      return "Launches an icy orb that spirals\nout frost shards in all directions.";
+        case SkillId::CHAIN_LIGHTNING: return "Fires a bolt of lightning that\nbounces between nearby enemies.";
+        case SkillId::METEOR_STRIKE:   return "Calls down a massive meteor that\nscorches the ground on impact.";
+        case SkillId::BLOOD_NOVA:      return "Sacrifices health to unleash a\ndevastating ring of blood energy.";
+        case SkillId::PHASE_DASH:      return "Teleports forward through enemies,\ndamaging all in the corridor.";
+        default: return "";
+    }
+}
+
 void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
                             const ItemInstance& item, const ItemDef& def)
 {
@@ -727,51 +749,54 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
 
     Vec3 rColor = rarityColor(item.rarity);
 
-    // Calculate tooltip dimensions
     u32 nameScale = 2;
     u32 bodyScale = 1;
     f32 lineH = FontSystem::textHeight(bodyScale) + 3.0f;
-    f32 nameH = FontSystem::textHeight(nameScale) + 4.0f;
-    f32 padX = 8.0f;
-    f32 padY = 6.0f;
+    f32 nameH = FontSystem::textHeight(nameScale) + 6.0f;
+    f32 padX = 10.0f;
+    f32 padY = 8.0f;
 
     // Count lines for sizing
-    u32 lineCount = 3; // rarity, slot, blank separator
+    u32 lineCount = 3; // rarity, slot, separator
     if (def.slot == ItemSlot::WEAPON) {
         lineCount += 1; // subtype
         lineCount += 3; // damage, cooldown, range
     } else {
-        lineCount += 1; // health
+        if (item.bonusHealth > 0.0f) lineCount += 1;
     }
-    lineCount += item.affixCount; // affix lines
-    if (def.legendarySkillId != SkillId::NONE) lineCount += 1;
+    lineCount += item.affixCount;
+    if (def.legendarySkillId != SkillId::NONE) {
+        lineCount += 4; // separator + skill name + 2 description lines
+    }
 
-    f32 tooltipW = 180.0f;
+    f32 tooltipW = 240.0f;
     f32 tooltipH = padY * 2 + nameH + lineCount * lineH;
 
-    // Clamp tooltip to screen bounds
+    // Clamp to screen
     if (tipX + tooltipW > static_cast<f32>(sw)) tipX = static_cast<f32>(sw) - tooltipW - 4.0f;
     if (tipY + tooltipH > static_cast<f32>(sh)) tipY = static_cast<f32>(sh) - tooltipH - 4.0f;
     if (tipX < 0) tipX = 4.0f;
     if (tipY < 0) tipY = 4.0f;
 
-    // Draw dark background
-    Vec3 bgColor = {0.08f, 0.08f, 0.12f};
+    // Dark background
+    Vec3 bgColor = {0.06f, 0.06f, 0.10f};
     for (f32 y = tipY; y < tipY + tooltipH; y += 1.0f) {
         pushLine(tipX, y, tipX + tooltipW, y, bgColor);
     }
 
-    // Border in rarity color
+    // Border in rarity color (double border for legendaries)
     Vec3 borderColor = {rColor.x * 0.6f, rColor.y * 0.6f, rColor.z * 0.6f};
     pushQuad(tipX, tipY, tipX + tooltipW, tipY + tooltipH, borderColor);
+    if (item.rarity == Rarity::LEGENDARY) {
+        pushQuad(tipX + 1, tipY + 1, tipX + tooltipW - 1, tipY + tooltipH - 1, borderColor);
+    }
 
     flushHUD(sw, sh);
 
-    // Draw text content
     f32 textX = tipX + padX;
-    f32 curY = tipY + tooltipH - padY - nameH; // start from top (y increases upward)
+    f32 curY = tipY + tooltipH - padY - nameH;
 
-    // Item name
+    // Item name (large)
     FontSystem::drawText(sw, sh, textX, curY, def.name, rColor, nameScale);
     curY -= nameH;
 
@@ -780,20 +805,22 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     curY -= lineH;
 
     // Slot type
-    FontSystem::drawText(sw, sh, textX, curY, slotName(def.slot), {0.8f, 0.8f, 0.8f}, bodyScale);
+    FontSystem::drawText(sw, sh, textX, curY, slotName(def.slot), {0.7f, 0.7f, 0.75f}, bodyScale);
     curY -= lineH;
 
     // Weapon subtype
     if (def.slot == ItemSlot::WEAPON && def.weaponSubtype != WeaponSubtype::NONE) {
-        FontSystem::drawText(sw, sh, textX, curY, subtypeName(def.weaponSubtype), {0.6f, 0.6f, 0.6f}, bodyScale);
+        FontSystem::drawText(sw, sh, textX, curY, subtypeName(def.weaponSubtype), {0.55f, 0.55f, 0.6f}, bodyScale);
         curY -= lineH;
     }
 
-    // Separator line
+    // Separator
+    pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.3f, 0.3f, 0.35f});
+    flushHUD(sw, sh);
     curY -= lineH * 0.5f;
 
     // Stats
-    char buf[64];
+    char buf[80];
     if (def.slot == ItemSlot::WEAPON) {
         std::snprintf(buf, sizeof(buf), "Damage: %.0f", item.damage);
         FontSystem::drawText(sw, sh, textX, curY, buf, {1.0f, 0.9f, 0.7f}, bodyScale);
@@ -824,14 +851,52 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     for (u8 a = 0; a < item.affixCount; a++) {
         const Affix& affix = item.affixes[a];
         const char* name = affixTypeName(affix.type);
-        std::snprintf(buf, sizeof(buf), "%s: %.1f", name, affix.value);
-        FontSystem::drawText(sw, sh, textX, curY, buf, {0.4f, 0.8f, 1.0f}, bodyScale);
+        std::snprintf(buf, sizeof(buf), "%s: +%.1f", name, affix.value);
+        FontSystem::drawText(sw, sh, textX, curY, buf, {0.4f, 0.85f, 1.0f}, bodyScale);
         curY -= lineH;
     }
 
-    // Legendary skill
+    // Legendary skill — name + description
     if (def.legendarySkillId != SkillId::NONE) {
-        FontSystem::drawText(sw, sh, textX, curY, "* Legendary Power *", {1.0f, 0.5f, 0.0f}, bodyScale);
+        // Gold separator
+        curY -= lineH * 0.3f;
+        pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.6f, 0.5f, 0.15f});
+        flushHUD(sw, sh);
+        curY -= lineH * 0.2f;
+
+        // Activation method depends on equipment slot
+        const char* activationLabel = "Skill";
+        Vec3 activationColor = {1.0f, 0.82f, 0.2f};
+        switch (def.slot) {
+            case ItemSlot::WEAPON:  activationLabel = "On Hit"; activationColor = {1.0f, 0.6f, 0.2f}; break;
+            case ItemSlot::RING:    activationLabel = "Right Click"; break;
+            case ItemSlot::BOOTS:   activationLabel = "Press F"; activationColor = {0.3f, 1.0f, 0.5f}; break;
+            case ItemSlot::HELMET:  activationLabel = "Press G"; activationColor = {0.5f, 0.8f, 1.0f}; break;
+            case ItemSlot::ARMOR:   activationLabel = "Passive Aura"; activationColor = {0.7f, 0.7f, 1.0f}; break;
+            case ItemSlot::OFFHAND: activationLabel = "Perfect Block"; activationColor = {0.9f, 0.9f, 1.0f}; break;
+            default: break;
+        }
+
+        const char* sName = skillDisplayName(def.legendarySkillId);
+        std::snprintf(buf, sizeof(buf), "[%s] %s", activationLabel, sName);
+        FontSystem::drawText(sw, sh, textX, curY, buf, activationColor, bodyScale);
         curY -= lineH;
+
+        // Skill description (split on \n)
+        const char* desc = skillDescription(def.legendarySkillId);
+        const char* line = desc;
+        while (*line) {
+            // Find end of line
+            const char* eol = line;
+            while (*eol && *eol != '\n') eol++;
+            char descLine[80];
+            u32 len = static_cast<u32>(eol - line);
+            if (len >= sizeof(descLine)) len = sizeof(descLine) - 1;
+            std::memcpy(descLine, line, len);
+            descLine[len] = '\0';
+            FontSystem::drawText(sw, sh, textX, curY, descLine, {0.9f, 0.75f, 0.3f}, bodyScale);
+            curY -= lineH;
+            line = (*eol == '\n') ? eol + 1 : eol;
+        }
     }
 }

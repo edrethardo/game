@@ -469,6 +469,36 @@ void Engine::init() {
         }
     });
 
+    // Perfect block callback — legendary shield triggers stun bash
+    Combat::setPerfectBlockCallback([](Player& player) {
+        if (!s_engine) return;
+        // Check if offhand is a legendary shield
+        const ItemInstance& shield = s_engine->m_inventories[0].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
+        bool hasLegendaryShield = !isItemEmpty(shield) && shield.rarity == Rarity::LEGENDARY;
+
+        // Stun all enemies within 3m (1 second)
+        if (hasLegendaryShield) {
+            for (u32 a = 0; a < s_engine->m_entities.activeCount; a++) {
+                u32 idx = s_engine->m_entities.activeList[a];
+                Entity& ent = s_engine->m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                if (ent.enemyType == EnemyType::PROP) continue;
+                f32 dist = length(ent.position - player.position);
+                if (dist < 3.0f) {
+                    ent.freezeTimer = 1.0f; // stun via freeze (stops movement)
+                }
+            }
+            // Visual feedback
+            for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                if (!s_engine->m_novaFX[ni].active) {
+                    s_engine->m_novaFX[ni] = {player.position, 3.0f, 0.4f, true, {0.8f, 0.8f, 1.0f}};
+                    break;
+                }
+            }
+        }
+    });
+
     // Init networking
     Net::init();
 
@@ -1907,22 +1937,107 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Update pending meteors
     SkillSystem::updateMeteors(m_entities, dt);
 
-    // Skill activation (right mouse button)
+    // --- Per-slot legendary skill sync ---
+    // Weapon: on-hit proc (tracked for use in weapon fire code)
+    {
+        const ItemInstance& wpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        m_weaponProc = (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[wpn.defId].legendarySkillId : SkillId::NONE;
+    }
+    // Ring: right-click active skill
+    {
+        const ItemInstance& ring = m_inventories[0].equipped[static_cast<u32>(ItemSlot::RING)];
+        m_skillStates[0].activeSkill = (!isItemEmpty(ring) && ring.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
+    }
+    // Boots: F key active skill
+    {
+        const ItemInstance& boots = m_inventories[0].equipped[static_cast<u32>(ItemSlot::BOOTS)];
+        m_bootSkillStates[0].activeSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
+        // Share energy pool with ring skill
+        m_bootSkillStates[0].energy = m_skillStates[0].energy;
+        m_bootSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
+    }
+    // Helmet: G key active skill
+    {
+        const ItemInstance& helm = m_inventories[0].equipped[static_cast<u32>(ItemSlot::HELMET)];
+        m_helmetSkillStates[0].activeSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
+        m_helmetSkillStates[0].energy = m_skillStates[0].energy;
+        m_helmetSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
+    }
+    // Armor: passive aura (no button)
+    {
+        const ItemInstance& armor = m_inventories[0].equipped[static_cast<u32>(ItemSlot::ARMOR)];
+        m_armorAura = (!isItemEmpty(armor) && armor.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[armor.defId].legendarySkillId : SkillId::NONE;
+    }
+
+    // --- Skill activation inputs ---
+    Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+
+    // Right-click: ring skill
     if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) && !m_inventoryOpen) {
-        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
         SkillSystem::tryActivate(m_skillStates[0], m_skillDefs, m_skillDefCount,
                                   eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                   m_projectiles, m_entities, m_grid, m_localPlayer);
     }
+    // F key: boots skill
+    if (Input::isKeyPressed(SDL_SCANCODE_F) && !m_inventoryOpen) {
+        if (SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
+                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
+            // Sync energy back to shared pool
+            m_skillStates[0].energy = m_bootSkillStates[0].energy;
+        }
+    }
+    // G key: helmet skill
+    if (Input::isKeyPressed(SDL_SCANCODE_G) && !m_inventoryOpen) {
+        if (SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
+                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
+            m_skillStates[0].energy = m_helmetSkillStates[0].energy;
+        }
+    }
 
-    // Update active skill from equipped legendary weapon
+    // --- Shield blocking (Ctrl/Shift) ---
     {
-        const ItemInstance& wpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-        if (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY) {
-            SkillId skillId = m_itemDefs[wpn.defId].legendarySkillId;
-            m_skillStates[0].activeSkill = skillId;
-        } else {
-            m_skillStates[0].activeSkill = SkillId::NONE;
+        bool wantsBlock = (Input::isKeyDown(SDL_SCANCODE_LCTRL) ||
+                           Input::isKeyDown(SDL_SCANCODE_RCTRL) ||
+                           Input::isKeyDown(SDL_SCANCODE_LSHIFT) ||
+                           Input::isKeyDown(SDL_SCANCODE_RSHIFT)) && !m_inventoryOpen;
+        if (wantsBlock && !m_localPlayer.blocking) {
+            m_localPlayer.blocking = true;
+            m_localPlayer.blockTimer = 0.0f; // start perfect block window
+        } else if (!wantsBlock) {
+            m_localPlayer.blocking = false;
+        }
+        if (m_localPlayer.blocking) {
+            m_localPlayer.blockTimer += dt;
+        }
+    }
+
+    // --- Armor passive aura tick ---
+    if (m_armorAura != SkillId::NONE) {
+        Vec3 playerPos = m_localPlayer.position;
+        for (u32 a = 0; a < m_entities.activeCount; a++) {
+            u32 idx = m_entities.activeList[a];
+            Entity& ent = m_entities.entities[idx];
+            if (ent.flags & ENT_DEAD) continue;
+            if (ent.flags & ENT_FRIENDLY) continue;
+            if (ent.enemyType == EnemyType::PROP) continue;
+            f32 dist = length(ent.position - playerPos);
+
+            switch (m_armorAura) {
+                case SkillId::METEOR_STRIKE: // Fire aura: 2 dps burn within 3m
+                    if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; }
+                    break;
+                case SkillId::FROZEN_ORB: // Frost aura: slow within 4m
+                    if (dist < 4.0f) { ent.freezeTimer = 0.5f; }
+                    break;
+                default: break;
+            }
         }
     }
 
@@ -2574,6 +2689,78 @@ void Engine::handleWeaponFire(f32 dt) {
     }
     m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
+
+    // Weapon legendary on-hit proc — % chance to trigger skill at hit position
+    if (result.hitEntity && m_weaponProc != SkillId::NONE) {
+        u32 procRoll = static_cast<u32>(std::rand()) % 100;
+        u32 procChance = 20; // default 20%
+        if (m_weaponProc == SkillId::FROZEN_ORB)    procChance = 15;
+        if (m_weaponProc == SkillId::CHAIN_LIGHTNING) procChance = 25;
+        if (m_weaponProc == SkillId::METEOR_STRIKE)  procChance = 10;
+        if (m_weaponProc == SkillId::BLOOD_NOVA)     procChance = 20;
+
+        if (procRoll < procChance) {
+            Vec3 procPos = result.hitPosition;
+            const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_weaponProc);
+            if (sd) {
+                // Fire the skill effect at the hit position
+                switch (m_weaponProc) {
+                    case SkillId::FROZEN_ORB: {
+                        Vec3 dir = m_localPlayer.forward;
+                        ProjectileSystem::spawn(m_projectiles, procPos, dir,
+                            sd->projectileSpeed, sd->damage, sd->radius, sd->duration, true);
+                        // Mark as orb for visual + shard spawning
+                        for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+                            Projectile& proj = m_projectiles.projectiles[pi];
+                            if (proj.active && proj.fromPlayer && proj.projFlags == 0) {
+                                Vec3 d = proj.position - procPos;
+                                if (lengthSq(d) < 0.5f) { proj.projFlags = PROJ_ORB; break; }
+                            }
+                        }
+                    } break;
+                    case SkillId::CHAIN_LIGHTNING: {
+                        // Spawn spark projectiles in a small fan from hit position
+                        for (s32 s = -1; s <= 1; s++) {
+                            f32 spread = s * 0.3f;
+                            Vec3 dir = normalize(Vec3{m_localPlayer.forward.x + spread,
+                                                       0, m_localPlayer.forward.z});
+                            ProjectileSystem::spawn(m_projectiles, procPos, dir,
+                                18.0f, sd->damage * 0.5f, 0.08f, 1.5f, true, PROJ_SPARK);
+                        }
+                    } break;
+                    case SkillId::METEOR_STRIKE: {
+                        // Drop a meteor on the hit position
+                        extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+                        for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+                            if (!s_meteors[mi].active) {
+                                s_meteors[mi] = {procPos, sd->damage, sd->radius, sd->delay, true};
+                                break;
+                            }
+                        }
+                    } break;
+                    case SkillId::BLOOD_NOVA: {
+                        // Nova centered on hit target
+                        EntityHandle hits[MAX_ENTITIES];
+                        f32 dists[MAX_ENTITIES];
+                        u32 hitCount = CombatQuery::queryConeSorted(
+                            m_entities, procPos, {0,0,-1}, -1.0f, sd->radius,
+                            hits, dists, MAX_ENTITIES);
+                        for (u32 h = 0; h < hitCount; h++) {
+                            Combat::applyDamage(m_entities, hits[h], sd->damage * 0.5f);
+                        }
+                        // Visual
+                        for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                            if (!m_novaFX[ni].active) {
+                                m_novaFX[ni] = {procPos, sd->radius, 0.6f, true, {1.0f, 0.15f, 0.1f}};
+                                break;
+                            }
+                        }
+                    } break;
+                    default: break;
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
