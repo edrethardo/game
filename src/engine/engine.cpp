@@ -58,6 +58,9 @@ static FrameAllocator s_frameAllocator;
 // Global engine pointer for static callbacks
 static Engine* s_engine = nullptr;
 
+// First-kill guaranteed drop flag (reset each floor in startGame)
+static bool s_firstKillDropGiven = false;
+
 // ---------------------------------------------------------------------------
 // Player class definitions — 8 classes with 4 skills each
 // ---------------------------------------------------------------------------
@@ -467,8 +470,32 @@ void Engine::init() {
             pool.entities[entityIndex].speechText = "Avenge... me...";
             pool.entities[entityIndex].speechTimer = 4.0f;
         }
+
+        // Floors 1-3: first hostile kill guarantees a magic (green) quality drop
+        if (!s_firstKillDropGiven && s_engine->m_currentFloor <= 3 &&
+            !(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
+            s_firstKillDropGiven = true;
+            u8 lvl = pool.entities[entityIndex].level;
+            if (lvl < 1) lvl = 1;
+            ItemInstance item = ItemGen::rollItem(lvl, s_engine->m_itemDefs,
+                                                   s_engine->m_itemDefCount,
+                                                   s_engine->m_affixDefs,
+                                                   s_engine->m_affixDefCount);
+            if (!isItemEmpty(item)) {
+                // Force to at least MAGIC rarity
+                if (item.rarity < Rarity::MAGIC) item.rarity = Rarity::MAGIC;
+                // Re-roll affixes for magic quality (1-2 affixes)
+                if (item.affixCount == 0) {
+                    ItemGen::rollAffixes(item, lvl, s_engine->m_itemDefs[item.defId].slot,
+                                          s_engine->m_affixDefs, s_engine->m_affixDefCount);
+                }
+                WorldItemSystem::spawn(s_engine->m_worldItems, item,
+                                       position + Vec3{0, 0.5f, 0});
+            }
+            return; // skip normal drop logic for this kill
+        }
+
         // Hostile enemies only drop loot; chance scales with floor depth
-        // (40% at floor 1, +1% per floor, capped at 70%)
         u8 enemyLevel = pool.entities[entityIndex].level;
         f32 dropChance = GameConst::LOOT_DROP_CHANCE + enemyLevel * 0.01f;
         if (dropChance > 0.70f) dropChance = 0.70f;
@@ -975,11 +1002,19 @@ void Engine::upgradeNpcEquipment(u8 newFloor) {
 }
 
 void Engine::startGame() {
-    // Build level — use BSP procedural generation with random seed
-    // Mix floor number into seed so each floor has unique layout
+    // Reset first-kill guaranteed drop for this floor
+    s_firstKillDropGiven = false;
+
+    // Build level — use BSP procedural generation with random seed.
+    // Early floors (1-9) use a smaller grid for simpler, more linear layouts
+    // so the exit is easier to find.  Later floors get the full 48x48 grid.
     u32 dungeonSeed = static_cast<u32>(std::rand()) + m_currentFloor * 7919;
-    LevelGridSystem::init(m_grid, 48, 48, 1.0f);
-    DungeonResult dungeon = LevelGen::generate(m_grid, dungeonSeed, 48, 48);
+    u32 gridSize = 48;
+    if (m_currentFloor <= 3)       gridSize = 24;  // very small, almost linear
+    else if (m_currentFloor <= 6)  gridSize = 32;  // small, few branches
+    else if (m_currentFloor <= 9)  gridSize = 40;  // medium, some exploration
+    LevelGridSystem::init(m_grid, gridSize, gridSize, 1.0f);
+    DungeonResult dungeon = LevelGen::generate(m_grid, dungeonSeed, gridSize, gridSize);
     Vec3 spawnPos = dungeon.spawnPos;
 
     // ---------------------------------------------------------------------------
