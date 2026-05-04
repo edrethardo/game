@@ -47,9 +47,14 @@ private:
     // Game state
     GameState m_gameState = GameState::MENU;
     u8        m_menuSelection = 0;
-    u8        m_menuSubState = 0;  // 0=main menu, 1=singleplayer sub-menu (new/continue)
+    u8        m_menuSubState = 0;  // 0=main, 1=singleplayer, 2=class selection
     u8        m_menuSubSelection = 0;
     char      m_connectAddress[64] = "127.0.0.1";
+
+    // Player class system
+    PlayerClass m_playerClass = PlayerClass::WARRIOR;
+    u8          m_activeClassSkill = 0;  // which of 4 class skills is selected (0-3)
+    SkillState  m_classSkillStates[4];   // per-slot cooldown tracking for class skills
 
     // Networking
     NetRole    m_netRole = NetRole::NONE;

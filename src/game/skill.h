@@ -43,9 +43,12 @@ namespace SkillSystem {
     // Visual FX callbacks — set by Engine to trigger skill effects
     using NovaCallback = void(*)(Vec3 position, f32 radius, Vec3 color);
     using DashCallback = void(*)(Vec3 start, Vec3 end);
-    // Scorch callback — creates a persistent ground fire zone (position, radius, duration)
     using ScorchCallback = void(*)(Vec3 position, f32 radius, f32 duration, f32 dps);
+    // Drone spawn callback — engine handles entity creation with proper mesh/material
+    // type: 0=combat drone (spider), 1=swarm drone (bat), 2=turret
+    using DroneSpawnCallback = void(*)(Vec3 position, u8 type);
     void setNovaCallback(NovaCallback cb);
     void setDashCallback(DashCallback cb);
     void setScorchCallback(ScorchCallback cb);
+    void setDroneSpawnCallback(DroneSpawnCallback cb);
 }

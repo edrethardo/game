@@ -59,6 +59,59 @@ static FrameAllocator s_frameAllocator;
 static Engine* s_engine = nullptr;
 
 // ---------------------------------------------------------------------------
+// Player class definitions — 8 classes with 4 skills each
+// ---------------------------------------------------------------------------
+const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
+    // WARRIOR — Melee Tank
+    {"Warrior", "Heavy melee fighter with crowd control",
+     150.0f, 5.0f, 80.0f, "Iron Sword",
+     {SkillId::CLEAVE, SkillId::WAR_CRY, SkillId::WHIRLWIND, SkillId::EARTHQUAKE},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // RANGER — Ranged DPS
+    {"Ranger", "Agile archer with poison and piercing shots",
+     80.0f, 6.5f, 100.0f, "Short Bow",
+     {SkillId::MULTI_SHOT, SkillId::RAIN_OF_ARROWS, SkillId::POISON_ARROW, SkillId::SHADOW_SHOT},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // SORCERER — Glass Cannon
+    {"Sorcerer", "Devastating elemental magic, fragile body",
+     70.0f, 5.5f, 150.0f, "Wand of Sparks",
+     {SkillId::FIREBALL, SkillId::FROZEN_ORB, SkillId::CHAIN_LIGHTNING, SkillId::METEOR_STRIKE},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // ROGUE — Hit-and-Run
+    {"Rogue", "Fast assassin with teleports and poison",
+     85.0f, 7.0f, 100.0f, "Rusty Dagger",
+     {SkillId::KNIFE_BURST, SkillId::PHASE_DASH, SkillId::POISON_CLOUD, SkillId::SHADOW_STRIKE},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // PALADIN — Holy Tank/Support
+    {"Paladin", "Holy warrior who heals and protects",
+     130.0f, 5.0f, 90.0f, "Iron Sword",
+     {SkillId::HOLY_SMITE, SkillId::CONSECRATION, SkillId::BLOOD_NOVA, SkillId::DIVINE_SHIELD},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // COMBAT ENGINEER — Gadget Specialist
+    {"Combat Engineer", "Turrets, tesla coils, and gadgets",
+     100.0f, 5.5f, 120.0f, "Pistol",
+     {SkillId::SHOCK_BOLT, SkillId::DEPLOY_TURRET, SkillId::TESLA_COIL, SkillId::MECH_OVERDRIVE},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // MARKSMAN — Precision Sniper
+    {"Marksman", "Precise hitscan specialist with executes",
+     75.0f, 6.0f, 100.0f, "Revolver",
+     {SkillId::AIMED_SHOT, SkillId::EXPLOSIVE_ROUND, SkillId::RAPID_FIRE, SkillId::HEADSHOT},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+
+    // TINKERER — Minion Master
+    {"Tinkerer", "Drone commander with stun grenades",
+     90.0f, 5.5f, 110.0f, "Pistol",
+     {SkillId::COMBAT_DRONE, SkillId::SWARM_DRONES, SkillId::STUN_GRENADE, SkillId::DEPLOY_TURRET},
+     {1, 10, 20, 30}, {5, 20, 30, 40}},
+};
+
+// ---------------------------------------------------------------------------
 // Spawn helpers for test enemies
 // ---------------------------------------------------------------------------
 static void spawnTestEnemies(EntityPool& pool, const LevelGrid& grid) {
@@ -495,6 +548,69 @@ void Engine::init() {
                     s_engine->m_novaFX[ni] = {player.position, 3.0f, 0.4f, true, {0.8f, 0.8f, 1.0f}};
                     break;
                 }
+            }
+        }
+    });
+
+    // Drone/turret spawn callback — skill.cpp delegates spawning here so we
+    // have direct access to the mesh registry.  type: 0=combat drone, 1=swarm, 2=turret
+    SkillSystem::setDroneSpawnCallback([](Vec3 position, u8 type) {
+        if (!s_engine) return;
+        EntityPool& pool = s_engine->m_entities;
+
+        if (type == 0) {
+            // Combat drone — large metal spider, rushes enemies, melee
+            // Check if one already exists (heal instead of double-spawn)
+            for (u32 a = 0; a < pool.activeCount; a++) {
+                u32 idx = pool.activeList[a];
+                Entity& ex = pool.entities[idx];
+                if ((ex.flags & ENT_FRIENDLY) && !(ex.flags & ENT_DEAD) &&
+                    ex.npcClass == NpcClass::NONE && ex.enemyType == EnemyType::SPIDER) {
+                    ex.health = ex.maxHealth; // full repair
+                    return;
+                }
+            }
+            EntityHandle h = EntitySystem::spawn(pool, position,
+                {0.4f, 0.2f, 0.4f}, false, 80.0f, 5.0f, 15.0f, 2.5f, 0.6f, 10.0f);
+            Entity* e = handleGet(pool, h);
+            if (e) {
+                e->flags        |= ENT_FRIENDLY;
+                e->enemyType     = EnemyType::SPIDER;
+                e->meshId        = s_engine->m_meshIdSpider;
+                e->materialId    = 49; // prop_iron
+                e->npcWeaponType = WeaponType::MELEE;
+                e->aiState       = AIState::IDLE;
+            }
+        } else if (type == 1) {
+            // Swarm drone — tiny flying metal bat body, weak projectile
+            EntityHandle h = EntitySystem::spawn(pool, position,
+                {0.15f, 0.1f, 0.15f}, true, 9999.0f, 5.0f, 12.0f, 8.0f, 1.5f, 3.0f);
+            Entity* e = handleGet(pool, h);
+            if (e) {
+                e->flags        |= ENT_FRIENDLY | ENT_FLYING;
+                e->enemyType     = EnemyType::GENERIC;
+                e->meshId        = s_engine->m_meshIdBat;
+                e->materialId    = 49; // prop_iron
+                e->npcWeaponType = WeaponType::PROJECTILE;
+                e->npcProjectileSpeed  = 22.0f;
+                e->npcProjectileRadius = 0.04f;
+                e->aiState       = AIState::IDLE;
+            }
+        } else if (type == 2) {
+            // Turret — stationary, hitscan, timed despawn
+            EntityHandle h = EntitySystem::spawn(pool, position,
+                {0.3f, 0.6f, 0.3f}, false, 80.0f, 0.0f, 15.0f, 10.0f, 1.5f, 12.0f);
+            Entity* e = handleGet(pool, h);
+            if (e) {
+                e->flags        |= ENT_FRIENDLY;
+                e->enemyType     = EnemyType::GENERIC;
+                e->meshId        = s_engine->m_meshIdSpider;
+                e->materialId    = 49;
+                e->npcWeaponType = WeaponType::PROJECTILE;
+                e->npcProjectileSpeed  = 30.0f;
+                e->npcProjectileRadius = 0.06f;
+                e->deathTimer    = 15.0f;
+                e->aiState       = AIState::IDLE;
             }
         }
     });
@@ -1607,18 +1723,76 @@ void Engine::updateMenu(f32 dt) {
             m_netRole = NetRole::NONE;
             m_localPlayerIndex = 0;
             if (m_menuSubSelection == 0) {
-                // New Game — fresh start
+                // New Game — go to class selection
                 m_currentFloor = 1;
+                m_menuSubState = 2; // class selection screen
+                m_menuSubSelection = 0;
             } else {
-                // Continue — load save
+                // Continue — load save (skip class selection)
                 if (loadGame()) {
                     m_currentFloor = m_savedFloor;
                 } else {
                     m_currentFloor = 1;
                 }
+                m_menuSubState = 0;
+                startGame();
             }
+        }
+        return;
+    }
+
+    // Class selection screen (subState 2)
+    if (m_menuSubState == 2) {
+        u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
+        if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menuSubSelection > 0) m_menuSubSelection--;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menuSubSelection < classCount - 1) m_menuSubSelection++;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            m_menuSubState = 1; // back to new/continue
+            m_menuSubSelection = 0;
+            return;
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            m_playerClass = static_cast<PlayerClass>(m_menuSubSelection);
+            m_activeClassSkill = 0;
+
+            // Apply class stats to player
+            const ClassDef& cls = kClassDefs[m_menuSubSelection];
+            m_localPlayer.maxHealth = cls.baseHealth;
+            m_localPlayer.health = cls.baseHealth;
+            m_localPlayer.moveSpeed = cls.baseMoveSpeed;
+            m_skillStates[0].maxEnergy = cls.baseEnergy;
+            m_skillStates[0].energy = cls.baseEnergy;
+
+            // Init class skill cooldown states
+            for (u32 s = 0; s < 4; s++) {
+                m_classSkillStates[s] = {};
+                m_classSkillStates[s].activeSkill = cls.skills[s];
+                m_classSkillStates[s].maxEnergy = cls.baseEnergy;
+                m_classSkillStates[s].energy = cls.baseEnergy;
+            }
+
             m_menuSubState = 0;
             startGame();
+
+            // Auto-equip starting weapon after startGame inits inventory
+            for (u32 wi = 0; wi < m_itemDefCount; wi++) {
+                if (std::strcmp(m_itemDefs[wi].name, cls.startingWeaponName) == 0) {
+                    ItemInstance wpn;
+                    wpn.defId = static_cast<u16>(wi);
+                    wpn.rarity = Rarity::COMMON;
+                    wpn.itemLevel = 1;
+                    wpn.damage = m_itemDefs[wi].baseDamage;
+                    wpn.uid = m_worldItems.nextUid++;
+                    m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
+                    Inventory::recalculateStats(m_inventories[0]);
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                    break;
+                }
+            }
         }
         return;
     }
@@ -1932,6 +2106,11 @@ void Engine::singleplayerUpdate(f32 dt) {
 
     // Update skill state (energy regen, cooldowns)
     SkillSystem::update(m_skillStates[0], dt);
+    // Tick class skill cooldowns (shared energy synced from main pool)
+    for (u32 s = 0; s < 4; s++) {
+        if (m_classSkillStates[s].cooldownTimer > 0.0f)
+            m_classSkillStates[s].cooldownTimer -= dt;
+    }
 
     // Update orb projectiles (spawn ice shards for Frozen Orb)
     SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
@@ -1939,67 +2118,51 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Update pending meteors
     SkillSystem::updateMeteors(m_entities, dt);
 
-    // --- Per-slot legendary skill sync ---
-    // Weapon: on-hit proc (tracked for use in weapon fire code)
+    // --- Weapon on-hit proc (legendary weapon passive) ---
     {
         const ItemInstance& wpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
         m_weaponProc = (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[wpn.defId].legendarySkillId : SkillId::NONE;
     }
-    // Ring: right-click active skill
-    {
-        const ItemInstance& ring = m_inventories[0].equipped[static_cast<u32>(ItemSlot::RING)];
-        m_skillStates[0].activeSkill = (!isItemEmpty(ring) && ring.rarity == Rarity::LEGENDARY)
-            ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
-    }
-    // Boots: F key active skill
-    {
-        const ItemInstance& boots = m_inventories[0].equipped[static_cast<u32>(ItemSlot::BOOTS)];
-        m_bootSkillStates[0].activeSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
-            ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
-        // Share energy pool with ring skill
-        m_bootSkillStates[0].energy = m_skillStates[0].energy;
-        m_bootSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
-    }
-    // Helmet: G key active skill
-    {
-        const ItemInstance& helm = m_inventories[0].equipped[static_cast<u32>(ItemSlot::HELMET)];
-        m_helmetSkillStates[0].activeSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
-            ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
-        m_helmetSkillStates[0].energy = m_skillStates[0].energy;
-        m_helmetSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
-    }
-    // Armor: passive aura (no button)
+    // Armor passive aura
     {
         const ItemInstance& armor = m_inventories[0].equipped[static_cast<u32>(ItemSlot::ARMOR)];
         m_armorAura = (!isItemEmpty(armor) && armor.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[armor.defId].legendarySkillId : SkillId::NONE;
     }
 
-    // --- Skill activation inputs ---
-    Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-
-    // Right-click: ring skill
-    if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) && !m_inventoryOpen) {
-        SkillSystem::tryActivate(m_skillStates[0], m_skillDefs, m_skillDefCount,
-                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                  m_projectiles, m_entities, m_grid, m_localPlayer);
-    }
-    // F key: boots skill
-    if (Input::isKeyPressed(SDL_SCANCODE_F) && !m_inventoryOpen) {
-        if (SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
-                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
-            // Sync energy back to shared pool
-            m_skillStates[0].energy = m_bootSkillStates[0].energy;
+    // --- Class skill selection (keys 1-4) ---
+    if (!m_inventoryOpen) {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        for (u8 s = 0; s < 4; s++) {
+            if (Input::isKeyPressed(SDL_SCANCODE_1 + s)) {
+                // Only select if this skill is unlocked on the current floor
+                if (m_currentFloor >= cls.skillUnlockFloor[s]) {
+                    m_activeClassSkill = s;
+                }
+            }
         }
     }
-    // G key: helmet skill
-    if (Input::isKeyPressed(SDL_SCANCODE_G) && !m_inventoryOpen) {
-        if (SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
-                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
-            m_skillStates[0].energy = m_helmetSkillStates[0].energy;
+
+    // --- Class skill activation (right-click) ---
+    Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+
+    if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) && !m_inventoryOpen) {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        u8 slot = m_activeClassSkill;
+        if (m_currentFloor >= cls.skillUnlockFloor[slot]) {
+            // Use the class skill state for cooldown tracking, shared energy pool
+            m_classSkillStates[slot].activeSkill = cls.skills[slot];
+            m_classSkillStates[slot].energy = m_skillStates[0].energy;
+            m_classSkillStates[slot].maxEnergy = m_skillStates[0].maxEnergy;
+
+            if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
+                                          eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                          m_projectiles, m_entities, m_grid, m_localPlayer)) {
+                m_skillStates[0].energy = m_classSkillStates[slot].energy;
+
+                // (drone/turret mesh assignment handled by DroneSpawnCallback)
+            }
         }
     }
 
@@ -4216,21 +4379,101 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         HUD::drawWeaponIndicator(sw, sh, m_quickbars[m_localPlayerIndex].activeSlot);
 
-        // Energy bar and skill cooldown
-        const SkillState& ss = m_skillStates[m_localPlayerIndex];
-        if (ss.activeSkill != SkillId::NONE) {
-            HUD::drawEnergyBar(sw, sh, ss.energy, ss.maxEnergy);
-            if (ss.cooldownTimer > 0.0f) {
-                f32 maxCd = 1.0f;
-                for (u32 i = 0; i < m_skillDefCount; i++) {
-                    if (m_skillDefs[i].id == ss.activeSkill) {
-                        maxCd = m_skillDefs[i].cooldown;
-                        break;
+        // Energy bar
+        HUD::drawEnergyBar(sw, sh, m_skillStates[0].energy, m_skillStates[0].maxEnergy);
+
+        // Class skill bar — 4 slots at bottom-center
+        {
+            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+            f32 slotW = 36.0f, slotH = 36.0f, gap = 4.0f;
+            f32 totalW = 4 * slotW + 3 * gap;
+            f32 barX = (static_cast<f32>(sw) - totalW) * 0.5f;
+            f32 barY = 10.0f;
+
+            for (u8 s = 0; s < 4; s++) {
+                f32 x = barX + s * (slotW + gap);
+                bool unlocked = (m_currentFloor >= cls.skillUnlockFloor[s]);
+                bool selected = (s == m_activeClassSkill);
+                bool upgraded = (m_currentFloor >= cls.skillUpgradeFloor[s]);
+
+                // Background
+                Vec3 bgCol = unlocked ? Vec3{0.15f, 0.15f, 0.2f} : Vec3{0.08f, 0.08f, 0.1f};
+                if (selected && unlocked) bgCol = {0.2f, 0.25f, 0.35f};
+                for (f32 fy = 0; fy < slotH; fy += 1.0f) {
+                    DebugDraw::line({x, barY + fy, 0}, {x + slotW, barY + fy, 0}, bgCol);
+                }
+
+                // Border
+                Vec3 borderCol = selected ? Vec3{0.4f, 0.9f, 0.5f} : Vec3{0.3f, 0.3f, 0.4f};
+                if (!unlocked) borderCol = {0.15f, 0.15f, 0.2f};
+                if (upgraded) borderCol = {0.9f, 0.8f, 0.3f}; // gold for upgraded
+                DebugDraw::line({x, barY, 0}, {x + slotW, barY, 0}, borderCol);
+                DebugDraw::line({x + slotW, barY, 0}, {x + slotW, barY + slotH, 0}, borderCol);
+                DebugDraw::line({x + slotW, barY + slotH, 0}, {x, barY + slotH, 0}, borderCol);
+                DebugDraw::line({x, barY + slotH, 0}, {x, barY, 0}, borderCol);
+
+                // Slot number
+                char num[2] = {static_cast<char>('1' + s), 0};
+                Vec3 numCol = unlocked ? Vec3{0.8f, 0.8f, 0.8f} : Vec3{0.3f, 0.3f, 0.3f};
+                FontSystem::drawText(sw, sh, x + 2.0f, barY + slotH - 12.0f, num, numCol, 1);
+
+                // Cooldown overlay
+                if (unlocked && m_classSkillStates[s].cooldownTimer > 0.0f) {
+                    f32 cdFrac = m_classSkillStates[s].cooldownTimer / 2.0f; // rough normalization
+                    if (cdFrac > 1.0f) cdFrac = 1.0f;
+                    f32 cdH = slotH * cdFrac;
+                    Vec3 cdCol = {0.1f, 0.1f, 0.15f};
+                    for (f32 fy = 0; fy < cdH; fy += 1.0f) {
+                        DebugDraw::line({x + 1, barY + fy + 1, 0}, {x + slotW - 1, barY + fy + 1, 0}, cdCol);
                     }
                 }
-                HUD::drawSkillCooldown(sw, sh, ss.cooldownTimer / maxCd);
-            } else {
-                HUD::drawSkillCooldown(sw, sh, 0.0f);
+
+                // "LOCKED" text for unavailable skills
+                if (!unlocked) {
+                    char lockTxt[8];
+                    std::snprintf(lockTxt, sizeof(lockTxt), "F%u", cls.skillUnlockFloor[s]);
+                    FontSystem::drawText(sw, sh, x + 8.0f, barY + 12.0f, lockTxt, {0.4f, 0.3f, 0.3f}, 1);
+                }
+            }
+        }
+
+        // Active skill display — right side of screen, shows current right-click skill name
+        {
+            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+            u8 slot = m_activeClassSkill;
+            bool unlocked = (m_currentFloor >= cls.skillUnlockFloor[slot]);
+            const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, cls.skills[slot]);
+
+            f32 rmbX = static_cast<f32>(sw) - 160.0f;
+            f32 rmbY = 15.0f;
+
+            // Background box
+            Vec3 bgCol = unlocked ? Vec3{0.12f, 0.12f, 0.18f} : Vec3{0.06f, 0.06f, 0.08f};
+            for (f32 fy = 0; fy < 30.0f; fy += 1.0f) {
+                DebugDraw::line({rmbX, rmbY + fy, 0}, {rmbX + 150.0f, rmbY + fy, 0}, bgCol);
+            }
+            // Border
+            Vec3 bCol = unlocked ? Vec3{0.3f, 0.7f, 0.4f} : Vec3{0.2f, 0.2f, 0.25f};
+            if (m_classSkillStates[slot].cooldownTimer > 0.0f) bCol = {0.5f, 0.3f, 0.2f};
+            DebugDraw::line({rmbX, rmbY, 0}, {rmbX + 150, rmbY, 0}, bCol);
+            DebugDraw::line({rmbX + 150, rmbY, 0}, {rmbX + 150, rmbY + 30, 0}, bCol);
+            DebugDraw::line({rmbX + 150, rmbY + 30, 0}, {rmbX, rmbY + 30, 0}, bCol);
+            DebugDraw::line({rmbX, rmbY + 30, 0}, {rmbX, rmbY, 0}, bCol);
+
+            // "RMB" label
+            FontSystem::drawText(sw, sh, rmbX + 4, rmbY + 17, "RMB", {0.5f, 0.5f, 0.6f}, 1);
+
+            // Skill name
+            const char* skillName = sd ? sd->name : "???";
+            Vec3 nameCol = unlocked ? Vec3{0.9f, 0.9f, 1.0f} : Vec3{0.4f, 0.4f, 0.4f};
+            if (m_classSkillStates[slot].cooldownTimer > 0.0f) nameCol = {0.6f, 0.4f, 0.3f};
+            FontSystem::drawText(sw, sh, rmbX + 35, rmbY + 17, skillName, nameCol, 1);
+
+            // Cooldown text
+            if (m_classSkillStates[slot].cooldownTimer > 0.0f) {
+                char cdTxt[8];
+                std::snprintf(cdTxt, sizeof(cdTxt), "%.1fs", m_classSkillStates[slot].cooldownTimer);
+                FontSystem::drawText(sw, sh, rmbX + 35, rmbY + 5, cdTxt, {1.0f, 0.5f, 0.2f}, 1);
             }
         }
 
@@ -4376,6 +4619,49 @@ void Engine::renderMenu() {
         const char* hint = "Up/Down, Enter to confirm, ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menuSubState == 2) {
+        // Class selection screen
+        const char* subTitle = "Choose Your Class";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.58f,
+                             subTitle, {0.9f, 0.8f, 0.3f}, 2);
+
+        u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
+        f32 listTop = sh * 0.50f;
+        f32 spacing = 28.0f;
+
+        for (u8 i = 0; i < classCount; i++) {
+            const ClassDef& cls = kClassDefs[i];
+            f32 y = listTop - i * spacing;
+            bool sel = (i == m_menuSubSelection);
+
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.35f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 300, 24, col, sel);
+
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.55f, 0.55f, 0.55f};
+            char label[64];
+            std::snprintf(label, sizeof(label), "%s  (%.0f HP, %.0f EN)", cls.name, cls.baseHealth, cls.baseEnergy);
+            f32 tw = FontSystem::textWidth(label, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 7.0f, label, tc, 1);
+        }
+
+        // Show selected class description and skills
+        if (m_menuSubSelection < classCount) {
+            const ClassDef& sel = kClassDefs[m_menuSubSelection];
+            f32 descY = sh * 0.50f - classCount * spacing - 20.0f;
+
+            FontSystem::drawText(sw, sh, sw * 0.25f, descY, sel.description, {0.7f, 0.7f, 0.8f}, 1);
+            descY -= 18.0f;
+
+            char statLine[80];
+            std::snprintf(statLine, sizeof(statLine), "HP: %.0f  Speed: %.1f  Energy: %.0f  Weapon: %s",
+                          sel.baseHealth, sel.baseMoveSpeed, sel.baseEnergy, sel.startingWeaponName);
+            FontSystem::drawText(sw, sh, sw * 0.25f, descY, statLine, {0.6f, 0.8f, 0.6f}, 1);
+        }
+
+        const char* hint2 = "Up/Down to select, Enter to confirm, ESC to go back";
+        f32 hintW2 = FontSystem::textWidth(hint2, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.08f, hint2, {0.4f, 0.4f, 0.5f}, 1);
     } else {
         // Main menu options
         static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Exit Game"};

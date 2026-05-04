@@ -143,6 +143,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Determine if this entity is a friendly NPC ally
         bool isFriendly = (e.flags & ENT_FRIENDLY) != 0;
 
+        // Tinkerer drones (friendly, npcClass NONE): teleport to player if too far
+        if (isFriendly && e.npcClass == NpcClass::NONE) {
+            f32 distToPlayer = length(e.position - playerEye);
+            if (distToPlayer > 15.0f) {
+                // Teleport back to player
+                e.position = playerEye + Vec3{1.0f, 0, 1.0f};
+                snapEntityToFloor(e, grid);
+            }
+        }
+
         // ---------------------------------------------------------------------------
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
@@ -438,6 +448,40 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                                 }
                             }
                         }
+                    }
+                }
+            } else if (e.npcClass == NpcClass::NONE) {
+                // --- DRONE MODE ---
+                // Combat drone (spider, not flying): run ahead of the player, rush enemies
+                // Swarm drones (flying): hover near the player
+                bool isCombatDrone = (e.enemyType == EnemyType::SPIDER);
+
+                if (isCombatDrone) {
+                    // Run to a point 3m ahead of the player in their look direction
+                    Vec3 aheadPos = player.position + player.forward * 3.0f;
+                    Vec3 toAhead = aheadPos - e.position;
+                    f32 aDist = length(toAhead);
+                    if (aDist > 1.5f) {
+                        Vec3 flatDir = normalize(Vec3{toAhead.x, 0, toAhead.z});
+                        e.velocity.x = flatDir.x * npcSpeed * 1.2f; // slightly faster than player
+                        e.velocity.z = flatDir.z * npcSpeed * 1.2f;
+                        e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                        entityMoveAndSlide(e, grid, dt);
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                } else {
+                    // Swarm drones: hover near the player
+                    Vec3 toPlayer = playerEye - e.position;
+                    f32 pDist = length(toPlayer);
+                    if (pDist > 3.0f) {
+                        Vec3 flatDir = normalize(Vec3{toPlayer.x, 0, toPlayer.z});
+                        e.velocity.x = flatDir.x * npcSpeed;
+                        e.velocity.z = flatDir.z * npcSpeed;
+                        e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                        entityMoveAndSlide(e, grid, dt);
+                    } else {
+                        e.velocity = {0, 0, 0};
                     }
                 }
             } else {

@@ -55,11 +55,46 @@ static WeaponSubtype weaponSubtypeFromString(const std::string& s) {
 }
 
 static SkillId skillIdFromString(const std::string& s) {
-    if (s == "frozen_orb"      || s == "FROZEN_ORB")      return SkillId::FROZEN_ORB;
-    if (s == "chain_lightning" || s == "CHAIN_LIGHTNING") return SkillId::CHAIN_LIGHTNING;
-    if (s == "meteor_strike"   || s == "METEOR_STRIKE")   return SkillId::METEOR_STRIKE;
-    if (s == "blood_nova"      || s == "BLOOD_NOVA")      return SkillId::BLOOD_NOVA;
-    if (s == "phase_dash"      || s == "PHASE_DASH")      return SkillId::PHASE_DASH;
+    // Legacy legendary skills
+    if (s == "frozen_orb")      return SkillId::FROZEN_ORB;
+    if (s == "chain_lightning")  return SkillId::CHAIN_LIGHTNING;
+    if (s == "meteor_strike")   return SkillId::METEOR_STRIKE;
+    if (s == "blood_nova")      return SkillId::BLOOD_NOVA;
+    if (s == "phase_dash")      return SkillId::PHASE_DASH;
+    // Warrior
+    if (s == "cleave")          return SkillId::CLEAVE;
+    if (s == "war_cry")         return SkillId::WAR_CRY;
+    if (s == "whirlwind")       return SkillId::WHIRLWIND;
+    if (s == "earthquake")      return SkillId::EARTHQUAKE;
+    // Ranger
+    if (s == "multi_shot")      return SkillId::MULTI_SHOT;
+    if (s == "rain_of_arrows")  return SkillId::RAIN_OF_ARROWS;
+    if (s == "poison_arrow")    return SkillId::POISON_ARROW;
+    if (s == "shadow_shot")     return SkillId::SHADOW_SHOT;
+    // Sorcerer
+    if (s == "fireball")        return SkillId::FIREBALL;
+    // Rogue
+    if (s == "knife_burst")     return SkillId::KNIFE_BURST;
+    if (s == "poison_cloud")    return SkillId::POISON_CLOUD;
+    if (s == "shadow_strike")   return SkillId::SHADOW_STRIKE;
+    // Paladin
+    if (s == "holy_smite")      return SkillId::HOLY_SMITE;
+    if (s == "consecration")    return SkillId::CONSECRATION;
+    if (s == "divine_shield")   return SkillId::DIVINE_SHIELD;
+    // Combat Engineer
+    if (s == "shock_bolt")      return SkillId::SHOCK_BOLT;
+    if (s == "deploy_turret")   return SkillId::DEPLOY_TURRET;
+    if (s == "tesla_coil")      return SkillId::TESLA_COIL;
+    if (s == "mech_overdrive")  return SkillId::MECH_OVERDRIVE;
+    // Marksman
+    if (s == "aimed_shot")      return SkillId::AIMED_SHOT;
+    if (s == "explosive_round") return SkillId::EXPLOSIVE_ROUND;
+    if (s == "rapid_fire")      return SkillId::RAPID_FIRE;
+    if (s == "headshot")        return SkillId::HEADSHOT;
+    // Tinkerer
+    if (s == "combat_drone")    return SkillId::COMBAT_DRONE;
+    if (s == "swarm_drones")    return SkillId::SWARM_DRONES;
+    if (s == "stun_grenade")    return SkillId::STUN_GRENADE;
     return SkillId::NONE;
 }
 

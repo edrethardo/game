@@ -10,7 +10,7 @@ static constexpr u32 MAX_ITEM_DEFS       = 128; // expanded to support 4 new dun
 static constexpr u32 MAX_AFFIX_DEFS      = 32;
 static constexpr u32 MAX_AFFIXES_PER_ITEM = 4;
 static constexpr u32 MAX_INVENTORY_ITEMS = 24;
-static constexpr u32 MAX_SKILL_DEFS      = 16;
+static constexpr u32 MAX_SKILL_DEFS      = 48;
 static constexpr u32 MAX_WORLD_ITEMS     = 32;
 
 // ---- Rarity tiers ----
@@ -52,17 +52,96 @@ enum struct AffixType : u8 {
     COUNT
 };
 
-// ---- Weapon skill IDs (legendary powers) ----
+// ---- Player class ----
+
+enum struct PlayerClass : u8 {
+    WARRIOR,
+    RANGER,
+    SORCERER,
+    ROGUE,
+    PALADIN,
+    COMBAT_ENGINEER,
+    MARKSMAN,
+    TINKERER,
+    CLASS_COUNT
+};
+
+// ---- Skill IDs (legendary powers + class skills) ----
 
 enum struct SkillId : u8 {
     NONE = 0,
+    // Legacy legendary skills
     FROZEN_ORB,
     CHAIN_LIGHTNING,
     METEOR_STRIKE,
     BLOOD_NOVA,
     PHASE_DASH,
+
+    // Warrior
+    CLEAVE,
+    WAR_CRY,
+    WHIRLWIND,
+    EARTHQUAKE,
+
+    // Ranger
+    MULTI_SHOT,
+    RAIN_OF_ARROWS,
+    POISON_ARROW,
+    SHADOW_SHOT,
+
+    // Sorcerer
+    FIREBALL,
+    // (reuses FROZEN_ORB, CHAIN_LIGHTNING, METEOR_STRIKE)
+
+    // Rogue
+    KNIFE_BURST,
+    // (reuses PHASE_DASH)
+    POISON_CLOUD,
+    SHADOW_STRIKE,
+
+    // Paladin
+    HOLY_SMITE,
+    CONSECRATION,
+    // (reuses BLOOD_NOVA)
+    DIVINE_SHIELD,
+
+    // Combat Engineer
+    SHOCK_BOLT,
+    DEPLOY_TURRET,
+    TESLA_COIL,
+    MECH_OVERDRIVE,
+
+    // Marksman
+    AIMED_SHOT,
+    EXPLOSIVE_ROUND,
+    RAPID_FIRE,
+    HEADSHOT,
+
+    // Tinkerer
+    COMBAT_DRONE,
+    SWARM_DRONES,
+    STUN_GRENADE,
+    // (reuses DEPLOY_TURRET)
+
     COUNT
 };
+
+// ---- Class definition (static template per class) ----
+
+struct ClassDef {
+    const char* name;
+    const char* description;
+    f32 baseHealth;
+    f32 baseMoveSpeed;
+    f32 baseEnergy;
+    const char* startingWeaponName; // matched against ItemDef.name
+    SkillId skills[4];             // skill slots 1-4
+    u8 skillUnlockFloor[4];        // floor at which each skill becomes available
+    u8 skillUpgradeFloor[4];       // floor at which each skill gets its upgrade
+};
+
+// Global class definition table (defined in engine.cpp)
+extern const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)];
 
 // ---- Affix instance (a single rolled modifier on an item) ----
 
