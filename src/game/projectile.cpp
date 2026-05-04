@@ -18,12 +18,11 @@ void ProjectileSystem::init(ProjectilePool& pool) {
     }
 }
 
-void ProjectileSystem::spawn(ProjectilePool& pool,
-                              Vec3 origin, Vec3 direction, f32 speed,
-                              f32 damage, f32 radius, f32 lifetime,
-                              bool fromPlayer, u8 extraFlags)
+u16 ProjectileSystem::spawn(ProjectilePool& pool,
+                             Vec3 origin, Vec3 direction, f32 speed,
+                             f32 damage, f32 radius, f32 lifetime,
+                             bool fromPlayer, u8 extraFlags)
 {
-    // Find first inactive slot
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         if (!pool.projectiles[i].active) {
             Projectile& p = pool.projectiles[i];
@@ -33,7 +32,7 @@ void ProjectileSystem::spawn(ProjectilePool& pool,
             p.damage     = damage;
             p.lifetime   = lifetime;
             p.active     = true;
-            p.projFlags  = extraFlags;  // caller can set PROJ_SPARK etc.
+            p.projFlags  = extraFlags;
             p.gravity    = 0.0f;
             p.splashRadius = 0.0f;
             p.splashDamage = 0.0f;
@@ -42,9 +41,10 @@ void ProjectileSystem::spawn(ProjectilePool& pool,
             p.meshId     = 0;
             p.fromPlayer = fromPlayer;
             pool.activeCount++;
-            return;
+            return static_cast<u16>(i);
         }
     }
+    return 0xFFFF;
 }
 
 static void destroyProjectile(ProjectilePool& pool, u32 idx) {

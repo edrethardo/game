@@ -271,7 +271,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     }
                     entityMoveAndSlide(e, grid, dt);
                     snapEntityToFloor(e, grid);
-                    goto npc_speech; // skip attack, go to speech handling
+                    inCombat = false; // suppress combat, fall through to speech
                 }
 
                 // -- Movement by class --
@@ -377,21 +377,11 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                                     f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
                                     f32 radius = e.npcProjectileRadius > 0.0f ? e.npcProjectileRadius : 0.1f;
                                     u8 extraFlags = (e.npcClass == NpcClass::MAGE) ? PROJ_SPLASH : 0;
-                                    ProjectileSystem::spawn(projectiles, eyePos,
+                                    u16 projIdx = ProjectileSystem::spawn(projectiles, eyePos,
                                         fireDir, speed, e.damage, radius, 3.0f, true, extraFlags);
-                                    if (e.npcClass == NpcClass::MAGE) {
-                                        for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                                            Projectile& proj = projectiles.projectiles[pi];
-                                            if (proj.active && proj.fromPlayer &&
-                                                (proj.projFlags & PROJ_SPLASH) && proj.splashRadius == 0.0f) {
-                                                Vec3 dd = proj.position - eyePos;
-                                                if (lengthSq(dd) < 0.5f) {
-                                                    proj.splashRadius = 1.5f;
-                                                    proj.splashDamage = e.damage * 0.5f;
-                                                    break;
-                                                }
-                                            }
-                                        }
+                                    if (e.npcClass == NpcClass::MAGE && projIdx != 0xFFFF) {
+                                        projectiles.projectiles[projIdx].splashRadius = 1.5f;
+                                        projectiles.projectiles[projIdx].splashDamage = e.damage * 0.5f;
                                     }
                                 } else {
                                     EntityHandle th = {bestEnemyIdx, target.generation};
@@ -429,7 +419,6 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             snapEntityToFloor(e, grid);
 
-            npc_speech:
             // Speech timer decay
             if (e.speechTimer > 0.0f) {
                 e.speechTimer -= dt;
@@ -534,19 +523,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // Floor 5: The Butcher — cleaver throw (classic)
                 case 5: {
                     e.flybyTimer = 4.0f;
-                    ProjectileSystem::spawn(projectiles, bossEye,
+                    u16 pi5 = ProjectileSystem::spawn(projectiles, bossEye,
                         toPlayerDir, 18.0f, bossDmg * 0.8f, 0.15f, 3.0f, false);
-                    // Tag the projectile with the cleaver mesh
-                    for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                        Projectile& proj = projectiles.projectiles[pi];
-                        if (proj.active && !proj.fromPlayer && proj.meshId == 0) {
-                            Vec3 d = proj.position - bossEye;
-                            if (lengthSq(d) < 0.5f) {
-                                proj.meshId = e.weaponMeshId;
-                                break;
-                            }
-                        }
-                    }
+                    if (pi5 != 0xFFFF) projectiles.projectiles[pi5].meshId = e.weaponMeshId;
                     e.speechText = "DIE!";
                     e.speechTimer = 2.0f;
                 } break;
@@ -653,18 +632,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 case 35: {
                     e.flybyTimer = 5.0f;
                     // Throw weapon then charge
-                    ProjectileSystem::spawn(projectiles, bossEye,
+                    u16 pi35 = ProjectileSystem::spawn(projectiles, bossEye,
                         toPlayerDir, 20.0f, bossDmg * 0.7f, 0.15f, 3.0f, false);
-                    for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                        Projectile& proj = projectiles.projectiles[pi];
-                        if (proj.active && !proj.fromPlayer && proj.meshId == 0) {
-                            Vec3 d = proj.position - bossEye;
-                            if (lengthSq(d) < 0.5f) {
-                                proj.meshId = e.weaponMeshId;
-                                break;
-                            }
-                        }
-                    }
+                    if (pi35 != 0xFFFF) projectiles.projectiles[pi35].meshId = e.weaponMeshId;
                     // Boost speed temporarily via velocity burst toward player
                     Vec3 chargeDir = normalize(Vec3{toPlayerDir.x, 0, toPlayerDir.z});
                     e.velocity = chargeDir * e.moveSpeed * 4.0f;
@@ -683,21 +653,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     for (u32 s = 0; s < 6; s++) {
                         f32 angle = s * (6.2832f / 6.0f);
                         Vec3 dir = {sinf(angle), 0.1f, cosf(angle)};
-                        ProjectileSystem::spawn(projectiles, bossEye,
+                        u16 pi40 = ProjectileSystem::spawn(projectiles, bossEye,
                             dir, 12.0f, bossDmg * 0.4f, 0.15f, 3.0f, false,
                             PROJ_SPLASH);
-                        // Set splash params on the just-spawned projectile
-                        for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                            Projectile& proj = projectiles.projectiles[pi];
-                            if (proj.active && !proj.fromPlayer &&
-                                (proj.projFlags & PROJ_SPLASH) && proj.splashRadius == 0.0f) {
-                                Vec3 d2 = proj.position - bossEye;
-                                if (lengthSq(d2) < 0.5f) {
-                                    proj.splashRadius = 2.5f;
-                                    proj.splashDamage = bossDmg * 0.3f;
-                                    break;
-                                }
-                            }
+                        if (pi40 != 0xFFFF) {
+                            projectiles.projectiles[pi40].splashRadius = 2.5f;
+                            projectiles.projectiles[pi40].splashDamage = bossDmg * 0.3f;
                         }
                     }
                     e.speechText = "BURN!";

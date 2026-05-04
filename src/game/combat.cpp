@@ -119,49 +119,31 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
     return result;
 }
 
-bool Combat::fireProjectile(const WeaponDef& weapon,
-                             Vec3 eyePos, Vec3 forward,
-                             ProjectilePool& projectiles,
-                             u8 extraFlags)
+u16 Combat::fireProjectile(const WeaponDef& weapon,
+                            Vec3 eyePos, Vec3 forward,
+                            ProjectilePool& projectiles,
+                            u8 extraFlags)
 {
-    f32 lifetime = 3.0f;
-    ProjectileSystem::spawn(projectiles, eyePos, forward,
-                            weapon.projectileSpeed, weapon.damage,
-                            weapon.projectileRadius, lifetime, true, extraFlags);
-    return true;
+    return ProjectileSystem::spawn(projectiles, eyePos, forward,
+                                    weapon.projectileSpeed, weapon.damage,
+                                    weapon.projectileRadius, 3.0f, true, extraFlags);
 }
 
-bool Combat::fireProjectile(const WeaponDef& weapon,
-                             Vec3 eyePos, Vec3 forward,
-                             ProjectilePool& projectiles,
-                             f32 gravity, f32 splashRadius, f32 splashDamage)
+u16 Combat::fireProjectile(const WeaponDef& weapon,
+                            Vec3 eyePos, Vec3 forward,
+                            ProjectilePool& projectiles,
+                            f32 gravity, f32 splashRadius, f32 splashDamage)
 {
-    f32 lifetime = 5.0f; // longer lifetime for arcing projectiles
-
-    // Find an inactive slot and configure it
-    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
-        if (!projectiles.projectiles[i].active) {
-            Projectile& p = projectiles.projectiles[i];
-            p.position   = eyePos;
-            p.velocity   = normalize(forward) * weapon.projectileSpeed;
-            p.radius     = weapon.projectileRadius;
-            p.damage     = weapon.damage;
-            p.lifetime   = lifetime;
-            p.active     = true;
-            p.fromPlayer = true;
-            p.projFlags  = 0;
-            p.subTimer   = 0.0f;
-            p.orbAngle   = 0.0f;
-            p.gravity      = gravity;
-            p.splashRadius = splashRadius;
-            p.splashDamage = splashDamage;
-
-            if (gravity > 0.0f) p.projFlags |= PROJ_GRAVITY;
-            if (splashRadius > 0.0f) p.projFlags |= PROJ_SPLASH;
-
-            projectiles.activeCount++;
-            return true;
-        }
+    u16 idx = ProjectileSystem::spawn(projectiles, eyePos, forward,
+                                       weapon.projectileSpeed, weapon.damage,
+                                       weapon.projectileRadius, 5.0f, true);
+    if (idx != 0xFFFF) {
+        Projectile& p = projectiles.projectiles[idx];
+        p.gravity      = gravity;
+        p.splashRadius = splashRadius;
+        p.splashDamage = splashDamage;
+        if (gravity > 0.0f) p.projFlags |= PROJ_GRAVITY;
+        if (splashRadius > 0.0f) p.projFlags |= PROJ_SPLASH;
     }
-    return false;
+    return idx;
 }

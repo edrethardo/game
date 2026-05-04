@@ -171,12 +171,36 @@ private:
     FireFX m_fireFX[MAX_FIRE_FX] = {};
 
     // Pre-cached mesh IDs (resolved once in init, avoids strcmp in startGame)
-    u8 m_meshIdSkeleton = 0, m_meshIdBat = 0, m_meshIdSpider = 0;
-    u8 m_meshIdChest = 0, m_meshIdHuman = 0;
-    u8 m_meshIdSword = 0, m_meshIdDagger = 0, m_meshIdAxe = 0;
-    u8 m_meshIdMace = 0, m_meshIdCleric = 0, m_meshIdArcher = 0, m_meshIdBow = 0;
-    u8 m_meshIdMage = 0, m_meshIdRogue = 0, m_meshIdPaladin = 0, m_meshIdStaff = 0, m_meshIdThrowingKnife = 0;
-    u8 m_meshIdButcher = 0, m_meshIdCleaver = 0, m_meshIdIronMaiden = 0;
+    enum MeshId : u8 {
+        MESH_SKELETON, MESH_BAT, MESH_SPIDER, MESH_CHEST, MESH_HUMAN,
+        MESH_SWORD, MESH_DAGGER, MESH_AXE, MESH_MACE, MESH_BOW, MESH_STAFF,
+        MESH_THROWING_KNIFE, MESH_CLERIC, MESH_ARCHER, MESH_MAGE, MESH_ROGUE,
+        MESH_PALADIN, MESH_BUTCHER, MESH_CLEAVER, MESH_IRON_MAIDEN,
+        MESH_ID_COUNT
+    };
+    u8 m_meshIds[MESH_ID_COUNT] = {};
+
+    // Convenience accessors (keep existing code compiling with minimal changes)
+    u8& m_meshIdSkeleton      = m_meshIds[MESH_SKELETON];
+    u8& m_meshIdBat           = m_meshIds[MESH_BAT];
+    u8& m_meshIdSpider        = m_meshIds[MESH_SPIDER];
+    u8& m_meshIdChest         = m_meshIds[MESH_CHEST];
+    u8& m_meshIdHuman         = m_meshIds[MESH_HUMAN];
+    u8& m_meshIdSword         = m_meshIds[MESH_SWORD];
+    u8& m_meshIdDagger        = m_meshIds[MESH_DAGGER];
+    u8& m_meshIdAxe           = m_meshIds[MESH_AXE];
+    u8& m_meshIdMace          = m_meshIds[MESH_MACE];
+    u8& m_meshIdBow           = m_meshIds[MESH_BOW];
+    u8& m_meshIdStaff         = m_meshIds[MESH_STAFF];
+    u8& m_meshIdThrowingKnife = m_meshIds[MESH_THROWING_KNIFE];
+    u8& m_meshIdCleric        = m_meshIds[MESH_CLERIC];
+    u8& m_meshIdArcher        = m_meshIds[MESH_ARCHER];
+    u8& m_meshIdMage          = m_meshIds[MESH_MAGE];
+    u8& m_meshIdRogue         = m_meshIds[MESH_ROGUE];
+    u8& m_meshIdPaladin       = m_meshIds[MESH_PALADIN];
+    u8& m_meshIdButcher       = m_meshIds[MESH_BUTCHER];
+    u8& m_meshIdCleaver       = m_meshIds[MESH_CLEAVER];
+    u8& m_meshIdIronMaiden    = m_meshIds[MESH_IRON_MAIDEN];
 
     // Switch constraint mode
     bool m_switchMode = false;

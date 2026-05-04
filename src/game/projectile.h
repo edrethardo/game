@@ -47,10 +47,11 @@ namespace ProjectileSystem {
 
     void init(ProjectilePool& pool);
 
-    void spawn(ProjectilePool& pool,
-               Vec3 origin, Vec3 direction, f32 speed,
-               f32 damage, f32 radius, f32 lifetime,
-               bool fromPlayer, u8 extraFlags = 0);
+    // Spawn a projectile. Returns the pool slot index (0xFFFF if pool full).
+    u16 spawn(ProjectilePool& pool,
+              Vec3 origin, Vec3 direction, f32 speed,
+              f32 damage, f32 radius, f32 lifetime,
+              bool fromPlayer, u8 extraFlags = 0);
 
     // Update all projectiles: move, collide with grid and entities/player.
     void update(ProjectilePool& pool,

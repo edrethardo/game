@@ -2645,15 +2645,16 @@ void Engine::handleWeaponFire(f32 dt) {
         bool isWand = qbItem && !isItemEmpty(*qbItem) &&
                       m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::WAND;
 
+        u16 projIdx;
         if (isMolotov) {
-            Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
-                                    9.8f, 3.0f, wpn.damage * 0.6f);
+            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
+                                              9.8f, 3.0f, wpn.damage * 0.6f);
         } else {
             u8 flags = isWand ? PROJ_SPARK : 0;
-            Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
+            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
         }
-        // Set weapon mesh on the projectile for throwing weapons (knife, molotov, bow, crossbow)
-        if (qbItem && !isItemEmpty(*qbItem)) {
+        // Tag thrown weapons with their mesh (knife, molotov, bow, crossbow)
+        if (projIdx != 0xFFFF && qbItem && !isItemEmpty(*qbItem)) {
             u8 wpnMesh = m_itemDefs[qbItem->defId].meshId;
             WeaponSubtype sub = m_itemDefs[qbItem->defId].weaponSubtype;
             bool isThrown = (sub == WeaponSubtype::THROWING_KNIFE ||
@@ -2661,17 +2662,7 @@ void Engine::handleWeaponFire(f32 dt) {
                              sub == WeaponSubtype::BOW ||
                              sub == WeaponSubtype::CROSSBOW);
             if (isThrown && wpnMesh > 0) {
-                // Find the just-spawned projectile and set its meshId
-                for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                    Projectile& proj = m_projectiles.projectiles[pi];
-                    if (proj.active && proj.fromPlayer && proj.meshId == 0) {
-                        Vec3 d = proj.position - eyePos;
-                        if (lengthSq(d) < 0.5f) {
-                            proj.meshId = wpnMesh;
-                            break;
-                        }
-                    }
-                }
+                m_projectiles.projectiles[projIdx].meshId = wpnMesh;
             }
         }
         result.didFire = true;
@@ -2707,16 +2698,9 @@ void Engine::handleWeaponFire(f32 dt) {
                 switch (m_weaponProc) {
                     case SkillId::FROZEN_ORB: {
                         Vec3 dir = m_localPlayer.forward;
-                        ProjectileSystem::spawn(m_projectiles, procPos, dir,
+                        u16 orbIdx = ProjectileSystem::spawn(m_projectiles, procPos, dir,
                             sd->projectileSpeed, sd->damage, sd->radius, sd->duration, true);
-                        // Mark as orb for visual + shard spawning
-                        for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
-                            Projectile& proj = m_projectiles.projectiles[pi];
-                            if (proj.active && proj.fromPlayer && proj.projFlags == 0) {
-                                Vec3 d = proj.position - procPos;
-                                if (lengthSq(d) < 0.5f) { proj.projFlags = PROJ_ORB; break; }
-                            }
-                        }
+                        if (orbIdx != 0xFFFF) m_projectiles.projectiles[orbIdx].projFlags = PROJ_ORB;
                     } break;
                     case SkillId::CHAIN_LIGHTNING: {
                         // Spawn spark projectiles in a small fan from hit position
