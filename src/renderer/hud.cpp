@@ -902,7 +902,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         if (item.bonusHealth > 0.0f) lineCount += 1;
     }
     lineCount += item.affixCount;
-    if (def.legendarySkillId != SkillId::NONE) {
+    if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
         lineCount += 4; // separator + skill name + 2 description lines
     }
 
@@ -993,8 +993,8 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         curY -= lineH;
     }
 
-    // Legendary skill — name + description
-    if (def.legendarySkillId != SkillId::NONE) {
+    // Legendary skill — only shown on legendary-rarity items
+    if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
         // Gold separator
         curY -= lineH * 0.3f;
         pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.6f, 0.5f, 0.15f});

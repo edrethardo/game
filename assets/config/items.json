@@ -157,7 +157,7 @@
       "weaponSubtype": "axe",
       "mesh": "axe",
       "material": "weapon_melee",
-      "baseDamage": 55.0,
+      "baseDamage": 35.0,
       "baseRange": 2.3,
       "baseCooldown": 0.68,
       "baseConeAngle": 120.0,

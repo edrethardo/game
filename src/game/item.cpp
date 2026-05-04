@@ -441,7 +441,7 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
     // Track which AffixTypes have already been assigned (no duplicate types)
     bool usedTypes[static_cast<u32>(AffixType::COUNT)] = {};
 
-    f32 levelScale = 1.0f + 0.15f * static_cast<f32>(itemLevel);
+    f32 levelScale = 1.0f + 0.06f * static_cast<f32>(itemLevel);
 
     for (u8 a = 0; a < affixCount && item.affixCount < MAX_AFFIXES_PER_ITEM; a++) {
         // Shuffle-pick a random candidate that has an unused type
@@ -518,8 +518,8 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     if (rolled > def.maxRarity) rolled = def.maxRarity;
     item.rarity = rolled;
 
-    // Scale base stats
-    f32 levelMult = 1.0f + 0.20f * static_cast<f32>(enemyLevel);
+    // Scale base stats — gentle curve so early-floor items aren't overpowered
+    f32 levelMult = 1.0f + 0.08f * static_cast<f32>(enemyLevel);
     item.damage      = def.baseDamage  * levelMult;
     item.bonusHealth = def.baseHealth  * levelMult;
 
