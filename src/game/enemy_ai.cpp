@@ -157,6 +157,28 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
         if (isFriendly) {
+            // Stuck detection: if NPC hasn't moved more than 0.1 units in 2 seconds,
+            // nudge it toward the next flow field cell center to unstick
+            f32 movedDist = length(e.position - e.lastSeenPos);
+            if (movedDist < 0.1f) {
+                e.flybyTimer += dt; // reuse as stuck timer for friendlies
+                if (e.flybyTimer > 2.0f) {
+                    // Teleport to the center of the next flow field cell
+                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                    if (lengthSq(flowDir) > 0.001f) {
+                        e.position = e.position + flowDir * 1.0f;
+                    }
+                    e.flybyTimer = 0.0f;
+                }
+            } else {
+                e.flybyTimer = 0.0f;
+                e.lastSeenPos = e.position; // update last known good position
+            }
+
+            // Shrink collision by 15% for movement so NPCs fit through tight corridors
+            Vec3 savedHalf = e.halfExtents;
+            e.halfExtents = e.halfExtents * 0.85f;
+
             // Freeze halves friendly NPC speed
             f32 npcSpeed = e.moveSpeed;
             if (e.freezeTimer > 0.0f) npcSpeed *= 0.5f;
@@ -543,6 +565,22 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             snapEntityToFloor(e, grid);
 
+            // Push apart from other friendly entities to prevent stacking
+            for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                u32 nIdx = pool.activeList[ni];
+                if (nIdx == i) continue;
+                Entity& other = pool.entities[nIdx];
+                if (!(other.flags & ENT_FRIENDLY)) continue;
+                if (other.flags & ENT_DEAD) continue;
+                Vec3 diff = e.position - other.position;
+                f32 dist2 = lengthSq(diff);
+                f32 minDist = e.halfExtents.x + other.halfExtents.x;
+                if (dist2 < minDist * minDist && dist2 > 0.001f) {
+                    Vec3 push = normalize(diff) * 0.05f; // gentle push
+                    e.position = e.position + push;
+                }
+            }
+
             // Speech timer decay
             if (e.speechTimer > 0.0f) {
                 e.speechTimer -= dt;
@@ -556,6 +594,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.speechTimer = 3.0f;
                 }
             }
+
+            // Restore full collision size after movement
+            e.halfExtents = savedHalf;
 
             continue; // skip hostile AI path for friendly NPCs
         }
@@ -868,11 +909,38 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         switch (e.aiState) {
 
         case AIState::IDLE: {
-            e.velocity = {0, 0, 0};
-
-            // Bats hold position when idle — no position wobble
-            if (isBat) {
-                (void)0; // wings flap via LimbSystem, body stays still
+            // Idle roaming — enemies wander slowly when no target detected.
+            // Uses flybyTimer as roam countdown (unused in IDLE for non-bats).
+            e.flybyTimer -= dt;
+            if (e.flybyTimer <= 0.0f) {
+                // Pick a new random roam direction + duration
+                f32 angle = (std::rand() % 628) * 0.01f; // 0 to 2pi
+                f32 roamSpeed = e.moveSpeed * 0.3f;       // slow wander
+                if (isBat) {
+                    // Bats: gentle hover drift
+                    e.velocity.x = sinf(angle) * roamSpeed * 0.5f;
+                    e.velocity.z = cosf(angle) * roamSpeed * 0.5f;
+                } else {
+                    e.velocity.x = sinf(angle) * roamSpeed;
+                    e.velocity.z = cosf(angle) * roamSpeed;
+                }
+                e.yaw = atan2f(-e.velocity.x, -e.velocity.z);
+                // Roam for 0.5-1.5 seconds, then pause 2-4 seconds
+                e.flybyTimer = 0.5f + (std::rand() % 100) * 0.01f; // roam duration
+                e.flybyTarget.z = 1.0f; // flag: currently roaming
+            } else if (e.flybyTarget.z > 0.0f) {
+                // Currently roaming — move
+                entityMoveAndSlide(e, grid, dt);
+                if (!isBat) snapEntityToFloor(e, grid);
+                // Check if roam time expired → pause
+                if (e.flybyTimer <= 0.0f) {
+                    e.velocity = {0, 0, 0};
+                    e.flybyTimer = 2.0f + (std::rand() % 200) * 0.01f; // pause duration
+                    e.flybyTarget.z = 0.0f; // flag: pausing
+                }
+            } else {
+                // Pausing between roams
+                e.velocity = {0, 0, 0};
             }
 
             // Staggered LOS check — bats check more frequently (every 4 frames)
@@ -880,11 +948,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             u16 checkFreq = isBat ? 4 : 8;
             if (e.aiCheckIdx >= checkFreq) {
                 e.aiCheckIdx = 0;
-                // Trigger on NPC target or player within detection range
                 if (targetIsNPC && targetDist <= e.detectionRange) {
                     e.aiState = AIState::CHASE;
+                    e.velocity = {0, 0, 0};
                 } else if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
                     e.aiState = AIState::CHASE;
+                    e.velocity = {0, 0, 0};
                 }
             }
         } break;

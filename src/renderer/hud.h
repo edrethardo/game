@@ -47,6 +47,13 @@ namespace HUD {
     // Energy bar (blue bar below health bar)
     void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
 
+    // Summon portrait — icon + name + optional health bar + optional count.
+    // healthFrac < 0 means no health bar. count <= 1 means no count shown.
+    // iconMatId: material ID for the portrait texture (0 = use colored square fallback).
+    void drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
+                             const char* name, Vec3 iconColor,
+                             f32 healthFrac, u32 count, u8 iconMatId = 0);
+
     // Skill cooldown indicator (small square near weapon indicator)
     void drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct);
 

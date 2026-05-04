@@ -1576,6 +1576,99 @@ def skin_shield_plate_tex():
     return w, h, p
 
 
+# ---------------------------------------------------------------------------
+# Minion portrait icons (8x8) — top-down HUD portraits for summoned minions.
+# px=0 is left, py=0 is bottom (Y-flipped on write like all other skins).
+# ---------------------------------------------------------------------------
+
+def skin_icon_drone():
+    """8x8 portrait matching the in-game combat drone — dark metallic spider with red eyes."""
+    w, h = 8, 8
+    bg    = (15, 15, 20, 255)
+    body  = (90, 85, 100, 255)      # dark metallic (prop_iron on spider mesh)
+    body2 = (70, 65, 80, 255)       # darker abdomen
+    leg   = (60, 55, 70, 255)       # dark metal legs
+    eye   = (220, 40, 30, 255)      # bright red (matches spider_skin eye stalks)
+    p = {(px, py): bg for py in range(h) for px in range(w)}
+
+    # Fat spider body — 4x3 center
+    for py in range(2, 5):
+        for px in range(2, 6):
+            p[(px, py)] = body
+    for px in range(3, 5):
+        p[(px, 2)] = body2; p[(px, 3)] = body2
+
+    # 8 legs radiating from body
+    p[(1, 5)] = leg; p[(0, 6)] = leg   # front-left
+    p[(6, 5)] = leg; p[(7, 6)] = leg   # front-right
+    p[(1, 1)] = leg; p[(0, 0)] = leg   # back-left
+    p[(6, 1)] = leg; p[(7, 0)] = leg   # back-right
+    p[(1, 3)] = leg; p[(0, 3)] = leg   # mid-left
+    p[(6, 3)] = leg; p[(7, 3)] = leg   # mid-right
+
+    # Two bright red eyes at front
+    p[(3, 5)] = eye; p[(4, 5)] = eye
+
+    return w, h, p
+
+
+def skin_icon_swarm():
+    """8x8 portrait matching the in-game swarm drone — tiny dark metallic bat body."""
+    w, h = 8, 8
+    bg   = (15, 15, 20, 255)
+    body = (80, 75, 90, 255)        # dark metallic (prop_iron on bat mesh)
+    ear  = (60, 55, 70, 255)        # darker ear/top detail
+    belly = (95, 90, 105, 255)      # slightly lighter belly
+    eye  = (150, 180, 230, 255)     # pale blue (matches void_bat eye style)
+    p = {(px, py): bg for py in range(h) for px in range(w)}
+
+    # Small bat body — 4x3 center
+    for py in range(2, 5):
+        for px in range(2, 6):
+            p[(px, py)] = body
+    # Lighter belly
+    p[(3, 2)] = belly; p[(4, 2)] = belly
+    # Ear points
+    p[(2, 5)] = ear; p[(5, 5)] = ear
+    p[(1, 6)] = ear; p[(6, 6)] = ear
+
+    # Blue eyes
+    p[(3, 4)] = eye; p[(4, 4)] = eye
+
+    return w, h, p
+
+
+def skin_icon_turret():
+    """8x8 portrait matching the in-game turret — dark metallic spider base with barrel."""
+    w, h = 8, 8
+    bg     = (15, 15, 20, 255)
+    base   = (85, 80, 95, 255)      # dark metallic base (same as drone)
+    base2  = (70, 65, 80, 255)      # darker center
+    barrel = (100, 100, 115, 255)   # lighter barrel
+    dot    = (220, 50, 30, 255)     # red targeting dot
+    p = {(px, py): bg for py in range(h) for px in range(w)}
+
+    # Spider-like base — 4x4 with cut corners
+    for py in range(2, 6):
+        for px in range(2, 6):
+            p[(px, py)] = base
+    p[(2, 2)] = bg; p[(5, 2)] = bg
+    p[(2, 5)] = bg; p[(5, 5)] = bg
+    # Darker center
+    p[(3, 3)] = base2; p[(4, 3)] = base2
+    p[(3, 4)] = base2; p[(4, 4)] = base2
+
+    # Barrel extending upward
+    p[(3, 5)] = barrel
+    p[(3, 6)] = barrel
+    p[(3, 7)] = barrel
+
+    # Red targeting dot at barrel tip (py 7)
+    p[(3, 7)] = dot
+
+    return w, h, p
+
+
 # --- Legendary glow variants ---
 
 def skin_legendary_weapon_tex():
@@ -1742,6 +1835,10 @@ SKIN_TYPES = {
     "legendary_boots_tex":   ("legendary_boots_skin_42.png",   skin_legendary_boots_tex),
     "legendary_ring_tex":    ("legendary_ring_skin_42.png",    skin_legendary_ring_tex),
     "legendary_shield_tex":  ("legendary_shield_skin_42.png",  skin_legendary_shield_tex),
+    # Minion portrait icons (8x8)
+    "icon_drone":         ("icon_drone_42.png",              skin_icon_drone),
+    "icon_swarm":         ("icon_swarm_42.png",              skin_icon_swarm),
+    "icon_turret":        ("icon_turret_42.png",             skin_icon_turret),
     # Skeleton-rig variants
     "zombie":             ("zombie_skin_42.png",             skin_zombie),
     "ghoul":              ("ghoul_skin_42.png",              skin_ghoul),

@@ -1396,18 +1396,24 @@ void Engine::startGame() {
 
                 f32 px, pz;
                 if (prop.wallOnly) {
-                    // Place against a room edge so it doesn't block movement.
-                    // Pick a random wall (0=north, 1=south, 2=west, 3=east) and
-                    // a random position along that wall.
+                    // Place flush against room walls — offset by halfExtents so
+                    // the prop's edge touches the wall, not its center.
                     u32 wall = std::rand() % 4;
+                    f32 cs = m_grid.cellSize;
                     if (wall < 2) {
-                        // North/south wall: fixed z, random x
-                        px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
-                        pz = (wall == 0 ? room.z : room.z + room.d - 1) * m_grid.cellSize;
+                        // North/south wall: fixed z, random x along wall
+                        px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * cs;
+                        if (wall == 0)
+                            pz = room.z * cs + prop.halfExt.z;                  // north: push inward
+                        else
+                            pz = (room.z + room.d) * cs - prop.halfExt.z;       // south: push inward
                     } else {
-                        // West/east wall: fixed x, random z
-                        px = (wall == 2 ? room.x : room.x + room.w - 1) * m_grid.cellSize;
-                        pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
+                        // West/east wall: fixed x, random z along wall
+                        pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * cs;
+                        if (wall == 2)
+                            px = room.x * cs + prop.halfExt.x;                  // west: push inward
+                        else
+                            px = (room.x + room.w) * cs - prop.halfExt.x;       // east: push inward
                     }
                 } else {
                     // Small/flat props (bones, webs) can go anywhere in the room
@@ -4382,13 +4388,13 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
 
-        // Summon portraits — top-left, below player health bar
+        // Summon portraits — top-left, well below floor/potion text
         {
             f32 portX = 10.0f;
-            f32 portY = static_cast<f32>(sh) - 60.0f; // below health bar area
-            f32 portW = 32.0f, portH = 32.0f, gap = 4.0f;
+            f32 portY = static_cast<f32>(sh) - 75.0f; // lower position, clear of other HUD
+            f32 portH = 26.0f, gap = 3.0f;
 
-            // Count and find summons by type
+            // Scan for summons
             Entity* combatDrone = nullptr;
             u32 swarmCount = 0;
             u32 turretCount = 0;
@@ -4398,97 +4404,38 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 Entity& ent = m_entities.entities[idx];
                 if (!(ent.flags & ENT_FRIENDLY)) continue;
                 if (ent.flags & ENT_DEAD) continue;
-                if (ent.npcClass != NpcClass::NONE) continue; // skip party NPCs
+                if (ent.npcClass != NpcClass::NONE) continue;
 
                 if (ent.enemyType == EnemyType::SPIDER && ent.moveSpeed > 0.0f) {
-                    combatDrone = &ent; // combat drone (mobile spider)
+                    combatDrone = &ent;
                 } else if (ent.flags & ENT_UNTARGETABLE) {
-                    swarmCount++; // swarm drones
+                    swarmCount++;
                 } else if (ent.moveSpeed <= 0.0f) {
-                    turretCount++; // turrets (stationary)
+                    turretCount++;
                 }
             }
 
-            u32 slotIdx = 0;
+            u32 slot = 0;
 
-            // Combat drone portrait — health bar + icon
+            u8 matDrone  = MaterialSystem::getIdByName("icon_drone");
+            u8 matSwarm  = MaterialSystem::getIdByName("icon_swarm");
+            u8 matTurret = MaterialSystem::getIdByName("icon_turret");
+
             if (combatDrone) {
-                f32 y = portY - slotIdx * (portH + gap);
-
-                // Background
-                for (f32 fy = 0; fy < portH; fy += 1.0f)
-                    DebugDraw::line({portX, y + fy, 0}, {portX + portW + 60, y + fy, 0}, {0.08f, 0.08f, 0.12f});
-
-                // Border
-                Vec3 bCol = {0.4f, 0.7f, 0.4f};
-                DebugDraw::line({portX, y, 0}, {portX + portW + 60, y, 0}, bCol);
-                DebugDraw::line({portX + portW + 60, y, 0}, {portX + portW + 60, y + portH, 0}, bCol);
-                DebugDraw::line({portX + portW + 60, y + portH, 0}, {portX, y + portH, 0}, bCol);
-                DebugDraw::line({portX, y + portH, 0}, {portX, y, 0}, bCol);
-
-                // Spider icon placeholder (small colored square)
-                for (f32 fy = 4; fy < portH - 4; fy += 1.0f)
-                    DebugDraw::line({portX + 4, y + fy, 0}, {portX + portH - 4, y + fy, 0}, {0.5f, 0.5f, 0.6f});
-
-                // Health bar
                 f32 hpFrac = combatDrone->health / combatDrone->maxHealth;
-                f32 barX = portX + portH + 2;
-                f32 barW = 56.0f;
-                f32 barH = 6.0f;
-                f32 barY = y + portH - 10;
-                for (f32 fy = 0; fy < barH; fy += 1.0f)
-                    DebugDraw::line({barX, barY + fy, 0}, {barX + barW, barY + fy, 0}, {0.15f, 0.15f, 0.2f});
-                Vec3 hpCol = (hpFrac > 0.5f) ? Vec3{0.2f, 0.8f, 0.3f} : Vec3{0.9f, 0.3f, 0.1f};
-                for (f32 fy = 0; fy < barH; fy += 1.0f)
-                    DebugDraw::line({barX, barY + fy, 0}, {barX + barW * hpFrac, barY + fy, 0}, hpCol);
-
-                FontSystem::drawText(sw, sh, barX, y + 18, "Drone", {0.7f, 0.7f, 0.8f}, 1);
-                slotIdx++;
+                HUD::drawSummonPortrait(sw, sh, portX, portY - slot * (portH + gap),
+                                         "Drone", {0.35f, 0.33f, 0.4f}, hpFrac, 1, matDrone);
+                slot++;
             }
-
-            // Swarm drones portrait — count
             if (swarmCount > 0) {
-                f32 y = portY - slotIdx * (portH + gap);
-                for (f32 fy = 0; fy < portH; fy += 1.0f)
-                    DebugDraw::line({portX, y + fy, 0}, {portX + portW + 60, y + fy, 0}, {0.08f, 0.08f, 0.12f});
-                Vec3 bCol = {0.3f, 0.6f, 0.8f};
-                DebugDraw::line({portX, y, 0}, {portX + portW + 60, y, 0}, bCol);
-                DebugDraw::line({portX + portW + 60, y, 0}, {portX + portW + 60, y + portH, 0}, bCol);
-                DebugDraw::line({portX + portW + 60, y + portH, 0}, {portX, y + portH, 0}, bCol);
-                DebugDraw::line({portX, y + portH, 0}, {portX, y, 0}, bCol);
-                // Icon
-                for (f32 fy = 4; fy < portH - 4; fy += 1.0f)
-                    DebugDraw::line({portX + 4, y + fy, 0}, {portX + portH - 4, y + fy, 0}, {0.3f, 0.5f, 0.7f});
-
-                char txt[16];
-                if (swarmCount > 1)
-                    std::snprintf(txt, sizeof(txt), "Swarm x%u", swarmCount);
-                else
-                    std::snprintf(txt, sizeof(txt), "Swarm");
-                FontSystem::drawText(sw, sh, portX + portH + 2, y + 12, txt, {0.6f, 0.8f, 1.0f}, 1);
-                slotIdx++;
+                HUD::drawSummonPortrait(sw, sh, portX, portY - slot * (portH + gap),
+                                         "Swarm", {0.3f, 0.3f, 0.35f}, -1.0f, swarmCount, matSwarm);
+                slot++;
             }
-
-            // Turrets portrait — count
             if (turretCount > 0) {
-                f32 y = portY - slotIdx * (portH + gap);
-                for (f32 fy = 0; fy < portH; fy += 1.0f)
-                    DebugDraw::line({portX, y + fy, 0}, {portX + portW + 60, y + fy, 0}, {0.08f, 0.08f, 0.12f});
-                Vec3 bCol = {0.7f, 0.5f, 0.3f};
-                DebugDraw::line({portX, y, 0}, {portX + portW + 60, y, 0}, bCol);
-                DebugDraw::line({portX + portW + 60, y, 0}, {portX + portW + 60, y + portH, 0}, bCol);
-                DebugDraw::line({portX + portW + 60, y + portH, 0}, {portX, y + portH, 0}, bCol);
-                DebugDraw::line({portX, y + portH, 0}, {portX, y, 0}, bCol);
-                for (f32 fy = 4; fy < portH - 4; fy += 1.0f)
-                    DebugDraw::line({portX + 4, y + fy, 0}, {portX + portH - 4, y + fy, 0}, {0.6f, 0.4f, 0.2f});
-
-                char txt[16];
-                if (turretCount > 1)
-                    std::snprintf(txt, sizeof(txt), "Turret x%u", turretCount);
-                else
-                    std::snprintf(txt, sizeof(txt), "Turret");
-                FontSystem::drawText(sw, sh, portX + portH + 2, y + 12, txt, {0.9f, 0.7f, 0.4f}, 1);
-                slotIdx++;
+                HUD::drawSummonPortrait(sw, sh, portX, portY - slot * (portH + gap),
+                                         "Turret", {0.33f, 0.31f, 0.37f}, -1.0f, turretCount, matTurret);
+                slot++;
             }
         }
 

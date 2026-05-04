@@ -2,6 +2,7 @@
 #include "renderer/shader.h"
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
+#include "renderer/material.h"
 #include "core/log.h"
 #include "core/profiler.h"
 #include "game/item.h"
@@ -317,6 +318,142 @@ void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
     }
 
     flushHUD(sw, sh);
+}
+
+void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
+                              const char* name, Vec3 iconColor,
+                              f32 healthFrac, u32 count, u8 iconMatId)
+{
+    f32 boxW = 110.0f;
+    f32 boxH = 24.0f;
+    f32 iconSz = 18.0f;
+
+    // Background fill
+    Vec3 bg = {0.06f, 0.06f, 0.10f};
+    for (f32 fy = 0; fy < boxH; fy += 1.0f) {
+        pushLine(x, y + fy, x + boxW, y + fy, bg);
+    }
+
+    // Border
+    pushQuad(x, y, x + boxW, y + boxH, {0.3f, 0.3f, 0.4f});
+
+    // Icon: render pixel-art portrait matching the in-game entity.
+    // Embedded 8x8 pixel patterns for drone/swarm/turret icons.
+    // Colors: 0=bg, 1=body, 2=body2, 3=leg/detail, 4=eye
+    {
+        // Determine which icon to draw based on material ID
+        // 88=drone, 89=swarm, 90=turret (from materials.json)
+        static const u8 droneIcon[8][8] = {
+            {0,0,0,0,0,0,3,0}, // row 0 (bottom)
+            {0,3,0,0,0,0,0,3},
+            {0,0,1,2,2,1,0,0},
+            {3,3,1,2,2,1,3,3},
+            {0,0,1,1,1,1,0,0},
+            {0,3,1,4,4,1,3,0},
+            {3,0,0,0,0,0,0,3},
+            {0,0,0,0,0,0,0,0},
+        };
+        static const u8 swarmIcon[8][8] = {
+            {0,0,0,0,0,0,0,0},
+            {0,0,0,0,0,0,0,0},
+            {0,0,1,1,1,1,0,0},
+            {0,1,1,1,1,1,1,0},
+            {0,0,1,4,4,1,0,0},
+            {0,0,3,1,1,3,0,0},
+            {0,3,0,0,0,0,3,0},
+            {0,0,0,0,0,0,0,0},
+        };
+        static const u8 turretIcon[8][8] = {
+            {0,0,0,0,0,0,0,0},
+            {0,0,0,0,0,0,0,0},
+            {0,0,0,1,1,0,0,0},
+            {0,0,1,2,2,1,0,0},
+            {0,0,1,2,2,1,0,0},
+            {0,0,0,3,1,0,0,0},
+            {0,0,0,3,0,0,0,0},
+            {0,0,0,4,0,0,0,0},
+        };
+
+        // Pick icon and colors based on iconMatId
+        const u8 (*icon)[8] = droneIcon;
+        Vec3 colors[5];
+        if (iconMatId == 88) { // drone
+            icon = droneIcon;
+            colors[0] = {0.06f, 0.06f, 0.08f}; // bg
+            colors[1] = {0.35f, 0.33f, 0.40f}; // body
+            colors[2] = {0.27f, 0.25f, 0.32f}; // body2
+            colors[3] = {0.24f, 0.22f, 0.28f}; // legs
+            colors[4] = {0.86f, 0.16f, 0.12f}; // red eyes
+        } else if (iconMatId == 89) { // swarm
+            icon = swarmIcon;
+            colors[0] = {0.06f, 0.06f, 0.08f};
+            colors[1] = {0.31f, 0.29f, 0.35f};
+            colors[2] = {0.27f, 0.25f, 0.32f};
+            colors[3] = {0.24f, 0.22f, 0.28f};
+            colors[4] = {0.59f, 0.71f, 0.90f}; // pale blue eye
+        } else if (iconMatId == 90) { // turret
+            icon = turretIcon;
+            colors[0] = {0.06f, 0.06f, 0.08f};
+            colors[1] = {0.33f, 0.31f, 0.37f};
+            colors[2] = {0.27f, 0.25f, 0.32f};
+            colors[3] = {0.39f, 0.39f, 0.45f}; // barrel
+            colors[4] = {0.86f, 0.20f, 0.12f}; // red dot
+        } else {
+            // Fallback: solid color square
+            icon = nullptr;
+        }
+
+        f32 ix = x + 3, iy = y + 3;
+        f32 pxSz = iconSz / 8.0f; // pixel size in screen units
+
+        if (icon) {
+            for (u32 py = 0; py < 8; py++) {
+                for (u32 px = 0; px < 8; px++) {
+                    u8 ci = icon[py][px];
+                    if (ci == 0) continue; // skip background pixels
+                    Vec3 c = colors[ci];
+                    f32 px0 = ix + px * pxSz;
+                    f32 py0 = iy + py * pxSz;
+                    for (f32 fy = 0; fy < pxSz; fy += 1.0f) {
+                        pushLine(px0, py0 + fy, px0 + pxSz, py0 + fy, c);
+                    }
+                }
+            }
+        } else {
+            for (f32 fy = 0; fy < iconSz; fy += 1.0f) {
+                pushLine(ix, iy + fy, ix + iconSz, iy + fy, iconColor);
+            }
+        }
+        flushHUD(sw, sh);
+    }
+
+    // Name text
+    f32 textX = x + iconSz + 6;
+    char label[32];
+    if (count > 1) {
+        std::snprintf(label, sizeof(label), "%s x%u", name, count);
+    } else {
+        std::snprintf(label, sizeof(label), "%s", name);
+    }
+    FontSystem::drawText(sw, sh, textX, y + 12, label, {0.8f, 0.8f, 0.9f}, 1);
+
+    // Health bar (if requested)
+    if (healthFrac >= 0.0f) {
+        f32 barX = textX;
+        f32 barW = boxW - iconSz - 12;
+        f32 barH = 4.0f;
+        f32 barY = y + 3;
+        if (healthFrac > 1.0f) healthFrac = 1.0f;
+        Vec3 hpBg = {0.15f, 0.15f, 0.2f};
+        Vec3 hpCol = (healthFrac > 0.5f) ? Vec3{0.2f, 0.8f, 0.3f} : Vec3{0.9f, 0.3f, 0.1f};
+        for (f32 fy = 0; fy < barH; fy += 1.0f) {
+            pushLine(barX, barY + fy, barX + barW, barY + fy, hpBg);
+        }
+        for (f32 fy = 0; fy < barH; fy += 1.0f) {
+            pushLine(barX, barY + fy, barX + barW * healthFrac, barY + fy, hpCol);
+        }
+        flushHUD(sw, sh);
+    }
 }
 
 void HUD::drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct) {
