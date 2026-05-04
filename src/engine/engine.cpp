@@ -865,7 +865,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
     f32 atkRange = 2.5f;
     f32 atkCool = 0.8f;
     f32 baseDmg = 10.0f;
-    Vec3 halfExt = {0.4f, 0.9f, 0.4f};
+    Vec3 halfExt = {0.35f, 0.9f, 0.35f};  // slightly smaller so NPCs fit through 1-cell corridors
     u8 meshId = m_meshIdHuman;
     const char* matName = "human_skin";
     u8 weaponMesh = 0;
@@ -1167,12 +1167,23 @@ void Engine::startGame() {
                 u32 typeIdx = static_cast<u32>(std::rand()) % ENEMIES_PER_TIER;
                 const EnemyTemplate& tmpl = tier[typeIdx];
 
-                f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
-                f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
+                // Spawn at cell center (+0.5) to avoid boundary clipping
+                f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1) + 0.5f) * m_grid.cellSize;
+                f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1) + 0.5f) * m_grid.cellSize;
                 f32 spawnY = tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y);
 
+                // Validate spawn position — snap to room center if cell is solid
+                Vec3 spawnPos = {ex, spawnY, ez};
+                u32 spGx, spGz;
+                if (LevelGridSystem::worldToGrid(m_grid, spawnPos, spGx, spGz) &&
+                    LevelGridSystem::isSolid(m_grid, spGx, spGz)) {
+                    ex = (room.x + room.w * 0.5f) * m_grid.cellSize;
+                    ez = (room.z + room.d * 0.5f) * m_grid.cellSize;
+                    spawnPos = {ex, spawnY, ez};
+                }
+
                 EntityHandle h = EntitySystem::spawn(m_entities,
-                    Vec3{ex, spawnY, ez}, tmpl.halfExtents, tmpl.flying,
+                    spawnPos, tmpl.halfExtents, tmpl.flying,
                     tmpl.health, tmpl.moveSpeed, tmpl.detRange,
                     tmpl.atkRange, tmpl.atkCool, tmpl.damage);
                 Entity* ent = handleGet(m_entities, h);

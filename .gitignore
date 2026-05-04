@@ -1,5 +1,6 @@
 build/
 build-rel/
+build-dbg/
 *.o
 *.obj
 *.exe

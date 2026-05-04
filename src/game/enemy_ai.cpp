@@ -54,19 +54,16 @@ static void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
 static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt) {
     Vec3 delta = e.velocity * dt;
 
-    // X axis
+    // X axis — skip movement on collision but DON'T zero velocity
+    // so the entity can still slide along the wall on the other axis
     Vec3 tryPos = e.position + Vec3{delta.x, 0, 0};
-    if (entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
-        e.velocity.x = 0.0f;
-    } else {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.x = tryPos.x;
     }
 
     // Z axis
     tryPos = e.position + Vec3{0, 0, delta.z};
-    if (entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
-        e.velocity.z = 0.0f;
-    } else {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.z = tryPos.z;
     }
 
@@ -157,20 +154,28 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
         if (isFriendly) {
-            // Stuck detection: if NPC hasn't moved 0.15 units in 1 second, unstick
+            // Stuck detection: if NPC barely moved in 0.5s, teleport to cell center
             f32 movedDist = length(e.position - e.lastSeenPos);
-            if (movedDist < 0.15f) {
+            if (movedDist < 0.05f) {
                 e.flybyTimer += dt;
-                if (e.flybyTimer > 1.0f) {
-                    // Jump to the center of the next flow cell to break free
-                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
-                    if (lengthSq(flowDir) > 0.001f) {
-                        // Move to center of the target cell
-                        u32 gx, gz;
-                        if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
-                            Vec3 cellCenter = LevelGridSystem::gridToWorld(grid, gx, gz);
-                            cellCenter.y = e.position.y;
-                            e.position = cellCenter + flowDir * grid.cellSize * 0.5f;
+                if (e.flybyTimer > 0.5f) {
+                    // Teleport to center of current cell (safe, validated)
+                    u32 gx, gz;
+                    if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
+                        Vec3 cellCenter = LevelGridSystem::gridToWorld(grid, gx, gz);
+                        cellCenter.y = e.position.y;
+                        if (!entityOverlapsGrid(cellCenter, e.halfExtents, grid)) {
+                            e.position = cellCenter;
+                        } else {
+                            // Current cell center overlaps — try next flow cell
+                            Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                            if (lengthSq(flowDir) > 0.001f) {
+                                Vec3 nextCenter = cellCenter + flowDir * grid.cellSize;
+                                nextCenter.y = e.position.y;
+                                if (!entityOverlapsGrid(nextCenter, e.halfExtents, grid)) {
+                                    e.position = nextCenter;
+                                }
+                            }
                         }
                     }
                     e.flybyTimer = 0.0f;
@@ -181,10 +186,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.lastSeenPos = e.position;
             }
 
-            // Shrink collision by 25% for movement — NPCs must fit through
-            // 1-cell corridors without catching on wall edges
-            Vec3 savedHalf = e.halfExtents;
-            e.halfExtents = e.halfExtents * 0.75f;
+            // NPC halfExtents are set smaller at spawn time (0.35 instead of 0.4)
+            // so they fit through 1-cell corridors naturally — no shrink/restore needed
 
             // Freeze halves friendly NPC speed
             f32 npcSpeed = e.moveSpeed;
@@ -572,6 +575,25 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             snapEntityToFloor(e, grid);
 
+            // Wall avoidance: nudge NPC toward cell center when near walls.
+            // Check 4 cardinal neighbors — if any is solid, push away from it.
+            {
+                u32 gx, gz;
+                if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
+                    Vec3 cc = LevelGridSystem::gridToWorld(grid, gx, gz);
+                    cc.y = e.position.y;
+                    // Gently steer toward cell center (avoids hugging walls)
+                    Vec3 toCc = cc - e.position;
+                    f32 offCenter = length(toCc);
+                    if (offCenter > 0.15f) {
+                        Vec3 nudge = toCc * 0.03f; // gentle centering force
+                        if (!entityOverlapsGrid(e.position + nudge, e.halfExtents, grid)) {
+                            e.position = e.position + nudge;
+                        }
+                    }
+                }
+            }
+
             // Push apart from other friendly entities to prevent stacking
             for (u32 ni = 0; ni < pool.activeCount; ni++) {
                 u32 nIdx = pool.activeList[ni];
@@ -583,10 +605,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 f32 dist2 = lengthSq(diff);
                 f32 minDist = e.halfExtents.x + other.halfExtents.x;
                 if (dist2 < minDist * minDist && dist2 > 0.001f) {
-                    // Stronger push proportional to overlap
                     f32 overlap = minDist - sqrtf(dist2);
                     Vec3 push = normalize(diff) * (overlap * 0.5f + 0.02f);
-                    e.position = e.position + push;
+                    // Only push if destination doesn't overlap a wall
+                    Vec3 newPos = e.position + push;
+                    if (!entityOverlapsGrid(newPos, e.halfExtents, grid)) {
+                        e.position = newPos;
+                    }
                 }
             }
 
@@ -603,9 +628,6 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.speechTimer = 3.0f;
                 }
             }
-
-            // Restore full collision size after movement
-            e.halfExtents = savedHalf;
 
             continue; // skip hostile AI path for friendly NPCs
         }
@@ -978,10 +1000,26 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.velocity = flyDir * effectiveSpeed;
                 }
             } else {
-                // Ground movement: XZ only toward target
-                Vec3 flatDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                // Ground movement: use flow field when no LOS to target,
+                // direct chase when target is visible. Prevents wall-faceplanting.
+                Vec3 moveDir = {0, 0, 0};
+                bool hasDirectLOS = hasLOSToPoint(
+                    e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid);
+
+                if (hasDirectLOS) {
+                    // Direct line to target — walk straight
+                    moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                } else {
+                    // No LOS — use the flow field to navigate around walls
+                    moveDir = LevelGridSystem::flowDirection(grid, e.position);
+                    if (lengthSq(moveDir) < 0.001f) {
+                        // Flow field has no direction — fall back to direct
+                        moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                    }
+                }
+
+                Vec3 flatDir = moveDir;
                 if (lengthSq(flatDir) > 0.001f) {
-                    // Boss sprints 2.5x faster after 1.5s LOS
                     f32 speed = effectiveSpeed;
                     if (e.enemyType == EnemyType::BOSS && e.flybyTarget.x > 1.5f) {
                         speed *= 2.5f;
