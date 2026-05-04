@@ -39,4 +39,13 @@ namespace SkillSystem {
 
     // Get the SkillDef for a given SkillId (returns nullptr if not found)
     const SkillDef* findSkillDef(const SkillDef* defs, u32 count, SkillId id);
+
+    // Visual FX callbacks — set by Engine to trigger skill effects
+    using NovaCallback = void(*)(Vec3 position, f32 radius, Vec3 color);
+    using DashCallback = void(*)(Vec3 start, Vec3 end);
+    // Scorch callback — creates a persistent ground fire zone (position, radius, duration)
+    using ScorchCallback = void(*)(Vec3 position, f32 radius, f32 duration, f32 dps);
+    void setNovaCallback(NovaCallback cb);
+    void setDashCallback(DashCallback cb);
+    void setScorchCallback(ScorchCallback cb);
 }

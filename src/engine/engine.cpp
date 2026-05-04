@@ -353,6 +353,43 @@ void Engine::init() {
         m_skillDefCount = 0;
     }
     SkillSystem::init();
+
+    // Register skill visual FX callbacks
+    SkillSystem::setNovaCallback([](Vec3 position, f32 radius, Vec3 color) {
+        if (!s_engine) return;
+        for (u32 i = 0; i < MAX_NOVA_FX; i++) {
+            if (!s_engine->m_novaFX[i].active) {
+                s_engine->m_novaFX[i] = {position, radius, 0.6f, true, color};
+                return;
+            }
+        }
+    });
+    SkillSystem::setDashCallback([](Vec3 start, Vec3 end) {
+        if (!s_engine) return;
+        for (u32 i = 0; i < MAX_DASH_FX; i++) {
+            if (!s_engine->m_dashFX[i].active) {
+                s_engine->m_dashFX[i] = {start, end, 0.5f, true};
+                return;
+            }
+        }
+    });
+    SkillSystem::setScorchCallback([](Vec3 position, f32 radius, f32 duration, f32 dps) {
+        if (!s_engine) return;
+        for (u32 i = 0; i < MAX_SCORCH; i++) {
+            if (!s_engine->m_scorchZones[i].active) {
+                s_engine->m_scorchZones[i] = {position, radius, duration, dps, true};
+                return;
+            }
+        }
+        // Also spawn a fire FX for the visual
+        for (u32 i = 0; i < MAX_FIRE_FX; i++) {
+            if (!s_engine->m_fireFX[i].active) {
+                s_engine->m_fireFX[i] = {position, radius, duration, true};
+                return;
+            }
+        }
+    });
+
     ItemGen::init(42);
 
     // Resolve item visual references (material names -> IDs)
@@ -629,8 +666,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             baseHp = GameConst::NPC_HEALTH_CLERIC;
             speed = 3.0f;
             atkRange = 2.5f;
-            atkCool = 0.9f;
-            baseDmg = 8.0f;
+            atkCool = 1.0f;
+            baseDmg = 5.0f;
             meshId = m_meshIdCleric;
             matName = "cleric_skin";
             weaponMesh = m_meshIdMace;
@@ -641,8 +678,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 3.5f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 12.0f;
-            atkCool = 0.8f;
-            baseDmg = 6.0f;
+            atkCool = 0.9f;
+            baseDmg = 4.0f;
             meshId = m_meshIdArcher;
             matName = "archer_skin";
             weaponMesh = m_meshIdBow;
@@ -652,8 +689,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             baseHp = GameConst::NPC_HEALTH_MAGE;
             speed = 2.8f;
             atkRange = 14.0f;
-            atkCool = 1.1f;
-            baseDmg = 10.0f;
+            atkCool = 1.2f;
+            baseDmg = 6.0f;
             meshId = m_meshIdMage;
             matName = "mage_skin";
             weaponMesh = m_meshIdStaff;
@@ -664,8 +701,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 4.0f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 10.0f;
-            atkCool = 0.5f;
-            baseDmg = 5.0f;
+            atkCool = 0.6f;
+            baseDmg = 3.0f;
             meshId = m_meshIdRogue;
             matName = "rogue_skin";
             weaponMesh = m_meshIdThrowingKnife;
@@ -673,11 +710,11 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             break;
         case NpcClass::PALADIN:
             baseHp = GameConst::NPC_HEALTH_PALADIN;
-            speed = 2.5f;  // slowest — heavy armor
-            halfExt = {0.45f, 0.95f, 0.45f};  // bigger collision
+            speed = 2.5f;
+            halfExt = {0.45f, 0.95f, 0.45f};
             atkRange = 2.5f;
-            atkCool = 0.9f;
-            baseDmg = 9.0f;
+            atkCool = 1.0f;
+            baseDmg = 6.0f;
             meshId = m_meshIdPaladin;
             matName = "paladin_skin";
             weaponMesh = m_meshIdMace;
@@ -1815,11 +1852,49 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Update world items
     WorldItemSystem::update(m_worldItems, dt);
 
-    // Decay fire AoE effects
+    // Decay visual effects (fire, nova, dash)
     for (u32 i = 0; i < MAX_FIRE_FX; i++) {
         if (m_fireFX[i].active) {
             m_fireFX[i].timer -= dt;
             if (m_fireFX[i].timer <= 0.0f) m_fireFX[i].active = false;
+        }
+    }
+    for (u32 i = 0; i < MAX_NOVA_FX; i++) {
+        if (m_novaFX[i].active) {
+            m_novaFX[i].timer -= dt;
+            if (m_novaFX[i].timer <= 0.0f) m_novaFX[i].active = false;
+        }
+    }
+    for (u32 i = 0; i < MAX_DASH_FX; i++) {
+        if (m_dashFX[i].active) {
+            m_dashFX[i].timer -= dt;
+            if (m_dashFX[i].timer <= 0.0f) m_dashFX[i].active = false;
+        }
+    }
+    // Scorch zones — persistent ground fire dealing AoE DoT each tick
+    for (u32 i = 0; i < MAX_SCORCH; i++) {
+        if (!m_scorchZones[i].active) continue;
+        ScorchZone& sz = m_scorchZones[i];
+        sz.timer -= dt;
+        if (sz.timer <= 0.0f) { sz.active = false; continue; }
+        // Damage all hostile entities standing in the scorch zone
+        for (u32 a = 0; a < m_entities.activeCount; a++) {
+            u32 idx = m_entities.activeList[a];
+            Entity& ent = m_entities.entities[idx];
+            if (ent.flags & ENT_DEAD) continue;
+            if (ent.flags & ENT_FRIENDLY) continue;
+            if (ent.enemyType == EnemyType::PROP) continue;
+            f32 dist = length(ent.position - sz.pos);
+            if (dist < sz.radius) {
+                ent.health -= sz.dps * dt;
+                if (ent.health <= 0.0f && !(ent.flags & ENT_DEAD)) {
+                    ent.health = 0.0f;
+                    ent.flags |= ENT_DEAD;
+                    ent.aiState = AIState::DEAD;
+                    ent.deathTimer = 1.0f;
+                    ent.velocity = {0,0,0};
+                }
+            }
         }
     }
 
@@ -3157,7 +3232,29 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         const Projectile& p = projPool.projectiles[i];
         if (!p.active) continue;
 
-        if (p.projFlags & PROJ_SPARK) {
+        if (p.projFlags & PROJ_ORB) {
+            // Frozen Orb: large pulsing ice-blue sphere
+            f32 pulse = 0.8f + 0.2f * sinf(p.lifetime * 15.0f);
+            f32 orbSize = p.radius * 4.0f * pulse;
+            Mat4 model = Mat4::translate(p.position)
+                       * Mat4::rotateY(p.lifetime * 6.0f)
+                       * Mat4::rotateX(p.lifetime * 4.0f)
+                       * Mat4::scale({orbSize, orbSize, orbSize});
+            AABB bounds = {p.position - Vec3{orbSize,orbSize,orbSize},
+                           p.position + Vec3{orbSize,orbSize,orbSize}};
+            Vec4 orbColor = {0.3f + pulse * 0.3f, 0.6f + pulse * 0.2f, 1.0f, 0.9f};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, orbColor);
+        } else if (p.projFlags & PROJ_ORB_SHARD) {
+            // Frozen Orb shard: small bright ice crystal
+            f32 shardSize = p.radius * 2.0f;
+            Mat4 model = Mat4::translate(p.position)
+                       * Mat4::rotateY(p.lifetime * 20.0f)
+                       * Mat4::scale({shardSize, shardSize, shardSize});
+            AABB bounds = {p.position - Vec3{shardSize,shardSize,shardSize},
+                           p.position + Vec3{shardSize,shardSize,shardSize}};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds,
+                             {0.5f, 0.8f, 1.0f, 1.0f});
+        } else if (p.projFlags & PROJ_SPARK) {
             // Lightning orb: bright glowing cube with pulsing size
             f32 pulse = 0.8f + 0.2f * sinf(p.lifetime * 20.0f);
             f32 orbSize = p.radius * 3.0f * pulse; // larger than normal projectiles
@@ -3312,6 +3409,74 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             DebugDraw::line(fx.pos + Vec3{dx * 0.5f, 0, dz * 0.5f},
                             fx.pos + Vec3{dx * 0.3f, h * alpha, dz * 0.3f},
                             {1.0f * alpha, 0.6f * alpha, 0.0f});
+        }
+    }
+
+    // --- Blood Nova / skill ring effects ---
+    for (u32 i = 0; i < MAX_NOVA_FX; i++) {
+        if (!m_novaFX[i].active) continue;
+        const NovaFX& nfx = m_novaFX[i];
+        f32 t = 1.0f - nfx.timer / 0.6f; // 0→1 over 0.6s lifetime
+        f32 alpha = nfx.timer / 0.6f;
+        f32 r = nfx.maxRadius * t; // expanding ring
+
+        static constexpr u32 NOVA_SEGS = 16;
+        for (u32 s = 0; s < NOVA_SEGS; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / NOVA_SEGS);
+            f32 a1 = a0 + (6.28318f / NOVA_SEGS);
+            Vec3 p0 = nfx.pos + Vec3{cosf(a0) * r, 0.2f, sinf(a0) * r};
+            Vec3 p1 = nfx.pos + Vec3{cosf(a1) * r, 0.2f, sinf(a1) * r};
+            Vec3 col = nfx.color * alpha;
+            DebugDraw::line(p0, p1, col);
+            // Second ring slightly higher for thickness
+            p0.y += 0.4f;
+            p1.y += 0.4f;
+            DebugDraw::line(p0, p1, col * 0.7f);
+        }
+    }
+
+    // --- Phase Dash trail ---
+    for (u32 i = 0; i < MAX_DASH_FX; i++) {
+        if (!m_dashFX[i].active) continue;
+        const DashFX& dfx = m_dashFX[i];
+        f32 alpha = dfx.timer / 0.5f;
+        Vec3 dir = dfx.end - dfx.start;
+        f32 len = length(dir);
+        if (len < 0.1f) continue;
+        Vec3 step = dir * (1.0f / len);
+        // Draw parallel lines along the dash corridor
+        Vec3 perp = {-step.z, 0, step.x}; // perpendicular in XZ
+        for (f32 d = 0; d < len; d += 0.3f) {
+            Vec3 p = dfx.start + step * d + Vec3{0, 0.3f, 0};
+            f32 flicker = 0.5f + 0.5f * sinf(d * 10.0f + dfx.timer * 20.0f);
+            Vec3 col = {0.2f * alpha * flicker, 0.5f * alpha * flicker, 1.0f * alpha};
+            DebugDraw::line(p + perp * 0.3f, p - perp * 0.3f, col);
+        }
+    }
+
+    // --- Pending meteor targeting circles (drawn while meteor delay counts down) ---
+    {
+        // Access the pending meteor pool from skill system (extern in skill.cpp)
+        // For simplicity, iterate the pool directly via the extern
+        extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+        for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
+            if (!s_meteors[i].active) continue;
+            Vec3 mp = s_meteors[i].position;
+            f32 mr = s_meteors[i].radius;
+            f32 t = s_meteors[i].timer;
+            f32 pulse = 0.5f + 0.5f * sinf(t * 15.0f);
+
+            // Red targeting circle on the ground
+            static constexpr u32 METEOR_SEGS = 12;
+            for (u32 s = 0; s < METEOR_SEGS; s++) {
+                f32 a0 = static_cast<f32>(s) * (6.28318f / METEOR_SEGS);
+                f32 a1 = a0 + (6.28318f / METEOR_SEGS);
+                Vec3 p0 = mp + Vec3{cosf(a0) * mr, 0.05f, sinf(a0) * mr};
+                Vec3 p1 = mp + Vec3{cosf(a1) * mr, 0.05f, sinf(a1) * mr};
+                DebugDraw::line(p0, p1, {1.0f * pulse, 0.2f, 0.1f});
+            }
+            // Vertical warning pillar
+            DebugDraw::line(mp, mp + Vec3{0, 3.0f * pulse, 0}, {1.0f, 0.3f * pulse, 0.1f});
         }
     }
 }

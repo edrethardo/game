@@ -7,7 +7,15 @@
 #include "core/log.h"
 #include <cmath>
 
-static PendingMeteor s_meteors[MAX_PENDING_METEORS];
+// Not static — extern'd by engine.cpp for rendering the targeting circles
+PendingMeteor s_meteors[MAX_PENDING_METEORS];
+static SkillSystem::NovaCallback s_novaCallback = nullptr;
+static SkillSystem::DashCallback s_dashCallback = nullptr;
+static SkillSystem::ScorchCallback s_scorchCallback = nullptr;
+
+void SkillSystem::setNovaCallback(NovaCallback cb) { s_novaCallback = cb; }
+void SkillSystem::setDashCallback(DashCallback cb) { s_dashCallback = cb; }
+void SkillSystem::setScorchCallback(ScorchCallback cb) { s_scorchCallback = cb; }
 
 // ---------------------------------------------------------------------------
 // Static helpers (individual skill fires)
@@ -117,6 +125,8 @@ static void fireBloodNova(Vec3 origin, const SkillDef* def, EntityPool& entities
         Combat::applyDamage(entities, hits[i], def->damage);
     }
 
+    // Trigger expanding red ring visual
+    if (s_novaCallback) s_novaCallback(origin, def->radius, {1.0f, 0.15f, 0.1f});
     LOG_INFO("Blood Nova hit %u enemies", hitCount);
 }
 
@@ -178,6 +188,8 @@ static void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
     // Teleport player
     player.position = endPos;
 
+    // Trigger blue trail visual
+    if (s_dashCallback) s_dashCallback(startPos, endPos);
     LOG_INFO("Phase Dash: moved %.1fm, hit %u enemies", dashDist, hitCount);
 }
 
@@ -318,6 +330,9 @@ void SkillSystem::updateMeteors(EntityPool& entities, f32 dt) {
             }
 
             m.active = false;
+            // Fire explosion visual + ground scorch zone (2s burn at 30% of impact damage)
+            if (s_novaCallback) s_novaCallback(m.position, m.radius, {1.0f, 0.5f, 0.1f});
+            if (s_scorchCallback) s_scorchCallback(m.position, m.radius, 2.0f, m.damage * 0.3f);
             LOG_INFO("Meteor struck: hit %u enemies", hitCount);
         }
     }

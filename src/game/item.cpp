@@ -435,12 +435,20 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
 
 ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
                                 const AffixDef* affixDefs, u32 affixDefCount) {
-    // Collect valid defs for this enemy level
+    // Collect valid defs for this enemy level.  If no items match the exact
+    // range (common on floors beyond the highest maxLevel), fall back to all
+    // items the player could have seen so far (minLevel <= enemyLevel).
     u32 validIndices[MAX_ITEM_DEFS];
     u32 validCount = 0;
     for (u32 i = 0; i < defCount; i++) {
         if (enemyLevel >= defs[i].minLevel && enemyLevel <= defs[i].maxLevel)
             validIndices[validCount++] = i;
+    }
+    if (validCount == 0) {
+        for (u32 i = 0; i < defCount; i++) {
+            if (enemyLevel >= defs[i].minLevel)
+                validIndices[validCount++] = i;
+        }
     }
 
     if (validCount == 0) {

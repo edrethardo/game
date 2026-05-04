@@ -37,11 +37,11 @@
     {
       "id": "meteor_strike",
       "name": "Meteor Strike",
-      "cooldown": 6.0,
-      "energyCost": 50.0,
-      "damage": 60.0,
-      "radius": 3.0,
-      "delay": 0.8
+      "cooldown": 9.0,
+      "energyCost": 60.0,
+      "damage": 120.0,
+      "radius": 5.0,
+      "delay": 1.0
     },
     {
       "id": "phase_dash",

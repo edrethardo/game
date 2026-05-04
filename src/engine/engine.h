@@ -149,6 +149,21 @@ private:
     // AoE fire effect (cheap visual for molotov splash)
     static constexpr u32 MAX_FIRE_FX = 8;
     struct FireFX { Vec3 pos; f32 radius; f32 timer; bool active; };
+
+    // Blood Nova / skill ring burst effect
+    static constexpr u32 MAX_NOVA_FX = 4;
+    struct NovaFX { Vec3 pos; f32 maxRadius; f32 timer; bool active; Vec3 color; };
+    NovaFX m_novaFX[MAX_NOVA_FX] = {};
+
+    // Phase Dash trail effect
+    static constexpr u32 MAX_DASH_FX = 4;
+    struct DashFX { Vec3 start; Vec3 end; f32 timer; bool active; };
+    DashFX m_dashFX[MAX_DASH_FX] = {};
+
+    // Meteor scorch zones — persistent ground fire that deals AoE DoT
+    static constexpr u32 MAX_SCORCH = 4;
+    struct ScorchZone { Vec3 pos; f32 radius; f32 timer; f32 dps; bool active; };
+    ScorchZone m_scorchZones[MAX_SCORCH] = {};
     FireFX m_fireFX[MAX_FIRE_FX] = {};
 
     // Pre-cached mesh IDs (resolved once in init, avoids strcmp in startGame)
