@@ -3233,65 +3233,132 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         if (!p.active) continue;
 
         if (p.projFlags & PROJ_ORB) {
-            // Frozen Orb: large pulsing ice-blue sphere
-            f32 pulse = 0.8f + 0.2f * sinf(p.lifetime * 15.0f);
-            f32 orbSize = p.radius * 4.0f * pulse;
-            Mat4 model = Mat4::translate(p.position)
-                       * Mat4::rotateY(p.lifetime * 6.0f)
-                       * Mat4::rotateX(p.lifetime * 4.0f)
-                       * Mat4::scale({orbSize, orbSize, orbSize});
-            AABB bounds = {p.position - Vec3{orbSize,orbSize,orbSize},
-                           p.position + Vec3{orbSize,orbSize,orbSize}};
-            Vec4 orbColor = {0.3f + pulse * 0.3f, 0.6f + pulse * 0.2f, 1.0f, 0.9f};
-            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, orbColor);
-        } else if (p.projFlags & PROJ_ORB_SHARD) {
-            // Frozen Orb shard: small bright ice crystal
-            f32 shardSize = p.radius * 2.0f;
-            Mat4 model = Mat4::translate(p.position)
-                       * Mat4::rotateY(p.lifetime * 20.0f)
-                       * Mat4::scale({shardSize, shardSize, shardSize});
-            AABB bounds = {p.position - Vec3{shardSize,shardSize,shardSize},
-                           p.position + Vec3{shardSize,shardSize,shardSize}};
-            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds,
-                             {0.5f, 0.8f, 1.0f, 1.0f});
-        } else if (p.projFlags & PROJ_SPARK) {
-            // Lightning orb: bright glowing cube with pulsing size
-            f32 pulse = 0.8f + 0.2f * sinf(p.lifetime * 20.0f);
-            f32 orbSize = p.radius * 3.0f * pulse; // larger than normal projectiles
-            Mat4 model = Mat4::translate(p.position)
-                       * Mat4::rotateY(p.lifetime * 12.0f) // spinning
-                       * Mat4::rotateX(p.lifetime * 8.0f)
-                       * Mat4::scale({orbSize, orbSize, orbSize});
-            AABB bounds = {
-                p.position - Vec3{orbSize, orbSize, orbSize},
-                p.position + Vec3{orbSize, orbSize, orbSize}
-            };
-            // Bright electric blue-white color
-            Vec4 sparkColor = {0.5f + pulse * 0.5f, 0.7f + pulse * 0.3f, 1.0f, 1.0f};
-            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, sparkColor);
+            // Frozen Orb — layered crystalline sphere with frost spiral trail
+            f32 t = p.lifetime;
+            f32 pulse = 0.7f + 0.3f * sinf(t * 12.0f);
 
-            // Second smaller trailing orb behind the main one
+            // Core: bright white-blue inner orb
+            f32 coreSize = p.radius * 2.0f * pulse;
+            Mat4 coreModel = Mat4::translate(p.position)
+                           * Mat4::rotateY(t * 8.0f)
+                           * Mat4::rotateX(t * 5.0f)
+                           * Mat4::scale({coreSize, coreSize, coreSize});
+            AABB coreBounds = {p.position - Vec3{coreSize,coreSize,coreSize},
+                               p.position + Vec3{coreSize,coreSize,coreSize}};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, coreModel, coreBounds,
+                             {0.8f, 0.9f, 1.0f, 1.0f});
+
+            // Outer shell: larger translucent ice-blue
+            f32 shellSize = p.radius * 4.5f * (0.9f + 0.1f * sinf(t * 20.0f));
+            Mat4 shellModel = Mat4::translate(p.position)
+                            * Mat4::rotateY(-t * 3.0f)
+                            * Mat4::rotateZ(t * 4.0f)
+                            * Mat4::scale({shellSize, shellSize, shellSize});
+            AABB shellBounds = {p.position - Vec3{shellSize,shellSize,shellSize},
+                                p.position + Vec3{shellSize,shellSize,shellSize}};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, shellModel, shellBounds,
+                             {0.2f, 0.5f, 1.0f, 0.4f});
+
+            // Frost spiral trail — 6 trailing ice motes in a helix
             Vec3 vel = p.velocity;
             f32 spd = length(vel);
             if (spd > 0.01f) {
                 Vec3 dir = vel * (1.0f / spd);
-                Vec3 trailPos = p.position - dir * orbSize * 2.0f;
-                f32 trailSize = orbSize * 0.6f;
-                Mat4 trailModel = Mat4::translate(trailPos)
-                                * Mat4::rotateY(-p.lifetime * 15.0f)
-                                * Mat4::scale({trailSize, trailSize, trailSize});
-                AABB trailBounds = {trailPos - Vec3{trailSize,trailSize,trailSize},
-                                    trailPos + Vec3{trailSize,trailSize,trailSize}};
-                Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, trailModel, trailBounds,
-                                 {0.3f, 0.4f, 1.0f, 1.0f});
+                for (u32 m = 0; m < 6; m++) {
+                    f32 offset = m * 0.15f;
+                    f32 angle = t * 10.0f + m * 1.05f;
+                    Vec3 spiral = {sinf(angle) * 0.15f, cosf(angle) * 0.15f, 0};
+                    Vec3 motePos = p.position - dir * (offset + 0.1f) + spiral;
+                    f32 moteSize = coreSize * (0.3f - m * 0.04f);
+                    if (moteSize < 0.02f) moteSize = 0.02f;
+                    Mat4 moteModel = Mat4::translate(motePos)
+                                   * Mat4::scale({moteSize, moteSize, moteSize});
+                    AABB moteBounds = {motePos - Vec3{moteSize,moteSize,moteSize},
+                                       motePos + Vec3{moteSize,moteSize,moteSize}};
+                    f32 fade = 1.0f - m * 0.15f;
+                    Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, moteModel, moteBounds,
+                                     {0.4f * fade, 0.7f * fade, 1.0f * fade, 0.7f * fade});
+                }
             }
+
+        } else if (p.projFlags & PROJ_ORB_SHARD) {
+            // Frozen Orb shard — elongated tumbling ice crystal with sparkle
+            f32 t = p.lifetime;
+            f32 shardW = p.radius * 1.2f;
+            f32 shardH = p.radius * 3.0f;  // elongated
+            Mat4 model = Mat4::translate(p.position)
+                       * Mat4::rotateY(t * 25.0f)
+                       * Mat4::rotateX(t * 15.0f)
+                       * Mat4::scale({shardW, shardH, shardW});
+            AABB bounds = {p.position - Vec3{shardH,shardH,shardH},
+                           p.position + Vec3{shardH,shardH,shardH}};
+            f32 sparkle = 0.7f + 0.3f * sinf(t * 40.0f);
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds,
+                             {0.6f * sparkle, 0.9f * sparkle, 1.0f, 0.9f});
+
+        } else if (p.projFlags & PROJ_SPARK) {
+            // Chain Lightning bolt — bright core + jagged electric arcs + trail
+            f32 t = p.lifetime;
+            f32 pulse = 0.6f + 0.4f * sinf(t * 30.0f);
+
+            // Bright white-blue core
+            f32 coreSize = p.radius * 2.5f * pulse;
+            Mat4 coreModel = Mat4::translate(p.position)
+                           * Mat4::rotateY(t * 20.0f)
+                           * Mat4::rotateX(t * 14.0f)
+                           * Mat4::scale({coreSize, coreSize, coreSize});
+            AABB coreBounds = {p.position - Vec3{coreSize,coreSize,coreSize},
+                               p.position + Vec3{coreSize,coreSize,coreSize}};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, coreModel, coreBounds,
+                             {0.9f, 0.95f, 1.0f, 1.0f});
+
+            // Outer electric glow
+            f32 glowSize = p.radius * 4.0f;
+            Mat4 glowModel = Mat4::translate(p.position)
+                           * Mat4::rotateZ(t * 12.0f)
+                           * Mat4::scale({glowSize, glowSize * 0.6f, glowSize});
+            AABB glowBounds = {p.position - Vec3{glowSize,glowSize,glowSize},
+                               p.position + Vec3{glowSize,glowSize,glowSize}};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, glowModel, glowBounds,
+                             {0.3f, 0.5f, 1.0f, 0.5f});
+
+            // Jagged electric arcs radiating from the bolt (4 arcs via debug lines)
+            for (u32 arc = 0; arc < 4; arc++) {
+                f32 a = t * 15.0f + arc * 1.57f;
+                f32 jitter = sinf(t * 50.0f + arc * 7.0f) * 0.12f;
+                Vec3 arcEnd = p.position + Vec3{sinf(a) * (0.2f + jitter),
+                                                 cosf(a * 1.3f) * 0.15f,
+                                                 cosf(a) * (0.2f + jitter)};
+                Vec3 col = {0.5f + pulse * 0.5f, 0.7f + pulse * 0.3f, 1.0f};
+                DebugDraw::line(p.position, arcEnd, col);
+            }
+
+            // Electric trail behind
+            Vec3 vel = p.velocity;
+            f32 spd = length(vel);
+            if (spd > 0.01f) {
+                Vec3 dir = vel * (1.0f / spd);
+                for (u32 tr = 0; tr < 3; tr++) {
+                    Vec3 trailPos = p.position - dir * (tr * 0.2f + 0.1f);
+                    f32 trailSize = coreSize * (0.5f - tr * 0.12f);
+                    Mat4 trailModel = Mat4::translate(trailPos)
+                                    * Mat4::rotateY(-t * 18.0f + tr)
+                                    * Mat4::scale({trailSize, trailSize, trailSize});
+                    AABB trailBounds = {trailPos - Vec3{trailSize,trailSize,trailSize},
+                                        trailPos + Vec3{trailSize,trailSize,trailSize}};
+                    f32 fade = 0.7f - tr * 0.2f;
+                    Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, trailModel, trailBounds,
+                                     {0.2f * fade, 0.4f * fade, 1.0f * fade, fade});
+                }
+            }
+
         } else {
             if (p.meshId > 0 && p.meshId < m_meshDefCount) {
-                // Thrown weapon: render the weapon mesh, spinning in flight
+                // Thrown weapon — spinning mesh with motion trail
                 Vec3 vel = p.velocity;
                 f32 spd = length(vel);
                 f32 flyYaw = (spd > 0.01f) ? atan2f(-vel.x, -vel.z) : 0.0f;
-                f32 spinAngle = p.lifetime * 15.0f; // rapid tumble
+                f32 spinAngle = p.lifetime * 15.0f;
 
                 const AABB& mb = m_meshDefs[p.meshId].bounds;
                 f32 maxDim = mb.max.y - mb.min.y;
@@ -3307,22 +3374,62 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                            * Mat4::scale({projScale, projScale, projScale});
                 AABB bounds = {p.position - Vec3{0.3f,0.3f,0.3f},
                                p.position + Vec3{0.3f,0.3f,0.3f}};
-
-                Vec4 tint = {0.8f, 0.8f, 0.8f, 1.0f};
-                Renderer::submit(m_basicShader, defaultTex, m_meshDefs[p.meshId].mesh, model, bounds, tint);
+                Renderer::submit(m_basicShader, defaultTex, m_meshDefs[p.meshId].mesh, model, bounds,
+                                 {0.8f, 0.8f, 0.8f, 1.0f});
             } else {
-                // Default projectile: colored cube
-                Mat4 model = Mat4::translate(p.position)
-                           * Mat4::scale({p.radius * 2.0f, p.radius * 2.0f, p.radius * 2.0f});
-                AABB bounds = {
-                    p.position - Vec3{p.radius, p.radius, p.radius},
-                    p.position + Vec3{p.radius, p.radius, p.radius}
-                };
+                // Magic wand / default projectile — glowing energy bolt with trail
+                f32 t = p.lifetime;
+                f32 pulse = 0.7f + 0.3f * sinf(t * 25.0f);
+                bool isPlayer = p.fromPlayer;
 
-                Vec4 projColor = p.fromPlayer
-                    ? Vec4{1.0f, 0.5f, 0.1f, 1.0f}
-                    : Vec4{0.8f, 0.2f, 1.0f, 1.0f};
-                Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, projColor);
+                // Core bolt (bright)
+                f32 coreSize = p.radius * 1.8f * pulse;
+                Mat4 coreModel = Mat4::translate(p.position)
+                               * Mat4::rotateY(t * 15.0f)
+                               * Mat4::rotateX(t * 10.0f)
+                               * Mat4::scale({coreSize, coreSize, coreSize});
+                AABB coreBounds = {p.position - Vec3{coreSize,coreSize,coreSize},
+                                   p.position + Vec3{coreSize,coreSize,coreSize}};
+                Vec4 coreColor = isPlayer
+                    ? Vec4{1.0f, 0.8f * pulse, 0.3f, 1.0f}     // warm golden
+                    : Vec4{0.9f * pulse, 0.2f, 1.0f, 1.0f};    // purple
+                Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, coreModel, coreBounds, coreColor);
+
+                // Outer glow (larger, dimmer, different rotation)
+                f32 glowSize = p.radius * 3.5f;
+                Mat4 glowModel = Mat4::translate(p.position)
+                               * Mat4::rotateZ(t * 8.0f)
+                               * Mat4::rotateY(-t * 6.0f)
+                               * Mat4::scale({glowSize, glowSize * 0.7f, glowSize});
+                AABB glowBounds = {p.position - Vec3{glowSize,glowSize,glowSize},
+                                   p.position + Vec3{glowSize,glowSize,glowSize}};
+                Vec4 glowColor = isPlayer
+                    ? Vec4{1.0f, 0.4f, 0.05f, 0.35f}
+                    : Vec4{0.5f, 0.1f, 0.8f, 0.35f};
+                Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, glowModel, glowBounds, glowColor);
+
+                // Trailing energy motes (3 fading behind)
+                Vec3 vel = p.velocity;
+                f32 spd = length(vel);
+                if (spd > 0.01f) {
+                    Vec3 dir = vel * (1.0f / spd);
+                    for (u32 tr = 0; tr < 3; tr++) {
+                        f32 offset = (tr + 1) * 0.12f;
+                        Vec3 trailPos = p.position - dir * offset;
+                        f32 trailSize = coreSize * (0.6f - tr * 0.15f);
+                        if (trailSize < 0.01f) trailSize = 0.01f;
+                        Mat4 trailModel = Mat4::translate(trailPos)
+                                        * Mat4::rotateY(t * 12.0f + tr * 2.0f)
+                                        * Mat4::scale({trailSize, trailSize, trailSize});
+                        AABB trailBounds = {trailPos - Vec3{trailSize,trailSize,trailSize},
+                                            trailPos + Vec3{trailSize,trailSize,trailSize}};
+                        f32 fade = 0.6f - tr * 0.18f;
+                        Vec4 tc = isPlayer
+                            ? Vec4{1.0f * fade, 0.5f * fade, 0.1f * fade, fade}
+                            : Vec4{0.6f * fade, 0.1f * fade, 0.9f * fade, fade};
+                        Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, trailModel, trailBounds, tc);
+                    }
+                }
             }
         }
     }
@@ -3412,30 +3519,51 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
-    // --- Blood Nova / skill ring effects ---
+    // --- Blood Nova — expanding blood tendrils + shockwave rings ---
     for (u32 i = 0; i < MAX_NOVA_FX; i++) {
         if (!m_novaFX[i].active) continue;
         const NovaFX& nfx = m_novaFX[i];
-        f32 t = 1.0f - nfx.timer / 0.6f; // 0→1 over 0.6s lifetime
+        f32 t = 1.0f - nfx.timer / 0.6f; // 0→1 over lifetime
         f32 alpha = nfx.timer / 0.6f;
-        f32 r = nfx.maxRadius * t; // expanding ring
+        f32 r = nfx.maxRadius * t;
 
-        static constexpr u32 NOVA_SEGS = 16;
+        // Outer shockwave ring (expanding)
+        static constexpr u32 NOVA_SEGS = 24;
         for (u32 s = 0; s < NOVA_SEGS; s++) {
             f32 a0 = static_cast<f32>(s) * (6.28318f / NOVA_SEGS);
             f32 a1 = a0 + (6.28318f / NOVA_SEGS);
-            Vec3 p0 = nfx.pos + Vec3{cosf(a0) * r, 0.2f, sinf(a0) * r};
-            Vec3 p1 = nfx.pos + Vec3{cosf(a1) * r, 0.2f, sinf(a1) * r};
-            Vec3 col = nfx.color * alpha;
-            DebugDraw::line(p0, p1, col);
-            // Second ring slightly higher for thickness
-            p0.y += 0.4f;
-            p1.y += 0.4f;
-            DebugDraw::line(p0, p1, col * 0.7f);
+            Vec3 p0 = nfx.pos + Vec3{cosf(a0) * r, 0.1f, sinf(a0) * r};
+            Vec3 p1 = nfx.pos + Vec3{cosf(a1) * r, 0.1f, sinf(a1) * r};
+            DebugDraw::line(p0, p1, nfx.color * alpha);
+        }
+
+        // Inner ring (smaller, brighter)
+        f32 r2 = r * 0.6f;
+        for (u32 s = 0; s < NOVA_SEGS; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / NOVA_SEGS) + t * 3.0f;
+            f32 a1 = a0 + (6.28318f / NOVA_SEGS);
+            Vec3 p0 = nfx.pos + Vec3{cosf(a0) * r2, 0.3f, sinf(a0) * r2};
+            Vec3 p1 = nfx.pos + Vec3{cosf(a1) * r2, 0.3f, sinf(a1) * r2};
+            DebugDraw::line(p0, p1, nfx.color * alpha * 1.2f);
+        }
+
+        // Blood tendrils radiating outward with wavy motion
+        for (u32 tendril = 0; tendril < 8; tendril++) {
+            f32 baseAngle = tendril * (6.28318f / 8.0f);
+            Vec3 prev = nfx.pos + Vec3{0, 0.2f, 0};
+            for (f32 d = 0.2f; d < r; d += 0.2f) {
+                f32 wave = sinf(d * 6.0f + t * 10.0f + tendril) * 0.15f;
+                f32 a = baseAngle + wave;
+                f32 h = 0.2f + sinf(d * 3.0f) * 0.3f * alpha;
+                Vec3 cur = nfx.pos + Vec3{cosf(a) * d, h, sinf(a) * d};
+                f32 fade = alpha * (1.0f - d / nfx.maxRadius);
+                DebugDraw::line(prev, cur, nfx.color * fade);
+                prev = cur;
+            }
         }
     }
 
-    // --- Phase Dash trail ---
+    // --- Phase Dash — ghostly afterimage trail with energy wisps ---
     for (u32 i = 0; i < MAX_DASH_FX; i++) {
         if (!m_dashFX[i].active) continue;
         const DashFX& dfx = m_dashFX[i];
@@ -3444,39 +3572,91 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         f32 len = length(dir);
         if (len < 0.1f) continue;
         Vec3 step = dir * (1.0f / len);
-        // Draw parallel lines along the dash corridor
-        Vec3 perp = {-step.z, 0, step.x}; // perpendicular in XZ
-        for (f32 d = 0; d < len; d += 0.3f) {
-            Vec3 p = dfx.start + step * d + Vec3{0, 0.3f, 0};
-            f32 flicker = 0.5f + 0.5f * sinf(d * 10.0f + dfx.timer * 20.0f);
-            Vec3 col = {0.2f * alpha * flicker, 0.5f * alpha * flicker, 1.0f * alpha};
-            DebugDraw::line(p + perp * 0.3f, p - perp * 0.3f, col);
+        Vec3 perp = {-step.z, 0, step.x};
+
+        // Central energy beam (thick, bright)
+        for (f32 h = 0.1f; h < 1.8f; h += 0.4f) {
+            Vec3 s0 = dfx.start + Vec3{0, h, 0};
+            Vec3 s1 = dfx.end + Vec3{0, h, 0};
+            f32 hAlpha = alpha * (1.0f - h / 2.0f);
+            DebugDraw::line(s0, s1, {0.2f * hAlpha, 0.5f * hAlpha, 1.0f * hAlpha});
+        }
+
+        // Swirling energy wisps along the corridor
+        for (f32 d = 0; d < len; d += 0.15f) {
+            f32 t2 = d + dfx.timer * 8.0f;
+            f32 wave = sinf(t2 * 4.0f) * 0.25f;
+            Vec3 p = dfx.start + step * d + Vec3{0, 0.8f, 0};
+            Vec3 wispA = p + perp * (0.35f + wave);
+            Vec3 wispB = p - perp * (0.35f + wave);
+            f32 flicker = 0.5f + 0.5f * sinf(t2 * 12.0f);
+            f32 fade = alpha * flicker * (1.0f - d / len);
+            DebugDraw::line(p + Vec3{0, wave * 0.5f, 0}, wispA,
+                            {0.3f * fade, 0.6f * fade, 1.0f * fade});
+            DebugDraw::line(p + Vec3{0, -wave * 0.5f, 0}, wispB,
+                            {0.2f * fade, 0.4f * fade, 0.9f * fade});
         }
     }
 
-    // --- Pending meteor targeting circles (drawn while meteor delay counts down) ---
+    // --- Meteor Strike — descending fire pillar + pulsing rune circle ---
     {
-        // Access the pending meteor pool from skill system (extern in skill.cpp)
-        // For simplicity, iterate the pool directly via the extern
         extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
         for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
             if (!s_meteors[i].active) continue;
             Vec3 mp = s_meteors[i].position;
             f32 mr = s_meteors[i].radius;
-            f32 t = s_meteors[i].timer;
-            f32 pulse = 0.5f + 0.5f * sinf(t * 15.0f);
+            f32 timer = s_meteors[i].timer;
+            f32 urgency = 1.0f - timer; // 0→1 as impact approaches
+            f32 pulse = 0.5f + 0.5f * sinf(urgency * 30.0f);
 
-            // Red targeting circle on the ground
-            static constexpr u32 METEOR_SEGS = 12;
-            for (u32 s = 0; s < METEOR_SEGS; s++) {
-                f32 a0 = static_cast<f32>(s) * (6.28318f / METEOR_SEGS);
-                f32 a1 = a0 + (6.28318f / METEOR_SEGS);
+            // Outer targeting rune circle (pulsing, accelerating)
+            static constexpr u32 RUNE_SEGS = 20;
+            for (u32 s = 0; s < RUNE_SEGS; s++) {
+                f32 a0 = static_cast<f32>(s) * (6.28318f / RUNE_SEGS) + urgency * 4.0f;
+                f32 a1 = a0 + (6.28318f / RUNE_SEGS);
                 Vec3 p0 = mp + Vec3{cosf(a0) * mr, 0.05f, sinf(a0) * mr};
                 Vec3 p1 = mp + Vec3{cosf(a1) * mr, 0.05f, sinf(a1) * mr};
-                DebugDraw::line(p0, p1, {1.0f * pulse, 0.2f, 0.1f});
+                DebugDraw::line(p0, p1, {1.0f * pulse, 0.15f * urgency, 0.05f});
             }
-            // Vertical warning pillar
-            DebugDraw::line(mp, mp + Vec3{0, 3.0f * pulse, 0}, {1.0f, 0.3f * pulse, 0.1f});
+
+            // Inner rune circle (counter-rotating, smaller)
+            f32 innerR = mr * 0.5f;
+            for (u32 s = 0; s < RUNE_SEGS; s++) {
+                f32 a0 = static_cast<f32>(s) * (6.28318f / RUNE_SEGS) - urgency * 6.0f;
+                f32 a1 = a0 + (6.28318f / RUNE_SEGS);
+                Vec3 p0 = mp + Vec3{cosf(a0) * innerR, 0.08f, sinf(a0) * innerR};
+                Vec3 p1 = mp + Vec3{cosf(a1) * innerR, 0.08f, sinf(a1) * innerR};
+                DebugDraw::line(p0, p1, {1.0f, 0.5f * pulse, 0.1f});
+            }
+
+            // Rune cross-lines (pentagram-like)
+            for (u32 s = 0; s < 5; s++) {
+                f32 a = s * (6.28318f / 5.0f) + urgency * 2.0f;
+                Vec3 p0 = mp + Vec3{cosf(a) * mr, 0.06f, sinf(a) * mr};
+                Vec3 p1 = mp + Vec3{cosf(a + 2.513f) * mr, 0.06f, sinf(a + 2.513f) * mr};
+                DebugDraw::line(p0, p1, {0.8f * pulse, 0.2f, 0.05f});
+            }
+
+            // Descending fire pillar — gets closer to ground as timer counts down
+            f32 pillarTop = 6.0f * (1.0f - urgency) + 0.5f;
+            f32 pillarBottom = 0.3f;
+            Vec3 pillarCol = {1.0f, 0.4f * pulse, 0.08f};
+            for (f32 ox = -0.1f; ox <= 0.1f; ox += 0.1f) {
+                DebugDraw::line(mp + Vec3{ox, pillarBottom, 0},
+                                mp + Vec3{ox, pillarTop, 0}, pillarCol);
+                DebugDraw::line(mp + Vec3{0, pillarBottom, ox},
+                                mp + Vec3{0, pillarTop, ox}, pillarCol);
+            }
+
+            // Ember particles spiraling down the pillar
+            for (u32 ember = 0; ember < 6; ember++) {
+                f32 eh = pillarTop * (1.0f - ember * 0.15f);
+                f32 ea = urgency * 8.0f + ember * 1.05f;
+                f32 er = 0.2f + ember * 0.05f;
+                Vec3 ep = mp + Vec3{cosf(ea) * er, eh, sinf(ea) * er};
+                Vec3 ep2 = mp + Vec3{cosf(ea + 0.5f) * er * 0.8f, eh - 0.2f, sinf(ea + 0.5f) * er * 0.8f};
+                DebugDraw::line(ep, ep2, {1.0f, 0.6f * pulse, 0.1f});
+            }
         }
     }
 }
