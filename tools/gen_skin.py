@@ -794,7 +794,15 @@ def skin_zombie():
             elif py >= 5:  p[(px, py)] = (45, 100, 40, 255)    # belt/waist
             elif py >= 2:  p[(px, py)] = (50, 110, 45, 255)    # legs
             else:          p[(px, py)] = (40, 70, 30, 255)     # muddy feet
-    # Hair — stringy dark patches
+    # Exposed brain on top-right of skull — pinkish-red, cracked open
+    # py=15 is upper skull, py=16 is top of head (hair level on human)
+    # Right side of the head (px 5-7) shows brain through cracked skull
+    p[(5, 15)] = (200, 80, 90, 255)    # brain peeking through crack
+    p[(6, 15)] = (190, 70, 80, 255)
+    p[(5, 16)] = (210, 85, 95, 255)    # brain on top
+    p[(6, 16)] = (195, 75, 85, 255)
+    p[(7, 16)] = (180, 65, 75, 255)
+    # Left side stays dark stringy hair
     for px in range(1, 5): p[(px, 16)] = (50, 70, 35, 255)
     # Eyes — bright glowing red (high visibility)
     p[(3, 14)] = (240, 40, 20, 255)
