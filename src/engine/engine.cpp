@@ -1078,18 +1078,19 @@ void Engine::startGame() {
 
         static constexpr u32 BOSS_COUNT = 10;
         static const BossTemplate kBosses[BOSS_COUNT] = {
-            // Mini-bosses (floors 5, 15, 25, 35, 45)
-            {  5, "The Butcher",   "FRESH MEAT!",         300, 30, 2.0f, 3.0f, 0.6f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
-            { 15, "Lich Lord",     "Your soul is MINE!",  250, 28, 2.5f, 12.f, 0.8f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
-            { 25, "Spider Queen",  "*HISSSS*",            350, 25, 4.5f, 2.5f, 0.6f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
-            { 35, "Demon Knight",  "Kneel before me!",    400, 32, 3.0f, 3.0f, 0.7f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
-            { 45, "Arch Mage",     "Feel the arcane!",    280, 35, 2.8f, 14.f, 0.5f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
-            // Major bosses (floors 10, 20, 30, 40, 50)
-            { 10, "Andariel",      "Die, insect!",        500, 35, 3.5f, 3.0f, 0.5f, {0.7f,1.1f, 0.7f}, true,  "human",    "boss_andariel",     nullptr},
-            { 20, "Mephisto",      "You cannot stop me.", 600, 40, 2.0f, 14.f, 0.7f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
-            { 30, "Baal",          "I am undefeated!",    800, 38, 2.5f, 3.5f, 0.6f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
-            { 40, "Diablo",        "NOT EVEN DEATH...",   750, 50, 3.0f, 3.5f, 0.5f, {0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
-            { 50, "Grim Reaper",   "YOUR TIME HAS COME.",1000, 60, 3.5f, 3.5f, 0.4f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
+            // Mini-bosses (floors 5, 15, 25, 35, 45) — should shred NPCs in 1-2 hits
+            //                                          HP   DMG  SPD  RNG  COOL  halfExtents
+            {  5, "The Butcher",   "FRESH MEAT!",         600, 55, 2.5f, 3.5f, 0.5f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
+            { 15, "Lich Lord",     "Your soul is MINE!",  500, 50, 2.8f, 12.f, 0.6f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
+            { 25, "Spider Queen",  "*HISSSS*",            700, 45, 5.0f, 3.0f, 0.4f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
+            { 35, "Demon Knight",  "Kneel before me!",    800, 60, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
+            { 45, "Arch Mage",     "Feel the arcane!",    600, 65, 3.0f, 14.f, 0.4f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
+            // Major bosses (floors 10, 20, 30, 40, 50) — devastating, need full player focus
+            { 10, "Andariel",      "Die, insect!",       1000, 65, 4.0f, 3.5f, 0.4f, {0.7f,1.1f, 0.7f}, true,  "human",    "boss_andariel",     nullptr},
+            { 20, "Mephisto",      "You cannot stop me.",1200, 75, 2.5f, 14.f, 0.5f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
+            { 30, "Baal",          "I am undefeated!",   1800, 70, 3.0f, 4.0f, 0.4f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
+            { 40, "Diablo",        "NOT EVEN DEATH...",  1600, 90, 3.5f, 4.0f, 0.35f,{0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
+            { 50, "Grim Reaper",   "YOUR TIME HAS COME.",2500,120, 4.0f, 4.0f, 0.3f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
         };
 
         // Find boss for this floor
@@ -3384,6 +3385,93 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                 }
             }
         }
+    }
+
+    // Enemy rim aura — subtle colored lines around the entity's feet so they
+    // pop from the background.  Uses DebugDraw (pure color, no texture).
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        const Entity& e = entPool.entities[i];
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+
+        f32 distSq = lengthSq(e.position - m_camera.position);
+        if (distSq > 225.0f) continue;
+
+        f32 fade = 1.0f - distSq / 225.0f;
+        f32 pulse = 0.7f + 0.3f * sinf(e.animTimer * 3.0f + static_cast<f32>(i));
+
+        Vec3 col;
+        f32 r;
+        if (e.enemyType == EnemyType::BOSS) {
+            col = {0.8f * fade * pulse, 0.15f * fade, 0.05f * fade};
+            r = e.halfExtents.x * 1.3f;
+        } else {
+            col = {0.6f * fade * pulse, 0.25f * fade, 0.08f * fade};
+            r = e.halfExtents.x * 1.1f;
+        }
+
+        // Ground ring around the entity's feet
+        Vec3 base = e.position - Vec3{0, e.halfExtents.y - 0.05f, 0};
+        static constexpr u32 RING_SEGS = 8;
+        for (u32 s = 0; s < RING_SEGS; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.2832f / RING_SEGS);
+            f32 a1 = a0 + (6.2832f / RING_SEGS);
+            Vec3 p0 = base + Vec3{cosf(a0) * r, 0, sinf(a0) * r};
+            Vec3 p1 = base + Vec3{cosf(a1) * r, 0, sinf(a1) * r};
+            DebugDraw::line(p0, p1, col);
+        }
+    }
+
+    // Enemy light source — starburst glow lines radiating from each entity's
+    // center to simulate a small point light.  Pure DebugDraw lines (no texture).
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        const Entity& e = entPool.entities[i];
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+
+        Vec3 lightPos = e.position + Vec3{0, e.halfExtents.y * 0.5f, 0};
+
+        f32 distSq = lengthSq(lightPos - m_camera.position);
+        if (distSq > 400.0f) continue;
+        f32 fade = 1.0f - distSq / 400.0f;
+        f32 pulse = 0.7f + 0.3f * sinf(e.animTimer * 4.0f + static_cast<f32>(i));
+
+        Vec3 col;
+        f32 lightRadius;
+        u32 rayCount;
+
+        if (e.flags & ENT_FRIENDLY) {
+            col = {0.1f * fade, 0.45f * fade * pulse, 0.15f * fade};
+            lightRadius = 0.4f;
+            rayCount = 4;
+        } else if (e.enemyType == EnemyType::BOSS) {
+            col = {0.9f * fade * pulse, 0.2f * fade, 0.05f * fade};
+            lightRadius = 1.0f;
+            rayCount = 8;
+        } else {
+            col = {0.65f * fade * pulse, 0.3f * fade, 0.08f * fade};
+            lightRadius = 0.5f;
+            rayCount = 6;
+        }
+
+        // Starburst: lines radiating outward in all directions from the light center
+        for (u32 r = 0; r < rayCount; r++) {
+            f32 angle = static_cast<f32>(r) * (6.2832f / static_cast<f32>(rayCount))
+                      + e.animTimer * 1.5f; // slow rotation
+            f32 dx = cosf(angle) * lightRadius;
+            f32 dz = sinf(angle) * lightRadius;
+            // Horizontal rays
+            DebugDraw::line(lightPos, lightPos + Vec3{dx, 0, dz}, col);
+            // Angled rays (upward and downward)
+            DebugDraw::line(lightPos, lightPos + Vec3{dx * 0.7f, lightRadius * 0.5f, dz * 0.7f}, col * 0.7f);
+            DebugDraw::line(lightPos, lightPos + Vec3{dx * 0.7f, -lightRadius * 0.3f, dz * 0.7f}, col * 0.5f);
+        }
+
+        // Vertical accent line (upward glow)
+        DebugDraw::line(lightPos, lightPos + Vec3{0, lightRadius * 0.6f, 0}, col * 0.8f);
     }
 }
 

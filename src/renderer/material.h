@@ -4,7 +4,7 @@
 #include "core/math.h"
 #include "renderer/texture.h"
 
-static constexpr u32 MAX_MATERIALS = 64;
+static constexpr u32 MAX_MATERIALS = 128;
 
 struct Material {
     Texture texture;

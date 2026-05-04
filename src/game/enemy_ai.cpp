@@ -361,7 +361,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 if (e.npcClass != NpcClass::CLERIC || eDist <= e.attackRange) {
                     // Cleric only attacks if cornered; everyone else attacks freely
                     if (eDist <= e.attackRange ||
-                        (e.npcWeaponType == WeaponType::PROJECTILE && eDist <= engageDist)) {
+                        (e.npcWeaponType == WeaponType::PROJECTILE && eDist <= engageDist && e.hasTargetLOS)) {
                         e.attackTimer -= dt;
                         if (e.attackTimer <= 0.0f) {
                             e.attackTimer = e.attackCooldown;
@@ -520,12 +520,14 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
                 switch (e.level) {
 
-                // Floor 5: The Butcher — cleaver throw (classic)
+                // Floor 5: The Butcher — cleaver throw then sprint to close the gap
                 case 5: {
                     e.flybyTimer = 4.0f;
                     u16 pi5 = ProjectileSystem::spawn(projectiles, bossEye,
-                        toPlayerDir, 18.0f, bossDmg * 0.8f, 0.15f, 3.0f, false);
+                        toPlayerDir, 18.0f, bossDmg * 0.4f, 0.15f, 3.0f, false);
                     if (pi5 != 0xFFFF) projectiles.projectiles[pi5].meshId = e.weaponMeshId;
+                    // Speed boost after throw — chase the target down
+                    e.moveSpeed *= 1.10f;
                     e.speechText = "DIE!";
                     e.speechTimer = 2.0f;
                 } break;
