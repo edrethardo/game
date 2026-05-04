@@ -116,7 +116,7 @@ static const LimbConfig s_genericConfig = {0, {}};
 void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount) {
     // Helper lambda: build a box mesh and register it in the shared mesh array
     auto registerMesh = [&](const char* name, Vec3 halfSize) -> u8 {
-        if (meshDefCount >= 40) return 0;
+        if (meshDefCount >= 64) return 0;
         Mesh m = buildBoxMesh(halfSize);
         if (m.vao == 0) return 0;
         MeshDef& def = meshDefs[meshDefCount];
@@ -215,26 +215,35 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
         }
 
         case EnemyType::BAT: {
-            // Steady, calm flapping
             f32 flapSpeed = isMoving ? 8.0f : 4.0f;
 
             if (limbIdx < 2) {
-                // Wings: gentle sinusoidal flap
-                f32 angle = sinf(e.animTimer * flapSpeed) * 0.5f;
+                // Wings: asymmetric flap — fast powerful downstroke, slow recovery upstroke
+                // like real bat wings
+                f32 phase = fmodf(e.animTimer * flapSpeed, 6.2832f);
+                f32 angle;
+                if (phase < 2.0f) {
+                    // Downstroke (fast, powerful) — sweeps down to -0.7 radians
+                    angle = -sinf(phase * 1.57f) * 0.7f;
+                } else {
+                    // Upstroke (slow, graceful recovery)
+                    f32 t = (phase - 2.0f) / 4.2832f;
+                    angle = -0.7f * (1.0f - t * t); // ease-out curve
+                }
 
                 if (e.attackAnimT > 0.0f) {
-                    // Attack: wings sweep wide
+                    // Attack: wings sweep wide and aggressive
                     f32 t = e.attackAnimT / 0.4f;
-                    angle = -0.4f + sinf(t * 3.14159f) * 1.2f;
+                    angle = -0.5f + sinf(t * 3.14159f) * 1.4f;
                 }
                 return angle;
             } else {
-                // Claws: gentle dangle, reach forward when chasing
-                f32 angle = sinf(e.animTimer * 2.0f) * 0.1f;
-                if (isMoving) angle -= 0.2f;
+                // Claws: dangle + reach forward when chasing
+                f32 angle = sinf(e.animTimer * 2.0f) * 0.15f;
+                if (isMoving) angle -= 0.25f;
                 if (e.attackAnimT > 0.0f) {
                     f32 t = e.attackAnimT / 0.4f;
-                    angle = -0.8f * sinf(t * 3.14159f);
+                    angle = -0.9f * sinf(t * 3.14159f);
                 }
                 return angle;
             }

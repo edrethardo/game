@@ -96,7 +96,7 @@ private:
     Mesh    m_cubeMesh;
 
     // Mesh registry for entities (MeshDef struct defined in limb_system.h)
-    static constexpr u32 MAX_MESH_DEFS = 40;
+    static constexpr u32 MAX_MESH_DEFS = 64;
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
 

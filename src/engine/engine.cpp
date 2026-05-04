@@ -969,9 +969,12 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
 }
 
 void Engine::upgradeNpcEquipment(u8 newFloor) {
-    // Find surviving friendly NPCs and upgrade their equipment
+    // Find surviving friendly NPCs and upgrade their equipment.
+    // Guard: if entity pool was already reset, skip (prevents stale iteration).
+    if (m_entities.activeCount == 0) return;
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         u32 idx = m_entities.activeList[a];
+        if (idx >= MAX_ENTITIES) continue; // safety bound check
         Entity& e = m_entities.entities[idx];
         if (!(e.flags & ENT_FRIENDLY)) continue;
         if (e.flags & ENT_DEAD) continue;
@@ -1004,6 +1007,9 @@ void Engine::upgradeNpcEquipment(u8 newFloor) {
 void Engine::startGame() {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
+
+    // Reset NPC equipment pool so old floor's slots don't persist
+    for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = {};
 
     // Build level — use BSP procedural generation with random seed.
     // Early floors (1-9) use a smaller grid for simpler, more linear layouts
@@ -1575,6 +1581,18 @@ void Engine::startGame() {
     }
 
     ProjectileSystem::init(m_projectiles);
+
+    // Reset all entity AI state to prevent stale data from previous floor
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        if (idx >= MAX_ENTITIES) continue;
+        Entity& ent = m_entities.entities[idx];
+        ent.lastSeenPos = ent.position;
+        ent.flybyTimer = 0.0f;
+        ent.flybyTarget = {0, 0, 0};
+        ent.hasTargetLOS = false;
+        ent.targetEntityIdx = 0xFFFF;
+    }
 
     // Init inventory & world items
     WorldItemSystem::init(m_worldItems);
@@ -3618,8 +3636,12 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                     AABB limbBounds = {limbPivot - Vec3{0.5f,0.5f,0.5f},
                                        limbPivot + Vec3{0.5f,0.5f,0.5f}};
 
-                    // Propagate hit flash to limbs to keep visual feedback consistent
-                    Renderer::submit(m_basicShader, entTex, m_meshDefs[limbMesh].mesh,
+                    // BAT wings (limbs 0-1) use dedicated wing membrane texture
+                    const Texture& limbTex = (e.enemyType == EnemyType::BAT && li < 2)
+                        ? MaterialSystem::get(MaterialSystem::getIdByName("bat_wing"))->texture
+                        : entTex;
+
+                    Renderer::submit(m_basicShader, limbTex, m_meshDefs[limbMesh].mesh,
                                      limbModel, limbBounds,
                                      (e.flashTimer > 0.0f)
                                          ? Vec4{1.0f, 0.3f * (e.flashTimer/0.12f), 0.3f * (e.flashTimer/0.12f), 1.0f}

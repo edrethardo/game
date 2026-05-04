@@ -1669,6 +1669,32 @@ def skin_icon_turret():
     return w, h, p
 
 
+def skin_bat_wing():
+    """4x4 bat wing membrane texture — dark membrane with bone structure visible."""
+    w, h = 4, 4
+    membrane = (40, 30, 50, 255)     # dark purple-brown membrane
+    bone     = (80, 65, 75, 255)     # lighter bone/finger lines
+    edge     = (25, 20, 35, 255)     # dark wing tip
+    joint    = (100, 70, 55, 255)    # warm joint where wing meets body
+    p = {(px, py): membrane for py in range(h) for px in range(w)}
+
+    # Bone fingers radiating from top-left (joint) to bottom-right (tip)
+    p[(0, 3)] = joint                # shoulder joint
+    p[(1, 3)] = bone                 # upper bone
+    p[(0, 2)] = bone                 # bone line
+    p[(1, 2)] = bone                 # bone line
+    p[(2, 1)] = bone                 # finger extending
+    p[(3, 0)] = edge                 # wing tip
+    p[(3, 1)] = edge                 # edge
+    p[(0, 0)] = edge                 # lower edge
+    # Thin membrane between bones (slightly lighter)
+    p[(2, 2)] = (50, 38, 58, 255)    # mid-membrane
+    p[(1, 1)] = (45, 34, 54, 255)    # membrane between bones
+    p[(2, 3)] = (55, 42, 62, 255)    # near-body membrane
+
+    return w, h, p
+
+
 # --- Legendary glow variants ---
 
 def skin_legendary_weapon_tex():
@@ -1839,6 +1865,7 @@ SKIN_TYPES = {
     "icon_drone":         ("icon_drone_42.png",              skin_icon_drone),
     "icon_swarm":         ("icon_swarm_42.png",              skin_icon_swarm),
     "icon_turret":        ("icon_turret_42.png",             skin_icon_turret),
+    "bat_wing":           ("bat_wing_skin_42.png",           skin_bat_wing),
     # Skeleton-rig variants
     "zombie":             ("zombie_skin_42.png",             skin_zombie),
     "ghoul":              ("ghoul_skin_42.png",              skin_ghoul),

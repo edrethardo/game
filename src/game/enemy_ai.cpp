@@ -974,9 +974,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.velocity = {0, 0, 0};
             }
 
-            // Staggered LOS check — bats check more frequently (every 4 frames)
+            // LOS check every 4 frames for all enemies — fast detection
             e.aiCheckIdx++;
-            u16 checkFreq = isBat ? 4 : 8;
+            u16 checkFreq = 4;
             if (e.aiCheckIdx >= checkFreq) {
                 e.aiCheckIdx = 0;
                 if (targetIsNPC && targetDist <= e.detectionRange) {
@@ -1020,9 +1020,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
                 Vec3 flatDir = moveDir;
                 if (lengthSq(flatDir) > 0.001f) {
-                    f32 speed = effectiveSpeed;
+                    // Enemies sprint at 1.3x speed when chasing
+                    f32 speed = effectiveSpeed * 1.3f;
                     if (e.enemyType == EnemyType::BOSS && e.flybyTarget.x > 1.5f) {
-                        speed *= 2.5f;
+                        speed = effectiveSpeed * 2.5f;
                     }
                     e.velocity.x = flatDir.x * speed;
                     e.velocity.z = flatDir.z * speed;
@@ -1043,8 +1044,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.attackTimer = e.attackCooldown * 0.5f;
                 }
             }
-            // Lost interest: fall back to idle if target is far away
-            if (targetDist > e.detectionRange * 1.5f) {
+            // Lost interest: fall back to idle only if target is very far
+            if (targetDist > e.detectionRange * 2.5f) {
                 e.aiState = AIState::IDLE;
             }
         } break;
