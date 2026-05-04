@@ -579,6 +579,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 const Entity& npc = pool.entities[nIdx];
                 if (!(npc.flags & ENT_FRIENDLY)) continue;
                 if (npc.flags & ENT_DEAD) continue;
+                if (npc.flags & ENT_UNTARGETABLE) continue;
 
                 Vec3 toNpc = npc.position - e.position;
                 f32 npcDist = length(toNpc);

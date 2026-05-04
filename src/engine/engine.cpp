@@ -567,6 +567,7 @@ void Engine::init() {
                 if ((ex.flags & ENT_FRIENDLY) && !(ex.flags & ENT_DEAD) &&
                     ex.npcClass == NpcClass::NONE && ex.enemyType == EnemyType::SPIDER) {
                     ex.health = ex.maxHealth; // full repair
+                    LOG_INFO("Combat Drone REPAIRED (existing drone found at idx %u)", idx);
                     return;
                 }
             }
@@ -580,6 +581,10 @@ void Engine::init() {
                 e->materialId    = 49; // prop_iron
                 e->npcWeaponType = WeaponType::MELEE;
                 e->aiState       = AIState::IDLE;
+                LOG_INFO("Combat Drone SPAWNED at (%.1f,%.1f,%.1f) meshId=%u",
+                         position.x, position.y, position.z, e->meshId);
+            } else {
+                LOG_WARN("Combat Drone spawn FAILED (pool full? h.index=%u)", h.index);
             }
         } else if (type == 1) {
             // Swarm drone — tiny flying metal bat body, weak projectile
@@ -587,7 +592,7 @@ void Engine::init() {
                 {0.15f, 0.1f, 0.15f}, true, 9999.0f, 5.0f, 12.0f, 8.0f, 1.5f, 3.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
-                e->flags        |= ENT_FRIENDLY | ENT_FLYING;
+                e->flags        |= ENT_FRIENDLY | ENT_FLYING | ENT_UNTARGETABLE;
                 e->enemyType     = EnemyType::GENERIC;
                 e->meshId        = s_engine->m_meshIdBat;
                 e->materialId    = 49; // prop_iron
@@ -4376,6 +4381,116 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             HUD::drawHitMarker(sw, sh, m_hitMarkerTimer / 0.2f);
 
         HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
+
+        // Summon portraits — top-left, below player health bar
+        {
+            f32 portX = 10.0f;
+            f32 portY = static_cast<f32>(sh) - 60.0f; // below health bar area
+            f32 portW = 32.0f, portH = 32.0f, gap = 4.0f;
+
+            // Count and find summons by type
+            Entity* combatDrone = nullptr;
+            u32 swarmCount = 0;
+            u32 turretCount = 0;
+
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (!(ent.flags & ENT_FRIENDLY)) continue;
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.npcClass != NpcClass::NONE) continue; // skip party NPCs
+
+                if (ent.enemyType == EnemyType::SPIDER && ent.moveSpeed > 0.0f) {
+                    combatDrone = &ent; // combat drone (mobile spider)
+                } else if (ent.flags & ENT_UNTARGETABLE) {
+                    swarmCount++; // swarm drones
+                } else if (ent.moveSpeed <= 0.0f) {
+                    turretCount++; // turrets (stationary)
+                }
+            }
+
+            u32 slotIdx = 0;
+
+            // Combat drone portrait — health bar + icon
+            if (combatDrone) {
+                f32 y = portY - slotIdx * (portH + gap);
+
+                // Background
+                for (f32 fy = 0; fy < portH; fy += 1.0f)
+                    DebugDraw::line({portX, y + fy, 0}, {portX + portW + 60, y + fy, 0}, {0.08f, 0.08f, 0.12f});
+
+                // Border
+                Vec3 bCol = {0.4f, 0.7f, 0.4f};
+                DebugDraw::line({portX, y, 0}, {portX + portW + 60, y, 0}, bCol);
+                DebugDraw::line({portX + portW + 60, y, 0}, {portX + portW + 60, y + portH, 0}, bCol);
+                DebugDraw::line({portX + portW + 60, y + portH, 0}, {portX, y + portH, 0}, bCol);
+                DebugDraw::line({portX, y + portH, 0}, {portX, y, 0}, bCol);
+
+                // Spider icon placeholder (small colored square)
+                for (f32 fy = 4; fy < portH - 4; fy += 1.0f)
+                    DebugDraw::line({portX + 4, y + fy, 0}, {portX + portH - 4, y + fy, 0}, {0.5f, 0.5f, 0.6f});
+
+                // Health bar
+                f32 hpFrac = combatDrone->health / combatDrone->maxHealth;
+                f32 barX = portX + portH + 2;
+                f32 barW = 56.0f;
+                f32 barH = 6.0f;
+                f32 barY = y + portH - 10;
+                for (f32 fy = 0; fy < barH; fy += 1.0f)
+                    DebugDraw::line({barX, barY + fy, 0}, {barX + barW, barY + fy, 0}, {0.15f, 0.15f, 0.2f});
+                Vec3 hpCol = (hpFrac > 0.5f) ? Vec3{0.2f, 0.8f, 0.3f} : Vec3{0.9f, 0.3f, 0.1f};
+                for (f32 fy = 0; fy < barH; fy += 1.0f)
+                    DebugDraw::line({barX, barY + fy, 0}, {barX + barW * hpFrac, barY + fy, 0}, hpCol);
+
+                FontSystem::drawText(sw, sh, barX, y + 18, "Drone", {0.7f, 0.7f, 0.8f}, 1);
+                slotIdx++;
+            }
+
+            // Swarm drones portrait — count
+            if (swarmCount > 0) {
+                f32 y = portY - slotIdx * (portH + gap);
+                for (f32 fy = 0; fy < portH; fy += 1.0f)
+                    DebugDraw::line({portX, y + fy, 0}, {portX + portW + 60, y + fy, 0}, {0.08f, 0.08f, 0.12f});
+                Vec3 bCol = {0.3f, 0.6f, 0.8f};
+                DebugDraw::line({portX, y, 0}, {portX + portW + 60, y, 0}, bCol);
+                DebugDraw::line({portX + portW + 60, y, 0}, {portX + portW + 60, y + portH, 0}, bCol);
+                DebugDraw::line({portX + portW + 60, y + portH, 0}, {portX, y + portH, 0}, bCol);
+                DebugDraw::line({portX, y + portH, 0}, {portX, y, 0}, bCol);
+                // Icon
+                for (f32 fy = 4; fy < portH - 4; fy += 1.0f)
+                    DebugDraw::line({portX + 4, y + fy, 0}, {portX + portH - 4, y + fy, 0}, {0.3f, 0.5f, 0.7f});
+
+                char txt[16];
+                if (swarmCount > 1)
+                    std::snprintf(txt, sizeof(txt), "Swarm x%u", swarmCount);
+                else
+                    std::snprintf(txt, sizeof(txt), "Swarm");
+                FontSystem::drawText(sw, sh, portX + portH + 2, y + 12, txt, {0.6f, 0.8f, 1.0f}, 1);
+                slotIdx++;
+            }
+
+            // Turrets portrait — count
+            if (turretCount > 0) {
+                f32 y = portY - slotIdx * (portH + gap);
+                for (f32 fy = 0; fy < portH; fy += 1.0f)
+                    DebugDraw::line({portX, y + fy, 0}, {portX + portW + 60, y + fy, 0}, {0.08f, 0.08f, 0.12f});
+                Vec3 bCol = {0.7f, 0.5f, 0.3f};
+                DebugDraw::line({portX, y, 0}, {portX + portW + 60, y, 0}, bCol);
+                DebugDraw::line({portX + portW + 60, y, 0}, {portX + portW + 60, y + portH, 0}, bCol);
+                DebugDraw::line({portX + portW + 60, y + portH, 0}, {portX, y + portH, 0}, bCol);
+                DebugDraw::line({portX, y + portH, 0}, {portX, y, 0}, bCol);
+                for (f32 fy = 4; fy < portH - 4; fy += 1.0f)
+                    DebugDraw::line({portX + 4, y + fy, 0}, {portX + portH - 4, y + fy, 0}, {0.6f, 0.4f, 0.2f});
+
+                char txt[16];
+                if (turretCount > 1)
+                    std::snprintf(txt, sizeof(txt), "Turret x%u", turretCount);
+                else
+                    std::snprintf(txt, sizeof(txt), "Turret");
+                FontSystem::drawText(sw, sh, portX + portH + 2, y + 12, txt, {0.9f, 0.7f, 0.4f}, 1);
+                slotIdx++;
+            }
+        }
 
         HUD::drawWeaponIndicator(sw, sh, m_quickbars[m_localPlayerIndex].activeSlot);
 

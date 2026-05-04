@@ -8,10 +8,11 @@
 static constexpr u32 MAX_ENTITIES = 128;
 
 enum EntityFlags : u8 {
-    ENT_ACTIVE   = 1 << 0,
-    ENT_FLYING   = 1 << 1,
-    ENT_DEAD     = 1 << 2,
-    ENT_FRIENDLY = 1 << 3,  // allied NPC, not targeted by player weapons
+    ENT_ACTIVE       = 1 << 0,
+    ENT_FLYING       = 1 << 1,
+    ENT_DEAD         = 1 << 2,
+    ENT_FRIENDLY     = 1 << 3,  // allied NPC, not targeted by player weapons
+    ENT_UNTARGETABLE = 1 << 4,  // enemies ignore this entity (swarm drones, effects)
 };
 
 enum struct AIState : u8 {
