@@ -642,9 +642,10 @@ void Engine::applyNpcEquipmentStats(Entity& e, const NpcEquipment& equip) {
     const ItemInstance& wpn = equip.equipped[static_cast<u32>(ItemSlot::WEAPON)];
     if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
         const ItemDef& def = m_itemDefs[wpn.defId];
-        // Base damage from rolled item + flat bonus
+        // Base damage from rolled item + flat bonus, scaled down so NPCs
+        // are support characters, not DPS machines that shred bosses
         f32 rawDmg = wpn.damage + equip.bonusDamageFlat;
-        e.damage = rawDmg * (1.0f + equip.bonusDamagePct / 100.0f);
+        e.damage = rawDmg * (1.0f + equip.bonusDamagePct / 100.0f) * 0.15f;
         e.npcWeaponType = def.weaponType;
 
         // Attack range depends on weapon type
@@ -697,7 +698,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 3.0f;
             atkRange = 2.5f;
             atkCool = 1.0f;
-            baseDmg = 4.0f;
+            baseDmg = 2.0f;
             meshId = m_meshIdCleric;
             matName = "cleric_skin";
             weaponMesh = m_meshIdMace;
@@ -708,8 +709,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 3.5f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 12.0f;
-            atkCool = 1.0f;
-            baseDmg = 3.0f;
+            atkCool = 1.5f;
+            baseDmg = 1.0f;
             meshId = m_meshIdArcher;
             matName = "archer_skin";
             weaponMesh = m_meshIdBow;
@@ -719,8 +720,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             baseHp = GameConst::NPC_HEALTH_MAGE;
             speed = 2.8f;
             atkRange = 14.0f;
-            atkCool = 1.2f;
-            baseDmg = 5.0f;
+            atkCool = 1.8f;
+            baseDmg = 1.5f;
             meshId = m_meshIdMage;
             matName = "mage_skin";
             weaponMesh = m_meshIdStaff;
@@ -731,8 +732,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 4.0f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 10.0f;
-            atkCool = 0.6f;
-            baseDmg = 2.5f;
+            atkCool = 1.0f;
+            baseDmg = 0.8f;
             meshId = m_meshIdRogue;
             matName = "rogue_skin";
             weaponMesh = m_meshIdThrowingKnife;
@@ -744,7 +745,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             halfExt = {0.45f, 0.95f, 0.45f};
             atkRange = 2.5f;
             atkCool = 1.0f;
-            baseDmg = 5.0f;
+            baseDmg = 2.5f;
             meshId = m_meshIdPaladin;
             matName = "paladin_skin";
             weaponMesh = m_meshIdMace;
@@ -3975,6 +3976,27 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                     itemTex = mat->texture;
                     tint = {color.x * mat->tint.x, color.y * mat->tint.y,
                             color.z * mat->tint.z, 1.0f};
+                }
+            }
+            // Legendary items override with glowing legendary material
+            if (wi.item.rarity == Rarity::LEGENDARY) {
+                const char* legMatName = nullptr;
+                switch (def.slot) {
+                    case ItemSlot::WEAPON:  legMatName = "legendary_weapon"; break;
+                    case ItemSlot::OFFHAND: legMatName = "legendary_shield"; break;
+                    case ItemSlot::HELMET:  legMatName = "legendary_helm";   break;
+                    case ItemSlot::ARMOR:   legMatName = "legendary_armor";  break;
+                    case ItemSlot::BOOTS:   legMatName = "legendary_boots";  break;
+                    case ItemSlot::RING:    legMatName = "legendary_ring";   break;
+                    default: break;
+                }
+                if (legMatName) {
+                    u8 legId = MaterialSystem::getIdByName(legMatName);
+                    const Material* legMat = MaterialSystem::get(legId);
+                    if (legMat && legId > 0) {
+                        itemTex = legMat->texture;
+                        tint = legMat->tint; // legendary uses its own golden tint
+                    }
                 }
             }
         }

@@ -1290,6 +1290,410 @@ def skin_void_skeleton():
     return w, h, p
 
 
+# ---------------------------------------------------------------------------
+# Equipment skin textures (4x4 grid) — full UV (0,0)-(1,1) per face.
+# Row 0 = bottom, row 3 = top (Y-flipped on write like all other skins).
+# ---------------------------------------------------------------------------
+
+def skin_weapon_melee_tex():
+    """Steel sword: bright steel blade top half, dark grip bottom, edge highlight right column."""
+    w, h = 4, 4
+    p = {}
+    steel      = (180, 180, 195, 255)
+    grip       = (60,  45,  30,  255)
+    highlight  = (220, 220, 230, 255)
+    for py in range(h):
+        for px in range(w):
+            # Top two rows = blade, bottom two = grip
+            p[(px, py)] = steel if py >= 2 else grip
+    # Edge highlight on right column (all rows)
+    for py in range(h):
+        p[(3, py)] = highlight
+    return w, h, p
+
+
+def skin_weapon_hitscan_tex():
+    """Gunmetal pistol: dark metal barrel top half, wood grip bottom, barrel highlight."""
+    w, h = 4, 4
+    p = {}
+    metal     = (50, 50, 55, 255)
+    wood      = (100, 70, 40, 255)
+    barrel_hi = (80, 80, 90, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = metal if py >= 2 else wood
+    # Barrel highlight strip on column 1
+    for py in range(2, 4):
+        p[(1, py)] = barrel_hi
+    return w, h, p
+
+
+def skin_weapon_projectile_tex():
+    """Wood bow: warm brown with darker grain and string line on right edge."""
+    w, h = 4, 4
+    p = {}
+    brown  = (140, 100, 55, 255)
+    grain  = (110,  75, 40, 255)
+    string = (200, 190, 170, 255)
+    for py in range(h):
+        for px in range(w):
+            # Alternating grain lines on columns 0 and 2
+            p[(px, py)] = grain if px in (0, 2) else brown
+    # String line on right edge
+    for py in range(h):
+        p[(3, py)] = string
+    return w, h, p
+
+
+def skin_weapon_staff_tex():
+    """Magic staff: dark wood shaft, glowing purple crystal top row."""
+    w, h = 4, 4
+    p = {}
+    dark_wood = (80, 55, 30, 255)
+    crystal   = (140, 60, 200, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = dark_wood
+    # Glowing crystal on top row (py=3)
+    for px in range(w):
+        p[(px, 3)] = crystal
+    return w, h, p
+
+
+def skin_weapon_molotov_tex():
+    """Molotov cocktail: glass body with orange liquid in bottom half."""
+    w, h = 4, 4
+    p = {}
+    glass  = (140, 160, 150, 255)
+    liquid = (220, 120,  30, 255)
+    for py in range(h):
+        for px in range(w):
+            # Bottom two rows = liquid, top two = glass
+            p[(px, py)] = liquid if py < 2 else glass
+    return w, h, p
+
+
+def skin_helmet_plate_tex():
+    """Plate helmet: polished steel body, dark visor slit on row 2, rivets on corners."""
+    w, h = 4, 4
+    p = {}
+    steel  = (165, 165, 175, 255)
+    visor  = (40,  40,  50,  255)
+    rivet  = (120, 120, 130, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    # Visor slit on row 2 (py=2, second from top)
+    for px in range(w):
+        p[(px, 2)] = visor
+    # Rivets on corner pixels of row 3 and row 0
+    p[(0, 3)] = rivet; p[(3, 3)] = rivet
+    p[(0, 0)] = rivet; p[(3, 0)] = rivet
+    return w, h, p
+
+
+def skin_helmet_leather_tex():
+    """Leather helmet: brown body with stitching dots and lighter brow band."""
+    w, h = 4, 4
+    p = {}
+    leather  = (130, 90,  50,  255)
+    stitch   = (90,  60,  35,  255)
+    band     = (150, 110, 65,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = leather
+    # Stitching dots on row 1 at columns 1 and 2
+    p[(1, 1)] = stitch; p[(2, 1)] = stitch
+    # Lighter brow band across top row
+    for px in range(w):
+        p[(px, 3)] = band
+    return w, h, p
+
+
+def skin_armor_plate_tex():
+    """Steel breastplate: steel body, dark center buckle column, edge trim."""
+    w, h = 4, 4
+    p = {}
+    steel  = (160, 160, 170, 255)
+    buckle = (80,  80,  90,  255)
+    trim   = (140, 140, 150, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    # Center buckle on column 1 and 2, middle rows
+    for py in range(1, 3):
+        p[(1, py)] = buckle; p[(2, py)] = buckle
+    # Edge trim on left and right columns
+    for py in range(h):
+        p[(0, py)] = trim; p[(3, py)] = trim
+    return w, h, p
+
+
+def skin_armor_leather_tex():
+    """Leather armor: brown body with cross-stitch pattern and lighter trim."""
+    w, h = 4, 4
+    p = {}
+    brown  = (120, 85, 45,  255)
+    stitch = (90,  60, 30,  255)
+    trim   = (145, 105, 60, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = brown
+    # Cross-stitch: diagonal pattern
+    p[(0, 3)] = stitch; p[(1, 2)] = stitch
+    p[(2, 1)] = stitch; p[(3, 0)] = stitch
+    # Lighter trim on top row
+    for px in range(w):
+        p[(px, 3)] = trim
+    return w, h, p
+
+
+def skin_armor_cloth_tex():
+    """Purple cloth armor: purple body with gold embroidery dots."""
+    w, h = 4, 4
+    p = {}
+    cloth = (100, 80,  130, 255)
+    gold  = (180, 150, 60,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = cloth
+    # Gold embroidery dots in a 2x2 checkerboard pattern
+    p[(1, 1)] = gold; p[(2, 2)] = gold
+    p[(0, 2)] = gold; p[(3, 1)] = gold
+    return w, h, p
+
+
+def skin_boots_plate_tex():
+    """Plate boots: steel body, dark sole on bottom row, knee highlight on top row."""
+    w, h = 4, 4
+    p = {}
+    steel = (155, 155, 165, 255)
+    sole  = (50,  45,  40,  255)
+    knee  = (175, 175, 185, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    # Dark sole on bottom row
+    for px in range(w):
+        p[(px, 0)] = sole
+    # Knee guard highlight on top row
+    for px in range(w):
+        p[(px, 3)] = knee
+    return w, h, p
+
+
+def skin_boots_leather_tex():
+    """Leather boots: brown body with lace dots and dark sole."""
+    w, h = 4, 4
+    p = {}
+    brown = (115, 80, 40,  255)
+    lace  = (80,  55, 28,  255)
+    sole  = (45,  35, 20,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = brown
+    # Lace dots on rows 1 and 2 at columns 1 and 2
+    p[(1, 2)] = lace; p[(2, 2)] = lace
+    p[(1, 1)] = lace; p[(2, 1)] = lace
+    # Dark sole on bottom row
+    for px in range(w):
+        p[(px, 0)] = sole
+    return w, h, p
+
+
+def skin_ring_bone_tex():
+    """Bone ring: white bone band with carved line and dark center."""
+    w, h = 4, 4
+    p = {}
+    bone   = (210, 200, 185, 255)
+    carved = (170, 160, 140, 255)
+    center = (140, 130, 115, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    # Carved line across middle rows (horizontal band)
+    for px in range(w):
+        p[(px, 1)] = carved; p[(px, 2)] = carved
+    # Dark center on 2x2 middle
+    p[(1, 1)] = center; p[(2, 1)] = center
+    p[(1, 2)] = center; p[(2, 2)] = center
+    return w, h, p
+
+
+def skin_ring_gold_tex():
+    """Gold ring: golden band with bright gemstone center pixel and shadow."""
+    w, h = 4, 4
+    p = {}
+    gold   = (210, 180, 60,  255)
+    gem    = (100, 200, 255, 255)
+    shadow = (170, 145, 45,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # Darker shadow on bottom row
+    for px in range(w):
+        p[(px, 0)] = shadow
+    # Bright gemstone single center pixel
+    p[(1, 2)] = gem  # slightly off-center for asymmetry interest
+    return w, h, p
+
+
+def skin_shield_wood_tex():
+    """Wood shield: plank texture with grain, metal boss center."""
+    w, h = 4, 4
+    p = {}
+    plank = (130, 95,  50,  255)
+    grain = (100, 70,  35,  255)
+    boss  = (160, 160, 170, 255)
+    for py in range(h):
+        for px in range(w):
+            # Vertical plank grain lines on columns 0 and 3
+            p[(px, py)] = grain if px in (0, 3) else plank
+    # Metal boss on 2x2 center
+    p[(1, 1)] = boss; p[(2, 1)] = boss
+    p[(1, 2)] = boss; p[(2, 2)] = boss
+    return w, h, p
+
+
+def skin_shield_plate_tex():
+    """Steel shield: steel body with red emblem center and golden border."""
+    w, h = 4, 4
+    p = {}
+    steel  = (155, 155, 165, 255)
+    emblem = (120, 50,  40,  255)  # red
+    border = (190, 165, 55,  255)  # gold
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    # Golden border on outermost ring
+    for px in range(w):
+        p[(px, 0)] = border; p[(px, 3)] = border
+    for py in range(1, 3):
+        p[(0, py)] = border; p[(3, py)] = border
+    # Red emblem on 2x2 center
+    p[(1, 1)] = emblem; p[(2, 1)] = emblem
+    p[(1, 2)] = emblem; p[(2, 2)] = emblem
+    return w, h, p
+
+
+# --- Legendary glow variants ---
+
+def skin_legendary_weapon_tex():
+    """Legendary weapon: bright gold blade, white-hot edge, rune marks."""
+    w, h = 4, 4
+    p = {}
+    gold    = (240, 210, 80,  255)
+    hot     = (255, 250, 200, 255)  # white-hot edge
+    rune    = (200, 170, 50,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # White-hot edge on right column
+    for py in range(h):
+        p[(3, py)] = hot
+    # Rune marks: scattered darker gold pixels
+    p[(0, 1)] = rune; p[(1, 3)] = rune; p[(2, 0)] = rune
+    return w, h, p
+
+
+def skin_legendary_armor_tex():
+    """Legendary armor: golden plate, glowing sigil center, dark trim."""
+    w, h = 4, 4
+    p = {}
+    gold  = (230, 200, 70,  255)
+    sigil = (255, 240, 150, 255)
+    trim  = (180, 150, 45,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # Dark trim on outer edges
+    for px in range(w):
+        p[(px, 0)] = trim; p[(px, 3)] = trim
+    p[(0, 1)] = trim; p[(0, 2)] = trim
+    p[(3, 1)] = trim; p[(3, 2)] = trim
+    # Glowing sigil on 2x2 center
+    p[(1, 1)] = sigil; p[(2, 1)] = sigil
+    p[(1, 2)] = sigil; p[(2, 2)] = sigil
+    return w, h, p
+
+
+def skin_legendary_helm_tex():
+    """Legendary helm: golden crown, bright jewel center, white accent."""
+    w, h = 4, 4
+    p = {}
+    gold   = (235, 205, 75,  255)
+    jewel  = (255, 100, 100, 255)
+    accent = (250, 245, 220, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # White accent on top row
+    for px in range(w):
+        p[(px, 3)] = accent
+    # Bright jewel — single center pixel
+    p[(1, 2)] = jewel
+    return w, h, p
+
+
+def skin_legendary_boots_tex():
+    """Legendary boots: golden body, energy trail on bottom row, trim."""
+    w, h = 4, 4
+    p = {}
+    gold   = (225, 195, 65,  255)
+    energy = (200, 255, 200, 255)
+    trim   = (190, 160, 50,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # Energy trail on bottom row
+    for px in range(w):
+        p[(px, 0)] = energy
+    # Trim on top row
+    for px in range(w):
+        p[(px, 3)] = trim
+    return w, h, p
+
+
+def skin_legendary_ring_tex():
+    """Legendary ring: bright gold band, large 2x2 gemstone center, dark shadow."""
+    w, h = 4, 4
+    p = {}
+    gold   = (240, 210, 80,  255)
+    gem    = (150, 230, 255, 255)  # large bright gemstone
+    shadow = (180, 150, 45,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # Dark shadow bottom row
+    for px in range(w):
+        p[(px, 0)] = shadow
+    # 2x2 gemstone center
+    p[(1, 1)] = gem; p[(2, 1)] = gem
+    p[(1, 2)] = gem; p[(2, 2)] = gem
+    return w, h, p
+
+
+def skin_legendary_shield_tex():
+    """Legendary shield: golden body, bright emblem center, golden border."""
+    w, h = 4, 4
+    p = {}
+    gold   = (235, 205, 75,  255)
+    emblem = (255, 255, 200, 255)
+    border = (210, 180, 55,  255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = gold
+    # Border on outermost ring
+    for px in range(w):
+        p[(px, 0)] = border; p[(px, 3)] = border
+    for py in range(1, 3):
+        p[(0, py)] = border; p[(3, py)] = border
+    # Bright emblem on 2x2 center
+    p[(1, 1)] = emblem; p[(2, 1)] = emblem
+    p[(1, 2)] = emblem; p[(2, 2)] = emblem
+    return w, h, p
+
+
 SKIN_TYPES = {
     "skeleton":           ("skeleton_skin_42.png",           skin_skeleton),
     "spider":             ("spider_skin_42.png",             skin_spider),
@@ -1314,6 +1718,30 @@ SKIN_TYPES = {
     "cavern_spider":      ("cavern_spider_skin_42.png",      skin_cavern_spider),
     "hellforge_spider":   ("hellforge_spider_skin_42.png",   skin_hellforge_spider),
     "void_spider":        ("void_spider_skin_42.png",        skin_void_spider),
+    # Equipment skins (4x4)
+    "weapon_melee_tex":      ("weapon_melee_skin_42.png",      skin_weapon_melee_tex),
+    "weapon_hitscan_tex":    ("weapon_hitscan_skin_42.png",    skin_weapon_hitscan_tex),
+    "weapon_projectile_tex": ("weapon_projectile_skin_42.png", skin_weapon_projectile_tex),
+    "weapon_staff_tex":      ("weapon_staff_skin_42.png",      skin_weapon_staff_tex),
+    "weapon_molotov_tex":    ("weapon_molotov_skin_42.png",    skin_weapon_molotov_tex),
+    "helmet_plate_tex":      ("helmet_plate_skin_42.png",      skin_helmet_plate_tex),
+    "helmet_leather_tex":    ("helmet_leather_skin_42.png",    skin_helmet_leather_tex),
+    "armor_plate_tex":       ("armor_plate_skin_42.png",       skin_armor_plate_tex),
+    "armor_leather_tex":     ("armor_leather_skin_42.png",     skin_armor_leather_tex),
+    "armor_cloth_tex":       ("armor_cloth_skin_42.png",       skin_armor_cloth_tex),
+    "boots_plate_tex":       ("boots_plate_skin_42.png",       skin_boots_plate_tex),
+    "boots_leather_tex":     ("boots_leather_skin_42.png",     skin_boots_leather_tex),
+    "ring_bone_tex":         ("ring_bone_skin_42.png",         skin_ring_bone_tex),
+    "ring_gold_tex":         ("ring_gold_skin_42.png",         skin_ring_gold_tex),
+    "shield_wood_tex":       ("shield_wood_skin_42.png",       skin_shield_wood_tex),
+    "shield_plate_tex":      ("shield_plate_skin_42.png",      skin_shield_plate_tex),
+    # Legendary equipment skins (4x4)
+    "legendary_weapon_tex":  ("legendary_weapon_skin_42.png",  skin_legendary_weapon_tex),
+    "legendary_armor_tex":   ("legendary_armor_skin_42.png",   skin_legendary_armor_tex),
+    "legendary_helm_tex":    ("legendary_helm_skin_42.png",    skin_legendary_helm_tex),
+    "legendary_boots_tex":   ("legendary_boots_skin_42.png",   skin_legendary_boots_tex),
+    "legendary_ring_tex":    ("legendary_ring_skin_42.png",    skin_legendary_ring_tex),
+    "legendary_shield_tex":  ("legendary_shield_skin_42.png",  skin_legendary_shield_tex),
     # Skeleton-rig variants
     "zombie":             ("zombie_skin_42.png",             skin_zombie),
     "ghoul":              ("ghoul_skin_42.png",              skin_ghoul),
