@@ -884,8 +884,8 @@ void Engine::startGame() {
              {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "spider_skin",   0, 0, 0},
             // Zombie (Diablo 1) — slow, tanky, human mesh
             {70,  1.8f, 10, 2.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
-            // Imp (Barony) — small fast flying nuisance
-            {20,  7.0f, 16, 2.5f, 0.6f,  5, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
+            // Imp (Barony) — small fast flying ranged nuisance, fires weak projectiles
+            {20,  7.0f, 16, 8.0f, 0.8f,  3, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
         };
         // Tier 2 (floors 11-20): Catacombs — poison + ghoul (D2) + bone mage (Barony)
         static const EnemyTemplate kTier2[] = {

@@ -870,10 +870,22 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.attackTimer = e.attackCooldown;
                 e.attackAnimT = 0.3f; // trigger attack animation
 
-                // Damage NPC target if we're targeting one, otherwise damage player.
+                // Ranged enemies (attackRange > 5) fire projectiles; melee do direct damage.
                 // Also apply on-hit status effects (poison/slow/burn/freeze).
                 if (targetDist <= e.attackRange * 1.1f) {
-                    if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
+                    bool isRanged = (e.attackRange > 5.0f && e.enemyType != EnemyType::BOSS);
+
+                    if (isRanged) {
+                        // Ranged hostile (imp, bone mage, demon): fire projectile at target
+                        Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
+                        Vec3 atkDir = normalize(targetPos - atkOrigin);
+                        f32 projSpeed = 14.0f;
+                        f32 projRadius = 0.08f;
+                        // Imps fire weaker, slower projectiles
+                        if (e.flags & ENT_FLYING) { projSpeed = 10.0f; projRadius = 0.06f; }
+                        ProjectileSystem::spawn(projectiles, atkOrigin,
+                            atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
+                    } else if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
                         Entity& npcTarget = pool.entities[e.targetEntityIdx];
                         if (!(npcTarget.flags & ENT_DEAD)) {
                             EntityHandle th = {e.targetEntityIdx, npcTarget.generation};
