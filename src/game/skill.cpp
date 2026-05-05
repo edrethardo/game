@@ -13,11 +13,13 @@ static SkillSystem::NovaCallback s_novaCallback = nullptr;
 static SkillSystem::DashCallback s_dashCallback = nullptr;
 static SkillSystem::ScorchCallback s_scorchCallback = nullptr;
 static SkillSystem::DroneSpawnCallback s_droneSpawnCallback = nullptr;
+static SkillSystem::ChainCallback s_chainCallback = nullptr;
 
 void SkillSystem::setNovaCallback(NovaCallback cb) { s_novaCallback = cb; }
 void SkillSystem::setDashCallback(DashCallback cb) { s_dashCallback = cb; }
 void SkillSystem::setScorchCallback(ScorchCallback cb) { s_scorchCallback = cb; }
 void SkillSystem::setDroneSpawnCallback(DroneSpawnCallback cb) { s_droneSpawnCallback = cb; }
+void SkillSystem::setChainCallback(ChainCallback cb) { s_chainCallback = cb; }
 
 // ---------------------------------------------------------------------------
 // Static helpers (individual skill fires)
@@ -50,10 +52,17 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
     Vec3 currentDir    = direction;
     f32  currentDamage = def->damage;
 
-    // Track the last entity hit so we don't bounce back immediately
-    Entity* lastHit = nullptr;
+    // Store chain positions for the visual arc effect
+    static constexpr u32 MAX_CHAIN_PTS = 24;
+    Vec3 chainPoints[MAX_CHAIN_PTS];
+    u8   chainCount = 0;
+    chainPoints[chainCount++] = origin;
 
-    for (u8 bounce = 0; bounce <= def->bounces; bounce++) {
+    // Track last TWO hits to avoid ping-ponging between the same pair
+    Entity* lastHit = nullptr;
+    Entity* prevHit = nullptr;
+
+    for (u8 bounce = 0; bounce <= def->bounces && chainCount < MAX_CHAIN_PTS; bounce++) {
         // Wide cone on first hit for forgiving aiming; sphere search on bounces
         f32 cosCone = (bounce == 0) ? cosf(radians(5.0f)) : -1.0f;
         f32 range   = (bounce == 0) ? 50.0f : def->bounceRange;
@@ -67,38 +76,38 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 
         if (hitCount == 0) break;
 
-        // Pick the nearest hit that isn't the one we just struck
+        // Pick nearest entity — skip only the PREVIOUS target to allow re-hitting
         Entity* hit = nullptr;
         EntityHandle hitHandle = {};
         for (u32 k = 0; k < hitCount; k++) {
             Entity* e = handleGet(entities, hits[k]);
-            if (!e || e == lastHit) continue;
+            if (!e) continue;
+            if (e == lastHit) continue; // don't bounce to same target twice in a row
             hit       = e;
             hitHandle = hits[k];
             break;
         }
         if (!hit) break;
 
-        // Visual debug line for the lightning bolt
-        DebugDraw::line(currentPos, hit->position, {0.8f, 0.8f, 1.0f});
-
         Combat::applyDamage(entities, hitHandle, currentDamage);
+        chainPoints[chainCount++] = hit->position + Vec3{0, hit->halfExtents.y, 0};
 
         // Setup next bounce
-        Vec3 prevPos = currentPos;
-        currentPos    = hit->position;
+        prevHit       = lastHit;
+        currentPos    = hit->position + Vec3{0, hit->halfExtents.y, 0};
         currentDamage *= def->damageFalloff;
         lastHit        = hit;
 
         if (bounce < def->bounces) {
-            // Find the nearest OTHER active entity for the next chain link
+            // Find nearest entity for next bounce (can re-hit prevHit but not lastHit)
             f32  bestDist = def->bounceRange + 1.0f;
             bool found    = false;
             for (u32 a = 0; a < entities.activeCount; a++) {
                 u32    idx = entities.activeList[a];
                 Entity& e  = entities.entities[idx];
-                if (e.flags & ENT_DEAD)  continue;
-                if (&e == lastHit)       continue;
+                if (e.flags & ENT_DEAD)     continue;
+                if (e.flags & ENT_FRIENDLY) continue;
+                if (&e == lastHit)          continue; // no immediate bounce-back
 
                 Vec3 toE = e.position - currentPos;
                 f32  d   = length(toE);
@@ -110,7 +119,12 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
             }
             if (!found) break;
         }
-        (void)prevPos;
+        (void)prevHit;
+    }
+
+    // Emit visual chain arc via callback
+    if (s_chainCallback && chainCount > 1) {
+        s_chainCallback(chainPoints, chainCount);
     }
 }
 

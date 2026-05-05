@@ -445,6 +445,19 @@ void Engine::init() {
             }
         }
     });
+    SkillSystem::setChainCallback([](const Vec3* points, u8 count) {
+        if (!s_engine || count < 2) return;
+        for (u32 i = 0; i < Engine::MAX_CHAIN_FX; i++) {
+            if (!s_engine->m_chainFX[i].active) {
+                Engine::ChainFX& fx = s_engine->m_chainFX[i];
+                fx.pointCount = (count > Engine::MAX_CHAIN_POINTS) ? Engine::MAX_CHAIN_POINTS : count;
+                for (u8 p = 0; p < fx.pointCount; p++) fx.points[p] = points[p];
+                fx.timer = 0.5f;
+                fx.active = true;
+                return;
+            }
+        }
+    });
 
     ItemGen::init(42);
 
@@ -2250,6 +2263,12 @@ void Engine::singleplayerUpdate(f32 dt) {
             if (m_dashFX[i].timer <= 0.0f) m_dashFX[i].active = false;
         }
     }
+    for (u32 i = 0; i < MAX_CHAIN_FX; i++) {
+        if (m_chainFX[i].active) {
+            m_chainFX[i].timer -= dt;
+            if (m_chainFX[i].timer <= 0.0f) m_chainFX[i].active = false;
+        }
+    }
     // Scorch zones — persistent ground fire dealing AoE DoT each tick
     for (u32 i = 0; i < MAX_SCORCH; i++) {
         if (!m_scorchZones[i].active) continue;
@@ -2284,6 +2303,11 @@ void Engine::singleplayerUpdate(f32 dt) {
         if (m_classSkillStates[s].cooldownTimer > 0.0f)
             m_classSkillStates[s].cooldownTimer -= dt;
     }
+    // Tick equipment skill cooldowns (boots F, helmet G)
+    if (m_bootSkillStates[0].cooldownTimer > 0.0f)
+        m_bootSkillStates[0].cooldownTimer -= dt;
+    if (m_helmetSkillStates[0].cooldownTimer > 0.0f)
+        m_helmetSkillStates[0].cooldownTimer -= dt;
 
     // Update orb projectiles (spawn ice shards for Frozen Orb)
     SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
@@ -2339,6 +2363,46 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
+    // --- Equipment legendary skill binding (boots/helmet/ring) ---
+    // Boots legendary → F key
+    {
+        const ItemInstance& boots = m_inventories[0].equipped[static_cast<u32>(ItemSlot::BOOTS)];
+        SkillId bootSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
+        m_bootSkillStates[0].activeSkill = bootSkill;
+    }
+    // Helmet legendary → G key
+    {
+        const ItemInstance& helm = m_inventories[0].equipped[static_cast<u32>(ItemSlot::HELMET)];
+        SkillId helmSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
+        m_helmetSkillStates[0].activeSkill = helmSkill;
+    }
+
+    // --- Boot skill activation (F key) ---
+    if (Input::isKeyPressed(SDL_SCANCODE_F) && !m_inventoryOpen &&
+        m_bootSkillStates[0].activeSkill != SkillId::NONE) {
+        m_bootSkillStates[0].energy = m_skillStates[0].energy;
+        m_bootSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
+        if (SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
+                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
+            m_skillStates[0].energy = m_bootSkillStates[0].energy;
+        }
+    }
+
+    // --- Helmet skill activation (G key) ---
+    if (Input::isKeyPressed(SDL_SCANCODE_G) && !m_inventoryOpen &&
+        m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
+        m_helmetSkillStates[0].energy = m_skillStates[0].energy;
+        m_helmetSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
+        if (SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
+                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
+            m_skillStates[0].energy = m_helmetSkillStates[0].energy;
+        }
+    }
+
     // --- Shield blocking (Ctrl/Shift) ---
     {
         bool wantsBlock = (Input::isKeyDown(SDL_SCANCODE_LCTRL) ||
@@ -2373,6 +2437,15 @@ void Engine::singleplayerUpdate(f32 dt) {
                     break;
                 case SkillId::FROZEN_ORB: // Frost aura: slow within 4m
                     if (dist < 4.0f) { ent.freezeTimer = 0.5f; }
+                    break;
+                case SkillId::BLOOD_NOVA: // Drain aura: 1 dps bleed within 3m
+                    if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; }
+                    break;
+                case SkillId::CHAIN_LIGHTNING: // Storm aura: brief freeze within 3m
+                    if (dist < 3.0f) { ent.freezeTimer = 0.3f; }
+                    break;
+                case SkillId::PHASE_DASH: // Phase aura: slow within 3m
+                    if (dist < 3.0f) { ent.freezeTimer = 0.4f; }
                     break;
                 default: break;
             }
@@ -3055,14 +3128,24 @@ void Engine::handleWeaponFire(f32 dt) {
                         if (orbIdx != 0xFFFF) m_projectiles.projectiles[orbIdx].projFlags = PROJ_ORB;
                     } break;
                     case SkillId::CHAIN_LIGHTNING: {
-                        // Spawn spark projectiles in a small fan from hit position
-                        for (s32 s = -1; s <= 1; s++) {
-                            f32 spread = s * 0.3f;
-                            Vec3 dir = normalize(Vec3{m_localPlayer.forward.x + spread,
-                                                       0, m_localPlayer.forward.z});
-                            ProjectileSystem::spawn(m_projectiles, procPos, dir,
-                                18.0f, sd->damage * 0.5f, 0.08f, 1.5f, true, PROJ_SPARK);
-                        }
+                        // Use the real chain lightning with item-level-scaled bounces.
+                        // Bounces scale from 3 (level 1) to 20 (level 50).
+                        const ItemInstance& wpn2 = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                        u8 itemLvl = wpn2.itemLevel > 0 ? wpn2.itemLevel : 1;
+                        // Temporarily override SkillDef bounces for this proc
+                        SkillDef procDef = *sd;
+                        procDef.bounces = static_cast<u8>(3 + (itemLvl - 1) * 17 / 49);
+                        // Fire from hit position toward nearest enemy
+                        SkillState tempSS;
+                        tempSS.activeSkill = SkillId::CHAIN_LIGHTNING;
+                        tempSS.cooldownTimer = 0.0f;
+                        tempSS.energy = 999.0f;
+                        tempSS.maxEnergy = 999.0f;
+                        // Direct call: chain from proc position
+                        Vec3 dir = m_localPlayer.forward;
+                        SkillSystem::tryActivate(tempSS, &procDef, 1,
+                            procPos, dir, m_localPlayer.yaw,
+                            m_projectiles, m_entities, m_grid, m_localPlayer);
                     } break;
                     case SkillId::METEOR_STRIKE: {
                         // Drop a meteor on the hit position
@@ -4133,6 +4216,68 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
+    // --- Chain Lightning — jagged electric arcs between bounce targets ---
+    for (u32 i = 0; i < MAX_CHAIN_FX; i++) {
+        if (!m_chainFX[i].active) continue;
+        const ChainFX& cfx = m_chainFX[i];
+        f32 alpha = cfx.timer / 0.5f; // fade over 0.5s lifetime
+
+        for (u8 seg = 0; seg + 1 < cfx.pointCount; seg++) {
+            Vec3 a = cfx.points[seg];
+            Vec3 b = cfx.points[seg + 1];
+            // Main arc — bright blue-white
+            DebugDraw::line(a, b, {0.4f * alpha, 0.6f * alpha, 1.0f * alpha});
+            // Jagged secondary arcs — offset by sine for electric jitter
+            Vec3 mid = (a + b) * 0.5f;
+            f32 jx = sinf(cfx.timer * 50.0f + seg * 3.0f) * 0.2f;
+            f32 jy = cosf(cfx.timer * 40.0f + seg * 5.0f) * 0.15f;
+            Vec3 jitter = {jx, jy, jx * 0.5f};
+            DebugDraw::line(a, mid + jitter, {0.3f * alpha, 0.5f * alpha, 1.0f * alpha});
+            DebugDraw::line(mid + jitter, b, {0.3f * alpha, 0.5f * alpha, 1.0f * alpha});
+            // Tertiary arc — dimmer, wider offset
+            Vec3 jit2 = {-jx * 1.5f, -jy, jx};
+            DebugDraw::line(a, mid + jit2, {0.2f * alpha, 0.3f * alpha, 0.8f * alpha});
+            DebugDraw::line(mid + jit2, b, {0.2f * alpha, 0.3f * alpha, 0.8f * alpha});
+        }
+    }
+
+    // --- Scorch zones — persistent ground fire rings ---
+    for (u32 i = 0; i < MAX_SCORCH; i++) {
+        if (!m_scorchZones[i].active) continue;
+        const ScorchZone& sz = m_scorchZones[i];
+        f32 alpha = (sz.timer < 0.5f) ? sz.timer * 2.0f : 1.0f; // fade in last 0.5s
+        f32 r = sz.radius;
+
+        // Pulsing fire ring on the ground
+        static constexpr u32 SCORCH_SEGS = 16;
+        f32 pulse = 0.7f + 0.3f * sinf(sz.timer * 6.0f);
+        for (u32 s = 0; s < SCORCH_SEGS; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / SCORCH_SEGS);
+            f32 a1 = a0 + (6.28318f / SCORCH_SEGS);
+            Vec3 p0 = sz.pos + Vec3{cosf(a0) * r, 0.05f, sinf(a0) * r};
+            Vec3 p1 = sz.pos + Vec3{cosf(a1) * r, 0.05f, sinf(a1) * r};
+            DebugDraw::line(p0, p1, {1.0f * alpha * pulse, 0.4f * alpha * pulse, 0.0f});
+        }
+        // Inner ring
+        f32 rInner = r * 0.5f;
+        for (u32 s = 0; s < SCORCH_SEGS; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / SCORCH_SEGS) + sz.timer * 2.0f;
+            f32 a1 = a0 + (6.28318f / SCORCH_SEGS);
+            Vec3 p0 = sz.pos + Vec3{cosf(a0) * rInner, 0.08f, sinf(a0) * rInner};
+            Vec3 p1 = sz.pos + Vec3{cosf(a1) * rInner, 0.08f, sinf(a1) * rInner};
+            DebugDraw::line(p0, p1, {1.0f * alpha, 0.6f * alpha, 0.1f * alpha});
+        }
+        // Small flame wisps rising from the zone
+        for (u32 w = 0; w < 4; w++) {
+            f32 angle = sz.timer * 3.0f + w * 1.57f;
+            f32 wr = r * 0.6f;
+            Vec3 base = sz.pos + Vec3{cosf(angle) * wr, 0.05f, sinf(angle) * wr};
+            f32 h = 0.3f + 0.2f * sinf(sz.timer * 8.0f + w);
+            DebugDraw::line(base, base + Vec3{0, h, 0},
+                            {1.0f * alpha, 0.5f * alpha, 0.0f});
+        }
+    }
+
     // --- Blood Nova — expanding blood tendrils + shockwave rings ---
     for (u32 i = 0; i < MAX_NOVA_FX; i++) {
         if (!m_novaFX[i].active) continue;
@@ -4707,6 +4852,58 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             HUD::drawClassSkillBar(sw, sh, skillBarX, skillBarY,
                                     m_activeClassSkill, m_currentFloor,
                                     cls.skillUnlockFloor, cls.skillUpgradeFloor, cooldowns);
+
+            // Equipment skill bar — shows active legendary equipment skills above class bar
+            {
+                HUD::EquipSkillSlot equipSlots[4];
+                u32 equipCount = 0;
+
+                // Boots (F key)
+                if (m_bootSkillStates[0].activeSkill != SkillId::NONE) {
+                    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
+                                                                     m_bootSkillStates[0].activeSkill);
+                    equipSlots[equipCount++] = {
+                        static_cast<u8>(m_bootSkillStates[0].activeSkill),
+                        m_bootSkillStates[0].cooldownTimer,
+                        "F", sd ? sd->name : "???", false
+                    };
+                }
+                // Helmet (G key)
+                if (m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
+                    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
+                                                                     m_helmetSkillStates[0].activeSkill);
+                    equipSlots[equipCount++] = {
+                        static_cast<u8>(m_helmetSkillStates[0].activeSkill),
+                        m_helmetSkillStates[0].cooldownTimer,
+                        "G", sd ? sd->name : "???", false
+                    };
+                }
+                // Armor (passive aura)
+                if (m_armorAura != SkillId::NONE) {
+                    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_armorAura);
+                    equipSlots[equipCount++] = {
+                        static_cast<u8>(m_armorAura), 0.0f,
+                        "", sd ? sd->name : "???", true
+                    };
+                }
+                // Weapon (on-hit proc)
+                if (m_weaponProc != SkillId::NONE) {
+                    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_weaponProc);
+                    equipSlots[equipCount++] = {
+                        static_cast<u8>(m_weaponProc), 0.0f,
+                        "", sd ? sd->name : "???", true
+                    };
+                }
+
+                if (equipCount > 0) {
+                    // Position above the class skill bar
+                    f32 equipBarW = equipCount * 32.0f + (equipCount - 1) * 3.0f;
+                    f32 equipBarX = skillBarX + (skillBarW - equipBarW) * 0.5f;
+                    f32 equipBarY = skillBarY + 56.0f; // well above class bar
+                    HUD::drawEquipSkillBar(sw, sh, equipBarX, equipBarY,
+                                            equipSlots, equipCount);
+                }
+            }
         }
 
         // Active skill display — right side of screen, shows current right-click skill name

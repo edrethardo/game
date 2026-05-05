@@ -47,8 +47,11 @@ namespace SkillSystem {
     // Drone spawn callback — engine handles entity creation with proper mesh/material
     // type: 0=combat drone (spider), 1=swarm drone (bat), 2=turret
     using DroneSpawnCallback = void(*)(Vec3 position, u8 type);
+    // Chain lightning visual — receives array of bounce positions
+    using ChainCallback = void(*)(const Vec3* points, u8 count);
     void setNovaCallback(NovaCallback cb);
     void setDashCallback(DashCallback cb);
     void setScorchCallback(ScorchCallback cb);
     void setDroneSpawnCallback(DroneSpawnCallback cb);
+    void setChainCallback(ChainCallback cb);
 }

@@ -174,6 +174,12 @@ private:
     struct DashFX { Vec3 start; Vec3 end; f32 timer; bool active; };
     DashFX m_dashFX[MAX_DASH_FX] = {};
 
+    // Chain Lightning arc visual — stores bounce chain positions for rendering
+    static constexpr u32 MAX_CHAIN_FX = 4;
+    static constexpr u32 MAX_CHAIN_POINTS = 24;
+    struct ChainFX { Vec3 points[MAX_CHAIN_POINTS]; u8 pointCount; f32 timer; bool active; };
+    ChainFX m_chainFX[MAX_CHAIN_FX] = {};
+
     // Meteor scorch zones — persistent ground fire that deals AoE DoT
     static constexpr u32 MAX_SCORCH = 4;
     struct ScorchZone { Vec3 pos; f32 radius; f32 timer; f32 dps; bool active; };

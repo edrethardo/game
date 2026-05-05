@@ -453,6 +453,167 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
     }
 }
 
+// 8x8 pixel-art icons for legendary equipment skills.
+// 0=transparent, 1=primary, 2=secondary, 3=detail, 4=highlight
+static const u8 kIconFrozenOrb[8][8] = {
+    {0,0,0,2,2,0,0,0},
+    {0,0,2,4,4,2,0,0},
+    {0,2,4,1,1,4,2,0},
+    {2,4,1,1,1,1,4,2},
+    {2,4,1,1,1,1,4,2},
+    {0,2,4,1,1,4,2,0},
+    {0,0,2,4,4,2,0,0},
+    {0,0,0,2,2,0,0,0},
+};
+static const u8 kIconChainLightning[8][8] = {
+    {0,0,0,0,4,0,0,0},
+    {0,0,0,4,1,0,0,0},
+    {0,0,4,1,0,0,0,0},
+    {0,0,1,4,4,0,0,0},
+    {0,0,0,0,1,4,0,0},
+    {0,0,0,4,1,0,0,0},
+    {0,0,4,1,0,0,0,0},
+    {0,0,1,0,0,0,0,0},
+};
+static const u8 kIconMeteorStrike[8][8] = {
+    {0,0,0,0,0,3,4,0},
+    {0,0,0,0,3,4,3,0},
+    {0,0,0,3,4,3,0,0},
+    {0,0,3,4,3,0,0,0},
+    {0,0,1,2,0,0,0,0},
+    {0,1,2,2,1,0,0,0},
+    {1,2,4,4,2,1,0,0},
+    {0,1,2,2,1,0,0,0},
+};
+static const u8 kIconBloodNova[8][8] = {
+    {0,0,0,4,4,0,0,0},
+    {0,3,0,0,0,0,3,0},
+    {0,0,1,0,0,1,0,0},
+    {4,0,0,2,2,0,0,4},
+    {4,0,0,2,2,0,0,4},
+    {0,0,1,0,0,1,0,0},
+    {0,3,0,0,0,0,3,0},
+    {0,0,0,4,4,0,0,0},
+};
+static const u8 kIconPhaseDash[8][8] = {
+    {0,0,0,0,0,0,0,4},
+    {0,0,0,0,0,0,4,1},
+    {3,0,0,0,0,4,1,0},
+    {0,3,2,2,4,1,0,0},
+    {0,0,3,2,4,1,0,0},
+    {0,0,0,4,1,0,0,0},
+    {0,0,4,1,0,0,0,0},
+    {0,4,0,0,0,0,0,0},
+};
+
+// Color palettes per skill icon
+static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
+    cols[0] = {0,0,0}; // transparent (unused)
+    switch (static_cast<SkillId>(skillId)) {
+        case SkillId::FROZEN_ORB:
+            cols[1] = {0.5f, 0.8f, 1.0f}; cols[2] = {0.2f, 0.4f, 0.7f};
+            cols[3] = {0.3f, 0.5f, 0.8f}; cols[4] = {0.9f, 0.95f, 1.0f};
+            break;
+        case SkillId::CHAIN_LIGHTNING:
+            cols[1] = {0.4f, 0.6f, 1.0f}; cols[2] = {0.2f, 0.3f, 0.6f};
+            cols[3] = {0.3f, 0.5f, 0.9f}; cols[4] = {1.0f, 1.0f, 0.6f};
+            break;
+        case SkillId::METEOR_STRIKE:
+            cols[1] = {1.0f, 0.5f, 0.1f}; cols[2] = {0.8f, 0.3f, 0.1f};
+            cols[3] = {0.6f, 0.3f, 0.1f}; cols[4] = {1.0f, 0.9f, 0.3f};
+            break;
+        case SkillId::BLOOD_NOVA:
+            cols[1] = {0.8f, 0.1f, 0.1f}; cols[2] = {0.5f, 0.05f, 0.05f};
+            cols[3] = {0.6f, 0.15f, 0.1f}; cols[4] = {1.0f, 0.3f, 0.2f};
+            break;
+        case SkillId::PHASE_DASH:
+            cols[1] = {0.3f, 0.8f, 0.5f}; cols[2] = {0.15f, 0.5f, 0.3f};
+            cols[3] = {0.2f, 0.6f, 0.4f}; cols[4] = {0.6f, 1.0f, 0.7f};
+            break;
+        default:
+            cols[1] = {0.6f, 0.6f, 0.6f}; cols[2] = {0.3f, 0.3f, 0.3f};
+            cols[3] = {0.4f, 0.4f, 0.4f}; cols[4] = {0.9f, 0.9f, 0.9f};
+            break;
+    }
+}
+
+static const u8* getSkillIcon(u8 skillId) {
+    switch (static_cast<SkillId>(skillId)) {
+        case SkillId::FROZEN_ORB:       return &kIconFrozenOrb[0][0];
+        case SkillId::CHAIN_LIGHTNING:  return &kIconChainLightning[0][0];
+        case SkillId::METEOR_STRIKE:    return &kIconMeteorStrike[0][0];
+        case SkillId::BLOOD_NOVA:       return &kIconBloodNova[0][0];
+        case SkillId::PHASE_DASH:       return &kIconPhaseDash[0][0];
+        default:                        return nullptr;
+    }
+}
+
+void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
+                              const EquipSkillSlot* slots, u32 slotCount)
+{
+    f32 slotW = 32.0f, slotH = 32.0f, gap = 3.0f;
+
+    for (u32 s = 0; s < slotCount; s++) {
+        const EquipSkillSlot& slot = slots[s];
+        f32 sx = x + s * (slotW + gap);
+        bool ready = (slot.cooldownTimer <= 0.0f);
+
+        // Background fill
+        Vec3 bgCol = ready ? Vec3{0.1f, 0.08f, 0.15f} : Vec3{0.06f, 0.06f, 0.08f};
+        for (f32 fy = 0; fy < slotH; fy += 1.0f) {
+            pushLine(sx, y + fy, sx + slotW, y + fy, bgCol);
+        }
+
+        // Border — gold for legendary feel
+        Vec3 borderCol = ready ? Vec3{0.7f, 0.55f, 0.2f} : Vec3{0.3f, 0.25f, 0.15f};
+        if (slot.isPassive) borderCol = ready ? Vec3{0.5f, 0.4f, 0.7f} : Vec3{0.25f, 0.2f, 0.35f};
+        pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
+
+        // Cooldown overlay
+        if (slot.cooldownTimer > 0.0f) {
+            f32 cdFrac = slot.cooldownTimer / 3.0f;
+            if (cdFrac > 1.0f) cdFrac = 1.0f;
+            f32 cdH = slotH * cdFrac;
+            Vec3 cdCol = {0.05f, 0.05f, 0.08f};
+            for (f32 fy = 0; fy < cdH; fy += 1.0f) {
+                pushLine(sx + 1, y + fy + 1, sx + slotW - 1, y + fy + 1, cdCol);
+            }
+        }
+
+        // Draw 8x8 skill icon scaled to 16x16, centered in the slot
+        const u8* icon = getSkillIcon(slot.skillId);
+        if (icon) {
+            Vec3 cols[5];
+            getSkillIconColors(slot.skillId, cols);
+            f32 iconX = sx + 8.0f;  // center 16px icon in 32px slot
+            f32 iconY = y + 8.0f;
+            f32 px = 2.0f; // pixel scale
+            for (u32 iy = 0; iy < 8; iy++) {
+                for (u32 ix = 0; ix < 8; ix++) {
+                    u8 c = icon[iy * 8 + ix];
+                    if (c == 0) continue;
+                    f32 pxX = iconX + ix * px;
+                    f32 pxY = iconY + (7 - iy) * px; // flip Y
+                    for (f32 fy = 0; fy < px; fy += 1.0f) {
+                        pushLine(pxX, pxY + fy, pxX + px, pxY + fy,
+                                 ready ? cols[c] : cols[c] * 0.4f);
+                    }
+                }
+            }
+        }
+
+        flushHUD(sw, sh);
+
+        // Key label or "Auto" for passives
+        if (slot.isPassive) {
+            FontSystem::drawText(sw, sh, sx + 4.0f, y + 2.0f, "auto",
+                                 {0.5f, 0.4f, 0.7f}, 1);
+        } else {
+            drawKeySymbol(sw, sh, sx + 7.0f, y - 20.0f, slot.keyLabel, ready);
+        }
+    }
+}
+
 void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
                               const char* name, Vec3 iconColor,
                               f32 healthFrac, u32 count, u8 iconMatId)

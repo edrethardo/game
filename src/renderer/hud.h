@@ -57,6 +57,19 @@ namespace HUD {
                             const u8* unlockFloors, const u8* upgradeFloors,
                             const f32* cooldownTimers);
 
+    // Equipment skill bar — shows active legendary equipment skills (boots F, helmet G,
+    // armor passive, weapon proc) with 8x8 pixel-art skill icons and cooldown overlays.
+    // Up to 4 slots; empty slots (NONE) are hidden.
+    struct EquipSkillSlot {
+        u8  skillId;       // SkillId cast to u8
+        f32 cooldownTimer; // 0 = ready
+        const char* keyLabel;   // "F", "G", etc.
+        const char* skillName;  // display name
+        bool isPassive;    // armor aura / weapon proc (no key activation)
+    };
+    void drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
+                            const EquipSkillSlot* slots, u32 slotCount);
+
     // Mouse button symbol — mouse outline with specified button highlighted
     // button: 0=left, 1=right, 2=middle
     void drawMouseButton(u32 sw, u32 sh, f32 x, f32 y,

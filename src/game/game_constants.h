@@ -42,7 +42,7 @@ namespace GameConst {
     static constexpr f32 HEALTH_GLOBE_AMOUNT = 20.0f;
     static constexpr f32 ENERGY_GLOBE_AMOUNT = 25.0f;
     static constexpr f32 POTION_HEAL_PCT     = 0.40f;
-    static constexpr f32 POTION_COOLDOWN     = 15.0f;
+    static constexpr f32 POTION_COOLDOWN     = 8.0f;
 
     // World items
     static constexpr f32 ITEM_SCALE          = 1.4f;
