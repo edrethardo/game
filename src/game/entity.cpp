@@ -1,4 +1,5 @@
 #include "game/entity.h"
+#include "game/game_constants.h"
 #include "core/log.h"
 
 void EntitySystem::init(EntityPool& pool) {
@@ -31,7 +32,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.halfExtents  = halfExtents;
     e.health       = health;
     e.maxHealth    = health;
-    e.moveSpeed    = moveSpeed;
+    e.moveSpeed    = moveSpeed * GameConst::SPEED_MULT;
     e.detectionRange = detectionRange;
     e.attackRange  = attackRange;
     e.attackCooldown = attackCooldown;

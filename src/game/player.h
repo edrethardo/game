@@ -14,7 +14,7 @@ struct Player {
     f32  eyeHeight  = 1.7f;    // metres above feet
     f32  yaw        = 0.0f;    // radians
     f32  pitch      = 0.0f;    // radians, clamped to ±89°
-    f32  moveSpeed  = 6.0f;    // m/s
+    f32  moveSpeed  = 6.0f;    // m/s (scaled by SPEED_MULT at runtime)
     f32  sensitivity = 0.002f; // radians per pixel
     bool onGround   = false;
     bool noclip     = false;   // fly freely, no collision

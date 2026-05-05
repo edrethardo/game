@@ -2,6 +2,7 @@
 #include <SDL.h>
 
 #include "game/player.h"
+#include "game/game_constants.h"
 #include "net/net_player.h"
 #include "platform/input.h"
 #include <cmath>
@@ -74,7 +75,7 @@ void PlayerController::update(Player& player, f32 dt) {
     Input::getMouseDelta(mx, my);
 
     // Apply slow debuff (e.g., from boss cleaver hit)
-    f32 effectiveSpeed = player.moveSpeed;
+    f32 effectiveSpeed = player.moveSpeed * GameConst::SPEED_MULT;
     if (player.slowTimer > 0.0f) {
         effectiveSpeed *= 0.4f; // 60% slow
         player.slowTimer -= dt;
@@ -116,7 +117,7 @@ void PlayerController::updateFromInput(Player& player, const NetInput& input, f3
 void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt) {
     applyMovement(np.position, np.velocity, np.yaw, np.pitch,
                   np.onGround, np.noclip,
-                  np.moveSpeed, np.sensitivity,
+                  np.moveSpeed * GameConst::SPEED_MULT, np.sensitivity,
                   input.mouseDeltaX, input.mouseDeltaY,
                   (input.moveFlags & INPUT_FORWARD)  != 0,
                   (input.moveFlags & INPUT_BACKWARD) != 0,
