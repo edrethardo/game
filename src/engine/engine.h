@@ -144,6 +144,10 @@ private:
     InventoryDragState m_dragState;
     DoubleClickState   m_dblClickState;
     f32 m_fullBackpackNotifyTimer = 0.0f;
+    bool m_firstPickupTooltipShown = false;
+    f32  m_firstPickupTooltipTimer = 0.0f;
+    bool m_equipTooltipShown = false;  // "double-click to equip" shown once
+    f32  m_equipTooltipTimer = 0.0f;
 
     // Floor door — portal to next dungeon level
     Vec3 m_floorDoorPos    = {0, 0, 0};

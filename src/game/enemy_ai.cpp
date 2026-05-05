@@ -11,6 +11,7 @@
 #include "game/projectile.h"
 #include "game/game_constants.h"
 #include "world/raycast.h"
+#include "world/combat_query.h"
 #include "world/level_grid.h"
 #include <cmath>
 #include <cstdlib>
@@ -275,6 +276,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 case NpcClass::ARCHER:  engageDist = 12.0f; break; // shoots from far
                 case NpcClass::MAGE:    engageDist = 14.0f; break; // casts from far
                 case NpcClass::ROGUE:   engageDist = 6.0f;  break; // quick strikes then moves
+                case NpcClass::NONE:
+                    // Flying swarm drones engage at full detection range; ground combat drones stay close
+                    engageDist = (e.flags & ENT_FLYING) ? e.detectionRange : 6.0f;
+                    break;
                 default:                engageDist = 6.0f;  break;
             }
 
@@ -456,7 +461,15 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             if (!(target.flags & ENT_DEAD)) {
                                 Vec3 eyePos = e.position + Vec3{0, e.halfExtents.y, 0};
 
-                                if (e.npcWeaponType == WeaponType::PROJECTILE) {
+                                if (e.npcWeaponType == WeaponType::HITSCAN) {
+                                    // Instant raycast attack (swarm drones, turrets)
+                                    Vec3 targetCenter = target.position + Vec3{0, target.halfExtents.y, 0};
+                                    Vec3 fireDir = normalize(targetCenter - eyePos);
+                                    CombatHit hit = CombatQuery::raycast(grid, pool, eyePos, fireDir, e.attackRange);
+                                    if (hit.hit && hit.type == CombatHit::ENTITY) {
+                                        Combat::applyDamage(pool, hit.entityHandle, e.damage);
+                                    }
+                                } else if (e.npcWeaponType == WeaponType::PROJECTILE) {
                                     Vec3 targetCenter = target.position + Vec3{0, target.halfExtents.y, 0};
                                     Vec3 fireDir = normalize(targetCenter - eyePos);
                                     f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
@@ -503,18 +516,59 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.velocity = {0, 0, 0};
                     }
                 } else {
-                    // Swarm drones: hover near the player
-                    Vec3 toPlayer = playerEye - e.position;
-                    f32 pDist = length(toPlayer);
-                    if (pDist > 3.0f) {
-                        Vec3 flatDir = normalize(Vec3{toPlayer.x, 0, toPlayer.z});
+                    // Swarm drones: autonomous exploration with vertical bobbing.
+                    // Pick random walkable cells as waypoints and fly toward them,
+                    // revealing fog of war as they go.
+
+                    // Pick a new waypoint when timer expires or drone reaches current one
+                    e.flybyTimer -= dt;
+                    Vec3 toWP = e.flybyTarget - e.position;
+                    f32 wpDist = sqrtf(toWP.x * toWP.x + toWP.z * toWP.z);
+
+                    if (e.flybyTimer <= 0.0f || wpDist < 1.0f) {
+                        // Select a random CELL_FLOOR cell within 10 cells of current pos
+                        u32 curGx, curGz;
+                        if (LevelGridSystem::worldToGrid(grid, e.position, curGx, curGz)) {
+                            bool found = false;
+                            for (u32 attempt = 0; attempt < 5; attempt++) {
+                                s32 dx = (std::rand() % 21) - 10; // -10 to +10
+                                s32 dz = (std::rand() % 21) - 10;
+                                s32 nx = static_cast<s32>(curGx) + dx;
+                                s32 nz = static_cast<s32>(curGz) + dz;
+                                if (nx < 1 || nz < 1) continue;
+                                u32 ux = static_cast<u32>(nx);
+                                u32 uz = static_cast<u32>(nz);
+                                if (!LevelGridSystem::isInBounds(grid, ux, uz)) continue;
+                                if (LevelGridSystem::isSolid(grid, ux, uz)) continue;
+                                e.flybyTarget = LevelGridSystem::gridToWorld(grid, ux, uz);
+                                e.flybyTarget.y = e.position.y; // keep current altitude
+                                found = true;
+                                break;
+                            }
+                            if (!found) {
+                                // Fallback: stay at current cell center
+                                e.flybyTarget = LevelGridSystem::gridToWorld(grid, curGx, curGz);
+                                e.flybyTarget.y = e.position.y;
+                            }
+                        }
+                        e.flybyTimer = 6.0f + (std::rand() % 5); // 6-10s before new waypoint
+                    }
+
+                    // Move toward waypoint
+                    if (wpDist > 1.0f) {
+                        Vec3 flatDir = normalize(Vec3{toWP.x, 0, toWP.z});
                         e.velocity.x = flatDir.x * npcSpeed;
                         e.velocity.z = flatDir.z * npcSpeed;
                         e.yaw = atan2f(-flatDir.x, -flatDir.z);
-                        entityMoveAndSlide(e, grid, dt);
                     } else {
-                        e.velocity = {0, 0, 0};
+                        e.velocity.x = 0.0f;
+                        e.velocity.z = 0.0f;
                     }
+
+                    // Vertical bobbing — smooth sine wave for natural flight
+                    e.velocity.y = sinf(e.animTimer * 2.5f) * 1.2f;
+
+                    entityMoveAndSlide(e, grid, dt);
                 }
             } else {
                 // --- PATHFIND MODE: follow flow field toward exit ---
@@ -573,7 +627,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
             }
 
-            snapEntityToFloor(e, grid);
+            // Flying drones stay airborne; ground NPCs snap to floor
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
 
             // Wall avoidance: nudge NPC toward cell center when near walls.
             // Check 4 cardinal neighbors — if any is solid, push away from it.

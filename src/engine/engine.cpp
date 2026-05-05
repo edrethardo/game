@@ -633,9 +633,7 @@ void Engine::init() {
                 e->enemyType     = EnemyType::GENERIC;
                 e->meshId        = s_engine->m_meshIdBat;
                 e->materialId    = 49; // prop_iron
-                e->npcWeaponType = WeaponType::PROJECTILE;
-                e->npcProjectileSpeed  = 22.0f;
-                e->npcProjectileRadius = 0.04f;
+                e->npcWeaponType = WeaponType::HITSCAN;
                 e->aiState       = AIState::IDLE;
             }
         } else if (type == 2) {
@@ -792,29 +790,36 @@ void Engine::rollNpcEquipment(NpcEquipment& equip, NpcClass npcClass, u8 floor) 
         equip.equipped[s] = {};
     }
 
-    // Roll a weapon appropriate for the class
+    // Roll weak equipment — always level 1, forced COMMON (no affixes),
+    // halved base stats so NPCs are clearly weaker than the player
+    (void)floor; // NPCs always get level-1 gear regardless of floor
     auto rollSlot = [&](ItemSlot slot, const char* subtypeHint) {
-        // Try up to 20 times to find a matching item
         for (u32 attempt = 0; attempt < 20; attempt++) {
-            ItemInstance item = ItemGen::rollItem(floor, m_itemDefs, m_itemDefCount,
+            ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
                                                    m_affixDefs, m_affixDefCount);
             if (isItemEmpty(item)) continue;
             const ItemDef& def = m_itemDefs[item.defId];
             if (def.slot != slot) continue;
-            // If caller specified a subtype hint, filter for it
             if (subtypeHint && subtypeHint[0]) {
                 if (std::strstr(def.name, subtypeHint) == nullptr) continue;
             }
+            item.rarity = Rarity::COMMON;
+            item.affixCount = 0;
+            item.damage *= 0.5f;
+            item.bonusHealth *= 0.5f;
             equip.equipped[static_cast<u32>(slot)] = item;
             return;
         }
-        // Fallback: just roll any item of the right slot
         for (u32 attempt = 0; attempt < 40; attempt++) {
-            ItemInstance item = ItemGen::rollItem(floor, m_itemDefs, m_itemDefCount,
+            ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
                                                    m_affixDefs, m_affixDefCount);
             if (isItemEmpty(item)) continue;
             const ItemDef& def = m_itemDefs[item.defId];
             if (def.slot != slot) continue;
+            item.rarity = Rarity::COMMON;
+            item.affixCount = 0;
+            item.damage *= 0.5f;
+            item.bonusHealth *= 0.5f;
             equip.equipped[static_cast<u32>(slot)] = item;
             return;
         }
@@ -1032,6 +1037,12 @@ void Engine::startGame() {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
 
+    // Reset first-pickup tutorial on new game (not on floor descent)
+    if (m_currentFloor <= 1) {
+        m_firstPickupTooltipShown = false;
+        m_equipTooltipShown = false;
+    }
+
     // Reset NPC equipment pool so old floor's slots don't persist
     for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = {};
 
@@ -1131,49 +1142,49 @@ void Engine::startGame() {
              GameConst::SPIDER_ATK_RANGE, GameConst::SPIDER_ATK_COOL, GameConst::SPIDER_DAMAGE,
              {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "spider_skin",   0, 0, 0},
             // Zombie (Diablo 1) — slow, tanky, human mesh
-            {70,  1.8f, 10, 2.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
+            {70,  1.8f, 18, 2.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
             // Imp (Barony) — small fast flying ranged nuisance, fires weak projectiles
-            {20,  7.0f, 16, 8.0f, 0.8f,  3, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
+            {20,  7.0f, 24, 8.0f, 0.8f,  3, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
         };
         // Tier 2 (floors 11-20): Catacombs — poison + ghoul (D2) + bone mage (Barony)
         static const EnemyTemplate kTier2[] = {
-            {60, 3.0f, 14, 2.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
-            {35, 6.5f, 14, 2.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
-            {48, 4.2f, 12, 2.0f, 0.8f, 11, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
+            {60, 3.0f, 22, 2.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
+            {35, 6.5f, 22, 2.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
+            {48, 4.2f, 20, 2.0f, 0.8f, 11, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
             // Ghoul (D2) — fast melee, high damage, lower HP
-            {40, 4.5f, 14, 2.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
+            {40, 4.5f, 22, 2.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
             // Bone Mage (Barony) — ranged skeleton caster
-            {35, 2.5f, 16, 10.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
+            {35, 2.5f, 24, 10.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
         };
         // Tier 3 (floors 21-30): Caverns — slow + broodmother (Barony) + stalker (HGL)
         static const EnemyTemplate kTier3[] = {
-            {65, 3.2f, 15, 2.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
-            {38, 7.0f, 15, 2.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
-            {52, 4.8f, 13, 2.0f, 0.7f, 12, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
+            {65, 3.2f, 24, 2.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
+            {38, 7.0f, 24, 2.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
+            {52, 4.8f, 22, 2.0f, 0.7f, 12, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
             // Broodmother (Barony) — large slow spider, extra tanky
-            {90, 2.5f, 12, 2.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
+            {90, 2.5f, 20, 2.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
             // Stalker (HGL) — fast, stealthy humanoid
-            {45, 5.0f, 18, 2.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
+            {45, 5.0f, 26, 2.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
         };
         // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
         static const EnemyTemplate kTier4[] = {
-            {70, 3.5f, 16, 2.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
-            {40, 7.5f, 16, 2.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
-            {58, 5.0f, 14, 2.0f, 0.6f, 14, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
+            {70, 3.5f, 24, 2.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
+            {40, 7.5f, 24, 2.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
+            {58, 5.0f, 22, 2.0f, 0.6f, 14, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
             // Hellhound (D2) — fast charging beast, spider rig
-            {50, 6.0f, 16, 2.5f, 0.5f, 16, {0.5f,0.35f,0.5f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
+            {50, 6.0f, 24, 2.5f, 0.5f, 16, {0.5f,0.35f,0.5f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
             // Demon (HGL) — ranged fire caster, humanoid
-            {55, 3.0f, 18, 12.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
+            {55, 3.0f, 26, 12.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
         };
         // Tier 5 (floors 41-50): Void — freeze + shade (Barony) + void demon (HGL)
         static const EnemyTemplate kTier5[] = {
-            {80, 3.8f, 18, 2.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
-            {45, 8.0f, 18, 2.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
-            {65, 5.5f, 16, 2.0f, 0.5f, 15, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
+            {80, 3.8f, 26, 2.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
+            {45, 8.0f, 26, 2.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
+            {65, 5.5f, 24, 2.0f, 0.5f, 15, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
             // Shade (Barony) — fast phasing humanoid, semi-transparent
-            {40, 5.5f, 20, 2.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
+            {40, 5.5f, 28, 2.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
             // Void Demon (HGL) — heavy tanky skeleton, high damage
-            {100, 2.5f, 16, 3.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
+            {100, 2.5f, 24, 3.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
         };
 
         // Select tier based on current floor
@@ -1405,7 +1416,7 @@ void Engine::startGame() {
 
             EntityHandle bh = EntitySystem::spawn(m_entities,
                 Vec3{bx, by + bt->halfExtents.y, bz}, bt->halfExtents, false,
-                bt->baseHp * floorMult, bt->speed, 20.0f,
+                bt->baseHp * floorMult, bt->speed, 40.0f,
                 bt->atkRange, bt->atkCooldown, bt->baseDmg * floorMult);
             Entity* boss = handleGet(m_entities, bh);
             if (boss) {
@@ -2377,6 +2388,11 @@ void Engine::singleplayerUpdate(f32 dt) {
     if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
         m_inventoryOpen = !m_inventoryOpen;
         Input::setRelativeMouseMode(!m_inventoryOpen);
+        // Show equip tutorial on first inventory open after first pickup
+        if (m_inventoryOpen && m_firstPickupTooltipShown && !m_equipTooltipShown) {
+            m_equipTooltipShown = true;
+            m_equipTooltipTimer = 5.0f;
+        }
         // Reset drag/click state when toggling inventory
         m_dragState = {};
         m_dblClickState = {};
@@ -2402,6 +2418,8 @@ void Engine::singleplayerUpdate(f32 dt) {
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
     if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
+    if (m_firstPickupTooltipTimer > 0.0f) m_firstPickupTooltipTimer -= dt;
+    if (m_equipTooltipTimer > 0.0f) m_equipTooltipTimer -= dt;
 
     // Camera
     PlayerController::applyToCamera(m_localPlayer, m_camera);
@@ -2459,6 +2477,11 @@ void Engine::updatePlayerPickup() {
         if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
             if (!isGlobe(picked)) {
                 if (Inventory::addToBackpack(m_inventories[0], picked)) {
+                    // Show "Press Tab to open inventory" on first pickup
+                    if (!m_firstPickupTooltipShown) {
+                        m_firstPickupTooltipShown = true;
+                        m_firstPickupTooltipTimer = 4.0f;
+                    }
                     // Auto-equip first weapon; assign subsequent weapons to quickbar
                     if (picked.defId < m_itemDefCount &&
                         m_itemDefs[picked.defId].slot == ItemSlot::WEAPON) {
@@ -2728,6 +2751,8 @@ void Engine::pushPlayerFromEntities() {
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
         // Friendly NPCs don't push the player — they yield instead
         if (e.flags & ENT_FRIENDLY) continue;
+        // Props (bones, decorations) have no collision with the player
+        if (e.enemyType == EnemyType::PROP) continue;
         AABB entBox = entityAABB(e);
         if (CombatQuery::aabbOverlap(playerBox, entBox)) {
             Vec3 toPlayer = m_localPlayer.position - e.position;
@@ -4494,13 +4519,14 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
     if (m_floorDoorActive && m_gameState == GameState::IN_GAME) {
         Vec3 toDoor = m_floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
-            char doorStr[48];
-            std::snprintf(doorStr, sizeof(doorStr), "Press E to descend to Floor %u", m_currentFloor + 1);
+            char doorStr[32];
+            std::snprintf(doorStr, sizeof(doorStr), "Descend to Floor %u", m_currentFloor + 1);
             f32 textW = FontSystem::textWidth(doorStr, 1);
-            FontSystem::drawText(sw, sh,
-                (static_cast<f32>(sw) - textW) * 0.5f,
-                static_cast<f32>(sh) * 0.4f,
-                doorStr, {0.3f, 1.0f, 0.4f}, 1);
+            f32 totalW = 22.0f + textW;
+            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.4f;
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, "E", true);
+            FontSystem::drawText(sw, sh, cx + 22.0f, cy, doorStr, {0.3f, 1.0f, 0.4f}, 1);
         }
     }
 
@@ -4535,13 +4561,12 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
 
         if (bestItem && bestDef) {
             Vec3 rColor = rarityColor(bestItem->item.rarity);
-            char pickupStr[64];
-            std::snprintf(pickupStr, sizeof(pickupStr), "[E] %s", bestDef->name);
-            f32 textW = FontSystem::textWidth(pickupStr, 1);
-            FontSystem::drawText(sw, sh,
-                (static_cast<f32>(sw) - textW) * 0.5f,
-                static_cast<f32>(sh) * 0.35f,
-                pickupStr, rColor, 1);
+            f32 nameW = FontSystem::textWidth(bestDef->name, 1);
+            f32 totalW = 22.0f + nameW;
+            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.35f;
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, "E", true);
+            FontSystem::drawText(sw, sh, cx + 22.0f, cy, bestDef->name, rColor, 1);
         }
     }
 }
@@ -4580,6 +4605,23 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                     static_cast<f32>(dmy) - 16.0f,
                     32.0f, dragDef, dragRarity);
             }
+        }
+
+        // Equip tutorial — pulsing mouse left-click + "Double-click to equip"
+        if (m_equipTooltipTimer > 0.0f) {
+            f32 alpha = (m_equipTooltipTimer < 0.5f)
+                        ? m_equipTooltipTimer * 2.0f : 1.0f;
+            bool mouseLit = (sinf(m_equipTooltipTimer * 6.0f) > 0.0f);
+
+            const char* eqText = "Double-click to equip";
+            f32 textW = FontSystem::textWidth(eqText, 2);
+            f32 totalW = 22.0f + 6.0f + textW;
+            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.3f;
+
+            HUD::drawMouseButton(sw, sh, cx, cy, 0, mouseLit); // left mouse button
+            FontSystem::drawText(sw, sh, cx + 24.0f, cy + 6.0f, eqText,
+                                 {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 2);
         }
     } else {
         Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
@@ -4740,15 +4782,20 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                                  floorStr, {0.7f, 0.7f, 0.7f}, 1);
         }
 
-        // Potion cooldown indicator (below floor text, Q key binding hint)
-        if (m_potionCooldown > 0.0f) {
-            char potStr[32];
-            std::snprintf(potStr, sizeof(potStr), "Potion: %.0fs", m_potionCooldown);
-            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 35.0f,
-                                 potStr, {0.8f, 0.3f, 0.3f}, 1);
-        } else {
-            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 35.0f,
-                                 "Q: Potion", {0.3f, 0.8f, 0.3f}, 1);
+        // Potion cooldown indicator (below floor text, Q key icon + label)
+        {
+            f32 potY = static_cast<f32>(sh) - 38.0f;
+            bool potReady = (m_potionCooldown <= 0.0f);
+            HUD::drawKeySymbol(sw, sh, 20.0f, potY, "Q", potReady);
+            if (potReady) {
+                FontSystem::drawText(sw, sh, 44.0f, potY + 4.0f,
+                                     "Potion", {0.3f, 0.8f, 0.3f}, 1);
+            } else {
+                char potStr[32];
+                std::snprintf(potStr, sizeof(potStr), "Potion: %.0fs", m_potionCooldown);
+                FontSystem::drawText(sw, sh, 44.0f, potY + 4.0f,
+                                     potStr, {0.8f, 0.3f, 0.3f}, 1);
+            }
         }
     }
 
@@ -4785,6 +4832,23 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         Vec3 fullColor = {0.9f * alpha, 0.2f * alpha, 0.2f * alpha};
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - fullW) * 0.5f,
                              static_cast<f32>(sh) * 0.7f, fullText, fullColor, 2);
+    }
+
+    // First pickup tutorial — pulsing Tab key + "Open Inventory" text
+    if (m_firstPickupTooltipTimer > 0.0f) {
+        f32 alpha = (m_firstPickupTooltipTimer < 0.5f)
+                    ? m_firstPickupTooltipTimer * 2.0f : 1.0f;
+        bool keyLit = (sinf(m_firstPickupTooltipTimer * 6.0f) > 0.0f);
+
+        const char* text = "Open Inventory";
+        f32 textW = FontSystem::textWidth(text, 2);
+        f32 totalW = 28.0f + textW;
+        f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+        f32 cy = static_cast<f32>(sh) * 0.65f;
+
+        HUD::drawKeySymbol(sw, sh, cx, cy, "Tab", keyLit);
+        FontSystem::drawText(sw, sh, cx + 28.0f, cy + 4.0f, text,
+                             {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 2);
     }
 
     // Quickbar — always visible at bottom of screen
