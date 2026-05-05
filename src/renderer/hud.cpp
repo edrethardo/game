@@ -404,7 +404,7 @@ void HUD::drawMouseButton(u32 sw, u32 sh, f32 x, f32 y,
 void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               u8 activeSlot, u32 currentFloor,
                               const u8* unlockFloors, const u8* upgradeFloors,
-                              const f32* cooldownTimers)
+                              const f32* cooldownTimers, const f32* maxCooldowns)
 {
     f32 slotW = 32.0f, slotH = 32.0f, gap = 3.0f;
 
@@ -427,14 +427,17 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         if (upgraded) borderCol = {0.9f, 0.8f, 0.3f};
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
 
-        // Cooldown overlay
+        // Cooldown overlay — dark from top, shrinks downward as skill recharges
         if (unlocked && cooldownTimers[s] > 0.0f) {
-            f32 cdFrac = cooldownTimers[s] / 2.0f;
+            f32 maxCD = (maxCooldowns && maxCooldowns[s] > 0.0f) ? maxCooldowns[s] : 1.0f;
+            f32 cdFrac = cooldownTimers[s] / maxCD;
             if (cdFrac > 1.0f) cdFrac = 1.0f;
             f32 cdH = slotH * cdFrac;
             Vec3 cdCol = {0.08f, 0.08f, 0.12f};
+            // Draw from top of slot downward
             for (f32 fy = 0; fy < cdH; fy += 1.0f) {
-                pushLine(sx + 1, y + fy + 1, sx + slotW - 1, y + fy + 1, cdCol);
+                f32 ly = y + slotH - 1 - fy;
+                pushLine(sx + 1, ly, sx + slotW - 1, ly, cdCol);
             }
         }
 
@@ -569,14 +572,16 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         if (slot.isPassive) borderCol = ready ? Vec3{0.5f, 0.4f, 0.7f} : Vec3{0.25f, 0.2f, 0.35f};
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
 
-        // Cooldown overlay
+        // Cooldown overlay — dark from top, shrinks downward as skill recharges
         if (slot.cooldownTimer > 0.0f) {
-            f32 cdFrac = slot.cooldownTimer / 3.0f;
+            f32 maxCD = (slot.maxCooldown > 0.0f) ? slot.maxCooldown : 1.0f;
+            f32 cdFrac = slot.cooldownTimer / maxCD;
             if (cdFrac > 1.0f) cdFrac = 1.0f;
             f32 cdH = slotH * cdFrac;
             Vec3 cdCol = {0.05f, 0.05f, 0.08f};
             for (f32 fy = 0; fy < cdH; fy += 1.0f) {
-                pushLine(sx + 1, y + fy + 1, sx + slotW - 1, y + fy + 1, cdCol);
+                f32 ly = y + slotH - 1 - fy;
+                pushLine(sx + 1, ly, sx + slotW - 1, ly, cdCol);
             }
         }
 

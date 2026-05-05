@@ -55,7 +55,7 @@ namespace HUD {
     void drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                             u8 activeSlot, u32 currentFloor,
                             const u8* unlockFloors, const u8* upgradeFloors,
-                            const f32* cooldownTimers);
+                            const f32* cooldownTimers, const f32* maxCooldowns);
 
     // Equipment skill bar — shows active legendary equipment skills (boots F, helmet G,
     // armor passive, weapon proc) with 8x8 pixel-art skill icons and cooldown overlays.
@@ -63,6 +63,7 @@ namespace HUD {
     struct EquipSkillSlot {
         u8  skillId;       // SkillId cast to u8
         f32 cooldownTimer; // 0 = ready
+        f32 maxCooldown;   // total cooldown for percentage calculation
         const char* keyLabel;   // "F", "G", etc.
         const char* skillName;  // display name
         bool isPassive;    // armor aura / weapon proc (no key activation)

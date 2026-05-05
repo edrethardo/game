@@ -1812,20 +1812,39 @@ void Engine::syncNetPlayerToLocalPlayer() {
 void Engine::update(f32 dt) {
     // Death screen input — handle before the generic ESC check so ESC goes to menu
     if (m_gameState == GameState::GAME_OVER) {
-        if (Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
-            // Restart from saved floor; fall back to floor 1 if no save exists
-            if (loadGame()) {
-                m_currentFloor = m_savedFloor;
-            } else {
-                m_currentFloor = 1;
+        if (m_confirmQuit) {
+            // "Are you sure?" confirmation before quitting to menu
+            if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_Y)) {
+                m_confirmQuit = false;
+                m_gameState = GameState::MENU;
+                Input::setRelativeMouseMode(false);
             }
-            m_localPlayer.health = m_localPlayer.maxHealth;
-            startGame();
-            m_gameState = GameState::IN_GAME;
-        }
-        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-            m_currentFloor = 1;
-            m_gameState = GameState::MENU;
+            if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isKeyPressed(SDL_SCANCODE_N)) {
+                m_confirmQuit = false; // cancel, stay on death screen
+            }
+        } else {
+            // Space = revive at entrance of current floor (no level restart)
+            if (Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+                m_localPlayer.health = m_localPlayer.maxHealth;
+                m_localPlayer.position = m_players[m_localPlayerIndex].spawnPosition;
+                m_localPlayer.velocity = {0, 0, 0};
+                m_gameState = GameState::IN_GAME;
+            }
+            // Enter = reload last save
+            if (Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+                if (loadGame()) {
+                    m_currentFloor = m_savedFloor;
+                } else {
+                    m_currentFloor = 1;
+                }
+                m_localPlayer.health = m_localPlayer.maxHealth;
+                startGame();
+                m_gameState = GameState::IN_GAME;
+            }
+            // ESC = ask to quit
+            if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+                m_confirmQuit = true;
+            }
         }
         return;
     }
@@ -2137,15 +2156,15 @@ void Engine::singleplayerUpdate(f32 dt) {
         m_quickbars[0].activeSlot = static_cast<u8>(slot);
     }
 
-    // Healing potion (Q key, 15 second cooldown — heals 40% of max HP)
+    // Healing potion (Q key, cooldown from GameConst — heals 40% of max HP)
     if (m_potionCooldown > 0.0f) m_potionCooldown -= dt;
     if (Input::isKeyPressed(SDL_SCANCODE_Q) && m_potionCooldown <= 0.0f) {
         f32 healAmount = m_localPlayer.maxHealth * 0.4f;
         m_localPlayer.health += healAmount;
         if (m_localPlayer.health > m_localPlayer.maxHealth)
             m_localPlayer.health = m_localPlayer.maxHealth;
-        m_potionCooldown = 15.0f;
-        LOG_INFO("Used healing potion: +%.0f HP (cooldown 15s)", healAmount);
+        m_potionCooldown = GameConst::POTION_COOLDOWN;
+        LOG_INFO("Used healing potion: +%.0f HP (cooldown %.0fs)", healAmount, GameConst::POTION_COOLDOWN);
     }
 
     // Player movement — disable look and movement while inventory is open
@@ -2300,14 +2319,20 @@ void Engine::singleplayerUpdate(f32 dt) {
     SkillSystem::update(m_skillStates[0], dt);
     // Tick class skill cooldowns (shared energy synced from main pool)
     for (u32 s = 0; s < 4; s++) {
-        if (m_classSkillStates[s].cooldownTimer > 0.0f)
+        if (m_classSkillStates[s].cooldownTimer > 0.0f) {
             m_classSkillStates[s].cooldownTimer -= dt;
+            if (m_classSkillStates[s].cooldownTimer < 0.0f) m_classSkillStates[s].cooldownTimer = 0.0f;
+        }
     }
     // Tick equipment skill cooldowns (boots F, helmet G)
-    if (m_bootSkillStates[0].cooldownTimer > 0.0f)
+    if (m_bootSkillStates[0].cooldownTimer > 0.0f) {
         m_bootSkillStates[0].cooldownTimer -= dt;
-    if (m_helmetSkillStates[0].cooldownTimer > 0.0f)
+        if (m_bootSkillStates[0].cooldownTimer < 0.0f) m_bootSkillStates[0].cooldownTimer = 0.0f;
+    }
+    if (m_helmetSkillStates[0].cooldownTimer > 0.0f) {
         m_helmetSkillStates[0].cooldownTimer -= dt;
+        if (m_helmetSkillStates[0].cooldownTimer < 0.0f) m_helmetSkillStates[0].cooldownTimer = 0.0f;
+    }
 
     // Update orb projectiles (spawn ice shards for Frozen Orb)
     SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
@@ -2380,27 +2405,24 @@ void Engine::singleplayerUpdate(f32 dt) {
     }
 
     // --- Boot skill activation (F key) ---
+    // Equipment legendary skills are cooldown-only (no energy cost deducted from player)
     if (Input::isKeyPressed(SDL_SCANCODE_F) && !m_inventoryOpen &&
         m_bootSkillStates[0].activeSkill != SkillId::NONE) {
-        m_bootSkillStates[0].energy = m_skillStates[0].energy;
-        m_bootSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
-        if (SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
-                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
-            m_skillStates[0].energy = m_bootSkillStates[0].energy;
-        }
+        m_bootSkillStates[0].energy = 999.0f;
+        m_bootSkillStates[0].maxEnergy = 999.0f;
+        SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
+                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                  m_projectiles, m_entities, m_grid, m_localPlayer);
     }
 
     // --- Helmet skill activation (G key) ---
     if (Input::isKeyPressed(SDL_SCANCODE_G) && !m_inventoryOpen &&
         m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
-        m_helmetSkillStates[0].energy = m_skillStates[0].energy;
-        m_helmetSkillStates[0].maxEnergy = m_skillStates[0].maxEnergy;
-        if (SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
-                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                      m_projectiles, m_entities, m_grid, m_localPlayer)) {
-            m_skillStates[0].energy = m_helmetSkillStates[0].energy;
-        }
+        m_helmetSkillStates[0].energy = 999.0f;
+        m_helmetSkillStates[0].maxEnergy = 999.0f;
+        SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
+                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                  m_projectiles, m_entities, m_grid, m_localPlayer);
     }
 
     // --- Shield blocking (Ctrl/Shift) ---
@@ -3488,17 +3510,41 @@ void Engine::render(f32 alpha) {
         FontSystem::drawText(sw, sh, (sw - titleW) * 0.5f, sh * 0.6f, deathTitle, {0.8f, 0.1f, 0.1f}, 4);
 
         char floorStr[48];
-        std::snprintf(floorStr, sizeof(floorStr), "Reached Floor %u", m_currentFloor);
+        std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_currentFloor);
         f32 floorW = FontSystem::textWidth(floorStr, 2);
-        FontSystem::drawText(sw, sh, (sw - floorW) * 0.5f, sh * 0.45f, floorStr, {0.7f, 0.7f, 0.7f}, 2);
+        FontSystem::drawText(sw, sh, (sw - floorW) * 0.5f, sh * 0.48f, floorStr, {0.6f, 0.6f, 0.6f}, 2);
 
-        const char* restartText = "Press ENTER to restart from last save";
-        f32 restartW = FontSystem::textWidth(restartText, 1);
-        FontSystem::drawText(sw, sh, (sw - restartW) * 0.5f, sh * 0.3f, restartText, {0.5f, 0.5f, 0.6f}, 1);
+        if (m_confirmQuit) {
+            // "Are you sure?" overlay
+            const char* confirmTxt = "Quit to menu?";
+            f32 cW = FontSystem::textWidth(confirmTxt, 2);
+            FontSystem::drawText(sw, sh, (sw - cW) * 0.5f, sh * 0.35f, confirmTxt, {1.0f, 0.8f, 0.3f}, 2);
 
-        const char* menuText = "Press ESC for main menu";
-        f32 menuW = FontSystem::textWidth(menuText, 1);
-        FontSystem::drawText(sw, sh, (sw - menuW) * 0.5f, sh * 0.22f, menuText, {0.4f, 0.4f, 0.5f}, 1);
+            f32 cy = sh * 0.26f;
+            f32 cx = static_cast<f32>(sw) * 0.5f;
+            HUD::drawKeySymbol(sw, sh, cx - 60.0f, cy, "Ent", true);
+            FontSystem::drawText(sw, sh, cx - 30.0f, cy + 4.0f, "Yes", {0.8f, 0.8f, 0.8f}, 1);
+            HUD::drawKeySymbol(sw, sh, cx + 15.0f, cy, "Esc", true);
+            FontSystem::drawText(sw, sh, cx + 43.0f, cy + 4.0f, "No", {0.8f, 0.8f, 0.8f}, 1);
+        } else {
+            // Three options with key icons
+            f32 cx = static_cast<f32>(sw) * 0.5f;
+            f32 optY = sh * 0.35f;
+
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Spc", true);
+            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Respawn at entrance",
+                                 {0.5f, 0.9f, 0.5f}, 1);
+
+            optY -= 25.0f;
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Ent", true);
+            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
+                                 {0.5f, 0.6f, 0.9f}, 1);
+
+            optY -= 25.0f;
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Esc", true);
+            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Quit to menu",
+                                 {0.7f, 0.4f, 0.4f}, 1);
+        }
 
         GLContext::swapBuffers(Window::getHandle());
         return;
@@ -4847,11 +4893,16 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             f32 skillBarY = 14.0f; // align with quickbar bottom area
 
             f32 cooldowns[4];
-            for (u32 s = 0; s < 4; s++) cooldowns[s] = m_classSkillStates[s].cooldownTimer;
+            f32 maxCooldowns[4];
+            for (u32 s = 0; s < 4; s++) {
+                cooldowns[s] = m_classSkillStates[s].cooldownTimer;
+                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, cls.skills[s]);
+                maxCooldowns[s] = sd ? sd->cooldown : 1.0f;
+            }
 
             HUD::drawClassSkillBar(sw, sh, skillBarX, skillBarY,
                                     m_activeClassSkill, m_currentFloor,
-                                    cls.skillUnlockFloor, cls.skillUpgradeFloor, cooldowns);
+                                    cls.skillUnlockFloor, cls.skillUpgradeFloor, cooldowns, maxCooldowns);
 
             // Equipment skill bar — shows active legendary equipment skills above class bar
             {
@@ -4864,7 +4915,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                                                                      m_bootSkillStates[0].activeSkill);
                     equipSlots[equipCount++] = {
                         static_cast<u8>(m_bootSkillStates[0].activeSkill),
-                        m_bootSkillStates[0].cooldownTimer,
+                        m_bootSkillStates[0].cooldownTimer, sd ? sd->cooldown : 1.0f,
                         "F", sd ? sd->name : "???", false
                     };
                 }
@@ -4874,7 +4925,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                                                                      m_helmetSkillStates[0].activeSkill);
                     equipSlots[equipCount++] = {
                         static_cast<u8>(m_helmetSkillStates[0].activeSkill),
-                        m_helmetSkillStates[0].cooldownTimer,
+                        m_helmetSkillStates[0].cooldownTimer, sd ? sd->cooldown : 1.0f,
                         "G", sd ? sd->name : "???", false
                     };
                 }
@@ -4882,7 +4933,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 if (m_armorAura != SkillId::NONE) {
                     const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_armorAura);
                     equipSlots[equipCount++] = {
-                        static_cast<u8>(m_armorAura), 0.0f,
+                        static_cast<u8>(m_armorAura), 0.0f, 0.0f,
                         "", sd ? sd->name : "???", true
                     };
                 }
@@ -4890,7 +4941,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 if (m_weaponProc != SkillId::NONE) {
                     const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_weaponProc);
                     equipSlots[equipCount++] = {
-                        static_cast<u8>(m_weaponProc), 0.0f,
+                        static_cast<u8>(m_weaponProc), 0.0f, 0.0f,
                         "", sd ? sd->name : "???", true
                     };
                 }
