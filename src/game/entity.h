@@ -79,6 +79,7 @@ struct Entity {
     u16     aiCheckIdx = 0;  // staggered LOS frame counter
     Vec3    flybyTarget = {0,0,0};  // waypoint for FLYBY state
     f32     flybyTimer  = 0.0f;     // time left in flyby maneuver
+    f32     stuckTimer  = 0.0f;     // stuck detection accumulator (friendly NPCs)
 
     // Rendering
     u8  meshId     = 0;  // index into Engine::m_meshDefs

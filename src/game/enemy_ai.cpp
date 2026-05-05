@@ -155,11 +155,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Friendly NPC AI — follows player, attacks nearest hostile enemy
         // ---------------------------------------------------------------------------
         if (isFriendly) {
-            // Stuck detection: if NPC barely moved in 0.5s, teleport to cell center
+            // Stuck detection: if NPC barely moved in 0.5s, teleport to cell center.
+            // Uses dedicated stuckTimer to avoid conflicting with flybyTimer (used by drones).
             f32 movedDist = length(e.position - e.lastSeenPos);
             if (movedDist < 0.05f) {
-                e.flybyTimer += dt;
-                if (e.flybyTimer > 0.5f) {
+                e.stuckTimer += dt;
+                if (e.stuckTimer > 0.5f) {
                     // Teleport to center of current cell (safe, validated)
                     u32 gx, gz;
                     if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
@@ -179,11 +180,11 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             }
                         }
                     }
-                    e.flybyTimer = 0.0f;
+                    e.stuckTimer = 0.0f;
                     e.lastSeenPos = e.position;
                 }
             } else {
-                e.flybyTimer = 0.0f;
+                e.stuckTimer = 0.0f;
                 e.lastSeenPos = e.position;
             }
 
@@ -304,20 +305,20 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.lastSeenPos = enemyPos;
                 }
 
-                // If ranged and no LOS, move toward last seen position instead
-                if (!e.hasTargetLOS && e.npcWeaponType == WeaponType::PROJECTILE) {
-                    Vec3 toLastSeen = e.lastSeenPos - e.position;
-                    f32 lsDist = length(toLastSeen);
-                    if (lsDist > 1.0f) {
-                        Vec3 flatDir = normalize(Vec3{toLastSeen.x, 0, toLastSeen.z});
-                        e.velocity.x = flatDir.x * npcSpeed;
-                        e.velocity.z = flatDir.z * npcSpeed;
-                        e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                // If ranged and no LOS, use flow field to navigate around walls
+                // instead of beelining toward lastSeenPos (which causes wall-hugging)
+                if (!e.hasTargetLOS &&
+                    (e.npcWeaponType == WeaponType::PROJECTILE || e.npcWeaponType == WeaponType::HITSCAN)) {
+                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                    if (lengthSq(flowDir) > 0.001f) {
+                        e.velocity.x = flowDir.x * npcSpeed;
+                        e.velocity.z = flowDir.z * npcSpeed;
+                        e.yaw = atan2f(-flowDir.x, -flowDir.z);
                     } else {
                         e.velocity = {0, 0, 0};
                     }
                     entityMoveAndSlide(e, grid, dt);
-                    snapEntityToFloor(e, grid);
+                    if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
                     inCombat = false; // suppress combat, fall through to speech
                 }
 
@@ -346,32 +347,56 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     f32 distToGrp = (grpN > 1) ? length(e.position - grpC) : 0.0f;
 
                     if (!e.hasTargetLOS) {
-                        // No line of sight — move toward the group
-                        if (grpN > 1 && distToGrp > 2.0f) {
-                            Vec3 toGrp = normalize(Vec3{grpC.x - e.position.x, 0, grpC.z - e.position.z});
-                            e.velocity.x = toGrp.x * npcSpeed;
-                            e.velocity.z = toGrp.z * npcSpeed;
-                            e.yaw = atan2f(-toGrp.x, -toGrp.z);
+                        // No LOS — reposition via flow field to find a firing angle
+                        Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                        if (lengthSq(flowDir) > 0.001f) {
+                            e.velocity.x = flowDir.x * npcSpeed * 0.8f;
+                            e.velocity.z = flowDir.z * npcSpeed * 0.8f;
+                            e.yaw = atan2f(-flowDir.x, -flowDir.z);
                         } else {
                             e.velocity = {0, 0, 0};
                         }
                     } else if (eDist < 5.0f && distToGrp < 6.0f) {
-                        // Has LOS and enemy close: kite at half speed
+                        // Has LOS and enemy close: kite, but check for wall behind
                         Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
-                        e.velocity.x = awayDir.x * npcSpeed * 0.5f;
-                        e.velocity.z = awayDir.z * npcSpeed * 0.5f;
+                        Vec3 testPos = e.position + awayDir * 0.5f;
+                        if (!entityOverlapsGrid(testPos, e.halfExtents, grid)) {
+                            e.velocity.x = awayDir.x * npcSpeed * 0.5f;
+                            e.velocity.z = awayDir.z * npcSpeed * 0.5f;
+                        } else {
+                            // Wall behind — strafe perpendicular instead
+                            Vec3 strafeDir = {awayDir.z, 0, -awayDir.x};
+                            e.velocity.x = strafeDir.x * npcSpeed * 0.5f;
+                            e.velocity.z = strafeDir.z * npcSpeed * 0.5f;
+                        }
                     } else if (eDist < 5.0f) {
-                        // Too far from group to kite — hold position
                         e.velocity = {0, 0, 0};
                     } else {
                         e.velocity = {0, 0, 0};
                     }
                 } else if (e.npcClass == NpcClass::MAGE) {
-                    // Mage: stand at range, back up if too close
-                    if (eDist < 6.0f) {
+                    // Mage: stand at range, reposition if no LOS
+                    if (!e.hasTargetLOS) {
+                        // No LOS — reposition via flow field to find a casting angle
+                        Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                        if (lengthSq(flowDir) > 0.001f) {
+                            e.velocity.x = flowDir.x * npcSpeed * 0.8f;
+                            e.velocity.z = flowDir.z * npcSpeed * 0.8f;
+                            e.yaw = atan2f(-flowDir.x, -flowDir.z);
+                        } else {
+                            e.velocity = {0, 0, 0};
+                        }
+                    } else if (eDist < 6.0f) {
+                        // Back up, but check wall behind first
                         Vec3 awayDir = normalize(Vec3{-dirToEnemy.x, 0, -dirToEnemy.z});
-                        e.velocity.x = awayDir.x * npcSpeed * 0.7f;
-                        e.velocity.z = awayDir.z * npcSpeed * 0.7f;
+                        Vec3 testPos = e.position + awayDir * 0.5f;
+                        if (!entityOverlapsGrid(testPos, e.halfExtents, grid)) {
+                            e.velocity.x = awayDir.x * npcSpeed * 0.7f;
+                            e.velocity.z = awayDir.z * npcSpeed * 0.7f;
+                        } else {
+                            // Wall behind — hold position instead of faceplanting
+                            e.velocity = {0, 0, 0};
+                        }
                     } else if (eDist > e.attackRange) {
                         Vec3 flatDir = normalize(Vec3{dirToEnemy.x, 0, dirToEnemy.z});
                         e.velocity.x = flatDir.x * npcSpeed * 0.5f;
@@ -502,67 +527,37 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 bool isCombatDrone = (e.enemyType == EnemyType::SPIDER);
 
                 if (isCombatDrone) {
-                    // Run to a point 3m ahead of the player in their look direction
-                    Vec3 aheadPos = player.position + player.forward * 3.0f;
-                    Vec3 toAhead = aheadPos - e.position;
-                    f32 aDist = length(toAhead);
-                    if (aDist > 1.5f) {
-                        Vec3 flatDir = normalize(Vec3{toAhead.x, 0, toAhead.z});
-                        e.velocity.x = flatDir.x * npcSpeed * 1.2f; // slightly faster than player
-                        e.velocity.z = flatDir.z * npcSpeed * 1.2f;
-                        e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                    // Combat drone: follow flow field toward exit at 1.2x speed.
+                    // When enemies are nearby the inCombat block handles rushing them.
+                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                    if (lengthSq(flowDir) > 0.001f) {
+                        e.velocity.x = flowDir.x * npcSpeed * 1.2f;
+                        e.velocity.z = flowDir.z * npcSpeed * 1.2f;
+                        e.yaw = atan2f(-flowDir.x, -flowDir.z);
                         entityMoveAndSlide(e, grid, dt);
                     } else {
                         e.velocity = {0, 0, 0};
                     }
                 } else {
-                    // Swarm drones: autonomous exploration with vertical bobbing.
-                    // Pick random walkable cells as waypoints and fly toward them,
-                    // revealing fog of war as they go.
-
-                    // Pick a new waypoint when timer expires or drone reaches current one
-                    e.flybyTimer -= dt;
-                    Vec3 toWP = e.flybyTarget - e.position;
-                    f32 wpDist = sqrtf(toWP.x * toWP.x + toWP.z * toWP.z);
-
-                    if (e.flybyTimer <= 0.0f || wpDist < 1.0f) {
-                        // Select a random CELL_FLOOR cell within 10 cells of current pos
-                        u32 curGx, curGz;
-                        if (LevelGridSystem::worldToGrid(grid, e.position, curGx, curGz)) {
-                            bool found = false;
-                            for (u32 attempt = 0; attempt < 5; attempt++) {
-                                s32 dx = (std::rand() % 21) - 10; // -10 to +10
-                                s32 dz = (std::rand() % 21) - 10;
-                                s32 nx = static_cast<s32>(curGx) + dx;
-                                s32 nz = static_cast<s32>(curGz) + dz;
-                                if (nx < 1 || nz < 1) continue;
-                                u32 ux = static_cast<u32>(nx);
-                                u32 uz = static_cast<u32>(nz);
-                                if (!LevelGridSystem::isInBounds(grid, ux, uz)) continue;
-                                if (LevelGridSystem::isSolid(grid, ux, uz)) continue;
-                                e.flybyTarget = LevelGridSystem::gridToWorld(grid, ux, uz);
-                                e.flybyTarget.y = e.position.y; // keep current altitude
-                                found = true;
-                                break;
-                            }
-                            if (!found) {
-                                // Fallback: stay at current cell center
-                                e.flybyTarget = LevelGridSystem::gridToWorld(grid, curGx, curGz);
-                                e.flybyTarget.y = e.position.y;
-                            }
-                        }
-                        e.flybyTimer = 6.0f + (std::rand() % 5); // 6-10s before new waypoint
-                    }
-
-                    // Move toward waypoint
-                    if (wpDist > 1.0f) {
-                        Vec3 flatDir = normalize(Vec3{toWP.x, 0, toWP.z});
-                        e.velocity.x = flatDir.x * npcSpeed;
-                        e.velocity.z = flatDir.z * npcSpeed;
-                        e.yaw = atan2f(-flatDir.x, -flatDir.z);
+                    // Swarm drones: follow flow field toward exit with lateral drift
+                    // for exploration spread. Reveals fog of war as they go.
+                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                    if (lengthSq(flowDir) > 0.001f) {
+                        // Periodic lateral drift so drones spread out instead of
+                        // following the exact same path. Each drone gets a unique
+                        // phase from its pool index.
+                        f32 drift = sinf(e.animTimer * 1.3f + static_cast<f32>(i) * 2.0f) * 0.4f;
+                        Vec3 driftedDir = {
+                            flowDir.x + flowDir.z * drift,
+                            0.0f,
+                            flowDir.z - flowDir.x * drift
+                        };
+                        driftedDir = normalize(driftedDir);
+                        e.velocity.x = driftedDir.x * npcSpeed;
+                        e.velocity.z = driftedDir.z * npcSpeed;
+                        e.yaw = atan2f(-driftedDir.x, -driftedDir.z);
                     } else {
-                        e.velocity.x = 0.0f;
-                        e.velocity.z = 0.0f;
+                        e.velocity = {0, 0, 0};
                     }
 
                     // Vertical bobbing — smooth sine wave for natural flight
