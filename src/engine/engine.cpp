@@ -4503,6 +4503,47 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
                 doorStr, {0.3f, 1.0f, 0.4f}, 1);
         }
     }
+
+    // Item pickup prompt — show item name in rarity color when aiming at a nearby item
+    {
+        f32 bestDot = 0.85f; // minimum alignment (must be roughly looking at it)
+        f32 bestDist = 3.5f; // max pickup range
+        const WorldItem* bestItem = nullptr;
+        const ItemDef* bestDef = nullptr;
+
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        Vec3 fwd = m_localPlayer.forward;
+
+        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+            const WorldItem& wi = m_worldItems.items[i];
+            if (!wi.active) continue;
+            if (isGlobe(wi.item)) continue;
+
+            Vec3 toItem = wi.position - eyePos;
+            f32 dist = length(toItem);
+            if (dist > bestDist || dist < 0.1f) continue;
+
+            Vec3 dir = toItem * (1.0f / dist);
+            f32 dot = fwd.x * dir.x + fwd.y * dir.y + fwd.z * dir.z;
+            if (dot > bestDot && wi.item.defId < m_itemDefCount) {
+                bestDot = dot;
+                bestDist = dist;
+                bestItem = &wi;
+                bestDef = &m_itemDefs[wi.item.defId];
+            }
+        }
+
+        if (bestItem && bestDef) {
+            Vec3 rColor = rarityColor(bestItem->item.rarity);
+            char pickupStr[64];
+            std::snprintf(pickupStr, sizeof(pickupStr), "[E] %s", bestDef->name);
+            f32 textW = FontSystem::textWidth(pickupStr, 1);
+            FontSystem::drawText(sw, sh,
+                (static_cast<f32>(sw) - textW) * 0.5f,
+                static_cast<f32>(sh) * 0.35f,
+                pickupStr, rColor, 1);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
