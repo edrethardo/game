@@ -848,7 +848,7 @@ void Engine::applyNpcEquipmentStats(Entity& e, const NpcEquipment& equip) {
         // Base damage from rolled item + flat bonus, scaled down so NPCs
         // are support characters, not DPS machines that shred bosses
         f32 rawDmg = wpn.damage + equip.bonusDamageFlat;
-        e.damage = rawDmg * (1.0f + equip.bonusDamagePct / 100.0f) * 0.15f;
+        e.damage = rawDmg * (1.0f + equip.bonusDamagePct / 100.0f) * 0.08f;
         e.npcWeaponType = def.weaponType;
 
         // Attack range depends on weapon type
@@ -888,7 +888,7 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
     f32 detRange = 15.0f;
     f32 atkRange = 2.5f;
     f32 atkCool = 0.8f;
-    f32 baseDmg = 10.0f;
+    f32 baseDmg = 5.0f;
     Vec3 halfExt = {0.35f, 0.9f, 0.35f};  // slightly smaller so NPCs fit through 1-cell corridors
     u8 meshId = m_meshIdHuman;
     const char* matName = "human_skin";
@@ -900,8 +900,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             baseHp = GameConst::NPC_HEALTH_CLERIC;
             speed = 3.0f;
             atkRange = 2.5f;
-            atkCool = 1.0f;
-            baseDmg = 2.0f;
+            atkCool = 3.0f;    // melee: 1/3 attack speed
+            baseDmg = 1.0f;
             meshId = m_meshIdCleric;
             matName = "cleric_skin";
             weaponMesh = m_meshIdMace;
@@ -912,8 +912,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 3.5f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 12.0f;
-            atkCool = 1.5f;
-            baseDmg = 1.0f;
+            atkCool = 7.5f;    // ranged: 1/5 attack speed
+            baseDmg = 0.5f;
             meshId = m_meshIdArcher;
             matName = "archer_skin";
             weaponMesh = m_meshIdBow;
@@ -923,8 +923,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             baseHp = GameConst::NPC_HEALTH_MAGE;
             speed = 2.8f;
             atkRange = 14.0f;
-            atkCool = 1.8f;
-            baseDmg = 1.5f;
+            atkCool = 9.0f;    // ranged: 1/5 attack speed
+            baseDmg = 0.8f;
             meshId = m_meshIdMage;
             matName = "mage_skin";
             weaponMesh = m_meshIdStaff;
@@ -935,8 +935,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 4.0f;
             halfExt = {0.35f, 0.85f, 0.35f};
             atkRange = 10.0f;
-            atkCool = 1.0f;
-            baseDmg = 0.8f;
+            atkCool = 5.0f;    // ranged: 1/5 attack speed
+            baseDmg = 0.4f;
             meshId = m_meshIdRogue;
             matName = "rogue_skin";
             weaponMesh = m_meshIdThrowingKnife;
@@ -947,8 +947,8 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
             speed = 2.5f;
             halfExt = {0.45f, 0.95f, 0.45f};
             atkRange = 2.5f;
-            atkCool = 1.0f;
-            baseDmg = 2.5f;
+            atkCool = 3.0f;    // melee: 1/3 attack speed
+            baseDmg = 1.2f;
             meshId = m_meshIdPaladin;
             matName = "paladin_skin";
             weaponMesh = m_meshIdMace;
