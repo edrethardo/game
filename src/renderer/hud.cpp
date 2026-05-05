@@ -320,6 +320,139 @@ void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
     flushHUD(sw, sh);
 }
 
+void HUD::drawKeySymbol(u32 sw, u32 sh, f32 x, f32 y,
+                          const char* label, bool highlighted)
+{
+    f32 kw = 18.0f, kh = 18.0f;
+
+    // Key background — darker when not highlighted
+    Vec3 bg = highlighted ? Vec3{0.2f, 0.22f, 0.28f} : Vec3{0.12f, 0.12f, 0.16f};
+    for (f32 fy = 1; fy < kh - 1; fy += 1.0f) {
+        pushLine(x + 1, y + fy, x + kw - 1, y + fy, bg);
+    }
+
+    // Key border — raised edge look (lighter top/left, darker bottom/right)
+    Vec3 hi = highlighted ? Vec3{0.8f, 0.85f, 0.9f} : Vec3{0.45f, 0.45f, 0.5f};
+    Vec3 lo = highlighted ? Vec3{0.4f, 0.42f, 0.48f} : Vec3{0.25f, 0.25f, 0.3f};
+    pushLine(x, y + kh, x + kw, y + kh, hi);       // top
+    pushLine(x, y, x, y + kh, hi);                   // left
+    pushLine(x + kw, y, x + kw, y + kh, lo);         // right
+    pushLine(x, y, x + kw, y, lo);                    // bottom
+
+    flushHUD(sw, sh);
+
+    // Label text centered
+    f32 tw = FontSystem::textWidth(label, 1);
+    Vec3 tc = highlighted ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.7f, 0.7f, 0.75f};
+    FontSystem::drawText(sw, sh, x + (kw - tw) * 0.5f, y + 5.0f, label, tc, 1);
+}
+
+void HUD::drawMouseButton(u32 sw, u32 sh, f32 x, f32 y,
+                            u8 button, bool highlighted)
+{
+    f32 mw = 16.0f, mh = 22.0f;
+
+    // Mouse body outline
+    Vec3 outline = highlighted ? Vec3{0.6f, 0.6f, 0.7f} : Vec3{0.35f, 0.35f, 0.4f};
+
+    // Body fill
+    Vec3 bodyBg = {0.1f, 0.1f, 0.14f};
+    for (f32 fy = 2; fy < mh - 2; fy += 1.0f) {
+        pushLine(x + 2, y + fy, x + mw - 2, y + fy, bodyBg);
+    }
+
+    // Outline — rounded-ish mouse shape
+    pushLine(x + 2, y, x + mw - 2, y, outline);               // bottom
+    pushLine(x + 2, y + mh, x + mw - 2, y + mh, outline);     // top (rounded)
+    pushLine(x, y + 2, x, y + mh - 2, outline);                 // left
+    pushLine(x + mw, y + 2, x + mw, y + mh - 2, outline);      // right
+    // Round corners
+    pushLine(x + 1, y + 1, x + 2, y, outline);
+    pushLine(x + mw - 1, y + 1, x + mw - 2, y, outline);
+    pushLine(x + 1, y + mh - 1, x + 2, y + mh, outline);
+    pushLine(x + mw - 1, y + mh - 1, x + mw - 2, y + mh, outline);
+
+    // Divider line between buttons (at 60% height)
+    f32 divY = y + mh * 0.6f;
+    pushLine(x + 2, divY, x + mw - 2, divY, outline);
+    // Center divider between left and right buttons
+    f32 midX = x + mw * 0.5f;
+    pushLine(midX, divY, midX, y + mh - 2, outline);
+
+    // Highlight the active button
+    Vec3 activeCol = highlighted ? Vec3{0.4f, 0.9f, 0.5f} : Vec3{0.3f, 0.6f, 0.35f};
+    if (button == 0) {
+        // Left button — left half above divider
+        for (f32 fy = divY + 1; fy < y + mh - 2; fy += 1.0f)
+            pushLine(x + 2, fy, midX - 1, fy, activeCol);
+    } else if (button == 1) {
+        // Right button — right half above divider
+        for (f32 fy = divY + 1; fy < y + mh - 2; fy += 1.0f)
+            pushLine(midX + 1, fy, x + mw - 2, fy, activeCol);
+    } else if (button == 2) {
+        // Middle — small dot between buttons at the divider
+        pushLine(midX - 1, divY - 2, midX + 1, divY - 2, activeCol);
+        pushLine(midX - 1, divY - 1, midX + 1, divY - 1, activeCol);
+    }
+
+    // Scroll wheel indicator (small notch at top-center)
+    pushLine(midX, y + mh - 4, midX, y + mh - 2, outline);
+
+    flushHUD(sw, sh);
+}
+
+void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
+                              u8 activeSlot, u32 currentFloor,
+                              const u8* unlockFloors, const u8* upgradeFloors,
+                              const f32* cooldownTimers)
+{
+    f32 slotW = 32.0f, slotH = 32.0f, gap = 3.0f;
+
+    for (u8 s = 0; s < 4; s++) {
+        f32 sx = x + s * (slotW + gap);
+        bool unlocked = (currentFloor >= unlockFloors[s]);
+        bool selected = (s == activeSlot);
+        bool upgraded = (currentFloor >= upgradeFloors[s]);
+
+        // Background fill
+        Vec3 bgCol = unlocked ? Vec3{0.12f, 0.12f, 0.18f} : Vec3{0.06f, 0.06f, 0.08f};
+        if (selected && unlocked) bgCol = {0.16f, 0.2f, 0.3f};
+        for (f32 fy = 0; fy < slotH; fy += 1.0f) {
+            pushLine(sx, y + fy, sx + slotW, y + fy, bgCol);
+        }
+
+        // Border
+        Vec3 borderCol = selected ? Vec3{0.4f, 0.9f, 0.5f} : Vec3{0.25f, 0.25f, 0.35f};
+        if (!unlocked) borderCol = {0.12f, 0.12f, 0.18f};
+        if (upgraded) borderCol = {0.9f, 0.8f, 0.3f};
+        pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
+
+        // Cooldown overlay
+        if (unlocked && cooldownTimers[s] > 0.0f) {
+            f32 cdFrac = cooldownTimers[s] / 2.0f;
+            if (cdFrac > 1.0f) cdFrac = 1.0f;
+            f32 cdH = slotH * cdFrac;
+            Vec3 cdCol = {0.08f, 0.08f, 0.12f};
+            for (f32 fy = 0; fy < cdH; fy += 1.0f) {
+                pushLine(sx + 1, y + fy + 1, sx + slotW - 1, y + fy + 1, cdCol);
+            }
+        }
+
+        flushHUD(sw, sh);
+
+        // Key symbol
+        char num[2] = {static_cast<char>('1' + s), 0};
+        drawKeySymbol(sw, sh, sx + 7.0f, y + 8.0f, num, selected && unlocked);
+
+        // Locked text
+        if (!unlocked) {
+            char lockTxt[8];
+            std::snprintf(lockTxt, sizeof(lockTxt), "F%u", unlockFloors[s]);
+            FontSystem::drawText(sw, sh, sx + 6.0f, y + 2.0f, lockTxt, {0.35f, 0.25f, 0.25f}, 1);
+        }
+    }
+}
+
 void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
                               const char* name, Vec3 iconColor,
                               f32 healthFrac, u32 count, u8 iconMatId)

@@ -359,7 +359,7 @@ struct WorldItemPool {
 
 // ---- Quickbar (8 assignable hotbar slots, keys 1-8) ----
 
-static constexpr u32 QUICKBAR_SLOTS = 8;
+static constexpr u32 QUICKBAR_SLOTS = 4;
 
 struct QuickbarSlot {
     enum Type : u8 { EMPTY, BACKPACK_REF, EQUIPPED_REF };

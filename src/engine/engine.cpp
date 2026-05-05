@@ -614,7 +614,17 @@ void Engine::init() {
                 LOG_WARN("Combat Drone spawn FAILED (pool full? h.index=%u)", h.index);
             }
         } else if (type == 1) {
-            // Swarm drone — tiny flying metal bat body, weak projectile
+            // Swarm drone — limit to 2 active (3 after floor 20 upgrade)
+            u32 swarmCount = 0;
+            u32 swarmMax = (s_engine->m_currentFloor >= 20) ? 3 : 2;
+            for (u32 a = 0; a < pool.activeCount; a++) {
+                u32 si = pool.activeList[a];
+                Entity& se = pool.entities[si];
+                if ((se.flags & ENT_UNTARGETABLE) && (se.flags & ENT_FRIENDLY) && !(se.flags & ENT_DEAD))
+                    swarmCount++;
+            }
+            if (swarmCount >= swarmMax) return; // at capacity
+
             EntityHandle h = EntitySystem::spawn(pool, position,
                 {0.15f, 0.1f, 0.15f}, true, 9999.0f, 5.0f, 12.0f, 8.0f, 1.5f, 3.0f);
             Entity* e = handleGet(pool, h);
@@ -662,9 +672,15 @@ void Engine::init() {
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
 
+static constexpr u32 SAVE_VERSION = 2; // bump when save format changes
+
 void Engine::saveGame() {
     FILE* f = std::fopen("save.dat", "wb");
     if (!f) { LOG_WARN("Failed to save game"); return; }
+
+    // Version header
+    u32 ver = SAVE_VERSION;
+    std::fwrite(&ver, sizeof(u32), 1, f);
 
     // Header: floor + seed
     std::fwrite(&m_savedFloor, sizeof(u32), 1, f);
@@ -697,6 +713,14 @@ void Engine::saveGame() {
 bool Engine::loadGame() {
     FILE* f = std::fopen("save.dat", "rb");
     if (!f) return false;
+
+    // Check save version — reject incompatible saves
+    u32 ver = 0;
+    if (std::fread(&ver, sizeof(u32), 1, f) != 1 || ver != SAVE_VERSION) {
+        LOG_WARN("Save file version mismatch (got %u, expected %u) — starting fresh", ver, SAVE_VERSION);
+        std::fclose(f);
+        return false;
+    }
 
     bool ok = true;
     ok = ok && std::fread(&m_savedFloor, sizeof(u32), 1, f) == 1;
@@ -2081,13 +2105,8 @@ void Engine::singleplayerUpdate(f32 dt) {
         }
     }
 
-    // Quickbar slot switching (keys 1-8 or mouse wheel)
+    // Quickbar slot switching (mouse wheel only — keys 1-4 are for class skills)
     WeaponState& ws = m_players[0].weaponState;
-    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
-        if (Input::isKeyPressed(SDL_SCANCODE_1 + i)) {
-            m_quickbars[0].activeSlot = static_cast<u8>(i);
-        }
-    }
     s32 wheel = Input::getMouseWheelDelta();
     if (wheel != 0) {
         s32 slot = static_cast<s32>(m_quickbars[0].activeSlot);
@@ -4591,59 +4610,23 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         // Energy bar
         HUD::drawEnergyBar(sw, sh, m_skillStates[0].energy, m_skillStates[0].maxEnergy);
 
-        // Class skill bar — 4 slots at bottom-center
+        // Class skill bar — 4 slots to the LEFT of the quickbar
         {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
-            f32 slotW = 36.0f, slotH = 36.0f, gap = 4.0f;
-            f32 totalW = 4 * slotW + 3 * gap;
-            f32 barX = (static_cast<f32>(sw) - totalW) * 0.5f;
-            f32 barY = 10.0f;
+            // Quickbar is 4 slots × 40px + 3 gaps × 4px = 172px, centered
+            f32 qbTotalW = QUICKBAR_SLOTS * 40.0f + (QUICKBAR_SLOTS - 1) * 4.0f;
+            f32 qbX = (static_cast<f32>(sw) - qbTotalW) * 0.5f;
+            // Skill bar goes to the left of the quickbar with a small gap
+            f32 skillBarW = 4 * 32.0f + 3 * 3.0f; // 4 slots × 32px + 3 gaps
+            f32 skillBarX = qbX - skillBarW - 12.0f;
+            f32 skillBarY = 14.0f; // align with quickbar bottom area
 
-            for (u8 s = 0; s < 4; s++) {
-                f32 x = barX + s * (slotW + gap);
-                bool unlocked = (m_currentFloor >= cls.skillUnlockFloor[s]);
-                bool selected = (s == m_activeClassSkill);
-                bool upgraded = (m_currentFloor >= cls.skillUpgradeFloor[s]);
+            f32 cooldowns[4];
+            for (u32 s = 0; s < 4; s++) cooldowns[s] = m_classSkillStates[s].cooldownTimer;
 
-                // Background
-                Vec3 bgCol = unlocked ? Vec3{0.15f, 0.15f, 0.2f} : Vec3{0.08f, 0.08f, 0.1f};
-                if (selected && unlocked) bgCol = {0.2f, 0.25f, 0.35f};
-                for (f32 fy = 0; fy < slotH; fy += 1.0f) {
-                    DebugDraw::line({x, barY + fy, 0}, {x + slotW, barY + fy, 0}, bgCol);
-                }
-
-                // Border
-                Vec3 borderCol = selected ? Vec3{0.4f, 0.9f, 0.5f} : Vec3{0.3f, 0.3f, 0.4f};
-                if (!unlocked) borderCol = {0.15f, 0.15f, 0.2f};
-                if (upgraded) borderCol = {0.9f, 0.8f, 0.3f}; // gold for upgraded
-                DebugDraw::line({x, barY, 0}, {x + slotW, barY, 0}, borderCol);
-                DebugDraw::line({x + slotW, barY, 0}, {x + slotW, barY + slotH, 0}, borderCol);
-                DebugDraw::line({x + slotW, barY + slotH, 0}, {x, barY + slotH, 0}, borderCol);
-                DebugDraw::line({x, barY + slotH, 0}, {x, barY, 0}, borderCol);
-
-                // Slot number
-                char num[2] = {static_cast<char>('1' + s), 0};
-                Vec3 numCol = unlocked ? Vec3{0.8f, 0.8f, 0.8f} : Vec3{0.3f, 0.3f, 0.3f};
-                FontSystem::drawText(sw, sh, x + 2.0f, barY + slotH - 12.0f, num, numCol, 1);
-
-                // Cooldown overlay
-                if (unlocked && m_classSkillStates[s].cooldownTimer > 0.0f) {
-                    f32 cdFrac = m_classSkillStates[s].cooldownTimer / 2.0f; // rough normalization
-                    if (cdFrac > 1.0f) cdFrac = 1.0f;
-                    f32 cdH = slotH * cdFrac;
-                    Vec3 cdCol = {0.1f, 0.1f, 0.15f};
-                    for (f32 fy = 0; fy < cdH; fy += 1.0f) {
-                        DebugDraw::line({x + 1, barY + fy + 1, 0}, {x + slotW - 1, barY + fy + 1, 0}, cdCol);
-                    }
-                }
-
-                // "LOCKED" text for unavailable skills
-                if (!unlocked) {
-                    char lockTxt[8];
-                    std::snprintf(lockTxt, sizeof(lockTxt), "F%u", cls.skillUnlockFloor[s]);
-                    FontSystem::drawText(sw, sh, x + 8.0f, barY + 12.0f, lockTxt, {0.4f, 0.3f, 0.3f}, 1);
-                }
-            }
+            HUD::drawClassSkillBar(sw, sh, skillBarX, skillBarY,
+                                    m_activeClassSkill, m_currentFloor,
+                                    cls.skillUnlockFloor, cls.skillUpgradeFloor, cooldowns);
         }
 
         // Active skill display — right side of screen, shows current right-click skill name
@@ -4669,8 +4652,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             DebugDraw::line({rmbX + 150, rmbY + 30, 0}, {rmbX, rmbY + 30, 0}, bCol);
             DebugDraw::line({rmbX, rmbY + 30, 0}, {rmbX, rmbY, 0}, bCol);
 
-            // "RMB" label
-            FontSystem::drawText(sw, sh, rmbX + 4, rmbY + 17, "RMB", {0.5f, 0.5f, 0.6f}, 1);
+            // Mouse right-click icon
+            bool skillReady = (m_classSkillStates[slot].cooldownTimer <= 0.0f && unlocked);
+            HUD::drawMouseButton(sw, sh, rmbX + 3, rmbY + 2, 1, skillReady);
 
             // Skill name
             const char* skillName = sd ? sd->name : "???";

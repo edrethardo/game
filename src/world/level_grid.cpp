@@ -6,6 +6,9 @@
 
 void LevelGridSystem::init(LevelGrid& grid, u32 width, u32 depth, f32 cellSize) {
     ENGINE_ASSERT(width > 0 && depth > 0, "Grid dimensions must be > 0");
+    // Free previous allocations if re-initializing (floor descent)
+    if (grid.cells)   { std::free(grid.cells);   grid.cells   = nullptr; }
+    if (grid.flowDir) { std::free(grid.flowDir); grid.flowDir = nullptr; }
     grid.width    = width;
     grid.depth    = depth;
     grid.cellSize = cellSize;

@@ -47,6 +47,21 @@ namespace HUD {
     // Energy bar (blue bar below health bar)
     void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
 
+    // Keyboard key symbol — small key-shaped box with label centered inside
+    void drawKeySymbol(u32 sw, u32 sh, f32 x, f32 y,
+                        const char* label, bool highlighted);
+
+    // Class skill bar — 4 skill slots with key icons, selection, cooldown
+    void drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
+                            u8 activeSlot, u32 currentFloor,
+                            const u8* unlockFloors, const u8* upgradeFloors,
+                            const f32* cooldownTimers);
+
+    // Mouse button symbol — mouse outline with specified button highlighted
+    // button: 0=left, 1=right, 2=middle
+    void drawMouseButton(u32 sw, u32 sh, f32 x, f32 y,
+                          u8 button, bool highlighted);
+
     // Summon portrait — icon + name + optional health bar + optional count.
     // healthFrac < 0 means no health bar. count <= 1 means no count shown.
     // iconMatId: material ID for the portrait texture (0 = use colored square fallback).
