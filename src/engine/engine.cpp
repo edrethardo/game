@@ -1464,41 +1464,38 @@ void Engine::startGame() {
         struct PropDef { u8 meshId; u8 matId; Vec3 halfExt; f32 yOff; bool wallOnly; };
 
         // Build tier-specific prop lists
+        // Cages removed — too visually noisy.  Webs are wallOnly with high Y
+        // so they stick to the upper part of walls, not the floor.
+        // Bones use tiny halfExtents (essentially nonblocking floor scatter).
+        // Shackles and cages removed — too visually noisy / blocking.
         PropDef dungeonProps[] = {
-            {mBarrel,   matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
-            {mShackles, matIron, {0.15f, 0.40f, 0.05f}, 0.40f, true},
-            {mCage,     matIron, {0.40f, 0.75f, 0.40f}, 0.75f, true},
-            {mBones,    matBone, {0.15f, 0.06f, 0.15f}, 0.06f, false},
+            {mBarrel, matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
+            {mBones,  matBone, {0.01f, 0.01f, 0.01f}, 0.06f, false},
         };
         PropDef catacombProps[] = {
-            {mBones,    matBone,    {0.15f, 0.06f, 0.15f}, 0.06f, false},
-            {mShackles, matIron,    {0.15f, 0.40f, 0.05f}, 0.40f, true},
-            {mBrazier,  matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
+            {mBones,   matBone,    {0.01f, 0.01f, 0.01f}, 0.06f, false},
+            {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
         };
         PropDef cavernProps[] = {
-            {mWeb,    matWeb,  {0.50f, 0.02f, 0.50f}, 1.80f, false},  // webs near ceiling
-            {mBones,  matBone, {0.15f, 0.06f, 0.15f}, 0.06f, false},
+            {mWeb,    matWeb,  {0.50f, 0.02f, 0.50f}, 2.2f, true},
+            {mBones,  matBone, {0.01f, 0.01f, 0.01f}, 0.06f, false},
             {mBarrel, matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
         };
         PropDef hellforgeProps[] = {
-            {mBrazier,  matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
-            {mCage,     matIron,    {0.40f, 0.75f, 0.40f}, 0.75f, true},
-            {mShackles, matIron,    {0.15f, 0.40f, 0.05f}, 0.40f, true},
-            {mBones,    matBone,    {0.15f, 0.06f, 0.15f}, 0.06f, false},
+            {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
+            {mBones,   matBone,    {0.01f, 0.01f, 0.01f}, 0.06f, false},
         };
         PropDef voidProps[] = {
-            {mBones,   matBone,    {0.15f, 0.06f, 0.15f}, 0.06f, false},
-            {mCage,    matIron,    {0.40f, 0.75f, 0.40f}, 0.75f, true},
+            {mBones,   matBone,    {0.01f, 0.01f, 0.01f}, 0.06f, false},
             {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
         };
 
-        // Select the right prop list for the current tier
         const PropDef* props = dungeonProps;
-        u32 propCount = 4;
-        if (m_currentFloor >= 41)      { props = voidProps;      propCount = 3; }
-        else if (m_currentFloor >= 31) { props = hellforgeProps;  propCount = 4; }
+        u32 propCount = 2;
+        if (m_currentFloor >= 41)      { props = voidProps;      propCount = 2; }
+        else if (m_currentFloor >= 31) { props = hellforgeProps;  propCount = 2; }
         else if (m_currentFloor >= 21) { props = cavernProps;     propCount = 3; }
-        else if (m_currentFloor >= 11) { props = catacombProps;   propCount = 3; }
+        else if (m_currentFloor >= 11) { props = catacombProps;   propCount = 2; }
 
         u32 decoCount = 0;
         for (u32 r = 1; r < dungeon.roomCount; r++) {
