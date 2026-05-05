@@ -49,10 +49,15 @@ bool GLContext::init(SDL_Window* window) {
     SDL_GL_SetSwapInterval(1);
 
 #ifdef ENGINE_DEBUG
-    glEnable(GL_DEBUG_OUTPUT);
-    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-    glDebugMessageCallback(glDebugCallback, nullptr);
-    LOG_INFO("GL debug output enabled");
+    // glDebugMessageCallback requires GL 4.3; macOS caps at 4.1, so guard against null
+    if (glDebugMessageCallback) {
+        glEnable(GL_DEBUG_OUTPUT);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        glDebugMessageCallback(glDebugCallback, nullptr);
+        LOG_INFO("GL debug output enabled");
+    } else {
+        LOG_INFO("GL debug output not available (GL < 4.3)");
+    }
 #endif
 
     return true;
