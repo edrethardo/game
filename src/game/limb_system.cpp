@@ -86,24 +86,12 @@ static const LimbConfig s_batConfig = {
     }
 };
 
-// Spider: 10 limbs (8 legs + 2 mandibles)
-// Limb indices: 0-7 = legs (radial), 8=L_mandible, 9=R_mandible
+// Spider: legs are static in body OBJ, only mandibles are animated limbs
 static const LimbConfig s_spiderConfig = {
-    10,
+    2,
     {
-        // 8 legs arranged around body at 45-degree intervals
-        // Front-right, front-left, mid-right, mid-left, etc.
-        {{ 0.35f, 0.08f,  0.35f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, false},  // leg 0 FR
-        {{-0.35f, 0.08f,  0.35f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, true},   // leg 1 FL
-        {{ 0.45f, 0.08f,  0.10f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, false},  // leg 2 MR
-        {{-0.45f, 0.08f,  0.10f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, true},   // leg 3 ML
-        {{ 0.45f, 0.08f, -0.10f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, false},  // leg 4 BR-mid
-        {{-0.45f, 0.08f, -0.10f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, true},   // leg 5 BL-mid
-        {{ 0.35f, 0.08f, -0.35f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, false},  // leg 6 BR
-        {{-0.35f, 0.08f, -0.35f}, {0.03f, 0.22f, 0.03f}, 0.3f, 0, true},   // leg 7 BL
-        // Mandibles
-        {{ 0.06f, 0.05f,  0.45f}, {0.04f, 0.05f, 0.02f}, 0.0f, 1, false},  // left mandible (Y-axis)
-        {{-0.06f, 0.05f,  0.45f}, {0.04f, 0.05f, 0.02f}, 0.0f, 1, true},   // right mandible
+        {{ 0.10f, 0.08f, -0.85f}, {0.04f, 0.05f, 0.02f}, 0.0f, 1, false},
+        {{-0.10f, 0.08f, -0.85f}, {0.04f, 0.05f, 0.02f}, 0.0f, 1, true},
     }
 };
 
@@ -146,21 +134,23 @@ void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount) {
              6u, s_armMeshId, s_legMeshId, s_spiderLegMeshId, s_mandibleMeshId, s_wingMeshId, s_clawMeshId);
 }
 
-void LimbSystem::setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u8 butcherLegId, u8 batFootId) {
-    if (armId > 0)        s_armMeshId = armId;
-    if (legId > 0)        s_legMeshId = legId;
-    if (wingId > 0)       s_wingMeshId = wingId;
-    if (butcherArmId > 0) s_butcherArmMeshId = butcherArmId;
-    if (butcherLegId > 0) s_butcherLegMeshId = butcherLegId;
-    if (batFootId > 0)    s_clawMeshId = batFootId;
-    LOG_INFO("LimbSystem: OBJ overrides arm=%u leg=%u wing=%u bArm=%u bLeg=%u claw=%u",
-             s_armMeshId, s_legMeshId, s_wingMeshId, s_butcherArmMeshId, s_butcherLegMeshId, s_clawMeshId);
+void LimbSystem::setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u8 butcherLegId, u8 batFootId, u8 spiderLegPairId) {
+    if (armId > 0)           s_armMeshId = armId;
+    if (legId > 0)           s_legMeshId = legId;
+    if (wingId > 0)          s_wingMeshId = wingId;
+    if (butcherArmId > 0)    s_butcherArmMeshId = butcherArmId;
+    if (butcherLegId > 0)    s_butcherLegMeshId = butcherLegId;
+    if (batFootId > 0)       s_clawMeshId = batFootId;
+    if (spiderLegPairId > 0) s_spiderLegMeshId = spiderLegPairId;
+    LOG_INFO("LimbSystem: OBJ overrides arm=%u leg=%u wing=%u bArm=%u bLeg=%u claw=%u spider=%u",
+             s_armMeshId, s_legMeshId, s_wingMeshId, s_butcherArmMeshId, s_butcherLegMeshId, s_clawMeshId, s_spiderLegMeshId);
 }
 
 bool LimbSystem::isObjLimbMesh(u8 meshId) {
     return meshId == s_armMeshId || meshId == s_legMeshId ||
            meshId == s_wingMeshId || meshId == s_butcherArmMeshId ||
-           meshId == s_butcherLegMeshId || meshId == s_clawMeshId;
+           meshId == s_butcherLegMeshId || meshId == s_clawMeshId ||
+           meshId == s_spiderLegMeshId;
 }
 
 // ============================================================
@@ -190,8 +180,8 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
             // 0-1 = wings, 2-3 = claws
             return (limbIdx < 2) ? s_wingMeshId : s_clawMeshId;
         case EnemyType::SPIDER:
-            // 0-7 = legs, 8-9 = mandibles
-            return (limbIdx < 8) ? s_spiderLegMeshId : s_mandibleMeshId;
+            // 0-1 = mandibles only (legs are in body OBJ)
+            return s_mandibleMeshId;
         default:
             return 0;
     }
@@ -341,21 +331,13 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
         }
 
         case EnemyType::SPIDER: {
-            if (limbIdx < 8) {
-                // Legs: alternating gait with per-leg phase offset (8 legs = π/4 each)
-                f32 walkPhase = e.animTimer * 10.0f;
-                f32 phaseOff = static_cast<f32>(limbIdx) * (3.14159f / 4.0f);
-                // +0.3 offset keeps legs spread outward at rest (added to restAngle in LimbDef)
-                return sinf(walkPhase + phaseOff) * 0.5f * speed01 + 0.3f;
-            } else {
-                // Mandibles: idle chew cycle, rapid snapping on attack
-                f32 angle = sinf(e.animTimer * 4.0f) * 0.15f;
-                if (e.attackAnimT > 0.0f) {
-                    f32 t = e.attackAnimT / 0.3f;
-                    angle = 0.5f * sinf(t * 3.14159f * 3.0f); // rapid triple-snap
-                }
-                return angle;
+            // Mandibles only: gentle idle chew, rapid snap on attack
+            f32 angle = sinf(e.animTimer * 3.0f) * 0.12f;
+            if (e.attackAnimT > 0.0f) {
+                f32 t = e.attackAnimT / 0.3f;
+                angle = 0.4f * sinf(t * 3.14159f * 3.0f);
             }
+            return angle;
         }
 
         default:

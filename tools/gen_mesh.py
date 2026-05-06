@@ -374,80 +374,71 @@ def gen_humanoid(height=1.8):
 
 def gen_spider(radius=0.6):
     """Barony-style chunky voxel spider. Fat body, fangs, jointed legs.
-
-    Origin at center-bottom.
-    """
+    Legs are part of the body mesh (static). Only mandibles are animated via limb system.
+    Origin at center-bottom."""
     mb = MeshBuilder()
-    vs = radius / 5.0  # voxel size — finer grid for more detail
+    vs = radius / 5.0
     filled = set()
-
     def fill_box(x0, y0, z0, w, h, d):
         for y in range(y0, y0 + h):
             for x in range(x0, x0 + w):
                 for z in range(z0, z0 + d):
                     filled.add((x, y, z))
-
-    # --- Fat abdomen (rear) — bulbous 6x4x6 ---
+    # Fat abdomen
     fill_box(-3, 1, 1, 6, 4, 6)
-    # Round top corners
     for corner in [(-3,4,1),(-3,4,6),(2,4,1),(2,4,6),
                    (-3,1,1),(-3,1,6),(2,1,1),(2,1,6)]:
         filled.discard(corner)
-    # Add a rounded bump on top
     fill_box(-2, 5, 2, 4, 1, 4)
-
-    # --- Thorax (middle) — 4x3x4 ---
+    # Thorax
     fill_box(-2, 1, -3, 4, 3, 4)
-
-    # --- Head — 3x3x3 with eye bumps ---
+    # Head
     fill_box(-1, 1, -6, 3, 3, 3)
-    # Eye bumps on top of head
-    filled.add((-1, 4, -5))
-    filled.add((1, 4, -5))
-    # Eye stalks above head at UNIQUE (gx,gy) — gy=6 has no abdomen overlap
-    # so the eye color only shows on these voxels, not on the back
-    filled.add((-1, 6, -5))
-    filled.add((1, 6, -5))
-
-    # --- Fangs — 2 voxels hanging down from head front ---
-    filled.add((-1, 0, -7))
-    filled.add((1, 0, -7))
-    filled.add((-1, 0, -6))
-    filled.add((1, 0, -6))
-
-    # --- Pedipalps (small feelers) ---
-    filled.add((-1, 1, -7))
-    filled.add((1, 1, -7))
-
-    # --- 8 legs with knee joints ---
-    # 4 per side, attached to thorax
-    leg_attach_z = [-2, -1, 0, 1]
-
-    for sz in leg_attach_z:
-        # LEFT leg: out, up to knee, then down to ground
-        # Upper segment — goes outward and up
-        filled.add((-3, 2, sz))
-        filled.add((-4, 3, sz))
-        filled.add((-5, 4, sz))  # knee (high point)
-        # Lower segment — goes down to ground
-        filled.add((-6, 3, sz))
-        filled.add((-6, 2, sz))
-        filled.add((-6, 1, sz))
-        filled.add((-7, 0, sz))  # foot
-
-        # RIGHT leg (mirror)
-        filled.add((3, 2, sz))
-        filled.add((4, 3, sz))
-        filled.add((5, 4, sz))
-        filled.add((6, 3, sz))
-        filled.add((6, 2, sz))
-        filled.add((6, 1, sz))
+    filled.add((-1, 4, -5)); filled.add((1, 4, -5))
+    filled.add((-1, 6, -5)); filled.add((1, 6, -5))
+    # Fangs
+    filled.add((-1, 0, -7)); filled.add((1, 0, -7))
+    filled.add((-1, 0, -6)); filled.add((1, 0, -6))
+    # Pedipalps
+    filled.add((-1, 1, -7)); filled.add((1, 1, -7))
+    # 8 legs with knee joints (static, part of body mesh)
+    for sz in [-2, -1, 0, 1]:
+        filled.add((-3, 2, sz)); filled.add((-4, 3, sz)); filled.add((-5, 4, sz))
+        filled.add((-6, 3, sz)); filled.add((-6, 2, sz)); filled.add((-6, 1, sz))
+        filled.add((-7, 0, sz))
+        filled.add((3, 2, sz)); filled.add((4, 3, sz)); filled.add((5, 4, sz))
+        filled.add((6, 3, sz)); filled.add((6, 2, sz)); filled.add((6, 1, sz))
         filled.add((7, 0, sz))
-
-    ox = -0.5 * vs
-    oz = -0.5 * vs
+    ox = -0.5 * vs; oz = -0.5 * vs
     add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
 
+def gen_spider_leg_pair(radius=0.6):
+    """One pair of spider legs matching the original spider style exactly.
+    Left side only — mirrored at render time. 2 legs at different Z.
+    Shape: short outward climb to knee, then sharp vertical drop to foot.
+    Origin at attachment point (gx=0 = body edge)."""
+    mb = MeshBuilder()
+    vs = radius / 5.0
+    filled = set()
+    leg_voxels = []
+
+    # Original leg pattern (shifted so attachment is at gx=0):
+    #   (0,2) attachment → (-1,3) out+up → (-2,4) KNEE → (-3,3) drop
+    #   → (-3,2) → (-3,1) → (-4,0) FOOT
+    def add_leg(sz):
+        for v in [(0,2,sz), (-1,3,sz), (-2,4,sz),
+                  (-3,3,sz), (-3,2,sz), (-3,1,sz), (-4,0,sz)]:
+            filled.add(v); leg_voxels.append(v)
+
+    add_leg(-1)  # front leg of pair
+    add_leg(1)   # rear leg of pair
+
+    # Remap all voxels to safe dark leg color (avoid eye pixel sampling)
+    uv_overrides = {v: (0, 2) for v in leg_voxels}
+
+    ox = -0.5 * vs; oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_overrides)
     return mb
 
 
@@ -1503,6 +1494,11 @@ MESH_TYPES = {
         "func": gen_bat_foot,
         "desc": "Bat foot/talon with three toes.",
         "default_file": "bat_foot.obj",
+    },
+    "spider_leg_pair": {
+        "func": lambda radius=0.6: gen_spider_leg_pair(radius),
+        "desc": "Spider leg pair (2 legs, left side). Params: --radius",
+        "default_file": "spider_leg_pair.obj",
     },
     "andariel": {
         "func": lambda height=2.0: gen_andariel(height),

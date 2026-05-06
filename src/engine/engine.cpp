@@ -361,6 +361,7 @@ void Engine::init() {
             {"butcher_leg",    "assets/meshes/butcher_leg.obj"},
             {"bat_foot",       "assets/meshes/bat_foot.obj"},
             {"andariel",       "assets/meshes/andariel.obj"},
+            {"spider_leg_pair","assets/meshes/spider_leg_pair.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -385,7 +386,8 @@ void Engine::init() {
         findMeshByName("bat_wing_mesh"),
         findMeshByName("butcher_arm"),
         findMeshByName("butcher_leg"),
-        findMeshByName("bat_foot")
+        findMeshByName("bat_foot"),
+        findMeshByName("spider_leg_pair")
     );
 
     // Cache mesh IDs for fast lookup in startGame — avoids repeated strcmp loops
