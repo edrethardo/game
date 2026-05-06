@@ -13,7 +13,7 @@ namespace InventoryUI {
     static constexpr u32 BP_ROWS = 4;
 
     // Equipment panel (left side)
-    static constexpr f32 EQ_W   = 168.0f;
+    static constexpr f32 EQ_W   = 240.0f;
     static constexpr f32 EQ_H   = 32.0f;
     static constexpr f32 EQ_GAP = 5.0f;
     static constexpr u32 EQ_SLOTS = 6;

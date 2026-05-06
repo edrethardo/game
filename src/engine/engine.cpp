@@ -68,7 +68,7 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
     // WARRIOR — Melee Tank
     {"Warrior", "Heavy melee fighter with crowd control",
      150.0f, 5.0f, 80.0f, "Iron Sword",
-     {SkillId::CLEAVE, SkillId::WAR_CRY, SkillId::WHIRLWIND, SkillId::EARTHQUAKE},
+     {SkillId::THUNDERCLAP, SkillId::WAR_CRY, SkillId::WHIRLWIND, SkillId::EARTHQUAKE},
      {1, 10, 20, 30}, {5, 20, 30, 40}},
 
     // RANGER — Ranged DPS
@@ -2408,13 +2408,24 @@ void Engine::singleplayerUpdate(f32 dt) {
             m_classSkillStates[slot].energy = m_skillStates[0].energy;
             m_classSkillStates[slot].maxEnergy = m_skillStates[0].maxEnergy;
 
+            // Thunderclap upgrade: increase stun from 0.2s to 0.5s past upgrade floor
+            SkillDef* tcDef = nullptr;
+            f32 origDuration = 0.0f;
+            if (cls.skills[slot] == SkillId::THUNDERCLAP &&
+                m_currentFloor >= cls.skillUpgradeFloor[slot]) {
+                tcDef = const_cast<SkillDef*>(SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
+                                                                         SkillId::THUNDERCLAP));
+                if (tcDef) { origDuration = tcDef->duration; tcDef->duration = 0.5f; }
+            }
+
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                           m_projectiles, m_entities, m_grid, m_localPlayer)) {
                 m_skillStates[0].energy = m_classSkillStates[slot].energy;
-
-                // (drone/turret mesh assignment handled by DroneSpawnCallback)
             }
+
+            // Restore original duration
+            if (tcDef) tcDef->duration = origDuration;
         }
     }
 
@@ -3159,9 +3170,26 @@ void Engine::handleWeaponFire(f32 dt) {
 
     AttackResult result;
     switch (wpn.type) {
-    case WeaponType::MELEE:
-        result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
-        break;
+    case WeaponType::MELEE: {
+        // Dagger crit: 5% chance for 300% damage
+        WeaponSubtype melSub = WeaponSubtype::NONE;
+        if (qbItem && !isItemEmpty(*qbItem))
+            melSub = m_itemDefs[qbItem->defId].weaponSubtype;
+        WeaponDef meleeWpn = wpn;
+        if (melSub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5) {
+            meleeWpn.damage *= 3.0f;
+        }
+        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
+
+        // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
+        if (melSub != WeaponSubtype::DAGGER && melSub != WeaponSubtype::NONE &&
+            result.hitEntity && (std::rand() % 100) < 5) {
+            WeaponDef cleaveWpn = wpn;
+            cleaveWpn.coneAngleDeg = 360.0f;
+            cleaveWpn.damage *= 0.5f; // cleave deals half damage
+            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities);
+        }
+    } break;
     case WeaponType::HITSCAN:
         result = Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
         if (result.hitEntity || result.hitWorld) {

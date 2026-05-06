@@ -64,6 +64,7 @@ static SkillId skillIdFromString(const std::string& s) {
     // Warrior
     if (s == "cleave")          return SkillId::CLEAVE;
     if (s == "war_cry")         return SkillId::WAR_CRY;
+    if (s == "thunderclap")     return SkillId::THUNDERCLAP;
     if (s == "whirlwind")       return SkillId::WHIRLWIND;
     if (s == "earthquake")      return SkillId::EARTHQUAKE;
     // Ranger

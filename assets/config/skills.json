@@ -54,6 +54,7 @@
       "invulnDuration": 0.3
     },
     { "id": "cleave",          "name": "Cleave",          "cooldown": 2.0, "energyCost": 15.0, "damage": 35.0, "radius": 3.0 },
+    { "id": "thunderclap",     "name": "Thunderclap",     "cooldown": 3.0, "energyCost": 20.0, "damage": 25.0, "radius": 5.0, "duration": 0.2 },
     { "id": "war_cry",         "name": "War Cry",         "cooldown": 8.0, "energyCost": 25.0, "damage": 0.0,  "radius": 6.0 },
     { "id": "whirlwind",       "name": "Whirlwind",       "cooldown": 10.0,"energyCost": 40.0, "damage": 30.0, "radius": 2.5 },
     { "id": "earthquake",      "name": "Earthquake",      "cooldown": 12.0,"energyCost": 50.0, "damage": 40.0, "radius": 4.0, "delay": 0.05 },

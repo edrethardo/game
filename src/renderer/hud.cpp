@@ -923,15 +923,14 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     // --- Equipment panel (left side) ---
     f32 eqX      = static_cast<f32>(sw) * 0.12f;
     f32 eqStartY = centerY + 130.0f;
-    f32 slotW    = 168.0f;
+    f32 slotW    = 240.0f;
     f32 slotH    = 32.0f;
     f32 slotGap  = 5.0f;
 
     // Dark background behind equipment panel
     {
         u32 slotCount = static_cast<u32>(ItemSlot::COUNT);
-        // Slots go from eqStartY (top of slot 0) down to last slot bottom
-        f32 topY = eqStartY + slotH;  // top edge of first slot
+        f32 topY = eqStartY + slotH;
         f32 botY = eqStartY - static_cast<f32>(slotCount - 1) * (slotH + slotGap);
         f32 pad = 8.0f;
         Vec3 bg = {0.05f, 0.05f, 0.08f};

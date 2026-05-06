@@ -82,6 +82,7 @@ enum struct SkillId : u8 {
     // Warrior
     CLEAVE,
     WAR_CRY,
+    THUNDERCLAP,  // ground stomp AoE with stun + slow
     WHIRLWIND,
     EARTHQUAKE,
 

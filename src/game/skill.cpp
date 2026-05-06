@@ -233,6 +233,38 @@ static void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
     LOG_INFO("Cleave fired");
 }
 
+// Ground stomp AoE — damages, stuns, and slows all enemies in radius.
+// Stun duration scales with upgrade: 0.2s base, 0.5s upgraded.
+static void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entities)
+{
+    // Ground-level position — origin is eye height, drop to feet
+    Vec3 groundPos = {origin.x, origin.y - 1.7f, origin.z};
+
+    EntityHandle hits[MAX_ENTITIES];
+    f32          dists[MAX_ENTITIES];
+    f32 range  = def->radius > 0.0f ? def->radius : 5.0f;
+    f32 damage = def->damage > 0.0f ? def->damage : 25.0f;
+    // Query from ground position with omnidirectional search
+    u32 hitCount = CombatQuery::queryConeSorted(
+        entities, groundPos, {0.0f, -1.0f, 0.0f}, -1.0f, range,
+        hits, dists, MAX_ENTITIES);
+
+    f32 stunTime = def->duration > 0.0f ? def->duration : 0.2f;
+    for (u32 i = 0; i < hitCount; i++) {
+        Combat::applyDamage(entities, hits[i], damage);
+        Entity* e = handleGet(entities, hits[i]);
+        if (e) {
+            e->freezeTimer = stunTime + 1.5f;
+        }
+    }
+
+    // Brown-grey ground stomp visual at feet level (earthy shockwave)
+    if (s_novaCallback) s_novaCallback(groundPos, range, {0.5f, 0.4f, 0.25f});
+    // Ground scorch zone for lingering dust cloud
+    if (s_scorchCallback) s_scorchCallback(groundPos, range, 0.8f, 0.0f);
+    LOG_INFO("Thunderclap hit %u enemies", hitCount);
+}
+
 // Stun all enemies within 6m with a war-cry shout.
 static void fireWarCry(Vec3 origin, const SkillDef* def, EntityPool& entities)
 {
@@ -823,6 +855,9 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     // ---- Warrior ----
     case SkillId::CLEAVE:
         fireCleave(eyePos, forward, def, entities);
+        break;
+    case SkillId::THUNDERCLAP:
+        fireThunderclap(eyePos, def, entities);
         break;
     case SkillId::WAR_CRY:
         fireWarCry(eyePos, def, entities);
