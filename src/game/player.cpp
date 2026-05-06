@@ -74,6 +74,16 @@ void PlayerController::update(Player& player, f32 dt) {
     s32 mx, my;
     Input::getMouseDelta(mx, my);
 
+    // Add right stick look (controller) — convert stick deflection to mouse-equivalent delta
+    f32 rsX = Input::getStickX(true);
+    f32 rsY = Input::getStickY(true);
+    if (rsX != 0.0f || rsY != 0.0f) {
+        // Convert stick to degrees, then to pixel-equivalent using sensitivity
+        f32 stickScale = Input::STICK_LOOK_SENSITIVITY * 60.0f; // scale per frame at 60Hz
+        mx += static_cast<s32>(rsX * stickScale);
+        my += static_cast<s32>(rsY * stickScale);
+    }
+
     // Apply slow debuff (e.g., from boss cleaver hit)
     f32 effectiveSpeed = player.moveSpeed * GameConst::SPEED_MULT;
     // Soul Harvest speed bonus: +5% per stack
@@ -85,15 +95,18 @@ void PlayerController::update(Player& player, f32 dt) {
         player.slowTimer -= dt;
     }
 
+    // Merge keyboard + left stick for movement
+    bool w = Input::isActionDown(GameAction::MOVE_FORWARD)  || Input::getStickY(false) < -0.3f;
+    bool s = Input::isActionDown(GameAction::MOVE_BACKWARD) || Input::getStickY(false) > 0.3f;
+    bool a = Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f;
+    bool d = Input::isActionDown(GameAction::MOVE_RIGHT)    || Input::getStickX(false) > 0.3f;
+
     applyMovement(player.position, player.velocity, player.yaw, player.pitch,
                   player.onGround, player.noclip,
                   effectiveSpeed, player.sensitivity,
                   mx, my,
-                  Input::isKeyDown(SDL_SCANCODE_W),
-                  Input::isKeyDown(SDL_SCANCODE_S),
-                  Input::isKeyDown(SDL_SCANCODE_A),
-                  Input::isKeyDown(SDL_SCANCODE_D),
-                  Input::isKeyPressed(SDL_SCANCODE_SPACE),
+                  w, s, a, d,
+                  Input::isActionPressed(GameAction::JUMP),
                   dt);
     player.forward = s_lastForward;
 }
@@ -149,18 +162,27 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     input.tick = tick;
     input.weaponId = weaponId;
 
+    // Merge keyboard + left stick for movement flags
     u8 flags = 0;
-    if (Input::isKeyDown(SDL_SCANCODE_W)) flags |= INPUT_FORWARD;
-    if (Input::isKeyDown(SDL_SCANCODE_S)) flags |= INPUT_BACKWARD;
-    if (Input::isKeyDown(SDL_SCANCODE_D)) flags |= INPUT_RIGHT;
-    if (Input::isKeyDown(SDL_SCANCODE_A)) flags |= INPUT_LEFT;
-    if (Input::isKeyPressed(SDL_SCANCODE_SPACE)) flags |= INPUT_JUMP;
-    if (Input::isMouseButtonDown(SDL_BUTTON_LEFT)) flags |= INPUT_FIRE;
-    if (Input::isMouseButtonDown(SDL_BUTTON_MIDDLE)) flags |= INPUT_LOCK;
+    if (Input::isActionDown(GameAction::MOVE_FORWARD)  || Input::getStickY(false) < -0.3f) flags |= INPUT_FORWARD;
+    if (Input::isActionDown(GameAction::MOVE_BACKWARD) || Input::getStickY(false) > 0.3f)  flags |= INPUT_BACKWARD;
+    if (Input::isActionDown(GameAction::MOVE_RIGHT)    || Input::getStickX(false) > 0.3f)  flags |= INPUT_RIGHT;
+    if (Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f) flags |= INPUT_LEFT;
+    if (Input::isActionPressed(GameAction::JUMP))    flags |= INPUT_JUMP;
+    if (Input::isActionDown(GameAction::FIRE))       flags |= INPUT_FIRE;
+    if (Input::isActionDown(GameAction::TARGET_LOCK)) flags |= INPUT_LOCK;
     input.moveFlags = flags;
 
     s32 mx, my;
     Input::getMouseDelta(mx, my);
+    // Add right stick look delta
+    f32 rsX = Input::getStickX(true);
+    f32 rsY = Input::getStickY(true);
+    if (rsX != 0.0f || rsY != 0.0f) {
+        f32 stickScale = Input::STICK_LOOK_SENSITIVITY * 60.0f;
+        mx += static_cast<s32>(rsX * stickScale);
+        my += static_cast<s32>(rsY * stickScale);
+    }
     // Clamp to s16 range
     if (mx >  32767) mx =  32767;
     if (mx < -32768) mx = -32768;
@@ -169,14 +191,14 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     input.mouseDeltaX = static_cast<s16>(mx);
     input.mouseDeltaY = static_cast<s16>(my);
 
-    // Extended input flags
+    // Extended input flags — unified keyboard + gamepad
     u8 ext = 0;
-    if (Input::isKeyPressed(SDL_SCANCODE_Q)) ext |= INPUT_EX_POTION;
-    if (Input::isKeyPressed(SDL_SCANCODE_R)) ext |= INPUT_EX_RELOAD;
-    if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) ext |= INPUT_EX_SKILL;
-    if (Input::isKeyPressed(SDL_SCANCODE_F)) ext |= INPUT_EX_BOOT_SKILL;
-    if (Input::isKeyPressed(SDL_SCANCODE_G)) ext |= INPUT_EX_HELM_SKILL;
-    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) ext |= INPUT_EX_INVENTORY;
+    if (Input::isActionPressed(GameAction::POTION))       ext |= INPUT_EX_POTION;
+    if (Input::isActionPressed(GameAction::RELOAD))        ext |= INPUT_EX_RELOAD;
+    if (Input::isActionPressed(GameAction::CLASS_SKILL))   ext |= INPUT_EX_SKILL;
+    if (Input::isActionPressed(GameAction::BOOT_SKILL))    ext |= INPUT_EX_BOOT_SKILL;
+    if (Input::isActionPressed(GameAction::HELMET_SKILL))  ext |= INPUT_EX_HELM_SKILL;
+    if (Input::isActionPressed(GameAction::INVENTORY))     ext |= INPUT_EX_INVENTORY;
     input.extFlags = ext;
     input.skillSlot = 0; // set by engine before sending
 

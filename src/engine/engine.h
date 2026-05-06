@@ -47,8 +47,10 @@ private:
     // Game state
     GameState m_gameState = GameState::MENU;
     u8        m_menuSelection = 0;
-    u8        m_menuSubState = 0;  // 0=main, 1=singleplayer, 2=class selection
+    u8        m_menuSubState = 0;  // 0=main, 1=singleplayer, 2=class selection, 3=options
     u8        m_menuSubSelection = 0;
+    bool      m_optionsBindCapture = false; // true when waiting for key/button press to rebind
+    bool      m_optionsBindKeyboard = true; // true=capturing keyboard, false=capturing controller
     bool      m_confirmQuit = false;  // "are you sure?" overlay when pressing ESC in-game
     char      m_connectAddress[64] = "127.0.0.1";
 

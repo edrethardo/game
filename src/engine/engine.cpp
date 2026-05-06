@@ -2208,17 +2208,17 @@ void Engine::updateMenu(f32 dt) {
 
     // Sub-menu for single player: New Game / Continue
     if (m_menuSubState == 1) {
-        if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menuSubSelection > 0) m_menuSubSelection--;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
             if (m_menuSubSelection < 1) m_menuSubSelection++;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-            m_menuSubState = 0; // back to main menu
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            m_menuSubState = 0;
             return;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
             // Keep m_netRole if already set to SERVER (hosting), otherwise NONE (singleplayer)
             if (m_netRole != NetRole::SERVER) m_netRole = NetRole::NONE;
             m_localPlayerIndex = 0;
@@ -2249,18 +2249,18 @@ void Engine::updateMenu(f32 dt) {
     // Class selection screen (subState 2)
     if (m_menuSubState == 2) {
         u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
-        if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menuSubSelection > 0) m_menuSubSelection--;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
             if (m_menuSubSelection < classCount - 1) m_menuSubSelection++;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-            m_menuSubState = 1; // back to new/continue
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            m_menuSubState = 1;
             m_menuSubSelection = 0;
             return;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
             m_playerClass = static_cast<PlayerClass>(m_menuSubSelection);
             m_activeClassSkill = 0;
 
@@ -2315,13 +2315,87 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
-    if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+    // Options / controls rebinding screen (subState 3)
+    if (m_menuSubState == 3) {
+        // Number of rebindable actions (skip menu navigation actions)
+        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1; // MOVE_FORWARD..INVENTORY
+
+        if (m_optionsBindCapture) {
+            // Waiting for player to press a key or button to rebind
+            if (m_optionsBindKeyboard) {
+                // Scan all keys for a press
+                for (s32 sc = 0; sc < 512; sc++) {
+                    if (Input::isKeyPressed(sc)) {
+                        GameAction act = static_cast<GameAction>(m_menuSubSelection);
+                        Input::setKeyBinding(act, sc);
+                        m_optionsBindCapture = false;
+                        break;
+                    }
+                }
+            } else {
+                // Scan gamepad buttons for a press
+                for (s32 b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
+                    if (Input::isButtonPressed(0, b)) {
+                        GameAction act = static_cast<GameAction>(m_menuSubSelection);
+                        // If L is held, set as modified binding
+                        if (Input::isModifierHeld() && b != SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
+                            Input::setButtonBinding(act, b, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+                        } else {
+                            Input::setButtonBinding(act, b);
+                        }
+                        m_optionsBindCapture = false;
+                        break;
+                    }
+                }
+            }
+            // ESC cancels capture
+            if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+                m_optionsBindCapture = false;
+            }
+        } else {
+            // Normal navigation
+            if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+                if (m_menuSubSelection > 0) m_menuSubSelection--;
+            }
+            if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+                if (m_menuSubSelection < REBIND_COUNT) m_menuSubSelection++; // +1 for "Reset Defaults"
+            }
+            if (Input::isActionPressed(GameAction::MENU_BACK)) {
+                // Save and return to main menu
+                Input::saveBindings("assets/config/controls.json");
+                m_menuSubState = 0;
+                m_menuSubSelection = 0;
+                return;
+            }
+            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+                if (m_menuSubSelection < REBIND_COUNT) {
+                    // Start capture mode — left/right selects keyboard or controller column
+                    m_optionsBindCapture = true;
+                    m_optionsBindKeyboard = true; // default to keyboard, press right for controller
+                } else {
+                    // "Reset to Defaults" option
+                    Input::resetBindingsToDefaults();
+                }
+            }
+            // Left/Right to toggle keyboard vs controller column before confirming
+            if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A)) {
+                m_optionsBindKeyboard = true;
+            }
+            if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+                m_optionsBindKeyboard = false;
+            }
+        }
+        return;
+    }
+
+    if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
         if (m_menuSelection > 0) m_menuSelection--;
     }
-    if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-        if (m_menuSelection < 3) m_menuSelection++;
+    if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+        if (m_menuSelection < 4) m_menuSelection++;
     }
-    if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+    if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
         switch (m_menuSelection) {
         case 0: // Singleplayer — show sub-menu
             m_menuSubState = 1;
@@ -2330,7 +2404,7 @@ void Engine::updateMenu(f32 dt) {
         case 1: // Host — same flow as singleplayer (new/continue → class selection)
             m_netRole = NetRole::SERVER;
             m_localPlayerIndex = 0;
-            m_menuSubState = 1;  // go to new/continue sub-menu
+            m_menuSubState = 1;
             m_menuSubSelection = 0;
             break;
         case 2: // Join
@@ -2340,7 +2414,12 @@ void Engine::updateMenu(f32 dt) {
                 LOG_INFO("Connecting to %s...", m_connectAddress);
             }
             break;
-        case 3: // Exit
+        case 3: // Options — controls rebinding
+            m_menuSubState = 3;
+            m_menuSubSelection = 0;
+            m_optionsBindCapture = false;
+            break;
+        case 4: // Exit
             m_running = false;
             break;
         }
@@ -2473,17 +2552,22 @@ void Engine::gameUpdate(f32 dt) {
     // Quickbar slot switching (mouse wheel only — keys 1-4 are for class skills)
     WeaponState& ws = m_players[0].weaponState;
     s32 wheel = Input::getMouseWheelDelta();
-    if (wheel != 0) {
+    {
         s32 slot = static_cast<s32>(m_quickbars[0].activeSlot);
-        slot -= wheel; // scroll up = previous slot, down = next
-        if (slot < 0) slot = QUICKBAR_SLOTS - 1;
-        if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0;
+        if (wheel != 0) {
+            slot -= wheel; // scroll up = previous slot, down = next
+            if (slot < 0) slot = QUICKBAR_SLOTS - 1;
+            if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0;
+        }
+        // Controller quickbar switching
+        if (Input::isActionPressed(GameAction::QUICKBAR_PREV)) { slot--; if (slot < 0) slot = QUICKBAR_SLOTS - 1; }
+        if (Input::isActionPressed(GameAction::QUICKBAR_NEXT)) { slot++; if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0; }
         m_quickbars[0].activeSlot = static_cast<u8>(slot);
     }
 
     // Healing potion (Q key) — restores 60% HP + 30% energy
     if (m_potionCooldown > 0.0f) m_potionCooldown -= dt;
-    if (Input::isKeyPressed(SDL_SCANCODE_Q) && m_potionCooldown <= 0.0f) {
+    if (Input::isActionPressed(GameAction::POTION) && m_potionCooldown <= 0.0f) {
         f32 healAmount = m_localPlayer.maxHealth * GameConst::POTION_HEAL_PCT;
         m_localPlayer.health += healAmount;
         if (m_localPlayer.health > m_localPlayer.maxHealth)
@@ -2699,7 +2783,7 @@ void Engine::gameUpdate(f32 dt) {
     if (!m_inventoryOpen) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         for (u8 s = 0; s < 4; s++) {
-            if (Input::isKeyPressed(SDL_SCANCODE_1 + s)) {
+            if (Input::isActionPressed(static_cast<GameAction>(static_cast<u8>(GameAction::SKILL_1) + s))) {
                 // Only select if this skill is unlocked on the current floor
                 if (m_currentFloor >= cls.skillUnlockFloor[s]) {
                     m_activeClassSkill = s;
@@ -2711,7 +2795,7 @@ void Engine::gameUpdate(f32 dt) {
     // --- Class skill activation (right-click) ---
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
 
-    if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) && !m_inventoryOpen) {
+    if (Input::isActionPressed(GameAction::CLASS_SKILL) && !m_inventoryOpen) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         u8 slot = m_activeClassSkill;
         if (m_currentFloor >= cls.skillUnlockFloor[slot]) {
@@ -2759,7 +2843,7 @@ void Engine::gameUpdate(f32 dt) {
 
     // --- Boot skill activation (F key) ---
     // Equipment legendary skills are cooldown-only (no energy cost deducted from player)
-    if (Input::isKeyPressed(SDL_SCANCODE_F) && !m_inventoryOpen &&
+    if (Input::isActionPressed(GameAction::BOOT_SKILL) && !m_inventoryOpen &&
         m_bootSkillStates[0].activeSkill != SkillId::NONE) {
         m_bootSkillStates[0].energy = 999.0f;
         m_bootSkillStates[0].maxEnergy = 999.0f;
@@ -2769,7 +2853,7 @@ void Engine::gameUpdate(f32 dt) {
     }
 
     // --- Helmet skill activation (G key) ---
-    if (Input::isKeyPressed(SDL_SCANCODE_G) && !m_inventoryOpen &&
+    if (Input::isActionPressed(GameAction::HELMET_SKILL) && !m_inventoryOpen &&
         m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
         m_helmetSkillStates[0].energy = 999.0f;
         m_helmetSkillStates[0].maxEnergy = 999.0f;
@@ -2780,10 +2864,7 @@ void Engine::gameUpdate(f32 dt) {
 
     // --- Shield blocking (Ctrl/Shift) ---
     {
-        bool wantsBlock = (Input::isKeyDown(SDL_SCANCODE_LCTRL) ||
-                           Input::isKeyDown(SDL_SCANCODE_RCTRL) ||
-                           Input::isKeyDown(SDL_SCANCODE_LSHIFT) ||
-                           Input::isKeyDown(SDL_SCANCODE_RSHIFT)) && !m_inventoryOpen;
+        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !m_inventoryOpen;
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;
             m_localPlayer.blockTimer = 0.0f; // start perfect block window
@@ -2909,7 +2990,7 @@ void Engine::gameUpdate(f32 dt) {
     if (updateFloorDoor()) return;
 
     // Toggle inventory (Tab key)
-    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
+    if (Input::isActionPressed(GameAction::INVENTORY)) {
         m_inventoryOpen = !m_inventoryOpen;
         Input::setRelativeMouseMode(!m_inventoryOpen);
         // Show equip tutorial on first inventory open after first pickup
@@ -2921,7 +3002,7 @@ void Engine::gameUpdate(f32 dt) {
         m_dragState = {};
         m_dblClickState = {};
     }
-    if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) && m_inventoryOpen) {
+    if (Input::isActionPressed(GameAction::MENU_BACK) && m_inventoryOpen) {
         m_inventoryOpen = false;
         Input::setRelativeMouseMode(true);
     }
@@ -3001,8 +3082,8 @@ void Engine::updatePlayerPickup() {
         }
     }
 
-    // Item pickup (E key) — globes are consumed above and never reach here
-    if (Input::isKeyPressed(SDL_SCANCODE_E)) {
+    // Item pickup (E key / action) — globes are consumed above and never reach here
+    if (Input::isActionPressed(GameAction::PICKUP)) {
         ItemInstance picked;
         if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
             if (!isGlobe(picked)) {
@@ -3053,7 +3134,7 @@ bool Engine::updateFloorDoor() {
     if (m_floorDoorActive) {
         Vec3 toDoor = m_floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
-            if (Input::isKeyPressed(SDL_SCANCODE_E)) {
+            if (Input::isActionPressed(GameAction::PICKUP)) {
                 m_currentFloor++;
                 // All players grow 1.5% stronger each floor (multiplicative)
                 m_localPlayer.maxHealth *= 1.015f;
@@ -3662,8 +3743,8 @@ void Engine::handleWeaponFire(f32 dt) {
         }
     }
 
-    // Manual reload (R key) — reload if clip not full and not already reloading
-    if (Input::isKeyPressed(SDL_SCANCODE_R) && wpn.clipSize > 0 &&
+    // Manual reload — reload if clip not full and not already reloading
+    if (Input::isActionPressed(GameAction::RELOAD) && wpn.clipSize > 0 &&
         !ws.reloading && ws.currentClip < wpn.clipSize) {
         ws.reloading = true;
         ws.reloadTimer = wpn.reloadTime;
@@ -3696,7 +3777,7 @@ void Engine::handleWeaponFire(f32 dt) {
     // Can't fire while reloading
     if (ws.reloading) return;
 
-    if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
+    if (!Input::isActionDown(GameAction::FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
     // Track subtype for projectile flags (molotov/wand detection)
@@ -4218,8 +4299,8 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
 // ---------------------------------------------------------------------------
 void Engine::updateTargetLock(f32 dt) {
     (void)dt;
-    // Middle-click outside inventory: equip active quickbar item (keeps ref in quickbar)
-    if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
+    // Middle-click / quickbar-use outside inventory: equip active quickbar item (keeps ref in quickbar)
+    if (Input::isActionPressed(GameAction::TARGET_LOCK)) {
         u8 slot = m_quickbars[0].activeSlot;
         QuickbarSlot& qs = m_quickbars[0].slots[slot];
         if (qs.type == QuickbarSlot::BACKPACK_REF &&
@@ -6530,18 +6611,102 @@ void Engine::renderMenu() {
         const char* hint2 = "Up/Down to select, Enter to confirm, ESC to go back";
         f32 hintW2 = FontSystem::textWidth(hint2, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.06f, hint2, {0.4f, 0.4f, 0.5f}, 2);
+    } else if (m_menuSubState == 3) {
+        // Options / controls rebinding screen
+        const char* subTitle = "Controls";
+        f32 stW = FontSystem::textWidth(subTitle, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.9f,
+                             subTitle, {0.9f, 0.8f, 0.3f}, 3);
+
+        // Column headers
+        f32 colAction = sw * 0.1f;
+        f32 colKey    = sw * 0.5f;
+        f32 colBtn    = sw * 0.72f;
+        f32 headerY   = sh * 0.82f;
+        FontSystem::drawText(sw, sh, colAction, headerY, "Action",     {0.7f, 0.7f, 0.7f}, 1);
+        FontSystem::drawText(sw, sh, colKey,    headerY, "Keyboard",   {0.7f, 0.7f, 0.7f}, 1);
+        FontSystem::drawText(sw, sh, colBtn,    headerY, "Controller", {0.7f, 0.7f, 0.7f}, 1);
+
+        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
+        f32 listTop = sh * 0.78f;
+        f32 lineH = 22.0f;
+
+        // Scroll offset so the list fits on screen
+        u32 visibleRows = static_cast<u32>((listTop - sh * 0.1f) / lineH);
+        u32 scrollOffset = 0;
+        if (m_menuSubSelection >= visibleRows) scrollOffset = m_menuSubSelection - visibleRows + 1;
+
+        for (u32 i = scrollOffset; i <= REBIND_COUNT && i - scrollOffset < visibleRows; i++) {
+            f32 y = listTop - (i - scrollOffset) * lineH;
+            bool sel = (i == m_menuSubSelection);
+
+            if (i < REBIND_COUNT) {
+                GameAction act = static_cast<GameAction>(i);
+                const char* name = Input::actionName(act);
+                const InputBinding& bind = Input::getBinding(act);
+
+                // Action name
+                FontSystem::drawText(sw, sh, colAction, y, name,
+                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+
+                // Keyboard binding
+                const char* keyName = (bind.key >= 0) ? SDL_GetScancodeName(static_cast<SDL_Scancode>(bind.key)) : "";
+                // Mouse button name
+                char keyBuf[32] = "";
+                if (bind.key >= 0) std::snprintf(keyBuf, sizeof(keyBuf), "%s", keyName);
+                if (bind.mouseButton == MOUSE_LEFT)   std::snprintf(keyBuf, sizeof(keyBuf), "LMB");
+                if (bind.mouseButton == MOUSE_RIGHT)  std::snprintf(keyBuf, sizeof(keyBuf), "RMB");
+                if (bind.mouseButton == MOUSE_MIDDLE) std::snprintf(keyBuf, sizeof(keyBuf), "MMB");
+
+                Vec3 keyCol = sel && m_optionsBindKeyboard ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.5f, 0.5f, 0.5f};
+                if (sel && m_optionsBindCapture && m_optionsBindKeyboard) keyCol = {1.0f, 0.5f, 0.2f};
+                FontSystem::drawText(sw, sh, colKey, y, keyBuf[0] ? keyBuf : "-", keyCol, 1);
+
+                // Controller binding
+                char btnBuf[32] = "-";
+                if (bind.button >= 0) {
+                    if (bind.modifier >= 0) {
+                        std::snprintf(btnBuf, sizeof(btnBuf), "%s+%s",
+                            Input::buttonName(bind.modifier), Input::buttonName(bind.button));
+                    } else {
+                        std::snprintf(btnBuf, sizeof(btnBuf), "%s", Input::buttonName(bind.button));
+                    }
+                } else if (bind.axis >= 0) {
+                    std::snprintf(btnBuf, sizeof(btnBuf), "%s",
+                        bind.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT ? "ZR" :
+                        bind.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT  ? "ZL" : "Axis");
+                }
+                Vec3 btnCol = sel && !m_optionsBindKeyboard ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.5f, 0.5f, 0.5f};
+                if (sel && m_optionsBindCapture && !m_optionsBindKeyboard) btnCol = {1.0f, 0.5f, 0.2f};
+                FontSystem::drawText(sw, sh, colBtn, y, btnBuf, btnCol, 1);
+            } else {
+                // "Reset to Defaults" option at the bottom
+                const char* resetLabel = "Reset to Defaults";
+                Vec3 rc = sel ? Vec3{1.0f, 0.4f, 0.4f} : Vec3{0.5f, 0.3f, 0.3f};
+                FontSystem::drawText(sw, sh, colAction, y, resetLabel, rc, 1);
+            }
+        }
+
+        // Hint text
+        const char* hint = m_optionsBindCapture
+            ? "Press a key/button to rebind, ESC to cancel"
+            : "Up/Down select, Left/Right column, Enter rebind, ESC save & back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.04f,
+                             hint, {0.5f, 0.5f, 0.6f}, 1);
     } else {
         // Main menu options
-        static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Exit Game"};
+        static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Options", "Exit Game"};
         Vec3 colors[] = {
             {0.2f, 0.9f, 0.2f},
             {0.2f, 0.5f, 1.0f},
             {1.0f, 0.7f, 0.2f},
+            {0.6f, 0.6f, 0.8f},
             {0.7f, 0.2f, 0.2f},
         };
 
-        for (u32 i = 0; i < 4; i++) {
-            f32 y = sh * 0.25f + (3 - i) * 50.0f;
+        for (u32 i = 0; i < 5; i++) {
+            f32 y = sh * 0.2f + (4 - i) * 50.0f;
             Vec3 color = colors[i];
             bool selected = (i == m_menuSelection);
             if (!selected) color = color * 0.4f;
@@ -6555,7 +6720,7 @@ void Engine::renderMenu() {
 
         const char* hint = "Up/Down to select, Enter to confirm";
         f32 hintW = FontSystem::textWidth(hint, 1);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.1f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 }
 
