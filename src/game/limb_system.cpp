@@ -86,12 +86,25 @@ static const LimbConfig s_batConfig = {
     }
 };
 
-// Spider: legs are static in body OBJ, only mandibles are animated limbs
+// Spider: legs are static in body OBJ. Mandibles + 8 foot tips animated.
+// Foot tip positions match where each leg ends (gx=±7, gy=0, gz=-2..-1..0..1).
+// In pivotScale space (÷0.6): foot X = 7*0.12/0.6 = 1.40, Z = sz*0.12/0.6
 static const LimbConfig s_spiderConfig = {
-    2,
+    10,
     {
+        // Mandibles (0-1)
         {{ 0.10f, 0.08f, -0.85f}, {0.04f, 0.05f, 0.02f}, 0.0f, 1, false},
         {{-0.10f, 0.08f, -0.85f}, {0.04f, 0.05f, 0.02f}, 0.0f, 1, true},
+        // Left foot tips (2-5) at each leg end
+        {{-1.00f, 0.0f, -0.29f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, false},
+        {{-1.00f, 0.0f, -0.14f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, false},
+        {{-1.00f, 0.0f,  0.00f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, false},
+        {{-1.00f, 0.0f,  0.14f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, false},
+        // Right foot tips (6-9)
+        {{ 1.00f, 0.0f, -0.29f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, true},
+        {{ 1.00f, 0.0f, -0.14f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, true},
+        {{ 1.00f, 0.0f,  0.00f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, true},
+        {{ 1.00f, 0.0f,  0.14f}, {0.02f, 0.03f, 0.02f}, 0.0f, 0, true},
     }
 };
 
@@ -180,8 +193,8 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
             // 0-1 = wings, 2-3 = claws
             return (limbIdx < 2) ? s_wingMeshId : s_clawMeshId;
         case EnemyType::SPIDER:
-            // 0-1 = mandibles only (legs are in body OBJ)
-            return s_mandibleMeshId;
+            // 0-1 = mandibles, 2-9 = foot tips
+            return (limbIdx < 2) ? s_mandibleMeshId : s_clawMeshId;
         default:
             return 0;
     }
@@ -331,13 +344,20 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
         }
 
         case EnemyType::SPIDER: {
-            // Mandibles only: gentle idle chew, rapid snap on attack
-            f32 angle = sinf(e.animTimer * 3.0f) * 0.12f;
-            if (e.attackAnimT > 0.0f) {
-                f32 t = e.attackAnimT / 0.3f;
-                angle = 0.4f * sinf(t * 3.14159f * 3.0f);
+            if (limbIdx < 2) {
+                // Mandibles: gentle idle chew, rapid snap on attack
+                f32 angle = sinf(e.animTimer * 3.0f) * 0.12f;
+                if (e.attackAnimT > 0.0f) {
+                    f32 t = e.attackAnimT / 0.3f;
+                    angle = 0.4f * sinf(t * 3.14159f * 3.0f);
+                }
+                return angle;
+            } else {
+                // Foot tips: subtle tapping/scratching, each leg slightly offset
+                f32 phase = e.animTimer * 6.0f + limbIdx * 0.8f;
+                f32 tap = sinf(phase) * 0.2f * (speed01 * 0.8f + 0.2f);
+                return tap;
             }
-            return angle;
         }
 
         default:
