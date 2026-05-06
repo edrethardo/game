@@ -354,6 +354,12 @@ void Engine::init() {
             {"iron_maiden",    "assets/meshes/iron_maiden.obj"},
             {"arrow",          "assets/meshes/arrow.obj"},
             {"bolt",           "assets/meshes/bolt.obj"},
+            {"skeleton_arm",   "assets/meshes/skeleton_arm.obj"},
+            {"skeleton_leg",   "assets/meshes/skeleton_leg.obj"},
+            {"bat_wing_mesh",  "assets/meshes/bat_wing_mesh.obj"},
+            {"butcher_arm",    "assets/meshes/butcher_arm.obj"},
+            {"butcher_leg",    "assets/meshes/butcher_leg.obj"},
+            {"bat_foot",       "assets/meshes/bat_foot.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -371,6 +377,15 @@ void Engine::init() {
 
     // Build limb meshes AFTER OBJ meshes are loaded (needs valid meshDefCount)
     LimbSystem::init(m_meshDefs, m_meshDefCount);
+    // Override box limb meshes with OBJ voxel limbs for better visuals
+    LimbSystem::setObjMeshIds(
+        findMeshByName("skeleton_arm"),
+        findMeshByName("skeleton_leg"),
+        findMeshByName("bat_wing_mesh"),
+        findMeshByName("butcher_arm"),
+        findMeshByName("butcher_leg"),
+        findMeshByName("bat_foot")
+    );
 
     // Cache mesh IDs for fast lookup in startGame — avoids repeated strcmp loops
     m_meshIdSkeleton = findMeshByName("skeleton");
@@ -4244,22 +4259,27 @@ void Engine::renderEntities(u32 sw, u32 sh) {
 
                     const LimbDef& ld = limbCfg.limbs[li];
                     f32 angle = LimbSystem::computeAngle(e, li, e.enemyType);
-                    if (ld.mirrored) angle = -angle;
+                    // Mirror negates angle for symmetric limbs (bat wings flap together).
+                    // Skip for skeleton/boss arms+legs — phase offset handles alternation,
+                    // mirroring the angle would make both sides swing in sync.
+                    bool skipMirrorAngle = (e.enemyType == EnemyType::SKELETON ||
+                                            e.enemyType == EnemyType::BOSS) && li < 4;
+                    if (ld.mirrored && !skipMirrorAngle) angle = -angle;
                     angle += ld.restAngle;
 
-                    // Scale limb proportionally to entity's rendered height
-                    f32 limbScale = 1.0f;
-                    if (meshId > 0 && meshId < m_meshDefCount) {
-                        const AABB& meshBounds = m_meshDefs[meshId].bounds;
-                        f32 meshH = meshBounds.max.y - meshBounds.min.y;
-                        f32 targetH = e.halfExtents.y * 2.0f * scaleY;
-                        limbScale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
-                    }
-
-                    // Build limb transform: entity feet position → scaled pivot → rotation → box
-                    Vec3 limbPivot = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
-                                   + Vec3{0, animBobY, 0}
-                                   + ld.pivotOffset * limbScale;
+                    // Build limb transform:
+                    //   1. Entity feet position (world space)
+                    //   2. Rotate by entity yaw (so limbs face same direction as body)
+                    //   3. Apply local pivot offset (in entity-local space AFTER yaw)
+                    //   4. Apply limb rotation (joint articulation)
+                    //   5. Scale the limb mesh
+                    Vec3 entBase = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                                 + Vec3{0, animBobY, 0};
+                    // Pivot offset is in entity-local space, scaled to match body size.
+                    // halfExtents.y defines the entity's half-height, so scale pivots
+                    // relative to a reference height of 0.5 (standard skeleton halfExtents.y)
+                    f32 pivotScale = e.halfExtents.y / 0.5f;
+                    Vec3 localPivot = ld.pivotOffset * pivotScale;
 
                     Mat4 limbRot;
                     switch (ld.pivotAxis) {
@@ -4269,13 +4289,46 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                         default: limbRot = Mat4::identity(); break;
                     }
 
-                    Mat4 limbModel = Mat4::translate(limbPivot)
-                                   * Mat4::rotateY(e.yaw)
-                                   * limbRot
-                                   * Mat4::scale(ld.meshHalfSize * 2.0f * limbScale);
+                    // Determine if this is an OBJ-loaded limb or a procedural box
+                    const AABB& limbMeshBounds = m_meshDefs[limbMesh].bounds;
+                    bool isObjLimb = LimbSystem::isObjLimbMesh(limbMesh);
 
-                    AABB limbBounds = {limbPivot - Vec3{0.5f,0.5f,0.5f},
-                                       limbPivot + Vec3{0.5f,0.5f,0.5f}};
+                    // For OBJ limbs, the mesh origin needs to be shifted so the
+                    // attachment end (top of arm = shoulder, top of leg = hip)
+                    // is at the rotation origin. The mesh hangs DOWN from the pivot.
+                    Vec3 meshOriginOffset = {0, 0, 0};
+                    Vec3 limbScaleVec;
+                    // Mirror the mesh on X for right-side limbs (wings, arms)
+                    f32 mirrorX = ld.mirrored ? -1.0f : 1.0f;
+                    if (isObjLimb) {
+                        limbScaleVec = {pivotScale * mirrorX, pivotScale, pivotScale};
+                        // For X-axis rotating limbs (arms/legs): shift mesh so top
+                        // is at pivot — limb hangs down naturally from shoulder/hip.
+                        // Wings (Z-axis) and Y-axis limbs don't need this.
+                        if (ld.pivotAxis == 0) {
+                            meshOriginOffset = {0, -limbMeshBounds.max.y, 0};
+                        }
+                    } else {
+                        limbScaleVec = ld.meshHalfSize * 2.0f * pivotScale;
+                        limbScaleVec.x *= mirrorX;
+                    }
+
+                    Mat4 limbModel = Mat4::translate(entBase)
+                                   * Mat4::rotateY(e.yaw)
+                                   * Mat4::translate(localPivot)
+                                   * limbRot
+                                   * Mat4::scale(limbScaleVec)
+                                   * Mat4::translate(meshOriginOffset);
+
+                    // Compute world-space limb position for culling bounds
+                    f32 cy = cosf(e.yaw), sy2 = sinf(e.yaw);
+                    Vec3 worldPivot = entBase + Vec3{
+                        localPivot.x * cy + localPivot.z * sy2,
+                        localPivot.y,
+                        -localPivot.x * sy2 + localPivot.z * cy
+                    };
+                    AABB limbBounds = {worldPivot - Vec3{0.5f,0.5f,0.5f},
+                                       worldPivot + Vec3{0.5f,0.5f,0.5f}};
 
                     // BAT wings (limbs 0-1) use dedicated wing membrane texture
                     const Texture& limbTex = (e.enemyType == EnemyType::BAT && li < 2)
@@ -4289,28 +4342,20 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                                          : tint);
                 }
 
-                // Skeleton weapon: attached to right arm, hilt in hand, swings with arm
-                if (e.enemyType == EnemyType::SKELETON && e.weaponMeshId > 0 && e.weaponMeshId < m_meshDefCount) {
-                    f32 armAngle = LimbSystem::computeAngle(e, 2, EnemyType::SKELETON);
-                    // Mirror the angle (right side is mirrored in LimbConfig)
-                    armAngle = -armAngle;
+                // Skeleton/Boss weapon: attached to right arm, hilt in hand, swings with arm
+                if ((e.enemyType == EnemyType::SKELETON || e.enemyType == EnemyType::BOSS) &&
+                    e.weaponMeshId > 0 && e.weaponMeshId < m_meshDefCount) {
+                    f32 armAngle = LimbSystem::computeAngle(e, 1, e.enemyType);
+                    armAngle = -armAngle; // un-mirror for right arm (index 1)
 
-                    // Entity base (feet position)
-                    Vec3 entBase = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
-                                 + Vec3{0, animBobY, 0};
+                    Vec3 wEntBase = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                                  + Vec3{0, animBobY, 0};
+                    f32 wPivotScale = e.halfExtents.y / 0.5f;
 
-                    f32 limbScale = 1.0f;
-                    if (meshId > 0 && meshId < m_meshDefCount) {
-                        const AABB& meshBounds = m_meshDefs[meshId].bounds;
-                        f32 mH = meshBounds.max.y - meshBounds.min.y;
-                        f32 targetH = e.halfExtents.y * 2.0f * scaleY;
-                        limbScale = (mH > 0.001f) ? (targetH / mH) : 1.0f;
-                    }
-
-                    // Right arm pivot (shoulder), scaled to entity
-                    Vec3 shoulder = {-0.35f * limbScale, 0.70f * limbScale, 0.0f};
+                    // Right arm pivot (shoulder) in entity-local space
+                    Vec3 shoulder = {-0.22f * wPivotScale, 0.56f * wPivotScale, 0.0f};
                     // Arm length (upper + lower arm combined)
-                    f32 armLen = 0.52f * limbScale;
+                    f32 armLen = 0.44f * wPivotScale;
                     // Hand position = shoulder + arm rotated by armAngle around X
                     // Arm hangs down by default, swings with angle
                     f32 handY = shoulder.y - armLen * cosf(armAngle);
@@ -4319,17 +4364,25 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                     // Scale weapon to fit in hand
                     const AABB& wb = m_meshDefs[e.weaponMeshId].bounds;
                     f32 wH = wb.max.y - wb.min.y;
-                    f32 wScale = (wH > 0.001f) ? (0.45f * limbScale / wH) : 0.3f;
+                    f32 wScale = (wH > 0.001f) ? (0.45f * wPivotScale / wH) : 0.3f;
 
                     // Weapon position: entity base + rotated hand offset
                     // The weapon's hilt (bottom) should be at the hand
-                    Vec3 weaponPos = entBase + Vec3{shoulder.x, handY, handZ};
+                    // Weapon in entity-local space, then rotated by yaw to world
+                    Vec3 localWeaponPos = {shoulder.x, handY, handZ};
+                    f32 wcy = cosf(e.yaw), wsy = sinf(e.yaw);
+                    Vec3 weaponPos = wEntBase + Vec3{
+                        localWeaponPos.x * wcy + localWeaponPos.z * wsy,
+                        localWeaponPos.y,
+                        -localWeaponPos.x * wsy + localWeaponPos.z * wcy
+                    };
 
-                    Mat4 weaponModel = Mat4::translate(weaponPos)
+                    Mat4 weaponModel = Mat4::translate(wEntBase)
                                      * Mat4::rotateY(e.yaw)
-                                     * Mat4::rotateX(armAngle) // weapon follows arm swing
+                                     * Mat4::translate(localWeaponPos)
+                                     * Mat4::rotateX(armAngle)
                                      * Mat4::scale({wScale, wScale, wScale})
-                                     * Mat4::translate({0, wH * 0.5f, 0}); // offset so hilt is at hand
+                                     * Mat4::translate({0, wH * 0.5f, 0});
 
                     AABB wBounds = {weaponPos - Vec3{0.5f,0.5f,0.5f},
                                     weaponPos + Vec3{0.5f,0.5f,0.5f}};

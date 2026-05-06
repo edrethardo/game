@@ -1147,21 +1147,297 @@ def gen_butcher(height=2.5):
 # Type registry
 # ---------------------------------------------------------------------------
 
+def gen_skeleton_arm(height=1.8):
+    """Skeleton arm — extracted from gen_humanoid. Origin at shoulder (top).
+    Includes upper arm, lower arm, and hand voxels with proper UV mapping."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Upper arm (2 voxels tall)
+    fill_box(0, 3, 0, 1, 2, 1)
+    # Lower arm (3 voxels tall)
+    fill_box(0, 0, 0, 1, 3, 1)
+    # Hand
+    fill_box(0, -1, -1, 1, 1, 2)
+    # Origin offset — center X, bottom at hand, Z centered
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_skeleton_leg(height=1.8):
+    """Skeleton leg — extracted from gen_humanoid. Origin at hip (top).
+    Includes thigh, shin, and foot voxels."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Thigh (2 voxels tall)
+    fill_box(0, 2, 0, 1, 2, 1)
+    # Shin (2 voxels tall)
+    fill_box(0, 0, 0, 1, 2, 1)
+    # Foot
+    fill_box(0, 0, -1, 1, 1, 2)
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_bat_wing(wingspan=1.0):
+    """Bat wing — wider membrane shape with multiple voxels for texture detail."""
+    mb = MeshBuilder()
+    vs = wingspan / 8.0  # 8 voxels wide
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Wing membrane — tapered shape, wider at base narrowing to tip
+    fill_box(0, 0, 0, 8, 1, 4)   # main membrane (8 wide, 1 tall, 4 deep)
+    fill_box(1, 0, 4, 5, 1, 2)   # inner extension
+    fill_box(2, 0, -1, 4, 1, 1)  # front edge
+    # Wing finger bones (ridges along the membrane)
+    fill_box(0, 1, 1, 1, 1, 1)   # base bone
+    fill_box(3, 1, 2, 1, 1, 1)   # mid bone
+    fill_box(6, 1, 1, 1, 1, 1)   # tip bone
+    ox = -0.5 * vs
+    oz = -2.5 * vs  # center depth-wise
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_butcher_arm(height=2.5):
+    """Butcher thick demon arm — extracted from gen_butcher. Origin at shoulder."""
+    mb = MeshBuilder()
+    vs = height / 20.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Upper arm (4 voxels tall, 1 wide)
+    fill_box(0, 4, 0, 1, 4, 1)
+    # Lower arm (4 voxels tall)
+    fill_box(0, 0, 0, 1, 4, 1)
+    # Big fist (2x2x2)
+    fill_box(-1, -1, -1, 2, 2, 2)
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_butcher_leg(height=2.5):
+    """Butcher thick demon leg — extracted from gen_butcher. Origin at hip."""
+    mb = MeshBuilder()
+    vs = height / 20.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Thigh (3x4x3)
+    fill_box(-1, 3, -1, 3, 4, 3)
+    # Shin (3x3x3)
+    fill_box(-1, 0, -1, 3, 3, 3)
+    # Hoof
+    fill_box(-1, 0, -2, 3, 1, 4)
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_bat_foot():
+    """Bat foot/talon — small curved claw shape."""
+    mb = MeshBuilder()
+    vs = 0.05  # small voxel size
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Ankle joint
+    fill_box(0, 2, 0, 1, 1, 1)
+    # Three toes spreading forward
+    fill_box(-1, 0, -1, 1, 2, 1)  # left toe
+    fill_box(0, 0, -2, 1, 2, 1)   # center toe
+    fill_box(1, 0, -1, 1, 2, 1)   # right toe
+    # Back claw
+    fill_box(0, 0, 1, 1, 1, 1)
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_humanoid_torso(height=1.8):
+    """Skeleton torso only — arms and legs removed for limb system animation."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Skull
+    fill_box(-2, 12, -2, 5, 4, 4)
+    fill_box(-1, 11, -2, 3, 1, 3)
+    filled.discard((-1, 14, -2)); filled.discard((1, 14, -2))
+    filled.discard((0, 13, -2)); filled.discard((0, 11, -2))
+    # Neck
+    fill_box(0, 10, 0, 1, 1, 1)
+    # Rib cage
+    fill_box(0, 5, 1, 1, 5, 1)
+    for ry in [6, 7, 9]:
+        fill_box(-2, ry, 0, 2, 1, 2)
+        fill_box(1, ry, 0, 2, 1, 2)
+    # Shoulder bones (attachment points for arm limbs)
+    fill_box(-3, 9, 0, 1, 1, 1)
+    fill_box(3, 9, 0, 1, 1, 1)
+    # Pelvis (attachment point for leg limbs)
+    fill_box(-1, 4, 0, 3, 1, 1)
+    # NO arms, NO legs — limb system provides these
+    ox = -0.5 * vs; oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_human_torso(height=1.8):
+    """Human NPC torso only — arms and legs removed for limb system animation."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)
+    filled.discard((-1, 14, -2)); filled.discard((1, 14, -2))
+    filled.discard((0, 12, -2))
+    # Neck
+    fill_box(0, 11, 0, 1, 1, 1)
+    # Torso
+    fill_box(-2, 6, -1, 5, 5, 3)
+    fill_box(-3, 9, -1, 1, 2, 3)  # left shoulder pad
+    fill_box(3, 9, -1, 1, 2, 3)   # right shoulder pad
+    # Belt
+    fill_box(-2, 5, -1, 5, 1, 3)
+    # Hip connectors (slim pelvis for leg attachment)
+    fill_box(-2, 4, -1, 5, 1, 2)
+    # NO arms, NO legs
+    ox = -0.5 * vs; oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+def gen_butcher_torso(height=2.5):
+    """Butcher boss torso only — arms and legs removed for limb system animation."""
+    mb = MeshBuilder()
+    vs = height / 20.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head
+    fill_box(-3, 16, -3, 6, 4, 5)
+    fill_box(-2, 15, -3, 4, 1, 4)
+    filled.discard((-2, 18, -3)); filled.discard((1, 18, -3))
+    filled.discard((-2, 18, -2)); filled.discard((1, 18, -2))
+    filled.discard((-1, 15, -3)); filled.discard((0, 15, -3))
+    # Horns
+    fill_box(-4, 19, -1, 1, 2, 1); filled.add((-5, 20, -1))
+    fill_box(3, 19, -1, 1, 2, 1); filled.add((4, 20, -1))
+    # Neck
+    fill_box(-1, 14, -1, 3, 2, 2)
+    # Massive torso
+    fill_box(-4, 8, -2, 8, 6, 4)
+    fill_box(-3, 10, -3, 6, 3, 1)
+    # Shoulder mounds (attachment points for arm limbs)
+    fill_box(-5, 12, -1, 1, 2, 3)
+    fill_box(4, 12, -1, 1, 2, 3)
+    # Belt / waist
+    fill_box(-4, 7, -2, 8, 1, 4)
+    # Hip area (attachment for leg limbs)
+    fill_box(-3, 6, -1, 7, 1, 3)
+    # NO arms, NO legs, NO fists, NO hooves
+    ox = -0.5 * vs; oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
 MESH_TYPES = {
     "humanoid": {
         "func": gen_humanoid,
         "desc": "Barony-style voxel humanoid. Params: --height",
         "default_file": "humanoid.obj",
     },
+    "humanoid_torso": {
+        "func": gen_humanoid_torso,
+        "desc": "Skeleton torso only (no arms/legs). Params: --height",
+        "default_file": "skeleton.obj",
+    },
     "human": {
         "func": gen_human,
         "desc": "Barony-style voxel human NPC. Params: --height",
+        "default_file": "human.obj",
+    },
+    "human_torso": {
+        "func": gen_human_torso,
+        "desc": "Human NPC torso only (no arms/legs). Params: --height",
         "default_file": "human.obj",
     },
     "butcher": {
         "func": lambda height=2.5: gen_butcher(height),
         "desc": "Large demon boss with horns. Params: --height",
         "default_file": "butcher.obj",
+    },
+    "butcher_torso": {
+        "func": lambda height=2.5: gen_butcher_torso(height),
+        "desc": "Butcher torso only (no arms/legs). Params: --height",
+        "default_file": "butcher.obj",
+    },
+    "skeleton_arm": {
+        "func": gen_skeleton_arm,
+        "desc": "Skeleton arm (upper + lower + hand). Params: --height",
+        "default_file": "skeleton_arm.obj",
+    },
+    "skeleton_leg": {
+        "func": gen_skeleton_leg,
+        "desc": "Skeleton leg (thigh + shin + foot). Params: --height",
+        "default_file": "skeleton_leg.obj",
+    },
+    "bat_wing": {
+        "func": lambda wingspan=1.0: gen_bat_wing(wingspan),
+        "desc": "Bat wing membrane shape. Params: --wingspan",
+        "default_file": "bat_wing.obj",
+    },
+    "butcher_arm": {
+        "func": lambda height=2.5: gen_butcher_arm(height),
+        "desc": "Butcher thick demon arm. Params: --height",
+        "default_file": "butcher_arm.obj",
+    },
+    "butcher_leg": {
+        "func": lambda height=2.5: gen_butcher_leg(height),
+        "desc": "Butcher thick demon leg. Params: --height",
+        "default_file": "butcher_leg.obj",
+    },
+    "bat_foot": {
+        "func": gen_bat_foot,
+        "desc": "Bat foot/talon with three toes.",
+        "default_file": "bat_foot.obj",
     },
     "cleric": {
         "func": gen_cleric,

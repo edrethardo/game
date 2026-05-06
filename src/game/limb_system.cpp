@@ -13,6 +13,8 @@ static u8 s_spiderLegMeshId = 0;
 static u8 s_mandibleMeshId  = 0;
 static u8 s_wingMeshId      = 0;
 static u8 s_clawMeshId      = 0;
+static u8 s_butcherArmMeshId = 0;
+static u8 s_butcherLegMeshId = 0;
 
 // ============================================================
 //  Box mesh builder (same pattern as engine.cpp hand mesh)
@@ -33,6 +35,8 @@ static Mesh buildBoxMesh(Vec3 halfSize) {
     u32 faceIdx[6][4] = {
         {0,1,2,3}, {5,4,7,6}, {4,0,3,7}, {1,5,6,2}, {4,5,1,0}, {3,2,6,7}
     };
+    // Per-face UV coordinates — each face maps [0,0] to [1,1]
+    Vec2 faceUVs[4] = {{0,0}, {1,0}, {1,1}, {0,1}};
 
     Vertex verts[24];
     u32 indices[36];
@@ -40,7 +44,7 @@ static Mesh buildBoxMesh(Vec3 halfSize) {
 
     for (u32 f = 0; f < 6; f++) {
         for (u32 v = 0; v < 4; v++) {
-            verts[vc++] = {corners[faceIdx[f][v]], normals[f], {0, 0}};
+            verts[vc++] = {corners[faceIdx[f][v]], normals[f], faceUVs[v]};
         }
         u32 b = f * 4;
         indices[ic++] = b;     indices[ic++] = b + 1; indices[ic++] = b + 2;
@@ -55,23 +59,20 @@ static Mesh buildBoxMesh(Vec3 halfSize) {
 // ============================================================
 
 // Skeleton: 8 limbs (4 arm segments + 4 leg segments)
-// Limb indices: 0=L_upper_arm, 1=L_lower_arm, 2=R_upper_arm, 3=R_lower_arm
-//               4=L_upper_leg, 5=L_lower_leg, 6=R_upper_leg, 7=R_lower_leg
+// Limb indices: 0=L_arm, 1=R_arm, 2=L_leg, 3=R_leg
+// Each is ONE full OBJ mesh (upper + lower + hand/foot).
+// Pivot at shoulder/hip. Scaled by pivotScale at render time.
 static const LimbConfig s_skeletonConfig = {
-    8,
+    4,
     {
-        // Left arm
-        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},  // upper
-        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false}, // lower
+        // Left arm — pivot at shoulder, swings from shoulder joint
+        {{ 0.22f, 0.56f, 0.0f}, {0.07f, 0.16f, 0.07f}, 0.0f, 0, false},
         // Right arm
-        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},   // upper
-        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},  // lower
-        // Left leg
-        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},  // upper
-        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},  // lower
+        {{-0.22f, 0.56f, 0.0f}, {0.07f, 0.16f, 0.07f}, 0.0f, 0, true},
+        // Left leg — pivot at hip
+        {{ 0.10f, 0.25f, 0.0f}, {0.09f, 0.18f, 0.09f}, 0.0f, 0, false},
         // Right leg
-        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},   // upper
-        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},   // lower
+        {{-0.10f, 0.25f, 0.0f}, {0.09f, 0.18f, 0.09f}, 0.0f, 0, true},
     }
 };
 
@@ -131,15 +132,37 @@ void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount) {
         return id;
     };
 
-    s_armMeshId       = registerMesh("limb_arm",        {0.04f, 0.14f, 0.04f});
-    s_legMeshId       = registerMesh("limb_leg",        {0.05f, 0.20f, 0.05f});
-    s_spiderLegMeshId = registerMesh("limb_spider_leg", {0.03f, 0.22f, 0.03f});
-    s_mandibleMeshId  = registerMesh("limb_mandible",   {0.04f, 0.05f, 0.02f});
+    // Note: skeleton/human/butcher OBJ meshes already include arms and legs,
+    // so arm/leg limb boxes are only used for boss EXTRA limbs and spider mandibles.
+    // They need to be large enough to be visible outside the body.
+    // Limb meshes — sized to match body proportions when body OBJ has no arms/legs.
+    // These are the SOLE source of appendages now.
+    s_armMeshId       = registerMesh("limb_arm",        {0.07f, 0.16f, 0.07f});
+    s_legMeshId       = registerMesh("limb_leg",        {0.09f, 0.22f, 0.09f});
+    s_spiderLegMeshId = registerMesh("limb_spider_leg", {0.05f, 0.28f, 0.05f});
+    s_mandibleMeshId  = registerMesh("limb_mandible",   {0.06f, 0.08f, 0.03f});
     s_wingMeshId      = registerMesh("limb_wing",       {0.45f, 0.03f, 0.28f});
-    s_clawMeshId      = registerMesh("limb_claw",       {0.03f, 0.08f, 0.03f});
+    s_clawMeshId      = registerMesh("limb_claw",       {0.04f, 0.10f, 0.04f});
 
     LOG_INFO("LimbSystem: registered %u limb meshes (arm=%u leg=%u spider=%u mand=%u wing=%u claw=%u)",
              6u, s_armMeshId, s_legMeshId, s_spiderLegMeshId, s_mandibleMeshId, s_wingMeshId, s_clawMeshId);
+}
+
+void LimbSystem::setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u8 butcherLegId, u8 batFootId) {
+    if (armId > 0)        s_armMeshId = armId;
+    if (legId > 0)        s_legMeshId = legId;
+    if (wingId > 0)       s_wingMeshId = wingId;
+    if (butcherArmId > 0) s_butcherArmMeshId = butcherArmId;
+    if (butcherLegId > 0) s_butcherLegMeshId = butcherLegId;
+    if (batFootId > 0)    s_clawMeshId = batFootId;
+    LOG_INFO("LimbSystem: OBJ overrides arm=%u leg=%u wing=%u bArm=%u bLeg=%u claw=%u",
+             s_armMeshId, s_legMeshId, s_wingMeshId, s_butcherArmMeshId, s_butcherLegMeshId, s_clawMeshId);
+}
+
+bool LimbSystem::isObjLimbMesh(u8 meshId) {
+    return meshId == s_armMeshId || meshId == s_legMeshId ||
+           meshId == s_wingMeshId || meshId == s_butcherArmMeshId ||
+           meshId == s_butcherLegMeshId || meshId == s_clawMeshId;
 }
 
 // ============================================================
@@ -163,7 +186,8 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
         case EnemyType::SKELETON:
         case EnemyType::BOSS:
             // 0-3 = arms, 4-7 = legs
-            return (limbIdx < 4) ? s_armMeshId : s_legMeshId;
+            // 0-1 = arms, 2-3 = legs
+            return (limbIdx < 2) ? s_armMeshId : s_legMeshId;
         case EnemyType::BAT:
             // 0-1 = wings, 2-3 = claws
             return (limbIdx < 2) ? s_wingMeshId : s_clawMeshId;
@@ -179,80 +203,57 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
 //  Boss-specific limb configs (extra limbs beyond skeleton base)
 // ============================================================
 
-// Andariel: skeleton base (8) + 4 spider legs from torso sides
+// Boss configs reuse the 4-limb skeleton base, plus extra limbs at index 4+.
+#define SKEL_BASE_LIMBS \
+    {{ 0.22f, 0.56f, 0.0f}, {0.07f, 0.16f, 0.07f}, 0.0f, 0, false}, \
+    {{-0.22f, 0.56f, 0.0f}, {0.07f, 0.16f, 0.07f}, 0.0f, 0, true},  \
+    {{ 0.10f, 0.25f, 0.0f}, {0.09f, 0.18f, 0.09f}, 0.0f, 0, false}, \
+    {{-0.10f, 0.25f, 0.0f}, {0.09f, 0.18f, 0.09f}, 0.0f, 0, true}
+
+// Andariel: base limbs + 4 spider legs from torso sides
 static const LimbConfig s_bossAndarielConfig = {
-    12,
+    8,
     {
-        // Standard skeleton limbs (0-7) — same as s_skeletonConfig
-        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
-        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
-        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
-        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
-        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
-        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
-        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
-        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
-        // Extra: 4 spider legs — upper pair wide and forward, lower pair from mid-torso
-        {{ 0.60f, 0.65f,  0.30f}, {0.04f, 0.30f, 0.04f}, 0.5f, 0, false},
-        {{-0.60f, 0.65f,  0.30f}, {0.04f, 0.30f, 0.04f}, 0.5f, 0, true},
-        {{ 0.65f, 0.50f,  0.10f}, {0.04f, 0.28f, 0.04f}, 0.4f, 0, false},
-        {{-0.65f, 0.50f,  0.10f}, {0.04f, 0.28f, 0.04f}, 0.4f, 0, true},
+        SKEL_BASE_LIMBS,
+        // Extra: 4 spider legs extending outward and forward
+        {{ 0.35f, 0.50f,  0.15f}, {0.05f, 0.30f, 0.05f}, 0.6f, 0, false},
+        {{-0.35f, 0.50f,  0.15f}, {0.05f, 0.30f, 0.05f}, 0.6f, 0, true},
+        {{ 0.38f, 0.40f,  0.05f}, {0.05f, 0.28f, 0.05f}, 0.5f, 0, false},
+        {{-0.38f, 0.40f,  0.05f}, {0.05f, 0.28f, 0.05f}, 0.5f, 0, true},
     }
 };
 
-// Mephisto: skeleton base (8) + 2 ghostly tentacles above shoulders
+// Mephisto: base limbs + 2 ghostly tentacles above shoulders
 static const LimbConfig s_bossMephistoConfig = {
-    10,
+    6,
     {
-        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
-        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
-        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
-        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
-        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
-        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
-        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
-        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
-        // Extra: 2 ghostly tentacle appendages above shoulders
-        {{ 0.40f, 0.90f, -0.10f}, {0.03f, 0.30f, 0.03f}, -0.5f, 0, false},
-        {{-0.40f, 0.90f, -0.10f}, {0.03f, 0.30f, 0.03f}, -0.5f, 0, true},
+        SKEL_BASE_LIMBS,
+        {{ 0.28f, 0.70f, -0.08f}, {0.05f, 0.30f, 0.05f}, -0.5f, 0, false},
+        {{-0.28f, 0.70f, -0.08f}, {0.05f, 0.30f, 0.05f}, -0.5f, 0, true},
     }
 };
 
-// Diablo: skeleton base (8) + 2 back spikes (upward-pointing, slight sway)
+// Diablo: base limbs + 2 back spikes
 static const LimbConfig s_bossDiabloConfig = {
-    10,
+    6,
     {
-        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
-        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
-        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
-        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
-        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
-        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
-        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
-        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
-        // Extra: 2 large back spikes pointing upward
-        {{ 0.25f, 0.95f, -0.20f}, {0.04f, 0.35f, 0.04f}, -0.3f, 0, false},
-        {{-0.25f, 0.95f, -0.20f}, {0.04f, 0.35f, 0.04f}, -0.3f, 0, true},
+        SKEL_BASE_LIMBS,
+        {{ 0.18f, 0.72f, -0.12f}, {0.05f, 0.35f, 0.05f}, -0.3f, 0, false},
+        {{-0.18f, 0.72f, -0.12f}, {0.05f, 0.35f, 0.05f}, -0.3f, 0, true},
     }
 };
 
-// Grim Reaper: skeleton base (8) + 2 scythe-blade arms from back
+// Grim Reaper: base limbs + 2 scythe-blade appendages from back
 static const LimbConfig s_bossReaperConfig = {
-    10,
+    6,
     {
-        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
-        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
-        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
-        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
-        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
-        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
-        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
-        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
-        // Extra: 2 scythe-like blade appendages from upper back
-        {{ 0.45f, 0.85f, -0.15f}, {0.02f, 0.35f, 0.06f}, -0.6f, 0, false},
-        {{-0.45f, 0.85f, -0.15f}, {0.02f, 0.35f, 0.06f}, -0.6f, 0, true},
+        SKEL_BASE_LIMBS,
+        {{ 0.30f, 0.65f, -0.10f}, {0.04f, 0.35f, 0.07f}, -0.6f, 0, false},
+        {{-0.30f, 0.65f, -0.10f}, {0.04f, 0.35f, 0.07f}, -0.6f, 0, true},
     }
 };
+
+#undef SKEL_BASE_LIMBS
 
 const LimbConfig& LimbSystem::getBossConfig(u8 configId) {
     switch (configId) {
@@ -265,10 +266,10 @@ const LimbConfig& LimbSystem::getBossConfig(u8 configId) {
 }
 
 u8 LimbSystem::getBossLimbMeshId(u8 configId, u32 limbIdx) {
-    // First 8 limbs = standard skeleton (arms/legs)
-    if (limbIdx < 4) return s_armMeshId;
-    if (limbIdx < 8) return s_legMeshId;
-    // Extra limbs (8+): use spider leg mesh for Andariel, arm mesh for others
+    // 0-1 = arms, 2-3 = legs (same as skeleton)
+    if (limbIdx < 2) return s_armMeshId;
+    if (limbIdx < 4) return s_legMeshId;
+    // Extra limbs (4+): use spider leg mesh for Andariel, arm mesh for others
     if (configId == 1) return s_spiderLegMeshId; // Andariel's spider legs
     return s_armMeshId; // tentacles, spikes, blades use arm mesh
 }
@@ -285,34 +286,29 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
     switch (type) {
         case EnemyType::SKELETON:
         case EnemyType::BOSS: {
+            // 4-limb layout: 0=L_arm, 1=R_arm, 2=L_leg, 3=R_leg
+            // Extra boss limbs at 4+
             f32 walkPhase = e.animTimer * 8.0f;
-            bool isRight = (limbIdx == 2 || limbIdx == 3 || limbIdx == 6 || limbIdx == 7);
+            bool isRight = (limbIdx == 1 || limbIdx == 3);
             f32 phase = isRight ? (walkPhase + 3.14159f) : walkPhase;
 
-            // Attack override for right arm (index 2, 3) — slam forward
-            if (e.attackAnimT > 0.0f && (limbIdx == 2 || limbIdx == 3)) {
-                f32 t = e.attackAnimT / 0.3f;
-                return -1.2f * sinf(t * 3.14159f);
-            }
-
-            if (limbIdx < 4) {
-                // Arms swing opposite to legs + gentle idle sway when still
+            if (limbIdx < 2) {
+                // Arms — swing opposite to legs
+                // Attack override for right arm (index 1)
+                if (e.attackAnimT > 0.0f && limbIdx == 1) {
+                    f32 t = e.attackAnimT / 0.3f;
+                    return -1.2f * sinf(t * 3.14159f);
+                }
                 f32 armPhase = phase + 3.14159f;
                 f32 idleSway = sinf(e.animTimer * 2.0f) * 0.08f;
                 return sinf(armPhase) * 0.5f * speed01 + idleSway;
-            } else if (limbIdx < 8) {
-                // Legs
-                bool isLower = (limbIdx == 5 || limbIdx == 7);
-                if (isLower) {
-                    f32 bend = sinf(phase + 0.8f);
-                    return (bend > 0 ? bend : 0) * 0.5f * speed01;
-                }
+            } else if (limbIdx < 4) {
+                // Legs — forward/back swing
                 return sinf(phase) * 0.6f * speed01;
             } else {
-                // Extra boss limbs (8+): slow menacing sway independent of walk
+                // Extra boss limbs (4+): slow menacing sway
                 f32 extraPhase = e.animTimer * 1.5f + limbIdx * 1.2f;
                 f32 sway = sinf(extraPhase) * 0.25f;
-                // During attack, extra limbs flare outward
                 if (e.attackAnimT > 0.0f) {
                     sway += -0.4f * sinf(e.attackAnimT / 0.3f * 3.14159f);
                 }

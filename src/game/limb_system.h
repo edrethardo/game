@@ -40,6 +40,12 @@ namespace LimbSystem {
     // Call once during Engine::init() after loading OBJ meshes.
     void init(MeshDef* meshDefs, u32& meshDefCount);
 
+    // Override limb mesh IDs with OBJ-loaded meshes (call after init + OBJ loading)
+    void setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u8 butcherLegId, u8 batFootId);
+
+    // Returns true if this mesh ID is an OBJ-loaded limb (not a procedural box)
+    bool isObjLimbMesh(u8 meshId);
+
     // Get the static limb configuration for an enemy type.
     const LimbConfig& getConfig(EnemyType type);
 
