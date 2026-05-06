@@ -3781,8 +3781,14 @@ void Engine::renderViewmodel() {
         }
     }
 
-    // Reload animation — weapon tilts down and to the side during reload
+    // Throwaway SMG: weapon is gone during reload (it was thrown)
     WeaponState& vmWs = m_players[m_localPlayerIndex].weaponState;
+    if (hasWeapon && m_itemDefs[equipped.defId].legendarySkillId == SkillId::THROWAWAY &&
+        vmWs.reloading) {
+        return; // weapon is flying through the air — nothing to render
+    }
+
+    // Reload animation — weapon tilts down and to the side during reload
     f32 reloadAnim = 0.0f; // 0 = not reloading, 1 = mid-reload
     if (vmWs.reloading && def.weaponType == WeaponType::HITSCAN) {
         // Build effective weapon to get reload time for progress calc
