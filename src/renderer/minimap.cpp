@@ -269,9 +269,36 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
     glBindBuffer(GL_ARRAY_BUFFER, s_minimapVBO);
 
     // ------------------------------------------------------------------
-    // 1. Dark border background (slightly larger than the map)
+    // 1. Frame + dark background behind the map
     // ------------------------------------------------------------------
     {
+        // Outer frame (bright edge)
+        static constexpr f32 FRAME = 3.0f;
+        f32 fx0 = mapX - BORDER - FRAME;
+        f32 fy0 = mapY - BORDER - FRAME;
+        f32 fx1 = mapX + MAP_SIZE + BORDER + FRAME;
+        f32 fy1 = mapY + MAP_SIZE + BORDER + FRAME;
+
+        MinimapVertex frame[6];
+        frame[0] = {{fx0, fy0, 0}, {0, 0}};
+        frame[1] = {{fx1, fy0, 0}, {1, 0}};
+        frame[2] = {{fx1, fy1, 0}, {1, 1}};
+        frame[3] = {{fx0, fy0, 0}, {0, 0}};
+        frame[4] = {{fx1, fy1, 0}, {1, 1}};
+        frame[5] = {{fx0, fy1, 0}, {0, 1}};
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_whiteTex);
+        if (s_minimapShader.loc_texture0 >= 0)
+            glUniform1i(s_minimapShader.loc_texture0, 0);
+
+        // Draw frame in muted gold
+        glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), frame);
+        if (s_minimapShader.loc_color >= 0)
+            glUniform4f(s_minimapShader.loc_color, 0.55f, 0.45f, 0.2f, 0.9f);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // Dark background inside frame
         f32 bx0 = mapX - BORDER;
         f32 by0 = mapY - BORDER;
         f32 bx1 = mapX + MAP_SIZE + BORDER;
@@ -286,14 +313,8 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
         bg[5] = {{bx0, by1, 0}, {0, 1}};
 
         glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), bg);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, s_whiteTex);
-        if (s_minimapShader.loc_texture0 >= 0)
-            glUniform1i(s_minimapShader.loc_texture0, 0);
         if (s_minimapShader.loc_color >= 0)
-            glUniform4f(s_minimapShader.loc_color, 0.0f, 0.0f, 0.0f, 0.75f);
-
+            glUniform4f(s_minimapShader.loc_color, 0.0f, 0.0f, 0.0f, 0.85f);
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 
