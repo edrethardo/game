@@ -3474,9 +3474,9 @@ void Engine::handleWeaponFire(f32 dt) {
             projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles,
                                               9.8f, 3.0f, wpn.damage * 0.6f);
         } else {
-            // Wands get spark visual, but void zone weapons get default (purple tinted)
+            // Wands get spark visual; void weapons get purple tint via PROJ_VOID flag
             bool isVoidWand = isWand && m_weaponProc == SkillId::VOID_ZONE;
-            u8 flags = (isWand && !isVoidWand) ? PROJ_SPARK : 0;
+            u8 flags = isVoidWand ? PROJ_VOID : (isWand ? PROJ_SPARK : 0);
             projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles, flags);
         }
         // Assign correct mesh to projectile based on weapon subtype
@@ -4637,9 +4637,9 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                                * Mat4::scale({coreSize, coreSize, coreSize});
                 AABB coreBounds = {p.position - Vec3{coreSize,coreSize,coreSize},
                                    p.position + Vec3{coreSize,coreSize,coreSize}};
-                // Void zone weapons get purple projectiles
-                bool isVoidWeapon = isPlayer && m_weaponProc == SkillId::VOID_ZONE;
-                Vec4 coreColor = isVoidWeapon
+                // Void-tagged projectiles get purple tint (only basic attacks, not skills)
+                bool isVoidProj = (p.projFlags & PROJ_VOID) != 0;
+                Vec4 coreColor = isVoidProj
                     ? Vec4{0.6f * pulse, 0.15f, 0.9f, 1.0f}    // dark purple
                     : isPlayer
                     ? Vec4{1.0f, 0.8f * pulse, 0.3f, 1.0f}     // warm golden
@@ -4654,7 +4654,7 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                                * Mat4::scale({glowSize, glowSize * 0.7f, glowSize});
                 AABB glowBounds = {p.position - Vec3{glowSize,glowSize,glowSize},
                                    p.position + Vec3{glowSize,glowSize,glowSize}};
-                Vec4 glowColor = isVoidWeapon
+                Vec4 glowColor = isVoidProj
                     ? Vec4{0.4f, 0.05f, 0.7f, 0.4f}
                     : isPlayer
                     ? Vec4{1.0f, 0.4f, 0.05f, 0.35f}
