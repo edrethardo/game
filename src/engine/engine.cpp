@@ -1340,7 +1340,9 @@ void Engine::startGame() {
         // meshIdx 3 = human mesh (used by zombies, ghouls, stalkers, demons, shades)
         u8 meshLookup[] = {m_meshIdSkeleton, m_meshIdBat, m_meshIdSpider, m_meshIdHuman};
 
-        for (u32 r = 1; r < dungeon.roomCount; r++) {
+        // Skip rooms near spawn so enemies don't ambush the player immediately
+        u32 firstEnemyRoom = (dungeon.roomCount > 4) ? 3 : 1;
+        for (u32 r = firstEnemyRoom; r < dungeon.roomCount; r++) {
             const DungeonRoom& room = dungeon.rooms[r];
 
             u32 area = room.w * room.d;
@@ -1739,19 +1741,19 @@ void Engine::startGame() {
         f32 sy = dungeon.spawnPos.y + 0.9f;
 
         // NPC 0: Cleric — front left
-        spawnFriendlyNpc({dungeon.spawnPos.x - 1.5f, sy, dungeon.spawnPos.z + 1.0f},
+        spawnFriendlyNpc({dungeon.spawnPos.x - 2.5f, sy, dungeon.spawnPos.z + 2.0f},
                           NpcClass::CLERIC, floor);
         // NPC 1: Archer — front right
-        spawnFriendlyNpc({dungeon.spawnPos.x + 1.5f, sy, dungeon.spawnPos.z + 1.0f},
+        spawnFriendlyNpc({dungeon.spawnPos.x + 2.5f, sy, dungeon.spawnPos.z + 2.0f},
                           NpcClass::ARCHER, floor);
         // NPC 2: Mage — back left
-        spawnFriendlyNpc({dungeon.spawnPos.x - 1.0f, sy, dungeon.spawnPos.z - 1.0f},
+        spawnFriendlyNpc({dungeon.spawnPos.x - 2.0f, sy, dungeon.spawnPos.z - 2.0f},
                           NpcClass::MAGE, floor);
         // NPC 3: Rogue — back right
-        spawnFriendlyNpc({dungeon.spawnPos.x + 1.0f, sy, dungeon.spawnPos.z - 1.0f},
+        spawnFriendlyNpc({dungeon.spawnPos.x + 2.0f, sy, dungeon.spawnPos.z - 2.0f},
                           NpcClass::ROGUE, floor);
         // NPC 4: Paladin — center back
-        spawnFriendlyNpc({dungeon.spawnPos.x, sy, dungeon.spawnPos.z - 1.5f},
+        spawnFriendlyNpc({dungeon.spawnPos.x, sy, dungeon.spawnPos.z - 3.0f},
                           NpcClass::PALADIN, floor);
         LOG_INFO("Spawned 5 friendly NPCs (cleric, archer, mage, rogue, paladin) in spawn room");
     }
@@ -3359,8 +3361,11 @@ void Engine::handleWeaponFire(f32 dt) {
         if (!isItemEmpty(eqWpn) && m_itemDefs[eqWpn.defId].legendarySkillId == SkillId::THROWAWAY) {
             Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
             Vec3 forward = m_localPlayer.forward;
+            // Offset to weapon hand position (right side, slightly down)
+            Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
+            Vec3 spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
             f32 throwDmg = wpn.damage * wpn.clipSize * 0.5f;
-            u16 projIdx = ProjectileSystem::spawn(m_projectiles, eyePos + forward * 1.0f,
+            u16 projIdx = ProjectileSystem::spawn(m_projectiles, spawnPos,
                 forward, 20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
             if (projIdx != 0xFFFF) {
                 m_projectiles.projectiles[projIdx].meshId = m_itemDefs[eqWpn.defId].meshId;

@@ -373,8 +373,10 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             static constexpr f32 ARROW_LEN = 7.0f;
             static constexpr f32 ARROW_W   = 1.5f;
 
-            f32 dirSX =  sinf(playerYaw);         // screen X component
-            f32 dirSY =  cosf(playerYaw);          // screen Y component (Z flipped)
+            // Player forward = (-sin(yaw), 0, -cos(yaw))
+            // Minimap: world +X → screen +X, world -Z → screen +Y (Z flipped)
+            f32 dirSX = -sinf(playerYaw);         // matches forward.x
+            f32 dirSY =  cosf(playerYaw);          // -forward.z → +screen Y
 
             // Tip of the arrow
             f32 tipX = dotX + dirSX * ARROW_LEN;
