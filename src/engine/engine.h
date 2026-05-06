@@ -161,6 +161,11 @@ private:
     ChatLine m_chatLog[MAX_CHAT_LINES] = {};
     void addChatMessage(const char* speaker, const char* msg, Vec3 color);
 
+    // Hitscan impact spark — small burst at hit position
+    static constexpr u32 MAX_IMPACT_FX = 8;
+    struct ImpactFX { Vec3 pos; Vec3 normal; f32 timer; bool active; bool isEntity; };
+    ImpactFX m_impactFX[MAX_IMPACT_FX] = {};
+
     // AoE fire effect (cheap visual for molotov splash)
     static constexpr u32 MAX_FIRE_FX = 8;
     struct FireFX { Vec3 pos; f32 radius; f32 timer; bool active; };

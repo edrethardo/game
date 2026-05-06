@@ -352,6 +352,8 @@ void Engine::init() {
             {"butcher",        "assets/meshes/butcher.obj"},
             {"cleaver",        "assets/meshes/cleaver.obj"},
             {"iron_maiden",    "assets/meshes/iron_maiden.obj"},
+            {"arrow",          "assets/meshes/arrow.obj"},
+            {"bolt",           "assets/meshes/bolt.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -2285,7 +2287,13 @@ void Engine::singleplayerUpdate(f32 dt) {
     // Update world items
     WorldItemSystem::update(m_worldItems, dt);
 
-    // Decay visual effects (fire, nova, dash)
+    // Decay visual effects (impact, fire, nova, dash)
+    for (u32 i = 0; i < MAX_IMPACT_FX; i++) {
+        if (m_impactFX[i].active) {
+            m_impactFX[i].timer -= dt;
+            if (m_impactFX[i].timer <= 0.0f) m_impactFX[i].active = false;
+        }
+    }
     for (u32 i = 0; i < MAX_FIRE_FX; i++) {
         if (m_fireFX[i].active) {
             m_fireFX[i].timer -= dt;
@@ -3162,6 +3170,14 @@ void Engine::handleWeaponFire(f32 dt) {
             m_lastCombatHit.normal   = result.hitNormal;
             m_lastCombatHit.distance = result.hitDistance;
             m_lastCombatHit.type     = result.hitEntity ? CombatHit::ENTITY : CombatHit::WORLD;
+            // Spawn impact spark at hit position
+            for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
+                if (!m_impactFX[fx].active) {
+                    m_impactFX[fx] = {result.hitPosition, result.hitNormal,
+                                      0.3f, true, result.hitEntity};
+                    break;
+                }
+            }
         }
         break;
     case WeaponType::PROJECTILE: {
@@ -3169,25 +3185,37 @@ void Engine::handleWeaponFire(f32 dt) {
                          m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::MOLOTOV;
         bool isWand = qbItem && !isItemEmpty(*qbItem) &&
                       m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::WAND;
+        bool isBow = qbItem && !isItemEmpty(*qbItem) &&
+                     m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::BOW;
+        bool isCrossbow = qbItem && !isItemEmpty(*qbItem) &&
+                          m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::CROSSBOW;
+
+        // Spawn projectile offset to the right of center (weapon position)
+        Vec3 spawnPos = eyePos + forward * 0.8f;
+        if (isBow || isCrossbow || isMolotov) {
+            // Offset right and slightly down to match weapon hand position
+            Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
+            spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
+        }
 
         u16 projIdx;
         if (isMolotov) {
-            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
+            projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles,
                                               9.8f, 3.0f, wpn.damage * 0.6f);
         } else {
             u8 flags = isWand ? PROJ_SPARK : 0;
-            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
+            projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles, flags);
         }
-        // Tag thrown weapons with their mesh (knife, molotov, bow, crossbow)
+        // Assign correct mesh to projectile based on weapon subtype
         if (projIdx != 0xFFFF && qbItem && !isItemEmpty(*qbItem)) {
-            u8 wpnMesh = m_itemDefs[qbItem->defId].meshId;
             WeaponSubtype sub = m_itemDefs[qbItem->defId].weaponSubtype;
-            bool isThrown = (sub == WeaponSubtype::THROWING_KNIFE ||
-                             sub == WeaponSubtype::MOLOTOV ||
-                             sub == WeaponSubtype::BOW ||
-                             sub == WeaponSubtype::CROSSBOW);
-            if (isThrown && wpnMesh > 0) {
-                m_projectiles.projectiles[projIdx].meshId = wpnMesh;
+            if (sub == WeaponSubtype::BOW) {
+                m_projectiles.projectiles[projIdx].meshId = findMeshByName("arrow");
+            } else if (sub == WeaponSubtype::CROSSBOW) {
+                m_projectiles.projectiles[projIdx].meshId = findMeshByName("bolt");
+            } else if (sub == WeaponSubtype::THROWING_KNIFE || sub == WeaponSubtype::MOLOTOV) {
+                u8 wpnMesh = m_itemDefs[qbItem->defId].meshId;
+                if (wpnMesh > 0) m_projectiles.projectiles[projIdx].meshId = wpnMesh;
             }
         }
         result.didFire = true;
@@ -4207,11 +4235,14 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
 
         } else {
             if (p.meshId > 0 && p.meshId < m_meshDefCount) {
-                // Thrown weapon — spinning mesh with motion trail
                 Vec3 vel = p.velocity;
                 f32 spd = length(vel);
                 f32 flyYaw = (spd > 0.01f) ? atan2f(-vel.x, -vel.z) : 0.0f;
-                f32 spinAngle = p.lifetime * 15.0f;
+
+                // Check if this is an arrow or bolt (fly straight, no spin)
+                u8 arrowId = findMeshByName("arrow");
+                u8 boltId  = findMeshByName("bolt");
+                bool isArrowOrBolt = (p.meshId == arrowId || p.meshId == boltId);
 
                 const AABB& mb = m_meshDefs[p.meshId].bounds;
                 f32 maxDim = mb.max.y - mb.min.y;
@@ -4219,12 +4250,26 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 f32 md = mb.max.z - mb.min.z;
                 if (mw > maxDim) maxDim = mw;
                 if (md > maxDim) maxDim = md;
-                f32 projScale = (maxDim > 0.001f) ? (0.4f / maxDim) : 0.4f;
 
-                Mat4 model = Mat4::translate(p.position)
-                           * Mat4::rotateY(flyYaw)
-                           * Mat4::rotateX(spinAngle)
-                           * Mat4::scale({projScale, projScale, projScale});
+                Mat4 model;
+                if (isArrowOrBolt) {
+                    // Arrow/bolt: larger, aligned with velocity, tip forward, no spin
+                    f32 projScale = (maxDim > 0.001f) ? (1.2f / maxDim) : 1.2f;
+                    f32 flyPitch = (spd > 0.01f) ? asinf(vel.y / spd) : 0.0f;
+                    model = Mat4::translate(p.position)
+                          * Mat4::rotateY(flyYaw)
+                          * Mat4::rotateX(-flyPitch)
+                          * Mat4::scale({projScale, projScale, projScale});
+                } else {
+                    // Thrown weapon: spinning
+                    f32 projScale = (maxDim > 0.001f) ? (0.4f / maxDim) : 0.4f;
+                    f32 spinAngle = p.lifetime * 15.0f;
+                    model = Mat4::translate(p.position)
+                          * Mat4::rotateY(flyYaw)
+                          * Mat4::rotateX(spinAngle)
+                          * Mat4::scale({projScale, projScale, projScale});
+                }
+
                 AABB bounds = {p.position - Vec3{0.3f,0.3f,0.3f},
                                p.position + Vec3{0.3f,0.3f,0.3f}};
                 Renderer::submit(m_basicShader, defaultTex, m_meshDefs[p.meshId].mesh, model, bounds,
@@ -4369,6 +4414,41 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             DebugDraw::line(fx.pos + Vec3{dx * 0.5f, 0, dz * 0.5f},
                             fx.pos + Vec3{dx * 0.3f, h * alpha, dz * 0.3f},
                             {1.0f * alpha, 0.6f * alpha, 0.0f});
+        }
+    }
+
+    // --- Hitscan impact sparks — dust/blood burst at hit position ---
+    for (u32 i = 0; i < MAX_IMPACT_FX; i++) {
+        if (!m_impactFX[i].active) continue;
+        const ImpactFX& fx = m_impactFX[i];
+        f32 alpha = fx.timer / 0.3f; // fade over 0.3s lifetime
+        f32 t = 1.0f - alpha; // 0→1 over lifetime
+
+        // Color: orange sparks on walls, red on entities
+        Vec3 col = fx.isEntity ? Vec3{1.0f, 0.2f, 0.1f} : Vec3{0.8f, 0.7f, 0.5f};
+
+        // Small expanding spark burst — 8 rays radiating from hit point
+        for (u32 ray = 0; ray < 8; ray++) {
+            f32 a = ray * (6.28318f / 8.0f) + t * 3.0f;
+            f32 spread = 0.05f + t * 0.15f; // expands outward
+            Vec3 dir = {cosf(a) * spread, sinf(a * 1.5f) * spread * 0.5f + t * 0.08f,
+                        sinf(a) * spread};
+            // Offset along hit normal so sparks fly outward from surface
+            Vec3 sparkEnd = fx.pos + fx.normal * (0.02f + t * 0.05f) + dir;
+            DebugDraw::line(fx.pos + fx.normal * 0.02f, sparkEnd,
+                            col * alpha);
+        }
+
+        // Central bright flash (small cube that fades quickly)
+        if (t < 0.5f) {
+            f32 flashSize = 0.04f * (1.0f - t * 2.0f);
+            Mat4 flashModel = Mat4::translate(fx.pos + fx.normal * 0.03f)
+                            * Mat4::scale({flashSize, flashSize, flashSize});
+            AABB flashBounds = {fx.pos - Vec3{0.1f,0.1f,0.1f},
+                                fx.pos + Vec3{0.1f,0.1f,0.1f}};
+            Vec3 flashCol = fx.isEntity ? Vec3{1.0f, 0.5f, 0.3f} : Vec3{1.0f, 0.9f, 0.6f};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, flashModel, flashBounds,
+                             {flashCol.x, flashCol.y, flashCol.z, alpha});
         }
     }
 
