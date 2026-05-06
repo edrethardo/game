@@ -1495,7 +1495,7 @@ void Engine::startGame() {
             // Mini-bosses (floors 5, 15, 25, 35, 45) — should shred NPCs in 1-2 hits
             //                                          HP   DMG  SPD  RNG  COOL  halfExtents
             {  5, "The Butcher",   "FRESH MEAT!",         800, 80, 3.0f, 3.5f, 0.4f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
-            { 15, "Lich Lord",     "Your soul is MINE!",  500, 50, 2.8f, 12.f, 0.6f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
+            { 15, "Lich Lord",     "Your soul is MINE!",  500, 30, 2.8f, 12.f, 0.8f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
             { 25, "Spider Queen",  "*HISSSS*",            700, 45, 5.0f, 3.0f, 0.4f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
             { 35, "Demon Knight",  "Kneel before me!",    800, 60, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
             { 45, "Arch Mage",     "Feel the arcane!",    600, 65, 3.0f, 14.f, 0.4f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
@@ -2836,8 +2836,9 @@ void Engine::updatePlayerPickup() {
         if (!isGlobe(wi.item)) continue;
 
         Vec3 delta = m_localPlayer.position - wi.position;
-        f32 dist = length(delta);
-        if (dist < 2.5f) {
+        // Use horizontal distance only — globes float above ground
+        f32 dist = sqrtf(delta.x * delta.x + delta.z * delta.z);
+        if (dist < 3.0f) {
             if (isGlobe(wi.item)) {
                 // Globe restores 30% max HP and 30% max energy
                 f32 healAmt = m_localPlayer.maxHealth * GameConst::GLOBE_HEAL_PCT;
@@ -2909,6 +2910,11 @@ bool Engine::updateFloorDoor() {
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isKeyPressed(SDL_SCANCODE_E)) {
                 m_currentFloor++;
+                // Player grows 1.5% stronger each floor (multiplicative)
+                m_localPlayer.maxHealth *= 1.015f;
+                m_localPlayer.health = m_localPlayer.maxHealth; // full heal on descent
+                m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
+                m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
                 // Upgrade equipment for NPCs that survived this floor
                 upgradeNpcEquipment(static_cast<u8>(m_currentFloor));
                 // Save progress before descending so death respawn returns here

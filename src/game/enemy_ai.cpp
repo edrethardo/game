@@ -683,6 +683,30 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
 
         // ---------------------------------------------------------------------------
+        // Push apart from other hostile entities to prevent blobbing
+        // ---------------------------------------------------------------------------
+        for (u32 oi = 0; oi < pool.activeCount; oi++) {
+            u32 oIdx = pool.activeList[oi];
+            if (oIdx == i) continue;
+            Entity& other = pool.entities[oIdx];
+            if (other.flags & ENT_DEAD) continue;
+            if (other.flags & ENT_FRIENDLY) continue;
+            if (other.enemyType == EnemyType::PROP) continue;
+            Vec3 diff = e.position - other.position;
+            f32 dist2 = diff.x * diff.x + diff.z * diff.z;
+            f32 minDist = e.halfExtents.x + other.halfExtents.x + 0.15f;
+            if (dist2 < minDist * minDist && dist2 > 0.001f) {
+                f32 dist = sqrtf(dist2);
+                Vec3 push = {diff.x / dist, 0, diff.z / dist};
+                f32 overlap = minDist - dist;
+                Vec3 newPos = e.position + push * (overlap * 0.3f);
+                if (!entityOverlapsGrid(newPos, e.halfExtents, grid)) {
+                    e.position = newPos;
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------------
         // Hostile enemy AI — targets friendly NPCs first, then player
         // ---------------------------------------------------------------------------
 
@@ -1034,9 +1058,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.velocity = {0, 0, 0};
             }
 
-            // LOS check every 4 frames for all enemies — fast detection
+            // LOS check every 2 frames — fast detection
             e.aiCheckIdx++;
-            u16 checkFreq = 4;
+            u16 checkFreq = 2;
             if (e.aiCheckIdx >= checkFreq) {
                 e.aiCheckIdx = 0;
                 if (targetIsNPC && targetDist <= e.detectionRange) {
@@ -1045,6 +1069,26 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 } else if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
+                } else if (dist <= e.detectionRange * 0.6f) {
+                    // Close enough to hear — chase without LOS
+                    e.aiState = AIState::CHASE;
+                    e.velocity = {0, 0, 0};
+                } else {
+                    // Aggro chaining: if a nearby enemy is already chasing, join in
+                    for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                        u32 nIdx = pool.activeList[ni];
+                        if (nIdx == i) continue;
+                        Entity& nearby = pool.entities[nIdx];
+                        if (nearby.flags & ENT_DEAD) continue;
+                        if (nearby.flags & ENT_FRIENDLY) continue;
+                        if (nearby.aiState != AIState::CHASE && nearby.aiState != AIState::ATTACK) continue;
+                        f32 chainDist = length(nearby.position - e.position);
+                        if (chainDist < 8.0f) {
+                            e.aiState = AIState::CHASE;
+                            e.velocity = {0, 0, 0};
+                            break;
+                        }
+                    }
                 }
             }
         } break;
@@ -1060,8 +1104,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.velocity = flyDir * effectiveSpeed;
                 }
             } else {
-                // Ground movement: use flow field when no LOS to target,
-                // direct chase when target is visible. Prevents wall-faceplanting.
+                // Ground movement: direct chase when LOS, wander toward
+                // target direction when blocked (not the exit flow field).
                 Vec3 moveDir = {0, 0, 0};
                 bool hasDirectLOS = hasLOSToPoint(
                     e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid);
@@ -1070,12 +1114,17 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     // Direct line to target — walk straight
                     moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
                 } else {
-                    // No LOS — use the flow field to navigate around walls
-                    moveDir = LevelGridSystem::flowDirection(grid, e.position);
-                    if (lengthSq(moveDir) < 0.001f) {
-                        // Flow field has no direction — fall back to direct
-                        moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
-                    }
+                    // No LOS — move toward target with random lateral drift
+                    // to explore around obstacles instead of all converging on the exit
+                    Vec3 toTarget = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                    f32 drift = sinf(e.animTimer * 2.0f + static_cast<f32>(i) * 1.7f) * 0.6f;
+                    moveDir = {
+                        toTarget.x + toTarget.z * drift,
+                        0.0f,
+                        toTarget.z - toTarget.x * drift
+                    };
+                    f32 len = sqrtf(moveDir.x * moveDir.x + moveDir.z * moveDir.z);
+                    if (len > 0.001f) moveDir = moveDir * (1.0f / len);
                 }
 
                 Vec3 flatDir = moveDir;
@@ -1104,8 +1153,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.attackTimer = e.attackCooldown * 0.5f;
                 }
             }
-            // Lost interest: fall back to idle only if target is very far
-            if (targetDist > e.detectionRange * 2.5f) {
+            // Lost interest: fall back to idle only if target is extremely far
+            if (targetDist > e.detectionRange * 5.0f) {
                 e.aiState = AIState::IDLE;
             }
         } break;
