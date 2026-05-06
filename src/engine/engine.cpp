@@ -3110,14 +3110,8 @@ void Engine::handleWeaponFire(f32 dt) {
         ws.reloadTimer = wpn.reloadTime;
     }
 
-    // Can't fire while reloading
-    if (ws.reloading) return;
-
-    if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
-    if (ws.cooldownTimer > 0.0f) return;
-
-    // Clip check — auto-reload on empty
-    if (wpn.clipSize > 0 && ws.currentClip == 0) {
+    // Auto-reload when clip is empty (triggers immediately, no need to click)
+    if (wpn.clipSize > 0 && ws.currentClip == 0 && !ws.reloading) {
         ws.reloading = true;
         ws.reloadTimer = wpn.reloadTime;
 
@@ -3126,7 +3120,6 @@ void Engine::handleWeaponFire(f32 dt) {
             Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
             Vec3 forward = m_localPlayer.forward;
             f32 throwDmg = wpn.damage * wpn.clipSize * 0.5f;
-            // Spawn with explicit speed/radius since hitscan weapons have 0 for these
             u16 projIdx = ProjectileSystem::spawn(m_projectiles, eyePos + forward * 1.0f,
                 forward, 20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
             if (projIdx != 0xFFFF) {
@@ -3136,14 +3129,19 @@ void Engine::handleWeaponFire(f32 dt) {
             }
             m_viewmodelState.attackAnimT = 0.3f;
         }
-        return;
     }
+
+    // Can't fire while reloading
+    if (ws.reloading) return;
+
+    if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
+    if (ws.cooldownTimer > 0.0f) return;
 
     // Track subtype for projectile flags (molotov/wand detection)
     const ItemInstance* qbItem = &eqWpn;
     ws.cooldownTimer = wpn.cooldown;
 
-    // Consume ammo
+    // Consume ammo — auto-reload will kick in next frame if this empties the clip
     if (wpn.clipSize > 0 && ws.currentClip > 0) {
         ws.currentClip--;
     }
@@ -3393,6 +3391,7 @@ void Engine::renderViewmodel() {
     f32 attackPitch = 0.0f;  // X rotation (pitch forward/back)
     f32 attackYaw   = 0.0f;  // Y rotation (swing left/right)
     f32 attackZ     = 0.0f;  // Z offset (thrust forward/back)
+    f32 attackY     = 0.0f;  // Y offset (drop down during reload)
 
     if (m_viewmodelState.attackAnimT > 0.0f) {
         if (def.weaponType == WeaponType::MELEE) {
@@ -3458,19 +3457,20 @@ void Engine::renderViewmodel() {
         f32 maxReload = (vmWpn.reloadTime > 0.0f) ? vmWpn.reloadTime : 1.0f;
         f32 progress = 1.0f - vmWs.reloadTimer / maxReload; // 0→1
 
-        // Smooth curve: drop down in first 30%, hold in middle, come back up in last 30%
-        if (progress < 0.3f) {
-            reloadAnim = progress / 0.3f; // ramp up
-        } else if (progress > 0.7f) {
-            reloadAnim = (1.0f - progress) / 0.3f; // ramp down
+        // Snappy curve: fast drop (first 20%), hold (20-80%), fast snap back (last 20%)
+        if (progress < 0.2f) {
+            reloadAnim = sinf(progress / 0.2f * 1.5708f); // smooth ease-in
+        } else if (progress > 0.8f) {
+            reloadAnim = sinf((1.0f - progress) / 0.2f * 1.5708f); // smooth ease-out
         } else {
             reloadAnim = 1.0f; // full tilt in middle
         }
 
-        // Apply reload tilt: drop weapon down and rotate to the side
-        attackPitch = -0.4f * reloadAnim;  // tilt weapon downward
-        attackYaw   = 0.5f * reloadAnim;   // rotate to the right
-        attackZ     = 0.15f * reloadAnim;  // push slightly forward
+        // Weapon drops down, tilts, and rotates during reload
+        attackPitch = -0.5f * reloadAnim;   // tilt weapon nose-down
+        attackYaw   = 0.6f * reloadAnim;    // rotate to the right
+        attackY     = -0.12f * reloadAnim;  // drop weapon downward
+        attackZ     = 0.1f * reloadAnim;    // slight push forward
     }
 
     // Per-weapon-type positioning
@@ -3479,7 +3479,7 @@ void Engine::renderViewmodel() {
     f32 holdPitch = 0.0f;
     switch (def.weaponType) {
         case WeaponType::MELEE:
-            offset = {0.35f + bobX, -0.35f + bobY, -0.45f + attackZ};
+            offset = {0.35f + bobX, -0.35f + bobY + attackY, -0.45f + attackZ};
             if (def.weaponSubtype == WeaponSubtype::DAGGER ||
                 def.weaponSubtype == WeaponSubtype::THROWING_KNIFE) {
                 // Dagger: held forward for stabbing, blade pointing at target
@@ -3491,12 +3491,12 @@ void Engine::renderViewmodel() {
             }
             break;
         case WeaponType::HITSCAN:
-            offset = {0.40f + bobX, -0.30f + bobY, -0.50f + attackZ};
+            offset = {0.40f + bobX, -0.30f + bobY + attackY, -0.50f + attackZ};
             holdYaw = 0.1f;
             holdPitch = 0.0f;
             break;
         case WeaponType::PROJECTILE:
-            offset = {0.30f + bobX, -0.35f + bobY, -0.50f};
+            offset = {0.30f + bobX, -0.35f + bobY + attackY, -0.50f};
             holdYaw = 0.2f;
             holdPitch = -0.1f;
             break;
