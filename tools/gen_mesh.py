@@ -1148,8 +1148,7 @@ def gen_butcher(height=2.5):
 # ---------------------------------------------------------------------------
 
 def gen_skeleton_arm(height=1.8):
-    """Skeleton arm — extracted from gen_humanoid. Origin at shoulder (top).
-    Includes upper arm, lower arm, and hand voxels with proper UV mapping."""
+    """Skeleton arm — bony arm with fist. Origin near elbow."""
     mb = MeshBuilder()
     vs = height / 16.0
     filled = set()
@@ -1158,13 +1157,14 @@ def gen_skeleton_arm(height=1.8):
             for x in range(x0, x0 + w):
                 for z in range(z0, z0 + d):
                     filled.add((x, y, z))
+    # Shoulder ball
+    fill_box(0, 5, 0, 1, 1, 1)
     # Upper arm (2 voxels tall)
     fill_box(0, 3, 0, 1, 2, 1)
     # Lower arm (3 voxels tall)
     fill_box(0, 0, 0, 1, 3, 1)
-    # Hand
-    fill_box(0, -1, -1, 1, 1, 2)
-    # Origin offset — center X, bottom at hand, Z centered
+    # Fist — compact cube, not flat like a foot
+    fill_box(0, -1, 0, 1, 1, 1)
     ox = -0.5 * vs
     oz = -0.5 * vs
     add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))

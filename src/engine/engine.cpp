@@ -4263,7 +4263,7 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                     // Skip for skeleton/boss arms+legs — phase offset handles alternation,
                     // mirroring the angle would make both sides swing in sync.
                     bool skipMirrorAngle = (e.enemyType == EnemyType::SKELETON ||
-                                            e.enemyType == EnemyType::BOSS) && li < 4;
+                                            e.enemyType == EnemyType::BOSS) && li < 2;
                     if (ld.mirrored && !skipMirrorAngle) angle = -angle;
                     angle += ld.restAngle;
 
@@ -4302,11 +4302,19 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                     f32 mirrorX = ld.mirrored ? -1.0f : 1.0f;
                     if (isObjLimb) {
                         limbScaleVec = {pivotScale * mirrorX, pivotScale, pivotScale};
-                        // For X-axis rotating limbs (arms/legs): shift mesh so top
-                        // is at pivot — limb hangs down naturally from shoulder/hip.
-                        // Wings (Z-axis) and Y-axis limbs don't need this.
                         if (ld.pivotAxis == 0) {
-                            meshOriginOffset = {0, -limbMeshBounds.max.y, 0};
+                            // Arms: shift so top is at pivot, then tilt forward.
+                            // Mesh center-Y becomes the rotation origin.
+                            f32 meshMidY = (limbMeshBounds.max.y + limbMeshBounds.min.y) * 0.5f;
+                            bool isArm = (li < 2) && (e.enemyType == EnemyType::SKELETON ||
+                                                       e.enemyType == EnemyType::BOSS);
+                            if (isArm) {
+                                // Arms held forward at ~45 degrees — ready to fight
+                                meshOriginOffset = {0, -limbMeshBounds.max.y, 0};
+                            } else {
+                                // Legs hang straight down from hip
+                                meshOriginOffset = {0, -limbMeshBounds.max.y, 0};
+                            }
                         }
                     } else {
                         limbScaleVec = ld.meshHalfSize * 2.0f * pivotScale;
@@ -4342,19 +4350,24 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                                          : tint);
                 }
 
-                // Skeleton/Boss weapon: attached to right arm, hilt in hand, swings with arm
+                // Skeleton/Boss weapon: held in right hand (arms are part of body OBJ)
                 if ((e.enemyType == EnemyType::SKELETON || e.enemyType == EnemyType::BOSS) &&
                     e.weaponMeshId > 0 && e.weaponMeshId < m_meshDefCount) {
-                    f32 armAngle = LimbSystem::computeAngle(e, 1, e.enemyType);
-                    armAngle = -armAngle; // un-mirror for right arm (index 1)
+                    // Weapon swings during attack, idle sway otherwise
+                    f32 armAngle = 0.0f;
+                    if (e.attackAnimT > 0.0f) {
+                        f32 t = e.attackAnimT / 0.3f;
+                        armAngle = 0.8f * sinf(t * 3.14159f);
+                    } else {
+                        armAngle = sinf(e.animTimer * 1.5f) * 0.1f;
+                    }
 
                     Vec3 wEntBase = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
                                   + Vec3{0, animBobY, 0};
                     f32 wPivotScale = e.halfExtents.y / 0.5f;
 
-                    // Right arm pivot (shoulder) in entity-local space
+                    // Right hand position (matches where the OBJ arm ends)
                     Vec3 shoulder = {-0.22f * wPivotScale, 0.56f * wPivotScale, 0.0f};
-                    // Arm length (upper + lower arm combined)
                     f32 armLen = 0.44f * wPivotScale;
                     // Hand position = shoulder + arm rotated by armAngle around X
                     // Arm hangs down by default, swings with angle
