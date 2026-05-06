@@ -7,15 +7,15 @@
 
 namespace InventoryUI {
     // Backpack grid (6 columns x 4 rows, right side of screen)
-    static constexpr f32 BP_CELL = 26.0f;
-    static constexpr f32 BP_GAP  = 3.0f;
+    static constexpr f32 BP_CELL = 32.0f;
+    static constexpr f32 BP_GAP  = 4.0f;
     static constexpr u32 BP_COLS = 6;
     static constexpr u32 BP_ROWS = 4;
 
     // Equipment panel (left side)
-    static constexpr f32 EQ_W   = 140.0f;
-    static constexpr f32 EQ_H   = 26.0f;
-    static constexpr f32 EQ_GAP = 4.0f;
+    static constexpr f32 EQ_W   = 168.0f;
+    static constexpr f32 EQ_H   = 32.0f;
+    static constexpr f32 EQ_GAP = 5.0f;
     static constexpr u32 EQ_SLOTS = 6;
 
     // Quickbar (bottom center)

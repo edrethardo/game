@@ -921,11 +921,25 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     f32 centerY = static_cast<f32>(sh) * 0.5f;
 
     // --- Equipment panel (left side) ---
-    f32 eqX      = static_cast<f32>(sw) * 0.15f;
-    f32 eqStartY = centerY + 100.0f;
-    f32 slotW    = 140.0f;
-    f32 slotH    = 26.0f;
-    f32 slotGap  = 4.0f;
+    f32 eqX      = static_cast<f32>(sw) * 0.12f;
+    f32 eqStartY = centerY + 130.0f;
+    f32 slotW    = 168.0f;
+    f32 slotH    = 32.0f;
+    f32 slotGap  = 5.0f;
+
+    // Dark background behind equipment panel
+    {
+        u32 slotCount = static_cast<u32>(ItemSlot::COUNT);
+        // Slots go from eqStartY (top of slot 0) down to last slot bottom
+        f32 topY = eqStartY + slotH;  // top edge of first slot
+        f32 botY = eqStartY - static_cast<f32>(slotCount - 1) * (slotH + slotGap);
+        f32 pad = 8.0f;
+        Vec3 bg = {0.05f, 0.05f, 0.08f};
+        for (f32 fy = botY - pad; fy < topY + pad; fy += 1.0f) {
+            pushLine(eqX - pad, fy, eqX + slotW + pad, fy, bg);
+        }
+        flushHUD(sw, sh);
+    }
 
     for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++) {
         f32 y = eqStartY - static_cast<f32>(i) * (slotH + slotGap);
@@ -953,7 +967,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         if (!isItemEmpty(item)) {
             const ItemDef& def = itemDefs[item.defId];
             // Dark fill behind icon
-            Vec3 fillColor = {color.x * 0.3f, color.y * 0.3f, color.z * 0.3f};
+            Vec3 fillColor = {color.x * 0.2f + 0.04f, color.y * 0.2f + 0.04f, color.z * 0.2f + 0.04f};
             for (f32 line = 2.0f; line < slotH - 2.0f; line += 1.0f) {
                 pushLine(eqX + 2.0f, y + line, eqX + slotW - 2.0f, y + line, fillColor);
             }
@@ -961,8 +975,8 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             // Icon on left side of slot
             ItemIconSystem::drawIcon(sw, sh, eqX + 3.0f, y + 2.0f, slotH - 4.0f, def, item.rarity);
             // Item name to the right of icon
-            FontSystem::drawText(sw, sh, eqX + slotH + 2.0f, y + 8.0f,
-                                 def.name, rarityColor(item.rarity), 1);
+            FontSystem::drawText(sw, sh, eqX + slotH + 4.0f, y + 9.0f,
+                                 def.name, rarityColor(item.rarity), 2);
         } else {
             // Slot type label for empty slots
             static const char* slotLabels[] = {"Weapon", "Offhand", "Helmet", "Armor", "Boots", "Ring"};
@@ -979,10 +993,24 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     }
 
     // --- Backpack panel (right side, 6 columns x 4 rows) ---
-    f32 bpX      = static_cast<f32>(sw) * 0.55f;
-    f32 bpStartY = centerY + 60.0f;
-    f32 cellSize = 26.0f;
-    f32 cellGap  = 3.0f;
+    f32 bpX      = static_cast<f32>(sw) * 0.52f;
+    f32 bpStartY = centerY + 90.0f;
+    f32 cellSize = 32.0f;
+    f32 cellGap  = 4.0f;
+
+    // Dark background behind backpack panel
+    {
+        f32 panelW = 6.0f * (cellSize + cellGap) - cellGap;
+        // Rows go from bpStartY (top of row 0) down to row 3 bottom
+        f32 topY = bpStartY + cellSize;
+        f32 botY = bpStartY - 3.0f * (cellSize + cellGap);
+        f32 pad = 8.0f;
+        Vec3 bg = {0.05f, 0.05f, 0.08f};
+        for (f32 fy = botY - pad; fy < topY + pad; fy += 1.0f) {
+            pushLine(bpX - pad, fy, bpX + panelW + pad, fy, bg);
+        }
+        flushHUD(sw, sh);
+    }
 
     for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
         u32 col = i % 6;
@@ -1006,7 +1034,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 
         // Fill + icon for occupied slots
         if (!isItemEmpty(item)) {
-            Vec3 fillColor = {color.x * 0.3f, color.y * 0.3f, color.z * 0.3f};
+            Vec3 fillColor = {color.x * 0.2f + 0.04f, color.y * 0.2f + 0.04f, color.z * 0.2f + 0.04f};
             for (f32 line = 2.0f; line < cellSize - 2.0f; line += 1.0f) {
                 pushLine(x + 2.0f, y + line, x + cellSize - 2.0f, y + line, fillColor);
             }

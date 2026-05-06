@@ -5385,12 +5385,12 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         f32 cy = static_cast<f32>(sh) * 0.72f;
 
         // LMB + "Attack"
-        HUD::drawMouseButton(sw, sh, cx - 100.0f, cy, 0, mouseLit);
-        FontSystem::drawText(sw, sh, cx - 78.0f, cy + 5.0f, "Attack",
+        HUD::drawMouseButton(sw, sh, cx - 120.0f, cy, 0, mouseLit);
+        FontSystem::drawText(sw, sh, cx - 98.0f, cy + 5.0f, "Attack",
                              {0.5f * alpha, 0.9f * alpha, 0.5f * alpha}, 3);
         // RMB + "Skill"
-        HUD::drawMouseButton(sw, sh, cx + 20.0f, cy, 1, mouseLit);
-        FontSystem::drawText(sw, sh, cx + 42.0f, cy + 5.0f, "Skill",
+        HUD::drawMouseButton(sw, sh, cx + 35.0f, cy, 1, mouseLit);
+        FontSystem::drawText(sw, sh, cx + 57.0f, cy + 5.0f, "Skill",
                              {0.5f * alpha, 0.6f * alpha, 0.9f * alpha}, 3);
     }
 
