@@ -1,12 +1,17 @@
 build/
 build-rel/
 build-dbg/
+build-switch/
 *.o
 *.obj
 *.exe
+*.nro
+*.nacp
+*.elf
 .cache/
 compile_commands.json
 .vscode/
 *.swp
 *.swo
 save.dat
+assets/config/controls.json

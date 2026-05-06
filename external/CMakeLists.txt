@@ -1,12 +1,25 @@
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST OFF CACHE BOOL "" FORCE)
-
-add_subdirectory(SDL2)
+# On Switch, use devkitPro's pre-built SDL2 — don't build from source
+if(NOT NINTENDO_SWITCH)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    add_subdirectory(SDL2)
+endif()
 
 # GLAD - OpenGL loader
-add_library(glad STATIC glad/src/glad.c)
-target_include_directories(glad PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/glad/include)
+if(NINTENDO_SWITCH)
+    # Use devkitPro's pre-built glad which has proper Switch GL bindings
+    add_library(glad STATIC IMPORTED GLOBAL)
+    set_target_properties(glad PROPERTIES
+        IMPORTED_LOCATION $ENV{DEVKITPRO}/portlibs/switch/lib/libglad.a)
+    # Use devkitPro's glad headers, but fall back to ours for compatibility
+    target_include_directories(glad INTERFACE
+        $ENV{DEVKITPRO}/portlibs/switch/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/glad/include)
+else()
+    add_library(glad STATIC glad/src/glad.c)
+    target_include_directories(glad PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/glad/include)
+endif()
 
 # ENet - reliable UDP networking
 set(ENET_SOURCES
@@ -20,8 +33,16 @@ set(ENET_SOURCES
     enet/unix.c
     enet/win32.c
 )
-add_library(enet STATIC ${ENET_SOURCES})
-target_include_directories(enet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/enet/include)
-if(WIN32)
-    target_link_libraries(enet PRIVATE ws2_32 winmm)
+if(NINTENDO_SWITCH)
+    # Use devkitPro's pre-built enet (has proper Switch socket support)
+    add_library(enet STATIC IMPORTED GLOBAL)
+    set_target_properties(enet PROPERTIES
+        IMPORTED_LOCATION $ENV{DEVKITPRO}/portlibs/switch/lib/libenet.a)
+    target_include_directories(enet INTERFACE $ENV{DEVKITPRO}/portlibs/switch/include)
+else()
+    add_library(enet STATIC ${ENET_SOURCES})
+    target_include_directories(enet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/enet/include)
+    if(WIN32)
+        target_link_libraries(enet PRIVATE ws2_32 winmm)
+    endif()
 endif()

@@ -2,6 +2,9 @@
 #include "net/server.h"
 #include "core/log.h"
 
+#ifdef __SWITCH__
+#include <sys/select.h> // needed before enet on Switch (fd_set)
+#endif
 #include <enet/enet.h>
 #include <cstring>
 

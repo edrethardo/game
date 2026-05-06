@@ -46,10 +46,30 @@ target_include_directories(DungeonEngine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external
 )
-target_link_libraries(DungeonEngine PRIVATE SDL2-static glad enet)
 
-if(UNIX AND NOT APPLE)
-    target_link_libraries(DungeonEngine PRIVATE dl)
+if(NINTENDO_SWITCH)
+    # Switch build: use devkitPro portlibs for SDL2, mesa GL, and ENet
+    target_include_directories(DungeonEngine PRIVATE
+        $ENV{DEVKITPRO}/portlibs/switch/include
+        $ENV{DEVKITPRO}/portlibs/switch/include/SDL2
+    )
+    # Link order matters: enet needs nx sockets, SDL2 needs EGL/GL/drm, nx must be last
+    target_link_libraries(DungeonEngine PRIVATE
+        SDL2 glad enet EGL glapi drm_nouveau nx
+    )
+    # Generate NRO from ELF, bundling assets into romfs
+    add_custom_command(TARGET DungeonEngine POST_BUILD
+        COMMAND $ENV{DEVKITPRO}/tools/bin/elf2nro
+            $<TARGET_FILE:DungeonEngine>
+            ${CMAKE_BINARY_DIR}/DungeonEngine.nro
+            --romfsdir=${CMAKE_SOURCE_DIR}/assets
+        COMMENT "Building NRO with romfs..."
+    )
+else()
+    target_link_libraries(DungeonEngine PRIVATE SDL2-static glad enet)
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(DungeonEngine PRIVATE dl)
+    endif()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")

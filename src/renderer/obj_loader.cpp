@@ -7,6 +7,19 @@
 #include <cmath>
 #include <vector>
 
+// newlib (Switch) doesn't have strtok_r — provide a simple implementation
+#ifdef __SWITCH__
+static char* strtok_r(char* str, const char* delim, char** saveptr) {
+    if (!str) str = *saveptr;
+    str += std::strspn(str, delim);
+    if (*str == '\0') { *saveptr = str; return nullptr; }
+    char* end = str + std::strcspn(str, delim);
+    if (*end) { *end = '\0'; end++; }
+    *saveptr = end;
+    return str;
+}
+#endif
+
 struct ObjVert {
     u32 posIdx, normIdx, uvIdx;
 };

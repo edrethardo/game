@@ -17,3 +17,11 @@ using f32 = float;
 using f64 = double;
 
 using usize = size_t;
+
+// Platform-specific asset path prefix. On Switch, romfs mounts at "romfs:/".
+// Use ASSET_PATH("assets/foo.json") to get the correct path on all platforms.
+#ifdef __SWITCH__
+    #define ASSET_PATH(p) "romfs:/" p
+#else
+    #define ASSET_PATH(p) p
+#endif
