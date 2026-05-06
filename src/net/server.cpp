@@ -37,7 +37,7 @@ void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     // Validate input to prevent server crash from malicious clients
     if (input.weaponId >= MAX_WEAPON_DEFS) input.weaponId = 0;
     input.moveFlags &= 0x7F;
-    input.extFlags &= 0x3F;
+    input.extFlags &= 0x7F; // allow bits 0-6 (includes INPUT_EX_RESPAWN)
     if (input.skillSlot > 3) input.skillSlot = 0;
 
     s_inputBuffers[playerSlot].push(input);

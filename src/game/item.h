@@ -139,6 +139,7 @@ enum struct SkillId : u8 {
     GRAVITY_PULL,   // pull enemies within 5m toward player
     PHASE_STRIKE,   // 10% on hit: teleport behind target
     VOID_KILL,      // on kill: 15% chance void zone on corpse
+    ARC_FIRE,       // melee proc: 20% chance spawn fire in swing arc (1.5s)
 
     COUNT
 };

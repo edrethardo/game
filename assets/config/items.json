@@ -1651,6 +1651,24 @@
       "maxRarity": "legendary",
       "legendarySkill": "second_wind",
       "dropWeight": 0.3
+    },
+    {
+      "name": "The Claymore",
+      "slot": "weapon",
+      "weaponType": "melee",
+      "weaponSubtype": "sword",
+      "mesh": "sword",
+      "material": "weapon_melee",
+      "baseDamage": 45.0,
+      "baseRange": 3.5,
+      "baseCooldown": 1.0,
+      "baseConeAngle": 90.0,
+      "baseRecoil": 0.02,
+      "minLevel": 5,
+      "maxLevel": 99,
+      "maxRarity": "legendary",
+      "legendarySkill": "arc_fire",
+      "dropWeight": 0.5
     }
   ]
 }

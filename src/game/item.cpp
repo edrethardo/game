@@ -106,6 +106,7 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "gravity_pull")    return SkillId::GRAVITY_PULL;
     if (s == "phase_strike")    return SkillId::PHASE_STRIKE;
     if (s == "void_kill")       return SkillId::VOID_KILL;
+    if (s == "arc_fire")        return SkillId::ARC_FIRE;
     return SkillId::NONE;
 }
 

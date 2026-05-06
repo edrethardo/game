@@ -509,6 +509,18 @@ static const u8 kIconPhaseDash[8][8] = {
     {0,4,0,0,0,0,0,0},
 };
 
+// Blazing Arc: horizontal fire sweep icon
+static const u8 kIconArcFire[8][8] = {
+    {0,0,0,4,4,0,0,0},
+    {0,0,4,1,1,4,0,0},
+    {0,4,1,0,0,1,4,0},
+    {4,1,0,0,0,0,1,4},
+    {2,2,0,0,0,0,2,2},
+    {1,4,1,0,0,1,4,1},
+    {0,1,4,1,1,4,1,0},
+    {0,0,1,4,4,1,0,0},
+};
+
 // Color palettes per skill icon
 static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
     cols[0] = {0,0,0}; // transparent (unused)
@@ -533,6 +545,10 @@ static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
             cols[1] = {0.3f, 0.8f, 0.5f}; cols[2] = {0.15f, 0.5f, 0.3f};
             cols[3] = {0.2f, 0.6f, 0.4f}; cols[4] = {0.6f, 1.0f, 0.7f};
             break;
+        case SkillId::ARC_FIRE:
+            cols[1] = {1.0f, 0.5f, 0.1f}; cols[2] = {0.9f, 0.3f, 0.05f};
+            cols[3] = {0.7f, 0.2f, 0.05f}; cols[4] = {1.0f, 0.85f, 0.2f};
+            break;
         default:
             cols[1] = {0.6f, 0.6f, 0.6f}; cols[2] = {0.3f, 0.3f, 0.3f};
             cols[3] = {0.4f, 0.4f, 0.4f}; cols[4] = {0.9f, 0.9f, 0.9f};
@@ -547,6 +563,7 @@ static const u8* getSkillIcon(u8 skillId) {
         case SkillId::METEOR_STRIKE:    return &kIconMeteorStrike[0][0];
         case SkillId::BLOOD_NOVA:       return &kIconBloodNova[0][0];
         case SkillId::PHASE_DASH:       return &kIconPhaseDash[0][0];
+        case SkillId::ARC_FIRE:         return &kIconArcFire[0][0];
         default:                        return nullptr;
     }
 }
@@ -1291,6 +1308,8 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::CONE_ANGLE:         return "+Swing Arc";
         case AffixType::RANGE_BONUS:        return "+Range";
         case AffixType::DAMAGE_TO_FLYING:   return "+Dmg vs Flying";
+        case AffixType::CLIP_SIZE_PCT:      return "+Clip Size %";
+        case AffixType::RELOAD_SPEED_PCT:   return "+Reload Speed %";
         default:                            return "Unknown";
     }
 }
@@ -1352,6 +1371,7 @@ static const char* skillDisplayName(SkillId id) {
         case SkillId::GRAVITY_PULL:    return "Gravity Pull";
         case SkillId::PHASE_STRIKE:    return "Phase Strike";
         case SkillId::VOID_KILL:       return "Void Kill";
+        case SkillId::ARC_FIRE:        return "Blazing Arc";
         default: return "Unknown";
     }
 }
@@ -1372,6 +1392,7 @@ static const char* skillDescription(SkillId id) {
         case SkillId::GRAVITY_PULL:    return "Enemies within 5m are slowly\npulled toward you.";
         case SkillId::PHASE_STRIKE:    return "10% on hit: teleport behind\nthe target.";
         case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
+        case SkillId::ARC_FIRE:        return "20% on hit: ignite the ground\nacross the full swing arc for 1.5s.";
         default: return "";
     }
 }

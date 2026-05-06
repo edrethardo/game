@@ -66,7 +66,7 @@
     {
       "type": "range_bonus",
       "name": "of Reach",
-      "slots": ["weapon"],
+      "slots": [],
       "minValue": 1.0,
       "maxValue": 5.0
     },
