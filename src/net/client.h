@@ -48,7 +48,8 @@ namespace Client {
     // Fills outPositions/outYaws/outPitches for all MAX_PLAYERS slots.
     void interpolateRemotePlayers(u8 localSlot,
                                    Vec3* outPositions, f32* outYaws, f32* outPitches,
-                                   bool* outActive, f32* outHealth, f32* outMaxHealth);
+                                   bool* outActive, f32* outHealth, f32* outMaxHealth,
+                                   u8* outAnimFlags = nullptr);
 
     // Interpolate entities from snapshots into a render-only pool.
     void interpolateEntities(EntityPool& renderEntities);

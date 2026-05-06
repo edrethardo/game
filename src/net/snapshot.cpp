@@ -54,6 +54,14 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.poisonTimer  = static_cast<u8>(np.poisonTimer * 25.0f);
         sp.burnTimer    = static_cast<u8>(np.burnTimer * 25.0f);
         sp.freezeTimer  = static_cast<u8>(np.freezeTimer * 25.0f);
+
+        // Animation state for remote player rendering
+        u8 anim = 0;
+        if (np.weaponState.cooldownTimer > 0.0f) anim |= (1 << 0); // attacking/fired recently
+        if (np.weaponState.reloading)             anim |= (1 << 1); // reload animation
+        if (np.isDead)                             anim |= (1 << 2); // dead
+        sp.animFlags = anim;
+        sp.weaponMeshId = np.weaponState.currentWeapon; // weapon index for mesh lookup
     }
 
     // Entities (only active ones)
@@ -139,6 +147,8 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w.writeU8(sp.poisonTimer);
         w.writeU8(sp.burnTimer);
         w.writeU8(sp.freezeTimer);
+        w.writeU8(sp.animFlags);
+        w.writeU8(sp.weaponMeshId);
     }
 
     // Entities
@@ -223,6 +233,8 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.poisonTimer  = r.readU8();
         sp.burnTimer    = r.readU8();
         sp.freezeTimer  = r.readU8();
+        sp.animFlags    = r.readU8();
+        sp.weaponMeshId = r.readU8();
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {

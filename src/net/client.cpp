@@ -155,13 +155,15 @@ void Client::storePrediction(const NetInput& input, const NetPlayer& predicted) 
 
 void Client::interpolateRemotePlayers(u8 localSlot,
                                        Vec3* outPositions, f32* outYaws, f32* outPitches,
-                                       bool* outActive, f32* outHealth, f32* outMaxHealth)
+                                       bool* outActive, f32* outHealth, f32* outMaxHealth,
+                                       u8* outAnimFlags)
 {
     // Clear all slots
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         outActive[i] = false;
         outHealth[i] = 0.0f;
         outMaxHealth[i] = 100.0f;
+        if (outAnimFlags) outAnimFlags[i] = 0;
     }
 
     // Need at least 2 snapshots for interpolation
@@ -185,6 +187,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
             outPitches[slot] = Quantize::unpackAngle(sp.pitch);
             outHealth[slot] = (sp.health / 255.0f) * 100.0f;
             outMaxHealth[slot] = 100.0f;
+            if (outAnimFlags) outAnimFlags[slot] = sp.animFlags;
         }
         return;
     }
@@ -231,6 +234,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         outPitches[slot] = pitchA + (pitchB - pitchA) * t;
         outHealth[slot] = (spB.health / 255.0f) * 100.0f;
         outMaxHealth[slot] = 100.0f;
+        if (outAnimFlags) outAnimFlags[slot] = spB.animFlags; // latest snapshot's anim state
     }
 }
 

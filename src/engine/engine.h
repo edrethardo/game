@@ -135,6 +135,7 @@ private:
     bool           m_renderPlayerActive[MAX_PLAYERS];
     f32            m_renderPlayerHealth[MAX_PLAYERS];
     f32            m_renderPlayerMaxHealth[MAX_PLAYERS];
+    u8             m_renderPlayerAnimFlags[MAX_PLAYERS]; // bit0=attacking, bit1=reloading, bit2=dead
 
     // Combat feedback
     CombatHit   m_lastCombatHit;
@@ -239,9 +240,11 @@ private:
 
     // Core update paths
     void update(f32 dt);
-    void serverUpdate(f32 dt);
-    void clientUpdate(f32 dt);
-    void singleplayerUpdate(f32 dt);
+    void gameUpdate(f32 dt);        // unified gameplay — all roles call this
+    void serverNetPre(f32 dt);      // server: process remote inputs before gameplay
+    void serverNetPost(f32 dt);     // server: status ticks + snapshot broadcast
+    void clientNetPre(f32 dt);      // client: predict + reconcile before gameplay
+    void clientNetPost(f32 dt);     // client: interpolate remote state after gameplay
 
     // Shared logic
     void handleWeaponFireForPlayer(NetPlayer& np, f32 dt);

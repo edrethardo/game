@@ -36,6 +36,11 @@ enum struct NetPacketType : u8 {
     SV_INVENTORY_SYNC = 0x16,  // server sends full inventory to client
 };
 
+// Sub-types for SV_EVENT packets
+enum struct NetEventType : u8 {
+    HITSCAN_IMPACT = 0x01,  // remote player hitscan hit: position + hitEntity flag
+};
+
 // 4-byte packet header on every packet
 struct PacketHeader {
     NetPacketType type;
