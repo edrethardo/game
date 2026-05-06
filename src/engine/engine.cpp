@@ -3443,6 +3443,36 @@ void Engine::renderViewmodel() {
         }
     }
 
+    // Reload animation — weapon tilts down and to the side during reload
+    WeaponState& vmWs = m_players[m_localPlayerIndex].weaponState;
+    f32 reloadAnim = 0.0f; // 0 = not reloading, 1 = mid-reload
+    if (vmWs.reloading && def.weaponType == WeaponType::HITSCAN) {
+        // Build effective weapon to get reload time for progress calc
+        WeaponDef vmWpn;
+        if (hasWeapon) {
+            vmWpn = Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex],
+                                                  m_itemDefs, equipped);
+        } else {
+            vmWpn = m_weaponDefs[vmWs.currentWeapon];
+        }
+        f32 maxReload = (vmWpn.reloadTime > 0.0f) ? vmWpn.reloadTime : 1.0f;
+        f32 progress = 1.0f - vmWs.reloadTimer / maxReload; // 0→1
+
+        // Smooth curve: drop down in first 30%, hold in middle, come back up in last 30%
+        if (progress < 0.3f) {
+            reloadAnim = progress / 0.3f; // ramp up
+        } else if (progress > 0.7f) {
+            reloadAnim = (1.0f - progress) / 0.3f; // ramp down
+        } else {
+            reloadAnim = 1.0f; // full tilt in middle
+        }
+
+        // Apply reload tilt: drop weapon down and rotate to the side
+        attackPitch = -0.4f * reloadAnim;  // tilt weapon downward
+        attackYaw   = 0.5f * reloadAnim;   // rotate to the right
+        attackZ     = 0.15f * reloadAnim;  // push slightly forward
+    }
+
     // Per-weapon-type positioning
     Vec3 offset;
     f32 holdYaw = 0.0f;
@@ -5029,16 +5059,44 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 f32 ammoX = 230.0f;
                 f32 ammoY = 20.0f;
                 if (ws.reloading) {
-                    // Reloading progress bar
-                    f32 pct = 1.0f - ws.reloadTimer / wpn.reloadTime;
-                    FontSystem::drawText(sw, sh, ammoX, ammoY + 5.0f, "Reloading",
-                                         {0.9f, 0.6f, 0.2f}, 2);
+                    f32 maxReload = (wpn.reloadTime > 0.0f) ? wpn.reloadTime : 1.0f;
+                    f32 pct = 1.0f - ws.reloadTimer / maxReload; // 0→1
+
+                    // "Reloading..." text that fills left-to-right with bright color
+                    const char* reloadTxt = "Reloading...";
+                    f32 fullW = FontSystem::textWidth(reloadTxt, 2);
+
+                    // Dim base text (full word, dark)
+                    FontSystem::drawText(sw, sh, ammoX, ammoY + 5.0f, reloadTxt,
+                                         {0.3f, 0.2f, 0.1f}, 2);
+
+                    // Bright fill — clip rendering to percentage of text width
+                    // Draw character by character, coloring based on fill progress
+                    f32 cx = ammoX;
+                    for (const char* c = reloadTxt; *c; c++) {
+                        char ch[2] = {*c, 0};
+                        f32 cw = FontSystem::textWidth(ch, 2);
+                        f32 charMid = (cx - ammoX + cw * 0.5f) / fullW;
+                        if (charMid < pct) {
+                            // Fully filled — bright orange-gold
+                            FontSystem::drawText(sw, sh, cx, ammoY + 5.0f, ch,
+                                                 {1.0f, 0.8f, 0.2f}, 2);
+                        }
+                        cx += cw;
+                    }
+
                     // Progress bar below text
-                    f32 barW = 80.0f;
-                    for (f32 fy = 0; fy < 4.0f; fy += 1.0f) {
-                        DebugDraw::line({ammoX, ammoY - 2.0f + fy, 0},
-                                        {ammoX + barW * pct, ammoY - 2.0f + fy, 0},
-                                        {0.9f, 0.7f, 0.2f});
+                    f32 barW = fullW;
+                    for (f32 fy = 0; fy < 3.0f; fy += 1.0f) {
+                        DebugDraw::line({ammoX, ammoY - 1.0f + fy, 0},
+                                        {ammoX + barW * pct, ammoY - 1.0f + fy, 0},
+                                        {1.0f, 0.7f, 0.2f});
+                    }
+                    // Bar background (dim)
+                    for (f32 fy = 0; fy < 3.0f; fy += 1.0f) {
+                        DebugDraw::line({ammoX + barW * pct, ammoY - 1.0f + fy, 0},
+                                        {ammoX + barW, ammoY - 1.0f + fy, 0},
+                                        {0.15f, 0.1f, 0.05f});
                     }
                 } else {
                     char ammoStr[16];
