@@ -60,6 +60,8 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage) {
     player.health -= damage;
     player.damageFlashTimer = 0.15f;
     player.hitShakeTimer = 0.15f;
+    // Track damage taken this frame for ring passives (thorns, etc.)
+    player.lastDamageTaken = damage;
     if (player.health <= 0.0f) {
         player.health = 0.0f;
     }

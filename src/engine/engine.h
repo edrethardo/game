@@ -80,6 +80,7 @@ private:
     SkillState      m_helmetSkillStates[MAX_PLAYERS]; // helmet (G key)
     SkillId         m_armorAura = SkillId::NONE;      // passive armor legendary
     SkillId         m_weaponProc = SkillId::NONE;     // weapon on-hit proc
+    SkillId         m_ringPassive = SkillId::NONE;    // ring passive effect
     WorldItemPool   m_worldItems;
     bool       m_inventoryOpen = false;
     QuickbarState   m_quickbars[MAX_PLAYERS];

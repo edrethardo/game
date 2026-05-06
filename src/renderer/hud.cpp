@@ -1342,6 +1342,16 @@ static const char* skillDisplayName(SkillId id) {
         case SkillId::METEOR_STRIKE:   return "Meteor Strike";
         case SkillId::BLOOD_NOVA:      return "Blood Nova";
         case SkillId::PHASE_DASH:      return "Phase Dash";
+        case SkillId::THROWAWAY:       return "Throwaway";
+        case SkillId::VOID_ZONE:       return "Void Zone";
+        case SkillId::LIFE_STEAL:      return "Life Steal";
+        case SkillId::THORNS:          return "Thorns";
+        case SkillId::BERSERKER:       return "Berserker";
+        case SkillId::SECOND_WIND:     return "Second Wind";
+        case SkillId::SOUL_HARVEST:    return "Soul Harvest";
+        case SkillId::GRAVITY_PULL:    return "Gravity Pull";
+        case SkillId::PHASE_STRIKE:    return "Phase Strike";
+        case SkillId::VOID_KILL:       return "Void Kill";
         default: return "Unknown";
     }
 }
@@ -1352,6 +1362,16 @@ static const char* skillDescription(SkillId id) {
         case SkillId::METEOR_STRIKE:   return "Calls down a massive meteor that\nscorches the ground on impact.";
         case SkillId::BLOOD_NOVA:      return "Sacrifices health to unleash a\ndevastating ring of blood energy.";
         case SkillId::PHASE_DASH:      return "Teleports forward through enemies,\ndamaging all in the corridor.";
+        case SkillId::THROWAWAY:       return "On empty clip, throw weapon as\nan explosive projectile.";
+        case SkillId::VOID_ZONE:       return "5% on hit: dark void zone dealing\nflat damage + 60% missing HP.";
+        case SkillId::LIFE_STEAL:      return "Heal 5% of all damage dealt.";
+        case SkillId::THORNS:          return "Reflect 20% of damage taken\nback to the nearest enemy.";
+        case SkillId::BERSERKER:       return "+1% damage for each 1% of\nmissing health. Risk vs reward.";
+        case SkillId::SECOND_WIND:     return "Below 20% HP: heal 30% and\ngain 2s invulnerability. 60s cooldown.";
+        case SkillId::SOUL_HARVEST:    return "Each kill: +5% speed, +3% damage\nfor 10s. Stacks up to 5 times.";
+        case SkillId::GRAVITY_PULL:    return "Enemies within 5m are slowly\npulled toward you.";
+        case SkillId::PHASE_STRIKE:    return "10% on hit: teleport behind\nthe target.";
+        case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
         default: return "";
     }
 }

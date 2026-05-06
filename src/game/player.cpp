@@ -76,6 +76,10 @@ void PlayerController::update(Player& player, f32 dt) {
 
     // Apply slow debuff (e.g., from boss cleaver hit)
     f32 effectiveSpeed = player.moveSpeed * GameConst::SPEED_MULT;
+    // Soul Harvest speed bonus: +5% per stack
+    if (player.soulHarvestStacks > 0 && player.soulHarvestTimer > 0.0f) {
+        effectiveSpeed *= (1.0f + player.soulHarvestStacks * 0.05f);
+    }
     if (player.slowTimer > 0.0f) {
         effectiveSpeed *= 0.4f; // 60% slow
         player.slowTimer -= dt;

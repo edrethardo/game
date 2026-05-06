@@ -98,6 +98,14 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "stun_grenade")    return SkillId::STUN_GRENADE;
     if (s == "throwaway")       return SkillId::THROWAWAY;
     if (s == "void_zone")       return SkillId::VOID_ZONE;
+    if (s == "life_steal")      return SkillId::LIFE_STEAL;
+    if (s == "thorns")          return SkillId::THORNS;
+    if (s == "berserker")       return SkillId::BERSERKER;
+    if (s == "second_wind")     return SkillId::SECOND_WIND;
+    if (s == "soul_harvest")    return SkillId::SOUL_HARVEST;
+    if (s == "gravity_pull")    return SkillId::GRAVITY_PULL;
+    if (s == "phase_strike")    return SkillId::PHASE_STRIKE;
+    if (s == "void_kill")       return SkillId::VOID_KILL;
     return SkillId::NONE;
 }
 

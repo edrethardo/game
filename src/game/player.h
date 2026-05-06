@@ -32,6 +32,13 @@ struct Player {
     f32  freezeTimer      = 0.0f;  // halves movement speed
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
+    u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
+    f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection)
+
+    // Ring passive state
+    f32  secondWindCooldown = 0.0f;  // internal cooldown for Second Wind (60s)
+    u8   soulHarvestStacks  = 0;     // current Soul Harvest kill streak stacks (max 5)
+    f32  soulHarvestTimer   = 0.0f;  // time remaining on Soul Harvest buff
 
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;

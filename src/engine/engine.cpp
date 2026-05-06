@@ -535,6 +535,40 @@ void Engine::init() {
                                        position + Vec3{0.2f, 0.5f, 0.0f});
             }
         }
+
+        // --- Ring on-kill passives ---
+        if (s_engine->m_ringPassive != SkillId::NONE && !(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
+            // Soul Harvest: +5% speed, +3% damage per stack for 10s (max 5)
+            if (s_engine->m_ringPassive == SkillId::SOUL_HARVEST) {
+                Player& p = s_engine->m_localPlayer;
+                if (p.soulHarvestStacks < 5) p.soulHarvestStacks++;
+                p.soulHarvestTimer = 10.0f;
+                // Speed bonus applied via moveSpeed multiplier
+            }
+            // Void Kill: 15% chance to spawn void zone on corpse
+            if (s_engine->m_ringPassive == SkillId::VOID_KILL && (std::rand() % 100) < 15) {
+                // AoE void damage to nearby enemies
+                EntityHandle aoeHits[MAX_ENTITIES];
+                f32 aoeDists[MAX_ENTITIES];
+                u32 aoeCount = CombatQuery::queryConeSorted(
+                    pool, position, {0,-1,0}, -1.0f, 3.0f,
+                    aoeHits, aoeDists, MAX_ENTITIES);
+                for (u32 h = 0; h < aoeCount; h++) {
+                    Entity* ve = handleGet(pool, aoeHits[h]);
+                    if (!ve || (ve->flags & ENT_DEAD) || (ve->flags & ENT_FRIENDLY)) continue;
+                    f32 missingHp = ve->maxHealth - ve->health;
+                    Combat::applyDamage(pool, aoeHits[h], 10.0f + missingHp * 0.6f);
+                }
+                // Dark purple nova visual
+                for (u32 ni = 0; ni < Engine::MAX_NOVA_FX; ni++) {
+                    if (!s_engine->m_novaFX[ni].active) {
+                        s_engine->m_novaFX[ni] = {position, 3.0f, 1.0f, true, {0.4f, 0.1f, 0.6f}};
+                        break;
+                    }
+                }
+            }
+        }
+
         (void)position;
     });
 
@@ -2486,6 +2520,13 @@ void Engine::singleplayerUpdate(f32 dt) {
         m_armorAura = (!isItemEmpty(armor) && armor.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[armor.defId].legendarySkillId : SkillId::NONE;
     }
+    // Ring passive effect
+    {
+        const ItemInstance& ring = m_inventories[0].equipped[static_cast<u32>(ItemSlot::RING)];
+        m_ringPassive = (!isItemEmpty(ring) && ring.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
+        m_localPlayer.ringPassive = static_cast<u8>(m_ringPassive);
+    }
 
     // --- Class skill selection (keys 1-4) ---
     if (!m_inventoryOpen) {
@@ -2617,6 +2658,82 @@ void Engine::singleplayerUpdate(f32 dt) {
                 default: break;
             }
         }
+    }
+
+    // --- Ring passive effects (per-frame tick) ---
+    if (m_ringPassive != SkillId::NONE) {
+        // Tick soul harvest buff timer
+        if (m_localPlayer.soulHarvestTimer > 0.0f) {
+            m_localPlayer.soulHarvestTimer -= dt;
+            if (m_localPlayer.soulHarvestTimer <= 0.0f) {
+                m_localPlayer.soulHarvestStacks = 0;
+            }
+        }
+        // Tick second wind internal cooldown
+        if (m_localPlayer.secondWindCooldown > 0.0f)
+            m_localPlayer.secondWindCooldown -= dt;
+
+        // Second Wind: at <20% HP, heal 30% + 2s invuln (60s cooldown)
+        if (m_ringPassive == SkillId::SECOND_WIND &&
+            m_localPlayer.health > 0.0f &&
+            m_localPlayer.health < m_localPlayer.maxHealth * 0.2f &&
+            m_localPlayer.secondWindCooldown <= 0.0f) {
+            m_localPlayer.health += m_localPlayer.maxHealth * 0.3f;
+            if (m_localPlayer.health > m_localPlayer.maxHealth)
+                m_localPlayer.health = m_localPlayer.maxHealth;
+            m_localPlayer.invulnTimer = 2.0f;
+            m_localPlayer.secondWindCooldown = 60.0f;
+            // Bright golden flash visual
+            for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                if (!m_novaFX[ni].active) {
+                    m_novaFX[ni] = {m_localPlayer.position, 2.0f, 0.8f, true, {1.0f, 0.9f, 0.3f}};
+                    break;
+                }
+            }
+            LOG_INFO("SECOND WIND triggered! Healed 30%%, 2s invuln");
+        }
+
+        // Gravity Pull: pull enemies within 5m toward player
+        if (m_ringPassive == SkillId::GRAVITY_PULL) {
+            Vec3 pPos = m_localPlayer.position;
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                if (ent.enemyType == EnemyType::PROP) continue;
+                Vec3 toPlayer = pPos - ent.position;
+                f32 dist = length(toPlayer);
+                if (dist > 0.5f && dist < 5.0f) {
+                    // Gentle pull: stronger the closer they are
+                    f32 pullStrength = (1.0f - dist / 5.0f) * 2.0f * dt;
+                    ent.position = ent.position + normalize(toPlayer) * pullStrength;
+                }
+            }
+        }
+
+        // Thorns: reflect 20% of damage taken to nearest enemy
+        if (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f) {
+            f32 reflectDmg = m_localPlayer.lastDamageTaken * 0.2f;
+            // Find nearest enemy and reflect damage to it
+            f32 bestDist = 5.0f;
+            EntityHandle bestH = {};
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                f32 d = length(ent.position - m_localPlayer.position);
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestH = {static_cast<u16>(idx), ent.generation};
+                }
+            }
+            if (bestDist < 5.0f) {
+                Combat::applyDamage(m_entities, bestH, reflectDmg);
+            }
+        }
+        m_localPlayer.lastDamageTaken = 0.0f; // reset each frame
     }
 
     updatePlayerPickup();
@@ -3276,6 +3393,15 @@ void Engine::handleWeaponFire(f32 dt) {
             wpn.damage *= 1.2f;
         }
     }
+    // Berserker ring: +1% damage per 1% missing HP
+    if (m_ringPassive == SkillId::BERSERKER) {
+        f32 missingPct = 1.0f - m_localPlayer.health / m_localPlayer.maxHealth;
+        wpn.damage *= (1.0f + missingPct);
+    }
+    // Soul Harvest ring: +3% damage per stack
+    if (m_localPlayer.soulHarvestStacks > 0) {
+        wpn.damage *= (1.0f + m_localPlayer.soulHarvestStacks * 0.03f);
+    }
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
     Vec3 forward = m_localPlayer.forward;
@@ -3375,6 +3501,30 @@ void Engine::handleWeaponFire(f32 dt) {
     }
     m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
+
+    // --- Ring on-hit passives ---
+    if (result.hitEntity && m_ringPassive != SkillId::NONE) {
+        // Life Steal: heal 5% of damage dealt
+        if (m_ringPassive == SkillId::LIFE_STEAL) {
+            f32 heal = wpn.damage * 0.05f;
+            m_localPlayer.health += heal;
+            if (m_localPlayer.health > m_localPlayer.maxHealth)
+                m_localPlayer.health = m_localPlayer.maxHealth;
+        }
+        // Phase Strike: 10% chance to teleport behind target
+        if (m_ringPassive == SkillId::PHASE_STRIKE && (std::rand() % 100) < 10) {
+            Vec3 hitPos = result.hitPosition;
+            Vec3 behindDir = normalize(hitPos - m_localPlayer.position);
+            Vec3 teleportPos = hitPos + behindDir * 1.5f;
+            // Validate teleport destination isn't inside a wall
+            u32 gx, gz;
+            if (LevelGridSystem::worldToGrid(m_grid, teleportPos, gx, gz) &&
+                !LevelGridSystem::isSolid(m_grid, gx, gz)) {
+                m_localPlayer.position = teleportPos;
+                m_localPlayer.yaw += 3.14159f; // face back toward target
+            }
+        }
+    }
 
     // Weapon legendary on-hit proc — % chance to trigger skill at hit position
     if (result.hitEntity && m_weaponProc != SkillId::NONE) {

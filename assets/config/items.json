@@ -807,7 +807,7 @@
       "minLevel": 5,
       "maxLevel": 10,
       "maxRarity": "legendary",
-      "legendarySkill": "meteor_strike",
+      "legendarySkill": "berserker",
       "dropWeight": 0.5
     },
     {
@@ -819,7 +819,7 @@
       "minLevel": 6,
       "maxLevel": 10,
       "maxRarity": "legendary",
-      "legendarySkill": "frozen_orb",
+      "legendarySkill": "life_steal",
       "dropWeight": 0.4
     },
     {
@@ -1051,7 +1051,9 @@
       "baseHealth": 12.0,
       "minLevel": 8,
       "maxLevel": 18,
-      "maxRarity": "rare"
+      "maxRarity": "legendary",
+      "legendarySkill": "thorns",
+      "dropWeight": 0.5
     },
     {
       "name": "Bone Shield",
@@ -1228,7 +1230,9 @@
       "baseHealth": 20.0,
       "minLevel": 16,
       "maxLevel": 28,
-      "maxRarity": "rare"
+      "maxRarity": "legendary",
+      "legendarySkill": "phase_strike",
+      "dropWeight": 0.5
     },
     {
       "name": "Carapace Shield",
@@ -1411,7 +1415,9 @@
       "baseHealth": 28.0,
       "minLevel": 24,
       "maxLevel": 38,
-      "maxRarity": "rare"
+      "maxRarity": "legendary",
+      "legendarySkill": "soul_harvest",
+      "dropWeight": 0.5
     },
     {
       "name": "Demon Shield",
@@ -1590,7 +1596,9 @@
       "baseHealth": 35.0,
       "minLevel": 32,
       "maxLevel": 50,
-      "maxRarity": "rare"
+      "maxRarity": "legendary",
+      "legendarySkill": "void_kill",
+      "dropWeight": 0.5
     },
     {
       "name": "Void Shield",
@@ -1629,8 +1637,20 @@
       "minLevel": 38,
       "maxLevel": 50,
       "maxRarity": "legendary",
-      "legendarySkill": "frozen_orb",
+      "legendarySkill": "gravity_pull",
       "dropWeight": 0.4
+    },
+    {
+      "name": "Phoenix Band",
+      "slot": "ring",
+      "mesh": "ring",
+      "material": "legendary_ring",
+      "baseHealth": 45.0,
+      "minLevel": 40,
+      "maxLevel": 50,
+      "maxRarity": "legendary",
+      "legendarySkill": "second_wind",
+      "dropWeight": 0.3
     }
   ]
 }
