@@ -64,7 +64,7 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 
     for (u8 bounce = 0; bounce <= def->bounces && chainCount < MAX_CHAIN_PTS; bounce++) {
         // Wide cone on first hit for forgiving aiming; sphere search on bounces
-        f32 cosCone = (bounce == 0) ? cosf(radians(5.0f)) : -1.0f;
+        f32 cosCone = (bounce == 0) ? cosf(radians(15.0f)) : -1.0f;
         f32 range   = (bounce == 0) ? 50.0f : def->bounceRange;
 
         EntityHandle hits[MAX_ENTITIES];
@@ -76,12 +76,15 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 
         if (hitCount == 0) break;
 
-        // Pick nearest entity — skip only the PREVIOUS target to allow re-hitting
+        // Pick nearest valid hostile entity — skip dead, friendly, props, and lastHit
         Entity* hit = nullptr;
         EntityHandle hitHandle = {};
         for (u32 k = 0; k < hitCount; k++) {
             Entity* e = handleGet(entities, hits[k]);
             if (!e) continue;
+            if (e->flags & ENT_DEAD) continue;
+            if (e->flags & ENT_FRIENDLY) continue;
+            if (e->enemyType == EnemyType::PROP) continue;
             if (e == lastHit) continue; // don't bounce to same target twice in a row
             hit       = e;
             hitHandle = hits[k];
@@ -107,6 +110,7 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
                 Entity& e  = entities.entities[idx];
                 if (e.flags & ENT_DEAD)     continue;
                 if (e.flags & ENT_FRIENDLY) continue;
+                if (e.enemyType == EnemyType::PROP) continue;
                 if (&e == lastHit)          continue; // no immediate bounce-back
 
                 Vec3 toE = e.position - currentPos;

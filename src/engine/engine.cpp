@@ -452,7 +452,7 @@ void Engine::init() {
                 Engine::ChainFX& fx = s_engine->m_chainFX[i];
                 fx.pointCount = (count > Engine::MAX_CHAIN_POINTS) ? Engine::MAX_CHAIN_POINTS : count;
                 for (u8 p = 0; p < fx.pointCount; p++) fx.points[p] = points[p];
-                fx.timer = 0.5f;
+                fx.timer = 0.8f;
                 fx.active = true;
                 return;
             }
@@ -524,21 +524,13 @@ void Engine::init() {
                                        position + Vec3{0, 0.5f, 0});
             }
 
-            // Chance to drop a health globe (instant heal on pickup)
-            if ((std::rand() % 100) < static_cast<int>(GameConst::HEALTH_GLOBE_CHANCE * 100.0f)) {
+            // Chance to drop a globe (restores both HP and energy on pickup)
+            if ((std::rand() % 100) < static_cast<int>(GameConst::GLOBE_DROP_CHANCE * 100.0f)) {
                 ItemInstance globe;
-                globe.defId = GLOBE_HEALTH_ID;
+                globe.defId = GLOBE_HEALTH_ID; // single globe type
                 globe.uid   = s_engine->m_worldItems.nextUid++;
                 WorldItemSystem::spawn(s_engine->m_worldItems, globe,
-                                       position + Vec3{0.3f, 0.5f, 0.0f});
-            }
-            // Chance to drop an energy globe (instant energy restore on pickup)
-            if ((std::rand() % 100) < static_cast<int>(GameConst::ENERGY_GLOBE_CHANCE * 100.0f)) {
-                ItemInstance globe;
-                globe.defId = GLOBE_ENERGY_ID;
-                globe.uid   = s_engine->m_worldItems.nextUid++;
-                WorldItemSystem::spawn(s_engine->m_worldItems, globe,
-                                       position + Vec3{-0.3f, 0.5f, 0.0f});
+                                       position + Vec3{0.2f, 0.5f, 0.0f});
             }
         }
         (void)position;
@@ -2182,15 +2174,19 @@ void Engine::singleplayerUpdate(f32 dt) {
         m_quickbars[0].activeSlot = static_cast<u8>(slot);
     }
 
-    // Healing potion (Q key, cooldown from GameConst — heals 40% of max HP)
+    // Healing potion (Q key) — restores 60% HP + 30% energy
     if (m_potionCooldown > 0.0f) m_potionCooldown -= dt;
     if (Input::isKeyPressed(SDL_SCANCODE_Q) && m_potionCooldown <= 0.0f) {
-        f32 healAmount = m_localPlayer.maxHealth * 0.4f;
+        f32 healAmount = m_localPlayer.maxHealth * GameConst::POTION_HEAL_PCT;
         m_localPlayer.health += healAmount;
         if (m_localPlayer.health > m_localPlayer.maxHealth)
             m_localPlayer.health = m_localPlayer.maxHealth;
+        SkillState& ss = m_skillStates[m_localPlayerIndex];
+        f32 energyAmt = ss.maxEnergy * GameConst::POTION_ENERGY_PCT;
+        ss.energy += energyAmt;
+        if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
         m_potionCooldown = GameConst::POTION_COOLDOWN;
-        LOG_INFO("Used healing potion: +%.0f HP (cooldown %.0fs)", healAmount, GameConst::POTION_COOLDOWN);
+        LOG_INFO("Used potion: +%.0f HP, +%.0f EN", healAmount, energyAmt);
     }
 
     // Player movement — disable look and movement while inventory is open
@@ -2576,15 +2572,15 @@ void Engine::updatePlayerPickup() {
         Vec3 delta = m_localPlayer.position - wi.position;
         f32 dist = length(delta);
         if (dist < 2.5f) {
-            if (wi.item.defId == GLOBE_HEALTH_ID) {
-                // Restore 20 HP, capped at max
-                m_localPlayer.health += 20.0f;
+            if (isGlobe(wi.item)) {
+                // Globe restores 30% max HP and 30% max energy
+                f32 healAmt = m_localPlayer.maxHealth * GameConst::GLOBE_HEAL_PCT;
+                m_localPlayer.health += healAmt;
                 if (m_localPlayer.health > m_localPlayer.maxHealth)
                     m_localPlayer.health = m_localPlayer.maxHealth;
-            } else if (wi.item.defId == GLOBE_ENERGY_ID) {
-                // Restore 25 energy, capped at max
                 SkillState& ss = m_skillStates[m_localPlayerIndex];
-                ss.energy += 25.0f;
+                f32 energyAmt = ss.maxEnergy * GameConst::GLOBE_ENERGY_PCT;
+                ss.energy += energyAmt;
                 if (ss.energy > ss.maxEnergy)
                     ss.energy = ss.maxEnergy;
             }
@@ -4289,28 +4285,59 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
-    // --- Chain Lightning — jagged electric arcs between bounce targets ---
+    // --- Chain Lightning — thick jagged electric arcs between bounce targets ---
     for (u32 i = 0; i < MAX_CHAIN_FX; i++) {
         if (!m_chainFX[i].active) continue;
         const ChainFX& cfx = m_chainFX[i];
-        f32 alpha = cfx.timer / 0.5f; // fade over 0.5s lifetime
+        f32 alpha = cfx.timer / 0.8f; // fade over 0.8s lifetime
 
         for (u8 seg = 0; seg + 1 < cfx.pointCount; seg++) {
             Vec3 a = cfx.points[seg];
             Vec3 b = cfx.points[seg + 1];
-            // Main arc — bright blue-white
-            DebugDraw::line(a, b, {0.4f * alpha, 0.6f * alpha, 1.0f * alpha});
-            // Jagged secondary arcs — offset by sine for electric jitter
+            Vec3 diff = b - a;
+            f32 segLen = length(diff);
+
+            // Core arc — bright white-blue, drawn multiple times for thickness
+            Vec3 coreCol = {0.6f * alpha, 0.8f * alpha, 1.0f * alpha};
+            DebugDraw::line(a, b, coreCol);
+            DebugDraw::line(a + Vec3{0, 0.02f, 0}, b + Vec3{0, 0.02f, 0}, coreCol);
+            DebugDraw::line(a + Vec3{0.02f, 0, 0}, b + Vec3{0.02f, 0, 0}, coreCol);
+
+            // 3 jagged sub-arcs per segment — each with different jitter phase
             Vec3 mid = (a + b) * 0.5f;
-            f32 jx = sinf(cfx.timer * 50.0f + seg * 3.0f) * 0.2f;
-            f32 jy = cosf(cfx.timer * 40.0f + seg * 5.0f) * 0.15f;
-            Vec3 jitter = {jx, jy, jx * 0.5f};
-            DebugDraw::line(a, mid + jitter, {0.3f * alpha, 0.5f * alpha, 1.0f * alpha});
-            DebugDraw::line(mid + jitter, b, {0.3f * alpha, 0.5f * alpha, 1.0f * alpha});
-            // Tertiary arc — dimmer, wider offset
-            Vec3 jit2 = {-jx * 1.5f, -jy, jx};
-            DebugDraw::line(a, mid + jit2, {0.2f * alpha, 0.3f * alpha, 0.8f * alpha});
-            DebugDraw::line(mid + jit2, b, {0.2f * alpha, 0.3f * alpha, 0.8f * alpha});
+            Vec3 q1 = a + diff * 0.33f;
+            Vec3 q3 = a + diff * 0.66f;
+
+            for (u32 arc = 0; arc < 3; arc++) {
+                f32 phase = cfx.timer * (40.0f + arc * 15.0f) + seg * 4.0f + arc * 2.1f;
+                f32 jScale = 0.15f + arc * 0.08f;
+                Vec3 j1 = {sinf(phase) * jScale, cosf(phase * 1.3f) * jScale * 0.8f,
+                           cosf(phase * 0.9f) * jScale};
+                Vec3 j2 = {cosf(phase * 1.1f) * jScale, sinf(phase * 0.7f) * jScale,
+                           sinf(phase * 1.4f) * jScale * 0.7f};
+                Vec3 j3 = {sinf(phase * 0.8f) * jScale * 0.6f, cosf(phase) * jScale * 0.5f,
+                           cosf(phase * 1.2f) * jScale};
+
+                f32 brightness = (0.5f - arc * 0.12f) * alpha;
+                Vec3 arcCol = {0.3f * brightness, 0.5f * brightness, 1.0f * brightness};
+
+                // Multi-segment jagged arc: a → q1+j1 → mid+j2 → q3+j3 → b
+                DebugDraw::line(a, q1 + j1, arcCol);
+                DebugDraw::line(q1 + j1, mid + j2, arcCol);
+                DebugDraw::line(mid + j2, q3 + j3, arcCol);
+                DebugDraw::line(q3 + j3, b, arcCol);
+            }
+
+            // Bright impact flash at each bounce point (except origin)
+            if (seg > 0) {
+                f32 flashSize = 0.1f + 0.05f * sinf(cfx.timer * 30.0f + seg);
+                for (u32 ray = 0; ray < 6; ray++) {
+                    f32 ra = ray * (6.28318f / 6.0f) + cfx.timer * 10.0f;
+                    Vec3 rayEnd = a + Vec3{cosf(ra) * flashSize, sinf(ra * 1.5f) * flashSize * 0.5f,
+                                           sinf(ra) * flashSize};
+                    DebugDraw::line(a, rayEnd, {0.7f * alpha, 0.85f * alpha, 1.0f * alpha});
+                }
+            }
         }
     }
 
@@ -4469,25 +4496,41 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 DebugDraw::line(p0, p1, {0.8f * pulse, 0.2f, 0.05f});
             }
 
-            // Descending fire pillar — gets closer to ground as timer counts down
-            f32 pillarTop = 6.0f * (1.0f - urgency) + 0.5f;
-            f32 pillarBottom = 0.3f;
-            Vec3 pillarCol = {1.0f, 0.4f * pulse, 0.08f};
-            for (f32 ox = -0.1f; ox <= 0.1f; ox += 0.1f) {
-                DebugDraw::line(mp + Vec3{ox, pillarBottom, 0},
-                                mp + Vec3{ox, pillarTop, 0}, pillarCol);
-                DebugDraw::line(mp + Vec3{0, pillarBottom, ox},
-                                mp + Vec3{0, pillarTop, ox}, pillarCol);
-            }
+            // Falling meteor rock — descends from sky to impact point
+            f32 meteorY = 8.0f * (1.0f - urgency); // starts at 8m, falls to 0
+            f32 rockSize = 0.3f + urgency * 0.2f;  // grows slightly as it approaches
+            Vec3 meteorPos = mp + Vec3{0, meteorY, 0};
+            Mat4 meteorModel = Mat4::translate(meteorPos)
+                             * Mat4::rotateY(urgency * 12.0f)
+                             * Mat4::rotateX(urgency * 8.0f)
+                             * Mat4::rotateZ(urgency * 5.0f)
+                             * Mat4::scale({rockSize, rockSize, rockSize});
+            AABB meteorBounds = {meteorPos - Vec3{rockSize,rockSize,rockSize},
+                                 meteorPos + Vec3{rockSize,rockSize,rockSize}};
+            // Orange-red glowing rock
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, meteorModel, meteorBounds,
+                             {1.0f, 0.35f + 0.15f * pulse, 0.05f, 1.0f});
 
-            // Ember particles spiraling down the pillar
-            for (u32 ember = 0; ember < 6; ember++) {
-                f32 eh = pillarTop * (1.0f - ember * 0.15f);
-                f32 ea = urgency * 8.0f + ember * 1.05f;
-                f32 er = 0.2f + ember * 0.05f;
-                Vec3 ep = mp + Vec3{cosf(ea) * er, eh, sinf(ea) * er};
-                Vec3 ep2 = mp + Vec3{cosf(ea + 0.5f) * er * 0.8f, eh - 0.2f, sinf(ea + 0.5f) * er * 0.8f};
-                DebugDraw::line(ep, ep2, {1.0f, 0.6f * pulse, 0.1f});
+            // Fiery glow shell around the meteor
+            f32 glowSize = rockSize * 2.0f;
+            Mat4 glowModel = Mat4::translate(meteorPos)
+                           * Mat4::rotateY(-urgency * 10.0f)
+                           * Mat4::scale({glowSize, glowSize, glowSize});
+            AABB glowBounds = {meteorPos - Vec3{glowSize,glowSize,glowSize},
+                               meteorPos + Vec3{glowSize,glowSize,glowSize}};
+            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, glowModel, glowBounds,
+                             {1.0f, 0.5f * pulse, 0.0f, 0.35f});
+
+            // Fire trail behind the meteor — sparks trailing upward
+            for (u32 trail = 0; trail < 8; trail++) {
+                f32 tOff = trail * 0.15f;
+                f32 ty = meteorY + 0.3f + tOff;
+                f32 ta = urgency * 10.0f + trail * 1.2f;
+                f32 tr = 0.1f + trail * 0.03f;
+                Vec3 tp = mp + Vec3{cosf(ta) * tr, ty, sinf(ta) * tr};
+                Vec3 tp2 = mp + Vec3{cosf(ta + 0.4f) * tr * 0.6f, ty + 0.15f, sinf(ta + 0.4f) * tr * 0.6f};
+                f32 fade = 1.0f - trail * 0.1f;
+                DebugDraw::line(tp, tp2, {1.0f * fade, 0.4f * fade * pulse, 0.05f});
             }
         }
     }
@@ -4530,12 +4573,8 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         Vec4 tint = {color.x, color.y, color.z, 1.0f};
 
         if (isGlobeItem) {
-            // Health globe: bright green; energy globe: bright blue
-            if (wi.item.defId == GLOBE_HEALTH_ID) {
-                tint = {0.2f, 1.0f, 0.3f, 1.0f};
-            } else {
-                tint = {0.3f, 0.5f, 1.0f, 1.0f};
-            }
+            // Globe: green with a touch of blue and red
+            tint = {0.3f, 0.9f, 0.5f, 1.0f};
         } else if (wi.item.defId < m_itemDefCount) {
             // Use weapon-specific mesh and material if available
             const ItemDef& def = m_itemDefs[wi.item.defId];
@@ -4902,8 +4941,6 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 slot++;
             }
         }
-
-        HUD::drawWeaponIndicator(sw, sh, m_quickbars[m_localPlayerIndex].activeSlot);
 
         // Energy bar
         HUD::drawEnergyBar(sw, sh, m_skillStates[0].energy, m_skillStates[0].maxEnergy);

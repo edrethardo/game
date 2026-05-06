@@ -37,11 +37,11 @@ namespace GameConst {
 
     // Combat
     static constexpr f32 LOOT_DROP_CHANCE    = 0.40f;
-    static constexpr f32 HEALTH_GLOBE_CHANCE = 0.30f;
-    static constexpr f32 ENERGY_GLOBE_CHANCE = 0.20f;
-    static constexpr f32 HEALTH_GLOBE_AMOUNT = 20.0f;
-    static constexpr f32 ENERGY_GLOBE_AMOUNT = 25.0f;
-    static constexpr f32 POTION_HEAL_PCT     = 0.40f;
+    static constexpr f32 GLOBE_DROP_CHANCE   = 0.55f;  // single globe type, drops often
+    static constexpr f32 GLOBE_HEAL_PCT      = 0.30f;  // restores 30% max HP
+    static constexpr f32 GLOBE_ENERGY_PCT    = 0.30f;  // restores 30% max energy
+    static constexpr f32 POTION_HEAL_PCT     = 0.60f;  // restores 60% max HP
+    static constexpr f32 POTION_ENERGY_PCT   = 0.30f;  // restores 30% max energy
     static constexpr f32 POTION_COOLDOWN     = 5.0f;
 
     // World items
