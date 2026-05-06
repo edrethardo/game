@@ -3330,8 +3330,9 @@ void Engine::serverNetPre(f32 dt) {
     NetInput localInput = PlayerController::captureLocalInput(m_serverTick, ws.currentWeapon);
     Server::getInputBuffer(m_localPlayerIndex).push(localInput);
 
-    // Process inputs for all active players (movement via NetPlayer)
+    // Process inputs for remote players only (host movement handled by gameUpdate)
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (i == m_localPlayerIndex) continue; // host moves in gameUpdate
         NetPlayer& np = m_players[i];
         if (!np.active) continue;
         const NetInput* input = Server::getInputBuffer(i).getLatest();
@@ -3343,8 +3344,9 @@ void Engine::serverNetPre(f32 dt) {
         }
     }
 
-    // Collision for all players
+    // Collision for remote players only (host collision handled by gameUpdate)
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (i == m_localPlayerIndex) continue;
         NetPlayer& np = m_players[i];
         if (!np.active || np.noclip) continue;
         Player tempP;
