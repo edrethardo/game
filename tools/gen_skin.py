@@ -1899,37 +1899,57 @@ def skin_status_invuln():
 # --- Boss skins (floor 10+) ---
 
 def skin_boss_andariel():
-    """Andariel — pale green demoness with dark veins, glowing red eyes. Human mesh 9x17."""
-    w, h = 9, 17
+    """Andariel — spider-woman demon. Dark chitin upper body, pale toxic lower.
+    Multiple red eyes, dark carapace shoulders. Andariel mesh 11x18."""
+    w, h = 11, 18
     p = {}
-    skin   = (120, 160, 100, 255)
-    dark   = (60, 90, 50, 255)
-    vein   = (40, 60, 35, 255)
-    eye    = (200, 50, 40, 255)
-    hair   = (30, 50, 25, 255)
-    belly  = (100, 140, 85, 255)
+    chitin   = (45, 35, 25, 255)     # dark brown-black chitin (spider shell)
+    darkSkin = (70, 55, 40, 255)     # dark skin between plates
+    paleSkin = (140, 120, 90, 255)   # pale underbelly/face
+    toxic    = (80, 140, 50, 255)    # toxic green belly/veins
+    eye      = (220, 40, 30, 255)    # glowing red spider eyes
+    carapace = (35, 25, 18, 255)     # near-black armor plates
+    fang     = (200, 190, 170, 255)  # pale fangs/teeth
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = skin
-    # Dark veins on torso
-    for py in range(6, 12):
-        p[(2, py)] = vein; p[(6, py)] = vein
-    for px in range(1, 8):
-        p[(px, 8)] = vein
-    # Belly area
-    for py in range(5, 9):
-        for px in range(3, 6):
-            p[(px, py)] = belly
-    # Darker legs
-    for py in range(0, 5):
+            p[(px, py)] = darkSkin
+    # Chitin carapace on upper torso (gy=10-12) and shoulder spikes
+    for py in range(10, 13):
         for px in range(w):
-            p[(px, py)] = dark
-    # Hair
-    for px in range(1, 8):
-        p[(px, 16)] = hair
-        p[(px, 15)] = hair
-    # Glowing red eyes
-    p[(3, 14)] = eye; p[(5, 14)] = eye
+            p[(px, py)] = chitin
+    # Shoulder spike tips (gx=0,1 and 9,10)
+    for py in range(11, 13):
+        p[(0, py)] = carapace; p[(1, py)] = carapace
+        p[(9, py)] = carapace; p[(10, py)] = carapace
+    # Narrow waist (gy=8-9) — darker
+    for py in range(8, 10):
+        for px in range(3, 8):
+            p[(px, py)] = chitin
+    # Bulbous abdomen with toxic green (gy=4-7)
+    for py in range(4, 8):
+        for px in range(2, 9):
+            p[(px, py)] = toxic
+    p[(4, 6)] = darkSkin; p[(6, 6)] = darkSkin  # vein breaks
+    # Dark chitinous legs (gy=0-3)
+    for py in range(0, 4):
+        for px in range(w):
+            p[(px, py)] = chitin
+    # Pale angular face (gy=14-17)
+    for px in range(3, 8):
+        for py in range(15, 18):
+            p[(px, py)] = paleSkin
+    # 4 spider eyes
+    p[(4, 16)] = eye; p[(6, 16)] = eye   # upper main eyes
+    p[(4, 15)] = eye; p[(6, 15)] = eye   # lower small eyes
+    # Dark crown/carapace top
+    for px in range(2, 9):
+        p[(px, 17)] = carapace
+    # Fangs at jaw (gy=14)
+    p[(4, 14)] = fang; p[(6, 14)] = fang
+    # Long clawed arms — dark chitin (gx=0-1 and 9-10, gy=5-11)
+    for py in range(5, 12):
+        p[(0, py)] = chitin; p[(1, py)] = chitin
+        p[(9, py)] = chitin; p[(10, py)] = chitin
     return w, h, p
 
 def skin_boss_mephisto():

@@ -360,6 +360,7 @@ void Engine::init() {
             {"butcher_arm",    "assets/meshes/butcher_arm.obj"},
             {"butcher_leg",    "assets/meshes/butcher_leg.obj"},
             {"bat_foot",       "assets/meshes/bat_foot.obj"},
+            {"andariel",       "assets/meshes/andariel.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -1497,7 +1498,7 @@ void Engine::startGame() {
             { 35, "Demon Knight",  "Kneel before me!",    800, 60, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
             { 45, "Arch Mage",     "Feel the arcane!",    600, 65, 3.0f, 14.f, 0.4f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
             // Major bosses (floors 10, 20, 30, 40, 50) — devastating, need full player focus
-            { 10, "Andariel",      "Die, insect!",       1000, 65, 4.0f, 3.5f, 0.4f, {0.7f,1.1f, 0.7f}, true,  "human",    "boss_andariel",     nullptr},
+            { 10, "Andariel",      "Die, insect!",       1000, 65, 4.0f, 3.5f, 0.4f, {0.7f,1.1f, 0.7f}, true,  "andariel", "boss_andariel",     nullptr},
             { 20, "Mephisto",      "You cannot stop me.",1200, 75, 2.5f, 14.f, 0.5f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
             { 30, "Baal",          "I am undefeated!",   1800, 70, 3.0f, 4.0f, 0.4f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
             { 40, "Diablo",        "NOT EVEN DEATH...",  1600, 90, 3.5f, 4.0f, 0.35f,{0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
@@ -4251,6 +4252,20 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                 const LimbConfig& limbCfg = (e.bossLimbConfig > 0)
                     ? LimbSystem::getBossConfig(e.bossLimbConfig)
                     : LimbSystem::getConfig(e.enemyType);
+
+                // One-shot debug log for boss limb rendering
+                static bool s_bossLimbLogged = false;
+                if (e.bossLimbConfig > 0 && !s_bossLimbLogged) {
+                    LOG_INFO("Rendering boss limbs: config=%u, limbCount=%u",
+                             e.bossLimbConfig, limbCfg.limbCount);
+                    for (u32 dli = 0; dli < limbCfg.limbCount; dli++) {
+                        u8 dm = LimbSystem::getBossLimbMeshId(e.bossLimbConfig, dli);
+                        LOG_INFO("  limb %u: meshId=%u (valid=%s)", dli, dm,
+                                 (dm > 0 && dm < m_meshDefCount) ? "yes" : "NO");
+                    }
+                    s_bossLimbLogged = true;
+                }
+
                 for (u32 li = 0; li < limbCfg.limbCount; li++) {
                     u8 limbMesh = (e.bossLimbConfig > 0)
                         ? LimbSystem::getBossLimbMeshId(e.bossLimbConfig, li)
@@ -4338,16 +4353,28 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                     AABB limbBounds = {worldPivot - Vec3{0.5f,0.5f,0.5f},
                                        worldPivot + Vec3{0.5f,0.5f,0.5f}};
 
-                    // BAT wings (limbs 0-1) use dedicated wing membrane texture
+                    // Special textures/tints per limb type
                     const Texture& limbTex = (e.enemyType == EnemyType::BAT && li < 2)
                         ? MaterialSystem::get(MaterialSystem::getIdByName("bat_wing"))->texture
                         : entTex;
 
+                    // Boss extra limbs (beyond base legs) get a dark spider/bone tint
+                    Vec4 limbTint = tint;
+                    if (e.flashTimer > 0.0f) {
+                        limbTint = {1.0f, 0.3f * (e.flashTimer/0.12f), 0.3f * (e.flashTimer/0.12f), 1.0f};
+                    } else if (e.bossLimbConfig > 0 && li >= 2) {
+                        // Extra boss limbs: dark chitinous color
+                        if (e.bossLimbConfig == 1) {
+                            // Andariel spider legs: dark brown-black chitin
+                            limbTint = {0.15f, 0.1f, 0.05f, 1.0f};
+                        } else {
+                            // Other bosses: dark grey-blue
+                            limbTint = {0.2f, 0.2f, 0.25f, 1.0f};
+                        }
+                    }
+
                     Renderer::submit(m_basicShader, limbTex, m_meshDefs[limbMesh].mesh,
-                                     limbModel, limbBounds,
-                                     (e.flashTimer > 0.0f)
-                                         ? Vec4{1.0f, 0.3f * (e.flashTimer/0.12f), 0.3f * (e.flashTimer/0.12f), 1.0f}
-                                         : tint);
+                                     limbModel, limbBounds, limbTint);
                 }
 
                 // Skeleton/Boss weapon: held in right hand (arms are part of body OBJ)

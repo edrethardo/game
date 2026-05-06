@@ -1280,6 +1280,71 @@ def gen_bat_foot():
     add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
     return mb
 
+def gen_andariel(height=2.0):
+    """Andariel — spider-woman demon boss. Tall, narrow waist, wide chitin shoulders,
+    elongated clawed arms, multiple eye sockets. More monster than human.
+    Origin at feet (Y=0). Uses 18 voxels tall for detail."""
+    mb = MeshBuilder()
+    vs = height / 18.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Head (angular, predatory) ---
+    fill_box(-2, 15, -2, 5, 3, 4)   # main skull
+    fill_box(-1, 14, -2, 3, 1, 3)   # narrow jaw with fangs
+    # 4 eye sockets (front face)
+    filled.discard((-1, 16, -2))     # upper left eye
+    filled.discard((1, 16, -2))      # upper right eye
+    filled.discard((-1, 15, -2))     # lower left eye
+    filled.discard((1, 15, -2))      # lower right eye
+    # Mouth/fang gap
+    filled.discard((0, 14, -2))
+
+    # --- Neck (thin) ---
+    fill_box(0, 13, 0, 1, 1, 1)
+
+    # --- Upper torso — wide chitin carapace ---
+    fill_box(-3, 10, -1, 7, 3, 3)   # broad chest plate
+    # Spiked shoulder pauldrons
+    fill_box(-4, 11, -1, 1, 2, 3)   # left shoulder spike
+    fill_box(4, 11, -1, 1, 2, 3)    # right shoulder spike
+    fill_box(-5, 12, 0, 1, 1, 1)    # left spike tip
+    fill_box(5, 12, 0, 1, 1, 1)     # right spike tip
+
+    # --- Narrow waist (spider-like constriction) ---
+    fill_box(-1, 8, 0, 3, 2, 2)     # thin waist
+
+    # --- Wide abdomen (spider-like) ---
+    fill_box(-3, 5, -1, 7, 3, 4)    # bulbous lower body
+    fill_box(-2, 4, -1, 5, 1, 3)    # taper
+
+    # --- Long clawed arms ---
+    fill_box(-4, 9, 0, 1, 3, 1)     # left upper arm
+    fill_box(4, 9, 0, 1, 3, 1)      # right upper arm
+    fill_box(-5, 6, 0, 1, 3, 1)     # left lower arm (longer, angled out)
+    fill_box(5, 6, 0, 1, 3, 1)      # right lower arm
+    # Clawed hands
+    fill_box(-5, 5, -1, 1, 1, 1)    # left claw
+    fill_box(5, 5, -1, 1, 1, 1)     # right claw
+
+    # --- Legs (thin, insectoid) ---
+    fill_box(-2, 2, 0, 1, 2, 1)     # left thigh
+    fill_box(2, 2, 0, 1, 2, 1)      # right thigh
+    fill_box(-2, 0, 0, 1, 2, 1)     # left shin
+    fill_box(2, 0, 0, 1, 2, 1)      # right shin
+    # Pointed feet
+    fill_box(-2, 0, -1, 1, 1, 2)
+    fill_box(2, 0, -1, 1, 1, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
 def gen_humanoid_torso(height=1.8):
     """Skeleton torso only — arms and legs removed for limb system animation."""
     mb = MeshBuilder()
@@ -1438,6 +1503,11 @@ MESH_TYPES = {
         "func": gen_bat_foot,
         "desc": "Bat foot/talon with three toes.",
         "default_file": "bat_foot.obj",
+    },
+    "andariel": {
+        "func": lambda height=2.0: gen_andariel(height),
+        "desc": "Andariel spider-woman boss. Params: --height",
+        "default_file": "andariel.obj",
     },
     "cleric": {
         "func": gen_cleric,
