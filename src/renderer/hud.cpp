@@ -19,7 +19,7 @@ struct HudVertex {
     Vec3 color;
 };
 
-static constexpr u32 MAX_HUD_VERTS = 1024;
+static constexpr u32 MAX_HUD_VERTS = 2048;
 
 static u32    s_vao = 0;
 static u32    s_vbo = 0;

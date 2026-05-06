@@ -11,7 +11,7 @@ struct DebugVertex {
     Vec3 color;
 };
 
-static constexpr u32 MAX_DEBUG_LINES = 8192;
+static constexpr u32 MAX_DEBUG_LINES = 16384;
 
 static DebugVertex s_verts[MAX_DEBUG_LINES * 2];
 static u32  s_lineCount = 0;

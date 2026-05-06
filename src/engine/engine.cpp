@@ -411,6 +411,9 @@ void Engine::init() {
     m_meshIdButcher    = findMeshByName("butcher");
     m_meshIdCleaver    = findMeshByName("cleaver");
     m_meshIdIronMaiden = findMeshByName("iron_maiden");
+    m_meshIdArrow      = findMeshByName("arrow");
+    m_meshIdBolt       = findMeshByName("bolt");
+    m_matIdBatWing     = MaterialSystem::getIdByName("bat_wing");
 
     // Weapons
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
@@ -4261,19 +4264,6 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                     ? LimbSystem::getBossConfig(e.bossLimbConfig)
                     : LimbSystem::getConfig(e.enemyType);
 
-                // One-shot debug log for boss limb rendering
-                static bool s_bossLimbLogged = false;
-                if (e.bossLimbConfig > 0 && !s_bossLimbLogged) {
-                    LOG_INFO("Rendering boss limbs: config=%u, limbCount=%u",
-                             e.bossLimbConfig, limbCfg.limbCount);
-                    for (u32 dli = 0; dli < limbCfg.limbCount; dli++) {
-                        u8 dm = LimbSystem::getBossLimbMeshId(e.bossLimbConfig, dli);
-                        LOG_INFO("  limb %u: meshId=%u (valid=%s)", dli, dm,
-                                 (dm > 0 && dm < m_meshDefCount) ? "yes" : "NO");
-                    }
-                    s_bossLimbLogged = true;
-                }
-
                 for (u32 li = 0; li < limbCfg.limbCount; li++) {
                     u8 limbMesh = (e.bossLimbConfig > 0)
                         ? LimbSystem::getBossLimbMeshId(e.bossLimbConfig, li)
@@ -4363,7 +4353,7 @@ void Engine::renderEntities(u32 sw, u32 sh) {
 
                     // Special textures/tints per limb type
                     const Texture& limbTex = (e.enemyType == EnemyType::BAT && li < 2)
-                        ? MaterialSystem::get(MaterialSystem::getIdByName("bat_wing"))->texture
+                        ? MaterialSystem::get(m_matIdBatWing)->texture
                         : entTex;
 
                     // Boss extra limbs (beyond base legs) get a dark spider/bone tint
@@ -4701,9 +4691,7 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 f32 flyYaw = (spd > 0.01f) ? atan2f(-vel.x, -vel.z) : 0.0f;
 
                 // Check if this is an arrow or bolt (fly straight, no spin)
-                u8 arrowId = findMeshByName("arrow");
-                u8 boltId  = findMeshByName("bolt");
-                bool isArrowOrBolt = (p.meshId == arrowId || p.meshId == boltId);
+                bool isArrowOrBolt = (p.meshId == m_meshIdArrow || p.meshId == m_meshIdBolt);
 
                 const AABB& mb = m_meshDefs[p.meshId].bounds;
                 f32 maxDim = mb.max.y - mb.min.y;

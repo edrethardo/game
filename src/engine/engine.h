@@ -225,6 +225,11 @@ private:
     u8& m_meshIdCleaver       = m_meshIds[MESH_CLEAVER];
     u8& m_meshIdIronMaiden    = m_meshIds[MESH_IRON_MAIDEN];
 
+    // Cached IDs for render-loop lookups (avoid per-frame string searches)
+    u8 m_meshIdArrow    = 0;
+    u8 m_meshIdBolt     = 0;
+    u8 m_matIdBatWing   = 0;
+
     // Switch constraint mode
     bool m_switchMode = false;
     static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;

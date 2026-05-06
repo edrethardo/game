@@ -122,6 +122,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
             // Hit hostile enemies only (skip friendlies so NPC projectiles
             // don't damage allies). Frozen Orb skips — it phases through.
             bool hit = false;
+            u16 primaryHitIdx = 0xFFFF;
             if (!(p.projFlags & PROJ_ORB)) // Frozen Orb phases through enemies
             for (u32 a = 0; a < entities.activeCount; a++) {
                 u32 e = entities.activeList[a];
@@ -133,17 +134,18 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                     EntityHandle h = {static_cast<u16>(e), ent.generation};
                     Combat::applyDamage(entities, h, p.damage);
-                    // Notify engine for weapon on-hit procs
                     if (s_hitCallback) s_hitCallback(p.position, h);
+                    primaryHitIdx = static_cast<u16>(e);
                     hit = true;
-                    break; // one hit per projectile
+                    break;
                 }
             }
             if (hit) {
-                // AoE splash on entity impact
+                // AoE splash on entity impact — skip primary target to avoid double damage
                 if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
                     for (u32 a2 = 0; a2 < entities.activeCount; a2++) {
                         u32 e2 = entities.activeList[a2];
+                        if (e2 == primaryHitIdx) continue; // already took direct hit
                         Entity& ent2 = entities.entities[e2];
                         if (ent2.flags & ENT_DEAD) continue;
                         if (ent2.flags & ENT_FRIENDLY) continue;
