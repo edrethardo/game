@@ -30,7 +30,7 @@ namespace GameConst {
     static constexpr f32 SPIDER_ATK_COOL     = 0.8f;    // was 1.0, faster attacks
 
     // Global speed multiplier — applied to player, NPCs, and enemies
-    static constexpr f32 SPEED_MULT            = 1.15f;
+    static constexpr f32 SPEED_MULT            = 1.45f;
 
     // Floor scaling — 10% per floor so difficulty ramps steadily to floor 50
     static constexpr f32 FLOOR_STAT_MULT     = 0.10f;

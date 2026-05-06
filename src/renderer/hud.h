@@ -100,6 +100,15 @@ namespace HUD {
                       const ItemDef* itemDefs,
                       f32 cooldownPct);
 
+    // Status effect icons above health bar — shows active debuffs/buffs with timers
+    struct StatusEffect {
+        const char* label; // short text (e.g. "PSN", "BRN")
+        Vec3 color;        // icon tint color
+        f32  timer;        // remaining duration (0 = inactive)
+    };
+    void drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
+                          const StatusEffect* effects, u32 count);
+
     // Speech bubble — dark background with text, rendered at screen position (x,y).
     // textColor is pre-chosen (green for allies, red for enemies); alpha for fade-out.
     void drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,

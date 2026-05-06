@@ -30,6 +30,7 @@ struct Player {
     f32  burnTimer        = 0.0f;
     f32  burnDps          = 0.0f;
     f32  freezeTimer      = 0.0f;  // halves movement speed
+    f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
 
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;

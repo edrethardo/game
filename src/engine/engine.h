@@ -148,6 +148,7 @@ private:
     f32  m_firstPickupTooltipTimer = 0.0f;
     bool m_equipTooltipShown = false;  // "double-click to equip" shown once
     f32  m_equipTooltipTimer = 0.0f;
+    f32  m_controlsTooltipTimer = 0.0f;  // LMB/RMB controls shown on floor 1 entry
 
     // Floor door — portal to next dungeon level
     Vec3 m_floorDoorPos    = {0, 0, 0};

@@ -40,6 +40,9 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
 }
 
 void Combat::applyDamageToPlayer(Player& player, f32 damage) {
+    // Invulnerability blocks all damage (respawn/floor entry grace period)
+    if (player.invulnTimer > 0.0f) return;
+
     if (player.blocking) {
         if (player.blockTimer < 0.2f) {
             // Perfect block — negate all damage, trigger shield bash via callback

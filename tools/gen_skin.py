@@ -1813,6 +1813,89 @@ def skin_legendary_shield_tex():
     return w, h, p
 
 
+# --- Status effect icons (4x4) ---
+
+def skin_status_poison():
+    """Poison icon: green droplet on dark background."""
+    w, h = 4, 4
+    p = {}
+    bg    = (20, 30, 20, 255)
+    green = (60, 200, 60, 255)
+    lime  = (120, 255, 80, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bg
+    p[(1, 3)] = green; p[(2, 3)] = green
+    p[(1, 2)] = lime;  p[(2, 2)] = lime
+    p[(0, 1)] = green; p[(1, 1)] = green; p[(2, 1)] = green; p[(3, 1)] = green
+    p[(1, 0)] = green; p[(2, 0)] = green
+    return w, h, p
+
+def skin_status_burn():
+    """Burn icon: orange flame on dark background."""
+    w, h = 4, 4
+    p = {}
+    bg     = (30, 15, 10, 255)
+    orange = (255, 140, 30, 255)
+    yellow = (255, 220, 60, 255)
+    red    = (220, 60, 20, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bg
+    p[(1, 0)] = red;    p[(2, 0)] = red
+    p[(0, 1)] = orange; p[(1, 1)] = orange; p[(2, 1)] = orange; p[(3, 1)] = orange
+    p[(1, 2)] = yellow; p[(2, 2)] = yellow
+    p[(1, 3)] = yellow
+    return w, h, p
+
+def skin_status_freeze():
+    """Freeze icon: blue snowflake/crystal on dark background."""
+    w, h = 4, 4
+    p = {}
+    bg    = (10, 15, 35, 255)
+    ice   = (100, 180, 255, 255)
+    white = (220, 240, 255, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bg
+    p[(1, 3)] = ice;   p[(2, 3)] = ice
+    p[(0, 2)] = ice;   p[(1, 2)] = white; p[(2, 2)] = white; p[(3, 2)] = ice
+    p[(0, 1)] = ice;   p[(1, 1)] = white; p[(2, 1)] = white; p[(3, 1)] = ice
+    p[(1, 0)] = ice;   p[(2, 0)] = ice
+    return w, h, p
+
+def skin_status_slow():
+    """Slow icon: purple snail/spiral on dark background."""
+    w, h = 4, 4
+    p = {}
+    bg     = (20, 15, 30, 255)
+    purple = (160, 80, 220, 255)
+    pink   = (200, 140, 255, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bg
+    p[(0, 0)] = purple; p[(1, 0)] = purple; p[(2, 0)] = purple; p[(3, 0)] = purple
+    p[(0, 1)] = purple; p[(1, 1)] = pink;   p[(2, 1)] = pink
+    p[(0, 2)] = purple; p[(1, 2)] = pink;   p[(2, 2)] = purple; p[(3, 2)] = purple
+    p[(2, 3)] = purple; p[(3, 3)] = purple
+    return w, h, p
+
+def skin_status_invuln():
+    """Invulnerable icon: golden shield on dark background."""
+    w, h = 4, 4
+    p = {}
+    bg   = (25, 25, 15, 255)
+    gold = (240, 210, 80, 255)
+    bright = (255, 245, 160, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bg
+    p[(1, 3)] = gold;   p[(2, 3)] = gold
+    p[(0, 2)] = gold;   p[(1, 2)] = bright; p[(2, 2)] = bright; p[(3, 2)] = gold
+    p[(0, 1)] = gold;   p[(1, 1)] = bright; p[(2, 1)] = bright; p[(3, 1)] = gold
+    p[(1, 0)] = gold;   p[(2, 0)] = gold
+    return w, h, p
+
 SKIN_TYPES = {
     "skeleton":           ("skeleton_skin_42.png",           skin_skeleton),
     "spider":             ("spider_skin_42.png",             skin_spider),
@@ -1866,6 +1949,12 @@ SKIN_TYPES = {
     "icon_swarm":         ("icon_swarm_42.png",              skin_icon_swarm),
     "icon_turret":        ("icon_turret_42.png",             skin_icon_turret),
     "bat_wing":           ("bat_wing_skin_42.png",           skin_bat_wing),
+    # Status effect icons (4x4)
+    "status_poison":      ("status_poison_42.png",           skin_status_poison),
+    "status_burn":        ("status_burn_42.png",             skin_status_burn),
+    "status_freeze":      ("status_freeze_42.png",           skin_status_freeze),
+    "status_slow":        ("status_slow_42.png",             skin_status_slow),
+    "status_invuln":      ("status_invuln_42.png",           skin_status_invuln),
     # Skeleton-rig variants
     "zombie":             ("zombie_skin_42.png",             skin_zombie),
     "ghoul":              ("ghoul_skin_42.png",              skin_ghoul),

@@ -1050,10 +1050,11 @@ void Engine::startGame() {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
 
-    // Reset first-pickup tutorial on new game (not on floor descent)
+    // Reset tutorials on new game (not on floor descent)
     if (m_currentFloor <= 1) {
         m_firstPickupTooltipShown = false;
         m_equipTooltipShown = false;
+        m_controlsTooltipTimer = 8.0f; // show LMB/RMB controls for 8 seconds
     }
 
     // Reset NPC equipment pool so old floor's slots don't persist
@@ -1688,6 +1689,9 @@ void Engine::startGame() {
         Client::init(m_localPlayerIndex);
     }
 
+    // Brief invulnerability on floor entry so enemies don't hit during load-in
+    m_localPlayer.invulnTimer = 2.5f;
+
     Input::setRelativeMouseMode(true);
     m_gameState = GameState::IN_GAME;
 }
@@ -1828,6 +1832,8 @@ void Engine::update(f32 dt) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.position = m_players[m_localPlayerIndex].spawnPosition;
                 m_localPlayer.velocity = {0, 0, 0};
+                m_localPlayer.invulnTimer = 1.5f;
+                m_inventoryOpen = false;
                 m_gameState = GameState::IN_GAME;
             }
             // Enter = reload last save
@@ -1838,6 +1844,8 @@ void Engine::update(f32 dt) {
                     m_currentFloor = 1;
                 }
                 m_localPlayer.health = m_localPlayer.maxHealth;
+                m_localPlayer.invulnTimer = 2.5f;
+                m_inventoryOpen = false;
                 startGame();
                 m_gameState = GameState::IN_GAME;
             }
@@ -1879,8 +1887,12 @@ void Engine::update(f32 dt) {
         if (m_gameState == GameState::MENU) {
             m_running = false;
         } else if (m_gameState == GameState::IN_GAME) {
-            m_confirmQuit = true;
-            m_menuSubSelection = 0; // default to "Continue Playing"
+            if (m_inventoryOpen) {
+                m_inventoryOpen = false; // ESC closes inventory first
+            } else {
+                m_confirmQuit = true;
+                m_menuSubSelection = 0; // default to "Continue Playing"
+            }
         } else if (m_gameState != GameState::GAME_OVER) {
             Net::disconnect();
             m_netRole = NetRole::NONE;
@@ -2062,14 +2074,28 @@ void Engine::updateLobby(f32 dt) {
 // Singleplayer update (unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::singleplayerUpdate(f32 dt) {
-    // Tick player status effects (poison, burn, freeze)
-    if (m_localPlayer.poisonTimer > 0.0f) {
-        m_localPlayer.poisonTimer -= dt;
-        m_localPlayer.health -= m_localPlayer.poisonDps * dt;
+    // Tick invulnerability timer
+    if (m_localPlayer.invulnTimer > 0.0f) {
+        m_localPlayer.invulnTimer -= dt;
+        if (m_localPlayer.invulnTimer < 0.0f) m_localPlayer.invulnTimer = 0.0f;
     }
-    if (m_localPlayer.burnTimer > 0.0f) {
-        m_localPlayer.burnTimer -= dt;
-        m_localPlayer.health -= m_localPlayer.burnDps * dt;
+
+    // Tick player status effects (poison, burn, freeze) — blocked by invulnerability
+    if (m_localPlayer.invulnTimer <= 0.0f) {
+        if (m_localPlayer.poisonTimer > 0.0f) {
+            m_localPlayer.poisonTimer -= dt;
+            m_localPlayer.health -= m_localPlayer.poisonDps * dt;
+        }
+        if (m_localPlayer.burnTimer > 0.0f) {
+            m_localPlayer.burnTimer -= dt;
+            m_localPlayer.health -= m_localPlayer.burnDps * dt;
+        }
+    } else {
+        // Clear DoT effects during invulnerability
+        m_localPlayer.poisonTimer = 0.0f;
+        m_localPlayer.burnTimer = 0.0f;
+        m_localPlayer.freezeTimer = 0.0f;
+        m_localPlayer.slowTimer = 0.0f;
     }
     if (m_localPlayer.freezeTimer > 0.0f) {
         m_localPlayer.freezeTimer -= dt;
@@ -2486,7 +2512,7 @@ void Engine::singleplayerUpdate(f32 dt) {
         // Show equip tutorial on first inventory open after first pickup
         if (m_inventoryOpen && m_firstPickupTooltipShown && !m_equipTooltipShown) {
             m_equipTooltipShown = true;
-            m_equipTooltipTimer = 5.0f;
+            m_equipTooltipTimer = 8.0f;
         }
         // Reset drag/click state when toggling inventory
         m_dragState = {};
@@ -2515,6 +2541,7 @@ void Engine::singleplayerUpdate(f32 dt) {
     if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
     if (m_firstPickupTooltipTimer > 0.0f) m_firstPickupTooltipTimer -= dt;
     if (m_equipTooltipTimer > 0.0f) m_equipTooltipTimer -= dt;
+    if (m_controlsTooltipTimer > 0.0f) m_controlsTooltipTimer -= dt;
 
     // Camera
     PlayerController::applyToCamera(m_localPlayer, m_camera);
@@ -2575,7 +2602,7 @@ void Engine::updatePlayerPickup() {
                     // Show "Press Tab to open inventory" on first pickup
                     if (!m_firstPickupTooltipShown) {
                         m_firstPickupTooltipShown = true;
-                        m_firstPickupTooltipTimer = 4.0f;
+                        m_firstPickupTooltipTimer = 7.0f;
                     }
                     // Auto-equip first weapon; assign subsequent weapons to quickbar
                     if (picked.defId < m_itemDefCount &&
@@ -4800,19 +4827,19 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Equip tutorial — pulsing mouse left-click + "Double-click to equip"
         if (m_equipTooltipTimer > 0.0f) {
-            f32 alpha = (m_equipTooltipTimer < 0.5f)
-                        ? m_equipTooltipTimer * 2.0f : 1.0f;
+            f32 alpha = (m_equipTooltipTimer < 1.0f)
+                        ? m_equipTooltipTimer : 1.0f;
             bool mouseLit = (sinf(m_equipTooltipTimer * 6.0f) > 0.0f);
 
             const char* eqText = "Double-click to equip";
-            f32 textW = FontSystem::textWidth(eqText, 2);
+            f32 textW = FontSystem::textWidth(eqText, 3);
             f32 totalW = 22.0f + 6.0f + textW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.3f;
 
-            HUD::drawMouseButton(sw, sh, cx, cy, 0, mouseLit); // left mouse button
-            FontSystem::drawText(sw, sh, cx + 24.0f, cy + 6.0f, eqText,
-                                 {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 2);
+            HUD::drawMouseButton(sw, sh, cx, cy, 0, mouseLit);
+            FontSystem::drawText(sw, sh, cx + 24.0f, cy + 4.0f, eqText,
+                                 {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 3);
         }
     } else {
         Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
@@ -4880,6 +4907,19 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Energy bar
         HUD::drawEnergyBar(sw, sh, m_skillStates[0].energy, m_skillStates[0].maxEnergy);
+
+        // Status effect icons above the energy bar
+        {
+            HUD::StatusEffect statuses[] = {
+                {"PSN", {0.2f, 0.8f, 0.2f}, m_localPlayer.poisonTimer},
+                {"BRN", {1.0f, 0.5f, 0.1f}, m_localPlayer.burnTimer},
+                {"FRZ", {0.4f, 0.7f, 1.0f}, m_localPlayer.freezeTimer},
+                {"SLO", {0.6f, 0.3f, 0.9f}, m_localPlayer.slowTimer},
+                {"INV", {1.0f, 0.85f, 0.3f}, m_localPlayer.invulnTimer},
+            };
+            // Energy bar top edge is at y=52, place icons above with gap
+            HUD::drawStatusIcons(sw, sh, 20.0f, 58.0f, statuses, 5);
+        }
 
         // Class skill bar — 4 slots to the LEFT of the quickbar
         {
@@ -4964,37 +5004,24 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             bool unlocked = (m_currentFloor >= cls.skillUnlockFloor[slot]);
             const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, cls.skills[slot]);
 
-            f32 rmbX = static_cast<f32>(sw) - 160.0f;
+            f32 rmbX = static_cast<f32>(sw) - 220.0f;
             f32 rmbY = 15.0f;
-
-            // Background box
-            Vec3 bgCol = unlocked ? Vec3{0.12f, 0.12f, 0.18f} : Vec3{0.06f, 0.06f, 0.08f};
-            for (f32 fy = 0; fy < 30.0f; fy += 1.0f) {
-                DebugDraw::line({rmbX, rmbY + fy, 0}, {rmbX + 150.0f, rmbY + fy, 0}, bgCol);
-            }
-            // Border
-            Vec3 bCol = unlocked ? Vec3{0.3f, 0.7f, 0.4f} : Vec3{0.2f, 0.2f, 0.25f};
-            if (m_classSkillStates[slot].cooldownTimer > 0.0f) bCol = {0.5f, 0.3f, 0.2f};
-            DebugDraw::line({rmbX, rmbY, 0}, {rmbX + 150, rmbY, 0}, bCol);
-            DebugDraw::line({rmbX + 150, rmbY, 0}, {rmbX + 150, rmbY + 30, 0}, bCol);
-            DebugDraw::line({rmbX + 150, rmbY + 30, 0}, {rmbX, rmbY + 30, 0}, bCol);
-            DebugDraw::line({rmbX, rmbY + 30, 0}, {rmbX, rmbY, 0}, bCol);
 
             // Mouse right-click icon
             bool skillReady = (m_classSkillStates[slot].cooldownTimer <= 0.0f && unlocked);
-            HUD::drawMouseButton(sw, sh, rmbX + 3, rmbY + 2, 1, skillReady);
+            HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8, 1, skillReady);
 
             // Skill name
             const char* skillName = sd ? sd->name : "???";
             Vec3 nameCol = unlocked ? Vec3{0.9f, 0.9f, 1.0f} : Vec3{0.4f, 0.4f, 0.4f};
             if (m_classSkillStates[slot].cooldownTimer > 0.0f) nameCol = {0.6f, 0.4f, 0.3f};
-            FontSystem::drawText(sw, sh, rmbX + 35, rmbY + 17, skillName, nameCol, 1);
+            FontSystem::drawText(sw, sh, rmbX + 25, rmbY + 22, skillName, nameCol, 2);
 
             // Cooldown text
             if (m_classSkillStates[slot].cooldownTimer > 0.0f) {
                 char cdTxt[8];
                 std::snprintf(cdTxt, sizeof(cdTxt), "%.1fs", m_classSkillStates[slot].cooldownTimer);
-                FontSystem::drawText(sw, sh, rmbX + 35, rmbY + 5, cdTxt, {1.0f, 0.5f, 0.2f}, 1);
+                FontSystem::drawText(sw, sh, rmbX + 25, rmbY + 6, cdTxt, {1.0f, 0.5f, 0.2f}, 2);
             }
         }
 
@@ -5026,23 +5053,23 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         {
             char floorStr[32];
             std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_currentFloor);
-            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 20.0f,
-                                 floorStr, {0.7f, 0.7f, 0.7f}, 1);
+            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 22.0f,
+                                 floorStr, {0.7f, 0.7f, 0.7f}, 2);
         }
 
         // Potion cooldown indicator (below floor text, Q key icon + label)
         {
-            f32 potY = static_cast<f32>(sh) - 38.0f;
+            f32 potY = static_cast<f32>(sh) - 45.0f;
             bool potReady = (m_potionCooldown <= 0.0f);
             HUD::drawKeySymbol(sw, sh, 20.0f, potY, "Q", potReady);
             if (potReady) {
-                FontSystem::drawText(sw, sh, 44.0f, potY + 4.0f,
-                                     "Potion", {0.3f, 0.8f, 0.3f}, 1);
+                FontSystem::drawText(sw, sh, 44.0f, potY + 2.0f,
+                                     "Potion", {0.3f, 0.8f, 0.3f}, 2);
             } else {
                 char potStr[32];
                 std::snprintf(potStr, sizeof(potStr), "Potion: %.0fs", m_potionCooldown);
-                FontSystem::drawText(sw, sh, 44.0f, potY + 4.0f,
-                                     potStr, {0.8f, 0.3f, 0.3f}, 1);
+                FontSystem::drawText(sw, sh, 44.0f, potY + 2.0f,
+                                     potStr, {0.8f, 0.3f, 0.3f}, 2);
             }
         }
     }
@@ -5082,21 +5109,39 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                              static_cast<f32>(sh) * 0.7f, fullText, fullColor, 2);
     }
 
+    // Floor 1 controls tutorial — LMB Attack / RMB Skill
+    if (m_controlsTooltipTimer > 0.0f) {
+        f32 alpha = (m_controlsTooltipTimer < 1.0f)
+                    ? m_controlsTooltipTimer : 1.0f;
+        bool mouseLit = (sinf(m_controlsTooltipTimer * 5.0f) > 0.0f);
+        f32 cx = static_cast<f32>(sw) * 0.5f;
+        f32 cy = static_cast<f32>(sh) * 0.72f;
+
+        // LMB + "Attack"
+        HUD::drawMouseButton(sw, sh, cx - 100.0f, cy, 0, mouseLit);
+        FontSystem::drawText(sw, sh, cx - 78.0f, cy + 5.0f, "Attack",
+                             {0.5f * alpha, 0.9f * alpha, 0.5f * alpha}, 3);
+        // RMB + "Skill"
+        HUD::drawMouseButton(sw, sh, cx + 20.0f, cy, 1, mouseLit);
+        FontSystem::drawText(sw, sh, cx + 42.0f, cy + 5.0f, "Skill",
+                             {0.5f * alpha, 0.6f * alpha, 0.9f * alpha}, 3);
+    }
+
     // First pickup tutorial — pulsing Tab key + "Open Inventory" text
     if (m_firstPickupTooltipTimer > 0.0f) {
-        f32 alpha = (m_firstPickupTooltipTimer < 0.5f)
-                    ? m_firstPickupTooltipTimer * 2.0f : 1.0f;
+        f32 alpha = (m_firstPickupTooltipTimer < 1.0f)
+                    ? m_firstPickupTooltipTimer : 1.0f;
         bool keyLit = (sinf(m_firstPickupTooltipTimer * 6.0f) > 0.0f);
 
         const char* text = "Open Inventory";
-        f32 textW = FontSystem::textWidth(text, 2);
+        f32 textW = FontSystem::textWidth(text, 3);
         f32 totalW = 28.0f + textW;
         f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.65f;
 
         HUD::drawKeySymbol(sw, sh, cx, cy, "Tab", keyLit);
-        FontSystem::drawText(sw, sh, cx + 28.0f, cy + 4.0f, text,
-                             {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 2);
+        FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
+                             {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 3);
     }
 
     // Quickbar — always visible at bottom of screen
@@ -5135,7 +5180,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // Chat log — left side of screen, above the quickbar
     {
         f32 chatX = 15.0f;
-        f32 chatY = 80.0f; // above quickbar (which is at Y=20)
+        f32 chatY = 100.0f; // above status icons and quickbar
         for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
             if (m_chatLog[i].timer <= 0.0f || m_chatLog[i].text[0] == '\0') continue;
             f32 alpha = (m_chatLog[i].timer < 2.0f) ? m_chatLog[i].timer * 0.5f : 1.0f;
@@ -5190,13 +5235,13 @@ void Engine::renderMenu() {
     } else if (m_menuSubState == 2) {
         // Class selection screen
         const char* subTitle = "Choose Your Class";
-        f32 stW = FontSystem::textWidth(subTitle, 2);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.58f,
-                             subTitle, {0.9f, 0.8f, 0.3f}, 2);
+        f32 stW = FontSystem::textWidth(subTitle, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.62f,
+                             subTitle, {0.9f, 0.8f, 0.3f}, 3);
 
         u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
-        f32 listTop = sh * 0.50f;
-        f32 spacing = 28.0f;
+        f32 listTop = sh * 0.54f;
+        f32 spacing = 38.0f;
 
         for (u8 i = 0; i < classCount; i++) {
             const ClassDef& cls = kClassDefs[i];
@@ -5204,32 +5249,36 @@ void Engine::renderMenu() {
             bool sel = (i == m_menuSubSelection);
 
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.35f, 0.2f};
-            HUD::drawMenuOption(sw, sh, y, 300, 24, col, sel);
+            HUD::drawMenuOption(sw, sh, y, 400, 32, col, sel);
 
             Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.55f, 0.55f, 0.55f};
             char label[64];
             std::snprintf(label, sizeof(label), "%s  (%.0f HP, %.0f EN)", cls.name, cls.baseHealth, cls.baseEnergy);
-            f32 tw = FontSystem::textWidth(label, 1);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 7.0f, label, tc, 1);
+            f32 tw = FontSystem::textWidth(label, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 9.0f, label, tc, 2);
         }
 
-        // Show selected class description and skills
+        // Show selected class description and stats above the game title
         if (m_menuSubSelection < classCount) {
             const ClassDef& sel = kClassDefs[m_menuSubSelection];
-            f32 descY = sh * 0.50f - classCount * spacing - 20.0f;
+            f32 descY = sh * 0.78f; // above "DUNGEON ENGINE" title (at 0.65)
 
-            FontSystem::drawText(sw, sh, sw * 0.25f, descY, sel.description, {0.7f, 0.7f, 0.8f}, 1);
-            descY -= 18.0f;
+            // Description centered
+            f32 descW = FontSystem::textWidth(sel.description, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - descW) * 0.5f, descY,
+                                 sel.description, {0.7f, 0.7f, 0.8f}, 2);
 
             char statLine[80];
             std::snprintf(statLine, sizeof(statLine), "HP: %.0f  Speed: %.1f  Energy: %.0f  Weapon: %s",
                           sel.baseHealth, sel.baseMoveSpeed, sel.baseEnergy, sel.startingWeaponName);
-            FontSystem::drawText(sw, sh, sw * 0.25f, descY, statLine, {0.6f, 0.8f, 0.6f}, 1);
+            f32 statW = FontSystem::textWidth(statLine, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - statW) * 0.5f, descY - 24.0f,
+                                 statLine, {0.6f, 0.8f, 0.6f}, 2);
         }
 
         const char* hint2 = "Up/Down to select, Enter to confirm, ESC to go back";
-        f32 hintW2 = FontSystem::textWidth(hint2, 1);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.08f, hint2, {0.4f, 0.4f, 0.5f}, 1);
+        f32 hintW2 = FontSystem::textWidth(hint2, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.06f, hint2, {0.4f, 0.4f, 0.5f}, 2);
     } else {
         // Main menu options
         static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Exit Game"};

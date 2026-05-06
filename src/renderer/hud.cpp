@@ -1062,6 +1062,157 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     flushHUD(sw, sh);
 }
 
+// 8x8 pixel-art icons for each status effect
+// 0=transparent, 1=primary, 2=secondary, 3=detail, 4=highlight
+static const u8 kIconPoison[8][8] = {
+    {0,0,0,0,0,0,0,0},
+    {0,0,0,1,1,0,0,0},
+    {0,0,1,4,4,1,0,0},
+    {0,1,4,2,2,4,1,0},
+    {0,1,2,1,1,2,1,0},
+    {0,0,1,3,3,1,0,0},
+    {0,0,0,3,3,0,0,0},
+    {0,0,0,0,3,0,0,0},
+};
+static const u8 kIconBurn[8][8] = {
+    {0,0,0,0,0,0,0,0},
+    {0,0,0,4,0,0,0,0},
+    {0,0,4,4,4,0,0,0},
+    {0,0,4,1,4,0,0,0},
+    {0,4,1,1,1,4,0,0},
+    {0,4,1,2,1,4,0,0},
+    {0,3,4,2,4,3,0,0},
+    {0,0,3,3,3,0,0,0},
+};
+static const u8 kIconFreeze[8][8] = {
+    {0,0,0,4,4,0,0,0},
+    {0,0,3,0,0,3,0,0},
+    {0,3,0,1,1,0,3,0},
+    {4,0,1,4,4,1,0,4},
+    {4,0,1,4,4,1,0,4},
+    {0,3,0,1,1,0,3,0},
+    {0,0,3,0,0,3,0,0},
+    {0,0,0,4,4,0,0,0},
+};
+static const u8 kIconSlow[8][8] = {
+    {0,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,0,0},
+    {0,1,4,4,4,4,1,0},
+    {0,1,4,2,3,0,1,0},
+    {0,1,4,3,0,0,1,0},
+    {0,1,4,0,0,0,1,0},
+    {0,0,1,1,1,1,0,0},
+    {0,0,0,0,0,0,0,0},
+};
+static const u8 kIconInvuln[8][8] = {
+    {0,0,0,0,0,0,0,0},
+    {0,1,1,1,1,1,1,0},
+    {0,1,4,4,4,4,1,0},
+    {0,1,4,2,2,4,1,0},
+    {0,1,4,2,2,4,1,0},
+    {0,0,1,4,4,1,0,0},
+    {0,0,0,1,1,0,0,0},
+    {0,0,0,0,0,0,0,0},
+};
+
+static const u8* getStatusIcon(u32 idx) {
+    static const u8* icons[] = {
+        &kIconPoison[0][0], &kIconBurn[0][0], &kIconFreeze[0][0],
+        &kIconSlow[0][0], &kIconInvuln[0][0]
+    };
+    return (idx < 5) ? icons[idx] : nullptr;
+}
+
+// Status-specific color palettes: [0]=unused, [1]=primary, [2]=secondary, [3]=detail, [4]=highlight
+static void getStatusColors(u32 idx, Vec3 cols[5]) {
+    cols[0] = {0,0,0};
+    switch (idx) {
+        case 0: // Poison
+            cols[1] = {0.15f, 0.55f, 0.15f}; cols[2] = {0.1f, 0.35f, 0.1f};
+            cols[3] = {0.2f, 0.4f, 0.1f};    cols[4] = {0.3f, 0.9f, 0.3f};
+            break;
+        case 1: // Burn
+            cols[1] = {0.9f, 0.45f, 0.05f};  cols[2] = {0.7f, 0.2f, 0.05f};
+            cols[3] = {0.5f, 0.15f, 0.05f};  cols[4] = {1.0f, 0.85f, 0.2f};
+            break;
+        case 2: // Freeze
+            cols[1] = {0.3f, 0.6f, 0.9f};    cols[2] = {0.15f, 0.35f, 0.6f};
+            cols[3] = {0.2f, 0.45f, 0.7f};   cols[4] = {0.8f, 0.92f, 1.0f};
+            break;
+        case 3: // Slow
+            cols[1] = {0.5f, 0.25f, 0.7f};   cols[2] = {0.3f, 0.1f, 0.5f};
+            cols[3] = {0.4f, 0.2f, 0.6f};    cols[4] = {0.75f, 0.5f, 1.0f};
+            break;
+        case 4: // Invulnerable
+            cols[1] = {0.8f, 0.65f, 0.2f};   cols[2] = {0.6f, 0.5f, 0.15f};
+            cols[3] = {0.5f, 0.4f, 0.1f};    cols[4] = {1.0f, 0.95f, 0.5f};
+            break;
+        default:
+            cols[1] = cols[2] = cols[3] = cols[4] = {0.5f, 0.5f, 0.5f};
+            break;
+    }
+}
+
+void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
+                            const StatusEffect* effects, u32 count)
+{
+    f32 iconSize = 28.0f;
+    f32 gap = 5.0f;
+    f32 cx = x;
+
+    for (u32 i = 0; i < count; i++) {
+        if (effects[i].timer <= 0.0f) continue;
+
+        // Pulsing brightness when timer is low (<2s)
+        f32 pulse = (effects[i].timer < 2.0f)
+            ? 0.5f + 0.5f * sinf(effects[i].timer * 8.0f)
+            : 1.0f;
+
+        // Background fill
+        Vec3 bg = effects[i].color * 0.15f;
+        for (f32 fy = 0; fy < iconSize; fy += 1.0f) {
+            pushLine(cx, y + fy, cx + iconSize, y + fy, bg);
+        }
+
+        // Border in status color
+        Vec3 borderCol = effects[i].color * (0.5f + 0.5f * pulse);
+        pushQuad(cx, y, cx + iconSize, y + iconSize, borderCol);
+
+        // Draw 8x8 pixel-art icon scaled to 24x24 (3px per pixel), centered
+        const u8* icon = getStatusIcon(i);
+        if (icon) {
+            Vec3 cols[5];
+            getStatusColors(i, cols);
+            f32 px = 3.0f; // pixel scale
+            f32 iconX = cx + 2.0f;
+            f32 iconY = y + 2.0f;
+            for (u32 iy = 0; iy < 8; iy++) {
+                for (u32 ix = 0; ix < 8; ix++) {
+                    u8 c = icon[iy * 8 + ix];
+                    if (c == 0) continue;
+                    f32 pxX = iconX + ix * px;
+                    f32 pxY = iconY + (7 - iy) * px; // flip Y
+                    Vec3 col = cols[c] * pulse;
+                    for (f32 fy = 0; fy < px; fy += 1.0f) {
+                        pushLine(pxX, pxY + fy, pxX + px, pxY + fy, col);
+                    }
+                }
+            }
+        }
+
+        flushHUD(sw, sh);
+
+        // Timer text above icon
+        char timeTxt[8];
+        std::snprintf(timeTxt, sizeof(timeTxt), "%.0f", effects[i].timer);
+        f32 tw = FontSystem::textWidth(timeTxt, 1);
+        FontSystem::drawText(sw, sh, cx + (iconSize - tw) * 0.5f, y + iconSize + 2.0f,
+                             timeTxt, effects[i].color * pulse, 1);
+
+        cx += iconSize + gap;
+    }
+}
+
 void HUD::drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,
                             const char* text, Vec3 textColor, f32 alpha) {
     if (!text || alpha <= 0.0f) return;
@@ -1185,8 +1336,8 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
 
     Vec3 rColor = rarityColor(item.rarity);
 
-    u32 nameScale = 2;
-    u32 bodyScale = 1;
+    u32 nameScale = 3;
+    u32 bodyScale = 2;
     f32 lineH = FontSystem::textHeight(bodyScale) + 3.0f;
     f32 nameH = FontSystem::textHeight(nameScale) + 6.0f;
     f32 padX = 10.0f;
@@ -1205,7 +1356,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         lineCount += 4; // separator + skill name + 2 description lines
     }
 
-    f32 tooltipW = 240.0f;
+    f32 tooltipW = 320.0f;
     f32 tooltipH = padY * 2 + nameH + lineCount * lineH;
 
     // Clamp to screen

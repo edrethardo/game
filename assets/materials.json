@@ -101,6 +101,12 @@
     { "id": 88, "name": "icon_drone",                "texture": "icon_drone_42.png" },
     { "id": 89, "name": "icon_swarm",                "texture": "icon_swarm_42.png" },
     { "id": 90, "name": "icon_turret",               "texture": "icon_turret_42.png" },
-    { "id": 91, "name": "bat_wing",                  "texture": "bat_wing_skin_42.png" }
+    { "id": 91, "name": "bat_wing",                  "texture": "bat_wing_skin_42.png" },
+
+    { "id": 92, "name": "status_poison",              "texture": "status_poison_42.png" },
+    { "id": 93, "name": "status_burn",                "texture": "status_burn_42.png" },
+    { "id": 94, "name": "status_freeze",              "texture": "status_freeze_42.png" },
+    { "id": 95, "name": "status_slow",                "texture": "status_slow_42.png" },
+    { "id": 96, "name": "status_invuln",              "texture": "status_invuln_42.png" }
   ]
 }
