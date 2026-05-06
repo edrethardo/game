@@ -175,6 +175,36 @@ void Engine::onPlayerJoin(u8 playerSlot) {
         np.spawnPosition = np.position;
         np.weaponState.currentWeapon = 0;
         np.weaponState.cooldownTimer = 0.0f;
+        np.isDead = false;
+        np.invulnTimer = 2.5f; // spawn protection
+        np.playerClass = PlayerClass::WARRIOR; // default class for joining players
+
+        // Initialize inventory, skill states, and quickbar for the new player
+        Inventory::init(s_engine->m_inventories[playerSlot]);
+        s_engine->m_skillStates[playerSlot] = {};
+        s_engine->m_bootSkillStates[playerSlot] = {};
+        s_engine->m_helmetSkillStates[playerSlot] = {};
+        Quickbar::init(s_engine->m_quickbars[playerSlot], s_engine->m_inventories[playerSlot]);
+
+        // Give starting weapon based on class (same logic as host startup)
+        const ClassDef& cls = kClassDefs[static_cast<u32>(np.playerClass)];
+        for (u32 di = 0; di < s_engine->m_itemDefCount; di++) {
+            if (std::strcmp(s_engine->m_itemDefs[di].name, cls.startingWeaponName) == 0) {
+                ItemInstance startWpn = {};
+                startWpn.defId = static_cast<u16>(di);
+                startWpn.damage = s_engine->m_itemDefs[di].baseDamage;
+                startWpn.rarity = Rarity::COMMON;
+                startWpn.itemLevel = 1;
+                startWpn.uid = static_cast<u16>(std::rand());
+                if (Inventory::addToBackpack(s_engine->m_inventories[playerSlot], startWpn)) {
+                    Inventory::equip(s_engine->m_inventories[playerSlot], 0, s_engine->m_itemDefs);
+                    Quickbar::syncWeaponSlot(s_engine->m_quickbars[playerSlot],
+                                              s_engine->m_inventories[playerSlot]);
+                }
+                break;
+            }
+        }
+
         LOG_INFO("Engine: player %u joined, spawned at (%.1f, %.1f, %.1f)",
                  playerSlot, np.position.x, np.position.y, np.position.z);
     }
@@ -2499,7 +2529,7 @@ void Engine::singleplayerUpdate(f32 dt) {
                         default:                name = "Ally";     break;
                     }
                 } else if (e.enemyType == EnemyType::BOSS) {
-                    name = "Butcher";
+                    name = e.nameTag ? e.nameTag : "Boss";
                 }
                 Vec3 chatCol = (e.flags & ENT_FRIENDLY)
                     ? Vec3{0.4f, 1.0f, 0.5f}
@@ -2859,6 +2889,10 @@ void Engine::singleplayerUpdate(f32 dt) {
         // Reset drag/click state when toggling inventory
         m_dragState = {};
         m_dblClickState = {};
+    }
+    if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) && m_inventoryOpen) {
+        m_inventoryOpen = false;
+        Input::setRelativeMouseMode(true);
     }
 
     updateInventoryInteraction(dt);
@@ -3265,7 +3299,53 @@ void Engine::serverUpdate(f32 dt) {
         DebugDraw::setEnabled(!DebugDraw::isEnabled());
     if (Input::isKeyPressed(SDL_SCANCODE_F2)) {
         m_localPlayer.noclip = !m_localPlayer.noclip;
+        m_players[m_localPlayerIndex].noclip = m_localPlayer.noclip;
         LOG_INFO("Noclip: %s", m_localPlayer.noclip ? "ON" : "OFF");
+    }
+    if (Input::isKeyPressed(SDL_SCANCODE_F3)) {
+        Profiler& prof = getProfiler();
+        prof.enabled = !prof.enabled;
+        LOG_INFO("Profiler: %s", prof.enabled ? "ON" : "OFF");
+    }
+    // Stress spawner: F4 = 10 enemies, F5 = 50 enemies
+    if (Input::isKeyPressed(SDL_SCANCODE_F4)) {
+        u32 spawned = 0;
+        for (u32 s = 0; s < 10 && m_entities.freeCount > 0; s++) {
+            f32 angle = (s / 10.0f) * 6.28f;
+            Vec3 pos = m_localPlayer.position + Vec3{cosf(angle) * 5.0f, 0.5f, sinf(angle) * 5.0f};
+            bool flying = (s % 3 == 0);
+            Vec3 half = flying ? Vec3{0.3f, 0.3f, 0.3f} : Vec3{0.4f, 0.5f, 0.4f};
+            EntitySystem::spawn(m_entities, pos, half, flying,
+                flying ? 30.0f : 50.0f, flying ? 4.0f : 2.5f,
+                15.0f, flying ? 8.0f : 2.5f, flying ? 1.5f : 1.0f, flying ? 8.0f : 10.0f);
+            spawned++;
+        }
+        LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
+    }
+    if (Input::isKeyPressed(SDL_SCANCODE_F5)) {
+        u32 spawned = 0;
+        for (u32 s = 0; s < 50 && m_entities.freeCount > 0; s++) {
+            f32 angle = (s / 50.0f) * 6.28f;
+            f32 radius = 4.0f + (s % 5) * 2.0f;
+            Vec3 pos = m_localPlayer.position + Vec3{cosf(angle) * radius, 0.5f, sinf(angle) * radius};
+            bool flying = (s % 4 == 0);
+            Vec3 half = flying ? Vec3{0.3f, 0.3f, 0.3f} : Vec3{0.4f, 0.5f, 0.4f};
+            EntitySystem::spawn(m_entities, pos, half, flying,
+                flying ? 30.0f : 50.0f, flying ? 4.0f : 2.5f,
+                15.0f, flying ? 8.0f : 2.5f, flying ? 1.5f : 1.0f, flying ? 8.0f : 10.0f);
+            spawned++;
+        }
+        LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
+    }
+    if (Input::isKeyPressed(SDL_SCANCODE_F6)) {
+        m_switchMode = !m_switchMode;
+        if (m_switchMode) {
+            m_camera.farPlane = SWITCH_FAR_PLANE;
+            LOG_INFO("[SWITCH] Mode ON — far=%.0f, res=%ux%u", SWITCH_FAR_PLANE, SWITCH_RES_W, SWITCH_RES_H);
+        } else {
+            m_camera.farPlane = 200.0f;
+            LOG_INFO("[SWITCH] Mode OFF");
+        }
     }
 
     // Weapon switching for local player
@@ -3382,20 +3462,23 @@ void Engine::serverUpdate(f32 dt) {
                 }
             }
 
-            // Class skill activation (right-click)
+            // Class skill activation (right-click) — use remote player's class, not host's
             if (input->extFlags & INPUT_EX_SKILL) {
                 u8 slot = input->skillSlot;
-                if (slot < 4 && static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
-                    const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+                PlayerClass remoteClass = m_players[i].playerClass;
+                if (slot < 4 && static_cast<u32>(remoteClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+                    const ClassDef& cls = kClassDefs[static_cast<u32>(remoteClass)];
                     if (m_currentFloor >= cls.skillUnlockFloor[slot]) {
-                        m_classSkillStates[slot].activeSkill = cls.skills[slot];
-                        m_classSkillStates[slot].energy = 999.0f; // simplified for MP
-                        m_classSkillStates[slot].maxEnergy = 999.0f;
+                        SkillState tempSS;
+                        tempSS.activeSkill = cls.skills[slot];
+                        tempSS.cooldownTimer = 0.0f;
+                        tempSS.energy = 999.0f; // simplified for MP
+                        tempSS.maxEnergy = 999.0f;
                         Vec3 eyePos = m_players[i].eyePos();
                         Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw) * cosf(m_players[i].pitch),
                                                     sinf(m_players[i].pitch),
                                                    -cosf(m_players[i].yaw) * cosf(m_players[i].pitch)});
-                        SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
+                        SkillSystem::tryActivate(tempSS, m_skillDefs, m_skillDefCount,
                                                   eyePos, fwd, m_players[i].yaw,
                                                   m_projectiles, m_entities, m_grid, m_localPlayer);
                     }
@@ -3441,6 +3524,43 @@ void Engine::serverUpdate(f32 dt) {
 
     // Entity timers
     EntitySystem::tickTimers(m_entities, dt);
+
+    // Decay speech timers + log new NPC speech to chat
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if (e.speechTimer > 0.0f) {
+            if (e.speechText && e.speechTimer > 1.9f) {
+                const char* name = "???";
+                if (e.flags & ENT_FRIENDLY) {
+                    switch (e.npcClass) {
+                        case NpcClass::CLERIC:  name = "Cleric";  break;
+                        case NpcClass::ARCHER:  name = "Archer";  break;
+                        case NpcClass::MAGE:    name = "Mage";    break;
+                        case NpcClass::ROGUE:   name = "Rogue";   break;
+                        case NpcClass::PALADIN: name = "Paladin"; break;
+                        default:                name = "Ally";     break;
+                    }
+                } else if (e.enemyType == EnemyType::BOSS) {
+                    name = e.nameTag ? e.nameTag : "Boss";
+                }
+                Vec3 chatCol = (e.flags & ENT_FRIENDLY)
+                    ? Vec3{0.4f, 1.0f, 0.5f}
+                    : Vec3{1.0f, 0.3f, 0.3f};
+                addChatMessage(name, e.speechText, chatCol);
+                e.speechTimer = 1.8f;
+            }
+            e.speechTimer -= dt;
+            if (e.speechTimer <= 0.0f) {
+                e.speechText  = nullptr;
+                e.speechTimer = 0.0f;
+            }
+        }
+    }
+    // Decay chat line timers
+    for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
+        if (m_chatLog[i].timer > 0.0f) m_chatLog[i].timer -= dt;
+    }
 
     // Damage flash decay for all players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
@@ -3549,13 +3669,150 @@ void Engine::serverUpdate(f32 dt) {
                 m_classSkillStates[slot].energy = m_skillStates[0].energy;
                 m_classSkillStates[slot].maxEnergy = m_skillStates[0].maxEnergy;
                 Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+
+                // Thunderclap upgrade: increase stun duration past upgrade floor
+                SkillDef* tcDef = nullptr;
+                f32 origDuration = 0.0f;
+                if (cls.skills[slot] == SkillId::THUNDERCLAP &&
+                    m_currentFloor >= cls.skillUpgradeFloor[slot]) {
+                    tcDef = const_cast<SkillDef*>(SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
+                                                                             SkillId::THUNDERCLAP));
+                    if (tcDef) { origDuration = tcDef->duration; tcDef->duration = 0.5f; }
+                }
+
                 if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                               eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                               m_projectiles, m_entities, m_grid, m_localPlayer)) {
                     m_skillStates[0].energy = m_classSkillStates[slot].energy;
                 }
+
+                if (tcDef) tcDef->duration = origDuration;
             }
         }
+    }
+
+    // --- Equipment legendary skill binding (boots/helmet) for host ---
+    {
+        const ItemInstance& boots = m_inventories[0].equipped[static_cast<u32>(ItemSlot::BOOTS)];
+        SkillId bootSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
+        m_bootSkillStates[0].activeSkill = bootSkill;
+    }
+    {
+        const ItemInstance& helm = m_inventories[0].equipped[static_cast<u32>(ItemSlot::HELMET)];
+        SkillId helmSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
+        m_helmetSkillStates[0].activeSkill = helmSkill;
+    }
+
+    // --- Boot skill activation (F key) for host ---
+    if (Input::isKeyPressed(SDL_SCANCODE_F) && !m_inventoryOpen &&
+        m_bootSkillStates[0].activeSkill != SkillId::NONE) {
+        m_bootSkillStates[0].energy = 999.0f;
+        m_bootSkillStates[0].maxEnergy = 999.0f;
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
+                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+    }
+
+    // --- Helmet skill activation (G key) for host ---
+    if (Input::isKeyPressed(SDL_SCANCODE_G) && !m_inventoryOpen &&
+        m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
+        m_helmetSkillStates[0].energy = 999.0f;
+        m_helmetSkillStates[0].maxEnergy = 999.0f;
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
+                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+    }
+
+    // --- Shield blocking (Ctrl/Shift) for host ---
+    {
+        bool wantsBlock = (Input::isKeyDown(SDL_SCANCODE_LCTRL) ||
+                           Input::isKeyDown(SDL_SCANCODE_RCTRL) ||
+                           Input::isKeyDown(SDL_SCANCODE_LSHIFT) ||
+                           Input::isKeyDown(SDL_SCANCODE_RSHIFT)) && !m_inventoryOpen;
+        if (wantsBlock && !m_localPlayer.blocking) {
+            m_localPlayer.blocking = true;
+            m_localPlayer.blockTimer = 0.0f;
+        } else if (!wantsBlock) {
+            m_localPlayer.blocking = false;
+        }
+        if (m_localPlayer.blocking) {
+            m_localPlayer.blockTimer += dt;
+        }
+    }
+
+    // --- Ring passive effects for host ---
+    if (m_ringPassive != SkillId::NONE) {
+        if (m_localPlayer.soulHarvestTimer > 0.0f) {
+            m_localPlayer.soulHarvestTimer -= dt;
+            if (m_localPlayer.soulHarvestTimer <= 0.0f) m_localPlayer.soulHarvestStacks = 0;
+        }
+        if (m_localPlayer.secondWindCooldown > 0.0f)
+            m_localPlayer.secondWindCooldown -= dt;
+
+        // Second Wind: at <20% HP, heal 30% + 2s invuln (60s cooldown)
+        if (m_ringPassive == SkillId::SECOND_WIND &&
+            m_localPlayer.health > 0.0f &&
+            m_localPlayer.health < m_localPlayer.maxHealth * 0.2f &&
+            m_localPlayer.secondWindCooldown <= 0.0f) {
+            m_localPlayer.health += m_localPlayer.maxHealth * 0.3f;
+            if (m_localPlayer.health > m_localPlayer.maxHealth)
+                m_localPlayer.health = m_localPlayer.maxHealth;
+            m_localPlayer.invulnTimer = 2.0f;
+            m_localPlayer.secondWindCooldown = 60.0f;
+            // Sync heal to NetPlayer immediately
+            m_players[m_localPlayerIndex].health = m_localPlayer.health;
+            m_players[m_localPlayerIndex].invulnTimer = 2.0f;
+            for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                if (!m_novaFX[ni].active) {
+                    m_novaFX[ni] = {m_localPlayer.position, 2.0f, 0.8f, true, {1.0f, 0.9f, 0.3f}};
+                    break;
+                }
+            }
+        }
+
+        // Gravity Pull: pull enemies within 5m toward player
+        if (m_ringPassive == SkillId::GRAVITY_PULL) {
+            Vec3 pPos = m_localPlayer.position;
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                if (ent.enemyType == EnemyType::PROP) continue;
+                Vec3 toPlayer = pPos - ent.position;
+                f32 dist = length(toPlayer);
+                if (dist > 0.5f && dist < 5.0f) {
+                    f32 pullStrength = (1.0f - dist / 5.0f) * 2.0f * dt;
+                    ent.position = ent.position + normalize(toPlayer) * pullStrength;
+                }
+            }
+        }
+
+        // Thorns: reflect 20% of damage taken to nearest enemy
+        if (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f) {
+            f32 reflectDmg = m_localPlayer.lastDamageTaken * 0.2f;
+            f32 bestDist = 5.0f;
+            EntityHandle bestH = {};
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                f32 d = length(ent.position - m_localPlayer.position);
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestH = {static_cast<u16>(idx), ent.generation};
+                }
+            }
+            if (bestDist < 5.0f) {
+                Combat::applyDamage(m_entities, bestH, reflectDmg);
+            }
+        }
+        m_localPlayer.lastDamageTaken = 0.0f;
     }
 
     // Inventory toggle (Tab) + interaction
@@ -3568,6 +3825,18 @@ void Engine::serverUpdate(f32 dt) {
         Input::setRelativeMouseMode(true);
     }
     updateInventoryInteraction(dt);
+
+    // Debug: F7 gives random item (host only)
+    if (Input::isKeyPressed(SDL_SCANCODE_F7)) {
+        ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
+                                              m_affixDefs, m_affixDefCount);
+        if (!isItemEmpty(item)) {
+            if (Inventory::addToBackpack(m_inventories[0], item)) {
+                LOG_INFO("Debug: gave %s (rarity %u, damage %.1f)",
+                         m_itemDefs[item.defId].name, (u32)item.rarity, item.damage);
+            }
+        }
+    }
 
     // Item pickup + globe pickup for host
     updatePlayerPickup();
@@ -3694,6 +3963,9 @@ void Engine::serverUpdate(f32 dt) {
         const ItemInstance& ringItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::RING)];
         np.ringPassive = (!isItemEmpty(ringItem) && ringItem.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[ringItem.defId].legendarySkillId : SkillId::NONE;
+
+        // Warrior class passive: 30% damage reduction
+        np.damageReduction = (np.playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
 
         // Tick armor aura for this player
         if (np.armorAura != SkillId::NONE) {
@@ -4588,12 +4860,19 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         ws.currentClip--;
     }
 
-    // Class damage bonus
-    if (static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
-        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+    // Class damage bonus — use remote player's class, not host's
+    PlayerClass remoteClass = np.playerClass;
+    if (static_cast<u32>(remoteClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(remoteClass)];
         if (wpn.type == cls.preferredWeapon) {
             wpn.damage *= 1.2f;
         }
+    }
+
+    // Berserker ring: +1% damage per 1% missing HP
+    if (np.ringPassive == SkillId::BERSERKER) {
+        f32 missingPct = 1.0f - np.health / np.maxHealth;
+        wpn.damage *= (1.0f + missingPct);
     }
 
     Vec3 eyePos = np.eyePos();
@@ -4603,6 +4882,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         -cosf(np.yaw) * cosf(np.pitch)
     });
 
+    AttackResult result;
     switch (wpn.type) {
     case WeaponType::MELEE: {
         // Dagger crit / non-dagger cleave
@@ -4612,7 +4892,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         if (sub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5) {
             meleeWpn.damage *= 3.0f;
         }
-        AttackResult result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
+        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
         if (sub != WeaponSubtype::DAGGER && sub != WeaponSubtype::NONE &&
             result.hitEntity && (std::rand() % 100) < 5) {
             WeaponDef cleaveWpn = wpn;
@@ -4622,9 +4902,8 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         }
     } break;
     case WeaponType::HITSCAN: {
-        AttackResult result = Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
+        result = Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
         if (result.hitEntity || result.hitWorld) {
-            // Spawn impact spark visible to all players
             for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
                 if (!m_impactFX[fx].active) {
                     m_impactFX[fx] = {result.hitPosition, result.hitNormal,
@@ -4637,7 +4916,101 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     } break;
     case WeaponType::PROJECTILE:
         Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
+        result.hitEntity = false; // procs handled by projectile hit callback
         break;
+    }
+
+    // --- Life steal ring passive for remote player ---
+    if (np.ringPassive == SkillId::LIFE_STEAL && result.hitEntity) {
+        f32 heal = wpn.damage * 0.05f;
+        np.health += heal;
+        if (np.health > np.maxHealth) np.health = np.maxHealth;
+    }
+
+    // --- Weapon legendary on-hit proc for remote player ---
+    if (result.hitEntity && np.weaponProc != SkillId::NONE) {
+        u32 procRoll = static_cast<u32>(std::rand()) % 100;
+        u32 procChance = 20;
+        if (np.weaponProc == SkillId::FROZEN_ORB)      procChance = 15;
+        if (np.weaponProc == SkillId::CHAIN_LIGHTNING)  procChance = 25;
+        if (np.weaponProc == SkillId::METEOR_STRIKE)    procChance = 10;
+        if (np.weaponProc == SkillId::BLOOD_NOVA)       procChance = 20;
+        if (np.weaponProc == SkillId::VOID_ZONE)        procChance = 5;
+        if (np.weaponProc == SkillId::ARC_FIRE)         procChance = 20;
+
+        if (procRoll < procChance) {
+            Vec3 procPos = result.hitPosition;
+            const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, np.weaponProc);
+            if (sd || np.weaponProc == SkillId::ARC_FIRE) {
+                switch (np.weaponProc) {
+                    case SkillId::FROZEN_ORB: {
+                        u16 orbIdx = ProjectileSystem::spawn(m_projectiles, procPos, forward,
+                            sd->projectileSpeed, sd->damage, sd->radius, sd->duration, true);
+                        if (orbIdx != 0xFFFF) m_projectiles.projectiles[orbIdx].projFlags = PROJ_ORB;
+                    } break;
+                    case SkillId::CHAIN_LIGHTNING: {
+                        SkillDef procDef = *sd;
+                        procDef.bounces = static_cast<u8>(3 + (eqWpn.itemLevel - 1) * 17 / 49);
+                        SkillState tempSS;
+                        tempSS.activeSkill = SkillId::CHAIN_LIGHTNING;
+                        tempSS.cooldownTimer = 0.0f;
+                        tempSS.energy = 999.0f;
+                        tempSS.maxEnergy = 999.0f;
+                        SkillSystem::tryActivate(tempSS, &procDef, 1,
+                            procPos, forward, np.yaw,
+                            m_projectiles, m_entities, m_grid, m_localPlayer);
+                    } break;
+                    case SkillId::METEOR_STRIKE: {
+                        extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+                        for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+                            if (!s_meteors[mi].active) {
+                                s_meteors[mi] = {procPos, sd->damage, sd->radius, sd->delay, true};
+                                break;
+                            }
+                        }
+                    } break;
+                    case SkillId::BLOOD_NOVA: {
+                        EntityHandle hits[MAX_ENTITIES];
+                        f32 dists[MAX_ENTITIES];
+                        u32 hitCount = CombatQuery::queryConeSorted(
+                            m_entities, procPos, {0,0,-1}, -1.0f, sd->radius,
+                            hits, dists, MAX_ENTITIES);
+                        for (u32 h = 0; h < hitCount; h++) {
+                            Combat::applyDamage(m_entities, hits[h], sd->damage * 0.5f);
+                        }
+                        for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                            if (!m_novaFX[ni].active) {
+                                m_novaFX[ni] = {procPos, sd->radius, 0.6f, true, {1.0f, 0.15f, 0.1f}};
+                                break;
+                            }
+                        }
+                    } break;
+                    case SkillId::ARC_FIRE: {
+                        f32 arcDps = wpn.damage * 0.3f;
+                        f32 halfAngle = wpn.coneAngleDeg * 0.5f * 3.14159f / 180.0f;
+                        for (u32 fi = 0; fi < 5; fi++) {
+                            f32 t = (fi / 4.0f) * 2.0f - 1.0f;
+                            f32 angle = np.yaw + t * halfAngle;
+                            Vec3 dir = {-sinf(angle), 0.0f, -cosf(angle)};
+                            Vec3 zonePos = np.position + dir * wpn.range * 0.8f;
+                            for (u32 si = 0; si < MAX_SCORCH; si++) {
+                                if (!m_scorchZones[si].active) {
+                                    m_scorchZones[si] = {zonePos, 1.0f, 1.5f, arcDps, true};
+                                    break;
+                                }
+                            }
+                            for (u32 fxi = 0; fxi < MAX_FIRE_FX; fxi++) {
+                                if (!m_fireFX[fxi].active) {
+                                    m_fireFX[fxi] = {zonePos, 1.5f, true};
+                                    break;
+                                }
+                            }
+                        }
+                    } break;
+                    default: break;
+                }
+            }
+        }
     }
 }
 
@@ -4968,11 +5341,13 @@ void Engine::render(f32 alpha) {
                                  {0.5f, 0.9f, 0.5f}, 1);
 
             optY -= 25.0f;
-            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Ent", true);
-            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
-                                 {0.5f, 0.6f, 0.9f}, 1);
-
-            optY -= 25.0f;
+            // Only show "Reload last save" in singleplayer
+            if (m_netRole == NetRole::NONE) {
+                HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Ent", true);
+                FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
+                                     {0.5f, 0.6f, 0.9f}, 1);
+                optY -= 25.0f;
+            }
             HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Esc", true);
             FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Quit to menu",
                                  {0.7f, 0.4f, 0.4f}, 1);

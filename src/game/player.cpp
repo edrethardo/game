@@ -119,9 +119,19 @@ void PlayerController::updateFromInput(Player& player, const NetInput& input, f3
 // Network-aware: applies a NetInput struct to a NetPlayer
 // ---------------------------------------------------------------------------
 void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt) {
+    // Apply slow debuff (same as singleplayer PlayerController::update)
+    f32 effectiveSpeed = np.moveSpeed * GameConst::SPEED_MULT;
+    if (np.slowTimer > 0.0f) {
+        effectiveSpeed *= 0.4f; // 60% slow
+        np.slowTimer -= dt;
+    }
+    // Freeze stops all movement
+    if (np.freezeTimer > 0.0f) {
+        effectiveSpeed = 0.0f;
+    }
     applyMovement(np.position, np.velocity, np.yaw, np.pitch,
                   np.onGround, np.noclip,
-                  np.moveSpeed * GameConst::SPEED_MULT, np.sensitivity,
+                  effectiveSpeed, np.sensitivity,
                   input.mouseDeltaX, input.mouseDeltaY,
                   (input.moveFlags & INPUT_FORWARD)  != 0,
                   (input.moveFlags & INPUT_BACKWARD) != 0,
