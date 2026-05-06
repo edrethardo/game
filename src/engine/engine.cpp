@@ -3075,10 +3075,7 @@ void Engine::handleWeaponFire(f32 dt) {
     ws.cooldownTimer -= dt;
     if (ws.cooldownTimer < 0.0f) ws.cooldownTimer = 0.0f;
 
-    if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
-    if (ws.cooldownTimer > 0.0f) return;
-
-    // Always fire with the equipped weapon (not the active quickbar slot)
+    // Build effective weapon stats from equipped item
     const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
     WeaponDef wpn;
     if (!isItemEmpty(eqWpn)) {
@@ -3087,9 +3084,69 @@ void Engine::handleWeaponFire(f32 dt) {
     } else {
         wpn = m_weaponDefs[ws.currentWeapon];
     }
+
+    // Detect weapon switch — reset clip on change
+    u16 curDefId = isItemEmpty(eqWpn) ? 0xFFFF : eqWpn.defId;
+    if (curDefId != ws.lastWeaponDef) {
+        ws.lastWeaponDef = curDefId;
+        ws.currentClip = wpn.clipSize;
+        ws.reloading = false;
+        ws.reloadTimer = 0.0f;
+    }
+
+    // Tick reload timer (must tick every frame, not just on fire)
+    if (ws.reloading) {
+        ws.reloadTimer -= dt;
+        if (ws.reloadTimer <= 0.0f) {
+            ws.currentClip = wpn.clipSize;
+            ws.reloading = false;
+        }
+    }
+
+    // Manual reload (R key) — reload if clip not full and not already reloading
+    if (Input::isKeyPressed(SDL_SCANCODE_R) && wpn.clipSize > 0 &&
+        !ws.reloading && ws.currentClip < wpn.clipSize) {
+        ws.reloading = true;
+        ws.reloadTimer = wpn.reloadTime;
+    }
+
+    // Can't fire while reloading
+    if (ws.reloading) return;
+
+    if (!Input::isMouseButtonDown(SDL_BUTTON_LEFT)) return;
+    if (ws.cooldownTimer > 0.0f) return;
+
+    // Clip check — auto-reload on empty
+    if (wpn.clipSize > 0 && ws.currentClip == 0) {
+        ws.reloading = true;
+        ws.reloadTimer = wpn.reloadTime;
+
+        // Throwaway legendary: throw weapon as projectile on empty clip
+        if (!isItemEmpty(eqWpn) && m_itemDefs[eqWpn.defId].legendarySkillId == SkillId::THROWAWAY) {
+            Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+            Vec3 forward = m_localPlayer.forward;
+            f32 throwDmg = wpn.damage * wpn.clipSize * 0.5f;
+            // Spawn with explicit speed/radius since hitscan weapons have 0 for these
+            u16 projIdx = ProjectileSystem::spawn(m_projectiles, eyePos + forward * 1.0f,
+                forward, 20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
+            if (projIdx != 0xFFFF) {
+                m_projectiles.projectiles[projIdx].meshId = m_itemDefs[eqWpn.defId].meshId;
+                m_projectiles.projectiles[projIdx].splashRadius = 2.0f;
+                m_projectiles.projectiles[projIdx].splashDamage = throwDmg * 0.5f;
+            }
+            m_viewmodelState.attackAnimT = 0.3f;
+        }
+        return;
+    }
+
     // Track subtype for projectile flags (molotov/wand detection)
     const ItemInstance* qbItem = &eqWpn;
     ws.cooldownTimer = wpn.cooldown;
+
+    // Consume ammo
+    if (wpn.clipSize > 0 && ws.currentClip > 0) {
+        ws.currentClip--;
+    }
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
     Vec3 forward = m_localPlayer.forward;
@@ -4956,6 +5013,41 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             };
             // Energy bar top edge is at y=52, place icons above with gap
             HUD::drawStatusIcons(sw, sh, 20.0f, 58.0f, statuses, 5);
+        }
+
+        // Ammo display for hitscan weapons (right side of health bar area)
+        {
+            WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
+            const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+            WeaponDef wpn;
+            if (!isItemEmpty(eqWpn)) {
+                wpn = Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex], m_itemDefs, eqWpn);
+            } else {
+                wpn = m_weaponDefs[ws.currentWeapon];
+            }
+            if (wpn.clipSize > 0) {
+                f32 ammoX = 230.0f;
+                f32 ammoY = 20.0f;
+                if (ws.reloading) {
+                    // Reloading progress bar
+                    f32 pct = 1.0f - ws.reloadTimer / wpn.reloadTime;
+                    FontSystem::drawText(sw, sh, ammoX, ammoY + 5.0f, "Reloading",
+                                         {0.9f, 0.6f, 0.2f}, 2);
+                    // Progress bar below text
+                    f32 barW = 80.0f;
+                    for (f32 fy = 0; fy < 4.0f; fy += 1.0f) {
+                        DebugDraw::line({ammoX, ammoY - 2.0f + fy, 0},
+                                        {ammoX + barW * pct, ammoY - 2.0f + fy, 0},
+                                        {0.9f, 0.7f, 0.2f});
+                    }
+                } else {
+                    char ammoStr[16];
+                    std::snprintf(ammoStr, sizeof(ammoStr), "%u / %u", ws.currentClip, wpn.clipSize);
+                    Vec3 ammoCol = (ws.currentClip <= 3 && wpn.clipSize > 3)
+                        ? Vec3{0.9f, 0.3f, 0.2f} : Vec3{0.8f, 0.8f, 0.8f};
+                    FontSystem::drawText(sw, sh, ammoX, ammoY + 5.0f, ammoStr, ammoCol, 2);
+                }
+            }
         }
 
         // Class skill bar — 4 slots to the LEFT of the quickbar

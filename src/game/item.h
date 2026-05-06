@@ -49,6 +49,8 @@ enum struct AffixType : u8 {
     CONE_ANGLE,
     RANGE_BONUS,
     DAMAGE_TO_FLYING,
+    CLIP_SIZE_PCT,      // % extra magazine capacity
+    RELOAD_SPEED_PCT,   // % faster reload
     COUNT
 };
 
@@ -123,6 +125,9 @@ enum struct SkillId : u8 {
     STUN_GRENADE,
     // (reuses DEPLOY_TURRET)
 
+    // Legendary weapon effect
+    THROWAWAY,  // throw weapon as projectile on reload
+
     COUNT
 };
 
@@ -178,6 +183,8 @@ struct ItemDef {
     f32        baseProjectileSpeed   = 0.0f;
     f32        baseProjectileRadius  = 0.0f;
     f32        baseRecoil            = 0.0f;
+    u8         baseClipSize          = 0;     // 0 = no clip (melee/projectile)
+    f32        baseReloadTime        = 0.0f;  // seconds to reload magazine
 
     // Armor base stats
     f32 baseHealth = 0.0f;
@@ -335,6 +342,8 @@ struct PlayerInventory {
     f32 bonusConeAngle          = 0.0f;
     f32 bonusRange              = 0.0f;
     f32 bonusDamageToFlying     = 0.0f;
+    f32 bonusClipSizePct        = 0.0f;
+    f32 bonusReloadSpeedPct     = 0.0f;
 };
 
 // ---- World item (dropped loot on the ground) ----

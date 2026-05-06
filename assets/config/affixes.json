@@ -76,6 +76,20 @@
       "slots": ["weapon", "ring"],
       "minValue": 10.0,
       "maxValue": 40.0
+    },
+    {
+      "type": "clip_size_pct",
+      "name": "of Capacity",
+      "slots": ["weapon"],
+      "minValue": 10.0,
+      "maxValue": 40.0
+    },
+    {
+      "type": "reload_speed_pct",
+      "name": "of Quick Hands",
+      "slots": ["weapon", "ring"],
+      "minValue": 10.0,
+      "maxValue": 35.0
     }
   ]
 }

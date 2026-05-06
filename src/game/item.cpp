@@ -95,6 +95,7 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "combat_drone")    return SkillId::COMBAT_DRONE;
     if (s == "swarm_drones")    return SkillId::SWARM_DRONES;
     if (s == "stun_grenade")    return SkillId::STUN_GRENADE;
+    if (s == "throwaway")       return SkillId::THROWAWAY;
     return SkillId::NONE;
 }
 
@@ -110,6 +111,8 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "cone_angle"         || s == "CONE_ANGLE")         return AffixType::CONE_ANGLE;
     if (s == "range_bonus"        || s == "RANGE_BONUS")        return AffixType::RANGE_BONUS;
     if (s == "damage_to_flying"   || s == "DAMAGE_TO_FLYING")   return AffixType::DAMAGE_TO_FLYING;
+    if (s == "clip_size_pct"      || s == "CLIP_SIZE_PCT")      return AffixType::CLIP_SIZE_PCT;
+    if (s == "reload_speed_pct"   || s == "RELOAD_SPEED_PCT")   return AffixType::RELOAD_SPEED_PCT;
     return AffixType::DAMAGE_FLAT;
 }
 
@@ -176,6 +179,8 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
             def.baseProjectileSpeed  = entry.value("baseProjectileSpeed",  0.0f);
             def.baseProjectileRadius = entry.value("baseProjectileRadius", 0.0f);
             def.baseRecoil           = entry.value("baseRecoil",           0.0f);
+            def.baseClipSize         = static_cast<u8>(entry.value("baseClipSize", 0));
+            def.baseReloadTime       = entry.value("baseReloadTime",       0.0f);
             def.baseHealth           = entry.value("baseHealth",           0.0f);
 
             std::string legendaryStr = entry.value("legendarySkill", "NONE");
@@ -557,6 +562,8 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusConeAngle          = 0.0f;
     inv.bonusRange              = 0.0f;
     inv.bonusDamageToFlying     = 0.0f;
+    inv.bonusClipSizePct        = 0.0f;
+    inv.bonusReloadSpeedPct     = 0.0f;
 
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
         const ItemInstance& equipped = inv.equipped[s];
@@ -576,6 +583,8 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
                 case AffixType::CONE_ANGLE:         inv.bonusConeAngle          += affix.value; break;
                 case AffixType::RANGE_BONUS:        inv.bonusRange              += affix.value; break;
                 case AffixType::DAMAGE_TO_FLYING:   inv.bonusDamageToFlying     += affix.value; break;
+                case AffixType::CLIP_SIZE_PCT:      inv.bonusClipSizePct        += affix.value; break;
+                case AffixType::RELOAD_SPEED_PCT:   inv.bonusReloadSpeedPct     += affix.value; break;
                 default: break;
             }
         }
@@ -584,6 +593,9 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
     // Cap cooldown reduction at 50%
     if (inv.bonusCooldownReduction > 0.5f)
         inv.bonusCooldownReduction = 0.5f;
+    // Cap reload speed at 60%
+    if (inv.bonusReloadSpeedPct > 60.0f)
+        inv.bonusReloadSpeedPct = 60.0f;
 }
 
 void Inventory::recalculateNpcStats(NpcEquipment& equip) {
@@ -732,6 +744,18 @@ static WeaponDef buildWeaponDef(const ItemDef& def, const PlayerInventory& inv, 
     wd.projectileSpeed = def.baseProjectileSpeed * (1.0f + inv.bonusProjectileSpeedPct / 100.0f);
     wd.projectileRadius = def.baseProjectileRadius;
     wd.recoilKick      = def.baseRecoil;
+
+    // Clip size: base + percentage bonus from affixes
+    if (def.baseClipSize > 0) {
+        wd.clipSize = static_cast<u8>(def.baseClipSize * (1.0f + inv.bonusClipSizePct / 100.0f));
+        if (wd.clipSize < 1) wd.clipSize = 1;
+    } else {
+        wd.clipSize = 0;
+    }
+    // Reload time: base reduced by reload speed bonus
+    wd.reloadTime = def.baseReloadTime * (1.0f - inv.bonusReloadSpeedPct / 100.0f);
+    if (def.baseReloadTime > 0.0f && wd.reloadTime < 0.2f) wd.reloadTime = 0.2f;
+
     return wd;
 }
 
