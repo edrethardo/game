@@ -29,15 +29,17 @@ void SkillSystem::setChainCallback(ChainCallback cb) { s_chainCallback = cb; }
 static void fireFrozenOrb(Vec3 origin, Vec3 direction, const SkillDef* def,
                            ProjectilePool& pool)
 {
+    // Orb itself deals no damage and is 30% smaller — shards do the damage
+    f32 orbRadius = def->radius * 0.7f;
     ProjectileSystem::spawn(pool, origin, direction, def->projectileSpeed,
-                            def->damage, def->radius, def->duration, true);
+                            0.0f, orbRadius, def->duration, true);
 
-    // Mark the most recently spawned inactive-flagged projectile as an orb
+    // Mark the most recently spawned projectile as an orb
     for (u32 i = MAX_PROJECTILES; i > 0; i--) {
         Projectile& p = pool.projectiles[i - 1];
         if (p.active && p.projFlags == 0 &&
-            fabsf(p.damage - def->damage) < 0.1f &&
-            fabsf(p.radius - def->radius) < 0.1f) {
+            fabsf(p.damage) < 0.1f &&
+            fabsf(p.radius - orbRadius) < 0.1f) {
             p.projFlags = 1;  // bit 0 = isOrb
             p.subTimer  = 0.0f;
             p.orbAngle  = 0.0f;
@@ -980,10 +982,13 @@ void SkillSystem::updateOrbProjectiles(ProjectilePool& pool,
         while (p.subTimer >= def->shardInterval) {
             p.subTimer -= def->shardInterval;
 
-            // Spawn shards in a rotating spoke pattern (D2 Frozen Orb style)
-            for (u8 s = 0; s < def->shardCount; s++) {
-                f32  angle    = p.orbAngle + s * (6.28318f / def->shardCount);
-                Vec3 shardDir = {cosf(angle), 0.0f, sinf(angle)};
+            // Spawn shards in random spherical directions (2x count for dense burst)
+            u8 burstCount = def->shardCount * 2;
+            for (u8 s = 0; s < burstCount; s++) {
+                // Random phi (azimuth) and theta (elevation) for full sphere coverage
+                f32 phi   = (rand() / static_cast<f32>(RAND_MAX)) * 6.28318f;
+                f32 theta = (rand() / static_cast<f32>(RAND_MAX)) * 3.14159f - 1.5708f; // -90 to +90 deg
+                Vec3 shardDir = {cosf(theta) * cosf(phi), sinf(theta), cosf(theta) * sinf(phi)};
 
                 ProjectileSystem::spawn(pool, p.position, shardDir, def->shardSpeed,
                                         def->shardDamage, def->shardRadius, 0.6f, true);

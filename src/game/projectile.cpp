@@ -120,8 +120,9 @@ void ProjectileSystem::update(ProjectilePool& pool,
 
         if (p.fromPlayer) {
             // Hit hostile enemies only (skip friendlies so NPC projectiles
-            // don't damage allies)
+            // don't damage allies). Frozen Orb skips — it phases through.
             bool hit = false;
+            if (!(p.projFlags & PROJ_ORB)) // Frozen Orb phases through enemies
             for (u32 a = 0; a < entities.activeCount; a++) {
                 u32 e = entities.activeList[a];
                 Entity& ent = entities.entities[e];
