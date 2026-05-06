@@ -1568,8 +1568,13 @@ void Engine::startGame() {
                 boss->meshId = findMeshByName(bt->meshName);
                 boss->materialId = MaterialSystem::getIdByName(bt->matName);
                 boss->enemyType = EnemyType::BOSS;
-                boss->nameTag = bt->name; // stable identifier for game logic
+                boss->nameTag = bt->name;
                 boss->level = static_cast<u8>(m_currentFloor);
+                // Assign boss-specific extra limb config for major bosses
+                if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
+                if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles
+                if (bt->floor == 40) boss->bossLimbConfig = 3; // Diablo: back spikes
+                if (bt->floor == 50) boss->bossLimbConfig = 4; // Reaper: blade arms
                 if (bt->weaponName) {
                     boss->weaponMeshId = findMeshByName(bt->weaponName);
                 }
@@ -1585,9 +1590,10 @@ void Engine::startGame() {
                     boss->npcProjectileRadius = 0.15f;
                 }
             }
-            LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u)",
+            LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u, limbConfig=%u)",
                      bt->name, m_currentFloor, bt->baseHp * floorMult,
-                     bt->baseDmg * floorMult, expandW, expandD);
+                     bt->baseDmg * floorMult, expandW, expandD,
+                     boss ? boss->bossLimbConfig : 0);
         }
     }
 
@@ -4226,28 +4232,20 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         if (e.enemyType != EnemyType::GENERIC && !(e.flags & ENT_DEAD)) {
             Vec3 toCamera = m_camera.position - e.position;
             if (lengthSq(toCamera) < LIMB_LOD_DIST_SQ) {
-                const LimbConfig& limbCfg = LimbSystem::getConfig(e.enemyType);
+                // Use boss-specific limb config if available (extra limbs)
+                const LimbConfig& limbCfg = (e.bossLimbConfig > 0)
+                    ? LimbSystem::getBossConfig(e.bossLimbConfig)
+                    : LimbSystem::getConfig(e.enemyType);
                 for (u32 li = 0; li < limbCfg.limbCount; li++) {
-                    u8 limbMesh = LimbSystem::getLimbMeshId(e.enemyType, li);
+                    u8 limbMesh = (e.bossLimbConfig > 0)
+                        ? LimbSystem::getBossLimbMeshId(e.bossLimbConfig, li)
+                        : LimbSystem::getLimbMeshId(e.enemyType, li);
                     if (limbMesh == 0 || limbMesh >= m_meshDefCount) continue;
 
                     const LimbDef& ld = limbCfg.limbs[li];
                     f32 angle = LimbSystem::computeAngle(e, li, e.enemyType);
                     if (ld.mirrored) angle = -angle;
                     angle += ld.restAngle;
-
-                    // Build limb transform: entity feet position → pivot offset → rotation → box
-                    Vec3 limbPivot = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
-                                   + Vec3{0, animBobY, 0}
-                                   + ld.pivotOffset;
-
-                    Mat4 limbRot;
-                    switch (ld.pivotAxis) {
-                        case 0: limbRot = Mat4::rotateX(angle); break;
-                        case 1: limbRot = Mat4::rotateY(angle); break;
-                        case 2: limbRot = Mat4::rotateZ(angle); break;
-                        default: limbRot = Mat4::identity(); break;
-                    }
 
                     // Scale limb proportionally to entity's rendered height
                     f32 limbScale = 1.0f;
@@ -4256,6 +4254,19 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                         f32 meshH = meshBounds.max.y - meshBounds.min.y;
                         f32 targetH = e.halfExtents.y * 2.0f * scaleY;
                         limbScale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
+                    }
+
+                    // Build limb transform: entity feet position → scaled pivot → rotation → box
+                    Vec3 limbPivot = renderPos - Vec3{0, e.halfExtents.y * scaleY, 0}
+                                   + Vec3{0, animBobY, 0}
+                                   + ld.pivotOffset * limbScale;
+
+                    Mat4 limbRot;
+                    switch (ld.pivotAxis) {
+                        case 0: limbRot = Mat4::rotateX(angle); break;
+                        case 1: limbRot = Mat4::rotateY(angle); break;
+                        case 2: limbRot = Mat4::rotateZ(angle); break;
+                        default: limbRot = Mat4::identity(); break;
                     }
 
                     Mat4 limbModel = Mat4::translate(limbPivot)

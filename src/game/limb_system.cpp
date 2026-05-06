@@ -176,6 +176,104 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
 }
 
 // ============================================================
+//  Boss-specific limb configs (extra limbs beyond skeleton base)
+// ============================================================
+
+// Andariel: skeleton base (8) + 4 spider legs from torso sides
+static const LimbConfig s_bossAndarielConfig = {
+    12,
+    {
+        // Standard skeleton limbs (0-7) — same as s_skeletonConfig
+        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
+        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
+        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
+        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
+        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
+        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
+        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
+        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
+        // Extra: 4 spider legs — upper pair wide and forward, lower pair from mid-torso
+        {{ 0.60f, 0.65f,  0.30f}, {0.04f, 0.30f, 0.04f}, 0.5f, 0, false},
+        {{-0.60f, 0.65f,  0.30f}, {0.04f, 0.30f, 0.04f}, 0.5f, 0, true},
+        {{ 0.65f, 0.50f,  0.10f}, {0.04f, 0.28f, 0.04f}, 0.4f, 0, false},
+        {{-0.65f, 0.50f,  0.10f}, {0.04f, 0.28f, 0.04f}, 0.4f, 0, true},
+    }
+};
+
+// Mephisto: skeleton base (8) + 2 ghostly tentacles above shoulders
+static const LimbConfig s_bossMephistoConfig = {
+    10,
+    {
+        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
+        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
+        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
+        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
+        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
+        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
+        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
+        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
+        // Extra: 2 ghostly tentacle appendages above shoulders
+        {{ 0.40f, 0.90f, -0.10f}, {0.03f, 0.30f, 0.03f}, -0.5f, 0, false},
+        {{-0.40f, 0.90f, -0.10f}, {0.03f, 0.30f, 0.03f}, -0.5f, 0, true},
+    }
+};
+
+// Diablo: skeleton base (8) + 2 back spikes (upward-pointing, slight sway)
+static const LimbConfig s_bossDiabloConfig = {
+    10,
+    {
+        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
+        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
+        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
+        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
+        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
+        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
+        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
+        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
+        // Extra: 2 large back spikes pointing upward
+        {{ 0.25f, 0.95f, -0.20f}, {0.04f, 0.35f, 0.04f}, -0.3f, 0, false},
+        {{-0.25f, 0.95f, -0.20f}, {0.04f, 0.35f, 0.04f}, -0.3f, 0, true},
+    }
+};
+
+// Grim Reaper: skeleton base (8) + 2 scythe-blade arms from back
+static const LimbConfig s_bossReaperConfig = {
+    10,
+    {
+        {{0.35f, 0.70f, 0.0f},  {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},
+        {{0.35f, 0.42f, 0.0f},  {0.035f, 0.12f, 0.035f}, 0.0f, 0, false},
+        {{-0.35f, 0.70f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},
+        {{-0.35f, 0.42f, 0.0f}, {0.035f, 0.12f, 0.035f}, 0.0f, 0, true},
+        {{0.12f, 0.08f, 0.0f},  {0.05f, 0.20f, 0.05f}, 0.0f, 0, false},
+        {{0.12f, -0.32f, 0.0f}, {0.04f, 0.18f, 0.04f}, 0.0f, 0, false},
+        {{-0.12f, 0.08f, 0.0f}, {0.05f, 0.20f, 0.05f}, 0.0f, 0, true},
+        {{-0.12f, -0.32f, 0.0f},{0.04f, 0.18f, 0.04f}, 0.0f, 0, true},
+        // Extra: 2 scythe-like blade appendages from upper back
+        {{ 0.45f, 0.85f, -0.15f}, {0.02f, 0.35f, 0.06f}, -0.6f, 0, false},
+        {{-0.45f, 0.85f, -0.15f}, {0.02f, 0.35f, 0.06f}, -0.6f, 0, true},
+    }
+};
+
+const LimbConfig& LimbSystem::getBossConfig(u8 configId) {
+    switch (configId) {
+        case 1: return s_bossAndarielConfig;
+        case 2: return s_bossMephistoConfig;
+        case 3: return s_bossDiabloConfig;
+        case 4: return s_bossReaperConfig;
+        default: return s_skeletonConfig;
+    }
+}
+
+u8 LimbSystem::getBossLimbMeshId(u8 configId, u32 limbIdx) {
+    // First 8 limbs = standard skeleton (arms/legs)
+    if (limbIdx < 4) return s_armMeshId;
+    if (limbIdx < 8) return s_legMeshId;
+    // Extra limbs (8+): use spider leg mesh for Andariel, arm mesh for others
+    if (configId == 1) return s_spiderLegMeshId; // Andariel's spider legs
+    return s_armMeshId; // tentacles, spikes, blades use arm mesh
+}
+
+// ============================================================
 //  Animation: compute per-limb angle
 // ============================================================
 f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
@@ -200,17 +298,25 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
             if (limbIdx < 4) {
                 // Arms swing opposite to legs + gentle idle sway when still
                 f32 armPhase = phase + 3.14159f;
-                f32 idleSway = sinf(e.animTimer * 2.0f) * 0.08f; // subtle idle movement
+                f32 idleSway = sinf(e.animTimer * 2.0f) * 0.08f;
                 return sinf(armPhase) * 0.5f * speed01 + idleSway;
-            } else {
+            } else if (limbIdx < 8) {
                 // Legs
                 bool isLower = (limbIdx == 5 || limbIdx == 7);
                 if (isLower) {
-                    // Knee bend: clamp to only positive angles (legs don't hyperextend backward)
                     f32 bend = sinf(phase + 0.8f);
                     return (bend > 0 ? bend : 0) * 0.5f * speed01;
                 }
                 return sinf(phase) * 0.6f * speed01;
+            } else {
+                // Extra boss limbs (8+): slow menacing sway independent of walk
+                f32 extraPhase = e.animTimer * 1.5f + limbIdx * 1.2f;
+                f32 sway = sinf(extraPhase) * 0.25f;
+                // During attack, extra limbs flare outward
+                if (e.attackAnimT > 0.0f) {
+                    sway += -0.4f * sinf(e.attackAnimT / 0.3f * 3.14159f);
+                }
+                return sway;
             }
         }
 

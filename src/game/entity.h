@@ -89,6 +89,7 @@ struct Entity {
     u8  materialId = 0;  // index into MaterialSystem
     EnemyType enemyType = EnemyType::GENERIC;
     u8 weaponMeshId = 0;  // skeleton weapon mesh index (0 = none)
+    u8 bossLimbConfig = 0; // 0=default, 1-4=boss-specific extra limbs
 
     // NPC equipment and class (friendly NPCs only)
     NpcClass npcClass   = NpcClass::NONE;

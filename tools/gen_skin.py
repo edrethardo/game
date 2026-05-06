@@ -1896,6 +1896,166 @@ def skin_status_invuln():
     p[(1, 0)] = gold;   p[(2, 0)] = gold
     return w, h, p
 
+# --- Boss skins (floor 10+) ---
+
+def skin_boss_andariel():
+    """Andariel — pale green demoness with dark veins, glowing red eyes. Human mesh 9x17."""
+    w, h = 9, 17
+    p = {}
+    skin   = (120, 160, 100, 255)
+    dark   = (60, 90, 50, 255)
+    vein   = (40, 60, 35, 255)
+    eye    = (200, 50, 40, 255)
+    hair   = (30, 50, 25, 255)
+    belly  = (100, 140, 85, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = skin
+    # Dark veins on torso
+    for py in range(6, 12):
+        p[(2, py)] = vein; p[(6, py)] = vein
+    for px in range(1, 8):
+        p[(px, 8)] = vein
+    # Belly area
+    for py in range(5, 9):
+        for px in range(3, 6):
+            p[(px, py)] = belly
+    # Darker legs
+    for py in range(0, 5):
+        for px in range(w):
+            p[(px, py)] = dark
+    # Hair
+    for px in range(1, 8):
+        p[(px, 16)] = hair
+        p[(px, 15)] = hair
+    # Glowing red eyes
+    p[(3, 14)] = eye; p[(5, 14)] = eye
+    return w, h, p
+
+def skin_boss_mephisto():
+    """Mephisto — ghostly blue-white specter, hollow eyes. Skeleton mesh 7x16."""
+    w, h = 7, 16
+    p = {}
+    ghost  = (160, 190, 220, 255)
+    pale   = (200, 220, 240, 255)
+    dark   = (60, 80, 120, 255)
+    eye    = (40, 200, 255, 255)
+    void_c = (20, 30, 60, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = ghost
+    # Pale skull
+    for px in range(1, 6):
+        for py in range(13, 16):
+            p[(px, py)] = pale
+    # Hollow glowing eyes
+    p[(2, 14)] = eye; p[(4, 14)] = eye
+    # Dark robes/lower body
+    for py in range(0, 8):
+        for px in range(w):
+            p[(px, py)] = dark
+    # Spectral glow streaks
+    p[(3, 10)] = pale; p[(3, 11)] = pale; p[(3, 12)] = pale
+    # Void patches
+    p[(1, 5)] = void_c; p[(5, 6)] = void_c; p[(2, 3)] = void_c
+    return w, h, p
+
+def skin_boss_baal():
+    """Baal — golden-brown armored demon lord, glowing orange runes. Butcher mesh 11x21."""
+    w, h = 11, 21
+    p = {}
+    armor  = (160, 130, 60, 255)
+    gold   = (220, 190, 80, 255)
+    rune   = (255, 160, 40, 255)
+    dark   = (80, 60, 30, 255)
+    skin   = (140, 110, 70, 255)
+    eye    = (255, 200, 50, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = skin
+    # Armor plates on torso
+    for py in range(8, 16):
+        for px in range(2, 9):
+            p[(px, py)] = armor
+    # Gold trim
+    for px in range(1, 10):
+        p[(px, 15)] = gold; p[(px, 8)] = gold
+    # Glowing runes on chest
+    p[(4, 12)] = rune; p[(6, 12)] = rune
+    p[(5, 11)] = rune; p[(5, 13)] = rune
+    # Dark legs
+    for py in range(0, 6):
+        for px in range(w):
+            p[(px, py)] = dark
+    # Eyes
+    p[(4, 18)] = eye; p[(6, 18)] = eye
+    # Horns
+    p[(3, 20)] = gold; p[(7, 20)] = gold
+    return w, h, p
+
+def skin_boss_diablo():
+    """Diablo — dark red scales, black horns, fiery orange belly. Butcher mesh 11x21."""
+    w, h = 11, 21
+    p = {}
+    scale  = (140, 30, 15, 255)
+    dark   = (60, 15, 10, 255)
+    fire   = (255, 140, 30, 255)
+    horn   = (30, 20, 15, 255)
+    eye    = (255, 220, 50, 255)
+    belly  = (200, 80, 20, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = scale
+    # Fiery belly
+    for py in range(8, 14):
+        for px in range(3, 8):
+            p[(px, py)] = belly
+    p[(5, 11)] = fire; p[(4, 10)] = fire; p[(6, 10)] = fire
+    # Black horns
+    p[(2, 20)] = horn; p[(3, 20)] = horn; p[(7, 20)] = horn; p[(8, 20)] = horn
+    p[(2, 19)] = horn; p[(8, 19)] = horn
+    # Dark legs and arms
+    for py in range(0, 5):
+        for px in range(w):
+            p[(px, py)] = dark
+    for py in range(10, 16):
+        p[(0, py)] = dark; p[(1, py)] = dark; p[(9, py)] = dark; p[(10, py)] = dark
+    # Glowing eyes
+    p[(4, 18)] = eye; p[(6, 18)] = eye
+    # Spine ridge
+    for py in range(6, 18):
+        p[(5, py)] = dark
+    return w, h, p
+
+def skin_boss_reaper():
+    """Grim Reaper — jet black robes, pale skull face, blue soul glow. Skeleton mesh 7x16."""
+    w, h = 7, 16
+    p = {}
+    robe   = (15, 15, 20, 255)
+    skull  = (220, 210, 190, 255)
+    soul   = (60, 120, 200, 255)
+    eye    = (80, 160, 255, 255)
+    shadow = (8, 8, 12, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = robe
+    # Pale skull face
+    for px in range(1, 6):
+        for py in range(13, 16):
+            p[(px, py)] = skull
+    # Hollow glowing eyes
+    p[(2, 14)] = eye; p[(4, 14)] = eye
+    # Jaw
+    p[(2, 13)] = shadow; p[(3, 13)] = shadow; p[(4, 13)] = shadow
+    # Soul glow on chest
+    p[(3, 10)] = soul; p[(3, 11)] = soul
+    p[(2, 10)] = soul; p[(4, 10)] = soul
+    # Deep shadow bottom
+    for py in range(0, 4):
+        for px in range(w):
+            p[(px, py)] = shadow
+    return w, h, p
+
 SKIN_TYPES = {
     "skeleton":           ("skeleton_skin_42.png",           skin_skeleton),
     "spider":             ("spider_skin_42.png",             skin_spider),
@@ -1955,6 +2115,12 @@ SKIN_TYPES = {
     "status_freeze":      ("status_freeze_42.png",           skin_status_freeze),
     "status_slow":        ("status_slow_42.png",             skin_status_slow),
     "status_invuln":      ("status_invuln_42.png",           skin_status_invuln),
+    # Boss skins (floor 10+)
+    "boss_andariel":      ("boss_andariel_42.png",           skin_boss_andariel),
+    "boss_mephisto":      ("boss_mephisto_42.png",           skin_boss_mephisto),
+    "boss_baal":          ("boss_baal_42.png",               skin_boss_baal),
+    "boss_diablo":        ("boss_diablo_42.png",             skin_boss_diablo),
+    "boss_reaper":        ("boss_reaper_42.png",             skin_boss_reaper),
     # Skeleton-rig variants
     "zombie":             ("zombie_skin_42.png",             skin_zombie),
     "ghoul":              ("ghoul_skin_42.png",              skin_ghoul),

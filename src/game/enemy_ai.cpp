@@ -758,10 +758,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // After 1.5s of LOS, force CHASE if still idle and sprint
             if (e.flybyTarget.x > 1.5f && e.aiState == AIState::IDLE) {
                 e.aiState = AIState::CHASE;
-                // Use boss-specific aggro line if no speech is set
-                if (!e.speechText || e.speechTimer <= 0.0f) {
-                    e.speechText = "FRESH MEAT!";
-                    e.speechTimer = 2.0f;
+                // Boss aggro speech — use nameTag for personalized line
+                if (e.speechTimer <= 0.0f) {
+                    if (e.nameTag) {
+                        // Each boss has a unique aggro line based on identity
+                        e.speechText = "You dare challenge me!";
+                        e.speechTimer = 3.0f;
+                    }
                 }
             }
 
