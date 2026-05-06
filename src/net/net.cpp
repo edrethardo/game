@@ -1,4 +1,5 @@
 #include "net/net.h"
+#include "net/server.h"
 #include "core/log.h"
 
 #include <enet/enet.h>
@@ -85,8 +86,8 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         buf[4] = slot;                    // playerIndex
         buf[5] = Net::getConnectedCount(); // playerCount
         buf[6] = 0; buf[7] = 0;          // padding
-        // Level seed placeholder (engine sets this)
-        u32 seed = 0;
+        // Send the actual level seed so client generates the same dungeon
+        u32 seed = Server::getLevelSeed();
         std::memcpy(buf + 8, &seed, 4);
         Net::sendReliable(slot, buf, 12);
 
@@ -349,14 +350,23 @@ void Net::sendUnreliable(u8 playerSlot, const u8* data, u32 size) {
 
 void Net::broadcastReliable(const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
-    ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
-    enet_host_broadcast(s_host, 0, pkt);
+    // Send only to active peers (not disconnected/empty slots)
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
+            ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 0, pkt);
+        }
+    }
 }
 
 void Net::broadcastUnreliable(const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
-    ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
-    enet_host_broadcast(s_host, 1, pkt);
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
+            ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
+            enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt);
+        }
+    }
 }
 
 void Net::sendToServer(const u8* data, u32 size, bool reliable) {

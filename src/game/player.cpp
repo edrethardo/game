@@ -159,6 +159,17 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     input.mouseDeltaX = static_cast<s16>(mx);
     input.mouseDeltaY = static_cast<s16>(my);
 
+    // Extended input flags
+    u8 ext = 0;
+    if (Input::isKeyPressed(SDL_SCANCODE_Q)) ext |= INPUT_EX_POTION;
+    if (Input::isKeyPressed(SDL_SCANCODE_R)) ext |= INPUT_EX_RELOAD;
+    if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) ext |= INPUT_EX_SKILL;
+    if (Input::isKeyPressed(SDL_SCANCODE_F)) ext |= INPUT_EX_BOOT_SKILL;
+    if (Input::isKeyPressed(SDL_SCANCODE_G)) ext |= INPUT_EX_HELM_SKILL;
+    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) ext |= INPUT_EX_INVENTORY;
+    input.extFlags = ext;
+    input.skillSlot = 0; // set by engine before sending
+
     return input;
 }
 

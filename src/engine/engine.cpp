@@ -1951,6 +1951,18 @@ void Engine::syncLocalPlayerToNetPlayer() {
     np.lockGeneration = m_localPlayer.lockGeneration;
     np.lockActive = m_localPlayer.lockActive;
     np.noclip = m_localPlayer.noclip;
+    // Status effects
+    np.invulnTimer      = m_localPlayer.invulnTimer;
+    np.damageReduction  = m_localPlayer.damageReduction;
+    np.slowTimer        = m_localPlayer.slowTimer;
+    np.poisonTimer      = m_localPlayer.poisonTimer;
+    np.poisonDps        = m_localPlayer.poisonDps;
+    np.burnTimer        = m_localPlayer.burnTimer;
+    np.burnDps          = m_localPlayer.burnDps;
+    np.freezeTimer      = m_localPlayer.freezeTimer;
+    np.blocking         = m_localPlayer.blocking;
+    np.blockTimer       = m_localPlayer.blockTimer;
+    np.ringPassive      = m_localPlayer.ringPassive;
 }
 
 void Engine::syncNetPlayerToLocalPlayer() {
@@ -1967,6 +1979,18 @@ void Engine::syncNetPlayerToLocalPlayer() {
     m_localPlayer.lockGeneration = np.lockGeneration;
     m_localPlayer.lockActive = np.lockActive;
     m_localPlayer.noclip = np.noclip;
+    // Status effects
+    m_localPlayer.invulnTimer      = np.invulnTimer;
+    m_localPlayer.damageReduction  = np.damageReduction;
+    m_localPlayer.slowTimer        = np.slowTimer;
+    m_localPlayer.poisonTimer      = np.poisonTimer;
+    m_localPlayer.poisonDps        = np.poisonDps;
+    m_localPlayer.burnTimer        = np.burnTimer;
+    m_localPlayer.burnDps          = np.burnDps;
+    m_localPlayer.freezeTimer      = np.freezeTimer;
+    m_localPlayer.blocking         = np.blocking;
+    m_localPlayer.blockTimer       = np.blockTimer;
+    m_localPlayer.ringPassive      = np.ringPassive;
 }
 
 // ---------------------------------------------------------------------------
@@ -3229,10 +3253,44 @@ void Engine::serverUpdate(f32 dt) {
         np.onGround = tempP.onGround;
     }
 
-    // Weapon fire for all players
+    // Weapon fire + extended actions for all players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (!m_players[i].active) continue;
         handleWeaponFireForPlayer(m_players[i], dt);
+
+        // Extended input handling (potion, skills)
+        const NetInput* input = Server::getInputBuffer(static_cast<u8>(i)).getLatest();
+        if (input) {
+            // Potion
+            if (input->extFlags & INPUT_EX_POTION) {
+                if (m_players[i].health > 0.0f) {
+                    f32 healAmt = m_players[i].maxHealth * GameConst::POTION_HEAL_PCT;
+                    m_players[i].health += healAmt;
+                    if (m_players[i].health > m_players[i].maxHealth)
+                        m_players[i].health = m_players[i].maxHealth;
+                }
+            }
+
+            // Class skill activation (right-click)
+            if (input->extFlags & INPUT_EX_SKILL) {
+                u8 slot = input->skillSlot;
+                if (slot < 4 && static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+                    const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+                    if (m_currentFloor >= cls.skillUnlockFloor[slot]) {
+                        m_classSkillStates[slot].activeSkill = cls.skills[slot];
+                        m_classSkillStates[slot].energy = 999.0f; // simplified for MP
+                        m_classSkillStates[slot].maxEnergy = 999.0f;
+                        Vec3 eyePos = m_players[i].eyePos();
+                        Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw) * cosf(m_players[i].pitch),
+                                                    sinf(m_players[i].pitch),
+                                                   -cosf(m_players[i].yaw) * cosf(m_players[i].pitch)});
+                        SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
+                                                  eyePos, fwd, m_players[i].yaw,
+                                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+                    }
+                }
+            }
+        }
     }
 
     // Target lock for local player
@@ -3270,6 +3328,28 @@ void Engine::serverUpdate(f32 dt) {
     pushPlayerFromEntities();
     syncLocalPlayerToNetPlayer();
 
+    // Server-side passive systems (armor aura, ring passives) for host player
+    // These run the same logic as singleplayer but on the server-authoritative state
+    if (m_armorAura != SkillId::NONE) {
+        Vec3 playerPos = m_localPlayer.position;
+        for (u32 a = 0; a < m_entities.activeCount; a++) {
+            u32 idx = m_entities.activeList[a];
+            Entity& ent = m_entities.entities[idx];
+            if (ent.flags & ENT_DEAD) continue;
+            if (ent.flags & ENT_FRIENDLY) continue;
+            if (ent.enemyType == EnemyType::PROP) continue;
+            f32 dist = length(ent.position - playerPos);
+            switch (m_armorAura) {
+                case SkillId::METEOR_STRIKE: if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; } break;
+                case SkillId::FROZEN_ORB: if (dist < 4.0f) { ent.freezeTimer = 0.5f; } break;
+                case SkillId::BLOOD_NOVA: if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; } break;
+                case SkillId::CHAIN_LIGHTNING: if (dist < 3.0f) { ent.freezeTimer = 0.3f; } break;
+                case SkillId::PHASE_DASH: if (dist < 3.0f) { ent.freezeTimer = 0.4f; } break;
+                default: break;
+            }
+        }
+    }
+
     // Broadcast snapshot every TICKS_PER_SNAP ticks
     if (m_serverTick % TICKS_PER_SNAP == 0) {
         Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles);
@@ -3280,6 +3360,16 @@ void Engine::serverUpdate(f32 dt) {
 // Client update (prediction + interpolation)
 // ---------------------------------------------------------------------------
 void Engine::clientUpdate(f32 dt) {
+    // Handle server disconnection gracefully
+    if (!Net::isConnected()) {
+        LOG_WARN("Lost connection to server");
+        Net::disconnect();
+        m_netRole = NetRole::NONE;
+        m_gameState = GameState::MENU;
+        Input::setRelativeMouseMode(false);
+        return;
+    }
+
     m_serverTick++;
 
     // Toggle debug
@@ -3667,15 +3757,74 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     ws.cooldownTimer -= dt;
     if (ws.cooldownTimer < 0.0f) ws.cooldownTimer = 0.0f;
 
-    // Check if fire input is set
     const NetInput* input = Server::getInputBuffer(np.slotIndex).getLatest();
     if (!input) return;
+
+    // Build effective weapon from equipped item
+    const ItemInstance& eqWpn = m_inventories[np.slotIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+    WeaponDef wpn;
+    if (!isItemEmpty(eqWpn)) {
+        wpn = Inventory::getWeaponFromItem(m_inventories[np.slotIndex], m_itemDefs, eqWpn);
+    } else {
+        wpn = m_weaponDefs[ws.currentWeapon];
+    }
+
+    // Detect weapon switch — reset clip
+    u16 curDefId = isItemEmpty(eqWpn) ? 0xFFFF : eqWpn.defId;
+    if (curDefId != ws.lastWeaponDef) {
+        ws.lastWeaponDef = curDefId;
+        ws.currentClip = wpn.clipSize;
+        ws.reloading = false;
+        ws.reloadTimer = 0.0f;
+    }
+
+    // Tick reload timer
+    if (ws.reloading) {
+        ws.reloadTimer -= dt;
+        if (ws.reloadTimer <= 0.0f) {
+            ws.currentClip = wpn.clipSize;
+            ws.reloading = false;
+        }
+    }
+
+    // Manual reload (R key)
+    if ((input->extFlags & INPUT_EX_RELOAD) && wpn.clipSize > 0 &&
+        !ws.reloading && ws.currentClip < wpn.clipSize) {
+        ws.reloading = true;
+        ws.reloadTimer = wpn.reloadTime;
+    }
+
+    // Auto-reload on empty clip
+    if (wpn.clipSize > 0 && ws.currentClip == 0 && !ws.reloading) {
+        ws.reloading = true;
+        ws.reloadTimer = wpn.reloadTime;
+    }
+
+    // Can't fire while reloading
+    if (ws.reloading) return;
+
+    // Potion (server handles per-player)
+    if (input->extFlags & INPUT_EX_POTION) {
+        // TODO: per-player potion cooldown tracking
+    }
+
     if (!(input->moveFlags & INPUT_FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
-    WeaponDef wpn = Inventory::getEffectiveWeapon(m_inventories[np.slotIndex],
-                                                    m_itemDefs, m_weaponDefs[ws.currentWeapon]);
     ws.cooldownTimer = wpn.cooldown;
+
+    // Consume ammo
+    if (wpn.clipSize > 0 && ws.currentClip > 0) {
+        ws.currentClip--;
+    }
+
+    // Class damage bonus
+    if (static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        if (wpn.type == cls.preferredWeapon) {
+            wpn.damage *= 1.2f;
+        }
+    }
 
     Vec3 eyePos = np.eyePos();
     Vec3 forward = normalize(Vec3{
@@ -3685,20 +3834,29 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     });
 
     switch (wpn.type) {
-    case WeaponType::MELEE:
-        Combat::fireMelee(wpn, eyePos, forward, m_entities);
-        break;
+    case WeaponType::MELEE: {
+        // Dagger crit / non-dagger cleave
+        WeaponSubtype sub = WeaponSubtype::NONE;
+        if (!isItemEmpty(eqWpn)) sub = m_itemDefs[eqWpn.defId].weaponSubtype;
+        WeaponDef meleeWpn = wpn;
+        if (sub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5) {
+            meleeWpn.damage *= 3.0f;
+        }
+        AttackResult result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
+        if (sub != WeaponSubtype::DAGGER && sub != WeaponSubtype::NONE &&
+            result.hitEntity && (std::rand() % 100) < 5) {
+            WeaponDef cleaveWpn = wpn;
+            cleaveWpn.coneAngleDeg = 360.0f;
+            cleaveWpn.damage *= 0.5f;
+            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities);
+        }
+    } break;
     case WeaponType::HITSCAN:
         Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
         break;
     case WeaponType::PROJECTILE:
         Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
         break;
-    }
-
-    // If this is the local player, trigger hit marker
-    if (np.slotIndex == m_localPlayerIndex) {
-        // Check via the result — simplified for now
     }
 }
 

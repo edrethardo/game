@@ -12,6 +12,8 @@ struct NetInput {
     u8  weaponId;       // currently selected weapon
     s16 mouseDeltaX;    // quantized mouse delta
     s16 mouseDeltaY;
+    u8  extFlags;       // extended input flags (potion, reload, skill, etc.)
+    u8  skillSlot;      // which class skill slot (0-3) to activate
 };
 
 // Move flag bits
@@ -22,6 +24,14 @@ static constexpr u8 INPUT_LEFT     = 1 << 3;
 static constexpr u8 INPUT_JUMP     = 1 << 4;
 static constexpr u8 INPUT_FIRE     = 1 << 5;
 static constexpr u8 INPUT_LOCK     = 1 << 6;
+
+// Extended input (sent in a second byte)
+static constexpr u8 INPUT_EX_POTION     = 1 << 0;
+static constexpr u8 INPUT_EX_RELOAD     = 1 << 1;
+static constexpr u8 INPUT_EX_SKILL      = 1 << 2;  // right-click class skill
+static constexpr u8 INPUT_EX_BOOT_SKILL = 1 << 3;
+static constexpr u8 INPUT_EX_HELM_SKILL = 1 << 4;
+static constexpr u8 INPUT_EX_INVENTORY  = 1 << 5;  // Tab toggle
 
 // Networked player state — the authoritative state the server maintains.
 struct NetPlayer {
@@ -56,8 +66,18 @@ struct NetPlayer {
     // Network
     u32  lastProcessedInputTick = 0;
 
-    // Respawn invulnerability
-    f32  invulnTimer    = 0.0f;
+    // Status effects (server-authoritative)
+    f32  invulnTimer       = 0.0f;
+    f32  damageReduction   = 0.0f;
+    f32  slowTimer         = 0.0f;
+    f32  poisonTimer       = 0.0f;
+    f32  poisonDps         = 0.0f;
+    f32  burnTimer         = 0.0f;
+    f32  burnDps           = 0.0f;
+    f32  freezeTimer       = 0.0f;
+    bool blocking          = false;
+    f32  blockTimer        = 0.0f;
+    u8   ringPassive       = 0;
 
     // Eye height (metres above feet)
     f32  eyeHeight      = 1.7f;

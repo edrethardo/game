@@ -64,8 +64,8 @@ void Client::captureAndSendInput(u32 clientTick, u8 weaponId) {
     s_latestInput = PlayerController::captureLocalInput(clientTick, weaponId);
     s_hasInput = true;
 
-    // Serialize and send to server
-    u8 buf[sizeof(PacketHeader) + 10];
+    // Serialize and send to server (including extended flags)
+    u8 buf[sizeof(PacketHeader) + 12];
     PacketWriter w;
     w.writeU8(static_cast<u8>(NetPacketType::CL_INPUT));
     w.writeU8(0);
@@ -75,8 +75,10 @@ void Client::captureAndSendInput(u32 clientTick, u8 weaponId) {
     w.writeU8(s_latestInput.weaponId);
     w.writeS16(s_latestInput.mouseDeltaX);
     w.writeS16(s_latestInput.mouseDeltaY);
+    w.writeU8(s_latestInput.extFlags);
+    w.writeU8(s_latestInput.skillSlot);
 
-    Net::sendToServer(w.data, w.cursor, false); // unreliable for inputs
+    Net::sendToServer(w.data, w.cursor, false);
 }
 
 const NetInput* Client::getLatestInput() {
@@ -285,9 +287,14 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
             ? Vec3{0.3f, 0.3f, 0.3f}
             : Vec3{0.4f, 0.5f, 0.4f};
 
+        // Restore new snapshot fields
+        e.stunTimer      = seB.stunTimer / 25.0f;
+        e.freezeTimer    = seB.freezeTimer / 25.0f;
+        e.bossLimbConfig = seB.bossLimbConfig;
+
         // Flash timer and death timer are cosmetic — approximate
         if (e.flags & ENT_DEAD) {
-            e.deathTimer = 0.5f; // approximate
+            e.deathTimer = 0.5f;
         }
     }
 }

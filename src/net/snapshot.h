@@ -7,10 +7,10 @@
 #include "net/net.h"
 #include "net/net_player.h"
 
-// Quantized snapshot of one player (20 bytes)
+// Quantized snapshot of one player (26 bytes)
 struct SnapPlayer {
     u8   slotIndex;     // 1
-    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=lockActive
+    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=lockActive, bit3=reloading, bit4=blocking
     u8   weaponId;      // 1
     u8   health;        // 1: 0-255 mapped to 0-maxHealth
     u16  posX, posY, posZ;  // 6
@@ -18,9 +18,16 @@ struct SnapPlayer {
     u16  yaw;           // 2
     u16  pitch;         // 2
     u16  lockIndex;     // 2
+    // New fields for status/clip sync
+    u8   currentClip;   // 1: rounds remaining
+    u8   statusFlags;   // 1: bit0=invuln, bit1=poisoned, bit2=burning, bit3=frozen, bit4=slowed
+    u8   invulnTimer;   // 1: quantized 0-10s in 0.04s steps
+    u8   poisonTimer;   // 1: quantized
+    u8   burnTimer;     // 1: quantized
+    u8   freezeTimer;   // 1: quantized
 };
 
-// Quantized snapshot of one entity (16 bytes)
+// Quantized snapshot of one entity (20 bytes)
 struct SnapEntity {
     u8   poolIndex;     // 1
     u8   flags;         // 1
@@ -29,6 +36,11 @@ struct SnapEntity {
     u16  posX, posY, posZ;  // 6
     u16  yaw;           // 2
     u16  velX, velZ;    // 4
+    // New fields
+    u8   stunTimer;     // 1: quantized 0-10s
+    u8   freezeTimer;   // 1: quantized 0-10s
+    u8   bossLimbConfig;// 1
+    u8   padding2;      // 1: alignment
 };
 
 // Quantized snapshot of one projectile (14 bytes)

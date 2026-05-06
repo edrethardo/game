@@ -23,8 +23,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 
         u8 flags = 0;
         flags |= 1;  // active
-        if (np.onGround)   flags |= (1 << 1);
-        if (np.lockActive) flags |= (1 << 2);
+        if (np.onGround)                flags |= (1 << 1);
+        if (np.lockActive)              flags |= (1 << 2);
+        if (np.weaponState.reloading)   flags |= (1 << 3);
+        if (np.blocking)                flags |= (1 << 4);
         sp.flags = flags;
 
         sp.weaponId = np.weaponState.currentWeapon;
@@ -38,6 +40,20 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.yaw   = Quantize::packAngle(np.yaw);
         sp.pitch = Quantize::packAngle(np.pitch);
         sp.lockIndex = np.lockIndex;
+
+        // Status effects + clip (new fields)
+        sp.currentClip = np.weaponState.currentClip;
+        u8 sf = 0;
+        if (np.invulnTimer > 0.0f) sf |= (1 << 0);
+        if (np.poisonTimer > 0.0f) sf |= (1 << 1);
+        if (np.burnTimer > 0.0f)   sf |= (1 << 2);
+        if (np.freezeTimer > 0.0f) sf |= (1 << 3);
+        if (np.slowTimer > 0.0f)   sf |= (1 << 4);
+        sp.statusFlags  = sf;
+        sp.invulnTimer  = static_cast<u8>(np.invulnTimer * 25.0f);  // 0-10s in 0.04s steps
+        sp.poisonTimer  = static_cast<u8>(np.poisonTimer * 25.0f);
+        sp.burnTimer    = static_cast<u8>(np.burnTimer * 25.0f);
+        sp.freezeTimer  = static_cast<u8>(np.freezeTimer * 25.0f);
     }
 
     // Entities (only active ones)
@@ -59,6 +75,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         se.yaw  = Quantize::packAngle(e.yaw);
         se.velX = Quantize::packVel(e.velocity.x);
         se.velZ = Quantize::packVel(e.velocity.z);
+        se.stunTimer     = static_cast<u8>(e.stunTimer * 25.0f);
+        se.freezeTimer   = static_cast<u8>(e.freezeTimer * 25.0f);
+        se.bossLimbConfig = e.bossLimbConfig;
+        se.padding2      = 0;
     }
 
     // Projectiles (only active ones)
@@ -113,6 +133,12 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w.writeU16(sp.yaw);
         w.writeU16(sp.pitch);
         w.writeU16(sp.lockIndex);
+        w.writeU8(sp.currentClip);
+        w.writeU8(sp.statusFlags);
+        w.writeU8(sp.invulnTimer);
+        w.writeU8(sp.poisonTimer);
+        w.writeU8(sp.burnTimer);
+        w.writeU8(sp.freezeTimer);
     }
 
     // Entities
@@ -128,6 +154,10 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w.writeU16(se.yaw);
         w.writeU16(se.velX);
         w.writeU16(se.velZ);
+        w.writeU8(se.stunTimer);
+        w.writeU8(se.freezeTimer);
+        w.writeU8(se.bossLimbConfig);
+        w.writeU8(se.padding2);
     }
 
     // Projectiles
@@ -165,6 +195,11 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     snap.projectileCount = r.readU8();
     r.readU8(); // padding
 
+    // Validate counts to prevent out-of-bounds on malformed packets
+    if (snap.playerCount > MAX_PLAYERS) snap.playerCount = MAX_PLAYERS;
+    if (snap.entityCount > MAX_ENTITIES) snap.entityCount = MAX_ENTITIES;
+    if (snap.projectileCount > MAX_PROJECTILES) snap.projectileCount = MAX_PROJECTILES;
+
     for (u32 i = 0; i < MAX_PLAYERS; i++)
         snap.lastInputTick[i] = r.readU32();
 
@@ -182,6 +217,12 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.yaw       = r.readU16();
         sp.pitch     = r.readU16();
         sp.lockIndex = r.readU16();
+        sp.currentClip  = r.readU8();
+        sp.statusFlags  = r.readU8();
+        sp.invulnTimer  = r.readU8();
+        sp.poisonTimer  = r.readU8();
+        sp.burnTimer    = r.readU8();
+        sp.freezeTimer  = r.readU8();
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {
@@ -196,6 +237,10 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         se.yaw       = r.readU16();
         se.velX      = r.readU16();
         se.velZ      = r.readU16();
+        se.stunTimer     = r.readU8();
+        se.freezeTimer   = r.readU8();
+        se.bossLimbConfig = r.readU8();
+        se.padding2      = r.readU8();
     }
 
     for (u32 i = 0; i < snap.projectileCount; i++) {

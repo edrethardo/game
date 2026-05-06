@@ -19,7 +19,7 @@ void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS) return;
 
     // Skip packet header (4 bytes)
-    if (size < sizeof(PacketHeader) + 10) return;
+    if (size < sizeof(PacketHeader) + 12) return; // 10 base + 2 extended
     PacketReader r;
     r.data = data;
     r.size = size;
@@ -31,6 +31,14 @@ void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     input.weaponId    = r.readU8();
     input.mouseDeltaX = r.readS16();
     input.mouseDeltaY = r.readS16();
+    input.extFlags    = r.readU8();
+    input.skillSlot   = r.readU8();
+
+    // Validate input to prevent server crash from malicious clients
+    if (input.weaponId >= MAX_WEAPON_DEFS) input.weaponId = 0;
+    input.moveFlags &= 0x7F;
+    input.extFlags &= 0x3F;
+    if (input.skillSlot > 3) input.skillSlot = 0;
 
     s_inputBuffers[playerSlot].push(input);
 }
