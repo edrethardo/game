@@ -28,6 +28,12 @@ enum struct NetPacketType : u8 {
     SV_EVENT          = 0x13,
     SV_PLAYER_LEFT    = 0x14,
     SV_LEVEL_SEED     = 0x15,
+
+    // Inventory packets
+    CL_EQUIP_ITEM     = 0x03,  // client requests equip
+    CL_DROP_ITEM      = 0x04,  // client drops item
+    CL_PICKUP_ITEM    = 0x05,  // client picks up world item
+    SV_INVENTORY_SYNC = 0x16,  // server sends full inventory to client
 };
 
 // 4-byte packet header on every packet

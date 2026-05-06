@@ -832,7 +832,7 @@ void Engine::init() {
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
 
-static constexpr u32 SAVE_VERSION = 2; // bump when save format changes
+static constexpr u32 SAVE_VERSION = 3; // bump when save format changes (v3: weapon clip/reload, ring passives, status effects)
 
 void Engine::saveGame() {
     FILE* f = std::fopen("save.dat", "wb");
@@ -1848,8 +1848,14 @@ void Engine::startGame() {
         Client::init(m_localPlayerIndex);
     }
 
-    // Brief invulnerability on floor entry so enemies don't hit during load-in
+    // Brief invulnerability on floor entry for all players
     m_localPlayer.invulnTimer = 2.5f;
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        if (m_players[pi].active) {
+            m_players[pi].invulnTimer = 2.5f;
+            m_players[pi].isDead = false;
+        }
+    }
 
     Input::setRelativeMouseMode(true);
     m_gameState = GameState::IN_GAME;
@@ -1962,7 +1968,7 @@ void Engine::syncLocalPlayerToNetPlayer() {
     np.freezeTimer      = m_localPlayer.freezeTimer;
     np.blocking         = m_localPlayer.blocking;
     np.blockTimer       = m_localPlayer.blockTimer;
-    np.ringPassive      = m_localPlayer.ringPassive;
+    np.ringPassive      = static_cast<SkillId>(m_localPlayer.ringPassive);
 }
 
 void Engine::syncNetPlayerToLocalPlayer() {
@@ -1990,7 +1996,7 @@ void Engine::syncNetPlayerToLocalPlayer() {
     m_localPlayer.freezeTimer      = np.freezeTimer;
     m_localPlayer.blocking         = np.blocking;
     m_localPlayer.blockTimer       = np.blockTimer;
-    m_localPlayer.ringPassive      = np.ringPassive;
+    m_localPlayer.ringPassive      = static_cast<u8>(np.ringPassive);
 }
 
 // ---------------------------------------------------------------------------
@@ -2059,6 +2065,10 @@ void Engine::update(f32 dt) {
                 // Save and Quit
                 m_confirmQuit = false;
                 saveGame();
+                if (m_netRole != NetRole::NONE) {
+                    Net::disconnect();
+                    m_netRole = NetRole::NONE;
+                }
                 m_gameState = GameState::MENU;
                 Input::setRelativeMouseMode(false);
             }
@@ -2125,7 +2135,8 @@ void Engine::updateMenu(f32 dt) {
             return;
         }
         if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
-            m_netRole = NetRole::NONE;
+            // Keep m_netRole if already set to SERVER (hosting), otherwise NONE (singleplayer)
+            if (m_netRole != NetRole::SERVER) m_netRole = NetRole::NONE;
             m_localPlayerIndex = 0;
             if (m_menuSubSelection == 0) {
                 // New Game — go to class selection
@@ -2138,6 +2149,11 @@ void Engine::updateMenu(f32 dt) {
                     m_currentFloor = m_savedFloor;
                 } else {
                     m_currentFloor = 1;
+                }
+                // Start server if hosting
+                if (m_netRole == NetRole::SERVER) {
+                    if (!Net::hostServer()) { m_netRole = NetRole::NONE; return; }
+                    LOG_INFO("Hosting game (continue)...");
                 }
                 m_menuSubState = 0;
                 startGame();
@@ -2183,6 +2199,17 @@ void Engine::updateMenu(f32 dt) {
             }
 
             m_menuSubState = 0;
+
+            // Start server if hosting
+            if (m_netRole == NetRole::SERVER) {
+                if (!Net::hostServer()) {
+                    m_netRole = NetRole::NONE;
+                    LOG_WARN("Failed to start server");
+                    return;
+                }
+                LOG_INFO("Hosting game...");
+            }
+
             startGame();
 
             // Auto-equip starting weapon after startGame inits inventory
@@ -2216,14 +2243,11 @@ void Engine::updateMenu(f32 dt) {
             m_menuSubState = 1;
             m_menuSubSelection = 0;
             break;
-        case 1: // Host
+        case 1: // Host — same flow as singleplayer (new/continue → class selection)
             m_netRole = NetRole::SERVER;
             m_localPlayerIndex = 0;
-            if (Net::hostServer()) {
-                startGame();
-                m_gameState = GameState::IN_GAME;
-                LOG_INFO("Hosting game...");
-            }
+            m_menuSubState = 1;  // go to new/continue sub-menu
+            m_menuSubSelection = 0;
             break;
         case 2: // Join
             m_netRole = NetRole::CLIENT;
@@ -2937,11 +2961,19 @@ bool Engine::updateFloorDoor() {
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isKeyPressed(SDL_SCANCODE_E)) {
                 m_currentFloor++;
-                // Player grows 1.5% stronger each floor (multiplicative)
+                // All players grow 1.5% stronger each floor (multiplicative)
                 m_localPlayer.maxHealth *= 1.015f;
-                m_localPlayer.health = m_localPlayer.maxHealth; // full heal on descent
+                m_localPlayer.health = m_localPlayer.maxHealth;
                 m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
                 m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
+                // Scale all networked players too
+                for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+                    if (!m_players[pi].active) continue;
+                    m_players[pi].maxHealth *= 1.015f;
+                    m_players[pi].health = m_players[pi].maxHealth;
+                    m_players[pi].invulnTimer = 2.5f;
+                    m_players[pi].isDead = false;
+                }
                 // Upgrade equipment for NPCs that survived this floor
                 upgradeNpcEquipment(static_cast<u8>(m_currentFloor));
                 // Save progress before descending so death respawn returns here
@@ -3261,13 +3293,47 @@ void Engine::serverUpdate(f32 dt) {
         // Extended input handling (potion, skills)
         const NetInput* input = Server::getInputBuffer(static_cast<u8>(i)).getLatest();
         if (input) {
-            // Potion
-            if (input->extFlags & INPUT_EX_POTION) {
-                if (m_players[i].health > 0.0f) {
-                    f32 healAmt = m_players[i].maxHealth * GameConst::POTION_HEAL_PCT;
-                    m_players[i].health += healAmt;
-                    if (m_players[i].health > m_players[i].maxHealth)
-                        m_players[i].health = m_players[i].maxHealth;
+            // Potion (with per-player cooldown)
+            if ((input->extFlags & INPUT_EX_POTION) &&
+                m_players[i].potionCooldown <= 0.0f && !m_players[i].isDead) {
+                f32 healAmt = m_players[i].maxHealth * GameConst::POTION_HEAL_PCT;
+                m_players[i].health += healAmt;
+                if (m_players[i].health > m_players[i].maxHealth)
+                    m_players[i].health = m_players[i].maxHealth;
+                m_players[i].potionCooldown = GameConst::POTION_COOLDOWN;
+            }
+
+            // Equipment skills (F = boots, G = helmet)
+            if ((input->extFlags & INPUT_EX_BOOT_SKILL) && !m_players[i].isDead) {
+                const ItemInstance& boots = m_inventories[i].equipped[static_cast<u32>(ItemSlot::BOOTS)];
+                if (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY) {
+                    SkillId bootSkill = m_itemDefs[boots.defId].legendarySkillId;
+                    if (bootSkill != SkillId::NONE) {
+                        SkillState ss; ss.activeSkill = bootSkill; ss.energy = 999.0f; ss.maxEnergy = 999.0f;
+                        Vec3 ep = m_players[i].eyePos();
+                        Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
+                                                    sinf(m_players[i].pitch),
+                                                   -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
+                        SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
+                                                  ep, fwd, m_players[i].yaw,
+                                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+                    }
+                }
+            }
+            if ((input->extFlags & INPUT_EX_HELM_SKILL) && !m_players[i].isDead) {
+                const ItemInstance& helm = m_inventories[i].equipped[static_cast<u32>(ItemSlot::HELMET)];
+                if (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY) {
+                    SkillId helmSkill = m_itemDefs[helm.defId].legendarySkillId;
+                    if (helmSkill != SkillId::NONE) {
+                        SkillState ss; ss.activeSkill = helmSkill; ss.energy = 999.0f; ss.maxEnergy = 999.0f;
+                        Vec3 ep = m_players[i].eyePos();
+                        Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
+                                                    sinf(m_players[i].pitch),
+                                                   -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
+                        SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
+                                                  ep, fwd, m_players[i].yaw,
+                                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+                    }
                 }
             }
 
@@ -3298,11 +3364,35 @@ void Engine::serverUpdate(f32 dt) {
     updateTargetLock(dt);
     syncLocalPlayerToNetPlayer();
 
-    // Enemy AI (still targets single local player for now — Phase D upgrades this)
+    // Enemy AI — pass m_localPlayer directly so damage is applied correctly.
+    // The host is always the target in listen-server mode.
     EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+    // Sync damage back to NetPlayer after AI applies it
+    m_players[m_localPlayerIndex].health = m_localPlayer.health;
+    m_players[m_localPlayerIndex].damageFlashTimer = m_localPlayer.damageFlashTimer;
 
     // Projectiles
     ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+
+    // Server-side globe auto-pickup for ALL players
+    for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
+        WorldItem& item = m_worldItems.items[wi];
+        if (!item.active || !isGlobe(item.item)) continue;
+        for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+            if (!m_players[pi].active || m_players[pi].isDead) continue;
+            Vec3 delta = m_players[pi].position - item.position;
+            f32 dist = sqrtf(delta.x * delta.x + delta.z * delta.z);
+            if (dist < 3.0f) {
+                f32 healAmt = m_players[pi].maxHealth * GameConst::GLOBE_HEAL_PCT;
+                m_players[pi].health += healAmt;
+                if (m_players[pi].health > m_players[pi].maxHealth)
+                    m_players[pi].health = m_players[pi].maxHealth;
+                item.active = false;
+                if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+                break; // one player picks up each globe
+            }
+        }
+    }
 
     // Entity timers
     EntitySystem::tickTimers(m_entities, dt);
@@ -3328,24 +3418,222 @@ void Engine::serverUpdate(f32 dt) {
     pushPlayerFromEntities();
     syncLocalPlayerToNetPlayer();
 
-    // Server-side passive systems (armor aura, ring passives) for host player
-    // These run the same logic as singleplayer but on the server-authoritative state
-    if (m_armorAura != SkillId::NONE) {
-        Vec3 playerPos = m_localPlayer.position;
-        for (u32 a = 0; a < m_entities.activeCount; a++) {
-            u32 idx = m_entities.activeList[a];
-            Entity& ent = m_entities.entities[idx];
-            if (ent.flags & ENT_DEAD) continue;
-            if (ent.flags & ENT_FRIENDLY) continue;
-            if (ent.enemyType == EnemyType::PROP) continue;
-            f32 dist = length(ent.position - playerPos);
-            switch (m_armorAura) {
-                case SkillId::METEOR_STRIKE: if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; } break;
-                case SkillId::FROZEN_ORB: if (dist < 4.0f) { ent.freezeTimer = 0.5f; } break;
-                case SkillId::BLOOD_NOVA: if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; } break;
-                case SkillId::CHAIN_LIGHTNING: if (dist < 3.0f) { ent.freezeTimer = 0.3f; } break;
-                case SkillId::PHASE_DASH: if (dist < 3.0f) { ent.freezeTimer = 0.4f; } break;
-                default: break;
+    // --- Host gameplay systems (same as singleplayer) ---
+    // These use m_localPlayer which was just synced from NetPlayer
+
+    // Skill state updates
+    SkillSystem::update(m_skillStates[0], dt);
+    for (u32 s = 0; s < 4; s++) {
+        if (m_classSkillStates[s].cooldownTimer > 0.0f) {
+            m_classSkillStates[s].cooldownTimer -= dt;
+            if (m_classSkillStates[s].cooldownTimer < 0.0f) m_classSkillStates[s].cooldownTimer = 0.0f;
+        }
+    }
+    if (m_bootSkillStates[0].cooldownTimer > 0.0f) {
+        m_bootSkillStates[0].cooldownTimer -= dt;
+        if (m_bootSkillStates[0].cooldownTimer < 0.0f) m_bootSkillStates[0].cooldownTimer = 0.0f;
+    }
+    if (m_helmetSkillStates[0].cooldownTimer > 0.0f) {
+        m_helmetSkillStates[0].cooldownTimer -= dt;
+        if (m_helmetSkillStates[0].cooldownTimer < 0.0f) m_helmetSkillStates[0].cooldownTimer = 0.0f;
+    }
+
+    // Orb and meteor ticks
+    SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
+    SkillSystem::updateMeteors(m_entities, dt);
+
+    // Weapon/armor/ring passive binding for host
+    {
+        const ItemInstance& wpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        m_weaponProc = (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[wpn.defId].legendarySkillId : SkillId::NONE;
+    }
+    {
+        const ItemInstance& armor = m_inventories[0].equipped[static_cast<u32>(ItemSlot::ARMOR)];
+        m_armorAura = (!isItemEmpty(armor) && armor.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[armor.defId].legendarySkillId : SkillId::NONE;
+    }
+    {
+        const ItemInstance& ring = m_inventories[0].equipped[static_cast<u32>(ItemSlot::RING)];
+        m_ringPassive = (!isItemEmpty(ring) && ring.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
+        m_localPlayer.ringPassive = static_cast<u8>(m_ringPassive);
+    }
+
+    // Class skill selection (1-4 keys) + activation (right-click)
+    if (!m_inventoryOpen) {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        for (u8 s = 0; s < 4; s++) {
+            if (Input::isKeyPressed(SDL_SCANCODE_1 + s)) {
+                if (m_currentFloor >= cls.skillUnlockFloor[s]) m_activeClassSkill = s;
+            }
+        }
+        if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) {
+            u8 slot = m_activeClassSkill;
+            if (m_currentFloor >= cls.skillUnlockFloor[slot]) {
+                m_classSkillStates[slot].activeSkill = cls.skills[slot];
+                m_classSkillStates[slot].energy = m_skillStates[0].energy;
+                m_classSkillStates[slot].maxEnergy = m_skillStates[0].maxEnergy;
+                Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+                if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
+                                              eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                              m_projectiles, m_entities, m_grid, m_localPlayer)) {
+                    m_skillStates[0].energy = m_classSkillStates[slot].energy;
+                }
+            }
+        }
+    }
+
+    // Inventory toggle (Tab) + interaction
+    if (Input::isKeyPressed(SDL_SCANCODE_TAB)) {
+        m_inventoryOpen = !m_inventoryOpen;
+        Input::setRelativeMouseMode(!m_inventoryOpen);
+    }
+    if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) && m_inventoryOpen) {
+        m_inventoryOpen = false;
+        Input::setRelativeMouseMode(true);
+    }
+    updateInventoryInteraction(dt);
+
+    // Item pickup + globe pickup for host
+    updatePlayerPickup();
+
+    // Floor door for host
+    if (updateFloorDoor()) return;
+
+    // Minimap
+    Minimap::updateVisited(m_grid, m_localPlayer.position, m_entities);
+
+    // Viewmodel timers
+    {
+        f32 playerSpeed = length(Vec3{m_localPlayer.velocity.x, 0, m_localPlayer.velocity.z});
+        if (playerSpeed > 0.5f) m_viewmodelState.bobTimer += playerSpeed * dt;
+        else m_viewmodelState.bobTimer *= 0.95f;
+        m_viewmodelState.recoilKick *= 0.92f;
+        if (m_viewmodelState.recoilKick < 0.001f) m_viewmodelState.recoilKick = 0.0f;
+        if (m_viewmodelState.attackAnimT > 0.0f) m_viewmodelState.attackAnimT -= dt;
+        if (m_viewmodelState.fireShakeTimer > 0.0f) m_viewmodelState.fireShakeTimer -= dt;
+    }
+
+    // Decay visual FX
+    for (u32 i = 0; i < MAX_IMPACT_FX; i++) {
+        if (m_impactFX[i].active) { m_impactFX[i].timer -= dt; if (m_impactFX[i].timer <= 0.0f) m_impactFX[i].active = false; }
+    }
+    for (u32 i = 0; i < MAX_FIRE_FX; i++) {
+        if (m_fireFX[i].active) { m_fireFX[i].timer -= dt; if (m_fireFX[i].timer <= 0.0f) m_fireFX[i].active = false; }
+    }
+    for (u32 i = 0; i < MAX_NOVA_FX; i++) {
+        if (m_novaFX[i].active) { m_novaFX[i].timer -= dt; if (m_novaFX[i].timer <= 0.0f) m_novaFX[i].active = false; }
+    }
+    for (u32 i = 0; i < MAX_DASH_FX; i++) {
+        if (m_dashFX[i].active) { m_dashFX[i].timer -= dt; if (m_dashFX[i].timer <= 0.0f) m_dashFX[i].active = false; }
+    }
+    for (u32 i = 0; i < MAX_CHAIN_FX; i++) {
+        if (m_chainFX[i].active) { m_chainFX[i].timer -= dt; if (m_chainFX[i].timer <= 0.0f) m_chainFX[i].active = false; }
+    }
+
+    // Scorch zones
+    for (u32 i = 0; i < MAX_SCORCH; i++) {
+        if (!m_scorchZones[i].active) continue;
+        ScorchZone& sz = m_scorchZones[i];
+        sz.timer -= dt;
+        if (sz.timer <= 0.0f) { sz.active = false; continue; }
+        if (sz.dps > 0.0f) {
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                f32 dist = length(ent.position - sz.pos);
+                if (dist < sz.radius) { ent.burnTimer = 0.3f; ent.burnDps = sz.dps; }
+            }
+        }
+    }
+
+    // World item updates
+    WorldItemSystem::update(m_worldItems, dt);
+
+    // Tutorial timers
+    if (m_firstPickupTooltipTimer > 0.0f) m_firstPickupTooltipTimer -= dt;
+    if (m_equipTooltipTimer > 0.0f) m_equipTooltipTimer -= dt;
+    if (m_controlsTooltipTimer > 0.0f) m_controlsTooltipTimer -= dt;
+
+    // --- Server-side: tick ALL player status effects + death detection ---
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        NetPlayer& np = m_players[pi];
+        if (!np.active || np.isDead) continue;
+
+        // Tick status effect timers
+        if (np.invulnTimer > 0.0f) { np.invulnTimer -= dt; if (np.invulnTimer < 0.0f) np.invulnTimer = 0.0f; }
+        if (np.slowTimer > 0.0f)   np.slowTimer -= dt;
+        if (np.freezeTimer > 0.0f) np.freezeTimer -= dt;
+        if (np.potionCooldown > 0.0f) np.potionCooldown -= dt;
+
+        // DoT damage (blocked by invulnerability)
+        if (np.invulnTimer <= 0.0f) {
+            if (np.poisonTimer > 0.0f) { np.poisonTimer -= dt; np.health -= np.poisonDps * dt; }
+            if (np.burnTimer > 0.0f)   { np.burnTimer -= dt;   np.health -= np.burnDps * dt;   }
+        } else {
+            np.poisonTimer = 0.0f; np.burnTimer = 0.0f;
+            np.freezeTimer = 0.0f; np.slowTimer = 0.0f;
+        }
+
+        // Death detection
+        if (np.health <= 0.0f) {
+            np.health = 0.0f;
+            np.isDead = true;
+            LOG_INFO("Player %u died", pi);
+        }
+    }
+
+    // Respawn handling — check if dead players sent respawn input
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        NetPlayer& np = m_players[pi];
+        if (!np.active || !np.isDead) continue;
+        const NetInput* input = Server::getInputBuffer(static_cast<u8>(pi)).getLatest();
+        if (input && (input->extFlags & INPUT_EX_RESPAWN)) {
+            np.health = np.maxHealth;
+            np.position = np.spawnPosition;
+            np.velocity = {0, 0, 0};
+            np.invulnTimer = 1.5f;
+            np.isDead = false;
+            LOG_INFO("Player %u respawned", pi);
+        }
+    }
+
+    // Server-side passive systems — update per-player equipment passives and tick auras
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        NetPlayer& np = m_players[pi];
+        if (!np.active || np.isDead) continue;
+
+        // Read equipment passives from this player's inventory
+        const ItemInstance& wpnItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        np.weaponProc = (!isItemEmpty(wpnItem) && wpnItem.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[wpnItem.defId].legendarySkillId : SkillId::NONE;
+        const ItemInstance& armorItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::ARMOR)];
+        np.armorAura = (!isItemEmpty(armorItem) && armorItem.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[armorItem.defId].legendarySkillId : SkillId::NONE;
+        const ItemInstance& ringItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::RING)];
+        np.ringPassive = (!isItemEmpty(ringItem) && ringItem.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[ringItem.defId].legendarySkillId : SkillId::NONE;
+
+        // Tick armor aura for this player
+        if (np.armorAura != SkillId::NONE) {
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if (ent.flags & ENT_DEAD) continue;
+                if (ent.flags & ENT_FRIENDLY) continue;
+                if (ent.enemyType == EnemyType::PROP) continue;
+                f32 dist = length(ent.position - np.position);
+                switch (np.armorAura) {
+                    case SkillId::METEOR_STRIKE: if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; } break;
+                    case SkillId::FROZEN_ORB: if (dist < 4.0f) { ent.freezeTimer = 0.5f; } break;
+                    case SkillId::BLOOD_NOVA: if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; } break;
+                    case SkillId::CHAIN_LIGHTNING: if (dist < 3.0f) { ent.freezeTimer = 0.3f; } break;
+                    case SkillId::PHASE_DASH: if (dist < 3.0f) { ent.freezeTimer = 0.4f; } break;
+                    default: break;
+                }
             }
         }
     }
@@ -3851,9 +4139,20 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
             Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities);
         }
     } break;
-    case WeaponType::HITSCAN:
-        Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
-        break;
+    case WeaponType::HITSCAN: {
+        AttackResult result = Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
+        if (result.hitEntity || result.hitWorld) {
+            // Spawn impact spark visible to all players
+            for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
+                if (!m_impactFX[fx].active) {
+                    m_impactFX[fx] = {result.hitPosition, result.hitNormal,
+                                      0.3f, true, result.hitEntity};
+                    break;
+                }
+            }
+            if (result.hitEntity) m_hitMarkerTimer = 0.2f;
+        }
+    } break;
     case WeaponType::PROJECTILE:
         Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
         break;

@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "game/weapon.h"
+#include "game/item.h"
 #include "net/net.h"
 
 // Input as received from a client (or captured locally for listen server host)
@@ -32,6 +33,7 @@ static constexpr u8 INPUT_EX_SKILL      = 1 << 2;  // right-click class skill
 static constexpr u8 INPUT_EX_BOOT_SKILL = 1 << 3;
 static constexpr u8 INPUT_EX_HELM_SKILL = 1 << 4;
 static constexpr u8 INPUT_EX_INVENTORY  = 1 << 5;  // Tab toggle
+static constexpr u8 INPUT_EX_RESPAWN    = 1 << 6;  // Respawn after death
 
 // Networked player state — the authoritative state the server maintains.
 struct NetPlayer {
@@ -77,7 +79,13 @@ struct NetPlayer {
     f32  freezeTimer       = 0.0f;
     bool blocking          = false;
     f32  blockTimer        = 0.0f;
-    u8   ringPassive       = 0;
+    bool isDead            = false;
+    f32  potionCooldown    = 0.0f;
+    // Per-player equipment passives (read from inventory each tick)
+    SkillId weaponProc     = SkillId::NONE;
+    SkillId armorAura      = SkillId::NONE;
+    SkillId ringPassive    = SkillId::NONE;
+    PlayerClass playerClass = PlayerClass::WARRIOR;
 
     // Eye height (metres above feet)
     f32  eyeHeight      = 1.7f;
