@@ -904,7 +904,7 @@
       "weaponType": "projectile",
       "weaponSubtype": "wand",
       "mesh": "staff",
-      "material": "weapon_staff",
+      "material": "legendary_weapon",
       "baseDamage": 38.0,
       "baseCooldown": 0.45,
       "baseProjectileSpeed": 18.0,
@@ -913,7 +913,7 @@
       "minLevel": 6,
       "maxLevel": 10,
       "maxRarity": "legendary",
-      "legendarySkill": "meteor_strike",
+      "legendarySkill": "void_zone",
       "dropWeight": 0.5
     },
 

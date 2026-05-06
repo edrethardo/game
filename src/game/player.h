@@ -31,6 +31,7 @@ struct Player {
     f32  burnDps          = 0.0f;
     f32  freezeTimer      = 0.0f;  // halves movement speed
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
+    f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
 
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;

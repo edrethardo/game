@@ -69,49 +69,49 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
     {"Warrior", "Heavy melee fighter with crowd control",
      150.0f, 5.0f, 80.0f, "Iron Sword",
      {SkillId::THUNDERCLAP, SkillId::WAR_CRY, SkillId::WHIRLWIND, SkillId::EARTHQUAKE},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
     // RANGER — Ranged DPS
     {"Ranger", "Agile archer with poison and piercing shots",
      80.0f, 6.5f, 100.0f, "Short Bow",
      {SkillId::MULTI_SHOT, SkillId::RAIN_OF_ARROWS, SkillId::POISON_ARROW, SkillId::SHADOW_SHOT},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::PROJECTILE},
 
     // SORCERER — Glass Cannon
     {"Sorcerer", "Devastating elemental magic, fragile body",
      70.0f, 5.5f, 150.0f, "Wand of Sparks",
      {SkillId::FIREBALL, SkillId::FROZEN_ORB, SkillId::CHAIN_LIGHTNING, SkillId::METEOR_STRIKE},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::PROJECTILE},
 
     // ROGUE — Hit-and-Run
     {"Rogue", "Fast assassin with teleports and poison",
      85.0f, 7.0f, 100.0f, "Rusty Dagger",
      {SkillId::KNIFE_BURST, SkillId::PHASE_DASH, SkillId::POISON_CLOUD, SkillId::SHADOW_STRIKE},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
     // PALADIN — Holy Tank/Support
     {"Paladin", "Holy warrior who heals and protects",
      130.0f, 5.0f, 90.0f, "Iron Sword",
      {SkillId::HOLY_SMITE, SkillId::CONSECRATION, SkillId::BLOOD_NOVA, SkillId::DIVINE_SHIELD},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
     // COMBAT ENGINEER — Gadget Specialist
     {"Combat Engineer", "Turrets, tesla coils, and gadgets",
      100.0f, 5.5f, 120.0f, "Pistol",
      {SkillId::SHOCK_BOLT, SkillId::DEPLOY_TURRET, SkillId::TESLA_COIL, SkillId::MECH_OVERDRIVE},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 
     // MARKSMAN — Precision Sniper
     {"Marksman", "Precise hitscan specialist with executes",
      75.0f, 6.0f, 100.0f, "Revolver",
      {SkillId::AIMED_SHOT, SkillId::EXPLOSIVE_ROUND, SkillId::RAPID_FIRE, SkillId::HEADSHOT},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 
     // TINKERER — Minion Master
     {"Tinkerer", "Drone commander with stun grenades",
      90.0f, 5.5f, 110.0f, "Pistol",
      {SkillId::COMBAT_DRONE, SkillId::SWARM_DRONES, SkillId::STUN_GRENADE, SkillId::DEPLOY_TURRET},
-     {1, 10, 20, 30}, {5, 20, 30, 40}},
+     {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 };
 
 // ---------------------------------------------------------------------------
@@ -556,6 +556,106 @@ void Engine::init() {
         }
     });
 
+    // Projectile hit callback — triggers weapon on-hit procs for projectile weapons
+    ProjectileSystem::setHitCallback([](Vec3 position, EntityHandle target) {
+        if (!s_engine) return;
+        if (s_engine->m_weaponProc == SkillId::NONE) return;
+
+        u32 procRoll = static_cast<u32>(std::rand()) % 100;
+        u32 procChance = 20;
+        if (s_engine->m_weaponProc == SkillId::VOID_ZONE)       procChance = 5;
+        if (s_engine->m_weaponProc == SkillId::FROZEN_ORB)      procChance = 15;
+        if (s_engine->m_weaponProc == SkillId::CHAIN_LIGHTNING)  procChance = 25;
+        if (s_engine->m_weaponProc == SkillId::METEOR_STRIKE)    procChance = 10;
+        if (s_engine->m_weaponProc == SkillId::BLOOD_NOVA)       procChance = 20;
+
+        LOG_INFO("Projectile hit: weaponProc=%u, roll=%u/%u",
+                 static_cast<u32>(s_engine->m_weaponProc), procRoll, procChance);
+
+        if (procRoll >= procChance) return;
+
+        const SkillDef* sd = SkillSystem::findSkillDef(s_engine->m_skillDefs,
+                                                         s_engine->m_skillDefCount,
+                                                         s_engine->m_weaponProc);
+        if (!sd) { LOG_WARN("  Proc skill def not found!"); return; }
+
+        LOG_INFO("WEAPON PROC triggered! skill=%u at (%.1f, %.1f, %.1f)",
+                 static_cast<u32>(s_engine->m_weaponProc), position.x, position.y, position.z);
+
+        switch (s_engine->m_weaponProc) {
+            case SkillId::VOID_ZONE: {
+                // AoE void zone — hits all enemies in radius with flat + 60% missing HP
+                EntityHandle aoeHits[MAX_ENTITIES];
+                f32 aoeDists[MAX_ENTITIES];
+                u32 aoeCount = CombatQuery::queryConeSorted(
+                    s_engine->m_entities, position, {0,-1,0}, -1.0f, sd->radius,
+                    aoeHits, aoeDists, MAX_ENTITIES);
+                for (u32 h = 0; h < aoeCount; h++) {
+                    Entity* ve = handleGet(s_engine->m_entities, aoeHits[h]);
+                    if (!ve || (ve->flags & ENT_DEAD) || (ve->flags & ENT_FRIENDLY)) continue;
+                    f32 missingHp = ve->maxHealth - ve->health;
+                    f32 voidDmg = sd->damage + missingHp * 0.6f;
+                    Combat::applyDamage(s_engine->m_entities, aoeHits[h], voidDmg);
+                }
+                LOG_INFO("  VOID ZONE AoE: hit %u enemies", aoeCount);
+                // Large dark-purple nova + scorch zone for visibility
+                for (u32 ni = 0; ni < Engine::MAX_NOVA_FX; ni++) {
+                    if (!s_engine->m_novaFX[ni].active) {
+                        s_engine->m_novaFX[ni] = {position, 3.0f, 1.2f, true, {0.4f, 0.1f, 0.6f}};
+                        break;
+                    }
+                }
+                // Also spawn a dark scorch zone on the ground
+                for (u32 si = 0; si < Engine::MAX_SCORCH; si++) {
+                    if (!s_engine->m_scorchZones[si].active) {
+                        s_engine->m_scorchZones[si] = {position, 3.0f, 1.5f, 0.0f, true};
+                        break;
+                    }
+                }
+            } break;
+            case SkillId::FROZEN_ORB: {
+                Vec3 dir = s_engine->m_localPlayer.forward;
+                u16 orbIdx = ProjectileSystem::spawn(s_engine->m_projectiles, position, dir,
+                    sd->projectileSpeed, sd->damage, sd->radius, sd->duration, true);
+                if (orbIdx != 0xFFFF) s_engine->m_projectiles.projectiles[orbIdx].projFlags = PROJ_ORB;
+            } break;
+            case SkillId::CHAIN_LIGHTNING: {
+                SkillState tempSS;
+                tempSS.activeSkill = SkillId::CHAIN_LIGHTNING;
+                tempSS.energy = 999.0f; tempSS.maxEnergy = 999.0f;
+                SkillSystem::tryActivate(tempSS, s_engine->m_skillDefs, s_engine->m_skillDefCount,
+                    position, s_engine->m_localPlayer.forward, 0,
+                    s_engine->m_projectiles, s_engine->m_entities,
+                    s_engine->m_grid, s_engine->m_localPlayer);
+            } break;
+            case SkillId::BLOOD_NOVA: {
+                EntityHandle hits[MAX_ENTITIES];
+                f32 dists[MAX_ENTITIES];
+                u32 hitCount = CombatQuery::queryConeSorted(
+                    s_engine->m_entities, position, {0,0,-1}, -1.0f, sd->radius,
+                    hits, dists, MAX_ENTITIES);
+                for (u32 h = 0; h < hitCount; h++)
+                    Combat::applyDamage(s_engine->m_entities, hits[h], sd->damage * 0.5f);
+                for (u32 ni = 0; ni < Engine::MAX_NOVA_FX; ni++) {
+                    if (!s_engine->m_novaFX[ni].active) {
+                        s_engine->m_novaFX[ni] = {position, sd->radius, 0.6f, true, {1.0f, 0.15f, 0.1f}};
+                        break;
+                    }
+                }
+            } break;
+            case SkillId::METEOR_STRIKE: {
+                extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+                for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+                    if (!s_meteors[mi].active) {
+                        s_meteors[mi] = {position, sd->damage, sd->radius, sd->delay, true};
+                        break;
+                    }
+                }
+            } break;
+            default: break;
+        }
+    });
+
     // Perfect block callback — legendary shield triggers stun bash
     Combat::setPerfectBlockCallback([](Player& player) {
         if (!s_engine) return;
@@ -774,6 +874,7 @@ bool Engine::loadGame() {
         if (static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
             m_localPlayer.moveSpeed = cls.baseMoveSpeed;
+            m_localPlayer.damageReduction = (m_playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
             m_skillStates[0].maxEnergy = cls.baseEnergy;
             // Re-sync class skill active IDs
             for (u32 s = 0; s < 4; s++) {
@@ -1983,6 +2084,8 @@ void Engine::updateMenu(f32 dt) {
             m_localPlayer.moveSpeed = cls.baseMoveSpeed;
             m_skillStates[0].maxEnergy = cls.baseEnergy;
             m_skillStates[0].energy = cls.baseEnergy;
+            // Warrior passive: 30% damage reduction
+            m_localPlayer.damageReduction = (m_playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
 
             // Init class skill cooldown states
             for (u32 s = 0; s < 4; s++) {
@@ -3166,6 +3269,14 @@ void Engine::handleWeaponFire(f32 dt) {
         ws.currentClip--;
     }
 
+    // Class passive: +20% damage with preferred weapon type
+    {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        if (wpn.type == cls.preferredWeapon) {
+            wpn.damage *= 1.2f;
+        }
+    }
+
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
     Vec3 forward = m_localPlayer.forward;
 
@@ -3232,7 +3343,9 @@ void Engine::handleWeaponFire(f32 dt) {
             projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles,
                                               9.8f, 3.0f, wpn.damage * 0.6f);
         } else {
-            u8 flags = isWand ? PROJ_SPARK : 0;
+            // Wands get spark visual, but void zone weapons get default (purple tinted)
+            bool isVoidWand = isWand && m_weaponProc == SkillId::VOID_ZONE;
+            u8 flags = (isWand && !isVoidWand) ? PROJ_SPARK : 0;
             projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles, flags);
         }
         // Assign correct mesh to projectile based on weapon subtype
@@ -4363,9 +4476,13 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                                * Mat4::scale({coreSize, coreSize, coreSize});
                 AABB coreBounds = {p.position - Vec3{coreSize,coreSize,coreSize},
                                    p.position + Vec3{coreSize,coreSize,coreSize}};
-                Vec4 coreColor = isPlayer
+                // Void zone weapons get purple projectiles
+                bool isVoidWeapon = isPlayer && m_weaponProc == SkillId::VOID_ZONE;
+                Vec4 coreColor = isVoidWeapon
+                    ? Vec4{0.6f * pulse, 0.15f, 0.9f, 1.0f}    // dark purple
+                    : isPlayer
                     ? Vec4{1.0f, 0.8f * pulse, 0.3f, 1.0f}     // warm golden
-                    : Vec4{0.9f * pulse, 0.2f, 1.0f, 1.0f};    // purple
+                    : Vec4{0.9f * pulse, 0.2f, 1.0f, 1.0f};    // enemy purple
                 Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, coreModel, coreBounds, coreColor);
 
                 // Outer glow (larger, dimmer, different rotation)
@@ -4376,7 +4493,9 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                                * Mat4::scale({glowSize, glowSize * 0.7f, glowSize});
                 AABB glowBounds = {p.position - Vec3{glowSize,glowSize,glowSize},
                                    p.position + Vec3{glowSize,glowSize,glowSize}};
-                Vec4 glowColor = isPlayer
+                Vec4 glowColor = isVoidWeapon
+                    ? Vec4{0.4f, 0.05f, 0.7f, 0.4f}
+                    : isPlayer
                     ? Vec4{1.0f, 0.4f, 0.05f, 0.35f}
                     : Vec4{0.5f, 0.1f, 0.8f, 0.35f};
                 Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, glowModel, glowBounds, glowColor);

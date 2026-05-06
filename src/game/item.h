@@ -145,6 +145,7 @@ struct ClassDef {
     SkillId skills[4];             // skill slots 1-4
     u8 skillUnlockFloor[4];        // floor at which each skill becomes available
     u8 skillUpgradeFloor[4];       // floor at which each skill gets its upgrade
+    WeaponType preferredWeapon;    // +20% damage with this weapon type
 };
 
 // Global class definition table (defined in engine.cpp)

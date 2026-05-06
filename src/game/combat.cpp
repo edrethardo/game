@@ -43,6 +43,9 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage) {
     // Invulnerability blocks all damage (respawn/floor entry grace period)
     if (player.invulnTimer > 0.0f) return;
 
+    // Class passive damage reduction (e.g. Warrior 30%)
+    damage *= (1.0f - player.damageReduction);
+
     if (player.blocking) {
         if (player.blockTimer < 0.2f) {
             // Perfect block — negate all damage, trigger shield bash via callback

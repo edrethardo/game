@@ -45,6 +45,10 @@ namespace ProjectileSystem {
     using SplashCallback = void(*)(Vec3 position, f32 radius);
     void setSplashCallback(SplashCallback cb);
 
+    // Callback when a player projectile hits an entity (for weapon on-hit procs)
+    using HitCallback = void(*)(Vec3 position, EntityHandle target);
+    void setHitCallback(HitCallback cb);
+
     void init(ProjectilePool& pool);
 
     // Spawn a projectile. Returns the pool slot index (0xFFFF if pool full).

@@ -6,9 +6,13 @@
 #include "world/collision.h"
 
 static ProjectileSystem::SplashCallback s_splashCallback = nullptr;
+static ProjectileSystem::HitCallback s_hitCallback = nullptr;
 
 void ProjectileSystem::setSplashCallback(SplashCallback cb) {
     s_splashCallback = cb;
+}
+void ProjectileSystem::setHitCallback(HitCallback cb) {
+    s_hitCallback = cb;
 }
 
 void ProjectileSystem::init(ProjectilePool& pool) {
@@ -128,6 +132,8 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                     EntityHandle h = {static_cast<u16>(e), ent.generation};
                     Combat::applyDamage(entities, h, p.damage);
+                    // Notify engine for weapon on-hit procs
+                    if (s_hitCallback) s_hitCallback(p.position, h);
                     hit = true;
                     break; // one hit per projectile
                 }
