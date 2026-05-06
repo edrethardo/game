@@ -1431,6 +1431,7 @@ void Engine::startGame() {
                 boss->meshId = findMeshByName(bt->meshName);
                 boss->materialId = MaterialSystem::getIdByName(bt->matName);
                 boss->enemyType = EnemyType::BOSS;
+                boss->nameTag = bt->name; // stable identifier for game logic
                 boss->level = static_cast<u8>(m_currentFloor);
                 if (bt->weaponName) {
                     boss->weaponMeshId = findMeshByName(bt->weaponName);
@@ -3270,6 +3271,7 @@ void Engine::handleWeaponFire(f32 dt) {
         if (m_weaponProc == SkillId::CHAIN_LIGHTNING) procChance = 25;
         if (m_weaponProc == SkillId::METEOR_STRIKE)  procChance = 10;
         if (m_weaponProc == SkillId::BLOOD_NOVA)     procChance = 20;
+        if (m_weaponProc == SkillId::VOID_ZONE)      procChance = 5;
 
         if (procRoll < procChance) {
             Vec3 procPos = result.hitPosition;
@@ -3327,6 +3329,24 @@ void Engine::handleWeaponFire(f32 dt) {
                         for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
                             if (!m_novaFX[ni].active) {
                                 m_novaFX[ni] = {procPos, sd->radius, 0.6f, true, {1.0f, 0.15f, 0.1f}};
+                                break;
+                            }
+                        }
+                    } break;
+                    case SkillId::VOID_ZONE: {
+                        // Void zone: flat damage + 60% of target's missing HP
+                        if (m_lastCombatHit.type == CombatHit::ENTITY) {
+                            Entity* ve = handleGet(m_entities, m_lastCombatHit.entityHandle);
+                            if (ve && !(ve->flags & ENT_DEAD)) {
+                                f32 missingHp = ve->maxHealth - ve->health;
+                                f32 voidDmg = sd->damage + missingHp * 0.6f;
+                                Combat::applyDamage(m_entities, m_lastCombatHit.entityHandle, voidDmg);
+                            }
+                        }
+                        // Dark purple void nova visual
+                        for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                            if (!m_novaFX[ni].active) {
+                                m_novaFX[ni] = {procPos, sd->radius, 0.8f, true, {0.3f, 0.1f, 0.5f}};
                                 break;
                             }
                         }
@@ -4034,6 +4054,33 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                                      Vec4{0.7f, 0.7f, 0.8f, 1.0f});
                 }
             }
+        }
+    }
+
+    // Stun indicator — 3 spinning stars orbiting above stunned entity heads
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        const Entity& e = entPool.entities[i];
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        if (e.stunTimer <= 0.0f) continue;
+
+        Vec3 headPos = e.position + Vec3{0, e.halfExtents.y * 2.0f + 0.15f, 0};
+        f32 t = e.animTimer * 4.0f; // spin speed
+        f32 orbitR = 0.25f;
+
+        for (u32 star = 0; star < 3; star++) {
+            f32 angle = t + star * (6.28318f / 3.0f);
+            Vec3 starPos = headPos + Vec3{cosf(angle) * orbitR, sinf(t * 2.0f + star) * 0.05f,
+                                           sinf(angle) * orbitR};
+            // Draw a small 4-pointed star burst
+            f32 sz = 0.06f;
+            DebugDraw::line(starPos + Vec3{-sz, 0, 0}, starPos + Vec3{sz, 0, 0}, {1.0f, 1.0f, 0.3f});
+            DebugDraw::line(starPos + Vec3{0, -sz, 0}, starPos + Vec3{0, sz, 0}, {1.0f, 1.0f, 0.3f});
+            DebugDraw::line(starPos + Vec3{0, 0, -sz}, starPos + Vec3{0, 0, sz}, {1.0f, 0.9f, 0.2f});
+            // Diagonal crosses for sparkle
+            f32 d = sz * 0.7f;
+            DebugDraw::line(starPos + Vec3{-d, d, 0}, starPos + Vec3{d, -d, 0}, {1.0f, 0.8f, 0.1f});
+            DebugDraw::line(starPos + Vec3{-d, -d, 0}, starPos + Vec3{d, d, 0}, {1.0f, 0.8f, 0.1f});
         }
     }
 

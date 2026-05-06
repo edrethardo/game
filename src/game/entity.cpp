@@ -98,6 +98,7 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
             }
         }
         if (e.freezeTimer > 0.0f) e.freezeTimer -= dt;
+        if (e.stunTimer > 0.0f) e.stunTimer -= dt;
 
         if (e.flags & ENT_DEAD) {
             e.deathTimer -= dt;

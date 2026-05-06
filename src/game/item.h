@@ -126,8 +126,9 @@ enum struct SkillId : u8 {
     STUN_GRENADE,
     // (reuses DEPLOY_TURRET)
 
-    // Legendary weapon effect
+    // Legendary weapon effects
     THROWAWAY,  // throw weapon as projectile on reload
+    VOID_ZONE,  // on-hit: dark zone dealing flat + 60% missing HP
 
     COUNT
 };

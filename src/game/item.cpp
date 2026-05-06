@@ -97,6 +97,7 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "swarm_drones")    return SkillId::SWARM_DRONES;
     if (s == "stun_grenade")    return SkillId::STUN_GRENADE;
     if (s == "throwaway")       return SkillId::THROWAWAY;
+    if (s == "void_zone")       return SkillId::VOID_ZONE;
     return SkillId::NONE;
 }
 

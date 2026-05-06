@@ -685,6 +685,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // ---------------------------------------------------------------------------
         // Hostile enemy AI — targets friendly NPCs first, then player
         // ---------------------------------------------------------------------------
+
+        // Stunned enemies are completely immobilized — skip all AI
+        if (e.stunTimer > 0.0f) {
+            e.velocity = {0, 0, 0};
+            continue;
+        }
+
         Vec3 toPlayer = playerEye - e.position;
         f32  dist     = length(toPlayer);
 

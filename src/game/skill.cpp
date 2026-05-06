@@ -6,6 +6,7 @@
 #include "renderer/debug_draw.h"
 #include "core/log.h"
 #include <cmath>
+#include <cstring>
 
 // Not static — extern'd by engine.cpp for rendering the targeting circles
 PendingMeteor s_meteors[MAX_PENDING_METEORS];
@@ -254,7 +255,14 @@ static void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entiti
         Combat::applyDamage(entities, hits[i], damage);
         Entity* e = handleGet(entities, hits[i]);
         if (e) {
-            e->freezeTimer = stunTime + 1.5f;
+            e->stunTimer = stunTime;       // full immobilize
+            e->freezeTimer = 1.5f;         // slow after stun wears off
+            // The Butcher is especially vulnerable to thunderclap
+            if (e->nameTag && std::strcmp(e->nameTag, "The Butcher") == 0) {
+                e->stunTimer = 3.0f;
+                e->speechText = "Oh no, I'm dizzy!";
+                e->speechTimer = 3.0f;
+            }
         }
     }
 
@@ -277,7 +285,7 @@ static void fireWarCry(Vec3 origin, const SkillDef* def, EntityPool& entities)
 
     for (u32 i = 0; i < hitCount; i++) {
         Entity* e = handleGet(entities, hits[i]);
-        if (e) e->freezeTimer = 2.0f;  // 2-second stun
+        if (e) e->stunTimer = 2.0f;  // 2-second stun
     }
     if (s_novaCallback) s_novaCallback(origin, range, {1.0f, 0.85f, 0.2f});
     LOG_INFO("War Cry stunned %u enemies", hitCount);

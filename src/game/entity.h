@@ -81,6 +81,9 @@ struct Entity {
     f32     flybyTimer  = 0.0f;     // time left in flyby maneuver
     f32     stuckTimer  = 0.0f;     // stuck detection accumulator (friendly NPCs)
 
+    // Identity — stable name for game logic (boss reactions, quests, etc.)
+    const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)
+
     // Rendering
     u8  meshId     = 0;  // index into Engine::m_meshDefs
     u8  materialId = 0;  // index into MaterialSystem
@@ -113,6 +116,7 @@ struct Entity {
     f32  burnTimer      = 0.0f;
     f32  burnDps        = 0.0f;
     f32  freezeTimer    = 0.0f;  // halves movement speed
+    f32  stunTimer      = 0.0f;  // fully immobilized, no AI, no attacks
 
     // On-hit status effect this entity applies to targets (0=none)
     // 1=poison, 2=slow, 3=burn, 4=freeze

@@ -1540,7 +1540,7 @@
       "weaponType": "projectile",
       "weaponSubtype": "wand",
       "mesh": "staff",
-      "material": "weapon_staff",
+      "material": "legendary_weapon",
       "baseDamage": 65.0,
       "baseCooldown": 0.38,
       "baseProjectileSpeed": 20.0,
@@ -1548,7 +1548,9 @@
       "baseRecoil": 0.012,
       "minLevel": 32,
       "maxLevel": 50,
-      "maxRarity": "rare"
+      "maxRarity": "legendary",
+      "legendarySkill": "void_zone",
+      "dropWeight": 0.5
     },
     {
       "name": "Void Crown",
