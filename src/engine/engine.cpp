@@ -1363,49 +1363,49 @@ void Engine::startGame() {
              GameConst::SPIDER_ATK_RANGE, GameConst::SPIDER_ATK_COOL, GameConst::SPIDER_DAMAGE,
              {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "spider_skin",   0, 0, 0},
             // Zombie (Diablo 1) — slow, tanky, human mesh
-            {70,  1.8f, 18, 2.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
+            {70,  1.8f, 18, 3.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
             // Imp (Barony) — small fast flying ranged nuisance, fires weak projectiles
-            {20,  7.0f, 24, 8.0f, 0.8f,  3, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
+            {20,  7.0f, 24, 9.0f, 0.8f,  3, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
         };
         // Tier 2 (floors 11-20): Catacombs — poison + ghoul (D2) + bone mage (Barony)
         static const EnemyTemplate kTier2[] = {
-            {60, 3.0f, 22, 2.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
-            {35, 6.5f, 22, 2.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
-            {48, 4.2f, 20, 2.0f, 0.8f, 11, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
+            {60, 3.0f, 22, 3.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
+            {35, 6.5f, 22, 3.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
+            {48, 4.2f, 20, 3.0f, 0.8f, 11, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
             // Ghoul (D2) — fast melee, high damage, lower HP
-            {40, 4.5f, 22, 2.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
+            {40, 4.5f, 22, 3.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
             // Bone Mage (Barony) — ranged skeleton caster
-            {35, 2.5f, 24, 10.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
+            {35, 2.5f, 24, 11.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
         };
         // Tier 3 (floors 21-30): Caverns — slow + broodmother (Barony) + stalker (HGL)
         static const EnemyTemplate kTier3[] = {
-            {65, 3.2f, 24, 2.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
-            {38, 7.0f, 24, 2.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
-            {52, 4.8f, 22, 2.0f, 0.7f, 12, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
+            {65, 3.2f, 24, 3.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
+            {38, 7.0f, 24, 3.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
+            {52, 4.8f, 22, 3.0f, 0.7f, 12, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
             // Broodmother (Barony) — large slow spider, extra tanky
-            {90, 2.5f, 20, 2.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
+            {90, 2.5f, 20, 3.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
             // Stalker (HGL) — fast, stealthy humanoid
-            {45, 5.0f, 26, 2.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
+            {45, 5.0f, 26, 3.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
         };
         // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
         static const EnemyTemplate kTier4[] = {
-            {70, 3.5f, 24, 2.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
-            {40, 7.5f, 24, 2.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
-            {58, 5.0f, 22, 2.0f, 0.6f, 14, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
+            {70, 3.5f, 24, 3.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
+            {40, 7.5f, 24, 3.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
+            {58, 5.0f, 22, 3.0f, 0.6f, 14, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
             // Hellhound (D2) — fast charging beast, spider rig
-            {50, 6.0f, 24, 2.5f, 0.5f, 16, {0.5f,0.35f,0.5f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
+            {50, 6.0f, 24, 3.5f, 0.5f, 16, {0.5f,0.35f,0.5f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
             // Demon (HGL) — ranged fire caster, humanoid
-            {55, 3.0f, 26, 12.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
+            {55, 3.0f, 26, 13.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
         };
         // Tier 5 (floors 41-50): Void — freeze + shade (Barony) + void demon (HGL)
         static const EnemyTemplate kTier5[] = {
-            {80, 3.8f, 26, 2.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
-            {45, 8.0f, 26, 2.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
-            {65, 5.5f, 24, 2.0f, 0.5f, 15, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
+            {80, 3.8f, 26, 3.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
+            {45, 8.0f, 26, 3.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
+            {65, 5.5f, 24, 3.0f, 0.5f, 15, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
             // Shade (Barony) — fast phasing humanoid, semi-transparent
-            {40, 5.5f, 28, 2.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
+            {40, 5.5f, 28, 3.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
             // Void Demon (HGL) — heavy tanky skeleton, high damage
-            {100, 2.5f, 24, 3.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
+            {100, 2.5f, 24, 4.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
         };
 
         // Select tier based on current floor
@@ -2275,7 +2275,12 @@ void Engine::update(f32 dt) {
                 // When P1 (sp=0) is dead, shared systems (AI, projectiles, entities)
                 // still need to tick — they're normally gated on activePlayerIndex==0
                 if (sp == 0) {
-                    EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+                    // P1 dead: enemies target P2 exclusively (single AI call)
+                    if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
+                        EnemyAI::update(m_entities, m_grid, m_localPlayers[1], m_projectiles, dt);
+                    } else if (!m_playerDead[0]) {
+                        EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+                    }
                     ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
                     EntitySystem::tickTimers(m_entities, dt);
                     WorldItemSystem::update(m_worldItems, dt);
@@ -2496,6 +2501,7 @@ void Engine::updateMenu(f32 dt) {
             m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
             m_localPlayers[1].yaw = m_localPlayer.yaw;
             m_localPlayers[1].eyeHeight = m_localPlayer.eyeHeight;
+            m_players[1].spawnPosition = m_localPlayers[1].position; // for respawn
             // Copy P1 state into arrays too
             m_localPlayers[0] = m_localPlayer;
             m_cameras[0] = m_camera;
@@ -2861,13 +2867,16 @@ void Engine::gameUpdate(f32 dt) {
         if (m_viewmodelState.fireShakeTimer > 0.0f) m_viewmodelState.fireShakeTimer -= dt;
     }
 
-    // Enemy AI — only run once per frame (on first player's update pass in split-screen)
+    // Enemy AI — run ONCE per frame, enemies pick the nearest player to target
     if (m_activePlayerIndex == 0) {
         PROFILE_SCOPE(1, "AI");
-        // In split-screen, create a temporary target at the nearest player for each enemy.
-        // For simplicity, just pass player 0 — enemies target the host.
-        // TODO: pass both players for proper nearest-target AI
-        EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+        if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
+            // Co-op: pass P2 as extra target so enemies chase the nearest player
+            Player* extras[] = { &m_localPlayers[1] };
+            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, extras, 1);
+        } else {
+            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+        }
     }
 
     // Decay speech timers + log new speech to chat
@@ -3329,46 +3338,72 @@ void Engine::updatePlayerPickup() {
         }
     }
 
-    // Item pickup (E key / action) — globes are consumed above and never reach here
+    // Item pickup (E key / action) — pick up the nearest item the player is roughly facing
     if (Input::isActionPressed(GameAction::PICKUP)) {
-        ItemInstance picked;
-        if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
-            if (!isGlobe(picked)) {
-                if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked)) {
-                    // Show "Press Tab to open inventory" on first pickup
-                    if (!m_firstPickupTooltipShown) {
-                        m_firstPickupTooltipShown = true;
-                        m_firstPickupTooltipTimer = 7.0f;
-                    }
-                    // Auto-equip first weapon; assign subsequent weapons to quickbar
-                    if (picked.defId < m_itemDefCount &&
-                        m_itemDefs[picked.defId].slot == ItemSlot::WEAPON) {
-                        // Find which backpack slot it landed in
-                        u8 bpIdx = 0xFF;
-                        for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
-                            if (m_inventories[m_localPlayerIndex].backpack[bi].uid == picked.uid) {
-                                bpIdx = bi;
-                                break;
-                            }
-                        }
-                        if (bpIdx != 0xFF) {
-                            const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-                            if (isItemEmpty(eqWpn)) {
-                                // No weapon equipped — auto-equip and assign to slot 0
-                                Inventory::equip(m_inventories[m_localPlayerIndex], bpIdx, m_itemDefs);
-                                Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-                            } else {
-                                // Already have a weapon — assign to quickbar
-                                Quickbar::assignItem(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex], bpIdx);
-                            }
-                        }
-                    }
-                } else {
-                    // Backpack full: drop item at player's feet
-                    WorldItemSystem::spawn(m_worldItems, picked,
-                        m_localPlayer.position + Vec3{0, 0.5f, 0});
-                    m_fullBackpackNotifyTimer = 2.0f;
+        // Find the best item: prefer aimed (high dot), fall back to nearest in range.
+        // Use XZ-only alignment so items on the floor are reachable.
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        Vec3 fwd = m_localPlayer.forward;
+        f32 bestScore = -1.0f;
+        s32 bestIdx = -1;
+        for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
+            WorldItem& w = m_worldItems.items[wi];
+            if (!w.active) continue;
+            if (isGlobe(w.item)) continue;
+            if (w.item.defId >= m_itemDefCount) continue;
+            Vec3 toItem = w.position - m_localPlayer.position;
+            f32 hDist = sqrtf(toItem.x * toItem.x + toItem.z * toItem.z);
+            if (hDist > 3.5f) continue;
+            // Horizontal-only dot product (ignore Y so floor items work)
+            f32 hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
+            f32 dot = 0.0f;
+            if (hDist > 0.1f && hLen > 0.01f) {
+                dot = (fwd.x * toItem.x + fwd.z * toItem.z) / (hDist * hLen);
+            } else {
+                dot = 1.0f; // very close = always pickable
+            }
+            if (dot < 0.3f) continue; // must be in front half (~70 degrees each side)
+            // Score: prefer high dot, penalize distance
+            f32 score = dot - hDist * 0.1f;
+            if (score > bestScore) {
+                bestScore = score; bestIdx = static_cast<s32>(wi);
+            }
+        }
+        ItemInstance picked = {};
+        if (bestIdx >= 0) {
+            picked = m_worldItems.items[bestIdx].item;
+            m_worldItems.items[bestIdx].active = false;
+            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        }
+        if (!isItemEmpty(picked)) {
+            if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked)) {
+                if (!m_firstPickupTooltipShown) {
+                    m_firstPickupTooltipShown = true;
+                    m_firstPickupTooltipTimer = 7.0f;
                 }
+                if (picked.defId < m_itemDefCount &&
+                    m_itemDefs[picked.defId].slot == ItemSlot::WEAPON) {
+                    u8 bpIdx = 0xFF;
+                    for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+                        if (m_inventories[m_localPlayerIndex].backpack[bi].uid == picked.uid) {
+                            bpIdx = bi; break;
+                        }
+                    }
+                    if (bpIdx != 0xFF) {
+                        const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                        if (isItemEmpty(eqWpn)) {
+                            Inventory::equip(m_inventories[m_localPlayerIndex], bpIdx, m_itemDefs);
+                            Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
+                        } else {
+                            Quickbar::assignItem(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex], bpIdx);
+                        }
+                    }
+                }
+            } else {
+                // Backpack full: drop item back at its position
+                WorldItemSystem::spawn(m_worldItems, picked,
+                    m_localPlayer.position + Vec3{0, 0.5f, 0});
+                m_fullBackpackNotifyTimer = 2.0f;
             }
         }
     }
@@ -3418,6 +3453,7 @@ bool Engine::updateFloorDoor() {
                     m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
                     m_localPlayers[1].velocity = {0, 0, 0};
                     m_localPlayers[1].invulnTimer = 2.5f;
+                    m_players[1].spawnPosition = m_localPlayers[1].position; // for respawn
                     m_cameras[0] = m_camera;
                 }
 
@@ -3440,22 +3476,23 @@ void Engine::updateInventoryInteraction(f32 dt) {
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
 
-    // --- D-pad inventory navigation (controller) ---
-    if (Input::isGamepadConnected(0)) {
+    // --- D-pad inventory navigation (controller — routes to active player's controller) ---
+    s32 padIdx = static_cast<s32>(m_localPlayerIndex);
+    if (Input::isGamepadConnected(padIdx)) {
         // Navigate cursor with D-pad
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
-            if (m_invCursorPanel == 0) { // backpack
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+            if (m_invCursorPanel == 0) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col < InventoryUI::BP_COLS - 1) m_invCursorIndex++;
             }
         }
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
             if (m_invCursorPanel == 0) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col > 0) m_invCursorIndex--;
             }
         }
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
             if (m_invCursorPanel == 0) {
                 if (m_invCursorIndex + InventoryUI::BP_COLS < InventoryUI::BP_COLS * InventoryUI::BP_ROWS)
                     m_invCursorIndex += InventoryUI::BP_COLS;
@@ -3463,7 +3500,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 if (m_invCursorIndex < InventoryUI::EQ_SLOTS - 1) m_invCursorIndex++;
             }
         }
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
             if (m_invCursorPanel == 0) {
                 if (m_invCursorIndex >= InventoryUI::BP_COLS)
                     m_invCursorIndex -= InventoryUI::BP_COLS;
@@ -3472,13 +3509,13 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
         // L/R shoulder to switch between backpack and equipment panels
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
-            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
+            Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
             m_invCursorPanel = m_invCursorPanel == 0 ? 1 : 0;
             m_invCursorIndex = 0;
         }
         // A = equip (backpack → equipment) or unequip (equipment → backpack)
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_A)) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 if (!isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex])) {
                     Inventory::equip(m_inventories[m_localPlayerIndex], m_invCursorIndex, m_itemDefs);
@@ -3491,8 +3528,8 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 }
             }
         }
-        // B = drop selected item
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_Y)) {
+        // Y = drop selected item
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y)) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], m_invCursorIndex);
@@ -3501,6 +3538,20 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                     static_cast<ItemSlot>(m_invCursorIndex));
                 if (!isItemEmpty(dropped)) WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+            }
+        }
+
+        // - button = drop entire backpack
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_BACK)) {
+            Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
+            for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], bi);
+                if (!isItemEmpty(dropped)) {
+                    // Scatter items slightly so they don't stack
+                    f32 scatter = (bi % 5) * 0.3f - 0.6f;
+                    WorldItemSystem::spawn(m_worldItems, dropped,
+                        dropPos + Vec3{scatter, 0, (bi / 5) * 0.3f});
+                }
             }
         }
 
@@ -3726,48 +3777,76 @@ void Engine::pushPlayerFromEntities() {
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
-                if (pushX < pushZ)
-                    m_localPlayer.position.x += (toPlayer.x > 0) ? pushX : -pushX;
-                else
-                    m_localPlayer.position.z += (toPlayer.z > 0) ? pushZ : -pushZ;
+                // Gentle push — mostly push the enemy away, barely move the player
+                f32 playerPush = 0.15f; // player moves 15%
+                f32 enemyPush  = 0.85f; // enemy moves 85%
+                if (pushX < pushZ) {
+                    f32 dir = (toPlayer.x > 0) ? 1.0f : -1.0f;
+                    m_localPlayer.position.x += dir * pushX * playerPush;
+                    e.position.x -= dir * pushX * enemyPush;
+                } else {
+                    f32 dir = (toPlayer.z > 0) ? 1.0f : -1.0f;
+                    m_localPlayer.position.z += dir * pushZ * playerPush;
+                    e.position.z -= dir * pushZ * enemyPush;
+                }
             }
         }
     }
 
-    // Wall push-out: if the player's AABB overlaps any solid cell, nudge out
-    // along the axis with the smallest penetration depth
+    // Player-to-player push in split-screen — gentle separation so they don't overlap
+    if (m_splitPlayerCount > 1) {
+        u8 otherP = (m_activePlayerIndex == 0) ? 1 : 0;
+        if (!m_playerDead[otherP]) {
+            Vec3 toMe = m_localPlayer.position - m_localPlayers[otherP].position;
+            f32 dist = sqrtf(toMe.x * toMe.x + toMe.z * toMe.z);
+            f32 minSep = 0.7f; // minimum separation (2 × player half-width)
+            if (dist > 0.01f && dist < minSep) {
+                f32 push = (minSep - dist) * 0.5f; // each player moves half
+                Vec3 dir = {toMe.x / dist, 0, toMe.z / dist};
+                m_localPlayer.position.x += dir.x * push;
+                m_localPlayer.position.z += dir.z * push;
+            }
+        }
+    }
+
+    // Wall push-out: check all cells the player AABB touches and resolve ALL overlaps
     f32 cs = m_grid.cellSize;
     f32 pw = PLAYER_HALF_WIDTH;
-    for (s32 dx = -1; dx <= 1; dx++) {
-        for (s32 dz = -1; dz <= 1; dz++) {
-            u32 gx, gz;
-            Vec3 probe = m_localPlayer.position + Vec3{dx * pw, 0, dz * pw};
-            if (!LevelGridSystem::worldToGrid(m_grid, probe, gx, gz)) continue;
-            if (!LevelGridSystem::isSolid(m_grid, gx, gz)) continue;
+    // Find grid range that the player AABB covers
+    f32 pMinX = m_localPlayer.position.x - pw;
+    f32 pMaxX = m_localPlayer.position.x + pw;
+    f32 pMinZ = m_localPlayer.position.z - pw;
+    f32 pMaxZ = m_localPlayer.position.z + pw;
 
-            // Compute wall cell AABB (XZ plane)
+    s32 gxMin = static_cast<s32>(pMinX / cs);
+    s32 gxMax = static_cast<s32>(pMaxX / cs);
+    s32 gzMin = static_cast<s32>(pMinZ / cs);
+    s32 gzMax = static_cast<s32>(pMaxZ / cs);
+
+    for (s32 gx = gxMin; gx <= gxMax; gx++) {
+        for (s32 gz = gzMin; gz <= gzMax; gz++) {
+            if (gx < 0 || gz < 0 || gx >= static_cast<s32>(m_grid.width) ||
+                gz >= static_cast<s32>(m_grid.depth)) continue;
+            if (!LevelGridSystem::isSolid(m_grid, static_cast<u32>(gx), static_cast<u32>(gz))) continue;
+
             f32 wallMinX = static_cast<f32>(gx) * cs;
             f32 wallMaxX = wallMinX + cs;
             f32 wallMinZ = static_cast<f32>(gz) * cs;
             f32 wallMaxZ = wallMinZ + cs;
 
-            // Player AABB in XZ
-            f32 pMinX = m_localPlayer.position.x - pw;
-            f32 pMaxX = m_localPlayer.position.x + pw;
-            f32 pMinZ = m_localPlayer.position.z - pw;
-            f32 pMaxZ = m_localPlayer.position.z + pw;
+            // Recompute player AABB (position may have shifted from previous push)
+            pMinX = m_localPlayer.position.x - pw;
+            pMaxX = m_localPlayer.position.x + pw;
+            pMinZ = m_localPlayer.position.z - pw;
+            pMaxZ = m_localPlayer.position.z + pw;
 
-            // Check overlap
-            f32 overlapX = 0.0f, overlapZ = 0.0f;
             if (pMaxX > wallMinX && pMinX < wallMaxX &&
                 pMaxZ > wallMinZ && pMinZ < wallMaxZ) {
-                // Penetration on each axis
                 f32 penRight = pMaxX - wallMinX;
                 f32 penLeft  = wallMaxX - pMinX;
                 f32 penFwd   = pMaxZ - wallMinZ;
                 f32 penBack  = wallMaxZ - pMinZ;
 
-                // Find smallest penetration and push out
                 f32 minPenX = (penRight < penLeft) ? penRight : penLeft;
                 f32 minPenZ = (penFwd < penBack) ? penFwd : penBack;
 
@@ -3776,8 +3855,6 @@ void Engine::pushPlayerFromEntities() {
                 } else {
                     m_localPlayer.position.z += (penFwd < penBack) ? -penFwd : penBack;
                 }
-                // Re-check only once per frame — break after first correction
-                return;
             }
         }
     }
@@ -4725,9 +4802,10 @@ void Engine::renderViewmodel() {
     // Clear depth so viewmodel renders on top of everything
     glClear(GL_DEPTH_BUFFER_BIT);
 
-    u32 sw = Window::getWidth();
-    u32 sh = Window::getHeight();
-    f32 aspect = static_cast<f32>(sw) / static_cast<f32>(sh);
+    // Use viewport dimensions (split-screen halves), not full window
+    GLint vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    f32 aspect = static_cast<f32>(vp[2]) / static_cast<f32>(vp[3]);
 
     // Wide FOV for viewmodel so arm/hand are visible in peripheral vision
     Mat4 proj = Mat4::perspective(85.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
@@ -6359,14 +6437,16 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 }
                 if (!active) continue;
 
-                // Human model + equipped weapon
+                // Human model — scale mesh to match NPC height (1.8m)
                 u8 humanMesh = findMeshByName("human");
                 u8 humanMat = MaterialSystem::getIdByName("human_skin");
-                f32 scale = 0.5f; // scale to player height
-                Mat4 model = Mat4::translate(pos + Vec3{0, 0.0f, 0})
+                f32 targetH = 1.8f; // same as NPC halfExtents.y * 2
+                f32 meshH = (humanMesh > 0) ? (m_meshDefs[humanMesh].bounds.max.y - m_meshDefs[humanMesh].bounds.min.y) : 1.0f;
+                f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
+                Mat4 model = Mat4::translate(pos)
                            * Mat4::rotateY(yaw)
                            * Mat4::scale({scale, scale, scale});
-                AABB bounds = {pos - Vec3{0.3f, 0, 0.3f}, pos + Vec3{0.3f, 1.8f, 0.3f}};
+                AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
                 const Material* humanMatPtr = MaterialSystem::get(humanMat);
                 Texture humanTex = humanMatPtr ? humanMatPtr->texture : defaultTex;
@@ -6402,19 +6482,21 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             }
         }
 
-        // Split-screen co-op: render the other local player
+        // Split-screen co-op: render the other local player (not the current viewport's player)
         if (m_splitPlayerCount > 1) {
-            u8 otherP = (m_activePlayerIndex == 0) ? 1 : 0;
+            u8 otherP = (m_localPlayerIndex == 0) ? 1 : 0;
             if (!m_playerDead[otherP]) {
                 Vec3 pos = m_localPlayers[otherP].position;
                 f32 yaw  = m_localPlayers[otherP].yaw;
 
                 u8 humanMesh = findMeshByName("human");
-                f32 scale = 0.5f;
+                f32 targetH = 1.8f;
+                f32 meshH = (humanMesh > 0) ? (m_meshDefs[humanMesh].bounds.max.y - m_meshDefs[humanMesh].bounds.min.y) : 1.0f;
+                f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
                 Mat4 model = Mat4::translate(pos)
                            * Mat4::rotateY(yaw)
                            * Mat4::scale({scale, scale, scale});
-                AABB bounds = {pos - Vec3{0.3f, 0, 0.3f}, pos + Vec3{0.3f, 1.8f, 0.3f}};
+                AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
                 u8 skinMat = MaterialSystem::getIdByName("human_skin");
                 const Material* skinMatPtr = MaterialSystem::get(skinMat);
@@ -6618,6 +6700,22 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                     static_cast<f32>(dmy) - 16.0f,
                     32.0f, dragDef, dragRarity);
             }
+        }
+
+        // Inventory button hints (always visible when inventory is open)
+        if (Input::isGamepadConnected(0)) {
+            f32 hintY = 10.0f;
+            f32 hintX = 10.0f;
+            HUD::drawKeySymbol(sw, sh, hintX, hintY, "A", true);
+            FontSystem::drawText(sw, sh, hintX + 22.0f, hintY + 3.0f, "Equip", {0.6f, 0.6f, 0.6f}, 1);
+            HUD::drawKeySymbol(sw, sh, hintX + 75.0f, hintY, "Y", true);
+            FontSystem::drawText(sw, sh, hintX + 97.0f, hintY + 3.0f, "Drop", {0.6f, 0.6f, 0.6f}, 1);
+            HUD::drawKeySymbol(sw, sh, hintX + 145.0f, hintY, "-", true);
+            FontSystem::drawText(sw, sh, hintX + 167.0f, hintY + 3.0f, "Drop All", {0.8f, 0.4f, 0.4f}, 1);
+            HUD::drawKeySymbol(sw, sh, hintX + 240.0f, hintY, "L", true);
+            FontSystem::drawText(sw, sh, hintX + 262.0f, hintY + 3.0f, "/", {0.6f, 0.6f, 0.6f}, 1);
+            HUD::drawKeySymbol(sw, sh, hintX + 272.0f, hintY, "R", true);
+            FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Panel", {0.6f, 0.6f, 0.6f}, 1);
         }
 
         // Equip tutorial — pulsing mouse left-click + "Double-click to equip"

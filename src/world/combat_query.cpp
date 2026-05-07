@@ -142,10 +142,14 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
 
         Vec3 toEntity = e.position - origin;
         f32 dist = length(toEntity);
-        if (dist > maxDistance || dist < 0.001f) continue;
+        if (dist > maxDistance) continue;
 
-        f32 d = dot(toEntity * (1.0f / dist), direction);
-        if (d < coneAngleCos) continue;
+        // Very close entities (< 0.5m) always hit — skip cone check to avoid
+        // degenerate normalization and allow hitting enemies in melee range
+        if (dist >= 0.5f) {
+            f32 d = dot(toEntity * (1.0f / dist), direction);
+            if (d < coneAngleCos) continue;
+        }
 
         // Insert sorted by distance (insertion sort, small N)
         u32 insertAt = count;

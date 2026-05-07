@@ -122,10 +122,9 @@ static bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
 // Main AI update
 // ---------------------------------------------------------------------------
 void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
-                      Player& player, ProjectilePool& projectiles, f32 dt)
+                      Player& player, ProjectilePool& projectiles, f32 dt,
+                      Player** extraPlayers, u32 extraPlayerCount)
 {
-    Vec3 playerEye = player.position + Vec3{0, player.eyeHeight, 0};
-
     for (u32 a = 0; a < pool.activeCount; a++) {
         u32 i = pool.activeList[a];
         Entity& e = pool.entities[i];
@@ -133,6 +132,22 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         // Skip static props — they have no AI, no movement, no combat
         if (e.enemyType == EnemyType::PROP) continue;
+
+        // Select nearest player as target (for co-op/multiplayer)
+        // Uses pointer so damage is applied to the correct player
+        Player* targetPlayer = &player;
+        if (extraPlayers && extraPlayerCount > 0) {
+            f32 bestDist = lengthSq(e.position - player.position);
+            for (u32 ep = 0; ep < extraPlayerCount; ep++) {
+                if (!extraPlayers[ep]) continue;
+                f32 d = lengthSq(e.position - extraPlayers[ep]->position);
+                if (d < bestDist) {
+                    bestDist = d;
+                    targetPlayer = extraPlayers[ep];
+                }
+            }
+        }
+        Vec3 playerEye = targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0};
 
         // Tick animation timer
         e.animTimer += dt;
@@ -886,7 +901,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 5.0f;
                     // Damage everything within 6 units of the boss
                     if (dist < 6.0f) {
-                        Combat::applyDamageToPlayer(player, bossDmg * 0.7f);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.7f);
                     }
                     // Also damage nearby friendly NPCs
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
@@ -930,7 +945,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 4.0f;
                     // Inner nova damage
                     if (dist < 5.0f) {
-                        Combat::applyDamageToPlayer(player, bossDmg * 0.5f);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.5f);
                     }
                     // Ring of 6 fire projectiles with splash
                     for (u32 s = 0; s < 6; s++) {
@@ -969,7 +984,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 5.0f;
                     // Death nova — damage everything within 8 units
                     if (dist < 8.0f) {
-                        Combat::applyDamageToPlayer(player, bossDmg * 0.6f);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.6f);
                     }
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
                         u32 nIdx = pool.activeList[ni];
@@ -1095,13 +1110,46 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         case AIState::CHASE: {
             if (isBat) {
-                // Fly directly toward target at a slight height offset
-                Vec3 flyTarget = targetPos + Vec3{0, 0.5f, 0};
+                // Fly toward target but maintain minimum distance.
+                // Ranged flyers (imps, attackRange > 5) keep far away and shoot.
+                // Melee flyers (bats) hover closer for swooping attacks.
+                bool isRangedFlyer = (e.attackRange > 5.0f);
+                f32 hoverHeight = isRangedFlyer ? 2.5f : 1.5f;
+                f32 minDist = isRangedFlyer ? e.attackRange * 0.85f : e.attackRange * 0.7f;
+
+                Vec3 flyTarget = targetPos + Vec3{0, hoverHeight, 0};
                 Vec3 toFly = flyTarget - e.position;
                 f32 flyDist = length(toFly);
+
                 if (flyDist > 0.01f) {
-                    Vec3 flyDir = toFly * (1.0f / flyDist);
-                    e.velocity = flyDir * effectiveSpeed;
+                    if (flyDist < minDist) {
+                        // Too close — orbit sideways (ranged) or hover (melee)
+                        Vec3 lateral = {-toFly.z, 0, toFly.x};
+                        f32 latLen = sqrtf(lateral.x * lateral.x + lateral.z * lateral.z);
+                        if (latLen > 0.01f) lateral = lateral * (1.0f / latLen);
+                        f32 orbitSpeed = isRangedFlyer ? 0.8f : 0.6f;
+                        e.velocity = lateral * effectiveSpeed * orbitSpeed;
+                        e.velocity.y = (flyTarget.y - e.position.y) * 2.0f;
+                        // Ranged flyers also back away when too close
+                        if (isRangedFlyer && flyDist < minDist * 0.7f) {
+                            Vec3 away = e.position - flyTarget;
+                            f32 awayLen = length(away);
+                            if (awayLen > 0.01f) {
+                                e.velocity = e.velocity + (away * (1.0f / awayLen)) * effectiveSpeed * 0.5f;
+                            }
+                        }
+                    } else if (flyDist > e.attackRange * 0.95f || !isRangedFlyer) {
+                        // Approach target (ranged flyers stop at 95% of attack range)
+                        Vec3 flyDir = toFly * (1.0f / flyDist);
+                        e.velocity = flyDir * effectiveSpeed;
+                    } else {
+                        // Ranged flyer in sweet spot — hold position, slight orbit
+                        Vec3 lateral = {-toFly.z, 0, toFly.x};
+                        f32 latLen = sqrtf(lateral.x * lateral.x + lateral.z * lateral.z);
+                        if (latLen > 0.01f) lateral = lateral * (1.0f / latLen);
+                        e.velocity = lateral * effectiveSpeed * 0.3f;
+                        e.velocity.y = (flyTarget.y - e.position.y) * 2.0f;
+                    }
                 }
             } else {
                 // Ground movement: direct chase when LOS, wander toward
@@ -1129,13 +1177,21 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
                 Vec3 flatDir = moveDir;
                 if (lengthSq(flatDir) > 0.001f) {
-                    // Enemies sprint at 1.3x speed when chasing
-                    f32 speed = effectiveSpeed * 1.3f;
-                    if (e.enemyType == EnemyType::BOSS && e.flybyTarget.x > 1.5f) {
-                        speed = effectiveSpeed * 2.5f;
+                    // Stop and attack if already within attack range
+                    if (targetDist <= e.attackRange * 0.9f) {
+                        e.velocity.x = 0.0f;
+                        e.velocity.z = 0.0f;
+                        e.aiState = AIState::ATTACK;
+                        e.attackTimer = 0.1f; // attack almost immediately
+                    } else {
+                        // Enemies sprint at 1.3x speed when chasing
+                        f32 speed = effectiveSpeed * 1.3f;
+                        if (e.enemyType == EnemyType::BOSS && e.flybyTarget.x > 1.5f) {
+                            speed = effectiveSpeed * 2.5f;
+                        }
+                        e.velocity.x = flatDir.x * speed;
+                        e.velocity.z = flatDir.z * speed;
                     }
-                    e.velocity.x = flatDir.x * speed;
-                    e.velocity.z = flatDir.z * speed;
                 }
                 snapEntityToFloor(e, grid);
             }
@@ -1191,7 +1247,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     }
                 } else if (hasLOS(e, player, grid)) {
                     // Damage the player if no NPC target
-                    Combat::applyDamageToPlayer(player, e.damage);
+                    Combat::applyDamageToPlayer(*targetPlayer, e.damage);
                     e.attackAnimT = 0.3f;
                 }
 
@@ -1213,8 +1269,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::ATTACK: {
-            // Stand and attack (ground enemies stop; bats hover in place)
+            // Stand and attack — stop moving, but back away if too close to player
             e.velocity = {0, 0, 0};
+            if (targetDist < e.attackRange * 0.4f && targetDist > 0.1f) {
+                Vec3 away = e.position - targetPos;
+                f32 awayLen = sqrtf(away.x * away.x + away.z * away.z);
+                if (awayLen > 0.01f) {
+                    e.velocity.x = (away.x / awayLen) * e.moveSpeed * 0.5f;
+                    e.velocity.z = (away.z / awayLen) * e.moveSpeed * 0.5f;
+                }
+            }
 
             // Ranged enemies: check LOS before attacking. If blocked, move toward
             // last-seen position to regain line of sight.
@@ -1273,12 +1337,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             if (e.onHitEffect == 4) { npcTarget.freezeTimer = e.onHitDuration; }
                         }
                     } else if (hasLOS(e, player, grid)) {
-                        Combat::applyDamageToPlayer(player, e.damage);
+                        Combat::applyDamageToPlayer(*targetPlayer, e.damage);
                         // Apply on-hit effect to player
-                        if (e.onHitEffect == 1) { player.poisonTimer = e.onHitDuration; player.poisonDps = e.onHitDps; }
-                        if (e.onHitEffect == 2) { player.slowTimer   = e.onHitDuration; }
-                        if (e.onHitEffect == 3) { player.burnTimer   = e.onHitDuration; player.burnDps   = e.onHitDps; }
-                        if (e.onHitEffect == 4) { player.freezeTimer = e.onHitDuration; }
+                        if (e.onHitEffect == 1) { targetPlayer->poisonTimer = e.onHitDuration; targetPlayer->poisonDps = e.onHitDps; }
+                        if (e.onHitEffect == 2) { targetPlayer->slowTimer   = e.onHitDuration; }
+                        if (e.onHitEffect == 3) { targetPlayer->burnTimer   = e.onHitDuration; targetPlayer->burnDps   = e.onHitDps; }
+                        if (e.onHitEffect == 4) { targetPlayer->freezeTimer = e.onHitDuration; }
                     }
                 }
             }

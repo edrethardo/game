@@ -184,12 +184,18 @@ void Input::update() {
     }
 
     // Gamepad button state snapshot — per controller for split-screen frame-edge detection
+    // On Switch, swap face buttons to match Nintendo physical layout
     memset(s_currentPadButtons, 0, sizeof(s_currentPadButtons));
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
         if (!s_controllers[c]) continue;
         for (s32 i = 0; i < NUM_PAD_BUTTONS; i++) {
+#ifdef __SWITCH__
+            s32 mapped = swapSdlButtonForSwitch(i);
+#else
+            s32 mapped = i;
+#endif
             s_currentPadButtons[c][i] = SDL_GameControllerGetButton(
-                s_controllers[c], static_cast<SDL_GameControllerButton>(i));
+                s_controllers[c], static_cast<SDL_GameControllerButton>(mapped));
         }
     }
 
@@ -287,12 +293,27 @@ f32 Input::getAxis(s32 gamepadIndex, s32 axis) {
 
 #ifdef __SWITCH__
 // Map SDL GameController button to libnx HidNpadButton
+// Swap SDL face buttons to match Nintendo physical layout on Switch.
+// SDL: A=bottom, B=right, X=left, Y=top (Xbox positions)
+// Nintendo: A=right, B=bottom, X=top, Y=left
+// So SDL's A (bottom, "confirm") should read Nintendo's B (bottom).
+static s32 swapSdlButtonForSwitch(s32 button) {
+    switch (button) {
+        case SDL_CONTROLLER_BUTTON_A: return SDL_CONTROLLER_BUTTON_B;
+        case SDL_CONTROLLER_BUTTON_B: return SDL_CONTROLLER_BUTTON_A;
+        case SDL_CONTROLLER_BUTTON_X: return SDL_CONTROLLER_BUTTON_Y;
+        case SDL_CONTROLLER_BUTTON_Y: return SDL_CONTROLLER_BUTTON_X;
+        default: return button;
+    }
+}
+
+// Map SDL button (Xbox position layout) to libnx HidNpadButton (Nintendo physical layout)
 static u64 sdlButtonToHid(s32 sdlButton) {
     switch (sdlButton) {
-        case SDL_CONTROLLER_BUTTON_A:             return HidNpadButton_A;
-        case SDL_CONTROLLER_BUTTON_B:             return HidNpadButton_B;
-        case SDL_CONTROLLER_BUTTON_X:             return HidNpadButton_X;
-        case SDL_CONTROLLER_BUTTON_Y:             return HidNpadButton_Y;
+        case SDL_CONTROLLER_BUTTON_A:             return HidNpadButton_B;  // SDL bottom → Nintendo B (bottom)
+        case SDL_CONTROLLER_BUTTON_B:             return HidNpadButton_A;  // SDL right  → Nintendo A (right)
+        case SDL_CONTROLLER_BUTTON_X:             return HidNpadButton_Y;  // SDL left   → Nintendo Y (left)
+        case SDL_CONTROLLER_BUTTON_Y:             return HidNpadButton_X;  // SDL top    → Nintendo X (top)
         case SDL_CONTROLLER_BUTTON_BACK:          return HidNpadButton_Minus;
         case SDL_CONTROLLER_BUTTON_START:         return HidNpadButton_Plus;
         case SDL_CONTROLLER_BUTTON_LEFTSTICK:     return HidNpadButton_StickL;
@@ -323,8 +344,14 @@ bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
     }
     // Single-player: merge all controllers
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
-        if (s_controllers[c] && SDL_GameControllerGetButton(
-                s_controllers[c], static_cast<SDL_GameControllerButton>(button)))
+        if (!s_controllers[c]) continue;
+#ifdef __SWITCH__
+        s32 mapped = swapSdlButtonForSwitch(button);
+#else
+        s32 mapped = button;
+#endif
+        if (SDL_GameControllerGetButton(s_controllers[c],
+                static_cast<SDL_GameControllerButton>(mapped)))
             return true;
     }
     return false;

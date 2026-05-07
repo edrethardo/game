@@ -334,21 +334,9 @@ static bool isControllerLabel(const char* label) {
     return false;
 }
 
-// Nintendo Switch face button colors
-// SDL uses Xbox layout (A=bottom, B=right), but Nintendo layout is A=right, B=bottom.
-// We display the Nintendo label that matches the physical button the player presses.
-// SDL A (bottom) = Nintendo B, SDL B (right) = Nintendo A, etc.
+// On Switch, input is already swapped at the reading level (swapSdlButtonForSwitch),
+// so SDL "A" corresponds to the physical A button. No display swap needed.
 static const char* switchButtonLabel(const char* sdlLabel) {
-#ifdef __SWITCH__
-    if (sdlLabel[1] == '\0') {
-        switch (sdlLabel[0]) {
-            case 'A': return "B";  // SDL bottom → Nintendo B
-            case 'B': return "A";  // SDL right  → Nintendo A
-            case 'X': return "Y";  // SDL left   → Nintendo Y
-            case 'Y': return "X";  // SDL top    → Nintendo X
-        }
-    }
-#endif
     return sdlLabel;
 }
 
