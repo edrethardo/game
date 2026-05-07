@@ -300,13 +300,13 @@ void Engine::init() {
     // NOTE: LimbSystem::init is called later, after OBJ meshes are loaded
 
     // Shaders
-    m_basicShader = ShaderSystem::load("assets/shaders/basic.vert",
-                                       "assets/shaders/basic.frag");
-    m_unlitShader = ShaderSystem::load("assets/shaders/unlit.vert",
-                                       "assets/shaders/unlit.frag");
+    m_basicShader = ShaderSystem::load(ASSET_PATH("assets/shaders/basic.vert"),
+                                       ASSET_PATH("assets/shaders/basic.frag"));
+    m_unlitShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
+                                       ASSET_PATH("assets/shaders/unlit.frag"));
 
     // Materials (loads textures from assets/materials.json)
-    MaterialSystem::init("assets/materials.json");
+    MaterialSystem::init(ASSET_PATH("assets/materials.json"));
 
     // Meshes
     m_cubeMesh = MeshSystem::createCube();
@@ -420,7 +420,7 @@ void Engine::init() {
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
             AABB bounds;
-            Mesh mesh = ObjLoader::load(entry.path, &bounds);
+            Mesh mesh = ObjLoader::load(ASSET_PATH(entry.path), &bounds);
             if (mesh.vao != 0) {
                 MeshDef& def = m_meshDefs[m_meshDefCount];
                 std::strncpy(def.name, entry.name, sizeof(def.name) - 1);
@@ -473,15 +473,15 @@ void Engine::init() {
     initWeaponTable(m_weaponDefs, m_weaponDefCount);
 
     // Item/loot system — log warnings and zero out tables rather than crashing on bad JSON
-    if (!ItemLoader::loadItemDefs("assets/config/items.json", m_itemDefs, m_itemDefCount)) {
+    if (!ItemLoader::loadItemDefs(ASSET_PATH("assets/config/items.json"), m_itemDefs, m_itemDefCount)) {
         LOG_WARN("Failed to load item defs — using empty table");
         m_itemDefCount = 0;
     }
-    if (!ItemLoader::loadAffixDefs("assets/config/affixes.json", m_affixDefs, m_affixDefCount)) {
+    if (!ItemLoader::loadAffixDefs(ASSET_PATH("assets/config/affixes.json"), m_affixDefs, m_affixDefCount)) {
         LOG_WARN("Failed to load affix defs — using empty table");
         m_affixDefCount = 0;
     }
-    if (!ItemLoader::loadSkillDefs("assets/config/skills.json", m_skillDefs, m_skillDefCount)) {
+    if (!ItemLoader::loadSkillDefs(ASSET_PATH("assets/config/skills.json"), m_skillDefs, m_skillDefCount)) {
         LOG_WARN("Failed to load skill defs — using empty table");
         m_skillDefCount = 0;
     }
@@ -2318,7 +2318,14 @@ void Engine::updateMenu(f32 dt) {
     // Options / controls rebinding screen (subState 3)
     if (m_menuSubState == 3) {
         // Number of rebindable actions (skip menu navigation actions)
-        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1; // MOVE_FORWARD..INVENTORY
+        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
+        // Extra options after rebind actions: stick sens, gyro sens, stick invertY, gyro invertY, reset
+        static constexpr u32 OPT_STICK_SENS   = REBIND_COUNT;
+        static constexpr u32 OPT_GYRO_SENS    = REBIND_COUNT + 1;
+        static constexpr u32 OPT_STICK_INVERT = REBIND_COUNT + 2;
+        static constexpr u32 OPT_GYRO_INVERT  = REBIND_COUNT + 3;
+        static constexpr u32 OPT_RESET        = REBIND_COUNT + 4;
+        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 5;
 
         if (m_optionsBindCapture) {
             // Waiting for player to press a key or button to rebind
@@ -2358,32 +2365,57 @@ void Engine::updateMenu(f32 dt) {
                 if (m_menuSubSelection > 0) m_menuSubSelection--;
             }
             if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-                if (m_menuSubSelection < REBIND_COUNT) m_menuSubSelection++; // +1 for "Reset Defaults"
+                if (m_menuSubSelection < TOTAL_OPTIONS - 1) m_menuSubSelection++;
             }
             if (Input::isActionPressed(GameAction::MENU_BACK)) {
                 // Save and return to main menu
+#ifndef __SWITCH__
                 Input::saveBindings("assets/config/controls.json");
+#endif
                 m_menuSubState = 0;
                 m_menuSubSelection = 0;
                 return;
             }
             if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
                 if (m_menuSubSelection < REBIND_COUNT) {
-                    // Start capture mode — left/right selects keyboard or controller column
                     m_optionsBindCapture = true;
-                    m_optionsBindKeyboard = true; // default to keyboard, press right for controller
-                } else {
-                    // "Reset to Defaults" option
+                    m_optionsBindKeyboard = true;
+                } else if (m_menuSubSelection == OPT_STICK_INVERT) {
+                    Input::setStickInvertY(!Input::getStickInvertY());
+                } else if (m_menuSubSelection == OPT_GYRO_INVERT) {
+                    Input::setGyroInvertY(!Input::getGyroInvertY());
+                } else if (m_menuSubSelection == OPT_RESET) {
                     Input::resetBindingsToDefaults();
+                    Input::setStickSensitivity(1.5f);
+                    Input::setGyroSensitivity(5.0f);
+                    Input::setStickInvertY(false);
+                    Input::setGyroInvertY(true);
                 }
             }
-            // Left/Right to toggle keyboard vs controller column before confirming
-            if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A)) {
-                m_optionsBindKeyboard = true;
+            // Left/Right adjusts sensitivity sliders or toggles column
+            if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
+                if (m_menuSubSelection == OPT_STICK_SENS) {
+                    Input::setStickSensitivity(Input::getStickSensitivity() - 0.25f);
+                    if (Input::getStickSensitivity() < 0.25f) Input::setStickSensitivity(0.25f);
+                } else if (m_menuSubSelection == OPT_GYRO_SENS) {
+                    Input::setGyroSensitivity(Input::getGyroSensitivity() - 1.0f);
+                    if (Input::getGyroSensitivity() < 1.0f) Input::setGyroSensitivity(1.0f);
+                } else {
+                    m_optionsBindKeyboard = true;
+                }
             }
             if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
                 Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
-                m_optionsBindKeyboard = false;
+                if (m_menuSubSelection == OPT_STICK_SENS) {
+                    Input::setStickSensitivity(Input::getStickSensitivity() + 0.25f);
+                    if (Input::getStickSensitivity() > 5.0f) Input::setStickSensitivity(5.0f);
+                } else if (m_menuSubSelection == OPT_GYRO_SENS) {
+                    Input::setGyroSensitivity(Input::getGyroSensitivity() + 1.0f);
+                    if (Input::getGyroSensitivity() > 20.0f) Input::setGyroSensitivity(20.0f);
+                } else {
+                    m_optionsBindKeyboard = false;
+                }
             }
         }
         return;
@@ -6628,15 +6660,21 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, colBtn,    headerY, "Controller", {0.7f, 0.7f, 0.7f}, 1);
 
         static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
+        static constexpr u32 OPT_STICK_SENS   = REBIND_COUNT;
+        static constexpr u32 OPT_GYRO_SENS    = REBIND_COUNT + 1;
+        static constexpr u32 OPT_STICK_INVERT = REBIND_COUNT + 2;
+        static constexpr u32 OPT_GYRO_INVERT  = REBIND_COUNT + 3;
+        static constexpr u32 OPT_RESET        = REBIND_COUNT + 4;
+        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 5;
+
         f32 listTop = sh * 0.78f;
         f32 lineH = 22.0f;
 
-        // Scroll offset so the list fits on screen
         u32 visibleRows = static_cast<u32>((listTop - sh * 0.1f) / lineH);
         u32 scrollOffset = 0;
         if (m_menuSubSelection >= visibleRows) scrollOffset = m_menuSubSelection - visibleRows + 1;
 
-        for (u32 i = scrollOffset; i <= REBIND_COUNT && i - scrollOffset < visibleRows; i++) {
+        for (u32 i = scrollOffset; i < TOTAL_OPTIONS && i - scrollOffset < visibleRows; i++) {
             f32 y = listTop - (i - scrollOffset) * lineH;
             bool sel = (i == m_menuSubSelection);
 
@@ -6679,18 +6717,40 @@ void Engine::renderMenu() {
                 Vec3 btnCol = sel && !m_optionsBindKeyboard ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.5f, 0.5f, 0.5f};
                 if (sel && m_optionsBindCapture && !m_optionsBindKeyboard) btnCol = {1.0f, 0.5f, 0.2f};
                 FontSystem::drawText(sw, sh, colBtn, y, btnBuf, btnCol, 1);
-            } else {
-                // "Reset to Defaults" option at the bottom
-                const char* resetLabel = "Reset to Defaults";
-                Vec3 rc = sel ? Vec3{1.0f, 0.4f, 0.4f} : Vec3{0.5f, 0.3f, 0.3f};
-                FontSystem::drawText(sw, sh, colAction, y, resetLabel, rc, 1);
+            } else if (i == OPT_STICK_SENS) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Stick Sensitivity: %.2f", Input::getStickSensitivity());
+                FontSystem::drawText(sw, sh, colAction, y, buf,
+                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == OPT_GYRO_SENS) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Gyro Sensitivity: %.1f", Input::getGyroSensitivity());
+                FontSystem::drawText(sw, sh, colAction, y, buf,
+                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == OPT_STICK_INVERT) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Stick Invert Y: %s", Input::getStickInvertY() ? "ON" : "OFF");
+                FontSystem::drawText(sw, sh, colAction, y, buf,
+                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == OPT_GYRO_INVERT) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Gyro Invert Y: %s", Input::getGyroInvertY() ? "ON" : "OFF");
+                FontSystem::drawText(sw, sh, colAction, y, buf,
+                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == OPT_RESET) {
+                FontSystem::drawText(sw, sh, colAction, y, "Reset to Defaults",
+                    sel ? Vec3{1.0f, 0.4f, 0.4f} : Vec3{0.5f, 0.3f, 0.3f}, 1);
             }
         }
 
         // Hint text
         const char* hint = m_optionsBindCapture
             ? "Press a key/button to rebind, ESC to cancel"
-            : "Up/Down select, Left/Right column, Enter rebind, ESC save & back";
+            : "Up/Down select, Left/Right adjust, Enter rebind/toggle, ESC back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.04f,
                              hint, {0.5f, 0.5f, 0.6f}, 1);

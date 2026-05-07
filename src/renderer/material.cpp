@@ -62,7 +62,7 @@ void MaterialSystem::init(const char* jsonPath) {
             if (entry.contains("texture")) {
                 std::string texFile = entry["texture"];
                 char texPath[256];
-                std::snprintf(texPath, sizeof(texPath), "assets/textures/%s", texFile.c_str());
+                std::snprintf(texPath, sizeof(texPath), ASSET_PATH("assets/textures/%s"), texFile.c_str());
                 m.texture = TextureSystem::load(texPath);
             } else {
                 m.texture = TextureSystem::createWhite();

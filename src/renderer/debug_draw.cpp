@@ -22,7 +22,7 @@ static u32    s_vbo = 0;
 static Shader s_shader;
 
 void DebugDraw::init() {
-    s_shader = ShaderSystem::load("assets/shaders/debug.vert", "assets/shaders/debug.frag");
+    s_shader = ShaderSystem::load(ASSET_PATH("assets/shaders/debug.vert"), ASSET_PATH("assets/shaders/debug.frag"));
     if (!s_shader.program) {
         LOG_WARN("DebugDraw: debug shaders not found, debug rendering disabled");
         return;

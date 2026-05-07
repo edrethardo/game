@@ -61,7 +61,16 @@ namespace Input {
     // --- Gamepad ---
     static constexpr s32 MAX_GAMEPADS = 4;
     static constexpr f32 STICK_DEADZONE = 0.15f;
-    static constexpr f32 STICK_LOOK_SENSITIVITY = 3.5f; // degrees per second per unit
+
+    // Sensitivity settings (mutable — adjustable from options menu)
+    f32  getStickSensitivity();
+    void setStickSensitivity(f32 v);
+    f32  getGyroSensitivity();
+    void setGyroSensitivity(f32 v);
+    bool getStickInvertY();
+    void setStickInvertY(bool v);
+    bool getGyroInvertY();
+    void setGyroInvertY(bool v);
 
     f32  getAxis(s32 gamepadIndex, s32 axis);
     bool isButtonDown(s32 gamepadIndex, s32 button);
@@ -75,6 +84,11 @@ namespace Input {
 
     // L shoulder modifier state
     bool isModifierHeld(s32 gamepadIndex = 0);
+
+    // Gyro (motion sensor) — returns angular velocity in deg/s
+    // dx = yaw (horizontal turn), dy = pitch (vertical tilt)
+    void getGyro(f32& dx, f32& dy, s32 gamepadIndex = 0);
+    bool isGyroAvailable(s32 gamepadIndex = 0);
 
     // --- Binding management ---
     const InputBinding& getBinding(GameAction action);

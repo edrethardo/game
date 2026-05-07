@@ -78,10 +78,17 @@ void PlayerController::update(Player& player, f32 dt) {
     f32 rsX = Input::getStickX(true);
     f32 rsY = Input::getStickY(true);
     if (rsX != 0.0f || rsY != 0.0f) {
-        // Convert stick to degrees, then to pixel-equivalent using sensitivity
-        f32 stickScale = Input::STICK_LOOK_SENSITIVITY * 60.0f; // scale per frame at 60Hz
+        f32 stickScale = Input::getStickSensitivity() * 60.0f;
         mx += static_cast<s32>(rsX * stickScale);
-        my += static_cast<s32>(rsY * stickScale);
+        my += static_cast<s32>(rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f));
+    }
+
+    // Add gyro aiming — angular velocity mapped to look delta
+    f32 gyroDx, gyroDy;
+    Input::getGyro(gyroDx, gyroDy);
+    if (gyroDx != 0.0f || gyroDy != 0.0f) {
+        mx += static_cast<s32>(gyroDx * Input::getGyroSensitivity());
+        my += static_cast<s32>(gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f));
     }
 
     // Apply slow debuff (e.g., from boss cleaver hit)
@@ -179,9 +186,16 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     f32 rsX = Input::getStickX(true);
     f32 rsY = Input::getStickY(true);
     if (rsX != 0.0f || rsY != 0.0f) {
-        f32 stickScale = Input::STICK_LOOK_SENSITIVITY * 60.0f;
+        f32 stickScale = Input::getStickSensitivity() * 60.0f;
         mx += static_cast<s32>(rsX * stickScale);
-        my += static_cast<s32>(rsY * stickScale);
+        my += static_cast<s32>(rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f));
+    }
+    // Add gyro aiming
+    f32 gyroDx, gyroDy;
+    Input::getGyro(gyroDx, gyroDy);
+    if (gyroDx != 0.0f || gyroDy != 0.0f) {
+        mx += static_cast<s32>(gyroDx * Input::getGyroSensitivity());
+        my += static_cast<s32>(gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f));
     }
     // Clamp to s16 range
     if (mx >  32767) mx =  32767;

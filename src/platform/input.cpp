@@ -24,6 +24,12 @@ static s32 s_mouseWheelY = 0;
 
 static SDL_GameController* s_controllers[Input::MAX_GAMEPADS] = {};
 
+// Sensitivity settings (adjustable from options menu)
+static f32  s_stickSensitivity = 1.5f;   // degrees per second per unit of stick deflection
+static f32  s_gyroSensitivity  = 5.0f;   // mouse-pixel-equivalent per deg/s
+static bool s_stickInvertY     = false;
+static bool s_gyroInvertY      = true;   // inverted by default for gyro
+
 // Per-frame button state for pressed detection (gamepad 0)
 static u8 s_currentPadButtons[NUM_PAD_BUTTONS];
 static u8 s_previousPadButtons[NUM_PAD_BUTTONS];
@@ -104,12 +110,19 @@ void Input::init() {
             if (s_controllers[i]) {
                 LOG_INFO("Gamepad %d connected: %s", i,
                          SDL_GameControllerName(s_controllers[i]));
+#ifndef __SWITCH__
+                // Enable gyro sensor if available (PC: SDL2 sensor API)
+                if (SDL_GameControllerHasSensor(s_controllers[i], SDL_SENSOR_GYRO)) {
+                    SDL_GameControllerSetSensorEnabled(s_controllers[i], SDL_SENSOR_GYRO, SDL_TRUE);
+                    LOG_INFO("Gamepad %d: gyro enabled", i);
+                }
+#endif
             }
         }
     }
 
     // Try to load saved bindings
-    loadBindings("assets/config/controls.json");
+    loadBindings(ASSET_PATH("assets/config/controls.json"));
 
     LOG_INFO("Input system initialized");
 }
@@ -233,6 +246,11 @@ void Input::handleControllerEvent(const SDL_Event& event) {
             if (s_controllers[index]) {
                 LOG_INFO("Gamepad %d connected: %s", index,
                          SDL_GameControllerName(s_controllers[index]));
+                // Enable gyro sensor if available
+                if (SDL_GameControllerHasSensor(s_controllers[index], SDL_SENSOR_GYRO)) {
+                    SDL_GameControllerSetSensorEnabled(s_controllers[index], SDL_SENSOR_GYRO, SDL_TRUE);
+                    LOG_INFO("Gamepad %d: gyro enabled", index);
+                }
             }
         }
     } else if (event.type == SDL_CONTROLLERDEVICEREMOVED) {
@@ -276,6 +294,95 @@ f32 Input::getStickY(bool rightStick, s32 gamepadIndex) {
 bool Input::isModifierHeld(s32 gamepadIndex) {
     return isButtonDown(gamepadIndex, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 }
+
+// ---------------------------------------------------------------------------
+// Gyro (motion sensor)
+// ---------------------------------------------------------------------------
+
+#ifdef __SWITCH__
+#include <switch.h>
+static bool s_gyroInitialized = false;
+static HidSixAxisSensorHandle s_gyroHandles[2]; // 0=player1 dual, 1=handheld
+static u32 s_gyroHandleCount = 0;
+
+static void initGyro() {
+    if (s_gyroInitialized) return;
+    s_gyroInitialized = true;
+
+    // Get six-axis sensor handles for the first player
+    padConfigureInput(1, HidNpadStyleSet_NpadFullCtrl);
+    hidGetSixAxisSensorHandles(&s_gyroHandles[0], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
+    hidStartSixAxisSensor(s_gyroHandles[0]);
+    s_gyroHandleCount = 1;
+
+    // Also try handheld mode
+    hidGetSixAxisSensorHandles(&s_gyroHandles[1], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    hidStartSixAxisSensor(s_gyroHandles[1]);
+    s_gyroHandleCount = 2;
+
+    LOG_INFO("Gyro: initialized %u sensor handles", s_gyroHandleCount);
+}
+#endif
+
+void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
+    dx = 0.0f;
+    dy = 0.0f;
+    (void)gamepadIndex;
+
+#ifdef __SWITCH__
+    initGyro();
+    HidSixAxisSensorState state = {};
+    // Try each handle until we get valid data
+    for (u32 i = 0; i < s_gyroHandleCount; i++) {
+        if (hidGetSixAxisSensorStates(s_gyroHandles[i], &state, 1) >= 1) {
+            // angular_velocity is in rad/s: x=pitch, y=yaw, z=roll
+            f32 yaw   = state.angular_velocity.y;
+            f32 pitch = state.angular_velocity.x;
+            // Apply small deadzone to filter drift (0.01 rad/s ≈ 0.6 deg/s)
+            if (yaw > -0.01f && yaw < 0.01f) yaw = 0.0f;
+            if (pitch > -0.01f && pitch < 0.01f) pitch = 0.0f;
+            if (yaw != 0.0f || pitch != 0.0f) {
+                dx = -yaw  * (180.0f / 3.14159f); // to deg/s (negated for natural direction)
+                dy = pitch * (180.0f / 3.14159f);
+                return;
+            }
+        }
+    }
+#else
+    // PC: try SDL2 sensor API (works with DS4/DualSense controllers)
+    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return;
+    if (!s_controllers[gamepadIndex]) return;
+    if (!SDL_GameControllerHasSensor(s_controllers[gamepadIndex], SDL_SENSOR_GYRO)) return;
+    f32 data[3] = {};
+    if (SDL_GameControllerGetSensorData(s_controllers[gamepadIndex], SDL_SENSOR_GYRO, data, 3) == 0) {
+        dx = data[1] * (180.0f / 3.14159f);
+        dy = data[0] * (180.0f / 3.14159f);
+    }
+#endif
+}
+
+bool Input::isGyroAvailable(s32 gamepadIndex) {
+#ifdef __SWITCH__
+    (void)gamepadIndex;
+    return true; // Switch always has gyro (Joy-Cons or Pro Controller)
+#else
+    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
+    if (!s_controllers[gamepadIndex]) return false;
+    return SDL_GameControllerHasSensor(s_controllers[gamepadIndex], SDL_SENSOR_GYRO);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Sensitivity getters/setters
+// ---------------------------------------------------------------------------
+f32  Input::getStickSensitivity()        { return s_stickSensitivity; }
+void Input::setStickSensitivity(f32 v)   { s_stickSensitivity = v; }
+f32  Input::getGyroSensitivity()         { return s_gyroSensitivity; }
+void Input::setGyroSensitivity(f32 v)    { s_gyroSensitivity = v; }
+bool Input::getStickInvertY()            { return s_stickInvertY; }
+void Input::setStickInvertY(bool v)      { s_stickInvertY = v; }
+bool Input::getGyroInvertY()             { return s_gyroInvertY; }
+void Input::setGyroInvertY(bool v)       { s_gyroInvertY = v; }
 
 // ---------------------------------------------------------------------------
 // Action-based input — merges keyboard + mouse + gamepad

@@ -18,9 +18,16 @@ bool Window::init(const char* title, s32 width, s32 height) {
     }
 
     // Must be set BEFORE SDL_CreateWindow
+#ifdef __SWITCH__
+    // Switch mesa provides OpenGL via a compatibility context — no core profile
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 #ifdef ENGINE_DEBUG
@@ -32,7 +39,11 @@ bool Window::init(const char* title, s32 width, s32 height) {
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         width, height,
+#ifdef __SWITCH__
+        SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN
+#else
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+#endif
     );
 
     if (!s_window) {

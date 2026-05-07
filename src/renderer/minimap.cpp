@@ -85,8 +85,8 @@ void Minimap::init(u32 gridWidth, u32 gridDepth) {
 
         glBindVertexArray(0);
 
-        s_minimapShader = ShaderSystem::load("assets/shaders/unlit.vert",
-                                             "assets/shaders/unlit.frag");
+        s_minimapShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
+                                             ASSET_PATH("assets/shaders/unlit.frag"));
     }
 
     LOG_INFO("Minimap: initialized (%ux%u)", gridWidth, gridDepth);

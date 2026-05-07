@@ -57,11 +57,19 @@ if(NINTENDO_SWITCH)
     target_link_libraries(DungeonEngine PRIVATE
         SDL2 glad enet EGL glapi drm_nouveau nx
     )
+    # Generate NACP metadata (required for romfs embedding)
+    add_custom_command(TARGET DungeonEngine POST_BUILD
+        COMMAND $ENV{DEVKITPRO}/tools/bin/nacptool --create
+            "DungeonEngine" "DungeonCo" "0.1.0"
+            ${CMAKE_BINARY_DIR}/DungeonEngine.nacp
+        COMMENT "Creating NACP..."
+    )
     # Generate NRO from ELF, bundling assets into romfs
     add_custom_command(TARGET DungeonEngine POST_BUILD
         COMMAND $ENV{DEVKITPRO}/tools/bin/elf2nro
             $<TARGET_FILE:DungeonEngine>
             ${CMAKE_BINARY_DIR}/DungeonEngine.nro
+            --nacp=${CMAKE_BINARY_DIR}/DungeonEngine.nacp
             --romfsdir=${CMAKE_SOURCE_DIR}/assets
         COMMENT "Building NRO with romfs..."
     )

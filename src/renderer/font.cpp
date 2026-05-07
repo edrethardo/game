@@ -177,7 +177,7 @@ void FontSystem::init() {
     glBindVertexArray(0);
 
     // Load unlit shader for text rendering
-    s_textShader = ShaderSystem::load("assets/shaders/unlit.vert", "assets/shaders/unlit.frag");
+    s_textShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"), ASSET_PATH("assets/shaders/unlit.frag"));
 
     LOG_INFO("FontSystem initialized (%ux%u atlas, %u glyphs)", ATLAS_W, ATLAS_H, FONT_CHAR_COUNT);
 }

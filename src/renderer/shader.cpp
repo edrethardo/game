@@ -51,6 +51,16 @@ Shader ShaderSystem::load(const char* vertPath, const char* fragPath) {
         return shader;
     }
 
+#ifdef __SWITCH__
+    // Switch mesa uses compatibility profile — strip "core" from #version directive
+    auto stripCore = [](char* src) {
+        char* p = std::strstr(src, "#version 330 core");
+        if (p) std::memcpy(p, "#version 330     ", 17); // same length, spaces replace "core"
+    };
+    stripCore(vertSrc);
+    stripCore(fragSrc);
+#endif
+
     u32 vert = compileShader(GL_VERTEX_SHADER, vertSrc, vertPath);
     u32 frag = compileShader(GL_FRAGMENT_SHADER, fragSrc, fragPath);
     std::free(vertSrc);

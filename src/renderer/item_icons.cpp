@@ -190,7 +190,7 @@ void ItemIconSystem::init() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     // Load shared unlit shader (same as font system)
-    s_unlitShader = ShaderSystem::load("assets/shaders/unlit.vert", "assets/shaders/unlit.frag");
+    s_unlitShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"), ASSET_PATH("assets/shaders/unlit.frag"));
 
     // VAO/VBO for a single icon quad (6 verts: 2 triangles, interleaved pos3+uv2)
     glGenVertexArrays(1, &s_vao);

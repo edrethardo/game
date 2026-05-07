@@ -77,7 +77,7 @@ static void flushHUD(u32 screenWidth, u32 screenHeight) {
 }
 
 void HUD::init() {
-    s_shader = ShaderSystem::load("assets/shaders/debug.vert", "assets/shaders/debug.frag");
+    s_shader = ShaderSystem::load(ASSET_PATH("assets/shaders/debug.vert"), ASSET_PATH("assets/shaders/debug.frag"));
 
     glGenVertexArrays(1, &s_vao);
     glBindVertexArray(s_vao);
