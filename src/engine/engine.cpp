@@ -5235,6 +5235,34 @@ void Engine::render(f32 alpha) {
             DebugDraw::cross(m_lastCombatHit.position, 0.15f, {1,0.5f,0});
             DebugDraw::ray(m_lastCombatHit.position, m_lastCombatHit.normal, 0.5f, {1,1,0});
         }
+
+        // Draw enemy tactical AI debug info: A* paths (green) and squad role indicators
+        for (u32 ai = 0; ai < entPool.activeCount; ai++) {
+            u32 idx = entPool.activeList[ai];
+            const Entity& ent = entPool.entities[idx];
+            if (ent.flags & ENT_DEAD) continue;
+            if (ent.flags & ENT_FRIENDLY) continue;
+
+            // Path visualization: connect position to each remaining waypoint in green
+            if (ent.pathLen > 0 && ent.pathIdx < ent.pathLen) {
+                Vec3 prev = ent.position;
+                for (u8 p = ent.pathIdx; p < ent.pathLen; p++) {
+                    DebugDraw::line(prev, ent.pathWaypoints[p], {0.2f, 0.9f, 0.2f});
+                    prev = ent.pathWaypoints[p];
+                }
+            }
+
+            // Vertical role-color indicator: shows squad assignment at a glance
+            Vec3 roleColor = {0, 0, 0};
+            switch (ent.squadRole) {
+                case SquadRole::ROLE_RUSH:   roleColor = {1.0f, 0.2f, 0.2f}; break;
+                case SquadRole::ROLE_FLANK:  roleColor = {1.0f, 0.8f, 0.0f}; break;
+                case SquadRole::ROLE_HOLD:   roleColor = {0.2f, 0.5f, 1.0f}; break;
+                case SquadRole::ROLE_HARASS: roleColor = {0.8f, 0.2f, 1.0f}; break;
+                default: continue; // ROLE_NONE: no indicator
+            }
+            DebugDraw::line(ent.position, ent.position + Vec3{0, 1.5f, 0}, roleColor);
+        }
     }
 
     // Target lock indicator
