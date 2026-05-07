@@ -16,6 +16,8 @@
 #include "game/item.h"
 #include "net/net.h"
 #include "net/net_player.h"
+#include "game/squad.h"
+#include "world/level_gen.h"
 
 static constexpr u32 MAX_LEVEL_SECTIONS = 64;
 
@@ -136,6 +138,12 @@ private:
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
     ProjectilePool m_projectiles;
+
+    // Squad system — groups entities by room for coordinated AI behaviour
+    SquadPool      m_squads;
+
+    // Dungeon layout — kept as member so SquadSystem::update can reference room adjacency
+    DungeonResult  m_dungeon;
 
     // NPC equipment pool — persistent across floor transitions for surviving NPCs
     NpcEquipment   m_npcEquip[MAX_NPC_EQUIP] = {};

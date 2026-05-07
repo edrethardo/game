@@ -30,6 +30,7 @@
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
+#include "game/squad.h"
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
@@ -558,6 +559,10 @@ void Engine::init() {
 
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
         if (!s_engine) return;
+
+        // Remove from squad so roles are reassigned before next AI tick
+        SquadSystem::onMemberDeath(s_engine->m_squads, entityIndex, pool);
+
         // Friendly NPC death speech — set before loot drop so it's visible
         if (pool.entities[entityIndex].flags & ENT_FRIENDLY) {
             pool.entities[entityIndex].speechText = "Avenge... me...";
@@ -1276,7 +1281,8 @@ void Engine::startGame() {
     else if (m_currentFloor <= 6)  gridSize = 32;  // small, few branches
     else if (m_currentFloor <= 9)  gridSize = 40;  // medium, some exploration
     LevelGridSystem::init(m_grid, gridSize, gridSize, 1.0f);
-    DungeonResult dungeon = LevelGen::generate(m_grid, dungeonSeed, gridSize, gridSize);
+    m_dungeon = LevelGen::generate(m_grid, dungeonSeed, gridSize, gridSize);
+    DungeonResult& dungeon = m_dungeon;  // local alias keeps the rest of startGame unchanged
     Vec3 spawnPos = dungeon.spawnPos;
 
     // ---------------------------------------------------------------------------
@@ -1482,6 +1488,9 @@ void Engine::startGame() {
             }
         }
     }
+
+    // Assign entities to room-based squads now that all enemies are placed
+    SquadSystem::rebuild(m_squads, dungeon, m_entities);
 
     // Spawn chests and mimics (1 per room, 20% chance mimic)
     {
@@ -2281,9 +2290,11 @@ void Engine::update(f32 dt) {
                 if (sp == 0) {
                     // P1 dead: enemies target P2 exclusively (single AI call)
                     if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
-                        EnemyAI::update(m_entities, m_grid, m_localPlayers[1], m_projectiles, dt);
+                        EnemyAI::update(m_entities, m_grid, m_localPlayers[1], m_projectiles, dt, &m_squads);
+                        SquadSystem::update(m_squads, m_dungeon, m_entities, m_localPlayers[1].position, dt);
                     } else if (!m_playerDead[0]) {
-                        EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+                        EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, &m_squads);
+                        SquadSystem::update(m_squads, m_dungeon, m_entities, m_localPlayer.position, dt);
                     }
                     // P1 dead — run projectiles checking against P2
                     if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
@@ -2881,10 +2892,12 @@ void Engine::gameUpdate(f32 dt) {
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
             // Co-op: pass P2 as extra target so enemies chase the nearest player
             Player* extras[] = { &m_localPlayers[1] };
-            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, nullptr, extras, 1);
+            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, &m_squads, extras, 1);
         } else {
-            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, &m_squads);
         }
+        // Propagate squad alerts and reassign roles for the active tick
+        SquadSystem::update(m_squads, m_dungeon, m_entities, m_localPlayer.position, dt);
     }
 
     // Decay speech timers + log new speech to chat
