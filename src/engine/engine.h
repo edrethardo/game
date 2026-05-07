@@ -237,8 +237,8 @@ private:
     bool m_switchMode = false;
     static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;
     static constexpr u32 SWITCH_MAX_ENTITIES  = 64;
-    static constexpr u32 SWITCH_RES_W         = 960;
-    static constexpr u32 SWITCH_RES_H         = 540;
+    static constexpr u32 SWITCH_RES_W         = 1280;
+    static constexpr u32 SWITCH_RES_H         = 720;
 
     // Core update paths
     void update(f32 dt);
