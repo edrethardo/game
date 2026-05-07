@@ -6,6 +6,7 @@
 #include "renderer/debug_draw.h"
 #include "core/log.h"
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 // Not static — extern'd by engine.cpp for rendering the targeting circles
