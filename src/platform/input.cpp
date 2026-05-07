@@ -35,46 +35,31 @@ static u8 s_activePlayer = 0;
 
 #ifdef __SWITCH__
 #include <switch.h>
-// libnx per-player pad state — bypasses SDL for reliable controller separation
+// libnx per-player pad state — used for all gamepad input on Switch
 static PadState s_pads[2];
 static bool s_padsInitialized = false;
+static u64 s_padPrevButtons[2] = {};
 
 static void initPads() {
     if (s_padsInitialized) return;
     s_padsInitialized = true;
-    // Configure system for 2 players with Pro Controller or dual Joy-Con
     padConfigureInput(2, HidNpadStyleSet_NpadFullCtrl);
     padInitialize(&s_pads[0], HidNpadIdType_No1);
     padInitialize(&s_pads[1], HidNpadIdType_No2);
+    // Seed prev state so buttons held at init don't trigger false presses
+    for (s32 p = 0; p < 2; p++) {
+        padUpdate(&s_pads[p]);
+        s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
+    }
     LOG_INFO("Pads: initialized 2-player input");
 }
 
-// Previous frame button state for press detection
-static u64 s_padPrevButtons[2] = {};
 #endif
 
 // Per-controller per-frame button state for pressed detection
 static u8 s_currentPadButtons[Input::MAX_GAMEPADS][NUM_PAD_BUTTONS];
 static u8 s_previousPadButtons[Input::MAX_GAMEPADS][NUM_PAD_BUTTONS];
 static bool s_splitActive = false;
-
-// Swap SDL face buttons to match Nintendo physical layout on Switch.
-// SDL: A=bottom, B=right, X=left, Y=top (Xbox positions)
-// Nintendo: A=right, B=bottom, X=top, Y=left
-// So when game binds "confirm" to SDL A (bottom), we read Nintendo B (bottom).
-static s32 swapSdlButtonForSwitch([[maybe_unused]] s32 button) {
-#ifdef __SWITCH__
-    switch (button) {
-        case SDL_CONTROLLER_BUTTON_A: return SDL_CONTROLLER_BUTTON_B;
-        case SDL_CONTROLLER_BUTTON_B: return SDL_CONTROLLER_BUTTON_A;
-        case SDL_CONTROLLER_BUTTON_X: return SDL_CONTROLLER_BUTTON_Y;
-        case SDL_CONTROLLER_BUTTON_Y: return SDL_CONTROLLER_BUTTON_X;
-        default: return button;
-    }
-#else
-    return button;
-#endif
-}
 
 // ---------------------------------------------------------------------------
 // Default bindings table
@@ -144,6 +129,10 @@ void Input::init() {
     s_mouseDX = 0;
     s_mouseDY = 0;
 
+#ifdef __SWITCH__
+    initPads();
+#endif
+
     setDefaults();
 
     // Open any controllers already connected
@@ -201,26 +190,21 @@ void Input::update() {
         s_currentMouseButtons[i] = (mouseState & SDL_BUTTON(i + 1)) ? 1 : 0;
     }
 
-    // Gamepad button state snapshot — per controller for split-screen frame-edge detection
-    // On Switch, swap face buttons to match Nintendo physical layout
+    // Gamepad button state snapshot — used on PC for frame-edge press detection
     memset(s_currentPadButtons, 0, sizeof(s_currentPadButtons));
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
         if (!s_controllers[c]) continue;
         for (s32 i = 0; i < NUM_PAD_BUTTONS; i++) {
-            s32 mapped = swapSdlButtonForSwitch(i);
             s_currentPadButtons[c][i] = SDL_GameControllerGetButton(
-                s_controllers[c], static_cast<SDL_GameControllerButton>(mapped));
+                s_controllers[c], static_cast<SDL_GameControllerButton>(i));
         }
     }
 
 #ifdef __SWITCH__
-    // Update libnx per-player pads (reliable separation for split-screen)
-    if (s_splitActive) {
-        initPads();
-        for (s32 p = 0; p < 2; p++) {
-            s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
-            padUpdate(&s_pads[p]);
-        }
+    // Update libnx pads every frame (used for all gamepad input on Switch)
+    for (s32 p = 0; p < 2; p++) {
+        s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
+        padUpdate(&s_pads[p]);
     }
 #endif
 }
@@ -306,14 +290,14 @@ f32 Input::getAxis(s32 gamepadIndex, s32 axis) {
 }
 
 #ifdef __SWITCH__
-// Map SDL GameController button to libnx HidNpadButton
-// Map SDL button (Xbox position layout) to libnx HidNpadButton (Nintendo physical layout)
+// Map SDL button constants to libnx HidNpadButton.
+// libnx uses Nintendo naming natively (A=right, B=bottom), so this is a direct 1:1 mapping.
 static u64 sdlButtonToHid(s32 sdlButton) {
     switch (sdlButton) {
-        case SDL_CONTROLLER_BUTTON_A:             return HidNpadButton_B;  // SDL bottom → Nintendo B (bottom)
-        case SDL_CONTROLLER_BUTTON_B:             return HidNpadButton_A;  // SDL right  → Nintendo A (right)
-        case SDL_CONTROLLER_BUTTON_X:             return HidNpadButton_Y;  // SDL left   → Nintendo Y (left)
-        case SDL_CONTROLLER_BUTTON_Y:             return HidNpadButton_X;  // SDL top    → Nintendo X (top)
+        case SDL_CONTROLLER_BUTTON_A:             return HidNpadButton_A;  // Nintendo A (right)
+        case SDL_CONTROLLER_BUTTON_B:             return HidNpadButton_B;  // Nintendo B (bottom)
+        case SDL_CONTROLLER_BUTTON_X:             return HidNpadButton_X;  // Nintendo X (top)
+        case SDL_CONTROLLER_BUTTON_Y:             return HidNpadButton_Y;  // Nintendo Y (left)
         case SDL_CONTROLLER_BUTTON_BACK:          return HidNpadButton_Minus;
         case SDL_CONTROLLER_BUTTON_START:         return HidNpadButton_Plus;
         case SDL_CONTROLLER_BUTTON_LEFTSTICK:     return HidNpadButton_StickL;
@@ -331,11 +315,11 @@ static u64 sdlButtonToHid(s32 sdlButton) {
 
 bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
 #ifdef __SWITCH__
-    if (s_splitActive && s_padsInitialized && gamepadIndex >= 0 && gamepadIndex < 2) {
-        u64 hid = sdlButtonToHid(button);
-        return (padGetButtons(&s_pads[gamepadIndex]) & hid) != 0;
-    }
-#endif
+    // Always use libnx pads on Switch — Nintendo naming, no SDL remap needed
+    if (gamepadIndex < 0 || gamepadIndex > 1) return false;
+    u64 hid = sdlButtonToHid(button);
+    return (padGetButtons(&s_pads[gamepadIndex]) & hid) != 0;
+#else
     if (s_splitActive) {
         if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
         if (!s_controllers[gamepadIndex]) return false;
@@ -345,24 +329,24 @@ bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
     // Single-player: merge all controllers
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
         if (!s_controllers[c]) continue;
-        s32 mapped = swapSdlButtonForSwitch(button);
         if (SDL_GameControllerGetButton(s_controllers[c],
-                static_cast<SDL_GameControllerButton>(mapped)))
+                static_cast<SDL_GameControllerButton>(button)))
             return true;
     }
     return false;
+#endif
 }
 
 bool Input::isButtonPressed(s32 gamepadIndex, s32 button) {
     if (button < 0 || button >= NUM_PAD_BUTTONS) return false;
 #ifdef __SWITCH__
-    if (s_splitActive && s_padsInitialized && gamepadIndex >= 0 && gamepadIndex < 2) {
-        u64 hid = sdlButtonToHid(button);
-        u64 cur = padGetButtons(&s_pads[gamepadIndex]);
-        u64 prev = s_padPrevButtons[gamepadIndex];
-        return (cur & hid) && !(prev & hid);
-    }
-#endif
+    // Always use libnx pads on Switch — Nintendo naming, no SDL remap needed
+    if (gamepadIndex < 0 || gamepadIndex > 1) return false;
+    u64 hid = sdlButtonToHid(button);
+    u64 cur = padGetButtons(&s_pads[gamepadIndex]);
+    u64 prev = s_padPrevButtons[gamepadIndex];
+    return (cur & hid) && !(prev & hid);
+#else
     if (s_splitActive) {
         if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
         return s_currentPadButtons[gamepadIndex][button] && !s_previousPadButtons[gamepadIndex][button];
@@ -372,6 +356,7 @@ bool Input::isButtonPressed(s32 gamepadIndex, s32 button) {
             return true;
     }
     return false;
+#endif
 }
 
 bool Input::isGamepadConnected(s32 gamepadIndex) {

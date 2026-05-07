@@ -2432,9 +2432,8 @@ void Engine::updateMenu(f32 dt) {
 
     // Couch co-op join screen — P1 selected class, waiting for P2 (subState 4)
     if (m_menuSubState == 4) {
-        // A button = P2 joins (on Switch all controllers report same input,
-        // so we use A for join and + for solo start to distinguish)
-        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
+        // P2 presses A on their controller to join
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A)) {
             m_splitPlayerCount = 2;
             Input::setSplitScreen(true);
             m_menuSubState = 5; // P2 class selection
@@ -7283,7 +7282,7 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - p1W) * 0.5f, sh * 0.55f,
                              p1Str, {0.3f, 1.0f, 0.4f}, 2);
 
-        const char* waitText = "Press A to join co-op";
+        const char* waitText = "Player 2: Press A to join co-op";
         f32 waitW = FontSystem::textWidth(waitText, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - waitW) * 0.5f, sh * 0.42f,
                              waitText, {0.7f, 0.7f, 0.9f}, 2);

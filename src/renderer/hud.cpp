@@ -429,10 +429,10 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
         // Draw cross arms
         bool isUp = (label[0] == 'U'), isDn = (label[0] == 'D');
         bool isLt = (label[0] == 'L'), isRt = (label[0] == 'R');
-        // Vertical arm
+        // Vertical arm (Y increases upward: positive fy = up on screen)
         for (f32 fy = -arm; fy <= arm; fy += 1.0f)
             pushLine(cx - w*0.5f, cy + fy, cx + w*0.5f, cy + fy,
-                     (fy < 0 && isUp) || (fy > 0 && isDn) ? hi * dim : base * dim);
+                     (fy > 0 && isUp) || (fy < 0 && isDn) ? hi * dim : base * dim);
         // Horizontal arm
         for (f32 fy = -w*0.5f; fy <= w*0.5f; fy += 1.0f)
             pushLine(cx - arm, cy + fy, cx + arm, cy + fy,
