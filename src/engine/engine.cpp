@@ -2126,6 +2126,8 @@ void Engine::update(f32 dt) {
                 m_localPlayer.velocity = {0, 0, 0};
                 m_localPlayer.invulnTimer = 1.5f;
                 m_inventoryOpen = false;
+                // Sync to per-player array so swapInPlayer doesn't overwrite
+                m_localPlayers[m_localPlayerIndex] = m_localPlayer;
                 // In networked mode, also update the NetPlayer so server state matches
                 if (m_netRole == NetRole::SERVER) {
                     // Host: directly update authoritative NetPlayer
