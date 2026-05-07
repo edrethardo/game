@@ -54,3 +54,24 @@ namespace LevelGridSystem {
     // the flow field.  Returns zero vector if already at exit or unreachable.
     Vec3 flowDirection(const LevelGrid& grid, Vec3 worldPos);
 }
+
+// Tactical spatial queries for enemy AI
+namespace LevelGridQuery {
+    // Find nearest walkable cell with cover from threatPos (wall blocks LOS).
+    // BFS from 'from', max 8-cell radius. Returns false if none found.
+    bool findCoverCell(const LevelGrid& grid, Vec3 from, Vec3 threatPos,
+                       Vec3& outPos, f32 maxRadius = 8.0f);
+
+    // Find a walkable cell at ~90-120 deg offset from target-entity line.
+    // Used for flanking. preferRight hints search direction.
+    bool findFlankCell(const LevelGrid& grid, Vec3 entityPos, Vec3 targetPos,
+                       f32 attackRange, bool preferRight, Vec3& outPos);
+
+    // Find doorway cells in a room (perimeter cells adjacent to corridor).
+    // Returns count found (up to maxResults).
+    u8 findDoorwayCells(const LevelGrid& grid, u32 roomX, u32 roomZ,
+                        u32 roomW, u32 roomD, Vec3* outPositions, u8 maxResults = 4);
+
+    // Calculate spread position for SURROUND state.
+    Vec3 getSurroundPosition(Vec3 targetPos, u8 slotIndex, u8 totalSlots, f32 radius);
+}
