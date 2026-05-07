@@ -4,6 +4,10 @@
 #include <glad/glad.h>
 #include <cstring>
 
+static f32 s_uiScale = 1.0f;
+void  FontSystem::setUIScale(f32 s) { s_uiScale = s; }
+f32   FontSystem::getUIScale()      { return s_uiScale; }
+
 // 5x7 pixel font glyphs. Each glyph is 7 bytes, one per row top-to-bottom.
 // Each byte holds 5 bits: bit 4 (MSB) = leftmost pixel.
 static const u8 s_glyphData[FONT_CHAR_COUNT][GLYPH_H] = {
@@ -192,11 +196,11 @@ void FontSystem::shutdown() {
 f32 FontSystem::textWidth(const char* text, u32 scale) {
     u32 len = 0;
     while (text[len]) len++;
-    return static_cast<f32>(len * (GLYPH_W + GLYPH_SPACING) * scale);
+    return static_cast<f32>(len * (GLYPH_W + GLYPH_SPACING) * scale) * s_uiScale;
 }
 
 f32 FontSystem::textHeight(u32 scale) {
-    return static_cast<f32>(GLYPH_H * scale);
+    return static_cast<f32>(GLYPH_H * scale) * s_uiScale;
 }
 
 void FontSystem::drawText(u32 screenWidth, u32 screenHeight,
@@ -209,9 +213,10 @@ void FontSystem::drawText(u32 screenWidth, u32 screenHeight,
     u32 vertCount = 0;
 
     f32 curX = x;
-    f32 charW   = static_cast<f32>(GLYPH_W * scale);
-    f32 charH   = static_cast<f32>(GLYPH_H * scale);
-    f32 advance = static_cast<f32>((GLYPH_W + GLYPH_SPACING) * scale);
+    f32 effectiveScale = static_cast<f32>(scale) * s_uiScale;
+    f32 charW   = static_cast<f32>(GLYPH_W) * effectiveScale;
+    f32 charH   = static_cast<f32>(GLYPH_H) * effectiveScale;
+    f32 advance = static_cast<f32>(GLYPH_W + GLYPH_SPACING) * effectiveScale;
 
     f32 invAtlasW = 1.0f / static_cast<f32>(ATLAS_W);
     f32 invAtlasH = 1.0f / static_cast<f32>(ATLAS_H);

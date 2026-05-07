@@ -158,14 +158,15 @@ void Input::update() {
         s_currentMouseButtons[i] = (mouseState & SDL_BUTTON(i + 1)) ? 1 : 0;
     }
 
-    // Gamepad button state snapshot (gamepad 0 for frame-edge detection)
-    if (s_controllers[0]) {
+    // Gamepad button state snapshot — merge all connected controllers
+    // (Switch reports Joy-Cons as separate controllers; merge so any press registers)
+    memset(s_currentPadButtons, 0, sizeof(s_currentPadButtons));
+    for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+        if (!s_controllers[c]) continue;
         for (s32 i = 0; i < NUM_PAD_BUTTONS; i++) {
-            s_currentPadButtons[i] = SDL_GameControllerGetButton(
-                s_controllers[0], static_cast<SDL_GameControllerButton>(i));
+            s_currentPadButtons[i] |= SDL_GameControllerGetButton(
+                s_controllers[c], static_cast<SDL_GameControllerButton>(i));
         }
-    } else {
-        memset(s_currentPadButtons, 0, sizeof(s_currentPadButtons));
     }
 }
 
@@ -213,6 +214,18 @@ void Input::handleMouseWheel(s32 y) { s_mouseWheelY += y; }
 // Gamepad raw
 // ---------------------------------------------------------------------------
 f32 Input::getAxis(s32 gamepadIndex, s32 axis) {
+    // On Switch, find the largest deflection across all controllers
+    if (gamepadIndex == 0) {
+        f32 best = 0.0f;
+        for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+            if (!s_controllers[c]) continue;
+            s16 raw = SDL_GameControllerGetAxis(s_controllers[c],
+                                                 static_cast<SDL_GameControllerAxis>(axis));
+            f32 v = static_cast<f32>(raw) / 32767.0f;
+            if (fabsf(v) > fabsf(best)) best = v;
+        }
+        return best;
+    }
     if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return 0.0f;
     if (!s_controllers[gamepadIndex]) return 0.0f;
     s16 raw = SDL_GameControllerGetAxis(s_controllers[gamepadIndex],
@@ -221,6 +234,15 @@ f32 Input::getAxis(s32 gamepadIndex, s32 axis) {
 }
 
 bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
+    // On Switch, merge all controllers (Joy-Cons reported separately)
+    if (gamepadIndex == 0) {
+        for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+            if (s_controllers[c] && SDL_GameControllerGetButton(
+                    s_controllers[c], static_cast<SDL_GameControllerButton>(button)))
+                return true;
+        }
+        return false;
+    }
     if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
     if (!s_controllers[gamepadIndex]) return false;
     return SDL_GameControllerGetButton(s_controllers[gamepadIndex],

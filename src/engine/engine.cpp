@@ -296,6 +296,9 @@ void Engine::init() {
     DebugDraw::init();
     HUD::init();
     FontSystem::init();
+#ifdef __SWITCH__
+    FontSystem::setUIScale(1.3f); // 30% larger UI on Switch (TV distance)
+#endif
     ItemIconSystem::init();
     // NOTE: LimbSystem::init is called later, after OBJ meshes are loaded
 
@@ -2067,17 +2070,17 @@ void Engine::update(f32 dt) {
     if (m_gameState == GameState::GAME_OVER) {
         if (m_confirmQuit) {
             // "Are you sure?" confirmation before quitting to menu
-            if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_Y)) {
+            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_Y)) {
                 m_confirmQuit = false;
                 m_gameState = GameState::MENU;
                 Input::setRelativeMouseMode(false);
             }
-            if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isKeyPressed(SDL_SCANCODE_N)) {
-                m_confirmQuit = false; // cancel, stay on death screen
+            if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_N)) {
+                m_confirmQuit = false;
             }
         } else {
-            // Space = revive at entrance of current floor (no level restart)
-            if (Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            // A / Space = revive at entrance
+            if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.position = m_players[m_localPlayerIndex].spawnPosition;
                 m_localPlayer.velocity = {0, 0, 0};
@@ -2108,8 +2111,9 @@ void Engine::update(f32 dt) {
                 }
                 m_gameState = GameState::IN_GAME;
             }
-            // Enter = reload last save (singleplayer only)
-            if (m_netRole == NetRole::NONE && Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            // Enter/X = reload last save (singleplayer only)
+            if (m_netRole == NetRole::NONE &&
+                (Input::isActionPressed(GameAction::PICKUP) || Input::isKeyPressed(SDL_SCANCODE_RETURN))) {
                 if (loadGame()) {
                     m_currentFloor = m_savedFloor;
                 } else {
@@ -2121,8 +2125,8 @@ void Engine::update(f32 dt) {
                 startGame();
                 m_gameState = GameState::IN_GAME;
             }
-            // ESC = ask to quit
-            if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            // ESC/B = ask to quit
+            if (Input::isActionPressed(GameAction::PAUSE)) {
                 m_confirmQuit = true;
             }
         }
@@ -2131,16 +2135,16 @@ void Engine::update(f32 dt) {
 
     // Pause/quit selection menu
     if (m_confirmQuit) {
-        if (Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menuSubSelection > 0) m_menuSubSelection--;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
             if (m_menuSubSelection < 1) m_menuSubSelection++;
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-            m_confirmQuit = false; // ESC again = resume
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            m_confirmQuit = false; // ESC/B = resume
         }
-        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
             if (m_menuSubSelection == 0) {
                 // Continue Playing
                 m_confirmQuit = false;
@@ -3207,6 +3211,87 @@ void Engine::updateInventoryInteraction(f32 dt) {
 
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
+
+    // --- D-pad inventory navigation (controller) ---
+    if (Input::isGamepadConnected(0)) {
+        // Navigate cursor with D-pad
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+            if (m_invCursorPanel == 0) { // backpack
+                u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
+                if (col < InventoryUI::BP_COLS - 1) m_invCursorIndex++;
+            }
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
+            if (m_invCursorPanel == 0) {
+                u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
+                if (col > 0) m_invCursorIndex--;
+            }
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+            if (m_invCursorPanel == 0) {
+                if (m_invCursorIndex + InventoryUI::BP_COLS < InventoryUI::BP_COLS * InventoryUI::BP_ROWS)
+                    m_invCursorIndex += InventoryUI::BP_COLS;
+            } else {
+                if (m_invCursorIndex < InventoryUI::EQ_SLOTS - 1) m_invCursorIndex++;
+            }
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
+            if (m_invCursorPanel == 0) {
+                if (m_invCursorIndex >= InventoryUI::BP_COLS)
+                    m_invCursorIndex -= InventoryUI::BP_COLS;
+            } else {
+                if (m_invCursorIndex > 0) m_invCursorIndex--;
+            }
+        }
+        // L/R shoulder to switch between backpack and equipment panels
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
+            m_invCursorPanel = m_invCursorPanel == 0 ? 1 : 0;
+            m_invCursorIndex = 0;
+        }
+        // A = equip (backpack → equipment) or unequip (equipment → backpack)
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
+            if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
+                if (!isItemEmpty(m_inventories[0].backpack[m_invCursorIndex])) {
+                    Inventory::equip(m_inventories[0], m_invCursorIndex, m_itemDefs);
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                }
+            } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
+                if (!isItemEmpty(m_inventories[0].equipped[m_invCursorIndex])) {
+                    Inventory::unequip(m_inventories[0], static_cast<ItemSlot>(m_invCursorIndex));
+                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                }
+            }
+        }
+        // B = drop selected item
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_Y)) {
+            Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
+            if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], m_invCursorIndex);
+                if (!isItemEmpty(dropped)) WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+            } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
+                ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                    static_cast<ItemSlot>(m_invCursorIndex));
+                if (!isItemEmpty(dropped)) WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+            }
+        }
+
+        // Move mouse cursor to match D-pad selection (so tooltip renders at right position)
+        if (m_invCursorPanel == 0) {
+            u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
+            u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
+            f32 bpX = static_cast<f32>(sw) * 0.52f;
+            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 90.0f;
+            mx = static_cast<s32>(bpX + col * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
+            my = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
+        } else {
+            f32 eqX = static_cast<f32>(sw) * 0.12f;
+            f32 centerY = static_cast<f32>(sh) * 0.5f;
+            f32 eqStartY = centerY + 130.0f;
+            mx = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
+            my = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
+        }
+    }
 
     // Tick double-click timer
     m_dblClickState.timer += dt;
@@ -4648,19 +4733,20 @@ void Engine::render(f32 alpha) {
             f32 cx = static_cast<f32>(sw) * 0.5f;
             f32 optY = sh * 0.35f;
 
-            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Spc", true);
+            bool pad = Input::isGamepadConnected(0);
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "A" : "Spc", true);
             FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Respawn at entrance",
                                  {0.5f, 0.9f, 0.5f}, 1);
 
             optY -= 25.0f;
             // Only show "Reload last save" in singleplayer
             if (m_netRole == NetRole::NONE) {
-                HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Ent", true);
+                HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "X" : "Ent", true);
                 FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
                                      {0.5f, 0.6f, 0.9f}, 1);
                 optY -= 25.0f;
             }
-            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, "Esc", true);
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "-" : "Esc", true);
             FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Quit to menu",
                                  {0.7f, 0.4f, 0.4f}, 1);
         }
@@ -6102,8 +6188,29 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         s32 invMX, invMY;
         Input::getMousePosition(invMX, invMY);
         invMY = static_cast<s32>(sh) - invMY; // flip to HUD coords
+
+        // When using controller, override mouse position with D-pad cursor
+        if (Input::isGamepadConnected(0)) {
+            if (m_invCursorPanel == 0) {
+                u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
+                u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
+                f32 bpX = static_cast<f32>(sw) * 0.52f;
+                f32 bpStartY = static_cast<f32>(sh) * 0.5f + 90.0f;
+                invMX = static_cast<s32>(bpX + col * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
+                invMY = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
+            } else {
+                f32 eqX = static_cast<f32>(sw) * 0.12f;
+                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 130.0f;
+                invMX = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
+                invMY = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
+            }
+        }
+
+        // Pass controller cursor selection for highlight rendering
+        u8 selSlot = Input::isGamepadConnected(0) ? m_invCursorIndex : 0;
+        bool selEquip = Input::isGamepadConnected(0) && m_invCursorPanel == 1;
         HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
-                                  m_itemDefs, 0, false, invMX, invMY);
+                                  m_itemDefs, selSlot, selEquip, invMX, invMY);
 
         // Draw dragged item icon at cursor position
         if (isDragActive(m_dragState)) {

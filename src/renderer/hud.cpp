@@ -1001,10 +1001,22 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                  slotLabels[i], dimColor, 1);
         }
 
-        // Selection arrow
+        // Selection highlight — golden border + arrow
         if (selected) {
-            Vec3 hi = {1.0f, 1.0f, 1.0f};
-            pushLine(eqX - 10.0f, y + slotH * 0.5f, eqX - 4.0f, y + slotH * 0.5f, hi);
+            Vec3 hi = {1.0f, 0.9f, 0.4f};
+            // Golden border (2px)
+            pushLine(eqX - 2,         y - 2,          eqX + slotW + 2, y - 2,          hi);
+            pushLine(eqX + slotW + 2, y - 2,          eqX + slotW + 2, y + slotH + 2, hi);
+            pushLine(eqX + slotW + 2, y + slotH + 2, eqX - 2,          y + slotH + 2, hi);
+            pushLine(eqX - 2,         y + slotH + 2, eqX - 2,          y - 2,          hi);
+            pushLine(eqX - 1,         y - 1,          eqX + slotW + 1, y - 1,          hi);
+            pushLine(eqX + slotW + 1, y - 1,          eqX + slotW + 1, y + slotH + 1, hi);
+            pushLine(eqX + slotW + 1, y + slotH + 1, eqX - 1,          y + slotH + 1, hi);
+            pushLine(eqX - 1,         y + slotH + 1, eqX - 1,          y - 1,          hi);
+            // Arrow
+            pushLine(eqX - 12.0f, y + slotH * 0.5f, eqX - 4.0f, y + slotH * 0.5f, hi);
+            pushLine(eqX - 7.0f, y + slotH * 0.5f + 3.0f, eqX - 4.0f, y + slotH * 0.5f, hi);
+            pushLine(eqX - 7.0f, y + slotH * 0.5f - 3.0f, eqX - 4.0f, y + slotH * 0.5f, hi);
         }
     }
 
@@ -1059,9 +1071,25 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             ItemIconSystem::drawIcon(sw, sh, x + 3.0f, y + 3.0f, cellSize - 6.0f, def, item.rarity);
         }
 
-        // Selection highlight
+        // Selection highlight — bright border + golden glow fill
         if (selected) {
-            Vec3 hi = {1.0f, 1.0f, 1.0f};
+            // Golden glow fill behind the slot
+            Vec3 glow = {0.4f, 0.35f, 0.1f};
+            for (f32 line = 1.0f; line < cellSize - 1.0f; line += 1.0f) {
+                pushLine(x + 1.0f, y + line, x + cellSize - 1.0f, y + line, glow);
+            }
+            flushHUD(sw, sh);
+            // Re-draw icon on top of glow
+            if (!isItemEmpty(item)) {
+                const ItemDef& def2 = itemDefs[item.defId];
+                ItemIconSystem::drawIcon(sw, sh, x + 3.0f, y + 3.0f, cellSize - 6.0f, def2, item.rarity);
+            }
+            // White border (2px thick)
+            Vec3 hi = {1.0f, 0.9f, 0.4f};
+            pushLine(x - 2, y - 2,           x + cellSize + 2, y - 2,           hi);
+            pushLine(x + cellSize + 2, y - 2, x + cellSize + 2, y + cellSize + 2, hi);
+            pushLine(x + cellSize + 2, y + cellSize + 2, x - 2, y + cellSize + 2, hi);
+            pushLine(x - 2, y + cellSize + 2, x - 2, y - 2,                       hi);
             pushLine(x - 1, y - 1,           x + cellSize + 1, y - 1,           hi);
             pushLine(x + cellSize + 1, y - 1, x + cellSize + 1, y + cellSize + 1, hi);
             pushLine(x + cellSize + 1, y + cellSize + 1, x - 1, y + cellSize + 1, hi);

@@ -147,6 +147,8 @@ private:
     // Inventory UI state
     InventoryDragState m_dragState;
     DoubleClickState   m_dblClickState;
+    u8  m_invCursorPanel = 0;  // 0=backpack, 1=equipment (D-pad navigation)
+    u8  m_invCursorIndex = 0;  // slot index within current panel
     f32 m_fullBackpackNotifyTimer = 0.0f;
     bool m_firstPickupTooltipShown = false;
     f32  m_firstPickupTooltipTimer = 0.0f;

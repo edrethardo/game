@@ -19,6 +19,10 @@ namespace FontSystem {
     void init();
     void shutdown();
 
+    // Global UI scale multiplier (1.0 = default, 1.3 = 30% larger)
+    void  setUIScale(f32 s);
+    f32   getUIScale();
+
     // Draw text at pixel position (x,y = bottom-left of first glyph).
     // scale: pixel multiplier (1 = 5x7, 2 = 10x14, etc.)
     void drawText(u32 screenWidth, u32 screenHeight,
