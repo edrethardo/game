@@ -2881,7 +2881,7 @@ void Engine::gameUpdate(f32 dt) {
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
             // Co-op: pass P2 as extra target so enemies chase the nearest player
             Player* extras[] = { &m_localPlayers[1] };
-            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, extras, 1);
+            EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, nullptr, extras, 1);
         } else {
             EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
         }

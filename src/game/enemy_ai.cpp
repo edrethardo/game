@@ -10,9 +10,11 @@
 #include "game/combat.h"
 #include "game/projectile.h"
 #include "game/game_constants.h"
+#include "game/squad.h"
 #include "world/raycast.h"
 #include "world/combat_query.h"
 #include "world/level_grid.h"
+#include "world/pathfinder.h"
 #include <cmath>
 #include <cstdlib>
 
@@ -123,6 +125,7 @@ static bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
 // ---------------------------------------------------------------------------
 void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       Player& player, ProjectilePool& projectiles, f32 dt,
+                      SquadPool* squads,
                       Player** extraPlayers, u32 extraPlayerCount)
 {
     for (u32 a = 0; a < pool.activeCount; a++) {
@@ -766,6 +769,15 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             }
         }
 
+        // Velocity of the current target — used for projectile leading in ranged attacks.
+        // NPC targets use entity velocity; otherwise fall back to player velocity.
+        Vec3 targetVel = {0, 0, 0};
+        if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
+            targetVel = pool.entities[e.targetEntityIdx].velocity;
+        } else {
+            targetVel = player.velocity;
+        }
+
         // Direction toward current target (NPC or player)
         Vec3 toTarget = targetPos - e.position;
         f32  tDist = length(toTarget);
@@ -1081,13 +1093,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 if (targetIsNPC && targetDist <= e.detectionRange) {
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
+                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
                 } else if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
+                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
                 } else if (dist <= e.detectionRange * 0.6f) {
                     // Close enough to hear — chase without LOS
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
+                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
                 } else {
                     // Aggro chaining: if a nearby enemy is already chasing, join in
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
@@ -1101,6 +1116,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         if (chainDist < 8.0f) {
                             e.aiState = AIState::CHASE;
                             e.velocity = {0, 0, 0};
+                            if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
                             break;
                         }
                     }
@@ -1109,6 +1125,34 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::CHASE: {
+            // Squad role: redirect flankers and hold-and-fire enemies to their tactical states.
+            if (e.squadRole == SquadRole::ROLE_FLANK && !(e.flags & ENT_FLYING)) {
+                if (e.pathLen == 0 || e.tacticalTimer <= 0.0f) {
+                    Vec3 flankPos;
+                    bool preferRight = (i % 2 == 0);
+                    if (LevelGridQuery::findFlankCell(grid, e.position, targetPos,
+                            e.attackRange, preferRight, flankPos)) {
+                        e.pathLen = Pathfinder::findPath(grid, e.position, flankPos,
+                            e.pathWaypoints);
+                        e.pathIdx = 0;
+                        if (e.pathLen > 0) {
+                            e.aiState = AIState::FLANK;
+                            e.tacticalTimer = 4.0f;
+                            break;
+                        }
+                    }
+                }
+            }
+            // HOLD role with ranged attack range: strafe while in sight instead of just chasing
+            if (e.squadRole == SquadRole::ROLE_HOLD && e.attackRange > 5.0f) {
+                if (targetDist <= e.attackRange && hasLOSToPoint(
+                        e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid)) {
+                    e.aiState = AIState::STRAFE;
+                    e.tacticalTimer = 1.0f;
+                    break;
+                }
+            }
+
             if (isBat) {
                 // Fly toward target but maintain minimum distance.
                 // Ranged flyers (imps, attackRange > 5) keep far away and shoot.
@@ -1191,6 +1235,21 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         }
                         e.velocity.x = flatDir.x * speed;
                         e.velocity.z = flatDir.z * speed;
+
+                        // Anti-kite: accumulate kiteTimer when target holds distance;
+                        // after 2 seconds burst to 2x speed for 3 seconds to close the gap.
+                        if (targetDist > e.attackRange * 1.5f && targetDist < e.detectionRange) {
+                            e.kiteTimer += dt;
+                            if (e.kiteTimer > 2.0f && e.sprintTimer <= 0.0f) {
+                                e.velocity.x = flatDir.x * effectiveSpeed * 2.0f;
+                                e.velocity.z = flatDir.z * effectiveSpeed * 2.0f;
+                                e.sprintTimer = 3.0f;
+                                e.kiteTimer = 0.0f;
+                            }
+                        } else {
+                            e.kiteTimer = 0.0f;
+                        }
+                        if (e.sprintTimer > 0.0f) e.sprintTimer -= dt;
                     }
                 }
                 snapEntityToFloor(e, grid);
@@ -1318,12 +1377,15 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 if (targetDist <= e.attackRange * 1.1f) {
 
                     if (hostileIsRanged) {
-                        // Ranged hostile (imp, bone mage, demon): fire projectile at target
+                        // Ranged hostile (imp, bone mage, demon): lead the shot using
+                        // predicted target position to account for target movement.
                         Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
-                        Vec3 atkDir = normalize(targetPos - atkOrigin);
                         f32 projSpeed = 14.0f;
                         f32 projRadius = 0.08f;
                         if (e.flags & ENT_FLYING) { projSpeed = 10.0f; projRadius = 0.06f; }
+                        f32 timeToHit = dist / projSpeed;
+                        Vec3 predictedPos = targetPos + targetVel * timeToHit;
+                        Vec3 atkDir = normalize(predictedPos - atkOrigin);
                         ProjectileSystem::spawn(projectiles, atkOrigin,
                             atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
                     } else if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
@@ -1347,6 +1409,23 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
             }
 
+            // Retreat when low HP: find cover and path toward it.
+            // Only ground non-boss enemies retreat (flying enemies can always escape freely).
+            if (e.health < e.maxHealth * 0.3f && !e.hasRetreated &&
+                !(e.flags & ENT_FLYING) && e.enemyType != EnemyType::BOSS) {
+                Vec3 coverPos;
+                if (LevelGridQuery::findCoverCell(grid, e.position, targetPos, coverPos)) {
+                    e.pathLen = Pathfinder::findPath(grid, e.position, coverPos,
+                        e.pathWaypoints);
+                    e.pathIdx = 0;
+                    if (e.pathLen > 0) {
+                        e.aiState = AIState::RETREAT;
+                        e.tacticalTimer = 1.5f;
+                        break;
+                    }
+                }
+            }
+
             // Transition back to chase if out of range
             if (targetDist > e.attackRange * 1.3f) {
                 e.aiState = AIState::CHASE;
@@ -1363,6 +1442,137 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.speechText = "*CHOMP*";
                 e.speechTimer = 2.0f;
             }
+        } break;
+
+        case AIState::FLANK: {
+            // Follow A* path to a flanking position, then transition to ATTACK.
+            // tacticalTimer acts as a timeout so flankers don't get stuck forever.
+            if (e.pathIdx < e.pathLen) {
+                Vec3 wp = e.pathWaypoints[e.pathIdx];
+                Vec3 toWP = wp - e.position;
+                f32 wpDist = length(Vec3{toWP.x, 0, toWP.z});
+                if (wpDist < 0.5f) {
+                    e.pathIdx++;
+                } else {
+                    Vec3 moveDir = normalize(Vec3{toWP.x, 0, toWP.z});
+                    e.velocity.x = moveDir.x * effectiveSpeed * 1.2f;
+                    e.velocity.z = moveDir.z * effectiveSpeed * 1.2f;
+                    e.yaw = atan2f(-moveDir.x, -moveDir.z);
+                }
+            } else {
+                // Arrived at flank position — switch to attack immediately
+                e.aiState = AIState::ATTACK;
+                e.attackTimer = 0.1f;
+                e.hasRetreated = false;
+            }
+            entityMoveAndSlide(e, grid, dt);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+            // Timeout: give up and chase directly if flanking takes too long
+            e.tacticalTimer -= dt;
+            if (e.tacticalTimer <= 0.0f) e.aiState = AIState::CHASE;
+        } break;
+
+        case AIState::RETREAT: {
+            // Follow A* path to cover, then hold position briefly.
+            // hasRetreated is set after reaching cover so enemies only retreat once per fight.
+            if (e.pathIdx < e.pathLen) {
+                Vec3 wp = e.pathWaypoints[e.pathIdx];
+                Vec3 toWP = wp - e.position;
+                f32 wpDist = length(Vec3{toWP.x, 0, toWP.z});
+                if (wpDist < 0.5f) {
+                    e.pathIdx++;
+                } else {
+                    Vec3 moveDir = normalize(Vec3{toWP.x, 0, toWP.z});
+                    // Sprint faster than normal chase to escape
+                    e.velocity.x = moveDir.x * effectiveSpeed * 1.4f;
+                    e.velocity.z = moveDir.z * effectiveSpeed * 1.4f;
+                    e.yaw = atan2f(-moveDir.x, -moveDir.z);
+                }
+            } else {
+                e.velocity = {0, 0, 0}; // reached cover — hold still
+            }
+            entityMoveAndSlide(e, grid, dt);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+            e.tacticalTimer -= dt;
+            if (e.tacticalTimer <= 0.0f) {
+                e.aiState = AIState::CHASE;
+                e.hasRetreated = true; // prevents retreating again this fight
+            }
+        } break;
+
+        case AIState::AMBUSH: {
+            // Hold position until player is very close, then burst into attack.
+            // Used for mimic-style or pre-positioned ambush setups.
+            e.velocity = {0, 0, 0};
+            Vec3 toTarget2 = targetPos - e.position;
+            if (lengthSq(toTarget2) > 0.01f) {
+                e.yaw = atan2f(-toTarget2.x, -toTarget2.z);
+            }
+            if (dist <= 4.0f && hasLOS(e, player, grid)) {
+                e.aiState = AIState::ATTACK;
+                e.attackTimer = 0.0f; // burst immediately on reveal
+            }
+        } break;
+
+        case AIState::STRAFE: {
+            // Lateral movement while maintaining attack range — used by HOLD-role ranged enemies.
+            // tacticalTimer controls strafe direction: positive = strafe right, negative = strafe left.
+            Vec3 toTargetS = targetPos - e.position;
+            f32 targetLenS = length(Vec3{toTargetS.x, 0, toTargetS.z});
+            if (targetLenS > 0.01f) {
+                Vec3 forward = Vec3{toTargetS.x, 0, toTargetS.z} * (1.0f / targetLenS);
+                f32 side = (e.tacticalTimer > 0.0f) ? 1.0f : -1.0f;
+                Vec3 lateral = {-forward.z * side, 0, forward.x * side};
+                e.velocity.x = lateral.x * effectiveSpeed * 0.7f;
+                e.velocity.z = lateral.z * effectiveSpeed * 0.7f;
+                e.yaw = atan2f(-forward.x, -forward.z);
+            }
+            entityMoveAndSlide(e, grid, dt);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+
+            // Flip strafe direction periodically with a bit of randomness
+            e.tacticalTimer -= dt;
+            if (e.tacticalTimer <= -1.5f) e.tacticalTimer = 1.0f + (std::rand() % 100) * 0.01f;
+
+            // Fire while strafing — predict target position for leading the shot
+            e.attackTimer -= dt;
+            if (e.attackTimer <= 0.0f && hasLOSToPoint(
+                    e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid)) {
+                e.attackTimer = e.attackCooldown;
+                e.attackAnimT = 0.3f;
+                Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
+                f32 projSpeed = 14.0f;
+                f32 timeToHit = dist / projSpeed;
+                Vec3 predictedPos = targetPos + targetVel * timeToHit;
+                Vec3 atkDir = normalize(predictedPos - atkOrigin);
+                ProjectileSystem::spawn(projectiles, atkOrigin,
+                    atkDir, projSpeed, e.damage, 0.08f, 3.0f, false);
+            }
+
+            // Return to chase if target moved out of comfortable range
+            if (targetDist < e.attackRange * 0.5f) e.aiState = AIState::CHASE;
+            if (targetDist > e.attackRange * 1.5f) e.aiState = AIState::CHASE;
+        } break;
+
+        case AIState::SURROUND: {
+            // Move toward a spread position around the target based on entity pool slot.
+            // When close enough, switch to ATTACK. Used by squad leaders to position members.
+            Vec3 goalPos = LevelGridQuery::getSurroundPosition(
+                targetPos, static_cast<u8>(i % 6), 4, e.attackRange * 0.8f);
+            Vec3 toGoal = goalPos - e.position;
+            f32 goalDist = length(Vec3{toGoal.x, 0, toGoal.z});
+            if (goalDist > 0.5f) {
+                Vec3 moveDir = normalize(Vec3{toGoal.x, 0, toGoal.z});
+                e.velocity.x = moveDir.x * effectiveSpeed;
+                e.velocity.z = moveDir.z * effectiveSpeed;
+                e.yaw = atan2f(-moveDir.x, -moveDir.z);
+            } else {
+                // In position — begin attacking
+                e.aiState = AIState::ATTACK;
+                e.attackTimer = 0.2f;
+            }
+            entityMoveAndSlide(e, grid, dt);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
         } break;
 
         case AIState::DEAD:
