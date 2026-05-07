@@ -34,6 +34,7 @@ add_executable(DungeonEngine
     game/inventory_ui.cpp
     game/limb_system.cpp
     game/skill.cpp
+    game/squad.cpp
     net/net.cpp
     net/snapshot.cpp
     net/server.cpp
