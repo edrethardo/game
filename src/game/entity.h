@@ -19,8 +19,13 @@ enum struct AIState : u8 {
     IDLE,
     CHASE,
     ATTACK,
-    FLYBY,   // bat swoops past player to attack from behind
-    DORMANT, // mimic: looks like a chest until player approaches
+    FLYBY,    // bat swoops past player to attack from behind
+    DORMANT,  // mimic: looks like a chest until player approaches
+    FLANK,    // circling to player's side/rear via A* path
+    RETREAT,  // falling back to cover (low HP or post-attack feint)
+    AMBUSH,   // holding doorway position, waiting for player
+    STRAFE,   // ranged: sidestepping while firing
+    SURROUND, // melee: spreading to surround target
     DEAD,
 };
 
@@ -34,6 +39,15 @@ enum struct EnemyType : u8 {
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
     PROP,         // static decoration — no AI, no collision response, no animation
     COUNT
+};
+
+// Squad role assigned by room coordinator to spread tactics across a group
+enum struct SquadRole : u8 {
+    ROLE_NONE = 0,
+    ROLE_RUSH,    // charge head-on
+    ROLE_FLANK,   // circle to side/rear
+    ROLE_HOLD,    // ranged: hold doorway/distance
+    ROLE_HARASS,  // flying: orbit and dive
 };
 
 // NPC class determines base stats, AI behavior, and starting equipment
@@ -80,6 +94,21 @@ struct Entity {
     Vec3    flybyTarget = {0,0,0};  // waypoint for FLYBY state
     f32     flybyTimer  = 0.0f;     // time left in flyby maneuver
     f32     stuckTimer  = 0.0f;     // stuck detection accumulator (friendly NPCs)
+
+    // Pathfinding (A* waypoint cache — filled by tactical planner, consumed by FLANK/RETREAT/SURROUND)
+    Vec3 pathWaypoints[6] = {};
+    u8   pathLen = 0;  // number of valid waypoints
+    u8   pathIdx = 0;  // next waypoint to move toward
+
+    // Squad coordination
+    SquadRole squadRole = SquadRole::ROLE_NONE;
+    u16 squadId = 0xFFFF;  // room-based squad identifier (0xFFFF = unassigned)
+
+    // Tactical state timers (multi-purpose to avoid proliferating fields)
+    f32  tacticalTimer = 0.0f;  // re-flank interval, retreat hold duration, ambush patience
+    f32  sprintTimer   = 0.0f;  // anti-kite sprint burst cooldown
+    f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
+    bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
     const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)
