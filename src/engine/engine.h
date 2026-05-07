@@ -54,10 +54,36 @@ private:
     bool      m_confirmQuit = false;  // "are you sure?" overlay when pressing ESC in-game
     char      m_connectAddress[64] = "127.0.0.1";
 
-    // Player class system
+    // --- Split-screen state ---
+    static constexpr u32 MAX_LOCAL_PLAYERS = 2;
+    u8   m_splitPlayerCount = 1;   // 1=single, 2=split-screen
+    u8   m_activePlayerIndex = 0;  // which player is currently being updated
+    u8   m_splitMode = 0;          // 0=horizontal (top/bottom), 1=vertical (left/right)
+    bool m_playerDead[MAX_LOCAL_PLAYERS] = {}; // per-player death state for split-screen
+
+    // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
+    Player         m_localPlayers[MAX_LOCAL_PLAYERS];
+    Camera         m_cameras[MAX_LOCAL_PLAYERS];
+    ViewmodelState m_viewmodelStates[MAX_LOCAL_PLAYERS];
+    PlayerClass    m_playerClasses[MAX_LOCAL_PLAYERS] = {PlayerClass::WARRIOR, PlayerClass::WARRIOR};
+    u8             m_activeClassSkills[MAX_LOCAL_PLAYERS] = {};
+    SkillState     m_classSkillStatesPerPlayer[MAX_LOCAL_PLAYERS][4];
+    SkillId        m_armorAuras[MAX_LOCAL_PLAYERS] = {};
+    SkillId        m_weaponProcs[MAX_LOCAL_PLAYERS] = {};
+    SkillId        m_ringPassives[MAX_LOCAL_PLAYERS] = {};
+    bool           m_inventoryOpenArr[MAX_LOCAL_PLAYERS] = {};
+    f32            m_hitMarkerTimers[MAX_LOCAL_PLAYERS] = {};
+    f32            m_potionCooldowns[MAX_LOCAL_PLAYERS] = {};
+
+    // Active-player aliases (gameUpdate reads/writes these, swapped per player)
     PlayerClass m_playerClass = PlayerClass::WARRIOR;
-    u8          m_activeClassSkill = 0;  // which of 4 class skills is selected (0-3)
-    SkillState  m_classSkillStates[4];   // per-slot cooldown tracking for class skills
+    u8          m_activeClassSkill = 0;
+    SkillState  m_classSkillStates[4];
+    SkillId     m_armorAura = SkillId::NONE;
+    SkillId     m_weaponProc = SkillId::NONE;
+    SkillId     m_ringPassive = SkillId::NONE;
+    bool        m_inventoryOpen = false;
+    ViewmodelState  m_viewmodelState;
 
     // Networking
     NetRole    m_netRole = NetRole::NONE;
@@ -77,23 +103,18 @@ private:
     SkillDef   m_skillDefs[MAX_SKILL_DEFS];
     u32        m_skillDefCount = 0;
     PlayerInventory m_inventories[MAX_PLAYERS];
-    SkillState      m_skillStates[MAX_PLAYERS];   // ring (right-click)
-    SkillState      m_bootSkillStates[MAX_PLAYERS];  // boots (F key)
-    SkillState      m_helmetSkillStates[MAX_PLAYERS]; // helmet (G key)
-    SkillId         m_armorAura = SkillId::NONE;      // passive armor legendary
-    SkillId         m_weaponProc = SkillId::NONE;     // weapon on-hit proc
-    SkillId         m_ringPassive = SkillId::NONE;    // ring passive effect
+    SkillState      m_skillStates[MAX_PLAYERS];
+    SkillState      m_bootSkillStates[MAX_PLAYERS];
+    SkillState      m_helmetSkillStates[MAX_PLAYERS];
     WorldItemPool   m_worldItems;
-    bool       m_inventoryOpen = false;
     QuickbarState   m_quickbars[MAX_PLAYERS];
-    ViewmodelState  m_viewmodelState;  // first-person hand/weapon animation
-    Mesh            m_handMesh;        // procedural hand geometry
+    Mesh            m_handMesh;
 
-    // Legacy single-player compat
-    Player     m_localPlayer;  // used for singleplayer mode camera/movement
-
-    // Rendering
-    Camera  m_camera;
+    // Active-player aliases (set before gameUpdate, read back after)
+    Player     m_localPlayer;
+    Camera     m_camera;
+    f32        m_hitMarkerTimer = 0.0f;
+    f32        m_potionCooldown = 0.0f;
     Shader  m_basicShader;
     Shader  m_unlitShader;
     Mesh    m_cubeMesh;
@@ -141,14 +162,14 @@ private:
 
     // Combat feedback
     CombatHit   m_lastCombatHit;
-    f32         m_hitMarkerTimer = 0.0f;
-    f32         m_potionCooldown = 0.0f;  // healing potion cooldown (15s)
 
     // Inventory UI state
     InventoryDragState m_dragState;
     DoubleClickState   m_dblClickState;
-    u8  m_invCursorPanel = 0;  // 0=backpack, 1=equipment (D-pad navigation)
-    u8  m_invCursorIndex = 0;  // slot index within current panel
+    u8  m_invCursorPanel = 0;  // active alias (swapped per player)
+    u8  m_invCursorIndex = 0;  // active alias
+    u8  m_invCursorPanels[MAX_LOCAL_PLAYERS] = {};
+    u8  m_invCursorIndices[MAX_LOCAL_PLAYERS] = {};
     f32 m_fullBackpackNotifyTimer = 0.0f;
     bool m_firstPickupTooltipShown = false;
     f32  m_firstPickupTooltipTimer = 0.0f;
@@ -241,6 +262,10 @@ private:
     static constexpr u32 SWITCH_MAX_ENTITIES  = 64;
     static constexpr u32 SWITCH_RES_W         = 1280;
     static constexpr u32 SWITCH_RES_H         = 720;
+
+    // Split-screen player swap helpers
+    void swapInPlayer(u8 idx);   // copy per-player arrays → active aliases
+    void swapOutPlayer(u8 idx);  // copy active aliases → per-player arrays
 
     // Core update paths
     void update(f32 dt);

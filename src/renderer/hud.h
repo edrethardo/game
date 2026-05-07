@@ -47,9 +47,15 @@ namespace HUD {
     // Energy bar (blue bar below health bar)
     void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
 
-    // Keyboard key symbol — small key-shaped box with label centered inside
+    // Keyboard key symbol — small key-shaped box with label centered inside.
+    // Auto-detects controller button names (A/B/X/Y/ZR etc.) when gamepad connected
+    // and draws colored Nintendo-style button shapes instead.
     void drawKeySymbol(u32 sw, u32 sh, f32 x, f32 y,
                         const char* label, bool highlighted);
+
+    // Controller button symbol — colored circle/pill for Nintendo-style buttons
+    void drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
+                               const char* label, bool highlighted);
 
     // Class skill bar — 4 skill slots with key icons, selection, cooldown
     void drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,

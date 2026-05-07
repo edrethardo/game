@@ -772,7 +772,7 @@ void Engine::init() {
     Combat::setPerfectBlockCallback([](Player& player) {
         if (!s_engine) return;
         // Check if offhand is a legendary shield
-        const ItemInstance& shield = s_engine->m_inventories[0].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
+        const ItemInstance& shield = s_engine->m_inventories[s_engine->m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
         bool hasLegendaryShield = !isItemEmpty(shield) && shield.rarity == Rarity::LEGENDARY;
 
         // Stun all enemies within 3m (1 second)
@@ -910,13 +910,13 @@ void Engine::saveGame() {
     std::fwrite(&maxHp, sizeof(f32), 1, f);
 
     // Inventory (equipment + backpack)
-    std::fwrite(&m_inventories[0], sizeof(PlayerInventory), 1, f);
+    std::fwrite(&m_inventories[m_localPlayerIndex], sizeof(PlayerInventory), 1, f);
 
     // Quickbar
-    std::fwrite(&m_quickbars[0], sizeof(QuickbarState), 1, f);
+    std::fwrite(&m_quickbars[m_localPlayerIndex], sizeof(QuickbarState), 1, f);
 
     // Skill state
-    std::fwrite(&m_skillStates[0], sizeof(SkillState), 1, f);
+    std::fwrite(&m_skillStates[m_localPlayerIndex], sizeof(SkillState), 1, f);
 
     // Player class
     std::fwrite(&m_playerClass, sizeof(m_playerClass), 1, f);
@@ -974,9 +974,9 @@ bool Engine::loadGame() {
     if (ok) {
         m_localPlayer.health = hp;
         m_localPlayer.maxHealth = maxHp;
-        m_inventories[0] = loadedInv;
-        m_quickbars[0] = loadedQb;
-        m_skillStates[0] = loadedSkill;
+        m_inventories[m_localPlayerIndex] = loadedInv;
+        m_quickbars[m_localPlayerIndex] = loadedQb;
+        m_skillStates[m_localPlayerIndex] = loadedSkill;
 
         // Restore player class and re-apply class-specific stats
         m_playerClass = loadedClass;
@@ -987,7 +987,7 @@ bool Engine::loadGame() {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
             m_localPlayer.moveSpeed = cls.baseMoveSpeed;
             m_localPlayer.damageReduction = (m_playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
-            m_skillStates[0].maxEnergy = cls.baseEnergy;
+            m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy;
             // Re-sync class skill active IDs
             for (u32 s = 0; s < 4; s++) {
                 m_classSkillStates[s].activeSkill = cls.skills[s];
@@ -1998,6 +1998,44 @@ void Engine::run() {
 }
 
 // ---------------------------------------------------------------------------
+// Split-screen player swap — copy per-player arrays ↔ active aliases
+// ---------------------------------------------------------------------------
+void Engine::swapInPlayer(u8 idx) {
+    m_localPlayer      = m_localPlayers[idx];
+    m_camera           = m_cameras[idx];
+    m_viewmodelState   = m_viewmodelStates[idx];
+    m_playerClass      = m_playerClasses[idx];
+    m_activeClassSkill = m_activeClassSkills[idx];
+    std::memcpy(m_classSkillStates, m_classSkillStatesPerPlayer[idx], sizeof(m_classSkillStates));
+    m_armorAura        = m_armorAuras[idx];
+    m_weaponProc       = m_weaponProcs[idx];
+    m_ringPassive      = m_ringPassives[idx];
+    m_inventoryOpen    = m_inventoryOpenArr[idx];
+    m_hitMarkerTimer   = m_hitMarkerTimers[idx];
+    m_potionCooldown   = m_potionCooldowns[idx];
+    m_invCursorPanel   = m_invCursorPanels[idx];
+    m_invCursorIndex   = m_invCursorIndices[idx];
+    m_localPlayerIndex = idx;
+}
+
+void Engine::swapOutPlayer(u8 idx) {
+    m_localPlayers[idx]      = m_localPlayer;
+    m_cameras[idx]           = m_camera;
+    m_viewmodelStates[idx]   = m_viewmodelState;
+    m_playerClasses[idx]     = m_playerClass;
+    m_activeClassSkills[idx] = m_activeClassSkill;
+    std::memcpy(m_classSkillStatesPerPlayer[idx], m_classSkillStates, sizeof(m_classSkillStates));
+    m_armorAuras[idx]        = m_armorAura;
+    m_weaponProcs[idx]       = m_weaponProc;
+    m_ringPassives[idx]      = m_ringPassive;
+    m_inventoryOpenArr[idx]  = m_inventoryOpen;
+    m_hitMarkerTimers[idx]   = m_hitMarkerTimer;
+    m_potionCooldowns[idx]   = m_potionCooldown;
+    m_invCursorPanels[idx]   = m_invCursorPanel;
+    m_invCursorIndices[idx]  = m_invCursorIndex;
+}
+
+// ---------------------------------------------------------------------------
 // Sync helpers between Player and NetPlayer
 // ---------------------------------------------------------------------------
 void Engine::syncLocalPlayerToNetPlayer() {
@@ -2163,15 +2201,15 @@ void Engine::update(f32 dt) {
         return;
     }
 
-    if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+    if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isActionPressed(GameAction::PAUSE)) {
         if (m_gameState == GameState::MENU) {
             m_running = false;
         } else if (m_gameState == GameState::IN_GAME) {
             if (m_inventoryOpen) {
-                m_inventoryOpen = false; // ESC closes inventory first
+                m_inventoryOpen = false;
             } else {
                 m_confirmQuit = true;
-                m_menuSubSelection = 0; // default to "Continue Playing"
+                m_menuSubSelection = 0;
             }
         } else if (m_gameState != GameState::GAME_OVER) {
             Net::disconnect();
@@ -2195,7 +2233,60 @@ void Engine::update(f32 dt) {
         // Unified game loop: networking pre → gameplay → networking post
         if (m_netRole == NetRole::SERVER) serverNetPre(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPre(dt);
-        gameUpdate(dt);
+
+        // Split-screen: update each local player in turn
+        for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
+            m_activePlayerIndex = sp;
+            swapInPlayer(sp);
+            Input::setActivePlayer(sp);
+
+            if (m_playerDead[sp]) {
+                // Dead player: check for respawn input (A / Space), skip gameplay
+                if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+                    m_localPlayer.health = m_localPlayer.maxHealth;
+                    m_localPlayer.position = m_players[sp].spawnPosition;
+                    m_localPlayer.velocity = {0, 0, 0};
+                    m_localPlayer.invulnTimer = 2.5f;
+                    m_localPlayer.health = m_localPlayer.maxHealth;
+                    m_playerDead[sp] = false;
+
+                    // Network sync: update NetPlayer for server, send packet for client
+                    if (m_netRole == NetRole::SERVER) {
+                        NetPlayer& np = m_players[m_localPlayerIndex];
+                        np.health = np.maxHealth;
+                        np.position = np.spawnPosition;
+                        np.velocity = {0, 0, 0};
+                        np.invulnTimer = 2.5f;
+                        np.isDead = false;
+                    } else if (m_netRole == NetRole::CLIENT) {
+                        u8 buf[sizeof(PacketHeader) + 12];
+                        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+                        hdr->type = NetPacketType::CL_INPUT;
+                        hdr->flags = 0;
+                        hdr->seq = 0;
+                        std::memset(buf + sizeof(PacketHeader), 0, 12);
+                        std::memcpy(buf + sizeof(PacketHeader), &m_serverTick, 4);
+                        buf[sizeof(PacketHeader) + 10] = INPUT_EX_RESPAWN;
+                        Net::sendToServer(buf, sizeof(buf), true);
+                    }
+                }
+                swapOutPlayer(sp);
+
+                // When P1 (sp=0) is dead, shared systems (AI, projectiles, entities)
+                // still need to tick — they're normally gated on activePlayerIndex==0
+                if (sp == 0) {
+                    EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+                    ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+                    EntitySystem::tickTimers(m_entities, dt);
+                    WorldItemSystem::update(m_worldItems, dt);
+                }
+                continue;
+            }
+
+            gameUpdate(dt);
+            swapOutPlayer(sp);
+        }
+
         if (m_netRole == NetRole::SERVER) serverNetPost(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPost(dt);
         break;
@@ -2273,8 +2364,8 @@ void Engine::updateMenu(f32 dt) {
             m_localPlayer.maxHealth = cls.baseHealth;
             m_localPlayer.health = cls.baseHealth;
             m_localPlayer.moveSpeed = cls.baseMoveSpeed;
-            m_skillStates[0].maxEnergy = cls.baseEnergy;
-            m_skillStates[0].energy = cls.baseEnergy;
+            m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy;
+            m_skillStates[m_localPlayerIndex].energy = cls.baseEnergy;
             // Warrior passive: 30% damage reduction
             m_localPlayer.damageReduction = (m_playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
 
@@ -2286,33 +2377,142 @@ void Engine::updateMenu(f32 dt) {
                 m_classSkillStates[s].energy = cls.baseEnergy;
             }
 
-            m_menuSubState = 0;
+            // Store P1 state into split-screen arrays
+            m_localPlayers[0] = m_localPlayer;
+            m_playerClasses[0] = m_playerClass;
+            std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
 
-            // Start server if hosting
+            // Go to "waiting for P2" screen (or start directly if networking)
             if (m_netRole == NetRole::SERVER) {
+                // Network hosting — skip couch co-op, start server directly
                 if (!Net::hostServer()) {
                     m_netRole = NetRole::NONE;
                     LOG_WARN("Failed to start server");
                     return;
                 }
                 LOG_INFO("Hosting game...");
+                m_menuSubState = 0;
+                m_splitPlayerCount = 1;
+                startGame();
+                // Auto-equip starting weapon for P1
+                const ClassDef& cls2 = kClassDefs[static_cast<u32>(m_playerClasses[0])];
+                for (u32 wi = 0; wi < m_itemDefCount; wi++) {
+                    if (std::strcmp(m_itemDefs[wi].name, cls2.startingWeaponName) == 0) {
+                        ItemInstance wpn; wpn.defId = static_cast<u16>(wi);
+                        wpn.rarity = Rarity::COMMON; wpn.itemLevel = 1;
+                        wpn.damage = m_itemDefs[wi].baseDamage; wpn.uid = m_worldItems.nextUid++;
+                        m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
+                        Inventory::recalculateStats(m_inventories[m_localPlayerIndex]);
+                        Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
+                        break;
+                    }
+                }
+            } else {
+                // Singleplayer — show "waiting for P2" join screen
+                m_menuSubState = 4;
+                m_menuSubSelection = 0;
+            }
+        }
+        return;
+    }
+
+    // Couch co-op join screen — P1 selected class, waiting for P2 (subState 4)
+    if (m_menuSubState == 4) {
+        // A button = P2 joins (on Switch all controllers report same input,
+        // so we use A for join and + for solo start to distinguish)
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
+            m_splitPlayerCount = 2;
+            Input::setSplitScreen(true);
+            m_menuSubState = 5; // P2 class selection
+            m_menuSubSelection = 0;
+        }
+        // +/Start or Enter/Space = start solo (skip P2)
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_START) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            m_splitPlayerCount = 1;
+            Input::setSplitScreen(false);
+            m_menuSubState = 0;
+            startGame();
+            // Equip P1 starting weapon
+            const ClassDef& cls2 = kClassDefs[static_cast<u32>(m_playerClasses[0])];
+            for (u32 wi = 0; wi < m_itemDefCount; wi++) {
+                if (std::strcmp(m_itemDefs[wi].name, cls2.startingWeaponName) == 0) {
+                    ItemInstance wpn; wpn.defId = static_cast<u16>(wi);
+                    wpn.rarity = Rarity::COMMON; wpn.itemLevel = 1;
+                    wpn.damage = m_itemDefs[wi].baseDamage; wpn.uid = m_worldItems.nextUid++;
+                    m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
+                    Inventory::recalculateStats(m_inventories[m_localPlayerIndex]);
+                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
+                    break;
+                }
+            }
+        }
+        // ESC/B goes back to P1 class selection
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            m_menuSubState = 2;
+            m_menuSubSelection = 0;
+        }
+        return;
+    }
+
+    // P2 class selection (subState 5) — P2 navigates with their own controller
+    if (m_menuSubState == 5) {
+        u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
+        // Read from both controllers so either player can navigate for P2
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+            Input::isKeyPressed(SDL_SCANCODE_W) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+            if (m_menuSubSelection > 0) m_menuSubSelection--;
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+            Input::isKeyPressed(SDL_SCANCODE_S) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+            if (m_menuSubSelection < classCount - 1) m_menuSubSelection++;
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            // P2 selected their class
+            m_playerClasses[1] = static_cast<PlayerClass>(m_menuSubSelection);
+            const ClassDef& cls2 = kClassDefs[m_menuSubSelection];
+            m_localPlayers[1].maxHealth = cls2.baseHealth;
+            m_localPlayers[1].health = cls2.baseHealth;
+            m_localPlayers[1].moveSpeed = cls2.baseMoveSpeed;
+            m_localPlayers[1].damageReduction = (m_playerClasses[1] == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
+            m_skillStates[1].maxEnergy = cls2.baseEnergy;
+            m_skillStates[1].energy = cls2.baseEnergy;
+            for (u32 s = 0; s < 4; s++) {
+                m_classSkillStatesPerPlayer[1][s] = {};
+                m_classSkillStatesPerPlayer[1][s].activeSkill = cls2.skills[s];
+                m_classSkillStatesPerPlayer[1][s].maxEnergy = cls2.baseEnergy;
+                m_classSkillStatesPerPlayer[1][s].energy = cls2.baseEnergy;
             }
 
+            // Both players ready — start the game
+            m_menuSubState = 0;
             startGame();
 
-            // Auto-equip starting weapon after startGame inits inventory
-            for (u32 wi = 0; wi < m_itemDefCount; wi++) {
-                if (std::strcmp(m_itemDefs[wi].name, cls.startingWeaponName) == 0) {
-                    ItemInstance wpn;
-                    wpn.defId = static_cast<u16>(wi);
-                    wpn.rarity = Rarity::COMMON;
-                    wpn.itemLevel = 1;
-                    wpn.damage = m_itemDefs[wi].baseDamage;
-                    wpn.uid = m_worldItems.nextUid++;
-                    m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
-                    Inventory::recalculateStats(m_inventories[0]);
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
-                    break;
+            // Set P2 spawn at same location as P1 (slightly offset)
+            m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
+            m_localPlayers[1].yaw = m_localPlayer.yaw;
+            m_localPlayers[1].eyeHeight = m_localPlayer.eyeHeight;
+            // Copy P1 state into arrays too
+            m_localPlayers[0] = m_localPlayer;
+            m_cameras[0] = m_camera;
+
+            // Equip starting weapons for both players
+            for (u8 pi = 0; pi < 2; pi++) {
+                const ClassDef& pc = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
+                for (u32 wi = 0; wi < m_itemDefCount; wi++) {
+                    if (std::strcmp(m_itemDefs[wi].name, pc.startingWeaponName) == 0) {
+                        ItemInstance wpn; wpn.defId = static_cast<u16>(wi);
+                        wpn.rarity = Rarity::COMMON; wpn.itemLevel = 1;
+                        wpn.damage = m_itemDefs[wi].baseDamage; wpn.uid = m_worldItems.nextUid++;
+                        m_inventories[pi].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
+                        Inventory::recalculateStats(m_inventories[pi]);
+                        Quickbar::syncWeaponSlot(m_quickbars[pi], m_inventories[pi]);
+                        break;
+                    }
                 }
             }
         }
@@ -2328,8 +2528,9 @@ void Engine::updateMenu(f32 dt) {
         static constexpr u32 OPT_GYRO_SENS    = REBIND_COUNT + 1;
         static constexpr u32 OPT_STICK_INVERT = REBIND_COUNT + 2;
         static constexpr u32 OPT_GYRO_INVERT  = REBIND_COUNT + 3;
-        static constexpr u32 OPT_RESET        = REBIND_COUNT + 4;
-        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 5;
+        static constexpr u32 OPT_SPLIT_MODE   = REBIND_COUNT + 4;
+        static constexpr u32 OPT_RESET        = REBIND_COUNT + 5;
+        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 6;
 
         if (m_optionsBindCapture) {
             // Waiting for player to press a key or button to rebind
@@ -2388,6 +2589,8 @@ void Engine::updateMenu(f32 dt) {
                     Input::setStickInvertY(!Input::getStickInvertY());
                 } else if (m_menuSubSelection == OPT_GYRO_INVERT) {
                     Input::setGyroInvertY(!Input::getGyroInvertY());
+                } else if (m_menuSubSelection == OPT_SPLIT_MODE) {
+                    m_splitMode = m_splitMode == 0 ? 1 : 0;
                 } else if (m_menuSubSelection == OPT_RESET) {
                     Input::resetBindingsToDefaults();
                     Input::setStickSensitivity(1.5f);
@@ -2515,8 +2718,14 @@ void Engine::gameUpdate(f32 dt) {
         m_localPlayer.freezeTimer -= dt;
     }
 
-    // Check for player death — transition to GAME_OVER immediately
+    // Check for player death
     if (m_localPlayer.health <= 0.0f) {
+        if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
+            // Multiplayer or co-op: this player dies, game keeps running
+            m_playerDead[m_activePlayerIndex] = true;
+            return;
+        }
+        // True singleplayer: full game over screen
         m_gameState = GameState::GAME_OVER;
         return;
     }
@@ -2589,7 +2798,7 @@ void Engine::gameUpdate(f32 dt) {
     WeaponState& ws = m_players[0].weaponState;
     s32 wheel = Input::getMouseWheelDelta();
     {
-        s32 slot = static_cast<s32>(m_quickbars[0].activeSlot);
+        s32 slot = static_cast<s32>(m_quickbars[m_localPlayerIndex].activeSlot);
         if (wheel != 0) {
             slot -= wheel; // scroll up = previous slot, down = next
             if (slot < 0) slot = QUICKBAR_SLOTS - 1;
@@ -2598,7 +2807,7 @@ void Engine::gameUpdate(f32 dt) {
         // Controller quickbar switching
         if (Input::isActionPressed(GameAction::QUICKBAR_PREV)) { slot--; if (slot < 0) slot = QUICKBAR_SLOTS - 1; }
         if (Input::isActionPressed(GameAction::QUICKBAR_NEXT)) { slot++; if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0; }
-        m_quickbars[0].activeSlot = static_cast<u8>(slot);
+        m_quickbars[m_localPlayerIndex].activeSlot = static_cast<u8>(slot);
     }
 
     // Healing potion (Q key) — restores 60% HP + 30% energy
@@ -2652,9 +2861,13 @@ void Engine::gameUpdate(f32 dt) {
         if (m_viewmodelState.fireShakeTimer > 0.0f) m_viewmodelState.fireShakeTimer -= dt;
     }
 
-    // Enemy AI
-    { PROFILE_SCOPE(1, "AI");
-    EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
+    // Enemy AI — only run once per frame (on first player's update pass in split-screen)
+    if (m_activePlayerIndex == 0) {
+        PROFILE_SCOPE(1, "AI");
+        // In split-screen, create a temporary target at the nearest player for each enemy.
+        // For simplicity, just pass player 0 — enemies target the host.
+        // TODO: pass both players for proper nearest-target AI
+        EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
     }
 
     // Decay speech timers + log new speech to chat
@@ -2701,16 +2914,14 @@ void Engine::gameUpdate(f32 dt) {
         if (m_chatLog[i].timer > 0.0f) m_chatLog[i].timer -= dt;
     }
 
-    // Projectiles
-    { PROFILE_SCOPE(2, "Projectiles");
-    ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+    // Shared systems — only run once per frame (first player pass in split-screen)
+    if (m_activePlayerIndex == 0) {
+        { PROFILE_SCOPE(2, "Projectiles");
+        ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+        }
+        EntitySystem::tickTimers(m_entities, dt);
+        WorldItemSystem::update(m_worldItems, dt);
     }
-
-    // Entity timers
-    EntitySystem::tickTimers(m_entities, dt);
-
-    // Update world items
-    WorldItemSystem::update(m_worldItems, dt);
 
     // Decay visual effects (impact, fire, nova, dash)
     for (u32 i = 0; i < MAX_IMPACT_FX; i++) {
@@ -2771,7 +2982,7 @@ void Engine::gameUpdate(f32 dt) {
     }
 
     // Update skill state (energy regen, cooldowns)
-    SkillSystem::update(m_skillStates[0], dt);
+    SkillSystem::update(m_skillStates[m_localPlayerIndex], dt);
     // Tick class skill cooldowns (shared energy synced from main pool)
     for (u32 s = 0; s < 4; s++) {
         if (m_classSkillStates[s].cooldownTimer > 0.0f) {
@@ -2797,19 +3008,19 @@ void Engine::gameUpdate(f32 dt) {
 
     // --- Weapon on-hit proc (legendary weapon passive) ---
     {
-        const ItemInstance& wpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        const ItemInstance& wpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
         m_weaponProc = (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[wpn.defId].legendarySkillId : SkillId::NONE;
     }
     // Armor passive aura
     {
-        const ItemInstance& armor = m_inventories[0].equipped[static_cast<u32>(ItemSlot::ARMOR)];
+        const ItemInstance& armor = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::ARMOR)];
         m_armorAura = (!isItemEmpty(armor) && armor.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[armor.defId].legendarySkillId : SkillId::NONE;
     }
     // Ring passive effect
     {
-        const ItemInstance& ring = m_inventories[0].equipped[static_cast<u32>(ItemSlot::RING)];
+        const ItemInstance& ring = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::RING)];
         m_ringPassive = (!isItemEmpty(ring) && ring.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
         m_localPlayer.ringPassive = static_cast<u8>(m_ringPassive);
@@ -2837,8 +3048,8 @@ void Engine::gameUpdate(f32 dt) {
         if (m_currentFloor >= cls.skillUnlockFloor[slot]) {
             // Use the class skill state for cooldown tracking, shared energy pool
             m_classSkillStates[slot].activeSkill = cls.skills[slot];
-            m_classSkillStates[slot].energy = m_skillStates[0].energy;
-            m_classSkillStates[slot].maxEnergy = m_skillStates[0].maxEnergy;
+            m_classSkillStates[slot].energy = m_skillStates[m_localPlayerIndex].energy;
+            m_classSkillStates[slot].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
 
             // Thunderclap upgrade: increase stun from 0.2s to 0.5s past upgrade floor
             SkillDef* tcDef = nullptr;
@@ -2853,7 +3064,7 @@ void Engine::gameUpdate(f32 dt) {
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                           m_projectiles, m_entities, m_grid, m_localPlayer)) {
-                m_skillStates[0].energy = m_classSkillStates[slot].energy;
+                m_skillStates[m_localPlayerIndex].energy = m_classSkillStates[slot].energy;
             }
 
             // Restore original duration
@@ -2864,14 +3075,14 @@ void Engine::gameUpdate(f32 dt) {
     // --- Equipment legendary skill binding (boots/helmet/ring) ---
     // Boots legendary → F key
     {
-        const ItemInstance& boots = m_inventories[0].equipped[static_cast<u32>(ItemSlot::BOOTS)];
+        const ItemInstance& boots = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)];
         SkillId bootSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
         m_bootSkillStates[0].activeSkill = bootSkill;
     }
     // Helmet legendary → G key
     {
-        const ItemInstance& helm = m_inventories[0].equipped[static_cast<u32>(ItemSlot::HELMET)];
+        const ItemInstance& helm = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)];
         SkillId helmSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
         m_helmetSkillStates[0].activeSkill = helmSkill;
@@ -3050,7 +3261,7 @@ void Engine::gameUpdate(f32 dt) {
         ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
                                               m_affixDefs, m_affixDefCount);
         if (!isItemEmpty(item)) {
-            if (Inventory::addToBackpack(m_inventories[0], item)) {
+            if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], item)) {
                 LOG_INFO("Debug: gave %s (rarity %u, damage %.1f)",
                          m_itemDefs[item.defId].name, (u32)item.rarity, item.damage);
             }
@@ -3123,7 +3334,7 @@ void Engine::updatePlayerPickup() {
         ItemInstance picked;
         if (WorldItemSystem::tryPickup(m_worldItems, m_localPlayer.position, 0, picked)) {
             if (!isGlobe(picked)) {
-                if (Inventory::addToBackpack(m_inventories[0], picked)) {
+                if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked)) {
                     // Show "Press Tab to open inventory" on first pickup
                     if (!m_firstPickupTooltipShown) {
                         m_firstPickupTooltipShown = true;
@@ -3135,20 +3346,20 @@ void Engine::updatePlayerPickup() {
                         // Find which backpack slot it landed in
                         u8 bpIdx = 0xFF;
                         for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
-                            if (m_inventories[0].backpack[bi].uid == picked.uid) {
+                            if (m_inventories[m_localPlayerIndex].backpack[bi].uid == picked.uid) {
                                 bpIdx = bi;
                                 break;
                             }
                         }
                         if (bpIdx != 0xFF) {
-                            const ItemInstance& eqWpn = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                            const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
                             if (isItemEmpty(eqWpn)) {
                                 // No weapon equipped — auto-equip and assign to slot 0
-                                Inventory::equip(m_inventories[0], bpIdx, m_itemDefs);
-                                Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                                Inventory::equip(m_inventories[m_localPlayerIndex], bpIdx, m_itemDefs);
+                                Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                             } else {
                                 // Already have a weapon — assign to quickbar
-                                Quickbar::assignItem(m_quickbars[0], m_inventories[0], bpIdx);
+                                Quickbar::assignItem(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex], bpIdx);
                             }
                         }
                     }
@@ -3193,6 +3404,23 @@ bool Engine::updateFloorDoor() {
                 saveGame();
                 LOG_INFO("Descending to floor %u", m_currentFloor);
                 startGame(); // regenerate dungeon with new floor seed
+
+                // In split-screen, reposition both players at the new spawn
+                if (m_splitPlayerCount > 1) {
+                    // Scale P2 health/energy too
+                    m_localPlayers[1].maxHealth *= 1.015f;
+                    m_localPlayers[1].health = m_localPlayers[1].maxHealth;
+                    m_skillStates[1].maxEnergy *= 1.015f;
+                    m_skillStates[1].energy = m_skillStates[1].maxEnergy;
+
+                    // Set both players at the new spawn point
+                    m_localPlayers[0] = m_localPlayer; // P1 gets the fresh spawn from startGame
+                    m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
+                    m_localPlayers[1].velocity = {0, 0, 0};
+                    m_localPlayers[1].invulnTimer = 2.5f;
+                    m_cameras[0] = m_camera;
+                }
+
                 return true; // skip the remainder of this tick
             }
         }
@@ -3252,14 +3480,14 @@ void Engine::updateInventoryInteraction(f32 dt) {
         // A = equip (backpack → equipment) or unequip (equipment → backpack)
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
-                if (!isItemEmpty(m_inventories[0].backpack[m_invCursorIndex])) {
-                    Inventory::equip(m_inventories[0], m_invCursorIndex, m_itemDefs);
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                if (!isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex])) {
+                    Inventory::equip(m_inventories[m_localPlayerIndex], m_invCursorIndex, m_itemDefs);
+                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 }
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
-                if (!isItemEmpty(m_inventories[0].equipped[m_invCursorIndex])) {
-                    Inventory::unequip(m_inventories[0], static_cast<ItemSlot>(m_invCursorIndex));
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                if (!isItemEmpty(m_inventories[m_localPlayerIndex].equipped[m_invCursorIndex])) {
+                    Inventory::unequip(m_inventories[m_localPlayerIndex], static_cast<ItemSlot>(m_invCursorIndex));
+                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 }
             }
         }
@@ -3267,10 +3495,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_Y)) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
-                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], m_invCursorIndex);
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], m_invCursorIndex);
                 if (!isItemEmpty(dropped)) WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
-                ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                     static_cast<ItemSlot>(m_invCursorIndex));
                 if (!isItemEmpty(dropped)) WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
             }
@@ -3305,15 +3533,15 @@ void Engine::updateInventoryInteraction(f32 dt) {
 
             if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
                 hit.index < MAX_INVENTORY_ITEMS &&
-                !isItemEmpty(m_inventories[0].backpack[hit.index])) {
+                !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[hit.index])) {
 
                 // Double-click detection: same backpack slot within 0.3s
                 if (m_dblClickState.wasBackpack &&
                     m_dblClickState.lastSlot == hit.index &&
                     m_dblClickState.timer < 0.3f) {
                     // Double-click: equip directly
-                    Inventory::equip(m_inventories[0], hit.index, m_itemDefs);
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                    Inventory::equip(m_inventories[m_localPlayerIndex], hit.index, m_itemDefs);
+                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     m_dblClickState = {};
                 } else {
                     // Record for potential double-click and begin potential drag
@@ -3321,7 +3549,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     m_dblClickState.lastSlot = hit.index;
                     m_dblClickState.wasBackpack = true;
 
-                    const ItemInstance& item = m_inventories[0].backpack[hit.index];
+                    const ItemInstance& item = m_inventories[m_localPlayerIndex].backpack[hit.index];
                     m_dragState.source = DragSource::BACKPACK;
                     m_dragState.sourceIndex = hit.index;
                     m_dragState.itemUid = item.uid;
@@ -3332,9 +3560,9 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 }
             } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
                        hit.index < static_cast<u8>(ItemSlot::COUNT) &&
-                       !isItemEmpty(m_inventories[0].equipped[hit.index])) {
+                       !isItemEmpty(m_inventories[m_localPlayerIndex].equipped[hit.index])) {
                 // Begin drag from equipment slot
-                const ItemInstance& item = m_inventories[0].equipped[hit.index];
+                const ItemInstance& item = m_inventories[m_localPlayerIndex].equipped[hit.index];
                 m_dragState.source = DragSource::EQUIPMENT;
                 m_dragState.sourceIndex = hit.index;
                 m_dragState.itemUid = item.uid;
@@ -3345,7 +3573,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 m_dblClickState = {};
             } else if (hit.panel == InventoryUI::SlotHit::QUICKBAR &&
                        hit.index < QUICKBAR_SLOTS) {
-                const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[0], m_inventories[0], hit.index);
+                const ItemInstance* qbItem = Quickbar::resolveSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex], hit.index);
                 if (qbItem && !isItemEmpty(*qbItem)) {
                     m_dragState.source = DragSource::QUICKBAR;
                     m_dragState.sourceIndex = hit.index;
@@ -3367,19 +3595,19 @@ void Engine::updateInventoryInteraction(f32 dt) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
                 hit.index < MAX_INVENTORY_ITEMS &&
-                !isItemEmpty(m_inventories[0].backpack[hit.index])) {
-                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], hit.index);
+                !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[hit.index])) {
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], hit.index);
                 if (!isItemEmpty(dropped)) {
                     WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                 }
             } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
                        hit.index < static_cast<u8>(ItemSlot::COUNT) &&
-                       !isItemEmpty(m_inventories[0].equipped[hit.index])) {
-                ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                       !isItemEmpty(m_inventories[m_localPlayerIndex].equipped[hit.index])) {
+                ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                     static_cast<ItemSlot>(hit.index));
                 if (!isItemEmpty(dropped)) {
                     WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 }
             }
         }
@@ -3388,8 +3616,8 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (Input::isKeyPressed(SDL_SCANCODE_Q)) {
             Vec3 dropBase = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 si = 0; si < MAX_INVENTORY_ITEMS; si++) {
-                if (isItemEmpty(m_inventories[0].backpack[si])) continue;
-                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], si);
+                if (isItemEmpty(m_inventories[m_localPlayerIndex].backpack[si])) continue;
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], si);
                 if (!isItemEmpty(dropped)) {
                     // Spread items in a small arc so they don't stack
                     f32 angle = si * 0.4f;
@@ -3403,18 +3631,18 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
             InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
             if (hit.panel == InventoryUI::SlotHit::QUICKBAR) {
-                QuickbarSlot& qs = m_quickbars[0].slots[hit.index];
+                QuickbarSlot& qs = m_quickbars[m_localPlayerIndex].slots[hit.index];
                 if (qs.type == QuickbarSlot::BACKPACK_REF &&
                     qs.sourceIndex < MAX_INVENTORY_ITEMS &&
-                    !isItemEmpty(m_inventories[0].backpack[qs.sourceIndex])) {
+                    !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex])) {
                     u32 uid = qs.itemUid;
-                    ItemSlot itemSlot = m_itemDefs[m_inventories[0].backpack[qs.sourceIndex].defId].slot;
-                    Inventory::equip(m_inventories[0], qs.sourceIndex, m_itemDefs);
+                    ItemSlot itemSlot = m_itemDefs[m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex].defId].slot;
+                    Inventory::equip(m_inventories[m_localPlayerIndex], qs.sourceIndex, m_itemDefs);
                     // Update this quickbar slot to point to the equipment slot
                     qs.type = QuickbarSlot::EQUIPPED_REF;
                     qs.sourceIndex = static_cast<u8>(itemSlot);
                     qs.itemUid = uid;
-                    Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 }
             }
         }
@@ -3443,34 +3671,34 @@ void Engine::updateInventoryInteraction(f32 dt) {
             if (drop.panel == InventoryUI::SlotHit::QUICKBAR) {
                 // Drop on quickbar slot
                 if (m_dragState.source == DragSource::QUICKBAR) {
-                    Quickbar::swapSlots(m_quickbars[0], m_dragState.sourceIndex, drop.index);
+                    Quickbar::swapSlots(m_quickbars[m_localPlayerIndex], m_dragState.sourceIndex, drop.index);
                 } else {
-                    Quickbar::assignToSlot(m_quickbars[0], m_inventories[0],
+                    Quickbar::assignToSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex],
                                             drop.index, m_dragState.source, m_dragState.sourceIndex);
                 }
             } else if (drop.panel == InventoryUI::SlotHit::EQUIPMENT &&
                        m_dragState.source == DragSource::BACKPACK) {
                 // Drop backpack item on equipment slot — equip it
-                Inventory::equip(m_inventories[0], m_dragState.sourceIndex, m_itemDefs);
-                Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                Inventory::equip(m_inventories[m_localPlayerIndex], m_dragState.sourceIndex, m_itemDefs);
+                Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
             } else if (drop.panel == InventoryUI::SlotHit::NONE) {
                 // Drop outside all panels — drop item to world
                 Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};
                 if (m_dragState.source == DragSource::BACKPACK) {
-                    ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[0], m_dragState.sourceIndex);
+                    ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], m_dragState.sourceIndex);
                     if (!isItemEmpty(dropped)) {
                         WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                     }
                 } else if (m_dragState.source == DragSource::EQUIPMENT) {
-                    ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[0],
+                    ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                         static_cast<ItemSlot>(m_dragState.sourceIndex));
                     if (!isItemEmpty(dropped)) {
                         WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
-                        Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+                        Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     }
                 } else if (m_dragState.source == DragSource::QUICKBAR) {
                     // Remove from quickbar only (item stays in backpack)
-                    Quickbar::removeItem(m_quickbars[0], m_dragState.sourceIndex);
+                    Quickbar::removeItem(m_quickbars[m_localPlayerIndex], m_dragState.sourceIndex);
                 }
             }
             // Reset drag state
@@ -3490,9 +3718,7 @@ void Engine::pushPlayerFromEntities() {
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         Entity& e = m_entities.entities[i];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-        // Friendly NPCs don't push the player — they yield instead
         if (e.flags & ENT_FRIENDLY) continue;
-        // Props (bones, decorations) have no collision with the player
         if (e.enemyType == EnemyType::PROP) continue;
         AABB entBox = entityAABB(e);
         if (CombatQuery::aabbOverlap(playerBox, entBox)) {
@@ -3500,18 +3726,58 @@ void Engine::pushPlayerFromEntities() {
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
-                // Try the push, but reject it if it lands inside a wall
-                Vec3 saved = m_localPlayer.position;
                 if (pushX < pushZ)
                     m_localPlayer.position.x += (toPlayer.x > 0) ? pushX : -pushX;
                 else
                     m_localPlayer.position.z += (toPlayer.z > 0) ? pushZ : -pushZ;
-                // Validate — revert if new position is inside solid geometry
-                u32 gx, gz;
-                if (LevelGridSystem::worldToGrid(m_grid, m_localPlayer.position, gx, gz) &&
-                    LevelGridSystem::isSolid(m_grid, gx, gz)) {
-                    m_localPlayer.position = saved;
+            }
+        }
+    }
+
+    // Wall push-out: if the player's AABB overlaps any solid cell, nudge out
+    // along the axis with the smallest penetration depth
+    f32 cs = m_grid.cellSize;
+    f32 pw = PLAYER_HALF_WIDTH;
+    for (s32 dx = -1; dx <= 1; dx++) {
+        for (s32 dz = -1; dz <= 1; dz++) {
+            u32 gx, gz;
+            Vec3 probe = m_localPlayer.position + Vec3{dx * pw, 0, dz * pw};
+            if (!LevelGridSystem::worldToGrid(m_grid, probe, gx, gz)) continue;
+            if (!LevelGridSystem::isSolid(m_grid, gx, gz)) continue;
+
+            // Compute wall cell AABB (XZ plane)
+            f32 wallMinX = static_cast<f32>(gx) * cs;
+            f32 wallMaxX = wallMinX + cs;
+            f32 wallMinZ = static_cast<f32>(gz) * cs;
+            f32 wallMaxZ = wallMinZ + cs;
+
+            // Player AABB in XZ
+            f32 pMinX = m_localPlayer.position.x - pw;
+            f32 pMaxX = m_localPlayer.position.x + pw;
+            f32 pMinZ = m_localPlayer.position.z - pw;
+            f32 pMaxZ = m_localPlayer.position.z + pw;
+
+            // Check overlap
+            f32 overlapX = 0.0f, overlapZ = 0.0f;
+            if (pMaxX > wallMinX && pMinX < wallMaxX &&
+                pMaxZ > wallMinZ && pMinZ < wallMaxZ) {
+                // Penetration on each axis
+                f32 penRight = pMaxX - wallMinX;
+                f32 penLeft  = wallMaxX - pMinX;
+                f32 penFwd   = pMaxZ - wallMinZ;
+                f32 penBack  = wallMaxZ - pMinZ;
+
+                // Find smallest penetration and push out
+                f32 minPenX = (penRight < penLeft) ? penRight : penLeft;
+                f32 minPenZ = (penFwd < penBack) ? penFwd : penBack;
+
+                if (minPenX < minPenZ) {
+                    m_localPlayer.position.x += (penRight < penLeft) ? -penRight : penLeft;
+                } else {
+                    m_localPlayer.position.z += (penFwd < penBack) ? -penFwd : penBack;
                 }
+                // Re-check only once per frame — break after first correction
+                return;
             }
         }
     }
@@ -3699,7 +3965,7 @@ void Engine::serverNetPost(f32 dt) {
             np.isDead = true;
             LOG_INFO("Player %u died", pi);
             if (pi == m_localPlayerIndex) {
-                m_gameState = GameState::GAME_OVER;
+                m_playerDead[0] = true; // don't freeze the server
             }
         }
     }
@@ -4073,7 +4339,7 @@ void Engine::handleWeaponFire(f32 dt) {
                     case SkillId::CHAIN_LIGHTNING: {
                         // Use the real chain lightning with item-level-scaled bounces.
                         // Bounces scale from 3 (level 1) to 20 (level 50).
-                        const ItemInstance& wpn2 = m_inventories[0].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                        const ItemInstance& wpn2 = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
                         u8 itemLvl = wpn2.itemLevel > 0 ? wpn2.itemLevel : 1;
                         // Temporarily override SkillDef bounces for this proc
                         SkillDef procDef = *sd;
@@ -4418,19 +4684,19 @@ void Engine::updateTargetLock(f32 dt) {
     (void)dt;
     // Middle-click / quickbar-use outside inventory: equip active quickbar item (keeps ref in quickbar)
     if (Input::isActionPressed(GameAction::TARGET_LOCK)) {
-        u8 slot = m_quickbars[0].activeSlot;
-        QuickbarSlot& qs = m_quickbars[0].slots[slot];
+        u8 slot = m_quickbars[m_localPlayerIndex].activeSlot;
+        QuickbarSlot& qs = m_quickbars[m_localPlayerIndex].slots[slot];
         if (qs.type == QuickbarSlot::BACKPACK_REF &&
             qs.sourceIndex < MAX_INVENTORY_ITEMS &&
-            !isItemEmpty(m_inventories[0].backpack[qs.sourceIndex])) {
+            !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex])) {
             u32 uid = qs.itemUid;
-            ItemSlot itemSlot = m_itemDefs[m_inventories[0].backpack[qs.sourceIndex].defId].slot;
-            Inventory::equip(m_inventories[0], qs.sourceIndex, m_itemDefs);
+            ItemSlot itemSlot = m_itemDefs[m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex].defId].slot;
+            Inventory::equip(m_inventories[m_localPlayerIndex], qs.sourceIndex, m_itemDefs);
             // Convert quickbar ref from backpack to equipment so it stays valid
             qs.type = QuickbarSlot::EQUIPPED_REF;
             qs.sourceIndex = static_cast<u8>(itemSlot);
             qs.itemUid = uid;
-            Quickbar::syncWeaponSlot(m_quickbars[0], m_inventories[0]);
+            Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
         }
     }
     m_localPlayer.lockActive = false;
@@ -4724,9 +4990,10 @@ void Engine::render(f32 alpha) {
 
             f32 cy = sh * 0.26f;
             f32 cx = static_cast<f32>(sw) * 0.5f;
-            HUD::drawKeySymbol(sw, sh, cx - 60.0f, cy, "Ent", true);
+            bool qp = Input::isGamepadConnected(0);
+            HUD::drawKeySymbol(sw, sh, cx - 60.0f, cy, qp ? "A" : "Ent", true);
             FontSystem::drawText(sw, sh, cx - 30.0f, cy + 4.0f, "Yes", {0.8f, 0.8f, 0.8f}, 1);
-            HUD::drawKeySymbol(sw, sh, cx + 15.0f, cy, "Esc", true);
+            HUD::drawKeySymbol(sw, sh, cx + 15.0f, cy, qp ? "B" : "Esc", true);
             FontSystem::drawText(sw, sh, cx + 43.0f, cy + 4.0f, "No", {0.8f, 0.8f, 0.8f}, 1);
         } else {
             // Three options with key icons
@@ -4762,14 +5029,45 @@ void Engine::render(f32 alpha) {
 
     PROFILE_SCOPE(3, "Render");
 
-    // Switch mode: reduced viewport
-    if (m_switchMode) {
-        sw = SWITCH_RES_W;
-        sh = SWITCH_RES_H;
-        glViewport(0, 0, sw, sh);
+    // Split-screen: render each player's view
+    for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
+    // Swap in this player's camera and state
+    if (m_splitPlayerCount > 1) {
+        swapInPlayer(sp);
     }
 
-    f32 aspect = static_cast<f32>(sw) / static_cast<f32>(sh);
+    // Compute viewport for this player
+    u32 vpX = 0, vpY = 0, vpW = sw, vpH = sh;
+    if (m_splitPlayerCount > 1) {
+        if (m_splitMode == 0) {
+            // Horizontal split: P1=top, P2=bottom
+            vpH = sh / 2;
+            vpY = (sp == 0) ? vpH : 0;
+        } else {
+            // Vertical split: P1=left, P2=right
+            vpW = sw / 2;
+            vpX = (sp == 0) ? 0 : vpW;
+        }
+    }
+
+    // Switch constraint mode
+    if (m_switchMode) {
+        vpW = SWITCH_RES_W;
+        vpH = SWITCH_RES_H;
+        if (m_splitPlayerCount > 1) {
+            if (m_splitMode == 0) vpH /= 2;
+            else vpW /= 2;
+        }
+    }
+
+    glViewport(vpX, vpY, vpW, vpH);
+    glScissor(vpX, vpY, vpW, vpH);
+    glEnable(GL_SCISSOR_TEST);
+
+    // Only clear depth per player (color was cleared at top of render)
+    if (sp > 0) glClear(GL_DEPTH_BUFFER_BIT);
+
+    f32 aspect = static_cast<f32>(vpW) / static_cast<f32>(vpH);
     CameraSystem::computeMatrices(m_camera, aspect);
 
     Renderer::beginFrame(m_camera);
@@ -4782,17 +5080,15 @@ void Engine::render(f32 alpha) {
     // Level geometry
     LevelMeshSystem::submitAll(m_sections, m_sectionCount, m_basicShader);
 
-    // Choose entity source based on role (also used by debug overlay below)
+    // Choose entity source based on role
     const EntityPool& entPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
 
-    renderEntities(sw, sh);
+    renderEntities(vpW, vpH);
 
-    // Clear debug lines before game effects — portal, fire, sparks, loot glow
-    // all use DebugDraw::line and must not be wiped before flush
     DebugDraw::clear();
 
-    renderProjectilesAndEffects(sw, sh);
-    renderWorldItems(sw, sh);
+    renderProjectilesAndEffects(vpW, vpH);
+    renderWorldItems(vpW, vpH);
 
     { PROFILE_SCOPE(4, "Flush");
     Renderer::flush();
@@ -4843,12 +5139,40 @@ void Engine::render(f32 alpha) {
 
     DebugDraw::flush(m_camera.viewProjection);
 
-    renderSpeechBubbles(sw, sh);
+    renderSpeechBubbles(vpW, vpH);
 
     // First-person viewmodel (hand + weapon) — drawn after world, before HUD
     renderViewmodel();
 
-    renderHUD(sw, sh);
+    renderHUD(vpW, vpH);
+
+    // Dead player overlay — shows "YOU DIED" on this player's viewport while game continues
+    if (m_playerDead[sp]) {
+        // Dark overlay
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        const char* deathText = "YOU DIED";
+        f32 dw = FontSystem::textWidth(deathText, 3);
+        FontSystem::drawText(vpW, vpH, (vpW - dw) * 0.5f, vpH * 0.55f,
+                             deathText, {0.8f, 0.1f, 0.1f}, 3);
+
+        bool pad = Input::isGamepadConnected(0);
+        const char* respawnText = pad ? "Press A to respawn" : "Press Space to respawn";
+        f32 rw = FontSystem::textWidth(respawnText, 2);
+        FontSystem::drawText(vpW, vpH, (vpW - rw) * 0.5f, vpH * 0.4f,
+                             respawnText, {0.7f, 0.7f, 0.7f}, 2);
+
+        glDisable(GL_BLEND);
+    }
+
+    } // end split-screen player loop
+
+    glDisable(GL_SCISSOR_TEST);
+    glViewport(0, 0, sw, sh); // restore full viewport
+
+    // Swap in player 0 state as default after rendering
+    if (m_splitPlayerCount > 1) swapInPlayer(0);
 
     GLContext::swapBuffers(Window::getHandle());
 }
@@ -6013,58 +6337,119 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         }
     }
 
-    // Remote players (multiplayer only)
-    if (m_netRole != NetRole::NONE) {
-        for (u32 i = 0; i < MAX_PLAYERS; i++) {
-            if (i == m_localPlayerIndex) continue;
+    // Other players (network multiplayer + split-screen co-op)
+    {
+        // Render network remote players
+        if (m_netRole != NetRole::NONE) {
+            for (u32 i = 0; i < MAX_PLAYERS; i++) {
+                if (i == m_localPlayerIndex) continue;
 
-            bool active = false;
-            Vec3 pos;
-            f32 yaw = 0.0f;
+                bool active = false;
+                Vec3 pos;
+                f32 yaw = 0.0f;
 
-            if (m_netRole == NetRole::CLIENT) {
-                active = m_renderPlayerActive[i];
-                pos = m_renderPlayerPositions[i];
-                yaw = m_renderPlayerYaws[i];
-            } else {
-                // Server: use authoritative state
-                active = m_players[i].active;
-                pos = m_players[i].position;
-                yaw = m_players[i].yaw;
+                if (m_netRole == NetRole::CLIENT) {
+                    active = m_renderPlayerActive[i];
+                    pos = m_renderPlayerPositions[i];
+                    yaw = m_renderPlayerYaws[i];
+                } else {
+                    active = m_players[i].active;
+                    pos = m_players[i].position;
+                    yaw = m_players[i].yaw;
+                }
+                if (!active) continue;
+
+                // Human model + equipped weapon
+                u8 humanMesh = findMeshByName("human");
+                u8 humanMat = MaterialSystem::getIdByName("human_skin");
+                f32 scale = 0.5f; // scale to player height
+                Mat4 model = Mat4::translate(pos + Vec3{0, 0.0f, 0})
+                           * Mat4::rotateY(yaw)
+                           * Mat4::scale({scale, scale, scale});
+                AABB bounds = {pos - Vec3{0.3f, 0, 0.3f}, pos + Vec3{0.3f, 1.8f, 0.3f}};
+
+                const Material* humanMatPtr = MaterialSystem::get(humanMat);
+                Texture humanTex = humanMatPtr ? humanMatPtr->texture : defaultTex;
+                Vec4 humanTint = humanMatPtr ? humanMatPtr->tint : Vec4{1,1,1,1};
+
+                if (humanMesh > 0 && m_meshDefs[humanMesh].mesh.vao) {
+                    Renderer::submit(m_basicShader, humanTex, m_meshDefs[humanMesh].mesh,
+                                     model, bounds, humanTint);
+                } else {
+                    Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds,
+                                     {0.5f, 0.5f, 0.5f, 1.0f});
+                }
+
+                // Render equipped weapon in hand
+                const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
+                    u8 wpnMeshId = m_itemDefs[wpn.defId].meshId;
+                    u8 wpnMatId  = m_itemDefs[wpn.defId].materialId;
+                    if (wpnMeshId > 0 && m_meshDefs[wpnMeshId].mesh.vao) {
+                        Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+                        Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
+                        Vec3 wpnPos = pos + Vec3{0, 0.8f, 0} + right * 0.35f + fwd * 0.3f;
+                        Mat4 wpnModel = Mat4::translate(wpnPos)
+                                      * Mat4::rotateY(yaw)
+                                      * Mat4::scale({0.4f, 0.4f, 0.4f});
+                        AABB wpnBounds = {wpnPos - Vec3{0.2f,0.2f,0.2f}, wpnPos + Vec3{0.2f,0.2f,0.2f}};
+                        const Material* wm = MaterialSystem::get(wpnMatId);
+                        Renderer::submit(m_basicShader, wm ? wm->texture : defaultTex,
+                                         m_meshDefs[wpnMeshId].mesh, wpnModel, wpnBounds,
+                                         wm ? wm->tint : Vec4{1,1,1,1});
+                    }
+                }
             }
+        }
 
-            if (!active) continue;
+        // Split-screen co-op: render the other local player
+        if (m_splitPlayerCount > 1) {
+            u8 otherP = (m_activePlayerIndex == 0) ? 1 : 0;
+            if (!m_playerDead[otherP]) {
+                Vec3 pos = m_localPlayers[otherP].position;
+                f32 yaw  = m_localPlayers[otherP].yaw;
 
-            Vec3 half = {0.3f, 0.9f, 0.3f}; // player-sized
-            Mat4 model = Mat4::translate(pos + Vec3{0, half.y, 0})
-                       * Mat4::rotateY(yaw)
-                       * Mat4::scale(half * 2.0f);
-            AABB bounds = {pos, pos + Vec3{half.x*2, half.y*2, half.z*2}};
+                u8 humanMesh = findMeshByName("human");
+                f32 scale = 0.5f;
+                Mat4 model = Mat4::translate(pos)
+                           * Mat4::rotateY(yaw)
+                           * Mat4::scale({scale, scale, scale});
+                AABB bounds = {pos - Vec3{0.3f, 0, 0.3f}, pos + Vec3{0.3f, 1.8f, 0.3f}};
 
-            // Color by player slot — flash white when attacking
-            Vec4 colors[4] = {
-                {0.2f, 0.8f, 0.2f, 1.0f}, // green
-                {0.2f, 0.5f, 1.0f, 1.0f}, // blue
-                {1.0f, 0.8f, 0.2f, 1.0f}, // yellow
-                {1.0f, 0.3f, 0.3f, 1.0f}, // red
-            };
-            Vec4 col = colors[i];
-            // Get animation flags (from snapshot for client, from NetPlayer for server)
-            u8 animFlags = 0;
-            if (m_netRole == NetRole::CLIENT) {
-                animFlags = m_renderPlayerAnimFlags[i];
-            } else if (m_players[i].active) {
-                animFlags = (m_players[i].weaponState.cooldownTimer > 0.0f) ? 1 : 0;
+                u8 skinMat = MaterialSystem::getIdByName("human_skin");
+                const Material* skinMatPtr = MaterialSystem::get(skinMat);
+                Texture skinTex = skinMatPtr ? skinMatPtr->texture : defaultTex;
+                // Tint by player slot (P1=greenish, P2=bluish)
+                Vec4 skinTint = (otherP == 0) ? Vec4{0.7f, 1.0f, 0.7f, 1} : Vec4{0.7f, 0.7f, 1.0f, 1};
+
+                if (humanMesh > 0 && m_meshDefs[humanMesh].mesh.vao) {
+                    Renderer::submit(m_basicShader, skinTex, m_meshDefs[humanMesh].mesh,
+                                     model, bounds, skinTint);
+                } else {
+                    Vec4 col = (otherP == 0) ? Vec4{0.2f,0.8f,0.2f,1} : Vec4{0.2f,0.5f,1,1};
+                    Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, col);
+                }
+
+                // Render equipped weapon in hand
+                const ItemInstance& wpn = m_inventories[otherP].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
+                    u8 wpnMeshId = m_itemDefs[wpn.defId].meshId;
+                    u8 wpnMatId  = m_itemDefs[wpn.defId].materialId;
+                    if (wpnMeshId > 0 && m_meshDefs[wpnMeshId].mesh.vao) {
+                        Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+                        Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
+                        Vec3 wpnPos = pos + Vec3{0, 0.8f, 0} + right * 0.35f + fwd * 0.3f;
+                        Mat4 wpnModel = Mat4::translate(wpnPos)
+                                      * Mat4::rotateY(yaw)
+                                      * Mat4::scale({0.4f, 0.4f, 0.4f});
+                        AABB wpnBounds = {wpnPos - Vec3{0.2f,0.2f,0.2f}, wpnPos + Vec3{0.2f,0.2f,0.2f}};
+                        const Material* wm = MaterialSystem::get(wpnMatId);
+                        Renderer::submit(m_basicShader, wm ? wm->texture : defaultTex,
+                                         m_meshDefs[wpnMeshId].mesh, wpnModel, wpnBounds,
+                                         wm ? wm->tint : Vec4{1,1,1,1});
+                    }
+                }
             }
-            // Flash brighter when attacking (bit 0)
-            if (animFlags & 1) {
-                col = {col.x + 0.4f, col.y + 0.4f, col.z + 0.4f, 1.0f};
-            }
-            // Dim when dead (bit 2)
-            if (animFlags & 4) {
-                col = {col.x * 0.3f, col.y * 0.3f, col.z * 0.3f, 0.5f};
-            }
-            Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, col);
         }
     }
 }
@@ -6132,7 +6517,7 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
             f32 totalW = 22.0f + textW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.4f;
-            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, "E", true);
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::isGamepadConnected(0) ? "X" : "E", true);
             FontSystem::drawText(sw, sh, cx + 22.0f, cy, doorStr, {0.3f, 1.0f, 0.4f}, 1);
         }
     }
@@ -6172,7 +6557,7 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
             f32 totalW = 22.0f + nameW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.35f;
-            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, "E", true);
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::isGamepadConnected(0) ? "X" : "E", true);
             FontSystem::drawText(sw, sh, cx + 22.0f, cy, bestDef->name, rColor, 1);
         }
     }
@@ -6223,10 +6608,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 Rarity dragRarity = Rarity::COMMON;
                 if (m_dragState.source == DragSource::BACKPACK &&
                     m_dragState.sourceIndex < MAX_INVENTORY_ITEMS) {
-                    dragRarity = m_inventories[0].backpack[m_dragState.sourceIndex].rarity;
+                    dragRarity = m_inventories[m_localPlayerIndex].backpack[m_dragState.sourceIndex].rarity;
                 } else if (m_dragState.source == DragSource::EQUIPMENT &&
                            m_dragState.sourceIndex < static_cast<u8>(ItemSlot::COUNT)) {
-                    dragRarity = m_inventories[0].equipped[m_dragState.sourceIndex].rarity;
+                    dragRarity = m_inventories[m_localPlayerIndex].equipped[m_dragState.sourceIndex].rarity;
                 }
                 ItemIconSystem::drawIcon(sw, sh,
                     static_cast<f32>(dmx) - 16.0f,
@@ -6241,13 +6626,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                         ? m_equipTooltipTimer : 1.0f;
             bool mouseLit = (sinf(m_equipTooltipTimer * 6.0f) > 0.0f);
 
-            const char* eqText = "Double-click to equip";
+            bool ep = Input::isGamepadConnected(0);
+            const char* eqText = ep ? "Press A to equip" : "Double-click to equip";
             f32 textW = FontSystem::textWidth(eqText, 3);
             f32 totalW = 22.0f + 6.0f + textW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.3f;
 
-            HUD::drawMouseButton(sw, sh, cx, cy, 0, mouseLit);
+            if (ep) HUD::drawKeySymbol(sw, sh, cx, cy, "A", mouseLit);
+            else    HUD::drawMouseButton(sw, sh, cx, cy, 0, mouseLit);
             FontSystem::drawText(sw, sh, cx + 24.0f, cy + 4.0f, eqText,
                                  {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 3);
         }
@@ -6314,7 +6701,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         }
 
         // Energy bar
-        HUD::drawEnergyBar(sw, sh, m_skillStates[0].energy, m_skillStates[0].maxEnergy);
+        HUD::drawEnergyBar(sw, sh, m_skillStates[m_localPlayerIndex].energy, m_skillStates[m_localPlayerIndex].maxEnergy);
 
         // Status effect icons above the energy bar
         {
@@ -6420,24 +6807,25 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 HUD::EquipSkillSlot equipSlots[4];
                 u32 equipCount = 0;
 
-                // Boots (F key)
+                bool eqPad = Input::isGamepadConnected(0);
+                // Boots (F key / L+A)
                 if (m_bootSkillStates[0].activeSkill != SkillId::NONE) {
                     const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
                                                                      m_bootSkillStates[0].activeSkill);
                     equipSlots[equipCount++] = {
                         static_cast<u8>(m_bootSkillStates[0].activeSkill),
                         m_bootSkillStates[0].cooldownTimer, sd ? sd->cooldown : 1.0f,
-                        "F", sd ? sd->name : "???", false
+                        eqPad ? "L+A" : "F", sd ? sd->name : "???", false
                     };
                 }
-                // Helmet (G key)
+                // Helmet (G key / L+B)
                 if (m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
                     const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
                                                                      m_helmetSkillStates[0].activeSkill);
                     equipSlots[equipCount++] = {
                         static_cast<u8>(m_helmetSkillStates[0].activeSkill),
                         m_helmetSkillStates[0].cooldownTimer, sd ? sd->cooldown : 1.0f,
-                        "G", sd ? sd->name : "???", false
+                        eqPad ? "L+B" : "G", sd ? sd->name : "???", false
                     };
                 }
                 // Armor (passive aura)
@@ -6478,9 +6866,12 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             f32 rmbX = static_cast<f32>(sw) - 220.0f;
             f32 rmbY = 15.0f;
 
-            // Mouse right-click icon
+            // Skill activation button icon
             bool skillReady = (m_classSkillStates[slot].cooldownTimer <= 0.0f && unlocked);
-            HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8, 1, skillReady);
+            if (Input::isGamepadConnected(0))
+                HUD::drawKeySymbol(sw, sh, rmbX, rmbY + 8, "R", skillReady);
+            else
+                HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8, 1, skillReady);
 
             // Skill name
             const char* skillName = sd ? sd->name : "???";
@@ -6532,7 +6923,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         {
             f32 potY = static_cast<f32>(sh) - 45.0f;
             bool potReady = (m_potionCooldown <= 0.0f);
-            HUD::drawKeySymbol(sw, sh, 20.0f, potY, "Q", potReady);
+            HUD::drawKeySymbol(sw, sh, 20.0f, potY, Input::isGamepadConnected(0) ? "B" : "Q", potReady);
             if (potReady) {
                 FontSystem::drawText(sw, sh, 44.0f, potY + 2.0f,
                                      "Potion", {0.3f, 0.8f, 0.3f}, 2);
@@ -6565,7 +6956,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             FontSystem::drawText(sw, sh, cx - tw * 0.5f, y + 7.0f, options[i], tc, 2);
         }
 
-        const char* hint = "Up/Down, Enter to select, ESC to resume";
+        const char* hint = Input::isGamepadConnected(0)
+            ? "D-pad, A to select, B to resume"
+            : "Up/Down, Enter to select, ESC to resume";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, cx - hintW * 0.5f, cy - 50.0f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
@@ -6588,12 +6981,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         f32 cx = static_cast<f32>(sw) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.72f;
 
-        // LMB + "Attack"
-        HUD::drawMouseButton(sw, sh, cx - 120.0f, cy, 0, mouseLit);
+        bool cp = Input::isGamepadConnected(0);
+        // Attack button
+        if (cp) HUD::drawKeySymbol(sw, sh, cx - 120.0f, cy, "ZR", mouseLit);
+        else    HUD::drawMouseButton(sw, sh, cx - 120.0f, cy, 0, mouseLit);
         FontSystem::drawText(sw, sh, cx - 98.0f, cy + 5.0f, "Attack",
                              {0.5f * alpha, 0.9f * alpha, 0.5f * alpha}, 3);
-        // RMB + "Skill"
-        HUD::drawMouseButton(sw, sh, cx + 35.0f, cy, 1, mouseLit);
+        // Skill button
+        if (cp) HUD::drawKeySymbol(sw, sh, cx + 35.0f, cy, "R", mouseLit);
+        else    HUD::drawMouseButton(sw, sh, cx + 35.0f, cy, 1, mouseLit);
         FontSystem::drawText(sw, sh, cx + 57.0f, cy + 5.0f, "Skill",
                              {0.5f * alpha, 0.6f * alpha, 0.9f * alpha}, 3);
     }
@@ -6610,7 +7006,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.65f;
 
-        HUD::drawKeySymbol(sw, sh, cx, cy, "Tab", keyLit);
+        HUD::drawKeySymbol(sw, sh, cx, cy, Input::isGamepadConnected(0) ? "+" : "Tab", keyLit);
         FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
                              {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 3);
     }
@@ -6700,7 +7096,9 @@ void Engine::renderMenu() {
             FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f, subLabels[i], tc, 2);
         }
 
-        const char* hint = "Up/Down, Enter to confirm, ESC to go back";
+        const char* hint = Input::isGamepadConnected(0)
+            ? "D-pad, A to confirm, B to go back"
+            : "Up/Down, Enter to confirm, ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menuSubState == 2) {
@@ -6747,9 +7145,62 @@ void Engine::renderMenu() {
                                  statLine, {0.6f, 0.8f, 0.6f}, 2);
         }
 
-        const char* hint2 = "Up/Down to select, Enter to confirm, ESC to go back";
+        const char* hint2 = Input::isGamepadConnected(0)
+            ? "D-pad to select, A to confirm, B to go back"
+            : "Up/Down to select, Enter to confirm, ESC to go back";
         f32 hintW2 = FontSystem::textWidth(hint2, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.06f, hint2, {0.4f, 0.4f, 0.5f}, 2);
+    } else if (m_menuSubState == 4) {
+        // Waiting for Player 2 join screen
+        const char* p1Class = kClassDefs[static_cast<u32>(m_playerClasses[0])].name;
+        char p1Str[64];
+        std::snprintf(p1Str, sizeof(p1Str), "Player 1: %s", p1Class);
+        f32 p1W = FontSystem::textWidth(p1Str, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - p1W) * 0.5f, sh * 0.55f,
+                             p1Str, {0.3f, 1.0f, 0.4f}, 2);
+
+        const char* waitText = "Press A to join co-op";
+        f32 waitW = FontSystem::textWidth(waitText, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - waitW) * 0.5f, sh * 0.42f,
+                             waitText, {0.7f, 0.7f, 0.9f}, 2);
+
+        bool pad = Input::isGamepadConnected(0);
+        const char* soloText = pad ? "Press + to start solo" : "Press Enter to start solo";
+        f32 soloW = FontSystem::textWidth(soloText, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - soloW) * 0.5f, sh * 0.32f,
+                             soloText, {0.5f, 0.5f, 0.6f}, 2);
+
+        const char* backText = pad ? "B to go back" : "ESC to go back";
+        f32 backW = FontSystem::textWidth(backText, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - backW) * 0.5f, sh * 0.1f,
+                             backText, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menuSubState == 5) {
+        // Player 2 class selection
+        const char* subTitle = "Player 2: Choose Your Class";
+        f32 stW = FontSystem::textWidth(subTitle, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.62f,
+                             subTitle, {0.3f, 0.7f, 1.0f}, 3);
+
+        u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
+        f32 listTop = sh * 0.54f;
+        f32 spacing = 38.0f;
+        for (u8 i = 0; i < classCount; i++) {
+            const ClassDef& cls = kClassDefs[i];
+            f32 y = listTop - i * spacing;
+            bool sel = (i == m_menuSubSelection);
+            Vec3 col = sel ? Vec3{0.3f, 0.6f, 1.0f} : Vec3{0.15f, 0.25f, 0.45f};
+            HUD::drawMenuOption(sw, sh, y, 400, 32, col, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.55f, 0.55f, 0.55f};
+            char label[64];
+            std::snprintf(label, sizeof(label), "%s  (%.0f HP, %.0f EN)", cls.name, cls.baseHealth, cls.baseEnergy);
+            f32 tw = FontSystem::textWidth(label, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 9.0f, label, tc, 2);
+        }
+
+        const char* hint = "D-pad to select, A to confirm";
+        f32 hintW3 = FontSystem::textWidth(hint, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW3) * 0.5f, sh * 0.06f,
+                             hint, {0.4f, 0.4f, 0.5f}, 2);
     } else if (m_menuSubState == 3) {
         // Options / controls rebinding screen
         const char* subTitle = "Controls";
@@ -6771,8 +7222,9 @@ void Engine::renderMenu() {
         static constexpr u32 OPT_GYRO_SENS    = REBIND_COUNT + 1;
         static constexpr u32 OPT_STICK_INVERT = REBIND_COUNT + 2;
         static constexpr u32 OPT_GYRO_INVERT  = REBIND_COUNT + 3;
-        static constexpr u32 OPT_RESET        = REBIND_COUNT + 4;
-        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 5;
+        static constexpr u32 OPT_SPLIT_MODE   = REBIND_COUNT + 4;
+        static constexpr u32 OPT_RESET        = REBIND_COUNT + 5;
+        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 6;
 
         f32 listTop = sh * 0.78f;
         f32 lineH = 22.0f;
@@ -6842,6 +7294,12 @@ void Engine::renderMenu() {
                 FontSystem::drawText(sw, sh, colAction, y, buf,
                     sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
                 if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == OPT_SPLIT_MODE) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Split Screen: %s", m_splitMode == 0 ? "Horizontal" : "Vertical");
+                FontSystem::drawText(sw, sh, colAction, y, buf,
+                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
             } else if (i == OPT_GYRO_INVERT) {
                 char buf[48];
                 std::snprintf(buf, sizeof(buf), "Gyro Invert Y: %s", Input::getGyroInvertY() ? "ON" : "OFF");
@@ -6885,7 +7343,9 @@ void Engine::renderMenu() {
                 selected ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}, 2);
         }
 
-        const char* hint = "Up/Down to select, Enter to confirm";
+        const char* hint = Input::isGamepadConnected(0)
+            ? "D-pad to select, A to confirm"
+            : "Up/Down to select, Enter to confirm";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.1f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }

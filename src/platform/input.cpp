@@ -25,14 +25,38 @@ static s32 s_mouseWheelY = 0;
 static SDL_GameController* s_controllers[Input::MAX_GAMEPADS] = {};
 
 // Sensitivity settings (adjustable from options menu)
-static f32  s_stickSensitivity = 1.5f;   // degrees per second per unit of stick deflection
-static f32  s_gyroSensitivity  = 5.0f;   // mouse-pixel-equivalent per deg/s
+static f32  s_stickSensitivity = 1.5f;
+static f32  s_gyroSensitivity  = 5.0f;
 static bool s_stickInvertY     = false;
-static bool s_gyroInvertY      = true;   // inverted by default for gyro
+static bool s_gyroInvertY      = true;
 
-// Per-frame button state for pressed detection (gamepad 0)
-static u8 s_currentPadButtons[NUM_PAD_BUTTONS];
-static u8 s_previousPadButtons[NUM_PAD_BUTTONS];
+// Split-screen: which player's controller to read (0=player1, 1=player2)
+static u8 s_activePlayer = 0;
+
+#ifdef __SWITCH__
+#include <switch.h>
+// libnx per-player pad state — bypasses SDL for reliable controller separation
+static PadState s_pads[2];
+static bool s_padsInitialized = false;
+
+static void initPads() {
+    if (s_padsInitialized) return;
+    s_padsInitialized = true;
+    // Configure system for 2 players with Pro Controller or dual Joy-Con
+    padConfigureInput(2, HidNpadStyleSet_NpadFullCtrl);
+    padInitialize(&s_pads[0], HidNpadIdType_No1);
+    padInitialize(&s_pads[1], HidNpadIdType_No2);
+    LOG_INFO("Pads: initialized 2-player input");
+}
+
+// Previous frame button state for press detection
+static u64 s_padPrevButtons[2] = {};
+#endif
+
+// Per-controller per-frame button state for pressed detection
+static u8 s_currentPadButtons[Input::MAX_GAMEPADS][NUM_PAD_BUTTONS];
+static u8 s_previousPadButtons[Input::MAX_GAMEPADS][NUM_PAD_BUTTONS];
+static bool s_splitActive = false;
 
 // ---------------------------------------------------------------------------
 // Default bindings table
@@ -98,6 +122,7 @@ void Input::init() {
     memset(s_previousMouseButtons, 0, sizeof(s_previousMouseButtons));
     memset(s_currentPadButtons, 0, sizeof(s_currentPadButtons));
     memset(s_previousPadButtons, 0, sizeof(s_previousPadButtons));
+    s_splitActive = false;
     s_mouseDX = 0;
     s_mouseDY = 0;
 
@@ -158,16 +183,26 @@ void Input::update() {
         s_currentMouseButtons[i] = (mouseState & SDL_BUTTON(i + 1)) ? 1 : 0;
     }
 
-    // Gamepad button state snapshot — merge all connected controllers
-    // (Switch reports Joy-Cons as separate controllers; merge so any press registers)
+    // Gamepad button state snapshot — per controller for split-screen frame-edge detection
     memset(s_currentPadButtons, 0, sizeof(s_currentPadButtons));
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
         if (!s_controllers[c]) continue;
         for (s32 i = 0; i < NUM_PAD_BUTTONS; i++) {
-            s_currentPadButtons[i] |= SDL_GameControllerGetButton(
+            s_currentPadButtons[c][i] = SDL_GameControllerGetButton(
                 s_controllers[c], static_cast<SDL_GameControllerButton>(i));
         }
     }
+
+#ifdef __SWITCH__
+    // Update libnx per-player pads (reliable separation for split-screen)
+    if (s_splitActive) {
+        initPads();
+        for (s32 p = 0; p < 2; p++) {
+            s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
+            padUpdate(&s_pads[p]);
+        }
+    }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -214,45 +249,106 @@ void Input::handleMouseWheel(s32 y) { s_mouseWheelY += y; }
 // Gamepad raw
 // ---------------------------------------------------------------------------
 f32 Input::getAxis(s32 gamepadIndex, s32 axis) {
-    // On Switch, find the largest deflection across all controllers
-    if (gamepadIndex == 0) {
-        f32 best = 0.0f;
-        for (s32 c = 0; c < MAX_GAMEPADS; c++) {
-            if (!s_controllers[c]) continue;
-            s16 raw = SDL_GameControllerGetAxis(s_controllers[c],
-                                                 static_cast<SDL_GameControllerAxis>(axis));
-            f32 v = static_cast<f32>(raw) / 32767.0f;
-            if (fabsf(v) > fabsf(best)) best = v;
+#ifdef __SWITCH__
+    if (s_splitActive && s_padsInitialized && gamepadIndex >= 0 && gamepadIndex < 2) {
+        // Read analog sticks from libnx per-player pads
+        HidAnalogStickState ls = padGetStickPos(&s_pads[gamepadIndex], 0); // left stick
+        HidAnalogStickState rs = padGetStickPos(&s_pads[gamepadIndex], 1); // right stick
+        switch (axis) {
+            case SDL_CONTROLLER_AXIS_LEFTX:  return static_cast<f32>(ls.x) / 32767.0f;
+            case SDL_CONTROLLER_AXIS_LEFTY:  return static_cast<f32>(-ls.y) / 32767.0f; // SDL inverts Y
+            case SDL_CONTROLLER_AXIS_RIGHTX: return static_cast<f32>(rs.x) / 32767.0f;
+            case SDL_CONTROLLER_AXIS_RIGHTY: return static_cast<f32>(-rs.y) / 32767.0f;
+            case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
+                return (padGetButtons(&s_pads[gamepadIndex]) & HidNpadButton_ZL) ? 1.0f : 0.0f;
+            case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+                return (padGetButtons(&s_pads[gamepadIndex]) & HidNpadButton_ZR) ? 1.0f : 0.0f;
+            default: return 0.0f;
         }
-        return best;
     }
-    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return 0.0f;
-    if (!s_controllers[gamepadIndex]) return 0.0f;
-    s16 raw = SDL_GameControllerGetAxis(s_controllers[gamepadIndex],
-                                         static_cast<SDL_GameControllerAxis>(axis));
-    return static_cast<f32>(raw) / 32767.0f;
+#endif
+    if (s_splitActive) {
+        if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return 0.0f;
+        if (!s_controllers[gamepadIndex]) return 0.0f;
+        s16 raw = SDL_GameControllerGetAxis(s_controllers[gamepadIndex],
+                                             static_cast<SDL_GameControllerAxis>(axis));
+        return static_cast<f32>(raw) / 32767.0f;
+    }
+    f32 best = 0.0f;
+    for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+        if (!s_controllers[c]) continue;
+        s16 raw = SDL_GameControllerGetAxis(s_controllers[c],
+                                             static_cast<SDL_GameControllerAxis>(axis));
+        f32 v = static_cast<f32>(raw) / 32767.0f;
+        if (fabsf(v) > fabsf(best)) best = v;
+    }
+    return best;
 }
 
-bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
-    // On Switch, merge all controllers (Joy-Cons reported separately)
-    if (gamepadIndex == 0) {
-        for (s32 c = 0; c < MAX_GAMEPADS; c++) {
-            if (s_controllers[c] && SDL_GameControllerGetButton(
-                    s_controllers[c], static_cast<SDL_GameControllerButton>(button)))
-                return true;
-        }
-        return false;
+#ifdef __SWITCH__
+// Map SDL GameController button to libnx HidNpadButton
+static u64 sdlButtonToHid(s32 sdlButton) {
+    switch (sdlButton) {
+        case SDL_CONTROLLER_BUTTON_A:             return HidNpadButton_A;
+        case SDL_CONTROLLER_BUTTON_B:             return HidNpadButton_B;
+        case SDL_CONTROLLER_BUTTON_X:             return HidNpadButton_X;
+        case SDL_CONTROLLER_BUTTON_Y:             return HidNpadButton_Y;
+        case SDL_CONTROLLER_BUTTON_BACK:          return HidNpadButton_Minus;
+        case SDL_CONTROLLER_BUTTON_START:         return HidNpadButton_Plus;
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK:     return HidNpadButton_StickL;
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK:     return HidNpadButton_StickR;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  return HidNpadButton_L;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return HidNpadButton_R;
+        case SDL_CONTROLLER_BUTTON_DPAD_UP:       return HidNpadButton_Up;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:     return HidNpadButton_Down;
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:     return HidNpadButton_Left;
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:    return HidNpadButton_Right;
+        default: return 0;
     }
-    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
-    if (!s_controllers[gamepadIndex]) return false;
-    return SDL_GameControllerGetButton(s_controllers[gamepadIndex],
-                                        static_cast<SDL_GameControllerButton>(button)) != 0;
+}
+#endif
+
+bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
+#ifdef __SWITCH__
+    if (s_splitActive && s_padsInitialized && gamepadIndex >= 0 && gamepadIndex < 2) {
+        u64 hid = sdlButtonToHid(button);
+        return (padGetButtons(&s_pads[gamepadIndex]) & hid) != 0;
+    }
+#endif
+    if (s_splitActive) {
+        if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
+        if (!s_controllers[gamepadIndex]) return false;
+        return SDL_GameControllerGetButton(s_controllers[gamepadIndex],
+                                            static_cast<SDL_GameControllerButton>(button)) != 0;
+    }
+    // Single-player: merge all controllers
+    for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+        if (s_controllers[c] && SDL_GameControllerGetButton(
+                s_controllers[c], static_cast<SDL_GameControllerButton>(button)))
+            return true;
+    }
+    return false;
 }
 
 bool Input::isButtonPressed(s32 gamepadIndex, s32 button) {
-    if (gamepadIndex != 0) return false; // frame-edge only tracked for pad 0
     if (button < 0 || button >= NUM_PAD_BUTTONS) return false;
-    return s_currentPadButtons[button] && !s_previousPadButtons[button];
+#ifdef __SWITCH__
+    if (s_splitActive && s_padsInitialized && gamepadIndex >= 0 && gamepadIndex < 2) {
+        u64 hid = sdlButtonToHid(button);
+        u64 cur = padGetButtons(&s_pads[gamepadIndex]);
+        u64 prev = s_padPrevButtons[gamepadIndex];
+        return (cur & hid) && !(prev & hid);
+    }
+#endif
+    if (s_splitActive) {
+        if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
+        return s_currentPadButtons[gamepadIndex][button] && !s_previousPadButtons[gamepadIndex][button];
+    }
+    for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+        if (s_currentPadButtons[c][button] && !s_previousPadButtons[c][button])
+            return true;
+    }
+    return false;
 }
 
 bool Input::isGamepadConnected(s32 gamepadIndex) {
@@ -295,6 +391,7 @@ void Input::handleControllerEvent(const SDL_Event& event) {
 // Stick with deadzone
 // ---------------------------------------------------------------------------
 f32 Input::getStickX(bool rightStick, s32 gamepadIndex) {
+    if (gamepadIndex == 0) gamepadIndex = s_activePlayer; // route to active player in split-screen
     s32 ax = rightStick ? SDL_CONTROLLER_AXIS_RIGHTX : SDL_CONTROLLER_AXIS_LEFTX;
     f32 v = getAxis(gamepadIndex, ax);
     if (v > -STICK_DEADZONE && v < STICK_DEADZONE) return 0.0f;
@@ -305,6 +402,7 @@ f32 Input::getStickX(bool rightStick, s32 gamepadIndex) {
 }
 
 f32 Input::getStickY(bool rightStick, s32 gamepadIndex) {
+    if (gamepadIndex == 0) gamepadIndex = s_activePlayer;
     s32 ax = rightStick ? SDL_CONTROLLER_AXIS_RIGHTY : SDL_CONTROLLER_AXIS_LEFTY;
     f32 v = getAxis(gamepadIndex, ax);
     if (v > -STICK_DEADZONE && v < STICK_DEADZONE) return 0.0f;
@@ -327,44 +425,57 @@ static bool s_gyroInitialized = false;
 static HidSixAxisSensorHandle s_gyroHandles[2]; // 0=player1 dual, 1=handheld
 static u32 s_gyroHandleCount = 0;
 
+static HidSixAxisSensorHandle s_gyroHandlesP2[2]; // P2 sensor handles
+static u32 s_gyroHandleCountP2 = 0;
+
 static void initGyro() {
     if (s_gyroInitialized) return;
     s_gyroInitialized = true;
 
-    // Get six-axis sensor handles for the first player
-    padConfigureInput(1, HidNpadStyleSet_NpadFullCtrl);
+    // Don't call padConfigureInput here — it's done by initPads() for split-screen
+    // Get six-axis sensor handles for player 1
     hidGetSixAxisSensorHandles(&s_gyroHandles[0], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
     hidStartSixAxisSensor(s_gyroHandles[0]);
     s_gyroHandleCount = 1;
 
-    // Also try handheld mode
+    // Handheld mode fallback for P1
     hidGetSixAxisSensorHandles(&s_gyroHandles[1], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
     hidStartSixAxisSensor(s_gyroHandles[1]);
     s_gyroHandleCount = 2;
 
-    LOG_INFO("Gyro: initialized %u sensor handles", s_gyroHandleCount);
+    // Player 2 gyro sensor
+    hidGetSixAxisSensorHandles(&s_gyroHandlesP2[0], 1, HidNpadIdType_No2, HidNpadStyleTag_NpadFullKey);
+    hidStartSixAxisSensor(s_gyroHandlesP2[0]);
+    s_gyroHandleCountP2 = 1;
+
+    LOG_INFO("Gyro: initialized P1=%u P2=%u sensor handles", s_gyroHandleCount, s_gyroHandleCountP2);
 }
 #endif
 
 void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
     dx = 0.0f;
     dy = 0.0f;
-    (void)gamepadIndex;
 
 #ifdef __SWITCH__
     initGyro();
     HidSixAxisSensorState state = {};
-    // Try each handle until we get valid data
-    for (u32 i = 0; i < s_gyroHandleCount; i++) {
-        if (hidGetSixAxisSensorStates(s_gyroHandles[i], &state, 1) >= 1) {
-            // angular_velocity is in rad/s: x=pitch, y=yaw, z=roll
+
+    // Pick the right sensor handles based on active player
+    HidSixAxisSensorHandle* handles = s_gyroHandles;
+    u32 handleCount = s_gyroHandleCount;
+    if (s_splitActive && s_activePlayer == 1) {
+        handles = s_gyroHandlesP2;
+        handleCount = s_gyroHandleCountP2;
+    }
+
+    for (u32 i = 0; i < handleCount; i++) {
+        if (hidGetSixAxisSensorStates(handles[i], &state, 1) >= 1) {
             f32 yaw   = state.angular_velocity.y;
             f32 pitch = state.angular_velocity.x;
-            // Apply small deadzone to filter drift (0.01 rad/s ≈ 0.6 deg/s)
             if (yaw > -0.01f && yaw < 0.01f) yaw = 0.0f;
             if (pitch > -0.01f && pitch < 0.01f) pitch = 0.0f;
             if (yaw != 0.0f || pitch != 0.0f) {
-                dx = -yaw  * (180.0f / 3.14159f); // to deg/s (negated for natural direction)
+                dx = -yaw  * (180.0f / 3.14159f);
                 dy = pitch * (180.0f / 3.14159f);
                 return;
             }
@@ -405,6 +516,9 @@ bool Input::getStickInvertY()            { return s_stickInvertY; }
 void Input::setStickInvertY(bool v)      { s_stickInvertY = v; }
 bool Input::getGyroInvertY()             { return s_gyroInvertY; }
 void Input::setGyroInvertY(bool v)       { s_gyroInvertY = v; }
+void Input::setActivePlayer(u8 index)    { s_activePlayer = index; }
+u8   Input::getActivePlayer()            { return s_activePlayer; }
+void Input::setSplitScreen(bool active)  { s_splitActive = active; }
 
 // ---------------------------------------------------------------------------
 // Action-based input — merges keyboard + mouse + gamepad
@@ -413,39 +527,36 @@ static bool checkActionRaw(GameAction action, bool pressed) {
     u32 idx = static_cast<u32>(action);
     if (idx >= static_cast<u32>(GameAction::COUNT)) return false;
     const InputBinding& b = s_bindings[idx];
+    s32 padIdx = static_cast<s32>(s_activePlayer); // which controller to read
 
-    // Keyboard check
-    if (b.key >= 0) {
-        if (pressed ? Input::isKeyPressed(b.key) : Input::isKeyDown(b.key))
-            return true;
-    }
-
-    // Mouse button check
-    if (b.mouseButton > 0) {
-        if (pressed ? Input::isMouseButtonPressed(b.mouseButton)
-                    : Input::isMouseButtonDown(b.mouseButton))
-            return true;
-    }
-
-    // Gamepad button check (with optional modifier)
-    if (b.button >= 0) {
-        bool modOk = (b.modifier < 0) || Input::isButtonDown(0, b.modifier);
-        // If modifier is required, also ensure we're NOT consuming the modifier's own action
-        if (b.modifier >= 0 && !Input::isButtonDown(0, b.modifier)) modOk = false;
-        if (modOk) {
-            if (pressed ? Input::isButtonPressed(0, b.button) : Input::isButtonDown(0, b.button))
+    // Keyboard + mouse only for player 0 (player 2 is controller-only in split-screen)
+    if (s_activePlayer == 0) {
+        if (b.key >= 0) {
+            if (pressed ? Input::isKeyPressed(b.key) : Input::isKeyDown(b.key))
+                return true;
+        }
+        if (b.mouseButton > 0) {
+            if (pressed ? Input::isMouseButtonPressed(b.mouseButton)
+                        : Input::isMouseButtonDown(b.mouseButton))
                 return true;
         }
     }
 
-    // Axis check (triggers)
+    // Gamepad button check — routes to active player's controller
+    if (b.button >= 0) {
+        bool modOk = (b.modifier < 0) || Input::isButtonDown(padIdx, b.modifier);
+        if (b.modifier >= 0 && !Input::isButtonDown(padIdx, b.modifier)) modOk = false;
+        if (modOk) {
+            if (pressed ? Input::isButtonPressed(padIdx, b.button) : Input::isButtonDown(padIdx, b.button))
+                return true;
+        }
+    }
+
+    // Axis check (triggers) — routes to active player's controller
     if (b.axis >= 0) {
-        f32 v = Input::getAxis(0, b.axis);
+        f32 v = Input::getAxis(padIdx, b.axis);
         if (v >= b.axisThreshold) {
-            // For "pressed", we'd need previous frame axis state — approximate with threshold
-            // Since triggers are analog, treat as "down" always
             if (!pressed) return true;
-            // For pressed: check if we just crossed threshold (not tracked precisely, but rare need)
             return true;
         }
     }

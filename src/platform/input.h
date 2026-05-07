@@ -85,6 +85,12 @@ namespace Input {
     // L shoulder modifier state
     bool isModifierHeld(s32 gamepadIndex = 0);
 
+    // Split-screen: set which player's controller to read (0 or 1)
+    void setActivePlayer(u8 index);
+    u8   getActivePlayer();
+    // Enable/disable per-controller separation (disables merge-all behavior)
+    void setSplitScreen(bool active);
+
     // Gyro (motion sensor) — returns angular velocity in deg/s
     // dx = yaw (horizontal turn), dy = pitch (vertical tilt)
     void getGyro(f32& dx, f32& dy, s32 gamepadIndex = 0);

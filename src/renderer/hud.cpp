@@ -3,6 +3,7 @@
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
 #include "renderer/material.h"
+#include "platform/input.h"
 #include "core/log.h"
 #include "core/profiler.h"
 #include "game/item.h"
@@ -320,9 +321,168 @@ void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
     flushHUD(sw, sh);
 }
 
+// Check if a label is a known controller button name
+static bool isControllerLabel(const char* label) {
+    static const char* kNames[] = {
+        "A", "B", "X", "Y", "L", "R", "ZL", "ZR",
+        "+", "-", "Up", "Rt", "Dn", "Lt",
+        "L+A", "L+B", nullptr
+    };
+    for (const char** p = kNames; *p; p++) {
+        if (std::strcmp(label, *p) == 0) return true;
+    }
+    return false;
+}
+
+// Nintendo Switch face button colors
+// SDL uses Xbox layout (A=bottom, B=right), but Nintendo layout is A=right, B=bottom.
+// We display the Nintendo label that matches the physical button the player presses.
+// SDL A (bottom) = Nintendo B, SDL B (right) = Nintendo A, etc.
+static const char* switchButtonLabel(const char* sdlLabel) {
+#ifdef __SWITCH__
+    if (sdlLabel[1] == '\0') {
+        switch (sdlLabel[0]) {
+            case 'A': return "B";  // SDL bottom → Nintendo B
+            case 'B': return "A";  // SDL right  → Nintendo A
+            case 'X': return "Y";  // SDL left   → Nintendo Y
+            case 'Y': return "X";  // SDL top    → Nintendo X
+        }
+    }
+#endif
+    return sdlLabel;
+}
+
+static Vec3 faceButtonColor(char c) {
+    // Colors match the Nintendo physical label after swap
+    switch (c) {
+        case 'A': return {0.3f, 0.75f, 0.4f};   // green accent
+        case 'B': return {0.8f, 0.3f, 0.3f};     // red accent
+        case 'X': return {0.3f, 0.5f, 0.85f};    // blue accent
+        case 'Y': return {0.85f, 0.75f, 0.2f};   // yellow accent
+        default:  return {0.45f, 0.45f, 0.5f};
+    }
+}
+
+void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
+                                 const char* label, bool highlighted)
+{
+    f32 dim = highlighted ? 1.0f : 0.55f;
+
+    // Face buttons (A/B/X/Y) — filled circle with letter (swap for Nintendo layout)
+    if (label[0] >= 'A' && label[0] <= 'Y' && label[1] == '\0') {
+        const char* displayLabel = switchButtonLabel(label);
+        f32 r = 9.0f;
+        f32 cx = x + r;
+        f32 cy = y + r;
+        Vec3 col = faceButtonColor(displayLabel[0]) * dim;
+        // Fill circle with scanlines
+        for (f32 dy = -r; dy <= r; dy += 1.0f) {
+            f32 hw = sqrtf(r * r - dy * dy);
+            pushLine(cx - hw, cy + dy, cx + hw, cy + dy, col);
+        }
+        // Darker border ring
+        Vec3 border = col * 0.6f;
+        for (f32 a = 0; a < 6.28f; a += 0.15f) {
+            f32 px = cx + cosf(a) * r;
+            f32 py = cy + sinf(a) * r;
+            pushLine(px, py, px + 0.5f, py, border);
+        }
+        flushHUD(sw, sh);
+        // Letter centered (using Nintendo-swapped label)
+        Vec3 tc = {1.0f * dim, 1.0f * dim, 1.0f * dim};
+        f32 tw = FontSystem::textWidth(displayLabel, 1);
+        FontSystem::drawText(sw, sh, cx - tw * 0.5f, cy - 3.0f, displayLabel, tc, 1);
+        return;
+    }
+
+    // Combo buttons (L+A, L+B) — pill + face circle
+    if (label[0] == 'L' && label[1] == '+') {
+        // Draw L pill
+        drawControllerButton(sw, sh, x, y, "L", highlighted);
+        // Small + text
+        FontSystem::drawText(sw, sh, x + 22.0f, y + 5.0f, "+",
+                             {0.6f * dim, 0.6f * dim, 0.6f * dim}, 1);
+        // Draw face button circle (drawControllerButton handles the swap internally)
+        char face[2] = {label[2], 0};
+        drawControllerButton(sw, sh, x + 28.0f, y, face, highlighted);
+        return;
+    }
+
+    // Shoulder/trigger (L/R/ZL/ZR) — rounded pill shape
+    if ((label[0] == 'L' || label[0] == 'R') && (label[1] == '\0' || label[1] == 'L' || label[1] == 'R') ||
+        (label[0] == 'Z')) {
+        bool isTrigger = (label[0] == 'Z');
+        Vec3 col = isTrigger ? Vec3{0.3f, 0.3f, 0.38f} * dim : Vec3{0.4f, 0.42f, 0.48f} * dim;
+        f32 pw = FontSystem::textWidth(label, 1) + 10.0f;
+        f32 ph = 16.0f;
+        // Rounded rect fill
+        for (f32 fy = 2; fy < ph - 2; fy += 1.0f)
+            pushLine(x + 2, y + fy, x + pw - 2, y + fy, col);
+        // Border
+        Vec3 border = col * 1.4f;
+        pushLine(x + 2, y + ph, x + pw - 2, y + ph, border);
+        pushLine(x + 2, y, x + pw - 2, y, border);
+        pushLine(x, y + 2, x, y + ph - 2, border);
+        pushLine(x + pw, y + 2, x + pw, y + ph - 2, border);
+        flushHUD(sw, sh);
+        Vec3 tc = {0.9f * dim, 0.9f * dim, 0.95f * dim};
+        f32 tw = FontSystem::textWidth(label, 1);
+        FontSystem::drawText(sw, sh, x + (pw - tw) * 0.5f, y + 4.0f, label, tc, 1);
+        return;
+    }
+
+    // D-pad directions (Up/Rt/Dn/Lt) — cross shape with highlighted arm
+    if (std::strcmp(label, "Up") == 0 || std::strcmp(label, "Dn") == 0 ||
+        std::strcmp(label, "Lt") == 0 || std::strcmp(label, "Rt") == 0) {
+        f32 cx = x + 9.0f, cy = y + 9.0f;
+        f32 arm = 6.0f, w = 4.0f;
+        Vec3 base = {0.3f, 0.3f, 0.35f};
+        Vec3 hi   = {0.7f, 0.75f, 0.8f};
+        // Draw cross arms
+        bool isUp = (label[0] == 'U'), isDn = (label[0] == 'D');
+        bool isLt = (label[0] == 'L'), isRt = (label[0] == 'R');
+        // Vertical arm
+        for (f32 fy = -arm; fy <= arm; fy += 1.0f)
+            pushLine(cx - w*0.5f, cy + fy, cx + w*0.5f, cy + fy,
+                     (fy < 0 && isUp) || (fy > 0 && isDn) ? hi * dim : base * dim);
+        // Horizontal arm
+        for (f32 fy = -w*0.5f; fy <= w*0.5f; fy += 1.0f)
+            pushLine(cx - arm, cy + fy, cx + arm, cy + fy,
+                     (isLt || isRt) ? base * dim : base * dim);
+        // Highlight specific direction
+        if (isLt) for (f32 fy = -w*0.5f; fy <= w*0.5f; fy++) pushLine(cx - arm, cy+fy, cx - 1, cy+fy, hi*dim);
+        if (isRt) for (f32 fy = -w*0.5f; fy <= w*0.5f; fy++) pushLine(cx + 1, cy+fy, cx + arm, cy+fy, hi*dim);
+        flushHUD(sw, sh);
+        return;
+    }
+
+    // System buttons (+/-) — small rounded rect
+    {
+        Vec3 col = {0.35f, 0.35f, 0.4f};
+        f32 pw = 14.0f, ph = 14.0f;
+        for (f32 fy = 2; fy < ph - 2; fy += 1.0f)
+            pushLine(x + 2, y + fy, x + pw - 2, y + fy, col * dim);
+        Vec3 border = {0.55f * dim, 0.55f * dim, 0.6f * dim};
+        pushLine(x + 2, y + ph, x + pw - 2, y + ph, border);
+        pushLine(x + 2, y, x + pw - 2, y, border);
+        pushLine(x, y + 2, x, y + ph - 2, border);
+        pushLine(x + pw, y + 2, x + pw, y + ph - 2, border);
+        flushHUD(sw, sh);
+        Vec3 tc = {0.9f * dim, 0.9f * dim, 0.9f * dim};
+        f32 tw = FontSystem::textWidth(label, 1);
+        FontSystem::drawText(sw, sh, x + (pw - tw) * 0.5f, y + 3.0f, label, tc, 1);
+    }
+}
+
 void HUD::drawKeySymbol(u32 sw, u32 sh, f32 x, f32 y,
                           const char* label, bool highlighted)
 {
+    // Auto-detect controller button labels and draw proper symbols
+    if (Input::isGamepadConnected(0) && isControllerLabel(label)) {
+        drawControllerButton(sw, sh, x, y, label, highlighted);
+        return;
+    }
+
     f32 kw = 18.0f, kh = 18.0f;
 
     // Key background — darker when not highlighted
@@ -443,9 +603,16 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
 
         flushHUD(sw, sh);
 
-        // Key symbol
-        char num[2] = {static_cast<char>('1' + s), 0};
-        drawKeySymbol(sw, sh, sx + 7.0f, y + 8.0f, num, selected && unlocked);
+        // Key symbol — show D-pad directions on controller, number keys on keyboard
+        const char* skillLabel;
+        if (Input::isGamepadConnected(0)) {
+            static const char* dpadLabels[] = {"Up", "Rt", "Dn", "Lt"};
+            skillLabel = dpadLabels[s];
+        } else {
+            static char numBuf[4][2] = {{'1',0}, {'2',0}, {'3',0}, {'4',0}};
+            skillLabel = numBuf[s];
+        }
+        drawKeySymbol(sw, sh, sx + 7.0f, y + 8.0f, skillLabel, selected && unlocked);
 
         // Locked text
         if (!unlocked) {
