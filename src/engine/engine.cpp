@@ -1565,15 +1565,15 @@ void Engine::startGame() {
             //                                          HP   DMG  SPD  RNG  COOL  halfExtents
             {  5, "The Butcher",   "FRESH MEAT!",         800, 80, 3.0f, 3.5f, 0.4f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
             { 15, "Lich Lord",     "Your soul is MINE!",  500, 30, 2.8f, 12.f, 0.8f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
-            { 25, "Spider Queen",  "*HISSSS*",            700, 45, 5.0f, 3.0f, 0.4f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
-            { 35, "Demon Knight",  "Kneel before me!",    800, 60, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
-            { 45, "Arch Mage",     "Feel the arcane!",    600, 65, 3.0f, 14.f, 0.4f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
+            { 25, "Spider Queen",  "*HISSSS*",            700, 30, 5.0f, 3.0f, 0.4f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
+            { 35, "Demon Knight",  "Kneel before me!",    800, 25, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
+            { 45, "Arch Mage",     "Feel the arcane!",    600, 20, 3.0f, 14.f, 0.4f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
             // Major bosses (floors 10, 20, 30, 40, 50) — devastating, need full player focus
             { 10, "Andariel",      "Die, insect!",       1000, 65, 4.0f, 3.5f, 0.4f, {0.7f,1.1f, 0.7f}, true,  "andariel", "boss_andariel",     nullptr},
-            { 20, "Mephisto",      "You cannot stop me.",1200, 75, 2.5f, 14.f, 0.5f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
-            { 30, "Baal",          "I am undefeated!",   1800, 70, 3.0f, 4.0f, 0.4f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
-            { 40, "Diablo",        "NOT EVEN DEATH...",  1600, 90, 3.5f, 4.0f, 0.35f,{0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
-            { 50, "Grim Reaper",   "YOUR TIME HAS COME.",2500,120, 4.0f, 4.0f, 0.3f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
+            { 20, "Mephisto",      "You cannot stop me.",1200, 30, 2.5f, 14.f, 0.5f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
+            { 30, "Baal",          "I am undefeated!",   1800, 30, 3.0f, 4.0f, 0.4f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
+            { 40, "Diablo",        "NOT EVEN DEATH...",  1600, 30, 3.5f, 4.0f, 0.35f,{0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
+            { 50, "Grim Reaper",   "YOUR TIME HAS COME.",2500, 30, 4.0f, 4.0f, 0.3f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
         };
 
         // Find boss for this floor
@@ -2217,20 +2217,27 @@ void Engine::update(f32 dt) {
     if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isActionPressed(GameAction::PAUSE)) {
         if (m_gameState == GameState::MENU) {
             m_running = false;
+            return;
         } else if (m_gameState == GameState::IN_GAME) {
             if (m_inventoryOpen) {
-                m_inventoryOpen = false;
+                // Only close on keyboard ESC — minus is drop-all, B (MENU_BACK) closes inventory
+                if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+                    m_inventoryOpen = false;
+                    return;
+                }
+                // Don't return — let minus fall through to updateInventoryInteraction
             } else {
                 m_confirmQuit = true;
                 m_menuSubSelection = 0;
+                return;
             }
         } else if (m_gameState != GameState::GAME_OVER) {
             Net::disconnect();
             m_netRole = NetRole::NONE;
             m_gameState = GameState::MENU;
             Input::setRelativeMouseMode(false);
+            return;
         }
-        return;
     }
 
     switch (m_gameState) {
@@ -2850,7 +2857,7 @@ void Engine::gameUpdate(f32 dt) {
         LOG_INFO("Used potion: +%.0f HP, +%.0f EN", healAmount, energyAmt);
     }
 
-    // Player movement — disable look and movement while inventory is open
+    // Player movement/aiming — disabled while inventory is open
     if (!m_inventoryOpen) {
         PlayerController::update(m_localPlayer, dt);
         if (!m_localPlayer.noclip) {
@@ -3377,7 +3384,7 @@ void Engine::updatePlayerPickup() {
     }
 
     // Item pickup (E key / action) — pick up the nearest item the player is roughly facing
-    if (Input::isActionPressed(GameAction::PICKUP)) {
+    if (!m_inventoryOpen && Input::isActionPressed(GameAction::PICKUP)) {
         // Find the best item: prefer aimed (high dot), fall back to nearest in range.
         // Use XZ-only alignment so items on the floor are reachable.
         Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};

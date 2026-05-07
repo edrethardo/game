@@ -879,7 +879,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             toPlayerDir.y,
                             toPlayerDir.z - spread * toPlayerDir.x});
                         ProjectileSystem::spawn(projectiles, bossEye,
-                            dir, 22.0f, bossDmg * 0.4f, 0.08f, 2.5f, false,
+                            dir, 14.0f, bossDmg * 0.4f, 0.15f, 3.0f, false,
                             PROJ_SPARK);
                     }
                     e.speechText = "LIGHTNING!";
@@ -1341,7 +1341,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             // Ranged enemies: check LOS before attacking. If blocked, move toward
             // last-seen position to regain line of sight.
-            bool hostileIsRanged = (e.attackRange > 5.0f && e.enemyType != EnemyType::BOSS);
+            bool hostileIsRanged = (e.attackRange > 5.0f);
             if (hostileIsRanged) {
                 Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
                 bool canSee = hasLOSToPoint(atkEye, targetPos, grid);

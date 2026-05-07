@@ -360,8 +360,13 @@ bool Input::isButtonPressed(s32 gamepadIndex, s32 button) {
 }
 
 bool Input::isGamepadConnected(s32 gamepadIndex) {
+#ifdef __SWITCH__
+    // Switch always has controllers (Joy-Cons or Pro Controller via libnx)
+    return gamepadIndex >= 0 && gamepadIndex <= 1;
+#else
     if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
     return s_controllers[gamepadIndex] != nullptr;
+#endif
 }
 
 void Input::handleControllerEvent(const SDL_Event& event) {
@@ -478,7 +483,7 @@ void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
 
     for (u32 i = 0; i < handleCount; i++) {
         if (hidGetSixAxisSensorStates(handles[i], &state, 1) >= 1) {
-            f32 yaw   = state.angular_velocity.y;
+            f32 yaw   = state.angular_velocity.y + state.angular_velocity.z;
             f32 pitch = state.angular_velocity.x;
             if (yaw > -0.01f && yaw < 0.01f) yaw = 0.0f;
             if (pitch > -0.01f && pitch < 0.01f) pitch = 0.0f;
