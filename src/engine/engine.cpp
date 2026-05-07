@@ -1884,10 +1884,12 @@ void Engine::startGame() {
     }
     m_players[m_localPlayerIndex].weaponState.currentWeapon = 0;
 
-    // Also set legacy player for singleplayer compat
+    // Set player position — both the active alias and the per-player array
     m_localPlayer.position = spawnPos;
     m_localPlayer.yaw = 0.0f;
     m_localPlayer.pitch = 0.0f;
+    m_localPlayers[0] = m_localPlayer; // sync to array so swapInPlayer doesn't overwrite
+    m_cameras[0] = m_camera;
 
     m_serverTick = 0;
     m_hitMarkerTimer = 0.0f;
@@ -2281,7 +2283,12 @@ void Engine::update(f32 dt) {
                     } else if (!m_playerDead[0]) {
                         EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt);
                     }
-                    ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+                    // P1 dead — run projectiles checking against P2
+                    if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
+                        ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayers[1], dt);
+                    } else {
+                        ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+                    }
                     EntitySystem::tickTimers(m_entities, dt);
                     WorldItemSystem::update(m_worldItems, dt);
                 }
@@ -2927,6 +2934,23 @@ void Engine::gameUpdate(f32 dt) {
     if (m_activePlayerIndex == 0) {
         { PROFILE_SCOPE(2, "Projectiles");
         ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
+        // In co-op, also check enemy projectile collision with P2
+        if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
+            AABB p2Box = {
+                m_localPlayers[1].position + Vec3{-PLAYER_HALF_WIDTH, 0, -PLAYER_HALF_WIDTH},
+                m_localPlayers[1].position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
+            };
+            for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+                Projectile& p = m_projectiles.projectiles[pi];
+                if (!p.active || p.fromPlayer) continue; // only enemy projectiles
+                AABB projBox = {p.position - Vec3{p.radius,p.radius,p.radius},
+                                p.position + Vec3{p.radius,p.radius,p.radius}};
+                if (CombatQuery::aabbOverlap(projBox, p2Box)) {
+                    Combat::applyDamageToPlayer(m_localPlayers[1], p.damage);
+                    p.active = false;
+                }
+            }
+        }
         }
         EntitySystem::tickTimers(m_entities, dt);
         WorldItemSystem::update(m_worldItems, dt);
