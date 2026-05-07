@@ -24,6 +24,7 @@ add_executable(DungeonEngine
     world/collision.cpp
     world/raycast.cpp
     world/combat_query.cpp
+    world/pathfinder.cpp
     game/player.cpp
     game/entity.cpp
     game/combat.cpp
