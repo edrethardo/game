@@ -843,7 +843,10 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
         WorldItem& wi = pool.items[i];
         if (!wi.active) continue;
 
-        wi.lifetime       -= dt;
+        // Legendary items never despawn — persist until floor exit
+        if (wi.item.rarity != Rarity::LEGENDARY) {
+            wi.lifetime -= dt;
+        }
         wi.bobTimer       += dt;
         wi.exclusiveTimer -= dt;
 

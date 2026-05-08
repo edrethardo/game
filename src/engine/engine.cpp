@@ -5498,6 +5498,14 @@ void Engine::renderEntities(u32 sw, u32 sh) {
     const EntityPool& entPool = (m_netRole == NetRole::CLIENT) ? m_renderEntities : m_entities;
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
+    // Cache web material IDs once (avoid per-entity string lookups)
+    static const u8 s_webMatIds[] = {
+        MaterialSystem::getIdByName("prop_web"),
+        MaterialSystem::getIdByName("prop_web_b"),
+        MaterialSystem::getIdByName("prop_web_c"),
+        MaterialSystem::getIdByName("prop_web_d"),
+    };
+
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         const Entity& e = entPool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
@@ -5594,13 +5602,8 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             tint = {0.8f, 0.5f, 0.3f, 1.0f};
         }
         // Skip webs in main pass — rendered in a translucent second pass below
-        {
-            u8 wm[] = {MaterialSystem::getIdByName("prop_web"), MaterialSystem::getIdByName("prop_web_b"),
-                        MaterialSystem::getIdByName("prop_web_c"), MaterialSystem::getIdByName("prop_web_d")};
-            bool skip = false;
-            for (u8 w = 0; w < 4; w++) { if (e.materialId == wm[w]) { skip = true; break; } }
-            if (skip) continue;
-        }
+        if (e.materialId == s_webMatIds[0] || e.materialId == s_webMatIds[1] ||
+            e.materialId == s_webMatIds[2] || e.materialId == s_webMatIds[3]) continue;
 
         if (e.flashTimer > 0.0f) {
             f32 flash = e.flashTimer / 0.12f;
@@ -5790,22 +5793,17 @@ void Engine::renderEntities(u32 sw, u32 sh) {
 
     // Second pass: render translucent webs with alpha blending (batched, single state change)
     {
-        Renderer::flush(); // flush opaque batch first
+        bool hasCavernWebs = (m_currentFloor >= 21 && m_currentFloor <= 30);
+        if (hasCavernWebs) {
+        Renderer::flush();
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
-        u8 webMats[] = {
-            MaterialSystem::getIdByName("prop_web"),
-            MaterialSystem::getIdByName("prop_web_b"),
-            MaterialSystem::getIdByName("prop_web_c"),
-            MaterialSystem::getIdByName("prop_web_d"),
-        };
         for (u32 i = 0; i < MAX_ENTITIES; i++) {
             const Entity& e = entPool.entities[i];
             if (!(e.flags & ENT_ACTIVE)) continue;
-            bool isWeb = false;
-            for (u8 w = 0; w < 4; w++) { if (e.materialId == webMats[w]) { isWeb = true; break; } }
-            if (!isWeb) continue;
+            if (e.materialId != s_webMatIds[0] && e.materialId != s_webMatIds[1] &&
+                e.materialId != s_webMatIds[2] && e.materialId != s_webMatIds[3]) continue;
             const Material* mat = MaterialSystem::get(e.materialId);
             const Texture& tex = (mat && mat->texture.handle) ? mat->texture : defaultTex;
             const Mesh& mesh = (e.meshId < m_meshDefCount) ? m_meshDefs[e.meshId].mesh : m_cubeMesh;
@@ -5831,6 +5829,7 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         Renderer::flush();
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
+        } // end cavern floor check
     }
 
     // Stun indicator — 3 spinning stars orbiting above stunned entity heads
@@ -6621,22 +6620,21 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             }
             // Legendary items override with glowing legendary material
             if (wi.item.rarity == Rarity::LEGENDARY) {
-                const char* legMatName = nullptr;
-                switch (def.slot) {
-                    case ItemSlot::WEAPON:  legMatName = "legendary_weapon"; break;
-                    case ItemSlot::OFFHAND: legMatName = "legendary_shield"; break;
-                    case ItemSlot::HELMET:  legMatName = "legendary_helm";   break;
-                    case ItemSlot::ARMOR:   legMatName = "legendary_armor";  break;
-                    case ItemSlot::BOOTS:   legMatName = "legendary_boots";  break;
-                    case ItemSlot::RING:    legMatName = "legendary_ring";   break;
-                    default: break;
-                }
-                if (legMatName) {
-                    u8 legId = MaterialSystem::getIdByName(legMatName);
-                    const Material* legMat = MaterialSystem::get(legId);
-                    if (legMat && legId > 0) {
+                // Cached legendary material IDs (avoid per-frame string lookups)
+                static const u8 legIds[] = {
+                    MaterialSystem::getIdByName("legendary_weapon"),  // WEAPON=0
+                    MaterialSystem::getIdByName("legendary_shield"),  // OFFHAND=1
+                    MaterialSystem::getIdByName("legendary_helm"),    // HELMET=2
+                    MaterialSystem::getIdByName("legendary_armor"),   // ARMOR=3
+                    MaterialSystem::getIdByName("legendary_boots"),   // BOOTS=4
+                    MaterialSystem::getIdByName("legendary_ring"),    // RING=5
+                };
+                u8 slotIdx = static_cast<u8>(def.slot);
+                if (slotIdx < 6) {
+                    const Material* legMat = MaterialSystem::get(legIds[slotIdx]);
+                    if (legMat && legIds[slotIdx] > 0) {
                         itemTex = legMat->texture;
-                        tint = legMat->tint; // legendary uses its own golden tint
+                        tint = legMat->tint;
                     }
                 }
             }
@@ -7062,9 +7060,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
             u32 slot = 0;
 
-            u8 matDrone  = MaterialSystem::getIdByName("icon_drone");
-            u8 matSwarm  = MaterialSystem::getIdByName("icon_swarm");
-            u8 matTurret = MaterialSystem::getIdByName("icon_turret");
+            static const u8 matDrone  = MaterialSystem::getIdByName("icon_drone");
+            static const u8 matSwarm  = MaterialSystem::getIdByName("icon_swarm");
+            static const u8 matTurret = MaterialSystem::getIdByName("icon_turret");
 
             if (combatDrone) {
                 f32 hpFrac = combatDrone->health / combatDrone->maxHealth;
