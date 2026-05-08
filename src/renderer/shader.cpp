@@ -101,6 +101,16 @@ Shader ShaderSystem::load(const char* vertPath, const char* fragPath) {
         shader.loc_color        = glGetUniformLocation(shader.program, "u_color");
         shader.loc_vp           = glGetUniformLocation(shader.program, "u_vp");
 
+        // Point light uniforms — queried by index since arrays don't have a single location
+        for (int i = 0; i < 4; i++) {
+            char posName[32], colName[32];
+            snprintf(posName, sizeof(posName), "u_pointLightPos[%d]", i);
+            snprintf(colName, sizeof(colName), "u_pointLightColor[%d]", i);
+            shader.loc_pointLightPos[i]   = glGetUniformLocation(shader.program, posName);
+            shader.loc_pointLightColor[i] = glGetUniformLocation(shader.program, colName);
+        }
+        shader.loc_pointLightCount = glGetUniformLocation(shader.program, "u_pointLightCount");
+
         LOG_INFO("Shader loaded: %s + %s (program=%u)", vertPath, fragPath, shader.program);
     }
 

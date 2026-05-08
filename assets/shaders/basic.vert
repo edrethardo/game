@@ -7,10 +7,12 @@ uniform mat4 u_mvp;
 uniform mat4 u_model;
 
 out vec3 vWorldNormal;
+out vec3 vWorldPos;
 out vec2 vUV;
 
 void main() {
     gl_Position  = u_mvp * vec4(aPos, 1.0);
     vWorldNormal = mat3(u_model) * aNormal;
+    vWorldPos    = (u_model * vec4(aPos, 1.0)).xyz;
     vUV          = aUV;
 }

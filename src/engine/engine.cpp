@@ -1495,6 +1495,36 @@ void Engine::startGame() {
     // Assign entities to room-based squads now that all enemies are placed
     SquadSystem::rebuild(m_squads, dungeon, m_entities);
 
+    // Place 1-2 point lights per room for atmospheric lighting
+    {
+        // Light color per tier
+        Vec3 lightCol = {1.0f, 0.7f, 0.3f}; // default: warm torch
+        if      (m_currentFloor >= 41) lightCol = {0.6f, 0.4f, 1.0f};  // Void: pale purple
+        else if (m_currentFloor >= 31) lightCol = {1.0f, 0.4f, 0.1f};  // Hellforge: lava red
+        else if (m_currentFloor >= 21) lightCol = {0.5f, 0.5f, 1.0f};  // Caverns: crystal blue
+        else if (m_currentFloor >= 11) lightCol = {0.4f, 0.8f, 0.3f};  // Catacombs: sickly green
+
+        m_pointLightCount = 0;
+        for (u32 r = 0; r < dungeon.roomCount && m_pointLightCount < MAX_POINT_LIGHTS; r++) {
+            const DungeonRoom& room = dungeon.rooms[r];
+            // Center light — slightly above floor for visibility
+            f32 cx = (room.x + room.w * 0.5f) * m_grid.cellSize;
+            f32 cz = (room.z + room.d * 0.5f) * m_grid.cellSize;
+            m_pointLights[m_pointLightCount++] = {
+                {cx, room.floorHeight + 1.8f, cz}, lightCol
+            };
+            // Second light near doorway for larger rooms
+            if (room.w * room.d >= 25 && m_pointLightCount < MAX_POINT_LIGHTS) {
+                f32 dx = (room.x + 1.0f) * m_grid.cellSize;
+                f32 dz = (room.z + 1.0f) * m_grid.cellSize;
+                m_pointLights[m_pointLightCount++] = {
+                    {dx, room.floorHeight + 1.5f, dz}, lightCol * 0.7f
+                };
+            }
+        }
+        LOG_INFO("Placed %u point lights for floor %u", m_pointLightCount, m_currentFloor);
+    }
+
     // Spawn chests and mimics (1 per room, 20% chance mimic)
     {
         u8 chestMeshId = m_meshIdChest;
@@ -5209,11 +5239,56 @@ void Engine::render(f32 alpha) {
     CameraSystem::computeMatrices(m_camera, aspect);
 
     Renderer::beginFrame(m_camera);
+    // Per-floor lighting themes — each tier gets distinct atmosphere
+    struct FloorTheme { u32 minFloor; Vec3 lightColor; Vec3 ambient; };
+    static const FloorTheme kThemes[] = {
+        { 1,  {1.0f, 0.95f, 0.9f},  {0.18f, 0.18f, 0.22f}},  // Dungeon: warm torchlight
+        {11,  {0.8f, 0.9f,  0.7f},  {0.12f, 0.15f, 0.12f}},  // Catacombs: sickly green
+        {21,  {0.7f, 0.7f,  1.0f},  {0.20f, 0.18f, 0.28f}},  // Caverns: cold blue-purple
+        {31,  {1.0f, 0.6f,  0.3f},  {0.25f, 0.10f, 0.05f}},  // Hellforge: hot orange
+        {41,  {0.6f, 0.6f,  0.8f},  {0.08f, 0.08f, 0.15f}},  // Void: dim alien
+    };
+    const FloorTheme* theme = &kThemes[0];
+    for (u32 t = 0; t < 5; t++) {
+        if (m_currentFloor >= kThemes[t].minFloor) theme = &kThemes[t];
+    }
     Renderer::setDirectionalLight(
         normalize(Vec3{-0.3f, -1.0f, -0.5f}),
-        {1.0f, 0.95f, 0.9f},
-        {0.15f, 0.15f, 0.2f}
+        theme->lightColor,
+        theme->ambient
     );
+
+    // Send nearest 4 point lights to the shader
+    if (m_pointLightCount > 0) {
+        Vec3 camPos = m_camera.position;
+        // Find nearest 4 by distance
+        struct LightDist { u32 idx; f32 dist; };
+        LightDist nearest[4];
+        u32 nearCount = 0;
+        for (u32 li = 0; li < m_pointLightCount; li++) {
+            f32 d = lengthSq(m_pointLights[li].position - camPos);
+            if (nearCount < 4) {
+                nearest[nearCount++] = {li, d};
+            } else {
+                // Replace furthest if this one is closer
+                u32 worstIdx = 0;
+                for (u32 n = 1; n < 4; n++) {
+                    if (nearest[n].dist > nearest[worstIdx].dist) worstIdx = n;
+                }
+                if (d < nearest[worstIdx].dist) {
+                    nearest[worstIdx] = {li, d};
+                }
+            }
+        }
+        Vec3 positions[4], colors[4];
+        for (u32 n = 0; n < nearCount; n++) {
+            positions[n] = m_pointLights[nearest[n].idx].position;
+            colors[n]    = m_pointLights[nearest[n].idx].color;
+        }
+        Renderer::setPointLights(positions, colors, nearCount);
+    } else {
+        Renderer::setPointLights(nullptr, nullptr, 0);
+    }
 
     // Level geometry
     LevelMeshSystem::submitAll(m_sections, m_sectionCount, m_basicShader);

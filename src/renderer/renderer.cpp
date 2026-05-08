@@ -34,6 +34,10 @@ static Vec3 s_lightDir     = normalize(Vec3{-0.3f, -1.0f, -0.5f});
 static Vec3 s_lightColor   = {1.0f, 0.95f, 0.9f};
 static Vec3 s_lightAmbient = {0.15f, 0.15f, 0.2f};
 
+static Vec3 s_pointLightPos[4];
+static Vec3 s_pointLightColor[4];
+static u32  s_pointLightCount = 0;
+
 void Renderer::init() {
     LOG_INFO("Renderer initialized (MAX_COMMANDS=%u)", MAX_COMMANDS);
 }
@@ -46,6 +50,15 @@ void Renderer::setDirectionalLight(Vec3 direction, Vec3 color, Vec3 ambient) {
     s_lightDir     = normalize(direction);
     s_lightColor   = color;
     s_lightAmbient = ambient;
+}
+
+void Renderer::setPointLights(const Vec3* positions, const Vec3* colors, u32 count) {
+    // Clamp to the shader's array size; caller is responsible for pre-sorting by distance
+    s_pointLightCount = (count > 4) ? 4 : count;
+    for (u32 i = 0; i < s_pointLightCount; i++) {
+        s_pointLightPos[i]   = positions[i];
+        s_pointLightColor[i] = colors[i];
+    }
 }
 
 void Renderer::beginFrame(const Camera& camera) {
@@ -114,6 +127,18 @@ void Renderer::flush() {
                 glUniform3f(sh.loc_lightColor, s_lightColor.x, s_lightColor.y, s_lightColor.z);
             if (sh.loc_ambientColor >= 0)
                 glUniform3f(sh.loc_ambientColor, s_lightAmbient.x, s_lightAmbient.y, s_lightAmbient.z);
+
+            // Point lights — count is always uploaded so the loop in the shader terminates correctly
+            if (sh.loc_pointLightCount >= 0)
+                glUniform1i(sh.loc_pointLightCount, static_cast<s32>(s_pointLightCount));
+            for (u32 p = 0; p < s_pointLightCount; p++) {
+                if (sh.loc_pointLightPos[p] >= 0)
+                    glUniform3f(sh.loc_pointLightPos[p],
+                                s_pointLightPos[p].x, s_pointLightPos[p].y, s_pointLightPos[p].z);
+                if (sh.loc_pointLightColor[p] >= 0)
+                    glUniform3f(sh.loc_pointLightColor[p],
+                                s_pointLightColor[p].x, s_pointLightColor[p].y, s_pointLightColor[p].z);
+            }
             lightSet = true;
         }
 

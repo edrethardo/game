@@ -21,6 +21,7 @@ namespace Renderer {
     void flush();
 
     void setDirectionalLight(Vec3 direction, Vec3 color, Vec3 ambient);
+    void setPointLights(const Vec3* positions, const Vec3* colors, u32 count);
 
     u32 getDrawCallCount();
     u32 getVisibleCount();

@@ -145,6 +145,12 @@ private:
     // Dungeon layout — kept as member so SquadSystem::update can reference room adjacency
     DungeonResult  m_dungeon;
 
+    // Per-room point lights (placed at level gen, nearest 4 sent to shader per frame)
+    static constexpr u32 MAX_POINT_LIGHTS = 64;
+    struct PointLight { Vec3 position; Vec3 color; };
+    PointLight m_pointLights[MAX_POINT_LIGHTS];
+    u32 m_pointLightCount = 0;
+
     // NPC equipment pool — persistent across floor transitions for surviving NPCs
     NpcEquipment   m_npcEquip[MAX_NPC_EQUIP] = {};
 
