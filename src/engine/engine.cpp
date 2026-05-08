@@ -1324,10 +1324,10 @@ void Engine::startGame() {
                 for (u32 x = 0; x < m_grid.width; x++) {
                     GridCell& cell = LevelGridSystem::getCell(m_grid, x, z);
                     if (!(cell.flags & CELL_FLOOR)) continue; // skip solid cells
-                    // Replace default stone/brick with theme, preserve blood (boss arenas)
-                    if (cell.wallMaterialId <= 3) cell.wallMaterialId = themeWall;
-                    if (cell.floorMaterialId <= 2) cell.floorMaterialId = themeFloor;
-                    if (cell.ceilMaterialId <= 2) cell.ceilMaterialId = themeCeil;
+                    // Replace default materials with theme — only preserve blood (boss arenas, id >= 20)
+                    if (cell.wallMaterialId < 20) cell.wallMaterialId = themeWall;
+                    if (cell.floorMaterialId < 20) cell.floorMaterialId = themeFloor;
+                    if (cell.ceilMaterialId < 20) cell.ceilMaterialId = themeCeil;
                 }
             }
             LOG_INFO("Applied floor theme for depth tier %u-%u",
@@ -1760,7 +1760,7 @@ void Engine::startGame() {
             {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
         };
         PropDef cavernProps[] = {
-            {mWeb,    matWeb,  {0.50f, 0.02f, 0.50f}, 2.2f, true},
+            {mWeb,    matWeb,  {0.50f, 0.50f, 0.02f}, 0.0f, true},  // wall web — yOff randomized below
             {mBones,  matBone, {0.01f, 0.01f, 0.01f}, 0.06f, false},
             {mBarrel, matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
         };
@@ -1793,46 +1793,110 @@ void Engine::startGame() {
                 const PropDef& prop = props[std::rand() % propCount];
 
                 f32 px, pz;
-                if (prop.wallOnly) {
-                    // Place inside the room against the inner face of walls.
-                    // Use (room + 1) as the first walkable cell — props go at the
-                    // edge of this cell, flush with the wall but inside the room.
-                    // Skip rooms too small to have wall space.
-                    if (room.w < 4 || room.d < 4) continue;
-                    u32 wall = std::rand() % 4;
+                u32 wall = std::rand() % 4; // 0=north, 1=south, 2=west, 3=east
+                // Webs: 30% ceiling, 70% wall. Decide before placement.
+                bool ceilingWeb = false;
+                f32 yOff = prop.yOff;
+                Vec3 spawnHalf = prop.halfExt;
+                if (prop.matId == matWeb && (std::rand() % 100) < 30) {
+                    ceilingWeb = true;
+                }
+
+                if (ceilingWeb) {
+                    // Ceiling web — random position, directly on ceiling surface
                     f32 cs = m_grid.cellSize;
+                    px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * cs;
+                    pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * cs;
+                    yOff = 3.0f; // exactly at ceiling
+                    spawnHalf = {0.50f, 0.02f, 0.50f};
+                } else if (prop.wallOnly) {
+                    // Place directly on the wall surface
+                    if (room.w < 4 || room.d < 4) continue;
+                    f32 cs = m_grid.cellSize;
+                    f32 margin = prop.halfExt.x + 0.1f;
                     if (wall < 2) {
-                        // North/south wall: random x along interior, z at inner wall face
-                        px = (room.x + 2 + std::rand() % (room.w > 4 ? room.w - 4 : 1)) * cs;
+                        f32 minX = (room.x * cs) + margin;
+                        f32 maxX = ((room.x + room.w) * cs) - margin;
+                        if (minX >= maxX) { px = (minX + maxX) * 0.5f; }
+                        else { px = minX + (std::rand() % 1000) * 0.001f * (maxX - minX); }
+                        // Flush on wall face (z at cell boundary)
                         if (wall == 0)
-                            pz = (room.z + 1) * cs + prop.halfExt.z;       // 1 cell in from north
+                            pz = room.z * cs;
                         else
-                            pz = (room.z + room.d - 2) * cs + cs - prop.halfExt.z; // 1 cell in from south
+                            pz = (room.z + room.d) * cs;
                     } else {
-                        // West/east wall: random z along interior, x at inner wall face
-                        pz = (room.z + 2 + std::rand() % (room.d > 4 ? room.d - 4 : 1)) * cs;
+                        f32 minZ = (room.z * cs) + margin;
+                        f32 maxZ = ((room.z + room.d) * cs) - margin;
+                        if (minZ >= maxZ) { pz = (minZ + maxZ) * 0.5f; }
+                        else { pz = minZ + (std::rand() % 1000) * 0.001f * (maxZ - minZ); }
+                        // Flush on wall face (x at cell boundary)
                         if (wall == 2)
-                            px = (room.x + 1) * cs + prop.halfExt.x;           // 1 cell in from west
+                            px = room.x * cs;
                         else
-                            px = (room.x + room.w - 2) * cs + cs - prop.halfExt.x; // 1 cell in from east
+                            px = (room.x + room.w) * cs;
                     }
+                    // Skip doorways — verify solid wall behind
+                    u32 checkX, checkZ;
+                    if (wall == 0)      { checkX = static_cast<u32>(px / cs); checkZ = room.z - 1; }
+                    else if (wall == 1) { checkX = static_cast<u32>(px / cs); checkZ = room.z + room.d; }
+                    else if (wall == 2) { checkX = room.x - 1;               checkZ = static_cast<u32>(pz / cs); }
+                    else                { checkX = room.x + room.w;          checkZ = static_cast<u32>(pz / cs); }
+                    if (!LevelGridSystem::isInBounds(m_grid, checkX, checkZ) ||
+                        !LevelGridSystem::isSolid(m_grid, checkX, checkZ)) continue;
+                    // Wall webs: random height 1.6-2.1m
+                    if (prop.matId == matWeb) yOff = 1.6f + (std::rand() % 50) * 0.01f;
                 } else {
-                    // Small/flat props (bones, webs) can go anywhere in the room
+                    // Small/flat props (bones) can go anywhere in the room
                     px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * m_grid.cellSize;
                     pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * m_grid.cellSize;
                 }
                 f32 py = room.floorHeight;
 
+                // Skip if too close to an existing web (min 2m spacing)
+                if (prop.matId == matWeb) {
+                    Vec3 candidate = {px, py + yOff, pz};
+                    bool tooClose = false;
+                    for (u32 ci = 0; ci < m_entities.activeCount; ci++) {
+                        const Entity& other = m_entities.entities[m_entities.activeList[ci]];
+                        if (other.enemyType != EnemyType::PROP) continue;
+                        // Check if other is a web by checking known web material IDs
+                        bool otherIsWeb = false;
+                        for (u8 w = 0; w < 4; w++) {
+                            u8 wids[] = {matWeb,
+                                MaterialSystem::getIdByName("prop_web_b"),
+                                MaterialSystem::getIdByName("prop_web_c"),
+                                MaterialSystem::getIdByName("prop_web_d")};
+                            if (other.materialId == wids[w]) { otherIsWeb = true; break; }
+                        }
+                        if (otherIsWeb && lengthSq(other.position - candidate) < 4.0f) {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                    if (tooClose) continue;
+                }
+
                 EntityHandle dh = EntitySystem::spawn(m_entities,
-                    Vec3{px, py + prop.yOff, pz}, prop.halfExt, false,
+                    Vec3{px, py + yOff, pz}, spawnHalf, false,
                     9999.0f, 0.0f, 0.0f, 0.0f, 999.0f, 0.0f);
                 Entity* deco = handleGet(m_entities, dh);
                 if (deco) {
                     deco->meshId = prop.meshId;
                     deco->materialId = prop.matId;
                     deco->enemyType = EnemyType::PROP;
-                    // Random rotation for variety
-                    deco->yaw = (std::rand() % 628) * 0.01f;
+                    // Randomize web texture for variety
+                    if (prop.matId == matWeb) {
+                        static const char* webMats[] = {"prop_web", "prop_web_b", "prop_web_c", "prop_web_d"};
+                        deco->materialId = MaterialSystem::getIdByName(webMats[std::rand() % 4]);
+                    }
+                    if (ceilingWeb) {
+                        deco->yaw = (std::rand() % 628) * 0.01f;
+                    } else if (prop.wallOnly) {
+                        static const f32 wallYaw[] = {0.0f, 0.0f, 1.5708f, 1.5708f};
+                        deco->yaw = wallYaw[wall];
+                    } else {
+                        deco->yaw = (std::rand() % 628) * 0.01f;
+                    }
                     decoCount++;
                 }
             }
@@ -5529,6 +5593,15 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         } else {
             tint = {0.8f, 0.5f, 0.3f, 1.0f};
         }
+        // Skip webs in main pass — rendered in a translucent second pass below
+        {
+            u8 wm[] = {MaterialSystem::getIdByName("prop_web"), MaterialSystem::getIdByName("prop_web_b"),
+                        MaterialSystem::getIdByName("prop_web_c"), MaterialSystem::getIdByName("prop_web_d")};
+            bool skip = false;
+            for (u8 w = 0; w < 4; w++) { if (e.materialId == wm[w]) { skip = true; break; } }
+            if (skip) continue;
+        }
+
         if (e.flashTimer > 0.0f) {
             f32 flash = e.flashTimer / 0.12f;
             Vec4 flashColor = {1.0f, 0.3f * flash, 0.3f * flash, 1.0f};
@@ -5713,6 +5786,51 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                 }
             }
         }
+    }
+
+    // Second pass: render translucent webs with alpha blending (batched, single state change)
+    {
+        Renderer::flush(); // flush opaque batch first
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        u8 webMats[] = {
+            MaterialSystem::getIdByName("prop_web"),
+            MaterialSystem::getIdByName("prop_web_b"),
+            MaterialSystem::getIdByName("prop_web_c"),
+            MaterialSystem::getIdByName("prop_web_d"),
+        };
+        for (u32 i = 0; i < MAX_ENTITIES; i++) {
+            const Entity& e = entPool.entities[i];
+            if (!(e.flags & ENT_ACTIVE)) continue;
+            bool isWeb = false;
+            for (u8 w = 0; w < 4; w++) { if (e.materialId == webMats[w]) { isWeb = true; break; } }
+            if (!isWeb) continue;
+            const Material* mat = MaterialSystem::get(e.materialId);
+            const Texture& tex = (mat && mat->texture.handle) ? mat->texture : defaultTex;
+            const Mesh& mesh = (e.meshId < m_meshDefCount) ? m_meshDefs[e.meshId].mesh : m_cubeMesh;
+            // Ceiling webs (flat Y halfExtent) need 90° X rotation to lay horizontal
+            bool isCeilingWeb = (e.halfExtents.y < 0.05f && e.halfExtents.x > 0.1f);
+            Mat4 model;
+            AABB bounds;
+            if (isCeilingWeb) {
+                // Scale as XZ slab directly (skip rotation — just swap Y/Z in scale)
+                Vec3 ceilScale = {e.halfExtents.x * 2.0f, e.halfExtents.z * 2.0f, e.halfExtents.y * 2.0f};
+                model = Mat4::translate(e.position) * Mat4::rotateY(e.yaw)
+                      * Mat4::rotateX(1.5708f) * Mat4::scale(ceilScale);
+                // Expand AABB so frustum culling doesn't clip the thin slab
+                bounds = {e.position - Vec3{e.halfExtents.x, 0.2f, e.halfExtents.z},
+                          e.position + Vec3{e.halfExtents.x, 0.2f, e.halfExtents.z}};
+            } else {
+                model = Mat4::translate(e.position) * Mat4::rotateY(e.yaw)
+                      * Mat4::scale(e.halfExtents * 2.0f);
+                bounds = entityAABB(e);
+            }
+            Renderer::submit(m_basicShader, tex, mesh, model, bounds, mat->tint);
+        }
+        Renderer::flush();
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
     }
 
     // Stun indicator — 3 spinning stars orbiting above stunned entity heads

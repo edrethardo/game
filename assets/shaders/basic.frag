@@ -31,5 +31,7 @@ void main() {
     }
 
     vec4 texColor = texture(u_texture0, vUV);
-    FragColor = vec4(texColor.rgb * lighting * u_color.rgb, texColor.a * u_color.a);
+    float alpha = texColor.a * u_color.a;
+    if (alpha < 0.05) discard;  // skip fully transparent fragments (webs, etc.)
+    FragColor = vec4(texColor.rgb * lighting * u_color.rgb, alpha);
 }
