@@ -193,19 +193,19 @@ void FontSystem::shutdown() {
     ShaderSystem::destroy(s_textShader);
 }
 
-f32 FontSystem::textWidth(const char* text, u32 scale) {
+f32 FontSystem::textWidth(const char* text, f32 scale) {
     u32 len = 0;
     while (text[len]) len++;
-    return static_cast<f32>(len * (GLYPH_W + GLYPH_SPACING) * scale) * s_uiScale;
+    return static_cast<f32>(len) * static_cast<f32>(GLYPH_W + GLYPH_SPACING) * scale * s_uiScale;
 }
 
-f32 FontSystem::textHeight(u32 scale) {
-    return static_cast<f32>(GLYPH_H * scale) * s_uiScale;
+f32 FontSystem::textHeight(f32 scale) {
+    return static_cast<f32>(GLYPH_H) * scale * s_uiScale;
 }
 
 void FontSystem::drawText(u32 screenWidth, u32 screenHeight,
                           f32 x, f32 y, const char* text,
-                          Vec3 color, u32 scale)
+                          Vec3 color, f32 scale)
 {
     if (!s_textVAO || !text || !text[0]) return;
 

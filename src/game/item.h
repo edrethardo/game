@@ -438,7 +438,8 @@ namespace ItemGen {
                           const AffixDef* affixDefs, u32 affixDefCount);
     Rarity rollRarity(u8 enemyLevel);
     void   rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
-                       const AffixDef* affixDefs, u32 affixDefCount);
+                       const AffixDef* affixDefs, u32 affixDefCount,
+                       WeaponType weaponType = WeaponType::MELEE);
 }
 
 namespace Inventory {

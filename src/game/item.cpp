@@ -424,7 +424,8 @@ Rarity ItemGen::rollRarity(u8 enemyLevel) {
 }
 
 void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
-                           const AffixDef* affixDefs, u32 affixDefCount) {
+                           const AffixDef* affixDefs, u32 affixDefCount,
+                           WeaponType weaponType) {
     // Determine how many affixes to roll based on rarity
     u8 minAffixes = 0;
     u8 maxAffixes = 0;
@@ -443,13 +444,24 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
     if (affixCount > MAX_AFFIXES_PER_ITEM)
         affixCount = MAX_AFFIXES_PER_ITEM;
 
-    // Build list of valid affix candidates for this slot
+    // Build list of valid affix candidates for this slot, filtering nonsensical stats
     u32 slotBit = 1u << static_cast<u32>(slot);
     u32 candidateIndices[MAX_AFFIX_DEFS];
     u32 candidateCount = 0;
     for (u32 i = 0; i < affixDefCount; i++) {
-        if (affixDefs[i].validSlots & slotBit)
-            candidateIndices[candidateCount++] = i;
+        if (!(affixDefs[i].validSlots & slotBit)) continue;
+        // Skip weapon-type-specific affixes that don't make sense
+        if (slot == ItemSlot::WEAPON) {
+            AffixType at = affixDefs[i].type;
+            // Reload/clip only on hitscan weapons
+            if ((at == AffixType::RELOAD_SPEED_PCT || at == AffixType::CLIP_SIZE_PCT) &&
+                weaponType != WeaponType::HITSCAN) continue;
+            // Projectile speed only on projectile weapons
+            if (at == AffixType::PROJECTILE_SPEED && weaponType != WeaponType::PROJECTILE) continue;
+            // Cone angle only on melee weapons
+            if (at == AffixType::CONE_ANGLE && weaponType != WeaponType::MELEE) continue;
+        }
+        candidateIndices[candidateCount++] = i;
     }
 
     item.affixCount = 0;
@@ -539,8 +551,8 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     item.damage      = def.baseDamage  * levelMult;
     item.bonusHealth = def.baseHealth  * levelMult;
 
-    // Roll affixes
-    rollAffixes(item, enemyLevel, def.slot, affixDefs, affixDefCount);
+    // Roll affixes — pass weapon type to filter nonsensical stats
+    rollAffixes(item, enemyLevel, def.slot, affixDefs, affixDefCount, def.weaponType);
 
     // Legendary items get their fixed skill affix appended (informational — stored separately)
     // The legendarySkillId is on the def; no affix slot consumed for it.

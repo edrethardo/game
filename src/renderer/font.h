@@ -24,14 +24,14 @@ namespace FontSystem {
     f32   getUIScale();
 
     // Draw text at pixel position (x,y = bottom-left of first glyph).
-    // scale: pixel multiplier (1 = 5x7, 2 = 10x14, etc.)
+    // scale: pixel multiplier (1.0 = 5x7, 2.0 = 10x14, 1.5 = 7x10, etc.)
     void drawText(u32 screenWidth, u32 screenHeight,
                   f32 x, f32 y, const char* text,
-                  Vec3 color, u32 scale = 1);
+                  Vec3 color, f32 scale = 1.0f);
 
     // Returns width in pixels of the given text at the given scale
-    f32 textWidth(const char* text, u32 scale = 1);
+    f32 textWidth(const char* text, f32 scale = 1.0f);
 
     // Returns height in pixels at the given scale
-    f32 textHeight(u32 scale = 1);
+    f32 textHeight(f32 scale = 1.0f);
 }

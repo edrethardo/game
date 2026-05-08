@@ -1295,13 +1295,25 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                     inv.backpack[i], bpDef);
 
                     // Right: currently equipped in matching slot
-                    FontSystem::drawText(sw, sh, rightTipX, tooltipY + 16.0f,
-                                        "EQUIPPED", {1.0f, 0.85f, 0.3f}, 1);
-
                     if (!isItemEmpty(inv.equipped[eqIdx])) {
                         drawItemTooltip(sw, sh, rightTipX, tooltipY,
                                         inv.equipped[eqIdx],
                                         itemDefs[inv.equipped[eqIdx].defId]);
+                        // "EQUIPPED" box below the tooltip
+                        f32 boxW = 80.0f, boxH = 16.0f;
+                        f32 boxX = rightTipX + (320.0f - boxW) * 0.5f;
+                        f32 boxY = tooltipY - boxH - 4.0f;
+                        Vec3 gold = {1.0f, 0.85f, 0.3f};
+                        for (f32 fy = 0; fy < boxH; fy += 1.0f)
+                            pushLine(boxX, boxY + fy, boxX + boxW, boxY + fy, {0.08f, 0.08f, 0.12f});
+                        pushLine(boxX, boxY, boxX + boxW, boxY, gold * 0.6f);
+                        pushLine(boxX, boxY + boxH, boxX + boxW, boxY + boxH, gold * 0.6f);
+                        pushLine(boxX, boxY, boxX, boxY + boxH, gold * 0.6f);
+                        pushLine(boxX + boxW, boxY, boxX + boxW, boxY + boxH, gold * 0.6f);
+                        flushHUD(sw, sh);
+                        f32 labelW = FontSystem::textWidth("EQUIPPED", 1);
+                        FontSystem::drawText(sw, sh, boxX + (boxW - labelW) * 0.5f, boxY + 3.0f,
+                                            "EQUIPPED", gold, 1);
                     } else {
                         char emptyLabel[32];
                         std::snprintf(emptyLabel, sizeof(emptyLabel),
@@ -1631,8 +1643,8 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
 
     Vec3 rColor = rarityColor(item.rarity);
 
-    u32 nameScale = 3;
-    u32 bodyScale = 2;
+    f32 nameScale = 2.5f;
+    f32 bodyScale = 1.5f;
     f32 lineH = FontSystem::textHeight(bodyScale) + 3.0f;
     f32 nameH = FontSystem::textHeight(nameScale) + 6.0f;
     f32 padX = 10.0f;
