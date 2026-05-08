@@ -1447,9 +1447,16 @@ void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
         if (effects[i].timer <= 0.0f) continue;
 
         // Pulsing brightness when timer is low (<2s)
-        f32 pulse = (effects[i].timer < 2.0f)
-            ? 0.5f + 0.5f * sinf(effects[i].timer * 8.0f)
-            : 1.0f;
+        // Blink when effect is about to wear off
+        f32 pulse = 1.0f;
+        f32 t = effects[i].timer;
+        if (t < 1.0f) {
+            pulse = 0.1f + 0.9f * (0.5f + 0.5f * sinf(t * 12.0f)); // urgent fast blink, 10-100%
+        } else if (t < 3.0f) {
+            pulse = 0.3f + 0.7f * (0.5f + 0.5f * sinf(t * 6.0f));  // moderate blink, 30-100%
+        } else if (t < 5.0f) {
+            pulse = 0.3f + 0.7f * (0.5f + 0.5f * sinf(t * 3.0f));  // slow blink, 30-100%
+        }
 
         // Background fill
         Vec3 bg = effects[i].color * 0.15f;
@@ -1485,9 +1492,10 @@ void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
 
         flushHUD(sw, sh);
 
-        // Timer text above icon
+        // Timer or display value text above icon
         char timeTxt[8];
-        std::snprintf(timeTxt, sizeof(timeTxt), "%.0f", effects[i].timer);
+        f32 showVal = (effects[i].displayValue >= 0.0f) ? effects[i].displayValue : effects[i].timer;
+        std::snprintf(timeTxt, sizeof(timeTxt), "%.0f", showVal);
         f32 tw = FontSystem::textWidth(timeTxt, 1);
         FontSystem::drawText(sw, sh, cx + (iconSize - tw) * 0.5f, y + iconSize + 2.0f,
                              timeTxt, effects[i].color * pulse, 1);

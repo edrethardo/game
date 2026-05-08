@@ -85,7 +85,7 @@ static void setDefaults() {
     set(GameAction::FIRE,          -1, MOUSE_LEFT,       -1, -1, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 0.5f);
     set(GameAction::BLOCK,         SDL_SCANCODE_LCTRL,  0, -1, -1, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 0.5f);
     set(GameAction::CLASS_SKILL,   -1, MOUSE_RIGHT,      SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
-    set(GameAction::TARGET_LOCK,   -1, MOUSE_MIDDLE,     SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::TARGET_LOCK,   -1, MOUSE_MIDDLE,     -1); // L is modifier-only on gamepad, not target lock
 
     // Items / utility
     set(GameAction::POTION,        SDL_SCANCODE_Q,      0, SDL_CONTROLLER_BUTTON_B);
@@ -481,10 +481,19 @@ void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
         handleCount = s_gyroHandleCountP2;
     }
 
+    // Read all queued gyro samples and average — sensor runs at 200Hz,
+    // game polls at 60Hz, so averaging captures all intermediate motion.
     for (u32 i = 0; i < handleCount; i++) {
-        if (hidGetSixAxisSensorStates(handles[i], &state, 1) >= 1) {
-            f32 yaw   = state.angular_velocity.y + state.angular_velocity.z;
-            f32 pitch = state.angular_velocity.x;
+        HidSixAxisSensorState states[16];
+        s32 count = hidGetSixAxisSensorStates(handles[i], states, 16);
+        if (count > 0) {
+            f32 yaw = 0.0f, pitch = 0.0f;
+            for (s32 s = 0; s < count; s++) {
+                yaw   += states[s].angular_velocity.y + states[s].angular_velocity.z;
+                pitch += states[s].angular_velocity.x;
+            }
+            yaw   /= static_cast<f32>(count);
+            pitch /= static_cast<f32>(count);
             if (yaw > -0.01f && yaw < 0.01f) yaw = 0.0f;
             if (pitch > -0.01f && pitch < 0.01f) pitch = 0.0f;
             if (yaw != 0.0f || pitch != 0.0f) {

@@ -110,7 +110,8 @@ namespace HUD {
     struct StatusEffect {
         const char* label; // short text (e.g. "PSN", "BRN")
         Vec3 color;        // icon tint color
-        f32  timer;        // remaining duration (0 = inactive)
+        f32  timer;        // remaining duration (0 = inactive), drives blink
+        f32  displayValue; // if >= 0, shown as text instead of timer (e.g. stack count)
     };
     void drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
                           const StatusEffect* effects, u32 count);

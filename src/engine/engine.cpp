@@ -625,7 +625,7 @@ void Engine::init() {
             if (s_engine->m_ringPassive == SkillId::SOUL_HARVEST) {
                 Player& p = s_engine->m_localPlayer;
                 if (p.soulHarvestStacks < 5) p.soulHarvestStacks++;
-                p.soulHarvestTimer = 10.0f;
+                p.soulHarvestTimer = 5.0f; // 5s window to get next kill or stacks reset
                 // Speed bonus applied via moveSpeed multiplier
             }
             // Void Kill: 15% chance to spawn void zone on corpse
@@ -5176,8 +5176,12 @@ void Engine::render(f32 alpha) {
     f32  tickPitch = m_camera.pitch;
     if (m_gameState == GameState::IN_GAME) {
         m_camera.position = m_camera.prevPosition + (tickPos   - m_camera.prevPosition) * alpha;
-        m_camera.yaw      = m_camera.prevYaw      + (tickYaw   - m_camera.prevYaw)      * alpha;
-        m_camera.pitch    = m_camera.prevPitch     + (tickPitch - m_camera.prevPitch)    * alpha;
+        // Angle-aware yaw interpolation — handles ±π wrapping without snapping
+        f32 yawDiff = tickYaw - m_camera.prevYaw;
+        if (yawDiff >  3.14159f) yawDiff -= 6.28318f;
+        if (yawDiff < -3.14159f) yawDiff += 6.28318f;
+        m_camera.yaw      = m_camera.prevYaw + yawDiff * alpha;
+        m_camera.pitch    = m_camera.prevPitch + (tickPitch - m_camera.prevPitch) * alpha;
     }
 
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
@@ -6984,7 +6988,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 invMY = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
             } else {
                 f32 eqX = static_cast<f32>(sw) * 0.12f;
-                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
+                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 220.0f;
                 invMX = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
                 invMY = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
             }
@@ -7121,14 +7125,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         // Status effect icons above the energy bar
         {
             HUD::StatusEffect statuses[] = {
-                {"PSN", {0.2f, 0.8f, 0.2f}, m_localPlayer.poisonTimer},
-                {"BRN", {1.0f, 0.5f, 0.1f}, m_localPlayer.burnTimer},
-                {"FRZ", {0.4f, 0.7f, 1.0f}, m_localPlayer.freezeTimer},
-                {"SLO", {0.6f, 0.3f, 0.9f}, m_localPlayer.slowTimer},
-                {"INV", {1.0f, 0.85f, 0.3f}, m_localPlayer.invulnTimer},
-                // Show stack count (as float) so the number above the icon = stacks, not seconds
-                {"SH",  {0.9f, 0.5f, 0.15f}, m_localPlayer.soulHarvestTimer > 0.0f
-                    ? static_cast<f32>(m_localPlayer.soulHarvestStacks) : 0.0f},
+                {"PSN", {0.2f, 0.8f, 0.2f}, m_localPlayer.poisonTimer, -1.0f},
+                {"BRN", {1.0f, 0.5f, 0.1f}, m_localPlayer.burnTimer, -1.0f},
+                {"FRZ", {0.4f, 0.7f, 1.0f}, m_localPlayer.freezeTimer, -1.0f},
+                {"SLO", {0.6f, 0.3f, 0.9f}, m_localPlayer.slowTimer, -1.0f},
+                {"INV", {1.0f, 0.85f, 0.3f}, m_localPlayer.invulnTimer, -1.0f},
+                // Soul Harvest: timer drives blink, displayValue shows stack count
+                {"SH",  {0.9f, 0.5f, 0.15f}, m_localPlayer.soulHarvestTimer,
+                    m_localPlayer.soulHarvestTimer > 0.0f
+                        ? static_cast<f32>(m_localPlayer.soulHarvestStacks) : -1.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap
             HUD::drawStatusIcons(sw, sh, 20.0f, 58.0f, statuses, 6);
