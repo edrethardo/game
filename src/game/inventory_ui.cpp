@@ -7,8 +7,8 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
 
     // --- Backpack grid (right side) ---
     {
-        f32 bpX = static_cast<f32>(sw) * 0.52f;
-        f32 bpStartY = static_cast<f32>(sh) * 0.5f + 90.0f;
+        f32 bpX = static_cast<f32>(sw) * 0.42f;
+        f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
 
         for (u32 i = 0; i < BP_COLS * BP_ROWS; i++) {
             u32 col = i % BP_COLS;
@@ -28,7 +28,7 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
     {
         f32 eqX = static_cast<f32>(sw) * 0.12f;
         f32 centerY = static_cast<f32>(sh) * 0.5f;
-        f32 eqStartY = centerY + 130.0f;
+        f32 eqStartY = centerY + 220.0f;
 
         for (u32 i = 0; i < EQ_SLOTS; i++) {
             f32 y = eqStartY - static_cast<f32>(i) * (EQ_H + EQ_GAP);

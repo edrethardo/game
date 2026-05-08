@@ -3510,6 +3510,8 @@ void Engine::updatePlayerPickup() {
             if (dot < 0.3f) continue; // must be in front half (~70 degrees each side)
             // Score: prefer high dot, penalize distance
             f32 score = dot - hDist * 0.1f;
+            // Legendary items get pickup priority
+            if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;
             if (score > bestScore) {
                 bestScore = score; bestIdx = static_cast<s32>(wi);
             }
@@ -3704,14 +3706,14 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (m_invCursorPanel == 0) {
             u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
             u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
-            f32 bpX = static_cast<f32>(sw) * 0.52f;
-            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 90.0f;
+            f32 bpX = static_cast<f32>(sw) * 0.42f;
+            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
             mx = static_cast<s32>(bpX + col * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
             my = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
         } else {
             f32 eqX = static_cast<f32>(sw) * 0.12f;
             f32 centerY = static_cast<f32>(sh) * 0.5f;
-            f32 eqStartY = centerY + 130.0f;
+            f32 eqStartY = centerY + 220.0f;
             mx = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
             my = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
         }
@@ -6686,6 +6688,25 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             DebugDraw::line(pos - Vec3{0, gd, gd}, pos + Vec3{0, gd, gd}, gc);
             // Loot beam from floor upward
             DebugDraw::line({pos.x, floorY, pos.z}, {pos.x, floorY + 4.0f, pos.z}, color);
+            // Legendary: triple vertical beams in triangle formation
+            if (wi.item.rarity == Rarity::LEGENDARY) {
+                Vec3 gold = {1.0f, 0.85f, 0.3f};
+                f32 beamH = 6.0f;
+                f32 r = 0.2f; // triangle radius
+                // Three beams at 120° intervals (triangle formation)
+                DebugDraw::line({pos.x, floorY, pos.z - r}, {pos.x, floorY + beamH, pos.z - r},
+                    gold * (0.4f + glowPulse * 0.6f));
+                DebugDraw::line({pos.x - r * 0.866f, floorY, pos.z + r * 0.5f},
+                    {pos.x - r * 0.866f, floorY + beamH, pos.z + r * 0.5f},
+                    gold * (0.6f + glowPulse * 0.4f));
+                DebugDraw::line({pos.x + r * 0.866f, floorY, pos.z + r * 0.5f},
+                    {pos.x + r * 0.866f, floorY + beamH, pos.z + r * 0.5f},
+                    gold * (0.4f + glowPulse * 0.6f));
+                // Extra diagonal crosses
+                f32 ge = gr * 0.5f;
+                DebugDraw::line(pos - Vec3{ge, ge, ge}, pos + Vec3{ge, ge, ge}, gold * glowPulse);
+                DebugDraw::line(pos - Vec3{ge, -ge, ge}, pos + Vec3{ge, -ge, ge}, gold * glowPulse);
+            }
         } else {
             // Globe glow — simple pulsing cross of colored lines
             f32 glowPulse = 0.5f + 0.5f * sinf(wi.bobTimer * 6.0f);
@@ -6919,12 +6940,29 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
 
         if (bestItem && bestDef) {
             Vec3 rColor = rarityColor(bestItem->item.rarity);
-            f32 nameW = FontSystem::textWidth(bestDef->name, 1);
-            f32 totalW = 22.0f + nameW;
+            // Build display text — legendaries append the skill name in brackets
+            char hintBuf[96];
+            if (bestItem->item.rarity == Rarity::LEGENDARY &&
+                bestDef->legendarySkillId != SkillId::NONE) {
+                const char* skillName = nullptr;
+                for (u32 si = 0; si < m_skillDefCount; si++) {
+                    if (m_skillDefs[si].id == bestDef->legendarySkillId) {
+                        skillName = m_skillDefs[si].name; break;
+                    }
+                }
+                if (skillName)
+                    std::snprintf(hintBuf, sizeof(hintBuf), "%s [%s]", bestDef->name, skillName);
+                else
+                    std::snprintf(hintBuf, sizeof(hintBuf), "%s", bestDef->name);
+            } else {
+                std::snprintf(hintBuf, sizeof(hintBuf), "%s", bestDef->name);
+            }
+            f32 hintW = FontSystem::textWidth(hintBuf, 1);
+            f32 totalW = 22.0f + hintW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.35f;
             HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::isGamepadConnected(0) ? "X" : "E", true);
-            FontSystem::drawText(sw, sh, cx + 22.0f, cy, bestDef->name, rColor, 1);
+            FontSystem::drawText(sw, sh, cx + 22.0f, cy, hintBuf, rColor, 1);
         }
     }
 }
@@ -6945,13 +6983,13 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             if (m_invCursorPanel == 0) {
                 u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
-                f32 bpX = static_cast<f32>(sw) * 0.52f;
-                f32 bpStartY = static_cast<f32>(sh) * 0.5f + 90.0f;
+                f32 bpX = static_cast<f32>(sw) * 0.42f;
+                f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
                 invMX = static_cast<s32>(bpX + col * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
                 invMY = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
             } else {
                 f32 eqX = static_cast<f32>(sw) * 0.12f;
-                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 130.0f;
+                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
                 invMX = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
                 invMY = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
             }
@@ -7274,6 +7312,34 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Minimap (top-right corner)
         Minimap::draw(sw, sh, m_grid, m_localPlayer.position, m_localPlayer.yaw, m_entities);
+
+        // Legendary item dots on minimap — gold "+" cross at each active legendary world item
+        {
+            static constexpr f32 mapSize = 150.0f;
+            static constexpr f32 margin  = 10.0f;
+            f32 mapX = static_cast<f32>(sw) - mapSize - margin;
+            f32 mapY = static_cast<f32>(sh) - mapSize - margin;
+
+            for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+                const WorldItem& wi = m_worldItems.items[i];
+                if (!wi.active) continue;
+                if (wi.item.rarity != Rarity::LEGENDARY) continue;
+
+                u32 lgx, lgz;
+                if (!LevelGridSystem::worldToGrid(m_grid, wi.position, lgx, lgz)) continue;
+
+                f32 normX = (static_cast<f32>(lgx) + 0.5f) / static_cast<f32>(m_grid.width);
+                f32 normZ = (static_cast<f32>(lgz) + 0.5f) / static_cast<f32>(m_grid.depth);
+                f32 dotX  = mapX + normX * mapSize;
+                f32 dotY  = mapY + (1.0f - normZ) * mapSize; // Z flipped to match minimap orientation
+
+                // Pulsing gold cross — two short strokes drawn as "+" text stand-in characters
+                f32 pulse    = 0.75f + 0.25f * sinf(m_statsTimer * 4.0f);
+                Vec3 goldCol = {1.0f * pulse, 0.8f * pulse, 0.1f * pulse};
+                // Draw a small cross using two one-pixel-wide line segments via FontSystem "+" glyph
+                FontSystem::drawText(sw, sh, dotX - 3.0f, dotY - 4.0f, "+", goldCol, 1);
+            }
+        }
 
         // Door marker on minimap (pulsing green "V" symbol at door grid position)
         if (m_floorDoorActive) {

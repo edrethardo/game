@@ -1083,6 +1083,9 @@ void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
     flushHUD(sw, sh);
 }
 
+// Forward declaration — defined later in this file alongside other tooltip helpers.
+static const char* slotName(ItemSlot slot);
+
 void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                const PlayerInventory& inv,
                                const ItemDef* itemDefs,
@@ -1092,9 +1095,9 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 
     f32 centerY = static_cast<f32>(sh) * 0.5f;
 
-    // --- Equipment panel (left side) ---
+    // --- Equipment panel (left side, raised to leave room for tooltips below) ---
     f32 eqX      = static_cast<f32>(sw) * 0.12f;
-    f32 eqStartY = centerY + 130.0f;
+    f32 eqStartY = centerY + 220.0f;
     f32 slotW    = 240.0f;
     f32 slotH    = 32.0f;
     f32 slotGap  = 5.0f;
@@ -1175,9 +1178,9 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         }
     }
 
-    // --- Backpack panel (right side, 6 columns x 4 rows) ---
-    f32 bpX      = static_cast<f32>(sw) * 0.52f;
-    f32 bpStartY = centerY + 90.0f;
+    // --- Backpack panel (closer to equipment, raised for tooltip space below) ---
+    f32 bpX      = static_cast<f32>(sw) * 0.42f;
+    f32 bpStartY = centerY + 180.0f;
     f32 cellSize = 32.0f;
     f32 cellGap  = 4.0f;
 
@@ -1278,8 +1281,34 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 
             if (mx >= x && mx <= x + cellSize && my >= y && my <= y + cellSize) {
                 if (!isItemEmpty(inv.backpack[i])) {
-                    drawItemTooltip(sw, sh, x + cellSize + 8.0f, y,
-                                    inv.backpack[i], itemDefs[inv.backpack[i].defId]);
+                    const ItemDef& bpDef = itemDefs[inv.backpack[i].defId];
+                    ItemSlot eqSlot = bpDef.slot;
+                    u32 eqIdx = static_cast<u32>(eqSlot);
+
+                    // Both tooltips below the inventory panels, side by side
+                    f32 tooltipY = 80.0f;
+                    f32 leftTipX = eqX;
+                    f32 rightTipX = eqX + 336.0f; // 320 tooltip width + 16 gap
+
+                    // Left: hovered backpack item
+                    drawItemTooltip(sw, sh, leftTipX, tooltipY,
+                                    inv.backpack[i], bpDef);
+
+                    // Right: currently equipped in matching slot
+                    FontSystem::drawText(sw, sh, rightTipX, tooltipY + 16.0f,
+                                        "EQUIPPED", {1.0f, 0.85f, 0.3f}, 1);
+
+                    if (!isItemEmpty(inv.equipped[eqIdx])) {
+                        drawItemTooltip(sw, sh, rightTipX, tooltipY,
+                                        inv.equipped[eqIdx],
+                                        itemDefs[inv.equipped[eqIdx].defId]);
+                    } else {
+                        char emptyLabel[32];
+                        std::snprintf(emptyLabel, sizeof(emptyLabel),
+                                      "Empty %s", slotName(eqSlot));
+                        FontSystem::drawText(sw, sh, rightTipX, tooltipY,
+                                            emptyLabel, {0.55f, 0.55f, 0.6f}, 1);
+                    }
                 }
                 break;
             }
