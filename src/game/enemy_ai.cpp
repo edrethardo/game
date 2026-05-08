@@ -701,25 +701,28 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
 
         // ---------------------------------------------------------------------------
-        // Push apart from other hostile entities to prevent blobbing
+        // Push apart from squad members only (same room) to prevent blobbing.
+        // Entities in different rooms can't overlap anyway (walls separate them).
         // ---------------------------------------------------------------------------
-        for (u32 oi = 0; oi < pool.activeCount; oi++) {
-            u32 oIdx = pool.activeList[oi];
-            if (oIdx == i) continue;
-            Entity& other = pool.entities[oIdx];
-            if (other.flags & ENT_DEAD) continue;
-            if (other.flags & ENT_FRIENDLY) continue;
-            if (other.enemyType == EnemyType::PROP) continue;
-            Vec3 diff = e.position - other.position;
-            f32 dist2 = diff.x * diff.x + diff.z * diff.z;
-            f32 minDist = e.halfExtents.x + other.halfExtents.x + 0.15f;
-            if (dist2 < minDist * minDist && dist2 > 0.001f) {
-                f32 dist = sqrtf(dist2);
-                Vec3 push = {diff.x / dist, 0, diff.z / dist};
-                f32 overlap = minDist - dist;
-                Vec3 newPos = e.position + push * (overlap * 0.3f);
-                if (!entityOverlapsGrid(newPos, e.halfExtents, grid)) {
-                    e.position = newPos;
+        if (e.squadId != 0xFFFF && squads && e.squadId < squads->squadCount) {
+            const Squad& sq = squads->squads[e.squadId];
+            for (u8 mi = 0; mi < sq.memberCount; mi++) {
+                u32 oIdx = sq.memberIndices[mi];
+                if (oIdx == i) continue;
+                Entity& other = pool.entities[oIdx];
+                if (!(other.flags & ENT_ACTIVE)) continue;
+                if (other.flags & ENT_DEAD) continue;
+                Vec3 diff = e.position - other.position;
+                f32 dist2 = diff.x * diff.x + diff.z * diff.z;
+                f32 minDist = e.halfExtents.x + other.halfExtents.x + 0.15f;
+                if (dist2 < minDist * minDist && dist2 > 0.001f) {
+                    f32 dist = sqrtf(dist2);
+                    Vec3 push = {diff.x / dist, 0, diff.z / dist};
+                    f32 overlap = minDist - dist;
+                    Vec3 newPos = e.position + push * (overlap * 0.3f);
+                    if (!entityOverlapsGrid(newPos, e.halfExtents, grid)) {
+                        e.position = newPos;
+                    }
                 }
             }
         }
@@ -1103,24 +1106,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
                     if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
-                } else {
-                    // Aggro chaining: if a nearby enemy is already chasing, join in
-                    for (u32 ni = 0; ni < pool.activeCount; ni++) {
-                        u32 nIdx = pool.activeList[ni];
-                        if (nIdx == i) continue;
-                        Entity& nearby = pool.entities[nIdx];
-                        if (nearby.flags & ENT_DEAD) continue;
-                        if (nearby.flags & ENT_FRIENDLY) continue;
-                        if (nearby.aiState != AIState::CHASE && nearby.aiState != AIState::ATTACK) continue;
-                        f32 chainDist = length(nearby.position - e.position);
-                        if (chainDist < 8.0f) {
-                            e.aiState = AIState::CHASE;
-                            e.velocity = {0, 0, 0};
-                            if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
-                            break;
-                        }
-                    }
                 }
+                // Aggro propagation handled by SquadSystem::alertSquad (no per-entity loop needed)
             }
         } break;
 
