@@ -1341,13 +1341,24 @@ static const u8 kIconInvuln[8][8] = {
     {0,0,0,1,1,0,0,0},
     {0,0,0,0,0,0,0,0},
 };
+// Soul Harvest — skull icon
+static const u8 kIconSoulHarvest[8][8] = {
+    {0,0,1,1,1,1,0,0},
+    {0,1,4,4,4,4,1,0},
+    {0,1,2,4,4,2,1,0},
+    {0,1,4,4,4,4,1,0},
+    {0,0,1,2,2,1,0,0},
+    {0,0,0,1,1,0,0,0},
+    {0,0,1,3,3,1,0,0},
+    {0,0,0,1,1,0,0,0},
+};
 
 static const u8* getStatusIcon(u32 idx) {
     static const u8* icons[] = {
         &kIconPoison[0][0], &kIconBurn[0][0], &kIconFreeze[0][0],
-        &kIconSlow[0][0], &kIconInvuln[0][0]
+        &kIconSlow[0][0], &kIconInvuln[0][0], &kIconSoulHarvest[0][0]
     };
-    return (idx < 5) ? icons[idx] : nullptr;
+    return (idx < 6) ? icons[idx] : nullptr;
 }
 
 // Status-specific color palettes: [0]=unused, [1]=primary, [2]=secondary, [3]=detail, [4]=highlight
@@ -1373,6 +1384,10 @@ static void getStatusColors(u32 idx, Vec3 cols[5]) {
         case 4: // Invulnerable
             cols[1] = {0.8f, 0.65f, 0.2f};   cols[2] = {0.6f, 0.5f, 0.15f};
             cols[3] = {0.5f, 0.4f, 0.1f};    cols[4] = {1.0f, 0.95f, 0.5f};
+            break;
+        case 5: // Soul Harvest
+            cols[1] = {0.7f, 0.3f, 0.1f};    cols[2] = {0.5f, 0.15f, 0.05f};
+            cols[3] = {0.4f, 0.2f, 0.1f};    cols[4] = {1.0f, 0.6f, 0.2f};
             break;
         default:
             cols[1] = cols[2] = cols[3] = cols[4] = {0.5f, 0.5f, 0.5f};

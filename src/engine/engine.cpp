@@ -1355,7 +1355,7 @@ void Engine::startGame() {
             f32 onHitDps;     // for poison/burn
         };
 
-        static constexpr u32 ENEMIES_PER_TIER = 5;
+
 
         // Tier 1 (floors 1-10): Dungeon — standard + zombie (Diablo 1) + imp (Barony)
         static const EnemyTemplate kTier1[] = {
@@ -1392,6 +1392,8 @@ void Engine::startGame() {
             {90, 2.5f, 20, 3.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
             // Stalker (HGL) — fast, stealthy humanoid
             {45, 5.0f, 26, 3.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
+            // Sniper Imp — flying ranged, long range, slow fire, fast small projectiles
+            {25, 4.0f, 30, 16.f, 2.0f, 18, {0.3f,0.3f,0.3f}, true, 1, EnemyType::BAT, "sniper_imp_skin", 2, 2.0f, 0},
         };
         // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
         static const EnemyTemplate kTier4[] = {
@@ -1416,10 +1418,11 @@ void Engine::startGame() {
 
         // Select tier based on current floor
         const EnemyTemplate* tier = kTier1;
-        if      (m_currentFloor >= 41) tier = kTier5;
-        else if (m_currentFloor >= 31) tier = kTier4;
-        else if (m_currentFloor >= 21) tier = kTier3;
-        else if (m_currentFloor >= 11) tier = kTier2;
+        u32 tierCount = sizeof(kTier1) / sizeof(kTier1[0]);
+        if      (m_currentFloor >= 41) { tier = kTier5; tierCount = sizeof(kTier5) / sizeof(kTier5[0]); }
+        else if (m_currentFloor >= 31) { tier = kTier4; tierCount = sizeof(kTier4) / sizeof(kTier4[0]); }
+        else if (m_currentFloor >= 21) { tier = kTier3; tierCount = sizeof(kTier3) / sizeof(kTier3[0]); }
+        else if (m_currentFloor >= 11) { tier = kTier2; tierCount = sizeof(kTier2) / sizeof(kTier2[0]); }
 
         // meshIdx 3 = human mesh (used by zombies, ghouls, stalkers, demons, shades)
         u8 meshLookup[] = {m_meshIdSkeleton, m_meshIdBat, m_meshIdSpider, m_meshIdHuman};
@@ -1434,7 +1437,7 @@ void Engine::startGame() {
             if (enemyCount > 3) enemyCount = 3;
 
             for (u32 e = 0; e < enemyCount; e++) {
-                u32 typeIdx = static_cast<u32>(std::rand()) % ENEMIES_PER_TIER;
+                u32 typeIdx = static_cast<u32>(std::rand()) % tierCount;
                 const EnemyTemplate& tmpl = tier[typeIdx];
 
                 // Spawn at cell center (+0.5) to avoid boundary clipping
@@ -6882,9 +6885,12 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 {"FRZ", {0.4f, 0.7f, 1.0f}, m_localPlayer.freezeTimer},
                 {"SLO", {0.6f, 0.3f, 0.9f}, m_localPlayer.slowTimer},
                 {"INV", {1.0f, 0.85f, 0.3f}, m_localPlayer.invulnTimer},
+                // Show stack count (as float) so the number above the icon = stacks, not seconds
+                {"SH",  {0.9f, 0.5f, 0.15f}, m_localPlayer.soulHarvestTimer > 0.0f
+                    ? static_cast<f32>(m_localPlayer.soulHarvestStacks) : 0.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap
-            HUD::drawStatusIcons(sw, sh, 20.0f, 58.0f, statuses, 5);
+            HUD::drawStatusIcons(sw, sh, 20.0f, 58.0f, statuses, 6);
         }
 
         // Ammo display for hitscan weapons (right side of health bar area)
