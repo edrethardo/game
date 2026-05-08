@@ -33,6 +33,16 @@ static bool s_gyroInvertY      = true;
 // Split-screen: which player's controller to read (0=player1, 1=player2)
 static u8 s_activePlayer = 0;
 
+// Cached gyro reading — updated once per frame in Input::update(),
+// returned by getGyro(). Per-player to avoid P2 sensor bleeding into P1.
+static f32 s_gyroDx[2] = {};
+static f32 s_gyroDy[2] = {};
+#ifdef __SWITCH__
+static void updateGyroCache(); // forward declaration — defined after gyro variables
+#else
+static void updateGyroCache() {} // no-op on PC
+#endif
+
 #ifdef __SWITCH__
 #include <switch.h>
 // libnx per-player pad state — used for all gamepad input on Switch
@@ -206,6 +216,9 @@ void Input::update() {
         s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
         padUpdate(&s_pads[p]);
     }
+
+    // Gyro cache updated below (after gyro variable declarations) via updateGyroCache()
+    updateGyroCache();
 #endif
 }
 
@@ -463,26 +476,11 @@ static void initGyro() {
 
     LOG_INFO("Gyro: initialized P1=%u P2=%u sensor handles", s_gyroHandleCount, s_gyroHandleCountP2);
 }
-#endif
 
-void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
-    dx = 0.0f;
-    dy = 0.0f;
-
-#ifdef __SWITCH__
-    initGyro();
-    HidSixAxisSensorState state = {};
-
-    // Pick the right sensor handles based on active player
-    HidSixAxisSensorHandle* handles = s_gyroHandles;
-    u32 handleCount = s_gyroHandleCount;
-    if (s_splitActive && s_activePlayer == 1) {
-        handles = s_gyroHandlesP2;
-        handleCount = s_gyroHandleCountP2;
-    }
-
-    // Read all queued gyro samples and average — sensor runs at 200Hz,
-    // game polls at 60Hz, so averaging captures all intermediate motion.
+// Read gyro sensor for one player into the per-player cache slot.
+static void readGyroForPlayer(u8 playerIdx, HidSixAxisSensorHandle* handles, u32 handleCount) {
+    s_gyroDx[playerIdx] = 0.0f;
+    s_gyroDy[playerIdx] = 0.0f;
     for (u32 i = 0; i < handleCount; i++) {
         HidSixAxisSensorState states[16];
         s32 count = hidGetSixAxisSensorStates(handles[i], states, 16);
@@ -497,12 +495,38 @@ void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
             if (yaw > -0.01f && yaw < 0.01f) yaw = 0.0f;
             if (pitch > -0.01f && pitch < 0.01f) pitch = 0.0f;
             if (yaw != 0.0f || pitch != 0.0f) {
-                dx = -yaw  * (180.0f / 3.14159f);
-                dy = pitch * (180.0f / 3.14159f);
-                return;
+                s_gyroDx[playerIdx] = -yaw  * (180.0f / 3.14159f);
+                s_gyroDy[playerIdx] = pitch * (180.0f / 3.14159f);
+                break;
             }
         }
     }
+}
+
+// Cache gyro reading once per frame — called from Input::update().
+// Reads both players' sensors so each gets their own gyro data.
+static void updateGyroCache() {
+    initGyro();
+    readGyroForPlayer(0, s_gyroHandles, s_gyroHandleCount);
+    if (s_splitActive) {
+        readGyroForPlayer(1, s_gyroHandlesP2, s_gyroHandleCountP2);
+    }
+}
+#endif
+
+void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
+    dx = 0.0f;
+    dy = 0.0f;
+
+#ifdef __SWITCH__
+    // Return cached gyro for the active player and consume — only the first
+    // tick per frame gets the gyro delta, subsequent ticks get zero.
+    u8 pi = s_activePlayer;
+    if (pi > 1) pi = 0;
+    dx = s_gyroDx[pi];
+    dy = s_gyroDy[pi];
+    s_gyroDx[pi] = 0.0f;
+    s_gyroDy[pi] = 0.0f;
 #else
     // PC: try SDL2 sensor API (works with DS4/DualSense controllers)
     if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return;
