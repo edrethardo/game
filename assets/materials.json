@@ -107,6 +107,7 @@
     { "id": 93, "name": "status_burn",                "texture": "status_burn_42.png" },
     { "id": 94, "name": "status_freeze",              "texture": "status_freeze_42.png" },
     { "id": 95, "name": "status_slow",                "texture": "status_slow_42.png" },
-    { "id": 96, "name": "status_invuln",              "texture": "status_invuln_42.png" }
+    { "id": 96, "name": "status_invuln",              "texture": "status_invuln_42.png" },
+    { "id": 97, "name": "sniper_imp_skin",            "tint": [0.4, 0.6, 0.9, 1.0] }
   ]
 }

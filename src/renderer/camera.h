@@ -11,6 +11,11 @@ struct Camera {
     f32  nearPlane = 0.1f;
     f32  farPlane  = 200.0f;
 
+    // Previous-tick state for render interpolation (reduces gyro lag)
+    Vec3 prevPosition = {0.0f, 1.7f, 5.0f};
+    f32  prevYaw      = 0.0f;
+    f32  prevPitch    = 0.0f;
+
     // Computed each frame
     Vec3 forward;
     Vec3 right;

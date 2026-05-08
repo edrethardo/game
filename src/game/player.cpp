@@ -17,13 +17,13 @@ static Vec3 s_lastForward = {0, 0, -1};
 static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
                            bool& onGround, bool noclip,
                            f32 moveSpeed, f32 sensitivity,
-                           s32 mouseDX, s32 mouseDY,
+                           f32 lookDX, f32 lookDY,
                            bool w, bool s, bool a, bool d, bool jump,
                            f32 dt)
 {
-    // Mouse look
-    yaw   -= mouseDX * sensitivity;
-    pitch -= mouseDY * sensitivity;
+    // Mouse/stick/gyro look — float precision, no integer quantization
+    yaw   -= lookDX * sensitivity;
+    pitch -= lookDY * sensitivity;
     if (pitch >  MAX_PITCH) pitch =  MAX_PITCH;
     if (pitch < -MAX_PITCH) pitch = -MAX_PITCH;
 
@@ -71,24 +71,27 @@ static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
 // Original: reads Input:: directly
 // ---------------------------------------------------------------------------
 void PlayerController::update(Player& player, f32 dt) {
-    s32 mx, my;
-    Input::getMouseDelta(mx, my);
+    // Accumulate look deltas as float to preserve sub-pixel gyro/stick precision
+    s32 rawMx, rawMy;
+    Input::getMouseDelta(rawMx, rawMy);
+    f32 mx = static_cast<f32>(rawMx);
+    f32 my = static_cast<f32>(rawMy);
 
-    // Add right stick look (controller) — convert stick deflection to mouse-equivalent delta
+    // Add right stick look (controller)
     f32 rsX = Input::getStickX(true);
     f32 rsY = Input::getStickY(true);
     if (rsX != 0.0f || rsY != 0.0f) {
         f32 stickScale = Input::getStickSensitivity() * 60.0f;
-        mx += static_cast<s32>(rsX * stickScale);
-        my += static_cast<s32>(rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f));
+        mx += rsX * stickScale;
+        my += rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f);
     }
 
     // Add gyro aiming — angular velocity mapped to look delta
     f32 gyroDx, gyroDy;
     Input::getGyro(gyroDx, gyroDy);
     if (gyroDx != 0.0f || gyroDy != 0.0f) {
-        mx += static_cast<s32>(gyroDx * Input::getGyroSensitivity());
-        my += static_cast<s32>(gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f));
+        mx += gyroDx * Input::getGyroSensitivity();
+        my += gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f);
     }
 
     // Apply slow debuff (e.g., from boss cleaver hit)
@@ -180,30 +183,34 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     if (Input::isActionDown(GameAction::TARGET_LOCK)) flags |= INPUT_LOCK;
     input.moveFlags = flags;
 
-    s32 mx, my;
-    Input::getMouseDelta(mx, my);
+    s32 rawMx, rawMy;
+    Input::getMouseDelta(rawMx, rawMy);
+    f32 mx = static_cast<f32>(rawMx);
+    f32 my = static_cast<f32>(rawMy);
     // Add right stick look delta
     f32 rsX = Input::getStickX(true);
     f32 rsY = Input::getStickY(true);
     if (rsX != 0.0f || rsY != 0.0f) {
         f32 stickScale = Input::getStickSensitivity() * 60.0f;
-        mx += static_cast<s32>(rsX * stickScale);
-        my += static_cast<s32>(rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f));
+        mx += rsX * stickScale;
+        my += rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f);
     }
     // Add gyro aiming
     f32 gyroDx, gyroDy;
     Input::getGyro(gyroDx, gyroDy);
     if (gyroDx != 0.0f || gyroDy != 0.0f) {
-        mx += static_cast<s32>(gyroDx * Input::getGyroSensitivity());
-        my += static_cast<s32>(gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f));
+        mx += gyroDx * Input::getGyroSensitivity();
+        my += gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f);
     }
-    // Clamp to s16 range
-    if (mx >  32767) mx =  32767;
-    if (mx < -32768) mx = -32768;
-    if (my >  32767) my =  32767;
-    if (my < -32768) my = -32768;
-    input.mouseDeltaX = static_cast<s16>(mx);
-    input.mouseDeltaY = static_cast<s16>(my);
+    // Quantize to s16 for network serialization
+    s32 imx = static_cast<s32>(mx);
+    s32 imy = static_cast<s32>(my);
+    if (imx >  32767) imx =  32767;
+    if (imx < -32768) imx = -32768;
+    if (imy >  32767) imy =  32767;
+    if (imy < -32768) imy = -32768;
+    input.mouseDeltaX = static_cast<s16>(imx);
+    input.mouseDeltaY = static_cast<s16>(imy);
 
     // Extended input flags — unified keyboard + gamepad
     u8 ext = 0;

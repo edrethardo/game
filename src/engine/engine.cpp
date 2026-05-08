@@ -3335,7 +3335,10 @@ void Engine::gameUpdate(f32 dt) {
     if (m_equipTooltipTimer > 0.0f) m_equipTooltipTimer -= dt;
     if (m_controlsTooltipTimer > 0.0f) m_controlsTooltipTimer -= dt;
 
-    // Camera
+    // Save previous camera state for render interpolation
+    m_camera.prevPosition = m_camera.position;
+    m_camera.prevYaw      = m_camera.yaw;
+    m_camera.prevPitch    = m_camera.pitch;
     PlayerController::applyToCamera(m_localPlayer, m_camera);
     // Screen shake only from enemy hits, not weapon fire
     if (m_localPlayer.hitShakeTimer > 0.0f) {
@@ -5075,7 +5078,16 @@ void Engine::renderViewmodel() {
 // Render
 // ---------------------------------------------------------------------------
 void Engine::render(f32 alpha) {
-    (void)alpha;
+    // Interpolate camera between previous and current tick for smooth gyro/look.
+    // Save tick state, interpolate for rendering, then restore after frame.
+    Vec3 tickPos   = m_camera.position;
+    f32  tickYaw   = m_camera.yaw;
+    f32  tickPitch = m_camera.pitch;
+    if (m_gameState == GameState::IN_GAME) {
+        m_camera.position = m_camera.prevPosition + (tickPos   - m_camera.prevPosition) * alpha;
+        m_camera.yaw      = m_camera.prevYaw      + (tickYaw   - m_camera.prevYaw)      * alpha;
+        m_camera.pitch    = m_camera.prevPitch     + (tickPitch - m_camera.prevPitch)    * alpha;
+    }
 
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -5327,6 +5339,11 @@ void Engine::render(f32 alpha) {
 
     // Swap in player 0 state as default after rendering
     if (m_splitPlayerCount > 1) swapInPlayer(0);
+
+    // Restore tick-accurate camera state after rendering (interpolation is visual only)
+    m_camera.position = tickPos;
+    m_camera.yaw      = tickYaw;
+    m_camera.pitch    = tickPitch;
 
     GLContext::swapBuffers(Window::getHandle());
 }
