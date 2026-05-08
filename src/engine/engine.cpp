@@ -5311,7 +5311,7 @@ void Engine::render(f32 alpha) {
         {11,  {0.8f, 0.9f,  0.7f},  {0.12f, 0.15f, 0.12f}},  // Catacombs: sickly green
         {21,  {0.7f, 0.7f,  1.0f},  {0.20f, 0.18f, 0.28f}},  // Caverns: cold blue-purple
         {31,  {1.0f, 0.6f,  0.3f},  {0.25f, 0.10f, 0.05f}},  // Hellforge: hot orange
-        {41,  {0.6f, 0.6f,  0.8f},  {0.08f, 0.08f, 0.15f}},  // Void: dim alien
+        {41,  {0.6f, 0.6f,  0.8f},  {0.15f, 0.15f, 0.25f}},  // Void: dark but visible
     };
     const FloorTheme* theme = &kThemes[0];
     for (u32 t = 0; t < 5; t++) {

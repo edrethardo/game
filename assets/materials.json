@@ -49,9 +49,9 @@
     { "id": 43, "name": "hellforge_floor",        "texture": "stone_floor_42.png",   "tint": [0.75, 0.30, 0.10, 1.0] },
     { "id": 44, "name": "hellforge_ceiling",      "texture": "stone_ceiling_42.png", "tint": [0.60, 0.20, 0.08, 1.0] },
 
-    { "id": 45, "name": "void_wall",              "texture": "stone_wall_42.png",    "tint": [0.15, 0.15, 0.25, 1.0] },
-    { "id": 46, "name": "void_floor",             "texture": "stone_floor_42.png",   "tint": [0.12, 0.12, 0.22, 1.0] },
-    { "id": 47, "name": "void_ceiling",           "texture": "stone_ceiling_42.png", "tint": [0.08, 0.08, 0.18, 1.0] },
+    { "id": 45, "name": "void_wall",              "texture": "stone_wall_42.png",    "tint": [0.35, 0.35, 0.50, 1.0] },
+    { "id": 46, "name": "void_floor",             "texture": "stone_floor_42.png",   "tint": [0.30, 0.30, 0.45, 1.0] },
+    { "id": 47, "name": "void_ceiling",           "texture": "stone_ceiling_42.png", "tint": [0.25, 0.25, 0.40, 1.0] },
 
     { "id": 48, "name": "prop_wood",              "tint": [0.55, 0.38, 0.20, 1.0] },
     { "id": 49, "name": "prop_iron",              "tint": [0.45, 0.45, 0.50, 1.0] },
