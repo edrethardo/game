@@ -662,20 +662,23 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
             }
 
-            // Push apart from other friendly entities to prevent stacking
+            // Push apart from other nearby friendly entities to prevent stacking
             for (u32 ni = 0; ni < pool.activeCount; ni++) {
                 u32 nIdx = pool.activeList[ni];
                 if (nIdx == i) continue;
                 Entity& other = pool.entities[nIdx];
                 if (!(other.flags & ENT_FRIENDLY)) continue;
                 if (other.flags & ENT_DEAD) continue;
+                // Early distance reject — skip entities more than 2m away
+                f32 ddx = e.position.x - other.position.x;
+                f32 ddz = e.position.z - other.position.z;
+                if (ddx * ddx + ddz * ddz > 4.0f) continue;
                 Vec3 diff = e.position - other.position;
                 f32 dist2 = lengthSq(diff);
                 f32 minDist = e.halfExtents.x + other.halfExtents.x;
                 if (dist2 < minDist * minDist && dist2 > 0.001f) {
                     f32 overlap = minDist - sqrtf(dist2);
                     Vec3 push = normalize(diff) * (overlap * 0.5f + 0.02f);
-                    // Only push if destination doesn't overlap a wall
                     Vec3 newPos = e.position + push;
                     if (!entityOverlapsGrid(newPos, e.halfExtents, grid)) {
                         e.position = newPos;

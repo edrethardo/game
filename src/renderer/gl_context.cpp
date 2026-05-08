@@ -45,8 +45,10 @@ bool GLContext::init(SDL_Window* window) {
     glCullFace(GL_BACK);
     glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
 
-    // VSync
-    SDL_GL_SetSwapInterval(1);
+    // Adaptive vsync: tear on late frames instead of blocking for next vsync
+    if (SDL_GL_SetSwapInterval(-1) < 0) {
+        SDL_GL_SetSwapInterval(1); // fallback to hard vsync if adaptive not supported
+    }
 
 #ifdef ENGINE_DEBUG
     // glDebugMessageCallback requires GL 4.3; macOS caps at 4.1, so guard against null

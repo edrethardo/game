@@ -1930,22 +1930,16 @@ void Engine::startGame() {
         u8 floor = static_cast<u8>(m_currentFloor);
         f32 sy = dungeon.spawnPos.y + 0.9f;
 
-        // NPC 0: Cleric — front left
+        // NPC 0: Cleric — front left (healer)
         spawnFriendlyNpc({dungeon.spawnPos.x - 2.5f, sy, dungeon.spawnPos.z + 2.0f},
                           NpcClass::CLERIC, floor);
-        // NPC 1: Archer — front right
+        // NPC 1: Archer — front right (ranged DPS)
         spawnFriendlyNpc({dungeon.spawnPos.x + 2.5f, sy, dungeon.spawnPos.z + 2.0f},
                           NpcClass::ARCHER, floor);
-        // NPC 2: Mage — back left
-        spawnFriendlyNpc({dungeon.spawnPos.x - 2.0f, sy, dungeon.spawnPos.z - 2.0f},
-                          NpcClass::MAGE, floor);
-        // NPC 3: Rogue — back right
-        spawnFriendlyNpc({dungeon.spawnPos.x + 2.0f, sy, dungeon.spawnPos.z - 2.0f},
+        // NPC 2: Rogue — back center (fast melee)
+        spawnFriendlyNpc({dungeon.spawnPos.x, sy, dungeon.spawnPos.z - 2.0f},
                           NpcClass::ROGUE, floor);
-        // NPC 4: Paladin — center back
-        spawnFriendlyNpc({dungeon.spawnPos.x, sy, dungeon.spawnPos.z - 3.0f},
-                          NpcClass::PALADIN, floor);
-        LOG_INFO("Spawned 5 friendly NPCs (cleric, archer, mage, rogue, paladin) in spawn room");
+        LOG_INFO("Spawned 3 friendly NPCs (cleric, archer, rogue) in spawn room");
     }
 
     ProjectileSystem::init(m_projectiles);
@@ -2081,9 +2075,10 @@ void Engine::run() {
             Net::poll();
         }
 
+        // Poll input once per rendered frame — decoupled from physics tick rate
+        Input::update();
         m_accumulator += frameTime;
         while (m_accumulator >= FIXED_DT) {
-            Input::update();
             update(static_cast<f32>(FIXED_DT));
             m_accumulator -= FIXED_DT;
             m_updateCount++;
