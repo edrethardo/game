@@ -276,7 +276,7 @@ void Engine::init() {
     Log::init();
     LOG_INFO("Engine initializing...");
 
-    if (!Window::init("DungeonEngine", 1280, 720)) {
+    if (!Window::init("Curse of the Dungeon Engine", 1280, 720)) {
         LOG_ERROR("Failed to initialize window");
         return;
     }
@@ -7518,7 +7518,7 @@ void Engine::renderMenu() {
 
     // Title text
     {
-        const char* title = "DUNGEON ENGINE";
+        const char* title = "CURSE OF THE DUNGEON ENGINE";
         f32 titleW = FontSystem::textWidth(title, 3);
         f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;
         f32 titleY = sh * 0.65f;
@@ -7581,7 +7581,7 @@ void Engine::renderMenu() {
         // Show selected class description and stats above the game title
         if (m_menuSubSelection < classCount) {
             const ClassDef& sel = kClassDefs[m_menuSubSelection];
-            f32 descY = sh * 0.78f; // above "DUNGEON ENGINE" title (at 0.65)
+            f32 descY = sh * 0.78f; // above title (at 0.65)
 
             // Description centered
             f32 descW = FontSystem::textWidth(sel.description, 2);
