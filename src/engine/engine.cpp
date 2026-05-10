@@ -3595,7 +3595,8 @@ bool Engine::updateFloorDoor() {
                     m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
                     m_localPlayers[1].velocity = {0, 0, 0};
                     m_localPlayers[1].invulnTimer = 2.5f;
-                    m_players[1].spawnPosition = m_localPlayers[1].position; // for respawn
+                    m_players[0].spawnPosition = m_localPlayer.position;      // P1 respawn point
+                    m_players[1].spawnPosition = m_localPlayers[1].position; // P2 respawn point
                     m_cameras[0] = m_camera;
                 }
 
