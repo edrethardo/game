@@ -2966,23 +2966,61 @@ void Engine::gameUpdate(f32 dt) {
         handleWeaponFire(dt);
     }
 
-    // Update viewmodel animation timers
+    // Update viewmodel animation timers — faithful Doom weapon bob algorithm
+    // Doom: bob = (momx² + momy²) >> 2, clamped to MAXBOB.
+    // Weapon swings at FINEANGLES/70 per tic (period = 2s at 35Hz).
+    // View bobs at FINEANGLES/20 per tic (period = 0.571s at 35Hz).
     {
-        // Use XZ speed to drive walk bob — ignore vertical velocity
-        f32 playerSpeed = length(Vec3{m_localPlayer.velocity.x, 0, m_localPlayer.velocity.z});
-        if (playerSpeed > 0.5f) {
-            m_viewmodelState.bobTimer += playerSpeed * dt;
-        } else {
-            // Smoothly decay bob amplitude when stopped
-            m_viewmodelState.bobTimer *= 0.95f;
+        // Bob amplitude from speed squared (Doom: momentum² / 4, capped)
+        f32 vx = m_localPlayer.velocity.x;
+        f32 vz = m_localPlayer.velocity.z;
+        f32 speedSq = vx * vx + vz * vz;
+        // Normalize: at max run speed (~6 m/s), speedSq=36. Scale so max=1.0
+        f32 bob = speedSq * 0.028f; // ~1.0 at full sprint
+        if (bob > 1.0f) bob = 1.0f;
+
+        // Bob timer advances at constant rate while moving (Doom uses leveltime)
+        // Doom weapon period = 2.0s → angular freq = π rad/s (3.14)
+        // Doom view period = 0.571s → angular freq = 11.0 rad/s
+        if (speedSq > 0.25f) {
+            m_viewmodelState.bobTimer += dt;
         }
+
+        // Sway from mouse/gyro look — weapon lags behind camera turns
+        static f32 s_prevYaw[2] = {};
+        static f32 s_prevPitch[2] = {};
+        u8 pi = m_localPlayerIndex;
+        f32 yawDelta = m_localPlayer.yaw - s_prevYaw[pi];
+        f32 pitchDelta = m_localPlayer.pitch - s_prevPitch[pi];
+        if (yawDelta >  3.14159f) yawDelta -= 6.28318f;
+        if (yawDelta < -3.14159f) yawDelta += 6.28318f;
+        s_prevYaw[pi] = m_localPlayer.yaw;
+        s_prevPitch[pi] = m_localPlayer.pitch;
+        f32 targetSwayYaw = -yawDelta * 0.6f;
+        f32 targetSwayPitch = -pitchDelta * 0.4f;
+        m_viewmodelState.swayYaw += (targetSwayYaw - m_viewmodelState.swayYaw) * 8.0f * dt;
+        m_viewmodelState.swayPitch += (targetSwayPitch - m_viewmodelState.swayPitch) * 8.0f * dt;
+        if (m_viewmodelState.swayYaw >  0.04f) m_viewmodelState.swayYaw =  0.04f;
+        if (m_viewmodelState.swayYaw < -0.04f) m_viewmodelState.swayYaw = -0.04f;
+        if (m_viewmodelState.swayPitch >  0.03f) m_viewmodelState.swayPitch =  0.03f;
+        if (m_viewmodelState.swayPitch < -0.03f) m_viewmodelState.swayPitch = -0.03f;
+
         // Exponential recoil decay each tick
-        m_viewmodelState.recoilKick *= 0.92f; // slower decay = smoother
+        m_viewmodelState.recoilKick *= 0.88f;
         if (m_viewmodelState.recoilKick < 0.001f) m_viewmodelState.recoilKick = 0.0f;
         // Count down melee swing animation
         if (m_viewmodelState.attackAnimT > 0.0f) m_viewmodelState.attackAnimT -= dt;
         // Count down ranged fire shake
         if (m_viewmodelState.fireShakeTimer > 0.0f) m_viewmodelState.fireShakeTimer -= dt;
+
+        // --- View bob: figure-8 (lemniscate) pattern for heavy footfalls ---
+        // Horizontal sway at base frequency, vertical at 2× (traces a lying 8).
+        // Slower cadence than Doom for a more deliberate, powerful stride.
+        f32 viewBobFreq = 5.5f; // rad/s — slower than Doom's 11 for heavier steps
+        f32 viewBobAngle = m_viewmodelState.bobTimer * viewBobFreq;
+        // Vertical: 2× frequency = two bounces per full lateral swing (figure-8)
+        f32 viewBobY = bob * 0.09f * sinf(viewBobAngle * 2.0f);
+        m_localPlayer.eyeHeight = 1.7f + viewBobY;
     }
 
     // Enemy AI — run ONCE per frame, enemies pick the nearest player to target
@@ -3429,6 +3467,23 @@ void Engine::gameUpdate(f32 dt) {
     m_camera.prevYaw      = m_camera.yaw;
     m_camera.prevPitch    = m_camera.pitch;
     PlayerController::applyToCamera(m_localPlayer, m_camera);
+
+    // View bob: lateral head sway (figure-8 horizontal component)
+    // Applied to camera yaw so it doesn't accumulate on the player
+    {
+        f32 vxB = m_localPlayer.velocity.x;
+        f32 vzB = m_localPlayer.velocity.z;
+        f32 sSq = vxB * vxB + vzB * vzB;
+        f32 bobAmp = sSq * 0.028f;
+        if (bobAmp > 1.0f) bobAmp = 1.0f;
+        f32 angle = m_viewmodelState.bobTimer * 5.5f;
+        // Horizontal: single-freq sway (half the 8's width)
+        m_camera.yaw += bobAmp * 0.008f * sinf(angle);
+        // Slight roll for that heavy-footed head tilt
+        // (roll isn't in our Camera struct, so we tilt pitch slightly at ¼ freq
+        //  to give a subtle forward lean at each step peak)
+    }
+
     // Screen shake only from enemy hits, not weapon fire
     if (m_localPlayer.hitShakeTimer > 0.0f) {
         m_localPlayer.hitShakeTimer -= dt;
@@ -4511,7 +4566,9 @@ void Engine::handleWeaponFire(f32 dt) {
         m_viewmodelState.attackAnimT = 0.2f; // shorter recoil snap
         m_viewmodelState.fireShakeTimer = 0.1f;
     } else {
-        m_viewmodelState.fireShakeTimer = 0.12f;
+        // Projectile: throw arc animation + slight shake on release
+        m_viewmodelState.attackAnimT = 0.3f;
+        m_viewmodelState.fireShakeTimer = 0.08f;
     }
     m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
     if (result.hitEntity) m_hitMarkerTimer = 0.2f;
@@ -4961,9 +5018,20 @@ void Engine::renderViewmodel() {
     // Wide FOV for viewmodel so arm/hand are visible in peripheral vision
     Mat4 proj = Mat4::perspective(85.0f * (3.14159f / 180.0f), aspect, 0.01f, 10.0f);
 
-    // Subtle walk bob
-    f32 bobX = sinf(m_viewmodelState.bobTimer * 6.0f) * 0.004f;
-    f32 bobY = sinf(m_viewmodelState.bobTimer * 12.0f) * 0.003f;
+    // Weapon bob: figure-8 pattern — X at base freq, Y at 2× (lying 8 shape).
+    // Slower, heavier cadence than vanilla Doom for a more powerful stride feel.
+    f32 vxR = m_localPlayer.velocity.x;
+    f32 vzR = m_localPlayer.velocity.z;
+    f32 speedSqR = vxR * vxR + vzR * vzR;
+    f32 bobR = speedSqR * 0.028f;
+    if (bobR > 1.0f) bobR = 1.0f;
+
+    f32 weaponAngle = m_viewmodelState.bobTimer * 5.5f; // match view bob frequency
+    f32 bobX = bobR * 0.035f * sinf(weaponAngle);             // wide lateral swing
+    f32 bobY = bobR * 0.025f * sinf(weaponAngle * 2.0f);      // 2× freq = figure-8 vertical
+    // Add look sway — weapon trails behind camera rotation
+    bobX += m_viewmodelState.swayYaw;
+    bobY += m_viewmodelState.swayPitch;
 
     // Viewmodel-only recoil (doesn't affect camera)
     f32 recoilPitch = -m_viewmodelState.recoilKick * 0.12f;
@@ -4977,19 +5045,50 @@ void Engine::renderViewmodel() {
     if (m_viewmodelState.attackAnimT > 0.0f) {
         if (def.weaponType == WeaponType::MELEE) {
             f32 t = m_viewmodelState.attackAnimT / 0.3f; // normalized 1→0
+            f32 swing = sinf(t * 3.14159f); // smooth arc, peaks at t=0.5
             switch (def.weaponSubtype) {
                 case WeaponSubtype::DAGGER:
                 case WeaponSubtype::THROWING_KNIFE:
-                    attackZ = -0.45f * sinf(t * 3.14159f);
-                    attackPitch = -0.3f * sinf(t * 3.14159f);
+                    // Fast stab forward with slight upward arc
+                    attackZ = -0.6f * swing;
+                    attackPitch = -0.4f * swing;
+                    attackY = 0.05f * swing;
                     break;
                 case WeaponSubtype::AXE:
-                    attackPitch = -0.9f * sinf(t * 3.14159f);
+                    // Heavy overhead chop — big pitch rotation + downward drop
+                    attackPitch = -1.4f * swing;
+                    attackY = -0.08f * swing;
+                    attackZ = -0.15f * swing;
                     break;
                 case WeaponSubtype::SWORD:
                 default:
-                    attackYaw = -0.8f * sinf(t * 3.14159f);
-                    attackPitch = -0.15f * t;
+                    // Wide lateral slash with follow-through
+                    attackYaw = -1.3f * swing;
+                    attackPitch = -0.25f * swing;
+                    attackZ = -0.12f * swing;
+                    break;
+            }
+        } else if (def.weaponType == WeaponType::PROJECTILE) {
+            // Overhand throw arc — wind up then hurl forward
+            f32 t = m_viewmodelState.attackAnimT / 0.3f;
+            f32 swing = sinf(t * 3.14159f);
+            switch (def.weaponSubtype) {
+                case WeaponSubtype::MOLOTOV:
+                    // Lob: arm swings up and forward in an arc
+                    attackPitch = -1.0f * swing;
+                    attackZ = -0.5f * swing;
+                    attackY = 0.15f * swing;
+                    break;
+                case WeaponSubtype::THROWING_KNIFE:
+                    // Quick flick forward
+                    attackZ = -0.7f * swing;
+                    attackPitch = -0.3f * swing;
+                    break;
+                default:
+                    // Generic throw — forward lunge
+                    attackPitch = -0.8f * swing;
+                    attackZ = -0.4f * swing;
+                    attackY = 0.1f * swing;
                     break;
             }
         } else if (def.weaponType == WeaponType::HITSCAN) {
