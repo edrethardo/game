@@ -243,10 +243,11 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
     if (s_gridW == 0 || s_gridD == 0) return;
     if (s_dirty) rebuildTexture(grid);
 
-    // Screen-space position: top-right corner
-    static constexpr f32 MAP_SIZE = 150.0f;
-    static constexpr f32 MARGIN   = 10.0f;
-    static constexpr f32 BORDER   = 2.0f;
+    // Screen-space position: top-right corner, scaled relative to 720p
+    f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
+    f32 MAP_SIZE = 150.0f * uiScale;
+    f32 MARGIN   = 10.0f * uiScale;
+    f32 BORDER   = 2.0f * uiScale;
 
     f32 sw = static_cast<f32>(screenWidth);
     f32 sh = static_cast<f32>(screenHeight);

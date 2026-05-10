@@ -297,9 +297,8 @@ void Engine::init() {
     DebugDraw::init();
     HUD::init();
     FontSystem::init();
-#ifdef __SWITCH__
-    FontSystem::setUIScale(1.3f); // 30% larger UI on Switch (TV distance)
-#endif
+    // Font UI scale is set dynamically per-frame based on viewport height
+    // (see renderHUD). No fixed scale needed here.
     ItemIconSystem::init();
     // NOTE: LimbSystem::init is called later, after OBJ meshes are loaded
 
@@ -5069,7 +5068,6 @@ void Engine::renderViewmodel() {
                     break;
             }
         } else if (def.weaponType == WeaponType::PROJECTILE) {
-            // Overhand throw arc — wind up then hurl forward
             f32 t = m_viewmodelState.attackAnimT / 0.3f;
             f32 swing = sinf(t * 3.14159f);
             switch (def.weaponSubtype) {
@@ -5084,11 +5082,25 @@ void Engine::renderViewmodel() {
                     attackZ = -0.7f * swing;
                     attackPitch = -0.3f * swing;
                     break;
+                case WeaponSubtype::BOW:
+                    // Draw and release — pull back then snap forward
+                    attackZ = 0.08f * swing;
+                    attackPitch = 0.15f * t;
+                    break;
+                case WeaponSubtype::CROSSBOW:
+                    // Short sharp recoil kick
+                    attackPitch = 0.2f * t;
+                    attackZ = 0.05f * t;
+                    break;
+                case WeaponSubtype::WAND:
+                    // Magic pulse — slight forward thrust with upward flick
+                    attackPitch = 0.12f * swing;
+                    attackZ = -0.06f * swing;
+                    break;
                 default:
-                    // Generic throw — forward lunge
-                    attackPitch = -0.8f * swing;
-                    attackZ = -0.4f * swing;
-                    attackY = 0.1f * swing;
+                    // Other projectiles — subtle recoil
+                    attackPitch = 0.15f * t;
+                    attackZ = 0.04f * t;
                     break;
             }
         } else if (def.weaponType == WeaponType::HITSCAN) {
@@ -7079,6 +7091,10 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
 // (health bar, crosshair, quickbar, minimap, skill bars, net stats, profiler)
 // ---------------------------------------------------------------------------
 void Engine::renderHUD(u32 sw, u32 sh) {
+    // Set font scale based on viewport height so text scales with resolution.
+    // At 720p = 1.0, at 1080p = 1.5. HUD code passes raw font sizes (1, 2, 3).
+    FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
+
     if (m_inventoryOpen) {
         // Inventory screen replaces normal HUD elements
         s32 invMX, invMY;
@@ -7251,8 +7267,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                     m_localPlayer.soulHarvestTimer > 0.0f
                         ? static_cast<f32>(m_localPlayer.soulHarvestStacks) : -1.0f},
             };
-            // Energy bar top edge is at y=52, place icons above with gap
-            HUD::drawStatusIcons(sw, sh, 20.0f, 58.0f, statuses, 6);
+            // Energy bar top edge is at y=52, place icons above with gap (scaled)
+            f32 hs2 = static_cast<f32>(sh) / 720.0f;
+            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses, 6);
         }
 
         // Ammo display for hitscan weapons (right side of health bar area)
@@ -7266,8 +7283,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 wpn = m_weaponDefs[ws.currentWeapon];
             }
             if (wpn.clipSize > 0) {
-                f32 ammoX = 230.0f;
-                f32 ammoY = 20.0f;
+                f32 hs3 = static_cast<f32>(sh) / 720.0f;
+                f32 ammoX = 230.0f * hs3;
+                f32 ammoY = 20.0f * hs3;
                 if (ws.reloading) {
                     f32 maxReload = (wpn.reloadTime > 0.0f) ? wpn.reloadTime : 1.0f;
                     f32 pct = 1.0f - ws.reloadTimer / maxReload; // 0→1
@@ -7320,14 +7338,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Class skill bar — 4 slots to the LEFT of the quickbar
         {
+            f32 hs4 = static_cast<f32>(sh) / 720.0f;
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
-            // Quickbar is 4 slots × 40px + 3 gaps × 4px = 172px, centered
-            f32 qbTotalW = QUICKBAR_SLOTS * 40.0f + (QUICKBAR_SLOTS - 1) * 4.0f;
+            // Quickbar is 4 slots × 40px + 3 gaps × 4px = 172px, centered (scaled)
+            f32 qbTotalW = QUICKBAR_SLOTS * 40.0f * hs4 + (QUICKBAR_SLOTS - 1) * 4.0f * hs4;
             f32 qbX = (static_cast<f32>(sw) - qbTotalW) * 0.5f;
             // Skill bar goes to the left of the quickbar with a small gap
-            f32 skillBarW = 4 * 32.0f + 3 * 3.0f; // 4 slots × 32px + 3 gaps
-            f32 skillBarX = qbX - skillBarW - 12.0f;
-            f32 skillBarY = 14.0f; // align with quickbar bottom area
+            f32 skillBarW = 4 * 32.0f * hs4 + 3 * 3.0f * hs4;
+            f32 skillBarX = qbX - skillBarW - 12.0f * hs4;
+            f32 skillBarY = 14.0f * hs4; // align with quickbar bottom area
 
             f32 cooldowns[4];
             f32 maxCooldowns[4];
@@ -7385,10 +7404,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 }
 
                 if (equipCount > 0) {
-                    // Position above the class skill bar
-                    f32 equipBarW = equipCount * 32.0f + (equipCount - 1) * 3.0f;
+                    // Position above the class skill bar (scaled)
+                    f32 equipBarW = equipCount * 32.0f * hs4 + (equipCount - 1) * 3.0f * hs4;
                     f32 equipBarX = skillBarX + (skillBarW - equipBarW) * 0.5f;
-                    f32 equipBarY = skillBarY + 56.0f; // well above class bar
+                    f32 equipBarY = skillBarY + 56.0f * hs4; // well above class bar
                     HUD::drawEquipSkillBar(sw, sh, equipBarX, equipBarY,
                                             equipSlots, equipCount);
                 }
@@ -7397,32 +7416,33 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Active skill display — right side of screen, shows current right-click skill name
         {
+            f32 hs5 = static_cast<f32>(sh) / 720.0f;
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
             u8 slot = m_activeClassSkill;
             bool unlocked = (m_currentFloor >= cls.skillUnlockFloor[slot]);
             const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, cls.skills[slot]);
 
-            f32 rmbX = static_cast<f32>(sw) - 220.0f;
-            f32 rmbY = 15.0f;
+            f32 rmbX = static_cast<f32>(sw) - 220.0f * hs5;
+            f32 rmbY = 15.0f * hs5;
 
             // Skill activation button icon
             bool skillReady = (m_classSkillStates[slot].cooldownTimer <= 0.0f && unlocked);
             if (Input::isGamepadConnected(0))
-                HUD::drawKeySymbol(sw, sh, rmbX, rmbY + 8, "R", skillReady);
+                HUD::drawKeySymbol(sw, sh, rmbX, rmbY + 8.0f * hs5, "R", skillReady);
             else
-                HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8, 1, skillReady);
+                HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8.0f * hs5, 1, skillReady);
 
             // Skill name
             const char* skillName = sd ? sd->name : "???";
             Vec3 nameCol = unlocked ? Vec3{0.9f, 0.9f, 1.0f} : Vec3{0.4f, 0.4f, 0.4f};
             if (m_classSkillStates[slot].cooldownTimer > 0.0f) nameCol = {0.6f, 0.4f, 0.3f};
-            FontSystem::drawText(sw, sh, rmbX + 25, rmbY + 22, skillName, nameCol, 2);
+            FontSystem::drawText(sw, sh, rmbX + 25.0f * hs5, rmbY + 22.0f * hs5, skillName, nameCol, 2);
 
             // Cooldown text
             if (m_classSkillStates[slot].cooldownTimer > 0.0f) {
                 char cdTxt[8];
                 std::snprintf(cdTxt, sizeof(cdTxt), "%.1fs", m_classSkillStates[slot].cooldownTimer);
-                FontSystem::drawText(sw, sh, rmbX + 25, rmbY + 6, cdTxt, {1.0f, 0.5f, 0.2f}, 2);
+                FontSystem::drawText(sw, sh, rmbX + 25.0f * hs5, rmbY + 6.0f * hs5, cdTxt, {1.0f, 0.5f, 0.2f}, 2);
             }
         }
 
@@ -7431,8 +7451,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Legendary item dots on minimap — gold "+" cross at each active legendary world item
         {
-            static constexpr f32 mapSize = 150.0f;
-            static constexpr f32 margin  = 10.0f;
+            f32 hudScale = static_cast<f32>(sh) / 720.0f;
+            f32 mapSize = 150.0f * hudScale;
+            f32 margin  = 10.0f * hudScale;
             f32 mapX = static_cast<f32>(sw) - mapSize - margin;
             f32 mapY = static_cast<f32>(sh) - mapSize - margin;
 
@@ -7461,10 +7482,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         if (m_floorDoorActive) {
             u32 doorGx, doorGz;
             if (LevelGridSystem::worldToGrid(m_grid, m_floorDoorPos, doorGx, doorGz)) {
-                // Convert grid coords to minimap screen position
-                // Minimap: top-right, 150x150px, 10px margin
-                f32 mapSize = 150.0f;
-                f32 margin = 10.0f;
+                // Convert grid coords to minimap screen position (scaled)
+                f32 hudScale2 = static_cast<f32>(sh) / 720.0f;
+                f32 mapSize = 150.0f * hudScale2;
+                f32 margin = 10.0f * hudScale2;
                 f32 mapX = static_cast<f32>(sw) - mapSize - margin;
                 f32 mapY = static_cast<f32>(sh) - mapSize - margin;
                 f32 normX = (static_cast<f32>(doorGx) + 0.5f) / static_cast<f32>(m_grid.width);
@@ -7478,26 +7499,28 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             }
         }
 
-        // Floor indicator (top-left)
+        // Floor indicator (top-left) — scaled with resolution
         {
+            f32 hs = static_cast<f32>(sh) / 720.0f;
             char floorStr[32];
             std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_currentFloor);
-            FontSystem::drawText(sw, sh, 20.0f, static_cast<f32>(sh) - 22.0f,
+            FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 22.0f * hs,
                                  floorStr, {0.7f, 0.7f, 0.7f}, 2);
         }
 
         // Potion cooldown indicator (below floor text, Q key icon + label)
         {
-            f32 potY = static_cast<f32>(sh) - 45.0f;
+            f32 hs = static_cast<f32>(sh) / 720.0f;
+            f32 potY = static_cast<f32>(sh) - 45.0f * hs;
             bool potReady = (m_potionCooldown <= 0.0f);
-            HUD::drawKeySymbol(sw, sh, 20.0f, potY, Input::isGamepadConnected(0) ? "B" : "Q", potReady);
+            HUD::drawKeySymbol(sw, sh, 20.0f * hs, potY, Input::isGamepadConnected(0) ? "B" : "Q", potReady);
             if (potReady) {
-                FontSystem::drawText(sw, sh, 44.0f, potY + 2.0f,
+                FontSystem::drawText(sw, sh, 44.0f * hs, potY + 2.0f * hs,
                                      "Potion", {0.3f, 0.8f, 0.3f}, 2);
             } else {
                 char potStr[32];
                 std::snprintf(potStr, sizeof(potStr), "Potion: %.0fs", m_potionCooldown);
-                FontSystem::drawText(sw, sh, 44.0f, potY + 2.0f,
+                FontSystem::drawText(sw, sh, 44.0f * hs, potY + 2.0f * hs,
                                      potStr, {0.8f, 0.3f, 0.3f}, 2);
             }
         }
@@ -7611,15 +7634,17 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                           m_netRole == NetRole::SERVER ? "HOST" : "CLIENT");
     }
 
-    // Chat log — left side of screen, above the quickbar
+    // Chat log — left side of screen, above the quickbar (scaled)
     {
-        f32 chatX = 15.0f;
-        f32 chatY = 100.0f; // above status icons and quickbar
+        f32 cs = static_cast<f32>(sh) / 720.0f;
+        f32 chatX = 15.0f * cs;
+        f32 chatY = 100.0f * cs; // above status icons and quickbar
+        f32 lineSpacing = 12.0f * cs;
         for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
             if (m_chatLog[i].timer <= 0.0f || m_chatLog[i].text[0] == '\0') continue;
             f32 alpha = (m_chatLog[i].timer < 2.0f) ? m_chatLog[i].timer * 0.5f : 1.0f;
             Vec3 col = m_chatLog[i].color * alpha;
-            f32 lineY = chatY + static_cast<f32>(i) * 12.0f;
+            f32 lineY = chatY + static_cast<f32>(i) * lineSpacing;
             FontSystem::drawText(sw, sh, chatX, lineY, m_chatLog[i].text, col, 1);
         }
     }
@@ -7631,6 +7656,8 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 void Engine::renderMenu() {
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    FontSystem::setUIScale(uiScale);
 
     // Title text
     {
@@ -7652,15 +7679,15 @@ void Engine::renderMenu() {
 
         static const char* subLabels[] = {"New Game", "Continue"};
         for (u32 i = 0; i < 2; i++) {
-            f32 y = sh * 0.38f + (1 - i) * 50.0f;
+            f32 y = sh * 0.38f + (1 - i) * 50.0f * uiScale;
             bool sel = (i == m_menuSubSelection);
             bool available = (i == 0) || hasSave;
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
             if (!available) col = {0.2f, 0.2f, 0.2f};
-            HUD::drawMenuOption(sw, sh, y, 250, 35, col, sel && available);
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel && available);
             Vec3 tc = available ? (sel ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}) : Vec3{0.35f,0.35f,0.35f};
             f32 tw = FontSystem::textWidth(subLabels[i], 2);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f, subLabels[i], tc, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale, subLabels[i], tc, 2);
         }
 
         const char* hint = Input::isGamepadConnected(0)
@@ -7677,7 +7704,7 @@ void Engine::renderMenu() {
 
         u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
         f32 listTop = sh * 0.54f;
-        f32 spacing = 38.0f;
+        f32 spacing = 38.0f * uiScale;
 
         for (u8 i = 0; i < classCount; i++) {
             const ClassDef& cls = kClassDefs[i];
@@ -7685,13 +7712,13 @@ void Engine::renderMenu() {
             bool sel = (i == m_menuSubSelection);
 
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.35f, 0.2f};
-            HUD::drawMenuOption(sw, sh, y, 400, 32, col, sel);
+            HUD::drawMenuOption(sw, sh, y, 400.0f * uiScale, 32.0f * uiScale, col, sel);
 
             Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.55f, 0.55f, 0.55f};
             char label[64];
             std::snprintf(label, sizeof(label), "%s  (%.0f HP, %.0f EN)", cls.name, cls.baseHealth, cls.baseEnergy);
             f32 tw = FontSystem::textWidth(label, 2);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 9.0f, label, tc, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 9.0f * uiScale, label, tc, 2);
         }
 
         // Show selected class description and stats above the game title
@@ -7708,7 +7735,7 @@ void Engine::renderMenu() {
             std::snprintf(statLine, sizeof(statLine), "HP: %.0f  Speed: %.1f  Energy: %.0f  Weapon: %s",
                           sel.baseHealth, sel.baseMoveSpeed, sel.baseEnergy, sel.startingWeaponName);
             f32 statW = FontSystem::textWidth(statLine, 2);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - statW) * 0.5f, descY - 24.0f,
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - statW) * 0.5f, descY - 24.0f * uiScale,
                                  statLine, {0.6f, 0.8f, 0.6f}, 2);
         }
 
@@ -7750,18 +7777,18 @@ void Engine::renderMenu() {
 
         u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
         f32 listTop = sh * 0.54f;
-        f32 spacing = 38.0f;
+        f32 spacing = 38.0f * uiScale;
         for (u8 i = 0; i < classCount; i++) {
             const ClassDef& cls = kClassDefs[i];
             f32 y = listTop - i * spacing;
             bool sel = (i == m_menuSubSelection);
             Vec3 col = sel ? Vec3{0.3f, 0.6f, 1.0f} : Vec3{0.15f, 0.25f, 0.45f};
-            HUD::drawMenuOption(sw, sh, y, 400, 32, col, sel);
+            HUD::drawMenuOption(sw, sh, y, 400.0f * uiScale, 32.0f * uiScale, col, sel);
             Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.55f, 0.55f, 0.55f};
             char label[64];
             std::snprintf(label, sizeof(label), "%s  (%.0f HP, %.0f EN)", cls.name, cls.baseHealth, cls.baseEnergy);
             f32 tw = FontSystem::textWidth(label, 2);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 9.0f, label, tc, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 9.0f * uiScale, label, tc, 2);
         }
 
         const char* hint = "D-pad to select, A to confirm";
@@ -7794,7 +7821,7 @@ void Engine::renderMenu() {
         static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 6;
 
         f32 listTop = sh * 0.78f;
-        f32 lineH = 22.0f;
+        f32 lineH = 22.0f * uiScale;
 
         u32 visibleRows = static_cast<u32>((listTop - sh * 0.1f) / lineH);
         u32 scrollOffset = 0;
@@ -7898,15 +7925,15 @@ void Engine::renderMenu() {
         };
 
         for (u32 i = 0; i < 5; i++) {
-            f32 y = sh * 0.2f + (4 - i) * 50.0f;
+            f32 y = sh * 0.2f + (4 - i) * 50.0f * uiScale;
             Vec3 color = colors[i];
             bool selected = (i == m_menuSelection);
             if (!selected) color = color * 0.4f;
-            HUD::drawMenuOption(sw, sh, y, 250, 35, color, selected);
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, color, selected);
 
             f32 textW = FontSystem::textWidth(labels[i], 2);
             f32 textX = (static_cast<f32>(sw) - textW) * 0.5f;
-            FontSystem::drawText(sw, sh, textX, y + 10.0f, labels[i],
+            FontSystem::drawText(sw, sh, textX, y + 10.0f * uiScale, labels[i],
                 selected ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}, 2);
         }
 

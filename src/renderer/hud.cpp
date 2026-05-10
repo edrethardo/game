@@ -103,10 +103,11 @@ void HUD::shutdown() {
 }
 
 void HUD::drawCrosshair(u32 screenWidth, u32 screenHeight, Vec3 color) {
+    f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
     f32 cx = screenWidth  * 0.5f;
     f32 cy = screenHeight * 0.5f;
-    f32 gap  = 4.0f;
-    f32 size = 12.0f;
+    f32 gap  = 4.0f * uiScale;
+    f32 size = 12.0f * uiScale;
 
     // Four lines with a gap in the centre
     pushLine(cx - size, cy, cx - gap, cy, color);  // left
@@ -118,16 +119,18 @@ void HUD::drawCrosshair(u32 screenWidth, u32 screenHeight, Vec3 color) {
 }
 
 void HUD::drawHitMarker(u32 screenWidth, u32 screenHeight, f32 alpha) {
+    f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
     f32 cx = screenWidth  * 0.5f;
     f32 cy = screenHeight * 0.5f;
-    f32 size = 8.0f;
+    f32 size = 8.0f * uiScale;
+    f32 inner = 3.0f * uiScale;
     Vec3 color = {alpha, alpha, alpha};
 
     // X shape
-    pushLine(cx - size, cy - size, cx - 3, cy - 3, color);
-    pushLine(cx + 3,    cy + 3,    cx + size, cy + size, color);
-    pushLine(cx + size, cy - size, cx + 3, cy - 3, color);
-    pushLine(cx - 3,    cy + 3,    cx - size, cy + size, color);
+    pushLine(cx - size, cy - size, cx - inner, cy - inner, color);
+    pushLine(cx + inner,    cy + inner,    cx + size, cy + size, color);
+    pushLine(cx + size, cy - size, cx + inner, cy - inner, color);
+    pushLine(cx - inner,    cy + inner,    cx - size, cy + size, color);
 
     flushHUD(screenWidth, screenHeight);
 }
@@ -135,10 +138,11 @@ void HUD::drawHitMarker(u32 screenWidth, u32 screenHeight, f32 alpha) {
 void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
                          f32 health, f32 maxHealth)
 {
-    f32 barW = 200.0f;
-    f32 barH = 16.0f;
-    f32 x0 = 20.0f;
-    f32 y0 = 20.0f;
+    f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
+    f32 barW = 200.0f * uiScale;
+    f32 barH = 16.0f * uiScale;
+    f32 x0 = 20.0f * uiScale;
+    f32 y0 = 20.0f * uiScale;
 
     f32 frac = (maxHealth > 0.0f) ? health / maxHealth : 0.0f;
     if (frac < 0.0f) frac = 0.0f;
@@ -150,16 +154,18 @@ void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
     // Filled portion (draw as horizontal lines to simulate fill)
     Vec3 barColor = (frac > 0.3f) ? Vec3{0.2f, 0.8f, 0.2f} : Vec3{0.9f, 0.2f, 0.2f};
     f32 fillW = barW * frac;
-    for (f32 y = y0 + 2; y < y0 + barH - 2; y += 2.0f) {
-        pushLine(x0 + 2, y, x0 + 2 + fillW - 4, y, barColor);
+    f32 fillPad = 2.0f * uiScale;
+    for (f32 y = y0 + fillPad; y < y0 + barH - fillPad; y += 2.0f * uiScale) {
+        pushLine(x0 + fillPad, y, x0 + fillPad + fillW - fillPad * 2.0f, y, barColor);
     }
 
     flushHUD(screenWidth, screenHeight);
 }
 
 void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) {
-    f32 x0 = static_cast<f32>(screenWidth) - 120.0f;
-    f32 y0 = 20.0f;
+    f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
+    f32 x0 = static_cast<f32>(screenWidth) - 120.0f * uiScale;
+    f32 y0 = 20.0f * uiScale;
 
     // Color per weapon type
     Vec3 colors[3] = {
@@ -169,7 +175,7 @@ void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) 
     };
 
     Vec3 c = (weaponSlot < 3) ? colors[weaponSlot] : Vec3{1,1,1};
-    pushQuad(x0, y0, x0 + 100, y0 + 16, c);
+    pushQuad(x0, y0, x0 + 100.0f * uiScale, y0 + 16.0f * uiScale, c);
 
     flushHUD(screenWidth, screenHeight);
 }
@@ -298,11 +304,12 @@ void HUD::drawNetStats(u32 screenWidth, u32 screenHeight,
 }
 
 void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
-    f32 barW = 200.0f;
-    f32 barH = 10.0f;
-    f32 x0 = 20.0f;
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    f32 barW = 200.0f * uiScale;
+    f32 barH = 10.0f * uiScale;
+    f32 x0 = 20.0f * uiScale;
     // Health bar sits at y0=20 with barH=16, so place energy bar 22px above it
-    f32 y0 = 20.0f + 16.0f + 6.0f; // = 42px from bottom
+    f32 y0 = (20.0f + 16.0f + 6.0f) * uiScale; // = 42px from bottom at 720p
 
     f32 frac = (maxEnergy > 0.0f) ? energy / maxEnergy : 0.0f;
     if (frac < 0.0f) frac = 0.0f;
@@ -314,8 +321,9 @@ void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
     // Filled portion in blue
     Vec3 barColor = {0.2f, 0.4f, 1.0f};
     f32 fillW = barW * frac;
-    for (f32 y = y0 + 2; y < y0 + barH - 2; y += 2.0f) {
-        pushLine(x0 + 2, y, x0 + 2 + fillW - 4, y, barColor);
+    f32 fillPad = 2.0f * uiScale;
+    for (f32 y = y0 + fillPad; y < y0 + barH - fillPad; y += 2.0f * uiScale) {
+        pushLine(x0 + fillPad, y, x0 + fillPad + fillW - fillPad * 2.0f, y, barColor);
     }
 
     flushHUD(sw, sh);
@@ -554,7 +562,8 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               const u8* unlockFloors, const u8* upgradeFloors,
                               const f32* cooldownTimers, const f32* maxCooldowns)
 {
-    f32 slotW = 32.0f, slotH = 32.0f, gap = 3.0f;
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    f32 slotW = 32.0f * uiScale, slotH = 32.0f * uiScale, gap = 3.0f * uiScale;
 
     for (u8 s = 0; s < 4; s++) {
         f32 sx = x + s * (slotW + gap);
@@ -600,13 +609,13 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             static char numBuf[4][2] = {{'1',0}, {'2',0}, {'3',0}, {'4',0}};
             skillLabel = numBuf[s];
         }
-        drawKeySymbol(sw, sh, sx + 7.0f, y + 8.0f, skillLabel, selected && unlocked);
+        drawKeySymbol(sw, sh, sx + 7.0f * uiScale, y + 8.0f * uiScale, skillLabel, selected && unlocked);
 
         // Locked text
         if (!unlocked) {
             char lockTxt[8];
             std::snprintf(lockTxt, sizeof(lockTxt), "F%u", unlockFloors[s]);
-            FontSystem::drawText(sw, sh, sx + 6.0f, y + 2.0f, lockTxt, {0.35f, 0.25f, 0.25f}, 1);
+            FontSystem::drawText(sw, sh, sx + 6.0f * uiScale, y + 2.0f * uiScale, lockTxt, {0.35f, 0.25f, 0.25f}, 1);
         }
     }
 }
@@ -726,7 +735,8 @@ static const u8* getSkillIcon(u8 skillId) {
 void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               const EquipSkillSlot* slots, u32 slotCount)
 {
-    f32 slotW = 32.0f, slotH = 32.0f, gap = 3.0f;
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    f32 slotW = 32.0f * uiScale, slotH = 32.0f * uiScale, gap = 3.0f * uiScale;
 
     for (u32 s = 0; s < slotCount; s++) {
         const EquipSkillSlot& slot = slots[s];
@@ -762,9 +772,9 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         if (icon) {
             Vec3 cols[5];
             getSkillIconColors(slot.skillId, cols);
-            f32 iconX = sx + 8.0f;  // center 16px icon in 32px slot
-            f32 iconY = y + 8.0f;
-            f32 px = 2.0f; // pixel scale
+            f32 iconX = sx + 8.0f * uiScale;  // center 16px icon in 32px slot
+            f32 iconY = y + 8.0f * uiScale;
+            f32 px = 2.0f * uiScale; // pixel scale
             for (u32 iy = 0; iy < 8; iy++) {
                 for (u32 ix = 0; ix < 8; ix++) {
                     u8 c = icon[iy * 8 + ix];
@@ -783,10 +793,10 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
 
         // Key label or "Auto" for passives
         if (slot.isPassive) {
-            FontSystem::drawText(sw, sh, sx + 4.0f, y + 2.0f, "auto",
+            FontSystem::drawText(sw, sh, sx + 4.0f * uiScale, y + 2.0f * uiScale, "auto",
                                  {0.5f, 0.4f, 0.7f}, 1);
         } else {
-            drawKeySymbol(sw, sh, sx + 7.0f, y - 20.0f, slot.keyLabel, ready);
+            drawKeySymbol(sw, sh, sx + 7.0f * uiScale, y - 20.0f * uiScale, slot.keyLabel, ready);
         }
     }
 }
@@ -957,11 +967,12 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
                         const PlayerInventory& inv,
                         const ItemDef* itemDefs,
                         f32 cooldownPct) {
-    static constexpr f32 SLOT_SIZE = 40.0f;
-    static constexpr f32 SLOT_GAP  = 4.0f;
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    f32 SLOT_SIZE = 40.0f * uiScale;
+    f32 SLOT_GAP  = 4.0f * uiScale;
     // Total width of all 8 slots plus gaps between them
-    static constexpr f32 TOTAL_W   = QUICKBAR_SLOTS * SLOT_SIZE + (QUICKBAR_SLOTS - 1) * SLOT_GAP;
-    static constexpr f32 Y_OFFSET  = 20.0f; // distance from bottom edge
+    f32 TOTAL_W   = QUICKBAR_SLOTS * SLOT_SIZE + (QUICKBAR_SLOTS - 1) * SLOT_GAP;
+    f32 Y_OFFSET  = 20.0f * uiScale; // distance from bottom edge
 
     f32 startX = (static_cast<f32>(sw) - TOTAL_W) * 0.5f;
     f32 baseY  = Y_OFFSET;
@@ -987,7 +998,7 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
         // Slot number label (top-left corner of slot, 1-indexed)
         char numStr[4];
         std::snprintf(numStr, sizeof(numStr), "%u", i + 1);
-        FontSystem::drawText(sw, sh, x0 + 2, y1 - 10, numStr,
+        FontSystem::drawText(sw, sh, x0 + 2.0f * uiScale, y1 - 10.0f * uiScale, numStr,
                              active ? Vec3{1.0f, 0.9f, 0.5f} : Vec3{0.5f, 0.5f, 0.5f}, 1);
 
         // Resolve the item currently assigned to this slot
@@ -1009,7 +1020,7 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
             std::strncpy(abbrev, def.name, 5);
             f32 textW = FontSystem::textWidth(abbrev, 1);
             f32 textX = x0 + (SLOT_SIZE - textW) * 0.5f;
-            FontSystem::drawText(sw, sh, textX, y0 - 10, abbrev, rc, 1);
+            FontSystem::drawText(sw, sh, textX, y0 - 10.0f * uiScale, abbrev, rc, 1);
 
             // Hand marker on the currently equipped weapon's slot (bottom-right corner)
             // Check if this item matches the equipped weapon by UID
@@ -1061,11 +1072,12 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
 }
 
 void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
     // Center-top of screen
-    f32 barW = 160.0f;
-    f32 barH = 8.0f;
+    f32 barW = 160.0f * uiScale;
+    f32 barH = 8.0f * uiScale;
     f32 x0 = static_cast<f32>(sw) * 0.5f - barW * 0.5f;
-    f32 y0 = static_cast<f32>(sh) - 60.0f;
+    f32 y0 = static_cast<f32>(sh) - 60.0f * uiScale;
 
     Vec3 c = {color.x * alpha, color.y * alpha, color.z * alpha};
 
@@ -1153,13 +1165,13 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             ItemIconSystem::drawIcon(sw, sh, eqX + 3.0f * uiScale, y + 2.0f * uiScale, slotH - 4.0f * uiScale, def, item.rarity);
             // Item name to the right of icon
             FontSystem::drawText(sw, sh, eqX + slotH + 4.0f * uiScale, y + 9.0f * uiScale,
-                                 def.name, rarityColor(item.rarity), 2.0f * uiScale);
+                                 def.name, rarityColor(item.rarity), 2);
         } else {
             // Slot type label for empty slots
             static const char* slotLabels[] = {"Weapon", "Offhand", "Helmet", "Armor", "Boots", "Ring"};
             Vec3 dimColor = {0.25f, 0.25f, 0.3f};
             FontSystem::drawText(sw, sh, eqX + 6.0f * uiScale, y + 8.0f * uiScale,
-                                 slotLabels[i], dimColor, 1.0f * uiScale);
+                                 slotLabels[i], dimColor, 1);
         }
 
         // Selection highlight — golden border + arrow
@@ -1442,8 +1454,9 @@ static void getStatusColors(u32 idx, Vec3 cols[5]) {
 void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
                             const StatusEffect* effects, u32 count)
 {
-    f32 iconSize = 28.0f;
-    f32 gap = 5.0f;
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    f32 iconSize = 28.0f * uiScale;
+    f32 gap = 5.0f * uiScale;
     f32 cx = x;
 
     for (u32 i = 0; i < count; i++) {
@@ -1476,9 +1489,9 @@ void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
         if (icon) {
             Vec3 cols[5];
             getStatusColors(i, cols);
-            f32 px = 3.0f; // pixel scale
-            f32 iconX = cx + 2.0f;
-            f32 iconY = y + 2.0f;
+            f32 px = 3.0f * uiScale; // pixel scale
+            f32 iconX = cx + 2.0f * uiScale;
+            f32 iconY = y + 2.0f * uiScale;
             for (u32 iy = 0; iy < 8; iy++) {
                 for (u32 ix = 0; ix < 8; ix++) {
                     u8 c = icon[iy * 8 + ix];
@@ -1500,7 +1513,7 @@ void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
         f32 showVal = (effects[i].displayValue >= 0.0f) ? effects[i].displayValue : effects[i].timer;
         std::snprintf(timeTxt, sizeof(timeTxt), "%.0f", showVal);
         f32 tw = FontSystem::textWidth(timeTxt, 1);
-        FontSystem::drawText(sw, sh, cx + (iconSize - tw) * 0.5f, y + iconSize + 2.0f,
+        FontSystem::drawText(sw, sh, cx + (iconSize - tw) * 0.5f, y + iconSize + 2.0f * uiScale,
                              timeTxt, effects[i].color * pulse, 1);
 
         cx += iconSize + gap;
