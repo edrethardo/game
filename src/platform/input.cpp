@@ -53,8 +53,10 @@ static u64 s_padPrevButtons[2] = {};
 static void initPads() {
     if (s_padsInitialized) return;
     s_padsInitialized = true;
-    padConfigureInput(2, HidNpadStyleSet_NpadFullCtrl);
-    padInitialize(&s_pads[0], HidNpadIdType_No1);
+    // Accept Pro Controller, handheld, and dual joycons (two joycons held
+    // sideways or attached to the grip as a single controller)
+    padConfigureInput(2, HidNpadStyleSet_NpadFullCtrl | HidNpadStyleTag_NpadJoyDual);
+    padInitializeDefault(&s_pads[0]);   // P1: auto-detects handheld, pro, or dual joycon
     padInitialize(&s_pads[1], HidNpadIdType_No2);
     // Seed prev state so buttons held at init don't trigger false presses
     for (s32 p = 0; p < 2; p++) {
@@ -448,31 +450,48 @@ bool Input::isModifierHeld(s32 gamepadIndex) {
 #ifdef __SWITCH__
 #include <switch.h>
 static bool s_gyroInitialized = false;
-static HidSixAxisSensorHandle s_gyroHandles[2]; // 0=player1 dual, 1=handheld
+static HidSixAxisSensorHandle s_gyroHandles[4]; // P1: pro, handheld, joydual-right, spare
 static u32 s_gyroHandleCount = 0;
 
-static HidSixAxisSensorHandle s_gyroHandlesP2[2]; // P2 sensor handles
+static HidSixAxisSensorHandle s_gyroHandlesP2[4]; // P2 sensor handles
 static u32 s_gyroHandleCountP2 = 0;
 
 static void initGyro() {
     if (s_gyroInitialized) return;
     s_gyroInitialized = true;
 
-    // Don't call padConfigureInput here — it's done by initPads() for split-screen
-    // Get six-axis sensor handles for player 1
-    hidGetSixAxisSensorHandles(&s_gyroHandles[0], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
-    hidStartSixAxisSensor(s_gyroHandles[0]);
-    s_gyroHandleCount = 1;
+    s_gyroHandleCount = 0;
 
-    // Handheld mode fallback for P1
-    hidGetSixAxisSensorHandles(&s_gyroHandles[1], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
-    hidStartSixAxisSensor(s_gyroHandles[1]);
-    s_gyroHandleCount = 2;
+    // P1: Pro Controller
+    hidGetSixAxisSensorHandles(&s_gyroHandles[s_gyroHandleCount], 1,
+                               HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
+    hidStartSixAxisSensor(s_gyroHandles[s_gyroHandleCount]);
+    s_gyroHandleCount++;
 
-    // Player 2 gyro sensor
-    hidGetSixAxisSensorHandles(&s_gyroHandlesP2[0], 1, HidNpadIdType_No2, HidNpadStyleTag_NpadFullKey);
-    hidStartSixAxisSensor(s_gyroHandlesP2[0]);
-    s_gyroHandleCountP2 = 1;
+    // P1: Handheld (attached joycons)
+    hidGetSixAxisSensorHandles(&s_gyroHandles[s_gyroHandleCount], 1,
+                               HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    hidStartSixAxisSensor(s_gyroHandles[s_gyroHandleCount]);
+    s_gyroHandleCount++;
+
+    // P1: Dual joycons (detached, used as one controller — right joycon has gyro)
+    hidGetSixAxisSensorHandles(&s_gyroHandles[s_gyroHandleCount], 1,
+                               HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
+    hidStartSixAxisSensor(s_gyroHandles[s_gyroHandleCount]);
+    s_gyroHandleCount++;
+
+    // P2: Pro Controller
+    s_gyroHandleCountP2 = 0;
+    hidGetSixAxisSensorHandles(&s_gyroHandlesP2[s_gyroHandleCountP2], 1,
+                               HidNpadIdType_No2, HidNpadStyleTag_NpadFullKey);
+    hidStartSixAxisSensor(s_gyroHandlesP2[s_gyroHandleCountP2]);
+    s_gyroHandleCountP2++;
+
+    // P2: Dual joycons
+    hidGetSixAxisSensorHandles(&s_gyroHandlesP2[s_gyroHandleCountP2], 1,
+                               HidNpadIdType_No2, HidNpadStyleTag_NpadJoyDual);
+    hidStartSixAxisSensor(s_gyroHandlesP2[s_gyroHandleCountP2]);
+    s_gyroHandleCountP2++;
 
     LOG_INFO("Gyro: initialized P1=%u P2=%u sensor handles", s_gyroHandleCount, s_gyroHandleCountP2);
 }
