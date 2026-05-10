@@ -5,18 +5,23 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
     f32 fmx = static_cast<f32>(mx);
     f32 fmy = static_cast<f32>(my);
 
+    // Scale relative to 720p reference so split-screen viewports work
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+
     // --- Backpack grid (right side) ---
     {
         f32 bpX = static_cast<f32>(sw) * 0.42f;
-        f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
+        f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
+        f32 cell = BP_CELL * uiScale;
+        f32 gap  = BP_GAP * uiScale;
 
         for (u32 i = 0; i < BP_COLS * BP_ROWS; i++) {
             u32 col = i % BP_COLS;
             u32 row = i / BP_COLS;
-            f32 x = bpX + static_cast<f32>(col) * (BP_CELL + BP_GAP);
-            f32 y = bpStartY - static_cast<f32>(row) * (BP_CELL + BP_GAP);
+            f32 x = bpX + static_cast<f32>(col) * (cell + gap);
+            f32 y = bpStartY - static_cast<f32>(row) * (cell + gap);
 
-            if (fmx >= x && fmx <= x + BP_CELL && fmy >= y && fmy <= y + BP_CELL) {
+            if (fmx >= x && fmx <= x + cell && fmy >= y && fmy <= y + cell) {
                 result.panel = SlotHit::BACKPACK;
                 result.index = static_cast<u8>(i);
                 return result;
@@ -28,11 +33,14 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
     {
         f32 eqX = static_cast<f32>(sw) * 0.12f;
         f32 centerY = static_cast<f32>(sh) * 0.5f;
-        f32 eqStartY = centerY + 220.0f;
+        f32 eqStartY = centerY + 220.0f * uiScale;
+        f32 eqW = EQ_W * uiScale;
+        f32 eqH = EQ_H * uiScale;
+        f32 eqGap = EQ_GAP * uiScale;
 
         for (u32 i = 0; i < EQ_SLOTS; i++) {
-            f32 y = eqStartY - static_cast<f32>(i) * (EQ_H + EQ_GAP);
-            if (fmx >= eqX && fmx <= eqX + EQ_W && fmy >= y && fmy <= y + EQ_H) {
+            f32 y = eqStartY - static_cast<f32>(i) * (eqH + eqGap);
+            if (fmx >= eqX && fmx <= eqX + eqW && fmy >= y && fmy <= y + eqH) {
                 result.panel = SlotHit::EQUIPMENT;
                 result.index = static_cast<u8>(i);
                 return result;

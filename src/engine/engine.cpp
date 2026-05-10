@@ -3699,19 +3699,27 @@ void Engine::updateInventoryInteraction(f32 dt) {
         }
 
         // Move mouse cursor to match D-pad selection (so tooltip renders at right position)
+        // Scale relative to 720p reference (matches hud.cpp layout)
+        f32 uiScale = static_cast<f32>(sh) / 720.0f;
+        f32 bpCell = InventoryUI::BP_CELL * uiScale;
+        f32 bpGap  = InventoryUI::BP_GAP * uiScale;
+        f32 eqH    = InventoryUI::EQ_H * uiScale;
+        f32 eqW    = InventoryUI::EQ_W * uiScale;
+        f32 eqGap  = InventoryUI::EQ_GAP * uiScale;
+
         if (m_invCursorPanel == 0) {
             u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
             u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
             f32 bpX = static_cast<f32>(sw) * 0.42f;
-            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
-            mx = static_cast<s32>(bpX + col * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
-            my = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
+            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
+            mx = static_cast<s32>(bpX + col * (bpCell + bpGap) + bpCell * 0.5f);
+            my = static_cast<s32>(bpStartY - row * (bpCell + bpGap) + bpCell * 0.5f);
         } else {
             f32 eqX = static_cast<f32>(sw) * 0.12f;
             f32 centerY = static_cast<f32>(sh) * 0.5f;
-            f32 eqStartY = centerY + 220.0f;
-            mx = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
-            my = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
+            f32 eqStartY = centerY + 220.0f * uiScale;
+            mx = static_cast<s32>(eqX + eqW * 0.5f);
+            my = static_cast<s32>(eqStartY - m_invCursorIndex * (eqH + eqGap) + eqH * 0.5f);
         }
     }
 
@@ -6980,18 +6988,26 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // When using controller, override mouse position with D-pad cursor
         if (Input::isGamepadConnected(0)) {
+            // Scale layout relative to 720p reference (matches hud.cpp / inventory_ui.cpp)
+            f32 uiScale = static_cast<f32>(sh) / 720.0f;
+            f32 bpCell = InventoryUI::BP_CELL * uiScale;
+            f32 bpGap  = InventoryUI::BP_GAP * uiScale;
+            f32 eqH    = InventoryUI::EQ_H * uiScale;
+            f32 eqW    = InventoryUI::EQ_W * uiScale;
+            f32 eqGap  = InventoryUI::EQ_GAP * uiScale;
+
             if (m_invCursorPanel == 0) {
                 u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
                 f32 bpX = static_cast<f32>(sw) * 0.42f;
-                f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f;
-                invMX = static_cast<s32>(bpX + col * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
-                invMY = static_cast<s32>(bpStartY - row * (InventoryUI::BP_CELL + InventoryUI::BP_GAP) + InventoryUI::BP_CELL * 0.5f);
+                f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
+                invMX = static_cast<s32>(bpX + col * (bpCell + bpGap) + bpCell * 0.5f);
+                invMY = static_cast<s32>(bpStartY - row * (bpCell + bpGap) + bpCell * 0.5f);
             } else {
                 f32 eqX = static_cast<f32>(sw) * 0.12f;
-                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 220.0f;
-                invMX = static_cast<s32>(eqX + InventoryUI::EQ_W * 0.5f);
-                invMY = static_cast<s32>(eqStartY - m_invCursorIndex * (InventoryUI::EQ_H + InventoryUI::EQ_GAP) + InventoryUI::EQ_H * 0.5f);
+                f32 eqStartY = static_cast<f32>(sh) * 0.5f + 220.0f * uiScale;
+                invMX = static_cast<s32>(eqX + eqW * 0.5f);
+                invMY = static_cast<s32>(eqStartY - m_invCursorIndex * (eqH + eqGap) + eqH * 0.5f);
             }
         }
 

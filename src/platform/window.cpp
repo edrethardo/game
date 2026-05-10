@@ -1,5 +1,8 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
 
 #include "platform/window.h"
 #include "platform/input.h"
@@ -16,6 +19,15 @@ bool Window::init(const char* title, s32 width, s32 height) {
         LOG_ERROR("SDL_Init failed: %s", SDL_GetError());
         return false;
     }
+
+#ifdef __SWITCH__
+    // Docked = 1080p, handheld = 720p
+    if (appletGetOperationMode() == AppletOperationMode_Console) {
+        width = 1920; height = 1080;
+    } else {
+        width = 1280; height = 720;
+    }
+#endif
 
     // Must be set BEFORE SDL_CreateWindow
 #ifdef __SWITCH__
@@ -69,6 +81,20 @@ void Window::shutdown() {
 }
 
 void Window::pollEvents() {
+#ifdef __SWITCH__
+    // Detect dock/undock transitions and adjust resolution
+    AppletOperationMode mode = appletGetOperationMode();
+    s32 newW = (mode == AppletOperationMode_Console) ? 1920 : 1280;
+    s32 newH = (mode == AppletOperationMode_Console) ? 1080 : 720;
+    if (newW != s_width || newH != s_height) {
+        s_width = newW;
+        s_height = newH;
+        SDL_SetWindowSize(s_window, s_width, s_height);
+        LOG_INFO("Switch mode change: %dx%d (%s)", s_width, s_height,
+                 mode == AppletOperationMode_Console ? "docked" : "handheld");
+    }
+#endif
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {

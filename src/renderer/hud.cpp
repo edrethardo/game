@@ -1092,15 +1092,18 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                u8 selectedSlot, bool selectedIsEquipped,
                                s32 mouseX, s32 mouseY)
 {
+    // Scale inventory layout relative to 720p reference height so it fits
+    // in split-screen viewports (e.g. horizontal split = half height)
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
 
     f32 centerY = static_cast<f32>(sh) * 0.5f;
 
     // --- Equipment panel (left side, raised to leave room for tooltips below) ---
     f32 eqX      = static_cast<f32>(sw) * 0.12f;
-    f32 eqStartY = centerY + 220.0f;
-    f32 slotW    = 240.0f;
-    f32 slotH    = 32.0f;
-    f32 slotGap  = 5.0f;
+    f32 eqStartY = centerY + 220.0f * uiScale;
+    f32 slotW    = 240.0f * uiScale;
+    f32 slotH    = 32.0f * uiScale;
+    f32 slotGap  = 5.0f * uiScale;
 
     // Dark background behind equipment panel
     {
@@ -1147,16 +1150,16 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             }
             flushHUD(sw, sh);
             // Icon on left side of slot
-            ItemIconSystem::drawIcon(sw, sh, eqX + 3.0f, y + 2.0f, slotH - 4.0f, def, item.rarity);
+            ItemIconSystem::drawIcon(sw, sh, eqX + 3.0f * uiScale, y + 2.0f * uiScale, slotH - 4.0f * uiScale, def, item.rarity);
             // Item name to the right of icon
-            FontSystem::drawText(sw, sh, eqX + slotH + 4.0f, y + 9.0f,
-                                 def.name, rarityColor(item.rarity), 2);
+            FontSystem::drawText(sw, sh, eqX + slotH + 4.0f * uiScale, y + 9.0f * uiScale,
+                                 def.name, rarityColor(item.rarity), 2.0f * uiScale);
         } else {
             // Slot type label for empty slots
             static const char* slotLabels[] = {"Weapon", "Offhand", "Helmet", "Armor", "Boots", "Ring"};
             Vec3 dimColor = {0.25f, 0.25f, 0.3f};
-            FontSystem::drawText(sw, sh, eqX + 6.0f, y + 8.0f,
-                                 slotLabels[i], dimColor, 1);
+            FontSystem::drawText(sw, sh, eqX + 6.0f * uiScale, y + 8.0f * uiScale,
+                                 slotLabels[i], dimColor, 1.0f * uiScale);
         }
 
         // Selection highlight — golden border + arrow
@@ -1180,9 +1183,9 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 
     // --- Backpack panel (closer to equipment, raised for tooltip space below) ---
     f32 bpX      = static_cast<f32>(sw) * 0.42f;
-    f32 bpStartY = centerY + 180.0f;
-    f32 cellSize = 32.0f;
-    f32 cellGap  = 4.0f;
+    f32 bpStartY = centerY + 180.0f * uiScale;
+    f32 cellSize = 32.0f * uiScale;
+    f32 cellGap  = 4.0f * uiScale;
 
     // Dark background behind backpack panel
     {
@@ -1286,9 +1289,9 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                     u32 eqIdx = static_cast<u32>(eqSlot);
 
                     // Both tooltips below the inventory panels, side by side
-                    f32 tooltipY = 80.0f;
+                    f32 tooltipY = 80.0f * uiScale;
                     f32 leftTipX = eqX;
-                    f32 rightTipX = eqX + 336.0f; // 320 tooltip width + 16 gap
+                    f32 rightTipX = eqX + 336.0f * uiScale;
 
                     // Left: hovered backpack item
                     drawItemTooltip(sw, sh, leftTipX, tooltipY,
