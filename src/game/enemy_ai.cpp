@@ -1370,9 +1370,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         // Ranged hostile (imp, bone mage, demon): lead the shot using
                         // predicted target position to account for target movement.
                         Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
-                        f32 projSpeed = 14.0f;
+                        f32 projSpeed = 16.1f;  // was 14, +15%
                         f32 projRadius = 0.08f;
-                        if (e.flags & ENT_FLYING) { projSpeed = 10.0f; projRadius = 0.06f; }
+                        if (e.flags & ENT_FLYING) { projSpeed = 11.5f; projRadius = 0.06f; }
                         f32 timeToHit = dist / projSpeed;
                         Vec3 predictedPos = targetPos + targetVel * timeToHit;
                         Vec3 atkDir = normalize(predictedPos - atkOrigin);

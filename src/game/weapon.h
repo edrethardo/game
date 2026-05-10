@@ -18,7 +18,7 @@ enum struct WeaponType : u8 {
 enum struct WeaponSubtype : u8 {
     NONE = 0,
     // Melee subtypes
-    SWORD, DAGGER, AXE,
+    SWORD, DAGGER, AXE, CLAYMORE,
     // Hitscan subtypes
     PISTOL, SMG, CARBINE, REVOLVER,
     // Projectile subtypes
@@ -86,7 +86,7 @@ inline void initWeaponTable(WeaponDef* defs, u32& count) {
     // 2: Fireball (projectile)
     defs[count++] = {
         "Fireball", WeaponType::PROJECTILE,
-        30.0f, 0.0f, 0.6f, 0.0f, 15.0f, 0.15f, 0.02f,
+        30.0f, 0.0f, 0.6f, 0.0f, 17.25f, 0.15f, 0.02f,
         0, 0.0f // no clip
     };
 }

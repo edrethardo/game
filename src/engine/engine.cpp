@@ -684,6 +684,7 @@ void Engine::init() {
         if (s_engine->m_weaponProc == SkillId::CHAIN_LIGHTNING)  procChance = 25;
         if (s_engine->m_weaponProc == SkillId::METEOR_STRIKE)    procChance = 10;
         if (s_engine->m_weaponProc == SkillId::BLOOD_NOVA)       procChance = 20;
+        if (s_engine->m_weaponProc == SkillId::SHADOW_RICOCHET)  procChance = 30;
 
         LOG_INFO("Projectile hit: weaponProc=%u, roll=%u/%u",
                  static_cast<u32>(s_engine->m_weaponProc), procRoll, procChance);
@@ -767,6 +768,35 @@ void Engine::init() {
                         break;
                     }
                 }
+            } break;
+            case SkillId::SHADOW_RICOCHET: {
+                // Find 2 nearest enemies (excluding the one we just hit) and fire
+                // shadow bolts at them. Each bolt is a normal player projectile so
+                // it can re-trigger the proc on hit (10% chance → natural decay).
+                EntityHandle nearby[8];
+                f32 nearDists[8];
+                u32 found = CombatQuery::queryConeSorted(
+                    s_engine->m_entities, position, {0,-1,0}, -1.0f, 12.0f,
+                    nearby, nearDists, 8);
+                u32 spawned = 0;
+                for (u32 h = 0; h < found && spawned < 2; h++) {
+                    if (nearby[h].index == target.index) continue; // skip primary target
+                    Entity* ne = handleGet(s_engine->m_entities, nearby[h]);
+                    if (!ne || (ne->flags & ENT_DEAD) || (ne->flags & ENT_FRIENDLY)) continue;
+                    Vec3 toEnemy = ne->position - position;
+                    f32 dist = length(toEnemy);
+                    if (dist < 0.1f) continue;
+                    Vec3 dir = toEnemy * (1.0f / dist);
+                    // Shadow bolt: 60% of weapon damage, fast, small radius
+                    f32 boltDmg = sd->damage * 0.6f;
+                    u16 idx = ProjectileSystem::spawn(s_engine->m_projectiles, position, dir,
+                        20.0f, boltDmg, 0.1f, 2.0f, true);
+                    if (idx != 0xFFFF) {
+                        s_engine->m_projectiles.projectiles[idx].projFlags = PROJ_VOID;
+                    }
+                    spawned++;
+                }
+                LOG_INFO("  SHADOW RICOCHET: spawned %u bolts", spawned);
             } break;
             default: break;
         }
@@ -1366,7 +1396,7 @@ void Engine::startGame() {
              {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "bat_skin",      0, 0, 0},
             {GameConst::SPIDER_HEALTH, GameConst::SPIDER_SPEED, GameConst::SPIDER_DET_RANGE,
              GameConst::SPIDER_ATK_RANGE, GameConst::SPIDER_ATK_COOL, GameConst::SPIDER_DAMAGE,
-             {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "spider_skin",   0, 0, 0},
+             {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "spider_skin",   0, 0, 0},
             // Zombie (Diablo 1) — slow, tanky, human mesh
             {70,  1.8f, 18, 3.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
             // Imp (Barony) — small fast flying ranged nuisance, fires weak projectiles
@@ -1376,7 +1406,7 @@ void Engine::startGame() {
         static const EnemyTemplate kTier2[] = {
             {60, 3.0f, 22, 3.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
             {35, 6.5f, 22, 3.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
-            {48, 4.2f, 20, 3.0f, 0.8f, 11, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
+            {48, 4.2f, 20, 3.0f, 0.8f, 11, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
             // Ghoul (D2) — fast melee, high damage, lower HP
             {40, 4.5f, 22, 3.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
             // Bone Mage (Barony) — ranged skeleton caster
@@ -1386,9 +1416,9 @@ void Engine::startGame() {
         static const EnemyTemplate kTier3[] = {
             {65, 3.2f, 24, 3.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
             {38, 7.0f, 24, 3.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
-            {52, 4.8f, 22, 3.0f, 0.7f, 12, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
+            {52, 4.8f, 22, 3.0f, 0.7f, 12, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
             // Broodmother (Barony) — large slow spider, extra tanky
-            {90, 2.5f, 20, 3.5f, 1.0f, 14, {0.7f,0.4f,0.7f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
+            {90, 2.5f, 20, 3.5f, 1.0f, 14, {0.91f,0.52f,0.91f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
             // Stalker (HGL) — fast, stealthy humanoid
             {45, 5.0f, 26, 3.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
             // Sniper Imp — flying ranged, long range, slow fire, fast small projectiles
@@ -1398,9 +1428,9 @@ void Engine::startGame() {
         static const EnemyTemplate kTier4[] = {
             {70, 3.5f, 24, 3.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
             {40, 7.5f, 24, 3.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
-            {58, 5.0f, 22, 3.0f, 0.6f, 14, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
+            {58, 5.0f, 22, 3.0f, 0.6f, 14, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
             // Hellhound (D2) — fast charging beast, spider rig
-            {50, 6.0f, 24, 3.5f, 0.5f, 16, {0.5f,0.35f,0.5f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
+            {50, 6.0f, 24, 3.5f, 0.5f, 16, {0.65f,0.455f,0.65f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
             // Demon (HGL) — ranged fire caster, humanoid
             {55, 3.0f, 26, 13.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
         };
@@ -1408,7 +1438,7 @@ void Engine::startGame() {
         static const EnemyTemplate kTier5[] = {
             {80, 3.8f, 26, 3.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
             {45, 8.0f, 26, 3.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
-            {65, 5.5f, 24, 3.0f, 0.5f, 15, {0.5f,0.3f,0.5f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
+            {65, 5.5f, 24, 3.0f, 0.5f, 15, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
             // Shade (Barony) — fast phasing humanoid, semi-transparent
             {40, 5.5f, 28, 3.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
             // Void Demon (HGL) — heavy tanky skeleton, high damage
@@ -1597,7 +1627,7 @@ void Engine::startGame() {
             //                                          HP   DMG  SPD  RNG  COOL  halfExtents
             {  5, "The Butcher",   "FRESH MEAT!",         800, 80, 3.0f, 3.5f, 0.4f, {0.8f,1.25f,0.8f}, false, "butcher",  "butcher_skin",      "cleaver"},
             { 15, "Lich Lord",     "Your soul is MINE!",  500, 30, 2.8f, 12.f, 0.8f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_lich",         "staff"},
-            { 25, "Spider Queen",  "*HISSSS*",            700, 30, 5.0f, 3.0f, 0.4f, {0.8f,0.5f, 0.8f}, false, "spider",   "boss_spider_queen", nullptr},
+            { 25, "Spider Queen",  "*HISSSS*",            700, 30, 5.0f, 3.0f, 0.4f, {1.04f,0.65f, 1.04f}, false, "spider",   "boss_spider_queen", nullptr},
             { 35, "Demon Knight",  "Kneel before me!",    800, 25, 3.5f, 3.5f, 0.5f, {0.7f,1.2f, 0.7f}, false, "butcher",  "boss_demon_knight", "sword"},
             { 45, "Arch Mage",     "Feel the arcane!",    600, 20, 3.0f, 14.f, 0.4f, {0.5f,1.0f, 0.5f}, false, "skeleton", "boss_arch_mage",    "staff"},
             // Major bosses (floors 10, 20, 30, 40, 50) — devastating, need full player focus
@@ -4524,11 +4554,14 @@ void Engine::handleWeaponFire(f32 dt) {
         bool isCrossbow = qbItem && !isItemEmpty(*qbItem) &&
                           m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::CROSSBOW;
 
-        // Spawn projectile offset to the right of center (weapon position)
+        // Spawn projectile at the weapon tip position (matches viewmodel)
+        Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
         Vec3 spawnPos = eyePos + forward * 0.8f;
-        if (isBow || isCrossbow || isMolotov) {
+        if (isWand) {
+            // Wand/staff tip: offset right and down, not too far forward for close hits
+            spawnPos = eyePos + forward * 0.7f + right * 0.25f + Vec3{0, -0.2f, 0};
+        } else if (isBow || isCrossbow || isMolotov) {
             // Offset right and slightly down to match weapon hand position
-            Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
             spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
         }
 
@@ -5038,6 +5071,7 @@ void Engine::renderViewmodel() {
     // Attack animation — per-subtype melee, generic recoil for ranged
     f32 attackPitch = 0.0f;  // X rotation (pitch forward/back)
     f32 attackYaw   = 0.0f;  // Y rotation (swing left/right)
+    f32 attackRoll  = 0.0f;  // Z rotation (roll — horizontal swing in view plane)
     f32 attackZ     = 0.0f;  // Z offset (thrust forward/back)
     f32 attackY     = 0.0f;  // Y offset (drop down during reload)
 
@@ -5059,6 +5093,22 @@ void Engine::renderViewmodel() {
                     attackY = -0.08f * swing;
                     attackZ = -0.15f * swing;
                     break;
+                case WeaponSubtype::CLAYMORE: {
+                    // Claymore: hand sweeps from right to left across the body.
+                    // t goes 1→0; cosine for smooth start/end, fast middle.
+                    f32 sweepT = t;
+                    f32 arc = sinf(sweepT * 3.14159f); // peaks at mid-swing
+                    // X translation: weapon moves from far right to far left
+                    bobX += 0.35f * cosf(sweepT * 3.14159f);
+                    // Roll follows the lateral motion — blade tilts into the cut
+                    attackRoll = -0.6f * cosf(sweepT * 3.14159f);
+                    // Tip blade forward so it reads as a horizontal sweep
+                    attackPitch = -0.7f;
+                    // Forward reach at mid-swing
+                    attackZ = -0.2f * arc;
+                    // Slight drop at mid-swing from the weight
+                    attackY = -0.06f * arc;
+                } break;
                 case WeaponSubtype::SWORD:
                 default:
                     // Wide lateral slash with follow-through
@@ -5225,11 +5275,18 @@ void Engine::renderViewmodel() {
         (wb.min.z + wb.max.z) * 0.5f
     };
 
+    // Pivot point: for swing animations, rotate around the grip (bottom of mesh)
+    // instead of the center so the blade tip sweeps a wide arc.
+    Vec3 pivotOffset = {-meshCenter.x, -wb.min.y, -meshCenter.z}; // pivot at grip (bottom)
+    Vec3 defaultPivot = {-meshCenter.x, -meshCenter.y, -meshCenter.z}; // pivot at center
+    bool useGripPivot = (attackRoll != 0.0f); // only for swing animations
+
     Mat4 weaponModel = Mat4::translate(offset)
+                     * Mat4::rotateZ(attackRoll)
                      * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
                      * Mat4::rotateY(holdYaw + attackYaw)
                      * Mat4::scale({weaponScale, weaponScale, weaponScale})
-                     * Mat4::translate({-meshCenter.x, -meshCenter.y, -meshCenter.z});
+                     * Mat4::translate(useGripPivot ? pivotOffset : defaultPivot);
 
     Mat4 weaponMVP = proj * weaponModel;
 

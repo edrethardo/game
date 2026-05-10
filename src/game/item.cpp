@@ -42,6 +42,7 @@ static WeaponSubtype weaponSubtypeFromString(const std::string& s) {
     if (s == "sword"          || s == "SWORD")          return WeaponSubtype::SWORD;
     if (s == "dagger"         || s == "DAGGER")         return WeaponSubtype::DAGGER;
     if (s == "axe"            || s == "AXE")            return WeaponSubtype::AXE;
+    if (s == "claymore"       || s == "CLAYMORE")       return WeaponSubtype::CLAYMORE;
     if (s == "pistol"         || s == "PISTOL")         return WeaponSubtype::PISTOL;
     if (s == "smg"            || s == "SMG")            return WeaponSubtype::SMG;
     if (s == "carbine"        || s == "CARBINE")        return WeaponSubtype::CARBINE;
@@ -98,6 +99,7 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "stun_grenade")    return SkillId::STUN_GRENADE;
     if (s == "throwaway")       return SkillId::THROWAWAY;
     if (s == "void_zone")       return SkillId::VOID_ZONE;
+    if (s == "shadow_ricochet") return SkillId::SHADOW_RICOCHET;
     if (s == "life_steal")      return SkillId::LIFE_STEAL;
     if (s == "thorns")          return SkillId::THORNS;
     if (s == "berserker")       return SkillId::BERSERKER;

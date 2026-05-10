@@ -127,8 +127,9 @@ enum struct SkillId : u8 {
     // (reuses DEPLOY_TURRET)
 
     // Legendary weapon effects
-    THROWAWAY,  // throw weapon as projectile on reload
-    VOID_ZONE,  // on-hit: dark zone dealing flat + 60% missing HP
+    THROWAWAY,      // throw weapon as projectile on reload
+    VOID_ZONE,      // on-hit: dark zone dealing flat + 60% missing HP
+    SHADOW_RICOCHET, // on-hit: 2 shadow bolts seek nearby enemies (can re-proc)
 
     // Ring passives (always-on while equipped)
     LIFE_STEAL,     // heal 5% of damage dealt
