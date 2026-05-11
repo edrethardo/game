@@ -420,6 +420,7 @@ void Engine::init() {
             {"andariel",       "assets/meshes/andariel.obj"},
             {"spider_leg_pair","assets/meshes/spider_leg_pair.obj"},
             {"claymore",       "assets/meshes/claymore.obj"},
+            {"turret",         "assets/meshes/turret.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -539,6 +540,9 @@ void Engine::init() {
             }
         }
     });
+
+    // Set bolt mesh/material IDs for shock bolt projectiles
+    SkillSystem::setBoltMeshId(findMeshByName("bolt"), MaterialSystem::getIdByName("shock_bolt"));
 
     ItemGen::init(42);
 
@@ -891,15 +895,15 @@ void Engine::init() {
                 e->aiState       = AIState::IDLE;
             }
         } else if (type == 2) {
-            // Turret — stationary, hitscan, timed despawn
+            // Turret — stationary, hitscan, timed despawn (compact sentry)
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.3f, 0.6f, 0.3f}, false, 80.0f, 0.0f, 15.0f, 10.0f, 1.5f, 12.0f);
+                {0.2f, 0.3f, 0.2f}, false, 80.0f, 0.0f, 15.0f, 10.0f, 1.5f, 12.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->flags        |= ENT_FRIENDLY;
                 e->enemyType     = EnemyType::GENERIC;
-                e->meshId        = s_engine->m_meshIdSpider;
-                e->materialId    = 49;
+                e->meshId        = s_engine->findMeshByName("turret");
+                e->materialId    = MaterialSystem::getIdByName("turret_skin");
                 e->npcWeaponType = WeaponType::PROJECTILE;
                 e->npcProjectileSpeed  = 30.0f;
                 e->npcProjectileRadius = 0.06f;
@@ -924,7 +928,7 @@ void Engine::init() {
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
 
-static constexpr u32 SAVE_VERSION = 3; // bump when save format changes (v3: weapon clip/reload, ring passives, status effects)
+static constexpr u32 SAVE_VERSION = 4; // v4: PlayerInventory +clip/reload fields, QuickbarState 4 slots
 
 void Engine::saveGame() {
     FILE* f = std::fopen("save.dat", "wb");
@@ -1018,6 +1022,12 @@ bool Engine::loadGame() {
         m_activeClassSkill = loadedActiveSkill;
         for (u32 s = 0; s < 4; s++) m_classSkillStates[s] = loadedClassSkills[s];
 
+        // Sync per-player arrays so swapInPlayer(0) doesn't overwrite with defaults
+        m_playerClasses[0] = m_playerClass;
+        m_activeClassSkills[0] = m_activeClassSkill;
+        std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
+        m_localPlayers[0] = m_localPlayer;
+
         if (static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
             m_localPlayer.moveSpeed = cls.baseMoveSpeed;
@@ -1027,6 +1037,10 @@ bool Engine::loadGame() {
             for (u32 s = 0; s < 4; s++) {
                 m_classSkillStates[s].activeSkill = cls.skills[s];
             }
+            // Update per-player arrays again after class stats applied
+            m_playerClasses[0] = m_playerClass;
+            m_localPlayers[0] = m_localPlayer;
+            std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
         }
 
         LOG_INFO("Game loaded: floor %u, class %u, HP %.0f/%.0f",
@@ -2108,10 +2122,12 @@ void Engine::run() {
         // Poll input once per rendered frame — decoupled from physics tick rate
         Input::update();
         m_accumulator += frameTime;
+        m_firstTick = true;
         while (m_accumulator >= FIXED_DT) {
             update(static_cast<f32>(FIXED_DT));
             m_accumulator -= FIXED_DT;
             m_updateCount++;
+            m_firstTick = false;
         }
 
         render(static_cast<f32>(m_accumulator / FIXED_DT));
@@ -2252,6 +2268,8 @@ void Engine::update(f32 dt) {
         } else {
             // A / Space = revive at entrance
             if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+                // Send enemies walking back to their rooms before respawning
+                resetEnemiesToRooms();
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.position = m_players[m_localPlayerIndex].spawnPosition;
                 m_localPlayer.velocity = {0, 0, 0};
@@ -2364,12 +2382,14 @@ void Engine::update(f32 dt) {
 
     switch (m_gameState) {
     case GameState::MENU:
-        updateMenu(dt);
+        // Menu input runs once per frame, not per physics tick, to prevent
+        // multi-step skipping when the accumulator runs multiple iterations.
+        if (m_firstTick) updateMenu(dt);
         break;
     case GameState::LOBBY_HOST:
     case GameState::LOBBY_JOIN:
     case GameState::CONNECTING:
-        updateLobby(dt);
+        if (m_firstTick) updateLobby(dt);
         break;
     case GameState::IN_GAME:
         // Unified game loop: networking pre → gameplay → networking post
@@ -2385,6 +2405,12 @@ void Engine::update(f32 dt) {
             if (m_playerDead[sp]) {
                 // Dead player: check for respawn input (A / Space), skip gameplay
                 if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+                    // If ALL players were dead, reset enemies to their rooms
+                    bool allDead = true;
+                    for (u32 p = 0; p < m_splitPlayerCount; p++) {
+                        if (!m_playerDead[p]) { allDead = false; break; }
+                    }
+                    if (allDead) resetEnemiesToRooms();
                     m_localPlayer.health = m_localPlayer.maxHealth;
                     m_localPlayer.position = m_players[sp].spawnPosition;
                     m_localPlayer.velocity = {0, 0, 0};
@@ -2453,7 +2479,7 @@ void Engine::update(f32 dt) {
 // Menu
 // ---------------------------------------------------------------------------
 void Engine::updateMenu(f32 dt) {
-    (void)dt;
+    if (m_menuMsgTimer > 0.0f) m_menuMsgTimer -= dt;
 
     // Sub-menu for single player: New Game / Continue
     if (m_menuSubState == 1) {
@@ -2480,16 +2506,21 @@ void Engine::updateMenu(f32 dt) {
                 // Continue — load save (skip class selection)
                 if (loadGame()) {
                     m_currentFloor = m_savedFloor;
+                    // Start server if hosting
+                    if (m_netRole == NetRole::SERVER) {
+                        if (!Net::hostServer()) { m_netRole = NetRole::NONE; return; }
+                        LOG_INFO("Hosting game (continue)...");
+                    }
+                    m_menuSubState = 0;
+                    startGame();
                 } else {
+                    // Save incompatible or missing — redirect to class selection
                     m_currentFloor = 1;
+                    m_menuSubState = 2;
+                    m_menuSubSelection = 0;
+                    m_menuMsg = "Save file incompatible — starting new game";
+                    m_menuMsgTimer = 5.0f;
                 }
-                // Start server if hosting
-                if (m_netRole == NetRole::SERVER) {
-                    if (!Net::hostServer()) { m_netRole = NetRole::NONE; return; }
-                    LOG_INFO("Hosting game (continue)...");
-                }
-                m_menuSubState = 0;
-                startGame();
             }
         }
         return;
@@ -2983,7 +3014,17 @@ void Engine::gameUpdate(f32 dt) {
     if (!m_inventoryOpen) {
         PlayerController::update(m_localPlayer, dt);
         if (!m_localPlayer.noclip) {
-            Collision::moveAndSlide(m_localPlayer, m_grid, dt);
+            // Build obstacle list from active hostile entities (friendly NPCs are non-blocking)
+            CollisionObstacle obstacles[MAX_ENTITIES];
+            u32 obsCount = 0;
+            for (u32 i = 0; i < MAX_ENTITIES; i++) {
+                const Entity& e = m_entities.entities[i];
+                if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+                if (e.flags & ENT_FRIENDLY) continue;
+                if (e.enemyType == EnemyType::PROP) continue;
+                obstacles[obsCount++] = {e.position, e.halfExtents};
+            }
+            Collision::moveAndSlide(m_localPlayer, m_grid, dt, obstacles, obsCount);
         }
     }
 
@@ -3994,6 +4035,30 @@ void Engine::updateInventoryInteraction(f32 dt) {
     }
 }
 
+// Makes all active hostile entities walk back to their spawn positions.
+// Called on player death/respawn to prevent spawn-camping.
+void Engine::resetEnemiesToRooms() {
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        Entity& e = m_entities.entities[i];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        // Set a single-waypoint path back to spawn and use RETREAT to walk there
+        e.pathWaypoints[0] = e.homePosition;
+        e.pathLen = 1;
+        e.pathIdx = 0;
+        e.aiState = AIState::RETREAT;
+        e.tacticalTimer = 30.0f; // long timer so they walk all the way home
+        e.hasRetreated = false;
+        e.velocity = {0, 0, 0};
+        e.stunTimer = 0.0f;
+    }
+    // Clear squad alerts so enemies don't immediately re-aggro
+    for (u32 s = 0; s < m_squads.squadCount; s++) {
+        m_squads.squads[s].alerted = false;
+        m_squads.squads[s].alertTimer = 0.0f;
+    }
+}
+
 // Pushes the local player out of all active hostile entity AABBs.
 // Uses the minimal-penetration axis to avoid tunneling on corners.
 // Reverts push if it would land the player inside solid geometry.
@@ -4013,9 +4078,9 @@ void Engine::pushPlayerFromEntities() {
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
-                // Gentle push — mostly push the enemy away, barely move the player
-                f32 playerPush = 0.15f; // player moves 15%
-                f32 enemyPush  = 0.85f; // enemy moves 85%
+                // Safety net — entities are solid, push the player out fully
+                f32 playerPush = 1.0f;
+                f32 enemyPush  = 0.0f;
                 if (pushX < pushZ) {
                     f32 dir = (toPlayer.x > 0) ? 1.0f : -1.0f;
                     m_localPlayer.position.x += dir * pushX * playerPush;
@@ -4131,7 +4196,17 @@ void Engine::serverNetPre(f32 dt) {
         tempP.velocity = np.velocity;
         tempP.onGround = np.onGround;
         tempP.noclip = np.noclip;
-        Collision::moveAndSlide(tempP, m_grid, dt);
+        // Build obstacle list for net player collision (friendly NPCs non-blocking)
+        CollisionObstacle npObs[MAX_ENTITIES];
+        u32 npObsCount = 0;
+        for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
+            const Entity& e = m_entities.entities[ei];
+            if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+            if (e.flags & ENT_FRIENDLY) continue;
+            if (e.enemyType == EnemyType::PROP) continue;
+            npObs[npObsCount++] = {e.position, e.halfExtents};
+        }
+        Collision::moveAndSlide(tempP, m_grid, dt, npObs, npObsCount);
         np.position = tempP.position;
         np.velocity = tempP.velocity;
         np.onGround = tempP.onGround;
@@ -4372,7 +4447,17 @@ void Engine::clientNetPre(f32 dt) {
         tempP.velocity = np.velocity;
         tempP.onGround = np.onGround;
         tempP.noclip = np.noclip;
-        Collision::moveAndSlide(tempP, m_grid, dt);
+        // Build obstacle list for client prediction collision (friendly NPCs non-blocking)
+        CollisionObstacle clObs[MAX_ENTITIES];
+        u32 clObsCount = 0;
+        for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
+            const Entity& e = m_entities.entities[ei];
+            if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+            if (e.flags & ENT_FRIENDLY) continue;
+            if (e.enemyType == EnemyType::PROP) continue;
+            clObs[clObsCount++] = {e.position, e.halfExtents};
+        }
+        Collision::moveAndSlide(tempP, m_grid, dt, clObs, clObsCount);
         np.position = tempP.position;
         np.velocity = tempP.velocity;
         np.onGround = tempP.onGround;
@@ -4627,6 +4712,15 @@ void Engine::handleWeaponFire(f32 dt) {
                 m_localPlayer.position = teleportPos;
                 m_localPlayer.yaw += 3.14159f; // face back toward target
             }
+        }
+    }
+
+    // Affix life-on-hit: heal percentage of damage dealt (works independently of ring passive)
+    if (result.hitEntity) {
+        f32 loh = m_inventories[m_localPlayerIndex].bonusLifeOnHit;
+        if (loh > 0.0f) {
+            f32 heal = wpn.damage * loh;
+            m_localPlayer.health = fminf(m_localPlayer.health + heal, m_localPlayer.maxHealth);
         }
     }
 
@@ -4906,6 +5000,15 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         f32 heal = wpn.damage * 0.05f;
         np.health += heal;
         if (np.health > np.maxHealth) np.health = np.maxHealth;
+    }
+
+    // Affix life-on-hit for remote player
+    if (result.hitEntity) {
+        f32 loh = m_inventories[np.slotIndex].bonusLifeOnHit;
+        if (loh > 0.0f) {
+            f32 heal = wpn.damage * loh;
+            np.health = fminf(np.health + heal, np.maxHealth);
+        }
     }
 
     // --- Weapon legendary on-hit proc for remote player ---
@@ -5234,15 +5337,20 @@ void Engine::renderViewmodel() {
                 // Dagger: held forward for stabbing, blade pointing at target
                 holdYaw = 0.1f;
                 holdPitch = -0.5f; // angled forward like an icepick grip
+            } else if (def.weaponSubtype == WeaponSubtype::AXE) {
+                // Axe blade extends in -X; rotate -90° so it faces forward (away from player)
+                holdYaw = 0.4f - 1.5708f;
+                holdPitch = -0.2f;
             } else {
                 holdYaw = 0.4f;
                 holdPitch = -0.2f;
             }
             break;
         case WeaponType::HITSCAN:
-            offset = {0.40f + bobX, -0.30f + bobY + attackY, -0.50f + attackZ};
-            holdYaw = 0.1f;
-            holdPitch = 0.0f;
+            // Grip at hand, barrel forward — offset places grip at lower-right of screen
+            offset = {0.35f + bobX, -0.40f + bobY + attackY, -0.45f + attackZ};
+            holdYaw = 3.24159f; // π + slight offset — barrel faces forward (away from player)
+            holdPitch = 0.05f;  // slight upward tilt so barrel aims at crosshair
             break;
         case WeaponType::PROJECTILE:
             offset = {0.30f + bobX, -0.35f + bobY + attackY, -0.50f};
@@ -5276,18 +5384,18 @@ void Engine::renderViewmodel() {
         (wb.min.z + wb.max.z) * 0.5f
     };
 
-    // Pivot point: for swing animations, rotate around the grip (bottom of mesh)
-    // instead of the center so the blade tip sweeps a wide arc.
-    Vec3 pivotOffset = {-meshCenter.x, -wb.min.y, -meshCenter.z}; // pivot at grip (bottom)
-    Vec3 defaultPivot = {-meshCenter.x, -meshCenter.y, -meshCenter.z}; // pivot at center
-    bool useGripPivot = (attackRoll != 0.0f); // only for swing animations
+    // Pivot point: rotate around the grip (bottom of mesh) for melee swings
+    // and hitscan weapons so the barrel extends forward from the hand.
+    Vec3 gripPivot   = {-meshCenter.x, -wb.min.y, -meshCenter.z}; // pivot at grip (bottom)
+    Vec3 centerPivot = {-meshCenter.x, -meshCenter.y, -meshCenter.z}; // pivot at center
+    bool useGripPivot = (attackRoll != 0.0f) || (def.weaponType == WeaponType::HITSCAN);
 
     Mat4 weaponModel = Mat4::translate(offset)
                      * Mat4::rotateZ(attackRoll)
                      * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
                      * Mat4::rotateY(holdYaw + attackYaw)
                      * Mat4::scale({weaponScale, weaponScale, weaponScale})
-                     * Mat4::translate(useGripPivot ? pivotOffset : defaultPivot);
+                     * Mat4::translate(useGripPivot ? gripPivot : centerPivot);
 
     Mat4 weaponMVP = proj * weaponModel;
 
@@ -5315,17 +5423,29 @@ void Engine::renderViewmodel() {
     // Draw hand gripping the weapon (or fist if unarmed)
     // Hand sits at the weapon's base, rotated to wrap around the grip
     {
-        const Material* fallback = MaterialSystem::get(0);
+        const Material* skinMat = MaterialSystem::get(MaterialSystem::getIdByName("human_skin"));
         Vec4 skinTint = {0.85f, 0.70f, 0.55f, 1.0f};
         glUniform4f(m_unlitShader.loc_color, skinTint.x, skinTint.y, skinTint.z, skinTint.w);
-        if (fallback) glBindTexture(GL_TEXTURE_2D, fallback->texture.handle);
+        if (skinMat) {
+            glBindTexture(GL_TEXTURE_2D, skinMat->texture.handle);
+        }
 
-        // Hand at weapon grip — offset down from weapon center
+        // Hand at weapon grip — positioning and rotation depends on weapon type
+        Vec3 handOff = {0.0f, -0.12f, 0.05f};
+        Vec3 armOff  = {0.02f, -0.18f, 0.25f};
+        f32  handRotX = 0.0f; // extra hand rotation to curl fingers around grip
+        if (def.weaponType == WeaponType::HITSCAN) {
+            // Pistol grip: fingers curl down around the grip, hand behind receiver
+            handOff = {0.0f, -0.04f, -0.02f};
+            armOff  = {0.02f, -0.14f, -0.20f};
+            handRotX = -1.5708f; // -90° X rotation: fingers point down to wrap grip
+        }
         Mat4 handModel = Mat4::translate(offset)
                        * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
                        * Mat4::rotateY(holdYaw + attackYaw)
-                       * Mat4::translate({0.0f, -0.12f, 0.05f}) // below weapon, slightly back
-                       * Mat4::scale({1.2f, 1.2f, 1.2f});       // slightly larger than default
+                       * Mat4::translate(handOff)
+                       * Mat4::rotateX(handRotX)
+                       * Mat4::scale({1.2f, 1.2f, 1.2f});
         Mat4 handMVP = proj * handModel;
         glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, handMVP.m);
         MeshSystem::draw(m_handMesh);
@@ -5334,9 +5454,9 @@ void Engine::renderViewmodel() {
         Mat4 armModel = Mat4::translate(offset)
                       * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
                       * Mat4::rotateY(holdYaw + attackYaw)
-                      * Mat4::translate({0.02f, -0.18f, 0.25f}) // behind and below hand
-                      * Mat4::rotateX(0.15f)  // slight angle following arm
-                      * Mat4::scale({0.08f, 0.07f, 0.30f});     // elongated arm shape
+                      * Mat4::translate(armOff)
+                      * Mat4::rotateX(0.15f)
+                      * Mat4::scale({0.08f, 0.07f, 0.30f});
         Mat4 armMVP = proj * armModel;
         glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, armMVP.m);
         MeshSystem::draw(m_cubeMesh);
@@ -7802,6 +7922,14 @@ void Engine::renderMenu() {
             : "Up/Down to select, Enter to confirm, ESC to go back";
         f32 hintW2 = FontSystem::textWidth(hint2, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.06f, hint2, {0.4f, 0.4f, 0.5f}, 2);
+
+        // Transient message (e.g. "save file incompatible")
+        if (m_menuMsgTimer > 0.0f && m_menuMsg) {
+            f32 alpha = fminf(m_menuMsgTimer, 1.0f); // fade out in last second
+            f32 msgW = FontSystem::textWidth(m_menuMsg, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - msgW) * 0.5f, sh * 0.12f,
+                                 m_menuMsg, {1.0f * alpha, 0.3f * alpha, 0.3f * alpha}, 2);
+        }
     } else if (m_menuSubState == 4) {
         // Waiting for Player 2 join screen
         const char* p1Class = kClassDefs[static_cast<u32>(m_playerClasses[0])].name;

@@ -992,6 +992,33 @@ def gen_staff(height=1.2):
     return mb
 
 
+def gen_turret(height=0.4):
+    """Combat engineer sentry turret — TF2 level-1 style.
+
+    Tripod base, squat body housing, single barrel on top.
+    Origin at feet (Y=0). Compact: about 0.4 units tall.
+    """
+    mb = MeshBuilder()
+    # Tripod base — three stubby legs splayed out
+    import math as _m
+    for i in range(3):
+        angle = i * 2.0 * _m.pi / 3.0
+        lx = _m.sin(angle) * 0.12
+        lz = _m.cos(angle) * 0.12
+        add_box(mb, center=(lx, 0.02, lz),
+                half_extents=(0.025, 0.02, 0.025))
+    # Central column — short vertical post connecting base to housing
+    add_box(mb, center=(0.0, 0.08, 0.0),
+            half_extents=(0.04, 0.04, 0.04))
+    # Housing body — wider squat box (the "head" of the sentry)
+    add_box(mb, center=(0.0, 0.18, 0.0),
+            half_extents=(0.08, 0.06, 0.06))
+    # Barrel — thin box extending forward from the housing
+    add_box(mb, center=(0.0, 0.20, -0.14),
+            half_extents=(0.02, 0.02, 0.08))
+    return mb
+
+
 def gen_sword(length=0.8):
     """Sword weapon — elongated blade + handle.
 
@@ -1810,6 +1837,11 @@ MESH_TYPES = {
         "desc": "Simple openable chest (~24 tris). Params: --width",
         "default_file": "chest.obj",
     },
+    "turret": {
+        "func": gen_turret,
+        "desc": "Combat engineer sentry turret — tripod + barrel. Params: --height",
+        "default_file": "turret.obj",
+    },
     "sword": {
         "func": gen_sword,
         "desc": "Sword weapon — blade + handle. Params: --height (as length)",
@@ -1953,7 +1985,7 @@ def main():
     elif mtype == "chest":
         if args.width is not None:
             kwargs["width"] = args.width
-    elif mtype in ("shackles", "brazier"):
+    elif mtype in ("shackles", "brazier", "turret"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "web":

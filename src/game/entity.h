@@ -95,6 +95,9 @@ struct Entity {
     f32     flybyTimer  = 0.0f;     // time left in flyby maneuver
     f32     stuckTimer  = 0.0f;     // stuck detection accumulator (friendly NPCs)
 
+    // Spawn position — set once on EntitySystem::spawn, used to walk enemies home on player death
+    Vec3 homePosition = {0,0,0};
+
     // Pathfinding (A* waypoint cache — filled by tactical planner, consumed by FLANK/RETREAT/SURROUND)
     Vec3 pathWaypoints[6] = {};
     u8   pathLen = 0;  // number of valid waypoints

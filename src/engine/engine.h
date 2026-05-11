@@ -43,6 +43,7 @@ private:
     bool m_running     = false;
     f64  m_accumulator = 0.0;
     f64  m_statsTimer  = 0.0;
+    bool m_firstTick   = true; // true only on first accumulator iteration per frame
     u32  m_updateCount = 0;
     u32  m_frameCount  = 0;
 
@@ -51,6 +52,8 @@ private:
     u8        m_menuSelection = 0;
     u8        m_menuSubState = 0;  // 0=main, 1=singleplayer, 2=class selection, 3=options
     u8        m_menuSubSelection = 0;
+    f32       m_menuMsgTimer = 0.0f; // countdown for transient menu messages
+    const char* m_menuMsg = nullptr;
     bool      m_optionsBindCapture = false; // true when waiting for key/button press to rebind
     bool      m_optionsBindKeyboard = true; // true=capturing keyboard, false=capturing controller
     bool      m_confirmQuit = false;  // "are you sure?" overlay when pressing ESC in-game
@@ -308,6 +311,7 @@ private:
 
     // Player-entity push collision (shared between singleplayer and server paths)
     void pushPlayerFromEntities();
+    void resetEnemiesToRooms(); // walk enemies back to spawn on player death
 
     // Mesh ID lookup helper — linear scan over m_meshDefs by name
     u8 findMeshByName(const char* name) const;

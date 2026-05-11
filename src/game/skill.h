@@ -54,4 +54,5 @@ namespace SkillSystem {
     void setScorchCallback(ScorchCallback cb);
     void setDroneSpawnCallback(DroneSpawnCallback cb);
     void setChainCallback(ChainCallback cb);
+    void setBoltMeshId(u8 meshId, u8 matId);
 }

@@ -27,6 +27,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.generation++;
     e.flags        = ENT_ACTIVE | (flying ? ENT_FLYING : 0);
     e.position     = position;
+    e.homePosition = position;
     e.velocity     = {0,0,0};
     e.yaw          = 0.0f;
     e.halfExtents  = halfExtents;

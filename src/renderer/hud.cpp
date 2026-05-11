@@ -1301,22 +1301,19 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                     u32 eqIdx = static_cast<u32>(eqSlot);
 
                     // Both tooltips below the inventory panels, side by side
+                    // Left = equipped (matches equipment panel), Right = backpack item
                     f32 tooltipY = 80.0f * uiScale;
                     f32 leftTipX = eqX;
                     f32 rightTipX = eqX + 336.0f * uiScale;
 
-                    // Left: hovered backpack item
-                    drawItemTooltip(sw, sh, leftTipX, tooltipY,
-                                    inv.backpack[i], bpDef);
-
-                    // Right: currently equipped in matching slot
+                    // Left: currently equipped in matching slot
                     if (!isItemEmpty(inv.equipped[eqIdx])) {
-                        drawItemTooltip(sw, sh, rightTipX, tooltipY,
+                        drawItemTooltip(sw, sh, leftTipX, tooltipY,
                                         inv.equipped[eqIdx],
                                         itemDefs[inv.equipped[eqIdx].defId]);
-                        // "EQUIPPED" box below the tooltip
+                        // "EQUIPPED" label below the left tooltip
                         f32 boxW = 80.0f, boxH = 16.0f;
-                        f32 boxX = rightTipX + (320.0f - boxW) * 0.5f;
+                        f32 boxX = leftTipX + (320.0f - boxW) * 0.5f;
                         f32 boxY = tooltipY - boxH - 4.0f;
                         Vec3 gold = {1.0f, 0.85f, 0.3f};
                         for (f32 fy = 0; fy < boxH; fy += 1.0f)
@@ -1333,9 +1330,13 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                         char emptyLabel[32];
                         std::snprintf(emptyLabel, sizeof(emptyLabel),
                                       "Empty %s", slotName(eqSlot));
-                        FontSystem::drawText(sw, sh, rightTipX, tooltipY,
+                        FontSystem::drawText(sw, sh, leftTipX, tooltipY,
                                             emptyLabel, {0.55f, 0.55f, 0.6f}, 1);
                     }
+
+                    // Right: hovered backpack item
+                    drawItemTooltip(sw, sh, rightTipX, tooltipY,
+                                    inv.backpack[i], bpDef);
                 }
                 break;
             }
@@ -1679,6 +1680,8 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     if (def.slot == ItemSlot::WEAPON) {
         lineCount += 1; // subtype
         lineCount += 3; // damage, cooldown, range
+        if (def.weaponType == WeaponType::HITSCAN && def.baseClipSize > 0)
+            lineCount += 1; // clip + reload
     } else {
         if (item.bonusHealth > 0.0f) lineCount += 1;
     }
@@ -1757,6 +1760,14 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         }
         FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 0.7f, 0.9f}, bodyScale);
         curY -= lineH;
+
+        // Clip size + reload time for hitscan weapons
+        if (def.weaponType == WeaponType::HITSCAN && def.baseClipSize > 0) {
+            std::snprintf(buf, sizeof(buf), "Clip: %u  Reload: %.1fs",
+                          def.baseClipSize, def.baseReloadTime);
+            FontSystem::drawText(sw, sh, textX, curY, buf, {0.9f, 0.7f, 0.9f}, bodyScale);
+            curY -= lineH;
+        }
     } else {
         if (item.bonusHealth > 0.0f) {
             std::snprintf(buf, sizeof(buf), "+%.0f Health", item.bonusHealth);

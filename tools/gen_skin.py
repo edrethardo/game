@@ -1866,6 +1866,46 @@ def skin_weapon_throwing_knife_tex():
     return w, h, p
 
 
+def skin_shock_bolt_tex():
+    """Shock bolt projectile: bright white-blue electric bolt."""
+    w, h = 4, 4
+    p = {}
+    core = (180, 200, 255, 255)   # bright white-blue
+    glow = (80, 140, 255, 255)    # electric blue
+    tip  = (220, 230, 255, 255)   # near-white tip
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = glow
+    # Bright core down the center columns
+    for py in range(h):
+        p[(1, py)] = core
+        p[(2, py)] = core
+    # Glowing tip at top
+    for px in range(w):
+        p[(px, 3)] = tip
+    return w, h, p
+
+
+def skin_turret_tex():
+    """Sentry turret: metallic grey body, darker base, red targeting lens."""
+    w, h = 4, 4
+    p = {}
+    metal  = (140, 140, 150, 255)
+    dark   = (80, 80, 90, 255)
+    barrel = (100, 100, 110, 255)
+    lens   = (220, 40, 30, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = dark if py < 1 else metal
+    # Barrel strip on top row
+    for px in range(w):
+        p[(px, 3)] = barrel
+    # Red targeting lens
+    p[(1, 2)] = lens
+    p[(2, 2)] = lens
+    return w, h, p
+
+
 def skin_weapon_wand_tex():
     """Wand: dark wood shaft, glowing blue-green gem tip on top row."""
     w, h = 4, 4
@@ -2636,6 +2676,8 @@ SKIN_TYPES = {
     "weapon_crossbow_tex":       ("weapon_crossbow_tex_42.png",       skin_weapon_crossbow_tex),
     "weapon_throwing_knife_tex": ("weapon_throwing_knife_tex_42.png", skin_weapon_throwing_knife_tex),
     "weapon_wand_tex":           ("weapon_wand_tex_42.png",           skin_weapon_wand_tex),
+    "shock_bolt_tex":            ("shock_bolt_tex_42.png",            skin_shock_bolt_tex),
+    "turret_tex":                ("turret_tex_42.png",                skin_turret_tex),
     "helmet_plate_tex":      ("helmet_plate_skin_42.png",      skin_helmet_plate_tex),
     "helmet_leather_tex":    ("helmet_leather_skin_42.png",    skin_helmet_leather_tex),
     "armor_plate_tex":       ("armor_plate_skin_42.png",       skin_armor_plate_tex),

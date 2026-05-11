@@ -15,6 +15,7 @@
 #include "world/combat_query.h"
 #include "world/level_grid.h"
 #include "world/pathfinder.h"
+#include "world/collision.h"
 #include <cmath>
 #include <cstdlib>
 
@@ -54,19 +55,39 @@ static void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
     }
 }
 
-static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt) {
+// Checks whether an entity AABB overlaps the player AABB in the XZ plane.
+static bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,
+                                  const Vec3& playerPos, f32 playerHW) {
+    f32 eMinX = entPos.x - halfExt.x;
+    f32 eMaxX = entPos.x + halfExt.x;
+    f32 eMinZ = entPos.z - halfExt.z;
+    f32 eMaxZ = entPos.z + halfExt.z;
+    f32 pMinX = playerPos.x - playerHW;
+    f32 pMaxX = playerPos.x + playerHW;
+    f32 pMinZ = playerPos.z - playerHW;
+    f32 pMaxZ = playerPos.z + playerHW;
+    return eMaxX > pMinX && eMinX < pMaxX &&
+           eMaxZ > pMinZ && eMinZ < pMaxZ;
+}
+
+static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
+                                const Vec3& playerPos, f32 playerHW) {
     Vec3 delta = e.velocity * dt;
+    // Friendly NPCs don't collide with the player — only walls
+    bool checkPlayer = !(e.flags & ENT_FRIENDLY);
 
     // X axis — skip movement on collision but DON'T zero velocity
     // so the entity can still slide along the wall on the other axis
     Vec3 tryPos = e.position + Vec3{delta.x, 0, 0};
-    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid) &&
+        (!checkPlayer || !entityOverlapsPlayer(tryPos, e.halfExtents, playerPos, playerHW))) {
         e.position.x = tryPos.x;
     }
 
     // Z axis
     tryPos = e.position + Vec3{0, 0, delta.z};
-    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid) &&
+        (!checkPlayer || !entityOverlapsPlayer(tryPos, e.halfExtents, playerPos, playerHW))) {
         e.position.z = tryPos.z;
     }
 
@@ -335,7 +356,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     } else {
                         e.velocity = {0, 0, 0};
                     }
-                    entityMoveAndSlide(e, grid, dt);
+                    entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                     if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
                     inCombat = false; // suppress combat, fall through to speech
                 }
@@ -467,7 +488,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     }
                 }
 
-                entityMoveAndSlide(e, grid, dt);
+                entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
 
                 // -- Attack on cooldown --
                 // Ranged NPCs ALWAYS require LOS to fire (prevents shooting walls)
@@ -490,7 +511,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             e.velocity.x = flatDir.x * npcSpeed;
                             e.velocity.z = flatDir.z * npcSpeed;
                             e.yaw = atan2f(-flatDir.x, -flatDir.z);
-                            entityMoveAndSlide(e, grid, dt);
+                            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                         }
                     }
 
@@ -552,7 +573,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.velocity.x = flowDir.x * npcSpeed * 1.2f;
                         e.velocity.z = flowDir.z * npcSpeed * 1.2f;
                         e.yaw = atan2f(-flowDir.x, -flowDir.z);
-                        entityMoveAndSlide(e, grid, dt);
+                        entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                     } else {
                         e.velocity = {0, 0, 0};
                     }
@@ -581,7 +602,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     // Vertical bobbing — smooth sine wave for natural flight
                     e.velocity.y = sinf(e.animTimer * 2.5f) * 1.2f;
 
-                    entityMoveAndSlide(e, grid, dt);
+                    entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                 }
             } else {
                 // --- PATHFIND MODE: follow flow field toward exit ---
@@ -636,7 +657,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.velocity.x = flowDir.x * npcSpeed * speedMult;
                     e.velocity.z = flowDir.z * npcSpeed * speedMult;
                     e.yaw = atan2f(-flowDir.x, -flowDir.z);
-                    entityMoveAndSlide(e, grid, dt);
+                    entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                 }
             }
 
@@ -1078,7 +1099,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.flybyTarget.z = 1.0f; // flag: currently roaming
             } else if (e.flybyTarget.z > 0.0f) {
                 // Currently roaming — move
-                entityMoveAndSlide(e, grid, dt);
+                entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                 if (!isBat) snapEntityToFloor(e, grid);
                 // Check if roam time expired → pause
                 if (e.flybyTimer <= 0.0f) {
@@ -1245,7 +1266,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 snapEntityToFloor(e, grid);
             }
 
-            entityMoveAndSlide(e, grid, dt);
+            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
 
             // Transition to attack if close enough to target
             if (targetDist <= e.attackRange) {
@@ -1282,7 +1303,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.yaw = atan2f(-e.velocity.x, -e.velocity.z);
             }
 
-            entityMoveAndSlide(e, grid, dt);
+            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
 
             // Deal damage when passing close to target
             if (dist <= e.attackRange * 0.8f) {
@@ -1347,7 +1368,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         Vec3 flatDir = normalize(Vec3{toLS.x, 0, toLS.z});
                         e.velocity.x = flatDir.x * effectiveSpeed;
                         e.velocity.z = flatDir.z * effectiveSpeed;
-                        entityMoveAndSlide(e, grid, dt);
+                        entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
                     } else {
                         // Reached last-seen spot but still no LOS — switch back to chase
@@ -1455,7 +1476,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.attackTimer = 0.1f;
                 e.hasRetreated = false;
             }
-            entityMoveAndSlide(e, grid, dt);
+            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
             if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
             // Timeout: give up and chase directly if flanking takes too long
             e.tacticalTimer -= dt;
@@ -1481,7 +1502,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             } else {
                 e.velocity = {0, 0, 0}; // reached cover — hold still
             }
-            entityMoveAndSlide(e, grid, dt);
+            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
             if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
             e.tacticalTimer -= dt;
             if (e.tacticalTimer <= 0.0f) {
@@ -1517,7 +1538,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.velocity.z = lateral.z * effectiveSpeed * 0.7f;
                 e.yaw = atan2f(-forward.x, -forward.z);
             }
-            entityMoveAndSlide(e, grid, dt);
+            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
             if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
 
             // Flip strafe direction periodically with a bit of randomness
@@ -1561,7 +1582,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 e.aiState = AIState::ATTACK;
                 e.attackTimer = 0.2f;
             }
-            entityMoveAndSlide(e, grid, dt);
+            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
             if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
         } break;
 

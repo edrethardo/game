@@ -31,6 +31,7 @@ struct Projectile {
     f32  gravity      = 0.0f;   // downward acceleration in units/s^2 (0 = straight line)
     f32  splashRadius = 0.0f;   // AoE radius on impact (0 = single target)
     f32  splashDamage = 0.0f;   // damage dealt in splash zone
+    f32  freezeDuration = 0.0f; // freeze target on hit for this many seconds (0 = no freeze)
     u8   meshId       = 0;     // weapon mesh to render (0 = default cube)
 };
 

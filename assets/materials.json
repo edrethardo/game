@@ -124,6 +124,8 @@
     { "id": 109, "name": "weapon_bow",               "texture": "weapon_bow_tex_42.png" },
     { "id": 110, "name": "weapon_crossbow",          "texture": "weapon_crossbow_tex_42.png" },
     { "id": 111, "name": "weapon_throwing_knife",    "texture": "weapon_throwing_knife_tex_42.png" },
-    { "id": 112, "name": "weapon_wand",              "texture": "weapon_wand_tex_42.png" }
+    { "id": 112, "name": "weapon_wand",              "texture": "weapon_wand_tex_42.png" },
+    { "id": 113, "name": "shock_bolt",               "texture": "shock_bolt_tex_42.png" },
+    { "id": 114, "name": "turret_skin",              "texture": "turret_tex_42.png" }
   ]
 }

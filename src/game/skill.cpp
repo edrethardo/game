@@ -16,12 +16,15 @@ static SkillSystem::DashCallback s_dashCallback = nullptr;
 static SkillSystem::ScorchCallback s_scorchCallback = nullptr;
 static SkillSystem::DroneSpawnCallback s_droneSpawnCallback = nullptr;
 static SkillSystem::ChainCallback s_chainCallback = nullptr;
+static u8 s_boltMeshId = 0;    // set by engine during init for shock bolt projectiles
+static u8 s_shockBoltMatId = 0;
 
 void SkillSystem::setNovaCallback(NovaCallback cb) { s_novaCallback = cb; }
 void SkillSystem::setDashCallback(DashCallback cb) { s_dashCallback = cb; }
 void SkillSystem::setScorchCallback(ScorchCallback cb) { s_scorchCallback = cb; }
 void SkillSystem::setDroneSpawnCallback(DroneSpawnCallback cb) { s_droneSpawnCallback = cb; }
 void SkillSystem::setChainCallback(ChainCallback cb) { s_chainCallback = cb; }
+void SkillSystem::setBoltMeshId(u8 meshId, u8 matId) { s_boltMeshId = meshId; s_shockBoltMatId = matId; }
 
 // ---------------------------------------------------------------------------
 // Static helpers (individual skill fires)
@@ -222,8 +225,9 @@ static void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
 // ---------------------------------------------------------------------------
 
 // Wide 120-degree melee swing — hits everything in a short, broad arc.
+// 5% lifesteal based on total damage dealt.
 static void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
-                       EntityPool& entities)
+                       EntityPool& entities, Player& player)
 {
     WeaponDef temp;
     temp.name        = "Cleave";
@@ -233,8 +237,13 @@ static void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
     temp.coneAngleDeg = 120.0f;
     temp.cooldown    = 0.0f;
     temp.recoilKick  = 0.0f;
-    Combat::fireMelee(temp, origin, forward, entities);
-    LOG_INFO("Cleave fired");
+    AttackResult result = Combat::fireMelee(temp, origin, forward, entities);
+
+    // Heal player for 5% of damage dealt
+    f32 hitCount = static_cast<f32>(result.entitiesHit);
+    f32 healAmt = temp.damage * 0.05f * hitCount;
+    player.health = fminf(player.health + healAmt, player.maxHealth);
+    LOG_INFO("Cleave fired, hit %u, healed %.1f", result.entitiesHit, healAmt);
 }
 
 // Ground stomp AoE — damages, stuns, and slows all enemies in radius.
@@ -271,8 +280,10 @@ static void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entiti
 
     // Brown-grey ground stomp visual at feet level (earthy shockwave)
     if (s_novaCallback) s_novaCallback(groundPos, range, {0.5f, 0.4f, 0.25f});
-    // Ground scorch zone for lingering dust cloud
-    if (s_scorchCallback) s_scorchCallback(groundPos, range, 0.8f, 0.0f);
+    // Persistent scorch zone — lingering fire damage in the stomp area
+    if (s_scorchCallback) {
+        s_scorchCallback(groundPos, range * 0.6f, 3.0f, 5.0f); // 60% radius, 3s duration, 5 DPS
+    }
     LOG_INFO("Thunderclap hit %u enemies", hitCount);
 }
 
@@ -312,20 +323,35 @@ static void fireWhirlwind(Vec3 origin, const SkillDef* def, EntityPool& entities
     LOG_INFO("Whirlwind hit %u enemies", hitCount);
 }
 
-// Slam the ground — reuses meteor pool for an instant at-feet blast.
-static void fireEarthquake(Vec3 origin, const SkillDef* def)
+// Slam the ground — reuses meteor pool for an instant at-feet blast + knockback.
+static void fireEarthquake(Vec3 origin, const SkillDef* def, EntityPool& entities)
 {
+    f32 radius = def->radius > 0.0f ? def->radius : 4.0f;
+
     for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
         if (!s_meteors[i].active) {
             s_meteors[i].position = origin;
             s_meteors[i].damage   = def->damage > 0.0f ? def->damage : 40.0f;
-            s_meteors[i].radius   = def->radius  > 0.0f ? def->radius : 4.0f;
+            s_meteors[i].radius   = radius;
             // Very short delay so it fires on the next updateMeteors tick
             s_meteors[i].timer    = 0.05f;
             s_meteors[i].active   = true;
             break;
         }
     }
+
+    // Immediate knockback — push entities outward from the epicentre
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        Entity& e = entities.entities[i];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        Vec3 diff = e.position - origin;
+        f32 dist2 = diff.x*diff.x + diff.z*diff.z;
+        if (dist2 < radius * radius && dist2 > 0.01f) {
+            Vec3 pushDir = normalize(diff);
+            e.position = e.position + pushDir * 2.0f;
+        }
+    }
+
     LOG_INFO("Earthquake triggered");
 }
 
@@ -341,18 +367,18 @@ static Vec3 rotateY(Vec3 v, f32 angleDeg)
     return { v.x * c + v.z * s, v.y, -v.x * s + v.z * c };
 }
 
-// Three projectiles spread in a -15 / 0 / +15 degree horizontal fan.
+// Five projectiles spread in a -20 / -10 / 0 / +10 / +20 degree horizontal fan.
 static void fireMultiShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                           ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 25.0f;
     f32 damage = def->damage          > 0.0f ? def->damage          : 20.0f;
-    f32 angles[3] = {-15.0f, 0.0f, 15.0f};
-    for (u32 i = 0; i < 3; i++) {
+    f32 angles[5] = {-20.0f, -10.0f, 0.0f, 10.0f, 20.0f};
+    for (u32 i = 0; i < 5; i++) {
         Vec3 dir = normalize(rotateY(forward, angles[i]));
         ProjectileSystem::spawn(pool, origin, dir, speed, damage, 0.1f, 2.0f, true);
     }
-    LOG_INFO("Multi Shot fired 3 arrows");
+    LOG_INFO("Multi Shot fired 5 arrows");
 }
 
 // Instant AoE at a raycasted target point — no delay, like a meteor that fires now.
@@ -451,7 +477,7 @@ static void fireKnifeBurst(Vec3 origin, Vec3 forward, const SkillDef* def,
 
 // Drop a toxic cloud at a target point using the scorch-zone system.
 static void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
-                             const LevelGrid& grid)
+                             const LevelGrid& grid, EntityPool& entities)
 {
     RayHit hit  = Raycast::cast(grid, origin, forward, 40.0f);
     Vec3 target = hit.hit ? (origin + forward * hit.distance)
@@ -459,10 +485,23 @@ static void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 radius  = def->radius > 0.0f ? def->radius : 2.5f;
     f32 dps     = def->damage > 0.0f ? def->damage * 0.4f : 10.0f;
 
+    // Immediate aggro reset — enemies in the cloud lose track of the player
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        Entity& e = entities.entities[i];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        Vec3 diff = e.position - target;
+        f32 dist2 = diff.x*diff.x + diff.z*diff.z;
+        if (dist2 < radius * radius) {
+            e.aiState = AIState::IDLE;
+            e.stunTimer = 1.5f; // brief stun to prevent immediate re-aggro
+        }
+    }
+
     // Green-tinted nova for visual + persistent scorch zone (poison DPS)
     if (s_novaCallback)   s_novaCallback(target, radius, {0.1f, 0.8f, 0.1f});
     if (s_scorchCallback) s_scorchCallback(target, radius, 4.0f, dps);
-    LOG_INFO("Poison Cloud deployed");
+    LOG_INFO("Poison Cloud deployed (aggro reset)");
 }
 
 // Teleport behind nearest enemy and deal 3x damage.
@@ -488,6 +527,7 @@ static void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
 
     f32 damage = def->damage > 0.0f ? def->damage * 3.0f : 90.0f;
     Combat::applyDamage(entities, hits[0], damage);
+    target->freezeTimer = 1.5f; // slow on hit (freezeTimer halves move speed)
 
     if (s_dashCallback) s_dashCallback(startPos, behind);
     LOG_INFO("Shadow Strike: teleported and dealt %.0f damage", damage);
@@ -510,32 +550,40 @@ static void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
     temp.cooldown     = 0.0f;
     temp.recoilKick   = 0.0f;
 
+    // Unconditional flat heal on activation
+    player.health = fminf(player.health + 5.0f, player.maxHealth);
+
     AttackResult result = Combat::fireMelee(temp, origin, forward, entities);
 
-    // Heal for 10% of total damage inflicted
+    // Heal for 15% of total damage inflicted
     f32 totalDmg = temp.damage * static_cast<f32>(result.entitiesHit);
-    f32 heal     = totalDmg * 0.1f;
+    f32 heal     = totalDmg * 0.15f;
     player.health = (player.health + heal > player.maxHealth)
                     ? player.maxHealth : player.health + heal;
-    LOG_INFO("Holy Smite hit %u enemies, healed %.1f HP", result.entitiesHit, heal);
+    LOG_INFO("Holy Smite hit %u enemies, healed %.1f HP (+5 flat)", result.entitiesHit, heal);
 }
 
-// Healing zone at player feet — heals the player instantly and burns a green nova.
+// Persistent holy ground — immediate partial heal + enemy-damaging scorch zone.
 static void fireConsecration(Vec3 origin, const SkillDef* def, Player& player)
 {
-    f32 healAmt = def->damage > 0.0f ? def->damage : 30.0f; // "damage" repurposed as heal amt
     f32 radius  = def->radius > 0.0f ? def->radius : 4.0f;
+    f32 dps     = def->damage > 0.0f ? def->damage : 5.0f;
 
-    player.health = (player.health + healAmt > player.maxHealth)
-                    ? player.maxHealth : player.health + healAmt;
+    // Immediate partial heal (30% of max HP)
+    player.health = fminf(player.health + player.maxHealth * 0.3f, player.maxHealth);
 
-    // Green ring signals the holy ground to the player
+    // Persistent holy ground — damages enemies standing in the zone
+    if (s_scorchCallback) {
+        s_scorchCallback(origin, radius, 5.0f, dps); // 5s duration, def damage as DPS
+    }
+
+    // Green healing nova visual
     if (s_novaCallback) s_novaCallback(origin, radius, {0.2f, 1.0f, 0.3f});
-    LOG_INFO("Consecration healed %.1f HP", healAmt);
+    LOG_INFO("Consecration: healed 30%% max HP, holy ground for 5s");
 }
 
-// Brief invulnerability: heal to full + clear all debuffs.
-static void fireDivineShield(Player& player)
+// Brief invulnerability: heal to full + clear all debuffs + stun nearby enemies.
+static void fireDivineShield(Player& player, EntityPool& entities, const SkillDef* def)
 {
     player.health        = player.maxHealth;
     player.slowTimer     = 0.0f;
@@ -544,42 +592,42 @@ static void fireDivineShield(Player& player)
     player.burnTimer     = 0.0f;
     player.burnDps       = 0.0f;
     player.freezeTimer   = 0.0f;
-    LOG_INFO("Divine Shield: healed to full, all debuffs cleared");
+
+    // AoE stun — 1s immobilize on nearby hostile enemies
+    f32 stunRadius = def->radius > 0.0f ? def->radius : 5.0f;
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        Entity& e = entities.entities[i];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        Vec3 diff = e.position - player.position;
+        f32 dist2 = diff.x*diff.x + diff.z*diff.z;
+        if (dist2 < stunRadius * stunRadius) {
+            e.stunTimer = 1.0f;
+        }
+    }
+
+    // Golden nova visual
+    if (s_novaCallback) {
+        s_novaCallback(player.position, stunRadius, {1.0f, 0.85f, 0.2f});
+    }
+    LOG_INFO("Divine Shield: healed to full, all debuffs cleared, stunned nearby enemies");
 }
 
 // ---------------------------------------------------------------------------
 // Combat Engineer skills
 // ---------------------------------------------------------------------------
 
-// Hitscan bolt that freezes the first enemy hit for 0.5s.
+// Electric bolt projectile that freezes the target on hit.
 static void fireShockBolt(Vec3 origin, Vec3 forward, const SkillDef* def,
-                           const LevelGrid& grid, EntityPool& entities)
+                           ProjectilePool& projectiles)
 {
-    WeaponDef temp;
-    temp.name         = "Shock Bolt";
-    temp.type         = WeaponType::HITSCAN;
-    temp.damage       = def->damage > 0.0f ? def->damage : 20.0f;
-    temp.range        = 40.0f;
-    temp.coneAngleDeg = 1.0f;
-    temp.cooldown     = 0.0f;
-    temp.recoilKick   = 0.01f;
-
-    AttackResult result = Combat::fireHitscan(temp, origin, forward, grid, entities);
-
-    if (result.hitEntity) {
-        // Apply freeze to the first entity the hitscan actually hit
-        RayHit rh = Raycast::cast(grid, origin, forward, temp.range);
-        (void)rh; // We only need the closest entity, which fireHitscan already handled.
-        // Walk the pool to find the just-hit entity (nearest active in cone).
-        EntityHandle eHits[MAX_ENTITIES];
-        f32          eDists[MAX_ENTITIES];
-        u32 cnt = CombatQuery::queryConeSorted(entities, origin, forward,
-                                               cosf(radians(2.0f)), temp.range,
-                                               eHits, eDists, MAX_ENTITIES);
-        if (cnt > 0) {
-            Entity* e = handleGet(entities, eHits[0]);
-            if (e) e->freezeTimer = 0.5f;
-        }
+    f32 damage = def->damage > 0.0f ? def->damage : 20.0f;
+    // Electric bolt projectile — freezes target on hit via Projectile.freezeDuration
+    u16 idx = ProjectileSystem::spawn(projectiles, origin, forward,
+                                       35.0f, damage, 0.12f, 2.5f, true, PROJ_SPARK);
+    if (idx != 0xFFFF) {
+        projectiles.projectiles[idx].freezeDuration = 1.5f;
+        projectiles.projectiles[idx].meshId = s_boltMeshId;
     }
     LOG_INFO("Shock Bolt fired");
 }
@@ -621,21 +669,23 @@ static void fireTeslaCoil(Vec3 origin, const SkillDef* def,
     LOG_INFO("Tesla Coil hit %u enemies", hitCount);
 }
 
-// Overdrive: restore HP + clear debuffs (simplified buff without a timer system).
+// Overdrive: restore HP + clear debuffs + 5s damage/speed buff.
+// Overdrive: restore HP + clear debuffs + 5s damage/speed buff.
 static void fireMechOverdrive(Player& player)
 {
     player.health = (player.health + 20.0f > player.maxHealth)
                     ? player.maxHealth : player.health + 20.0f;
     player.slowTimer   = 0.0f;
     player.freezeTimer = 0.0f;
-    LOG_INFO("Mech Overdrive activated");
+    player.overdriveTimer = 5.0f; // 5s buff — consumed by combat/movement systems
+    LOG_INFO("Mech Overdrive activated (5s buff)");
 }
 
 // ---------------------------------------------------------------------------
 // Marksman skills
 // ---------------------------------------------------------------------------
 
-// 3x damage hitscan aimed shot.
+// 3x damage hitscan aimed shot. Applies 2s slow on hit.
 static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                            const LevelGrid& grid, EntityPool& entities)
 {
@@ -647,7 +697,20 @@ static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     temp.coneAngleDeg = 0.5f;
     temp.cooldown     = 0.0f;
     temp.recoilKick   = 0.03f;
-    Combat::fireHitscan(temp, origin, forward, grid, entities);
+    AttackResult result = Combat::fireHitscan(temp, origin, forward, grid, entities);
+
+    // Apply slow to the nearest entity in the narrow cone
+    if (result.hitEntity) {
+        EntityHandle eHits[MAX_ENTITIES];
+        f32          eDists[MAX_ENTITIES];
+        u32 cnt = CombatQuery::queryConeSorted(entities, origin, forward,
+                                               cosf(radians(1.0f)), temp.range,
+                                               eHits, eDists, MAX_ENTITIES);
+        if (cnt > 0) {
+            Entity* e = handleGet(entities, eHits[0]);
+            if (e) e->freezeTimer = 2.0f; // slow on hit (freezeTimer halves move speed)
+        }
+    }
     LOG_INFO("Aimed Shot fired");
 }
 
@@ -682,21 +745,33 @@ static void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
         hits, dists, MAX_ENTITIES);
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], damage * 0.5f);
+        // Knockback — push each hit entity 2m away from detonation point
+        Entity* e = handleGet(entities, hits[i]);
+        if (e) {
+            Vec3 pushDir = e->position - detonPos;
+            f32 pushLen2 = pushDir.x*pushDir.x + pushDir.z*pushDir.z;
+            if (pushLen2 > 0.01f) {
+                pushDir = normalize(pushDir);
+                e->position = e->position + pushDir * 2.0f;
+            }
+        }
     }
     if (s_novaCallback) s_novaCallback(detonPos, splashR, {1.0f, 0.6f, 0.1f});
     LOG_INFO("Explosive Round detonated, splash hit %u enemies", hitCount);
 }
 
-// Three rapid hitscan shots with slight random spread.
+// Five rapid hitscan shots with slight deterministic spread.
 static void fireRapidFire(Vec3 origin, Vec3 forward, const SkillDef* def,
                            const LevelGrid& grid, EntityPool& entities)
 {
     f32 damage = def->damage > 0.0f ? def->damage : 15.0f;
 
-    // Bake tiny deterministic spreads into the three shots (no RNG needed)
-    static const f32 kSpreads[3][2] = { {-2.0f, 0.5f}, {0.0f, 0.0f}, {2.0f, -0.5f} };
+    // Bake tiny deterministic spreads into the five shots (no RNG needed)
+    static const f32 kSpreads[5][2] = {
+        {-3.0f, 0.7f}, {-1.5f, -0.3f}, {0.0f, 0.0f}, {1.5f, 0.3f}, {3.0f, -0.7f}
+    };
 
-    for (u32 i = 0; i < 3; i++) {
+    for (u32 i = 0; i < 5; i++) {
         Vec3 dir = normalize(rotateY(forward, kSpreads[i][0])
                              + Vec3{0.0f, kSpreads[i][1] * 0.02f, 0.0f});
         WeaponDef temp;
@@ -709,12 +784,14 @@ static void fireRapidFire(Vec3 origin, Vec3 forward, const SkillDef* def,
         temp.recoilKick   = 0.01f;
         Combat::fireHitscan(temp, dir, dir, grid, entities);
     }
-    LOG_INFO("Rapid Fire: 3 shots fired");
+    LOG_INFO("Rapid Fire: 5 shots fired");
 }
 
-// Hitscan that instantly kills enemies below 20% health, otherwise deals normal damage.
+// Hitscan that instantly kills enemies below 25% health, otherwise deals normal damage.
+// Resets cooldown on successful execute kill.
 static void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
-                          const LevelGrid& grid, EntityPool& entities)
+                          const LevelGrid& grid, EntityPool& entities,
+                          SkillState& skillState)
 {
     // First, find the entity that would be hit
     EntityHandle eHits[MAX_ENTITIES];
@@ -726,12 +803,15 @@ static void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
     if (cnt > 0) {
         Entity* e = handleGet(entities, eHits[0]);
         if (e && !(e->flags & ENT_DEAD)) {
-            f32 damage = (e->health < e->maxHealth * 0.2f)
+            bool isExecute = (e->health < e->maxHealth * 0.25f);
+            f32 damage = isExecute
                          ? e->health + 1.0f  // instant kill
                          : (def->damage > 0.0f ? def->damage : 25.0f);
             Combat::applyDamage(entities, eHits[0], damage);
+            // Reset cooldown on successful execute
+            if (isExecute) skillState.cooldownTimer = 0.0f;
             LOG_INFO("Headshot: %.0f damage (instant kill: %s)",
-                     damage, damage > e->health ? "yes" : "no");
+                     damage, isExecute ? "yes" : "no");
             return;
         }
     }
@@ -865,7 +945,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
 
     // ---- Warrior ----
     case SkillId::CLEAVE:
-        fireCleave(eyePos, forward, def, entities);
+        fireCleave(eyePos, forward, def, entities, player);
         break;
     case SkillId::THUNDERCLAP:
         fireThunderclap(eyePos, def, entities);
@@ -877,7 +957,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireWhirlwind(eyePos, def, entities);
         break;
     case SkillId::EARTHQUAKE:
-        fireEarthquake(eyePos, def);
+        fireEarthquake(eyePos, def, entities);
         break;
 
     // ---- Ranger ----
@@ -904,7 +984,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireKnifeBurst(eyePos, forward, def, projectiles);
         break;
     case SkillId::POISON_CLOUD:
-        firePoisonCloud(eyePos, forward, def, grid);
+        firePoisonCloud(eyePos, forward, def, grid, entities);
         break;
     case SkillId::SHADOW_STRIKE:
         fireShadowStrike(eyePos, forward, def, entities, player);
@@ -918,12 +998,12 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireConsecration(eyePos, def, player);
         break;
     case SkillId::DIVINE_SHIELD:
-        fireDivineShield(player);
+        fireDivineShield(player, entities, def);
         break;
 
     // ---- Combat Engineer ----
     case SkillId::SHOCK_BOLT:
-        fireShockBolt(eyePos, forward, def, grid, entities);
+        fireShockBolt(eyePos, forward, def, projectiles);
         break;
     case SkillId::DEPLOY_TURRET:
         fireDeployTurret(eyePos, forward, entities);
@@ -946,7 +1026,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireRapidFire(eyePos, forward, def, grid, entities);
         break;
     case SkillId::HEADSHOT:
-        fireHeadshot(eyePos, forward, def, grid, entities);
+        fireHeadshot(eyePos, forward, def, grid, entities, ss);
         break;
 
     // ---- Tinkerer ----
