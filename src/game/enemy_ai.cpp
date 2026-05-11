@@ -71,23 +71,22 @@ static bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,
 }
 
 static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
-                                const Vec3& playerPos, f32 playerHW) {
+                                const Vec3& /*playerPos*/, f32 /*playerHW*/) {
     Vec3 delta = e.velocity * dt;
-    // Friendly NPCs don't collide with the player — only walls
-    bool checkPlayer = !(e.flags & ENT_FRIENDLY);
+    // Enemies walk freely toward the player — only walls block them.
+    // The player is blocked from walking through enemies via moveAndSlide
+    // obstacles, and pushPlayerFromEntities handles any residual overlap.
 
     // X axis — skip movement on collision but DON'T zero velocity
     // so the entity can still slide along the wall on the other axis
     Vec3 tryPos = e.position + Vec3{delta.x, 0, 0};
-    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid) &&
-        (!checkPlayer || !entityOverlapsPlayer(tryPos, e.halfExtents, playerPos, playerHW))) {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.x = tryPos.x;
     }
 
     // Z axis
     tryPos = e.position + Vec3{0, 0, delta.z};
-    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid) &&
-        (!checkPlayer || !entityOverlapsPlayer(tryPos, e.halfExtents, playerPos, playerHW))) {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.z = tryPos.z;
     }
 
@@ -1500,6 +1499,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.yaw = atan2f(-moveDir.x, -moveDir.z);
                 }
             } else {
+                // Reached end of path — check if near home position
+                Vec3 toHome = e.homePosition - e.position;
+                f32 homeDist2 = toHome.x * toHome.x + toHome.z * toHome.z;
+                if (homeDist2 < 2.0f * 2.0f) {
+                    // Close to home — go idle with normal detection (not dumb)
+                    e.velocity = {0, 0, 0};
+                    e.aiState = AIState::IDLE;
+                    e.hasRetreated = false;
+                    break;
+                }
                 e.velocity = {0, 0, 0}; // reached cover — hold still
             }
             entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);

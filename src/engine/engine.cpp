@@ -2268,8 +2268,6 @@ void Engine::update(f32 dt) {
         } else {
             // A / Space = revive at entrance
             if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
-                // Send enemies walking back to their rooms before respawning
-                resetEnemiesToRooms();
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.position = m_players[m_localPlayerIndex].spawnPosition;
                 m_localPlayer.velocity = {0, 0, 0};
@@ -2410,7 +2408,6 @@ void Engine::update(f32 dt) {
                     for (u32 p = 0; p < m_splitPlayerCount; p++) {
                         if (!m_playerDead[p]) { allDead = false; break; }
                     }
-                    if (allDead) resetEnemiesToRooms();
                     m_localPlayer.health = m_localPlayer.maxHealth;
                     m_localPlayer.position = m_players[sp].spawnPosition;
                     m_localPlayer.velocity = {0, 0, 0};
@@ -2908,9 +2905,16 @@ void Engine::gameUpdate(f32 dt) {
         if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
             // Multiplayer or co-op: this player dies, game keeps running
             m_playerDead[m_activePlayerIndex] = true;
+            // If ALL players are now dead, send enemies walking home
+            bool allDead = true;
+            for (u32 p = 0; p < m_splitPlayerCount; p++) {
+                if (!m_playerDead[p]) { allDead = false; break; }
+            }
+            if (allDead) resetEnemiesToRooms();
             return;
         }
-        // True singleplayer: full game over screen
+        // True singleplayer: full game over screen — send enemies home immediately
+        resetEnemiesToRooms();
         m_gameState = GameState::GAME_OVER;
         return;
     }
