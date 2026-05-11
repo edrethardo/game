@@ -32,3 +32,9 @@ attribution required.
 
 To use any part of this project commercially, contact me via GitHub to
 discuss a commercial license agreement.
+
+## Support
+
+If you enjoy this project, consider buying me a coffee!
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/rethardotv)
