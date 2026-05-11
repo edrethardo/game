@@ -48,6 +48,19 @@ def build_meshes():
         ["--type", "bat",      "--wingspan", "1.0", "--out", os.path.join(mesh_dir, "bat.obj")],
         ["--type", "pillar",   "--out", os.path.join(mesh_dir, "pillar.obj")],
         ["--type", "chest",    "--out", os.path.join(mesh_dir, "chest.obj")],
+        ["--type", "sword",          "--out", os.path.join(mesh_dir, "sword.obj")],
+        ["--type", "dagger",         "--out", os.path.join(mesh_dir, "dagger.obj")],
+        ["--type", "axe",            "--out", os.path.join(mesh_dir, "axe.obj")],
+        ["--type", "claymore",       "--out", os.path.join(mesh_dir, "claymore.obj")],
+        ["--type", "pistol",         "--out", os.path.join(mesh_dir, "pistol.obj")],
+        ["--type", "smg",            "--out", os.path.join(mesh_dir, "smg.obj")],
+        ["--type", "carbine",        "--out", os.path.join(mesh_dir, "carbine.obj")],
+        ["--type", "revolver",       "--out", os.path.join(mesh_dir, "revolver.obj")],
+        ["--type", "bow",            "--out", os.path.join(mesh_dir, "bow.obj")],
+        ["--type", "crossbow",       "--out", os.path.join(mesh_dir, "crossbow.obj")],
+        ["--type", "throwing_knife", "--out", os.path.join(mesh_dir, "throwing_knife.obj")],
+        ["--type", "molotov",        "--out", os.path.join(mesh_dir, "molotov.obj")],
+        ["--type", "wand",           "--out", os.path.join(mesh_dir, "wand.obj")],
     ]
 
     ok = True
@@ -56,14 +69,53 @@ def build_meshes():
             ok = False
     return ok
 
+def build_skins():
+    print("\n=== Building Skins ===")
+    py = sys.executable
+    tool = os.path.join(SCRIPT_DIR, "gen_skin.py")
+    tex_dir = os.path.join(ROOT_DIR, "assets", "textures")
+
+    skins = [
+        ("weapon_sword_tex",          "weapon_sword_tex_42.png"),
+        ("weapon_dagger_tex",         "weapon_dagger_tex_42.png"),
+        ("weapon_axe_tex",            "weapon_axe_tex_42.png"),
+        ("weapon_claymore_tex",       "weapon_claymore_tex_42.png"),
+        ("weapon_pistol_tex",         "weapon_pistol_tex_42.png"),
+        ("weapon_smg_tex",            "weapon_smg_tex_42.png"),
+        ("weapon_carbine_tex",        "weapon_carbine_tex_42.png"),
+        ("weapon_revolver_tex",       "weapon_revolver_tex_42.png"),
+        ("weapon_bow_tex",            "weapon_bow_tex_42.png"),
+        ("weapon_crossbow_tex",       "weapon_crossbow_tex_42.png"),
+        ("weapon_throwing_knife_tex", "weapon_throwing_knife_tex_42.png"),
+        ("weapon_wand_tex",           "weapon_wand_tex_42.png"),
+        # Boss skins
+        ("boss_andariel",             "boss_andariel_42.png"),
+        ("boss_mephisto",             "boss_mephisto_42.png"),
+        ("boss_baal",                 "boss_baal_42.png"),
+        ("boss_diablo",               "boss_diablo_42.png"),
+        ("boss_reaper",               "boss_reaper_42.png"),
+        ("boss_lich",                 "boss_lich_42.png"),
+        ("boss_spider_queen",         "boss_spider_queen_42.png"),
+        ("boss_demon_knight",         "boss_demon_knight_42.png"),
+        ("boss_arch_mage",            "boss_arch_mage_42.png"),
+    ]
+
+    ok = True
+    for skin_type, filename in skins:
+        if not run([py, tool, "--type", skin_type,
+                    "--out", os.path.join(tex_dir, filename)]):
+            ok = False
+    return ok
+
 def main():
     parser = argparse.ArgumentParser(description="Build game assets")
     parser.add_argument("--all", action="store_true", help="Build everything")
     parser.add_argument("--textures", action="store_true", help="Build textures only")
     parser.add_argument("--meshes", action="store_true", help="Build meshes only")
+    parser.add_argument("--skins", action="store_true", help="Build weapon skins only")
     args = parser.parse_args()
 
-    if not (args.all or args.textures or args.meshes):
+    if not (args.all or args.textures or args.meshes or args.skins):
         args.all = True
 
     ok = True
@@ -71,6 +123,8 @@ def main():
         ok = build_textures() and ok
     if args.all or args.meshes:
         ok = build_meshes() and ok
+    if args.all or args.skins:
+        ok = build_skins() and ok
 
     if ok:
         print("\n=== All assets built successfully ===")

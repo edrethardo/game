@@ -27,10 +27,10 @@
     { "id": 24, "name": "rogue_skin",           "texture": "rogue_skin_42.png" },
     { "id": 25, "name": "weapon_staff",          "texture": "weapon_staff_tex_42.png" },
     { "id": 26, "name": "paladin_skin",          "texture": "paladin_skin_42.png" },
-    { "id": 27, "name": "boss_lich",             "tint": [0.35, 0.25, 0.70, 1.0] },
-    { "id": 28, "name": "boss_spider_queen",     "tint": [0.20, 0.55, 0.15, 1.0] },
-    { "id": 29, "name": "boss_demon_knight",     "tint": [0.75, 0.25, 0.10, 1.0] },
-    { "id": 30, "name": "boss_arch_mage",        "tint": [0.50, 0.20, 0.80, 1.0] },
+    { "id": 27, "name": "boss_lich",             "texture": "boss_lich_42.png" },
+    { "id": 28, "name": "boss_spider_queen",     "texture": "boss_spider_queen_42.png" },
+    { "id": 29, "name": "boss_demon_knight",     "texture": "boss_demon_knight_42.png" },
+    { "id": 30, "name": "boss_arch_mage",        "texture": "boss_arch_mage_42.png" },
     { "id": 31, "name": "boss_andariel",         "texture": "boss_andariel_42.png" },
     { "id": 32, "name": "boss_mephisto",         "texture": "boss_mephisto_42.png" },
     { "id": 33, "name": "boss_baal",             "texture": "boss_baal_42.png" },
@@ -111,6 +111,19 @@
     { "id": 97, "name": "sniper_imp_skin",            "tint": [0.4, 0.6, 0.9, 1.0] },
     { "id": 98, "name": "prop_web_b",                "texture": "web_b_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] },
     { "id": 99, "name": "prop_web_c",                "texture": "web_c_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] },
-    { "id": 100, "name": "prop_web_d",               "texture": "web_d_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] }
+    { "id": 100, "name": "prop_web_d",               "texture": "web_d_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] },
+
+    { "id": 101, "name": "weapon_sword",             "texture": "weapon_sword_tex_42.png" },
+    { "id": 102, "name": "weapon_dagger",            "texture": "weapon_dagger_tex_42.png" },
+    { "id": 103, "name": "weapon_axe",               "texture": "weapon_axe_tex_42.png" },
+    { "id": 104, "name": "weapon_claymore",          "texture": "weapon_claymore_tex_42.png" },
+    { "id": 105, "name": "weapon_pistol",            "texture": "weapon_pistol_tex_42.png" },
+    { "id": 106, "name": "weapon_smg",               "texture": "weapon_smg_tex_42.png" },
+    { "id": 107, "name": "weapon_carbine",           "texture": "weapon_carbine_tex_42.png" },
+    { "id": 108, "name": "weapon_revolver",          "texture": "weapon_revolver_tex_42.png" },
+    { "id": 109, "name": "weapon_bow",               "texture": "weapon_bow_tex_42.png" },
+    { "id": 110, "name": "weapon_crossbow",          "texture": "weapon_crossbow_tex_42.png" },
+    { "id": 111, "name": "weapon_throwing_knife",    "texture": "weapon_throwing_knife_tex_42.png" },
+    { "id": 112, "name": "weapon_wand",              "texture": "weapon_wand_tex_42.png" }
   ]
 }

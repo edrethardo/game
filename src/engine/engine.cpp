@@ -419,6 +419,7 @@ void Engine::init() {
             {"bat_foot",       "assets/meshes/bat_foot.obj"},
             {"andariel",       "assets/meshes/andariel.obj"},
             {"spider_leg_pair","assets/meshes/spider_leg_pair.obj"},
+            {"claymore",       "assets/meshes/claymore.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;

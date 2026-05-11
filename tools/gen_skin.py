@@ -577,6 +577,307 @@ def skin_broodmother():
     return w, h, p
 
 
+def skin_andariel():
+    """Andariel boss: spider-woman demon. Dark green chitin, red eyes, pale claws.
+    Uses andariel rig (w=11, h=18). x offset gx+5."""
+    w, h = 11, 18
+    p = {}
+    chitin = (45, 65, 35, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = chitin
+    # Head (y15-17) — darker green skull
+    for py in range(15, 18):
+        for px in range(3, 8): p[(px, py)] = (55, 75, 40, 255)
+    # Four red eyes (upper and lower pair)
+    p[(4, 16)] = (220, 30, 15, 255)
+    p[(6, 16)] = (220, 30, 15, 255)
+    p[(4, 15)] = (180, 25, 15, 255)
+    p[(6, 15)] = (180, 25, 15, 255)
+    # Mouth/fangs
+    p[(5, 14)] = (200, 190, 160, 255)
+    # Chitin shoulder pauldrons (y10-12)
+    for py in range(10, 13):
+        for px in [0, 1, 9, 10]: p[(px, py)] = (35, 55, 28, 255)
+    p[(0, 12)] = (30, 45, 22, 255)
+    p[(10, 12)] = (30, 45, 22, 255)
+    # Upper torso (y10-12) — broad chest plate
+    for py in range(10, 13):
+        for px in range(2, 9): p[(px, py)] = (50, 75, 38, 255)
+    # Narrow waist (y8-9)
+    for py in range(8, 10):
+        for px in range(4, 7): p[(px, py)] = (40, 55, 30, 255)
+    # Abdomen (y4-7) — mottled green-brown
+    for py in range(4, 8):
+        for px in range(2, 9): p[(px, py)] = (55, 80, 40, 255)
+    for px in range(3, 8):
+        p[(px, 6)] = (65, 95, 48, 255)
+    # Arms
+    for py in range(6, 12):
+        p[(0, py)] = (40, 60, 30, 255)
+        p[(10, py)] = (40, 60, 30, 255)
+    # Claws — pale bone
+    p[(0, 5)] = (180, 170, 140, 255)
+    p[(10, 5)] = (180, 170, 140, 255)
+    # Legs (y0-3)
+    for py in range(0, 4):
+        p[(3, py)] = (38, 55, 28, 255)
+        p[(7, py)] = (38, 55, 28, 255)
+    p[(3, 0)] = (30, 45, 22, 255)
+    p[(7, 0)] = (30, 45, 22, 255)
+    return w, h, p
+
+
+def skin_mephisto():
+    """Mephisto boss: skeletal ice-demon. Blue-purple bones, glowing blue eyes.
+    Uses skeleton rig (w=7, h=16)."""
+    w, h = 7, 16
+    p = {}
+    bone = (80, 90, 140, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    # Skull
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (100, 110, 170, 255)
+    p[(2, 14)] = (60, 120, 255, 255)
+    p[(4, 14)] = (60, 120, 255, 255)
+    p[(3, 11)] = (30, 40, 80, 255)
+    p[(2, 11)] = (120, 130, 180, 255)
+    p[(4, 11)] = (120, 130, 180, 255)
+    p[(1, 13)] = (65, 75, 120, 255)
+    p[(5, 13)] = (65, 75, 120, 255)
+    for py in range(5, 11): p[(3, py)] = (60, 70, 110, 255)
+    for py in [6, 7, 9]:
+        for px in [1, 2, 4, 5]: p[(px, py)] = (90, 100, 160, 255)
+    for px in [1, 2, 4, 5]: p[(px, 8)] = (25, 30, 60, 255)
+    p[(0, 9)] = (55, 65, 100, 255)
+    p[(6, 9)] = (55, 65, 100, 255)
+    for py in range(3, 9):
+        p[(0, py)] = (65, 75, 115, 255)
+        p[(6, py)] = (65, 75, 115, 255)
+    for px in range(2, 5): p[(px, 4)] = (60, 70, 110, 255)
+    for px in [1, 4]:
+        p[(px, 2)] = bone; p[(px, 3)] = bone
+        p[(px, 0)] = (70, 80, 130, 255); p[(px, 1)] = (55, 65, 100, 255)
+    return w, h, p
+
+
+def skin_baal():
+    """Baal boss: golden demon lord. Gold/bronze body, glowing yellow eyes.
+    Uses butcher rig (w=11, h=21)."""
+    w, h = 11, 21
+    p = {}
+    gold = (170, 140, 50, 255)
+    for py in range(h):
+        for px in range(w):
+            if py >= 19: p[(px, py)] = (140, 110, 30, 255)
+            elif py >= 16: p[(px, py)] = (180, 150, 60, 255)
+            elif py >= 14: p[(px, py)] = (160, 130, 45, 255)
+            elif py >= 8: p[(px, py)] = gold
+            elif py >= 7: p[(px, py)] = (100, 80, 30, 255)
+            elif py >= 3: p[(px, py)] = (150, 120, 40, 255)
+            else: p[(px, py)] = (120, 95, 30, 255)
+    p[(4, 18)] = (255, 230, 50, 255)
+    p[(7, 18)] = (255, 230, 50, 255)
+    for px in range(3, 8):
+        p[(px, 10)] = (190, 160, 65, 255)
+        p[(px, 11)] = (190, 160, 65, 255)
+    fist = (130, 100, 35, 255)
+    for py in [4, 5]:
+        p[(0, py)] = fist; p[(1, py)] = fist
+        p[(9, py)] = fist; p[(10, py)] = fist
+    return w, h, p
+
+
+def skin_diablo():
+    """Diablo boss: lord of terror. Deep red body, burning orange eyes, dark horns.
+    Uses butcher rig (w=11, h=21)."""
+    w, h = 11, 21
+    p = {}
+    for py in range(h):
+        for px in range(w):
+            if py >= 19: p[(px, py)] = (50, 15, 10, 255)
+            elif py >= 16: p[(px, py)] = (160, 30, 15, 255)
+            elif py >= 14: p[(px, py)] = (140, 25, 12, 255)
+            elif py >= 8: p[(px, py)] = (180, 40, 20, 255)
+            elif py >= 7: p[(px, py)] = (80, 20, 10, 255)
+            elif py >= 3: p[(px, py)] = (150, 30, 15, 255)
+            else: p[(px, py)] = (60, 18, 10, 255)
+    p[(4, 18)] = (255, 160, 30, 255)
+    p[(7, 18)] = (255, 160, 30, 255)
+    for px in range(3, 8):
+        p[(px, 10)] = (200, 50, 25, 255)
+        p[(px, 11)] = (200, 50, 25, 255)
+    fist = (120, 22, 12, 255)
+    for py in [4, 5]:
+        p[(0, py)] = fist; p[(1, py)] = fist
+        p[(9, py)] = fist; p[(10, py)] = fist
+    return w, h, p
+
+
+def skin_reaper():
+    """Grim Reaper boss: death incarnate. Near-black bones, white skull, ghostly blue eyes.
+    Uses skeleton rig (w=7, h=16)."""
+    w, h = 7, 16
+    p = {}
+    bone = (35, 30, 40, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    # Skull — pale white
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (200, 195, 210, 255)
+    p[(2, 14)] = (100, 180, 255, 255)
+    p[(4, 14)] = (100, 180, 255, 255)
+    p[(3, 11)] = (10, 8, 15, 255)
+    p[(2, 11)] = (180, 175, 190, 255)
+    p[(4, 11)] = (180, 175, 190, 255)
+    p[(1, 13)] = (60, 55, 70, 255)
+    p[(5, 13)] = (60, 55, 70, 255)
+    for py in range(5, 11): p[(3, py)] = (25, 22, 32, 255)
+    for py in [6, 7, 9]:
+        for px in [1, 2, 4, 5]: p[(px, py)] = (45, 40, 55, 255)
+    for px in [1, 2, 4, 5]: p[(px, 8)] = (8, 6, 12, 255)
+    p[(0, 9)] = (28, 25, 35, 255)
+    p[(6, 9)] = (28, 25, 35, 255)
+    for py in range(3, 9):
+        p[(0, py)] = (30, 27, 38, 255)
+        p[(6, py)] = (30, 27, 38, 255)
+    for px in range(2, 5): p[(px, 4)] = (28, 25, 35, 255)
+    for px in [1, 4]:
+        p[(px, 2)] = bone; p[(px, 3)] = bone
+        p[(px, 0)] = (30, 27, 38, 255); p[(px, 1)] = (25, 22, 32, 255)
+    return w, h, p
+
+
+def skin_lich_lord():
+    """Lich Lord mini-boss: purple-robed undead sorcerer. Violet bones, glowing purple eyes.
+    Uses skeleton rig (w=7, h=16)."""
+    w, h = 7, 16
+    p = {}
+    bone = (90, 65, 180, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (120, 90, 210, 255)
+    p[(2, 14)] = (180, 60, 255, 255)
+    p[(4, 14)] = (180, 60, 255, 255)
+    p[(3, 11)] = (40, 25, 80, 255)
+    p[(2, 11)] = (140, 110, 200, 255)
+    p[(4, 11)] = (140, 110, 200, 255)
+    p[(1, 13)] = (70, 50, 140, 255)
+    p[(5, 13)] = (70, 50, 140, 255)
+    for py in range(5, 11): p[(3, py)] = (60, 40, 130, 255)
+    for py in [6, 7, 9]:
+        for px in [1, 2, 4, 5]: p[(px, py)] = (100, 75, 190, 255)
+    for px in [1, 2, 4, 5]: p[(px, 8)] = (30, 18, 60, 255)
+    p[(0, 9)] = (60, 42, 120, 255)
+    p[(6, 9)] = (60, 42, 120, 255)
+    for py in range(3, 9):
+        p[(0, py)] = (75, 55, 150, 255)
+        p[(6, py)] = (75, 55, 150, 255)
+    for px in range(2, 5): p[(px, 4)] = (65, 45, 135, 255)
+    for px in [1, 4]:
+        p[(px, 2)] = bone; p[(px, 3)] = bone
+        p[(px, 0)] = (80, 60, 160, 255); p[(px, 1)] = (60, 42, 120, 255)
+    return w, h, p
+
+
+def skin_spider_queen():
+    """Spider Queen mini-boss: bright green spider with gold eyes.
+    Uses spider rig (w=15, h=7)."""
+    w, h = 15, 7
+    p = {}
+    body = (50, 140, 38, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = body
+    for py in range(1, 6):
+        for px in range(4, 10): p[(px, py)] = (60, 160, 48, 255)
+    for px in range(5, 9): p[(px, 5)] = (75, 180, 60, 255)
+    for py in range(1, 4):
+        for px in range(5, 9): p[(px, py)] = (55, 150, 42, 255)
+    for py in range(1, 4):
+        for px in range(6, 9): p[(px, py)] = (58, 155, 45, 255)
+    p[(6, 6)] = (255, 220, 40, 255)
+    p[(8, 6)] = (255, 220, 40, 255)
+    p[(6, 0)] = (200, 190, 160, 255)
+    p[(8, 0)] = (200, 190, 160, 255)
+    for px in [0, 1]:
+        for py in range(h): p[(px, py)] = (35, 110, 25, 255)
+    for px in [2, 3]:
+        for py in range(h): p[(px, py)] = (45, 130, 32, 255)
+    for px in [13, 14]:
+        for py in range(h): p[(px, py)] = (35, 110, 25, 255)
+    for px in [10, 11, 12]:
+        for py in range(h): p[(px, py)] = (45, 130, 32, 255)
+    for (px, py) in [(1,2),(1,3),(2,1),(3,3),(13,2),(13,3),(11,1),(12,3)]:
+        p[(px, py)] = (65, 160, 48, 255)
+    return w, h, p
+
+
+def skin_demon_knight():
+    """Demon Knight mini-boss: armored red-orange demon.
+    Uses butcher rig (w=11, h=21)."""
+    w, h = 11, 21
+    p = {}
+    for py in range(h):
+        for px in range(w):
+            if py >= 19: p[(px, py)] = (60, 20, 10, 255)
+            elif py >= 16: p[(px, py)] = (190, 65, 25, 255)
+            elif py >= 14: p[(px, py)] = (170, 55, 20, 255)
+            elif py >= 8: p[(px, py)] = (200, 70, 30, 255)
+            elif py >= 7: p[(px, py)] = (80, 30, 12, 255)
+            elif py >= 3: p[(px, py)] = (180, 60, 25, 255)
+            else: p[(px, py)] = (70, 25, 10, 255)
+    p[(4, 18)] = (255, 180, 40, 255)
+    p[(7, 18)] = (255, 180, 40, 255)
+    for px in range(3, 8):
+        p[(px, 10)] = (220, 80, 35, 255)
+        p[(px, 11)] = (220, 80, 35, 255)
+    fist = (160, 50, 20, 255)
+    for py in [4, 5]:
+        p[(0, py)] = fist; p[(1, py)] = fist
+        p[(9, py)] = fist; p[(10, py)] = fist
+    return w, h, p
+
+
+def skin_arch_mage():
+    """Arch Mage mini-boss: arcane skeleton mage. Magenta-purple bones.
+    Uses skeleton rig (w=7, h=16)."""
+    w, h = 7, 16
+    p = {}
+    bone = (130, 50, 205, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (160, 75, 230, 255)
+    p[(2, 14)] = (255, 80, 220, 255)
+    p[(4, 14)] = (255, 80, 220, 255)
+    p[(3, 11)] = (50, 18, 80, 255)
+    p[(2, 11)] = (170, 70, 220, 255)
+    p[(4, 11)] = (170, 70, 220, 255)
+    p[(1, 13)] = (100, 38, 160, 255)
+    p[(5, 13)] = (100, 38, 160, 255)
+    for py in range(5, 11): p[(3, py)] = (90, 32, 150, 255)
+    for py in [6, 7, 9]:
+        for px in [1, 2, 4, 5]: p[(px, py)] = (140, 55, 215, 255)
+    for px in [1, 2, 4, 5]: p[(px, 8)] = (40, 12, 65, 255)
+    p[(0, 9)] = (90, 32, 150, 255)
+    p[(6, 9)] = (90, 32, 150, 255)
+    for py in range(3, 9):
+        p[(0, py)] = (110, 42, 180, 255)
+        p[(6, py)] = (110, 42, 180, 255)
+    for px in range(2, 5): p[(px, 4)] = (95, 35, 155, 255)
+    for px in [1, 4]:
+        p[(px, 2)] = bone; p[(px, 3)] = bone
+        p[(px, 0)] = (115, 45, 185, 255); p[(px, 1)] = (90, 32, 150, 255)
+    return w, h, p
+
+
 def skin_hellhound():
     """Spider-rig hellhound: fiery orange-red body, bright yellow eyes, white fangs."""
     w, h = 15, 7
@@ -1373,6 +1674,213 @@ def skin_weapon_molotov_tex():
     return w, h, p
 
 
+def skin_weapon_sword_tex():
+    """Sword: bright steel blade top half, brown leather grip bottom, edge highlight."""
+    w, h = 4, 4
+    p = {}
+    steel     = (180, 180, 195, 255)
+    grip      = (90, 60, 35, 255)
+    highlight = (220, 220, 230, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel if py >= 2 else grip
+    # Edge highlight on right column
+    for py in range(h):
+        p[(3, py)] = highlight
+    return w, h, p
+
+
+def skin_weapon_dagger_tex():
+    """Dagger: darker steel blade, black grip, thin highlight on column 2."""
+    w, h = 4, 4
+    p = {}
+    steel     = (140, 140, 160, 255)
+    grip      = (30, 25, 20, 255)
+    highlight = (180, 180, 195, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel if py >= 2 else grip
+    # Thin highlight on column 2 (not right edge — narrower blade feel)
+    for py in range(2, 4):
+        p[(2, py)] = highlight
+    return w, h, p
+
+
+def skin_weapon_axe_tex():
+    """Axe: grey iron blade top, reddish-brown haft bottom, wide blade highlight."""
+    w, h = 4, 4
+    p = {}
+    iron = (150, 150, 155, 255)
+    haft = (120, 65, 30, 255)
+    edge = (200, 200, 210, 255)
+    for py in range(h):
+        for px in range(w):
+            # Top two rows = blade, bottom two = haft
+            p[(px, py)] = iron if py >= 2 else haft
+    # Wide blade highlight — entire top row
+    for px in range(w):
+        p[(px, 3)] = edge
+    return w, h, p
+
+
+def skin_weapon_claymore_tex():
+    """Claymore: blue-steel blade, leather wrap grip, cross-guard accent row."""
+    w, h = 4, 4
+    p = {}
+    blue_steel = (170, 175, 200, 255)
+    leather    = (100, 75, 45, 255)
+    accent     = (130, 120, 90, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = blue_steel if py >= 2 else leather
+    # Cross-guard accent on row 2 (boundary between grip and blade)
+    for px in range(w):
+        p[(px, 2)] = accent
+    return w, h, p
+
+
+def skin_weapon_pistol_tex():
+    """Pistol: gunmetal body, wood grip bottom, barrel highlight strip."""
+    w, h = 4, 4
+    p = {}
+    metal     = (50, 50, 55, 255)
+    wood      = (100, 70, 40, 255)
+    barrel_hi = (80, 80, 90, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = metal if py >= 2 else wood
+    # Barrel highlight on column 1
+    for py in range(2, 4):
+        p[(1, py)] = barrel_hi
+    return w, h, p
+
+
+def skin_weapon_smg_tex():
+    """SMG: dark polymer body, grey metal accents, magazine block pattern."""
+    w, h = 4, 4
+    p = {}
+    polymer = (35, 35, 40, 255)
+    metal   = (70, 70, 75, 255)
+    mag     = (45, 45, 50, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = polymer
+    # Metal accents on top row
+    for px in range(w):
+        p[(px, 3)] = metal
+    # Magazine block pattern on bottom-left
+    p[(0, 0)] = mag
+    p[(1, 0)] = mag
+    p[(0, 1)] = mag
+    p[(1, 1)] = mag
+    return w, h, p
+
+
+def skin_weapon_carbine_tex():
+    """Carbine: matte black body, brown wood furniture, green scope dot."""
+    w, h = 4, 4
+    p = {}
+    black = (25, 25, 30, 255)
+    wood  = (90, 65, 35, 255)
+    scope = (40, 120, 40, 255)
+    for py in range(h):
+        for px in range(w):
+            # Top two rows = barrel (black), bottom two = furniture (wood)
+            p[(px, py)] = black if py >= 2 else wood
+    # Scope dot — green pixel at top-right
+    p[(3, 3)] = scope
+    return w, h, p
+
+
+def skin_weapon_revolver_tex():
+    """Revolver: silver body, ivory grip, cylinder drum pattern."""
+    w, h = 4, 4
+    p = {}
+    silver   = (160, 160, 170, 255)
+    ivory    = (200, 190, 170, 255)
+    cylinder = (120, 120, 130, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = silver if py >= 2 else ivory
+    # Cylinder drum pattern — darker block in middle
+    p[(1, 2)] = cylinder
+    p[(2, 2)] = cylinder
+    p[(1, 3)] = cylinder
+    p[(2, 3)] = cylinder
+    return w, h, p
+
+
+def skin_weapon_bow_tex():
+    """Bow: warm brown wood, darker grain lines, cream string on right edge."""
+    w, h = 4, 4
+    p = {}
+    brown  = (140, 100, 55, 255)
+    grain  = (110, 75, 40, 255)
+    string = (200, 190, 170, 255)
+    for py in range(h):
+        for px in range(w):
+            # Alternating grain on columns 0 and 2
+            p[(px, py)] = grain if px in (0, 2) else brown
+    # String on right edge
+    for py in range(h):
+        p[(3, py)] = string
+    return w, h, p
+
+
+def skin_weapon_crossbow_tex():
+    """Crossbow: dark wood body, iron fittings, bolt channel highlight."""
+    w, h = 4, 4
+    p = {}
+    dark_wood = (80, 55, 30, 255)
+    iron      = (100, 100, 110, 255)
+    bolt      = (130, 130, 140, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = dark_wood
+    # Iron fittings on top row
+    for px in range(w):
+        p[(px, 3)] = iron
+    # Bolt channel — highlight strip on column 1
+    for py in range(h):
+        p[(1, py)] = bolt
+    return w, h, p
+
+
+def skin_weapon_throwing_knife_tex():
+    """Throwing knife: bright steel all-blade pattern, small dark pommel dot."""
+    w, h = 4, 4
+    p = {}
+    steel  = (190, 190, 205, 255)
+    edge   = (220, 220, 235, 255)
+    pommel = (50, 40, 30, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    # Edge highlights on columns 0 and 3
+    for py in range(h):
+        p[(0, py)] = edge
+        p[(3, py)] = edge
+    # Pommel dot — bottom-center
+    p[(1, 0)] = pommel
+    p[(2, 0)] = pommel
+    return w, h, p
+
+
+def skin_weapon_wand_tex():
+    """Wand: dark wood shaft, glowing blue-green gem tip on top row."""
+    w, h = 4, 4
+    p = {}
+    dark_wood = (80, 55, 30, 255)
+    gem       = (60, 180, 160, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = dark_wood
+    # Glowing gem on top row
+    for px in range(w):
+        p[(px, 3)] = gem
+    return w, h, p
+
+
 def skin_helmet_plate_tex():
     """Plate helmet: polished steel body, dark visor slit on row 2, rivets on corners."""
     w, h = 4, 4
@@ -2095,6 +2603,16 @@ SKIN_TYPES = {
     "void_bat":           ("void_bat_skin_42.png",           skin_void_bat),
     # Spider-rig variants
     "broodmother":        ("broodmother_skin_42.png",        skin_broodmother),
+    # Boss skins
+    "boss_andariel":      ("boss_andariel_42.png",      skin_andariel),
+    "boss_mephisto":      ("boss_mephisto_42.png",      skin_mephisto),
+    "boss_baal":          ("boss_baal_42.png",          skin_baal),
+    "boss_diablo":        ("boss_diablo_42.png",        skin_diablo),
+    "boss_reaper":        ("boss_reaper_42.png",        skin_reaper),
+    "boss_lich":          ("boss_lich_42.png",          skin_lich_lord),
+    "boss_spider_queen":  ("boss_spider_queen_42.png",  skin_spider_queen),
+    "boss_demon_knight":  ("boss_demon_knight_42.png",  skin_demon_knight),
+    "boss_arch_mage":     ("boss_arch_mage_42.png",     skin_arch_mage),
     "hellhound":          ("hellhound_skin_42.png",          skin_hellhound),
     "catacomb_spider":    ("catacomb_spider_skin_42.png",    skin_catacomb_spider),
     "cavern_spider":      ("cavern_spider_skin_42.png",      skin_cavern_spider),
@@ -2106,6 +2624,18 @@ SKIN_TYPES = {
     "weapon_projectile_tex": ("weapon_projectile_skin_42.png", skin_weapon_projectile_tex),
     "weapon_staff_tex":      ("weapon_staff_skin_42.png",      skin_weapon_staff_tex),
     "weapon_molotov_tex":    ("weapon_molotov_skin_42.png",    skin_weapon_molotov_tex),
+    "weapon_sword_tex":          ("weapon_sword_tex_42.png",          skin_weapon_sword_tex),
+    "weapon_dagger_tex":         ("weapon_dagger_tex_42.png",         skin_weapon_dagger_tex),
+    "weapon_axe_tex":            ("weapon_axe_tex_42.png",            skin_weapon_axe_tex),
+    "weapon_claymore_tex":       ("weapon_claymore_tex_42.png",       skin_weapon_claymore_tex),
+    "weapon_pistol_tex":         ("weapon_pistol_tex_42.png",         skin_weapon_pistol_tex),
+    "weapon_smg_tex":            ("weapon_smg_tex_42.png",            skin_weapon_smg_tex),
+    "weapon_carbine_tex":        ("weapon_carbine_tex_42.png",        skin_weapon_carbine_tex),
+    "weapon_revolver_tex":       ("weapon_revolver_tex_42.png",       skin_weapon_revolver_tex),
+    "weapon_bow_tex":            ("weapon_bow_tex_42.png",            skin_weapon_bow_tex),
+    "weapon_crossbow_tex":       ("weapon_crossbow_tex_42.png",       skin_weapon_crossbow_tex),
+    "weapon_throwing_knife_tex": ("weapon_throwing_knife_tex_42.png", skin_weapon_throwing_knife_tex),
+    "weapon_wand_tex":           ("weapon_wand_tex_42.png",           skin_weapon_wand_tex),
     "helmet_plate_tex":      ("helmet_plate_skin_42.png",      skin_helmet_plate_tex),
     "helmet_leather_tex":    ("helmet_leather_skin_42.png",    skin_helmet_leather_tex),
     "armor_plate_tex":       ("armor_plate_skin_42.png",       skin_armor_plate_tex),

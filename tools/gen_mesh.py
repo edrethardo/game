@@ -992,6 +992,231 @@ def gen_staff(height=1.2):
     return mb
 
 
+def gen_sword(length=0.8):
+    """Sword weapon — elongated blade + handle.
+
+    Blade extends upward along Y, grip below origin.
+    """
+    mb = MeshBuilder()
+    # Blade — thin wide box extending upward
+    add_box(mb, center=(0.0, 0.15, 0.0),
+            half_extents=(0.025, 0.3, 0.01))
+    # Grip — slightly narrower below blade
+    add_box(mb, center=(0.0, -0.2, 0.0),
+            half_extents=(0.02, 0.075, 0.02))
+    return mb
+
+
+def gen_dagger(length=0.4):
+    """Dagger weapon — short blade + crossguard.
+
+    Shorter and thinner than sword, compact grip.
+    """
+    mb = MeshBuilder()
+    # Blade — shorter than sword
+    add_box(mb, center=(0.0, 0.05, 0.0),
+            half_extents=(0.02, 0.15, 0.01))
+    # Grip
+    add_box(mb, center=(0.0, -0.18, 0.0),
+            half_extents=(0.0175, 0.06, 0.0175))
+    return mb
+
+
+def gen_axe(length=0.7):
+    """Axe weapon — asymmetric axe blade on shaft.
+
+    Wide blade head on left side, butt on right, long haft downward.
+    """
+    mb = MeshBuilder()
+    # Blade head — wide, on left side
+    add_box(mb, center=(-0.06, 0.225, 0.0),
+            half_extents=(0.06, 0.075, 0.015))
+    # Butt — small counterweight on right
+    add_box(mb, center=(0.02, 0.22, 0.0),
+            half_extents=(0.02, 0.04, 0.02))
+    # Haft — long vertical shaft
+    add_box(mb, center=(0.0, -0.06, 0.0),
+            half_extents=(0.015, 0.24, 0.015))
+    return mb
+
+
+def gen_claymore(length=1.2):
+    """Claymore weapon — large two-handed sword.
+
+    Longer blade than sword, wide crossguard, extended grip.
+    """
+    mb = MeshBuilder()
+    # Blade — long and slightly wider than sword
+    add_box(mb, center=(0.0, 0.25, 0.0),
+            half_extents=(0.03, 0.45, 0.012))
+    # Crossguard — wide horizontal bar
+    add_box(mb, center=(0.0, -0.05, 0.0),
+            half_extents=(0.08, 0.015, 0.015))
+    # Grip — long two-handed grip
+    add_box(mb, center=(0.0, -0.25, 0.0),
+            half_extents=(0.02, 0.12, 0.02))
+    return mb
+
+
+def gen_pistol(length=0.25):
+    """Pistol weapon — L-shaped handgun.
+
+    Barrel extends forward along Z, grip hangs below.
+    """
+    mb = MeshBuilder()
+    # Barrel/frame — extends forward along Z
+    add_box(mb, center=(0.0, 0.02, 0.05),
+            half_extents=(0.02, 0.02, 0.1))
+    # Grip — hangs below, angled back
+    add_box(mb, center=(0.0, -0.06, -0.05),
+            half_extents=(0.02, 0.06, 0.015))
+    return mb
+
+
+def gen_smg(length=0.35):
+    """SMG weapon — compact automatic with magazine.
+
+    Longer barrel than pistol, box magazine underneath.
+    """
+    mb = MeshBuilder()
+    # Body/barrel
+    add_box(mb, center=(0.0, 0.025, 0.1),
+            half_extents=(0.02, 0.025, 0.15))
+    # Grip
+    add_box(mb, center=(0.0, -0.06, -0.02),
+            half_extents=(0.02, 0.06, 0.015))
+    # Magazine — box below barrel
+    add_box(mb, center=(0.0, -0.04, 0.02),
+            half_extents=(0.015, 0.04, 0.01))
+    return mb
+
+
+def gen_carbine(length=0.6):
+    """Carbine weapon — long-barreled rifle with stock.
+
+    Extended barrel, buttstock behind, grip below.
+    """
+    mb = MeshBuilder()
+    # Barrel/receiver — long
+    add_box(mb, center=(0.0, 0.02, 0.15),
+            half_extents=(0.0175, 0.02, 0.225))
+    # Stock — extends behind
+    add_box(mb, center=(0.0, 0.0, -0.15),
+            half_extents=(0.02, 0.025, 0.075))
+    # Grip
+    add_box(mb, center=(0.0, -0.05, -0.02),
+            half_extents=(0.0175, 0.05, 0.015))
+    return mb
+
+
+def gen_revolver(length=0.3):
+    """Revolver weapon — barrel + cylinder drum + grip.
+
+    Distinctive cylinder block behind the barrel.
+    """
+    mb = MeshBuilder()
+    # Barrel
+    add_box(mb, center=(0.0, 0.02, 0.05),
+            half_extents=(0.02, 0.02, 0.075))
+    # Cylinder drum — wider block
+    add_box(mb, center=(0.0, 0.02, -0.01),
+            half_extents=(0.03, 0.03, 0.03))
+    # Grip
+    add_box(mb, center=(0.0, -0.065, -0.04),
+            half_extents=(0.02, 0.065, 0.015))
+    return mb
+
+
+def gen_bow(height=0.8):
+    """Bow weapon — curved arc with grip.
+
+    Central grip block, two limbs extending up and down (offset left).
+    """
+    mb = MeshBuilder()
+    # Grip — small central block
+    add_box(mb, center=(0.0, 0.0, 0.0),
+            half_extents=(0.015, 0.03, 0.015))
+    # Upper limb — thin, offset left
+    add_box(mb, center=(-0.03, 0.13, 0.0),
+            half_extents=(0.01, 0.1, 0.01))
+    # Lower limb — thin, offset left
+    add_box(mb, center=(-0.03, -0.13, 0.0),
+            half_extents=(0.01, 0.1, 0.01))
+    return mb
+
+
+def gen_crossbow(width=0.5):
+    """Crossbow weapon — stock with horizontal prod arms.
+
+    Forward-pointing stock, prod arms at the front, bolt channel on top, grip below.
+    """
+    mb = MeshBuilder()
+    # Stock — extends along Z
+    add_box(mb, center=(0.0, 0.0, 0.04),
+            half_extents=(0.015, 0.015, 0.14))
+    # Left prod arm
+    add_box(mb, center=(-0.07, 0.02, 0.14),
+            half_extents=(0.05, 0.01, 0.02))
+    # Right prod arm
+    add_box(mb, center=(0.07, 0.02, 0.14),
+            half_extents=(0.05, 0.01, 0.02))
+    # Bolt channel — thin rail on top
+    add_box(mb, center=(0.0, 0.02, 0.06),
+            half_extents=(0.008, 0.005, 0.08))
+    # Grip
+    add_box(mb, center=(0.0, -0.0475, -0.04),
+            half_extents=(0.02, 0.0325, 0.02))
+    return mb
+
+
+def gen_throwing_knife(length=0.25):
+    """Throwing knife — very thin flat blade + small pommel.
+
+    Extremely thin profile (Z), elongated along Y.
+    """
+    mb = MeshBuilder()
+    # Blade — very thin
+    add_box(mb, center=(0.0, 0.03, 0.0),
+            half_extents=(0.01, 0.075, 0.0025))
+    # Pommel/grip
+    add_box(mb, center=(0.0, -0.08, 0.0),
+            half_extents=(0.0075, 0.04, 0.0075))
+    return mb
+
+
+def gen_molotov(height=0.25):
+    """Molotov cocktail — bottle body + neck.
+
+    Wider bottle body below, narrow neck above.
+    """
+    mb = MeshBuilder()
+    # Bottle body
+    add_box(mb, center=(0.0, -0.01, 0.0),
+            half_extents=(0.03, 0.06, 0.03))
+    # Neck
+    add_box(mb, center=(0.0, 0.09, 0.0),
+            half_extents=(0.015, 0.03, 0.015))
+    return mb
+
+
+def gen_wand(length=0.35):
+    """Wand weapon — thin shaft with crystal tip and pommel.
+
+    Long shaft, gem/crystal at top, small pommel at bottom.
+    """
+    mb = MeshBuilder()
+    # Shaft — long thin rod
+    add_box(mb, center=(0.0, -0.025, 0.0),
+            half_extents=(0.015, 0.225, 0.015))
+    # Crystal tip — wider at top
+    add_box(mb, center=(0.0, 0.25, 0.0),
+            half_extents=(0.025, 0.05, 0.025))
+    # Pommel — small at bottom
+    add_box(mb, center=(0.0, -0.25, 0.0),
+            half_extents=(0.02, 0.03, 0.02))
+    return mb
+
+
 def gen_web(size=1.0):
     """Flat spider web decoration — thin diamond in XZ plane."""
     mb = MeshBuilder()
@@ -1585,6 +1810,71 @@ MESH_TYPES = {
         "desc": "Simple openable chest (~24 tris). Params: --width",
         "default_file": "chest.obj",
     },
+    "sword": {
+        "func": gen_sword,
+        "desc": "Sword weapon — blade + handle. Params: --height (as length)",
+        "default_file": "sword.obj",
+    },
+    "dagger": {
+        "func": gen_dagger,
+        "desc": "Dagger weapon — short blade + grip. Params: --height (as length)",
+        "default_file": "dagger.obj",
+    },
+    "axe": {
+        "func": gen_axe,
+        "desc": "Axe weapon — asymmetric blade on shaft. Params: --height (as length)",
+        "default_file": "axe.obj",
+    },
+    "claymore": {
+        "func": gen_claymore,
+        "desc": "Claymore weapon — large two-handed sword. Params: --height (as length)",
+        "default_file": "claymore.obj",
+    },
+    "pistol": {
+        "func": gen_pistol,
+        "desc": "Pistol weapon — L-shaped handgun. Params: --height (as length)",
+        "default_file": "pistol.obj",
+    },
+    "smg": {
+        "func": gen_smg,
+        "desc": "SMG weapon — compact automatic with magazine. Params: --height (as length)",
+        "default_file": "smg.obj",
+    },
+    "carbine": {
+        "func": gen_carbine,
+        "desc": "Carbine weapon — long-barreled rifle. Params: --height (as length)",
+        "default_file": "carbine.obj",
+    },
+    "revolver": {
+        "func": gen_revolver,
+        "desc": "Revolver weapon — barrel + cylinder + grip. Params: --height (as length)",
+        "default_file": "revolver.obj",
+    },
+    "bow": {
+        "func": gen_bow,
+        "desc": "Bow weapon — curved arc with grip. Params: --height",
+        "default_file": "bow.obj",
+    },
+    "crossbow": {
+        "func": gen_crossbow,
+        "desc": "Crossbow weapon — stock with horizontal prods. Params: --width",
+        "default_file": "crossbow.obj",
+    },
+    "throwing_knife": {
+        "func": gen_throwing_knife,
+        "desc": "Throwing knife — thin blade + pommel. Params: --height (as length)",
+        "default_file": "throwing_knife.obj",
+    },
+    "molotov": {
+        "func": gen_molotov,
+        "desc": "Molotov cocktail — bottle + neck. Params: --height",
+        "default_file": "molotov.obj",
+    },
+    "wand": {
+        "func": gen_wand,
+        "desc": "Wand weapon — shaft + crystal tip. Params: --height (as length)",
+        "default_file": "wand.obj",
+    },
 }
 
 
@@ -1679,6 +1969,16 @@ def main():
             kwargs["width"] = args.width
         if args.height is not None:
             kwargs["height"] = args.height
+    elif mtype in ("sword", "dagger", "axe", "claymore", "pistol",
+                   "smg", "carbine", "revolver", "throwing_knife", "wand"):
+        if args.height is not None:
+            kwargs["length"] = args.height
+    elif mtype in ("bow", "molotov"):
+        if args.height is not None:
+            kwargs["height"] = args.height
+    elif mtype == "crossbow":
+        if args.width is not None:
+            kwargs["width"] = args.width
     # bones and brazier use defaults — no special args needed
 
     mb = MESH_TYPES[mtype]["func"](**kwargs)
