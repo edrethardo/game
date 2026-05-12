@@ -2387,6 +2387,10 @@ void Engine::update(f32 dt) {
                 m_confirmQuit = true;
             }
         }
+        // Keep enemies and projectiles ticking while dead so they walk home
+        EnemyAI::update(m_entities, m_grid, m_localPlayer, m_projectiles, dt, &m_squads);
+        EntitySystem::tickTimers(m_entities, dt);
+        ProjectileSystem::update(m_projectiles, m_grid, m_entities, m_localPlayer, dt);
         return;
     }
 

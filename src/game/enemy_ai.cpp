@@ -1605,6 +1605,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::RETREAT: {
+            // If a player is alive and close, stop retreating and re-engage
+            if (player.health > 0.0f && dist <= e.detectionRange) {
+                e.aiState = AIState::CHASE;
+                e.velocity = {0, 0, 0};
+                break;
+            }
             // Follow A* path to cover, then hold position briefly.
             // hasRetreated is set after reaching cover so enemies only retreat once per fight.
             if (e.pathIdx < e.pathLen) {
