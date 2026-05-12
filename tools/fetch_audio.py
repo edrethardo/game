@@ -136,7 +136,7 @@ SOUND_MAP = {
     "sfx_footstep_stone":   (["step", "foot", "stone", "walk", "concrete"], "short"),
     "sfx_footstep_metal":   (["step", "foot", "metal"], "short"),
     "sfx_enemy_footstep":   (["step", "foot", "heavy", "wood"], "short"),
-    # Enemies — attack bark is short roar_01, boss gets deep monster_04
+    # Enemies
     "sfx_enemy_attack":     (["attack", "swipe", "claw", "creature", "roar"], "short"),
     "sfx_boss_roar":        (["roar", "growl", "monster", "boss", "creature_roar"], "long"),
     "sfx_boss_stomp":       (["stomp", "quake", "heavy", "slam", "bell"], "medium"),
@@ -200,7 +200,7 @@ MANUAL_OVERRIDES = {
     "sfx_footstep_stone":   "kenney_impact-sounds/Audio/footstep_concrete_000.ogg",  # was variant 001
     "sfx_footstep_metal":   "kenney_rpg-audio/Audio/footstep03.ogg",
     "sfx_enemy_footstep":   "kenney_impact-sounds/Audio/footstep_wood_004.ogg",      # was variant 002
-    # Enemies
+    # Enemies — attack bark is short roar_01, boss gets deep monster_04
     "sfx_enemy_attack":     "oga_80-rpg-sfx/creature_roar_01.ogg",          # was roar_03
     "sfx_boss_roar":        "oga_80-rpg-sfx/creature_monster_04.ogg",       # was monster_03
     "sfx_boss_stomp":       "kenney_impact-sounds/Audio/impactPlate_heavy_000.ogg",  # was variant 002
@@ -208,6 +208,7 @@ MANUAL_OVERRIDES = {
     "sfx_door_open":        "kenney_rpg-audio/Audio/doorOpen_2.ogg",         # was doorOpen_1
     "sfx_level_up":         "oga_80-rpg-sfx/item_gem_02.ogg",               # was variant 01
 }
+
 # Per-sound pitch multiplier for ffmpeg processing.
 # 1.0 = no pitch change, <1.0 = pitch down (deeper), >1.0 = pitch up.
 # Applied in Phase 3 via: asetrate=44100*pitch, aresample=44100
@@ -909,28 +910,53 @@ def main():
     if mapped + fallback == total:
         print(f"\nAll {total} sounds are ready in {OUTPUT_DIR}")
 
-    # Post-process: pitch down all audio files by 20% using ffmpeg (if available)
+    # Post-process: apply per-sound pitch shifts using ffmpeg (if available)
     import subprocess
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg and not args.dry_run:
-        print("\n--- Phase 3: Pitch down all sounds by 60% (ffmpeg) ---")
+        print("\n--- Phase 3: Apply per-sound pitch shifts (ffmpeg) ---")
         pitched = 0
+        skipped = 0
         for fname in os.listdir(OUTPUT_DIR):
             if not fname.endswith((".wav", ".ogg")):
                 continue
+            sfx_name = os.path.splitext(fname)[0]
+            pitch = PITCH_SHIFTS.get(sfx_name, 0.6)  # default to old behavior if missing
+
             src = os.path.join(OUTPUT_DIR, fname)
+            if pitch == 1.0:
+                # No pitch change needed — just ensure it's WAV format
+                if fname.endswith(".ogg"):
+                    tmp = src + ".tmp.wav"
+                    ret = subprocess.run(
+                        [ffmpeg, "-y", "-i", src,
+                         "-ar", "44100", "-ac", "1", "-sample_fmt", "s16",
+                         tmp],
+                        capture_output=True)
+                    if ret.returncode == 0 and os.path.isfile(tmp):
+                        wav_name = sfx_name + ".wav"
+                        dst = os.path.join(OUTPUT_DIR, wav_name)
+                        os.replace(tmp, dst)
+                        if os.path.isfile(src):
+                            os.remove(src)
+                        skipped += 1
+                    else:
+                        if os.path.isfile(tmp):
+                            os.remove(tmp)
+                else:
+                    skipped += 1
+                continue
+
             tmp = src + ".tmp.wav"
-            # asetrate: treat source as 20% faster -> plays deeper
-            # aresample: resample back to 44100 for consistent output
+            # asetrate: treat source as faster -> plays deeper when resampled back
             ret = subprocess.run(
                 [ffmpeg, "-y", "-i", src,
-                 "-af", "asetrate=44100*0.4,aresample=44100",
+                 "-af", f"asetrate=44100*{pitch},aresample=44100",
                  "-ar", "44100", "-ac", "1", "-sample_fmt", "s16",
                  tmp],
                 capture_output=True)
             if ret.returncode == 0 and os.path.isfile(tmp):
-                # Replace original with pitched version (always WAV output)
-                wav_name = os.path.splitext(fname)[0] + ".wav"
+                wav_name = sfx_name + ".wav"
                 dst = os.path.join(OUTPUT_DIR, wav_name)
                 os.replace(tmp, dst)
                 # Remove OGG original if it was different
@@ -940,7 +966,7 @@ def main():
             else:
                 if os.path.isfile(tmp):
                     os.remove(tmp)
-        print(f"  Pitched {pitched} files down 60%")
+        print(f"  Pitched {pitched} files, {skipped} kept at original pitch")
     elif not ffmpeg:
         print("\n[NOTE] ffmpeg not found — skipping pitch processing")
 
