@@ -1078,8 +1078,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Necromancer: resurrect nearest dead enemy every 8s
         if (e.enemyRole == EnemyRole::SUMMONER) {
             e.tacticalTimer -= dt;
-            if (e.tacticalTimer <= 0.0f && e.resurrectCount < 2) {
-                e.tacticalTimer = 8.0f;
+            if (e.tacticalTimer <= 0.0f) {
+                e.tacticalTimer = 3.0f;
                 // Find nearest dead entity within 10m
                 f32 bestDist2 = 10.0f * 10.0f;
                 u32 bestIdx = 0xFFFF;
@@ -1098,7 +1098,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 if (bestIdx != 0xFFFF) {
                     Entity& revived = pool.entities[bestIdx];
                     revived.flags = ENT_ACTIVE; // clear ENT_DEAD
-                    revived.health = revived.maxHealth * 0.5f;
+                    revived.health = revived.maxHealth * 0.3f;
                     revived.aiState = AIState::IDLE;
                     revived.velocity = {0, 0, 0};
                     revived.deathTimer = 0.0f;
@@ -1114,7 +1114,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         if (e.enemyRole == EnemyRole::HEALER && e.aiState != AIState::IDLE) {
             e.tacticalTimer -= dt;
             if (e.tacticalTimer <= 0.0f) {
-                e.tacticalTimer = 5.0f;
+                e.tacticalTimer = 1.0f;
                 f32 lowestHpPct = 1.0f;
                 u32 healIdx = 0xFFFF;
                 for (u32 ha = 0; ha < pool.activeCount; ha++) {
@@ -1134,10 +1134,39 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
                 if (healIdx != 0xFFFF) {
                     Entity& target = pool.entities[healIdx];
-                    target.health = fminf(target.health + 15.0f, target.maxHealth);
+                    target.health = fminf(target.health + target.maxHealth * 0.3f, target.maxHealth);
                     target.flashTimer = 0.2f; // visual feedback
                     e.speechText = "HEAL!";
                     e.speechTimer = 1.5f;
+                } else {
+                    // No one to heal — try to resurrect a dead enemy
+                    e.tacticalTimer = 3.0f;
+                    f32 bestDist2 = 10.0f * 10.0f;
+                    u32 bestIdx = 0xFFFF;
+                    for (u32 di = 0; di < MAX_ENTITIES; di++) {
+                        Entity& dead = pool.entities[di];
+                        if (!(dead.flags & ENT_DEAD)) continue;
+                        if (dead.flags & ENT_FRIENDLY) continue;
+                        if (dead.deathTimer <= 0.0f) continue;
+                        Vec3 diff = dead.position - e.position;
+                        f32 d2 = diff.x * diff.x + diff.z * diff.z;
+                        if (d2 < bestDist2) {
+                            bestDist2 = d2;
+                            bestIdx = di;
+                        }
+                    }
+                    if (bestIdx != 0xFFFF) {
+                        Entity& revived = pool.entities[bestIdx];
+                        revived.flags = ENT_ACTIVE;
+                        revived.health = revived.maxHealth * 0.3f;
+                        revived.aiState = AIState::IDLE;
+                        revived.velocity = {0, 0, 0};
+                        revived.deathTimer = 0.0f;
+                        revived.flashTimer = 0.3f;
+                        e.resurrectCount++;
+                        e.speechText = "RISE!";
+                        e.speechTimer = 2.0f;
+                    }
                 }
             }
         }
