@@ -5590,6 +5590,75 @@ void Engine::renderViewmodel() {
         glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, armMVP.m);
         MeshSystem::draw(m_cubeMesh);
     }
+
+    // Shield on left side — lowered at rest, raised when blocking
+    const ItemInstance& shieldItem = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
+    if (!isItemEmpty(shieldItem) && m_itemDefs[shieldItem.defId].slot == ItemSlot::OFFHAND) {
+        u8 shieldMeshId = m_itemDefs[shieldItem.defId].meshId;
+        if (shieldMeshId > 0 && shieldMeshId < m_meshDefCount) {
+            // Block animation: smoothly raise shield from hip to face level
+            f32 blockT = 0.0f; // 0 = resting (lowered), 1 = fully raised (blocking)
+            if (m_localPlayer.blocking) {
+                // Quick raise: reach full block in 0.15s
+                blockT = fminf(m_localPlayer.blockTimer / 0.15f, 1.0f);
+            }
+
+            // Rest position: low and to the left (out of view center)
+            // Block position: raised to cover center-left, angled to face forward
+            f32 shieldY = -0.55f + blockT * 0.30f;  // raise from hip to chest
+            f32 shieldX = -0.45f + blockT * 0.10f;   // move slightly inward when blocking
+            f32 shieldZ = -0.45f - blockT * 0.10f;   // push slightly forward when blocking
+            f32 shieldPitch = -0.3f + blockT * 0.3f;  // tilt upright when blocking
+            f32 shieldYaw = -0.3f + blockT * 0.15f;   // face more forward when blocking
+
+            Vec3 shieldOff = {shieldX + bobX * 0.3f, shieldY + bobY * 0.3f, shieldZ};
+
+            // Scale shield mesh
+            const AABB& sb = m_meshDefs[shieldMeshId].bounds;
+            f32 sMaxDim = sb.max.y - sb.min.y;
+            if (sb.max.x - sb.min.x > sMaxDim) sMaxDim = sb.max.x - sb.min.x;
+            if (sb.max.z - sb.min.z > sMaxDim) sMaxDim = sb.max.z - sb.min.z;
+            f32 shieldScale = (sMaxDim > 0.001f) ? (0.7f / sMaxDim) : 0.7f;
+            Vec3 sCtr = {(sb.min.x+sb.max.x)*0.5f, (sb.min.y+sb.max.y)*0.5f, (sb.min.z+sb.max.z)*0.5f};
+
+            Mat4 shieldModel = Mat4::translate(shieldOff)
+                             * Mat4::rotateX(shieldPitch + recoilPitch * 0.2f)
+                             * Mat4::rotateY(shieldYaw)
+                             * Mat4::scale({shieldScale, shieldScale, shieldScale})
+                             * Mat4::translate({-sCtr.x, -sCtr.y, -sCtr.z});
+            Mat4 shieldMVP = proj * shieldModel;
+
+            // Draw shield with its material
+            const Material* shMat = MaterialSystem::get(m_itemDefs[shieldItem.defId].materialId);
+            Vec4 shTint = shMat ? shMat->tint : Vec4{0.7f, 0.7f, 0.7f, 1.0f};
+            glUniform4f(m_unlitShader.loc_color, shTint.x, shTint.y, shTint.z, shTint.w);
+            if (shMat) glBindTexture(GL_TEXTURE_2D, shMat->texture.handle);
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, shieldMVP.m);
+            MeshSystem::draw(m_meshDefs[shieldMeshId].mesh);
+
+            // Left hand holding the shield
+            const Material* skinMat2 = MaterialSystem::get(MaterialSystem::getIdByName("human_skin"));
+            Vec4 skin2 = {0.85f, 0.70f, 0.55f, 1.0f};
+            glUniform4f(m_unlitShader.loc_color, skin2.x, skin2.y, skin2.z, skin2.w);
+            if (skinMat2) glBindTexture(GL_TEXTURE_2D, skinMat2->texture.handle);
+
+            Mat4 lHandModel = Mat4::translate(shieldOff)
+                            * Mat4::translate({0.0f, -0.08f, 0.05f})
+                            * Mat4::scale({1.2f, 1.2f, 1.2f});
+            Mat4 lHandMVP = proj * lHandModel;
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, lHandMVP.m);
+            MeshSystem::draw(m_handMesh);
+
+            // Left forearm
+            Mat4 lArmModel = Mat4::translate(shieldOff)
+                           * Mat4::translate({-0.02f, -0.14f, 0.25f})
+                           * Mat4::rotateX(0.15f)
+                           * Mat4::scale({0.08f, 0.07f, 0.30f});
+            Mat4 lArmMVP = proj * lArmModel;
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, lArmMVP.m);
+            MeshSystem::draw(m_cubeMesh);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
