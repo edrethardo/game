@@ -163,7 +163,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
     "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
     # Magic weapons
-    "sfx_weapon_wand":      "oga_100-cc0-sfx/slam_01.ogg",               # punchy energy bolt thump, pitched up
+    "sfx_weapon_wand":      "kenney_impact-sounds/Audio/impactSoft_medium_002.ogg",  # soft whomp — pitched up becomes a punchy magic bolt
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
     # Reload
     "sfx_reload":           "kenney_rpg-audio/Audio/metalLatch.ogg",
@@ -271,6 +271,14 @@ PITCH_SHIFTS = {
     # Environment
     "sfx_door_open":        0.80,
     "sfx_level_up":         1.0,   # bright, rewarding — no darkening
+}
+
+# Per-sound reverb: ffmpeg aecho params "in_gain:out_gain:delays:decays"
+# Only sounds that need extra tail/space. Most sounds stay dry.
+REVERB = {
+    "sfx_skill_stun":       "0.8:0.7:40|80:0.4|0.2",    # holy smite uses this — needs divine reverb
+    "sfx_skill_heal":       "0.8:0.6:60|120:0.3|0.15",   # healing chime benefits from space
+    "sfx_boss_roar":        "0.8:0.7:50|100:0.5|0.25",   # big creature in a dungeon
 }
 
 # ---------------------------------------------------------------------------
@@ -924,37 +932,27 @@ def main():
             pitch = PITCH_SHIFTS.get(sfx_name, 0.6)  # default to old behavior if missing
 
             src = os.path.join(OUTPUT_DIR, fname)
-            if pitch == 1.0:
-                # No pitch change needed — just ensure it's WAV format
-                if fname.endswith(".ogg"):
-                    tmp = src + ".tmp.wav"
-                    ret = subprocess.run(
-                        [ffmpeg, "-y", "-i", src,
-                         "-ar", "44100", "-ac", "1", "-sample_fmt", "s16",
-                         tmp],
-                        capture_output=True)
-                    if ret.returncode == 0 and os.path.isfile(tmp):
-                        wav_name = sfx_name + ".wav"
-                        dst = os.path.join(OUTPUT_DIR, wav_name)
-                        os.replace(tmp, dst)
-                        if os.path.isfile(src):
-                            os.remove(src)
-                        skipped += 1
-                    else:
-                        if os.path.isfile(tmp):
-                            os.remove(tmp)
-                else:
-                    skipped += 1
+            reverb = REVERB.get(sfx_name)
+
+            # Build the ffmpeg filter chain: pitch shift + optional reverb
+            filters = []
+            if pitch != 1.0:
+                filters.append(f"asetrate=44100*{pitch}")
+                filters.append("aresample=44100")
+            if reverb:
+                filters.append(f"aecho={reverb}")
+
+            if not filters and not fname.endswith(".ogg"):
+                # No processing needed — WAV at natural pitch, no reverb
+                skipped += 1
                 continue
 
             tmp = src + ".tmp.wav"
-            # asetrate: treat source as faster -> plays deeper when resampled back
-            ret = subprocess.run(
-                [ffmpeg, "-y", "-i", src,
-                 "-af", f"asetrate=44100*{pitch},aresample=44100",
-                 "-ar", "44100", "-ac", "1", "-sample_fmt", "s16",
-                 tmp],
-                capture_output=True)
+            cmd = [ffmpeg, "-y", "-i", src]
+            if filters:
+                cmd += ["-af", ",".join(filters)]
+            cmd += ["-ar", "44100", "-ac", "1", "-sample_fmt", "s16", tmp]
+            ret = subprocess.run(cmd, capture_output=True)
             if ret.returncode == 0 and os.path.isfile(tmp):
                 wav_name = sfx_name + ".wav"
                 dst = os.path.join(OUTPUT_DIR, wav_name)
