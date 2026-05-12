@@ -41,6 +41,15 @@ enum struct EnemyType : u8 {
     COUNT
 };
 
+// Special archetype role — drives unique AI behaviors (resurrect, heal, aura, ambush)
+enum struct EnemyRole : u8 {
+    NORMAL = 0,
+    AMBUSH,      // gargoyle — starts dormant, wakes when player is close
+    SUMMONER,    // necromancer — resurrects dead enemies
+    HEALER,      // shaman — heals injured allies
+    AURA,        // herald — passive damage aura around self
+};
+
 // Squad role assigned by room coordinator to spread tactics across a group
 enum struct SquadRole : u8 {
     ROLE_NONE = 0,
@@ -112,6 +121,8 @@ struct Entity {
     f32  sprintTimer   = 0.0f;  // anti-kite sprint burst cooldown
     f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
     bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
+    EnemyRole enemyRole = EnemyRole::NORMAL; // archetype behavior (summoner, healer, aura, ambush)
+    u8  resurrectCount = 0;  // necromancer: how many dead enemies have been raised (max 2)
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
     const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)

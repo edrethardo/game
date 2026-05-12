@@ -126,6 +126,13 @@
     { "id": 111, "name": "weapon_throwing_knife",    "texture": "weapon_throwing_knife_tex_42.png" },
     { "id": 112, "name": "weapon_wand",              "texture": "weapon_wand_tex_42.png" },
     { "id": 113, "name": "shock_bolt",               "texture": "shock_bolt_tex_42.png" },
-    { "id": 114, "name": "turret_skin",              "texture": "turret_tex_42.png" }
+    { "id": 114, "name": "turret_skin",              "texture": "turret_tex_42.png" },
+    { "id": 115, "name": "gargoyle_skin",          "texture": "gargoyle_skin_42.png" },
+    { "id": 116, "name": "necromancer_skin",        "texture": "necromancer_skin_42.png" },
+    { "id": 117, "name": "cavern_shaman_skin",      "texture": "cavern_shaman_skin_42.png" },
+    { "id": 118, "name": "infernal_herald_skin",    "texture": "infernal_herald_skin_42.png" },
+    { "id": 119, "name": "void_necromancer_skin",   "texture": "void_necromancer_skin_42.png" },
+    { "id": 120, "name": "void_shaman_skin",        "texture": "void_shaman_skin_42.png" },
+    { "id": 121, "name": "void_herald_skin",        "texture": "void_herald_skin_42.png" }
   ]
 }

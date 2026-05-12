@@ -1592,6 +1592,202 @@ def skin_void_skeleton():
 
 
 # ---------------------------------------------------------------------------
+# New archetype enemy skins (w=7, h=16 skeleton rig)
+# ---------------------------------------------------------------------------
+
+def skin_gargoyle():
+    """Gargoyle — grey stone body, amber eyes, mossy green patches."""
+    w, h = 7, 16
+    p = {}
+    stone = (150, 150, 155, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = stone
+    # Head — lighter stone
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (170, 170, 175, 255)
+    # Amber eyes
+    p[(2, 14)] = (200, 150, 40, 255)
+    p[(4, 14)] = (200, 150, 40, 255)
+    # Mossy patches on torso
+    for px in [2, 4]:
+        p[(px, 8)] = (80, 110, 60, 255)
+        p[(px, 9)] = (80, 110, 60, 255)
+    # Wing plates — darker stone
+    for py in range(8, 11):
+        p[(0, py)] = (110, 110, 115, 255)
+        p[(6, py)] = (110, 110, 115, 255)
+    # Claws — dark
+    p[(0, 3)] = (80, 80, 85, 255)
+    p[(6, 3)] = (80, 80, 85, 255)
+    # Legs — slightly darker
+    for py in range(0, 4):
+        for px in [1, 5]: p[(px, py)] = (130, 130, 135, 255)
+    return w, h, p
+
+
+def skin_necromancer():
+    """Necromancer — dark purple bones, green eyes, black robes."""
+    w, h = 7, 16
+    p = {}
+    robe = (25, 20, 30, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = robe
+    # Hood — dark purple
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (60, 30, 80, 255)
+    # Green glowing eyes
+    p[(2, 14)] = (40, 200, 40, 255)
+    p[(4, 14)] = (40, 200, 40, 255)
+    # Skull visible under hood
+    p[(3, 13)] = (80, 40, 120, 255)
+    # Purple bone hands
+    p[(0, 6)] = (80, 40, 120, 255)
+    p[(6, 6)] = (80, 40, 120, 255)
+    # Robe hem — slightly lighter
+    for px in range(w):
+        p[(px, 0)] = (35, 28, 40, 255)
+        p[(px, 1)] = (30, 24, 36, 255)
+    # Robe trim — faint purple
+    for py in [4, 8]:
+        for px in range(w): p[(px, py)] = (40, 25, 50, 255)
+    return w, h, p
+
+
+def skin_cavern_shaman():
+    """Cavern Shaman — green-brown body, bone-white headdress, blue hands."""
+    w, h = 7, 16
+    p = {}
+    body = (90, 100, 60, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = body
+    # Horned headdress — bone white
+    for py in [14, 15]:
+        for px in range(w): p[(px, py)] = (220, 210, 200, 255)
+    # Eyes — warm amber
+    p[(2, 13)] = (180, 140, 40, 255)
+    p[(4, 13)] = (180, 140, 40, 255)
+    # Face — darker
+    for px in range(1, 6): p[(px, 12)] = (70, 80, 45, 255)
+    # Blue glowing hands
+    p[(0, 6)] = (60, 120, 200, 255)
+    p[(6, 6)] = (60, 120, 200, 255)
+    p[(0, 5)] = (60, 120, 200, 255)
+    p[(6, 5)] = (60, 120, 200, 255)
+    # Shoulders — darker green
+    for px in [0, 6]:
+        p[(px, 9)] = (70, 85, 45, 255)
+        p[(px, 10)] = (70, 85, 45, 255)
+    # Belt
+    for px in range(w): p[(px, 5)] = (100, 75, 40, 255)
+    # Legs — earthen brown
+    for py in range(0, 4):
+        for px in range(w): p[(px, py)] = (80, 70, 45, 255)
+    return w, h, p
+
+
+def skin_infernal_herald():
+    """Infernal Herald — orange-red bones, fiery core, ember eyes."""
+    w, h = 7, 16
+    p = {}
+    bone = (200, 80, 30, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    # Skull
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (220, 100, 40, 255)
+    # Ember eyes
+    p[(2, 14)] = (255, 120, 20, 255)
+    p[(4, 14)] = (255, 120, 20, 255)
+    # Fiery core (open chest area)
+    for py in [10, 11, 12]:
+        p[(3, py)] = (255, 180, 40, 255)
+    p[(2, 11)] = (255, 200, 60, 255)
+    p[(4, 11)] = (255, 200, 60, 255)
+    # Spine
+    for py in range(8, 13): p[(3, py)] = (160, 60, 20, 255)
+    # Arms — darker red
+    for py in range(5, 11):
+        p[(0, py)] = (160, 60, 20, 255)
+        p[(6, py)] = (160, 60, 20, 255)
+    # Legs — cooling ember
+    for py in range(0, 5):
+        for px in [1, 5]: p[(px, py)] = (140, 50, 15, 255)
+    return w, h, p
+
+
+def skin_void_necromancer():
+    """Void Necromancer — dark purple-void robes, ice-blue eyes."""
+    w, h = 7, 16
+    p = {}
+    robe = (35, 20, 55, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = robe
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (60, 30, 90, 255)
+    p[(2, 14)] = (80, 160, 255, 255)
+    p[(4, 14)] = (80, 160, 255, 255)
+    p[(3, 13)] = (50, 25, 75, 255)
+    for px in range(w):
+        p[(px, 0)] = (45, 28, 65, 255)
+    for py in [4, 8]:
+        for px in range(w): p[(px, py)] = (50, 30, 70, 255)
+    p[(0, 6)] = (60, 30, 90, 255)
+    p[(6, 6)] = (60, 30, 90, 255)
+    return w, h, p
+
+
+def skin_void_shaman():
+    """Void Shaman — teal void body, white headdress."""
+    w, h = 7, 16
+    p = {}
+    body = (40, 100, 100, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = body
+    for py in [14, 15]:
+        for px in range(w): p[(px, py)] = (180, 180, 200, 255)
+    p[(2, 13)] = (100, 200, 255, 255)
+    p[(4, 13)] = (100, 200, 255, 255)
+    for px in range(1, 6): p[(px, 12)] = (30, 80, 80, 255)
+    p[(0, 6)] = (60, 160, 200, 255)
+    p[(6, 6)] = (60, 160, 200, 255)
+    for px in range(w): p[(px, 5)] = (50, 80, 80, 255)
+    for py in range(0, 4):
+        for px in range(w): p[(px, py)] = (30, 75, 75, 255)
+    return w, h, p
+
+
+def skin_void_herald():
+    """Void Herald — black void body, blue glowing core."""
+    w, h = 7, 16
+    p = {}
+    bone = (25, 25, 35, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = bone
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (35, 35, 50, 255)
+    p[(2, 14)] = (80, 160, 255, 255)
+    p[(4, 14)] = (80, 160, 255, 255)
+    for py in [10, 11, 12]:
+        p[(3, py)] = (60, 120, 255, 255)
+    p[(2, 11)] = (80, 150, 255, 255)
+    p[(4, 11)] = (80, 150, 255, 255)
+    for py in range(8, 13): p[(3, py)] = (20, 20, 30, 255)
+    for py in range(5, 11):
+        p[(0, py)] = (20, 20, 30, 255)
+        p[(6, py)] = (20, 20, 30, 255)
+    for py in range(0, 5):
+        for px in [1, 5]: p[(px, py)] = (18, 18, 28, 255)
+    return w, h, p
+
+
+# ---------------------------------------------------------------------------
 # Equipment skin textures (4x4 grid) — full UV (0,0)-(1,1) per face.
 # Row 0 = bottom, row 3 = top (Y-flipped on write like all other skins).
 # ---------------------------------------------------------------------------
@@ -2725,6 +2921,14 @@ SKIN_TYPES = {
     "cavern_skeleton":    ("cavern_skeleton_skin_42.png",    skin_cavern_skeleton),
     "hellforge_skeleton": ("hellforge_skeleton_skin_42.png", skin_hellforge_skeleton),
     "void_skeleton":      ("void_skeleton_skin_42.png",      skin_void_skeleton),
+    # New archetype enemy skins
+    "gargoyle":           ("gargoyle_skin_42.png",           skin_gargoyle),
+    "necromancer":        ("necromancer_skin_42.png",        skin_necromancer),
+    "cavern_shaman":      ("cavern_shaman_skin_42.png",     skin_cavern_shaman),
+    "infernal_herald":    ("infernal_herald_skin_42.png",    skin_infernal_herald),
+    "void_necromancer":   ("void_necromancer_skin_42.png",   skin_void_necromancer),
+    "void_shaman":        ("void_shaman_skin_42.png",       skin_void_shaman),
+    "void_herald":        ("void_herald_skin_42.png",       skin_void_herald),
 }
 
 

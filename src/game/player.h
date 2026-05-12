@@ -31,6 +31,7 @@ struct Player {
     f32  burnDps          = 0.0f;
     f32  freezeTimer      = 0.0f;  // halves movement speed
     f32  overdriveTimer   = 0.0f;  // Mech Overdrive buff countdown (damage/speed boost)
+    f32  smokeTimer       = 0.0f;  // Shadow Ring smoke bomb — enemies can't detect player
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)

@@ -224,6 +224,14 @@ void Input::update() {
 #endif
 }
 
+// Consume all "just pressed" edges so subsequent accumulator ticks see them as held,
+// not freshly pressed. Call after the first tick in the fixed-timestep loop.
+void Input::consumePressedState() {
+    memcpy(s_previousKeys, s_currentKeys, NUM_KEYS);
+    memcpy(s_previousMouseButtons, s_currentMouseButtons, NUM_MOUSE_BUTTONS);
+    memcpy(s_previousPadButtons, s_currentPadButtons, sizeof(s_currentPadButtons));
+}
+
 // ---------------------------------------------------------------------------
 // Raw keyboard
 // ---------------------------------------------------------------------------

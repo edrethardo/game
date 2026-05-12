@@ -37,7 +37,8 @@ struct InputBinding {
 namespace Input {
     void init();
     void shutdown();
-    void update(); // Call once per frame after pollEvents
+    void update();              // Call once per frame after pollEvents
+    void consumePressedState(); // Call after first accumulator tick to prevent multi-fire
 
     // --- Action-based input (keyboard + gamepad unified) ---
     bool isActionDown(GameAction action);     // true while held

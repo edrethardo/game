@@ -1019,6 +1019,184 @@ def gen_turret(height=0.4):
     return mb
 
 
+def gen_gargoyle(height=1.6):
+    """Gargoyle — stone ambush enemy. Hunched humanoid with stubby wing plates.
+    Origin at feet (Y=0). 14 voxels tall, wider and stockier than skeleton."""
+    mb = MeshBuilder()
+    vs = height / 14.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head (hunched forward)
+    fill_box(-1, 11, -1, 3, 3, 3)
+    # Neck
+    fill_box(0, 10, 0, 1, 1, 1)
+    # Torso (wide, stocky)
+    fill_box(-2, 6, -1, 5, 4, 3)
+    # Wing plates (stubby, on back)
+    fill_box(-3, 8, 1, 2, 3, 2)
+    fill_box(2, 8, 1, 2, 3, 2)
+    # Arms (thick)
+    fill_box(-3, 5, 0, 1, 4, 1)
+    fill_box(3, 5, 0, 1, 4, 1)
+    fill_box(-4, 4, -1, 1, 3, 1)
+    fill_box(4, 4, -1, 1, 3, 1)
+    # Hands/claws
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box(4, 3, -1, 1, 1, 2)
+    # Pelvis
+    fill_box(-1, 4, 0, 3, 2, 2)
+    # Legs (thick)
+    fill_box(-2, 2, 0, 2, 3, 1)
+    fill_box(1, 2, 0, 2, 3, 1)
+    # Feet
+    fill_box(-2, 0, -1, 2, 2, 2)
+    fill_box(1, 0, -1, 2, 2, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_necromancer(height=2.0):
+    """Necromancer — tall hooded skeleton mage. Robed, thin arms.
+    Origin at feet (Y=0). 18 voxels tall."""
+    mb = MeshBuilder()
+    vs = height / 18.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Hood (pointed)
+    fill_box(0, 17, 0, 1, 1, 1)
+    fill_box(-1, 15, -1, 3, 2, 3)
+    # Head inside hood
+    fill_box(-1, 13, -1, 3, 2, 2)
+    # Neck
+    fill_box(0, 12, 0, 1, 1, 1)
+    # Shoulders
+    fill_box(-3, 11, 0, 7, 1, 2)
+    # Upper robe (narrow)
+    fill_box(-2, 9, -1, 5, 2, 3)
+    # Mid robe (widening)
+    fill_box(-2, 6, -1, 5, 3, 3)
+    # Lower robe (widest)
+    fill_box(-3, 2, -1, 7, 4, 4)
+    # Robe hem
+    fill_box(-3, 0, -2, 7, 2, 5)
+    # Arms (thin, holding staff position)
+    fill_box(-3, 8, 0, 1, 3, 1)
+    fill_box(3, 8, 0, 1, 3, 1)
+    fill_box(-4, 6, -1, 1, 2, 1)
+    fill_box(4, 6, -1, 1, 2, 1)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_shaman(height=1.6):
+    """Shaman — stocky healer with horned headdress. Broad shoulders.
+    Origin at feet (Y=0). 16 voxels tall."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Horns
+    fill_box(-2, 15, 0, 1, 1, 1)
+    fill_box(2, 15, 0, 1, 1, 1)
+    # Headdress (wide crown)
+    fill_box(-2, 14, -1, 5, 1, 3)
+    # Head
+    fill_box(-1, 12, -1, 3, 2, 3)
+    # Neck
+    fill_box(0, 11, 0, 1, 1, 1)
+    # Broad shoulders
+    fill_box(-3, 9, -1, 7, 2, 3)
+    # Torso (wide)
+    fill_box(-2, 6, -1, 5, 3, 3)
+    # Pelvis
+    fill_box(-2, 5, 0, 5, 1, 2)
+    # Arms
+    fill_box(-3, 6, 0, 1, 4, 1)
+    fill_box(3, 6, 0, 1, 4, 1)
+    # Hands
+    fill_box(-3, 5, -1, 1, 1, 1)
+    fill_box(3, 5, -1, 1, 1, 1)
+    # Legs (short, thick)
+    fill_box(-2, 2, 0, 2, 3, 1)
+    fill_box(1, 2, 0, 2, 3, 1)
+    # Feet
+    fill_box(-2, 0, -1, 2, 2, 2)
+    fill_box(1, 0, -1, 2, 2, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_herald(height=2.2):
+    """Herald — tall thin skeleton with open rib cage and extended arms.
+    Aura-caster enemy. Origin at feet (Y=0). 20 voxels tall."""
+    mb = MeshBuilder()
+    vs = height / 20.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Skull (angular)
+    fill_box(-1, 17, -1, 3, 3, 3)
+    # Jaw
+    fill_box(-1, 16, -1, 3, 1, 2)
+    # Neck (thin)
+    fill_box(0, 15, 0, 1, 1, 1)
+    # Shoulders (wide, thin)
+    fill_box(-4, 14, 0, 9, 1, 2)
+    # Upper chest (ribs, open center)
+    fill_box(-3, 12, -1, 2, 2, 3)
+    fill_box(2, 12, -1, 2, 2, 3)
+    # Spine (visible through open chest)
+    fill_box(0, 10, 1, 1, 4, 1)
+    # Lower ribs
+    fill_box(-2, 10, -1, 2, 2, 3)
+    fill_box(1, 10, -1, 2, 2, 3)
+    # Pelvis
+    fill_box(-1, 8, 0, 3, 2, 2)
+    # Arms (long, extended outward)
+    fill_box(-4, 11, 0, 1, 3, 1)
+    fill_box(4, 11, 0, 1, 3, 1)
+    fill_box(-5, 9, -1, 1, 3, 1)
+    fill_box(5, 9, -1, 1, 3, 1)
+    # Clawed hands
+    fill_box(-5, 8, -1, 1, 1, 2)
+    fill_box(5, 8, -1, 1, 1, 2)
+    # Legs (thin)
+    fill_box(-1, 4, 0, 1, 4, 1)
+    fill_box(1, 4, 0, 1, 4, 1)
+    # Feet
+    fill_box(-1, 0, -1, 1, 4, 2)
+    fill_box(1, 0, -1, 1, 4, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
 def gen_sword(length=0.8):
     """Sword weapon — elongated blade + handle.
 
@@ -1842,6 +2020,26 @@ MESH_TYPES = {
         "desc": "Combat engineer sentry turret — tripod + barrel. Params: --height",
         "default_file": "turret.obj",
     },
+    "gargoyle": {
+        "func": gen_gargoyle,
+        "desc": "Gargoyle ambush enemy — hunched stone humanoid. Params: --height",
+        "default_file": "gargoyle.obj",
+    },
+    "necromancer": {
+        "func": gen_necromancer,
+        "desc": "Necromancer — tall hooded skeleton mage. Params: --height",
+        "default_file": "necromancer.obj",
+    },
+    "shaman": {
+        "func": gen_shaman,
+        "desc": "Shaman healer — stocky with horned headdress. Params: --height",
+        "default_file": "shaman.obj",
+    },
+    "herald": {
+        "func": gen_herald,
+        "desc": "Herald aura enemy — tall thin skeleton. Params: --height",
+        "default_file": "herald.obj",
+    },
     "sword": {
         "func": gen_sword,
         "desc": "Sword weapon — blade + handle. Params: --height (as length)",
@@ -1985,7 +2183,7 @@ def main():
     elif mtype == "chest":
         if args.width is not None:
             kwargs["width"] = args.width
-    elif mtype in ("shackles", "brazier", "turret"):
+    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "necromancer", "shaman", "herald"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "web":

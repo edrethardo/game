@@ -61,6 +61,10 @@ def build_meshes():
         ["--type", "throwing_knife", "--out", os.path.join(mesh_dir, "throwing_knife.obj")],
         ["--type", "molotov",        "--out", os.path.join(mesh_dir, "molotov.obj")],
         ["--type", "wand",           "--out", os.path.join(mesh_dir, "wand.obj")],
+        ["--type", "gargoyle",       "--out", os.path.join(mesh_dir, "gargoyle.obj")],
+        ["--type", "necromancer",    "--out", os.path.join(mesh_dir, "necromancer.obj")],
+        ["--type", "shaman",        "--out", os.path.join(mesh_dir, "shaman.obj")],
+        ["--type", "herald",        "--out", os.path.join(mesh_dir, "herald.obj")],
     ]
 
     ok = True
@@ -98,6 +102,14 @@ def build_skins():
         ("boss_spider_queen",         "boss_spider_queen_42.png"),
         ("boss_demon_knight",         "boss_demon_knight_42.png"),
         ("boss_arch_mage",            "boss_arch_mage_42.png"),
+        # Enemy archetype skins
+        ("gargoyle",                  "gargoyle_skin_42.png"),
+        ("necromancer",               "necromancer_skin_42.png"),
+        ("cavern_shaman",             "cavern_shaman_skin_42.png"),
+        ("infernal_herald",           "infernal_herald_skin_42.png"),
+        ("void_necromancer",          "void_necromancer_skin_42.png"),
+        ("void_shaman",              "void_shaman_skin_42.png"),
+        ("void_herald",              "void_herald_skin_42.png"),
     ]
 
     ok = True

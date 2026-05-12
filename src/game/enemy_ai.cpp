@@ -1074,6 +1074,74 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             }
         }
 
+        // --- Archetype special abilities ---
+        // Necromancer: resurrect nearest dead enemy every 8s
+        if (e.enemyRole == EnemyRole::SUMMONER) {
+            e.tacticalTimer -= dt;
+            if (e.tacticalTimer <= 0.0f && e.resurrectCount < 2) {
+                e.tacticalTimer = 8.0f;
+                // Find nearest dead entity within 10m
+                f32 bestDist2 = 10.0f * 10.0f;
+                u32 bestIdx = 0xFFFF;
+                for (u32 di = 0; di < MAX_ENTITIES; di++) {
+                    Entity& dead = pool.entities[di];
+                    if (!(dead.flags & ENT_DEAD)) continue;
+                    if (dead.flags & ENT_FRIENDLY) continue;
+                    if (dead.deathTimer <= 0.0f) continue; // slot about to be freed
+                    Vec3 diff = dead.position - e.position;
+                    f32 d2 = diff.x * diff.x + diff.z * diff.z;
+                    if (d2 < bestDist2) {
+                        bestDist2 = d2;
+                        bestIdx = di;
+                    }
+                }
+                if (bestIdx != 0xFFFF) {
+                    Entity& revived = pool.entities[bestIdx];
+                    revived.flags = ENT_ACTIVE; // clear ENT_DEAD
+                    revived.health = revived.maxHealth * 0.5f;
+                    revived.aiState = AIState::IDLE;
+                    revived.velocity = {0, 0, 0};
+                    revived.deathTimer = 0.0f;
+                    revived.flashTimer = 0.3f; // flash to show resurrection
+                    e.resurrectCount++;
+                    e.speechText = "RISE!";
+                    e.speechTimer = 2.0f;
+                }
+            }
+        }
+
+        // Shaman: heal lowest-HP ally within 8m every 5s
+        if (e.enemyRole == EnemyRole::HEALER && e.aiState != AIState::IDLE) {
+            e.tacticalTimer -= dt;
+            if (e.tacticalTimer <= 0.0f) {
+                e.tacticalTimer = 5.0f;
+                f32 lowestHpPct = 1.0f;
+                u32 healIdx = 0xFFFF;
+                for (u32 ha = 0; ha < pool.activeCount; ha++) {
+                    u32 hi = pool.activeList[ha];
+                    Entity& ally = pool.entities[hi];
+                    if (hi == i) continue; // don't heal self
+                    if (!(ally.flags & ENT_ACTIVE) || (ally.flags & ENT_DEAD)) continue;
+                    if (ally.flags & ENT_FRIENDLY) continue;
+                    Vec3 diff = ally.position - e.position;
+                    f32 d2 = diff.x * diff.x + diff.z * diff.z;
+                    if (d2 > 8.0f * 8.0f) continue;
+                    f32 hpPct = ally.health / ally.maxHealth;
+                    if (hpPct < lowestHpPct && ally.health < ally.maxHealth) {
+                        lowestHpPct = hpPct;
+                        healIdx = hi;
+                    }
+                }
+                if (healIdx != 0xFFFF) {
+                    Entity& target = pool.entities[healIdx];
+                    target.health = fminf(target.health + 15.0f, target.maxHealth);
+                    target.flashTimer = 0.2f; // visual feedback
+                    e.speechText = "HEAL!";
+                    e.speechTimer = 1.5f;
+                }
+            }
+        }
+
         switch (e.aiState) {
 
         case AIState::IDLE: {
@@ -1112,9 +1180,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             }
 
             // LOS check every 2 frames — fast detection
+            // Smoke bomb: player is undetectable while smokeTimer > 0
             e.aiCheckIdx++;
             u16 checkFreq = 2;
-            if (e.aiCheckIdx >= checkFreq) {
+            if (e.aiCheckIdx >= checkFreq && player.smokeTimer <= 0.0f) {
                 e.aiCheckIdx = 0;
                 if (targetIsNPC && targetDist <= e.detectionRange) {
                     e.aiState = AIState::CHASE;
@@ -1135,6 +1204,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::CHASE: {
+            // Smoke bomb: enemies lose the player and return to idle
+            if (player.smokeTimer > 0.0f) {
+                e.aiState = AIState::IDLE;
+                e.velocity = {0, 0, 0};
+                break;
+            }
             // Squad role: redirect flankers and hold-and-fire enemies to their tactical states.
             if (e.squadRole == SquadRole::ROLE_FLANK && !(e.flags & ENT_FLYING)) {
                 if (e.pathLen == 0 || e.tacticalTimer <= 0.0f) {
@@ -1443,14 +1518,23 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::DORMANT: {
-            // Mimic: sits still disguised as a chest until player gets close
+            // Dormant: sits still until player gets close. Mimics use a tight
+            // trigger range; gargoyles (AMBUSH role) wake from further away.
             e.velocity = {0, 0, 0};
-            if (dist <= GameConst::MIMIC_TRIGGER_DIST) {
-                // Player is trying to loot — spring to life!
+            f32 triggerDist = (e.enemyRole == EnemyRole::AMBUSH) ? 4.0f : GameConst::MIMIC_TRIGGER_DIST;
+            if (dist <= triggerDist) {
                 e.aiState = AIState::CHASE;
-                e.attackAnimT = 0.4f; // surprise attack animation
-                e.speechText = "*CHOMP*";
-                e.speechTimer = 2.0f;
+                e.attackTimer = 0.0f; // attack immediately on wake
+                if (e.enemyRole == EnemyRole::AMBUSH) {
+                    // Gargoyle: silent wake, no chomp animation
+                    e.speechText = "...";
+                    e.speechTimer = 1.5f;
+                } else {
+                    // Mimic: surprise chomp
+                    e.attackAnimT = 0.4f;
+                    e.speechText = "*CHOMP*";
+                    e.speechTimer = 2.0f;
+                }
             }
         } break;
 

@@ -421,6 +421,10 @@ void Engine::init() {
             {"spider_leg_pair","assets/meshes/spider_leg_pair.obj"},
             {"claymore",       "assets/meshes/claymore.obj"},
             {"turret",         "assets/meshes/turret.obj"},
+            {"gargoyle",       "assets/meshes/gargoyle.obj"},
+            {"necromancer",    "assets/meshes/necromancer.obj"},
+            {"shaman",         "assets/meshes/shaman.obj"},
+            {"herald",         "assets/meshes/herald.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -631,6 +635,29 @@ void Engine::init() {
                 if (p.soulHarvestStacks < 5) p.soulHarvestStacks++;
                 p.soulHarvestTimer = 5.0f; // 5s window to get next kill or stacks reset
                 // Speed bonus applied via moveSpeed multiplier
+            }
+            // Phase Strike (Shadow Ring): 20% on kill, drop smoke bomb — 0.5s stealth + aggro reset
+            if (s_engine->m_ringPassive == SkillId::PHASE_STRIKE && (std::rand() % 100) < 20) {
+                Player& p = s_engine->m_localPlayer;
+                p.smokeTimer = 0.5f;
+                // Reset aggro on all enemies within 6m
+                for (u32 si = 0; si < MAX_ENTITIES; si++) {
+                    Entity& se = pool.entities[si];
+                    if (!(se.flags & ENT_ACTIVE) || (se.flags & ENT_DEAD)) continue;
+                    if (se.flags & ENT_FRIENDLY) continue;
+                    Vec3 diff = se.position - position;
+                    if (diff.x * diff.x + diff.z * diff.z < 6.0f * 6.0f) {
+                        se.aiState = AIState::IDLE;
+                        se.velocity = {0, 0, 0};
+                    }
+                }
+                // Dark grey smoke nova at kill position
+                for (u32 ni = 0; ni < Engine::MAX_NOVA_FX; ni++) {
+                    if (!s_engine->m_novaFX[ni].active) {
+                        s_engine->m_novaFX[ni] = {position, 4.0f, 1.2f, true, {0.3f, 0.3f, 0.35f}};
+                        break;
+                    }
+                }
             }
             // Void Kill: 15% chance to spawn void zone on corpse
             if (s_engine->m_ringPassive == SkillId::VOID_KILL && (std::rand() % 100) < 15) {
@@ -1422,6 +1449,8 @@ void Engine::startGame() {
             {70,  1.8f, 18, 3.0f, 1.2f, 13, {0.4f,0.9f,0.4f}, false, 3, EnemyType::SKELETON, "zombie_skin",  0, 0, 0},
             // Imp (Barony) — small fast flying ranged nuisance, fires weak projectiles
             {20,  7.0f, 24, 9.0f, 0.8f,  3, {0.3f,0.3f,0.3f}, true,  1, EnemyType::BAT,      "imp_skin",     0, 0, 0},
+            // Gargoyle — stone ambush, starts dormant, high burst damage
+            {50, 4.5f, 15, 3.0f, 0.8f, 18, {0.45f,0.9f,0.45f}, false, 4, EnemyType::SKELETON, "gargoyle_skin", 0, 0, 0},
         };
         // Tier 2 (floors 11-20): Catacombs — poison + ghoul (D2) + bone mage (Barony)
         static const EnemyTemplate kTier2[] = {
@@ -1432,6 +1461,8 @@ void Engine::startGame() {
             {40, 4.5f, 22, 3.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
             // Bone Mage (Barony) — ranged skeleton caster
             {35, 2.5f, 24, 11.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
+            // Necromancer — ranged caster, resurrects dead enemies
+            {30, 2.0f, 20, 11.0f, 1.5f, 10, {0.4f,1.0f,0.4f}, false, 5, EnemyType::SKELETON, "necromancer_skin", 1, 2.0f, 3.0f},
         };
         // Tier 3 (floors 21-30): Caverns — slow + broodmother (Barony) + stalker (HGL)
         static const EnemyTemplate kTier3[] = {
@@ -1444,6 +1475,8 @@ void Engine::startGame() {
             {45, 5.0f, 26, 3.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
             // Sniper Imp — flying ranged, long range, slow fire, fast small projectiles
             {25, 4.0f, 30, 16.f, 2.0f, 18, {0.3f,0.3f,0.3f}, true, 1, EnemyType::BAT, "sniper_imp_skin", 2, 2.0f, 0},
+            // Cavern Shaman — healer, heals injured allies
+            {35, 2.5f, 18, 10.0f, 1.2f, 8, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "cavern_shaman_skin", 2, 2.0f, 0},
         };
         // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
         static const EnemyTemplate kTier4[] = {
@@ -1454,6 +1487,8 @@ void Engine::startGame() {
             {50, 6.0f, 24, 3.5f, 0.5f, 16, {0.65f,0.455f,0.65f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
             // Demon (HGL) — ranged fire caster, humanoid
             {55, 3.0f, 26, 13.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
+            // Infernal Herald — burn aura, area denial
+            {55, 3.0f, 20, 3.5f, 0.9f, 14, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "infernal_herald_skin", 3, 2.5f, 6.0f},
         };
         // Tier 5 (floors 41-50): Void — freeze + shade (Barony) + void demon (HGL)
         static const EnemyTemplate kTier5[] = {
@@ -1464,6 +1499,12 @@ void Engine::startGame() {
             {40, 5.5f, 28, 3.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
             // Void Demon (HGL) — heavy tanky skeleton, high damage
             {100, 2.5f, 24, 4.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
+            // Void Necromancer — resurrects dead, freeze
+            {40, 2.2f, 22, 12.0f, 1.2f, 12, {0.4f,1.0f,0.4f}, false, 5, EnemyType::SKELETON, "void_necromancer_skin", 4, 1.5f, 0},
+            // Void Shaman — heals allies, freeze
+            {45, 2.5f, 20, 11.0f, 1.0f, 10, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "void_shaman_skin", 4, 1.5f, 0},
+            // Void Herald — freeze aura
+            {65, 2.8f, 22, 3.5f, 0.8f, 16, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "void_herald_skin", 4, 2.0f, 0},
         };
 
         // Select tier based on current floor
@@ -1475,7 +1516,9 @@ void Engine::startGame() {
         else if (m_currentFloor >= 11) { tier = kTier2; tierCount = sizeof(kTier2) / sizeof(kTier2[0]); }
 
         // meshIdx 3 = human mesh (used by zombies, ghouls, stalkers, demons, shades)
-        u8 meshLookup[] = {m_meshIdSkeleton, m_meshIdBat, m_meshIdSpider, m_meshIdHuman};
+        u8 meshLookup[] = {m_meshIdSkeleton, m_meshIdBat, m_meshIdSpider, m_meshIdHuman,
+                           findMeshByName("gargoyle"), findMeshByName("necromancer"),
+                           findMeshByName("shaman"), findMeshByName("herald")};
 
         // Skip rooms near spawn so enemies don't ambush the player immediately
         u32 firstEnemyRoom = (dungeon.roomCount > 4) ? 3 : 1;
@@ -1513,6 +1556,19 @@ void Engine::startGame() {
                 if (ent) {
                     ent->meshId = meshLookup[tmpl.meshIdx];
                     ent->materialId = MaterialSystem::getIdByName(tmpl.matName);
+                    // Set archetype role based on enemy type
+                    if (std::strstr(tmpl.matName, "gargoyle")) {
+                        ent->enemyRole = EnemyRole::AMBUSH;
+                        ent->aiState = AIState::DORMANT;
+                    } else if (std::strstr(tmpl.matName, "necromancer")) {
+                        ent->enemyRole = EnemyRole::SUMMONER;
+                        ent->tacticalTimer = 8.0f; // first resurrect after 8s
+                    } else if (std::strstr(tmpl.matName, "shaman")) {
+                        ent->enemyRole = EnemyRole::HEALER;
+                        ent->tacticalTimer = 5.0f; // first heal after 5s
+                    } else if (std::strstr(tmpl.matName, "herald")) {
+                        ent->enemyRole = EnemyRole::AURA;
+                    }
                     ent->enemyType = tmpl.etype;
                     ent->level = static_cast<u8>(m_currentFloor);
 
@@ -2133,7 +2189,12 @@ void Engine::run() {
             update(static_cast<f32>(FIXED_DT));
             m_accumulator -= FIXED_DT;
             m_updateCount++;
-            m_firstTick = false;
+            // After first tick, consume pressed edges so isKeyPressed/isActionPressed
+            // return false on subsequent ticks. Fixes all multi-fire input bugs.
+            if (m_firstTick) {
+                Input::consumePressedState();
+                m_firstTick = false;
+            }
         }
 
         render(static_cast<f32>(m_accumulator / FIXED_DT));
@@ -2386,14 +2447,12 @@ void Engine::update(f32 dt) {
 
     switch (m_gameState) {
     case GameState::MENU:
-        // Menu input runs once per frame, not per physics tick, to prevent
-        // multi-step skipping when the accumulator runs multiple iterations.
-        if (m_firstTick) updateMenu(dt);
+        updateMenu(dt);
         break;
     case GameState::LOBBY_HOST:
     case GameState::LOBBY_JOIN:
     case GameState::CONNECTING:
-        if (m_firstTick) updateLobby(dt);
+        updateLobby(dt);
         break;
     case GameState::IN_GAME:
         // Unified game loop: networking pre → gameplay → networking post
@@ -3261,6 +3320,22 @@ void Engine::gameUpdate(f32 dt) {
         }
     }
 
+    // Herald aura — burn/freeze players standing within 3m of any herald
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyRole != EnemyRole::AURA) continue;
+        // Check distance to local player
+        Vec3 diff = m_localPlayer.position - e.position;
+        f32 dist2 = diff.x * diff.x + diff.z * diff.z;
+        if (dist2 < 3.0f * 3.0f) {
+            m_localPlayer.burnTimer = fmaxf(m_localPlayer.burnTimer, 0.5f);
+            m_localPlayer.burnDps = 4.0f;
+        }
+    }
+
     // Update skill state (energy regen, cooldowns)
     SkillSystem::update(m_skillStates[m_localPlayerIndex], dt);
     // Tick class skill cooldowns (shared energy synced from main pool)
@@ -3551,6 +3626,8 @@ void Engine::gameUpdate(f32 dt) {
     // Damage flash decay
     if (m_localPlayer.damageFlashTimer > 0.0f)
         m_localPlayer.damageFlashTimer -= dt;
+    if (m_localPlayer.smokeTimer > 0.0f)
+        m_localPlayer.smokeTimer -= dt;
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
     if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
@@ -4561,35 +4638,38 @@ void Engine::handleWeaponFire(f32 dt) {
         }
     }
 
+    // Throw weapon as projectile on any reload (hitscan weapons with clips)
+    auto throwWeaponOnReload = [&]() {
+        if (isItemEmpty(eqWpn)) return;
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        Vec3 forward = m_localPlayer.forward;
+        Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
+        Vec3 spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
+        f32 throwDmg = wpn.damage * ws.currentClip * 0.5f; // damage scales with remaining ammo
+        if (throwDmg < wpn.damage) throwDmg = wpn.damage;  // minimum 1 shot worth
+        u16 projIdx = ProjectileSystem::spawn(m_projectiles, spawnPos,
+            forward, 20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
+        if (projIdx != 0xFFFF) {
+            m_projectiles.projectiles[projIdx].meshId = m_itemDefs[eqWpn.defId].meshId;
+            m_projectiles.projectiles[projIdx].splashRadius = 2.0f;
+            m_projectiles.projectiles[projIdx].splashDamage = throwDmg * 0.5f;
+        }
+        m_viewmodelState.attackAnimT = 0.3f;
+    };
+
     // Manual reload — reload if clip not full and not already reloading
     if (Input::isActionPressed(GameAction::RELOAD) && wpn.clipSize > 0 &&
         !ws.reloading && ws.currentClip < wpn.clipSize) {
         ws.reloading = true;
         ws.reloadTimer = wpn.reloadTime;
+        throwWeaponOnReload();
     }
 
     // Auto-reload when clip is empty (triggers immediately, no need to click)
     if (wpn.clipSize > 0 && ws.currentClip == 0 && !ws.reloading) {
         ws.reloading = true;
         ws.reloadTimer = wpn.reloadTime;
-
-        // Throwaway legendary: throw weapon as projectile on empty clip
-        if (!isItemEmpty(eqWpn) && m_itemDefs[eqWpn.defId].legendarySkillId == SkillId::THROWAWAY) {
-            Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-            Vec3 forward = m_localPlayer.forward;
-            // Offset to weapon hand position (right side, slightly down)
-            Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
-            Vec3 spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
-            f32 throwDmg = wpn.damage * wpn.clipSize * 0.5f;
-            u16 projIdx = ProjectileSystem::spawn(m_projectiles, spawnPos,
-                forward, 20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
-            if (projIdx != 0xFFFF) {
-                m_projectiles.projectiles[projIdx].meshId = m_itemDefs[eqWpn.defId].meshId;
-                m_projectiles.projectiles[projIdx].splashRadius = 2.0f;
-                m_projectiles.projectiles[projIdx].splashDamage = throwDmg * 0.5f;
-            }
-            m_viewmodelState.attackAnimT = 0.3f;
-        }
+        throwWeaponOnReload();
     }
 
     // Can't fire while reloading
@@ -4753,19 +4833,7 @@ void Engine::handleWeaponFire(f32 dt) {
             if (m_localPlayer.health > m_localPlayer.maxHealth)
                 m_localPlayer.health = m_localPlayer.maxHealth;
         }
-        // Phase Strike: 10% chance to teleport behind target
-        if (m_ringPassive == SkillId::PHASE_STRIKE && (std::rand() % 100) < 10) {
-            Vec3 hitPos = result.hitPosition;
-            Vec3 behindDir = normalize(hitPos - m_localPlayer.position);
-            Vec3 teleportPos = hitPos + behindDir * 1.5f;
-            // Validate teleport destination isn't inside a wall
-            u32 gx, gz;
-            if (LevelGridSystem::worldToGrid(m_grid, teleportPos, gx, gz) &&
-                !LevelGridSystem::isSolid(m_grid, gx, gz)) {
-                m_localPlayer.position = teleportPos;
-                m_localPlayer.yaw += 3.14159f; // face back toward target
-            }
-        }
+        // Phase Strike is now on-kill (smoke bomb) — see death callback
     }
 
     // Affix life-on-hit: heal percentage of damage dealt (works independently of ring passive)
@@ -5341,10 +5409,9 @@ void Engine::renderViewmodel() {
         }
     }
 
-    // Throwaway SMG: weapon is gone during reload (it was thrown)
+    // Weapon is gone during reload (it was thrown)
     WeaponState& vmWs = m_players[m_localPlayerIndex].weaponState;
-    if (hasWeapon && m_itemDefs[equipped.defId].legendarySkillId == SkillId::THROWAWAY &&
-        vmWs.reloading) {
+    if (hasWeapon && def.weaponType == WeaponType::HITSCAN && vmWs.reloading) {
         return; // weapon is flying through the air — nothing to render
     }
 
