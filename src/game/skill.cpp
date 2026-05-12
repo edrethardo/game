@@ -953,6 +953,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     case SkillId::SHADOW_SHOT:
         AudioSystem::play(SfxId::SKILL_DASH); break;
     case SkillId::HOLY_SMITE:
+        AudioSystem::play(SfxId::SKILL_STUN); break;   // thunderous divine impact
     case SkillId::DIVINE_SHIELD:
         AudioSystem::play(SfxId::SKILL_HEAL); break;
     case SkillId::WAR_CRY:
