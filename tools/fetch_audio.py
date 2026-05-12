@@ -208,6 +208,69 @@ MANUAL_OVERRIDES = {
     "sfx_door_open":        "kenney_rpg-audio/Audio/doorOpen_1.ogg",
     "sfx_level_up":         "oga_80-rpg-sfx/item_gem_01.ogg",
 }
+# Per-sound pitch multiplier for ffmpeg processing.
+# 1.0 = no pitch change, <1.0 = pitch down (deeper), >1.0 = pitch up.
+# Applied in Phase 3 via: asetrate=44100*pitch, aresample=44100
+PITCH_SHIFTS = {
+    # Melee weapons — weight hierarchy: dagger(light) > sword > axe=claymore(heavy)
+    "sfx_weapon_sword":     0.75,
+    "sfx_weapon_dagger":    0.90,
+    "sfx_weapon_axe":       0.65,
+    "sfx_weapon_claymore":  0.65,
+    # Ranged weapons — weight hierarchy: SMG(snappy) > pistol=carbine > revolver(boomy)
+    "sfx_weapon_pistol":    0.70,
+    "sfx_weapon_smg":       0.80,
+    "sfx_weapon_carbine":   0.70,
+    "sfx_weapon_revolver":  0.65,
+    "sfx_weapon_bow":       0.85,
+    "sfx_weapon_crossbow":  0.80,
+    "sfx_weapon_throw":     0.90,
+    "sfx_weapon_molotov":   0.70,
+    "sfx_weapon_wand":      0.90,
+    "sfx_weapon_staff":     0.80,
+    # Reload
+    "sfx_reload":           0.80,
+    # Combat hits
+    "sfx_hit_melee":        0.70,
+    "sfx_hit_hitscan":      0.80,
+    "sfx_hit_projectile":   0.75,
+    "sfx_enemy_hit":        0.75,
+    "sfx_enemy_death":      0.65,
+    "sfx_player_hit":       0.75,
+    "sfx_player_death":     0.60,
+    # Skills — mostly natural pitch, slight darkening for dungeon atmosphere
+    "sfx_skill_fire":       0.85,
+    "sfx_skill_ice":        0.85,
+    "sfx_skill_lightning":  0.90,
+    "sfx_skill_blood":      0.80,
+    "sfx_skill_dash":       1.0,
+    "sfx_skill_heal":       1.0,   # bright chime — no darkening
+    "sfx_skill_buff":       0.95,
+    "sfx_skill_summon":     0.75,
+    "sfx_skill_explosion":  0.70,
+    "sfx_skill_stun":       0.75,
+    # Items — mostly natural
+    "sfx_item_pickup":      0.95,
+    "sfx_item_equip":       0.85,
+    "sfx_item_drop":        0.90,
+    "sfx_potion_use":       0.90,
+    # UI — no pitch shift, keep crisp
+    "sfx_ui_click":         1.0,
+    "sfx_ui_back":          1.0,
+    "sfx_ui_confirm":       1.0,
+    "sfx_menu_hover":       1.0,
+    # Footsteps
+    "sfx_footstep_stone":   0.80,
+    "sfx_footstep_metal":   0.85,
+    "sfx_enemy_footstep":   0.70,
+    # Enemies — dark and menacing
+    "sfx_enemy_attack":     0.75,
+    "sfx_boss_roar":        0.60,
+    "sfx_boss_stomp":       0.60,
+    # Environment
+    "sfx_door_open":        0.80,
+    "sfx_level_up":         1.0,   # bright, rewarding — no darkening
+}
 
 # ---------------------------------------------------------------------------
 # Download helpers
