@@ -545,7 +545,7 @@ static void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
     temp.name         = "Holy Smite";
     temp.type         = WeaponType::MELEE;
     temp.damage       = def->damage > 0.0f ? def->damage : 40.0f;
-    temp.range        = 2.5f;
+    temp.range        = def->radius > 0.0f ? def->radius : 4.0f;
     temp.coneAngleDeg = 60.0f;
     temp.cooldown     = 0.0f;
     temp.recoilKick   = 0.0f;
@@ -560,6 +560,11 @@ static void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 heal     = totalDmg * 0.15f;
     player.health = (player.health + heal > player.maxHealth)
                     ? player.maxHealth : player.health + heal;
+
+    // Golden nova burst visual
+    if (s_novaCallback) {
+        s_novaCallback(origin, temp.range, {1.0f, 0.85f, 0.3f});
+    }
     LOG_INFO("Holy Smite hit %u enemies, healed %.1f HP (+5 flat)", result.entitiesHit, heal);
 }
 

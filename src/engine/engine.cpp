@@ -577,6 +577,10 @@ void Engine::init() {
             pool.entities[entityIndex].speechTimer = 4.0f;
         }
 
+        // Track hostile kills for floor transition screen
+        if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY))
+            s_engine->m_floorKillCount++;
+
         // Floors 1-3: first hostile kill guarantees a magic (green) quality drop
         if (!s_firstKillDropGiven && s_engine->m_currentFloor <= 3 &&
             !(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
@@ -961,7 +965,7 @@ void Engine::init() {
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
 
-static constexpr u32 SAVE_VERSION = 5; // v5: fixed multiplicative CDR, recalculateStats on load
+static constexpr u32 SAVE_VERSION = 6; // v6: added totalPlayTime
 
 void Engine::saveGame() {
     FILE* f = std::fopen("save.dat", "wb");
@@ -995,8 +999,11 @@ void Engine::saveGame() {
     std::fwrite(&m_activeClassSkill, sizeof(m_activeClassSkill), 1, f);
     std::fwrite(m_classSkillStates, sizeof(m_classSkillStates), 1, f);
 
+    // Total play time
+    std::fwrite(&m_totalPlayTime, sizeof(f32), 1, f);
+
     std::fclose(f);
-    LOG_INFO("Game saved at floor %u (class %u)", m_savedFloor, static_cast<u32>(m_playerClass));
+    LOG_INFO("Game saved at floor %u (class %u, time %.0fs)", m_savedFloor, static_cast<u32>(m_playerClass), m_totalPlayTime);
 }
 
 bool Engine::loadGame() {
@@ -1041,9 +1048,14 @@ bool Engine::loadGame() {
         std::fread(loadedClassSkills, sizeof(loadedClassSkills), 1, f);
     }
 
+    // Total play time (v6+)
+    f32 loadedTotalTime = 0.0f;
+    std::fread(&loadedTotalTime, sizeof(f32), 1, f); // silently fails on older saves
+
     std::fclose(f);
 
     if (ok) {
+        m_totalPlayTime = loadedTotalTime;
         m_localPlayer.health = hp;
         m_localPlayer.maxHealth = maxHp;
         m_inventories[m_localPlayerIndex] = loadedInv;
@@ -1339,6 +1351,10 @@ void Engine::upgradeNpcEquipment(u8 newFloor) {
 void Engine::startGame() {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
+
+    // Reset per-floor stats for transition screen
+    m_floorKillCount = 0;
+    m_floorTime = 0.0f;
 
     // Reset tutorials on new game (not on floor descent)
     if (m_currentFloor <= 1) {
@@ -2459,6 +2475,28 @@ void Engine::update(f32 dt) {
     case GameState::CONNECTING:
         updateLobby(dt);
         break;
+    case GameState::FLOOR_TRANSITION:
+        m_transitionTimer -= dt;
+        if (m_transitionTimer <= 0.0f) {
+            startGame();
+            // In split-screen, reposition both players at the new spawn
+            if (m_splitPlayerCount > 1) {
+                m_localPlayers[1].maxHealth *= 1.015f;
+                m_localPlayers[1].health = m_localPlayers[1].maxHealth;
+                m_skillStates[1].maxEnergy *= 1.015f;
+                m_skillStates[1].energy = m_skillStates[1].maxEnergy;
+
+                m_localPlayers[0] = m_localPlayer;
+                m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
+                m_localPlayers[1].velocity = {0, 0, 0};
+                m_localPlayers[1].invulnTimer = 2.5f;
+                m_players[0].spawnPosition = m_localPlayer.position;
+                m_players[1].spawnPosition = m_localPlayers[1].position;
+                m_cameras[0] = m_camera;
+            }
+            m_gameState = GameState::IN_GAME;
+        }
+        break;
     case GameState::IN_GAME:
         // Unified game loop: networking pre → gameplay → networking post
         if (m_netRole == NetRole::SERVER) serverNetPre(dt);
@@ -2937,6 +2975,9 @@ void Engine::updateLobby(f32 dt) {
 // Singleplayer update (unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::gameUpdate(f32 dt) {
+    m_floorTime += dt;
+    m_totalPlayTime += dt;
+
     // In multiplayer, sync NetPlayer → m_localPlayer so gameplay sees current state.
     // In singleplayer, m_localPlayer is the authority — no sync needed.
     if (m_netRole != NetRole::NONE) {
@@ -3821,27 +3862,13 @@ bool Engine::updateFloorDoor() {
                 m_savedSeed = static_cast<u32>(std::rand());
                 saveGame();
                 LOG_INFO("Descending to floor %u", m_currentFloor);
-                startGame(); // regenerate dungeon with new floor seed
 
-                // In split-screen, reposition both players at the new spawn
-                if (m_splitPlayerCount > 1) {
-                    // Scale P2 health/energy too
-                    m_localPlayers[1].maxHealth *= 1.015f;
-                    m_localPlayers[1].health = m_localPlayers[1].maxHealth;
-                    m_skillStates[1].maxEnergy *= 1.015f;
-                    m_skillStates[1].energy = m_skillStates[1].maxEnergy;
-
-                    // Set both players at the new spawn point
-                    m_localPlayers[0] = m_localPlayer; // P1 gets the fresh spawn from startGame
-                    m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
-                    m_localPlayers[1].velocity = {0, 0, 0};
-                    m_localPlayers[1].invulnTimer = 2.5f;
-                    m_players[0].spawnPosition = m_localPlayer.position;      // P1 respawn point
-                    m_players[1].spawnPosition = m_localPlayers[1].position; // P2 respawn point
-                    m_cameras[0] = m_camera;
-                }
-
-                return true; // skip the remainder of this tick
+                // Snapshot floor stats for transition screen
+                m_transitionKills = m_floorKillCount;
+                m_transitionTime = m_floorTime;
+                m_transitionTimer = 2.0f;
+                m_gameState = GameState::FLOOR_TRANSITION;
+                return true;
             }
         }
     }
@@ -5700,6 +5727,66 @@ void Engine::render(f32 alpha) {
         // Pulsing dot to indicate connecting
         f32 pulse = (sinf(m_statsTimer * 6.0f) + 1.0f) * 0.5f;
         HUD::drawCrosshair(sw, sh, {pulse, pulse, 0.5f + pulse * 0.5f});
+        GLContext::swapBuffers(Window::getHandle());
+        return;
+    }
+
+    if (m_gameState == GameState::FLOOR_TRANSITION) {
+        glClearColor(0.02f, 0.02f, 0.04f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        u32 sw = Window::getWidth();
+        u32 sh = Window::getHeight();
+        f32 uiScale = static_cast<f32>(sh) / 720.0f;
+        FontSystem::setUIScale(uiScale);
+
+        // Fade: full opacity for first 1.5s, fade out in last 0.5s
+        f32 alpha = fminf(m_transitionTimer * 2.0f, 1.0f);
+
+        // Floor number — large gold
+        char floorStr[32];
+        std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_currentFloor);
+        f32 floorW = FontSystem::textWidth(floorStr, 4);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - floorW) * 0.5f, sh * 0.6f,
+                             floorStr, {0.9f * alpha, 0.7f * alpha, 0.2f * alpha}, 4);
+
+        // Theme name — smaller muted gold
+        const char* themeName = "The Dungeon";
+        if (m_currentFloor >= 41)      themeName = "The Void";
+        else if (m_currentFloor >= 31) themeName = "The Hellforge";
+        else if (m_currentFloor >= 21) themeName = "Spider Caverns";
+        else if (m_currentFloor >= 11) themeName = "The Catacombs";
+        f32 themeW = FontSystem::textWidth(themeName, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - themeW) * 0.5f, sh * 0.50f,
+                             themeName, {0.7f * alpha, 0.55f * alpha, 0.2f * alpha}, 2);
+
+        // Kill count
+        char killStr[32];
+        std::snprintf(killStr, sizeof(killStr), "Enemies slain: %u", m_transitionKills);
+        f32 killW = FontSystem::textWidth(killStr, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - killW) * 0.5f, sh * 0.35f,
+                             killStr, {0.8f * alpha, 0.8f * alpha, 0.8f * alpha}, 2);
+
+        // Time — format as M:SS
+        u32 totalSec = static_cast<u32>(m_transitionTime);
+        u32 minutes = totalSec / 60;
+        u32 seconds = totalSec % 60;
+        char timeStr[32];
+        std::snprintf(timeStr, sizeof(timeStr), "Floor time: %u:%02u", minutes, seconds);
+        f32 timeW = FontSystem::textWidth(timeStr, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - timeW) * 0.5f, sh * 0.28f,
+                             timeStr, {0.8f * alpha, 0.8f * alpha, 0.8f * alpha}, 2);
+
+        // Total play time
+        u32 totalAll = static_cast<u32>(m_totalPlayTime);
+        u32 totalMin = totalAll / 60;
+        u32 totalSc  = totalAll % 60;
+        char totalStr[32];
+        std::snprintf(totalStr, sizeof(totalStr), "Total time: %u:%02u", totalMin, totalSc);
+        f32 totalW = FontSystem::textWidth(totalStr, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - totalW) * 0.5f, sh * 0.21f,
+                             totalStr, {0.6f * alpha, 0.6f * alpha, 0.6f * alpha}, 2);
+
         GLContext::swapBuffers(Window::getHandle());
         return;
     }

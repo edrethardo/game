@@ -27,7 +27,8 @@ enum struct GameState : u8 {
     LOBBY_JOIN,
     CONNECTING,
     IN_GAME,
-    GAME_OVER,  // player died, show death screen
+    GAME_OVER,          // player died, show death screen
+    FLOOR_TRANSITION,   // between-floor title card (2s hold)
 };
 
 class Engine {
@@ -58,6 +59,14 @@ private:
     bool      m_optionsBindKeyboard = true; // true=capturing keyboard, false=capturing controller
     bool      m_confirmQuit = false;  // "are you sure?" overlay when pressing ESC in-game
     char      m_connectAddress[64] = "127.0.0.1";
+
+    // Floor transition screen
+    f32  m_transitionTimer = 0.0f;
+    u32  m_floorKillCount  = 0;    // kills on current floor (reset in startGame)
+    f32  m_floorTime       = 0.0f; // seconds spent on current floor
+    f32  m_totalPlayTime   = 0.0f; // cumulative play time across all floors (saved)
+    u32  m_transitionKills = 0;    // snapshot for transition display
+    f32  m_transitionTime  = 0.0f; // snapshot for transition display
 
     // --- Split-screen state ---
     static constexpr u32 MAX_LOCAL_PLAYERS = 2;
