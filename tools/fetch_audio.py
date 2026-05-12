@@ -163,7 +163,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
     "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
     # Magic weapons
-    "sfx_weapon_wand":      "kenney_impact-sounds/Audio/impactSoft_medium_002.ogg",  # soft whomp — pitched up becomes a punchy magic bolt
+    "sfx_weapon_wand":      "oga_100-cc0-sfx/spring_03.ogg",              # twangy snap — pitched down becomes a punchy magic bolt
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
     # Reload
     "sfx_reload":           "kenney_rpg-audio/Audio/metalLatch.ogg",
@@ -178,7 +178,7 @@ MANUAL_OVERRIDES = {
     # Skills
     "sfx_skill_fire":       "oga_80-rpg-sfx/spell_fire_03.ogg",
     "sfx_skill_ice":        "kenney_impact-sounds/Audio/impactGlass_light_000.ogg",  # was variant 003
-    "sfx_skill_lightning":  "oga_50-retro-synth/synth_laser_05.ogg",        # was variant 03
+    "sfx_skill_lightning":  "kenney_impact-sounds/Audio/impactMetal_heavy_002.ogg",  # metallic crack — reads as electric arc
     "sfx_skill_blood":      "oga_80-rpg-sfx/creature_slime_02.ogg",
     "sfx_skill_dash":       "oga_swishes/swishes/swish-1.wav",              # was swish-5 (swish-1 is quicker)
     "sfx_skill_heal":       "oga_100-cc0-sfx/bell_01.ogg",                  # was spell_fire_04 (fire sound for heal!)
@@ -219,7 +219,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_axe":       0.65,
     "sfx_weapon_claymore":  0.65,
     # Ranged weapons — weight hierarchy: SMG(snappy) > pistol=carbine > revolver(boomy)
-    "sfx_weapon_pistol":    0.56,
+    "sfx_weapon_pistol":    0.45,
     "sfx_weapon_smg":       0.80,
     "sfx_weapon_carbine":   0.70,
     "sfx_weapon_revolver":  0.65,
@@ -227,7 +227,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_crossbow":  0.80,
     "sfx_weapon_throw":     0.90,
     "sfx_weapon_molotov":   0.70,
-    "sfx_weapon_wand":      1.15,   # pitched UP — makes slam sound like a punchy magic bolt
+    "sfx_weapon_wand":      0.70,   # spring twang pitched down becomes punchy magic bolt
     "sfx_weapon_staff":     0.80,
     # Reload
     "sfx_reload":           0.80,
@@ -242,7 +242,7 @@ PITCH_SHIFTS = {
     # Skills — mostly natural pitch, slight darkening for dungeon atmosphere
     "sfx_skill_fire":       0.85,
     "sfx_skill_ice":        0.85,
-    "sfx_skill_lightning":  0.63,
+    "sfx_skill_lightning":  1.10,   # sharp metallic crack for electric arc
     "sfx_skill_blood":      0.80,
     "sfx_skill_dash":       1.0,
     "sfx_skill_heal":       1.0,   # bright chime — no darkening
