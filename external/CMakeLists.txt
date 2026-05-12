@@ -4,6 +4,23 @@ if(NOT NINTENDO_SWITCH)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     set(SDL_TEST OFF CACHE BOOL "" FORCE)
     add_subdirectory(SDL2)
+
+    # SDL_mixer — audio mixing library (WAV + OGG support)
+    set(SDL2MIXER_VENDORED ON CACHE BOOL "" FORCE)
+    set(SDL2MIXER_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_FLAC OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_MOD OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_MP3 OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_MIDI OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_OPUS OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_WAVPACK OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_OGG OFF CACHE BOOL "" FORCE)
+    # Force SDL_mixer to build as static library
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(SDL_mixer)
+    # Fix INTERFACE_SDL2_SHARED to match SDL2-static (FALSE)
+    set_property(TARGET SDL2_mixer PROPERTY INTERFACE_SDL2_SHARED FALSE)
 endif()
 
 # GLAD - OpenGL loader

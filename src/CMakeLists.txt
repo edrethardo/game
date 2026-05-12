@@ -7,6 +7,16 @@ add_executable(DungeonEngine
     platform/clock.cpp
     platform/input.cpp
     engine/engine.cpp
+    engine/engine_init.cpp
+    engine/engine_persist.cpp
+    engine/engine_startgame.cpp
+    engine/engine_update.cpp
+    engine/engine_menu.cpp
+    engine/engine_inventory.cpp
+    engine/engine_combat.cpp
+    engine/engine_net.cpp
+    engine/engine_render.cpp
+    engine/engine_hud.cpp
     renderer/gl_context.cpp
     renderer/shader.cpp
     renderer/mesh.cpp
@@ -42,6 +52,7 @@ add_executable(DungeonEngine
     renderer/material.cpp
     renderer/obj_loader.cpp
     world/level_loader.cpp
+    audio/audio.cpp
 )
 
 target_include_directories(DungeonEngine PRIVATE
@@ -76,7 +87,7 @@ if(NINTENDO_SWITCH)
         COMMENT "Building NRO with romfs..."
     )
 else()
-    target_link_libraries(DungeonEngine PRIVATE SDL2-static glad enet)
+    target_link_libraries(DungeonEngine PRIVATE SDL2-static SDL2_mixer glad enet)
     if(UNIX AND NOT APPLE)
         target_link_libraries(DungeonEngine PRIVATE dl)
     endif()
@@ -84,6 +95,21 @@ endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
     target_compile_definitions(DungeonEngine PRIVATE ENGINE_DEBUG=1)
+endif()
+
+# Auto-fetch CC0 audio assets on first build (requires internet + ffmpeg)
+if(NOT NINTENDO_SWITCH)
+    set(AUDIO_STAMP "${CMAKE_SOURCE_DIR}/assets/audio/.fetched")
+    add_custom_command(
+        OUTPUT ${AUDIO_STAMP}
+        COMMAND ${CMAKE_COMMAND} -E echo "Fetching CC0 audio assets..."
+        COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fetch_audio.py
+        COMMAND ${CMAKE_COMMAND} -E touch ${AUDIO_STAMP}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Downloading and pitch-processing CC0 sound effects"
+    )
+    add_custom_target(fetch_audio DEPENDS ${AUDIO_STAMP})
+    add_dependencies(DungeonEngine fetch_audio)
 endif()
 
 # Standalone weapon model generator tool

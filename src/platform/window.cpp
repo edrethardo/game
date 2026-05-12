@@ -19,6 +19,10 @@ bool Window::init(const char* title, s32 width, s32 height) {
         LOG_ERROR("SDL_Init failed: %s", SDL_GetError());
         return false;
     }
+    // Audio is optional — don't fail if no audio device is available
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        LOG_WARN("SDL audio init failed (no audio device?): %s — continuing without audio", SDL_GetError());
+    }
 
 #ifdef __SWITCH__
     // Docked = 1080p, handheld = 720p

@@ -50,23 +50,31 @@ private:
 
     // Game state
     GameState m_gameState = GameState::MENU;
-    u8        m_menuSelection = 0;
-    u8        m_menuSubState = 0;  // 0=main, 1=singleplayer, 2=class selection, 3=options
-    u8        m_menuSubSelection = 0;
-    f32       m_menuMsgTimer = 0.0f; // countdown for transient menu messages
-    const char* m_menuMsg = nullptr;
-    bool      m_optionsBindCapture = false; // true when waiting for key/button press to rebind
-    bool      m_optionsBindKeyboard = true; // true=capturing keyboard, false=capturing controller
-    bool      m_confirmQuit = false;  // "are you sure?" overlay when pressing ESC in-game
-    char      m_connectAddress[64] = "127.0.0.1";
 
-    // Floor transition screen
-    f32  m_transitionTimer = 0.0f;
-    u32  m_floorKillCount  = 0;    // kills on current floor (reset in startGame)
-    f32  m_floorTime       = 0.0f; // seconds spent on current floor
-    f32  m_totalPlayTime   = 0.0f; // cumulative play time across all floors (saved)
-    u32  m_transitionKills = 0;    // snapshot for transition display
-    f32  m_transitionTime  = 0.0f; // snapshot for transition display
+    // Menu/UI state — grouped for isolation
+    struct MenuState {
+        u8   selection = 0;
+        u8   subState = 0;       // 0=main, 1=singleplayer, 2=class selection, 3=options
+        u8   subSelection = 0;
+        f32  msgTimer = 0.0f;    // countdown for transient menu messages
+        const char* msg = nullptr;
+        bool bindCapture = false;   // true when waiting for key/button press to rebind
+        bool bindKeyboard = true;   // true=capturing keyboard, false=capturing controller
+        bool confirmQuit = false;   // "are you sure?" overlay when pressing ESC in-game
+        char connectAddress[64] = "127.0.0.1";
+    };
+    MenuState m_menu;
+
+    // Floor transition screen state
+    struct TransitionState {
+        f32  timer = 0.0f;
+        u32  floorKillCount = 0;    // kills on current floor (reset in startGame)
+        f32  floorTime = 0.0f;      // seconds spent on current floor
+        f32  totalPlayTime = 0.0f;  // cumulative play time across all floors (saved)
+        u32  snapshotKills = 0;     // snapshot for transition display
+        f32  snapshotTime = 0.0f;   // snapshot for transition display
+    };
+    TransitionState m_transition;
 
     // --- Split-screen state ---
     static constexpr u32 MAX_LOCAL_PLAYERS = 2;
@@ -138,24 +146,25 @@ private:
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
 
-    // Level
-    LevelGrid    m_grid;
-    LevelSection m_sections[MAX_LEVEL_SECTIONS];
-    u32          m_sectionCount = 0;
-    u32          m_levelSeed    = 42;
-    u32          m_currentFloor = 1;  // current dungeon floor (increases each descent)
-    u32          m_savedFloor   = 1;  // last saved floor for death respawn
-    u32          m_savedSeed    = 0;  // saved RNG seed for that floor
+    // Level, dungeon, and world state
+    struct LevelState {
+        LevelGrid    grid;
+        LevelSection sections[MAX_LEVEL_SECTIONS];
+        u32          sectionCount = 0;
+        u32          levelSeed    = 42;
+        u32          currentFloor = 1;
+        u32          savedFloor   = 1;
+        u32          savedSeed    = 0;
+        DungeonResult dungeon;
+        SquadPool     squads;
+        Vec3          floorDoorPos;
+        bool          floorDoorActive = false;
+    };
+    LevelState m_level;
 
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
     ProjectilePool m_projectiles;
-
-    // Squad system — groups entities by room for coordinated AI behaviour
-    SquadPool      m_squads;
-
-    // Dungeon layout — kept as member so SquadSystem::update can reference room adjacency
-    DungeonResult  m_dungeon;
 
     // Per-room point lights (placed at level gen, nearest 4 sent to shader per frame)
     static constexpr u32 MAX_POINT_LIGHTS = 64;
@@ -175,16 +184,19 @@ private:
     // Upgrade equipment for NPCs that survived the floor
     void upgradeNpcEquipment(u8 newFloor);
 
-    // Render copies for client interpolation
-    EntityPool     m_renderEntities;
-    ProjectilePool m_renderProjectiles;
-    Vec3           m_renderPlayerPositions[MAX_PLAYERS];
-    f32            m_renderPlayerYaws[MAX_PLAYERS];
-    f32            m_renderPlayerPitches[MAX_PLAYERS];
-    bool           m_renderPlayerActive[MAX_PLAYERS];
-    f32            m_renderPlayerHealth[MAX_PLAYERS];
-    f32            m_renderPlayerMaxHealth[MAX_PLAYERS];
-    u8             m_renderPlayerAnimFlags[MAX_PLAYERS]; // bit0=attacking, bit1=reloading, bit2=dead
+    // Client interpolation state — read-only from gameplay, written by net code
+    struct RenderInterp {
+        EntityPool     entities;
+        ProjectilePool projectiles;
+        Vec3           playerPositions[MAX_PLAYERS];
+        f32            playerYaws[MAX_PLAYERS];
+        f32            playerPitches[MAX_PLAYERS];
+        bool           playerActive[MAX_PLAYERS];
+        f32            playerHealth[MAX_PLAYERS];
+        f32            playerMaxHealth[MAX_PLAYERS];
+        u8             playerAnimFlags[MAX_PLAYERS]; // bit0=attacking, bit1=reloading, bit2=dead
+    };
+    RenderInterp m_renderInterp;
 
     // Combat feedback
     CombatHit   m_lastCombatHit;
@@ -203,10 +215,6 @@ private:
     f32  m_equipTooltipTimer = 0.0f;
     f32  m_controlsTooltipTimer = 0.0f;  // LMB/RMB controls shown on floor 1 entry
 
-    // Floor door — portal to next dungeon level
-    Vec3 m_floorDoorPos    = {0, 0, 0};
-    bool m_floorDoorActive = false;
-
     // Chat log — displays NPC speech and game events on the left side of the screen
     static constexpr u32 MAX_CHAT_LINES = 8;
     static constexpr u32 CHAT_LINE_LEN = 48;
@@ -214,48 +222,34 @@ private:
     ChatLine m_chatLog[MAX_CHAT_LINES] = {};
     void addChatMessage(const char* speaker, const char* msg, Vec3 color);
 
-    // Hitscan impact spark — small burst at hit position
+    // Visual effects pools — grouped for isolation
     static constexpr u32 MAX_IMPACT_FX = 8;
     struct ImpactFX { Vec3 pos; Vec3 normal; f32 timer; bool active; bool isEntity; };
-    ImpactFX m_impactFX[MAX_IMPACT_FX] = {};
-
-    // AoE fire effect (cheap visual for molotov splash)
     static constexpr u32 MAX_FIRE_FX = 8;
     struct FireFX { Vec3 pos; f32 radius; f32 timer; bool active; };
-
-    // Blood Nova / skill ring burst effect
     static constexpr u32 MAX_NOVA_FX = 4;
     struct NovaFX { Vec3 pos; f32 maxRadius; f32 timer; bool active; Vec3 color; };
-    NovaFX m_novaFX[MAX_NOVA_FX] = {};
-
-    // Phase Dash trail effect
     static constexpr u32 MAX_DASH_FX = 4;
     struct DashFX { Vec3 start; Vec3 end; f32 timer; bool active; };
-    DashFX m_dashFX[MAX_DASH_FX] = {};
-
-    // Chain Lightning arc visual — stores bounce chain positions for rendering
     static constexpr u32 MAX_CHAIN_FX = 4;
     static constexpr u32 MAX_CHAIN_POINTS = 24;
     struct ChainFX { Vec3 points[MAX_CHAIN_POINTS]; u8 pointCount; f32 timer; bool active; };
-    ChainFX m_chainFX[MAX_CHAIN_FX] = {};
-
-    // Meteor scorch zones — persistent ground fire that deals AoE DoT
     static constexpr u32 MAX_SCORCH = 4;
     struct ScorchZone { Vec3 pos; f32 radius; f32 timer; f32 dps; bool active; };
-    ScorchZone m_scorchZones[MAX_SCORCH] = {};
-    FireFX m_fireFX[MAX_FIRE_FX] = {};
-
-    // Floating damage numbers — world-space text that drifts upward and fades
     static constexpr u32 MAX_DAMAGE_NUMBERS = 16;
-    struct DamageNumber {
-        Vec3 position;
-        f32  amount;
-        f32  timer;
-        bool active;
-        bool isHeal;  // green for heals
-        bool isCrit;  // larger + yellow for crits
+    struct DamageNumber { Vec3 position; f32 amount; f32 timer; bool active; bool isHeal; bool isCrit; };
+
+    struct EffectsState {
+        ImpactFX      impactFX[MAX_IMPACT_FX] = {};
+        FireFX        fireFX[MAX_FIRE_FX] = {};
+        NovaFX        novaFX[MAX_NOVA_FX] = {};
+        DashFX        dashFX[MAX_DASH_FX] = {};
+        ChainFX       chainFX[MAX_CHAIN_FX] = {};
+        ScorchZone    scorchZones[MAX_SCORCH] = {};
+        DamageNumber  damageNumbers[MAX_DAMAGE_NUMBERS] = {};
     };
-    DamageNumber m_damageNumbers[MAX_DAMAGE_NUMBERS] = {};
+    EffectsState m_fx;
+
     void spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal = false, bool isCrit = false);
     void renderDamageNumbers(u32 sw, u32 sh);
 
