@@ -74,6 +74,24 @@ PACKS = [
         "oga_50-retro-synth",
         "https://opengameart.org/sites/default/files/50-CC0-retro-synth-SFX.zip",
     ),
+    (
+        "oga_rpg-sound-pack",
+        "https://opengameart.org/sites/default/files/rpg_sound_pack.zip",
+    ),
+]
+
+# Individual CC0 files (not ZIPs) — downloaded to their own cache subdirectory.
+# Format: (pack_name, {filename: url, ...})
+INDIVIDUAL_FILES = [
+    ("oga_magic-spell-sfx", {
+        "magical_1.ogg": "https://opengameart.org/sites/default/files/magical_1_0.ogg",
+        "magical_2.ogg": "https://opengameart.org/sites/default/files/magical_2.ogg",
+        "magical_3.ogg": "https://opengameart.org/sites/default/files/magical_3.ogg",
+        "magical_4.ogg": "https://opengameart.org/sites/default/files/magical_4.ogg",
+        "magical_5.ogg": "https://opengameart.org/sites/default/files/magical_5.ogg",
+        "magical_6.ogg": "https://opengameart.org/sites/default/files/magical_6_0.ogg",
+        "magical_7.ogg": "https://opengameart.org/sites/default/files/magical_7_0.ogg",
+    }),
 ]
 
 # ---------------------------------------------------------------------------
@@ -163,7 +181,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
     "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
     # Magic weapons
-    "sfx_weapon_wand":      "oga_100-cc0-sfx/spring_03.ogg",              # twangy snap — pitched down becomes a punchy magic bolt
+    "sfx_weapon_wand":      "oga_magic-spell-sfx/magical_2.ogg",           # synthesized magic bolt — designed for dungeon crawlers
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
     # Reload
     "sfx_reload":           "kenney_rpg-audio/Audio/metalLatch.ogg",
@@ -178,7 +196,7 @@ MANUAL_OVERRIDES = {
     # Skills
     "sfx_skill_fire":       "oga_80-rpg-sfx/spell_fire_03.ogg",
     "sfx_skill_ice":        "kenney_impact-sounds/Audio/impactGlass_light_000.ogg",  # was variant 003
-    "sfx_skill_lightning":  "oga_80-rpg-sfx/chain_02.ogg",                # sharp chain rattle — reads as electric crackle
+    "sfx_skill_lightning":  "oga_rpg-sound-pack/RPG Sound Pack/battle/spell.wav",  # designed RPG spell sound — sharp attack
     "sfx_skill_blood":      "oga_80-rpg-sfx/creature_slime_02.ogg",
     "sfx_skill_dash":       "oga_swishes/swishes/swish-1.wav",              # was swish-5 (swish-1 is quicker)
     "sfx_skill_heal":       "oga_100-cc0-sfx/bell_01.ogg",                  # was spell_fire_04 (fire sound for heal!)
@@ -227,7 +245,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_crossbow":  0.80,
     "sfx_weapon_throw":     0.90,
     "sfx_weapon_molotov":   0.70,
-    "sfx_weapon_wand":      0.70,   # spring twang pitched down becomes punchy magic bolt
+    "sfx_weapon_wand":      0.85,   # synthesized magic bolt — slight pitch down for weight
     "sfx_weapon_staff":     0.80,
     # Reload
     "sfx_reload":           0.80,
@@ -242,7 +260,7 @@ PITCH_SHIFTS = {
     # Skills — mostly natural pitch, slight darkening for dungeon atmosphere
     "sfx_skill_fire":       0.85,
     "sfx_skill_ice":        0.85,
-    "sfx_skill_lightning":  0.80,   # chain rattle pitched down for crackling electric bolt
+    "sfx_skill_lightning":  0.75,   # electric crack pitched down for thunder
     "sfx_skill_blood":      0.80,
     "sfx_skill_dash":       1.0,
     "sfx_skill_heal":       1.0,   # bright chime — no darkening
@@ -578,6 +596,34 @@ def download_packs(force=False):
 
         cached.append((pack_name, pack_dir))
         print(f"  OK")
+
+    # Download individual files (non-ZIP packs)
+    for pack_name, files in INDIVIDUAL_FILES:
+        pack_dir = os.path.join(CACHE_DIR, pack_name)
+        marker = os.path.join(pack_dir, ".extracted")
+
+        if os.path.exists(marker) and not force:
+            print(f"[CACHED] {pack_name}")
+            cached.append((pack_name, pack_dir))
+            continue
+
+        print(f"[DOWNLOAD] {pack_name} ({len(files)} individual files)")
+        os.makedirs(pack_dir, exist_ok=True)
+        all_ok = True
+        for fname, url in files.items():
+            dest = os.path.join(pack_dir, fname)
+            if not _download_with_progress(url, dest):
+                print(f"  SKIPPED: failed to download {fname}")
+                all_ok = False
+
+        if all_ok:
+            with open(marker, "w") as f:
+                f.write("ok\n")
+            cached.append((pack_name, pack_dir))
+            print(f"  OK")
+        else:
+            print(f"  PARTIAL: some files failed for {pack_name}")
+            cached.append((pack_name, pack_dir))
 
     return cached
 
