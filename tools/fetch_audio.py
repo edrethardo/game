@@ -163,7 +163,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
     "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
     # Magic weapons
-    "sfx_weapon_wand":      "oga_80-rpg-sfx/spell_01.ogg",
+    "sfx_weapon_wand":      "oga_50-retro-synth/synth_laser_04.ogg",     # was spell_01 (vague whoosh, now snappy zap)
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
     # Reload
     "sfx_reload":           "kenney_rpg-audio/Audio/metalLatch.ogg",
@@ -227,7 +227,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_crossbow":  0.80,
     "sfx_weapon_throw":     0.90,
     "sfx_weapon_molotov":   0.70,
-    "sfx_weapon_wand":      0.90,
+    "sfx_weapon_wand":      0.85,
     "sfx_weapon_staff":     0.80,
     # Reload
     "sfx_reload":           0.80,

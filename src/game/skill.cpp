@@ -1,6 +1,7 @@
 #include "game/skill.h"
 #include "game/combat.h"
 #include "game/player.h"
+#include "audio/audio.h"
 #include "world/combat_query.h"
 #include "world/raycast.h"
 #include "renderer/debug_draw.h"
@@ -931,6 +932,54 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
 
     ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
     if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
+
+    // Play skill activation sound — mapped by theme so each skill has audio feedback
+    switch (ss.activeSkill) {
+    case SkillId::FIREBALL:
+    case SkillId::CONSECRATION:
+        AudioSystem::play(SfxId::SKILL_FIRE); break;
+    case SkillId::FROZEN_ORB:
+        AudioSystem::play(SfxId::SKILL_ICE); break;
+    case SkillId::CHAIN_LIGHTNING:
+    case SkillId::SHOCK_BOLT:
+    case SkillId::TESLA_COIL:
+        AudioSystem::play(SfxId::SKILL_LIGHTNING); break;
+    case SkillId::BLOOD_NOVA:
+    case SkillId::POISON_CLOUD:
+    case SkillId::POISON_ARROW:
+        AudioSystem::play(SfxId::SKILL_BLOOD); break;
+    case SkillId::PHASE_DASH:
+    case SkillId::SHADOW_STRIKE:
+    case SkillId::SHADOW_SHOT:
+        AudioSystem::play(SfxId::SKILL_DASH); break;
+    case SkillId::HOLY_SMITE:
+    case SkillId::DIVINE_SHIELD:
+        AudioSystem::play(SfxId::SKILL_HEAL); break;
+    case SkillId::WAR_CRY:
+    case SkillId::MECH_OVERDRIVE:
+        AudioSystem::play(SfxId::SKILL_BUFF); break;
+    case SkillId::DEPLOY_TURRET:
+    case SkillId::COMBAT_DRONE:
+    case SkillId::SWARM_DRONES:
+        AudioSystem::play(SfxId::SKILL_SUMMON); break;
+    case SkillId::METEOR_STRIKE:
+    case SkillId::EXPLOSIVE_ROUND:
+    case SkillId::EARTHQUAKE:
+    case SkillId::STUN_GRENADE:
+    case SkillId::RAIN_OF_ARROWS:
+        AudioSystem::play(SfxId::SKILL_EXPLOSION); break;
+    case SkillId::THUNDERCLAP:
+    case SkillId::CLEAVE:
+    case SkillId::WHIRLWIND:
+        AudioSystem::play(SfxId::SKILL_STUN); break;
+    case SkillId::MULTI_SHOT:
+    case SkillId::AIMED_SHOT:
+    case SkillId::RAPID_FIRE:
+    case SkillId::HEADSHOT:
+    case SkillId::KNIFE_BURST:
+        AudioSystem::play(SfxId::WEAPON_BOW); break;
+    default: break;
+    }
 
     switch (ss.activeSkill) {
     // ---- Legacy legendary skills ----
