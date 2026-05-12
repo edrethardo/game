@@ -219,7 +219,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_axe":       0.65,
     "sfx_weapon_claymore":  0.65,
     # Ranged weapons — weight hierarchy: SMG(snappy) > pistol=carbine > revolver(boomy)
-    "sfx_weapon_pistol":    0.70,
+    "sfx_weapon_pistol":    0.56,
     "sfx_weapon_smg":       0.80,
     "sfx_weapon_carbine":   0.70,
     "sfx_weapon_revolver":  0.65,
@@ -242,7 +242,7 @@ PITCH_SHIFTS = {
     # Skills — mostly natural pitch, slight darkening for dungeon atmosphere
     "sfx_skill_fire":       0.85,
     "sfx_skill_ice":        0.85,
-    "sfx_skill_lightning":  0.90,
+    "sfx_skill_lightning":  0.63,
     "sfx_skill_blood":      0.80,
     "sfx_skill_dash":       1.0,
     "sfx_skill_heal":       1.0,   # bright chime — no darkening
