@@ -1687,7 +1687,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     }
     lineCount += item.affixCount;
     if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
-        lineCount += 4; // separator + skill name + 2 description lines
+        lineCount += 5; // separator + skill name + 3 description lines
     }
 
     f32 tooltipW = 320.0f;

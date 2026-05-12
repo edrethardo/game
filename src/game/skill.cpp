@@ -904,7 +904,8 @@ void SkillSystem::update(SkillState& ss, f32 dt) {
 bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 skillDefCount,
                                Vec3 eyePos, Vec3 forward, f32 /*yaw*/,
                                ProjectilePool& projectiles, EntityPool& entities,
-                               const LevelGrid& grid, Player& player)
+                               const LevelGrid& grid, Player& player,
+                               f32 cooldownReduction)
 {
     if (ss.activeSkill == SkillId::NONE)  return false;
     if (ss.cooldownTimer > 0.0f)          return false;
@@ -923,7 +924,8 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         ss.energy -= def->energyCost;
     }
 
-    ss.cooldownTimer = def->cooldown;
+    ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
+    if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
 
     switch (ss.activeSkill) {
     // ---- Legacy legendary skills ----

@@ -46,6 +46,11 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     // Class passive damage reduction (e.g. Warrior 30%)
     damage *= (1.0f - player.damageReduction);
 
+    // Necromancer curse: +5% damage taken per stack
+    if (player.curseStacks > 0) {
+        damage *= (1.0f + player.curseStacks * 0.05f);
+    }
+
     if (player.blocking) {
         if (player.blockTimer < 0.2f) {
             // Perfect block — negate all damage, trigger shield bash via callback

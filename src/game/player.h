@@ -30,6 +30,8 @@ struct Player {
     f32  burnTimer        = 0.0f;
     f32  burnDps          = 0.0f;
     f32  freezeTimer      = 0.0f;  // halves movement speed
+    f32  curseTimer       = 0.0f;  // necromancer curse — increased damage taken
+    u8   curseStacks      = 0;     // 5% increased damage per stack, max 4
     f32  overdriveTimer   = 0.0f;  // Mech Overdrive buff countdown (damage/speed boost)
     f32  smokeTimer       = 0.0f;  // Shadow Ring smoke bomb — enemies can't detect player
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)

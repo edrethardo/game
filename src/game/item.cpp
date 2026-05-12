@@ -601,7 +601,12 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
                 case AffixType::HEALTH_FLAT:        inv.bonusHealthFlat         += affix.value; break;
                 case AffixType::MOVE_SPEED_FLAT:    inv.bonusMoveSpeed          += affix.value; break;
                 case AffixType::DAMAGE_PCT:         inv.bonusDamagePct          += affix.value; break;
-                case AffixType::COOLDOWN_REDUCTION: inv.bonusCooldownReduction  += affix.value; break;
+                case AffixType::COOLDOWN_REDUCTION: {
+                    // Multiplicative stacking: (1-a)*(1-b) gives diminishing returns
+                    // affix.value is a percentage (e.g. 10.0 = 10%), convert to fraction
+                    f32 frac = affix.value / 100.0f;
+                    inv.bonusCooldownReduction = 1.0f - (1.0f - inv.bonusCooldownReduction) * (1.0f - frac);
+                } break;
                 case AffixType::HEALTH_PCT:         inv.bonusHealthPct          += affix.value; break;
                 case AffixType::LIFE_ON_HIT:        inv.bonusLifeOnHit          += affix.value; break;
                 case AffixType::PROJECTILE_SPEED:   inv.bonusProjectileSpeedPct += affix.value; break;
@@ -615,9 +620,9 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
         }
     }
 
-    // Cap cooldown reduction at 50%
-    if (inv.bonusCooldownReduction > 0.5f)
-        inv.bonusCooldownReduction = 0.5f;
+    // Cap CDR at 80%
+    if (inv.bonusCooldownReduction > 0.8f)
+        inv.bonusCooldownReduction = 0.8f;
     // Cap reload speed at 60%
     if (inv.bonusReloadSpeedPct > 60.0f)
         inv.bonusReloadSpeedPct = 60.0f;
@@ -651,7 +656,10 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
                 case AffixType::HEALTH_FLAT:        equip.bonusHealthFlat         += affix.value; break;
                 case AffixType::MOVE_SPEED_FLAT:    equip.bonusMoveSpeed          += affix.value; break;
                 case AffixType::DAMAGE_PCT:         equip.bonusDamagePct          += affix.value; break;
-                case AffixType::COOLDOWN_REDUCTION: equip.bonusCooldownReduction  += affix.value; break;
+                case AffixType::COOLDOWN_REDUCTION: {
+                    f32 frac = affix.value / 100.0f;
+                    equip.bonusCooldownReduction = 1.0f - (1.0f - equip.bonusCooldownReduction) * (1.0f - frac);
+                } break;
                 case AffixType::HEALTH_PCT:         equip.bonusHealthPct          += affix.value; break;
                 case AffixType::LIFE_ON_HIT:        equip.bonusLifeOnHit          += affix.value; break;
                 case AffixType::PROJECTILE_SPEED:   equip.bonusProjectileSpeedPct += affix.value; break;
@@ -662,8 +670,9 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
             }
         }
     }
-    if (equip.bonusCooldownReduction > 0.5f)
-        equip.bonusCooldownReduction = 0.5f;
+    // Cap CDR at 80%
+    if (equip.bonusCooldownReduction > 0.8f)
+        equip.bonusCooldownReduction = 0.8f;
 }
 
 bool Inventory::addToBackpack(PlayerInventory& inv, const ItemInstance& item) {

@@ -29,7 +29,8 @@ namespace SkillSystem {
     bool tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 skillDefCount,
                      Vec3 eyePos, Vec3 forward, f32 yaw,
                      ProjectilePool& projectiles, EntityPool& entities,
-                     const LevelGrid& grid, Player& player);
+                     const LevelGrid& grid, Player& player,
+                     f32 cooldownReduction = 0.0f);
 
     // Update orb projectiles (spawn shards) -- called from projectile update or engine update
     void updateOrbProjectiles(ProjectilePool& pool, const SkillDef* skillDefs, u32 skillDefCount, f32 dt);

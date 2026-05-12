@@ -961,7 +961,7 @@ void Engine::init() {
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
 
-static constexpr u32 SAVE_VERSION = 4; // v4: PlayerInventory +clip/reload fields, QuickbarState 4 slots
+static constexpr u32 SAVE_VERSION = 5; // v5: fixed multiplicative CDR, recalculateStats on load
 
 void Engine::saveGame() {
     FILE* f = std::fopen("save.dat", "wb");
@@ -1047,6 +1047,7 @@ bool Engine::loadGame() {
         m_localPlayer.health = hp;
         m_localPlayer.maxHealth = maxHp;
         m_inventories[m_localPlayerIndex] = loadedInv;
+        Inventory::recalculateStats(m_inventories[m_localPlayerIndex]); // rebuild bonuses from affixes
         m_quickbars[m_localPlayerIndex] = loadedQb;
         m_skillStates[m_localPlayerIndex] = loadedSkill;
 
@@ -3418,7 +3419,8 @@ void Engine::gameUpdate(f32 dt) {
 
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                          m_projectiles, m_entities, m_grid, m_localPlayer)) {
+                                          m_projectiles, m_entities, m_grid, m_localPlayer,
+                                          m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
                 m_skillStates[m_localPlayerIndex].energy = m_classSkillStates[slot].energy;
             }
 
@@ -3451,7 +3453,8 @@ void Engine::gameUpdate(f32 dt) {
         m_bootSkillStates[0].maxEnergy = 999.0f;
         SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
                                   eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+                                  m_projectiles, m_entities, m_grid, m_localPlayer,
+                                  m_inventories[m_localPlayerIndex].bonusCooldownReduction);
     }
 
     // --- Helmet skill activation (G key) ---
@@ -3461,7 +3464,8 @@ void Engine::gameUpdate(f32 dt) {
         m_helmetSkillStates[0].maxEnergy = 999.0f;
         SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
                                   eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                  m_projectiles, m_entities, m_grid, m_localPlayer);
+                                  m_projectiles, m_entities, m_grid, m_localPlayer,
+                                  m_inventories[m_localPlayerIndex].bonusCooldownReduction);
     }
 
     // --- Shield blocking (Ctrl/Shift) ---
@@ -3628,6 +3632,10 @@ void Engine::gameUpdate(f32 dt) {
         m_localPlayer.damageFlashTimer -= dt;
     if (m_localPlayer.smokeTimer > 0.0f)
         m_localPlayer.smokeTimer -= dt;
+    if (m_localPlayer.curseTimer > 0.0f) {
+        m_localPlayer.curseTimer -= dt;
+        if (m_localPlayer.curseTimer <= 0.0f) m_localPlayer.curseStacks = 0;
+    }
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
     if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
@@ -4638,9 +4646,10 @@ void Engine::handleWeaponFire(f32 dt) {
         }
     }
 
-    // Throw weapon as projectile on any reload (hitscan weapons with clips)
+    // Throwaway legendary: throw weapon as projectile on reload
     auto throwWeaponOnReload = [&]() {
         if (isItemEmpty(eqWpn)) return;
+        if (m_itemDefs[eqWpn.defId].legendarySkillId != SkillId::THROWAWAY) return;
         Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
         Vec3 forward = m_localPlayer.forward;
         Vec3 right = normalize(Vec3{-forward.z, 0, forward.x});
@@ -5409,9 +5418,9 @@ void Engine::renderViewmodel() {
         }
     }
 
-    // Weapon is gone during reload (it was thrown)
+    // Throwaway legendary: weapon is gone during reload (it was thrown)
     WeaponState& vmWs = m_players[m_localPlayerIndex].weaponState;
-    if (hasWeapon && def.weaponType == WeaponType::HITSCAN && vmWs.reloading) {
+    if (hasWeapon && m_itemDefs[equipped.defId].legendarySkillId == SkillId::THROWAWAY && vmWs.reloading) {
         return; // weapon is flying through the air — nothing to render
     }
 

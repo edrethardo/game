@@ -1108,9 +1108,18 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.speechTimer = 2.0f;
                 }
             }
+            // Necromancer curse: +5% damage taken per stack (max 4), 3s cooldown
+            e.kiteTimer -= dt;
+            if (e.kiteTimer <= 0.0f && dist < e.detectionRange) {
+                e.kiteTimer = 3.0f;
+                if (player.curseStacks < 4) player.curseStacks++;
+                player.curseTimer = 5.0f;
+                e.speechText = "CURSE!";
+                e.speechTimer = 1.5f;
+            }
         }
 
-        // Shaman: heal lowest-HP ally within 8m every 5s
+        // Shaman: heal lowest-HP ally within 8m every 1s
         if (e.enemyRole == EnemyRole::HEALER && e.aiState != AIState::IDLE) {
             e.tacticalTimer -= dt;
             if (e.tacticalTimer <= 0.0f) {
