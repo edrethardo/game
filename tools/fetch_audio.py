@@ -178,7 +178,7 @@ MANUAL_OVERRIDES = {
     # Skills
     "sfx_skill_fire":       "oga_80-rpg-sfx/spell_fire_03.ogg",
     "sfx_skill_ice":        "kenney_impact-sounds/Audio/impactGlass_light_000.ogg",  # was variant 003
-    "sfx_skill_lightning":  "kenney_impact-sounds/Audio/impactMetal_heavy_002.ogg",  # metallic crack — reads as electric arc
+    "sfx_skill_lightning":  "oga_80-rpg-sfx/chain_02.ogg",                # sharp chain rattle — reads as electric crackle
     "sfx_skill_blood":      "oga_80-rpg-sfx/creature_slime_02.ogg",
     "sfx_skill_dash":       "oga_swishes/swishes/swish-1.wav",              # was swish-5 (swish-1 is quicker)
     "sfx_skill_heal":       "oga_100-cc0-sfx/bell_01.ogg",                  # was spell_fire_04 (fire sound for heal!)
@@ -242,7 +242,7 @@ PITCH_SHIFTS = {
     # Skills — mostly natural pitch, slight darkening for dungeon atmosphere
     "sfx_skill_fire":       0.85,
     "sfx_skill_ice":        0.85,
-    "sfx_skill_lightning":  1.10,   # sharp metallic crack for electric arc
+    "sfx_skill_lightning":  0.80,   # chain rattle pitched down for crackling electric bolt
     "sfx_skill_blood":      0.80,
     "sfx_skill_dash":       1.0,
     "sfx_skill_heal":       1.0,   # bright chime — no darkening
@@ -279,6 +279,12 @@ REVERB = {
     "sfx_skill_stun":       "0.8:0.7:40|80:0.4|0.2",    # holy smite uses this — needs divine reverb
     "sfx_skill_heal":       "0.8:0.6:60|120:0.3|0.15",   # healing chime benefits from space
     "sfx_boss_roar":        "0.8:0.7:50|100:0.5|0.25",   # big creature in a dungeon
+}
+
+# Per-sound max duration in seconds. Trims long sounds via ffmpeg atrim.
+# Only sounds that need truncation — most are fine at their natural length.
+MAX_DURATION = {
+    "sfx_weapon_wand":      0.5,
 }
 
 # ---------------------------------------------------------------------------
@@ -933,9 +939,12 @@ def main():
 
             src = os.path.join(OUTPUT_DIR, fname)
             reverb = REVERB.get(sfx_name)
+            max_dur = MAX_DURATION.get(sfx_name)
 
-            # Build the ffmpeg filter chain: pitch shift + optional reverb
+            # Build the ffmpeg filter chain: trim + pitch shift + optional reverb
             filters = []
+            if max_dur:
+                filters.append(f"atrim=0:{max_dur}")
             if pitch != 1.0:
                 filters.append(f"asetrate=44100*{pitch}")
                 filters.append("aresample=44100")
