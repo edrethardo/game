@@ -807,6 +807,12 @@ void Engine::init() {
         }
     });
 
+    // Floating damage numbers for projectile hits
+    ProjectileSystem::setDamageNumberCallback([](Vec3 position, f32 damage) {
+        if (!s_engine) return;
+        s_engine->spawnDamageNumber(position, damage);
+    });
+
     // Perfect block callback — legendary shield triggers stun bash
     Combat::setPerfectBlockCallback([](Player& player) {
         if (!s_engine) return;
@@ -2900,6 +2906,21 @@ void Engine::gameUpdate(f32 dt) {
         m_localPlayer.freezeTimer -= dt;
     }
 
+    // Tick floating damage numbers — drift upward and expire after 1s
+    for (u32 i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        if (!m_damageNumbers[i].active) continue;
+        m_damageNumbers[i].timer -= dt;
+        m_damageNumbers[i].position.y += dt * 1.5f;
+        if (m_damageNumbers[i].timer <= 0.0f)
+            m_damageNumbers[i].active = false;
+    }
+
+    // Tick directional damage indicators
+    for (u32 i = 0; i < Player::MAX_HIT_INDICATORS; i++) {
+        if (m_localPlayer.hitIndicators[i].timer > 0.0f)
+            m_localPlayer.hitIndicators[i].timer -= dt;
+    }
+
     // Check for player death
     if (m_localPlayer.health <= 0.0f) {
         if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
@@ -3172,7 +3193,7 @@ void Engine::gameUpdate(f32 dt) {
                 AABB projBox = {p.position - Vec3{p.radius,p.radius,p.radius},
                                 p.position + Vec3{p.radius,p.radius,p.radius}};
                 if (CombatQuery::aabbOverlap(projBox, p2Box)) {
-                    Combat::applyDamageToPlayer(m_localPlayers[1], p.damage);
+                    Combat::applyDamageToPlayer(m_localPlayers[1], p.damage, &p.position);
                     p.active = false;
                 }
             }
@@ -3559,11 +3580,12 @@ void Engine::gameUpdate(f32 dt) {
         //  to give a subtle forward lean at each step peak)
     }
 
-    // Screen shake only from enemy hits, not weapon fire
+    // Screen shake — vertical pitch wobble + subtle horizontal position offset
     if (m_localPlayer.hitShakeTimer > 0.0f) {
         m_localPlayer.hitShakeTimer -= dt;
         f32 shake = m_localPlayer.hitShakeTimer * 0.08f;
         m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
+        m_camera.position.x += sinf(m_localPlayer.hitShakeTimer * 47.0f) * shake * 0.3f;
     }
 
     pushPlayerFromEntities();
@@ -4060,6 +4082,17 @@ void Engine::resetEnemiesToRooms() {
     for (u32 s = 0; s < m_squads.squadCount; s++) {
         m_squads.squads[s].alerted = false;
         m_squads.squads[s].alertTimer = 0.0f;
+    }
+}
+
+// Spawns a floating damage number at a world position.
+// Finds the first inactive slot in the damage number pool.
+void Engine::spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal, bool isCrit) {
+    for (u32 i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        if (!m_damageNumbers[i].active) {
+            m_damageNumbers[i] = {pos, amount, 1.0f, true, isHeal, isCrit};
+            return;
+        }
     }
 }
 
@@ -4606,6 +4639,10 @@ void Engine::handleWeaponFire(f32 dt) {
             meleeWpn.damage *= 3.0f;
         }
         result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
+        if (result.hitEntity) {
+            spawnDamageNumber(result.hitPosition, wpn.damage);
+        }
+        m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
 
         // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
         if (melSub != WeaponSubtype::DAGGER && melSub != WeaponSubtype::NONE &&
@@ -4618,6 +4655,10 @@ void Engine::handleWeaponFire(f32 dt) {
     } break;
     case WeaponType::HITSCAN:
         result = Combat::fireHitscan(wpn, eyePos, forward, m_grid, m_entities);
+        if (result.hitEntity) {
+            spawnDamageNumber(result.hitPosition, wpn.damage);
+        }
+        m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
         if (result.hitEntity || result.hitWorld) {
             m_lastCombatHit.hit      = true;
             m_lastCombatHit.position = result.hitPosition;
@@ -4678,6 +4719,7 @@ void Engine::handleWeaponFire(f32 dt) {
             }
         }
         result.didFire = true;
+        m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.02f);
     } break;
     }
 
@@ -4693,7 +4735,14 @@ void Engine::handleWeaponFire(f32 dt) {
         m_viewmodelState.fireShakeTimer = 0.08f;
     }
     m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
-    if (result.hitEntity) m_hitMarkerTimer = 0.2f;
+    // Subtle screen shake on weapon fire
+    f32 fireShake = (wpn.type == WeaponType::HITSCAN) ? 0.05f :
+                    (wpn.type == WeaponType::MELEE)   ? 0.03f : 0.02f;
+    m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, fireShake);
+    if (result.hitEntity) {
+        m_hitMarkerTimer = 0.2f;
+        spawnDamageNumber(result.hitPosition, wpn.damage);
+    }
 
     // --- Ring on-hit passives ---
     if (result.hitEntity && m_ringPassive != SkillId::NONE) {
@@ -5748,6 +5797,7 @@ void Engine::render(f32 alpha) {
     DebugDraw::flush(m_camera.viewProjection);
 
     renderSpeechBubbles(vpW, vpH);
+    renderDamageNumbers(vpW, vpH);
 
     // First-person viewmodel (hand + weapon) — drawn after world, before HUD
     renderViewmodel();
@@ -7269,6 +7319,49 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
 }
 
 // ---------------------------------------------------------------------------
+// renderDamageNumbers — projects floating damage numbers from world space
+// onto the screen, drifting upward and fading out over 1 second.
+// Uses the same world-to-screen projection as renderSpeechBubbles.
+// ---------------------------------------------------------------------------
+void Engine::renderDamageNumbers(u32 sw, u32 sh) {
+    const f32* vp = m_camera.viewProjection.m;
+    for (u32 i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        const DamageNumber& dn = m_damageNumbers[i];
+        if (!dn.active) continue;
+
+        // World-to-screen projection (same as speech bubbles)
+        f32 cx = vp[0]*dn.position.x + vp[4]*dn.position.y + vp[8]*dn.position.z + vp[12];
+        f32 cy = vp[1]*dn.position.x + vp[5]*dn.position.y + vp[9]*dn.position.z + vp[13];
+        f32 cw = vp[3]*dn.position.x + vp[7]*dn.position.y + vp[11]*dn.position.z + vp[15];
+        if (cw <= 0.01f) continue;
+
+        f32 ndcX = cx / cw;
+        f32 ndcY = cy / cw;
+        f32 screenX = (ndcX + 1.0f) * 0.5f * static_cast<f32>(sw);
+        f32 screenY = (1.0f - ndcY) * 0.5f * static_cast<f32>(sh);
+
+        // Fade out in last 0.33s
+        f32 alpha = fminf(dn.timer * 3.0f, 1.0f);
+
+        // Color: white normal, yellow crit, green heal
+        Vec3 color;
+        if (dn.isHeal)      color = {0.2f * alpha, 1.0f * alpha, 0.3f * alpha};
+        else if (dn.isCrit) color = {1.0f * alpha, 0.9f * alpha, 0.2f * alpha};
+        else                color = {1.0f * alpha, 1.0f * alpha, 1.0f * alpha};
+
+        f32 scale = dn.isCrit ? 3.0f : 2.0f;
+        char buf[16];
+        if (dn.isHeal)
+            std::snprintf(buf, sizeof(buf), "+%.0f", dn.amount);
+        else
+            std::snprintf(buf, sizeof(buf), "%.0f", dn.amount);
+
+        f32 textW = FontSystem::textWidth(buf, scale);
+        FontSystem::drawText(sw, sh, screenX - textW * 0.5f, screenY, buf, color, scale);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // renderHUD — all 2D HUD elements: inventory screen or normal HUD
 // (health bar, crosshair, quickbar, minimap, skill bars, net stats, profiler)
 // ---------------------------------------------------------------------------
@@ -7379,6 +7472,14 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         if (m_hitMarkerTimer > 0.0f)
             HUD::drawHitMarker(sw, sh, m_hitMarkerTimer / 0.2f);
+
+    // CS-style directional damage arcs — show where hits came from
+    for (u32 i = 0; i < Player::MAX_HIT_INDICATORS; i++) {
+        const auto& hi = m_localPlayer.hitIndicators[i];
+        if (hi.timer <= 0.0f) continue;
+        f32 alpha = fminf(hi.timer * 2.0f, 1.0f) * 0.6f;
+        HUD::drawDamageDirection(sw, sh, -hi.angle, alpha);
+    }
 
         HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
 

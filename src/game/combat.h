@@ -26,8 +26,8 @@ namespace Combat {
     // Apply damage to an entity. Handles health, flash, death transition.
     void applyDamage(EntityPool& pool, EntityHandle target, f32 damage);
 
-    // Apply damage to the player.
-    void applyDamageToPlayer(Player& player, f32 damage);
+    // Apply damage to the player. Optional attackerPos enables directional indicator.
+    void applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr);
 
     // Execute a melee attack (cone check, damage all in cone).
     AttackResult fireMelee(const WeaponDef& weapon,

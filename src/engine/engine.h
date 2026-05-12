@@ -236,6 +236,20 @@ private:
     ScorchZone m_scorchZones[MAX_SCORCH] = {};
     FireFX m_fireFX[MAX_FIRE_FX] = {};
 
+    // Floating damage numbers — world-space text that drifts upward and fades
+    static constexpr u32 MAX_DAMAGE_NUMBERS = 16;
+    struct DamageNumber {
+        Vec3 position;
+        f32  amount;
+        f32  timer;
+        bool active;
+        bool isHeal;  // green for heals
+        bool isCrit;  // larger + yellow for crits
+    };
+    DamageNumber m_damageNumbers[MAX_DAMAGE_NUMBERS] = {};
+    void spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal = false, bool isCrit = false);
+    void renderDamageNumbers(u32 sw, u32 sh);
+
     // Pre-cached mesh IDs (resolved once in init, avoids strcmp in startGame)
     enum MeshId : u8 {
         MESH_SKELETON, MESH_BAT, MESH_SPIDER, MESH_CHEST, MESH_HUMAN,

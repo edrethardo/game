@@ -7,12 +7,16 @@
 
 static ProjectileSystem::SplashCallback s_splashCallback = nullptr;
 static ProjectileSystem::HitCallback s_hitCallback = nullptr;
+static ProjectileSystem::DamageNumberCallback s_dmgNumCallback = nullptr;
 
 void ProjectileSystem::setSplashCallback(SplashCallback cb) {
     s_splashCallback = cb;
 }
 void ProjectileSystem::setHitCallback(HitCallback cb) {
     s_hitCallback = cb;
+}
+void ProjectileSystem::setDamageNumberCallback(DamageNumberCallback cb) {
+    s_dmgNumCallback = cb;
 }
 
 void ProjectileSystem::init(ProjectilePool& pool) {
@@ -134,6 +138,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                     EntityHandle h = {static_cast<u16>(e), ent.generation};
                     Combat::applyDamage(entities, h, p.damage);
+                    if (s_dmgNumCallback) s_dmgNumCallback(p.position, p.damage);
                     // Apply freeze if the projectile carries a freeze effect
                     if (p.freezeDuration > 0.0f) {
                         ent.freezeTimer = p.freezeDuration;
@@ -173,7 +178,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 player.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
             };
             if (CombatQuery::aabbOverlap(projBox, playerBox)) {
-                Combat::applyDamageToPlayer(player, p.damage);
+                Combat::applyDamageToPlayer(player, p.damage, &p.position);
                 // Enemy projectiles apply a slow debuff to the player
                 player.slowTimer = 2.5f;
                 destroyProjectile(pool, i);

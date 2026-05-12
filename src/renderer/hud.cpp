@@ -1829,3 +1829,58 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         }
     }
 }
+
+// Red vignette overlay — draws red gradient lines along all four screen edges.
+// Intensity 0..1 controls opacity; used when the player takes damage.
+void HUD::drawDamageVignette(u32 sw, u32 sh, f32 intensity) {
+    if (intensity <= 0.0f) return;
+    if (intensity > 1.0f) intensity = 1.0f;
+
+    f32 depth = static_cast<f32>(sh) * 0.12f;
+    f32 fW = static_cast<f32>(sw);
+    f32 fH = static_cast<f32>(sh);
+
+    // Top edge
+    for (f32 d = 0; d < depth; d += 1.0f) {
+        f32 lineAlpha = (1.0f - d / depth) * intensity;
+        Vec3 c = {0.8f * lineAlpha, 0.0f, 0.0f};
+        pushLine(0, fH - d, fW, fH - d, c);
+    }
+    // Bottom edge
+    for (f32 d = 0; d < depth; d += 1.0f) {
+        f32 lineAlpha = (1.0f - d / depth) * intensity;
+        Vec3 c = {0.8f * lineAlpha, 0.0f, 0.0f};
+        pushLine(0, d, fW, d, c);
+    }
+    // Left edge
+    for (f32 d = 0; d < depth; d += 1.0f) {
+        f32 lineAlpha = (1.0f - d / depth) * intensity;
+        Vec3 c = {0.8f * lineAlpha, 0.0f, 0.0f};
+        pushLine(d, 0, d, fH, c);
+    }
+    // Right edge
+    for (f32 d = 0; d < depth; d += 1.0f) {
+        f32 lineAlpha = (1.0f - d / depth) * intensity;
+        Vec3 c = {0.8f * lineAlpha, 0.0f, 0.0f};
+        pushLine(fW - d, 0, fW - d, fH, c);
+    }
+    flushHUD(sw, sh);
+}
+
+void HUD::drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha) {
+    if (alpha <= 0.0f) return;
+    f32 cx = static_cast<f32>(sw) * 0.5f;
+    f32 cy = static_cast<f32>(sh) * 0.5f;
+    f32 r = 60.0f;
+    f32 arcHalf = 0.35f; // ~20° half-width
+    Vec3 c = {0.9f * alpha, 0.15f * alpha, 0.1f * alpha};
+    // 3 line segments forming a short arc around crosshair
+    for (int s = -1; s <= 1; s++) {
+        f32 a0 = angle + s * arcHalf * 0.67f;
+        f32 a1 = angle + (s + 1) * arcHalf * 0.67f;
+        f32 x0 = cx + sinf(a0) * r, y0 = cy - cosf(a0) * r;
+        f32 x1 = cx + sinf(a1) * r, y1 = cy - cosf(a1) * r;
+        pushLine(x0, y0, x1, y1, c);
+    }
+    flushHUD(sw, sh);
+}

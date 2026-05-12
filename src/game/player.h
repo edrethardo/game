@@ -36,6 +36,14 @@ struct Player {
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection)
 
+    // CS-style directional damage indicators — arcs showing where hits came from
+    static constexpr u32 MAX_HIT_INDICATORS = 4;
+    struct HitIndicator {
+        f32 angle;  // radians relative to player yaw (0 = front, π = behind)
+        f32 timer;  // counts down from 0.8s
+    };
+    HitIndicator hitIndicators[MAX_HIT_INDICATORS] = {};
+
     // Ring passive state
     f32  secondWindCooldown = 0.0f;  // internal cooldown for Second Wind (60s)
     u8   soulHarvestStacks  = 0;     // current Soul Harvest kill streak stacks (max 5)

@@ -51,6 +51,10 @@ namespace ProjectileSystem {
     using HitCallback = void(*)(Vec3 position, EntityHandle target);
     void setHitCallback(HitCallback cb);
 
+    // Callback for floating damage numbers when projectile deals damage
+    using DamageNumberCallback = void(*)(Vec3 position, f32 damage);
+    void setDamageNumberCallback(DamageNumberCallback cb);
+
     void init(ProjectilePool& pool);
 
     // Spawn a projectile. Returns the pool slot index (0xFFFF if pool full).

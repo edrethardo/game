@@ -939,7 +939,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 5.0f;
                     // Damage everything within 6 units of the boss
                     if (dist < 6.0f) {
-                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.7f);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.7f, &e.position);
                     }
                     // Also damage nearby friendly NPCs
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
@@ -983,7 +983,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 4.0f;
                     // Inner nova damage
                     if (dist < 5.0f) {
-                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.5f);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.5f, &e.position);
                     }
                     // Ring of 6 fire projectiles with splash
                     for (u32 s = 0; s < 6; s++) {
@@ -1022,7 +1022,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 5.0f;
                     // Death nova — damage everything within 8 units
                     if (dist < 8.0f) {
-                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.6f);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.6f, &e.position);
                     }
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
                         u32 nIdx = pool.activeList[ni];
@@ -1316,7 +1316,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     }
                 } else if (hasLOS(e, player, grid)) {
                     // Damage the player if no NPC target
-                    Combat::applyDamageToPlayer(*targetPlayer, e.damage);
+                    Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position);
                     e.attackAnimT = 0.3f;
                 }
 
@@ -1409,7 +1409,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             if (e.onHitEffect == 4) { npcTarget.freezeTimer = e.onHitDuration; }
                         }
                     } else if (hasLOS(e, player, grid)) {
-                        Combat::applyDamageToPlayer(*targetPlayer, e.damage);
+                        Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position);
                         // Apply on-hit effect to player
                         if (e.onHitEffect == 1) { targetPlayer->poisonTimer = e.onHitDuration; targetPlayer->poisonDps = e.onHitDps; }
                         if (e.onHitEffect == 2) { targetPlayer->slowTimer   = e.onHitDuration; }

@@ -39,7 +39,7 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
     }
 }
 
-void Combat::applyDamageToPlayer(Player& player, f32 damage) {
+void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos) {
     // Invulnerability blocks all damage (respawn/floor entry grace period)
     if (player.invulnTimer > 0.0f) return;
 
@@ -62,6 +62,20 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage) {
     player.hitShakeTimer = 0.15f;
     // Track damage taken this frame for ring passives (thorns, etc.)
     player.lastDamageTaken = damage;
+
+    // Record hit direction for CS-style directional indicator
+    if (attackerPos && damage > 0.0f) {
+        Vec3 toAttacker = *attackerPos - player.position;
+        f32 worldAngle = atan2f(toAttacker.x, toAttacker.z);
+        f32 relAngle = worldAngle - player.yaw;
+        for (u32 i = 0; i < Player::MAX_HIT_INDICATORS; i++) {
+            if (player.hitIndicators[i].timer <= 0.0f) {
+                player.hitIndicators[i] = {relAngle, 0.8f};
+                break;
+            }
+        }
+    }
+
     if (player.health <= 0.0f) {
         player.health = 0.0f;
     }

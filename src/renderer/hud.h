@@ -120,4 +120,10 @@ namespace HUD {
     // textColor is pre-chosen (green for allies, red for enemies); alpha for fade-out.
     void drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,
                           const char* text, Vec3 textColor, f32 alpha);
+
+    // Red vignette overlay when taking damage — draws red gradient edges
+    void drawDamageVignette(u32 sw, u32 sh, f32 intensity);
+
+    // CS-style directional damage arc — red arc around crosshair pointing toward attacker
+    void drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha);
 }
