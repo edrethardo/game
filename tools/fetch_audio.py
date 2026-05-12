@@ -136,7 +136,7 @@ SOUND_MAP = {
     "sfx_footstep_stone":   (["step", "foot", "stone", "walk", "concrete"], "short"),
     "sfx_footstep_metal":   (["step", "foot", "metal"], "short"),
     "sfx_enemy_footstep":   (["step", "foot", "heavy", "wood"], "short"),
-    # Enemies
+    # Enemies — attack bark is short roar_01, boss gets deep monster_04
     "sfx_enemy_attack":     (["attack", "swipe", "claw", "creature", "roar"], "short"),
     "sfx_boss_roar":        (["roar", "growl", "monster", "boss", "creature_roar"], "long"),
     "sfx_boss_stomp":       (["stomp", "quake", "heavy", "slam", "bell"], "medium"),
@@ -148,65 +148,65 @@ SOUND_MAP = {
 # Manual overrides — bypass keyword matching for sounds that need specific files.
 # Paths are relative to the cache directory.
 MANUAL_OVERRIDES = {
-    # Melee weapons — blade slashes and impacts
+    # Melee weapons
     "sfx_weapon_sword":     "oga_80-rpg-sfx/blade_01.ogg",
-    "sfx_weapon_dagger":    "kenney_rpg-audio/Audio/drawKnife1.ogg",
+    "sfx_weapon_dagger":    "kenney_rpg-audio/Audio/knifeSlice.ogg",        # was drawKnife1 (unsheathing, not attacking)
     "sfx_weapon_axe":       "kenney_rpg-audio/Audio/chop.ogg",
-    "sfx_weapon_claymore":  "oga_80-rpg-sfx/blade_02.ogg",
-    # Ranged weapons — shots and mechanical sounds
+    "sfx_weapon_claymore":  "oga_80-rpg-sfx/blade_03.ogg",                  # was blade_02 (too similar to sword's blade_01)
+    # Ranged weapons
     "sfx_weapon_pistol":    "oga_100-cc0-sfx/shot_01.ogg",
     "sfx_weapon_smg":       "oga_100-cc0-sfx/shot_02.ogg",
-    "sfx_weapon_carbine":   "oga_50-retro-synth/shot_02.ogg",
-    "sfx_weapon_revolver":  "oga_50-retro-synth/shot_01.ogg",
+    "sfx_weapon_carbine":   "oga_100-cc0-sfx/hit_03.ogg",                   # was retro synth (too arcade-y)
+    "sfx_weapon_revolver":  "oga_100-cc0-sfx/slam_03.ogg",                  # was retro synth (too arcade-y)
     "sfx_weapon_bow":       "oga_swishes/swishes/swish-3.wav",
     "sfx_weapon_crossbow":  "oga_thwack/PCM/thwack-01.wav",
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
-    "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_000.ogg",
+    "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
     # Magic weapons
     "sfx_weapon_wand":      "oga_80-rpg-sfx/spell_01.ogg",
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
     # Reload
     "sfx_reload":           "kenney_rpg-audio/Audio/metalLatch.ogg",
     # Combat hits
-    "sfx_hit_melee":        "kenney_impact-sounds/Audio/impactPunch_heavy_002.ogg",
+    "sfx_hit_melee":        "kenney_impact-sounds/Audio/impactPunch_heavy_000.ogg",  # was variant 002
     "sfx_hit_hitscan":      "kenney_impact-sounds/Audio/impactMetal_light_002.ogg",
     "sfx_hit_projectile":   "kenney_impact-sounds/Audio/impactWood_medium_001.ogg",
     "sfx_enemy_hit":        "kenney_impact-sounds/Audio/impactSoft_heavy_001.ogg",
     "sfx_enemy_death":      "oga_80-rpg-sfx/creature_die_01.ogg",
-    "sfx_player_hit":       "oga_80-rpg-sfx/creature_hurt_01.ogg",
-    "sfx_player_death":     "oga_80-rpg-sfx/creature_monster_01.ogg",
+    "sfx_player_hit":       "oga_80-rpg-sfx/creature_hurt_02.ogg",          # was variant 01
+    "sfx_player_death":     "oga_80-rpg-sfx/creature_monster_02.ogg",       # was variant 01
     # Skills
     "sfx_skill_fire":       "oga_80-rpg-sfx/spell_fire_03.ogg",
-    "sfx_skill_ice":        "kenney_impact-sounds/Audio/impactGlass_light_003.ogg",
-    "sfx_skill_lightning":  "oga_50-retro-synth/synth_laser_03.ogg",
+    "sfx_skill_ice":        "kenney_impact-sounds/Audio/impactGlass_light_000.ogg",  # was variant 003
+    "sfx_skill_lightning":  "oga_50-retro-synth/synth_laser_05.ogg",        # was variant 03
     "sfx_skill_blood":      "oga_80-rpg-sfx/creature_slime_02.ogg",
-    "sfx_skill_dash":       "oga_swishes/swishes/swish-5.wav",
-    "sfx_skill_heal":       "oga_80-rpg-sfx/spell_fire_04.ogg",
-    "sfx_skill_buff":       "oga_50-retro-synth/power_up_03.ogg",
-    "sfx_skill_summon":     "oga_80-rpg-sfx/misc_02.ogg",
+    "sfx_skill_dash":       "oga_swishes/swishes/swish-1.wav",              # was swish-5 (swish-1 is quicker)
+    "sfx_skill_heal":       "oga_100-cc0-sfx/bell_01.ogg",                  # was spell_fire_04 (fire sound for heal!)
+    "sfx_skill_buff":       "oga_50-retro-synth/power_up_04.ogg",           # was variant 03
+    "sfx_skill_summon":     "oga_80-rpg-sfx/misc_03.ogg",                   # was variant 02
     "sfx_skill_explosion":  "oga_100-cc0-sfx/explosion.ogg",
-    "sfx_skill_stun":       "oga_thwack/PCM/thwack-05.wav",
+    "sfx_skill_stun":       "oga_thwack/PCM/thwack-08.wav",                 # was thwack-05
     # Items
-    "sfx_item_pickup":      "oga_80-rpg-sfx/item_coins_01.ogg",
-    "sfx_item_equip":       "oga_80-rpg-sfx/metal_01.ogg",
-    "sfx_item_drop":        "oga_80-rpg-sfx/item_wood_01.ogg",
-    "sfx_potion_use":       "oga_100-cc0-sfx/plop_01.ogg",
+    "sfx_item_pickup":      "oga_80-rpg-sfx/item_coins_02.ogg",             # was variant 01
+    "sfx_item_equip":       "oga_80-rpg-sfx/metal_02.ogg",                  # was variant 01
+    "sfx_item_drop":        "oga_80-rpg-sfx/item_wood_02.ogg",              # was variant 01
+    "sfx_potion_use":       "oga_100-cc0-sfx/plop_02.ogg",                  # was variant 01
     # UI
     "sfx_ui_click":         "kenney_ui-audio/Audio/click3.ogg",
     "sfx_ui_back":          "kenney_ui-audio/Audio/click5.ogg",
     "sfx_ui_confirm":       "kenney_ui-audio/Audio/switch3.ogg",
     "sfx_menu_hover":       "kenney_ui-audio/Audio/rollover1.ogg",
     # Movement
-    "sfx_footstep_stone":   "kenney_impact-sounds/Audio/footstep_concrete_001.ogg",
+    "sfx_footstep_stone":   "kenney_impact-sounds/Audio/footstep_concrete_000.ogg",  # was variant 001
     "sfx_footstep_metal":   "kenney_rpg-audio/Audio/footstep03.ogg",
-    "sfx_enemy_footstep":   "kenney_impact-sounds/Audio/footstep_wood_002.ogg",
+    "sfx_enemy_footstep":   "kenney_impact-sounds/Audio/footstep_wood_004.ogg",      # was variant 002
     # Enemies
-    "sfx_enemy_attack":     "oga_80-rpg-sfx/creature_roar_03.ogg",
-    "sfx_boss_roar":        "oga_80-rpg-sfx/creature_monster_03.ogg",
-    "sfx_boss_stomp":       "kenney_impact-sounds/Audio/impactPlate_heavy_002.ogg",
+    "sfx_enemy_attack":     "oga_80-rpg-sfx/creature_roar_01.ogg",          # was roar_03
+    "sfx_boss_roar":        "oga_80-rpg-sfx/creature_monster_04.ogg",       # was monster_03
+    "sfx_boss_stomp":       "kenney_impact-sounds/Audio/impactPlate_heavy_000.ogg",  # was variant 002
     # Environment
-    "sfx_door_open":        "kenney_rpg-audio/Audio/doorOpen_1.ogg",
-    "sfx_level_up":         "oga_80-rpg-sfx/item_gem_01.ogg",
+    "sfx_door_open":        "kenney_rpg-audio/Audio/doorOpen_2.ogg",         # was doorOpen_1
+    "sfx_level_up":         "oga_80-rpg-sfx/item_gem_02.ogg",               # was variant 01
 }
 # Per-sound pitch multiplier for ffmpeg processing.
 # 1.0 = no pitch change, <1.0 = pitch down (deeper), >1.0 = pitch up.
