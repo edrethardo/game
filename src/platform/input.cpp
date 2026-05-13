@@ -519,13 +519,10 @@ static void readGyroForPlayer(u8 playerIdx, HidSixAxisSensorHandle* handles, u32
             }
             yaw   /= static_cast<f32>(count);
             pitch /= static_cast<f32>(count);
-            if (yaw > -0.01f && yaw < 0.01f) yaw = 0.0f;
-            if (pitch > -0.01f && pitch < 0.01f) pitch = 0.0f;
-            if (yaw != 0.0f || pitch != 0.0f) {
-                s_gyroDx[playerIdx] = -yaw  * (180.0f / 3.14159f);
-                s_gyroDy[playerIdx] = pitch * (180.0f / 3.14159f);
-                break;
-            }
+            // No deadzone — the multi-sample average already smooths sensor noise
+            s_gyroDx[playerIdx] = -yaw  * (180.0f / 3.14159f);
+            s_gyroDy[playerIdx] = pitch * (180.0f / 3.14159f);
+            break;
         }
     }
 }
