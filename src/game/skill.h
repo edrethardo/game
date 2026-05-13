@@ -17,7 +17,9 @@ struct PendingMeteor {
     bool active   = false;
 };
 
-struct Player; // forward decl
+struct Player;     // forward decl
+struct ParticlePool;
+struct ScreenShake;
 
 namespace SkillSystem {
     void init();
@@ -56,4 +58,7 @@ namespace SkillSystem {
     void setDroneSpawnCallback(DroneSpawnCallback cb);
     void setChainCallback(ChainCallback cb);
     void setBoltMeshId(u8 meshId, u8 matId);
+
+    // Wire in the particle pool and screen shake for skill activation FX.
+    void setFXTargets(ParticlePool* particles, ScreenShake* shake);
 }

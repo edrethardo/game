@@ -276,19 +276,19 @@ void Engine::handleWeaponFire(f32 dt) {
     // Play weapon fire sound based on subtype
     if (!isItemEmpty(eqWpn)) {
         switch (m_itemDefs[eqWpn.defId].weaponSubtype) {
-            case WeaponSubtype::SWORD:   AudioSystem::play(SfxId::WEAPON_SWORD); break;
-            case WeaponSubtype::DAGGER:  AudioSystem::play(SfxId::WEAPON_DAGGER); break;
-            case WeaponSubtype::AXE:     AudioSystem::play(SfxId::WEAPON_AXE); break;
-            case WeaponSubtype::CLAYMORE:AudioSystem::play(SfxId::WEAPON_CLAYMORE); break;
-            case WeaponSubtype::PISTOL:  AudioSystem::play(SfxId::WEAPON_PISTOL); break;
-            case WeaponSubtype::SMG:     AudioSystem::play(SfxId::WEAPON_SMG); break;
-            case WeaponSubtype::CARBINE: AudioSystem::play(SfxId::WEAPON_CARBINE); break;
-            case WeaponSubtype::REVOLVER:AudioSystem::play(SfxId::WEAPON_REVOLVER); break;
-            case WeaponSubtype::BOW:     AudioSystem::play(SfxId::WEAPON_BOW); break;
-            case WeaponSubtype::CROSSBOW:AudioSystem::play(SfxId::WEAPON_CROSSBOW); break;
-            case WeaponSubtype::THROWING_KNIFE: AudioSystem::play(SfxId::WEAPON_THROW); break;
-            case WeaponSubtype::MOLOTOV: AudioSystem::play(SfxId::WEAPON_MOLOTOV); break;
-            case WeaponSubtype::WAND:    AudioSystem::play(SfxId::WEAPON_WAND); break;
+            case WeaponSubtype::SWORD:   AudioSystem::play(SfxId::WEAPON_SWORD, 0.5f); break;
+            case WeaponSubtype::DAGGER:  AudioSystem::play(SfxId::WEAPON_DAGGER, 0.5f); break;
+            case WeaponSubtype::AXE:     AudioSystem::play(SfxId::WEAPON_AXE, 0.5f); break;
+            case WeaponSubtype::CLAYMORE:AudioSystem::play(SfxId::WEAPON_CLAYMORE, 0.5f); break;
+            case WeaponSubtype::PISTOL:  AudioSystem::play(SfxId::WEAPON_PISTOL, 0.5f); break;
+            case WeaponSubtype::SMG:     AudioSystem::play(SfxId::WEAPON_SMG, 0.5f); break;
+            case WeaponSubtype::CARBINE: AudioSystem::play(SfxId::WEAPON_CARBINE, 0.5f); break;
+            case WeaponSubtype::REVOLVER:AudioSystem::play(SfxId::WEAPON_REVOLVER, 0.5f); break;
+            case WeaponSubtype::BOW:     AudioSystem::play(SfxId::WEAPON_BOW, 0.5f); break;
+            case WeaponSubtype::CROSSBOW:AudioSystem::play(SfxId::WEAPON_CROSSBOW, 0.5f); break;
+            case WeaponSubtype::THROWING_KNIFE: AudioSystem::play(SfxId::WEAPON_THROW, 0.5f); break;
+            case WeaponSubtype::MOLOTOV: AudioSystem::play(SfxId::WEAPON_MOLOTOV, 0.5f); break;
+            case WeaponSubtype::WAND:    AudioSystem::play(SfxId::WEAPON_WAND, 0.5f); break;
             default: break;
         }
     }

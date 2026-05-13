@@ -208,7 +208,7 @@ MANUAL_OVERRIDES = {
     "sfx_item_pickup":      "oga_80-rpg-sfx/item_coins_02.ogg",             # was variant 01
     "sfx_item_equip":       "oga_80-rpg-sfx/metal_02.ogg",                  # was variant 01
     "sfx_item_drop":        "oga_80-rpg-sfx/item_wood_02.ogg",              # was variant 01
-    "sfx_potion_use":       "oga_100-cc0-sfx/plop_02.ogg",                  # was variant 01
+    "sfx_potion_use":       "oga_rpg-sound-pack/RPG Sound Pack/inventory/bubble.wav",
     # UI
     "sfx_ui_click":         "kenney_ui-audio/Audio/click3.ogg",
     "sfx_ui_back":          "kenney_ui-audio/Audio/click5.ogg",
@@ -232,7 +232,7 @@ MANUAL_OVERRIDES = {
 # Applied in Phase 3 via: asetrate=44100*pitch, aresample=44100
 PITCH_SHIFTS = {
     # Melee weapons — weight hierarchy: dagger(light) > sword > axe=claymore(heavy)
-    "sfx_weapon_sword":     0.75,
+    "sfx_weapon_sword":     0.525,
     "sfx_weapon_dagger":    0.90,
     "sfx_weapon_axe":       0.65,
     "sfx_weapon_claymore":  0.65,
@@ -272,7 +272,7 @@ PITCH_SHIFTS = {
     "sfx_item_pickup":      0.95,
     "sfx_item_equip":       0.85,
     "sfx_item_drop":        0.90,
-    "sfx_potion_use":       0.90,
+    "sfx_potion_use":       1.0,    # procedural — already tuned
     # UI — no pitch shift, keep crisp
     "sfx_ui_click":         1.0,
     "sfx_ui_back":          1.0,

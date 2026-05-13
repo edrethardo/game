@@ -90,6 +90,13 @@
       "slots": ["weapon", "ring"],
       "minValue": 10.0,
       "maxValue": 35.0
+    },
+    {
+      "type": "energy_flat",
+      "name": "of Arcana",
+      "slots": ["weapon", "helmet", "ring"],
+      "minValue": 10.0,
+      "maxValue": 30.0
     }
   ]
 }

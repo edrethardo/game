@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include "renderer/camera.h"
+#include "renderer/particles.h"
 #include "renderer/shader.h"
 #include "renderer/texture.h"
 #include "world/level_grid.h"
@@ -249,6 +250,11 @@ private:
         DamageNumber  damageNumbers[MAX_DAMAGE_NUMBERS] = {};
     };
     EffectsState m_fx;
+
+    // Particle system — pooled per-frame visual FX (blood, sparks, magic, smoke)
+    ParticlePool m_particles;
+    u8 m_particleBlobMatId  = 0;   // material ID for billboard smoke/magic blobs
+    u8 m_particleSparkMatId = 0;   // material ID for geometric spark cubes
 
     void spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal = false, bool isCrit = false);
     void renderDamageNumbers(u32 sw, u32 sh);

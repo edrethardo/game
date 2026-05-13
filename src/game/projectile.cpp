@@ -1,9 +1,19 @@
 #include "game/projectile.h"
 #include "game/player.h"
 #include "game/combat.h"
+#include "renderer/particles.h"
 #include "world/combat_query.h"
 #include "world/raycast.h"
 #include "world/collision.h"
+#include <cstdlib>
+
+// Set by Engine::init() so projectiles can spawn trail particles
+static ParticlePool* s_trailPool = nullptr;
+void ProjectileSystem_setTrailPool(ParticlePool* pool) { s_trailPool = pool; }
+
+static f32 randf(f32 lo, f32 hi) {
+    return lo + (hi - lo) * (std::rand() / static_cast<f32>(RAND_MAX));
+}
 
 static ProjectileSystem::SplashCallback s_splashCallback = nullptr;
 static ProjectileSystem::HitCallback s_hitCallback = nullptr;
@@ -115,6 +125,41 @@ void ProjectileSystem::update(ProjectilePool& pool,
 
         // Move
         p.position += p.velocity * dt;
+
+        // Spawn trail particles for skill projectiles (every ~3rd frame to avoid flooding)
+        if (s_trailPool && p.fromPlayer && ((i + static_cast<u32>(p.lifetime * 60.0f)) % 3 == 0)) {
+            if (p.projFlags & PROJ_SPLASH) {
+                // Fireball — red/orange trailing embers
+                Particle tp = {};
+                tp.position = p.position;
+                tp.velocity = {randf(-0.3f, 0.3f), randf(0.1f, 0.4f), randf(-0.3f, 0.3f)};
+                tp.life = 0.25f; tp.maxLife = 0.25f;
+                tp.size = randf(0.03f, 0.06f); tp.baseAlpha = 0.9f;
+                tp.r = 255; tp.g = static_cast<u8>(randf(60, 140)); tp.b = 0;
+                tp.type = PTYPE_GEOMETRIC; tp.flags = PFLAG_FADE | PFLAG_SHRINK;
+                ParticleSystem::spawn(*s_trailPool, tp);
+            } else if (p.projFlags & PROJ_SPARK) {
+                // Shock bolt — blue-white electric trail
+                Particle tp = {};
+                tp.position = p.position;
+                tp.velocity = {randf(-0.5f, 0.5f), randf(-0.5f, 0.5f), randf(-0.5f, 0.5f)};
+                tp.life = 0.15f; tp.maxLife = 0.15f;
+                tp.size = randf(0.02f, 0.04f); tp.baseAlpha = 0.9f;
+                tp.r = static_cast<u8>(randf(180, 220)); tp.g = static_cast<u8>(randf(200, 240)); tp.b = 255;
+                tp.type = PTYPE_GEOMETRIC; tp.flags = PFLAG_FADE;
+                ParticleSystem::spawn(*s_trailPool, tp);
+            } else if (p.projFlags & PROJ_ORB) {
+                // Frozen orb — cyan ice trail
+                Particle tp = {};
+                tp.position = p.position;
+                tp.velocity = {randf(-0.4f, 0.4f), randf(-0.4f, 0.4f), randf(-0.4f, 0.4f)};
+                tp.life = 0.2f; tp.maxLife = 0.2f;
+                tp.size = randf(0.03f, 0.05f); tp.baseAlpha = 0.7f;
+                tp.r = 100; tp.g = 200; tp.b = 255;
+                tp.type = PTYPE_GEOMETRIC; tp.flags = PFLAG_FADE | PFLAG_SHRINK;
+                ParticleSystem::spawn(*s_trailPool, tp);
+            }
+        }
 
         // Entity collision (AABB overlap)
         AABB projBox = {

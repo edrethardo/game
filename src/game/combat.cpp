@@ -2,11 +2,15 @@
 #include "game/player.h"
 #include "game/projectile.h"
 #include "world/combat_query.h"
+#include "renderer/particles.h"
+#include "renderer/camera.h"  // for ScreenShake
 #include "core/log.h"
 #include <cmath>
 
 static Combat::DeathCallback s_deathCallback = nullptr;
 static Combat::PerfectBlockCallback s_perfectBlockCallback = nullptr;
+static ParticlePool* s_particlePool = nullptr;
+static ScreenShake*  s_screenShake  = nullptr;
 
 void Combat::setDeathCallback(DeathCallback cb) {
     s_deathCallback = cb;
@@ -14,6 +18,11 @@ void Combat::setDeathCallback(DeathCallback cb) {
 
 void Combat::setPerfectBlockCallback(PerfectBlockCallback cb) {
     s_perfectBlockCallback = cb;
+}
+
+void Combat::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
+    s_particlePool = particles;
+    s_screenShake  = shake;
 }
 
 void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
@@ -104,7 +113,17 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
 
     for (u32 i = 0; i < hitCount; i++) {
         applyDamage(pool, hits[i], weapon.damage);
+        // Blood + sparks at each entity hit in the melee cone
+        if (s_particlePool) {
+            Entity* he = handleGet(pool, hits[i]);
+            if (he) {
+                Vec3 hitPos = he->position;
+                hitPos.y += 0.5f; // roughly torso height
+                ParticleSystem::spawnSparks(*s_particlePool, hitPos, {0, 0.5f, 0}, 4);
+            }
+        }
     }
+    if (hitCount > 0 && s_screenShake) s_screenShake->trigger(0.02f, 0.15f);
 
     result.entitiesHit = hitCount;
     if (hitCount > 0) {
@@ -138,8 +157,15 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
             result.hitEntity   = true;
             result.entitiesHit = 1;
             applyDamage(pool, hit.entityHandle, weapon.damage);
+            // Blood + sparks at hitscan entity impact
+            if (s_particlePool) {
+                ParticleSystem::spawnSparks(*s_particlePool, hit.position, {0, 0.5f, 0}, 4);
+            }
+            if (s_screenShake) s_screenShake->trigger(0.015f, 0.1f);
         } else {
             result.hitWorld = true;
+            // Debris chips on wall hit
+            if (s_particlePool) ParticleSystem::spawnDebris(*s_particlePool, hit.position, 4);
         }
     }
 
@@ -151,8 +177,10 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
                             ProjectilePool& projectiles,
                             u8 extraFlags)
 {
-    // Spawn 1m ahead of the camera so the projectile doesn't clip the viewmodel
-    Vec3 spawnPos = eyePos + forward * 1.0f;
+    // Small forward nudge so the projectile clears the player's own collision box.
+    // Callers already offset eyePos to the weapon tip, so 1.0m was too far and
+    // caused projectiles to skip over close enemies.
+    Vec3 spawnPos = eyePos + forward * 0.3f;
     return ProjectileSystem::spawn(projectiles, spawnPos, forward,
                                     weapon.projectileSpeed, weapon.damage,
                                     weapon.projectileRadius, 3.0f, true, extraFlags);
@@ -163,7 +191,7 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
                             ProjectilePool& projectiles,
                             f32 gravity, f32 splashRadius, f32 splashDamage)
 {
-    Vec3 spawnPos = eyePos + forward * 1.0f;
+    Vec3 spawnPos = eyePos + forward * 0.3f;
     u16 idx = ProjectileSystem::spawn(projectiles, spawnPos, forward,
                                        weapon.projectileSpeed, weapon.damage,
                                        weapon.projectileRadius, 5.0f, true);

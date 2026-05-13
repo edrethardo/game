@@ -536,11 +536,26 @@ def sfx_item_drop():
 
 
 def sfx_potion_use():
-    """Gulp — sine sweep up then back down."""
-    return synthesize_chain([
-        dict(waveform='sine', duration=0.1, freq_start=200, freq_end=500, attack=0.002, decay=0.02, sustain_level=0.3, sustain_time=0.02, release=0.04, noise_mix=0.15, volume=0.7),
-        dict(waveform='sine', duration=0.1, freq_start=500, freq_end=150, attack=0.002, decay=0.02, sustain_level=0.25, sustain_time=0.02, release=0.04, noise_mix=0.15, volume=0.65),
-    ])
+    """D2-style potion: cork pop, 3 rapid gulps (bubbling sine pulses), breathy exhale."""
+    # Cork pop — short noise burst
+    cork = synthesize(waveform='noise', duration=0.06, freq_start=1200, freq_end=400,
+                      attack=0.001, decay=0.01, sustain_level=0.2, sustain_time=0.01,
+                      release=0.03, lowpass=0.3, volume=0.6, drive=2.0)
+    # Three rapid gulps — sine pulses sweeping up then down (bubbling)
+    gulp1 = synthesize(waveform='sine', duration=0.08, freq_start=250, freq_end=450,
+                       attack=0.002, decay=0.015, sustain_level=0.35, sustain_time=0.02,
+                       release=0.02, noise_mix=0.2, volume=0.7)
+    gulp2 = synthesize(waveform='sine', duration=0.08, freq_start=280, freq_end=500,
+                       attack=0.002, decay=0.015, sustain_level=0.3, sustain_time=0.02,
+                       release=0.02, noise_mix=0.2, volume=0.65)
+    gulp3 = synthesize(waveform='sine', duration=0.1, freq_start=220, freq_end=400,
+                       attack=0.002, decay=0.02, sustain_level=0.3, sustain_time=0.025,
+                       release=0.03, noise_mix=0.25, volume=0.6)
+    # Breathy exhale — filtered noise fading out
+    exhale = synthesize(waveform='noise', duration=0.25, freq_start=300, freq_end=80,
+                        attack=0.01, decay=0.05, sustain_level=0.15, sustain_time=0.08,
+                        release=0.1, lowpass=0.1, volume=0.4)
+    return cork + gulp1 + gulp2 + gulp3 + exhale
 
 
 # ---------------------------------------------------------------------------

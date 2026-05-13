@@ -490,6 +490,7 @@ void Engine::gameUpdate(f32 dt) {
         ss.energy += energyAmt;
         if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
         m_potionCooldown = GameConst::POTION_COOLDOWN;
+        AudioSystem::play(SfxId::POTION_USE);
         LOG_INFO("Used potion: +%.0f HP, +%.0f EN", healAmount, energyAmt);
     }
 
@@ -760,6 +761,9 @@ void Engine::gameUpdate(f32 dt) {
     // Update pending meteors
     SkillSystem::updateMeteors(m_entities, dt);
 
+    // Tick the particle pool (motion, gravity, lifetime decay)
+    ParticleSystem::update(m_particles, dt);
+
     // --- Weapon on-hit proc (legendary weapon passive) ---
     {
         const ItemInstance& wpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
@@ -1028,8 +1032,10 @@ void Engine::gameUpdate(f32 dt) {
 
     // Damage flash decay — play hit sound on the first tick of a fresh flash
     if (m_localPlayer.damageFlashTimer > 0.0f) {
-        if (m_localPlayer.damageFlashTimer >= 0.15f - 0.001f)
+        if (m_localPlayer.damageFlashTimer >= 0.15f - 0.001f) {
             AudioSystem::play(SfxId::PLAYER_HIT, 0.7f);
+            m_camera.shake.trigger(0.03f, 0.2f);
+        }
         m_localPlayer.damageFlashTimer -= dt;
     }
     if (m_localPlayer.smokeTimer > 0.0f)

@@ -51,6 +51,7 @@ enum struct AffixType : u8 {
     DAMAGE_TO_FLYING,
     CLIP_SIZE_PCT,      // % extra magazine capacity
     RELOAD_SPEED_PCT,   // % faster reload
+    ENERGY_FLAT,        // flat bonus to max energy
     COUNT
 };
 
@@ -359,6 +360,7 @@ struct PlayerInventory {
     f32 bonusDamageToFlying     = 0.0f;
     f32 bonusClipSizePct        = 0.0f;
     f32 bonusReloadSpeedPct     = 0.0f;
+    f32 bonusEnergyFlat         = 0.0f;
 };
 
 // ---- World item (dropped loot on the ground) ----
@@ -444,6 +446,11 @@ namespace ItemGen {
 }
 
 namespace Inventory {
+    // Optional callback fired after recalculateStats — lets the engine apply
+    // derived bonuses (e.g. energy_flat → SkillState.maxEnergy) without coupling.
+    using StatsChangedCallback = void(*)(PlayerInventory& inv);
+    void setStatsChangedCallback(StatsChangedCallback cb);
+
     void init(PlayerInventory& inv);
     void recalculateStats(PlayerInventory& inv);
     // Recalculate cached stat bonuses for NPC equipment (same logic, different struct)

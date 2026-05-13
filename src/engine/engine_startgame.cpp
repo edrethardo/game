@@ -326,6 +326,10 @@ void Engine::startGame() {
     // Reset NPC equipment pool so old floor's slots don't persist
     for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = {};
 
+    // Clear particle pool and shake so leftover FX from previous floor don't persist
+    ParticleSystem::clear(m_particles);
+    m_camera.shake.intensity = 0.0f;
+
     // Build level — use BSP procedural generation with random seed.
     // Early floors (1-9) use a smaller grid for simpler, more linear layouts
     // so the exit is easier to find.  Later floors get the full 48x48 grid.

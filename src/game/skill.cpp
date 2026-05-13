@@ -5,6 +5,8 @@
 #include "world/combat_query.h"
 #include "world/raycast.h"
 #include "renderer/debug_draw.h"
+#include "renderer/particles.h"
+#include "renderer/camera.h"  // for ScreenShake
 #include "core/log.h"
 #include <cmath>
 #include <cstdlib>
@@ -12,6 +14,8 @@
 
 // Not static — extern'd by engine.cpp for rendering the targeting circles
 PendingMeteor s_meteors[MAX_PENDING_METEORS];
+static ParticlePool* s_particlePool = nullptr;
+static ScreenShake*  s_screenShake  = nullptr;
 static SkillSystem::NovaCallback s_novaCallback = nullptr;
 static SkillSystem::DashCallback s_dashCallback = nullptr;
 static SkillSystem::ScorchCallback s_scorchCallback = nullptr;
@@ -26,6 +30,10 @@ void SkillSystem::setScorchCallback(ScorchCallback cb) { s_scorchCallback = cb; 
 void SkillSystem::setDroneSpawnCallback(DroneSpawnCallback cb) { s_droneSpawnCallback = cb; }
 void SkillSystem::setChainCallback(ChainCallback cb) { s_chainCallback = cb; }
 void SkillSystem::setBoltMeshId(u8 meshId, u8 matId) { s_boltMeshId = meshId; s_shockBoltMatId = matId; }
+void SkillSystem::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
+    s_particlePool = particles;
+    s_screenShake  = shake;
+}
 
 // ---------------------------------------------------------------------------
 // Static helpers (individual skill fires)
@@ -978,8 +986,43 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     case SkillId::RAPID_FIRE:
     case SkillId::HEADSHOT:
     case SkillId::KNIFE_BURST:
-        AudioSystem::play(SfxId::WEAPON_BOW); break;
+        AudioSystem::play(SfxId::WEAPON_BOW, 0.5f); break;
     default: break;
+    }
+
+    // Particle burst on activation — spawned at muzzle/cast point for immediate feedback
+    if (s_particlePool) {
+        Vec3 castPos = eyePos + forward * 0.5f;
+        switch (ss.activeSkill) {
+        case SkillId::FIREBALL:     // trails handled by projectile system
+        case SkillId::SHOCK_BOLT:   // trails handled by projectile system
+        case SkillId::FROZEN_ORB:   // trails handled by projectile system
+            break;
+        case SkillId::CONSECRATION:
+            ParticleSystem::spawnMagicBurst(*s_particlePool, castPos, 255, 120, 30, 12);
+            break;
+        case SkillId::CHAIN_LIGHTNING:
+        case SkillId::TESLA_COIL:
+            ParticleSystem::spawnSparks(*s_particlePool, castPos, forward, 6);
+            break;
+        case SkillId::BLOOD_NOVA:
+            break;
+        case SkillId::PHASE_DASH:
+        case SkillId::SHADOW_STRIKE:
+            ParticleSystem::spawnSmoke(*s_particlePool, eyePos, 8);
+            break;
+        case SkillId::METEOR_STRIKE:
+        case SkillId::EARTHQUAKE:
+        case SkillId::EXPLOSIVE_ROUND:
+            ParticleSystem::spawnExplosion(*s_particlePool, eyePos + forward * 2.0f, 2.0f);
+            if (s_screenShake) s_screenShake->trigger(0.1f, 0.5f);
+            break;
+        case SkillId::THUNDERCLAP:
+            ParticleSystem::spawnSparks(*s_particlePool, eyePos, {0.0f, 1.0f, 0.0f}, 10);
+            if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
+            break;
+        default: break;
+        }
     }
 
     switch (ss.activeSkill) {
@@ -1171,6 +1214,9 @@ void SkillSystem::updateMeteors(EntityPool& entities, f32 dt) {
             // Fire explosion visual + ground scorch zone (2s burn at 30% of impact damage)
             if (s_novaCallback) s_novaCallback(m.position, m.radius, {1.0f, 0.5f, 0.1f});
             if (s_scorchCallback) s_scorchCallback(m.position, m.radius, 2.0f, m.damage * 0.3f);
+            // Particle explosion at impact point + camera shake
+            if (s_particlePool) ParticleSystem::spawnExplosion(*s_particlePool, m.position, m.radius);
+            if (s_screenShake)  s_screenShake->trigger(0.1f, 0.5f);
             LOG_INFO("Meteor struck: hit %u enemies", hitCount);
         }
     }

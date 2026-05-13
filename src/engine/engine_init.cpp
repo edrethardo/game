@@ -411,6 +411,29 @@ void Engine::init() {
         }
     }
 
+    // Particle system init — must come after MaterialSystem::init so mat IDs are valid
+    ParticleSystem::init(m_particles);
+    m_particleBlobMatId  = MaterialSystem::getIdByName("particle_blob");
+    m_particleSparkMatId = MaterialSystem::getIdByName("particle_spark");
+
+    // Wire particle pool and screen shake into combat, skill, and projectile systems
+    Combat::setFXTargets(&m_particles, &m_camera.shake);
+    SkillSystem::setFXTargets(&m_particles, &m_camera.shake);
+    extern void ProjectileSystem_setTrailPool(ParticlePool* pool);
+    ProjectileSystem_setTrailPool(&m_particles);
+
+    // Apply energy_flat affix bonus to SkillState.maxEnergy on equip/unequip
+    Inventory::setStatsChangedCallback([](PlayerInventory& inv) {
+        if (!s_engine) return;
+        SkillState& ss = s_engine->m_skillStates[s_engine->m_localPlayerIndex];
+        f32 baseEnergy = kClassDefs[static_cast<u32>(s_engine->m_playerClass)].baseEnergy;
+        f32 oldMax = ss.maxEnergy;
+        ss.maxEnergy = baseEnergy + inv.bonusEnergyFlat;
+        // Preserve energy percentage so equipping doesn't drain/fill
+        if (oldMax > 0.0f) ss.energy = ss.energy * (ss.maxEnergy / oldMax);
+        if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
+    });
+
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
         if (!s_engine) return;
 
@@ -554,6 +577,9 @@ void Engine::init() {
                 break;
             }
         }
+        // Fireball splash particles — fiery burst at impact point
+        ParticleSystem::spawnExplosion(s_engine->m_particles, position, radius);
+        s_engine->m_camera.shake.trigger(0.06f, 0.3f);
     });
 
     // Projectile hit callback — triggers weapon on-hit procs for projectile weapons

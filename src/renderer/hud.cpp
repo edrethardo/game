@@ -1574,6 +1574,7 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::DAMAGE_TO_FLYING:   return "+Dmg vs Flying";
         case AffixType::CLIP_SIZE_PCT:      return "+Clip Size %";
         case AffixType::RELOAD_SPEED_PCT:   return "+Reload Speed %";
+        case AffixType::ENERGY_FLAT:        return "+Max Energy";
         default:                            return "Unknown";
     }
 }

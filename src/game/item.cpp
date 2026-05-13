@@ -126,6 +126,7 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "damage_to_flying"   || s == "DAMAGE_TO_FLYING")   return AffixType::DAMAGE_TO_FLYING;
     if (s == "clip_size_pct"      || s == "CLIP_SIZE_PCT")      return AffixType::CLIP_SIZE_PCT;
     if (s == "reload_speed_pct"   || s == "RELOAD_SPEED_PCT")   return AffixType::RELOAD_SPEED_PCT;
+    if (s == "energy_flat"        || s == "ENERGY_FLAT")        return AffixType::ENERGY_FLAT;
     return AffixType::DAMAGE_FLAT;
 }
 
@@ -556,8 +557,24 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     // Roll affixes — pass weapon type to filter nonsensical stats
     rollAffixes(item, enemyLevel, def.slot, affixDefs, affixDefCount, def.weaponType);
 
-    // Legendary items get their fixed skill affix appended (informational — stored separately)
-    // The legendarySkillId is on the def; no affix slot consumed for it.
+    // Legendary wands/staffs always get CDR + max energy bonuses
+    if (item.rarity == Rarity::LEGENDARY && def.weaponSubtype == WeaponSubtype::WAND) {
+        f32 levelScale = 1.0f + 0.06f * static_cast<f32>(enemyLevel);
+        // Inject CDR if not already present
+        bool hasCdr = false;
+        for (u8 a = 0; a < item.affixCount; a++)
+            if (item.affixes[a].type == AffixType::COOLDOWN_REDUCTION) hasCdr = true;
+        if (!hasCdr && item.affixCount < MAX_AFFIXES_PER_ITEM) {
+            item.affixes[item.affixCount++] = {AffixType::COOLDOWN_REDUCTION, (8.0f + randF01() * 7.0f) * levelScale};
+        }
+        // Inject energy bonus if not already present
+        bool hasEnergy = false;
+        for (u8 a = 0; a < item.affixCount; a++)
+            if (item.affixes[a].type == AffixType::ENERGY_FLAT) hasEnergy = true;
+        if (!hasEnergy && item.affixCount < MAX_AFFIXES_PER_ITEM) {
+            item.affixes[item.affixCount++] = {AffixType::ENERGY_FLAT, (15.0f + randF01() * 20.0f) * levelScale};
+        }
+    }
 
     return item;
 }
@@ -574,6 +591,9 @@ void Inventory::init(PlayerInventory& inv) {
         inv.backpack[i].defId = 0xFFFF;
     inv.backpackCount = 0;
 }
+
+static Inventory::StatsChangedCallback s_statsChangedCb = nullptr;
+void Inventory::setStatsChangedCallback(StatsChangedCallback cb) { s_statsChangedCb = cb; }
 
 void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusDamageFlat         = 0.0f;
@@ -615,17 +635,20 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
                 case AffixType::DAMAGE_TO_FLYING:   inv.bonusDamageToFlying     += affix.value; break;
                 case AffixType::CLIP_SIZE_PCT:      inv.bonusClipSizePct        += affix.value; break;
                 case AffixType::RELOAD_SPEED_PCT:   inv.bonusReloadSpeedPct     += affix.value; break;
+                case AffixType::ENERGY_FLAT:        inv.bonusEnergyFlat         += affix.value; break;
                 default: break;
             }
         }
     }
 
-    // Cap CDR at 80%
-    if (inv.bonusCooldownReduction > 0.8f)
-        inv.bonusCooldownReduction = 0.8f;
+    // Cap CDR at 92% (minimum cooldown = 8% of base)
+    if (inv.bonusCooldownReduction > 0.92f)
+        inv.bonusCooldownReduction = 0.92f;
     // Cap reload speed at 60%
     if (inv.bonusReloadSpeedPct > 60.0f)
         inv.bonusReloadSpeedPct = 60.0f;
+
+    if (s_statsChangedCb) s_statsChangedCb(inv);
 }
 
 void Inventory::recalculateNpcStats(NpcEquipment& equip) {
@@ -670,9 +693,9 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
             }
         }
     }
-    // Cap CDR at 80%
-    if (equip.bonusCooldownReduction > 0.8f)
-        equip.bonusCooldownReduction = 0.8f;
+    // Cap CDR at 92% (minimum cooldown = 8% of base)
+    if (equip.bonusCooldownReduction > 0.92f)
+        equip.bonusCooldownReduction = 0.92f;
 }
 
 bool Inventory::addToBackpack(PlayerInventory& inv, const ItemInstance& item) {

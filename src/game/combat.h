@@ -8,6 +8,8 @@
 
 struct Player;
 struct ProjectilePool;
+struct ParticlePool;
+struct ScreenShake;
 
 // Result of a player attack. Melee can hit multiple entities (cone query);
 // hitscan hits first entity or wall (raycast); projectile spawns are fire-and-forget.
@@ -59,4 +61,8 @@ namespace Combat {
     // Perfect block callback — called when player executes a perfect block
     using PerfectBlockCallback = void(*)(Player& player);
     void setPerfectBlockCallback(PerfectBlockCallback cb);
+
+    // Wire in the particle pool and screen shake so combat events emit visual FX.
+    // Both pointers are stored as file-scope statics in combat.cpp.
+    void setFXTargets(ParticlePool* particles, ScreenShake* shake);
 }

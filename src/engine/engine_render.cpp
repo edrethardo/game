@@ -479,6 +479,9 @@ void Engine::render(f32 alpha) {
         if (yawDiff < -3.14159f) yawDiff += 6.28318f;
         m_camera.yaw      = m_camera.prevYaw + yawDiff * alpha;
         m_camera.pitch    = m_camera.prevPitch + (tickPitch - m_camera.prevPitch) * alpha;
+        // Apply screen shake offset — decays over time, doesn't affect saved tick state
+        Vec3 shakeOffset = m_camera.shake.update(static_cast<f32>(FIXED_DT));
+        m_camera.position = m_camera.position + shakeOffset;
     }
 
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
@@ -1914,6 +1917,10 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             }
         }
     }
+
+    // Particle pool — rendered after all DebugDraw calls so particles composite on top
+    ParticleSystem::render(m_particles, m_camera, m_unlitShader, m_cubeMesh,
+                           m_particleBlobMatId, m_particleSparkMatId);
 }
 
 // ---------------------------------------------------------------------------
