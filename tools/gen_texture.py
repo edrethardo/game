@@ -100,6 +100,8 @@ TEXTURE_TYPES = [
     "skeleton_skin",
     "spider_skin",
     "bat_skin",
+    "particle_blob",
+    "particle_spark",
 ]
 
 DEFAULT_PALETTE = {
@@ -113,6 +115,9 @@ DEFAULT_PALETTE = {
     "skeleton_skin": "skeleton_bone",
     "spider_skin": "spider_dark",
     "bat_skin": "bat_brown",
+    # Particle types use no palette — white shape with alpha gradient
+    "particle_blob": "dark_dungeon",
+    "particle_spark": "dark_dungeon",
 }
 
 # ---------------------------------------------------------------------------
@@ -551,6 +556,51 @@ def gen_bat_skin(img, size, palette):
             px[x, y] = noise_color(darkest, 3)
 
 
+def gen_particle_blob(img, size, palette):  # noqa: ARG001 -- palette unused; shape is always white
+    """Soft circular blob for additive particle rendering.
+
+    White RGB (255,255,255) with a radial alpha falloff: alpha = max(0, 1-(d/r)^2).
+    The quadratic falloff gives a smooth centre-bright disc that composites well
+    under additive blending without a hard edge.
+    """
+    px = img.load()
+    cx = cy = (size - 1) / 2.0
+    # Radius reaches almost to the edge so the full disc is visible at 16 px
+    radius = cx
+
+    for y in range(size):
+        for x in range(size):
+            dx = x - cx
+            dy = y - cy
+            dist = math.sqrt(dx * dx + dy * dy)
+            # Quadratic falloff: full white at centre, transparent at the rim
+            alpha = max(0.0, 1.0 - (dist / radius) ** 2)
+            px[x, y] = (255, 255, 255, int(alpha * 255))
+
+
+def gen_particle_spark(img, size, palette):  # noqa: ARG001 -- palette unused
+    """Elongated spark / streak shape for directional particle effects.
+
+    White RGB with an alpha mask built from a weighted Manhattan metric:
+    t = |dx|*0.6 + |dy|*1.4 where dx/dy are normalised to [0,1] from centre.
+    The heavier vertical weight makes a taller-than-wide diamond (spark shape).
+    alpha = max(0, 1 - t).
+    """
+    px = img.load()
+    cx = cy = (size - 1) / 2.0
+    half = cx  # normalisation factor
+
+    for y in range(size):
+        for x in range(size):
+            # Normalise so half-width/height maps to 1.0
+            dx = abs(x - cx) / half
+            dy = abs(y - cy) / half
+            # Heavier vertical falloff produces an elongated diamond
+            t = dx * 0.6 + dy * 1.4
+            alpha = max(0.0, 1.0 - t)
+            px[x, y] = (255, 255, 255, int(alpha * 255))
+
+
 GENERATORS = {
     "stone_wall": gen_stone_wall,
     "stone_wall_moss": gen_stone_wall_moss,
@@ -562,6 +612,8 @@ GENERATORS = {
     "skeleton_skin": gen_skeleton_skin,
     "spider_skin": gen_spider_skin,
     "bat_skin": gen_bat_skin,
+    "particle_blob": gen_particle_blob,
+    "particle_spark": gen_particle_spark,
 }
 
 # ---------------------------------------------------------------------------
@@ -607,6 +659,11 @@ def main():
         action="store_true",
         help="List available palettes and exit.",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Output file path. Overrides the default assets/textures/<type>_<seed>.png location.",
+    )
 
     args = parser.parse_args()
 
@@ -634,14 +691,17 @@ def main():
     img = Image.new("RGBA", (args.size, args.size))
     GENERATORS[args.tex_type](img, args.size, palette)
 
-    # Output path: assets/textures/<type>_<seed>.png relative to repo root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(script_dir)
-    out_dir = os.path.join(repo_root, "assets", "textures")
-    os.makedirs(out_dir, exist_ok=True)
+    if args.output:
+        out_path = args.output
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    else:
+        # Default: assets/textures/<type>_<seed>.png relative to repo root
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(script_dir)
+        out_dir = os.path.join(repo_root, "assets", "textures")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{args.tex_type}_{args.seed}.png")
 
-    filename = f"{args.tex_type}_{args.seed}.png"
-    out_path = os.path.join(out_dir, filename)
     img.save(out_path)
     print(out_path)
 

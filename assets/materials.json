@@ -133,6 +133,8 @@
     { "id": 118, "name": "infernal_herald_skin",    "texture": "infernal_herald_skin_42.png" },
     { "id": 119, "name": "void_necromancer_skin",   "texture": "void_necromancer_skin_42.png" },
     { "id": 120, "name": "void_shaman_skin",        "texture": "void_shaman_skin_42.png" },
-    { "id": 121, "name": "void_herald_skin",        "texture": "void_herald_skin_42.png" }
+    { "id": 121, "name": "void_herald_skin",        "texture": "void_herald_skin_42.png" },
+    { "id": 122, "name": "particle_blob",  "texture": "particle_blob_16.png",  "tint": [1,1,1,1] },
+    { "id": 123, "name": "particle_spark", "texture": "particle_spark_16.png", "tint": [1,1,1,1] }
   ]
 }
