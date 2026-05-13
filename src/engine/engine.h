@@ -351,8 +351,27 @@ private:
     void updateMenu(f32 dt);
     void updateLobby(f32 dt);
     void startGame();
-    void saveGame();
-    bool loadGame();
+    void saveGame(u8 slot);
+    bool loadGame(u8 slot);
+
+    // Save slot management
+    static constexpr u32 MAX_SAVE_SLOTS = 20;
+    u8 m_activeSaveSlot = 0;  // 0 = no active slot, 1-20 = slot number
+
+    struct SaveSlotInfo {
+        bool exists;
+        u8   floor;
+        u8   playerCount;       // 1 or 2
+        u8   playerClasses[2];  // PlayerClass cast to u8; index 1 is 0xFF if single-player
+        u32  timestamp;         // seconds since epoch
+        f32  totalPlayTime;
+    };
+    SaveSlotInfo m_saveSlots[MAX_SAVE_SLOTS];
+
+    // Populate m_saveSlots by reading just the header of each slot file
+    void scanSaveSlots();
+    // Write the platform-appropriate slot path into buf (e.g. "save_01.dat")
+    static const char* getSaveSlotPath(u8 slot, char* buf, u32 bufSize);
 
     // Net player helpers
     void syncLocalPlayerToNetPlayer();

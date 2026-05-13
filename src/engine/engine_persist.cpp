@@ -1,5 +1,8 @@
-// Engine module — see engine.h for class definition.
-// Split from engine.cpp for manageability. All methods are Engine:: members.
+// engine_persist.cpp — Save/load system for DungeonEngine.
+// Supports 20 independent save slots (save_01.dat … save_20.dat).
+// Each slot stores a compact header (readable without a full load) followed
+// by per-player data for up to 2 local (split-screen) players.
+// Version is reset to 1; all prior saves (version ≤ 6) are incompatible.
 
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
@@ -48,141 +51,262 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 
-// Shared statics defined in engine.cpp
 // Shared statics defined in engine.cpp
 extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
+// Version 1 = multi-slot + two-player format. All older saves are incompatible.
+static constexpr u32 SAVE_VERSION = 1;
 
-static constexpr u32 SAVE_VERSION = 6; // v6: added totalPlayTime
+// ---------------------------------------------------------------------------
+// Path helper
+// ---------------------------------------------------------------------------
 
-void Engine::saveGame() {
-    FILE* f = std::fopen("save.dat", "wb");
-    if (!f) { LOG_WARN("Failed to save game"); return; }
+const char* Engine::getSaveSlotPath(u8 slot, char* buf, u32 bufSize) {
+    // Slots are 1-based externally; clamp to valid range just in case.
+    if (slot < 1 || slot > MAX_SAVE_SLOTS) slot = 1;
+    std::snprintf(buf, bufSize, "save_%02u.dat", static_cast<u32>(slot));
+    return buf;
+}
 
-    // Version header
+// ---------------------------------------------------------------------------
+// Scan all slot headers to populate m_saveSlots[]
+// ---------------------------------------------------------------------------
+
+void Engine::scanSaveSlots() {
+    char path[32];
+    for (u32 i = 0; i < MAX_SAVE_SLOTS; i++) {
+        SaveSlotInfo& info = m_saveSlots[i];
+        info = {};  // default: does not exist
+
+        getSaveSlotPath(static_cast<u8>(i + 1), path, sizeof(path));
+        FILE* f = std::fopen(path, "rb");
+        if (!f) continue;
+
+        // Read just the header block — version + floor + playerCount + classes + timestamp + time
+        u32 ver = 0;
+        if (std::fread(&ver, sizeof(u32), 1, f) != 1 || ver != SAVE_VERSION) {
+            std::fclose(f);
+            continue;
+        }
+
+        u8 floor = 0, playerCount = 0, classes[2] = {0, 0xFF};
+        u32 timestamp = 0;
+        f32 totalTime = 0.0f;
+
+        bool ok = true;
+        ok = ok && std::fread(&floor,       sizeof(u8),  1, f) == 1;
+        ok = ok && std::fread(&playerCount, sizeof(u8),  1, f) == 1;
+        ok = ok && std::fread(classes,      sizeof(u8),  2, f) == 2;
+        ok = ok && std::fread(&timestamp,   sizeof(u32), 1, f) == 1;
+        ok = ok && std::fread(&totalTime,   sizeof(f32), 1, f) == 1;
+
+        std::fclose(f);
+
+        if (!ok) continue;
+
+        info.exists           = true;
+        info.floor            = floor;
+        info.playerCount      = playerCount;
+        info.playerClasses[0] = classes[0];
+        info.playerClasses[1] = classes[1];
+        info.timestamp        = timestamp;
+        info.totalPlayTime    = totalTime;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Save
+// ---------------------------------------------------------------------------
+
+void Engine::saveGame(u8 slot) {
+    char path[32];
+    getSaveSlotPath(slot, path, sizeof(path));
+
+    FILE* f = std::fopen(path, "wb");
+    if (!f) { LOG_WARN("saveGame: failed to open %s for writing", path); return; }
+
+    // --- Header (must match scanSaveSlots reader) ---
     u32 ver = SAVE_VERSION;
     std::fwrite(&ver, sizeof(u32), 1, f);
 
-    // Header: floor + seed
-    std::fwrite(&m_level.savedFloor, sizeof(u32), 1, f);
+    u8 floor        = static_cast<u8>(m_level.savedFloor);
+    u8 playerCount  = m_splitPlayerCount;
+    // Second class slot is 0xFF when only one player is saved
+    u8 cls1 = static_cast<u8>(m_playerClasses[0]);
+    u8 cls2 = (playerCount >= 2) ? static_cast<u8>(m_playerClasses[1]) : static_cast<u8>(0xFF);
+    u8 classes[2] = { cls1, cls2 };
+    u32 timestamp   = static_cast<u32>(std::time(nullptr));
+    f32 totalTime   = m_transition.totalPlayTime;
+
+    std::fwrite(&floor,       sizeof(u8),  1, f);
+    std::fwrite(&playerCount, sizeof(u8),  1, f);
+    std::fwrite(classes,      sizeof(u8),  2, f);
+    std::fwrite(&timestamp,   sizeof(u32), 1, f);
+    std::fwrite(&totalTime,   sizeof(f32), 1, f);
+
+    // Level seed (after header, before per-player data)
     std::fwrite(&m_level.savedSeed, sizeof(u32), 1, f);
 
-    // Player health
-    f32 hp = m_localPlayer.health;
-    f32 maxHp = m_localPlayer.maxHealth;
-    std::fwrite(&hp, sizeof(f32), 1, f);
-    std::fwrite(&maxHp, sizeof(f32), 1, f);
+    // --- Per-player data ---
+    // Always save from the per-player arrays, not the active aliases, so we
+    // capture the correct state regardless of which player is currently swapped in.
+    for (u8 p = 0; p < playerCount; p++) {
+        f32 hp    = m_localPlayers[p].health;
+        f32 maxHp = m_localPlayers[p].maxHealth;
+        std::fwrite(&hp,    sizeof(f32), 1, f);
+        std::fwrite(&maxHp, sizeof(f32), 1, f);
 
-    // Inventory (equipment + backpack)
-    std::fwrite(&m_inventories[m_localPlayerIndex], sizeof(PlayerInventory), 1, f);
+        std::fwrite(&m_inventories[p],  sizeof(PlayerInventory), 1, f);
+        std::fwrite(&m_quickbars[p],    sizeof(QuickbarState),   1, f);
+        std::fwrite(&m_skillStates[p],  sizeof(SkillState),      1, f);
 
-    // Quickbar
-    std::fwrite(&m_quickbars[m_localPlayerIndex], sizeof(QuickbarState), 1, f);
-
-    // Skill state
-    std::fwrite(&m_skillStates[m_localPlayerIndex], sizeof(SkillState), 1, f);
-
-    // Player class
-    std::fwrite(&m_playerClass, sizeof(m_playerClass), 1, f);
-    std::fwrite(&m_activeClassSkill, sizeof(m_activeClassSkill), 1, f);
-    std::fwrite(m_classSkillStates, sizeof(m_classSkillStates), 1, f);
-
-    // Total play time
-    std::fwrite(&m_transition.totalPlayTime, sizeof(f32), 1, f);
+        u8 cls        = static_cast<u8>(m_playerClasses[p]);
+        u8 activeSkill = m_activeClassSkills[p];
+        std::fwrite(&cls,         sizeof(u8), 1, f);
+        std::fwrite(&activeSkill, sizeof(u8), 1, f);
+        std::fwrite(m_classSkillStatesPerPlayer[p], sizeof(SkillState) * 4, 1, f);
+    }
 
     std::fclose(f);
-    LOG_INFO("Game saved at floor %u (class %u, time %.0fs)", m_level.savedFloor, static_cast<u32>(m_playerClass), m_transition.totalPlayTime);
+
+    // Update in-memory slot info so the menu reflects the new state immediately
+    m_activeSaveSlot = slot;
+    SaveSlotInfo& info  = m_saveSlots[slot - 1];
+    info.exists         = true;
+    info.floor          = floor;
+    info.playerCount    = playerCount;
+    info.playerClasses[0] = classes[0];
+    info.playerClasses[1] = classes[1];
+    info.timestamp      = timestamp;
+    info.totalPlayTime  = totalTime;
+
+    LOG_INFO("Game saved to slot %u (%s) — floor %u, %u player(s), time %.0fs",
+             slot, path, floor, playerCount, totalTime);
 }
 
-bool Engine::loadGame() {
-    FILE* f = std::fopen("save.dat", "rb");
+// ---------------------------------------------------------------------------
+// Load
+// ---------------------------------------------------------------------------
+
+bool Engine::loadGame(u8 slot) {
+    char path[32];
+    getSaveSlotPath(slot, path, sizeof(path));
+
+    FILE* f = std::fopen(path, "rb");
     if (!f) return false;
 
-    // Check save version — reject incompatible saves
+    // Verify version
     u32 ver = 0;
     if (std::fread(&ver, sizeof(u32), 1, f) != 1 || ver != SAVE_VERSION) {
-        LOG_WARN("Save file version mismatch (got %u, expected %u) — starting fresh", ver, SAVE_VERSION);
+        LOG_WARN("loadGame slot %u: version mismatch (got %u, expected %u) — ignoring",
+                 slot, ver, SAVE_VERSION);
         std::fclose(f);
         return false;
     }
 
+    // Read header
+    u8  floor = 0, playerCount = 0, classes[2] = {};
+    u32 timestamp = 0;
+    f32 totalTime = 0.0f;
+    u32 seed = 0;
+
     bool ok = true;
-    ok = ok && std::fread(&m_level.savedFloor, sizeof(u32), 1, f) == 1;
-    ok = ok && std::fread(&m_level.savedSeed, sizeof(u32), 1, f) == 1;
+    ok = ok && std::fread(&floor,       sizeof(u8),  1, f) == 1;
+    ok = ok && std::fread(&playerCount, sizeof(u8),  1, f) == 1;
+    ok = ok && std::fread(classes,      sizeof(u8),  2, f) == 2;
+    ok = ok && std::fread(&timestamp,   sizeof(u32), 1, f) == 1;
+    ok = ok && std::fread(&totalTime,   sizeof(f32), 1, f) == 1;
+    ok = ok && std::fread(&seed,        sizeof(u32), 1, f) == 1;
 
-    // Player health
-    f32 hp = 100.0f, maxHp = 100.0f;
-    ok = ok && std::fread(&hp, sizeof(f32), 1, f) == 1;
-    ok = ok && std::fread(&maxHp, sizeof(f32), 1, f) == 1;
+    if (!ok) { std::fclose(f); return false; }
 
-    // Inventory
-    PlayerInventory loadedInv = {};
-    ok = ok && std::fread(&loadedInv, sizeof(PlayerInventory), 1, f) == 1;
+    // Clamp to sane bounds — don't trust file contents blindly
+    if (playerCount < 1 || playerCount > MAX_LOCAL_PLAYERS) playerCount = 1;
 
-    // Quickbar
-    QuickbarState loadedQb = {};
-    ok = ok && std::fread(&loadedQb, sizeof(QuickbarState), 1, f) == 1;
+    // Per-player scratch buffers
+    struct PlayerSave {
+        f32             hp, maxHp;
+        PlayerInventory inv;
+        QuickbarState   qb;
+        SkillState      skill;
+        u8              cls;
+        u8              activeSkill;
+        SkillState      classSkills[4];
+    } pdata[MAX_LOCAL_PLAYERS] = {};
 
-    // Skill state
-    SkillState loadedSkill = {};
-    ok = ok && std::fread(&loadedSkill, sizeof(SkillState), 1, f) == 1;
-
-    // Player class (may not exist in old saves — defaults to WARRIOR)
-    PlayerClass loadedClass = PlayerClass::WARRIOR;
-    u8 loadedActiveSkill = 0;
-    SkillState loadedClassSkills[4] = {};
-    if (std::fread(&loadedClass, sizeof(loadedClass), 1, f) == 1) {
-        std::fread(&loadedActiveSkill, sizeof(loadedActiveSkill), 1, f);
-        std::fread(loadedClassSkills, sizeof(loadedClassSkills), 1, f);
+    // If the save has 2 players, activate split-screen so both get restored
+    if (playerCount == 2 && m_splitPlayerCount < 2) {
+        m_splitPlayerCount = 2;
+        Input::setSplitScreen(true);
     }
+    u8 restoreCount = (m_splitPlayerCount < playerCount) ? m_splitPlayerCount : playerCount;
 
-    // Total play time (v6+)
-    f32 loadedTotalTime = 0.0f;
-    std::fread(&loadedTotalTime, sizeof(f32), 1, f); // silently fails on older saves
+    for (u8 p = 0; p < playerCount; p++) {
+        bool pok = true;
+        pok = pok && std::fread(&pdata[p].hp,    sizeof(f32),            1, f) == 1;
+        pok = pok && std::fread(&pdata[p].maxHp, sizeof(f32),            1, f) == 1;
+        pok = pok && std::fread(&pdata[p].inv,   sizeof(PlayerInventory), 1, f) == 1;
+        pok = pok && std::fread(&pdata[p].qb,    sizeof(QuickbarState),  1, f) == 1;
+        pok = pok && std::fread(&pdata[p].skill, sizeof(SkillState),     1, f) == 1;
+        pok = pok && std::fread(&pdata[p].cls,   sizeof(u8),             1, f) == 1;
+        pok = pok && std::fread(&pdata[p].activeSkill, sizeof(u8),       1, f) == 1;
+        pok = pok && std::fread(pdata[p].classSkills, sizeof(SkillState) * 4, 1, f) == 1;
+        if (!pok) { ok = false; break; }
+    }
 
     std::fclose(f);
+    if (!ok) return false;
 
-    if (ok) {
-        m_transition.totalPlayTime = loadedTotalTime;
-        m_localPlayer.health = hp;
-        m_localPlayer.maxHealth = maxHp;
-        m_inventories[m_localPlayerIndex] = loadedInv;
-        Inventory::recalculateStats(m_inventories[m_localPlayerIndex]); // rebuild bonuses from affixes
-        m_quickbars[m_localPlayerIndex] = loadedQb;
-        m_skillStates[m_localPlayerIndex] = loadedSkill;
+    // --- Apply to engine state ---
+    m_level.savedFloor = floor;
+    m_level.savedSeed  = seed;
+    m_transition.totalPlayTime = totalTime;
 
-        // Restore player class and re-apply class-specific stats
-        m_playerClass = loadedClass;
-        m_activeClassSkill = loadedActiveSkill;
-        for (u32 s = 0; s < 4; s++) m_classSkillStates[s] = loadedClassSkills[s];
+    for (u8 p = 0; p < restoreCount; p++) {
+        const PlayerSave& ps = pdata[p];
 
-        // Sync per-player arrays so swapInPlayer(0) doesn't overwrite with defaults
-        m_playerClasses[0] = m_playerClass;
-        m_activeClassSkills[0] = m_activeClassSkill;
-        std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
-        m_localPlayers[0] = m_localPlayer;
+        m_localPlayers[p].health    = ps.hp;
+        m_localPlayers[p].maxHealth = ps.maxHp;
 
-        if (static_cast<u32>(m_playerClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
-            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
-            m_localPlayer.moveSpeed = cls.baseMoveSpeed;
-            m_localPlayer.damageReduction = (m_playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
-            m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy;
-            // Re-sync class skill active IDs
-            for (u32 s = 0; s < 4; s++) {
-                m_classSkillStates[s].activeSkill = cls.skills[s];
-            }
-            // Update per-player arrays again after class stats applied
-            m_playerClasses[0] = m_playerClass;
-            m_localPlayers[0] = m_localPlayer;
-            std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
+        m_inventories[p] = ps.inv;
+        Inventory::recalculateStats(m_inventories[p]);  // rebuild bonus cache from affixes
+
+        m_quickbars[p]   = ps.qb;
+        m_skillStates[p] = ps.skill;
+
+        PlayerClass cls = (static_cast<u32>(ps.cls) < static_cast<u32>(PlayerClass::CLASS_COUNT))
+                          ? static_cast<PlayerClass>(ps.cls)
+                          : PlayerClass::WARRIOR;
+
+        m_playerClasses[p]    = cls;
+        m_activeClassSkills[p] = ps.activeSkill;
+        std::memcpy(m_classSkillStatesPerPlayer[p], ps.classSkills, sizeof(ps.classSkills));
+
+        // Re-apply class base stats so speed/reduction/energy are correct
+        if (static_cast<u32>(cls) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+            const ClassDef& cdef = kClassDefs[static_cast<u32>(cls)];
+            m_localPlayers[p].moveSpeed      = cdef.baseMoveSpeed;
+            m_localPlayers[p].damageReduction = (cls == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
+            m_skillStates[p].maxEnergy        = cdef.baseEnergy;
+            // Re-wire class skill IDs (the active skill field is positional, not stored per-slot)
+            for (u32 s = 0; s < 4; s++)
+                m_classSkillStatesPerPlayer[p][s].activeSkill = cdef.skills[s];
         }
-
-        LOG_INFO("Game loaded: floor %u, class %u, HP %.0f/%.0f",
-                 m_level.savedFloor, static_cast<u32>(m_playerClass), hp, maxHp);
     }
-    return ok;
-}
 
+    // Sync active aliases for player 0 (swapInPlayer would overwrite these otherwise)
+    m_localPlayer           = m_localPlayers[0];
+    m_playerClass           = m_playerClasses[0];
+    m_activeClassSkill      = m_activeClassSkills[0];
+    std::memcpy(m_classSkillStates, m_classSkillStatesPerPlayer[0], sizeof(m_classSkillStates));
+
+    m_activeSaveSlot = slot;
+
+    LOG_INFO("Game loaded from slot %u — floor %u, %u player(s) restored (save had %u)",
+             slot, floor, restoreCount, playerCount);
+    return true;
+}

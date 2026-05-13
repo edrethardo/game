@@ -110,7 +110,7 @@ void Engine::update(f32 dt) {
             // Enter/X = reload last save (singleplayer only)
             if (m_netRole == NetRole::NONE &&
                 (Input::isActionPressed(GameAction::PICKUP) || Input::isKeyPressed(SDL_SCANCODE_RETURN))) {
-                if (loadGame()) {
+                if (loadGame(m_activeSaveSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
                 } else {
                     m_level.currentFloor = 1;
@@ -151,7 +151,7 @@ void Engine::update(f32 dt) {
             } else {
                 // Save and Quit
                 m_menu.confirmQuit = false;
-                saveGame();
+                saveGame(m_activeSaveSlot);
                 if (m_netRole != NetRole::NONE) {
                     Net::disconnect();
                     m_netRole = NetRole::NONE;
@@ -163,7 +163,16 @@ void Engine::update(f32 dt) {
         return;
     }
 
-    if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isActionPressed(GameAction::PAUSE)) {
+    // Check pause from any player — in split-screen, active player may be P2 from last frame
+    bool anyPause = Input::isKeyPressed(SDL_SCANCODE_ESCAPE);
+    if (!anyPause) {
+        for (u8 pp = 0; pp < m_splitPlayerCount; pp++) {
+            Input::setActivePlayer(pp);
+            if (Input::isActionPressed(GameAction::PAUSE)) { anyPause = true; break; }
+        }
+        Input::setActivePlayer(0); // restore default
+    }
+    if (anyPause) {
         if (m_gameState == GameState::MENU) {
             m_running = false;
             return;
@@ -276,19 +285,17 @@ void Engine::update(f32 dt) {
                 // When P1 (sp=0) is dead, shared systems (AI, projectiles, entities)
                 // still need to tick — they're normally gated on activePlayerIndex==0
                 if (sp == 0) {
-                    // P1 dead: enemies target P2 exclusively (single AI call)
+                    // Shared systems must always tick so enemies return to spawns
+                    // when both players are dead, and projectiles expire normally.
                     if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
                         EnemyAI::update(m_entities, m_level.grid, m_localPlayers[1], m_projectiles, dt, &m_level.squads);
                         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[1].position, dt);
-                    } else if (!m_playerDead[0]) {
-                        EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads);
-                        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayer.position, dt);
-                    }
-                    // P1 dead — run projectiles checking against P2
-                    if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
                         ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[1], dt);
                     } else {
-                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt);
+                        // P0 alive or both dead — use P0 as reference (enemies idle/return if dead)
+                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads);
+                        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[0].position, dt);
+                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt);
                     }
                     EntitySystem::tickTimers(m_entities, dt);
                     WorldItemSystem::update(m_worldItems, dt);
@@ -1224,7 +1231,7 @@ bool Engine::updateFloorDoor() {
                 // Save progress before descending so death respawn returns here
                 m_level.savedFloor = m_level.currentFloor;
                 m_level.savedSeed = static_cast<u32>(std::rand());
-                saveGame();
+                saveGame(m_activeSaveSlot);
                 LOG_INFO("Descending to floor %u", m_level.currentFloor);
 
                 // Snapshot floor stats for transition screen

@@ -82,29 +82,93 @@ void Engine::updateMenu(f32 dt) {
             if (m_netRole != NetRole::SERVER) m_netRole = NetRole::NONE;
             m_localPlayerIndex = 0;
             if (m_menu.subSelection == 0) {
-                // New Game — go to class selection
+                // New Game — show slot selection so the player picks where to save
+                scanSaveSlots();
                 m_level.currentFloor = 1;
-                m_menu.subState = 2; // class selection screen
+                m_menu.subState = 6; // slot selection screen
                 m_menu.subSelection = 0;
+                m_menu.msgTimer = 0.0f;
+                // Store intent (0 = new game, 1 = continue) in the message pointer slot.
+                // We use a sentinel string — checked in the slot-selection handler below.
+                m_menu.msg = "new";
             } else {
-                // Continue — load save (skip class selection)
-                if (loadGame()) {
+                // Continue — show slot selection to pick which save to load
+                scanSaveSlots();
+                m_menu.subState = 6;
+                m_menu.subSelection = 0;
+                m_menu.msg = "continue";
+            }
+        }
+        return;
+    }
+
+    // Save-slot selection screen (subState 6)
+    // m_menu.msg is "new" or "continue" to remember which path brought us here.
+    if (m_menu.subState == 6) {
+        // Navigate the list of 20 slots
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < MAX_SAVE_SLOTS - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 1;
+            m_menu.subSelection = (m_menu.msg && m_menu.msg[0] == 'c') ? 1 : 0;
+            m_menu.msg = nullptr;
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            u8 selectedSlot = static_cast<u8>(m_menu.subSelection + 1); // 1-based
+            bool isContinue = (m_menu.msg && m_menu.msg[0] == 'c');
+
+            if (isContinue) {
+                // Load the selected slot; it must exist
+                if (!m_saveSlots[m_menu.subSelection].exists) {
+                    // Nothing saved here — ignore or redirect to new game
+                    m_menu.msg = "new";
+                    m_menu.subState = 2; // fall through to class selection as new game
+                    m_menu.subSelection = 0;
+                    m_menu.msgTimer = 0.0f;
+                    m_level.currentFloor = 1;
+                    return;
+                }
+                if (loadGame(selectedSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
-                    // Start server if hosting
                     if (m_netRole == NetRole::SERVER) {
                         if (!Net::hostServer()) { m_netRole = NetRole::NONE; return; }
-                        LOG_INFO("Hosting game (continue)...");
+                        LOG_INFO("Hosting game (continue slot %u)...", selectedSlot);
                     }
                     m_menu.subState = 0;
+                    m_menu.msg = nullptr;
                     startGame();
+                    // Position P2 next to P1 at the new dungeon spawn
+                    if (m_splitPlayerCount > 1) {
+                        m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
+                        m_localPlayers[1].velocity = {0, 0, 0};
+                        m_localPlayers[1].yaw = m_localPlayer.yaw;
+                        m_localPlayers[1].eyeHeight = m_localPlayer.eyeHeight;
+                        m_players[1].spawnPosition = m_localPlayers[1].position;
+                        m_localPlayers[0] = m_localPlayer;
+                        m_cameras[0] = m_camera;
+                    }
                 } else {
-                    // Save incompatible or missing — redirect to class selection
+                    // File corrupt or version mismatch — fall back to new game
                     m_level.currentFloor = 1;
                     m_menu.subState = 2;
                     m_menu.subSelection = 0;
                     m_menu.msg = "Save file incompatible — starting new game";
                     m_menu.msgTimer = 5.0f;
                 }
+            } else {
+                // New game — record chosen slot and proceed to class selection
+                m_activeSaveSlot = selectedSlot;
+                m_level.currentFloor = 1;
+                m_menu.subState = 2; // class selection
+                m_menu.subSelection = 0;
+                m_menu.msg = nullptr;
             }
         }
         return;

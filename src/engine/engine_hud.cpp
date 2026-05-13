@@ -667,8 +667,11 @@ void Engine::renderMenu() {
         f32 stW = FontSystem::textWidth(subTitle, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
 
+        // Any populated slot means "Continue" is available
         bool hasSave = false;
-        { FILE* f = std::fopen("save.dat", "rb"); if (f) { hasSave = true; std::fclose(f); } }
+        for (u32 si = 0; si < MAX_SAVE_SLOTS; si++) {
+            if (m_saveSlots[si].exists) { hasSave = true; break; }
+        }
 
         static const char* subLabels[] = {"New Game", "Continue"};
         for (u32 i = 0; i < 2; i++) {
@@ -914,6 +917,81 @@ void Engine::renderMenu() {
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.04f,
                              hint, {0.5f, 0.5f, 0.6f}, 1);
+    } else if (m_menu.subState == 6) {
+        // Save-slot selection screen — shown for both New Game and Continue.
+        bool isContinue = (m_menu.msg && m_menu.msg[0] == 'c');
+        const char* screenTitle = isContinue ? "Select Save Slot — Continue" : "Select Save Slot — New Game";
+        f32 stW = FontSystem::textWidth(screenTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.88f,
+                             screenTitle, {0.9f, 0.8f, 0.3f}, 2);
+
+        // Scroll window: show up to ~14 slots at once
+        static constexpr u32 VISIBLE = 14;
+        u32 scrollOffset = 0;
+        if (m_menu.subSelection >= VISIBLE)
+            scrollOffset = m_menu.subSelection - VISIBLE + 1;
+
+        f32 listTop = sh * 0.82f;
+        f32 lineH   = 28.0f * uiScale;
+
+        for (u32 i = scrollOffset; i < MAX_SAVE_SLOTS && (i - scrollOffset) < VISIBLE; i++) {
+            const SaveSlotInfo& info = m_saveSlots[i];
+            f32 y   = listTop - static_cast<f32>(i - scrollOffset) * lineH;
+            bool sel = (i == m_menu.subSelection);
+
+            // Background highlight for the selected row
+            Vec3 bgCol = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.12f, 0.3f, 0.15f};
+            HUD::drawMenuOption(sw, sh, y - 2.0f * uiScale, sw * 0.7f, lineH - 4.0f * uiScale, bgCol, sel);
+
+            char label[80];
+            if (!info.exists) {
+                std::snprintf(label, sizeof(label), "Slot %2u:  Empty", i + 1);
+            } else {
+                // Format play time as MM:SS
+                u32 totalSec = static_cast<u32>(info.totalPlayTime);
+                u32 mins = totalSec / 60;
+                u32 secs = totalSec % 60;
+
+                // Build class string (one or two players)
+                const char* cls1 = (info.playerClasses[0] < static_cast<u8>(PlayerClass::CLASS_COUNT))
+                    ? kClassDefs[info.playerClasses[0]].name : "?";
+
+                if (info.playerCount >= 2 && info.playerClasses[1] != 0xFF &&
+                    info.playerClasses[1] < static_cast<u8>(PlayerClass::CLASS_COUNT)) {
+                    const char* cls2 = kClassDefs[info.playerClasses[1]].name;
+                    std::snprintf(label, sizeof(label), "Slot %2u:  Floor %2u — %s + %s — %02u:%02u",
+                                  i + 1, info.floor, cls1, cls2, mins, secs);
+                } else {
+                    std::snprintf(label, sizeof(label), "Slot %2u:  Floor %2u — %s — %02u:%02u",
+                                  i + 1, info.floor, cls1, mins, secs);
+                }
+            }
+
+            Vec3 textCol;
+            if (!info.exists) {
+                // Empty slot: dimmer, but still selectable for new game
+                textCol = isContinue ? Vec3{0.3f, 0.3f, 0.3f} : (sel ? Vec3{0.8f, 0.8f, 0.8f} : Vec3{0.45f, 0.45f, 0.45f});
+            } else {
+                textCol = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.7f, 0.6f};
+            }
+
+            f32 lw = FontSystem::textWidth(label, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 7.0f * uiScale, label, textCol, 1);
+        }
+
+        // Scroll indicator when list overflows
+        if (MAX_SAVE_SLOTS > VISIBLE) {
+            char scrollBuf[16];
+            std::snprintf(scrollBuf, sizeof(scrollBuf), "%u / %u", m_menu.subSelection + 1, MAX_SAVE_SLOTS);
+            FontSystem::drawText(sw, sh, sw * 0.88f, sh * 0.88f, scrollBuf, {0.5f, 0.5f, 0.6f}, 1);
+        }
+
+        const char* slotHint = Input::isGamepadConnected(0)
+            ? "D-pad to select, A to confirm, B to go back"
+            : "Up/Down to select, Enter to confirm, ESC to go back";
+        f32 hintW2 = FontSystem::textWidth(slotHint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f,
+                             slotHint, {0.4f, 0.4f, 0.5f}, 1);
     } else {
         // Main menu options
         static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Options", "Exit Game"};
