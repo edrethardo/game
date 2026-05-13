@@ -38,6 +38,7 @@ static u8 s_activePlayer = 0;
 static f32 s_gyroDx[2] = {};
 static f32 s_gyroDy[2] = {};
 #ifdef __SWITCH__
+static void initGyro();        // forward declaration — enables sensors (defined below)
 static void updateGyroCache(); // forward declaration — defined after gyro variables
 #else
 static void updateGyroCache() {} // no-op on PC
@@ -143,6 +144,7 @@ void Input::init() {
 
 #ifdef __SWITCH__
     initPads();
+    initGyro();  // start sensors early so they warm up during menus
 #endif
 
     setDefaults();
