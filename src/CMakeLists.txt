@@ -68,6 +68,7 @@ if(NINTENDO_SWITCH)
     )
     # Link order matters: enet needs nx sockets, SDL2 needs EGL/GL/drm, nx must be last
     target_link_libraries(DungeonEngine PRIVATE
+        SDL2_mixer vorbisidec opusfile opus FLAC modplug mpg123 ogg
         SDL2 glad enet EGL glapi drm_nouveau nx
     )
     # Generate NACP metadata (required for romfs embedding)
@@ -97,9 +98,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
     target_compile_definitions(DungeonEngine PRIVATE ENGINE_DEBUG=1)
 endif()
 
-# Auto-fetch CC0 audio assets on first build (requires internet + ffmpeg)
+# Auto-fetch CC0 audio assets on first build (requires internet + ffmpeg).
+# On Switch, audio must be pre-fetched on the host before the Docker build
+# since the Docker container may lack internet/ffmpeg. The romfs bundles
+# assets/audio/ so the WAVs must exist before elf2nro runs.
+set(AUDIO_STAMP "${CMAKE_SOURCE_DIR}/assets/audio/.fetched")
 if(NOT NINTENDO_SWITCH)
-    set(AUDIO_STAMP "${CMAKE_SOURCE_DIR}/assets/audio/.fetched")
     add_custom_command(
         OUTPUT ${AUDIO_STAMP}
         COMMAND ${CMAKE_COMMAND} -E echo "Fetching CC0 audio assets..."
@@ -110,6 +114,11 @@ if(NOT NINTENDO_SWITCH)
     )
     add_custom_target(fetch_audio DEPENDS ${AUDIO_STAMP})
     add_dependencies(DungeonEngine fetch_audio)
+else()
+    # Switch: verify audio was pre-fetched on the host
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/assets/audio/sfx_weapon_sword.wav")
+        message(WARNING "assets/audio/ is empty — run 'python3 tools/fetch_audio.py' on the host before the Switch build")
+    endif()
 endif()
 
 # Standalone weapon model generator tool
