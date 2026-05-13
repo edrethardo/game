@@ -57,11 +57,17 @@ namespace HUD {
     void drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
                                const char* label, bool highlighted);
 
+    // Radial pie-sweep cooldown overlay — draws clockwise from 12 o'clock.
+    // fraction=1.0 fills entire circle, fraction=0.0 draws nothing.
+    void drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction, Vec3 color);
+
     // Class skill bar — 4 skill slots with key icons, selection, cooldown
+    // flashTimers: per-slot countdown (seconds) — slot border flashes white when > 0
     void drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                             u8 activeSlot, u32 currentFloor,
                             const u8* unlockFloors, const u8* upgradeFloors,
-                            const f32* cooldownTimers, const f32* maxCooldowns);
+                            const f32* cooldownTimers, const f32* maxCooldowns,
+                            const f32* flashTimers = nullptr);
 
     // Equipment skill bar — shows active legendary equipment skills (boots F, helmet G,
     // armor passive, weapon proc) with 8x8 pixel-art skill icons and cooldown overlays.

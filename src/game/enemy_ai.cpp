@@ -1427,8 +1427,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         Combat::applyDamage(pool, th, e.damage);
                         e.attackAnimT = 0.3f;
                     }
-                } else if (hasLOS(e, player, grid)) {
-                    // Damage the player if no NPC target
+                } else if (hasLOSToPoint(e.position, targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0}, grid)) {
+                    // Damage the targeted player (not just player 0)
                     Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position);
                     e.attackAnimT = 0.3f;
                 }
@@ -1521,7 +1521,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             if (e.onHitEffect == 3) { npcTarget.burnTimer   = e.onHitDuration; npcTarget.burnDps   = e.onHitDps; }
                             if (e.onHitEffect == 4) { npcTarget.freezeTimer = e.onHitDuration; }
                         }
-                    } else if (hasLOS(e, player, grid)) {
+                    } else if (hasLOSToPoint(e.position, targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0}, grid)) {
                         Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position);
                         // Apply on-hit effect to player
                         if (e.onHitEffect == 1) { targetPlayer->poisonTimer = e.onHitDuration; targetPlayer->poisonDps = e.onHitDps; }

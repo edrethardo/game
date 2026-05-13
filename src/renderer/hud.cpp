@@ -8,6 +8,7 @@
 #include "core/profiler.h"
 #include "game/item.h"
 #include <glad/glad.h>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -557,13 +558,44 @@ void HUD::drawMouseButton(u32 sw, u32 sh, f32 x, f32 y,
     flushHUD(sw, sh);
 }
 
+// ---------------------------------------------------------------------------
+// drawRadialCooldown — pie sweep from 12 o'clock, clockwise.
+// Uses line-fan triangulation: each of STEPS angular wedges is filled by
+// 5 lines from center to the arc edge, giving a dense fill at any slot size.
+// ---------------------------------------------------------------------------
+void HUD::drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction, Vec3 color) {
+    if (fraction <= 0.0f) return;
+    if (fraction > 1.0f) fraction = 1.0f;
+    constexpr u32 STEPS = 24;
+    f32 endAngle = fraction * 6.28318f;
+    for (u32 i = 0; i < STEPS; i++) {
+        f32 a0 = (static_cast<f32>(i) / STEPS) * 6.28318f;
+        if (a0 >= endAngle) break;
+        f32 a1 = (static_cast<f32>(i + 1) / STEPS) * 6.28318f;
+        if (a1 > endAngle) a1 = endAngle;
+        // 0 = 12 o'clock (up), clockwise. Offset by -PI/2 so 0=up
+        f32 r0 = a0 - 1.5708f, r1 = a1 - 1.5708f;
+        f32 ex0 = cx + cosf(r0) * radius, ey0 = cy + sinf(r0) * radius;
+        f32 ex1 = cx + cosf(r1) * radius, ey1 = cy + sinf(r1) * radius;
+        // Fill the wedge triangle (center → arc edge0 → arc edge1) with 5 lines
+        for (u32 f = 0; f <= 4; f++) {
+            f32 t  = static_cast<f32>(f) / 4.0f;
+            f32 px = ex0 + (ex1 - ex0) * t;
+            f32 py = ey0 + (ey1 - ey0) * t;
+            pushLine(cx, cy, px, py, color);
+        }
+    }
+}
+
 void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               u8 activeSlot, u32 currentFloor,
                               const u8* unlockFloors, const u8* upgradeFloors,
-                              const f32* cooldownTimers, const f32* maxCooldowns)
+                              const f32* cooldownTimers, const f32* maxCooldowns,
+                              const f32* flashTimers)
 {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
-    f32 slotW = 32.0f * uiScale, slotH = 32.0f * uiScale, gap = 3.0f * uiScale;
+    // Upgraded to 64px slots with 4px gaps for better readability
+    f32 slotW = 64.0f * uiScale, slotH = 64.0f * uiScale, gap = 4.0f * uiScale;
 
     for (u8 s = 0; s < 4; s++) {
         f32 sx = x + s * (slotW + gap);
@@ -578,24 +610,22 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             pushLine(sx, y + fy, sx + slotW, y + fy, bgCol);
         }
 
-        // Border
+        // Border — flash white when skill just became ready, else normal color
         Vec3 borderCol = selected ? Vec3{0.4f, 0.9f, 0.5f} : Vec3{0.25f, 0.25f, 0.35f};
         if (!unlocked) borderCol = {0.12f, 0.12f, 0.18f};
         if (upgraded) borderCol = {0.9f, 0.8f, 0.3f};
+        if (flashTimers && flashTimers[s] > 0.0f) borderCol = {1.0f, 1.0f, 1.0f};
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
 
-        // Cooldown overlay — dark from top, shrinks downward as skill recharges
+        // Radial cooldown overlay — pie sweep from 12 o'clock, clockwise
         if (unlocked && cooldownTimers[s] > 0.0f) {
             f32 maxCD = (maxCooldowns && maxCooldowns[s] > 0.0f) ? maxCooldowns[s] : 1.0f;
             f32 cdFrac = cooldownTimers[s] / maxCD;
             if (cdFrac > 1.0f) cdFrac = 1.0f;
-            f32 cdH = slotH * cdFrac;
-            Vec3 cdCol = {0.08f, 0.08f, 0.12f};
-            // Draw from top of slot downward
-            for (f32 fy = 0; fy < cdH; fy += 1.0f) {
-                f32 ly = y + slotH - 1 - fy;
-                pushLine(sx + 1, ly, sx + slotW - 1, ly, cdCol);
-            }
+            f32 cx = sx + slotW * 0.5f;
+            f32 cy = y + slotH * 0.5f;
+            f32 radius = slotW * 0.45f;
+            drawRadialCooldown(cx, cy, radius, cdFrac, {0.05f, 0.05f, 0.08f});
         }
 
         flushHUD(sw, sh);
@@ -609,13 +639,14 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             static char numBuf[4][2] = {{'1',0}, {'2',0}, {'3',0}, {'4',0}};
             skillLabel = numBuf[s];
         }
-        drawKeySymbol(sw, sh, sx + 7.0f * uiScale, y + 8.0f * uiScale, skillLabel, selected && unlocked);
+        // Adjusted positions for the larger 64px slot
+        drawKeySymbol(sw, sh, sx + 14.0f * uiScale, y + 16.0f * uiScale, skillLabel, selected && unlocked);
 
         // Locked text
         if (!unlocked) {
             char lockTxt[8];
             std::snprintf(lockTxt, sizeof(lockTxt), "F%u", unlockFloors[s]);
-            FontSystem::drawText(sw, sh, sx + 6.0f * uiScale, y + 2.0f * uiScale, lockTxt, {0.35f, 0.25f, 0.25f}, 1);
+            FontSystem::drawText(sw, sh, sx + 12.0f * uiScale, y + 4.0f * uiScale, lockTxt, {0.35f, 0.25f, 0.25f}, 1);
         }
     }
 }
@@ -736,7 +767,8 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               const EquipSkillSlot* slots, u32 slotCount)
 {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
-    f32 slotW = 32.0f * uiScale, slotH = 32.0f * uiScale, gap = 3.0f * uiScale;
+    // Upgraded to 64px slots with 4px gaps to match class skill bar
+    f32 slotW = 64.0f * uiScale, slotH = 64.0f * uiScale, gap = 4.0f * uiScale;
 
     for (u32 s = 0; s < slotCount; s++) {
         const EquipSkillSlot& slot = slots[s];
@@ -754,27 +786,25 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         if (slot.isPassive) borderCol = ready ? Vec3{0.5f, 0.4f, 0.7f} : Vec3{0.25f, 0.2f, 0.35f};
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
 
-        // Cooldown overlay — dark from top, shrinks downward as skill recharges
+        // Radial cooldown overlay — pie sweep from 12 o'clock, clockwise
         if (slot.cooldownTimer > 0.0f) {
             f32 maxCD = (slot.maxCooldown > 0.0f) ? slot.maxCooldown : 1.0f;
             f32 cdFrac = slot.cooldownTimer / maxCD;
             if (cdFrac > 1.0f) cdFrac = 1.0f;
-            f32 cdH = slotH * cdFrac;
-            Vec3 cdCol = {0.05f, 0.05f, 0.08f};
-            for (f32 fy = 0; fy < cdH; fy += 1.0f) {
-                f32 ly = y + slotH - 1 - fy;
-                pushLine(sx + 1, ly, sx + slotW - 1, ly, cdCol);
-            }
+            f32 cx = sx + slotW * 0.5f;
+            f32 cy = y + slotH * 0.5f;
+            f32 radius = slotW * 0.45f;
+            drawRadialCooldown(cx, cy, radius, cdFrac, {0.05f, 0.05f, 0.08f});
         }
 
-        // Draw 8x8 skill icon scaled to 16x16, centered in the slot
+        // Draw 8x8 skill icon scaled to 32x32, centered in the 64px slot
         const u8* icon = getSkillIcon(slot.skillId);
         if (icon) {
             Vec3 cols[5];
             getSkillIconColors(slot.skillId, cols);
-            f32 iconX = sx + 8.0f * uiScale;  // center 16px icon in 32px slot
-            f32 iconY = y + 8.0f * uiScale;
-            f32 px = 2.0f * uiScale; // pixel scale
+            f32 iconX = sx + 16.0f * uiScale;  // center 32px icon in 64px slot
+            f32 iconY = y + 16.0f * uiScale;
+            f32 px = 4.0f * uiScale; // pixel scale (2× larger than before)
             for (u32 iy = 0; iy < 8; iy++) {
                 for (u32 ix = 0; ix < 8; ix++) {
                     u8 c = icon[iy * 8 + ix];
@@ -791,12 +821,12 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
 
         flushHUD(sw, sh);
 
-        // Key label or "Auto" for passives
+        // Key label or "Auto" for passives — adjusted for larger 64px slot
         if (slot.isPassive) {
-            FontSystem::drawText(sw, sh, sx + 4.0f * uiScale, y + 2.0f * uiScale, "auto",
+            FontSystem::drawText(sw, sh, sx + 8.0f * uiScale, y + 4.0f * uiScale, "auto",
                                  {0.5f, 0.4f, 0.7f}, 1);
         } else {
-            drawKeySymbol(sw, sh, sx + 7.0f * uiScale, y - 20.0f * uiScale, slot.keyLabel, ready);
+            drawKeySymbol(sw, sh, sx + 14.0f * uiScale, y - 22.0f * uiScale, slot.keyLabel, ready);
         }
     }
 }

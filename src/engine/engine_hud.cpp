@@ -321,8 +321,8 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             // Quickbar is 4 slots × 40px + 3 gaps × 4px = 172px, centered (scaled)
             f32 qbTotalW = QUICKBAR_SLOTS * 40.0f * hs4 + (QUICKBAR_SLOTS - 1) * 4.0f * hs4;
             f32 qbX = (static_cast<f32>(sw) - qbTotalW) * 0.5f;
-            // Skill bar goes to the left of the quickbar with a small gap
-            f32 skillBarW = 4 * 32.0f * hs4 + 3 * 3.0f * hs4;
+            // Skill bar: 4×64px slots + 3×4px gaps = 268px (scaled)
+            f32 skillBarW = 4 * 64.0f * hs4 + 3 * 4.0f * hs4;
             f32 skillBarX = qbX - skillBarW - 12.0f * hs4;
             f32 skillBarY = 14.0f * hs4; // align with quickbar bottom area
 
@@ -334,9 +334,22 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 maxCooldowns[s] = sd ? sd->cooldown : 1.0f;
             }
 
+            // Flash effect: briefly highlight slot border white when a skill comes off cooldown
+            static f32 s_classSkillFlash[4] = {};
+            static f32 s_prevCooldowns[4]   = {};
+            for (u8 s = 0; s < 4; s++) {
+                if (s_classSkillFlash[s] > 0.0f) s_classSkillFlash[s] -= 1.0f / 60.0f;
+                // Transition from on-cooldown to ready triggers the flash
+                if (cooldowns[s] <= 0.0f && s_prevCooldowns[s] > 0.0f) {
+                    s_classSkillFlash[s] = 0.15f;
+                }
+                s_prevCooldowns[s] = cooldowns[s];
+            }
+
             HUD::drawClassSkillBar(sw, sh, skillBarX, skillBarY,
                                     m_activeClassSkill, m_level.currentFloor,
-                                    cls.skillUnlockFloor, cls.skillUpgradeFloor, cooldowns, maxCooldowns);
+                                    cls.skillUnlockFloor, cls.skillUpgradeFloor,
+                                    cooldowns, maxCooldowns, s_classSkillFlash);
 
             // Equipment skill bar — shows active legendary equipment skills above class bar
             {
@@ -382,10 +395,12 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 }
 
                 if (equipCount > 0) {
-                    // Position above the class skill bar (scaled)
-                    f32 equipBarW = equipCount * 32.0f * hs4 + (equipCount - 1) * 3.0f * hs4;
+                    // Position above the class skill bar (scaled).
+                    // Equip bar: N×64px slots + (N-1)×4px gaps
+                    f32 equipBarW = equipCount * 64.0f * hs4 + (equipCount - 1) * 4.0f * hs4;
                     f32 equipBarX = skillBarX + (skillBarW - equipBarW) * 0.5f;
-                    f32 equipBarY = skillBarY + 56.0f * hs4; // well above class bar
+                    // Class bar is now 64px tall; place equip bar 8px above it
+                    f32 equipBarY = skillBarY + 64.0f * hs4 + 8.0f * hs4;
                     HUD::drawEquipSkillBar(sw, sh, equipBarX, equipBarY,
                                             equipSlots, equipCount);
                 }
