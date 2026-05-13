@@ -218,6 +218,11 @@ void Engine::update(f32 dt) {
                 m_cameras[0] = m_camera;
             }
             m_gameState = GameState::IN_GAME;
+            // startGame() can take 100ms+ (BSP gen, mesh build, spawning).
+            // Reset accumulator and clock so the next frame doesn't see
+            // the loading spike and try to catch up with multiple ticks.
+            m_accumulator = 0.0;
+            Clock::update();
         }
         break;
     case GameState::IN_GAME:
