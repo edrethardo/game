@@ -75,6 +75,12 @@ docker run --rm \
 
 This produces `build-switch/DungeonEngine.nro` with assets bundled as romfs.
 
+**Note:** Audio assets must be fetched on the host before building for Switch:
+
+```bash
+python3 tools/fetch_audio.py
+```
+
 ### Running on a Homebrew Switch
 
 Your Switch needs custom firmware (CFW) such as [Atmosphere](https://github.com/Atmosphere-NX/Atmosphere) with the [Homebrew Menu](https://github.com/switchbrew/nx-hbmenu) installed.
@@ -136,7 +142,8 @@ Attribution is not required but appreciated:
 
 - [Kenney](https://kenney.nl/) — RPG Audio, Impact Sounds, UI Audio (CC0 1.0)
 - [OpenGameArt.org](https://opengameart.org/) contributors — 80 CC0 RPG SFX,
-  100 CC0 SFX, 50 CC0 Retro Synth SFX, Swishes, Thwack (CC0 1.0)
+  100 CC0 SFX, 50 CC0 Retro Synth SFX, Swishes, Thwack, RPG Sound Pack,
+  Magic Spell SFX (CC0 1.0)
 
 **Third-party libraries** in `external/` retain their own licenses
 (ENet: MIT, SDL2: zlib, stb: public domain). See each subdirectory.
