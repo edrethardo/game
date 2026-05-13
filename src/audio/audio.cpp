@@ -87,7 +87,12 @@ static void buildPath(char* out, u32 outSize, const char* filename) {
 }
 
 bool AudioSystem::init() {
+    // Switch hardware runs at 48kHz — match it to avoid sinc resampling artifacts
+#ifdef __SWITCH__
+    if (Mix_OpenAudio(48000, MIX_DEFAULT_FORMAT, 2, 1024) < 0) {
+#else
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) < 0) {
+#endif
         LOG_WARN("Mix_OpenAudio failed: %s — audio disabled", Mix_GetError());
         return false;
     }

@@ -181,7 +181,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
     "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
     # Magic weapons
-    "sfx_weapon_wand":      "oga_magic-spell-sfx/magical_2.ogg",           # synthesized magic bolt — designed for dungeon crawlers
+    "sfx_weapon_wand":      "oga_80-rpg-sfx/spell_fire_06.ogg",            # short dark fire pulse — sci-fantasy energy weapon
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
     # Reload
     "sfx_reload":           "kenney_rpg-audio/Audio/metalLatch.ogg",
@@ -195,17 +195,17 @@ MANUAL_OVERRIDES = {
     "sfx_player_death":     "oga_80-rpg-sfx/creature_monster_02.ogg",       # was variant 01
     # Skills
     "sfx_skill_fire":       "oga_80-rpg-sfx/spell_fire_03.ogg",
-    "sfx_skill_ice":        "kenney_impact-sounds/Audio/impactGlass_light_000.ogg",  # was variant 003
-    "sfx_skill_lightning":  "oga_rpg-sound-pack/RPG Sound Pack/battle/spell.wav",  # designed RPG spell sound — sharp attack
+    "sfx_skill_ice":        "oga_80-rpg-sfx/chain_01.ogg",                 # chains snapping — reads as crystalline freeze
+    "sfx_skill_lightning":  "oga_100-cc0-sfx/noise_01.ogg",                # raw noise burst — harsh electrical crackle
     "sfx_skill_blood":      "oga_80-rpg-sfx/creature_slime_02.ogg",
     "sfx_skill_dash":       "oga_swishes/swishes/swish-1.wav",              # was swish-5 (swish-1 is quicker)
-    "sfx_skill_heal":       "oga_100-cc0-sfx/bell_01.ogg",                  # was spell_fire_04 (fire sound for heal!)
-    "sfx_skill_buff":       "oga_50-retro-synth/power_up_04.ogg",           # was variant 03
-    "sfx_skill_summon":     "oga_80-rpg-sfx/misc_03.ogg",                   # was variant 02
+    "sfx_skill_heal":       "oga_100-cc0-sfx/gong_02.ogg",                  # deep resonant gong — dark ritual restoration
+    "sfx_skill_buff":       "oga_80-rpg-sfx/creature_roar_02.ogg",          # was retro power_up (too 8-bit for a war cry)
+    "sfx_skill_summon":     "oga_80-rpg-sfx/creature_misc_05.ogg",          # deep otherworldly — portal/summoning
     "sfx_skill_explosion":  "oga_100-cc0-sfx/explosion.ogg",
     "sfx_skill_stun":       "oga_thwack/PCM/thwack-08.wav",                 # was thwack-05
     # Items
-    "sfx_item_pickup":      "oga_80-rpg-sfx/item_coins_02.ogg",             # was variant 01
+    "sfx_item_pickup":      "oga_100-cc0-sfx/metal_03.ogg",                 # metallic clink — darker, industrial
     "sfx_item_equip":       "oga_80-rpg-sfx/metal_02.ogg",                  # was variant 01
     "sfx_item_drop":        "oga_80-rpg-sfx/item_wood_02.ogg",              # was variant 01
     "sfx_potion_use":       "oga_rpg-sound-pack/RPG Sound Pack/inventory/bubble.wav",
@@ -224,7 +224,7 @@ MANUAL_OVERRIDES = {
     "sfx_boss_stomp":       "kenney_impact-sounds/Audio/impactPlate_heavy_000.ogg",  # was variant 002
     # Environment
     "sfx_door_open":        "kenney_rpg-audio/Audio/doorOpen_2.ogg",         # was doorOpen_1
-    "sfx_level_up":         "oga_80-rpg-sfx/item_gem_02.ogg",               # was variant 01
+    "sfx_level_up":         "oga_100-cc0-sfx/gong_01.ogg",                  # powerful gong strike — ominous power gained
 }
 
 # Per-sound pitch multiplier for ffmpeg processing.
@@ -245,10 +245,10 @@ PITCH_SHIFTS = {
     "sfx_weapon_crossbow":  0.80,
     "sfx_weapon_throw":     0.90,
     "sfx_weapon_molotov":   0.70,
-    "sfx_weapon_wand":      0.85,   # synthesized magic bolt — slight pitch down for weight
+    "sfx_weapon_wand":      0.70,   # dark fire pulse pitched low
     "sfx_weapon_staff":     0.80,
     # Reload
-    "sfx_reload":           0.80,
+    "sfx_reload":           0.336,
     # Combat hits
     "sfx_hit_melee":        0.70,
     "sfx_hit_hitscan":      0.80,
@@ -259,17 +259,17 @@ PITCH_SHIFTS = {
     "sfx_player_death":     0.60,
     # Skills — mostly natural pitch, slight darkening for dungeon atmosphere
     "sfx_skill_fire":       0.85,
-    "sfx_skill_ice":        0.85,
-    "sfx_skill_lightning":  0.75,   # electric crack pitched down for thunder
+    "sfx_skill_ice":        0.75,   # chains — pitched down for dark cracking freeze
+    "sfx_skill_lightning":  0.80,   # raw noise burst — harsh crackle
     "sfx_skill_blood":      0.80,
     "sfx_skill_dash":       1.0,
-    "sfx_skill_heal":       1.0,   # bright chime — no darkening
-    "sfx_skill_buff":       0.95,
-    "sfx_skill_summon":     0.75,
+    "sfx_skill_heal":       0.65,   # deep gong — dark ritual
+    "sfx_skill_buff":       0.60,   # deep aggressive roar for war cry
+    "sfx_skill_summon":     0.55,   # deep otherworldly portal
     "sfx_skill_explosion":  0.70,
     "sfx_skill_stun":       0.75,
     # Items — mostly natural
-    "sfx_item_pickup":      0.95,
+    "sfx_item_pickup":      0.90,   # dark metallic clink
     "sfx_item_equip":       0.85,
     "sfx_item_drop":        0.90,
     "sfx_potion_use":       1.0,    # procedural — already tuned
@@ -288,14 +288,14 @@ PITCH_SHIFTS = {
     "sfx_boss_stomp":       0.60,
     # Environment
     "sfx_door_open":        0.80,
-    "sfx_level_up":         1.0,   # bright, rewarding — no darkening
+    "sfx_level_up":         0.75,   # deep gong — ominous power gained
 }
 
 # Per-sound reverb: ffmpeg aecho params "in_gain:out_gain:delays:decays"
 # Only sounds that need extra tail/space. Most sounds stay dry.
 REVERB = {
     "sfx_skill_stun":       "0.8:0.7:40|80:0.4|0.2",    # holy smite uses this — needs divine reverb
-    "sfx_skill_heal":       "0.8:0.6:60|120:0.3|0.15",   # healing chime benefits from space
+    "sfx_skill_heal":       "0.8:0.6:60|120:0.3|0.15",   # gong + reverb for dark ritual feel
     "sfx_boss_roar":        "0.8:0.7:50|100:0.5|0.25",   # big creature in a dungeon
 }
 
@@ -303,6 +303,10 @@ REVERB = {
 # Only sounds that need truncation — most are fine at their natural length.
 MAX_DURATION = {
     "sfx_weapon_wand":      0.5,
+}
+
+# Per-sound low-pass filter cutoff in Hz. Removes bright/harsh frequencies.
+LOWPASS = {
 }
 
 # ---------------------------------------------------------------------------
@@ -986,14 +990,17 @@ def main():
             src = os.path.join(OUTPUT_DIR, fname)
             reverb = REVERB.get(sfx_name)
             max_dur = MAX_DURATION.get(sfx_name)
+            lp_freq = LOWPASS.get(sfx_name)
 
-            # Build the ffmpeg filter chain: trim + pitch shift + optional reverb
+            # Build the ffmpeg filter chain: trim + pitch shift + lowpass + reverb
             filters = []
             if max_dur:
                 filters.append(f"atrim=0:{max_dur}")
             if pitch != 1.0:
                 filters.append(f"asetrate=44100*{pitch}")
                 filters.append("aresample=44100")
+            if lp_freq:
+                filters.append(f"lowpass=f={lp_freq}")
             if reverb:
                 filters.append(f"aecho={reverb}")
 
