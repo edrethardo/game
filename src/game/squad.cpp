@@ -112,11 +112,14 @@ void SquadSystem::rebuild(SquadPool& pool, const DungeonResult& dungeon,
     }
 }
 
+// Forward declaration — propagateAdjacentAlert is called from both update()
+// (cascade on delayed alert) and alertSquad (initial propagation).
+static void propagateAdjacentAlert(SquadPool& pool, u16 sid,
+                                    const DungeonResult& dungeon);
+
 void SquadSystem::update(SquadPool& pool, const DungeonResult& dungeon,
                          EntityPool& entities, Vec3 playerPos, f32 dt)
 {
-    (void)dungeon;  // reserved for spatial adjacency queries in future
-
     for (u32 s = 0; s < pool.squadCount; ++s) {
         Squad& squad = pool.squads[s];
 
@@ -128,6 +131,10 @@ void SquadSystem::update(SquadPool& pool, const DungeonResult& dungeon,
                     squad.alertTimer = 0.0f;
                     squad.alerted    = true;
                     assignRoles(squad, entities, playerPos);
+
+                    // Cascade: newly alerted squad also alerts its own neighbors,
+                    // creating a wave that propagates room-by-room through corridors
+                    propagateAdjacentAlert(pool, static_cast<u16>(s), dungeon);
                 }
             }
             continue;
@@ -146,7 +153,8 @@ void SquadSystem::update(SquadPool& pool, const DungeonResult& dungeon,
 }
 
 void SquadSystem::alertSquad(SquadPool& pool, u16 entityIndex,
-                              EntityPool& entities)
+                              EntityPool& entities,
+                              const DungeonResult& dungeon)
 {
     // Find the squad that owns this entity
     Entity& trigger = entities.entities[entityIndex];
@@ -165,16 +173,26 @@ void SquadSystem::alertSquad(SquadPool& pool, u16 entityIndex,
     own.reassignTimer = SQUAD_REASSIGN_INTERVAL;
     assignRoles(own, entities, trigger.lastSeenPos);
 
-    // Propagate a delayed alert to ALL other non-alerted squads.
-    // The dungeon is small enough that a blanket propagation is acceptable;
-    // a future improvement could restrict this to geometrically adjacent rooms.
-    for (u32 s = 0; s < pool.squadCount; ++s) {
-        Squad& other = pool.squads[s];
-        if (static_cast<u16>(s) == sid) continue;
-        if (other.alerted) continue;
-        // Only set the timer if it hasn't already started (first alerter wins)
-        if (other.alertTimer <= 0.0f) {
-            other.alertTimer = SQUAD_ADJACENT_ALERT_DELAY;
+    // Propagate delayed alert only to adjacent rooms (not all squads),
+    // creating a realistic wave-propagation effect through connected corridors.
+    propagateAdjacentAlert(pool, sid, dungeon);
+}
+
+// Alert adjacent rooms of squad sid with a delay, skipping already-alerted squads.
+static void propagateAdjacentAlert(SquadPool& pool, u16 sid,
+                                    const DungeonResult& dungeon)
+{
+    if (sid >= dungeon.roomCount) return;
+    const DungeonRoom& alertRoom = dungeon.rooms[sid];
+
+    for (u8 a = 0; a < alertRoom.adjacentCount; a++) {
+        u16 adjRoomIdx = alertRoom.adjacentRooms[a];
+        if (adjRoomIdx >= pool.squadCount) continue;
+        Squad& neighbor = pool.squads[adjRoomIdx];
+        if (neighbor.alerted) continue;
+        // First alerter wins — don't reset a shorter timer already running
+        if (neighbor.alertTimer <= 0.0f) {
+            neighbor.alertTimer = SQUAD_ADJACENT_ALERT_DELAY;
         }
     }
 }

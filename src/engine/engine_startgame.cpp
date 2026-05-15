@@ -537,10 +537,32 @@ void Engine::startGame() {
                 if (ent) {
                     ent->meshId = meshLookup[tmpl.meshIdx];
                     ent->materialId = MaterialSystem::getIdByName(tmpl.matName);
+
+                    // Cache base stats before any floor scaling so the aura system
+                    // can reset them each frame before reapplying the buff
+                    ent->baseMoveSpeed      = ent->moveSpeed;
+                    ent->baseAttackCooldown = ent->attackCooldown;
+
                     // Set archetype role based on enemy type
                     if (std::strstr(tmpl.matName, "gargoyle")) {
                         ent->enemyRole = EnemyRole::AMBUSH;
                         ent->aiState = AIState::DORMANT;
+
+                        // Reposition gargoyle to a room doorway so it can ambush
+                        // players entering the room from the corridor
+                        Vec3 doorPos[4];
+                        u8 doorCount = LevelGridQuery::findDoorwayCells(
+                            m_level.grid, room.x, room.z, room.w, room.d, doorPos, 4);
+                        if (doorCount > 0) {
+                            u8 pick = static_cast<u8>(std::rand() % doorCount);
+                            f32 doorY = tmpl.flying
+                                ? (room.floorHeight + 1.5f)
+                                : (room.floorHeight + tmpl.halfExtents.y);
+                            ent->position = {doorPos[pick].x, doorY, doorPos[pick].z};
+                            // Doorway position is already facing the corridor, so
+                            // switch to AMBUSH (active wait) rather than DORMANT
+                            ent->aiState = AIState::AMBUSH;
+                        }
                     } else if (std::strstr(tmpl.matName, "necromancer")) {
                         ent->enemyRole = EnemyRole::SUMMONER;
                         ent->tacticalTimer = 8.0f; // first resurrect after 8s

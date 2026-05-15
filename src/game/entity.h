@@ -168,6 +168,11 @@ struct Entity {
     f32  onHitDuration  = 0.0f;
     f32  onHitDps       = 0.0f;  // for poison/burn
 
+    // Aura buff state — set on spawn from template, modified at runtime by AURA heralds
+    f32  baseMoveSpeed      = 0.0f;   // original moveSpeed from spawn template
+    f32  baseAttackCooldown = 0.0f;   // original attackCooldown from spawn template
+    bool hasAuraBuff        = false;  // true while within range of an AURA herald this frame
+
     // Feedback
     f32  flashTimer = 0.0f;
     f32  deathTimer = 0.0f;

@@ -9,6 +9,11 @@ struct DungeonRoom {
     u32 x, z, w, d;     // grid cell position and dimensions
     f32 floorHeight;     // floor height in meters
     u8  wallMat;         // wall material ID
+
+    // Rooms connected via corridors (indices into DungeonResult::rooms).
+    // Populated by LevelGen::generate after all rooms and corridors are carved.
+    u16 adjacentRooms[4] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+    u8  adjacentCount = 0;
 };
 
 static constexpr u32 MAX_DUNGEON_ROOMS = 32;

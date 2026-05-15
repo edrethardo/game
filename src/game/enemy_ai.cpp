@@ -7,6 +7,7 @@
 
 #include "game/enemy_ai.h"
 #include "game/player.h"
+#include "world/level_gen.h"
 #include "game/combat.h"
 #include "game/projectile.h"
 #include "game/game_constants.h"
@@ -146,8 +147,45 @@ static bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
 void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       Player& player, ProjectilePool& projectiles, f32 dt,
                       SquadPool* squads,
-                      Player** extraPlayers, u32 extraPlayerCount)
+                      Player** extraPlayers, u32 extraPlayerCount,
+                      const DungeonResult* dungeon)
 {
+    // ---------------------------------------------------------------------------
+    // Herald aura pass — runs before per-entity AI so movement/cooldown mods
+    // are in effect for the entire tick. We reset all buffs first, then reapply
+    // from any active AURA heralds. This handles heralds dying mid-floor cleanly.
+    // ---------------------------------------------------------------------------
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        Entity& e = pool.entities[pool.activeList[a]];
+        if (e.hasAuraBuff) {
+            e.moveSpeed      = e.baseMoveSpeed;
+            e.attackCooldown = e.baseAttackCooldown;
+            e.hasAuraBuff    = false;
+        }
+    }
+
+    constexpr f32 AURA_RADIUS_SQ = 5.0f * 5.0f;
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        Entity& herald = pool.entities[pool.activeList[a]];
+        if (herald.enemyRole != EnemyRole::AURA) continue;
+        if (herald.flags & ENT_DEAD) continue;
+
+        for (u32 b = 0; b < pool.activeCount; b++) {
+            if (b == a) continue;
+            Entity& ally = pool.entities[pool.activeList[b]];
+            if (ally.flags & ENT_DEAD) continue;
+            if (ally.flags & ENT_FRIENDLY) continue;  // don't buff player-side NPCs
+
+            Vec3 delta = ally.position - herald.position;
+            f32 distSq = delta.x*delta.x + delta.y*delta.y + delta.z*delta.z;
+            if (distSq < AURA_RADIUS_SQ) {
+                ally.moveSpeed      = ally.baseMoveSpeed * 1.1f;
+                ally.attackCooldown = ally.baseAttackCooldown * 0.9f;
+                ally.hasAuraBuff    = true;
+            }
+        }
+    }
+
     for (u32 a = 0; a < pool.activeCount; a++) {
         u32 i = pool.activeList[a];
         Entity& e = pool.entities[i];
@@ -1223,19 +1261,24 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             u16 checkFreq = 2;
             if (e.aiCheckIdx >= checkFreq && player.smokeTimer <= 0.0f) {
                 e.aiCheckIdx = 0;
+                // A static empty dungeon result is used as a fallback when no dungeon
+                // is provided, so alertSquad always has valid adjacency data to read.
+                static const DungeonResult s_emptyDungeon{};
+                const DungeonResult& alertDungeon = dungeon ? *dungeon : s_emptyDungeon;
+
                 if (targetIsNPC && targetDist <= e.detectionRange) {
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
-                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
+                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
                 } else if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
-                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
+                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
                 } else if (dist <= e.detectionRange * 0.6f) {
                     // Close enough to hear — chase without LOS
                     e.aiState = AIState::CHASE;
                     e.velocity = {0, 0, 0};
-                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool);
+                    if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
                 }
                 // Aggro propagation handled by SquadSystem::alertSquad (no per-entity loop needed)
             }

@@ -127,7 +127,7 @@ void Engine::update(f32 dt) {
             }
         }
         // Keep enemies and projectiles ticking while dead so they walk home
-        EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads);
+        EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
         EntitySystem::tickTimers(m_entities, dt);
         ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt);
         return;
@@ -288,12 +288,12 @@ void Engine::update(f32 dt) {
                     // Shared systems must always tick so enemies return to spawns
                     // when both players are dead, and projectiles expire normally.
                     if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
-                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[1], m_projectiles, dt, &m_level.squads);
+                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[1], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
                         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[1].position, dt);
                         ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[1], dt);
                     } else {
                         // P0 alive or both dead — use P0 as reference (enemies idle/return if dead)
-                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads);
+                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
                         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[0].position, dt);
                         ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt);
                     }
@@ -591,9 +591,9 @@ void Engine::gameUpdate(f32 dt) {
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
             // Co-op: pass P2 as extra target so enemies chase the nearest player
             Player* extras[] = { &m_localPlayers[1] };
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, extras, 1);
+            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, extras, 1, &m_level.dungeon);
         } else {
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads);
+            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
         }
         // Propagate squad alerts and reassign roles for the active tick
         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayer.position, dt);

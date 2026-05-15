@@ -248,6 +248,22 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
         }
     }
 
+    // Compute room adjacency — two rooms are adjacent when their bounding boxes,
+    // expanded by 3 cells to account for corridor width, overlap in both axes.
+    // This drives the wave-propagation alert system in squad.cpp.
+    for (u32 i = 0; i < result.roomCount; i++) {
+        DungeonRoom& ri = result.rooms[i];
+        for (u32 j = i + 1; j < result.roomCount; j++) {
+            DungeonRoom& rj = result.rooms[j];
+            bool xOverlap = (ri.x < rj.x + rj.w + 3) && (rj.x < ri.x + ri.w + 3);
+            bool zOverlap = (ri.z < rj.z + rj.d + 3) && (rj.z < ri.z + ri.d + 3);
+            if (xOverlap && zOverlap) {
+                if (ri.adjacentCount < 4) ri.adjacentRooms[ri.adjacentCount++] = static_cast<u16>(j);
+                if (rj.adjacentCount < 4) rj.adjacentRooms[rj.adjacentCount++] = static_cast<u16>(i);
+            }
+        }
+    }
+
     // Player spawns in center of first room
     if (result.roomCount > 0) {
         const DungeonRoom& r = result.rooms[0];

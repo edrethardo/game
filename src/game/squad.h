@@ -36,7 +36,9 @@ namespace SquadSystem {
                 EntityPool& entities, Vec3 playerPos, f32 dt);
 
     // Alert the squad containing this entity. Called when an enemy detects the player.
-    void alertSquad(SquadPool& pool, u16 entityIndex, EntityPool& entities);
+    // dungeon is needed for adjacency-based propagation.
+    void alertSquad(SquadPool& pool, u16 entityIndex, EntityPool& entities,
+                    const DungeonResult& dungeon);
 
     // Remove dead member and force role reassignment next tick.
     void onMemberDeath(SquadPool& pool, u16 entityIndex, EntityPool& entities);
