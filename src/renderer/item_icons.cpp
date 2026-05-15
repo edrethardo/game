@@ -69,12 +69,24 @@ static const u16 s_iconData[][16] = {
         0x1F80, 0x1F80, 0x3F00, 0x3F00,
         0x3E00, 0x0000, 0x0000, 0x0000,
     },
-    // 8: BOW — curved arc with string (left arc = bow limb, right column = string)
+    // 8: BOW — D-shaped bow with string (left = curved limb, right = taut string)
     {
-        0x0080, 0x0180, 0x0280, 0x0480,
-        0x0880, 0x1080, 0x2080, 0x4080,
-        0x4080, 0x2080, 0x1080, 0x0880,
-        0x0480, 0x0280, 0x0180, 0x0080,
+        0x0300, // ......##.......
+        0x0480, // ....#..#.......
+        0x0880, // ...#...#.......
+        0x1080, // ..#....#.......
+        0x2080, // .#.....#.......
+        0x4080, // #......#.......
+        0x4080, // #......#.......
+        0x4080, // #......#.......
+        0x4080, // #......#.......
+        0x4080, // #......#.......
+        0x4080, // #......#.......
+        0x2080, // .#.....#.......
+        0x1080, // ..#....#.......
+        0x0880, // ...#...#.......
+        0x0480, // ....#..#.......
+        0x0300, // ......##.......
     },
     // 9: CROSSBOW — T-shape (horizontal stock + vertical tiller)
     {
@@ -138,6 +150,32 @@ static const u16 s_iconData[][16] = {
         0x07E0, 0x0E70, 0x0C30, 0x1818,
         0x1818, 0x0C30, 0x0E70, 0x07E0,
         0x03C0, 0x0000, 0x0000, 0x0000,
+    },
+    // 17: (unused padding — keeps atlas row alignment; atlas is 16 cols × 2 rows)
+    {
+        0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000,
+    },
+    // 18: CLAYMORE — tall two-handed greatsword (narrow blade, long, big crossguard + pommel)
+    {
+        0x0100, // .......#.......  tip
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x0380, // ......###......  blade
+        0x3FFC, // ..############.  crossguard
+        0x0100, // .......#.......  grip
+        0x0100, // .......#.......  grip
+        0x0100, // .......#.......  grip
+        0x0100, // .......#.......  grip
+        0x0380, // ......###......  pommel
+        0x0380, // ......###......  pommel
     },
 };
 
@@ -236,6 +274,7 @@ static u32 subtypeToIconIndex(WeaponSubtype st) {
         case WeaponSubtype::THROWING_KNIFE: return 10;
         case WeaponSubtype::MOLOTOV:        return 11;
         case WeaponSubtype::WAND:           return 12;
+        case WeaponSubtype::CLAYMORE:       return 19;  // array idx 19 (comments had duplicate "13")
         default:                            return 0;
     }
 }
@@ -265,6 +304,8 @@ void ItemIconSystem::drawIcon(u32 screenWidth, u32 screenHeight,
     } else {
         iconIdx = slotToIconIndex(def.slot);
     }
+    // Clamp to valid atlas range
+    if (iconIdx >= ICON_COUNT) iconIdx = 0;
 
     // Compute UV rect for this icon within the atlas
     u32 col = iconIdx % ICON_ATLAS_COLS;

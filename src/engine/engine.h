@@ -141,6 +141,7 @@ private:
     Shader  m_basicShader;
     Shader  m_unlitShader;
     Mesh    m_cubeMesh;
+    Mesh    m_quadMesh;   // flat quad for billboard sprites
 
     // Mesh registry for entities (MeshDef struct defined in limb_system.h)
     static constexpr u32 MAX_MESH_DEFS = 64;

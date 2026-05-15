@@ -1952,7 +1952,19 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         f32 renderScale = isGlobeItem ? 0.4f : ITEM_SCALE; // globes are small orbs
         f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
         Vec3 pos = {wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
-        f32 spin = wi.bobTimer * 2.0f;
+
+        // Non-weapon items spin slower (weapons tumble quickly; armor/accessories drift).
+        // Spin speed is set before any slot-specific Y adjustments.
+        bool isWeaponSlot = (wi.item.defId < m_itemDefCount &&
+                             m_itemDefs[wi.item.defId].slot == ItemSlot::WEAPON);
+        f32 spin = isWeaponSlot ? wi.bobTimer * 2.0f : wi.bobTimer * 0.8f;
+
+        // Helmets float a touch higher so they appear to rest at head-level rather
+        // than the same floor-hover as flat items like rings and boots.
+        if (!isGlobeItem && wi.item.defId < m_itemDefCount &&
+            m_itemDefs[wi.item.defId].slot == ItemSlot::HELMET) {
+            pos.y += 0.15f * renderScale;
+        }
 
         // Globes render as small colored cubes; regular items use their mesh
         const Mesh* itemMesh = &m_cubeMesh;
@@ -2035,53 +2047,72 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         }
         AABB bounds = {pos - Vec3{renderScale,renderScale,renderScale},
                        pos + Vec3{renderScale,renderScale,renderScale}};
-        Renderer::submit(m_unlitShader, itemTex, *itemMesh, model, bounds, tint);
 
         if (!isGlobeItem) {
-            // Rarity glow — pulsing cross of debug lines radiating from item center
-            f32 glowPulse = 0.6f + 0.4f * sinf(wi.bobTimer * 4.0f);
-            Vec3 gc = color * glowPulse;
-            f32 gr = 0.4f + glowPulse * 0.2f; // glow radius
-            DebugDraw::line(pos - Vec3{gr, 0, 0}, pos + Vec3{gr, 0, 0}, gc);
-            DebugDraw::line(pos - Vec3{0, gr, 0}, pos + Vec3{0, gr, 0}, gc);
-            DebugDraw::line(pos - Vec3{0, 0, gr}, pos + Vec3{0, 0, gr}, gc);
-            // Diagonal cross for more glow volume
-            f32 gd = gr * 0.7f;
-            DebugDraw::line(pos - Vec3{gd, gd, 0}, pos + Vec3{gd, gd, 0}, gc);
-            DebugDraw::line(pos - Vec3{gd, 0, gd}, pos + Vec3{gd, 0, gd}, gc);
-            DebugDraw::line(pos - Vec3{0, gd, gd}, pos + Vec3{0, gd, gd}, gc);
-            // Loot beam from floor upward
-            DebugDraw::line({pos.x, floorY, pos.z}, {pos.x, floorY + 4.0f, pos.z}, color);
-            // Legendary: triple vertical beams in triangle formation
-            if (wi.item.rarity == Rarity::LEGENDARY) {
-                Vec3 gold = {1.0f, 0.85f, 0.3f};
-                f32 beamH = 6.0f;
-                f32 r = 0.2f; // triangle radius
-                // Three beams at 120° intervals (triangle formation)
-                DebugDraw::line({pos.x, floorY, pos.z - r}, {pos.x, floorY + beamH, pos.z - r},
-                    gold * (0.4f + glowPulse * 0.6f));
-                DebugDraw::line({pos.x - r * 0.866f, floorY, pos.z + r * 0.5f},
-                    {pos.x - r * 0.866f, floorY + beamH, pos.z + r * 0.5f},
-                    gold * (0.6f + glowPulse * 0.4f));
-                DebugDraw::line({pos.x + r * 0.866f, floorY, pos.z + r * 0.5f},
-                    {pos.x + r * 0.866f, floorY + beamH, pos.z + r * 0.5f},
-                    gold * (0.4f + glowPulse * 0.6f));
-                // Extra diagonal crosses
-                f32 ge = gr * 0.5f;
-                DebugDraw::line(pos - Vec3{ge, ge, ge}, pos + Vec3{ge, ge, ge}, gold * glowPulse);
-                DebugDraw::line(pos - Vec3{ge, -ge, ge}, pos + Vec3{ge, -ge, ge}, gold * glowPulse);
+            // Rarity disc — camera-facing billboard behind the item mesh, colored by rarity.
+            // Legendary gets a larger, brighter disc; other rarities are subtler.
+            Vec4 discColor;
+            f32 discSize;
+            discColor = {0.9f, 0.9f, 0.9f, 0.3f};  // safe init (white/common)
+            discSize  = renderScale * 1.2f;
+            switch (wi.item.rarity) {
+                case Rarity::MAGIC:
+                    discColor = {0.2f, 0.9f, 0.2f, 0.4f};   // green
+                    break;
+                case Rarity::RARE:
+                    discColor = {0.2f, 0.4f, 1.0f, 0.4f};   // blue
+                    break;
+                case Rarity::LEGENDARY:
+                    discColor = {1.0f, 0.8f, 0.2f, 0.5f};   // gold
+                    discSize  = renderScale * 1.5f;
+                    break;
+                default: // COMMON
+                    discColor = {0.9f, 0.9f, 0.9f, 0.3f};   // white
+                    break;
             }
-        } else {
-            // Globe glow — simple pulsing cross of colored lines
-            f32 glowPulse = 0.5f + 0.5f * sinf(wi.bobTimer * 6.0f);
-            Vec3 gc = (wi.item.defId == GLOBE_HEALTH_ID)
-                ? Vec3{0.1f, glowPulse, 0.15f}
-                : Vec3{0.15f, 0.25f, glowPulse};
-            f32 gr = 0.3f;
-            DebugDraw::line(pos - Vec3{gr, 0, 0}, pos + Vec3{gr, 0, 0}, gc);
-            DebugDraw::line(pos - Vec3{0, gr, 0}, pos + Vec3{0, gr, 0}, gc);
-            DebugDraw::line(pos - Vec3{0, 0, gr}, pos + Vec3{0, 0, gr}, gc);
+
+            // Build billboard matrix: right/up/look axes from camera + world up,
+            // same pattern as the particle system (particles.cpp).
+            // Billboard faces camera: local +Z points toward camera (negated forward)
+            Vec3 bRight = m_camera.right;
+            Vec3 bUp    = {0.0f, 1.0f, 0.0f};
+            Vec3 bFwd   = m_camera.forward * -1.0f;  // toward camera
+            Mat4 discMat = Mat4::identity();
+            discMat.m[0]  = bRight.x * discSize; discMat.m[1]  = bRight.y * discSize; discMat.m[2]  = bRight.z * discSize;
+            discMat.m[4]  = bUp.x    * discSize; discMat.m[5]  = bUp.y    * discSize; discMat.m[6]  = bUp.z    * discSize;
+            discMat.m[8]  = bFwd.x   * discSize; discMat.m[9]  = bFwd.y   * discSize; discMat.m[10] = bFwd.z   * discSize;
+            discMat.m[12] = pos.x; discMat.m[13] = pos.y; discMat.m[14] = pos.z;
+
+            // Draw disc directly with raw GL — bypasses Renderer::submit which
+            // is designed for opaque batched draws and doesn't respect blend state.
+            Renderer::flush(); // clear any pending opaque draws first
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDepthMask(GL_FALSE);
+            glDisable(GL_CULL_FACE);
+
+            const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
+            const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
+            Mat4 discMvp = m_camera.viewProjection * discMat;
+
+            glUseProgram(m_unlitShader.program);
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, discMvp.ptr());
+            glUniform4f(m_unlitShader.loc_color, discColor.x, discColor.y, discColor.z, discColor.w);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, blobTex.handle);
+            if (m_unlitShader.loc_texture0 >= 0)
+                glUniform1i(m_unlitShader.loc_texture0, 0);
+
+            glBindVertexArray(m_quadMesh.vao);
+            glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, 0);
+
+            glEnable(GL_CULL_FACE);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
         }
+
+        Renderer::submit(m_unlitShader, itemTex, *itemMesh, model, bounds, tint);
     }
 
     // Other players (network multiplayer + split-screen co-op)

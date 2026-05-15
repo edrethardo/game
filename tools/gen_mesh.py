@@ -1333,20 +1333,37 @@ def gen_revolver(length=0.3):
 
 
 def gen_bow(height=0.8):
-    """Bow weapon — curved arc with grip.
+    """Bow weapon — D-shape built with add_cylinder for the curved limb.
 
-    Central grip block, two limbs extending up and down (offset left).
+    The limb is a half-circle arc (cylinder bent into a C), grip at center,
+    string connecting the tips. Uses add_cylinder for a smooth curve.
     """
     mb = MeshBuilder()
-    # Grip — small central block
+
+    # Grip — the central handle
     add_box(mb, center=(0.0, 0.0, 0.0),
-            half_extents=(0.015, 0.03, 0.015))
-    # Upper limb — thin, offset left
-    add_box(mb, center=(-0.03, 0.13, 0.0),
-            half_extents=(0.01, 0.1, 0.01))
-    # Lower limb — thin, offset left
-    add_box(mb, center=(-0.03, -0.13, 0.0),
-            half_extents=(0.01, 0.1, 0.01))
+            half_extents=(0.015, 0.04, 0.012))
+
+    # Curved limb — approximate a D-shape arc using small cylinders
+    # placed along a semicircle. Cylinders are upright (along Y) and
+    # small enough to blend together into a smooth curve.
+    num = 10
+    R = 0.15  # radius of the D arc
+    for i in range(num):
+        # Angle from -80 to +80 degrees (almost a semicircle)
+        angle = math.radians(-80 + (160 * i / (num - 1)))
+        cx = -R * math.cos(angle)  # curves backward (-X)
+        cy = R * math.sin(angle)   # vertical spread
+        # Each cylinder segment is short and thin
+        add_cylinder(mb, base_center=(cx, cy - 0.015, 0.0),
+                     radius=0.008, height=0.03, sides=4)
+
+    # String — thin tall box connecting the tips straight across
+    # Tips are at roughly (R*cos(80deg), ±R*sin(80deg))
+    tip_y = R * math.sin(math.radians(80))
+    add_box(mb, center=(0.0, 0.0, 0.0),
+            half_extents=(0.003, tip_y + 0.01, 0.003))
+
     return mb
 
 

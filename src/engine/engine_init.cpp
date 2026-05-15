@@ -159,6 +159,7 @@ void Engine::init() {
 
     // Meshes
     m_cubeMesh = MeshSystem::createCube();
+    m_quadMesh = MeshSystem::createQuad();
 
     // Build procedural hand mesh for viewmodel (palm + 4 fingers)
     {
@@ -852,6 +853,7 @@ void Engine::shutdown() {
     }
 
     MeshSystem::destroy(m_cubeMesh);
+    MeshSystem::destroy(m_quadMesh);
     MeshSystem::destroy(m_handMesh);
     LevelMeshSystem::destroyAll(m_level.sections, m_level.sectionCount);
     LevelGridSystem::shutdown(m_level.grid);

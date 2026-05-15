@@ -23,4 +23,5 @@ namespace MeshSystem {
     void draw(const Mesh& mesh);
 
     Mesh createCube();
+    Mesh createQuad();  // flat 1x1 quad in XY plane, centered at origin
 }
