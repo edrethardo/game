@@ -164,7 +164,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
     }
 
-    constexpr f32 AURA_RADIUS_SQ = 5.0f * 5.0f;
+    constexpr f32 AURA_RADIUS_SQ = 18.0f * 18.0f;
     for (u32 a = 0; a < pool.activeCount; a++) {
         Entity& herald = pool.entities[pool.activeList[a]];
         if (herald.enemyRole != EnemyRole::AURA) continue;

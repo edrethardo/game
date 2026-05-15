@@ -1688,6 +1688,41 @@ def skin_cavern_shaman():
     return w, h, p
 
 
+def skin_cavern_herald():
+    """Cavern Herald — earthy green-brown body, glowing amber core, amber eyes."""
+    w, h = 7, 16
+    p = {}
+    body = (80, 95, 55, 255)  # mossy green-brown
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = body
+    # Skull — bone with green tinge
+    for py in [14, 15]:
+        for px in range(1, 6): p[(px, py)] = (160, 155, 120, 255)
+    # Amber glowing eyes — shows this is an aura carrier
+    p[(2, 14)] = (220, 170, 30, 255)
+    p[(4, 14)] = (220, 170, 30, 255)
+    # Amber aura core (chest area) — glowing center
+    for py in [10, 11, 12]:
+        p[(3, py)] = (200, 160, 40, 255)
+    p[(2, 11)] = (180, 140, 30, 255)
+    p[(4, 11)] = (180, 140, 30, 255)
+    # Spine — darker
+    for py in range(8, 13): p[(3, py)] = (60, 75, 40, 255)
+    # Arms — darker green
+    for py in range(5, 11):
+        p[(0, py)] = (65, 80, 40, 255)
+        p[(6, py)] = (65, 80, 40, 255)
+    # Shoulders — mossy stone
+    for px in [0, 6]:
+        p[(px, 9)] = (90, 85, 55, 255)
+        p[(px, 10)] = (90, 85, 55, 255)
+    # Legs — earthen brown
+    for py in range(0, 5):
+        for px in [1, 5]: p[(px, py)] = (70, 65, 40, 255)
+    return w, h, p
+
+
 def skin_infernal_herald():
     """Infernal Herald — orange-red bones, fiery core, ember eyes."""
     w, h = 7, 16
@@ -2925,6 +2960,7 @@ SKIN_TYPES = {
     "gargoyle":           ("gargoyle_skin_42.png",           skin_gargoyle),
     "necromancer":        ("necromancer_skin_42.png",        skin_necromancer),
     "cavern_shaman":      ("cavern_shaman_skin_42.png",     skin_cavern_shaman),
+    "cavern_herald":      ("cavern_herald_skin_42.png",      skin_cavern_herald),
     "infernal_herald":    ("infernal_herald_skin_42.png",    skin_infernal_herald),
     "void_necromancer":   ("void_necromancer_skin_42.png",   skin_void_necromancer),
     "void_shaman":        ("void_shaman_skin_42.png",       skin_void_shaman),

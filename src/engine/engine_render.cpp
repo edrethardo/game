@@ -829,6 +829,70 @@ void Engine::render(f32 alpha) {
 
     DebugDraw::flush(m_camera.viewProjection);
 
+    // Herald aura effect — golden rotating ring at the feet of the herald
+    // and all aura-buffed enemies. Uses the quad mesh with blob texture + alpha.
+    {
+        Renderer::flush();
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_CULL_FACE);
+
+        const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
+        const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
+
+        for (u32 i = 0; i < MAX_ENTITIES; i++) {
+            const Entity& e = entPool.entities[i];
+            if (!(e.flags & ENT_ACTIVE)) continue;
+            if (e.flags & ENT_DEAD) continue;
+            // Show disc under heralds (larger, brighter) and buffed enemies (smaller, dimmer)
+            bool isHerald = (e.enemyRole == EnemyRole::AURA);
+            if (!isHerald && !e.hasAuraBuff) continue;
+
+            Vec3 feetPos = e.position - Vec3{0, e.halfExtents.y - 0.03f, 0};
+            f32 t = e.animTimer * 2.0f;
+            f32 discR = isHerald ? (1.2f + 0.15f * sinf(t * 3.0f))   // herald: large pulsing disc
+                                 : (0.5f + 0.05f * sinf(t * 4.0f));  // buffed: small pulsing disc
+            Vec4 discCol = isHerald ? Vec4{0.2f, 0.85f, 0.75f, 0.45f}   // herald: bright teal
+                                    : Vec4{0.25f, 0.7f, 0.6f, 0.25f};  // buffed: dim teal
+
+            // Lay quad flat on ground: quad is in XY plane, we need XZ plane.
+            // Column 0 = local X → world X (with Y-rotation for spin)
+            // Column 1 = local Y → world Z (quad's Y becomes ground forward)
+            // Column 2 = local Z → world Y (quad faces up)
+            f32 rot = isHerald ? t : -t * 0.5f;
+            f32 cr = cosf(rot), sr = sinf(rot);
+            Mat4 discMat = {};
+            discMat.m[0]  =  cr * discR;  // col0.x
+            discMat.m[1]  =  0.0f;        // col0.y
+            discMat.m[2]  =  sr * discR;  // col0.z
+            discMat.m[4]  = -sr * discR;  // col1.x  (local Y → world XZ rotated)
+            discMat.m[5]  =  0.0f;        // col1.y
+            discMat.m[6]  =  cr * discR;  // col1.z
+            discMat.m[8]  =  0.0f;        // col2.x  (local Z → world Y = up)
+            discMat.m[9]  =  1.0f;        // col2.y
+            discMat.m[10] =  0.0f;        // col2.z
+            discMat.m[12] = feetPos.x;
+            discMat.m[13] = feetPos.y;
+            discMat.m[14] = feetPos.z;
+            discMat.m[15] = 1.0f;
+
+            Mat4 discMvp = m_camera.viewProjection * discMat;
+            glUseProgram(m_unlitShader.program);
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, discMvp.ptr());
+            glUniform4f(m_unlitShader.loc_color, discCol.x, discCol.y, discCol.z, discCol.w);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, blobTex.handle);
+            if (m_unlitShader.loc_texture0 >= 0) glUniform1i(m_unlitShader.loc_texture0, 0);
+            glBindVertexArray(m_quadMesh.vao);
+            glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, 0);
+        }
+
+        glEnable(GL_CULL_FACE);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
+
     renderSpeechBubbles(vpW, vpH);
     renderDamageNumbers(vpW, vpH);
 
@@ -987,6 +1051,13 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         } else {
             tint = {0.8f, 0.5f, 0.3f, 1.0f};
         }
+        // Aura-buffed enemies get a subtle red-orange tint shift
+        if (e.hasAuraBuff && !(e.flags & ENT_FRIENDLY)) {
+            tint.x = fminf(tint.x * 1.3f, 1.0f);
+            tint.y *= 0.85f;
+            tint.z *= 0.7f;
+        }
+
         // Skip webs in main pass — rendered in a translucent second pass below
         if (e.materialId == s_webMatIds[0] || e.materialId == s_webMatIds[1] ||
             e.materialId == s_webMatIds[2] || e.materialId == s_webMatIds[3]) continue;
@@ -1279,6 +1350,40 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             Vec3 p0 = base + Vec3{cosf(a0) * r, 0, sinf(a0) * r};
             Vec3 p1 = base + Vec3{cosf(a1) * r, 0, sinf(a1) * r};
             DebugDraw::line(p0, p1, col);
+        }
+    }
+
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        const Entity& e = entPool.entities[i];
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        if (e.enemyRole != EnemyRole::AURA) continue;
+
+        Vec3 base = e.position - Vec3{0, e.halfExtents.y - 0.02f, 0};
+        f32 t = e.animTimer * 1.5f;
+        f32 pulse = 4.8f + 0.2f * sinf(t * 3.0f);
+        Vec3 aurCol = {1.0f, 0.7f, 0.15f};
+
+        // Outer ring — dashed, rotating clockwise
+        static constexpr u32 AURA_SEGS = 16;
+        for (u32 s = 0; s < AURA_SEGS; s++) {
+            if (s % 2 != 0) continue;
+            f32 a0 = t + static_cast<f32>(s) * (6.2832f / AURA_SEGS);
+            f32 a1 = t + static_cast<f32>(s + 1) * (6.2832f / AURA_SEGS);
+            Vec3 p0 = base + Vec3{cosf(a0) * pulse, 0, sinf(a0) * pulse};
+            Vec3 p1 = base + Vec3{cosf(a1) * pulse, 0, sinf(a1) * pulse};
+            DebugDraw::line(p0, p1, aurCol);
+        }
+
+        // Inner ring — solid, rotating counter-clockwise
+        f32 innerR = pulse * 0.5f;
+        Vec3 innerCol = {0.8f, 0.55f, 0.1f};
+        for (u32 s = 0; s < AURA_SEGS; s++) {
+            f32 a0 = -t * 0.7f + static_cast<f32>(s) * (6.2832f / AURA_SEGS);
+            f32 a1 = -t * 0.7f + static_cast<f32>(s + 1) * (6.2832f / AURA_SEGS);
+            Vec3 p0 = base + Vec3{cosf(a0) * innerR, 0, sinf(a0) * innerR};
+            Vec3 p1 = base + Vec3{cosf(a1) * innerR, 0, sinf(a1) * innerR};
+            DebugDraw::line(p0, p1, innerCol);
         }
     }
 

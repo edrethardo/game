@@ -458,6 +458,8 @@ void Engine::startGame() {
             {25, 4.0f, 30, 16.f, 2.0f, 18, {0.3f,0.3f,0.3f}, true, 1, EnemyType::BAT, "sniper_imp_skin", 2, 2.0f, 0},
             // Cavern Shaman — healer, heals injured allies
             {35, 2.5f, 18, 10.0f, 1.2f, 8, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "cavern_shaman_skin", 2, 2.0f, 0},
+            // Cavern Herald — aura buff, +10% speed/attack for nearby enemies
+            {45, 3.0f, 18, 3.5f, 0.9f, 12, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "cavern_herald_skin", 2, 2.5f, 0},
         };
         // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
         static const EnemyTemplate kTier4[] = {

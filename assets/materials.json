@@ -136,6 +136,7 @@
     { "id": 121, "name": "void_herald_skin",        "texture": "void_herald_skin_42.png" },
     { "id": 122, "name": "particle_blob",  "texture": "particle_blob_16.png",  "tint": [1,1,1,1] },
     { "id": 123, "name": "particle_spark", "texture": "particle_spark_16.png", "tint": [1,1,1,1] },
-    { "id": 124, "name": "white",          "tint": [1,1,1,1] }
+    { "id": 124, "name": "white",          "tint": [1,1,1,1] },
+    { "id": 125, "name": "cavern_herald_skin", "texture": "cavern_herald_skin_42.png" }
   ]
 }
