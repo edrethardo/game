@@ -16,3 +16,4 @@ compile_commands.json
 save.dat
 assets/config/controls.json
 assets/audio/
+save_*.dat

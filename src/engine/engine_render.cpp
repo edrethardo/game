@@ -284,8 +284,14 @@ void Engine::renderViewmodel() {
             break;
         case WeaponType::PROJECTILE:
             offset = {0.30f + bobX, -0.35f + bobY + attackY, -0.50f};
-            holdYaw = 0.2f;
-            holdPitch = -0.1f;
+            if (def.weaponSubtype == WeaponSubtype::CROSSBOW) {
+                // Crossbow stock extends along +Z in mesh space — rotate π so it points away
+                holdYaw = 3.14159f;
+                holdPitch = 0.05f;
+            } else {
+                holdYaw = 0.2f;
+                holdPitch = -0.1f;
+            }
             break;
     }
 
@@ -347,7 +353,25 @@ void Engine::renderViewmodel() {
     glUniform1i(m_unlitShader.loc_texture0, 0);
 
     if (hasWeapon) {
-        MeshSystem::draw(m_meshDefs[weaponMeshId].mesh);
+        const Mesh& wpnMesh = m_meshDefs[weaponMeshId].mesh;
+        if (wpnMesh.materialGroupCount > 0) {
+            // Multi-material viewmodel: bind VAO once, draw each group with its own texture/tint.
+            glBindVertexArray(wpnMesh.vao);
+            for (u8 g = 0; g < wpnMesh.materialGroupCount; g++) {
+                const MeshMaterialGroup& grp = wpnMesh.materials[g];
+                const Material* mat = MaterialSystem::get(grp.materialId);
+                if (mat) {
+                    glBindTexture(GL_TEXTURE_2D, mat->texture.handle);
+                    glUniform4f(m_unlitShader.loc_color,
+                                mat->tint.x, mat->tint.y, mat->tint.z, mat->tint.w);
+                }
+                glDrawElements(GL_TRIANGLES, grp.indexCount, GL_UNSIGNED_INT,
+                               reinterpret_cast<void*>(
+                                   static_cast<uintptr_t>(grp.indexStart * sizeof(u32))));
+            }
+        } else {
+            MeshSystem::draw(wpnMesh);
+        }
     }
 
     // Draw hand gripping the weapon (or fist if unarmed)

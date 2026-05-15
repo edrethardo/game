@@ -49,7 +49,9 @@ class MeshBuilder:
         self.verts = []   # list of (x, y, z)
         self.normals = []  # list of (nx, ny, nz)
         self.uvs = []      # list of (u, v)
-        self.faces = []    # list of ((vi, ti, ni), (vi, ti, ni), (vi, ti, ni))
+        # Each face is ((vi,ti,ni), (vi,ti,ni), (vi,ti,ni), material_name_or_None)
+        self.faces = []
+        self._current_material = None  # active usemtl name, None = no material groups
 
     # indices are 0-based internally; converted to 1-based on write.
 
@@ -65,8 +67,12 @@ class MeshBuilder:
         self.uvs.append((u, v))
         return len(self.uvs) - 1
 
+    def set_material(self, name):
+        """Set the current material name for subsequent faces (emits usemtl in write_obj)."""
+        self._current_material = name
+
     def add_tri(self, v0, v1, v2, t0, t1, t2, n0, n1, n2):
-        self.faces.append(((v0, t0, n0), (v1, t1, n1), (v2, t2, n2)))
+        self.faces.append(((v0, t0, n0), (v1, t1, n1), (v2, t2, n2), self._current_material))
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +267,11 @@ def add_voxel_model(mb, filled, voxel_size, offset=(0, 0, 0),
 # ---------------------------------------------------------------------------
 
 def write_obj(path, mb):
-    """Write a MeshBuilder to an OBJ file."""
+    """Write a MeshBuilder to an OBJ file.
+
+    Emits usemtl directives when faces carry material names (set via set_material()).
+    Faces without a material name are written without a usemtl header.
+    """
     dirpath = os.path.dirname(path)
     if dirpath:
         os.makedirs(dirpath, exist_ok=True)
@@ -283,9 +293,23 @@ def write_obj(path, mb):
             f.write(f"vt {u:.6f} {v:.6f}\n")
         f.write("\n")
 
+        active_material = object()  # sentinel that won't match any string or None
         for tri in mb.faces:
+            # Support both old 3-element tuples and new 4-element (with material name)
+            if len(tri) == 4:
+                v0, v1, v2, mat_name = tri
+            else:
+                v0, v1, v2 = tri
+                mat_name = None
+
+            # Emit usemtl when material changes between faces
+            if mat_name != active_material:
+                if mat_name is not None:
+                    f.write(f"usemtl {mat_name}\n")
+                active_material = mat_name
+
             parts = []
-            for vi, ti, ni in tri:
+            for vi, ti, ni in (v0, v1, v2):
                 # OBJ is 1-based
                 parts.append(f"{vi+1}/{ti+1}/{ni+1}")
             f.write(f"f {' '.join(parts)}\n")
@@ -1337,8 +1361,13 @@ def gen_bow(height=0.8):
 
     The limb is a half-circle arc (cylinder bent into a C), grip at center,
     string connecting the tips. Uses add_cylinder for a smooth curve.
+    Two material groups: weapon_bow (brown wood) for the limb and grip,
+    and white (pure white tint) for the bowstring.
     """
     mb = MeshBuilder()
+
+    # Wood parts (grip + limb arc) use the bow texture
+    mb.set_material("weapon_bow")
 
     # Grip — the central handle
     add_box(mb, center=(0.0, 0.0, 0.0),
@@ -1358,9 +1387,10 @@ def gen_bow(height=0.8):
         add_cylinder(mb, base_center=(cx, cy - 0.015, 0.0),
                      radius=0.008, height=0.03, sides=4)
 
-    # String — thin tall box connecting the tips straight across
-    # Tips are at roughly (R*cos(80deg), ±R*sin(80deg))
+    # String — thin tall box connecting the tips straight across.
+    # Uses a distinct white material so it renders visually separate from the wood.
     tip_y = R * math.sin(math.radians(80))
+    mb.set_material("white")
     add_box(mb, center=(0.0, 0.0, 0.0),
             half_extents=(0.003, tip_y + 0.01, 0.003))
 

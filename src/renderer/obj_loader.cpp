@@ -59,6 +59,13 @@ Mesh ObjLoader::load(const char* path, AABB* outBounds) {
     Vec3 bmin = { 1e30f,  1e30f,  1e30f};
     Vec3 bmax = {-1e30f, -1e30f, -1e30f};
 
+    // Multi-material tracking: records the start index and name for each usemtl group.
+    // materialGroupCount==0 after load means no usemtl was seen (legacy single-material path).
+    Mesh resultMesh = {};
+    char currentMaterial[32] = {};     // current usemtl name, empty = none seen yet
+    u32  currentGroupIndexStart = 0;   // index offset where the current group begins
+    bool seenUsemtl = false;
+
     char line[512];
     while (std::fgets(line, sizeof(line), f)) {
         // Skip comments and empty lines
@@ -118,8 +125,37 @@ Mesh ObjLoader::load(const char* path, AABB* outBounds) {
                 indices.push_back(faceVerts[2]);
                 indices.push_back(faceVerts[3]);
             }
+        } else if (std::strncmp(line, "usemtl ", 7) == 0) {
+            // Finalize the in-progress group (if any faces were emitted into it)
+            if (seenUsemtl && currentGroupIndexStart < indices.size()
+                    && resultMesh.materialGroupCount < MAX_MESH_MATERIALS) {
+                MeshMaterialGroup& grp = resultMesh.materials[resultMesh.materialGroupCount++];
+                grp.indexStart = currentGroupIndexStart;
+                grp.indexCount = static_cast<u32>(indices.size()) - currentGroupIndexStart;
+                std::strncpy(grp.materialName, currentMaterial, 31);
+                grp.materialName[31] = '\0';
+            }
+            // Start the new group: trim trailing newline from the material name
+            char* nameStart = line + 7;
+            u32 nameLen = static_cast<u32>(std::strlen(nameStart));
+            while (nameLen > 0 && (nameStart[nameLen - 1] == '\n' || nameStart[nameLen - 1] == '\r'))
+                nameLen--;
+            std::strncpy(currentMaterial, nameStart, (nameLen < 31) ? nameLen : 31);
+            currentMaterial[(nameLen < 31) ? nameLen : 31] = '\0';
+            currentGroupIndexStart = static_cast<u32>(indices.size());
+            seenUsemtl = true;
         }
-        // Ignore mtllib, usemtl, g, s, o, etc.
+        // Ignore mtllib, g, s, o, etc.
+    }
+
+    // Finalize the last material group (if the file used usemtl at all)
+    if (seenUsemtl && currentGroupIndexStart < indices.size()
+            && resultMesh.materialGroupCount < MAX_MESH_MATERIALS) {
+        MeshMaterialGroup& grp = resultMesh.materials[resultMesh.materialGroupCount++];
+        grp.indexStart = currentGroupIndexStart;
+        grp.indexCount = static_cast<u32>(indices.size()) - currentGroupIndexStart;
+        std::strncpy(grp.materialName, currentMaterial, 31);
+        grp.materialName[31] = '\0';
     }
 
     std::fclose(f);
@@ -134,9 +170,19 @@ Mesh ObjLoader::load(const char* path, AABB* outBounds) {
         outBounds->max = bmax;
     }
 
+    // Upload geometry; copy material group metadata into the returned mesh.
     Mesh mesh = MeshSystem::create(vertices.data(), static_cast<u32>(vertices.size()),
                                    indices.data(), static_cast<u32>(indices.size()));
-    LOG_INFO("ObjLoader: loaded %s (%u verts, %u indices)",
-             path, (u32)vertices.size(), (u32)indices.size());
+    mesh.materialGroupCount = resultMesh.materialGroupCount;
+    for (u32 g = 0; g < resultMesh.materialGroupCount; g++)
+        mesh.materials[g] = resultMesh.materials[g];
+
+    if (mesh.materialGroupCount > 0) {
+        LOG_INFO("ObjLoader: loaded %s (%u verts, %u indices, %u material groups)",
+                 path, (u32)vertices.size(), (u32)indices.size(), (u32)mesh.materialGroupCount);
+    } else {
+        LOG_INFO("ObjLoader: loaded %s (%u verts, %u indices)",
+                 path, (u32)vertices.size(), (u32)indices.size());
+    }
     return mesh;
 }

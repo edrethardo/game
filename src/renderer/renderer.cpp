@@ -2,6 +2,7 @@
 #include "renderer/shader.h"
 #include "renderer/texture.h"
 #include "renderer/mesh.h"
+#include "renderer/material.h"
 #include "renderer/camera.h"
 #include "core/log.h"
 
@@ -11,6 +12,7 @@
 struct RenderCommand {
     u64           sortKey;      // packed: (shader << 42) | (texture << 21) | mesh
     const Shader* shader;       // pointer to shader (stable lifetime) for cached locs
+    const Mesh*   meshPtr;      // for multi-material group access during flush
     u32           texHandle;
     u32           meshVAO;
     u32           meshIndexCount;
@@ -89,6 +91,7 @@ void Renderer::submit(const Shader& shader, const Texture& texture,
                   | (static_cast<u64>(texture.handle & 0x1FFFFF) << 21)
                   | (static_cast<u64>(mesh.vao       & 0x3FFFFF));
     cmd.shader         = &shader;
+    cmd.meshPtr        = &mesh;
     cmd.texHandle      = texture.handle;
     cmd.meshVAO        = mesh.vao;
     cmd.meshIndexCount = mesh.indexCount;
@@ -162,8 +165,39 @@ void Renderer::flush() {
             boundVAO = cmd.meshVAO;
         }
 
-        glDrawElements(GL_TRIANGLES, cmd.meshIndexCount, GL_UNSIGNED_INT, 0);
-        s_drawCalls++;
+        if (cmd.meshPtr && cmd.meshPtr->materialGroupCount > 0) {
+            // Multi-material path: draw each group with its own texture and tint.
+            // The caller's texture/tint are overridden per-group; base color is
+            // still multiplied in so per-object tinting (e.g. loot glow) works.
+            for (u8 g = 0; g < cmd.meshPtr->materialGroupCount; g++) {
+                const MeshMaterialGroup& grp = cmd.meshPtr->materials[g];
+                const Material* mat = MaterialSystem::get(grp.materialId);
+                u32 groupTex = mat ? mat->texture.handle : cmd.texHandle;
+                if (groupTex != boundTex) {
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, groupTex);
+                    boundTex = groupTex;
+                    if (sh.loc_texture0 >= 0) glUniform1i(sh.loc_texture0, 0);
+                }
+                if (sh.loc_color >= 0) {
+                    Vec4 tint = mat ? mat->tint : Vec4{1.0f, 1.0f, 1.0f, 1.0f};
+                    glUniform4f(sh.loc_color,
+                        cmd.color.x * tint.x, cmd.color.y * tint.y,
+                        cmd.color.z * tint.z, cmd.color.w * tint.w);
+                }
+                glDrawElements(GL_TRIANGLES, grp.indexCount, GL_UNSIGNED_INT,
+                               reinterpret_cast<void*>(
+                                   static_cast<uintptr_t>(grp.indexStart * sizeof(u32))));
+                s_drawCalls++;
+            }
+            // Restore the per-object color for subsequent commands that may share shader
+            if (sh.loc_color >= 0)
+                glUniform4f(sh.loc_color, cmd.color.x, cmd.color.y, cmd.color.z, cmd.color.w);
+        } else {
+            // Legacy single-material path — unchanged behaviour
+            glDrawElements(GL_TRIANGLES, cmd.meshIndexCount, GL_UNSIGNED_INT, 0);
+            s_drawCalls++;
+        }
     }
 }
 

@@ -278,6 +278,12 @@ void Engine::init() {
             AABB bounds;
             Mesh mesh = ObjLoader::load(ASSET_PATH(entry.path), &bounds);
             if (mesh.vao != 0) {
+                // Resolve usemtl material names → IDs now that MaterialSystem is initialised.
+                // MaterialSystem::init() runs before this loop so getIdByName is safe to call.
+                for (u8 g = 0; g < mesh.materialGroupCount; g++) {
+                    mesh.materials[g].materialId =
+                        MaterialSystem::getIdByName(mesh.materials[g].materialName);
+                }
                 MeshDef& def = m_meshDefs[m_meshDefCount];
                 std::strncpy(def.name, entry.name, sizeof(def.name) - 1);
                 def.mesh = mesh;
