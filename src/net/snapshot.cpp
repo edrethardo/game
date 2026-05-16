@@ -89,11 +89,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         se.padding2      = 0;
     }
 
-    // Projectiles (only active ones, capped at 255 for u8 count field)
+    // Projectiles (only active ones)
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = projectiles.projectiles[i];
         if (!p.active) continue;
-        if (snap.projectileCount >= 255) break;
 
         SnapProjectile& sp = snap.projectiles[snap.projectileCount++];
         sp.poolIndex = static_cast<u8>(i);
@@ -209,7 +208,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     // Validate counts to prevent out-of-bounds on malformed packets
     if (snap.playerCount > MAX_PLAYERS) snap.playerCount = MAX_PLAYERS;
     if (snap.entityCount > MAX_ENTITIES) snap.entityCount = MAX_ENTITIES;
-    if (snap.projectileCount > 255) snap.projectileCount = 255; // u8 field caps at 255
+    if (snap.projectileCount > MAX_PROJECTILES) snap.projectileCount = MAX_PROJECTILES;
 
     for (u32 i = 0; i < MAX_PLAYERS; i++)
         snap.lastInputTick[i] = r.readU32();
