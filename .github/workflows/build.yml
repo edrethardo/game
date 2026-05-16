@@ -70,8 +70,16 @@ jobs:
         run: |
           mkdir -p package-linux
           cp build-rel/src/DungeonEngine package-linux/
+          chmod +x package-linux/DungeonEngine
           cp -r assets package-linux/assets
           rm -f package-linux/assets/audio/.fetched
+          # Launcher script that sets CWD to the game directory
+          cat > package-linux/run.sh << 'SH'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          ./DungeonEngine "$@"
+          SH
+          chmod +x package-linux/run.sh
           cd package-linux && zip -r ../DungeonEngine-Linux.zip . && cd ..
 
       - name: Upload artifact

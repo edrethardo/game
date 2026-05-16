@@ -81,7 +81,7 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
     for (u8 bounce = 0; bounce <= def->bounces && chainCount < MAX_CHAIN_PTS; bounce++) {
         // Wide cone on first hit for forgiving aiming; sphere search on bounces
         f32 cosCone = (bounce == 0) ? cosf(radians(15.0f)) : -1.0f;
-        f32 range   = (bounce == 0) ? 50.0f : def->bounceRange;
+        f32 range   = (bounce == 0) ? 15.0f : def->bounceRange;
 
         EntityHandle hits[MAX_ENTITIES];
         f32          dists[MAX_ENTITIES];
