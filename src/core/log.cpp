@@ -56,8 +56,12 @@ void Log::log(LogLevel level, const char* file, int line, const char* fmt, ...) 
     vsnprintf(msgBuf, sizeof(msgBuf), fmt, args);
     va_end(args);
 
+    // Skip console output on Windows Release builds — Win32 console I/O is
+    // extremely slow (1-5ms per call) and causes visible microstutters.
+#if !defined(NDEBUG) || !defined(_WIN32)
     FILE* out = (level >= LogLevel::Warn) ? stderr : stdout;
     fprintf(out, "[%s] %s %s:%d: %s\n", levelStr, timeBuf, filename, line, msgBuf);
+#endif
 
     if (s_logFile) {
         fprintf(s_logFile, "[%s] %s %s:%d: %s\n", levelStr, timeBuf, filename, line, msgBuf);
