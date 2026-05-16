@@ -279,7 +279,7 @@ PITCH_SHIFTS = {
     "sfx_ui_confirm":       1.0,
     "sfx_menu_hover":       1.0,
     # Footsteps
-    "sfx_footstep_stone":   0.80,
+    "sfx_footstep_stone":   0.64,
     "sfx_footstep_metal":   0.85,
     "sfx_enemy_footstep":   0.70,
     # Enemies — dark and menacing

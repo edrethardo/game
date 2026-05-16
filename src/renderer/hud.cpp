@@ -1718,7 +1718,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     }
     lineCount += item.affixCount;
     if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
-        lineCount += 5; // separator + skill name + 3 description lines
+        lineCount += 6; // extra spacing + separator + skill name + 3 description lines
     }
 
     f32 tooltipW = 320.0f;
@@ -1818,6 +1818,8 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
 
     // Legendary skill — only shown on legendary-rarity items
     if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
+        // Extra spacing before legendary section
+        curY -= lineH;
         // Gold separator
         curY -= lineH * 0.3f;
         pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.6f, 0.5f, 0.15f});

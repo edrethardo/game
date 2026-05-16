@@ -338,15 +338,15 @@ void Engine::gameUpdate(f32 dt) {
     m_transition.floorTime += dt;
     m_transition.totalPlayTime += dt;
 
-    // Player footstep sound — every ~2.5m of horizontal movement
+    // Player footstep sound — heavy steps every ~4.5m to match the weighty FOV bob
     {
         static f32 stepAccum = 0.0f;
         f32 hSpeed = sqrtf(m_localPlayer.velocity.x * m_localPlayer.velocity.x +
                            m_localPlayer.velocity.z * m_localPlayer.velocity.z);
         if (hSpeed > 0.5f) {
             stepAccum += hSpeed * dt;
-            if (stepAccum > 2.5f) {
-                AudioSystem::play(SfxId::FOOTSTEP_STONE, 0.4f);
+            if (stepAccum > 4.5f) {
+                AudioSystem::play(SfxId::FOOTSTEP_STONE, 0.6f);
                 stepAccum = 0.0f;
             }
         }
