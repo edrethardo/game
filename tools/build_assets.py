@@ -134,6 +134,7 @@ def build_skins():
         ("weapon_crossbow_tex",       "weapon_crossbow_tex_42.png"),
         ("weapon_throwing_knife_tex", "weapon_throwing_knife_tex_42.png"),
         ("weapon_wand_tex",           "weapon_wand_tex_42.png"),
+        ("weapon_cleaver_tex",        "weapon_cleaver_tex_42.png"),
         # Boss skins
         ("boss_andariel",             "boss_andariel_42.png"),
         ("boss_mephisto",             "boss_mephisto_42.png"),

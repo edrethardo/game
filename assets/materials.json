@@ -1,142 +1,794 @@
 {
   "materials": [
-    { "id": 0, "name": "stone_wall",    "texture": "stone_wall_42.png" },
-    { "id": 1, "name": "stone_floor",   "texture": "stone_floor_42.png", "tint": [0.9, 0.9, 0.95, 1.0] },
-    { "id": 2, "name": "stone_ceiling", "texture": "stone_ceiling_42.png", "tint": [0.7, 0.7, 0.75, 1.0] },
-    { "id": 3, "name": "brick_wall",    "texture": "brick_wall_42.png" },
-    { "id": 4, "name": "skeleton_skin", "texture": "skeleton_skin_42.png" },
-    { "id": 5, "name": "spider_skin",   "texture": "spider_skin_42.png" },
-    { "id": 6, "name": "bat_skin",      "texture": "bat_skin_42.png" },
-    { "id": 7, "name": "weapon_melee",      "texture": "weapon_melee_tex_42.png" },
-    { "id": 8, "name": "weapon_hitscan",     "texture": "weapon_hitscan_tex_42.png" },
-    { "id": 9, "name": "weapon_projectile",  "texture": "weapon_projectile_tex_42.png" },
-    { "id": 10, "name": "weapon_molotov",    "texture": "weapon_molotov_tex_42.png" },
-    { "id": 11, "name": "armor_plate",        "texture": "armor_plate_tex_42.png" },
-    { "id": 12, "name": "armor_leather",      "texture": "armor_leather_tex_42.png" },
-    { "id": 13, "name": "armor_cloth",        "texture": "armor_cloth_tex_42.png" },
-    { "id": 14, "name": "accessory_bone",     "texture": "ring_bone_tex_42.png" },
-    { "id": 15, "name": "accessory_gold",     "texture": "ring_gold_tex_42.png" },
-    { "id": 16, "name": "human_skin",          "texture": "human_skin_42.png" },
-    { "id": 17, "name": "cleric_skin",         "texture": "cleric_skin_42.png" },
-    { "id": 18, "name": "archer_skin",         "texture": "archer_skin_42.png" },
-    { "id": 19, "name": "butcher_skin",        "texture": "butcher_skin_42.png" },
-    { "id": 20, "name": "blood_floor",         "texture": "blood_floor_42.png" },
-    { "id": 21, "name": "blood_wall",          "texture": "blood_wall_42.png" },
-    { "id": 22, "name": "blood_ceiling",       "texture": "blood_ceiling_42.png" },
-    { "id": 23, "name": "mage_skin",            "texture": "mage_skin_42.png" },
-    { "id": 24, "name": "rogue_skin",           "texture": "rogue_skin_42.png" },
-    { "id": 25, "name": "weapon_staff",          "texture": "weapon_staff_tex_42.png" },
-    { "id": 26, "name": "paladin_skin",          "texture": "paladin_skin_42.png" },
-    { "id": 27, "name": "boss_lich",             "texture": "boss_lich_42.png" },
-    { "id": 28, "name": "boss_spider_queen",     "texture": "boss_spider_queen_42.png" },
-    { "id": 29, "name": "boss_demon_knight",     "texture": "boss_demon_knight_42.png" },
-    { "id": 30, "name": "boss_arch_mage",        "texture": "boss_arch_mage_42.png" },
-    { "id": 31, "name": "boss_andariel",         "texture": "boss_andariel_42.png" },
-    { "id": 32, "name": "boss_mephisto",         "texture": "boss_mephisto_42.png" },
-    { "id": 33, "name": "boss_baal",             "texture": "boss_baal_42.png" },
-    { "id": 34, "name": "boss_diablo",           "texture": "boss_diablo_42.png" },
-    { "id": 35, "name": "boss_reaper",           "texture": "boss_reaper_42.png" },
-
-    { "id": 36, "name": "catacomb_wall",          "texture": "stone_wall_42.png",    "tint": [0.55, 0.65, 0.45, 1.0] },
-    { "id": 37, "name": "catacomb_floor",         "texture": "stone_floor_42.png",   "tint": [0.50, 0.60, 0.40, 1.0] },
-    { "id": 38, "name": "catacomb_ceiling",       "texture": "stone_ceiling_42.png", "tint": [0.40, 0.50, 0.35, 1.0] },
-
-    { "id": 39, "name": "cavern_wall",            "texture": "stone_wall_42.png",    "tint": [0.65, 0.55, 0.75, 1.0] },
-    { "id": 40, "name": "cavern_floor",           "texture": "stone_floor_42.png",   "tint": [0.55, 0.45, 0.65, 1.0] },
-    { "id": 41, "name": "cavern_ceiling",         "texture": "stone_ceiling_42.png", "tint": [0.50, 0.40, 0.60, 1.0] },
-
-    { "id": 42, "name": "hellforge_wall",         "texture": "brick_wall_42.png",    "tint": [0.85, 0.35, 0.15, 1.0] },
-    { "id": 43, "name": "hellforge_floor",        "texture": "stone_floor_42.png",   "tint": [0.75, 0.30, 0.10, 1.0] },
-    { "id": 44, "name": "hellforge_ceiling",      "texture": "stone_ceiling_42.png", "tint": [0.60, 0.20, 0.08, 1.0] },
-
-    { "id": 45, "name": "void_wall",              "texture": "stone_wall_42.png",    "tint": [0.35, 0.35, 0.50, 1.0] },
-    { "id": 46, "name": "void_floor",             "texture": "stone_floor_42.png",   "tint": [0.30, 0.30, 0.45, 1.0] },
-    { "id": 47, "name": "void_ceiling",           "texture": "stone_ceiling_42.png", "tint": [0.25, 0.25, 0.40, 1.0] },
-
-    { "id": 48, "name": "prop_wood",              "tint": [0.55, 0.38, 0.20, 1.0] },
-    { "id": 49, "name": "prop_iron",              "tint": [0.45, 0.45, 0.50, 1.0] },
-    { "id": 50, "name": "prop_bone",              "tint": [0.80, 0.75, 0.65, 1.0] },
-    { "id": 51, "name": "prop_web",               "texture": "web_42.png", "tint": [0.7, 0.7, 0.75, 0.6] },
-    { "id": 52, "name": "prop_brazier",           "tint": [0.70, 0.40, 0.15, 1.0] },
-    { "id": 53, "name": "prop_brazier_fire",      "tint": [1.00, 0.55, 0.10, 1.0] },
-
-    { "id": 54, "name": "catacomb_skeleton",      "texture": "catacomb_skeleton_skin_42.png" },
-    { "id": 55, "name": "catacomb_bat",            "texture": "catacomb_bat_skin_42.png" },
-    { "id": 56, "name": "catacomb_spider",         "texture": "catacomb_spider_skin_42.png" },
-    { "id": 57, "name": "cavern_skeleton",         "texture": "cavern_skeleton_skin_42.png" },
-    { "id": 58, "name": "cavern_bat",              "texture": "cavern_bat_skin_42.png" },
-    { "id": 59, "name": "cavern_spider",           "texture": "cavern_spider_skin_42.png" },
-    { "id": 60, "name": "hellforge_skeleton",      "texture": "hellforge_skeleton_skin_42.png" },
-    { "id": 61, "name": "hellforge_bat",           "texture": "hellforge_bat_skin_42.png" },
-    { "id": 62, "name": "hellforge_spider",        "texture": "hellforge_spider_skin_42.png" },
-    { "id": 63, "name": "void_skeleton",           "texture": "void_skeleton_skin_42.png" },
-    { "id": 64, "name": "void_bat",                "texture": "void_bat_skin_42.png" },
-    { "id": 65, "name": "void_spider",             "texture": "void_spider_skin_42.png" },
-
-    { "id": 66, "name": "zombie_skin",             "texture": "zombie_skin_42.png" },
-    { "id": 67, "name": "imp_skin",                "texture": "imp_skin_42.png" },
-    { "id": 68, "name": "ghoul_skin",              "texture": "ghoul_skin_42.png" },
-    { "id": 69, "name": "bone_mage_skin",          "texture": "bone_mage_skin_42.png" },
-    { "id": 70, "name": "broodmother_skin",        "texture": "broodmother_skin_42.png" },
-    { "id": 71, "name": "stalker_skin",            "texture": "stalker_skin_42.png" },
-    { "id": 72, "name": "hellhound_skin",          "texture": "hellhound_skin_42.png" },
-    { "id": 73, "name": "demon_skin",              "texture": "demon_skin_42.png" },
-    { "id": 74, "name": "shade_skin",              "texture": "shade_skin_42.png" },
-    { "id": 75, "name": "void_demon_skin",         "texture": "void_demon_skin_42.png" },
-
-    { "id": 76, "name": "helmet_plate",             "texture": "helmet_plate_tex_42.png" },
-    { "id": 77, "name": "helmet_leather",            "texture": "helmet_leather_tex_42.png" },
-    { "id": 78, "name": "boots_plate",               "texture": "boots_plate_tex_42.png" },
-    { "id": 79, "name": "boots_leather",              "texture": "boots_leather_tex_42.png" },
-    { "id": 80, "name": "shield_wood",               "texture": "shield_wood_tex_42.png" },
-    { "id": 81, "name": "shield_plate",              "texture": "shield_plate_tex_42.png" },
-
-    { "id": 82, "name": "legendary_weapon",          "texture": "legendary_weapon_tex_42.png" },
-    { "id": 83, "name": "legendary_armor",           "texture": "legendary_armor_tex_42.png" },
-    { "id": 84, "name": "legendary_helm",            "texture": "legendary_helm_tex_42.png" },
-    { "id": 85, "name": "legendary_boots",           "texture": "legendary_boots_tex_42.png" },
-    { "id": 86, "name": "legendary_ring",            "texture": "legendary_ring_tex_42.png" },
-    { "id": 87, "name": "legendary_shield",          "texture": "legendary_shield_tex_42.png" },
-
-    { "id": 88, "name": "icon_drone",                "texture": "icon_drone_42.png" },
-    { "id": 89, "name": "icon_swarm",                "texture": "icon_swarm_42.png" },
-    { "id": 90, "name": "icon_turret",               "texture": "icon_turret_42.png" },
-    { "id": 91, "name": "bat_wing",                  "texture": "bat_wing_skin_42.png" },
-
-    { "id": 92, "name": "status_poison",              "texture": "status_poison_42.png" },
-    { "id": 93, "name": "status_burn",                "texture": "status_burn_42.png" },
-    { "id": 94, "name": "status_freeze",              "texture": "status_freeze_42.png" },
-    { "id": 95, "name": "status_slow",                "texture": "status_slow_42.png" },
-    { "id": 96, "name": "status_invuln",              "texture": "status_invuln_42.png" },
-    { "id": 97, "name": "sniper_imp_skin",            "tint": [0.4, 0.6, 0.9, 1.0] },
-    { "id": 98, "name": "prop_web_b",                "texture": "web_b_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] },
-    { "id": 99, "name": "prop_web_c",                "texture": "web_c_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] },
-    { "id": 100, "name": "prop_web_d",               "texture": "web_d_42.png",  "tint": [0.7, 0.7, 0.75, 0.6] },
-
-    { "id": 101, "name": "weapon_sword",             "texture": "weapon_sword_tex_42.png" },
-    { "id": 102, "name": "weapon_dagger",            "texture": "weapon_dagger_tex_42.png" },
-    { "id": 103, "name": "weapon_axe",               "texture": "weapon_axe_tex_42.png" },
-    { "id": 104, "name": "weapon_claymore",          "texture": "weapon_claymore_tex_42.png" },
-    { "id": 105, "name": "weapon_pistol",            "texture": "weapon_pistol_tex_42.png" },
-    { "id": 106, "name": "weapon_smg",               "texture": "weapon_smg_tex_42.png" },
-    { "id": 107, "name": "weapon_carbine",           "texture": "weapon_carbine_tex_42.png" },
-    { "id": 108, "name": "weapon_revolver",          "texture": "weapon_revolver_tex_42.png" },
-    { "id": 109, "name": "weapon_bow",               "texture": "weapon_bow_tex_42.png" },
-    { "id": 110, "name": "weapon_crossbow",          "texture": "weapon_crossbow_tex_42.png" },
-    { "id": 111, "name": "weapon_throwing_knife",    "texture": "weapon_throwing_knife_tex_42.png" },
-    { "id": 112, "name": "weapon_wand",              "texture": "weapon_wand_tex_42.png" },
-    { "id": 113, "name": "shock_bolt",               "texture": "shock_bolt_tex_42.png" },
-    { "id": 114, "name": "turret_skin",              "texture": "turret_tex_42.png" },
-    { "id": 115, "name": "gargoyle_skin",          "texture": "gargoyle_skin_42.png" },
-    { "id": 116, "name": "necromancer_skin",        "texture": "necromancer_skin_42.png" },
-    { "id": 117, "name": "cavern_shaman_skin",      "texture": "cavern_shaman_skin_42.png" },
-    { "id": 118, "name": "infernal_herald_skin",    "texture": "infernal_herald_skin_42.png" },
-    { "id": 119, "name": "void_necromancer_skin",   "texture": "void_necromancer_skin_42.png" },
-    { "id": 120, "name": "void_shaman_skin",        "texture": "void_shaman_skin_42.png" },
-    { "id": 121, "name": "void_herald_skin",        "texture": "void_herald_skin_42.png" },
-    { "id": 122, "name": "particle_blob",  "texture": "particle_blob_16.png",  "tint": [1,1,1,1] },
-    { "id": 123, "name": "particle_spark", "texture": "particle_spark_16.png", "tint": [1,1,1,1] },
-    { "id": 124, "name": "white",          "tint": [1,1,1,1] },
-    { "id": 125, "name": "cavern_herald_skin", "texture": "cavern_herald_skin_42.png" }
+    {
+      "id": 0,
+      "name": "stone_wall",
+      "texture": "stone_wall_42.png"
+    },
+    {
+      "id": 1,
+      "name": "stone_floor",
+      "texture": "stone_floor_42.png",
+      "tint": [
+        0.9,
+        0.9,
+        0.95,
+        1.0
+      ]
+    },
+    {
+      "id": 2,
+      "name": "stone_ceiling",
+      "texture": "stone_ceiling_42.png",
+      "tint": [
+        0.7,
+        0.7,
+        0.75,
+        1.0
+      ]
+    },
+    {
+      "id": 3,
+      "name": "brick_wall",
+      "texture": "brick_wall_42.png"
+    },
+    {
+      "id": 4,
+      "name": "skeleton_skin",
+      "texture": "skeleton_skin_42.png"
+    },
+    {
+      "id": 5,
+      "name": "spider_skin",
+      "texture": "spider_skin_42.png"
+    },
+    {
+      "id": 6,
+      "name": "bat_skin",
+      "texture": "bat_skin_42.png"
+    },
+    {
+      "id": 7,
+      "name": "weapon_melee",
+      "texture": "weapon_melee_tex_42.png"
+    },
+    {
+      "id": 8,
+      "name": "weapon_hitscan",
+      "texture": "weapon_hitscan_tex_42.png"
+    },
+    {
+      "id": 9,
+      "name": "weapon_projectile",
+      "texture": "weapon_projectile_tex_42.png"
+    },
+    {
+      "id": 10,
+      "name": "weapon_molotov",
+      "texture": "weapon_molotov_tex_42.png"
+    },
+    {
+      "id": 11,
+      "name": "armor_plate",
+      "texture": "armor_plate_tex_42.png"
+    },
+    {
+      "id": 12,
+      "name": "armor_leather",
+      "texture": "armor_leather_tex_42.png"
+    },
+    {
+      "id": 13,
+      "name": "armor_cloth",
+      "texture": "armor_cloth_tex_42.png"
+    },
+    {
+      "id": 14,
+      "name": "accessory_bone",
+      "texture": "ring_bone_tex_42.png"
+    },
+    {
+      "id": 15,
+      "name": "accessory_gold",
+      "texture": "ring_gold_tex_42.png"
+    },
+    {
+      "id": 16,
+      "name": "human_skin",
+      "texture": "human_skin_42.png"
+    },
+    {
+      "id": 17,
+      "name": "cleric_skin",
+      "texture": "cleric_skin_42.png"
+    },
+    {
+      "id": 18,
+      "name": "archer_skin",
+      "texture": "archer_skin_42.png"
+    },
+    {
+      "id": 19,
+      "name": "butcher_skin",
+      "texture": "butcher_skin_42.png"
+    },
+    {
+      "id": 20,
+      "name": "blood_floor",
+      "texture": "blood_floor_42.png"
+    },
+    {
+      "id": 21,
+      "name": "blood_wall",
+      "texture": "blood_wall_42.png"
+    },
+    {
+      "id": 22,
+      "name": "blood_ceiling",
+      "texture": "blood_ceiling_42.png"
+    },
+    {
+      "id": 23,
+      "name": "mage_skin",
+      "texture": "mage_skin_42.png"
+    },
+    {
+      "id": 24,
+      "name": "rogue_skin",
+      "texture": "rogue_skin_42.png"
+    },
+    {
+      "id": 25,
+      "name": "weapon_staff",
+      "texture": "weapon_staff_tex_42.png"
+    },
+    {
+      "id": 26,
+      "name": "paladin_skin",
+      "texture": "paladin_skin_42.png"
+    },
+    {
+      "id": 27,
+      "name": "boss_lich",
+      "texture": "boss_lich_42.png"
+    },
+    {
+      "id": 28,
+      "name": "boss_spider_queen",
+      "texture": "boss_spider_queen_42.png"
+    },
+    {
+      "id": 29,
+      "name": "boss_demon_knight",
+      "texture": "boss_demon_knight_42.png"
+    },
+    {
+      "id": 30,
+      "name": "boss_arch_mage",
+      "texture": "boss_arch_mage_42.png"
+    },
+    {
+      "id": 31,
+      "name": "boss_andariel",
+      "texture": "boss_andariel_42.png"
+    },
+    {
+      "id": 32,
+      "name": "boss_mephisto",
+      "texture": "boss_mephisto_42.png"
+    },
+    {
+      "id": 33,
+      "name": "boss_baal",
+      "texture": "boss_baal_42.png"
+    },
+    {
+      "id": 34,
+      "name": "boss_diablo",
+      "texture": "boss_diablo_42.png"
+    },
+    {
+      "id": 35,
+      "name": "boss_reaper",
+      "texture": "boss_reaper_42.png"
+    },
+    {
+      "id": 36,
+      "name": "catacomb_wall",
+      "texture": "stone_wall_42.png",
+      "tint": [
+        0.55,
+        0.65,
+        0.45,
+        1.0
+      ]
+    },
+    {
+      "id": 37,
+      "name": "catacomb_floor",
+      "texture": "stone_floor_42.png",
+      "tint": [
+        0.5,
+        0.6,
+        0.4,
+        1.0
+      ]
+    },
+    {
+      "id": 38,
+      "name": "catacomb_ceiling",
+      "texture": "stone_ceiling_42.png",
+      "tint": [
+        0.4,
+        0.5,
+        0.35,
+        1.0
+      ]
+    },
+    {
+      "id": 39,
+      "name": "cavern_wall",
+      "texture": "stone_wall_42.png",
+      "tint": [
+        0.65,
+        0.55,
+        0.75,
+        1.0
+      ]
+    },
+    {
+      "id": 40,
+      "name": "cavern_floor",
+      "texture": "stone_floor_42.png",
+      "tint": [
+        0.55,
+        0.45,
+        0.65,
+        1.0
+      ]
+    },
+    {
+      "id": 41,
+      "name": "cavern_ceiling",
+      "texture": "stone_ceiling_42.png",
+      "tint": [
+        0.5,
+        0.4,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "id": 42,
+      "name": "hellforge_wall",
+      "texture": "brick_wall_42.png",
+      "tint": [
+        0.85,
+        0.35,
+        0.15,
+        1.0
+      ]
+    },
+    {
+      "id": 43,
+      "name": "hellforge_floor",
+      "texture": "stone_floor_42.png",
+      "tint": [
+        0.75,
+        0.3,
+        0.1,
+        1.0
+      ]
+    },
+    {
+      "id": 44,
+      "name": "hellforge_ceiling",
+      "texture": "stone_ceiling_42.png",
+      "tint": [
+        0.6,
+        0.2,
+        0.08,
+        1.0
+      ]
+    },
+    {
+      "id": 45,
+      "name": "void_wall",
+      "texture": "stone_wall_42.png",
+      "tint": [
+        0.35,
+        0.35,
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "id": 46,
+      "name": "void_floor",
+      "texture": "stone_floor_42.png",
+      "tint": [
+        0.3,
+        0.3,
+        0.45,
+        1.0
+      ]
+    },
+    {
+      "id": 47,
+      "name": "void_ceiling",
+      "texture": "stone_ceiling_42.png",
+      "tint": [
+        0.25,
+        0.25,
+        0.4,
+        1.0
+      ]
+    },
+    {
+      "id": 48,
+      "name": "prop_wood",
+      "tint": [
+        0.55,
+        0.38,
+        0.2,
+        1.0
+      ]
+    },
+    {
+      "id": 49,
+      "name": "prop_iron",
+      "tint": [
+        0.45,
+        0.45,
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "id": 50,
+      "name": "prop_bone",
+      "tint": [
+        0.8,
+        0.75,
+        0.65,
+        1.0
+      ]
+    },
+    {
+      "id": 51,
+      "name": "prop_web",
+      "texture": "web_42.png",
+      "tint": [
+        0.7,
+        0.7,
+        0.75,
+        0.6
+      ]
+    },
+    {
+      "id": 52,
+      "name": "prop_brazier",
+      "tint": [
+        0.7,
+        0.4,
+        0.15,
+        1.0
+      ]
+    },
+    {
+      "id": 53,
+      "name": "prop_brazier_fire",
+      "tint": [
+        1.0,
+        0.55,
+        0.1,
+        1.0
+      ]
+    },
+    {
+      "id": 54,
+      "name": "catacomb_skeleton",
+      "texture": "catacomb_skeleton_skin_42.png"
+    },
+    {
+      "id": 55,
+      "name": "catacomb_bat",
+      "texture": "catacomb_bat_skin_42.png"
+    },
+    {
+      "id": 56,
+      "name": "catacomb_spider",
+      "texture": "catacomb_spider_skin_42.png"
+    },
+    {
+      "id": 57,
+      "name": "cavern_skeleton",
+      "texture": "cavern_skeleton_skin_42.png"
+    },
+    {
+      "id": 58,
+      "name": "cavern_bat",
+      "texture": "cavern_bat_skin_42.png"
+    },
+    {
+      "id": 59,
+      "name": "cavern_spider",
+      "texture": "cavern_spider_skin_42.png"
+    },
+    {
+      "id": 60,
+      "name": "hellforge_skeleton",
+      "texture": "hellforge_skeleton_skin_42.png"
+    },
+    {
+      "id": 61,
+      "name": "hellforge_bat",
+      "texture": "hellforge_bat_skin_42.png"
+    },
+    {
+      "id": 62,
+      "name": "hellforge_spider",
+      "texture": "hellforge_spider_skin_42.png"
+    },
+    {
+      "id": 63,
+      "name": "void_skeleton",
+      "texture": "void_skeleton_skin_42.png"
+    },
+    {
+      "id": 64,
+      "name": "void_bat",
+      "texture": "void_bat_skin_42.png"
+    },
+    {
+      "id": 65,
+      "name": "void_spider",
+      "texture": "void_spider_skin_42.png"
+    },
+    {
+      "id": 66,
+      "name": "zombie_skin",
+      "texture": "zombie_skin_42.png"
+    },
+    {
+      "id": 67,
+      "name": "imp_skin",
+      "texture": "imp_skin_42.png"
+    },
+    {
+      "id": 68,
+      "name": "ghoul_skin",
+      "texture": "ghoul_skin_42.png"
+    },
+    {
+      "id": 69,
+      "name": "bone_mage_skin",
+      "texture": "bone_mage_skin_42.png"
+    },
+    {
+      "id": 70,
+      "name": "broodmother_skin",
+      "texture": "broodmother_skin_42.png"
+    },
+    {
+      "id": 71,
+      "name": "stalker_skin",
+      "texture": "stalker_skin_42.png"
+    },
+    {
+      "id": 72,
+      "name": "hellhound_skin",
+      "texture": "hellhound_skin_42.png"
+    },
+    {
+      "id": 73,
+      "name": "demon_skin",
+      "texture": "demon_skin_42.png"
+    },
+    {
+      "id": 74,
+      "name": "shade_skin",
+      "texture": "shade_skin_42.png"
+    },
+    {
+      "id": 75,
+      "name": "void_demon_skin",
+      "texture": "void_demon_skin_42.png"
+    },
+    {
+      "id": 76,
+      "name": "helmet_plate",
+      "texture": "helmet_plate_tex_42.png"
+    },
+    {
+      "id": 77,
+      "name": "helmet_leather",
+      "texture": "helmet_leather_tex_42.png"
+    },
+    {
+      "id": 78,
+      "name": "boots_plate",
+      "texture": "boots_plate_tex_42.png"
+    },
+    {
+      "id": 79,
+      "name": "boots_leather",
+      "texture": "boots_leather_tex_42.png"
+    },
+    {
+      "id": 80,
+      "name": "shield_wood",
+      "texture": "shield_wood_tex_42.png"
+    },
+    {
+      "id": 81,
+      "name": "shield_plate",
+      "texture": "shield_plate_tex_42.png"
+    },
+    {
+      "id": 82,
+      "name": "legendary_weapon",
+      "texture": "legendary_weapon_tex_42.png"
+    },
+    {
+      "id": 83,
+      "name": "legendary_armor",
+      "texture": "legendary_armor_tex_42.png"
+    },
+    {
+      "id": 84,
+      "name": "legendary_helm",
+      "texture": "legendary_helm_tex_42.png"
+    },
+    {
+      "id": 85,
+      "name": "legendary_boots",
+      "texture": "legendary_boots_tex_42.png"
+    },
+    {
+      "id": 86,
+      "name": "legendary_ring",
+      "texture": "legendary_ring_tex_42.png"
+    },
+    {
+      "id": 87,
+      "name": "legendary_shield",
+      "texture": "legendary_shield_tex_42.png"
+    },
+    {
+      "id": 88,
+      "name": "icon_drone",
+      "texture": "icon_drone_42.png"
+    },
+    {
+      "id": 89,
+      "name": "icon_swarm",
+      "texture": "icon_swarm_42.png"
+    },
+    {
+      "id": 90,
+      "name": "icon_turret",
+      "texture": "icon_turret_42.png"
+    },
+    {
+      "id": 91,
+      "name": "bat_wing",
+      "texture": "bat_wing_skin_42.png"
+    },
+    {
+      "id": 92,
+      "name": "status_poison",
+      "texture": "status_poison_42.png"
+    },
+    {
+      "id": 93,
+      "name": "status_burn",
+      "texture": "status_burn_42.png"
+    },
+    {
+      "id": 94,
+      "name": "status_freeze",
+      "texture": "status_freeze_42.png"
+    },
+    {
+      "id": 95,
+      "name": "status_slow",
+      "texture": "status_slow_42.png"
+    },
+    {
+      "id": 96,
+      "name": "status_invuln",
+      "texture": "status_invuln_42.png"
+    },
+    {
+      "id": 97,
+      "name": "sniper_imp_skin",
+      "tint": [
+        0.4,
+        0.6,
+        0.9,
+        1.0
+      ]
+    },
+    {
+      "id": 98,
+      "name": "prop_web_b",
+      "texture": "web_b_42.png",
+      "tint": [
+        0.7,
+        0.7,
+        0.75,
+        0.6
+      ]
+    },
+    {
+      "id": 99,
+      "name": "prop_web_c",
+      "texture": "web_c_42.png",
+      "tint": [
+        0.7,
+        0.7,
+        0.75,
+        0.6
+      ]
+    },
+    {
+      "id": 100,
+      "name": "prop_web_d",
+      "texture": "web_d_42.png",
+      "tint": [
+        0.7,
+        0.7,
+        0.75,
+        0.6
+      ]
+    },
+    {
+      "id": 101,
+      "name": "weapon_sword",
+      "texture": "weapon_sword_tex_42.png"
+    },
+    {
+      "id": 102,
+      "name": "weapon_dagger",
+      "texture": "weapon_dagger_tex_42.png"
+    },
+    {
+      "id": 103,
+      "name": "weapon_axe",
+      "texture": "weapon_axe_tex_42.png"
+    },
+    {
+      "id": 104,
+      "name": "weapon_claymore",
+      "texture": "weapon_claymore_tex_42.png"
+    },
+    {
+      "id": 105,
+      "name": "weapon_pistol",
+      "texture": "weapon_pistol_tex_42.png"
+    },
+    {
+      "id": 106,
+      "name": "weapon_smg",
+      "texture": "weapon_smg_tex_42.png"
+    },
+    {
+      "id": 107,
+      "name": "weapon_carbine",
+      "texture": "weapon_carbine_tex_42.png"
+    },
+    {
+      "id": 108,
+      "name": "weapon_revolver",
+      "texture": "weapon_revolver_tex_42.png"
+    },
+    {
+      "id": 109,
+      "name": "weapon_bow",
+      "texture": "weapon_bow_tex_42.png"
+    },
+    {
+      "id": 110,
+      "name": "weapon_crossbow",
+      "texture": "weapon_crossbow_tex_42.png"
+    },
+    {
+      "id": 111,
+      "name": "weapon_throwing_knife",
+      "texture": "weapon_throwing_knife_tex_42.png"
+    },
+    {
+      "id": 112,
+      "name": "weapon_wand",
+      "texture": "weapon_wand_tex_42.png"
+    },
+    {
+      "id": 113,
+      "name": "shock_bolt",
+      "texture": "shock_bolt_tex_42.png"
+    },
+    {
+      "id": 114,
+      "name": "turret_skin",
+      "texture": "turret_tex_42.png"
+    },
+    {
+      "id": 115,
+      "name": "gargoyle_skin",
+      "texture": "gargoyle_skin_42.png"
+    },
+    {
+      "id": 116,
+      "name": "necromancer_skin",
+      "texture": "necromancer_skin_42.png"
+    },
+    {
+      "id": 117,
+      "name": "cavern_shaman_skin",
+      "texture": "cavern_shaman_skin_42.png"
+    },
+    {
+      "id": 118,
+      "name": "infernal_herald_skin",
+      "texture": "infernal_herald_skin_42.png"
+    },
+    {
+      "id": 119,
+      "name": "void_necromancer_skin",
+      "texture": "void_necromancer_skin_42.png"
+    },
+    {
+      "id": 120,
+      "name": "void_shaman_skin",
+      "texture": "void_shaman_skin_42.png"
+    },
+    {
+      "id": 121,
+      "name": "void_herald_skin",
+      "texture": "void_herald_skin_42.png"
+    },
+    {
+      "id": 122,
+      "name": "particle_blob",
+      "texture": "particle_blob_16.png",
+      "tint": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": 123,
+      "name": "particle_spark",
+      "texture": "particle_spark_16.png",
+      "tint": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": 124,
+      "name": "white",
+      "tint": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": 125,
+      "name": "cavern_herald_skin",
+      "texture": "cavern_herald_skin_42.png"
+    },
+    {
+      "id": 126,
+      "name": "weapon_cleaver",
+      "texture": "weapon_cleaver_tex_42.png"
+    }
   ]
 }

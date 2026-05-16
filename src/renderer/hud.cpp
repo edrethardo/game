@@ -1636,6 +1636,8 @@ static const char* subtypeName(WeaponSubtype st) {
         case WeaponSubtype::SWORD:          return "Sword";
         case WeaponSubtype::DAGGER:         return "Dagger";
         case WeaponSubtype::AXE:            return "Axe";
+        case WeaponSubtype::CLAYMORE:       return "Claymore";
+        case WeaponSubtype::CLEAVER:        return "Cleaver";
         case WeaponSubtype::PISTOL:         return "Pistol";
         case WeaponSubtype::SMG:            return "SMG";
         case WeaponSubtype::CARBINE:        return "Carbine";
@@ -1685,7 +1687,7 @@ static const char* skillDescription(SkillId id) {
         case SkillId::SECOND_WIND:     return "Below 20% HP: heal 30% and\ngain 2s invulnerability. 60s cooldown.";
         case SkillId::SOUL_HARVEST:    return "Each kill: +5% speed, +3% damage\nfor 10s. Stacks up to 5 times.";
         case SkillId::GRAVITY_PULL:    return "Enemies within 5m are slowly\npulled toward you.";
-        case SkillId::PHASE_STRIKE:    return "10% on hit: teleport behind\nthe target.";
+        case SkillId::PHASE_STRIKE:    return "20% on kill: smoke bomb that\nblinds nearby enemies for 0.5s.";
         case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
         case SkillId::ARC_FIRE:        return "20% on hit: ignite the ground\nacross the full swing arc for 1.5s.";
         default: return "";

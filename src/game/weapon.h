@@ -18,7 +18,7 @@ enum struct WeaponType : u8 {
 enum struct WeaponSubtype : u8 {
     NONE = 0,
     // Melee subtypes
-    SWORD, DAGGER, AXE, CLAYMORE,
+    SWORD, DAGGER, AXE, CLAYMORE, CLEAVER,
     // Hitscan subtypes
     PISTOL, SMG, CARBINE, REVOLVER,
     // Projectile subtypes

@@ -177,6 +177,25 @@ static const u16 s_iconData[][16] = {
         0x0380, // ......###......  pommel
         0x0380, // ......###......  pommel
     },
+    // 19: CLEAVER — wide heavy blade on short handle (butcher knife)
+    {
+        0x0000, // ................
+        0x3F00, // ..######........  wide blade top
+        0x7F80, // .########.......  wide blade
+        0x7FC0, // .#########......  wide blade
+        0x7FC0, // .#########......  wide blade
+        0x7FC0, // .#########......  wide blade
+        0x3FC0, // ..########......  blade taper
+        0x1FC0, // ...#######......  blade taper
+        0x0FC0, // ....######......  blade narrows
+        0x07C0, // .....#####......  neck
+        0x03C0, // ......####......  handle start
+        0x01C0, // .......###......  handle
+        0x01C0, // .......###......  handle
+        0x01C0, // .......###......  handle
+        0x03E0, // ......#####.....  pommel
+        0x0000, // ................
+    },
 };
 
 static constexpr u32 ICON_COUNT = sizeof(s_iconData) / sizeof(s_iconData[0]);
@@ -275,6 +294,7 @@ static u32 subtypeToIconIndex(WeaponSubtype st) {
         case WeaponSubtype::MOLOTOV:        return 11;
         case WeaponSubtype::WAND:           return 12;
         case WeaponSubtype::CLAYMORE:       return 19;  // array idx 19 (comments had duplicate "13")
+        case WeaponSubtype::CLEAVER:        return 20;  // wide butcher blade
         default:                            return 0;
     }
 }

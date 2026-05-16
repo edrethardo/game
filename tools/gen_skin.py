@@ -1954,6 +1954,22 @@ def skin_weapon_axe_tex():
     return w, h, p
 
 
+def skin_weapon_cleaver_tex():
+    """Cleaver: dark steel blade, blood-red edge highlight, dark wood handle."""
+    w, h = 4, 4
+    p = {}
+    dark_steel = (90, 90, 100, 255)
+    blood_edge = (160, 30, 30, 255)
+    handle     = (60, 40, 25, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = dark_steel if py >= 2 else handle
+    # Blood-red cutting edge — top row
+    for px in range(w):
+        p[(px, 3)] = blood_edge
+    return w, h, p
+
+
 def skin_weapon_claymore_tex():
     """Claymore: blue-steel blade, leather wrap grip, cross-guard accent row."""
     w, h = 4, 4
@@ -2898,6 +2914,7 @@ SKIN_TYPES = {
     "weapon_sword_tex":          ("weapon_sword_tex_42.png",          skin_weapon_sword_tex),
     "weapon_dagger_tex":         ("weapon_dagger_tex_42.png",         skin_weapon_dagger_tex),
     "weapon_axe_tex":            ("weapon_axe_tex_42.png",            skin_weapon_axe_tex),
+    "weapon_cleaver_tex":        ("weapon_cleaver_tex_42.png",        skin_weapon_cleaver_tex),
     "weapon_claymore_tex":       ("weapon_claymore_tex_42.png",       skin_weapon_claymore_tex),
     "weapon_pistol_tex":         ("weapon_pistol_tex_42.png",         skin_weapon_pistol_tex),
     "weapon_smg_tex":            ("weapon_smg_tex_42.png",            skin_weapon_smg_tex),
