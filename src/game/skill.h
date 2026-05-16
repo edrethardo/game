@@ -24,6 +24,14 @@ struct ScreenShake;
 namespace SkillSystem {
     void init();
 
+    // Set skill power scaling (0.0 = base, 1.0 = max). Called by engine before
+    // tryActivate — 0.0 for class skills, scaled by item level for legendary skills.
+    void setSkillPower(f32 power);
+
+    // Set class skill damage multiplier (scales with effective floor).
+    // Called by engine before class skill activation. Item skills use 1.0.
+    void setClassDamageMult(f32 mult);
+
     // Tick cooldowns, energy regen, pending meteors
     void update(SkillState& ss, f32 dt);
 

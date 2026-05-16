@@ -448,9 +448,11 @@ void Engine::gameUpdate(f32 dt) {
             Vec3 pos = m_localPlayer.position + Vec3{cosf(angle) * 5.0f, 0.5f, sinf(angle) * 5.0f};
             bool flying = (s % 3 == 0);
             Vec3 half = flying ? Vec3{0.3f, 0.3f, 0.3f} : Vec3{0.4f, 0.5f, 0.4f};
-            EntitySystem::spawn(m_entities, pos, half, flying,
+            EntityHandle h = EntitySystem::spawn(m_entities, pos, half, flying,
                 flying ? 30.0f : 50.0f, flying ? 4.0f : 2.5f,
                 15.0f, flying ? 8.0f : 2.5f, flying ? 1.5f : 1.0f, flying ? 8.0f : 10.0f);
+            Entity* ent = handleGet(m_entities, h);
+            if (ent) { ent->baseMoveSpeed = ent->moveSpeed; ent->baseAttackCooldown = ent->attackCooldown; }
             spawned++;
         }
         LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
@@ -464,9 +466,11 @@ void Engine::gameUpdate(f32 dt) {
             Vec3 pos = m_localPlayer.position + Vec3{cosf(angle) * radius, 0.5f, sinf(angle) * radius};
             bool flying = (s % 4 == 0);
             Vec3 half = flying ? Vec3{0.3f, 0.3f, 0.3f} : Vec3{0.4f, 0.5f, 0.4f};
-            EntitySystem::spawn(m_entities, pos, half, flying,
+            EntityHandle h = EntitySystem::spawn(m_entities, pos, half, flying,
                 flying ? 30.0f : 50.0f, flying ? 4.0f : 2.5f,
                 15.0f, flying ? 8.0f : 2.5f, flying ? 1.5f : 1.0f, flying ? 8.0f : 10.0f);
+            Entity* ent = handleGet(m_entities, h);
+            if (ent) { ent->baseMoveSpeed = ent->moveSpeed; ent->baseAttackCooldown = ent->attackCooldown; }
             spawned++;
         }
         LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
@@ -841,6 +845,10 @@ void Engine::gameUpdate(f32 dt) {
                 if (tcDef) { origDuration = tcDef->duration; tcDef->duration = 0.5f; }
             }
 
+            SkillSystem::setSkillPower(0.0f);  // class skills use base power
+            // Class skill damage scales at 6% per effective floor (slower than enemy 10%)
+            { u32 effFloor = m_level.currentFloor + m_difficulty * 50;
+              SkillSystem::setClassDamageMult(1.0f + (effFloor - 1) * 0.06f); }
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                           m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -875,6 +883,10 @@ void Engine::gameUpdate(f32 dt) {
         m_bootSkillStates[0].activeSkill != SkillId::NONE) {
         m_bootSkillStates[0].energy = 999.0f;
         m_bootSkillStates[0].maxEnergy = 999.0f;
+        // Scale by boots item level — item skills use base class damage (1.0)
+        { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)].itemLevel;
+          SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
+        SkillSystem::setClassDamageMult(1.0f);
         SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
                                   eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                   m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -886,6 +898,10 @@ void Engine::gameUpdate(f32 dt) {
         m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
         m_helmetSkillStates[0].energy = 999.0f;
         m_helmetSkillStates[0].maxEnergy = 999.0f;
+        // Scale by helmet item level — item skills use base class damage (1.0)
+        { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)].itemLevel;
+          SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
+        SkillSystem::setClassDamageMult(1.0f);
         SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
                                   eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                   m_projectiles, m_entities, m_level.grid, m_localPlayer,

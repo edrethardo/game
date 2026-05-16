@@ -361,7 +361,10 @@ void Engine::handleWeaponFire(f32 dt) {
                         tempSS.cooldownTimer = 0.0f;
                         tempSS.energy = 999.0f;
                         tempSS.maxEnergy = 999.0f;
-                        // Direct call: chain from proc position
+                        // Scale by weapon item level — proc skills use base class damage (1.0)
+                        { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)].itemLevel;
+                          SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
+                        SkillSystem::setClassDamageMult(1.0f);
                         Vec3 dir = m_localPlayer.forward;
                         SkillSystem::tryActivate(tempSS, &procDef, 1,
                             procPos, dir, m_localPlayer.yaw,
@@ -639,6 +642,9 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                         tempSS.cooldownTimer = 0.0f;
                         tempSS.energy = 999.0f;
                         tempSS.maxEnergy = 999.0f;
+                        { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)].itemLevel;
+                          SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
+                        SkillSystem::setClassDamageMult(1.0f);
                         SkillSystem::tryActivate(tempSS, &procDef, 1,
                             procPos, forward, np.yaw,
                             m_projectiles, m_entities, m_level.grid, m_localPlayer);

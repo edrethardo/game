@@ -15,6 +15,16 @@
 // Not static — extern'd by engine.cpp for rendering the targeting circles
 PendingMeteor s_meteors[MAX_PENDING_METEORS];
 static ParticlePool* s_particlePool = nullptr;
+
+// Skill power scaling (0.0 = base, 1.0 = max). Set by engine before tryActivate.
+// Class skills get 0.0; legendary item skills get a value scaled by item level.
+static f32 s_skillPower = 0.0f;
+void SkillSystem::setSkillPower(f32 power) { s_skillPower = power; }
+
+// Class skill damage multiplier — scales damage/heal numbers by effective floor.
+// Set to floor-based mult for class skills, 1.0 for item skills.
+static f32 s_classDmgMult = 1.0f;
+void SkillSystem::setClassDamageMult(f32 mult) { s_classDmgMult = mult; }
 static ScreenShake*  s_screenShake  = nullptr;
 static SkillSystem::NovaCallback s_novaCallback = nullptr;
 static SkillSystem::DashCallback s_dashCallback = nullptr;
@@ -42,22 +52,16 @@ void SkillSystem::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
 static void fireFrozenOrb(Vec3 origin, Vec3 direction, const SkillDef* def,
                            ProjectilePool& pool)
 {
-    // Orb itself deals no damage and is 30% smaller — shards do the damage
+    // Orb itself phases through enemies; shards do the damage.
+    // We store s_classDmgMult in the orb's damage field (otherwise 0) so
+    // updateOrbProjectiles can read it back for shard damage scaling.
     f32 orbRadius = def->radius * 0.7f;
-    ProjectileSystem::spawn(pool, origin, direction, def->projectileSpeed,
-                            0.0f, orbRadius, def->duration, true);
-
-    // Mark the most recently spawned projectile as an orb
-    for (u32 i = MAX_PROJECTILES; i > 0; i--) {
-        Projectile& p = pool.projectiles[i - 1];
-        if (p.active && p.projFlags == 0 &&
-            fabsf(p.damage) < 0.1f &&
-            fabsf(p.radius - orbRadius) < 0.1f) {
-            p.projFlags = 1;  // bit 0 = isOrb
-            p.subTimer  = 0.0f;
-            p.orbAngle  = 0.0f;
-            break;
-        }
+    u16 orbIdx = ProjectileSystem::spawn(pool, origin, direction, def->projectileSpeed,
+                            s_classDmgMult, orbRadius, def->duration, true);
+    if (orbIdx != 0xFFFF) {
+        pool.projectiles[orbIdx].projFlags = PROJ_ORB;
+        pool.projectiles[orbIdx].subTimer  = 0.0f;
+        pool.projectiles[orbIdx].orbAngle  = 0.0f;
     }
 }
 
@@ -66,7 +70,7 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 {
     Vec3 currentPos    = origin;
     Vec3 currentDir    = direction;
-    f32  currentDamage = def->damage;
+    f32  currentDamage = def->damage * s_classDmgMult;
 
     // Store chain positions for the visual arc effect
     static constexpr u32 MAX_CHAIN_PTS = 24;
@@ -78,7 +82,11 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
     Entity* lastHit = nullptr;
     Entity* prevHit = nullptr;
 
-    for (u8 bounce = 0; bounce <= def->bounces && chainCount < MAX_CHAIN_PTS; bounce++) {
+    // Scale bounces by item level: 3 (base) to 20 (Hell max)
+    u8 effectiveBounces = static_cast<u8>(3.0f + s_skillPower * 17.0f);
+    if (effectiveBounces < def->bounces) effectiveBounces = def->bounces; // never below skill def
+
+    for (u8 bounce = 0; bounce <= effectiveBounces && chainCount < MAX_CHAIN_PTS; bounce++) {
         // Wide cone on first hit for forgiving aiming; sphere search on bounces
         f32 cosCone = (bounce == 0) ? cosf(radians(15.0f)) : -1.0f;
         f32 range   = (bounce == 0) ? 15.0f : def->bounceRange;
@@ -117,7 +125,7 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
         currentDamage *= def->damageFalloff;
         lastHit        = hit;
 
-        if (bounce < def->bounces) {
+        if (bounce < effectiveBounces) {
             // Find nearest entity for next bounce (can re-hit prevHit but not lastHit)
             f32  bestDist = def->bounceRange + 1.0f;
             bool found    = false;
@@ -150,19 +158,23 @@ static void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 
 static void fireBloodNova(Vec3 origin, const SkillDef* def, EntityPool& entities)
 {
+    // Radius scales with item level: 1.0x base to 1.5x at max power
+    f32 scaledRadius = def->radius * (1.0f + s_skillPower * 0.5f);
+
     // 360-degree AoE: pass cosAngle of -1 (covers all directions)
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     u32 hitCount = CombatQuery::queryConeSorted(
-        entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, def->radius,
+        entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, scaledRadius,
         hits, dists, MAX_ENTITIES);
 
+    f32 novaDmg = def->damage * s_classDmgMult;
     for (u32 i = 0; i < hitCount; i++) {
-        Combat::applyDamage(entities, hits[i], def->damage);
+        Combat::applyDamage(entities, hits[i], novaDmg);
     }
 
     // Trigger expanding red ring visual
-    if (s_novaCallback) s_novaCallback(origin, def->radius, {1.0f, 0.15f, 0.1f});
+    if (s_novaCallback) s_novaCallback(origin, scaledRadius, {1.0f, 0.15f, 0.1f});
     LOG_INFO("Blood Nova hit %u enemies", hitCount);
 }
 
@@ -175,15 +187,29 @@ static void fireMeteorStrike(Vec3 origin, Vec3 direction, const SkillDef* def,
         ? (origin + direction * hit.distance)
         : (origin + direction * 20.0f);
 
-    // Slot into the pending-meteor pool
-    for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
-        if (!s_meteors[i].active) {
-            s_meteors[i].position = targetPos;
-            s_meteors[i].damage   = def->damage;
-            s_meteors[i].radius   = def->radius;
-            s_meteors[i].timer    = def->delay;
-            s_meteors[i].active   = true;
-            break;
+    // Number of meteors scales with item level: 1 (base) to 5 (Hell max)
+    u8 meteorCount = static_cast<u8>(1.0f + s_skillPower * 4.0f);
+
+    for (u8 m = 0; m < meteorCount; m++) {
+        // Spread extra meteors around the target in a ring
+        Vec3 meteorPos = targetPos;
+        if (m > 0) {
+            f32 angle = (6.2832f / (meteorCount - 1)) * (m - 1);
+            f32 spread = def->radius * 1.5f;
+            meteorPos.x += cosf(angle) * spread;
+            meteorPos.z += sinf(angle) * spread;
+        }
+
+        // Slot into the pending-meteor pool
+        for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
+            if (!s_meteors[i].active) {
+                s_meteors[i].position = meteorPos;
+                s_meteors[i].damage   = def->damage * s_classDmgMult;
+                s_meteors[i].radius   = def->radius;
+                s_meteors[i].timer    = def->delay + m * 0.15f; // stagger impacts
+                s_meteors[i].active   = true;
+                break;
+            }
         }
     }
 }
@@ -200,10 +226,13 @@ static void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
         dashDir = normalize(dashDir);
     }
 
+    // Distance scales with item level: 1.0x base to 1.5x at max power
+    f32 scaledDist = def->distance * (1.0f + s_skillPower * 0.5f);
+
     // Raycast for wall obstruction
     Vec3  rayOrigin = player.position + Vec3{0.0f, 0.5f, 0.0f};
-    RayHit wallHit  = Raycast::cast(grid, rayOrigin, dashDir, def->distance);
-    f32    dashDist = wallHit.hit ? (wallHit.distance - 0.5f) : def->distance;
+    RayHit wallHit  = Raycast::cast(grid, rayOrigin, dashDir, scaledDist);
+    f32    dashDist = wallHit.hit ? (wallHit.distance - 0.5f) : scaledDist;
     if (dashDist < 0.5f) dashDist = 0.5f;
 
     Vec3 startPos = player.position;
@@ -217,8 +246,9 @@ static void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
         cosf(radians(30.0f)), dashDist,
         hits, dists, MAX_ENTITIES);
 
+    f32 dashDmg = def->damage * s_classDmgMult;
     for (u32 i = 0; i < hitCount; i++) {
-        Combat::applyDamage(entities, hits[i], def->damage);
+        Combat::applyDamage(entities, hits[i], dashDmg);
     }
 
     // Teleport player
@@ -241,7 +271,7 @@ static void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name        = "Cleave";
     temp.type        = WeaponType::MELEE;
-    temp.damage      = def->damage > 0.0f ? def->damage : 35.0f;
+    temp.damage      = (def->damage > 0.0f ? def->damage : 35.0f) * s_classDmgMult;
     temp.range       = def->radius  > 0.0f ? def->radius : 3.0f;
     temp.coneAngleDeg = 120.0f;
     temp.cooldown    = 0.0f;
@@ -265,7 +295,7 @@ static void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entiti
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     f32 range  = def->radius > 0.0f ? def->radius : 5.0f;
-    f32 damage = def->damage > 0.0f ? def->damage : 25.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
     // Query from ground position with omnidirectional search
     u32 hitCount = CombatQuery::queryConeSorted(
         entities, groundPos, {0.0f, -1.0f, 0.0f}, -1.0f, range,
@@ -320,7 +350,7 @@ static void fireWhirlwind(Vec3 origin, const SkillDef* def, EntityPool& entities
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     f32 range    = def->radius > 0.0f ? def->radius : 2.5f;
-    f32 damage   = def->damage > 0.0f ? def->damage : 30.0f;
+    f32 damage   = (def->damage > 0.0f ? def->damage : 30.0f) * s_classDmgMult;
     u32 hitCount = CombatQuery::queryConeSorted(
         entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, range,
         hits, dists, MAX_ENTITIES);
@@ -340,7 +370,7 @@ static void fireEarthquake(Vec3 origin, const SkillDef* def, EntityPool& entitie
     for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
         if (!s_meteors[i].active) {
             s_meteors[i].position = origin;
-            s_meteors[i].damage   = def->damage > 0.0f ? def->damage : 40.0f;
+            s_meteors[i].damage   = (def->damage > 0.0f ? def->damage : 40.0f) * s_classDmgMult;
             s_meteors[i].radius   = radius;
             // Very short delay so it fires on the next updateMeteors tick
             s_meteors[i].timer    = 0.05f;
@@ -381,7 +411,7 @@ static void fireMultiShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                           ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 25.0f;
-    f32 damage = def->damage          > 0.0f ? def->damage          : 20.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 20.0f) * s_classDmgMult;
     f32 angles[5] = {-20.0f, -10.0f, 0.0f, 10.0f, 20.0f};
     for (u32 i = 0; i < 5; i++) {
         Vec3 dir = normalize(rotateY(forward, angles[i]));
@@ -398,7 +428,7 @@ static void fireRainOfArrows(Vec3 origin, Vec3 forward, const SkillDef* def,
     Vec3 target   = hit.hit ? (origin + forward * hit.distance)
                             : (origin + forward * 20.0f);
     f32 radius    = def->radius > 0.0f ? def->radius : 3.5f;
-    f32 damage    = def->damage > 0.0f ? def->damage : 25.0f;
+    f32 damage    = (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
 
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
@@ -419,7 +449,7 @@ static void firePoisonArrow(Vec3 origin, Vec3 forward, const SkillDef* def,
                              ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 22.0f;
-    f32 damage = def->damage          > 0.0f ? def->damage          : 18.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
     // Spawn with PROJ_SPARK flag repurposed as green-tint hint for renderer
     ProjectileSystem::spawn(pool, origin, forward, speed, damage, 0.12f, 3.0f,
                             true, PROJ_SPARK);
@@ -433,7 +463,7 @@ static void fireShadowShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name    = "Shadow Shot";
     temp.type    = WeaponType::HITSCAN;
-    temp.damage  = def->damage > 0.0f ? def->damage * 2.5f : 60.0f;
+    temp.damage  = (def->damage > 0.0f ? def->damage * 2.5f : 60.0f) * s_classDmgMult;
     temp.range   = 80.0f;
     temp.coneAngleDeg  = 1.0f;
     temp.cooldown      = 0.0f;
@@ -451,7 +481,7 @@ static void fireFireball(Vec3 origin, Vec3 forward, const SkillDef* def,
                          ProjectilePool& pool)
 {
     f32 speed       = def->projectileSpeed > 0.0f ? def->projectileSpeed : 18.0f;
-    f32 damage      = def->damage          > 0.0f ? def->damage          : 35.0f;
+    f32 damage      = (def->damage > 0.0f ? def->damage : 35.0f) * s_classDmgMult;
     f32 splashR     = def->radius          > 0.0f ? def->radius          : 2.0f;
     f32 splashDmg   = damage * 0.6f;  // 60% damage in splash zone
     // PROJ_SPLASH + slight gravity arc for feel
@@ -475,7 +505,7 @@ static void fireKnifeBurst(Vec3 origin, Vec3 forward, const SkillDef* def,
                             ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 30.0f;
-    f32 damage = def->damage          > 0.0f ? def->damage          : 12.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 12.0f) * s_classDmgMult;
     f32 angles[3] = {-8.0f, 0.0f, 8.0f};
     for (u32 i = 0; i < 3; i++) {
         Vec3 dir = normalize(rotateY(forward, angles[i]));
@@ -492,7 +522,7 @@ static void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
     Vec3 target = hit.hit ? (origin + forward * hit.distance)
                           : (origin + forward * 15.0f);
     f32 radius  = def->radius > 0.0f ? def->radius : 2.5f;
-    f32 dps     = def->damage > 0.0f ? def->damage * 0.4f : 10.0f;
+    f32 dps     = (def->damage > 0.0f ? def->damage * 0.4f : 10.0f) * s_classDmgMult;
 
     // Immediate aggro reset — enemies in the cloud lose track of the player
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
@@ -534,7 +564,7 @@ static void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
     Vec3 startPos = player.position;
     player.position = behind;
 
-    f32 damage = def->damage > 0.0f ? def->damage * 3.0f : 90.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage * 3.0f : 90.0f) * s_classDmgMult;
     Combat::applyDamage(entities, hits[0], damage);
     target->freezeTimer = 1.5f; // slow on hit (freezeTimer halves move speed)
 
@@ -553,14 +583,14 @@ static void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name         = "Holy Smite";
     temp.type         = WeaponType::MELEE;
-    temp.damage       = def->damage > 0.0f ? def->damage : 40.0f;
+    temp.damage       = (def->damage > 0.0f ? def->damage : 40.0f) * s_classDmgMult;
     temp.range        = def->radius > 0.0f ? def->radius : 4.0f;
     temp.coneAngleDeg = 60.0f;
     temp.cooldown     = 0.0f;
     temp.recoilKick   = 0.0f;
 
-    // Unconditional flat heal on activation
-    player.health = fminf(player.health + 5.0f, player.maxHealth);
+    // Flat heal scales with floor too — keeps Paladin sustain relevant
+    player.health = fminf(player.health + 5.0f * s_classDmgMult, player.maxHealth);
 
     AttackResult result = Combat::fireMelee(temp, origin, forward, entities);
 
@@ -581,7 +611,7 @@ static void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
 static void fireConsecration(Vec3 origin, const SkillDef* def, Player& player)
 {
     f32 radius  = def->radius > 0.0f ? def->radius : 4.0f;
-    f32 dps     = def->damage > 0.0f ? def->damage : 5.0f;
+    f32 dps     = (def->damage > 0.0f ? def->damage : 5.0f) * s_classDmgMult;
 
     // Immediate partial heal (30% of max HP)
     player.health = fminf(player.health + player.maxHealth * 0.3f, player.maxHealth);
@@ -635,7 +665,7 @@ static void fireDivineShield(Player& player, EntityPool& entities, const SkillDe
 static void fireShockBolt(Vec3 origin, Vec3 forward, const SkillDef* def,
                            ProjectilePool& projectiles)
 {
-    f32 damage = def->damage > 0.0f ? def->damage : 20.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 20.0f) * s_classDmgMult;
     // Electric bolt projectile — freezes target on hit via Projectile.freezeDuration
     u16 idx = ProjectileSystem::spawn(projectiles, origin, forward,
                                        35.0f, damage, 0.12f, 2.5f, true, PROJ_SPARK);
@@ -661,7 +691,7 @@ static void fireTeslaCoil(Vec3 origin, const SkillDef* def,
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     f32 radius = def->radius > 0.0f ? def->radius : 4.0f;
-    f32 damage = def->damage > 0.0f ? def->damage : 30.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 30.0f) * s_classDmgMult;
 
     u32 hitCount = CombatQuery::queryConeSorted(
         entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, radius,
@@ -706,7 +736,7 @@ static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name         = "Aimed Shot";
     temp.type         = WeaponType::HITSCAN;
-    temp.damage       = (def->damage > 0.0f ? def->damage : 25.0f) * 3.0f;
+    temp.damage       = (def->damage > 0.0f ? def->damage : 25.0f) * 3.0f * s_classDmgMult;
     temp.range        = 80.0f;
     temp.coneAngleDeg = 0.5f;
     temp.cooldown     = 0.0f;
@@ -732,7 +762,7 @@ static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
 static void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
                                 const LevelGrid& grid, EntityPool& entities)
 {
-    f32 damage    = def->damage > 0.0f ? def->damage : 20.0f;
+    f32 damage    = (def->damage > 0.0f ? def->damage : 20.0f) * s_classDmgMult;
     f32 splashR   = def->radius > 0.0f ? def->radius : 2.5f;
 
     // Find hit position via grid raycast
@@ -778,7 +808,7 @@ static void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
 static void fireRapidFire(Vec3 origin, Vec3 forward, const SkillDef* def,
                            const LevelGrid& grid, EntityPool& entities)
 {
-    f32 damage = def->damage > 0.0f ? def->damage : 15.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 15.0f) * s_classDmgMult;
 
     // Bake tiny deterministic spreads into the five shots (no RNG needed)
     static const f32 kSpreads[5][2] = {
@@ -819,8 +849,8 @@ static void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
         if (e && !(e->flags & ENT_DEAD)) {
             bool isExecute = (e->health < e->maxHealth * 0.25f);
             f32 damage = isExecute
-                         ? e->health + 1.0f  // instant kill
-                         : (def->damage > 0.0f ? def->damage : 25.0f);
+                         ? e->health + 1.0f  // instant kill (no scaling needed)
+                         : (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
             Combat::applyDamage(entities, eHits[0], damage);
             // Reset cooldown on successful execute
             if (isExecute) skillState.cooldownTimer = 0.0f;
@@ -834,7 +864,7 @@ static void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name         = "Headshot";
     temp.type         = WeaponType::HITSCAN;
-    temp.damage       = def->damage > 0.0f ? def->damage : 25.0f;
+    temp.damage       = (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
     temp.range        = 80.0f;
     temp.coneAngleDeg = 2.0f;
     temp.cooldown     = 0.0f;
@@ -871,7 +901,7 @@ static void fireSwarmDrones(Vec3 origin, Vec3 forward, EntityPool& /*entities*/)
 static void fireStunGrenade(Vec3 origin, Vec3 forward, const SkillDef* def,
                              ProjectilePool& pool)
 {
-    f32 damage  = def->damage > 0.0f ? def->damage : 15.0f;
+    f32 damage  = (def->damage > 0.0f ? def->damage : 15.0f) * s_classDmgMult;
     f32 splashR = def->radius > 0.0f ? def->radius : 2.0f;
 
     u16 slot = ProjectileSystem::spawn(pool, origin, forward,
@@ -1171,18 +1201,15 @@ void SkillSystem::updateOrbProjectiles(ProjectilePool& pool,
                 f32 theta = (rand() / static_cast<f32>(RAND_MAX)) * 3.14159f - 1.5708f; // -90 to +90 deg
                 Vec3 shardDir = {cosf(theta) * cosf(phi), sinf(theta), cosf(theta) * sinf(phi)};
 
-                ProjectileSystem::spawn(pool, p.position, shardDir, def->shardSpeed,
-                                        def->shardDamage, def->shardRadius, 0.6f, true);
+                // Shard damage scales: classDmgMult (stored on orb) + skillPower (item level)
+                f32 orbClassMult = p.damage > 0.0f ? p.damage : 1.0f; // stored at spawn
+                f32 scaledShardDmg = def->shardDamage * orbClassMult * (1.0f + s_skillPower);
+                u16 shardIdx = ProjectileSystem::spawn(pool, p.position, shardDir, def->shardSpeed,
+                                        scaledShardDmg, def->shardRadius, 0.6f, true);
 
                 // Mark the freshly spawned shard (bit 1 = isOrbShard)
-                for (u32 j = MAX_PROJECTILES; j > 0; j--) {
-                    Projectile& sp = pool.projectiles[j - 1];
-                    if (sp.active && sp.projFlags == 0 &&
-                        fabsf(sp.damage - def->shardDamage) < 0.1f &&
-                        fabsf(sp.radius - def->shardRadius) < 0.01f) {
-                        sp.projFlags = 2; // bit 1 = isOrbShard
-                        break;
-                    }
+                if (shardIdx != 0xFFFF) {
+                    pool.projectiles[shardIdx].projFlags = PROJ_ORB_SHARD;
                 }
             }
 

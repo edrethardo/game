@@ -23,7 +23,7 @@
       "energyCost": 25.0,
       "damage": 35.0,
       "bounces": 3,
-      "bounceRange": 10.0,
+      "bounceRange": 7.0,
       "damageFalloff": 0.8
     },
     {

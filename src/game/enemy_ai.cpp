@@ -966,6 +966,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             spider->enemyType = EnemyType::SPIDER;
                             spider->aiState = AIState::CHASE;
                             spider->level = e.level;
+                            spider->baseMoveSpeed = spider->moveSpeed;
+                            spider->baseAttackCooldown = spider->attackCooldown;
                         }
                     }
                     e.speechText = "MY CHILDREN!";
@@ -1092,6 +1094,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             skel->enemyType = EnemyType::SKELETON;
                             skel->aiState = AIState::CHASE;
                             skel->level = e.level;
+                            skel->baseMoveSpeed = skel->moveSpeed;
+                            skel->baseAttackCooldown = skel->attackCooldown;
                         }
                     }
                     e.speechText = "DEATH COMES!";

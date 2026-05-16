@@ -32,7 +32,13 @@ static void setCwdToExeDir([[maybe_unused]] const char* argv0) {
     if (len > 0) {
         buf[len] = '\0';
         char* dir = dirname(buf);
-        (void)chdir(dir);
+        // Only chdir if assets exist next to the binary (packaged build).
+        // In dev builds the binary is in build/src/ but assets are at repo root.
+        char check[1100];
+        snprintf(check, sizeof(check), "%s/assets", dir);
+        if (access(check, F_OK) == 0) {
+            (void)chdir(dir);
+        }
     }
 #endif
 }

@@ -13,7 +13,7 @@ static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
 static constexpr u8 PROJ_SPARK     = 1 << 4;  // Lightning bolt visual (jagged line)
 static constexpr u8 PROJ_VOID      = 1 << 5;  // Void weapon projectile (purple tint)
 
-static constexpr u32 MAX_PROJECTILES = 128;
+static constexpr u32 MAX_PROJECTILES = 256;
 
 // Active projectile instance. Moves each frame, collides with walls and entities.
 // projFlags bits: 0=isOrb (Frozen Orb skill), 1=isOrbShard (sub-projectile)

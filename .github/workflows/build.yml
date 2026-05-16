@@ -3,12 +3,12 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'  # Only trigger on version tags (v0.1.0, v1.0.0, etc.)
-  workflow_dispatch:  # Allow manual trigger from GitHub UI
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-windows:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,30 +20,30 @@ jobs:
           sudo apt-get install -y mingw-w64 python3 python3-pip ffmpeg zip
           pip3 install Pillow
 
-      - name: Fetch audio assets
-        run: python3 tools/fetch_audio.py
-
-      - name: Generate music
-        run: python3 tools/gen_audio.py --music-all
-
-      - name: Cross-compile for Windows
+      - name: Fetch audio + music
         run: |
-          cmake -B build-win \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/windows.cmake \
-            -DCMAKE_BUILD_TYPE=Release
+          python3 tools/fetch_audio.py
+          python3 tools/gen_audio.py --music-all
+
+      - name: Cross-compile
+        run: |
+          cmake -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/windows.cmake -DCMAKE_BUILD_TYPE=Release
           cmake --build build-win -j$(nproc)
 
       - name: Package
         run: ./tools/package_windows.sh
 
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: DungeonEngine-Windows
           path: DungeonEngine-Windows.zip
 
   build-linux:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,14 +52,15 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake python3 python3-pip ffmpeg zip libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libgl-dev libasound2-dev libpulse-dev libudev-dev
-          pip3 install Pillow
+          sudo apt-get install -y build-essential cmake python3 python3-pip ffmpeg zip \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
+            libgl-dev libasound2-dev libpulse-dev libudev-dev
+          pip3 install Pillow || pip3 install Pillow --break-system-packages
 
-      - name: Fetch audio assets
-        run: python3 tools/fetch_audio.py
-
-      - name: Generate music
-        run: python3 tools/gen_audio.py --music-all
+      - name: Fetch audio + music
+        run: |
+          python3 tools/fetch_audio.py
+          python3 tools/gen_audio.py --music-all
 
       - name: Build
         run: |
@@ -68,25 +69,25 @@ jobs:
 
       - name: Package
         run: |
+          SUFFIX=$(echo "${{ matrix.os }}" | sed 's/ubuntu-//')
           mkdir -p package-linux
           cp build-rel/src/DungeonEngine package-linux/
           chmod +x package-linux/DungeonEngine
           cp -r assets package-linux/assets
           rm -f package-linux/assets/audio/.fetched
-          # Launcher script that sets CWD to the game directory
           cat > package-linux/run.sh << 'SH'
           #!/bin/bash
           cd "$(dirname "$0")"
           ./DungeonEngine "$@"
           SH
           chmod +x package-linux/run.sh
-          cd package-linux && zip -r ../DungeonEngine-Linux.zip . && cd ..
+          cd package-linux && zip -r ../DungeonEngine-Linux-${SUFFIX}.zip . && cd ..
 
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DungeonEngine-Linux
-          path: DungeonEngine-Linux.zip
+          name: DungeonEngine-Linux-${{ matrix.os }}
+          path: DungeonEngine-Linux-*.zip
 
   build-macos:
     runs-on: macos-latest
@@ -101,11 +102,10 @@ jobs:
       - name: Install Pillow
         run: pip3 install Pillow --break-system-packages
 
-      - name: Fetch audio assets
-        run: python3 tools/fetch_audio.py
-
-      - name: Generate music
-        run: python3 tools/gen_audio.py --music-all
+      - name: Fetch audio + music
+        run: |
+          python3 tools/fetch_audio.py
+          python3 tools/gen_audio.py --music-all
 
       - name: Build
         run: |
@@ -134,7 +134,7 @@ jobs:
           PLIST
           zip -r DungeonEngine-macOS.zip DungeonEngine.app
 
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: DungeonEngine-macOS
@@ -155,6 +155,7 @@ jobs:
         with:
           files: |
             DungeonEngine-Windows/DungeonEngine-Windows.zip
-            DungeonEngine-Linux/DungeonEngine-Linux.zip
+            DungeonEngine-Linux-ubuntu-22.04/DungeonEngine-Linux-22.04.zip
+            DungeonEngine-Linux-ubuntu-24.04/DungeonEngine-Linux-24.04.zip
             DungeonEngine-macOS/DungeonEngine-macOS.zip
           generate_release_notes: true
