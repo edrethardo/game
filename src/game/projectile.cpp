@@ -187,6 +187,8 @@ void ProjectileSystem::update(ProjectilePool& pool,
                     // Apply freeze if the projectile carries a freeze effect
                     if (p.freezeDuration > 0.0f) {
                         ent.freezeTimer = p.freezeDuration;
+                        // Electric projectiles (PROJ_SPARK) stagger enemies briefly
+                        if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);
                     }
                     if (s_hitCallback) s_hitCallback(p.position, h);
                     primaryHitIdx = static_cast<u16>(e);

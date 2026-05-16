@@ -204,3 +204,14 @@ void Renderer::flush() {
 u32 Renderer::getDrawCallCount()  { return s_drawCalls; }
 u32 Renderer::getVisibleCount()   { return s_visible; }
 u32 Renderer::getTotalSubmitted() { return s_submitted; }
+
+Vec3 Renderer::getLightDir()      { return s_lightDir; }
+Vec3 Renderer::getLightColor()    { return s_lightColor; }
+Vec3 Renderer::getAmbientColor()  { return s_lightAmbient; }
+u32  Renderer::getPointLights(Vec3* outPos, Vec3* outCol) {
+    for (u32 i = 0; i < s_pointLightCount; i++) {
+        outPos[i] = s_pointLightPos[i];
+        outCol[i] = s_pointLightColor[i];
+    }
+    return s_pointLightCount;
+}

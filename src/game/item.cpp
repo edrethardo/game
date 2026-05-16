@@ -81,19 +81,23 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "poison_cloud")    return SkillId::POISON_CLOUD;
     if (s == "shadow_strike")   return SkillId::SHADOW_STRIKE;
     // Paladin
-    if (s == "holy_smite")      return SkillId::HOLY_SMITE;
-    if (s == "consecration")    return SkillId::CONSECRATION;
-    if (s == "divine_shield")   return SkillId::DIVINE_SHIELD;
+    if (s == "holy_smite")        return SkillId::HOLY_SMITE;
+    if (s == "consecration")      return SkillId::CONSECRATION;
+    if (s == "divine_shield")     return SkillId::DIVINE_SHIELD;
+    if (s == "holy_bombardment")  return SkillId::HOLY_BOMBARDMENT;
+    if (s == "holy_nova")         return SkillId::HOLY_NOVA;
+    if (s == "divine_judgment")   return SkillId::DIVINE_JUDGMENT;
     // Combat Engineer
     if (s == "shock_bolt")      return SkillId::SHOCK_BOLT;
     if (s == "deploy_turret")   return SkillId::DEPLOY_TURRET;
     if (s == "tesla_coil")      return SkillId::TESLA_COIL;
     if (s == "mech_overdrive")  return SkillId::MECH_OVERDRIVE;
     // Marksman
-    if (s == "aimed_shot")      return SkillId::AIMED_SHOT;
-    if (s == "explosive_round") return SkillId::EXPLOSIVE_ROUND;
-    if (s == "rapid_fire")      return SkillId::RAPID_FIRE;
-    if (s == "headshot")        return SkillId::HEADSHOT;
+    if (s == "aimed_shot")           return SkillId::AIMED_SHOT;
+    if (s == "explosive_round")      return SkillId::EXPLOSIVE_ROUND;
+    if (s == "rapid_fire")           return SkillId::RAPID_FIRE;
+    if (s == "overcharged_magazine") return SkillId::OVERCHARGED_MAGAZINE;
+    if (s == "headshot")             return SkillId::HEADSHOT;
     // Tinkerer
     if (s == "combat_drone")    return SkillId::COMBAT_DRONE;
     if (s == "swarm_drones")    return SkillId::SWARM_DRONES;
@@ -353,6 +357,10 @@ bool ItemLoader::loadSkillDefs(const char* path, SkillDef* defs, u32& count) {
             def.distance       = entry.value("distance",       0.0f);
             def.corridorWidth  = entry.value("corridorWidth",  0.0f);
             def.invulnDuration = entry.value("invulnDuration", 0.0f);
+
+            // Holy Nova specifics
+            def.secondaryDamage = entry.value("secondaryDamage", 0.0f);
+            def.allyHealPct     = entry.value("allyHealPct",     0.0f);
 
             count++;
         }

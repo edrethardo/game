@@ -13,7 +13,7 @@ static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
 static constexpr u8 PROJ_SPARK     = 1 << 4;  // Lightning bolt visual (jagged line)
 static constexpr u8 PROJ_VOID      = 1 << 5;  // Void weapon projectile (purple tint)
 
-static constexpr u32 MAX_PROJECTILES = 256;
+static constexpr u32 MAX_PROJECTILES = 4096;
 
 // Active projectile instance. Moves each frame, collides with walls and entities.
 // projFlags bits: 0=isOrb (Frozen Orb skill), 1=isOrbShard (sub-projectile)
@@ -32,6 +32,7 @@ struct Projectile {
     f32  splashRadius = 0.0f;   // AoE radius on impact (0 = single target)
     f32  splashDamage = 0.0f;   // damage dealt in splash zone
     f32  freezeDuration = 0.0f; // freeze target on hit for this many seconds (0 = no freeze)
+    Vec3 lightColor   = {0,0,0}; // dynamic point light color (zero = no light emitted)
     u8   meshId       = 0;     // weapon mesh to render (0 = default cube)
 };
 

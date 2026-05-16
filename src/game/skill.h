@@ -7,14 +7,16 @@
 #include "game/entity.h"
 #include "world/level_grid.h"
 
-// Pending meteor (delayed AoE)
-static constexpr u32 MAX_PENDING_METEORS = 4;
+// Pending meteor (delayed AoE) — used by Meteor Strike + Paladin holy pillars
+static constexpr u32 MAX_PENDING_METEORS = 8;
 struct PendingMeteor {
     Vec3 position = {0,0,0};
     f32  damage   = 0.0f;
     f32  radius   = 0.0f;
     f32  timer    = 0.0f;
     bool active   = false;
+    bool healsPlayer = false;  // holy pillar heals caster on impact
+    Vec3 color = {1.0f, 0.5f, 0.1f}; // visual color (fire=orange, holy=gold)
 };
 
 struct Player;     // forward decl
@@ -45,8 +47,8 @@ namespace SkillSystem {
     // Update orb projectiles (spawn shards) -- called from projectile update or engine update
     void updateOrbProjectiles(ProjectilePool& pool, const SkillDef* skillDefs, u32 skillDefCount, f32 dt);
 
-    // Update pending meteors
-    void updateMeteors(EntityPool& entities, f32 dt);
+    // Update pending meteors (+ holy pillar healing)
+    void updateMeteors(EntityPool& entities, Player& player, f32 dt);
 
     // Get the SkillDef for a given SkillId (returns nullptr if not found)
     const SkillDef* findSkillDef(const SkillDef* defs, u32 count, SkillId id);
@@ -55,6 +57,7 @@ namespace SkillSystem {
     using NovaCallback = void(*)(Vec3 position, f32 radius, Vec3 color);
     using DashCallback = void(*)(Vec3 start, Vec3 end);
     using ScorchCallback = void(*)(Vec3 position, f32 radius, f32 duration, f32 dps);
+    using BeamCallback = void(*)(Vec3 start, Vec3 end, Vec3 color);
     // Drone spawn callback — engine handles entity creation with proper mesh/material
     // type: 0=combat drone (spider), 1=swarm drone (bat), 2=turret
     using DroneSpawnCallback = void(*)(Vec3 position, u8 type);
@@ -63,6 +66,12 @@ namespace SkillSystem {
     void setNovaCallback(NovaCallback cb);
     void setDashCallback(DashCallback cb);
     void setScorchCallback(ScorchCallback cb);
+    void setBeamCallback(BeamCallback cb);
+
+    // Overcharged Magazine — buff state for Marksman
+    bool isOvercharged();
+    void consumeOverchargeShot();
+    void tickOvercharge(f32 dt);
     void setDroneSpawnCallback(DroneSpawnCallback cb);
     void setChainCallback(ChainCallback cb);
     void setBoltMeshId(u8 meshId, u8 matId);

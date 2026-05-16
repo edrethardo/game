@@ -180,6 +180,12 @@ private:
     PointLight m_pointLights[MAX_POINT_LIGHTS];
     u32 m_pointLightCount = 0;
 
+    // Dynamic lights — brief weapon flash effects (muzzle flashes, melee swings)
+    static constexpr u32 MAX_DYNAMIC_LIGHTS = 4;
+    struct DynamicLight { Vec3 position; Vec3 color; f32 timer; };
+    DynamicLight m_dynamicLights[MAX_DYNAMIC_LIGHTS] = {};
+    void spawnDynamicLight(Vec3 pos, Vec3 color, f32 duration);
+
     // NPC equipment pool — persistent across floor transitions for surviving NPCs
     NpcEquipment   m_npcEquip[MAX_NPC_EQUIP] = {};
 
@@ -239,6 +245,8 @@ private:
     struct NovaFX { Vec3 pos; f32 maxRadius; f32 timer; bool active; Vec3 color; };
     static constexpr u32 MAX_DASH_FX = 4;
     struct DashFX { Vec3 start; Vec3 end; f32 timer; bool active; };
+    static constexpr u32 MAX_BEAM_FX = 8;
+    struct BeamFX { Vec3 start; Vec3 end; Vec3 color; f32 timer; bool active; };
     static constexpr u32 MAX_CHAIN_FX = 4;
     static constexpr u32 MAX_CHAIN_POINTS = 24;
     struct ChainFX { Vec3 points[MAX_CHAIN_POINTS]; u8 pointCount; f32 timer; bool active; };
@@ -252,6 +260,7 @@ private:
         FireFX        fireFX[MAX_FIRE_FX] = {};
         NovaFX        novaFX[MAX_NOVA_FX] = {};
         DashFX        dashFX[MAX_DASH_FX] = {};
+        BeamFX        beamFX[MAX_BEAM_FX] = {};
         ChainFX       chainFX[MAX_CHAIN_FX] = {};
         ScorchZone    scorchZones[MAX_SCORCH] = {};
         DamageNumber  damageNumbers[MAX_DAMAGE_NUMBERS] = {};

@@ -6,7 +6,7 @@
 #include "core/types.h"
 #include "core/math.h"
 
-constexpr u32 MAX_PARTICLES = 128;
+constexpr u32 MAX_PARTICLES = 256;
 
 enum ParticleType : u8 {
     PTYPE_BILLBOARD = 0,  // camera-facing quad (smoke, magic glow)

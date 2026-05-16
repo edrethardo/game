@@ -29,6 +29,7 @@ add_executable(DungeonEngine
     renderer/hud.cpp
     renderer/minimap.cpp
     renderer/particles.cpp
+    renderer/projectile_renderer.cpp
     world/level_grid.cpp
     world/level_mesh.cpp
     world/level_gen.cpp

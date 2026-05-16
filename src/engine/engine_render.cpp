@@ -16,6 +16,7 @@
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
 #include "renderer/material.h"
+#include "renderer/projectile_renderer.h"
 #include "renderer/obj_loader.h"
 #include "world/level_gen.h"
 #include "world/level_mesh.h"
@@ -764,35 +765,67 @@ void Engine::render(f32 alpha) {
     );
 
     // Send nearest 4 point lights to the shader
-    if (m_pointLightCount > 0) {
+    // Collect all light candidates: static level lights + dynamic weapon flashes + projectile lights.
+    // Pick the nearest 4 to the camera and send to the shader.
+    {
         Vec3 camPos = m_camera.position;
-        // Find nearest 4 by distance
+        // Candidate pool — positions and colors collected from all sources
+        static constexpr u32 MAX_CANDIDATES = 80; // 64 static + 4 dynamic + ~12 lit projectiles
+        Vec3 candPos[MAX_CANDIDATES];
+        Vec3 candCol[MAX_CANDIDATES];
+        u32 candCount = 0;
+
+        // Static level lights
+        for (u32 li = 0; li < m_pointLightCount && candCount < MAX_CANDIDATES; li++) {
+            candPos[candCount] = m_pointLights[li].position;
+            candCol[candCount] = m_pointLights[li].color;
+            candCount++;
+        }
+        // Dynamic weapon flash lights (decaying muzzle flashes)
+        for (u32 di = 0; di < MAX_DYNAMIC_LIGHTS && candCount < MAX_CANDIDATES; di++) {
+            if (m_dynamicLights[di].timer > 0.0f) {
+                candPos[candCount] = m_dynamicLights[di].position;
+                // Fade light intensity as timer expires
+                f32 fade = m_dynamicLights[di].timer * 10.0f; // 0.1s → fades over duration
+                if (fade > 1.0f) fade = 1.0f;
+                candCol[candCount] = m_dynamicLights[di].color * fade;
+                candCount++;
+            }
+        }
+        // Active projectiles with non-zero lightColor
+        for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES; pi++) {
+            const Projectile& p = m_projectiles.projectiles[pi];
+            if (!p.active) continue;
+            if (p.lightColor.x == 0.0f && p.lightColor.y == 0.0f && p.lightColor.z == 0.0f) continue;
+            candPos[candCount] = p.position;
+            candCol[candCount] = p.lightColor;
+            candCount++;
+        }
+
+        // Find nearest 4 candidates to camera
+        Vec3 positions[4], colors[4];
+        u32 nearCount = 0;
         struct LightDist { u32 idx; f32 dist; };
         LightDist nearest[4];
-        u32 nearCount = 0;
-        for (u32 li = 0; li < m_pointLightCount; li++) {
-            f32 d = lengthSq(m_pointLights[li].position - camPos);
+        for (u32 ci = 0; ci < candCount; ci++) {
+            f32 d = lengthSq(candPos[ci] - camPos);
             if (nearCount < 4) {
-                nearest[nearCount++] = {li, d};
+                nearest[nearCount++] = {ci, d};
             } else {
-                // Replace furthest if this one is closer
                 u32 worstIdx = 0;
                 for (u32 n = 1; n < 4; n++) {
                     if (nearest[n].dist > nearest[worstIdx].dist) worstIdx = n;
                 }
                 if (d < nearest[worstIdx].dist) {
-                    nearest[worstIdx] = {li, d};
+                    nearest[worstIdx] = {ci, d};
                 }
             }
         }
-        Vec3 positions[4], colors[4];
         for (u32 n = 0; n < nearCount; n++) {
-            positions[n] = m_pointLights[nearest[n].idx].position;
-            colors[n]    = m_pointLights[nearest[n].idx].color;
+            positions[n] = candPos[nearest[n].idx];
+            colors[n]    = candCol[nearest[n].idx];
         }
         Renderer::setPointLights(positions, colors, nearCount);
-    } else {
-        Renderer::setPointLights(nullptr, nullptr, 0);
     }
 
     // Level geometry
@@ -1505,10 +1538,18 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
     const ProjectilePool& projPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.projectiles : m_projectiles;
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
-    // Projectiles
+    // Instanced render: batch all simple mesh-based projectiles (arrows, bolts, shards)
+    // into a few draw calls. Special effects (orbs, sparks) still use the per-projectile path below.
+    ProjectileRenderer::render(projPool, m_camera.viewProjection, m_meshDefs, m_meshDefCount);
+
+    // Per-projectile special effects (layered orbs, spark trails, etc.)
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = projPool.projectiles[i];
         if (!p.active) continue;
+
+        // Skip projectiles already rendered by the instanced path (has a real mesh assigned)
+        // Only render special effects here (orbs, sparks, generic cubes with custom visuals)
+        if (p.meshId > 0 && !(p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH))) continue;
 
         if (p.projFlags & PROJ_ORB) {
             // Frozen Orb — layered crystalline sphere with frost spiral trail
@@ -1575,12 +1616,12 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                              {0.6f * sparkle, 0.9f * sparkle, 1.0f, 0.9f});
 
         } else if (p.projFlags & PROJ_SPARK) {
-            // Chain Lightning bolt — bright core + jagged electric arcs + trail
+            // Electric bolt — intense pulsing core + crackling arcs + trail
             f32 t = p.lifetime;
-            f32 pulse = 0.6f + 0.4f * sinf(t * 30.0f);
+            f32 pulse = 0.5f + 0.5f * sinf(t * 30.0f); // more dramatic flicker
 
-            // Bright white-blue core
-            f32 coreSize = p.radius * 2.5f * pulse;
+            // Bright white-blue core (larger, more visible)
+            f32 coreSize = p.radius * 3.0f * pulse;
             Mat4 coreModel = Mat4::translate(p.position)
                            * Mat4::rotateY(t * 20.0f)
                            * Mat4::rotateX(t * 14.0f)
@@ -1590,43 +1631,49 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, coreModel, coreBounds,
                              {0.9f, 0.95f, 1.0f, 1.0f});
 
-            // Outer electric glow
-            f32 glowSize = p.radius * 4.0f;
+            // Outer electric glow (brighter)
+            f32 glowSize = p.radius * 5.0f;
             Mat4 glowModel = Mat4::translate(p.position)
                            * Mat4::rotateZ(t * 12.0f)
                            * Mat4::scale({glowSize, glowSize * 0.6f, glowSize});
             AABB glowBounds = {p.position - Vec3{glowSize,glowSize,glowSize},
                                p.position + Vec3{glowSize,glowSize,glowSize}};
             Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, glowModel, glowBounds,
-                             {0.3f, 0.5f, 1.0f, 0.5f});
+                             {0.4f, 0.6f, 1.0f, 0.6f});
 
-            // Jagged electric arcs radiating from the bolt (4 arcs via debug lines)
-            for (u32 arc = 0; arc < 4; arc++) {
-                f32 a = t * 15.0f + arc * 1.57f;
-                f32 jitter = sinf(t * 50.0f + arc * 7.0f) * 0.12f;
-                Vec3 arcEnd = p.position + Vec3{sinf(a) * (0.2f + jitter),
-                                                 cosf(a * 1.3f) * 0.15f,
-                                                 cosf(a) * (0.2f + jitter)};
+            // 6 jagged electric arcs radiating outward (longer, more dramatic)
+            for (u32 arc = 0; arc < 6; arc++) {
+                f32 a = t * 15.0f + arc * (6.28318f / 6.0f);
+                f32 jitter = sinf(t * 50.0f + arc * 7.0f) * 0.15f;
+                f32 reach = 0.3f + jitter;
+                Vec3 arcEnd = p.position + Vec3{sinf(a) * reach,
+                                                 cosf(a * 1.3f) * reach * 0.6f,
+                                                 cosf(a) * reach};
                 Vec3 col = {0.5f + pulse * 0.5f, 0.7f + pulse * 0.3f, 1.0f};
                 DebugDraw::line(p.position, arcEnd, col);
+                // Fine sub-arc (half length, offset phase)
+                Vec3 subEnd = p.position + Vec3{sinf(a + 0.5f) * reach * 0.5f,
+                                                 cosf(a * 0.8f + 1.0f) * reach * 0.3f,
+                                                 cosf(a + 0.5f) * reach * 0.5f};
+                DebugDraw::line(p.position, subEnd, col * 0.6f);
             }
 
-            // Electric trail behind
+            // Electric trail behind (more segments, brighter)
             Vec3 vel = p.velocity;
             f32 spd = length(vel);
             if (spd > 0.01f) {
                 Vec3 dir = vel * (1.0f / spd);
-                for (u32 tr = 0; tr < 3; tr++) {
-                    Vec3 trailPos = p.position - dir * (tr * 0.2f + 0.1f);
-                    f32 trailSize = coreSize * (0.5f - tr * 0.12f);
+                for (u32 tr = 0; tr < 4; tr++) {
+                    Vec3 trailPos = p.position - dir * (tr * 0.18f + 0.08f);
+                    f32 trailSize = coreSize * (0.6f - tr * 0.12f);
                     Mat4 trailModel = Mat4::translate(trailPos)
                                     * Mat4::rotateY(-t * 18.0f + tr)
                                     * Mat4::scale({trailSize, trailSize, trailSize});
                     AABB trailBounds = {trailPos - Vec3{trailSize,trailSize,trailSize},
                                         trailPos + Vec3{trailSize,trailSize,trailSize}};
-                    f32 fade = 0.7f - tr * 0.2f;
+                    f32 fade = 0.8f - tr * 0.18f;
                     Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, trailModel, trailBounds,
-                                     {0.2f * fade, 0.4f * fade, 1.0f * fade, fade});
+                                     {0.3f * fade, 0.5f * fade, 1.0f * fade, fade});
                 }
             }
 
@@ -2025,7 +2072,32 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
-    // --- Meteor Strike — descending fire pillar + pulsing rune circle ---
+    // --- Beam Trails (Marksman) — bright fading hitscan lines ---
+    for (u32 i = 0; i < MAX_BEAM_FX; i++) {
+        if (!m_fx.beamFX[i].active) continue;
+        const BeamFX& bfx = m_fx.beamFX[i];
+        f32 alpha = bfx.timer / 0.3f;
+        if (alpha <= 0.0f) continue;
+        Vec3 c = bfx.color * alpha;
+
+        // Thick central beam
+        DebugDraw::line(bfx.start, bfx.end, c);
+
+        // Two thinner parallel beams for width (offset perpendicular)
+        Vec3 dir = bfx.end - bfx.start;
+        f32 len = length(dir);
+        if (len > 0.1f) {
+            Vec3 fwd = dir * (1.0f / len);
+            Vec3 perp = {-fwd.z, 0.0f, fwd.x};
+            Vec3 up = {0.0f, 1.0f, 0.0f};
+            DebugDraw::line(bfx.start + perp * 0.03f, bfx.end + perp * 0.03f, c * 0.6f);
+            DebugDraw::line(bfx.start - perp * 0.03f, bfx.end - perp * 0.03f, c * 0.6f);
+            DebugDraw::line(bfx.start + up * 0.03f, bfx.end + up * 0.03f, c * 0.4f);
+            DebugDraw::line(bfx.start - up * 0.03f, bfx.end - up * 0.03f, c * 0.4f);
+        }
+    }
+
+    // --- Meteor Strike / Holy Pillar — descending pillar + pulsing rune circle ---
     {
         extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
         for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
@@ -2033,7 +2105,11 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             Vec3 mp = s_meteors[i].position;
             f32 mr = s_meteors[i].radius;
             f32 timer = s_meteors[i].timer;
+            Vec3 col = s_meteors[i].color; // fire=orange, holy=gold
+            bool isHoly = s_meteors[i].healsPlayer;
             f32 urgency = 1.0f - timer; // 0→1 as impact approaches
+            if (urgency < 0.0f) urgency = 0.0f;
+            if (urgency > 1.0f) urgency = 1.0f;
             f32 pulse = 0.5f + 0.5f * sinf(urgency * 30.0f);
 
             // Outer targeting rune circle (pulsing, accelerating)
@@ -2043,7 +2119,7 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 f32 a1 = a0 + (6.28318f / RUNE_SEGS);
                 Vec3 p0 = mp + Vec3{cosf(a0) * mr, 0.05f, sinf(a0) * mr};
                 Vec3 p1 = mp + Vec3{cosf(a1) * mr, 0.05f, sinf(a1) * mr};
-                DebugDraw::line(p0, p1, {1.0f * pulse, 0.15f * urgency, 0.05f});
+                DebugDraw::line(p0, p1, col * pulse);
             }
 
             // Inner rune circle (counter-rotating, smaller)
@@ -2053,7 +2129,7 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 f32 a1 = a0 + (6.28318f / RUNE_SEGS);
                 Vec3 p0 = mp + Vec3{cosf(a0) * innerR, 0.08f, sinf(a0) * innerR};
                 Vec3 p1 = mp + Vec3{cosf(a1) * innerR, 0.08f, sinf(a1) * innerR};
-                DebugDraw::line(p0, p1, {1.0f, 0.5f * pulse, 0.1f});
+                DebugDraw::line(p0, p1, col * (pulse * 1.2f));
             }
 
             // Rune cross-lines (pentagram-like)
@@ -2061,12 +2137,12 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 f32 a = s * (6.28318f / 5.0f) + urgency * 2.0f;
                 Vec3 p0 = mp + Vec3{cosf(a) * mr, 0.06f, sinf(a) * mr};
                 Vec3 p1 = mp + Vec3{cosf(a + 2.513f) * mr, 0.06f, sinf(a + 2.513f) * mr};
-                DebugDraw::line(p0, p1, {0.8f * pulse, 0.2f, 0.05f});
+                DebugDraw::line(p0, p1, col * (0.8f * pulse));
             }
 
-            // Falling meteor rock — descends from sky to impact point
-            f32 meteorY = 8.0f * (1.0f - urgency); // starts at 8m, falls to 0
-            f32 rockSize = 0.3f + urgency * 0.2f;  // grows slightly as it approaches
+            // Falling pillar — descends from sky to impact point
+            f32 meteorY = 8.0f * (1.0f - urgency);
+            f32 rockSize = isHoly ? (0.15f + urgency * 0.1f) : (0.3f + urgency * 0.2f);
             Vec3 meteorPos = mp + Vec3{0, meteorY, 0};
             Mat4 meteorModel = Mat4::translate(meteorPos)
                              * Mat4::rotateY(urgency * 12.0f)
@@ -2075,11 +2151,10 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                              * Mat4::scale({rockSize, rockSize, rockSize});
             AABB meteorBounds = {meteorPos - Vec3{rockSize,rockSize,rockSize},
                                  meteorPos + Vec3{rockSize,rockSize,rockSize}};
-            // Orange-red glowing rock
             Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, meteorModel, meteorBounds,
-                             {1.0f, 0.35f + 0.15f * pulse, 0.05f, 1.0f});
+                             {col.x, col.y * (0.5f + 0.5f * pulse), col.z, 1.0f});
 
-            // Fiery glow shell around the meteor
+            // Glow shell
             f32 glowSize = rockSize * 2.0f;
             Mat4 glowModel = Mat4::translate(meteorPos)
                            * Mat4::rotateY(-urgency * 10.0f)
@@ -2087,9 +2162,9 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             AABB glowBounds = {meteorPos - Vec3{glowSize,glowSize,glowSize},
                                meteorPos + Vec3{glowSize,glowSize,glowSize}};
             Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, glowModel, glowBounds,
-                             {1.0f, 0.5f * pulse, 0.0f, 0.35f});
+                             {col.x, col.y * pulse, col.z * 0.5f, 0.35f});
 
-            // Fire trail behind the meteor — sparks trailing upward
+            // Trail sparks behind pillar
             for (u32 trail = 0; trail < 8; trail++) {
                 f32 tOff = trail * 0.15f;
                 f32 ty = meteorY + 0.3f + tOff;
@@ -2098,7 +2173,7 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                 Vec3 tp = mp + Vec3{cosf(ta) * tr, ty, sinf(ta) * tr};
                 Vec3 tp2 = mp + Vec3{cosf(ta + 0.4f) * tr * 0.6f, ty + 0.15f, sinf(ta + 0.4f) * tr * 0.6f};
                 f32 fade = 1.0f - trail * 0.1f;
-                DebugDraw::line(tp, tp2, {1.0f * fade, 0.4f * fade * pulse, 0.05f});
+                DebugDraw::line(tp, tp2, col * fade * pulse);
             }
         }
     }

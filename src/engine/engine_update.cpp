@@ -515,7 +515,9 @@ void Engine::gameUpdate(f32 dt) {
         f32 energyAmt = ss.maxEnergy * GameConst::POTION_ENERGY_PCT;
         ss.energy += energyAmt;
         if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
-        m_potionCooldown = GameConst::POTION_COOLDOWN;
+        // Potion cooldown benefits from 10% of item CDR
+        f32 cdr = m_inventories[m_localPlayerIndex].bonusCooldownReduction * 0.1f;
+        m_potionCooldown = GameConst::POTION_COOLDOWN * (1.0f - cdr);
         AudioSystem::play(SfxId::POTION_USE);
         LOG_INFO("Used potion: +%.0f HP, +%.0f EN", healAmount, energyAmt);
     }
@@ -713,6 +715,20 @@ void Engine::gameUpdate(f32 dt) {
             if (m_fx.dashFX[i].timer <= 0.0f) m_fx.dashFX[i].active = false;
         }
     }
+    for (u32 i = 0; i < MAX_BEAM_FX; i++) {
+        if (m_fx.beamFX[i].active) {
+            m_fx.beamFX[i].timer -= dt;
+            if (m_fx.beamFX[i].timer <= 0.0f) m_fx.beamFX[i].active = false;
+        }
+    }
+    // Tick overcharge buff (Marksman)
+    SkillSystem::tickOvercharge(dt);
+    // Tick dynamic lights (weapon muzzle flashes)
+    for (u32 i = 0; i < MAX_DYNAMIC_LIGHTS; i++) {
+        if (m_dynamicLights[i].timer > 0.0f) {
+            m_dynamicLights[i].timer -= dt;
+        }
+    }
     for (u32 i = 0; i < MAX_CHAIN_FX; i++) {
         if (m_fx.chainFX[i].active) {
             m_fx.chainFX[i].timer -= dt;
@@ -784,8 +800,8 @@ void Engine::gameUpdate(f32 dt) {
     // Update orb projectiles (spawn ice shards for Frozen Orb)
     SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
 
-    // Update pending meteors
-    SkillSystem::updateMeteors(m_entities, dt);
+    // Update pending meteors (+ holy bombardment ticking + pillar healing)
+    SkillSystem::updateMeteors(m_entities, m_localPlayer, dt);
 
     // Tick the particle pool (motion, gravity, lifetime decay)
     ParticleSystem::update(m_particles, dt);
@@ -1302,6 +1318,17 @@ bool Engine::updateFloorDoor() {
         }
     }
     return false;
+}
+
+void Engine::spawnDynamicLight(Vec3 pos, Vec3 color, f32 duration) {
+    // Find an expired slot (or overwrite oldest)
+    u32 best = 0;
+    f32 bestTimer = m_dynamicLights[0].timer;
+    for (u32 i = 0; i < MAX_DYNAMIC_LIGHTS; i++) {
+        if (m_dynamicLights[i].timer <= 0.0f) { best = i; break; }
+        if (m_dynamicLights[i].timer < bestTimer) { best = i; bestTimer = m_dynamicLights[i].timer; }
+    }
+    m_dynamicLights[best] = {pos, color, duration};
 }
 
 // Inventory drag-and-drop state machine — handles click, double-click, and drag

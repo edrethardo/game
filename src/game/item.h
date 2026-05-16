@@ -105,9 +105,11 @@ enum struct SkillId : u8 {
 
     // Paladin
     HOLY_SMITE,
-    CONSECRATION,
-    // (reuses BLOOD_NOVA)
-    DIVINE_SHIELD,
+    CONSECRATION,       // legacy — kept for save compat
+    DIVINE_SHIELD,      // legacy — kept for save compat
+    HOLY_BOMBARDMENT,   // replaces Consecration
+    HOLY_NOVA,          // Paladin-specific AoE (no HP cost)
+    DIVINE_JUDGMENT,    // replaces Divine Shield
 
     // Combat Engineer
     SHOCK_BOLT,
@@ -118,7 +120,8 @@ enum struct SkillId : u8 {
     // Marksman
     AIMED_SHOT,
     EXPLOSIVE_ROUND,
-    RAPID_FIRE,
+    RAPID_FIRE,             // legacy — kept for save compat
+    OVERCHARGED_MAGAZINE,   // replaces Rapid Fire
     HEADSHOT,
 
     // Tinkerer
@@ -306,6 +309,10 @@ struct SkillDef {
     f32 distance        = 0.0f;
     f32 corridorWidth   = 0.0f;
     f32 invulnDuration  = 0.0f;
+
+    // Holy Nova specifics (dual-hit AoE)
+    f32 secondaryDamage = 0.0f;
+    f32 allyHealPct     = 0.0f;  // fraction of ally max HP healed per hit
 };
 
 // ---- Skill state per player ----

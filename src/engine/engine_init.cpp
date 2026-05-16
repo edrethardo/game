@@ -18,6 +18,7 @@
 #include "renderer/item_icons.h"
 #include "renderer/material.h"
 #include "renderer/obj_loader.h"
+#include "renderer/projectile_renderer.h"
 #include "world/level_gen.h"
 #include "world/level_mesh.h"
 #include "world/level_loader.h"
@@ -85,10 +86,10 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
      {SkillId::KNIFE_BURST, SkillId::PHASE_DASH, SkillId::POISON_CLOUD, SkillId::SHADOW_STRIKE},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
-    // PALADIN — Holy Tank/Support
-    {"Paladin", "Holy warrior who heals and protects",
+    // PALADIN — Wrathful Holy Warrior
+    {"Paladin", "Wrathful holy warrior raining judgment",
      130.0f, 5.0f, 90.0f, "Iron Sword",
-     {SkillId::HOLY_SMITE, SkillId::CONSECRATION, SkillId::BLOOD_NOVA, SkillId::DIVINE_SHIELD},
+     {SkillId::HOLY_SMITE, SkillId::HOLY_BOMBARDMENT, SkillId::HOLY_NOVA, SkillId::DIVINE_JUDGMENT},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
     // COMBAT ENGINEER — Gadget Specialist
@@ -98,9 +99,9 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 
     // MARKSMAN — Precision Sniper
-    {"Marksman", "Precise hitscan specialist with executes",
+    {"Marksman", "Anti-materiel sniper with devastating penetrating shots",
      75.0f, 6.0f, 100.0f, "Revolver",
-     {SkillId::AIMED_SHOT, SkillId::EXPLOSIVE_ROUND, SkillId::RAPID_FIRE, SkillId::HEADSHOT},
+     {SkillId::AIMED_SHOT, SkillId::EXPLOSIVE_ROUND, SkillId::OVERCHARGED_MAGAZINE, SkillId::HEADSHOT},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 
     // TINKERER — Minion Master
@@ -369,6 +370,15 @@ void Engine::init() {
             }
         }
     });
+    SkillSystem::setBeamCallback([](Vec3 start, Vec3 end, Vec3 color) {
+        if (!s_engine) return;
+        for (u32 i = 0; i < MAX_BEAM_FX; i++) {
+            if (!s_engine->m_fx.beamFX[i].active) {
+                s_engine->m_fx.beamFX[i] = {start, end, color, 0.3f, true};
+                return;
+            }
+        }
+    });
     SkillSystem::setScorchCallback([](Vec3 position, f32 radius, f32 duration, f32 dps) {
         if (!s_engine) return;
         for (u32 i = 0; i < MAX_SCORCH; i++) {
@@ -418,6 +428,9 @@ void Engine::init() {
             }
         }
     }
+
+    // Instanced projectile renderer — batches projectiles by mesh for minimal draw calls
+    ProjectileRenderer::init();
 
     // Particle system init — must come after MaterialSystem::init so mat IDs are valid
     ParticleSystem::init(m_particles);
@@ -814,9 +827,12 @@ void Engine::init() {
                 e->aiState       = AIState::IDLE;
             }
         } else if (type == 2) {
-            // Turret — stationary, hitscan, timed despawn (compact sentry)
+            // Mobile turret bot — armored body on tank treads, follows player when idle.
+            // HP scales with floor depth so turrets stay relevant in later tiers.
+            f32 baseHp = 160.0f;
+            f32 floorMult = 1.0f + (s_engine->m_level.currentFloor - 1) * 0.06f;
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.2f, 0.3f, 0.2f}, false, 80.0f, 0.0f, 15.0f, 10.0f, 1.5f, 12.0f);
+                {0.2f, 0.3f, 0.2f}, false, baseHp * floorMult, 3.0f, 15.0f, 10.0f, 1.5f, 12.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->flags        |= ENT_FRIENDLY;
@@ -826,8 +842,11 @@ void Engine::init() {
                 e->npcWeaponType = WeaponType::PROJECTILE;
                 e->npcProjectileSpeed  = 30.0f;
                 e->npcProjectileRadius = 0.06f;
-                e->deathTimer    = 15.0f;
                 e->aiState       = AIState::IDLE;
+                e->baseMoveSpeed      = e->moveSpeed;
+                e->baseAttackCooldown = e->attackCooldown;
+                // Spark burst on deploy — visual feedback
+                ParticleSystem::spawnSparks(s_engine->m_particles, position, {0, 1, 0}, 8);
             }
         }
     });
@@ -882,6 +901,7 @@ void Engine::shutdown() {
     FontSystem::shutdown();
     ItemIconSystem::shutdown();
     HUD::shutdown();
+    ProjectileRenderer::shutdown();
     Minimap::shutdown();
     DebugDraw::shutdown();
     Renderer::shutdown();

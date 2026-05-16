@@ -22,6 +22,8 @@
 #include "world/level_loader.h"
 #include "world/collision.h"
 #include "world/combat_query.h"
+#include "world/raycast.h"
+#include "renderer/particles.h"
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
@@ -192,23 +194,53 @@ void Engine::handleWeaponFire(f32 dt) {
         }
     } break;
     case WeaponType::HITSCAN:
-        result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
-        if (result.hitEntity) {
-            spawnDamageNumber(result.hitPosition, wpn.damage);
-        }
-        m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
-        if (result.hitEntity || result.hitWorld) {
-            m_lastCombatHit.hit      = true;
-            m_lastCombatHit.position = result.hitPosition;
-            m_lastCombatHit.normal   = result.hitNormal;
-            m_lastCombatHit.distance = result.hitDistance;
-            m_lastCombatHit.type     = result.hitEntity ? CombatHit::ENTITY : CombatHit::WORLD;
-            // Spawn impact spark at hit position
-            for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
-                if (!m_fx.impactFX[fx].active) {
-                    m_fx.impactFX[fx] = {result.hitPosition, result.hitNormal,
-                                      0.3f, true, result.hitEntity};
+        // Overcharged Magazine: 3× damage + penetrating shot with beam trail
+        if (SkillSystem::isOvercharged()) {
+            wpn.damage *= 3.0f;
+            SkillSystem::consumeOverchargeShot();
+            // Penetrating hitscan — hit ALL enemies in narrow cone
+            EntityHandle oHits[MAX_ENTITIES];
+            f32          oDists[MAX_ENTITIES];
+            u32 oCnt = CombatQuery::queryConeSorted(
+                m_entities, eyePos, forward, cosf(radians(1.0f)), wpn.range,
+                oHits, oDists, MAX_ENTITIES);
+            for (u32 oi = 0; oi < oCnt; oi++) {
+                Entity* oe = handleGet(m_entities, oHits[oi]);
+                if (!oe || (oe->flags & ENT_DEAD) || (oe->flags & ENT_FRIENDLY)) continue;
+                Combat::applyDamage(m_entities, oHits[oi], wpn.damage);
+                ParticleSystem::spawnDebris(m_particles, oe->position, 3);
+            }
+            // Beam trail
+            RayHit bWall = Raycast::cast(m_level.grid, eyePos, forward, wpn.range);
+            Vec3 bEnd = bWall.hit ? (eyePos + forward * bWall.distance)
+                                  : (eyePos + forward * wpn.range);
+            for (u32 bfx = 0; bfx < MAX_BEAM_FX; bfx++) {
+                if (!m_fx.beamFX[bfx].active) {
+                    m_fx.beamFX[bfx] = {eyePos, bEnd, {1.0f, 0.7f, 0.2f}, 0.3f, true};
                     break;
+                }
+            }
+            m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
+            result.hitEntity = (oCnt > 0);
+        } else {
+            result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
+            if (result.hitEntity) {
+                spawnDamageNumber(result.hitPosition, wpn.damage);
+            }
+            m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
+            if (result.hitEntity || result.hitWorld) {
+                m_lastCombatHit.hit      = true;
+                m_lastCombatHit.position = result.hitPosition;
+                m_lastCombatHit.normal   = result.hitNormal;
+                m_lastCombatHit.distance = result.hitDistance;
+                m_lastCombatHit.type     = result.hitEntity ? CombatHit::ENTITY : CombatHit::WORLD;
+                // Spawn impact spark at hit position
+                for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
+                    if (!m_fx.impactFX[fx].active) {
+                        m_fx.impactFX[fx] = {result.hitPosition, result.hitNormal,
+                                          0.3f, true, result.hitEntity};
+                        break;
+                    }
                 }
             }
         }
@@ -256,6 +288,13 @@ void Engine::handleWeaponFire(f32 dt) {
                 if (wpnMesh > 0) m_projectiles.projectiles[projIdx].meshId = wpnMesh;
             }
         }
+        // Assign projectile light color based on weapon subtype
+        if (projIdx != 0xFFFF) {
+            Projectile& proj = m_projectiles.projectiles[projIdx];
+            if (isMolotov)             proj.lightColor = {1.0f, 0.5f, 0.1f}; // fire
+            else if (isWand)           proj.lightColor = {0.4f, 0.6f, 1.0f}; // arcane blue
+            else if (proj.projFlags & PROJ_VOID) proj.lightColor = {0.4f, 0.0f, 0.8f}; // purple
+        }
         result.didFire = true;
         m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.02f);
     } break;
@@ -273,6 +312,28 @@ void Engine::handleWeaponFire(f32 dt) {
         m_viewmodelState.fireShakeTimer = 0.08f;
     }
     m_viewmodelState.recoilKick += wpn.recoilKick * 1.5f;
+
+    // Muzzle flash dynamic light — color depends on weapon type
+    {
+        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+        Vec3 flashCol = {0, 0, 0};
+        if (wpn.type == WeaponType::MELEE)
+            flashCol = {1.0f, 0.9f, 0.7f};   // warm white
+        else if (wpn.type == WeaponType::HITSCAN)
+            flashCol = {1.0f, 0.7f, 0.3f};   // orange muzzle flash
+        else if (wpn.type == WeaponType::PROJECTILE) {
+            // Projectile color depends on subtype/skill
+            if (!isItemEmpty(eqWpn)) {
+                WeaponSubtype st = m_itemDefs[eqWpn.defId].weaponSubtype;
+                if (st == WeaponSubtype::WAND)       flashCol = {0.4f, 0.6f, 1.0f}; // blue arcane
+                else if (st == WeaponSubtype::MOLOTOV) flashCol = {1.0f, 0.5f, 0.1f}; // fire
+                else flashCol = {0.8f, 0.8f, 0.6f}; // dim warm for arrows/knives
+            }
+        }
+        if (flashCol.x > 0.0f || flashCol.y > 0.0f || flashCol.z > 0.0f)
+            spawnDynamicLight(eyePos + m_localPlayer.forward * 0.5f, flashCol, 0.1f);
+    }
+
     // Play weapon fire sound based on subtype
     if (!isItemEmpty(eqWpn)) {
         switch (m_itemDefs[eqWpn.defId].weaponSubtype) {

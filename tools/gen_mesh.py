@@ -1017,29 +1017,30 @@ def gen_staff(height=1.2):
 
 
 def gen_turret(height=0.4):
-    """Combat engineer sentry turret — TF2 level-1 style.
+    """Mobile turret bot — compact armored body on tank treads.
 
-    Tripod base, squat body housing, single barrel on top.
-    Origin at feet (Y=0). Compact: about 0.4 units tall.
+    Two track assemblies (left/right), boxy armored housing, barrel, antenna.
+    Origin at feet (Y=0). About 0.4 units tall, 0.3 wide.
     """
     mb = MeshBuilder()
-    # Tripod base — three stubby legs splayed out
-    import math as _m
-    for i in range(3):
-        angle = i * 2.0 * _m.pi / 3.0
-        lx = _m.sin(angle) * 0.12
-        lz = _m.cos(angle) * 0.12
-        add_box(mb, center=(lx, 0.02, lz),
-                half_extents=(0.025, 0.02, 0.025))
-    # Central column — short vertical post connecting base to housing
-    add_box(mb, center=(0.0, 0.08, 0.0),
-            half_extents=(0.04, 0.04, 0.04))
-    # Housing body — wider squat box (the "head" of the sentry)
-    add_box(mb, center=(0.0, 0.18, 0.0),
-            half_extents=(0.08, 0.06, 0.06))
-    # Barrel — thin box extending forward from the housing
-    add_box(mb, center=(0.0, 0.20, -0.14),
-            half_extents=(0.02, 0.02, 0.08))
+    # Left track assembly (long low box)
+    add_box(mb, center=(-0.12, 0.04, 0.0), half_extents=(0.03, 0.04, 0.12))
+    # Left track wheels (front + rear cylinders)
+    add_cylinder(mb, base_center=(-0.12, 0.0, -0.10), radius=0.04, height=0.03, sides=6)
+    add_cylinder(mb, base_center=(-0.12, 0.0, 0.08), radius=0.04, height=0.03, sides=6)
+    # Right track assembly
+    add_box(mb, center=(0.12, 0.04, 0.0), half_extents=(0.03, 0.04, 0.12))
+    # Right track wheels
+    add_cylinder(mb, base_center=(0.12, 0.0, -0.10), radius=0.04, height=0.03, sides=6)
+    add_cylinder(mb, base_center=(0.12, 0.0, 0.08), radius=0.04, height=0.03, sides=6)
+    # Armored body housing (sits on top of tracks)
+    add_box(mb, center=(0.0, 0.14, 0.0), half_extents=(0.09, 0.05, 0.08))
+    # Top turret head (rotatable look)
+    add_box(mb, center=(0.0, 0.22, 0.0), half_extents=(0.06, 0.03, 0.06))
+    # Barrel — extends forward from turret head
+    add_box(mb, center=(0.0, 0.22, -0.14), half_extents=(0.015, 0.015, 0.08))
+    # Antenna — thin vertical rod
+    add_box(mb, center=(0.04, 0.30, 0.03), half_extents=(0.005, 0.06, 0.005))
     return mb
 
 

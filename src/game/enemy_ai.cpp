@@ -576,11 +576,18 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                                     f32 speed = e.npcProjectileSpeed > 0.0f ? e.npcProjectileSpeed : 15.0f;
                                     f32 radius = e.npcProjectileRadius > 0.0f ? e.npcProjectileRadius : 0.1f;
                                     u8 extraFlags = (e.npcClass == NpcClass::MAGE) ? PROJ_SPLASH : 0;
+                                    // Turret bots fire electric bolts (PROJ_SPARK visual)
+                                    if (e.npcClass == NpcClass::NONE && !(e.flags & ENT_FLYING))
+                                        extraFlags |= PROJ_SPARK;
                                     u16 projIdx = ProjectileSystem::spawn(projectiles, eyePos,
                                         fireDir, speed, e.damage, radius, 3.0f, true, extraFlags);
                                     if (e.npcClass == NpcClass::MAGE && projIdx != 0xFFFF) {
                                         projectiles.projectiles[projIdx].splashRadius = 1.5f;
                                         projectiles.projectiles[projIdx].splashDamage = e.damage * 0.5f;
+                                    }
+                                    // Turret electric glow
+                                    if (projIdx != 0xFFFF && (extraFlags & PROJ_SPARK)) {
+                                        projectiles.projectiles[projIdx].lightColor = {0.4f, 0.7f, 1.0f};
                                     }
                                 } else {
                                     EntityHandle th = {bestEnemyIdx, target.generation};
@@ -598,11 +605,30 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
             } else if (e.npcClass == NpcClass::NONE) {
                 // --- DRONE MODE ---
+                // Mobile turret: hold position in combat, follow player when idle
                 // Combat drone (spider, not flying): run ahead of the player, rush enemies
                 // Swarm drones (flying): hover near the player
+                bool isTurret = (e.enemyType == EnemyType::GENERIC && !(e.flags & ENT_FLYING)
+                                 && !(e.flags & ENT_UNTARGETABLE));
                 bool isCombatDrone = (e.enemyType == EnemyType::SPIDER);
 
-                if (isCombatDrone) {
+                if (isTurret) {
+                    // Mobile turret bot: follow player when no enemies in range.
+                    // Stays put during combat (handled by the inCombat block above).
+                    f32 distToPlayer = length(e.position - player.position);
+                    if (distToPlayer > 4.0f) {
+                        // Too far from player — walk toward them using flow field
+                        Vec3 toPlayer = normalize(Vec3{player.position.x - e.position.x, 0,
+                                                       player.position.z - e.position.z});
+                        e.velocity.x = toPlayer.x * npcSpeed;
+                        e.velocity.z = toPlayer.z * npcSpeed;
+                        e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
+                        entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+                        if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+                    } else {
+                        e.velocity = {0, 0, 0};
+                    }
+                } else if (isCombatDrone) {
                     // Combat drone: follow flow field toward exit at 1.2x speed.
                     // When enemies are nearby the inCombat block handles rushing them.
                     Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
