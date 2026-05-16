@@ -43,11 +43,11 @@ def build_meshes():
     mesh_dir = os.path.join(ROOT_DIR, "assets", "meshes")
 
     meshes = [
-        # Enemy bodies (torso-only for limb system)
-        ["--type", "humanoid_torso", "--height", "1.8", "--out", os.path.join(mesh_dir, "skeleton.obj")],
+        # Enemy bodies — full body meshes (limbs overlay for animation)
+        ["--type", "humanoid", "--height", "1.8", "--out", os.path.join(mesh_dir, "skeleton.obj")],
         ["--type", "spider",   "--radius", "0.6", "--out", os.path.join(mesh_dir, "spider.obj")],
         ["--type", "bat",      "--wingspan", "1.0", "--out", os.path.join(mesh_dir, "bat.obj")],
-        ["--type", "butcher_torso", "--height", "2.5", "--out", os.path.join(mesh_dir, "butcher.obj")],
+        ["--type", "butcher",       "--height", "2.5", "--out", os.path.join(mesh_dir, "butcher.obj")],
         ["--type", "andariel",      "--height", "2.0", "--out", os.path.join(mesh_dir, "andariel.obj")],
         # Limb parts
         ["--type", "skeleton_arm",   "--out", os.path.join(mesh_dir, "skeleton_arm.obj")],

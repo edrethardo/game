@@ -2044,15 +2044,16 @@ def gen_boots(height=0.2):
     return mb
 
 def gen_ring(radius=0.05):
-    """Ring — real torus band with a gemstone on top."""
+    """Ring — torus band with a single gemstone facing outward (-Z)."""
     mb = MeshBuilder()
-    # Torus ring band (12 major segments x 6 minor for smooth donut)
+    # Torus ring band lying flat in XZ plane
     add_torus(mb, center=(0, 0, 0), major_r=0.04, minor_r=0.012,
               major_segs=12, minor_segs=6)
-    # Gemstone setting — small box prong base
-    add_box(mb, center=(0, 0.015, -0.04), half_extents=(0.008, 0.005, 0.008))
-    # Gemstone — faceted octagonal gem (short cylinder rotated up)
-    add_cylinder(mb, base_center=(-0.04, 0.02, 0), radius=0.012, height=0.015, sides=8)
+    # Prong setting at front of ring
+    add_box(mb, center=(0, 0, -0.052), half_extents=(0.01, 0.008, 0.006))
+    # Gemstone — diamond shape facing outward (two boxes rotated 45 deg for facets)
+    add_box(mb, center=(0, 0, -0.07), half_extents=(0.012, 0.012, 0.01))
+    add_box(mb, center=(0, 0, -0.07), half_extents=(0.008, 0.016, 0.008))
     return mb
 
 def gen_shield(width=0.3):
