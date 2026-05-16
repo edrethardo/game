@@ -1911,6 +1911,250 @@ def gen_butcher_torso(height=2.5):
     add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
     return mb
 
+# ---------------------------------------------------------------------------
+# Helper: add a torus to a MeshBuilder
+# ---------------------------------------------------------------------------
+
+def add_torus(mb, center, major_r, minor_r, major_segs=12, minor_segs=6):
+    """Add a torus (donut) centered at `center`, lying flat in the XZ plane.
+
+    major_r: distance from center of torus to center of tube
+    minor_r: radius of the tube itself
+    major_segs: segments around the ring
+    minor_segs: segments around the tube cross-section
+    """
+    cx, cy, cz = center
+    # Build vertex grid [major_segs][minor_segs]
+    grid = []
+    for i in range(major_segs):
+        theta = 2.0 * math.pi * i / major_segs
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        ring_center_x = cx + major_r * cos_t
+        ring_center_z = cz + major_r * sin_t
+        row = []
+        for j in range(minor_segs):
+            phi = 2.0 * math.pi * j / minor_segs
+            cos_p, sin_p = math.cos(phi), math.sin(phi)
+            # Point on tube surface
+            x = ring_center_x + minor_r * cos_p * cos_t
+            y = cy + minor_r * sin_p
+            z = ring_center_z + minor_r * cos_p * sin_t
+            vi = mb.add_vert(x, y, z)
+            # Normal points outward from tube center
+            nx = cos_p * cos_t
+            ny = sin_p
+            nz = cos_p * sin_t
+            ni = mb.add_normal(nx, ny, nz)
+            u = i / major_segs
+            v = j / minor_segs
+            ti = mb.add_uv(u, v)
+            row.append((vi, ti, ni))
+        grid.append(row)
+
+    # Stitch quads (as triangle pairs)
+    for i in range(major_segs):
+        i2 = (i + 1) % major_segs
+        for j in range(minor_segs):
+            j2 = (j + 1) % minor_segs
+            a = grid[i][j]
+            b = grid[i2][j]
+            c = grid[i2][j2]
+            d = grid[i][j2]
+            mb.add_tri(a[0], b[0], c[0], a[1], b[1], c[1], a[2], b[2], c[2])
+            mb.add_tri(a[0], c[0], d[0], a[1], c[1], d[1], a[2], c[2], d[2])
+
+
+# ---------------------------------------------------------------------------
+# Equipment, props, and projectile meshes
+# ---------------------------------------------------------------------------
+
+def gen_helmet(height=0.3):
+    """Helmet — simple round dome (half-sphere)."""
+    mb = MeshBuilder()
+    r = 0.15
+    segs = 10
+    rings = 4
+    # Bottom ring vertices (equator)
+    prev_row = []
+    for j in range(segs):
+        theta = 2.0 * math.pi * j / segs
+        vi = mb.add_vert(r * math.cos(theta), 0, r * math.sin(theta))
+        ni = mb.add_normal(math.cos(theta), 0, math.sin(theta))
+        ti = mb.add_uv(j / segs, 0)
+        prev_row.append((vi, ti, ni))
+    # Build rings up to the top
+    for i in range(1, rings + 1):
+        phi = (math.pi * 0.5) * i / rings
+        ring_r = r * math.cos(phi)
+        ring_y = r * math.sin(phi)
+        row = []
+        for j in range(segs):
+            theta = 2.0 * math.pi * j / segs
+            x, z = ring_r * math.cos(theta), ring_r * math.sin(theta)
+            nx, ny, nz = _normalize((x, ring_y, z))
+            vi = mb.add_vert(x, ring_y, z)
+            ni = mb.add_normal(nx, ny, nz)
+            ti = mb.add_uv(j / segs, i / rings)
+            row.append((vi, ti, ni))
+        for j in range(segs):
+            j2 = (j + 1) % segs
+            a, b = prev_row[j], prev_row[j2]
+            c, d = row[j2], row[j]
+            mb.add_tri(a[0], c[0], b[0], a[1], c[1], b[1], a[2], c[2], b[2])
+            mb.add_tri(a[0], d[0], c[0], a[1], d[1], c[1], a[2], d[2], c[2])
+        prev_row = row
+    return mb
+
+def gen_armor(height=0.5):
+    """Body armor — chest plate with shoulder pauldrons and belt."""
+    mb = MeshBuilder()
+    # Chest plate (slightly tapered — wider at top)
+    add_box(mb, center=(0, 0.25, 0), half_extents=(0.18, 0.20, 0.08))
+    # Belly section (slightly narrower)
+    add_box(mb, center=(0, 0.02, 0), half_extents=(0.15, 0.06, 0.07))
+    # Left pauldron (shoulder)
+    add_cylinder(mb, base_center=(-0.20, 0.38, 0), radius=0.07, height=0.06, sides=8)
+    # Right pauldron
+    add_cylinder(mb, base_center=(0.20, 0.38, 0), radius=0.07, height=0.06, sides=8)
+    # Belt
+    add_box(mb, center=(0, -0.04, 0), half_extents=(0.17, 0.02, 0.09))
+    # Belt buckle
+    add_box(mb, center=(0, -0.04, -0.10), half_extents=(0.03, 0.02, 0.01))
+    return mb
+
+def gen_boots(height=0.2):
+    """Boots — a pair of armored boots with shin guards."""
+    mb = MeshBuilder()
+    # Left boot — shin
+    add_box(mb, center=(-0.06, 0.12, 0), half_extents=(0.04, 0.10, 0.04))
+    # Left boot — foot
+    add_box(mb, center=(-0.06, 0.02, -0.03), half_extents=(0.04, 0.02, 0.07))
+    # Left boot — toe cap
+    add_box(mb, center=(-0.06, 0.03, -0.11), half_extents=(0.035, 0.025, 0.02))
+    # Left boot — heel
+    add_box(mb, center=(-0.06, 0.01, 0.04), half_extents=(0.03, 0.01, 0.02))
+    # Right boot — shin
+    add_box(mb, center=(0.06, 0.12, 0), half_extents=(0.04, 0.10, 0.04))
+    # Right boot — foot
+    add_box(mb, center=(0.06, 0.02, -0.03), half_extents=(0.04, 0.02, 0.07))
+    # Right boot — toe cap
+    add_box(mb, center=(0.06, 0.03, -0.11), half_extents=(0.035, 0.025, 0.02))
+    # Right boot — heel
+    add_box(mb, center=(0.06, 0.01, 0.04), half_extents=(0.03, 0.01, 0.02))
+    return mb
+
+def gen_ring(radius=0.05):
+    """Ring — real torus band with a gemstone on top."""
+    mb = MeshBuilder()
+    # Torus ring band (12 major segments x 6 minor for smooth donut)
+    add_torus(mb, center=(0, 0, 0), major_r=0.04, minor_r=0.012,
+              major_segs=12, minor_segs=6)
+    # Gemstone setting — small box prong base
+    add_box(mb, center=(0, 0.015, -0.04), half_extents=(0.008, 0.005, 0.008))
+    # Gemstone — faceted octagonal gem (short cylinder rotated up)
+    add_cylinder(mb, base_center=(-0.04, 0.02, 0), radius=0.012, height=0.015, sides=8)
+    return mb
+
+def gen_shield(width=0.3):
+    """Shield — kite shield shape with rim, boss, and strap."""
+    mb = MeshBuilder()
+    # Main shield face (tall kite shape approximated as tapered boxes)
+    add_box(mb, center=(0, 0.25, 0), half_extents=(0.14, 0.15, 0.012))
+    # Lower taper
+    add_box(mb, center=(0, 0.05, 0), half_extents=(0.10, 0.10, 0.012))
+    # Rim band (top)
+    add_box(mb, center=(0, 0.40, 0), half_extents=(0.12, 0.01, 0.018))
+    # Rim band (sides)
+    add_box(mb, center=(-0.14, 0.25, 0), half_extents=(0.01, 0.14, 0.018))
+    add_box(mb, center=(0.14, 0.25, 0), half_extents=(0.01, 0.14, 0.018))
+    # Center boss (raised dome)
+    add_cylinder(mb, base_center=(0, 0.20, -0.012), radius=0.04, height=0.025, sides=8)
+    # Back strap (arm grip)
+    add_box(mb, center=(0, 0.25, 0.02), half_extents=(0.03, 0.08, 0.01))
+    return mb
+
+def gen_mace(length=0.6):
+    """Mace — shaft with flanged spiked head."""
+    mb = MeshBuilder()
+    # Shaft (round)
+    add_cylinder(mb, base_center=(0, -0.25, 0), radius=0.015, height=0.35, sides=6)
+    # Grip wrapping (slightly wider section at bottom)
+    add_cylinder(mb, base_center=(0, -0.25, 0), radius=0.02, height=0.10, sides=6)
+    # Head — main mass
+    add_cylinder(mb, base_center=(0, 0.10, 0), radius=0.05, height=0.08, sides=8)
+    # Flanges (4 protruding blades around the head)
+    for i in range(4):
+        angle = math.pi * 0.5 * i
+        dx = math.cos(angle) * 0.04
+        dz = math.sin(angle) * 0.04
+        add_box(mb, center=(dx, 0.14, dz), half_extents=(0.01, 0.03, 0.01))
+    # Pommel
+    add_cylinder(mb, base_center=(0, -0.27, 0), radius=0.025, height=0.02, sides=6)
+    return mb
+
+def gen_cleaver(length=0.5):
+    """Cleaver — Butcher's wide heavy blade."""
+    mb = MeshBuilder()
+    # Wide blade (tall, thin)
+    add_box(mb, center=(0.04, 0.1, 0), half_extents=(0.10, 0.14, 0.008))
+    # Blade spine (thicker top edge)
+    add_box(mb, center=(0.04, 0.24, 0), half_extents=(0.08, 0.01, 0.012))
+    # Handle
+    add_box(mb, center=(0, -0.12, 0), half_extents=(0.018, 0.10, 0.018))
+    # Rivets on handle (two small boxes)
+    add_box(mb, center=(0, -0.06, -0.02), half_extents=(0.005, 0.005, 0.005))
+    add_box(mb, center=(0, -0.16, -0.02), half_extents=(0.005, 0.005, 0.005))
+    return mb
+
+def gen_iron_maiden(height=2.0):
+    """Iron maiden — upright sarcophagus with hinged door and spikes."""
+    mb = MeshBuilder()
+    # Main body (coffin shape — wider at shoulders, tapered at feet)
+    add_box(mb, center=(0, 1.0, 0), half_extents=(0.28, 0.85, 0.22))
+    # Narrower base
+    add_box(mb, center=(0, 0.08, 0), half_extents=(0.20, 0.08, 0.20))
+    # Door (slightly offset forward)
+    add_box(mb, center=(0, 1.0, -0.24), half_extents=(0.24, 0.78, 0.015))
+    # Hinge brackets
+    add_box(mb, center=(-0.26, 1.4, -0.22), half_extents=(0.02, 0.04, 0.02))
+    add_box(mb, center=(-0.26, 0.6, -0.22), half_extents=(0.02, 0.04, 0.02))
+    # Interior spikes (visible when door ajar)
+    for sy in [0.6, 0.8, 1.0, 1.2, 1.4]:
+        for sx in [-0.08, 0.0, 0.08]:
+            add_box(mb, center=(sx, sy, -0.20), half_extents=(0.008, 0.008, 0.03))
+    return mb
+
+def gen_arrow(length=0.5):
+    """Arrow — thin round shaft with triangular arrowhead and fletching."""
+    mb = MeshBuilder()
+    # Shaft (thin cylinder along -Z)
+    add_cylinder(mb, base_center=(0, 0, -0.2), radius=0.005, height=0.005, sides=4)
+    add_box(mb, center=(0, 0, 0), half_extents=(0.004, 0.004, 0.20))
+    # Arrowhead (diamond-shaped point)
+    add_box(mb, center=(0, 0, -0.24), half_extents=(0.015, 0.003, 0.035))
+    add_box(mb, center=(0, 0, -0.24), half_extents=(0.003, 0.015, 0.035))
+    # Fletching (3 thin fins at the back)
+    for i in range(3):
+        angle = 2.0 * math.pi * i / 3
+        dx = math.cos(angle) * 0.012
+        dy = math.sin(angle) * 0.012
+        add_box(mb, center=(dx, dy, 0.17), half_extents=(0.001, 0.01, 0.03))
+    return mb
+
+def gen_bolt(length=0.35):
+    """Crossbow bolt — shorter and thicker than arrow, with flat vanes."""
+    mb = MeshBuilder()
+    # Shaft (thicker than arrow)
+    add_box(mb, center=(0, 0, 0), half_extents=(0.006, 0.006, 0.14))
+    # Broad head (flat diamond tip)
+    add_box(mb, center=(0, 0, -0.17), half_extents=(0.018, 0.004, 0.03))
+    add_box(mb, center=(0, 0, -0.17), half_extents=(0.004, 0.018, 0.03))
+    # Vanes (2 flat fins at back)
+    add_box(mb, center=(0.01, 0, 0.12), half_extents=(0.001, 0.008, 0.02))
+    add_box(mb, center=(-0.01, 0, 0.12), half_extents=(0.001, 0.008, 0.02))
+    return mb
+
+
 MESH_TYPES = {
     "humanoid": {
         "func": gen_humanoid,
@@ -2151,6 +2395,56 @@ MESH_TYPES = {
         "func": gen_wand,
         "desc": "Wand weapon — shaft + crystal tip. Params: --height (as length)",
         "default_file": "wand.obj",
+    },
+    "helmet": {
+        "func": gen_helmet,
+        "desc": "Armor helmet — dome with rim band.",
+        "default_file": "helmet.obj",
+    },
+    "armor": {
+        "func": gen_armor,
+        "desc": "Body armor — torso plate with shoulder pads.",
+        "default_file": "armor.obj",
+    },
+    "boots": {
+        "func": gen_boots,
+        "desc": "Boots — short box with toe extension.",
+        "default_file": "boots.obj",
+    },
+    "ring": {
+        "func": gen_ring,
+        "desc": "Finger ring — small cylinder.",
+        "default_file": "ring.obj",
+    },
+    "shield": {
+        "func": gen_shield,
+        "desc": "Off-hand shield — flat rectangle with center boss.",
+        "default_file": "shield.obj",
+    },
+    "mace": {
+        "func": gen_mace,
+        "desc": "Mace weapon — shaft with heavy head.",
+        "default_file": "mace.obj",
+    },
+    "cleaver": {
+        "func": gen_cleaver,
+        "desc": "Cleaver — wide blade on short handle.",
+        "default_file": "cleaver.obj",
+    },
+    "iron_maiden": {
+        "func": gen_iron_maiden,
+        "desc": "Iron maiden torture device — tall coffin box.",
+        "default_file": "iron_maiden.obj",
+    },
+    "arrow": {
+        "func": gen_arrow,
+        "desc": "Arrow projectile — thin shaft + arrowhead.",
+        "default_file": "arrow.obj",
+    },
+    "bolt": {
+        "func": gen_bolt,
+        "desc": "Crossbow bolt — short shaft + flat head.",
+        "default_file": "bolt.obj",
     },
 }
 

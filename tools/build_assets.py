@@ -43,15 +43,41 @@ def build_meshes():
     mesh_dir = os.path.join(ROOT_DIR, "assets", "meshes")
 
     meshes = [
-        ["--type", "humanoid", "--height", "1.8", "--out", os.path.join(mesh_dir, "skeleton.obj")],
+        # Enemy bodies (torso-only for limb system)
+        ["--type", "humanoid_torso", "--height", "1.8", "--out", os.path.join(mesh_dir, "skeleton.obj")],
         ["--type", "spider",   "--radius", "0.6", "--out", os.path.join(mesh_dir, "spider.obj")],
         ["--type", "bat",      "--wingspan", "1.0", "--out", os.path.join(mesh_dir, "bat.obj")],
-        ["--type", "pillar",   "--out", os.path.join(mesh_dir, "pillar.obj")],
-        ["--type", "chest",    "--out", os.path.join(mesh_dir, "chest.obj")],
+        ["--type", "butcher_torso", "--height", "2.5", "--out", os.path.join(mesh_dir, "butcher.obj")],
+        ["--type", "andariel",      "--height", "2.0", "--out", os.path.join(mesh_dir, "andariel.obj")],
+        # Limb parts
+        ["--type", "skeleton_arm",   "--out", os.path.join(mesh_dir, "skeleton_arm.obj")],
+        ["--type", "skeleton_leg",   "--out", os.path.join(mesh_dir, "skeleton_leg.obj")],
+        ["--type", "bat_wing",       "--out", os.path.join(mesh_dir, "bat_wing_mesh.obj")],
+        ["--type", "bat_foot",       "--out", os.path.join(mesh_dir, "bat_foot.obj")],
+        ["--type", "butcher_arm",    "--out", os.path.join(mesh_dir, "butcher_arm.obj")],
+        ["--type", "butcher_leg",    "--out", os.path.join(mesh_dir, "butcher_leg.obj")],
+        ["--type", "spider_leg_pair","--out", os.path.join(mesh_dir, "spider_leg_pair.obj")],
+        # NPC class models
+        ["--type", "human",    "--out", os.path.join(mesh_dir, "human.obj")],
+        ["--type", "cleric",   "--out", os.path.join(mesh_dir, "cleric.obj")],
+        ["--type", "archer",   "--out", os.path.join(mesh_dir, "archer.obj")],
+        ["--type", "mage",     "--out", os.path.join(mesh_dir, "mage.obj")],
+        ["--type", "rogue",    "--out", os.path.join(mesh_dir, "rogue.obj")],
+        ["--type", "paladin",  "--out", os.path.join(mesh_dir, "paladin.obj")],
+        # Archetype enemies
+        ["--type", "gargoyle",       "--out", os.path.join(mesh_dir, "gargoyle.obj")],
+        ["--type", "necromancer",    "--out", os.path.join(mesh_dir, "necromancer.obj")],
+        ["--type", "shaman",         "--out", os.path.join(mesh_dir, "shaman.obj")],
+        ["--type", "herald",         "--out", os.path.join(mesh_dir, "herald.obj")],
+        # Weapons
         ["--type", "sword",          "--out", os.path.join(mesh_dir, "sword.obj")],
         ["--type", "dagger",         "--out", os.path.join(mesh_dir, "dagger.obj")],
         ["--type", "axe",            "--out", os.path.join(mesh_dir, "axe.obj")],
         ["--type", "claymore",       "--out", os.path.join(mesh_dir, "claymore.obj")],
+        ["--type", "mace",           "--out", os.path.join(mesh_dir, "mace.obj")],
+        ["--type", "cleaver",        "--out", os.path.join(mesh_dir, "cleaver.obj")],
+        ["--type", "staff",          "--out", os.path.join(mesh_dir, "staff.obj")],
+        ["--type", "wand",           "--out", os.path.join(mesh_dir, "wand.obj")],
         ["--type", "pistol",         "--out", os.path.join(mesh_dir, "pistol.obj")],
         ["--type", "smg",            "--out", os.path.join(mesh_dir, "smg.obj")],
         ["--type", "carbine",        "--out", os.path.join(mesh_dir, "carbine.obj")],
@@ -60,11 +86,27 @@ def build_meshes():
         ["--type", "crossbow",       "--out", os.path.join(mesh_dir, "crossbow.obj")],
         ["--type", "throwing_knife", "--out", os.path.join(mesh_dir, "throwing_knife.obj")],
         ["--type", "molotov",        "--out", os.path.join(mesh_dir, "molotov.obj")],
-        ["--type", "wand",           "--out", os.path.join(mesh_dir, "wand.obj")],
-        ["--type", "gargoyle",       "--out", os.path.join(mesh_dir, "gargoyle.obj")],
-        ["--type", "necromancer",    "--out", os.path.join(mesh_dir, "necromancer.obj")],
-        ["--type", "shaman",        "--out", os.path.join(mesh_dir, "shaman.obj")],
-        ["--type", "herald",        "--out", os.path.join(mesh_dir, "herald.obj")],
+        # Projectiles
+        ["--type", "arrow",          "--out", os.path.join(mesh_dir, "arrow.obj")],
+        ["--type", "bolt",           "--out", os.path.join(mesh_dir, "bolt.obj")],
+        # Equipment
+        ["--type", "helmet",         "--out", os.path.join(mesh_dir, "helmet.obj")],
+        ["--type", "armor",          "--out", os.path.join(mesh_dir, "armor.obj")],
+        ["--type", "boots",          "--out", os.path.join(mesh_dir, "boots.obj")],
+        ["--type", "ring",           "--out", os.path.join(mesh_dir, "ring.obj")],
+        ["--type", "shield",         "--out", os.path.join(mesh_dir, "shield.obj")],
+        # Props
+        ["--type", "pillar",         "--out", os.path.join(mesh_dir, "pillar.obj")],
+        ["--type", "chest",          "--out", os.path.join(mesh_dir, "chest.obj")],
+        ["--type", "web",            "--out", os.path.join(mesh_dir, "web.obj")],
+        ["--type", "shackles",       "--out", os.path.join(mesh_dir, "shackles.obj")],
+        ["--type", "barrel",         "--out", os.path.join(mesh_dir, "barrel.obj")],
+        ["--type", "cage",           "--out", os.path.join(mesh_dir, "cage.obj")],
+        ["--type", "bones",          "--out", os.path.join(mesh_dir, "bones.obj")],
+        ["--type", "brazier",        "--out", os.path.join(mesh_dir, "brazier.obj")],
+        ["--type", "iron_maiden",    "--out", os.path.join(mesh_dir, "iron_maiden.obj")],
+        # Gadgets
+        ["--type", "turret",         "--out", os.path.join(mesh_dir, "turret.obj")],
     ]
 
     ok = True
