@@ -1014,11 +1014,11 @@ static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 damage = (def->damage > 0.0f ? def->damage : 30.0f) * 3.0f * s_classDmgMult;
     f32 range  = 80.0f;
 
-    // Find all entities in a very narrow cone (penetrating — hits ALL, not just first)
+    // Find all entities in a narrow cone (penetrating — hits ALL in the line)
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     u32 hitCount = CombatQuery::queryConeSorted(
-        entities, origin, forward, cosf(radians(0.5f)), range,
+        entities, origin, forward, cosf(radians(3.0f)), range,
         hits, dists, MAX_ENTITIES);
 
     // Damage + slow every enemy in the line
