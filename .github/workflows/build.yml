@@ -1,0 +1,95 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Only trigger on version tags (v0.1.0, v1.0.0, etc.)
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 python3 python3-pip ffmpeg zip
+          pip3 install Pillow
+
+      - name: Fetch audio assets
+        run: python3 tools/fetch_audio.py
+
+      - name: Generate music
+        run: python3 tools/gen_audio.py --music-all
+
+      - name: Cross-compile for Windows
+        run: |
+          cmake -B build-win \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/windows.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-win -j$(nproc)
+
+      - name: Package
+        run: ./tools/package_windows.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DungeonEngine-Windows
+          path: DungeonEngine-Windows.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libsdl2-dev python3 python3-pip ffmpeg zip
+          pip3 install Pillow
+
+      - name: Fetch audio assets
+        run: python3 tools/fetch_audio.py
+
+      - name: Generate music
+        run: python3 tools/gen_audio.py --music-all
+
+      - name: Build
+        run: |
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-rel -j$(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p package-linux
+          cp build-rel/src/DungeonEngine package-linux/
+          cp -r assets package-linux/assets
+          rm -f package-linux/assets/audio/.fetched
+          cd package-linux && zip -r ../DungeonEngine-Linux.zip . && cd ..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DungeonEngine-Linux
+          path: DungeonEngine-Linux.zip
+
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DungeonEngine-Windows/DungeonEngine-Windows.zip
+            DungeonEngine-Linux/DungeonEngine-Linux.zip
+          generate_release_notes: true
