@@ -455,6 +455,11 @@ void Engine::init() {
         if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
     });
 
+    Combat::setDamageNumberCallback([](Vec3 pos, f32 amount) {
+        if (!s_engine) return;
+        s_engine->spawnDamageNumber(pos, amount);
+    });
+
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
         if (!s_engine) return;
 

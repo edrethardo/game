@@ -54,6 +54,10 @@ namespace Combat {
                        ProjectilePool& projectiles,
                        f32 gravity, f32 splashRadius, f32 splashDamage);
 
+    // Damage number callback — auto-fires on every applyDamage call
+    using DamageNumberCallback = void(*)(Vec3 position, f32 amount);
+    void setDamageNumberCallback(DamageNumberCallback cb);
+
     // Death callback — called when an entity dies, before pool cleanup
     using DeathCallback = void(*)(EntityPool& pool, u16 entityIndex, Vec3 position);
     void setDeathCallback(DeathCallback cb);

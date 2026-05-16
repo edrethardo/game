@@ -7,10 +7,15 @@
 #include "core/log.h"
 #include <cmath>
 
+static Combat::DamageNumberCallback s_damageNumberCallback = nullptr;
 static Combat::DeathCallback s_deathCallback = nullptr;
 static Combat::PerfectBlockCallback s_perfectBlockCallback = nullptr;
 static ParticlePool* s_particlePool = nullptr;
 static ScreenShake*  s_screenShake  = nullptr;
+
+void Combat::setDamageNumberCallback(DamageNumberCallback cb) {
+    s_damageNumberCallback = cb;
+}
 
 void Combat::setDeathCallback(DeathCallback cb) {
     s_deathCallback = cb;
@@ -35,6 +40,9 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
 
     e->health -= damage;
     e->flashTimer = 0.12f;
+
+    // Auto-spawn floating damage number at entity position
+    if (s_damageNumberCallback) s_damageNumberCallback(e->position + Vec3{0, 0.5f, 0}, damage);
 
     if (e->health <= 0.0f) {
         e->health     = 0.0f;

@@ -179,9 +179,6 @@ void Engine::handleWeaponFire(f32 dt) {
             meleeWpn.damage *= 3.0f;
         }
         result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
-        if (result.hitEntity) {
-            spawnDamageNumber(result.hitPosition, wpn.damage);
-        }
         m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
 
         // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
@@ -224,9 +221,6 @@ void Engine::handleWeaponFire(f32 dt) {
             result.hitEntity = (oCnt > 0);
         } else {
             result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
-            if (result.hitEntity) {
-                spawnDamageNumber(result.hitPosition, wpn.damage);
-            }
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
             if (result.hitEntity || result.hitWorld) {
                 m_lastCombatHit.hit      = true;
@@ -360,7 +354,6 @@ void Engine::handleWeaponFire(f32 dt) {
     if (result.hitEntity) {
         m_hitMarkerTimer = 0.2f;
         AudioSystem::play(SfxId::HIT_MELEE); // generic hit sound — subtype doesn't matter for impact
-        spawnDamageNumber(result.hitPosition, wpn.damage);
     }
 
     // --- Ring on-hit passives ---

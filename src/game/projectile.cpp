@@ -183,7 +183,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                     EntityHandle h = {static_cast<u16>(e), ent.generation};
                     Combat::applyDamage(entities, h, p.damage);
-                    if (s_dmgNumCallback) s_dmgNumCallback(p.position, p.damage);
+                    // damage number now auto-spawned by Combat::applyDamage
                     // Apply freeze if the projectile carries a freeze effect
                     if (p.freezeDuration > 0.0f) {
                         ent.freezeTimer = p.freezeDuration;
