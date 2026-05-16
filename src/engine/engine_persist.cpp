@@ -58,8 +58,8 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
-// Version 1 = multi-slot + two-player format. All older saves are incompatible.
-static constexpr u32 SAVE_VERSION = 1;
+// Version 2 = adds m_difficulty byte to header. Version 1 saves are incompatible.
+static constexpr u32 SAVE_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Path helper
@@ -93,7 +93,7 @@ void Engine::scanSaveSlots() {
             continue;
         }
 
-        u8 floor = 0, playerCount = 0, classes[2] = {0, 0xFF};
+        u8 floor = 0, playerCount = 0, classes[2] = {0, 0xFF}, difficulty = 0;
         u32 timestamp = 0;
         f32 totalTime = 0.0f;
 
@@ -103,6 +103,7 @@ void Engine::scanSaveSlots() {
         ok = ok && std::fread(classes,      sizeof(u8),  2, f) == 2;
         ok = ok && std::fread(&timestamp,   sizeof(u32), 1, f) == 1;
         ok = ok && std::fread(&totalTime,   sizeof(f32), 1, f) == 1;
+        ok = ok && std::fread(&difficulty,  sizeof(u8),  1, f) == 1; // difficulty tier
 
         std::fclose(f);
 
@@ -142,11 +143,12 @@ void Engine::saveGame(u8 slot) {
     u32 timestamp   = static_cast<u32>(std::time(nullptr));
     f32 totalTime   = m_transition.totalPlayTime;
 
-    std::fwrite(&floor,       sizeof(u8),  1, f);
-    std::fwrite(&playerCount, sizeof(u8),  1, f);
-    std::fwrite(classes,      sizeof(u8),  2, f);
-    std::fwrite(&timestamp,   sizeof(u32), 1, f);
-    std::fwrite(&totalTime,   sizeof(f32), 1, f);
+    std::fwrite(&floor,         sizeof(u8),  1, f);
+    std::fwrite(&playerCount,   sizeof(u8),  1, f);
+    std::fwrite(classes,        sizeof(u8),  2, f);
+    std::fwrite(&timestamp,     sizeof(u32), 1, f);
+    std::fwrite(&totalTime,     sizeof(f32), 1, f);
+    std::fwrite(&m_difficulty,  sizeof(u8),  1, f); // difficulty tier
 
     // Level seed (after header, before per-player data)
     std::fwrite(&m_level.savedSeed, sizeof(u32), 1, f);
@@ -209,7 +211,7 @@ bool Engine::loadGame(u8 slot) {
     }
 
     // Read header
-    u8  floor = 0, playerCount = 0, classes[2] = {};
+    u8  floor = 0, playerCount = 0, classes[2] = {}, difficulty = 0;
     u32 timestamp = 0;
     f32 totalTime = 0.0f;
     u32 seed = 0;
@@ -220,6 +222,7 @@ bool Engine::loadGame(u8 slot) {
     ok = ok && std::fread(classes,      sizeof(u8),  2, f) == 2;
     ok = ok && std::fread(&timestamp,   sizeof(u32), 1, f) == 1;
     ok = ok && std::fread(&totalTime,   sizeof(f32), 1, f) == 1;
+    ok = ok && std::fread(&difficulty,  sizeof(u8),  1, f) == 1; // difficulty tier
     ok = ok && std::fread(&seed,        sizeof(u32), 1, f) == 1;
 
     if (!ok) { std::fclose(f); return false; }
@@ -265,6 +268,8 @@ bool Engine::loadGame(u8 slot) {
     m_level.savedFloor = floor;
     m_level.savedSeed  = seed;
     m_transition.totalPlayTime = totalTime;
+    // Restore difficulty, clamped to valid range
+    m_difficulty = (difficulty <= 2) ? difficulty : 0;
 
     for (u8 p = 0; p < restoreCount; p++) {
         const PlayerSave& ps = pdata[p];

@@ -30,6 +30,7 @@ enum struct GameState : u8 {
     IN_GAME,
     GAME_OVER,          // player died, show death screen
     FLOOR_TRANSITION,   // between-floor title card (2s hold)
+    VICTORY,            // player completed floor 50 — victory screen before menu return
 };
 
 class Engine {
@@ -51,6 +52,11 @@ private:
 
     // Game state
     GameState m_gameState = GameState::MENU;
+
+    // Difficulty — 0=Normal, 1=Nightmare (2x HP/1.5x dmg), 2=Hell (3x HP/2x dmg)
+    u8 m_difficulty        = 0;
+    // Highest difficulty unlocked globally (persisted in difficulty_unlock.dat)
+    u8 m_highestUnlocked   = 0;
 
     // Menu/UI state — grouped for isolation
     struct MenuState {

@@ -771,6 +771,165 @@ def generate_sound(sound_type, out_path=None):
     return True
 
 
+# ---------------------------------------------------------------------------
+# Procedural ambient music — one track per floor tier, progressively darker
+# ---------------------------------------------------------------------------
+
+def _apply_fade(samples, fade_in_s=2.0, fade_out_s=2.0, sr=44100):
+    """Apply fade-in and fade-out to a sample list for seamless looping."""
+    fade_in = int(fade_in_s * sr)
+    fade_out = int(fade_out_s * sr)
+    for i in range(min(fade_in, len(samples))):
+        t = i / fade_in
+        samples[i] = int(samples[i] * t)
+    for i in range(min(fade_out, len(samples))):
+        idx = len(samples) - 1 - i
+        t = i / fade_out
+        samples[idx] = int(samples[idx] * t)
+    return samples
+
+
+def music_tier1_dungeon():
+    """Tier 1 (floors 1-10): Stone Dungeon — eerie, sparse, quiet."""
+    samples = synthesize_mix([
+        # Low sine drone — the foundation
+        dict(waveform='sine', duration=60.0, freq_start=80, freq_end=75,
+             attack=3.0, decay=2.0, sustain_level=0.4, sustain_time=50.0, release=5.0,
+             volume=0.5, vibrato_freq=0.3, vibrato_depth=2),
+        # Filtered wind noise — corridor ambience
+        dict(waveform='noise', duration=60.0, freq_start=200, freq_end=150,
+             attack=4.0, decay=3.0, sustain_level=0.15, sustain_time=48.0, release=5.0,
+             lowpass=0.04, volume=0.3),
+        # Very subtle high sine — distant ringing
+        dict(waveform='sine', duration=60.0, freq_start=440, freq_end=430,
+             attack=5.0, decay=2.0, sustain_level=0.05, sustain_time=48.0, release=5.0,
+             volume=0.12, vibrato_freq=0.5, vibrato_depth=3),
+    ], master_volume=0.6)
+    return _apply_fade(samples)
+
+
+def music_tier2_catacombs():
+    """Tier 2 (floors 11-20): Catacombs — ominous, deeper, slow pulse."""
+    samples = synthesize_mix([
+        # Deep drone
+        dict(waveform='sine', duration=60.0, freq_start=50, freq_end=48,
+             attack=3.0, decay=2.0, sustain_level=0.5, sustain_time=50.0, release=5.0,
+             volume=0.55, vibrato_freq=0.2, vibrato_depth=1.5),
+        # Detuned harmonic — unsettling interval
+        dict(waveform='sine', duration=60.0, freq_start=75, freq_end=73,
+             attack=4.0, decay=3.0, sustain_level=0.25, sustain_time=48.0, release=5.0,
+             volume=0.3, vibrato_freq=0.15, vibrato_depth=2),
+        # Slow pulsing sub
+        dict(waveform='sine', duration=60.0, freq_start=35, freq_end=35,
+             attack=2.0, decay=1.0, sustain_level=0.3, sustain_time=52.0, release=5.0,
+             volume=0.35, vibrato_freq=0.08, vibrato_depth=5),
+        # Metallic resonance — filtered noise
+        dict(waveform='noise', duration=60.0, freq_start=300, freq_end=200,
+             attack=5.0, decay=3.0, sustain_level=0.08, sustain_time=47.0, release=5.0,
+             lowpass=0.03, volume=0.2),
+    ], master_volume=0.6)
+    return _apply_fade(samples)
+
+
+def music_tier3_caverns():
+    """Tier 3 (floors 21-30): Caverns — oppressive, heavy sub-bass, dripping."""
+    samples = synthesize_mix([
+        # Heavy sub-bass drone
+        dict(waveform='sine', duration=60.0, freq_start=40, freq_end=38,
+             attack=3.0, decay=2.0, sustain_level=0.6, sustain_time=50.0, release=5.0,
+             volume=0.6, vibrato_freq=0.1, vibrato_depth=1),
+        # Oppressive mid — sawtooth with heavy filtering
+        dict(waveform='sawtooth', duration=60.0, freq_start=100, freq_end=90,
+             attack=5.0, decay=3.0, sustain_level=0.2, sustain_time=47.0, release=5.0,
+             lowpass=0.05, volume=0.3, drive=1.5),
+        # Drip texture — noise bursts
+        dict(waveform='noise', duration=60.0, freq_start=400, freq_end=100,
+             attack=6.0, decay=4.0, sustain_level=0.1, sustain_time=45.0, release=5.0,
+             lowpass=0.06, volume=0.2),
+        # Rumble
+        dict(waveform='noise', duration=60.0, freq_start=60, freq_end=40,
+             attack=4.0, decay=3.0, sustain_level=0.15, sustain_time=48.0, release=5.0,
+             lowpass=0.02, volume=0.25),
+    ], master_volume=0.6)
+    return _apply_fade(samples)
+
+
+def music_tier4_hellforge():
+    """Tier 4 (floors 31-40): Hellforge — infernal, aggressive, machinery."""
+    samples = synthesize_mix([
+        # Aggressive sawtooth drone
+        dict(waveform='sawtooth', duration=60.0, freq_start=60, freq_end=55,
+             attack=2.0, decay=2.0, sustain_level=0.45, sustain_time=51.0, release=5.0,
+             lowpass=0.08, volume=0.5, drive=2.0),
+        # Distorted noise crackle — fire ambience
+        dict(waveform='noise', duration=60.0, freq_start=500, freq_end=200,
+             attack=3.0, decay=2.0, sustain_level=0.2, sustain_time=50.0, release=5.0,
+             lowpass=0.1, volume=0.3, drive=3.0),
+        # Fast sub-pulse — distant machinery
+        dict(waveform='square', duration=60.0, freq_start=30, freq_end=30,
+             attack=2.0, decay=1.0, sustain_level=0.3, sustain_time=52.0, release=5.0,
+             volume=0.3, vibrato_freq=2.0, vibrato_depth=8),
+        # Mid-range menace
+        dict(waveform='sawtooth', duration=60.0, freq_start=150, freq_end=130,
+             attack=5.0, decay=3.0, sustain_level=0.15, sustain_time=47.0, release=5.0,
+             lowpass=0.06, volume=0.25, drive=1.8),
+    ], master_volume=0.6)
+    return _apply_fade(samples)
+
+
+def music_tier5_void():
+    """Tier 5 (floors 41-50): Void — alien, dissonant, ultra-deep, unsettling."""
+    samples = synthesize_mix([
+        # Ultra-low sine — at the edge of hearing
+        dict(waveform='sine', duration=60.0, freq_start=30, freq_end=28,
+             attack=4.0, decay=3.0, sustain_level=0.5, sustain_time=48.0, release=5.0,
+             volume=0.55, vibrato_freq=0.05, vibrato_depth=1),
+        # Dissonant tritone interval — deeply unsettling
+        dict(waveform='sine', duration=60.0, freq_start=42, freq_end=40,
+             attack=5.0, decay=3.0, sustain_level=0.3, sustain_time=47.0, release=5.0,
+             volume=0.35, vibrato_freq=0.07, vibrato_depth=1.5),
+        # Alien modulation — sine with heavy vibrato
+        dict(waveform='sine', duration=60.0, freq_start=200, freq_end=180,
+             attack=6.0, decay=4.0, sustain_level=0.1, sustain_time=45.0, release=5.0,
+             volume=0.2, vibrato_freq=3.0, vibrato_depth=40),
+        # Void hum — filtered square
+        dict(waveform='square', duration=60.0, freq_start=55, freq_end=50,
+             attack=4.0, decay=3.0, sustain_level=0.2, sustain_time=48.0, release=5.0,
+             lowpass=0.03, volume=0.3),
+        # Distant whispers — barely-there noise
+        dict(waveform='noise', duration=60.0, freq_start=800, freq_end=400,
+             attack=8.0, decay=5.0, sustain_level=0.05, sustain_time=42.0, release=5.0,
+             lowpass=0.02, volume=0.15),
+    ], master_volume=0.6)
+    return _apply_fade(samples)
+
+
+MUSIC_PRESETS = {
+    'tier1': ('music_tier1.wav', music_tier1_dungeon),
+    'tier2': ('music_tier2.wav', music_tier2_catacombs),
+    'tier3': ('music_tier3.wav', music_tier3_caverns),
+    'tier4': ('music_tier4.wav', music_tier4_hellforge),
+    'tier5': ('music_tier5.wav', music_tier5_void),
+}
+
+
+def generate_music(music_type, out_path=None):
+    """Generate a music track."""
+    if music_type not in MUSIC_PRESETS:
+        print(f"Unknown music type: {music_type}")
+        return False
+    default_file, gen_func = MUSIC_PRESETS[music_type]
+    if out_path is None:
+        game_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        out_path = os.path.join(game_root, "assets", "audio", default_file)
+    random.seed(hash(music_type) & 0xFFFFFFFF)
+    print(f"Generating {music_type} (~60s, this takes a moment)...")
+    samples = gen_func()
+    write_wav(out_path, samples)
+    print(f"Wrote {out_path}  ({len(samples)} samples, {len(samples)/44100:.1f}s)")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Procedural sound effect generator (sfxr-style synthesis).")
@@ -782,12 +941,30 @@ def main():
                         help="Generate all sound presets")
     parser.add_argument("--list", action="store_true",
                         help="List all available presets")
+    parser.add_argument("--music", choices=list(MUSIC_PRESETS.keys()),
+                        help="Generate a single music track")
+    parser.add_argument("--music-all", action="store_true",
+                        help="Generate all music tracks")
     args = parser.parse_args()
 
     if args.list:
         print(f"Available presets ({len(SOUND_PRESETS)}):")
         for name, (fname, _) in SOUND_PRESETS.items():
             print(f"  {name:20s} -> {fname}")
+        print(f"\nMusic tracks ({len(MUSIC_PRESETS)}):")
+        for name, (fname, _) in MUSIC_PRESETS.items():
+            print(f"  {name:20s} -> {fname}")
+        return
+
+    if args.music_all:
+        print(f"Generating {len(MUSIC_PRESETS)} music tracks...")
+        for name in MUSIC_PRESETS:
+            generate_music(name)
+        print("Done.")
+        return
+
+    if args.music:
+        generate_music(args.music, args.out)
         return
 
     if args.all:
@@ -798,7 +975,7 @@ def main():
         return
 
     if not args.type:
-        parser.error("--type is required (or use --all / --list)")
+        parser.error("--type is required (or use --all / --list / --music / --music-all)")
 
     generate_sound(args.type, args.out)
 

@@ -217,7 +217,7 @@ void Engine::updateMenu(f32 dt) {
             m_playerClasses[0] = m_playerClass;
             std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
 
-            // Go to "waiting for P2" screen (or start directly if networking)
+            // Go to difficulty selection (subState 7) before co-op/network start
             if (m_netRole == NetRole::SERVER) {
                 // Network hosting — skip couch co-op, start server directly
                 if (!Net::hostServer()) {
@@ -243,13 +243,16 @@ void Engine::updateMenu(f32 dt) {
                     }
                 }
             } else {
-                // Singleplayer — show "waiting for P2" join screen
+                // Skip difficulty selection — difficulty is automatic per save (Diablo-style)
+                m_difficulty = 0;  // new games always start Normal
                 m_menu.subState = 4;
                 m_menu.subSelection = 0;
             }
         }
         return;
     }
+
+    // (Difficulty selection removed — difficulty is automatic per save, Diablo-style)
 
     // Couch co-op join screen — P1 selected class, waiting for P2 (subState 4)
     if (m_menu.subState == 4) {

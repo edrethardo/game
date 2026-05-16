@@ -540,9 +540,12 @@ void Engine::render(f32 alpha) {
         // Fade: full opacity for first 1.5s, fade out in last 0.5s
         f32 alpha = fminf(m_transition.timer * 2.0f, 1.0f);
 
-        // Floor number — large gold
-        char floorStr[32];
-        std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
+        // Difficulty prefix + floor number — large gold
+        char floorStr[48];
+        const char* diffPrefix = "";
+        if (m_difficulty == 1) diffPrefix = "Nightmare - ";
+        else if (m_difficulty == 2) diffPrefix = "Hell - ";
+        std::snprintf(floorStr, sizeof(floorStr), "%sFloor %u", diffPrefix, m_level.currentFloor);
         f32 floorW = FontSystem::textWidth(floorStr, 4);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - floorW) * 0.5f, sh * 0.6f,
                              floorStr, {0.9f * alpha, 0.7f * alpha, 0.2f * alpha}, 4);
@@ -583,6 +586,59 @@ void Engine::render(f32 alpha) {
         f32 totalW = FontSystem::textWidth(totalStr, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - totalW) * 0.5f, sh * 0.21f,
                              totalStr, {0.6f * alpha, 0.6f * alpha, 0.6f * alpha}, 2);
+
+        GLContext::swapBuffers(Window::getHandle());
+        return;
+    }
+
+    if (m_gameState == GameState::VICTORY) {
+        // --- Victory screen ---
+        glClearColor(0.01f, 0.02f, 0.06f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
+
+        // Final victory — only shown after Hell floor 50
+        const char* title = "You conquered the Dungeon Engine.";
+        const char* subtitle = nullptr;
+
+        f32 titleW = FontSystem::textWidth(title, 4);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - titleW) * 0.5f, sh * 0.65f,
+                             title, {0.9f, 0.8f, 0.2f}, 4);
+
+        if (subtitle) {
+            f32 subW = FontSystem::textWidth(subtitle, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - subW) * 0.5f, sh * 0.54f,
+                                 subtitle, {0.7f, 0.9f, 0.5f}, 2);
+        }
+
+        // Stats — total play time
+        {
+            u32 totalSec = static_cast<u32>(m_transition.totalPlayTime);
+            u32 totalMin = totalSec / 60;
+            u32 totalS   = totalSec % 60;
+            char timeStr[48];
+            std::snprintf(timeStr, sizeof(timeStr), "Total time: %u:%02u", totalMin, totalS);
+            f32 timeW = FontSystem::textWidth(timeStr, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - timeW) * 0.5f, sh * 0.40f,
+                                 timeStr, {0.7f, 0.7f, 0.7f}, 2);
+        }
+
+        // Class name
+        {
+            const char* className = kClassDefs[static_cast<u32>(m_playerClass)].name;
+            char classStr[48];
+            std::snprintf(classStr, sizeof(classStr), "Class: %s", className);
+            f32 classW = FontSystem::textWidth(classStr, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - classW) * 0.5f, sh * 0.32f,
+                                 classStr, {0.7f, 0.7f, 0.7f}, 2);
+        }
+
+        // Prompt
+        const char* prompt = "Press any key to continue";
+        f32 promptW = FontSystem::textWidth(prompt, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - promptW) * 0.5f, sh * 0.18f,
+                             prompt, {0.5f, 0.5f, 0.5f}, 1);
 
         GLContext::swapBuffers(Window::getHandle());
         return;

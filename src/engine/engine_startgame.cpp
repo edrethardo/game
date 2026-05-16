@@ -5,6 +5,7 @@
 #include <SDL.h>
 
 #include "engine/engine.h"
+#include "audio/audio.h"
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -577,8 +578,9 @@ void Engine::startGame() {
                     ent->enemyType = tmpl.etype;
                     ent->level = static_cast<u8>(m_level.currentFloor);
 
-                    // Floor scaling
-                    f32 floorMult = 1.0f + (m_level.currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
+                    // Floor scaling — Nightmare floor 1 = effective 51, Hell floor 1 = effective 101
+                    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                    f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
                     ent->health    *= floorMult;
                     ent->maxHealth  = ent->health;
                     ent->damage    *= floorMult;
@@ -1129,5 +1131,13 @@ void Engine::startGame() {
 
     Input::setRelativeMouseMode(true);
     m_gameState = GameState::IN_GAME;
+
+    // Play tier-appropriate ambient music — progressively darker per floor tier
+    const char* musicFile = ASSET_PATH("assets/audio/music_tier1.wav");
+    if      (m_level.currentFloor >= 41) musicFile = ASSET_PATH("assets/audio/music_tier5.wav");
+    else if (m_level.currentFloor >= 31) musicFile = ASSET_PATH("assets/audio/music_tier4.wav");
+    else if (m_level.currentFloor >= 21) musicFile = ASSET_PATH("assets/audio/music_tier3.wav");
+    else if (m_level.currentFloor >= 11) musicFile = ASSET_PATH("assets/audio/music_tier2.wav");
+    AudioSystem::playMusic(musicFile);
 }
 

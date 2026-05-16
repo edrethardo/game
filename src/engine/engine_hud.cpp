@@ -799,6 +799,7 @@ void Engine::renderMenu() {
         f32 hintW3 = FontSystem::textWidth(hint, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW3) * 0.5f, sh * 0.06f,
                              hint, {0.4f, 0.4f, 0.5f}, 2);
+    // (subState 7 difficulty selection removed — difficulty is automatic per save)
     } else if (m_menu.subState == 3) {
         // Options / controls rebinding screen
         const char* subTitle = "Controls";

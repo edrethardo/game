@@ -126,6 +126,7 @@ void Engine::init() {
     }
 
     AudioSystem::init(); // non-fatal — game works without audio
+    AudioSystem::setMusicVolume(0.3f); // ambient music sits below SFX
 
     if (!GLContext::init(Window::getHandle())) {
         LOG_ERROR("Failed to initialize GL context");
@@ -842,6 +843,16 @@ void Engine::init() {
     m_statsTimer = 0.0;
     m_updateCount = 0;
     m_frameCount = 0;
+
+    // Load global difficulty unlock so the menu can gray out locked tiers
+    {
+        FILE* f = std::fopen("difficulty_unlock.dat", "rb");
+        if (f) {
+            std::fread(&m_highestUnlocked, 1, 1, f);
+            std::fclose(f);
+            if (m_highestUnlocked > 2) m_highestUnlocked = 0; // sanitize bad data
+        }
+    }
 
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }

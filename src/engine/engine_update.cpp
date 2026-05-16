@@ -67,6 +67,7 @@ void Engine::update(f32 dt) {
             if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_Y)) {
                 m_menu.confirmQuit = false;
                 m_gameState = GameState::MENU;
+                AudioSystem::stopMusic();
                 Input::setRelativeMouseMode(false);
             }
             if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_N)) {
@@ -157,6 +158,7 @@ void Engine::update(f32 dt) {
                     m_netRole = NetRole::NONE;
                 }
                 m_gameState = GameState::MENU;
+                AudioSystem::stopMusic();
                 Input::setRelativeMouseMode(false);
             }
         }
@@ -189,7 +191,9 @@ void Engine::update(f32 dt) {
                 m_menu.subSelection = 0;
                 return;
             }
-        } else if (m_gameState != GameState::GAME_OVER) {
+        } else if (m_gameState != GameState::GAME_OVER &&
+                   m_gameState != GameState::VICTORY) {
+            // Lobby/connecting states — ESC disconnects and returns to menu
             Net::disconnect();
             m_netRole = NetRole::NONE;
             m_gameState = GameState::MENU;
@@ -312,6 +316,17 @@ void Engine::update(f32 dt) {
         break;
     case GameState::GAME_OVER:
         break; // handled above
+    case GameState::VICTORY:
+        // Final victory (Hell floor 50 cleared) — "You conquered the Dungeon Engine."
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isActionPressed(GameAction::JUMP) ||
+            Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            m_gameState = GameState::MENU;
+            AudioSystem::stopMusic();
+            Input::setRelativeMouseMode(false);
+        }
+        break;
     }
 }
 
@@ -1237,9 +1252,35 @@ bool Engine::updateFloorDoor() {
                 // Snapshot floor stats for transition screen
                 m_transition.snapshotKills = m_transition.floorKillCount;
                 m_transition.snapshotTime = m_transition.floorTime;
-                m_transition.timer = 2.0f;
-                m_gameState = GameState::FLOOR_TRANSITION;
-                AudioSystem::play(SfxId::LEVEL_UP);
+
+                // Floor 50 is the final floor of each difficulty
+                if (m_level.currentFloor > 50) {
+                    if (m_difficulty < 2) {
+                        // Advance to next difficulty — reset to floor 1, keep gear
+                        m_difficulty++;
+                        m_highestUnlocked = m_difficulty;
+                        FILE* uf = std::fopen("difficulty_unlock.dat", "wb");
+                        if (uf) { std::fwrite(&m_highestUnlocked, 1, 1, uf); std::fclose(uf); }
+                        m_level.currentFloor = 1;
+                        m_level.savedFloor = 1;
+                        saveGame(m_activeSaveSlot);
+                        // Show transition with difficulty name
+                        m_transition.timer = 3.0f;
+                        m_gameState = GameState::FLOOR_TRANSITION;
+                        AudioSystem::play(SfxId::LEVEL_UP);
+                        LOG_INFO("Advancing to %s difficulty",
+                                 m_difficulty == 1 ? "Nightmare" : "Hell");
+                    } else {
+                        // Hell complete — final victory
+                        m_gameState = GameState::VICTORY;
+                        AudioSystem::stopMusic();
+                        Input::setRelativeMouseMode(false);
+                    }
+                } else {
+                    m_transition.timer = 2.0f;
+                    m_gameState = GameState::FLOOR_TRANSITION;
+                    AudioSystem::play(SfxId::LEVEL_UP);
+                }
                 return true;
             }
         }
