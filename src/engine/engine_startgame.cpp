@@ -63,7 +63,7 @@ extern bool s_firstKillDropGiven;
 void Engine::rollNpcEquipment(NpcEquipment& equip, NpcClass npcClass, u8 floor) {
     // Clear all slots
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
-        equip.equipped[s] = {};
+        equip.equipped[s] = ItemInstance{};
     }
 
     // Roll weak equipment — always level 1, forced COMMON (no affixes),
@@ -325,7 +325,7 @@ void Engine::startGame() {
     }
 
     // Reset NPC equipment pool so old floor's slots don't persist
-    for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = {};
+    for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = NpcEquipment{};
 
     // Clear particle pool and shake so leftover FX from previous floor don't persist
     ParticleSystem::clear(m_particles);
@@ -1037,7 +1037,7 @@ void Engine::startGame() {
     {
         // Clear NPC equipment pool on floor 1, preserve on descent
         if (m_level.currentFloor <= 1) {
-            for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = {};
+            for (u32 i = 0; i < MAX_NPC_EQUIP; i++) m_npcEquip[i] = NpcEquipment{};
         }
 
         u8 floor = static_cast<u8>(m_level.currentFloor);

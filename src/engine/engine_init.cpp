@@ -848,7 +848,7 @@ void Engine::init() {
     {
         FILE* f = std::fopen("difficulty_unlock.dat", "rb");
         if (f) {
-            std::fread(&m_highestUnlocked, 1, 1, f);
+            (void)std::fread(&m_highestUnlocked, 1, 1, f);
             std::fclose(f);
             if (m_highestUnlocked > 2) m_highestUnlocked = 0; // sanitize bad data
         }
