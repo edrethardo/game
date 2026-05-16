@@ -92,6 +92,7 @@ else()
     target_link_libraries(DungeonEngine PRIVATE SDL2-static SDL2_mixer glad enet)
     if(WIN32)
         target_link_libraries(DungeonEngine PRIVATE winmm)  # timeBeginPeriod — 1ms timer resolution
+        target_link_options(DungeonEngine PRIVATE -mwindows)  # suppress console window (SUBSYSTEM:WINDOWS)
     endif()
     if(UNIX AND NOT APPLE)
         target_link_libraries(DungeonEngine PRIVATE dl)
