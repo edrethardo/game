@@ -80,8 +80,60 @@ jobs:
           name: DungeonEngine-Linux
           path: DungeonEngine-Linux.zip
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: brew install cmake python3 ffmpeg zip
+
+      - name: Install Pillow
+        run: pip3 install Pillow --break-system-packages
+
+      - name: Fetch audio assets
+        run: python3 tools/fetch_audio.py
+
+      - name: Generate music
+        run: python3 tools/gen_audio.py --music-all
+
+      - name: Build
+        run: |
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-rel -j$(sysctl -n hw.ncpu)
+
+      - name: Package
+        run: |
+          mkdir -p DungeonEngine.app/Contents/MacOS
+          mkdir -p DungeonEngine.app/Contents/Resources
+          cp build-rel/src/DungeonEngine DungeonEngine.app/Contents/MacOS/
+          cp -r assets DungeonEngine.app/Contents/Resources/assets
+          rm -f DungeonEngine.app/Contents/Resources/assets/audio/.fetched
+          cat > DungeonEngine.app/Contents/Info.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>DungeonEngine</string>
+            <key>CFBundleIdentifier</key><string>com.edrethardo.dungeonengine</string>
+            <key>CFBundleName</key><string>Dungeon Engine</string>
+            <key>CFBundleVersion</key><string>0.1.0</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+          </dict>
+          </plist>
+          PLIST
+          zip -r DungeonEngine-macOS.zip DungeonEngine.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DungeonEngine-macOS
+          path: DungeonEngine-macOS.zip
+
   release:
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -96,4 +148,5 @@ jobs:
           files: |
             DungeonEngine-Windows/DungeonEngine-Windows.zip
             DungeonEngine-Linux/DungeonEngine-Linux.zip
+            DungeonEngine-macOS/DungeonEngine-macOS.zip
           generate_release_notes: true
