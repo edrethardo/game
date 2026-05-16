@@ -1014,23 +1014,36 @@ static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 damage = (def->damage > 0.0f ? def->damage : 30.0f) * 3.0f * s_classDmgMult;
     f32 range  = 80.0f;
 
-    // Find all entities in a narrow cone (penetrating — hits ALL in the line)
-    EntityHandle hits[MAX_ENTITIES];
-    f32          dists[MAX_ENTITIES];
-    u32 hitCount = CombatQuery::queryConeSorted(
-        entities, origin, forward, cosf(radians(3.0f)), range,
-        hits, dists, MAX_ENTITIES);
+    // Penetrating rail: test ray against every entity AABB along the line.
+    // This gives precise aim (like hitscan) but pierces through all of them.
+    u32 hitCount = 0;
+    for (u32 a = 0; a < entities.activeCount; a++) {
+        u32 idx = entities.activeList[a];
+        Entity& e = entities.entities[idx];
+        if (e.flags & ENT_DEAD) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
 
-    // Damage + slow every enemy in the line
-    Vec3 lastHitPos = origin + forward * range;
-    for (u32 i = 0; i < hitCount; i++) {
-        Entity* e = handleGet(entities, hits[i]);
-        if (!e || (e->flags & ENT_DEAD) || (e->flags & ENT_FRIENDLY)) continue;
-        Combat::applyDamage(entities, hits[i], damage);
-        e->freezeTimer = 2.0f; // slow on hit
-        lastHitPos = e->position;
-        // Debris burst at each penetration point
-        if (s_particlePool) ParticleSystem::spawnDebris(*s_particlePool, e->position, 4);
+        // Ray-AABB intersection test
+        AABB box = entityAABB(e);
+        Vec3 invDir = {1.0f / (forward.x != 0.0f ? forward.x : 0.0001f),
+                       1.0f / (forward.y != 0.0f ? forward.y : 0.0001f),
+                       1.0f / (forward.z != 0.0f ? forward.z : 0.0001f)};
+        f32 t1 = (box.min.x - origin.x) * invDir.x;
+        f32 t2 = (box.max.x - origin.x) * invDir.x;
+        f32 t3 = (box.min.y - origin.y) * invDir.y;
+        f32 t4 = (box.max.y - origin.y) * invDir.y;
+        f32 t5 = (box.min.z - origin.z) * invDir.z;
+        f32 t6 = (box.max.z - origin.z) * invDir.z;
+        f32 tmin = fmaxf(fmaxf(fminf(t1, t2), fminf(t3, t4)), fminf(t5, t6));
+        f32 tmax = fminf(fminf(fmaxf(t1, t2), fmaxf(t3, t4)), fmaxf(t5, t6));
+        if (tmax < 0.0f || tmin > tmax || tmin > range) continue;
+
+        // Ray intersects this entity's AABB — apply damage
+        EntityHandle h = {static_cast<u16>(idx), e.generation};
+        Combat::applyDamage(entities, h, damage);
+        e.freezeTimer = 2.0f;
+        if (s_particlePool) ParticleSystem::spawnDebris(*s_particlePool, e.position, 4);
+        hitCount++;
     }
 
     // Beam trail from origin to wall/max range
