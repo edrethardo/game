@@ -121,16 +121,16 @@ void Engine::onPlayerJoin(u8 playerSlot) {
 
         // Initialize inventory, skill states, and quickbar for the new player
         Inventory::init(s_engine->m_inventories[playerSlot]);
-        s_engine->m_skillStates[playerSlot] = {};
-        s_engine->m_bootSkillStates[playerSlot] = {};
-        s_engine->m_helmetSkillStates[playerSlot] = {};
+        s_engine->m_skillStates[playerSlot] = SkillState{};
+        s_engine->m_bootSkillStates[playerSlot] = SkillState{};
+        s_engine->m_helmetSkillStates[playerSlot] = SkillState{};
         Quickbar::init(s_engine->m_quickbars[playerSlot], s_engine->m_inventories[playerSlot]);
 
         // Give starting weapon based on class (same logic as host startup)
         const ClassDef& cls = kClassDefs[static_cast<u32>(np.playerClass)];
         for (u32 di = 0; di < s_engine->m_itemDefCount; di++) {
             if (std::strcmp(s_engine->m_itemDefs[di].name, cls.startingWeaponName) == 0) {
-                ItemInstance startWpn = {};
+                ItemInstance startWpn{};
                 startWpn.defId = static_cast<u16>(di);
                 startWpn.damage = s_engine->m_itemDefs[di].baseDamage;
                 startWpn.rarity = Rarity::COMMON;

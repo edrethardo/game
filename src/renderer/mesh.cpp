@@ -6,7 +6,7 @@
 
 Mesh MeshSystem::create(const Vertex* vertices, u32 vertexCount,
                          const u32* indices, u32 indexCount) {
-    Mesh mesh = {};
+    Mesh mesh = Mesh{};
     mesh.indexCount = indexCount;
 
     glGenVertexArrays(1, &mesh.vao);
@@ -43,7 +43,7 @@ void MeshSystem::destroy(Mesh& mesh) {
     if (mesh.vao) glDeleteVertexArrays(1, &mesh.vao);
     if (mesh.vbo) glDeleteBuffers(1, &mesh.vbo);
     if (mesh.ibo) glDeleteBuffers(1, &mesh.ibo);
-    mesh = {};
+    mesh = Mesh{};
 }
 
 void MeshSystem::draw(const Mesh& mesh) {

@@ -35,7 +35,7 @@ void MaterialSystem::init(const char* jsonPath) {
     std::fseek(f, 0, SEEK_SET);
 
     char* buf = static_cast<char*>(std::malloc(size + 1));
-    std::fread(buf, 1, size, f);
+    (void)std::fread(buf, 1, size, f);
     buf[size] = '\0';
     std::fclose(f);
 
@@ -91,7 +91,7 @@ void MaterialSystem::init(const char* jsonPath) {
 void MaterialSystem::shutdown() {
     for (u32 i = 0; i < s_materialCount; i++) {
         TextureSystem::destroy(s_materials[i].texture);
-        s_materials[i] = {};
+        s_materials[i] = Material{};
     }
     s_materialCount = 0;
 }

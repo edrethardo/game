@@ -50,7 +50,7 @@ static u8 findSlotByPeer(ENetPeer* peer) {
 
 static void resetSlots() {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        s_slots[i] = {};
+        s_slots[i] = NetPlayerSlot{};
     }
 }
 

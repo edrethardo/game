@@ -1075,14 +1075,14 @@ void Engine::startGame() {
     if (m_level.currentFloor <= 1) {
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
             Inventory::init(m_inventories[i]);
-            m_skillStates[i] = {};
+            m_skillStates[i] = SkillState{};
             Quickbar::init(m_quickbars[i], m_inventories[i]);
         }
     }
 
     // Init players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        m_players[i] = {};
+        m_players[i] = NetPlayer{};
     }
 
     // Setup local player

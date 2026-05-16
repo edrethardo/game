@@ -142,7 +142,7 @@ static char* readFileToBuffer(const char* path) {
     char* buf = static_cast<char*>(std::malloc(size + 1));
     if (!buf) { std::fclose(f); return nullptr; }
 
-    std::fread(buf, 1, size, f);
+    (void)std::fread(buf, 1, size, f);
     buf[size] = '\0';
     std::fclose(f);
     return buf;
@@ -172,7 +172,7 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
             }
 
             ItemDef& def = defs[count];
-            def = {};
+            def = ItemDef{};
 
             std::string name = entry.value("name", "unnamed");
             std::strncpy(def.name, name.c_str(), sizeof(def.name) - 1);
@@ -251,7 +251,7 @@ bool ItemLoader::loadAffixDefs(const char* path, AffixDef* defs, u32& count) {
             }
 
             AffixDef& def = defs[count];
-            def = {};
+            def = AffixDef{};
 
             std::string name = entry.value("name", "unnamed");
             std::strncpy(def.name, name.c_str(), sizeof(def.name) - 1);
@@ -313,7 +313,7 @@ bool ItemLoader::loadSkillDefs(const char* path, SkillDef* defs, u32& count) {
             }
 
             SkillDef& def = defs[count];
-            def = {};
+            def = SkillDef{};
 
             std::string idStr = entry.value("id", "NONE");
             def.id = skillIdFromString(idStr);
@@ -519,7 +519,7 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
 
     if (validCount == 0) {
         LOG_WARN("ItemGen: no valid item defs for enemy level %u", enemyLevel);
-        return {};
+        return ItemInstance{};
     }
 
     // Weighted random selection using dropWeight
@@ -584,7 +584,7 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
 // ============================================================
 
 void Inventory::init(PlayerInventory& inv) {
-    inv = {};
+    inv = PlayerInventory{};
     for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++)
         inv.equipped[i].defId = 0xFFFF;
     for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++)
@@ -874,9 +874,9 @@ void ItemLoader::resolveVisuals(ItemDef* defs, u32 count) {
 // ============================================================
 
 void WorldItemSystem::init(WorldItemPool& pool) {
-    pool = {};
+    pool = WorldItemPool{};
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
-        pool.items[i] = {};
+        pool.items[i] = WorldItem{};
         pool.items[i].active = false;
     }
     pool.activeCount = 0;
@@ -961,7 +961,7 @@ bool WorldItemSystem::tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSl
 // ============================================================
 
 void Quickbar::init(QuickbarState& qb, const PlayerInventory& inv) {
-    qb = {};
+    qb = QuickbarState{};
     // Slot 0 always references equipped weapon
     syncWeaponSlot(qb, inv);
 }
@@ -991,7 +991,7 @@ void Quickbar::assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 back
 
 void Quickbar::removeItem(QuickbarState& qb, u8 slotIdx) {
     if (slotIdx >= QUICKBAR_SLOTS) return;
-    qb.slots[slotIdx] = {};
+    qb.slots[slotIdx] = QuickbarSlot{};
 }
 
 void Quickbar::syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv) {
@@ -1015,7 +1015,7 @@ void Quickbar::syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv) {
                 }
             }
             if (!found) {
-                qb.slots[i] = {}; // item gone entirely, clear slot
+                qb.slots[i] = QuickbarSlot{}; // item gone entirely, clear slot
             }
         }
     }
@@ -1091,7 +1091,7 @@ void Quickbar::assignToSlot(QuickbarState& qb, const PlayerInventory& inv,
     // Remove any existing quickbar slot with the same UID (prevent duplicates)
     for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
         if (qb.slots[i].itemUid == uid && qb.slots[i].type != QuickbarSlot::EMPTY) {
-            qb.slots[i] = {};
+            qb.slots[i] = QuickbarSlot{};
         }
     }
 

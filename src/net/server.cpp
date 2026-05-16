@@ -10,7 +10,7 @@ static u32             s_levelSeed = 0;
 void Server::init(NetPlayer* players, u32 levelSeed) {
     s_levelSeed = levelSeed;
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        s_inputBuffers[i] = {};
+        s_inputBuffers[i] = InputRingBuffer{};
     }
     LOG_INFO("Server: initialized (seed=%u)", levelSeed);
 }

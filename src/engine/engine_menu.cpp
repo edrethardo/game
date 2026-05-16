@@ -206,7 +206,7 @@ void Engine::updateMenu(f32 dt) {
 
             // Init class skill cooldown states
             for (u32 s = 0; s < 4; s++) {
-                m_classSkillStates[s] = {};
+                m_classSkillStates[s] = SkillState{};
                 m_classSkillStates[s].activeSkill = cls.skills[s];
                 m_classSkillStates[s].maxEnergy = cls.baseEnergy;
                 m_classSkillStates[s].energy = cls.baseEnergy;
@@ -319,7 +319,7 @@ void Engine::updateMenu(f32 dt) {
             m_skillStates[1].maxEnergy = cls2.baseEnergy;
             m_skillStates[1].energy = cls2.baseEnergy;
             for (u32 s = 0; s < 4; s++) {
-                m_classSkillStatesPerPlayer[1][s] = {};
+                m_classSkillStatesPerPlayer[1][s] = SkillState{};
                 m_classSkillStatesPerPlayer[1][s].activeSkill = cls2.skills[s];
                 m_classSkillStatesPerPlayer[1][s].maxEnergy = cls2.baseEnergy;
                 m_classSkillStatesPerPlayer[1][s].energy = cls2.baseEnergy;

@@ -55,7 +55,7 @@ Texture TextureSystem::createWhite() {
 void TextureSystem::destroy(Texture& tex) {
     if (tex.handle) {
         glDeleteTextures(1, &tex.handle);
-        tex = {};
+        tex = Texture{};
     }
 }
 
