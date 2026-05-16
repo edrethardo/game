@@ -2,6 +2,9 @@ build/
 build-rel/
 build-dbg/
 build-switch/
+build-win/
+*.zip
+difficulty_unlock.dat
 *.o
 *.obj
 *.exe

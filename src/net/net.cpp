@@ -12,7 +12,7 @@
 // Static state
 // ---------------------------------------------------------------------------
 static NetRole          s_role = NetRole::NONE;
-static ENetHost*        s_host = nullptr;         // server or client host
+static ENetHost*        s_enetHost = nullptr;         // server or client host
 static ENetPeer*        s_serverPeer = nullptr;   // client's peer to server
 static NetPlayerSlot    s_slots[MAX_PLAYERS];
 static u8               s_localPlayerIndex = 0;
@@ -157,7 +157,7 @@ bool Net::init() {
     s_initialized = true;
     resetSlots();
     s_role = NetRole::NONE;
-    s_host = nullptr;
+    s_enetHost = nullptr;
     s_serverPeer = nullptr;
     s_localPlayerIndex = 0;
     s_seq = 0;
@@ -176,15 +176,15 @@ void Net::shutdown() {
 
 bool Net::hostServer(u16 port) {
     if (!s_initialized) return false;
-    if (s_host) return false;
+    if (s_enetHost) return false;
 
     ENetAddress address;
     address.host = ENET_HOST_ANY;
     address.port = port;
 
     // MAX_PLAYERS - 1 peers (slot 0 is the local host)
-    s_host = enet_host_create(&address, MAX_PLAYERS - 1, NUM_CHANNELS, 0, 0);
-    if (!s_host) {
+    s_enetHost = enet_host_create(&address, MAX_PLAYERS - 1, NUM_CHANNELS, 0, 0);
+    if (!s_enetHost) {
         LOG_ERROR("Net: failed to create server on port %u", port);
         return false;
     }
@@ -201,10 +201,10 @@ bool Net::hostServer(u16 port) {
 
 bool Net::connectToServer(const char* address, u16 port) {
     if (!s_initialized) return false;
-    if (s_host) return false;
+    if (s_enetHost) return false;
 
-    s_host = enet_host_create(nullptr, 1, NUM_CHANNELS, 0, 0);
-    if (!s_host) {
+    s_enetHost = enet_host_create(nullptr, 1, NUM_CHANNELS, 0, 0);
+    if (!s_enetHost) {
         LOG_ERROR("Net: failed to create client host");
         return false;
     }
@@ -213,11 +213,11 @@ bool Net::connectToServer(const char* address, u16 port) {
     enet_address_set_host(&addr, address);
     addr.port = port;
 
-    s_serverPeer = enet_host_connect(s_host, &addr, NUM_CHANNELS, 0);
+    s_serverPeer = enet_host_connect(s_enetHost, &addr, NUM_CHANNELS, 0);
     if (!s_serverPeer) {
         LOG_ERROR("Net: failed to initiate connection to %s:%u", address, port);
-        enet_host_destroy(s_host);
-        s_host = nullptr;
+        enet_host_destroy(s_enetHost);
+        s_enetHost = nullptr;
         return false;
     }
 
@@ -232,7 +232,7 @@ void Net::disconnect() {
         enet_peer_disconnect(s_serverPeer, 0);
         // Flush disconnect
         ENetEvent event;
-        while (enet_host_service(s_host, &event, 200) > 0) {
+        while (enet_host_service(s_enetHost, &event, 200) > 0) {
             if (event.type == ENET_EVENT_TYPE_DISCONNECT) break;
             if (event.type == ENET_EVENT_TYPE_RECEIVE)
                 enet_packet_destroy(event.packet);
@@ -240,9 +240,9 @@ void Net::disconnect() {
         s_serverPeer = nullptr;
     }
 
-    if (s_host) {
-        enet_host_destroy(s_host);
-        s_host = nullptr;
+    if (s_enetHost) {
+        enet_host_destroy(s_enetHost);
+        s_enetHost = nullptr;
     }
 
     resetSlots();
@@ -251,10 +251,10 @@ void Net::disconnect() {
 }
 
 void Net::poll() {
-    if (!s_host) return;
+    if (!s_enetHost) return;
 
     ENetEvent event;
-    while (enet_host_service(s_host, &event, 0) > 0) {
+    while (enet_host_service(s_enetHost, &event, 0) > 0) {
         switch (event.type) {
         case ENET_EVENT_TYPE_CONNECT: {
             if (s_role == NetRole::SERVER) {
@@ -382,7 +382,7 @@ void Net::sendToServer(const u8* data, u32 size, bool reliable) {
 
 NetRole Net::getRole()              { return s_role; }
 u8      Net::getLocalPlayerIndex()  { return s_localPlayerIndex; }
-bool    Net::isConnected()          { return s_host != nullptr; }
+bool    Net::isConnected()          { return s_enetHost != nullptr; }
 
 const NetPlayerSlot* Net::getSlots() { return s_slots; }
 
