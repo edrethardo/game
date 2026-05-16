@@ -9,6 +9,7 @@
 #include <cstring>
 #ifdef _WIN32
 #include <windows.h>
+// timeBeginPeriod/timeEndPeriod declared in windows.h (MinGW) or timeapi.h (MSVC)
 #else
 #include <unistd.h>
 #include <libgen.h>
@@ -59,12 +60,23 @@ int main(int argc, char* argv[]) {
     nxlinkStdio(); // redirect stdout/stderr to nxlink console (debug)
 #endif
 
+#ifdef _WIN32
+    // Set Windows timer resolution to 1ms so vsync blocking and the OS scheduler
+    // wake the game precisely. Without this, default 15.6ms granularity causes
+    // frame delivery jitter and visible microstutters in the fixed-timestep loop.
+    timeBeginPeriod(1);
+#endif
+
     SDL_SetMainReady();
 
     Engine engine;
     engine.init();
     engine.run();
     engine.shutdown();
+
+#ifdef _WIN32
+    timeEndPeriod(1);
+#endif
 
 #ifdef __SWITCH__
     socketExit();
