@@ -25,6 +25,9 @@ jobs:
           python3 tools/fetch_audio.py
           python3 tools/gen_audio.py --music-all
 
+      - name: Generate assets (meshes, textures, skins)
+        run: python3 tools/build_assets.py
+
       - name: Cross-compile
         run: |
           cmake -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/windows.cmake -DCMAKE_BUILD_TYPE=Release
@@ -61,6 +64,9 @@ jobs:
         run: |
           python3 tools/fetch_audio.py
           python3 tools/gen_audio.py --music-all
+
+      - name: Generate assets (meshes, textures, skins)
+        run: python3 tools/build_assets.py
 
       - name: Build
         run: |
@@ -106,6 +112,9 @@ jobs:
         run: |
           python3 tools/fetch_audio.py
           python3 tools/gen_audio.py --music-all
+
+      - name: Generate assets (meshes, textures, skins)
+        run: python3 tools/build_assets.py
 
       - name: Build
         run: |
