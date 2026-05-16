@@ -1839,6 +1839,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
             default: break;
         }
 
+        curY -= lineH; // extra line before skill text
         const char* sName = skillDisplayName(def.legendarySkillId);
         std::snprintf(buf, sizeof(buf), "[%s] %s", activationLabel, sName);
         FontSystem::drawText(sw, sh, textX, curY, buf, activationColor, bodyScale);
