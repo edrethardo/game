@@ -999,19 +999,61 @@ void Engine::renderMenu() {
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f,
                              slotHint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 7) {
+        // Credits screen — scrolling text
+        f32 cx = static_cast<f32>(sw) * 0.5f;
+        f32 baseY = static_cast<f32>(sh) * 1.2f - m_menu.creditsScroll;
+        f32 lineH = 20.0f * uiScale;
+        f32 sectionGap = 40.0f * uiScale;
+
+        static const struct { const char* text; f32 scale; Vec3 color; bool gap; } credits[] = {
+            {"CURSE OF THE DUNGEON ENGINE", 3, {1.0f, 0.9f, 0.3f}, false},
+            {"", 1, {0,0,0}, true},
+            {"Developed by", 2, {0.7f, 0.7f, 0.8f}, false},
+            {"Aaron (edrethardo)", 2, {1.0f, 1.0f, 1.0f}, false},
+            {"", 1, {0,0,0}, true},
+            {"--- Libraries ---", 2, {1.0f, 0.6f, 0.1f}, false},
+            {"ENet - Lee Salzman (MIT)", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"SDL2 - Sam Lantinga (Zlib)", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"SDL_mixer - Sam Lantinga (Zlib)", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"nlohmann/json - Niels Lohmann (MIT)", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"stb_image - Sean Barrett (MIT/PD)", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"glad - OpenGL Loader Generator", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"", 1, {0,0,0}, true},
+            {"--- Audio ---", 2, {1.0f, 0.6f, 0.1f}, false},
+            {"Kenney.nl - RPG Audio, Impacts, UI (CC0)", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"OpenGameArt.org - CC0 RPG SFX,", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"  Retro Synth, Swishes, Thwack,", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"  RPG Sound Pack, Magic Spell SFX", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"", 1, {0,0,0}, true},
+            {"Built with love, C++17, and AI", 2, {0.5f, 0.8f, 1.0f}, false},
+            {"", 1, {0,0,0}, true},
+            {"Press ESC to return", 1, {0.4f, 0.4f, 0.5f}, false},
+        };
+
+        f32 y = baseY;
+        for (const auto& line : credits) {
+            if (line.gap) { y -= sectionGap; continue; }
+            if (y > -30.0f && y < static_cast<f32>(sh) + 30.0f) {
+                f32 tw = FontSystem::textWidth(line.text, line.scale);
+                FontSystem::drawText(sw, sh, cx - tw * 0.5f, y, line.text, line.color, line.scale);
+            }
+            y -= lineH * line.scale;
+        }
     } else {
         // Main menu options
-        static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Options", "Exit Game"};
+        static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Options", "Credits", "Exit Game"};
         Vec3 colors[] = {
             {0.2f, 0.9f, 0.2f},
             {0.2f, 0.5f, 1.0f},
             {1.0f, 0.7f, 0.2f},
             {0.6f, 0.6f, 0.8f},
+            {1.0f, 0.6f, 0.1f},   // orange for Credits
             {0.7f, 0.2f, 0.2f},
         };
 
-        for (u32 i = 0; i < 5; i++) {
-            f32 y = sh * 0.2f + (4 - i) * 50.0f * uiScale;
+        for (u32 i = 0; i < 6; i++) {
+            f32 y = sh * 0.2f + (5 - i) * 50.0f * uiScale;
             Vec3 color = colors[i];
             bool selected = (i == m_menu.selection);
             if (!selected) color = color * 0.4f;

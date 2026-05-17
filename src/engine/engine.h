@@ -70,6 +70,7 @@ private:
         bool bindKeyboard = true;   // true=capturing keyboard, false=capturing controller
         bool confirmQuit = false;   // "are you sure?" overlay when pressing ESC in-game
         char connectAddress[64] = "127.0.0.1";
+        f32  creditsScroll = 0.0f;  // Y offset for scrolling credits text
     };
     MenuState m_menu;
 

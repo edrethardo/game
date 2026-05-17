@@ -466,11 +466,27 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
+    // Credits screen — auto-scroll + back button
+    if (m_menu.subState == 7) {
+        m_menu.creditsScroll += dt * 40.0f; // auto-scroll upward
+        if (Input::isActionDown(GameAction::MENU_DOWN) || Input::isKeyDown(SDL_SCANCODE_S))
+            m_menu.creditsScroll += dt * 120.0f; // fast scroll down
+        if (Input::isActionDown(GameAction::MENU_UP) || Input::isKeyDown(SDL_SCANCODE_W))
+            m_menu.creditsScroll -= dt * 120.0f; // scroll back up
+        if (m_menu.creditsScroll < 0.0f) m_menu.creditsScroll = 0.0f;
+        if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) ||
+            Input::isActionPressed(GameAction::MENU_BACK)) {
+            m_menu.subState = 0;
+            AudioSystem::play(SfxId::UI_CONFIRM);
+        }
+        return;
+    }
+
     if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
         if (m_menu.selection > 0) m_menu.selection--;
     }
     if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-        if (m_menu.selection < 4) m_menu.selection++;
+        if (m_menu.selection < 5) m_menu.selection++;
     }
     if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
         AudioSystem::play(SfxId::UI_CONFIRM);
@@ -497,7 +513,11 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             m_menu.bindCapture = false;
             break;
-        case 4: // Exit
+        case 4: // Credits
+            m_menu.subState = 7;
+            m_menu.creditsScroll = 0.0f;
+            break;
+        case 5: // Exit
             m_running = false;
             break;
         }
