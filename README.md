@@ -1,5 +1,7 @@
 # Curse of the Dungeon Engine
 
+![Logo](assets/logo_wide.png)
+
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/WHKx3BkS)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Me-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/rethardotv)
 
