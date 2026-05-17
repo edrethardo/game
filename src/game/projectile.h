@@ -5,6 +5,8 @@
 #include "game/entity.h"
 #include "world/level_grid.h"
 
+struct SpatialGrid;  // forward decl for spatial proximity queries
+
 // Projectile behavior flags (stored in projFlags bitmask)
 static constexpr u8 PROJ_ORB       = 1 << 0;  // Frozen Orb skill projectile
 static constexpr u8 PROJ_ORB_SHARD = 1 << 1;  // Frozen Orb sub-shard
@@ -69,5 +71,6 @@ namespace ProjectileSystem {
                 const LevelGrid& grid,
                 EntityPool& entities,
                 Player& player,
-                f32 dt);
+                f32 dt,
+                const SpatialGrid* spatialGrid = nullptr);
 }

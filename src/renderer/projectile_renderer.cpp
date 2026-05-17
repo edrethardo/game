@@ -92,61 +92,81 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
     glBindTexture(GL_TEXTURE_2D, MaterialSystem::get(0)->texture.handle);
     glUniform1i(s_shader.loc_texture0, 0);
 
-    // For each mesh ID with active projectiles, batch and draw
+    // Single-pass bucketing: collect all active projectile instances into per-mesh buckets.
+    // O(activeCount) instead of O(meshDefCount × MAX_PROJECTILES).
+    static constexpr u32 MAX_BUCKETS = 64;
+    u32 bucketStart[MAX_BUCKETS] = {};  // start index in s_instanceBuf per mesh
+    u32 bucketCount[MAX_BUCKETS] = {};  // instance count per mesh
+    u32 totalInstances = 0;
+
+    // Pass 1: count per mesh
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        const Projectile& p = pool.projectiles[i];
+        if (!p.active || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (totalInstances >= MAX_INSTANCES_PER_BATCH) break;
+        bucketCount[p.meshId]++;
+        totalInstances++;
+    }
+
+    // Compute bucket start offsets (prefix sum)
+    u32 offset = 0;
+    for (u32 m = 0; m < meshDefCount; m++) {
+        bucketStart[m] = offset;
+        offset += bucketCount[m];
+    }
+
+    // Pass 2: fill instance data into correct bucket positions
+    u32 bucketCur[MAX_BUCKETS] = {};
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        const Projectile& p = pool.projectiles[i];
+        if (!p.active || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        u32 mid = p.meshId;
+        u32 slot = bucketStart[mid] + bucketCur[mid];
+        if (slot >= MAX_INSTANCES_PER_BATCH) continue;
+        bucketCur[mid]++;
+
+        f32 s = p.radius * 2.0f;
+        if (s < 0.05f) s = 0.1f;
+        InstanceData& inst = s_instanceBuf[slot];
+
+        inst.modelRow0[0] = s;    inst.modelRow0[1] = 0.0f; inst.modelRow0[2] = 0.0f; inst.modelRow0[3] = 0.0f;
+        inst.modelRow1[0] = 0.0f; inst.modelRow1[1] = s;    inst.modelRow1[2] = 0.0f; inst.modelRow1[3] = 0.0f;
+        inst.modelRow2[0] = 0.0f; inst.modelRow2[1] = 0.0f; inst.modelRow2[2] = s;    inst.modelRow2[3] = 0.0f;
+        inst.modelRow3[0] = p.position.x; inst.modelRow3[1] = p.position.y;
+        inst.modelRow3[2] = p.position.z; inst.modelRow3[3] = 1.0f;
+
+        if (p.projFlags & PROJ_ORB)           { inst.color[0]=0.3f; inst.color[1]=0.8f; inst.color[2]=1.0f; inst.color[3]=0.8f; }
+        else if (p.projFlags & PROJ_ORB_SHARD){ inst.color[0]=0.5f; inst.color[1]=0.9f; inst.color[2]=1.0f; inst.color[3]=0.9f; }
+        else if (p.projFlags & PROJ_SPARK)    { inst.color[0]=0.7f; inst.color[1]=0.8f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
+        else if (p.projFlags & PROJ_SPLASH)   { inst.color[0]=1.0f; inst.color[1]=0.5f; inst.color[2]=0.2f; inst.color[3]=1.0f; }
+        else if (p.projFlags & PROJ_VOID)     { inst.color[0]=0.6f; inst.color[1]=0.2f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
+        else                                   { inst.color[0]=1.0f; inst.color[1]=1.0f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
+    }
+
+    if (totalInstances == 0) { glBindVertexArray(0); glUseProgram(0); return; }
+
+    // Upload all instance data once
+    glBindBuffer(GL_ARRAY_BUFFER, s_instanceVBO);
+    glBufferData(GL_ARRAY_BUFFER, totalInstances * sizeof(InstanceData), s_instanceBuf, GL_STREAM_DRAW);
+
+    // Draw each mesh bucket as a single instanced call
     for (u32 mid = 0; mid < meshDefCount; mid++) {
+        if (bucketCount[mid] == 0) continue;
         const Mesh& mesh = meshDefs[mid].mesh;
         if (mesh.vao == 0 || mesh.indexCount == 0) continue;
 
-        // Collect instances for this mesh
-        u32 count = 0;
-        for (u32 i = 0; i < MAX_PROJECTILES && count < MAX_INSTANCES_PER_BATCH; i++) {
-            const Projectile& p = pool.projectiles[i];
-            if (!p.active || p.meshId != mid) continue;
-
-            // Build model matrix: translate to position, uniform scale by radius
-            f32 s = p.radius * 2.0f; // scale factor (radius → diameter)
-            if (s < 0.05f) s = 0.1f; // minimum visible size
-            InstanceData& inst = s_instanceBuf[count++];
-
-            // Column-major model matrix (translate + uniform scale)
-            inst.modelRow0[0] = s;    inst.modelRow0[1] = 0.0f; inst.modelRow0[2] = 0.0f; inst.modelRow0[3] = 0.0f;
-            inst.modelRow1[0] = 0.0f; inst.modelRow1[1] = s;    inst.modelRow1[2] = 0.0f; inst.modelRow1[3] = 0.0f;
-            inst.modelRow2[0] = 0.0f; inst.modelRow2[1] = 0.0f; inst.modelRow2[2] = s;    inst.modelRow2[3] = 0.0f;
-            inst.modelRow3[0] = p.position.x; inst.modelRow3[1] = p.position.y;
-            inst.modelRow3[2] = p.position.z; inst.modelRow3[3] = 1.0f;
-
-            // Color tint based on projFlags
-            if (p.projFlags & PROJ_ORB)        { inst.color[0]=0.3f; inst.color[1]=0.8f; inst.color[2]=1.0f; inst.color[3]=0.8f; }
-            else if (p.projFlags & PROJ_ORB_SHARD) { inst.color[0]=0.5f; inst.color[1]=0.9f; inst.color[2]=1.0f; inst.color[3]=0.9f; }
-            else if (p.projFlags & PROJ_SPARK) { inst.color[0]=0.7f; inst.color[1]=0.8f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
-            else if (p.projFlags & PROJ_SPLASH){ inst.color[0]=1.0f; inst.color[1]=0.5f; inst.color[2]=0.2f; inst.color[3]=1.0f; }
-            else if (p.projFlags & PROJ_VOID)  { inst.color[0]=0.6f; inst.color[1]=0.2f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
-            else                                { inst.color[0]=1.0f; inst.color[1]=1.0f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
-        }
-
-        if (count == 0) continue;
-
-        // Upload instance data
-        glBindBuffer(GL_ARRAY_BUFFER, s_instanceVBO);
-        glBufferData(GL_ARRAY_BUFFER, count * sizeof(InstanceData), s_instanceBuf, GL_STREAM_DRAW);
-
-        // Bind mesh VAO and configure instance attributes
         glBindVertexArray(mesh.vao);
-
-        // Instance attributes at locations 3-7 (model matrix rows + color)
         glBindBuffer(GL_ARRAY_BUFFER, s_instanceVBO);
         for (u32 loc = 3; loc <= 7; loc++) {
             glEnableVertexAttribArray(loc);
             glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, sizeof(InstanceData),
-                                  (void*)((loc - 3) * 16));  // 16 bytes per vec4
-            glVertexAttribDivisor(loc, 1);  // advance once per instance
+                                  (void*)(bucketStart[mid] * sizeof(InstanceData) + (loc - 3) * 16));
+            glVertexAttribDivisor(loc, 1);
         }
 
-        // Draw all instances in one call
         glDrawElementsInstanced(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT,
-                                nullptr, count);
+                                nullptr, bucketCount[mid]);
 
-        // Clean up divisors so other rendering isn't affected
         for (u32 loc = 3; loc <= 7; loc++) {
             glVertexAttribDivisor(loc, 0);
             glDisableVertexAttribArray(loc);

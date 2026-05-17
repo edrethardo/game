@@ -11,6 +11,7 @@
 #include "world/combat_query.h"
 #include "game/player.h"
 #include "game/entity.h"
+#include "world/spatial_grid.h"
 #include "game/limb_system.h"
 #include "game/weapon.h"
 #include "game/projectile.h"
@@ -173,6 +174,7 @@ private:
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
     ProjectilePool m_projectiles;
+    SpatialGrid    m_spatialGrid;  // rebuilt each tick for fast entity proximity queries
 
     // Per-room point lights (placed at level gen, nearest 4 sent to shader per frame)
     static constexpr u32 MAX_POINT_LIGHTS = 64;

@@ -12,6 +12,9 @@ namespace HUD {
     void init();
     void shutdown();
 
+    // Flush all accumulated HUD vertices in a single draw call. Call once at end of frame.
+    void flush(u32 screenWidth, u32 screenHeight);
+
     // Render crosshair at screen centre. Call after 3D rendering, before swap.
     void drawCrosshair(u32 screenWidth, u32 screenHeight, Vec3 color);
 

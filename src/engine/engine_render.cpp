@@ -517,6 +517,7 @@ void Engine::render(f32 alpha) {
 
     if (m_gameState == GameState::MENU) {
         renderMenu();
+        HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
         return;
     }
@@ -525,6 +526,7 @@ void Engine::render(f32 alpha) {
         // Pulsing dot to indicate connecting
         f32 pulse = (sinf(m_statsTimer * 6.0f) + 1.0f) * 0.5f;
         HUD::drawCrosshair(sw, sh, {pulse, pulse, 0.5f + pulse * 0.5f});
+        HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
         return;
     }
@@ -588,6 +590,7 @@ void Engine::render(f32 alpha) {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - totalW) * 0.5f, sh * 0.21f,
                              totalStr, {0.6f * alpha, 0.6f * alpha, 0.6f * alpha}, 2);
 
+        HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
         return;
     }
@@ -641,6 +644,7 @@ void Engine::render(f32 alpha) {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - promptW) * 0.5f, sh * 0.18f,
                              prompt, {0.5f, 0.5f, 0.5f}, 1);
 
+        HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
         return;
     }
@@ -692,11 +696,13 @@ void Engine::render(f32 alpha) {
                                  {0.7f, 0.4f, 0.4f}, 1);
         }
 
+        HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
         return;
     }
 
     if (m_gameState != GameState::IN_GAME) {
+        HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
         return;
     }
@@ -855,7 +861,7 @@ void Engine::render(f32 alpha) {
         Vec3 boxColor = m_localPlayer.onGround ? Vec3{0,1,0} : Vec3{1,1,0};
         DebugDraw::box(playerBox, boxColor);
 
-        for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        for (u32 _a = 0; _a < entPool.activeCount; _a++) { u32 i = entPool.activeList[_a];
             const Entity& e = entPool.entities[i];
             if (!(e.flags & ENT_ACTIVE)) continue;
             Vec3 c = (e.flags & ENT_DEAD) ? Vec3{0.5f,0.5f,0.5f}
@@ -930,7 +936,7 @@ void Engine::render(f32 alpha) {
         const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
         const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
 
-        for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        for (u32 _a = 0; _a < entPool.activeCount; _a++) { u32 i = entPool.activeList[_a];
             const Entity& e = entPool.entities[i];
             if (!(e.flags & ENT_ACTIVE)) continue;
             if (e.flags & ENT_DEAD) continue;
@@ -1009,6 +1015,9 @@ void Engine::render(f32 alpha) {
 
         glDisable(GL_BLEND);
     }
+
+    // Flush all accumulated HUD lines in a single draw call (was 36 per frame)
+    HUD::flush(vpW, vpH);
 
     } // end split-screen player loop
 
@@ -1345,7 +1354,7 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
-        for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        for (u32 _a = 0; _a < entPool.activeCount; _a++) { u32 i = entPool.activeList[_a];
             const Entity& e = entPool.entities[i];
             if (!(e.flags & ENT_ACTIVE)) continue;
             if (e.materialId != s_webMatIds[0] && e.materialId != s_webMatIds[1] &&

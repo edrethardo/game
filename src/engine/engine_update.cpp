@@ -130,7 +130,8 @@ void Engine::update(f32 dt) {
         // Keep enemies and projectiles ticking while dead so they walk home
         EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
         EntitySystem::tickTimers(m_entities, dt);
-        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt);
+        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid);
         return;
     }
 
@@ -294,12 +295,14 @@ void Engine::update(f32 dt) {
                     if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
                         EnemyAI::update(m_entities, m_level.grid, m_localPlayers[1], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
                         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[1].position, dt);
-                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[1], dt);
+                        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[1], dt, &m_spatialGrid);
                     } else {
                         // P0 alive or both dead — use P0 as reference (enemies idle/return if dead)
                         EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
                         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[0].position, dt);
-                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt);
+                        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt, &m_spatialGrid);
                     }
                     EntitySystem::tickTimers(m_entities, dt);
                     WorldItemSystem::update(m_worldItems, dt);
@@ -526,12 +529,13 @@ void Engine::gameUpdate(f32 dt) {
     if (!m_inventoryOpen) {
         PlayerController::update(m_localPlayer, dt);
         if (!m_localPlayer.noclip) {
-            // Build obstacle list from active hostile entities (friendly NPCs are non-blocking)
-            CollisionObstacle obstacles[MAX_ENTITIES];
+            // Build obstacle list using frame allocator (avoids stack array)
+            auto* obstacles = static_cast<CollisionObstacle*>(
+                s_frameAllocator.alloc(MAX_ENTITIES * sizeof(CollisionObstacle)));
             u32 obsCount = 0;
-            for (u32 i = 0; i < MAX_ENTITIES; i++) {
-                const Entity& e = m_entities.entities[i];
-                if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                const Entity& e = m_entities.entities[m_entities.activeList[a]];
+                if (e.flags & ENT_DEAD) continue;
                 if (e.flags & ENT_FRIENDLY) continue;
                 if (e.enemyType == EnemyType::PROP) continue;
                 obstacles[obsCount++] = {e.position, e.halfExtents};
@@ -667,7 +671,8 @@ void Engine::gameUpdate(f32 dt) {
     // Shared systems — only run once per frame (first player pass in split-screen)
     if (m_activePlayerIndex == 0) {
         { PROFILE_SCOPE(2, "Projectiles");
-        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt);
+        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid);
         // In co-op, also check enemy projectile collision with P2
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
             AABB p2Box = {
@@ -748,8 +753,8 @@ void Engine::gameUpdate(f32 dt) {
             if (ent.flags & ENT_DEAD) continue;
             if (ent.flags & ENT_FRIENDLY) continue;
             if (ent.enemyType == EnemyType::PROP) continue;
-            f32 dist = length(ent.position - sz.pos);
-            if (dist < sz.radius) {
+            f32 distSq = lengthSq(ent.position - sz.pos);
+            if (distSq < sz.radius * sz.radius) {
                 ent.health -= sz.dps * dt;
                 if (ent.health <= 0.0f && !(ent.flags & ENT_DEAD)) {
                     ent.health = 0.0f;
@@ -831,8 +836,9 @@ void Engine::gameUpdate(f32 dt) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         for (u8 s = 0; s < 4; s++) {
             if (Input::isActionPressed(static_cast<GameAction>(static_cast<u8>(GameAction::SKILL_1) + s))) {
-                // Only select if this skill is unlocked on the current floor
-                if (m_level.currentFloor >= cls.skillUnlockFloor[s]) {
+                // Effective floor accounts for difficulty (Nightmare=+50, Hell=+100)
+                u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                if (effectiveFloor >= cls.skillUnlockFloor[s]) {
                     m_activeClassSkill = s;
                 }
             }
@@ -845,7 +851,8 @@ void Engine::gameUpdate(f32 dt) {
     if (Input::isActionPressed(GameAction::CLASS_SKILL) && !m_inventoryOpen) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         u8 slot = m_activeClassSkill;
-        if (m_level.currentFloor >= cls.skillUnlockFloor[slot]) {
+        u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+        if (effectiveFloor >= cls.skillUnlockFloor[slot]) {
             // Use the class skill state for cooldown tracking, shared energy pool
             m_classSkillStates[slot].activeSkill = cls.skills[slot];
             m_classSkillStates[slot].energy = m_skillStates[m_localPlayerIndex].energy;
@@ -938,48 +945,13 @@ void Engine::gameUpdate(f32 dt) {
         }
     }
 
-    // --- Armor passive aura tick ---
-    if (m_armorAura != SkillId::NONE) {
-        Vec3 playerPos = m_localPlayer.position;
-        for (u32 a = 0; a < m_entities.activeCount; a++) {
-            u32 idx = m_entities.activeList[a];
-            Entity& ent = m_entities.entities[idx];
-            if (ent.flags & ENT_DEAD) continue;
-            if (ent.flags & ENT_FRIENDLY) continue;
-            if (ent.enemyType == EnemyType::PROP) continue;
-            f32 dist = length(ent.position - playerPos);
-
-            switch (m_armorAura) {
-                case SkillId::METEOR_STRIKE: // Fire aura: 2 dps burn within 3m
-                    if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; }
-                    break;
-                case SkillId::FROZEN_ORB: // Frost aura: slow within 4m
-                    if (dist < 4.0f) { ent.freezeTimer = 0.5f; }
-                    break;
-                case SkillId::BLOOD_NOVA: // Drain aura: 1 dps bleed within 3m
-                    if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; }
-                    break;
-                case SkillId::CHAIN_LIGHTNING: // Storm aura: brief freeze within 3m
-                    if (dist < 3.0f) { ent.freezeTimer = 0.3f; }
-                    break;
-                case SkillId::PHASE_DASH: // Phase aura: slow within 3m
-                    if (dist < 3.0f) { ent.freezeTimer = 0.4f; }
-                    break;
-                default: break;
-            }
-        }
-    }
-
-    // --- Ring passive effects (per-frame tick) ---
+    // --- Armor aura + ring passives: single merged entity pass ---
+    // Ring-specific timers (no entity iteration needed)
     if (m_ringPassive != SkillId::NONE) {
-        // Tick soul harvest buff timer
         if (m_localPlayer.soulHarvestTimer > 0.0f) {
             m_localPlayer.soulHarvestTimer -= dt;
-            if (m_localPlayer.soulHarvestTimer <= 0.0f) {
-                m_localPlayer.soulHarvestStacks = 0;
-            }
+            if (m_localPlayer.soulHarvestTimer <= 0.0f) m_localPlayer.soulHarvestStacks = 0;
         }
-        // Tick second wind internal cooldown
         if (m_localPlayer.secondWindCooldown > 0.0f)
             m_localPlayer.secondWindCooldown -= dt;
 
@@ -993,7 +965,6 @@ void Engine::gameUpdate(f32 dt) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
             m_localPlayer.invulnTimer = 2.0f;
             m_localPlayer.secondWindCooldown = 60.0f;
-            // Bright golden flash visual
             for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
                 if (!m_fx.novaFX[ni].active) {
                     m_fx.novaFX[ni] = {m_localPlayer.position, 2.0f, 0.8f, true, {1.0f, 0.9f, 0.3f}};
@@ -1002,49 +973,72 @@ void Engine::gameUpdate(f32 dt) {
             }
             LOG_INFO("SECOND WIND triggered! Healed 30%%, 2s invuln");
         }
-
-        // Gravity Pull: pull enemies within 5m toward player
-        if (m_ringPassive == SkillId::GRAVITY_PULL) {
-            Vec3 pPos = m_localPlayer.position;
-            for (u32 a = 0; a < m_entities.activeCount; a++) {
-                u32 idx = m_entities.activeList[a];
-                Entity& ent = m_entities.entities[idx];
-                if (ent.flags & ENT_DEAD) continue;
-                if (ent.flags & ENT_FRIENDLY) continue;
-                if (ent.enemyType == EnemyType::PROP) continue;
-                Vec3 toPlayer = pPos - ent.position;
-                f32 dist = length(toPlayer);
-                if (dist > 0.5f && dist < 5.0f) {
-                    // Gentle pull: stronger the closer they are
-                    f32 pullStrength = (1.0f - dist / 5.0f) * 2.0f * dt;
-                    ent.position = ent.position + normalize(toPlayer) * pullStrength;
-                }
-            }
-        }
-
-        // Thorns: reflect 20% of damage taken to nearest enemy
-        if (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f) {
-            f32 reflectDmg = m_localPlayer.lastDamageTaken * 0.2f;
-            // Find nearest enemy and reflect damage to it
-            f32 bestDist = 5.0f;
-            EntityHandle bestH = {};
-            for (u32 a = 0; a < m_entities.activeCount; a++) {
-                u32 idx = m_entities.activeList[a];
-                Entity& ent = m_entities.entities[idx];
-                if (ent.flags & ENT_DEAD) continue;
-                if (ent.flags & ENT_FRIENDLY) continue;
-                f32 d = length(ent.position - m_localPlayer.position);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestH = {static_cast<u16>(idx), ent.generation};
-                }
-            }
-            if (bestDist < 5.0f) {
-                Combat::applyDamage(m_entities, bestH, reflectDmg);
-            }
-        }
-        m_localPlayer.lastDamageTaken = 0.0f; // reset each frame
     }
+
+    // Single pass over entities for armor aura + gravity pull + thorns
+    bool needEntityPass = (m_armorAura != SkillId::NONE) ||
+                          (m_ringPassive == SkillId::GRAVITY_PULL) ||
+                          (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f);
+    if (needEntityPass) {
+        Vec3 pPos = m_localPlayer.position;
+        bool doGravity = (m_ringPassive == SkillId::GRAVITY_PULL);
+        bool doThorns  = (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f);
+        f32  reflectDmg = doThorns ? m_localPlayer.lastDamageTaken * 0.2f : 0.0f;
+        f32  bestThornsDist2 = 25.0f; // 5m squared
+        EntityHandle bestThornsH = {};
+
+        for (u32 a = 0; a < m_entities.activeCount; a++) {
+            u32 idx = m_entities.activeList[a];
+            Entity& ent = m_entities.entities[idx];
+            if (ent.flags & ENT_DEAD) continue;
+            if (ent.flags & ENT_FRIENDLY) continue;
+            if (ent.enemyType == EnemyType::PROP) continue;
+
+            Vec3 delta = ent.position - pPos;
+            f32 distSq = delta.x*delta.x + delta.z*delta.z; // XZ distance (no sqrt)
+
+            // Armor aura effects (use squared distance thresholds)
+            if (m_armorAura != SkillId::NONE) {
+                switch (m_armorAura) {
+                    case SkillId::METEOR_STRIKE:
+                        if (distSq < 9.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; }
+                        break;
+                    case SkillId::FROZEN_ORB:
+                        if (distSq < 16.0f) { ent.freezeTimer = 0.5f; }
+                        break;
+                    case SkillId::BLOOD_NOVA:
+                        if (distSq < 9.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; }
+                        break;
+                    case SkillId::CHAIN_LIGHTNING:
+                        if (distSq < 9.0f) { ent.freezeTimer = 0.3f; }
+                        break;
+                    case SkillId::PHASE_DASH:
+                        if (distSq < 9.0f) { ent.freezeTimer = 0.4f; }
+                        break;
+                    default: break;
+                }
+            }
+
+            // Gravity pull: within 5m (25 sq), pull toward player
+            if (doGravity && distSq > 0.25f && distSq < 25.0f) {
+                f32 dist = sqrtf(distSq); // sqrt only for entities in range
+                f32 pullStrength = (1.0f - dist / 5.0f) * 2.0f * dt;
+                Vec3 toPlayer = pPos - ent.position;
+                ent.position = ent.position + normalize(toPlayer) * pullStrength;
+            }
+
+            // Thorns: track nearest enemy
+            if (doThorns && distSq < bestThornsDist2) {
+                bestThornsDist2 = distSq;
+                bestThornsH = {static_cast<u16>(idx), ent.generation};
+            }
+        }
+
+        if (doThorns && bestThornsDist2 < 25.0f) {
+            Combat::applyDamage(m_entities, bestThornsH, reflectDmg);
+        }
+    }
+    m_localPlayer.lastDamageTaken = 0.0f;
 
     updatePlayerPickup();
 

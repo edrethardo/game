@@ -46,10 +46,11 @@ struct SnapEntity {
     u8   padding2;      // 1: alignment
 };
 
-// Quantized snapshot of one projectile (14 bytes)
+// Quantized snapshot of one projectile (16 bytes)
 struct SnapProjectile {
-    u8   poolIndex;     // 1
+    u16  poolIndex;     // 2: supports MAX_PROJECTILES=4096
     u8   flags;         // 1: bit0=active, bit1=fromPlayer
+    u8   padding;       // 1: alignment
     u16  posX, posY, posZ;  // 6
     u16  velX, velY, velZ;  // 6
 };
@@ -59,8 +60,7 @@ struct WorldSnapshot {
     u32  serverTick       = 0;
     u8   playerCount      = 0;
     u8   entityCount      = 0;
-    u8   projectileCount  = 0;
-    u8   padding          = 0;
+    u16  projectileCount  = 0;  // supports up to 4096
 
     // Per-player last processed input tick (for client reconciliation)
     u32  lastInputTick[MAX_PLAYERS] = {};

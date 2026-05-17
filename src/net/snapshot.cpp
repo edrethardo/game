@@ -93,9 +93,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = projectiles.projectiles[i];
         if (!p.active) continue;
+        if (snap.projectileCount >= MAX_PROJECTILES) break;
 
         SnapProjectile& sp = snap.projectiles[snap.projectileCount++];
-        sp.poolIndex = static_cast<u8>(i);
+        sp.poolIndex = static_cast<u16>(i);
         u8 flags = 1; // active
         if (p.fromPlayer) flags |= (1 << 1);
         sp.flags = flags;
@@ -119,8 +120,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     w.writeU32(snap.serverTick);
     w.writeU8(snap.playerCount);
     w.writeU8(snap.entityCount);
-    w.writeU8(snap.projectileCount);
-    w.writeU8(0); // padding
+    w.writeU16(snap.projectileCount);
 
     // Last input ticks per player
     for (u32 i = 0; i < MAX_PLAYERS; i++)
@@ -173,7 +173,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     // Projectiles
     for (u32 i = 0; i < snap.projectileCount; i++) {
         const SnapProjectile& sp = snap.projectiles[i];
-        w.writeU8(sp.poolIndex);
+        w.writeU16(sp.poolIndex);
         w.writeU8(sp.flags);
         w.writeU16(sp.posX);
         w.writeU16(sp.posY);
@@ -202,8 +202,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     snap.serverTick      = r.readU32();
     snap.playerCount     = r.readU8();
     snap.entityCount     = r.readU8();
-    snap.projectileCount = r.readU8();
-    r.readU8(); // padding
+    snap.projectileCount = r.readU16();
 
     // Validate counts to prevent out-of-bounds on malformed packets
     if (snap.playerCount > MAX_PLAYERS) snap.playerCount = MAX_PLAYERS;
@@ -257,7 +256,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
 
     for (u32 i = 0; i < snap.projectileCount; i++) {
         SnapProjectile& sp = snap.projectiles[i];
-        sp.poolIndex = r.readU8();
+        sp.poolIndex = r.readU16();
         sp.flags     = r.readU8();
         sp.posX      = r.readU16();
         sp.posY      = r.readU16();

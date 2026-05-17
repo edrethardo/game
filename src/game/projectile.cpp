@@ -5,6 +5,7 @@
 #include "world/combat_query.h"
 #include "world/raycast.h"
 #include "world/collision.h"
+#include "world/spatial_grid.h"
 #include <cstdlib>
 
 // Set by Engine::init() so projectiles can spawn trail particles
@@ -74,7 +75,8 @@ void ProjectileSystem::update(ProjectilePool& pool,
                                const LevelGrid& grid,
                                EntityPool& entities,
                                Player& player,
-                               f32 dt)
+                               f32 dt,
+                               const SpatialGrid* spatialGrid)
 {
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         Projectile& p = pool.projectiles[i];
@@ -168,47 +170,61 @@ void ProjectileSystem::update(ProjectilePool& pool,
         };
 
         if (p.fromPlayer) {
-            // Hit hostile enemies only (skip friendlies so NPC projectiles
-            // don't damage allies). Frozen Orb skips — it phases through.
+            // Hit hostile enemies only. Use spatial grid for O(1) neighbor lookup
+            // instead of iterating all active entities (O(N) → O(~8) per projectile).
             bool hit = false;
             u16 primaryHitIdx = 0xFFFF;
-            if (!(p.projFlags & PROJ_ORB)) // Frozen Orb phases through enemies
-            for (u32 a = 0; a < entities.activeCount; a++) {
-                u32 e = entities.activeList[a];
-                Entity& ent = entities.entities[e];
-                if (ent.flags & ENT_DEAD) continue;
-                if (ent.flags & ENT_FRIENDLY) continue;
-                if (ent.enemyType == EnemyType::PROP) continue;
+            if (!(p.projFlags & PROJ_ORB)) { // Frozen Orb phases through enemies
+                u16 nearby[72]; // 3x3 cells × 8 per cell max
+                u32 nearCount = 0;
+                if (spatialGrid) {
+                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, nearby, 72);
+                } else {
+                    // Fallback: scan all active entities (no grid available)
+                    for (u32 a = 0; a < entities.activeCount && nearCount < 72; a++)
+                        nearby[nearCount++] = static_cast<u16>(entities.activeList[a]);
+                }
+                for (u32 n = 0; n < nearCount; n++) {
+                    u32 e = nearby[n];
+                    Entity& ent = entities.entities[e];
+                    if (ent.flags & ENT_DEAD) continue;
+                    if (ent.flags & ENT_FRIENDLY) continue;
+                    if (ent.enemyType == EnemyType::PROP) continue;
 
-                if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
-                    EntityHandle h = {static_cast<u16>(e), ent.generation};
-                    Combat::applyDamage(entities, h, p.damage);
-                    // damage number now auto-spawned by Combat::applyDamage
-                    // Apply freeze if the projectile carries a freeze effect
-                    if (p.freezeDuration > 0.0f) {
-                        ent.freezeTimer = p.freezeDuration;
-                        // Electric projectiles (PROJ_SPARK) stagger enemies briefly
-                        if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);
+                    if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
+                        EntityHandle h = {static_cast<u16>(e), ent.generation};
+                        Combat::applyDamage(entities, h, p.damage);
+                        if (p.freezeDuration > 0.0f) {
+                            ent.freezeTimer = p.freezeDuration;
+                            if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);
+                        }
+                        if (s_hitCallback) s_hitCallback(p.position, h);
+                        primaryHitIdx = static_cast<u16>(e);
+                        hit = true;
+                        break;
                     }
-                    if (s_hitCallback) s_hitCallback(p.position, h);
-                    primaryHitIdx = static_cast<u16>(e);
-                    hit = true;
-                    break;
                 }
             }
             if (hit) {
-                // AoE splash on entity impact — skip primary target to avoid double damage
+                // AoE splash — use spatial grid for neighbor query
                 if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
-                    for (u32 a2 = 0; a2 < entities.activeCount; a2++) {
-                        u32 e2 = entities.activeList[a2];
-                        if (e2 == primaryHitIdx) continue; // already took direct hit
+                    u16 splashNear[72];
+                    u32 splashCount = 0;
+                    if (spatialGrid) {
+                        splashCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, splashNear, 72);
+                    } else {
+                        for (u32 a2 = 0; a2 < entities.activeCount && splashCount < 72; a2++)
+                            splashNear[splashCount++] = static_cast<u16>(entities.activeList[a2]);
+                    }
+                    for (u32 n = 0; n < splashCount; n++) {
+                        u32 e2 = splashNear[n];
+                        if (e2 == primaryHitIdx) continue;
                         Entity& ent2 = entities.entities[e2];
                         if (ent2.flags & ENT_DEAD) continue;
                         if (ent2.flags & ENT_FRIENDLY) continue;
                         if (ent2.enemyType == EnemyType::PROP) continue;
-                        Vec3 delta = ent2.position - p.position;
-                        f32 dist = length(delta);
-                        if (dist < p.splashRadius) {
+                        f32 distSq = lengthSq(ent2.position - p.position);
+                        if (distSq < p.splashRadius * p.splashRadius) {
                             EntityHandle h2 = {static_cast<u16>(e2), ent2.generation};
                             Combat::applyDamage(entities, h2, p.splashDamage);
                         }

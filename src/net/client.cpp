@@ -86,7 +86,9 @@ const NetInput* Client::getLatestInput() {
 }
 
 void Client::receiveSnapshot(const u8* data, u32 size) {
-    WorldSnapshot snap;
+    // Static to avoid 68KB stack allocation per snapshot received
+    static WorldSnapshot snap;
+    snap = {};
     if (Snapshot::deserialize(snap, data, size)) {
         pushSnapshot(snap);
     }
@@ -318,7 +320,7 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
 
     for (u32 i = 0; i < snapB->projectileCount; i++) {
         const SnapProjectile& spB = snapB->projectiles[i];
-        u8 idx = spB.poolIndex;
+        u16 idx = spB.poolIndex;
         if (idx >= MAX_PROJECTILES) continue;
 
         Projectile& p = renderProjectiles.projectiles[idx];

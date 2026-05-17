@@ -21,13 +21,15 @@ struct HudVertex {
     Vec3 color;
 };
 
-static constexpr u32 MAX_HUD_VERTS = 2048;
+static constexpr u32 MAX_HUD_VERTS = 8192; // all HUD elements now batch into single flush
 
 static u32    s_vao = 0;
 static u32    s_vbo = 0;
 static Shader s_shader;
 static HudVertex s_verts[MAX_HUD_VERTS];
 static u32 s_vertCount = 0;
+static u32 s_screenW = 1280;  // cached for flushHUD (set by HUD::flush)
+static u32 s_screenH = 720;
 
 static void pushLine(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
     if (s_vertCount + 2 > MAX_HUD_VERTS) return;
@@ -43,7 +45,7 @@ static void pushQuad(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
     pushLine(x1, y0, x1, y1, color);
 }
 
-static void flushHUD(u32 screenWidth, u32 screenHeight) {
+static void flushHUD() {
     if (s_vertCount == 0 || !s_vao) return;
 
     glDisable(GL_DEPTH_TEST);
@@ -55,8 +57,8 @@ static void flushHUD(u32 screenWidth, u32 screenHeight) {
 
     // Build ortho projection: (0,0) = bottom-left, (w,h) = top-right
     Mat4 ortho;
-    f32 w = static_cast<f32>(screenWidth);
-    f32 h = static_cast<f32>(screenHeight);
+    f32 w = static_cast<f32>(s_screenW);
+    f32 h = static_cast<f32>(s_screenH);
     // Simple orthographic: map [0,w] x [0,h] to [-1,1] x [-1,1]
     ortho = Mat4::identity();
     ortho.m[0]  =  2.0f / w;
@@ -103,7 +105,14 @@ void HUD::shutdown() {
     ShaderSystem::destroy(s_shader);
 }
 
+void HUD::flush(u32 screenWidth, u32 screenHeight) {
+    s_screenW = screenWidth;
+    s_screenH = screenHeight;
+    flushHUD();
+}
+
 void HUD::drawCrosshair(u32 screenWidth, u32 screenHeight, Vec3 color) {
+    s_screenW = screenWidth; s_screenH = screenHeight;
     f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
     f32 cx = screenWidth  * 0.5f;
     f32 cy = screenHeight * 0.5f;
@@ -116,7 +125,7 @@ void HUD::drawCrosshair(u32 screenWidth, u32 screenHeight, Vec3 color) {
     pushLine(cx, cy - size, cx, cy - gap, color);   // bottom
     pushLine(cx, cy + gap,  cx, cy + size, color);  // top
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawHitMarker(u32 screenWidth, u32 screenHeight, f32 alpha) {
@@ -133,12 +142,13 @@ void HUD::drawHitMarker(u32 screenWidth, u32 screenHeight, f32 alpha) {
     pushLine(cx + size, cy - size, cx + inner, cy - inner, color);
     pushLine(cx - inner,    cy + inner,    cx - size, cy + size, color);
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
                          f32 health, f32 maxHealth)
 {
+    s_screenW = screenWidth; s_screenH = screenHeight;
     f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
     f32 barW = 200.0f * uiScale;
     f32 barH = 16.0f * uiScale;
@@ -160,7 +170,7 @@ void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
         pushLine(x0 + fillPad, y, x0 + fillPad + fillW - fillPad * 2.0f, y, barColor);
     }
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) {
@@ -178,13 +188,14 @@ void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) 
     Vec3 c = (weaponSlot < 3) ? colors[weaponSlot] : Vec3{1,1,1};
     pushQuad(x0, y0, x0 + 100.0f * uiScale, y0 + 16.0f * uiScale, c);
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawMenuOption(u32 screenWidth, u32 screenHeight,
                           f32 y, f32 width, f32 height,
                           Vec3 color, bool selected)
 {
+    s_screenW = screenWidth; s_screenH = screenHeight;
     f32 cx = screenWidth * 0.5f;
     f32 x0 = cx - width * 0.5f;
     f32 x1 = cx + width * 0.5f;
@@ -204,7 +215,7 @@ void HUD::drawMenuOption(u32 screenWidth, u32 screenHeight,
         pushLine(x1 + 15, y + height * 0.5f, x1 + 5, y + height * 0.7f, color);
     }
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawProfiler(u32 screenWidth, u32 screenHeight) {
@@ -275,7 +286,7 @@ void HUD::drawProfiler(u32 screenWidth, u32 screenHeight) {
     f32 maxW = static_cast<f32>(prof.frameTimeMax / barMaxMs) * barW;
     pushLine(x0, infoY - 8, x0 + maxW, infoY - 8, {0.8f, 0.2f, 0.2f});
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawNetStats(u32 screenWidth, u32 screenHeight,
@@ -301,7 +312,7 @@ void HUD::drawNetStats(u32 screenWidth, u32 screenHeight,
     pushLine(x0 + 80, y0, x0 + 80, y0 + pingH, pingColor);
     pushLine(x0 + 82, y0, x0 + 82, y0 + pingH, pingColor);
 
-    flushHUD(screenWidth, screenHeight);
+    flushHUD();
 }
 
 void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
@@ -327,7 +338,7 @@ void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
         pushLine(x0 + fillPad, y, x0 + fillPad + fillW - fillPad * 2.0f, y, barColor);
     }
 
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 // Check if a label is a known controller button name
@@ -384,7 +395,7 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
             f32 py = cy + sinf(a) * r;
             pushLine(px, py, px + 0.5f, py, border);
         }
-        flushHUD(sw, sh);
+        flushHUD();
         // Letter centered (using Nintendo-swapped label)
         Vec3 tc = {1.0f * dim, 1.0f * dim, 1.0f * dim};
         f32 tw = FontSystem::textWidth(displayLabel, 1);
@@ -421,7 +432,7 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
         pushLine(x + 2, y, x + pw - 2, y, border);
         pushLine(x, y + 2, x, y + ph - 2, border);
         pushLine(x + pw, y + 2, x + pw, y + ph - 2, border);
-        flushHUD(sw, sh);
+        flushHUD();
         Vec3 tc = {0.9f * dim, 0.9f * dim, 0.95f * dim};
         f32 tw = FontSystem::textWidth(label, 1);
         FontSystem::drawText(sw, sh, x + (pw - tw) * 0.5f, y + 4.0f, label, tc, 1);
@@ -449,7 +460,7 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
         // Highlight specific direction
         if (isLt) for (f32 fy = -w*0.5f; fy <= w*0.5f; fy++) pushLine(cx - arm, cy+fy, cx - 1, cy+fy, hi*dim);
         if (isRt) for (f32 fy = -w*0.5f; fy <= w*0.5f; fy++) pushLine(cx + 1, cy+fy, cx + arm, cy+fy, hi*dim);
-        flushHUD(sw, sh);
+        flushHUD();
         return;
     }
 
@@ -464,7 +475,7 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
         pushLine(x + 2, y, x + pw - 2, y, border);
         pushLine(x, y + 2, x, y + ph - 2, border);
         pushLine(x + pw, y + 2, x + pw, y + ph - 2, border);
-        flushHUD(sw, sh);
+        flushHUD();
         Vec3 tc = {0.9f * dim, 0.9f * dim, 0.9f * dim};
         f32 tw = FontSystem::textWidth(label, 1);
         FontSystem::drawText(sw, sh, x + (pw - tw) * 0.5f, y + 3.0f, label, tc, 1);
@@ -496,7 +507,7 @@ void HUD::drawKeySymbol(u32 sw, u32 sh, f32 x, f32 y,
     pushLine(x + kw, y, x + kw, y + kh, lo);         // right
     pushLine(x, y, x + kw, y, lo);                    // bottom
 
-    flushHUD(sw, sh);
+    flushHUD();
 
     // Label text centered
     f32 tw = FontSystem::textWidth(label, 1);
@@ -555,7 +566,7 @@ void HUD::drawMouseButton(u32 sw, u32 sh, f32 x, f32 y,
     // Scroll wheel indicator (small notch at top-center)
     pushLine(midX, y + mh - 4, midX, y + mh - 2, outline);
 
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 // ---------------------------------------------------------------------------
@@ -628,7 +639,7 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             drawRadialCooldown(cx, cy, radius, cdFrac, {0.05f, 0.05f, 0.08f});
         }
 
-        flushHUD(sw, sh);
+        flushHUD();
 
         // Key symbol — show D-pad directions on controller, number keys on keyboard
         const char* skillLabel;
@@ -819,7 +830,7 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             }
         }
 
-        flushHUD(sw, sh);
+        flushHUD();
 
         // Key label or "Auto" for passives — adjusted for larger 64px slot
         if (slot.isPassive) {
@@ -935,7 +946,7 @@ void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
                 pushLine(ix, iy + fy, ix + iconSz, iy + fy, iconColor);
             }
         }
-        flushHUD(sw, sh);
+        flushHUD();
     }
 
     // Name text
@@ -963,7 +974,7 @@ void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
         for (f32 fy = 0; fy < barH; fy += 1.0f) {
             pushLine(barX, barY + fy, barX + barW * healthFrac, barY + fy, hpCol);
         }
-        flushHUD(sw, sh);
+        flushHUD();
     }
 }
 
@@ -989,7 +1000,7 @@ void HUD::drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct) {
         pushLine(x0 + 2, y, x0 + size - 2, y, fillColor);
     }
 
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 void HUD::drawQuickbar(u32 sw, u32 sh,
@@ -1098,7 +1109,7 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
         }
     }
 
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
@@ -1122,7 +1133,7 @@ void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
         pushLine(x0 + 1, y, x0 + barW - 1, y, c);
     }
 
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 // Forward declaration — defined later in this file alongside other tooltip helpers.
@@ -1157,7 +1168,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         for (f32 fy = botY - pad; fy < topY + pad; fy += 1.0f) {
             pushLine(eqX - pad, fy, eqX + slotW + pad, fy, bg);
         }
-        flushHUD(sw, sh);
+        flushHUD();
     }
 
     for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++) {
@@ -1190,7 +1201,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             for (f32 line = 2.0f; line < slotH - 2.0f; line += 1.0f) {
                 pushLine(eqX + 2.0f, y + line, eqX + slotW - 2.0f, y + line, fillColor);
             }
-            flushHUD(sw, sh);
+            flushHUD();
             // Icon on left side of slot
             ItemIconSystem::drawIcon(sw, sh, eqX + 3.0f * uiScale, y + 2.0f * uiScale, slotH - 4.0f * uiScale, def, item.rarity);
             // Item name to the right of icon
@@ -1240,7 +1251,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         for (f32 fy = botY - pad; fy < topY + pad; fy += 1.0f) {
             pushLine(bpX - pad, fy, bpX + panelW + pad, fy, bg);
         }
-        flushHUD(sw, sh);
+        flushHUD();
     }
 
     for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
@@ -1269,7 +1280,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             for (f32 line = 2.0f; line < cellSize - 2.0f; line += 1.0f) {
                 pushLine(x + 2.0f, y + line, x + cellSize - 2.0f, y + line, fillColor);
             }
-            flushHUD(sw, sh);
+            flushHUD();
             const ItemDef& def = itemDefs[item.defId];
             ItemIconSystem::drawIcon(sw, sh, x + 3.0f, y + 3.0f, cellSize - 6.0f, def, item.rarity);
         }
@@ -1281,7 +1292,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             for (f32 line = 1.0f; line < cellSize - 1.0f; line += 1.0f) {
                 pushLine(x + 1.0f, y + line, x + cellSize - 1.0f, y + line, glow);
             }
-            flushHUD(sw, sh);
+            flushHUD();
             // Re-draw icon on top of glow
             if (!isItemEmpty(item)) {
                 const ItemDef& def2 = itemDefs[item.defId];
@@ -1352,7 +1363,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                         pushLine(boxX, boxY + boxH, boxX + boxW, boxY + boxH, gold * 0.6f);
                         pushLine(boxX, boxY, boxX, boxY + boxH, gold * 0.6f);
                         pushLine(boxX + boxW, boxY, boxX + boxW, boxY + boxH, gold * 0.6f);
-                        flushHUD(sw, sh);
+                        flushHUD();
                         f32 labelW = FontSystem::textWidth("EQUIPPED", 1);
                         FontSystem::drawText(sw, sh, boxX + (boxW - labelW) * 0.5f, boxY + 3.0f,
                                             "EQUIPPED", gold, 1);
@@ -1373,7 +1384,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         }
     }
 
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 // 8x8 pixel-art icons for each status effect
@@ -1537,7 +1548,7 @@ void HUD::drawStatusIcons(u32 sw, u32 sh, f32 x, f32 y,
             }
         }
 
-        flushHUD(sw, sh);
+        flushHUD();
 
         // Timer or display value text above icon
         char timeTxt[8];
@@ -1581,7 +1592,7 @@ void HUD::drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,
     pushLine(triX - 3.0f, bgY0, triX,        triY, borderColor);
     pushLine(triX,        triY, triX + 3.0f, bgY0, borderColor);
 
-    flushHUD(sw, sh);
+    flushHUD();
 
     // Text centered inside the bubble
     Vec3 tc = {textColor.x * alpha, textColor.y * alpha, textColor.z * alpha};
@@ -1745,7 +1756,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         pushQuad(tipX + 1, tipY + 1, tipX + tooltipW - 1, tipY + tooltipH - 1, borderColor);
     }
 
-    flushHUD(sw, sh);
+    flushHUD();
 
     f32 textX = tipX + padX;
     f32 curY = tipY + tooltipH - padY - nameH;
@@ -1770,7 +1781,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
 
     // Separator
     pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.3f, 0.3f, 0.35f});
-    flushHUD(sw, sh);
+    flushHUD();
     curY -= lineH * 0.5f;
 
     // Stats
@@ -1825,7 +1836,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         // Gold separator
         curY -= lineH * 0.3f;
         pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.6f, 0.5f, 0.15f});
-        flushHUD(sw, sh);
+        flushHUD();
         curY -= lineH * 0.2f;
 
         // Activation method depends on equipment slot
@@ -1900,7 +1911,7 @@ void HUD::drawDamageVignette(u32 sw, u32 sh, f32 intensity) {
         Vec3 c = {0.8f * lineAlpha, 0.0f, 0.0f};
         pushLine(fW - d, 0, fW - d, fH, c);
     }
-    flushHUD(sw, sh);
+    flushHUD();
 }
 
 void HUD::drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha) {
@@ -1918,5 +1929,5 @@ void HUD::drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha) {
         f32 x1 = cx + sinf(a1) * r, y1 = cy - cosf(a1) * r;
         pushLine(x0, y0, x1, y1, c);
     }
-    flushHUD(sw, sh);
+    flushHUD();
 }

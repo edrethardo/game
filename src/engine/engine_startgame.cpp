@@ -576,10 +576,10 @@ void Engine::startGame() {
                         ent->enemyRole = EnemyRole::AURA;
                     }
                     ent->enemyType = tmpl.etype;
-                    ent->level = static_cast<u8>(m_level.currentFloor);
 
                     // Floor scaling — Nightmare floor 1 = effective 51, Hell floor 1 = effective 101
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                    ent->level = static_cast<u8>(effectiveFloor > 255 ? 255 : effectiveFloor);
                     f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
                     ent->health    *= floorMult;
                     ent->maxHealth  = ent->health;
@@ -802,7 +802,8 @@ void Engine::startGame() {
                 boss->materialId = MaterialSystem::getIdByName(bt->matName);
                 boss->enemyType = EnemyType::BOSS;
                 boss->nameTag = bt->name;
-                boss->level = static_cast<u8>(m_level.currentFloor);
+                u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
+                boss->level = static_cast<u8>(bossEffFloor > 255 ? 255 : bossEffFloor);
                 // Assign boss-specific extra limb config for major bosses
                 if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
                 if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles
@@ -1071,8 +1072,9 @@ void Engine::startGame() {
 
     // Init inventory & world items
     WorldItemSystem::init(m_worldItems);
-    // Only reset inventory on floor 1 — preserve gear when descending
-    if (m_level.currentFloor <= 1) {
+    // Only reset inventory on a true new game (floor 1, Normal difficulty).
+    // Nightmare/Hell transitions set floor=1 but must preserve gear.
+    if (m_level.currentFloor <= 1 && m_difficulty == 0) {
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
             Inventory::init(m_inventories[i]);
             m_skillStates[i] = SkillState{};
