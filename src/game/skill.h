@@ -34,8 +34,11 @@ namespace SkillSystem {
     // Called by engine before class skill activation. Item skills use 1.0.
     void setClassDamageMult(f32 mult);
 
-    // Set equipped weapon damage — Marksman skills scale off weapon damage.
+    // Set equipped weapon damage — Marksman/Ranger skills scale off weapon damage.
     void setWeaponDamage(f32 dmg);
+
+    // Set arrow/bolt mesh IDs for Ranger Volley (needs to assign meshId on spawned projectiles).
+    void setArrowMeshIds(u8 arrow, u8 bolt);
 
     // Tick cooldowns, energy regen, pending meteors
     void update(SkillState& ss, f32 dt);

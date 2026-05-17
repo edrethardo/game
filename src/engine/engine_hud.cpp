@@ -346,10 +346,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 s_prevCooldowns[s] = cooldowns[s];
             }
 
+            // Pass skill IDs as u8 array for icon rendering
+            u8 skillIdBytes[4];
+            for (u8 si = 0; si < 4; si++) skillIdBytes[si] = static_cast<u8>(cls.skills[si]);
+            // Effective floor accounts for difficulty so Nightmare/Hell show all skills unlocked
+            u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
             HUD::drawClassSkillBar(sw, sh, skillBarX, skillBarY,
-                                    m_activeClassSkill, m_level.currentFloor,
+                                    m_activeClassSkill, effectiveFloor,
                                     cls.skillUnlockFloor, cls.skillUpgradeFloor,
-                                    cooldowns, maxCooldowns, s_classSkillFlash);
+                                    cooldowns, maxCooldowns, s_classSkillFlash, skillIdBytes);
 
             // Equipment skill bar — shows active legendary equipment skills above class bar
             {
@@ -412,7 +417,8 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             f32 hs5 = static_cast<f32>(sh) / 720.0f;
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
             u8 slot = m_activeClassSkill;
-            bool unlocked = (m_level.currentFloor >= cls.skillUnlockFloor[slot]);
+            u32 effFloor = m_level.currentFloor + m_difficulty * 50;
+            bool unlocked = (effFloor >= cls.skillUnlockFloor[slot]);
             const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, cls.skills[slot]);
 
             f32 rmbX = static_cast<f32>(sw) - 220.0f * hs5;

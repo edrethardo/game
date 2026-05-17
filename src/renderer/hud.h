@@ -70,7 +70,8 @@ namespace HUD {
                             u8 activeSlot, u32 currentFloor,
                             const u8* unlockFloors, const u8* upgradeFloors,
                             const f32* cooldownTimers, const f32* maxCooldowns,
-                            const f32* flashTimers = nullptr);
+                            const f32* flashTimers = nullptr,
+                            const u8* skillIds = nullptr);
 
     // Equipment skill bar — shows active legendary equipment skills (boots F, helmet G,
     // armor passive, weapon proc) with 8x8 pixel-art skill icons and cooldown overlays.

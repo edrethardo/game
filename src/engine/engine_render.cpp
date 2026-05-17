@@ -1556,17 +1556,16 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
     const ProjectilePool& projPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.projectiles : m_projectiles;
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
-    // Instanced render: batch all simple mesh-based projectiles (arrows, bolts, shards)
-    // into a few draw calls. Special effects (orbs, sparks) still use the per-projectile path below.
-    ProjectileRenderer::render(projPool, m_camera.viewProjection, m_meshDefs, m_meshDefCount);
+    // Instanced render: batch mesh-based projectiles (arrows, bolts, thrown weapons)
+    ProjectileRenderer::render(projPool, m_camera.viewProjection, m_meshDefs, m_meshDefCount,
+                               m_meshIdArrow, m_meshIdBolt);
 
-    // Per-projectile special effects (layered orbs, spark trails, etc.)
+    // Per-projectile special effects (orbs, sparks, generic cubes)
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = projPool.projectiles[i];
         if (!p.active) continue;
 
-        // Skip projectiles already rendered by the instanced path (has a real mesh assigned)
-        // Only render special effects here (orbs, sparks, generic cubes with custom visuals)
+        // Skip mesh-based projectiles handled by the instanced path above
         if (p.meshId > 0 && !(p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH))) continue;
 
         if (p.projFlags & PROJ_ORB) {

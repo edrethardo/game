@@ -20,5 +20,6 @@ namespace ProjectileRenderer {
     // instance data, and issues one instanced draw per mesh type.
     // meshDefs/meshDefCount: the engine's mesh registry for VAO/index lookup.
     void render(const ProjectilePool& pool, const Mat4& vp,
-                const MeshDef* meshDefs, u32 meshDefCount);
+                const MeshDef* meshDefs, u32 meshDefCount,
+                u8 arrowMeshId, u8 boltMeshId);
 }

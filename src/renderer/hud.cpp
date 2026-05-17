@@ -2,6 +2,7 @@
 #include "renderer/shader.h"
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
+#include "renderer/skill_icons_data.h"
 #include "renderer/material.h"
 #include "platform/input.h"
 #include "core/log.h"
@@ -44,6 +45,10 @@ static void pushQuad(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
     pushLine(x0, y0, x0, y1, color);
     pushLine(x1, y0, x1, y1, color);
 }
+
+// Forward declarations for icon functions (defined after drawClassSkillBar)
+static const u8* getSkillIcon(u8 skillId);
+static void getSkillIconColors(u8 skillId, Vec3 cols[5]);
 
 static void flushHUD() {
     if (s_vertCount == 0 || !s_vao) return;
@@ -602,7 +607,7 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               u8 activeSlot, u32 currentFloor,
                               const u8* unlockFloors, const u8* upgradeFloors,
                               const f32* cooldownTimers, const f32* maxCooldowns,
-                              const f32* flashTimers)
+                              const f32* flashTimers, const u8* skillIds)
 {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
     // Upgraded to 64px slots with 4px gaps for better readability
@@ -627,6 +632,34 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         if (upgraded) borderCol = {0.9f, 0.8f, 0.3f};
         if (flashTimers && flashTimers[s] > 0.0f) borderCol = {1.0f, 1.0f, 1.0f};
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
+
+        // 32×32 skill icon centered in slot
+        if (skillIds && unlocked) {
+            const u8* icon = getSkillIcon(skillIds[s]);
+            if (icon) {
+                Vec3 cols[5];
+                getSkillIconColors(skillIds[s], cols);
+                bool ready = (cooldownTimers[s] <= 0.0f);
+                f32 iconX = sx + 16.0f * uiScale;
+                f32 iconY = y + 16.0f * uiScale;
+                f32 px = 1.0f * uiScale;
+                for (u32 iy = 0; iy < 32; iy++) {
+                    f32 rowY = iconY + (31 - iy) * px;
+                    u32 ix = 0;
+                    while (ix < 32) {
+                        u8 c = icon[iy * 32 + ix];
+                        if (c == 0) { ix++; continue; }
+                        u32 runEnd = ix + 1;
+                        while (runEnd < 32 && icon[iy * 32 + runEnd] == c) runEnd++;
+                        f32 x0 = iconX + ix * px;
+                        f32 x1 = iconX + runEnd * px;
+                        Vec3 col = ready ? cols[c] : cols[c] * 0.4f;
+                        pushLine(x0, rowY, x1, rowY, col);
+                        ix = runEnd;
+                    }
+                }
+            }
+        }
 
         // Radial cooldown overlay — pie sweep from 12 o'clock, clockwise
         if (unlocked && cooldownTimers[s] > 0.0f) {
@@ -755,6 +788,58 @@ static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
             cols[1] = {1.0f, 0.5f, 0.1f}; cols[2] = {0.9f, 0.3f, 0.05f};
             cols[3] = {0.7f, 0.2f, 0.05f}; cols[4] = {1.0f, 0.85f, 0.2f};
             break;
+        // Warrior — red/steel
+        case SkillId::CLEAVE: case SkillId::WAR_CRY:
+        case SkillId::THUNDERCLAP: case SkillId::WHIRLWIND: case SkillId::EARTHQUAKE:
+            cols[1] = {0.9f, 0.3f, 0.2f}; cols[2] = {0.6f, 0.2f, 0.1f};
+            cols[3] = {0.4f, 0.15f, 0.1f}; cols[4] = {1.0f, 0.6f, 0.4f};
+            break;
+        // Sorcerer — fire/arcane
+        case SkillId::FIREBALL:
+            cols[1] = {1.0f, 0.5f, 0.1f}; cols[2] = {0.8f, 0.3f, 0.05f};
+            cols[3] = {0.5f, 0.2f, 0.05f}; cols[4] = {1.0f, 0.9f, 0.3f};
+            break;
+        // Combat Engineer — electric blue
+        case SkillId::SHOCK_BOLT: case SkillId::DEPLOY_TURRET:
+        case SkillId::TESLA_COIL: case SkillId::MECH_OVERDRIVE:
+            cols[1] = {0.3f, 0.6f, 1.0f}; cols[2] = {0.2f, 0.4f, 0.7f};
+            cols[3] = {0.1f, 0.2f, 0.4f}; cols[4] = {0.6f, 0.9f, 1.0f};
+            break;
+        // Smoke Bomb — green
+        case SkillId::POISON_CLOUD:
+            cols[1] = {0.2f, 0.7f, 0.2f}; cols[2] = {0.1f, 0.5f, 0.1f};
+            cols[3] = {0.1f, 0.3f, 0.1f}; cols[4] = {0.4f, 0.9f, 0.3f};
+            break;
+        // Paladin — gold/white
+        case SkillId::HOLY_SMITE: case SkillId::HOLY_BOMBARDMENT:
+        case SkillId::HOLY_NOVA:  case SkillId::DIVINE_JUDGMENT:
+            cols[1] = {1.0f, 0.9f, 0.3f}; cols[2] = {0.8f, 0.6f, 0.1f};
+            cols[3] = {0.6f, 0.5f, 0.1f}; cols[4] = {1.0f, 1.0f, 0.7f};
+            break;
+        // Marksman — amber/orange
+        case SkillId::AIMED_SHOT: case SkillId::EXPLOSIVE_ROUND:
+        case SkillId::OVERCHARGED_MAGAZINE: case SkillId::HEADSHOT:
+            cols[1] = {1.0f, 0.7f, 0.2f}; cols[2] = {0.8f, 0.5f, 0.1f};
+            cols[3] = {0.5f, 0.3f, 0.1f}; cols[4] = {1.0f, 0.9f, 0.5f};
+            break;
+        // Tinkerer — cyan/teal
+        case SkillId::SWARM_DEPLOY: case SkillId::OVERCLOCK:
+        case SkillId::DETONATE_SWARM: case SkillId::SWARM_QUEEN:
+            cols[1] = {0.3f, 0.8f, 0.9f}; cols[2] = {0.2f, 0.5f, 0.6f};
+            cols[3] = {0.1f, 0.3f, 0.4f}; cols[4] = {0.5f, 1.0f, 1.0f};
+            break;
+        // Rogue — purple
+        case SkillId::FAN_OF_KNIVES: case SkillId::SHADOW_STEP:
+        case SkillId::SHADOW_DANCE:
+            cols[1] = {0.5f, 0.2f, 0.7f}; cols[2] = {0.3f, 0.1f, 0.5f};
+            cols[3] = {0.2f, 0.1f, 0.3f}; cols[4] = {0.7f, 0.4f, 1.0f};
+            break;
+        // Ranger — green/brown
+        case SkillId::VOLLEY: case SkillId::PIERCING_SHOT:
+        case SkillId::BARRAGE: case SkillId::MARK_PREY:
+            cols[1] = {0.4f, 0.7f, 0.2f}; cols[2] = {0.6f, 0.4f, 0.1f};
+            cols[3] = {0.3f, 0.2f, 0.1f}; cols[4] = {0.6f, 0.9f, 0.3f};
+            break;
         default:
             cols[1] = {0.6f, 0.6f, 0.6f}; cols[2] = {0.3f, 0.3f, 0.3f};
             cols[3] = {0.4f, 0.4f, 0.4f}; cols[4] = {0.9f, 0.9f, 0.9f};
@@ -764,13 +849,53 @@ static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
 
 static const u8* getSkillIcon(u8 skillId) {
     switch (static_cast<SkillId>(skillId)) {
-        case SkillId::FROZEN_ORB:       return &kIconFrozenOrb[0][0];
-        case SkillId::CHAIN_LIGHTNING:  return &kIconChainLightning[0][0];
-        case SkillId::METEOR_STRIKE:    return &kIconMeteorStrike[0][0];
-        case SkillId::BLOOD_NOVA:       return &kIconBloodNova[0][0];
-        case SkillId::PHASE_DASH:       return &kIconPhaseDash[0][0];
-        case SkillId::ARC_FIRE:         return &kIconArcFire[0][0];
-        default:                        return nullptr;
+        // Warrior
+        case SkillId::CLEAVE:              return &kIcon32_Cleave[0][0];
+        case SkillId::WAR_CRY:            return &kIcon32_WarCry[0][0];
+        case SkillId::THUNDERCLAP:         return &kIcon32_Thunderclap[0][0];
+        case SkillId::WHIRLWIND:           return &kIcon32_Whirlwind[0][0];
+        case SkillId::EARTHQUAKE:          return &kIcon32_Earthquake[0][0];
+        // Sorcerer
+        case SkillId::FIREBALL:            return &kIcon32_Fireball[0][0];
+        // Legendary icons
+        case SkillId::FROZEN_ORB:          return &kIcon32_FrozenOrb[0][0];
+        case SkillId::CHAIN_LIGHTNING:     return &kIcon32_ChainLightning[0][0];
+        case SkillId::METEOR_STRIKE:       return &kIcon32_MeteorStrike[0][0];
+        case SkillId::BLOOD_NOVA:          return &kIcon32_BloodNova[0][0];
+        case SkillId::PHASE_DASH:          return &kIcon32_PhaseDash[0][0];
+        case SkillId::ARC_FIRE:            return &kIcon32_ArcFire[0][0];
+        // Combat Engineer
+        case SkillId::SHOCK_BOLT:          return &kIcon32_ShockBolt[0][0];
+        case SkillId::DEPLOY_TURRET:       return &kIcon32_DeployTurret[0][0];
+        case SkillId::TESLA_COIL:          return &kIcon32_TeslaCoil[0][0];
+        case SkillId::MECH_OVERDRIVE:      return &kIcon32_MechOverdrive[0][0];
+        // Rogue (Smoke Bomb)
+        case SkillId::POISON_CLOUD:        return &kIcon32_PoisonCloud[0][0];
+        // Paladin
+        case SkillId::HOLY_SMITE:          return &kIcon32_HolySmite[0][0];
+        case SkillId::HOLY_BOMBARDMENT:    return &kIcon32_HolyBombardment[0][0];
+        case SkillId::HOLY_NOVA:           return &kIcon32_HolyNova[0][0];
+        case SkillId::DIVINE_JUDGMENT:     return &kIcon32_DivineJudgment[0][0];
+        // Marksman
+        case SkillId::AIMED_SHOT:          return &kIcon32_AimedShot[0][0];
+        case SkillId::EXPLOSIVE_ROUND:     return &kIcon32_ExplosiveRound[0][0];
+        case SkillId::OVERCHARGED_MAGAZINE:return &kIcon32_OverchargedMag[0][0];
+        case SkillId::HEADSHOT:            return &kIcon32_Headshot[0][0];
+        // Tinkerer
+        case SkillId::SWARM_DEPLOY:        return &kIcon32_SwarmDeploy[0][0];
+        case SkillId::OVERCLOCK:           return &kIcon32_Overclock[0][0];
+        case SkillId::DETONATE_SWARM:      return &kIcon32_DetonateSwarm[0][0];
+        case SkillId::SWARM_QUEEN:         return &kIcon32_SwarmQueen[0][0];
+        // Rogue
+        case SkillId::FAN_OF_KNIVES:       return &kIcon32_FanOfKnives[0][0];
+        case SkillId::SHADOW_STEP:         return &kIcon32_ShadowStep[0][0];
+        case SkillId::SHADOW_DANCE:        return &kIcon32_ShadowDance[0][0];
+        // Ranger
+        case SkillId::VOLLEY:              return &kIcon32_Volley[0][0];
+        case SkillId::PIERCING_SHOT:       return &kIcon32_PiercingShot[0][0];
+        case SkillId::BARRAGE:             return &kIcon32_Barrage[0][0];
+        case SkillId::MARK_PREY:           return &kIcon32_MarkPrey[0][0];
+        default:                           return nullptr;
     }
 }
 
@@ -809,24 +934,29 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             drawRadialCooldown(cx, cy, radius, cdFrac, {0.15f, 0.12f, 0.2f});
         }
 
-        // Draw 8x8 skill icon scaled to 32x32, centered in the 64px slot
+        // Draw 32x32 skill icon at 1:1 pixel scale, centered in 64px slot
         const u8* icon = getSkillIcon(slot.skillId);
         if (icon) {
             Vec3 cols[5];
             getSkillIconColors(slot.skillId, cols);
-            f32 iconX = sx + 16.0f * uiScale;  // center 32px icon in 64px slot
+            f32 iconX = sx + 16.0f * uiScale;
             f32 iconY = y + 16.0f * uiScale;
-            f32 px = 4.0f * uiScale; // pixel scale (2× larger than before)
-            for (u32 iy = 0; iy < 8; iy++) {
-                for (u32 ix = 0; ix < 8; ix++) {
-                    u8 c = icon[iy * 8 + ix];
-                    if (c == 0) continue;
-                    f32 pxX = iconX + ix * px;
-                    f32 pxY = iconY + (7 - iy) * px; // flip Y
-                    for (f32 fy = 0; fy < px; fy += 1.0f) {
-                        pushLine(pxX, pxY + fy, pxX + px, pxY + fy,
-                                 ready ? cols[c] : cols[c] * 0.4f);
-                    }
+            f32 px = 1.0f * uiScale;
+            // Row-based run-length rendering: batch contiguous same-color pixels
+            for (u32 iy = 0; iy < 32; iy++) {
+                f32 rowY = iconY + (31 - iy) * px;
+                u32 ix = 0;
+                while (ix < 32) {
+                    u8 c = icon[iy * 32 + ix];
+                    if (c == 0) { ix++; continue; }
+                    // Find run of same color
+                    u32 runEnd = ix + 1;
+                    while (runEnd < 32 && icon[iy * 32 + runEnd] == c) runEnd++;
+                    f32 x0 = iconX + ix * px;
+                    f32 x1 = iconX + runEnd * px;
+                    Vec3 col = ready ? cols[c] : cols[c] * 0.4f;
+                    pushLine(x0, rowY, x1, rowY, col);
+                    ix = runEnd;
                 }
             }
         }

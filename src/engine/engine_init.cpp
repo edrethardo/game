@@ -331,6 +331,7 @@ void Engine::init() {
     m_meshIdIronMaiden = findMeshByName("iron_maiden");
     m_meshIdArrow      = findMeshByName("arrow");
     m_meshIdBolt       = findMeshByName("bolt");
+    SkillSystem::setArrowMeshIds(m_meshIdArrow, m_meshIdBolt);
     m_matIdBatWing     = MaterialSystem::getIdByName("bat_wing");
 
     // Weapons

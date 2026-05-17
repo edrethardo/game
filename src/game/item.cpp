@@ -521,18 +521,21 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
 
 ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
                                 const AffixDef* affixDefs, u32 affixDefCount) {
-    // Collect valid defs for this enemy level.  If no items match the exact
-    // range (common on floors beyond the highest maxLevel), fall back to all
-    // items the player could have seen so far (minLevel <= enemyLevel).
+    // Wrap enemy level into 1-50 range so Nightmare/Hell repeat the same drop tables.
+    // Level 51 (Nightmare floor 1) → wrappedLevel 1, level 100 → 50, level 101 → 1, etc.
+    u8 wrappedLevel = ((enemyLevel - 1) % 50) + 1;
+
+    // Collect valid defs matching the wrapped level range
     u32 validIndices[MAX_ITEM_DEFS];
     u32 validCount = 0;
     for (u32 i = 0; i < defCount; i++) {
-        if (enemyLevel >= defs[i].minLevel && enemyLevel <= defs[i].maxLevel)
+        if (wrappedLevel >= defs[i].minLevel && wrappedLevel <= defs[i].maxLevel)
             validIndices[validCount++] = i;
     }
     if (validCount == 0) {
+        // Fallback: any item the player could have seen at this wrapped level
         for (u32 i = 0; i < defCount; i++) {
-            if (enemyLevel >= defs[i].minLevel)
+            if (wrappedLevel >= defs[i].minLevel)
                 validIndices[validCount++] = i;
         }
     }

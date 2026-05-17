@@ -57,15 +57,10 @@ void ProjectileRenderer::shutdown() {
 }
 
 void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
-                                 const MeshDef* meshDefs, u32 meshDefCount)
+                                 const MeshDef* meshDefs, u32 meshDefCount,
+                                 u8 arrowMeshId, u8 boltMeshId)
 {
     if (!s_shader.program || !s_instanceVBO) return;
-
-    // Group active projectiles by meshId. Use a simple bucket approach:
-    // for each meshId, collect instance data into the scratch buffer then draw.
-    // Since meshDefCount is small (≤32), iterate mesh IDs and scan pool per ID.
-    // This is O(meshDefCount * MAX_PROJECTILES) in the worst case but pool
-    // iteration is cache-friendly and meshDefCount is tiny.
 
     glUseProgram(s_shader.program);
 
@@ -92,65 +87,96 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
     glBindTexture(GL_TEXTURE_2D, MaterialSystem::get(0)->texture.handle);
     glUniform1i(s_shader.loc_texture0, 0);
 
-    // Single-pass bucketing: collect all active projectile instances into per-mesh buckets.
-    // O(activeCount) instead of O(meshDefCount × MAX_PROJECTILES).
+    // Bucketed single-pass: collect all mesh-based projectiles into per-mesh buckets.
+    // Skip meshId 0 (generic cubes → FX path) and FX-flagged projectiles.
     static constexpr u32 MAX_BUCKETS = 64;
-    u32 bucketStart[MAX_BUCKETS] = {};  // start index in s_instanceBuf per mesh
-    u32 bucketCount[MAX_BUCKETS] = {};  // instance count per mesh
+    u32 bucketCount[MAX_BUCKETS] = {};
     u32 totalInstances = 0;
 
     // Pass 1: count per mesh
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = pool.projectiles[i];
-        if (!p.active || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (!p.active || p.meshId == 0 || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH)) continue;
         if (totalInstances >= MAX_INSTANCES_PER_BATCH) break;
         bucketCount[p.meshId]++;
         totalInstances++;
     }
+    if (totalInstances == 0) { glBindVertexArray(0); glUseProgram(0); return; }
 
-    // Compute bucket start offsets (prefix sum)
-    u32 offset = 0;
-    for (u32 m = 0; m < meshDefCount; m++) {
-        bucketStart[m] = offset;
-        offset += bucketCount[m];
-    }
+    // Prefix sum for bucket start offsets
+    u32 bucketStart[MAX_BUCKETS] = {};
+    u32 off = 0;
+    for (u32 m = 0; m < MAX_BUCKETS; m++) { bucketStart[m] = off; off += bucketCount[m]; }
 
-    // Pass 2: fill instance data into correct bucket positions
+    // Pass 2: fill instance data with proper rotation + scale
     u32 bucketCur[MAX_BUCKETS] = {};
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         const Projectile& p = pool.projectiles[i];
-        if (!p.active || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (!p.active || p.meshId == 0 || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH)) continue;
         u32 mid = p.meshId;
         u32 slot = bucketStart[mid] + bucketCur[mid];
         if (slot >= MAX_INSTANCES_PER_BATCH) continue;
         bucketCur[mid]++;
 
-        f32 s = p.radius * 2.0f;
-        if (s < 0.05f) s = 0.1f;
+        // Compute scale from mesh bounds (match per-projectile path)
+        const AABB& mb = meshDefs[mid].bounds;
+        f32 maxDim = fmaxf(fmaxf(mb.max.x - mb.min.x, mb.max.y - mb.min.y),
+                           mb.max.z - mb.min.z);
+        bool isArrow = (mid == arrowMeshId || mid == boltMeshId);
+        f32 projScale = isArrow ? (1.2f / fmaxf(maxDim, 0.001f))
+                                : (0.4f / fmaxf(maxDim, 0.001f));
+
+        // Compute rotation from velocity (yaw + pitch for arrows, spin for thrown)
+        f32 spd = length(p.velocity);
+        f32 flyYaw = atan2f(-p.velocity.x, -p.velocity.z);
+        f32 rotX;
+        if (isArrow) {
+            rotX = (spd > 0.01f) ? -asinf(p.velocity.y / spd) : 0.0f;
+        } else {
+            rotX = p.lifetime * 15.0f; // spinning throw
+        }
+
+        // Build model = translate * rotateY(flyYaw) * rotateX(rotX) * scale
+        // Instance rows map to GL columns: row0=col0, row1=col1, row2=col2, row3=col3
+        f32 cy = cosf(flyYaw), sy = sinf(flyYaw);
+        f32 cx = cosf(rotX),   sx = sinf(rotX);
+        f32 s = projScale;
+
         InstanceData& inst = s_instanceBuf[slot];
+        // Column 0
+        inst.modelRow0[0] = cy * s;
+        inst.modelRow0[1] = 0.0f;
+        inst.modelRow0[2] = -sy * s;
+        inst.modelRow0[3] = 0.0f;
+        // Column 1
+        inst.modelRow1[0] = sy * sx * s;
+        inst.modelRow1[1] = cx * s;
+        inst.modelRow1[2] = cy * sx * s;
+        inst.modelRow1[3] = 0.0f;
+        // Column 2
+        inst.modelRow2[0] = sy * cx * s;
+        inst.modelRow2[1] = -sx * s;
+        inst.modelRow2[2] = cy * cx * s;
+        inst.modelRow2[3] = 0.0f;
+        // Column 3 (translation)
+        inst.modelRow3[0] = p.position.x;
+        inst.modelRow3[1] = p.position.y;
+        inst.modelRow3[2] = p.position.z;
+        inst.modelRow3[3] = 1.0f;
 
-        inst.modelRow0[0] = s;    inst.modelRow0[1] = 0.0f; inst.modelRow0[2] = 0.0f; inst.modelRow0[3] = 0.0f;
-        inst.modelRow1[0] = 0.0f; inst.modelRow1[1] = s;    inst.modelRow1[2] = 0.0f; inst.modelRow1[3] = 0.0f;
-        inst.modelRow2[0] = 0.0f; inst.modelRow2[1] = 0.0f; inst.modelRow2[2] = s;    inst.modelRow2[3] = 0.0f;
-        inst.modelRow3[0] = p.position.x; inst.modelRow3[1] = p.position.y;
-        inst.modelRow3[2] = p.position.z; inst.modelRow3[3] = 1.0f;
-
-        if (p.projFlags & PROJ_ORB)           { inst.color[0]=0.3f; inst.color[1]=0.8f; inst.color[2]=1.0f; inst.color[3]=0.8f; }
-        else if (p.projFlags & PROJ_ORB_SHARD){ inst.color[0]=0.5f; inst.color[1]=0.9f; inst.color[2]=1.0f; inst.color[3]=0.9f; }
-        else if (p.projFlags & PROJ_SPARK)    { inst.color[0]=0.7f; inst.color[1]=0.8f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
-        else if (p.projFlags & PROJ_SPLASH)   { inst.color[0]=1.0f; inst.color[1]=0.5f; inst.color[2]=0.2f; inst.color[3]=1.0f; }
-        else if (p.projFlags & PROJ_VOID)     { inst.color[0]=0.6f; inst.color[1]=0.2f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
-        else                                   { inst.color[0]=1.0f; inst.color[1]=1.0f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
+        // Color tint
+        if (p.projFlags & PROJ_VOID) { inst.color[0]=0.6f; inst.color[1]=0.2f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
+        else                          { inst.color[0]=0.8f; inst.color[1]=0.8f; inst.color[2]=0.8f; inst.color[3]=1.0f; }
     }
 
-    if (totalInstances == 0) { glBindVertexArray(0); glUseProgram(0); return; }
-
-    // Upload all instance data once
+    // Single VBO upload for all buckets
     glBindBuffer(GL_ARRAY_BUFFER, s_instanceVBO);
     glBufferData(GL_ARRAY_BUFFER, totalInstances * sizeof(InstanceData), s_instanceBuf, GL_STREAM_DRAW);
 
-    // Draw each mesh bucket as a single instanced call
-    for (u32 mid = 0; mid < meshDefCount; mid++) {
+    // Draw each mesh bucket
+    for (u32 mid = 1; mid < meshDefCount && mid < MAX_BUCKETS; mid++) {
         if (bucketCount[mid] == 0) continue;
         const Mesh& mesh = meshDefs[mid].mesh;
         if (mesh.vao == 0 || mesh.indexCount == 0) continue;

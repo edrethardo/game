@@ -26,10 +26,13 @@ void SkillSystem::setSkillPower(f32 power) { s_skillPower = power; }
 static f32 s_classDmgMult = 1.0f;
 void SkillSystem::setClassDamageMult(f32 mult) { s_classDmgMult = mult; }
 
-// Equipped weapon base damage — set by engine before marksman skill activation.
-// Marksman skills scale off weapon damage instead of fixed skill damage.
+// Equipped weapon base damage — set by engine before marksman/ranger skill activation.
 static f32 s_weaponDamage = 10.0f;
 void SkillSystem::setWeaponDamage(f32 dmg) { s_weaponDamage = dmg; }
+
+// Arrow mesh ID for Volley (bolt reuses s_boltMeshId set by setBoltMeshId)
+static u8 s_arrowMeshId = 0;
+void SkillSystem::setArrowMeshIds(u8 arrow, u8 /*bolt*/) { s_arrowMeshId = arrow; }
 static ScreenShake*  s_screenShake  = nullptr;
 static SkillSystem::NovaCallback s_novaCallback = nullptr;
 static SkillSystem::DashCallback s_dashCallback = nullptr;
@@ -498,40 +501,45 @@ static void fireShadowShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     LOG_INFO("Shadow Shot fired");
 }
 
-// Volley: 20 arrows rain on target area over 0.5s. Weapon-scaling damage.
+// Volley: 4 damage waves + 80 cosmetic arrows raining in 4 visual volleys.
+// Damage via PendingMeteors (zone-wide AoE), visuals via PROJ_ORB arrows (no collision).
 static void fireVolley(Vec3 origin, Vec3 forward, const SkillDef* def,
-                        const LevelGrid& grid)
+                        const LevelGrid& grid, ProjectilePool& pool)
 {
     RayHit hit = Raycast::cast(grid, origin, forward, 20.0f);
     Vec3 target = hit.hit ? (origin + forward * hit.distance) : (origin + forward * 15.0f);
-    f32 radius = def->radius > 0.0f ? def->radius : 4.0f;
-    f32 delay  = def->delay > 0.0f ? def->delay : 0.5f;
-    f32 arrowDmg = s_weaponDamage * 0.3f * s_classDmgMult;
+    f32 radius = (def->radius > 0.0f ? def->radius : 4.0f) * 1.2f;
+    f32 arrowDmg = s_weaponDamage * 0.6f * s_classDmgMult;
 
-    // Spawn 20 arrows as staggered PendingMeteors at random positions in the zone
-    for (u32 a = 0; a < 20; a++) {
-        f32 angle = (std::rand() / static_cast<f32>(RAND_MAX)) * 6.2832f;
-        f32 dist  = (std::rand() / static_cast<f32>(RAND_MAX)) * radius;
-        Vec3 arrowPos = target + Vec3{cosf(angle) * dist, 0.0f, sinf(angle) * dist};
+    // 80 arrows in 4 visual waves (20 per wave at staggered heights).
+    // Each arrow deals real damage via projectile-entity collision.
+    static const f32 waveHeight[4] = {5.0f, 8.0f, 11.0f, 14.0f};
+    for (u32 w = 0; w < 4; w++) {
+        for (u32 a = 0; a < 20; a++) {
+            f32 angle = (std::rand() / static_cast<f32>(RAND_MAX)) * 6.2832f;
+            f32 dist  = (std::rand() / static_cast<f32>(RAND_MAX)) * radius;
+            // Per-arrow height jitter within the wave for natural scatter
+            f32 hJitter = ((std::rand() / static_cast<f32>(RAND_MAX)) - 0.5f) * 1.0f;
+            Vec3 spawnPos = target + Vec3{cosf(angle) * dist, waveHeight[w] + hJitter, sinf(angle) * dist};
 
-        for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
-            if (!s_meteors[m].active) {
-                s_meteors[m].position    = arrowPos;
-                s_meteors[m].damage      = arrowDmg;
-                s_meteors[m].radius      = 0.8f;
-                s_meteors[m].timer       = delay * (0.3f + 0.7f * (a / 20.0f)); // stagger over delay
-                s_meteors[m].active      = true;
-                s_meteors[m].healsPlayer = false;
-                s_meteors[m].color       = {0.6f, 0.4f, 0.1f}; // brown/arrow color
-                break;
+            f32 sx = ((std::rand() / static_cast<f32>(RAND_MAX)) - 0.5f) * 1.5f;
+            f32 sz = ((std::rand() / static_cast<f32>(RAND_MAX)) - 0.5f) * 1.5f;
+            Vec3 dir = normalize(Vec3{sx, -8.0f, sz});
+
+            u16 idx = ProjectileSystem::spawn(pool, spawnPos, dir, 12.0f, arrowDmg,
+                                               0.4f, 3.0f, true, PROJ_GRAVITY);
+            if (idx != 0xFFFF) {
+                pool.projectiles[idx].gravity = 6.0f;
+                pool.projectiles[idx].meshId = (a % 2 == 0) ? s_arrowMeshId : s_boltMeshId;
             }
         }
     }
 
-    // Targeting nova at ground
+    // Target zone: persistent ground ring + crosshair pattern (no DPS, just visual)
+    if (s_scorchCallback) s_scorchCallback(target, radius, 1.5f, 0.0f);
     if (s_novaCallback) s_novaCallback(target, radius, {0.6f, 0.4f, 0.1f});
     if (s_screenShake) s_screenShake->trigger(0.04f, 0.3f);
-    LOG_INFO("Volley: 20 arrows targeting (%.1f, %.1f), dmg %.1f each", target.x, target.z, arrowDmg);
+    LOG_INFO("Volley: 80 arrows in 4 waves, dmg %.1f each", arrowDmg);
 }
 
 // Piercing Shot: ray-AABB penetrating arrow + bleed DoT. Weapon-scaling damage.
@@ -1884,7 +1892,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireShadowShot(eyePos, forward, def, grid, entities);
         break;
     case SkillId::VOLLEY:
-        fireVolley(eyePos, forward, def, grid);
+        fireVolley(eyePos, forward, def, grid, projectiles);
         break;
     case SkillId::PIERCING_SHOT:
         firePiercingShot(eyePos, forward, def, grid, entities);

@@ -10,7 +10,7 @@ static constexpr u32 MAX_ITEM_DEFS       = 160; // expanded for full floor cover
 static constexpr u32 MAX_AFFIX_DEFS      = 32;
 static constexpr u32 MAX_AFFIXES_PER_ITEM = 4;
 static constexpr u32 MAX_INVENTORY_ITEMS = 24;
-static constexpr u32 MAX_SKILL_DEFS      = 48;
+static constexpr u32 MAX_SKILL_DEFS      = 64;
 static constexpr u32 MAX_WORLD_ITEMS     = 32;
 
 // ---- Rarity tiers ----

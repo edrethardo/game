@@ -181,6 +181,11 @@ def main():
     if args.all or args.skins:
         ok = build_skins() and ok
 
+    # Always generate skill icons header (fast, no args needed)
+    if args.all:
+        print("\n=== Generating Skill Icons ===")
+        ok = run([sys.executable, os.path.join(SCRIPT_DIR, "gen_skill_icons.py")]) and ok
+
     if ok:
         print("\n=== All assets built successfully ===")
     else:
