@@ -161,6 +161,9 @@ struct Entity {
     f32  burnDps        = 0.0f;
     f32  freezeTimer    = 0.0f;  // halves movement speed
     f32  stunTimer      = 0.0f;  // fully immobilized, no AI, no attacks
+    f32  overclockTimer = 0.0f;  // Tinkerer overclock buff: 2× dmg, 1.5× speed
+    f32  queenLifeTimer = 0.0f;  // Swarm Queen despawn countdown
+    f32  queenSpawnTimer = 0.0f; // Swarm Queen auto-spawn interval
 
     // On-hit status effect this entity applies to targets (0=none)
     // 1=poison, 2=slow, 3=burn, 4=freeze

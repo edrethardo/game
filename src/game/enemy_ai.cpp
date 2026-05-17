@@ -20,6 +20,10 @@
 #include <cmath>
 #include <cstdlib>
 
+// Queen drone auto-spawn callback — set by Engine so queen can spawn mini drones
+static void(*s_droneSpawnCb)(Vec3 pos, u8 type) = nullptr;
+void EnemyAI::setDroneSpawnCallback(void(*cb)(Vec3, u8)) { s_droneSpawnCb = cb; }
+
 // ---------------------------------------------------------------------------
 // Grid collision for entities (simplified axis-separated slide)
 // ---------------------------------------------------------------------------
@@ -221,9 +225,33 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         if (isFriendly && e.npcClass == NpcClass::NONE) {
             f32 distToPlayer = length(e.position - playerEye);
             if (distToPlayer > 15.0f) {
-                // Teleport back to player
                 e.position = playerEye + Vec3{1.0f, 0, 1.0f};
                 snapEntityToFloor(e, grid);
+            }
+
+            // Tick overclock buff timer
+            if (e.overclockTimer > 0.0f) e.overclockTimer -= dt;
+
+            // Swarm Queen: auto-spawn mini drone every 2s, despawn after lifetime
+            if (e.queenLifeTimer > 0.0f) {
+                e.queenLifeTimer -= dt;
+                e.queenSpawnTimer -= dt;
+                if (e.queenSpawnTimer <= 0.0f) {
+                    e.queenSpawnTimer = 2.0f;
+                    // Spawn a mini spider near the queen
+                    Vec3 spawnPos = e.position + Vec3{
+                        (std::rand() % 200 - 100) * 0.01f, 0.0f,
+                        (std::rand() % 200 - 100) * 0.01f};
+                    // Use projectile pool callback would be cleanest but drone callback
+                    // is available via static — spawn type 0 (spider) near queen
+                    if (s_droneSpawnCb) s_droneSpawnCb(spawnPos, 0);
+                }
+                if (e.queenLifeTimer <= 0.0f) {
+                    // Queen expires — kill without loot
+                    e.flags |= ENT_DEAD;
+                    e.aiState = AIState::DEAD;
+                    e.deathTimer = 0.01f;
+                }
             }
         }
 
@@ -270,6 +298,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Freeze halves friendly NPC speed
             f32 npcSpeed = e.moveSpeed;
             if (e.freezeTimer > 0.0f) npcSpeed *= 0.5f;
+            if (e.overclockTimer > 0.0f) npcSpeed *= 1.5f; // Overclock: +50% speed
 
             // ---------------------------------------------------------------
             // Friendly NPC AI: pathfind toward the exit AND fight enemies
@@ -348,16 +377,19 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // trigger combat; otherwise the NPC follows the flow field.
             f32 engageDist = 0.0f;
             switch (e.npcClass) {
-                case NpcClass::PALADIN: engageDist = 8.0f;  break; // charges in aggressively
-                case NpcClass::CLERIC:  engageDist = 3.0f;  break; // only fights if cornered
-                case NpcClass::ARCHER:  engageDist = 12.0f; break; // shoots from far
-                case NpcClass::MAGE:    engageDist = 14.0f; break; // casts from far
-                case NpcClass::ROGUE:   engageDist = 6.0f;  break; // quick strikes then moves
+                case NpcClass::PALADIN: engageDist = 8.0f;  break;
+                case NpcClass::CLERIC:  engageDist = 3.0f;  break;
+                case NpcClass::ARCHER:  engageDist = 12.0f; break;
+                case NpcClass::MAGE:    engageDist = 14.0f; break;
+                case NpcClass::ROGUE:   engageDist = 6.0f;  break;
                 case NpcClass::NONE:
-                    // Flying swarm drones engage at full detection range; ground combat drones stay close
                     engageDist = (e.flags & ENT_FLYING) ? e.detectionRange : 6.0f;
                     break;
                 default:                engageDist = 6.0f;  break;
+            }
+            // Overclock: drones hunt enemies up to 30m away
+            if (e.overclockTimer > 0.0f && e.npcClass == NpcClass::NONE) {
+                engageDist = 30.0f;
             }
 
             bool inCombat = (bestEnemyIdx != 0xFFFF && bestEnemyDist < engageDist);
@@ -561,6 +593,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             Entity& target = pool.entities[bestEnemyIdx];
                             if (!(target.flags & ENT_DEAD)) {
                                 Vec3 eyePos = e.position + Vec3{0, e.halfExtents.y, 0};
+                                // Overclock buff: double damage while active
+                                f32 savedDmg = e.damage;
+                                if (e.overclockTimer > 0.0f) e.damage *= 2.0f;
 
                                 if (e.npcWeaponType == WeaponType::HITSCAN) {
                                     // Instant raycast attack (swarm drones, turrets)
@@ -593,6 +628,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                                     EntityHandle th = {bestEnemyIdx, target.generation};
                                     Combat::applyDamage(pool, th, e.damage);
                                 }
+                                e.damage = savedDmg; // restore base damage after overclock
 
                                 if ((std::rand() % 5) == 0) {
                                     static const char* atk[] = {"Take that!", "Die, beast!", "For glory!"};
@@ -629,41 +665,48 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.velocity = {0, 0, 0};
                     }
                 } else if (isCombatDrone) {
-                    // Combat drone: follow flow field toward exit at 1.2x speed.
-                    // When enemies are nearby the inCombat block handles rushing them.
-                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
-                    if (lengthSq(flowDir) > 0.001f) {
-                        e.velocity.x = flowDir.x * npcSpeed * 1.2f;
-                        e.velocity.z = flowDir.z * npcSpeed * 1.2f;
-                        e.yaw = atan2f(-flowDir.x, -flowDir.z);
-                        entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+                    // Combat drone (spider): orbit player at unique angle, spread out.
+                    // Each drone gets a distinct phase so they fan around the player.
+                    f32 phase = static_cast<f32>(i) * 1.618f * 6.2832f; // golden angle spread
+                    f32 orbitDist = 3.0f + sinf(e.animTimer * 0.8f + phase) * 1.5f;
+                    Vec3 orbitTarget = player.position + Vec3{
+                        cosf(e.animTimer * 0.5f + phase) * orbitDist, 0.0f,
+                        sinf(e.animTimer * 0.5f + phase) * orbitDist
+                    };
+                    Vec3 toTarget = orbitTarget - e.position;
+                    f32 dist2Tgt = lengthSq(toTarget);
+                    if (dist2Tgt > 0.5f) {
+                        Vec3 moveDir = normalize(toTarget);
+                        e.velocity.x = moveDir.x * npcSpeed * 1.2f;
+                        e.velocity.z = moveDir.z * npcSpeed * 1.2f;
+                        e.yaw = atan2f(-moveDir.x, -moveDir.z);
                     } else {
-                        e.velocity = {0, 0, 0};
+                        e.velocity.x = 0; e.velocity.z = 0;
                     }
+                    entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                 } else {
-                    // Swarm drones: follow flow field toward exit with lateral drift
-                    // for exploration spread. Reveals fog of war as they go.
-                    Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
-                    if (lengthSq(flowDir) > 0.001f) {
-                        // Periodic lateral drift so drones spread out instead of
-                        // following the exact same path. Each drone gets a unique
-                        // phase from its pool index.
-                        f32 drift = sinf(e.animTimer * 1.3f + static_cast<f32>(i) * 2.0f) * 0.4f;
-                        Vec3 driftedDir = {
-                            flowDir.x + flowDir.z * drift,
-                            0.0f,
-                            flowDir.z - flowDir.x * drift
-                        };
-                        driftedDir = normalize(driftedDir);
-                        e.velocity.x = driftedDir.x * npcSpeed;
-                        e.velocity.z = driftedDir.z * npcSpeed;
-                        e.yaw = atan2f(-driftedDir.x, -driftedDir.z);
+                    // Swarm drones (flying bats): orbit player at different heights and angles.
+                    // Wide spread with varying orbit radii for a real swarm look.
+                    f32 phase = static_cast<f32>(i) * 2.399f; // golden angle (137.5°)
+                    f32 orbitRadius = 2.5f + sinf(phase * 3.0f) * 2.0f; // 0.5–4.5m spread
+                    f32 orbitSpeed = 1.2f + sinf(phase * 2.0f) * 0.5f;  // varied orbit speed
+                    f32 angle = e.animTimer * orbitSpeed + phase;
+                    Vec3 orbitTarget = player.position + Vec3{
+                        cosf(angle) * orbitRadius, 1.0f + sinf(angle * 1.7f) * 0.5f,
+                        sinf(angle) * orbitRadius
+                    };
+                    Vec3 toTarget = orbitTarget - e.position;
+                    f32 d = length(toTarget);
+                    if (d > 0.3f) {
+                        Vec3 moveDir = toTarget * (1.0f / d);
+                        f32 speed = fminf(npcSpeed, d * 4.0f); // ease in near target
+                        e.velocity.x = moveDir.x * speed;
+                        e.velocity.y = moveDir.y * speed;
+                        e.velocity.z = moveDir.z * speed;
+                        e.yaw = atan2f(-moveDir.x, -moveDir.z);
                     } else {
                         e.velocity = {0, 0, 0};
                     }
-
-                    // Vertical bobbing — smooth sine wave for natural flight
-                    e.velocity.y = sinf(e.animTimer * 2.5f) * 1.2f;
 
                     entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
                 }

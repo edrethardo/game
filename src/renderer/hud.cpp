@@ -805,7 +805,8 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             f32 cx = sx + slotW * 0.5f;
             f32 cy = y + slotH * 0.5f;
             f32 radius = slotW * 0.45f;
-            drawRadialCooldown(cx, cy, radius, cdFrac, {0.05f, 0.05f, 0.08f});
+            // Brighter overlay color so it's visible against the dark slot background
+            drawRadialCooldown(cx, cy, radius, cdFrac, {0.15f, 0.12f, 0.2f});
         }
 
         // Draw 8x8 skill icon scaled to 32x32, centered in the 64px slot

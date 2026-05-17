@@ -104,10 +104,10 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
      {SkillId::AIMED_SHOT, SkillId::EXPLOSIVE_ROUND, SkillId::OVERCHARGED_MAGAZINE, SkillId::HEADSHOT},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 
-    // TINKERER — Minion Master
-    {"Tinkerer", "Drone commander with stun grenades",
+    // TINKERER — Swarm Overlord
+    {"Tinkerer", "Swarm overlord who overwhelms with drone armies",
      90.0f, 5.5f, 110.0f, "Pistol",
-     {SkillId::COMBAT_DRONE, SkillId::SWARM_DRONES, SkillId::STUN_GRENADE, SkillId::DEPLOY_TURRET},
+     {SkillId::SWARM_DEPLOY, SkillId::OVERCLOCK, SkillId::DETONATE_SWARM, SkillId::SWARM_QUEEN},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
 };
 
@@ -793,21 +793,13 @@ void Engine::init() {
         if (!s_engine) return;
         EntityPool& pool = s_engine->m_entities;
 
+        f32 floorMult = 1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f;
+
         if (type == 0) {
-            // Combat drone — large metal spider, rushes enemies, melee
-            // Check if one already exists (heal instead of double-spawn)
-            for (u32 a = 0; a < pool.activeCount; a++) {
-                u32 idx = pool.activeList[a];
-                Entity& ex = pool.entities[idx];
-                if ((ex.flags & ENT_FRIENDLY) && !(ex.flags & ENT_DEAD) &&
-                    ex.npcClass == NpcClass::NONE && ex.enemyType == EnemyType::SPIDER) {
-                    ex.health = ex.maxHealth; // full repair
-                    LOG_INFO("Combat Drone REPAIRED (existing drone found at idx %u)", idx);
-                    return;
-                }
-            }
+            // Spider drone — melee ground unit. Swarm Overlord spawns many of these.
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.4f, 0.2f, 0.4f}, false, 80.0f, 5.0f, 15.0f, 2.5f, 0.6f, 10.0f);
+                {0.3f, 0.2f, 0.3f}, false, 30.0f * floorMult, 6.0f * floorMult,
+                12.0f, 4.0f, 0.5f, 8.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->flags        |= ENT_FRIENDLY;
@@ -816,33 +808,44 @@ void Engine::init() {
                 e->materialId    = 49; // prop_iron
                 e->npcWeaponType = WeaponType::MELEE;
                 e->aiState       = AIState::IDLE;
-                LOG_INFO("Combat Drone SPAWNED at (%.1f,%.1f,%.1f) meshId=%u",
-                         position.x, position.y, position.z, e->meshId);
-            } else {
-                LOG_WARN("Combat Drone spawn FAILED (pool full? h.index=%u)", h.index);
+                e->baseMoveSpeed      = e->moveSpeed;
+                e->baseAttackCooldown = e->attackCooldown;
             }
         } else if (type == 1) {
-            // Swarm drone — limit to 2 active (3 after floor 20 upgrade)
-            u32 swarmCount = 0;
-            u32 swarmMax = (s_engine->m_level.currentFloor >= 20) ? 3 : 2;
-            for (u32 a = 0; a < pool.activeCount; a++) {
-                u32 si = pool.activeList[a];
-                Entity& se = pool.entities[si];
-                if ((se.flags & ENT_UNTARGETABLE) && (se.flags & ENT_FRIENDLY) && !(se.flags & ENT_DEAD))
-                    swarmCount++;
-            }
-            if (swarmCount >= swarmMax) return; // at capacity
-
+            // Bat drone — flying hitscan unit. Vulnerable and targetable.
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.15f, 0.1f, 0.15f}, true, 9999.0f, 5.0f, 12.0f, 8.0f, 1.5f, 3.0f);
+                {0.15f, 0.1f, 0.15f}, true, 20.0f * floorMult, 4.0f * floorMult,
+                12.0f, 8.0f, 1.0f, 3.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
-                e->flags        |= ENT_FRIENDLY | ENT_FLYING | ENT_UNTARGETABLE;
+                e->flags        |= ENT_FRIENDLY | ENT_FLYING;
                 e->enemyType     = EnemyType::GENERIC;
                 e->meshId        = s_engine->m_meshIdBat;
                 e->materialId    = 49; // prop_iron
                 e->npcWeaponType = WeaponType::HITSCAN;
                 e->aiState       = AIState::IDLE;
+                e->baseMoveSpeed      = e->moveSpeed;
+                e->baseAttackCooldown = e->attackCooldown;
+            }
+        } else if (type == 3) {
+            // Swarm Queen — large tanky spider that auto-spawns minis every 2s for 20s
+            EntityHandle h = EntitySystem::spawn(pool, position,
+                {0.5f, 0.4f, 0.5f}, false, 200.0f * floorMult, 8.0f * floorMult,
+                15.0f, 3.0f, 1.0f, 10.0f);
+            Entity* e = handleGet(pool, h);
+            if (e) {
+                e->flags        |= ENT_FRIENDLY;
+                e->enemyType     = EnemyType::SPIDER;
+                e->meshId        = s_engine->m_meshIdSpider;
+                e->materialId    = MaterialSystem::getIdByName("gold_trim");
+                if (e->materialId == 0) e->materialId = 49; // fallback
+                e->npcWeaponType = WeaponType::MELEE;
+                e->aiState       = AIState::IDLE;
+                e->queenLifeTimer  = 20.0f;
+                e->queenSpawnTimer = 2.0f;
+                e->baseMoveSpeed      = e->moveSpeed;
+                e->baseAttackCooldown = e->attackCooldown;
+                // Scale up visually (halfExtents already larger)
             }
         } else if (type == 2) {
             // Mobile turret bot — armored body on tank treads, follows player when idle.
@@ -866,6 +869,31 @@ void Engine::init() {
                 // Spark burst on deploy — visual feedback
                 ParticleSystem::spawnSparks(s_engine->m_particles, position, {0, 1, 0}, 8);
             }
+        }
+    });
+    // Share the same drone spawn path with EnemyAI for Swarm Queen auto-spawning.
+    // The SkillSystem callback is a captureless lambda stored as function pointer —
+    // EnemyAI needs the same capability so the queen can spawn mini drones.
+    EnemyAI::setDroneSpawnCallback([](Vec3 pos, u8 type) {
+        if (!s_engine) return;
+        // Re-invoke the skill system's drone spawn (same lambda body as above)
+        // by calling the SkillSystem callback which is stored as a static.
+        // Simplest: just inline the spawn for type 0 (spider mini drone)
+        EntityPool& pool = s_engine->m_entities;
+        f32 fm = 1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f;
+        EntityHandle h = EntitySystem::spawn(pool, pos,
+            {0.3f, 0.2f, 0.3f}, false, 30.0f * fm, 6.0f * fm,
+            12.0f, 4.0f, 0.5f, 8.0f);
+        Entity* e = handleGet(pool, h);
+        if (e) {
+            e->flags        |= ENT_FRIENDLY;
+            e->enemyType     = EnemyType::SPIDER;
+            e->meshId        = s_engine->m_meshIdSpider;
+            e->materialId    = 49;
+            e->npcWeaponType = WeaponType::MELEE;
+            e->aiState       = AIState::IDLE;
+            e->baseMoveSpeed      = e->moveSpeed;
+            e->baseAttackCooldown = e->attackCooldown;
         }
     });
 

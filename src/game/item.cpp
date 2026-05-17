@@ -100,6 +100,10 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "headshot")             return SkillId::HEADSHOT;
     // Tinkerer
     if (s == "combat_drone")    return SkillId::COMBAT_DRONE;
+    if (s == "swarm_deploy")    return SkillId::SWARM_DEPLOY;
+    if (s == "overclock")       return SkillId::OVERCLOCK;
+    if (s == "detonate_swarm")  return SkillId::DETONATE_SWARM;
+    if (s == "swarm_queen")     return SkillId::SWARM_QUEEN;
     if (s == "swarm_drones")    return SkillId::SWARM_DRONES;
     if (s == "stun_grenade")    return SkillId::STUN_GRENADE;
     if (s == "throwaway")       return SkillId::THROWAWAY;

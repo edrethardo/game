@@ -1281,6 +1281,14 @@ bool Engine::updateFloorDoor() {
                 saveGame(m_activeSaveSlot);
                 LOG_INFO("Descending to floor %u", m_level.currentFloor);
 
+                // Refresh all cooldowns on floor descend
+                for (u32 p = 0; p < MAX_PLAYERS; p++) {
+                    m_skillStates[p].cooldownTimer = 0.0f;
+                    for (u32 s = 0; s < 4; s++) m_classSkillStates[s].cooldownTimer = 0.0f;
+                }
+                m_bootSkillStates[0].cooldownTimer = 0.0f;
+                m_helmetSkillStates[0].cooldownTimer = 0.0f;
+
                 // Snapshot floor stats for transition screen
                 m_transition.snapshotKills = m_transition.floorKillCount;
                 m_transition.snapshotTime = m_transition.floorTime;

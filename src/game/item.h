@@ -125,9 +125,13 @@ enum struct SkillId : u8 {
     HEADSHOT,
 
     // Tinkerer
-    COMBAT_DRONE,
-    SWARM_DRONES,
-    STUN_GRENADE,
+    COMBAT_DRONE,       // legacy
+    SWARM_DRONES,       // legacy
+    STUN_GRENADE,       // legacy
+    SWARM_DEPLOY,       // mass drone spawn (3 spiders + 3 bats)
+    OVERCLOCK,          // buff all drones +100% dmg +50% speed
+    DETONATE_SWARM,     // explode all drones for AoE
+    SWARM_QUEEN,        // summon auto-spawning queen
     // (reuses DEPLOY_TURRET)
 
     // Legendary weapon effects
