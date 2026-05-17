@@ -527,9 +527,11 @@ void Engine::gameUpdate(f32 dt) {
 
     // Player movement/aiming — disabled while inventory is open
     if (!m_inventoryOpen) {
-        // Shadow Dance: +20% move speed while active
+        // Speed buffs: Shadow Dance +20%, Shrine +25%, War Cry/Overdrive +30%
         f32 savedSpeed = m_localPlayer.moveSpeed;
         if (m_localPlayer.shadowDanceTimer > 0.0f) m_localPlayer.moveSpeed *= 1.2f;
+        if (m_localPlayer.shrineBuff == 2) m_localPlayer.moveSpeed *= (1.0f + m_localPlayer.shrineBuffValue);
+        if (m_localPlayer.overdriveTimer > 0.0f) m_localPlayer.moveSpeed *= 1.3f;
         PlayerController::update(m_localPlayer, dt);
         m_localPlayer.moveSpeed = savedSpeed;
         if (!m_localPlayer.noclip) {
@@ -777,7 +779,7 @@ void Engine::gameUpdate(f32 dt) {
         Entity& e = m_entities.entities[idx];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
         if (e.flags & ENT_FRIENDLY) continue;
-        if (e.enemyRole != EnemyRole::AURA) continue;
+        if (!(e.enemyRole & EnemyRole::AURA)) continue;
         // Check distance to local player
         Vec3 diff = m_localPlayer.position - e.position;
         f32 dist2 = diff.x * diff.x + diff.z * diff.z;
@@ -1098,6 +1100,8 @@ void Engine::gameUpdate(f32 dt) {
     }
     if (m_localPlayer.smokeTimer > 0.0f)
         m_localPlayer.smokeTimer -= dt;
+    if (m_localPlayer.overdriveTimer > 0.0f)
+        m_localPlayer.overdriveTimer -= dt;
     // Shadow Dance: tick timer, keep smokeTimer synced, apply speed bonus
     if (m_localPlayer.shadowDanceTimer > 0.0f) {
         m_localPlayer.shadowDanceTimer -= dt;

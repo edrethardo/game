@@ -1612,6 +1612,387 @@ def gen_butcher(height=2.5):
     return mb
 
 
+def gen_hellhound(height=1.2):
+    """Hellhound — quadruped canine demon. Low to the ground, long body, snarling jaws.
+
+    Origin at feet (Y=0). Oriented along Z axis (nose at -Z, tail at +Z).
+    Uses spider rig for 4-legged animation but with canine proportions.
+    """
+    mb = MeshBuilder()
+    vs = height / 10.0  # 10 voxels tall, compact
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Head (snarling) ---
+    fill_box(-2, 6, -5, 4, 3, 3)   # skull
+    fill_box(-1, 6, -7, 2, 2, 2)   # snout/jaw
+    # Ears
+    filled.add((-2, 9, -4))
+    filled.add((1, 9, -4))
+    # Eye sockets
+    filled.discard((-2, 8, -5))
+    filled.discard((1, 8, -5))
+
+    # --- Neck (thick, sloping down) ---
+    fill_box(-2, 5, -3, 4, 3, 2)
+
+    # --- Torso (long, barrel-shaped) ---
+    fill_box(-2, 4, -1, 4, 4, 6)   # main body
+    fill_box(-3, 5, 0, 6, 2, 4)    # ribcage width
+
+    # --- Haunches (rear, slightly raised) ---
+    fill_box(-2, 4, 5, 4, 3, 2)
+
+    # --- Tail ---
+    filled.add((0, 6, 7))
+    filled.add((0, 7, 8))
+    filled.add((0, 7, 9))
+
+    # --- Front legs ---
+    fill_box(-3, 0, -2, 2, 5, 2)   # left front
+    fill_box(1, 0, -2, 2, 5, 2)    # right front
+    # Paws
+    fill_box(-3, 0, -3, 2, 1, 3)
+    fill_box(1, 0, -3, 2, 1, 3)
+
+    # --- Rear legs ---
+    fill_box(-3, 0, 4, 2, 4, 2)    # left rear
+    fill_box(1, 0, 4, 2, 4, 2)     # right rear
+    # Paws
+    fill_box(-3, 0, 3, 2, 1, 3)
+    fill_box(1, 0, 3, 2, 1, 3)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_wraith(height=2.0):
+    """Tomb Wraith — ghostly legless floating torso with trailing arms.
+    Origin at feet (Y=0). 18 voxels tall. No legs, just a wispy tail."""
+    mb = MeshBuilder()
+    vs = height / 18.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Hood point
+    fill_box(0, 17, 0, 1, 1, 1)
+    # Hood dome
+    fill_box(-1, 15, -1, 3, 2, 3)
+    # Head inside hood
+    fill_box(-1, 13, -1, 3, 2, 2)
+    # Shoulder shroud
+    fill_box(-2, 12, 0, 5, 1, 2)
+    # Torso — narrow with open center spine (gaps for ghostly look)
+    fill_box(-1, 6, 0, 3, 6, 2)
+    # Remove center voxels to create spine gaps
+    for gy in range(7, 12, 2):
+        filled.discard((0, gy, 0))
+        filled.discard((0, gy, 1))
+    # Arms — very long, thin
+    # Upper arms
+    fill_box(-2, 9, 0, 1, 3, 1)
+    fill_box(2, 9, 0, 1, 3, 1)
+    # Lower arms (extending very low)
+    fill_box(-2, 1, 0, 1, 5, 1)
+    fill_box(2, 1, 0, 1, 5, 1)
+    # Wispy tail — tapers from pelvis, no legs
+    fill_box(0, 0, 0, 1, 3, 1)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_sentinel(height=1.8):
+    """Catacomb Sentinel — armored shield-bearing undead guard.
+    Origin at feet (Y=0). 16 voxels tall. Solid plated torso."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Helmet (flat top, wider than skull)
+    fill_box(-2, 13, -2, 4, 3, 4)
+    # Thick neck
+    fill_box(-1, 12, 0, 2, 1, 2)
+    # Solid plated torso
+    fill_box(-2, 7, -1, 5, 5, 3)
+    # Left shield arm (bulky)
+    fill_box(-4, 5, 0, 2, 6, 1)
+    # Right arm — upper
+    fill_box(3, 9, 0, 1, 3, 1)
+    # Right arm — lower
+    fill_box(3, 6, 0, 1, 3, 1)
+    # Armored pelvis
+    fill_box(-2, 5, 0, 5, 2, 2)
+    # Thick legs
+    fill_box(-2, 2, 0, 2, 3, 1)
+    fill_box(1, 2, 0, 2, 3, 1)
+    # Wide boots
+    fill_box(-2, 0, -1, 2, 2, 2)
+    fill_box(1, 0, -1, 2, 2, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_cave_troll(height=2.2):
+    """Cave Troll — hunched brutish creature with massive shoulders.
+    Origin at feet (Y=0). 18 voxels tall. Short legs, big fists."""
+    mb = MeshBuilder()
+    vs = height / 18.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Small head (sunk between shoulders)
+    fill_box(-1, 15, -1, 3, 2, 3)
+    # No visible neck — head sits directly on shoulders
+    # Massive shoulders
+    fill_box(-4, 13, -1, 9, 2, 3)
+    # Barrel torso (solid fill)
+    fill_box(-3, 8, -2, 7, 5, 4)
+    # Thick arms — upper
+    fill_box(-5, 7, 0, 2, 4, 1)
+    fill_box(4, 7, 0, 2, 4, 1)
+    # Thick arms — lower
+    fill_box(-5, 3, 0, 2, 4, 1)
+    fill_box(4, 3, 0, 2, 4, 1)
+    # Big fists
+    fill_box(-6, 2, -1, 2, 2, 2)
+    fill_box(4, 2, -1, 2, 2, 2)
+    # Wide pelvis
+    fill_box(-3, 6, -1, 7, 2, 3)
+    # Short thick legs
+    fill_box(-3, 2, 0, 3, 3, 2)
+    fill_box(1, 2, 0, 3, 3, 2)
+    # Wide flat feet
+    fill_box(-3, 0, -1, 3, 2, 3)
+    fill_box(1, 0, -1, 3, 2, 3)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_pit_fiend(height=2.4):
+    """Pit Fiend — winged demon with tail and horns.
+    Origin at feet (Y=0). 20 voxels tall."""
+    mb = MeshBuilder()
+    vs = height / 20.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head
+    fill_box(-2, 16, -2, 5, 3, 4)
+    # Short horns
+    fill_box(-2, 19, 0, 1, 2, 1)
+    fill_box(2, 19, 0, 1, 2, 1)
+    # Thick neck
+    fill_box(-1, 14, -1, 3, 2, 2)
+    # Torso
+    fill_box(-3, 8, -2, 7, 6, 4)
+    # Barrel chest protrusion
+    fill_box(-2, 10, -3, 5, 3, 1)
+    # Wing plates (on back)
+    fill_box(-5, 11, 2, 3, 4, 1)
+    fill_box(3, 11, 2, 3, 4, 1)
+    # Arms — upper
+    fill_box(-4, 9, 0, 1, 4, 1)
+    fill_box(4, 9, 0, 1, 4, 1)
+    # Arms — lower
+    fill_box(-4, 5, 0, 1, 4, 1)
+    fill_box(4, 5, 0, 1, 4, 1)
+    # Fists
+    fill_box(-5, 4, -1, 2, 2, 2)
+    fill_box(4, 4, -1, 2, 2, 2)
+    # Tail — chain of single voxels trailing back
+    filled.add((0, 7, 2))
+    filled.add((0, 6, 2))
+    filled.add((0, 5, 2))
+    # Legs
+    fill_box(-3, 3, -1, 3, 4, 2)
+    fill_box(1, 3, -1, 3, 4, 2)
+    # Hooves
+    fill_box(-3, 0, -1, 3, 1, 3)
+    fill_box(1, 0, -1, 3, 1, 3)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_succubus(height=1.9):
+    """Succubus — lithe demonic humanoid with wing pauldrons and tail.
+    Origin at feet (Y=0). 17 voxels tall."""
+    mb = MeshBuilder()
+    vs = height / 17.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head
+    fill_box(-1, 13, -1, 3, 3, 3)
+    # Small horns
+    filled.add((-1, 16, 0))
+    filled.add((1, 16, 0))
+    # Thin neck
+    fill_box(0, 12, 0, 1, 1, 1)
+    # Narrow shoulders
+    fill_box(-2, 11, 0, 5, 1, 2)
+    # Wing pauldrons (on back)
+    fill_box(-3, 10, 1, 2, 2, 1)
+    fill_box(2, 10, 1, 2, 2, 1)
+    # Slender torso
+    fill_box(-1, 7, 0, 3, 4, 2)
+    # Thin arms — upper
+    fill_box(-2, 8, 0, 1, 3, 1)
+    fill_box(2, 8, 0, 1, 3, 1)
+    # Thin arms — lower
+    fill_box(-2, 5, 0, 1, 3, 1)
+    fill_box(2, 5, 0, 1, 3, 1)
+    # Slim pelvis
+    fill_box(-1, 6, 0, 3, 1, 2)
+    # Tail — single voxels trailing back
+    filled.add((0, 6, 1))
+    filled.add((0, 5, 2))
+    filled.add((0, 4, 3))
+    # Long thin legs
+    fill_box(-1, 1, 0, 1, 4, 1)
+    fill_box(1, 1, 0, 1, 4, 1)
+    # Pointed feet
+    filled.add((-1, 0, 0))
+    filled.add((1, 0, 0))
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_abyssal_titan(height=2.8):
+    """Abyssal Titan — massive void colossus with crystal spikes.
+    Origin at feet (Y=0). 22 voxels tall. Enormous build."""
+    mb = MeshBuilder()
+    vs = height / 22.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head
+    fill_box(-2, 18, -2, 5, 4, 4)
+    # Crystal spikes (crown)
+    filled.add((-2, 22, 0))
+    filled.add((0, 22, 0))
+    filled.add((2, 22, 0))
+    # Thick neck
+    fill_box(-1, 16, -1, 3, 2, 3)
+    # Crystal shoulder spikes
+    fill_box(-4, 17, 0, 1, 2, 1)
+    fill_box(4, 17, 0, 1, 2, 1)
+    # Massive torso (solid)
+    fill_box(-4, 9, -2, 9, 7, 5)
+    # Huge arms — upper
+    fill_box(-6, 10, 0, 2, 5, 1)
+    fill_box(5, 10, 0, 2, 5, 1)
+    # Huge arms — lower
+    fill_box(-6, 5, 0, 2, 5, 1)
+    fill_box(5, 5, 0, 2, 5, 1)
+    # Fists
+    fill_box(-7, 4, -1, 2, 2, 2)
+    fill_box(5, 4, -1, 2, 2, 2)
+    # Wide pelvis
+    fill_box(-4, 7, -1, 9, 2, 3)
+    # Massive legs
+    fill_box(-4, 2, -1, 3, 5, 3)
+    fill_box(2, 2, -1, 3, 5, 3)
+    # Enormous feet
+    fill_box(-4, 0, -2, 3, 2, 4)
+    fill_box(2, 0, -2, 3, 2, 4)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_entropy_weaver(height=2.0):
+    """Entropy Weaver — spindly hooded void spellcaster with extra long arms.
+    Origin at feet (Y=0). 18 voxels tall. Robed lower body widens downward."""
+    mb = MeshBuilder()
+    vs = height / 18.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Hood point
+    fill_box(0, 17, 0, 1, 1, 1)
+    # Wide cowl
+    fill_box(-2, 15, -1, 5, 2, 3)
+    # Head inside cowl
+    fill_box(-1, 13, 0, 2, 2, 2)
+    # Wide shoulder drape
+    fill_box(-3, 12, 0, 7, 1, 2)
+    # Narrow torso with rune border — fill outer ring for top 2 rows
+    # Full torso base
+    fill_box(-1, 8, 0, 3, 4, 2)
+    # Rune border: fill wider then keep only outer ring for Y=10-11
+    fill_box(-2, 10, -1, 5, 2, 2)
+    # Remove inner voxels of the wider border to leave just the ring
+    for ry in [10, 11]:
+        for rx in [-1, 0, 1]:
+            filled.discard((rx, ry, -1))
+    # Extra long arms — upper
+    fill_box(-3, 9, 0, 1, 3, 1)
+    fill_box(3, 9, 0, 1, 3, 1)
+    # Extra long arms — lower (reaching very low)
+    fill_box(-3, 2, 0, 1, 5, 1)
+    fill_box(3, 2, 0, 1, 5, 1)
+    # Claw fingers
+    fill_box(-3, 0, 0, 1, 2, 1)
+    fill_box(3, 0, 0, 1, 2, 1)
+    # Robe — widens from 3 to 5 to 7
+    fill_box(-1, 5, -1, 3, 1, 3)  # Y=5, width 3
+    fill_box(-2, 3, -1, 5, 2, 3)  # Y=3-4, width 5
+    fill_box(-3, 2, -1, 7, 1, 3)  # Y=2, width 7
+    # Robe hem
+    fill_box(-3, 0, -2, 7, 2, 4)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
 # ---------------------------------------------------------------------------
 # Type registry
 # ---------------------------------------------------------------------------
@@ -2332,6 +2713,46 @@ MESH_TYPES = {
         "func": gen_herald,
         "desc": "Herald aura enemy — tall thin skeleton. Params: --height",
         "default_file": "herald.obj",
+    },
+    "hellhound": {
+        "func": gen_hellhound,
+        "desc": "Quadruped canine demon — low, long body, snarling. Params: --height",
+        "default_file": "hellhound.obj",
+    },
+    "wraith": {
+        "func": gen_wraith,
+        "desc": "Ghostly legless wraith — floating torso + trailing arms. Params: --height",
+        "default_file": "wraith.obj",
+    },
+    "sentinel": {
+        "func": gen_sentinel,
+        "desc": "Armored shield-bearing sentinel — solid plated torso. Params: --height",
+        "default_file": "sentinel.obj",
+    },
+    "cave_troll": {
+        "func": lambda height=2.2: gen_cave_troll(height),
+        "desc": "Hunched brutish troll — massive shoulders, short legs. Params: --height",
+        "default_file": "cave_troll.obj",
+    },
+    "pit_fiend": {
+        "func": lambda height=2.4: gen_pit_fiend(height),
+        "desc": "Winged demon with tail and horns. Params: --height",
+        "default_file": "pit_fiend.obj",
+    },
+    "succubus": {
+        "func": gen_succubus,
+        "desc": "Lithe winged demon — slender with pauldrons and tail. Params: --height",
+        "default_file": "succubus.obj",
+    },
+    "abyssal_titan": {
+        "func": lambda height=2.8: gen_abyssal_titan(height),
+        "desc": "Massive void colossus — crystal spikes, enormous build. Params: --height",
+        "default_file": "abyssal_titan.obj",
+    },
+    "entropy_weaver": {
+        "func": gen_entropy_weaver,
+        "desc": "Spindly hooded void caster — extra long arms, robed. Params: --height",
+        "default_file": "entropy_weaver.obj",
     },
     "sword": {
         "func": gen_sword,

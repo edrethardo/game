@@ -30,10 +30,38 @@ void Combat::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
     s_screenShake  = shake;
 }
 
-void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
+void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
+                          const Vec3* damageOrigin) {
     Entity* e = handleGet(pool, target);
     if (!e) return;
     if (e->flags & ENT_DEAD) return;
+
+    // Shield Bearer frontal damage reduction — forces player to flank
+    if ((e->enemyRole & EnemyRole::SHIELD_BEARER) && damageOrigin) {
+        Vec3 toSource = *damageOrigin - e->position;
+        f32 len = sqrtf(toSource.x * toSource.x + toSource.z * toSource.z);
+        if (len > 0.001f) {
+            Vec3 dirToSource = {toSource.x / len, 0.0f, toSource.z / len};
+            // Entity facing direction from yaw
+            Vec3 facing = {sinf(e->yaw), 0.0f, cosf(e->yaw)};
+            f32 d = dirToSource.x * facing.x + dirToSource.z * facing.z;
+            // dot < -0.3 means damage came from the front (facing toward source)
+            if (d < -0.3f) damage *= 0.5f;
+        }
+    }
+
+    // Minion Shield: boss takes 75% reduced damage while alive minions exist
+    if (e->minionShield && e->bossDefIdx != 0xFF && e->spawnerIdx == 0xFFFF) {
+        bool hasAliveMinion = false;
+        for (u32 a = 0; a < pool.activeCount; a++) {
+            const Entity& m = pool.entities[pool.activeList[a]];
+            if (m.spawnerIdx == target.index && !(m.flags & ENT_DEAD)) {
+                hasAliveMinion = true;
+                break;
+            }
+        }
+        if (hasAliveMinion) damage *= 0.25f;
+    }
 
     // Paladin passive: 25% damage reduction
     if (e->npcClass == NpcClass::PALADIN) damage *= 0.75f;

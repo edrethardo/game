@@ -950,7 +950,7 @@ void Engine::render(f32 alpha) {
             if (!(e.flags & ENT_ACTIVE)) continue;
             if (e.flags & ENT_DEAD) continue;
             // Show disc under heralds (larger, brighter) and buffed enemies (smaller, dimmer)
-            bool isHerald = (e.enemyRole == EnemyRole::AURA);
+            bool isHerald = (e.enemyRole & EnemyRole::AURA) != 0;
             if (!isHerald && !e.hasAuraBuff) continue;
 
             Vec3 feetPos = e.position - Vec3{0, e.halfExtents.y - 0.03f, 0};
@@ -1464,7 +1464,7 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         const Entity& e = entPool.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
-        if (e.enemyRole != EnemyRole::AURA) continue;
+        if (!(e.enemyRole & EnemyRole::AURA)) continue;
 
         Vec3 base = e.position - Vec3{0, e.halfExtents.y - 0.02f, 0};
         f32 t = e.animTimer * 1.5f;

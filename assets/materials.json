@@ -789,6 +789,76 @@
       "id": 126,
       "name": "weapon_cleaver",
       "texture": "weapon_cleaver_tex_42.png"
+    },
+    {
+      "id": 127,
+      "name": "bone_archer_skin",
+      "texture": "bone_archer_skin_42.png"
+    },
+    {
+      "id": 128,
+      "name": "catacomb_sentinel_skin",
+      "texture": "catacomb_sentinel_skin_42.png"
+    },
+    {
+      "id": 129,
+      "name": "tomb_wraith_skin",
+      "texture": "tomb_wraith_skin_42.png"
+    },
+    {
+      "id": 130,
+      "name": "plague_bat_skin",
+      "texture": "plague_bat_skin_42.png"
+    },
+    {
+      "id": 131,
+      "name": "web_spinner_skin",
+      "texture": "web_spinner_skin_42.png"
+    },
+    {
+      "id": 132,
+      "name": "burrowing_widow_skin",
+      "texture": "burrowing_widow_skin_42.png"
+    },
+    {
+      "id": 133,
+      "name": "cave_troll_skin",
+      "texture": "cave_troll_skin_42.png"
+    },
+    {
+      "id": 134,
+      "name": "pit_fiend_skin",
+      "texture": "pit_fiend_skin_42.png"
+    },
+    {
+      "id": 135,
+      "name": "hellforge_smith_skin",
+      "texture": "hellforge_smith_skin_42.png"
+    },
+    {
+      "id": 136,
+      "name": "succubus_skin",
+      "texture": "succubus_skin_42.png"
+    },
+    {
+      "id": 137,
+      "name": "entropy_weaver_skin",
+      "texture": "entropy_weaver_skin_42.png"
+    },
+    {
+      "id": 138,
+      "name": "nullifier_skin",
+      "texture": "nullifier_skin_42.png"
+    },
+    {
+      "id": 139,
+      "name": "abyssal_titan_skin",
+      "texture": "abyssal_titan_skin_42.png"
+    },
+    {
+      "id": 140,
+      "name": "crypt_herald_skin",
+      "texture": "crypt_herald_skin_42.png"
     }
   ]
 }

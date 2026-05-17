@@ -242,8 +242,20 @@ void ProjectileSystem::update(ProjectilePool& pool,
             };
             if (CombatQuery::aabbOverlap(projBox, playerBox)) {
                 Combat::applyDamageToPlayer(player, p.damage, &p.position);
-                // Enemy projectiles apply a slow debuff to the player
-                player.slowTimer = 2.5f;
+                // Apply on-hit status effect from projectile (or default slow)
+                if (p.onHitEffect == 1) {  // poison
+                    player.poisonTimer = fmaxf(player.poisonTimer, p.onHitDuration);
+                    player.poisonDps = 4.0f;
+                } else if (p.onHitEffect == 2) {  // slow
+                    player.slowTimer = fmaxf(player.slowTimer, p.onHitDuration);
+                } else if (p.onHitEffect == 3) {  // burn
+                    player.burnTimer = fmaxf(player.burnTimer, p.onHitDuration);
+                } else if (p.onHitEffect == 4) {  // freeze
+                    player.freezeTimer = fmaxf(player.freezeTimer, p.onHitDuration);
+                } else {
+                    // Default: mild slow for enemy projectiles
+                    player.slowTimer = 2.5f;
+                }
                 destroyProjectile(pool, i);
                 continue;
             }

@@ -311,6 +311,14 @@ static void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 hitCount = static_cast<f32>(result.entitiesHit);
     f32 healAmt = temp.damage * 0.05f * hitCount;
     player.health = fminf(player.health + healAmt, player.maxHealth);
+
+    // VFX: wide red arc + debris on hit + screen shake
+    if (s_novaCallback) s_novaCallback(origin, temp.range, {0.9f, 0.25f, 0.1f});
+    if (s_particlePool && result.entitiesHit > 0) {
+        ParticleSystem::spawnDebris(*s_particlePool, origin + forward * 1.5f, 8);
+        ParticleSystem::spawnSparks(*s_particlePool, origin + forward * 1.5f, forward, 6);
+    }
+    if (s_screenShake) s_screenShake->trigger(0.04f, 0.2f);
     LOG_INFO("Cleave fired, hit %u, healed %.1f", result.entitiesHit, healAmt);
 }
 
@@ -356,7 +364,8 @@ static void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entiti
 }
 
 // Stun all enemies within 6m with a war-cry shout.
-static void fireWarCry(Vec3 origin, const SkillDef* def, EntityPool& entities)
+static void fireWarCry(Vec3 origin, const SkillDef* def, EntityPool& entities,
+                        Player& player)
 {
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
@@ -365,12 +374,31 @@ static void fireWarCry(Vec3 origin, const SkillDef* def, EntityPool& entities)
         entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, range,
         hits, dists, MAX_ENTITIES);
 
+    u32 stunned = 0;
     for (u32 i = 0; i < hitCount; i++) {
         Entity* e = handleGet(entities, hits[i]);
-        if (e) e->stunTimer = 2.0f;  // 2-second stun
+        if (!e) continue;
+        if (e->flags & ENT_FRIENDLY) {
+            // Buff allies: +30% speed for 3s via overclock timer (reuse existing field)
+            e->overclockTimer = 3.0f;
+        } else {
+            e->stunTimer = 2.0f;
+            stunned++;
+        }
     }
+
+    // Buff player: +30% speed for 3s via shrine speed buff (temporary)
+    // Use a simple timer on the player — reuse overdriveTimer for the speed boost
+    player.overdriveTimer = fmaxf(player.overdriveTimer, 3.0f);
+
+    // VFX: massive golden shockwave + upward sparks + screen shake
     if (s_novaCallback) s_novaCallback(origin, range, {1.0f, 0.85f, 0.2f});
-    LOG_INFO("War Cry stunned %u enemies", hitCount);
+    if (s_particlePool) {
+        ParticleSystem::spawnSparks(*s_particlePool, origin, {0, 1, 0}, 12);
+        ParticleSystem::spawnMagicBurst(*s_particlePool, origin, 255, 220, 50, 10);
+    }
+    if (s_screenShake) s_screenShake->trigger(0.08f, 0.4f);
+    LOG_INFO("War Cry: stunned %u enemies, buffed allies with +30%% speed for 3s", stunned);
 }
 
 // Instant 360-degree AoE melee spin at short range (no health cost — uses energy).
@@ -387,7 +415,18 @@ static void fireWhirlwind(Vec3 origin, const SkillDef* def, EntityPool& entities
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], damage);
     }
+
+    // VFX: orange shockwave + spinning debris ring + screen shake
     if (s_novaCallback) s_novaCallback(origin, range, {0.8f, 0.3f, 0.1f});
+    if (s_particlePool) {
+        // Spinning debris ring around player
+        for (u32 p = 0; p < 12; p++) {
+            f32 angle = (6.2832f / 12.0f) * p;
+            Vec3 sparkPos = origin + Vec3{cosf(angle) * range * 0.8f, 0.5f, sinf(angle) * range * 0.8f};
+            ParticleSystem::spawnSparks(*s_particlePool, sparkPos, {0, 1, 0}, 2);
+        }
+    }
+    if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
     LOG_INFO("Whirlwind hit %u enemies", hitCount);
 }
 
@@ -1869,7 +1908,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireThunderclap(eyePos, def, entities);
         break;
     case SkillId::WAR_CRY:
-        fireWarCry(eyePos, def, entities);
+        fireWarCry(eyePos, def, entities, player);
         break;
     case SkillId::WHIRLWIND:
         fireWhirlwind(eyePos, def, entities);

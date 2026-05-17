@@ -56,7 +56,7 @@ static WeaponSubtype weaponSubtypeFromString(const std::string& s) {
     return WeaponSubtype::NONE;
 }
 
-static SkillId skillIdFromString(const std::string& s) {
+SkillId skillIdFromString(const std::string& s) {
     // Legacy legendary skills
     if (s == "frozen_orb")      return SkillId::FROZEN_ORB;
     if (s == "chain_lightning")  return SkillId::CHAIN_LIGHTNING;

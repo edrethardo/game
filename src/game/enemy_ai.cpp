@@ -12,6 +12,8 @@
 #include "game/projectile.h"
 #include "game/game_constants.h"
 #include "game/squad.h"
+#include "game/boss_ai.h"
+#include "game/boss_def.h"
 #include "world/raycast.h"
 #include "world/combat_query.h"
 #include "world/level_grid.h"
@@ -23,6 +25,10 @@
 // Queen drone auto-spawn callback — set by Engine so queen can spawn mini drones
 static void(*s_droneSpawnCb)(Vec3 pos, u8 type) = nullptr;
 void EnemyAI::setDroneSpawnCallback(void(*cb)(Vec3, u8)) { s_droneSpawnCb = cb; }
+
+// Boss personality table — set by Engine during init so boss AI can look up BossDefs
+static const BossDefTable* s_bossDefTable = nullptr;
+void EnemyAI::setBossDefTable(const BossDefTable* table) { s_bossDefTable = table; }
 
 // ---------------------------------------------------------------------------
 // Grid collision for entities (simplified axis-separated slide)
@@ -171,7 +177,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
     constexpr f32 AURA_RADIUS_SQ = 18.0f * 18.0f;
     for (u32 a = 0; a < pool.activeCount; a++) {
         Entity& herald = pool.entities[pool.activeList[a]];
-        if (herald.enemyRole != EnemyRole::AURA) continue;
+        if (!(herald.enemyRole & EnemyRole::AURA)) continue;
         if (herald.flags & ENT_DEAD) continue;
 
         for (u32 b = 0; b < pool.activeCount; b++) {
@@ -930,6 +936,11 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Boss behavior — unique skill per boss + aggressive chase after 1.5s LOS.
         // Each boss is identified by its spawn floor (e.level).
         if (e.enemyType == EnemyType::BOSS) {
+            // Delegate to BossAI personality system if this boss has a loaded def
+            if (e.bossDefIdx != 0xFF && s_bossDefTable && e.bossDefIdx < s_bossDefTable->count) {
+                BossAI::update(e, s_bossDefTable->defs[e.bossDefIdx], pool, projectiles, player, grid, dt);
+            }
+
             bool bossLOS = dist < 20.0f && hasLOS(e, player, grid);
 
             // Track LOS duration (repurpose flybyTarget.x as timer)
@@ -1187,7 +1198,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         // --- Archetype special abilities ---
         // Necromancer: resurrect nearest dead enemy every 8s
-        if (e.enemyRole == EnemyRole::SUMMONER) {
+        if (e.enemyRole & EnemyRole::SUMMONER) {
             e.tacticalTimer -= dt;
             if (e.tacticalTimer <= 0.0f) {
                 e.tacticalTimer = 3.0f;
@@ -1231,7 +1242,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
 
         // Shaman: heal lowest-HP ally within 8m every 1s
-        if (e.enemyRole == EnemyRole::HEALER && e.aiState != AIState::IDLE) {
+        if ((e.enemyRole & EnemyRole::HEALER) && e.aiState != AIState::IDLE) {
             e.tacticalTimer -= dt;
             if (e.tacticalTimer <= 0.0f) {
                 e.tacticalTimer = 1.0f;
@@ -1288,6 +1299,71 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.speechTimer = 2.0f;
                     }
                 }
+            }
+        }
+
+        // Charger: sprint at 2x speed, retreat after landing attack
+        if (e.enemyRole & EnemyRole::CHARGER) {
+            // Sprint at 2x speed during CHASE
+            if (e.aiState == AIState::CHASE) {
+                e.moveSpeed = e.baseMoveSpeed * 2.0f;
+            }
+
+            // Suicide bomber: charger+bomber combo self-destructs on reaching target.
+            // Kill via damage BEFORE setting ENT_DEAD so the death callback fires
+            // and triggers the bomber AoE explosion.
+            if ((e.enemyRole & EnemyRole::BOMBER) && e.aiState == AIState::ATTACK) {
+                e.attackAnimT = 0.3f;
+                EntityHandle selfH = {static_cast<u16>(i), e.generation};
+                Combat::applyDamage(pool, selfH, e.health + 1.0f); // lethal — triggers death callback + explosion
+                break;
+            }
+
+            // After attack animation finishes, retreat briefly (non-bomber chargers)
+            if (e.hasRetreated && e.attackAnimT <= 0.0f && e.aiState == AIState::ATTACK) {
+                e.aiState = AIState::RETREAT;
+                e.tacticalTimer = 1.0f;
+            }
+            // Mark for retreat when attack starts (but don't switch state yet)
+            if (e.attackAnimT > 0.2f && e.aiState == AIState::ATTACK) {
+                e.hasRetreated = true;
+            }
+            // Re-engage after retreat
+            if (e.aiState == AIState::RETREAT && e.tacticalTimer <= 0.0f) {
+                e.aiState = AIState::CHASE;
+                e.hasRetreated = false;
+            }
+        }
+
+        // Ranged Caster: prefer strafe at range, retreat if player closes
+        if (e.enemyRole & EnemyRole::RANGED_CASTER) {
+            if (dist < e.attackRange * 0.5f && e.aiState != AIState::RETREAT) {
+                // Player too close — retreat to preferred range
+                e.aiState = AIState::RETREAT;
+                e.tacticalTimer = 1.0f;
+            } else if (dist < e.attackRange && e.aiState == AIState::CHASE) {
+                // At firing range — switch to strafe
+                e.aiState = AIState::STRAFE;
+            }
+        }
+
+        // Bomber: dive-bomb (FLYBY) then retreat. Death explosion handled in death callback.
+        if (e.enemyRole & EnemyRole::BOMBER) {
+            if (e.aiState == AIState::ATTACK) {
+                // After attack, immediately retreat
+                e.aiState = AIState::RETREAT;
+                e.tacticalTimer = 2.0f;
+            }
+        }
+
+        // Shield Bearer: always face player (for frontal damage reduction in combat.cpp)
+        if (e.enemyRole & EnemyRole::SHIELD_BEARER) {
+            // Always face toward target for maximum frontal coverage
+            Vec3 toTarget = playerEye - e.position;
+            e.yaw = atan2f(toTarget.x, toTarget.z);
+            // Prefer surround state to spread out with other melee
+            if (e.aiState == AIState::CHASE && dist < e.attackRange * 2.0f) {
+                e.aiState = AIState::SURROUND;
             }
         }
 
@@ -1567,9 +1643,20 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::ATTACK: {
-            // Stand and attack — stop moving, but back away if too close to player
+            // Melee enemies creep forward while attacking to maintain pressure.
+            // Ranged enemies stand still. Chargers keep full speed.
             e.velocity = {0, 0, 0};
-            if (targetDist < e.attackRange * 0.4f && targetDist > 0.1f) {
+            bool isRangedAttacker = (e.attackRange > 5.0f);
+            if (!isRangedAttacker && targetDist > e.attackRange * 0.6f) {
+                // Creep toward target to stay in range (30% speed, or 80% for chargers)
+                Vec3 toTarget = targetPos - e.position;
+                f32 tLen = sqrtf(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
+                if (tLen > 0.01f) {
+                    f32 creepMult = (e.enemyRole & EnemyRole::CHARGER) ? 0.8f : 0.3f;
+                    e.velocity.x = (toTarget.x / tLen) * e.moveSpeed * creepMult;
+                    e.velocity.z = (toTarget.z / tLen) * e.moveSpeed * creepMult;
+                }
+            } else if (targetDist < e.attackRange * 0.4f && targetDist > 0.1f) {
                 Vec3 away = e.position - targetPos;
                 f32 awayLen = sqrtf(away.x * away.x + away.z * away.z);
                 if (awayLen > 0.01f) {
@@ -1675,11 +1762,11 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Dormant: sits still until player gets close. Mimics use a tight
             // trigger range; gargoyles (AMBUSH role) wake from further away.
             e.velocity = {0, 0, 0};
-            f32 triggerDist = (e.enemyRole == EnemyRole::AMBUSH) ? 4.0f : GameConst::MIMIC_TRIGGER_DIST;
+            f32 triggerDist = (e.enemyRole & EnemyRole::AMBUSH) ? 4.0f : GameConst::MIMIC_TRIGGER_DIST;
             if (dist <= triggerDist) {
                 e.aiState = AIState::CHASE;
                 e.attackTimer = 0.0f; // attack immediately on wake
-                if (e.enemyRole == EnemyRole::AMBUSH) {
+                if (e.enemyRole & EnemyRole::AMBUSH) {
                     // Gargoyle: silent wake, no chomp animation
                     e.speechText = "...";
                     e.speechTimer = 1.5f;

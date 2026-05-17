@@ -9,6 +9,7 @@
 #include "world/pathfinder.h"
 
 struct Player;
+struct BossDefTable;
 
 namespace EnemyAI {
     // Update all enemy AI: FSM transitions, movement, attacks.
@@ -21,4 +22,7 @@ namespace EnemyAI {
 
     // Set drone spawn callback for Swarm Queen auto-spawning
     void setDroneSpawnCallback(void(*cb)(Vec3 pos, u8 type));
+
+    // Set boss def table for personality-driven boss AI delegation
+    void setBossDefTable(const BossDefTable* table);
 }

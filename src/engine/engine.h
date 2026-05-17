@@ -16,6 +16,8 @@
 #include "game/weapon.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/boss_def.h"
+#include "game/enemy_def.h"
 #include "net/net.h"
 #include "net/net_player.h"
 #include "game/squad.h"
@@ -125,6 +127,12 @@ private:
     NetPlayer  m_players[MAX_PLAYERS];
     WeaponDef  m_weaponDefs[MAX_WEAPON_DEFS];
     u32        m_weaponDefCount = 0;
+
+    // Boss definitions (loaded from bosses.json)
+    BossDefTable m_bossDefs;
+
+    // Enemy definitions (loaded from enemies.json — replaces kTier* inline arrays)
+    EnemyDefTable m_enemyDefs;
 
     // Item/loot system
     ItemDef    m_itemDefs[MAX_ITEM_DEFS];

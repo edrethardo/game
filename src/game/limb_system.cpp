@@ -108,6 +108,20 @@ static const LimbConfig s_spiderConfig = {
     }
 };
 
+// Hellhound: 4 legs (quadruped gallop animation). Body mesh has no limbs.
+// Leg positions at each corner of the body (front-left, front-right, rear-left, rear-right)
+static const LimbConfig s_hellhoundConfig = {
+    4,
+    {
+        // Front legs — forward pivot
+        {{ 0.20f, 0.15f, -0.30f}, {0.08f, 0.20f, 0.08f}, 0.0f, 0, false},  // front-left
+        {{-0.20f, 0.15f, -0.30f}, {0.08f, 0.20f, 0.08f}, 0.0f, 0, true},   // front-right
+        // Rear legs — backward pivot
+        {{ 0.20f, 0.15f,  0.30f}, {0.08f, 0.20f, 0.08f}, 0.0f, 0, false},  // rear-left
+        {{-0.20f, 0.15f,  0.30f}, {0.08f, 0.20f, 0.08f}, 0.0f, 0, true},   // rear-right
+    }
+};
+
 static const LimbConfig s_genericConfig = {0, {}};
 
 // ============================================================
@@ -174,8 +188,9 @@ const LimbConfig& LimbSystem::getConfig(EnemyType type) {
         case EnemyType::SKELETON: return s_skeletonConfig;
         case EnemyType::BOSS:    return s_skeletonConfig; // boss uses same limb rig
         case EnemyType::BAT:     return s_batConfig;
-        case EnemyType::SPIDER:  return s_spiderConfig;
-        default:                 return s_genericConfig;
+        case EnemyType::SPIDER:    return s_spiderConfig;
+        case EnemyType::HELLHOUND: return s_hellhoundConfig;
+        default:                   return s_genericConfig;
     }
 }
 
@@ -195,6 +210,9 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
         case EnemyType::SPIDER:
             // 0-1 = mandibles, 2-9 = foot tips
             return (limbIdx < 2) ? s_mandibleMeshId : s_clawMeshId;
+        case EnemyType::HELLHOUND:
+            // 0-3 = legs (all use leg mesh)
+            return s_legMeshId;
         default:
             return 0;
     }
@@ -358,6 +376,22 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
                 f32 tap = sinf(phase) * 0.2f * (speed01 * 0.8f + 0.2f);
                 return tap;
             }
+        }
+
+        case EnemyType::HELLHOUND: {
+            // Quadruped gallop: diagonal pairs move together (0+3, 1+2)
+            // Front-left(0) syncs with rear-right(3), front-right(1) with rear-left(2)
+            f32 freq = 8.0f * speed01 + 2.0f; // faster gallop when running
+            f32 amplitude = 0.6f * speed01 + 0.1f; // bigger strides when fast
+            bool diagonalA = (limbIdx == 0 || limbIdx == 3);
+            f32 phase = diagonalA ? 0.0f : 3.14159f; // offset by half cycle
+            f32 angle = sinf(e.animTimer * freq + phase) * amplitude;
+            // Attack lunge: all legs extend forward briefly
+            if (e.attackAnimT > 0.0f) {
+                f32 t = e.attackAnimT / 0.3f;
+                angle += (limbIdx < 2 ? -0.5f : 0.3f) * sinf(t * 3.14159f);
+            }
+            return angle;
         }
 
         default:

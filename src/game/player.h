@@ -37,6 +37,8 @@ struct Player {
     f32  shadowDanceTimer = 0.0f;  // Shadow Dance: 2× damage + 20% speed, kills extend by 0.3s
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
+    u8   shrineBuff       = 0;     // 0=none, 1=power(+30%dmg), 2=speed(+25%), 3=vitality(+40%hp)
+    f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection)
 

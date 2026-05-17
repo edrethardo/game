@@ -36,19 +36,25 @@ enum struct EnemyType : u8 {
     BAT,          // 2 wings, 2 claws
     SPIDER,       // 8 legs, 2 mandibles
     MIMIC,        // disguised as chest, attacks when approached
+    HELLHOUND,    // quadruped canine demon — 4 legs, galloping animation
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
     PROP,         // static decoration — no AI, no collision response, no animation
     COUNT
 };
 
-// Special archetype role — drives unique AI behaviors (resurrect, heal, aura, ambush)
-enum struct EnemyRole : u8 {
-    NORMAL = 0,
-    AMBUSH,      // gargoyle — starts dormant, wakes when player is close
-    SUMMONER,    // necromancer — resurrects dead enemies
-    HEALER,      // shaman — heals injured allies
-    AURA,        // herald — passive damage aura around self
-};
+// Special archetype role — bitmask so bosses can combine multiple roles.
+// Regular enemies typically have one role; bosses can stack 2-3.
+namespace EnemyRole {
+    constexpr u8 NORMAL        = 0x00;
+    constexpr u8 AMBUSH        = 0x01;  // gargoyle — starts dormant, wakes when player is close
+    constexpr u8 SUMMONER      = 0x02;  // necromancer — resurrects dead enemies
+    constexpr u8 HEALER        = 0x04;  // shaman — heals injured allies
+    constexpr u8 AURA          = 0x08;  // herald — passive damage aura around self
+    constexpr u8 RANGED_CASTER = 0x10;  // bone mage — prefers strafe, fires projectiles
+    constexpr u8 CHARGER       = 0x20;  // ghoul — sprint-charge then retreat
+    constexpr u8 BOMBER        = 0x40;  // plague bat — dive-bomb or explode on death
+    constexpr u8 SHIELD_BEARER = 0x80;  // sentinel — frontal damage reduction, forces flanking
+}
 
 // Squad role assigned by room coordinator to spread tactics across a group
 enum struct SquadRole : u8 {
@@ -121,7 +127,7 @@ struct Entity {
     f32  sprintTimer   = 0.0f;  // anti-kite sprint burst cooldown
     f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
     bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
-    EnemyRole enemyRole = EnemyRole::NORMAL; // archetype behavior (summoner, healer, aura, ambush)
+    u8 enemyRole = EnemyRole::NORMAL; // archetype bitmask (summoner, healer, aura, ambush, etc.)
     u8  resurrectCount = 0;  // necromancer: how many dead enemies have been raised (max 2)
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
@@ -133,6 +139,9 @@ struct Entity {
     EnemyType enemyType = EnemyType::GENERIC;
     u8 weaponMeshId = 0;  // skeleton weapon mesh index (0 = none)
     u8 bossLimbConfig = 0; // 0=default, 1-4=boss-specific extra limbs
+    u8 bossDefIdx = 0xFF;  // index into Engine::m_bossDefs (0xFF = not a boss)
+    u16 spawnerIdx = 0xFFFF; // entity pool index of boss that spawned this minion
+    bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
 
     // NPC equipment and class (friendly NPCs only)
     NpcClass npcClass   = NpcClass::NONE;

@@ -34,6 +34,10 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "game/boss_def.h"
+#include "game/boss_ai.h"
+#include "game/boss_loader.h"
+#include "game/enemy_loader.h"
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -274,6 +278,15 @@ void Engine::init() {
             {"necromancer",    "assets/meshes/necromancer.obj"},
             {"shaman",         "assets/meshes/shaman.obj"},
             {"herald",         "assets/meshes/herald.obj"},
+            // New enemy meshes (roster rework)
+            {"hellhound",      "assets/meshes/hellhound.obj"},
+            {"wraith",         "assets/meshes/wraith.obj"},
+            {"sentinel",       "assets/meshes/sentinel.obj"},
+            {"cave_troll",     "assets/meshes/cave_troll.obj"},
+            {"pit_fiend",      "assets/meshes/pit_fiend.obj"},
+            {"succubus",       "assets/meshes/succubus.obj"},
+            {"abyssal_titan",  "assets/meshes/abyssal_titan.obj"},
+            {"entropy_weaver", "assets/meshes/entropy_weaver.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
@@ -351,6 +364,20 @@ void Engine::init() {
         m_skillDefCount = 0;
     }
     SkillSystem::init();
+
+    // Boss definitions — loaded after skills so skill names resolve to IDs
+    if (!BossLoader::load(ASSET_PATH("assets/config/bosses.json"), m_bossDefs)) {
+        LOG_WARN("Failed to load boss defs — using empty table");
+        m_bossDefs.count = 0;
+    }
+    // Provide boss def table to EnemyAI for personality-driven boss behavior
+    EnemyAI::setBossDefTable(&m_bossDefs);
+
+    // Enemy definitions — loaded after materials so material names resolve
+    if (!EnemyLoader::load(ASSET_PATH("assets/config/enemies.json"), m_enemyDefs)) {
+        LOG_WARN("Failed to load enemy defs — using fallback kTier arrays");
+        m_enemyDefs.count = 0;
+    }
 
     // Register skill visual FX callbacks
     SkillSystem::setNovaCallback([](Vec3 position, f32 radius, Vec3 color) {
@@ -443,6 +470,40 @@ void Engine::init() {
         }
     }
 
+    // Resolve enemy def visuals (material names → IDs, mesh names → mesh registry IDs)
+    EnemyLoader::resolveVisuals(m_enemyDefs);
+    for (u32 i = 0; i < m_enemyDefs.count; i++) {
+        if (m_enemyDefs.defs[i].meshName[0] != '\0') {
+            for (u32 m = 0; m < m_meshDefCount; m++) {
+                if (std::strcmp(m_enemyDefs.defs[i].meshName, m_meshDefs[m].name) == 0) {
+                    m_enemyDefs.defs[i].meshId = static_cast<u8>(m);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Resolve boss def visuals (material + mesh)
+    BossLoader::resolveVisuals(m_bossDefs);
+    for (u32 i = 0; i < m_bossDefs.count; i++) {
+        if (m_bossDefs.defs[i].meshName[0] != '\0') {
+            for (u32 m = 0; m < m_meshDefCount; m++) {
+                if (std::strcmp(m_bossDefs.defs[i].meshName, m_meshDefs[m].name) == 0) {
+                    m_bossDefs.defs[i].meshId = static_cast<u8>(m);
+                    break;
+                }
+            }
+        }
+        if (m_bossDefs.defs[i].weaponName[0] != '\0') {
+            for (u32 m = 0; m < m_meshDefCount; m++) {
+                if (std::strcmp(m_bossDefs.defs[i].weaponName, m_meshDefs[m].name) == 0) {
+                    m_bossDefs.defs[i].weaponMeshId = static_cast<u8>(m);
+                    break;
+                }
+            }
+        }
+    }
+
     // Instanced projectile renderer — batches projectiles by mesh for minimal draw calls
     ProjectileRenderer::init();
 
@@ -527,6 +588,41 @@ void Engine::init() {
             }
         }
 
+        // Bomber death explosion — AoE damage + burn in radius on death
+        if ((pool.entities[entityIndex].enemyRole & EnemyRole::BOMBER) &&
+            !(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
+            f32 explosionRadius = 3.0f;
+            f32 explosionDmg = pool.entities[entityIndex].damage * 0.8f;
+            f32 burnDur = pool.entities[entityIndex].onHitDuration;
+            f32 burnDps = pool.entities[entityIndex].onHitDps;
+
+            // Damage player if in radius
+            Vec3 playerDelta = s_engine->m_localPlayer.position - position;
+            f32 playerDist = sqrtf(playerDelta.x * playerDelta.x + playerDelta.z * playerDelta.z);
+            if (playerDist < explosionRadius) {
+                Combat::applyDamageToPlayer(s_engine->m_localPlayer, explosionDmg, &position);
+                if (burnDur > 0.0f) {
+                    s_engine->m_localPlayer.burnTimer = fmaxf(s_engine->m_localPlayer.burnTimer, burnDur);
+                    s_engine->m_localPlayer.burnDps = burnDps;
+                }
+            }
+            // Damage friendly NPCs in radius
+            for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                u32 nIdx = pool.activeList[ni];
+                Entity& npc = pool.entities[nIdx];
+                if (nIdx == entityIndex) continue;
+                if (!(npc.flags & ENT_FRIENDLY)) continue;
+                if (npc.flags & ENT_DEAD) continue;
+                f32 nDist = length(npc.position - position);
+                if (nDist < explosionRadius) {
+                    EntityHandle nh = {static_cast<u16>(nIdx), npc.generation};
+                    Combat::applyDamage(pool, nh, explosionDmg);
+                }
+            }
+            // Visual: spawn explosion particles
+            ParticleSystem::spawnExplosion(s_engine->m_particles, position, explosionRadius * 0.5f);
+        }
+
         // Track hostile kills for floor transition screen
         if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
             s_engine->m_transition.floorKillCount++;
@@ -555,6 +651,54 @@ void Engine::init() {
                                        position + Vec3{0, 0.5f, 0});
             }
             return; // skip normal drop logic for this kill
+        }
+
+        // Boss guaranteed loot — mini-bosses drop rare+, major bosses drop legendary
+        if (pool.entities[entityIndex].bossDefIdx != 0xFF &&
+            pool.entities[entityIndex].bossDefIdx < s_engine->m_bossDefs.count) {
+            const BossDef& bd = s_engine->m_bossDefs.defs[pool.entities[entityIndex].bossDefIdx];
+            u8 bossLvl = pool.entities[entityIndex].level;
+            if (bossLvl < 1) bossLvl = 1;
+
+            // Guaranteed quality drop
+            ItemInstance bossItem = ItemGen::rollItem(bossLvl, s_engine->m_itemDefs,
+                                                      s_engine->m_itemDefCount,
+                                                      s_engine->m_affixDefs,
+                                                      s_engine->m_affixDefCount);
+            if (!isItemEmpty(bossItem)) {
+                Rarity minRarity = static_cast<Rarity>(bd.lootGuarantee);
+                if (bossItem.rarity < minRarity) {
+                    bossItem.rarity = minRarity;
+                    // Re-roll affixes for the upgraded rarity
+                    bossItem.affixCount = 0;
+                    ItemGen::rollAffixes(bossItem, bossLvl,
+                                          s_engine->m_itemDefs[bossItem.defId].slot,
+                                          s_engine->m_affixDefs, s_engine->m_affixDefCount);
+                }
+                WorldItemSystem::spawn(s_engine->m_worldItems, bossItem,
+                                       position + Vec3{0, 0.5f, 0});
+            }
+
+            // Bonus drops for major bosses
+            for (u8 bd_i = 0; bd_i < bd.bonusDrops; bd_i++) {
+                ItemInstance bonus = ItemGen::rollItem(bossLvl, s_engine->m_itemDefs,
+                                                       s_engine->m_itemDefCount,
+                                                       s_engine->m_affixDefs,
+                                                       s_engine->m_affixDefCount);
+                if (!isItemEmpty(bonus)) {
+                    Vec3 offset = {(f32)(bd_i) * 0.3f - 0.15f, 0.5f, 0.2f};
+                    WorldItemSystem::spawn(s_engine->m_worldItems, bonus,
+                                           position + offset);
+                }
+            }
+
+            // Always drop a globe from bosses
+            ItemInstance globe;
+            globe.defId = GLOBE_HEALTH_ID;
+            globe.uid   = s_engine->m_worldItems.nextUid++;
+            WorldItemSystem::spawn(s_engine->m_worldItems, globe,
+                                   position + Vec3{0.2f, 0.5f, 0.0f});
+            return; // skip normal loot path
         }
 
         // Hostile enemies only drop loot; chance scales with floor depth

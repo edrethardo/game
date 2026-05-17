@@ -441,6 +441,10 @@ inline bool isDragActive(const InventoryDragState& ds) {
     return ds.source != DragSource::NONE && ds.dragging;
 }
 
+// Skill ID string lookup (used by item and boss loaders)
+#include <string>
+SkillId skillIdFromString(const std::string& s);
+
 // ---- System namespaces ----
 
 namespace ItemLoader {

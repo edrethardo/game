@@ -51,7 +51,9 @@ SDL2 is fetched via `fetch_sdl2.sh` if missing. Single binary, no install step.
 | `Engine` | `engine/engine.h` | Owns all pools, defs, networking state |
 | `Player` | `game/player.h` | Local-only struct (camera, lock, health). Singleplayer authority |
 | `NetPlayer` | `net/net_player.h` | Server-authoritative player. Slot 0 = host. `eyePos()` adds eyeHeight |
-| `Entity` | `game/entity.h` | Enemy NPC. `flags` bitmask: `ENT_ACTIVE/FLYING/DEAD`. `aiState`: `IDLE/CHASE/ATTACK/FLYBY/DEAD` |
+| `Entity` | `game/entity.h` | Enemy NPC. `flags` bitmask: `ENT_ACTIVE/FLYING/DEAD`. `aiState`: `IDLE/CHASE/ATTACK/FLYBY/DEAD`. `enemyRole` is a u8 bitmask (see `EnemyRole` namespace). `bossDefIdx` links to `BossDefTable`. |
+| `BossDef` / `BossDefTable` | `game/boss_def.h` | Boss definition loaded from `bosses.json`. Stats, role bitmask, AI personality, skill, projectile, loot guarantee. |
+| `BossPersonality` | `game/boss_def.h` | `BERSERKER/KITER/TELEPORTER/DUELIST` — overrides FSM state selection for bosses |
 | `Projectile` | `game/projectile.h` | `projFlags`: `PROJ_ORB/ORB_SHARD/GRAVITY/SPLASH` |
 | `ItemDef` / `ItemInstance` | `game/item.h` | Static template vs rolled runtime item. `defId == 0xFFFF` ⇒ empty |
 | `AffixDef` / `Affix` | `game/item.h` | `validSlots` is a bitmask of `ItemSlot` values |
@@ -97,6 +99,7 @@ Important caps (search the header for the constant if you need to grow it):
 
 ## Asset Conventions
 
+- **Always use tools to generate assets.** Meshes are generated via `tools/gen_mesh.py`, textures via `tools/gen_texture.py`, skins via `tools/gen_skin.py`, skill icons via `tools/gen_skill_icons.py`. Run `tools/build_assets.py` to rebuild all assets. Never hand-author `.obj` or `.png` files — the tools ensure correct format, naming, and sizing.
 - **Textures**: tile textures end in `_42.png` (42×42 px), e.g. `stone_wall_42.png`. Skins/non-tile textures are exceptions (e.g. `bat_skin_42.png` is also 42 but "skin" naming).
 - **Materials** (`assets/materials.json`): each entry has `id` (must match array index), `name`, optional `texture` (path under `assets/textures/`), optional `tint` `[r,g,b,a]`. Material 0 is the default fallback. Code looks up by name via `MaterialSystem::getIdByName`.
 - **Meshes** (`assets/meshes/*.obj`): triangulated, +Y up, units in metres. Loaded at engine init by name into the `Engine::m_meshDefs` registry; mesh 0 is always a unit cube fallback. Names referenced from JSON (item `mesh` field, enemy `meshName`).
@@ -123,7 +126,9 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 
 `assets/config/weapons.json` — currently a static fallback table; the live weapon table is built in code by `initWeaponTable` in `game/weapon.h`. Weapon stats actually used in-game come from equipped `ItemInstance`s via `Inventory::getEffectiveWeapon`.
 
-`assets/config/enemies.json` — array under `"enemies"`. Fields: `name`, `meshName`, `health`, `moveSpeed`, `detectionRange`, `attackRange`, `attackCooldown`, `damage`, `flying` (bool), `halfExtents` `[x,y,z]`. *Currently the engine spawns enemies via a hardcoded `kEnemies` table in `Engine::startGame` (`engine.cpp:286`); `enemies.json` is the parallel data source you'd promote to be the single source.*
+`assets/config/enemies.json` — array under `"enemies"`. 36 enemy types across 5 tiers. Per entry: `name`, `tier` (1-5), `meshName`, `materialName`, `health`, `moveSpeed`, `detectionRange`, `attackRange`, `attackCooldown`, `damage`, `flying` (bool), `halfExtents` `[x,y,z]`, `role` (string → `EnemyRole` bitmask), `aiPreference` (string → initial `AIState`), `onHitEffect` (0-4), `onHitDuration`, `onHitDps`, `dropWeight`.
+
+`assets/config/bosses.json` — array under `"bosses"`. 10 boss definitions on milestone floors (5,10,...50). Per entry: `name`, `floor`, `isMajor`, stats (`baseHp`, `baseDmg`, `speed`, etc.), `meshName`, `matName`, `weaponName`, `roles` (array of role strings → bitmask), `personality` (string → `BossPersonality`), `skillId` (skill name string), `enrageFactor`, `minionShield`, `onHitEffect`, `projectile` (sub-object), `lootGuarantee` ("rare"/"legendary"), `bonusDrops`, `limbConfig`. Loader: `BossLoader::load` (`game/boss_loader.cpp`).
 
 ## How to Add Things
 
@@ -133,7 +138,11 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 
 **New weapon type/subtype**: add subtype enum value in `game/weapon.h`. To affect combat behavior beyond the three existing `WeaponType`s (MELEE/HITSCAN/PROJECTILE), modify `Combat::fireMelee`/`fireHitscan`/`fireProjectile` and the dispatch in `Engine::handleWeaponFireForPlayer`.
 
-**New enemy type**: add mesh/skin assets, register the mesh in `Engine::init`'s `kMeshes`, add a material in `materials.json` (skin), and add a row to the `kEnemies` template table in `Engine::startGame`. AI behavior is in `EnemyAI::update` (`game/enemy_ai.cpp`) — `flying` entities use `FLYBY`/swooping logic; ground use `CHASE`/`ATTACK`.
+**New enemy type**: append to `assets/config/enemies.json` with a `tier`, `role`, `aiPreference`, and stats. If it needs a new mesh, drop the `.obj` into `assets/meshes/` and register it in `Engine::init`'s `kMeshes`. Add a material in `materials.json` for its skin. The `role` field is a string matching an `EnemyRole` bitmask value (`"normal"`, `"charger"`, `"ranged_caster"`, `"bomber"`, `"shield_bearer"`, `"ambush"`, `"summoner"`, `"healer"`, `"aura"`). AI behavior is driven by the role — see `enemy_ai.cpp` for role-specific state selection.
+
+**New boss**: append to `assets/config/bosses.json` with floor, stats, role bitmask (array of role strings), personality (`"berserker"`, `"kiter"`, `"teleporter"`, `"duelist"`), optional skill ID, projectile definition, and loot guarantee. Boss loader is `BossLoader::load` in `game/boss_loader.cpp`. Personality-driven AI is in `BossAI::update` (`game/boss_ai.cpp`). Boss loot guarantee is checked in the death callback in `engine_init.cpp`.
+
+**New enemy role**: add a bitmask constant to the `EnemyRole` namespace in `game/entity.h`, add behavior in `enemy_ai.cpp`'s per-entity loop, and parse the role string in the enemy JSON loader.
 
 **New skill**: add to `SkillId` in `game/item.h`, add fields to `SkillDef` if needed, parse in `loadSkillDefs`, add an activation branch in `SkillSystem::tryActivate` (`game/skill.cpp`). Per-tick logic that needs to persist (orb shards, meteor delay) goes in `updateOrbProjectiles` / `updateMeteors`. Add an entry in `assets/config/skills.json` and reference from a legendary item via `legendarySkill`.
 
@@ -183,7 +192,9 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 
 - **Entity handles vs raw indices.** Always use `EntityHandle` + `handleValid`/`handleGet` for cross-frame references. Indices alone go stale when slots get reused.
 - **Item visual resolution timing.** `ItemDef.meshId`/`materialId` are zero until `ItemLoader::resolveVisuals` runs *after* `MaterialSystem::init` and the mesh registry is filled. Don't render items earlier in init.
-- **`enemies.json` is currently inert** for the live spawn loop — production spawns use the inline `kEnemies` table in `Engine::startGame`. Promoting JSON is a known TODO.
+- **`EnemyRole` is a bitmask, not an enum.** Use `e.enemyRole & EnemyRole::SUMMONER`, not `==`. Bosses can combine multiple roles.
+- **Boss loot** is guaranteed in the death callback (`engine_init.cpp`). Mini-bosses drop rare+, major bosses drop legendary. This runs *before* the normal loot path and returns early.
+- **Minion shield** requires `entity.minionShield = true` (set at spawn from `BossDef`) AND alive minions with `spawnerIdx == bossIdx`. The check is in `Combat::applyDamage`.
 - **Death callback drops loot** via a global `s_engine` pointer (file-scope in `engine.cpp`). If you swap the singleton or move loot-drop, update both.
 - **Listen-server host plays as slot 0.** `Engine::onPlayerJoin` is not called for the host; slot 0 is initialised inside `startGame`. Don't put host-init logic in the join callback.
 - **Snapshot quantization range** clamps positions to ±128 m. Keep level/grid bounds inside that range or clients see jitter.

@@ -43,6 +43,9 @@
 #include "core/frame_allocator.h"
 #include "core/allocation_tracker.h"
 #include "core/profiler.h"
+#include "game/boss_def.h"
+#include "game/enemy_def.h"
+#include "game/boss_loader.h"
 
 #include <glad/glad.h>
 #include <cmath>
@@ -491,15 +494,28 @@ void Engine::startGame() {
             {65, 2.8f, 22, 3.5f, 0.8f, 16, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "void_herald_skin", 4, 2.0f, 0},
         };
 
-        // Select tier based on current floor
-        const EnemyTemplate* tier = kTier1;
-        u32 tierCount = sizeof(kTier1) / sizeof(kTier1[0]);
-        if      (m_level.currentFloor >= 41) { tier = kTier5; tierCount = sizeof(kTier5) / sizeof(kTier5[0]); }
-        else if (m_level.currentFloor >= 31) { tier = kTier4; tierCount = sizeof(kTier4) / sizeof(kTier4[0]); }
-        else if (m_level.currentFloor >= 21) { tier = kTier3; tierCount = sizeof(kTier3) / sizeof(kTier3[0]); }
-        else if (m_level.currentFloor >= 11) { tier = kTier2; tierCount = sizeof(kTier2) / sizeof(kTier2[0]); }
+        // --- Enemy spawning: JSON-loaded defs (primary) or kTier fallback ---
+        u8 currentTier = 1;
+        if      (m_level.currentFloor >= 41) currentTier = 5;
+        else if (m_level.currentFloor >= 31) currentTier = 4;
+        else if (m_level.currentFloor >= 21) currentTier = 3;
+        else if (m_level.currentFloor >= 11) currentTier = 2;
 
-        // meshIdx 3 = human mesh (used by zombies, ghouls, stalkers, demons, shades)
+        // Collect JSON defs for this tier
+        const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
+        u32 tierDefCount = collectTierDefs(m_enemyDefs, currentTier, tierDefs, MAX_ENEMY_DEFS);
+
+        // Fallback: use kTier arrays if no JSON defs loaded
+        const EnemyTemplate* fallbackTier = kTier1;
+        u32 fallbackCount = sizeof(kTier1) / sizeof(kTier1[0]);
+        if      (currentTier == 5) { fallbackTier = kTier5; fallbackCount = sizeof(kTier5) / sizeof(kTier5[0]); }
+        else if (currentTier == 4) { fallbackTier = kTier4; fallbackCount = sizeof(kTier4) / sizeof(kTier4[0]); }
+        else if (currentTier == 3) { fallbackTier = kTier3; fallbackCount = sizeof(kTier3) / sizeof(kTier3[0]); }
+        else if (currentTier == 2) { fallbackTier = kTier2; fallbackCount = sizeof(kTier2) / sizeof(kTier2[0]); }
+
+        bool useJsonDefs = (tierDefCount > 0);
+
+        // Mesh lookup for fallback path only
         u8 meshLookup[] = {m_meshIdSkeleton, m_meshIdBat, m_meshIdSpider, m_meshIdHuman,
                            findMeshByName("gargoyle"), findMeshByName("necromancer"),
                            findMeshByName("shaman"), findMeshByName("herald")};
@@ -514,90 +530,151 @@ void Engine::startGame() {
             if (enemyCount > 3) enemyCount = 3;
 
             for (u32 e = 0; e < enemyCount; e++) {
-                u32 typeIdx = static_cast<u32>(std::rand()) % tierCount;
-                const EnemyTemplate& tmpl = tier[typeIdx];
 
-                // Spawn at cell center (+0.5) to avoid boundary clipping
-                f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1) + 0.5f) * m_level.grid.cellSize;
-                f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1) + 0.5f) * m_level.grid.cellSize;
-                f32 spawnY = tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y);
+                if (useJsonDefs) {
+                    // --- JSON path: spawn from EnemyDef ---
+                    u32 typeIdx = static_cast<u32>(std::rand()) % tierDefCount;
+                    const EnemyDef& def = *tierDefs[typeIdx];
 
-                // Validate spawn position — snap to room center if cell is solid
-                Vec3 spawnPos = {ex, spawnY, ez};
-                u32 spGx, spGz;
-                if (LevelGridSystem::worldToGrid(m_level.grid, spawnPos, spGx, spGz) &&
-                    LevelGridSystem::isSolid(m_level.grid, spGx, spGz)) {
-                    ex = (room.x + room.w * 0.5f) * m_level.grid.cellSize;
-                    ez = (room.z + room.d * 0.5f) * m_level.grid.cellSize;
-                    spawnPos = {ex, spawnY, ez};
-                }
+                    f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1) + 0.5f) * m_level.grid.cellSize;
+                    f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1) + 0.5f) * m_level.grid.cellSize;
+                    f32 spawnY = def.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + def.halfExtents.y);
 
-                EntityHandle h = EntitySystem::spawn(m_entities,
-                    spawnPos, tmpl.halfExtents, tmpl.flying,
-                    tmpl.health, tmpl.moveSpeed, tmpl.detRange,
-                    tmpl.atkRange, tmpl.atkCool, tmpl.damage);
-                Entity* ent = handleGet(m_entities, h);
-                if (ent) {
-                    ent->meshId = meshLookup[tmpl.meshIdx];
-                    ent->materialId = MaterialSystem::getIdByName(tmpl.matName);
-
-                    // Cache base stats before any floor scaling so the aura system
-                    // can reset them each frame before reapplying the buff
-                    ent->baseMoveSpeed      = ent->moveSpeed;
-                    ent->baseAttackCooldown = ent->attackCooldown;
-
-                    // Set archetype role based on enemy type
-                    if (std::strstr(tmpl.matName, "gargoyle")) {
-                        ent->enemyRole = EnemyRole::AMBUSH;
-                        ent->aiState = AIState::DORMANT;
-
-                        // Reposition gargoyle to a room doorway so it can ambush
-                        // players entering the room from the corridor
-                        Vec3 doorPos[4];
-                        u8 doorCount = LevelGridQuery::findDoorwayCells(
-                            m_level.grid, room.x, room.z, room.w, room.d, doorPos, 4);
-                        if (doorCount > 0) {
-                            u8 pick = static_cast<u8>(std::rand() % doorCount);
-                            f32 doorY = tmpl.flying
-                                ? (room.floorHeight + 1.5f)
-                                : (room.floorHeight + tmpl.halfExtents.y);
-                            ent->position = {doorPos[pick].x, doorY, doorPos[pick].z};
-                            // Doorway position is already facing the corridor, so
-                            // switch to AMBUSH (active wait) rather than DORMANT
-                            ent->aiState = AIState::AMBUSH;
-                        }
-                    } else if (std::strstr(tmpl.matName, "necromancer")) {
-                        ent->enemyRole = EnemyRole::SUMMONER;
-                        ent->tacticalTimer = 8.0f; // first resurrect after 8s
-                    } else if (std::strstr(tmpl.matName, "shaman")) {
-                        ent->enemyRole = EnemyRole::HEALER;
-                        ent->tacticalTimer = 5.0f; // first heal after 5s
-                    } else if (std::strstr(tmpl.matName, "herald")) {
-                        ent->enemyRole = EnemyRole::AURA;
+                    Vec3 spawnPos = {ex, spawnY, ez};
+                    u32 spGx, spGz;
+                    if (LevelGridSystem::worldToGrid(m_level.grid, spawnPos, spGx, spGz) &&
+                        LevelGridSystem::isSolid(m_level.grid, spGx, spGz)) {
+                        ex = (room.x + room.w * 0.5f) * m_level.grid.cellSize;
+                        ez = (room.z + room.d * 0.5f) * m_level.grid.cellSize;
+                        spawnPos = {ex, spawnY, ez};
                     }
-                    ent->enemyType = tmpl.etype;
 
-                    // Floor scaling — Nightmare floor 1 = effective 51, Hell floor 1 = effective 101
-                    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-                    ent->level = static_cast<u8>(effectiveFloor > 255 ? 255 : effectiveFloor);
-                    f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
-                    ent->health    *= floorMult;
-                    ent->maxHealth  = ent->health;
-                    ent->damage    *= floorMult;
+                    EntityHandle h = EntitySystem::spawn(m_entities,
+                        spawnPos, def.halfExtents, def.flying,
+                        def.health, def.moveSpeed, def.detectionRange,
+                        def.attackRange, def.attackCooldown, def.damage);
+                    Entity* ent = handleGet(m_entities, h);
+                    if (ent) {
+                        ent->meshId     = def.meshId;
+                        ent->materialId = def.materialId;
+                        ent->enemyType  = def.enemyType;
+                        ent->enemyRole  = def.role;
 
-                    // On-hit status effect
-                    ent->onHitEffect   = tmpl.onHitEffect;
-                    ent->onHitDuration = tmpl.onHitDuration;
-                    ent->onHitDps      = tmpl.onHitDps * floorMult;
+                        ent->baseMoveSpeed      = ent->moveSpeed;
+                        ent->baseAttackCooldown = ent->attackCooldown;
 
-                    // Weapon assignment — ranged enemies get staves/bows, melee get blades
-                    if (ent->enemyType == EnemyType::SKELETON) {
-                        if (ent->attackRange > 5.0f) {
-                            // Ranged caster — give a staff or wand
-                            ent->weaponMeshId = m_meshIdStaff;
-                        } else {
-                            u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};
-                            ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
+                        // Set initial AI state from JSON aiPreference
+                        if (def.role & EnemyRole::AMBUSH) {
+                            ent->aiState = AIState::DORMANT;
+                            // Reposition ambush enemies to doorways
+                            Vec3 doorPos[4];
+                            u8 doorCount = LevelGridQuery::findDoorwayCells(
+                                m_level.grid, room.x, room.z, room.w, room.d, doorPos, 4);
+                            if (doorCount > 0) {
+                                u8 pick = static_cast<u8>(std::rand() % doorCount);
+                                f32 doorY = def.flying
+                                    ? (room.floorHeight + 1.5f)
+                                    : (room.floorHeight + def.halfExtents.y);
+                                ent->position = {doorPos[pick].x, doorY, doorPos[pick].z};
+                                ent->aiState = AIState::AMBUSH;
+                            }
+                        }
+                        if (def.role & EnemyRole::SUMMONER) ent->tacticalTimer = 8.0f;
+                        if (def.role & EnemyRole::HEALER)   ent->tacticalTimer = 5.0f;
+
+                        // Floor scaling
+                        u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                        ent->level = static_cast<u8>(effectiveFloor > 255 ? 255 : effectiveFloor);
+                        f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
+                        ent->health    *= floorMult;
+                        ent->maxHealth  = ent->health;
+                        ent->damage    *= floorMult;
+
+                        ent->onHitEffect   = def.onHitEffect;
+                        ent->onHitDuration = def.onHitDuration;
+                        ent->onHitDps      = def.onHitDps * floorMult;
+
+                        // Weapon assignment for skeleton-rig enemies
+                        if (ent->enemyType == EnemyType::SKELETON) {
+                            if (ent->attackRange > 5.0f) {
+                                ent->weaponMeshId = m_meshIdStaff;
+                            } else {
+                                u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};
+                                ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
+                            }
+                        }
+                    }
+
+                } else {
+                    // --- Fallback path: spawn from kTier inline arrays ---
+                    u32 typeIdx = static_cast<u32>(std::rand()) % fallbackCount;
+                    const EnemyTemplate& tmpl = fallbackTier[typeIdx];
+
+                    f32 ex = (room.x + 1 + static_cast<u32>(std::rand()) % (room.w > 2 ? room.w - 2 : 1) + 0.5f) * m_level.grid.cellSize;
+                    f32 ez = (room.z + 1 + static_cast<u32>(std::rand()) % (room.d > 2 ? room.d - 2 : 1) + 0.5f) * m_level.grid.cellSize;
+                    f32 spawnY = tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y);
+
+                    Vec3 spawnPos = {ex, spawnY, ez};
+                    u32 spGx, spGz;
+                    if (LevelGridSystem::worldToGrid(m_level.grid, spawnPos, spGx, spGz) &&
+                        LevelGridSystem::isSolid(m_level.grid, spGx, spGz)) {
+                        ex = (room.x + room.w * 0.5f) * m_level.grid.cellSize;
+                        ez = (room.z + room.d * 0.5f) * m_level.grid.cellSize;
+                        spawnPos = {ex, spawnY, ez};
+                    }
+
+                    EntityHandle h = EntitySystem::spawn(m_entities,
+                        spawnPos, tmpl.halfExtents, tmpl.flying,
+                        tmpl.health, tmpl.moveSpeed, tmpl.detRange,
+                        tmpl.atkRange, tmpl.atkCool, tmpl.damage);
+                    Entity* ent = handleGet(m_entities, h);
+                    if (ent) {
+                        ent->meshId = meshLookup[tmpl.meshIdx];
+                        ent->materialId = MaterialSystem::getIdByName(tmpl.matName);
+                        ent->baseMoveSpeed      = ent->moveSpeed;
+                        ent->baseAttackCooldown = ent->attackCooldown;
+
+                        if (std::strstr(tmpl.matName, "gargoyle")) {
+                            ent->enemyRole = EnemyRole::AMBUSH;
+                            ent->aiState = AIState::DORMANT;
+                            Vec3 doorPos[4];
+                            u8 doorCount = LevelGridQuery::findDoorwayCells(
+                                m_level.grid, room.x, room.z, room.w, room.d, doorPos, 4);
+                            if (doorCount > 0) {
+                                u8 pick = static_cast<u8>(std::rand() % doorCount);
+                                ent->position = {doorPos[pick].x,
+                                    tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y),
+                                    doorPos[pick].z};
+                                ent->aiState = AIState::AMBUSH;
+                            }
+                        } else if (std::strstr(tmpl.matName, "necromancer")) {
+                            ent->enemyRole = EnemyRole::SUMMONER;
+                            ent->tacticalTimer = 8.0f;
+                        } else if (std::strstr(tmpl.matName, "shaman")) {
+                            ent->enemyRole = EnemyRole::HEALER;
+                            ent->tacticalTimer = 5.0f;
+                        } else if (std::strstr(tmpl.matName, "herald")) {
+                            ent->enemyRole = EnemyRole::AURA;
+                        }
+                        ent->enemyType = tmpl.etype;
+
+                        u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                        ent->level = static_cast<u8>(effectiveFloor > 255 ? 255 : effectiveFloor);
+                        f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
+                        ent->health    *= floorMult;
+                        ent->maxHealth  = ent->health;
+                        ent->damage    *= floorMult;
+                        ent->onHitEffect   = tmpl.onHitEffect;
+                        ent->onHitDuration = tmpl.onHitDuration;
+                        ent->onHitDps      = tmpl.onHitDps * floorMult;
+
+                        if (ent->enemyType == EnemyType::SKELETON) {
+                            if (ent->attackRange > 5.0f) {
+                                ent->weaponMeshId = m_meshIdStaff;
+                            } else {
+                                u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};
+                                ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
+                            }
                         }
                     }
                 }
@@ -722,17 +799,24 @@ void Engine::startGame() {
             { 50, "Grim Reaper",   "YOUR TIME HAS COME.",2500, 30, 4.0f, 4.0f, 0.3f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
         };
 
-        // Find boss for this floor
+        // Find boss for this floor — prefer JSON-loaded BossDef, fall back to hardcoded
+        u8 bossIdx = findBossDefIdx(m_bossDefs, static_cast<u8>(m_level.currentFloor));
+        const BossDef* bd = (bossIdx != 0xFF) ? &m_bossDefs.defs[bossIdx] : nullptr;
+
+        // Fallback: if no JSON boss def, check the hardcoded table
         const BossTemplate* bt = nullptr;
-        for (u32 b = 0; b < BOSS_COUNT; b++) {
-            if (kBosses[b].floor == m_level.currentFloor) { bt = &kBosses[b]; break; }
+        if (!bd) {
+            for (u32 b = 0; b < BOSS_COUNT; b++) {
+                if (kBosses[b].floor == m_level.currentFloor) { bt = &kBosses[b]; break; }
+            }
         }
 
-        if (bt && dungeon.roomCount > 2) {
+        if ((bd || bt) && dungeon.roomCount > 2) {
             DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
 
             // Arena size: major bosses get a larger arena
-            u32 arenaScale = bt->isMajor ? 4 : 3;
+            bool isMajor = bd ? bd->isMajor : bt->isMajor;
+            u32 arenaScale = isMajor ? 4 : 3;
             u32 expandW = bossRoom.w * arenaScale;
             u32 expandD = bossRoom.d * arenaScale;
             s32 startX = static_cast<s32>(bossRoom.x) - static_cast<s32>(bossRoom.w * (arenaScale / 2));
@@ -766,7 +850,7 @@ void Engine::startGame() {
             m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, m_level.sections, MAX_LEVEL_SECTIONS);
 
             // Iron maidens in corners for major bosses
-            if (bt->isMajor && m_meshIdIronMaiden > 0) {
+            if (isMajor && m_meshIdIronMaiden > 0) {
                 Vec3 corners[] = {
                     {(bossRoom.x + 2) * m_level.grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_level.grid.cellSize},
                     {(bossRoom.x + bossRoom.w - 2) * m_level.grid.cellSize, bossRoom.floorHeight, (bossRoom.z + 2) * m_level.grid.cellSize},
@@ -792,42 +876,82 @@ void Engine::startGame() {
             f32 by = bossRoom.floorHeight;
             f32 floorMult = 1.0f + (m_level.currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
 
+            // Extract stats from whichever source is active (JSON bd or hardcoded bt)
+            Vec3 bossHalf    = bd ? bd->halfExtents  : bt->halfExtents;
+            f32  bossHp      = bd ? bd->baseHp       : bt->baseHp;
+            f32  bossSpd     = bd ? bd->speed         : bt->speed;
+            f32  bossDetect  = bd ? bd->detectionRange : 40.0f;
+            f32  bossAtkRng  = bd ? bd->atkRange      : bt->atkRange;
+            f32  bossAtkCool = bd ? bd->atkCooldown   : bt->atkCooldown;
+            f32  bossDmg     = bd ? bd->baseDmg       : bt->baseDmg;
+
             EntityHandle bh = EntitySystem::spawn(m_entities,
-                Vec3{bx, by + bt->halfExtents.y, bz}, bt->halfExtents, false,
-                bt->baseHp * floorMult, bt->speed, 40.0f,
-                bt->atkRange, bt->atkCooldown, bt->baseDmg * floorMult);
+                Vec3{bx, by + bossHalf.y, bz}, bossHalf, false,
+                bossHp * floorMult, bossSpd, bossDetect,
+                bossAtkRng, bossAtkCool, bossDmg * floorMult);
             Entity* boss = handleGet(m_entities, bh);
             if (boss) {
-                boss->meshId = findMeshByName(bt->meshName);
-                boss->materialId = MaterialSystem::getIdByName(bt->matName);
-                boss->enemyType = EnemyType::BOSS;
-                boss->nameTag = bt->name;
-                u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
-                boss->level = static_cast<u8>(bossEffFloor > 255 ? 255 : bossEffFloor);
-                // Assign boss-specific extra limb config for major bosses
-                if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
-                if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles
-                if (bt->floor == 40) boss->bossLimbConfig = 3; // Diablo: back spikes
-                if (bt->floor == 50) boss->bossLimbConfig = 4; // Reaper: blade arms
-                if (bt->weaponName) {
-                    boss->weaponMeshId = findMeshByName(bt->weaponName);
-                }
-                boss->speechText = bt->speech;
-                boss->speechTimer = 6.0f;
+                if (bd) {
+                    // JSON-loaded boss path
+                    boss->meshId = findMeshByName(bd->meshName);
+                    boss->materialId = MaterialSystem::getIdByName(bd->matName);
+                    boss->enemyType = EnemyType::BOSS;
+                    boss->nameTag = bd->name;
+                    u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
+                    boss->level = static_cast<u8>(bossEffFloor > 255 ? 255 : bossEffFloor);
+                    boss->bossLimbConfig = bd->limbConfig;
+                    if (bd->weaponName[0] != '\0') {
+                        boss->weaponMeshId = findMeshByName(bd->weaponName);
+                    }
+                    boss->speechText = bd->speech;
+                    boss->speechTimer = 6.0f;
 
-                // Ranged bosses (Lich Lord, Arch Mage, Mephisto) use projectile attacks
-                // via the boss AI cleaver-throw mechanic — their weapon mesh rides the
-                // projectile for visual consistency
-                if (bt->atkRange > 5.0f) {
-                    boss->npcWeaponType = WeaponType::PROJECTILE;
-                    boss->npcProjectileSpeed = 18.0f;
-                    boss->npcProjectileRadius = 0.15f;
+                    // New BossDef-specific fields
+                    boss->bossDefIdx = bossIdx;
+                    boss->enemyRole = bd->roles;
+                    boss->minionShield = bd->minionShield;
+                    boss->onHitEffect = bd->onHitEffect;
+                    boss->onHitDuration = bd->onHitDuration;
+                    boss->onHitDps = bd->onHitDps;
+
+                    // Ranged bosses use projectile attacks — weapon mesh rides the projectile
+                    if (bd->atkRange > 5.0f) {
+                        boss->npcWeaponType = WeaponType::PROJECTILE;
+                        boss->npcProjectileSpeed = 18.0f;
+                        boss->npcProjectileRadius = 0.15f;
+                    }
+                } else {
+                    // Hardcoded fallback path (kBosses)
+                    boss->meshId = findMeshByName(bt->meshName);
+                    boss->materialId = MaterialSystem::getIdByName(bt->matName);
+                    boss->enemyType = EnemyType::BOSS;
+                    boss->nameTag = bt->name;
+                    u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
+                    boss->level = static_cast<u8>(bossEffFloor > 255 ? 255 : bossEffFloor);
+                    // Hardcoded limb config per floor
+                    if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
+                    if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles
+                    if (bt->floor == 40) boss->bossLimbConfig = 3; // Diablo: back spikes
+                    if (bt->floor == 50) boss->bossLimbConfig = 4; // Reaper: blade arms
+                    if (bt->weaponName) {
+                        boss->weaponMeshId = findMeshByName(bt->weaponName);
+                    }
+                    boss->speechText = bt->speech;
+                    boss->speechTimer = 6.0f;
+
+                    if (bt->atkRange > 5.0f) {
+                        boss->npcWeaponType = WeaponType::PROJECTILE;
+                        boss->npcProjectileSpeed = 18.0f;
+                        boss->npcProjectileRadius = 0.15f;
+                    }
                 }
             }
-            LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u, limbConfig=%u)",
-                     bt->name, m_level.currentFloor, bt->baseHp * floorMult,
-                     bt->baseDmg * floorMult, expandW, expandD,
-                     boss ? boss->bossLimbConfig : 0);
+            const char* bossName = bd ? bd->name : bt->name;
+            LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u, limbConfig=%u, src=%s)",
+                     bossName, m_level.currentFloor, bossHp * floorMult,
+                     bossDmg * floorMult, expandW, expandD,
+                     boss ? boss->bossLimbConfig : 0,
+                     bd ? "json" : "hardcoded");
         }
     }
 

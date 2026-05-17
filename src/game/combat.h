@@ -26,7 +26,9 @@ struct AttackResult {
 
 namespace Combat {
     // Apply damage to an entity. Handles health, flash, death transition.
-    void applyDamage(EntityPool& pool, EntityHandle target, f32 damage);
+    // Optional damageOrigin enables directional checks (e.g. shield bearer frontal reduction).
+    void applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
+                     const Vec3* damageOrigin = nullptr);
 
     // Apply damage to the player. Optional attackerPos enables directional indicator.
     void applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr);

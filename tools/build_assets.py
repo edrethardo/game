@@ -69,6 +69,15 @@ def build_meshes():
         ["--type", "necromancer",    "--out", os.path.join(mesh_dir, "necromancer.obj")],
         ["--type", "shaman",         "--out", os.path.join(mesh_dir, "shaman.obj")],
         ["--type", "herald",         "--out", os.path.join(mesh_dir, "herald.obj")],
+        # New enemy meshes (roster rework)
+        ["--type", "hellhound",      "--height", "2.0", "--out", os.path.join(mesh_dir, "hellhound.obj")],
+        ["--type", "wraith",         "--out", os.path.join(mesh_dir, "wraith.obj")],
+        ["--type", "sentinel",       "--out", os.path.join(mesh_dir, "sentinel.obj")],
+        ["--type", "cave_troll",     "--height", "2.2", "--out", os.path.join(mesh_dir, "cave_troll.obj")],
+        ["--type", "pit_fiend",      "--height", "2.4", "--out", os.path.join(mesh_dir, "pit_fiend.obj")],
+        ["--type", "succubus",       "--out", os.path.join(mesh_dir, "succubus.obj")],
+        ["--type", "abyssal_titan",  "--height", "2.8", "--out", os.path.join(mesh_dir, "abyssal_titan.obj")],
+        ["--type", "entropy_weaver", "--out", os.path.join(mesh_dir, "entropy_weaver.obj")],
         # Weapons
         ["--type", "sword",          "--out", os.path.join(mesh_dir, "sword.obj")],
         ["--type", "dagger",         "--out", os.path.join(mesh_dir, "dagger.obj")],
@@ -149,10 +158,26 @@ def build_skins():
         ("gargoyle",                  "gargoyle_skin_42.png"),
         ("necromancer",               "necromancer_skin_42.png"),
         ("cavern_shaman",             "cavern_shaman_skin_42.png"),
+        ("crypt_herald",              "crypt_herald_skin_42.png"),
+        ("sniper_imp",                "sniper_imp_skin_42.png"),
         ("infernal_herald",           "infernal_herald_skin_42.png"),
         ("void_necromancer",          "void_necromancer_skin_42.png"),
         ("void_shaman",              "void_shaman_skin_42.png"),
         ("void_herald",              "void_herald_skin_42.png"),
+        # New enemy-specific skins (roster rework)
+        ("bone_archer",              "bone_archer_skin_42.png"),
+        ("catacomb_sentinel",        "catacomb_sentinel_skin_42.png"),
+        ("tomb_wraith",              "tomb_wraith_skin_42.png"),
+        ("plague_bat",               "plague_bat_skin_42.png"),
+        ("web_spinner",              "web_spinner_skin_42.png"),
+        ("burrowing_widow",          "burrowing_widow_skin_42.png"),
+        ("cave_troll",               "cave_troll_skin_42.png"),
+        ("pit_fiend",                "pit_fiend_skin_42.png"),
+        ("hellforge_smith",          "hellforge_smith_skin_42.png"),
+        ("succubus",                 "succubus_skin_42.png"),
+        ("entropy_weaver",           "entropy_weaver_skin_42.png"),
+        ("nullifier",                "nullifier_skin_42.png"),
+        ("abyssal_titan",            "abyssal_titan_skin_42.png"),
     ]
 
     ok = True

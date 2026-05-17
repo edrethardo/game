@@ -36,6 +36,11 @@ struct Projectile {
     f32  freezeDuration = 0.0f; // freeze target on hit for this many seconds (0 = no freeze)
     Vec3 lightColor   = {0,0,0}; // dynamic point light color (zero = no light emitted)
     u8   meshId       = 0;     // weapon mesh to render (0 = default cube)
+
+    // On-hit status effect (enemy projectiles apply to player on hit)
+    // 0=none, 1=poison, 2=slow, 3=burn, 4=freeze
+    u8   onHitEffect    = 0;
+    f32  onHitDuration  = 0.0f;
 };
 
 struct ProjectilePool {
