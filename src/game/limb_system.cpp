@@ -122,6 +122,19 @@ static const LimbConfig s_hellhoundConfig = {
     }
 };
 
+// Sentinel: 2 legs + 1 shield arm held forward (blocking stance).
+// The shield arm is a large limb on the left side, angled forward to cover the front.
+static const LimbConfig s_sentinelConfig = {
+    3,
+    {
+        // Legs (same as skeleton base)
+        {{ 0.12f, 0.25f, 0.0f}, {0.09f, 0.20f, 0.09f}, 0.0f, 0, false},
+        {{-0.12f, 0.25f, 0.0f}, {0.09f, 0.20f, 0.09f}, 0.0f, 0, true},
+        // Shield arm — large, held forward (restAngle negative = forward-facing)
+        {{-0.30f, 0.55f, -0.10f}, {0.18f, 0.28f, 0.06f}, -0.4f, 0, false},
+    }
+};
+
 static const LimbConfig s_genericConfig = {0, {}};
 
 // ============================================================
@@ -190,6 +203,7 @@ const LimbConfig& LimbSystem::getConfig(EnemyType type) {
         case EnemyType::BAT:     return s_batConfig;
         case EnemyType::SPIDER:    return s_spiderConfig;
         case EnemyType::HELLHOUND: return s_hellhoundConfig;
+        case EnemyType::SENTINEL:  return s_sentinelConfig;
         default:                   return s_genericConfig;
     }
 }
@@ -213,6 +227,9 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
         case EnemyType::HELLHOUND:
             // 0-3 = legs (all use leg mesh)
             return s_legMeshId;
+        case EnemyType::SENTINEL:
+            // 0-1 = legs, 2 = shield arm (uses arm mesh, rendered large)
+            return (limbIdx < 2) ? s_legMeshId : s_armMeshId;
         default:
             return 0;
     }
@@ -375,6 +392,25 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
                 f32 phase = e.animTimer * 6.0f + limbIdx * 0.8f;
                 f32 tap = sinf(phase) * 0.2f * (speed01 * 0.8f + 0.2f);
                 return tap;
+            }
+        }
+
+        case EnemyType::SENTINEL: {
+            if (limbIdx < 2) {
+                // Legs: standard walk cycle (same as skeleton)
+                f32 freq = 4.0f * speed01 + 1.0f;
+                f32 amplitude = 0.4f * speed01 + 0.05f;
+                f32 phase = (limbIdx == 0) ? 0.0f : 3.14159f;
+                return sinf(e.animTimer * freq + phase) * amplitude;
+            } else {
+                // Shield arm: held forward, slight sway. Braces on attack (pushes forward)
+                f32 angle = -0.4f + sinf(e.animTimer * 1.5f) * 0.05f;
+                if (e.attackAnimT > 0.0f) {
+                    // Shield bash — thrust forward
+                    f32 t = e.attackAnimT / 0.3f;
+                    angle -= 0.3f * sinf(t * 3.14159f);
+                }
+                return angle;
             }
         }
 

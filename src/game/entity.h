@@ -37,6 +37,7 @@ enum struct EnemyType : u8 {
     SPIDER,       // 8 legs, 2 mandibles
     MIMIC,        // disguised as chest, attacks when approached
     HELLHOUND,    // quadruped canine demon — 4 legs, galloping animation
+    SENTINEL,     // armored shield-bearer — 2 legs, shield arm, blocking stance
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
     PROP,         // static decoration — no AI, no collision response, no animation
     COUNT

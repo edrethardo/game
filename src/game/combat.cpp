@@ -168,7 +168,7 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
         hits, distances, MAX_ENTITIES);
 
     for (u32 i = 0; i < hitCount; i++) {
-        applyDamage(pool, hits[i], weapon.damage);
+        applyDamage(pool, hits[i], weapon.damage, &eyePos);
         // Blood + sparks at each entity hit in the melee cone
         if (s_particlePool) {
             Entity* he = handleGet(pool, hits[i]);
@@ -212,7 +212,7 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
         if (hit.type == CombatHit::ENTITY) {
             result.hitEntity   = true;
             result.entitiesHit = 1;
-            applyDamage(pool, hit.entityHandle, weapon.damage);
+            applyDamage(pool, hit.entityHandle, weapon.damage, &eyePos);
             // Blood + sparks at hitscan entity impact
             if (s_particlePool) {
                 ParticleSystem::spawnSparks(*s_particlePool, hit.position, {0, 0.5f, 0}, 4);

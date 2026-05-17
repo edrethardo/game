@@ -72,7 +72,7 @@ def build_meshes():
         # New enemy meshes (roster rework)
         ["--type", "hellhound",      "--height", "2.0", "--out", os.path.join(mesh_dir, "hellhound.obj")],
         ["--type", "wraith",         "--out", os.path.join(mesh_dir, "wraith.obj")],
-        ["--type", "sentinel",       "--out", os.path.join(mesh_dir, "sentinel.obj")],
+        ["--type", "sentinel",       "--height", "2.0", "--out", os.path.join(mesh_dir, "sentinel.obj")],
         ["--type", "cave_troll",     "--height", "2.2", "--out", os.path.join(mesh_dir, "cave_troll.obj")],
         ["--type", "pit_fiend",      "--height", "2.4", "--out", os.path.join(mesh_dir, "pit_fiend.obj")],
         ["--type", "succubus",       "--out", os.path.join(mesh_dir, "succubus.obj")],

@@ -12,7 +12,11 @@
       "attackCooldown": 1.2,
       "damage": 13,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "normal",
       "aiPreference": "chase",
       "onHitEffect": 0,
@@ -32,7 +36,11 @@
       "attackCooldown": 1.5,
       "damage": 8,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "ranged_caster",
       "aiPreference": "strafe",
       "onHitEffect": 0,
@@ -52,7 +60,11 @@
       "attackCooldown": 1.5,
       "damage": 8,
       "flying": true,
-      "halfExtents": [0.4, 0.4, 0.4],
+      "halfExtents": [
+        0.4,
+        0.4,
+        0.4
+      ],
       "role": "normal",
       "aiPreference": "flyby",
       "onHitEffect": 0,
@@ -72,7 +84,11 @@
       "attackCooldown": 0.8,
       "damage": 12,
       "flying": false,
-      "halfExtents": [0.5, 0.3, 0.5],
+      "halfExtents": [
+        0.5,
+        0.3,
+        0.5
+      ],
       "role": "normal",
       "aiPreference": "chase",
       "onHitEffect": 1,
@@ -92,7 +108,11 @@
       "attackCooldown": 0.6,
       "damage": 18,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "ambush",
       "aiPreference": "dormant",
       "onHitEffect": 0,
@@ -112,32 +132,16 @@
       "attackCooldown": 0.8,
       "damage": 3,
       "flying": true,
-      "halfExtents": [0.25, 0.4, 0.25],
+      "halfExtents": [
+        0.25,
+        0.4,
+        0.25
+      ],
       "role": "ranged_caster",
       "aiPreference": "strafe",
       "onHitEffect": 0,
       "onHitDuration": 0,
       "onHitDps": 0,
-      "dropWeight": 1.0
-    },
-    {
-      "name": "Catacomb Sentinel",
-      "tier": 2,
-      "meshName": "sentinel",
-      "materialName": "catacomb_sentinel_skin",
-      "health": 80,
-      "moveSpeed": 2.0,
-      "detectionRange": 12,
-      "attackRange": 2.5,
-      "attackCooldown": 1.2,
-      "damage": 14,
-      "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
-      "role": "shield_bearer",
-      "aiPreference": "surround",
-      "onHitEffect": 1,
-      "onHitDuration": 3.0,
-      "onHitDps": 4.0,
       "dropWeight": 1.0
     },
     {
@@ -152,7 +156,11 @@
       "attackCooldown": 0.8,
       "damage": 16,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "charger",
       "aiPreference": "chase",
       "onHitEffect": 1,
@@ -172,7 +180,11 @@
       "attackCooldown": 1.2,
       "damage": 14,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "ranged_caster",
       "aiPreference": "strafe",
       "onHitEffect": 1,
@@ -192,7 +204,11 @@
       "attackCooldown": 2.0,
       "damage": 6,
       "flying": true,
-      "halfExtents": [0.4, 0.4, 0.4],
+      "halfExtents": [
+        0.4,
+        0.4,
+        0.4
+      ],
       "role": "bomber",
       "aiPreference": "flyby",
       "onHitEffect": 1,
@@ -212,7 +228,11 @@
       "attackCooldown": 2.0,
       "damage": 10,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "summoner",
       "aiPreference": "strafe",
       "onHitEffect": 0,
@@ -232,7 +252,11 @@
       "attackCooldown": 1.0,
       "damage": 12,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "normal",
       "aiPreference": "flank",
       "onHitEffect": 0,
@@ -252,7 +276,11 @@
       "attackCooldown": 1.5,
       "damage": 10,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "aura",
       "aiPreference": "surround",
       "onHitEffect": 1,
@@ -272,7 +300,11 @@
       "attackCooldown": 0.8,
       "damage": 11,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "charger",
       "aiPreference": "flank",
       "onHitEffect": 2,
@@ -292,7 +324,11 @@
       "attackCooldown": 1.0,
       "damage": 14,
       "flying": false,
-      "halfExtents": [0.6, 0.5, 0.6],
+      "halfExtents": [
+        0.6,
+        0.5,
+        0.6
+      ],
       "role": "summoner",
       "aiPreference": "retreat",
       "onHitEffect": 2,
@@ -312,7 +348,11 @@
       "attackCooldown": 2.0,
       "damage": 8,
       "flying": false,
-      "halfExtents": [0.5, 0.3, 0.5],
+      "halfExtents": [
+        0.5,
+        0.3,
+        0.5
+      ],
       "role": "bomber",
       "aiPreference": "strafe",
       "onHitEffect": 2,
@@ -332,7 +372,11 @@
       "attackCooldown": 2.5,
       "damage": 18,
       "flying": true,
-      "halfExtents": [0.4, 0.4, 0.4],
+      "halfExtents": [
+        0.4,
+        0.4,
+        0.4
+      ],
       "role": "ranged_caster",
       "aiPreference": "strafe",
       "onHitEffect": 0,
@@ -352,7 +396,11 @@
       "attackCooldown": 2.0,
       "damage": 8,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "healer",
       "aiPreference": "retreat",
       "onHitEffect": 0,
@@ -372,7 +420,11 @@
       "attackCooldown": 1.5,
       "damage": 10,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "aura",
       "aiPreference": "surround",
       "onHitEffect": 2,
@@ -392,7 +444,11 @@
       "attackCooldown": 1.5,
       "damage": 20,
       "flying": false,
-      "halfExtents": [0.6, 1.1, 0.6],
+      "halfExtents": [
+        0.6,
+        1.1,
+        0.6
+      ],
       "role": "shield_bearer",
       "aiPreference": "chase",
       "onHitEffect": 2,
@@ -412,7 +468,11 @@
       "attackCooldown": 0.6,
       "damage": 15,
       "flying": false,
-      "halfExtents": [0.5, 0.3, 0.5],
+      "halfExtents": [
+        0.5,
+        0.3,
+        0.5
+      ],
       "role": "ambush",
       "aiPreference": "dormant",
       "onHitEffect": 1,
@@ -432,8 +492,15 @@
       "attackCooldown": 0.6,
       "damage": 28,
       "flying": false,
-      "halfExtents": [0.6, 0.8, 0.7],
-      "role": ["charger", "bomber"],
+      "halfExtents": [
+        0.6,
+        0.8,
+        0.7
+      ],
+      "role": [
+        "charger",
+        "bomber"
+      ],
       "aiPreference": "chase",
       "onHitEffect": 3,
       "onHitDuration": 2.5,
@@ -452,8 +519,15 @@
       "attackCooldown": 0.7,
       "damage": 20,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
-      "role": ["ranged_caster", "aura"],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
+      "role": [
+        "ranged_caster",
+        "aura"
+      ],
       "aiPreference": "chase",
       "onHitEffect": 3,
       "onHitDuration": 2.5,
@@ -472,8 +546,15 @@
       "attackCooldown": 1.0,
       "damage": 20,
       "flying": true,
-      "halfExtents": [0.25, 0.4, 0.25],
-      "role": ["charger", "bomber"],
+      "halfExtents": [
+        0.25,
+        0.4,
+        0.25
+      ],
+      "role": [
+        "charger",
+        "bomber"
+      ],
       "aiPreference": "chase",
       "onHitEffect": 3,
       "onHitDuration": 2.5,
@@ -492,8 +573,15 @@
       "attackCooldown": 1.5,
       "damage": 22,
       "flying": false,
-      "halfExtents": [0.6, 1.2, 0.6],
-      "role": ["shield_bearer", "ranged_caster"],
+      "halfExtents": [
+        0.6,
+        1.2,
+        0.6
+      ],
+      "role": [
+        "shield_bearer",
+        "ranged_caster"
+      ],
       "aiPreference": "chase",
       "onHitEffect": 3,
       "onHitDuration": 2.5,
@@ -512,7 +600,11 @@
       "attackCooldown": 1.5,
       "damage": 14,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "aura",
       "aiPreference": "chase",
       "onHitEffect": 3,
@@ -532,8 +624,15 @@
       "attackCooldown": 2.0,
       "damage": 12,
       "flying": false,
-      "halfExtents": [0.6, 1.1, 0.6],
-      "role": ["summoner", "healer"],
+      "halfExtents": [
+        0.6,
+        1.1,
+        0.6
+      ],
+      "role": [
+        "summoner",
+        "healer"
+      ],
       "aiPreference": "retreat",
       "onHitEffect": 0,
       "onHitDuration": 0,
@@ -552,8 +651,15 @@
       "attackCooldown": 1.5,
       "damage": 14,
       "flying": true,
-      "halfExtents": [0.4, 0.9, 0.4],
-      "role": ["ranged_caster", "charger"],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
+      "role": [
+        "ranged_caster",
+        "charger"
+      ],
       "aiPreference": "flank",
       "onHitEffect": 4,
       "onHitDuration": 0.1,
@@ -572,7 +678,11 @@
       "attackCooldown": 0.8,
       "damage": 16,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "charger",
       "aiPreference": "chase",
       "onHitEffect": 4,
@@ -592,7 +702,11 @@
       "attackCooldown": 0.8,
       "damage": 14,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "normal",
       "aiPreference": "flank",
       "onHitEffect": 4,
@@ -612,7 +726,11 @@
       "attackCooldown": 1.5,
       "damage": 16,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "ranged_caster",
       "aiPreference": "strafe",
       "onHitEffect": 4,
@@ -632,7 +750,11 @@
       "attackCooldown": 2.0,
       "damage": 12,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "summoner",
       "aiPreference": "retreat",
       "onHitEffect": 4,
@@ -652,7 +774,11 @@
       "attackCooldown": 2.0,
       "damage": 10,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "healer",
       "aiPreference": "retreat",
       "onHitEffect": 4,
@@ -672,7 +798,11 @@
       "attackCooldown": 1.5,
       "damage": 16,
       "flying": false,
-      "halfExtents": [0.4, 0.9, 0.4],
+      "halfExtents": [
+        0.4,
+        0.9,
+        0.4
+      ],
       "role": "aura",
       "aiPreference": "surround",
       "onHitEffect": 4,
@@ -692,7 +822,11 @@
       "attackCooldown": 2.0,
       "damage": 10,
       "flying": true,
-      "halfExtents": [0.4, 0.4, 0.4],
+      "halfExtents": [
+        0.4,
+        0.4,
+        0.4
+      ],
       "role": "bomber",
       "aiPreference": "flyby",
       "onHitEffect": 0,
@@ -712,7 +846,11 @@
       "attackCooldown": 1.5,
       "damage": 24,
       "flying": false,
-      "halfExtents": [0.7, 1.3, 0.7],
+      "halfExtents": [
+        0.7,
+        1.3,
+        0.7
+      ],
       "role": "shield_bearer",
       "aiPreference": "chase",
       "onHitEffect": 4,

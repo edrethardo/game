@@ -596,7 +596,10 @@ void Engine::startGame() {
 
                         // Weapon assignment for skeleton-rig enemies
                         if (ent->enemyType == EnemyType::SKELETON) {
-                            if (ent->attackRange > 5.0f) {
+                            if (def.role & EnemyRole::SHIELD_BEARER) {
+                                // Shield bearers hold a shield instead of a weapon
+                                ent->weaponMeshId = findMeshByName("shield");
+                            } else if (ent->attackRange > 5.0f) {
                                 ent->weaponMeshId = m_meshIdStaff;
                             } else {
                                 u8 weapMeshes[] = {m_meshIdSword, m_meshIdDagger, m_meshIdAxe};

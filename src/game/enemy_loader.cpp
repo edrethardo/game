@@ -59,6 +59,8 @@ static EnemyType inferEnemyType(const char* meshName) {
     if (std::strcmp(meshName, "butcher") == 0) return EnemyType::BOSS;
     // Hellhound has its own quadruped rig with galloping animation
     if (std::strcmp(meshName, "hellhound") == 0) return EnemyType::HELLHOUND;
+    // Sentinel has its own armored rig with shield arm
+    if (std::strcmp(meshName, "sentinel") == 0) return EnemyType::SENTINEL;
     // Butcher-rig enemies use BOSS type for limb config (large skeleton rig)
     if (std::strcmp(meshName, "cave_troll") == 0)     return EnemyType::BOSS;
     if (std::strcmp(meshName, "pit_fiend") == 0)      return EnemyType::BOSS;
