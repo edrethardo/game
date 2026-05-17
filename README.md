@@ -1,6 +1,6 @@
 # Curse of the Dungeon Engine
 
-[![Discord](https://img.shields.io/discord/1234567890?color=5865F2&label=Discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/WHKx3BkS)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/WHKx3BkS)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Me-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/rethardotv)
 
 A first-person dungeon crawler built with a custom C++17 engine, targeting Nintendo Switch and low-end PC. Inspired by **Barony** (low-poly visual style) and **Hellgate: London** (real-time combat, loot, and skills).
