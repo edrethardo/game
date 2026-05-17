@@ -98,10 +98,12 @@ enum struct SkillId : u8 {
     // (reuses FROZEN_ORB, CHAIN_LIGHTNING, METEOR_STRIKE)
 
     // Rogue
-    KNIFE_BURST,
-    // (reuses PHASE_DASH)
+    KNIFE_BURST,        // legacy
     POISON_CLOUD,
-    SHADOW_STRIKE,
+    SHADOW_STRIKE,      // legacy
+    FAN_OF_KNIVES,      // 8-knife 360° burst + stealth
+    SHADOW_STEP,        // teleport behind + backstab from stealth
+    SHADOW_DANCE,       // 2s stealth + 2× damage + speed, kills extend
 
     // Paladin
     HOLY_SMITE,

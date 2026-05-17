@@ -154,6 +154,10 @@ void Engine::handleWeaponFire(f32 dt) {
             wpn.damage *= 1.2f;
         }
     }
+    // Shadow Dance: 2× damage on all weapon attacks while active
+    if (m_localPlayer.shadowDanceTimer > 0.0f) {
+        wpn.damage *= 2.0f;
+    }
     // Berserker ring: +1% damage per 1% missing HP
     if (m_ringPassive == SkillId::BERSERKER) {
         f32 missingPct = 1.0f - m_localPlayer.health / m_localPlayer.maxHealth;

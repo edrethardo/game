@@ -336,13 +336,20 @@ void Engine::renderViewmodel() {
 
     Mat4 weaponMVP = proj * weaponModel;
 
-    // Draw weapon mesh with material tint
+    // Draw weapon mesh with material tint — fade to 30% alpha during stealth
+    bool stealthed = (m_localPlayer.smokeTimer > 0.0f);
+    if (stealthed) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+
     glUseProgram(m_unlitShader.program);
     glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, weaponMVP.m);
 
     const Material* wpnMat = MaterialSystem::get(def.materialId);
     Vec4 wpnTint = wpnMat ? wpnMat->tint : Vec4{0.7f, 0.7f, 0.7f, 1.0f};
-    glUniform4f(m_unlitShader.loc_color, wpnTint.x, wpnTint.y, wpnTint.z, wpnTint.w);
+    f32 stealthAlpha = stealthed ? 0.3f : 1.0f;
+    glUniform4f(m_unlitShader.loc_color, wpnTint.x, wpnTint.y, wpnTint.z, wpnTint.w * stealthAlpha);
 
     glActiveTexture(GL_TEXTURE0);
     if (wpnMat) {
@@ -364,7 +371,7 @@ void Engine::renderViewmodel() {
                 if (mat) {
                     glBindTexture(GL_TEXTURE_2D, mat->texture.handle);
                     glUniform4f(m_unlitShader.loc_color,
-                                mat->tint.x, mat->tint.y, mat->tint.z, mat->tint.w);
+                                mat->tint.x, mat->tint.y, mat->tint.z, mat->tint.w * stealthAlpha);
                 }
                 glDrawElements(GL_TRIANGLES, grp.indexCount, GL_UNSIGNED_INT,
                                reinterpret_cast<void*>(
@@ -380,7 +387,7 @@ void Engine::renderViewmodel() {
     {
         const Material* skinMat = MaterialSystem::get(MaterialSystem::getIdByName("human_skin"));
         Vec4 skinTint = {0.85f, 0.70f, 0.55f, 1.0f};
-        glUniform4f(m_unlitShader.loc_color, skinTint.x, skinTint.y, skinTint.z, skinTint.w);
+        glUniform4f(m_unlitShader.loc_color, skinTint.x, skinTint.y, skinTint.z, skinTint.w * stealthAlpha);
         if (skinMat) {
             glBindTexture(GL_TEXTURE_2D, skinMat->texture.handle);
         }
@@ -457,14 +464,14 @@ void Engine::renderViewmodel() {
             // Draw shield with its material
             const Material* shMat = MaterialSystem::get(m_itemDefs[shieldItem.defId].materialId);
             Vec4 shTint = shMat ? shMat->tint : Vec4{0.7f, 0.7f, 0.7f, 1.0f};
-            glUniform4f(m_unlitShader.loc_color, shTint.x, shTint.y, shTint.z, shTint.w);
+            glUniform4f(m_unlitShader.loc_color, shTint.x, shTint.y, shTint.z, shTint.w * stealthAlpha);
             if (shMat) glBindTexture(GL_TEXTURE_2D, shMat->texture.handle);
             glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, shieldMVP.m);
             MeshSystem::draw(m_meshDefs[shieldMeshId].mesh);
 
             // Left hand holding the shield
             const Material* skinMat2 = MaterialSystem::get(MaterialSystem::getIdByName("human_skin"));
-            Vec4 skin2 = {0.85f, 0.70f, 0.55f, 1.0f};
+            Vec4 skin2 = {0.85f, 0.70f, 0.55f, stealthAlpha};
             glUniform4f(m_unlitShader.loc_color, skin2.x, skin2.y, skin2.z, skin2.w);
             if (skinMat2) glBindTexture(GL_TEXTURE_2D, skinMat2->texture.handle);
 
@@ -485,6 +492,8 @@ void Engine::renderViewmodel() {
             MeshSystem::draw(m_cubeMesh);
         }
     }
+
+    if (stealthed) glDisable(GL_BLEND);
 }
 
 // ---------------------------------------------------------------------------

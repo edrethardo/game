@@ -80,10 +80,10 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
      {SkillId::FIREBALL, SkillId::FROZEN_ORB, SkillId::CHAIN_LIGHTNING, SkillId::METEOR_STRIKE},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::PROJECTILE},
 
-    // ROGUE — Hit-and-Run
-    {"Rogue", "Fast assassin with teleports and poison",
+    // ROGUE — Hit-and-Run Assassin
+    {"Rogue", "Hit-and-run assassin with stealth and backstabs",
      85.0f, 7.0f, 100.0f, "Rusty Dagger",
-     {SkillId::KNIFE_BURST, SkillId::PHASE_DASH, SkillId::POISON_CLOUD, SkillId::SHADOW_STRIKE},
+     {SkillId::FAN_OF_KNIVES, SkillId::SHADOW_STEP, SkillId::POISON_CLOUD, SkillId::SHADOW_DANCE},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
     // PALADIN — Wrathful Holy Warrior
@@ -483,6 +483,13 @@ void Engine::init() {
         if (pool.entities[entityIndex].flags & ENT_FRIENDLY) {
             pool.entities[entityIndex].speechText = "Avenge... me...";
             pool.entities[entityIndex].speechTimer = 4.0f;
+        }
+
+        // Shadow Dance: extend by 0.3s on each kill
+        if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY) &&
+            s_engine->m_localPlayer.shadowDanceTimer > 0.0f) {
+            s_engine->m_localPlayer.shadowDanceTimer += 0.3f;
+            s_engine->m_localPlayer.smokeTimer = s_engine->m_localPlayer.shadowDanceTimer;
         }
 
         // Track hostile kills for floor transition screen

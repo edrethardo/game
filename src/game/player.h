@@ -33,7 +33,8 @@ struct Player {
     f32  curseTimer       = 0.0f;  // necromancer curse — increased damage taken
     u8   curseStacks      = 0;     // 5% increased damage per stack, max 4
     f32  overdriveTimer   = 0.0f;  // Mech Overdrive buff countdown (damage/speed boost)
-    f32  smokeTimer       = 0.0f;  // Shadow Ring smoke bomb — enemies can't detect player
+    f32  smokeTimer       = 0.0f;  // stealth — enemies can't detect player while > 0
+    f32  shadowDanceTimer = 0.0f;  // Shadow Dance: 2× damage + 20% speed, kills extend by 0.3s
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)

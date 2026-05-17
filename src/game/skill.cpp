@@ -543,7 +543,8 @@ static void fireKnifeBurst(Vec3 origin, Vec3 forward, const SkillDef* def,
 
 // Drop a toxic cloud at a target point using the scorch-zone system.
 static void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
-                             const LevelGrid& grid, EntityPool& entities)
+                             const LevelGrid& grid, EntityPool& entities,
+                             Player& player)
 {
     RayHit hit  = Raycast::cast(grid, origin, forward, 40.0f);
     Vec3 target = hit.hit ? (origin + forward * hit.distance)
@@ -564,10 +565,13 @@ static void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
         }
     }
 
+    // Grant stealth to the player
+    player.smokeTimer = 2.0f;
+
     // Green-tinted nova for visual + persistent scorch zone (poison DPS)
     if (s_novaCallback)   s_novaCallback(target, radius, {0.1f, 0.8f, 0.1f});
     if (s_scorchCallback) s_scorchCallback(target, radius, 4.0f, dps);
-    LOG_INFO("Poison Cloud deployed (aggro reset)");
+    LOG_INFO("Poison Cloud deployed (aggro reset + 2s stealth)");
 }
 
 // Teleport behind nearest enemy and deal 3x damage.
@@ -597,6 +601,116 @@ static void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
 
     if (s_dashCallback) s_dashCallback(startPos, behind);
     LOG_INFO("Shadow Strike: teleported and dealt %.0f damage", damage);
+}
+
+// Fan of Knives: 144 knife projectiles in a starburst ring + stealth.
+// Three rings at different heights for a 3D knife cloud.
+static void fireFanOfKnives(Vec3 origin, Vec3 forward, const SkillDef* def,
+                              ProjectilePool& pool, Player& player)
+{
+    f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 28.0f;
+    f32 damage = (def->damage > 0.0f ? def->damage : 10.0f) * s_classDmgMult;
+
+    // Ring 1: 64 horizontal knives
+    for (u32 i = 0; i < 64; i++) {
+        f32 angle = (6.2832f / 64.0f) * i;
+        Vec3 dir = {cosf(angle), 0.0f, sinf(angle)};
+        ProjectileSystem::spawn(pool, origin, dir, speed, damage, 0.06f, 1.3f, true);
+    }
+    // Ring 2: 48 upward-angled knives
+    for (u32 i = 0; i < 48; i++) {
+        f32 angle = (6.2832f / 48.0f) * i;
+        Vec3 dir = normalize(Vec3{cosf(angle) * 0.8f, 0.4f, sinf(angle) * 0.8f});
+        ProjectileSystem::spawn(pool, origin + Vec3{0, 0.3f, 0}, dir, speed * 0.9f, damage, 0.06f, 1.3f, true);
+    }
+    // Ring 3: 32 downward-angled knives
+    for (u32 i = 0; i < 32; i++) {
+        f32 angle = (6.2832f / 32.0f) * i;
+        Vec3 dir = normalize(Vec3{cosf(angle) * 0.85f, -0.25f, sinf(angle) * 0.85f});
+        ProjectileSystem::spawn(pool, origin - Vec3{0, 0.2f, 0}, dir, speed * 1.1f, damage, 0.06f, 1.3f, true);
+    }
+
+    // Brief stealth flicker after the burst
+    player.smokeTimer = 0.3f;
+
+    // Dark purple nova burst
+    if (s_novaCallback) s_novaCallback(origin, 3.0f, {0.4f, 0.1f, 0.6f});
+    if (s_particlePool) ParticleSystem::spawnSparks(*s_particlePool, origin, {0, 1, 0}, 8);
+    if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
+    LOG_INFO("Fan of Knives: 144 knives + 1.5s stealth");
+}
+
+// Shadow Step: teleport behind nearest enemy. Backstab 3× from stealth.
+// Gain stealth after the strike. Dark purple trail + smoke VFX.
+static void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
+                             EntityPool& entities, Player& player)
+{
+    f32 range = def->distance > 0.0f ? def->distance : 15.0f;
+    EntityHandle hits[MAX_ENTITIES];
+    f32          dists[MAX_ENTITIES];
+    u32 hitCount = CombatQuery::queryConeSorted(
+        entities, origin, forward, -1.0f, range,
+        hits, dists, MAX_ENTITIES);
+
+    if (hitCount == 0) return;
+
+    Entity* target = handleGet(entities, hits[0]);
+    if (!target || (target->flags & ENT_DEAD) || (target->flags & ENT_FRIENDLY)) return;
+
+    // Teleport behind the target
+    Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
+    Vec3 startPos = player.position;
+    player.position = behind;
+
+    // Backstab: 3× damage if attacking from stealth
+    f32 baseDmg = (def->damage > 0.0f ? def->damage : 40.0f) * s_classDmgMult;
+    f32 damage = (player.smokeTimer > 0.0f) ? baseDmg * 3.0f : baseDmg;
+    Combat::applyDamage(entities, hits[0], damage);
+    target->freezeTimer = 1.5f; // slow on hit
+
+    // Gain stealth after the strike
+    player.smokeTimer = 1.5f;
+
+    // Dark purple dash trail + smoke at both ends
+    if (s_dashCallback) s_dashCallback(startPos, behind);
+    if (s_particlePool) {
+        ParticleSystem::spawnSmoke(*s_particlePool, startPos, 10);
+        ParticleSystem::spawnSmoke(*s_particlePool, behind, 10);
+        ParticleSystem::spawnDebris(*s_particlePool, target->position, 6);
+    }
+    if (s_novaCallback) s_novaCallback(behind, 1.5f, {0.4f, 0.1f, 0.6f});
+    if (s_screenShake) s_screenShake->trigger(0.08f, 0.3f);
+    LOG_INFO("Shadow Step: %s for %.0f damage",
+             damage > baseDmg ? "BACKSTAB" : "strike", damage);
+}
+
+// Shadow Dance: 2s stealth + 2× damage + 20% speed. Kills extend by 0.3s.
+static void fireShadowDance(Player& player)
+{
+    player.shadowDanceTimer = 2.0f;
+    player.smokeTimer = 2.0f;
+
+    // Dramatic dark purple nova + particle explosion
+    if (s_novaCallback) s_novaCallback(player.position, 5.0f, {0.3f, 0.1f, 0.5f});
+    if (s_particlePool) {
+        // 64 dark purple particles burst outward
+        for (u32 p = 0; p < 64; p++) {
+            f32 angle = (6.2832f / 64.0f) * p;
+            f32 speed = 6.0f + (std::rand() / static_cast<f32>(RAND_MAX)) * 3.0f;
+            Particle tp = {};
+            tp.position = player.position;
+            tp.velocity = {cosf(angle) * speed, 1.0f + (std::rand() / static_cast<f32>(RAND_MAX)) * 2.0f,
+                           sinf(angle) * speed};
+            tp.life = 0.6f; tp.maxLife = 0.6f;
+            tp.size = 0.05f;
+            tp.baseAlpha = 0.8f;
+            tp.r = 100; tp.g = 30; tp.b = 160;
+            tp.type = PTYPE_GEOMETRIC; tp.flags = PFLAG_FADE | PFLAG_SHRINK;
+            ParticleSystem::spawn(*s_particlePool, tp);
+        }
+    }
+    if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
+    LOG_INFO("Shadow Dance: 2s stealth + 2x damage + 20%% speed");
 }
 
 // ---------------------------------------------------------------------------
@@ -1486,8 +1600,13 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         AudioSystem::play(SfxId::SKILL_BLOOD); break;
     case SkillId::PHASE_DASH:
     case SkillId::SHADOW_STRIKE:
+    case SkillId::SHADOW_STEP:
     case SkillId::SHADOW_SHOT:
         AudioSystem::play(SfxId::SKILL_DASH); break;
+    case SkillId::FAN_OF_KNIVES:
+        AudioSystem::play(SfxId::SKILL_EXPLOSION); break;
+    case SkillId::SHADOW_DANCE:
+        AudioSystem::play(SfxId::SKILL_BUFF); break;
     case SkillId::HOLY_SMITE:
         AudioSystem::play(SfxId::SKILL_STUN); break;   // thunderous divine impact
     case SkillId::DIVINE_SHIELD:
@@ -1552,8 +1671,12 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
             break;
         case SkillId::PHASE_DASH:
         case SkillId::SHADOW_STRIKE:
+        case SkillId::SHADOW_STEP:
             ParticleSystem::spawnSmoke(*s_particlePool, eyePos, 8);
             break;
+        case SkillId::FAN_OF_KNIVES:
+        case SkillId::SHADOW_DANCE:
+            break; // VFX handled inside fire functions
         case SkillId::EARTHQUAKE:
             ParticleSystem::spawnExplosion(*s_particlePool, eyePos + forward * 2.0f, 2.0f);
             if (s_screenShake) s_screenShake->trigger(0.1f, 0.5f);
@@ -1631,11 +1754,20 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     case SkillId::KNIFE_BURST:
         fireKnifeBurst(eyePos, forward, def, projectiles);
         break;
+    case SkillId::FAN_OF_KNIVES:
+        fireFanOfKnives(eyePos, forward, def, projectiles, player);
+        break;
     case SkillId::POISON_CLOUD:
-        firePoisonCloud(eyePos, forward, def, grid, entities);
+        firePoisonCloud(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::SHADOW_STRIKE:
         fireShadowStrike(eyePos, forward, def, entities, player);
+        break;
+    case SkillId::SHADOW_STEP:
+        fireShadowStep(eyePos, forward, def, entities, player);
+        break;
+    case SkillId::SHADOW_DANCE:
+        fireShadowDance(player);
         break;
 
     // ---- Paladin ----

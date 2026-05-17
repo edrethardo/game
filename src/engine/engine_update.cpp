@@ -527,7 +527,11 @@ void Engine::gameUpdate(f32 dt) {
 
     // Player movement/aiming — disabled while inventory is open
     if (!m_inventoryOpen) {
+        // Shadow Dance: +20% move speed while active
+        f32 savedSpeed = m_localPlayer.moveSpeed;
+        if (m_localPlayer.shadowDanceTimer > 0.0f) m_localPlayer.moveSpeed *= 1.2f;
         PlayerController::update(m_localPlayer, dt);
+        m_localPlayer.moveSpeed = savedSpeed;
         if (!m_localPlayer.noclip) {
             // Build obstacle list using frame allocator (avoids stack array)
             auto* obstacles = static_cast<CollisionObstacle*>(
@@ -1094,6 +1098,17 @@ void Engine::gameUpdate(f32 dt) {
     }
     if (m_localPlayer.smokeTimer > 0.0f)
         m_localPlayer.smokeTimer -= dt;
+    // Shadow Dance: tick timer, keep smokeTimer synced, apply speed bonus
+    if (m_localPlayer.shadowDanceTimer > 0.0f) {
+        m_localPlayer.shadowDanceTimer -= dt;
+        if (m_localPlayer.shadowDanceTimer > 0.0f) {
+            // Keep stealth active for the full Shadow Dance duration
+            if (m_localPlayer.smokeTimer < m_localPlayer.shadowDanceTimer)
+                m_localPlayer.smokeTimer = m_localPlayer.shadowDanceTimer;
+        } else {
+            m_localPlayer.shadowDanceTimer = 0.0f;
+        }
+    }
     if (m_localPlayer.curseTimer > 0.0f) {
         m_localPlayer.curseTimer -= dt;
         if (m_localPlayer.curseTimer <= 0.0f) m_localPlayer.curseStacks = 0;

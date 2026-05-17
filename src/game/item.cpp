@@ -80,6 +80,9 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "knife_burst")     return SkillId::KNIFE_BURST;
     if (s == "poison_cloud")    return SkillId::POISON_CLOUD;
     if (s == "shadow_strike")   return SkillId::SHADOW_STRIKE;
+    if (s == "fan_of_knives")   return SkillId::FAN_OF_KNIVES;
+    if (s == "shadow_step")     return SkillId::SHADOW_STEP;
+    if (s == "shadow_dance")    return SkillId::SHADOW_DANCE;
     // Paladin
     if (s == "holy_smite")        return SkillId::HOLY_SMITE;
     if (s == "consecration")      return SkillId::CONSECRATION;
