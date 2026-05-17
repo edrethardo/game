@@ -38,11 +38,29 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
     // Paladin passive: 25% damage reduction
     if (e->npcClass == NpcClass::PALADIN) damage *= 0.75f;
 
+    // If this IDLE enemy survives the hit, alert nearby hostiles within 6m
+    bool wasIdle = (e->aiState == AIState::IDLE);
+
     e->health -= damage;
     e->flashTimer = 0.12f;
 
     // Auto-spawn floating damage number at entity position
     if (s_damageNumberCallback) s_damageNumberCallback(e->position + Vec3{0, 0.5f, 0}, damage);
+
+    // Damage alert: first hit on an unalerted enemy that survives wakes neighbors
+    if (wasIdle && e->health > 0.0f) {
+        e->aiState = AIState::CHASE;
+        constexpr f32 ALERT_RADIUS_SQ = 6.0f * 6.0f;
+        for (u32 a = 0; a < pool.activeCount; a++) {
+            Entity& n = pool.entities[pool.activeList[a]];
+            if (n.aiState != AIState::IDLE) continue;
+            if (n.flags & ENT_FRIENDLY) continue;
+            Vec3 d = n.position - e->position;
+            if (d.x*d.x + d.z*d.z < ALERT_RADIUS_SQ) {
+                n.aiState = AIState::CHASE;
+            }
+        }
+    }
 
     if (e->health <= 0.0f) {
         e->health     = 0.0f;

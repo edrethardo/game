@@ -379,6 +379,19 @@ void Engine::init() {
             }
         }
     });
+    SkillSystem::setReloadCallback([]() {
+        if (!s_engine) return;
+        WeaponState& ws = s_engine->m_players[s_engine->m_localPlayerIndex].weaponState;
+        const ItemInstance& eqWpn = s_engine->m_inventories[s_engine->m_localPlayerIndex]
+            .equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        if (!isItemEmpty(eqWpn)) {
+            WeaponDef wpn = Inventory::getWeaponFromItem(
+                s_engine->m_inventories[s_engine->m_localPlayerIndex],
+                s_engine->m_itemDefs, eqWpn);
+            ws.currentClip = wpn.clipSize;
+            ws.reloading = false;
+        }
+    });
     SkillSystem::setScorchCallback([](Vec3 position, f32 radius, f32 duration, f32 dps) {
         if (!s_engine) return;
         for (u32 i = 0; i < MAX_SCORCH; i++) {

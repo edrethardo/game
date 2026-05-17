@@ -872,6 +872,12 @@ void Engine::gameUpdate(f32 dt) {
             // Class skill damage scales at 6% per effective floor (slower than enemy 10%)
             { u32 effFloor = m_level.currentFloor + m_difficulty * 50;
               SkillSystem::setClassDamageMult(1.0f + (effFloor - 1) * 0.06f); }
+            // Set weapon damage for Marksman skills that scale off equipped weapon
+            { const ItemInstance& wpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+              WeaponDef wd = !isItemEmpty(wpn)
+                  ? Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex], m_itemDefs, wpn)
+                  : m_weaponDefs[0];
+              SkillSystem::setWeaponDamage(wd.damage); }
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                           m_projectiles, m_entities, m_level.grid, m_localPlayer,

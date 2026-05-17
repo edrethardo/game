@@ -194,6 +194,7 @@ void Engine::handleWeaponFire(f32 dt) {
         // Overcharged Magazine: 3× damage + penetrating shot with beam trail
         if (SkillSystem::isOvercharged()) {
             wpn.damage *= 3.0f;
+            ws.cooldownTimer *= 0.7f; // 30% attack speed bonus during overcharge
             SkillSystem::consumeOverchargeShot();
             // Penetrating hitscan — hit ALL enemies in narrow cone
             EntityHandle oHits[MAX_ENTITIES];
@@ -201,12 +202,17 @@ void Engine::handleWeaponFire(f32 dt) {
             u32 oCnt = CombatQuery::queryConeSorted(
                 m_entities, eyePos, forward, cosf(radians(1.0f)), wpn.range,
                 oHits, oDists, MAX_ENTITIES);
+            bool gotKill = false;
             for (u32 oi = 0; oi < oCnt; oi++) {
                 Entity* oe = handleGet(m_entities, oHits[oi]);
                 if (!oe || (oe->flags & ENT_DEAD) || (oe->flags & ENT_FRIENDLY)) continue;
+                f32 hpBefore = oe->health;
                 Combat::applyDamage(m_entities, oHits[oi], wpn.damage);
+                if (hpBefore > 0.0f && oe->health <= 0.0f) gotKill = true;
                 ParticleSystem::spawnDebris(m_particles, oe->position, 3);
             }
+            // Instant full reload on kill
+            if (gotKill) { ws.currentClip = wpn.clipSize; ws.reloading = false; }
             // Beam trail
             RayHit bWall = Raycast::cast(m_level.grid, eyePos, forward, wpn.range);
             Vec3 bEnd = bWall.hit ? (eyePos + forward * bWall.distance)

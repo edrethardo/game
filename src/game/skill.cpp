@@ -25,6 +25,11 @@ void SkillSystem::setSkillPower(f32 power) { s_skillPower = power; }
 // Set to floor-based mult for class skills, 1.0 for item skills.
 static f32 s_classDmgMult = 1.0f;
 void SkillSystem::setClassDamageMult(f32 mult) { s_classDmgMult = mult; }
+
+// Equipped weapon base damage — set by engine before marksman skill activation.
+// Marksman skills scale off weapon damage instead of fixed skill damage.
+static f32 s_weaponDamage = 10.0f;
+void SkillSystem::setWeaponDamage(f32 dmg) { s_weaponDamage = dmg; }
 static ScreenShake*  s_screenShake  = nullptr;
 static SkillSystem::NovaCallback s_novaCallback = nullptr;
 static SkillSystem::DashCallback s_dashCallback = nullptr;
@@ -32,6 +37,7 @@ static SkillSystem::ScorchCallback s_scorchCallback = nullptr;
 static SkillSystem::DroneSpawnCallback s_droneSpawnCallback = nullptr;
 static SkillSystem::ChainCallback s_chainCallback = nullptr;
 static SkillSystem::BeamCallback s_beamCallback = nullptr;
+static SkillSystem::ReloadCallback s_reloadCallback = nullptr;
 static u8 s_boltMeshId = 0;    // set by engine during init for shock bolt projectiles
 static u8 s_shockBoltMatId = 0;
 
@@ -45,6 +51,7 @@ void SkillSystem::setScorchCallback(ScorchCallback cb) { s_scorchCallback = cb; 
 void SkillSystem::setDroneSpawnCallback(DroneSpawnCallback cb) { s_droneSpawnCallback = cb; }
 void SkillSystem::setChainCallback(ChainCallback cb) { s_chainCallback = cb; }
 void SkillSystem::setBeamCallback(BeamCallback cb) { s_beamCallback = cb; }
+void SkillSystem::setReloadCallback(ReloadCallback cb) { s_reloadCallback = cb; }
 
 bool SkillSystem::isOvercharged() { return s_overchargeTimer > 0.0f && s_overchargeShots > 0; }
 void SkillSystem::consumeOverchargeShot() {
@@ -1011,7 +1018,8 @@ static void fireMechOverdrive(Player& player)
 static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                            const LevelGrid& grid, EntityPool& entities)
 {
-    f32 damage = (def->damage > 0.0f ? def->damage : 30.0f) * 3.0f * s_classDmgMult;
+    // Scales off weapon damage (Marksman gimmick: skills amplify weapon)
+    f32 damage = s_weaponDamage * 1.2f * s_classDmgMult;
     f32 range  = 80.0f;
 
     // Penetrating rail: test ray against every entity AABB along the line.
@@ -1067,7 +1075,8 @@ static void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
 static void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
                                 const LevelGrid& grid, EntityPool& entities)
 {
-    f32 damage  = (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
+    // Scales off weapon damage (Marksman gimmick: skills amplify weapon)
+    f32 damage  = s_weaponDamage * 1.2f * s_classDmgMult;
     f32 splashR = def->radius > 0.0f ? def->radius : 3.5f;
 
     // Find detonation point via raycast
@@ -1156,15 +1165,17 @@ static void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
         Entity* e = handleGet(entities, eHits[0]);
         if (e && !(e->flags & ENT_DEAD) && !(e->flags & ENT_FRIENDLY)) {
             bool isExecute = (e->health < e->maxHealth * 0.25f);
+            // Non-execute: scales off weapon damage (Marksman gimmick)
             f32 damage = isExecute
                          ? e->health + 1.0f
-                         : (def->damage > 0.0f ? def->damage : 50.0f) * s_classDmgMult;
+                         : s_weaponDamage * 2.5f * s_classDmgMult;
             Combat::applyDamage(entities, eHits[0], damage);
             beamEnd = e->position; // beam goes to target
 
             if (isExecute) {
-                // Execute kill! Reset cooldown + chain execute + massive VFX
+                // Execute kill! Reset cooldown + instant reload + chain execute + massive VFX
                 skillState.cooldownTimer = 0.0f;
+                if (s_reloadCallback) s_reloadCallback();
 
                 // Debris explosion on primary target
                 if (s_particlePool) {

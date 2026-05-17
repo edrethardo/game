@@ -34,6 +34,9 @@ namespace SkillSystem {
     // Called by engine before class skill activation. Item skills use 1.0.
     void setClassDamageMult(f32 mult);
 
+    // Set equipped weapon damage — Marksman skills scale off weapon damage.
+    void setWeaponDamage(f32 dmg);
+
     // Tick cooldowns, energy regen, pending meteors
     void update(SkillState& ss, f32 dt);
 
@@ -67,6 +70,10 @@ namespace SkillSystem {
     void setDashCallback(DashCallback cb);
     void setScorchCallback(ScorchCallback cb);
     void setBeamCallback(BeamCallback cb);
+
+    // Instant reload callback — called by skills that grant reload on kill
+    using ReloadCallback = void(*)();
+    void setReloadCallback(ReloadCallback cb);
 
     // Overcharged Magazine — buff state for Marksman
     bool isOvercharged();
