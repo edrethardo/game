@@ -164,6 +164,8 @@ struct Entity {
     f32  overclockTimer = 0.0f;  // Tinkerer overclock buff: 2× dmg, 1.5× speed
     f32  queenLifeTimer = 0.0f;  // Swarm Queen despawn countdown
     f32  queenSpawnTimer = 0.0f; // Swarm Queen auto-spawn interval
+    f32  markPreyTimer  = 0.0f;  // Ranger Mark Prey: takes 2× damage while active
+    f32  markPreyDmgMult = 1.0f; // resets to 1.0 when markPreyTimer expires
 
     // On-hit status effect this entity applies to targets (0=none)
     // 1=poison, 2=slow, 3=burn, 4=freeze

@@ -37,6 +37,8 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage) {
 
     // Paladin passive: 25% damage reduction
     if (e->npcClass == NpcClass::PALADIN) damage *= 0.75f;
+    // Mark Prey: marked targets take amplified damage
+    if (e->markPreyDmgMult > 1.0f) damage *= e->markPreyDmgMult;
 
     // If this IDLE enemy survives the hit, alert nearby hostiles within 6m
     bool wasIdle = (e->aiState == AIState::IDLE);

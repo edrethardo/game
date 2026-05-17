@@ -100,6 +100,11 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         }
         if (e.freezeTimer > 0.0f) e.freezeTimer -= dt;
         if (e.stunTimer > 0.0f) e.stunTimer -= dt;
+        // Mark Prey: tick down and reset damage multiplier when expired
+        if (e.markPreyTimer > 0.0f) {
+            e.markPreyTimer -= dt;
+            if (e.markPreyTimer <= 0.0f) { e.markPreyTimer = 0.0f; e.markPreyDmgMult = 1.0f; }
+        }
 
         if (e.flags & ENT_DEAD) {
             e.deathTimer -= dt;

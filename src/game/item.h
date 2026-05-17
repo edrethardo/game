@@ -88,10 +88,14 @@ enum struct SkillId : u8 {
     EARTHQUAKE,
 
     // Ranger
-    MULTI_SHOT,
-    RAIN_OF_ARROWS,
-    POISON_ARROW,
-    SHADOW_SHOT,
+    MULTI_SHOT,         // legacy
+    RAIN_OF_ARROWS,     // legacy
+    POISON_ARROW,       // legacy
+    SHADOW_SHOT,        // legacy
+    VOLLEY,             // 20 arrows rain in target area
+    PIERCING_SHOT,      // penetrating arrow + bleed DoT
+    BARRAGE,            // 10-arrow shotgun blast
+    MARK_PREY,          // 2× damage debuff, chain clear on kill
 
     // Sorcerer
     FIREBALL,

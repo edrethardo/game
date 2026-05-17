@@ -68,10 +68,10 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
      {SkillId::THUNDERCLAP, SkillId::WAR_CRY, SkillId::WHIRLWIND, SkillId::EARTHQUAKE},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::MELEE},
 
-    // RANGER — Ranged DPS
-    {"Ranger", "Agile archer with poison and piercing shots",
+    // RANGER — Rapid-Fire Sharpshooter
+    {"Ranger", "Rapid-fire sharpshooter with piercing shots and volleys",
      80.0f, 6.5f, 100.0f, "Short Bow",
-     {SkillId::MULTI_SHOT, SkillId::RAIN_OF_ARROWS, SkillId::POISON_ARROW, SkillId::SHADOW_SHOT},
+     {SkillId::VOLLEY, SkillId::PIERCING_SHOT, SkillId::BARRAGE, SkillId::MARK_PREY},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::PROJECTILE},
 
     // SORCERER — Glass Cannon
@@ -490,6 +490,40 @@ void Engine::init() {
             s_engine->m_localPlayer.shadowDanceTimer > 0.0f) {
             s_engine->m_localPlayer.shadowDanceTimer += 0.3f;
             s_engine->m_localPlayer.smokeTimer = s_engine->m_localPlayer.shadowDanceTimer;
+        }
+
+        // Mark Prey chain clear: if marked enemy dies, arrows rain on nearby enemies
+        if (pool.entities[entityIndex].markPreyTimer > 0.0f &&
+            !(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
+            f32 chainDmg = s_engine->m_localPlayer.moveSpeed > 0.0f  // use weapon damage if available
+                ? 15.0f * (1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f)
+                : 15.0f;
+            EntityHandle nearby[MAX_ENTITIES];
+            f32 nearDists[MAX_ENTITIES];
+            u32 nearCnt = CombatQuery::queryConeSorted(
+                pool, position, {0, -1, 0}, -1.0f, 6.0f, nearby, nearDists, MAX_ENTITIES);
+            for (u32 nc = 0; nc < nearCnt; nc++) {
+                if (nearby[nc].index == entityIndex) continue;
+                Entity* ne = handleGet(pool, nearby[nc]);
+                if (!ne || (ne->flags & ENT_FRIENDLY) || (ne->flags & ENT_DEAD)) continue;
+                // Spawn arrow impacts as PendingMeteors
+                for (u32 arr = 0; arr < 5; arr++) {
+                    extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+                    for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
+                        if (!s_meteors[m].active) {
+                            f32 ofs = (std::rand() / static_cast<f32>(RAND_MAX)) * 0.5f;
+                            s_meteors[m].position = ne->position + Vec3{ofs - 0.25f, 0, ofs - 0.25f};
+                            s_meteors[m].damage   = chainDmg;
+                            s_meteors[m].radius   = 0.8f;
+                            s_meteors[m].timer    = 0.1f + arr * 0.05f;
+                            s_meteors[m].active   = true;
+                            s_meteors[m].healsPlayer = false;
+                            s_meteors[m].color    = {0.6f, 0.4f, 0.1f};
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         // Track hostile kills for floor transition screen

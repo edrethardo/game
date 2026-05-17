@@ -498,6 +498,139 @@ static void fireShadowShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     LOG_INFO("Shadow Shot fired");
 }
 
+// Volley: 20 arrows rain on target area over 0.5s. Weapon-scaling damage.
+static void fireVolley(Vec3 origin, Vec3 forward, const SkillDef* def,
+                        const LevelGrid& grid)
+{
+    RayHit hit = Raycast::cast(grid, origin, forward, 20.0f);
+    Vec3 target = hit.hit ? (origin + forward * hit.distance) : (origin + forward * 15.0f);
+    f32 radius = def->radius > 0.0f ? def->radius : 4.0f;
+    f32 delay  = def->delay > 0.0f ? def->delay : 0.5f;
+    f32 arrowDmg = s_weaponDamage * 0.3f * s_classDmgMult;
+
+    // Spawn 20 arrows as staggered PendingMeteors at random positions in the zone
+    for (u32 a = 0; a < 20; a++) {
+        f32 angle = (std::rand() / static_cast<f32>(RAND_MAX)) * 6.2832f;
+        f32 dist  = (std::rand() / static_cast<f32>(RAND_MAX)) * radius;
+        Vec3 arrowPos = target + Vec3{cosf(angle) * dist, 0.0f, sinf(angle) * dist};
+
+        for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
+            if (!s_meteors[m].active) {
+                s_meteors[m].position    = arrowPos;
+                s_meteors[m].damage      = arrowDmg;
+                s_meteors[m].radius      = 0.8f;
+                s_meteors[m].timer       = delay * (0.3f + 0.7f * (a / 20.0f)); // stagger over delay
+                s_meteors[m].active      = true;
+                s_meteors[m].healsPlayer = false;
+                s_meteors[m].color       = {0.6f, 0.4f, 0.1f}; // brown/arrow color
+                break;
+            }
+        }
+    }
+
+    // Targeting nova at ground
+    if (s_novaCallback) s_novaCallback(target, radius, {0.6f, 0.4f, 0.1f});
+    if (s_screenShake) s_screenShake->trigger(0.04f, 0.3f);
+    LOG_INFO("Volley: 20 arrows targeting (%.1f, %.1f), dmg %.1f each", target.x, target.z, arrowDmg);
+}
+
+// Piercing Shot: ray-AABB penetrating arrow + bleed DoT. Weapon-scaling damage.
+static void firePiercingShot(Vec3 origin, Vec3 forward, const SkillDef* def,
+                               const LevelGrid& grid, EntityPool& entities)
+{
+    f32 damage = s_weaponDamage * 1.5f * s_classDmgMult;
+    f32 range  = 80.0f;
+
+    // Ray-AABB intersection against all entities (same pattern as Aimed Shot)
+    u32 hitCount = 0;
+    for (u32 a = 0; a < entities.activeCount; a++) {
+        u32 idx = entities.activeList[a];
+        Entity& e = entities.entities[idx];
+        if (e.flags & ENT_DEAD) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+
+        AABB box = entityAABB(e);
+        Vec3 invDir = {1.0f / (forward.x != 0.0f ? forward.x : 0.0001f),
+                       1.0f / (forward.y != 0.0f ? forward.y : 0.0001f),
+                       1.0f / (forward.z != 0.0f ? forward.z : 0.0001f)};
+        f32 t1 = (box.min.x - origin.x) * invDir.x;
+        f32 t2 = (box.max.x - origin.x) * invDir.x;
+        f32 t3 = (box.min.y - origin.y) * invDir.y;
+        f32 t4 = (box.max.y - origin.y) * invDir.y;
+        f32 t5 = (box.min.z - origin.z) * invDir.z;
+        f32 t6 = (box.max.z - origin.z) * invDir.z;
+        f32 tmin = fmaxf(fmaxf(fminf(t1, t2), fminf(t3, t4)), fminf(t5, t6));
+        f32 tmax = fminf(fminf(fmaxf(t1, t2), fmaxf(t3, t4)), fmaxf(t5, t6));
+        if (tmax < 0.0f || tmin > tmax || tmin > range) continue;
+
+        EntityHandle h = {static_cast<u16>(idx), e.generation};
+        Combat::applyDamage(entities, h, damage);
+        // Apply bleed DoT: 20% of hit damage per second for 3s
+        e.poisonTimer = 3.0f;
+        e.poisonDps   = damage * 0.2f;
+        if (s_particlePool) ParticleSystem::spawnDebris(*s_particlePool, e.position, 3);
+        hitCount++;
+    }
+
+    // Beam trail
+    RayHit wallHit = Raycast::cast(grid, origin, forward, range);
+    Vec3 beamEnd = wallHit.hit ? (origin + forward * wallHit.distance)
+                               : (origin + forward * range);
+    if (s_beamCallback) s_beamCallback(origin, beamEnd, {0.4f, 0.6f, 0.2f});
+    if (s_particlePool) ParticleSystem::spawnSparks(*s_particlePool, origin, forward, 4);
+    if (s_screenShake) s_screenShake->trigger(0.05f, 0.25f);
+    LOG_INFO("Piercing Shot: hit %u enemies, %.0f damage + bleed", hitCount, damage);
+}
+
+// Barrage: 10 arrows in a tight forward cone. Weapon-scaling damage.
+static void fireBarrage(Vec3 origin, Vec3 forward, const SkillDef* def,
+                          ProjectilePool& pool)
+{
+    f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 30.0f;
+    f32 damage = s_weaponDamage * 0.4f * s_classDmgMult;
+
+    for (u32 i = 0; i < 10; i++) {
+        // Random spread ±5° horizontal, ±2° vertical
+        f32 yawSpread   = ((std::rand() / static_cast<f32>(RAND_MAX)) - 0.5f) * 10.0f;
+        f32 pitchSpread = ((std::rand() / static_cast<f32>(RAND_MAX)) - 0.5f) * 4.0f;
+        Vec3 dir = normalize(rotateY(forward, yawSpread) +
+                             Vec3{0.0f, pitchSpread * 0.017f, 0.0f}); // degrees to ~radians
+        ProjectileSystem::spawn(pool, origin, dir, speed, damage, 0.08f, 1.5f, true);
+    }
+
+    if (s_particlePool) ParticleSystem::spawnSparks(*s_particlePool, origin, forward, 6);
+    if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
+    LOG_INFO("Barrage: 10 arrows, %.0f damage each", damage);
+}
+
+// Mark Prey: mark nearest enemy for 2× damage. Chain clear on kill.
+static void fireMarkPrey(Vec3 origin, Vec3 forward, const SkillDef* def,
+                           EntityPool& entities)
+{
+    f32 range = 15.0f;
+    EntityHandle hits[MAX_ENTITIES];
+    f32          dists[MAX_ENTITIES];
+    u32 cnt = CombatQuery::queryConeSorted(
+        entities, origin, forward, cosf(radians(30.0f)), range,
+        hits, dists, MAX_ENTITIES);
+
+    for (u32 i = 0; i < cnt; i++) {
+        Entity* e = handleGet(entities, hits[i]);
+        if (!e || (e->flags & ENT_DEAD) || (e->flags & ENT_FRIENDLY)) continue;
+
+        e->markPreyTimer  = def->duration > 0.0f ? def->duration : 5.0f;
+        e->markPreyDmgMult = 2.0f;
+
+        // Red-orange mark visual
+        if (s_novaCallback) s_novaCallback(e->position, 1.5f, {1.0f, 0.3f, 0.1f});
+        if (s_particlePool) ParticleSystem::spawnMagicBurst(*s_particlePool, e->position, 255, 80, 30, 8);
+        if (s_screenShake) s_screenShake->trigger(0.04f, 0.2f);
+        LOG_INFO("Mark Prey: marked entity %u for 2x damage", hits[i].index);
+        return; // mark only the first valid target
+    }
+    LOG_INFO("Mark Prey: no valid target found");
+}
+
 // ---------------------------------------------------------------------------
 // Sorcerer skills
 // ---------------------------------------------------------------------------
@@ -1642,7 +1775,13 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     case SkillId::RAPID_FIRE:
     case SkillId::HEADSHOT:
     case SkillId::KNIFE_BURST:
+    case SkillId::BARRAGE:
+    case SkillId::PIERCING_SHOT:
         AudioSystem::play(SfxId::WEAPON_BOW, 0.5f); break;
+    case SkillId::VOLLEY:
+        AudioSystem::play(SfxId::SKILL_EXPLOSION); break;
+    case SkillId::MARK_PREY:
+        AudioSystem::play(SfxId::SKILL_BLOOD); break;
     case SkillId::OVERCHARGED_MAGAZINE:
         AudioSystem::play(SfxId::SKILL_BUFF); break;
     default: break;
@@ -1743,6 +1882,18 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         break;
     case SkillId::SHADOW_SHOT:
         fireShadowShot(eyePos, forward, def, grid, entities);
+        break;
+    case SkillId::VOLLEY:
+        fireVolley(eyePos, forward, def, grid);
+        break;
+    case SkillId::PIERCING_SHOT:
+        firePiercingShot(eyePos, forward, def, grid, entities);
+        break;
+    case SkillId::BARRAGE:
+        fireBarrage(eyePos, forward, def, projectiles);
+        break;
+    case SkillId::MARK_PREY:
+        fireMarkPrey(eyePos, forward, def, entities);
         break;
 
     // ---- Sorcerer ----

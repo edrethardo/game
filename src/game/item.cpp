@@ -74,6 +74,10 @@ static SkillId skillIdFromString(const std::string& s) {
     if (s == "rain_of_arrows")  return SkillId::RAIN_OF_ARROWS;
     if (s == "poison_arrow")    return SkillId::POISON_ARROW;
     if (s == "shadow_shot")     return SkillId::SHADOW_SHOT;
+    if (s == "volley")          return SkillId::VOLLEY;
+    if (s == "piercing_shot")   return SkillId::PIERCING_SHOT;
+    if (s == "barrage")         return SkillId::BARRAGE;
+    if (s == "mark_prey")       return SkillId::MARK_PREY;
     // Sorcerer
     if (s == "fireball")        return SkillId::FIREBALL;
     // Rogue
