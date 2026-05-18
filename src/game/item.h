@@ -68,6 +68,7 @@ enum struct PlayerClass : u8 {
     COMBAT_ENGINEER,
     MARKSMAN,
     TINKERER,
+    WANDERER,
     CLASS_COUNT
 };
 
@@ -141,6 +142,12 @@ enum struct SkillId : u8 {
     DETONATE_SWARM,     // explode all drones for AoE
     SWARM_QUEEN,        // summon auto-spawning queen
     // (reuses DEPLOY_TURRET)
+
+    // --- Wanderer ---
+    DEFLECT,            // parry window — stuns melee attackers on perfect timing
+    EXPLOIT_WEAKNESS,   // mark a target for bonus damage
+    ADRENALINE_SURGE,   // stack-based burst from dodge counters
+    DEATHS_DANCE,       // ultimate: AoE slash on dodge-through
 
     // Legendary weapon effects
     THROWAWAY,      // throw weapon as projectile on reload
@@ -325,6 +332,18 @@ struct SkillDef {
     // Holy Nova specifics (dual-hit AoE)
     f32 secondaryDamage = 0.0f;
     f32 allyHealPct     = 0.0f;  // fraction of ally max HP healed per hit
+
+    // --- Wanderer: Deflect ---
+    f32 activeWindow      = 0.0f;  // parry active duration (seconds)
+    f32 stunDuration      = 0.0f;  // stun applied on melee parry
+
+    // --- Wanderer: Exploit Weakness ---
+    f32 markDuration      = 0.0f;  // how long mark lasts
+    f32 damageMultiplier  = 1.0f;  // damage mult on marked target
+
+    // --- Wanderer: Death's Dance ---
+    f32 slashRadius       = 0.0f;  // AoE slash radius on dodge-through
+    f32 slashDamageMult   = 0.0f;  // slash damage as fraction of weapon damage
 };
 
 // ---- Skill state per player ----

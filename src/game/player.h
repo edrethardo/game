@@ -8,6 +8,18 @@ struct EntityHandle;
 struct NetInput;
 struct NetPlayer;
 
+// Wanderer dodge roll state — tracks all transient data for the 0.5s roll and cooldown.
+struct DodgeState {
+    f32  rollTimer      = 0.0f;    // countdown during roll (0.5 -> 0)
+    f32  cooldownTimer  = 0.0f;    // countdown after roll ends (1.0 -> 0)
+    Vec3 rollDirection  = {0,0,0}; // normalized XZ direction of roll
+    f32  rollAngle      = 0.0f;    // current camera roll in radians (0 to 2*PI)
+    bool rolling        = false;   // true during the 0.5s roll
+    s8   rollSign       = 1;       // +1 clockwise, -1 counter-clockwise
+    u8   counterStacks  = 0;       // adrenaline surge stacks (0-5)
+    f32  counterTimers[5] = {};    // per-stack decay timers (4s each)
+};
+
 struct Player {
     Vec3 position   = {0.0f, 0.0f, 0.0f}; // feet position (bottom of collider)
     Vec3 velocity   = {0.0f, 0.0f, 0.0f};
@@ -58,6 +70,15 @@ struct Player {
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;
     f32  blockTimer        = 0.0f;  // time since block started (for perfect block window)
+
+    // --- Wanderer ---
+    DodgeState dodgeState;
+    f32  deflectTimer     = 0.0f;  // active parry window countdown
+    u16  markedEntityIdx  = 0xFFFF;// Exploit Weakness target
+    u16  markedEntityGen  = 0;
+    f32  markTimer        = 0.0f;
+    f32  deathsDanceTimer = 0.0f;  // ultimate duration countdown
+    bool adrenalineUnlocked = false; // true once skill 3 is unlocked
 
     // Soft target lock
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)

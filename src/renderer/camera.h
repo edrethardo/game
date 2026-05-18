@@ -37,6 +37,7 @@ struct Camera {
     Vec3 position  = {0.0f, 1.7f, 5.0f};
     f32  yaw       = 0.0f;   // radians
     f32  pitch     = 0.0f;   // radians, clamped
+    f32  roll      = 0.0f;   // radians; used by Wanderer barrel roll effect
     f32  fovY      = 70.0f;  // degrees
     f32  nearPlane = 0.1f;
     f32  farPlane  = 200.0f;
