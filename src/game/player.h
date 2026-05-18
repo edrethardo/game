@@ -13,9 +13,13 @@ struct DodgeState {
     f32  rollTimer      = 0.0f;    // countdown during roll (0.5 -> 0)
     f32  cooldownTimer  = 0.0f;    // countdown after roll ends (1.0 -> 0)
     Vec3 rollDirection  = {0,0,0}; // normalized XZ direction of roll
-    f32  rollAngle      = 0.0f;    // current camera roll in radians (0 to 2*PI)
+    f32  rollAngle      = 0.0f;    // camera roll axis (barrel roll, radians)
+    f32  pitchAngle     = 0.0f;    // camera pitch axis (front/back flip, radians)
+    f32  rollWeight     = 0.0f;    // blend: 0 = pure pitch flip, 1 = pure barrel roll
+    f32  pitchWeight    = 0.0f;    // blend: how much front/back flip
     bool rolling        = false;   // true during the 0.5s roll
     s8   rollSign       = 1;       // +1 clockwise, -1 counter-clockwise
+    s8   pitchSign      = 1;       // +1 forward flip, -1 backward flip
     u8   counterStacks  = 0;       // adrenaline surge stacks (0-5)
     f32  counterTimers[5] = {};    // per-stack decay timers (4s each)
 };

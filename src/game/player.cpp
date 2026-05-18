@@ -123,6 +123,7 @@ void PlayerController::update(Player& player, f32 dt) {
         ds.rolling = true;
         ds.rollTimer = 0.5f;
         ds.rollAngle = 0.0f;
+        ds.pitchAngle = 0.0f;
 
         // Direction from WASD, or forward if no directional input held
         f32 cosY = cosf(player.yaw);
@@ -138,9 +139,19 @@ void PlayerController::update(Player& player, f32 dt) {
         if (lengthSq(dir) < 0.001f) dir = flatFwd;
         ds.rollDirection = normalize(dir);
 
-        // Camera roll direction: left=CCW, right=CW, forward/back=CW
-        if (a && !d) ds.rollSign = -1;
-        else ds.rollSign = 1;
+        // Camera rotation axis depends on dodge direction relative to facing:
+        // Forward  = front flip (pitch), Backward = back flip (pitch),
+        // Left/Right = barrel roll, Diagonal = blend of both.
+        f32 fwdDot   = dot(ds.rollDirection, flatFwd);   // +1 forward, -1 back
+        f32 rightDot = dot(ds.rollDirection, flatRight);  // +1 right, -1 left
+        ds.pitchWeight = fabsf(fwdDot);   // how much front/back flip
+        ds.rollWeight  = fabsf(rightDot);  // how much barrel roll
+        // Normalize so they sum to 1 (pure direction = 1.0, diagonal ≈ 0.707 each)
+        f32 totalW = ds.pitchWeight + ds.rollWeight;
+        if (totalW > 0.001f) { ds.pitchWeight /= totalW; ds.rollWeight /= totalW; }
+        else { ds.pitchWeight = 1.0f; ds.rollWeight = 0.0f; } // fallback: front flip
+        ds.pitchSign = (fwdDot >= 0.0f) ? 1 : -1;  // forward = front flip, back = back flip
+        ds.rollSign  = (rightDot >= 0.0f) ? 1 : -1; // right = CW, left = CCW
 
         // I-frames: invulnerability for the first 0.3s of the roll (60% of duration)
         player.invulnTimer = 0.3f;
@@ -171,19 +182,24 @@ void PlayerController::update(Player& player, f32 dt) {
 
             ds.rollTimer -= dt;
 
-            // Smooth 360° barrel roll using cubic ease-in-out (3t²-2t³)
+            // Smooth 360° rotation using cubic ease-in-out (3t²-2t³).
+            // Blends between barrel roll (sideways) and pitch flip (forward/back)
+            // based on dodge direction.
             constexpr f32 ROLL_DURATION = 0.5f;
+            constexpr f32 TWO_PI = 2.0f * 3.14159265f;
             f32 t = 1.0f - (ds.rollTimer / ROLL_DURATION); // 0→1 over duration
             if (t < 0.0f) t = 0.0f;
             if (t > 1.0f) t = 1.0f;
             f32 smooth = t * t * (3.0f - 2.0f * t);
-            ds.rollAngle = smooth * 2.0f * 3.14159265f * static_cast<f32>(ds.rollSign);
+            ds.rollAngle  = smooth * TWO_PI * static_cast<f32>(ds.rollSign)  * ds.rollWeight;
+            ds.pitchAngle = smooth * TWO_PI * static_cast<f32>(ds.pitchSign) * ds.pitchWeight;
 
             if (ds.rollTimer <= 0.0f) {
                 // Roll finished — reset angle and start cooldown
                 ds.rolling = false;
                 ds.rollTimer = 0.0f;
                 ds.rollAngle = 0.0f;
+                ds.pitchAngle = 0.0f;
                 ds.cooldownTimer = 1.0f;
             }
         } else if (ds.cooldownTimer > 0.0f) {
@@ -314,7 +330,9 @@ void PlayerController::applyToCamera(const Player& player, Camera& cam) {
     cam.position = player.position + Vec3{0.0f, player.eyeHeight, 0.0f};
     cam.yaw      = player.yaw;
     cam.pitch    = player.pitch;
-    cam.roll     = player.dodgeState.rollAngle; // barrel roll from Wanderer dodge
+    cam.roll     = player.dodgeState.rollAngle;  // barrel roll component (sideways dodge)
+    // Pitch flip component (forward/back dodge) — added to cam.pitch, not clamped
+    cam.pitch   += player.dodgeState.pitchAngle;
     cam.forward  = normalize(Vec3{
         -sinf(player.yaw) * cosf(player.pitch),
          sinf(player.pitch),
