@@ -113,6 +113,20 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
      90.0f, 5.5f, 110.0f, "Pistol",
      {SkillId::SWARM_DEPLOY, SkillId::OVERCLOCK, SkillId::DETONATE_SWARM, SkillId::SWARM_QUEEN},
      {1, 10, 20, 30}, {5, 20, 30, 40}, WeaponType::HITSCAN},
+
+    // WANDERER — evasive counter-attacker, dodge roll replaces block
+    {
+        "Wanderer",
+        "Evasive counter-attacker. Dodge through enemy attacks for counter-hits and stacking attack speed.",
+        90.0f,   // baseHealth — low, dodge is the defense
+        6.5f,    // baseMoveSpeed — fast, tied with Ranger
+        110.0f,  // baseEnergy
+        "Iron Sword",
+        {SkillId::DEFLECT, SkillId::EXPLOIT_WEAKNESS, SkillId::ADRENALINE_SURGE, SkillId::DEATHS_DANCE},
+        {1, 10, 20, 30},   // skill unlock floors
+        {5, 20, 30, 40},   // skill upgrade floors
+        WeaponType::MELEE   // +20% melee damage
+    },
 };
 
 

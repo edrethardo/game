@@ -97,6 +97,7 @@ static void setDefaults() {
     set(GameAction::JUMP,          SDL_SCANCODE_SPACE,  0, SDL_CONTROLLER_BUTTON_A);
     set(GameAction::FIRE,          -1, MOUSE_LEFT,       -1, -1, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 0.5f);
     set(GameAction::BLOCK,         SDL_SCANCODE_LCTRL,  0, -1, -1, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 0.5f);
+    set(GameAction::DODGE,         SDL_SCANCODE_LSHIFT, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
     set(GameAction::CLASS_SKILL,   -1, MOUSE_RIGHT,      SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
     set(GameAction::TARGET_LOCK,   -1, MOUSE_MIDDLE,     -1); // L is modifier-only on gamepad, not target lock
 
