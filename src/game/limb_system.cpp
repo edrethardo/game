@@ -15,6 +15,7 @@ static u8 s_wingMeshId      = 0;
 static u8 s_clawMeshId      = 0;
 static u8 s_butcherArmMeshId = 0;
 static u8 s_butcherLegMeshId = 0;
+static u8 s_pitFiendWingMeshId = 0;
 
 // ============================================================
 //  Box mesh builder (same pattern as engine.cpp hand mesh)
@@ -136,6 +137,35 @@ static const LimbConfig s_succubusConfig = {
     }
 };
 
+// Pit Fiend: D2 Pit Lord style — small wings on upper back facing outward.
+// Y-axis rotation so wings face the player and sweep forward/back gently.
+static const LimbConfig s_pitFiendConfig = {
+    4,
+    {
+        // Wings (0-1) — spread left/right from the back, Y-pivot for forward/back sweep
+        // pivotScale = halfExtents.y/0.5 = 2.4x; effective: X=±0.48, Y=1.10, Z=0.24
+        {{ 0.20f, 0.46f, 0.10f}, {0.18f, 0.03f, 0.14f}, 0.0f, 1, false},  // left wing
+        {{-0.20f, 0.46f, 0.10f}, {0.18f, 0.03f, 0.14f}, 0.0f, 1, true},   // right wing
+        // Legs (2-3) — bipedal walk, wider stance than skeleton
+        {{ 0.15f, 0.30f, 0.0f}, {0.12f, 0.25f, 0.12f}, 0.0f, 0, false},   // left leg
+        {{-0.15f, 0.30f, 0.0f}, {0.12f, 0.25f, 0.12f}, 0.0f, 0, true},    // right leg
+    }
+};
+
+// Hellforge Smith: 2 heavy legs + 1 oversized hammer arm (right side).
+// Hammer rests slightly raised (negative restAngle lifts it), slams down on attack.
+static const LimbConfig s_hellforgeSmithConfig = {
+    3,
+    {
+        // Legs (0-1) — wide stance, heavy walk
+        {{ 0.18f, 0.25f, 0.0f}, {0.14f, 0.22f, 0.14f}, 0.0f, 0, false},   // left leg
+        {{-0.18f, 0.25f, 0.0f}, {0.14f, 0.22f, 0.14f}, 0.0f, 0, true},    // right leg
+        // Hammer arm (2) — right side, large, pivotAxis=0 for swing
+        // Raw values account for pivotScale = halfExtents.y/0.5 = 2.0x
+        {{-0.25f, 0.55f, 0.0f}, {0.14f, 0.26f, 0.14f}, -0.2f, 0, false},  // rests slightly raised
+    }
+};
+
 // Sentinel: 2 legs + 1 shield arm held forward (blocking stance).
 // The shield arm is a large limb on the left side, angled forward to cover the front.
 static const LimbConfig s_sentinelConfig = {
@@ -200,11 +230,16 @@ void LimbSystem::setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u
              s_armMeshId, s_legMeshId, s_wingMeshId, s_butcherArmMeshId, s_butcherLegMeshId, s_clawMeshId, s_spiderLegMeshId);
 }
 
+void LimbSystem::setPitFiendWingMeshId(u8 id) {
+    s_pitFiendWingMeshId = id;
+    LOG_INFO("LimbSystem: pit fiend wing mesh=%u", id);
+}
+
 bool LimbSystem::isObjLimbMesh(u8 meshId) {
     return meshId == s_armMeshId || meshId == s_legMeshId ||
            meshId == s_wingMeshId || meshId == s_butcherArmMeshId ||
            meshId == s_butcherLegMeshId || meshId == s_clawMeshId ||
-           meshId == s_spiderLegMeshId;
+           meshId == s_spiderLegMeshId || meshId == s_pitFiendWingMeshId;
 }
 
 // ============================================================
@@ -218,8 +253,10 @@ const LimbConfig& LimbSystem::getConfig(EnemyType type) {
         case EnemyType::SPIDER:    return s_spiderConfig;
         case EnemyType::HELLHOUND: return s_hellhoundConfig;
         case EnemyType::SENTINEL:  return s_sentinelConfig;
-        case EnemyType::SUCCUBUS:  return s_succubusConfig;
-        default:                   return s_genericConfig;
+        case EnemyType::SUCCUBUS:        return s_succubusConfig;
+        case EnemyType::PIT_FIEND:       return s_pitFiendConfig;
+        case EnemyType::HELLFORGE_SMITH: return s_hellforgeSmithConfig;
+        default:                         return s_genericConfig;
     }
 }
 
@@ -248,6 +285,12 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
         case EnemyType::SUCCUBUS:
             // 0-1 = wings, 2-3 = talons (same mesh types as bat)
             return (limbIdx < 2) ? s_wingMeshId : s_clawMeshId;
+        case EnemyType::PIT_FIEND:
+            // 0-1 = pit fiend wings (small triangular plates), 2-3 = legs
+            return (limbIdx < 2) ? s_pitFiendWingMeshId : s_legMeshId;
+        case EnemyType::HELLFORGE_SMITH:
+            // 0-1 = legs, 2 = hammer arm
+            return (limbIdx < 2) ? s_legMeshId : s_armMeshId;
         default:
             return 0;
     }
@@ -441,6 +484,53 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
                     sway -= 0.5f * sinf(t * 3.14159f); // kick forward
                 }
                 return sway;
+            }
+        }
+
+        case EnemyType::PIT_FIEND: {
+            if (limbIdx < 2) {
+                // Wings: D2 Pit Lord style — face outward, gentle forward/back sweep.
+                // Y-axis rotation: positive = forward, negative = backward.
+                f32 sweep = sinf(e.animTimer * 1.2f) * 0.15f;
+                if (e.attackAnimT > 0.0f) {
+                    // Attack: wings sweep forward aggressively
+                    f32 t = e.attackAnimT / 0.4f;
+                    return sweep + sinf(t * 3.14159f) * 0.35f;
+                }
+                return sweep;
+            } else {
+                // Legs: standard walk cycle (same as skeleton)
+                f32 walkFreq = 8.0f;
+                f32 walkAmp = 0.6f;
+                f32 phase = (limbIdx == 2) ? 0.0f : 3.14159f;
+                f32 swing = sinf(e.animTimer * walkFreq + phase) * walkAmp * speed01;
+                if (e.attackAnimT > 0.0f) {
+                    swing *= 0.3f; // dampen walk during attack
+                }
+                return swing;
+            }
+        }
+
+        case EnemyType::HELLFORGE_SMITH: {
+            if (limbIdx < 2) {
+                // Legs: slow heavy walk — 0.6x normal frequency
+                f32 walkFreq = 4.8f;
+                f32 walkAmp = 0.5f;
+                f32 phase = (limbIdx == 0) ? 0.0f : 3.14159f;
+                f32 swing = sinf(e.animTimer * walkFreq + phase) * walkAmp * speed01;
+                if (e.attackAnimT > 0.0f) {
+                    swing *= 0.2f;
+                }
+                return swing;
+            } else {
+                // Hammer arm: slow pendulum idle, heavy downward slam on attack
+                f32 idle = sinf(e.animTimer * 1.0f) * 0.15f;
+                if (e.attackAnimT > 0.0f) {
+                    // Heavy downward slam — fast snap, -1.2 radians
+                    f32 t = e.attackAnimT / 0.5f;
+                    return -1.2f * sinf(t * 3.14159f);
+                }
+                return idle;
             }
         }
 

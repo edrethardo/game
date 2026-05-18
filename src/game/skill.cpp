@@ -1648,11 +1648,15 @@ static void fireDetonateSwarm(const SkillDef* def, EntityPool& entities)
         u32 hitCount = CombatQuery::queryConeSorted(
             entities, drone.position, {0, -1, 0}, -1.0f, radius,
             hits, dists, MAX_ENTITIES);
+        f32 totalDmg = 0.0f;
         for (u32 j = 0; j < hitCount; j++) {
             Entity* target = handleGet(entities, hits[j]);
             if (!target || (target->flags & ENT_FRIENDLY)) continue;
             Combat::applyDamage(entities, hits[j], damage);
+            totalDmg += damage;
         }
+        // Show explosion damage number at drone position even if no enemies hit
+        Combat::spawnDamageNumber(drone.position + Vec3{0, 0.5f, 0}, totalDmg > 0 ? totalDmg : damage);
 
         // VFX per drone
         if (s_novaCallback) s_novaCallback(drone.position, radius, {1.0f, 0.5f, 0.1f});

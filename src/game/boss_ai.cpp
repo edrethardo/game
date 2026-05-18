@@ -82,8 +82,9 @@ void BossAI::update(Entity& e, const BossDef& def,
     // --- Personality-driven state selection ---
     switch (def.personality) {
         case BossPersonality::BERSERKER: {
-            // Always chase, never retreat
-            if (e.aiState == AIState::IDLE || e.aiState == AIState::RETREAT) {
+            // Relentless pursuit — force CHASE from any non-combat state.
+            // ATTACK is allowed (melee swings), DEAD is untouchable.
+            if (e.aiState != AIState::ATTACK && e.aiState != AIState::DEAD) {
                 e.aiState = AIState::CHASE;
             }
         } break;

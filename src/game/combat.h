@@ -59,6 +59,8 @@ namespace Combat {
     // Damage number callback — auto-fires on every applyDamage call
     using DamageNumberCallback = void(*)(Vec3 position, f32 amount);
     void setDamageNumberCallback(DamageNumberCallback cb);
+    // Manually spawn a floating damage number (for skills that bypass applyDamage)
+    void spawnDamageNumber(Vec3 position, f32 amount);
 
     // Death callback — called when an entity dies, before pool cleanup
     using DeathCallback = void(*)(EntityPool& pool, u16 entityIndex, Vec3 position);

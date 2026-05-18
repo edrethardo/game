@@ -17,6 +17,10 @@ void Combat::setDamageNumberCallback(DamageNumberCallback cb) {
     s_damageNumberCallback = cb;
 }
 
+void Combat::spawnDamageNumber(Vec3 position, f32 amount) {
+    if (s_damageNumberCallback) s_damageNumberCallback(position, amount);
+}
+
 void Combat::setDeathCallback(DeathCallback cb) {
     s_deathCallback = cb;
 }

@@ -1243,6 +1243,8 @@ void Engine::renderEntities(u32 sw, u32 sh) {
                             f32 meshMidY = (limbMeshBounds.max.y + limbMeshBounds.min.y) * 0.5f;
                             bool isArm = (li < 2) && (e.enemyType == EnemyType::SKELETON ||
                                                        e.enemyType == EnemyType::BOSS);
+                            // Hellforge Smith hammer arm is limb index 2
+                            if (e.enemyType == EnemyType::HELLFORGE_SMITH && li == 2) isArm = true;
                             if (isArm) {
                                 // Arms held forward at ~45 degrees — ready to fight
                                 meshOriginOffset = {0, -limbMeshBounds.max.y, 0};
@@ -1440,7 +1442,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
 
         Vec3 col;
         f32 r;
-        if (e.enemyType == EnemyType::BOSS) {
+        if (e.enemyType == EnemyType::BOSS ||
+            e.enemyType == EnemyType::PIT_FIEND ||
+            e.enemyType == EnemyType::HELLFORGE_SMITH) {
             col = {0.8f * fade * pulse, 0.15f * fade, 0.05f * fade};
             r = e.halfExtents.x * 1.3f;
         } else {
@@ -1517,7 +1521,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             col = {0.1f * fade, 0.45f * fade * pulse, 0.15f * fade};
             lightRadius = 0.4f;
             rayCount = 4;
-        } else if (e.enemyType == EnemyType::BOSS) {
+        } else if (e.enemyType == EnemyType::BOSS ||
+                   e.enemyType == EnemyType::PIT_FIEND ||
+                   e.enemyType == EnemyType::HELLFORGE_SMITH) {
             col = {0.9f * fade * pulse, 0.2f * fade, 0.05f * fade};
             lightRadius = 1.0f;
             rayCount = 8;

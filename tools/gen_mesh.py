@@ -1795,49 +1795,152 @@ def gen_cave_troll(height=2.2):
 
 
 def gen_pit_fiend(height=2.4):
-    """Pit Fiend — winged demon with tail and horns.
-    Origin at feet (Y=0). 20 voxels tall."""
+    """Pit Fiend — classic winged demon. Massive bat wings (real 3D geometry),
+    muscular torso, curved horns, barrel chest, cloven hooves. Balrog-style.
+    Origin at feet (Y=0). 24 voxels tall, 15 wide for wing span."""
     mb = MeshBuilder()
-    vs = height / 20.0
+    vs = height / 24.0
     filled = set()
+
     def fill_box(x0, y0, z0, w, h, d):
         for y in range(y0, y0 + h):
             for x in range(x0, x0 + w):
                 for z in range(z0, z0 + d):
                     filled.add((x, y, z))
-    # Head
-    fill_box(-2, 16, -2, 5, 3, 4)
-    # Short horns
-    fill_box(-2, 19, 0, 1, 2, 1)
-    fill_box(2, 19, 0, 1, 2, 1)
-    # Thick neck
-    fill_box(-1, 14, -1, 3, 2, 2)
-    # Torso
-    fill_box(-3, 8, -2, 7, 6, 4)
-    # Barrel chest protrusion
-    fill_box(-2, 10, -3, 5, 3, 1)
-    # Wing plates (on back)
-    fill_box(-5, 11, 2, 3, 4, 1)
-    fill_box(3, 11, 2, 3, 4, 1)
-    # Arms — upper
-    fill_box(-4, 9, 0, 1, 4, 1)
-    fill_box(4, 9, 0, 1, 4, 1)
-    # Arms — lower
-    fill_box(-4, 5, 0, 1, 4, 1)
-    fill_box(4, 5, 0, 1, 4, 1)
-    # Fists
-    fill_box(-5, 4, -1, 2, 2, 2)
-    fill_box(4, 4, -1, 2, 2, 2)
-    # Tail — chain of single voxels trailing back
-    filled.add((0, 7, 2))
-    filled.add((0, 6, 2))
-    filled.add((0, 5, 2))
-    # Legs
-    fill_box(-3, 3, -1, 3, 4, 2)
-    fill_box(1, 3, -1, 3, 4, 2)
-    # Hooves
-    fill_box(-3, 0, -1, 3, 1, 3)
-    fill_box(1, 0, -1, 3, 1, 3)
+
+    # Curved horns (gy 22-23) — swept back
+    fill_box(-3, 22, 0, 1, 2, 1)      # left horn base
+    filled.add((-4, 23, 1))            # left horn tip (swept back)
+    fill_box(2, 22, 0, 1, 2, 1)       # right horn base
+    filled.add((3, 23, 1))             # right horn tip
+
+    # Head (gy 18-21) — 5x4x4, imposing
+    fill_box(-2, 18, -2, 5, 4, 4)
+    # Deep eye sockets
+    filled.discard((-2, 20, -2))
+    filled.discard((2, 20, -2))
+
+    # Thick neck (gy 16-17)
+    fill_box(-1, 16, -1, 3, 2, 3)
+
+    # Massive torso (gy 10-15) — 7 wide, 4 deep
+    fill_box(-3, 10, -2, 7, 6, 4)
+
+    # Barrel chest protrusion (front face, gy 12-14)
+    fill_box(-2, 12, -3, 5, 3, 1)
+
+    # Wing roots on upper back (gy 13-15) — anchor geometry
+    fill_box(-4, 13, 2, 1, 3, 2)      # left wing root
+    fill_box(3, 13, 2, 1, 3, 2)       # right wing root
+
+    # Left wing — MAIN FEATURE — real 3D bat wings
+    # Bone struts (2 voxels deep for visual mass)
+    fill_box(-7, 14, 1, 3, 2, 2)      # upper strut
+    fill_box(-7, 12, 2, 3, 2, 2)      # lower strut
+    fill_box(-6, 11, 3, 2, 1, 2)      # wing tip
+    # Membrane panels (fill gaps between struts)
+    fill_box(-6, 13, 1, 2, 1, 1)      # upper membrane
+    fill_box(-5, 12, 1, 1, 2, 1)      # inner membrane
+    fill_box(-7, 13, 3, 1, 1, 1)      # outer membrane
+
+    # Right wing (mirrored)
+    fill_box(4, 14, 1, 3, 2, 2)
+    fill_box(4, 12, 2, 3, 2, 2)
+    fill_box(4, 11, 3, 2, 1, 2)
+    fill_box(4, 13, 1, 2, 1, 1)
+    fill_box(4, 12, 1, 1, 2, 1)
+    fill_box(6, 13, 3, 1, 1, 1)
+
+    # Arms — upper (gy 11-14)
+    fill_box(-4, 11, -1, 1, 4, 2)
+    fill_box(3, 11, -1, 1, 4, 2)
+    # Arms — lower (gy 7-10)
+    fill_box(-4, 7, -1, 1, 4, 2)
+    fill_box(3, 7, -1, 1, 4, 2)
+    # Fists (2x2x2)
+    fill_box(-5, 6, -1, 2, 2, 2)
+    fill_box(3, 6, -1, 2, 2, 2)
+
+    # Tail — trailing from lower back
+    filled.add((0, 9, 2))
+    filled.add((0, 8, 3))
+    filled.add((0, 7, 3))
+    filled.add((0, 6, 4))
+    filled.add((0, 5, 4))
+
+    # Legs (gy 4-8) — thick thighs
+    fill_box(-3, 4, -1, 3, 5, 3)
+    fill_box(1, 4, -1, 3, 5, 3)
+    # Calves (gy 1-3)
+    fill_box(-2, 1, -1, 2, 3, 2)
+    fill_box(1, 1, -1, 2, 3, 2)
+    # Cloven hooves (gy 0)
+    fill_box(-3, 0, -2, 3, 1, 4)
+    fill_box(1, 0, -2, 3, 1, 4)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_hellforge_smith(height=2.0):
+    """Hellforge Smith — hunched demonic blacksmith. Stocky, wide shoulders,
+    massive hammer arm (right), iron apron, forge bellows on back.
+    Shorter and wider than butcher. Origin at feet (Y=0). 18 voxels tall."""
+    mb = MeshBuilder()
+    vs = height / 18.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head (gy 15-16) — small, sunken between shoulders
+    fill_box(-1, 15, -1, 3, 2, 3)
+    # Brow ridge / visor (gy 16)
+    fill_box(-2, 16, -2, 5, 1, 1)
+    # Eye sockets
+    filled.discard((-1, 16, -2))
+    filled.discard((1, 16, -2))
+
+    # Massive shoulder hump (gy 13-14) — widest part, hunched look
+    fill_box(-5, 13, -1, 11, 2, 3)
+
+    # Broad torso (gy 8-12)
+    fill_box(-4, 8, -2, 9, 5, 5)
+
+    # Iron apron on front (gy 6-11)
+    fill_box(-3, 6, -3, 7, 6, 1)
+
+    # Forge bellows on back (gy 9-12)
+    fill_box(-3, 9, 3, 2, 4, 1)       # left bellows
+    fill_box(1, 9, 3, 2, 4, 1)        # right bellows
+    fill_box(-1, 10, 3, 2, 2, 1)      # bellows connector
+
+    # Left arm — normal (gy 5-12)
+    fill_box(-5, 9, -1, 1, 4, 2)      # upper
+    fill_box(-5, 5, -1, 1, 4, 2)      # lower
+    fill_box(-6, 4, -1, 2, 2, 2)      # left fist
+
+    # Right arm — HAMMER ARM (oversized, gy 5-13)
+    fill_box(4, 9, -1, 2, 4, 2)       # upper arm (thicker)
+    fill_box(4, 5, -1, 2, 4, 2)       # lower arm (thicker)
+    # Anvil fist / hammer head (3x3x3)
+    fill_box(4, 3, -2, 3, 3, 3)
+
+    # Wide pelvis (gy 5-7)
+    fill_box(-4, 5, -1, 9, 3, 3)
+
+    # Short thick legs (gy 2-4)
+    fill_box(-3, 2, -1, 3, 3, 2)
+    fill_box(1, 2, -1, 3, 3, 2)
+
+    # Heavy boots (gy 0-1)
+    fill_box(-4, 0, -2, 4, 2, 4)
+    fill_box(1, 0, -2, 4, 2, 4)
 
     ox = -0.5 * vs
     oz = -0.5 * vs
@@ -2087,6 +2190,29 @@ def gen_bat_wing(wingspan=1.0):
     oz = -2.5 * vs  # center depth-wise
     add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
     return mb
+
+def gen_pit_fiend_wing(size=0.4):
+    """Pit Fiend wing — small triangular plate, D2 Pit Lord style.
+    Wide in X, tall in Y, thin in Z (1 voxel) — flat face visible from front.
+    Y-axis rotation sweeps it forward/back."""
+    mb = MeshBuilder()
+    vs = size / 4.0  # 4 voxels tall
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Triangular plate: wide base (3 in X), tapers to 1 at top, 1 deep (Z)
+    fill_box(0, 0, 0, 3, 1, 1)   # base row — 3 wide
+    fill_box(0, 1, 0, 3, 1, 1)   # second row — 3 wide
+    fill_box(0, 2, 0, 2, 1, 1)   # third row — 2 wide (taper)
+    fill_box(0, 3, 0, 1, 1, 1)   # tip — 1 wide
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
 
 def gen_butcher_arm(height=2.5):
     """Butcher thick demon arm — extracted from gen_butcher. Origin at shoulder."""
@@ -2607,6 +2733,11 @@ MESH_TYPES = {
         "desc": "Bat wing membrane shape. Params: --wingspan",
         "default_file": "bat_wing.obj",
     },
+    "pit_fiend_wing": {
+        "func": lambda size=0.4: gen_pit_fiend_wing(size),
+        "desc": "Small triangular wing plate for pit fiend. Params: --size",
+        "default_file": "pit_fiend_wing.obj",
+    },
     "butcher_arm": {
         "func": lambda height=2.5: gen_butcher_arm(height),
         "desc": "Butcher thick demon arm. Params: --height",
@@ -2761,6 +2892,11 @@ MESH_TYPES = {
         "func": lambda height=2.4: gen_pit_fiend(height),
         "desc": "Winged demon with tail and horns. Params: --height",
         "default_file": "pit_fiend.obj",
+    },
+    "hellforge_smith": {
+        "func": lambda height=2.0: gen_hellforge_smith(height),
+        "desc": "Hunched demonic blacksmith with hammer arm. Params: --height",
+        "default_file": "hellforge_smith.obj",
     },
     "succubus": {
         "func": gen_succubus,

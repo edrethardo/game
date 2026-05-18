@@ -508,6 +508,30 @@
       "dropWeight": 1.0
     },
     {
+      "name": "Hellforged Reaver",
+      "tier": 4,
+      "meshName": "skeleton",
+      "materialName": "demon_skin",
+      "health": 75,
+      "moveSpeed": 3.8,
+      "detectionRange": 16,
+      "attackRange": 3.0,
+      "attackCooldown": 1.2,
+      "damage": 24,
+      "flying": false,
+      "halfExtents": [
+        0.45,
+        0.9,
+        0.45
+      ],
+      "role": "normal",
+      "aiPreference": "chase",
+      "onHitEffect": 3,
+      "onHitDuration": 2.0,
+      "onHitDps": 4.0,
+      "dropWeight": 1.2
+    },
+    {
       "name": "Demon Caster",
       "tier": 4,
       "meshName": "skeleton",
@@ -615,7 +639,7 @@
     {
       "name": "Hellforge Smith",
       "tier": 4,
-      "meshName": "butcher",
+      "meshName": "hellforge_smith",
       "materialName": "hellforge_smith_skin",
       "health": 70,
       "moveSpeed": 2.8,
@@ -625,9 +649,9 @@
       "damage": 12,
       "flying": false,
       "halfExtents": [
-        0.6,
-        1.1,
-        0.6
+        0.65,
+        1.0,
+        0.5
       ],
       "role": [
         "summoner",

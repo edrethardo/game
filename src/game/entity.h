@@ -39,6 +39,8 @@ enum struct EnemyType : u8 {
     HELLHOUND,    // quadruped canine demon — 4 legs, galloping animation
     SENTINEL,     // armored shield-bearer — 2 legs, shield arm, blocking stance
     SUCCUBUS,     // harpy-style flyer — 2 bat wings, 2 dangling talons, no walking legs
+    PIT_FIEND,    // winged demon — 2 bat wings, 2 legs, wing-flap + walk animation
+    HELLFORGE_SMITH, // hunched blacksmith — 2 legs, hammer arm, hammer-swing idle
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
     PROP,         // static decoration — no AI, no collision response, no animation
     COUNT

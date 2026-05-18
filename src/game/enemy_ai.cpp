@@ -228,9 +228,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         bool isFriendly = (e.flags & ENT_FRIENDLY) != 0;
 
         // Tinkerer drones (friendly, npcClass NONE): teleport to player if too far
+        // Skip teleport while Overclock is active — let drones roam freely
         if (isFriendly && e.npcClass == NpcClass::NONE) {
             f32 distToPlayer = length(e.position - playerEye);
-            if (distToPlayer > 15.0f) {
+            if (distToPlayer > 30.0f && e.overclockTimer <= 0.0f) {
                 e.position = playerEye + Vec3{1.0f, 0, 1.0f};
                 snapEntityToFloor(e, grid);
             }
@@ -1098,19 +1099,19 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.speechTimer = 2.0f;
                 } break;
 
-                // Floor 40: Diablo — Fire Storm (splash projectile ring + direct nova)
+                // Floor 40: Diablo — Fire Storm (dense splash ring + wide inner nova)
                 case 40: {
-                    e.flybyTimer = 4.0f;
-                    // Inner nova damage
-                    if (dist < 5.0f) {
+                    e.flybyTimer = 2.5f; // frequent nova
+                    // Inner nova damage — wide radius, hard to dodge up close
+                    if (dist < 6.0f) {
                         Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.5f, &e.position);
                     }
-                    // Ring of 6 fire projectiles with splash
-                    for (u32 s = 0; s < 6; s++) {
-                        f32 angle = s * (6.2832f / 6.0f);
+                    // Dense ring of 10 fast fire projectiles with splash
+                    for (u32 s = 0; s < 10; s++) {
+                        f32 angle = s * (6.2832f / 10.0f);
                         Vec3 dir = {sinf(angle), 0.1f, cosf(angle)};
                         u16 pi40 = ProjectileSystem::spawn(projectiles, bossEye,
-                            dir, 12.0f, bossDmg * 0.4f, 0.15f, 3.0f, false,
+                            dir, 16.0f, bossDmg * 0.4f, 0.15f, 3.0f, false,
                             PROJ_SPLASH);
                         if (pi40 != 0xFFFF) {
                             projectiles.projectiles[pi40].splashRadius = 2.5f;
@@ -1304,8 +1305,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         // Charger: sprint at 2x speed, retreat after landing attack
         if (e.enemyRole & EnemyRole::CHARGER) {
-            // Sprint at 2x speed during CHASE
-            if (e.aiState == AIState::CHASE) {
+            // Sprint at 2x speed during CHASE (bosses handle speed via BossAI enrage)
+            if (e.aiState == AIState::CHASE && e.bossDefIdx == 0xFF) {
                 e.moveSpeed = e.baseMoveSpeed * 2.0f;
             }
 
@@ -1319,19 +1320,23 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 break;
             }
 
-            // After attack animation finishes, retreat briefly (non-bomber chargers)
-            if (e.hasRetreated && e.attackAnimT <= 0.0f && e.aiState == AIState::ATTACK) {
-                e.aiState = AIState::RETREAT;
-                e.tacticalTimer = 1.0f;
-            }
-            // Mark for retreat when attack starts (but don't switch state yet)
-            if (e.attackAnimT > 0.2f && e.aiState == AIState::ATTACK) {
-                e.hasRetreated = true;
-            }
-            // Re-engage after retreat
-            if (e.aiState == AIState::RETREAT && e.tacticalTimer <= 0.0f) {
-                e.aiState = AIState::CHASE;
-                e.hasRetreated = false;
+            // Charger retreat cycle: hit-and-run for regular enemies only.
+            // Bosses use their personality system (BERSERKER never retreats).
+            if (e.bossDefIdx == 0xFF) {
+                // After attack animation finishes, retreat briefly (non-bomber chargers)
+                if (e.hasRetreated && e.attackAnimT <= 0.0f && e.aiState == AIState::ATTACK) {
+                    e.aiState = AIState::RETREAT;
+                    e.tacticalTimer = 1.0f;
+                }
+                // Mark for retreat when attack starts (but don't switch state yet)
+                if (e.attackAnimT > 0.2f && e.aiState == AIState::ATTACK) {
+                    e.hasRetreated = true;
+                }
+                // Re-engage after retreat
+                if (e.aiState == AIState::RETREAT && e.tacticalTimer <= 0.0f) {
+                    e.aiState = AIState::CHASE;
+                    e.hasRetreated = false;
+                }
             }
         }
 
@@ -1511,27 +1516,43 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     }
                 }
             } else {
-                // Ground movement: direct chase when LOS, wander toward
-                // target direction when blocked (not the exit flow field).
+                // Ground movement: direct chase when LOS, A* pathfinding when blocked.
                 Vec3 moveDir = {0, 0, 0};
                 bool hasDirectLOS = hasLOSToPoint(
                     e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid);
 
                 if (hasDirectLOS) {
-                    // Direct line to target — walk straight
+                    // Direct line to target — walk straight, clear any stale path
                     moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                    e.pathLen = 0;
                 } else {
-                    // No LOS — move toward target with random lateral drift
-                    // to explore around obstacles instead of all converging on the exit
-                    Vec3 toTarget = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
-                    f32 drift = sinf(e.animTimer * 2.0f + static_cast<f32>(i) * 1.7f) * 0.6f;
-                    moveDir = {
-                        toTarget.x + toTarget.z * drift,
-                        0.0f,
-                        toTarget.z - toTarget.x * drift
-                    };
-                    f32 len = sqrtf(moveDir.x * moveDir.x + moveDir.z * moveDir.z);
-                    if (len > 0.001f) moveDir = moveDir * (1.0f / len);
+                    // No LOS — use A* pathfinding to navigate around obstacles.
+                    // Recompute path every ~2s or when path is exhausted.
+                    if (e.pathLen == 0 || e.pathIdx >= e.pathLen || e.tacticalTimer <= 0.0f) {
+                        e.pathLen = Pathfinder::findPath(grid, e.position, targetPos,
+                            e.pathWaypoints);
+                        e.pathIdx = 0;
+                        e.tacticalTimer = 2.0f; // recompute interval
+                    }
+                    e.tacticalTimer -= dt;
+
+                    // Follow waypoints
+                    if (e.pathLen > 0 && e.pathIdx < e.pathLen) {
+                        Vec3 wp = e.pathWaypoints[e.pathIdx];
+                        Vec3 toWp = wp - e.position;
+                        f32 wpDist = sqrtf(toWp.x * toWp.x + toWp.z * toWp.z);
+                        if (wpDist < 0.5f) {
+                            e.pathIdx++; // reached waypoint, advance
+                            if (e.pathIdx < e.pathLen) {
+                                wp = e.pathWaypoints[e.pathIdx];
+                                toWp = wp - e.position;
+                            }
+                        }
+                        moveDir = normalize(Vec3{toWp.x, 0.0f, toWp.z});
+                    } else {
+                        // A* failed or exhausted — fallback to direct approach
+                        moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                    }
                 }
 
                 Vec3 flatDir = moveDir;
@@ -1731,8 +1752,31 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         if (e.onHitEffect == 2) { targetPlayer->slowTimer   = e.onHitDuration; }
                         if (e.onHitEffect == 3) { targetPlayer->burnTimer   = e.onHitDuration; targetPlayer->burnDps   = e.onHitDps; }
                         if (e.onHitEffect == 4) { targetPlayer->freezeTimer = e.onHitDuration; }
+
+                        // Melee cleave: skeleton-type melee enemies also hit nearby friendlies.
+                        // Bosses cleave in 3m at 50% damage; regular melee in 2m at 40%.
+                        if (e.attackRange <= 5.0f && (e.enemyType == EnemyType::SKELETON ||
+                            e.enemyType == EnemyType::BOSS)) {
+                            f32 cleaveRadius = (e.bossDefIdx != 0xFF) ? 3.0f : 2.0f;
+                            f32 cleaveMult   = (e.bossDefIdx != 0xFF) ? 0.5f : 0.4f;
+                            f32 cleaveRadSq  = cleaveRadius * cleaveRadius;
+                            for (u32 ca = 0; ca < pool.activeCount; ca++) {
+                                u32 ci = pool.activeList[ca];
+                                Entity& victim = pool.entities[ci];
+                                if (!(victim.flags & ENT_FRIENDLY) || (victim.flags & ENT_DEAD)) continue;
+                                if (lengthSq(victim.position - e.position) < cleaveRadSq) {
+                                    EntityHandle vh = {static_cast<u16>(ci), victim.generation};
+                                    Combat::applyDamage(pool, vh, e.damage * cleaveMult);
+                                }
+                            }
+                        }
                     }
                 }
+            }
+
+            // If target moved well out of attack range, switch back to CHASE
+            if (targetDist > e.attackRange * 1.5f) {
+                e.aiState = AIState::CHASE;
             }
 
             // Retreat when low HP: find cover and path toward it.
@@ -1929,5 +1973,77 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         case AIState::DEAD:
             break;
         }
+    }
+
+    // --- Entity-entity separation: push overlapping entities apart ---
+    // Prevents pileup in doorways and tight corridors.
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        Entity& ea = pool.entities[pool.activeList[a]];
+        if (!(ea.flags & ENT_ACTIVE) || (ea.flags & ENT_DEAD)) continue;
+        if (ea.enemyType == EnemyType::PROP) continue;
+
+        for (u32 b = a + 1; b < pool.activeCount; b++) {
+            Entity& eb = pool.entities[pool.activeList[b]];
+            if (!(eb.flags & ENT_ACTIVE) || (eb.flags & ENT_DEAD)) continue;
+            if (eb.enemyType == EnemyType::PROP) continue;
+
+            // Skip drone-drone pairs (let swarms overlap freely)
+            bool aDrone = (ea.flags & ENT_FRIENDLY) && ea.npcClass == NpcClass::NONE;
+            bool bDrone = (eb.flags & ENT_FRIENDLY) && eb.npcClass == NpcClass::NONE;
+            if (aDrone && bDrone) continue;
+
+            Vec3 delta = eb.position - ea.position;
+            delta.y = 0.0f; // XZ plane only
+            f32 distSq = delta.x * delta.x + delta.z * delta.z;
+            constexpr f32 SEP_RADIUS = 1.0f;
+            if (distSq > SEP_RADIUS * SEP_RADIUS || distSq < 0.0001f) continue;
+
+            f32 d = sqrtf(distSq);
+            f32 overlap = SEP_RADIUS - d;
+            Vec3 pushDir = delta * (1.0f / d);
+            f32 pushStr = overlap * 2.0f * dt; // gentle push proportional to overlap
+
+            ea.position.x -= pushDir.x * pushStr;
+            ea.position.z -= pushDir.z * pushStr;
+            eb.position.x += pushDir.x * pushStr;
+            eb.position.z += pushDir.z * pushStr;
+        }
+    }
+
+    // --- Stuck detection for hostile enemies ---
+    // Mirrors the friendly NPC stuck detection. Teleports to cell center after 0.8s stuck.
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        u32 idx = pool.activeList[a];
+        Entity& e = pool.entities[idx];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue; // friendlies already have their own stuck detection
+        if (e.aiState != AIState::CHASE) continue; // only check during active pursuit
+
+        f32 movedDist = length(e.position - e.lastSeenPos);
+        if (movedDist < 0.05f) {
+            e.stuckTimer += dt;
+            if (e.stuckTimer > 0.8f) {
+                // Try A* path to target as recovery
+                e.pathLen = Pathfinder::findPath(grid, e.position,
+                    player.position, e.pathWaypoints);
+                e.pathIdx = 0;
+
+                // If A* also fails, teleport to nearest walkable cell center
+                if (e.pathLen == 0) {
+                    u32 gx, gz;
+                    if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
+                        Vec3 cellCenter = LevelGridSystem::gridToWorld(grid, gx, gz);
+                        cellCenter.y = e.position.y;
+                        if (!entityOverlapsGrid(cellCenter, e.halfExtents, grid)) {
+                            e.position = cellCenter;
+                        }
+                    }
+                }
+                e.stuckTimer = 0.0f;
+            }
+        } else {
+            e.stuckTimer = 0.0f;
+        }
+        e.lastSeenPos = e.position;
     }
 }

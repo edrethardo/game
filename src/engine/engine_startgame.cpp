@@ -916,6 +916,8 @@ void Engine::startGame() {
                     boss->onHitEffect = bd->onHitEffect;
                     boss->onHitDuration = bd->onHitDuration;
                     boss->onHitDps = bd->onHitDps;
+                    boss->baseMoveSpeed      = boss->moveSpeed;
+                    boss->baseAttackCooldown = boss->attackCooldown;
 
                     // Ranged bosses use projectile attacks — weapon mesh rides the projectile
                     if (bd->atkRange > 5.0f) {
@@ -941,6 +943,8 @@ void Engine::startGame() {
                     }
                     boss->speechText = bt->speech;
                     boss->speechTimer = 6.0f;
+                    boss->baseMoveSpeed      = boss->moveSpeed;
+                    boss->baseAttackCooldown = boss->attackCooldown;
 
                     if (bt->atkRange > 5.0f) {
                         boss->npcWeaponType = WeaponType::PROJECTILE;

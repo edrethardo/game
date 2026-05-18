@@ -64,43 +64,38 @@ static void carveLCorridor(LevelGrid& grid, u32 x0, u32 z0, u32 x1, u32 z1,
     u8 floorEnc = static_cast<u8>(floorH / 0.25f);
     u8 ceilEnc  = static_cast<u8>(ceilH  / 0.25f);
 
-    // Horizontal leg
+    auto carveCell = [&](u32 x, u32 z) {
+        if (!LevelGridSystem::isInBounds(grid, x, z)) return;
+        GridCell& cell = LevelGridSystem::getCell(grid, x, z);
+        if (cell.flags & CELL_SOLID) {
+            cell.flags           = CELL_FLOOR | CELL_CEILING;
+            cell.floorHeight     = floorEnc;
+            cell.ceilingHeight   = ceilEnc;
+            cell.wallMaterialId  = 0;
+            cell.floorMaterialId = 1;
+            cell.ceilMaterialId  = 2;
+        }
+    };
+
+    // Horizontal leg — 2 cells wide in Z
     u32 xMin = (x0 < x1) ? x0 : x1;
     u32 xMax = (x0 > x1) ? x0 : x1;
     for (u32 x = xMin; x <= xMax; x++) {
         for (s32 dz = -1; dz <= 0; dz++) {
             s32 cz = static_cast<s32>(z0) + dz;
             if (cz < 0) continue;
-            if (!LevelGridSystem::isInBounds(grid, x, static_cast<u32>(cz))) continue;
-            GridCell& cell = LevelGridSystem::getCell(grid, x, static_cast<u32>(cz));
-            if (cell.flags & CELL_SOLID) {
-                cell.flags           = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight     = floorEnc;
-                cell.ceilingHeight   = ceilEnc;
-                cell.wallMaterialId  = 0;
-                cell.floorMaterialId = 1;
-                cell.ceilMaterialId  = 2;
-            }
+            carveCell(x, static_cast<u32>(cz));
         }
     }
 
-    // Vertical leg
+    // Vertical leg — 2 cells wide in X
     u32 zMin = (z0 < z1) ? z0 : z1;
     u32 zMax = (z0 > z1) ? z0 : z1;
     for (u32 z = zMin; z <= zMax; z++) {
         for (s32 dx = -1; dx <= 0; dx++) {
             s32 cx = static_cast<s32>(x1) + dx;
             if (cx < 0) continue;
-            if (!LevelGridSystem::isInBounds(grid, static_cast<u32>(cx), z)) continue;
-            GridCell& cell = LevelGridSystem::getCell(grid, static_cast<u32>(cx), z);
-            if (cell.flags & CELL_SOLID) {
-                cell.flags           = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight     = floorEnc;
-                cell.ceilingHeight   = ceilEnc;
-                cell.wallMaterialId  = 0;
-                cell.floorMaterialId = 1;
-                cell.ceilMaterialId  = 2;
-            }
+            carveCell(static_cast<u32>(cx), z);
         }
     }
 }
@@ -316,6 +311,7 @@ static void carveRoom(LevelGrid& grid, const Room& r,
 }
 
 // Carve an L-shaped corridor between two room centre points
+// 2-wide corridor variant used by BSP connector
 static void carveCorridor(LevelGrid& grid,
                            u32 x0, u32 z0, u32 x1, u32 z1,
                            f32 floorH, f32 ceilH)
@@ -323,43 +319,38 @@ static void carveCorridor(LevelGrid& grid,
     u8 floorEnc = static_cast<u8>(floorH / 0.25f);
     u8 ceilEnc  = static_cast<u8>(ceilH  / 0.25f);
 
-    // Horizontal leg first (x0→x1 at z0), then vertical (z0→z1 at x1)
+    auto carveCell = [&](u32 x, u32 z) {
+        if (!LevelGridSystem::isInBounds(grid, x, z)) return;
+        GridCell& cell = LevelGridSystem::getCell(grid, x, z);
+        if (cell.flags & CELL_SOLID) {
+            cell.flags           = CELL_FLOOR | CELL_CEILING;
+            cell.floorHeight     = floorEnc;
+            cell.ceilingHeight   = ceilEnc;
+            cell.wallMaterialId  = 0;
+            cell.floorMaterialId = 1;
+            cell.ceilMaterialId  = 2;
+        }
+    };
+
+    // Horizontal leg — 2 cells wide in Z
     u32 xMin = (x0 < x1) ? x0 : x1;
     u32 xMax = (x0 > x1) ? x0 : x1;
     for (u32 x = xMin; x <= xMax; x++) {
-        // 2 cells wide corridor
         for (s32 dz = -1; dz <= 0; dz++) {
             s32 cz = (s32)z0 + dz;
             if (cz < 0) continue;
-            if (!LevelGridSystem::isInBounds(grid, x, (u32)cz)) continue;
-            GridCell& cell = LevelGridSystem::getCell(grid, x, (u32)cz);
-            if (cell.flags & CELL_SOLID) {
-                cell.flags           = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight     = floorEnc;
-                cell.ceilingHeight   = ceilEnc;
-                cell.wallMaterialId  = 0;
-                cell.floorMaterialId = 1;
-                cell.ceilMaterialId  = 2;
-            }
+            carveCell(x, (u32)cz);
         }
     }
 
+    // Vertical leg — 2 cells wide in X
     u32 zMin = (z0 < z1) ? z0 : z1;
     u32 zMax = (z0 > z1) ? z0 : z1;
     for (u32 z = zMin; z <= zMax; z++) {
         for (s32 dx = -1; dx <= 0; dx++) {
             s32 cx = (s32)x1 + dx;
             if (cx < 0) continue;
-            if (!LevelGridSystem::isInBounds(grid, (u32)cx, z)) continue;
-            GridCell& cell = LevelGridSystem::getCell(grid, (u32)cx, z);
-            if (cell.flags & CELL_SOLID) {
-                cell.flags           = CELL_FLOOR | CELL_CEILING;
-                cell.floorHeight     = floorEnc;
-                cell.ceilingHeight   = ceilEnc;
-                cell.wallMaterialId  = 0;
-                cell.floorMaterialId = 1;
-                cell.ceilMaterialId  = 2;
-            }
+            carveCell((u32)cx, z);
         }
     }
 }

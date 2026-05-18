@@ -42,6 +42,7 @@ namespace LimbSystem {
 
     // Override limb mesh IDs with OBJ-loaded meshes (call after init + OBJ loading)
     void setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u8 butcherLegId, u8 batFootId, u8 spiderLegPairId);
+    void setPitFiendWingMeshId(u8 id);
 
     // Returns true if this mesh ID is an OBJ-loaded limb (not a procedural box)
     bool isObjLimbMesh(u8 meshId);

@@ -2161,83 +2161,153 @@ def skin_cave_troll():
 
 
 def skin_pit_fiend():
-    """Butcher-rig pit fiend: dark obsidian body, glowing magma cracks, burning orange eyes."""
-    w, h = 12, 21
+    """Pit Fiend: dark obsidian body, 3D bat wings (burgundy membrane),
+    magma crack veins, burning orange eyes, curved horns."""
+    w, h = 15, 24
     p = {}
     obsidian = (30, 25, 35, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = obsidian
 
-    # Horns
-    for py in range(19, 21):
-        for px in range(w): p[(px, py)] = (25, 20, 28, 255)
-    # Head
-    for py in range(16, 19):
-        for px in range(w): p[(px, py)] = (35, 28, 38, 255)
-    # Burning orange eyes
-    p[(4, 18)] = (240, 140, 20, 255)
-    p[(7, 18)] = (240, 140, 20, 255)
-    # Glowing magma cracks as veins at torso — alternating rows
-    for py in [8, 10, 12]:
-        for px in range(3, 9):
-            if (px + py) % 2 == 0: p[(px, py)] = (220, 100, 20, 255)
-    # Darker at extremities
-    for py in range(0, 3):
-        for px in range(w): p[(px, py)] = (20, 18, 25, 255)
-    for py in range(3, 9):
-        p[(0, py)] = (22, 20, 28, 255)
-        p[(10, py)] = (22, 20, 28, 255)
-    # Barrel chest — slightly lighter obsidian
-    for px in range(3, 8):
-        p[(px, 10)] = (38, 32, 42, 255)
-        p[(px, 11)] = (38, 32, 42, 255)
-    # Fists
-    for py in [4, 5]:
-        p[(0, py)] = (22, 18, 26, 255); p[(1, py)] = (22, 18, 26, 255)
-        p[(9, py)] = (22, 18, 26, 255); p[(10, py)] = (22, 18, 26, 255)
+    # Horns (gy 22-23) — dark purple-black
+    for py in range(22, 24):
+        for px in range(w):
+            p[(px, py)] = (25, 20, 28, 255)
+
+    # Head (gy 18-21)
+    for py in range(18, 22):
+        for px in range(w):
+            p[(px, py)] = (35, 28, 38, 255)
+
+    # Burning orange eyes — gx -2 and +2 at gy 20
+    # Grid offset: gx -7 maps to px 0, so gx -2 = px 5, gx +2 = px 9
+    p[(5, 20)] = (240, 140, 20, 255)
+    p[(9, 20)] = (240, 140, 20, 255)
+
+    # Wing membrane (gx -7..-4 and 4..7, gy 11-16) — deep burgundy
+    # gx -7 = px 0, gx -4 = px 3, gx 4 = px 11, gx 7 = px 14
+    for py in range(11, 17):
+        for px in [0, 1, 2, 3]:
+            p[(px, py)] = (80, 20, 25, 255)
+        for px in [11, 12, 13, 14]:
+            p[(px, py)] = (80, 20, 25, 255)
+
+    # Wing bone struts — darker burgundy within wing area
+    for py in [12, 13, 14, 15]:
+        p[(0, py)] = (50, 15, 18, 255)
+        p[(14, py)] = (50, 15, 18, 255)
+
+    # Magma crack veins on torso (alternating pattern)
+    # Torso gx -3..3 = px 4..10
+    for py in [10, 12, 14]:
+        for px in range(4, 11):
+            if (px + py) % 2 == 0:
+                p[(px, py)] = (220, 100, 20, 255)
+
+    # Barrel chest — slightly lighter obsidian (gx -2..2, gy 12-14)
+    # px 5..9
+    for py in [12, 13]:
+        for px in range(5, 10):
+            if p[(px, py)] != (220, 100, 20, 255):  # don't overwrite veins
+                p[(px, py)] = (38, 32, 42, 255)
+
+    # Dark extremities — hooves and lower legs (gy 0-3)
+    for py in range(0, 4):
+        for px in range(w):
+            p[(px, py)] = (20, 18, 25, 255)
+
+    # Hooves — ember glow
+    for px in range(w):
+        p[(px, 0)] = (40, 20, 10, 255)
+
+    # Fists — dark charcoal
+    # gx -5..-4 = px 2..3, gx 3..4 = px 10..11 at gy 6-7
+    for py in [6, 7]:
+        for px in [2, 3]:
+            p[(px, py)] = (22, 18, 26, 255)
+        for px in [10, 11]:
+            p[(px, py)] = (22, 18, 26, 255)
+
+    # Tail (gy 5-9) — darker obsidian
+    # gx 0 = px 7
+    for py in range(5, 10):
+        p[(7, py)] = (25, 20, 30, 255)
+
     return w, h, p
 
 
 def skin_hellforge_smith():
-    """Butcher-rig hellforge smith: soot-black body, glowing forge-arm, iron apron, ember eyes."""
-    w, h = 12, 21
+    """Hellforge Smith: soot-black body, glowing forge-arm (right), iron apron,
+    forge bellows (rusted copper), ember eyes, massive shoulder hump."""
+    w, h = 13, 18
     p = {}
     soot = (40, 35, 30, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = soot
 
-    # Horns
-    for py in range(19, 21):
-        for px in range(w): p[(px, py)] = (35, 30, 25, 255)
-    # Head
-    for py in range(16, 19):
-        for px in range(w): p[(px, py)] = (45, 38, 32, 255)
-    # Red ember eyes
-    p[(4, 18)] = (200, 60, 20, 255)
-    p[(7, 18)] = (200, 60, 20, 255)
-    # Glowing orange forge-arm on right side
-    for py in range(4, 10):
-        p[(9, py)]  = (200, 120, 30, 255)
+    # Brow ridge / head (gy 15-17) — lighter soot for face definition
+    for py in range(15, 18):
+        for px in range(w):
+            p[(px, py)] = (45, 38, 32, 255)
+
+    # Red ember eyes — gx -1 and +1 at gy 16
+    # Grid offset: gx -6 maps to px 0, so gx -1 = px 5, gx +1 = px 7
+    p[(5, 16)] = (200, 60, 20, 255)
+    p[(7, 16)] = (200, 60, 20, 255)
+
+    # Shoulder hump (gy 13-14) — darker soot
+    for py in [13, 14]:
+        for px in range(w):
+            p[(px, py)] = (35, 30, 25, 255)
+
+    # Iron-grey apron (front, gx -3..3, gy 6-11)
+    # gx -3 = px 3, gx 3 = px 9
+    for py in range(6, 12):
+        for px in range(3, 10):
+            p[(px, py)] = (120, 125, 130, 255)
+
+    # Glowing orange forge-arm on right side (gx 4..5, gy 3-12)
+    # gx 4 = px 10, gx 5 = px 11
+    for py in range(3, 13):
         p[(10, py)] = (200, 120, 30, 255)
-    # Iron-grey apron area
-    for py in range(6, 11):
-        for px in range(3, 8): p[(px, py)] = (120, 125, 130, 255)
-    # Barrel chest
-    for px in range(3, 8):
-        p[(px, 11)] = (48, 42, 35, 255)
-        p[(px, 12)] = (48, 42, 35, 255)
-    # Left arm — normal soot
-    for py in range(3, 9):
+        p[(11, py)] = (200, 120, 30, 255)
+
+    # Hammer head extra glow (gx 4..6, gy 3-5) — brighter orange
+    # gx 6 = px 12
+    for py in range(3, 6):
+        p[(10, py)] = (230, 150, 40, 255)
+        p[(11, py)] = (230, 150, 40, 255)
+        p[(12, py)] = (230, 150, 40, 255)
+
+    # Forge bellows on back — rusted copper (back face voxels at gz=3)
+    # These voxels have gx -3..-2 and 1..2, gy 9-12
+    # gx -3 = px 3, gx -2 = px 4, gx 1 = px 7, gx 2 = px 8
+    # UVs map by (gx, gy) so the bellows color shows on all faces
+    for py in range(9, 13):
+        for px in [3, 4]:
+            p[(px, py)] = (140, 90, 50, 255)
+        for px in [7, 8]:
+            p[(px, py)] = (140, 90, 50, 255)
+
+    # Left arm — normal soot (gx -5..-6, gy 4-12)
+    # gx -6 = px 0, gx -5 = px 1
+    for py in range(4, 13):
         p[(0, py)] = (35, 30, 25, 255)
         p[(1, py)] = (35, 30, 25, 255)
-    # Hooves
-    for py in range(0, 3):
-        for px in range(w): p[(px, py)] = (30, 25, 20, 255)
-    # Fists
-    for py in [4, 5]:
-        p[(0, py)] = (35, 30, 25, 255); p[(1, py)] = (35, 30, 25, 255)
+
+    # Boots — darkest charcoal (gy 0-1)
+    for py in range(0, 2):
+        for px in range(w):
+            p[(px, py)] = (30, 25, 20, 255)
+
+    # Legs — dark (gy 2-4)
+    for py in range(2, 5):
+        for px in range(w):
+            if p[(px, py)] == soot:
+                p[(px, py)] = (35, 30, 25, 255)
+
     return w, h, p
 
 

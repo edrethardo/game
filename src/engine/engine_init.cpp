@@ -284,6 +284,8 @@ void Engine::init() {
             {"sentinel",       "assets/meshes/sentinel.obj"},
             {"cave_troll",     "assets/meshes/cave_troll.obj"},
             {"pit_fiend",      "assets/meshes/pit_fiend.obj"},
+            {"pit_fiend_wing","assets/meshes/pit_fiend_wing.obj"},
+            {"hellforge_smith","assets/meshes/hellforge_smith.obj"},
             {"succubus",       "assets/meshes/succubus.obj"},
             {"abyssal_titan",  "assets/meshes/abyssal_titan.obj"},
             {"entropy_weaver", "assets/meshes/entropy_weaver.obj"},
@@ -320,6 +322,7 @@ void Engine::init() {
         findMeshByName("bat_foot"),
         findMeshByName("spider_leg_pair")
     );
+    LimbSystem::setPitFiendWingMeshId(findMeshByName("pit_fiend_wing"));
 
     // Cache mesh IDs for fast lookup in startGame — avoids repeated strcmp loops
     m_meshIdSkeleton = findMeshByName("skeleton");
@@ -998,17 +1001,17 @@ void Engine::init() {
                 e->baseAttackCooldown = e->attackCooldown;
             }
         } else if (type == 1) {
-            // Bat drone — flying hitscan unit. Vulnerable and targetable.
+            // Bat drone — flying melee swarm unit. Fast, closes distance to attack.
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.15f, 0.1f, 0.15f}, true, 20.0f * floorMult, 4.0f * floorMult,
-                12.0f, 8.0f, 1.0f, 3.0f);
+                {0.15f, 0.1f, 0.15f}, true, 20.0f * floorMult, 7.0f * floorMult,
+                12.0f, 3.0f, 0.5f, 6.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->flags        |= ENT_FRIENDLY | ENT_FLYING;
                 e->enemyType     = EnemyType::GENERIC;
                 e->meshId        = s_engine->m_meshIdBat;
                 e->materialId    = 49; // prop_iron
-                e->npcWeaponType = WeaponType::HITSCAN;
+                e->npcWeaponType = WeaponType::MELEE;
                 e->aiState       = AIState::IDLE;
                 e->baseMoveSpeed      = e->moveSpeed;
                 e->baseAttackCooldown = e->attackCooldown;

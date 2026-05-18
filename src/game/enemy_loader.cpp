@@ -63,9 +63,12 @@ static EnemyType inferEnemyType(const char* meshName) {
     if (std::strcmp(meshName, "sentinel") == 0) return EnemyType::SENTINEL;
     // Succubus: harpy-style with bat wings + dangling talons
     if (std::strcmp(meshName, "succubus") == 0) return EnemyType::SUCCUBUS;
+    // Pit Fiend: own winged-demon rig (wings + bipedal legs)
+    if (std::strcmp(meshName, "pit_fiend") == 0)      return EnemyType::PIT_FIEND;
+    // Hellforge Smith: hunched blacksmith rig (legs + hammer arm)
+    if (std::strcmp(meshName, "hellforge_smith") == 0) return EnemyType::HELLFORGE_SMITH;
     // Butcher-rig enemies use BOSS type for limb config (large skeleton rig)
     if (std::strcmp(meshName, "cave_troll") == 0)     return EnemyType::BOSS;
-    if (std::strcmp(meshName, "pit_fiend") == 0)      return EnemyType::BOSS;
     if (std::strcmp(meshName, "abyssal_titan") == 0)  return EnemyType::BOSS;
     // Default: skeleton rig (humanoid, wraith, sentinel, succubus, entropy_weaver, etc.)
     return EnemyType::SKELETON;

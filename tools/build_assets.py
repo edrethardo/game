@@ -75,6 +75,8 @@ def build_meshes():
         ["--type", "sentinel",       "--height", "2.0", "--out", os.path.join(mesh_dir, "sentinel.obj")],
         ["--type", "cave_troll",     "--height", "2.2", "--out", os.path.join(mesh_dir, "cave_troll.obj")],
         ["--type", "pit_fiend",      "--height", "2.4", "--out", os.path.join(mesh_dir, "pit_fiend.obj")],
+        ["--type", "pit_fiend_wing", "--out", os.path.join(mesh_dir, "pit_fiend_wing.obj")],
+        ["--type", "hellforge_smith", "--height", "2.0", "--out", os.path.join(mesh_dir, "hellforge_smith.obj")],
         ["--type", "succubus",       "--out", os.path.join(mesh_dir, "succubus.obj")],
         ["--type", "abyssal_titan",  "--height", "2.8", "--out", os.path.join(mesh_dir, "abyssal_titan.obj")],
         ["--type", "entropy_weaver", "--out", os.path.join(mesh_dir, "entropy_weaver.obj")],
