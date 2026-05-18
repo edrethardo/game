@@ -31,7 +31,14 @@ namespace Combat {
                      const Vec3* damageOrigin = nullptr);
 
     // Apply damage to the player. Optional attackerPos enables directional indicator.
-    void applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr);
+    // attackerIdx: entity pool index of the attacker (0xFFFF if unknown/environmental).
+    // Used by dodge-through detection to fire riposte counter-hits.
+    void applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr,
+                             u16 attackerIdx = 0xFFFF);
+
+    // Dodge-through callback: called when damage is blocked during a dodge roll
+    using DodgeThroughCallback = void(*)(u16 attackerIdx, Vec3 attackerPos);
+    void setDodgeThroughCallback(DodgeThroughCallback cb);
 
     // Execute a melee attack (cone check, damage all in cone).
     AttackResult fireMelee(const WeaponDef& weapon,

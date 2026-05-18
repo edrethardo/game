@@ -990,6 +990,71 @@ void Engine::init() {
         }
     });
 
+    // Dodge-through callback: fires an automatic riposte counter-hit when the player
+    // dodges through an incoming attack, and grants an adrenaline stack if unlocked.
+    Combat::setDodgeThroughCallback([](u16 attackerIdx, Vec3 attackerPos) {
+        if (!s_engine) return;
+        Player& player = s_engine->m_localPlayer;
+
+        // 1. Instant riposte: 50% weapon damage counter-hit on the attacker.
+        // m_weaponDefs[0] is the fallback if no item is equipped (unarmed).
+        WeaponDef effectiveWeapon = Inventory::getEffectiveWeapon(
+            s_engine->m_inventories[s_engine->m_localPlayerIndex],
+            s_engine->m_itemDefs, s_engine->m_weaponDefs[0]);
+        f32 riposteDmg = effectiveWeapon.damage * 0.5f;
+
+        if (attackerIdx < MAX_ENTITIES &&
+            (s_engine->m_entities.entities[attackerIdx].flags & ENT_ACTIVE)) {
+            EntityHandle h;
+            h.index      = attackerIdx;
+            h.generation = s_engine->m_entities.entities[attackerIdx].generation;
+            Combat::applyDamage(s_engine->m_entities, h, riposteDmg, &player.position);
+            Combat::spawnDamageNumber(attackerPos, riposteDmg);
+        }
+
+        // 2. Adrenaline surge stacks (only if skill 3 is unlocked)
+        if (player.adrenalineUnlocked) {
+            DodgeState& ds = player.dodgeState;
+            if (ds.counterStacks < 5) {
+                ds.counterTimers[ds.counterStacks] = 4.0f;
+                ds.counterStacks++;
+            } else {
+                // Refresh the oldest (shortest remaining) stack timer rather than losing a stack
+                f32 minT  = ds.counterTimers[0];
+                u8  minIdx = 0;
+                for (u8 i = 1; i < 5; i++) {
+                    if (ds.counterTimers[i] < minT) { minT = ds.counterTimers[i]; minIdx = i; }
+                }
+                ds.counterTimers[minIdx] = 4.0f;
+            }
+        }
+
+        // 3. Death's Dance AoE slash: if the ultimate is active, radiate a full-circle
+        //    slash to all nearby enemies on every dodge-through
+        if (player.deathsDanceTimer > 0.0f) {
+            WeaponDef ew = Inventory::getEffectiveWeapon(
+                s_engine->m_inventories[s_engine->m_localPlayerIndex],
+                s_engine->m_itemDefs, s_engine->m_weaponDefs[0]);
+            f32 slashDmg = ew.damage;
+            Vec3 eyePos  = player.position + Vec3{0, player.eyeHeight, 0};
+
+            EntityHandle hits[MAX_ENTITIES];
+            f32 dists[MAX_ENTITIES];
+            // cosCone = -1.0f → cos(180°) → query everything in a sphere of radius 3 m
+            u32 hitCount = CombatQuery::queryConeSorted(
+                s_engine->m_entities, eyePos, player.forward, -1.0f, 3.0f,
+                hits, dists, MAX_ENTITIES);
+            for (u32 k = 0; k < hitCount; k++) {
+                Combat::applyDamage(s_engine->m_entities, hits[k], slashDmg, &eyePos);
+            }
+        }
+
+        // 4. Subtle screen-shake for tactile riposte feedback
+        if (s_engine->m_camera.shake.intensity < 0.03f) {
+            s_engine->m_camera.shake.trigger(0.03f, 0.2f);
+        }
+    });
+
     // Drone/turret spawn callback — skill.cpp delegates spawning here so we
     // have direct access to the mesh registry.  type: 0=combat drone, 1=swarm, 2=turret
     SkillSystem::setDroneSpawnCallback([](Vec3 position, u8 type) {

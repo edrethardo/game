@@ -7,9 +7,10 @@
 #include "core/log.h"
 #include <cmath>
 
-static Combat::DamageNumberCallback s_damageNumberCallback = nullptr;
-static Combat::DeathCallback s_deathCallback = nullptr;
-static Combat::PerfectBlockCallback s_perfectBlockCallback = nullptr;
+static Combat::DamageNumberCallback   s_damageNumberCallback   = nullptr;
+static Combat::DeathCallback           s_deathCallback           = nullptr;
+static Combat::PerfectBlockCallback    s_perfectBlockCallback    = nullptr;
+static Combat::DodgeThroughCallback    s_dodgeThroughCallback    = nullptr;
 static ParticlePool* s_particlePool = nullptr;
 static ScreenShake*  s_screenShake  = nullptr;
 
@@ -27,6 +28,10 @@ void Combat::setDeathCallback(DeathCallback cb) {
 
 void Combat::setPerfectBlockCallback(PerfectBlockCallback cb) {
     s_perfectBlockCallback = cb;
+}
+
+void Combat::setDodgeThroughCallback(DodgeThroughCallback cb) {
+    s_dodgeThroughCallback = cb;
 }
 
 void Combat::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
@@ -108,9 +113,16 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     }
 }
 
-void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos) {
-    // Invulnerability blocks all damage (respawn/floor entry grace period)
-    if (player.invulnTimer > 0.0f) return;
+void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos,
+                                   u16 attackerIdx) {
+    // Invulnerability blocks all damage (respawn/floor entry grace period).
+    // If player is mid-roll, this is a successful dodge-through — fire riposte callback.
+    if (player.invulnTimer > 0.0f) {
+        if (player.dodgeState.rolling && s_dodgeThroughCallback && attackerIdx != 0xFFFF) {
+            s_dodgeThroughCallback(attackerIdx, attackerPos ? *attackerPos : Vec3{0, 0, 0});
+        }
+        return;
+    }
 
     // Class passive damage reduction (e.g. Warrior 30%)
     damage *= (1.0f - player.damageReduction);

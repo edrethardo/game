@@ -1064,7 +1064,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 5.0f;
                     // Damage everything within 6 units of the boss
                     if (dist < 6.0f) {
-                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.7f, &e.position);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.7f, &e.position, static_cast<u16>(i));
                     }
                     // Also damage nearby friendly NPCs
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
@@ -1108,7 +1108,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 2.5f; // frequent nova
                     // Inner nova damage — wide radius, hard to dodge up close
                     if (dist < 6.0f) {
-                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.5f, &e.position);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.5f, &e.position, static_cast<u16>(i));
                     }
                     // Dense ring of 10 fast fire projectiles with splash
                     for (u32 s = 0; s < 10; s++) {
@@ -1147,7 +1147,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.flybyTimer = 5.0f;
                     // Death nova — damage everything within 8 units
                     if (dist < 8.0f) {
-                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.6f, &e.position);
+                        Combat::applyDamageToPlayer(*targetPlayer, bossDmg * 0.6f, &e.position, static_cast<u16>(i));
                     }
                     for (u32 ni = 0; ni < pool.activeCount; ni++) {
                         u32 nIdx = pool.activeList[ni];
@@ -1651,8 +1651,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         e.attackAnimT = 0.3f;
                     }
                 } else if (hasLOSToPoint(e.position, targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0}, grid)) {
-                    // Damage the targeted player (not just player 0)
-                    Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position);
+                    // Damage the targeted player (not just player 0); pass pool index for riposte
+                    Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position, static_cast<u16>(i));
                     e.attackAnimT = 0.3f;
                 }
 
@@ -1757,7 +1757,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                             if (e.onHitEffect == 4) { npcTarget.freezeTimer = e.onHitDuration; }
                         }
                     } else if (hasLOSToPoint(e.position, targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0}, grid)) {
-                        Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position);
+                        // Pass entity pool index so dodge-through detection can riposte the correct attacker
+                        Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position, static_cast<u16>(i));
                         // Apply on-hit effect to player
                         if (e.onHitEffect == 1) { targetPlayer->poisonTimer = e.onHitDuration; targetPlayer->poisonDps = e.onHitDps; }
                         if (e.onHitEffect == 2) { targetPlayer->slowTimer   = e.onHitDuration; }
