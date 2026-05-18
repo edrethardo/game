@@ -126,6 +126,11 @@ SkillId skillIdFromString(const std::string& s) {
     if (s == "phase_strike")    return SkillId::PHASE_STRIKE;
     if (s == "void_kill")       return SkillId::VOID_KILL;
     if (s == "arc_fire")        return SkillId::ARC_FIRE;
+    // Wanderer
+    if (s == "deflect")           return SkillId::DEFLECT;
+    if (s == "exploit_weakness")  return SkillId::EXPLOIT_WEAKNESS;
+    if (s == "adrenaline_surge")  return SkillId::ADRENALINE_SURGE;
+    if (s == "deaths_dance")      return SkillId::DEATHS_DANCE;
     return SkillId::NONE;
 }
 
@@ -373,6 +378,18 @@ bool ItemLoader::loadSkillDefs(const char* path, SkillDef* defs, u32& count) {
             // Holy Nova specifics
             def.secondaryDamage = entry.value("secondaryDamage", 0.0f);
             def.allyHealPct     = entry.value("allyHealPct",     0.0f);
+
+            // Wanderer: Deflect
+            if (entry.contains("activeWindow"))    def.activeWindow    = entry.value("activeWindow",    0.0f);
+            if (entry.contains("stunDuration"))    def.stunDuration    = entry.value("stunDuration",    0.0f);
+
+            // Wanderer: Exploit Weakness
+            if (entry.contains("markDuration"))    def.markDuration    = entry.value("markDuration",    0.0f);
+            if (entry.contains("damageMultiplier"))def.damageMultiplier= entry.value("damageMultiplier",0.0f);
+
+            // Wanderer: Death's Dance
+            if (entry.contains("slashRadius"))     def.slashRadius     = entry.value("slashRadius",     0.0f);
+            if (entry.contains("slashDamageMult")) def.slashDamageMult = entry.value("slashDamageMult", 0.0f);
 
             count++;
         }
