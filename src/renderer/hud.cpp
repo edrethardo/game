@@ -2062,3 +2062,21 @@ void HUD::drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha) {
     }
     flushHUD();
 }
+
+// Filled horizontal bar — draws a background rect then a filled portion up to pct.
+// Coordinates are in HUD pixel space (origin bottom-left).
+void HUD::drawFilledBar(u32 sw, u32 sh, f32 x, f32 y, f32 barW, f32 barH,
+                        f32 pct, Vec3 bgColor, Vec3 fgColor) {
+    s_screenW = sw; s_screenH = sh;
+    // Background outline
+    pushQuad(x, y, x + barW, y + barH, bgColor);
+    // Filled portion as horizontal scan lines
+    if (pct > 0.0f) {
+        f32 fillW = barW * pct;
+        f32 pad = 1.0f;
+        for (f32 fy = y + pad; fy < y + barH - pad; fy += 1.0f) {
+            pushLine(x + pad, fy, x + pad + fillW - pad * 2.0f, fy, fgColor);
+        }
+    }
+    flushHUD();
+}

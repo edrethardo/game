@@ -168,6 +168,59 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         if (m_hitMarkerTimer > 0.0f)
             HUD::drawHitMarker(sw, sh, m_hitMarkerTimer / 0.2f);
 
+        // --- Wanderer HUD indicators (dodge cooldown, adrenaline, Death's Dance) ---
+        // Drawn just below the crosshair. HUD coords: origin bottom-left, so
+        // decreasing Y moves elements downward from center.
+        if (m_playerClass == PlayerClass::WANDERER) {
+            const DodgeState& ds = m_localPlayer.dodgeState;
+            f32 hs = static_cast<f32>(sh) / 720.0f;
+            f32 cx = static_cast<f32>(sw) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.5f;
+
+            // Dodge cooldown bar: filled while on cooldown, empty/cyan while rolling
+            if (ds.rolling || ds.cooldownTimer > 0.0f) {
+                // pct: 0 = empty/on-cooldown, 1 = ready
+                f32 pct = ds.rolling ? 0.0f : (1.0f - ds.cooldownTimer / 1.0f);
+                Vec3 barBg = {0.15f, 0.15f, 0.15f};
+                Vec3 barFg = ds.rolling ? Vec3{0.0f, 0.8f, 1.0f} : Vec3{0.5f, 0.5f, 0.5f};
+                f32 barW = 30.0f * hs;
+                f32 barH = 3.0f * hs;
+                f32 bx = cx - barW * 0.5f;
+                f32 by = cy - 18.0f * hs; // 18px below crosshair center
+                HUD::drawFilledBar(sw, sh, bx, by, barW, barH, pct, barBg, barFg);
+            }
+
+            // Adrenaline stacks: orange pips below the dodge bar
+            if (m_localPlayer.adrenalineUnlocked && ds.counterStacks > 0) {
+                u8 stacks = ds.counterStacks;
+                f32 pipW = 8.0f * hs;
+                f32 pipH = 4.0f * hs;
+                f32 pipGap = 2.0f * hs;
+                f32 totalPipW = stacks * pipW + (stacks - 1) * pipGap;
+                f32 px = cx - totalPipW * 0.5f;
+                f32 py = cy - 26.0f * hs; // below dodge bar
+                Vec3 pipBg = {0.2f, 0.1f, 0.0f};
+                Vec3 pipFg = {1.0f, 0.53f, 0.0f}; // orange
+                for (u8 i = 0; i < stacks; i++) {
+                    HUD::drawFilledBar(sw, sh, px + i * (pipW + pipGap), py,
+                                       pipW, pipH, 1.0f, pipBg, pipFg);
+                }
+            }
+
+            // Death's Dance timer bar: purple, below adrenaline pips
+            if (m_localPlayer.deathsDanceTimer > 0.0f) {
+                // 8s total duration (matches skill definition)
+                f32 pct = m_localPlayer.deathsDanceTimer / 8.0f;
+                if (pct > 1.0f) pct = 1.0f;
+                f32 barW = 60.0f * hs;
+                f32 barH = 4.0f * hs;
+                f32 bx = cx - barW * 0.5f;
+                f32 by = cy - 34.0f * hs; // below adrenaline pips
+                HUD::drawFilledBar(sw, sh, bx, by, barW, barH, pct,
+                                   {0.15f, 0.05f, 0.15f}, {0.8f, 0.27f, 1.0f});
+            }
+        }
+
     // CS-style directional damage arcs — show where hits came from
     for (u32 i = 0; i < Player::MAX_HIT_INDICATORS; i++) {
         const auto& hi = m_localPlayer.hitIndicators[i];

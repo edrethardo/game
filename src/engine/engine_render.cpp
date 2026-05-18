@@ -2572,6 +2572,43 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
         HUD::drawSpeechBubble(sw, sh, screenX, screenY, e.speechText, textColor, alpha);
     }
 
+    // Wanderer: Exploit Weakness mark indicator — pulsing "!" above the marked entity
+    if (m_playerClass == PlayerClass::WANDERER
+        && m_localPlayer.markTimer > 0.0f
+        && m_localPlayer.markedEntityIdx != 0xFFFF)
+    {
+        const EntityPool& markPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities : m_entities;
+        EntityHandle markHandle = {m_localPlayer.markedEntityIdx, m_localPlayer.markedEntityGen};
+        const Entity* markTarget = handleGet(const_cast<EntityPool&>(markPool), markHandle);
+        if (markTarget && !(markTarget->flags & ENT_DEAD)) {
+            // Project a point above the entity's head (same technique as speech bubbles)
+            f32 topOfHead = markTarget->position.y + markTarget->halfExtents.y;
+            Vec3 headPos = {markTarget->position.x, topOfHead + 0.4f, markTarget->position.z};
+
+            const f32* vp = m_camera.viewProjection.m;
+            f32 cx = vp[0]*headPos.x + vp[4]*headPos.y + vp[8]*headPos.z  + vp[12];
+            f32 cy = vp[1]*headPos.x + vp[5]*headPos.y + vp[9]*headPos.z  + vp[13];
+            f32 cw = vp[3]*headPos.x + vp[7]*headPos.y + vp[11]*headPos.z + vp[15];
+
+            if (cw > 0.01f) {
+                f32 screenX = ((cx / cw) + 1.0f) * 0.5f * static_cast<f32>(sw);
+                f32 screenY = (1.0f - (cy / cw)) * 0.5f * static_cast<f32>(sh);
+
+                if (screenX >= -50.0f && screenX <= static_cast<f32>(sw) + 50.0f
+                    && screenY >= -50.0f && screenY <= static_cast<f32>(sh) + 50.0f)
+                {
+                    // Pulsing orange-red "!" to signal the exploitable target
+                    f32 pulse = 0.7f + 0.3f * sinf(m_statsTimer * 8.0f);
+                    // Fade out in the last second of the mark
+                    f32 fade = (m_localPlayer.markTimer < 1.0f) ? m_localPlayer.markTimer : 1.0f;
+                    Vec3 markCol = {1.0f * pulse * fade, 0.4f * pulse * fade, 0.0f};
+                    f32 textH = FontSystem::textHeight(2);
+                    FontSystem::drawText(sw, sh, screenX - 3.0f, screenY - textH, "!", markCol, 2);
+                }
+            }
+        }
+    }
+
     // Floor door interaction prompt — shown when player is within trigger range
     if (m_level.floorDoorActive && m_gameState == GameState::IN_GAME) {
         Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;

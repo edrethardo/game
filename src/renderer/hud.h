@@ -136,4 +136,10 @@ namespace HUD {
 
     // CS-style directional damage arc — red arc around crosshair pointing toward attacker
     void drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha);
+
+    // Filled horizontal bar with optional background.
+    // (x,y) is the bottom-left corner in HUD pixel coords (origin bottom-left).
+    // bgColor: background bar; fgColor: filled portion up to pct [0,1].
+    void drawFilledBar(u32 sw, u32 sh, f32 x, f32 y, f32 w, f32 h,
+                       f32 pct, Vec3 bgColor, Vec3 fgColor);
 }
