@@ -1845,49 +1845,72 @@ def gen_pit_fiend(height=2.4):
     return mb
 
 
-def gen_succubus(height=1.9):
-    """Succubus — lithe demonic humanoid with wing pauldrons and tail.
-    Origin at feet (Y=0). 17 voxels tall."""
+def gen_succubus(height=1.4):
+    """Succubus — cute harpy demon. Hourglass feminine body with bat wings (limbs)
+    and dangling talons (limbs). Curved horns, whip tail, hair detail.
+    Body has mass and curves: 5-wide chest, 3-wide waist, 5-wide hips.
+    16 voxels tall. Origin at feet (Y=0)."""
     mb = MeshBuilder()
-    vs = height / 17.0
+    vs = height / 16.0
     filled = set()
     def fill_box(x0, y0, z0, w, h, d):
         for y in range(y0, y0 + h):
             for x in range(x0, x0 + w):
                 for z in range(z0, z0 + d):
                     filled.add((x, y, z))
-    # Head
-    fill_box(-1, 13, -1, 3, 3, 3)
-    # Small horns
-    filled.add((-1, 16, 0))
-    filled.add((1, 16, 0))
-    # Thin neck
-    fill_box(0, 12, 0, 1, 1, 1)
-    # Narrow shoulders
-    fill_box(-2, 11, 0, 5, 1, 2)
-    # Wing pauldrons (on back)
-    fill_box(-3, 10, 1, 2, 2, 1)
-    fill_box(2, 10, 1, 2, 2, 1)
-    # Slender torso
-    fill_box(-1, 7, 0, 3, 4, 2)
-    # Thin arms — upper
-    fill_box(-2, 8, 0, 1, 3, 1)
-    fill_box(2, 8, 0, 1, 3, 1)
-    # Thin arms — lower
-    fill_box(-2, 5, 0, 1, 3, 1)
-    fill_box(2, 5, 0, 1, 3, 1)
-    # Slim pelvis
-    fill_box(-1, 6, 0, 3, 1, 2)
-    # Tail — single voxels trailing back
-    filled.add((0, 6, 1))
-    filled.add((0, 5, 2))
+
+    # --- Hair (gy 15) — frames the horns, adds character ---
+    fill_box(-1, 15, -2, 3, 1, 4)
+
+    # --- Head (gy 12-14, 3x3 — smaller relative to 5-wide body) ---
+    fill_box(-1, 13, -1, 3, 2, 3)   # upper skull
+    fill_box(-1, 12, -1, 3, 1, 2)   # lower face/jaw
+    # Eye sockets (gy 14, front face)
+    filled.discard((-1, 14, -1))
+    filled.discard((1, 14, -1))
+    # Mouth carved
+    filled.discard((0, 12, -1))
+
+    # Horns — swept back and up from above hair (gy 16-17)
+    filled.add((-2, 16, 0))   # left horn base
+    filled.add((-3, 17, 1))   # left horn tip (swept back)
+    filled.add((2, 16, 0))    # right horn base
+    filled.add((3, 17, 1))    # right horn tip
+
+    # Neck — thin (gy 11)
+    fill_box(0, 11, 0, 1, 1, 1)
+
+    # --- Chest (gy 8-10, 5 wide — the widest upper body) ---
+    fill_box(-2, 8, -1, 5, 3, 3)    # main chest block
+    fill_box(-2, 8, -2, 5, 2, 1)    # bust protrusion (front, 2 rows deep)
+    fill_box(-2, 9, -2, 5, 1, 1)    # upper bust line
+    # Shoulder nubs for wing limb attachment
+    fill_box(-3, 10, 0, 1, 1, 1)
+    fill_box(3, 10, 0, 1, 1, 1)
+
+    # --- Narrow waist (gy 7, 3 wide — the pinch) ---
+    fill_box(-1, 7, -1, 3, 1, 2)
+
+    # --- Wide hips (gy 5-6, 5 wide — wider than chest = curvy) ---
+    fill_box(-2, 5, -1, 5, 2, 3)
+
+    # --- Tapered pelvis (gy 3-4, 3 wide — narrowing gracefully) ---
+    fill_box(-1, 3, -1, 3, 2, 2)
+
+    # --- Lower taper (gy 1-2, 1-2 wide — where talons attach) ---
+    fill_box(0, 1, 0, 1, 2, 1)
+    filled.add((-1, 2, 0))    # slight width at top of taper
+    filled.add((1, 2, 0))
+
+    # --- Body terminus (gy 0) — talon limbs hang from here ---
+    filled.add((0, 0, 0))
+
+    # --- Tail (whip, 5 voxels trailing back from hip level) ---
+    filled.add((0, 6, 2))
+    filled.add((0, 5, 3))
     filled.add((0, 4, 3))
-    # Long thin legs
-    fill_box(-1, 1, 0, 1, 4, 1)
-    fill_box(1, 1, 0, 1, 4, 1)
-    # Pointed feet
-    filled.add((-1, 0, 0))
-    filled.add((1, 0, 0))
+    filled.add((0, 3, 4))
+    filled.add((0, 2, 4))     # tail tip
 
     ox = -0.5 * vs
     oz = -0.5 * vs

@@ -122,6 +122,20 @@ static const LimbConfig s_hellhoundConfig = {
     }
 };
 
+// Succubus: harpy-style — 2 large bat wings + 2 dangling talons. No walking legs.
+// Wings at shoulder height, talons hang below body center.
+static const LimbConfig s_succubusConfig = {
+    4,
+    {
+        // Wings (0-1) — large, at shoulder height, roll axis for flapping
+        {{ 0.18f, 0.55f, 0.0f}, {0.50f, 0.04f, 0.32f}, 0.0f, 2, false},  // left wing
+        {{-0.18f, 0.55f, 0.0f}, {0.50f, 0.04f, 0.32f}, 0.0f, 2, true},   // right wing
+        // Talons (2-3) — dangle below body, pitch axis for sway
+        {{ 0.06f, 0.10f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, false},  // left talon
+        {{-0.06f, 0.10f, 0.0f}, {0.04f, 0.14f, 0.04f}, 0.0f, 0, true},   // right talon
+    }
+};
+
 // Sentinel: 2 legs + 1 shield arm held forward (blocking stance).
 // The shield arm is a large limb on the left side, angled forward to cover the front.
 static const LimbConfig s_sentinelConfig = {
@@ -204,6 +218,7 @@ const LimbConfig& LimbSystem::getConfig(EnemyType type) {
         case EnemyType::SPIDER:    return s_spiderConfig;
         case EnemyType::HELLHOUND: return s_hellhoundConfig;
         case EnemyType::SENTINEL:  return s_sentinelConfig;
+        case EnemyType::SUCCUBUS:  return s_succubusConfig;
         default:                   return s_genericConfig;
     }
 }
@@ -230,6 +245,9 @@ u8 LimbSystem::getLimbMeshId(EnemyType type, u32 limbIdx) {
         case EnemyType::SENTINEL:
             // 0-1 = legs, 2 = shield arm (uses arm mesh, rendered large)
             return (limbIdx < 2) ? s_legMeshId : s_armMeshId;
+        case EnemyType::SUCCUBUS:
+            // 0-1 = wings, 2-3 = talons (same mesh types as bat)
+            return (limbIdx < 2) ? s_wingMeshId : s_clawMeshId;
         default:
             return 0;
     }
@@ -392,6 +410,37 @@ f32 LimbSystem::computeAngle(const Entity& e, u32 limbIdx, EnemyType type) {
                 f32 phase = e.animTimer * 6.0f + limbIdx * 0.8f;
                 f32 tap = sinf(phase) * 0.2f * (speed01 * 0.8f + 0.2f);
                 return tap;
+            }
+        }
+
+        case EnemyType::SUCCUBUS: {
+            if (limbIdx < 2) {
+                // Wings: slow majestic flap (slower than bat's frantic beating)
+                f32 flapSpeed = isMoving ? 5.0f : 2.5f;
+                f32 phase = fmodf(e.animTimer * flapSpeed, 6.2832f);
+                f32 angle;
+                if (phase < 2.0f) {
+                    // Downstroke — powerful, wider arc than bat (0.9 vs 0.7)
+                    angle = -sinf(phase * 1.57f) * 0.9f;
+                } else {
+                    // Upstroke — slow graceful recovery
+                    f32 t = (phase - 2.0f) / 4.2832f;
+                    angle = -0.9f * (1.0f - t * t);
+                }
+                if (e.attackAnimT > 0.0f) {
+                    // Attack: wings sweep wide and hold menacingly
+                    f32 t = e.attackAnimT / 0.4f;
+                    angle = -0.6f + sinf(t * 3.14159f) * 1.2f;
+                }
+                return angle;
+            } else {
+                // Talons: gentle pendulum sway, kick forward on attack
+                f32 sway = sinf(e.animTimer * 2.0f + limbIdx * 1.5f) * 0.15f;
+                if (e.attackAnimT > 0.0f) {
+                    f32 t = e.attackAnimT / 0.3f;
+                    sway -= 0.5f * sinf(t * 3.14159f); // kick forward
+                }
+                return sway;
             }
         }
 

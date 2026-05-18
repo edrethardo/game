@@ -33,7 +33,7 @@
       "moveSpeed": 2.5,
       "detectionRange": 16,
       "attackRange": 10,
-      "attackCooldown": 1.5,
+      "attackCooldown": 1.1,
       "damage": 8,
       "flying": false,
       "halfExtents": [
@@ -177,7 +177,7 @@
       "moveSpeed": 2.5,
       "detectionRange": 16,
       "attackRange": 11,
-      "attackCooldown": 1.2,
+      "attackCooldown": 0.9,
       "damage": 14,
       "flying": false,
       "halfExtents": [
@@ -369,7 +369,7 @@
       "moveSpeed": 4.0,
       "detectionRange": 20,
       "attackRange": 16,
-      "attackCooldown": 2.5,
+      "attackCooldown": 1.8,
       "damage": 18,
       "flying": true,
       "halfExtents": [
@@ -570,7 +570,7 @@
       "moveSpeed": 3.0,
       "detectionRange": 14,
       "attackRange": 10,
-      "attackCooldown": 1.5,
+      "attackCooldown": 1.1,
       "damage": 22,
       "flying": false,
       "halfExtents": [
@@ -648,12 +648,12 @@
       "moveSpeed": 5.0,
       "detectionRange": 18,
       "attackRange": 10,
-      "attackCooldown": 1.5,
+      "attackCooldown": 1.0,
       "damage": 14,
       "flying": true,
       "halfExtents": [
         0.4,
-        0.9,
+        0.7,
         0.4
       ],
       "role": [
@@ -723,7 +723,7 @@
       "moveSpeed": 2.5,
       "detectionRange": 16,
       "attackRange": 12,
-      "attackCooldown": 1.5,
+      "attackCooldown": 1.0,
       "damage": 16,
       "flying": false,
       "halfExtents": [

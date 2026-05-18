@@ -38,6 +38,7 @@ enum struct EnemyType : u8 {
     MIMIC,        // disguised as chest, attacks when approached
     HELLHOUND,    // quadruped canine demon — 4 legs, galloping animation
     SENTINEL,     // armored shield-bearer — 2 legs, shield arm, blocking stance
+    SUCCUBUS,     // harpy-style flyer — 2 bat wings, 2 dangling talons, no walking legs
     BOSS,         // large boss enemy (uses skeleton rig, oversized)
     PROP,         // static decoration — no AI, no collision response, no animation
     COUNT

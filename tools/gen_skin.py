@@ -338,7 +338,7 @@ def skin_paladin():
 
 def skin_butcher():
     """Grid: approx w=11, h=21."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     for py in range(h):
         for px in range(w):
@@ -666,7 +666,7 @@ def skin_mephisto():
 def skin_baal():
     """Baal boss: golden demon lord. Gold/bronze body, glowing yellow eyes.
     Uses butcher rig (w=11, h=21)."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     gold = (170, 140, 50, 255)
     for py in range(h):
@@ -693,7 +693,7 @@ def skin_baal():
 def skin_diablo():
     """Diablo boss: lord of terror. Deep red body, burning orange eyes, dark horns.
     Uses butcher rig (w=11, h=21)."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     for py in range(h):
         for px in range(w):
@@ -821,7 +821,7 @@ def skin_spider_queen():
 def skin_demon_knight():
     """Demon Knight mini-boss: armored red-orange demon.
     Uses butcher rig (w=11, h=21)."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     for py in range(h):
         for px in range(w):
@@ -1769,9 +1769,9 @@ def skin_sniper_imp():
     # Belly — slightly lighter
     for py in range(3, 7):
         for px in range(1, 4): p[(px, py)] = (85, 65, 105, 255)
-    # Sharp yellow hawk eyes — sniper vision
-    p[(1, 9)] = (240, 220, 40, 255)
-    p[(3, 9)] = (240, 220, 40, 255)
+    # Sharp yellow hawk eyes — same position as base bat (py=6)
+    p[(1, 6)] = (240, 220, 40, 255)
+    p[(3, 6)] = (240, 220, 40, 255)
     # Wing tips — crystal blue (targeting crystals)
     p[(0, 7)] = (120, 160, 220, 255)
     p[(4, 7)] = (120, 160, 220, 255)
@@ -2019,9 +2019,9 @@ def skin_plague_bat():
     p[(1, 5)] = (100, 200, 40, 255)
     p[(3, 7)] = (100, 200, 40, 255)
     p[(2, 3)] = (100, 200, 40, 255)
-    # Infected red eyes
-    p[(1, 9)] = (220, 50, 30, 255)
-    p[(3, 9)] = (220, 50, 30, 255)
+    # Infected red eyes — same position as base bat (py=6)
+    p[(1, 6)] = (220, 50, 30, 255)
+    p[(3, 6)] = (220, 50, 30, 255)
     # Ears
     p[(1, 8)] = (120, 140, 50, 255)
     p[(3, 8)] = (120, 140, 50, 255)
@@ -2119,7 +2119,7 @@ def skin_burrowing_widow():
 
 def skin_cave_troll():
     """Butcher-rig cave troll: mossy grey-green rocky hide, amber eyes, moss patches."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     rock = (90, 110, 80, 255)
     for py in range(h):
@@ -2162,7 +2162,7 @@ def skin_cave_troll():
 
 def skin_pit_fiend():
     """Butcher-rig pit fiend: dark obsidian body, glowing magma cracks, burning orange eyes."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     obsidian = (30, 25, 35, 255)
     for py in range(h):
@@ -2201,7 +2201,7 @@ def skin_pit_fiend():
 
 def skin_hellforge_smith():
     """Butcher-rig hellforge smith: soot-black body, glowing forge-arm, iron apron, ember eyes."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     soot = (40, 35, 30, 255)
     for py in range(h):
@@ -2242,39 +2242,93 @@ def skin_hellforge_smith():
 
 
 def skin_succubus():
-    """Skeleton-rig succubus: deep crimson body, black wing-plate markings, violet eyes."""
-    w, h = 7, 16
+    """Succubus skin — grid 7x18, matching harpy mesh (gx -3..3, gy 0..17).
+    High-contrast cute harpy: pale lavender skin on face/chest/hips,
+    dark purple-black on waist/lower body, magenta eyes, violet runes,
+    bright horn tips, hair detail, tail glow."""
+    w, h = 7, 18
+    # px = gx+3, py = gy
     p = {}
-    crimson = (150, 30, 50, 255)
+    dark = (35, 15, 40, 255)
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = crimson
+            p[(px, py)] = dark
 
-    # Pale face
-    for py in range(13, 16):
-        for px in range(1, 6): p[(px, py)] = (200, 160, 170, 255)
-    # Violet eyes
-    p[(2, 14)] = (180, 60, 200, 255)
-    p[(4, 14)] = (180, 60, 200, 255)
-    # Black wing-plate markings on shoulders
-    for py in [9, 10]:
-        p[(0, py)] = (30, 20, 25, 255)
-        p[(6, py)] = (30, 20, 25, 255)
-    # Spine
-    for py in range(5, 10): p[(3, py)] = (120, 25, 40, 255)
-    # Torso detail
-    for py in [6, 7, 9]:
-        for px in [1, 2, 4, 5]: p[(px, py)] = (140, 28, 45, 255)
-    # Arms
-    for py in range(3, 9):
-        p[(0, py)] = (130, 25, 42, 255)
-        p[(6, py)] = (130, 25, 42, 255)
-    # Pelvis
-    for px in range(2, 5): p[(px, 4)] = (135, 28, 44, 255)
-    # Legs
-    for px in [1, 4]:
-        p[(px, 2)] = crimson; p[(px, 3)] = crimson
-        p[(px, 0)] = (120, 22, 38, 255); p[(px, 1)] = (125, 24, 40, 255)
+    # --- Horn tips (gy 17) -> py 17 ---
+    p[(0, 17)] = (220, 50, 160, 255)
+    p[(6, 17)] = (220, 50, 160, 255)
+    # Horn bases (gy 16) -> py 16
+    p[(1, 16)] = (160, 35, 100, 255)
+    p[(5, 16)] = (160, 35, 100, 255)
+
+    # --- Hair (gy 15) -> py 15 — dark purple-red ---
+    for px in range(2, 5): p[(px, 15)] = (80, 25, 55, 255)
+
+    # --- Head (gy 12-14) -> py 12-14 — pale lavender skin ---
+    for py in [13, 14]:
+        for px in range(2, 5): p[(px, py)] = (150, 120, 145, 255)
+    # Lower face/jaw
+    for px in range(2, 5): p[(px, 12)] = (140, 110, 135, 255)
+    # Bright magenta eyes (gy 14)
+    p[(2, 14)] = (255, 40, 200, 255)
+    p[(4, 14)] = (255, 40, 200, 255)
+    # Mouth
+    p[(3, 12)] = (120, 70, 90, 255)
+
+    # --- Neck (gy 11) — transition ---
+    p[(3, 11)] = (100, 70, 95, 255)
+
+    # --- Shoulder nubs (gy 10) — medium, wing attach ---
+    p[(0, 10)] = (90, 45, 75, 255)
+    p[(6, 10)] = (90, 45, 75, 255)
+
+    # --- Chest/bust (gy 8-10) — pale lavender skin, prominent ---
+    for py in [8, 9, 10]:
+        for px in range(1, 6): p[(px, py)] = (140, 108, 132, 255)
+    # Bust highlights — lighter at center (gy 8-9)
+    for py in [8, 9]:
+        p[(2, py)] = (160, 130, 150, 255)
+        p[(3, py)] = (165, 135, 155, 255)
+        p[(4, py)] = (160, 130, 150, 255)
+    # Bust line shadow underneath
+    for px in range(1, 6): p[(px, 8)] = (130, 98, 122, 255)
+
+    # Violet runes on torso — glow against pale skin
+    p[(3, 10)] = (180, 60, 220, 255)
+    p[(2, 9)]  = (160, 50, 200, 255)
+    p[(4, 9)]  = (160, 50, 200, 255)
+    p[(3, 8)]  = (180, 60, 220, 255)
+
+    # --- Narrow waist (gy 7) — dark pinch, defines hourglass ---
+    for px in range(2, 5): p[(px, 7)] = (55, 28, 50, 255)
+
+    # --- Wide hips (gy 5-6) — pale skin, curvy ---
+    for py in [5, 6]:
+        for px in range(1, 6): p[(px, py)] = (135, 105, 128, 255)
+    # Hip highlights
+    p[(2, 6)] = (145, 115, 138, 255)
+    p[(4, 6)] = (145, 115, 138, 255)
+
+    # --- Tapered pelvis (gy 3-4) — transitions dark ---
+    for py in [3, 4]:
+        for px in range(2, 5): p[(px, py)] = (70, 35, 60, 255)
+
+    # --- Lower taper (gy 1-2) — dark ---
+    p[(2, 2)] = (50, 25, 45, 255)
+    p[(3, 2)] = (50, 25, 45, 255)
+    p[(4, 2)] = (50, 25, 45, 255)
+    p[(3, 1)] = (40, 20, 38, 255)
+
+    # --- Terminus (gy 0) ---
+    p[(3, 0)] = (30, 12, 28, 255)
+
+    # --- Tail (gy 2-6) — magenta glow to bright tip ---
+    p[(3, 6)] = (90, 28, 70, 255)
+    p[(3, 5)] = (110, 35, 85, 255)
+    p[(3, 4)] = (140, 45, 105, 255)
+    p[(3, 3)] = (170, 55, 125, 255)
+    p[(3, 2)] = (210, 65, 155, 255)   # bright tail tip
+
     return w, h, p
 
 
@@ -2341,9 +2395,9 @@ def skin_nullifier():
     p[(2, 5)] = (180, 200, 240, 255)
     p[(1, 3)] = (180, 200, 240, 255)
     p[(3, 7)] = (180, 200, 240, 255)
-    # White void eyes
-    p[(1, 9)] = (220, 230, 250, 255)
-    p[(3, 9)] = (220, 230, 250, 255)
+    # White void eyes — same position as base bat (py=6)
+    p[(1, 6)] = (220, 230, 250, 255)
+    p[(3, 6)] = (220, 230, 250, 255)
     # Ears
     p[(1, 8)] = (30, 30, 42, 255)
     p[(3, 8)] = (30, 30, 42, 255)
@@ -2362,7 +2416,7 @@ def skin_nullifier():
 
 def skin_abyssal_titan():
     """Butcher-rig abyssal titan: deep void-black body, faint purple runes, ice-blue eyes."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     void = (25, 22, 35, 255)
     for py in range(h):
@@ -3355,7 +3409,7 @@ def skin_boss_mephisto():
 
 def skin_boss_baal():
     """Baal — golden-brown armored demon lord, glowing orange runes. Butcher mesh 11x21."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     armor  = (160, 130, 60, 255)
     gold   = (220, 190, 80, 255)
@@ -3381,14 +3435,14 @@ def skin_boss_baal():
         for px in range(w):
             p[(px, py)] = dark
     # Eyes
-    p[(4, 18)] = eye; p[(6, 18)] = eye
+    p[(4, 18)] = eye; p[(7, 18)] = eye
     # Horns
     p[(3, 20)] = gold; p[(7, 20)] = gold
     return w, h, p
 
 def skin_boss_diablo():
     """Diablo — dark red scales, black horns, fiery orange belly. Butcher mesh 11x21."""
-    w, h = 11, 21
+    w, h = 12, 21
     p = {}
     scale  = (140, 30, 15, 255)
     dark   = (60, 15, 10, 255)
@@ -3414,7 +3468,7 @@ def skin_boss_diablo():
     for py in range(10, 16):
         p[(0, py)] = dark; p[(1, py)] = dark; p[(9, py)] = dark; p[(10, py)] = dark
     # Glowing eyes
-    p[(4, 18)] = eye; p[(6, 18)] = eye
+    p[(4, 18)] = eye; p[(7, 18)] = eye
     # Spine ridge
     for py in range(6, 18):
         p[(5, py)] = dark
