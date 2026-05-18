@@ -103,13 +103,13 @@
         "cooldown": 2.0,
         "energyCost": 20,
         "damage": 0,
-        "activeWindow": 0.3,
+        "activeWindow": 0.4,
         "stunDuration": 2.0
     },
     {
         "id": "exploit_weakness",
         "name": "Exploit Weakness",
-        "cooldown": 8.0,
+        "cooldown": 2.5,
         "energyCost": 25,
         "damage": 0,
         "markDuration": 5.0,

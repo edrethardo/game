@@ -104,6 +104,14 @@ void PlayerController::update(Player& player, f32 dt) {
     if (player.adrenalineUpgraded && player.dodgeState.counterStacks > 0) {
         effectiveSpeed *= (1.0f + player.dodgeState.counterStacks * 0.05f);
     }
+    // Wanderer Deflect burst speed buff: +8% for 3s after releasing absorbed damage
+    if (player.deflectSpeedTimer > 0.0f) {
+        effectiveSpeed *= 1.08f;
+    }
+    // Wanderer Exploit Weakness speed buff: +5% per stack from marked enemy interactions
+    if (player.markSpeedStacks > 0) {
+        effectiveSpeed *= (1.0f + player.markSpeedStacks * 0.05f);
+    }
     if (player.slowTimer > 0.0f) {
         effectiveSpeed *= 0.4f; // 60% slow
         player.slowTimer -= dt;

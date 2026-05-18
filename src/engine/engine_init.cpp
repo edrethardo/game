@@ -571,34 +571,43 @@ void Engine::init() {
             s_engine->m_localPlayer.smokeTimer = s_engine->m_localPlayer.shadowDanceTimer;
         }
 
+        // Wanderer: killing a marked enemy grants speed stack + resets Exploit Weakness cooldown
+        if (s_engine->m_playerClass == PlayerClass::WANDERER &&
+            pool.entities[entityIndex].markPreyTimer > 0.0f) {
+            Player& wp = s_engine->m_localPlayer;
+            // +5% speed stack (3s, non-refreshing)
+            if (wp.markSpeedStacks < 20) {
+                wp.markSpeedTimers[wp.markSpeedStacks] = 3.0f;
+                wp.markSpeedStacks++;
+            }
+            // Reset Exploit Weakness cooldown so it can be recast immediately
+            for (u8 cs = 0; cs < 4; cs++) {
+                if (s_engine->m_classSkillStates[cs].activeSkill == SkillId::EXPLOIT_WEAKNESS) {
+                    s_engine->m_classSkillStates[cs].cooldownTimer = 0.0f;
+                    break;
+                }
+            }
+        }
+
         // Wanderer Exploit Weakness upgrade (floor >= 20): mark spreads to nearest alive enemy on kill
         if (s_engine->m_playerClass == PlayerClass::WANDERER &&
             s_engine->m_level.currentFloor >= 20 &&
-            s_engine->m_localPlayer.markTimer > 0.0f &&
-            s_engine->m_localPlayer.markedEntityIdx == entityIndex) {
-            // The marked enemy just died — find the nearest non-dead hostile within 5m
+            pool.entities[entityIndex].markPreyTimer > 0.0f) {
             constexpr f32 SPREAD_RANGE_SQ = 5.0f * 5.0f;
-            u16 bestIdx = 0xFFFF;
-            f32 bestDistSq = SPREAD_RANGE_SQ;
             for (u32 si = 0; si < pool.activeCount; si++) {
                 u32 sIdx = pool.activeList[si];
                 if (sIdx == entityIndex) continue;
-                const Entity& se = pool.entities[sIdx];
+                Entity& se = pool.entities[sIdx];
                 if (!(se.flags & ENT_ACTIVE) || (se.flags & ENT_DEAD)) continue;
                 if (se.flags & ENT_FRIENDLY) continue;
+                if (se.markPreyTimer > 0.0f) continue; // already marked
                 f32 dSq = lengthSq(se.position - position);
-                if (dSq < bestDistSq) { bestDistSq = dSq; bestIdx = static_cast<u16>(sIdx); }
-            }
-            if (bestIdx != 0xFFFF) {
-                // Transfer the mark to the nearest surviving enemy
-                s_engine->m_localPlayer.markedEntityIdx = bestIdx;
-                s_engine->m_localPlayer.markedEntityGen = pool.entities[bestIdx].generation;
-                // Refresh mark duration so the new target has a full window
-                s_engine->m_localPlayer.markTimer = 6.0f;
-                pool.entities[bestIdx].markPreyDmgMult = 1.35f;
-            } else {
-                s_engine->m_localPlayer.markedEntityIdx = 0xFFFF;
-                s_engine->m_localPlayer.markTimer = 0.0f;
+                if (dSq < SPREAD_RANGE_SQ) {
+                    se.markPreyDmgMult = 1.6f;
+                    se.markPreyTimer = 5.0f;
+                    s_engine->m_localPlayer.markTimer = 5.0f;
+                    break; // spread to one nearest
+                }
             }
         }
 
@@ -991,19 +1000,15 @@ void Engine::init() {
         s_engine->spawnDamageNumber(position, damage);
     });
 
-    // Perfect block callback — legendary shield stun bash OR Wanderer Deflect parry
+    // Perfect block callback — legendary shield stun bash
     Combat::setPerfectBlockCallback([](Player& player) {
         if (!s_engine) return;
-
-        // Wanderer Deflect: deflectTimer was > 0 when the parry fired.
-        // Stun all enemies in a tight 3m radius (the attacker is always in range).
-        bool isDeflect = (player.deflectTimer > 0.0f);
 
         // Check if offhand is a legendary shield
         const ItemInstance& shield = s_engine->m_inventories[s_engine->m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
         bool hasLegendaryShield = !isItemEmpty(shield) && shield.rarity == Rarity::LEGENDARY;
 
-        if (isDeflect || hasLegendaryShield) {
+        if (hasLegendaryShield) {
             for (u32 a = 0; a < s_engine->m_entities.activeCount; a++) {
                 u32 idx = s_engine->m_entities.activeList[a];
                 Entity& ent = s_engine->m_entities.entities[idx];
@@ -1011,25 +1016,14 @@ void Engine::init() {
                 if (ent.flags & ENT_FRIENDLY) continue;
                 if (ent.enemyType == EnemyType::PROP) continue;
                 f32 dist = length(ent.position - player.position);
-                f32 stunRange = isDeflect ? 3.0f : 3.0f;
-                if (dist < stunRange) {
-                    // Wanderer Deflect uses stunTimer (full immobilize); shield uses freezeTimer
-                    if (isDeflect) {
-                        // Deflect upgrade: 3s stun at floor >= 5 (base: 2s)
-                        f32 stunDur = (s_engine->m_level.currentFloor >= 5) ? 3.0f : 2.0f;
-                        ent.stunTimer = stunDur;
-                        ent.aiState = AIState::IDLE;
-                        ent.velocity = {0, 0, 0};
-                    } else {
-                        ent.freezeTimer = 1.0f;
-                    }
+                if (dist < 3.0f) {
+                    ent.freezeTimer = 1.0f;
                 }
             }
             // Visual nova feedback
             for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
                 if (!s_engine->m_fx.novaFX[ni].active) {
-                    Vec3 col = isDeflect ? Vec3{1.0f, 0.7f, 0.2f} : Vec3{0.8f, 0.8f, 1.0f};
-                    s_engine->m_fx.novaFX[ni] = {player.position, 3.0f, 0.4f, true, col};
+                    s_engine->m_fx.novaFX[ni] = {player.position, 3.0f, 0.4f, true, Vec3{0.8f, 0.8f, 1.0f}};
                     break;
                 }
             }
@@ -1075,7 +1069,16 @@ void Engine::init() {
             }
         }
 
-        // 3. Death's Dance AoE slash: if the ultimate is active, radiate a full-circle
+        // 3. Exploit Weakness: dodge-through a marked enemy grants +5% speed stack (3s)
+        if (attackerIdx < MAX_ENTITIES) {
+            Entity& attacker = s_engine->m_entities.entities[attackerIdx];
+            if (attacker.markPreyTimer > 0.0f && player.markSpeedStacks < 20) {
+                player.markSpeedTimers[player.markSpeedStacks] = 3.0f;
+                player.markSpeedStacks++;
+            }
+        }
+
+        // 4. Death's Dance AoE slash: if the ultimate is active, radiate a full-circle
         //    slash to all nearby enemies on every dodge-through
         if (player.deathsDanceTimer > 0.0f) {
             WeaponDef ew = Inventory::getEffectiveWeapon(

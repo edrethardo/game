@@ -2042,35 +2042,57 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
 
     // ---- Wanderer ----
     case SkillId::DEFLECT: {
-        // Open the parry window — applyDamageToPlayer checks deflectTimer each hit
-        player.deflectTimer = def->activeWindow;
+        // Open the absorb window — all hits are accumulated, then burst-released
+        // as 8 projectiles per absorbed hit carrying the total damage
+        player.deflectTimer = def->activeWindow; // 0.4s
+        player.deflectAbsorbed = 0.0f;
+        player.deflectHitCount = 0;
         break;
     }
     case SkillId::EXPLOIT_WEAKNESS: {
-        // Narrow cone raycast to find the aimed target, then mark it for +60% damage
-        EntityHandle hits[1];
-        f32 dists[1];
-        u32 hitCount = CombatQuery::queryConeSorted(
+        // AoE mark: raycast to find aim point, then mark all enemies within 5m radius
+        // First find where the player is aiming (first entity or wall hit)
+        EntityHandle aimHits[1];
+        f32 aimDists[1];
+        u32 aimCount = CombatQuery::queryConeSorted(
             entities, eyePos, forward, cosf(radians(5.0f)), 30.0f,
-            hits, dists, 1);
-        if (hitCount > 0) {
-            Entity* target = handleGet(entities, hits[0]);
-            if (target) {
-                // Track mark on player for UI and timer expiry
-                player.markedEntityIdx = hits[0].index;
-                player.markedEntityGen = hits[0].generation;
-                player.markTimer = def->markDuration;
-                // Apply amplification directly on entity (same mechanism as Ranger Mark Prey)
-                // so applyDamage picks it up without needing s_engine in combat.cpp
-                target->markPreyDmgMult = 1.6f;
-                target->markPreyTimer = def->markDuration;
-            } else {
-                // No valid target — don't consume cooldown
-                return false;
-            }
+            aimHits, aimDists, 1);
+        Vec3 markCenter;
+        if (aimCount > 0) {
+            Entity* aimTarget = handleGet(entities, aimHits[0]);
+            if (aimTarget) markCenter = aimTarget->position;
+            else markCenter = eyePos + forward * 10.0f;
         } else {
-            // Nothing in range — don't consume cooldown
-            return false;
+            // No entity hit — place mark at 10m ahead on the ground
+            markCenter = eyePos + forward * 10.0f;
+        }
+        // Mark all enemies within 5m of the aim point
+        u32 marked = 0;
+        for (u32 a = 0; a < entities.activeCount; a++) {
+            u32 idx = entities.activeList[a];
+            Entity& e = entities.entities[idx];
+            if (e.flags & ENT_DEAD) continue;
+            if (e.flags & ENT_FRIENDLY) continue;
+            if (e.enemyType == EnemyType::PROP) continue;
+            f32 d = length(e.position - markCenter);
+            if (d <= 5.0f) {
+                e.markPreyDmgMult = def->damageMultiplier; // 1.6
+                e.markPreyTimer = def->markDuration;       // 5s
+                // Per-enemy visual: orange sparks burst on mark
+                if (s_particlePool) {
+                    ParticleSystem::spawnMagicBurst(*s_particlePool, e.position + Vec3{0, e.halfExtents.y, 0}, 255, 140, 0, 8);
+                }
+                marked++;
+            }
+        }
+        player.markTimer = def->markDuration;
+        player.markedEntityIdx = 0xFFFF;
+        if (marked == 0) {
+            return false; // nothing to mark — don't consume cooldown
+        }
+        // Cast visual: orange nova ring at the mark center
+        if (s_novaCallback) {
+            s_novaCallback(markCenter, 5.0f, Vec3{1.0f, 0.6f, 0.0f});
         }
         break;
     }

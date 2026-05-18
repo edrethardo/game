@@ -241,11 +241,12 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 player.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
             };
             if (CombatQuery::aabbOverlap(projBox, playerBox)) {
-                // Wanderer Deflect: active parry window reflects projectiles back
+                // Wanderer Deflect: absorb projectile into the deflect pool
                 if (player.deflectTimer > 0.0f) {
-                    p.velocity = p.velocity * -1.0f; // reverse direction
-                    p.fromPlayer = true;              // now a player-owned projectile
-                    continue;                         // skip damage this frame
+                    player.deflectAbsorbed += p.damage;
+                    player.deflectHitCount++;
+                    p.lifetime = 0.0f; // destroy absorbed projectile
+                    continue;
                 }
                 Combat::applyDamageToPlayer(player, p.damage, &p.position);
                 // Apply on-hit status effect from projectile (or default slow)

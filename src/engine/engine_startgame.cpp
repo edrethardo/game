@@ -1201,6 +1201,9 @@ void Engine::startGame() {
     if (m_playerClass == PlayerClass::WANDERER) {
         m_localPlayer.dodgeState      = {};
         m_localPlayer.deflectTimer    = 0.0f;
+        m_localPlayer.deflectAbsorbed = 0.0f;
+        m_localPlayer.deflectHitCount = 0;
+        m_localPlayer.deflectSpeedTimer = 0.0f;
         m_localPlayer.markedEntityIdx = 0xFFFF;
         m_localPlayer.markTimer       = 0.0f;
         m_localPlayer.deathsDanceTimer = 0.0f;

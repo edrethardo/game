@@ -385,10 +385,106 @@ void Engine::gameUpdate(f32 dt) {
         }
     }
 
-    // --- Wanderer: tick deflect parry window ---
+    // --- Wanderer: tick deflect absorb window ---
     if (m_localPlayer.deflectTimer > 0.0f) {
+        f32 prev = m_localPlayer.deflectTimer;
         m_localPlayer.deflectTimer -= dt;
-        if (m_localPlayer.deflectTimer < 0.0f) m_localPlayer.deflectTimer = 0.0f;
+        if (m_localPlayer.deflectTimer <= 0.0f) {
+            m_localPlayer.deflectTimer = 0.0f;
+            // Window expired — burst release: 8 projectiles per absorbed hit
+            u8 hits = m_localPlayer.deflectHitCount;
+            f32 absorbed = m_localPlayer.deflectAbsorbed;
+            if (hits > 0 && absorbed > 0.0f) {
+                Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+
+                // 1. Melee nova first: hit everything within 5.5m for full absorbed damage
+                {
+                    EntityHandle novaHits[MAX_ENTITIES];
+                    f32 novaDists[MAX_ENTITIES];
+                    u32 novaCount = CombatQuery::queryConeSorted(
+                        m_entities, eyePos, m_localPlayer.forward, -1.0f, 5.5f,
+                        novaHits, novaDists, MAX_ENTITIES);
+                    for (u32 ni = 0; ni < novaCount; ni++) {
+                        Combat::applyDamage(m_entities, novaHits[ni], absorbed, &eyePos);
+                    }
+                }
+                // Nova visual — double ring burst for a bigger impact feel
+                for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                    if (!m_fx.novaFX[ni].active) {
+                        m_fx.novaFX[ni] = {m_localPlayer.position, 5.5f, 0.6f, true, Vec3{1.0f, 0.5f, 0.1f}};
+                        break;
+                    }
+                }
+                // Second ring slightly delayed and larger for a shockwave look
+                for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                    if (!m_fx.novaFX[ni].active) {
+                        m_fx.novaFX[ni] = {m_localPlayer.position, 7.0f, 0.8f, true, Vec3{1.0f, 0.8f, 0.3f}};
+                        break;
+                    }
+                }
+                // Stronger screen shake
+                m_camera.shake.trigger(0.08f, 0.35f);
+
+                // 2. Projectile burst aimed at surviving enemies, split evenly
+                {
+                    // Query surviving enemies after the nova (dead ones are filtered out)
+                    EntityHandle targets[MAX_ENTITIES];
+                    f32 targetDists[MAX_ENTITIES];
+                    u32 targetCount = CombatQuery::queryConeSorted(
+                        m_entities, eyePos, m_localPlayer.forward, -1.0f, 30.0f,
+                        targets, targetDists, MAX_ENTITIES);
+                    u32 totalProj = static_cast<u32>(hits) * 8u;
+                    if (targetCount > 0) {
+                        // Split projectiles evenly across surviving enemies
+                        u32 projPerTarget = totalProj / targetCount;
+                        if (projPerTarget < 1) projPerTarget = 1;
+                        u32 spawned = 0;
+                        for (u32 ti = 0; ti < targetCount && spawned < totalProj; ti++) {
+                            Entity* tgt = handleGet(m_entities, targets[ti]);
+                            if (!tgt) continue;
+                            Vec3 targetPos = tgt->position + Vec3{0, tgt->halfExtents.y, 0};
+                            Vec3 dir = normalize(targetPos - eyePos);
+                            u32 count = (ti < targetCount - 1) ? projPerTarget : (totalProj - spawned);
+                            for (u32 pi = 0; pi < count; pi++) {
+                                for (u32 si = 0; si < MAX_PROJECTILES; si++) {
+                                    Projectile& proj = m_projectiles.projectiles[si];
+                                    if (!proj.active) {
+                                        proj = {};
+                                        proj.active = true;
+                                        proj.fromPlayer = true;
+                                        proj.position = eyePos;
+                                        proj.velocity = dir * 15.0f;
+                                        proj.damage = absorbed;
+                                        proj.radius = 0.12f;
+                                        proj.lifetime = 2.0f;
+                                        proj.lightColor = {1.0f, 0.6f, 0.2f};
+                                        m_projectiles.activeCount++;
+                                        spawned++;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // No surviving enemies = no projectiles (nova was enough)
+                }
+
+                m_localPlayer.deflectAbsorbed = 0.0f;
+                m_localPlayer.deflectHitCount = 0;
+                // 8% move speed buff for 3 seconds after burst
+                m_localPlayer.deflectSpeedTimer = 3.0f;
+                // Screen shake feedback
+                m_camera.shake.trigger(0.08f, 0.35f);
+            } else {
+                m_localPlayer.deflectAbsorbed = 0.0f;
+                m_localPlayer.deflectHitCount = 0;
+            }
+        }
+    }
+    // --- Wanderer: tick deflect speed buff ---
+    if (m_localPlayer.deflectSpeedTimer > 0.0f) {
+        m_localPlayer.deflectSpeedTimer -= dt;
+        if (m_localPlayer.deflectSpeedTimer < 0.0f) m_localPlayer.deflectSpeedTimer = 0.0f;
     }
 
     // --- Wanderer: tick Exploit Weakness mark duration ---
@@ -397,6 +493,21 @@ void Engine::gameUpdate(f32 dt) {
         if (m_localPlayer.markTimer <= 0.0f) {
             m_localPlayer.markTimer = 0.0f;
             m_localPlayer.markedEntityIdx = 0xFFFF;
+        }
+    }
+    // --- Wanderer: tick Exploit Weakness speed stacks (non-refreshing 3s each) ---
+    {
+        u8& stacks = m_localPlayer.markSpeedStacks;
+        for (u8 i = 0; i < stacks; ) {
+            m_localPlayer.markSpeedTimers[i] -= dt;
+            if (m_localPlayer.markSpeedTimers[i] <= 0.0f) {
+                for (u8 j = i; j + 1 < stacks; j++) {
+                    m_localPlayer.markSpeedTimers[j] = m_localPlayer.markSpeedTimers[j + 1];
+                }
+                stacks--;
+            } else {
+                i++;
+            }
         }
     }
 
