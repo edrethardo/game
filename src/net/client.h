@@ -10,7 +10,7 @@
 #include "game/weapon.h"
 #include "world/level_grid.h"
 
-static constexpr u32 SNAP_BUFFER_SIZE = 32;
+static constexpr u32 SNAP_BUFFER_SIZE = 4;  // 4 snapshots × ~66KB = 264KB (was 32 × 66KB = 2.1MB)
 static constexpr f32 INTERP_DELAY_SEC = 0.1f;  // 100ms interpolation delay
 static constexpr u32 PREDICTION_HISTORY_SIZE = 128;
 

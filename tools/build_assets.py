@@ -215,6 +215,21 @@ def main():
         print("\n=== Generating Skill Icons ===")
         ok = run([sys.executable, os.path.join(SCRIPT_DIR, "gen_skill_icons.py")]) and ok
 
+    # Compress music WAVs to OGG if they exist (reduces binary size ~10×)
+    if args.all:
+        import glob
+        audio_dir = os.path.join(ROOT_DIR, "assets", "audio")
+        music_wavs = glob.glob(os.path.join(audio_dir, "music_*.wav"))
+        if music_wavs:
+            print("\n=== Compressing Music to OGG ===")
+            for wav in music_wavs:
+                ogg = wav.replace(".wav", ".ogg")
+                if not os.path.exists(ogg):
+                    if run(["ffmpeg", "-y", "-i", wav, "-c:a", "libvorbis", "-q:a", "4", ogg]):
+                        os.remove(wav)
+                    else:
+                        print(f"  Warning: ffmpeg failed for {wav}, keeping WAV")
+
     if ok:
         print("\n=== All assets built successfully ===")
     else:

@@ -69,7 +69,32 @@ struct WorldSnapshot {
 
     SnapPlayer     players[MAX_PLAYERS];
     SnapEntity     entities[MAX_ENTITIES];
-    SnapProjectile projectiles[MAX_PROJECTILES];
+    // Heap-allocated projectile array — supports full MAX_PROJECTILES without
+    // bloating BSS (4096 × 16 bytes = 64KB per snapshot).
+    SnapProjectile* projectiles = nullptr;
+
+    WorldSnapshot()  { projectiles = new SnapProjectile[MAX_PROJECTILES](); }
+    ~WorldSnapshot() { delete[] projectiles; }
+
+    // Copy/move support (snapshot ring buffer copies these)
+    WorldSnapshot(const WorldSnapshot& o) {
+        *this = o; // copy fields
+        projectiles = new SnapProjectile[MAX_PROJECTILES];
+        for (u16 i = 0; i < o.projectileCount; i++) projectiles[i] = o.projectiles[i];
+    }
+    WorldSnapshot& operator=(const WorldSnapshot& o) {
+        if (this == &o) return *this;
+        serverTick = o.serverTick;
+        playerCount = o.playerCount;
+        entityCount = o.entityCount;
+        projectileCount = o.projectileCount;
+        for (u32 i = 0; i < MAX_PLAYERS; i++) lastInputTick[i] = o.lastInputTick[i];
+        for (u32 i = 0; i < MAX_PLAYERS; i++) players[i] = o.players[i];
+        for (u32 i = 0; i < MAX_ENTITIES; i++) entities[i] = o.entities[i];
+        if (!projectiles) projectiles = new SnapProjectile[MAX_PROJECTILES];
+        for (u16 i = 0; i < o.projectileCount; i++) projectiles[i] = o.projectiles[i];
+        return *this;
+    }
 };
 
 namespace Snapshot {

@@ -905,7 +905,7 @@ def music_tier5_void():
 
 
 MUSIC_PRESETS = {
-    'tier1': ('music_tier1.wav', music_tier1_dungeon),
+    'tier1': ('music_tier1.wav', music_tier1_dungeon),  # .wav generated then compressed to .ogg
     'tier2': ('music_tier2.wav', music_tier2_catacombs),
     'tier3': ('music_tier3.wav', music_tier3_caverns),
     'tier4': ('music_tier4.wav', music_tier4_hellforge),
@@ -927,6 +927,24 @@ def generate_music(music_type, out_path=None):
     samples = gen_func()
     write_wav(out_path, samples)
     print(f"Wrote {out_path}  ({len(samples)} samples, {len(samples)/44100:.1f}s)")
+
+    # Compress to OGG Vorbis for smaller binary size (~10× reduction)
+    ogg_path = out_path.replace(".wav", ".ogg")
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", out_path, "-c:a", "libvorbis", "-q:a", "4", ogg_path],
+            capture_output=True, text=True)
+        if result.returncode == 0:
+            wav_size = os.path.getsize(out_path) / (1024 * 1024)
+            ogg_size = os.path.getsize(ogg_path) / (1024 * 1024)
+            os.remove(out_path)  # remove WAV, keep only OGG
+            print(f"Compressed to OGG: {wav_size:.1f}MB -> {ogg_size:.1f}MB")
+        else:
+            print(f"ffmpeg not available, keeping WAV ({out_path})")
+    except FileNotFoundError:
+        print(f"ffmpeg not found, keeping WAV ({out_path})")
+
     return True
 
 

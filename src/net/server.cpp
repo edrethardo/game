@@ -52,9 +52,8 @@ void Server::sendSnapshot(u32 serverTick,
                            const EntityPool& entities,
                            const ProjectilePool& projectiles)
 {
-    // Static to avoid 68KB stack allocation (SnapProjectile[4096] = 65KB alone)
     static WorldSnapshot snap;
-    snap = {};
+    snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
     Snapshot::buildFromState(snap, serverTick, players, entities, projectiles);
 
     u8 buf[MAX_PACKET_SIZE];

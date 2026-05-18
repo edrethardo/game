@@ -86,9 +86,8 @@ const NetInput* Client::getLatestInput() {
 }
 
 void Client::receiveSnapshot(const u8* data, u32 size) {
-    // Static to avoid 68KB stack allocation per snapshot received
     static WorldSnapshot snap;
-    snap = {};
+    snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
     if (Snapshot::deserialize(snap, data, size)) {
         pushSnapshot(snap);
     }

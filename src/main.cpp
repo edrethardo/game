@@ -58,6 +58,8 @@ int main(int argc, char* argv[]) {
     romfsInit();
     socketInitializeDefault();
     nxlinkStdio(); // redirect stdout/stderr to nxlink console (debug)
+    fprintf(stderr, "=== Switch main() entered ===\n");
+    fflush(stderr);
 #endif
 
 #ifdef _WIN32
@@ -69,10 +71,12 @@ int main(int argc, char* argv[]) {
 
     SDL_SetMainReady();
 
-    Engine engine;
-    engine.init();
-    engine.run();
-    engine.shutdown();
+    // Heap-allocate Engine to avoid ~500KB on the stack (Switch stack is limited)
+    Engine* engine = new Engine();
+    engine->init();
+    engine->run();
+    engine->shutdown();
+    delete engine;
 
 #ifdef _WIN32
     timeEndPeriod(1);

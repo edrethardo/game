@@ -1287,12 +1287,12 @@ void Engine::startGame() {
     Input::setRelativeMouseMode(true);
     m_gameState = GameState::IN_GAME;
 
-    // Play tier-appropriate ambient music — progressively darker per floor tier
-    const char* musicFile = ASSET_PATH("assets/audio/music_tier1.wav");
-    if      (m_level.currentFloor >= 41) musicFile = ASSET_PATH("assets/audio/music_tier5.wav");
-    else if (m_level.currentFloor >= 31) musicFile = ASSET_PATH("assets/audio/music_tier4.wav");
-    else if (m_level.currentFloor >= 21) musicFile = ASSET_PATH("assets/audio/music_tier3.wav");
-    else if (m_level.currentFloor >= 11) musicFile = ASSET_PATH("assets/audio/music_tier2.wav");
+    // Play tier-appropriate ambient music — OGG Vorbis for smaller binary size
+    const char* musicFile = ASSET_PATH("assets/audio/music_tier1.ogg");
+    if      (m_level.currentFloor >= 41) musicFile = ASSET_PATH("assets/audio/music_tier5.ogg");
+    else if (m_level.currentFloor >= 31) musicFile = ASSET_PATH("assets/audio/music_tier4.ogg");
+    else if (m_level.currentFloor >= 21) musicFile = ASSET_PATH("assets/audio/music_tier3.ogg");
+    else if (m_level.currentFloor >= 11) musicFile = ASSET_PATH("assets/audio/music_tier2.ogg");
     AudioSystem::playMusic(musicFile);
 }
 

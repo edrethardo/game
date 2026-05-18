@@ -212,7 +212,8 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     // Validate counts to prevent out-of-bounds on malformed packets
     if (snap.playerCount > MAX_PLAYERS) snap.playerCount = MAX_PLAYERS;
     if (snap.entityCount > MAX_ENTITIES) snap.entityCount = MAX_ENTITIES;
-    if (snap.projectileCount > MAX_PROJECTILES) snap.projectileCount = MAX_PROJECTILES;
+    if (snap.projectileCount > MAX_PROJECTILES)
+        snap.projectileCount = MAX_PROJECTILES;
 
     for (u32 i = 0; i < MAX_PLAYERS; i++)
         snap.lastInputTick[i] = r.readU32();

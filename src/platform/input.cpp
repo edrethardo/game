@@ -74,6 +74,12 @@ static u8 s_currentPadButtons[Input::MAX_GAMEPADS][NUM_PAD_BUTTONS];
 static u8 s_previousPadButtons[Input::MAX_GAMEPADS][NUM_PAD_BUTTONS];
 static bool s_splitActive = false;
 
+// Axis edge detection — raw axis values snapshotted each frame so "pressed"
+// only fires on threshold crossing, not every tick while held.
+static constexpr s32 MAX_AXES = 8;
+static f32 s_currentAxisValues[Input::MAX_GAMEPADS][MAX_AXES];
+static f32 s_previousAxisValues[Input::MAX_GAMEPADS][MAX_AXES];
+
 // ---------------------------------------------------------------------------
 // Default bindings table
 // ---------------------------------------------------------------------------
@@ -215,6 +221,18 @@ void Input::update() {
         }
     }
 
+    // Axis value snapshot — edge detection for trigger-based "pressed" queries
+    memcpy(s_previousAxisValues, s_currentAxisValues, sizeof(s_currentAxisValues));
+    memset(s_currentAxisValues, 0, sizeof(s_currentAxisValues));
+    for (s32 c = 0; c < MAX_GAMEPADS; c++) {
+        if (!s_controllers[c]) continue;
+        for (s32 a = 0; a < MAX_AXES; a++) {
+            s16 raw = SDL_GameControllerGetAxis(
+                s_controllers[c], static_cast<SDL_GameControllerAxis>(a));
+            s_currentAxisValues[c][a] = static_cast<f32>(raw) / 32767.0f;
+        }
+    }
+
 #ifdef __SWITCH__
     // Update libnx pads every frame (used for all gamepad input on Switch)
     for (s32 p = 0; p < 2; p++) {
@@ -233,6 +251,14 @@ void Input::consumePressedState() {
     memcpy(s_previousKeys, s_currentKeys, NUM_KEYS);
     memcpy(s_previousMouseButtons, s_currentMouseButtons, NUM_MOUSE_BUTTONS);
     memcpy(s_previousPadButtons, s_currentPadButtons, sizeof(s_currentPadButtons));
+    memcpy(s_previousAxisValues, s_currentAxisValues, sizeof(s_currentAxisValues));
+#ifdef __SWITCH__
+    // Also consume libnx pad edges — isButtonPressed on Switch reads
+    // s_padPrevButtons (libnx), not the SDL s_previousPadButtons arrays.
+    for (s32 p = 0; p < 2; p++) {
+        s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
+    }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -626,11 +652,14 @@ static bool checkActionRaw(GameAction action, bool pressed) {
     }
 
     // Axis check (triggers) — routes to active player's controller
-    if (b.axis >= 0) {
+    if (b.axis >= 0 && b.axis < MAX_AXES) {
         f32 v = Input::getAxis(padIdx, b.axis);
         if (v >= b.axisThreshold) {
             if (!pressed) return true;
-            return true;
+            // Edge detection: only fire on threshold crossing
+            if (padIdx >= 0 && padIdx < Input::MAX_GAMEPADS &&
+                s_previousAxisValues[padIdx][b.axis] < b.axisThreshold)
+                return true;
         }
     }
 

@@ -22,8 +22,9 @@ struct MaterialBucket {
     bool   used       = false;
 };
 
-// We keep a small static pool of buckets
-static MaterialBucket s_buckets[MAX_SUBMESHES_PER_SECTION];
+// Heap-allocated scratch buckets — only used during buildAll(), freed after.
+// Avoids 3.6MB of BSS which crashes the Switch at static init.
+static MaterialBucket* s_buckets = nullptr;
 
 static void resetBuckets() {
     for (u32 i = 0; i < MAX_SUBMESHES_PER_SECTION; i++) {
@@ -234,6 +235,9 @@ static void buildSection(const LevelGrid& grid,
 u32 LevelMeshSystem::buildAll(const LevelGrid& grid,
                                LevelSection* outSections, u32 maxSects)
 {
+    // Allocate scratch buckets on heap (3.6MB — too large for BSS on Switch)
+    if (!s_buckets) s_buckets = new MaterialBucket[MAX_SUBMESHES_PER_SECTION];
+
     u32 sx = (grid.width + SECTION_SIZE - 1) / SECTION_SIZE;
     u32 sz = (grid.depth + SECTION_SIZE - 1) / SECTION_SIZE;
     u32 total = sx * sz;
@@ -250,6 +254,10 @@ u32 LevelMeshSystem::buildAll(const LevelGrid& grid,
             count++;
         }
     }
+
+    // Free scratch buckets after building (reclaim 3.6MB)
+    delete[] s_buckets;
+    s_buckets = nullptr;
 
     LOG_INFO("LevelMesh: built %u sections", count);
     return count;
