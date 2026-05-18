@@ -34,6 +34,7 @@ static constexpr u8 INPUT_EX_BOOT_SKILL = 1 << 3;
 static constexpr u8 INPUT_EX_HELM_SKILL = 1 << 4;
 static constexpr u8 INPUT_EX_INVENTORY  = 1 << 5;  // Tab toggle
 static constexpr u8 INPUT_EX_RESPAWN    = 1 << 6;  // Respawn after death
+static constexpr u8 INPUT_EX_DODGE     = 1 << 7;  // Wanderer dodge roll
 
 // Networked player state — the authoritative state the server maintains.
 struct NetPlayer {

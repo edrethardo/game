@@ -7,7 +7,7 @@
 #include "net/net.h"
 #include "net/net_player.h"
 
-// Quantized snapshot of one player (30 bytes)
+// Quantized snapshot of one player (31 bytes)
 struct SnapPlayer {
     u8   slotIndex;     // 1
     u8   flags;         // 1: bit0=active, bit1=onGround, bit2=lockActive, bit3=reloading, bit4=blocking, bit5=isDead
@@ -28,6 +28,8 @@ struct SnapPlayer {
     // Animation state for remote player rendering
     u8   animFlags;     // 1: bit0=melee swing, bit1=firing/recoil, bit2=skillActive
     u8   weaponMeshId;  // 1: mesh ID of equipped weapon (for third-person rendering)
+    // Wanderer dodge state for remote rendering: bit0=rolling, bits1-3=counterStacks (0-5)
+    u8   dodgeFlags;    // 1
 };
 
 // Quantized snapshot of one entity (20 bytes)

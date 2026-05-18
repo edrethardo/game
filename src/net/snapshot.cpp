@@ -62,6 +62,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         if (np.isDead)                             anim |= (1 << 2); // dead
         sp.animFlags = anim;
         sp.weaponMeshId = np.weaponState.currentWeapon; // weapon index for mesh lookup
+
+        // Dodge state: server doesn't track full DodgeState on NetPlayer yet,
+        // so we zero-out; clients use local prediction for the rolling player.
+        sp.dodgeFlags = 0;
     }
 
     // Entities (only active ones)
@@ -149,6 +153,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w.writeU8(sp.freezeTimer);
         w.writeU8(sp.animFlags);
         w.writeU8(sp.weaponMeshId);
+        w.writeU8(sp.dodgeFlags);  // Wanderer dodge state (bit0=rolling, bits1-3=counterStacks)
     }
 
     // Entities
@@ -234,6 +239,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.freezeTimer  = r.readU8();
         sp.animFlags    = r.readU8();
         sp.weaponMeshId = r.readU8();
+        sp.dodgeFlags   = r.readU8();  // bit0=rolling, bits1-3=counterStacks
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {

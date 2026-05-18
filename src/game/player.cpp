@@ -236,6 +236,12 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
                   (input.moveFlags & INPUT_RIGHT)    != 0,
                   (input.moveFlags & INPUT_JUMP)     != 0,
                   dt);
+
+    // Server-side Wanderer dodge: grant i-frames for the roll duration.
+    // Full dodge movement is client-predicted; server only needs to track invulnerability.
+    if ((input.extFlags & INPUT_EX_DODGE) && np.invulnTimer <= 0.0f) {
+        np.invulnTimer = 0.3f;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +300,7 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     if (Input::isActionPressed(GameAction::BOOT_SKILL))    ext |= INPUT_EX_BOOT_SKILL;
     if (Input::isActionPressed(GameAction::HELMET_SKILL))  ext |= INPUT_EX_HELM_SKILL;
     if (Input::isActionPressed(GameAction::INVENTORY))     ext |= INPUT_EX_INVENTORY;
+    if (Input::isActionPressed(GameAction::DODGE))         ext |= INPUT_EX_DODGE;
     input.extFlags = ext;
     input.skillSlot = 0; // set by engine before sending
 
