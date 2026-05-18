@@ -111,6 +111,43 @@ void PlayerController::update(Player& player, f32 dt) {
     bool a = Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f;
     bool d = Input::isActionDown(GameAction::MOVE_RIGHT)    || Input::getStickX(false) > 0.3f;
 
+    // --- Wanderer dodge roll activation ---
+    // Triggered on Shift press when not already rolling and cooldown has expired.
+    if (Input::isActionPressed(GameAction::DODGE) && !player.dodgeState.rolling
+        && player.dodgeState.cooldownTimer <= 0.0f) {
+        DodgeState& ds = player.dodgeState;
+        ds.rolling = true;
+        ds.rollTimer = 0.5f;
+        ds.rollAngle = 0.0f;
+
+        // Direction from WASD, or forward if no directional input held
+        f32 cosY = cosf(player.yaw);
+        f32 sinY = sinf(player.yaw);
+        Vec3 flatFwd   = normalize(Vec3{-sinY, 0.0f, -cosY});
+        Vec3 flatRight = normalize(cross(flatFwd, {0.0f, 1.0f, 0.0f}));
+
+        Vec3 dir = {0, 0, 0};
+        if (w) dir += flatFwd;
+        if (s) dir -= flatFwd;
+        if (d) dir += flatRight;
+        if (a) dir -= flatRight;
+        if (lengthSq(dir) < 0.001f) dir = flatFwd;
+        ds.rollDirection = normalize(dir);
+
+        // Camera roll direction: left=CCW, right=CW, forward/back=CW
+        if (a && !d) ds.rollSign = -1;
+        else ds.rollSign = 1;
+
+        // I-frames: invulnerability for the first 0.3s of the roll (60% of duration)
+        player.invulnTimer = 0.3f;
+    }
+
+    // During roll, zero out look deltas so camera stays fixed (no mouse look)
+    if (player.dodgeState.rolling) {
+        mx = 0.0f;
+        my = 0.0f;
+    }
+
     applyMovement(player.position, player.velocity, player.yaw, player.pitch,
                   player.onGround, player.noclip,
                   effectiveSpeed, player.sensitivity,
@@ -118,6 +155,39 @@ void PlayerController::update(Player& player, f32 dt) {
                   w, s, a, d,
                   Input::isActionPressed(GameAction::JUMP),
                   dt);
+
+    // --- Wanderer dodge roll tick ---
+    // Override velocity during roll for a consistent 4m distance (8m/s × 0.5s).
+    {
+        DodgeState& ds = player.dodgeState;
+        if (ds.rolling) {
+            constexpr f32 ROLL_SPEED = 8.0f; // 4m over 0.5s
+            player.velocity.x = ds.rollDirection.x * ROLL_SPEED;
+            player.velocity.z = ds.rollDirection.z * ROLL_SPEED;
+
+            ds.rollTimer -= dt;
+
+            // Smooth 360° barrel roll using cubic ease-in-out (3t²-2t³)
+            constexpr f32 ROLL_DURATION = 0.5f;
+            f32 t = 1.0f - (ds.rollTimer / ROLL_DURATION); // 0→1 over duration
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            f32 smooth = t * t * (3.0f - 2.0f * t);
+            ds.rollAngle = smooth * 2.0f * 3.14159265f * static_cast<f32>(ds.rollSign);
+
+            if (ds.rollTimer <= 0.0f) {
+                // Roll finished — reset angle and start cooldown
+                ds.rolling = false;
+                ds.rollTimer = 0.0f;
+                ds.rollAngle = 0.0f;
+                ds.cooldownTimer = 1.0f;
+            }
+        } else if (ds.cooldownTimer > 0.0f) {
+            ds.cooldownTimer -= dt;
+            if (ds.cooldownTimer < 0.0f) ds.cooldownTimer = 0.0f;
+        }
+    }
+
     player.forward = s_lastForward;
 }
 
@@ -233,6 +303,7 @@ void PlayerController::applyToCamera(const Player& player, Camera& cam) {
     cam.position = player.position + Vec3{0.0f, player.eyeHeight, 0.0f};
     cam.yaw      = player.yaw;
     cam.pitch    = player.pitch;
+    cam.roll     = player.dodgeState.rollAngle; // barrel roll from Wanderer dodge
     cam.forward  = normalize(Vec3{
         -sinf(player.yaw) * cosf(player.pitch),
          sinf(player.pitch),

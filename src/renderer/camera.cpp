@@ -12,6 +12,14 @@ void CameraSystem::computeMatrices(Camera& cam, f32 aspectRatio) {
 
     Vec3 target     = cam.position + cam.forward;
     cam.view        = Mat4::lookAt(cam.position, target, {0.0f, 1.0f, 0.0f});
+
+    // Wanderer barrel roll: rotate view around the forward (−Z view-space) axis.
+    // rotateZ in view space tilts the screen, giving the 360° roll effect.
+    if (cam.roll != 0.0f) {
+        Mat4 rollMat = Mat4::rotateZ(-cam.roll); // negate: view-space Z is inverted vs world
+        cam.view = rollMat * cam.view;
+    }
+
     cam.projection  = Mat4::perspective(radians(cam.fovY), aspectRatio,
                                         cam.nearPlane, cam.farPlane);
     cam.viewProjection = cam.projection * cam.view;

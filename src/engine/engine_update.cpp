@@ -944,7 +944,8 @@ void Engine::gameUpdate(f32 dt) {
     }
 
     // --- Shield blocking (Ctrl/Shift) ---
-    {
+    // Wanderer uses Shift for dodge roll, not block; skip the block state entirely for that class.
+    if (m_playerClass != PlayerClass::WANDERER) {
         bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !m_inventoryOpen;
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;
