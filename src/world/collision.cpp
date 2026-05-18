@@ -258,3 +258,66 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Entity-grid collision helpers (shared by enemy AI and spawn validation)
+// ---------------------------------------------------------------------------
+
+bool Collision::entityOverlapsGrid(Vec3 centre, Vec3 halfExtents, const LevelGrid& grid) {
+    f32 minX = centre.x - halfExtents.x;
+    f32 maxX = centre.x + halfExtents.x;
+    f32 minZ = centre.z - halfExtents.z;
+    f32 maxZ = centre.z + halfExtents.z;
+
+    s32 cx0 = static_cast<s32>(std::floor(minX / grid.cellSize));
+    s32 cx1 = static_cast<s32>(std::floor((maxX - 0.0001f) / grid.cellSize));
+    s32 cz0 = static_cast<s32>(std::floor(minZ / grid.cellSize));
+    s32 cz1 = static_cast<s32>(std::floor((maxZ - 0.0001f) / grid.cellSize));
+
+    for (s32 z = cz0; z <= cz1; z++) {
+        for (s32 x = cx0; x <= cx1; x++) {
+            if (x < 0 || z < 0) return true;
+            if (!LevelGridSystem::isInBounds(grid, static_cast<u32>(x), static_cast<u32>(z))) return true;
+            if (LevelGridSystem::isSolid(grid, static_cast<u32>(x), static_cast<u32>(z))) return true;
+        }
+    }
+    return false;
+}
+
+void Collision::snapEntityToFloor(Vec3& position, Vec3 halfExtents, const LevelGrid& grid) {
+    u32 gx, gz;
+    if (LevelGridSystem::worldToGrid(grid, position, gx, gz) &&
+        !LevelGridSystem::isSolid(grid, gx, gz)) {
+        f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
+        position.y = floorH + halfExtents.y;
+    }
+}
+
+void Collision::ensureNotInWall(Vec3& position, Vec3 halfExtents, const LevelGrid& grid) {
+    if (!entityOverlapsGrid(position, halfExtents, grid)) return;
+
+    u32 cx, cz;
+    if (!LevelGridSystem::worldToGrid(grid, position, cx, cz)) return;
+
+    // Spiral search: try cell centres in expanding rings until a valid spot is found
+    for (u32 radius = 0; radius <= 5; radius++) {
+        for (s32 dz = -static_cast<s32>(radius); dz <= static_cast<s32>(radius); dz++) {
+            for (s32 dx = -static_cast<s32>(radius); dx <= static_cast<s32>(radius); dx++) {
+                if (static_cast<u32>(std::abs(dx)) != radius &&
+                    static_cast<u32>(std::abs(dz)) != radius) continue;
+                s32 tx = static_cast<s32>(cx) + dx;
+                s32 tz = static_cast<s32>(cz) + dz;
+                if (tx < 0 || tz < 0) continue;
+                if (!LevelGridSystem::isInBounds(grid, static_cast<u32>(tx), static_cast<u32>(tz))) continue;
+                if (LevelGridSystem::isSolid(grid, static_cast<u32>(tx), static_cast<u32>(tz))) continue;
+                Vec3 candidate = LevelGridSystem::gridToWorld(grid, static_cast<u32>(tx), static_cast<u32>(tz));
+                candidate.y = position.y;
+                if (!entityOverlapsGrid(candidate, halfExtents, grid)) {
+                    position = candidate;
+                    snapEntityToFloor(position, halfExtents, grid);
+                    return;
+                }
+            }
+        }
+    }
+}

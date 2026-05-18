@@ -8,6 +8,7 @@
 #include "game/entity.h"
 #include "game/boss_def.h"
 #include "game/combat.h"
+#include "world/collision.h"
 #include "game/projectile.h"
 #include "game/player.h"
 #include "world/level_grid.h"
@@ -37,11 +38,8 @@ static bool tryTeleport(Entity& e, const LevelGrid& grid, Vec3 targetPos) {
             targetPos.z + cosf(angle) * dist
         };
 
-        // Check grid is walkable
-        s32 cx = static_cast<s32>(candidate.x / grid.cellSize);
-        s32 cz = static_cast<s32>(candidate.z / grid.cellSize);
-        if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
-        if (LevelGridSystem::isSolid(grid, (u32)cx, (u32)cz)) continue;
+        // Check full AABB doesn't overlap any solid cells
+        if (Collision::entityOverlapsGrid(candidate, e.halfExtents, grid)) continue;
 
         // Teleport — VFX at origin and destination
         if (s_magicBurstCb) {

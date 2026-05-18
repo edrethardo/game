@@ -985,6 +985,38 @@ void Engine::gameUpdate(f32 dt) {
             }
             LOG_INFO("SECOND WIND triggered! Healed 30%%, 2s invuln");
         }
+
+        // Divine Judgment: at <25% HP, full heal + cleanse + AoE stun (45s cooldown)
+        if (m_ringPassive == SkillId::DIVINE_JUDGMENT &&
+            m_localPlayer.health > 0.0f &&
+            m_localPlayer.health < m_localPlayer.maxHealth * 0.25f &&
+            m_localPlayer.secondWindCooldown <= 0.0f) {
+            // Full heal + cleanse all debuffs
+            m_localPlayer.health = m_localPlayer.maxHealth;
+            m_localPlayer.slowTimer   = 0.0f;
+            m_localPlayer.poisonTimer = 0.0f;
+            m_localPlayer.poisonDps   = 0.0f;
+            m_localPlayer.burnTimer   = 0.0f;
+            m_localPlayer.burnDps     = 0.0f;
+            m_localPlayer.freezeTimer = 0.0f;
+            m_localPlayer.invulnTimer = 1.5f;
+            m_localPlayer.secondWindCooldown = 45.0f;
+            // AoE stun nearby enemies
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                Entity& ent = m_entities.entities[m_entities.activeList[a]];
+                if (ent.flags & ENT_FRIENDLY || ent.flags & ENT_DEAD) continue;
+                if (lengthSq(ent.position - m_localPlayer.position) < 25.0f) { // 5m
+                    ent.stunTimer = 1.5f;
+                }
+            }
+            for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                if (!m_fx.novaFX[ni].active) {
+                    m_fx.novaFX[ni] = {m_localPlayer.position, 5.0f, 0.8f, true, {1.0f, 0.95f, 0.4f}};
+                    break;
+                }
+            }
+            LOG_INFO("DIVINE JUDGMENT triggered! Full heal, cleanse, AoE stun");
+        }
     }
 
     // Single pass over entities for armor aura + gravity pull + thorns

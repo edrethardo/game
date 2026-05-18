@@ -391,7 +391,14 @@ def gen_humanoid(height=1.8):
 
     ox = -0.5 * vs
     oz = -0.5 * vs
-    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    # UV overrides: prevent eye color bleeding to back-of-head voxels.
+    # gz=-2 is removed (eye socket hole), gz=-1 is the visible eye — keep it.
+    # Only remap gz=0 and gz=1 (back of head) to non-eye pixel.
+    uv_fix = {}
+    for gz in range(0, 2):
+        uv_fix[(-1, 14, gz)] = (0, 14)
+        uv_fix[( 1, 14, gz)] = (0, 14)
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
 
     return mb
 
@@ -2373,7 +2380,14 @@ def gen_humanoid_torso(height=1.8):
     fill_box(-1, 4, 0, 3, 1, 1)
     # NO arms, NO legs — limb system provides these
     ox = -0.5 * vs; oz = -0.5 * vs
-    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    # UV overrides: prevent eye color bleeding to back-of-head voxels.
+    # Eye sockets are at gx=-1,+1 gy=14 gz=-2 (front face removed).
+    # Remap back-of-head voxels at same (gx,gy) to a non-eye pixel.
+    uv_fix = {}
+    for gz in range(0, 2):  # gz=0,1 are behind the eye — gz=-1 is the visible eye, keep it
+        uv_fix[(-1, 14, gz)] = (0, 14)
+        uv_fix[( 1, 14, gz)] = (0, 14)
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz), uv_overrides=uv_fix)
     return mb
 
 def gen_human_torso(height=1.8):

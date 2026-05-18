@@ -273,6 +273,9 @@ EntityHandle Engine::spawnFriendlyNpc(Vec3 pos, NpcClass npcClass, u8 floor) {
         }
     }
 
+    // Ensure NPC doesn't spawn inside a wall
+    Collision::ensureNotInWall(npc->position, npc->halfExtents, m_level.grid);
+
     return h;
 }
 
@@ -606,6 +609,8 @@ void Engine::startGame() {
                                 ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
                             }
                         }
+                        // Validate spawn position — nudge out of walls if AABB overlaps
+                        Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
                     }
 
                 } else {
@@ -679,6 +684,8 @@ void Engine::startGame() {
                                 ent->weaponMeshId = weapMeshes[static_cast<u32>(std::rand()) % 3];
                             }
                         }
+                        // Validate spawn position — nudge out of walls if AABB overlaps
+                        Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
                     }
                 }
             }
@@ -755,6 +762,7 @@ void Engine::startGame() {
                     ent->meshId = chestMeshId;
                     ent->enemyType = EnemyType::MIMIC;
                     ent->aiState = AIState::DORMANT;
+                    Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
                 }
             } else {
                 // Real chest: spawn a world item with good loot at this position
@@ -762,7 +770,7 @@ void Engine::startGame() {
                     static_cast<u8>(2 + r / 3), // higher level deeper in dungeon
                     m_itemDefs, m_itemDefCount, m_affixDefs, m_affixDefCount);
                 if (!isItemEmpty(item)) {
-                    WorldItemSystem::spawn(m_worldItems, item, Vec3{cx, cy + 0.3f, cz});
+                    WorldItemSystem::spawn(m_worldItems, item, Vec3{cx, cy + 0.3f, cz}, &m_level.grid);
                 }
             }
         }
@@ -953,6 +961,7 @@ void Engine::startGame() {
                     }
                 }
             }
+            if (boss) Collision::ensureNotInWall(boss->position, boss->halfExtents, m_level.grid);
             const char* bossName = bd ? bd->name : bt->name;
             LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u, limbConfig=%u, src=%s)",
                      bossName, m_level.currentFloor, bossHp * floorMult,

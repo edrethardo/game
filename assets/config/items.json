@@ -1645,7 +1645,7 @@
       "minLevel": 40,
       "maxLevel": 50,
       "maxRarity": "legendary",
-      "legendarySkill": "second_wind",
+      "legendarySkill": "divine_judgment",
       "dropWeight": 0.3
     },
     {

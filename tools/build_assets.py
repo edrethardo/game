@@ -179,6 +179,8 @@ def build_skins():
         ("succubus",                 "succubus_skin_42.png"),
         ("entropy_weaver",           "entropy_weaver_skin_42.png"),
         ("nullifier",                "nullifier_skin_42.png"),
+        ("mind_flayer",              "mind_flayer_skin_42.png"),
+        ("phase_ripper",             "phase_ripper_skin_42.png"),
         ("abyssal_titan",            "abyssal_titan_skin_42.png"),
     ]
 

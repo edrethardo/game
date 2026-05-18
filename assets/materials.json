@@ -859,6 +859,16 @@
       "id": 140,
       "name": "crypt_herald_skin",
       "texture": "crypt_herald_skin_42.png"
+    },
+    {
+      "id": 141,
+      "name": "mind_flayer_skin",
+      "texture": "mind_flayer_skin_42.png"
+    },
+    {
+      "id": 142,
+      "name": "phase_ripper_skin",
+      "texture": "phase_ripper_skin_42.png"
     }
   ]
 }

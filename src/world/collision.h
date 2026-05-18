@@ -30,4 +30,14 @@ namespace Collision {
     // Player slides along entity AABBs the same way they slide along walls.
     void moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
                       const CollisionObstacle* obstacles, u32 obstacleCount);
+
+    // Check if an AABB (centre ± halfExtents) overlaps any solid grid cell.
+    bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents, const LevelGrid& grid);
+
+    // Snap an entity's Y to the floor of its current cell (if walkable).
+    void snapEntityToFloor(Vec3& position, Vec3 halfExtents, const LevelGrid& grid);
+
+    // Nudge an entity out of walls by spiral-searching nearby cell centres.
+    // Call after spawning to guarantee the entity isn't embedded in geometry.
+    void ensureNotInWall(Vec3& position, Vec3 halfExtents, const LevelGrid& grid);
 }

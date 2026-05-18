@@ -4,6 +4,8 @@
 #include "core/math.h"
 #include "game/weapon.h"
 
+struct LevelGrid; // forward declaration for WorldItemSystem::spawn
+
 // ---- Constants ----
 
 static constexpr u32 MAX_ITEM_DEFS       = 160; // expanded for full floor coverage on all weapon subtypes
@@ -493,7 +495,8 @@ namespace Inventory {
 namespace WorldItemSystem {
     void init(WorldItemPool& pool);
     void update(WorldItemPool& pool, f32 dt);
-    bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position);
+    bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
+               const LevelGrid* grid = nullptr);
     // Returns true if pickup succeeded, fills outItem
     bool tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
                    ItemInstance& outItem);

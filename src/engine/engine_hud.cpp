@@ -398,6 +398,16 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                         "", sd ? sd->name : "???", true
                     };
                 }
+                // Ring passive (proc on low HP — shows cooldown)
+                if (m_ringPassive != SkillId::NONE) {
+                    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_ringPassive);
+                    f32 maxCD = (m_ringPassive == SkillId::DIVINE_JUDGMENT) ? 45.0f : 60.0f;
+                    equipSlots[equipCount++] = {
+                        static_cast<u8>(m_ringPassive),
+                        m_localPlayer.secondWindCooldown, maxCD,
+                        "", sd ? sd->name : "???", true
+                    };
+                }
 
                 if (equipCount > 0) {
                     // Position above the class skill bar (scaled).

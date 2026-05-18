@@ -1,5 +1,6 @@
 #include "game/item.h"
 #include "core/log.h"
+#include "world/collision.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -927,7 +928,14 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
     }
 }
 
-bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position) {
+bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
+                              const LevelGrid* grid) {
+    // Nudge item out of walls if grid is provided
+    if (grid) {
+        Vec3 itemHalf = {0.15f, 0.15f, 0.15f}; // small AABB for item
+        Collision::ensureNotInWall(position, itemHalf, *grid);
+    }
+
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = pool.items[i];
         if (wi.active) continue;

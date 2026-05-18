@@ -160,7 +160,7 @@ private:
     Mesh    m_quadMesh;   // flat quad for billboard sprites
 
     // Mesh registry for entities (MeshDef struct defined in limb_system.h)
-    static constexpr u32 MAX_MESH_DEFS = 64;
+    static constexpr u32 MAX_MESH_DEFS = 96;
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
 

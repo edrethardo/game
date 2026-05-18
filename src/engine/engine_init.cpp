@@ -651,7 +651,7 @@ void Engine::init() {
                                           s_engine->m_affixDefs, s_engine->m_affixDefCount);
                 }
                 WorldItemSystem::spawn(s_engine->m_worldItems, item,
-                                       position + Vec3{0, 0.5f, 0});
+                                       position + Vec3{0, 0.5f, 0}, &s_engine->m_level.grid);
             }
             return; // skip normal drop logic for this kill
         }
@@ -679,7 +679,7 @@ void Engine::init() {
                                           s_engine->m_affixDefs, s_engine->m_affixDefCount);
                 }
                 WorldItemSystem::spawn(s_engine->m_worldItems, bossItem,
-                                       position + Vec3{0, 0.5f, 0});
+                                       position + Vec3{0, 0.5f, 0}, &s_engine->m_level.grid);
             }
 
             // Bonus drops for major bosses
@@ -691,7 +691,7 @@ void Engine::init() {
                 if (!isItemEmpty(bonus)) {
                     Vec3 offset = {(f32)(bd_i) * 0.3f - 0.15f, 0.5f, 0.2f};
                     WorldItemSystem::spawn(s_engine->m_worldItems, bonus,
-                                           position + offset);
+                                           position + offset, &s_engine->m_level.grid);
                 }
             }
 
@@ -700,7 +700,7 @@ void Engine::init() {
             globe.defId = GLOBE_HEALTH_ID;
             globe.uid   = s_engine->m_worldItems.nextUid++;
             WorldItemSystem::spawn(s_engine->m_worldItems, globe,
-                                   position + Vec3{0.2f, 0.5f, 0.0f});
+                                   position + Vec3{0.2f, 0.5f, 0.0f}, &s_engine->m_level.grid);
             return; // skip normal loot path
         }
 
@@ -717,7 +717,7 @@ void Engine::init() {
                                                    s_engine->m_affixDefCount);
             if (!isItemEmpty(item)) {
                 WorldItemSystem::spawn(s_engine->m_worldItems, item,
-                                       position + Vec3{0, 0.5f, 0});
+                                       position + Vec3{0, 0.5f, 0}, &s_engine->m_level.grid);
             }
 
             // Chance to drop a globe (restores both HP and energy on pickup)

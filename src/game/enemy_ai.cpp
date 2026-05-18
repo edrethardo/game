@@ -88,17 +88,20 @@ static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
     // The player is blocked from walking through enemies via moveAndSlide
     // obstacles, and pushPlayerFromEntities handles any residual overlap.
 
-    // X axis — skip movement on collision but DON'T zero velocity
-    // so the entity can still slide along the wall on the other axis
+    // X axis — zero velocity on collision to prevent wall penetration over time
     Vec3 tryPos = e.position + Vec3{delta.x, 0, 0};
     if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.x = tryPos.x;
+    } else {
+        e.velocity.x = 0.0f;
     }
 
     // Z axis
     tryPos = e.position + Vec3{0, 0, delta.z};
     if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.z = tryPos.z;
+    } else {
+        e.velocity.z = 0.0f;
     }
 
     // Y axis (flying only — ground enemies snap to floor)
@@ -233,6 +236,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             f32 distToPlayer = length(e.position - playerEye);
             if (distToPlayer > 30.0f && e.overclockTimer <= 0.0f) {
                 e.position = playerEye + Vec3{1.0f, 0, 1.0f};
+                Collision::ensureNotInWall(e.position, e.halfExtents, grid);
                 snapEntityToFloor(e, grid);
             }
 
@@ -1220,12 +1224,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
                 if (bestIdx != 0xFFFF) {
                     Entity& revived = pool.entities[bestIdx];
-                    revived.flags = ENT_ACTIVE; // clear ENT_DEAD
+                    bool wasFlying = (revived.flags & ENT_FLYING) != 0;
+                    revived.flags = ENT_ACTIVE | (wasFlying ? ENT_FLYING : 0);
                     revived.health = revived.maxHealth * 0.3f;
                     revived.aiState = AIState::IDLE;
                     revived.velocity = {0, 0, 0};
                     revived.deathTimer = 0.0f;
                     revived.flashTimer = 0.3f; // flash to show resurrection
+                    // Ensure revived enemy isn't inside a wall
+                    Collision::ensureNotInWall(revived.position, revived.halfExtents, grid);
+                    if (!wasFlying) snapEntityToFloor(revived, grid);
                     e.resurrectCount++;
                     e.speechText = "RISE!";
                     e.speechTimer = 2.0f;
@@ -1305,9 +1313,11 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
         // Charger: sprint at 2x speed, retreat after landing attack
         if (e.enemyRole & EnemyRole::CHARGER) {
-            // Sprint at 2x speed during CHASE (bosses handle speed via BossAI enrage)
+            // Sprint at 1.5x speed during CHASE, capped at 10 m/s to avoid overshooting
             if (e.aiState == AIState::CHASE && e.bossDefIdx == 0xFF) {
-                e.moveSpeed = e.baseMoveSpeed * 2.0f;
+                f32 sprintSpeed = e.baseMoveSpeed * 1.5f;
+                if (sprintSpeed > 10.0f) sprintSpeed = 10.0f;
+                e.moveSpeed = sprintSpeed;
             }
 
             // Suicide bomber: charger+bomber combo self-destructs on reaching target.
@@ -1320,22 +1330,26 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 break;
             }
 
-            // Charger retreat cycle: hit-and-run for regular enemies only.
+            // Charger retreat cycle: brief disengage after 3 hits, not every hit.
             // Bosses use their personality system (BERSERKER never retreats).
             if (e.bossDefIdx == 0xFF) {
-                // After attack animation finishes, retreat briefly (non-bomber chargers)
-                if (e.hasRetreated && e.attackAnimT <= 0.0f && e.aiState == AIState::ATTACK) {
-                    e.aiState = AIState::RETREAT;
-                    e.tacticalTimer = 1.0f;
-                }
-                // Mark for retreat when attack starts (but don't switch state yet)
-                if (e.attackAnimT > 0.2f && e.aiState == AIState::ATTACK) {
+                // Count hits via hasRetreated + tacticalTimer as hit counter
+                if (e.attackAnimT > 0.2f && e.aiState == AIState::ATTACK && !e.hasRetreated) {
                     e.hasRetreated = true;
+                    e.tacticalTimer += 1.0f; // count hits
+                }
+                if (e.attackAnimT <= 0.0f && e.hasRetreated) {
+                    e.hasRetreated = false;
+                }
+                // Retreat briefly after 3+ hits, then reset
+                if (e.tacticalTimer >= 3.0f && e.aiState == AIState::ATTACK) {
+                    e.aiState = AIState::RETREAT;
+                    e.tacticalTimer = 0.5f; // short retreat
                 }
                 // Re-engage after retreat
                 if (e.aiState == AIState::RETREAT && e.tacticalTimer <= 0.0f) {
                     e.aiState = AIState::CHASE;
-                    e.hasRetreated = false;
+                    e.tacticalTimer = 0.0f;
                 }
             }
         }
@@ -1593,16 +1607,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
             entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
 
-            // Transition to attack if close enough to target
-            if (targetDist <= e.attackRange) {
-                if (isBat) {
-                    // Bats use ATTACK state directly — no complex FLYBY
-                    e.aiState = AIState::ATTACK;
-                    e.attackTimer = e.attackCooldown * 0.5f;
-                } else {
-                    e.aiState     = AIState::ATTACK;
-                    e.attackTimer = e.attackCooldown * 0.5f;
-                }
+            // Transition to attack if close enough to target.
+            // Chargers use wider transition zone (1.3x range) so they don't overshoot.
+            f32 atkTransition = (e.enemyRole & EnemyRole::CHARGER) ? e.attackRange * 1.3f : e.attackRange;
+            if (targetDist <= atkTransition) {
+                e.aiState = AIState::ATTACK;
+                e.attackTimer = 0.3f; // fast first strike for all enemies
             }
             // Lost interest: fall back to idle only if target is extremely far
             if (targetDist > e.detectionRange * 5.0f) {
@@ -1664,20 +1674,21 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::ATTACK: {
-            // Melee enemies creep forward while attacking to maintain pressure.
-            // Ranged enemies stand still. Chargers keep full speed.
+            // Melee enemies pursue at 60% speed while attacking — keeps pressure on.
+            // Ranged enemies stand still. Chargers maintain 80% speed.
             e.velocity = {0, 0, 0};
             bool isRangedAttacker = (e.attackRange > 5.0f);
-            if (!isRangedAttacker && targetDist > e.attackRange * 0.6f) {
-                // Creep toward target to stay in range (30% speed, or 80% for chargers)
+            if (!isRangedAttacker && targetDist > e.attackRange * 0.4f) {
+                // Pursue target while swinging — melee enemies don't stop moving
                 Vec3 toTarget = targetPos - e.position;
                 f32 tLen = sqrtf(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
                 if (tLen > 0.01f) {
-                    f32 creepMult = (e.enemyRole & EnemyRole::CHARGER) ? 0.8f : 0.3f;
+                    f32 creepMult = (e.enemyRole & EnemyRole::CHARGER) ? 0.8f : 0.6f;
                     e.velocity.x = (toTarget.x / tLen) * e.moveSpeed * creepMult;
                     e.velocity.z = (toTarget.z / tLen) * e.moveSpeed * creepMult;
                 }
-            } else if (targetDist < e.attackRange * 0.4f && targetDist > 0.1f) {
+            } else if (isRangedAttacker && targetDist < e.attackRange * 0.4f && targetDist > 0.1f) {
+                // Ranged enemies back away if player is too close
                 Vec3 away = e.position - targetPos;
                 f32 awayLen = sqrtf(away.x * away.x + away.z * away.z);
                 if (awayLen > 0.01f) {
@@ -1753,6 +1764,11 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                         if (e.onHitEffect == 3) { targetPlayer->burnTimer   = e.onHitDuration; targetPlayer->burnDps   = e.onHitDps; }
                         if (e.onHitEffect == 4) { targetPlayer->freezeTimer = e.onHitDuration; }
 
+                        // Drain heal: melee freeze enemies heal 50% of damage dealt (Mind Flayer)
+                        if (e.onHitEffect == 4 && e.attackRange <= 5.0f) {
+                            e.health = fminf(e.health + e.damage * 0.5f, e.maxHealth);
+                        }
+
                         // Melee cleave: skeleton-type melee enemies also hit nearby friendlies.
                         // Bosses cleave in 3m at 50% damage; regular melee in 2m at 40%.
                         if (e.attackRange <= 5.0f && (e.enemyType == EnemyType::SKELETON ||
@@ -1803,11 +1819,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::DORMANT: {
-            // Dormant: sits still until player gets close. Mimics use a tight
-            // trigger range; gargoyles (AMBUSH role) wake from further away.
+            // Dormant: sits still until player gets close or combat happens nearby.
             e.velocity = {0, 0, 0};
-            f32 triggerDist = (e.enemyRole & EnemyRole::AMBUSH) ? 4.0f : GameConst::MIMIC_TRIGGER_DIST;
-            if (dist <= triggerDist) {
+            f32 triggerDist = (e.enemyRole & EnemyRole::AMBUSH) ? e.detectionRange * 0.5f : GameConst::MIMIC_TRIGGER_DIST;
+            // Also wake if damaged (flashTimer from being hit) or if player is fighting nearby
+            bool combatNearby = (e.flashTimer > 0.0f);
+            if (dist <= triggerDist || combatNearby) {
                 e.aiState = AIState::CHASE;
                 e.attackTimer = 0.0f; // attack immediately on wake
                 if (e.enemyRole & EnemyRole::AMBUSH) {
@@ -2003,10 +2020,15 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             Vec3 pushDir = delta * (1.0f / d);
             f32 pushStr = overlap * 2.0f * dt; // gentle push proportional to overlap
 
-            ea.position.x -= pushDir.x * pushStr;
-            ea.position.z -= pushDir.z * pushStr;
-            eb.position.x += pushDir.x * pushStr;
-            eb.position.z += pushDir.z * pushStr;
+            // Only push if the new position doesn't overlap a wall
+            Vec3 newA = ea.position; newA.x -= pushDir.x * pushStr; newA.z -= pushDir.z * pushStr;
+            Vec3 newB = eb.position; newB.x += pushDir.x * pushStr; newB.z += pushDir.z * pushStr;
+            if (!Collision::entityOverlapsGrid(newA, ea.halfExtents, grid)) {
+                ea.position.x = newA.x; ea.position.z = newA.z;
+            }
+            if (!Collision::entityOverlapsGrid(newB, eb.halfExtents, grid)) {
+                eb.position.x = newB.x; eb.position.z = newB.z;
+            }
         }
     }
 
