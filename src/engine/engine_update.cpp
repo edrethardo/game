@@ -367,6 +367,50 @@ void Engine::gameUpdate(f32 dt) {
         if (m_localPlayer.invulnTimer < 0.0f) m_localPlayer.invulnTimer = 0.0f;
     }
 
+    // --- Wanderer: tick adrenaline counter stack decay ---
+    // Each stack persists for 4s independently; remove expired stacks by compacting.
+    {
+        DodgeState& ds = m_localPlayer.dodgeState;
+        for (u8 i = 0; i < ds.counterStacks; ) {
+            ds.counterTimers[i] -= dt;
+            if (ds.counterTimers[i] <= 0.0f) {
+                // Remove this stack, shift remaining down to fill the gap
+                for (u8 j = i; j + 1 < ds.counterStacks; j++) {
+                    ds.counterTimers[j] = ds.counterTimers[j + 1];
+                }
+                ds.counterStacks--;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    // --- Wanderer: tick deflect parry window ---
+    if (m_localPlayer.deflectTimer > 0.0f) {
+        m_localPlayer.deflectTimer -= dt;
+        if (m_localPlayer.deflectTimer < 0.0f) m_localPlayer.deflectTimer = 0.0f;
+    }
+
+    // --- Wanderer: tick Exploit Weakness mark duration ---
+    if (m_localPlayer.markTimer > 0.0f) {
+        m_localPlayer.markTimer -= dt;
+        if (m_localPlayer.markTimer <= 0.0f) {
+            m_localPlayer.markTimer = 0.0f;
+            m_localPlayer.markedEntityIdx = 0xFFFF;
+        }
+    }
+
+    // --- Wanderer: tick Death's Dance ultimate duration ---
+    if (m_localPlayer.deathsDanceTimer > 0.0f) {
+        m_localPlayer.deathsDanceTimer -= dt;
+        if (m_localPlayer.deathsDanceTimer < 0.0f) m_localPlayer.deathsDanceTimer = 0.0f;
+    }
+
+    // --- Wanderer: unlock adrenaline once the player reaches floor 20 ---
+    if (m_playerClass == PlayerClass::WANDERER) {
+        m_localPlayer.adrenalineUnlocked = (m_level.currentFloor >= 20);
+    }
+
     // Tick player status effects (poison, burn, freeze) — blocked by invulnerability
     if (m_localPlayer.invulnTimer <= 0.0f) {
         if (m_localPlayer.poisonTimer > 0.0f) {

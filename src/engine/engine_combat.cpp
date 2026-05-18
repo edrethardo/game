@@ -142,6 +142,13 @@ void Engine::handleWeaponFire(f32 dt) {
     const ItemInstance* qbItem = &eqWpn;
     ws.cooldownTimer = wpn.cooldown;
 
+    // Wanderer adrenaline attack speed bonus: -10% cooldown per stack, capped at -50%
+    if (m_localPlayer.dodgeState.counterStacks > 0) {
+        f32 atkSpeedMult = 1.0f - (m_localPlayer.dodgeState.counterStacks * 0.10f);
+        if (atkSpeedMult < 0.5f) atkSpeedMult = 0.5f;
+        ws.cooldownTimer *= atkSpeedMult;
+    }
+
     // Consume ammo — auto-reload will kick in next frame if this empties the clip
     if (wpn.clipSize > 0 && ws.currentClip > 0) {
         ws.currentClip--;

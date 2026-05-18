@@ -960,15 +960,19 @@ void Engine::init() {
         s_engine->spawnDamageNumber(position, damage);
     });
 
-    // Perfect block callback — legendary shield triggers stun bash
+    // Perfect block callback — legendary shield stun bash OR Wanderer Deflect parry
     Combat::setPerfectBlockCallback([](Player& player) {
         if (!s_engine) return;
+
+        // Wanderer Deflect: deflectTimer was > 0 when the parry fired.
+        // Stun all enemies in a tight 3m radius (the attacker is always in range).
+        bool isDeflect = (player.deflectTimer > 0.0f);
+
         // Check if offhand is a legendary shield
         const ItemInstance& shield = s_engine->m_inventories[s_engine->m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
         bool hasLegendaryShield = !isItemEmpty(shield) && shield.rarity == Rarity::LEGENDARY;
 
-        // Stun all enemies within 3m (1 second)
-        if (hasLegendaryShield) {
+        if (isDeflect || hasLegendaryShield) {
             for (u32 a = 0; a < s_engine->m_entities.activeCount; a++) {
                 u32 idx = s_engine->m_entities.activeList[a];
                 Entity& ent = s_engine->m_entities.entities[idx];
@@ -976,14 +980,23 @@ void Engine::init() {
                 if (ent.flags & ENT_FRIENDLY) continue;
                 if (ent.enemyType == EnemyType::PROP) continue;
                 f32 dist = length(ent.position - player.position);
-                if (dist < 3.0f) {
-                    ent.freezeTimer = 1.0f; // stun via freeze (stops movement)
+                f32 stunRange = isDeflect ? 3.0f : 3.0f;
+                if (dist < stunRange) {
+                    // Wanderer Deflect uses stunTimer (full immobilize); shield uses freezeTimer
+                    if (isDeflect) {
+                        ent.stunTimer = 2.0f; // 2s stun — can't move or attack
+                        ent.aiState = AIState::IDLE;
+                        ent.velocity = {0, 0, 0};
+                    } else {
+                        ent.freezeTimer = 1.0f;
+                    }
                 }
             }
-            // Visual feedback
+            // Visual nova feedback
             for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
                 if (!s_engine->m_fx.novaFX[ni].active) {
-                    s_engine->m_fx.novaFX[ni] = {player.position, 3.0f, 0.4f, true, {0.8f, 0.8f, 1.0f}};
+                    Vec3 col = isDeflect ? Vec3{1.0f, 0.7f, 0.2f} : Vec3{0.8f, 0.8f, 1.0f};
+                    s_engine->m_fx.novaFX[ni] = {player.position, 3.0f, 0.4f, true, col};
                     break;
                 }
             }

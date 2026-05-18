@@ -100,6 +100,10 @@ void PlayerController::update(Player& player, f32 dt) {
     if (player.soulHarvestStacks > 0 && player.soulHarvestTimer > 0.0f) {
         effectiveSpeed *= (1.0f + player.soulHarvestStacks * 0.05f);
     }
+    // Wanderer adrenaline move speed bonus: +5% per stack (requires adrenaline unlock at floor 20)
+    if (player.adrenalineUnlocked && player.dodgeState.counterStacks > 0) {
+        effectiveSpeed *= (1.0f + player.dodgeState.counterStacks * 0.05f);
+    }
     if (player.slowTimer > 0.0f) {
         effectiveSpeed *= 0.4f; // 60% slow
         player.slowTimer -= dt;

@@ -132,6 +132,14 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
         damage *= (1.0f + player.curseStacks * 0.05f);
     }
 
+    // Wanderer Deflect: timed parry window — stun attacker and negate damage.
+    // The perfect-block callback (registered in engine_init.cpp) checks deflectTimer
+    // and stuns all enemies within 3m, so no entity pool pointer needed here.
+    if (player.deflectTimer > 0.0f) {
+        if (s_perfectBlockCallback) s_perfectBlockCallback(player);
+        return; // damage negated
+    }
+
     if (player.blocking) {
         if (player.blockTimer < 0.2f) {
             // Perfect block — negate all damage, trigger shield bash via callback

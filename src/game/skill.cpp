@@ -2040,6 +2040,49 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireSwarmQueen(eyePos, forward);
         break;
 
+    // ---- Wanderer ----
+    case SkillId::DEFLECT: {
+        // Open the parry window — applyDamageToPlayer checks deflectTimer each hit
+        player.deflectTimer = def->activeWindow;
+        break;
+    }
+    case SkillId::EXPLOIT_WEAKNESS: {
+        // Narrow cone raycast to find the aimed target, then mark it for +60% damage
+        EntityHandle hits[1];
+        f32 dists[1];
+        u32 hitCount = CombatQuery::queryConeSorted(
+            entities, eyePos, forward, cosf(radians(5.0f)), 30.0f,
+            hits, dists, 1);
+        if (hitCount > 0) {
+            Entity* target = handleGet(entities, hits[0]);
+            if (target) {
+                // Track mark on player for UI and timer expiry
+                player.markedEntityIdx = hits[0].index;
+                player.markedEntityGen = hits[0].generation;
+                player.markTimer = def->markDuration;
+                // Apply amplification directly on entity (same mechanism as Ranger Mark Prey)
+                // so applyDamage picks it up without needing s_engine in combat.cpp
+                target->markPreyDmgMult = 1.6f;
+                target->markPreyTimer = def->markDuration;
+            } else {
+                // No valid target — don't consume cooldown
+                return false;
+            }
+        } else {
+            // Nothing in range — don't consume cooldown
+            return false;
+        }
+        break;
+    }
+    case SkillId::DEATHS_DANCE: {
+        // Activate ultimate — AoE slash on each dodge-through is handled separately
+        player.deathsDanceTimer = def->duration;
+        break;
+    }
+    case SkillId::ADRENALINE_SURGE:
+        // Passive — no activation needed; stacks are awarded by the dodge-through callback
+        break;
+
     default:
         return false;
     }
