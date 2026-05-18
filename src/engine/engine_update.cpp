@@ -406,9 +406,11 @@ void Engine::gameUpdate(f32 dt) {
         if (m_localPlayer.deathsDanceTimer < 0.0f) m_localPlayer.deathsDanceTimer = 0.0f;
     }
 
-    // --- Wanderer: unlock adrenaline once the player reaches floor 20 ---
+    // --- Wanderer: unlock and upgrade adrenaline based on current floor ---
+    // Unlocked at floor 20 (skill becomes available), upgraded at floor 30 (move speed bonus)
     if (m_playerClass == PlayerClass::WANDERER) {
         m_localPlayer.adrenalineUnlocked = (m_level.currentFloor >= 20);
+        m_localPlayer.adrenalineUpgraded = (m_level.currentFloor >= 30);
     }
 
     // Tick player status effects (poison, burn, freeze) — blocked by invulnerability
@@ -449,6 +451,14 @@ void Engine::gameUpdate(f32 dt) {
 
     // Check for player death
     if (m_localPlayer.health <= 0.0f) {
+        // Reset Wanderer transient state on death so timers/marks don't persist to respawn
+        if (m_playerClass == PlayerClass::WANDERER) {
+            m_localPlayer.dodgeState      = {};
+            m_localPlayer.deflectTimer    = 0.0f;
+            m_localPlayer.markedEntityIdx = 0xFFFF;
+            m_localPlayer.markTimer       = 0.0f;
+            m_localPlayer.deathsDanceTimer = 0.0f;
+        }
         if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
             // Multiplayer or co-op: this player dies, game keeps running
             m_playerDead[m_activePlayerIndex] = true;

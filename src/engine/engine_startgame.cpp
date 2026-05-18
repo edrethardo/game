@@ -1196,6 +1196,16 @@ void Engine::startGame() {
         LOG_INFO("Spawned 3 friendly NPCs (cleric, archer, rogue) in spawn room");
     }
 
+    // Reset Wanderer transient combat state on every floor entry so parry windows,
+    // marks, and ultimates don't carry over across levels in an active state.
+    if (m_playerClass == PlayerClass::WANDERER) {
+        m_localPlayer.dodgeState      = {};
+        m_localPlayer.deflectTimer    = 0.0f;
+        m_localPlayer.markedEntityIdx = 0xFFFF;
+        m_localPlayer.markTimer       = 0.0f;
+        m_localPlayer.deathsDanceTimer = 0.0f;
+    }
+
     ProjectileSystem::init(m_projectiles);
 
     // Reset all entity AI state to prevent stale data from previous floor

@@ -571,6 +571,37 @@ void Engine::init() {
             s_engine->m_localPlayer.smokeTimer = s_engine->m_localPlayer.shadowDanceTimer;
         }
 
+        // Wanderer Exploit Weakness upgrade (floor >= 20): mark spreads to nearest alive enemy on kill
+        if (s_engine->m_playerClass == PlayerClass::WANDERER &&
+            s_engine->m_level.currentFloor >= 20 &&
+            s_engine->m_localPlayer.markTimer > 0.0f &&
+            s_engine->m_localPlayer.markedEntityIdx == entityIndex) {
+            // The marked enemy just died — find the nearest non-dead hostile within 5m
+            constexpr f32 SPREAD_RANGE_SQ = 5.0f * 5.0f;
+            u16 bestIdx = 0xFFFF;
+            f32 bestDistSq = SPREAD_RANGE_SQ;
+            for (u32 si = 0; si < pool.activeCount; si++) {
+                u32 sIdx = pool.activeList[si];
+                if (sIdx == entityIndex) continue;
+                const Entity& se = pool.entities[sIdx];
+                if (!(se.flags & ENT_ACTIVE) || (se.flags & ENT_DEAD)) continue;
+                if (se.flags & ENT_FRIENDLY) continue;
+                f32 dSq = lengthSq(se.position - position);
+                if (dSq < bestDistSq) { bestDistSq = dSq; bestIdx = static_cast<u16>(sIdx); }
+            }
+            if (bestIdx != 0xFFFF) {
+                // Transfer the mark to the nearest surviving enemy
+                s_engine->m_localPlayer.markedEntityIdx = bestIdx;
+                s_engine->m_localPlayer.markedEntityGen = pool.entities[bestIdx].generation;
+                // Refresh mark duration so the new target has a full window
+                s_engine->m_localPlayer.markTimer = 6.0f;
+                pool.entities[bestIdx].markPreyDmgMult = 1.35f;
+            } else {
+                s_engine->m_localPlayer.markedEntityIdx = 0xFFFF;
+                s_engine->m_localPlayer.markTimer = 0.0f;
+            }
+        }
+
         // Mark Prey chain clear: if marked enemy dies, arrows rain on nearby enemies
         if (pool.entities[entityIndex].markPreyTimer > 0.0f &&
             !(pool.entities[entityIndex].flags & ENT_FRIENDLY)) {
@@ -984,7 +1015,9 @@ void Engine::init() {
                 if (dist < stunRange) {
                     // Wanderer Deflect uses stunTimer (full immobilize); shield uses freezeTimer
                     if (isDeflect) {
-                        ent.stunTimer = 2.0f; // 2s stun — can't move or attack
+                        // Deflect upgrade: 3s stun at floor >= 5 (base: 2s)
+                        f32 stunDur = (s_engine->m_level.currentFloor >= 5) ? 3.0f : 2.0f;
+                        ent.stunTimer = stunDur;
                         ent.aiState = AIState::IDLE;
                         ent.velocity = {0, 0, 0};
                     } else {
@@ -1057,8 +1090,20 @@ void Engine::init() {
             u32 hitCount = CombatQuery::queryConeSorted(
                 s_engine->m_entities, eyePos, player.forward, -1.0f, 3.0f,
                 hits, dists, MAX_ENTITIES);
+            f32 totalDmg = 0.0f;
             for (u32 k = 0; k < hitCount; k++) {
-                Combat::applyDamage(s_engine->m_entities, hits[k], slashDmg, &eyePos);
+                Entity* he = handleGet(s_engine->m_entities, hits[k]);
+                if (he && !(he->flags & ENT_DEAD)) {
+                    // Accumulate actual damage dealt (capped by remaining HP before hit)
+                    f32 hpBefore = he->health;
+                    Combat::applyDamage(s_engine->m_entities, hits[k], slashDmg, &eyePos);
+                    totalDmg += hpBefore - (he->health < 0.0f ? 0.0f : he->health);
+                }
+            }
+            // Death's Dance upgrade: heal 10% of AoE damage dealt (floor >= 40)
+            if (s_engine->m_level.currentFloor >= 40 && totalDmg > 0.0f) {
+                player.health += totalDmg * 0.1f;
+                if (player.health > player.maxHealth) player.health = player.maxHealth;
             }
         }
 

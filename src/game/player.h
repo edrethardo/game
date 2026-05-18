@@ -78,7 +78,8 @@ struct Player {
     u16  markedEntityGen  = 0;
     f32  markTimer        = 0.0f;
     f32  deathsDanceTimer = 0.0f;  // ultimate duration countdown
-    bool adrenalineUnlocked = false; // true once skill 3 is unlocked
+    bool adrenalineUnlocked = false; // true once floor >= 20 (skill 3 unlocked)
+    bool adrenalineUpgraded = false; // true once floor >= 30 (move speed bonus active)
 
     // Soft target lock
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)
