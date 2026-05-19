@@ -270,6 +270,7 @@ void Engine::init() {
             {"paladin",        "assets/meshes/paladin.obj"},
             {"staff",          "assets/meshes/staff.obj"},
             {"web",            "assets/meshes/web.obj"},
+            {"web_wall",       "assets/meshes/web_wall.obj"},
             {"shackles",       "assets/meshes/shackles.obj"},
             {"barrel",         "assets/meshes/barrel.obj"},
             {"cage",           "assets/meshes/cage.obj"},

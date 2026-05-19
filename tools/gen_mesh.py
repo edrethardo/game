@@ -1478,9 +1478,29 @@ def gen_wand(length=0.35):
 
 
 def gen_web(size=1.0):
-    """Flat spider web decoration — thin diamond in XZ plane."""
+    """Flat spider web decoration — thin slab in XZ plane (for legacy/reference)."""
     mb = MeshBuilder()
     hs = size * 0.5
+    add_box(mb, center=(0.0, 0.0, 0.0), half_extents=(hs, 0.02, hs))
+    return mb
+
+
+def gen_web_wall(size=1.0):
+    """Wall-mounted spider web — upright panel, thin in Z, 1m wide x 1m tall."""
+    mb = MeshBuilder()
+    hs = size * 0.5
+    add_box(mb, center=(0.0, 0.0, 0.0), half_extents=(hs, hs, 0.02))
+    return mb
+
+
+def gen_web_ceiling(size=1.0):
+    """Ceiling spider web — same shape as web_wall but rotated 90° around X
+    so it lies flat against the ceiling. The texture maps identically to the
+    wall version so the web pattern looks correct from below."""
+    mb = MeshBuilder()
+    hs = size * 0.5
+    # web_wall is thin in Z, tall in Y: half_extents = (hs, hs, 0.02)
+    # Rotate 90° around X: Y→Z, Z→-Y → half_extents become (hs, 0.02, hs)
     add_box(mb, center=(0.0, 0.0, 0.0), half_extents=(hs, 0.02, hs))
     return mb
 
@@ -2809,8 +2829,18 @@ MESH_TYPES = {
     },
     "web": {
         "func": gen_web,
-        "desc": "Flat spider web decoration. Params: --radius (used as size)",
+        "desc": "Flat spider web decoration (legacy). Params: --radius (used as size)",
         "default_file": "web.obj",
+    },
+    "web_wall": {
+        "func": gen_web_wall,
+        "desc": "Wall-mounted spider web — upright panel. Params: --radius (used as size)",
+        "default_file": "web_wall.obj",
+    },
+    "web_ceiling": {
+        "func": gen_web_ceiling,
+        "desc": "Ceiling spider web — flat quad, visible from below. Params: --radius (used as size)",
+        "default_file": "web_ceiling.obj",
     },
     "shackles": {
         "func": gen_shackles,

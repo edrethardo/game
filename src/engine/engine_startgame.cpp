@@ -1062,7 +1062,8 @@ void Engine::startGame() {
     // ---------------------------------------------------------------------------
     {
         // Resolve decoration mesh IDs once
-        u8 mWeb      = findMeshByName("web");
+        u8 mWeb        = findMeshByName("web");         // flat slab for ceilings
+        u8 mWebWall    = findMeshByName("web_wall");   // upright panel for walls
         u8 mShackles = findMeshByName("shackles");
         u8 mBarrel   = findMeshByName("barrel");
         u8 mCage     = findMeshByName("cage");
@@ -1078,38 +1079,32 @@ void Engine::startGame() {
         // wallOnly = true places props against room edges so they don't block movement.
         struct PropDef { u8 meshId; u8 matId; Vec3 halfExt; f32 yOff; bool wallOnly; };
 
-        // Build tier-specific prop lists
-        // Cages removed — too visually noisy.  Webs are wallOnly with high Y
-        // so they stick to the upper part of walls, not the floor.
-        // Bones use tiny halfExtents (essentially nonblocking floor scatter).
-        // Shackles and cages removed — too visually noisy / blocking.
+        // Build tier-specific prop lists — only webs and braziers.
+        // Bones and barrels removed (boring, block movement/items).
         PropDef dungeonProps[] = {
-            {mBarrel, matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
-            {mBones,  matBone, {0.01f, 0.01f, 0.01f}, 0.06f, false},
+            {mWeb, matWeb, {0.50f, 0.50f, 0.02f}, 0.0f, true},
         };
         PropDef catacombProps[] = {
-            {mBones,   matBone,    {0.01f, 0.01f, 0.01f}, 0.06f, false},
+            {mWeb,     matWeb,     {0.50f, 0.50f, 0.02f}, 0.0f, true},
             {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
         };
         PropDef cavernProps[] = {
-            {mWeb,    matWeb,  {0.50f, 0.50f, 0.02f}, 0.0f, true},  // wall web — yOff randomized below
-            {mBones,  matBone, {0.01f, 0.01f, 0.01f}, 0.06f, false},
-            {mBarrel, matWood, {0.25f, 0.35f, 0.25f}, 0.35f, true},
+            {mWeb, matWeb, {0.50f, 0.50f, 0.02f}, 0.0f, true},
         };
         PropDef hellforgeProps[] = {
+            {mWeb,     matWeb,     {0.50f, 0.50f, 0.02f}, 0.0f, true},
             {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
-            {mBones,   matBone,    {0.01f, 0.01f, 0.01f}, 0.06f, false},
         };
         PropDef voidProps[] = {
-            {mBones,   matBone,    {0.01f, 0.01f, 0.01f}, 0.06f, false},
+            {mWeb,     matWeb,     {0.50f, 0.50f, 0.02f}, 0.0f, true},
             {mBrazier, matBrazier, {0.12f, 0.30f, 0.12f}, 0.30f, true},
         };
 
         const PropDef* props = dungeonProps;
-        u32 propCount = 2;
+        u32 propCount = 1;
         if (m_level.currentFloor >= 41)      { props = voidProps;      propCount = 2; }
         else if (m_level.currentFloor >= 31) { props = hellforgeProps;  propCount = 2; }
-        else if (m_level.currentFloor >= 21) { props = cavernProps;     propCount = 3; }
+        else if (m_level.currentFloor >= 21) { props = cavernProps;     propCount = 1; }
         else if (m_level.currentFloor >= 11) { props = catacombProps;   propCount = 2; }
 
         u32 decoCount = 0;
@@ -1135,11 +1130,12 @@ void Engine::startGame() {
                 }
 
                 if (ceilingWeb) {
-                    // Ceiling web — random position, directly on ceiling surface
+                    // Ceiling web — random position, flush against ceiling surface.
+                    // yOff is relative to floorHeight, but ceiling is always at 3.0m absolute.
                     f32 cs = m_level.grid.cellSize;
                     px = (room.x + 1 + std::rand() % (room.w > 2 ? room.w - 2 : 1)) * cs;
                     pz = (room.z + 1 + std::rand() % (room.d > 2 ? room.d - 2 : 1)) * cs;
-                    yOff = 3.0f; // exactly at ceiling
+                    yOff = 3.0f - room.floorHeight;
                     spawnHalf = {0.50f, 0.02f, 0.50f};
                 } else if (prop.wallOnly) {
                     // Place directly on the wall surface
@@ -1222,7 +1218,16 @@ void Engine::startGame() {
                         deco->materialId = MaterialSystem::getIdByName(webMats[std::rand() % 4]);
                     }
                     if (ceilingWeb) {
+                        // Ceiling webs use fallback cube path scaled flat by halfExtents
+                        // (meshId 0 = cube, renderer scales by halfExtents directly)
+                        deco->meshId = 0;
                         deco->yaw = (std::rand() % 628) * 0.01f;
+                    } else if (prop.matId == matWeb) {
+                        // Wall webs use the upright mesh, yaw faces the wall normal
+                        deco->meshId = mWebWall;
+                        // N/S walls face along Z → yaw 0, E/W walls face along X → yaw 90°
+                        static const f32 wallYaw[] = {0.0f, 0.0f, 1.5708f, 1.5708f};
+                        deco->yaw = wallYaw[wall];
                     } else if (prop.wallOnly) {
                         static const f32 wallYaw[] = {0.0f, 0.0f, 1.5708f, 1.5708f};
                         deco->yaw = wallYaw[wall];
