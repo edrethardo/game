@@ -421,6 +421,17 @@ static inline f32 randF01() {
     return static_cast<f32>(lcgNext() >> 8) / static_cast<f32>(1u << 24);
 }
 
+// Normal-distribution variance multiplier centered at +5%, clamped to [1.0, 1.1].
+// Approximates a bell curve via central limit theorem (sum of 3 uniforms).
+static f32 rollVariance() {
+    f32 sum = randF01() + randF01() + randF01();
+    f32 normalized = (sum - 1.5f) / 0.866f; // mean=0, stddev≈1
+    f32 v = 1.05f + normalized * 0.033f;     // center +5%, stddev 3.3%
+    if (v < 1.0f) v = 1.0f;
+    if (v > 1.1f) v = 1.1f;
+    return v;
+}
+
 // Returns a value in [0, range)
 static inline u32 randU32(u32 range) {
     if (range == 0) return 0;
@@ -511,7 +522,9 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
     // Track which AffixTypes have already been assigned (no duplicate types)
     bool usedTypes[static_cast<u32>(AffixType::COUNT)] = {};
 
-    f32 levelScale = 1.0f + 0.06f * static_cast<f32>(itemLevel);
+    f32 linearScale = 1.0f + 0.06f * static_cast<f32>(itemLevel);
+    // Sqrt scale for affixes where linear growth is too extreme at high levels
+    f32 sqrtScale = sqrtf(linearScale);
 
     for (u8 a = 0; a < affixCount && item.affixCount < MAX_AFFIXES_PER_ITEM; a++) {
         // Shuffle-pick a random candidate that has an unused type
@@ -531,7 +544,9 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
 
         Affix affix;
         affix.type  = ad.type;
-        affix.value = (ad.minValue + randF01() * (ad.maxValue - ad.minValue)) * levelScale;
+        // Range bonus uses sqrt scaling so it doesn't grow too large at high levels
+        f32 scale = (ad.type == AffixType::RANGE_BONUS) ? sqrtScale : linearScale;
+        affix.value = (ad.minValue + randF01() * (ad.maxValue - ad.minValue)) * scale * rollVariance();
 
         item.affixes[item.affixCount++] = affix;
         usedTypes[static_cast<u32>(ad.type)] = true;
@@ -593,8 +608,8 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
 
     // Scale base stats — gentle curve so early-floor items aren't overpowered
     f32 levelMult = 1.0f + 0.08f * static_cast<f32>(enemyLevel);
-    item.damage      = def.baseDamage  * levelMult;
-    item.bonusHealth = def.baseHealth  * levelMult;
+    item.damage      = def.baseDamage  * levelMult * rollVariance();
+    item.bonusHealth = def.baseHealth  * levelMult * rollVariance();
 
     // Roll affixes — pass weapon type to filter nonsensical stats
     rollAffixes(item, enemyLevel, def.slot, affixDefs, affixDefCount, def.weaponType);
