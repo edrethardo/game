@@ -158,8 +158,8 @@ void PlayerController::update(Player& player, f32 dt) {
         f32 totalW = ds.pitchWeight + ds.rollWeight;
         if (totalW > 0.001f) { ds.pitchWeight /= totalW; ds.rollWeight /= totalW; }
         else { ds.pitchWeight = 1.0f; ds.rollWeight = 0.0f; } // fallback: front flip
-        ds.pitchSign = (fwdDot >= 0.0f) ? 1 : -1;  // forward = front flip, back = back flip
-        ds.rollSign  = (rightDot >= 0.0f) ? 1 : -1; // right = CW, left = CCW
+        ds.pitchSign = (fwdDot >= 0.0f) ? -1 : 1;  // forward = pitch down first, back = pitch up first
+        ds.rollSign  = (rightDot >= 0.0f) ? -1 : 1; // right = CW roll, left = CCW roll
 
         // I-frames: invulnerability for the first 0.3s of the roll (60% of duration)
         player.invulnTimer = 0.3f;

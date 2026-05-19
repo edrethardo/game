@@ -10,6 +10,10 @@
 #ifdef _WIN32
 #include <windows.h>
 // timeBeginPeriod/timeEndPeriod declared in windows.h (MinGW) or timeapi.h (MSVC)
+#elif defined(__APPLE__)
+#include <unistd.h>
+#include <libgen.h>
+#include <mach-o/dyld.h>
 #else
 #include <unistd.h>
 #include <libgen.h>
@@ -27,6 +31,25 @@ static void setCwdToExeDir([[maybe_unused]] const char* argv0) {
     GetModuleFileNameA(NULL, path, MAX_PATH);
     char* last = std::strrchr(path, '\\');
     if (last) { *last = '\0'; SetCurrentDirectoryA(path); }
+#elif defined(__APPLE__)
+    char buf[1024];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) == 0) {
+        char* dir = dirname(buf);
+        // .app bundle: exe at Contents/MacOS/, assets at Contents/Resources/assets/
+        char resDir[1100];
+        snprintf(resDir, sizeof(resDir), "%s/../Resources", dir);
+        char checkRes[1200];
+        snprintf(checkRes, sizeof(checkRes), "%s/assets", resDir);
+        if (access(checkRes, F_OK) == 0) {
+            (void)chdir(resDir);
+        } else {
+            // Flat layout (local dev build): assets next to binary
+            char check[1100];
+            snprintf(check, sizeof(check), "%s/assets", dir);
+            if (access(check, F_OK) == 0) (void)chdir(dir);
+        }
+    }
 #elif !defined(__SWITCH__)
     char buf[1024];
     ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);

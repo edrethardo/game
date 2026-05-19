@@ -138,6 +138,8 @@ jobs:
             <key>CFBundleName</key><string>Dungeon Engine</string>
             <key>CFBundleVersion</key><string>0.1.0</string>
             <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
           </dict>
           </plist>
           PLIST
