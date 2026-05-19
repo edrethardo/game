@@ -692,10 +692,19 @@ void Engine::init() {
             s_firstKillDropGiven = true;
             u8 lvl = pool.entities[entityIndex].level;
             if (lvl < 1) lvl = 1;
-            ItemInstance item = ItemGen::rollItem(lvl, s_engine->m_itemDefs,
-                                                   s_engine->m_itemDefCount,
-                                                   s_engine->m_affixDefs,
-                                                   s_engine->m_affixDefCount);
+            // Floor 1: force armor drops so tutorial teaches equipping gear
+            ItemInstance item;
+            for (u32 attempt = 0; attempt < 20; attempt++) {
+                item = ItemGen::rollItem(lvl, s_engine->m_itemDefs,
+                                         s_engine->m_itemDefCount,
+                                         s_engine->m_affixDefs,
+                                         s_engine->m_affixDefCount);
+                if (isItemEmpty(item)) break;
+                if (s_engine->m_level.currentFloor > 1) break; // no restriction above floor 1
+                // On floor 1, only allow armor slots (not weapons)
+                ItemSlot slot = s_engine->m_itemDefs[item.defId].slot;
+                if (slot != ItemSlot::WEAPON) break;
+            }
             if (!isItemEmpty(item)) {
                 // Force to at least MAGIC rarity
                 if (item.rarity < Rarity::MAGIC) item.rarity = Rarity::MAGIC;
@@ -765,10 +774,18 @@ void Engine::init() {
         if (!(pool.entities[entityIndex].flags & ENT_FRIENDLY) &&
             (std::rand() % 100) < static_cast<int>(dropChance * 100.0f)) {
             if (enemyLevel < 1) enemyLevel = 1;
-            ItemInstance item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
-                                                   s_engine->m_itemDefCount,
-                                                   s_engine->m_affixDefs,
-                                                   s_engine->m_affixDefCount);
+            ItemInstance item;
+            // Floor 1: force armor drops to teach players about equipment
+            for (u32 attempt = 0; attempt < 20; attempt++) {
+                item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
+                                         s_engine->m_itemDefCount,
+                                         s_engine->m_affixDefs,
+                                         s_engine->m_affixDefCount);
+                if (isItemEmpty(item)) break;
+                if (s_engine->m_level.currentFloor > 1) break;
+                ItemSlot slot = s_engine->m_itemDefs[item.defId].slot;
+                if (slot != ItemSlot::WEAPON) break;
+            }
             if (!isItemEmpty(item)) {
                 WorldItemSystem::spawn(s_engine->m_worldItems, item,
                                        position + Vec3{0, 0.5f, 0}, &s_engine->m_level.grid);

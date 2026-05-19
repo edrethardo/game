@@ -234,11 +234,12 @@ private:
     u8  m_invCursorPanels[MAX_LOCAL_PLAYERS] = {};
     u8  m_invCursorIndices[MAX_LOCAL_PLAYERS] = {};
     f32 m_fullBackpackNotifyTimer = 0.0f;
-    bool m_firstPickupTooltipShown = false;
-    f32  m_firstPickupTooltipTimer = 0.0f;
-    bool m_equipTooltipShown = false;  // "double-click to equip" shown once
-    f32  m_equipTooltipTimer = 0.0f;
-    f32  m_controlsTooltipTimer = 0.0f;  // LMB/RMB controls shown on floor 1 entry
+    bool m_firstPickupTooltipShown = false;  // item picked up → show "Open Inventory"
+    bool m_inventoryOpenedOnce    = false;  // dismiss "Open Inventory" once opened
+    bool m_equipTooltipShown = false;       // inventory opened → show "equip" hint
+    bool m_itemEquippedOnce  = false;       // dismiss equip hint once an item is equipped
+    f32  m_controlsTooltipTimer = 0.0f;     // LMB/RMB controls shown on floor 1 entry
+    f32  m_tutorialPulseTimer   = 0.0f;     // shared pulse timer for tutorial tooltips
 
     // Chat log — displays NPC speech and game events on the left side of the screen
     static constexpr u32 MAX_CHAT_LINES = 8;

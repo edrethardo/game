@@ -141,11 +141,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Panel", {0.6f, 0.6f, 0.6f}, 1);
         }
 
-        // Equip tutorial — pulsing mouse left-click + "Double-click to equip"
-        if (m_equipTooltipTimer > 0.0f) {
-            f32 alpha = (m_equipTooltipTimer < 1.0f)
-                        ? m_equipTooltipTimer : 1.0f;
-            bool mouseLit = (sinf(m_equipTooltipTimer * 6.0f) > 0.0f);
+        // Equip tutorial — shown until the player equips an item
+        if (m_equipTooltipShown && !m_itemEquippedOnce) {
+            f32 alpha = 1.0f;
+            bool mouseLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
 
             bool ep = Input::isGamepadConnected(0);
             const char* eqText = ep ? "Press A to equip" : "Double-click to equip";
@@ -646,11 +645,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                              {0.5f * alpha, 0.6f * alpha, 0.9f * alpha}, 3);
     }
 
-    // First pickup tutorial — pulsing Tab key + "Open Inventory" text
-    if (m_firstPickupTooltipTimer > 0.0f) {
-        f32 alpha = (m_firstPickupTooltipTimer < 1.0f)
-                    ? m_firstPickupTooltipTimer : 1.0f;
-        bool keyLit = (sinf(m_firstPickupTooltipTimer * 6.0f) > 0.0f);
+    // First pickup tutorial — shown until the player opens inventory
+    if (m_firstPickupTooltipShown && !m_inventoryOpenedOnce) {
+        f32 alpha = 1.0f;
+        bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
 
         const char* text = "Open Inventory";
         f32 textW = FontSystem::textWidth(text, 3);

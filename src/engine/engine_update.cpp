@@ -699,8 +699,9 @@ void Engine::gameUpdate(f32 dt) {
 
     // Player movement/aiming — disabled while inventory is open
     if (!m_inventoryOpen) {
-        // Speed buffs: Shadow Dance +20%, Shrine +25%, War Cry/Overdrive +30%
+        // Speed modifiers: blocking slows, buffs speed up
         f32 savedSpeed = m_localPlayer.moveSpeed;
+        if (m_localPlayer.blocking) m_localPlayer.moveSpeed *= 0.4f;
         if (m_localPlayer.shadowDanceTimer > 0.0f) m_localPlayer.moveSpeed *= 1.2f;
         if (m_localPlayer.shrineBuff == 2) m_localPlayer.moveSpeed *= (1.0f + m_localPlayer.shrineBuffValue);
         if (m_localPlayer.overdriveTimer > 0.0f) m_localPlayer.moveSpeed *= 1.3f;
@@ -1116,9 +1117,8 @@ void Engine::gameUpdate(f32 dt) {
                                   m_inventories[m_localPlayerIndex].bonusCooldownReduction);
     }
 
-    // --- Shield blocking (Ctrl/Shift) ---
-    // Wanderer uses Shift for dodge roll, not block; skip the block state entirely for that class.
-    if (m_playerClass != PlayerClass::WANDERER) {
+    // --- Shield blocking (Ctrl / Left Trigger) ---
+    {
         bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !m_inventoryOpen;
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;
@@ -1268,10 +1268,11 @@ void Engine::gameUpdate(f32 dt) {
         m_inventoryOpen = !m_inventoryOpen;
         Input::setRelativeMouseMode(!m_inventoryOpen);
         AudioSystem::play(SfxId::UI_CLICK);
-        // Show equip tutorial on first inventory open after first pickup
-        if (m_inventoryOpen && m_firstPickupTooltipShown && !m_equipTooltipShown) {
-            m_equipTooltipShown = true;
-            m_equipTooltipTimer = 8.0f;
+        if (m_inventoryOpen) {
+            m_inventoryOpenedOnce = true; // dismiss "Open Inventory" tooltip
+            // Show equip tutorial on first inventory open after first pickup
+            if (m_firstPickupTooltipShown && !m_equipTooltipShown)
+                m_equipTooltipShown = true;
         }
         // Reset drag/click state when toggling inventory
         m_dragState = {};
@@ -1326,9 +1327,8 @@ void Engine::gameUpdate(f32 dt) {
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
     if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
-    if (m_firstPickupTooltipTimer > 0.0f) m_firstPickupTooltipTimer -= dt;
-    if (m_equipTooltipTimer > 0.0f) m_equipTooltipTimer -= dt;
     if (m_controlsTooltipTimer > 0.0f) m_controlsTooltipTimer -= dt;
+    m_tutorialPulseTimer += dt; // shared pulse clock for tutorial tooltips
 
     // Save previous camera state for render interpolation
     m_camera.prevPosition = m_camera.position;
@@ -1446,7 +1446,6 @@ void Engine::updatePlayerPickup() {
                 AudioSystem::play(SfxId::ITEM_PICKUP);
                 if (!m_firstPickupTooltipShown) {
                     m_firstPickupTooltipShown = true;
-                    m_firstPickupTooltipTimer = 7.0f;
                 }
                 if (picked.defId < m_itemDefCount &&
                     m_itemDefs[picked.defId].slot == ItemSlot::WEAPON) {

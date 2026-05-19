@@ -113,6 +113,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     Inventory::equip(m_inventories[m_localPlayerIndex], m_invCursorIndex, m_itemDefs);
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_EQUIP);
+                    m_itemEquippedOnce = true;
                 }
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
                 if (!isItemEmpty(m_inventories[m_localPlayerIndex].equipped[m_invCursorIndex])) {
@@ -196,6 +197,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     Inventory::equip(m_inventories[m_localPlayerIndex], hit.index, m_itemDefs);
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_EQUIP);
+                    m_itemEquippedOnce = true;
                     m_dblClickState = {};
                 } else {
                     // Record for potential double-click and begin potential drag
@@ -339,6 +341,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 Inventory::equip(m_inventories[m_localPlayerIndex], m_dragState.sourceIndex, m_itemDefs);
                 Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 AudioSystem::play(SfxId::ITEM_EQUIP);
+                m_itemEquippedOnce = true;
             } else if (drop.panel == InventoryUI::SlotHit::NONE) {
                 // Drop outside all panels — drop item to world
                 Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};

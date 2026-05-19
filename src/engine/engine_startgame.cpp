@@ -323,11 +323,14 @@ void Engine::startGame() {
     m_transition.floorKillCount = 0;
     m_transition.floorTime = 0.0f;
 
-    // Reset tutorials on new game (not on floor descent)
+    // Reset tutorials on floor 1 only (first floor of a new game)
     if (m_level.currentFloor <= 1) {
         m_firstPickupTooltipShown = false;
-        m_equipTooltipShown = false;
-        m_controlsTooltipTimer = 8.0f; // show LMB/RMB controls for 8 seconds
+        m_inventoryOpenedOnce     = false;
+        m_equipTooltipShown       = false;
+        m_itemEquippedOnce        = false;
+        m_tutorialPulseTimer      = 0.0f;
+        m_controlsTooltipTimer    = 8.0f;
     }
 
     // Reset NPC equipment pool so old floor's slots don't persist
@@ -529,8 +532,8 @@ void Engine::startGame() {
             const DungeonRoom& room = dungeon.rooms[r];
 
             u32 area = room.w * room.d;
-            u32 enemyCount = (m_level.currentFloor == 1) ? 1 : (1 + (area / 20));
-            if (enemyCount > 3) enemyCount = 3;
+            u32 enemyCount = (m_level.currentFloor == 1) ? 2 : (1 + (area / 15));
+            if (enemyCount > 5) enemyCount = 5;
 
             for (u32 e = 0; e < enemyCount; e++) {
 
