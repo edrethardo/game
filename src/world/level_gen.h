@@ -22,6 +22,9 @@ struct DungeonResult {
     Vec3 spawnPos;                         // player spawn (world coords)
     DungeonRoom rooms[MAX_DUNGEON_ROOMS];  // generated rooms
     u32 roomCount;                         // number of rooms created
+    u32 spawnRoomIdx;                      // dead-end room chosen for player spawn
+    u32 exitRoomIdx;                       // farthest room from spawn for exit portal
+    bool valid;                            // false if no suitable spawn dead-end found
 };
 
 namespace LevelGen {

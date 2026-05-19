@@ -1043,6 +1043,45 @@ void Engine::render(f32 alpha) {
     m_camera.yaw      = tickYaw;
     m_camera.pitch    = tickPitch;
 
+    // Fade-from-black overlay — hides stale frame fragments after level load/respawn.
+    // First few frames are fully black, then fades out over 0.3s.
+    if (m_fadeFromBlack > 0.0f) {
+        f32 alpha = m_fadeFromBlack / 0.3f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        // Draw fullscreen black quad using the unlit shader + white texture trick
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glUseProgram(m_unlitShader.program);
+        Mat4 ortho = Mat4::identity();
+        ortho.m[0]  =  2.0f / static_cast<f32>(sw);
+        ortho.m[5]  =  2.0f / static_cast<f32>(sh);
+        ortho.m[10] = -1.0f;
+        ortho.m[12] = -1.0f;
+        ortho.m[13] = -1.0f;
+        if (m_unlitShader.loc_mvp >= 0)
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, ortho.ptr());
+        if (m_unlitShader.loc_color >= 0)
+            glUniform4f(m_unlitShader.loc_color, 0.0f, 0.0f, 0.0f, alpha);
+
+        // Use the quad mesh (unit XY quad centered at origin → scale to screen)
+        Mat4 quadModel = Mat4::translate({static_cast<f32>(sw) * 0.5f,
+                                          static_cast<f32>(sh) * 0.5f, 0.0f})
+                       * Mat4::scale({static_cast<f32>(sw), static_cast<f32>(sh), 1.0f});
+        if (m_unlitShader.loc_mvp >= 0)
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
+
+        glBindVertexArray(m_quadMesh.vao);
+        glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, nullptr);
+        glBindVertexArray(0);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        m_fadeFromBlack -= 1.0f / 60.0f;
+    }
+
     GLContext::swapBuffers(Window::getHandle());
 }
 

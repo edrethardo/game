@@ -87,6 +87,7 @@ private:
         f32  snapshotTime = 0.0f;   // snapshot for transition display
     };
     TransitionState m_transition;
+    f32 m_fadeFromBlack = 0.0f;  // overlay alpha timer — hides stale frames after level load
 
     // --- Split-screen state ---
     static constexpr u32 MAX_LOCAL_PLAYERS = 2;

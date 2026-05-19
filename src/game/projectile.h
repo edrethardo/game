@@ -19,7 +19,7 @@ static constexpr u8 PROJ_VOID      = 1 << 5;  // Void weapon projectile (purple 
 #ifdef __SWITCH__
 static constexpr u32 MAX_PROJECTILES = 512;
 #else
-static constexpr u32 MAX_PROJECTILES = 4096;
+static constexpr u32 MAX_PROJECTILES = 1024;
 #endif
 
 // Active projectile instance. Moves each frame, collides with walls and entities.

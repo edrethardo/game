@@ -87,9 +87,11 @@ void ProjectileSystem::update(ProjectilePool& pool,
                                f32 dt,
                                const SpatialGrid* spatialGrid)
 {
-    // Scan pool but exit early once all active projectiles are processed
+    // Snapshot activeCount before iterating — destroyProjectile() decrements it
+    // mid-loop, which would cause early exit and leave later projectiles stuck.
+    u32 startCount = pool.activeCount;
     u32 seen = 0;
-    for (u32 i = 0; i < MAX_PROJECTILES && seen < pool.activeCount; i++) {
+    for (u32 i = 0; i < MAX_PROJECTILES && seen < startCount; i++) {
         Projectile& p = pool.projectiles[i];
         if (!p.active) continue;
         seen++;

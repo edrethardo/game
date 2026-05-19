@@ -120,6 +120,7 @@ void Engine::update(f32 dt) {
                 m_localPlayer.invulnTimer = 2.5f;
                 m_inventoryOpen = false;
                 startGame();
+                m_fadeFromBlack = 0.3f;
                 m_gameState = GameState::IN_GAME;
             }
             // ESC/B = ask to quit
@@ -239,6 +240,7 @@ void Engine::update(f32 dt) {
                 m_cameras[0] = m_camera;
             }
             m_gameState = GameState::IN_GAME;
+            m_fadeFromBlack = 0.3f;
             // startGame() can take 100ms+ (BSP gen, mesh build, spawning).
             // Reset accumulator and clock so the next frame doesn't see
             // the loading spike and try to catch up with multiple ticks.

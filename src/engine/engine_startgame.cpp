@@ -348,9 +348,15 @@ void Engine::startGame() {
     if (m_level.currentFloor <= 3)       gridSize = 24;  // very small, almost linear
     else if (m_level.currentFloor <= 6)  gridSize = 32;  // small, few branches
     else if (m_level.currentFloor <= 9)  gridSize = 40;  // medium, some exploration
-    LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
-    m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed, gridSize, gridSize);
-    DungeonResult& dungeon = m_level.dungeon;  // local alias keeps the rest of startGame unchanged
+
+    // Retry generation until we find a layout with a valid dead-end spawn room.
+    // BSP almost always produces dead-ends; retries are rare (< 5% of seeds).
+    for (u32 attempt = 0; attempt < 20; attempt++) {
+        LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
+        m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed + attempt, gridSize, gridSize);
+        if (m_level.dungeon.valid) break;
+    }
+    DungeonResult& dungeon = m_level.dungeon;
     Vec3 spawnPos = dungeon.spawnPos;
 
     // ---------------------------------------------------------------------------
@@ -526,21 +532,43 @@ void Engine::startGame() {
                            findMeshByName("gargoyle"), findMeshByName("necromancer"),
                            findMeshByName("shaman"), findMeshByName("herald")};
 
-        // Skip rooms near spawn so enemies don't ambush the player immediately
-        u32 firstEnemyRoom = (dungeon.roomCount > 4) ? 3 : 1;
-        for (u32 r = firstEnemyRoom; r < dungeon.roomCount; r++) {
+        // Skip spawn room + its adjacent room. Reduce enemies in 2-hop rooms.
+        const DungeonRoom& spawnRm = dungeon.rooms[dungeon.spawnRoomIdx];
+        for (u32 r = 0; r < dungeon.roomCount; r++) {
+            if (r == dungeon.spawnRoomIdx) continue;
+            // Skip the room directly adjacent to spawn (no enemies there)
+            bool adjacentToSpawn = false;
+            for (u8 a = 0; a < spawnRm.adjacentCount; a++) {
+                if (spawnRm.adjacentRooms[a] == r) { adjacentToSpawn = true; break; }
+            }
+            if (adjacentToSpawn) continue;
+
+            // Check if this room is 2 hops from spawn (adjacent to spawn's neighbor)
+            bool twoHopsFromSpawn = false;
+            for (u8 a = 0; a < spawnRm.adjacentCount; a++) {
+                u32 nb = spawnRm.adjacentRooms[a];
+                if (nb >= dungeon.roomCount) continue;
+                const DungeonRoom& nbRoom = dungeon.rooms[nb];
+                for (u8 b = 0; b < nbRoom.adjacentCount; b++) {
+                    if (nbRoom.adjacentRooms[b] == r) { twoHopsFromSpawn = true; break; }
+                }
+                if (twoHopsFromSpawn) break;
+            }
+
             const DungeonRoom& room = dungeon.rooms[r];
 
             u32 area = room.w * room.d;
             u32 enemyCount;
             if (m_level.currentFloor <= 10) {
-                // Floors 1-10: lighter spawns (1-3 per room)
                 enemyCount = 1 + (area / 25);
                 if (enemyCount > 3) enemyCount = 3;
             } else {
                 enemyCount = 1 + (area / 15);
                 if (enemyCount > 5) enemyCount = 5;
             }
+
+            // Halve enemy count in rooms 2 hops from spawn
+            if (twoHopsFromSpawn && enemyCount > 1) enemyCount = (enemyCount + 1) / 2;
 
 #ifdef __SWITCH__
             // Switch: cap at 3/room for all floors to keep entity count under ~48
@@ -838,7 +866,42 @@ void Engine::startGame() {
         }
 
         if ((bd || bt) && dungeon.roomCount > 2) {
-            DungeonRoom& bossRoom = dungeon.rooms[dungeon.roomCount - 2];
+            // Boss room: pick the exit room or a neighbor of it, but NEVER the
+            // spawn room or a room adjacent to spawn.
+            const DungeonRoom& spawnRm2 = dungeon.rooms[dungeon.spawnRoomIdx];
+
+            auto isNearSpawn = [&](u32 idx) -> bool {
+                if (idx == dungeon.spawnRoomIdx) return true;
+                for (u8 a = 0; a < spawnRm2.adjacentCount; a++)
+                    if (spawnRm2.adjacentRooms[a] == idx) return true;
+                return false;
+            };
+
+            // First choice: exit room (if not near spawn)
+            // Second choice: a neighbor of exit that's not near spawn
+            // Last resort: any room that's not near spawn
+            u32 bossRoomIdx = 0xFFFFFFFF;
+            if (!isNearSpawn(dungeon.exitRoomIdx)) {
+                bossRoomIdx = dungeon.exitRoomIdx;
+            } else {
+                const DungeonRoom& exitRoom = dungeon.rooms[dungeon.exitRoomIdx];
+                for (u8 a = 0; a < exitRoom.adjacentCount; a++) {
+                    u32 nb = exitRoom.adjacentRooms[a];
+                    if (nb < dungeon.roomCount && !isNearSpawn(nb)) {
+                        bossRoomIdx = nb;
+                        break;
+                    }
+                }
+            }
+            // Last resort: pick any room far from spawn
+            if (bossRoomIdx == 0xFFFFFFFF) {
+                for (u32 i = dungeon.roomCount; i > 0; i--) {
+                    if (!isNearSpawn(i - 1)) { bossRoomIdx = i - 1; break; }
+                }
+            }
+            if (bossRoomIdx == 0xFFFFFFFF) bossRoomIdx = dungeon.exitRoomIdx; // absolute fallback
+
+            DungeonRoom& bossRoom = dungeon.rooms[bossRoomIdx];
 
             // Arena size: major bosses get a larger arena
             bool isMajor = bd ? bd->isMajor : bt->isMajor;
@@ -1174,10 +1237,10 @@ void Engine::startGame() {
                  decoCount, (m_level.currentFloor / 10) * 10 + 1, ((m_level.currentFloor / 10) + 1) * 10);
     }
 
-    // Spawn a floor exit portal in the last room (farthest from spawn room 0)
+    // Spawn exit portal in the exit room (BFS-farthest from spawn)
     m_level.floorDoorActive = false;
     if (dungeon.roomCount > 1) {
-        const DungeonRoom& lastRoom = dungeon.rooms[dungeon.roomCount - 1];
+        const DungeonRoom& lastRoom = dungeon.rooms[dungeon.exitRoomIdx];
         f32 doorX = (lastRoom.x + lastRoom.w * 0.5f) * m_level.grid.cellSize;
         f32 doorZ = (lastRoom.z + lastRoom.d * 0.5f) * m_level.grid.cellSize;
         f32 doorY = lastRoom.floorHeight;
