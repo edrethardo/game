@@ -177,8 +177,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
     }
 
+    // Herald aura — staggered over 15 frames so the O(N²) check runs ~4×/sec
     constexpr f32 AURA_RADIUS_SQ = 18.0f * 18.0f;
+    constexpr u32 AURA_STAGGER = 15;
+    static u32 s_auraFrame = 0;
+    s_auraFrame++;
     for (u32 a = 0; a < pool.activeCount; a++) {
+        if ((a % AURA_STAGGER) != (s_auraFrame % AURA_STAGGER)) continue;
         Entity& herald = pool.entities[pool.activeList[a]];
         if (!(herald.enemyRole & EnemyRole::AURA)) continue;
         if (herald.flags & ENT_DEAD) continue;
@@ -187,7 +192,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             if (b == a) continue;
             Entity& ally = pool.entities[pool.activeList[b]];
             if (ally.flags & ENT_DEAD) continue;
-            if (ally.flags & ENT_FRIENDLY) continue;  // don't buff player-side NPCs
+            if (ally.flags & ENT_FRIENDLY) continue;
 
             Vec3 delta = ally.position - herald.position;
             f32 distSq = delta.x*delta.x + delta.y*delta.y + delta.z*delta.z;
@@ -1501,21 +1506,19 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
 
                 if (flyDist > 0.01f) {
                     if (flyDist < minDist) {
-                        // Too close — orbit sideways (ranged) or hover (melee)
+                        // Too close — smoothly retreat with gentle lateral drift
+                        Vec3 away = e.position - flyTarget;
+                        f32 awayLen = length(away);
+                        if (awayLen > 0.01f) away = away * (1.0f / awayLen);
                         Vec3 lateral = {-toFly.z, 0, toFly.x};
                         f32 latLen = sqrtf(lateral.x * lateral.x + lateral.z * lateral.z);
                         if (latLen > 0.01f) lateral = lateral * (1.0f / latLen);
-                        f32 orbitSpeed = isRangedFlyer ? 0.8f : 0.6f;
-                        e.velocity = lateral * effectiveSpeed * orbitSpeed;
+                        // Ranged flyers retreat mostly backward with slight orbit;
+                        // melee flyers orbit more aggressively
+                        f32 retreatWeight = isRangedFlyer ? 0.7f : 0.2f;
+                        f32 orbitWeight   = isRangedFlyer ? 0.3f : 0.6f;
+                        e.velocity = (away * retreatWeight + lateral * orbitWeight) * effectiveSpeed;
                         e.velocity.y = (flyTarget.y - e.position.y) * 2.0f;
-                        // Ranged flyers also back away when too close
-                        if (isRangedFlyer && flyDist < minDist * 0.7f) {
-                            Vec3 away = e.position - flyTarget;
-                            f32 awayLen = length(away);
-                            if (awayLen > 0.01f) {
-                                e.velocity = e.velocity + (away * (1.0f / awayLen)) * effectiveSpeed * 0.5f;
-                            }
-                        }
                     } else if (flyDist > e.attackRange * 0.95f || !isRangedFlyer) {
                         // Approach target (ranged flyers stop at 95% of attack range)
                         Vec3 flyDir = toFly * (1.0f / flyDist);
@@ -1911,22 +1914,31 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.pathIdx++;
                 } else {
                     Vec3 moveDir = normalize(Vec3{toWP.x, 0, toWP.z});
-                    // Sprint faster than normal chase to escape
-                    e.velocity.x = moveDir.x * effectiveSpeed * 1.4f;
-                    e.velocity.z = moveDir.z * effectiveSpeed * 1.4f;
-                    e.yaw = atan2f(-moveDir.x, -moveDir.z);
+                    // Ranged: kite at 70% speed facing player; melee: sprint away
+                    f32 retreatMult = (e.attackRange > 5.0f) ? 0.8f : 1.4f;
+                    e.velocity.x = moveDir.x * effectiveSpeed * retreatMult;
+                    e.velocity.z = moveDir.z * effectiveSpeed * retreatMult;
+                    if (e.attackRange > 5.0f) {
+                        // Face the player while kiting
+                        Vec3 toPlayer = player.position - e.position;
+                        e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
+                    } else {
+                        e.yaw = atan2f(-moveDir.x, -moveDir.z);
+                    }
                 }
             } else {
                 // No path or reached end — ranged enemies backpedal directly
                 // away from the player instead of standing still.
                 if (e.attackRange > 5.0f && dist < e.attackRange * 0.8f) {
+                    // Backpedal at 70% speed while facing the player
                     Vec3 away = e.position - player.position;
                     away.y = 0.0f;
                     if (lengthSq(away) > 0.01f) {
                         away = normalize(away);
-                        e.velocity.x = away.x * effectiveSpeed;
-                        e.velocity.z = away.z * effectiveSpeed;
-                        e.yaw = atan2f(-away.x, -away.z);
+                        e.velocity.x = away.x * effectiveSpeed * 0.8f;
+                        e.velocity.z = away.z * effectiveSpeed * 0.8f;
+                        Vec3 toPlayer = player.position - e.position;
+                        e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
                     }
                 } else {
                     // Melee or far enough — check home position

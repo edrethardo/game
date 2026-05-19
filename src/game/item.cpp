@@ -144,7 +144,6 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "life_on_hit"        || s == "LIFE_ON_HIT")        return AffixType::LIFE_ON_HIT;
     if (s == "projectile_speed"   || s == "PROJECTILE_SPEED")   return AffixType::PROJECTILE_SPEED;
     if (s == "cone_angle"         || s == "CONE_ANGLE")         return AffixType::CONE_ANGLE;
-    if (s == "range_bonus"        || s == "RANGE_BONUS")        return AffixType::RANGE_BONUS;
     if (s == "damage_to_flying"   || s == "DAMAGE_TO_FLYING")   return AffixType::DAMAGE_TO_FLYING;
     if (s == "clip_size_pct"      || s == "CLIP_SIZE_PCT")      return AffixType::CLIP_SIZE_PCT;
     if (s == "reload_speed_pct"   || s == "RELOAD_SPEED_PCT")   return AffixType::RELOAD_SPEED_PCT;
@@ -510,9 +509,8 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
                 weaponType != WeaponType::HITSCAN) continue;
             // Projectile speed only on projectile weapons
             if (at == AffixType::PROJECTILE_SPEED && weaponType != WeaponType::PROJECTILE) continue;
-            // Cone angle and range bonus only on melee weapons
+            // Cone angle only on melee weapons
             if (at == AffixType::CONE_ANGLE && weaponType != WeaponType::MELEE) continue;
-            if (at == AffixType::RANGE_BONUS && weaponType != WeaponType::MELEE) continue;
         }
         candidateIndices[candidateCount++] = i;
     }
@@ -523,8 +521,6 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
     bool usedTypes[static_cast<u32>(AffixType::COUNT)] = {};
 
     f32 linearScale = 1.0f + 0.06f * static_cast<f32>(itemLevel);
-    // Sqrt scale for affixes where linear growth is too extreme at high levels
-    f32 sqrtScale = sqrtf(linearScale);
 
     for (u8 a = 0; a < affixCount && item.affixCount < MAX_AFFIXES_PER_ITEM; a++) {
         // Shuffle-pick a random candidate that has an unused type
@@ -544,9 +540,7 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
 
         Affix affix;
         affix.type  = ad.type;
-        // Range bonus uses sqrt scaling so it doesn't grow too large at high levels
-        f32 scale = (ad.type == AffixType::RANGE_BONUS) ? sqrtScale : linearScale;
-        affix.value = (ad.minValue + randF01() * (ad.maxValue - ad.minValue)) * scale * rollVariance();
+        affix.value = (ad.minValue + randF01() * (ad.maxValue - ad.minValue)) * linearScale * rollVariance();
 
         item.affixes[item.affixCount++] = affix;
         usedTypes[static_cast<u32>(ad.type)] = true;
@@ -662,7 +656,6 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusLifeOnHit          = 0.0f;
     inv.bonusProjectileSpeedPct = 0.0f;
     inv.bonusConeAngle          = 0.0f;
-    inv.bonusRange              = 0.0f;
     inv.bonusDamageToFlying     = 0.0f;
     inv.bonusClipSizePct        = 0.0f;
     inv.bonusReloadSpeedPct     = 0.0f;
@@ -688,7 +681,6 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
                 case AffixType::LIFE_ON_HIT:        inv.bonusLifeOnHit          += affix.value; break;
                 case AffixType::PROJECTILE_SPEED:   inv.bonusProjectileSpeedPct += affix.value; break;
                 case AffixType::CONE_ANGLE:         inv.bonusConeAngle          += affix.value; break;
-                case AffixType::RANGE_BONUS:        inv.bonusRange              += affix.value; break;
                 case AffixType::DAMAGE_TO_FLYING:   inv.bonusDamageToFlying     += affix.value; break;
                 case AffixType::CLIP_SIZE_PCT:      inv.bonusClipSizePct        += affix.value; break;
                 case AffixType::RELOAD_SPEED_PCT:   inv.bonusReloadSpeedPct     += affix.value; break;
@@ -719,7 +711,6 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
     equip.bonusLifeOnHit          = 0.0f;
     equip.bonusProjectileSpeedPct = 0.0f;
     equip.bonusConeAngle          = 0.0f;
-    equip.bonusRange              = 0.0f;
     equip.bonusDamageToFlying     = 0.0f;
 
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
@@ -744,7 +735,6 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
                 case AffixType::LIFE_ON_HIT:        equip.bonusLifeOnHit          += affix.value; break;
                 case AffixType::PROJECTILE_SPEED:   equip.bonusProjectileSpeedPct += affix.value; break;
                 case AffixType::CONE_ANGLE:         equip.bonusConeAngle          += affix.value; break;
-                case AffixType::RANGE_BONUS:        equip.bonusRange              += affix.value; break;
                 case AffixType::DAMAGE_TO_FLYING:   equip.bonusDamageToFlying     += affix.value; break;
                 default: break;
             }
@@ -857,7 +847,7 @@ static WeaponDef buildWeaponDef(const ItemDef& def, const PlayerInventory& inv, 
     wd.cooldown        = def.baseCooldown * (1.0f - inv.bonusCooldownReduction);
     if (wd.cooldown < 0.05f) wd.cooldown = 0.05f; // hard minimum to prevent division by zero
 
-    wd.range           = def.baseRange + inv.bonusRange;
+    wd.range           = def.baseRange;
     wd.coneAngleDeg    = def.baseConeAngle + inv.bonusConeAngle;
     wd.projectileSpeed = def.baseProjectileSpeed * (1.0f + inv.bonusProjectileSpeedPct / 100.0f);
     wd.projectileRadius = def.baseProjectileRadius;

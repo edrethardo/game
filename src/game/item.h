@@ -49,7 +49,7 @@ enum struct AffixType : u8 {
     LIFE_ON_HIT,
     PROJECTILE_SPEED,
     CONE_ANGLE,
-    RANGE_BONUS,
+    _REMOVED_RANGE_BONUS, // deprecated — rerolled on load for save compatibility
     DAMAGE_TO_FLYING,
     CLIP_SIZE_PCT,      // % extra magazine capacity
     RELOAD_SPEED_PCT,   // % faster reload

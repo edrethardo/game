@@ -10,16 +10,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_DIR"
 
-echo "=== Fetching audio ==="
-python3 tools/fetch_audio.py
+echo "=== Fetching audio (if missing) ==="
+if [ ! -f assets/audio/sfx_hit_melee.wav ]; then
+    python3 tools/fetch_audio.py
+fi
 
-echo "=== Compressing music to OGG (if WAV present) ==="
+echo "=== Generating music (if missing) ==="
+if [ ! -f assets/audio/music_tier1.ogg ]; then
+    python3 tools/gen_audio.py --music-all
+fi
+
+echo "=== Cleaning stale music WAVs ==="
 for wav in assets/audio/music_tier*.wav; do
-    [ -f "$wav" ] || continue
-    ogg="${wav%.wav}.ogg"
-    [ -f "$ogg" ] && continue
-    echo "  $wav → $ogg"
-    ffmpeg -y -i "$wav" -c:a libvorbis -q:a 4 "$ogg" && rm "$wav"
+    [ -f "$wav" ] && rm "$wav"
 done
 
 echo "=== Building PC ==="

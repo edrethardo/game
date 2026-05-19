@@ -278,6 +278,23 @@ bool Engine::loadGame(u8 slot) {
         m_localPlayers[p].maxHealth = ps.maxHp;
 
         m_inventories[p] = ps.inv;
+        // Reroll deprecated affixes from old saves (e.g. removed RANGE_BONUS)
+        for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
+            ItemInstance& item = m_inventories[p].equipped[s];
+            for (u8 a = 0; a < item.affixCount; a++) {
+                if (item.affixes[a].type == AffixType::_REMOVED_RANGE_BONUS) {
+                    item.affixes[a].type = AffixType::DAMAGE_FLAT;
+                }
+            }
+        }
+        for (u32 b = 0; b < m_inventories[p].backpackCount; b++) {
+            ItemInstance& item = m_inventories[p].backpack[b];
+            for (u8 a = 0; a < item.affixCount; a++) {
+                if (item.affixes[a].type == AffixType::_REMOVED_RANGE_BONUS) {
+                    item.affixes[a].type = AffixType::DAMAGE_FLAT;
+                }
+            }
+        }
         Inventory::recalculateStats(m_inventories[p]);  // rebuild bonus cache from affixes
 
         m_quickbars[p]   = ps.qb;

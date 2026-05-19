@@ -93,10 +93,16 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
     u32 bucketCount[MAX_BUCKETS] = {};
     u32 totalInstances = 0;
 
-    // Pass 1: count per mesh
-    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+    // Early out if no projectiles active
+    if (pool.activeCount == 0) { glBindVertexArray(0); glUseProgram(0); return; }
+
+    // Pass 1: count per mesh (scan only up to activeCount found)
+    u32 seen = 0;
+    for (u32 i = 0; i < MAX_PROJECTILES && seen < pool.activeCount; i++) {
         const Projectile& p = pool.projectiles[i];
-        if (!p.active || p.meshId == 0 || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (!p.active) continue;
+        seen++;
+        if (p.meshId == 0 || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
         if (p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH)) continue;
         if (totalInstances >= MAX_INSTANCES_PER_BATCH) break;
         bucketCount[p.meshId]++;
@@ -111,9 +117,12 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
 
     // Pass 2: fill instance data with proper rotation + scale
     u32 bucketCur[MAX_BUCKETS] = {};
-    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+    seen = 0;
+    for (u32 i = 0; i < MAX_PROJECTILES && seen < pool.activeCount; i++) {
         const Projectile& p = pool.projectiles[i];
-        if (!p.active || p.meshId == 0 || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
+        if (!p.active) continue;
+        seen++;
+        if (p.meshId == 0 || p.meshId >= meshDefCount || p.meshId >= MAX_BUCKETS) continue;
         if (p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH)) continue;
         u32 mid = p.meshId;
         u32 slot = bucketStart[mid] + bucketCur[mid];

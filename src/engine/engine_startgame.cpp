@@ -137,13 +137,13 @@ void Engine::applyNpcEquipmentStats(Entity& e, const NpcEquipment& equip) {
 
         // Attack range depends on weapon type
         if (def.weaponType == WeaponType::PROJECTILE) {
-            e.attackRange = 12.0f + equip.bonusRange;
+            e.attackRange = 12.0f;
             e.npcProjectileSpeed = def.baseProjectileSpeed * (1.0f + equip.bonusProjectileSpeedPct / 100.0f);
             if (e.npcProjectileSpeed < 8.0f) e.npcProjectileSpeed = 12.0f;
             e.npcProjectileRadius = def.baseProjectileRadius;
             if (e.npcProjectileRadius < 0.05f) e.npcProjectileRadius = 0.1f;
         } else {
-            e.attackRange = def.baseRange + equip.bonusRange;
+            e.attackRange = def.baseRange;
             if (e.attackRange < 2.0f) e.attackRange = 2.5f;
         }
 
@@ -532,8 +532,15 @@ void Engine::startGame() {
             const DungeonRoom& room = dungeon.rooms[r];
 
             u32 area = room.w * room.d;
-            u32 enemyCount = (m_level.currentFloor == 1) ? 2 : (1 + (area / 15));
-            if (enemyCount > 5) enemyCount = 5;
+            u32 enemyCount;
+            if (m_level.currentFloor <= 10) {
+                // Floors 1-10: lighter spawns (1-3 per room)
+                enemyCount = 1 + (area / 25);
+                if (enemyCount > 3) enemyCount = 3;
+            } else {
+                enemyCount = 1 + (area / 15);
+                if (enemyCount > 5) enemyCount = 5;
+            }
 
             for (u32 e = 0; e < enemyCount; e++) {
 

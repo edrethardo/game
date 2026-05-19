@@ -1742,7 +1742,6 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::LIFE_ON_HIT:        return "Life on Hit";
         case AffixType::PROJECTILE_SPEED:   return "+Proj Speed";
         case AffixType::CONE_ANGLE:         return "+Swing Arc";
-        case AffixType::RANGE_BONUS:        return "+Range";
         case AffixType::DAMAGE_TO_FLYING:   return "+Dmg vs Flying";
         case AffixType::CLIP_SIZE_PCT:      return "+Clip Size %";
         case AffixType::RELOAD_SPEED_PCT:   return "+Reload Speed %";

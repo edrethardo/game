@@ -11,7 +11,7 @@
 // Beyond LOD distance, entities render as a single body mesh (no limb overhead).
 
 static constexpr u32 MAX_LIMBS = 12;
-static constexpr f32 LIMB_LOD_DIST_SQ = 144.0f; // 12m squared
+static constexpr f32 LIMB_LOD_DIST_SQ = 64.0f; // 8m — reduced for Switch perf
 
 struct LimbDef {
     Vec3 pivotOffset;   // relative to entity feet position

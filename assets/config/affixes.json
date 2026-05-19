@@ -64,13 +64,6 @@
       "maxValue": 25.0
     },
     {
-      "type": "range_bonus",
-      "name": "of Reach",
-      "slots": ["weapon"],
-      "minValue": 0.4,
-      "maxValue": 1.0
-    },
-    {
       "type": "damage_to_flying",
       "name": "of the Hawk",
       "slots": ["weapon", "ring"],

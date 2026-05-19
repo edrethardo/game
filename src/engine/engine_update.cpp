@@ -947,8 +947,10 @@ void Engine::gameUpdate(f32 dt) {
         }
     }
 
-    // Herald aura — burn/freeze players standing within 3m of any herald
-    for (u32 a = 0; a < m_entities.activeCount; a++) {
+    // Herald aura — staggered across 30 frames to avoid full entity scan every frame
+    static u32 s_heraldFrame = 0;
+    s_heraldFrame++;
+    for (u32 a = s_heraldFrame % 30; a < m_entities.activeCount; a += 30) {
         u32 idx = m_entities.activeList[a];
         Entity& e = m_entities.entities[idx];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;

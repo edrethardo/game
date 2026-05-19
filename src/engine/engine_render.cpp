@@ -1063,9 +1063,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         MaterialSystem::getIdByName("prop_web_d"),
     };
 
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < entPool.activeCount; a++) {
+        u32 i = entPool.activeList[a];
         const Entity& e = entPool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
 
         f32 scaleY = 1.0f;
         if (e.flags & ENT_DEAD) {
@@ -1178,15 +1178,29 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         }
 
         // Render articulated limbs (LOD: only when close enough to camera)
+        // Cap limb count when many enemies are active to stay within draw call budget
         if (e.enemyType != EnemyType::GENERIC && !(e.flags & ENT_DEAD)) {
             Vec3 toCamera = m_camera.position - e.position;
-            if (lengthSq(toCamera) < LIMB_LOD_DIST_SQ) {
-                // Use boss-specific limb config if available (extra limbs)
+            f32 limbLodSq = (e.enemyType == EnemyType::BAT) ? 225.0f : LIMB_LOD_DIST_SQ;
+            if (lengthSq(toCamera) < limbLodSq) {
                 const LimbConfig& limbCfg = (e.bossLimbConfig > 0)
                     ? LimbSystem::getBossConfig(e.bossLimbConfig)
                     : LimbSystem::getConfig(e.enemyType);
 
-                for (u32 li = 0; li < limbCfg.limbCount; li++) {
+                u32 maxLimbs = limbCfg.limbCount;
+#ifdef __SWITCH__
+                // Switch: spiders get mandibles only (2/10), others capped at 4 when busy
+                if (e.enemyType == EnemyType::SPIDER && e.bossDefIdx == 0xFF)
+                    maxLimbs = 2; // mandibles only, skip 8 foot tips
+                else if (entPool.activeCount > 15 && e.bossDefIdx == 0xFF)
+                    maxLimbs = (maxLimbs > 4) ? 4 : maxLimbs;
+#else
+                if (entPool.activeCount > 15 && e.bossDefIdx == 0xFF) {
+                    maxLimbs = (maxLimbs > 4) ? 4 : maxLimbs;
+                }
+#endif
+
+                for (u32 li = 0; li < maxLimbs; li++) {
                     u8 limbMesh = (e.bossLimbConfig > 0)
                         ? LimbSystem::getBossLimbMeshId(e.bossLimbConfig, li)
                         : LimbSystem::getLimbMeshId(e.enemyType, li);
@@ -1399,9 +1413,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
     }
 
     // Stun indicator — 3 spinning stars orbiting above stunned entity heads
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < entPool.activeCount; a++) {
+        u32 i = entPool.activeList[a];
         const Entity& e = entPool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
         if (e.stunTimer <= 0.0f) continue;
 
@@ -1427,9 +1441,10 @@ void Engine::renderEntities(u32 sw, u32 sh) {
 
     // Enemy rim aura — subtle colored lines around the entity's feet so they
     // pop from the background.  Uses DebugDraw (pure color, no texture).
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+#ifndef __SWITCH__  // skip on Switch for performance
+    for (u32 a = 0; a < entPool.activeCount; a++) {
+        u32 i = entPool.activeList[a];
         const Entity& e = entPool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;
         if (e.enemyType == EnemyType::PROP) continue;
@@ -1463,10 +1478,11 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             DebugDraw::line(p0, p1, col);
         }
     }
+#endif // !__SWITCH__
 
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+    for (u32 a = 0; a < entPool.activeCount; a++) {
+        u32 i = entPool.activeList[a];
         const Entity& e = entPool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
         if (!(e.enemyRole & EnemyRole::AURA)) continue;
 
@@ -1500,9 +1516,10 @@ void Engine::renderEntities(u32 sw, u32 sh) {
 
     // Enemy light source — starburst glow lines radiating from each entity's
     // center to simulate a small point light.  Pure DebugDraw lines (no texture).
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+#ifndef __SWITCH__  // skip on Switch for performance
+    for (u32 a = 0; a < entPool.activeCount; a++) {
+        u32 i = entPool.activeList[a];
         const Entity& e = entPool.entities[i];
-        if (!(e.flags & ENT_ACTIVE)) continue;
         if (e.flags & ENT_DEAD) continue;
         if (e.enemyType == EnemyType::PROP) continue;
 
@@ -1549,6 +1566,7 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         // Vertical accent line (upward glow)
         DebugDraw::line(lightPos, lightPos + Vec3{0, lightRadius * 0.6f, 0}, col * 0.8f);
     }
+#endif // !__SWITCH__
 }
 
 // ---------------------------------------------------------------------------
