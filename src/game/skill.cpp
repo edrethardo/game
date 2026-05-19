@@ -823,7 +823,8 @@ static void fireFanOfKnives(Vec3 origin, Vec3 forward, const SkillDef* def,
 // Shadow Step: teleport behind nearest enemy. Backstab 3× from stealth.
 // Gain stealth after the strike. Dark purple trail + smoke VFX.
 static void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
-                             EntityPool& entities, Player& player)
+                             const LevelGrid& grid, EntityPool& entities,
+                             Player& player)
 {
     f32 range = def->distance > 0.0f ? def->distance : 15.0f;
     EntityHandle hits[MAX_ENTITIES];
@@ -837,8 +838,21 @@ static void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
     Entity* target = handleGet(entities, hits[0]);
     if (!target || (target->flags & ENT_DEAD) || (target->flags & ENT_FRIENDLY)) return;
 
-    // Teleport behind the target
+    // Teleport behind the target — validate destination is walkable
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
+    u32 cx = static_cast<u32>(behind.x / grid.cellSize);
+    u32 cz = static_cast<u32>(behind.z / grid.cellSize);
+    if (cx >= grid.width || cz >= grid.depth ||
+        (grid.cells[cz * grid.width + cx].flags & CELL_SOLID)) {
+        // Destination blocked — teleport to target's position instead
+        behind = target->position;
+    }
+    // Snap to floor height so the player doesn't float or fall through
+    u32 fx = static_cast<u32>(behind.x / grid.cellSize);
+    u32 fz = static_cast<u32>(behind.z / grid.cellSize);
+    if (fx < grid.width && fz < grid.depth) {
+        behind.y = LevelGridSystem::getFloorHeight(grid, fx, fz);
+    }
     Vec3 startPos = player.position;
     player.position = behind;
 
@@ -1966,7 +1980,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireShadowStrike(eyePos, forward, def, entities, player);
         break;
     case SkillId::SHADOW_STEP:
-        fireShadowStep(eyePos, forward, def, entities, player);
+        fireShadowStep(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::SHADOW_DANCE:
         fireShadowDance(player);

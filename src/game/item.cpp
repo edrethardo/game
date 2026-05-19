@@ -499,8 +499,9 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
                 weaponType != WeaponType::HITSCAN) continue;
             // Projectile speed only on projectile weapons
             if (at == AffixType::PROJECTILE_SPEED && weaponType != WeaponType::PROJECTILE) continue;
-            // Cone angle only on melee weapons
+            // Cone angle and range bonus only on melee weapons
             if (at == AffixType::CONE_ANGLE && weaponType != WeaponType::MELEE) continue;
+            if (at == AffixType::RANGE_BONUS && weaponType != WeaponType::MELEE) continue;
         }
         candidateIndices[candidateCount++] = i;
     }
@@ -828,8 +829,12 @@ static WeaponDef buildWeaponDef(const ItemDef& def, const PlayerInventory& inv, 
     wd.name            = def.name;
     wd.type            = def.weaponType;
 
-    // Base damage from the rolled item, plus flat bonus from affixes
-    f32 rawDamage      = baseDamage + inv.bonusDamageFlat;
+    // Flat damage scaled by fire rate — sqrt falloff for fast weapons (gentler
+    // than linear), linear for slow weapons (full ratio, no cap).
+    f32 cdRef = 0.4f;
+    f32 ratio = (def.baseCooldown > 0.05f) ? (def.baseCooldown / cdRef) : 1.0f;
+    f32 flatScale = (ratio <= 1.0f) ? sqrtf(ratio) : (ratio * ratio);
+    f32 rawDamage      = baseDamage + inv.bonusDamageFlat * flatScale;
     // Apply percentage bonus (stored as a raw multiplier addition, e.g. 10 = +10%)
     wd.damage          = rawDamage * (1.0f + inv.bonusDamagePct / 100.0f);
 

@@ -710,8 +710,10 @@ void Engine::init() {
                 if (item.rarity < Rarity::MAGIC) item.rarity = Rarity::MAGIC;
                 // Re-roll affixes for magic quality (1-2 affixes)
                 if (item.affixCount == 0) {
-                    ItemGen::rollAffixes(item, lvl, s_engine->m_itemDefs[item.defId].slot,
-                                          s_engine->m_affixDefs, s_engine->m_affixDefCount);
+                    const ItemDef& idef = s_engine->m_itemDefs[item.defId];
+                    ItemGen::rollAffixes(item, lvl, idef.slot,
+                                          s_engine->m_affixDefs, s_engine->m_affixDefCount,
+                                          idef.weaponType);
                 }
                 WorldItemSystem::spawn(s_engine->m_worldItems, item,
                                        position + Vec3{0, 0.5f, 0}, &s_engine->m_level.grid);
@@ -726,20 +728,28 @@ void Engine::init() {
             u8 bossLvl = pool.entities[entityIndex].level;
             if (bossLvl < 1) bossLvl = 1;
 
-            // Guaranteed quality drop
-            ItemInstance bossItem = ItemGen::rollItem(bossLvl, s_engine->m_itemDefs,
-                                                      s_engine->m_itemDefCount,
-                                                      s_engine->m_affixDefs,
-                                                      s_engine->m_affixDefCount);
+            // Guaranteed quality drop — re-roll until we get a true legendary
+            // (an item whose definition supports legendary rarity + has a skill)
+            Rarity minRarity = static_cast<Rarity>(bd.lootGuarantee);
+            ItemInstance bossItem;
+            for (u32 attempt = 0; attempt < 50; attempt++) {
+                bossItem = ItemGen::rollItem(bossLvl, s_engine->m_itemDefs,
+                                              s_engine->m_itemDefCount,
+                                              s_engine->m_affixDefs,
+                                              s_engine->m_affixDefCount);
+                if (isItemEmpty(bossItem)) break;
+                // Accept if the item's definition can actually be this rarity
+                if (s_engine->m_itemDefs[bossItem.defId].maxRarity >= minRarity) break;
+            }
             if (!isItemEmpty(bossItem)) {
-                Rarity minRarity = static_cast<Rarity>(bd.lootGuarantee);
                 if (bossItem.rarity < minRarity) {
                     bossItem.rarity = minRarity;
-                    // Re-roll affixes for the upgraded rarity
+                    // Re-roll affixes for the upgraded rarity with correct weapon type
                     bossItem.affixCount = 0;
-                    ItemGen::rollAffixes(bossItem, bossLvl,
-                                          s_engine->m_itemDefs[bossItem.defId].slot,
-                                          s_engine->m_affixDefs, s_engine->m_affixDefCount);
+                    const ItemDef& biDef = s_engine->m_itemDefs[bossItem.defId];
+                    ItemGen::rollAffixes(bossItem, bossLvl, biDef.slot,
+                                          s_engine->m_affixDefs, s_engine->m_affixDefCount,
+                                          biDef.weaponType);
                 }
                 WorldItemSystem::spawn(s_engine->m_worldItems, bossItem,
                                        position + Vec3{0, 0.5f, 0}, &s_engine->m_level.grid);

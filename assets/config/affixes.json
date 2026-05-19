@@ -66,9 +66,9 @@
     {
       "type": "range_bonus",
       "name": "of Reach",
-      "slots": [],
-      "minValue": 1.0,
-      "maxValue": 5.0
+      "slots": ["weapon"],
+      "minValue": 0.7,
+      "maxValue": 1.5
     },
     {
       "type": "damage_to_flying",
