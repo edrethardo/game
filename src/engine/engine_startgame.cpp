@@ -542,6 +542,11 @@ void Engine::startGame() {
                 if (enemyCount > 5) enemyCount = 5;
             }
 
+#ifdef __SWITCH__
+            // Switch: cap at 3/room for all floors to keep entity count under ~48
+            if (enemyCount > 3) enemyCount = 3;
+#endif
+
             for (u32 e = 0; e < enemyCount; e++) {
 
                 if (useJsonDefs) {

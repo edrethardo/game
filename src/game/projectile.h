@@ -15,7 +15,12 @@ static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
 static constexpr u8 PROJ_SPARK     = 1 << 4;  // Lightning bolt visual (jagged line)
 static constexpr u8 PROJ_VOID      = 1 << 5;  // Void weapon projectile (purple tint)
 
+// Switch: smaller pool for better cache utilization on Tegra X1 (A57 at 1 GHz)
+#ifdef __SWITCH__
+static constexpr u32 MAX_PROJECTILES = 512;
+#else
 static constexpr u32 MAX_PROJECTILES = 4096;
+#endif
 
 // Active projectile instance. Moves each frame, collides with walls and entities.
 // projFlags bits: 0=isOrb (Frozen Orb skill), 1=isOrbShard (sub-projectile)
@@ -45,6 +50,7 @@ struct Projectile {
 
 struct ProjectilePool {
     Projectile projectiles[MAX_PROJECTILES];
+    u16 activeList[MAX_PROJECTILES]; // indices of active projectiles (dense)
     u32 activeCount = 0;
 };
 

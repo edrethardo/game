@@ -808,9 +808,11 @@ void Engine::render(f32 alpha) {
             }
         }
         // Active projectiles with non-zero lightColor
-        for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES; pi++) {
+        u32 plSeen = 0;
+        for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES && plSeen < m_projectiles.activeCount; pi++) {
             const Projectile& p = m_projectiles.projectiles[pi];
             if (!p.active) continue;
+            plSeen++;
             if (p.lightColor.x == 0.0f && p.lightColor.y == 0.0f && p.lightColor.z == 0.0f) continue;
             candPos[candCount] = p.position;
             candCol[candCount] = p.lightColor;
@@ -1585,9 +1587,11 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
                                m_meshIdArrow, m_meshIdBolt);
 
     // Per-projectile special effects (orbs, sparks, generic cubes)
-    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+    u32 pxSeen = 0;
+    for (u32 i = 0; i < MAX_PROJECTILES && pxSeen < projPool.activeCount; i++) {
         const Projectile& p = projPool.projectiles[i];
         if (!p.active) continue;
+        pxSeen++;
 
         // Skip mesh-based projectiles handled by the instanced path above
         if (p.meshId > 0 && !(p.projFlags & (PROJ_ORB | PROJ_SPARK | PROJ_SPLASH))) continue;
@@ -2220,8 +2224,8 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
     }
 
     // Particle pool — rendered after all DebugDraw calls so particles composite on top
-    ParticleSystem::render(m_particles, m_camera, m_unlitShader, m_cubeMesh,
-                           m_particleBlobMatId, m_particleSparkMatId);
+    ParticleSystem::render(m_particles, m_camera, m_particleShader, m_unlitShader,
+                           m_cubeMesh, m_particleBlobMatId, m_particleSparkMatId);
 }
 
 // ---------------------------------------------------------------------------

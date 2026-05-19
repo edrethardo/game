@@ -1,7 +1,8 @@
 #pragma once
 // Particle pool — lightweight visual FX for blood, sparks, magic, smoke, debris.
-// Static array of MAX_PARTICLES particles, rendered via Renderer::submit() each frame.
-// Billboard particles use a camera-facing quad; geometric particles use the cube mesh.
+// Billboard particles are batched into a single draw call via a dynamic VBO with
+// per-vertex color (particle.vert/frag shader). Geometric particles (cubes) still
+// use individual Renderer::submit() calls since they share the cube mesh.
 
 #include "core/types.h"
 #include "core/math.h"
@@ -32,9 +33,21 @@ struct Particle {
     bool active;
 };
 
+// Per-vertex data for batched billboard particles (world-space pre-transformed)
+struct ParticleVertex {
+    Vec3 position;   // world-space corner of the billboard quad
+    Vec4 color;      // RGBA per-vertex (includes alpha fade)
+    Vec2 uv;         // texture coordinates
+};
+
 struct ParticlePool {
     Particle particles[MAX_PARTICLES];
     u32 activeCount;  // cached for fast skip in render
+
+    // Batch rendering GPU handles — initialized by initBatchBuffers()
+    u32 batchVAO = 0;
+    u32 batchVBO = 0;
+    u32 batchIBO = 0;
 };
 
 struct Camera;
@@ -43,9 +56,14 @@ struct Mesh;
 
 namespace ParticleSystem {
     void init(ParticlePool& pool);
+    void initBatchBuffers(ParticlePool& pool);
+    void shutdownBatchBuffers(ParticlePool& pool);
     void update(ParticlePool& pool, f32 dt);
+    // particleShader is the batched per-vertex-color shader (particle.vert/frag).
+    // unlitShader is still used for geometric (cube) particles via Renderer::submit().
     void render(const ParticlePool& pool, const Camera& cam,
-                const Shader& unlitShader, const Mesh& cubeMesh,
+                const Shader& particleShader, const Shader& unlitShader,
+                const Mesh& cubeMesh,
                 u8 blobMaterialId, u8 sparkMaterialId);
     void clear(ParticlePool& pool);
 

@@ -859,9 +859,12 @@ void Engine::gameUpdate(f32 dt) {
                 m_localPlayers[1].position + Vec3{-PLAYER_HALF_WIDTH, 0, -PLAYER_HALF_WIDTH},
                 m_localPlayers[1].position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
             };
-            for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+            u32 pSeen = 0;
+            for (u32 pi = 0; pi < MAX_PROJECTILES && pSeen < m_projectiles.activeCount; pi++) {
                 Projectile& p = m_projectiles.projectiles[pi];
-                if (!p.active || p.fromPlayer) continue; // only enemy projectiles
+                if (!p.active) continue;
+                pSeen++;
+                if (p.fromPlayer) continue; // only enemy projectiles
                 AABB projBox = {p.position - Vec3{p.radius,p.radius,p.radius},
                                 p.position + Vec3{p.radius,p.radius,p.radius}};
                 if (CombatQuery::aabbOverlap(projBox, p2Box)) {
@@ -1609,9 +1612,11 @@ void Engine::pushPlayerFromEntities() {
         m_localPlayer.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
         m_localPlayer.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
     };
-    for (u32 i = 0; i < MAX_ENTITIES; i++) {
-        Entity& e = m_entities.entities[i];
-        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+    // Use activeList instead of scanning all 128 entity slots
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;
         if (e.enemyType == EnemyType::PROP) continue;
         AABB entBox = entityAABB(e);

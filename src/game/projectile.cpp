@@ -34,6 +34,7 @@ void ProjectileSystem::init(ProjectilePool& pool) {
     pool.activeCount = 0;
     for (u32 i = 0; i < MAX_PROJECTILES; i++) {
         pool.projectiles[i].active = false;
+        pool.activeList[i] = 0;
     }
 }
 
@@ -59,6 +60,7 @@ u16 ProjectileSystem::spawn(ProjectilePool& pool,
             p.orbAngle   = 0.0f;
             p.meshId     = 0;
             p.fromPlayer = fromPlayer;
+            pool.activeList[pool.activeCount] = static_cast<u16>(i);
             pool.activeCount++;
             return static_cast<u16>(i);
         }
@@ -68,6 +70,13 @@ u16 ProjectileSystem::spawn(ProjectilePool& pool,
 
 static void destroyProjectile(ProjectilePool& pool, u32 idx) {
     pool.projectiles[idx].active = false;
+    // Swap-remove from activeList
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        if (pool.activeList[a] == static_cast<u16>(idx)) {
+            pool.activeList[a] = pool.activeList[pool.activeCount - 1];
+            break;
+        }
+    }
     if (pool.activeCount > 0) pool.activeCount--;
 }
 
@@ -78,9 +87,12 @@ void ProjectileSystem::update(ProjectilePool& pool,
                                f32 dt,
                                const SpatialGrid* spatialGrid)
 {
-    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+    // Scan pool but exit early once all active projectiles are processed
+    u32 seen = 0;
+    for (u32 i = 0; i < MAX_PROJECTILES && seen < pool.activeCount; i++) {
         Projectile& p = pool.projectiles[i];
         if (!p.active) continue;
+        seen++;
 
         // Lifetime
         p.lifetime -= dt;

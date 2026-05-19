@@ -64,14 +64,17 @@ void Minimap::init(u32 gridWidth, u32 gridDepth) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
 
-    // VAO / VBO — dynamic buffer big enough for 12 vertices (reused for each draw call)
+    // VAO / VBO — dynamic buffer sized for all minimap geometry per frame:
+    // frame(6) + bg(6) + map(6) + player dot(6) + arrow(3) + up to 128 entity dots(6 each)
+    // = 27 + 768 = 795 verts max. Round up to 896.
+    static constexpr u32 MINIMAP_MAX_VERTS = 896;
     if (!s_minimapVAO) {
         glGenVertexArrays(1, &s_minimapVAO);
         glBindVertexArray(s_minimapVAO);
 
         glGenBuffers(1, &s_minimapVBO);
         glBindBuffer(GL_ARRAY_BUFFER, s_minimapVBO);
-        glBufferData(GL_ARRAY_BUFFER, 12 * sizeof(MinimapVertex), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, MINIMAP_MAX_VERTS * sizeof(MinimapVertex), nullptr, GL_DYNAMIC_DRAW);
 
         // aPos  (location 0)
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(MinimapVertex),
@@ -270,72 +273,66 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
     glBindBuffer(GL_ARRAY_BUFFER, s_minimapVBO);
 
     // ------------------------------------------------------------------
-    // 1. Frame + dark background behind the map
+    // 1. Frame + dark background (batched into one upload, two draws)
     // ------------------------------------------------------------------
     {
-        // Outer frame (bright edge)
         static constexpr f32 FRAME = 3.0f;
         f32 fx0 = mapX - BORDER - FRAME;
         f32 fy0 = mapY - BORDER - FRAME;
         f32 fx1 = mapX + MAP_SIZE + BORDER + FRAME;
         f32 fy1 = mapY + MAP_SIZE + BORDER + FRAME;
+        f32 bx0 = mapX - BORDER;
+        f32 by0 = mapY - BORDER;
+        f32 bx1 = mapX + MAP_SIZE + BORDER;
+        f32 by1 = mapY + MAP_SIZE + BORDER;
 
-        MinimapVertex frame[6];
-        frame[0] = {{fx0, fy0, 0}, {0, 0}};
-        frame[1] = {{fx1, fy0, 0}, {1, 0}};
-        frame[2] = {{fx1, fy1, 0}, {1, 1}};
-        frame[3] = {{fx0, fy0, 0}, {0, 0}};
-        frame[4] = {{fx1, fy1, 0}, {1, 1}};
-        frame[5] = {{fx0, fy1, 0}, {0, 1}};
+        // Upload both quads (frame + bg) in one call: 12 verts
+        MinimapVertex frameBg[12];
+        frameBg[0]  = {{fx0, fy0, 0}, {0, 0}};
+        frameBg[1]  = {{fx1, fy0, 0}, {1, 0}};
+        frameBg[2]  = {{fx1, fy1, 0}, {1, 1}};
+        frameBg[3]  = {{fx0, fy0, 0}, {0, 0}};
+        frameBg[4]  = {{fx1, fy1, 0}, {1, 1}};
+        frameBg[5]  = {{fx0, fy1, 0}, {0, 1}};
+        frameBg[6]  = {{bx0, by0, 0}, {0, 0}};
+        frameBg[7]  = {{bx1, by0, 0}, {1, 0}};
+        frameBg[8]  = {{bx1, by1, 0}, {1, 1}};
+        frameBg[9]  = {{bx0, by0, 0}, {0, 0}};
+        frameBg[10] = {{bx1, by1, 0}, {1, 1}};
+        frameBg[11] = {{bx0, by1, 0}, {0, 1}};
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, s_whiteTex);
         if (s_minimapShader.loc_texture0 >= 0)
             glUniform1i(s_minimapShader.loc_texture0, 0);
 
-        // Draw frame in muted gold
-        glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), frame);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, 12 * sizeof(MinimapVertex), frameBg);
+
+        // Frame (gold)
         if (s_minimapShader.loc_color >= 0)
             glUniform4f(s_minimapShader.loc_color, 0.55f, 0.45f, 0.2f, 0.9f);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        // Dark background inside frame
-        f32 bx0 = mapX - BORDER;
-        f32 by0 = mapY - BORDER;
-        f32 bx1 = mapX + MAP_SIZE + BORDER;
-        f32 by1 = mapY + MAP_SIZE + BORDER;
-
-        MinimapVertex bg[6];
-        bg[0] = {{bx0, by0, 0}, {0, 0}};
-        bg[1] = {{bx1, by0, 0}, {1, 0}};
-        bg[2] = {{bx1, by1, 0}, {1, 1}};
-        bg[3] = {{bx0, by0, 0}, {0, 0}};
-        bg[4] = {{bx1, by1, 0}, {1, 1}};
-        bg[5] = {{bx0, by1, 0}, {0, 1}};
-
-        glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), bg);
+        // Background (dark) — already uploaded at offset 6
         if (s_minimapShader.loc_color >= 0)
             glUniform4f(s_minimapShader.loc_color, 0.0f, 0.0f, 0.0f, 0.85f);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDrawArrays(GL_TRIANGLES, 6, 6);
     }
 
     // ------------------------------------------------------------------
     // 2. Dungeon map quad (textured)
-    //    UV convention: (0,0) = top-left of texture = grid cell (x=0, z=0)
-    //    Screen Y increases upward; grid Z increases "into" the level.
-    //    We flip V so that low-Z rows appear at the top of the minimap.
     // ------------------------------------------------------------------
     {
         f32 x0 = mapX, y0 = mapY;
         f32 x1 = mapX + MAP_SIZE, y1 = mapY + MAP_SIZE;
 
         MinimapVertex mv[6];
-        mv[0] = {{x0, y0, 0}, {0, 1}};  // bottom-left  screen  → high-Z row
-        mv[1] = {{x1, y0, 0}, {1, 1}};  // bottom-right screen  → high-Z row
-        mv[2] = {{x1, y1, 0}, {1, 0}};  // top-right    screen  → low-Z  row
+        mv[0] = {{x0, y0, 0}, {0, 1}};
+        mv[1] = {{x1, y0, 0}, {1, 1}};
+        mv[2] = {{x1, y1, 0}, {1, 0}};
         mv[3] = {{x0, y0, 0}, {0, 1}};
         mv[4] = {{x1, y1, 0}, {1, 0}};
-        mv[5] = {{x0, y1, 0}, {0, 0}};  // top-left     screen  → low-Z  row
+        mv[5] = {{x0, y1, 0}, {0, 0}};
 
         glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), mv);
 
@@ -424,39 +421,45 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
     }
 
     // ------------------------------------------------------------------
-    // 4. Friendly NPC dots: pale green squares on the minimap
+    // 4. Friendly NPC dots: batched into a single upload + draw call
     // ------------------------------------------------------------------
-    for (u32 a = 0; a < entities.activeCount; a++) {
-        u32 eidx = entities.activeList[a];
-        const Entity& ent = entities.entities[eidx];
-        if (!(ent.flags & ENT_FRIENDLY)) continue;
-        if (ent.flags & ENT_DEAD) continue;
-
-        u32 nx, nz;
-        if (!LevelGridSystem::worldToGrid(grid, ent.position, nx, nz)) continue;
-
-        f32 normX = (static_cast<f32>(nx) + 0.5f) / static_cast<f32>(s_gridW);
-        f32 normZ = (static_cast<f32>(nz) + 0.5f) / static_cast<f32>(s_gridD);
-
-        f32 ndX = mapX + normX * MAP_SIZE;
-        f32 ndY = mapY + (1.0f - normZ) * MAP_SIZE;
-
+    {
         static constexpr f32 NPC_DOT = 2.0f;
-        MinimapVertex npcDot[6];
-        npcDot[0] = {{ndX - NPC_DOT, ndY - NPC_DOT, 0}, {0, 0}};
-        npcDot[1] = {{ndX + NPC_DOT, ndY - NPC_DOT, 0}, {1, 0}};
-        npcDot[2] = {{ndX + NPC_DOT, ndY + NPC_DOT, 0}, {1, 1}};
-        npcDot[3] = {{ndX - NPC_DOT, ndY - NPC_DOT, 0}, {0, 0}};
-        npcDot[4] = {{ndX + NPC_DOT, ndY + NPC_DOT, 0}, {1, 1}};
-        npcDot[5] = {{ndX - NPC_DOT, ndY + NPC_DOT, 0}, {0, 1}};
+        static constexpr u32 MAX_NPC_DOTS = 128;
+        MinimapVertex npcBatch[MAX_NPC_DOTS * 6];
+        u32 npcVertCount = 0;
 
-        glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), npcDot);
+        for (u32 a = 0; a < entities.activeCount; a++) {
+            u32 eidx = entities.activeList[a];
+            const Entity& ent = entities.entities[eidx];
+            if (!(ent.flags & ENT_FRIENDLY)) continue;
+            if (ent.flags & ENT_DEAD) continue;
 
-        glBindTexture(GL_TEXTURE_2D, s_whiteTex);
-        if (s_minimapShader.loc_color >= 0)
-            glUniform4f(s_minimapShader.loc_color, 0.4f, 0.9f, 0.5f, 0.85f);
+            u32 nx, nz;
+            if (!LevelGridSystem::worldToGrid(grid, ent.position, nx, nz)) continue;
 
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+            f32 normX = (static_cast<f32>(nx) + 0.5f) / static_cast<f32>(s_gridW);
+            f32 normZ = (static_cast<f32>(nz) + 0.5f) / static_cast<f32>(s_gridD);
+
+            f32 ndX = mapX + normX * MAP_SIZE;
+            f32 ndY = mapY + (1.0f - normZ) * MAP_SIZE;
+
+            if (npcVertCount + 6 > MAX_NPC_DOTS * 6) break;
+            npcBatch[npcVertCount++] = {{ndX - NPC_DOT, ndY - NPC_DOT, 0}, {0, 0}};
+            npcBatch[npcVertCount++] = {{ndX + NPC_DOT, ndY - NPC_DOT, 0}, {1, 0}};
+            npcBatch[npcVertCount++] = {{ndX + NPC_DOT, ndY + NPC_DOT, 0}, {1, 1}};
+            npcBatch[npcVertCount++] = {{ndX - NPC_DOT, ndY - NPC_DOT, 0}, {0, 0}};
+            npcBatch[npcVertCount++] = {{ndX + NPC_DOT, ndY + NPC_DOT, 0}, {1, 1}};
+            npcBatch[npcVertCount++] = {{ndX - NPC_DOT, ndY + NPC_DOT, 0}, {0, 1}};
+        }
+
+        if (npcVertCount > 0) {
+            glBindTexture(GL_TEXTURE_2D, s_whiteTex);
+            if (s_minimapShader.loc_color >= 0)
+                glUniform4f(s_minimapShader.loc_color, 0.4f, 0.9f, 0.5f, 0.85f);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, npcVertCount * sizeof(MinimapVertex), npcBatch);
+            glDrawArrays(GL_TRIANGLES, 0, npcVertCount);
+        }
     }
 
     // Restore GL state

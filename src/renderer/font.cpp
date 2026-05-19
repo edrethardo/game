@@ -261,12 +261,14 @@ void FontSystem::drawText(u32 screenWidth, u32 screenHeight,
 
     if (vertCount == 0) return;
 
-    // Upload and draw
+    // Upload and draw — orphan the buffer first to avoid CPU-GPU stall
+    // (glBufferData with NULL tells the driver to allocate a fresh buffer)
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glBindBuffer(GL_ARRAY_BUFFER, s_textVBO);
+    glBufferData(GL_ARRAY_BUFFER, MAX_TEXT_VERTS * sizeof(TextVertex), nullptr, GL_STREAM_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertCount * sizeof(TextVertex), verts);
 
     glUseProgram(s_textShader.program);

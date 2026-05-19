@@ -177,13 +177,31 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
     }
 
+    // Frame counter for staggering expensive per-entity work (LOS, AI state)
+    static u32 s_frameTick = 0;
+    s_frameTick++;
+
+    // Pre-compute friendly group center once per frame so archers don't each scan O(N)
+    static Vec3 s_friendlyGroupCenter = {0,0,0};
+    static u32  s_friendlyGroupCount  = 0;
+    {
+        Vec3 grpC = {0,0,0}; u32 grpN = 0;
+        for (u32 a = 0; a < pool.activeCount; a++) {
+            const Entity& ent = pool.entities[pool.activeList[a]];
+            if ((ent.flags & ENT_FRIENDLY) && !(ent.flags & ENT_DEAD)) {
+                grpC = grpC + ent.position; grpN++;
+            }
+        }
+        if (grpN > 1) grpC = grpC * (1.0f / static_cast<f32>(grpN));
+        s_friendlyGroupCenter = grpC;
+        s_friendlyGroupCount  = grpN;
+    }
+
     // Herald aura — staggered over 15 frames so the O(N²) check runs ~4×/sec
     constexpr f32 AURA_RADIUS_SQ = 18.0f * 18.0f;
     constexpr u32 AURA_STAGGER = 15;
-    static u32 s_auraFrame = 0;
-    s_auraFrame++;
     for (u32 a = 0; a < pool.activeCount; a++) {
-        if ((a % AURA_STAGGER) != (s_auraFrame % AURA_STAGGER)) continue;
+        if ((a % AURA_STAGGER) != (s_frameTick % AURA_STAGGER)) continue;
         Entity& herald = pool.entities[pool.activeList[a]];
         if (!(herald.enemyRole & EnemyRole::AURA)) continue;
         if (herald.flags & ENT_DEAD) continue;
@@ -328,25 +346,45 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // ---------------------------------------------------------------
 
             // --- 1. Find closest hostile enemy within detection range ---
-            f32 bestEnemyDist = e.detectionRange;
-            u16 bestEnemyIdx = 0xFFFF;
-            Vec3 enemyPos = {0,0,0};
-            for (u32 ni = 0; ni < pool.activeCount; ni++) {
-                u32 nIdx = pool.activeList[ni];
-                const Entity& enemy = pool.entities[nIdx];
-                if (enemy.flags & ENT_FRIENDLY) continue;
-                if (enemy.flags & ENT_DEAD) continue;
-                if (!(enemy.flags & ENT_ACTIVE)) continue;
-                if (enemy.enemyType == EnemyType::PROP) continue;
-                Vec3 toE = enemy.position - e.position;
-                f32 d2 = length(toE);
-                if (d2 < bestEnemyDist) {
-                    bestEnemyDist = d2;
-                    bestEnemyIdx = static_cast<u16>(nIdx);
-                    enemyPos = enemy.position;
-                }
+            // Staggered: only rescan every 8 frames. Use cached target otherwise.
+            // If cached target died, force an immediate rescan.
+            bool needTargetRescan = ((i + s_frameTick) % 8 == 0);
+            if (e.targetEntityIdx < MAX_ENTITIES) {
+                const Entity& cached = pool.entities[e.targetEntityIdx];
+                if ((cached.flags & ENT_DEAD) || !(cached.flags & ENT_ACTIVE) ||
+                    (cached.flags & ENT_FRIENDLY))
+                    needTargetRescan = true;
+            } else {
+                needTargetRescan = true; // no cached target
             }
-            e.targetEntityIdx = bestEnemyIdx;
+
+            f32 bestEnemyDist = e.detectionRange;
+            u16 bestEnemyIdx = e.targetEntityIdx;
+            Vec3 enemyPos = {0,0,0};
+
+            if (needTargetRescan) {
+                bestEnemyIdx = 0xFFFF;
+                for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                    u32 nIdx = pool.activeList[ni];
+                    const Entity& enemy = pool.entities[nIdx];
+                    if (enemy.flags & ENT_FRIENDLY) continue;
+                    if (enemy.flags & ENT_DEAD) continue;
+                    if (!(enemy.flags & ENT_ACTIVE)) continue;
+                    if (enemy.enemyType == EnemyType::PROP) continue;
+                    Vec3 toE = enemy.position - e.position;
+                    f32 d2 = length(toE);
+                    if (d2 < bestEnemyDist) {
+                        bestEnemyDist = d2;
+                        bestEnemyIdx = static_cast<u16>(nIdx);
+                        enemyPos = enemy.position;
+                    }
+                }
+                e.targetEntityIdx = bestEnemyIdx;
+            } else if (bestEnemyIdx < MAX_ENTITIES) {
+                // Use cached target position
+                enemyPos = pool.entities[bestEnemyIdx].position;
+                bestEnemyDist = length(enemyPos - e.position);
+            }
 
             // --- 2. Cleric healing (always runs, even during combat) ---
             if (e.npcClass == NpcClass::CLERIC) {
@@ -459,15 +497,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 } else if (e.npcClass == NpcClass::ARCHER) {
                     // Archer: only kite if has LOS (can actually shoot).
                     // Without LOS, rejoin the group instead.
-                    Vec3 grpC = {0,0,0}; u32 grpN = 0;
-                    for (u32 gi = 0; gi < pool.activeCount; gi++) {
-                        u32 gIdx = pool.activeList[gi];
-                        const Entity& gn = pool.entities[gIdx];
-                        if ((gn.flags & ENT_FRIENDLY) && !(gn.flags & ENT_DEAD)) {
-                            grpC = grpC + gn.position; grpN++;
-                        }
-                    }
-                    if (grpN > 1) grpC = grpC * (1.0f / static_cast<f32>(grpN));
+                    // Group center is pre-computed once per frame (s_friendlyGroupCenter)
+                    Vec3 grpC = s_friendlyGroupCenter;
+                    u32 grpN = s_friendlyGroupCount;
                     f32 distToGrp = (grpN > 1) ? length(e.position - grpC) : 0.0f;
 
                     if (!e.hasTargetLOS) {
@@ -891,30 +923,48 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         f32  targetDist = dist;
         bool targetIsNPC = false;
 
-        // Search for closer friendly NPCs to target instead of the player
+        // Search for closer friendly NPCs to target instead of the player.
+        // Staggered: only rescan every 8 frames. If cached target died, force rescan.
         {
-            f32 bestNpcDist = dist; // only retarget if NPC is closer than the player
-            for (u32 ni = 0; ni < pool.activeCount; ni++) {
-                u32 nIdx = pool.activeList[ni];
-                const Entity& npc = pool.entities[nIdx];
-                if (!(npc.flags & ENT_FRIENDLY)) continue;
-                if (npc.flags & ENT_DEAD) continue;
-                if (npc.flags & ENT_UNTARGETABLE) continue;
-
-                Vec3 toNpc = npc.position - e.position;
-                f32 npcDist = length(toNpc);
-                // Paladin taunt: appears half as far away so enemies prefer targeting them
-                f32 effectiveDist = (npc.npcClass == NpcClass::PALADIN) ? npcDist * 0.5f : npcDist;
-                if (effectiveDist < bestNpcDist && npcDist <= e.detectionRange) {
-                    bestNpcDist = npcDist;
-                    targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
-                    targetDist = npcDist;
-                    targetIsNPC = true;
-                    e.targetEntityIdx = static_cast<u16>(nIdx);
-                }
+            bool needNpcRescan = ((i + s_frameTick) % 8 == 0);
+            if (e.targetEntityIdx < MAX_ENTITIES) {
+                const Entity& cached = pool.entities[e.targetEntityIdx];
+                if ((cached.flags & ENT_DEAD) || !(cached.flags & ENT_ACTIVE) ||
+                    !(cached.flags & ENT_FRIENDLY))
+                    needNpcRescan = true;
             }
-            if (!targetIsNPC) {
-                e.targetEntityIdx = 0xFFFF;
+
+            if (needNpcRescan) {
+                f32 bestNpcDist = dist;
+                for (u32 ni = 0; ni < pool.activeCount; ni++) {
+                    u32 nIdx = pool.activeList[ni];
+                    const Entity& npc = pool.entities[nIdx];
+                    if (!(npc.flags & ENT_FRIENDLY)) continue;
+                    if (npc.flags & ENT_DEAD) continue;
+                    if (npc.flags & ENT_UNTARGETABLE) continue;
+
+                    Vec3 toNpc = npc.position - e.position;
+                    f32 npcDist = length(toNpc);
+                    f32 effectiveDist = (npc.npcClass == NpcClass::PALADIN) ? npcDist * 0.5f : npcDist;
+                    if (effectiveDist < bestNpcDist && npcDist <= e.detectionRange) {
+                        bestNpcDist = npcDist;
+                        targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
+                        targetDist = npcDist;
+                        targetIsNPC = true;
+                        e.targetEntityIdx = static_cast<u16>(nIdx);
+                    }
+                }
+                if (!targetIsNPC) {
+                    e.targetEntityIdx = 0xFFFF;
+                }
+            } else if (e.targetEntityIdx < MAX_ENTITIES) {
+                // Use cached NPC target
+                const Entity& npc = pool.entities[e.targetEntityIdx];
+                if ((npc.flags & ENT_FRIENDLY) && !(npc.flags & ENT_DEAD)) {
+                    targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
+                    targetDist = length(npc.position - e.position);
+                    targetIsNPC = true;
+                }
             }
         }
 
@@ -1391,6 +1441,21 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             }
         }
 
+        // Stagger: distant enemies (>15m) skip the full state machine on off-frames.
+        // They still apply velocity from previous decisions — just skip the expensive
+        // LOS checks, pathfinding, and state transitions. Saves ~67% of AI cost for
+        // enemies the player isn't actively fighting.
+        bool farEnemy = (dist > 15.0f);
+        if (farEnemy && ((i + s_frameTick) % 3 != 0)) {
+            // Apply existing velocity + collision only
+            entityMoveAndSlide(e, grid, dt, targetPlayer->position, PLAYER_HALF_WIDTH);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+            continue;
+        }
+
+        // LOS stagger: all enemies check LOS every 4th frame, use cached value otherwise
+        bool shouldCheckLOS = ((i + s_frameTick) % 4 == 0);
+
         switch (e.aiState) {
 
         case AIState::IDLE: {
@@ -1700,10 +1765,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 }
             }
 
-            // Ranged enemies: check LOS before attacking. If blocked, move toward
-            // last-seen position to regain line of sight.
+            // Ranged enemies: check LOS before attacking (staggered every 4 frames).
             bool hostileIsRanged = (e.attackRange > 5.0f);
-            if (hostileIsRanged) {
+            if (hostileIsRanged && shouldCheckLOS) {
                 Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
                 bool canSee = hasLOSToPoint(atkEye, targetPos, grid);
                 if (canSee) {
@@ -1875,7 +1939,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         case AIState::RETREAT: {
             // Ranged enemies shoot while retreating — backpedal and fire.
             // Re-check LOS here since the ATTACK state's LOS update doesn't run.
-            if (e.attackRange > 5.0f && dist <= e.attackRange) {
+            if (e.attackRange > 5.0f && dist <= e.attackRange && shouldCheckLOS) {
                 Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
                 Vec3 tgt = player.position + Vec3{0, player.eyeHeight, 0};
                 e.hasTargetLOS = hasLOSToPoint(atkEye, tgt, grid);

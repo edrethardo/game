@@ -173,6 +173,8 @@ void Engine::init() {
                                        ASSET_PATH("assets/shaders/basic.frag"));
     m_unlitShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
                                        ASSET_PATH("assets/shaders/unlit.frag"));
+    m_particleShader = ShaderSystem::load(ASSET_PATH("assets/shaders/particle.vert"),
+                                           ASSET_PATH("assets/shaders/particle.frag"));
 
     // Materials (loads textures from assets/materials.json)
     MaterialSystem::init(ASSET_PATH("assets/materials.json"));
@@ -526,6 +528,7 @@ void Engine::init() {
 
     // Particle system init — must come after MaterialSystem::init so mat IDs are valid
     ParticleSystem::init(m_particles);
+    ParticleSystem::initBatchBuffers(m_particles);
     m_particleBlobMatId  = MaterialSystem::getIdByName("particle_blob");
     m_particleSparkMatId = MaterialSystem::getIdByName("particle_spark");
 
@@ -1296,9 +1299,11 @@ void Engine::shutdown() {
     LevelMeshSystem::destroyAll(m_level.sections, m_level.sectionCount);
     LevelGridSystem::shutdown(m_level.grid);
 
+    ParticleSystem::shutdownBatchBuffers(m_particles);
     MaterialSystem::shutdown();
     ShaderSystem::destroy(m_basicShader);
     ShaderSystem::destroy(m_unlitShader);
+    ShaderSystem::destroy(m_particleShader);
 
     FontSystem::shutdown();
     ItemIconSystem::shutdown();

@@ -157,6 +157,7 @@ private:
     f32        m_potionCooldown = 0.0f;
     Shader  m_basicShader;
     Shader  m_unlitShader;
+    Shader  m_particleShader;  // batched per-vertex-color shader for billboard particles
     Mesh    m_cubeMesh;
     Mesh    m_quadMesh;   // flat quad for billboard sprites
 

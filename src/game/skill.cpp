@@ -2133,9 +2133,12 @@ void SkillSystem::updateOrbProjectiles(ProjectilePool& pool,
     const SkillDef* def = findSkillDef(skillDefs, skillDefCount, SkillId::FROZEN_ORB);
     if (!def) return;
 
-    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+    u32 seen = 0;
+    for (u32 i = 0; i < MAX_PROJECTILES && seen < pool.activeCount; i++) {
         Projectile& p = pool.projectiles[i];
-        if (!p.active || !(p.projFlags & 1)) continue; // not an orb
+        if (!p.active) continue;
+        seen++;
+        if (!(p.projFlags & 1)) continue; // not an orb
 
         p.subTimer += dt;
 
@@ -2181,9 +2184,10 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player& player, f32 dt) {
             Vec3 pillarPos = s_bombardmentCenter;
             f32 bestDist2 = s_bombardmentRadius * s_bombardmentRadius;
             bool foundTarget = false;
-            for (u32 i = 0; i < MAX_ENTITIES; i++) {
+            for (u32 a = 0; a < entities.activeCount; a++) {
+                u32 i = entities.activeList[a];
                 Entity& e = entities.entities[i];
-                if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+                if (e.flags & ENT_DEAD) continue;
                 if (e.flags & ENT_FRIENDLY) continue;
                 Vec3 diff = e.position - s_bombardmentCenter;
                 f32 d2 = diff.x*diff.x + diff.z*diff.z;

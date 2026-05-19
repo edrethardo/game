@@ -1,8 +1,8 @@
 // ParticleSystem — lightweight visual FX pool.
 // update() ticks all active particles (gravity, fade, shrink, lifetime).
-// render() submits each particle via Renderer::submit() — billboard quads face
-// the camera, geometric cubes use the existing cube mesh. Emitter presets
-// (spawnBlood, spawnSparks, etc.) are fire-and-forget convenience functions.
+// render() batches billboard particles into a single draw call using a dynamic
+// VBO with per-vertex color (particle.vert/frag shader). Geometric particles
+// (cubes) are still submitted individually via Renderer::submit().
 
 #include "renderer/particles.h"
 #include "renderer/camera.h"
@@ -11,6 +11,7 @@
 #include "renderer/material.h"
 #include "renderer/renderer.h"
 #include "renderer/frustum.h"
+#include <glad/glad.h>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -27,8 +28,66 @@ static Vec3 randomSpread(Vec3 dir, f32 spread) {
     };
 }
 
+// CPU-side vertex staging buffer for billboard batch (reused each frame)
+static ParticleVertex s_billboardVerts[MAX_PARTICLES * 4];
+
 void ParticleSystem::init(ParticlePool& pool) {
     std::memset(&pool, 0, sizeof(pool));
+}
+
+void ParticleSystem::initBatchBuffers(ParticlePool& pool) {
+    // Create VAO/VBO/IBO for batched billboard particles.
+    // VBO is dynamic (updated each frame), IBO is static (quad index pattern).
+    glGenVertexArrays(1, &pool.batchVAO);
+    glGenBuffers(1, &pool.batchVBO);
+    glGenBuffers(1, &pool.batchIBO);
+
+    glBindVertexArray(pool.batchVAO);
+
+    // VBO — allocate for max capacity, filled each frame via glBufferSubData
+    glBindBuffer(GL_ARRAY_BUFFER, pool.batchVBO);
+    glBufferData(GL_ARRAY_BUFFER,
+                 MAX_PARTICLES * 4 * sizeof(ParticleVertex),
+                 nullptr, GL_DYNAMIC_DRAW);
+
+    // Vertex layout: position (vec3), color (vec4), uv (vec2) = 36 bytes
+    // location 0: position
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ParticleVertex),
+                          (void*)offsetof(ParticleVertex, position));
+    // location 1: color (vec4 — matches particle.vert aColor)
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(ParticleVertex),
+                          (void*)offsetof(ParticleVertex, color));
+    // location 2: uv
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(ParticleVertex),
+                          (void*)offsetof(ParticleVertex, uv));
+
+    // IBO — static quad indices (0,1,2, 2,3,0) repeated for each particle
+    u32 indices[MAX_PARTICLES * 6];
+    for (u32 i = 0; i < MAX_PARTICLES; i++) {
+        u32 base = i * 4;
+        u32 idx  = i * 6;
+        indices[idx + 0] = base + 0;
+        indices[idx + 1] = base + 1;
+        indices[idx + 2] = base + 2;
+        indices[idx + 3] = base + 2;
+        indices[idx + 4] = base + 3;
+        indices[idx + 5] = base + 0;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, pool.batchIBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 MAX_PARTICLES * 6 * sizeof(u32),
+                 indices, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+}
+
+void ParticleSystem::shutdownBatchBuffers(ParticlePool& pool) {
+    if (pool.batchVAO) { glDeleteVertexArrays(1, &pool.batchVAO); pool.batchVAO = 0; }
+    if (pool.batchVBO) { glDeleteBuffers(1, &pool.batchVBO);      pool.batchVBO = 0; }
+    if (pool.batchIBO) { glDeleteBuffers(1, &pool.batchIBO);      pool.batchIBO = 0; }
 }
 
 void ParticleSystem::clear(ParticlePool& pool) {
@@ -63,12 +122,13 @@ void ParticleSystem::update(ParticlePool& pool, f32 dt) {
 }
 
 void ParticleSystem::render(const ParticlePool& pool, const Camera& cam,
-                             const Shader& unlitShader, const Mesh& cubeMesh,
+                             const Shader& particleShader, const Shader& unlitShader,
+                             const Mesh& cubeMesh,
                              u8 blobMaterialId, u8 sparkMaterialId)
 {
     if (pool.activeCount == 0) return;
 
-    // Fallback to material 0 if the particle materials aren't loaded yet
+    // Material textures for billboard (blob) and geometric (spark) particles
     const Texture& blobTex  = MaterialSystem::get(blobMaterialId)
                                 ? MaterialSystem::get(blobMaterialId)->texture
                                 : MaterialSystem::get(0)->texture;
@@ -76,9 +136,82 @@ void ParticleSystem::render(const ParticlePool& pool, const Camera& cam,
                                 ? MaterialSystem::get(sparkMaterialId)->texture
                                 : MaterialSystem::get(0)->texture;
 
+    // Camera basis for billboard orientation
+    Vec3 right = cam.right;
+    Vec3 up    = {0.0f, 1.0f, 0.0f};
+
+    // --- Pass 1: Batch all billboard particles into the dynamic VBO ---
+    u32 billboardCount = 0;
+
     for (u32 i = 0; i < MAX_PARTICLES; i++) {
         const Particle& p = pool.particles[i];
         if (!p.active) continue;
+        if (p.type != PTYPE_BILLBOARD) continue;
+
+        f32 t     = (p.maxLife > 0.0f) ? (p.life / p.maxLife) : 1.0f;
+        f32 alpha = (p.flags & PFLAG_FADE)   ? p.baseAlpha * t : p.baseAlpha;
+        f32 sz    = (p.flags & PFLAG_SHRINK) ? p.size * t      : p.size;
+        if (sz < 0.001f || alpha < 0.01f) continue;
+
+        Vec4 color = {p.r / 255.0f, p.g / 255.0f, p.b / 255.0f, alpha};
+
+        // Build 4 world-space corners of the camera-facing quad
+        Vec3 r_scaled = right * sz;
+        Vec3 u_scaled = up * sz;
+
+        u32 base = billboardCount * 4;
+        // bottom-left, bottom-right, top-right, top-left
+        s_billboardVerts[base + 0] = {p.position - r_scaled - u_scaled, color, {0.0f, 0.0f}};
+        s_billboardVerts[base + 1] = {p.position + r_scaled - u_scaled, color, {1.0f, 0.0f}};
+        s_billboardVerts[base + 2] = {p.position + r_scaled + u_scaled, color, {1.0f, 1.0f}};
+        s_billboardVerts[base + 3] = {p.position - r_scaled + u_scaled, color, {0.0f, 1.0f}};
+
+        billboardCount++;
+    }
+
+    // Upload and draw batched billboards in a single draw call
+    if (billboardCount > 0 && pool.batchVAO) {
+        glUseProgram(particleShader.program);
+
+        // Upload VP matrix (vertices are already in world space, no model transform)
+        if (particleShader.loc_vp >= 0)
+            glUniformMatrix4fv(particleShader.loc_vp, 1, GL_FALSE, cam.viewProjection.ptr());
+        // Fallback: some shader builds may use u_mvp instead of u_vp
+        if (particleShader.loc_mvp >= 0)
+            glUniformMatrix4fv(particleShader.loc_mvp, 1, GL_FALSE, cam.viewProjection.ptr());
+
+        if (particleShader.loc_texture0 >= 0)
+            glUniform1i(particleShader.loc_texture0, 0);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, blobTex.handle);
+
+        // Enable alpha blending for transparent particles
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE); // don't write to depth buffer for transparent particles
+
+        glBindVertexArray(pool.batchVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, pool.batchVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0,
+                        billboardCount * 4 * sizeof(ParticleVertex),
+                        s_billboardVerts);
+
+        glDrawElements(GL_TRIANGLES,
+                       billboardCount * 6,
+                       GL_UNSIGNED_INT, nullptr);
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        glBindVertexArray(0);
+    }
+
+    // --- Pass 2: Geometric (cube) particles — still individual submits ---
+    // These are rare (blood, sparks, debris) and use the shared cube mesh.
+    for (u32 i = 0; i < MAX_PARTICLES; i++) {
+        const Particle& p = pool.particles[i];
+        if (!p.active) continue;
+        if (p.type != PTYPE_GEOMETRIC) continue;
 
         f32 t     = (p.maxLife > 0.0f) ? (p.life / p.maxLife) : 1.0f;
         f32 alpha = (p.flags & PFLAG_FADE)   ? p.baseAlpha * t : p.baseAlpha;
@@ -90,24 +223,8 @@ void ParticleSystem::render(const ParticlePool& pool, const Camera& cam,
         bounds.min = p.position - Vec3{sz, sz, sz};
         bounds.max = p.position + Vec3{sz, sz, sz};
 
-        if (p.type == PTYPE_BILLBOARD) {
-            // Camera-facing billboard — build orientation from camera right + world up
-            Vec3 right = cam.right;
-            Vec3 up    = {0.0f, 1.0f, 0.0f};
-            Vec3 look  = cross(right, up);
-            Mat4 billboard = Mat4::identity();
-            billboard.m[0]  = right.x * sz; billboard.m[1]  = right.y * sz; billboard.m[2]  = right.z * sz;
-            billboard.m[4]  = up.x    * sz; billboard.m[5]  = up.y    * sz; billboard.m[6]  = up.z    * sz;
-            billboard.m[8]  = look.x  * sz; billboard.m[9]  = look.y  * sz; billboard.m[10] = look.z  * sz;
-            billboard.m[12] = p.position.x;
-            billboard.m[13] = p.position.y;
-            billboard.m[14] = p.position.z;
-            Renderer::submit(unlitShader, blobTex, cubeMesh, billboard, bounds, color);
-        } else {
-            // Geometric: axis-aligned spinning cube
-            Mat4 model = Mat4::translate(p.position) * Mat4::scale({sz, sz, sz});
-            Renderer::submit(unlitShader, sparkTex, cubeMesh, model, bounds, color);
-        }
+        Mat4 model = Mat4::translate(p.position) * Mat4::scale({sz, sz, sz});
+        Renderer::submit(unlitShader, sparkTex, cubeMesh, model, bounds, color);
     }
 }
 
