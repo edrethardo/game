@@ -492,12 +492,14 @@ void Engine::updateMenu(f32 dt) {
         AudioSystem::play(SfxId::UI_CONFIRM);
         switch (m_menu.selection) {
         case 0: // Singleplayer — show sub-menu
+            scanSaveSlots(); // scan early so "Continue" is available if saves exist
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;
         case 1: // Host — same flow as singleplayer (new/continue → class selection)
             m_netRole = NetRole::SERVER;
             m_localPlayerIndex = 0;
+            scanSaveSlots();
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;

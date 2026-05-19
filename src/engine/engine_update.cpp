@@ -135,6 +135,17 @@ void Engine::update(f32 dt) {
         return;
     }
 
+    // Escape closes inventory on PC — checked before confirmQuit/pause handlers
+    // so neither can swallow the keypress. On Switch, B (MENU_BACK at line 1273)
+    // closes inventory; minus is drop-all only.
+    if (m_gameState == GameState::IN_GAME && m_inventoryOpen &&
+        (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isActionPressed(GameAction::PAUSE))) {
+        m_inventoryOpen = false;
+        m_inventoryOpenArr[m_localPlayerIndex] = false; // sync to per-player array
+        Input::setRelativeMouseMode(true);
+        return;
+    }
+
     // Pause/quit selection menu
     if (m_menu.confirmQuit) {
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
@@ -176,22 +187,18 @@ void Engine::update(f32 dt) {
         Input::setActivePlayer(0); // restore default
     }
     if (anyPause) {
-        if (m_gameState == GameState::MENU) {
+        // Inventory open: gamepad minus (-) skips the pause handler entirely
+        // so it falls through to drop-all in updateInventoryInteraction.
+        // (PC Escape already handled above, before confirmQuit.)
+        if (m_gameState == GameState::IN_GAME && m_inventoryOpen) {
+            // Skip pause menu — minus reaches updateInventoryInteraction below
+        } else if (m_gameState == GameState::MENU) {
             m_running = false;
             return;
         } else if (m_gameState == GameState::IN_GAME) {
-            if (m_inventoryOpen) {
-                // Only close on keyboard ESC — minus is drop-all, B (MENU_BACK) closes inventory
-                if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-                    m_inventoryOpen = false;
-                    return;
-                }
-                // Don't return — let minus fall through to updateInventoryInteraction
-            } else {
-                m_menu.confirmQuit = true;
-                m_menu.subSelection = 0;
-                return;
-            }
+            m_menu.confirmQuit = true;
+            m_menu.subSelection = 0;
+            return;
         } else if (m_gameState != GameState::GAME_OVER &&
                    m_gameState != GameState::VICTORY) {
             // Lobby/connecting states — ESC disconnects and returns to menu
@@ -730,8 +737,9 @@ void Engine::gameUpdate(f32 dt) {
     // View bobs at FINEANGLES/20 per tic (period = 0.571s at 35Hz).
     {
         // Bob amplitude from speed squared (Doom: momentum² / 4, capped)
-        f32 vx = m_localPlayer.velocity.x;
-        f32 vz = m_localPlayer.velocity.z;
+        // Freeze bob while inventory is open so the view stays still
+        f32 vx = m_inventoryOpen ? 0.0f : m_localPlayer.velocity.x;
+        f32 vz = m_inventoryOpen ? 0.0f : m_localPlayer.velocity.z;
         f32 speedSq = vx * vx + vz * vz;
         // Normalize: at max run speed (~6 m/s), speedSq=36. Scale so max=1.0
         f32 bob = speedSq * 0.028f; // ~1.0 at full sprint

@@ -13,6 +13,15 @@ cd "$REPO_DIR"
 echo "=== Fetching audio ==="
 python3 tools/fetch_audio.py
 
+echo "=== Compressing music to OGG (if WAV present) ==="
+for wav in assets/audio/music_tier*.wav; do
+    [ -f "$wav" ] || continue
+    ogg="${wav%.wav}.ogg"
+    [ -f "$ogg" ] && continue
+    echo "  $wav → $ogg"
+    ffmpeg -y -i "$wav" -c:a libvorbis -q:a 4 "$ogg" && rm "$wav"
+done
+
 echo "=== Building PC ==="
 cmake --build build
 

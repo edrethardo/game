@@ -87,6 +87,13 @@ static void buildPath(char* out, u32 outSize, const char* filename) {
 }
 
 bool AudioSystem::init() {
+    // Initialize OGG Vorbis decoder for music playback
+    int mixFlags = MIX_INIT_OGG;
+    int mixInitted = Mix_Init(mixFlags);
+    if ((mixInitted & mixFlags) != mixFlags) {
+        LOG_WARN("Mix_Init(OGG) incomplete: %s — music may not play", Mix_GetError());
+    }
+
     // Switch hardware runs at 48kHz — match it to avoid sinc resampling artifacts
 #ifdef __SWITCH__
     if (Mix_OpenAudio(48000, MIX_DEFAULT_FORMAT, 2, 1024) < 0) {
@@ -142,6 +149,7 @@ void AudioSystem::shutdown() {
     if (s_music) { Mix_FreeMusic(s_music); s_music = nullptr; }
 
     Mix_CloseAudio();
+    Mix_Quit();
     s_initialized = false;
     LOG_INFO("AudioSystem: shutdown");
 }
@@ -174,9 +182,26 @@ void AudioSystem::playMusic(const char* path) {
     if (!s_initialized) return;
     if (s_music) { Mix_FreeMusic(s_music); s_music = nullptr; }
     s_music = Mix_LoadMUS(path);
+    // Fallback: .ogg → .wav or vice versa (Switch ships OGG, PC may have WAV)
+    if (!s_music) {
+        char fallback[256];
+        std::strncpy(fallback, path, sizeof(fallback) - 1);
+        fallback[sizeof(fallback) - 1] = '\0';
+        char* ext = std::strrchr(fallback, '.');
+        if (ext && std::strcmp(ext, ".ogg") == 0) {
+            std::strcpy(ext, ".wav");
+            s_music = Mix_LoadMUS(fallback);
+        } else if (ext && std::strcmp(ext, ".wav") == 0) {
+            std::strcpy(ext, ".ogg");
+            s_music = Mix_LoadMUS(fallback);
+        }
+    }
     if (s_music) {
-        Mix_VolumeMusic(static_cast<int>(s_musicVol * s_masterVol * MIX_MAX_VOLUME));
-        Mix_PlayMusic(s_music, -1); // loop forever
+        int vol = static_cast<int>(s_musicVol * s_masterVol * MIX_MAX_VOLUME);
+        Mix_VolumeMusic(vol);
+        int rc = Mix_PlayMusic(s_music, -1);
+        LOG_INFO("Music playing: %s (vol=%d, rc=%d)", path, vol, rc);
+        if (rc < 0) LOG_WARN("Mix_PlayMusic failed: %s", Mix_GetError());
     } else {
         LOG_WARN("Failed to load music: %s (%s)", path, Mix_GetError());
     }
