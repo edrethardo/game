@@ -228,6 +228,7 @@ void Engine::run() {
         m_statsTimer += frameTime;
         if (m_statsTimer >= 1.0) {
             if (m_gameState == GameState::IN_GAME) logStats();
+            m_displayFps   = m_frameCount;
             m_statsTimer  -= 1.0;
             m_updateCount  = 0;
             m_frameCount   = 0;

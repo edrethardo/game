@@ -1870,8 +1870,33 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         } break;
 
         case AIState::RETREAT: {
-            // If a player is alive and close, stop retreating and re-engage
-            if (player.health > 0.0f && dist <= e.detectionRange) {
+            // Ranged enemies shoot while retreating — backpedal and fire.
+            // Re-check LOS here since the ATTACK state's LOS update doesn't run.
+            if (e.attackRange > 5.0f && dist <= e.attackRange) {
+                Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
+                Vec3 tgt = player.position + Vec3{0, player.eyeHeight, 0};
+                e.hasTargetLOS = hasLOSToPoint(atkEye, tgt, grid);
+            }
+            if (e.attackRange > 5.0f && dist <= e.attackRange && e.hasTargetLOS) {
+                e.attackTimer -= dt;
+                if (e.attackTimer <= 0.0f) {
+                    e.attackTimer = e.attackCooldown;
+                    e.attackAnimT = 0.3f;
+                    Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
+                    Vec3 tPos = player.position + Vec3{0, player.eyeHeight, 0};
+                    f32 projSpeed = (e.flags & ENT_FLYING) ? 11.5f : 16.1f;
+                    f32 projRadius = (e.flags & ENT_FLYING) ? 0.06f : 0.08f;
+                    f32 timeToHit = dist / projSpeed;
+                    Vec3 predictedPos = tPos + player.velocity * timeToHit;
+                    Vec3 atkDir = normalize(predictedPos - atkOrigin);
+                    ProjectileSystem::spawn(projectiles, atkOrigin,
+                        atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
+                }
+            }
+            // Re-engage once at preferred range — ranged enemies stay in retreat
+            // while the player is too close so they keep backpedaling and firing.
+            bool rangedTooClose = (e.attackRange > 5.0f && dist < e.attackRange * 0.5f);
+            if (player.health > 0.0f && dist <= e.detectionRange && !rangedTooClose) {
                 e.aiState = AIState::CHASE;
                 e.velocity = {0, 0, 0};
                 break;
@@ -1892,17 +1917,29 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     e.yaw = atan2f(-moveDir.x, -moveDir.z);
                 }
             } else {
-                // Reached end of path — check if near home position
-                Vec3 toHome = e.homePosition - e.position;
-                f32 homeDist2 = toHome.x * toHome.x + toHome.z * toHome.z;
-                if (homeDist2 < 2.0f * 2.0f) {
-                    // Close to home — go idle with normal detection (not dumb)
+                // No path or reached end — ranged enemies backpedal directly
+                // away from the player instead of standing still.
+                if (e.attackRange > 5.0f && dist < e.attackRange * 0.8f) {
+                    Vec3 away = e.position - player.position;
+                    away.y = 0.0f;
+                    if (lengthSq(away) > 0.01f) {
+                        away = normalize(away);
+                        e.velocity.x = away.x * effectiveSpeed;
+                        e.velocity.z = away.z * effectiveSpeed;
+                        e.yaw = atan2f(-away.x, -away.z);
+                    }
+                } else {
+                    // Melee or far enough — check home position
+                    Vec3 toHome = e.homePosition - e.position;
+                    f32 homeDist2 = toHome.x * toHome.x + toHome.z * toHome.z;
+                    if (homeDist2 < 2.0f * 2.0f) {
+                        e.velocity = {0, 0, 0};
+                        e.aiState = AIState::IDLE;
+                        e.hasRetreated = false;
+                        break;
+                    }
                     e.velocity = {0, 0, 0};
-                    e.aiState = AIState::IDLE;
-                    e.hasRetreated = false;
-                    break;
                 }
-                e.velocity = {0, 0, 0}; // reached cover — hold still
             }
             entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
             if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);

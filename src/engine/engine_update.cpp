@@ -139,7 +139,7 @@ void Engine::update(f32 dt) {
     // so neither can swallow the keypress. On Switch, B (MENU_BACK at line 1273)
     // closes inventory; minus is drop-all only.
     if (m_gameState == GameState::IN_GAME && m_inventoryOpen &&
-        (Input::isKeyPressed(SDL_SCANCODE_ESCAPE) || Input::isActionPressed(GameAction::PAUSE))) {
+        Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
         m_inventoryOpen = false;
         m_inventoryOpenArr[m_localPlayerIndex] = false; // sync to per-player array
         Input::setRelativeMouseMode(true);

@@ -136,18 +136,20 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
 
-        // - button = drop entire backpack
+        // - button = drop entire backpack + close inventory
         if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_BACK)) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], bi);
                 if (!isItemEmpty(dropped)) {
-                    // Scatter items slightly so they don't stack
                     f32 scatter = (bi % 5) * 0.3f - 0.6f;
                     WorldItemSystem::spawn(m_worldItems, dropped,
                         dropPos + Vec3{scatter, 0, (bi / 5) * 0.3f});
                 }
             }
+            m_inventoryOpen = false;
+            m_inventoryOpenArr[m_localPlayerIndex] = false;
+            Input::setRelativeMouseMode(true);
         }
 
         // Move mouse cursor to match D-pad selection (so tooltip renders at right position)
@@ -270,19 +272,21 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
 
-        // Q key: drop all backpack items to world
+        // Q key: drop all backpack items to world + close inventory
         if (Input::isKeyPressed(SDL_SCANCODE_Q)) {
             Vec3 dropBase = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 si = 0; si < MAX_INVENTORY_ITEMS; si++) {
                 if (isItemEmpty(m_inventories[m_localPlayerIndex].backpack[si])) continue;
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], si);
                 if (!isItemEmpty(dropped)) {
-                    // Spread items in a small arc so they don't stack
                     f32 angle = si * 0.4f;
                     Vec3 offset = {sinf(angle) * 0.5f, 0, cosf(angle) * 0.5f};
                     WorldItemSystem::spawn(m_worldItems, dropped, dropBase + offset);
                 }
             }
+            m_inventoryOpen = false;
+            m_inventoryOpenArr[m_localPlayerIndex] = false;
+            Input::setRelativeMouseMode(true);
         }
 
         // Middle mouse: equip from quickbar (item stays in quickbar as EQUIPPED_REF)

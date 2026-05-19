@@ -2211,9 +2211,15 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
 // plus remote player models (multiplayer only)
 // ---------------------------------------------------------------------------
 void Engine::renderWorldItems(u32 sw, u32 sh) {
-    (void)sw; (void)sh; // sw/sh reserved for future use (e.g. distance-based culling)
+    (void)sw; (void)sh;
 
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
+
+    // Collect disc billboard data so we can draw them all in one batched pass
+    // instead of flushing per item (was 32 flushes → 1 flush).
+    struct DiscData { Mat4 mvp; Vec4 color; };
+    DiscData discs[MAX_WORLD_ITEMS];
+    u32 discCount = 0;
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& wi = m_worldItems.items[i];
@@ -2229,36 +2235,28 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             floorY = LevelGridSystem::getFloorHeight(m_level.grid, gx, gz);
         }
 
-        // Hover bob just above the floor (globes float lower and use smaller scale)
         static constexpr f32 ITEM_SCALE = 1.4f;
         bool isGlobeItem = isGlobe(wi.item);
-        f32 renderScale = isGlobeItem ? 0.4f : ITEM_SCALE; // globes are small orbs
+        f32 renderScale = isGlobeItem ? 0.4f : ITEM_SCALE;
         f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
         Vec3 pos = {wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
 
-        // Non-weapon items spin slower (weapons tumble quickly; armor/accessories drift).
-        // Spin speed is set before any slot-specific Y adjustments.
         bool isWeaponSlot = (wi.item.defId < m_itemDefCount &&
                              m_itemDefs[wi.item.defId].slot == ItemSlot::WEAPON);
         f32 spin = isWeaponSlot ? wi.bobTimer * 2.0f : wi.bobTimer * 0.8f;
 
-        // Helmets float a touch higher so they appear to rest at head-level rather
-        // than the same floor-hover as flat items like rings and boots.
         if (!isGlobeItem && wi.item.defId < m_itemDefCount &&
             m_itemDefs[wi.item.defId].slot == ItemSlot::HELMET) {
             pos.y += 0.15f * renderScale;
         }
 
-        // Globes render as small colored cubes; regular items use their mesh
         const Mesh* itemMesh = &m_cubeMesh;
         Texture itemTex = defaultTex;
         Vec4 tint = {color.x, color.y, color.z, 1.0f};
 
         if (isGlobeItem) {
-            // Globe: green with a touch of blue and red
             tint = {0.3f, 0.9f, 0.5f, 1.0f};
         } else if (wi.item.defId < m_itemDefCount) {
-            // Use weapon-specific mesh and material if available
             const ItemDef& def = m_itemDefs[wi.item.defId];
             if (def.meshId > 0 && def.meshId < m_meshDefCount) {
                 itemMesh = &m_meshDefs[def.meshId].mesh;
@@ -2267,28 +2265,23 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 const Material* mat = MaterialSystem::get(def.materialId);
                 if (mat) {
                     itemTex = mat->texture;
-                    // Use the material's natural tint as base — higher rarity items
-                    // get a subtle colored hue blended in instead of full color override
                     Vec3 baseTint = {mat->tint.x, mat->tint.y, mat->tint.z};
                     f32 hueStrength = 0.0f;
                     if (wi.item.rarity == Rarity::MAGIC)     hueStrength = 0.15f;
                     else if (wi.item.rarity == Rarity::RARE) hueStrength = 0.20f;
-                    // Legendary handled separately below
                     tint = {baseTint.x * (1.0f - hueStrength) + color.x * hueStrength,
                             baseTint.y * (1.0f - hueStrength) + color.y * hueStrength,
                             baseTint.z * (1.0f - hueStrength) + color.z * hueStrength, 1.0f};
                 }
             }
-            // Legendary items override with glowing legendary material
             if (wi.item.rarity == Rarity::LEGENDARY) {
-                // Cached legendary material IDs (avoid per-frame string lookups)
                 static const u8 legIds[] = {
-                    MaterialSystem::getIdByName("legendary_weapon"),  // WEAPON=0
-                    MaterialSystem::getIdByName("legendary_shield"),  // OFFHAND=1
-                    MaterialSystem::getIdByName("legendary_helm"),    // HELMET=2
-                    MaterialSystem::getIdByName("legendary_armor"),   // ARMOR=3
-                    MaterialSystem::getIdByName("legendary_boots"),   // BOOTS=4
-                    MaterialSystem::getIdByName("legendary_ring"),    // RING=5
+                    MaterialSystem::getIdByName("legendary_weapon"),
+                    MaterialSystem::getIdByName("legendary_shield"),
+                    MaterialSystem::getIdByName("legendary_helm"),
+                    MaterialSystem::getIdByName("legendary_armor"),
+                    MaterialSystem::getIdByName("legendary_boots"),
+                    MaterialSystem::getIdByName("legendary_ring"),
                 };
                 u8 slotIdx = static_cast<u8>(def.slot);
                 if (slotIdx < 6) {
@@ -2301,12 +2294,11 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             }
         }
 
-        // Item mesh — normalize size so all items render at consistent visual scale
+        // Item mesh — normalize size
         Mat4 model;
         if (itemMesh != &m_cubeMesh && !isGlobeItem && wi.item.defId < m_itemDefCount) {
             const ItemDef& idef = m_itemDefs[wi.item.defId];
             if (idef.meshId > 0 && idef.meshId < m_meshDefCount) {
-                // Scale mesh so its largest axis fills 0.6 units, then multiply by ITEM_SCALE
                 const AABB& mb = m_meshDefs[idef.meshId].bounds;
                 f32 maxDim = mb.max.y - mb.min.y;
                 f32 mw = mb.max.x - mb.min.x;
@@ -2331,71 +2323,57 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         AABB bounds = {pos - Vec3{renderScale,renderScale,renderScale},
                        pos + Vec3{renderScale,renderScale,renderScale}};
 
-        if (!isGlobeItem) {
-            // Rarity disc — camera-facing billboard behind the item mesh, colored by rarity.
-            // Legendary gets a larger, brighter disc; other rarities are subtler.
-            Vec4 discColor;
-            f32 discSize;
-            discColor = {0.9f, 0.9f, 0.9f, 0.3f};  // safe init (white/common)
-            discSize  = renderScale * 1.2f;
+        // Collect disc billboard for batched rendering below
+        if (!isGlobeItem && discCount < MAX_WORLD_ITEMS) {
+            Vec4 discColor = {0.9f, 0.9f, 0.9f, 0.3f};
+            f32 discSize = renderScale * 1.2f;
             switch (wi.item.rarity) {
-                case Rarity::MAGIC:
-                    discColor = {0.2f, 0.9f, 0.2f, 0.4f};   // green
-                    break;
-                case Rarity::RARE:
-                    discColor = {0.2f, 0.4f, 1.0f, 0.4f};   // blue
-                    break;
-                case Rarity::LEGENDARY:
-                    discColor = {1.0f, 0.8f, 0.2f, 0.5f};   // gold
-                    discSize  = renderScale * 1.5f;
-                    break;
-                default: // COMMON
-                    discColor = {0.9f, 0.9f, 0.9f, 0.3f};   // white
-                    break;
+                case Rarity::MAGIC:     discColor = {0.2f, 0.9f, 0.2f, 0.4f}; break;
+                case Rarity::RARE:      discColor = {0.2f, 0.4f, 1.0f, 0.4f}; break;
+                case Rarity::LEGENDARY: discColor = {1.0f, 0.8f, 0.2f, 0.5f}; discSize = renderScale * 1.5f; break;
+                default: break;
             }
-
-            // Build billboard matrix: right/up/look axes from camera + world up,
-            // same pattern as the particle system (particles.cpp).
-            // Billboard faces camera: local +Z points toward camera (negated forward)
             Vec3 bRight = m_camera.right;
             Vec3 bUp    = {0.0f, 1.0f, 0.0f};
-            Vec3 bFwd   = m_camera.forward * -1.0f;  // toward camera
+            Vec3 bFwd   = m_camera.forward * -1.0f;
             Mat4 discMat = Mat4::identity();
             discMat.m[0]  = bRight.x * discSize; discMat.m[1]  = bRight.y * discSize; discMat.m[2]  = bRight.z * discSize;
             discMat.m[4]  = bUp.x    * discSize; discMat.m[5]  = bUp.y    * discSize; discMat.m[6]  = bUp.z    * discSize;
             discMat.m[8]  = bFwd.x   * discSize; discMat.m[9]  = bFwd.y   * discSize; discMat.m[10] = bFwd.z   * discSize;
             discMat.m[12] = pos.x; discMat.m[13] = pos.y; discMat.m[14] = pos.z;
-
-            // Draw disc directly with raw GL — bypasses Renderer::submit which
-            // is designed for opaque batched draws and doesn't respect blend state.
-            Renderer::flush(); // clear any pending opaque draws first
-
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glDepthMask(GL_FALSE);
-            glDisable(GL_CULL_FACE);
-
-            const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
-            const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
-            Mat4 discMvp = m_camera.viewProjection * discMat;
-
-            glUseProgram(m_unlitShader.program);
-            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, discMvp.ptr());
-            glUniform4f(m_unlitShader.loc_color, discColor.x, discColor.y, discColor.z, discColor.w);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, blobTex.handle);
-            if (m_unlitShader.loc_texture0 >= 0)
-                glUniform1i(m_unlitShader.loc_texture0, 0);
-
-            glBindVertexArray(m_quadMesh.vao);
-            glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, 0);
-
-            glEnable(GL_CULL_FACE);
-            glDepthMask(GL_TRUE);
-            glDisable(GL_BLEND);
+            discs[discCount++] = {m_camera.viewProjection * discMat, discColor};
         }
 
         Renderer::submit(m_unlitShader, itemTex, *itemMesh, model, bounds, tint);
+    }
+
+    // Batched rarity disc pass — one flush + one GL state change for all discs
+    if (discCount > 0) {
+        Renderer::flush();
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_CULL_FACE);
+
+        const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
+        const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
+        glUseProgram(m_unlitShader.program);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, blobTex.handle);
+        if (m_unlitShader.loc_texture0 >= 0)
+            glUniform1i(m_unlitShader.loc_texture0, 0);
+        glBindVertexArray(m_quadMesh.vao);
+
+        for (u32 d = 0; d < discCount; d++) {
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, discs[d].mvp.ptr());
+            glUniform4f(m_unlitShader.loc_color, discs[d].color.x, discs[d].color.y,
+                        discs[d].color.z, discs[d].color.w);
+            glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, 0);
+        }
+
+        glEnable(GL_CULL_FACE);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
     }
 
     // Other players (network multiplayer + split-screen co-op)

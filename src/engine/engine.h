@@ -52,6 +52,7 @@ private:
     bool m_firstTick   = true; // true only on first accumulator iteration per frame
     u32  m_updateCount = 0;
     u32  m_frameCount  = 0;
+    u32  m_displayFps  = 0;  // last completed second's frame count (for HUD)
 
     // Game state
     GameState m_gameState = GameState::MENU;

@@ -683,6 +683,14 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // Profiler overlay (F3)
     HUD::drawProfiler(sw, sh);
 
+    // FPS counter — always visible, top-left
+    {
+        char fpsBuf[16];
+        std::snprintf(fpsBuf, sizeof(fpsBuf), "%u FPS", m_displayFps);
+        FontSystem::drawText(sw, sh, 8.0f, static_cast<f32>(sh) - 16.0f,
+                             fpsBuf, {0.6f, 0.6f, 0.6f}, 1);
+    }
+
     // Net stats overlay in multiplayer
     if (m_netRole != NetRole::NONE) {
         u32 ping = 0;
