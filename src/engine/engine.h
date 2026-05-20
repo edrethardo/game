@@ -242,6 +242,8 @@ private:
     bool m_inventoryOpenedOnce    = false;  // dismiss "Open Inventory" once opened
     bool m_equipTooltipShown = false;       // inventory opened → show "equip" hint
     bool m_itemEquippedOnce  = false;       // dismiss equip hint once an item is equipped
+    bool m_shieldBlockedOnce = false;       // dismiss shield tutorial once player blocks
+    bool m_dodgeRolledOnce   = false;       // dismiss dodge tutorial once player dodges
     f32  m_controlsTooltipTimer = 0.0f;     // LMB/RMB controls shown on floor 1 entry
     f32  m_tutorialPulseTimer   = 0.0f;     // shared pulse timer for tutorial tooltips
 

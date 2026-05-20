@@ -141,8 +141,8 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Panel", {0.6f, 0.6f, 0.6f}, 1);
         }
 
-        // Equip tutorial — shown until the player equips an item
-        if (m_equipTooltipShown && !m_itemEquippedOnce) {
+        // Equip tutorial — shown until the player equips an item (floor 1 only)
+        if (m_equipTooltipShown && !m_itemEquippedOnce && m_level.currentFloor <= 1) {
             f32 alpha = 1.0f;
             bool mouseLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
 
@@ -167,27 +167,31 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         if (m_hitMarkerTimer > 0.0f)
             HUD::drawHitMarker(sw, sh, m_hitMarkerTimer / 0.2f);
 
-        // --- Wanderer HUD indicators (dodge cooldown, adrenaline, Death's Dance) ---
-        // Drawn just below the crosshair. HUD coords: origin bottom-left, so
-        // decreasing Y moves elements downward from center.
-        if (m_playerClass == PlayerClass::WANDERER) {
+        // --- Dodge cooldown bar (all classes) ---
+        {
             const DodgeState& ds = m_localPlayer.dodgeState;
             f32 hs = static_cast<f32>(sh) / 720.0f;
             f32 cx = static_cast<f32>(sw) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.5f;
 
-            // Dodge cooldown bar: filled while on cooldown, empty/cyan while rolling
             if (ds.rolling || ds.cooldownTimer > 0.0f) {
-                // pct: 0 = empty/on-cooldown, 1 = ready
                 f32 pct = ds.rolling ? 0.0f : (1.0f - ds.cooldownTimer / 1.0f);
                 Vec3 barBg = {0.15f, 0.15f, 0.15f};
                 Vec3 barFg = ds.rolling ? Vec3{0.0f, 0.8f, 1.0f} : Vec3{0.5f, 0.5f, 0.5f};
                 f32 barW = 30.0f * hs;
                 f32 barH = 3.0f * hs;
                 f32 bx = cx - barW * 0.5f;
-                f32 by = cy - 18.0f * hs; // 18px below crosshair center
+                f32 by = cy - 18.0f * hs;
                 HUD::drawFilledBar(sw, sh, bx, by, barW, barH, pct, barBg, barFg);
             }
+        }
+
+        // --- Wanderer-specific HUD (adrenaline, Death's Dance) ---
+        if (m_playerClass == PlayerClass::WANDERER) {
+            const DodgeState& ds = m_localPlayer.dodgeState;
+            f32 hs = static_cast<f32>(sh) / 720.0f;
+            f32 cx = static_cast<f32>(sw) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.5f;
 
             // Adrenaline stacks: orange pips below the dodge bar
             if (m_localPlayer.adrenalineUnlocked && ds.counterStacks > 0) {
@@ -645,8 +649,45 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                              {0.5f * alpha, 0.6f * alpha, 0.9f * alpha}, 3);
     }
 
-    // First pickup tutorial — shown until the player opens inventory
-    if (m_firstPickupTooltipShown && !m_inventoryOpenedOnce) {
+    // Shield tutorial — shown whenever a shield is equipped until the player blocks
+    if (!m_shieldBlockedOnce) {
+        const ItemInstance& offhand = m_inventories[m_localPlayerIndex].equipped[static_cast<u8>(ItemSlot::OFFHAND)];
+        bool hasShield = !isItemEmpty(offhand) &&
+                         m_itemDefs[offhand.defId].slot == ItemSlot::OFFHAND;
+        if (hasShield) {
+            f32 alpha = 1.0f;
+            bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
+            bool cp = Input::isGamepadConnected(0);
+            const char* text = cp ? "Block" : "Block";
+            f32 textW = FontSystem::textWidth(text, 3);
+            f32 totalW = 28.0f + textW;
+            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.62f;
+
+            HUD::drawKeySymbol(sw, sh, cx, cy, cp ? "ZL" : "Ctrl", keyLit);
+            FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
+                                 {0.5f * alpha, 0.7f * alpha, 0.9f * alpha}, 3);
+        }
+    }
+
+    // Dodge roll tutorial — shown after shield tutorial is completed, until player dodges
+    if (m_shieldBlockedOnce && !m_dodgeRolledOnce) {
+        f32 alpha = 1.0f;
+        bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
+        bool cp = Input::isGamepadConnected(0);
+        const char* text = "Dodge Roll";
+        f32 textW = FontSystem::textWidth(text, 3);
+        f32 totalW = 28.0f + textW;
+        f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+        f32 cy = static_cast<f32>(sh) * 0.62f;
+
+        HUD::drawKeySymbol(sw, sh, cx, cy, cp ? "B" : "Shift", keyLit);
+        FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
+                             {0.9f * alpha, 0.7f * alpha, 0.3f * alpha}, 3);
+    }
+
+    // First pickup tutorial — shown until the player opens inventory (floor 1 only)
+    if (m_firstPickupTooltipShown && !m_inventoryOpenedOnce && m_level.currentFloor <= 1) {
         f32 alpha = 1.0f;
         bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
 

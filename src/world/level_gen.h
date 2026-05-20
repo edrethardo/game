@@ -24,17 +24,13 @@ struct DungeonResult {
     u32 roomCount;                         // number of rooms created
     u32 spawnRoomIdx;                      // dead-end room chosen for player spawn
     u32 exitRoomIdx;                       // farthest room from spawn for exit portal
-    bool valid;                            // false if no suitable spawn dead-end found
 };
 
 namespace LevelGen {
     // Legacy test dungeon (kept for fallback)
     Vec3 generateTestDungeon(LevelGrid& grid);
 
-    // Procedural BSP dungeon generation
-    // seed: RNG seed for deterministic generation
-    // gridWidth/gridDepth: grid dimensions to use (will init the grid)
-    // minExitDist: minimum BFS hop-distance between spawn and exit rooms.
-    // If no layout meets this requirement, result.valid = false (caller retries).
-    DungeonResult generate(LevelGrid& grid, u32 seed, u32 gridWidth = 48, u32 gridDepth = 48, u32 minExitDist = 0);
+    // Procedural BSP dungeon generation. Always produces a valid result —
+    // spawn is the room with fewest corridor exits, exit is the BFS-farthest room.
+    DungeonResult generate(LevelGrid& grid, u32 seed, u32 gridWidth = 48, u32 gridDepth = 48);
 }

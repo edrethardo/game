@@ -705,9 +705,9 @@ void Engine::init() {
                                          s_engine->m_affixDefCount);
                 if (isItemEmpty(item)) break;
                 if (s_engine->m_level.currentFloor > 1) break; // no restriction above floor 1
-                // On floor 1, only allow armor slots (not weapons)
+                // On floor 1, only allow shields so the tutorial teaches blocking
                 ItemSlot slot = s_engine->m_itemDefs[item.defId].slot;
-                if (slot != ItemSlot::WEAPON) break;
+                if (slot == ItemSlot::OFFHAND) break;
             }
             if (!isItemEmpty(item)) {
                 // Force to at least MAGIC rarity
@@ -789,7 +789,7 @@ void Engine::init() {
             (std::rand() % 100) < static_cast<int>(dropChance * 100.0f)) {
             if (enemyLevel < 1) enemyLevel = 1;
             ItemInstance item;
-            // Floor 1: force armor drops to teach players about equipment
+            // Floor 1: force shield drops so the tutorial teaches blocking
             for (u32 attempt = 0; attempt < 20; attempt++) {
                 item = ItemGen::rollItem(enemyLevel, s_engine->m_itemDefs,
                                          s_engine->m_itemDefCount,
@@ -798,7 +798,7 @@ void Engine::init() {
                 if (isItemEmpty(item)) break;
                 if (s_engine->m_level.currentFloor > 1) break;
                 ItemSlot slot = s_engine->m_itemDefs[item.defId].slot;
-                if (slot != ItemSlot::WEAPON) break;
+                if (slot == ItemSlot::OFFHAND) break;
             }
             if (!isItemEmpty(item)) {
                 WorldItemSystem::spawn(s_engine->m_worldItems, item,

@@ -711,6 +711,7 @@ void Engine::gameUpdate(f32 dt) {
         if (m_localPlayer.shrineBuff == 2) m_localPlayer.moveSpeed *= (1.0f + m_localPlayer.shrineBuffValue);
         if (m_localPlayer.overdriveTimer > 0.0f) m_localPlayer.moveSpeed *= 1.3f;
         PlayerController::update(m_localPlayer, dt);
+        if (m_localPlayer.dodgeState.rolling) m_dodgeRolledOnce = true;
         m_localPlayer.moveSpeed = savedSpeed;
         if (!m_localPlayer.noclip) {
             // Build obstacle list using frame allocator (avoids stack array)
@@ -1133,6 +1134,7 @@ void Engine::gameUpdate(f32 dt) {
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;
             m_localPlayer.blockTimer = 0.0f; // start perfect block window
+            m_shieldBlockedOnce = true;
         } else if (!wantsBlock) {
             m_localPlayer.blocking = false;
         }

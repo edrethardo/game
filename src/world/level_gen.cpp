@@ -170,7 +170,7 @@ static bool findRoomCenter(const BSPNode* nodes, s32 nodeIdx, const DungeonRoom*
     return findRoomCenter(nodes, n.right, rooms, outCX, outCZ);
 }
 
-DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 gridDepth, u32 minExitDist) {
+DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 gridDepth) {
     DungeonResult result = {};
     GenRNG rng = {seed};
 
@@ -259,17 +259,14 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
         }
     }
 
-    // --- Pick spawn and exit rooms based on actual corridor connectivity ---
-    // Count real corridor exits per room by scanning the grid border of each room.
-    // A corridor exit = a contiguous run of floor cells on the room's perimeter edge.
-    // A dead-end room has exactly 1 corridor exit.
-    result.valid = false;
+    // --- Pick spawn and exit rooms — always succeeds ---
+    // Spawn = room with fewest corridor exits (prefer dead-ends).
+    // Exit  = BFS-farthest room from spawn (prefer dead-ends at same distance).
     result.spawnRoomIdx = 0;
-    result.exitRoomIdx  = (result.roomCount > 1) ? result.roomCount - 1 : 0;
+    result.exitRoomIdx  = 0;
 
     if (result.roomCount < 2) {
         if (result.roomCount > 0) {
-            result.valid = true;
             const DungeonRoom& r = result.rooms[0];
             result.spawnPos.x = (r.x + r.w * 0.5f) * grid.cellSize;
             result.spawnPos.y = r.floorHeight;
@@ -278,130 +275,67 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
         return result;
     }
 
-    // Count distinct corridor exits for each room by scanning grid cells
-    // just outside each of the 4 walls. A "corridor exit" is a contiguous
-    // run of non-solid cells along one wall edge.
+    // Count distinct corridor exits per room by scanning grid cells just
+    // outside each wall. A "corridor exit" = contiguous run of floor cells.
     auto countCorridorExits = [&](const DungeonRoom& room) -> u32 {
         u32 exits = 0;
-
-        // North wall (z - 1): scan x from room.x to room.x + room.w - 1
-        if (room.z > 0) {
+        auto scanEdge = [&](u32 fixedAxis, u32 start, u32 end, bool fixIsX) {
             bool inCorridor = false;
-            for (u32 x = room.x; x < room.x + room.w; x++) {
-                u32 cz = room.z - 1;
-                bool isFloor = LevelGridSystem::isInBounds(grid, x, cz) &&
-                               !LevelGridSystem::isSolid(grid, x, cz);
+            for (u32 v = start; v < end; v++) {
+                u32 gx = fixIsX ? v : fixedAxis;
+                u32 gz = fixIsX ? fixedAxis : v;
+                bool isFloor = LevelGridSystem::isInBounds(grid, gx, gz) &&
+                               !LevelGridSystem::isSolid(grid, gx, gz);
                 if (isFloor && !inCorridor) { exits++; inCorridor = true; }
                 else if (!isFloor) inCorridor = false;
             }
-        }
-        // South wall (z + d): scan x
-        {
-            u32 cz = room.z + room.d;
-            if (cz < grid.depth) {
-                bool inCorridor = false;
-                for (u32 x = room.x; x < room.x + room.w; x++) {
-                    bool isFloor = LevelGridSystem::isInBounds(grid, x, cz) &&
-                                   !LevelGridSystem::isSolid(grid, x, cz);
-                    if (isFloor && !inCorridor) { exits++; inCorridor = true; }
-                    else if (!isFloor) inCorridor = false;
-                }
-            }
-        }
-        // West wall (x - 1): scan z
-        if (room.x > 0) {
-            bool inCorridor = false;
-            for (u32 z = room.z; z < room.z + room.d; z++) {
-                u32 cx = room.x - 1;
-                bool isFloor = LevelGridSystem::isInBounds(grid, cx, z) &&
-                               !LevelGridSystem::isSolid(grid, cx, z);
-                if (isFloor && !inCorridor) { exits++; inCorridor = true; }
-                else if (!isFloor) inCorridor = false;
-            }
-        }
-        // East wall (x + w): scan z
-        {
-            u32 cx = room.x + room.w;
-            if (cx < grid.width) {
-                bool inCorridor = false;
-                for (u32 z = room.z; z < room.z + room.d; z++) {
-                    bool isFloor = LevelGridSystem::isInBounds(grid, cx, z) &&
-                                   !LevelGridSystem::isSolid(grid, cx, z);
-                    if (isFloor && !inCorridor) { exits++; inCorridor = true; }
-                    else if (!isFloor) inCorridor = false;
-                }
-            }
-        }
+        };
+        if (room.z > 0)                scanEdge(room.z - 1,     room.x, room.x + room.w, true);  // north
+        if (room.z + room.d < grid.depth) scanEdge(room.z + room.d, room.x, room.x + room.w, true);  // south
+        if (room.x > 0)                scanEdge(room.x - 1,     room.z, room.z + room.d, false); // west
+        if (room.x + room.w < grid.width) scanEdge(room.x + room.w, room.z, room.z + room.d, false); // east
         return exits;
     };
 
-    // Find a room with exactly 1 corridor exit for spawn
-    u32 spawnIdx = 0xFFFF;
+    // Pick spawn = room with fewest corridor exits (1 = dead-end ideal)
+    u32 spawnIdx = 0;
+    u32 fewestExits = 0xFFFFFFFF;
     for (u32 i = 0; i < result.roomCount; i++) {
-        if (countCorridorExits(result.rooms[i]) == 1) {
-            spawnIdx = i;
-            break;
-        }
+        u32 ex = countCorridorExits(result.rooms[i]);
+        if (ex < fewestExits) { fewestExits = ex; spawnIdx = i; }
     }
 
-    if (spawnIdx == 0xFFFF) {
-        LOG_WARN("LevelGen: no single-exit room found for spawn, will retry");
-        return result;
-    }
+    // Exit = room with greatest Euclidean distance from spawn center.
+    // Prefer dead-ends at similar distances. Euclidean is more reliable than
+    // BFS hops because the bounding-box adjacency heuristic marks most rooms
+    // as 1 hop on small grids, making BFS useless for distance ranking.
+    f32 spawnCX = result.rooms[spawnIdx].x + result.rooms[spawnIdx].w * 0.5f;
+    f32 spawnCZ = result.rooms[spawnIdx].z + result.rooms[spawnIdx].d * 0.5f;
 
-    // BFS from spawn using adjacency to find hop-distance to every room
-    u32 dist[MAX_DUNGEON_ROOMS];
-    for (u32 i = 0; i < MAX_DUNGEON_ROOMS; i++) dist[i] = 0xFFFFFFFF;
-    u32 queue[MAX_DUNGEON_ROOMS];
-    u32 qHead = 0, qTail = 0;
-    dist[spawnIdx] = 0;
-    queue[qTail++] = spawnIdx;
-    while (qHead < qTail) {
-        u32 cur = queue[qHead++];
-        const DungeonRoom& rm = result.rooms[cur];
-        for (u8 a = 0; a < rm.adjacentCount; a++) {
-            u32 nb = rm.adjacentRooms[a];
-            if (nb < result.roomCount && dist[nb] == 0xFFFFFFFF) {
-                dist[nb] = dist[cur] + 1;
-                queue[qTail++] = nb;
-            }
-        }
-    }
-
-    // Pick exit = farthest room from spawn, prefer single-exit rooms
-    u32 exitIdx = 0;
-    u32 bestDist = 0;
-    bool bestIsDeadEnd = false;
+    u32 exitIdx = (spawnIdx == 0) ? 1 : 0;
+    f32 bestDistSq = 0.0f;
     for (u32 i = 0; i < result.roomCount; i++) {
         if (i == spawnIdx) continue;
-        if (dist[i] == 0xFFFFFFFF) continue;
-        bool deadEnd = (countCorridorExits(result.rooms[i]) == 1);
-        if (dist[i] > bestDist || (dist[i] == bestDist && deadEnd && !bestIsDeadEnd)) {
-            bestDist = dist[i];
+        f32 cx = result.rooms[i].x + result.rooms[i].w * 0.5f;
+        f32 cz = result.rooms[i].z + result.rooms[i].d * 0.5f;
+        f32 dx = cx - spawnCX, dz = cz - spawnCZ;
+        f32 distSq = dx * dx + dz * dz;
+        if (distSq > bestDistSq) {
+            bestDistSq = distSq;
             exitIdx = i;
-            bestIsDeadEnd = deadEnd;
         }
-    }
-
-    // Enforce minimum distance between spawn and exit
-    if (minExitDist > 0 && bestDist < minExitDist) {
-        LOG_WARN("LevelGen: exit only %u hops from spawn (need %u), will retry", bestDist, minExitDist);
-        return result;
     }
 
     result.spawnRoomIdx = spawnIdx;
     result.exitRoomIdx  = exitIdx;
-    result.valid = true;
 
     const DungeonRoom& spawnRoom = result.rooms[spawnIdx];
     result.spawnPos.x = (spawnRoom.x + spawnRoom.w * 0.5f) * grid.cellSize;
     result.spawnPos.y = spawnRoom.floorHeight;
     result.spawnPos.z = (spawnRoom.z + spawnRoom.d * 0.5f) * grid.cellSize;
 
-    LOG_INFO("LevelGen: BSP dungeon generated (%ux%u), %u rooms, spawn room %u (%.1f, %.1f, %.1f), exit room %u (dist %u)",
-             grid.width, grid.depth, result.roomCount,
-             spawnIdx, result.spawnPos.x, result.spawnPos.y, result.spawnPos.z,
-             exitIdx, bestDist);
+    LOG_INFO("LevelGen: %u rooms, spawn %u (%u exits), exit %u (distSq %.0f)",
+             result.roomCount, spawnIdx, fewestExits, exitIdx, bestDistSq);
 
     return result;
 }

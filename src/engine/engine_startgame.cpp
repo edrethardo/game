@@ -349,17 +349,10 @@ void Engine::startGame() {
     else if (m_level.currentFloor <= 6)  gridSize = 32;  // small, few branches
     else if (m_level.currentFloor <= 9)  gridSize = 40;  // medium, some exploration
 
-    // Non-boss floors require at least 5 rooms between spawn and exit.
-    // Boss floors (every 5th) and small grids (floors 1-6) skip the requirement.
-    bool isBossFloor = (m_level.currentFloor % 5 == 0);
-    u32 minExitDist = (!isBossFloor && gridSize >= 32) ? 5 : 0;
-
-    // Retry generation until we find a valid layout.
-    for (u32 attempt = 0; attempt < 20; attempt++) {
-        LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
-        m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed + attempt, gridSize, gridSize, minExitDist);
-        if (m_level.dungeon.valid) break;
-    }
+    // Generate the level once — spawn/exit room selection always succeeds
+    // by falling back to the best available rooms.
+    LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
+    m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed, gridSize, gridSize);
     DungeonResult& dungeon = m_level.dungeon;
     Vec3 spawnPos = dungeon.spawnPos;
 
@@ -801,7 +794,7 @@ void Engine::startGame() {
 
             if (isMimic) {
                 EntityHandle h = EntitySystem::spawn(m_entities,
-                    Vec3{cx, cy + 0.25f, cz}, {0.3f, 0.25f, 0.3f}, false,
+                    Vec3{cx, cy + 0.4f, cz}, {0.45f, 0.4f, 0.45f}, false,
                     GameConst::MIMIC_HEALTH, 4.0f, GameConst::MIMIC_TRIGGER_DIST,
                     2.0f, 0.6f, GameConst::MIMIC_DAMAGE);
                 Entity* ent = handleGet(m_entities, h);
@@ -1316,8 +1309,10 @@ void Engine::startGame() {
     // Init inventory & world items
     WorldItemSystem::init(m_worldItems);
     // Only reset inventory on a true new game (floor 1, Normal difficulty).
+    // Skip if the weapon slot already has an item — means we loaded from a save.
     // Nightmare/Hell transitions set floor=1 but must preserve gear.
-    if (m_level.currentFloor <= 1 && m_difficulty == 0) {
+    if (m_level.currentFloor <= 1 && m_difficulty == 0 &&
+        isItemEmpty(m_inventories[0].equipped[static_cast<u8>(ItemSlot::WEAPON)])) {
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
             Inventory::init(m_inventories[i]);
             m_skillStates[i] = SkillState{};
