@@ -194,8 +194,11 @@ void Engine::update(f32 dt) {
         if (m_gameState == GameState::IN_GAME && m_inventoryOpen) {
             // Skip pause menu — minus reaches updateInventoryInteraction below
         } else if (m_gameState == GameState::MENU) {
-            m_running = false;
-            return;
+            if (m_menu.subState == 0) {
+                m_running = false;
+                return;
+            }
+            // Sub-menus: fall through so updateMenu() sees MENU_BACK
         } else if (m_gameState == GameState::IN_GAME) {
             m_menu.confirmQuit = true;
             m_menu.subSelection = 0;

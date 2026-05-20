@@ -349,11 +349,15 @@ void Engine::startGame() {
     else if (m_level.currentFloor <= 6)  gridSize = 32;  // small, few branches
     else if (m_level.currentFloor <= 9)  gridSize = 40;  // medium, some exploration
 
-    // Retry generation until we find a layout with a valid dead-end spawn room.
-    // BSP almost always produces dead-ends; retries are rare (< 5% of seeds).
+    // Non-boss floors require at least 5 rooms between spawn and exit.
+    // Boss floors (every 5th) and small grids (floors 1-6) skip the requirement.
+    bool isBossFloor = (m_level.currentFloor % 5 == 0);
+    u32 minExitDist = (!isBossFloor && gridSize >= 32) ? 5 : 0;
+
+    // Retry generation until we find a valid layout.
     for (u32 attempt = 0; attempt < 20; attempt++) {
         LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
-        m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed + attempt, gridSize, gridSize);
+        m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed + attempt, gridSize, gridSize, minExitDist);
         if (m_level.dungeon.valid) break;
     }
     DungeonResult& dungeon = m_level.dungeon;
@@ -823,6 +827,7 @@ void Engine::startGame() {
     // Boss roster — unique encounters on milestone floors.
     // Mini-bosses on 5/15/25/35/45, major bosses on 10/20/30/40/50.
     // ---------------------------------------------------------------------------
+    u32 bossRoomForExit = 0xFFFFFFFF; // set by boss spawn, used by exit portal placement
     {
         struct BossTemplate {
             u8 floor;
@@ -900,6 +905,7 @@ void Engine::startGame() {
                 }
             }
             if (bossRoomIdx == 0xFFFFFFFF) bossRoomIdx = dungeon.exitRoomIdx; // absolute fallback
+            bossRoomForExit = bossRoomIdx;
 
             DungeonRoom& bossRoom = dungeon.rooms[bossRoomIdx];
 
@@ -1242,10 +1248,11 @@ void Engine::startGame() {
                  decoCount, (m_level.currentFloor / 10) * 10 + 1, ((m_level.currentFloor / 10) + 1) * 10);
     }
 
-    // Spawn exit portal in the exit room (BFS-farthest from spawn)
+    // Spawn exit portal in the boss room so the boss guards the descent.
+    // Falls back to exitRoomIdx on non-boss floors.
     m_level.floorDoorActive = false;
     if (dungeon.roomCount > 1) {
-        const DungeonRoom& lastRoom = dungeon.rooms[dungeon.exitRoomIdx];
+        const DungeonRoom& lastRoom = dungeon.rooms[bossRoomForExit < dungeon.roomCount ? bossRoomForExit : dungeon.exitRoomIdx];
         f32 doorX = (lastRoom.x + lastRoom.w * 0.5f) * m_level.grid.cellSize;
         f32 doorZ = (lastRoom.z + lastRoom.d * 0.5f) * m_level.grid.cellSize;
         f32 doorY = lastRoom.floorHeight;

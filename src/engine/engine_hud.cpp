@@ -1064,7 +1064,7 @@ void Engine::renderMenu() {
 
         const char* slotHint = Input::isGamepadConnected(0)
             ? "D-pad to select, A to confirm, B to go back"
-            : "Up/Down to select, Enter to confirm, ESC to go back";
+            : "Up/Down to select, Enter/Click to confirm, ESC to go back";
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f,
                              slotHint, {0.4f, 0.4f, 0.5f}, 1);
@@ -1109,6 +1109,27 @@ void Engine::renderMenu() {
             }
             y -= lineH * line.scale;
         }
+    } else if (m_menu.subState == 8) {
+        // Overwrite save confirmation — same style as singleplayer sub-menu
+        char owTitle[64];
+        std::snprintf(owTitle, sizeof(owTitle), "Overwrite Slot %u?", m_menu.overwriteSlot + 1);
+        f32 stW = FontSystem::textWidth(owTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, owTitle, {0.9f, 0.3f, 0.3f}, 2);
+
+        static const char* owLabels[] = {"Yes", "No"};
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = sh * 0.38f + (1 - i) * 50.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 col = sel ? Vec3{0.9f, 0.3f, 0.3f} : Vec3{0.35f, 0.15f, 0.15f};
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel);
+            Vec3 tc = sel ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f};
+            f32 tw = FontSystem::textWidth(owLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale, owLabels[i], tc, 2);
+        }
+
+        const char* hint = "Up/Down to select, Enter to confirm, ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else {
         // Main menu options
         static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Options", "Credits", "Exit Game"};

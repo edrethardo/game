@@ -65,13 +65,14 @@ private:
     // Menu/UI state — grouped for isolation
     struct MenuState {
         u8   selection = 0;
-        u8   subState = 0;       // 0=main, 1=singleplayer, 2=class selection, 3=options
+        u8   subState = 0;       // 0=main, 1=singleplayer, 2=class, 3=options, 8=overwrite confirm
         u8   subSelection = 0;
         f32  msgTimer = 0.0f;    // countdown for transient menu messages
         const char* msg = nullptr;
         bool bindCapture = false;   // true when waiting for key/button press to rebind
         bool bindKeyboard = true;   // true=capturing keyboard, false=capturing controller
-        bool confirmQuit = false;   // "are you sure?" overlay when pressing ESC in-game
+        bool confirmQuit = false;      // "are you sure?" overlay when pressing ESC in-game
+        u8   overwriteSlot = 0;        // save slot pending overwrite (subState 8)
         char connectAddress[64] = "127.0.0.1";
         f32  creditsScroll = 0.0f;  // Y offset for scrolling credits text
     };

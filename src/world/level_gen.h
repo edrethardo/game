@@ -34,5 +34,7 @@ namespace LevelGen {
     // Procedural BSP dungeon generation
     // seed: RNG seed for deterministic generation
     // gridWidth/gridDepth: grid dimensions to use (will init the grid)
-    DungeonResult generate(LevelGrid& grid, u32 seed, u32 gridWidth = 48, u32 gridDepth = 48);
+    // minExitDist: minimum BFS hop-distance between spawn and exit rooms.
+    // If no layout meets this requirement, result.valid = false (caller retries).
+    DungeonResult generate(LevelGrid& grid, u32 seed, u32 gridWidth = 48, u32 gridDepth = 48, u32 minExitDist = 0);
 }

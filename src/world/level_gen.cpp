@@ -170,7 +170,7 @@ static bool findRoomCenter(const BSPNode* nodes, s32 nodeIdx, const DungeonRoom*
     return findRoomCenter(nodes, n.right, rooms, outCX, outCZ);
 }
 
-DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 gridDepth) {
+DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 gridDepth, u32 minExitDist) {
     DungeonResult result = {};
     GenRNG rng = {seed};
 
@@ -381,6 +381,12 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
             exitIdx = i;
             bestIsDeadEnd = deadEnd;
         }
+    }
+
+    // Enforce minimum distance between spawn and exit
+    if (minExitDist > 0 && bestDist < minExitDist) {
+        LOG_WARN("LevelGen: exit only %u hops from spawn (need %u), will retry", bestDist, minExitDist);
+        return result;
     }
 
     result.spawnRoomIdx = spawnIdx;

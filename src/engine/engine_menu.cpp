@@ -58,10 +58,96 @@ extern bool s_firstKillDropGiven;
 
 
 // ---------------------------------------------------------------------------
+// Centered menu hit-test: returns item index under mouse or -1.
+// baseY/spacing/topDown match the render layout in engine_hud.cpp.
+// ---------------------------------------------------------------------------
+static s32 menuMouseHit(u32 sw, u32 sh,
+                        f32 baseY, f32 spacing, u32 itemCount,
+                        f32 itemW, f32 itemH, bool topDown)
+{
+    s32 mx, my;
+    Input::getMousePosition(mx, my);
+    f32 hudX = static_cast<f32>(mx);
+    f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
+
+    f32 cx = static_cast<f32>(sw) * 0.5f;
+    f32 halfW = itemW * 0.5f;
+    if (hudX < cx - halfW || hudX > cx + halfW) return -1;
+
+    for (u32 i = 0; i < itemCount; i++) {
+        f32 y = topDown ? (baseY - i * spacing) : (baseY + (itemCount - 1 - i) * spacing);
+        if (hudY >= y && hudY <= y + itemH) return static_cast<s32>(i);
+    }
+    return -1;
+}
+
+// Compute which menu item the mouse hovers for the current subState.
+// Layouts must match renderMenu() in engine_hud.cpp exactly.
+static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCount) {
+    switch (subState) {
+    case 0: // Main menu: 6 items, Y = sh*0.2 + (5-i)*50*uiScale
+        return menuMouseHit(sw, sh, sh * 0.2f, 50.0f * uiScale, 6,
+                            250.0f * uiScale, 35.0f * uiScale, false);
+    case 1: // Singleplayer: 2 items, Y = sh*0.38 + (1-i)*50*uiScale
+        return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
+                            250.0f * uiScale, 35.0f * uiScale, false);
+    case 2: // Class selection: N items top-down
+    case 5: // P2 class selection: same layout
+        return menuMouseHit(sw, sh, sh * 0.54f, 38.0f * uiScale, itemCount,
+                            400.0f * uiScale, 32.0f * uiScale, true);
+    case 8: // Overwrite confirm: 2 items (Yes/No), same layout as singleplayer sub-menu
+        return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
+                            250.0f * uiScale, 35.0f * uiScale, false);
+    case 6: { // Save slot selection: scrollable list, top-down from sh*0.82
+        // Must account for scroll offset — compute it the same way as render
+        static constexpr u32 VISIBLE = 14;
+        u32 scrollOff = 0;
+        // itemCount doubles as subSelection here for scroll calc
+        if (itemCount >= VISIBLE) scrollOff = itemCount - VISIBLE + 1;
+        f32 lineH = 28.0f * (static_cast<f32>(sh) / 720.0f);
+        // Hit-test visible slots only
+        s32 hit = menuMouseHit(sw, sh, sh * 0.82f, lineH, VISIBLE,
+                               sw * 0.7f, lineH - 4.0f * (static_cast<f32>(sh) / 720.0f), true);
+        if (hit >= 0) return static_cast<s32>(hit + scrollOff);
+        return -1;
+    }
+    default:
+        return -1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
 void Engine::updateMenu(f32 dt) {
     if (m_menu.msgTimer > 0.0f) m_menu.msgTimer -= dt;
+
+    // --- Unified mouse handling for all menu screens ---
+    // Release mouse capture so cursor is visible, compute hover + click once.
+    Input::setRelativeMouseMode(false);
+    u32 sw = Window::getWidth();
+    u32 sh = Window::getHeight();
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    bool mouseClicked = Input::isMouseButtonPressed(MOUSE_LEFT);
+
+    // Item count depends on subState
+    u8 mouseItemCount = 0;
+    if (m_menu.subState == 2 || m_menu.subState == 5)
+        mouseItemCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
+    else if (m_menu.subState == 6)
+        mouseItemCount = m_menu.subSelection; // pass current selection for scroll offset calc
+
+    s32 mouseHit = menuMouseForState(sw, sh, uiScale, m_menu.subState, mouseItemCount);
+
+    // Apply hover: update selection when mouse moves over an item
+    u8* selPtr = (m_menu.subState == 0) ? &m_menu.selection : &m_menu.subSelection;
+    if (mouseHit >= 0 && static_cast<u8>(mouseHit) != *selPtr) {
+        *selPtr = static_cast<u8>(mouseHit);
+        AudioSystem::play(SfxId::MENU_HOVER);
+    }
+
+    // mouseConfirm is true when the user clicks a valid menu item
+    bool mouseConfirm = (mouseHit >= 0 && mouseClicked);
 
     // Sub-menu for single player: New Game / Continue
     if (m_menu.subState == 1) {
@@ -76,7 +162,8 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 0;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             // Keep m_netRole if already set to SERVER (hosting), otherwise NONE (singleplayer)
             if (m_netRole != NetRole::SERVER) m_netRole = NetRole::NONE;
@@ -105,6 +192,8 @@ void Engine::updateMenu(f32 dt) {
     // Save-slot selection screen (subState 6)
     // m_menu.msg is "new" or "continue" to remember which path brought us here.
     if (m_menu.subState == 6) {
+        bool isContinue = (m_menu.msg && m_menu.msg[0] == 'c');
+
         // Navigate the list of 20 slots
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
@@ -115,26 +204,33 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
             m_menu.subState = 1;
-            m_menu.subSelection = (m_menu.msg && m_menu.msg[0] == 'c') ? 1 : 0;
+            m_menu.subSelection = isContinue ? 1 : 0;
             m_menu.msg = nullptr;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
+            bool slotExists = m_saveSlots[m_menu.subSelection].exists;
+
+            // Continue mode: block empty slots
+            if (isContinue && !slotExists) {
+                AudioSystem::play(SfxId::UI_BACK);
+                return;
+            }
+
+            // New game mode: warn before overwriting existing save
+            if (!isContinue && slotExists) {
+                AudioSystem::play(SfxId::UI_CONFIRM);
+                m_menu.overwriteSlot = static_cast<u8>(m_menu.subSelection);
+                m_menu.subState = 8;
+                m_menu.subSelection = 0; // default to "Yes"
+                return;
+            }
+
             AudioSystem::play(SfxId::UI_CONFIRM);
             u8 selectedSlot = static_cast<u8>(m_menu.subSelection + 1); // 1-based
-            bool isContinue = (m_menu.msg && m_menu.msg[0] == 'c');
 
             if (isContinue) {
-                // Load the selected slot; it must exist
-                if (!m_saveSlots[m_menu.subSelection].exists) {
-                    // Nothing saved here — ignore or redirect to new game
-                    m_menu.msg = "new";
-                    m_menu.subState = 2; // fall through to class selection as new game
-                    m_menu.subSelection = 0;
-                    m_menu.msgTimer = 0.0f;
-                    m_level.currentFloor = 1;
-                    return;
-                }
                 if (loadGame(selectedSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
                     if (m_netRole == NetRole::SERVER) {
@@ -189,7 +285,8 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_playerClass = static_cast<PlayerClass>(m_menu.subSelection);
             m_activeClassSkill = 0;
@@ -308,7 +405,8 @@ void Engine::updateMenu(f32 dt) {
         }
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A) ||
             Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) ||
-            Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
             // P2 selected their class
             m_playerClasses[1] = static_cast<PlayerClass>(m_menu.subSelection);
             const ClassDef& cls2 = kClassDefs[m_menu.subSelection];
@@ -419,7 +517,8 @@ void Engine::updateMenu(f32 dt) {
                 m_menu.subSelection = 0;
                 return;
             }
-            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+                || mouseConfirm) {
                 if (m_menu.subSelection < REBIND_COUNT) {
                     m_menu.bindCapture = true;
                     m_menu.bindKeyboard = true;
@@ -482,13 +581,49 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
+    // Overwrite save confirmation (subState 8) — Yes/No menu
+    if (m_menu.subState == 8) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 6;
+            m_menu.subSelection = m_menu.overwriteSlot;
+            m_menu.msg = "new";
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            if (m_menu.subSelection == 0) {
+                // Yes — proceed with overwrite
+                m_activeSaveSlot = m_menu.overwriteSlot + 1;
+                m_level.currentFloor = 1;
+                m_menu.subState = 2;
+                m_menu.subSelection = 0;
+                m_menu.msg = nullptr;
+            } else {
+                // No — back to slot selection
+                m_menu.subState = 6;
+                m_menu.subSelection = m_menu.overwriteSlot;
+                m_menu.msg = "new";
+            }
+        }
+        return;
+    }
+
     if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
         if (m_menu.selection > 0) m_menu.selection--;
     }
     if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
         if (m_menu.selection < 5) m_menu.selection++;
     }
-    if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+    if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        || mouseConfirm) {
         AudioSystem::play(SfxId::UI_CONFIRM);
         switch (m_menu.selection) {
         case 0: // Singleplayer — show sub-menu
