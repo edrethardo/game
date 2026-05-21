@@ -352,6 +352,36 @@ static const LimbConfig s_bossReaperConfig = {
     }
 };
 
+// Lich (Sethrak): robed/floating — legs are HIDDEN (body OBJ has a full-length robe)
+// + 2 sleeve/arm limbs at the shoulders for a gentle ethereal sway.
+// Slots 0-1 are placeholder SKEL_BASE_LIMBS whose mesh will be skipped at render
+// (getBossLimbMeshId returns 0 for leg slots when configId >= 4).
+static const LimbConfig s_bossLichConfig = {
+    4,
+    {
+        SKEL_BASE_LIMBS,
+        // Sleeve arms — wide at shoulder, gentle restAngle tips slightly downward
+        {{ 0.22f, 0.70f, 0.0f}, {0.07f, 0.26f, 0.07f}, -0.3f, 0, false},
+        {{-0.22f, 0.70f, 0.0f}, {0.07f, 0.26f, 0.07f}, -0.3f, 0, true},
+    }
+};
+
+// Nyx (Weaver of the Void): robed/floating — legs hidden + 4 thin "weaving" arms
+// fanning outward from upper body. Two pairs at different heights/offsets give
+// the impression of a spider-like weaving gesture without full spider geometry.
+static const LimbConfig s_bossNyxConfig = {
+    6,
+    {
+        SKEL_BASE_LIMBS,
+        // Upper pair — close to head/collar, thin, slight outward cant
+        {{ 0.20f, 0.75f, 0.0f}, {0.04f, 0.30f, 0.04f}, -0.2f, 0, false},
+        {{-0.20f, 0.75f, 0.0f}, {0.04f, 0.30f, 0.04f}, -0.2f, 0, true},
+        // Lower pair — wider stance, more pronounced fan angle
+        {{ 0.30f, 0.60f, 0.0f}, {0.04f, 0.30f, 0.04f}, -0.4f, 0, false},
+        {{-0.30f, 0.60f, 0.0f}, {0.04f, 0.30f, 0.04f}, -0.4f, 0, true},
+    }
+};
+
 #undef SKEL_BASE_LIMBS
 
 const LimbConfig& LimbSystem::getBossConfig(u8 configId) {
@@ -360,16 +390,24 @@ const LimbConfig& LimbSystem::getBossConfig(u8 configId) {
         case 2: return s_bossMephistoConfig;
         case 3: return s_bossDiabloConfig;
         case 4: return s_bossReaperConfig;
+        case 5: return s_bossLichConfig;
+        case 6: return s_bossNyxConfig;
         default: return s_skeletonConfig;
     }
 }
 
 u8 LimbSystem::getBossLimbMeshId(u8 configId, u32 limbIdx) {
-    // 0-1 = legs (same as skeleton)
-    if (limbIdx < 2) return s_legMeshId;
-    // Extra limbs (2+): spider legs for Andariel, arm mesh for others
+    if (limbIdx < 2) {
+        // Robed/floating bosses (Reaper=4, Lich=5, Nyx=6) have a floor-length robe
+        // or cloak in their body OBJ, so rendering separate walking legs would clip
+        // through the robe geometry. Return 0 so the render loop skips the slot.
+        if (configId == 4 || configId == 5 || configId == 6) return 0;
+        return s_legMeshId;
+    }
+    // Extra limbs (2+): spider legs for Andariel (config 1), arm mesh for all others
+    // (tentacles, spikes, blades, sleeves, weaving arms).
     if (configId == 1) return s_spiderLegMeshId;
-    return s_armMeshId; // tentacles, spikes, blades
+    return s_armMeshId;
 }
 
 // ============================================================

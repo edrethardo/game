@@ -337,7 +337,8 @@ def skin_paladin():
 
 
 def skin_butcher():
-    """Grid: approx w=11, h=21."""
+    """Grid: approx w=11, h=21. Polish: bloodstained apron, exposed-muscle arm streaks,
+    brighter cleaver-side fist."""
     w, h = 12, 21
     p = {}
     for py in range(h):
@@ -356,11 +357,29 @@ def skin_butcher():
     for px in range(3, 8):
         p[(px, 10)] = (170, 50, 35, 255)
         p[(px, 11)] = (170, 50, 35, 255)
-    # Fists
+    # Bloodstained apron band across chest/waist rows — dirty off-white with blood splatters
+    for px in range(3, 8):
+        p[(px, 8)] = (190, 175, 155, 255)    # apron band top
+        p[(px, 9)] = (185, 170, 150, 255)    # apron band
+    # Blood stains on the apron
+    p[(4, 8)]  = (160, 50,  35, 255)         # blood stain left
+    p[(6, 9)]  = (150, 40,  28, 255)         # blood stain right
+    p[(5, 8)]  = (140, 135, 115, 255)        # apron center slightly soiled
+    # Exposed-muscle streaks on arms (bright red highlights)
+    muscle = (210, 60, 40, 255)
+    for py in range(5, 14):
+        if py % 2 == 0:
+            p[(2, py)] = muscle             # left arm muscle streak
+            p[(9, py)] = muscle             # right arm muscle streak
+    # Brighter cleaver-side fist (right hand, slightly brighter)
+    cleaver_fist = (180, 55, 35, 255)
+    for py in [4, 5]:
+        p[(9,  py)] = cleaver_fist
+        p[(10, py)] = cleaver_fist
+    # Left fist stays standard
     fist = (120, 30, 20, 255)
     for py in [4, 5]:
         p[(0, py)] = fist; p[(1, py)] = fist
-        p[(9, py)] = fist; p[(10, py)] = fist
     return w, h, p
 
 
@@ -578,303 +597,403 @@ def skin_broodmother():
 
 
 def skin_andariel():
-    """Andariel boss: spider-woman demon. Dark green chitin, red eyes, pale claws.
-    Uses andariel rig (w=11, h=18). x offset gx+5."""
+    """Andariel boss: spider-woman demon. Polish: glistening egg-sac abdomen highlights,
+    darker chitin plates, brighter red eye cluster. Grid unchanged: w=11, h=18."""
     w, h = 11, 18
     p = {}
-    chitin = (45, 65, 35, 255)
+    chitin = (38, 55, 28, 255)   # slightly darker base chitin
     for py in range(h):
         for px in range(w):
             p[(px, py)] = chitin
     # Head (y15-17) — darker green skull
     for py in range(15, 18):
-        for px in range(3, 8): p[(px, py)] = (55, 75, 40, 255)
-    # Four red eyes (upper and lower pair)
-    p[(4, 16)] = (220, 30, 15, 255)
-    p[(6, 16)] = (220, 30, 15, 255)
-    p[(4, 15)] = (180, 25, 15, 255)
-    p[(6, 15)] = (180, 25, 15, 255)
-    # Mouth/fangs
-    p[(5, 14)] = (200, 190, 160, 255)
-    # Chitin shoulder pauldrons (y10-12)
+        for px in range(3, 8): p[(px, py)] = (50, 70, 36, 255)
+    # Four red eyes — brighter, more saturated cluster
+    p[(4, 16)] = (255, 35, 15, 255)    # upper left — very bright
+    p[(6, 16)] = (255, 35, 15, 255)    # upper right
+    p[(4, 15)] = (220, 28, 12, 255)    # lower left
+    p[(6, 15)] = (220, 28, 12, 255)    # lower right
+    # Mouth/fangs — pale bone
+    p[(5, 14)] = (210, 200, 168, 255)
+    # Chitin shoulder pauldrons — darker plate contrast
     for py in range(10, 13):
-        for px in [0, 1, 9, 10]: p[(px, py)] = (35, 55, 28, 255)
-    p[(0, 12)] = (30, 45, 22, 255)
-    p[(10, 12)] = (30, 45, 22, 255)
-    # Upper torso (y10-12) — broad chest plate
+        for px in [0, 1, 9, 10]: p[(px, py)] = (28, 45, 20, 255)
+    p[(0, 12)] = (22, 36, 16, 255)
+    p[(10, 12)] = (22, 36, 16, 255)
+    # Upper torso (y10-12) — broad chest plate slightly brighter
     for py in range(10, 13):
-        for px in range(2, 9): p[(px, py)] = (50, 75, 38, 255)
-    # Narrow waist (y8-9)
+        for px in range(2, 9): p[(px, py)] = (48, 72, 36, 255)
+    # Narrow waist (y8-9) — dark constriction
     for py in range(8, 10):
-        for px in range(4, 7): p[(px, py)] = (40, 55, 30, 255)
-    # Abdomen (y4-7) — mottled green-brown
+        for px in range(4, 7): p[(px, py)] = (32, 48, 24, 255)
+    # Abdomen (y4-7) — glistening translucent amber egg-sac highlights
     for py in range(4, 8):
-        for px in range(2, 9): p[(px, py)] = (55, 80, 40, 255)
+        for px in range(2, 9): p[(px, py)] = (48, 72, 34, 255)
+    # Egg-sac glistening highlights — amber/translucent center
     for px in range(3, 8):
-        p[(px, 6)] = (65, 95, 48, 255)
-    # Arms
+        p[(px, 6)] = (160, 120, 50, 255)    # bright amber highlight stripe
+    for px in range(4, 7):
+        p[(px, 5)] = (130,  95, 40, 255)    # secondary highlight
+    p[(5, 7)] = (180, 140, 65, 255)          # peak highlight
+    # Arms — dark chitin
     for py in range(6, 12):
-        p[(0, py)] = (40, 60, 30, 255)
-        p[(10, py)] = (40, 60, 30, 255)
-    # Claws — pale bone
-    p[(0, 5)] = (180, 170, 140, 255)
-    p[(10, 5)] = (180, 170, 140, 255)
-    # Legs (y0-3)
+        p[(0, py)] = (32, 50, 24, 255)
+        p[(10, py)] = (32, 50, 24, 255)
+    # Claws — pale bone, slightly more vivid
+    p[(0, 5)]  = (195, 182, 148, 255)
+    p[(10, 5)] = (195, 182, 148, 255)
+    # Legs (y0-3) — darkest chitin
     for py in range(0, 4):
-        p[(3, py)] = (38, 55, 28, 255)
-        p[(7, py)] = (38, 55, 28, 255)
-    p[(3, 0)] = (30, 45, 22, 255)
-    p[(7, 0)] = (30, 45, 22, 255)
+        p[(3, py)] = (30, 44, 22, 255)
+        p[(7, py)] = (30, 44, 22, 255)
+    p[(3, 0)] = (24, 36, 16, 255)
+    p[(7, 0)] = (24, 36, 16, 255)
     return w, h, p
 
 
 def skin_mephisto():
-    """Mephisto boss: skeletal ice-demon. Blue-purple bones, glowing blue eyes.
-    Uses skeleton rig (w=7, h=16)."""
-    w, h = 7, 16
+    """Mephisto/Warden boss: tomb-grey stone armor, spectral blue glow in joints/eyes.
+    Grid matches gen_warden: w=13, h=22. min_gx=-6 so pixel col = gx+6."""
+    w, h = 13, 22
     p = {}
-    bone = (80, 90, 140, 255)
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = bone
-    # Skull
-    for py in [14, 15]:
-        for px in range(1, 6): p[(px, py)] = (100, 110, 170, 255)
-    p[(2, 14)] = (60, 120, 255, 255)
-    p[(4, 14)] = (60, 120, 255, 255)
-    p[(3, 11)] = (30, 40, 80, 255)
-    p[(2, 11)] = (120, 130, 180, 255)
-    p[(4, 11)] = (120, 130, 180, 255)
-    p[(1, 13)] = (65, 75, 120, 255)
-    p[(5, 13)] = (65, 75, 120, 255)
-    for py in range(5, 11): p[(3, py)] = (60, 70, 110, 255)
-    for py in [6, 7, 9]:
-        for px in [1, 2, 4, 5]: p[(px, py)] = (90, 100, 160, 255)
-    for px in [1, 2, 4, 5]: p[(px, 8)] = (25, 30, 60, 255)
-    p[(0, 9)] = (55, 65, 100, 255)
-    p[(6, 9)] = (55, 65, 100, 255)
-    for py in range(3, 9):
-        p[(0, py)] = (65, 75, 115, 255)
-        p[(6, py)] = (65, 75, 115, 255)
-    for px in range(2, 5): p[(px, 4)] = (60, 70, 110, 255)
-    for px in [1, 4]:
-        p[(px, 2)] = bone; p[(px, 3)] = bone
-        p[(px, 0)] = (70, 80, 130, 255); p[(px, 1)] = (55, 65, 100, 255)
+            if py >= 18:   p[(px, py)] = (130, 130, 140, 255)   # skull — pale stone
+            elif py >= 16: p[(px, py)] = (100, 100, 110, 255)   # crown/helm top
+            elif py >= 12: p[(px, py)] = (80,  85,  95, 255)    # broken crown rows
+            elif py >= 7:  p[(px, py)] = (70,  72,  82, 255)    # cuirass — dark stone armor
+            elif py >= 6:  p[(px, py)] = (55,  58,  68, 255)    # belt
+            elif py >= 2:  p[(px, py)] = (65,  68,  78, 255)    # greaves
+            else:          p[(px, py)] = (50,  52,  60, 255)    # sabatons
+    # Gravestone pauldron slabs — rusted-iron trim (cols 0-1 and 11-12)
+    for py in range(12, 16):
+        for px in [0, 1]:   p[(px, py)] = (90,  65,  45, 255)   # left pauldron
+        for px in [11, 12]: p[(px, py)] = (90,  65,  45, 255)   # right pauldron
+    # Skull eye sockets — spectral blue glow
+    p[(5, 18)] = (80, 180, 255, 255)
+    p[(7, 18)] = (80, 180, 255, 255)
+    # Ribcage gaps — deep shadow with spectral blue edge
+    p[(5, 9)]  = (30,  60, 140, 255)
+    p[(7, 9)]  = (30,  60, 140, 255)
+    p[(5, 11)] = (30,  60, 140, 255)
+    p[(7, 11)] = (30,  60, 140, 255)
+    # Gauntlet fists — dark iron with blue joint glow
+    for py in range(4, 7):
+        p[(0,  py)] = (55, 58, 68, 255)
+        p[(12, py)] = (55, 58, 68, 255)
+    p[(0, 5)]  = (60, 140, 220, 255)   # left joint glow
+    p[(12, 5)] = (60, 140, 220, 255)   # right joint glow
+    # Broken crown spikes — asymmetric (left tall, right stub missing top)
+    for py in range(20, 22):
+        p[(4, py)] = (110, 115, 125, 255)   # left crown spike
+    p[(6, 20)] = (110, 115, 125, 255)        # center stub
+    for py in range(20, 22):
+        p[(8, py)] = (110, 115, 125, 255)   # right spike intact
+    # p[(8, 21)] left default — matches discarded voxel (broken tip)
     return w, h, p
 
 
 def skin_baal():
-    """Baal boss: golden demon lord. Gold/bronze body, glowing yellow eyes.
-    Uses butcher rig (w=11, h=21)."""
-    w, h = 12, 21
+    """Baal/Korvath boss: dark iron plate, bronze trim, glowing red visor slit.
+    Grid matches gen_korvath: w=14, h=22. min_gx=-7 so pixel col = gx+7."""
+    w, h = 14, 22
     p = {}
-    gold = (170, 140, 50, 255)
     for py in range(h):
         for px in range(w):
-            if py >= 19: p[(px, py)] = (140, 110, 30, 255)
-            elif py >= 16: p[(px, py)] = (180, 150, 60, 255)
-            elif py >= 14: p[(px, py)] = (160, 130, 45, 255)
-            elif py >= 8: p[(px, py)] = gold
-            elif py >= 7: p[(px, py)] = (100, 80, 30, 255)
-            elif py >= 3: p[(px, py)] = (150, 120, 40, 255)
-            else: p[(px, py)] = (120, 95, 30, 255)
-    p[(4, 18)] = (255, 230, 50, 255)
-    p[(7, 18)] = (255, 230, 50, 255)
-    for px in range(3, 8):
-        p[(px, 10)] = (190, 160, 65, 255)
-        p[(px, 11)] = (190, 160, 65, 255)
-    fist = (130, 100, 35, 255)
-    for py in [4, 5]:
-        p[(0, py)] = fist; p[(1, py)] = fist
-        p[(9, py)] = fist; p[(10, py)] = fist
+            if py >= 18:   p[(px, py)] = (45,  42,  55, 255)    # helm — near-black iron
+            elif py >= 14: p[(px, py)] = (40,  38,  50, 255)    # upper helm/horns
+            elif py >= 12: p[(px, py)] = (50,  48,  60, 255)    # pauldrons
+            elif py >= 7:  p[(px, py)] = (55,  52,  65, 255)    # cuirass
+            elif py >= 5:  p[(px, py)] = (45,  42,  55, 255)    # fauld/hips
+            elif py >= 2:  p[(px, py)] = (50,  48,  60, 255)    # greaves
+            else:          p[(px, py)] = (38,  36,  48, 255)    # sabatons
+    # Bronze trim highlights on armor edges
+    for px in range(3, 11):
+        p[(px, 7)]  = (130, 95, 40, 255)   # cuirass lower rim
+        p[(px, 13)] = (130, 95, 40, 255)   # pauldron bottom trim
+    for py in range(7, 14):
+        p[(3,  py)] = (110, 80, 35, 255)   # left side trim
+        p[(10, py)] = (110, 80, 35, 255)   # right side trim
+    # Battle scratch marks on cuirass
+    p[(6, 10)] = (70, 67, 80, 255)
+    p[(7, 9)]  = (70, 67, 80, 255)
+    p[(8, 11)] = (70, 67, 80, 255)
+    # Glowing red visor slit (helm gy=17 → py=17, across gx=-2..3 → col 5..10)
+    for px in range(5, 11):
+        p[(px, 17)] = (255, 40, 20, 255)   # visor slit bright red glow
+    # Horn tips — darker iron
+    for py in range(19, 22):
+        p[(1, py)] = (35, 32, 42, 255)    # left horn tip
+        p[(12, py)] = (35, 32, 42, 255)   # right horn tip
+    # Tower shield face (left arm, cols 0-1)
+    for py in range(4, 13):
+        p[(0, py)] = (62, 58, 72, 255)    # shield plate
+        p[(1, py)] = (68, 64, 78, 255)    # shield inner
+    p[(0, 8)] = (140, 100, 38, 255)       # shield boss center — bronze
+    p[(1, 8)] = (140, 100, 38, 255)
+    # Spiked gauntlet right (cols 12-13 lower)
+    for py in range(3, 6):
+        p[(12, py)] = (55, 52, 65, 255)
+        p[(13, py)] = (60, 55, 68, 255)
+    p[(13, 4)] = (200, 190, 150, 255)    # spike tip highlight
     return w, h, p
 
 
 def skin_diablo():
-    """Diablo boss: lord of terror. Deep red body, burning orange eyes, dark horns.
-    Uses butcher rig (w=11, h=21)."""
-    w, h = 12, 21
+    """Diablo boss: deep crimson + charred black, burning orange cracks, blazing orange eyes.
+    Grid matches gen_diablo: w=15, h=26. min_gx=-7 so pixel col = gx+7."""
+    w, h = 15, 26
     p = {}
     for py in range(h):
         for px in range(w):
-            if py >= 19: p[(px, py)] = (50, 15, 10, 255)
-            elif py >= 16: p[(px, py)] = (160, 30, 15, 255)
-            elif py >= 14: p[(px, py)] = (140, 25, 12, 255)
-            elif py >= 8: p[(px, py)] = (180, 40, 20, 255)
-            elif py >= 7: p[(px, py)] = (80, 20, 10, 255)
-            elif py >= 3: p[(px, py)] = (150, 30, 15, 255)
-            else: p[(px, py)] = (60, 18, 10, 255)
-    p[(4, 18)] = (255, 160, 30, 255)
-    p[(7, 18)] = (255, 160, 30, 255)
-    for px in range(3, 8):
-        p[(px, 10)] = (200, 50, 25, 255)
-        p[(px, 11)] = (200, 50, 25, 255)
-    fist = (120, 22, 12, 255)
-    for py in [4, 5]:
-        p[(0, py)] = fist; p[(1, py)] = fist
-        p[(9, py)] = fist; p[(10, py)] = fist
+            if py >= 22:   p[(px, py)] = (15,  8,   5, 255)    # ram horn sweep — charred black
+            elif py >= 18: p[(px, py)] = (145, 20,  8, 255)    # skull — deep crimson
+            elif py >= 16: p[(px, py)] = (120, 18,  6, 255)    # neck (hunched)
+            elif py >= 10: p[(px, py)] = (160, 28, 12, 255)    # torso
+            elif py >= 8:  p[(px, py)] = (90,  15,  6, 255)    # belt
+            elif py >= 4:  p[(px, py)] = (130, 22, 10, 255)    # thighs
+            elif py >= 2:  p[(px, py)] = (100, 16,  7, 255)    # lower legs
+            else:          p[(px, py)] = (60,  10,  4, 255)    # feet
+    # Burning orange cracks scattered across body
+    crack = (255, 130, 25, 255)
+    for (px, py) in [(7,20),(6,17),(8,15),(5,12),(9,11),(7,9),(6,7),(8,5)]:
+        p[(px, py)] = crack
+    # Ridged spine spikes (back, col 7-8 at odd y rows 9-17)
+    for sy in range(9, 18, 2):
+        p[(7, sy)] = (55, 10, 5, 255)   # spine ridge dark
+        p[(8, sy)] = (55, 10, 5, 255)
+    # Blazing orange eyes (gx=-2,-1,0,1 → col 5-8 at gy=20→py=20)
+    p[(5, 20)] = (255, 165, 30, 255)
+    p[(6, 20)] = (255, 165, 30, 255)
+    p[(8, 20)] = (255, 165, 30, 255)
+    p[(9, 20)] = (255, 165, 30, 255)
+    # Bestial maw — carved open (dark interior at snout rows 15-16)
+    for px in range(5, 10):
+        p[(px, 15)] = (25, 5, 2, 255)
+        p[(px, 16)] = (25, 5, 2, 255)
+    # Broad clawed hands
+    for py in range(2, 5):
+        for px in [0, 1, 2]:   p[(px, py)] = (80, 12, 5, 255)   # left claws
+        for px in [12, 13, 14]: p[(px, py)] = (80, 12, 5, 255)  # right claws
+    # Ram horn curve — charred with ember tips
+    p[(2, 25)] = (255, 80, 10, 255)    # left horn tip ember
+    p[(12, 25)] = (255, 80, 10, 255)  # right horn tip ember
     return w, h, p
 
 
 def skin_reaper():
-    """Grim Reaper boss: death incarnate. Near-black bones, white skull, ghostly blue eyes.
-    Uses skeleton rig (w=7, h=16)."""
-    w, h = 7, 16
+    """Grim Reaper boss: near-black cloak, bone-white skull, ghostly green-blue glow in eyes.
+    Grid matches gen_reaper: w=13, h=25. min_gx=-6 so pixel col = gx+6."""
+    w, h = 13, 25
     p = {}
-    bone = (35, 30, 40, 255)
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = bone
-    # Skull — pale white
-    for py in [14, 15]:
-        for px in range(1, 6): p[(px, py)] = (200, 195, 210, 255)
-    p[(2, 14)] = (100, 180, 255, 255)
-    p[(4, 14)] = (100, 180, 255, 255)
-    p[(3, 11)] = (10, 8, 15, 255)
-    p[(2, 11)] = (180, 175, 190, 255)
-    p[(4, 11)] = (180, 175, 190, 255)
-    p[(1, 13)] = (60, 55, 70, 255)
-    p[(5, 13)] = (60, 55, 70, 255)
-    for py in range(5, 11): p[(3, py)] = (25, 22, 32, 255)
-    for py in [6, 7, 9]:
-        for px in [1, 2, 4, 5]: p[(px, py)] = (45, 40, 55, 255)
-    for px in [1, 2, 4, 5]: p[(px, 8)] = (8, 6, 12, 255)
-    p[(0, 9)] = (28, 25, 35, 255)
-    p[(6, 9)] = (28, 25, 35, 255)
-    for py in range(3, 9):
-        p[(0, py)] = (30, 27, 38, 255)
-        p[(6, py)] = (30, 27, 38, 255)
-    for px in range(2, 5): p[(px, 4)] = (28, 25, 35, 255)
-    for px in [1, 4]:
-        p[(px, 2)] = bone; p[(px, 3)] = bone
-        p[(px, 0)] = (30, 27, 38, 255); p[(px, 1)] = (25, 22, 32, 255)
+            if py >= 21:   p[(px, py)] = (12,  10,  16, 255)   # hood apex — near black
+            elif py >= 17: p[(px, py)] = (18,  15,  22, 255)   # hood — very dark
+            elif py >= 14: p[(px, py)] = (22,  18,  28, 255)   # cloaked shoulders
+            elif py >= 10: p[(px, py)] = (20,  16,  25, 255)   # cloaked torso
+            elif py >= 7:  p[(px, py)] = (25,  20,  30, 255)   # upper cloak bell
+            elif py >= 4:  p[(px, py)] = (20,  15,  24, 255)   # mid cloak flare
+            elif py >= 1:  p[(px, py)] = (16,  12,  20, 255)   # lower cloak
+            else:          p[(px, py)] = (12,  10,  15, 255)   # tattered hem
+    # Bone-white skull inside the hood (gx=-1..1 → col 5..7, gy=18-19 → py 18-19)
+    for py in range(18, 20):
+        for px in range(5, 8): p[(px, py)] = (215, 208, 200, 255)
+    # Ghostly green-blue eye sockets
+    p[(5, 19)] = (60, 220, 200, 255)   # left eye glow
+    p[(7, 19)] = (60, 220, 200, 255)   # right eye glow
+    # Broad shoulder drape — slightly lighter than body
+    for py in range(14, 17):
+        for px in range(2, 11): p[(px, py)] = (30, 25, 38, 255)
+    # Shoulder edge caps
+    for py in range(15, 17):
+        p[(1, py)]  = (28, 22, 35, 255)
+        p[(11, py)] = (28, 22, 35, 255)
+    # Scythe pole — bone white (col 11, full height)
+    for py in range(0, h):
+        p[(11, py)] = (195, 188, 178, 255)   # pole — weathered bone
+    # Scythe blade (top area, rows 22-23)
+    for px in range(7, 12):
+        p[(px, 22)] = (180, 180, 190, 255)   # blade face — steel grey
+        p[(px, 21)] = (150, 148, 158, 255)   # blade lower edge
+    p[(6, 22)] = (200, 200, 210, 255)         # blade tip highlight
+    # Skeletal arm (left, col 2, rows 7-14)
+    for py in range(7, 15):
+        p[(2, py)] = (190, 182, 172, 255)    # left arm bone
+    # Bony hands
+    p[(1, 6)]  = (210, 202, 190, 255)        # left hand
+    p[(10, 5)] = (210, 202, 190, 255)        # right hand (grips scythe)
+    # Tattered hem tendrils — ghostly glow at floor
+    for px in [1, 3, 5, 7, 9, 11]:
+        p[(px, 0)] = (40, 150, 130, 255)     # ghostly green-teal hem
     return w, h, p
 
 
 def skin_lich_lord():
-    """Lich Lord mini-boss: purple-robed undead sorcerer. Violet bones, glowing purple eyes.
-    Uses skeleton rig (w=7, h=16)."""
-    w, h = 7, 16
+    """Lich boss: tattered purple-grey robe, ivory skull, glowing violet eye-sockets.
+    Grid matches gen_lich: w=9, h=20. min_gx=-4 so pixel col = gx+4."""
+    w, h = 9, 20
     p = {}
-    bone = (90, 65, 180, 255)
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = bone
-    for py in [14, 15]:
-        for px in range(1, 6): p[(px, py)] = (120, 90, 210, 255)
-    p[(2, 14)] = (180, 60, 255, 255)
-    p[(4, 14)] = (180, 60, 255, 255)
-    p[(3, 11)] = (40, 25, 80, 255)
-    p[(2, 11)] = (140, 110, 200, 255)
-    p[(4, 11)] = (140, 110, 200, 255)
-    p[(1, 13)] = (70, 50, 140, 255)
-    p[(5, 13)] = (70, 50, 140, 255)
-    for py in range(5, 11): p[(3, py)] = (60, 40, 130, 255)
-    for py in [6, 7, 9]:
-        for px in [1, 2, 4, 5]: p[(px, py)] = (100, 75, 190, 255)
-    for px in [1, 2, 4, 5]: p[(px, 8)] = (30, 18, 60, 255)
-    p[(0, 9)] = (60, 42, 120, 255)
-    p[(6, 9)] = (60, 42, 120, 255)
-    for py in range(3, 9):
-        p[(0, py)] = (75, 55, 150, 255)
-        p[(6, py)] = (75, 55, 150, 255)
-    for px in range(2, 5): p[(px, 4)] = (65, 45, 135, 255)
-    for px in [1, 4]:
-        p[(px, 2)] = bone; p[(px, 3)] = bone
-        p[(px, 0)] = (80, 60, 160, 255); p[(px, 1)] = (60, 42, 120, 255)
+            if py >= 17:   p[(px, py)] = (185, 170, 210, 255)   # hood/skull — ivory-grey
+            elif py >= 13: p[(px, py)] = (80,  65, 130, 255)    # upper hood shadow/shoulders
+            elif py >= 7:  p[(px, py)] = (90,  70, 150, 255)    # torso — muted purple robe
+            elif py >= 4:  p[(px, py)] = (70,  55, 120, 255)    # upper skirt
+            elif py >= 2:  p[(px, py)] = (60,  45, 105, 255)    # mid skirt (wider, darker)
+            else:          p[(px, py)] = (50,  38,  90, 255)    # base skirt (darkest)
+    # Crown spikes — gold
+    for px in [0, 4, 8]:
+        for py in range(18, 20):
+            p[(px, py)] = (210, 185, 50, 255)
+    # Skull face — ivory highlight
+    for py in range(14, 17):
+        for px in range(3, 6): p[(px, py)] = (215, 200, 180, 255)
+    # Glowing violet eye-sockets (skull at gx=-1..1, gy=15 → pixel col 3,5 row 15)
+    p[(3, 15)] = (220,  80, 255, 255)   # left eye glow
+    p[(5, 15)] = (220,  80, 255, 255)   # right eye glow
+    # Arms — slightly lighter bone
+    for py in range(5, 13):
+        p[(1, py)] = (160, 140, 200, 255)   # left arm column
+        p[(7, py)] = (160, 140, 200, 255)   # right arm column
+    # Raised right arm (col 7, upper rows) — brighter to show elevation
+    for py in range(9, 13):
+        p[(7, py)] = (190, 170, 230, 255)
+    # Bony hands
+    p[(1, 5)] = (200, 188, 160, 255)
+    p[(7, 5)] = (200, 188, 160, 255)
     return w, h, p
 
 
 def skin_spider_queen():
-    """Spider Queen mini-boss: bright green spider with gold eyes.
-    Uses spider rig (w=15, h=7)."""
-    w, h = 15, 7
+    """Spider Queen boss: mottled green-black carapace, swollen amber egg-sac, gold eye cluster.
+    Grid matches gen_spider_queen: w=18, h=8. min_gx=-9 so pixel col = gx+9."""
+    w, h = 18, 8
     p = {}
-    body = (50, 140, 38, 255)
+    carapace = (35, 60, 28, 255)    # dark green-black carapace base
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = body
-    for py in range(1, 6):
-        for px in range(4, 10): p[(px, py)] = (60, 160, 48, 255)
-    for px in range(5, 9): p[(px, 5)] = (75, 180, 60, 255)
-    for py in range(1, 4):
-        for px in range(5, 9): p[(px, py)] = (55, 150, 42, 255)
-    for py in range(1, 4):
-        for px in range(6, 9): p[(px, py)] = (58, 155, 45, 255)
-    p[(6, 6)] = (255, 220, 40, 255)
-    p[(8, 6)] = (255, 220, 40, 255)
-    p[(6, 0)] = (200, 190, 160, 255)
-    p[(8, 0)] = (200, 190, 160, 255)
-    for px in [0, 1]:
-        for py in range(h): p[(px, py)] = (35, 110, 25, 255)
+            p[(px, py)] = carapace
+    # Bloated egg-sac abdomen — swollen amber/translucent (rear, cols ~9-16 in pixel space)
+    # Abdomen gx=-4..3 → pixel col 5..12; py rows 1..7 (gy=1..7)
+    for py in range(1, 8):
+        for px in range(5, 13):
+            p[(px, py)] = (180, 130, 60, 255)   # amber translucent egg-sac
+    # Abdomen dome highlight — lighter amber
+    for px in range(6, 12):
+        p[(px, 6)] = (220, 170, 90, 255)
+        p[(px, 7)] = (200, 150, 75, 255)
+    # Cephalothorax — mottled dark green (front center, gx=-3..2 → col 6..11, py 2..5)
+    for py in range(2, 6):
+        for px in range(6, 12):
+            p[(px, py)] = (45, 75, 35, 255)
+    # Head — darker chitin
+    for py in range(2, 5):
+        for px in range(7, 11):
+            p[(px, py)] = (30, 50, 22, 255)
+    # Eye crown cluster — gold (gy=5 → py=5, gx=-2..2 → col 7..11)
+    p[(7, 5)]  = (255, 220, 40, 255)    # left eye stalk
+    p[(9, 5)]  = (255, 220, 40, 255)    # center eye 1
+    p[(10, 5)] = (255, 220, 40, 255)   # center eye 2
+    p[(11, 5)] = (255, 220, 40, 255)   # right eye stalk
+    # Fangs — pale bone
+    p[(8, 0)]  = (210, 200, 170, 255)
+    p[(10, 0)] = (210, 200, 170, 255)
+    # Front-pair legs (raised higher, cols 6-9 pixel left and 9-12 right)
+    for px in [4, 5]:
+        for py in range(h): p[(px, py)] = (30, 50, 22, 255)   # inner front leg
     for px in [2, 3]:
-        for py in range(h): p[(px, py)] = (45, 130, 32, 255)
+        for py in range(h): p[(px, py)] = (25, 42, 18, 255)   # outer front leg
+    for px in [0, 1]:
+        for py in range(h): p[(px, py)] = (20, 35, 14, 255)   # tip front leg
     for px in [13, 14]:
-        for py in range(h): p[(px, py)] = (35, 110, 25, 255)
-    for px in [10, 11, 12]:
-        for py in range(h): p[(px, py)] = (45, 130, 32, 255)
-    for (px, py) in [(1,2),(1,3),(2,1),(3,3),(13,2),(13,3),(11,1),(12,3)]:
-        p[(px, py)] = (65, 160, 48, 255)
+        for py in range(h): p[(px, py)] = (30, 50, 22, 255)
+    for px in [15, 16]:
+        for py in range(h): p[(px, py)] = (25, 42, 18, 255)
+    p[(17, py)] = (20, 35, 14, 255) if True else None
+    for py in range(h): p[(17, py)] = (20, 35, 14, 255)
+    # Leg joint highlights
+    for (px, py) in [(1,3),(3,2),(4,4),(14,3),(16,2),(13,4)]:
+        p[(px, py)] = (55, 90, 40, 255)
     return w, h, p
 
 
 def skin_demon_knight():
-    """Demon Knight mini-boss: armored red-orange demon.
-    Uses butcher rig (w=11, h=21)."""
-    w, h = 12, 21
+    """Demon Knight/Azhar boss: ashen grey cracked stone with ember-orange glowing cracks.
+    Grid matches gen_azhar: w=9, h=23. min_gx=-4 so pixel col = gx+4."""
+    w, h = 9, 23
     p = {}
     for py in range(h):
         for px in range(w):
-            if py >= 19: p[(px, py)] = (60, 20, 10, 255)
-            elif py >= 16: p[(px, py)] = (190, 65, 25, 255)
-            elif py >= 14: p[(px, py)] = (170, 55, 20, 255)
-            elif py >= 8: p[(px, py)] = (200, 70, 30, 255)
-            elif py >= 7: p[(px, py)] = (80, 30, 12, 255)
-            elif py >= 3: p[(px, py)] = (180, 60, 25, 255)
-            else: p[(px, py)] = (70, 25, 10, 255)
-    p[(4, 18)] = (255, 180, 40, 255)
-    p[(7, 18)] = (255, 180, 40, 255)
-    for px in range(3, 8):
-        p[(px, 10)] = (220, 80, 35, 255)
-        p[(px, 11)] = (220, 80, 35, 255)
-    fist = (160, 50, 20, 255)
-    for py in [4, 5]:
-        p[(0, py)] = fist; p[(1, py)] = fist
-        p[(9, py)] = fist; p[(10, py)] = fist
+            if py >= 20:   p[(px, py)] = (130, 118, 110, 255)   # horns — light ashen
+            elif py >= 15: p[(px, py)] = (100, 90, 82, 255)     # head — ashen grey
+            elif py >= 12: p[(px, py)] = (88,  78, 70, 255)     # upper torso/shoulders
+            elif py >= 7:  p[(px, py)] = (82,  72, 65, 255)     # main torso
+            elif py >= 4:  p[(px, py)] = (70,  62, 56, 255)     # waist/cape
+            elif py >= 2:  p[(px, py)] = (80,  70, 63, 255)     # thighs
+            else:          p[(px, py)] = (60,  52, 48, 255)     # feet/claws
+    # Ember-orange glowing cracks — scattered across body
+    crack = (255, 120, 20, 255)
+    p[(4, 15)] = crack; p[(3, 13)] = crack; p[(5, 11)] = crack
+    p[(4, 9)]  = crack; p[(3, 7)]  = crack; p[(5, 5)]  = crack
+    p[(2, 18)] = crack; p[(6, 16)] = crack   # face cracks
+    # Yellow eyes (gx=-1,1 → col 3,5 at gy=18 → py 18)
+    p[(3, 18)] = (255, 230, 50, 255)
+    p[(5, 18)] = (255, 230, 50, 255)
+    # Swept-back horn tips — lighter grey
+    for py in range(20, 23):
+        p[(2, py)] = (160, 148, 138, 255)    # left horn tip
+        p[(6, py)] = (160, 148, 138, 255)    # right horn tip
+    # Charcoal cape (thin back slab, col 4, rows 5-13)
+    for py in range(5, 14):
+        p[(4, py)] = (45, 38, 35, 255)       # cape center dark
+    # Shoulder spikes — orange ember tips
+    p[(0, 13)] = (255, 140, 30, 255)
+    p[(8, 13)] = (255, 140, 30, 255)
+    # Extended blade (right arm, col 7-8, rows 5-13)
+    for py in range(5, 14):
+        p[(7, py)] = (200, 195, 175, 255)    # blade — pale steel
+    p[(7, 13)] = (255, 240, 160, 255)        # blade tip highlight
+    # Clawed hand highlights
+    p[(1, 5)]  = (210, 200, 175, 255)        # left claw
+    p[(7, 4)]  = (210, 200, 175, 255)        # right claw/grip
     return w, h, p
 
 
 def skin_arch_mage():
-    """Arch Mage mini-boss: arcane skeleton mage. Magenta-purple bones.
-    Uses skeleton rig (w=7, h=16)."""
-    w, h = 7, 16
+    """Arch Mage/Nyx boss: void black-purple robe, magenta crystal glow, bright pink eyes.
+    Grid matches gen_nyx: w=9, h=23. min_gx=-4 so pixel col = gx+4."""
+    w, h = 9, 23
     p = {}
-    bone = (130, 50, 205, 255)
     for py in range(h):
         for px in range(w):
-            p[(px, py)] = bone
-    for py in [14, 15]:
-        for px in range(1, 6): p[(px, py)] = (160, 75, 230, 255)
-    p[(2, 14)] = (255, 80, 220, 255)
-    p[(4, 14)] = (255, 80, 220, 255)
-    p[(3, 11)] = (50, 18, 80, 255)
-    p[(2, 11)] = (170, 70, 220, 255)
-    p[(4, 11)] = (170, 70, 220, 255)
-    p[(1, 13)] = (100, 38, 160, 255)
-    p[(5, 13)] = (100, 38, 160, 255)
-    for py in range(5, 11): p[(3, py)] = (90, 32, 150, 255)
-    for py in [6, 7, 9]:
-        for px in [1, 2, 4, 5]: p[(px, py)] = (140, 55, 215, 255)
-    for px in [1, 2, 4, 5]: p[(px, 8)] = (40, 12, 65, 255)
-    p[(0, 9)] = (90, 32, 150, 255)
-    p[(6, 9)] = (90, 32, 150, 255)
-    for py in range(3, 9):
-        p[(0, py)] = (110, 42, 180, 255)
-        p[(6, py)] = (110, 42, 180, 255)
-    for px in range(2, 5): p[(px, 4)] = (95, 35, 155, 255)
-    for px in [1, 4]:
-        p[(px, 2)] = bone; p[(px, 3)] = bone
-        p[(px, 0)] = (115, 45, 185, 255); p[(px, 1)] = (90, 32, 150, 255)
+            if py >= 19:   p[(px, py)] = (20,  12,  40, 255)    # hood — void black-purple
+            elif py >= 15: p[(px, py)] = (28,  16,  55, 255)    # hooded head
+            elif py >= 9:  p[(px, py)] = (35,  20,  65, 255)    # upper torso
+            elif py >= 5:  p[(px, py)] = (25,  14,  50, 255)    # lower torso
+            elif py >= 2:  p[(px, py)] = (20,  10,  40, 255)    # robe bell
+            else:          p[(px, py)] = (15,   8,  32, 255)    # base tendrils
+    # Void-crystal crown — magenta glow (top rows above hood)
+    crown = (255, 60, 220, 255)
+    for (px, py) in [(0,20),(1,21),(3,21),(4,22),(5,21),(7,21),(8,20)]:
+        p[(px, py)] = crown
+    p[(4, 22)] = (255, 120, 240, 255)   # tallest center crystal tip — bright pink
+    # Face shadow cavity
+    for py in range(16, 19):
+        p[(4, py)] = (10, 5, 20, 255)   # center void-dark face cavity
+    # Bright pink eyes (gx=-1,1 → col 3,5 at gy=17 → py=17)
+    p[(3, 17)] = (255, 80, 255, 255)    # left eye bright pink glow
+    p[(5, 17)] = (255, 80, 255, 255)    # right eye bright pink glow
+    # Arms — slightly lighter void-purple
+    for py in range(5, 14):
+        p[(1, py)] = (42, 25, 80, 255)     # left arm
+        p[(7, py)] = (42, 25, 80, 255)     # right arm
+    # Hands — magenta glow at fingertips
+    p[(0, 5)]  = (200, 50, 200, 255)   # left hand glow
+    p[(8, 5)]  = (200, 50, 200, 255)   # right hand glow
+    # Robe tendril tips — magenta
+    for px in [0, 4, 8]:
+        p[(px, 0)] = (180, 40, 175, 255)
     return w, h, p
 
 
@@ -3774,12 +3893,6 @@ SKIN_TYPES = {
     "status_freeze":      ("status_freeze_42.png",           skin_status_freeze),
     "status_slow":        ("status_slow_42.png",             skin_status_slow),
     "status_invuln":      ("status_invuln_42.png",           skin_status_invuln),
-    # Boss skins (floor 10+)
-    "boss_andariel":      ("boss_andariel_42.png",           skin_boss_andariel),
-    "boss_mephisto":      ("boss_mephisto_42.png",           skin_boss_mephisto),
-    "boss_baal":          ("boss_baal_42.png",               skin_boss_baal),
-    "boss_diablo":        ("boss_diablo_42.png",             skin_boss_diablo),
-    "boss_reaper":        ("boss_reaper_42.png",             skin_boss_reaper),
     # Skeleton-rig variants
     "zombie":             ("zombie_skin_42.png",             skin_zombie),
     "ghoul":              ("ghoul_skin_42.png",              skin_ghoul),

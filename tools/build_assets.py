@@ -49,6 +49,15 @@ def build_meshes():
         ["--type", "bat",      "--wingspan", "1.0", "--out", os.path.join(mesh_dir, "bat.obj")],
         ["--type", "butcher",       "--height", "2.5", "--out", os.path.join(mesh_dir, "butcher.obj")],
         ["--type", "andariel",      "--height", "2.0", "--out", os.path.join(mesh_dir, "andariel.obj")],
+        # Boss meshes (floor-milestone encounters)
+        ["--type", "lich",        "--height", "2.0", "--out", os.path.join(mesh_dir, "lich.obj")],
+        ["--type", "warden",      "--height", "2.4", "--out", os.path.join(mesh_dir, "warden.obj")],
+        ["--type", "spider_queen","--radius",  "0.7", "--out", os.path.join(mesh_dir, "spider_queen.obj")],
+        ["--type", "korvath",     "--height", "2.4", "--out", os.path.join(mesh_dir, "korvath.obj")],
+        ["--type", "azhar",       "--height", "2.2", "--out", os.path.join(mesh_dir, "azhar.obj")],
+        ["--type", "diablo",      "--height", "2.6", "--out", os.path.join(mesh_dir, "diablo.obj")],
+        ["--type", "nyx",         "--height", "2.2", "--out", os.path.join(mesh_dir, "nyx.obj")],
+        ["--type", "reaper",      "--height", "2.6", "--out", os.path.join(mesh_dir, "reaper.obj")],
         # Limb parts
         ["--type", "skeleton_arm",   "--out", os.path.join(mesh_dir, "skeleton_arm.obj")],
         ["--type", "skeleton_leg",   "--out", os.path.join(mesh_dir, "skeleton_leg.obj")],

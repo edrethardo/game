@@ -130,6 +130,8 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 
 `assets/config/bosses.json` — array under `"bosses"`. 10 boss definitions on milestone floors (5,10,...50). Per entry: `name`, `floor`, `isMajor`, stats (`baseHp`, `baseDmg`, `speed`, etc.), `meshName`, `matName`, `weaponName`, `roles` (array of role strings → bitmask), `personality` (string → `BossPersonality`), `skillId` (skill name string), `enrageFactor`, `minionShield`, `onHitEffect`, `projectile` (sub-object), `lootGuarantee` ("rare"/"legendary"), `bonusDrops`, `limbConfig`. Loader: `BossLoader::load` (`game/boss_loader.cpp`).
 
+**Boss mesh rework (visual pass):** Each of the 8 non-Butcher/Ygara bosses now has a dedicated mesh instead of reusing shared bodies: `lich` (Sethrak, floor 15), `warden` (Malachar, floor 20), `spider_queen` (Ixara, floor 25), `korvath` (floor 30), `azhar` (floor 35), `diablo` (floor 40), `nyx` (Nyx, floor 45), `reaper` (Grim Reaper, floor 50). Limb configs 5 (`s_bossLichConfig`) and 6 (`s_bossNyxConfig`) were added to `limb_system.cpp`. Configs 4 (Reaper), 5, and 6 hide walking-leg limbs (slots 0-1 return mesh id 0) because their body OBJs include a full-length robe/cloak that would clip through separate leg geometry.
+
 ## How to Add Things
 
 **New item**: append to `assets/config/items.json`. If it needs a new mesh, drop the `.obj` into `assets/meshes/` and add it to the `kMeshes` table in `Engine::init` (`engine.cpp:175`). If it needs a new material, add an entry in `assets/materials.json`. Increase `MAX_ITEM_DEFS` if you exceed 64.

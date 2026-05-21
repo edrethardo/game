@@ -306,6 +306,15 @@ void Engine::init() {
             {"succubus",       "assets/meshes/succubus.obj"},
             {"abyssal_titan",  "assets/meshes/abyssal_titan.obj"},
             {"entropy_weaver", "assets/meshes/entropy_weaver.obj"},
+            // New boss meshes (visual rework) — each major boss now has a dedicated OBJ
+            {"lich",           "assets/meshes/lich.obj"},
+            {"warden",         "assets/meshes/warden.obj"},
+            {"spider_queen",   "assets/meshes/spider_queen.obj"},
+            {"korvath",        "assets/meshes/korvath.obj"},
+            {"azhar",          "assets/meshes/azhar.obj"},
+            {"diablo",         "assets/meshes/diablo.obj"},
+            {"nyx",            "assets/meshes/nyx.obj"},
+            {"reaper",         "assets/meshes/reaper.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;

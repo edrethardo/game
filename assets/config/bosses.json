@@ -99,10 +99,10 @@
       "detectionRange": 20.0,
       "halfExtents": [
         0.5,
-        1.0,
+        1.05,
         0.5
       ],
-      "meshName": "skeleton",
+      "meshName": "lich",
       "matName": "boss_lich",
       "weaponName": "staff",
       "roles": [
@@ -127,7 +127,7 @@
       },
       "lootGuarantee": "rare",
       "bonusDrops": 0,
-      "limbConfig": 0,
+      "limbConfig": 5,
       "speech": "THE DEAD WILL RISE!"
     },
     {
@@ -141,11 +141,11 @@
       "atkCooldown": 1.0,
       "detectionRange": 20.0,
       "halfExtents": [
-        0.5,
+        0.55,
         1.2,
-        0.5
+        0.55
       ],
-      "meshName": "skeleton",
+      "meshName": "warden",
       "matName": "boss_mephisto",
       "weaponName": "staff",
       "roles": [
@@ -184,11 +184,11 @@
       "atkCooldown": 0.8,
       "detectionRange": 20.0,
       "halfExtents": [
-        0.5,
-        1.0,
-        0.5
+        0.7,
+        0.9,
+        0.7
       ],
-      "meshName": "spider",
+      "meshName": "spider_queen",
       "matName": "boss_spider_queen",
       "weaponName": "",
       "roles": [
@@ -227,11 +227,11 @@
       "atkCooldown": 1.5,
       "detectionRange": 20.0,
       "halfExtents": [
-        0.6,
+        0.7,
         1.2,
-        0.6
+        0.7
       ],
-      "meshName": "butcher",
+      "meshName": "korvath",
       "matName": "boss_baal",
       "weaponName": "",
       "roles": [
@@ -271,10 +271,10 @@
       "detectionRange": 20.0,
       "halfExtents": [
         0.5,
-        1.0,
+        1.05,
         0.5
       ],
-      "meshName": "butcher",
+      "meshName": "azhar",
       "matName": "boss_demon_knight",
       "weaponName": "sword",
       "roles": [
@@ -313,11 +313,11 @@
       "atkCooldown": 0.7,
       "detectionRange": 20.0,
       "halfExtents": [
-        0.6,
+        0.65,
         1.3,
-        0.6
+        0.65
       ],
-      "meshName": "butcher",
+      "meshName": "diablo",
       "matName": "boss_diablo",
       "weaponName": "sword",
       "roles": [
@@ -357,10 +357,10 @@
       "detectionRange": 20.0,
       "halfExtents": [
         0.5,
-        1.0,
+        1.1,
         0.5
       ],
-      "meshName": "skeleton",
+      "meshName": "nyx",
       "matName": "boss_arch_mage",
       "weaponName": "staff",
       "roles": [
@@ -385,7 +385,7 @@
       },
       "lootGuarantee": "rare",
       "bonusDrops": 0,
-      "limbConfig": 0,
+      "limbConfig": 6,
       "speech": "THE VOID CONSUMES!"
     },
     {
@@ -403,7 +403,7 @@
         1.3,
         0.5
       ],
-      "meshName": "skeleton",
+      "meshName": "reaper",
       "matName": "boss_reaper",
       "weaponName": "axe",
       "roles": [

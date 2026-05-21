@@ -2721,6 +2721,610 @@ def gen_bolt(length=0.35):
     return mb
 
 
+# ---------------------------------------------------------------------------
+# Boss mesh generators (floor-milestone encounters)
+# ---------------------------------------------------------------------------
+
+def gen_lich(height=2.0):
+    """Lich sorcerer boss — hooded skeletal undead with flared robe base.
+
+    Peaked hood with a shadowed skull cavity (front voxels discarded to create
+    depth), bone-spike crown on the hood ridge, hunched bony shoulders, one
+    arm raised as if gripping a staff. No legs — robe flares into a wide skirt
+    cone that reaches the floor. Grid: ~9w x 18h.
+    """
+    mb = MeshBuilder()
+    vs = height / 18.0   # 18 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Peaked hood (deep with shadow cavity) ---
+    fill_box(-2, 13, -2, 5, 5, 4)   # main hood block
+    fill_box(-1, 17, -1, 3, 1, 3)   # hood peak
+    # Carve a deep shadow cavity in the front — skull sits inside
+    for gy in range(14, 17):
+        filled.discard((-1, gy, -2))
+        filled.discard((0,  gy, -2))
+        filled.discard((1,  gy, -2))
+    # Small skull set back inside the cavity
+    fill_box(-1, 14, -1, 3, 2, 2)
+    # Eye sockets on the skull (glowing through the shadow)
+    filled.discard((-1, 15, -1))
+    filled.discard((1,  15, -1))
+
+    # --- Crown spikes on hood ridge ---
+    filled.add((-2, 18, 0))   # left crown spike
+    filled.add(( 2, 18, 0))   # right crown spike
+    filled.add(( 0, 18, 0))   # center crown spike (tallest)
+    filled.add(( 0, 19, 0))   # center spike tip
+
+    # --- Hunched bony neck/shoulders ---
+    fill_box(-1, 12, 0, 3, 1, 1)    # neck
+    fill_box(-3, 11, -1, 7, 2, 3)   # wide-set hunched shoulders
+    # Shoulder bone protrusions
+    filled.add((-4, 12, 0))
+    filled.add(( 4, 12, 0))
+
+    # --- Torso (slim, robed) ---
+    fill_box(-2, 7, -1, 5, 4, 3)
+
+    # --- Left arm (hanging, bony) ---
+    fill_box(-3, 9, 0, 1, 3, 1)   # left upper arm
+    fill_box(-3, 6, 0, 1, 3, 1)   # left lower arm
+    fill_box(-4, 5, -1, 2, 1, 2)  # left clawed hand
+
+    # --- Right arm (raised, gripping staff) ---
+    fill_box(3, 8, 0, 1, 4, 1)    # right upper arm raised
+    fill_box(3, 12, 0, 1, 2, 1)   # right upper arm connects to shoulder
+    fill_box(3, 5, 0, 1, 3, 1)    # right lower arm (held lower)
+    fill_box(3, 4, -1, 1, 1, 2)   # right hand / grip
+
+    # --- Floor-length robe skirt (cone widening toward base) ---
+    # Robe flares: each lower row is wider — no legs visible
+    fill_box(-2, 4, -1, 5, 3, 3)   # upper skirt (narrow)
+    fill_box(-3, 2, -2, 7, 2, 4)   # mid skirt (wider)
+    fill_box(-4, 0, -2, 9, 2, 4)   # base skirt (widest, floor level)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_warden(height=2.4):
+    """Armored skeletal tomb-warden — broad, imposing gravestone-slab pauldrons.
+
+    Gaunt skull under an asymmetric broken crown (one spike discarded to show
+    battle damage). Huge flat gravestone pauldrons on both shoulders. Armored
+    cuirass over a partly-open ribcage. Two thick greaved legs. Widest-shouldered
+    humanoid silhouette. Grid: ~11w x 20h.
+    """
+    mb = MeshBuilder()
+    vs = height / 20.0   # 20 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Skull (gaunt, angular) ---
+    fill_box(-2, 16, -2, 5, 4, 4)
+    # Jaw
+    fill_box(-1, 15, -2, 3, 1, 3)
+    # Eye sockets
+    filled.discard((-1, 18, -2))
+    filled.discard(( 1, 18, -2))
+    # Broken asymmetric crown — left spike intact, right spike broken
+    fill_box(-2, 20, -1, 1, 2, 1)   # left full spike
+    fill_box(-1, 20, -1, 1, 1, 1)   # center stub (short)
+    fill_box( 1, 20, -1, 1, 2, 1)   # right spike intact
+    # Right crown spike tip is discarded (broken)
+    filled.discard((1, 21, -1))
+
+    # --- Thick neck ---
+    fill_box(-1, 14, -1, 3, 2, 2)
+
+    # --- Gravestone-slab pauldrons (huge flat slabs, iconically wide) ---
+    fill_box(-5, 12, -1, 2, 4, 3)   # left pauldron slab
+    fill_box( 4, 12, -1, 2, 4, 3)   # right pauldron slab
+    # Pauldron edge caps
+    filled.add((-6, 13, 0)); filled.add((-6, 14, 0))
+    filled.add(( 6, 13, 0)); filled.add(( 6, 14, 0))
+
+    # --- Armored cuirass over ribcage ---
+    fill_box(-3, 8, -2, 7, 6, 4)    # main torso/cuirass
+    # Ribcage gaps through front of cuirass (skeletal showing through)
+    for ry in [9, 11]:
+        filled.discard((-1, ry, -2))
+        filled.discard(( 1, ry, -2))
+
+    # --- Belt / waist ---
+    fill_box(-2, 7, -1, 5, 1, 3)
+
+    # --- Heavy gauntlet arms ---
+    fill_box(-4, 9, 0, 1, 4, 1)    # left upper arm
+    fill_box( 4, 9, 0, 1, 4, 1)    # right upper arm
+    fill_box(-4, 5, 0, 1, 4, 1)    # left lower arm
+    fill_box( 4, 5, 0, 1, 4, 1)    # right lower arm
+    # Big gauntlet fists
+    fill_box(-5, 4, -1, 2, 2, 2)
+    fill_box( 4, 4, -1, 2, 2, 2)
+
+    # --- Armored greaves (thick plate legs) ---
+    fill_box(-3, 3, -1, 3, 4, 3)   # left thigh greave
+    fill_box( 1, 3, -1, 3, 4, 3)   # right thigh greave
+    fill_box(-3, 0, -1, 3, 3, 3)   # left shin greave
+    fill_box( 1, 0, -1, 3, 3, 3)   # right shin greave
+    # Sabatons (armored boots, flat-bottomed)
+    fill_box(-3, 0, -2, 3, 1, 4)
+    fill_box( 1, 0, -2, 3, 1, 4)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_spider_queen(radius=0.7):
+    """Spider Queen boss — massively bloated egg-sac abdomen, crown of eye voxels.
+
+    ~40% larger than gen_spider. Huge rounded abdomen at rear, smaller
+    cephalothorax up front. Front crown of eye voxels with carved sockets.
+    8 thick legs baked in — front pair raised higher than regular spider.
+    Grid follows horizontal spider convention: x-span wide x y-span tall.
+    """
+    mb = MeshBuilder()
+    vs = radius / 7.0   # 7 voxels per radius gives a bigger grid than spider's 5
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Bloated egg-sac abdomen (rear, large rounded block) ---
+    fill_box(-4, 1, 2, 8, 6, 7)   # main abdomen
+    # Round the corners of the abdomen
+    for corner in [(-4,6,2),(-4,6,8),(3,6,2),(3,6,8),
+                   (-4,1,2),(-4,1,8),(3,1,2),(3,1,8)]:
+        filled.discard(corner)
+    fill_box(-3, 7, 3, 6, 1, 5)   # abdomen dome top
+
+    # --- Cephalothorax (front, smaller) ---
+    fill_box(-3, 2, -4, 6, 4, 5)
+    # Narrow neck between thorax and abdomen
+    fill_box(-2, 3, 1, 4, 2, 2)
+
+    # --- Head with crown of eyes ---
+    fill_box(-2, 2, -7, 4, 3, 3)   # main head
+    # Eye crown cluster — small voxels on top of head
+    for ex, ez in [(-2, -6), (-1, -7), (0, -7), (1, -7), (2, -6)]:
+        filled.add((ex, 5, ez))
+    # Carve eye sockets in the crown
+    filled.discard((-1, 5, -7))
+    filled.discard(( 1, 5, -7))
+    # Front face eyes (two pairs)
+    filled.discard((-1, 4, -7))
+    filled.discard(( 1, 4, -7))
+    # Fangs below head
+    filled.add((-1, 1, -8)); filled.add((1, 1, -8))
+    filled.add((-1, 2, -8)); filled.add((1, 2, -8))
+
+    # --- 8 thick legs (longer/taller than regular spider) ---
+    # Front 2 pairs — raised higher
+    for sz in [-3, -2]:
+        filled.add((-3, 3, sz)); filled.add((-4, 4, sz)); filled.add((-5, 6, sz))
+        filled.add((-6, 5, sz)); filled.add((-7, 4, sz)); filled.add((-8, 3, sz))
+        filled.add((-8, 1, sz)); filled.add((-9, 0, sz))
+        filled.add(( 2, 3, sz)); filled.add(( 3, 4, sz)); filled.add(( 4, 6, sz))
+        filled.add(( 5, 5, sz)); filled.add(( 6, 4, sz)); filled.add(( 7, 3, sz))
+        filled.add(( 7, 1, sz)); filled.add(( 8, 0, sz))
+    # Rear 2 pairs — lower
+    for sz in [0, 1]:
+        filled.add((-3, 2, sz)); filled.add((-4, 3, sz)); filled.add((-5, 5, sz))
+        filled.add((-6, 4, sz)); filled.add((-6, 3, sz)); filled.add((-7, 2, sz))
+        filled.add((-8, 0, sz))
+        filled.add(( 2, 2, sz)); filled.add(( 3, 3, sz)); filled.add(( 4, 5, sz))
+        filled.add(( 5, 4, sz)); filled.add(( 5, 3, sz)); filled.add(( 6, 2, sz))
+        filled.add(( 7, 0, sz))
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_korvath(height=2.4):
+    """Korvath — armored siege juggernaut. Broadest silhouette of all bosses.
+
+    Massive horned great-helm with a visor slit (carved eye slot). Enormous
+    blocky pauldrons. A tower shield baked onto the left arm as a large flat
+    slab. Spiked gauntlet right fist. Heavy plate cuirass + faulds. Grid: ~13w x 20h.
+    """
+    mb = MeshBuilder()
+    vs = height / 20.0   # 20 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Great-helm with horns ---
+    fill_box(-3, 15, -3, 7, 5, 5)   # main helm block
+    # Visor slit — horizontal carved eye slot
+    for vx in range(-2, 4):
+        filled.discard((vx, 17, -3))
+    # Horns sweeping up and outward
+    fill_box(-5, 18, -1, 2, 3, 1)   # left horn
+    fill_box(-6, 20, -1, 1, 1, 1)   # left horn tip
+    fill_box( 4, 18, -1, 2, 3, 1)   # right horn
+    fill_box( 5, 20, -1, 1, 1, 1)   # right horn tip (slightly taller)
+    filled.add(( 5, 21, -1))         # right horn extra tip
+
+    # --- Thick neck ---
+    fill_box(-2, 13, -1, 5, 2, 3)
+
+    # --- Enormous blocky pauldrons ---
+    fill_box(-6, 11, -2, 3, 4, 4)   # left pauldron (wide block)
+    fill_box( 4, 11, -2, 3, 4, 4)   # right pauldron
+    # Pauldron spikes
+    filled.add((-7, 14, 0)); filled.add((-7, 15, 0))
+    filled.add(( 6, 14, 0)); filled.add(( 6, 15, 0))
+
+    # --- Heavy plate cuirass + faulds ---
+    fill_box(-3, 7, -2, 7, 6, 4)    # cuirass
+    fill_box(-4, 6, -2, 9, 1, 4)    # fauld/hip plate (slightly wider)
+    fill_box(-3, 5, -2, 7, 1, 3)    # lower fauld
+
+    # --- Tower shield baked onto LEFT arm (large flat slab) ---
+    fill_box(-7, 4, -3, 2, 9, 1)    # shield face (flat, tall slab)
+    fill_box(-7, 4, -2, 2, 9, 1)    # shield depth
+    fill_box(-5, 8, 0, 1, 5, 1)     # left upper arm behind shield
+    fill_box(-5, 4, 0, 1, 4, 1)     # left lower arm
+
+    # --- Right arm (spiked gauntlet fist) ---
+    fill_box( 4, 8, 0, 1, 5, 1)     # right upper arm
+    fill_box( 4, 4, 0, 1, 4, 1)     # right lower arm
+    # Spiked gauntlet
+    fill_box( 4, 3, -2, 2, 2, 3)    # right fist
+    filled.add(( 5, 4, -3))          # spike front
+    filled.add(( 4, 5, -3))          # spike front 2
+
+    # --- Thick armored legs ---
+    fill_box(-4, 2, -1, 4, 3, 3)    # left leg
+    fill_box( 1, 2, -1, 4, 3, 3)    # right leg
+    fill_box(-4, 0, -1, 4, 2, 3)    # left lower leg
+    fill_box( 1, 0, -1, 4, 2, 3)    # right lower leg
+    # Sabatons (broad, armored)
+    fill_box(-4, 0, -2, 4, 1, 4)
+    fill_box( 1, 0, -2, 4, 1, 4)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_azhar(height=2.2):
+    """Azhar — lean demon duelist. Deliberately slender, contrasts with bulky butcher.
+
+    Narrow waist, long swept-back curved horns (extend several voxels back and
+    up), angular ashen face, flared shoulder spikes. Right arm extended holding
+    a long thin blade. Thin tattered cape baked on the back. Clawed digit legs.
+    Grid: ~9w x 20h (narrow silhouette).
+    """
+    mb = MeshBuilder()
+    vs = height / 20.0   # 20 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Angular head ---
+    fill_box(-2, 16, -2, 5, 4, 4)
+    # Narrow angular jaw
+    fill_box(-1, 15, -2, 3, 1, 3)
+    # Eye sockets (angular slits)
+    filled.discard((-1, 18, -2))
+    filled.discard(( 1, 18, -2))
+
+    # --- Long swept-back curved horns ---
+    # Horns curve back and up from the skull sides
+    fill_box(-3, 19, -1, 1, 1, 1)   # left horn base
+    filled.add((-3, 20, 0))           # left horn mid
+    filled.add((-3, 21, 1))           # left horn upper sweep
+    filled.add((-2, 22, 2))           # left horn tip (sweeps back)
+    fill_box( 2, 19, -1, 1, 1, 1)   # right horn base
+    filled.add(( 2, 20, 0))           # right horn mid
+    filled.add(( 2, 21, 1))           # right horn upper sweep
+    filled.add(( 1, 22, 2))           # right horn tip
+
+    # --- Neck (slender) ---
+    fill_box(-1, 14, -1, 3, 2, 2)
+
+    # --- Narrow torso with flared shoulder spikes ---
+    fill_box(-2, 10, -1, 5, 4, 3)   # torso (narrow)
+    # Shoulder spikes (angular, flared)
+    filled.add((-3, 13, 0)); filled.add((-4, 14, 0))   # left spike
+    filled.add(( 3, 13, 0)); filled.add(( 4, 14, 0))   # right spike
+
+    # --- Narrow waist ---
+    fill_box(-1, 8, -1, 3, 2, 2)
+
+    # --- Thin tattered cape (back slab, behind torso) ---
+    fill_box(-2, 5, 2, 5, 9, 1)   # cape: runs from hips up to shoulder height
+
+    # --- Left arm (hanging, clawed) ---
+    fill_box(-3, 10, 0, 1, 4, 1)   # left upper arm
+    fill_box(-3, 6, 0, 1, 4, 1)    # left lower arm
+    fill_box(-4, 5, -1, 2, 1, 2)   # left clawed hand
+
+    # --- Right arm extended holding a long thin blade ---
+    fill_box( 3, 10, 0, 1, 4, 1)   # right upper arm
+    fill_box( 3, 6, 0, 1, 4, 1)    # right lower arm
+    fill_box( 3, 4, -1, 1, 2, 1)   # right hand/grip
+    # Long thin blade extending from the hand upward
+    fill_box( 4, 5, -1, 1, 8, 1)   # blade (tall, thin column)
+    filled.add(( 4, 13, -1))         # blade tip
+
+    # --- Narrow pelvis ---
+    fill_box(-2, 7, -1, 5, 1, 2)
+
+    # --- Clawed digit legs (slender, digitigrade) ---
+    fill_box(-2, 3, -1, 2, 4, 2)   # left thigh
+    fill_box( 1, 3, -1, 2, 4, 2)   # right thigh
+    fill_box(-2, 1, -1, 2, 2, 1)   # left lower leg (slanted)
+    fill_box( 1, 1, -1, 2, 2, 1)   # right lower leg
+    # Clawed feet (digitigrade — heel raised)
+    fill_box(-2, 0, -2, 2, 1, 2)
+    fill_box( 1, 0, -2, 2, 1, 2)
+    filled.add((-3, 0, -1)); filled.add(( 2, 0, -1))  # claw tips
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_diablo(height=2.6):
+    """Diablo — iconic demon terror. Distinct hunched bestial posture.
+
+    Long curving ram/bull horns sweeping back and up (multi-voxel curve).
+    Elongated bestial maw (carved mouth). Hunched powerful torso leaning
+    forward. A ridged spine row of spikes up the back. Broad clawed hands.
+    Digitigrade clawed legs. Largest non-final boss. Grid: ~13w x 22h.
+    """
+    mb = MeshBuilder()
+    vs = height / 22.0   # 22 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Massive bestial head ---
+    fill_box(-3, 18, -4, 7, 4, 5)   # skull
+    # Elongated bestial maw (lower jaw protrudes)
+    fill_box(-2, 16, -5, 5, 2, 3)   # maw/snout
+    fill_box(-2, 15, -5, 5, 1, 2)   # lower jaw
+    # Carved mouth gap
+    for mx in range(-2, 3):
+        filled.discard((mx, 16, -5))
+        filled.discard((mx, 15, -5))
+    # Eyes — sunken orange embers
+    filled.discard((-2, 20, -4))
+    filled.discard(( 2, 20, -4))
+    filled.discard((-1, 20, -4))
+    filled.discard(( 1, 20, -4))
+
+    # --- Long curving ram horns ---
+    # Left horn: sweeps up and back in a curve
+    fill_box(-4, 21, -2, 1, 2, 1)   # left horn base
+    filled.add((-5, 23, -1))          # left horn mid sweep
+    filled.add((-5, 24, 0))           # left horn upper
+    filled.add((-4, 25, 1))           # left horn tip curving back
+    # Right horn: mirror
+    fill_box( 3, 21, -2, 1, 2, 1)
+    filled.add(( 4, 23, -1))
+    filled.add(( 4, 24, 0))
+    filled.add(( 3, 25, 1))
+
+    # --- Neck (thick, hunched forward) ---
+    fill_box(-2, 16, -1, 5, 2, 3)   # neck leans forward
+
+    # --- Hunched powerful torso ---
+    fill_box(-4, 10, -2, 9, 6, 5)   # main torso
+    # Barrel chest protrusion (hunched forward lean)
+    fill_box(-3, 12, -4, 7, 3, 2)
+    # Ridged spine — row of spikes up the back
+    for sy in range(9, 18, 2):
+        filled.add((0, sy, 3))    # spine ridge spike
+
+    # --- Belt / waist ---
+    fill_box(-3, 8, -2, 7, 2, 4)
+
+    # --- Broad clawed hands ---
+    fill_box(-6, 7, -1, 2, 5, 2)    # left upper arm
+    fill_box( 5, 7, -1, 2, 5, 2)    # right upper arm
+    fill_box(-6, 3, -1, 2, 4, 2)    # left lower arm
+    fill_box( 5, 3, -1, 2, 4, 2)    # right lower arm
+    # Broad 3-voxel-wide clawed hands
+    fill_box(-7, 2, -2, 3, 2, 3)
+    fill_box( 5, 2, -2, 3, 2, 3)
+
+    # --- Digitigrade clawed legs ---
+    fill_box(-4, 4, -1, 3, 4, 3)    # left thigh
+    fill_box( 2, 4, -1, 3, 4, 3)    # right thigh
+    fill_box(-4, 1, 0, 3, 3, 2)     # left lower leg (angled back)
+    fill_box( 2, 1, 0, 3, 3, 2)     # right lower leg
+    # Clawed feet pointing forward
+    fill_box(-4, 0, -3, 3, 1, 4)
+    fill_box( 2, 0, -3, 3, 1, 4)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_nyx(height=2.2):
+    """Nyx — void weaver. Elongated spindly torso, void-crystal crown of spikes.
+
+    No legs — trails a void-robe base with a few tapering tendrils reaching
+    the ground (wraith-like robe silhouette). Narrow hooded head.
+    Grid: ~9w x 20h.
+    """
+    mb = MeshBuilder()
+    vs = height / 20.0   # 20 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Narrow hooded head ---
+    fill_box(-2, 15, -2, 5, 5, 4)
+    # Hood peak (tall, narrow)
+    fill_box(-1, 19, -1, 3, 2, 2)
+    filled.add(( 0, 21, 0))   # hood apex voxel
+
+    # --- Void-crystal crown (cluster of sharp spikes on the hood) ---
+    filled.add((-2, 20, 0))    # left outer spike
+    filled.add((-1, 21, 0))    # left inner spike
+    filled.add(( 1, 21, 0))    # right inner spike (already implied by hood)
+    filled.add(( 2, 20, 0))    # right outer spike
+    filled.add(( 0, 22, 0))    # tallest center crystal spike
+    filled.add((-1, 22, -1))   # forward left crystal
+    filled.add(( 1, 22, -1))   # forward right crystal
+
+    # --- Face cavity (carved shadow) ---
+    for fy in range(16, 19):
+        filled.discard((0, fy, -2))
+    # Eyes inside the cavity
+    fill_box(-1, 17, -1, 3, 1, 1)   # eye row
+    filled.discard(( 0, 17, -1))      # center of eye row stays dark
+
+    # --- Neck (spindly) ---
+    fill_box( 0, 14, 0, 1, 1, 1)
+
+    # --- Elongated spindly torso ---
+    fill_box(-2, 9, -1, 5, 5, 3)    # upper torso
+    fill_box(-1, 5, -1, 3, 4, 2)    # lower torso (narrower)
+
+    # --- Long thin arms ---
+    fill_box(-3, 11, 0, 1, 4, 1)    # left upper arm
+    fill_box(-4, 7, 0, 1, 4, 1)     # left lower arm (angled)
+    fill_box(-4, 5, -1, 1, 2, 1)    # left hand
+    fill_box( 3, 11, 0, 1, 4, 1)    # right upper arm
+    fill_box( 4, 7, 0, 1, 4, 1)     # right lower arm
+    fill_box( 4, 5, -1, 1, 2, 1)    # right hand
+
+    # --- Void-robe base (wraith-like tendrils, no legs) ---
+    fill_box(-3, 3, -2, 7, 2, 4)    # upper robe bell
+    fill_box(-4, 1, -2, 9, 2, 4)    # lower robe flare
+    # Tapering tendrils reaching the floor
+    filled.add((-3, 0, -1)); filled.add((-3, 0, 0))   # left tendril
+    filled.add(( 3, 0, -1)); filled.add(( 3, 0, 0))   # right tendril
+    filled.add(( 0, 0, -1)); filled.add(( 0, 0, 1))   # center tendrils
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_reaper(height=2.6):
+    """Grim Reaper death boss — huge peaked hood with deep shadow skull cavity.
+
+    Broad cloaked shoulders. Skeletal arms, one gripping a tall SCYTHE baked
+    in (a pole with an angled blade at the top). No legs — cloak flares to the
+    floor with a tattered hem. Grid: ~13w x 22h.
+    """
+    mb = MeshBuilder()
+    vs = height / 22.0   # 22 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Huge peaked hood ---
+    fill_box(-3, 17, -3, 7, 5, 5)   # main hood block
+    fill_box(-2, 21, -2, 5, 2, 4)   # hood peak upper
+    fill_box(-1, 23, -1, 3, 1, 2)   # hood apex
+    filled.add(( 0, 24, 0))           # top of hood
+
+    # --- Deep shadow skull cavity (carve front face) ---
+    for gy in range(18, 21):
+        for gx in range(-2, 3):
+            filled.discard((gx, gy, -3))
+    # Small skull deep inside the hood
+    fill_box(-1, 18, -2, 3, 2, 2)
+    # Skull eye sockets (glowing)
+    filled.discard((-1, 19, -2))
+    filled.discard(( 1, 19, -2))
+
+    # --- Broad cloaked shoulders ---
+    fill_box(-5, 14, -2, 11, 3, 4)   # wide shoulder drape
+    # Shoulder edge definition
+    fill_box(-6, 15, -1, 1, 2, 2)
+    fill_box( 6, 15, -1, 1, 2, 2)
+
+    # --- Neck ---
+    fill_box(-1, 16, -1, 3, 1, 2)
+
+    # --- Cloaked torso (slim under cloak) ---
+    fill_box(-3, 10, -1, 7, 4, 3)
+
+    # --- Skeletal left arm (hanging, bony) ---
+    fill_box(-4, 11, 0, 1, 4, 1)    # left upper arm
+    fill_box(-4, 7, 0, 1, 4, 1)     # left lower arm
+    fill_box(-5, 6, -1, 2, 1, 2)    # left bony hand
+
+    # --- Right arm gripping a tall scythe ---
+    fill_box( 4, 11, 0, 1, 4, 1)    # right upper arm
+    fill_box( 4, 7, 0, 1, 4, 1)     # right lower arm
+    fill_box( 4, 5, 0, 1, 2, 1)     # right hand/grip
+    # Scythe pole (tall, extends high above the head)
+    fill_box( 5, 1, 0, 1, 22, 1)    # scythe pole (tall thin column)
+    # Scythe blade (angled at the top, curving left)
+    fill_box( 2, 22, -1, 4, 1, 1)   # blade horizontal span
+    fill_box( 2, 21, -2, 3, 1, 1)   # blade lower angled edge
+    filled.add(( 1, 22, -1))          # blade tip left
+
+    # --- Cloak base (no legs, flares to floor with tattered hem) ---
+    fill_box(-4, 7, -2, 9, 3, 4)    # upper cloak bell
+    fill_box(-5, 4, -2, 11, 3, 4)   # mid cloak flare
+    fill_box(-6, 1, -2, 13, 3, 4)   # lower cloak (widest)
+    # Tattered hem tendrils
+    for tx in [-5, -3, -1, 1, 3, 5]:
+        filled.add((tx, 0, -1))
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
 MESH_TYPES = {
     "humanoid": {
         "func": gen_humanoid,
@@ -3071,6 +3675,47 @@ MESH_TYPES = {
         "func": gen_bolt,
         "desc": "Crossbow bolt — short shaft + flat head.",
         "default_file": "bolt.obj",
+    },
+    # Boss mesh types
+    "lich": {
+        "func": lambda height=2.0: gen_lich(height),
+        "desc": "Hooded skeletal sorcerer boss with flared robe base. Params: --height",
+        "default_file": "lich.obj",
+    },
+    "warden": {
+        "func": lambda height=2.4: gen_warden(height),
+        "desc": "Armored skeletal tomb-warden with gravestone pauldrons. Params: --height",
+        "default_file": "warden.obj",
+    },
+    "spider_queen": {
+        "func": lambda radius=0.7: gen_spider_queen(radius),
+        "desc": "Bloated spider queen boss with egg-sac abdomen. Params: --radius",
+        "default_file": "spider_queen.obj",
+    },
+    "korvath": {
+        "func": lambda height=2.4: gen_korvath(height),
+        "desc": "Armored siege juggernaut with tower shield. Params: --height",
+        "default_file": "korvath.obj",
+    },
+    "azhar": {
+        "func": lambda height=2.2: gen_azhar(height),
+        "desc": "Lean demon duelist with swept horns and baked blade. Params: --height",
+        "default_file": "azhar.obj",
+    },
+    "diablo": {
+        "func": lambda height=2.6: gen_diablo(height),
+        "desc": "Iconic demon terror — hunched bestial posture with ridged spine. Params: --height",
+        "default_file": "diablo.obj",
+    },
+    "nyx": {
+        "func": lambda height=2.2: gen_nyx(height),
+        "desc": "Void weaver boss — crystal crown, spindly torso, trailing robe tendrils. Params: --height",
+        "default_file": "nyx.obj",
+    },
+    "reaper": {
+        "func": lambda height=2.6: gen_reaper(height),
+        "desc": "Grim Reaper boss — deep-shadow hood, baked scythe, cloak base. Params: --height",
+        "default_file": "reaper.obj",
     },
 }
 
