@@ -20,3 +20,5 @@ save.dat
 assets/config/controls.json
 assets/audio/
 save_*.dat
+__pycache__/
+*.pyc
