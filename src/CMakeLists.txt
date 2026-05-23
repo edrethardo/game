@@ -32,6 +32,11 @@ add_executable(DungeonEngine
     renderer/font.cpp
     renderer/item_icons.cpp
     renderer/hud.cpp
+    renderer/hud_input_glyphs.cpp
+    renderer/hud_status.cpp
+    renderer/hud_skill_bar.cpp
+    renderer/hud_inventory.cpp
+    renderer/hud_portraits.cpp
     renderer/minimap.cpp
     renderer/particles.cpp
     renderer/projectile_renderer.cpp
