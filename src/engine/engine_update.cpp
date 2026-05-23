@@ -1322,14 +1322,25 @@ void Engine::gameUpdate(f32 dt) {
         m_localPlayer.hurtVignette -= dt * 2.5f;
         if (m_localPlayer.hurtVignette < 0.0f) m_localPlayer.hurtVignette = 0.0f;
     }
-    // Low-HP danger: hold a gentle pulsing red floor while under 25% HP.
-    // sinf oscillates at 5 Hz for an urgent heartbeat feel.
+    // Low-HP danger feedback. Visual red pulse under 25% HP; a LIGHT periodic rumble
+    // "nag" under 40% HP — a short pulse roughly once a second, never a constant rumble.
     {
         f32 hpFrac = (m_localPlayer.maxHealth > 0.0f)
                    ? (m_localPlayer.health / m_localPlayer.maxHealth) : 1.0f;
-        if (hpFrac > 0.0f && hpFrac < 0.25f) {
+        bool alive = hpFrac > 0.0f;
+        if (alive && hpFrac < 0.25f) {
+            // sinf oscillates at 5 Hz for an urgent heartbeat feel.
             f32 pulse = 0.12f + 0.06f * sinf(static_cast<f32>(Clock::getElapsedSeconds()) * 5.0f);
             if (pulse > m_localPlayer.hurtVignette) m_localPlayer.hurtVignette = pulse;
+        }
+        if (alive && hpFrac < 0.40f) {
+            m_lowHpRumbleTimer -= dt;
+            if (m_lowHpRumbleTimer <= 0.0f) {
+                Input::rumble(m_localPlayerIndex, 0.25f, 110);  // light, short nag pulse
+                m_lowHpRumbleTimer = 1.1f;                       // ~1 pulse/sec, not constant
+            }
+        } else {
+            m_lowHpRumbleTimer = 0.0f;  // reset so it fires promptly on re-entering danger
         }
     }
 

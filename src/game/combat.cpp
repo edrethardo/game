@@ -217,6 +217,18 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     // Track damage taken this frame for ring passives (thorns, etc.)
     player.lastDamageTaken = damage;
 
+    // Near-death grace: when a hit drops the player into critical HP (<20%) but does
+    // NOT kill them, grant a brief invisible i-frame so a follow-up hit can't instantly
+    // finish them. Fires only on the crossing (health was >=20% before this hit), so it
+    // re-arms after healing back up but never makes low HP permanently safe.
+    {
+        f32 critThresh   = player.maxHealth * 0.20f;
+        f32 healthBefore = player.health + damage;
+        if (player.health > 0.0f && player.health < critThresh && healthBefore >= critThresh) {
+            if (player.invulnTimer < 0.6f) player.invulnTimer = 0.6f;
+        }
+    }
+
     // Red hurt vignette, scaled by the size of the hit relative to max HP.
     // Larger hits push vignette higher; clamp so it never whiteouts the screen.
     if (damage > 0.0f) {
