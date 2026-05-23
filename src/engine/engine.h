@@ -407,6 +407,21 @@ private:
     void renderHUD(u32 sw, u32 sh);
     void logStats();
 
+    // renderHUD helpers — extracted contiguous blocks, called in original order
+    void renderInventoryHUD(u32 sw, u32 sh);          // inventory screen branch
+    void renderSkillsHUD(u32 sw, u32 sh);             // class skill bar + equip bar + active skill display
+    void renderMinimapAndFloor(u32 sw, u32 sh);       // minimap + door blip + floor text + potion cooldown
+    void renderTutorials(u32 sw, u32 sh);             // tutorial tooltip blocks
+
+    // render() helpers — extracted contiguous blocks, called in original order
+    // Returns true if a non-IN_GAME screen was drawn (caller should early-out)
+    bool renderTransitionScreens(u32 sw, u32 sh);
+    void selectPointLights();                          // gathers candidates, calls Renderer::setPointLights
+    void renderAuraDiscs(const EntityPool& entPool);  // herald/buffed-enemy ground-disc pass
+    void renderPostOverlays(u32 sw, u32 sh);          // fade-from-black + hurt vignette fullscreen quads
+    // Draws a fullscreen quad with the given RGBA using the unlit shader + ortho projection
+    void drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba);
+
     // Menu/lobby
     void updateMenu(f32 dt);
     void updateLobby(f32 dt);

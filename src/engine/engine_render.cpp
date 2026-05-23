@@ -58,36 +58,17 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
-void Engine::render(f32 alpha) {
-    // Interpolate camera between previous and current tick for smooth gyro/look.
-    // Save tick state, interpolate for rendering, then restore after frame.
-    Vec3 tickPos   = m_camera.position;
-    f32  tickYaw   = m_camera.yaw;
-    f32  tickPitch = m_camera.pitch;
-    if (m_gameState == GameState::IN_GAME) {
-        m_camera.position = m_camera.prevPosition + (tickPos   - m_camera.prevPosition) * alpha;
-        // Angle-aware yaw interpolation — handles ±π wrapping without snapping
-        f32 yawDiff = tickYaw - m_camera.prevYaw;
-        if (yawDiff >  3.14159f) yawDiff -= 6.28318f;
-        if (yawDiff < -3.14159f) yawDiff += 6.28318f;
-        m_camera.yaw      = m_camera.prevYaw + yawDiff * alpha;
-        m_camera.pitch    = m_camera.prevPitch + (tickPitch - m_camera.prevPitch) * alpha;
-        // Apply screen shake offset — decays over time, doesn't affect saved tick state
-        Vec3 shakeOffset = m_camera.shake.update(static_cast<f32>(FIXED_DT));
-        m_camera.position = m_camera.position + shakeOffset;
-    }
-
-    glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    u32 sw = Window::getWidth();
-    u32 sh = Window::getHeight();
-
+// ---------------------------------------------------------------------------
+// renderTransitionScreens — draws non-IN_GAME full-screen states
+// (MENU, CONNECTING, FLOOR_TRANSITION, VICTORY, GAME_OVER, and any unknown
+// state). Returns true if one was drawn; render() early-outs on true.
+// ---------------------------------------------------------------------------
+bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
     if (m_gameState == GameState::MENU) {
         renderMenu();
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
-        return;
+        return true;
     }
 
     if (m_gameState == GameState::CONNECTING) {
@@ -96,15 +77,13 @@ void Engine::render(f32 alpha) {
         HUD::drawCrosshair(sw, sh, {pulse, pulse, 0.5f + pulse * 0.5f});
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
-        return;
+        return true;
     }
 
     if (m_gameState == GameState::FLOOR_TRANSITION) {
         glClearColor(0.02f, 0.02f, 0.04f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        u32 sw = Window::getWidth();
-        u32 sh = Window::getHeight();
         f32 uiScale = static_cast<f32>(sh) / 720.0f;
         FontSystem::setUIScale(uiScale);
 
@@ -160,7 +139,7 @@ void Engine::render(f32 alpha) {
 
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
-        return;
+        return true;
     }
 
     if (m_gameState == GameState::VICTORY) {
@@ -214,7 +193,7 @@ void Engine::render(f32 alpha) {
 
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
-        return;
+        return true;
     }
 
     if (m_gameState == GameState::GAME_OVER) {
@@ -266,14 +245,255 @@ void Engine::render(f32 alpha) {
 
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
-        return;
+        return true;
     }
 
     if (m_gameState != GameState::IN_GAME) {
+        // Unknown / lobby states — flush and present
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());
-        return;
+        return true;
     }
+
+    return false; // IN_GAME — let render() continue with the 3D scene
+}
+
+// ---------------------------------------------------------------------------
+// selectPointLights — collects all light candidates (static + dynamic +
+// projectile) and selects the nearest 4 to the camera, then uploads them
+// to the shader via Renderer::setPointLights.
+// ---------------------------------------------------------------------------
+void Engine::selectPointLights() {
+    Vec3 camPos = m_camera.position;
+    // Candidate pool — positions and colors collected from all sources
+    static constexpr u32 MAX_CANDIDATES = 80; // 64 static + 4 dynamic + ~12 lit projectiles
+    Vec3 candPos[MAX_CANDIDATES];
+    Vec3 candCol[MAX_CANDIDATES];
+    u32 candCount = 0;
+
+    // Static level lights
+    for (u32 li = 0; li < m_pointLightCount && candCount < MAX_CANDIDATES; li++) {
+        candPos[candCount] = m_pointLights[li].position;
+        candCol[candCount] = m_pointLights[li].color;
+        candCount++;
+    }
+    // Dynamic weapon flash lights (decaying muzzle flashes)
+    for (u32 di = 0; di < MAX_DYNAMIC_LIGHTS && candCount < MAX_CANDIDATES; di++) {
+        if (m_dynamicLights[di].timer > 0.0f) {
+            candPos[candCount] = m_dynamicLights[di].position;
+            // Fade light intensity as timer expires
+            f32 fade = m_dynamicLights[di].timer * 10.0f; // 0.1s → fades over duration
+            if (fade > 1.0f) fade = 1.0f;
+            candCol[candCount] = m_dynamicLights[di].color * fade;
+            candCount++;
+        }
+    }
+    // Active projectiles with non-zero lightColor
+    u32 plSeen = 0;
+    for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES && plSeen < m_projectiles.activeCount; pi++) {
+        const Projectile& p = m_projectiles.projectiles[pi];
+        if (!p.active) continue;
+        plSeen++;
+        if (p.lightColor.x == 0.0f && p.lightColor.y == 0.0f && p.lightColor.z == 0.0f) continue;
+        candPos[candCount] = p.position;
+        candCol[candCount] = p.lightColor;
+        candCount++;
+    }
+
+    // Find nearest 4 candidates to camera
+    Vec3 positions[4], colors[4];
+    u32 nearCount = 0;
+    struct LightDist { u32 idx; f32 dist; };
+    LightDist nearest[4];
+    for (u32 ci = 0; ci < candCount; ci++) {
+        f32 d = lengthSq(candPos[ci] - camPos);
+        if (nearCount < 4) {
+            nearest[nearCount++] = {ci, d};
+        } else {
+            u32 worstIdx = 0;
+            for (u32 n = 1; n < 4; n++) {
+                if (nearest[n].dist > nearest[worstIdx].dist) worstIdx = n;
+            }
+            if (d < nearest[worstIdx].dist) {
+                nearest[worstIdx] = {ci, d};
+            }
+        }
+    }
+    for (u32 n = 0; n < nearCount; n++) {
+        positions[n] = candPos[nearest[n].idx];
+        colors[n]    = candCol[nearest[n].idx];
+    }
+    Renderer::setPointLights(positions, colors, nearCount);
+}
+
+// ---------------------------------------------------------------------------
+// renderAuraDiscs — herald/buffed-enemy ground disc pass.
+// Does its own Renderer::flush + blend state setup so it can draw additive
+// alpha quads after the opaque world has been flushed.
+// ---------------------------------------------------------------------------
+void Engine::renderAuraDiscs(const EntityPool& entPool) {
+    // Herald aura effect — golden rotating ring at the feet of the herald
+    // and all aura-buffed enemies. Uses the quad mesh with blob texture + alpha.
+    Renderer::flush();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+
+    const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
+    const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
+
+    for (u32 _a = 0; _a < entPool.activeCount; _a++) { u32 i = entPool.activeList[_a];
+        const Entity& e = entPool.entities[i];
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        if (e.flags & ENT_DEAD) continue;
+        // Show disc under heralds (larger, brighter) and buffed enemies (smaller, dimmer)
+        bool isHerald = (e.enemyRole & EnemyRole::AURA) != 0;
+        if (!isHerald && !e.hasAuraBuff) continue;
+
+        Vec3 feetPos = e.position - Vec3{0, e.halfExtents.y - 0.03f, 0};
+        f32 t = e.animTimer * 2.0f;
+        f32 discR = isHerald ? (1.2f + 0.15f * sinf(t * 3.0f))   // herald: large pulsing disc
+                             : (0.5f + 0.05f * sinf(t * 4.0f));  // buffed: small pulsing disc
+        Vec4 discCol = isHerald ? Vec4{0.2f, 0.85f, 0.75f, 0.45f}   // herald: bright teal
+                                : Vec4{0.25f, 0.7f, 0.6f, 0.25f};  // buffed: dim teal
+
+        // Lay quad flat on ground: quad is in XY plane, we need XZ plane.
+        // Column 0 = local X → world X (with Y-rotation for spin)
+        // Column 1 = local Y → world Z (quad's Y becomes ground forward)
+        // Column 2 = local Z → world Y (quad faces up)
+        f32 rot = isHerald ? t : -t * 0.5f;
+        f32 cr = cosf(rot), sr = sinf(rot);
+        Mat4 discMat = {};
+        discMat.m[0]  =  cr * discR;  // col0.x
+        discMat.m[1]  =  0.0f;        // col0.y
+        discMat.m[2]  =  sr * discR;  // col0.z
+        discMat.m[4]  = -sr * discR;  // col1.x  (local Y → world XZ rotated)
+        discMat.m[5]  =  0.0f;        // col1.y
+        discMat.m[6]  =  cr * discR;  // col1.z
+        discMat.m[8]  =  0.0f;        // col2.x  (local Z → world Y = up)
+        discMat.m[9]  =  1.0f;        // col2.y
+        discMat.m[10] =  0.0f;        // col2.z
+        discMat.m[12] = feetPos.x;
+        discMat.m[13] = feetPos.y;
+        discMat.m[14] = feetPos.z;
+        discMat.m[15] = 1.0f;
+
+        Mat4 discMvp = m_camera.viewProjection * discMat;
+        glUseProgram(m_unlitShader.program);
+        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, discMvp.ptr());
+        glUniform4f(m_unlitShader.loc_color, discCol.x, discCol.y, discCol.z, discCol.w);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, blobTex.handle);
+        if (m_unlitShader.loc_texture0 >= 0) glUniform1i(m_unlitShader.loc_texture0, 0);
+        glBindVertexArray(m_quadMesh.vao);
+        glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, 0);
+    }
+
+    glEnable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+}
+
+// ---------------------------------------------------------------------------
+// drawFullscreenQuad — shared helper for full-viewport alpha overlays.
+// Sets up an ortho MVP that maps pixel coordinates to NDC, draws the unit
+// quad mesh scaled to (sw × sh) pixels with the given RGBA color.
+// Caller is responsible for enabling/disabling blend and depth-test as needed.
+// ---------------------------------------------------------------------------
+void Engine::drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba) {
+    glUseProgram(m_unlitShader.program);
+    Mat4 ortho = Mat4::identity();
+    ortho.m[0]  =  2.0f / static_cast<f32>(sw);
+    ortho.m[5]  =  2.0f / static_cast<f32>(sh);
+    ortho.m[10] = -1.0f;
+    ortho.m[12] = -1.0f;
+    ortho.m[13] = -1.0f;
+    if (m_unlitShader.loc_mvp >= 0)
+        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, ortho.ptr());
+    if (m_unlitShader.loc_color >= 0)
+        glUniform4f(m_unlitShader.loc_color, rgba.x, rgba.y, rgba.z, rgba.w);
+
+    // Scale a centered unit quad to fill the full viewport
+    Mat4 quadModel = Mat4::translate({static_cast<f32>(sw) * 0.5f,
+                                      static_cast<f32>(sh) * 0.5f, 0.0f})
+                   * Mat4::scale({static_cast<f32>(sw), static_cast<f32>(sh), 1.0f});
+    if (m_unlitShader.loc_mvp >= 0)
+        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
+
+    glBindVertexArray(m_quadMesh.vao);
+    glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+}
+
+// ---------------------------------------------------------------------------
+// renderPostOverlays — fade-from-black + red hurt vignette, drawn after the
+// HUD and split-screen loops have been closed. Both use fullscreen quads.
+// ---------------------------------------------------------------------------
+void Engine::renderPostOverlays(u32 sw, u32 sh) {
+    // Fade-from-black overlay — hides stale frame fragments after level load/respawn.
+    // First few frames are fully black, then fades out over 0.3s.
+    if (m_fadeFromBlack > 0.0f) {
+        f32 alpha = m_fadeFromBlack / 0.3f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        drawFullscreenQuad(sw, sh, {0.0f, 0.0f, 0.0f, alpha});
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        m_fadeFromBlack -= 1.0f / 60.0f;
+    }
+
+    // Red hurt vignette — same fullscreen-quad path as the fade overlay, tinted red.
+    // Driven by m_localPlayer.hurtVignette (0..1), which is set on each hit and
+    // pulsed when the player is below 25% HP.
+    if (m_localPlayer.hurtVignette > 0.0f) {
+        // Cap rendered alpha below 0.55 so the screen never goes fully red.
+        f32 alpha = m_localPlayer.hurtVignette * 0.5f;
+        if (alpha > 0.55f) alpha = 0.55f;
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        drawFullscreenQuad(sw, sh, {0.6f, 0.0f, 0.0f, alpha});
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+    }
+}
+
+void Engine::render(f32 alpha) {
+    // Interpolate camera between previous and current tick for smooth gyro/look.
+    // Save tick state, interpolate for rendering, then restore after frame.
+    Vec3 tickPos   = m_camera.position;
+    f32  tickYaw   = m_camera.yaw;
+    f32  tickPitch = m_camera.pitch;
+    if (m_gameState == GameState::IN_GAME) {
+        m_camera.position = m_camera.prevPosition + (tickPos   - m_camera.prevPosition) * alpha;
+        // Angle-aware yaw interpolation — handles ±π wrapping without snapping
+        f32 yawDiff = tickYaw - m_camera.prevYaw;
+        if (yawDiff >  3.14159f) yawDiff -= 6.28318f;
+        if (yawDiff < -3.14159f) yawDiff += 6.28318f;
+        m_camera.yaw      = m_camera.prevYaw + yawDiff * alpha;
+        m_camera.pitch    = m_camera.prevPitch + (tickPitch - m_camera.prevPitch) * alpha;
+        // Apply screen shake offset — decays over time, doesn't affect saved tick state
+        Vec3 shakeOffset = m_camera.shake.update(static_cast<f32>(FIXED_DT));
+        m_camera.position = m_camera.position + shakeOffset;
+    }
+
+    glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    u32 sw = Window::getWidth();
+    u32 sh = Window::getHeight();
+
+    // Non-IN_GAME states: render the appropriate full-screen screen and early-out
+    if (renderTransitionScreens(sw, sh)) return;
 
     PROFILE_SCOPE(3, "Render");
 
@@ -339,70 +559,7 @@ void Engine::render(f32 alpha) {
     );
 
     // Send nearest 4 point lights to the shader
-    // Collect all light candidates: static level lights + dynamic weapon flashes + projectile lights.
-    // Pick the nearest 4 to the camera and send to the shader.
-    {
-        Vec3 camPos = m_camera.position;
-        // Candidate pool — positions and colors collected from all sources
-        static constexpr u32 MAX_CANDIDATES = 80; // 64 static + 4 dynamic + ~12 lit projectiles
-        Vec3 candPos[MAX_CANDIDATES];
-        Vec3 candCol[MAX_CANDIDATES];
-        u32 candCount = 0;
-
-        // Static level lights
-        for (u32 li = 0; li < m_pointLightCount && candCount < MAX_CANDIDATES; li++) {
-            candPos[candCount] = m_pointLights[li].position;
-            candCol[candCount] = m_pointLights[li].color;
-            candCount++;
-        }
-        // Dynamic weapon flash lights (decaying muzzle flashes)
-        for (u32 di = 0; di < MAX_DYNAMIC_LIGHTS && candCount < MAX_CANDIDATES; di++) {
-            if (m_dynamicLights[di].timer > 0.0f) {
-                candPos[candCount] = m_dynamicLights[di].position;
-                // Fade light intensity as timer expires
-                f32 fade = m_dynamicLights[di].timer * 10.0f; // 0.1s → fades over duration
-                if (fade > 1.0f) fade = 1.0f;
-                candCol[candCount] = m_dynamicLights[di].color * fade;
-                candCount++;
-            }
-        }
-        // Active projectiles with non-zero lightColor
-        u32 plSeen = 0;
-        for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES && plSeen < m_projectiles.activeCount; pi++) {
-            const Projectile& p = m_projectiles.projectiles[pi];
-            if (!p.active) continue;
-            plSeen++;
-            if (p.lightColor.x == 0.0f && p.lightColor.y == 0.0f && p.lightColor.z == 0.0f) continue;
-            candPos[candCount] = p.position;
-            candCol[candCount] = p.lightColor;
-            candCount++;
-        }
-
-        // Find nearest 4 candidates to camera
-        Vec3 positions[4], colors[4];
-        u32 nearCount = 0;
-        struct LightDist { u32 idx; f32 dist; };
-        LightDist nearest[4];
-        for (u32 ci = 0; ci < candCount; ci++) {
-            f32 d = lengthSq(candPos[ci] - camPos);
-            if (nearCount < 4) {
-                nearest[nearCount++] = {ci, d};
-            } else {
-                u32 worstIdx = 0;
-                for (u32 n = 1; n < 4; n++) {
-                    if (nearest[n].dist > nearest[worstIdx].dist) worstIdx = n;
-                }
-                if (d < nearest[worstIdx].dist) {
-                    nearest[worstIdx] = {ci, d};
-                }
-            }
-        }
-        for (u32 n = 0; n < nearCount; n++) {
-            positions[n] = candPos[nearest[n].idx];
-            colors[n]    = candCol[nearest[n].idx];
-        }
-        Renderer::setPointLights(positions, colors, nearCount);
-    }
+    selectPointLights();
 
     // Level geometry
     LevelMeshSystem::submitAll(m_level.sections, m_level.sectionCount, m_basicShader);
@@ -494,69 +651,7 @@ void Engine::render(f32 alpha) {
 
     DebugDraw::flush(m_camera.viewProjection);
 
-    // Herald aura effect — golden rotating ring at the feet of the herald
-    // and all aura-buffed enemies. Uses the quad mesh with blob texture + alpha.
-    {
-        Renderer::flush();
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDepthMask(GL_FALSE);
-        glDisable(GL_CULL_FACE);
-
-        const Material* blobMat = MaterialSystem::get(m_particleBlobMatId);
-        const Texture& blobTex = blobMat ? blobMat->texture : MaterialSystem::get(0)->texture;
-
-        for (u32 _a = 0; _a < entPool.activeCount; _a++) { u32 i = entPool.activeList[_a];
-            const Entity& e = entPool.entities[i];
-            if (!(e.flags & ENT_ACTIVE)) continue;
-            if (e.flags & ENT_DEAD) continue;
-            // Show disc under heralds (larger, brighter) and buffed enemies (smaller, dimmer)
-            bool isHerald = (e.enemyRole & EnemyRole::AURA) != 0;
-            if (!isHerald && !e.hasAuraBuff) continue;
-
-            Vec3 feetPos = e.position - Vec3{0, e.halfExtents.y - 0.03f, 0};
-            f32 t = e.animTimer * 2.0f;
-            f32 discR = isHerald ? (1.2f + 0.15f * sinf(t * 3.0f))   // herald: large pulsing disc
-                                 : (0.5f + 0.05f * sinf(t * 4.0f));  // buffed: small pulsing disc
-            Vec4 discCol = isHerald ? Vec4{0.2f, 0.85f, 0.75f, 0.45f}   // herald: bright teal
-                                    : Vec4{0.25f, 0.7f, 0.6f, 0.25f};  // buffed: dim teal
-
-            // Lay quad flat on ground: quad is in XY plane, we need XZ plane.
-            // Column 0 = local X → world X (with Y-rotation for spin)
-            // Column 1 = local Y → world Z (quad's Y becomes ground forward)
-            // Column 2 = local Z → world Y (quad faces up)
-            f32 rot = isHerald ? t : -t * 0.5f;
-            f32 cr = cosf(rot), sr = sinf(rot);
-            Mat4 discMat = {};
-            discMat.m[0]  =  cr * discR;  // col0.x
-            discMat.m[1]  =  0.0f;        // col0.y
-            discMat.m[2]  =  sr * discR;  // col0.z
-            discMat.m[4]  = -sr * discR;  // col1.x  (local Y → world XZ rotated)
-            discMat.m[5]  =  0.0f;        // col1.y
-            discMat.m[6]  =  cr * discR;  // col1.z
-            discMat.m[8]  =  0.0f;        // col2.x  (local Z → world Y = up)
-            discMat.m[9]  =  1.0f;        // col2.y
-            discMat.m[10] =  0.0f;        // col2.z
-            discMat.m[12] = feetPos.x;
-            discMat.m[13] = feetPos.y;
-            discMat.m[14] = feetPos.z;
-            discMat.m[15] = 1.0f;
-
-            Mat4 discMvp = m_camera.viewProjection * discMat;
-            glUseProgram(m_unlitShader.program);
-            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, discMvp.ptr());
-            glUniform4f(m_unlitShader.loc_color, discCol.x, discCol.y, discCol.z, discCol.w);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, blobTex.handle);
-            if (m_unlitShader.loc_texture0 >= 0) glUniform1i(m_unlitShader.loc_texture0, 0);
-            glBindVertexArray(m_quadMesh.vao);
-            glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, 0);
-        }
-
-        glEnable(GL_CULL_FACE);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-    }
+    renderAuraDiscs(entPool);
 
     renderSpeechBubbles(vpW, vpH);
     renderDamageNumbers(vpW, vpH);
@@ -602,82 +697,7 @@ void Engine::render(f32 alpha) {
     m_camera.yaw      = tickYaw;
     m_camera.pitch    = tickPitch;
 
-    // Fade-from-black overlay — hides stale frame fragments after level load/respawn.
-    // First few frames are fully black, then fades out over 0.3s.
-    if (m_fadeFromBlack > 0.0f) {
-        f32 alpha = m_fadeFromBlack / 0.3f;
-        if (alpha > 1.0f) alpha = 1.0f;
-
-        // Draw fullscreen black quad using the unlit shader + white texture trick
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glUseProgram(m_unlitShader.program);
-        Mat4 ortho = Mat4::identity();
-        ortho.m[0]  =  2.0f / static_cast<f32>(sw);
-        ortho.m[5]  =  2.0f / static_cast<f32>(sh);
-        ortho.m[10] = -1.0f;
-        ortho.m[12] = -1.0f;
-        ortho.m[13] = -1.0f;
-        if (m_unlitShader.loc_mvp >= 0)
-            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, ortho.ptr());
-        if (m_unlitShader.loc_color >= 0)
-            glUniform4f(m_unlitShader.loc_color, 0.0f, 0.0f, 0.0f, alpha);
-
-        // Use the quad mesh (unit XY quad centered at origin → scale to screen)
-        Mat4 quadModel = Mat4::translate({static_cast<f32>(sw) * 0.5f,
-                                          static_cast<f32>(sh) * 0.5f, 0.0f})
-                       * Mat4::scale({static_cast<f32>(sw), static_cast<f32>(sh), 1.0f});
-        if (m_unlitShader.loc_mvp >= 0)
-            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
-
-        glBindVertexArray(m_quadMesh.vao);
-        glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, nullptr);
-        glBindVertexArray(0);
-
-        glDisable(GL_BLEND);
-        glEnable(GL_DEPTH_TEST);
-        m_fadeFromBlack -= 1.0f / 60.0f;
-    }
-
-    // Red hurt vignette — same fullscreen-quad path as the fade overlay, tinted red.
-    // Driven by m_localPlayer.hurtVignette (0..1), which is set on each hit and
-    // pulsed when the player is below 25% HP.
-    if (m_localPlayer.hurtVignette > 0.0f) {
-        // Cap rendered alpha below 0.55 so the screen never goes fully red.
-        f32 alpha = m_localPlayer.hurtVignette * 0.5f;
-        if (alpha > 0.55f) alpha = 0.55f;
-
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glUseProgram(m_unlitShader.program);
-        Mat4 ortho = Mat4::identity();
-        ortho.m[0]  =  2.0f / static_cast<f32>(sw);
-        ortho.m[5]  =  2.0f / static_cast<f32>(sh);
-        ortho.m[10] = -1.0f;
-        ortho.m[12] = -1.0f;
-        ortho.m[13] = -1.0f;
-        if (m_unlitShader.loc_mvp >= 0)
-            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, ortho.ptr());
-        if (m_unlitShader.loc_color >= 0)
-            glUniform4f(m_unlitShader.loc_color, 0.6f, 0.0f, 0.0f, alpha);
-
-        Mat4 quadModel = Mat4::translate({static_cast<f32>(sw) * 0.5f,
-                                          static_cast<f32>(sh) * 0.5f, 0.0f})
-                       * Mat4::scale({static_cast<f32>(sw), static_cast<f32>(sh), 1.0f});
-        if (m_unlitShader.loc_mvp >= 0)
-            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
-
-        glBindVertexArray(m_quadMesh.vao);
-        glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, nullptr);
-        glBindVertexArray(0);
-
-        glDisable(GL_BLEND);
-        glEnable(GL_DEPTH_TEST);
-    }
+    renderPostOverlays(sw, sh);
 
     GLContext::swapBuffers(Window::getHandle());
 }
