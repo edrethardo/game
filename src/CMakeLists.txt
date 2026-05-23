@@ -45,7 +45,11 @@ add_executable(DungeonEngine
     game/boss_ai.cpp
     game/boss_loader.cpp
     game/enemy_loader.cpp
-    game/item.cpp
+    game/item_loader.cpp
+    game/item_gen.cpp
+    game/inventory.cpp
+    game/world_item.cpp
+    game/quickbar.cpp
     game/inventory_ui.cpp
     game/limb_system.cpp
     game/skill.cpp

@@ -1,0 +1,100 @@
+// world_item.cpp — World item pool: spawn, update (lifetime/bob), and pickup logic.
+#include "game/item.h"
+#include "core/log.h"
+#include "world/collision.h"
+
+#include <cmath>
+
+// ============================================================
+//  WorldItemSystem
+// ============================================================
+
+void WorldItemSystem::init(WorldItemPool& pool) {
+    pool = WorldItemPool{};
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        pool.items[i] = WorldItem{};
+        pool.items[i].active = false;
+    }
+    pool.activeCount = 0;
+    pool.nextUid     = 1;
+    LOG_INFO("WorldItemSystem: pool initialized (%u slots)", MAX_WORLD_ITEMS);
+}
+
+void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = pool.items[i];
+        if (!wi.active) continue;
+
+        // Legendary items never despawn — persist until floor exit
+        if (wi.item.rarity != Rarity::LEGENDARY) {
+            wi.lifetime -= dt;
+        }
+        wi.bobTimer       += dt;
+        wi.exclusiveTimer -= dt;
+
+        if (wi.lifetime <= 0.0f) {
+            wi.active = false;
+            if (pool.activeCount > 0)
+                pool.activeCount--;
+        }
+    }
+}
+
+bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
+                              const LevelGrid* grid) {
+    // Nudge item out of walls if grid is provided
+    if (grid) {
+        Vec3 itemHalf = {0.15f, 0.15f, 0.15f}; // small AABB for item
+        Collision::ensureNotInWall(position, itemHalf, *grid);
+    }
+
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = pool.items[i];
+        if (wi.active) continue;
+
+        wi.item          = item;
+        wi.position      = position;
+        wi.bobTimer      = 0.0f;
+        wi.lifetime      = 60.0f;
+        wi.exclusiveTimer = 3.0f;
+        wi.ownerSlot     = 0xFF;
+        wi.active        = true;
+        pool.activeCount++;
+        return true;
+    }
+
+    LOG_WARN("WorldItemSystem: pool full, cannot spawn item");
+    return false;
+}
+
+bool WorldItemSystem::tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
+                                  ItemInstance& outItem) {
+    static constexpr f32 PICKUP_RADIUS = 3.5f;
+
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = pool.items[i];
+        if (!wi.active) continue;
+
+        Vec3 delta = {
+            playerPos.x - wi.position.x,
+            playerPos.y - wi.position.y,
+            playerPos.z - wi.position.z
+        };
+        f32 dist = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+        if (dist >= PICKUP_RADIUS) continue;
+
+        // Check ownership: free-for-all, owned by this player, or exclusive timer expired
+        bool canPickup = (wi.ownerSlot == 0xFF)
+                      || (wi.ownerSlot == playerSlot)
+                      || (wi.exclusiveTimer <= 0.0f);
+        if (!canPickup) continue;
+
+        outItem   = wi.item;
+        wi.active = false;
+        if (pool.activeCount > 0)
+            pool.activeCount--;
+        return true;
+    }
+
+    return false;
+}
