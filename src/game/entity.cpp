@@ -76,6 +76,14 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
 
         if (e.flashTimer > 0.0f) e.flashTimer -= dt;
 
+        if (e.knockbackTimer > 0.0f) {
+            e.knockbackTimer -= dt;
+            // Decay the horizontal push so the enemy settles in ~0.25s.
+            e.velocity.x *= 0.85f;
+            e.velocity.z *= 0.85f;
+            if (e.knockbackTimer <= 0.0f) { e.velocity.x = 0.0f; e.velocity.z = 0.0f; }
+        }
+
         // Tick status effects (poison/burn deal DoT, freeze checked at move time)
         if (e.poisonTimer > 0.0f) {
             e.poisonTimer -= dt;

@@ -127,6 +127,23 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
         }
     }
 
+    // --- Knockback (authoritative): push the victim along the hit direction. ---
+    // Only when we know where the hit came from (no DoT/environmental knockback).
+    if (fx.knockback > 0.0f && damageOrigin) {
+        Vec3 push = e->position - *damageOrigin; push.y = 0.0f;
+        f32 len = sqrtf(push.x*push.x + push.z*push.z);
+        if (len > 0.001f) {
+            // Size/mass resistance: larger enemies move less; bosses barely budge.
+            f32 sizeResist = 0.5f / (e->halfExtents.x + e->halfExtents.z + 0.001f);
+            if (sizeResist > 1.0f) sizeResist = 1.0f;
+            if (e->bossDefIdx != 0xFF) sizeResist *= 0.1f; // bosses ~immovable
+            f32 impulse = fx.knockback * sizeResist;
+            e->velocity.x += (push.x / len) * impulse;
+            e->velocity.z += (push.z / len) * impulse;
+            e->knockbackTimer = 0.25f;
+        }
+    }
+
     if (e->health <= 0.0f) {
         killEntity(pool, target);
     }

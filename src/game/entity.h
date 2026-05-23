@@ -192,8 +192,9 @@ struct Entity {
     bool hasAuraBuff        = false;  // true while within range of an AURA herald this frame
 
     // Feedback
-    f32  flashTimer = 0.0f;
-    f32  deathTimer = 0.0f;
+    f32  flashTimer      = 0.0f;
+    f32  knockbackTimer  = 0.0f;  // >0 while a knockback impulse is decaying
+    f32  deathTimer      = 0.0f;
 };
 
 struct EntityHandle {
