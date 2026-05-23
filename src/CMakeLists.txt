@@ -57,7 +57,16 @@ add_executable(DungeonEngine
     game/quickbar.cpp
     game/inventory_ui.cpp
     game/limb_system.cpp
-    game/skill.cpp
+    game/skill_system.cpp
+    game/skill_legendary.cpp
+    game/skill_warrior.cpp
+    game/skill_ranger.cpp
+    game/skill_sorcerer.cpp
+    game/skill_rogue.cpp
+    game/skill_paladin.cpp
+    game/skill_engineer.cpp
+    game/skill_marksman.cpp
+    game/skill_tinkerer.cpp
     game/squad.cpp
     net/net.cpp
     net/snapshot.cpp
