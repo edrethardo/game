@@ -14,6 +14,8 @@ add_executable(DungeonEngine
     engine/engine_persist.cpp
     engine/engine_startgame.cpp
     engine/engine_update.cpp
+    engine/engine_update_player.cpp
+    engine/engine_update_skills.cpp
     engine/engine_menu.cpp
     engine/engine_inventory.cpp
     engine/engine_combat.cpp

@@ -378,6 +378,20 @@ private:
     // Returns true if the player descended (caller should return immediately)
     bool updateFloorDoor();
 
+    // gameUpdate helpers — extracted from the god function for readability.
+    // Each is called exactly once, in the same order they appear in gameUpdate.
+    void tickWandererTimers(f32 dt);             // adrenaline stacks, deflect burst, mark, Death's Dance, floor unlock
+    void tickPlayerStatusEffects(f32 dt);        // poison / burn / freeze DoT ticks
+    void handleDebugKeys();                      // F1-F6 debug toggles and stress spawners
+    void tickFXDecay(f32 dt);                    // impact/fire/nova/dash/beam/chain/light timers + scorch AoE + herald aura
+    void tickSkillCooldowns(f32 dt);             // SkillSystem::update + class/boot/helmet cooldown ticks
+    void tickPassiveEquipment();                 // bind weapon-proc / armor-aura / ring-passive SkillIds each tick
+    void handleClassSkillActivation(f32 dt, Vec3 eyePos);     // keys 1-4 selection + right-click cast
+    void handleEquipmentSkillActivation(f32 dt, Vec3 eyePos); // boots F / helmet G casts
+    void tickArmorRingPassives(f32 dt);          // ring timers, Second Wind, Divine Judgment, per-entity armor/ring pass
+    void tickVisualFeedback(f32 dt);             // damage flash + hurt vignette + low-HP rumble
+    void tickMiscTimers(f32 dt);                 // smoke/overdrive/shadowDance/curse/hitMarker/tutorial + camera + view bob + hit shake
+
     // Player-entity push collision (shared between singleplayer and server paths)
     void pushPlayerFromEntities();
     void resetEnemiesToRooms(); // walk enemies back to spawn on player death
