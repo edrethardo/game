@@ -220,7 +220,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     // Larger hits push vignette higher; clamp so it never whiteouts the screen.
     if (damage > 0.0f) {
         f32 frac = damage / (player.maxHealth > 0.0f ? player.maxHealth : 100.0f);
-        f32 v = 0.35f + frac * 0.5f;
+        f32 v = 0.15f + frac * 0.6f;  // small floor so light hits still register, scales with damage
         if (v > 0.85f) v = 0.85f;
         if (v > player.hurtVignette) player.hurtVignette = v;
     }
@@ -260,19 +260,11 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
         hits, distances, MAX_ENTITIES);
 
     for (u32 i = 0; i < hitCount; i++) {
-        // Pass isCrit so the CRIT feedback tier (spark burst + enlarged number) fires.
+        // applyDamage owns all on-hit FX (tier-driven shake + blood/sparks via the
+        // hit-feedback recipe); isCrit selects the CRIT tier. No inline FX here —
+        // that would double up with the tier system.
         applyDamage(pool, hits[i], weapon.damage, &eyePos, isCrit);
-        // Blood + sparks at each entity hit in the melee cone
-        if (s_particlePool) {
-            Entity* he = handleGet(pool, hits[i]);
-            if (he) {
-                Vec3 hitPos = he->position;
-                hitPos.y += 0.5f; // roughly torso height
-                ParticleSystem::spawnSparks(*s_particlePool, hitPos, {0, 0.5f, 0}, 4);
-            }
-        }
     }
-    if (hitCount > 0 && s_screenShake) s_screenShake->trigger(0.02f, 0.15f);
 
     result.entitiesHit = hitCount;
     if (hitCount > 0) {
@@ -305,12 +297,8 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
         if (hit.type == CombatHit::ENTITY) {
             result.hitEntity   = true;
             result.entitiesHit = 1;
+            // applyDamage owns on-hit FX (tier-driven shake + particles).
             applyDamage(pool, hit.entityHandle, weapon.damage, &eyePos);
-            // Blood + sparks at hitscan entity impact
-            if (s_particlePool) {
-                ParticleSystem::spawnSparks(*s_particlePool, hit.position, {0, 0.5f, 0}, 4);
-            }
-            if (s_screenShake) s_screenShake->trigger(0.015f, 0.1f);
         } else {
             result.hitWorld = true;
             // Debris chips on wall hit
