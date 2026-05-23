@@ -429,6 +429,17 @@ private:
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);
+
+    // Floor-population helpers called by startGame in engine_spawn.cpp.
+    // All receive dungeon by reference because spawnFloorBoss mutates room geometry.
+    void spawnFloorEnemies(DungeonResult& dungeon, u8 tier);
+    // Returns the index of the boss room used for exit-portal placement,
+    // or 0xFFFFFFFF if no boss was spawned this floor.
+    u32  spawnFloorBoss(DungeonResult& dungeon);
+    void spawnFloorChests(const DungeonResult& dungeon);
+    void spawnFloorDecorations(const DungeonResult& dungeon);
+    void spawnFloorNpcs(const DungeonResult& dungeon);
+
     void saveGame(u8 slot);
     bool loadGame(u8 slot);
 

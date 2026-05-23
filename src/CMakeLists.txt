@@ -13,6 +13,7 @@ add_executable(DungeonEngine
     engine/engine_death.cpp
     engine/engine_persist.cpp
     engine/engine_startgame.cpp
+    engine/engine_spawn.cpp
     engine/engine_update.cpp
     engine/engine_update_player.cpp
     engine/engine_update_skills.cpp
