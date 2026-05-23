@@ -16,6 +16,10 @@ add_executable(DungeonEngine
     engine/engine_combat.cpp
     engine/engine_net.cpp
     engine/engine_render.cpp
+    engine/engine_render_viewmodel.cpp
+    engine/engine_render_entities.cpp
+    engine/engine_render_effects.cpp
+    engine/engine_render_world.cpp
     engine/engine_hud.cpp
     renderer/gl_context.cpp
     renderer/shader.cpp
