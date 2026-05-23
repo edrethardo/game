@@ -68,3 +68,17 @@ bool hasLOS(const Entity& e, const Player& player, const LevelGrid& grid);
 
 // True if there is clear LOS between two world points.
 bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid);
+
+// ---------------------------------------------------------------------------
+// Extracted per-entity blocks (each declared here, defined in its own .cpp)
+// ---------------------------------------------------------------------------
+
+// updateLegacyBossAbilities: handles boss-type entities — delegates to BossAI
+// personality system, tracks LOS-duration aggro, and fires the per-floor boss
+// ability on cooldown. No loop-level early exits — always returns Continue.
+// (enemy_ai_boss.cpp)
+void updateLegacyBossAbilities(Entity& e, u32 i,
+                                EntityPool& pool, ProjectilePool& projectiles,
+                                Player& player, Player* targetPlayer,
+                                const LevelGrid& grid, f32 dt,
+                                f32 dist, Vec3 playerEye);
