@@ -6,6 +6,7 @@
 // CLAUDE.md "Data Lifecycles" for the entity handle/death flow.
 
 #include "game/enemy_ai.h"
+#include "game/enemy_ai_internal.h"
 #include "game/player.h"
 #include "world/level_gen.h"
 #include "game/combat.h"
@@ -23,18 +24,26 @@
 #include <cstdlib>
 
 // Queen drone auto-spawn callback — set by Engine so queen can spawn mini drones
-static void(*s_droneSpawnCb)(Vec3 pos, u8 type) = nullptr;
+void(*s_droneSpawnCb)(Vec3 pos, u8 type) = nullptr;
 void EnemyAI::setDroneSpawnCallback(void(*cb)(Vec3, u8)) { s_droneSpawnCb = cb; }
 
 // Boss personality table — set by Engine during init so boss AI can look up BossDefs
-static const BossDefTable* s_bossDefTable = nullptr;
+const BossDefTable* s_bossDefTable = nullptr;
 void EnemyAI::setBossDefTable(const BossDefTable* table) { s_bossDefTable = table; }
+
+// Frame counter for staggering expensive per-entity work (LOS, AI state).
+// Defined here at file scope so extracted sub-files can share it via extern.
+u32  s_frameTick           = 0;
+// Pre-computed friendly group center/count — updated once per frame so archer
+// kiting logic doesn't each scan O(N) per entity.
+Vec3 s_friendlyGroupCenter = {0, 0, 0};
+u32  s_friendlyGroupCount  = 0;
 
 // ---------------------------------------------------------------------------
 // Grid collision for entities (simplified axis-separated slide)
 // ---------------------------------------------------------------------------
-static bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents,
-                                const LevelGrid& grid)
+bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents,
+                        const LevelGrid& grid)
 {
     f32 minX = centre.x - halfExtents.x;
     f32 maxX = centre.x + halfExtents.x;
@@ -57,7 +66,7 @@ static bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents,
 
 // Snap a ground entity's Y to the floor height of its current grid cell.
 // Called after XZ movement to keep entities from floating or sinking.
-static void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
+void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
     u32 gx, gz;
     if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
         !LevelGridSystem::isSolid(grid, gx, gz)) {
@@ -67,8 +76,8 @@ static void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
 }
 
 // Checks whether an entity AABB overlaps the player AABB in the XZ plane.
-static bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,
-                                  const Vec3& playerPos, f32 playerHW) {
+bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,
+                          const Vec3& playerPos, f32 playerHW) {
     f32 eMinX = entPos.x - halfExt.x;
     f32 eMaxX = entPos.x + halfExt.x;
     f32 eMinZ = entPos.z - halfExt.z;
@@ -81,8 +90,8 @@ static bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,
            eMaxZ > pMinZ && eMinZ < pMaxZ;
 }
 
-static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
-                                const Vec3& /*playerPos*/, f32 /*playerHW*/) {
+void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
+                        const Vec3& /*playerPos*/, f32 /*playerHW*/) {
     Vec3 delta = e.velocity * dt;
     // Enemies walk freely toward the player — only walls block them.
     // The player is blocked from walking through enemies via moveAndSlide
@@ -130,8 +139,8 @@ static void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
 // ---------------------------------------------------------------------------
 // Line-of-sight checks (world only — ignores other entities)
 // ---------------------------------------------------------------------------
-static bool hasLOS(const Entity& e, const Player& player,
-                   const LevelGrid& grid)
+bool hasLOS(const Entity& e, const Player& player,
+            const LevelGrid& grid)
 {
     Vec3 eyePos = player.position + Vec3{0, player.eyeHeight, 0};
     Vec3 toPlayer = eyePos - e.position;
@@ -144,7 +153,7 @@ static bool hasLOS(const Entity& e, const Player& player,
 }
 
 // General point-to-point LOS check (used for NPC→enemy and enemy→NPC)
-static bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
+bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
 {
     Vec3 delta = to - from;
     f32 dist = length(delta);
@@ -177,13 +186,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
     }
 
-    // Frame counter for staggering expensive per-entity work (LOS, AI state)
-    static u32 s_frameTick = 0;
+    // Frame counter for staggering expensive per-entity work (LOS, AI state).
+    // s_frameTick is now file-scope (defined above) so extracted sub-files can use it.
     s_frameTick++;
 
-    // Pre-compute friendly group center once per frame so archers don't each scan O(N)
-    static Vec3 s_friendlyGroupCenter = {0,0,0};
-    static u32  s_friendlyGroupCount  = 0;
+    // Pre-compute friendly group center once per frame so archers don't each scan O(N).
+    // s_friendlyGroupCenter / s_friendlyGroupCount are file-scope for the same reason.
     {
         Vec3 grpC = {0,0,0}; u32 grpN = 0;
         for (u32 a = 0; a < pool.activeCount; a++) {
