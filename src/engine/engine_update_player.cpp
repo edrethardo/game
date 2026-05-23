@@ -217,10 +217,9 @@ void Engine::tickWandererTimers(f32 dt) {
         if (m_localPlayer.deathsDanceTimer < 0.0f) m_localPlayer.deathsDanceTimer = 0.0f;
     }
 
-    // --- Wanderer: unlock and upgrade adrenaline based on current floor ---
-    // Unlocked at floor 20 (skill becomes available), upgraded at floor 30 (move speed bonus)
+    // --- Wanderer: adrenaline available from floor 1; move-speed upgrade at floor 30 ---
     if (m_playerClass == PlayerClass::WANDERER) {
-        m_localPlayer.adrenalineUnlocked = (m_level.currentFloor >= 20);
+        m_localPlayer.adrenalineUnlocked = true;
         m_localPlayer.adrenalineUpgraded = (m_level.currentFloor >= 30);
     }
 }

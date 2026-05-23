@@ -88,7 +88,7 @@ struct Player {
     u8   markSpeedStacks  = 0;     // Exploit Weakness speed buff stacks (5% each, max 20)
     f32  markSpeedTimers[20] = {}; // per-stack 3s non-refreshing decay
     f32  deathsDanceTimer = 0.0f;  // ultimate duration countdown
-    bool adrenalineUnlocked = false; // true once floor >= 20 (skill 3 unlocked)
+    bool adrenalineUnlocked = false; // Wanderer: available from floor 1 (set each tick)
     bool adrenalineUpgraded = false; // true once floor >= 30 (move speed bonus active)
 
     // Soft target lock
