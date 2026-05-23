@@ -221,8 +221,8 @@ void Engine::tickWandererTimers(f32 dt) {
     if (m_playerClass == PlayerClass::WANDERER) {
         m_localPlayer.adrenalineUnlocked = true;
         m_localPlayer.adrenalineUpgraded = (m_level.currentFloor >= 30);
-        // Max adrenaline stacks: 3 to start, raised to 5 after clearing floor 5.
-        m_localPlayer.adrenalineMaxStacks = (m_level.currentFloor >= 6) ? 5 : 3;
+        // Max adrenaline stacks: 3 on floors 1-4, raised to 5 from floor 5 onward.
+        m_localPlayer.adrenalineMaxStacks = (m_level.currentFloor >= 5) ? 5 : 3;
     }
 }
 
