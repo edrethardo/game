@@ -93,3 +93,14 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                            Player& player, Player* targetPlayer,
                            const LevelGrid& grid, f32 dt,
                            f32 dist, Vec3 playerEye);
+
+// updateFriendlyNPC: full AI for friendly NPC party members (Paladin/Cleric/
+// Archer/Mage/Rogue) and drones. Finds enemy targets, moves, attacks, handles
+// group cohesion, separation, and speech. Always returns NextEntity because the
+// original block ended with `continue;` (friendlies skip the hostile AI path).
+// (enemy_ai_friendly.cpp)
+AIStep updateFriendlyNPC(Entity& e, u32 i,
+                          EntityPool& pool, ProjectilePool& projectiles,
+                          Player& player,
+                          const LevelGrid& grid, f32 dt,
+                          Vec3 playerEye);

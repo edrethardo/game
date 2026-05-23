@@ -60,6 +60,7 @@ add_executable(DungeonEngine
     game/enemy_ai.cpp
     game/enemy_ai_boss.cpp
     game/enemy_ai_roles.cpp
+    game/enemy_ai_friendly.cpp
     game/boss_ai.cpp
     game/boss_loader.cpp
     game/enemy_loader.cpp
