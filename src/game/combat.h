@@ -28,7 +28,7 @@ namespace Combat {
     // Apply damage to an entity. Handles health, flash, death transition.
     // Optional damageOrigin enables directional checks (e.g. shield bearer frontal reduction).
     void applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
-                     const Vec3* damageOrigin = nullptr);
+                     const Vec3* damageOrigin = nullptr, bool isCrit = false);
 
     // Transition an entity to its death state and fire the death callback (loot
     // drop, squad alert, death procs). Use this for damage that bypasses

@@ -41,7 +41,7 @@ void Combat::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
 }
 
 void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
-                          const Vec3* damageOrigin) {
+                          const Vec3* damageOrigin, bool isCrit) {
     Entity* e = handleGet(pool, target);
     if (!e) return;
     if (e->flags & ENT_DEAD) return;
@@ -84,8 +84,33 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     e->health -= damage;
     e->flashTimer = 0.12f;
 
-    // Auto-spawn floating damage number at entity position
-    if (s_damageNumberCallback) s_damageNumberCallback(e->position + Vec3{0, 0.5f, 0}, damage);
+    // --- Hit feedback: classify impact tier and fire the matching recipe ---
+    bool isKill = (e->health <= 0.0f);
+    ImpactTier tier = classifyTier(damage, e->maxHealth, isCrit, isKill);
+    const HitFeedbackTier& fx = kHitTiers[static_cast<u32>(tier)];
+    Vec3 hitPos = e->position + Vec3{0, 0.5f, 0};
+
+    // Camera shake (trigger() keeps the stronger of current/new, so spam is fine).
+    if (s_screenShake && fx.shakeIntensity > 0.0f)
+        s_screenShake->trigger(fx.shakeIntensity, fx.shakeDuration);
+
+    // Particles. Blood/sparks fly back along the hit direction; debris/smoke on kills.
+    if (s_particlePool) {
+        Vec3 back = {0, 1, 0};
+        if (damageOrigin) {
+            Vec3 d = e->position - *damageOrigin; d.y = 0.0f;
+            f32 len = sqrtf(d.x*d.x + d.z*d.z);
+            // Normalise to get the knockback-back direction; fall back to up if origin coincides
+            if (len > 0.001f) back = Vec3{d.x/len, 0.4f, d.z/len};
+        }
+        if (fx.bloodCount)  ParticleSystem::spawnBlood(*s_particlePool, hitPos, back, fx.bloodCount);
+        if (fx.sparkCount)  ParticleSystem::spawnSparks(*s_particlePool, hitPos, back, fx.sparkCount);
+        if (fx.debrisCount) ParticleSystem::spawnDebris(*s_particlePool, hitPos, fx.debrisCount);
+        if (fx.smoke)       ParticleSystem::spawnSmoke(*s_particlePool, hitPos, 4);
+    }
+
+    // Floating damage number (crit styling is added in a later task).
+    if (s_damageNumberCallback) s_damageNumberCallback(hitPos, damage);
 
     // Damage alert: first hit on an unalerted enemy that survives wakes neighbors
     if (wasIdle && e->health > 0.0f) {
