@@ -1313,6 +1313,23 @@ void Engine::gameUpdate(f32 dt) {
         }
         m_localPlayer.damageFlashTimer -= dt;
     }
+
+    // Hurt vignette decay (~0.4s fade to clear after each hit).
+    if (m_localPlayer.hurtVignette > 0.0f) {
+        m_localPlayer.hurtVignette -= dt * 2.5f;
+        if (m_localPlayer.hurtVignette < 0.0f) m_localPlayer.hurtVignette = 0.0f;
+    }
+    // Low-HP danger: hold a gentle pulsing red floor while under 25% HP.
+    // sinf oscillates at 5 Hz for an urgent heartbeat feel.
+    {
+        f32 hpFrac = (m_localPlayer.maxHealth > 0.0f)
+                   ? (m_localPlayer.health / m_localPlayer.maxHealth) : 1.0f;
+        if (hpFrac > 0.0f && hpFrac < 0.25f) {
+            f32 pulse = 0.12f + 0.06f * sinf(static_cast<f32>(Clock::getElapsedSeconds()) * 5.0f);
+            if (pulse > m_localPlayer.hurtVignette) m_localPlayer.hurtVignette = pulse;
+        }
+    }
+
     if (m_localPlayer.smokeTimer > 0.0f)
         m_localPlayer.smokeTimer -= dt;
     if (m_localPlayer.overdriveTimer > 0.0f)

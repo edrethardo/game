@@ -1082,6 +1082,44 @@ void Engine::render(f32 alpha) {
         m_fadeFromBlack -= 1.0f / 60.0f;
     }
 
+    // Red hurt vignette — same fullscreen-quad path as the fade overlay, tinted red.
+    // Driven by m_localPlayer.hurtVignette (0..1), which is set on each hit and
+    // pulsed when the player is below 25% HP.
+    if (m_localPlayer.hurtVignette > 0.0f) {
+        // Cap rendered alpha below 0.55 so the screen never goes fully red.
+        f32 alpha = m_localPlayer.hurtVignette * 0.5f;
+        if (alpha > 0.55f) alpha = 0.55f;
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glUseProgram(m_unlitShader.program);
+        Mat4 ortho = Mat4::identity();
+        ortho.m[0]  =  2.0f / static_cast<f32>(sw);
+        ortho.m[5]  =  2.0f / static_cast<f32>(sh);
+        ortho.m[10] = -1.0f;
+        ortho.m[12] = -1.0f;
+        ortho.m[13] = -1.0f;
+        if (m_unlitShader.loc_mvp >= 0)
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, ortho.ptr());
+        if (m_unlitShader.loc_color >= 0)
+            glUniform4f(m_unlitShader.loc_color, 0.6f, 0.0f, 0.0f, alpha);
+
+        Mat4 quadModel = Mat4::translate({static_cast<f32>(sw) * 0.5f,
+                                          static_cast<f32>(sh) * 0.5f, 0.0f})
+                       * Mat4::scale({static_cast<f32>(sw), static_cast<f32>(sh), 1.0f});
+        if (m_unlitShader.loc_mvp >= 0)
+            glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
+
+        glBindVertexArray(m_quadMesh.vao);
+        glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, nullptr);
+        glBindVertexArray(0);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+    }
+
     GLContext::swapBuffers(Window::getHandle());
 }
 

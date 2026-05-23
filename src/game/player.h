@@ -40,6 +40,7 @@ struct Player {
     f32  maxHealth      = 100.0f;
     f32  damageFlashTimer = 0.0f;
     f32  hitShakeTimer    = 0.0f;  // screen shake on taking damage
+    f32  hurtVignette     = 0.0f;  // 0..1 red screen overlay intensity, decays each frame
     f32  slowTimer        = 0.0f;  // movement speed debuff countdown
     f32  poisonTimer      = 0.0f;
     f32  poisonDps        = 0.0f;

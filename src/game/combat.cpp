@@ -216,6 +216,15 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     // Track damage taken this frame for ring passives (thorns, etc.)
     player.lastDamageTaken = damage;
 
+    // Red hurt vignette, scaled by the size of the hit relative to max HP.
+    // Larger hits push vignette higher; clamp so it never whiteouts the screen.
+    if (damage > 0.0f) {
+        f32 frac = damage / (player.maxHealth > 0.0f ? player.maxHealth : 100.0f);
+        f32 v = 0.35f + frac * 0.5f;
+        if (v > 0.85f) v = 0.85f;
+        if (v > player.hurtVignette) player.hurtVignette = v;
+    }
+
     // Record hit direction for CS-style directional indicator
     if (attackerPos && damage > 0.0f) {
         Vec3 toAttacker = *attackerPos - player.position;
