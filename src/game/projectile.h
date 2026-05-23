@@ -32,6 +32,7 @@ struct Projectile {
     f32  lifetime   = 3.0f;
     bool active     = false;
     bool fromPlayer = true; // false = enemy projectile
+    bool isCrit     = false; // player rolled a crit at spawn — applied on direct hit, NOT splash
     u8   projFlags  = 0;       // bit 0: isOrb, bit 1: isOrbShard
     f32  subTimer   = 0.0f;    // orb shard spawn interval timer
     f32  orbAngle   = 0.0f;    // current rotation angle for shard spawning

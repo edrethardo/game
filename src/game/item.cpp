@@ -865,6 +865,16 @@ static WeaponDef buildWeaponDef(const ItemDef& def, const PlayerInventory& inv, 
     wd.reloadTime = def.baseReloadTime * (1.0f - inv.bonusReloadSpeedPct / 100.0f);
     if (def.baseReloadTime > 0.0f && wd.reloadTime < 0.2f) wd.reloadTime = 0.2f;
 
+    // Crit: daggers crit far more often; every other weapon has a small baseline.
+    // Tune these here — single source of truth for per-subtype crit chance/mult.
+    if (def.weaponSubtype == WeaponSubtype::DAGGER) {
+        wd.critChance = 0.20f;  // 20% crit chance for daggers
+        wd.critMult   = 2.5f;   // 2.5× damage on dagger crits
+    } else {
+        wd.critChance = 0.05f;  // 5% baseline for all other weapons
+        wd.critMult   = 2.0f;   // 2× damage on standard crits
+    }
+
     return wd;
 }
 

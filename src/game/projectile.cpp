@@ -207,7 +207,10 @@ void ProjectileSystem::update(ProjectilePool& pool,
 
                     if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                         EntityHandle h = {static_cast<u16>(e), ent.generation};
-                        Combat::applyDamage(entities, h, p.damage, &p.position);
+                        // p.isCrit was set at spawn in Combat::fireProjectile — pass it
+                        // through so the CRIT feedback tier fires on direct hits.
+                        // Splash hits below are intentionally NON-crit (AoE doesn't crit).
+                        Combat::applyDamage(entities, h, p.damage, &p.position, p.isCrit);
                         if (p.freezeDuration > 0.0f) {
                             ent.freezeTimer = p.freezeDuration;
                             if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);

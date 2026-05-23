@@ -7,6 +7,7 @@
 #include "renderer/camera.h"  // for ScreenShake
 #include "core/log.h"
 #include <cmath>
+#include <cstdlib>  // std::rand — used for crit rolls in fire* functions
 
 static Combat::DamageNumberCallback   s_damageNumberCallback   = nullptr;
 static Combat::DeathCallback           s_deathCallback           = nullptr;
@@ -245,7 +246,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
 
 AttackResult Combat::fireMelee(const WeaponDef& weapon,
                                 Vec3 eyePos, Vec3 forward,
-                                EntityPool& pool, bool isCrit)
+                                EntityPool& pool)
 {
     AttackResult result;
     result.didFire = true;
@@ -259,11 +260,15 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
         pool, eyePos, forward, cosCone, weapon.range,
         hits, distances, MAX_ENTITIES);
 
+    // Roll crit once for the whole swing — all cone hits share the same outcome.
+    // Using 0..9999 * 0.0001 gives a uniform [0,1) float without float-modulo artifacts.
+    bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
+    f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;
     for (u32 i = 0; i < hitCount; i++) {
         // applyDamage owns all on-hit FX (tier-driven shake + blood/sparks via the
-        // hit-feedback recipe); isCrit selects the CRIT tier. No inline FX here —
+        // hit-feedback recipe); crit selects the CRIT tier. No inline FX here —
         // that would double up with the tier system.
-        applyDamage(pool, hits[i], weapon.damage, &eyePos, isCrit);
+        applyDamage(pool, hits[i], dmg, &eyePos, crit);
     }
 
     result.entitiesHit = hitCount;
@@ -297,8 +302,10 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
         if (hit.type == CombatHit::ENTITY) {
             result.hitEntity   = true;
             result.entitiesHit = 1;
-            // applyDamage owns on-hit FX (tier-driven shake + particles).
-            applyDamage(pool, hit.entityHandle, weapon.damage, &eyePos);
+            // Roll crit per shot — hitscan always hits exactly one target.
+            bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
+            f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;
+            applyDamage(pool, hit.entityHandle, dmg, &eyePos, crit);
         } else {
             result.hitWorld = true;
             // Debris chips on wall hit
@@ -318,9 +325,14 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
     // Callers already offset eyePos to the weapon tip, so 1.0m was too far and
     // caused projectiles to skip over close enemies.
     Vec3 spawnPos = eyePos + forward * 0.3f;
-    return ProjectileSystem::spawn(projectiles, spawnPos, forward,
-                                    weapon.projectileSpeed, weapon.damage,
-                                    weapon.projectileRadius, 3.0f, true, extraFlags);
+    // Roll crit at spawn; multiply damage into the projectile so the hit path is crit-unaware.
+    bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
+    f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;
+    u16 idx = ProjectileSystem::spawn(projectiles, spawnPos, forward,
+                                       weapon.projectileSpeed, dmg,
+                                       weapon.projectileRadius, 3.0f, true, extraFlags);
+    if (idx != 0xFFFF) projectiles.projectiles[idx].isCrit = crit;
+    return idx;
 }
 
 u16 Combat::fireProjectile(const WeaponDef& weapon,
@@ -329,14 +341,21 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
                             f32 gravity, f32 splashRadius, f32 splashDamage)
 {
     Vec3 spawnPos = eyePos + forward * 0.3f;
+    // Splash/gravity projectiles (e.g. molotov) can still crit; the direct-hit damage
+    // is multiplied, but splash damage is kept at base (AoE splash does not crit — see
+    // projectile.cpp). isCrit is stored so the hit call in projectile.cpp can trigger
+    // the CRIT feedback tier on the primary target.
+    bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
+    f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;
     u16 idx = ProjectileSystem::spawn(projectiles, spawnPos, forward,
-                                       weapon.projectileSpeed, weapon.damage,
+                                       weapon.projectileSpeed, dmg,
                                        weapon.projectileRadius, 5.0f, true);
     if (idx != 0xFFFF) {
         Projectile& p = projectiles.projectiles[idx];
         p.gravity      = gravity;
         p.splashRadius = splashRadius;
         p.splashDamage = splashDamage;
+        p.isCrit       = crit;
         if (gravity > 0.0f) p.projFlags |= PROJ_GRAVITY;
         if (splashRadius > 0.0f) p.projFlags |= PROJ_SPLASH;
     }

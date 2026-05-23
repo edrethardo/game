@@ -181,18 +181,12 @@ void Engine::handleWeaponFire(f32 dt) {
     AttackResult result;
     switch (wpn.type) {
     case WeaponType::MELEE: {
-        // Dagger crit: 5% chance for 300% damage
+        // Crit is now rolled inside Combat::fireMelee from weapon.critChance (set in
+        // buildWeaponDef in item.cpp). No per-subtype crit logic needed here.
         WeaponSubtype melSub = WeaponSubtype::NONE;
         if (qbItem && !isItemEmpty(*qbItem))
             melSub = m_itemDefs[qbItem->defId].weaponSubtype;
-        WeaponDef meleeWpn = wpn;
-        // Store the crit outcome so it can be threaded into fireMelee → applyDamage,
-        // enabling the CRIT impact tier (spark burst + enlarged damage number).
-        bool crit = (melSub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5);
-        if (crit) {
-            meleeWpn.damage *= 3.0f;
-        }
-        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities, crit);
+        result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
         m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
 
         // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
@@ -619,16 +613,11 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     AttackResult result;
     switch (wpn.type) {
     case WeaponType::MELEE: {
-        // Dagger crit / non-dagger cleave
+        // Crit is now rolled inside Combat::fireMelee from weapon.critChance (set in
+        // buildWeaponDef in item.cpp). No per-subtype crit logic needed here.
         WeaponSubtype sub = WeaponSubtype::NONE;
         if (!isItemEmpty(eqWpn)) sub = m_itemDefs[eqWpn.defId].weaponSubtype;
-        WeaponDef meleeWpn = wpn;
-        // Same crit logic as singleplayer: store outcome to pass into fireMelee.
-        bool crit = (sub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5);
-        if (crit) {
-            meleeWpn.damage *= 3.0f;
-        }
-        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities, crit);
+        result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
         if (sub != WeaponSubtype::DAGGER && sub != WeaponSubtype::NONE &&
             result.hitEntity && (std::rand() % 100) < 5) {
             WeaponDef cleaveWpn = wpn;

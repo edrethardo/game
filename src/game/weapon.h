@@ -40,6 +40,10 @@ struct WeaponDef {
     f32  recoilKick;      // pitch kick on fire (radians)
     u8   clipSize;        // 0 = no clip (melee/projectile), >0 = rounds per magazine
     f32  reloadTime;      // seconds to reload (0 = instant)
+    // Crit stats — rolled once per weapon type in Combat::fire*; set per subtype in
+    // buildWeaponDef (item.cpp) so the whole system has a single source of truth.
+    f32  critChance = 0.05f;  // 0..1 probability of a critical hit
+    f32  critMult   = 2.0f;   // damage multiplier applied on a crit
 };
 
 // Per-player mutable weapon state (cooldown tracking, recoil decay)
