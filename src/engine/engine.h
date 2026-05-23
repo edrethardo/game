@@ -406,6 +406,16 @@ private:
     void initAssets();      // load meshes/materials/JSON content + resolve visuals (called by init)
     void initCallbacks();   // wire Combat/SkillSystem/ProjectileSystem/Inventory event callbacks (called by init)
 
+    // Death-event handlers (called from the Combat death callback).
+    // handleDeathPreamble runs unconditionally for every death (squad, speech, class passives, bomber).
+    // The remaining helpers handle loot and on-kill ring effects in order; each bool-returning
+    // helper returns true when it fully handled the drop path and no further drop logic should run.
+    void handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos);
+    bool handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos);
+    bool handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
+    void handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
+    void handleOnKillRingPassives(EntityPool& pool, u16 idx, Vec3 pos);
+
     // Save slot management
     static constexpr u32 MAX_SAVE_SLOTS = 20;
     u8 m_activeSaveSlot = 0;  // 0 = no active slot, 1-20 = slot number
