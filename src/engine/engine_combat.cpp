@@ -186,10 +186,13 @@ void Engine::handleWeaponFire(f32 dt) {
         if (qbItem && !isItemEmpty(*qbItem))
             melSub = m_itemDefs[qbItem->defId].weaponSubtype;
         WeaponDef meleeWpn = wpn;
-        if (melSub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5) {
+        // Store the crit outcome so it can be threaded into fireMelee → applyDamage,
+        // enabling the CRIT impact tier (spark burst + enlarged damage number).
+        bool crit = (melSub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5);
+        if (crit) {
             meleeWpn.damage *= 3.0f;
         }
-        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
+        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities, crit);
         m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
 
         // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
@@ -198,7 +201,7 @@ void Engine::handleWeaponFire(f32 dt) {
             WeaponDef cleaveWpn = wpn;
             cleaveWpn.coneAngleDeg = 360.0f;
             cleaveWpn.damage *= 0.5f; // cleave deals half damage
-            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities);
+            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities); // cleave is never a crit
         }
     } break;
     case WeaponType::HITSCAN:
@@ -620,16 +623,18 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         WeaponSubtype sub = WeaponSubtype::NONE;
         if (!isItemEmpty(eqWpn)) sub = m_itemDefs[eqWpn.defId].weaponSubtype;
         WeaponDef meleeWpn = wpn;
-        if (sub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5) {
+        // Same crit logic as singleplayer: store outcome to pass into fireMelee.
+        bool crit = (sub == WeaponSubtype::DAGGER && (std::rand() % 100) < 5);
+        if (crit) {
             meleeWpn.damage *= 3.0f;
         }
-        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities);
+        result = Combat::fireMelee(meleeWpn, eyePos, forward, m_entities, crit);
         if (sub != WeaponSubtype::DAGGER && sub != WeaponSubtype::NONE &&
             result.hitEntity && (std::rand() % 100) < 5) {
             WeaponDef cleaveWpn = wpn;
             cleaveWpn.coneAngleDeg = 360.0f;
             cleaveWpn.damage *= 0.5f;
-            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities);
+            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities); // cleave is never a crit
         }
     } break;
     case WeaponType::HITSCAN: {

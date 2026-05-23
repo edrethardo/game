@@ -48,9 +48,10 @@ namespace Combat {
     void setDodgeThroughCallback(DodgeThroughCallback cb);
 
     // Execute a melee attack (cone check, damage all in cone).
+    // isCrit is forwarded to applyDamage so the CRIT feedback tier fires correctly.
     AttackResult fireMelee(const WeaponDef& weapon,
                            Vec3 eyePos, Vec3 forward,
-                           EntityPool& pool);
+                           EntityPool& pool, bool isCrit = false);
 
     // Execute a hitscan attack (raycast, damage first entity hit).
     AttackResult fireHitscan(const WeaponDef& weapon,

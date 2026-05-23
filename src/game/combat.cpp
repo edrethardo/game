@@ -236,7 +236,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
 
 AttackResult Combat::fireMelee(const WeaponDef& weapon,
                                 Vec3 eyePos, Vec3 forward,
-                                EntityPool& pool)
+                                EntityPool& pool, bool isCrit)
 {
     AttackResult result;
     result.didFire = true;
@@ -251,7 +251,8 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
         hits, distances, MAX_ENTITIES);
 
     for (u32 i = 0; i < hitCount; i++) {
-        applyDamage(pool, hits[i], weapon.damage, &eyePos);
+        // Pass isCrit so the CRIT feedback tier (spark burst + enlarged number) fires.
+        applyDamage(pool, hits[i], weapon.damage, &eyePos, isCrit);
         // Blood + sparks at each entity hit in the melee cone
         if (s_particlePool) {
             Entity* he = handleGet(pool, hits[i]);
