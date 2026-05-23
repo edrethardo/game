@@ -1310,6 +1310,9 @@ void Engine::gameUpdate(f32 dt) {
         if (m_localPlayer.damageFlashTimer >= 0.15f - 0.001f) {
             AudioSystem::play(SfxId::PLAYER_HIT, 0.7f);
             m_camera.shake.trigger(0.03f, 0.2f);
+            // Gamepad rumble scaled by how hard we were hit.
+            f32 r = 0.3f + m_localPlayer.hurtVignette * 0.5f;
+            Input::rumble(m_localPlayerIndex, r, 120 + static_cast<u32>(m_localPlayer.hurtVignette * 180.0f));
         }
         m_localPlayer.damageFlashTimer -= dt;
     }

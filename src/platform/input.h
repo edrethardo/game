@@ -87,6 +87,9 @@ namespace Input {
     // L shoulder modifier state
     bool isModifierHeld(s32 gamepadIndex = 0);
 
+    // Rumble player `slot`'s controller at `strength` (0..1) for `durationMs` ms. No-op if no controller.
+    void rumble(u8 slot, f32 strength, u32 durationMs);
+
     // Split-screen: set which player's controller to read (0 or 1)
     void setActivePlayer(u8 index);
     u8   getActivePlayer();

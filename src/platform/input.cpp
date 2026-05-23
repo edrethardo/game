@@ -453,6 +453,19 @@ void Input::handleControllerEvent(const SDL_Event& event) {
 }
 
 // ---------------------------------------------------------------------------
+// Gamepad rumble
+// ---------------------------------------------------------------------------
+void Input::rumble(u8 slot, f32 strength, u32 durationMs) {
+    if (slot >= static_cast<u8>(MAX_GAMEPADS)) return;
+    SDL_GameController* gc = s_controllers[slot];
+    if (!gc) return;
+    if (strength < 0.0f) strength = 0.0f;
+    if (strength > 1.0f) strength = 1.0f;
+    Uint16 mag = static_cast<Uint16>(strength * 65535.0f);
+    SDL_GameControllerRumble(gc, mag, mag, durationMs);
+}
+
+// ---------------------------------------------------------------------------
 // Stick with deadzone
 // ---------------------------------------------------------------------------
 f32 Input::getStickX(bool rightStick, s32 gamepadIndex) {
