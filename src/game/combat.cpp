@@ -1,4 +1,5 @@
 #include "game/combat.h"
+#include "game/hit_feedback.h"
 #include "game/player.h"
 #include "game/projectile.h"
 #include "world/combat_query.h"
