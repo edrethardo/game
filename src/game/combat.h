@@ -30,6 +30,13 @@ namespace Combat {
     void applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
                      const Vec3* damageOrigin = nullptr);
 
+    // Transition an entity to its death state and fire the death callback (loot
+    // drop, squad alert, death procs). Use this for damage that bypasses
+    // applyDamage — environmental/DoT sources (poison, burn, scorch) — so those
+    // kills still drop loot. No-op if the entity is already dead. Does NOT spawn a
+    // damage number (DoTs tick every frame and would otherwise spam).
+    void killEntity(EntityPool& pool, EntityHandle target);
+
     // Apply damage to the player. Optional attackerPos enables directional indicator.
     // attackerIdx: entity pool index of the attacker (0xFFFF if unknown/environmental).
     // Used by dodge-through detection to fire riposte counter-hits.

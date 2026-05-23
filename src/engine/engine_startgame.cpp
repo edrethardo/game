@@ -315,7 +315,28 @@ void Engine::upgradeNpcEquipment(u8 newFloor) {
     }
 }
 
-void Engine::startGame() {
+// Equip the class starting weapon for one local player. Centralizes the loadout
+// logic that used to be copy-pasted across the menu start paths; called from
+// startGame() on a NEW_GAME only. Floor-1 shield drops are separate world-item
+// logic (the player picks those up), so this grants the weapon only.
+void Engine::equipStartingLoadout(u8 playerIdx) {
+    const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[playerIdx])];
+    for (u32 wi = 0; wi < m_itemDefCount; wi++) {
+        if (std::strcmp(m_itemDefs[wi].name, cls.startingWeaponName) != 0) continue;
+        ItemInstance wpn;
+        wpn.defId = static_cast<u16>(wi);
+        wpn.rarity = Rarity::COMMON;
+        wpn.itemLevel = 1;
+        wpn.damage = m_itemDefs[wi].baseDamage;
+        wpn.uid = m_worldItems.nextUid++;
+        m_inventories[playerIdx].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
+        Inventory::recalculateStats(m_inventories[playerIdx]);
+        Quickbar::syncWeaponSlot(m_quickbars[playerIdx], m_inventories[playerIdx]);
+        break;
+    }
+}
+
+void Engine::startGame(GameStart mode) {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
 
@@ -1308,16 +1329,17 @@ void Engine::startGame() {
 
     // Init inventory & world items
     WorldItemSystem::init(m_worldItems);
-    // Only reset inventory on a true new game (floor 1, Normal difficulty).
-    // Skip if the weapon slot already has an item — means we loaded from a save.
-    // Nightmare/Hell transitions set floor=1 but must preserve gear.
-    if (m_level.currentFloor <= 1 && m_difficulty == 0 &&
-        isItemEmpty(m_inventories[0].equipped[static_cast<u8>(ItemSlot::WEAPON)])) {
+    // Inventory is reset + starter gear granted ONLY on a brand-new run. CONTINUE
+    // keeps what loadGame() restored; DESCEND keeps the current run's gear. The mode
+    // makes the intent explicit instead of guessing from floor/difficulty/empty-slot.
+    if (mode == GameStart::NEW_GAME) {
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
             Inventory::init(m_inventories[i]);
             m_skillStates[i] = SkillState{};
             Quickbar::init(m_quickbars[i], m_inventories[i]);
         }
+        // Grant the class starting weapon to each active local player.
+        for (u8 pi = 0; pi < m_splitPlayerCount; pi++) equipStartingLoadout(pi);
     }
 
     // Init players
@@ -1330,10 +1352,15 @@ void Engine::startGame() {
     m_players[m_localPlayerIndex].slotIndex = m_localPlayerIndex;
     m_players[m_localPlayerIndex].position = spawnPos;
     m_players[m_localPlayerIndex].spawnPosition = spawnPos;
-    // Only reset health on floor 1 — keep current HP when descending
-    if (m_level.currentFloor <= 1) {
-        m_players[m_localPlayerIndex].health = 100.0f;
-        m_players[m_localPlayerIndex].maxHealth = 100.0f;
+    // Reset health to the class base only on a brand-new run. CONTINUE keeps the
+    // saved HP and DESCEND keeps the current run's HP (the old code hard-reset to
+    // 100 on every floor<=1 entry, which clobbered class HP and continued saves).
+    if (mode == GameStart::NEW_GAME) {
+        for (u8 pi = 0; pi < m_splitPlayerCount; pi++) {
+            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
+            m_players[pi].health = cls.baseHealth;
+            m_players[pi].maxHealth = cls.baseHealth;
+        }
     }
     m_players[m_localPlayerIndex].weaponState.currentWeapon = 0;
 

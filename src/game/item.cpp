@@ -659,6 +659,7 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusDamageToFlying     = 0.0f;
     inv.bonusClipSizePct        = 0.0f;
     inv.bonusReloadSpeedPct     = 0.0f;
+    inv.bonusEnergyFlat         = 0.0f;  // was missing — accumulated across every recalc
 
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
         const ItemInstance& equipped = inv.equipped[s];

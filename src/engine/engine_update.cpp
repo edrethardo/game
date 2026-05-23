@@ -119,7 +119,7 @@ void Engine::update(f32 dt) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.invulnTimer = 2.5f;
                 m_inventoryOpen = false;
-                startGame();
+                startGame(GameStart::CONTINUE); // loadGame already restored gear/HP
                 m_fadeFromBlack = 0.3f;
                 m_gameState = GameState::IN_GAME;
             }
@@ -226,7 +226,7 @@ void Engine::update(f32 dt) {
     case GameState::FLOOR_TRANSITION:
         m_transition.timer -= dt;
         if (m_transition.timer <= 0.0f) {
-            startGame();
+            startGame(GameStart::DESCEND); // keep inventory & HP into the next floor
             // In split-screen, reposition both players at the new spawn
             if (m_splitPlayerCount > 1) {
                 m_localPlayers[1].maxHealth *= 1.015f;
@@ -945,13 +945,9 @@ void Engine::gameUpdate(f32 dt) {
             f32 distSq = lengthSq(ent.position - sz.pos);
             if (distSq < sz.radius * sz.radius) {
                 ent.health -= sz.dps * dt;
-                if (ent.health <= 0.0f && !(ent.flags & ENT_DEAD)) {
-                    ent.health = 0.0f;
-                    ent.flags |= ENT_DEAD;
-                    ent.aiState = AIState::DEAD;
-                    ent.deathTimer = 1.0f;
-                    ent.velocity = {0,0,0};
-                }
+                // Route death through killEntity so scorch kills still drop loot / fire procs.
+                if (ent.health <= 0.0f)
+                    Combat::killEntity(m_entities, {static_cast<u16>(idx), ent.generation});
             }
         }
     }

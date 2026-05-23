@@ -36,6 +36,17 @@ enum struct GameState : u8 {
     VICTORY,            // player completed floor 50 — victory screen before menu return
 };
 
+// How a call to Engine::startGame() should treat player progression state.
+// Makes the intent explicit instead of inferring it from floor/difficulty/inventory:
+//   NEW_GAME — fresh run: wipe inventory, grant the class starting loadout, reset to class HP.
+//   CONTINUE — loaded from a save (loadGame already restored inventory/skills/HP): leave them alone.
+//   DESCEND  — next floor or difficulty loop within a run: keep inventory & HP; floor already set.
+enum struct GameStart : u8 {
+    NEW_GAME,
+    CONTINUE,
+    DESCEND,
+};
+
 class Engine {
 public:
     void init();
@@ -384,7 +395,10 @@ private:
     // Menu/lobby
     void updateMenu(f32 dt);
     void updateLobby(f32 dt);
-    void startGame();
+    void startGame(GameStart mode);
+    // Equip the class starting weapon for one local player (centralizes what used
+    // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
+    void equipStartingLoadout(u8 playerIdx);
     void saveGame(u8 slot);
     bool loadGame(u8 slot);
 

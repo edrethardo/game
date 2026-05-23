@@ -102,14 +102,23 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     }
 
     if (e->health <= 0.0f) {
-        e->health     = 0.0f;
-        e->flags     |= ENT_DEAD;
-        e->aiState    = AIState::DEAD;
-        e->deathTimer = 1.0f;
-        e->velocity   = {0,0,0};
-        if (s_deathCallback) {
-            s_deathCallback(pool, target.index, e->position);
-        }
+        killEntity(pool, target);
+    }
+}
+
+// Canonical death transition + death-callback dispatch. Single source of truth so
+// every kill path (applyDamage and the DoT/environmental sources) drops loot and
+// fires squad/death procs identically.
+void Combat::killEntity(EntityPool& pool, EntityHandle target) {
+    Entity* e = handleGet(pool, target);
+    if (!e || (e->flags & ENT_DEAD)) return;
+    e->health     = 0.0f;
+    e->flags     |= ENT_DEAD;
+    e->aiState    = AIState::DEAD;
+    e->deathTimer = 1.0f;
+    e->velocity   = {0, 0, 0};
+    if (s_deathCallback) {
+        s_deathCallback(pool, target.index, e->position);
     }
 }
 

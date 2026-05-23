@@ -78,9 +78,12 @@ struct WorldSnapshot {
 
     // Copy/move support (snapshot ring buffer copies these)
     WorldSnapshot(const WorldSnapshot& o) {
-        *this = o; // copy fields
-        projectiles = new SnapProjectile[MAX_PROJECTILES];
-        for (u16 i = 0; i < o.projectileCount; i++) projectiles[i] = o.projectiles[i];
+        // Allocate our projectile array exactly once, then let operator= copy the
+        // fields and projectile contents into it. (Previously this called *this = o
+        // first — which itself allocated because projectiles was still null — then
+        // allocated a SECOND array here, leaking ~64KB on every snapshot copy.)
+        projectiles = new SnapProjectile[MAX_PROJECTILES]();
+        *this = o;
     }
     WorldSnapshot& operator=(const WorldSnapshot& o) {
         if (this == &o) return *this;

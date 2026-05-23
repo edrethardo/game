@@ -141,34 +141,15 @@ void BossAI::update(Entity& e, const BossDef& def,
         default: break;
     }
 
-    // --- Boss projectile firing ---
-    if (def.projectile.enabled) {
-        e.flybyTimer -= dt;
-        if (e.flybyTimer <= 0.0f && dist < def.detectionRange) {
-            e.flybyTimer = def.projectile.cooldown / enrageMult;
-
-            Vec3 bossEye = e.position + Vec3{0, e.halfExtents.y, 0};
-            Vec3 playerEye = playerPos + Vec3{0, 1.0f, 0};
-            Vec3 toPlayer = normalize(playerEye - bossEye);
-
-            u16 pi = ProjectileSystem::spawn(projectiles, bossEye,
-                toPlayer, def.projectile.speed, e.damage * 0.4f,
-                def.projectile.radius, 3.0f, false);
-
-            if (pi != 0xFFFF) {
-                // Apply weapon mesh if configured (e.g., Butcher's cleaver)
-                if (def.projectile.usesWeaponMesh && e.weaponMeshId > 0) {
-                    projectiles.projectiles[pi].meshId = e.weaponMeshId;
-                }
-                // Set on-hit status effect on the projectile
-                if (def.projectile.onHitEffect > 0) {
-                    projectiles.projectiles[pi].onHitEffect = def.projectile.onHitEffect;
-                    projectiles.projectiles[pi].onHitDuration = def.projectile.onHitDuration;
-                }
-            }
-            e.attackAnimT = 0.4f;
-        }
-    }
+    // --- Boss ability firing is owned by the per-boss dispatch in enemy_ai.cpp ---
+    // That switch (keyed on the boss floor) provides each boss's *signature* attack
+    // — poison nova, frost fan, summons, etc. — and shares the same `e.flybyTimer`
+    // cooldown. Firing a generic projectile here too made projectile-enabled bosses
+    // decrement flybyTimer twice per tick and fire two attacks at once. We keep
+    // BossAI for personality/movement/enrage only and let the switch be the single
+    // ability authority. (Migrating those patterns into BossDef/bosses.json to
+    // retire the floor-keyed switch entirely is a separate refactor.)
+    (void)projectiles; (void)pool;
 
     // --- Summoner role: spawn minions ---
     if (def.roles & EnemyRole::SUMMONER) {

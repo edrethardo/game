@@ -2,6 +2,7 @@
 #include "net/packet.h"
 #include "game/player.h"
 #include "world/collision.h"
+#include "platform/clock.h"   // wall-clock for time-based snapshot interpolation
 #include "core/log.h"
 
 #include <cstring>
@@ -14,6 +15,7 @@ static u8  s_localPlayerIndex = 0;
 
 // Snapshot ring buffer
 static WorldSnapshot s_snapshots[SNAP_BUFFER_SIZE];
+static f64           s_snapRecvTime[SNAP_BUFFER_SIZE] = {}; // wall-clock arrival time per slot
 static u32           s_snapHead  = 0;
 static u32           s_snapCount = 0;
 
@@ -37,8 +39,33 @@ static const WorldSnapshot* getSnapshot(u32 ago) {
 
 static void pushSnapshot(const WorldSnapshot& snap) {
     s_snapshots[s_snapHead] = snap;
+    s_snapRecvTime[s_snapHead] = Clock::getElapsedSeconds();
     s_snapHead = (s_snapHead + 1) % SNAP_BUFFER_SIZE;
     if (s_snapCount < SNAP_BUFFER_SIZE) s_snapCount++;
+}
+
+// Wall-clock arrival time of the snapshot `ago` steps back (0 = newest).
+static f64 getSnapTime(u32 ago) {
+    if (ago >= s_snapCount) return 0.0;
+    u32 idx = (s_snapHead + SNAP_BUFFER_SIZE - 1 - ago) % SNAP_BUFFER_SIZE;
+    return s_snapRecvTime[idx];
+}
+
+// Time-based interpolation factor between the two newest snapshots. Sweeps 0->1
+// across the real inter-snapshot interval as wall-clock advances, so remote
+// entities move smoothly every frame instead of being pinned at a fixed blend
+// (the old hardcoded 0.7) and jumping when the next snapshot arrived. Clamped to
+// [0,1] (no extrapolation); returns 1.0 (render newest) when interpolation isn't
+// possible.
+static f32 computeInterpAlpha() {
+    if (s_snapCount < 2) return 1.0f;
+    f64 tNewer = getSnapTime(0);
+    f64 tOlder = getSnapTime(1);
+    f64 interval = tNewer - tOlder;
+    if (interval <= 1e-6) return 1.0f;
+    f64 a = (Clock::getElapsedSeconds() - tNewer) / interval;
+    if (a < 0.0) a = 0.0; else if (a > 1.0) a = 1.0;
+    return static_cast<f32>(a);
 }
 
 static void pushPrediction(const PredictionEntry& entry) {
@@ -193,12 +220,10 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         return;
     }
 
-    // Interpolation factor based on time between snapshots
-    f32 t = 0.5f; // Default to midpoint
-    if (snapB->serverTick > snapA->serverTick) {
-        // We want to render slightly in the past
-        t = 0.7f; // Bias toward newer snapshot
-    }
+    // Time-based interpolation factor (see computeInterpAlpha): sweeps the blend
+    // from the older snapshot toward the newer one across the real inter-snapshot
+    // interval, instead of the old fixed 0.7 that froze motion between snapshots.
+    f32 t = computeInterpAlpha();
 
     // For each player in snapB, find corresponding entry in snapA and lerp
     for (u32 i = 0; i < snapB->playerCount; i++) {
@@ -249,7 +274,7 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
     if (!snapB) return;
 
     const WorldSnapshot* snapA = getSnapshot(1);
-    f32 t = snapA ? 0.7f : 1.0f;
+    f32 t = snapA ? computeInterpAlpha() : 1.0f;
 
     for (u32 i = 0; i < snapB->entityCount; i++) {
         const SnapEntity& seB = snapB->entities[i];
@@ -315,7 +340,7 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
     if (!snapB) return;
 
     const WorldSnapshot* snapA = getSnapshot(1);
-    f32 t = snapA ? 0.7f : 1.0f;
+    f32 t = snapA ? computeInterpAlpha() : 1.0f;
 
     for (u32 i = 0; i < snapB->projectileCount; i++) {
         const SnapProjectile& spB = snapB->projectiles[i];

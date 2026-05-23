@@ -239,7 +239,7 @@ void Engine::updateMenu(f32 dt) {
                     }
                     m_menu.subState = 0;
                     m_menu.msg = nullptr;
-                    startGame();
+                    startGame(GameStart::CONTINUE);
                     // Position P2 next to P1 at the new dungeon spawn
                     if (m_splitPlayerCount > 1) {
                         m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
@@ -325,20 +325,7 @@ void Engine::updateMenu(f32 dt) {
                 LOG_INFO("Hosting game...");
                 m_menu.subState = 0;
                 m_splitPlayerCount = 1;
-                startGame();
-                // Auto-equip starting weapon for P1
-                const ClassDef& cls2 = kClassDefs[static_cast<u32>(m_playerClasses[0])];
-                for (u32 wi = 0; wi < m_itemDefCount; wi++) {
-                    if (std::strcmp(m_itemDefs[wi].name, cls2.startingWeaponName) == 0) {
-                        ItemInstance wpn; wpn.defId = static_cast<u16>(wi);
-                        wpn.rarity = Rarity::COMMON; wpn.itemLevel = 1;
-                        wpn.damage = m_itemDefs[wi].baseDamage; wpn.uid = m_worldItems.nextUid++;
-                        m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
-                        Inventory::recalculateStats(m_inventories[m_localPlayerIndex]);
-                        Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-                        break;
-                    }
-                }
+                startGame(GameStart::NEW_GAME); // wipes + grants starting loadout
             } else {
                 // Skip difficulty selection — difficulty is automatic per save (Diablo-style)
                 m_difficulty = 0;  // new games always start Normal
@@ -366,20 +353,7 @@ void Engine::updateMenu(f32 dt) {
             m_splitPlayerCount = 1;
             Input::setSplitScreen(false);
             m_menu.subState = 0;
-            startGame();
-            // Equip P1 starting weapon
-            const ClassDef& cls2 = kClassDefs[static_cast<u32>(m_playerClasses[0])];
-            for (u32 wi = 0; wi < m_itemDefCount; wi++) {
-                if (std::strcmp(m_itemDefs[wi].name, cls2.startingWeaponName) == 0) {
-                    ItemInstance wpn; wpn.defId = static_cast<u16>(wi);
-                    wpn.rarity = Rarity::COMMON; wpn.itemLevel = 1;
-                    wpn.damage = m_itemDefs[wi].baseDamage; wpn.uid = m_worldItems.nextUid++;
-                    m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
-                    Inventory::recalculateStats(m_inventories[m_localPlayerIndex]);
-                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-                    break;
-                }
-            }
+            startGame(GameStart::NEW_GAME); // wipes + grants starting loadout
         }
         // ESC/B goes back to P1 class selection
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
@@ -423,9 +397,11 @@ void Engine::updateMenu(f32 dt) {
                 m_classSkillStatesPerPlayer[1][s].energy = cls2.baseEnergy;
             }
 
-            // Both players ready — start the game
+            // Both players ready — start the game.
+            // startGame(NEW_GAME) wipes inventories and grants both players their
+            // class starting loadout (m_splitPlayerCount == 2 here).
             m_menu.subState = 0;
-            startGame();
+            startGame(GameStart::NEW_GAME);
 
             // Set P2 spawn at same location as P1 (slightly offset)
             m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
@@ -435,22 +411,6 @@ void Engine::updateMenu(f32 dt) {
             // Copy P1 state into arrays too
             m_localPlayers[0] = m_localPlayer;
             m_cameras[0] = m_camera;
-
-            // Equip starting weapons for both players
-            for (u8 pi = 0; pi < 2; pi++) {
-                const ClassDef& pc = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
-                for (u32 wi = 0; wi < m_itemDefCount; wi++) {
-                    if (std::strcmp(m_itemDefs[wi].name, pc.startingWeaponName) == 0) {
-                        ItemInstance wpn; wpn.defId = static_cast<u16>(wi);
-                        wpn.rarity = Rarity::COMMON; wpn.itemLevel = 1;
-                        wpn.damage = m_itemDefs[wi].baseDamage; wpn.uid = m_worldItems.nextUid++;
-                        m_inventories[pi].equipped[static_cast<u32>(ItemSlot::WEAPON)] = wpn;
-                        Inventory::recalculateStats(m_inventories[pi]);
-                        Quickbar::syncWeaponSlot(m_quickbars[pi], m_inventories[pi]);
-                        break;
-                    }
-                }
-            }
         }
         return;
     }
@@ -670,9 +630,11 @@ void Engine::updateLobby(f32 dt) {
         // Wait for join accept — check if we got assigned a player index
         u8 idx = Net::getLocalPlayerIndex();
         if (idx != 0 || Net::getConnectedCount() > 0) {
-            // We're connected and got a slot
+            // We're connected and got a slot. The host is authoritative for our
+            // inventory (it runs onPlayerJoin + syncs via snapshots), so locally we
+            // start without wiping or granting a loadout — CONTINUE semantics.
             m_localPlayerIndex = idx;
-            startGame();
+            startGame(GameStart::CONTINUE);
         }
     }
 }

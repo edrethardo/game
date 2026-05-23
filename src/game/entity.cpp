@@ -1,4 +1,5 @@
 #include "game/entity.h"
+#include "game/combat.h"        // Combat::killEntity — DoT deaths must drop loot too
 #include "game/game_constants.h"
 #include "core/log.h"
 
@@ -79,24 +80,13 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         if (e.poisonTimer > 0.0f) {
             e.poisonTimer -= dt;
             e.health -= e.poisonDps * dt;
-            if (e.health <= 0.0f && !(e.flags & ENT_DEAD)) {
-                e.health = 0.0f;
-                e.flags |= ENT_DEAD;
-                e.aiState = AIState::DEAD;
-                e.deathTimer = 1.0f;
-                e.velocity = {0,0,0};
-            }
+            // Route death through killEntity so DoT kills still drop loot / fire procs.
+            if (e.health <= 0.0f) Combat::killEntity(pool, {static_cast<u16>(i), e.generation});
         }
         if (e.burnTimer > 0.0f) {
             e.burnTimer -= dt;
             e.health -= e.burnDps * dt;
-            if (e.health <= 0.0f && !(e.flags & ENT_DEAD)) {
-                e.health = 0.0f;
-                e.flags |= ENT_DEAD;
-                e.aiState = AIState::DEAD;
-                e.deathTimer = 1.0f;
-                e.velocity = {0,0,0};
-            }
+            if (e.health <= 0.0f) Combat::killEntity(pool, {static_cast<u16>(i), e.generation});
         }
         if (e.freezeTimer > 0.0f) e.freezeTimer -= dt;
         if (e.stunTimer > 0.0f) e.stunTimer -= dt;
