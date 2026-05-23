@@ -915,6 +915,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             continue;
         }
 
+        // Knockback stagger: while a knockback impulse is decaying, let it carry the
+        // entity (skip movement/AI this tick) instead of the AI overwriting velocity.
+        if (e.knockbackTimer > 0.0f) continue;
+
         Vec3 toPlayer = playerEye - e.position;
         f32  dist     = length(toPlayer);
 
