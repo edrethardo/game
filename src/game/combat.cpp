@@ -20,7 +20,9 @@ void Combat::setDamageNumberCallback(DamageNumberCallback cb) {
 }
 
 void Combat::spawnDamageNumber(Vec3 position, f32 amount) {
-    if (s_damageNumberCallback) s_damageNumberCallback(position, amount);
+    // Skills that call this directly (e.g. riposte, drone) never produce crits or kills
+    // through this path, so both flags are false.
+    if (s_damageNumberCallback) s_damageNumberCallback(position, amount, false, false);
 }
 
 void Combat::setDeathCallback(DeathCallback cb) {
@@ -109,8 +111,8 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
         if (fx.smoke)       ParticleSystem::spawnSmoke(*s_particlePool, hitPos, 4);
     }
 
-    // Floating damage number (crit styling is added in a later task).
-    if (s_damageNumberCallback) s_damageNumberCallback(hitPos, damage);
+    // Fire the damage number callback with crit/kill flags so the renderer can style them.
+    if (s_damageNumberCallback) s_damageNumberCallback(hitPos, damage, isCrit, isKill);
 
     // Damage alert: first hit on an unalerted enemy that survives wakes neighbors
     if (wasIdle && e->health > 0.0f) {

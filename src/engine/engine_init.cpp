@@ -560,9 +560,11 @@ void Engine::init() {
         if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
     });
 
-    Combat::setDamageNumberCallback([](Vec3 pos, f32 amount) {
+    // Thread isCrit and isKill into the damage number renderer.
+    // Killing blows reuse the crit visual style (larger, brighter number).
+    Combat::setDamageNumberCallback([](Vec3 pos, f32 amount, bool isCrit, bool isKill) {
         if (!s_engine) return;
-        s_engine->spawnDamageNumber(pos, amount);
+        s_engine->spawnDamageNumber(pos, amount, /*isHeal*/false, isCrit || isKill);
     });
 
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {

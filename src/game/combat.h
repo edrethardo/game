@@ -70,10 +70,12 @@ namespace Combat {
                        ProjectilePool& projectiles,
                        f32 gravity, f32 splashRadius, f32 splashDamage);
 
-    // Damage number callback — auto-fires on every applyDamage call
-    using DamageNumberCallback = void(*)(Vec3 position, f32 amount);
+    // Damage number callback — auto-fires on every applyDamage call.
+    // isCrit/isKill are threaded through so the renderer can style those hits distinctly.
+    using DamageNumberCallback = void(*)(Vec3 position, f32 amount, bool isCrit, bool isKill);
     void setDamageNumberCallback(DamageNumberCallback cb);
-    // Manually spawn a floating damage number (for skills that bypass applyDamage)
+    // Manually spawn a floating damage number (for skills that bypass applyDamage).
+    // Crits are not applicable at this call site, so isCrit/isKill are always false.
     void spawnDamageNumber(Vec3 position, f32 amount);
 
     // Death callback — called when an entity dies, before pool cleanup
