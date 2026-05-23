@@ -82,3 +82,14 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
                                 Player& player, Player* targetPlayer,
                                 const LevelGrid& grid, f32 dt,
                                 f32 dist, Vec3 playerEye);
+
+// applyRoleModifiers: handles archetype special abilities (SUMMONER/HEALER/
+// CHARGER/RANGED_CASTER/BOMBER/SHIELD_BEARER) and the far-enemy stagger early-
+// exit. Returns NextEntity if the stagger `continue` fires, BreakLoop if the
+// suicide-bomber `break` fires, Continue otherwise.
+// (enemy_ai_roles.cpp)
+AIStep applyRoleModifiers(Entity& e, u32 i,
+                           EntityPool& pool,
+                           Player& player, Player* targetPlayer,
+                           const LevelGrid& grid, f32 dt,
+                           f32 dist, Vec3 playerEye);
