@@ -621,6 +621,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Status effect icons above the energy bar
         {
+            // Adrenaline (Wanderer): longest remaining stack drives the blink, the
+            // stack count is shown as the displayValue. counterStacks is only ever
+            // >0 for Wanderer (the gain is gated on adrenalineUnlocked), so this row
+            // entry is inactive for every other class.
+            f32 adrTimer = 0.0f;
+            const DodgeState& adrDs = m_localPlayer.dodgeState;
+            for (u8 ai = 0; ai < adrDs.counterStacks; ai++)
+                if (adrDs.counterTimers[ai] > adrTimer) adrTimer = adrDs.counterTimers[ai];
+
             HUD::StatusEffect statuses[] = {
                 {"PSN", {0.2f, 0.8f, 0.2f}, m_localPlayer.poisonTimer, -1.0f},
                 {"BRN", {1.0f, 0.5f, 0.1f}, m_localPlayer.burnTimer, -1.0f},
@@ -631,10 +640,13 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 {"SH",  {0.9f, 0.5f, 0.15f}, m_localPlayer.soulHarvestTimer,
                     m_localPlayer.soulHarvestTimer > 0.0f
                         ? static_cast<f32>(m_localPlayer.soulHarvestStacks) : -1.0f},
+                // Adrenaline: lightning-bolt icon + stack count (electric yellow)
+                {"ADR", {1.0f, 0.85f, 0.2f}, adrTimer,
+                    adrDs.counterStacks > 0 ? static_cast<f32>(adrDs.counterStacks) : -1.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap (scaled)
             f32 hs2 = static_cast<f32>(sh) / 720.0f;
-            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses, 6);
+            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses, 7);
         }
 
         // Ammo display for hitscan weapons (right side of health bar area)
