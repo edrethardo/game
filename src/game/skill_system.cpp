@@ -150,34 +150,16 @@ void SkillSystem::update(SkillState& ss, f32 dt) {
     }
 }
 
-bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 skillDefCount,
-                               Vec3 eyePos, Vec3 forward, f32 /*yaw*/,
-                               ProjectilePool& projectiles, EntityPool& entities,
-                               const LevelGrid& grid, Player& player,
-                               f32 cooldownReduction)
+// ---------------------------------------------------------------------------
+// File-scope helpers extracted from tryActivate — called in the same order,
+// verbatim logic. Static so they don't leak into the header.
+// ---------------------------------------------------------------------------
+
+// Play the themed activation sound for a skill.
+// Only reads the SkillId — no other state needed.
+static void playActivationSound(SkillId id)
 {
-    if (ss.activeSkill == SkillId::NONE)  return false;
-    if (ss.cooldownTimer > 0.0f)          return false;
-
-    const SkillDef* def = findSkillDef(skillDefs, skillDefCount, ss.activeSkill);
-    if (!def) return false;
-
-    // Energy / resource check
-    if (ss.activeSkill == SkillId::BLOOD_NOVA) {
-        f32 cost = player.health * def->healthCostPct;
-        if (player.health <= cost + 1.0f) return false; // refuse to suicide
-        player.health         -= cost;
-        player.damageFlashTimer = 0.1f;
-    } else {
-        if (ss.energy < def->energyCost) return false;
-        ss.energy -= def->energyCost;
-    }
-
-    ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
-    if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
-
-    // Play skill activation sound — mapped by theme so each skill has audio feedback
-    switch (ss.activeSkill) {
+    switch (id) {
     case SkillId::FIREBALL:
     case SkillId::CONSECRATION:
     case SkillId::HOLY_BOMBARDMENT:
@@ -247,54 +229,94 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         AudioSystem::play(SfxId::SKILL_BUFF); break;
     default: break;
     }
+}
+
+// Spawn the cast-point particle burst for a skill.
+// Uses s_particlePool and s_screenShake (file-scope); eyePos/forward define
+// the muzzle position for directional effects.
+static void spawnActivationParticles(SkillId id, Vec3 eyePos, Vec3 forward)
+{
+    if (!s_particlePool) return;
+
+    Vec3 castPos = eyePos + forward * 0.5f;
+    switch (id) {
+    case SkillId::FIREBALL:     // trails handled by projectile system
+    case SkillId::SHOCK_BOLT:   // trails handled by projectile system
+    case SkillId::FROZEN_ORB:   // trails handled by projectile system
+        break;
+    case SkillId::CONSECRATION:
+    case SkillId::HOLY_BOMBARDMENT:
+        ParticleSystem::spawnMagicBurst(*s_particlePool, castPos, 255, 210, 50, 12);
+        break;
+    case SkillId::HOLY_NOVA:
+    case SkillId::DIVINE_JUDGMENT:
+        break; // particles spawned inside the fire functions
+    case SkillId::CHAIN_LIGHTNING:
+    case SkillId::TESLA_COIL:
+        ParticleSystem::spawnSparks(*s_particlePool, castPos, forward, 6);
+        break;
+    case SkillId::BLOOD_NOVA:
+        break;
+    case SkillId::PHASE_DASH:
+    case SkillId::SHADOW_STRIKE:
+    case SkillId::SHADOW_STEP:
+        ParticleSystem::spawnSmoke(*s_particlePool, eyePos, 8);
+        break;
+    case SkillId::FAN_OF_KNIVES:
+    case SkillId::SHADOW_DANCE:
+        break; // VFX handled inside fire functions
+    case SkillId::EARTHQUAKE:
+        ParticleSystem::spawnExplosion(*s_particlePool, eyePos + forward * 2.0f, 2.0f);
+        if (s_screenShake) s_screenShake->trigger(0.1f, 0.5f);
+        break;
+    case SkillId::EXPLOSIVE_ROUND:
+    case SkillId::AIMED_SHOT:
+    case SkillId::HEADSHOT:
+    case SkillId::OVERCHARGED_MAGAZINE:
+        break; // VFX handled inside fire functions
+    case SkillId::METEOR_STRIKE:
+        break; // no cast-time VFX — explosion + smoke spawn on impact in updateMeteors
+    case SkillId::THUNDERCLAP:
+        ParticleSystem::spawnSparks(*s_particlePool, eyePos, {0.0f, 1.0f, 0.0f}, 10);
+        if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
+        break;
+    default: break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 skillDefCount,
+                               Vec3 eyePos, Vec3 forward, f32 /*yaw*/,
+                               ProjectilePool& projectiles, EntityPool& entities,
+                               const LevelGrid& grid, Player& player,
+                               f32 cooldownReduction)
+{
+    if (ss.activeSkill == SkillId::NONE)  return false;
+    if (ss.cooldownTimer > 0.0f)          return false;
+
+    const SkillDef* def = findSkillDef(skillDefs, skillDefCount, ss.activeSkill);
+    if (!def) return false;
+
+    // Energy / resource check
+    if (ss.activeSkill == SkillId::BLOOD_NOVA) {
+        f32 cost = player.health * def->healthCostPct;
+        if (player.health <= cost + 1.0f) return false; // refuse to suicide
+        player.health         -= cost;
+        player.damageFlashTimer = 0.1f;
+    } else {
+        if (ss.energy < def->energyCost) return false;
+        ss.energy -= def->energyCost;
+    }
+
+    ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
+    if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
+
+    // Play skill activation sound — mapped by theme so each skill has audio feedback
+    playActivationSound(ss.activeSkill);
 
     // Particle burst on activation — spawned at muzzle/cast point for immediate feedback
-    if (s_particlePool) {
-        Vec3 castPos = eyePos + forward * 0.5f;
-        switch (ss.activeSkill) {
-        case SkillId::FIREBALL:     // trails handled by projectile system
-        case SkillId::SHOCK_BOLT:   // trails handled by projectile system
-        case SkillId::FROZEN_ORB:   // trails handled by projectile system
-            break;
-        case SkillId::CONSECRATION:
-        case SkillId::HOLY_BOMBARDMENT:
-            ParticleSystem::spawnMagicBurst(*s_particlePool, castPos, 255, 210, 50, 12);
-            break;
-        case SkillId::HOLY_NOVA:
-        case SkillId::DIVINE_JUDGMENT:
-            break; // particles spawned inside the fire functions
-        case SkillId::CHAIN_LIGHTNING:
-        case SkillId::TESLA_COIL:
-            ParticleSystem::spawnSparks(*s_particlePool, castPos, forward, 6);
-            break;
-        case SkillId::BLOOD_NOVA:
-            break;
-        case SkillId::PHASE_DASH:
-        case SkillId::SHADOW_STRIKE:
-        case SkillId::SHADOW_STEP:
-            ParticleSystem::spawnSmoke(*s_particlePool, eyePos, 8);
-            break;
-        case SkillId::FAN_OF_KNIVES:
-        case SkillId::SHADOW_DANCE:
-            break; // VFX handled inside fire functions
-        case SkillId::EARTHQUAKE:
-            ParticleSystem::spawnExplosion(*s_particlePool, eyePos + forward * 2.0f, 2.0f);
-            if (s_screenShake) s_screenShake->trigger(0.1f, 0.5f);
-            break;
-        case SkillId::EXPLOSIVE_ROUND:
-        case SkillId::AIMED_SHOT:
-        case SkillId::HEADSHOT:
-        case SkillId::OVERCHARGED_MAGAZINE:
-            break; // VFX handled inside fire functions
-        case SkillId::METEOR_STRIKE:
-            break; // no cast-time VFX — explosion + smoke spawn on impact in updateMeteors
-        case SkillId::THUNDERCLAP:
-            ParticleSystem::spawnSparks(*s_particlePool, eyePos, {0.0f, 1.0f, 0.0f}, 10);
-            if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
-            break;
-        default: break;
-        }
-    }
+    spawnActivationParticles(ss.activeSkill, eyePos, forward);
 
     switch (ss.activeSkill) {
     // ---- Legacy legendary skills ----
