@@ -90,6 +90,7 @@ struct Player {
     f32  deathsDanceTimer = 0.0f;  // ultimate duration countdown
     bool adrenalineUnlocked = false; // Wanderer: available from floor 1 (set each tick)
     bool adrenalineUpgraded = false; // true once floor >= 30 (move speed bonus active)
+    u8   adrenalineMaxStacks = 3;    // 3 early, 5 after clearing floor 5 (set each tick)
 
     // Soft target lock
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)

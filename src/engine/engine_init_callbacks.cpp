@@ -312,14 +312,15 @@ void Engine::initCallbacks() {
         // 2. Adrenaline surge stacks (only if skill 3 is unlocked)
         if (player.adrenalineUnlocked) {
             DodgeState& ds = player.dodgeState;
-            if (ds.counterStacks < 5) {
+            if (ds.counterStacks < player.adrenalineMaxStacks) {
                 ds.counterTimers[ds.counterStacks] = 4.0f;
                 ds.counterStacks++;
             } else {
-                // Refresh the oldest (shortest remaining) stack timer rather than losing a stack
+                // At cap — refresh the oldest (shortest remaining) stack rather than
+                // losing one. Scan only the active stacks (cap may be 3, not the array's 5).
                 f32 minT  = ds.counterTimers[0];
                 u8  minIdx = 0;
-                for (u8 i = 1; i < 5; i++) {
+                for (u8 i = 1; i < ds.counterStacks; i++) {
                     if (ds.counterTimers[i] < minT) { minT = ds.counterTimers[i]; minIdx = i; }
                 }
                 ds.counterTimers[minIdx] = 4.0f;
