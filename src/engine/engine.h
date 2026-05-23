@@ -403,6 +403,9 @@ private:
     void saveGame(u8 slot);
     bool loadGame(u8 slot);
 
+    void initAssets();      // load meshes/materials/JSON content + resolve visuals (called by init)
+    void initCallbacks();   // wire Combat/SkillSystem/ProjectileSystem/Inventory event callbacks (called by init)
+
     // Save slot management
     static constexpr u32 MAX_SAVE_SLOTS = 20;
     u8 m_activeSaveSlot = 0;  // 0 = no active slot, 1-20 = slot number
