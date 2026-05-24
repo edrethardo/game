@@ -171,6 +171,7 @@ private:
     f32        m_potionCooldown = 0.0f;
     Shader  m_basicShader;
     Shader  m_unlitShader;
+    Shader  m_vignetteShader;  // fullscreen radial red damage vignette (BioShock-style)
     Shader  m_particleShader;  // batched per-vertex-color shader for billboard particles
     Mesh    m_cubeMesh;
     Mesh    m_quadMesh;   // flat quad for billboard sprites
@@ -258,6 +259,7 @@ private:
     bool m_dodgeRolledOnce   = false;       // dismiss dodge tutorial once player dodges
     f32  m_controlsTooltipTimer = 0.0f;     // LMB/RMB controls shown on floor 1 entry
     f32  m_tutorialPulseTimer   = 0.0f;     // shared pulse timer for tutorial tooltips
+    f32  m_spawnCalmTimer       = 0.0f;     // >0 = floor-start calm window: no enemy auto-aggro, NPCs hold
 
     // Chat log — displays NPC speech and game events on the left side of the screen
     static constexpr u32 MAX_CHAT_LINES = 8;
@@ -390,6 +392,7 @@ private:
     void handleEquipmentSkillActivation(f32 dt, Vec3 eyePos); // boots F / helmet G casts
     void tickArmorRingPassives(f32 dt);          // ring timers, Second Wind, Divine Judgment, per-entity armor/ring pass
     void tickVisualFeedback(f32 dt);             // damage flash + hurt vignette + low-HP rumble
+    void snapCameraToPlayer();                   // snap camera onto player (no interp smear) after teleport/respawn
     void tickMiscTimers(f32 dt);                 // smoke/overdrive/shadowDance/curse/hitMarker/tutorial + camera + view bob + hit shake
 
     // Player-entity push collision (shared between singleplayer and server paths)
@@ -418,8 +421,10 @@ private:
     bool renderTransitionScreens(u32 sw, u32 sh);
     void selectPointLights();                          // gathers candidates, calls Renderer::setPointLights
     void renderAuraDiscs(const EntityPool& entPool);  // herald/buffed-enemy ground-disc pass
-    void renderPostOverlays(u32 sw, u32 sh);          // fade-from-black + hurt vignette fullscreen quads
-    // Draws a fullscreen quad with the given RGBA using the unlit shader + ortho projection
+    void renderPostOverlays(u32 sw, u32 sh);          // fade-from-black + radial red damage vignette
+    // Draws a viewport-filling quad with the given RGBA + ortho projection using the
+    // supplied shader. drawFullscreenQuad is the flat-fill convenience (unlit shader).
+    void drawScreenQuad(u32 sw, u32 sh, Vec4 rgba, const Shader& shader);
     void drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba);
 
     // Menu/lobby

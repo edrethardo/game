@@ -173,6 +173,9 @@ void Engine::init() {
                                        ASSET_PATH("assets/shaders/basic.frag"));
     m_unlitShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
                                        ASSET_PATH("assets/shaders/unlit.frag"));
+    // Reuses unlit.vert (it forwards UVs); only the fragment stage differs.
+    m_vignetteShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
+                                          ASSET_PATH("assets/shaders/vignette.frag"));
     m_particleShader = ShaderSystem::load(ASSET_PATH("assets/shaders/particle.vert"),
                                            ASSET_PATH("assets/shaders/particle.frag"));
 
@@ -236,6 +239,7 @@ void Engine::shutdown() {
     MaterialSystem::shutdown();
     ShaderSystem::destroy(m_basicShader);
     ShaderSystem::destroy(m_unlitShader);
+    ShaderSystem::destroy(m_vignetteShader);
     ShaderSystem::destroy(m_particleShader);
 
     FontSystem::shutdown();

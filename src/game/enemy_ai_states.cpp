@@ -20,8 +20,30 @@ void updateHostileStates(Entity& e, u32 i,
                           Vec3 dirToTarget, bool isBat,
                           f32 effectiveSpeed, bool shouldCheckLOS,
                           f32 dist,
-                          SquadPool* squads, const DungeonResult* dungeon)
+                          SquadPool* squads, const DungeonResult* dungeon,
+                          bool spawnCalm)
 {
+    // Stealth (Shadow Step / smoke bomb): an enemy actively engaging the PLAYER
+    // loses track and disengages. Enemies engaging a friendly NPC (targetIsNPC)
+    // are unaffected. ATTACK is intentionally NOT handled here — an enemy already
+    // attacking gets to land a swing due this frame (see end of ATTACK case),
+    // matching the "finish current swing only" rule. Passive IDLE/DORMANT/AMBUSH
+    // are gated in their own cases so they don't get yanked out of position.
+    if (player.smokeTimer > 0.0f && !targetIsNPC) {
+        switch (e.aiState) {
+            case AIState::CHASE:
+            case AIState::FLANK:
+            case AIState::STRAFE:
+            case AIState::RETREAT:
+            case AIState::SURROUND:
+            case AIState::FLYBY:
+                e.aiState   = AIState::IDLE;
+                e.velocity  = {0, 0, 0};
+                return;
+            default: break;
+        }
+    }
+
     switch (e.aiState) {
 
     case AIState::IDLE: {
@@ -63,7 +85,10 @@ void updateHostileStates(Entity& e, u32 i,
         // Smoke bomb: player is undetectable while smokeTimer > 0
         e.aiCheckIdx++;
         u16 checkFreq = 2;
-        if (e.aiCheckIdx >= checkFreq && player.smokeTimer <= 0.0f) {
+        // spawnCalm: during the floor-start calm window, idle enemies still roam
+        // (above) but never auto-aggro the player/NPCs. Damage-driven aggro in
+        // Combat::applyDamage is unaffected, so hitting an enemy still wakes it.
+        if (!spawnCalm && e.aiCheckIdx >= checkFreq && player.smokeTimer <= 0.0f) {
             e.aiCheckIdx = 0;
             // A static empty dungeon result is used as a fallback when no dungeon
             // is provided, so alertSquad always has valid adjacency data to read.
@@ -89,12 +114,6 @@ void updateHostileStates(Entity& e, u32 i,
     } break;
 
     case AIState::CHASE: {
-        // Smoke bomb: enemies lose the player and return to idle
-        if (player.smokeTimer > 0.0f) {
-            e.aiState = AIState::IDLE;
-            e.velocity = {0, 0, 0};
-            break;
-        }
         // Squad role: redirect flankers and hold-and-fire enemies to their tactical states.
         if (e.squadRole == SquadRole::ROLE_FLANK && !(e.flags & ENT_FLYING)) {
             if (e.pathLen == 0 || e.tacticalTimer <= 0.0f) {
@@ -450,6 +469,16 @@ void updateHostileStates(Entity& e, u32 i,
         if (targetDist > e.attackRange * 1.3f) {
             e.aiState = AIState::CHASE;
         }
+
+        // Stealth: the swing/shot due this frame (if any) has already resolved
+        // above; now the player has slipped away, so drop the target. One final
+        // hit can land, but the enemy cannot keep attacking or re-acquire while
+        // stealth holds.
+        if (player.smokeTimer > 0.0f && !targetIsNPC) {
+            e.aiState  = AIState::IDLE;
+            e.velocity = {0, 0, 0};
+            break;
+        }
     } break;
 
     case AIState::DORMANT: {
@@ -458,7 +487,7 @@ void updateHostileStates(Entity& e, u32 i,
         f32 triggerDist = (e.enemyRole & EnemyRole::AMBUSH) ? e.detectionRange * 0.5f : GameConst::MIMIC_TRIGGER_DIST;
         // Also wake if damaged (flashTimer from being hit) or if player is fighting nearby
         bool combatNearby = (e.flashTimer > 0.0f);
-        if (dist <= triggerDist || combatNearby) {
+        if ((dist <= triggerDist && player.smokeTimer <= 0.0f) || combatNearby) {
             e.aiState = AIState::CHASE;
             e.attackTimer = 0.0f; // attack immediately on wake
             if (e.enemyRole & EnemyRole::AMBUSH) {
@@ -600,7 +629,7 @@ void updateHostileStates(Entity& e, u32 i,
         if (lengthSq(toTarget2) > 0.01f) {
             e.yaw = atan2f(-toTarget2.x, -toTarget2.z);
         }
-        if (dist <= 4.0f && hasLOS(e, player, grid)) {
+        if (dist <= 4.0f && hasLOS(e, player, grid) && player.smokeTimer <= 0.0f) {
             e.aiState = AIState::ATTACK;
             e.attackTimer = 0.0f; // burst immediately on reveal
         }

@@ -143,7 +143,9 @@ void Engine::initCallbacks() {
         const SkillDef* sd = SkillSystem::findSkillDef(s_engine->m_skillDefs,
                                                          s_engine->m_skillDefCount,
                                                          s_engine->m_weaponProc);
-        if (!sd) { LOG_WARN("  Proc skill def not found!"); return; }
+        // No def = this legendary isn't a weapon proc (it's a passive/on-kill skill
+        // like Phase Strike, or the Throwaway throw mechanic). Nothing to fire here.
+        if (!sd) return;
 
         LOG_INFO("WEAPON PROC triggered! skill=%u at (%.1f, %.1f, %.1f)",
                  static_cast<u32>(s_engine->m_weaponProc), position.x, position.y, position.z);

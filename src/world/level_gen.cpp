@@ -154,20 +154,33 @@ static void splitBSP(BSPNode* nodes, u32& nodeCount, u32 nodeIdx, GenRNG& rng, u
     splitBSP(nodes, nodeCount, rightIdx, rng, depth + 1);
 }
 
-// Find a room center in a subtree (for corridor connections)
+// Record a bidirectional room adjacency, de-duplicated and capped at 4 slots.
+// Used for both true corridor links and bounding-box-touching rooms.
+static void addAdjacency(DungeonRoom& a, u16 aIdx, DungeonRoom& b, u16 bIdx) {
+    bool hasB = false;
+    for (u8 k = 0; k < a.adjacentCount; k++) if (a.adjacentRooms[k] == bIdx) hasB = true;
+    if (!hasB && a.adjacentCount < 4) a.adjacentRooms[a.adjacentCount++] = bIdx;
+    bool hasA = false;
+    for (u8 k = 0; k < b.adjacentCount; k++) if (b.adjacentRooms[k] == aIdx) hasA = true;
+    if (!hasA && b.adjacentCount < 4) b.adjacentRooms[b.adjacentCount++] = aIdx;
+}
+
+// Find a room center in a subtree (for corridor connections). Also reports the
+// representative room's index so callers can record the true corridor link.
 static bool findRoomCenter(const BSPNode* nodes, s32 nodeIdx, const DungeonRoom* rooms,
-                           u32& outCX, u32& outCZ) {
+                           u32& outCX, u32& outCZ, s32& outRoomIdx) {
     if (nodeIdx < 0) return false;
     const BSPNode& n = nodes[nodeIdx];
     if (n.roomIndex >= 0) {
         const DungeonRoom& r = rooms[n.roomIndex];
         outCX = r.x + r.w / 2;
         outCZ = r.z + r.d / 2;
+        outRoomIdx = n.roomIndex;
         return true;
     }
     // Try left subtree first, then right
-    if (findRoomCenter(nodes, n.left, rooms, outCX, outCZ)) return true;
-    return findRoomCenter(nodes, n.right, rooms, outCX, outCZ);
+    if (findRoomCenter(nodes, n.left, rooms, outCX, outCZ, outRoomIdx)) return true;
+    return findRoomCenter(nodes, n.right, rooms, outCX, outCZ, outRoomIdx);
 }
 
 DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 gridDepth) {
@@ -236,26 +249,30 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
         BSPNode& node = nodes[i];
         if (node.left < 0 || node.right < 0) continue;
 
-        u32 lx, lz, rx, rz;
-        if (findRoomCenter(nodes, node.left, result.rooms, lx, lz) &&
-            findRoomCenter(nodes, node.right, result.rooms, rx, rz)) {
+        u32 lx, lz, rx, rz; s32 lRoom = -1, rRoom = -1;
+        if (findRoomCenter(nodes, node.left, result.rooms, lx, lz, lRoom) &&
+            findRoomCenter(nodes, node.right, result.rooms, rx, rz, rRoom)) {
             carveLCorridor(grid, lx, lz, rx, rz, 0.0f, CEIL);
+            // Record the TRUE corridor link between these two rooms (done before the
+            // bbox pass below so real connections always claim the 4 adjacency slots).
+            if (lRoom >= 0 && rRoom >= 0)
+                addAdjacency(result.rooms[lRoom], static_cast<u16>(lRoom),
+                             result.rooms[rRoom], static_cast<u16>(rRoom));
         }
     }
 
-    // Compute room adjacency — two rooms are adjacent when their bounding boxes,
-    // expanded by 3 cells to account for corridor width, overlap in both axes.
-    // This drives the wave-propagation alert system in squad.cpp.
+    // Supplement corridor links (recorded above) with bounding-box-touching rooms:
+    // two rooms also count as adjacent when their boxes, expanded by 3 cells, overlap
+    // in both axes. addAdjacency de-dups, so corridor links are never doubled.
+    // This adjacency drives the spawn/room exclusion and the squad alert system.
     for (u32 i = 0; i < result.roomCount; i++) {
         DungeonRoom& ri = result.rooms[i];
         for (u32 j = i + 1; j < result.roomCount; j++) {
             DungeonRoom& rj = result.rooms[j];
             bool xOverlap = (ri.x < rj.x + rj.w + 3) && (rj.x < ri.x + ri.w + 3);
             bool zOverlap = (ri.z < rj.z + rj.d + 3) && (rj.z < ri.z + ri.d + 3);
-            if (xOverlap && zOverlap) {
-                if (ri.adjacentCount < 4) ri.adjacentRooms[ri.adjacentCount++] = static_cast<u16>(j);
-                if (rj.adjacentCount < 4) rj.adjacentRooms[rj.adjacentCount++] = static_cast<u16>(i);
-            }
+            if (xOverlap && zOverlap)
+                addAdjacency(ri, static_cast<u16>(i), rj, static_cast<u16>(j));
         }
     }
 

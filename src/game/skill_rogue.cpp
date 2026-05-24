@@ -4,6 +4,16 @@
 
 #include "game/skill_internal.h"
 
+// True if a straight line from `from` to `to` isn't blocked by a solid wall.
+// Shadow Step uses this so the rogue can't blink through walls to an enemy.
+static bool shadowStepHasLOS(Vec3 from, Vec3 to, const LevelGrid& grid) {
+    Vec3 d = to - from;
+    f32 dist = length(d);
+    if (dist < 0.001f) return true;
+    RayHit hit = Raycast::cast(grid, from, d * (1.0f / dist), dist);
+    return !hit.hit || hit.distance >= dist - 0.1f;
+}
+
 // Three fast knives in a tight -8 / 0 / +8 degree fan.
 void fireKnifeBurst(Vec3 origin, Vec3 forward, const SkillDef* def,
                     ProjectilePool& pool)
@@ -70,6 +80,9 @@ void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
     Vec3 startPos = player.position;
     player.position = behind;
+    // Face the enemy's back: look the same direction it faces, level pitch.
+    player.yaw   = target->yaw;
+    player.pitch = 0.0f;
 
     f32 damage = (def->damage > 0.0f ? def->damage * 3.0f : 90.0f) * s_classDmgMult;
     Combat::applyDamage(entities, hits[0], damage);
@@ -130,8 +143,19 @@ void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
 
     if (hitCount == 0) return;
 
-    Entity* target = handleGet(entities, hits[0]);
-    if (!target || (target->flags & ENT_DEAD) || (target->flags & ENT_FRIENDLY)) return;
+    // Shadow Step needs line of sight — no blinking through walls. Scan the
+    // distance-sorted hits and take the nearest enemy that's alive, hostile,
+    // and actually visible from the rogue's eye (origin).
+    Entity*      target       = nullptr;
+    EntityHandle targetHandle = {};
+    for (u32 i = 0; i < hitCount; i++) {
+        Entity* e = handleGet(entities, hits[i]);
+        if (!e || (e->flags & ENT_DEAD) || (e->flags & ENT_FRIENDLY)) continue;
+        if (!shadowStepHasLOS(origin, e->position, grid)) continue;
+        target = e; targetHandle = hits[i];
+        break;
+    }
+    if (!target) return; // nothing visible — Shadow Step does nothing
 
     // Teleport behind the target — validate destination is walkable
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
@@ -150,11 +174,14 @@ void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
     }
     Vec3 startPos = player.position;
     player.position = behind;
+    // Face the enemy's back: look the same direction it faces, level pitch.
+    player.yaw   = target->yaw;
+    player.pitch = 0.0f;
 
     // Backstab: 3× damage if attacking from stealth
     f32 baseDmg = (def->damage > 0.0f ? def->damage : 40.0f) * s_classDmgMult;
     f32 damage = (player.smokeTimer > 0.0f) ? baseDmg * 3.0f : baseDmg;
-    Combat::applyDamage(entities, hits[0], damage);
+    Combat::applyDamage(entities, targetHandle, damage);
     target->freezeTimer = 1.5f; // slow on hit
 
     // Gain stealth after the strike

@@ -104,3 +104,20 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
                           Player& player,
                           const LevelGrid& grid, f32 dt,
                           Vec3 playerEye);
+
+// updateHostileStates: the switch(e.aiState) FSM for hostile entities.
+// Handles IDLE/CHASE/FLYBY/ATTACK/DORMANT/FLANK/RETREAT/AMBUSH/STRAFE/
+// SURROUND/DEAD. All `break` statements inside are switch-internal (exit the
+// switch, not the entity loop), so this function returns void.
+// (enemy_ai_states.cpp)
+void updateHostileStates(Entity& e, u32 i,
+                          EntityPool& pool, ProjectilePool& projectiles,
+                          Player& player, Player* targetPlayer,
+                          const LevelGrid& grid, f32 dt,
+                          Vec3 targetPos, f32 targetDist,
+                          Vec3 targetVel, bool targetIsNPC,
+                          Vec3 dirToTarget, bool isBat,
+                          f32 effectiveSpeed, bool shouldCheckLOS,
+                          f32 dist,
+                          SquadPool* squads, const DungeonResult* dungeon,
+                          bool spawnCalm);  // true = suppress IDLE->CHASE auto-detection

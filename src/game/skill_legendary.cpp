@@ -22,8 +22,18 @@ void fireFrozenOrb(Vec3 origin, Vec3 direction, const SkillDef* def,
     }
 }
 
+// True if a straight line from `from` to `to` is not blocked by a solid wall.
+// Mirrors hasLOSToPoint in the AI code; used so lightning can't arc through walls.
+static bool chainHasLOS(Vec3 from, Vec3 to, const LevelGrid& grid) {
+    Vec3 d = to - from;
+    f32 dist = length(d);
+    if (dist < 0.001f) return true;
+    RayHit hit = Raycast::cast(grid, from, d * (1.0f / dist), dist);
+    return !hit.hit || hit.distance >= dist - 0.1f;
+}
+
 void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
-                        const LevelGrid& /*grid*/, EntityPool& entities)
+                        const LevelGrid& grid, EntityPool& entities)
 {
     Vec3 currentPos    = origin;
     Vec3 currentDir    = direction;
@@ -67,6 +77,7 @@ void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
             if (e->flags & ENT_FRIENDLY) continue;
             if (e->enemyType == EnemyType::PROP) continue;
             if (e == lastHit) continue; // don't bounce to same target twice in a row
+            if (!chainHasLOS(currentPos, e->position, grid)) continue; // no zapping/chaining through walls
             hit       = e;
             hitHandle = hits[k];
             break;
@@ -96,7 +107,8 @@ void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 
                 Vec3 toE = e.position - currentPos;
                 f32  d   = length(toE);
-                if (d < def->bounceRange && d < bestDist) {
+                if (d < def->bounceRange && d < bestDist &&
+                    chainHasLOS(currentPos, e.position, grid)) { // only aim at reachable enemies
                     bestDist   = d;
                     currentDir = toE * (1.0f / d);
                     found      = true;

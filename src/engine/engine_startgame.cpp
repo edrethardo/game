@@ -344,6 +344,10 @@ void Engine::startGame(GameStart mode) {
     m_transition.floorKillCount = 0;
     m_transition.floorTime = 0.0f;
 
+    // Every floor opens with a brief calm window so the player isn't dropped into
+    // an already-raging fight (enemies don't auto-aggro, friendly NPCs wait).
+    m_spawnCalmTimer = GameConst::SPAWN_CALM_SECONDS;
+
     // Reset tutorials on floor 1 only (first floor of a new game)
     if (m_level.currentFloor <= 1) {
         m_firstPickupTooltipShown = false;
@@ -578,7 +582,11 @@ void Engine::startGame(GameStart mode) {
     m_localPlayer.position = spawnPos;
     m_localPlayer.yaw = 0.0f;
     m_localPlayer.pitch = 0.0f;
+    m_localPlayer.eyeHeight = 1.7f; // reset view-bob offset so the camera snap is level
     m_localPlayers[0] = m_localPlayer; // sync to array so swapInPlayer doesn't overwrite
+    // Snap the camera onto the new spawn (prev == current) BEFORE saving it, so the
+    // first IN_GAME frame doesn't interpolate from the old floor's camera position.
+    snapCameraToPlayer();
     m_cameras[0] = m_camera;
 
     m_serverTick = 0;

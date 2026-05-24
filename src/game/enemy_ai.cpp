@@ -170,7 +170,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       Player& player, ProjectilePool& projectiles, f32 dt,
                       SquadPool* squads,
                       Player** extraPlayers, u32 extraPlayerCount,
-                      const DungeonResult* dungeon)
+                      const DungeonResult* dungeon,
+                      bool spawnCalm)
 {
     // ---------------------------------------------------------------------------
     // Herald aura pass — runs before per-entity AI so movement/cooldown mods
@@ -303,7 +304,13 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // friendly entities skip the hostile AI path (original `continue`).
         // ---------------------------------------------------------------------------
         if (isFriendly) {
-            updateFriendlyNPC(e, i, pool, projectiles, player, grid, dt, playerEye);
+            if (spawnCalm) {
+                // Spawn-calm window: companions wait with the player instead of
+                // marching toward the exit and starting fights before the player moves.
+                e.velocity = {0, 0, 0};
+            } else {
+                updateFriendlyNPC(e, i, pool, projectiles, player, grid, dt, playerEye);
+            }
             continue; // friendly NPC path ends here; hostile AI below is skipped
         }
 
@@ -454,7 +461,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         updateHostileStates(e, i, pool, projectiles, player, targetPlayer, grid, dt,
                             targetPos, targetDist, targetVel, targetIsNPC,
                             dirToTarget, isBat, effectiveSpeed, shouldCheckLOS,
-                            dist, squads, dungeon);
+                            dist, squads, dungeon, spawnCalm);
     }
 
     // --- Entity-entity separation: push overlapping entities apart ---

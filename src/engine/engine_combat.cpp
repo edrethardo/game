@@ -138,6 +138,10 @@ void Engine::handleWeaponFire(f32 dt) {
     if (!Input::isActionDown(GameAction::FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;
 
+    // A shot is committed — attacking ends the floor-start calm window immediately
+    // so the companions stop waiting and the world springs to life with the player.
+    m_spawnCalmTimer = 0.0f;
+
     // Track subtype for projectile flags (molotov/wand detection)
     const ItemInstance* qbItem = &eqWpn;
     ws.cooldownTimer = wpn.cooldown;

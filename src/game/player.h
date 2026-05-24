@@ -40,7 +40,7 @@ struct Player {
     f32  maxHealth      = 100.0f;
     f32  damageFlashTimer = 0.0f;
     f32  hitShakeTimer    = 0.0f;  // screen shake on taking damage
-    f32  hurtVignette     = 0.0f;  // 0..1 red screen overlay intensity, decays each frame
+    f32  hurtVignette     = 0.0f;  // 0..1 per-hit red edge-vignette intensity, decays each frame
     f32  slowTimer        = 0.0f;  // movement speed debuff countdown
     f32  poisonTimer      = 0.0f;
     f32  poisonDps        = 0.0f;
@@ -53,6 +53,7 @@ struct Player {
     f32  smokeTimer       = 0.0f;  // stealth — enemies can't detect player while > 0
     f32  shadowDanceTimer = 0.0f;  // Shadow Dance: 2× damage + 20% speed, kills extend by 0.3s
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
+    bool lifesaverArmed   = true;  // near-death i-frame available; consumed on use, re-armed only at >=40% HP
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
     u8   shrineBuff       = 0;     // 0=none, 1=power(+30%dmg), 2=speed(+25%), 3=vitality(+40%hp)
     f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount

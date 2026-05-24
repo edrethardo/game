@@ -299,6 +299,9 @@ void Engine::initAssets() {
     });
     SkillSystem::setDashCallback([](Vec3 start, Vec3 end) {
         if (!s_engine) return;
+        // Blinks land instantly — zero camera-interp delta so the view doesn't
+        // smear/whip across the room (esp. now that rogue blinks also rotate yaw).
+        s_engine->snapCameraToPlayer();
         for (u32 i = 0; i < MAX_DASH_FX; i++) {
             if (!s_engine->m_fx.dashFX[i].active) {
                 s_engine->m_fx.dashFX[i] = {start, end, 0.5f, true};

@@ -182,9 +182,9 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
 
 // ---------------------------------------------------------------------------
 // handleEquipmentSkillActivation — binds boot/helmet legendary skills each
-// tick and activates them on F/G key press. Equipment skills are
-// cooldown-only (no energy cost deducted from the player energy pool).
-// eyePos is the same value threaded from gameUpdate as to handleClassSkillActivation.
+// tick and activates them on F/G key press. Equipment skills are gated like
+// class skills: they cost mana from the player's shared energy pool (and use the
+// skill's own cooldown). eyePos is threaded from gameUpdate as for class skills.
 // ---------------------------------------------------------------------------
 void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     // --- Equipment legendary skill binding (boots/helmet/ring) ---
@@ -207,31 +207,38 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     // Equipment legendary skills are cooldown-only (no energy cost deducted from player)
     if (Input::isActionPressed(GameAction::BOOT_SKILL) && !m_inventoryOpen &&
         m_bootSkillStates[0].activeSkill != SkillId::NONE) {
-        m_bootSkillStates[0].energy = 999.0f;
-        m_bootSkillStates[0].maxEnergy = 999.0f;
+        // Item skills draw from the player's shared energy pool (cost mana like class
+        // skills): copy the pool in, let tryActivate spend energyCost, copy back on success.
+        m_bootSkillStates[0].energy    = m_skillStates[m_localPlayerIndex].energy;
+        m_bootSkillStates[0].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
         // Scale by boots item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
         SkillSystem::setClassDamageMult(1.0f);
-        SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
-                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                  m_projectiles, m_entities, m_level.grid, m_localPlayer,
-                                  m_inventories[m_localPlayerIndex].bonusCooldownReduction);
+        if (SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
+                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                      m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                                      m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
+            m_skillStates[m_localPlayerIndex].energy = m_bootSkillStates[0].energy; // deduct spent mana
+        }
     }
 
     // --- Helmet skill activation (G key) ---
     if (Input::isActionPressed(GameAction::HELMET_SKILL) && !m_inventoryOpen &&
         m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
-        m_helmetSkillStates[0].energy = 999.0f;
-        m_helmetSkillStates[0].maxEnergy = 999.0f;
+        // Item skills draw from the player's shared energy pool (cost mana like class skills).
+        m_helmetSkillStates[0].energy    = m_skillStates[m_localPlayerIndex].energy;
+        m_helmetSkillStates[0].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
         // Scale by helmet item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
         SkillSystem::setClassDamageMult(1.0f);
-        SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
-                                  eyePos, m_localPlayer.forward, m_localPlayer.yaw,
-                                  m_projectiles, m_entities, m_level.grid, m_localPlayer,
-                                  m_inventories[m_localPlayerIndex].bonusCooldownReduction);
+        if (SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
+                                      eyePos, m_localPlayer.forward, m_localPlayer.yaw,
+                                      m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                                      m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
+            m_skillStates[m_localPlayerIndex].energy = m_helmetSkillStates[0].energy; // deduct spent mana
+        }
     }
 }
 

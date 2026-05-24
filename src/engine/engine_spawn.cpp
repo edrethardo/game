@@ -209,7 +209,10 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                        findMeshByName("gargoyle"), findMeshByName("necromancer"),
                        findMeshByName("shaman"), findMeshByName("herald")};
 
-    // Skip spawn room + its adjacent room. Reduce enemies in 2-hop rooms.
+    // Skip the spawn room + its corridor-connected neighbours ("the room after"),
+    // so the player never spawns next to monsters. adjacentRooms is now true corridor
+    // connectivity (see LevelGen::generate), so this reliably covers the next room.
+    // Rooms 2 hops out get a reduced count.
     const DungeonRoom& spawnRm = dungeon.rooms[dungeon.spawnRoomIdx];
     for (u32 r = 0; r < dungeon.roomCount; r++) {
         if (r == dungeon.spawnRoomIdx) continue;
@@ -633,6 +636,16 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
 {
     u8 chestMeshId = m_meshIdChest;
 
+    // Spawn-proximity test (mirrors the boss placement): the spawn room and its
+    // corridor-connected neighbours must stay monster-free, so mimics are barred there.
+    const DungeonRoom& spawnRm = dungeon.rooms[dungeon.spawnRoomIdx];
+    auto isNearSpawn = [&](u32 idx) -> bool {
+        if (idx == dungeon.spawnRoomIdx) return true;
+        for (u8 a = 0; a < spawnRm.adjacentCount; a++)
+            if (spawnRm.adjacentRooms[a] == idx) return true;
+        return false;
+    };
+
     for (u32 r = 1; r < dungeon.roomCount; r++) {
         if ((std::rand() % 2) != 0) continue; // 50% of rooms get a chest
         const DungeonRoom& room = dungeon.rooms[r];
@@ -656,6 +669,7 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
         }
 
         bool isMimic = (std::rand() % 5) == 0;
+        if (isNearSpawn(r)) isMimic = false; // no monsters in the spawn room / the room after
 
         if (isMimic) {
             EntityHandle h = EntitySystem::spawn(m_entities,

@@ -401,34 +401,39 @@ void Engine::renderAuraDiscs(const EntityPool& entPool) {
 // quad mesh scaled to (sw × sh) pixels with the given RGBA color.
 // Caller is responsible for enabling/disabling blend and depth-test as needed.
 // ---------------------------------------------------------------------------
-void Engine::drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba) {
-    glUseProgram(m_unlitShader.program);
+void Engine::drawScreenQuad(u32 sw, u32 sh, Vec4 rgba, const Shader& shader) {
+    glUseProgram(shader.program);
     Mat4 ortho = Mat4::identity();
     ortho.m[0]  =  2.0f / static_cast<f32>(sw);
     ortho.m[5]  =  2.0f / static_cast<f32>(sh);
     ortho.m[10] = -1.0f;
     ortho.m[12] = -1.0f;
     ortho.m[13] = -1.0f;
-    if (m_unlitShader.loc_mvp >= 0)
-        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, ortho.ptr());
-    if (m_unlitShader.loc_color >= 0)
-        glUniform4f(m_unlitShader.loc_color, rgba.x, rgba.y, rgba.z, rgba.w);
+    if (shader.loc_color >= 0)
+        glUniform4f(shader.loc_color, rgba.x, rgba.y, rgba.z, rgba.w);
 
-    // Scale a centered unit quad to fill the full viewport
+    // Scale a centered unit quad to fill the full viewport; UVs span 0..1 across it.
     Mat4 quadModel = Mat4::translate({static_cast<f32>(sw) * 0.5f,
                                       static_cast<f32>(sh) * 0.5f, 0.0f})
                    * Mat4::scale({static_cast<f32>(sw), static_cast<f32>(sh), 1.0f});
-    if (m_unlitShader.loc_mvp >= 0)
-        glUniformMatrix4fv(m_unlitShader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
+    if (shader.loc_mvp >= 0)
+        glUniformMatrix4fv(shader.loc_mvp, 1, GL_FALSE, (ortho * quadModel).ptr());
 
     glBindVertexArray(m_quadMesh.vao);
     glDrawElements(GL_TRIANGLES, m_quadMesh.indexCount, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
 }
 
+// Flat-fill convenience wrapper — unlit shader (samples bound texture × u_color).
+void Engine::drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba) {
+    drawScreenQuad(sw, sh, rgba, m_unlitShader);
+}
+
 // ---------------------------------------------------------------------------
-// renderPostOverlays — fade-from-black + red hurt vignette, drawn after the
-// HUD and split-screen loops have been closed. Both use fullscreen quads.
+// renderPostOverlays — fade-from-black (fullscreen quad) + red damage feedback
+// (edge-gradient vignette: per-hit fade + steady low-HP border glow, never a
+// full-screen red sheet, never flashing). Drawn after the HUD and split-screen
+// loops have been closed.
 // ---------------------------------------------------------------------------
 void Engine::renderPostOverlays(u32 sw, u32 sh) {
     // Fade-from-black overlay — hides stale frame fragments after level load/respawn.
@@ -448,19 +453,28 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
         m_fadeFromBlack -= 1.0f / 60.0f;
     }
 
-    // Red hurt vignette — same fullscreen-quad path as the fade overlay, tinted red.
-    // Driven by m_localPlayer.hurtVignette (0..1), which is set on each hit and
-    // pulsed when the player is below 25% HP.
-    if (m_localPlayer.hurtVignette > 0.0f) {
-        // Cap rendered alpha below 0.55 so the screen never goes fully red.
-        f32 alpha = m_localPlayer.hurtVignette * 0.5f;
-        if (alpha > 0.55f) alpha = 0.55f;
-
+    // Red damage feedback — BioShock-style radial vignette (vignette.frag): red
+    // blooms in from the corners/edges with a smooth falloff, center always clear.
+    // Never a flat full-screen red sheet, never flashing. Combines the transient
+    // per-hit fade (m_localPlayer.hurtVignette, set on each hit and decayed in
+    // tickVisualFeedback) with a STEADY low-HP glow computed directly from current
+    // HP. Because the low-HP term is a function of HP alone — no sine, no timer —
+    // it never oscillates, so this is safe for photosensitivity (WCAG 2.3.1).
+    // The combined intensity is passed to the shader as the quad's alpha.
+    f32 hpFrac = (m_localPlayer.maxHealth > 0.0f)
+               ? (m_localPlayer.health / m_localPlayer.maxHealth) : 1.0f;
+    f32 lowHp = 0.0f;
+    if (hpFrac > 0.0f && hpFrac < 0.25f)
+        lowHp = (0.25f - hpFrac) / 0.25f * 0.40f;   // 0 at 25% HP -> 0.40 near death, constant per frame
+    f32 vig = fmaxf(m_localPlayer.hurtVignette, lowHp);
+    if (vig > 0.60f) vig = 0.60f;
+    if (vig > 0.0f) {
         glDisable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        drawFullscreenQuad(sw, sh, {0.6f, 0.0f, 0.0f, alpha});
+        // Deep red, intensity in alpha; the shader does the radial corner-weighted falloff.
+        drawScreenQuad(sw, sh, {0.55f, 0.0f, 0.0f, vig}, m_vignetteShader);
 
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);

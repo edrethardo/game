@@ -83,6 +83,7 @@ void Engine::update(f32 dt) {
                 m_inventoryOpen = false;
                 // Sync to per-player array so swapInPlayer doesn't overwrite
                 m_localPlayers[m_localPlayerIndex] = m_localPlayer;
+                snapCameraToPlayer(); // no camera-interp smear on revive at entrance
                 // In networked mode, also update the NetPlayer so server state matches
                 if (m_netRole == NetRole::SERVER) {
                     // Host: directly update authoritative NetPlayer
@@ -156,12 +157,14 @@ void Engine::update(f32 dt) {
             if (m_menu.subSelection < 1) m_menu.subSelection++;
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
-            m_menu.confirmQuit = false; // ESC/B = resume
+            m_menu.confirmQuit = false;          // ESC/B = resume
+            Input::setRelativeMouseMode(true);   // recapture the cursor for gameplay
         }
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
             if (m_menu.subSelection == 0) {
                 // Continue Playing
                 m_menu.confirmQuit = false;
+                Input::setRelativeMouseMode(true); // recapture the cursor for gameplay
             } else {
                 // Save and Quit
                 m_menu.confirmQuit = false;
@@ -202,6 +205,9 @@ void Engine::update(f32 dt) {
         } else if (m_gameState == GameState::IN_GAME) {
             m_menu.confirmQuit = true;
             m_menu.subSelection = 0;
+            // Free the cursor while paused: visible and able to leave the window so
+            // the player can click other apps (discreet "play at work" pause).
+            Input::setRelativeMouseMode(false);
             return;
         } else if (m_gameState != GameState::GAME_OVER &&
                    m_gameState != GameState::VICTORY) {
@@ -256,6 +262,10 @@ void Engine::update(f32 dt) {
         if (m_netRole == NetRole::SERVER) serverNetPre(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPre(dt);
 
+        // Tick the spawn-calm window once per frame (here, not in gameUpdate, so
+        // couch co-op — which calls gameUpdate per player — doesn't double-decrement).
+        if (m_spawnCalmTimer > 0.0f) m_spawnCalmTimer -= dt;
+
         // Split-screen: update each local player in turn
         for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
             m_activePlayerIndex = sp;
@@ -275,6 +285,8 @@ void Engine::update(f32 dt) {
                     m_localPlayer.velocity = {0, 0, 0};
                     m_localPlayer.invulnTimer = 2.5f;
                     m_localPlayer.health = m_localPlayer.maxHealth;
+                    m_localPlayer.hurtVignette = 0.0f; // no red lingering on co-op respawn
+                    snapCameraToPlayer();              // no camera-interp smear on co-op respawn
                     m_playerDead[sp] = false;
 
                     // Network sync: update NetPlayer for server, send packet for client
@@ -399,6 +411,11 @@ void Engine::gameUpdate(f32 dt) {
 
     // Check for player death
     if (m_localPlayer.health <= 0.0f) {
+        // Clear the damage vignette the instant the player dies so no red lingers
+        // into the game-over / respawn screen. (The low-HP vignette term is already
+        // 0 at 0 HP, and 0 again once respawn restores full HP, so this closes the
+        // whole death->respawn window.)
+        m_localPlayer.hurtVignette = 0.0f;
         // Reset Wanderer transient state on death so timers/marks don't persist to respawn
         if (m_playerClass == PlayerClass::WANDERER) {
             m_localPlayer.dodgeState      = {};
@@ -560,12 +577,13 @@ void Engine::gameUpdate(f32 dt) {
     // Enemy AI — run ONCE per frame, enemies pick the nearest player to target
     if (m_activePlayerIndex == 0) {
         PROFILE_SCOPE(1, "AI");
+        bool spawnCalm = m_spawnCalmTimer > 0.0f; // floor-start calm window
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
             // Co-op: pass P2 as extra target so enemies chase the nearest player
             Player* extras[] = { &m_localPlayers[1] };
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, extras, 1, &m_level.dungeon);
+            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, extras, 1, &m_level.dungeon, spawnCalm);
         } else {
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
+            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon, spawnCalm);
         }
         // Propagate squad alerts and reassign roles for the active tick
         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayer.position, dt);

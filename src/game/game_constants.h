@@ -35,6 +35,12 @@ namespace GameConst {
     // Floor scaling — 10% per floor so difficulty ramps steadily to floor 50
     static constexpr f32 FLOOR_STAT_MULT     = 0.10f;
 
+    // Seconds of "calm" at the start of each floor: hostile enemies don't
+    // auto-aggro and friendly NPCs hold position with the player, so the world
+    // isn't already fighting at spawn. Ends early the moment the player attacks.
+    // Damage-driven aggro (Combat::applyDamage) is never gated by this.
+    static constexpr f32 SPAWN_CALM_SECONDS  = 0.4f;
+
     // Combat
     static constexpr f32 LOOT_DROP_CHANCE    = 0.40f;
     static constexpr f32 GLOBE_DROP_CHANCE   = 0.55f;  // single globe type, drops often

@@ -18,7 +18,8 @@ namespace EnemyAI {
                 Player& player, ProjectilePool& projectiles, f32 dt,
                 SquadPool* squads = nullptr,
                 Player** extraPlayers = nullptr, u32 extraPlayerCount = 0,
-                const DungeonResult* dungeon = nullptr);
+                const DungeonResult* dungeon = nullptr,
+                bool spawnCalm = false);  // true = floor-start calm: no auto-aggro, friendly NPCs hold
 
     // Set drone spawn callback for Swarm Queen auto-spawning
     void setDroneSpawnCallback(void(*cb)(Vec3 pos, u8 type));

@@ -441,17 +441,15 @@ void Engine::tickVisualFeedback(f32 dt) {
         m_localPlayer.hurtVignette -= dt * 2.5f;
         if (m_localPlayer.hurtVignette < 0.0f) m_localPlayer.hurtVignette = 0.0f;
     }
-    // Low-HP danger feedback. Visual red pulse under 25% HP; a LIGHT periodic rumble
-    // "nag" under 40% HP — a short pulse roughly once a second, never a constant rumble.
+    // Low-HP danger feedback — rumble only here. The low-HP VISUAL is a STEADY
+    // (non-flashing) edge vignette computed at render time in renderPostOverlays;
+    // we must never oscillate the red overlay (photosensitivity / WCAG 2.3.1).
+    // The rumble is a LIGHT periodic "nag" under 40% HP — a short pulse roughly
+    // once a second, never a constant rumble.
     {
         f32 hpFrac = (m_localPlayer.maxHealth > 0.0f)
                    ? (m_localPlayer.health / m_localPlayer.maxHealth) : 1.0f;
         bool alive = hpFrac > 0.0f;
-        if (alive && hpFrac < 0.25f) {
-            // sinf oscillates at 5 Hz for an urgent heartbeat feel.
-            f32 pulse = 0.12f + 0.06f * sinf(static_cast<f32>(Clock::getElapsedSeconds()) * 5.0f);
-            if (pulse > m_localPlayer.hurtVignette) m_localPlayer.hurtVignette = pulse;
-        }
         if (alive && hpFrac < 0.40f) {
             m_lowHpRumbleTimer -= dt;
             if (m_lowHpRumbleTimer <= 0.0f) {
@@ -462,6 +460,20 @@ void Engine::tickVisualFeedback(f32 dt) {
             m_lowHpRumbleTimer = 0.0f;  // reset so it fires promptly on re-entering danger
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// snapCameraToPlayer — place the render camera on the local player with ZERO
+// interpolation delta (prev == current). Call after any teleport (floor change,
+// respawn) so render() doesn't lerp the camera from the old position to the new
+// for a frame or two — that smear showed the "old view" flickering as the
+// fade-from-black cleared, which broke immersion on transitions/respawns.
+// ---------------------------------------------------------------------------
+void Engine::snapCameraToPlayer() {
+    PlayerController::applyToCamera(m_localPlayer, m_camera);
+    m_camera.prevPosition = m_camera.position;
+    m_camera.prevYaw      = m_camera.yaw;
+    m_camera.prevPitch    = m_camera.pitch;
 }
 
 // ---------------------------------------------------------------------------

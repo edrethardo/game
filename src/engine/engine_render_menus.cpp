@@ -64,8 +64,8 @@ void Engine::renderMenu() {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
     FontSystem::setUIScale(uiScale);
 
-    // Title text
-    {
+    // Title text — hidden on the save-game-select screen (subState 1) to keep it uncluttered.
+    if (m_menu.subState != 1) {
         const char* title = "CURSE OF THE DUNGEON ENGINE";
         f32 titleW = FontSystem::textWidth(title, 3);
         f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;

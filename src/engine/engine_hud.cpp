@@ -487,7 +487,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // At 720p = 1.0, at 1080p = 1.5. HUD code passes raw font sizes (1, 2, 3).
     FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
 
-    if (m_inventoryOpen) {
+    if (m_menu.confirmQuit) {
+        // Paused: hide the entire game HUD (and inventory). Only the pause overlay
+        // below is drawn, so the screen looks unremarkable at a glance.
+    } else if (m_inventoryOpen) {
         renderInventoryHUD(sw, sh);
     } else {
         Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
