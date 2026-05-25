@@ -396,7 +396,7 @@ void Engine::renderAuraDiscs(const EntityPool& entPool) {
 }
 
 // ---------------------------------------------------------------------------
-// drawFullscreenQuad — shared helper for full-viewport alpha overlays.
+// drawScreenQuad — shared helper for full-viewport overlays with a given shader.
 // Sets up an ortho MVP that maps pixel coordinates to NDC, draws the unit
 // quad mesh scaled to (sw × sh) pixels with the given RGBA color.
 // Caller is responsible for enabling/disabling blend and depth-test as needed.
@@ -424,35 +424,12 @@ void Engine::drawScreenQuad(u32 sw, u32 sh, Vec4 rgba, const Shader& shader) {
     glBindVertexArray(0);
 }
 
-// Flat-fill convenience wrapper — unlit shader (samples bound texture × u_color).
-void Engine::drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba) {
-    drawScreenQuad(sw, sh, rgba, m_unlitShader);
-}
-
 // ---------------------------------------------------------------------------
-// renderPostOverlays — fade-from-black (fullscreen quad) + red damage feedback
-// (edge-gradient vignette: per-hit fade + steady low-HP border glow, never a
-// full-screen red sheet, never flashing). Drawn after the HUD and split-screen
-// loops have been closed.
+// renderPostOverlays — red damage feedback (edge-gradient vignette: per-hit
+// fade + steady low-HP border glow, never a full-screen red sheet, never
+// flashing). Drawn after the HUD and split-screen loops have been closed.
 // ---------------------------------------------------------------------------
 void Engine::renderPostOverlays(u32 sw, u32 sh) {
-    // Fade-from-black overlay — hides stale frame fragments after level load/respawn.
-    // First few frames are fully black, then fades out over 0.3s.
-    if (m_fadeFromBlack > 0.0f) {
-        f32 alpha = m_fadeFromBlack / 0.3f;
-        if (alpha > 1.0f) alpha = 1.0f;
-
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        drawFullscreenQuad(sw, sh, {0.0f, 0.0f, 0.0f, alpha});
-
-        glDisable(GL_BLEND);
-        glEnable(GL_DEPTH_TEST);
-        m_fadeFromBlack -= 1.0f / 60.0f;
-    }
-
     // Red damage feedback — BioShock-style radial vignette (vignette.frag): red
     // blooms in from the corners/edges with a smooth falloff, center always clear.
     // Never a flat full-screen red sheet, never flashing. Combines the transient

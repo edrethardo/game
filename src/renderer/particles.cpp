@@ -239,9 +239,9 @@ void ParticleSystem::spawnBlood(ParticlePool& pool, Vec3 pos, Vec3 dir, u8 count
         p.velocity = randomSpread(dir * 2.0f, 1.5f);
         p.life = randf(0.3f, 0.6f); p.maxLife = p.life;
         p.size = randf(0.03f, 0.06f); p.baseAlpha = 0.9f;
-        p.r = static_cast<u8>(randf(180, 220));
-        p.g = static_cast<u8>(randf(0, 30));
-        p.b = static_cast<u8>(randf(0, 20));
+        // Ash grey to match the spark/smoke particles — no red blood/gore.
+        u8 grey = static_cast<u8>(randf(150, 200));
+        p.r = grey; p.g = grey; p.b = grey;
         p.type  = PTYPE_GEOMETRIC;
         p.flags = PFLAG_GRAVITY;
         spawn(pool, p);

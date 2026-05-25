@@ -99,7 +99,6 @@ private:
         f32  snapshotTime = 0.0f;   // snapshot for transition display
     };
     TransitionState m_transition;
-    f32 m_fadeFromBlack = 0.0f;  // overlay alpha timer — hides stale frames after level load
     f32 m_lowHpRumbleTimer = 0.0f;  // countdown between low-HP "heartbeat" rumble nags
 
     // --- Split-screen state ---
@@ -421,11 +420,10 @@ private:
     bool renderTransitionScreens(u32 sw, u32 sh);
     void selectPointLights();                          // gathers candidates, calls Renderer::setPointLights
     void renderAuraDiscs(const EntityPool& entPool);  // herald/buffed-enemy ground-disc pass
-    void renderPostOverlays(u32 sw, u32 sh);          // fade-from-black + radial red damage vignette
+    void renderPostOverlays(u32 sw, u32 sh);          // radial red damage vignette
     // Draws a viewport-filling quad with the given RGBA + ortho projection using the
-    // supplied shader. drawFullscreenQuad is the flat-fill convenience (unlit shader).
+    // supplied shader.
     void drawScreenQuad(u32 sw, u32 sh, Vec4 rgba, const Shader& shader);
-    void drawFullscreenQuad(u32 sw, u32 sh, Vec4 rgba);
 
     // Menu/lobby
     void updateMenu(f32 dt);
