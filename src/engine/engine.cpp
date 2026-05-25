@@ -155,8 +155,21 @@ void Engine::onPlayerJoin(u8 playerSlot) {
 
 void Engine::onPlayerLeft(u8 playerSlot) {
     if (!s_engine) return;
-    if (playerSlot < MAX_PLAYERS) {
-        s_engine->m_players[playerSlot].active = false;
+    // Never reset slot 0 (the listen-server host) — it doesn't leave via this path,
+    // and wiping it would destroy the authoritative host player.
+    if (playerSlot > 0 && playerSlot < MAX_PLAYERS) {
+        // Fully reset the slot's NetPlayer (back to default-constructed) so leftover
+        // state — stale lock-on (lockActive/lockIndex), status timers, isDead, velocity —
+        // can't linger while the slot is inactive or bleed into a future rejoin.
+        // onPlayerJoin re-inits inventory/skills/quickbar separately, so a clean
+        // NetPlayer here is sufficient for a correct rejoin.
+        //
+        // Entity/projectile cleanup is intentionally NOT done: per-net-slot ownership
+        // isn't tracked (Entity.ownerLocalPlayer is a SPLIT-SCREEN local index, not a
+        // net slot), and lock-on only ever targets entities (NPCs), never other players —
+        // so no other player's lock can point at the leaver. Cleaning entities owned by
+        // a departed net player needs a real ownership field; deferred (see report).
+        s_engine->m_players[playerSlot] = NetPlayer{};
         LOG_INFO("Engine: player %u left", playerSlot);
     }
 }

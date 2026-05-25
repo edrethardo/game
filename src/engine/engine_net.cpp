@@ -165,7 +165,11 @@ void Engine::serverNetPre(f32 dt) {
                 PlayerClass remoteClass = m_players[i].playerClass;
                 if (slot < 4 && static_cast<u32>(remoteClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
                     const ClassDef& cls = kClassDefs[static_cast<u32>(remoteClass)];
-                    if (m_level.currentFloor >= cls.skillUnlockFloor[slot]) {
+                    // Mirror the host's effectiveFloor gate (engine_update_skills.cpp):
+                    // difficulty adds +50/floor so remote clients unlock skills at the
+                    // same depth their own HUD shows, instead of the raw floor.
+                    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                    if (effectiveFloor >= cls.skillUnlockFloor[slot]) {
                         SkillState tempSS;
                         tempSS.activeSkill = cls.skills[slot];
                         tempSS.cooldownTimer = 0.0f;

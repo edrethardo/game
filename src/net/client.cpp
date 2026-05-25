@@ -125,6 +125,15 @@ void Client::receiveSnapshot(const u8* data, u32 size) {
     static WorldSnapshot snap;
     snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
     if (Snapshot::deserialize(snap, data, size)) {
+        // Snapshots ride an UNRELIABLE_FRAGMENT channel, so a stale fragment can
+        // arrive AFTER a newer one. The buffer is ordered by arrival, not by tick,
+        // and the 2-snapshot wall-clock interpolation blends the two newest arrivals
+        // — so a late older snapshot pushed as "newest" makes remotes jump backward.
+        // Discard anything not strictly newer than the latest already accepted.
+        // serverTick is a monotonic u32 from the server sim (no wrap in any realistic
+        // session), so a plain compare is correct without seq wrap-handling.
+        const WorldSnapshot* newest = getSnapshot(0);
+        if (newest && snap.serverTick <= newest->serverTick) return;
         pushSnapshot(snap);
     }
 }

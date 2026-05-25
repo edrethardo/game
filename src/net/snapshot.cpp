@@ -84,8 +84,12 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.animFlags = anim;
         sp.weaponMeshId = np.weaponState.currentWeapon; // weapon index for mesh lookup
 
-        // Dodge state: server doesn't track full DodgeState on NetPlayer yet,
-        // so we zero-out; clients use local prediction for the rolling player.
+        // Dodge state: the Wanderer roll (rolling flag + counterStacks) lives only on
+        // the local-only Player.dodgeState (player.h) and is NOT mirrored to NetPlayer.
+        // The server only tracks dodge i-frames as invulnTimer (player.cpp:266), which is
+        // also set by respawn (engine_net.cpp:265) — so it can't be reused as a "rolling"
+        // bit without animating a roll on every remote respawn. Until NetPlayer carries
+        // real roll state, dodgeFlags stays 0 and remotes don't animate the roll.
         sp.dodgeFlags = 0;
     }
 
@@ -245,7 +249,9 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     // Header
     w8(static_cast<u8>(NetPacketType::SV_SNAPSHOT));
     w8(0);  // flags
-    w16(0); // seq (filled by caller)
+    // Header seq is unused for snapshots: the client orders/dedupes by the snapshot's
+    // own monotonic serverTick (see Client::receiveSnapshot), so we leave it zero.
+    w16(0); // seq (unused — ordering is by serverTick)
     // Snapshot header — ACTUAL counts that will be written below.
     w32(snap.serverTick);
     w8(playerCount);
