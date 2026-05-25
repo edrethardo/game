@@ -58,11 +58,13 @@ InputRingBuffer& Server::getInputBuffer(u8 playerSlot) {
 void Server::sendSnapshot(u32 serverTick,
                            const NetPlayer* players,
                            const EntityPool& entities,
-                           const ProjectilePool& projectiles)
+                           const ProjectilePool& projectiles,
+                           const WorldItemPool& worldItems)
 {
     static WorldSnapshot snap;
-    snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
-    Snapshot::buildFromState(snap, serverTick, players, entities, projectiles);
+    snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0;
+    snap.worldItemCount = 0; snap.projectileCount = 0;
+    Snapshot::buildFromState(snap, serverTick, players, entities, projectiles, worldItems);
 
     // Static scratch (server-only, single-threaded send path) — keeps the larger
     // snapshot buffer off the stack and out of the per-frame heap. serialize()

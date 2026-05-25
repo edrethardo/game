@@ -16,6 +16,7 @@ static ENetHost*        s_enetHost = nullptr;         // server or client host
 static ENetPeer*        s_serverPeer = nullptr;   // client's peer to server
 static NetPlayerSlot    s_slots[MAX_PLAYERS];
 static u8               s_localPlayerIndex = 0;
+static u8               s_localPlayerClass = 0; // chosen PlayerClass to send in CL_JOIN_REQUEST
 static u16              s_seq = 0;
 static bool             s_initialized = false;
 // Dungeon sync received from the server in SV_JOIN_ACCEPT (client side)
@@ -26,9 +27,11 @@ static u8               s_serverDifficulty = 0;
 // Callbacks
 static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
 static Net::OnInputFn      s_onInput      = nullptr;
+static Net::OnPickupFn     s_onPickup     = nullptr;
 static Net::OnEventFn      s_onEvent      = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
+static Net::OnLevelSeedFn  s_onLevelSeed  = nullptr;
 
 // Channels: 0 = reliable ordered, 1 = unreliable sequenced
 static constexpr u32 NUM_CHANNELS = 2;
@@ -67,9 +70,13 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
 
     switch (hdr->type) {
     case NetPacketType::CL_JOIN_REQUEST: {
-        if (size < sizeof(PacketHeader) + 4) break;
+        if (size < sizeof(PacketHeader) + 4) break; // header(4) + version(4) minimum
         u32 version;
         std::memcpy(&version, data + sizeof(PacketHeader), 4);
+        // Chosen class is an optional 9th byte; 0xFF if absent (the join callback
+        // validates and falls back to Warrior for out-of-range/missing values).
+        u8 chosenClass = 0xFF;
+        if (size >= sizeof(PacketHeader) + 5) chosenClass = data[sizeof(PacketHeader) + 4];
         if (version != PROTOCOL_VERSION) {
             // Send reject
             PacketHeader reject;
@@ -82,7 +89,8 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         }
         // Accept
         s_slots[slot].state = SlotState::ACTIVE;
-        LOG_INFO("Net: player %u connected", slot);
+        s_slots[slot].connectTimeMs = 0; // joined in time — clear the CONNECTING deadline (N12)
+        LOG_INFO("Net: player %u connected (class=%u)", slot, chosenClass);
 
         // Send accept packet
         u8 buf[12];
@@ -99,11 +107,17 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         std::memcpy(buf + 8, &seed, 4);
         Net::sendReliable(slot, buf, 12);
 
-        if (s_onPlayerJoin) s_onPlayerJoin(slot);
+        if (s_onPlayerJoin) s_onPlayerJoin(slot, chosenClass);
     } break;
 
     case NetPacketType::CL_INPUT: {
         if (s_onInput) s_onInput(slot, data, size);
+    } break;
+
+    case NetPacketType::CL_PICKUP_ITEM: {
+        // Client requests pickup of a world item by uid. The engine handler validates
+        // proximity/ownership server-side and removes the item (propagates via snapshot).
+        if (s_onPickup) s_onPickup(slot, data, size);
     } break;
 
     default:
@@ -147,6 +161,23 @@ static void clientHandlePacket(const u8* data, u32 size) {
             LOG_INFO("Net: player %u left", slot);
             if (s_onPlayerLeft) s_onPlayerLeft(slot);
         }
+    } break;
+
+    case NetPacketType::SV_LEVEL_SEED: {
+        // Mid-run floor descent. Layout mirrors SV_JOIN_ACCEPT's tail:
+        //   [4]=floor [5]=difficulty [6..7]=reserved [8..11]=run seed (u32 LE).
+        if (size < 12) break;
+        u8  floor      = data[4];
+        u8  difficulty = data[5];
+        u32 seed;
+        std::memcpy(&seed, data + 8, 4);
+        // Keep the client-side join getters coherent in case of a later late-join path.
+        s_serverFloor      = floor;
+        s_serverDifficulty = difficulty;
+        s_serverLevelSeed  = seed;
+        LOG_INFO("Net: server descended to floor %u (diff=%u seed=%u)",
+                 floor, difficulty, seed);
+        if (s_onLevelSeed) s_onLevelSeed(floor, difficulty, seed);
     } break;
 
     default:
@@ -206,6 +237,10 @@ bool Net::hostServer(u16 port) {
 
     LOG_INFO("Net: hosting on port %u", port);
     return true;
+}
+
+void Net::setLocalPlayerClass(u8 classId) {
+    s_localPlayerClass = classId;
 }
 
 bool Net::connectToServer(const char* address, u16 port) {
@@ -277,19 +312,29 @@ void Net::poll() {
                 s_slots[slot].state = SlotState::CONNECTING;
                 s_slots[slot].playerIndex = slot;
                 s_slots[slot].peer = event.peer;
+                s_slots[slot].connectTimeMs = enet_time_get(); // start the join deadline (N12)
                 event.peer->data = reinterpret_cast<void*>(static_cast<uintptr_t>(slot));
+                // Tighten ENet's own keep-alive timeout (default ~30 s) so a peer that
+                // silently dies after joining is also reaped quickly. The CONNECTING
+                // sweep above handles the never-sent-JOIN case independently.
+                enet_peer_timeout(event.peer, 0, 4000, 8000);
                 LOG_INFO("Net: peer connecting to slot %u", slot);
             } else {
                 // Client connected to server
                 LOG_INFO("Net: connected to server");
-                // Send join request
-                u8 buf[sizeof(PacketHeader) + 4];
+                // Send join request: header(4) + version(4) + chosenClass(1) = 9 bytes.
+                // The class byte (added after the seed/floor/difficulty SV_JOIN_ACCEPT
+                // work) tells the server which class to set up for this slot so a joiner
+                // isn't forced to Warrior. Older servers that only read 8 bytes simply
+                // ignore the trailing byte; the size guard below accepts >= 8.
+                u8 buf[sizeof(PacketHeader) + 5];
                 PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
                 hdr->type = NetPacketType::CL_JOIN_REQUEST;
                 hdr->flags = 0;
                 hdr->seq = s_seq++;
                 u32 version = PROTOCOL_VERSION;
                 std::memcpy(buf + sizeof(PacketHeader), &version, 4);
+                buf[sizeof(PacketHeader) + 4] = s_localPlayerClass; // chosen PlayerClass
                 sendToServer(buf, sizeof(buf), true);
             }
         } break;
@@ -342,6 +387,21 @@ void Net::poll() {
 
         case ENET_EVENT_TYPE_NONE:
             break;
+        }
+    }
+
+    // N12: evict peers stuck in CONNECTING (handshake done, no CL_JOIN_REQUEST) so an
+    // idle/abandoned connection can't hold a slot until ENet's own long timeout. A
+    // real joiner flips to ACTIVE (clearing connectTimeMs) well within the window.
+    if (s_role == NetRole::SERVER) {
+        u32 nowMs = enet_time_get();
+        for (u32 i = 1; i < MAX_PLAYERS; i++) { // slot 0 = host, never CONNECTING
+            if (s_slots[i].state != SlotState::CONNECTING) continue;
+            if (nowMs - s_slots[i].connectTimeMs < CONNECTING_TIMEOUT_MS) continue;
+            LOG_WARN("Net: dropping slot %u — no join request within %u ms", i, CONNECTING_TIMEOUT_MS);
+            if (s_slots[i].peer)
+                enet_peer_disconnect_now(static_cast<ENetPeer*>(s_slots[i].peer), 0);
+            s_slots[i] = NetPlayerSlot{}; // back to EMPTY so findFreeSlot reuses it
         }
     }
 }
@@ -398,6 +458,23 @@ void Net::broadcastSnapshot(const u8* data, u32 size) {
     }
 }
 
+void Net::broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed) {
+    if (s_role != NetRole::SERVER) return;
+    // 12-byte packet, same layout/size as SV_JOIN_ACCEPT so the wire stays uniform:
+    //   [0..3]=header [4]=floor [5]=difficulty [6..7]=reserved [8..11]=seed (u32 LE).
+    u8 buf[12];
+    PacketHeader* h = reinterpret_cast<PacketHeader*>(buf);
+    h->type  = NetPacketType::SV_LEVEL_SEED;
+    h->flags = 0;
+    h->seq   = s_seq++;
+    buf[4] = floor;
+    buf[5] = difficulty;
+    buf[6] = 0;
+    buf[7] = 0;
+    std::memcpy(buf + 8, &seed, 4);
+    broadcastReliable(buf, sizeof(buf)); // reliable: a missed descent would hard-desync
+}
+
 void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     if (s_role != NetRole::CLIENT || !s_serverPeer) return;
     u32 flags = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
@@ -438,6 +515,8 @@ NetStats Net::getStats(u8 playerSlot) {
 
 void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }
 void Net::setOnInput(OnInputFn fn)         { s_onInput = fn; }
+void Net::setOnPickup(OnPickupFn fn)       { s_onPickup = fn; }
 void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }
+void Net::setOnLevelSeed(OnLevelSeedFn fn)   { s_onLevelSeed = fn; }

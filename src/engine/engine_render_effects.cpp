@@ -316,8 +316,13 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         f32 pulse = 0.5f + 0.5f * sinf(t * 3.0f);
         f32 fastPulse = 0.5f + 0.5f * sinf(t * 8.0f);
 
+        // Red while a milestone boss seals the exit, green once open — mirrors the
+        // minimap door marker so the portal reads as locked from a distance too.
+        bool portalLocked = m_level.floorHasBoss && floorBossAlive();
+
         // Tall vertical beam (bright green, visible from far away)
-        Vec3 beamCol = {0.1f, 0.9f * pulse, 0.2f};
+        Vec3 beamCol = portalLocked ? Vec3{0.9f * pulse, 0.12f, 0.12f}
+                                    : Vec3{0.1f, 0.9f * pulse, 0.2f};
         for (f32 ox = -0.08f; ox <= 0.08f; ox += 0.04f) {
             DebugDraw::line(dp + Vec3{ox, 0, 0}, dp + Vec3{ox, 4.0f, 0}, beamCol);
             DebugDraw::line(dp + Vec3{0, 0, ox}, dp + Vec3{0, 4.0f, ox}, beamCol);
@@ -326,7 +331,8 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         // Spinning portal ring at waist height
         f32 ringY = dp.y + 1.0f;
         f32 ringR = 0.6f + fastPulse * 0.1f;
-        Vec3 ringCol = {0.3f * pulse, 1.0f * pulse, 0.4f * pulse};
+        Vec3 ringCol = portalLocked ? Vec3{1.0f * pulse, 0.2f * pulse, 0.2f * pulse}
+                                    : Vec3{0.3f * pulse, 1.0f * pulse, 0.4f * pulse};
         for (u32 s = 0; s < 12; s++) {
             f32 a0 = static_cast<f32>(s) * (6.28318f / 12.0f) + t * 2.0f;
             f32 a1 = a0 + (6.28318f / 12.0f);
@@ -336,22 +342,26 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
 
         // Second ring at head height
+        Vec3 ring2Col = portalLocked ? Vec3{0.8f * pulse, 0.15f, 0.15f}
+                                     : Vec3{0.2f, 0.8f * pulse, 0.3f};
         f32 ringY2 = dp.y + 2.0f;
         for (u32 s = 0; s < 12; s++) {
             f32 a0 = static_cast<f32>(s) * (6.28318f / 12.0f) - t * 1.5f;
             f32 a1 = a0 + (6.28318f / 12.0f);
             Vec3 p0 = dp + Vec3{cosf(a0) * ringR * 0.7f, ringY2 - dp.y, sinf(a0) * ringR * 0.7f};
             Vec3 p1 = dp + Vec3{cosf(a1) * ringR * 0.7f, ringY2 - dp.y, sinf(a1) * ringR * 0.7f};
-            DebugDraw::line(p0, p1, {0.2f, 0.8f * pulse, 0.3f});
+            DebugDraw::line(p0, p1, ring2Col);
         }
 
         // Ground circle (large, static)
+        Vec3 groundCol = portalLocked ? Vec3{0.5f, 0.1f, 0.1f}
+                                      : Vec3{0.15f, 0.5f, 0.2f};
         for (u32 s = 0; s < 16; s++) {
             f32 a0 = static_cast<f32>(s) * (6.28318f / 16.0f);
             f32 a1 = a0 + (6.28318f / 16.0f);
             Vec3 p0 = dp + Vec3{cosf(a0) * 0.8f, 0.02f, sinf(a0) * 0.8f};
             Vec3 p1 = dp + Vec3{cosf(a1) * 0.8f, 0.02f, sinf(a1) * 0.8f};
-            DebugDraw::line(p0, p1, {0.15f, 0.5f, 0.2f});
+            DebugDraw::line(p0, p1, groundCol);
         }
 
         // Stairway steps descending

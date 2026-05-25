@@ -486,10 +486,23 @@ private:
     void syncLocalPlayerToNetPlayer();
     void syncNetPlayerToLocalPlayer();
 
+    // Client: pick the aimed world item and request its pickup from the server
+    // (CL_PICKUP_ITEM, server-authoritative pickups — N5).
+    void sendPickupRequest();
+    // Server: validate and apply a client's CL_PICKUP_ITEM request (proximity + ownership),
+    // moving the item into that player's inventory and freeing the world slot.
+    void handlePickupRequest(u8 playerSlot, u32 uid);
+
     // Net callbacks (static, forwarded to engine instance)
     static void onSnapshot(const u8* data, u32 size);
     static void onInput(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_PICKUP_ITEM handler (forwarded from the net layer). Validates the
+    // request against authoritative world-item + player state and applies the pickup.
+    static void onPickup(u8 playerSlot, const u8* data, u32 size);
     static void onEvent(const u8* data, u32 size);
-    static void onPlayerJoin(u8 playerSlot);
+    static void onPlayerJoin(u8 playerSlot, u8 classId);
     static void onPlayerLeft(u8 playerSlot);
+    // Server-pushed mid-run floor descent (SV_LEVEL_SEED). Client-only: adopt the
+    // host's new floor/difficulty/seed and follow into the same FLOOR_TRANSITION path.
+    static void onLevelSeed(u8 floor, u8 difficulty, u32 seed);
 };

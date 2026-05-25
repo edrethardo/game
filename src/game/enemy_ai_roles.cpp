@@ -43,6 +43,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                     if (!(dead.flags & ENT_DEAD)) continue;
                     if (dead.flags & ENT_FRIENDLY) continue;
                     if (dead.deathTimer <= 0.0f) continue; // slot about to be freed
+                    if (dead.isBoss) continue; // never raise a boss — it has guaranteed loot + an exit lock
                     Vec3 diff = dead.position - e.position;
                     f32 d2 = diff.x * diff.x + diff.z * diff.z;
                     if (d2 < bestDist2) {
@@ -139,6 +140,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                     if (!(dead.flags & ENT_DEAD)) continue;
                     if (dead.flags & ENT_FRIENDLY) continue;
                     if (dead.deathTimer <= 0.0f) continue;
+                    if (dead.isBoss) continue; // never raise a boss (see SUMMONER note)
                     Vec3 diff = dead.position - e.position;
                     f32 d2 = diff.x * diff.x + diff.z * diff.z;
                     if (d2 < bestDist2) {

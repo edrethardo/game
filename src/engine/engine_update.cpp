@@ -753,6 +753,17 @@ void Engine::gameUpdate(f32 dt) {
 // Auto-pickup health/energy globes (walk-over) and E-key item pickup.
 // Globes are consumed immediately; regular items go to the backpack.
 void Engine::updatePlayerPickup() {
+    // CLIENT: pickups are SERVER-AUTHORITATIVE (N5). The client never consumes globes or
+    // removes world items locally — instead it requests a pickup of the aimed item via
+    // CL_PICKUP_ITEM, and the server validates proximity/ownership, applies the effect, and
+    // removes the item (which propagates back via the next snapshot). Globe auto-pickup for
+    // the client is handled server-side in serverNetPost (the client is a "remote" slot there).
+    if (m_netRole == NetRole::CLIENT) {
+        if (!m_inventoryOpen && Input::isActionPressed(GameAction::PICKUP))
+            sendPickupRequest();
+        return;
+    }
+
     // Auto-pickup health/energy globes (no key press needed, walk-over activation)
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = m_worldItems.items[i];
@@ -859,6 +870,93 @@ void Engine::updatePlayerPickup() {
     }
 }
 
+// CLIENT-only (N5): pick the world item the local player is aiming at (same aim logic as
+// the host's updatePlayerPickup) and send its uid to the server as CL_PICKUP_ITEM. The
+// server validates and removes it; the removal arrives back via the next snapshot, so we
+// do NOT touch m_worldItems locally here (it's mirrored from the server).
+void Engine::sendPickupRequest() {
+    Vec3 fwd = m_localPlayer.forward;
+    f32 bestScore = -1.0f;
+    s32 bestIdx = -1;
+    for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
+        const WorldItem& w = m_worldItems.items[wi];
+        if (!w.active) continue;
+        if (isGlobe(w.item)) continue;            // globes are auto-picked server-side
+        if (w.item.defId >= m_itemDefCount) continue;
+        Vec3 toItem = w.position - m_localPlayer.position;
+        f32 hDist = sqrtf(toItem.x * toItem.x + toItem.z * toItem.z);
+        if (hDist > 3.5f) continue;
+        f32 hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
+        f32 dot = (hDist > 0.1f && hLen > 0.01f)
+            ? (fwd.x * toItem.x + fwd.z * toItem.z) / (hDist * hLen)
+            : 1.0f;
+        if (dot < 0.3f) continue;
+        f32 score = dot - hDist * 0.1f;
+        if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;
+        if (score > bestScore) { bestScore = score; bestIdx = static_cast<s32>(wi); }
+    }
+    if (bestIdx < 0) return;
+
+    u32 uid = m_worldItems.items[bestIdx].item.uid;
+    // Packet: header(4) + uid(4). Reliable so a dropped pickup request still lands.
+    u8 buf[sizeof(PacketHeader) + 4];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_PICKUP_ITEM;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    std::memcpy(buf + sizeof(PacketHeader), &uid, 4);
+    Net::sendToServer(buf, sizeof(buf), true);
+}
+
+// SERVER-only (N5): apply a validated CL_PICKUP_ITEM request. Finds the world item by uid,
+// checks the requesting player's proximity + ownership against AUTHORITATIVE state, then
+// moves it into that player's inventory and frees the slot (propagates via the next
+// snapshot). Mirrors the host's local pickup rules so clients and host behave identically.
+void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
+    if (playerSlot >= MAX_PLAYERS) return;
+    NetPlayer& np = m_players[playerSlot];
+    if (!np.active || np.isDead) return;
+
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = m_worldItems.items[i];
+        if (!wi.active || wi.item.uid != uid) continue;
+        if (isGlobe(wi.item)) return; // globes are server-auto-picked, not requestable
+
+        // Proximity check against the authoritative net player position (XZ, matches aim path).
+        Vec3 delta = np.position - wi.position;
+        f32 hDist = sqrtf(delta.x * delta.x + delta.z * delta.z);
+        if (hDist > 3.5f) return; // too far — reject (snapshot keeps the item present)
+
+        // Ownership: free-for-all, owned by this player, or exclusive window expired.
+        bool canPickup = (wi.ownerSlot == 0xFF)
+                      || (wi.ownerSlot == playerSlot)
+                      || (wi.exclusiveTimer <= 0.0f);
+        if (!canPickup) return;
+
+        ItemInstance picked = wi.item;
+        if (!Inventory::addToBackpack(m_inventories[playerSlot], picked))
+            return; // backpack full — leave the item in the world
+
+        // Auto-equip an empty weapon slot (matches the host local-pickup convenience).
+        if (picked.defId < m_itemDefCount &&
+            m_itemDefs[picked.defId].slot == ItemSlot::WEAPON) {
+            u8 bpIdx = 0xFF;
+            for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+                if (m_inventories[playerSlot].backpack[bi].uid == picked.uid) { bpIdx = bi; break; }
+            }
+            if (bpIdx != 0xFF) {
+                const ItemInstance& eqWpn = m_inventories[playerSlot].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                if (isItemEmpty(eqWpn))
+                    Inventory::equip(m_inventories[playerSlot], bpIdx, m_itemDefs);
+            }
+        }
+
+        wi.active = false; // removal propagates to all clients via the next snapshot
+        if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        return;
+    }
+}
+
 // True while a milestone boss is still alive on this floor. Used to lock the floor
 // exit so the player must defeat the boss before descending. A boss mid-death-fade
 // (ENT_DEAD set, deathTimer running) counts as dead. Malachar counts as alive through
@@ -866,7 +964,7 @@ void Engine::updatePlayerPickup() {
 bool Engine::floorBossAlive() const {
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         const Entity& e = m_entities.entities[m_entities.activeList[a]];
-        if (e.enemyType == EnemyType::BOSS && !(e.flags & ENT_DEAD)) return true;
+        if (e.isBoss && !(e.flags & ENT_DEAD)) return true;
     }
     return false;
 }
@@ -879,6 +977,17 @@ bool Engine::updateFloorDoor() {
         Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isActionPressed(GameAction::PICKUP)) {
+                // Server-authoritative descent: a remote CLIENT must never advance its
+                // own floor / regenerate the level locally — that would desync from the
+                // still-on-floor-N host. The host (SERVER) and offline/split-screen
+                // (NONE) run the local descend below; the host then BROADCASTS it so
+                // clients follow via onLevelSeed -> FLOOR_TRANSITION. (Remote-initiated
+                // descent — a client requesting a descend at the door — is deferred;
+                // descent is currently host-initiated only. See CLAUDE.md.)
+                if (m_netRole == NetRole::CLIENT) {
+                    m_bossLockNotifyTimer = 0.0f; // no UI nag; just wait for the host
+                    return false;
+                }
                 // Exit is sealed only on boss floors, and only until the boss is dead.
                 if (m_level.floorHasBoss && floorBossAlive()) {
                     m_bossLockNotifyTimer = 2.0f;
@@ -960,6 +1069,16 @@ bool Engine::updateFloorDoor() {
                     m_transition.timer = 2.0f;
                     m_gameState = GameState::FLOOR_TRANSITION;
                     AudioSystem::play(SfxId::LEVEL_UP);
+                }
+                // Host tells clients to follow into the same floor. Broadcast the FINAL
+                // floor/difficulty (already resolved above, incl. the floor-50->1 loop
+                // where difficulty++ and currentFloor reset to 1) plus the run seed, so
+                // clients regenerate the IDENTICAL dungeon. Skipped on VICTORY (no next
+                // floor) since that branch leaves m_gameState != FLOOR_TRANSITION.
+                if (m_netRole == NetRole::SERVER &&
+                    m_gameState == GameState::FLOOR_TRANSITION) {
+                    Net::broadcastLevelSeed(static_cast<u8>(m_level.currentFloor),
+                                            m_difficulty, m_level.levelSeed);
                 }
                 return true;
             }

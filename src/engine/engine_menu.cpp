@@ -315,7 +315,21 @@ void Engine::updateMenu(f32 dt) {
             std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
 
             // Go to difficulty selection (subState 7) before co-op/network start
-            if (m_netRole == NetRole::SERVER) {
+            if (m_netRole == NetRole::CLIENT) {
+                // Joining a remote game: advertise the chosen class so the server sets
+                // up this slot correctly (no more forced Warrior), then connect. The
+                // local loadout/health were already applied above from the class.
+                Net::setLocalPlayerClass(static_cast<u8>(m_playerClass));
+                m_menu.subState = 0;
+                m_splitPlayerCount = 1;
+                if (Net::connectToServer(m_menu.connectAddress)) {
+                    m_gameState = GameState::CONNECTING;
+                    LOG_INFO("Connecting to %s as class %u...",
+                             m_menu.connectAddress, static_cast<u32>(m_playerClass));
+                } else {
+                    m_netRole = NetRole::NONE; // connection failed — drop back to menu role
+                }
+            } else if (m_netRole == NetRole::SERVER) {
                 // Network hosting — skip couch co-op, start server directly
                 if (!Net::hostServer()) {
                     m_netRole = NetRole::NONE;
@@ -598,12 +612,11 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;
-        case 2: // Join
+        case 2: // Join — pick a class first, then connect (class travels in CL_JOIN_REQUEST)
             m_netRole = NetRole::CLIENT;
-            if (Net::connectToServer(m_menu.connectAddress)) {
-                m_gameState = GameState::CONNECTING;
-                LOG_INFO("Connecting to %s...", m_menu.connectAddress);
-            }
+            m_localPlayerIndex = 0; // provisional; server assigns the real slot in SV_JOIN_ACCEPT
+            m_menu.subState = 2;    // class selection (the confirm handler branches on CLIENT)
+            m_menu.subSelection = 0;
             break;
         case 3: // Options — controls rebinding
             m_menu.subState = 3;

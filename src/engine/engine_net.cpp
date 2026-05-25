@@ -309,9 +309,9 @@ void Engine::serverNetPost(f32 dt) {
         }
     }
 
-    // Broadcast snapshot every TICKS_PER_SNAP ticks
+    // Broadcast snapshot every TICKS_PER_SNAP ticks (now includes world items — N5)
     if (m_serverTick % TICKS_PER_SNAP == 0) {
-        Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles);
+        Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
     }
 }
 
@@ -335,6 +335,19 @@ void Engine::clientNetPre(f32 dt) {
     WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
     Client::captureAndSendInput(m_serverTick, ws.currentWeapon);
 
+    // Build obstacle list for client prediction collision (friendly NPCs non-blocking).
+    // Built once here so the reconcile replay uses the IDENTICAL list — replayed collision
+    // must match the prediction step 1:1 or the corrected position will drift.
+    CollisionObstacle clObs[MAX_ENTITIES];
+    u32 clObsCount = 0;
+    for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
+        const Entity& e = m_entities.entities[ei];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        clObs[clObsCount++] = {e.position, e.halfExtents};
+    }
+
     // Apply local prediction (movement + collision)
     const NetInput* input = Client::getLatestInput();
     if (input) {
@@ -346,16 +359,6 @@ void Engine::clientNetPre(f32 dt) {
         tempP.velocity = np.velocity;
         tempP.onGround = np.onGround;
         tempP.noclip = np.noclip;
-        // Build obstacle list for client prediction collision (friendly NPCs non-blocking)
-        CollisionObstacle clObs[MAX_ENTITIES];
-        u32 clObsCount = 0;
-        for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
-            const Entity& e = m_entities.entities[ei];
-            if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-            if (e.flags & ENT_FRIENDLY) continue;
-            if (e.enemyType == EnemyType::PROP) continue;
-            clObs[clObsCount++] = {e.position, e.halfExtents};
-        }
         Collision::moveAndSlide(tempP, m_level.grid, dt, clObs, clObsCount);
         np.position = tempP.position;
         np.velocity = tempP.velocity;
@@ -364,8 +367,9 @@ void Engine::clientNetPre(f32 dt) {
         Client::storePrediction(*input, np);
     }
 
-    // Reconcile with server
-    Client::reconcile(m_players[m_localPlayerIndex], m_level.grid, dt);
+    // Reconcile with server: snap-and-replay against the prediction we stored for the
+    // server-acked tick, using the same obstacle list/dt so replay matches prediction.
+    Client::reconcile(m_players[m_localPlayerIndex], m_level.grid, dt, clObs, clObsCount);
 
     // Sync NetPlayer → m_localPlayer so gameUpdate sees predicted state
     // (gameUpdate's top-of-function sync handles this)
@@ -385,5 +389,11 @@ void Engine::clientNetPost(f32 dt) {
         m_renderInterp.playerAnimFlags);
     Client::interpolateEntities(m_renderInterp.entities);
     Client::interpolateProjectiles(m_renderInterp.projectiles);
+
+    // Mirror server-authoritative world items (loot drops — N5) into the local pool.
+    // The renderer and pickup-aim code read m_worldItems directly, so this is all the
+    // client needs to see/aim at loot. Runs AFTER gameUpdate so it overrides the local
+    // WorldItemSystem::update (lifetime decay is server-driven for clients).
+    Client::mirrorWorldItems(m_worldItems, m_itemDefs, m_itemDefCount);
 }
 

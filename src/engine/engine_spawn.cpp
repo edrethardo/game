@@ -568,6 +568,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 f32 arenaD = bossRoom.d * m_level.grid.cellSize;
                 boss->leashRadius = 0.5f * sqrtf(arenaW * arenaW + arenaD * arenaD) + 1.0f;
             }
+            boss->isBoss = true; // canonical milestone-boss marker (gates the floor exit)
             if (bd) {
                 // JSON-loaded boss path
                 boss->meshId = findMeshByName(bd->meshName);

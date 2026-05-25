@@ -94,6 +94,12 @@ void Engine::initCallbacks() {
     Combat::setDeathCallback([](EntityPool& pool, u16 entityIndex, Vec3 position) {
         if (!s_engine) return;
         s_engine->handleDeathPreamble(pool, entityIndex, position);
+        // Loot is SERVER-AUTHORITATIVE (N5): only the host (SERVER) and offline/split
+        // (NONE) roll and spawn drops. A remote CLIENT must NOT roll its own loot — it
+        // receives the authoritative world-item list from the server snapshot, which is
+        // mirrored into m_worldItems each frame. Clients still run the preamble above
+        // (squad/speech/passives are cosmetic-local) but skip every drop phase here.
+        if (s_engine->m_netRole == NetRole::CLIENT) return;
         if (s_engine->handleFirstKillDrop(pool, entityIndex, position)) return;
         if (s_engine->handleBossLootDrop(pool, entityIndex, position)) return;
         s_engine->handleNormalLootDrop(pool, entityIndex, position);

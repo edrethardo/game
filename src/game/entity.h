@@ -157,6 +157,9 @@ struct Entity {
     u8 weaponMeshId = 0;  // skeleton weapon mesh index (0 = none)
     u8 bossLimbConfig = 0; // 0=default, 1-4=boss-specific extra limbs
     u8 bossDefIdx = 0xFF;  // index into Engine::m_bossDefs (0xFF = not a boss)
+    bool isBoss = false;   // true ONLY for a milestone boss (set in spawnFloorBoss). Distinct from
+                           // enemyType==BOSS, which large rig-sharing regular enemies (cave_troll,
+                           // abyssal_titan, butcher) also use just to borrow the boss limb rig.
     u16 spawnerIdx = 0xFFFF; // entity pool index of boss that spawned this minion
     bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
     u8  bossPhase = 0;     // BossPhase:: false-death state machine (NONE=normal death)

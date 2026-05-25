@@ -42,6 +42,7 @@
 #include "net/client.h"
 #include "net/snapshot.h"
 #include "net/packet.h"
+#include "audio/audio.h" // AudioSystem::play / SfxId for client descent cue (onLevelSeed)
 #include "core/log.h"
 #include "core/math.h"
 #include "core/frame_allocator.h"
@@ -74,6 +75,17 @@ void Engine::onInput(u8 playerSlot, const u8* data, u32 size) {
     Server::receiveInput(playerSlot, data, size);
 }
 
+// Server-side CL_PICKUP_ITEM dispatch (N5). Decodes the requested uid and forwards to
+// the instance handler, which validates proximity/ownership against authoritative state.
+void Engine::onPickup(u8 playerSlot, const u8* data, u32 size) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return; // only the host services pickups
+    if (size < sizeof(PacketHeader) + 4) return;        // header(4) + uid(4)
+    u32 uid;
+    std::memcpy(&uid, data + sizeof(PacketHeader), 4);
+    s_engine->handlePickupRequest(playerSlot, uid);
+}
+
 void Engine::onEvent(const u8* data, u32 size) {
     if (!s_engine) return;
     if (size < sizeof(PacketHeader) + 1) return;
@@ -103,34 +115,81 @@ void Engine::onEvent(const u8* data, u32 size) {
     }
 }
 
-void Engine::onPlayerJoin(u8 playerSlot) {
+// Server-authoritative mid-run floor descent. The host has already advanced to the
+// new floor; this drives the CLIENT into the same FLOOR_TRANSITION -> startGame(DESCEND)
+// path the host ran locally, so it regenerates the IDENTICAL next dungeon from the
+// shared per-run seed (levelSeed + floor*7919 + difficulty*104729). Floor/HP/inventory
+// stay server-authoritative via snapshots; this only resyncs the LEVEL the client builds.
+void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
+    if (!s_engine) return;
+    // Only a remote client follows a pushed descent. The host advances itself in
+    // updateFloorDoor; a NONE role never receives net packets. Guarding here keeps the
+    // host's local descend feel exactly as-is even though it set the same callback path.
+    if (s_engine->m_netRole != NetRole::CLIENT) return;
+    // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe):
+    // if we're already on (or past) the announced floor, do nothing.
+    if (s_engine->m_gameState == GameState::FLOOR_TRANSITION) return;
+
+    // Adopt the host's authoritative level coordinates. seed is normally unchanged
+    // across floors, but trusting the server's value self-corrects a client that
+    // somehow missed SV_JOIN_ACCEPT. Difficulty rises on the floor-50->1 loop.
+    s_engine->m_level.levelSeed    = seed;
+    s_engine->m_level.currentFloor = floor;
+    s_engine->m_difficulty         = difficulty;
+    s_engine->m_level.savedFloor   = floor;
+    s_engine->m_level.savedSeed    = seed;
+
+    // Enter the shared transition: the FLOOR_TRANSITION handler ticks the timer down
+    // then calls startGame(GameStart::DESCEND), which rebuilds the level from the
+    // coordinates set above. Same timer as the host's non-difficulty-loop descent.
+    s_engine->m_transition.snapshotKills = s_engine->m_transition.floorKillCount;
+    s_engine->m_transition.snapshotTime  = s_engine->m_transition.floorTime;
+    s_engine->m_transition.timer = 2.0f;
+    s_engine->m_gameState = GameState::FLOOR_TRANSITION;
+    AudioSystem::play(SfxId::LEVEL_UP);
+    LOG_INFO("Client following host descent to floor %u (diff=%u)", floor, difficulty);
+}
+
+void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
     if (!s_engine) return;
     if (playerSlot < MAX_PLAYERS) {
         // Ignore a duplicate/retransmitted JOIN for an already-active slot, and never
         // re-init the host (slot 0, set up in startGame) — either would wipe live state.
         if (playerSlot == 0 || s_engine->m_players[playerSlot].active) return;
+        // Honor the class the joiner picked in their lobby (sent in CL_JOIN_REQUEST).
+        // Anything out of range (or a pre-class-byte request that sends 0xFF) falls
+        // back to Warrior so the server never indexes kClassDefs out of bounds.
+        PlayerClass joinClass = (classId < static_cast<u8>(PlayerClass::CLASS_COUNT))
+                                ? static_cast<PlayerClass>(classId)
+                                : PlayerClass::WARRIOR;
+        const ClassDef& cls = kClassDefs[static_cast<u32>(joinClass)];
         NetPlayer& np = s_engine->m_players[playerSlot];
         np.active = true;
         np.slotIndex = playerSlot;
-        np.health = 100.0f;
-        np.maxHealth = 100.0f;
+        // Health from the chosen class (not a hardcoded 100) so warriors/tanks aren't
+        // shortchanged and squishier classes aren't over-tanked on join.
+        np.health = cls.baseHealth;
+        np.maxHealth = cls.baseHealth;
         np.position = s_engine->m_players[0].spawnPosition; // spawn at host's spawn
         np.spawnPosition = np.position;
         np.weaponState.currentWeapon = 0;
         np.weaponState.cooldownTimer = 0.0f;
         np.isDead = false;
         np.invulnTimer = 2.5f; // spawn protection
-        np.playerClass = PlayerClass::WARRIOR; // default class for joining players
+        np.playerClass = joinClass; // class chosen by the joining player
 
         // Initialize inventory, skill states, and quickbar for the new player
         Inventory::init(s_engine->m_inventories[playerSlot]);
         s_engine->m_skillStates[playerSlot] = SkillState{};
+        // Seed the joiner's energy ceiling from its class so skills are usable on join.
+        s_engine->m_skillStates[playerSlot].maxEnergy = cls.baseEnergy;
+        s_engine->m_skillStates[playerSlot].energy    = cls.baseEnergy;
         s_engine->m_bootSkillStates[playerSlot] = SkillState{};
         s_engine->m_helmetSkillStates[playerSlot] = SkillState{};
         Quickbar::init(s_engine->m_quickbars[playerSlot], s_engine->m_inventories[playerSlot]);
 
-        // Give starting weapon based on class (same logic as host startup)
-        const ClassDef& cls = kClassDefs[static_cast<u32>(np.playerClass)];
+        // Give the class's deterministic starting weapon (same logic as host startup,
+        // now driven by the joiner's real class instead of a forced Warrior).
         for (u32 di = 0; di < s_engine->m_itemDefCount; di++) {
             if (std::strcmp(s_engine->m_itemDefs[di].name, cls.startingWeaponName) == 0) {
                 ItemInstance startWpn{};

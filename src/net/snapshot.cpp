@@ -20,11 +20,13 @@ static f32 nearestPlayerDistSq(Vec3 p, const NetPlayer* players) {
 void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
                                const NetPlayer* players,
                                const EntityPool& entities,
-                               const ProjectilePool& projectiles)
+                               const ProjectilePool& projectiles,
+                               const WorldItemPool& worldItems)
 {
     snap.serverTick = tick;
     snap.playerCount = 0;
     snap.entityCount = 0;
+    snap.worldItemCount = 0;
     snap.projectileCount = 0;
 
     // Players
@@ -158,6 +160,24 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.velZ = Quantize::packVel(p.velocity.z);
     }
 
+    // World items (dropped loot). Server-authoritative (N5): every active world item is
+    // mirrored by slotIndex so the client can copy it directly into its own pool. Globes
+    // are included too — clients render them and the server auto-picks them up. These have
+    // the LOWEST serialize priority (after projectiles), so a pathologically tiny budget
+    // drops loot first; in practice 32 items * 14 B = 448 B always fits the 8 KB budget.
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        const WorldItem& wi = worldItems.items[i];
+        if (!wi.active) continue;
+        SnapWorldItem& sw = snap.worldItems[snap.worldItemCount++];
+        sw.slotIndex = static_cast<u8>(i);
+        sw.rarity    = static_cast<u8>(wi.item.rarity);
+        sw.defId     = wi.item.defId;
+        sw.uid       = wi.item.uid;
+        sw.posX = Quantize::packPos(wi.position.x);
+        sw.posY = Quantize::packPos(wi.position.y);
+        sw.posZ = Quantize::packPos(wi.position.z);
+    }
+
     // Reorder entities/projectiles nearest-player-first. If serialize() later has
     // to cap a record list to fit the wire budget, it truncates the TAIL — which is
     // now the farthest-from-any-player records, the least visible to clients. Sorts
@@ -192,8 +212,12 @@ static constexpr u32 SNAP_PLAYER_WIRE     = 29;
 static constexpr u32 SNAP_ENTITY_WIRE     = 20;
 // Projectile: 2(idx) + 1(flags)+1(projFlags)+1(meshId)+1(radiusQ) + 6(pos) + 6(vel) = 18.
 static constexpr u32 SNAP_PROJECTILE_WIRE = 18;
-// Fixed prefix: 4 B packet header + 8 B snapshot header + MAX_PLAYERS u32 input ticks.
-static constexpr u32 SNAP_FIXED_BYTES     = 4 + 8 + MAX_PLAYERS * 4;
+// World item: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos) = 14.
+static constexpr u32 SNAP_WORLDITEM_WIRE  = 14;
+// Fixed prefix: 4 B packet header + snapshot header + MAX_PLAYERS u32 input ticks.
+// Snapshot header is now 9 B: serverTick(4) + playerCount(1) + entityCount(1) +
+// worldItemCount(1) + projectileCount(2). (Was 8 B before the world-item count field.)
+static constexpr u32 SNAP_FIXED_BYTES     = 4 + 9 + MAX_PLAYERS * 4;
 
 // Overflow-safe serializer.
 //
@@ -243,8 +267,18 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     budget -= entityBytes;
 
     u16 projectileCount = snap.projectileCount;
-    if (projectileCount * SNAP_PROJECTILE_WIRE > budget)
+    u32 projectileBytes = projectileCount * SNAP_PROJECTILE_WIRE;
+    if (projectileBytes > budget) {
         projectileCount = static_cast<u16>(budget / SNAP_PROJECTILE_WIRE);
+        projectileBytes = projectileCount * SNAP_PROJECTILE_WIRE;
+    }
+    budget -= projectileBytes;
+
+    // World items have the LOWEST priority — they absorb whatever budget remains after
+    // players/entities/projectiles. (In practice 32*14=448 B always fits the 8 KB budget.)
+    u8  worldItemCount = snap.worldItemCount;
+    if (worldItemCount * SNAP_WORLDITEM_WIRE > budget)
+        worldItemCount = static_cast<u8>(budget / SNAP_WORLDITEM_WIRE);
 
     // Header
     w8(static_cast<u8>(NetPacketType::SV_SNAPSHOT));
@@ -256,6 +290,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     w32(snap.serverTick);
     w8(playerCount);
     w8(entityCount);
+    w8(worldItemCount);
     w16(projectileCount);
 
     // Last input ticks per player
@@ -323,8 +358,21 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w16(sp.velZ);
     }
 
+    // World items (lowest priority — written last so they drop first under a tight budget).
+    for (u32 i = 0; i < worldItemCount; i++) {
+        const SnapWorldItem& sw = snap.worldItems[i];
+        w8(sw.slotIndex);
+        w8(sw.rarity);
+        w16(sw.defId);
+        w32(sw.uid);
+        w16(sw.posX);
+        w16(sw.posY);
+        w16(sw.posZ);
+    }
+
     // cursor == SNAP_FIXED_BYTES + playerBytes + entityBytes +
-    //           projectileCount*SNAP_PROJECTILE_WIRE, always <= maxSize by the caps above.
+    //           projectileCount*SNAP_PROJECTILE_WIRE + worldItemCount*SNAP_WORLDITEM_WIRE,
+    //           always <= maxSize by the caps above.
     return cursor;
 }
 
@@ -340,11 +388,13 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     snap.serverTick      = r.readU32();
     snap.playerCount     = r.readU8();
     snap.entityCount     = r.readU8();
+    snap.worldItemCount  = r.readU8();
     snap.projectileCount = r.readU16();
 
     // Validate counts to prevent out-of-bounds on malformed packets
     if (snap.playerCount > MAX_PLAYERS) snap.playerCount = MAX_PLAYERS;
     if (snap.entityCount > MAX_ENTITIES) snap.entityCount = MAX_ENTITIES;
+    if (snap.worldItemCount > MAX_WORLD_ITEMS) snap.worldItemCount = MAX_WORLD_ITEMS;
     if (snap.projectileCount > MAX_PROJECTILES)
         snap.projectileCount = MAX_PROJECTILES;
 
@@ -407,6 +457,17 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.velX      = r.readU16();
         sp.velY      = r.readU16();
         sp.velZ      = r.readU16();
+    }
+
+    for (u32 i = 0; i < snap.worldItemCount; i++) {
+        SnapWorldItem& sw = snap.worldItems[i];
+        sw.slotIndex = r.readU8();
+        sw.rarity    = r.readU8();
+        sw.defId     = r.readU16();
+        sw.uid       = r.readU32();
+        sw.posX      = r.readU16();
+        sw.posY      = r.readU16();
+        sw.posZ      = r.readU16();
     }
 
     return r.cursor <= r.size;

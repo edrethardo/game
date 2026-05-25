@@ -7,6 +7,7 @@
 #include "game/entity.h"
 #include "game/projectile.h"
 #include "game/weapon.h"
+#include "game/item.h"        // WorldItemPool (world-item replication in snapshots)
 #include "world/level_grid.h"
 
 namespace Server {
@@ -22,7 +23,8 @@ namespace Server {
     void sendSnapshot(u32 serverTick,
                       const NetPlayer* players,
                       const EntityPool& entities,
-                      const ProjectilePool& projectiles);
+                      const ProjectilePool& projectiles,
+                      const WorldItemPool& worldItems);
 
     u32 getLevelSeed();
     u8  getLevelFloor();

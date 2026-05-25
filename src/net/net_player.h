@@ -105,6 +105,20 @@ struct InputRingBuffer {
     u32      count = 0;
 
     void push(const NetInput& input) {
+        // Client input rides an UNSEQUENCED/unreliable channel (see Server::receiveInput /
+        // net.cpp), so a late or duplicate packet can arrive carrying an OLDER tick than one
+        // already buffered. getLatest() returns the most-recently-PUSHED entry, so accepting
+        // a stale tick here would make the server re-apply old movement / re-fire for that
+        // remote player. Keep the buffer monotonic: ignore any input whose tick isn't strictly
+        // newer than the newest already buffered. (Input-repeat on packet loss is preserved —
+        // getLatest() simply keeps returning the last good input.) The tick counter resets to 0
+        // alongside this buffer on every floor transition (Server::init in startGame), so an
+        // empty buffer always accepts the next tick regardless of prior values; u32 tick wrap is
+        // a non-concern at 60 Hz (matches the serverTick assumption in client.cpp).
+        if (count > 0) {
+            const NetInput& newest = inputs[(head + INPUT_BUFFER_SIZE - 1) % INPUT_BUFFER_SIZE];
+            if (input.tick <= newest.tick) return;
+        }
         inputs[head] = input;
         head = (head + 1) % INPUT_BUFFER_SIZE;
         if (count < INPUT_BUFFER_SIZE) count++;

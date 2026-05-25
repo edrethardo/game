@@ -622,6 +622,7 @@ void Engine::startGame(GameStart mode) {
     // Setup net callbacks
     if (m_netRole == NetRole::SERVER) {
         Net::setOnInput(Engine::onInput);
+        Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
         Net::setOnPlayerJoin(Engine::onPlayerJoin);
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         Server::init(m_players, m_level.levelSeed,
@@ -630,7 +631,21 @@ void Engine::startGame(GameStart mode) {
         Net::setOnSnapshot(Engine::onSnapshot);
         Net::setOnEvent(Engine::onEvent);
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
+        // Follow the host's mid-run floor descents (server-authoritative).
+        Net::setOnLevelSeed(Engine::onLevelSeed);
         Client::init(m_localPlayerIndex);
+        // CONTINUE doesn't grant a loadout, but a FRESH network joiner has no save to
+        // restore from — so locally mirror the deterministic starting loadout the server
+        // grants this slot in onPlayerJoin. Both ends thus agree on the joiner's gear
+        // for a new run. (Mid-run inventory replication still needs SV_INVENTORY_SYNC.)
+        Inventory::init(m_inventories[m_localPlayerIndex]);
+        m_skillStates[m_localPlayerIndex] = SkillState{};
+        Quickbar::init(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
+        m_playerClasses[m_localPlayerIndex] = m_playerClass; // ensure loadout uses chosen class
+        equipStartingLoadout(m_localPlayerIndex);
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy + m_inventories[m_localPlayerIndex].bonusEnergyFlat;
+        m_skillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].maxEnergy;
     }
 
     // Brief invulnerability on floor entry for all players

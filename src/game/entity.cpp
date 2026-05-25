@@ -44,6 +44,18 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.flashTimer   = 0.0f;
     e.deathTimer   = 0.0f;
     e.ownerLocalPlayer = 0; // default P1; friendly spawn sites override (pool slots aren't zeroed)
+    // Pool slots are reused without zeroing, so clear identity fields that callers
+    // may not override (spiderlings set enemyType but not enemyRole, etc.). Defaulting
+    // to GENERIC/NORMAL prevents a respawned slot from inheriting a stale summoner role.
+    e.enemyType = EnemyType::GENERIC;
+    e.enemyRole = EnemyRole::NORMAL;
+    // Reused slots must not inherit a dead boss's identity (it would lock the floor exit,
+    // grant knockback immunity, or trigger Malachar's false-death on a normal enemy).
+    e.isBoss       = false;
+    e.bossDefIdx   = 0xFF;
+    e.bossPhase    = BossPhase::NONE;
+    e.minionShield = false;
+    e.leashRadius  = 0.0f;
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;

@@ -7,8 +7,10 @@
 #include "net/snapshot.h"
 #include "game/entity.h"
 #include "game/projectile.h"
+#include "game/item.h"        // WorldItemPool / ItemDef for world-item mirroring
 #include "game/weapon.h"
 #include "world/level_grid.h"
+#include "world/collision.h"  // CollisionObstacle for the reconcile replay step
 
 static constexpr u32 SNAP_BUFFER_SIZE = 4;  // 4 snapshots × ~66KB = 264KB (was 32 × 66KB = 2.1MB)
 static constexpr f32 INTERP_DELAY_SEC = 0.1f;  // 100ms interpolation delay
@@ -39,10 +41,15 @@ namespace Client {
     // Get the latest received snapshot (may be null if none yet)
     const WorldSnapshot* getLatestSnapshot();
 
-    // Reconcile: when a new snapshot arrives, compare server position for
-    // local player against our prediction. If error > threshold, correct.
+    // Reconcile: compare the server's authoritative position for the local player
+    // (from the newest snapshot, at the server-acked input tick) against the prediction
+    // we stored for that same tick. If they diverge, snap to the server state and replay
+    // every later buffered input to recover the corrected current position (snap-and-replay).
+    // `obstacles`/`obstacleCount` must be the SAME entity-obstacle list used for prediction
+    // this tick so the replayed collision matches the prediction step 1:1.
     // Returns true if a correction was applied.
-    bool reconcile(NetPlayer& localPlayer, const LevelGrid& grid, f32 dt);
+    bool reconcile(NetPlayer& localPlayer, const LevelGrid& grid, f32 dt,
+                   const CollisionObstacle* obstacles, u32 obstacleCount);
 
     // Interpolate remote players between snapshots.
     // Fills outPositions/outYaws/outPitches for all MAX_PLAYERS slots.
@@ -56,6 +63,12 @@ namespace Client {
 
     // Interpolate projectiles from snapshots into a render-only pool.
     void interpolateProjectiles(ProjectilePool& renderProjectiles);
+
+    // Mirror the server-authoritative world-item list (loot drops) from the newest
+    // snapshot into the client's local pool. Items are static so a direct copy is fine
+    // (no interpolation). The renderer and pickup-aim code read m_worldItems directly,
+    // so populating it here makes loot appear/disappear in lockstep with the server.
+    void mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, u32 itemDefCount);
 
     // Store a prediction entry after local simulation
     void storePrediction(const NetInput& input, const NetPlayer& predicted);

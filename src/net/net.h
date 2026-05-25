@@ -10,6 +10,12 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 3
 
 static constexpr u32 PROTOCOL_VERSION  = 1;
 
+// A peer that finishes the ENet handshake but never sends CL_JOIN_REQUEST is dropped
+// after this many milliseconds so it can't hold a CONNECTING slot until ENet's own
+// (much longer) timeout. A normal joiner sends JOIN_REQUEST immediately on connect,
+// so this window only ever catches stalled/abandoned handshakes (N12).
+static constexpr u32 CONNECTING_TIMEOUT_MS = 5000;
+
 enum struct NetRole : u8 {
     NONE,       // offline / singleplayer
     SERVER,     // listen server (host plays + serves)
@@ -27,7 +33,7 @@ enum struct NetPacketType : u8 {
     SV_SNAPSHOT       = 0x12,
     SV_EVENT          = 0x13,
     SV_PLAYER_LEFT    = 0x14,
-    SV_LEVEL_SEED     = 0x15,
+    SV_LEVEL_SEED     = 0x15,  // mid-run floor descent: new floor + difficulty + run seed
 
     // Inventory packets
     CL_EQUIP_ITEM     = 0x03,  // client requests equip
@@ -68,6 +74,9 @@ struct NetPlayerSlot {
     void*     peer        = nullptr; // ENetPeer* (opaque)
     u32       lastInputTick = 0;
     f32       rttMs       = 0.0f;
+    // enet_time_get() ms when the peer entered CONNECTING. Used to evict a peer that
+    // completes the ENet handshake but never sends CL_JOIN_REQUEST (N12). 0 = not set.
+    u32       connectTimeMs = 0;
 };
 
 namespace Net {
@@ -76,6 +85,10 @@ namespace Net {
 
     // Host a listen server. Slot 0 is the local host player.
     bool hostServer(u16 port = DEFAULT_PORT);
+
+    // Set the chosen PlayerClass (cast to u8) to advertise in CL_JOIN_REQUEST.
+    // Call before connectToServer() so the join request carries the right class.
+    void setLocalPlayerClass(u8 classId);
 
     // Connect to a remote server.
     bool connectToServer(const char* address, u16 port = DEFAULT_PORT);
@@ -116,13 +129,29 @@ namespace Net {
     // Callback types — set before poll()
     using OnSnapshotFn   = void(*)(const u8* data, u32 size);
     using OnInputFn      = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_PICKUP_ITEM handler — slot = requesting client, payload carries the uid.
+    using OnPickupFn     = void(*)(u8 playerSlot, const u8* data, u32 size);
     using OnEventFn      = void(*)(const u8* data, u32 size);
-    using OnPlayerJoinFn = void(*)(u8 playerSlot);
+    // classId is the joining client's chosen PlayerClass (validated by the callback;
+    // 0xFF if the join request predates the class byte — treated as default Warrior).
+    using OnPlayerJoinFn = void(*)(u8 playerSlot, u8 classId);
     using OnPlayerLeftFn = void(*)(u8 playerSlot);
+    // Mid-run floor descent pushed by the server (SV_LEVEL_SEED). The client adopts
+    // (floor, difficulty, seed) and regenerates the identical next dungeon. Distinct
+    // from the join-time floor sync (SV_JOIN_ACCEPT), which is read via the getters.
+    using OnLevelSeedFn  = void(*)(u8 floor, u8 difficulty, u32 seed);
 
     void setOnSnapshot(OnSnapshotFn fn);
     void setOnInput(OnInputFn fn);
+    void setOnPickup(OnPickupFn fn);
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);
+    void setOnLevelSeed(OnLevelSeedFn fn);
+
+    // Server-only: broadcast a mid-run floor descent to all clients (SV_LEVEL_SEED).
+    // Carries the NEW floor + difficulty + per-run seed so clients regenerate the
+    // identical next dungeon. The run seed is unchanged across floors but is included
+    // for robustness (a client that missed SV_JOIN_ACCEPT still self-corrects).
+    void broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed);
 }

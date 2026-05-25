@@ -4,6 +4,7 @@
 #include "core/math.h"
 #include "game/entity.h"
 #include "game/projectile.h"
+#include "game/item.h"     // MAX_WORLD_ITEMS, WorldItemPool (world-item replication)
 #include "net/net.h"
 #include "net/net_player.h"
 
@@ -62,11 +63,23 @@ struct SnapProjectile {
     u16  velX, velY, velZ;  // 6
 };
 
+// Quantized snapshot of one dropped world item (14 bytes). Loot is server-
+// authoritative (N5): only the host/SP rolls drops; clients mirror this list into
+// their local m_worldItems for rendering and pickup requests.
+struct SnapWorldItem {
+    u8   slotIndex;     // 1: index into WorldItemPool (0..MAX_WORLD_ITEMS-1) — client mirrors directly
+    u8   rarity;        // 1: Rarity enum value
+    u16  defId;         // 2: item definition id (or GLOBE_* sentinel)
+    u32  uid;           // 4: unique instance id — pickup requests reference this (full u32; no overflow)
+    u16  posX, posY, posZ; // 6: position packed via Quantize::packPos
+};
+
 // Full world snapshot
 struct WorldSnapshot {
     u32  serverTick       = 0;
     u8   playerCount      = 0;
     u8   entityCount      = 0;
+    u8   worldItemCount   = 0;  // dropped loot count (<= MAX_WORLD_ITEMS)
     u16  projectileCount  = 0;  // supports up to 4096
 
     // Per-player last processed input tick (for client reconciliation)
@@ -74,6 +87,7 @@ struct WorldSnapshot {
 
     SnapPlayer     players[MAX_PLAYERS];
     SnapEntity     entities[MAX_ENTITIES];
+    SnapWorldItem  worldItems[MAX_WORLD_ITEMS];
     // Heap-allocated projectile array — supports full MAX_PROJECTILES without
     // bloating BSS (1024 × 16 bytes = 16KB per snapshot on PC; 512 × 16 = 8KB on Switch).
     SnapProjectile* projectiles = nullptr;
@@ -95,10 +109,12 @@ struct WorldSnapshot {
         serverTick = o.serverTick;
         playerCount = o.playerCount;
         entityCount = o.entityCount;
+        worldItemCount = o.worldItemCount;
         projectileCount = o.projectileCount;
         for (u32 i = 0; i < MAX_PLAYERS; i++) lastInputTick[i] = o.lastInputTick[i];
         for (u32 i = 0; i < MAX_PLAYERS; i++) players[i] = o.players[i];
         for (u32 i = 0; i < MAX_ENTITIES; i++) entities[i] = o.entities[i];
+        for (u32 i = 0; i < o.worldItemCount; i++) worldItems[i] = o.worldItems[i];
         if (!projectiles) projectiles = new SnapProjectile[MAX_PROJECTILES];
         for (u16 i = 0; i < o.projectileCount; i++) projectiles[i] = o.projectiles[i];
         return *this;
@@ -110,7 +126,8 @@ namespace Snapshot {
     void buildFromState(WorldSnapshot& snap, u32 tick,
                         const NetPlayer* players,
                         const EntityPool& entities,
-                        const ProjectilePool& projectiles);
+                        const ProjectilePool& projectiles,
+                        const WorldItemPool& worldItems);
 
     // Serialize snapshot to packet bytes. Returns byte count written.
     u32 serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize);

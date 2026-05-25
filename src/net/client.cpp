@@ -142,11 +142,22 @@ const WorldSnapshot* Client::getLatestSnapshot() {
     return getSnapshot(0);
 }
 
-bool Client::reconcile(NetPlayer& localPlayer, const LevelGrid& grid, f32 dt) {
-    const WorldSnapshot* snap = getSnapshot(0);
-    if (!snap) return false;
+// Find the prediction-history slot whose stored input tick equals `tick`.
+// Returns the ring index, or -1 if that tick is no longer buffered (too old / lost).
+static s32 findPredictionByTick(u32 tick) {
+    for (u32 i = 0; i < s_predCount; i++) {
+        u32 idx = (s_predHead + PREDICTION_HISTORY_SIZE - 1 - i) % PREDICTION_HISTORY_SIZE;
+        if (s_predictions[idx].input.tick == tick) return static_cast<s32>(idx);
+    }
+    return -1;
+}
 
-    // Find our player in the snapshot
+bool Client::reconcile(NetPlayer& localPlayer, const LevelGrid& grid, f32 dt,
+                       const CollisionObstacle* obstacles, u32 obstacleCount) {
+    const WorldSnapshot* snap = getSnapshot(0);
+    if (!snap) return false; // no snapshot yet — keep pure prediction
+
+    // Find our own player in the snapshot.
     const SnapPlayer* serverState = nullptr;
     for (u32 i = 0; i < snap->playerCount; i++) {
         if (snap->players[i].slotIndex == s_localPlayerIndex) {
@@ -154,37 +165,90 @@ bool Client::reconcile(NetPlayer& localPlayer, const LevelGrid& grid, f32 dt) {
             break;
         }
     }
-    if (!serverState) return false;
+    if (!serverState) return false; // local player absent from snapshot — no-op
 
-    // Decode server position
+    // Acked tick: the highest client input tick the server has processed for our slot.
+    // The server sets lastProcessedInputTick for every REMOTE slot each tick
+    // (engine_net.cpp), and from the server's view a connected client IS a remote slot,
+    // so lastInputTick[ourSlot] is populated in every snapshot (snapshot.cpp:33).
+    u32 ackTick = snap->lastInputTick[s_localPlayerIndex];
+
+    // Decode the server's authoritative state for our player.
     Vec3 serverPos;
     serverPos.x = Quantize::unpackPos(serverState->posX);
     serverPos.y = Quantize::unpackPos(serverState->posY);
     serverPos.z = Quantize::unpackPos(serverState->posZ);
+    Vec3 serverVel{ Quantize::unpackVel(serverState->velX), 0.0f,
+                    Quantize::unpackVel(serverState->velZ) };
+    f32  serverYaw   = Quantize::unpackAngle(serverState->yaw);
+    f32  serverPitch = Quantize::unpackAngle(serverState->pitch);
+    bool serverGround = (serverState->flags & (1 << 1)) != 0;
 
-    // Compare with our predicted position
-    Vec3 diff = localPlayer.position - serverPos;
-    f32 error = length(diff);
-
-    if (error < 0.01f) {
-        // Within tolerance — no correction needed
-        return false;
-    }
-
-    if (error > 1.0f) {
-        // Hard snap — something went very wrong
+    // Locate the prediction we made for the acked tick.
+    s32 ackIdx = findPredictionByTick(ackTick);
+    if (ackIdx < 0) {
+        // Acked tick fell out of history (very high latency / tiny buffer). We can't verify
+        // a specific prediction, so fall back to the old hard-snap to the authoritative state.
+        Vec3 diff = localPlayer.position - serverPos;
+        if (length(diff) <= 0.01f) return false; // already coincident — nothing to do
         localPlayer.position = serverPos;
-        localPlayer.velocity.x = Quantize::unpackVel(serverState->velX);
-        localPlayer.velocity.z = Quantize::unpackVel(serverState->velZ);
-        localPlayer.yaw   = Quantize::unpackAngle(serverState->yaw);
-        localPlayer.pitch = Quantize::unpackAngle(serverState->pitch);
-        LOG_WARN("Client: hard snap correction (error=%.2f)", error);
+        localPlayer.velocity.x = serverVel.x;
+        localPlayer.velocity.z = serverVel.z;
+        localPlayer.yaw   = serverYaw;
+        localPlayer.pitch = serverPitch;
+        localPlayer.onGround = serverGround;
+        LOG_WARN("Client: reconcile fallback snap (acked tick %u not in history)", ackTick);
         return true;
     }
 
-    // Smooth blend toward server position
-    f32 blendFactor = 0.15f;
-    localPlayer.position = localPlayer.position + (serverPos - localPlayer.position) * blendFactor;
+    // Compare the server position to what WE predicted at that same tick (not the live
+    // position, which is several ticks ahead). If the prediction matched, the local player
+    // is already correct — accept it and avoid touching position (no jitter).
+    Vec3 predErr = s_predictions[ackIdx].predictedPosition - serverPos;
+    if (length(predErr) < 0.05f) return false; // within tolerance — prediction was right
+
+    // Diverged: reset the local player to the server's authoritative state at ackTick, then
+    // REPLAY every buffered input newer than ackTick in ascending order, re-running the exact
+    // prediction step (updateNetPlayerFromInput → moveAndSlide with the same obstacle list and
+    // dt) so the corrected current position accounts for all inputs the server hasn't acked yet.
+    localPlayer.position = serverPos;
+    localPlayer.velocity.x = serverVel.x;
+    localPlayer.velocity.z = serverVel.z;
+    localPlayer.yaw   = serverYaw;
+    localPlayer.pitch = serverPitch;
+    localPlayer.onGround = serverGround;
+
+    // Walk the history oldest→newest; replay only ticks strictly after the acked one.
+    for (u32 i = 0; i < s_predCount; i++) {
+        u32 idx = (s_predHead + PREDICTION_HISTORY_SIZE - s_predCount + i) % PREDICTION_HISTORY_SIZE;
+        PredictionEntry& e = s_predictions[idx];
+        if (e.input.tick <= ackTick) continue;
+
+        // Re-apply movement from input (mirrors clientNetPre's prediction call exactly).
+        PlayerController::updateNetPlayerFromInput(localPlayer, e.input, dt);
+
+        // Re-run collision against the SAME obstacle list used for this tick's prediction.
+        // (We don't re-fire weapons/skills here — those are one-shot, server-authoritative
+        // actions; replaying their extFlags would double-trigger them. Only movement state
+        // is re-simulated, which is all the local player predicts.)
+        Player tempP;
+        tempP.position = localPlayer.position;
+        tempP.velocity = localPlayer.velocity;
+        tempP.onGround = localPlayer.onGround;
+        tempP.noclip   = localPlayer.noclip;
+        Collision::moveAndSlide(tempP, grid, dt, obstacles, obstacleCount);
+        localPlayer.position = tempP.position;
+        localPlayer.velocity = tempP.velocity;
+        localPlayer.onGround = tempP.onGround;
+
+        // Keep the stored prediction consistent with the corrected base so a later reconcile
+        // against an intermediate tick compares against the right (recomputed) value.
+        e.predictedPosition = localPlayer.position;
+        e.predictedVelocity = localPlayer.velocity;
+        e.predictedYaw      = localPlayer.yaw;
+        e.predictedPitch    = localPlayer.pitch;
+        e.predictedOnGround = localPlayer.onGround;
+    }
     return true;
 }
 
@@ -416,6 +480,46 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
 
         renderProjectiles.activeCount++;
     }
+}
+
+void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, u32 itemDefCount) {
+    (void)itemDefs; (void)itemDefCount; // reserved: client could resolve full stats later
+    const WorldSnapshot* snap = getSnapshot(0); // newest — items are static, no lerp needed
+    if (!snap) return;
+
+    // Build a presence set from the snapshot keyed by pool slot, preserving the local
+    // bobTimer for slots whose uid is unchanged so the bob/spin animation stays smooth
+    // across snapshots (only reset it when a slot is newly occupied by a different item).
+    bool present[MAX_WORLD_ITEMS] = {};
+    u32  activeCount = 0;
+
+    for (u32 i = 0; i < snap->worldItemCount; i++) {
+        const SnapWorldItem& sw = snap->worldItems[i];
+        u8 slot = sw.slotIndex;
+        if (slot >= MAX_WORLD_ITEMS) continue; // guard malformed snapshot
+        present[slot] = true;
+
+        WorldItem& wi = outItems.items[slot];
+        bool sameItem = wi.active && wi.item.uid == sw.uid;
+
+        wi.active        = true;
+        wi.item.defId    = sw.defId;
+        wi.item.rarity   = static_cast<Rarity>(sw.rarity);
+        wi.item.uid      = sw.uid;
+        wi.position.x    = Quantize::unpackPos(sw.posX);
+        wi.position.y    = Quantize::unpackPos(sw.posY);
+        wi.position.z    = Quantize::unpackPos(sw.posZ);
+        wi.ownerSlot     = 0xFF;          // ownership is resolved server-side
+        wi.exclusiveTimer = 0.0f;
+        if (!sameItem) wi.bobTimer = 0.0f; // fresh drop in this slot — restart animation
+        activeCount++;
+    }
+
+    // Free any local slot the server no longer reports (picked up / despawned).
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        if (!present[i]) outItems.items[i].active = false;
+    }
+    outItems.activeCount = activeCount;
 }
 
 u8 Client::getLocalPlayerIndex() {
