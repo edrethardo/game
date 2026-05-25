@@ -1,0 +1,15 @@
+// TEMPLATE — append to the "affixes" array in assets/config/affixes.json.
+// DELETE these // lines (affixes.json is strict JSON). Field legend:
+//   type     : snake_case, must match your affixTypeFromString() string
+//   name     : the display suffix, e.g. "of Haste"
+//   slots    : array of "weapon"|"offhand"|"helmet"|"armor"|"boots"|"ring"
+//              (omit the field entirely => valid on all slots)
+//   minValue : low end of the rolled magnitude (units depend on how you consume it:
+//   maxValue : high end                          flat number, or percent like 5.0 = 5%)
+{
+  "type": "<type>",
+  "name": "of <Name>",
+  "slots": ["weapon", "ring"],
+  "minValue": 5.0,
+  "maxValue": 20.0
+}

@@ -1,0 +1,34 @@
+// TEMPLATE — append to the "items" array in assets/config/items.json.
+// DELETE these // lines (items.json is strict JSON). Field legend:
+//   slot          : "weapon" (this skill); other slots: offhand/helmet/armor/boots/ring
+//   weaponType    : "melee" | "hitscan" | "projectile"
+//   weaponSubtype : sword|dagger|axe|claymore|cleaver | pistol|smg|carbine|revolver
+//                   | bow|crossbow|throwing_knife|molotov|wand
+//   mesh          : kMeshes / gen_mesh name (reuse e.g. "sword", or your new "<name>")
+//   material      : materials.json name (reuse e.g. "weapon_sword", or your new one)
+//   base*         : melee uses baseRange+baseConeAngle; hitscan uses baseRange+clip/reload;
+//                   projectile uses baseProjectileSpeed+baseProjectileRadius
+//   maxRarity     : "common" | "magic" | "rare" | "legendary"
+//   legendarySkill: optional — a skills.json id (only fires when equipped as LEGENDARY)
+//   dropWeight    : relative drop frequency (default 1.0)
+{
+  "name": "<Display Name>",
+  "slot": "weapon",
+  "weaponType": "melee",
+  "weaponSubtype": "sword",
+  "mesh": "sword",
+  "material": "weapon_sword",
+  "baseDamage": 24.0,
+  "baseRange": 3.5,
+  "baseCooldown": 0.4,
+  "baseConeAngle": 70.0,
+  "baseProjectileSpeed": 0.0,
+  "baseProjectileRadius": 0.0,
+  "baseClipSize": 0,
+  "baseReloadTime": 0.0,
+  "baseRecoil": 0.01,
+  "minLevel": 1,
+  "maxLevel": 5,
+  "maxRarity": "rare",
+  "dropWeight": 1.0
+}

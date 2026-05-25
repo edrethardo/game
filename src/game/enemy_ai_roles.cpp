@@ -173,10 +173,14 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
             e.moveSpeed = sprintSpeed;
         }
 
-        // Suicide bomber: charger+bomber combo self-destructs on reaching target.
-        // Kill via damage BEFORE setting ENT_DEAD so the death callback fires
-        // and triggers the bomber AoE explosion.
-        if ((e.enemyRole & EnemyRole::BOMBER) && e.aiState == AIState::ATTACK) {
+        // Suicide bomber: charger+bomber combo charges in and self-destructs only once
+        // it's almost on top of the target (0.85 * attackRange), so the blast lands
+        // point-blank. Detonating at the loose ATTACK-transition range (1.3 * attackRange)
+        // put the player outside the 3 m explosion radius → zero damage. `dist` is the 3D
+        // distance to the player; 0.85 * attackRange keeps the XZ offset well inside the
+        // blast even for flying bombers. Kill via damage BEFORE setting ENT_DEAD so the
+        // death callback fires and triggers the bomber AoE explosion.
+        if ((e.enemyRole & EnemyRole::BOMBER) && dist <= e.attackRange * 0.85f) {
             e.attackAnimT = 0.3f;
             EntityHandle selfH = {static_cast<u16>(i), e.generation};
             Combat::applyDamage(pool, selfH, e.health + 1.0f); // lethal — triggers death callback + explosion

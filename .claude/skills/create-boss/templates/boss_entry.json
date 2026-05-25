@@ -1,0 +1,51 @@
+// TEMPLATE — append to the "bosses" array in assets/config/bosses.json.
+// DELETE these // lines (bosses.json is strict JSON). Field legend:
+//   floor        : milestone floor this boss owns (5,10,...,50); one BossDef per floor
+//   isMajor      : true = 4x arena + iron maidens + bonus drops; false = mini-boss
+//   roles        : array of EnemyRole strings (ambush/summoner/healer/aura/ranged_caster/
+//                  charger/bomber/shield_bearer) — OR'd together
+//   personality  : "berserker" | "kiter" | "teleporter" | "duelist"  (data-driven AI)
+//   skillId      : a skills.json id, or "" for none  (must exist in skillIdFromString)
+//   minionShield : true => 75% damage reduction while minions alive (REQUIRES "summoner" role)
+//   onHitEffect  : 0=none 1=poison 2=slow 3=burn 4=freeze (+ onHitDuration/onHitDps)
+//   projectile   : ranged attack; set enabled=false for pure melee
+//   lootGuarantee: "magic" | "rare" | "legendary"  (minimum drop rarity; auto-enforced)
+//   limbConfig   : 0=default legs, 1=Andariel spider legs, 2=tentacles, 3=spikes,
+//                  4=blades(legs hidden), 5=lich sleeves(hidden), 6=Nyx arms(hidden)
+//   secondPhase  : LEAVE false unless you also add the enemy_ai.cpp false-death case
+{
+  "name": "<Boss Name>",
+  "floor": 22,
+  "isMajor": false,
+  "baseHp": 600,
+  "baseDmg": 32,
+  "speed": 4.0,
+  "atkRange": 3.5,
+  "atkCooldown": 1.0,
+  "detectionRange": 22.0,
+  "halfExtents": [0.5, 1.05, 0.5],
+  "meshName": "skeleton",
+  "matName": "boss_lich",
+  "weaponName": "",
+  "roles": ["charger"],
+  "personality": "duelist",
+  "skillId": "",
+  "enrageFactor": 0.3,
+  "minionShield": false,
+  "onHitEffect": 0,
+  "onHitDuration": 0.0,
+  "onHitDps": 0.0,
+  "projectile": {
+    "enabled": false,
+    "usesWeaponMesh": false,
+    "speed": 0.0,
+    "radius": 0.0,
+    "cooldown": 0.0,
+    "onHitEffect": 0,
+    "onHitDuration": 0.0
+  },
+  "lootGuarantee": "rare",
+  "bonusDrops": 0,
+  "limbConfig": 0,
+  "speech": "<intro line>"
+}

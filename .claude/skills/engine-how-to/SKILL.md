@@ -1,0 +1,65 @@
+---
+name: engine-how-to
+description: Use when adding or modifying DungeonEngine content (items, affixes, weapons, enemies, bosses, enemy roles, skills, materials, levels) or generating assets, and to check known pitfalls/gotchas before touching combat, loot, networking, split-screen, or entity handles.
+---
+
+# DungeonEngine — How To & Pitfalls
+
+Recipes for extending the DungeonEngine and the known gotchas to avoid. Extracted from
+`CLAUDE.md`, whose slim core keeps build + architecture + directory map + conventions.
+Reference material (types/constants, game loop, data lifecycles, JSON schemas, networking,
+debug keys) lives in the `engine-reference` skill.
+
+## Asset Conventions
+
+- **Always use tools to generate assets.** Meshes are generated via `tools/gen_mesh.py`, textures via `tools/gen_texture.py`, skins via `tools/gen_skin.py`, skill icons via `tools/gen_skill_icons.py`. Run `tools/build_assets.py` to rebuild all assets. Never hand-author `.obj` or `.png` files — the tools ensure correct format, naming, and sizing.
+- **Textures**: tile textures end in `_42.png` (42×42 px), e.g. `stone_wall_42.png`. Skins/non-tile textures are exceptions (e.g. `bat_skin_42.png` is also 42 but "skin" naming).
+- **Materials** (`assets/materials.json`): each entry has `id` (must match array index), `name`, optional `texture` (path under `assets/textures/`), optional `tint` `[r,g,b,a]`. Material 0 is the default fallback. Code looks up by name via `MaterialSystem::getIdByName`.
+- **Meshes** (`assets/meshes/*.obj`): triangulated, +Y up, units in metres. Loaded at engine init by name into the `Engine::m_meshDefs` registry; mesh 0 is always a unit cube fallback. Names referenced from JSON (item `mesh` field, enemy `meshName`).
+- **Shaders** (`assets/shaders/*.{vert,frag}`): `basic` is the lit textured shader for level/entities/items. `unlit` is for HUD/billboards. `debug` for `DebugDraw`. `vignette` (reuses `unlit.vert`) is the fullscreen radial red damage vignette drawn in `Engine::renderPostOverlays` via `drawScreenQuad`; intensity rides in the quad's alpha and the fragment shader does the corner-weighted falloff — it never flashes (photosensitivity-safe).
+
+## How to Add Things
+
+**New item**: append to `assets/config/items.json`. If it needs a new mesh, drop the `.obj` into `assets/meshes/` and add it to the `kMeshes` table in `Engine::init` (`engine.cpp:175`). If it needs a new material, add an entry in `assets/materials.json`. Increase `MAX_ITEM_DEFS` if you exceed 64.
+
+**New affix type**: use the dedicated **`create-affix`** skill (enum → loader → recalculateStats → consumption → affixes.json sync chain).
+
+**New weapon**: use the dedicated **`create-weapon`** skill (items.json + generated mesh/skin/material; or a new `WeaponSubtype` + firing behavior).
+
+**New enemy type**: use the dedicated **`create-enemy`** skill — it covers the full pipeline (generated mesh + skin via the Python tools, material, `kMeshes` registration, the `enemies.json` entry, and the behavioral gimmick incl. adding a new `EnemyRole`). Don't hand-roll the steps here.
+
+**New boss**: use the dedicated **`create-boss`** skill (bosses.json: floor/roles/personality/skill/projectile/loot; optional dedicated mesh + limb config).
+
+**New enemy role**: covered by the **`create-enemy`** skill's gimmick path (new `EnemyRole` constant + `u8`→`u16` widening + `parseRole` mapping + behavior branch in `enemy_ai_roles.cpp`).
+
+**New skill**: use the dedicated **`create-skill`** skill (`SkillId` → `SkillDef` → loader → `tryActivate` branch → optional per-tick → skills.json → HUD icon → granting legendary item).
+
+**New material**: edit `assets/materials.json`. ID must equal array index. Look up at runtime by name with `MaterialSystem::getIdByName`. Tint blends with sampled texture color (1,1,1,1 = unmodified).
+
+**New level layout**: procedural BSP gen in `LevelGen::generate` (`world/level_gen.cpp`) is the production path — pass a seed and grid dimensions. `LevelGen::generateTestDungeon` is a hardcoded fallback. Hand-authored levels can be loaded via `LevelLoader::loadFromJson` (`world/level_loader.h`) but no level JSON files ship by default.
+
+## Pitfalls / Gotchas
+
+- **Entity handles vs raw indices.** Always use `EntityHandle` + `handleValid`/`handleGet` for cross-frame references. Indices alone go stale when slots get reused.
+- **Item visual resolution timing.** `ItemDef.meshId`/`materialId` are zero until `ItemLoader::resolveVisuals` runs *after* `MaterialSystem::init` and the mesh registry is filled. Don't render items earlier in init.
+- **`EnemyRole` is a bitmask, not an enum.** Use `e.enemyRole & EnemyRole::SUMMONER`, not `==`. Bosses can combine multiple roles.
+- **Spawn-calm window.** Every floor opens with `GameConst::SPAWN_CALM_SECONDS` (0.4 s) of calm: `m_spawnCalmTimer` (reset in `startGame`, ticked once per frame in `update()`'s `IN_GAME` case) is passed as `spawnCalm` to `EnemyAI::update`. While set, hostiles skip the `IDLE→CHASE` auto-detection (`enemy_ai_states.cpp`) and friendly NPCs hold position instead of marching out (`enemy_ai.cpp`). It ends early when the player fires (`handleWeaponFire` zeroes it). **Damage-driven aggro is never gated** — `Combat::applyDamage` sets `aiState = CHASE` directly, so hitting an enemy always wakes it (and neighbours within 6 m) even mid-calm.
+- **Boss loot** is guaranteed in the death callback (`engine_init.cpp`). Mini-bosses drop rare+, major bosses drop legendary. This runs *before* the normal loot path and returns early.
+- **Minion shield** requires `entity.minionShield = true` (set at spawn from `BossDef`) AND alive minions with `spawnerIdx == bossIdx`. The check is in `Combat::applyDamage`.
+- **Death callback drops loot** via a global `s_engine` pointer (file-scope in `engine.cpp`). If you swap the singleton or move loot-drop, update both. **The orchestrator returns early on `NetRole::CLIENT` (after the cosmetic preamble) so clients never roll loot** — loot is server-authoritative (N5); if you add a new loot phase, put it AFTER that client gate.
+- **Client loot is render/aim-only.** A CLIENT's `m_worldItems` is overwritten every frame by `Client::mirrorWorldItems` from the snapshot; never authoritatively mutate it on a client (pickups go through `CL_PICKUP_ITEM`). The local `WorldItemSystem::update` lifetime decay on a client is harmless (it's overwritten by the mirror in `clientNetPost`).
+- **N4 client double-sim is DEFERRED, not fixed.** Clients still run `EnemyAI::update`/`ProjectileSystem::update`/`EntitySystem::tickTimers`/`SquadSystem::update`/weapon-fire on local `m_entities`/`m_projectiles`. It's invisible (render uses `m_renderInterp.*`) and no longer leaks loot, but it's wasted CPU and a latent divergence. To finish it you MUST first re-source the prediction-collision obstacle list in `clientNetPre` (currently built from `m_entities`) to the interpolated snapshot entities (`m_renderInterp.entities`) — `Client::reconcile` replays against the same list, so both must move together — THEN gate the sims off for CLIENT. Don't gate the sim off without moving the obstacle source or the predicted player will pass through enemies (or collide with phantom spawn-position enemies).
+- **Listen-server host plays as slot 0.** `Engine::onPlayerJoin` is not called for the host; slot 0 is initialised inside `startGame`. Don't put host-init logic in the join callback.
+- **Split-screen per-player fields go in the swap macro.** A per-player field that isn't in `LOCAL_PLAYER_SWAP_FIELDS` (`engine.cpp`) silently leaks/shares across local players. Add the field to the macro AND its `m_*[MAX_LOCAL_PLAYERS]` array in `engine.h`; don't hand-edit only one of `swapInPlayer`/`swapOutPlayer`.
+- **Don't put shared-world updates in `gameUpdate`.** `gameUpdate` runs once per local player; anything that mutates shared state (entities, projectiles, FX, particles, meteors, enemy speech) belongs in `tickSharedSystems` (runs once/frame after the loop) or it double-ticks in split-screen and freezes when P1 (sp=0) is dead.
+- **Kill-credit for loot is `Combat::s_attackingPlayer`.** Set it around weapon fire / per projectile; `killEntity` stamps it onto `Entity::killerSlot`, and the loot drop passes it as `WorldItem::ownerSlot`. If you add a new entity-killing damage source and want it to reserve loot, set the attacker first; leave it `0xFF` (the `tickSharedSystems` default) for free-for-all.
+- **Snapshot quantization range** clamps positions to ±128 m. Keep level/grid bounds inside that range or clients see jitter.
+- **`assets/config/weapons.json` is shadowed** by the inline `initWeaponTable` (`game/weapon.h`). Editing the JSON alone has no effect; either remove the inline table or load JSON in `Engine::init`.
+- **Legendary skills require equipping the right item** — `legendarySkillId` on the equipped weapon's `ItemDef` becomes the player's `activeSkill`; without a matching item, right-click does nothing.
+- **OBJ loader expects triangles + per-vertex normals.** Quad meshes will load with garbage normals. Triangulate on export.
+
+## Maintenance
+
+Keep this skill in sync when you add a subsystem, change how content is added, or discover a
+new pitfall. The always-loaded core lives in `CLAUDE.md`; types/constants, schemas, data
+lifecycles, networking internals, and debug keys live in the `engine-reference` skill.

@@ -1,0 +1,19 @@
+// TEMPLATE — append to the "skills" array in assets/config/skills.json.
+// DELETE these // lines (skills.json is strict JSON). Field legend:
+//   id         : snake_case, MUST match your skillIdFromString() string
+//   name       : display name
+//   cooldown   : seconds (a hard 0.05s minimum is enforced after item CDR)
+//   energyCost : energy spent per cast (health-cost skills like blood_nova use healthCostPct)
+//   damage     : base damage (the loader also accepts orbDamage as an alias)
+//   radius     : AoE radius if relevant (alias: orbRadius)
+//   duration   : lifetime for persistent effects
+//   <extra>    : any skill-specific fields you added to SkillDef + loadSkillDefs
+{
+  "id": "<name>",
+  "name": "<Display Name>",
+  "cooldown": 2.0,
+  "energyCost": 40.0,
+  "damage": 50.0,
+  "radius": 4.0,
+  "duration": 0.0
+}

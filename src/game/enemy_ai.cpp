@@ -463,8 +463,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 bool playerInArena = (pdx*pdx + pdz*pdz) <= e.leashRadius * e.leashRadius;
                 Vec3 toHome = {e.homePosition.x - e.position.x, 0.0f, e.homePosition.z - e.position.z};
                 f32 hd = sqrtf(toHome.x*toHome.x + toHome.z*toHome.z);
-                if (!playerInArena) {
+                if (!playerInArena && !e.provoked) {
                     // Disengage: return toward the arena centre and idle (skip abilities + FSM).
+                    // A provoked boss (one that has been attacked) never disengages — it stays
+                    // engaged and rages at the arena edge even if the attacker is outside the room.
                     e.aiState = AIState::IDLE;
                     if (hd > 0.6f) {
                         Vec3 d = toHome * (1.0f / hd);

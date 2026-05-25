@@ -56,6 +56,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.bossPhase    = BossPhase::NONE;
     e.minionShield = false;
     e.leashRadius  = 0.0f;
+    e.provoked     = false;
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;

@@ -100,6 +100,7 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
 
     e->health -= damage;
     e->flashTimer = 0.12f;
+    e->provoked = true; // any hit provokes: a boss now engages even if the attacker is outside its leash arena
 
     // --- Hit feedback: classify impact tier and fire the matching recipe ---
     bool isKill = (e->health <= 0.0f);
@@ -244,17 +245,20 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     player.lastDamageTaken = damage;
 
     // Near-death grace ("lifesaver"): when a hit drops the player into critical HP
-    // (<20%) without killing them, grant a brief invisible i-frame so a follow-up hit
-    // can't instantly finish them. It is a ONE-SHOT: consumed on use, then re-earned
-    // only by recovering to >=40% max HP. So once you spend it, healing back to, say,
-    // 30% does NOT refill it — you must reach 40%+ to be protected again, and staying
-    // in the danger zone never refills it.
+    // (<20%) — OR would have killed them outright (a one-shot) — grant a brief invisible
+    // i-frame so a follow-up hit can't instantly finish them; a lethal hit is survived at
+    // 1 HP. It is a ONE-SHOT: consumed on use, then re-earned only by recovering to >=40%
+    // max HP. So once you spend it, healing back to, say, 30% does NOT refill it — you must
+    // reach 40%+ to be protected again, and staying in the danger zone never refills it.
     {
         f32 critThresh   = player.maxHealth * 0.20f;  // danger zone: i-frame may fire below this
         f32 rearmThresh  = player.maxHealth * 0.40f;  // must recover above this to re-earn it
         f32 healthBefore = player.health + damage;     // HP just before this hit landed
         if (healthBefore >= rearmThresh) player.lifesaverArmed = true;  // were healthy -> (re)armed
-        if (player.lifesaverArmed && player.health > 0.0f && player.health < critThresh) {
+        // Fires when a hit drops us into the danger zone OR would have killed us outright (a one-shot).
+        // `lifesaverArmed` is set only from >=40% HP, so this can only save you from a healthy state.
+        if (player.lifesaverArmed && player.health < critThresh) {
+            if (player.health <= 0.0f) player.health = 1.0f; // cheat death: survive the otherwise-lethal hit at 1 HP
             if (player.invulnTimer < 0.6f) player.invulnTimer = 0.6f;
             player.lifesaverArmed = false;  // consume; re-earn by healing to >=40% HP
         }

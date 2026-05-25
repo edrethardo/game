@@ -160,6 +160,8 @@ struct Entity {
     bool isBoss = false;   // true ONLY for a milestone boss (set in spawnFloorBoss). Distinct from
                            // enemyType==BOSS, which large rig-sharing regular enemies (cave_troll,
                            // abyssal_titan, butcher) also use just to borrow the boss limb rig.
+    bool provoked = false; // set by Combat::applyDamage on any hit. A provoked boss ignores its
+                           // leash "wait" gate and engages even when the player is outside the arena.
     u16 spawnerIdx = 0xFFFF; // entity pool index of boss that spawned this minion
     bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
     u8  bossPhase = 0;     // BossPhase:: false-death state machine (NONE=normal death)

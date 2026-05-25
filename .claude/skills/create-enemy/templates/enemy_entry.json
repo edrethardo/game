@@ -1,0 +1,35 @@
+// TEMPLATE — append the object below to the "enemies" array in
+// assets/config/enemies.json. DELETE these // comment lines (enemies.json is
+// strict JSON). Field legend:
+//   tier         : 1-5  (maps to floor ranges)
+//   meshName     : the gen_mesh.py / kMeshes name  (== "<name>")
+//   materialName : the materials.json entry         (== "<name>_skin")
+//   flying       : true = ignores floor snapping, uses fly AI
+//   halfExtents  : [x,y,z] half-size in metres (~ the mesh's half dimensions)
+//   role         : "normal" | "ambush" | "summoner" | "healer" | "aura" |
+//                  "ranged_caster" | "charger" | "bomber" | "shield_bearer"
+//                  | "<your new role>"   — OR an array to combine: ["summoner","aura"]
+//   aiPreference : "idle" | "chase" | "strafe" | "flyby" | "dormant" |
+//                  "flank" | "retreat" | "surround"   (initial AI state)
+//   onHitEffect  : 0=none 1=poison 2=slow 3=burn 4=freeze (+ onHitDuration / onHitDps)
+//   dropWeight   : relative loot-drop weighting (default 1.0)
+{
+  "name": "<Display Name>",
+  "tier": 2,
+  "meshName": "<name>",
+  "materialName": "<name>_skin",
+  "health": 60,
+  "moveSpeed": 3.5,
+  "detectionRange": 15,
+  "attackRange": 2.5,
+  "attackCooldown": 1.0,
+  "damage": 15,
+  "flying": false,
+  "halfExtents": [0.4, 0.9, 0.4],
+  "role": "normal",
+  "aiPreference": "chase",
+  "onHitEffect": 0,
+  "onHitDuration": 0,
+  "onHitDps": 0,
+  "dropWeight": 1.0
+}

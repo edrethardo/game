@@ -170,18 +170,41 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
     if ((pool.entities[idx].enemyRole & EnemyRole::BOMBER) &&
         !(pool.entities[idx].flags & ENT_FRIENDLY)) {
         f32 explosionRadius = 3.0f;
-        f32 explosionDmg = pool.entities[idx].damage * 0.8f;
+        f32 explosionDmg = pool.entities[idx].damage * 2.5f; // suicide hits hard (was 0.8 — and under the old detonation range it whiffed entirely)
         f32 burnDur = pool.entities[idx].onHitDuration;
         f32 burnDps = pool.entities[idx].onHitDps;
 
-        // Damage player if in radius
-        Vec3 playerDelta = m_localPlayer.position - pos;
-        f32 playerDist = sqrtf(playerDelta.x * playerDelta.x + playerDelta.z * playerDelta.z);
-        if (playerDist < explosionRadius) {
-            Combat::applyDamageToPlayer(m_localPlayer, explosionDmg, &pos);
-            if (burnDur > 0.0f) {
-                m_localPlayer.burnTimer = fmaxf(m_localPlayer.burnTimer, burnDur);
-                m_localPlayer.burnDps = burnDps;
+        // Players take the blast only where player HP is authoritative — SP/split (NONE) and the
+        // host (SERVER). On a CLIENT the server applies it and it arrives via snapshot, so doing it
+        // here would double-count. Damage goes to the PERSISTENT m_localPlayers[] array (not the
+        // m_localPlayer swap alias, whose writes are discarded after tickSharedSystems) — which is
+        // exactly why the blast previously dealt nothing even point-blank.
+        if (m_netRole != NetRole::CLIENT) {
+            // Local players (SP/split-screen locals; the host is slot 0 with m_splitPlayerCount==1).
+            for (u8 p = 0; p < m_splitPlayerCount; p++) {
+                if (m_playerDead[p]) continue;
+                Player& lp = m_localPlayers[p];
+                Vec3 d = lp.position - pos;
+                if (sqrtf(d.x * d.x + d.z * d.z) < explosionRadius) {
+                    Combat::applyDamageToPlayer(lp, explosionDmg, &pos);
+                    if (burnDur > 0.0f) { lp.burnTimer = fmaxf(lp.burnTimer, burnDur); lp.burnDps = burnDps; }
+                }
+            }
+            // Networked co-op: damage remote NetPlayers through a throwaway view so it rides the
+            // snapshot (mirrors buildRemotePlayerViews: skip the host slot + inactive/dead remotes).
+            if (m_netRole == NetRole::SERVER) {
+                for (u8 s = 0; s < MAX_PLAYERS; s++) {
+                    if (s == m_localPlayerIndex) continue;
+                    const NetPlayer& np = m_players[s];
+                    if (!np.active || np.isDead) continue;
+                    Vec3 d = np.position - pos;
+                    if (sqrtf(d.x * d.x + d.z * d.z) >= explosionRadius) continue;
+                    Player view;
+                    buildRemotePlayerView(s, view);
+                    Combat::applyDamageToPlayer(view, explosionDmg, &pos);
+                    if (burnDur > 0.0f) { view.burnTimer = fmaxf(view.burnTimer, burnDur); view.burnDps = burnDps; }
+                    applyRemotePlayerView(view, s);
+                }
             }
         }
         // Damage friendly NPCs in radius
