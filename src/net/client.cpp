@@ -332,6 +332,10 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
         e.stunTimer      = seB.stunTimer / 25.0f;
         e.freezeTimer    = seB.freezeTimer / 25.0f;
         e.bossLimbConfig = seB.bossLimbConfig;
+        // Boss invuln/shield state so the boss renders as un-killable when it is
+        // (bit0=minionShield, bits1-3=bossPhase). Mirrors the host pack in buildFromState.
+        e.minionShield   = (seB.bossStatus & 0x01) != 0;
+        e.bossPhase      = static_cast<u8>((seB.bossStatus >> 1) & 0x07);
 
         // Flash timer and death timer are cosmetic — approximate
         if (e.flags & ENT_DEAD) {
@@ -361,7 +365,21 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
         Projectile& p = renderProjectiles.projectiles[idx];
         p.active     = true;
         p.fromPlayer = (spB.flags & (1 << 1)) != 0;
-        p.radius     = 0.15f;
+        p.isCrit     = (spB.flags & (1 << 2)) != 0;
+        // Visual fields recovered from the wire so skill/boss projectiles render with
+        // their real look instead of the default energy bolt.
+        p.projFlags  = spB.projFlags;
+        p.meshId     = spB.meshId;
+        p.radius     = (spB.radiusQ > 0) ? (spB.radiusQ / 100.0f) : 0.15f;
+
+        // lightColor isn't on the wire (byte-frugal) — reconstruct a glow color from
+        // projFlags using the host's conventions so lit projectiles still emit light.
+        if (p.projFlags & (PROJ_ORB | PROJ_ORB_SHARD)) p.lightColor = {0.3f, 0.7f, 1.0f}; // cyan frost
+        else if (p.projFlags & PROJ_SPARK)             p.lightColor = {0.4f, 0.6f, 1.0f}; // electric blue
+        else if (p.projFlags & PROJ_VOID)              p.lightColor = {0.4f, 0.0f, 0.8f}; // void purple
+        else if (p.meshId > 0)                         p.lightColor = {0.0f, 0.0f, 0.0f}; // mesh weapons: no glow
+        else p.lightColor = p.fromPlayer ? Vec3{1.0f, 0.6f, 0.2f}  // warm player bolt
+                                         : Vec3{0.6f, 0.1f, 0.9f}; // enemy purple bolt
 
         Vec3 posB;
         posB.x = Quantize::unpackPos(spB.posX);

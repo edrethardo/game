@@ -193,6 +193,7 @@ private:
         SquadPool     squads;
         Vec3          floorDoorPos;
         bool          floorDoorActive = false;
+        bool          floorHasBoss    = false; // this floor spawned a milestone boss (gates the exit lock)
     };
     LevelState m_level;
 
@@ -250,6 +251,7 @@ private:
     u8  m_invCursorPanels[MAX_LOCAL_PLAYERS] = {};
     u8  m_invCursorIndices[MAX_LOCAL_PLAYERS] = {};
     f32 m_fullBackpackNotifyTimer = 0.0f;
+    f32 m_bossLockNotifyTimer = 0.0f;  // "defeat the boss" prompt when descend is blocked
     bool m_firstPickupTooltipShown = false;  // item picked up → show "Open Inventory"
     bool m_inventoryOpenedOnce    = false;  // dismiss "Open Inventory" once opened
     bool m_equipTooltipShown = false;       // inventory opened → show "equip" hint
@@ -378,6 +380,7 @@ private:
     void updatePlayerPickup();
     // Returns true if the player descended (caller should return immediately)
     bool updateFloorDoor();
+    bool floorBossAlive() const; // true while a milestone boss on this floor is not yet dead
 
     // gameUpdate helpers — extracted from the god function for readability.
     // Each is called exactly once, in the same order they appear in gameUpdate.

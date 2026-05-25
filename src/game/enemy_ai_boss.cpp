@@ -17,8 +17,10 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
                                 const LevelGrid& grid, f32 dt,
                                 f32 dist, Vec3 playerEye)
 {
-    // Delegate to BossAI personality system if this boss has a loaded def
-    if (e.bossDefIdx != 0xFF && s_bossDefTable && e.bossDefIdx < s_bossDefTable->count) {
+    // Delegate to BossAI personality system if this boss has a loaded def.
+    // Skipped while ENTOMBING so the boss stays rooted during its false-death channel.
+    if (e.bossDefIdx != 0xFF && s_bossDefTable && e.bossDefIdx < s_bossDefTable->count
+        && e.bossPhase != BossPhase::ENTOMBING) {
         // Pass the chased target (nearest local player) so boss movement/teleport/LOS
         // track whoever the boss is engaging, not always P1.
         BossAI::update(e, s_bossDefTable->defs[e.bossDefIdx], pool, projectiles, *targetPlayer, grid, dt);
@@ -32,6 +34,66 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
     // every boss. Recover the 1–50 milestone floor so each boss keeps its
     // signature ability on every difficulty. (Maps 5→5, 50→50, 55→5, 100→50.)
     u32 rawFloor = ((e.level - 1) % 50) + 1;
+
+    // --- False-death phase machine (Malachar, floor 20) -------------------------
+    // ENTOMBING: rooted, invulnerable channel (combat.cpp set sprintTimer = -1 as the
+    // "not yet started" sentinel). Init once, count down, then erupt the guardians
+    // and seal the boss (minionShield). The caller (enemy_ai.cpp) also skips the
+    // FSM/role passes while ENTOMBING so he doesn't move.
+    if (e.bossPhase == BossPhase::ENTOMBING) {
+        e.velocity = {0, 0, 0};
+        if (e.sprintTimer < 0.0f) {
+            e.sprintTimer = 2.5f; // channel duration
+            e.speechText  = "I am bound to this tomb — you cannot end me!";
+            e.speechTimer = 3.0f;
+            // Sarcophagus telegraph: a ring of purple bursts around the warden.
+            for (u32 s = 0; s < 6; s++) {
+                f32 a = s * (6.2832f / 6.0f);
+                BossAI::magicBurst(e.position + Vec3{cosf(a) * 1.8f, 0.3f, sinf(a) * 1.8f},
+                                   0.6f, 0.2f, 0.8f, 6);
+            }
+        } else {
+            e.sprintTimer -= dt;
+            if (e.sprintTimer <= 0.0f) {
+                // Erupt 4 tomb-guardians in a ring; minionShield seals the boss until they die.
+                f32 bossDmg = e.damage;
+                for (u32 s = 0; s < 4; s++) {
+                    f32 a = s * (6.2832f / 4.0f) + e.animTimer;
+                    Vec3 pos = e.position + Vec3{sinf(a) * 2.5f, 0.0f, cosf(a) * 2.5f};
+                    EntityHandle sh = EntitySystem::spawn(pool, pos,
+                        {0.4f, 0.9f, 0.4f}, false,
+                        e.maxHealth * 0.10f, 4.0f, 14.0f, 2.2f, 0.8f, bossDmg * 0.20f);
+                    Entity* g = handleGet(pool, sh);
+                    if (g) {
+                        g->meshId             = s_skeletonMeshId;
+                        g->materialId         = s_skeletonMatId;
+                        g->enemyType          = EnemyType::SKELETON;
+                        g->aiState            = AIState::CHASE;
+                        g->level              = e.level;
+                        g->baseMoveSpeed      = g->moveSpeed;
+                        g->baseAttackCooldown = g->attackCooldown;
+                        g->spawnerIdx         = static_cast<u16>(i); // drives minionShield
+                        BossAI::magicBurst(pos, 0.6f, 0.2f, 0.8f, 8);
+                    }
+                }
+                e.minionShield = true;
+                e.bossPhase    = BossPhase::SEALED;
+                e.speechText   = "Arise, wardens! Bind the intruder!";
+                e.speechTimer  = 3.0f;
+            }
+        }
+        e.attackAnimT = 0.0f;
+        return; // entombed: no aggro/abilities this tick (movement skipped by caller)
+    }
+    if (e.bossPhase == BossPhase::SEALED && e.bossDefIdx != 0xFF &&
+        !BossAI::hasMinionAlive(pool, static_cast<u16>(i))) {
+        // Seal broken — every guardian is dead. Drop the shield and enrage for the finish.
+        e.minionShield = false;
+        e.bossPhase    = BossPhase::ENRAGED;
+        e.speechText   = "My bonds... SHATTERED! Then I will kill you MYSELF!";
+        e.speechTimer  = 3.0f;
+        BossAI::magicBurst(e.position + Vec3{0, 1.0f, 0}, 0.9f, 0.2f, 0.9f, 24);
+    }
 
     // Track LOS duration (repurpose flybyTarget.x as timer)
     if (bossLOS) {
@@ -61,7 +123,13 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
     e.flybyTimer -= dt;
     if (e.flybyTimer <= 0.0f && bossLOS) {
         Vec3 bossEye = e.position + Vec3{0, e.halfExtents.y, 0};
-        Vec3 toPlayerDir = normalize(playerEye - bossEye);
+        // Aim at the player's torso, not the eye. A tall boss fires from well above
+        // the player; aiming at the eye (the very top of the 1.8m hitbox) makes fast
+        // bolts graze over the head and miss every frame. The torso point sends them
+        // down through the body so the AABB test connects. (Charges re-flatten to XZ,
+        // so their behaviour is unchanged.)
+        Vec3 playerAim   = targetPlayer->position + Vec3{0.0f, 0.9f, 0.0f};
+        Vec3 toPlayerDir = normalize(playerAim - bossEye);
         f32 bossDmg = e.damage;
 
         switch (rawFloor) {
@@ -112,9 +180,10 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
             e.speechTimer = 2.5f;
         } break;
 
-        // Floor 20: Mephisto — Chain Lightning (5 spark bolts in rapid fan)
+        // Floor 20: Malachar — Chain Lightning (5 spark bolts in rapid fan).
+        // After the seal breaks (ENRAGED) he casts it nearly twice as fast.
         case 20: {
-            e.flybyTimer = 4.0f;
+            e.flybyTimer = (e.bossPhase == BossPhase::ENRAGED) ? 2.0f : 4.0f;
             for (s32 s = -2; s <= 2; s++) {
                 f32 spread = s * 0.12f;
                 Vec3 dir = normalize(Vec3{

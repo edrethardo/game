@@ -49,6 +49,13 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     if (!e) return;
     if (e->flags & ENT_DEAD) return;
 
+    // Entombed boss (Malachar's false-death channel) is fully invulnerable —
+    // hits register as a flash but deal no damage until the channel ends.
+    if (e->bossPhase == BossPhase::ENTOMBING) {
+        e->flashTimer = 0.12f;
+        return;
+    }
+
     // Shield Bearer frontal damage reduction — forces player to flank
     if ((e->enemyRole & EnemyRole::SHIELD_BEARER) && damageOrigin) {
         Vec3 toSource = *damageOrigin - e->position;
@@ -148,7 +155,18 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     }
 
     if (e->health <= 0.0f) {
-        killEntity(pool, target);
+        // False death (Malachar): the first lethal hit doesn't kill — he survives
+        // at 60% HP and entombs himself. The AI tick (enemy_ai_boss.cpp) drives the
+        // channel/guardian-summon; sprintTimer < 0 is the "channel not yet started"
+        // sentinel it watches for. Only fires once (ARMED → ENTOMBING).
+        if (e->bossPhase == BossPhase::ARMED) {
+            e->health     = e->maxHealth * 0.6f;
+            e->bossPhase  = BossPhase::ENTOMBING;
+            e->sprintTimer = -1.0f;
+            e->flashTimer = 0.2f;
+        } else {
+            killEntity(pool, target);
+        }
     }
 }
 

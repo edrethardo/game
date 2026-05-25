@@ -156,6 +156,7 @@
       "skillId": "frozen_orb",
       "enrageFactor": 0.3,
       "minionShield": false,
+      "secondPhase": true,
       "onHitEffect": 2,
       "onHitDuration": 2.0,
       "onHitDps": 0.0,

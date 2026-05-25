@@ -19,6 +19,9 @@
 // Particle callback for teleport VFX — set by Engine
 static void(*s_magicBurstCb)(Vec3 pos, f32 r, f32 g, f32 b, u32 count) = nullptr;
 void BossAI::setMagicBurstCallback(void(*cb)(Vec3, f32, f32, f32, u32)) { s_magicBurstCb = cb; }
+void BossAI::magicBurst(Vec3 pos, f32 r, f32 g, f32 b, u32 count) {
+    if (s_magicBurstCb) s_magicBurstCb(pos, r, g, b, count);
+}
 
 // Damage number callback — set by Engine (shared with Combat)
 static void(*s_bossSkillDmgCb)(Vec3 pos, f32 dmg) = nullptr;
@@ -105,10 +108,12 @@ void BossAI::update(Entity& e, const BossDef& def,
         } break;
 
         case BossPersonality::TELEPORTER: {
-            // Blink every 4-6s to a random position near the player
+            // Blink every 4-6s to a random position near the player — twice as
+            // often (2-3s) once a false-death boss has broken its seal (ENRAGED).
             e.kiteTimer -= dt;
             if (e.kiteTimer <= 0.0f) {
-                e.kiteTimer = 4.0f + (std::rand() % 20) * 0.1f; // 4-6s
+                f32 base = (e.bossPhase == BossPhase::ENRAGED) ? 2.0f : 4.0f;
+                e.kiteTimer = base + (std::rand() % 20) * 0.1f;
                 tryTeleport(e, grid, playerPos);
             }
             // Between teleports, strafe if ranged, chase if melee

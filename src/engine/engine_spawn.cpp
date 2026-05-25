@@ -558,6 +558,16 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
             bossAtkRng, bossAtkCool, bossDmg * floorMult);
         Entity* boss = handleGet(m_entities, bh);
         if (boss) {
+            // Boss-room leash: confine the boss to its arena and only wake it when
+            // the player enters. Radius = half the arena diagonal (+1m margin) so he
+            // covers the whole room and engages at the doorway. homePosition (set at
+            // spawn) is the arena centre. Without this, bosses chase the player out
+            // into the corridors and the boss-room encounter never happens.
+            {
+                f32 arenaW = bossRoom.w * m_level.grid.cellSize;
+                f32 arenaD = bossRoom.d * m_level.grid.cellSize;
+                boss->leashRadius = 0.5f * sqrtf(arenaW * arenaW + arenaD * arenaD) + 1.0f;
+            }
             if (bd) {
                 // JSON-loaded boss path
                 boss->meshId = findMeshByName(bd->meshName);
@@ -577,6 +587,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 boss->bossDefIdx = bossIdx;
                 boss->enemyRole = bd->roles;
                 boss->minionShield = bd->minionShield;
+                boss->bossPhase = bd->secondPhase ? BossPhase::ARMED : BossPhase::NONE;
                 boss->onHitEffect = bd->onHitEffect;
                 boss->onHitDuration = bd->onHitDuration;
                 boss->onHitDps = bd->onHitDps;

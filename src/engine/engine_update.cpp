@@ -794,6 +794,9 @@ void Engine::updatePlayerPickup() {
             if (isGlobe(w.item)) continue;
             if (w.item.defId >= m_itemDefCount) continue;
             // Loot-ownership window: skip items reserved to another local player (3s, then free).
+            // Currently dormant — all drops spawn ownerSlot=0xFF (free-for-all) because the death
+            // callback can't attribute the killer (it runs under m_activePlayerIndex==0). Kept as the
+            // consumer hook for a future per-killer attribution pass; harmless with 0xFF owners.
             if (w.ownerSlot != 0xFF && w.ownerSlot != m_localPlayerIndex && w.exclusiveTimer > 0.0f)
                 continue;
             Vec3 toItem = w.position - m_localPlayer.position;
@@ -856,6 +859,18 @@ void Engine::updatePlayerPickup() {
     }
 }
 
+// True while a milestone boss is still alive on this floor. Used to lock the floor
+// exit so the player must defeat the boss before descending. A boss mid-death-fade
+// (ENT_DEAD set, deathTimer running) counts as dead. Malachar counts as alive through
+// his false-death phases until the real kill.
+bool Engine::floorBossAlive() const {
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        const Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (e.enemyType == EnemyType::BOSS && !(e.flags & ENT_DEAD)) return true;
+    }
+    return false;
+}
+
 // Floor door interaction — descend to next floor when near and E is pressed.
 // Returns true if the player descended (caller must return immediately to skip
 // the rest of the tick with the now-regenerated level state).
@@ -864,6 +879,11 @@ bool Engine::updateFloorDoor() {
         Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isActionPressed(GameAction::PICKUP)) {
+                // Exit is sealed only on boss floors, and only until the boss is dead.
+                if (m_level.floorHasBoss && floorBossAlive()) {
+                    m_bossLockNotifyTimer = 2.0f;
+                    return false;
+                }
                 m_level.currentFloor++;
                 // All players grow 1.5% stronger each floor (multiplicative).
                 // In split-screen the FLOOR_TRANSITION block grows BOTH local players once

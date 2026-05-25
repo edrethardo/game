@@ -245,8 +245,7 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                       idef.weaponType);
             }
             WorldItemSystem::spawn(m_worldItems, item,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
-                                   static_cast<u8>(m_activePlayerIndex)); // your-kill, your-loot 3s
+                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid);
         }
         return true; // skip normal drop logic for this kill
     }
@@ -290,8 +289,7 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                       biDef.weaponType);
             }
             WorldItemSystem::spawn(m_worldItems, bossItem,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
-                                   static_cast<u8>(m_activePlayerIndex));
+                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid);
         }
 
         // Bonus drops for major bosses
@@ -303,8 +301,7 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             if (!isItemEmpty(bonus)) {
                 Vec3 offset = {(f32)(bd_i) * 0.3f - 0.15f, 0.5f, 0.2f};
                 WorldItemSystem::spawn(m_worldItems, bonus,
-                                       pos + offset, &m_level.grid,
-                                       static_cast<u8>(m_activePlayerIndex));
+                                       pos + offset, &m_level.grid);
             }
         }
 
@@ -347,8 +344,7 @@ void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         }
         if (!isItemEmpty(item)) {
             WorldItemSystem::spawn(m_worldItems, item,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
-                                   static_cast<u8>(m_activePlayerIndex)); // your-kill, your-loot 3s
+                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid);
         }
 
         // Chance to drop a globe (restores both HP and energy on pickup)

@@ -452,8 +452,43 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Each boss is identified by its spawn floor (e.level).
         // Extracted to enemy_ai_boss.cpp; no early loop exits in this block.
         if (e.enemyType == EnemyType::BOSS) {
+            // Boss-room leash: only engage while the player is inside the arena;
+            // otherwise disengage and walk back to the arena centre (homePosition).
+            // Keeps milestone bosses in their room instead of roaming the floor.
+            // Skipped during the ENTOMBING channel so a false-death boss finishes
+            // channelling even if the player steps out.
+            if (e.leashRadius > 0.0f && e.bossPhase != BossPhase::ENTOMBING) {
+                f32 pdx = targetPos.x - e.homePosition.x;
+                f32 pdz = targetPos.z - e.homePosition.z;
+                bool playerInArena = (pdx*pdx + pdz*pdz) <= e.leashRadius * e.leashRadius;
+                Vec3 toHome = {e.homePosition.x - e.position.x, 0.0f, e.homePosition.z - e.position.z};
+                f32 hd = sqrtf(toHome.x*toHome.x + toHome.z*toHome.z);
+                if (!playerInArena) {
+                    // Disengage: return toward the arena centre and idle (skip abilities + FSM).
+                    e.aiState = AIState::IDLE;
+                    if (hd > 0.6f) {
+                        Vec3 d = toHome * (1.0f / hd);
+                        e.position.x += d.x * e.moveSpeed * dt;
+                        e.position.z += d.z * e.moveSpeed * dt;
+                        e.yaw = atan2f(-d.x, -d.z);
+                        e.animTimer += dt; // keep the walk-home animation moving
+                    }
+                    e.velocity = {0,0,0};
+                    e.flybyTarget.x = 0.0f; // reset LOS-aggro timer so he re-arms on re-entry
+                    continue;
+                }
+                // Engaged: clamp inside the arena (catches teleport/knockback overshoot).
+                if (hd > e.leashRadius) {
+                    Vec3 d = toHome * (1.0f / hd);
+                    e.position.x = e.homePosition.x - d.x * e.leashRadius;
+                    e.position.z = e.homePosition.z - d.z * e.leashRadius;
+                }
+            }
             updateLegacyBossAbilities(e, i, pool, projectiles, player, targetPlayer,
                                       grid, dt, dist, playerEye);
+            // Entombed boss (Malachar's false-death channel) stays put — skip the
+            // role/FSM passes so he doesn't drift while invulnerable and channeling.
+            if (e.bossPhase == BossPhase::ENTOMBING) { e.velocity = {0,0,0}; continue; }
         }
 
         // Archetype role modifiers + far-enemy stagger early-exit.

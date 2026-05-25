@@ -356,7 +356,10 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
             f32 dotY = mapY + (1.0f - normZ) * mapSize; // Z flipped
 
             f32 doorPulse = 0.7f + 0.3f * sinf(m_statsTimer * 5.0f);
-            Vec3 doorCol = {0.2f * doorPulse, 1.0f * doorPulse, 0.3f * doorPulse};
+            // Red while the boss seals the exit, green once it's open (boss floors only).
+            Vec3 doorCol = (m_level.floorHasBoss && floorBossAlive())
+                ? Vec3{1.0f * doorPulse, 0.2f * doorPulse, 0.2f * doorPulse}
+                : Vec3{0.2f * doorPulse, 1.0f * doorPulse, 0.3f * doorPulse};
             FontSystem::drawText(sw, sh, dotX - 3.0f, dotY - 4.0f, "V", doorCol, 1);
         }
     }
@@ -401,6 +404,16 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         Vec3 fullColor = {0.9f * alpha, 0.2f * alpha, 0.2f * alpha};
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - fullW) * 0.5f,
                              static_cast<f32>(sh) * 0.7f, fullText, fullColor, 2);
+    }
+
+    // Exit-sealed prompt — shown when the player tries to descend with the boss alive.
+    if (m_bossLockNotifyTimer > 0.0f) {
+        const char* lockText = "Defeat the boss to descend!";
+        f32 lockW = FontSystem::textWidth(lockText, 2);
+        f32 alpha = (m_bossLockNotifyTimer < 0.5f) ? m_bossLockNotifyTimer * 2.0f : 1.0f;
+        Vec3 lockColor = {0.95f * alpha, 0.5f * alpha, 0.15f * alpha};
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lockW) * 0.5f,
+                             static_cast<f32>(sh) * 0.65f, lockText, lockColor, 2);
     }
 
     // Floor 1 controls tutorial — LMB Attack / RMB Skill

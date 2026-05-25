@@ -512,6 +512,7 @@ void Engine::tickMiscTimers(f32 dt) {
     if (m_hitMarkerTimer > 0.0f)
         m_hitMarkerTimer -= dt;
     if (m_fullBackpackNotifyTimer > 0.0f) m_fullBackpackNotifyTimer -= dt;
+    if (m_bossLockNotifyTimer > 0.0f) m_bossLockNotifyTimer -= dt;
     if (m_controlsTooltipTimer > 0.0f) m_controlsTooltipTimer -= dt;
     m_tutorialPulseTimer += dt; // shared pulse clock for tutorial tooltips
 

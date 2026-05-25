@@ -499,6 +499,9 @@ void Engine::startGame(GameStart mode) {
     // spawnFloorBoss mutates dungeon.rooms[bossRoom] (arena expansion) and rebuilds
     // the level mesh — the exit-portal placement below depends on the post-boss grid.
     u32 bossRoomForExit = spawnFloorBoss(dungeon);
+    // Record whether this floor actually has a boss — gates the exit lock so the
+    // portal is only sealed on boss floors (not regular floors like 21).
+    m_level.floorHasBoss = (bossRoomForExit != 0xFFFFFFFF);
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
 

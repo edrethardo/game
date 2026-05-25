@@ -61,6 +61,7 @@ struct BossDef {
     u8  skillId         = 0;     // SkillId to cast (0 = none)
     f32 enrageFactor    = 0.3f;  // 0.0 = no enrage, 0.5 = very aggressive
     bool minionShield   = false; // 75% damage reduction while minions alive
+    bool secondPhase    = false; // "false death": survives first kill, entombs + summons guardians
 
     // On-hit status effect for melee attacks
     u8  onHitEffect     = 0;     // 0=none, 1=poison, 2=slow, 3=burn, 4=freeze

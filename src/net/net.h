@@ -92,6 +92,12 @@ namespace Net {
     // Broadcast to all connected clients (server only)
     void broadcastReliable(const u8* data, u32 size);
     void broadcastUnreliable(const u8* data, u32 size);
+    // Broadcast a snapshot: unreliable but fragmentable. Unlike broadcastUnreliable
+    // (ENET_PACKET_FLAG_UNSEQUENCED), payloads larger than the MTU are split into
+    // MTU-sized fragments delivered unreliably (no retransmit latency) instead of
+    // being silently downgraded to reliable. A lost fragment just drops that one
+    // snapshot; the next arrives 50 ms later. Use for the 20 Hz world snapshot.
+    void broadcastSnapshot(const u8* data, u32 size);
 
     // Send to server (client only)
     void sendToServer(const u8* data, u32 size, bool reliable);

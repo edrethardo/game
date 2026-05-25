@@ -23,6 +23,11 @@ namespace BossAI {
     // Check if any minion spawned by this boss is still alive (for minion shield).
     bool hasMinionAlive(const EntityPool& pool, u16 bossIdx);
 
+    // Emit a magic-burst particle FX (purple by default) — forwards to the
+    // engine callback. Lets boss-ability code (enemy_ai_boss.cpp) reuse the same
+    // VFX the teleporter personality uses, for telegraphs/summons.
+    void magicBurst(Vec3 pos, f32 r, f32 g, f32 b, u32 count);
+
     // Callbacks — set by Engine during init
     void setMagicBurstCallback(void(*cb)(Vec3 pos, f32 r, f32 g, f32 b, u32 count));
     void setDamageNumberCallback(void(*cb)(Vec3 pos, f32 dmg));

@@ -381,6 +381,23 @@ void Net::broadcastUnreliable(const u8* data, u32 size) {
     }
 }
 
+void Net::broadcastSnapshot(const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    // UNRELIABLE_FRAGMENT: ENet fragments payloads over the MTU into MTU-sized
+    // pieces sent unreliably (peer.c chooses SEND_UNRELIABLE_FRAGMENT, not the
+    // reliable fragment path an UNSEQUENCED oversize packet would fall back to).
+    // Sub-MTU snapshots are sent as a single unreliable datagram. On send failure
+    // (enet_peer_send returns < 0, e.g. peer mid-handshake) we must destroy the
+    // packet ourselves; ENet only takes ownership on success.
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
+            ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
+            if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
+                enet_packet_destroy(pkt);
+        }
+    }
+}
+
 void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     if (s_role != NetRole::CLIENT || !s_serverPeer) return;
     u32 flags = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;

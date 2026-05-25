@@ -139,6 +139,7 @@ bool BossLoader::load(const char* path, BossDefTable& table) {
 
             def.enrageFactor = entry.value("enrageFactor", 0.3f);
             def.minionShield = entry.value("minionShield", false);
+            def.secondPhase  = entry.value("secondPhase", false);
 
             // Melee on-hit effect
             def.onHitEffect   = static_cast<u8>(entry.value("onHitEffect", 0));

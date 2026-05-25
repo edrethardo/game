@@ -60,6 +60,16 @@ namespace EnemyRole {
     constexpr u8 SHIELD_BEARER = 0x80;  // sentinel — frontal damage reduction, forces flanking
 }
 
+// Boss multi-phase / "false death" state machine (currently Malachar, floor 20).
+// Most bosses stay NONE and die normally; bosses with BossDef.secondPhase spawn ARMED.
+namespace BossPhase {
+    constexpr u8 NONE      = 0; // no special phase — dies normally on the first kill
+    constexpr u8 ARMED     = 1; // has an unused false-death; lethal hit triggers ENTOMBING
+    constexpr u8 ENTOMBING = 2; // invulnerable, rooted channel; ends by summoning guardians
+    constexpr u8 SEALED    = 3; // guardians up → 75% damage reduction (minionShield) until they die
+    constexpr u8 ENRAGED   = 4; // shield broken, faster/more aggressive, mortal again
+}
+
 // Squad role assigned by room coordinator to spread tactics across a group
 enum struct SquadRole : u8 {
     ROLE_NONE = 0,
@@ -116,6 +126,9 @@ struct Entity {
 
     // Spawn position — set once on EntitySystem::spawn, used to walk enemies home on player death
     Vec3 homePosition = {0,0,0};
+    // Boss-room leash radius around homePosition (0 = unleashed). Bosses only engage
+    // while the player is within this radius (the arena) and can't chase out of it.
+    f32  leashRadius = 0.0f;
 
     // Pathfinding (A* waypoint cache — filled by tactical planner, consumed by FLANK/RETREAT/SURROUND)
     Vec3 pathWaypoints[6] = {};
@@ -146,6 +159,7 @@ struct Entity {
     u8 bossDefIdx = 0xFF;  // index into Engine::m_bossDefs (0xFF = not a boss)
     u16 spawnerIdx = 0xFFFF; // entity pool index of boss that spawned this minion
     bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
+    u8  bossPhase = 0;     // BossPhase:: false-death state machine (NONE=normal death)
     u8  ownerLocalPlayer = 0;  // split-screen: local player a friendly NPC/drone serves (0=P1)
 
     // NPC equipment and class (friendly NPCs only)

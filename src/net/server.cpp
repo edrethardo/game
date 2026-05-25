@@ -64,10 +64,15 @@ void Server::sendSnapshot(u32 serverTick,
     snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
     Snapshot::buildFromState(snap, serverTick, players, entities, projectiles);
 
-    u8 buf[MAX_PACKET_SIZE];
-    u32 size = Snapshot::serialize(snap, buf, MAX_PACKET_SIZE);
+    // Static scratch (server-only, single-threaded send path) — keeps the larger
+    // snapshot buffer off the stack and out of the per-frame heap. serialize()
+    // bounds every write by MAX_SNAPSHOT_SIZE and emits truthful counts, so the
+    // packet is always internally consistent even if it has to priority-drop.
+    static u8 buf[MAX_SNAPSHOT_SIZE];
+    u32 size = Snapshot::serialize(snap, buf, MAX_SNAPSHOT_SIZE);
     if (size > 0) {
-        Net::broadcastUnreliable(buf, size);
+        // Snapshots may exceed one MTU; broadcastSnapshot fragments them unreliably.
+        Net::broadcastSnapshot(buf, size);
     }
 }
 

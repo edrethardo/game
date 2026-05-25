@@ -45,14 +45,19 @@ struct SnapEntity {
     u8   stunTimer;     // 1: quantized 0-10s
     u8   freezeTimer;   // 1: quantized 0-10s
     u8   bossLimbConfig;// 1
-    u8   padding2;      // 1: alignment
+    // Boss status (replaces the old alignment-only padding byte — wire size unchanged).
+    // bit0 = minionShield (75% damage reduction active); bits1-3 = bossPhase (BossPhase::,
+    // 0-4 fits in 3 bits). Lets clients render the invuln/sealed boss as un-killable.
+    u8   bossStatus;    // 1
 };
 
-// Quantized snapshot of one projectile (16 bytes)
+// Quantized snapshot of one projectile (18 bytes)
 struct SnapProjectile {
     u16  poolIndex;     // 2: u16 index into the projectile pool (1024 PC / 512 Switch)
-    u8   flags;         // 1: bit0=active, bit1=fromPlayer
-    u8   padding;       // 1: alignment
+    u8   flags;         // 1: bit0=active, bit1=fromPlayer, bit2=isCrit
+    u8   projFlags;     // 1: PROJ_ORB/ORB_SHARD/GRAVITY/SPLASH/SPARK/VOID — drives skill VFX
+    u8   meshId;        // 1: weapon mesh to render (0 = procedural energy bolt)
+    u8   radiusQ;       // 1: radius quantized to 0-2.55 m in 0.01 m steps
     u16  posX, posY, posZ;  // 6
     u16  velX, velY, velZ;  // 6
 };

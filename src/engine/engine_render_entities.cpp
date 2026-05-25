@@ -176,6 +176,20 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             tint.z *= 0.7f;
         }
 
+        // Boss invuln/shield cue — STEADY (non-flashing) cool blue-white shift so the
+        // player can read that the boss is currently un-killable. Driven purely by data
+        // synced over the wire (bossPhase/minionShield), so host and clients match.
+        // ENTOMBING = full invuln channel; SEALED/minionShield = 75% damage reduction.
+        bool bossInvuln  = (e.bossPhase == BossPhase::ENTOMBING);
+        bool bossShielded = e.minionShield ||
+                            e.bossPhase == BossPhase::SEALED;
+        if (bossInvuln || bossShielded) {
+            f32 amt = bossInvuln ? 0.6f : 0.35f;  // invuln reads stronger than shielded
+            tint.x = tint.x * (1.0f - amt) + 0.55f * amt;
+            tint.y = tint.y * (1.0f - amt) + 0.75f * amt;
+            tint.z = tint.z * (1.0f - amt) + 1.0f  * amt;
+        }
+
         // Skip webs in main pass — rendered in a translucent second pass below
         if (e.materialId == s_webMatIds[0] || e.materialId == s_webMatIds[1] ||
             e.materialId == s_webMatIds[2] || e.materialId == s_webMatIds[3]) continue;
