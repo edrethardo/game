@@ -366,8 +366,9 @@ private:
 
     // Shared logic
     void handleWeaponFireForPlayer(NetPlayer& np, f32 dt);
-    void updateTargetLockForPlayer(NetPlayer& np, f32 dt);
     void handleWeaponFire(f32 dt); // singleplayer legacy
+    // Lock-on is inert (lockActive never set true); this now only handles the
+    // quickbar-use action. Name kept to avoid churning call sites (R7-6).
     void updateTargetLock(f32 dt); // singleplayer legacy
 
     void render(f32 alpha);
@@ -485,6 +486,22 @@ private:
     // Net player helpers
     void syncLocalPlayerToNetPlayer();
     void syncNetPlayerToLocalPlayer();
+
+    // R7-3: bridge active REMOTE NetPlayers into the server's AI/projectile target set.
+    // The AI + projectile systems operate on `Player&`/`Player**`, but remote players are
+    // NetPlayers — so on the SERVER we build throwaway Player "views" of each active,
+    // non-dead remote NetPlayer (copying the fields the targeting/damage paths read), pass
+    // them as extras to BOTH EnemyAI::update and ProjectileSystem::update, then copy the
+    // mutated fields (health + status timers) back into the NetPlayers. `buildRemotePlayerViews`
+    // fills the view array + pointer array (skipping the local host slot) and returns the count;
+    // `applyRemotePlayerViews` writes the mutated state back. NOT used in SP/split-screen.
+    u32  buildRemotePlayerViews(Player* views, Player** ptrs, u8* slots);
+    void applyRemotePlayerViews(const Player* views, const u8* slots, u32 count);
+    // TA-3: single-slot form of the same bridge, for the remote skill-cast paths. A guest's
+    // skill must run against ITS OWN Player view (not the host's m_localPlayer), so build a
+    // view of one remote NetPlayer, pass it to SkillSystem::tryActivate, then write back.
+    void buildRemotePlayerView(u8 slot, Player& out);
+    void applyRemotePlayerView(const Player& v, u8 slot);
 
     // Client: pick the aimed world item and request its pickup from the server
     // (CL_PICKUP_ITEM, server-authoritative pickups — N5).

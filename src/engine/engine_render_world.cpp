@@ -240,10 +240,16 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                     active = m_renderInterp.playerActive[i];
                     pos = m_renderInterp.playerPositions[i];
                     yaw = m_renderInterp.playerYaws[i];
+                    // Skip dead remotes: isDead rides synced animFlags bit2 (see snapshot.cpp
+                    // buildFromState + interpolateRemotePlayers' outAnimFlags). Without this a
+                    // dead remote keeps rendering as an upright live figure until it respawns.
+                    if (m_renderInterp.playerAnimFlags[i] & (1 << 2)) continue;
                 } else {
                     active = m_players[i].active;
                     pos = m_players[i].position;
                     yaw = m_players[i].yaw;
+                    // Host has the authoritative NetPlayer.isDead directly — same gate as CLIENT.
+                    if (m_players[i].isDead) continue;
                 }
                 if (!active) continue;
 

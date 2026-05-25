@@ -9,7 +9,7 @@ static constexpr u32 MAX_PACKET_SIZE = 4096;
 // Snapshot payloads can exceed one UDP datagram and are sent via ENet's
 // unreliable-fragment path (Net::broadcastSnapshot), so they are NOT bounded by
 // MAX_PACKET_SIZE. 8 KB holds all 4 players + 128 entities + ~304 projectiles
-// (28 fixed + 4*29 + 128*20 = 2704 B; remaining 5488 B / 18 B = 304 projectiles),
+// (29 fixed + 4*31 + 128*20 = 2713 B; remaining 5479 B / 18 B = 304 projectiles),
 // which covers a Frozen-Orb storm during a boss fight. Loads above this are
 // priority-dropped by the serializer (projectiles first, nearest-player kept) so
 // the packet's declared counts always match the bytes present. Kept modest on

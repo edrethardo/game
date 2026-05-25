@@ -625,21 +625,10 @@ void Engine::render(f32 alpha) {
         }
     }
 
-    // Target lock indicator
-    if (m_localPlayer.lockActive) {
-        const EntityPool& lockPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities : m_entities;
-        EntityHandle h = {m_localPlayer.lockIndex, m_localPlayer.lockGeneration};
-        Entity* target = handleGet(const_cast<EntityPool&>(lockPool), h);
-        if (target) {
-            AABB lockBox = entityAABB(*target);
-            lockBox.min = lockBox.min - Vec3{0.05f, 0.05f, 0.05f};
-            lockBox.max = lockBox.max + Vec3{0.05f, 0.05f, 0.05f};
-            bool wasEnabled = DebugDraw::isEnabled();
-            DebugDraw::setEnabled(true);
-            DebugDraw::box(lockBox, {0.0f, 1.0f, 1.0f});
-            DebugDraw::setEnabled(wasEnabled);
-        }
-    }
+    // Soft target lock-on is currently inert: lockActive is never set true (see
+    // updateTargetLock in engine_combat.cpp), so the lock indicator UI was dead code
+    // and has been removed (R7-6). The lockIndex/lockActive snapshot fields are still
+    // serialized as harmless zero/false data — see SnapPlayer in net/snapshot.h.
 
     DebugDraw::flush(m_camera.viewProjection);
 

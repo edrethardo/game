@@ -414,6 +414,92 @@ void Engine::syncNetPlayerToLocalPlayer() {
     m_localPlayer.ringPassive      = static_cast<u8>(np.ringPassive);
 }
 
+// R7-3 / TA-3: SERVER target bridge. The AI/projectile/skill systems operate on `Player&`,
+// but remote players are `NetPlayer`s — so we build throwaway Player "views" of a remote and
+// copy the mutated fields back afterwards. The per-field copy list lives ONCE in these two
+// free helpers so the array adapter (AI/projectile path) and the single-slot helpers (skill
+// path) never duplicate it. Wanderer-only concepts NetPlayer lacks (smokeTimer, deflectTimer,
+// dodgeState, curseStacks, ...) stay at the Player default-zero — graceful (no stealth, no
+// deflect, detectable) — and, having no NetPlayer home, simply don't persist across the call.
+
+// Seed `v` from `np` with every field the AI/projectile/skill paths read. Position/yaw/pitch
+// are included because skills (PhaseDash, ShadowStrike/Step) read the CURRENT transform to
+// compute their destination; the AI/projectile path reads position too. lifesaverArmed (TA-1)
+// is mirrored so the one-shot near-death i-frame stays one-shot for remotes.
+static void seedRemoteView(const NetPlayer& np, Player& v) {
+    v = Player{};                                        // default-zero Wanderer-only fields
+    v.position        = np.position;
+    v.velocity        = np.velocity;
+    v.yaw             = np.yaw;
+    v.pitch           = np.pitch;
+    v.eyeHeight       = np.eyeHeight;
+    v.health          = np.health;
+    v.maxHealth       = np.maxHealth;
+    // Shared status the damage/skill paths read/write (NetPlayer-backed).
+    v.invulnTimer     = np.invulnTimer;
+    v.damageReduction = np.damageReduction;
+    v.slowTimer       = np.slowTimer;
+    v.poisonTimer     = np.poisonTimer;
+    v.poisonDps       = np.poisonDps;
+    v.burnTimer       = np.burnTimer;
+    v.burnDps         = np.burnDps;
+    v.freezeTimer     = np.freezeTimer;
+    v.blocking        = np.blocking;
+    v.blockTimer      = np.blockTimer;
+    v.lifesaverArmed  = np.lifesaverArmed; // TA-1: mirror so the i-frame isn't re-armed each frame
+}
+
+// Copy back every view field the AI/projectile/skill paths can mutate. Position is written back
+// so dash/blink skills actually move the remote; serverNetPost then ticks DoT/death and the
+// snapshot carries the result to the owning client.
+static void writeBackRemoteView(const Player& v, NetPlayer& np) {
+    np.position         = v.position;       // TA-3: dash/blink skills move the casting remote
+    np.health           = v.health;         // damage / Blood Nova self-cost / heals
+    np.invulnTimer      = v.invulnTimer;    // lifesaver near-death i-frame + Divine Shield
+    np.slowTimer        = v.slowTimer;
+    np.poisonTimer      = v.poisonTimer;
+    np.poisonDps        = v.poisonDps;
+    np.burnTimer        = v.burnTimer;
+    np.burnDps          = v.burnDps;
+    np.freezeTimer      = v.freezeTimer;
+    np.damageFlashTimer = v.damageFlashTimer; // drives the remote damage-flash render
+    np.lifesaverArmed   = v.lifesaverArmed;   // TA-1: persist consume/re-arm across frames
+}
+
+// Array form (AI + projectile pass): build a view of every ACTIVE, non-dead REMOTE NetPlayer
+// (skip the local host slot, whose damage flows through m_localPlayer in gameUpdate). `views[k]`
+// is the view for `ptrs[k]`; `slots[k]` records its NetPlayer index for applyRemotePlayerViews.
+u32 Engine::buildRemotePlayerViews(Player* views, Player** ptrs, u8* slots) {
+    u32 count = 0;
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (i == m_localPlayerIndex) continue;           // host slot handled via m_localPlayer
+        const NetPlayer& np = m_players[i];
+        if (!np.active || np.isDead) continue;           // only live remotes are targetable
+        slots[count] = static_cast<u8>(i);
+        seedRemoteView(np, views[count]);
+        ptrs[count] = &views[count];
+        count++;
+    }
+    return count;
+}
+
+// Array form: copy the mutated view fields back into the matching remote NetPlayers.
+void Engine::applyRemotePlayerViews(const Player* views, const u8* slots, u32 count) {
+    for (u32 k = 0; k < count; k++)
+        writeBackRemoteView(views[k], m_players[slots[k]]);
+}
+
+// TA-3 single-slot form (skill path): seed `out` from one specific remote NetPlayer so the
+// skill computes against THAT guest's current transform/health, not the host's m_localPlayer.
+void Engine::buildRemotePlayerView(u8 slot, Player& out) {
+    seedRemoteView(m_players[slot], out);
+}
+
+// TA-3 single-slot form: write a remote's skill-mutated view back into its NetPlayer.
+void Engine::applyRemotePlayerView(const Player& v, u8 slot) {
+    writeBackRemoteView(v, m_players[slot]);
+}
+
 
 // ---------------------------------------------------------------------------
 // Stats

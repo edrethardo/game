@@ -57,11 +57,12 @@ struct NetPlayer {
     // Weapon
     WeaponState weaponState;
 
-    // Target lock (server validates)
+    // Target lock — currently inert (lockActive never set true). lockActive (snapshot
+    // flag bit 2) and lockIndex are still serialized into the wire, so these fields stay
+    // even though no code drives them (R7-6).
     u16  lockIndex      = 0xFFFF;
     u16  lockGeneration = 0;
     bool lockActive     = false;
-    f32  lockLosTimer   = 0.0f;
 
     // Spawn
     Vec3 spawnPosition  = {0,0,0};
@@ -82,6 +83,10 @@ struct NetPlayer {
     f32  blockTimer        = 0.0f;
     bool isDead            = false;
     f32  potionCooldown    = 0.0f;
+    // Near-death lifesaver i-frame (TA-1): server-side mirror of Player.lifesaverArmed so the
+    // one-shot below-20%-HP invuln stays one-shot across frames for remotes (consumed on use,
+    // re-earned only at >=40% HP). NOT serialized — server-only state, never on the wire.
+    bool lifesaverArmed    = true;
     // Per-player equipment passives (read from inventory each tick)
     SkillId weaponProc     = SkillId::NONE;
     SkillId armorAura      = SkillId::NONE;

@@ -8,12 +8,14 @@
 #include "net/net.h"
 #include "net/net_player.h"
 
-// Quantized snapshot of one player (31 bytes)
+// Quantized snapshot of one player (31 wire bytes — see SNAP_PLAYER_WIRE)
 struct SnapPlayer {
     u8   slotIndex;     // 1
-    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=lockActive, bit3=reloading, bit4=blocking, bit5=isDead
+    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=lockActive, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
     u8   weaponId;      // 1
-    u8   health;        // 1: 0-255 mapped to 0-maxHealth
+    u8   health;        // 1: 0-255 ratio of maxHealth (client reconstructs absolute = ratio*maxHealth)
+    u16  maxHealth;     // 2: absolute max HP (raw, rounded) — lets the client reconstruct absolute
+                        //    HP and track per-floor growth (R7-4). Capped to u16 range on pack.
     u16  posX, posY, posZ;  // 6
     u16  velX, velZ;    // 4
     u16  yaw;           // 2
@@ -27,7 +29,7 @@ struct SnapPlayer {
     u8   burnTimer;     // 1: quantized
     u8   freezeTimer;   // 1: quantized
     // Animation state for remote player rendering
-    u8   animFlags;     // 1: bit0=melee swing, bit1=firing/recoil, bit2=skillActive
+    u8   animFlags;     // 1: bit0=attacking (cooldown active), bit1=reloading, bit2=isDead
     u8   weaponMeshId;  // 1: mesh ID of equipped weapon (for third-person rendering)
     // Wanderer dodge state for remote rendering: bit0=rolling, bits1-3=counterStacks (0-5)
     u8   dodgeFlags;    // 1
@@ -89,7 +91,7 @@ struct WorldSnapshot {
     SnapEntity     entities[MAX_ENTITIES];
     SnapWorldItem  worldItems[MAX_WORLD_ITEMS];
     // Heap-allocated projectile array — supports full MAX_PROJECTILES without
-    // bloating BSS (1024 × 16 bytes = 16KB per snapshot on PC; 512 × 16 = 8KB on Switch).
+    // bloating BSS (1024 × 18 bytes = 18KB per snapshot on PC; 512 × 18 = 9KB on Switch).
     SnapProjectile* projectiles = nullptr;
 
     WorldSnapshot()  { projectiles = new SnapProjectile[MAX_PROJECTILES](); }

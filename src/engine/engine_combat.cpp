@@ -254,6 +254,26 @@ void Engine::handleWeaponFire(f32 dt) {
                         break;
                     }
                 }
+                // R7-5: replicate the host's own hitscan impact to clients so they see
+                // the spark (mirrors the remote-player path in handleWeaponFireForPlayer).
+                // SERVER-gated: singleplayer/split-screen (NONE) has no peers to notify.
+                if (m_netRole == NetRole::SERVER) {
+                    u8 evBuf[sizeof(PacketHeader) + 26]; // eventType(1) + pos(12) + normal(12) + hitEntity(1)
+                    PacketHeader* evHdr = reinterpret_cast<PacketHeader*>(evBuf);
+                    evHdr->type = NetPacketType::SV_EVENT;
+                    evHdr->flags = 0;
+                    evHdr->seq = 0;
+                    u32 off = sizeof(PacketHeader);
+                    evBuf[off++] = static_cast<u8>(NetEventType::HITSCAN_IMPACT);
+                    std::memcpy(evBuf + off, &result.hitPosition.x, 4); off += 4;
+                    std::memcpy(evBuf + off, &result.hitPosition.y, 4); off += 4;
+                    std::memcpy(evBuf + off, &result.hitPosition.z, 4); off += 4;
+                    std::memcpy(evBuf + off, &result.hitNormal.x, 4);   off += 4;
+                    std::memcpy(evBuf + off, &result.hitNormal.y, 4);   off += 4;
+                    std::memcpy(evBuf + off, &result.hitNormal.z, 4);   off += 4;
+                    evBuf[off++] = result.hitEntity ? 1 : 0;
+                    Net::broadcastReliable(evBuf, off);
+                }
             }
         }
         break;
@@ -773,7 +793,9 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Soft target lock (singleplayer — unchanged from Phase 3)
+// Soft target lock (singleplayer). Lock-on itself is currently inert — lockActive
+// is never set true, so this only handles the TARGET_LOCK action's quickbar-use
+// behaviour. The trailing lockActive=false keeps the (unused) state pinned off (R7-6).
 // ---------------------------------------------------------------------------
 void Engine::updateTargetLock(f32 dt) {
     (void)dt;

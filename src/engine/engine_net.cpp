@@ -136,9 +136,24 @@ void Engine::serverNetPre(f32 dt) {
                         Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
                                                     sinf(m_players[i].pitch),
                                                    -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
+                        // TA-7: set skill-scaling globals from the REMOTE's own data so the
+                        // guest's skill damage isn't inherited from the host's last cast.
+                        // Item skills scale by item level (boots) and use base class damage (1.0).
+                        SkillSystem::setSkillPower(boots.itemLevel > 1
+                            ? static_cast<f32>(boots.itemLevel - 1) / 149.0f : 0.0f);
+                        SkillSystem::setClassDamageMult(1.0f);
+                        // Network forces split-count 1, so the per-player buff arrays only model
+                        // the host (slot 0). NOTE: meteor/holy kill-heal in updateMeteors credits
+                        // players[caster] (LOCAL players), so a remote's heal mis-attributes to the
+                        // host — deferred fix needs updateMeteors to accept remote NetPlayers.
+                        SkillSystem::setCastingPlayer(0);
+                        // TA-3: cast against the GUEST's own view, not the host's m_localPlayer,
+                        // so position/health-mutating skills (PhaseDash, Blood Nova) hit the guest.
+                        Player view; buildRemotePlayerView(static_cast<u8>(i), view);
                         SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
                                                   ep, fwd, m_players[i].yaw,
-                                                  m_projectiles, m_entities, m_level.grid, m_localPlayer);
+                                                  m_projectiles, m_entities, m_level.grid, view);
+                        applyRemotePlayerView(view, static_cast<u8>(i));
                     }
                 }
             }
@@ -152,9 +167,17 @@ void Engine::serverNetPre(f32 dt) {
                         Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
                                                     sinf(m_players[i].pitch),
                                                    -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
+                        // TA-7: scale from the REMOTE's own helmet item level (see boot note).
+                        SkillSystem::setSkillPower(helm.itemLevel > 1
+                            ? static_cast<f32>(helm.itemLevel - 1) / 149.0f : 0.0f);
+                        SkillSystem::setClassDamageMult(1.0f);
+                        SkillSystem::setCastingPlayer(0); // remote heals mis-attribute to host (see boot note)
+                        // TA-3: cast against the GUEST's own view (see boot-skill note above).
+                        Player view; buildRemotePlayerView(static_cast<u8>(i), view);
                         SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
                                                   ep, fwd, m_players[i].yaw,
-                                                  m_projectiles, m_entities, m_level.grid, m_localPlayer);
+                                                  m_projectiles, m_entities, m_level.grid, view);
+                        applyRemotePlayerView(view, static_cast<u8>(i));
                     }
                 }
             }
@@ -179,9 +202,26 @@ void Engine::serverNetPre(f32 dt) {
                         Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw) * cosf(m_players[i].pitch),
                                                     sinf(m_players[i].pitch),
                                                    -cosf(m_players[i].yaw) * cosf(m_players[i].pitch)});
+                        // TA-7: set skill-scaling globals from the REMOTE's own data (mirror the
+                        // host's class-skill block in engine_update_skills.cpp) so the guest's
+                        // skill damage uses its own floor/weapon, not the host's last cast.
+                        SkillSystem::setSkillPower(0.0f); // class skills use base power
+                        // Class skill damage scales 6% per effective floor (reuse effectiveFloor above).
+                        SkillSystem::setClassDamageMult(1.0f + (effectiveFloor - 1) * 0.06f);
+                        // Weapon damage for Marksman skills that scale off the equipped weapon.
+                        { const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                          WeaponDef wd = !isItemEmpty(wpn)
+                              ? Inventory::getWeaponFromItem(m_inventories[i], m_itemDefs, wpn)
+                              : m_weaponDefs[0];
+                          SkillSystem::setWeaponDamage(wd.damage); }
+                        SkillSystem::setCastingPlayer(0); // remote heals mis-attribute to host (see boot note)
+                        // TA-3: cast against the GUEST's own view (see boot-skill note above)
+                        // so class dash/blink/Blood Nova mutate the guest, never the host.
+                        Player view; buildRemotePlayerView(static_cast<u8>(i), view);
                         SkillSystem::tryActivate(tempSS, m_skillDefs, m_skillDefCount,
                                                   eyePos, fwd, m_players[i].yaw,
-                                                  m_projectiles, m_entities, m_level.grid, m_localPlayer);
+                                                  m_projectiles, m_entities, m_level.grid, view);
+                        applyRemotePlayerView(view, static_cast<u8>(i));
                     }
                 }
             }

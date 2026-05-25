@@ -230,15 +230,21 @@ void Engine::tickWandererTimers(f32 dt) {
 // and clearing DoTs while invulnerable.
 // ---------------------------------------------------------------------------
 void Engine::tickPlayerStatusEffects(f32 dt) {
+    // R7-4: on the CLIENT, DoT damage to the local player is server-authoritative — the
+    // server applies poison/burn in serverNetPost and the result rides the snapshot, which
+    // Client::reconcile adopts every tick. Subtracting it locally too would double-dip the
+    // ghost sim against authoritative HP, so the client only DECAYS the timers (for HUD) and
+    // never touches health here. (SP + SERVER host keep the full local DoT path.)
+    const bool clientGhost = (m_netRole == NetRole::CLIENT);
     // Tick player status effects (poison, burn, freeze) — blocked by invulnerability
     if (m_localPlayer.invulnTimer <= 0.0f) {
         if (m_localPlayer.poisonTimer > 0.0f) {
             m_localPlayer.poisonTimer -= dt;
-            m_localPlayer.health -= m_localPlayer.poisonDps * dt;
+            if (!clientGhost) m_localPlayer.health -= m_localPlayer.poisonDps * dt;
         }
         if (m_localPlayer.burnTimer > 0.0f) {
             m_localPlayer.burnTimer -= dt;
-            m_localPlayer.health -= m_localPlayer.burnDps * dt;
+            if (!clientGhost) m_localPlayer.health -= m_localPlayer.burnDps * dt;
         }
     } else {
         // Clear DoT effects during invulnerability

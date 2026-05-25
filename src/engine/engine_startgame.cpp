@@ -583,9 +583,20 @@ void Engine::startGame(GameStart mode) {
     // floor frozen behind the respawn overlay (defensive; the descend path also clears).
     for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) m_playerDead[p] = false;
 
-    // Init players
+    // Init players.
+    // On a CLIENT DESCEND the server hasn't re-sent our HP yet (full authoritative
+    // client HP replication lands in a later wave), and NetPlayer{} defaults to
+    // health=maxHealth=100 — which the first IN_GAME frame's syncNetPlayerToLocalPlayer
+    // would copy into m_localPlayer, clobbering carried HP + per-floor growth. Preserve
+    // the local slot's HP/maxHealth across the reset so the descend keeps it.
+    f32 carriedHealth = m_players[m_localPlayerIndex].health;
+    f32 carriedMaxHealth = m_players[m_localPlayerIndex].maxHealth;
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         m_players[i] = NetPlayer{};
+    }
+    if (m_netRole == NetRole::CLIENT && mode == GameStart::DESCEND) {
+        m_players[m_localPlayerIndex].health    = carriedHealth;
+        m_players[m_localPlayerIndex].maxHealth = carriedMaxHealth;
     }
 
     // Setup local player
@@ -634,18 +645,23 @@ void Engine::startGame(GameStart mode) {
         // Follow the host's mid-run floor descents (server-authoritative).
         Net::setOnLevelSeed(Engine::onLevelSeed);
         Client::init(m_localPlayerIndex);
-        // CONTINUE doesn't grant a loadout, but a FRESH network joiner has no save to
-        // restore from — so locally mirror the deterministic starting loadout the server
-        // grants this slot in onPlayerJoin. Both ends thus agree on the joiner's gear
-        // for a new run. (Mid-run inventory replication still needs SV_INVENTORY_SYNC.)
-        Inventory::init(m_inventories[m_localPlayerIndex]);
-        m_skillStates[m_localPlayerIndex] = SkillState{};
-        Quickbar::init(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-        m_playerClasses[m_localPlayerIndex] = m_playerClass; // ensure loadout uses chosen class
-        equipStartingLoadout(m_localPlayerIndex);
-        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
-        m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy + m_inventories[m_localPlayerIndex].bonusEnergyFlat;
-        m_skillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].maxEnergy;
+        // Fresh network join only (mode != DESCEND): a brand-new joiner has no save to
+        // restore from, so locally mirror the deterministic starting loadout the server
+        // grants this slot in onPlayerJoin. Both ends thus agree on the joiner's gear for
+        // a new run. (Mid-run inventory replication still needs SV_INVENTORY_SYNC.)
+        // On DESCEND the client now re-enters startGame every floor (FLOOR_TRANSITION ->
+        // startGame(DESCEND)); it must KEEP its accumulated inventory/skills/quickbar
+        // exactly like the host's DESCEND path, so skip the wipe+re-grant entirely.
+        if (mode != GameStart::DESCEND) {
+            Inventory::init(m_inventories[m_localPlayerIndex]);
+            m_skillStates[m_localPlayerIndex] = SkillState{};
+            Quickbar::init(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
+            m_playerClasses[m_localPlayerIndex] = m_playerClass; // ensure loadout uses chosen class
+            equipStartingLoadout(m_localPlayerIndex);
+            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+            m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy + m_inventories[m_localPlayerIndex].bonusEnergyFlat;
+            m_skillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].maxEnergy;
+        }
     }
 
     // Brief invulnerability on floor entry for all players

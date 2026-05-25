@@ -91,11 +91,11 @@ struct Player {
     bool adrenalineUpgraded = false; // true once floor >= 30 (move speed bonus active)
     u8   adrenalineMaxStacks = 3;    // 3 on floors 1-4, 5 from floor 5 on (set each tick)
 
-    // Soft target lock
+    // Soft target lock — currently inert (lockActive never set true). Kept because the
+    // values flow through the sync helpers into NetPlayer / the snapshot wire (R7-6).
     u16  lockIndex      = 0xFFFF; // entity index (or 0xFFFF if none)
     u16  lockGeneration = 0;
     bool lockActive     = false;
-    f32  lockLosTimer   = 0.0f;   // time since LOS was broken
 
     // Cached forward vector (computed once per frame in update)
     Vec3 forward = {0.0f, 0.0f, -1.0f};

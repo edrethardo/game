@@ -54,6 +54,12 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         if (hpFrac < 0.0f) hpFrac = 0.0f;
         if (hpFrac > 1.0f) hpFrac = 1.0f;
         sp.health   = static_cast<u8>(hpFrac * 255.0f);
+        // Absolute max HP on the wire so the client reconstructs absolute health and tracks
+        // per-floor growth (R7-4). Round + clamp into u16 (HP never realistically exceeds 65535).
+        f32 mh = np.maxHealth;
+        if (mh < 0.0f) mh = 0.0f;
+        if (mh > 65535.0f) mh = 65535.0f;
+        sp.maxHealth = static_cast<u16>(mh + 0.5f);
 
         sp.posX = Quantize::packPos(np.position.x);
         sp.posY = Quantize::packPos(np.position.y);
@@ -207,7 +213,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 
 // Per-record wire sizes (bytes actually emitted by the loops below — NOT sizeof
 // the structs, which include alignment padding that is never serialized).
-static constexpr u32 SNAP_PLAYER_WIRE     = 29;
+// Player: 1(slot)+1(flags)+1(weapon)+1(health)+2(maxHealth) + 6(pos)+4(vel)+2(yaw)+2(pitch)
+//       + 2(lockIndex) + 1(clip)+1(statusFlags)+1(invuln)+1(poison)+1(burn)+1(freeze)
+//       + 1(animFlags)+1(weaponMeshId)+1(dodgeFlags) = 31. (Was 29 before maxHealth — R7-4.)
+static constexpr u32 SNAP_PLAYER_WIRE     = 31;
 // Entity: 1+1+1+1 + 6(pos) + 2(yaw) + 4(vel) + 1(stun)+1(freeze)+1(limb)+1(bossStatus) = 20.
 static constexpr u32 SNAP_ENTITY_WIRE     = 20;
 // Projectile: 2(idx) + 1(flags)+1(projFlags)+1(meshId)+1(radiusQ) + 6(pos) + 6(vel) = 18.
@@ -304,6 +313,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w8(sp.flags);
         w8(sp.weaponId);
         w8(sp.health);
+        w16(sp.maxHealth);
         w16(sp.posX);
         w16(sp.posY);
         w16(sp.posZ);
@@ -407,6 +417,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.flags     = r.readU8();
         sp.weaponId  = r.readU8();
         sp.health    = r.readU8();
+        sp.maxHealth = r.readU16();
         sp.posX      = r.readU16();
         sp.posY      = r.readU16();
         sp.posZ      = r.readU16();

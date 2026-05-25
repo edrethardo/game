@@ -321,7 +321,27 @@ void Engine::update(f32 dt) {
                 if (sp == 0) {
                     // Shared systems must always tick so enemies return to spawns
                     // when both players are dead, and projectiles expire normally.
-                    if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
+                    if (m_netRole == NetRole::SERVER) {
+                        // TA-2: the host (slot 0) is down, but living guests must still be
+                        // targetable — otherwise enemies/projectiles ignore them and combat
+                        // stalls until the host respawns. Build remote views and pass them as
+                        // extras (mirroring the main path's R7-3 bridge), then write back the
+                        // damage/status. SERVER-gated: NONE keeps its split-screen behavior.
+                        Player  deadHostViews[MAX_PLAYERS - 1];
+                        Player* deadHostPtrs[MAX_PLAYERS - 1];
+                        u8      deadHostSlots[MAX_PLAYERS - 1];
+                        u32     deadHostCount = buildRemotePlayerViews(deadHostViews, deadHostPtrs, deadHostSlots);
+                        // m_localPlayers[0] is the dead host's reference (idle/return AI target);
+                        // the live remotes ride along as extras so enemies chase the nearest of them.
+                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads,
+                                        deadHostCount > 0 ? deadHostPtrs : nullptr, deadHostCount, &m_level.dungeon);
+                        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[0].position, dt);
+                        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt, &m_spatialGrid,
+                                                 deadHostCount > 0 ? deadHostPtrs : nullptr, deadHostCount);
+                        if (deadHostCount > 0)
+                            applyRemotePlayerViews(deadHostViews, deadHostSlots, deadHostCount);
+                    } else if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
                         EnemyAI::update(m_entities, m_level.grid, m_localPlayers[1], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
                         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[1].position, dt);
                         SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
@@ -577,6 +597,38 @@ void Engine::gameUpdate(f32 dt) {
         m_localPlayer.eyeHeight = 1.7f + viewBobY;
     }
 
+    // R7-3: SERVER target bridge — throwaway Player views of active remote NetPlayers so
+    // server enemies/projectiles can chase + damage them (they only ever saw the host
+    // before). Built ONCE here so the SAME views feed BOTH the AI pass and the projectile
+    // pass below; the mutated fields are copied back to the NetPlayers after the projectile
+    // pass. MAX_PLAYERS-1 = at most 3 remotes. Empty (count 0) in SP/split-screen, so the
+    // existing branches below are untouched there. m_splitPlayerCount is forced to 1 in
+    // networked play, so the split-screen and SERVER branches are mutually exclusive.
+    Player  remoteViews[MAX_PLAYERS - 1];
+    Player* remotePtrs[MAX_PLAYERS - 1];
+    u8      remoteSlots[MAX_PLAYERS - 1];
+    u32     remoteViewCount = 0;
+    if (m_netRole == NetRole::SERVER && m_activePlayerIndex == 0)
+        remoteViewCount = buildRemotePlayerViews(remoteViews, remotePtrs, remoteSlots);
+
+    // R7-4 option (a): on the CLIENT, the local ghost sim (EnemyAI + projectiles still run
+    // against m_localPlayer between snapshots) must NOT fight authoritative HP. Snapshot the
+    // local player's HP + status before the ghost passes and restore them after, so the only
+    // source of truth for local HP is the snapshot (adopted in Client::reconcile). Movement is
+    // still predicted; only the damage/status the ghost would inflict is discarded.
+    const bool ghostGuard = (m_netRole == NetRole::CLIENT && m_activePlayerIndex == 0);
+    f32 savedHealth = 0.0f, savedInvuln = 0.0f, savedPoison = 0.0f, savedBurn = 0.0f,
+        savedFreeze = 0.0f, savedSlow = 0.0f, savedFlash = 0.0f;
+    if (ghostGuard) {
+        savedHealth = m_localPlayer.health;
+        savedInvuln = m_localPlayer.invulnTimer;
+        savedPoison = m_localPlayer.poisonTimer;
+        savedBurn   = m_localPlayer.burnTimer;
+        savedFreeze = m_localPlayer.freezeTimer;
+        savedSlow   = m_localPlayer.slowTimer;
+        savedFlash  = m_localPlayer.damageFlashTimer;
+    }
+
     // Enemy AI — run ONCE per frame, enemies pick the nearest player to target
     if (m_activePlayerIndex == 0) {
         PROFILE_SCOPE(1, "AI");
@@ -585,6 +637,9 @@ void Engine::gameUpdate(f32 dt) {
             // Co-op: pass P2 as extra target so enemies chase the nearest player
             Player* extras[] = { &m_localPlayers[1] };
             EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, extras, 1, &m_level.dungeon, spawnCalm);
+        } else if (remoteViewCount > 0) {
+            // SERVER: pass live remote players so enemies chase/melee the nearest of host+remotes.
+            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, remotePtrs, remoteViewCount, &m_level.dungeon, spawnCalm);
         } else {
             EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon, spawnCalm);
         }
@@ -645,9 +700,27 @@ void Engine::gameUpdate(f32 dt) {
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
             Player* projExtras[] = { &m_localPlayers[1] };
             ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid, projExtras, 1);
+        } else if (remoteViewCount > 0) {
+            // SERVER: same views as the AI pass so enemy-projectile damage lands on remotes too.
+            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid, remotePtrs, remoteViewCount);
         } else {
             ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid);
         }
+        }
+        // R7-3: copy AI + projectile damage/status back into the authoritative NetPlayers.
+        // serverNetPost then ticks DoT/death and the snapshot carries it to the owning client.
+        if (remoteViewCount > 0)
+            applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
+        // R7-4 option (a): discard any HP/status the CLIENT ghost sim just inflicted on the
+        // local player — authoritative HP comes only from the snapshot (Client::reconcile).
+        if (ghostGuard) {
+            m_localPlayer.health          = savedHealth;
+            m_localPlayer.invulnTimer     = savedInvuln;
+            m_localPlayer.poisonTimer     = savedPoison;
+            m_localPlayer.burnTimer       = savedBurn;
+            m_localPlayer.freezeTimer     = savedFreeze;
+            m_localPlayer.slowTimer       = savedSlow;
+            m_localPlayer.damageFlashTimer = savedFlash;
         }
         EntitySystem::tickTimers(m_entities, dt);
         WorldItemSystem::update(m_worldItems, dt);

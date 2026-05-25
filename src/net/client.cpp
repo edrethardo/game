@@ -28,6 +28,14 @@ static u32             s_predCount = 0;
 static NetInput s_latestInput = {};
 static bool     s_hasInput    = false;
 
+// Set by Client::init (every client floor descend re-enters startGame -> Client::init,
+// engine_startgame.cpp). It forces receiveSnapshot to accept the FIRST snapshot after a
+// descend unconditionally, closing the reset-gap straddle window: if a late prior-floor
+// snapshot lands first it would become "newest", and a short prior floor (tick < RESET_GAP)
+// would then trap the real new-floor snapshot (tick ~0) inside RESET_GAP and discard it as
+// stale. Accepting the first arrival regardless makes the post-descend newest deterministic.
+static bool     s_acceptNextSnapshot = false;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -93,6 +101,7 @@ void Client::init(u8 localPlayerIndex) {
     s_predHead = 0;
     s_predCount = 0;
     s_hasInput = false;
+    s_acceptNextSnapshot = true; // first post-(re)init snapshot is accepted unconditionally (TA-6)
     LOG_INFO("Client: initialized (local player=%u)", localPlayerIndex);
 }
 
@@ -125,15 +134,39 @@ void Client::receiveSnapshot(const u8* data, u32 size) {
     static WorldSnapshot snap;
     snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
     if (Snapshot::deserialize(snap, data, size)) {
+        // TA-6: right after a descend, accept whatever arrives first as the sole newest,
+        // regardless of straddle ordering. Clear the (already-emptied-by-init) ring so this
+        // becomes the unambiguous newest, then resume normal monotonic discard. The RESET_GAP
+        // logic below stays as a backstop for in-session resets that don't go through init.
+        if (s_acceptNextSnapshot) {
+            s_acceptNextSnapshot = false;
+            s_snapHead = 0;
+            s_snapCount = 0;
+            pushSnapshot(snap);
+            return;
+        }
         // Snapshots ride an UNRELIABLE_FRAGMENT channel, so a stale fragment can
         // arrive AFTER a newer one. The buffer is ordered by arrival, not by tick,
         // and the 2-snapshot wall-clock interpolation blends the two newest arrivals
         // — so a late older snapshot pushed as "newest" makes remotes jump backward.
         // Discard anything not strictly newer than the latest already accepted.
         // serverTick is a monotonic u32 from the server sim (no wrap in any realistic
-        // session), so a plain compare is correct without seq wrap-handling.
+        // session) WITHIN a floor, so a plain compare is correct for same-floor reordering.
         const WorldSnapshot* newest = getSnapshot(0);
-        if (newest && snap.serverTick <= newest->serverTick) return;
+        if (newest && snap.serverTick <= newest->serverTick) {
+            // EXCEPTION: the host resets m_serverTick=0 when it descends, so new-floor
+            // snapshots start near tick 0 — far below the previous floor's tick. A plain
+            // monotonic discard would then reject every new-floor snapshot until the tick
+            // climbed back, freezing remotes/entities/loot for minutes. If the incoming
+            // tick is FAR below newest, treat it as a server reset (floor change): drop the
+            // now-stale prior-floor buffer and accept the new-floor snapshot. The gap
+            // (~10 s of ticks) is large enough that no legitimate same-floor reorder can
+            // hit it (in-flight reordering spans at most a few snapshots).
+            constexpr u32 RESET_GAP = 600; // 10 s at NET_TICK_RATE (60 Hz)
+            if (newest->serverTick - snap.serverTick <= RESET_GAP) return; // genuine stale reorder
+            s_snapHead = 0;
+            s_snapCount = 0; // clear prior-floor snapshots; this becomes the new newest
+        }
         pushSnapshot(snap);
     }
 }
@@ -166,6 +199,31 @@ bool Client::reconcile(NetPlayer& localPlayer, const LevelGrid& grid, f32 dt,
         }
     }
     if (!serverState) return false; // local player absent from snapshot — no-op
+
+    // R7-4: adopt the server's AUTHORITATIVE health/maxHealth + status into the local
+    // player BEFORE any position-reconcile branch returns. The wire carries health as a
+    // 0-255 ratio of the (now also wired) absolute maxHealth, so reconstruct absolute HP =
+    // ratio * maxHealth. This is the client's source of truth for the HUD HP bar and the
+    // death check — the local ghost sim no longer dictates HP (the engine also save/restores
+    // local HP around its ghost AI pass, option (a), so this value isn't fought between
+    // snapshots). maxHealth==0 (pre-first-real-snapshot) is ignored so we don't zero HP.
+    if (serverState->maxHealth > 0) {
+        localPlayer.maxHealth = static_cast<f32>(serverState->maxHealth);
+        localPlayer.health    = (serverState->health / 255.0f) * localPlayer.maxHealth;
+        // Status timers (quantized 0.04 s steps; see buildFromState). The status path on the
+        // client should reflect the server so HUD debuff icons / DoT match authoritative state.
+        localPlayer.invulnTimer = serverState->invulnTimer / 25.0f;
+        localPlayer.poisonTimer = serverState->poisonTimer / 25.0f;
+        localPlayer.burnTimer   = serverState->burnTimer   / 25.0f;
+        localPlayer.freezeTimer = serverState->freezeTimer / 25.0f;
+        // slowTimer has only a status FLAG on the wire (bit4), not a quantized value; keep a
+        // short slow alive while the flag is set so the speed debuff is visible client-side.
+        if (serverState->statusFlags & (1 << 4)) {
+            if (localPlayer.slowTimer < 0.1f) localPlayer.slowTimer = 0.2f;
+        } else {
+            localPlayer.slowTimer = 0.0f;
+        }
+    }
 
     // Acked tick: the highest client input tick the server has processed for our slot.
     // The server sets lastProcessedInputTick for every REMOTE slot each tick
@@ -296,8 +354,9 @@ void Client::interpolateRemotePlayers(u8 localSlot,
             outPositions[slot].z = Quantize::unpackPos(sp.posZ);
             outYaws[slot]   = Quantize::unpackAngle(sp.yaw);
             outPitches[slot] = Quantize::unpackAngle(sp.pitch);
-            outHealth[slot] = (sp.health / 255.0f) * 100.0f;
-            outMaxHealth[slot] = 100.0f;
+            // Absolute HP from the wired maxHealth (R7-4) — falls back to 100 pre-first-snap.
+            outMaxHealth[slot] = (sp.maxHealth > 0) ? static_cast<f32>(sp.maxHealth) : 100.0f;
+            outHealth[slot] = (sp.health / 255.0f) * outMaxHealth[slot];
             if (outAnimFlags) outAnimFlags[slot] = sp.animFlags;
         }
         return;
@@ -342,8 +401,9 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         outPositions[slot] = posA + (posB - posA) * t;
         outYaws[slot]   = lerpAngle(yawA, yawB, t);
         outPitches[slot] = lerpAngle(pitchA, pitchB, t);
-        outHealth[slot] = (spB.health / 255.0f) * 100.0f;
-        outMaxHealth[slot] = 100.0f;
+        // Absolute HP from the wired maxHealth (R7-4) — falls back to 100 pre-first-snap.
+        outMaxHealth[slot] = (spB.maxHealth > 0) ? static_cast<f32>(spB.maxHealth) : 100.0f;
+        outHealth[slot] = (spB.health / 255.0f) * outMaxHealth[slot];
         if (outAnimFlags) outAnimFlags[slot] = spB.animFlags; // latest snapshot's anim state
     }
 }
