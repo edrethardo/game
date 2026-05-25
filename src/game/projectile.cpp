@@ -80,12 +80,50 @@ static void destroyProjectile(ProjectilePool& pool, u32 idx) {
     if (pool.activeCount > 0) pool.activeCount--;
 }
 
+// Result of testing one enemy projectile against one player.
+enum class PlayerHitResult { MISS, DEFLECTED, HIT };
+
+// Apply an enemy projectile to one player: Wanderer Deflect absorb (full immunity
+// incl. status), else damage + on-hit status. Factored out of the old P1-only branch
+// so every local player (split-screen) gets identical treatment.
+static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& player) {
+    AABB playerBox = {
+        player.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
+        player.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
+    };
+    if (!CombatQuery::aabbOverlap(projBox, playerBox)) return PlayerHitResult::MISS;
+    // Wanderer Deflect: absorb into the deflect pool (full immunity incl. status).
+    if (player.deflectTimer > 0.0f) {
+        player.deflectAbsorbed += p.damage;
+        player.deflectHitCount++;
+        p.lifetime = 0.0f; // destroy absorbed projectile (reaped next frame)
+        return PlayerHitResult::DEFLECTED;
+    }
+    Combat::applyDamageToPlayer(player, p.damage, &p.position);
+    // Apply on-hit status effect from projectile (or default slow)
+    if (p.onHitEffect == 1) {        // poison
+        player.poisonTimer = fmaxf(player.poisonTimer, p.onHitDuration);
+        player.poisonDps = 4.0f;
+    } else if (p.onHitEffect == 2) { // slow
+        player.slowTimer = fmaxf(player.slowTimer, p.onHitDuration);
+    } else if (p.onHitEffect == 3) { // burn
+        player.burnTimer = fmaxf(player.burnTimer, p.onHitDuration);
+    } else if (p.onHitEffect == 4) { // freeze
+        player.freezeTimer = fmaxf(player.freezeTimer, p.onHitDuration);
+    } else {
+        player.slowTimer = 2.5f;     // default mild slow
+    }
+    return PlayerHitResult::HIT;
+}
+
 void ProjectileSystem::update(ProjectilePool& pool,
                                const LevelGrid& grid,
                                EntityPool& entities,
                                Player& player,
                                f32 dt,
-                               const SpatialGrid* spatialGrid)
+                               const SpatialGrid* spatialGrid,
+                               Player** extraPlayers,
+                               u32 extraPlayerCount)
 {
     // Snapshot activeCount before iterating — destroyProjectile() decrements it
     // mid-loop, which would cause early exit and leave later projectiles stuck.
@@ -252,37 +290,19 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 continue;
             }
         } else {
-            // Hit player
-            AABB playerBox = {
-                player.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
-                player.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
-            };
-            if (CombatQuery::aabbOverlap(projBox, playerBox)) {
-                // Wanderer Deflect: absorb projectile into the deflect pool
-                if (player.deflectTimer > 0.0f) {
-                    player.deflectAbsorbed += p.damage;
-                    player.deflectHitCount++;
-                    p.lifetime = 0.0f; // destroy absorbed projectile
-                    continue;
+            // Enemy projectile — test the primary player, then each extra local player
+            // (split-screen). First DEFLECT/HIT consumes the projectile; primary wins
+            // ties so singleplayer behavior is byte-identical.
+            PlayerHitResult r = tryHitPlayer(p, projBox, player);
+            if (r == PlayerHitResult::MISS && extraPlayers) {
+                for (u32 ep = 0; ep < extraPlayerCount; ep++) {
+                    if (!extraPlayers[ep]) continue;
+                    r = tryHitPlayer(p, projBox, *extraPlayers[ep]);
+                    if (r != PlayerHitResult::MISS) break;
                 }
-                Combat::applyDamageToPlayer(player, p.damage, &p.position);
-                // Apply on-hit status effect from projectile (or default slow)
-                if (p.onHitEffect == 1) {  // poison
-                    player.poisonTimer = fmaxf(player.poisonTimer, p.onHitDuration);
-                    player.poisonDps = 4.0f;
-                } else if (p.onHitEffect == 2) {  // slow
-                    player.slowTimer = fmaxf(player.slowTimer, p.onHitDuration);
-                } else if (p.onHitEffect == 3) {  // burn
-                    player.burnTimer = fmaxf(player.burnTimer, p.onHitDuration);
-                } else if (p.onHitEffect == 4) {  // freeze
-                    player.freezeTimer = fmaxf(player.freezeTimer, p.onHitDuration);
-                } else {
-                    // Default: mild slow for enemy projectiles
-                    player.slowTimer = 2.5f;
-                }
-                destroyProjectile(pool, i);
-                continue;
             }
+            if (r == PlayerHitResult::HIT)       { destroyProjectile(pool, i); continue; }
+            if (r == PlayerHitResult::DEFLECTED) { continue; } // lifetime already 0
         }
     }
 }

@@ -326,11 +326,11 @@ void Engine::handleDebugKeys() {
 }
 
 // ---------------------------------------------------------------------------
-// tickFXDecay — expire timed visual effects pools: impact sparks, fire bursts,
-// nova rings, dash trails, beam FX, overcharge buff, dynamic weapon lights,
-// chain lightning FX, scorch ground-fire AoE DoT, and the herald aura burn.
+// tickSharedFX — ONCE-PER-FRAME decay of SHARED effect pools (impact/fire/nova/
+// dash/beam/chain FX, dynamic weapon lights) and the scorch ground-fire AoE DoT.
+// Must NOT run per local player, or split-screen ages/damages them at 2×.
 // ---------------------------------------------------------------------------
-void Engine::tickFXDecay(f32 dt) {
+void Engine::tickSharedFX(f32 dt) {
     // Decay visual effects (impact, fire, nova, dash)
     for (u32 i = 0; i < MAX_IMPACT_FX; i++) {
         if (m_fx.impactFX[i].active) {
@@ -362,8 +362,6 @@ void Engine::tickFXDecay(f32 dt) {
             if (m_fx.beamFX[i].timer <= 0.0f) m_fx.beamFX[i].active = false;
         }
     }
-    // Tick overcharge buff (Marksman)
-    SkillSystem::tickOvercharge(dt);
     // Tick dynamic lights (weapon muzzle flashes)
     for (u32 i = 0; i < MAX_DYNAMIC_LIGHTS; i++) {
         if (m_dynamicLights[i].timer > 0.0f) {
@@ -398,6 +396,17 @@ void Engine::tickFXDecay(f32 dt) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// tickPlayerFX — per-local-player feel/buff decay: Marksman overcharge timer and
+// the herald aura burn applied to the swapped-in m_localPlayer. Runs once per
+// local player (so each player's overcharge ticks once and each gets burned by
+// auras they personally stand in).
+// ---------------------------------------------------------------------------
+void Engine::tickPlayerFX(f32 dt) {
+    // Tick overcharge buff (Marksman) for the active local player
+    SkillSystem::tickOvercharge(dt, m_localPlayerIndex);
 
     // Herald aura — staggered across 30 frames to avoid full entity scan every frame
     static u32 s_heraldFrame = 0;

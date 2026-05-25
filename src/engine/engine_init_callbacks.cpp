@@ -391,6 +391,7 @@ void Engine::initCallbacks() {
                 12.0f, 4.0f, 0.5f, 8.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
+                e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // serve the casting local player
                 e->flags        |= ENT_FRIENDLY;
                 e->enemyType     = EnemyType::SPIDER;
                 e->meshId        = s_engine->m_meshIdSpider;
@@ -407,6 +408,7 @@ void Engine::initCallbacks() {
                 12.0f, 3.0f, 0.5f, 6.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
+                e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // serve the casting local player
                 e->flags        |= ENT_FRIENDLY | ENT_FLYING;
                 e->enemyType     = EnemyType::GENERIC;
                 e->meshId        = s_engine->m_meshIdBat;
@@ -423,6 +425,7 @@ void Engine::initCallbacks() {
                 15.0f, 3.0f, 1.0f, 10.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
+                e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // serve the casting local player
                 e->flags        |= ENT_FRIENDLY;
                 e->enemyType     = EnemyType::SPIDER;
                 e->meshId        = s_engine->m_meshIdSpider;
@@ -445,6 +448,7 @@ void Engine::initCallbacks() {
                 {0.2f, 0.3f, 0.2f}, false, baseHp * floorMult, 3.0f, 15.0f, 10.0f, 1.5f, 12.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
+                e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // serve the casting local player
                 e->flags        |= ENT_FRIENDLY;
                 e->enemyType     = EnemyType::GENERIC;
                 e->meshId        = s_engine->findMeshByName("turret");

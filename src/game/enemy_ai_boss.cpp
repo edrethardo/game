@@ -19,10 +19,12 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
 {
     // Delegate to BossAI personality system if this boss has a loaded def
     if (e.bossDefIdx != 0xFF && s_bossDefTable && e.bossDefIdx < s_bossDefTable->count) {
-        BossAI::update(e, s_bossDefTable->defs[e.bossDefIdx], pool, projectiles, player, grid, dt);
+        // Pass the chased target (nearest local player) so boss movement/teleport/LOS
+        // track whoever the boss is engaging, not always P1.
+        BossAI::update(e, s_bossDefTable->defs[e.bossDefIdx], pool, projectiles, *targetPlayer, grid, dt);
     }
 
-    bool bossLOS = dist < 20.0f && hasLOS(e, player, grid);
+    bool bossLOS = dist < 20.0f && hasLOS(e, *targetPlayer, grid);
 
     // Difficulty-proof boss-ability keying: e.level is the *effective* floor
     // (raw floor + difficulty*50), so on the floor-50→1 difficulty loop the

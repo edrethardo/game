@@ -314,7 +314,9 @@ bool Engine::loadGame(u8 slot) {
             const ClassDef& cdef = kClassDefs[static_cast<u32>(cls)];
             m_localPlayers[p].moveSpeed      = cdef.baseMoveSpeed;
             m_localPlayers[p].damageReduction = (cls == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
-            m_skillStates[p].maxEnergy        = cdef.baseEnergy;
+            m_skillStates[p].maxEnergy        = cdef.baseEnergy + m_inventories[p].bonusEnergyFlat;
+            if (m_skillStates[p].energy > m_skillStates[p].maxEnergy)
+                m_skillStates[p].energy = m_skillStates[p].maxEnergy; // clamp; preserve saved energy
             // Re-wire class skill IDs (the active skill field is positional, not stored per-slot)
             for (u32 s = 0; s < 4; s++)
                 m_classSkillStatesPerPlayer[p][s].activeSkill = cdef.skills[s];

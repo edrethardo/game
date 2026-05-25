@@ -16,6 +16,7 @@ struct PendingMeteor {
     f32  timer    = 0.0f;
     bool active   = false;
     bool healsPlayer = false;  // holy pillar heals caster on impact
+    u8   caster = 0;           // local-player index to credit on kill-heal (split-screen)
     Vec3 color = {1.0f, 0.5f, 0.1f}; // visual color (fire=orange, holy=gold)
 };
 
@@ -29,6 +30,9 @@ namespace SkillSystem {
     // Set skill power scaling (0.0 = base, 1.0 = max). Called by engine before
     // tryActivate — 0.0 for class skills, scaled by item level for legendary skills.
     void setSkillPower(f32 power);
+    // Local-player index currently casting — credits per-player buffs (overcharge,
+    // meteor kill-heal) to the right player in split-screen. Default 0 in singleplayer.
+    void setCastingPlayer(u8 playerIndex);
 
     // Set class skill damage multiplier (scales with effective floor).
     // Called by engine before class skill activation. Item skills use 1.0.
@@ -54,7 +58,7 @@ namespace SkillSystem {
     void updateOrbProjectiles(ProjectilePool& pool, const SkillDef* skillDefs, u32 skillDefCount, f32 dt);
 
     // Update pending meteors (+ holy pillar healing)
-    void updateMeteors(EntityPool& entities, Player& player, f32 dt);
+    void updateMeteors(EntityPool& entities, Player** players, u8 playerCount, f32 dt);
 
     // Get the SkillDef for a given SkillId (returns nullptr if not found)
     const SkillDef* findSkillDef(const SkillDef* defs, u32 count, SkillId id);
@@ -79,9 +83,9 @@ namespace SkillSystem {
     void setReloadCallback(ReloadCallback cb);
 
     // Overcharged Magazine — buff state for Marksman
-    bool isOvercharged();
-    void consumeOverchargeShot();
-    void tickOvercharge(f32 dt);
+    bool isOvercharged(u8 playerIndex = 0);
+    void consumeOverchargeShot(u8 playerIndex = 0);
+    void tickOvercharge(f32 dt, u8 playerIndex = 0);
     void setDroneSpawnCallback(DroneSpawnCallback cb);
     void setChainCallback(ChainCallback cb);
     void setBoltMeshId(u8 meshId, u8 matId);

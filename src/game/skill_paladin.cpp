@@ -67,6 +67,7 @@ void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
             s_meteors[i].timer       = 0.1f;
             s_meteors[i].active      = true;
             s_meteors[i].healsPlayer = true;
+            s_meteors[i].caster      = s_castingPlayer;
             s_meteors[i].color       = {1.0f, 0.9f, 0.3f};
             totalDmg += pillarDmg; // anticipated pillar damage for heal calc
             break;
@@ -90,6 +91,7 @@ void fireHolyBombardment(Vec3 origin, const SkillDef* def, Player& player)
     s_bombardmentRadius = def->radius > 0.0f ? def->radius : 6.0f;
     s_bombardmentDamage = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
     s_bombardmentCenter = origin;
+    s_bombardmentCaster = s_castingPlayer;
     s_bombardmentTimer  = def->duration > 0.0f ? def->duration : 4.0f;
     s_bombardmentAccum  = 0.0f;
 
@@ -255,6 +257,7 @@ void fireDivineJudgment(Player& player, EntityPool& entities, const SkillDef* de
                 s_meteors[m].timer       = 0.15f + pillarsSpawned * 0.15f;
                 s_meteors[m].active      = true;
                 s_meteors[m].healsPlayer = true; // kill-heal checked in updateMeteors
+                s_meteors[m].caster      = s_castingPlayer;
                 s_meteors[m].color       = {1.0f, 0.95f, 0.4f};
                 pillarPositions[pillarsSpawned + 1] = ent->position;
                 pillarsSpawned++;

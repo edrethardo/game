@@ -515,7 +515,7 @@ namespace WorldItemSystem {
     void init(WorldItemPool& pool);
     void update(WorldItemPool& pool, f32 dt);
     bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-               const LevelGrid* grid = nullptr);
+               const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 3.0f);
     // Returns true if pickup succeeded, fills outItem
     bool tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
                    ItemInstance& outItem);

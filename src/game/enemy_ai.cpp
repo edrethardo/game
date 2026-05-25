@@ -268,12 +268,21 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Determine if this entity is a friendly NPC ally
         bool isFriendly = (e.flags & ENT_FRIENDLY) != 0;
 
-        // Tinkerer drones (friendly, npcClass NONE): teleport to player if too far
+        // Resolve the local player this friendly serves (split-screen): its owner, else the
+        // primary player. anchor/anchorEye drive follow, teleport, and Cleric heal so P2's
+        // companions serve P2 instead of always tethering to P1.
+        Player* anchor = &player;
+        if (isFriendly && e.ownerLocalPlayer > 0 && extraPlayers &&
+            (e.ownerLocalPlayer - 1u) < extraPlayerCount && extraPlayers[e.ownerLocalPlayer - 1])
+            anchor = extraPlayers[e.ownerLocalPlayer - 1];
+        Vec3 anchorEye = anchor->position + Vec3{0, anchor->eyeHeight, 0};
+
+        // Tinkerer drones (friendly, npcClass NONE): teleport to owner if too far
         // Skip teleport while Overclock is active — let drones roam freely
         if (isFriendly && e.npcClass == NpcClass::NONE) {
-            f32 distToPlayer = length(e.position - playerEye);
+            f32 distToPlayer = length(e.position - anchorEye);
             if (distToPlayer > 30.0f && e.overclockTimer <= 0.0f) {
-                e.position = playerEye + Vec3{1.0f, 0, 1.0f};
+                e.position = anchorEye + Vec3{1.0f, 0, 1.0f};
                 Collision::ensureNotInWall(e.position, e.halfExtents, grid);
                 snapEntityToFloor(e, grid);
             }
@@ -315,7 +324,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // marching toward the exit and starting fights before the player moves.
                 e.velocity = {0, 0, 0};
             } else {
-                updateFriendlyNPC(e, i, pool, projectiles, player, grid, dt, playerEye);
+                updateFriendlyNPC(e, i, pool, projectiles, *anchor, grid, dt, anchorEye);
             }
             continue; // friendly NPC path ends here; hostile AI below is skipped
         }

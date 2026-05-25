@@ -41,7 +41,7 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
 }
 
 bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-                              const LevelGrid* grid) {
+                              const LevelGrid* grid, u8 ownerSlot, f32 exclusiveSeconds) {
     // Nudge item out of walls if grid is provided
     if (grid) {
         Vec3 itemHalf = {0.15f, 0.15f, 0.15f}; // small AABB for item
@@ -56,8 +56,8 @@ bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 
         wi.position      = position;
         wi.bobTimer      = 0.0f;
         wi.lifetime      = 60.0f;
-        wi.exclusiveTimer = 3.0f;
-        wi.ownerSlot     = 0xFF;
+        wi.exclusiveTimer = exclusiveSeconds;
+        wi.ownerSlot     = ownerSlot;
         wi.active        = true;
         pool.activeCount++;
         return true;

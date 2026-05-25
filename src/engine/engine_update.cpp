@@ -238,11 +238,6 @@ void Engine::update(f32 dt) {
             for (u8 p = 0; p < m_splitPlayerCount; p++) m_playerDead[p] = false;
             // In split-screen, reposition both players at the new spawn
             if (m_splitPlayerCount > 1) {
-                m_localPlayers[1].maxHealth *= 1.015f;
-                m_localPlayers[1].health = m_localPlayers[1].maxHealth;
-                m_skillStates[1].maxEnergy *= 1.015f;
-                m_skillStates[1].energy = m_skillStates[1].maxEnergy;
-
                 m_localPlayers[0] = m_localPlayer;
                 m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
                 m_localPlayers[1].velocity = {0, 0, 0};
@@ -250,6 +245,15 @@ void Engine::update(f32 dt) {
                 m_players[0].spawnPosition = m_localPlayer.position;
                 m_players[1].spawnPosition = m_localPlayers[1].position;
                 m_cameras[0] = m_camera;
+                // Single growth point for split-screen: each local player +1.5% HP/energy
+                // exactly once per floor (the door-path growth is suppressed in split).
+                // Runs AFTER m_localPlayers[0]=m_localPlayer so P0's growth isn't clobbered.
+                for (u8 p = 0; p < m_splitPlayerCount; p++) {
+                    m_localPlayers[p].maxHealth *= 1.015f;
+                    m_localPlayers[p].health = m_localPlayers[p].maxHealth;
+                    m_skillStates[p].maxEnergy *= 1.015f;
+                    m_skillStates[p].energy = m_skillStates[p].maxEnergy;
+                }
             }
             m_gameState = GameState::IN_GAME;
             // startGame() can take 100ms+ (BSP gen, mesh build, spawning).
@@ -636,49 +640,42 @@ void Engine::gameUpdate(f32 dt) {
     if (m_activePlayerIndex == 0) {
         { PROFILE_SCOPE(2, "Projectiles");
         SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
-        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid);
-        // In co-op, also check enemy projectile collision with P2
+        // In split-screen, pass P2 as an extra collidable player so enemy projectiles
+        // apply full status + Wanderer Deflect to P2 (mirrors the EnemyAI extras call).
         if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
-            AABB p2Box = {
-                m_localPlayers[1].position + Vec3{-PLAYER_HALF_WIDTH, 0, -PLAYER_HALF_WIDTH},
-                m_localPlayers[1].position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
-            };
-            u32 pSeen = 0;
-            for (u32 pi = 0; pi < MAX_PROJECTILES && pSeen < m_projectiles.activeCount; pi++) {
-                Projectile& p = m_projectiles.projectiles[pi];
-                if (!p.active) continue;
-                pSeen++;
-                if (p.fromPlayer) continue; // only enemy projectiles
-                AABB projBox = {p.position - Vec3{p.radius,p.radius,p.radius},
-                                p.position + Vec3{p.radius,p.radius,p.radius}};
-                if (CombatQuery::aabbOverlap(projBox, p2Box)) {
-                    Combat::applyDamageToPlayer(m_localPlayers[1], p.damage, &p.position);
-                    p.active = false;
-                }
-            }
+            Player* projExtras[] = { &m_localPlayers[1] };
+            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid, projExtras, 1);
+        } else {
+            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid);
         }
         }
         EntitySystem::tickTimers(m_entities, dt);
         WorldItemSystem::update(m_worldItems, dt);
+
+        // Shared FX pools + shared skill systems tick ONCE per frame (not per local
+        // player) — running them in the per-player tail double-ticks them in split-screen.
+        tickSharedFX(dt);
+        // Update orb projectiles (spawn ice shards for Frozen Orb)
+        SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
+        // Update pending meteors (+ holy bombardment + pillar kill-heal). Pass both local
+        // players so kill-heals credit the casting player; index 0 is the live swapped-in
+        // alias (this block runs under m_activePlayerIndex==0).
+        Player* meteorPlayers[MAX_LOCAL_PLAYERS] = { &m_localPlayer, &m_localPlayers[1] };
+        SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt);
+        // Tick the particle pool (motion, gravity, lifetime decay)
+        ParticleSystem::update(m_particles, dt);
     }
 
-    tickFXDecay(dt);
+    // Per-local-player FX/buff decay + skill cooldowns (run once per swap).
+    tickPlayerFX(dt);
     tickSkillCooldowns(dt);
-
-    // Update orb projectiles (spawn ice shards for Frozen Orb)
-    SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
-
-    // Update pending meteors (+ holy bombardment ticking + pillar healing)
-    SkillSystem::updateMeteors(m_entities, m_localPlayer, dt);
-
-    // Tick the particle pool (motion, gravity, lifetime decay)
-    ParticleSystem::update(m_particles, dt);
 
     tickPassiveEquipment();
 
     // eyePos is computed here (after view-bob has updated eyeHeight) and threaded
     // into both skill-activation helpers that need it.
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+    SkillSystem::setCastingPlayer(m_localPlayerIndex); // credit per-player buffs to this player
     handleClassSkillActivation(dt, eyePos);
     handleEquipmentSkillActivation(dt, eyePos);
 
@@ -796,6 +793,9 @@ void Engine::updatePlayerPickup() {
             if (!w.active) continue;
             if (isGlobe(w.item)) continue;
             if (w.item.defId >= m_itemDefCount) continue;
+            // Loot-ownership window: skip items reserved to another local player (3s, then free).
+            if (w.ownerSlot != 0xFF && w.ownerSlot != m_localPlayerIndex && w.exclusiveTimer > 0.0f)
+                continue;
             Vec3 toItem = w.position - m_localPlayer.position;
             f32 hDist = sqrtf(toItem.x * toItem.x + toItem.z * toItem.z);
             if (hDist > 3.5f) continue;
@@ -865,11 +865,16 @@ bool Engine::updateFloorDoor() {
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isActionPressed(GameAction::PICKUP)) {
                 m_level.currentFloor++;
-                // All players grow 1.5% stronger each floor (multiplicative)
-                m_localPlayer.maxHealth *= 1.015f;
-                m_localPlayer.health = m_localPlayer.maxHealth;
-                m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
-                m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
+                // All players grow 1.5% stronger each floor (multiplicative).
+                // In split-screen the FLOOR_TRANSITION block grows BOTH local players once
+                // (regardless of who opened the door), so suppress the per-trigger growth
+                // here to avoid double-growing whoever reached the exit.
+                if (m_splitPlayerCount <= 1) {
+                    m_localPlayer.maxHealth *= 1.015f;
+                    m_localPlayer.health = m_localPlayer.maxHealth;
+                    m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
+                    m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
+                }
                 // Scale all networked players too
                 for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
                     if (!m_players[pi].active) continue;

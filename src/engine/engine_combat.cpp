@@ -204,10 +204,10 @@ void Engine::handleWeaponFire(f32 dt) {
     } break;
     case WeaponType::HITSCAN:
         // Overcharged Magazine: 3× damage + penetrating shot with beam trail
-        if (SkillSystem::isOvercharged()) {
+        if (SkillSystem::isOvercharged(m_localPlayerIndex)) {
             wpn.damage *= 3.0f;
             ws.cooldownTimer *= 0.7f; // 30% attack speed bonus during overcharge
-            SkillSystem::consumeOverchargeShot();
+            SkillSystem::consumeOverchargeShot(m_localPlayerIndex);
             // Penetrating hitscan — hit ALL enemies in narrow cone
             EntityHandle oHits[MAX_ENTITIES];
             f32          oDists[MAX_ENTITIES];

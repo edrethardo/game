@@ -146,6 +146,7 @@ struct Entity {
     u8 bossDefIdx = 0xFF;  // index into Engine::m_bossDefs (0xFF = not a boss)
     u16 spawnerIdx = 0xFFFF; // entity pool index of boss that spawned this minion
     bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
+    u8  ownerLocalPlayer = 0;  // split-screen: local player a friendly NPC/drone serves (0=P1)
 
     // NPC equipment and class (friendly NPCs only)
     NpcClass npcClass   = NpcClass::NONE;

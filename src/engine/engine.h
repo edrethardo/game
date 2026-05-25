@@ -384,7 +384,8 @@ private:
     void tickWandererTimers(f32 dt);             // adrenaline stacks, deflect burst, mark, Death's Dance, floor unlock
     void tickPlayerStatusEffects(f32 dt);        // poison / burn / freeze DoT ticks
     void handleDebugKeys();                      // F1-F6 debug toggles and stress spawners
-    void tickFXDecay(f32 dt);                    // impact/fire/nova/dash/beam/chain/light timers + scorch AoE + herald aura
+    void tickSharedFX(f32 dt);                   // ONCE/frame: impact/fire/nova/dash/beam/chain/light timers + scorch AoE DoT
+    void tickPlayerFX(f32 dt);                   // per local player: overcharge tick + herald aura on m_localPlayer
     void tickSkillCooldowns(f32 dt);             // SkillSystem::update + class/boot/helmet cooldown ticks
     void tickPassiveEquipment();                 // bind weapon-proc / armor-aura / ring-passive SkillIds each tick
     void handleClassSkillActivation(f32 dt, Vec3 eyePos);     // keys 1-4 selection + right-click cast

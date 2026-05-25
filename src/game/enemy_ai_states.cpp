@@ -29,7 +29,7 @@ void updateHostileStates(Entity& e, u32 i,
     // attacking gets to land a swing due this frame (see end of ATTACK case),
     // matching the "finish current swing only" rule. Passive IDLE/DORMANT/AMBUSH
     // are gated in their own cases so they don't get yanked out of position.
-    if (player.smokeTimer > 0.0f && !targetIsNPC) {
+    if (targetPlayer->smokeTimer > 0.0f && !targetIsNPC) {
         switch (e.aiState) {
             case AIState::CHASE:
             case AIState::FLANK:
@@ -88,7 +88,7 @@ void updateHostileStates(Entity& e, u32 i,
         // spawnCalm: during the floor-start calm window, idle enemies still roam
         // (above) but never auto-aggro the player/NPCs. Damage-driven aggro in
         // Combat::applyDamage is unaffected, so hitting an enemy still wakes it.
-        if (!spawnCalm && e.aiCheckIdx >= checkFreq && player.smokeTimer <= 0.0f) {
+        if (!spawnCalm && e.aiCheckIdx >= checkFreq && targetPlayer->smokeTimer <= 0.0f) {
             e.aiCheckIdx = 0;
             // A static empty dungeon result is used as a fallback when no dungeon
             // is provided, so alertSquad always has valid adjacency data to read.
@@ -99,7 +99,7 @@ void updateHostileStates(Entity& e, u32 i,
                 e.aiState = AIState::CHASE;
                 e.velocity = {0, 0, 0};
                 if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
-            } else if (dist <= e.detectionRange && hasLOS(e, player, grid)) {
+            } else if (dist <= e.detectionRange && hasLOS(e, *targetPlayer, grid)) {
                 e.aiState = AIState::CHASE;
                 e.velocity = {0, 0, 0};
                 if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
@@ -474,7 +474,7 @@ void updateHostileStates(Entity& e, u32 i,
         // above; now the player has slipped away, so drop the target. One final
         // hit can land, but the enemy cannot keep attacking or re-acquire while
         // stealth holds.
-        if (player.smokeTimer > 0.0f && !targetIsNPC) {
+        if (targetPlayer->smokeTimer > 0.0f && !targetIsNPC) {
             e.aiState  = AIState::IDLE;
             e.velocity = {0, 0, 0};
             break;
@@ -487,7 +487,7 @@ void updateHostileStates(Entity& e, u32 i,
         f32 triggerDist = (e.enemyRole & EnemyRole::AMBUSH) ? e.detectionRange * 0.5f : GameConst::MIMIC_TRIGGER_DIST;
         // Also wake if damaged (flashTimer from being hit) or if player is fighting nearby
         bool combatNearby = (e.flashTimer > 0.0f);
-        if ((dist <= triggerDist && player.smokeTimer <= 0.0f) || combatNearby) {
+        if ((dist <= triggerDist && targetPlayer->smokeTimer <= 0.0f) || combatNearby) {
             e.aiState = AIState::CHASE;
             e.attackTimer = 0.0f; // attack immediately on wake
             if (e.enemyRole & EnemyRole::AMBUSH) {
@@ -536,7 +536,7 @@ void updateHostileStates(Entity& e, u32 i,
         // Re-check LOS here since the ATTACK state's LOS update doesn't run.
         if (e.attackRange > 5.0f && dist <= e.attackRange && shouldCheckLOS) {
             Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
-            Vec3 tgt = player.position + Vec3{0, player.eyeHeight, 0};
+            Vec3 tgt = targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0};
             e.hasTargetLOS = hasLOSToPoint(atkEye, tgt, grid);
         }
         if (e.attackRange > 5.0f && dist <= e.attackRange && e.hasTargetLOS) {
@@ -545,11 +545,11 @@ void updateHostileStates(Entity& e, u32 i,
                 e.attackTimer = e.attackCooldown;
                 e.attackAnimT = 0.3f;
                 Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
-                Vec3 tPos = player.position + Vec3{0, player.eyeHeight, 0};
+                Vec3 tPos = targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0};
                 f32 projSpeed = (e.flags & ENT_FLYING) ? 11.5f : 16.1f;
                 f32 projRadius = (e.flags & ENT_FLYING) ? 0.06f : 0.08f;
                 f32 timeToHit = dist / projSpeed;
-                Vec3 predictedPos = tPos + player.velocity * timeToHit;
+                Vec3 predictedPos = tPos + targetPlayer->velocity * timeToHit;
                 Vec3 atkDir = normalize(predictedPos - atkOrigin);
                 ProjectileSystem::spawn(projectiles, atkOrigin,
                     atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
@@ -558,7 +558,7 @@ void updateHostileStates(Entity& e, u32 i,
         // Re-engage once at preferred range — ranged enemies stay in retreat
         // while the player is too close so they keep backpedaling and firing.
         bool rangedTooClose = (e.attackRange > 5.0f && dist < e.attackRange * 0.5f);
-        if (player.health > 0.0f && dist <= e.detectionRange && !rangedTooClose) {
+        if (targetPlayer->health > 0.0f && dist <= e.detectionRange && !rangedTooClose) {
             e.aiState = AIState::CHASE;
             e.velocity = {0, 0, 0};
             break;
@@ -578,8 +578,8 @@ void updateHostileStates(Entity& e, u32 i,
                 e.velocity.x = moveDir.x * effectiveSpeed * retreatMult;
                 e.velocity.z = moveDir.z * effectiveSpeed * retreatMult;
                 if (e.attackRange > 5.0f) {
-                    // Face the player while kiting
-                    Vec3 toPlayer = player.position - e.position;
+                    // Face the target while kiting
+                    Vec3 toPlayer = targetPlayer->position - e.position;
                     e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
                 } else {
                     e.yaw = atan2f(-moveDir.x, -moveDir.z);
@@ -590,13 +590,13 @@ void updateHostileStates(Entity& e, u32 i,
             // away from the player instead of standing still.
             if (e.attackRange > 5.0f && dist < e.attackRange * 0.8f) {
                 // Backpedal at 70% speed while facing the player
-                Vec3 away = e.position - player.position;
+                Vec3 away = e.position - targetPlayer->position;
                 away.y = 0.0f;
                 if (lengthSq(away) > 0.01f) {
                     away = normalize(away);
                     e.velocity.x = away.x * effectiveSpeed * 0.8f;
                     e.velocity.z = away.z * effectiveSpeed * 0.8f;
-                    Vec3 toPlayer = player.position - e.position;
+                    Vec3 toPlayer = targetPlayer->position - e.position;
                     e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
                 }
             } else {
@@ -629,7 +629,7 @@ void updateHostileStates(Entity& e, u32 i,
         if (lengthSq(toTarget2) > 0.01f) {
             e.yaw = atan2f(-toTarget2.x, -toTarget2.z);
         }
-        if (dist <= 4.0f && hasLOS(e, player, grid) && player.smokeTimer <= 0.0f) {
+        if (dist <= 4.0f && hasLOS(e, *targetPlayer, grid) && targetPlayer->smokeTimer <= 0.0f) {
             e.aiState = AIState::ATTACK;
             e.attackTimer = 0.0f; // burst immediately on reveal
         }

@@ -84,8 +84,8 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
         e.kiteTimer -= dt;
         if (e.kiteTimer <= 0.0f && dist < e.detectionRange) {
             e.kiteTimer = 3.0f;
-            if (player.curseStacks < 4) player.curseStacks++;
-            player.curseTimer = 5.0f;
+            if (targetPlayer->curseStacks < 4) targetPlayer->curseStacks++;
+            targetPlayer->curseTimer = 5.0f;
             if (isBoss) {
                 static const char* kCurseLines[] = {
                     "Wither. Rot. Become as I am.",

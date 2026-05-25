@@ -79,10 +79,15 @@ namespace ProjectileSystem {
               bool fromPlayer, u8 extraFlags = 0);
 
     // Update all projectiles: move, collide with grid and entities/player.
+    // extraPlayers/extraPlayerCount: additional local players (split-screen) that enemy
+    // projectiles must also collide with — full status + Wanderer Deflect, same as the
+    // primary. Mirrors EnemyAI::update's extra-players convention.
     void update(ProjectilePool& pool,
                 const LevelGrid& grid,
                 EntityPool& entities,
                 Player& player,
                 f32 dt,
-                const SpatialGrid* spatialGrid = nullptr);
+                const SpatialGrid* spatialGrid = nullptr,
+                Player** extraPlayers = nullptr,
+                u32 extraPlayerCount = 0);
 }

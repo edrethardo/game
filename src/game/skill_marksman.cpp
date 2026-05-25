@@ -127,8 +127,8 @@ void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
 // Overcharged Magazine — activates a 4s buff. Next 5 weapon shots deal 3× damage + pierce.
 void fireOverchargedMagazine(Vec3 origin, Vec3 forward)
 {
-    s_overchargeTimer = 4.0f;
-    s_overchargeShots = 5;
+    s_overchargeTimer[s_castingPlayer] = 4.0f;
+    s_overchargeShots[s_castingPlayer] = 5;
 
     // Activation VFX
     if (s_particlePool) {

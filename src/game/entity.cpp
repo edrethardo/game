@@ -43,6 +43,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.aiState      = AIState::IDLE;
     e.flashTimer   = 0.0f;
     e.deathTimer   = 0.0f;
+    e.ownerLocalPlayer = 0; // default P1; friendly spawn sites override (pool slots aren't zeroed)
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;

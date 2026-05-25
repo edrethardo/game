@@ -61,8 +61,10 @@ extern SkillSystem::ReloadCallback      s_reloadCallback;
 
 // Overcharged Magazine state — set by fireOverchargedMagazine (marksman),
 // read by SkillSystem::isOvercharged / consumeOverchargeShot / tickOvercharge.
-extern f32 s_overchargeTimer;
-extern u8  s_overchargeShots;
+extern f32 s_overchargeTimer[2];  // per local player (MAX_LOCAL_PLAYERS)
+extern u8  s_overchargeShots[2];
+extern u8  s_castingPlayer;        // local-player index currently casting
+extern u8  s_bombardmentCaster;    // local-player index that cast Holy Bombardment
 
 // Holy Bombardment persistent state — set by fireHolyBombardment (paladin),
 // ticked by SkillSystem::updateMeteors.

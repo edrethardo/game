@@ -45,9 +45,11 @@ SkillSystem::ReloadCallback     s_reloadCallback     = nullptr;
 u8 s_boltMeshId     = 0;    // set by engine during init for shock bolt projectiles
 u8 s_shockBoltMatId = 0;
 
-// Overcharged Magazine state (Marksman buff)
-f32 s_overchargeTimer = 0.0f;
-u8  s_overchargeShots = 0;
+// Overcharged Magazine state (Marksman buff) — per local player (split-screen)
+f32 s_overchargeTimer[2] = {0.0f, 0.0f};
+u8  s_overchargeShots[2] = {0, 0};
+u8  s_castingPlayer     = 0;  // local-player index currently casting
+u8  s_bombardmentCaster = 0;  // local-player index that cast Holy Bombardment
 
 // Holy Bombardment persistent state — set by fireHolyBombardment, ticked by updateMeteors
 f32  s_bombardmentTimer  = 0.0f;
@@ -68,6 +70,7 @@ f32  s_holyNovaHealPct = 0.0f;
 // ---------------------------------------------------------------------------
 
 void SkillSystem::setSkillPower(f32 power)       { s_skillPower    = power; }
+void SkillSystem::setCastingPlayer(u8 playerIndex) { s_castingPlayer = (playerIndex < 2) ? playerIndex : 0; }
 void SkillSystem::setClassDamageMult(f32 mult)   { s_classDmgMult  = mult;  }
 void SkillSystem::setWeaponDamage(f32 dmg)       { s_weaponDamage  = dmg;   }
 void SkillSystem::setArrowMeshIds(u8 arrow, u8 /*bolt*/) { s_arrowMeshId = arrow; }
@@ -88,15 +91,15 @@ void SkillSystem::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
 // Overcharge state (Marksman buff)
 // ---------------------------------------------------------------------------
 
-bool SkillSystem::isOvercharged() { return s_overchargeTimer > 0.0f && s_overchargeShots > 0; }
-void SkillSystem::consumeOverchargeShot() {
-    if (s_overchargeShots > 0) s_overchargeShots--;
-    if (s_overchargeShots == 0) s_overchargeTimer = 0.0f;
+bool SkillSystem::isOvercharged(u8 p) { return s_overchargeTimer[p] > 0.0f && s_overchargeShots[p] > 0; }
+void SkillSystem::consumeOverchargeShot(u8 p) {
+    if (s_overchargeShots[p] > 0) s_overchargeShots[p]--;
+    if (s_overchargeShots[p] == 0) s_overchargeTimer[p] = 0.0f;
 }
-void SkillSystem::tickOvercharge(f32 dt) {
-    if (s_overchargeTimer > 0.0f) {
-        s_overchargeTimer -= dt;
-        if (s_overchargeTimer <= 0.0f) { s_overchargeTimer = 0.0f; s_overchargeShots = 0; }
+void SkillSystem::tickOvercharge(f32 dt, u8 p) {
+    if (s_overchargeTimer[p] > 0.0f) {
+        s_overchargeTimer[p] -= dt;
+        if (s_overchargeTimer[p] <= 0.0f) { s_overchargeTimer[p] = 0.0f; s_overchargeShots[p] = 0; }
     }
 }
 
@@ -142,6 +145,7 @@ void SkillSystem::update(SkillState& ss, f32 dt) {
                     s_meteors[m].timer       = 0.001f; // triggers next frame
                     s_meteors[m].active      = true;
                     s_meteors[m].healsPlayer = true;
+                    s_meteors[m].caster      = s_castingPlayer;
                     s_meteors[m].color       = {1.0f, 0.85f, 0.3f};
                     break;
                 }
@@ -600,7 +604,7 @@ void SkillSystem::updateOrbProjectiles(ProjectilePool& pool,
     }
 }
 
-void SkillSystem::updateMeteors(EntityPool& entities, Player& player, f32 dt) {
+void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playerCount, f32 dt) {
     // Holy Bombardment tick — needs entity access for smart targeting
     if (s_bombardmentTimer > 0.0f) {
         s_bombardmentTimer -= dt;
@@ -643,6 +647,7 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player& player, f32 dt) {
                     s_meteors[m].timer       = 0.3f;
                     s_meteors[m].active      = true;
                     s_meteors[m].healsPlayer = true;
+                    s_meteors[m].caster      = s_bombardmentCaster;
                     s_meteors[m].color       = {1.0f, 0.9f, 0.3f};
                     break;
                 }
@@ -678,16 +683,18 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player& player, f32 dt) {
                     f32 hpBefore = ent->health;
                     Combat::applyDamage(entities, hits[j], m.damage);
                     if (m.healsPlayer && hpBefore > 0.0f && ent->health <= 0.0f) {
-                        // Kill heal: 15% max HP
-                        player.health = fminf(player.health + player.maxHealth * 0.15f, player.maxHealth);
+                        // Kill heal: 15% max HP — credit the casting local player
+                        Player& cp = *players[(m.caster < playerCount) ? m.caster : 0];
+                        cp.health = fminf(cp.health + cp.maxHealth * 0.15f, cp.maxHealth);
                     }
                     enemiesHit++;
                 }
             }
 
-            // Holy pillar heals player 3% max HP on hit
+            // Holy pillar heals the casting local player 3% max HP on hit
             if (m.healsPlayer && enemiesHit > 0) {
-                player.health = fminf(player.health + player.maxHealth * 0.03f, player.maxHealth);
+                Player& cp = *players[(m.caster < playerCount) ? m.caster : 0];
+                cp.health = fminf(cp.health + cp.maxHealth * 0.03f, cp.maxHealth);
             }
 
             m.active = false;
