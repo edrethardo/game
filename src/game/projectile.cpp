@@ -134,6 +134,11 @@ void ProjectileSystem::update(ProjectilePool& pool,
         if (!p.active) continue;
         seen++;
 
+        // (L8) Credit any entity kill this projectile causes (direct or splash) to the firer,
+        // even though the projectile resolves frames after it was fired. Enemy projectiles
+        // (fromPlayer=false) damage players, not entities, so 0xFF is the safe default.
+        Combat::setAttackingPlayer(p.fromPlayer ? p.ownerSlot : 0xFF);
+
         // Lifetime
         p.lifetime -= dt;
         if (p.lifetime <= 0.0f) {

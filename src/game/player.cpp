@@ -71,9 +71,13 @@ static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
 // Original: reads Input:: directly
 // ---------------------------------------------------------------------------
 void PlayerController::update(Player& player, f32 dt) {
-    // Accumulate look deltas as float to preserve sub-pixel gyro/stick precision
-    s32 rawMx, rawMy;
-    Input::getMouseDelta(rawMx, rawMy);
+    // Accumulate look deltas as float to preserve sub-pixel gyro/stick precision.
+    // Keyboard+mouse belong to player 0 only (P2+ are controller-only in split-screen).
+    // getMouseDelta() returns the global, un-consumed SDL delta, so without this gate the
+    // same mouse motion would be applied to every local player in the per-player update
+    // loop — spinning P2's camera whenever P1 moves the mouse.
+    s32 rawMx = 0, rawMy = 0;
+    if (Input::getActivePlayer() == 0) Input::getMouseDelta(rawMx, rawMy);
     f32 mx = static_cast<f32>(rawMx);
     f32 my = static_cast<f32>(rawMy);
 

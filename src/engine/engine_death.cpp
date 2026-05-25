@@ -245,7 +245,8 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                       idef.weaponType);
             }
             WorldItemSystem::spawn(m_worldItems, item,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid);
+                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
+                                   pool.entities[idx].killerSlot); // (L8) reserve to the killer
         }
         return true; // skip normal drop logic for this kill
     }
@@ -289,7 +290,8 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                       biDef.weaponType);
             }
             WorldItemSystem::spawn(m_worldItems, bossItem,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid);
+                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
+                                   pool.entities[idx].killerSlot); // (L8) reserve to the killer
         }
 
         // Bonus drops for major bosses
@@ -301,7 +303,9 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             if (!isItemEmpty(bonus)) {
                 Vec3 offset = {(f32)(bd_i) * 0.3f - 0.15f, 0.5f, 0.2f};
                 WorldItemSystem::spawn(m_worldItems, bonus,
-                                       pos + offset, &m_level.grid);
+                                       pos + offset, &m_level.grid,
+                                       pool.entities[idx].killerSlot); // (L8) reserve to the killer
+
             }
         }
 
@@ -343,8 +347,13 @@ void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             if (slot == ItemSlot::OFFHAND) break;
         }
         if (!isItemEmpty(item)) {
+            // (L8) Reserve the drop to whoever landed the kill for a few seconds (their kills,
+            // their loot), then it falls back to free-for-all. killerSlot is 0xFF for
+            // environmental/AoE kills, which spawn() treats as free-for-all. Globes stay
+            // free-for-all auto-pickup below.
+            u8 killer = pool.entities[idx].killerSlot;
             WorldItemSystem::spawn(m_worldItems, item,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid);
+                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid, killer);
         }
 
         // Chance to drop a globe (restores both HP and energy on pickup)

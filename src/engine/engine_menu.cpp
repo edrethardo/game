@@ -240,16 +240,9 @@ void Engine::updateMenu(f32 dt) {
                     m_menu.subState = 0;
                     m_menu.msg = nullptr;
                     startGame(GameStart::CONTINUE);
-                    // Position P2 next to P1 at the new dungeon spawn
-                    if (m_splitPlayerCount > 1) {
-                        m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
-                        m_localPlayers[1].velocity = {0, 0, 0};
-                        m_localPlayers[1].yaw = m_localPlayer.yaw;
-                        m_localPlayers[1].eyeHeight = m_localPlayer.eyeHeight;
-                        m_players[1].spawnPosition = m_localPlayers[1].position;
-                        m_localPlayers[0] = m_localPlayer;
-                        m_cameras[0] = m_camera;
-                    }
+                    // Position the couch-co-op pair at the new dungeon spawn (M5 helper;
+                    // self-guards to split-screen).
+                    positionLocalPlayersAtSpawn();
                 } else {
                     // File corrupt or version mismatch — fall back to new game
                     m_level.currentFloor = 1;
@@ -417,14 +410,8 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 0;
             startGame(GameStart::NEW_GAME);
 
-            // Set P2 spawn at same location as P1 (slightly offset)
-            m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
-            m_localPlayers[1].yaw = m_localPlayer.yaw;
-            m_localPlayers[1].eyeHeight = m_localPlayer.eyeHeight;
-            m_players[1].spawnPosition = m_localPlayers[1].position; // for respawn
-            // Copy P1 state into arrays too
-            m_localPlayers[0] = m_localPlayer;
-            m_cameras[0] = m_camera;
+            // Place the couch-co-op pair at the spawn (P2 beside P1) — M5 helper.
+            positionLocalPlayersAtSpawn();
         }
         return;
     }

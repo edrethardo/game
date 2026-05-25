@@ -103,8 +103,15 @@ private:
 
     // --- Split-screen state ---
     static constexpr u32 MAX_LOCAL_PLAYERS = 2;
+    // (L5) Several split-screen sites assume EXACTLY two local players: the 2-way viewport
+    // split (engine_render.cpp), the "the other player" partner logic (otherP = 1 - idx in
+    // engine_render_world.cpp and the player-push code), and the couch co-op menu flow.
+    // Raising this cap requires revisiting all of them — fail loudly at compile time.
+    static_assert(MAX_LOCAL_PLAYERS == 2, "split-screen assumes exactly 2 local players (see L5)");
     u8   m_splitPlayerCount = 1;   // 1=single, 2=split-screen
-    u8   m_activePlayerIndex = 0;  // which player is currently being updated
+    // (M2) The "currently-updated player" index is m_localPlayerIndex, set by swapInPlayer.
+    // The old separate m_activePlayerIndex duplicated it and was only updated in the update
+    // loop (never in render), so the two could silently disagree — collapsed into one.
     u8   m_splitMode = 0;          // 0=horizontal (top/bottom), 1=vertical (left/right)
     bool m_playerDead[MAX_LOCAL_PLAYERS] = {}; // per-player death state for split-screen
 
@@ -244,8 +251,12 @@ private:
     CombatHit   m_lastCombatHit;
 
     // Inventory UI state
-    InventoryDragState m_dragState;
-    DoubleClickState   m_dblClickState;
+    InventoryDragState m_dragState;        // active alias (swapped per player)
+    DoubleClickState   m_dblClickState;    // active alias (swapped per player)
+    // (L2) Per-player backing store so each split player has independent drag/double-click
+    // state (only P0 uses the mouse today, but this stops P1's UI from sharing P0's drag).
+    InventoryDragState m_dragStates[MAX_LOCAL_PLAYERS] = {};
+    DoubleClickState   m_dblClickStates[MAX_LOCAL_PLAYERS] = {};
     u8  m_invCursorPanel = 0;  // active alias (swapped per player)
     u8  m_invCursorIndex = 0;  // active alias
     u8  m_invCursorPanels[MAX_LOCAL_PLAYERS] = {};
@@ -355,10 +366,15 @@ private:
     // Split-screen player swap helpers
     void swapInPlayer(u8 idx);   // copy per-player arrays → active aliases
     void swapOutPlayer(u8 idx);  // copy active aliases → per-player arrays
+    void positionLocalPlayersAtSpawn(); // (M5) place the couch-co-op pair at the current spawn
+                                        // (P0 from the active alias, P1 beside it) — one helper
+                                        // for the floor-transition / continue-load / new-run paths
 
     // Core update paths
     void update(f32 dt);
     void gameUpdate(f32 dt);        // unified gameplay — all roles call this
+    void tickSharedSystems(f32 dt); // ONCE/frame after the per-player loop: AI, projectiles,
+                                    // entity timers, world items, shared FX, meteors, particles (M3)
     void serverNetPre(f32 dt);      // server: process remote inputs before gameplay
     void serverNetPost(f32 dt);     // server: status ticks + snapshot broadcast
     void clientNetPre(f32 dt);      // client: predict + reconcile before gameplay

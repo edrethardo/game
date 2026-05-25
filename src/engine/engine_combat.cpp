@@ -63,6 +63,10 @@ extern bool s_firstKillDropGiven;
 // Weapon fire (singleplayer — unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::handleWeaponFire(f32 dt) {
+    // (L8) Credit this player's melee/hitscan kills (and stamp the slot onto any projectile
+    // fired this pass). tickSharedSystems resets it to 0xFF before AI/projectiles/skills, so
+    // only this player's direct, synchronous weapon kills are attributed here.
+    Combat::setAttackingPlayer(m_localPlayerIndex);
     WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
     ws.cooldownTimer -= dt;
     if (ws.cooldownTimer < 0.0f) ws.cooldownTimer = 0.0f;
@@ -547,6 +551,7 @@ void Engine::handleWeaponFire(f32 dt) {
 // Weapon fire for any NetPlayer (server-authoritative)
 // ---------------------------------------------------------------------------
 void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
+    Combat::setAttackingPlayer(np.slotIndex); // (L8) credit this remote player's kills
     WeaponState& ws = np.weaponState;
     ws.cooldownTimer -= dt;
     if (ws.cooldownTimer < 0.0f) ws.cooldownTimer = 0.0f;
@@ -597,10 +602,10 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     // Can't fire while reloading
     if (ws.reloading) return;
 
-    // Potion (server handles per-player)
-    if (input->extFlags & INPUT_EX_POTION) {
-        // TODO: per-player potion cooldown tracking
-    }
+    // Potion: handled by the caller (serverNetPre in engine_net.cpp) with the remote's own
+    // per-player cooldown (NetPlayer::potionCooldown, decremented in serverNetPost), right
+    // after this call — so there's nothing to do here (L7: the old per-player-cooldown TODO
+    // was already implemented there; this stub is removed to avoid double-applying).
 
     if (!(input->moveFlags & INPUT_FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;

@@ -236,18 +236,13 @@ void Engine::update(f32 dt) {
             // refilled below), so clear death flags — otherwise that player would arrive
             // frozen behind the "YOU DIED" overlay despite being alive again.
             for (u8 p = 0; p < m_splitPlayerCount; p++) m_playerDead[p] = false;
-            // In split-screen, reposition both players at the new spawn
+            // In split-screen, reposition both players at the new spawn (M5 helper).
             if (m_splitPlayerCount > 1) {
-                m_localPlayers[0] = m_localPlayer;
-                m_localPlayers[1].position = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
-                m_localPlayers[1].velocity = {0, 0, 0};
-                m_localPlayers[1].invulnTimer = 2.5f;
-                m_players[0].spawnPosition = m_localPlayer.position;
-                m_players[1].spawnPosition = m_localPlayers[1].position;
-                m_cameras[0] = m_camera;
+                positionLocalPlayersAtSpawn();
                 // Single growth point for split-screen: each local player +1.5% HP/energy
                 // exactly once per floor (the door-path growth is suppressed in split).
-                // Runs AFTER m_localPlayers[0]=m_localPlayer so P0's growth isn't clobbered.
+                // Runs AFTER positionLocalPlayersAtSpawn (which set m_localPlayers[0]) so
+                // P0's growth isn't clobbered.
                 for (u8 p = 0; p < m_splitPlayerCount; p++) {
                     m_localPlayers[p].maxHealth *= 1.015f;
                     m_localPlayers[p].health = m_localPlayers[p].maxHealth;
@@ -274,18 +269,18 @@ void Engine::update(f32 dt) {
 
         // Split-screen: update each local player in turn
         for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
-            m_activePlayerIndex = sp;
-            swapInPlayer(sp);
+            swapInPlayer(sp);             // sets m_localPlayerIndex = sp (the active player)
             Input::setActivePlayer(sp);
 
             if (m_playerDead[sp]) {
-                // Dead player: check for respawn input (A / Space), skip gameplay
-                if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
-                    // If ALL players were dead, reset enemies to their rooms
-                    bool allDead = true;
-                    for (u32 p = 0; p < m_splitPlayerCount; p++) {
-                        if (!m_playerDead[p]) { allDead = false; break; }
-                    }
+                // Dead player: check for respawn input, skip gameplay. Gamepad JUMP is routed
+                // to this player's controller (setActivePlayer above); keyboard Space counts
+                // only for P0 (L4 — Space is P0's key and must not respawn the controller P2).
+                if (Input::isActionPressed(GameAction::JUMP) ||
+                    (sp == 0 && Input::isKeyPressed(SDL_SCANCODE_SPACE))) {
+                    // (M4) Enemies are already sent home when the last player dies (the co-op
+                    // death path calls resetEnemiesToRooms), so nothing to reset on respawn —
+                    // the old allDead computation here was dead code.
                     m_localPlayer.health = m_localPlayer.maxHealth;
                     m_localPlayer.position = m_players[sp].spawnPosition;
                     m_localPlayer.velocity = {0, 0, 0};
@@ -315,53 +310,21 @@ void Engine::update(f32 dt) {
                     }
                 }
                 swapOutPlayer(sp);
-
-                // When P1 (sp=0) is dead, shared systems (AI, projectiles, entities)
-                // still need to tick — they're normally gated on activePlayerIndex==0
-                if (sp == 0) {
-                    // Shared systems must always tick so enemies return to spawns
-                    // when both players are dead, and projectiles expire normally.
-                    if (m_netRole == NetRole::SERVER) {
-                        // TA-2: the host (slot 0) is down, but living guests must still be
-                        // targetable — otherwise enemies/projectiles ignore them and combat
-                        // stalls until the host respawns. Build remote views and pass them as
-                        // extras (mirroring the main path's R7-3 bridge), then write back the
-                        // damage/status. SERVER-gated: NONE keeps its split-screen behavior.
-                        Player  deadHostViews[MAX_PLAYERS - 1];
-                        Player* deadHostPtrs[MAX_PLAYERS - 1];
-                        u8      deadHostSlots[MAX_PLAYERS - 1];
-                        u32     deadHostCount = buildRemotePlayerViews(deadHostViews, deadHostPtrs, deadHostSlots);
-                        // m_localPlayers[0] is the dead host's reference (idle/return AI target);
-                        // the live remotes ride along as extras so enemies chase the nearest of them.
-                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads,
-                                        deadHostCount > 0 ? deadHostPtrs : nullptr, deadHostCount, &m_level.dungeon);
-                        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[0].position, dt);
-                        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
-                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt, &m_spatialGrid,
-                                                 deadHostCount > 0 ? deadHostPtrs : nullptr, deadHostCount);
-                        if (deadHostCount > 0)
-                            applyRemotePlayerViews(deadHostViews, deadHostSlots, deadHostCount);
-                    } else if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
-                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[1], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
-                        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[1].position, dt);
-                        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
-                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[1], dt, &m_spatialGrid);
-                    } else {
-                        // P0 alive or both dead — use P0 as reference (enemies idle/return if dead)
-                        EnemyAI::update(m_entities, m_level.grid, m_localPlayers[0], m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon);
-                        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayers[0].position, dt);
-                        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
-                        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayers[0], dt, &m_spatialGrid);
-                    }
-                    EntitySystem::tickTimers(m_entities, dt);
-                    WorldItemSystem::update(m_worldItems, dt);
-                }
+                // A dead player runs no gameplay. The shared world systems still tick once
+                // after the loop (tickSharedSystems below), so enemies/projectiles/FX keep
+                // running and enemies return home when everyone is down — no special-casing
+                // needed here anymore (M3 removed the duplicated dead-branch shared block).
                 continue;
             }
 
             gameUpdate(dt);
             swapOutPlayer(sp);
         }
+
+        // Shared world systems run EXACTLY once, after every local player has been updated
+        // (M3) — independent of who is alive, so FX/AI/projectiles never freeze when P1 is
+        // dead, and they're no longer duplicated across the alive/dead code paths.
+        tickSharedSystems(dt);
 
         if (m_netRole == NetRole::SERVER) serverNetPost(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPost(dt);
@@ -382,6 +345,138 @@ void Engine::update(f32 dt) {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Shared-world systems — run EXACTLY once per frame (M3), AFTER every local player has been
+// updated. This used to live inline in gameUpdate gated on m_localPlayerIndex==0 AND was
+// duplicated in the dead-player branch of the update loop. The gated copy never ran when P1
+// (sp=0) was dead, so FX/meteors/orb-shards/particles froze even while P2 kept playing.
+// Centralizing here fixes that freeze and removes the copy-paste drift.
+//
+// Primary AI/projectile reference = first ALIVE local player (fallback P0 if all dead); the
+// other living locals ride along as extras so enemies chase the nearest. On a SERVER the
+// extras are throwaway views of the remote NetPlayers (R7-3); on a CLIENT the local player's
+// HP/status is saved/restored around the passes so the ghost sim can't fight the
+// authoritative snapshot HP (R7-4 option (a)).
+void Engine::tickSharedSystems(f32 dt) {
+    // (L8) Default kill-credit to "none" so AI / skill / DoT entity kills drop free-for-all;
+    // projectile.cpp re-asserts each player projectile's own firer around its damage below.
+    Combat::setAttackingPlayer(0xFF);
+
+    // Choose the primary reference (first alive local) + the living-local extra targets.
+    u8 primaryIdx = 0;
+    for (u8 p = 0; p < m_splitPlayerCount; p++) {
+        if (!m_playerDead[p]) { primaryIdx = p; break; }
+    }
+    Player& primary = m_localPlayers[primaryIdx];
+
+    Player* extras[MAX_PLAYERS - 1];
+    u32     extraCount = 0;
+
+    // SERVER: build throwaway views of the remote NetPlayers, copied back after projectiles.
+    Player  remoteViews[MAX_PLAYERS - 1];
+    Player* remotePtrs[MAX_PLAYERS - 1];
+    u8      remoteSlots[MAX_PLAYERS - 1];
+    u32     remoteViewCount = 0;
+    if (m_netRole == NetRole::SERVER) {
+        remoteViewCount = buildRemotePlayerViews(remoteViews, remotePtrs, remoteSlots);
+        for (u32 i = 0; i < remoteViewCount; i++) extras[extraCount++] = remotePtrs[i];
+    } else {
+        // Split-screen: the other living local players are the extra targets.
+        for (u8 p = 0; p < m_splitPlayerCount; p++) {
+            if (p == primaryIdx || m_playerDead[p]) continue;
+            extras[extraCount++] = &m_localPlayers[p];
+        }
+    }
+
+    // CLIENT ghost-sim guard (R7-4 (a)): snapshot the local player's HP/status, restore after,
+    // so the locally-run ghost AI/projectiles can't overwrite the authoritative snapshot HP.
+    const u8   localIdx   = (m_localPlayerIndex < MAX_LOCAL_PLAYERS) ? m_localPlayerIndex : 0;
+    const bool ghostGuard = (m_netRole == NetRole::CLIENT);
+    f32 sH=0, sInv=0, sPoi=0, sBur=0, sFrz=0, sSlo=0, sFla=0;
+    if (ghostGuard) {
+        Player& lp = m_localPlayers[localIdx];
+        sH=lp.health; sInv=lp.invulnTimer; sPoi=lp.poisonTimer; sBur=lp.burnTimer;
+        sFrz=lp.freezeTimer; sSlo=lp.slowTimer; sFla=lp.damageFlashTimer;
+    }
+
+    // Enemy AI — enemies target the nearest of primary + extras.
+    {
+        PROFILE_SCOPE(1, "AI");
+        bool spawnCalm = m_spawnCalmTimer > 0.0f; // floor-start calm window
+        EnemyAI::update(m_entities, m_level.grid, primary, m_projectiles, dt, &m_level.squads,
+                        extraCount > 0 ? extras : nullptr, extraCount, &m_level.dungeon, spawnCalm);
+        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, primary.position, dt);
+    }
+
+    // Decay enemy speech timers + log fresh speech to chat (shared entity state → once/frame;
+    // the old per-player placement double-ticked these in split-screen).
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if (e.speechTimer > 0.0f) {
+            if (e.speechText && e.speechTimer > 1.9f) {
+                const char* name = "???";
+                if (e.flags & ENT_FRIENDLY) {
+                    switch (e.npcClass) {
+                        case NpcClass::CLERIC:  name = "Cleric";  break;
+                        case NpcClass::ARCHER:  name = "Archer";  break;
+                        case NpcClass::MAGE:    name = "Mage";    break;
+                        case NpcClass::ROGUE:   name = "Rogue";   break;
+                        case NpcClass::PALADIN: name = "Paladin"; break;
+                        default:                name = "Ally";     break;
+                    }
+                } else if (e.enemyType == EnemyType::BOSS) {
+                    name = e.nameTag ? e.nameTag : "Boss";
+                }
+                Vec3 chatCol = (e.flags & ENT_FRIENDLY)
+                    ? Vec3{0.4f, 1.0f, 0.5f}
+                    : Vec3{1.0f, 0.3f, 0.3f};
+                addChatMessage(name, e.speechText, chatCol);
+                e.speechTimer = 1.8f; // prevent re-logging on next tick
+            }
+            e.speechTimer -= dt;
+            if (e.speechTimer <= 0.0f) {
+                e.speechText  = nullptr;
+                e.speechTimer = 0.0f;
+            }
+        }
+    }
+    for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
+        if (m_chatLog[i].timer > 0.0f) m_chatLog[i].timer -= dt;
+    }
+
+    // Projectiles — primary + extras are collidable so enemy projectiles damage everyone.
+    {
+        PROFILE_SCOPE(2, "Projectiles");
+        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, primary, dt, &m_spatialGrid,
+                                 extraCount > 0 ? extras : nullptr, extraCount);
+    }
+
+    // SERVER: write AI + projectile damage/status back to the authoritative NetPlayers
+    // (serverNetPost then ticks DoT/death and the snapshot carries it to the owning client).
+    if (remoteViewCount > 0)
+        applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
+    // CLIENT: discard any HP/status the ghost sim just inflicted (snapshot is authoritative).
+    if (ghostGuard) {
+        Player& lp = m_localPlayers[localIdx];
+        lp.health=sH; lp.invulnTimer=sInv; lp.poisonTimer=sPoi; lp.burnTimer=sBur;
+        lp.freezeTimer=sFrz; lp.slowTimer=sSlo; lp.damageFlashTimer=sFla;
+    }
+
+    EntitySystem::tickTimers(m_entities, dt);
+    WorldItemSystem::update(m_worldItems, dt);
+
+    // Shared FX pools + shared skill world-systems (once/frame).
+    tickSharedFX(dt);
+    SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
+    // Meteors: pass both local players so kill-heals credit the casting player.
+    Player* meteorPlayers[MAX_LOCAL_PLAYERS];
+    for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) meteorPlayers[p] = &m_localPlayers[p];
+    SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt);
+    ParticleSystem::update(m_particles, dt);
+}
 
 // ---------------------------------------------------------------------------
 // Singleplayer update (unchanged from Phase 3)
@@ -450,7 +545,7 @@ void Engine::gameUpdate(f32 dt) {
         }
         if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
             // Multiplayer or co-op: this player dies, game keeps running
-            m_playerDead[m_activePlayerIndex] = true;
+            m_playerDead[m_localPlayerIndex] = true;
             // If ALL players are now dead, send enemies walking home
             bool allDead = true;
             for (u32 p = 0; p < m_splitPlayerCount; p++) {
@@ -597,147 +692,9 @@ void Engine::gameUpdate(f32 dt) {
         m_localPlayer.eyeHeight = 1.7f + viewBobY;
     }
 
-    // R7-3: SERVER target bridge — throwaway Player views of active remote NetPlayers so
-    // server enemies/projectiles can chase + damage them (they only ever saw the host
-    // before). Built ONCE here so the SAME views feed BOTH the AI pass and the projectile
-    // pass below; the mutated fields are copied back to the NetPlayers after the projectile
-    // pass. MAX_PLAYERS-1 = at most 3 remotes. Empty (count 0) in SP/split-screen, so the
-    // existing branches below are untouched there. m_splitPlayerCount is forced to 1 in
-    // networked play, so the split-screen and SERVER branches are mutually exclusive.
-    Player  remoteViews[MAX_PLAYERS - 1];
-    Player* remotePtrs[MAX_PLAYERS - 1];
-    u8      remoteSlots[MAX_PLAYERS - 1];
-    u32     remoteViewCount = 0;
-    if (m_netRole == NetRole::SERVER && m_activePlayerIndex == 0)
-        remoteViewCount = buildRemotePlayerViews(remoteViews, remotePtrs, remoteSlots);
-
-    // R7-4 option (a): on the CLIENT, the local ghost sim (EnemyAI + projectiles still run
-    // against m_localPlayer between snapshots) must NOT fight authoritative HP. Snapshot the
-    // local player's HP + status before the ghost passes and restore them after, so the only
-    // source of truth for local HP is the snapshot (adopted in Client::reconcile). Movement is
-    // still predicted; only the damage/status the ghost would inflict is discarded.
-    const bool ghostGuard = (m_netRole == NetRole::CLIENT && m_activePlayerIndex == 0);
-    f32 savedHealth = 0.0f, savedInvuln = 0.0f, savedPoison = 0.0f, savedBurn = 0.0f,
-        savedFreeze = 0.0f, savedSlow = 0.0f, savedFlash = 0.0f;
-    if (ghostGuard) {
-        savedHealth = m_localPlayer.health;
-        savedInvuln = m_localPlayer.invulnTimer;
-        savedPoison = m_localPlayer.poisonTimer;
-        savedBurn   = m_localPlayer.burnTimer;
-        savedFreeze = m_localPlayer.freezeTimer;
-        savedSlow   = m_localPlayer.slowTimer;
-        savedFlash  = m_localPlayer.damageFlashTimer;
-    }
-
-    // Enemy AI — run ONCE per frame, enemies pick the nearest player to target
-    if (m_activePlayerIndex == 0) {
-        PROFILE_SCOPE(1, "AI");
-        bool spawnCalm = m_spawnCalmTimer > 0.0f; // floor-start calm window
-        if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
-            // Co-op: pass P2 as extra target so enemies chase the nearest player
-            Player* extras[] = { &m_localPlayers[1] };
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, extras, 1, &m_level.dungeon, spawnCalm);
-        } else if (remoteViewCount > 0) {
-            // SERVER: pass live remote players so enemies chase/melee the nearest of host+remotes.
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, remotePtrs, remoteViewCount, &m_level.dungeon, spawnCalm);
-        } else {
-            EnemyAI::update(m_entities, m_level.grid, m_localPlayer, m_projectiles, dt, &m_level.squads, nullptr, 0, &m_level.dungeon, spawnCalm);
-        }
-        // Propagate squad alerts and reassign roles for the active tick
-        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, m_localPlayer.position, dt);
-    }
-
-    // Decay speech timers + log new speech to chat
-    for (u32 a = 0; a < m_entities.activeCount; a++) {
-        u32 idx = m_entities.activeList[a];
-        Entity& e = m_entities.entities[idx];
-        if (e.speechTimer > 0.0f) {
-            // Log new speech to the chat log. We detect "first frame" by
-            // checking a negative-flag trick: aiCheckIdx bit 15 is set once logged,
-            // cleared when speechText changes. Simpler: just compare last-logged
-            // pointer. Use the animTimer trick: if speechTimer > 2.0 it's fresh spawn
-            // speech, otherwise it's combat/hurt speech that may repeat.
-            // Simplest: always log, but cap speechTimer to prevent re-entry.
-            if (e.speechText && e.speechTimer > 1.9f) {
-                const char* name = "???";
-                if (e.flags & ENT_FRIENDLY) {
-                    switch (e.npcClass) {
-                        case NpcClass::CLERIC:  name = "Cleric";  break;
-                        case NpcClass::ARCHER:  name = "Archer";  break;
-                        case NpcClass::MAGE:    name = "Mage";    break;
-                        case NpcClass::ROGUE:   name = "Rogue";   break;
-                        case NpcClass::PALADIN: name = "Paladin"; break;
-                        default:                name = "Ally";     break;
-                    }
-                } else if (e.enemyType == EnemyType::BOSS) {
-                    name = e.nameTag ? e.nameTag : "Boss";
-                }
-                Vec3 chatCol = (e.flags & ENT_FRIENDLY)
-                    ? Vec3{0.4f, 1.0f, 0.5f}
-                    : Vec3{1.0f, 0.3f, 0.3f};
-                addChatMessage(name, e.speechText, chatCol);
-                e.speechTimer = 1.8f; // prevent re-logging on next tick
-            }
-            e.speechTimer -= dt;
-            if (e.speechTimer <= 0.0f) {
-                e.speechText  = nullptr;
-                e.speechTimer = 0.0f;
-            }
-        }
-    }
-
-    // Decay chat line timers
-    for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
-        if (m_chatLog[i].timer > 0.0f) m_chatLog[i].timer -= dt;
-    }
-
-    // Shared systems — only run once per frame (first player pass in split-screen)
-    if (m_activePlayerIndex == 0) {
-        { PROFILE_SCOPE(2, "Projectiles");
-        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
-        // In split-screen, pass P2 as an extra collidable player so enemy projectiles
-        // apply full status + Wanderer Deflect to P2 (mirrors the EnemyAI extras call).
-        if (m_splitPlayerCount > 1 && !m_playerDead[1]) {
-            Player* projExtras[] = { &m_localPlayers[1] };
-            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid, projExtras, 1);
-        } else if (remoteViewCount > 0) {
-            // SERVER: same views as the AI pass so enemy-projectile damage lands on remotes too.
-            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid, remotePtrs, remoteViewCount);
-        } else {
-            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, m_localPlayer, dt, &m_spatialGrid);
-        }
-        }
-        // R7-3: copy AI + projectile damage/status back into the authoritative NetPlayers.
-        // serverNetPost then ticks DoT/death and the snapshot carries it to the owning client.
-        if (remoteViewCount > 0)
-            applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
-        // R7-4 option (a): discard any HP/status the CLIENT ghost sim just inflicted on the
-        // local player — authoritative HP comes only from the snapshot (Client::reconcile).
-        if (ghostGuard) {
-            m_localPlayer.health          = savedHealth;
-            m_localPlayer.invulnTimer     = savedInvuln;
-            m_localPlayer.poisonTimer     = savedPoison;
-            m_localPlayer.burnTimer       = savedBurn;
-            m_localPlayer.freezeTimer     = savedFreeze;
-            m_localPlayer.slowTimer       = savedSlow;
-            m_localPlayer.damageFlashTimer = savedFlash;
-        }
-        EntitySystem::tickTimers(m_entities, dt);
-        WorldItemSystem::update(m_worldItems, dt);
-
-        // Shared FX pools + shared skill systems tick ONCE per frame (not per local
-        // player) — running them in the per-player tail double-ticks them in split-screen.
-        tickSharedFX(dt);
-        // Update orb projectiles (spawn ice shards for Frozen Orb)
-        SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
-        // Update pending meteors (+ holy bombardment + pillar kill-heal). Pass both local
-        // players so kill-heals credit the casting player; index 0 is the live swapped-in
-        // alias (this block runs under m_activePlayerIndex==0).
-        Player* meteorPlayers[MAX_LOCAL_PLAYERS] = { &m_localPlayer, &m_localPlayers[1] };
-        SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt);
-        // Tick the particle pool (motion, gravity, lifetime decay)
-        ParticleSystem::update(m_particles, dt);
-    }
+    // Shared world systems (AI, projectiles, entity timers, world items, shared FX, meteors,
+    // particles, enemy speech/chat decay) moved to Engine::tickSharedSystems, which runs ONCE
+    // per frame after the per-player loop (M3) — they no longer ride the first player's pass.
 
     // Per-local-player FX/buff decay + skill cooldowns (run once per swap).
     tickPlayerFX(dt);
@@ -774,10 +731,14 @@ void Engine::gameUpdate(f32 dt) {
     // updateFloorDoor returns true when the player descends — skip remainder of tick
     if (updateFloorDoor()) return;
 
-    // Toggle inventory (Tab key)
+    // Toggle inventory (Tab key). Co-op decision (L3): opening an inventory does NOT pause
+    // the game — the other player and all enemies keep running. This is intentional couch
+    // co-op behavior (a shared session can't freeze for one player); inventory is simply not
+    // a "safe" moment in split-screen. Mouse capture is toggled only for P0, the mouse owner
+    // — otherwise P2 (controller-only) opening their inventory would release P1's mouse-look.
     if (Input::isActionPressed(GameAction::INVENTORY)) {
         m_inventoryOpen = !m_inventoryOpen;
-        Input::setRelativeMouseMode(!m_inventoryOpen);
+        if (m_localPlayerIndex == 0) Input::setRelativeMouseMode(!m_inventoryOpen);
         AudioSystem::play(SfxId::UI_CLICK);
         if (m_inventoryOpen) {
             m_inventoryOpenedOnce = true; // dismiss "Open Inventory" tooltip
@@ -878,9 +839,9 @@ void Engine::updatePlayerPickup() {
             if (isGlobe(w.item)) continue;
             if (w.item.defId >= m_itemDefCount) continue;
             // Loot-ownership window: skip items reserved to another local player (3s, then free).
-            // Currently dormant — all drops spawn ownerSlot=0xFF (free-for-all) because the death
-            // callback can't attribute the killer (it runs under m_activePlayerIndex==0). Kept as the
-            // consumer hook for a future per-killer attribution pass; harmless with 0xFF owners.
+            // (L8) Now active — drops are stamped with the killer's slot (Combat::s_attackingPlayer
+            // → Entity::killerSlot → WorldItem::ownerSlot). Environmental/AoE kills stay 0xFF
+            // (free-for-all). So in split-screen each player's kills are briefly theirs to grab.
             if (w.ownerSlot != 0xFF && w.ownerSlot != m_localPlayerIndex && w.exclusiveTimer > 0.0f)
                 continue;
             Vec3 toItem = w.position - m_localPlayer.position;
@@ -1244,15 +1205,20 @@ void Engine::pushPlayerFromEntities() {
         }
     }
 
-    // Player-to-player push in split-screen — gentle separation so they don't overlap
+    // Player-to-player push in split-screen — gentle separation so they don't overlap.
+    // L1: each player pushes only ITSELF (the active alias) away from the other, during its
+    // own update pass — pushing both here would be clobbered by swapOutPlayer for the
+    // non-active player. Both passes together separate the pair; it converges over a couple
+    // of frames rather than snapping, which is the intended "gentle" feel. The wall push-out
+    // below then resolves any overlap a push created with level geometry.
     if (m_splitPlayerCount > 1) {
-        u8 otherP = (m_activePlayerIndex == 0) ? 1 : 0;
+        u8 otherP = (m_localPlayerIndex == 0) ? 1 : 0;
         if (!m_playerDead[otherP]) {
             Vec3 toMe = m_localPlayer.position - m_localPlayers[otherP].position;
             f32 dist = sqrtf(toMe.x * toMe.x + toMe.z * toMe.z);
             f32 minSep = 0.7f; // minimum separation (2 × player half-width)
             if (dist > 0.01f && dist < minSep) {
-                f32 push = (minSep - dist) * 0.5f; // each player moves half
+                f32 push = (minSep - dist) * 0.5f;
                 Vec3 dir = {toMe.x / dist, 0, toMe.z / dist};
                 m_localPlayer.position.x += dir.x * push;
                 m_localPlayer.position.z += dir.z * push;

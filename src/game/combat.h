@@ -83,6 +83,13 @@ namespace Combat {
     using DeathCallback = void(*)(EntityPool& pool, u16 entityIndex, Vec3 position);
     void setDeathCallback(DeathCallback cb);
 
+    // (L8) Player slot currently credited as the attacker. The engine sets it around each
+    // player's weapon fire (and projectile.cpp restores each projectile's ownerSlot around
+    // its damage); killEntity stamps it onto Entity::killerSlot so loot can be reserved to
+    // the killer. 0xFF = none/environmental (free-for-all drop).
+    void setAttackingPlayer(u8 slot);
+    u8   getAttackingPlayer();
+
     // Perfect block callback — called when player executes a perfect block
     using PerfectBlockCallback = void(*)(Player& player);
     void setPerfectBlockCallback(PerfectBlockCallback cb);

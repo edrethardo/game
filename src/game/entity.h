@@ -213,6 +213,9 @@ struct Entity {
     f32  flashTimer      = 0.0f;
     f32  knockbackTimer  = 0.0f;  // >0 while a knockback impulse is decaying
     f32  deathTimer      = 0.0f;
+    u8   killerSlot      = 0xFF;  // (L8) player slot credited with the kill, 0xFF = none/environmental;
+                                  // set in Combat::killEntity from Combat::s_attackingPlayer, read by
+                                  // the loot drop to reserve the drop to that player for a few seconds
 };
 
 struct EntityHandle {

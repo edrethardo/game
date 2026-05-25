@@ -15,6 +15,13 @@ static Combat::PerfectBlockCallback    s_perfectBlockCallback    = nullptr;
 static Combat::DodgeThroughCallback    s_dodgeThroughCallback    = nullptr;
 static ParticlePool* s_particlePool = nullptr;
 static ScreenShake*  s_screenShake  = nullptr;
+// (L8) Player slot credited for the current damage source (0xFF = none/environmental).
+// Set by the engine around weapon fire and by projectile.cpp per projectile; stamped onto
+// Entity::killerSlot in killEntity so loot drops can be reserved to the killer.
+static u8 s_attackingPlayer = 0xFF;
+
+void Combat::setAttackingPlayer(u8 slot) { s_attackingPlayer = slot; }
+u8   Combat::getAttackingPlayer()        { return s_attackingPlayer; }
 
 void Combat::setDamageNumberCallback(DamageNumberCallback cb) {
     s_damageNumberCallback = cb;
@@ -181,6 +188,7 @@ void Combat::killEntity(EntityPool& pool, EntityHandle target) {
     e->aiState    = AIState::DEAD;
     e->deathTimer = 1.0f;
     e->velocity   = {0, 0, 0};
+    e->killerSlot = s_attackingPlayer; // (L8) credit the kill before the loot callback reads it
     if (s_deathCallback) {
         s_deathCallback(pool, target.index, e->position);
     }
@@ -366,7 +374,10 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
     u16 idx = ProjectileSystem::spawn(projectiles, spawnPos, forward,
                                        weapon.projectileSpeed, dmg,
                                        weapon.projectileRadius, 3.0f, true, extraFlags);
-    if (idx != 0xFFFF) projectiles.projectiles[idx].isCrit = crit;
+    if (idx != 0xFFFF) {
+        projectiles.projectiles[idx].isCrit    = crit;
+        projectiles.projectiles[idx].ownerSlot = s_attackingPlayer; // (L8) credit the firer
+    }
     return idx;
 }
 
@@ -391,6 +402,7 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
         p.splashRadius = splashRadius;
         p.splashDamage = splashDamage;
         p.isCrit       = crit;
+        p.ownerSlot    = s_attackingPlayer; // (L8) credit the firer
         if (gravity > 0.0f) p.projFlags |= PROJ_GRAVITY;
         if (splashRadius > 0.0f) p.projFlags |= PROJ_SPLASH;
     }

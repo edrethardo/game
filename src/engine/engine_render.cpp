@@ -460,24 +460,6 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
 }
 
 void Engine::render(f32 alpha) {
-    // Interpolate camera between previous and current tick for smooth gyro/look.
-    // Save tick state, interpolate for rendering, then restore after frame.
-    Vec3 tickPos   = m_camera.position;
-    f32  tickYaw   = m_camera.yaw;
-    f32  tickPitch = m_camera.pitch;
-    if (m_gameState == GameState::IN_GAME) {
-        m_camera.position = m_camera.prevPosition + (tickPos   - m_camera.prevPosition) * alpha;
-        // Angle-aware yaw interpolation — handles ±π wrapping without snapping
-        f32 yawDiff = tickYaw - m_camera.prevYaw;
-        if (yawDiff >  3.14159f) yawDiff -= 6.28318f;
-        if (yawDiff < -3.14159f) yawDiff += 6.28318f;
-        m_camera.yaw      = m_camera.prevYaw + yawDiff * alpha;
-        m_camera.pitch    = m_camera.prevPitch + (tickPitch - m_camera.prevPitch) * alpha;
-        // Apply screen shake offset — decays over time, doesn't affect saved tick state
-        Vec3 shakeOffset = m_camera.shake.update(static_cast<f32>(FIXED_DT));
-        m_camera.position = m_camera.position + shakeOffset;
-    }
-
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -489,34 +471,31 @@ void Engine::render(f32 alpha) {
 
     PROFILE_SCOPE(3, "Render");
 
+    // Switch constraint mode shrinks the *base* render area. Split offsets below are derived
+    // from this base so the viewport origin and size always live in one coordinate space —
+    // the old code forced vpW/vpH to the Switch res but left vpX/vpY in real-window space,
+    // which placed the second player's view in the wrong spot at the wrong size (H3).
+    u32 baseW = m_switchMode ? SWITCH_RES_W : sw;
+    u32 baseH = m_switchMode ? SWITCH_RES_H : sh;
+
     // Split-screen: render each player's view
     for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
-    // Swap in this player's camera and state
-    if (m_splitPlayerCount > 1) {
-        swapInPlayer(sp);
-    }
+    // Swap in this player's camera + state. Done unconditionally (even single-player) so
+    // m_camera is always a fresh copy of the per-player store — the render interpolation
+    // below mutates that transient copy, so repeated renders between ticks never compound.
+    swapInPlayer(sp);
 
-    // Compute viewport for this player
-    u32 vpX = 0, vpY = 0, vpW = sw, vpH = sh;
+    // Compute viewport for this player from the base (post-Switch) dimensions.
+    u32 vpX = 0, vpY = 0, vpW = baseW, vpH = baseH;
     if (m_splitPlayerCount > 1) {
         if (m_splitMode == 0) {
-            // Horizontal split: P1=top, P2=bottom
-            vpH = sh / 2;
+            // Horizontal split: P1=top, P2=bottom (GL viewport Y is bottom-origin)
+            vpH = baseH / 2;
             vpY = (sp == 0) ? vpH : 0;
         } else {
             // Vertical split: P1=left, P2=right
-            vpW = sw / 2;
+            vpW = baseW / 2;
             vpX = (sp == 0) ? 0 : vpW;
-        }
-    }
-
-    // Switch constraint mode
-    if (m_switchMode) {
-        vpW = SWITCH_RES_W;
-        vpH = SWITCH_RES_H;
-        if (m_splitPlayerCount > 1) {
-            if (m_splitMode == 0) vpH /= 2;
-            else vpW /= 2;
         }
     }
 
@@ -526,6 +505,26 @@ void Engine::render(f32 alpha) {
 
     // Only clear depth per player (color was cleared at top of render)
     if (sp > 0) glClear(GL_DEPTH_BUFFER_BIT);
+
+    // Per-viewport camera interpolation between previous and current tick for smooth
+    // gyro/look. Each player's prev-tick state rides in their swapped-in m_camera, so this
+    // MUST run inside the loop: the old once-before-the-loop version was immediately
+    // overwritten by swapInPlayer, so split-screen rendered raw, stuttery cameras (H2).
+    if (m_gameState == GameState::IN_GAME) {
+        Vec3 tickPos   = m_camera.position;
+        f32  tickYaw   = m_camera.yaw;
+        f32  tickPitch = m_camera.pitch;
+        m_camera.position = m_camera.prevPosition + (tickPos - m_camera.prevPosition) * alpha;
+        // Angle-aware yaw interpolation — handles ±π wrapping without snapping
+        f32 yawDiff = tickYaw - m_camera.prevYaw;
+        if (yawDiff >  3.14159f) yawDiff -= 6.28318f;
+        if (yawDiff < -3.14159f) yawDiff += 6.28318f;
+        m_camera.yaw   = m_camera.prevYaw + yawDiff * alpha;
+        m_camera.pitch = m_camera.prevPitch + (tickPitch - m_camera.prevPitch) * alpha;
+        // Screen shake offset — decays over time, applied to the transient render copy
+        Vec3 shakeOffset = m_camera.shake.update(static_cast<f32>(FIXED_DT));
+        m_camera.position = m_camera.position + shakeOffset;
+    }
 
     f32 aspect = static_cast<f32>(vpW) / static_cast<f32>(vpH);
     CameraSystem::computeMatrices(m_camera, aspect);
@@ -675,13 +674,10 @@ void Engine::render(f32 alpha) {
     glDisable(GL_SCISSOR_TEST);
     glViewport(0, 0, sw, sh); // restore full viewport
 
-    // Swap in player 0 state as default after rendering
-    if (m_splitPlayerCount > 1) swapInPlayer(0);
-
-    // Restore tick-accurate camera state after rendering (interpolation is visual only)
-    m_camera.position = tickPos;
-    m_camera.yaw      = tickYaw;
-    m_camera.pitch    = tickPitch;
+    // Default the active aliases back to player 0 for any code that reads them outside
+    // render. This also reloads m_camera from the persistent (tick-accurate) store, so the
+    // visual-only interpolation applied above is discarded — no manual restore needed.
+    swapInPlayer(0);
 
     GLContext::swapBuffers(Window::getHandle());
 }

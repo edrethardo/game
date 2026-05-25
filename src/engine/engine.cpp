@@ -312,41 +312,64 @@ void Engine::run() {
 }
 
 // ---------------------------------------------------------------------------
-// Split-screen player swap — copy per-player arrays ↔ active aliases
+// Split-screen player swap — copy per-player arrays ↔ active aliases.
+//
+// M1 (drift-proofing): the alias↔array field list lives in ONE place — the X-macro below.
+// swapInPlayer and swapOutPlayer expand it in opposite directions, so it is impossible to
+// add (or rename) a per-player field that gets restored in one direction but not the other.
+// Each entry is (active-alias, per-player-array); a plain assignment must be valid for both.
+// Array-typed fields (m_classSkillStates) can't use operator= and are listed separately.
 // ---------------------------------------------------------------------------
+#define LOCAL_PLAYER_SWAP_FIELDS(X)        \
+    X(m_localPlayer,      m_localPlayers)   \
+    X(m_camera,           m_cameras)        \
+    X(m_viewmodelState,   m_viewmodelStates)\
+    X(m_playerClass,      m_playerClasses)  \
+    X(m_activeClassSkill, m_activeClassSkills) \
+    X(m_armorAura,        m_armorAuras)     \
+    X(m_weaponProc,       m_weaponProcs)    \
+    X(m_ringPassive,      m_ringPassives)   \
+    X(m_inventoryOpen,    m_inventoryOpenArr) \
+    X(m_hitMarkerTimer,   m_hitMarkerTimers)\
+    X(m_potionCooldown,   m_potionCooldowns)\
+    X(m_invCursorPanel,   m_invCursorPanels)\
+    X(m_invCursorIndex,   m_invCursorIndices) \
+    X(m_dragState,        m_dragStates)     \
+    X(m_dblClickState,    m_dblClickStates)
+
 void Engine::swapInPlayer(u8 idx) {
-    m_localPlayer      = m_localPlayers[idx];
-    m_camera           = m_cameras[idx];
-    m_viewmodelState   = m_viewmodelStates[idx];
-    m_playerClass      = m_playerClasses[idx];
-    m_activeClassSkill = m_activeClassSkills[idx];
+    #define X(alias, arr) alias = arr[idx];
+    LOCAL_PLAYER_SWAP_FIELDS(X)
+    #undef X
+    // Array field — paired manually (must mirror the swapOut memcpy below).
     std::memcpy(m_classSkillStates, m_classSkillStatesPerPlayer[idx], sizeof(m_classSkillStates));
-    m_armorAura        = m_armorAuras[idx];
-    m_weaponProc       = m_weaponProcs[idx];
-    m_ringPassive      = m_ringPassives[idx];
-    m_inventoryOpen    = m_inventoryOpenArr[idx];
-    m_hitMarkerTimer   = m_hitMarkerTimers[idx];
-    m_potionCooldown   = m_potionCooldowns[idx];
-    m_invCursorPanel   = m_invCursorPanels[idx];
-    m_invCursorIndex   = m_invCursorIndices[idx];
     m_localPlayerIndex = idx;
 }
 
 void Engine::swapOutPlayer(u8 idx) {
-    m_localPlayers[idx]      = m_localPlayer;
-    m_cameras[idx]           = m_camera;
-    m_viewmodelStates[idx]   = m_viewmodelState;
-    m_playerClasses[idx]     = m_playerClass;
-    m_activeClassSkills[idx] = m_activeClassSkill;
+    #define X(alias, arr) arr[idx] = alias;
+    LOCAL_PLAYER_SWAP_FIELDS(X)
+    #undef X
     std::memcpy(m_classSkillStatesPerPlayer[idx], m_classSkillStates, sizeof(m_classSkillStates));
-    m_armorAuras[idx]        = m_armorAura;
-    m_weaponProcs[idx]       = m_weaponProc;
-    m_ringPassives[idx]      = m_ringPassive;
-    m_inventoryOpenArr[idx]  = m_inventoryOpen;
-    m_hitMarkerTimers[idx]   = m_hitMarkerTimer;
-    m_potionCooldowns[idx]   = m_potionCooldown;
-    m_invCursorPanels[idx]   = m_invCursorPanel;
-    m_invCursorIndices[idx]  = m_invCursorIndex;
+}
+#undef LOCAL_PLAYER_SWAP_FIELDS
+
+// (M5) Place the split-screen pair at the current spawn. P0 is taken from the active alias
+// (the freshly-built spawn position/orientation); P1 is placed one metre to the side facing
+// the same way, briefly invulnerable, and both NetPlayer spawnPositions are recorded for
+// respawn. This consolidates the near-identical reposition blocks that were copy-pasted in
+// the floor-transition, continue-load, and new-run-with-P2 paths. No-op outside split-screen.
+void Engine::positionLocalPlayersAtSpawn() {
+    if (m_splitPlayerCount <= 1) return;
+    m_localPlayers[0]            = m_localPlayer;          // P0 = current active alias
+    m_cameras[0]                 = m_camera;
+    m_players[0].spawnPosition   = m_localPlayer.position;
+    m_localPlayers[1].position   = m_localPlayer.position + Vec3{1.0f, 0.0f, 0.0f};
+    m_localPlayers[1].velocity   = {0, 0, 0};
+    m_localPlayers[1].yaw        = m_localPlayer.yaw;
+    m_localPlayers[1].eyeHeight  = m_localPlayer.eyeHeight;
+    m_localPlayers[1].invulnTimer = 2.5f;                  // brief spawn protection for P1
+    m_players[1].spawnPosition   = m_localPlayers[1].position;
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,9 @@ struct Projectile {
     bool active     = false;
     bool fromPlayer = true; // false = enemy projectile
     bool isCrit     = false; // player rolled a crit at spawn — applied on direct hit, NOT splash
+    u8   ownerSlot  = 0xFF;  // (L8) firing player's slot (0xFF = none); restored into
+                             // Combat::s_attackingPlayer around this projectile's damage so a
+                             // kill credits the firer even though it resolves frames later
     u8   projFlags  = 0;       // bit 0: isOrb, bit 1: isOrbShard
     f32  subTimer   = 0.0f;    // orb shard spawn interval timer
     f32  orbAngle   = 0.0f;    // current rotation angle for shard spawning
