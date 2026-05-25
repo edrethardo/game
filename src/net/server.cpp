@@ -6,13 +6,17 @@
 
 static InputRingBuffer s_inputBuffers[MAX_PLAYERS];
 static u32             s_levelSeed = 0;
+static u8              s_levelFloor = 1;      // current floor, sent to joiners in JOIN_ACCEPT
+static u8              s_levelDifficulty = 0; // current difficulty tier, sent to joiners
 
-void Server::init(NetPlayer* players, u32 levelSeed) {
+void Server::init(NetPlayer* players, u32 levelSeed, u8 levelFloor, u8 difficulty) {
     s_levelSeed = levelSeed;
+    s_levelFloor = levelFloor;
+    s_levelDifficulty = difficulty;
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         s_inputBuffers[i] = InputRingBuffer{};
     }
-    LOG_INFO("Server: initialized (seed=%u)", levelSeed);
+    LOG_INFO("Server: initialized (seed=%u floor=%u diff=%u)", levelSeed, levelFloor, difficulty);
 }
 
 void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
@@ -37,7 +41,11 @@ void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     // Validate input to prevent server crash from malicious clients
     if (input.weaponId >= MAX_WEAPON_DEFS) input.weaponId = 0;
     input.moveFlags &= 0x7F;
-    input.extFlags &= 0x7F; // allow bits 0-6 (includes INPUT_EX_RESPAWN)
+    // Keep all defined INPUT_EX_* flags (bits 0-7). Previously masked 0x7F, which
+    // silently stripped INPUT_EX_DODGE (bit7) for remote clients — so a remote
+    // Wanderer's dodge never granted server-authoritative i-frames (player.cpp:266).
+    input.extFlags &= (INPUT_EX_POTION | INPUT_EX_RELOAD | INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL
+                       | INPUT_EX_HELM_SKILL | INPUT_EX_INVENTORY | INPUT_EX_RESPAWN | INPUT_EX_DODGE);
     if (input.skillSlot > 3) input.skillSlot = 0;
 
     s_inputBuffers[playerSlot].push(input);
@@ -66,3 +74,6 @@ void Server::sendSnapshot(u32 serverTick,
 u32 Server::getLevelSeed() {
     return s_levelSeed;
 }
+
+u8 Server::getLevelFloor()      { return s_levelFloor; }
+u8 Server::getLevelDifficulty() { return s_levelDifficulty; }

@@ -54,6 +54,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 
 // Shared statics defined in engine.cpp
 // Shared statics defined in engine.cpp
@@ -138,6 +139,11 @@ void Engine::init() {
 
     Log::init();
     LOG_INFO("Engine initializing...");
+
+    // Seed the global RNG once from wall-clock entropy so gameplay RNG (loot/procs/
+    // particles) varies between runs. The dungeon uses a dedicated per-run seed
+    // (m_level.levelSeed), so multiplayer determinism is unaffected by this.
+    std::srand(static_cast<unsigned>(std::time(nullptr)));
 
     if (!Window::init("Curse of the Dungeon Engine", 1280, 720)) {
         LOG_ERROR("Failed to initialize window");

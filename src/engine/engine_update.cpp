@@ -232,6 +232,10 @@ void Engine::update(f32 dt) {
         m_transition.timer -= dt;
         if (m_transition.timer <= 0.0f) {
             startGame(GameStart::DESCEND); // keep inventory & HP into the next floor
+            // Co-op carries a player who died on the previous floor to the next one (HP is
+            // refilled below), so clear death flags — otherwise that player would arrive
+            // frozen behind the "YOU DIED" overlay despite being alive again.
+            for (u8 p = 0; p < m_splitPlayerCount; p++) m_playerDead[p] = false;
             // In split-screen, reposition both players at the new spawn
             if (m_splitPlayerCount > 1) {
                 m_localPlayers[1].maxHealth *= 1.015f;
@@ -282,7 +286,6 @@ void Engine::update(f32 dt) {
                     m_localPlayer.position = m_players[sp].spawnPosition;
                     m_localPlayer.velocity = {0, 0, 0};
                     m_localPlayer.invulnTimer = 2.5f;
-                    m_localPlayer.health = m_localPlayer.maxHealth;
                     m_localPlayer.hurtVignette = 0.0f; // no red lingering on co-op respawn
                     snapCameraToPlayer();              // no camera-interp smear on co-op respawn
                     m_playerDead[sp] = false;
@@ -418,7 +421,6 @@ void Engine::gameUpdate(f32 dt) {
         if (m_playerClass == PlayerClass::WANDERER) {
             m_localPlayer.dodgeState      = {};
             m_localPlayer.deflectTimer    = 0.0f;
-            m_localPlayer.markedEntityIdx = 0xFFFF;
             m_localPlayer.markTimer       = 0.0f;
             m_localPlayer.deathsDanceTimer = 0.0f;
         }
@@ -445,7 +447,6 @@ void Engine::gameUpdate(f32 dt) {
     handleDebugKeys();
 
     // Quickbar slot switching (mouse wheel only — keys 1-4 are for class skills)
-    WeaponState& ws = m_players[0].weaponState;
     s32 wheel = Input::getMouseWheelDelta();
     {
         s32 slot = static_cast<s32>(m_quickbars[m_localPlayerIndex].activeSlot);
@@ -881,17 +882,27 @@ bool Engine::updateFloorDoor() {
                 upgradeNpcEquipment(static_cast<u8>(m_level.currentFloor));
                 // Save progress before descending so death respawn returns here
                 m_level.savedFloor = m_level.currentFloor;
-                m_level.savedSeed = static_cast<u32>(std::rand());
+                m_level.savedSeed = m_level.levelSeed; // persist the run seed (not a fresh draw)
                 saveGame(m_activeSaveSlot);
                 LOG_INFO("Descending to floor %u", m_level.currentFloor);
 
-                // Refresh all cooldowns on floor descend
-                for (u32 p = 0; p < MAX_PLAYERS; p++) {
+                // Refresh all cooldowns on floor descend. m_skillStates is a direct
+                // [MAX_PLAYERS] array. Class-skill cooldowns live in the per-local-player
+                // store m_classSkillStatesPerPlayer[MAX_LOCAL_PLAYERS][4] (m_classSkillStates
+                // is only the swapped-in alias), so clear the store — not the alias — or the
+                // non-descending split player keeps its cooldowns into the next floor.
+                for (u32 p = 0; p < MAX_PLAYERS; p++)
                     m_skillStates[p].cooldownTimer = 0.0f;
-                    for (u32 s = 0; s < 4; s++) m_classSkillStates[s].cooldownTimer = 0.0f;
+                for (u32 lp = 0; lp < MAX_LOCAL_PLAYERS; lp++)
+                    for (u32 s = 0; s < 4; s++) m_classSkillStatesPerPlayer[lp][s].cooldownTimer = 0.0f;
+                // Keep the currently swapped-in player's active alias in sync.
+                for (u32 s = 0; s < 4; s++) m_classSkillStates[s].cooldownTimer = 0.0f;
+                // Per-player: clear every local player's equipment-skill cooldowns
+                // (boot/helmet states are indexed per slot, not swapped in/out).
+                for (u32 p = 0; p < MAX_PLAYERS; p++) {
+                    m_bootSkillStates[p].cooldownTimer = 0.0f;
+                    m_helmetSkillStates[p].cooldownTimer = 0.0f;
                 }
-                m_bootSkillStates[0].cooldownTimer = 0.0f;
-                m_helmetSkillStates[0].cooldownTimer = 0.0f;
 
                 // Snapshot floor stats for transition screen
                 m_transition.snapshotKills = m_transition.floorKillCount;

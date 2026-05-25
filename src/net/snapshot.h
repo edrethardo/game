@@ -50,7 +50,7 @@ struct SnapEntity {
 
 // Quantized snapshot of one projectile (16 bytes)
 struct SnapProjectile {
-    u16  poolIndex;     // 2: supports MAX_PROJECTILES=4096
+    u16  poolIndex;     // 2: u16 index into the projectile pool (1024 PC / 512 Switch)
     u8   flags;         // 1: bit0=active, bit1=fromPlayer
     u8   padding;       // 1: alignment
     u16  posX, posY, posZ;  // 6
@@ -70,7 +70,7 @@ struct WorldSnapshot {
     SnapPlayer     players[MAX_PLAYERS];
     SnapEntity     entities[MAX_ENTITIES];
     // Heap-allocated projectile array — supports full MAX_PROJECTILES without
-    // bloating BSS (4096 × 16 bytes = 64KB per snapshot).
+    // bloating BSS (1024 × 16 bytes = 16KB per snapshot on PC; 512 × 16 = 8KB on Switch).
     SnapProjectile* projectiles = nullptr;
 
     WorldSnapshot()  { projectiles = new SnapProjectile[MAX_PROJECTILES](); }

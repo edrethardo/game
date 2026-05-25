@@ -83,9 +83,7 @@ struct Player {
     f32  deflectAbsorbed  = 0.0f;  // total accumulated damage during deflect window
     u8   deflectHitCount  = 0;     // number of hits absorbed (each fires 8 projectiles)
     f32  deflectSpeedTimer = 0.0f; // 8% move speed buff after deflect burst (3s)
-    u16  markedEntityIdx  = 0xFFFF;// Exploit Weakness target
-    u16  markedEntityGen  = 0;
-    f32  markTimer        = 0.0f;
+    f32  markTimer        = 0.0f;  // Exploit Weakness mark duration (timer-based AoE mark)
     u8   markSpeedStacks  = 0;     // Exploit Weakness speed buff stacks (5% each, max 20)
     f32  markSpeedTimers[20] = {}; // per-stack 3s non-refreshing decay
     f32  deathsDanceTimer = 0.0f;  // ultimate duration countdown

@@ -99,6 +99,9 @@ namespace Net {
     // Query
     NetRole getRole();
     u8      getLocalPlayerIndex();
+    u32     getServerLevelSeed();       // per-run dungeon seed from SV_JOIN_ACCEPT (client)
+    u8      getServerLevelFloor();      // host's current floor at join time
+    u8      getServerLevelDifficulty(); // host's difficulty tier at join time
     bool    isConnected();
     const NetPlayerSlot* getSlots(); // array of MAX_PLAYERS
     u32     getConnectedCount();

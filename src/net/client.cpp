@@ -57,6 +57,15 @@ static f64 getSnapTime(u32 ago) {
 // (the old hardcoded 0.7) and jumping when the next snapshot arrived. Clamped to
 // [0,1] (no extrapolation); returns 1.0 (render newest) when interpolation isn't
 // possible.
+// Shortest-arc angle interpolation. A plain lerp of two angles in [-π,π] sweeps the
+// long way around when they straddle the ±π seam, making remote players/entities spin.
+static f32 lerpAngle(f32 a, f32 b, f32 t) {
+    f32 d = b - a;
+    while (d >  3.14159265f) d -= 6.28318531f;
+    while (d < -3.14159265f) d += 6.28318531f;
+    return a + d * t;
+}
+
 static f32 computeInterpAlpha() {
     if (s_snapCount < 2) return 1.0f;
     f64 tNewer = getSnapTime(0);
@@ -204,6 +213,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         for (u32 i = 0; i < snapB->playerCount; i++) {
             const SnapPlayer& sp = snapB->players[i];
             u8 slot = sp.slotIndex;
+            if (slot >= MAX_PLAYERS) continue; // guard malformed/corrupt snapshot -> OOB write
             if (slot == localSlot) continue;
             if (!(sp.flags & 1)) continue;
 
@@ -229,6 +239,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
     for (u32 i = 0; i < snapB->playerCount; i++) {
         const SnapPlayer& spB = snapB->players[i];
         u8 slot = spB.slotIndex;
+        if (slot >= MAX_PLAYERS) continue; // guard malformed/corrupt snapshot -> OOB write
         if (slot == localSlot) continue;
         if (!(spB.flags & 1)) continue;
 
@@ -256,8 +267,8 @@ void Client::interpolateRemotePlayers(u8 localSlot,
 
         outActive[slot] = true;
         outPositions[slot] = posA + (posB - posA) * t;
-        outYaws[slot]   = yawA + (yawB - yawA) * t;
-        outPitches[slot] = pitchA + (pitchB - pitchA) * t;
+        outYaws[slot]   = lerpAngle(yawA, yawB, t);
+        outPitches[slot] = lerpAngle(pitchA, pitchB, t);
         outHealth[slot] = (spB.health / 255.0f) * 100.0f;
         outMaxHealth[slot] = 100.0f;
         if (outAnimFlags) outAnimFlags[slot] = spB.animFlags; // latest snapshot's anim state
@@ -305,7 +316,7 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
                 }
             }
             e.position = posA + (posB - posA) * t;
-            e.yaw = yawA + (yawB - yawA) * t;
+            e.yaw = lerpAngle(yawA, yawB, t);
         } else {
             e.position = posB;
             e.yaw = yawB;

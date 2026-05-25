@@ -634,6 +634,12 @@ void Engine::updateLobby(f32 dt) {
             // inventory (it runs onPlayerJoin + syncs via snapshots), so locally we
             // start without wiping or granting a loadout — CONTINUE semantics.
             m_localPlayerIndex = idx;
+            // Adopt the server's per-run dungeon seed, floor, and difficulty (from
+            // SV_JOIN_ACCEPT) so startGame regenerates the IDENTICAL dungeon as the host
+            // instead of rolling its own from local rand().
+            m_level.levelSeed    = Net::getServerLevelSeed();
+            m_level.currentFloor = Net::getServerLevelFloor();
+            m_difficulty         = Net::getServerLevelDifficulty();
             startGame(GameStart::CONTINUE);
         }
     }

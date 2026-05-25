@@ -7,10 +7,16 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "game/entity.h"
+#ifdef ENGINE_DEBUG
+#include "core/log.h"  // overflow diagnostics, debug builds only
+#endif
 
 static constexpr u32 SGRID_SIZE     = 64;   // 64×64 cells
 static constexpr f32 SGRID_CELL     = 4.0f; // 4m per cell (covers 256×256m world)
-static constexpr u32 SGRID_PER_CELL = 8;    // max entities per cell (overflow silently dropped)
+// Max entities tracked per 4m cell. Entities beyond this in one cell are invisible
+// to queryNeighbors (projectile collision), so a too-low cap drops hits in dense
+// swarms (e.g. F4/F5 debug spawns, boss minion clusters). Debug builds log overflow.
+static constexpr u32 SGRID_PER_CELL = 16;
 static constexpr f32 SGRID_OFFSET   = 128.0f; // world origin offset (positions range ±128m)
 
 struct SpatialGrid {
@@ -26,6 +32,9 @@ namespace SpatialGridSystem {
             for (u32 x = 0; x < SGRID_SIZE; x++)
                 grid.count[z][x] = 0;
 
+#ifdef ENGINE_DEBUG
+        u32 dropped = 0;  // entities that overflowed a full cell this rebuild
+#endif
         for (u32 a = 0; a < pool.activeCount; a++) {
             u32 idx = pool.activeList[a];
             const Entity& e = pool.entities[idx];
@@ -41,7 +50,16 @@ namespace SpatialGridSystem {
                 grid.cells[cz][cx][cnt] = static_cast<u16>(idx);
                 cnt++;
             }
+#ifdef ENGINE_DEBUG
+            else { dropped++; }
+#endif
         }
+#ifdef ENGINE_DEBUG
+        // If this fires, raise SGRID_PER_CELL: dropped entities can't be hit by
+        // projectiles (queryNeighbors never returns them) until the cluster spreads.
+        if (dropped > 0)
+            LOG_WARN("SpatialGrid: %u entities dropped from full cells (raise SGRID_PER_CELL)", dropped);
+#endif
     }
 
     // Query all entity indices in a cell and its 8 neighbors (3×3 region).

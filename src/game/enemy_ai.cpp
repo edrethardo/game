@@ -31,6 +31,12 @@ void EnemyAI::setDroneSpawnCallback(void(*cb)(Vec3, u8)) { s_droneSpawnCb = cb; 
 const BossDefTable* s_bossDefTable = nullptr;
 void EnemyAI::setBossDefTable(const BossDefTable* table) { s_bossDefTable = table; }
 
+// Skeleton minion visuals — resolved once at init (AI code can't resolve asset
+// name strings) so boss summon abilities can spawn proper-looking skeletons.
+u8 s_skeletonMeshId = 0;
+u8 s_skeletonMatId  = 0;
+void EnemyAI::setSkeletonVisuals(u8 meshId, u8 matId) { s_skeletonMeshId = meshId; s_skeletonMatId = matId; }
+
 // Frame counter for staggering expensive per-entity work (LOS, AI state).
 // Defined here at file scope so extracted sub-files can share it via extern.
 u32  s_frameTick           = 0;

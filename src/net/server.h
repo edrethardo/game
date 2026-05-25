@@ -10,7 +10,7 @@
 #include "world/level_grid.h"
 
 namespace Server {
-    void init(NetPlayer* players, u32 levelSeed);
+    void init(NetPlayer* players, u32 levelSeed, u8 levelFloor, u8 difficulty);
 
     // Process incoming input packet from a client.
     void receiveInput(u8 playerSlot, const u8* data, u32 size);
@@ -25,4 +25,6 @@ namespace Server {
                       const ProjectilePool& projectiles);
 
     u32 getLevelSeed();
+    u8  getLevelFloor();
+    u8  getLevelDifficulty();
 }

@@ -106,6 +106,9 @@ void Engine::onEvent(const u8* data, u32 size) {
 void Engine::onPlayerJoin(u8 playerSlot) {
     if (!s_engine) return;
     if (playerSlot < MAX_PLAYERS) {
+        // Ignore a duplicate/retransmitted JOIN for an already-active slot, and never
+        // re-init the host (slot 0, set up in startGame) — either would wipe live state.
+        if (playerSlot == 0 || s_engine->m_players[playerSlot].active) return;
         NetPlayer& np = s_engine->m_players[playerSlot];
         np.active = true;
         np.slotIndex = playerSlot;

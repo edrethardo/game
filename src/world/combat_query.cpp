@@ -128,7 +128,8 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
                                   Vec3 origin, Vec3 direction,
                                   f32 coneAngleCos, f32 maxDistance,
                                   EntityHandle* outHandles, f32* outDistances,
-                                  u32 maxResults)
+                                  u32 maxResults,
+                                  bool horizontalCone)
 {
     u32 count = 0;
 
@@ -144,9 +145,22 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
         f32 dist = length(toEntity);
         if (dist > maxDistance) continue;
 
-        // Very close entities (< 0.5m) always hit — skip cone check to avoid
-        // degenerate normalization and allow hitting enemies in melee range
-        if (dist >= 0.5f) {
+        // Cone test. Melee (horizontalCone) judges the arc in the XZ plane: a
+        // point-blank enemy's centre sits well below the eye, so the 3D
+        // eye->centre vector points downward and would wrongly fail the cone.
+        // A swing is a horizontal arc, so drop the vertical component. Other
+        // callers keep the original 3D test. Very-close cases skip the check
+        // entirely to avoid degenerate normalization.
+        if (horizontalCone) {
+            Vec3 toXZ   = {toEntity.x, 0.0f, toEntity.z};
+            Vec3 dirXZ  = {direction.x, 0.0f, direction.z};
+            f32  lenXZ  = length(toXZ);
+            f32  dirLen = length(dirXZ);
+            if (lenXZ >= 0.5f && dirLen > 1e-4f) {
+                f32 d = dot(toXZ * (1.0f / lenXZ), dirXZ * (1.0f / dirLen));
+                if (d < coneAngleCos) continue;
+            }
+        } else if (dist >= 0.5f) {
             f32 d = dot(toEntity * (1.0f / dist), direction);
             if (d < coneAngleCos) continue;
         }

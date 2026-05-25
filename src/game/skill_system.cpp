@@ -298,25 +298,20 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     const SkillDef* def = findSkillDef(skillDefs, skillDefCount, ss.activeSkill);
     if (!def) return false;
 
-    // Energy / resource check
+    // Resource AVAILABILITY check only — do NOT commit cost yet. A whiffed skill
+    // (no target / no LOS / nothing to mark) must be free and trigger no
+    // cooldown, so energy/health/cooldown are committed only after the effect
+    // reports it actually did something (didActivate, below).
+    f32 healthCost = 0.0f;
     if (ss.activeSkill == SkillId::BLOOD_NOVA) {
-        f32 cost = player.health * def->healthCostPct;
-        if (player.health <= cost + 1.0f) return false; // refuse to suicide
-        player.health         -= cost;
-        player.damageFlashTimer = 0.1f;
+        healthCost = player.health * def->healthCostPct;
+        if (player.health <= healthCost + 1.0f) return false; // refuse to suicide
     } else {
         if (ss.energy < def->energyCost) return false;
-        ss.energy -= def->energyCost;
     }
 
-    ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
-    if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
-
-    // Play skill activation sound — mapped by theme so each skill has audio feedback
-    playActivationSound(ss.activeSkill);
-
-    // Particle burst on activation — spawned at muzzle/cast point for immediate feedback
-    spawnActivationParticles(ss.activeSkill, eyePos, forward);
+    // Most skills always do something; the few target-dependent ones overwrite this.
+    bool didActivate = true;
 
     switch (ss.activeSkill) {
     // ---- Legacy legendary skills ----
@@ -376,7 +371,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireBarrage(eyePos, forward, def, projectiles);
         break;
     case SkillId::MARK_PREY:
-        fireMarkPrey(eyePos, forward, def, entities);
+        didActivate = fireMarkPrey(eyePos, forward, def, entities);
         break;
 
     // ---- Sorcerer ----
@@ -395,10 +390,10 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         firePoisonCloud(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::SHADOW_STRIKE:
-        fireShadowStrike(eyePos, forward, def, entities, player);
+        didActivate = fireShadowStrike(eyePos, forward, def, entities, player);
         break;
     case SkillId::SHADOW_STEP:
-        fireShadowStep(eyePos, forward, def, grid, entities, player);
+        didActivate = fireShadowStep(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::SHADOW_DANCE:
         fireShadowDance(player);
@@ -518,9 +513,9 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
             }
         }
         player.markTimer = def->markDuration;
-        player.markedEntityIdx = 0xFFFF;
         if (marked == 0) {
-            return false; // nothing to mark — don't consume cooldown
+            didActivate = false; // nothing to mark — free, no cooldown
+            break;
         }
         // Cast visual: orange nova ring at the mark center
         if (s_novaCallback) {
@@ -541,6 +536,21 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         return false;
     }
 
+    if (!didActivate) return false; // skill whiffed — no energy/health spent, no cooldown
+
+    // Commit cost + cooldown now that the skill actually did something.
+    if (ss.activeSkill == SkillId::BLOOD_NOVA) {
+        player.health          -= healthCost;
+        player.damageFlashTimer = 0.1f;
+    } else {
+        ss.energy -= def->energyCost;
+    }
+    ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
+    if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
+
+    // Feedback only on a real activation — no cast sound/particles on a whiff.
+    playActivationSound(ss.activeSkill);
+    spawnActivationParticles(ss.activeSkill, eyePos, forward);
     return true;
 }
 

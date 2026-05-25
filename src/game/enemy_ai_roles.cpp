@@ -14,6 +14,7 @@
 #include "game/enemy_ai_internal.h"
 #include "game/game_constants.h"
 #include <cmath>
+#include <cstdlib>  // std::rand for boss speech-line variety
 
 AIStep applyRoleModifiers(Entity& e, u32 i,
                            EntityPool& pool,
@@ -23,41 +24,60 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
 {
     // --- Archetype special abilities ---
 
-    // Necromancer: resurrect nearest dead enemy every 3s, curse player every 3s
+    // Necromancer: resurrect nearby dead enemies every 3s, curse player every 3s
     if (e.enemyRole & EnemyRole::SUMMONER) {
+        bool isBoss = (e.enemyType == EnemyType::BOSS); // Sethrak the lich rambles + raises 3
         e.tacticalTimer -= dt;
         if (e.tacticalTimer <= 0.0f) {
             e.tacticalTimer = 3.0f;
-            // Find nearest dead entity within 10m
-            f32 bestDist2 = 10.0f * 10.0f;
-            u32 bestIdx = 0xFFFF;
-            for (u32 di = 0; di < MAX_ENTITIES; di++) {
-                Entity& dead = pool.entities[di];
-                if (!(dead.flags & ENT_DEAD)) continue;
-                if (dead.flags & ENT_FRIENDLY) continue;
-                if (dead.deathTimer <= 0.0f) continue; // slot about to be freed
-                Vec3 diff = dead.position - e.position;
-                f32 d2 = diff.x * diff.x + diff.z * diff.z;
-                if (d2 < bestDist2) {
-                    bestDist2 = d2;
-                    bestIdx = di;
+            // Bosses raise up to 3 corpses at once; regular necromancers raise 1.
+            u32 reviveCount = isBoss ? 3 : 1;
+            u32 revived = 0;
+            for (u32 r = 0; r < reviveCount; r++) {
+                // Find nearest still-dead entity within 10m. Reviving clears ENT_DEAD,
+                // so each pass naturally picks the next-nearest corpse.
+                f32 bestDist2 = 10.0f * 10.0f;
+                u32 bestIdx = 0xFFFF;
+                for (u32 di = 0; di < MAX_ENTITIES; di++) {
+                    Entity& dead = pool.entities[di];
+                    if (!(dead.flags & ENT_DEAD)) continue;
+                    if (dead.flags & ENT_FRIENDLY) continue;
+                    if (dead.deathTimer <= 0.0f) continue; // slot about to be freed
+                    Vec3 diff = dead.position - e.position;
+                    f32 d2 = diff.x * diff.x + diff.z * diff.z;
+                    if (d2 < bestDist2) {
+                        bestDist2 = d2;
+                        bestIdx = di;
+                    }
                 }
-            }
-            if (bestIdx != 0xFFFF) {
-                Entity& revived = pool.entities[bestIdx];
-                bool wasFlying = (revived.flags & ENT_FLYING) != 0;
-                revived.flags = ENT_ACTIVE | (wasFlying ? ENT_FLYING : 0);
-                revived.health = revived.maxHealth * 0.3f;
-                revived.aiState = AIState::IDLE;
-                revived.velocity = {0, 0, 0};
-                revived.deathTimer = 0.0f;
-                revived.flashTimer = 0.3f; // flash to show resurrection
+                if (bestIdx == 0xFFFF) break; // no more corpses in range
+                Entity& revivedEnt = pool.entities[bestIdx];
+                bool wasFlying = (revivedEnt.flags & ENT_FLYING) != 0;
+                revivedEnt.flags = ENT_ACTIVE | (wasFlying ? ENT_FLYING : 0);
+                revivedEnt.health = revivedEnt.maxHealth * 0.3f;
+                revivedEnt.aiState = AIState::IDLE;
+                revivedEnt.velocity = {0, 0, 0};
+                revivedEnt.deathTimer = 0.0f;
+                revivedEnt.flashTimer = 0.3f; // flash to show resurrection
                 // Ensure revived enemy isn't inside a wall
-                Collision::ensureNotInWall(revived.position, revived.halfExtents, grid);
-                if (!wasFlying) snapEntityToFloor(revived, grid);
+                Collision::ensureNotInWall(revivedEnt.position, revivedEnt.halfExtents, grid);
+                if (!wasFlying) snapEntityToFloor(revivedEnt, grid);
                 e.resurrectCount++;
-                e.speechText = "RISE!";
-                e.speechTimer = 2.0f;
+                revived++;
+            }
+            if (revived > 0) {
+                if (isBoss) {
+                    static const char* kRiseLines[] = {
+                        "Rise! Death is but a brief inconvenience.",
+                        "Why rest, my servants, when there is killing to do?",
+                        "The grave gives up what I demand of it!",
+                    };
+                    e.speechText  = kRiseLines[std::rand() % 3];
+                    e.speechTimer = 2.5f;
+                } else {
+                    e.speechText  = "RISE!";
+                    e.speechTimer = 2.0f;
+                }
             }
         }
         // Necromancer curse: +5% damage taken per stack (max 4), 3s cooldown
@@ -66,8 +86,18 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
             e.kiteTimer = 3.0f;
             if (player.curseStacks < 4) player.curseStacks++;
             player.curseTimer = 5.0f;
-            e.speechText = "CURSE!";
-            e.speechTimer = 1.5f;
+            if (isBoss) {
+                static const char* kCurseLines[] = {
+                    "Wither. Rot. Become as I am.",
+                    "I curse the warm blood in your veins!",
+                    "Your flesh betrays you already, mortal.",
+                };
+                e.speechText  = kCurseLines[std::rand() % 3];
+                e.speechTimer = 2.5f;
+            } else {
+                e.speechText  = "CURSE!";
+                e.speechTimer = 1.5f;
+            }
         }
     }
 

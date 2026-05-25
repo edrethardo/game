@@ -192,7 +192,6 @@ void Engine::tickWandererTimers(f32 dt) {
         m_localPlayer.markTimer -= dt;
         if (m_localPlayer.markTimer <= 0.0f) {
             m_localPlayer.markTimer = 0.0f;
-            m_localPlayer.markedEntityIdx = 0xFFFF;
         }
     }
     // --- Wanderer: tick Exploit Weakness speed stacks (non-refreshing 3s each) ---

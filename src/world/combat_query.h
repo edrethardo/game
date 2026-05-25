@@ -34,5 +34,6 @@ namespace CombatQuery {
                         Vec3 origin, Vec3 direction,
                         f32 coneAngleCos, f32 maxDistance,
                         EntityHandle* outHandles, f32* outDistances,
-                        u32 maxResults);
+                        u32 maxResults,
+                        bool horizontalCone = false);  // melee: judge the cone in the XZ plane
 }

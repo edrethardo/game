@@ -77,13 +77,13 @@ void Engine::tickSkillCooldowns(f32 dt) {
         }
     }
     // Tick equipment skill cooldowns (boots F, helmet G)
-    if (m_bootSkillStates[0].cooldownTimer > 0.0f) {
-        m_bootSkillStates[0].cooldownTimer -= dt;
-        if (m_bootSkillStates[0].cooldownTimer < 0.0f) m_bootSkillStates[0].cooldownTimer = 0.0f;
+    if (m_bootSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f) {
+        m_bootSkillStates[m_localPlayerIndex].cooldownTimer -= dt;
+        if (m_bootSkillStates[m_localPlayerIndex].cooldownTimer < 0.0f) m_bootSkillStates[m_localPlayerIndex].cooldownTimer = 0.0f;
     }
-    if (m_helmetSkillStates[0].cooldownTimer > 0.0f) {
-        m_helmetSkillStates[0].cooldownTimer -= dt;
-        if (m_helmetSkillStates[0].cooldownTimer < 0.0f) m_helmetSkillStates[0].cooldownTimer = 0.0f;
+    if (m_helmetSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f) {
+        m_helmetSkillStates[m_localPlayerIndex].cooldownTimer -= dt;
+        if (m_helmetSkillStates[m_localPlayerIndex].cooldownTimer < 0.0f) m_helmetSkillStates[m_localPlayerIndex].cooldownTimer = 0.0f;
     }
 }
 
@@ -193,51 +193,51 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         const ItemInstance& boots = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)];
         SkillId bootSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
-        m_bootSkillStates[0].activeSkill = bootSkill;
+        m_bootSkillStates[m_localPlayerIndex].activeSkill = bootSkill;
     }
     // Helmet legendary → G key
     {
         const ItemInstance& helm = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)];
         SkillId helmSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
-        m_helmetSkillStates[0].activeSkill = helmSkill;
+        m_helmetSkillStates[m_localPlayerIndex].activeSkill = helmSkill;
     }
 
     // --- Boot skill activation (F key) ---
     // Equipment legendary skills are cooldown-only (no energy cost deducted from player)
     if (Input::isActionPressed(GameAction::BOOT_SKILL) && !m_inventoryOpen &&
-        m_bootSkillStates[0].activeSkill != SkillId::NONE) {
+        m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class
         // skills): copy the pool in, let tryActivate spend energyCost, copy back on success.
-        m_bootSkillStates[0].energy    = m_skillStates[m_localPlayerIndex].energy;
-        m_bootSkillStates[0].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
+        m_bootSkillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].energy;
+        m_bootSkillStates[m_localPlayerIndex].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
         // Scale by boots item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
         SkillSystem::setClassDamageMult(1.0f);
-        if (SkillSystem::tryActivate(m_bootSkillStates[0], m_skillDefs, m_skillDefCount,
+        if (SkillSystem::tryActivate(m_bootSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
                                       m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
-            m_skillStates[m_localPlayerIndex].energy = m_bootSkillStates[0].energy; // deduct spent mana
+            m_skillStates[m_localPlayerIndex].energy = m_bootSkillStates[m_localPlayerIndex].energy; // deduct spent mana
         }
     }
 
     // --- Helmet skill activation (G key) ---
     if (Input::isActionPressed(GameAction::HELMET_SKILL) && !m_inventoryOpen &&
-        m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
+        m_helmetSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class skills).
-        m_helmetSkillStates[0].energy    = m_skillStates[m_localPlayerIndex].energy;
-        m_helmetSkillStates[0].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
+        m_helmetSkillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].energy;
+        m_helmetSkillStates[m_localPlayerIndex].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
         // Scale by helmet item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
         SkillSystem::setClassDamageMult(1.0f);
-        if (SkillSystem::tryActivate(m_helmetSkillStates[0], m_skillDefs, m_skillDefCount,
+        if (SkillSystem::tryActivate(m_helmetSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
                                       m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
-            m_skillStates[m_localPlayerIndex].energy = m_helmetSkillStates[0].energy; // deduct spent mana
+            m_skillStates[m_localPlayerIndex].energy = m_helmetSkillStates[m_localPlayerIndex].energy; // deduct spent mana
         }
     }
 }

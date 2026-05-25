@@ -177,6 +177,12 @@ void Engine::updateInventoryInteraction(f32 dt) {
         }
     }
 
+    // The physical mouse belongs to local player 0; couch co-op P2 uses the D-pad path
+    // above. Gate the shared mouse drag/double-click handling to the mouse owner so a drag
+    // begun in P1's frame can't be applied to P2's inventory (m_dragState is shared, not
+    // per-player). Singleplayer is unaffected — m_localPlayerIndex is always 0 there.
+    if (m_localPlayerIndex != 0) return;
+
     // Tick double-click timer
     m_dblClickState.timer += dt;
 

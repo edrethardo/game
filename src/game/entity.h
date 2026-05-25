@@ -103,7 +103,7 @@ struct Entity {
     f32  attackCooldown = 1.0f;
     f32  attackTimer    = 0.0f;
     f32  damage         = 10.0f;
-    u8   level          = 1;   // entity level (scales with dungeon floor)
+    u16  level          = 1;   // effective floor (currentFloor + difficulty*50); scales stats/loot
     f32  moveSpeed      = 3.0f;
     f32  detectionRange = 15.0f;
 
@@ -132,7 +132,7 @@ struct Entity {
     f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
     bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
     u8 enemyRole = EnemyRole::NORMAL; // archetype bitmask (summoner, healer, aura, ambush, etc.)
-    u8  resurrectCount = 0;  // necromancer: how many dead enemies have been raised (max 2)
+    u8  resurrectCount = 0;  // necromancer: how many dead enemies have been raised (no cap; stat only)
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
     const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)

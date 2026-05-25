@@ -18,6 +18,10 @@ static NetPlayerSlot    s_slots[MAX_PLAYERS];
 static u8               s_localPlayerIndex = 0;
 static u16              s_seq = 0;
 static bool             s_initialized = false;
+// Dungeon sync received from the server in SV_JOIN_ACCEPT (client side)
+static u32              s_serverLevelSeed = 0;
+static u8               s_serverFloor = 1;
+static u8               s_serverDifficulty = 0;
 
 // Callbacks
 static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
@@ -86,10 +90,11 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         acc->type = NetPacketType::SV_JOIN_ACCEPT;
         acc->flags = 0;
         acc->seq = s_seq++;
-        buf[4] = slot;                    // playerIndex
-        buf[5] = Net::getConnectedCount(); // playerCount
-        buf[6] = 0; buf[7] = 0;          // padding
-        // Send the actual level seed so client generates the same dungeon
+        buf[4] = slot;                         // playerIndex
+        buf[5] = Net::getConnectedCount();     // playerCount
+        buf[6] = Server::getLevelFloor();      // current floor (client generates this floor)
+        buf[7] = Server::getLevelDifficulty(); // difficulty tier (folds into the dungeon seed)
+        // Send the per-run dungeon seed so the client generates the identical dungeon.
         u32 seed = Server::getLevelSeed();
         std::memcpy(buf + 8, &seed, 4);
         Net::sendReliable(slot, buf, 12);
@@ -117,7 +122,11 @@ static void clientHandlePacket(const u8* data, u32 size) {
     case NetPacketType::SV_JOIN_ACCEPT: {
         if (size < 12) break;
         s_localPlayerIndex = data[4];
-        LOG_INFO("Net: joined as player %u", s_localPlayerIndex);
+        s_serverFloor      = data[6];
+        s_serverDifficulty = data[7];
+        std::memcpy(&s_serverLevelSeed, data + 8, 4); // per-run dungeon seed
+        LOG_INFO("Net: joined as player %u (floor=%u seed=%u)",
+                 s_localPlayerIndex, s_serverFloor, s_serverLevelSeed);
     } break;
 
     case NetPacketType::SV_JOIN_REJECT: {
@@ -382,6 +391,9 @@ void Net::sendToServer(const u8* data, u32 size, bool reliable) {
 
 NetRole Net::getRole()              { return s_role; }
 u8      Net::getLocalPlayerIndex()  { return s_localPlayerIndex; }
+u32     Net::getServerLevelSeed()       { return s_serverLevelSeed; }
+u8      Net::getServerLevelFloor()      { return s_serverFloor; }
+u8      Net::getServerLevelDifficulty() { return s_serverDifficulty; }
 bool    Net::isConnected()          { return s_enetHost != nullptr; }
 
 const NetPlayerSlot* Net::getSlots() { return s_slots; }

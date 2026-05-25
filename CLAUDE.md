@@ -65,7 +65,7 @@ SDL2 is fetched via `fetch_sdl2.sh` if missing. Single binary, no install step.
 | `AABB` | `renderer/frustum.h` | Min/max box for collision and frustum culling |
 
 Important caps (search the header for the constant if you need to grow it):
-`MAX_PLAYERS=4`, `MAX_ENTITIES=128`, `MAX_PROJECTILES=128`, `MAX_ITEM_DEFS=64`,
+`MAX_PLAYERS=4`, `MAX_ENTITIES=128`, `MAX_PROJECTILES=1024` (512 on Switch), `MAX_ITEM_DEFS=64`,
 `MAX_AFFIX_DEFS=32`, `MAX_AFFIXES_PER_ITEM=4`, `MAX_INVENTORY_ITEMS=24`,
 `MAX_SKILL_DEFS=16`, `MAX_WORLD_ITEMS=32`, `MAX_WEAPON_DEFS=16`, `MAX_MATERIALS=64`,
 `MAX_MESH_DEFS=32` (Engine-local), `MAX_LEVEL_SECTIONS=64`, `MAX_DUNGEON_ROOMS=32`,
@@ -99,7 +99,7 @@ Important caps (search the header for the constant if you need to grow it):
 
 **Networking (client tick).** Capture local input (`Client::captureAndSendInput`) → store in prediction history → run local sim on the local player only (entities/projectiles wait for the next snapshot). When a snapshot arrives (`Client::receiveSnapshot`), `reconcile` compares server position vs predicted — if delta exceeds threshold, snap and replay buffered inputs. `interpolateRemotePlayers/Entities/Projectiles` lerp between two recent snapshots with a 100 ms delay for smooth remote motion.
 
-**Snapshot quantization.** `SnapPlayer`=20 B, `SnapEntity`=16 B, `SnapProjectile`=14 B. Positions packed to u16 over [-128, 128] m (~4 mm precision); velocities over [-30, 30] m/s; angles over [-π, π]. See `Quantize::pack*/unpack*` in `net/packet.h`.
+**Snapshot quantization.** `SnapPlayer`=31 B, `SnapEntity`=20 B, `SnapProjectile`=16 B. Positions packed to u16 over [-128, 128] m (~4 mm precision); velocities over [-30, 30] m/s; angles over [-π, π]. See `Quantize::pack*/unpack*` in `net/packet.h`.
 
 ## Asset Conventions
 
@@ -160,7 +160,7 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 
 - **ENet** under the hood (`src/net/net.cpp`). Default port 7777. Protocol version is checked on `CL_JOIN_REQUEST`.
 - Packets prefixed with `PacketHeader{type, flags, seq}`. Types in `NetPacketType`: `CL_INPUT`, `CL_JOIN_REQUEST`, `SV_JOIN_ACCEPT/REJECT/SNAPSHOT/EVENT/PLAYER_LEFT/LEVEL_SEED`.
-- Server seeds clients with the dungeon seed (`SV_LEVEL_SEED`) so both ends generate the identical level. Hosts and clients regenerate locally — the level itself is never sent over the wire.
+- Server seeds clients with the per-run dungeon seed in `SV_JOIN_ACCEPT` (along with the current floor + difficulty) so both ends generate the identical level. Hosts and clients regenerate locally — the level itself is never sent over the wire. The dungeon seed is a dedicated **per-run seed** (`m_level.levelSeed`), minted from entropy on `NEW_GAME`, persisted in saves, and folded with floor + difficulty in `startGame` (`dungeonSeed = levelSeed + floor*7919 + difficulty*104729`) — deliberately **isolated from the global `std::rand()`** used by gameplay (loot/procs/spawns) so host and client stay in sync regardless of differing gameplay RNG draws. (`SV_LEVEL_SEED` is reserved for future per-floor client sync; client floor transitions aren't wired yet, so the seed currently travels only at join.)
 - Use `PacketWriter`/`PacketReader` (`net/packet.h`) for serialization. `Quantize::*` for bounded floats.
 - Register Engine static callbacks via `Net::setOn*` before `Net::poll`.
 

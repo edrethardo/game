@@ -40,6 +40,9 @@ extern u32  s_friendlyGroupCount;
 extern void(*s_droneSpawnCb)(Vec3 pos, u8 type);
 // Boss personality table (set by Engine during init)
 extern const BossDefTable* s_bossDefTable;
+// Skeleton minion visuals (resolved by Engine at init) for boss summon abilities
+extern u8 s_skeletonMeshId;
+extern u8 s_skeletonMatId;
 
 // ---------------------------------------------------------------------------
 // Grid/movement helpers (defined in enemy_ai.cpp)

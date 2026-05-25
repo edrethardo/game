@@ -275,7 +275,7 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
     f32 distances[MAX_ENTITIES];
     u32 hitCount = CombatQuery::queryConeSorted(
         pool, eyePos, forward, cosCone, weapon.range,
-        hits, distances, MAX_ENTITIES);
+        hits, distances, MAX_ENTITIES, /*horizontalCone=*/true);
 
     // Roll crit once for the whole swing — all cone hits share the same outcome.
     // Using 0..9999 * 0.0001 gives a uniform [0,1) float without float-modulo artifacts.

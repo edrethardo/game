@@ -189,7 +189,8 @@ void fireBarrage(Vec3 origin, Vec3 forward, const SkillDef* def,
 }
 
 // Mark Prey: mark nearest enemy for 2× damage. Chain clear on kill.
-void fireMarkPrey(Vec3 origin, Vec3 forward, const SkillDef* def,
+// Returns false (no valid target) so a whiff stays free and triggers no cooldown.
+bool fireMarkPrey(Vec3 origin, Vec3 forward, const SkillDef* def,
                   EntityPool& entities)
 {
     f32 range = 15.0f;
@@ -211,7 +212,8 @@ void fireMarkPrey(Vec3 origin, Vec3 forward, const SkillDef* def,
         if (s_particlePool) ParticleSystem::spawnMagicBurst(*s_particlePool, e->position, 255, 80, 30, 8);
         if (s_screenShake) s_screenShake->trigger(0.04f, 0.2f);
         LOG_INFO("Mark Prey: marked entity %u for 2x damage", hits[i].index);
-        return; // mark only the first valid target
+        return true; // mark only the first valid target
     }
     LOG_INFO("Mark Prey: no valid target found");
+    return false; // nothing marked — free, no cooldown
 }

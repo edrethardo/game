@@ -280,6 +280,9 @@ void Engine::initAssets() {
     }
     // Provide boss def table to EnemyAI for personality-driven boss behavior
     EnemyAI::setBossDefTable(&m_bossDefs);
+    // Resolve skeleton minion visuals once so boss summon abilities (Sethrak) can
+    // spawn proper-looking skeletons — AI code can't resolve asset name strings.
+    EnemyAI::setSkeletonVisuals(findMeshByName("skeleton"), MaterialSystem::getIdByName("skeleton_skin"));
 
     // Enemy definitions — loaded after materials so material names resolve
     if (!EnemyLoader::load(ASSET_PATH("assets/config/enemies.json"), m_enemyDefs)) {

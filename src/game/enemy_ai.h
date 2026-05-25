@@ -26,4 +26,7 @@ namespace EnemyAI {
 
     // Set boss def table for personality-driven boss AI delegation
     void setBossDefTable(const BossDefTable* table);
+
+    // Set resolved skeleton mesh/material IDs for boss skeleton-summon abilities
+    void setSkeletonVisuals(u8 meshId, u8 matId);
 }

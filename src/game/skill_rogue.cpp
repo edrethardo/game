@@ -61,7 +61,8 @@ void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
 }
 
 // Teleport behind nearest enemy and deal 3x damage.
-void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
+// Returns false (no target) so a whiff stays free and triggers no cooldown.
+bool fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
                       EntityPool& entities, Player& player)
 {
     EntityHandle hits[MAX_ENTITIES];
@@ -71,10 +72,10 @@ void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
         entities, origin, forward, -1.0f, 15.0f,
         hits, dists, MAX_ENTITIES);
 
-    if (hitCount == 0) return;
+    if (hitCount == 0) return false;
 
     Entity* target = handleGet(entities, hits[0]);
-    if (!target) return;
+    if (!target) return false;
 
     // Teleport to just behind the target relative to its facing
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
@@ -90,6 +91,7 @@ void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
 
     if (s_dashCallback) s_dashCallback(startPos, behind);
     LOG_INFO("Shadow Strike: teleported and dealt %.0f damage", damage);
+    return true;
 }
 
 // Fan of Knives: 144 knife projectiles in a starburst ring + stealth.
@@ -131,7 +133,8 @@ void fireFanOfKnives(Vec3 origin, Vec3 forward, const SkillDef* def,
 
 // Shadow Step: teleport behind nearest enemy. Backstab 3× from stealth.
 // Gain stealth after the strike. Dark purple trail + smoke VFX.
-void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
+// Returns false (no target / no LOS) so a whiff stays free and triggers no cooldown.
+bool fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
                     const LevelGrid& grid, EntityPool& entities, Player& player)
 {
     f32 range = def->distance > 0.0f ? def->distance : 15.0f;
@@ -141,7 +144,7 @@ void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
         entities, origin, forward, -1.0f, range,
         hits, dists, MAX_ENTITIES);
 
-    if (hitCount == 0) return;
+    if (hitCount == 0) return false;
 
     // Shadow Step needs line of sight — no blinking through walls. Scan the
     // distance-sorted hits and take the nearest enemy that's alive, hostile,
@@ -155,7 +158,7 @@ void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
         target = e; targetHandle = hits[i];
         break;
     }
-    if (!target) return; // nothing visible — Shadow Step does nothing
+    if (!target) return false; // nothing visible — Shadow Step does nothing
 
     // Teleport behind the target — validate destination is walkable
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
@@ -198,6 +201,7 @@ void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
     if (s_screenShake) s_screenShake->trigger(0.08f, 0.3f);
     LOG_INFO("Shadow Step: %s for %.0f damage",
              damage > baseDmg ? "BACKSTAB" : "strike", damage);
+    return true;
 }
 
 // Shadow Dance: 2s stealth + 2× damage + 20% speed. Kills extend by 0.3s.

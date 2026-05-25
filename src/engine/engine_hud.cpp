@@ -209,22 +209,22 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
 
             bool eqPad = Input::isGamepadConnected(0);
             // Boots (F key / L+A)
-            if (m_bootSkillStates[0].activeSkill != SkillId::NONE) {
+            if (m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
                 const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
-                                                                 m_bootSkillStates[0].activeSkill);
+                                                                 m_bootSkillStates[m_localPlayerIndex].activeSkill);
                 equipSlots[equipCount++] = {
-                    static_cast<u8>(m_bootSkillStates[0].activeSkill),
-                    m_bootSkillStates[0].cooldownTimer, sd ? sd->cooldown : 1.0f,
+                    static_cast<u8>(m_bootSkillStates[m_localPlayerIndex].activeSkill),
+                    m_bootSkillStates[m_localPlayerIndex].cooldownTimer, sd ? sd->cooldown : 1.0f,
                     eqPad ? "L+A" : "F", sd ? sd->name : "???", false
                 };
             }
             // Helmet (G key / L+B)
-            if (m_helmetSkillStates[0].activeSkill != SkillId::NONE) {
+            if (m_helmetSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
                 const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
-                                                                 m_helmetSkillStates[0].activeSkill);
+                                                                 m_helmetSkillStates[m_localPlayerIndex].activeSkill);
                 equipSlots[equipCount++] = {
-                    static_cast<u8>(m_helmetSkillStates[0].activeSkill),
-                    m_helmetSkillStates[0].cooldownTimer, sd ? sd->cooldown : 1.0f,
+                    static_cast<u8>(m_helmetSkillStates[m_localPlayerIndex].activeSkill),
+                    m_helmetSkillStates[m_localPlayerIndex].cooldownTimer, sd ? sd->cooldown : 1.0f,
                     eqPad ? "L+B" : "G", sd ? sd->name : "???", false
                 };
             }

@@ -267,6 +267,7 @@ bool Engine::loadGame(u8 slot) {
     // --- Apply to engine state ---
     m_level.savedFloor = floor;
     m_level.savedSeed  = seed;
+    m_level.levelSeed  = seed; // restore the run seed so startGame regenerates the saved dungeon
     m_transition.totalPlayTime = totalTime;
     // Restore difficulty, clamped to valid range
     m_difficulty = (difficulty <= 2) ? difficulty : 0;

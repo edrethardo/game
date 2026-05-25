@@ -146,8 +146,8 @@ void firePiercingShot(Vec3 origin, Vec3 forward, const SkillDef* def,
 void fireBarrage(Vec3 origin, Vec3 forward, const SkillDef* def,
                  ProjectilePool& pool);
 
-void fireMarkPrey(Vec3 origin, Vec3 forward, const SkillDef* def,
-                  EntityPool& entities);
+bool fireMarkPrey(Vec3 origin, Vec3 forward, const SkillDef* def,
+                  EntityPool& entities);  // false = no valid target (free, no cooldown)
 
 // ---------------------------------------------------------------------------
 // Sorcerer skill fire* functions  (skill_sorcerer.cpp)
@@ -166,14 +166,14 @@ void fireKnifeBurst(Vec3 origin, Vec3 forward, const SkillDef* def,
 void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
                      const LevelGrid& grid, EntityPool& entities, Player& player);
 
-void fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
-                      EntityPool& entities, Player& player);
+bool fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
+                      EntityPool& entities, Player& player);  // false = no target (free)
 
 void fireFanOfKnives(Vec3 origin, Vec3 forward, const SkillDef* def,
                      ProjectilePool& pool, Player& player);
 
-void fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
-                    const LevelGrid& grid, EntityPool& entities, Player& player);
+bool fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
+                    const LevelGrid& grid, EntityPool& entities, Player& player);  // false = no target/LOS (free)
 
 void fireShadowDance(Player& player);
 

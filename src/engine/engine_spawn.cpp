@@ -310,7 +310,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
                     // Floor scaling
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-                    ent->level = static_cast<u8>(effectiveFloor > 255 ? 255 : effectiveFloor);
+                    ent->level = static_cast<u16>(effectiveFloor);
                     f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
                     ent->health    *= floorMult;
                     ent->maxHealth  = ent->health;
@@ -390,7 +390,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     ent->enemyType = tmpl.etype;
 
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-                    ent->level = static_cast<u8>(effectiveFloor > 255 ? 255 : effectiveFloor);
+                    ent->level = static_cast<u16>(effectiveFloor);
                     f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
                     ent->health    *= floorMult;
                     ent->maxHealth  = ent->health;
@@ -565,7 +565,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 boss->enemyType = EnemyType::BOSS;
                 boss->nameTag = bd->name;
                 u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
-                boss->level = static_cast<u8>(bossEffFloor > 255 ? 255 : bossEffFloor);
+                boss->level = static_cast<u16>(bossEffFloor);
                 boss->bossLimbConfig = bd->limbConfig;
                 if (bd->weaponName[0] != '\0') {
                     boss->weaponMeshId = findMeshByName(bd->weaponName);
@@ -596,7 +596,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 boss->enemyType = EnemyType::BOSS;
                 boss->nameTag = bt->name;
                 u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
-                boss->level = static_cast<u8>(bossEffFloor > 255 ? 255 : bossEffFloor);
+                boss->level = static_cast<u16>(bossEffFloor);
                 // Hardcoded limb config per floor
                 if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
                 if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles

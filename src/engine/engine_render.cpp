@@ -427,7 +427,8 @@ void Engine::drawScreenQuad(u32 sw, u32 sh, Vec4 rgba, const Shader& shader) {
 // ---------------------------------------------------------------------------
 // renderPostOverlays — red damage feedback (edge-gradient vignette: per-hit
 // fade + steady low-HP border glow, never a full-screen red sheet, never
-// flashing). Drawn after the HUD and split-screen loops have been closed.
+// flashing). Called once per player INSIDE the split-screen loop with that
+// player's viewport dims, so each player sees only their own feedback.
 // ---------------------------------------------------------------------------
 void Engine::renderPostOverlays(u32 sw, u32 sh) {
     // Red damage feedback — BioShock-style radial vignette (vignette.frag): red
@@ -675,6 +676,11 @@ void Engine::render(f32 alpha) {
     // Flush all accumulated HUD lines in a single draw call (was 36 per frame)
     HUD::flush(vpW, vpH);
 
+    // Per-player damage vignette / low-HP glow — drawn into THIS player's viewport
+    // (scissor still enabled) from the swapped-in m_localPlayer, so each split-screen
+    // player sees only their own feedback instead of P1's covering the whole window.
+    renderPostOverlays(vpW, vpH);
+
     } // end split-screen player loop
 
     glDisable(GL_SCISSOR_TEST);
@@ -687,8 +693,6 @@ void Engine::render(f32 alpha) {
     m_camera.position = tickPos;
     m_camera.yaw      = tickYaw;
     m_camera.pitch    = tickPitch;
-
-    renderPostOverlays(sw, sh);
 
     GLContext::swapBuffers(Window::getHandle());
 }

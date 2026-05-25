@@ -30,7 +30,12 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.flags = flags;
 
         sp.weaponId = np.weaponState.currentWeapon;
-        sp.health   = static_cast<u8>((np.health / np.maxHealth) * 255.0f);
+        // Guard divide-by-zero (mirrors the entity path) and clamp the ratio so a
+        // transient overheal or maxHealth==0 can't NaN or wrap the u8.
+        f32 hpFrac = (np.maxHealth > 0.0f) ? (np.health / np.maxHealth) : 0.0f;
+        if (hpFrac < 0.0f) hpFrac = 0.0f;
+        if (hpFrac > 1.0f) hpFrac = 1.0f;
+        sp.health   = static_cast<u8>(hpFrac * 255.0f);
 
         sp.posX = Quantize::packPos(np.position.x);
         sp.posY = Quantize::packPos(np.position.y);

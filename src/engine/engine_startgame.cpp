@@ -365,10 +365,22 @@ void Engine::startGame(GameStart mode) {
     ParticleSystem::clear(m_particles);
     m_camera.shake.intensity = 0.0f;
 
-    // Build level — use BSP procedural generation with random seed.
+    // Build level. The dungeon layout comes from a dedicated PER-RUN seed
+    // (m_level.levelSeed), NOT the global std::rand() that gameplay (loot/procs/spawns)
+    // advances at different rates on host vs client. NEW_GAME mints a fresh run seed from
+    // entropy (so runs vary); DESCEND keeps it; CONTINUE already has it (restored from a
+    // save, or set from the server's JOIN_ACCEPT on a network client). This makes the
+    // dungeon reproducible per run AND identical across host/client.
+    if (mode == GameStart::NEW_GAME) {
+        m_level.levelSeed = static_cast<u32>(std::rand()); // global RNG is srand()-seeded at init
+        m_level.savedSeed = m_level.levelSeed;             // persist the run seed
+    }
+    // Floor + difficulty fold in so each floor and each difficulty-loop tier differs.
+    u32 dungeonSeed = m_level.levelSeed
+                    + m_level.currentFloor * 7919u
+                    + static_cast<u32>(m_difficulty) * 104729u;
     // Early floors (1-9) use a smaller grid for simpler, more linear layouts
     // so the exit is easier to find.  Later floors get the full 48x48 grid.
-    u32 dungeonSeed = static_cast<u32>(std::rand()) + m_level.currentFloor * 7919;
     u32 gridSize = 48;
     if (m_level.currentFloor <= 3)       gridSize = 24;  // very small, almost linear
     else if (m_level.currentFloor <= 6)  gridSize = 32;  // small, few branches
@@ -522,7 +534,6 @@ void Engine::startGame(GameStart mode) {
         m_localPlayer.deflectAbsorbed = 0.0f;
         m_localPlayer.deflectHitCount = 0;
         m_localPlayer.deflectSpeedTimer = 0.0f;
-        m_localPlayer.markedEntityIdx = 0xFFFF;
         m_localPlayer.markTimer       = 0.0f;
         m_localPlayer.deathsDanceTimer = 0.0f;
     }
@@ -554,7 +565,20 @@ void Engine::startGame(GameStart mode) {
         }
         // Grant the class starting weapon to each active local player.
         for (u8 pi = 0; pi < m_splitPlayerCount; pi++) equipStartingLoadout(pi);
+        // The stats-changed callback recomputes maxEnergy from the *active* alias
+        // (m_localPlayerIndex / m_playerClass), but no swapInPlayer has run yet in this
+        // loop, so it wrote P0's energy for every iteration. Set each local player's
+        // energy ceiling explicitly from its own class + energy affixes.
+        for (u8 pi = 0; pi < m_splitPlayerCount; pi++) {
+            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
+            m_skillStates[pi].maxEnergy = cls.baseEnergy + m_inventories[pi].bonusEnergyFlat;
+            m_skillStates[pi].energy    = m_skillStates[pi].maxEnergy;
+        }
     }
+
+    // Clear per-local-player death flags on any floor/game (re)entry so nobody starts a
+    // floor frozen behind the respawn overlay (defensive; the descend path also clears).
+    for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) m_playerDead[p] = false;
 
     // Init players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
@@ -597,7 +621,8 @@ void Engine::startGame(GameStart mode) {
         Net::setOnInput(Engine::onInput);
         Net::setOnPlayerJoin(Engine::onPlayerJoin);
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
-        Server::init(m_players, m_level.levelSeed);
+        Server::init(m_players, m_level.levelSeed,
+                     static_cast<u8>(m_level.currentFloor), m_difficulty);
     } else if (m_netRole == NetRole::CLIENT) {
         Net::setOnSnapshot(Engine::onSnapshot);
         Net::setOnEvent(Engine::onEvent);

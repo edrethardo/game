@@ -1,5 +1,6 @@
 // enemy_ai_boss.cpp — Boss ability dispatch for EnemyAI::update.
-// Handles the legacy per-floor boss abilities (switch on e.level) plus
+// Handles the legacy per-floor boss abilities (switch on the 1-50 milestone
+// floor, recovered from e.level so it works on every difficulty) plus
 // personality-system delegation via BossAI::update and LOS-duration aggro.
 // Called once per entity per tick, only when e.enemyType == EnemyType::BOSS.
 // See CLAUDE.md "Data Lifecycles" for entity handle usage and death flow.
@@ -23,6 +24,13 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
 
     bool bossLOS = dist < 20.0f && hasLOS(e, player, grid);
 
+    // Difficulty-proof boss-ability keying: e.level is the *effective* floor
+    // (raw floor + difficulty*50), so on the floor-50→1 difficulty loop the
+    // milestone floors become 55,60,... and a raw `switch(e.level)` would miss
+    // every boss. Recover the 1–50 milestone floor so each boss keeps its
+    // signature ability on every difficulty. (Maps 5→5, 50→50, 55→5, 100→50.)
+    u32 rawFloor = ((e.level - 1) % 50) + 1;
+
     // Track LOS duration (repurpose flybyTarget.x as timer)
     if (bossLOS) {
         e.flybyTarget.x += dt;
@@ -35,7 +43,11 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
         e.aiState = AIState::CHASE;
         // Boss aggro speech — use nameTag for personalized line
         if (e.speechTimer <= 0.0f) {
-            if (e.nameTag) {
+            if (rawFloor == 15) {
+                // Sethrak the lich — themed aggro rambling
+                e.speechText = "Flesh is fleeting; bone is FOREVER. Kneel before Sethrak!";
+                e.speechTimer = 3.0f;
+            } else if (e.nameTag) {
                 // Each boss has a unique aggro line based on identity
                 e.speechText = "You dare challenge me!";
                 e.speechTimer = 3.0f;
@@ -50,7 +62,7 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
         Vec3 toPlayerDir = normalize(playerEye - bossEye);
         f32 bossDmg = e.damage;
 
-        switch (e.level) {
+        switch (rawFloor) {
 
         // Floor 5: The Butcher — cleaver throw then sprint to close the gap
         case 5: {
@@ -89,8 +101,13 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
                 ProjectileSystem::spawn(projectiles, bossEye,
                     dir, 16.0f, bossDmg * 0.6f, 0.10f, 3.0f, false);
             }
-            e.speechText = "FREEZE!";
-            e.speechTimer = 2.0f;
+            static const char* kFrostLines[] = {
+                "Feel the cold of the tomb!",
+                "Frost shall still your beating heart!",
+                "Shiver, mortal, as the dead do not.",
+            };
+            e.speechText  = kFrostLines[std::rand() % 3];
+            e.speechTimer = 2.5f;
         } break;
 
         // Floor 20: Mephisto — Chain Lightning (5 spark bolts in rapid fan)
@@ -273,5 +290,41 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
         }
 
         e.attackAnimT = 0.4f;
+    }
+
+    // Floor-15 lich (Sethrak) secondary ability: raise a guard of 5 skeletons in a
+    // ring around himself, on its own cooldown (sprintTimer — unused by a
+    // KITER+SUMMONER boss) so it runs independently of the frost fan above.
+    if (rawFloor == 15 && bossLOS) {
+        e.sprintTimer -= dt;
+        if (e.sprintTimer <= 0.0f) {
+            e.sprintTimer = 5.0f;
+            f32 bossDmg = e.damage;
+            for (u32 s = 0; s < 5; s++) {
+                f32 ang = s * (6.2832f / 5.0f) + e.animTimer;
+                Vec3 pos = e.position + Vec3{sinf(ang) * 2.5f, 0.0f, cosf(ang) * 2.5f};
+                EntityHandle sh = EntitySystem::spawn(pool, pos,
+                    {0.4f, 0.9f, 0.4f}, false,
+                    e.maxHealth * 0.08f, 4.0f, 14.0f, 2.2f, 0.8f, bossDmg * 0.20f);
+                Entity* skel = handleGet(pool, sh);
+                if (skel) {
+                    skel->meshId             = s_skeletonMeshId; // resolved at init
+                    skel->materialId         = s_skeletonMatId;
+                    skel->enemyType          = EnemyType::SKELETON;
+                    skel->aiState            = AIState::CHASE;
+                    skel->level              = e.level;
+                    skel->baseMoveSpeed      = skel->moveSpeed;
+                    skel->baseAttackCooldown = skel->attackCooldown;
+                    skel->spawnerIdx         = static_cast<u16>(i); // minion linkage
+                }
+            }
+            static const char* kSummonLines[] = {
+                "Arise, my bony legion! Surround this fool!",
+                "From dust and grave-dirt, I call your end!",
+                "My guards never tire, never bleed, never stop.",
+            };
+            e.speechText  = kSummonLines[std::rand() % 3];
+            e.speechTimer = 3.0f;
+        }
     }
 }

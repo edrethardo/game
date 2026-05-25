@@ -21,6 +21,33 @@ void Inventory::init(PlayerInventory& inv) {
 static Inventory::StatsChangedCallback s_statsChangedCb = nullptr;
 void Inventory::setStatsChangedCallback(StatsChangedCallback cb) { s_statsChangedCb = cb; }
 
+// Accumulate the affix bonuses shared by players and NPCs. PlayerInventory and
+// NpcEquipment expose the same bonus* field names, so one template serves both and the
+// common affix→stat mapping lives in a single place (add a new shared affix here once,
+// not twice). Caller-specific affixes (player clip/reload/energy) and the NPC per-item
+// bonusHealth stay in the callers, since the two structs' field sets differ.
+template <typename Equip>
+static void accumulateCommonAffix(Equip& e, const Affix& affix) {
+    switch (affix.type) {
+        case AffixType::DAMAGE_FLAT:        e.bonusDamageFlat         += affix.value; break;
+        case AffixType::HEALTH_FLAT:        e.bonusHealthFlat         += affix.value; break;
+        case AffixType::MOVE_SPEED_FLAT:    e.bonusMoveSpeed          += affix.value; break;
+        case AffixType::DAMAGE_PCT:         e.bonusDamagePct          += affix.value; break;
+        case AffixType::COOLDOWN_REDUCTION: {
+            // Multiplicative stacking: (1-a)*(1-b) gives diminishing returns.
+            // affix.value is a percentage (e.g. 10.0 = 10%), convert to fraction.
+            f32 frac = affix.value / 100.0f;
+            e.bonusCooldownReduction = 1.0f - (1.0f - e.bonusCooldownReduction) * (1.0f - frac);
+        } break;
+        case AffixType::HEALTH_PCT:         e.bonusHealthPct          += affix.value; break;
+        case AffixType::LIFE_ON_HIT:        e.bonusLifeOnHit          += affix.value; break;
+        case AffixType::PROJECTILE_SPEED:   e.bonusProjectileSpeedPct += affix.value; break;
+        case AffixType::CONE_ANGLE:         e.bonusConeAngle          += affix.value; break;
+        case AffixType::DAMAGE_TO_FLYING:   e.bonusDamageToFlying     += affix.value; break;
+        default: break;  // type-specific affixes are handled by the caller
+    }
+}
+
 void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusDamageFlat         = 0.0f;
     inv.bonusDamagePct          = 0.0f;
@@ -42,22 +69,9 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
 
         for (u8 a = 0; a < equipped.affixCount; a++) {
             const Affix& affix = equipped.affixes[a];
+            accumulateCommonAffix(inv, affix);
+            // Player-only affixes (NpcEquipment has no clip/reload/energy fields):
             switch (affix.type) {
-                case AffixType::DAMAGE_FLAT:        inv.bonusDamageFlat         += affix.value; break;
-                case AffixType::HEALTH_FLAT:        inv.bonusHealthFlat         += affix.value; break;
-                case AffixType::MOVE_SPEED_FLAT:    inv.bonusMoveSpeed          += affix.value; break;
-                case AffixType::DAMAGE_PCT:         inv.bonusDamagePct          += affix.value; break;
-                case AffixType::COOLDOWN_REDUCTION: {
-                    // Multiplicative stacking: (1-a)*(1-b) gives diminishing returns
-                    // affix.value is a percentage (e.g. 10.0 = 10%), convert to fraction
-                    f32 frac = affix.value / 100.0f;
-                    inv.bonusCooldownReduction = 1.0f - (1.0f - inv.bonusCooldownReduction) * (1.0f - frac);
-                } break;
-                case AffixType::HEALTH_PCT:         inv.bonusHealthPct          += affix.value; break;
-                case AffixType::LIFE_ON_HIT:        inv.bonusLifeOnHit          += affix.value; break;
-                case AffixType::PROJECTILE_SPEED:   inv.bonusProjectileSpeedPct += affix.value; break;
-                case AffixType::CONE_ANGLE:         inv.bonusConeAngle          += affix.value; break;
-                case AffixType::DAMAGE_TO_FLYING:   inv.bonusDamageToFlying     += affix.value; break;
                 case AffixType::CLIP_SIZE_PCT:      inv.bonusClipSizePct        += affix.value; break;
                 case AffixType::RELOAD_SPEED_PCT:   inv.bonusReloadSpeedPct     += affix.value; break;
                 case AffixType::ENERGY_FLAT:        inv.bonusEnergyFlat         += affix.value; break;
@@ -97,23 +111,8 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
         equip.bonusHealthFlat += equipped.bonusHealth;
 
         for (u8 a = 0; a < equipped.affixCount; a++) {
-            const Affix& affix = equipped.affixes[a];
-            switch (affix.type) {
-                case AffixType::DAMAGE_FLAT:        equip.bonusDamageFlat         += affix.value; break;
-                case AffixType::HEALTH_FLAT:        equip.bonusHealthFlat         += affix.value; break;
-                case AffixType::MOVE_SPEED_FLAT:    equip.bonusMoveSpeed          += affix.value; break;
-                case AffixType::DAMAGE_PCT:         equip.bonusDamagePct          += affix.value; break;
-                case AffixType::COOLDOWN_REDUCTION: {
-                    f32 frac = affix.value / 100.0f;
-                    equip.bonusCooldownReduction = 1.0f - (1.0f - equip.bonusCooldownReduction) * (1.0f - frac);
-                } break;
-                case AffixType::HEALTH_PCT:         equip.bonusHealthPct          += affix.value; break;
-                case AffixType::LIFE_ON_HIT:        equip.bonusLifeOnHit          += affix.value; break;
-                case AffixType::PROJECTILE_SPEED:   equip.bonusProjectileSpeedPct += affix.value; break;
-                case AffixType::CONE_ANGLE:         equip.bonusConeAngle          += affix.value; break;
-                case AffixType::DAMAGE_TO_FLYING:   equip.bonusDamageToFlying     += affix.value; break;
-                default: break;
-            }
+            // NPCs use only the affixes shared with players (no clip/reload/energy).
+            accumulateCommonAffix(equip, equipped.affixes[a]);
         }
     }
     // Cap CDR at 92% (minimum cooldown = 8% of base)

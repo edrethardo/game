@@ -216,7 +216,10 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     if (!s_firstKillDropGiven && m_level.currentFloor <= 3 &&
         !(pool.entities[idx].flags & ENT_FRIENDLY)) {
         s_firstKillDropGiven = true;
-        u8 lvl = pool.entities[idx].level;
+        // Loot/item level is u8 (ItemInstance.itemLevel is save-bound) and rollItem
+        // wraps it mod 50 anyway, so cap the effective floor at 255 for loot.
+        u16 entLvl = pool.entities[idx].level;
+        u8 lvl = static_cast<u8>(entLvl > 255 ? 255 : entLvl);
         if (lvl < 1) lvl = 1;
         // Floor 1: force armor drops so tutorial teaches equipping gear
         ItemInstance item;
@@ -257,7 +260,9 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     if (pool.entities[idx].bossDefIdx != 0xFF &&
         pool.entities[idx].bossDefIdx < m_bossDefs.count) {
         const BossDef& bd = m_bossDefs.defs[pool.entities[idx].bossDefIdx];
-        u8 bossLvl = pool.entities[idx].level;
+        // Loot level is u8 (save-bound ItemInstance.itemLevel) — cap effective floor at 255.
+        u16 bossEntLvl = pool.entities[idx].level;
+        u8 bossLvl = static_cast<u8>(bossEntLvl > 255 ? 255 : bossEntLvl);
         if (bossLvl < 1) bossLvl = 1;
 
         // Guaranteed quality drop — re-roll until we get a true legendary
@@ -316,8 +321,10 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
 // Drop chance scales with enemy level/floor depth. Floor 1 forces shield drops
 // so the tutorial teaches blocking. Void return — no early exit in original.
 void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
-    // Hostile enemies only drop loot; chance scales with floor depth
-    u8 enemyLevel = pool.entities[idx].level;
+    // Hostile enemies only drop loot; chance scales with floor depth.
+    // Loot level is u8 (save-bound ItemInstance.itemLevel) — cap effective floor at 255.
+    u16 entLvl = pool.entities[idx].level;
+    u8 enemyLevel = static_cast<u8>(entLvl > 255 ? 255 : entLvl);
     f32 dropChance = GameConst::LOOT_DROP_CHANCE + enemyLevel * 0.01f;
     if (dropChance > 0.70f) dropChance = 0.70f;
     if (!(pool.entities[idx].flags & ENT_FRIENDLY) &&
