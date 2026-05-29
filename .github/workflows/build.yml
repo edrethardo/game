@@ -143,7 +143,29 @@ jobs:
           </dict>
           </plist>
           PLIST
-          zip -r DungeonEngine-macOS.zip DungeonEngine.app
+          # Ad-hoc sign so the bundle carries a valid signature. Apple Silicon
+          # rejects unsigned/invalidly-signed downloaded apps with an "is damaged"
+          # error; a clean ad-hoc signature avoids that. No --deep needed because
+          # SDL2/SDL_mixer/glad/enet are statically linked (single self-contained
+          # Mach-O, no embedded dylibs/frameworks). --verify fails the job if bad.
+          codesign --force --sign - DungeonEngine.app
+          codesign --verify --verbose DungeonEngine.app
+          # Ship launch instructions: the app is unsigned by an Apple Developer ID,
+          # so users must clear the quarantine attribute before macOS will run it.
+          cat > README-macOS.txt << 'TXT'
+          DungeonEngine for macOS (Apple Silicon)
+
+          If macOS says "DungeonEngine is damaged and can't be opened", that is because
+          the app is not signed with a paid Apple Developer ID. The app is fine — macOS
+          blocks unsigned apps downloaded from the internet.
+
+          To run it:
+            1. Move DungeonEngine.app where you want it (e.g. /Applications).
+            2. Open Terminal and run:
+                   xattr -cr /path/to/DungeonEngine.app
+            3. Double-click the app, or run:  open /path/to/DungeonEngine.app
+          TXT
+          zip -r DungeonEngine-macOS.zip DungeonEngine.app README-macOS.txt
 
       - name: Upload
         uses: actions/upload-artifact@v4
