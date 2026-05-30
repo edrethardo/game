@@ -8,13 +8,16 @@ static constexpr u32 MAX_PACKET_SIZE = 4096;
 
 // Snapshot payloads can exceed one UDP datagram and are sent via ENet's
 // unreliable-fragment path (Net::broadcastSnapshot), so they are NOT bounded by
-// MAX_PACKET_SIZE. 8 KB holds all 4 players + 128 entities + ~304 projectiles
-// (29 fixed + 4*31 + 128*20 = 2713 B; remaining 5479 B / 18 B = 304 projectiles),
-// which covers a Frozen-Orb storm during a boss fight. Loads above this are
-// priority-dropped by the serializer (projectiles first, nearest-player kept) so
-// the packet's declared counts always match the bytes present. Kept modest on
-// purpose: 8 KB is ~6 MTU fragments, and a single lost fragment drops the whole
-// snapshot — a larger buffer would raise per-snapshot loss under real packet loss.
+// MAX_PACKET_SIZE. 8 KB holds all 4 players + 128 entities + 32 world items + ~213
+// projectiles (29 fixed + 4*29 + 128*27 + 32*16 = 4113 B; remaining 4079 B / 19 B = 214
+// projectiles), which still covers a Frozen-Orb storm during a boss fight. Entity wire
+// grew 24→27 B in the audit P2 #4 batch (halfExtents quantized 3 B per entity so non-boss
+// custom colliders render correctly on clients). World-item wire grew 14→16 B and
+// projectile 18→19 B in the prior audit-A/B batch (ownership now wired).
+// Loads above this are priority-dropped by the serializer (projectiles first,
+// nearest-player kept) so the packet's declared counts always match the bytes present.
+// Kept modest on purpose: 8 KB is ~6 MTU fragments, and a single lost fragment drops the
+// whole snapshot — a larger buffer would raise per-snapshot loss under real packet loss.
 static constexpr u32 MAX_SNAPSHOT_SIZE = 8192;
 
 struct PacketWriter {

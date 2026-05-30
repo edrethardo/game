@@ -8,7 +8,12 @@ static constexpr u32 NET_TICK_RATE     = 60;
 static constexpr u32 SNAPSHOT_RATE     = 20;
 static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 3
 
-static constexpr u32 PROTOCOL_VERSION  = 1;
+// Bumped to 2 with the absolute-aim + client-authoritative-position NetInput change:
+// the wire layout grew from 14 bytes (header(4) + tick(4) + flags(2) + dx/dy(4)) to
+// 20 bytes (header(4) + tick(4) + flags(2) + yawQ/pitchQ(4) + posXQ/Y/Z(6)). A v1
+// host paired with a v2 client (or vice versa) would silently mis-parse; the version
+// check in CL_JOIN_REQUEST handling now produces a clean SV_JOIN_REJECT instead.
+static constexpr u32 PROTOCOL_VERSION  = 2;
 
 // A peer that finishes the ENet handshake but never sends CL_JOIN_REQUEST is dropped
 // after this many milliseconds so it can't hold a CONNECTING slot until ENet's own
@@ -39,20 +44,39 @@ enum struct NetPacketType : u8 {
     CL_EQUIP_ITEM     = 0x03,  // client requests equip
     CL_DROP_ITEM      = 0x04,  // client drops item
     CL_PICKUP_ITEM    = 0x05,  // client picks up world item
+    CL_RESPAWN        = 0x06,  // client requests respawn after death (reliable; no payload)
     SV_INVENTORY_SYNC = 0x16,  // server sends full inventory to client
 };
 
 // Sub-types for SV_EVENT packets
 enum struct NetEventType : u8 {
-    HITSCAN_IMPACT = 0x01,  // remote player hitscan hit: position + hitEntity flag
+    HITSCAN_IMPACT  = 0x01,  // remote player hitscan hit: position + hitEntity flag
+    // Server-authoritative class-skill cooldown reset (Wanderer Exploit Weakness on
+    // marked-enemy kill, etc.). Payload: skillId (u16 LE). The host can't write the
+    // client's m_classSkillStates directly, so it ships this targeted reliable event
+    // and the client zeros the matching slot's cooldownTimer on receipt.
+    SKILL_CD_RESET  = 0x02,
 };
 
-// 4-byte packet header on every packet
+// 4-byte packet header on every packet.
+// Wire format is raw host-order bytes (memcpy of multi-byte fields), so it is
+// little-endian and assumes PacketHeader has no padding — both are asserted below.
 struct PacketHeader {
     NetPacketType type;
     u8            flags;
+    // Reserved / currently unused — packet ordering is via the snapshot's serverTick
+    // (SV_SNAPSHOT) and the input tick (CL_INPUT); the client writes a literal 0 here.
+    // Kept on the wire to preserve the 4-byte header size (removing it is a format change).
     u16           seq;
 };
+
+// The wire format depends on a 4-byte, padding-free header laid out in little-endian
+// host order. C++17 has no std::endian, so use the GCC/clang byte-order builtins
+// (defined by gcc/clang/MinGW/devkitA64 — all of this project's compilers).
+static_assert(sizeof(PacketHeader) == 4,
+              "PacketHeader must be 4 bytes / no padding — wire layout depends on it");
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
+              "netcode wire format is little-endian only");
 
 struct NetStats {
     f32 rttMs;
@@ -122,6 +146,9 @@ namespace Net {
     u8      getServerLevelFloor();      // host's current floor at join time
     u8      getServerLevelDifficulty(); // host's difficulty tier at join time
     bool    isConnected();
+    // Client: true if the in-progress join failed (SV_JOIN_REJECT or pre-accept disconnect).
+    // Cleared on the next connectToServer. Let the lobby bail out of CONNECTING (M10).
+    bool    joinFailed();
     const NetPlayerSlot* getSlots(); // array of MAX_PLAYERS
     u32     getConnectedCount();
     NetStats getStats(u8 playerSlot);
@@ -131,6 +158,8 @@ namespace Net {
     using OnInputFn      = void(*)(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_PICKUP_ITEM handler — slot = requesting client, payload carries the uid.
     using OnPickupFn     = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_RESPAWN handler — slot = requesting (dead) client; no payload.
+    using OnRespawnFn    = void(*)(u8 playerSlot);
     using OnEventFn      = void(*)(const u8* data, u32 size);
     // classId is the joining client's chosen PlayerClass (validated by the callback;
     // 0xFF if the join request predates the class byte — treated as default Warrior).
@@ -144,6 +173,7 @@ namespace Net {
     void setOnSnapshot(OnSnapshotFn fn);
     void setOnInput(OnInputFn fn);
     void setOnPickup(OnPickupFn fn);
+    void setOnRespawn(OnRespawnFn fn);
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);

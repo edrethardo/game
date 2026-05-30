@@ -142,7 +142,22 @@ private:
     // Networking
     NetRole    m_netRole = NetRole::NONE;
     u8         m_localPlayerIndex = 0;
+    // Net slot of the local player as assigned by the server (SV_JOIN_ACCEPT). On a host or in
+    // singleplayer/split the local player's net slot equals its lane, so this stays 0 and
+    // activeNetSlot() == m_localPlayerIndex. On a CLIENT, networking forces m_splitPlayerCount=1
+    // so m_localPlayerIndex (the split-screen lane) is always 0, while the real net slot (>=1)
+    // lives here. Separating the two is required because swapInPlayer() overwrites
+    // m_localPlayerIndex with the lane every frame — see activeNetSlot().
+    u8         m_clientNetSlot = 0;
     u32        m_serverTick = 0;
+    f32        m_connectingElapsed = 0.0f; // seconds spent in CONNECTING; bails out on timeout (M10)
+
+    // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
+    // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client
+    // m_localPlayerIndex is the lane (0) but the player lives at the server-assigned slot.
+    // Per-lane split-screen arrays (m_inventories/m_skillStates/m_localPlayers/... sized by
+    // lane) must keep using m_localPlayerIndex.
+    u8 activeNetSlot() const { return (m_netRole == NetRole::CLIENT) ? m_clientNetSlot : m_localPlayerIndex; }
 
     // Players (networked)
     NetPlayer  m_players[MAX_PLAYERS];
@@ -239,11 +254,11 @@ private:
         ProjectilePool projectiles;
         Vec3           playerPositions[MAX_PLAYERS];
         f32            playerYaws[MAX_PLAYERS];
-        f32            playerPitches[MAX_PLAYERS];
         bool           playerActive[MAX_PLAYERS];
         f32            playerHealth[MAX_PLAYERS];
         f32            playerMaxHealth[MAX_PLAYERS];
         u8             playerAnimFlags[MAX_PLAYERS]; // bit0=attacking, bit1=reloading, bit2=dead
+        u8             playerWeaponMeshId[MAX_PLAYERS]; // equipped weapon mesh (wire; clients lack remote inventories)
     };
     RenderInterp m_renderInterp;
 
@@ -526,12 +541,19 @@ private:
     // moving the item into that player's inventory and freeing the world slot.
     void handlePickupRequest(u8 playerSlot, u32 uid);
 
+    // Client: request respawn after death (reliable CL_RESPAWN). Server-authoritative.
+    void sendRespawnRequest();
+    // Server: respawn a dead client's NetPlayer (idempotent; revival propagates via snapshot).
+    void handleRespawnRequest(u8 playerSlot);
+
     // Net callbacks (static, forwarded to engine instance)
     static void onSnapshot(const u8* data, u32 size);
     static void onInput(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_PICKUP_ITEM handler (forwarded from the net layer). Validates the
     // request against authoritative world-item + player state and applies the pickup.
     static void onPickup(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_RESPAWN handler (forwarded from the net layer).
+    static void onRespawn(u8 playerSlot);
     static void onEvent(const u8* data, u32 size);
     static void onPlayerJoin(u8 playerSlot, u8 classId);
     static void onPlayerLeft(u8 playerSlot);

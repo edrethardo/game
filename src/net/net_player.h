@@ -6,13 +6,28 @@
 #include "game/item.h"
 #include "net/net.h"
 
-// Input as received from a client (or captured locally for listen server host)
+// Input as received from a client (or captured locally for listen server host).
+//
+// Aim and position are sent as ABSOLUTE quantized values rather than deltas (the
+// historic mouseDeltaX/Y design). Deltas were lossy under UDP loss: a dropped CL_INPUT
+// permanently dropped its mouse delta and the server's yaw drifted behind the client's
+// live camera ("shoot where I'm not aiming"). Absolutes are idempotent — a dropped
+// packet only delays the next sync; nothing is lost. Same byte count for yaw/pitch.
+//
+// Position is also absolute (posXQ/Y/Z) — the server snaps the remote NetPlayer to
+// this value with a max-delta sanity clamp instead of running its own moveAndSlide.
+// Co-op trust model: the client is authoritative for player position, the server is
+// authoritative for combat / HP / loot. A cheating client can only cheat their own
+// movement (visible to themselves) — they can't fake damage or steal kills.
 struct NetInput {
     u32 tick;           // which server tick this input is for
     u8  moveFlags;      // bit0=W, bit1=S, bit2=A, bit3=D, bit4=jump, bit5=fire, bit6=lockHold
     u8  weaponId;       // currently selected weapon
-    s16 mouseDeltaX;    // quantized mouse delta
-    s16 mouseDeltaY;
+    u16 yawQ;           // absolute yaw,   packed via Quantize::packAngle over [-π, π]
+    u16 pitchQ;         // absolute pitch, packed via Quantize::packAngle over [-π, π]
+    u16 posXQ;          // absolute position, packed via Quantize::packPos over [-128, 128] m
+    u16 posYQ;
+    u16 posZQ;
     u8  extFlags;       // extended input flags (potion, reload, skill, etc.)
     u8  skillSlot;      // which class skill slot (0-3) to activate
 };
@@ -33,7 +48,7 @@ static constexpr u8 INPUT_EX_SKILL      = 1 << 2;  // right-click class skill
 static constexpr u8 INPUT_EX_BOOT_SKILL = 1 << 3;
 static constexpr u8 INPUT_EX_HELM_SKILL = 1 << 4;
 static constexpr u8 INPUT_EX_INVENTORY  = 1 << 5;  // Tab toggle
-static constexpr u8 INPUT_EX_RESPAWN    = 1 << 6;  // Respawn after death
+// bit 6 free — respawn now uses the reliable CL_RESPAWN packet, not an input flag
 static constexpr u8 INPUT_EX_DODGE     = 1 << 7;  // Wanderer dodge roll
 
 // Networked player state — the authoritative state the server maintains.
@@ -57,9 +72,9 @@ struct NetPlayer {
     // Weapon
     WeaponState weaponState;
 
-    // Target lock — currently inert (lockActive never set true). lockActive (snapshot
-    // flag bit 2) and lockIndex are still serialized into the wire, so these fields stay
-    // even though no code drives them (R7-6).
+    // Target lock — currently inert (lockActive never set true). lockActive and lockIndex
+    // are NO LONGER on the wire (CV-4 removed them from SnapPlayer) but the in-memory fields
+    // are kept on NetPlayer/Player so consumers compile until lock-on is brought back.
     u16  lockIndex      = 0xFFFF;
     u16  lockGeneration = 0;
     bool lockActive     = false;
@@ -87,6 +102,22 @@ struct NetPlayer {
     // one-shot below-20%-HP invuln stays one-shot across frames for remotes (consumed on use,
     // re-earned only at >=40% HP). NOT serialized — server-only state, never on the wire.
     bool lifesaverArmed    = true;
+    // Ring-passive state (M8/M9 follow-up batch): server-only mirror of the Player fields so a
+    // remote with Soul Harvest / Second Wind / Phase Strike actually accumulates stacks, gets
+    // the emergency heal, and runs stealth — instead of all of it landing on the host. Not on
+    // the wire; the host's gameUpdate path keeps using the Player swap aliases.
+    f32  soulHarvestTimer  = 0.0f;
+    u8   soulHarvestStacks = 0;
+    f32  secondWindCooldown = 0.0f;
+    f32  smokeTimer        = 0.0f;  // Phase Strike post-kill stealth (mirrors Player::smokeTimer)
+    // Wanderer mark-prey state (death-preamble follow-up batch): server-only mirror so a remote
+    // Wanderer's Shadow Dance / mark-spread / speed stacks credit the *remote*, not the host
+    // (m_localPlayer swap alias). Mirrors Player::{shadowDanceTimer,markTimer,markSpeedStacks,
+    // markSpeedTimers}; not on the wire.
+    f32  shadowDanceTimer  = 0.0f;
+    f32  markTimer         = 0.0f;
+    u8   markSpeedStacks   = 0;
+    f32  markSpeedTimers[20] = {};
     // Per-player equipment passives (read from inventory each tick)
     SkillId weaponProc     = SkillId::NONE;
     SkillId armorAura      = SkillId::NONE;

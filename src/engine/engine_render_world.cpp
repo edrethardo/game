@@ -230,7 +230,7 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         // Render network remote players
         if (m_netRole != NetRole::NONE) {
             for (u32 i = 0; i < MAX_PLAYERS; i++) {
-                if (i == m_localPlayerIndex) continue;
+                if (i == activeNetSlot()) continue; // skip the local player's net slot (client slot may be >=1)
 
                 bool active = false;
                 Vec3 pos;
@@ -276,24 +276,41 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                                      {0.5f, 0.5f, 0.5f, 1.0f});
                 }
 
-                // Render equipped weapon in hand
-                const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-                if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
-                    u8 wpnMeshId = m_itemDefs[wpn.defId].meshId;
-                    u8 wpnMatId  = m_itemDefs[wpn.defId].materialId;
-                    if (wpnMeshId > 0 && m_meshDefs[wpnMeshId].mesh.vao) {
-                        Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
-                        Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
-                        Vec3 wpnPos = pos + Vec3{0, 0.8f, 0} + right * 0.35f + fwd * 0.3f;
-                        Mat4 wpnModel = Mat4::translate(wpnPos)
-                                      * Mat4::rotateY(yaw)
-                                      * Mat4::scale({0.4f, 0.4f, 0.4f});
-                        AABB wpnBounds = {wpnPos - Vec3{0.2f,0.2f,0.2f}, wpnPos + Vec3{0.2f,0.2f,0.2f}};
-                        const Material* wm = MaterialSystem::get(wpnMatId);
-                        Renderer::submit(m_basicShader, wm ? wm->texture : defaultTex,
-                                         m_meshDefs[wpnMeshId].mesh, wpnModel, wpnBounds,
-                                         wm ? wm->tint : Vec4{1,1,1,1});
+                // Render equipped weapon in hand. The weapon MESH is authoritative: on a CLIENT
+                // the remote's inventory isn't replicated yet (SV_INVENTORY_SYNC TODO), so use the
+                // wired weaponMeshId (material isn't wired → default texture). The host has the
+                // full inventory and uses the item's real mesh + material.
+                u8 wpnMeshId = 0, wpnMatId = 0; bool haveWpnMat = false;
+                u8 anim = 0; // bit0=attacking, bit1=reloading — drives the M7 telegraph below
+                if (m_netRole == NetRole::CLIENT) {
+                    wpnMeshId = m_renderInterp.playerWeaponMeshId[i];
+                    anim = m_renderInterp.playerAnimFlags[i];
+                } else {
+                    const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                    if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
+                        wpnMeshId = m_itemDefs[wpn.defId].meshId;
+                        wpnMatId  = m_itemDefs[wpn.defId].materialId;
+                        haveWpnMat = true;
                     }
+                    if (m_players[i].weaponState.cooldownTimer > 0.0f) anim |= 1;
+                    if (m_players[i].weaponState.reloading)            anim |= 2;
+                }
+                if (wpnMeshId > 0 && m_meshDefs[wpnMeshId].mesh.vao) {
+                    Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+                    Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
+                    // M7: thrust the weapon forward while attacking and drop it while reloading so
+                    // remote players visibly telegraph their actions (anim state rides the wire).
+                    f32 thrust = (anim & 1) ? 0.25f : 0.0f;
+                    f32 drop   = (anim & 2) ? -0.25f : 0.0f;
+                    Vec3 wpnPos = pos + Vec3{0, 0.8f + drop, 0} + right * 0.35f + fwd * (0.3f + thrust);
+                    Mat4 wpnModel = Mat4::translate(wpnPos)
+                                  * Mat4::rotateY(yaw)
+                                  * Mat4::scale({0.4f, 0.4f, 0.4f});
+                    AABB wpnBounds = {wpnPos - Vec3{0.2f,0.2f,0.2f}, wpnPos + Vec3{0.2f,0.2f,0.2f}};
+                    const Material* wm = haveWpnMat ? MaterialSystem::get(wpnMatId) : nullptr;
+                    Renderer::submit(m_basicShader, wm ? wm->texture : defaultTex,
+                                     m_meshDefs[wpnMeshId].mesh, wpnModel, wpnBounds,
+                                     wm ? wm->tint : Vec4{1,1,1,1});
                 }
             }
         }

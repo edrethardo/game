@@ -219,7 +219,7 @@ void Engine::renderViewmodel() {
     }
 
     // Throwaway legendary: weapon is gone during reload (it was thrown)
-    WeaponState& vmWs = m_players[m_localPlayerIndex].weaponState;
+    WeaponState& vmWs = m_players[activeNetSlot()].weaponState; // local player's net slot
     if (hasWeapon && m_itemDefs[equipped.defId].legendarySkillId == SkillId::THROWAWAY && vmWs.reloading) {
         return; // weapon is flying through the air — nothing to render
     }

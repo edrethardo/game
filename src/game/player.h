@@ -105,14 +105,18 @@ namespace PlayerController {
     // Original: reads Input:: directly (used for singleplayer and local capture)
     void update(Player& player, f32 dt);
 
-    // Network-aware: applies a NetInput struct instead of reading Input::
-    void updateFromInput(Player& player, const NetInput& input, f32 dt);
-
-    // Apply to NetPlayer (same logic, different struct)
-    void updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt);
+    // Apply to NetPlayer (same logic, different struct). movementOnly=true (reconcile
+    // replay) re-integrates position but skips timer/i-frame side effects (slow decay,
+    // dodge invuln) that the authoritative snapshot already owns.
+    void updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt,
+                                  bool movementOnly = false);
 
     void applyToCamera(const Player& player, Camera& cam);
 
-    // Capture current Input:: state into a NetInput
-    NetInput captureLocalInput(u32 tick, u8 weaponId);
+    // Capture current Input:: state into a NetInput. The Player& is read for the live
+    // yaw/pitch/position baseline — captureLocalInput packs absolute (not delta) aim
+    // and position, which it computes by applying this frame's pending mouse delta to
+    // `player.yaw/pitch/position` without mutating them (PlayerController::update later
+    // in the frame produces the identical update via applyMovement).
+    NetInput captureLocalInput(const Player& player, u32 tick, u8 weaponId);
 }

@@ -62,56 +62,106 @@ extern bool s_firstKillDropGiven;
 void Engine::serverNetPre(f32 dt) {
     m_serverTick++;
 
-    // Capture local input and push into server's input buffer
+    // Capture local input and push into server's input buffer. Pass m_localPlayer
+    // so captureLocalInput can pack absolute yaw/pitch/position (PROTOCOL_VERSION 2
+    // wire layout); the host's own input still rides the same NetInput shape so the
+    // server's snapshot lastInputTick is uniform across all slots.
     WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
-    NetInput localInput = PlayerController::captureLocalInput(m_serverTick, ws.currentWeapon);
+    NetInput localInput = PlayerController::captureLocalInput(m_localPlayer, m_serverTick, ws.currentWeapon);
     Server::getInputBuffer(m_localPlayerIndex).push(localInput);
+    // Track the host's own ack too. The host moves in gameUpdate (not the remote loop
+    // below), so without this its lastInputTick stays 0 forever on the wire — harmless
+    // today (clients only reconcile their own slot) but a trap for any future feature
+    // that reads slot 0's ack (spectate/lag-comp/debug).
+    m_players[m_localPlayerIndex].lastProcessedInputTick = localInput.tick;
 
-    // Process inputs for remote players only (host movement handled by gameUpdate)
+    // Process inputs for remote players only (host movement handled by gameUpdate).
+    //
+    // Drain ALL unprocessed inputs in tick order, not just `getLatest()`. The prior
+    // code dropped every input that arrived between two server ticks except the
+    // newest one — their mouse deltas (and one-shot fire/jump/dodge flags) were
+    // silently discarded. That caused the server's NetPlayer.yaw to drift behind the
+    // client's live camera yaw — visible as "shooting where I'm not aiming" — plus
+    // position drift that fed reconcile snaps (felt as lag and jitter on the client).
+    //
+    // Walking the ring oldest→newest is correct because push() rejects stale ticks
+    // (net_player.h:139-142), so the buffer is monotonically ordered by tick. The
+    // buffer holds INPUT_BUFFER_SIZE=64 inputs (~1 s at 60 Hz), which exceeds any
+    // realistic jitter window — overflow would silently overwrite the oldest, but
+    // that's a packet-loss scenario already handled by the snapshot reconcile path.
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (i == m_localPlayerIndex) continue; // host moves in gameUpdate
         NetPlayer& np = m_players[i];
         if (!np.active) continue;
-        const NetInput* input = Server::getInputBuffer(i).getLatest();
-        if (input) {
-            PlayerController::updateNetPlayerFromInput(np, *input, dt);
-            np.lastProcessedInputTick = input->tick;
-            if (input->weaponId < m_weaponDefCount)
-                np.weaponState.currentWeapon = input->weaponId;
+        InputRingBuffer& buf = Server::getInputBuffer(i);
+        for (u32 k = 0; k < buf.count; k++) {
+            // oldest→newest walk: head points one past the newest write; count entries trail back from there
+            u32 idx = (buf.head + INPUT_BUFFER_SIZE - buf.count + k) % INPUT_BUFFER_SIZE;
+            const NetInput& in = buf.inputs[idx];
+            if (in.tick <= np.lastProcessedInputTick) continue; // already applied last tick
+            // Always advance the ack and mirror the weapon, even while dead, so the
+            // client's reconcile keeps a fresh ack across the death window. But DON'T
+            // drive movement/aim from input while dead — a corpse that died holding a
+            // move key or aiming somewhere would keep updating each tick.
+            np.lastProcessedInputTick = in.tick;
+            if (in.weaponId < m_weaponDefCount)
+                np.weaponState.currentWeapon = in.weaponId;
+            if (!np.isDead) {
+                // CLIENT-AUTHORITATIVE POSITION: snap NetPlayer.position to the absolute
+                // position the client reported, with a max-delta sanity clamp to keep
+                // flagrant teleport-cheats from working. This eliminates the divergence
+                // between client-side prediction-collision (against interp entities) and
+                // server-side moveAndSlide (against live entities) that produced the MED
+                // reconcile snaps (~0.2-1 m every few seconds). Combat / HP / loot stay
+                // server-authoritative; the only thing we trust the client for is its own
+                // position. Co-op trade: a cheating client could phase through enemies on
+                // their own screen but can't fake damage or steal kills.
+                Vec3 reported{Quantize::unpackPos(in.posXQ),
+                              Quantize::unpackPos(in.posYQ),
+                              Quantize::unpackPos(in.posZQ)};
+                // Cap per-tick movement at 4× the player's nominal speed × dt — a real
+                // sprint+jump+dodge is well under this; a teleport hack is way over.
+                // Reject by holding the prior position so the cheating client snaps in
+                // place visibly to others (server is still the source of truth on the wire).
+                Vec3 delta = reported - np.position;
+                f32 maxStep = np.moveSpeed * 4.0f * dt + 0.5f; // +0.5 m slack for spawns / floor transitions
+                if (lengthSq(delta) > maxStep * maxStep) {
+                    // Out-of-bounds move: keep np.position unchanged this tick.
+                    // (No log spam: a single warn-once would be fine to add if cheating
+                    //  becomes a real concern; for now silent reject is sufficient.)
+                } else {
+                    np.position = reported;
+                }
+                // Yaw/pitch + movement state (velocity, onGround) come from this call —
+                // updateNetPlayerFromInput now SETS np.yaw/pitch absolutely from the
+                // input (no longer applies a mouse delta), and runs applyMovement with
+                // zero look-delta to compute velocity / WASD-derived motion / jump.
+                // applyMovement also writes np.position, so we set position again AFTER
+                // it to keep client-authoritative.
+                Vec3 preMovePos = np.position;
+                PlayerController::updateNetPlayerFromInput(np, in, dt);
+                // applyMovement integrated np.position by velocity*dt against the grid.
+                // Discard that — the client's reported position is the truth — but keep
+                // the velocity, onGround, yaw, pitch, etc. it computed.
+                np.position = preMovePos;
+            }
         }
     }
 
-    // Collision for remote players only (host collision handled by gameUpdate)
-    for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        if (i == m_localPlayerIndex) continue;
-        NetPlayer& np = m_players[i];
-        if (!np.active || np.noclip) continue;
-        Player tempP;
-        tempP.position = np.position;
-        tempP.velocity = np.velocity;
-        tempP.onGround = np.onGround;
-        tempP.noclip = np.noclip;
-        // Build obstacle list for net player collision (friendly NPCs non-blocking)
-        CollisionObstacle npObs[MAX_ENTITIES];
-        u32 npObsCount = 0;
-        for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
-            const Entity& e = m_entities.entities[ei];
-            if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-            if (e.flags & ENT_FRIENDLY) continue;
-            if (e.enemyType == EnemyType::PROP) continue;
-            npObs[npObsCount++] = {e.position, e.halfExtents};
-        }
-        Collision::moveAndSlide(tempP, m_level.grid, dt, npObs, npObsCount);
-        np.position = tempP.position;
-        np.velocity = tempP.velocity;
-        np.onGround = tempP.onGround;
-    }
+    // (Server-side remote moveAndSlide block intentionally removed: position is now
+    // client-authoritative, set above from in.posXQ/Y/Z. Server doesn't need to slide
+    // remote players against the grid because the client already did that during its
+    // own prediction. Removes the ghost-vs-live entity collision divergence that
+    // was producing reconcile MED snaps.)
 
     // Remote player weapon fire + extended actions (server-authoritative)
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (!m_players[i].active) continue;
         if (i == m_localPlayerIndex) continue; // host handled by gameUpdate
-        handleWeaponFireForPlayer(m_players[i], dt);
+        // Don't let a dead remote keep firing: getLatest() repeats the last input on
+        // packet loss/idle, so a corpse that died holding FIRE would shoot every tick
+        // until it respawns. Mirrors the !isDead gate on the potion/skill actions below.
+        if (!m_players[i].isDead) handleWeaponFireForPlayer(m_players[i], dt);
 
         const NetInput* input = Server::getInputBuffer(static_cast<u8>(i)).getLatest();
         if (input) {
@@ -142,11 +192,11 @@ void Engine::serverNetPre(f32 dt) {
                         SkillSystem::setSkillPower(boots.itemLevel > 1
                             ? static_cast<f32>(boots.itemLevel - 1) / 149.0f : 0.0f);
                         SkillSystem::setClassDamageMult(1.0f);
-                        // Network forces split-count 1, so the per-player buff arrays only model
-                        // the host (slot 0). NOTE: meteor/holy kill-heal in updateMeteors credits
-                        // players[caster] (LOCAL players), so a remote's heal mis-attributes to the
-                        // host — deferred fix needs updateMeteors to accept remote NetPlayers.
-                        SkillSystem::setCastingPlayer(0);
+                        // Stamp the remote's net slot so per-slot skill state (overcharge buff,
+                        // meteor/holy kill-heal target) lands on the actual caster, not the host.
+                        // (H4/H5: overcharge arrays are MAX_PLAYERS-sized; updateMeteors resolves
+                        //  the heal target against m_players by net slot.)
+                        SkillSystem::setCastingPlayer(static_cast<u8>(i));
                         // TA-3: cast against the GUEST's own view, not the host's m_localPlayer,
                         // so position/health-mutating skills (PhaseDash, Blood Nova) hit the guest.
                         Player view; buildRemotePlayerView(static_cast<u8>(i), view);
@@ -171,7 +221,7 @@ void Engine::serverNetPre(f32 dt) {
                         SkillSystem::setSkillPower(helm.itemLevel > 1
                             ? static_cast<f32>(helm.itemLevel - 1) / 149.0f : 0.0f);
                         SkillSystem::setClassDamageMult(1.0f);
-                        SkillSystem::setCastingPlayer(0); // remote heals mis-attribute to host (see boot note)
+                        SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
                         // TA-3: cast against the GUEST's own view (see boot-skill note above).
                         Player view; buildRemotePlayerView(static_cast<u8>(i), view);
                         SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
@@ -182,8 +232,10 @@ void Engine::serverNetPre(f32 dt) {
                 }
             }
 
-            // Class skill activation (right-click) — use remote player's class
-            if (input->extFlags & INPUT_EX_SKILL) {
+            // Class skill activation (right-click) — use remote player's class.
+            // Gate on !isDead like potion/boot/helm above; a latched INPUT_EX_SKILL on a
+            // dead remote would otherwise keep casting (teleporting/healing the corpse).
+            if ((input->extFlags & INPUT_EX_SKILL) && !m_players[i].isDead) {
                 u8 slot = input->skillSlot;
                 PlayerClass remoteClass = m_players[i].playerClass;
                 if (slot < 4 && static_cast<u32>(remoteClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
@@ -214,7 +266,7 @@ void Engine::serverNetPre(f32 dt) {
                               ? Inventory::getWeaponFromItem(m_inventories[i], m_itemDefs, wpn)
                               : m_weaponDefs[0];
                           SkillSystem::setWeaponDamage(wd.damage); }
-                        SkillSystem::setCastingPlayer(0); // remote heals mis-attribute to host (see boot note)
+                        SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
                         // TA-3: cast against the GUEST's own view (see boot-skill note above)
                         // so class dash/blink/Blood Nova mutate the guest, never the host.
                         Player view; buildRemotePlayerView(static_cast<u8>(i), view);
@@ -228,18 +280,33 @@ void Engine::serverNetPre(f32 dt) {
         }
     }
 
-    // Sync NetPlayer → m_localPlayer so gameUpdate sees current server state
-    // (gameUpdate's top-of-function sync handles this, but we also need forward vector)
 }
 
 // ---------------------------------------------------------------------------
 // Server networking — post-gameplay: status ticks, snapshot broadcast
 // ---------------------------------------------------------------------------
 void Engine::serverNetPost(f32 dt) {
-    // gameUpdate already synced m_localPlayer → NetPlayer at its end.
-    // Sync EnemyAI damage back (AI ran inside gameUpdate targeting m_localPlayer)
-    m_players[m_localPlayerIndex].health = m_localPlayer.health;
-    m_players[m_localPlayerIndex].damageFlashTimer = m_localPlayer.damageFlashTimer;
+    // Write the host's combat/status state back into its authoritative NetPlayer. Enemy AI,
+    // projectiles, and the bomber blast run in tickSharedSystems (AFTER the per-player loop's
+    // swapOut), and damage the PERSISTENT m_localPlayers[host] array — NOT the m_localPlayer
+    // swap alias (whose writes were already swapped out before tickSharedSystems). Reading the
+    // stale alias here dropped all host damage every frame; read the persistent array instead.
+    // Transform (position/velocity) is owned by gameUpdate and already in m_players via
+    // syncLocalPlayerToNetPlayer — enemies never move the player, so it's intentionally omitted.
+    {
+        NetPlayer& host = m_players[m_localPlayerIndex];
+        const Player& hp = m_localPlayers[m_localPlayerIndex];
+        host.health          = hp.health;
+        host.damageFlashTimer = hp.damageFlashTimer;
+        host.invulnTimer     = hp.invulnTimer;
+        host.lifesaverArmed  = hp.lifesaverArmed;
+        host.poisonTimer     = hp.poisonTimer;
+        host.poisonDps       = hp.poisonDps;
+        host.burnTimer       = hp.burnTimer;
+        host.burnDps         = hp.burnDps;
+        host.slowTimer       = hp.slowTimer;
+        host.freezeTimer     = hp.freezeTimer;
+    }
 
     // Server-side globe auto-pickup for remote players
     for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
@@ -269,22 +336,28 @@ void Engine::serverNetPost(f32 dt) {
             m_players[i].damageFlashTimer -= dt;
     }
 
-    // Tick status effects + death detection for ALL players
+    // Tick status effects (REMOTES only) + death detection (all). The HOST's status timers and
+    // DoT are already ticked by its local tickPlayerStatusEffects pass and copied into its
+    // NetPlayer by the writeback at the top of this function — ticking them again here would
+    // double the host's poison/burn and halve its debuff/invuln durations. Death detection
+    // still runs for every slot (the host's enemy + local-DoT damage is now in np.health).
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
         NetPlayer& np = m_players[pi];
         if (!np.active || np.isDead) continue;
 
-        if (np.invulnTimer > 0.0f) { np.invulnTimer -= dt; if (np.invulnTimer < 0.0f) np.invulnTimer = 0.0f; }
-        if (np.slowTimer > 0.0f)   np.slowTimer -= dt;
-        if (np.freezeTimer > 0.0f) np.freezeTimer -= dt;
-        if (np.potionCooldown > 0.0f) np.potionCooldown -= dt;
+        if (pi != m_localPlayerIndex) {
+            if (np.invulnTimer > 0.0f) { np.invulnTimer -= dt; if (np.invulnTimer < 0.0f) np.invulnTimer = 0.0f; }
+            if (np.slowTimer > 0.0f)   np.slowTimer -= dt;
+            if (np.freezeTimer > 0.0f) np.freezeTimer -= dt;
+            if (np.potionCooldown > 0.0f) np.potionCooldown -= dt;
 
-        if (np.invulnTimer <= 0.0f) {
-            if (np.poisonTimer > 0.0f) { np.poisonTimer -= dt; np.health -= np.poisonDps * dt; }
-            if (np.burnTimer > 0.0f)   { np.burnTimer -= dt;   np.health -= np.burnDps * dt;   }
-        } else {
-            np.poisonTimer = 0.0f; np.burnTimer = 0.0f;
-            np.freezeTimer = 0.0f; np.slowTimer = 0.0f;
+            if (np.invulnTimer <= 0.0f) {
+                if (np.poisonTimer > 0.0f) { np.poisonTimer -= dt; np.health -= np.poisonDps * dt; }
+                if (np.burnTimer > 0.0f)   { np.burnTimer -= dt;   np.health -= np.burnDps * dt;   }
+            } else {
+                np.poisonTimer = 0.0f; np.burnTimer = 0.0f;
+                np.freezeTimer = 0.0f; np.slowTimer = 0.0f;
+            }
         }
 
         if (np.health <= 0.0f) {
@@ -297,20 +370,10 @@ void Engine::serverNetPost(f32 dt) {
         }
     }
 
-    // Respawn handling
-    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
-        NetPlayer& np = m_players[pi];
-        if (!np.active || !np.isDead) continue;
-        const NetInput* input = Server::getInputBuffer(static_cast<u8>(pi)).getLatest();
-        if (input && (input->extFlags & INPUT_EX_RESPAWN)) {
-            np.health = np.maxHealth;
-            np.position = np.spawnPosition;
-            np.velocity = {0, 0, 0};
-            np.invulnTimer = 1.5f;
-            np.isDead = false;
-            LOG_INFO("Player %u respawned", pi);
-        }
-    }
+    // Client respawn is handled out-of-band via the reliable CL_RESPAWN packet
+    // (Engine::handleRespawnRequest), not through the input buffer — the old
+    // INPUT_EX_RESPAWN-via-input approach was silently dropped by the monotonic-tick
+    // input ring buffer. The host respawns itself directly in the IN_GAME dead-branch.
 
     // Per-player equipment passives + armor aura
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
@@ -347,10 +410,103 @@ void Engine::serverNetPost(f32 dt) {
                 }
             }
         }
+
+        // (M9) Defensive ring passives for REMOTE players. The host's ring passives are ticked
+        // in gameUpdate via tickArmorRingPassives — we skip slot 0 here to avoid double-ticking
+        // Second Wind / Divine Judgment / Soul Harvest decay on the host.
+        if (pi != m_localPlayerIndex && np.ringPassive != SkillId::NONE) {
+            // Soul Harvest stack window decay (also keeps M8 stacks consistent for remotes).
+            if (np.soulHarvestTimer > 0.0f) {
+                np.soulHarvestTimer -= dt;
+                if (np.soulHarvestTimer <= 0.0f) np.soulHarvestStacks = 0;
+            }
+            if (np.secondWindCooldown > 0.0f) np.secondWindCooldown -= dt;
+            // Second Wind: <20% HP, heal 30% + 2 s invuln, 60 s cooldown.
+            if (np.ringPassive == SkillId::SECOND_WIND &&
+                np.health > 0.0f &&
+                np.health < np.maxHealth * 0.2f &&
+                np.secondWindCooldown <= 0.0f) {
+                np.health = fminf(np.health + np.maxHealth * 0.3f, np.maxHealth);
+                np.invulnTimer = fmaxf(np.invulnTimer, 2.0f);
+                np.secondWindCooldown = 60.0f;
+                LOG_INFO("Player %u Second Wind triggered (remote)", pi);
+            }
+            // Divine Judgment: <25% HP, full heal + cleanse + AoE stun, 45 s cooldown (shares slot).
+            if (np.ringPassive == SkillId::DIVINE_JUDGMENT &&
+                np.health > 0.0f &&
+                np.health < np.maxHealth * 0.25f &&
+                np.secondWindCooldown <= 0.0f) {
+                np.health = np.maxHealth;
+                np.slowTimer = np.poisonTimer = np.burnTimer = np.freezeTimer = 0.0f;
+                np.poisonDps = np.burnDps = 0.0f;
+                np.invulnTimer = fmaxf(np.invulnTimer, 1.5f);
+                np.secondWindCooldown = 45.0f;
+                // AoE stun nearby enemies (5 m).
+                for (u32 a = 0; a < m_entities.activeCount; a++) {
+                    Entity& ent = m_entities.entities[m_entities.activeList[a]];
+                    if ((ent.flags & ENT_FRIENDLY) || (ent.flags & ENT_DEAD)) continue;
+                    Vec3 d = ent.position - np.position;
+                    if (d.x*d.x + d.y*d.y + d.z*d.z < 25.0f) ent.stunTimer = 1.5f;
+                }
+                LOG_INFO("Player %u Divine Judgment triggered (remote)", pi);
+            }
+        }
+
+        // Wanderer transient timers for REMOTES. Without this, marks/stacks/Shadow Dance
+        // credited onto the NetPlayer in handleDeathPreamble accumulate forever (the host's
+        // PlayerController tick only touches m_localPlayer). Mirrors the per-frame decay in
+        // engine_update_player.cpp:191-211, :508-517 — applied per server tick (60 Hz).
+        // Class gate kept loose (decay is safe regardless): a remote that was Wanderer
+        // earlier and changed class would still benefit from draining leftover timers.
+        if (pi != m_localPlayerIndex) {
+            // Mark duration
+            if (np.markTimer > 0.0f) { np.markTimer -= dt; if (np.markTimer < 0.0f) np.markTimer = 0.0f; }
+            // Per-stack 3 s non-refreshing speed timers — compact down as they expire.
+            u8& stacks = np.markSpeedStacks;
+            for (u8 i = 0; i < stacks; ) {
+                np.markSpeedTimers[i] -= dt;
+                if (np.markSpeedTimers[i] <= 0.0f) {
+                    for (u8 j = i; j + 1 < stacks; j++) np.markSpeedTimers[j] = np.markSpeedTimers[j + 1];
+                    stacks--;
+                } else { i++; }
+            }
+            // Shadow Dance: keep smokeTimer pinned to shadowDanceTimer for the buff's life.
+            if (np.shadowDanceTimer > 0.0f) {
+                np.shadowDanceTimer -= dt;
+                if (np.shadowDanceTimer > 0.0f) {
+                    if (np.smokeTimer < np.shadowDanceTimer) np.smokeTimer = np.shadowDanceTimer;
+                } else {
+                    np.shadowDanceTimer = 0.0f;
+                }
+            }
+        }
     }
 
-    // Broadcast snapshot every TICKS_PER_SNAP ticks (now includes world items — N5)
+    // Broadcast snapshot every TICKS_PER_SNAP ticks (now includes world items — N5).
+    // Refresh each active player's resolved third-person weapon-mesh ID first — the wire field
+    // is a MeshDef index (NOT a weapon-slot index). Without this clients render random props
+    // as remote weapons. (See SnapPlayer.weaponMeshId + WeaponState.weaponMeshId in weapon.h.)
     if (m_serverTick % TICKS_PER_SNAP == 0) {
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            NetPlayer& np = m_players[i];
+            if (!np.active) { np.weaponState.weaponMeshId = 0; continue; }
+            const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+            np.weaponState.weaponMeshId = (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount)
+                                          ? m_itemDefs[wpn.defId].meshId : 0;
+        }
+        // [AUDIT-P1] Diagnostic: what is the server actually publishing? If ents=0/projs=0 here,
+        // the bug is on the host (m_entities/m_projectiles not populated), not in transmit/recv.
+        // Throttled to every 5th broadcast (~4 Hz) — enough to confirm steady-state, quiet enough
+        // to read. Remove once the no-enemies/no-projectiles symptom is root-caused.
+        static u32 s_snapTxLogCounter = 0;
+        if ((s_snapTxLogCounter++ % 5) == 0) {
+            u32 activePlayers = 0;
+            for (u32 i = 0; i < MAX_PLAYERS; i++) if (m_players[i].active) activePlayers++;
+            LOG_INFO("[AUDIT-P1] snap tx tick=%u players=%u ents=%u projs=%u items=%u",
+                     m_serverTick, activePlayers,
+                     m_entities.activeCount, m_projectiles.activeCount,
+                     m_worldItems.activeCount);
+        }
         Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
     }
 }
@@ -371,48 +527,31 @@ void Engine::clientNetPre(f32 dt) {
 
     m_serverTick++;
 
-    // Capture and send input to server
-    WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
-    Client::captureAndSendInput(m_serverTick, ws.currentWeapon);
+    // Capture and send input to server. Pass m_localPlayer so captureLocalInput can pack
+    // absolute yaw/pitch/position (PROTOCOL_VERSION 2 NetInput). Pass the selected class-
+    // skill slot so right-click activates the chosen skill (1-4) rather than always slot 0
+    // — captureLocalInput defaults skillSlot to 0, and the server reads input->skillSlot
+    // to pick the skill.
+    WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
+    Client::captureAndSendInput(m_localPlayer, m_serverTick, ws.currentWeapon, m_activeClassSkill);
 
-    // Build obstacle list for client prediction collision (friendly NPCs non-blocking).
-    // Built once here so the reconcile replay uses the IDENTICAL list — replayed collision
-    // must match the prediction step 1:1 or the corrected position will drift.
-    CollisionObstacle clObs[MAX_ENTITIES];
-    u32 clObsCount = 0;
-    for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
-        const Entity& e = m_entities.entities[ei];
-        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-        if (e.flags & ENT_FRIENDLY) continue;
-        if (e.enemyType == EnemyType::PROP) continue;
-        clObs[clObsCount++] = {e.position, e.halfExtents};
-    }
+    // No client-side prediction step anymore — under the trust-client position model,
+    // m_localPlayer is the authoritative source for the local camera/transform (updated
+    // in gameUpdate via PlayerController::update). The server adopts the absolute yaw/
+    // pitch/position the client packed in NetInput and mirrors them back via snapshot.
+    // Running a second prediction here on NetPlayer would produce a post-movement
+    // position that diverges from the pre-movement position the server adopts (every
+    // frame), and the snap-back via syncNetPlayerToLocalPlayer would feed double-applied
+    // mouse delta into the camera — caused the "can't aim" + "shaking" pair after the
+    // absolute-aim change. Reconcile is now HP/status-only (+ a loose-threshold safety
+    // snap for legitimate teleports).
+    Client::reconcile(m_players[activeNetSlot()], m_localPlayer);
 
-    // Apply local prediction (movement + collision)
-    const NetInput* input = Client::getLatestInput();
-    if (input) {
-        NetPlayer& np = m_players[m_localPlayerIndex];
-        PlayerController::updateNetPlayerFromInput(np, *input, dt);
-
-        Player tempP;
-        tempP.position = np.position;
-        tempP.velocity = np.velocity;
-        tempP.onGround = np.onGround;
-        tempP.noclip = np.noclip;
-        Collision::moveAndSlide(tempP, m_level.grid, dt, clObs, clObsCount);
-        np.position = tempP.position;
-        np.velocity = tempP.velocity;
-        np.onGround = tempP.onGround;
-
-        Client::storePrediction(*input, np);
-    }
-
-    // Reconcile with server: snap-and-replay against the prediction we stored for the
-    // server-acked tick, using the same obstacle list/dt so replay matches prediction.
-    Client::reconcile(m_players[m_localPlayerIndex], m_level.grid, dt, clObs, clObsCount);
-
-    // Sync NetPlayer → m_localPlayer so gameUpdate sees predicted state
-    // (gameUpdate's top-of-function sync handles this)
+    // CLIENT death is server-authoritative: reconcile adopted the server's isDead into our net
+    // slot; mirror it into the lane-indexed m_playerDead that the dead-branch + HUD overlay read
+    // (lane is 0 on a client). Auto-clears when the server respawns us — no sticky local flag,
+    // no optimistic-revive flicker.
+    m_playerDead[m_localPlayerIndex] = m_players[activeNetSlot()].isDead;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,12 +562,28 @@ void Engine::clientNetPost(f32 dt) {
     // gameUpdate already synced m_localPlayer → NetPlayer at its end.
 
     // Interpolate remote players, entities, and projectiles from server snapshots
-    Client::interpolateRemotePlayers(m_localPlayerIndex,
-        m_renderInterp.playerPositions, m_renderInterp.playerYaws, m_renderInterp.playerPitches,
+    Client::interpolateRemotePlayers(activeNetSlot(),
+        m_renderInterp.playerPositions, m_renderInterp.playerYaws,
         m_renderInterp.playerActive, m_renderInterp.playerHealth, m_renderInterp.playerMaxHealth,
-        m_renderInterp.playerAnimFlags);
+        m_renderInterp.playerAnimFlags, m_renderInterp.playerWeaponMeshId);
     Client::interpolateEntities(m_renderInterp.entities);
+    // Boss / non-boss halfExtents are now wire-authoritative per SnapEntity (Audit P2 #4).
+    // The prior post-pass that looked up BossDef::halfExtents here was made redundant by
+    // that wire change; removed to keep the floor lookup out of every snapshot tick.
     Client::interpolateProjectiles(m_renderInterp.projectiles);
+
+    // [AUDIT-P1] Diagnostic: what does the RENDER pool actually contain after interp? If
+    // [AUDIT-P1] snap rx showed non-zero ents/projs but this shows 0, the rebuild-activeList
+    // path (the C1 fix) is broken or m_renderInterp is being clobbered post-interp. Throttled
+    // to every 30th frame (~2 Hz at 60 fps) — interp runs once per CLIENT update tick.
+    {
+        static u32 s_interpLogCounter = 0;
+        if ((s_interpLogCounter++ % 30) == 0) {
+            LOG_INFO("[AUDIT-P1] interp render: ents=%u projs=%u",
+                     m_renderInterp.entities.activeCount,
+                     m_renderInterp.projectiles.activeCount);
+        }
+    }
 
     // Mirror server-authoritative world items (loot drops — N5) into the local pool.
     // The renderer and pickup-aim code read m_worldItems directly, so this is all the

@@ -85,33 +85,77 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
         pool.entities[idx].speechTimer = 4.0f;
     }
 
-    // Shadow Dance: extend by 0.3s on each kill
-    if (!(pool.entities[idx].flags & ENT_FRIENDLY) &&
-        m_localPlayer.shadowDanceTimer > 0.0f) {
-        m_localPlayer.shadowDanceTimer += 0.3f;
-        m_localPlayer.smokeTimer = m_localPlayer.shadowDanceTimer;
+    // Resolve who actually got the kill (M8 attribution pattern, applied to the preamble
+    // path too). `killerSlot` is stamped on the entity by Combat / Projectile / meteor code.
+    //   - host or unattributed → write to m_localPlayer (swap alias)
+    //   - remote NetPlayer     → write to m_players[ks] directly
+    // The host swap-alias path is preserved when `killer != nullptr`, so split-screen and SP
+    // are unchanged. On a CLIENT we still fall through to the host swap-alias path (the
+    // entity is server-replicated; the client preamble runs only on host's m_localPlayer
+    // which has class+state — matches old behavior).
+    const u8 ks = pool.entities[idx].killerSlot;
+    Player* killer = &m_localPlayer;
+    NetPlayer* killerNp = nullptr;
+    PlayerClass killerClass = m_playerClass;
+    if (m_netRole == NetRole::SERVER && ks != 0xFF && ks != m_localPlayerIndex &&
+        ks < MAX_PLAYERS && m_players[ks].active) {
+        killer      = nullptr;
+        killerNp    = &m_players[ks];
+        killerClass = killerNp->playerClass;
+    }
+
+    // Shadow Dance: extend by 0.3s on each kill (route by killer)
+    auto getShadowDance = [&]() -> f32 { return killerNp ? killerNp->shadowDanceTimer : killer->shadowDanceTimer; };
+    if (!(pool.entities[idx].flags & ENT_FRIENDLY) && getShadowDance() > 0.0f) {
+        if (killerNp) {
+            killerNp->shadowDanceTimer += 0.3f;
+            killerNp->smokeTimer = killerNp->shadowDanceTimer;
+        } else {
+            killer->shadowDanceTimer += 0.3f;
+            killer->smokeTimer = killer->shadowDanceTimer;
+        }
     }
 
     // Wanderer: killing a marked enemy grants speed stack + resets Exploit Weakness cooldown
-    if (m_playerClass == PlayerClass::WANDERER &&
+    if (killerClass == PlayerClass::WANDERER &&
         pool.entities[idx].markPreyTimer > 0.0f) {
-        Player& wp = m_localPlayer;
-        // +5% speed stack (3s, non-refreshing)
-        if (wp.markSpeedStacks < 20) {
-            wp.markSpeedTimers[wp.markSpeedStacks] = 3.0f;
-            wp.markSpeedStacks++;
-        }
-        // Reset Exploit Weakness cooldown so it can be recast immediately
-        for (u8 cs = 0; cs < 4; cs++) {
-            if (m_classSkillStates[cs].activeSkill == SkillId::EXPLOIT_WEAKNESS) {
-                m_classSkillStates[cs].cooldownTimer = 0.0f;
-                break;
+        if (killerNp) {
+            // +5% speed stack (3s, non-refreshing) — remote slot
+            if (killerNp->markSpeedStacks < 20) {
+                killerNp->markSpeedTimers[killerNp->markSpeedStacks] = 3.0f;
+                killerNp->markSpeedStacks++;
+            }
+            // Exploit Weakness CD reset for a remote Wanderer: the host doesn't own that
+            // client's m_classSkillStates, so ship a targeted SKILL_CD_RESET event and let
+            // the client zero the matching slot. Reliable channel — one packet per
+            // marked-enemy kill is cheap.
+            u8 evBuf[sizeof(PacketHeader) + 1 + 2]; // hdr + eventType + skillId(u16 LE)
+            PacketHeader* evHdr = reinterpret_cast<PacketHeader*>(evBuf);
+            evHdr->type = NetPacketType::SV_EVENT;
+            evHdr->flags = 0;
+            evHdr->seq = 0;
+            u32 off = sizeof(PacketHeader);
+            evBuf[off++] = static_cast<u8>(NetEventType::SKILL_CD_RESET);
+            u16 sid = static_cast<u16>(SkillId::EXPLOIT_WEAKNESS);
+            std::memcpy(evBuf + off, &sid, 2); off += 2;
+            Net::sendReliable(ks, evBuf, off);
+        } else {
+            Player& wp = *killer;
+            if (wp.markSpeedStacks < 20) {
+                wp.markSpeedTimers[wp.markSpeedStacks] = 3.0f;
+                wp.markSpeedStacks++;
+            }
+            for (u8 cs = 0; cs < 4; cs++) {
+                if (m_classSkillStates[cs].activeSkill == SkillId::EXPLOIT_WEAKNESS) {
+                    m_classSkillStates[cs].cooldownTimer = 0.0f;
+                    break;
+                }
             }
         }
     }
 
     // Wanderer Exploit Weakness upgrade (floor >= 20): mark spreads to nearest alive enemy on kill
-    if (m_playerClass == PlayerClass::WANDERER &&
+    if (killerClass == PlayerClass::WANDERER &&
         m_level.currentFloor >= 20 &&
         pool.entities[idx].markPreyTimer > 0.0f) {
         constexpr f32 SPREAD_RANGE_SQ = 5.0f * 5.0f;
@@ -126,7 +170,8 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
             if (dSq < SPREAD_RANGE_SQ) {
                 se.markPreyDmgMult = 1.6f;
                 se.markPreyTimer = 5.0f;
-                m_localPlayer.markTimer = 5.0f;
+                if (killerNp) killerNp->markTimer = 5.0f;
+                else          killer->markTimer = 5.0f;
                 break; // spread to one nearest
             }
         }
@@ -135,7 +180,10 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
     // Mark Prey chain clear: if marked enemy dies, arrows rain on nearby enemies
     if (pool.entities[idx].markPreyTimer > 0.0f &&
         !(pool.entities[idx].flags & ENT_FRIENDLY)) {
-        f32 chainDmg = m_localPlayer.moveSpeed > 0.0f  // use weapon damage if available
+        // Original check was "weapon equipped" via moveSpeed > 0 — both Player and NetPlayer
+        // surface moveSpeed identically, so the routed read keeps the same heuristic.
+        f32 killerMoveSpeed = killerNp ? killerNp->moveSpeed : killer->moveSpeed;
+        f32 chainDmg = killerMoveSpeed > 0.0f
             ? 15.0f * (1.0f + (m_level.currentFloor + m_difficulty * 50 - 1) * 0.06f)
             : 15.0f;
         EntityHandle nearby[MAX_ENTITIES];
@@ -158,6 +206,13 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
                         s_meteors[m].timer    = 0.1f + arr * 0.05f;
                         s_meteors[m].active   = true;
                         s_meteors[m].healsPlayer = false;
+                        // Audit P1: recycled PendingMeteor slot retains the previous user's
+                        // .caster, which was then stamped via setAttackingPlayer in updateMeteors
+                        // and credited the wrong slot for the chain-arrow kills. Stamp the
+                        // current killer's net slot (works for host kill and remote-Wanderer
+                        // kill identically — 0xFF only when killer is unattributed, but the
+                        // outer gate requires markPreyTimer > 0 so an attributed Wanderer kill).
+                        s_meteors[m].caster   = ks;
                         s_meteors[m].color    = {0.6f, 0.4f, 0.1f};
                         break;
                     }
@@ -394,18 +449,40 @@ void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
 // Only fires for hostile kills and when a ring passive is active.
 // Void return — no early exit in original.
 void Engine::handleOnKillRingPassives(EntityPool& pool, u16 idx, Vec3 pos) {
-    if (m_ringPassive != SkillId::NONE && !(pool.entities[idx].flags & ENT_FRIENDLY)) {
+    if (pool.entities[idx].flags & ENT_FRIENDLY) return;
+
+    // (M8) Credit the actual killer, not always the host. killerSlot is stamped on the entity
+    // by Combat (direct/projectile/skill paths) and by updateMeteors (caster). 0xFF = no
+    // specific player (e.g. world hazard) — skip ring credit entirely.
+    const u8 killer = pool.entities[idx].killerSlot;
+    if (killer == 0xFF) return;
+    const bool isHost   = (killer == m_localPlayerIndex);
+    const bool isRemote = (!isHost && killer < MAX_PLAYERS && m_players[killer].active);
+    if (!isHost && !isRemote) return;
+
+    // Effective ringPassive for the credited player — host uses the swap alias (so the
+    // existing HUD/sync paths see the stack changes), remote uses the NetPlayer's mirror.
+    const SkillId effRing = isHost ? m_ringPassive : m_players[killer].ringPassive;
+    if (effRing == SkillId::NONE) return;
+
+    {
         // Soul Harvest: +5% speed, +3% damage per stack for 10s (max 5)
-        if (m_ringPassive == SkillId::SOUL_HARVEST) {
-            Player& p = m_localPlayer;
-            if (p.soulHarvestStacks < 5) p.soulHarvestStacks++;
-            p.soulHarvestTimer = 5.0f; // 5s window to get next kill or stacks reset
+        if (effRing == SkillId::SOUL_HARVEST) {
+            if (isHost) {
+                Player& p = m_localPlayer;
+                if (p.soulHarvestStacks < 5) p.soulHarvestStacks++;
+                p.soulHarvestTimer = 5.0f;
+            } else {
+                NetPlayer& np = m_players[killer];
+                if (np.soulHarvestStacks < 5) np.soulHarvestStacks++;
+                np.soulHarvestTimer = 5.0f;
+            }
             // Speed bonus applied via moveSpeed multiplier
         }
         // Phase Strike (Shadow Ring): 20% on kill, drop smoke bomb — 0.5s stealth + aggro reset
-        if (m_ringPassive == SkillId::PHASE_STRIKE && (std::rand() % 100) < 20) {
-            Player& p = m_localPlayer;
-            p.smokeTimer = 0.5f;
+        if (effRing == SkillId::PHASE_STRIKE && (std::rand() % 100) < 20) {
+            if (isHost) m_localPlayer.smokeTimer = 0.5f;
+            else        m_players[killer].smokeTimer = 0.5f;
             // Reset aggro on all enemies within 6m
             for (u32 si = 0; si < MAX_ENTITIES; si++) {
                 Entity& se = pool.entities[si];
@@ -426,7 +503,7 @@ void Engine::handleOnKillRingPassives(EntityPool& pool, u16 idx, Vec3 pos) {
             }
         }
         // Void Kill: 15% chance to spawn void zone on corpse
-        if (m_ringPassive == SkillId::VOID_KILL && (std::rand() % 100) < 15) {
+        if (effRing == SkillId::VOID_KILL && (std::rand() % 100) < 15) {
             // AoE void damage to nearby enemies
             EntityHandle aoeHits[MAX_ENTITIES];
             f32 aoeDists[MAX_ENTITIES];

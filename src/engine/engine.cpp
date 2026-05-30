@@ -86,8 +86,19 @@ void Engine::onPickup(u8 playerSlot, const u8* data, u32 size) {
     s_engine->handlePickupRequest(playerSlot, uid);
 }
 
+void Engine::onRespawn(u8 playerSlot) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return; // only the host services respawns
+    s_engine->handleRespawnRequest(playerSlot);
+}
+
 void Engine::onEvent(const u8* data, u32 size) {
     if (!s_engine) return;
+    // SV_EVENT is a server→client packet. The host wires `Net::setOnEvent` only on
+    // CLIENT (engine_startgame.cpp), so it can't physically receive its own broadcast
+    // today — but make the contract explicit so a future regression doesn't quietly
+    // double-spend an event handler on the host.
+    if (s_engine->m_netRole != NetRole::CLIENT) return;
     if (size < sizeof(PacketHeader) + 1) return;
 
     u8 eventType = data[sizeof(PacketHeader)];
@@ -111,6 +122,24 @@ void Engine::onEvent(const u8* data, u32 size) {
                 }
             }
         } break;
+        case NetEventType::SKILL_CD_RESET: {
+            // Server-authoritative skill cooldown reset (Wanderer Exploit Weakness on
+            // marked-enemy kill, etc.). Server doesn't own our m_classSkillStates, so it
+            // ships the skill id and we zero whichever slot has it equipped. We zero
+            // both the active alias (m_classSkillStates) and the persistent backing
+            // (m_classSkillStatesPerPlayer[0]) since a client is always single-player
+            // (split-screen is mutually exclusive with NetRole != NONE).
+            if (size < sizeof(PacketHeader) + 1 + 2) break;
+            u16 sidRaw;
+            std::memcpy(&sidRaw, data + sizeof(PacketHeader) + 1, 2);
+            SkillId sid = static_cast<SkillId>(sidRaw);
+            for (u32 s = 0; s < 4; s++) {
+                if (s_engine->m_classSkillStates[s].activeSkill == sid)
+                    s_engine->m_classSkillStates[s].cooldownTimer = 0.0f;
+                if (s_engine->m_classSkillStatesPerPlayer[0][s].activeSkill == sid)
+                    s_engine->m_classSkillStatesPerPlayer[0][s].cooldownTimer = 0.0f;
+            }
+        } break;
         default: break;
     }
 }
@@ -126,9 +155,25 @@ void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
     // updateFloorDoor; a NONE role never receives net packets. Guarding here keeps the
     // host's local descend feel exactly as-is even though it set the same callback path.
     if (s_engine->m_netRole != NetRole::CLIENT) return;
-    // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe):
-    // if we're already on (or past) the announced floor, do nothing.
-    if (s_engine->m_gameState == GameState::FLOOR_TRANSITION) return;
+    // Only adopt a level seed while we're actually in (or transitioning between) levels.
+    // A stray SV_LEVEL_SEED arriving during MENU / LOBBY / CONNECTING / GAME_OVER would
+    // jump straight into FLOOR_TRANSITION and 2 s later call startGame(DESCEND) against
+    // uninitialized engine state. Reliable ordering + the host only broadcasting to
+    // ACTIVE peers makes this hard to hit naturally, but a hostile/buggy server defeats
+    // both — close the contract explicitly.
+    if (s_engine->m_gameState != GameState::IN_GAME &&
+        s_engine->m_gameState != GameState::FLOOR_TRANSITION) {
+        LOG_WARN("Net: SV_LEVEL_SEED dropped — wrong game state");
+        return;
+    }
+    // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe).
+    // Compare announced (floor, difficulty) against current — only act on a STRICTLY newer
+    // descent. This both rejects a dup for the current floor and accepts a genuinely newer
+    // descent that arrives mid-transition, instead of just gating on FLOOR_TRANSITION.
+    const u32 announced = (static_cast<u32>(difficulty) << 8) | floor;
+    const u32 current   = (static_cast<u32>(s_engine->m_difficulty) << 8)
+                        | static_cast<u32>(s_engine->m_level.currentFloor);
+    if (announced <= current) return;
 
     // Adopt the host's authoritative level coordinates. seed is normally unchanged
     // across floors, but trusting the server's value self-corrects a client that
@@ -166,10 +211,18 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         NetPlayer& np = s_engine->m_players[playerSlot];
         np.active = true;
         np.slotIndex = playerSlot;
-        // Health from the chosen class (not a hardcoded 100) so warriors/tanks aren't
-        // shortchanged and squishier classes aren't over-tanked on join.
-        np.health = cls.baseHealth;
-        np.maxHealth = cls.baseHealth;
+        // Fresh input buffer for this slot — a previous occupant's stale high ticks would
+        // otherwise freeze this joiner via the monotonic-tick guard (H6).
+        Server::resetInputBuffer(playerSlot);
+        // Health from the chosen class scaled by the host's per-floor growth, so a mid-run
+        // joiner isn't dramatically under-statted on a deep floor. Use the host's
+        // maxHealth/baseHealth ratio as the growth factor (self-corrects whatever formula the
+        // run is using). Falls back to 1.0 if the host's class lookup is degenerate.
+        const NetPlayer& host = s_engine->m_players[0];
+        const ClassDef& hostCls = kClassDefs[static_cast<u32>(host.playerClass)];
+        const f32 growth = (hostCls.baseHealth > 0.0f) ? (host.maxHealth / hostCls.baseHealth) : 1.0f;
+        np.maxHealth = cls.baseHealth * (growth > 1.0f ? growth : 1.0f);
+        np.health = np.maxHealth;
         np.position = s_engine->m_players[0].spawnPosition; // spawn at host's spawn
         np.spawnPosition = np.position;
         np.weaponState.currentWeapon = 0;
@@ -177,6 +230,24 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         np.isDead = false;
         np.invulnTimer = 2.5f; // spawn protection
         np.playerClass = joinClass; // class chosen by the joining player
+        // Seed moveSpeed from the joiner's class — NetPlayer's default 6.0 f isn't right for
+        // every class, and `np.moveSpeed` is read by chain-damage attribution and (more
+        // importantly) any future code that consults it. Mirrors the class-table read used
+        // by m_localPlayer.moveSpeed at startup.
+        np.moveSpeed = cls.baseMoveSpeed;
+        // Defensive zero-init of new server-only fields. Today onPlayerLeft does
+        // m_players[i] = NetPlayer{} so defaults already apply, but reactivating a slot
+        // without going through onPlayerLeft (e.g. some future re-init path) would
+        // leave Wanderer / ring-passive timers carrying values from the previous occupant.
+        np.shadowDanceTimer  = 0.0f;
+        np.markTimer         = 0.0f;
+        np.markSpeedStacks   = 0;
+        for (u32 ms = 0; ms < 20; ms++) np.markSpeedTimers[ms] = 0.0f;
+        np.soulHarvestTimer  = 0.0f;
+        np.soulHarvestStacks = 0;
+        np.smokeTimer        = 0.0f;
+        np.secondWindCooldown = 0.0f;
+        np.lifesaverArmed    = true;  // one-shot near-death i-frame ready on (re)join
 
         // Initialize inventory, skill states, and quickbar for the new player
         Inventory::init(s_engine->m_inventories[playerSlot]);
@@ -222,13 +293,47 @@ void Engine::onPlayerLeft(u8 playerSlot) {
         // can't linger while the slot is inactive or bleed into a future rejoin.
         // onPlayerJoin re-inits inventory/skills/quickbar separately, so a clean
         // NetPlayer here is sufficient for a correct rejoin.
-        //
-        // Entity/projectile cleanup is intentionally NOT done: per-net-slot ownership
-        // isn't tracked (Entity.ownerLocalPlayer is a SPLIT-SCREEN local index, not a
-        // net slot), and lock-on only ever targets entities (NPCs), never other players —
-        // so no other player's lock can point at the leaver. Cleaning entities owned by
-        // a departed net player needs a real ownership field; deferred (see report).
         s_engine->m_players[playerSlot] = NetPlayer{};
+        Server::resetInputBuffer(playerSlot); // don't leave stale ticks for the next occupant (H6)
+
+        // Audit-#7 leaver sweep. Without this, a still-flying projectile / unclaimed
+        // exclusive drop / pending meteor / friendly minion the leaver owned would
+        // either credit a future rejoiner of the same net slot (loot ownership, on-kill
+        // procs), or keep ticking in a phantom state. Each pool keys ownership on the
+        // net slot we just freed.
+
+        // 1) Projectiles owned by the leaver — orphan to FFA so a kill credits nobody.
+        for (u32 pi = 0; pi < MAX_PROJECTILES; pi++) {
+            Projectile& p = s_engine->m_projectiles.projectiles[pi];
+            if (p.active && p.fromPlayer && p.ownerSlot == playerSlot) p.ownerSlot = 0xFF;
+        }
+
+        // 2) World items still inside the leaver's exclusive window — release to FFA so
+        // remaining players can grab the loot instead of it ageing out untouched.
+        for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
+            WorldItem& w = s_engine->m_worldItems.items[wi];
+            if (w.active && w.ownerSlot == playerSlot && w.exclusiveTimer > 0.0f) {
+                w.ownerSlot = 0xFF;
+                w.exclusiveTimer = 0.0f;
+            }
+        }
+
+        // 3) Friendly minions tethered to the leaver — despawn instead of leaving them
+        // following the host (which is what the N4 anchor fallback would now do).
+        for (u32 ei = 0; ei < s_engine->m_entities.activeCount; ei++) {
+            u32 idx = s_engine->m_entities.activeList[ei];
+            Entity& e = s_engine->m_entities.entities[idx];
+            if ((e.flags & ENT_FRIENDLY) && !(e.flags & ENT_DEAD) &&
+                e.ownerNetSlot == playerSlot) {
+                e.flags |= ENT_DEAD;
+                e.deathTimer = 0.01f;
+            }
+        }
+
+        // 4) SkillSystem statics (Holy Bombardment / Holy Nova / Overcharge / pending
+        // meteors credited to this slot).
+        SkillSystem::resetSlotState(playerSlot);
+
         LOG_INFO("Engine: player %u left", playerSlot);
     }
 }
@@ -376,7 +481,7 @@ void Engine::positionLocalPlayersAtSpawn() {
 // Sync helpers between Player and NetPlayer
 // ---------------------------------------------------------------------------
 void Engine::syncLocalPlayerToNetPlayer() {
-    NetPlayer& np = m_players[m_localPlayerIndex];
+    NetPlayer& np = m_players[activeNetSlot()]; // net slot, not lane (client slot may be >=1)
     np.position = m_localPlayer.position;
     np.velocity = m_localPlayer.velocity;
     np.yaw      = m_localPlayer.yaw;
@@ -404,7 +509,7 @@ void Engine::syncLocalPlayerToNetPlayer() {
 }
 
 void Engine::syncNetPlayerToLocalPlayer() {
-    const NetPlayer& np = m_players[m_localPlayerIndex];
+    const NetPlayer& np = m_players[activeNetSlot()]; // net slot, not lane (client slot may be >=1)
     m_localPlayer.position = np.position;
     m_localPlayer.velocity = np.velocity;
     m_localPlayer.yaw      = np.yaw;
@@ -470,6 +575,20 @@ static void seedRemoteView(const NetPlayer& np, Player& v) {
     v.blocking        = np.blocking;
     v.blockTimer      = np.blockTimer;
     v.lifesaverArmed  = np.lifesaverArmed; // TA-1: mirror so the i-frame isn't re-armed each frame
+    // M-3/M-4: ring-passive state on a remote — Soul Harvest stacks drive the gun-damage /
+    // move-speed bonus the AI/combat code reads from the Player view; smokeTimer drives the
+    // Phase Strike stealth check in enemy_ai_states.cpp. Without mirroring these, M8 credits
+    // stacks/timer onto the NetPlayer but the remote view zero-defaults them and nothing reads.
+    v.soulHarvestStacks  = np.soulHarvestStacks;
+    v.soulHarvestTimer   = np.soulHarvestTimer;
+    v.smokeTimer         = np.smokeTimer;
+    v.secondWindCooldown = np.secondWindCooldown;
+    // Wanderer death-preamble state (next-batch): mirror so a remote Wanderer's Shadow Dance
+    // and mark-prey stacks credit-and-read through the view consistently.
+    v.shadowDanceTimer   = np.shadowDanceTimer;
+    v.markTimer          = np.markTimer;
+    v.markSpeedStacks    = np.markSpeedStacks;
+    for (u32 ms = 0; ms < 20; ms++) v.markSpeedTimers[ms] = np.markSpeedTimers[ms];
 }
 
 // Copy back every view field the AI/projectile/skill paths can mutate. Position is written back
@@ -487,6 +606,17 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.freezeTimer      = v.freezeTimer;
     np.damageFlashTimer = v.damageFlashTimer; // drives the remote damage-flash render
     np.lifesaverArmed   = v.lifesaverArmed;   // TA-1: persist consume/re-arm across frames
+    // Persist ring-passive state mutations across frames (e.g., a stack decay that some skill
+    // path applied to the view) — mirrors the seed list above.
+    np.soulHarvestStacks  = v.soulHarvestStacks;
+    np.soulHarvestTimer   = v.soulHarvestTimer;
+    np.smokeTimer         = v.smokeTimer;
+    np.secondWindCooldown = v.secondWindCooldown;
+    // Wanderer death-preamble state (next-batch) — same persistence pattern.
+    np.shadowDanceTimer   = v.shadowDanceTimer;
+    np.markTimer          = v.markTimer;
+    np.markSpeedStacks    = v.markSpeedStacks;
+    for (u32 ms = 0; ms < 20; ms++) np.markSpeedTimers[ms] = v.markSpeedTimers[ms];
 }
 
 // Array form (AI + projectile pass): build a view of every ACTIVE, non-dead REMOTE NetPlayer

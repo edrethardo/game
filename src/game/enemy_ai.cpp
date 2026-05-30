@@ -8,6 +8,7 @@
 #include "game/enemy_ai.h"
 #include "game/enemy_ai_internal.h"
 #include "game/player.h"
+#include "net/net_player.h"  // for NetPlayer in N4 friendly-tether resolution
 #include "world/level_gen.h"
 #include "game/combat.h"
 #include "game/projectile.h"
@@ -177,7 +178,8 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       SquadPool* squads,
                       Player** extraPlayers, u32 extraPlayerCount,
                       const DungeonResult* dungeon,
-                      bool spawnCalm)
+                      bool spawnCalm,
+                      const NetPlayer* netPlayers, u32 netPlayerCount)
 {
     // ---------------------------------------------------------------------------
     // Herald aura pass — runs before per-entity AI so movement/cooldown mods
@@ -268,14 +270,32 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Determine if this entity is a friendly NPC ally
         bool isFriendly = (e.flags & ENT_FRIENDLY) != 0;
 
-        // Resolve the local player this friendly serves (split-screen): its owner, else the
-        // primary player. anchor/anchorEye drive follow, teleport, and Cleric heal so P2's
-        // companions serve P2 instead of always tethering to P1.
-        Player* anchor = &player;
-        if (isFriendly && e.ownerLocalPlayer > 0 && extraPlayers &&
-            (e.ownerLocalPlayer - 1u) < extraPlayerCount && extraPlayers[e.ownerLocalPlayer - 1])
-            anchor = extraPlayers[e.ownerLocalPlayer - 1];
-        Vec3 anchorEye = anchor->position + Vec3{0, anchor->eyeHeight, 0};
+        // Resolve the owner this friendly serves. Priorities:
+        //   1) Net co-op (N4): if `ownerNetSlot` is set and that NetPlayer is active, use it
+        //      so a remote-cast Tinkerer drone/Necromancer skeleton tethers to its caster.
+        //   2) Split-screen: `ownerLocalPlayer > 0` resolves to an `extraPlayers[]` entry.
+        //   3) Fallback: the primary local player.
+        // `anchorP` stays a Player* only when we still have one (cases 2/3). For net case 1
+        // we lift the parts the tether actually needs (position + eyeHeight) into local
+        // vars so the rest of the function doesn't need a synthetic Player view.
+        Player* anchorP = &player;
+        Vec3 anchorPos  = player.position;
+        f32  anchorEyeH = player.eyeHeight;
+        if (isFriendly) {
+            if (e.ownerNetSlot != 0xFF && netPlayers && e.ownerNetSlot < netPlayerCount &&
+                netPlayers[e.ownerNetSlot].active) {
+                anchorP    = nullptr;
+                anchorPos  = netPlayers[e.ownerNetSlot].position;
+                anchorEyeH = netPlayers[e.ownerNetSlot].eyeHeight;
+            } else if (e.ownerLocalPlayer > 0 && extraPlayers &&
+                       (e.ownerLocalPlayer - 1u) < extraPlayerCount &&
+                       extraPlayers[e.ownerLocalPlayer - 1]) {
+                anchorP    = extraPlayers[e.ownerLocalPlayer - 1];
+                anchorPos  = anchorP->position;
+                anchorEyeH = anchorP->eyeHeight;
+            }
+        }
+        Vec3 anchorEye = anchorPos + Vec3{0, anchorEyeH, 0};
 
         // Tinkerer drones (friendly, npcClass NONE): teleport to owner if too far
         // Skip teleport while Overclock is active — let drones roam freely
@@ -323,8 +343,19 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // Spawn-calm window: companions wait with the player instead of
                 // marching toward the exit and starting fights before the player moves.
                 e.velocity = {0, 0, 0};
-            } else {
-                updateFriendlyNPC(e, i, pool, projectiles, *anchor, grid, dt, anchorEye);
+            } else if (anchorP) {
+                // Local anchor (host/split-screen P2). updateFriendlyNPC reads Player fields
+                // for Cleric heal etc., which a NetPlayer doesn't surface — so for a
+                // remote-cast minion (anchorP == nullptr) we still tick movement basics via
+                // the anchorPos/anchorEye-driven teleport above, but skip the Player-coupled
+                // routines until they're refactored to take a Vec3 anchor.
+                // KNOWN GAP (audit follow-up): today this is reached only by drone-class
+                // minions (`npcClass == NONE`) since all `ownerNetSlot`-setting callbacks in
+                // engine_init_callbacks.cpp spawn drones. If a future class skill ever
+                // summons a `NpcClass::CLERIC/ARCHER/...` for a remote, that NPC will have
+                // no AI ticked here — refactor updateFriendlyNPC to accept (anchorPos,
+                // anchorEyeH, Player* anchorPlayerOrNull) at that time.
+                updateFriendlyNPC(e, i, pool, projectiles, *anchorP, grid, dt, anchorEye);
             }
             continue; // friendly NPC path ends here; hostile AI below is skipped
         }

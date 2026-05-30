@@ -60,6 +60,11 @@ extern bool s_firstKillDropGiven;
 // Update (60 Hz fixed timestep) — dispatches based on role
 // ---------------------------------------------------------------------------
 void Engine::update(f32 dt) {
+    // (N6) Networking is mutually exclusive with split-screen. A path that loads a 2-player
+    // save into CONTINUE and then enters Host/Join would leave m_splitPlayerCount at 2 while
+    // net mode assumes 1 (lane-indexed arrays get cross-wired). Force it here, defensively.
+    if (m_netRole != NetRole::NONE && m_splitPlayerCount != 1) m_splitPlayerCount = 1;
+
     // Death screen input — handle before the generic ESC check so ESC goes to menu
     if (m_gameState == GameState::GAME_OVER) {
         if (m_menu.confirmQuit) {
@@ -77,7 +82,7 @@ void Engine::update(f32 dt) {
             // A / Space = revive at entrance
             if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
-                m_localPlayer.position = m_players[m_localPlayerIndex].spawnPosition;
+                m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local player's net slot
                 m_localPlayer.velocity = {0, 0, 0};
                 m_localPlayer.invulnTimer = 1.5f;
                 m_inventoryOpen = false;
@@ -94,18 +99,10 @@ void Engine::update(f32 dt) {
                     np.invulnTimer = 1.5f;
                     np.isDead = false;
                 } else if (m_netRole == NetRole::CLIENT) {
-                    // Client: send respawn input to server so it clears isDead
-                    // Layout: header(4) + tick(4) + moveFlags(1) + weaponId(1) +
-                    //         mouseDX(2) + mouseDY(2) + extFlags(1) + skillSlot(1)
-                    u8 buf[sizeof(PacketHeader) + 12];
-                    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
-                    hdr->type = NetPacketType::CL_INPUT;
-                    hdr->flags = 0;
-                    hdr->seq = 0;
-                    std::memset(buf + sizeof(PacketHeader), 0, 12);
-                    std::memcpy(buf + sizeof(PacketHeader), &m_serverTick, 4);
-                    buf[sizeof(PacketHeader) + 10] = INPUT_EX_RESPAWN; // extFlags at offset 10
-                    Net::sendToServer(buf, sizeof(buf), true);
+                    // Client: request respawn (reliable CL_RESPAWN). A client never actually
+                    // reaches GAME_OVER — death is handled in the IN_GAME dead-branch — but keep
+                    // this path correct rather than leaving the old dropped-input hack.
+                    sendRespawnRequest();
                 }
                 m_gameState = GameState::IN_GAME;
             }
@@ -281,32 +278,31 @@ void Engine::update(f32 dt) {
                     // (M4) Enemies are already sent home when the last player dies (the co-op
                     // death path calls resetEnemiesToRooms), so nothing to reset on respawn —
                     // the old allDead computation here was dead code.
-                    m_localPlayer.health = m_localPlayer.maxHealth;
-                    m_localPlayer.position = m_players[sp].spawnPosition;
-                    m_localPlayer.velocity = {0, 0, 0};
-                    m_localPlayer.invulnTimer = 2.5f;
-                    m_localPlayer.hurtVignette = 0.0f; // no red lingering on co-op respawn
-                    snapCameraToPlayer();              // no camera-interp smear on co-op respawn
-                    m_playerDead[sp] = false;
-
-                    // Network sync: update NetPlayer for server, send packet for client
-                    if (m_netRole == NetRole::SERVER) {
-                        NetPlayer& np = m_players[m_localPlayerIndex];
-                        np.health = np.maxHealth;
-                        np.position = np.spawnPosition;
-                        np.velocity = {0, 0, 0};
-                        np.invulnTimer = 2.5f;
-                        np.isDead = false;
-                    } else if (m_netRole == NetRole::CLIENT) {
-                        u8 buf[sizeof(PacketHeader) + 12];
-                        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
-                        hdr->type = NetPacketType::CL_INPUT;
-                        hdr->flags = 0;
-                        hdr->seq = 0;
-                        std::memset(buf + sizeof(PacketHeader), 0, 12);
-                        std::memcpy(buf + sizeof(PacketHeader), &m_serverTick, 4);
-                        buf[sizeof(PacketHeader) + 10] = INPUT_EX_RESPAWN;
-                        Net::sendToServer(buf, sizeof(buf), true);
+                    if (m_netRole == NetRole::CLIENT) {
+                        // CLIENT: request respawn and WAIT for the server. Don't touch local
+                        // health/position/m_playerDead — reconcile re-adopts authoritative HP
+                        // every frame, so an optimistic local revive just flickers. The server
+                        // clears isDead, and clientNetPre clears m_playerDead from the snapshot.
+                        // Sent reliably as a dedicated CL_RESPAWN packet (NOT via the input ring
+                        // buffer, whose monotonic-tick guard silently dropped the old respawn).
+                        sendRespawnRequest();
+                    } else {
+                        // SERVER + split-screen: direct local revive (authoritative locally).
+                        m_localPlayer.health = m_localPlayer.maxHealth;
+                        m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local net slot (sp is the lane)
+                        m_localPlayer.velocity = {0, 0, 0};
+                        m_localPlayer.invulnTimer = 2.5f;
+                        m_localPlayer.hurtVignette = 0.0f; // no red lingering on co-op respawn
+                        snapCameraToPlayer();              // no camera-interp smear on co-op respawn
+                        m_playerDead[sp] = false;
+                        if (m_netRole == NetRole::SERVER) {
+                            NetPlayer& np = m_players[m_localPlayerIndex];
+                            np.health = np.maxHealth;
+                            np.position = np.spawnPosition;
+                            np.velocity = {0, 0, 0};
+                            np.invulnTimer = 2.5f;
+                            np.isDead = false;
+                        }
                     }
                 }
                 swapOutPlayer(sp);
@@ -404,8 +400,12 @@ void Engine::tickSharedSystems(f32 dt) {
     {
         PROFILE_SCOPE(1, "AI");
         bool spawnCalm = m_spawnCalmTimer > 0.0f; // floor-start calm window
+        // Pass m_players + MAX_PLAYERS so the friendly-tether code in EnemyAI::update can
+        // resolve `Entity::ownerNetSlot` against the right NetPlayer for remote-cast minions
+        // (N4). Harmless on SP/split since all `m_players[]` slots are inactive there.
         EnemyAI::update(m_entities, m_level.grid, primary, m_projectiles, dt, &m_level.squads,
-                        extraCount > 0 ? extras : nullptr, extraCount, &m_level.dungeon, spawnCalm);
+                        extraCount > 0 ? extras : nullptr, extraCount, &m_level.dungeon, spawnCalm,
+                        m_players, MAX_PLAYERS);
         SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, primary.position, dt);
     }
 
@@ -474,7 +474,10 @@ void Engine::tickSharedSystems(f32 dt) {
     // Meteors: pass both local players so kill-heals credit the casting player.
     Player* meteorPlayers[MAX_LOCAL_PLAYERS];
     for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) meteorPlayers[p] = &m_localPlayers[p];
-    SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt);
+    // Pass the NetPlayer array on a SERVER so a remote caster's meteor/pillar heal lands on
+    // the caster's NetPlayer (H4), not silently re-routed to local lane 0.
+    SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt,
+                                m_netRole == NetRole::SERVER ? m_players : nullptr);
     ParticleSystem::update(m_particles, dt);
 }
 
@@ -531,6 +534,11 @@ void Engine::gameUpdate(f32 dt) {
 
     // Check for player death
     if (m_localPlayer.health <= 0.0f) {
+        // CLIENT: death is server-authoritative — m_playerDead is driven from the snapshot's
+        // isDead in clientNetPre. Don't set m_playerDead or trigger GAME_OVER from local HP here
+        // (that fought reconcile and caused a death-loop/flicker); just stop this frame's
+        // gameplay and let the authoritative snapshot drive the death overlay/respawn.
+        if (m_netRole == NetRole::CLIENT) return;
         // Clear the damage vignette the instant the player dies so no red lingers
         // into the game-over / respawn screen. (The low-HP vignette term is already
         // 0 at 0 HP, and 0 again once respawn restores full HP, so this closes the
@@ -705,7 +713,7 @@ void Engine::gameUpdate(f32 dt) {
     // eyePos is computed here (after view-bob has updated eyeHeight) and threaded
     // into both skill-activation helpers that need it.
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-    SkillSystem::setCastingPlayer(m_localPlayerIndex); // credit per-player buffs to this player
+    SkillSystem::setCastingPlayer(activeNetSlot()); // local player's net slot — keeps client-side Marksman overcharge prediction targeting the right slot
     handleClassSkillActivation(dt, eyePos);
     handleEquipmentSkillActivation(dt, eyePos);
 
@@ -842,7 +850,7 @@ void Engine::updatePlayerPickup() {
             // (L8) Now active — drops are stamped with the killer's slot (Combat::s_attackingPlayer
             // → Entity::killerSlot → WorldItem::ownerSlot). Environmental/AoE kills stay 0xFF
             // (free-for-all). So in split-screen each player's kills are briefly theirs to grab.
-            if (w.ownerSlot != 0xFF && w.ownerSlot != m_localPlayerIndex && w.exclusiveTimer > 0.0f)
+            if (w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
                 continue;
             Vec3 toItem = w.position - m_localPlayer.position;
             f32 hDist = sqrtf(toItem.x * toItem.x + toItem.z * toItem.z);
@@ -940,6 +948,34 @@ void Engine::sendPickupRequest() {
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &uid, 4);
     Net::sendToServer(buf, sizeof(buf), true);
+}
+
+// CLIENT: request respawn after death. A header-only reliable CL_RESPAWN packet — NOT routed
+// through the input ring buffer (whose monotonic-tick guard silently dropped the old
+// INPUT_EX_RESPAWN input when it shared a tick with that frame's regular input). The server
+// respawns us authoritatively and the revival comes back in the next snapshot.
+void Engine::sendRespawnRequest() {
+    u8 buf[sizeof(PacketHeader)];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_RESPAWN;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    Net::sendToServer(buf, sizeof(buf), true);
+}
+
+// SERVER-only: respawn a dead client's NetPlayer in response to CL_RESPAWN. Idempotent (only
+// acts on an active, dead slot), so a duplicate/late packet is harmless. The revived state
+// (health, position, invuln, isDead=false) propagates to the client via the next snapshot.
+void Engine::handleRespawnRequest(u8 playerSlot) {
+    if (playerSlot >= MAX_PLAYERS) return;
+    NetPlayer& np = m_players[playerSlot];
+    if (!np.active || !np.isDead) return;
+    np.health     = np.maxHealth;
+    np.position   = np.spawnPosition;
+    np.velocity   = {0, 0, 0};
+    np.invulnTimer = 1.5f;
+    np.isDead     = false;
+    LOG_INFO("Player %u respawned (CL_RESPAWN)", playerSlot);
 }
 
 // SERVER-only (N5): apply a validated CL_PICKUP_ITEM request. Finds the world item by uid,
@@ -1113,6 +1149,11 @@ bool Engine::updateFloorDoor() {
                     m_gameState == GameState::FLOOR_TRANSITION) {
                     Net::broadcastLevelSeed(static_cast<u8>(m_level.currentFloor),
                                             m_difficulty, m_level.levelSeed);
+                    // (M11) Advance Server's authoritative level NOW so a client joining during
+                    // the ~2 s FLOOR_TRANSITION window receives the NEW floor/seed in
+                    // SV_JOIN_ACCEPT — otherwise it generates the previous floor and desyncs.
+                    Server::updateLevel(m_level.levelSeed,
+                                        static_cast<u8>(m_level.currentFloor), m_difficulty);
                 }
                 return true;
             }

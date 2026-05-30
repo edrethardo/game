@@ -317,6 +317,7 @@ void Engine::updateMenu(f32 dt) {
                 m_splitPlayerCount = 1;
                 if (Net::connectToServer(m_menu.connectAddress)) {
                     m_gameState = GameState::CONNECTING;
+                    m_connectingElapsed = 0.0f; // (M10) start the bail-out timer fresh
                     LOG_INFO("Connecting to %s as class %u...",
                              m_menu.connectAddress, static_cast<u32>(m_playerClass));
                 } else {
@@ -601,7 +602,9 @@ void Engine::updateMenu(f32 dt) {
             break;
         case 2: // Join — pick a class first, then connect (class travels in CL_JOIN_REQUEST)
             m_netRole = NetRole::CLIENT;
-            m_localPlayerIndex = 0; // provisional; server assigns the real slot in SV_JOIN_ACCEPT
+            // Lane stays 0 on a client (networking forces split count 1). The server-assigned
+            // net slot lands in m_clientNetSlot at SV_JOIN_ACCEPT; net access uses activeNetSlot().
+            m_localPlayerIndex = 0;
             m_menu.subState = 2;    // class selection (the confirm handler branches on CLIENT)
             m_menu.subSelection = 0;
             break;
@@ -625,15 +628,33 @@ void Engine::updateMenu(f32 dt) {
 // Lobby / Connecting
 // ---------------------------------------------------------------------------
 void Engine::updateLobby(f32 dt) {
-    (void)dt;
     if (m_gameState == GameState::CONNECTING) {
+        // (M10) Bail out instead of hanging on the pulsing-dot screen if the join fails
+        // (SV_JOIN_REJECT, server full → pre-accept disconnect, or any handshake drop) or if
+        // the server never accepts us within a reasonable window (10 s).
+        m_connectingElapsed += dt;
+        const f32 kConnectTimeout = 10.0f;
+        if (Net::joinFailed() || m_connectingElapsed > kConnectTimeout) {
+            LOG_WARN("Connect failed (%s); returning to menu",
+                     Net::joinFailed() ? "rejected/disconnected" : "timeout");
+            Net::disconnect();
+            m_netRole = NetRole::NONE;
+            m_gameState = GameState::MENU;
+            m_menu.subState = 0;
+            m_menu.subSelection = 0;
+            return;
+        }
         // Wait for join accept — check if we got assigned a player index
         u8 idx = Net::getLocalPlayerIndex();
         if (idx != 0 || Net::getConnectedCount() > 0) {
             // We're connected and got a slot. The host is authoritative for our
             // inventory (it runs onPlayerJoin + syncs via snapshots), so locally we
             // start without wiping or granting a loadout — CONTINUE semantics.
-            m_localPlayerIndex = idx;
+            // Store the server-assigned slot as the NET slot; leave m_localPlayerIndex at 0
+            // (the split-screen lane, set above) — net-array access goes through
+            // activeNetSlot(). Overwriting m_localPlayerIndex here would be clobbered by
+            // swapInPlayer(0) every frame anyway and would mis-index the per-lane arrays.
+            m_clientNetSlot = idx;
             // Adopt the server's per-run dungeon seed, floor, and difficulty (from
             // SV_JOIN_ACCEPT) so startGame regenerates the IDENTICAL dungeon as the host
             // instead of rolling its own from local rand().

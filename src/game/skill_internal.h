@@ -13,6 +13,7 @@
 #include "game/player.h"
 #include "game/combat.h"
 #include "audio/audio.h"
+#include "net/net.h"        // MAX_PLAYERS — overcharge state is per-net-slot now (H5)
 #include "world/combat_query.h"
 #include "world/raycast.h"
 #include "renderer/debug_draw.h"
@@ -61,26 +62,26 @@ extern SkillSystem::ReloadCallback      s_reloadCallback;
 
 // Overcharged Magazine state — set by fireOverchargedMagazine (marksman),
 // read by SkillSystem::isOvercharged / consumeOverchargeShot / tickOvercharge.
-extern f32 s_overchargeTimer[2];  // per local player (MAX_LOCAL_PLAYERS)
-extern u8  s_overchargeShots[2];
-extern u8  s_castingPlayer;        // local-player index currently casting
-extern u8  s_bombardmentCaster;    // local-player index that cast Holy Bombardment
+// Per net-slot so a remote Marksman's overcharge buffs their OWN gun, not the host's (H5).
+extern f32 s_overchargeTimer[MAX_PLAYERS];
+extern u8  s_overchargeShots[MAX_PLAYERS];
+extern u8  s_castingPlayer;        // net-slot index currently casting (0..MAX_PLAYERS-1)
 
 // Holy Bombardment persistent state — set by fireHolyBombardment (paladin),
-// ticked by SkillSystem::updateMeteors.
-extern f32  s_bombardmentTimer;
-extern Vec3 s_bombardmentCenter;
-extern f32  s_bombardmentAccum;
-extern f32  s_bombardmentDamage;
-extern f32  s_bombardmentRadius;
+// ticked by SkillSystem::updateMeteors. Per-caster so two paladins in net co-op
+// don't overwrite each other (N3); the array index is the caster's net slot.
+extern f32  s_bombardmentTimer [MAX_PLAYERS];
+extern Vec3 s_bombardmentCenter[MAX_PLAYERS];
+extern f32  s_bombardmentAccum [MAX_PLAYERS];
+extern f32  s_bombardmentDamage[MAX_PLAYERS];
+extern f32  s_bombardmentRadius[MAX_PLAYERS];
 
 // Holy Nova delayed second-hit state — set by fireHolyNova (paladin),
-// ticked by SkillSystem::update.
-extern f32  s_holyNovaTimer;
-extern Vec3 s_holyNovaCenter;
-extern f32  s_holyNovaDamage2;
-extern f32  s_holyNovaRadius;
-extern f32  s_holyNovaHealPct;
+// ticked by SkillSystem::update. Also per-caster (N3).
+extern f32  s_holyNovaTimer  [MAX_PLAYERS];
+extern Vec3 s_holyNovaCenter [MAX_PLAYERS];
+extern f32  s_holyNovaDamage2[MAX_PLAYERS];
+extern f32  s_holyNovaRadius [MAX_PLAYERS];
 
 // ---------------------------------------------------------------------------
 // Helper used by multiple families

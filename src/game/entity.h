@@ -166,6 +166,11 @@ struct Entity {
     bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
     u8  bossPhase = 0;     // BossPhase:: false-death state machine (NONE=normal death)
     u8  ownerLocalPlayer = 0;  // split-screen: local player a friendly NPC/drone serves (0=P1)
+    // (N4) Net-slot owner for friendly NPCs/drones in NET mode — when a remote casts a summon
+    // skill the host needs to know which NetPlayer the minion tethers to (the lane-keyed
+    // ownerLocalPlayer can't represent slots >= MAX_LOCAL_PLAYERS). 0xFF = unset / use the
+    // lane field; 0..MAX_PLAYERS-1 = follow that NetPlayer's position.
+    u8  ownerNetSlot     = 0xFF;
 
     // NPC equipment and class (friendly NPCs only)
     NpcClass npcClass   = NpcClass::NONE;

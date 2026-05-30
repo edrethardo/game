@@ -626,8 +626,9 @@ void Engine::render(f32 alpha) {
 
     // Soft target lock-on is currently inert: lockActive is never set true (see
     // updateTargetLock in engine_combat.cpp), so the lock indicator UI was dead code
-    // and has been removed (R7-6). The lockIndex/lockActive snapshot fields are still
-    // serialized as harmless zero/false data — see SnapPlayer in net/snapshot.h.
+    // and has been removed (R7-6). The lockIndex/lockActive fields were also retired
+    // from the wire in CV-4 (SnapPlayer no longer carries them) — only the in-memory
+    // Player/NetPlayer fields remain so consumers compile until lock-on is brought back.
 
     DebugDraw::flush(m_camera.viewProjection);
 

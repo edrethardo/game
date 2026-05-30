@@ -7,6 +7,8 @@
 #include "game/entity.h"
 #include "world/level_grid.h"
 
+struct NetPlayer; // forward-declared for updateMeteors net-slot heal routing (H4)
+
 // Pending meteor (delayed AoE) — used by Meteor Strike + Paladin holy pillars
 static constexpr u32 MAX_PENDING_METEORS = 8;
 struct PendingMeteor {
@@ -26,6 +28,16 @@ struct ScreenShake;
 
 namespace SkillSystem {
     void init();
+    // Clear cross-floor gameplay state (pending meteors, overcharge buffs, bombardment/holy-nova
+    // timers). Call from startGame so a skill warming up on the previous floor can't trigger
+    // on the next one. Distinct from init() which also wires callbacks at engine startup.
+    void resetGameplayState();
+
+    // Clear per-slot timers + deactivate any in-flight effects credited to that slot.
+    // Called from Engine::onPlayerLeft so a remote that disconnects mid-cast doesn't
+    // leave its Holy Bombardment / Holy Nova / Overcharged Magazine ticking on the host
+    // (continued meteor rain crediting the gone slot, or its rejoin successor).
+    void resetSlotState(u8 slot);
 
     // Set skill power scaling (0.0 = base, 1.0 = max). Called by engine before
     // tryActivate — 0.0 for class skills, scaled by item level for legendary skills.
@@ -33,6 +45,9 @@ namespace SkillSystem {
     // Local-player index currently casting — credits per-player buffs (overcharge,
     // meteor kill-heal) to the right player in split-screen. Default 0 in singleplayer.
     void setCastingPlayer(u8 playerIndex);
+    // Returns the most-recently-stamped casting player (net slot). Used by minion spawn callbacks
+    // so a remote-cast drone tethers to the REMOTE caster, not the host (N4).
+    u8   getCastingPlayer();
 
     // Set class skill damage multiplier (scales with effective floor).
     // Called by engine before class skill activation. Item skills use 1.0.
@@ -57,8 +72,13 @@ namespace SkillSystem {
     // Update orb projectiles (spawn shards) -- called from projectile update or engine update
     void updateOrbProjectiles(ProjectilePool& pool, const SkillDef* skillDefs, u32 skillDefCount, f32 dt);
 
-    // Update pending meteors (+ holy pillar healing)
-    void updateMeteors(EntityPool& entities, Player** players, u8 playerCount, f32 dt);
+    // Update pending meteors (+ holy pillar healing). `netPlayers` (optional, MAX_PLAYERS-sized)
+    // is the server's authoritative NetPlayer array; if non-null, a `m.caster >= playerCount`
+    // heal routes to `netPlayers[caster]` so a remote Paladin's pillar heals the REMOTE caster
+    // instead of the host. Pass nullptr in non-net modes; behavior degrades to the local-player
+    // array as before.
+    void updateMeteors(EntityPool& entities, Player** players, u8 playerCount, f32 dt,
+                       NetPlayer* netPlayers = nullptr);
 
     // Get the SkillDef for a given SkillId (returns nullptr if not found)
     const SkillDef* findSkillDef(const SkillDef* defs, u32 count, SkillId id);

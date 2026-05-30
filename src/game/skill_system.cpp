@@ -10,6 +10,7 @@
 // declarations in skill_internal.h.
 
 #include "game/skill_internal.h"
+#include "net/net_player.h" // NetPlayer for updateMeteors remote-caster heal routing (H4)
 
 // ---------------------------------------------------------------------------
 // Cross-boundary state definitions (one definition; extern'd elsewhere)
@@ -45,32 +46,34 @@ SkillSystem::ReloadCallback     s_reloadCallback     = nullptr;
 u8 s_boltMeshId     = 0;    // set by engine during init for shock bolt projectiles
 u8 s_shockBoltMatId = 0;
 
-// Overcharged Magazine state (Marksman buff) — per local player (split-screen)
-f32 s_overchargeTimer[2] = {0.0f, 0.0f};
-u8  s_overchargeShots[2] = {0, 0};
-u8  s_castingPlayer     = 0;  // local-player index currently casting
-u8  s_bombardmentCaster = 0;  // local-player index that cast Holy Bombardment
+// Overcharged Magazine state (Marksman buff) — per net-slot so a remote Marksman's
+// overcharge buffs their own gun, not the host's (H5).
+f32 s_overchargeTimer[MAX_PLAYERS] = {};
+u8  s_overchargeShots[MAX_PLAYERS] = {};
+u8  s_castingPlayer     = 0;  // net-slot index currently casting (0..MAX_PLAYERS-1)
 
-// Holy Bombardment persistent state — set by fireHolyBombardment, ticked by updateMeteors
-f32  s_bombardmentTimer  = 0.0f;
-Vec3 s_bombardmentCenter = {0,0,0};
-f32  s_bombardmentAccum  = 0.0f;
-f32  s_bombardmentDamage = 0.0f;
-f32  s_bombardmentRadius = 0.0f;
+// Holy Bombardment persistent state — per-caster so two paladins in net co-op don't
+// overwrite each other's casts (N3). The array index IS the caster's net slot, so a
+// separate `s_bombardmentCaster` is redundant.
+f32  s_bombardmentTimer [MAX_PLAYERS] = {};
+Vec3 s_bombardmentCenter[MAX_PLAYERS] = {};
+f32  s_bombardmentAccum [MAX_PLAYERS] = {};
+f32  s_bombardmentDamage[MAX_PLAYERS] = {};
+f32  s_bombardmentRadius[MAX_PLAYERS] = {};
 
-// Holy Nova delayed second hit state — set by fireHolyNova, ticked by update()
-f32  s_holyNovaTimer   = 0.0f;
-Vec3 s_holyNovaCenter  = {0,0,0};
-f32  s_holyNovaDamage2 = 0.0f;
-f32  s_holyNovaRadius  = 0.0f;
-f32  s_holyNovaHealPct = 0.0f;
+// Holy Nova delayed second hit state — also per-caster (N3).
+f32  s_holyNovaTimer  [MAX_PLAYERS] = {};
+Vec3 s_holyNovaCenter [MAX_PLAYERS] = {};
+f32  s_holyNovaDamage2[MAX_PLAYERS] = {};
+f32  s_holyNovaRadius [MAX_PLAYERS] = {};
 
 // ---------------------------------------------------------------------------
 // Setters (called by engine during init and before each activation)
 // ---------------------------------------------------------------------------
 
 void SkillSystem::setSkillPower(f32 power)       { s_skillPower    = power; }
-void SkillSystem::setCastingPlayer(u8 playerIndex) { s_castingPlayer = (playerIndex < 2) ? playerIndex : 0; }
+void SkillSystem::setCastingPlayer(u8 playerIndex) { s_castingPlayer = (playerIndex < MAX_PLAYERS) ? playerIndex : 0; }
+u8   SkillSystem::getCastingPlayer() { return s_castingPlayer; }
 void SkillSystem::setClassDamageMult(f32 mult)   { s_classDmgMult  = mult;  }
 void SkillSystem::setWeaponDamage(f32 dmg)       { s_weaponDamage  = dmg;   }
 void SkillSystem::setArrowMeshIds(u8 arrow, u8 /*bolt*/) { s_arrowMeshId = arrow; }
@@ -91,12 +94,16 @@ void SkillSystem::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
 // Overcharge state (Marksman buff)
 // ---------------------------------------------------------------------------
 
-bool SkillSystem::isOvercharged(u8 p) { return s_overchargeTimer[p] > 0.0f && s_overchargeShots[p] > 0; }
+bool SkillSystem::isOvercharged(u8 p) {
+    return p < MAX_PLAYERS && s_overchargeTimer[p] > 0.0f && s_overchargeShots[p] > 0;
+}
 void SkillSystem::consumeOverchargeShot(u8 p) {
+    if (p >= MAX_PLAYERS) return;
     if (s_overchargeShots[p] > 0) s_overchargeShots[p]--;
     if (s_overchargeShots[p] == 0) s_overchargeTimer[p] = 0.0f;
 }
 void SkillSystem::tickOvercharge(f32 dt, u8 p) {
+    if (p >= MAX_PLAYERS) return;
     if (s_overchargeTimer[p] > 0.0f) {
         s_overchargeTimer[p] -= dt;
         if (s_overchargeTimer[p] <= 0.0f) { s_overchargeTimer[p] = 0.0f; s_overchargeShots[p] = 0; }
@@ -110,6 +117,50 @@ void SkillSystem::tickOvercharge(f32 dt, u8 p) {
 void SkillSystem::init() {
     for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
         s_meteors[i] = {};
+    }
+}
+
+void SkillSystem::resetGameplayState() {
+    // Clear pending AoEs so a meteor warming up on the old floor doesn't fire on the new one
+    // (or carry a stale caster). Same for the Holy Bombardment / Holy Nova / overcharge timers.
+    for (u32 i = 0; i < MAX_PENDING_METEORS; i++) s_meteors[i] = {};
+    for (u32 p = 0; p < MAX_PLAYERS; p++) {
+        s_overchargeTimer[p] = 0.0f;
+        s_overchargeShots[p] = 0;
+    }
+    for (u32 p = 0; p < MAX_PLAYERS; p++) {
+        s_bombardmentTimer [p] = 0.0f;
+        s_bombardmentAccum [p] = 0.0f;
+        s_bombardmentDamage[p] = 0.0f;
+        s_bombardmentRadius[p] = 0.0f;
+        s_bombardmentCenter[p] = {0,0,0};
+        s_holyNovaTimer    [p] = 0.0f;
+        s_holyNovaDamage2  [p] = 0.0f;
+        s_holyNovaRadius   [p] = 0.0f;
+        s_holyNovaCenter   [p] = {0,0,0};
+    }
+}
+
+void SkillSystem::resetSlotState(u8 slot) {
+    if (slot >= MAX_PLAYERS) return;
+    // Audit-#8: zero this slot's per-skill statics so a disconnecting Paladin's
+    // Bombardment/Nova doesn't keep ticking on the host (and crediting the rejoiner).
+    s_overchargeTimer [slot] = 0.0f;
+    s_overchargeShots [slot] = 0;
+    s_bombardmentTimer [slot] = 0.0f;
+    s_bombardmentAccum [slot] = 0.0f;
+    s_bombardmentDamage[slot] = 0.0f;
+    s_bombardmentRadius[slot] = 0.0f;
+    s_bombardmentCenter[slot] = {0,0,0};
+    s_holyNovaTimer    [slot] = 0.0f;
+    s_holyNovaDamage2  [slot] = 0.0f;
+    s_holyNovaRadius   [slot] = 0.0f;
+    s_holyNovaCenter   [slot] = {0,0,0};
+    // Deactivate any in-flight pending meteors the leaver had cast — they'd otherwise
+    // continue exploding crediting `caster == slot` (which by then is FFA or, worse, a
+    // future rejoiner of that net slot).
+    for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
+        if (s_meteors[m].active && s_meteors[m].caster == slot) s_meteors[m] = {};
     }
 }
 
@@ -131,24 +182,25 @@ void SkillSystem::update(SkillState& ss, f32 dt) {
         if (ss.cooldownTimer < 0.0f) ss.cooldownTimer = 0.0f;
     }
 
-    // Holy Nova delayed second hit (particle wave) — ticked here since no entity access needed
-    if (s_holyNovaTimer > 0.0f) {
-        s_holyNovaTimer -= dt;
-        if (s_holyNovaTimer <= 0.0f) {
-            s_holyNovaTimer = 0.0f;
-            // Spawn a PendingMeteor for the delayed AoE (resolved in updateMeteors)
-            for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
-                if (!s_meteors[m].active) {
-                    s_meteors[m].position    = s_holyNovaCenter;
-                    s_meteors[m].damage      = s_holyNovaDamage2;
-                    s_meteors[m].radius      = s_holyNovaRadius;
-                    s_meteors[m].timer       = 0.001f; // triggers next frame
-                    s_meteors[m].active      = true;
-                    s_meteors[m].healsPlayer = true;
-                    s_meteors[m].caster      = s_castingPlayer;
-                    s_meteors[m].color       = {1.0f, 0.85f, 0.3f};
-                    break;
-                }
+    // Holy Nova delayed second hit (particle wave) — ticked here since no entity access needed.
+    // Per-caster loop so two paladins' Novas tick independently (N3).
+    for (u32 p = 0; p < MAX_PLAYERS; p++) {
+        if (s_holyNovaTimer[p] <= 0.0f) continue;
+        s_holyNovaTimer[p] -= dt;
+        if (s_holyNovaTimer[p] > 0.0f) continue;
+        s_holyNovaTimer[p] = 0.0f;
+        // Spawn a PendingMeteor for the delayed AoE (resolved in updateMeteors)
+        for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
+            if (!s_meteors[m].active) {
+                s_meteors[m].position    = s_holyNovaCenter[p];
+                s_meteors[m].damage      = s_holyNovaDamage2[p];
+                s_meteors[m].radius      = s_holyNovaRadius[p];
+                s_meteors[m].timer       = 0.001f; // triggers next frame
+                s_meteors[m].active      = true;
+                s_meteors[m].healsPlayer = true;
+                s_meteors[m].caster      = static_cast<u8>(p);
+                s_meteors[m].color       = {1.0f, 0.85f, 0.3f};
+                break;
             }
         }
     }
@@ -604,24 +656,27 @@ void SkillSystem::updateOrbProjectiles(ProjectilePool& pool,
     }
 }
 
-void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playerCount, f32 dt) {
-    // Holy Bombardment tick — needs entity access for smart targeting
-    if (s_bombardmentTimer > 0.0f) {
-        s_bombardmentTimer -= dt;
-        s_bombardmentAccum += dt;
-        while (s_bombardmentAccum >= 0.4f) {
-            s_bombardmentAccum -= 0.4f;
+void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playerCount, f32 dt,
+                                 NetPlayer* netPlayers) {
+    // Holy Bombardment tick — needs entity access for smart targeting.
+    // Per-caster loop so two paladins' zones tick independently (N3).
+    for (u32 p = 0; p < MAX_PLAYERS; p++) {
+        if (s_bombardmentTimer[p] <= 0.0f) continue;
+        s_bombardmentTimer[p] -= dt;
+        s_bombardmentAccum[p] += dt;
+        while (s_bombardmentAccum[p] >= 0.4f) {
+            s_bombardmentAccum[p] -= 0.4f;
 
             // Target nearest hostile enemy in zone
-            Vec3 pillarPos = s_bombardmentCenter;
-            f32 bestDist2 = s_bombardmentRadius * s_bombardmentRadius;
+            Vec3 pillarPos = s_bombardmentCenter[p];
+            f32 bestDist2 = s_bombardmentRadius[p] * s_bombardmentRadius[p];
             bool foundTarget = false;
             for (u32 a = 0; a < entities.activeCount; a++) {
                 u32 i = entities.activeList[a];
                 Entity& e = entities.entities[i];
                 if (e.flags & ENT_DEAD) continue;
                 if (e.flags & ENT_FRIENDLY) continue;
-                Vec3 diff = e.position - s_bombardmentCenter;
+                Vec3 diff = e.position - s_bombardmentCenter[p];
                 f32 d2 = diff.x*diff.x + diff.z*diff.z;
                 if (d2 < bestDist2) {
                     // Pick a random enemy (cycle via rand to avoid always targeting the same one)
@@ -634,7 +689,7 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playe
             if (!foundTarget) {
                 // No enemies — random position in zone for area denial visual
                 f32 angle = (std::rand() / static_cast<f32>(RAND_MAX)) * 6.2832f;
-                f32 dist  = (std::rand() / static_cast<f32>(RAND_MAX)) * s_bombardmentRadius * 0.8f;
+                f32 dist  = (std::rand() / static_cast<f32>(RAND_MAX)) * s_bombardmentRadius[p] * 0.8f;
                 pillarPos.x += cosf(angle) * dist;
                 pillarPos.z += sinf(angle) * dist;
             }
@@ -642,19 +697,19 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playe
             for (u32 m = 0; m < MAX_PENDING_METEORS; m++) {
                 if (!s_meteors[m].active) {
                     s_meteors[m].position    = pillarPos;
-                    s_meteors[m].damage      = s_bombardmentDamage;
+                    s_meteors[m].damage      = s_bombardmentDamage[p];
                     s_meteors[m].radius      = 1.5f;
                     s_meteors[m].timer       = 0.3f;
                     s_meteors[m].active      = true;
                     s_meteors[m].healsPlayer = true;
-                    s_meteors[m].caster      = s_bombardmentCaster;
+                    s_meteors[m].caster      = static_cast<u8>(p);
                     s_meteors[m].color       = {1.0f, 0.9f, 0.3f};
                     break;
                 }
             }
             if (s_screenShake) s_screenShake->trigger(0.03f, 0.15f);
         }
-        if (s_bombardmentTimer <= 0.0f) s_bombardmentTimer = 0.0f;
+        if (s_bombardmentTimer[p] <= 0.0f) s_bombardmentTimer[p] = 0.0f;
     }
 
     // Process pending meteors (fire + holy pillar impacts)
@@ -664,6 +719,10 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playe
 
         m.timer -= dt;
         if (m.timer <= 0.0f) {
+            // (M8) Stamp the casting net slot so meteor/pillar KILLS credit the caster's
+            // ring-on-kill passives and loot drops, instead of inheriting `tickSharedSystems`'
+            // 0xFF "no specific attacker" reset that left these as FFA.
+            Combat::setAttackingPlayer(m.caster);
             // Explode — damage enemies, heal allies within blast radius
             EntityHandle hits[MAX_ENTITIES];
             f32          dists[MAX_ENTITIES];
@@ -683,18 +742,30 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playe
                     f32 hpBefore = ent->health;
                     Combat::applyDamage(entities, hits[j], m.damage);
                     if (m.healsPlayer && hpBefore > 0.0f && ent->health <= 0.0f) {
-                        // Kill heal: 15% max HP — credit the casting local player
-                        Player& cp = *players[(m.caster < playerCount) ? m.caster : 0];
-                        cp.health = fminf(cp.health + cp.maxHealth * 0.15f, cp.maxHealth);
+                        // Kill heal: 15% max HP — credit the casting player. Net-mode: a remote
+                        // caster (caster >= playerCount) heals their NetPlayer at netPlayers[caster]
+                        // instead of being silently re-routed to local lane 0 (H4).
+                        if (m.caster < playerCount) {
+                            Player& cp = *players[m.caster];
+                            cp.health = fminf(cp.health + cp.maxHealth * 0.15f, cp.maxHealth);
+                        } else if (netPlayers && m.caster < MAX_PLAYERS) {
+                            NetPlayer& np = netPlayers[m.caster];
+                            np.health = fminf(np.health + np.maxHealth * 0.15f, np.maxHealth);
+                        }
                     }
                     enemiesHit++;
                 }
             }
 
-            // Holy pillar heals the casting local player 3% max HP on hit
+            // Holy pillar heals the casting player 3% max HP on hit — same H4 routing.
             if (m.healsPlayer && enemiesHit > 0) {
-                Player& cp = *players[(m.caster < playerCount) ? m.caster : 0];
-                cp.health = fminf(cp.health + cp.maxHealth * 0.03f, cp.maxHealth);
+                if (m.caster < playerCount) {
+                    Player& cp = *players[m.caster];
+                    cp.health = fminf(cp.health + cp.maxHealth * 0.03f, cp.maxHealth);
+                } else if (netPlayers && m.caster < MAX_PLAYERS) {
+                    NetPlayer& np = netPlayers[m.caster];
+                    np.health = fminf(np.health + np.maxHealth * 0.03f, np.maxHealth);
+                }
             }
 
             m.active = false;

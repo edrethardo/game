@@ -411,8 +411,12 @@ void Engine::tickSharedFX(f32 dt) {
 // auras they personally stand in).
 // ---------------------------------------------------------------------------
 void Engine::tickPlayerFX(f32 dt) {
-    // Tick overcharge buff (Marksman) for the active local player
-    SkillSystem::tickOvercharge(dt, m_localPlayerIndex);
+    // Tick overcharge (Marksman) for ALL net slots, ONCE per frame: the array is MAX_PLAYERS
+    // since H5, so a remote's overcharge has its own slot. Gate on lane 0 to avoid
+    // double-decay in split-screen (the loop body iterates every slot independently of lane).
+    if (m_localPlayerIndex == 0) {
+        for (u32 s = 0; s < MAX_PLAYERS; s++) SkillSystem::tickOvercharge(dt, s);
+    }
 
     // Herald aura — staggered across 30 frames to avoid full entity scan every frame
     static u32 s_heraldFrame = 0;

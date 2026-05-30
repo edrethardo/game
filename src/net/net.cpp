@@ -14,6 +14,7 @@
 static NetRole          s_role = NetRole::NONE;
 static ENetHost*        s_enetHost = nullptr;         // server or client host
 static ENetPeer*        s_serverPeer = nullptr;   // client's peer to server
+static bool             s_joinFailed = false;     // client: set on SV_JOIN_REJECT or pre-accept disconnect
 static NetPlayerSlot    s_slots[MAX_PLAYERS];
 static u8               s_localPlayerIndex = 0;
 static u8               s_localPlayerClass = 0; // chosen PlayerClass to send in CL_JOIN_REQUEST
@@ -28,6 +29,7 @@ static u8               s_serverDifficulty = 0;
 static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
 static Net::OnInputFn      s_onInput      = nullptr;
 static Net::OnPickupFn     s_onPickup     = nullptr;
+static Net::OnRespawnFn    s_onRespawn    = nullptr;
 static Net::OnEventFn      s_onEvent      = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
@@ -120,6 +122,13 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         if (s_onPickup) s_onPickup(slot, data, size);
     } break;
 
+    case NetPacketType::CL_RESPAWN: {
+        // Dead client requests respawn. The engine handler respawns that slot's NetPlayer
+        // (idempotent) and the revival propagates back via the next snapshot. Sent reliably
+        // so it can't be lost like the old INPUT_EX_RESPAWN-through-the-input-buffer hack.
+        if (s_onRespawn) s_onRespawn(slot);
+    } break;
+
     default:
         break;
     }
@@ -135,7 +144,20 @@ static void clientHandlePacket(const u8* data, u32 size) {
     switch (hdr->type) {
     case NetPacketType::SV_JOIN_ACCEPT: {
         if (size < 12) break;
-        s_localPlayerIndex = data[4];
+        // Validate the assigned slot before storing — a malicious or buggy server
+        // sending a bogus byte here would otherwise be used unchecked across the
+        // client (m_clientNetSlot → activeNetSlot() → m_players[]/m_inventories[]/
+        // m_renderInterp.* every frame, OOB-write all over). Slot 0 is the host's,
+        // so a remote slot must be in [1, MAX_PLAYERS). Reject otherwise — the lobby
+        // bails on s_joinFailed (M10).
+        u8 assignedSlot = data[4];
+        if (assignedSlot == 0 || assignedSlot >= MAX_PLAYERS) {
+            LOG_WARN("Net: server-assigned slot %u out of range — rejecting join",
+                     assignedSlot);
+            s_joinFailed = true;
+            break;
+        }
+        s_localPlayerIndex = assignedSlot;
         s_serverFloor      = data[6];
         s_serverDifficulty = data[7];
         std::memcpy(&s_serverLevelSeed, data + 8, 4); // per-run dungeon seed
@@ -145,10 +167,23 @@ static void clientHandlePacket(const u8* data, u32 size) {
 
     case NetPacketType::SV_JOIN_REJECT: {
         LOG_WARN("Net: join rejected by server");
+        s_joinFailed = true; // lobby polls this to bail out of CONNECTING (M10)
     } break;
 
     case NetPacketType::SV_SNAPSHOT: {
-        if (s_onSnapshot) s_onSnapshot(data, size);
+        // [AUDIT-P2] Disambiguate sub-cause D: SV_SNAPSHOT arrived at clientHandlePacket but
+        // the callback pointer is null — the registration was clobbered or never set in the
+        // first place. Log warns ONCE then sets a sticky bit to avoid log spam (one snapshot
+        // every 50 ms = 1200/min worth of warn lines would drown everything else).
+        if (!s_onSnapshot) {
+            static bool s_warnedNullSnapCb = false;
+            if (!s_warnedNullSnapCb) {
+                LOG_WARN("[AUDIT-P2] SV_SNAPSHOT received but s_onSnapshot==null — callback not registered");
+                s_warnedNullSnapCb = true;
+            }
+        } else {
+            s_onSnapshot(data, size);
+        }
     } break;
 
     case NetPacketType::SV_EVENT: {
@@ -266,6 +301,7 @@ bool Net::connectToServer(const char* address, u16 port) {
     }
 
     s_role = NetRole::CLIENT;
+    s_joinFailed = false; // fresh attempt
     resetSlots();
     LOG_INFO("Net: connecting to %s:%u...", address, port);
     return true;
@@ -292,6 +328,11 @@ void Net::disconnect() {
     resetSlots();
     s_role = NetRole::NONE;
     s_localPlayerIndex = 0;
+    // Hygiene (CV-3): clear server-level statics so a stale value can't be read by a future
+    // lobby probe between connect attempts. They're refreshed by the next SV_JOIN_ACCEPT.
+    s_serverLevelSeed  = 0;
+    s_serverFloor      = 1;
+    s_serverDifficulty = 0;
 }
 
 void Net::poll() {
@@ -350,6 +391,19 @@ void Net::poll() {
                 if (slot < MAX_PLAYERS)
                     s_slots[slot].rttMs = event.peer->roundTripTime;
             } else {
+                // [AUDIT-P2] Disambiguate sub-causes C / D / E: log every packet the CLIENT
+                // actually receives from ENet (before dispatch). If we see NO RX lines at all,
+                // either Net::poll isn't running (E) or the broadcast isn't reaching us (C).
+                // If we see RX with type=SV_SNAPSHOT (NetPacketType numeric value) but no
+                // matching [AUDIT-P1] snap rx, sub-cause D (callback null). Throttled every
+                // 5th packet so steady-state spam stays readable; the FIRST few packets are
+                // always logged so we see the join handshake.
+                static u32 s_pollRxLogCounter = 0;
+                u8 pktType = (size >= 1) ? data[0] : 0xFF;
+                if (s_pollRxLogCounter < 4 || (s_pollRxLogCounter % 5) == 0) {
+                    LOG_INFO("[AUDIT-P2] poll RX type=%u size=%u", pktType, size);
+                }
+                s_pollRxLogCounter++;
                 clientHandlePacket(data, size);
             }
 
@@ -382,6 +436,7 @@ void Net::poll() {
             } else {
                 LOG_INFO("Net: disconnected from server");
                 s_serverPeer = nullptr;
+                s_joinFailed = true; // covers server-full reject (peer dropped) + any pre-accept drop (M10)
             }
         } break;
 
@@ -406,18 +461,23 @@ void Net::poll() {
     }
 }
 
+// ENet only takes ownership of a packet on successful enet_peer_send (return >= 0).
+// On failure (mid-handshake peer, disconnected slot) the packet leaks unless we
+// destroy it explicitly — same defensive pattern used in broadcastSnapshot below.
 void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
-    enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 0, pkt);
+    if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 0, pkt) < 0)
+        enet_packet_destroy(pkt);
 }
 
 void Net::sendUnreliable(u8 playerSlot, const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
-    enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt);
+    if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
+        enet_packet_destroy(pkt);
 }
 
 void Net::broadcastReliable(const u8* data, u32 size) {
@@ -426,7 +486,8 @@ void Net::broadcastReliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
-            enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 0, pkt);
+            if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 0, pkt) < 0)
+                enet_packet_destroy(pkt);
         }
     }
 }
@@ -436,7 +497,8 @@ void Net::broadcastUnreliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
-            enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt);
+            if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
+                enet_packet_destroy(pkt);
         }
     }
 }
@@ -449,12 +511,23 @@ void Net::broadcastSnapshot(const u8* data, u32 size) {
     // Sub-MTU snapshots are sent as a single unreliable datagram. On send failure
     // (enet_peer_send returns < 0, e.g. peer mid-handshake) we must destroy the
     // packet ourselves; ENet only takes ownership on success.
+    u32 activePeers = 0;  // [AUDIT-P2] count for the diagnostic LOG below
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
+            activePeers++;
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
             if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
                 enet_packet_destroy(pkt);
         }
+    }
+    // [AUDIT-P2] Disambiguate sub-cause B: if active_peers=0 here while the server is
+    // publishing snapshots, the joiner connected (ENET_EVENT_TYPE_CONNECT fired) but
+    // never advanced to ACTIVE — almost always a version-mismatch reject or a stuck
+    // CL_JOIN_REQUEST. Throttled every 5th broadcast (~4 Hz) to match snap tx cadence.
+    static u32 s_bcastLogCounter = 0;
+    if ((s_bcastLogCounter++ % 5) == 0) {
+        LOG_INFO("[AUDIT-P2] broadcastSnapshot size=%u active_peers=%u",
+                 size, activePeers);
     }
 }
 
@@ -480,11 +553,13 @@ void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     u32 flags = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
     u8 channel = reliable ? 0 : 1;
     ENetPacket* pkt = enet_packet_create(data, size, flags);
-    enet_peer_send(s_serverPeer, channel, pkt);
+    if (enet_peer_send(s_serverPeer, channel, pkt) < 0)
+        enet_packet_destroy(pkt);
 }
 
 NetRole Net::getRole()              { return s_role; }
 u8      Net::getLocalPlayerIndex()  { return s_localPlayerIndex; }
+bool    Net::joinFailed()           { return s_joinFailed; }
 u32     Net::getServerLevelSeed()       { return s_serverLevelSeed; }
 u8      Net::getServerLevelFloor()      { return s_serverFloor; }
 u8      Net::getServerLevelDifficulty() { return s_serverDifficulty; }
@@ -516,6 +591,7 @@ NetStats Net::getStats(u8 playerSlot) {
 void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }
 void Net::setOnInput(OnInputFn fn)         { s_onInput = fn; }
 void Net::setOnPickup(OnPickupFn fn)       { s_onPickup = fn; }
+void Net::setOnRespawn(OnRespawnFn fn)     { s_onRespawn = fn; }
 void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }

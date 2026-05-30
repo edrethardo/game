@@ -19,6 +19,11 @@ namespace Server {
     // Get the input buffer for a player slot.
     InputRingBuffer& getInputBuffer(u8 playerSlot);
 
+    // Clear one slot's input ring buffer (call on join/leave). Without this, a client that
+    // rejoins a slot mid-floor is frozen: the buffer's monotonic-tick guard rejects the
+    // rejoiner's fresh low ticks until they climb past the departed client's stale ticks.
+    void resetInputBuffer(u8 playerSlot);
+
     // Build and broadcast a snapshot to all clients.
     void sendSnapshot(u32 serverTick,
                       const NetPlayer* players,
@@ -29,4 +34,10 @@ namespace Server {
     u32 getLevelSeed();
     u8  getLevelFloor();
     u8  getLevelDifficulty();
+
+    // Update the authoritative level metadata WITHOUT touching the input buffers (M11).
+    // Call at descent commit so a joiner arriving during the FLOOR_TRANSITION window gets the
+    // NEW floor/seed in SV_JOIN_ACCEPT instead of the old one. The full Server::init still runs
+    // at transition end via startGame(DESCEND); buffer clear stays there.
+    void updateLevel(u32 levelSeed, u8 levelFloor, u8 difficulty);
 }

@@ -66,8 +66,8 @@ void Engine::handleWeaponFire(f32 dt) {
     // (L8) Credit this player's melee/hitscan kills (and stamp the slot onto any projectile
     // fired this pass). tickSharedSystems resets it to 0xFF before AI/projectiles/skills, so
     // only this player's direct, synchronous weapon kills are attributed here.
-    Combat::setAttackingPlayer(m_localPlayerIndex);
-    WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
+    Combat::setAttackingPlayer(activeNetSlot());                // local player's net slot — host=0, client=its assigned slot
+    WeaponState& ws = m_players[activeNetSlot()].weaponState;   // local player's net slot
     ws.cooldownTimer -= dt;
     if (ws.cooldownTimer < 0.0f) ws.cooldownTimer = 0.0f;
 
@@ -207,11 +207,12 @@ void Engine::handleWeaponFire(f32 dt) {
         }
     } break;
     case WeaponType::HITSCAN:
-        // Overcharged Magazine: 3× damage + penetrating shot with beam trail
-        if (SkillSystem::isOvercharged(m_localPlayerIndex)) {
+        // Overcharged Magazine: 3× damage + penetrating shot with beam trail.
+        // Key by NET slot so a remote Marksman's overcharge buffs THEIR gun, not the host's (H5).
+        if (SkillSystem::isOvercharged(activeNetSlot())) {
             wpn.damage *= 3.0f;
             ws.cooldownTimer *= 0.7f; // 30% attack speed bonus during overcharge
-            SkillSystem::consumeOverchargeShot(m_localPlayerIndex);
+            SkillSystem::consumeOverchargeShot(activeNetSlot());
             // Penetrating hitscan — hit ALL enemies in narrow cone
             EntityHandle oHits[MAX_ENTITIES];
             f32          oDists[MAX_ENTITIES];
@@ -626,6 +627,18 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         }
     }
 
+    // (M-3) Soul Harvest ring: +3% damage per stack (mirrors the host's gun bonus at engine_combat.cpp:182).
+    // Without this the M8 stack credit on a remote was wired but had no offensive effect.
+    if (np.soulHarvestStacks > 0 && np.soulHarvestTimer > 0.0f) {
+        wpn.damage *= (1.0f + np.soulHarvestStacks * 0.03f);
+    }
+    // Shadow Dance: 2× damage on all weapon attacks while active (mirrors host at :173).
+    // Without this the Wanderer death-preamble credit landed on np.shadowDanceTimer but the
+    // remote's gun fire had no damage bonus — same M-3 class of bug.
+    if (np.shadowDanceTimer > 0.0f) {
+        wpn.damage *= 2.0f;
+    }
+
     // Berserker ring: +1% damage per 1% missing HP
     if (np.ringPassive == SkillId::BERSERKER) {
         f32 missingPct = 1.0f - np.health / np.maxHealth;
@@ -656,6 +669,30 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         }
     } break;
     case WeaponType::HITSCAN: {
+        // (H5) Overcharged Magazine for a remote Marksman — mirror the host's host-side branch
+        // so a remote's overcharge actually buffs their own gun (3× damage, +30% attack speed,
+        // penetrate all enemies in a narrow cone, instant reload on kill). Without this the
+        // remote's ult silently empowered slot 0 (the host) instead.
+        if (SkillSystem::isOvercharged(np.slotIndex)) {
+            wpn.damage *= 3.0f;
+            np.weaponState.cooldownTimer *= 0.7f;
+            SkillSystem::consumeOverchargeShot(np.slotIndex);
+            EntityHandle oHits[MAX_ENTITIES];
+            f32          oDists[MAX_ENTITIES];
+            u32 oCnt = CombatQuery::queryConeSorted(
+                m_entities, eyePos, forward, cosf(radians(1.0f)), wpn.range,
+                oHits, oDists, MAX_ENTITIES);
+            bool gotKill = false;
+            for (u32 oi = 0; oi < oCnt; oi++) {
+                Entity* oe = handleGet(m_entities, oHits[oi]);
+                if (!oe || (oe->flags & ENT_DEAD) || (oe->flags & ENT_FRIENDLY)) continue;
+                f32 hpBefore = oe->health;
+                Combat::applyDamage(m_entities, oHits[oi], wpn.damage);
+                if (hpBefore > 0.0f && oe->health <= 0.0f) gotKill = true;
+            }
+            if (gotKill) { np.weaponState.currentClip = wpn.clipSize; np.weaponState.reloading = false; }
+            break;
+        }
         result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
         if (result.hitEntity || result.hitWorld) {
             for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
@@ -685,10 +722,44 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
             Net::broadcastReliable(evBuf, off);
         }
     } break;
-    case WeaponType::PROJECTILE:
-        Combat::fireProjectile(wpn, eyePos, forward, m_projectiles);
+    case WeaponType::PROJECTILE: {
+        // Mirror the host's SP fire path (engine_combat.cpp:286-334) so a remote-fired
+        // projectile carries the right mesh/light/gravity over the wire. Without this,
+        // ProjectileSystem::spawn defaulted meshId=0 and a remote bow shot rendered as
+        // the fallback energy-bolt instead of an arrow ("bow not an arrow on client").
+        // Subtype comes from the equipped item; falls back to the bare wpn.type path
+        // if the slot is empty (no item → use default fireProjectile, no special mesh).
+        WeaponSubtype sub = WeaponSubtype::NONE;
+        if (!isItemEmpty(eqWpn)) sub = m_itemDefs[eqWpn.defId].weaponSubtype;
+        bool isMolotov = (sub == WeaponSubtype::MOLOTOV);
+        bool isWand    = (sub == WeaponSubtype::WAND);
+
+        u16 projIdx;
+        if (isMolotov) {
+            // Gravity + splash overload — same magic numbers as the host path
+            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles,
+                                              9.8f, 3.0f, wpn.damage * 0.6f);
+        } else {
+            // Wand gets a spark flag for visual; remote-fired wands don't have the
+            // m_weaponProc void-zone state (that's host-local), so PROJ_VOID is omitted.
+            u8 flags = isWand ? PROJ_SPARK : 0;
+            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
+        }
+        if (projIdx != 0xFFFF) {
+            Projectile& proj = m_projectiles.projectiles[projIdx];
+            if (sub == WeaponSubtype::BOW) {
+                proj.meshId = m_meshIdArrow;
+            } else if (sub == WeaponSubtype::CROSSBOW) {
+                proj.meshId = m_meshIdBolt;
+            } else if (sub == WeaponSubtype::THROWING_KNIFE || sub == WeaponSubtype::MOLOTOV) {
+                u8 wpnMesh = m_itemDefs[eqWpn.defId].meshId;
+                if (wpnMesh > 0) proj.meshId = wpnMesh;
+            }
+            if (isMolotov)   proj.lightColor = {1.0f, 0.5f, 0.1f}; // fire
+            else if (isWand) proj.lightColor = {0.4f, 0.6f, 1.0f}; // arcane blue
+        }
         result.hitEntity = false; // procs handled by projectile hit callback
-        break;
+    } break;
     }
 
     // --- Life steal ring passive for remote player ---

@@ -560,6 +560,9 @@ void Engine::startGame(GameStart mode) {
     // Inventory is reset + starter gear granted ONLY on a brand-new run. CONTINUE
     // keeps what loadGame() restored; DESCEND keeps the current run's gear. The mode
     // makes the intent explicit instead of guessing from floor/difficulty/empty-slot.
+    // Clear cross-floor SkillSystem state (meteors, overcharge, holy bombardment/nova timers)
+    // so a skill warming up on the old floor doesn't trigger on the new one.
+    SkillSystem::resetGameplayState();
     if (mode == GameStart::NEW_GAME) {
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
             Inventory::init(m_inventories[i]);
@@ -589,21 +592,40 @@ void Engine::startGame(GameStart mode) {
     // health=maxHealth=100 — which the first IN_GAME frame's syncNetPlayerToLocalPlayer
     // would copy into m_localPlayer, clobbering carried HP + per-floor growth. Preserve
     // the local slot's HP/maxHealth across the reset so the descend keeps it.
-    f32 carriedHealth = m_players[m_localPlayerIndex].health;
-    f32 carriedMaxHealth = m_players[m_localPlayerIndex].maxHealth;
+    f32 carriedHealth = m_players[activeNetSlot()].health;       // local player's net slot
+    f32 carriedMaxHealth = m_players[activeNetSlot()].maxHealth;
+    // Net host only: the wipe below clears every slot's `active`, and just below we
+    // re-activate ONLY the local (host) slot — which would silently drop every connected
+    // client on a floor DESCEND (onPlayerJoin runs on connect, not on descend). Remember
+    // which remote slots were occupied (and their carried HP/class) so we can re-spawn
+    // them on the new floor after the reset. See the restore block after local setup.
+    bool        netSlotWasActive[MAX_PLAYERS] = {};
+    f32         netSlotHealth[MAX_PLAYERS]    = {};
+    f32         netSlotMaxHealth[MAX_PLAYERS] = {};
+    PlayerClass netSlotClass[MAX_PLAYERS]     = {};
+    if (m_netRole == NetRole::SERVER) {
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            netSlotWasActive[i] = m_players[i].active;
+            netSlotHealth[i]    = m_players[i].health;
+            netSlotMaxHealth[i] = m_players[i].maxHealth;
+            netSlotClass[i]     = m_players[i].playerClass;
+        }
+    }
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         m_players[i] = NetPlayer{};
     }
     if (m_netRole == NetRole::CLIENT && mode == GameStart::DESCEND) {
-        m_players[m_localPlayerIndex].health    = carriedHealth;
-        m_players[m_localPlayerIndex].maxHealth = carriedMaxHealth;
+        m_players[activeNetSlot()].health    = carriedHealth;
+        m_players[activeNetSlot()].maxHealth = carriedMaxHealth;
     }
 
-    // Setup local player
-    m_players[m_localPlayerIndex].active = true;
-    m_players[m_localPlayerIndex].slotIndex = m_localPlayerIndex;
-    m_players[m_localPlayerIndex].position = spawnPos;
-    m_players[m_localPlayerIndex].spawnPosition = spawnPos;
+    // Setup local player at its NET slot (client slot may be >=1; m_localPlayerIndex is the
+    // split-screen lane and is 0 on a client). slotIndex MUST be the net slot too — the
+    // client's reconcile matches the snapshot player by slotIndex == its net slot.
+    m_players[activeNetSlot()].active = true;
+    m_players[activeNetSlot()].slotIndex = activeNetSlot();
+    m_players[activeNetSlot()].position = spawnPos;
+    m_players[activeNetSlot()].spawnPosition = spawnPos;
     // Reset health to the class base only on a brand-new run. CONTINUE keeps the
     // saved HP and DESCEND keeps the current run's HP (the old code hard-reset to
     // 100 on every floor<=1 entry, which clobbered class HP and continued saves).
@@ -612,9 +634,60 @@ void Engine::startGame(GameStart mode) {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
             m_players[pi].health = cls.baseHealth;
             m_players[pi].maxHealth = cls.baseHealth;
+            m_players[pi].moveSpeed = cls.baseMoveSpeed;
         }
     }
-    m_players[m_localPlayerIndex].weaponState.currentWeapon = 0;
+    // Also seed the host's own NetPlayer moveSpeed every startGame entry — covers DESCEND
+    // and CONTINUE (NEW_GAME branch above already wrote it). The host's m_localPlayer
+    // gets baseMoveSpeed at character-create; this keeps the NetPlayer mirror in sync so
+    // future remote-side reads (chain-damage gate, etc.) see the right value.
+    {
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[m_localPlayerIndex])];
+        m_players[activeNetSlot()].moveSpeed = cls.baseMoveSpeed;
+    }
+    m_players[activeNetSlot()].weaponState.currentWeapon = 0;
+
+    // Net host: re-establish the remote players that were connected before this floor's
+    // reset, re-spawned on the new floor. Without this, a DESCEND leaves their slots
+    // inactive, so the server stops applying their input (frozen ack -> the client
+    // fallback-snaps in place and can't move) and omits them from snapshots (client sees
+    // Players: 0). Mirrors onPlayerJoin's core fields; inventory/skills/quickbar persist
+    // across DESCEND (not wiped), so they're left intact. currentWeapon self-corrects from
+    // the client's next input. Server-only: clients rebuild remote players from snapshots.
+    if (m_netRole == NetRole::SERVER && mode == GameStart::DESCEND) {
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            if (i == m_localPlayerIndex || !netSlotWasActive[i]) continue;
+            NetPlayer& np = m_players[i];
+            np.active        = true;
+            np.slotIndex     = static_cast<u8>(i);
+            np.position      = spawnPos;
+            np.spawnPosition = spawnPos;
+            // Carry HP across the descend, but a remote that was DEAD on the old floor revives
+            // to full on the new one — keeping health 0 with isDead=false would make
+            // serverNetPost's death check re-kill it instantly on arrival.
+            np.health        = (netSlotHealth[i] > 0.0f) ? netSlotHealth[i] : netSlotMaxHealth[i];
+            np.maxHealth     = netSlotMaxHealth[i];
+            np.playerClass   = netSlotClass[i];
+            // Re-seed moveSpeed from the (possibly different) class each descend — covers a
+            // mid-run class change and matches m_localPlayer's per-floor reset path.
+            np.moveSpeed     = kClassDefs[static_cast<u32>(netSlotClass[i])].baseMoveSpeed;
+            np.weaponState.currentWeapon = 0; // self-corrects from next client input
+            np.isDead        = false;
+            np.invulnTimer   = 2.5f;          // match floor-entry spawn protection
+            // Symmetric with the host's per-floor Wanderer reset above (line ~540): clear
+            // transient mark-prey / shadow-dance state so timers don't carry across descend.
+            np.shadowDanceTimer = 0.0f;
+            np.markTimer        = 0.0f;
+            np.markSpeedStacks  = 0;
+            for (u32 ms = 0; ms < 20; ms++) np.markSpeedTimers[ms] = 0.0f;
+            // Also clear other transient ring-passive state (Soul Harvest, etc.) so a fresh
+            // floor starts clean for remotes the same way it does for the host.
+            np.soulHarvestTimer  = 0.0f;
+            np.soulHarvestStacks = 0;
+            np.smokeTimer        = 0.0f;
+            np.secondWindCooldown = 0.0f;
+        }
+    }
 
     // Set player position — both the active alias and the per-player array
     m_localPlayer.position = spawnPos;
@@ -634,6 +707,7 @@ void Engine::startGame(GameStart mode) {
     if (m_netRole == NetRole::SERVER) {
         Net::setOnInput(Engine::onInput);
         Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
+        Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
         Net::setOnPlayerJoin(Engine::onPlayerJoin);
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         Server::init(m_players, m_level.levelSeed,
@@ -644,7 +718,7 @@ void Engine::startGame(GameStart mode) {
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         // Follow the host's mid-run floor descents (server-authoritative).
         Net::setOnLevelSeed(Engine::onLevelSeed);
-        Client::init(m_localPlayerIndex);
+        Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
         // Fresh network join only (mode != DESCEND): a brand-new joiner has no save to
         // restore from, so locally mirror the deterministic starting loadout the server
         // grants this slot in onPlayerJoin. Both ends thus agree on the joiner's gear for

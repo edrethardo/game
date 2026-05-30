@@ -88,19 +88,20 @@ void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
 // Each pillar hit heals 3% max HP. Ground scorch zone for residual DPS.
 void fireHolyBombardment(Vec3 origin, const SkillDef* def, Player& player)
 {
-    s_bombardmentRadius = def->radius > 0.0f ? def->radius : 6.0f;
-    s_bombardmentDamage = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
-    s_bombardmentCenter = origin;
-    s_bombardmentCaster = s_castingPlayer;
-    s_bombardmentTimer  = def->duration > 0.0f ? def->duration : 4.0f;
-    s_bombardmentAccum  = 0.0f;
+    // Per-caster slot (N3) — `s_castingPlayer` is the canonical net-slot index.
+    const u8 cp = s_castingPlayer;
+    s_bombardmentRadius[cp] = def->radius > 0.0f ? def->radius : 6.0f;
+    s_bombardmentDamage[cp] = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
+    s_bombardmentCenter[cp] = origin;
+    s_bombardmentTimer [cp] = def->duration > 0.0f ? def->duration : 4.0f;
+    s_bombardmentAccum [cp] = 0.0f;
 
     // Scorch zone for residual ground DPS
     f32 scorchDps = 4.0f * s_classDmgMult;
-    if (s_scorchCallback) s_scorchCallback(origin, s_bombardmentRadius, 4.0f, scorchDps);
+    if (s_scorchCallback) s_scorchCallback(origin, s_bombardmentRadius[cp], 4.0f, scorchDps);
 
     // Gold nova ring on activation
-    if (s_novaCallback) s_novaCallback(origin, s_bombardmentRadius, {1.0f, 0.9f, 0.3f});
+    if (s_novaCallback) s_novaCallback(origin, s_bombardmentRadius[cp], {1.0f, 0.9f, 0.3f});
     if (s_screenShake) s_screenShake->trigger(0.05f, 0.3f);
     LOG_INFO("Holy Bombardment: judgment zone active for 4s");
 }
@@ -187,12 +188,13 @@ void fireHolyNova(Vec3 origin, const SkillDef* def,
         ParticleSystem::spawnSparks(*s_particlePool, origin, {0.0f, 1.0f, 0.0f}, 8);
     }
 
-    // Set up delayed second hit (particle wave arrives 0.3s later)
-    s_holyNovaTimer   = 0.3f;
-    s_holyNovaCenter  = origin;
-    s_holyNovaDamage2 = (def->secondaryDamage > 0.0f ? def->secondaryDamage : 20.0f) * s_classDmgMult;
-    s_holyNovaRadius  = radius;
-    s_holyNovaHealPct = healPct;
+    // Set up delayed second hit (particle wave arrives 0.3s later). Per-caster (N3).
+    const u8 cp = s_castingPlayer;
+    s_holyNovaTimer  [cp] = 0.3f;
+    s_holyNovaCenter [cp] = origin;
+    s_holyNovaDamage2[cp] = (def->secondaryDamage > 0.0f ? def->secondaryDamage : 20.0f) * s_classDmgMult;
+    s_holyNovaRadius [cp] = radius;
+    (void)healPct;        // ring heal already applied above; second-hit healPct field was dead
 
     if (s_screenShake) s_screenShake->trigger(0.08f, 0.4f);
     LOG_INFO("Holy Nova: ring hit %u enemies, healed %u allies", enemiesHit, alliesHealed);

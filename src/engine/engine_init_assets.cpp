@@ -323,7 +323,7 @@ void Engine::initAssets() {
     });
     SkillSystem::setReloadCallback([]() {
         if (!s_engine) return;
-        WeaponState& ws = s_engine->m_players[s_engine->m_localPlayerIndex].weaponState;
+        WeaponState& ws = s_engine->m_players[s_engine->activeNetSlot()].weaponState; // local player's net slot
         const ItemInstance& eqWpn = s_engine->m_inventories[s_engine->m_localPlayerIndex]
             .equipped[static_cast<u32>(ItemSlot::WEAPON)];
         if (!isItemEmpty(eqWpn)) {

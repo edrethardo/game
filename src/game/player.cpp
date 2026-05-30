@@ -4,6 +4,7 @@
 #include "game/player.h"
 #include "game/game_constants.h"
 #include "net/net_player.h"
+#include "net/packet.h"  // Quantize::packAngle / packPos for absolute-aim NetInput
 #include "platform/input.h"
 #include <cmath>
 
@@ -224,40 +225,52 @@ void PlayerController::update(Player& player, f32 dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Network-aware: applies a NetInput struct to a Player
-// ---------------------------------------------------------------------------
-void PlayerController::updateFromInput(Player& player, const NetInput& input, f32 dt) {
-    applyMovement(player.position, player.velocity, player.yaw, player.pitch,
-                  player.onGround, player.noclip,
-                  player.moveSpeed, player.sensitivity,
-                  input.mouseDeltaX, input.mouseDeltaY,
-                  (input.moveFlags & INPUT_FORWARD)  != 0,
-                  (input.moveFlags & INPUT_BACKWARD) != 0,
-                  (input.moveFlags & INPUT_LEFT)     != 0,
-                  (input.moveFlags & INPUT_RIGHT)    != 0,
-                  (input.moveFlags & INPUT_JUMP)     != 0,
-                  dt);
-    player.forward = s_lastForward;
-}
-
-// ---------------------------------------------------------------------------
 // Network-aware: applies a NetInput struct to a NetPlayer
 // ---------------------------------------------------------------------------
-void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt) {
-    // Apply slow debuff (same as singleplayer PlayerController::update)
+void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& input, f32 dt,
+                                                bool movementOnly) {
+    // Apply slow debuff (same as singleplayer PlayerController::update). During a reconcile
+    // REPLAY (movementOnly=true) these inputs were already applied once during live
+    // prediction, so re-integrate position with the slow SPEED still in effect but do NOT
+    // re-decay the timer — owned by the authoritative snapshot, and replaying it would make
+    // slow wear off too fast. The dodge re-arm below is intentionally idempotent (only sets
+    // invulnTimer when it's currently <=0, then a single input replay re-asserts the same
+    // 0.3 s); the old comment incorrectly claimed it was skipped on replay.
     f32 effectiveSpeed = np.moveSpeed * GameConst::SPEED_MULT;
     if (np.slowTimer > 0.0f) {
-        effectiveSpeed *= 0.4f; // 60% slow
-        np.slowTimer -= dt;
+        effectiveSpeed *= 0.4f; // 60% slow (speed effect only; timer decay is owned by
+        // PlayerController::update / serverNetPost to avoid the previous double-decay where
+        // the client decayed slowTimer twice per frame — once here and once in update()).
     }
     // Freeze stops all movement
     if (np.freezeTimer > 0.0f) {
         effectiveSpeed = 0.0f;
     }
+    // (M-3) Soul Harvest ring: +5% speed per stack while the buff window is active. Mirrors
+    // PlayerController::update's host bonus at player.cpp:104-106 so a remote with stacks
+    // actually moves faster — without this M8 stacks accumulated but had no kinetic effect.
+    if (np.soulHarvestStacks > 0 && np.soulHarvestTimer > 0.0f) {
+        effectiveSpeed *= (1.0f + np.soulHarvestStacks * 0.05f);
+    }
+    // Shadow Dance: +20% move speed while active (mirrors host at engine_update.cpp:614).
+    if (np.shadowDanceTimer > 0.0f) {
+        effectiveSpeed *= 1.2f;
+    }
+    // Wanderer Exploit Weakness speed stacks: +5% per stack (mirrors host at player.cpp:116).
+    if (np.markSpeedStacks > 0) {
+        effectiveSpeed *= (1.0f + np.markSpeedStacks * 0.05f);
+    }
+    // Absolute aim: SET yaw/pitch from the input's quantized fields, then run movement
+    // with zero look-delta (applyMovement uses np.yaw to compute forward direction, so
+    // the assignment must happen first or movement direction is one tick stale).
+    // This is the key fix for "shoot where I'm not aiming" — server's NetPlayer.yaw
+    // is now exactly what the client packed, immune to UDP loss of any single input.
+    np.yaw   = Quantize::unpackAngle(input.yawQ);
+    np.pitch = Quantize::unpackAngle(input.pitchQ);
     applyMovement(np.position, np.velocity, np.yaw, np.pitch,
                   np.onGround, np.noclip,
                   effectiveSpeed, np.sensitivity,
-                  input.mouseDeltaX, input.mouseDeltaY,
+                  /*lookDX=*/0.0f, /*lookDY=*/0.0f,
                   (input.moveFlags & INPUT_FORWARD)  != 0,
                   (input.moveFlags & INPUT_BACKWARD) != 0,
                   (input.moveFlags & INPUT_LEFT)     != 0,
@@ -267,6 +280,10 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
 
     // Server-side Wanderer dodge: grant i-frames for the roll duration.
     // Full dodge movement is client-predicted; server only needs to track invulnerability.
+    // Replayed during reconcile too: setting invulnTimer = 0.3 if it's currently <=0 is
+    // idempotent for the same input, and re-arming here keeps the local view honest after
+    // reconcile snaps invulnTimer back to the (older) snapshot value — otherwise a freshly
+    // predicted dodge briefly looks like it had no i-frames until the server's ack catches up.
     if ((input.extFlags & INPUT_EX_DODGE) && np.invulnTimer <= 0.0f) {
         np.invulnTimer = 0.3f;
     }
@@ -274,8 +291,19 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
 
 // ---------------------------------------------------------------------------
 // Capture current Input:: into a NetInput
+//
+// Packs ABSOLUTE yaw/pitch/position rather than mouse deltas. The look fields are
+// computed as "where the player will be after PlayerController::update applies this
+// same frame's mouse delta later in the loop" — that calculation must mirror
+// applyMovement's `yaw -= dx*sens; pitch -= dy*sens; pitch clamp` exactly, or the
+// server-side NetPlayer drifts away from the client's local camera every tick.
+//
+// Position is the player's CURRENT (not predicted) position. PlayerController::update
+// hasn't run yet this frame, so this is end-of-last-frame position. Acceptable: the
+// server treats this as authoritative and snaps NetPlayer to it; the resulting 1-tick
+// lag is invisible compared to the prior reconcile-snap rubberband.
 // ---------------------------------------------------------------------------
-NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
+NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 weaponId) {
     NetInput input = {};
     input.tick = tick;
     input.weaponId = weaponId;
@@ -291,11 +319,13 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
     if (Input::isActionDown(GameAction::TARGET_LOCK)) flags |= INPUT_LOCK;
     input.moveFlags = flags;
 
+    // Peek at this frame's mouse/stick/gyro delta WITHOUT consuming it (Input::getMouseDelta
+    // doesn't mutate; PlayerController::update will read the same s_mouseDX/Y later in
+    // the frame and produce the identical look update).
     s32 rawMx, rawMy;
     Input::getMouseDelta(rawMx, rawMy);
     f32 mx = static_cast<f32>(rawMx);
     f32 my = static_cast<f32>(rawMy);
-    // Add right stick look delta
     f32 rsX = Input::getStickX(true);
     f32 rsY = Input::getStickY(true);
     if (rsX != 0.0f || rsY != 0.0f) {
@@ -303,22 +333,28 @@ NetInput PlayerController::captureLocalInput(u32 tick, u8 weaponId) {
         mx += rsX * stickScale;
         my += rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f);
     }
-    // Add gyro aiming
     f32 gyroDx, gyroDy;
     Input::getGyro(gyroDx, gyroDy);
     if (gyroDx != 0.0f || gyroDy != 0.0f) {
         mx += gyroDx * Input::getGyroSensitivity();
         my += gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f);
     }
-    // Quantize to s16 for network serialization
-    s32 imx = static_cast<s32>(mx);
-    s32 imy = static_cast<s32>(my);
-    if (imx >  32767) imx =  32767;
-    if (imx < -32768) imx = -32768;
-    if (imy >  32767) imy =  32767;
-    if (imy < -32768) imy = -32768;
-    input.mouseDeltaX = static_cast<s16>(imx);
-    input.mouseDeltaY = static_cast<s16>(imy);
+
+    // Compute absolute yaw/pitch that PlayerController::update WILL produce this frame.
+    // Formula must match applyMovement at player.cpp:25-28 exactly.
+    f32 newYaw   = player.yaw   - mx * player.sensitivity;
+    f32 newPitch = player.pitch - my * player.sensitivity;
+    if (newPitch >  MAX_PITCH) newPitch =  MAX_PITCH;
+    if (newPitch < -MAX_PITCH) newPitch = -MAX_PITCH;
+    input.yawQ   = Quantize::packAngle(newYaw);
+    input.pitchQ = Quantize::packAngle(newPitch);
+
+    // Absolute position — end-of-last-frame value (PlayerController::update will move
+    // the player later this frame; that gets sent next tick). The server adopts this
+    // as authoritative for the remote slot.
+    input.posXQ = Quantize::packPos(player.position.x);
+    input.posYQ = Quantize::packPos(player.position.y);
+    input.posZQ = Quantize::packPos(player.position.z);
 
     // Extended input flags — unified keyboard + gamepad
     u8 ext = 0;

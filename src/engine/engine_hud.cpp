@@ -667,7 +667,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Ammo display for hitscan weapons (right side of health bar area)
         {
-            WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
+            WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
             const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
             WeaponDef wpn;
             if (!isItemEmpty(eqWpn)) {
@@ -766,7 +766,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // Quickbar — always visible at bottom of screen
     {
         f32 cdPct = 0.0f;
-        WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
+        WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
         // Get cooldown percentage for active quickbar weapon
         const ItemInstance* activeItem = Quickbar::resolveSlot(
             m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex],
@@ -797,7 +797,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     if (m_netRole != NetRole::NONE) {
         u32 ping = 0;
         if (m_netRole == NetRole::CLIENT) {
-            NetStats stats = Net::getStats(m_localPlayerIndex);
+            NetStats stats = Net::getStats(activeNetSlot()); // local player's net slot (arg ignored on client, kept correct)
             ping = static_cast<u32>(stats.rttMs);
         }
         HUD::drawNetStats(sw, sh, Net::getConnectedCount(), ping,

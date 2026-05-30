@@ -8,10 +8,10 @@
 #include "net/net.h"
 #include "net/net_player.h"
 
-// Quantized snapshot of one player (31 wire bytes — see SNAP_PLAYER_WIRE)
+// Quantized snapshot of one player (29 wire bytes — see SNAP_PLAYER_WIRE)
 struct SnapPlayer {
     u8   slotIndex;     // 1
-    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=lockActive, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
+    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=UNUSED, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
     u8   weaponId;      // 1
     u8   health;        // 1: 0-255 ratio of maxHealth (client reconstructs absolute = ratio*maxHealth)
     u16  maxHealth;     // 2: absolute max HP (raw, rounded) — lets the client reconstruct absolute
@@ -20,7 +20,6 @@ struct SnapPlayer {
     u16  velX, velZ;    // 4
     u16  yaw;           // 2
     u16  pitch;         // 2
-    u16  lockIndex;     // 2
     // Status/clip sync
     u8   currentClip;   // 1: rounds remaining
     u8   statusFlags;   // 1: bit0=invuln, bit1=poisoned, bit2=burning, bit3=frozen, bit4=slowed
@@ -35,7 +34,7 @@ struct SnapPlayer {
     u8   dodgeFlags;    // 1
 };
 
-// Quantized snapshot of one entity (20 bytes)
+// Quantized snapshot of one entity (27 bytes — see SNAP_ENTITY_WIRE)
 struct SnapEntity {
     u8   poolIndex;     // 1
     u8   flags;         // 1
@@ -52,9 +51,24 @@ struct SnapEntity {
     // bit0 = minionShield (75% damage reduction active); bits1-3 = bossPhase (BossPhase::,
     // 0-4 fits in 3 bits). Lets clients render the invuln/sealed boss as un-killable.
     u8   bossStatus;    // 1
+    // Visual identity — the client's local entity pool diverges from the server's (the client
+    // predicts kills), so its poolIndex can hold a different enemy. Send identity authoritatively
+    // so clients render the correct mesh/material/type instead of a default gray cube.
+    u8   meshId;        // 1: index into the mesh registry
+    u8   materialId;    // 1: index into MaterialSystem
+    u8   enemyTypeId;   // 1: EnemyType (cast to u8) — drives mimic/material logic
+    u8   weaponMeshId;  // 1: skeleton/boss weapon mesh (0 = none)
+    // halfExtents quantized to 0-2.55 m in 0.01 m steps (3 B). Covers every enemy def's
+    // collider, including the chonky GENERIC variants. Drives client-side collision +
+    // visual scale; without this every non-boss entity uses a default ~0.4×0.5×0.4 box
+    // and renders/collides wrong (audit P2 #4). Boss-floor patch in engine_net.cpp is
+    // now redundant — left in as a no-op fallback for older snapshots.
+    u8   halfExtentsXQ; // 1
+    u8   halfExtentsYQ; // 1
+    u8   halfExtentsZQ; // 1
 };
 
-// Quantized snapshot of one projectile (18 bytes)
+// Quantized snapshot of one projectile (19 bytes)
 struct SnapProjectile {
     u16  poolIndex;     // 2: u16 index into the projectile pool (1024 PC / 512 Switch)
     u8   flags;         // 1: bit0=active, bit1=fromPlayer, bit2=isCrit
@@ -63,9 +77,10 @@ struct SnapProjectile {
     u8   radiusQ;       // 1: radius quantized to 0-2.55 m in 0.01 m steps
     u16  posX, posY, posZ;  // 6
     u16  velX, velY, velZ;  // 6
+    u8   ownerSlot;     // 1: net slot that fired this projectile (0xFF = unattributed)
 };
 
-// Quantized snapshot of one dropped world item (14 bytes). Loot is server-
+// Quantized snapshot of one dropped world item (16 bytes). Loot is server-
 // authoritative (N5): only the host/SP rolls drops; clients mirror this list into
 // their local m_worldItems for rendering and pickup requests.
 struct SnapWorldItem {
@@ -74,6 +89,8 @@ struct SnapWorldItem {
     u16  defId;         // 2: item definition id (or GLOBE_* sentinel)
     u32  uid;           // 4: unique instance id — pickup requests reference this (full u32; no overflow)
     u16  posX, posY, posZ; // 6: position packed via Quantize::packPos
+    u8   ownerSlot;     // 1: exclusive-pickup owner (0xFF = FFA) — drives client pickup gate (Audit-B)
+    u8   exclusiveTimerQ; // 1: exclusive window quantized to 0-10.2 s in 0.04 s steps
 };
 
 // Full world snapshot

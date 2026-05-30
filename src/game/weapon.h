@@ -55,6 +55,10 @@ struct WeaponState {
     f32 reloadTimer   = 0.0f; // countdown while reloading
     bool reloading    = false;
     u16 lastWeaponDef = 0xFFFF; // tracks equipped weapon to detect switches
+    // Resolved third-person weapon-mesh ID (m_meshDefs index), refreshed by the host before
+    // building each snapshot so the wire's SnapPlayer.weaponMeshId is a real MeshDef index
+    // (not a weapon-slot index). Lets clients render the correct weapon without inventories.
+    u8  weaponMeshId  = 0;
 };
 
 // First-person viewmodel animation state
