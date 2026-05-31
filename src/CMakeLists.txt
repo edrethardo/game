@@ -94,6 +94,7 @@ add_executable(DungeonEngine
     net/prediction_ring.cpp
     net/render_offset.cpp
     net/pending_hit_ring.cpp
+    net/pending_damage_ring.cpp
     renderer/material.cpp
     renderer/obj_loader.cpp
     world/level_loader.cpp
