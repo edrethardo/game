@@ -9,6 +9,8 @@
 add_executable(dungeon_tests
     test_main.cpp
     sanity_test.cpp
+    net/test_clock_sync.cpp
+    ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
 )
 
 target_include_directories(dungeon_tests PRIVATE
