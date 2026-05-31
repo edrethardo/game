@@ -73,6 +73,18 @@ def build_meshes():
         ["--type", "mage",     "--out", os.path.join(mesh_dir, "mage.obj")],
         ["--type", "rogue",    "--out", os.path.join(mesh_dir, "rogue.obj")],
         ["--type", "paladin",  "--out", os.path.join(mesh_dir, "paladin.obj")],
+        # Player class meshes (one per PlayerClass enum; renderer resolves the name via
+        # ClassDef.meshName in item.h). Distinct from the NPC meshes above on purpose so
+        # NPCs and player characters can diverge visually.
+        ["--type", "player_warrior",         "--out", os.path.join(mesh_dir, "player_warrior.obj")],
+        ["--type", "player_ranger",          "--out", os.path.join(mesh_dir, "player_ranger.obj")],
+        ["--type", "player_sorcerer",        "--out", os.path.join(mesh_dir, "player_sorcerer.obj")],
+        ["--type", "player_rogue",           "--out", os.path.join(mesh_dir, "player_rogue.obj")],
+        ["--type", "player_paladin",         "--out", os.path.join(mesh_dir, "player_paladin.obj")],
+        ["--type", "player_combat_engineer", "--out", os.path.join(mesh_dir, "player_combat_engineer.obj")],
+        ["--type", "player_marksman",        "--out", os.path.join(mesh_dir, "player_marksman.obj")],
+        ["--type", "player_tinkerer",        "--out", os.path.join(mesh_dir, "player_tinkerer.obj")],
+        ["--type", "player_wanderer",        "--out", os.path.join(mesh_dir, "player_wanderer.obj")],
         # Archetype enemies
         ["--type", "gargoyle",       "--out", os.path.join(mesh_dir, "gargoyle.obj")],
         ["--type", "necromancer",    "--out", os.path.join(mesh_dir, "necromancer.obj")],
@@ -191,6 +203,16 @@ def build_skins():
         ("mind_flayer",              "mind_flayer_skin_42.png"),
         ("phase_ripper",             "phase_ripper_skin_42.png"),
         ("abyssal_titan",            "abyssal_titan_skin_42.png"),
+        # Player class skins (one per PlayerClass; paired with the meshes above).
+        ("player_warrior",           "player_warrior_skin_42.png"),
+        ("player_ranger",            "player_ranger_skin_42.png"),
+        ("player_sorcerer",          "player_sorcerer_skin_42.png"),
+        ("player_rogue",             "player_rogue_skin_42.png"),
+        ("player_paladin",           "player_paladin_skin_42.png"),
+        ("player_combat_engineer",   "player_combat_engineer_skin_42.png"),
+        ("player_marksman",          "player_marksman_skin_42.png"),
+        ("player_tinkerer",          "player_tinkerer_skin_42.png"),
+        ("player_wanderer",          "player_wanderer_skin_42.png"),
     ]
 
     ok = True

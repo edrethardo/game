@@ -3809,6 +3809,1061 @@ def skin_boss_reaper():
             p[(px, py)] = shadow
     return w, h, p
 
+
+def skin_player_warrior():
+    """Player Warrior skin — heavy plate + crimson sash + cape + full helm.
+
+    Mesh grid: gx in [-5, 5] (w=11), gy in [0, 17] (h=18).
+    Offset: px = gx + 5, py = gy.
+
+    Cape voxels are uv-overridden by the mesh to sample pixel (10, 17), so
+    that one texel carries the crimson cape colour even though those voxels
+    physically share gx/gy columns with the plate torso.
+    """
+    w, h = 11, 18
+
+    # Palette — colours are MUTED enough that the same column showing on
+    # adjacent voxel faces still reads sensibly (a single pixel paints every
+    # exposed face of every voxel in that gx/gy column).
+    plate       = (90,  95, 105, 255)   # dark steel plate (torso/legs)
+    plate_hi    = (140, 145, 155, 255)  # lighter steel highlight (pauldrons/helm top)
+    plate_mid   = (115, 120, 130, 255)  # mid steel (helm shell)
+    sash        = (140,  30,  35, 255)  # deep crimson sash band
+    cape        = (130,  25,  30, 255)  # crimson cape — sampled via uv override
+    eye_slit    = ( 40,  20,  10, 255)  # muted dark for the carved eye slit
+    dark_metal  = ( 45,  45,  55, 255)  # nearly-black boots/gauntlets
+    belt        = ( 55,  50,  45, 255)  # leather belt under the sash
+
+    p = {}
+
+    # --- Base fill: everything starts as plate so unused-but-sampled-from-an
+    #     adjacent-voxel pixels never read transparent/black. ---
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = plate
+
+    # --- Boots / sabatons (gy=0) ---
+    for px in range(w):
+        p[(px, 0)] = dark_metal
+
+    # --- Greaves + thighs (gy=1..3) — plate steel, already set ---
+    # Just a slightly lighter knee-height row for variation.
+    for px in range(3, 8):
+        p[(px, 3)] = (100, 105, 115, 255)
+
+    # --- Belt row (gy=4) ---
+    for px in range(w):
+        p[(px, 4)] = belt
+    # Buckle dot at the centre — slightly lighter so it reads as a buckle.
+    p[(5, 4)] = (120, 110, 70, 255)
+
+    # --- Lower-belt row (gy=5) — still belt leather under the sash ---
+    for px in range(w):
+        p[(px, 5)] = belt
+
+    # --- Crimson sash band (gy=6) ---
+    for px in range(w):
+        p[(px, 6)] = sash
+
+    # --- Torso plate (gy=7..10) — mostly already plate, add a chest seam ---
+    for py in range(7, 11):
+        for px in range(2, 9):
+            p[(px, py)] = plate
+    # Central plate seam (vertical line, slightly darker) — px=5 is gx=0.
+    for py in range(7, 11):
+        p[(5, py)] = (75, 80, 90, 255)
+
+    # --- Pauldron row (gy=11..12) — wider, brighter steel on the outer
+    #     columns (gx=-5/-4 → px=0/1, gx=4/5 → px=9/10). ---
+    for py in range(11, 13):
+        for px in range(w):
+            p[(px, py)] = plate
+        for px in (0, 1, 9, 10):
+            p[(px, py)] = plate_hi
+
+    # --- Pauldron top ridge (gy=13) ---
+    for px in range(w):
+        p[(px, 13)] = plate_hi
+
+    # --- Helm shell (gy=14..16) — mid steel, slightly darker than pauldron ---
+    for py in range(14, 17):
+        for px in range(w):
+            p[(px, py)] = plate_mid
+
+    # Horizontal eye-slit row (gy=15) — gx=-1..1 (px=4..6) is the carved
+    # opening. The slit pixels are muted dark; they only show through the
+    # front carve-out and on the back face of those inner voxels.
+    p[(4, 15)] = eye_slit
+    p[(5, 15)] = eye_slit
+    p[(6, 15)] = eye_slit
+
+    # Helm crown — top row gy=16 slightly lighter for a sculpted helm dome.
+    for px in range(3, 8):
+        p[(px, 16)] = plate_hi
+
+    # --- Helm crest (gy=17) — only gx=-1..1 voxels exist, but other pixels
+    #     in this row are read via uv_overrides cape (10, 17). ---
+    for px in range(w):
+        p[(px, 17)] = plate_hi          # helm crest colour
+    p[(10, 17)] = cape                  # dedicated cape uv-override target
+
+    # --- Gauntlet columns (gx=-4 / +4 → px=1 / px=9) at gy=3 (gauntlet fist)
+    #     — paint nearly-black so the fists look like gloved gauntlets. ---
+    p[(1, 3)] = dark_metal
+    p[(9, 3)] = dark_metal
+
+    return w, h, p
+
+
+def skin_player_paladin():
+    """Player Paladin skin — white-and-gold plate, winged helm, tabard.
+
+    Mesh grid: gx in [-5, 5] (w=11), gy in [0, 17] (h=18).
+    Offset: px = gx + 5, py = gy.
+
+    UV-override targets defined by the mesh:
+      - Tabard voxels   -> pixel (10, 17)  [tabard cream]
+      - Sunburst centre -> pixel  (0, 17)  [rich gold]
+      - Sunburst halo   -> pixel  (0, 16)  [light gold "rays"]
+      - Back-of-head helm voxels at the eye row remap to gy=13 (helm shell).
+    """
+    w, h = 11, 18
+
+    # --- Palette ---------------------------------------------------------
+    # Each pixel paints every face of every voxel in that (gx, gy) column,
+    # so colours are deliberately readable from any angle.
+    plate       = (225, 220, 205, 255)   # bone-white plate (base)
+    plate_shade = (170, 165, 150, 255)   # warm grey for sides/armpits
+    gold_trim   = (220, 175,  60, 255)   # bright gold (helm wings, edges)
+    gold_emblem = (190, 145,  40, 255)   # rich gold (sunburst centre)
+    gold_halo   = (235, 200,  90, 255)   # lighter gold (sunburst rays halo)
+    tabard      = (235, 225, 200, 255)   # warm cream tabard cloth
+    eye_slit    = ( 60,  45,  30, 255)   # warm shadow inside the visor
+    boot_white  = (215, 210, 195, 255)   # boots — keep mostly bone-white
+    boot_gold   = (220, 175,  60, 255)   # boot top trim (gold edge)
+    crest_gold  = (220, 175,  60, 255)   # winged helm crest cap
+
+    p = {}
+
+    # --- Base fill: everything starts as plate so any uv sample is sane.
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = plate
+
+    # --- Boots / sabatons (gy=0) — bone-white with a gold top trim row.
+    for px in range(w):
+        p[(px, 0)] = boot_white
+    # Boot-top gold band lives one row up (gy=1) so the boot reads as
+    # plate with a gold ankle ring.
+    for px in range(w):
+        p[(px, 1)] = boot_gold
+
+    # --- Greaves / thighs (gy=2..3) — plate-white, already set; add a
+    #     subtle shade row at the knee so the legs aren't a flat slab.
+    for px in range(3, 8):
+        p[(px, 3)] = plate_shade
+
+    # --- Belt / tassets (gy=4..5) — gold trim band over plate.
+    # gy=4 is the tasset row; gy=5 is the under-belt. Use gold across the
+    # full row at gy=4 (looks like the gold-trimmed belt of a paladin).
+    for px in range(w):
+        p[(px, 4)] = gold_trim
+    for px in range(w):
+        p[(px, 5)] = plate          # under-belt = plate-white again
+
+    # --- Torso plate (gy=6..11) — bone-white, with shaded sides so the
+    #     squared chest reads as armour rather than a flat board.
+    for py in range(6, 12):
+        for px in (3, 7):
+            p[(px, py)] = plate_shade   # inner shaded "seam" columns
+        for px in (2, 8):
+            p[(px, py)] = plate_shade   # arm-pit / side shade
+
+    # --- Pauldron rows (gy=10..12): outer columns (px=0/1 left,
+    #     px=9/10 right) are gold-edged plate caps. ---
+    for py in range(10, 13):
+        for px in (0, 10):
+            p[(px, py)] = gold_trim     # outer pauldron rim = gold edge
+        for px in (1, 9):
+            p[(px, py)] = plate         # inner pauldron body = white plate
+    # Pauldron top-cap ridge highlight at gy=13 (single voxel each side).
+    p[(1, 13)] = gold_trim
+    p[(9, 13)] = gold_trim
+
+    # --- Gorget / collar (gy=12) — gold-trimmed plate ring.
+    for px in range(4, 7):
+        p[(px, 12)] = gold_trim
+
+    # --- Helm shell (gy=13..16) — bone-white plate, slight shade on the
+    #     sides so the helmet reads as a curved shape.
+    for py in range(13, 17):
+        for px in range(w):
+            p[(px, py)] = plate
+        # Subtle side shading near the cheek rows.
+        p[(2, py)] = plate_shade
+        p[(8, py)] = plate_shade
+
+    # Visor slit row (gy=14) — gx=-2..2 (px=3..7) is the carved opening.
+    # The front face is discarded by the mesh, so this colour only shows
+    # on the back face of the eye voxel; back-of-head voxels at gz=0/1
+    # are uv-redirected to gy=13 by the mesh to avoid bleeding.
+    for px in range(3, 8):
+        p[(px, 14)] = eye_slit
+
+    # --- Winged helm tips (gy=14..15, outer columns) ---
+    # Wings occupy gx=-4/-3 (px=1/2) and gx=3/4 (px=8/9) at gy=14, with
+    # an upper tip voxel at gy=15. Paint these gold so the wing-flares
+    # pop against the white helm.
+    for px in (1, 2, 8, 9):
+        p[(px, 14)] = gold_trim
+    p[(1, 15)] = gold_trim
+    p[(9, 15)] = gold_trim
+
+    # --- Helm crest (gy=17) — gold spine. Only gx=-1..1 (px=4..6) and
+    #     gx=0 (px=5) voxels exist physically; the rest of this row is
+    #     reserved for uv-override pixels (see below). ---
+    for px in range(4, 7):
+        p[(px, 17)] = crest_gold
+
+    # --- UV-override target pixels ---------------------------------------
+    # These pixels are sampled by mesh voxels via uv_overrides; their
+    # (gx, gy) grid cells are physically empty so we are free to claim
+    # them as palette swatches.
+    #
+    #   (10, 17) = tabard cream       (mesh override (5, 17))
+    #   ( 0, 17) = sunburst centre    (mesh override (-5, 17))
+    #   ( 0, 16) = sunburst halo      (mesh override (-5, 16))
+    p[(10, 17)] = tabard
+    p[( 0, 17)] = gold_emblem
+    p[( 0, 16)] = gold_halo
+
+    # --- Gauntlet fists (gy=3, px=1 / px=9) — gold-trimmed plate fists.
+    p[(1, 3)] = gold_trim
+    p[(9, 3)] = gold_trim
+
+    return w, h, p
+
+
+def skin_player_rogue():
+    """Player Rogue skin — black-and-charcoal hooded leathers + rust knife straps.
+
+    Mesh grid (from ``gen_player_rogue``): gx in [-3, 3] (w=7), gy in [0, 14] (h=15).
+    Offset: px = gx + 3, py = gy.
+
+    The colour bands stack vertically because the voxel-mesh UV scheme paints one
+    pixel per (gx, gy) column — so each py row defines the colour of every voxel
+    at that height. Strap rows at py=7 / py=8 carry the rust-leather bandolier
+    colour; py=13 is the eye row with ice-blue eyes at the eye columns and a
+    near-black hood-shadow band everywhere else; py=11..12 is the cloth face wrap.
+    """
+    w, h = 7, 15
+
+    # --- Palette (RGBA) --------------------------------------------------
+    # Kept muted because the same pixel is read by every face of every voxel in
+    # the column, so saturated colours bleed onto side/back faces.
+    leather       = ( 35,  35,  45, 255)   # main near-black charcoal leathers
+    leather_hi    = ( 55,  55,  70, 255)   # slate highlight (shoulders, hood edges)
+    wrap          = ( 75,  75,  85, 255)   # muted grey-charcoal cloth face wrap
+    strap         = (120,  80,  55, 255)   # rust-leather brown chest straps
+    eye           = (170, 200, 220, 255)   # ice-blue glint (eyes under hood)
+    hood_shadow   = ( 20,  20,  28, 255)   # deeper shadow under the hood brim
+    boot          = ( 30,  30,  40, 255)   # very dark with a faint blue tinge
+    glove         = ( 45,  45,  55, 255)   # slightly lighter leather at the wrist
+
+    p = {}
+
+    # --- Base fill ------------------------------------------------------
+    # Default everything to the main leather colour so columns we don't explicitly
+    # paint still read sensibly (rather than transparent / black).
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = leather
+
+    # --- Boots (py=0) --------------------------------------------------
+    for px in range(w):
+        p[(px, 0)] = boot
+
+    # --- Shins / soft boot shaft (py=1) --------------------------------
+    for px in range(w):
+        p[(px, 1)] = boot
+
+    # --- Thighs / lower legs (py=2..3) — leather pants -----------------
+    # py=3 is also the glove row, but only px=1 and px=5 are glove voxels (gloves
+    # sit at gx=-2 and gx=+2). The rest of the row is empty grid cells (nothing
+    # at that gy/gx). Paint the whole row leather, then override the glove pixels.
+    for py in range(2, 4):
+        for px in range(w):
+            p[(px, py)] = leather
+    # Fingerless glove columns at gx=-2 -> px=1 and gx=+2 -> px=5; slightly
+    # brighter so the gloves read distinct from the pant legs.
+    p[(1, 3)] = glove
+    p[(5, 3)] = glove
+
+    # --- Belt (py=4) ---------------------------------------------------
+    # Painted as the rust-leather strap colour so it visually ties to the
+    # bandoliers higher up.
+    for px in range(w):
+        p[(px, 4)] = strap
+
+    # --- Pelvis (py=5) -------------------------------------------------
+    for px in range(w):
+        p[(px, 5)] = leather
+
+    # --- Lower torso (py=6) — leather chestpiece -----------------------
+    for px in range(w):
+        p[(px, 6)] = leather
+
+    # --- Chest-strap rows (py=7 / py=8) — throwing-knife bandoliers ----
+    # Two horizontal bands of rust-leather brown so they pop against the
+    # near-black leathers. The two rows at different heights read as crossed
+    # diagonal straps from any angle because they sit at different vertical
+    # heights of the same 3-wide torso column.
+    for px in range(w):
+        p[(px, 7)] = strap                    # lower bandolier row
+        p[(px, 8)] = strap                    # upper bandolier row
+
+    # --- Shoulders (py=9) — leather highlight --------------------------
+    # The shoulder caps sit at gx=-2 / +2 (px=1 / px=5); the torso voxels at
+    # py=9 are the upper torso. Paint the whole row in the slate highlight so
+    # the shoulder caps catch a brighter light than the chest below.
+    for px in range(w):
+        p[(px, 9)] = leather_hi
+
+    # --- Neck (py=10) — exposed wrap fabric ----------------------------
+    for px in range(w):
+        p[(px, 10)] = wrap
+
+    # --- Cloth face wrap (py=11..12) -----------------------------------
+    # Two rows of fabric covering chin/cheeks below the eyes. The hood does
+    # not extend this low, so this band is visible on the FRONT face of the
+    # head as a distinct cloth-wrap colour.
+    for py in range(11, 13):
+        for px in range(w):
+            p[(px, py)] = wrap
+
+    # --- Eye row (py=13) -----------------------------------------------
+    # Hood shadow base — the brow voxels above the eyes overhang and cast a
+    # deep shadow, so this row is near-black everywhere EXCEPT the two eye
+    # columns at px=2 (gx=-1) and px=4 (gx=+1), which glow ice-blue.
+    for px in range(w):
+        p[(px, 13)] = hood_shadow
+    p[(2, 13)] = eye
+    p[(4, 13)] = eye
+
+    # --- Hood crown + brim (py=14) -------------------------------------
+    # The forward brim and crown of the hood — slightly lighter than the
+    # main leathers (slate highlight) so the silhouette of the hood's top
+    # edge reads against the body below.
+    for px in range(w):
+        p[(px, 14)] = leather_hi
+
+    return w, h, p
+
+
+def skin_player_combat_engineer():
+    """Player Combat Engineer skin — hazard-orange exosuit + welder helm + power-pack.
+
+    Mesh grid: gx in [-6, 6] (w=13), gy in [0, 16] (h=17).
+    Offset: px = gx + 6, py = gy.
+
+    Power-pack voxels are uv-overridden by the mesh to sample three dedicated
+    pixels in the gx=6 column (px=12): (12, 14) gunmetal frame, (12, 13)
+    darker clamp, (12, 15) cyan glow vent. Those targets only exist on the
+    skin (no body voxel actually lives at gy=12+ on gx=6 except a single
+    pauldron ridge voxel at gy=11).
+    """
+    w, h = 13, 17
+
+    # Palette — industrial workshop colours, all RGBA.
+    suit        = (225, 120,  35, 255)   # hazard orange — main suit fill
+    suit_shadow = (170,  85,  25, 255)   # darker orange — limbs / shadowed sides
+    steel       = ( 70,  75,  80, 255)   # gunmetal — helm, gauntlets, boots, pack
+    steel_hi    = (120, 125, 135, 255)   # lighter steel highlight — pauldron tops
+    goggles     = (230, 180,  60, 255)   # glowing amber welder goggles
+    vent_glow   = ( 80, 200, 230, 255)   # cyan power-pack vent
+    black       = ( 30,  30,  35, 255)   # near-black joint seals / boot rubber
+
+    p = {}
+
+    # --- Base fill: suit_shadow so any unsampled pixel reads as a
+    #     dim industrial colour rather than transparent/black. ---
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = suit_shadow
+
+    # --- Boots (gy=0) — gunmetal stompers with a black rubber sole feel. ---
+    for px in range(w):
+        p[(px, 0)] = steel
+    # Add a black rubber accent on the four leg-column boot pixels so the
+    # toe-front voxels show as treaded rubber.
+    for px in (4, 5, 7, 8):
+        p[(px, 0)] = black
+
+    # --- Legs (gy=1..2) — darker orange shadow, suit's lower piston tubes. ---
+    for py in (1, 2):
+        for px in range(w):
+            p[(px, py)] = suit_shadow
+    # Knee joint seal (black band at gy=2) on the leg columns only.
+    for px in (4, 5, 7, 8):
+        p[(px, 2)] = black
+
+    # --- Hip / fist row (gy=3) — fists are gunmetal gauntlets, hips orange. ---
+    for px in range(w):
+        p[(px, 3)] = suit
+    for px in (1, 2, 10, 11):       # fist columns at gx=-5..-4 and gx=4..5
+        p[(px, 3)] = steel
+
+    # --- Hip / forearm rows (gy=4..6) — wide orange hip block + steel
+    #     gauntlet columns on the sides. ---
+    for py in (4, 5, 6):
+        for px in range(w):
+            p[(px, py)] = suit
+        for px in (1, 2, 10, 11):
+            p[(px, py)] = steel
+    # Black utility belt across the hip (gy=4) for an industrial harness look.
+    for px in range(3, 10):
+        p[(px, 4)] = black
+
+    # --- Forearm top row (gy=7) — still gauntlet on the side columns,
+    #     suit-orange on the torso columns. ---
+    for px in range(w):
+        p[(px, 7)] = suit
+    for px in (1, 2, 10, 11):       # forearm tops still steel
+        p[(px, 7)] = steel
+
+    # --- Torso (gy=8..10) — hazard orange with steel chest plate accent. ---
+    for py in (8, 9, 10):
+        for px in range(w):
+            p[(px, py)] = suit
+        # Upper-arm columns (gx=-4 / +4 → px=2/10) are gunmetal.
+        p[(2, py)] = steel
+        p[(10, py)] = steel
+    # Central chest plate (steel) — px=5..7 row gy=9.
+    for px in (5, 6, 7):
+        p[(5 + 0, 9)] = steel
+        p[(6, 9)] = steel
+        p[(7, 9)] = steel
+    # Hazard "warning" stripe across the chest (gy=10) — alternating black on
+    # the center five columns reads as workshop safety tape from any angle.
+    for px in (4, 6, 8):
+        p[(px, 10)] = black
+
+    # --- Pauldron + upper torso row (gy=11) ---
+    # Outer ridge voxels live at gx=-6/+6 (px=0/12) — steel highlight.
+    # The dome columns gx=-5..-4 (px=1..2) and gx=4..5 (px=10..11) carry
+    # the bulk of the pauldron — steel highlight.
+    # Torso columns (px=3..9) stay suit-orange.
+    for px in range(w):
+        p[(px, 11)] = suit
+    for px in (0, 1, 2, 10, 11, 12):
+        p[(px, 11)] = steel_hi
+
+    # --- Pauldron top row (gy=12) — outer dome columns gunmetal-light;
+    #     torso columns stay orange. ---
+    for px in range(w):
+        p[(px, 12)] = suit
+    for px in (1, 2, 10, 11):
+        p[(px, 12)] = steel_hi
+    # Power-pack frame pixel — gy=12 column gx=6 (px=12) is one of the pack
+    # uv-override targets.  Set the dedicated pack frame colour here too so
+    # the gx=6 column reads consistently if any voxel falls back to it.
+    p[(12, 12)] = steel
+
+    # --- Neck / gorget row (gy=13) — gunmetal collar; px=12 doubles as the
+    #     power-pack CLAMP uv-override target. ---
+    for px in range(w):
+        p[(px, 13)] = steel
+    p[(12, 13)] = steel        # dedicated pack clamp pixel (darker steel)
+
+    # --- Helm body row (gy=14) — gunmetal welder helm shell. ---
+    for px in range(w):
+        p[(px, 14)] = steel
+    p[(12, 14)] = steel        # dedicated pack frame uv-override target
+
+    # --- Goggle eye row (gy=15) — helm steel everywhere except the carved
+    #     front band (gx=-1..1 → px=5..7) which shows the glowing amber. ---
+    for px in range(w):
+        p[(px, 15)] = steel
+    for px in (5, 6, 7):
+        p[(px, 15)] = goggles
+    p[(12, 15)] = vent_glow    # dedicated pack VENT uv-override target
+
+    # --- Helm crown + brim row (gy=16) — lighter steel so the hardhat lip
+    #     reads against the helm body below. ---
+    for px in range(w):
+        p[(px, 16)] = steel_hi
+
+    return w, h, p
+
+
+def skin_player_marksman():
+    """Player Marksman skin — old-west sniper in tan duster + wide-brim hat.
+
+    Mesh grid: gx in [-2, 2] (w=5), gy in [0, 17] (h=18).
+    Pixel mapping: px = gx + 2, py = gy.
+
+    Notes on a few non-obvious cells:
+      * (px=4, py=17) is the dedicated uv_override target for the scope
+        voxel — that grid cell is otherwise unoccupied by the mesh, so
+        painting it gunmetal does not affect any other voxel face.
+      * py=14 is the head-top row whose front-face voxels were carved
+        away to suggest brim shadow. The remaining back voxels read as
+        the brim's underside / hat-line — paint them deep brown.
+      * py=13 is the eye row. The scope sits over the right eye and
+        overrides to (2,17), so the right-eye column itself can stay
+        face skin (otherwise its own pixel would be sampled by the
+        front-face eye-socket area).
+    """
+    w, h = 5, 18
+
+    # --- Palette (RGBA, 0..255) ---
+    duster      = (155, 120,  80, 255)   # warm tan duster body
+    duster_dark = ( 85,  60,  40, 255)   # dark brown duster shadow / coat panels
+    hat         = ( 75,  50,  30, 255)   # dark brown leather hat crown + brim
+    brim_shadow = ( 40,  25,  15, 255)   # deep brown shadow under brim / hat line
+    bandolier   = (115,  75,  45, 255)   # leather strap colour
+    brass       = (200, 165,  70, 255)   # cartridge brass accents
+    scope       = ( 85,  90,  95, 255)   # gunmetal grey scope-goggle
+    face        = (195, 155, 115, 255)   # tanned face skin
+    boot        = ( 60,  40,  25, 255)   # dark scuffed boot leather
+
+    p = {}
+
+    # --- Base fill: duster colour so any sampled-but-undefined pixel still
+    #     reads as the coat instead of black. ---
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = duster
+
+    # --- Boots (py=0..1) ---
+    # py=0 covers the full boot at gy=0; py=1 is the small heel riser. Both
+    # paint as dark boot leather.
+    for px in range(w):
+        p[(px, 0)] = boot
+        p[(px, 1)] = boot
+
+    # --- Coat hem flare (py=2..3) — slightly darker than the upper duster
+    #     so the bottom of the coat reads as shadowed. ---
+    for px in range(w):
+        p[(px, 2)] = duster_dark
+        p[(px, 3)] = duster_dark
+
+    # --- Lower coat / thigh row (py=4..5) — main duster colour. ---
+    for px in range(w):
+        p[(px, 4)] = duster
+        p[(px, 5)] = duster
+
+    # --- Belt accent (py=6) + torso lower (py=7). The belt row paints
+    #     darker so the waist reads against the bandolier above. ---
+    for px in range(w):
+        p[(px, 6)] = duster_dark
+        p[(px, 7)] = duster
+
+    # --- Bandolier row (py=8) — leather strap across the chest. ---
+    for px in range(w):
+        p[(px, 8)] = bandolier
+    # Brass cartridge dots scattered across the strap. With a 3-wide chest
+    # (px=1..3) we drop two visible cartridges; px=0 and px=4 are arm
+    # columns at this gy so they stay strap-leather (looks like the strap
+    # passing over the shoulder).
+    p[(1, 8)] = brass
+    p[(3, 8)] = brass
+
+    # --- Upper torso (py=9..10) — duster main. ---
+    for px in range(w):
+        p[(px,  9)] = duster
+        p[(px, 10)] = duster
+
+    # --- Neck (py=11) — narrow exposed throat read as flesh. ---
+    for px in range(w):
+        p[(px, 11)] = face
+
+    # --- Chin row (py=12) — face skin. ---
+    for px in range(w):
+        p[(px, 12)] = face
+
+    # --- Eye row (py=13) — face skin; eye sockets carved on the front
+    #     show this colour through. The scope voxel is uv-overridden to
+    #     (px=4, py=17) below, so the right-eye column stays face. ---
+    for px in range(w):
+        p[(px, 13)] = face
+    # Dark eye dots — paint the eye columns slightly darker so the carved
+    # sockets read as eye-holes. Back-of-head voxels in these columns are
+    # uv-remapped to (0,13) on the mesh side to avoid showing this dot on
+    # the rear of the skull.
+    p[(1, 13)] = brim_shadow   # left eye dot
+    p[(3, 13)] = brim_shadow   # right eye dot (sits behind the scope)
+
+    # --- Head top row (py=14) — front carved away in the mesh; remaining
+    #     back voxels read as deep shadow / hairline under the brim. ---
+    for px in range(w):
+        p[(px, 14)] = brim_shadow
+
+    # --- Brim row (py=15) — hat leather. Every face of each brim voxel
+    #     (top, sides, underside) shares this one pixel, so a deep
+    #     leather brown reads as a heavy brim from any angle. ---
+    for px in range(w):
+        p[(px, 15)] = hat
+
+    # --- Hat crown (py=16..17) — leather crown. ---
+    for px in range(w):
+        p[(px, 16)] = hat
+        p[(px, 17)] = hat
+    # Scope uv-override target: (px=4, py=17) — gunmetal grey. The crown
+    # voxels only occupy gx=-1..1 (px=1..3) at gy=17, so px=4 is unused
+    # and safe to repurpose for the scope colour.
+    p[(4, 17)] = scope
+
+    return w, h, p
+
+
+def skin_player_tinkerer():
+    """Player Tinkerer skin — slate-blue vest + teal undershirt + brass goggles.
+
+    Mesh grid: gx in [-2, 2] (w=5), gy in [0, 14] (h=15).
+    Offset: px = gx + 2, py = gy.
+
+    Column layout:
+      px=0 (gx=-2): arm column + belt extension; gy=11 = TAN pouch pixel
+                    referenced by the mesh's uv_overrides for the two pouches.
+      px=1 (gx=-1): left half of body (boot/shin/thigh/hip/vest/face).
+      px=2 (gx= 0): centre column — UNDERSHIRT TEAL in the torso rows so the
+                    unbuttoned-vest gap shows the undershirt through.
+      px=3 (gx= 1): right half of body (mirror of px=1).
+      px=4 (gx= 2): arm column + chrome drone perch pixel at gy=11.
+    """
+    # CRITICAL: brass goggles sit ABOVE the eye row (gy=14 forehead band,
+    # eyes carved at gy=13). This is the defining cue that separates the
+    # Tinkerer from the Combat Engineer (whose welder goggles are at the
+    # eye row).
+    w, h = 5, 15
+
+    # Palette (RGBA, 0-255).
+    vest        = ( 80, 100, 130, 255)   # slate-blue mechanic's vest
+    vest_shadow = ( 50,  65,  90, 255)   # darker vest seam
+    undershirt  = ( 55, 130, 130, 255)   # teal undershirt visible in centre
+    pants       = (100,  75,  50, 255)   # medium brown leather pants
+    belt_strap  = ( 65,  45,  30, 255)   # dark leather belt
+    pouch_tan   = (140, 105,  70, 255)   # tan-leather pouch highlight
+    brass       = (195, 155,  60, 255)   # brass goggles (forehead band)
+    face_skin   = (210, 180, 145, 255)   # light olive face/hand skin
+    eye_dark    = ( 50,  30,  15, 255)   # dark warm eye dots
+    boot        = ( 80,  60,  40, 255)   # scuffed leather boot
+    drone       = (120, 160, 200, 255)   # chrome-blue drone perch
+    # Slightly darker face for the mouth column so the carved grin reads.
+    mouth_dim   = (150, 115,  90, 255)
+
+    p = {}
+
+    # Default fill — vest_shadow is a quiet neutral so any cell that ends up
+    # sampled by an adjacent voxel face reads as a dark seam rather than
+    # transparent black.
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = vest_shadow
+
+    # --- Boots (gy=0) ---
+    for px in range(w):
+        p[(px, 0)] = boot
+
+    # --- Pants (gy=1..3) ---
+    for py in range(1, 4):
+        for px in range(w):
+            p[(px, py)] = pants
+
+    # --- Hip row (gy=4) — pants + bare hands at the arm columns ---
+    for px in range(w):
+        p[(px, 4)] = pants
+    p[(0, 4)] = face_skin   # left bare hand at gx=-2
+    p[(4, 4)] = face_skin   # right bare hand at gx=+2
+
+    # --- Utility belt (gy=5) — dark leather strap across the whole row.
+    #     Pouch voxels (uv-overridden) sample (px=0, py=11) instead, so they
+    #     read as a brighter tan against the dark strap.
+    for px in range(w):
+        p[(px, 5)] = belt_strap
+
+    # --- Torso (gy=6..10) — vest flaps + undershirt centre + vest sleeves ---
+    # Centre column (px=2 = gx=0) is teal undershirt visible between the
+    # vest flaps. gx=-1/+1 columns are slate-blue vest. Arm columns
+    # (px=0/4 = gx=-2/+2) painted vest blue so the sleeves match the vest.
+    for py in range(6, 11):
+        p[(0, py)] = vest          # left sleeve
+        p[(1, py)] = vest          # left vest panel + flap
+        p[(2, py)] = undershirt    # centre undershirt strip
+        p[(3, py)] = vest          # right vest panel + flap
+        p[(4, py)] = vest          # right sleeve
+
+    # Vertical vest seam — slightly darker band on the flap columns at one
+    # row (gy=7) so the vest reads as a sewn unbuttoned edge rather than a
+    # flat blue slab.
+    p[(1, 7)] = vest_shadow
+    p[(3, 7)] = vest_shadow
+
+    # --- Row gy=11 ---
+    #   px=0: FREE -> TAN POUCH pixel (mesh uv_overrides target).
+    #   px=1: FREE (vest_shadow default; no voxel samples it).
+    #   px=2: neck voxel -> face skin.
+    #   px=3: FREE.
+    #   px=4: DRONE PERCH voxel -> chrome blue.
+    p[(0, 11)] = pouch_tan
+    p[(2, 11)] = face_skin
+    p[(4, 11)] = drone
+
+    # --- Head row gy=12 — chin / mouth ---
+    for px in range(w):
+        p[(px, 12)] = face_skin
+    p[(2, 12)] = mouth_dim         # mouth column (centre, gx=0)
+
+    # --- Head row gy=13 — eyes ---
+    # Centre column = face skin; gx=-1/+1 columns = DARK EYE so the carved
+    # front-face holes at (gx=±1, gy=13, gz=-1) reveal a dark voxel behind.
+    # (Side and back faces of the eye columns will also sample this dark
+    # pixel — accepted bleed; palette is muted enough that it still reads as
+    # a face from oblique angles.)
+    for px in range(w):
+        p[(px, 13)] = face_skin
+    p[(1, 13)] = eye_dark          # left eye  (gx=-1)
+    p[(3, 13)] = eye_dark          # right eye (gx=+1)
+
+    # --- Head row gy=14 — FOREHEAD / BRASS GOGGLE BAND ---
+    # Entire row is brass so the goggle strap wraps around the head (front
+    # goggle plates protruding at gz=-2, side straps, rear band). This is
+    # the defining visual cue of the Tinkerer.
+    for px in range(w):
+        p[(px, 14)] = brass
+
+    return w, h, p
+
+
+def skin_player_sorcerer():
+    """Player Sorcerer skin - deep purple robe + star-blue trim + glowing eyes.
+
+    Mesh grid: gx in [-3, 3] (w=7), gy in [0, 17] (h=18).
+    Offset: px = gx + 3, py = gy.
+
+    Palette is deliberately muted on the hood-shadow row so the cyan eye
+    pixels read as the focal point. The hood-shadow row paints the *inside*
+    of the hood (the gz=0 voxels exposed by carving away gz=-1); the mesh's
+    uv_overrides remap the back-of-hood voxels to robe-purple pixels so the
+    rear of the hood doesn't read as shadow.
+    """
+    w, h = 7, 18
+
+    # --- Palette ---------------------------------------------------------
+    robe       = ( 70,  40, 110, 255)  # deep purple - main robe/hood fabric
+    trim       = ( 90, 130, 200, 255)  # star-blue trim (hem & hood lining)
+    sash       = (140,  90, 200, 255)  # brighter blue-purple sash band
+    shadow     = ( 20,  15,  35, 255)  # near-black inside the hood
+    eye        = (140, 220, 255, 255)  # bright cyan-blue glowing eye
+
+    p = {}
+
+    # --- Base fill: everything starts as robe purple so any unused pixel
+    #     sampled by an adjacent voxel still reads as fabric. ---
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = robe
+
+    # --- Robe hem (gy=0) - star-blue trim band ---
+    # The hem is the visible bottom of the robe; trim it in star-blue to
+    # echo the celestial-scholar palette.
+    for px in range(w):
+        p[(px, 0)] = trim
+
+    # --- Robe skirt + torso (gy=1..6, gy=8..11) - solid robe purple ---
+    # Already filled with robe; no further changes needed for these rows.
+
+    # --- Sash band (gy=7) - bright blue-purple ---
+    for px in range(w):
+        p[(px, 7)] = sash
+
+    # --- Hood shadow row 1 (gy=12) - lower face row, all shadow ---
+    # The mesh carved away the entire front face of the hood at gy=12, so
+    # this whole row shows the inside of the hood through the opening.
+    for px in range(w):
+        p[(px, 12)] = shadow
+
+    # --- Hood shadow row 2 (gy=13) - eye row, shadow with two glowing eyes ---
+    # The mesh kept only the eye voxels at the front; the rest of this row
+    # is the carved interior shadow.
+    for px in range(w):
+        p[(px, 13)] = shadow
+    # Left eye: gx=-1 -> px=2.  Right eye: gx=1 -> px=4.
+    # KEEP cyan only on the two eye columns so the side-face leakage reads
+    # as a faint spell-light glow rather than as a band of cyan.
+    p[(2, 13)] = eye
+    p[(4, 13)] = eye
+
+    # --- Hood crown / point (gy=14..17) - robe purple, already filled ---
+    # The hood tapers to a single point voxel at the top; keep it the same
+    # purple as the rest of the hood for a unified silhouette.
+
+    return w, h, p
+
+
+def skin_player_wanderer():
+    """Player Wanderer skin — tattered traveler's robe + face scarf + arm wraps.
+
+    Mesh grid: gx in [-2, 2] (w=5), gy in [0, 15] (h=16).
+    Offset: px = gx + 2, py = gy.
+
+    The mesh remaps the back-of-head eye voxels to pixel (0, 15) for the
+    hair colour, and remaps a diagonal satchel-strap stripe (plus the
+    pouch voxel) to pixel (0, 0) — that cell is otherwise unsampled
+    because the gx=-2 column has no voxel at gy=0 (only the gx=-1/+1 leg
+    columns reach the floor).
+    """
+    w, h = 5, 16
+
+    # Palette — muted earth tones. Robe and arm wraps are deliberately close
+    # in value because they're meant to read as the same dusty linen.
+    robe_main   = (225, 210, 185, 255)   # off-white linen
+    robe_shadow = (170, 155, 130, 255)   # tan-grey under-shadow
+    robe_dust   = (130, 105,  80, 255)   # dusty brown — bottommost hem row
+    wrap        = (210, 195, 170, 255)   # arm wraps (forearm-to-elbow)
+    scarf       = (140, 135, 125, 255)   # dust-grey face scarf
+    skin_tan    = (190, 160, 130, 255)   # bare tanned skin
+    hair        = ( 60,  45,  30, 255)   # dark brown hair / scalp
+    eye_dark    = ( 45,  35,  25, 255)   # eyes — warm dark
+    strap       = ( 95,  65,  40, 255)   # leather satchel strap + pouch
+
+    p = {}
+
+    # --- Base fill: everything starts as bare tanned skin so any pixel cell
+    #     that happens to be sampled but not explicitly set still reads as a
+    #     coherent warm tone. ---
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = skin_tan
+
+    # --- py=0: foot row + leather-strap override pixel ---
+    # (px=0, py=0) is the UV-override target for the satchel strap and
+    # pouch — make it explicitly leather brown. The (px=1) and (px=3)
+    # cells carry the bare lower-leg voxels; (px=2) and (px=4) are unused
+    # at this row.
+    p[(0, 0)] = strap                     # dedicated strap pixel
+    p[(1, 0)] = skin_tan                  # left foot
+    p[(2, 0)] = skin_tan                  # unsampled — neutral
+    p[(3, 0)] = skin_tan                  # right foot
+    p[(4, 0)] = skin_tan                  # unsampled — neutral
+
+    # --- py=1: lower shin (bare skin) ---
+    for px in range(w):
+        p[(px, 1)] = skin_tan
+
+    # --- py=2: ragged hem long-tatter row (only px=1 and px=3 are filled) ---
+    # The bottommost robe row is dusty brown so the tatters read filthy
+    # from travel.
+    for px in range(w):
+        p[(px, 2)] = robe_dust
+
+    # --- py=3: hem full row + hand fists ---
+    # px=0 and px=4 are HAND fists (bare skin); px=1..3 are inner hem
+    # fabric rendered in dusty brown.
+    p[(0, 3)] = skin_tan                  # left fist
+    p[(1, 3)] = robe_dust                 # hem inner left
+    p[(2, 3)] = robe_dust                 # hem center
+    p[(3, 3)] = robe_dust                 # hem inner right
+    p[(4, 3)] = skin_tan                  # right fist
+
+    # --- py=4..6: lower robe body + arm wraps ---
+    # px=0 and px=4 share their column between the lower robe (gx=-2 only)
+    # and the arm forearm: paint them as wrap fabric so the forearm reads
+    # as the wrap band. px=1..3 are the inner robe.
+    for py in range(4, 7):
+        p[(0, py)] = wrap
+        p[(1, py)] = robe_main
+        p[(2, py)] = robe_main
+        p[(3, py)] = robe_main
+        p[(4, py)] = wrap
+
+    # --- py=7: top of the lower robe / forearm-to-elbow transition ---
+    # robe_shadow reads as a soft cinch line just under the slim torso.
+    for px in range(w):
+        p[(px, 7)] = robe_shadow
+
+    # --- py=8..10: slim torso (robe top) + bare upper arms ---
+    # px=0 and px=4 are the bare upper-arm columns. px=1..3 are torso fabric.
+    for py in range(8, 11):
+        p[(0, py)] = skin_tan             # bare left upper arm
+        p[(1, py)] = robe_main
+        p[(2, py)] = robe_main
+        p[(3, py)] = robe_main
+        p[(4, py)] = skin_tan             # bare right upper arm
+
+    # --- py=11: neck (only px=2 has a voxel) ---
+    for px in range(w):
+        p[(px, 11)] = skin_tan
+
+    # --- py=12..13: scarf wrapping the lower half of the face ---
+    # Two voxel rows tall — covers mid-nose down to chin per the brief.
+    for py in (12, 13):
+        for px in range(w):
+            p[(px, py)] = scarf
+
+    # --- py=14: eye row ---
+    # px=1 and px=3 are the visible eye voxels (front face carved); the
+    # other head voxels in those columns are uv-remapped to (0, 15) hair,
+    # so the eye pixel only shows through the carved holes. px=0, px=2, and
+    # px=4 are non-eye head voxels (sides + nose bridge) — paint as bare
+    # skin (above the scarf line).
+    p[(0, 14)] = skin_tan                 # left temple
+    p[(1, 14)] = eye_dark                 # left eye (gx=-1)
+    p[(2, 14)] = skin_tan                 # nose bridge
+    p[(3, 14)] = eye_dark                 # right eye (gx=+1)
+    p[(4, 14)] = skin_tan                 # right temple
+
+    # --- py=15: top of head (hair) — also the back-of-head uv-override target ---
+    for px in range(w):
+        p[(px, 15)] = hair
+
+    return w, h, p
+
+
+def skin_player_ranger():
+    """Player Ranger skin — mossy-green hooded cloak, leather accents, leaf cape.
+
+    Mesh grid (from gen_player_ranger): gx in [-3, 3] (w=7), gy in [0, 17]
+    (h=18). Offset: px = gx + 3, py = gy.
+
+    Special uv-override targets (set up by the mesh):
+      * (px=6, py=17) — cape body. The cape voxels at gz=2 sample only
+        this texel, so it carries the cloak-green even though those voxels
+        share gy with the leather belt row.
+      * (px=6, py=16) — leaf-accent (the lowest center fringe drops).
+      * (px=6, py=15) — quiver brown (the two arrow-rods on the upper back).
+      * Hood-back layer (gz=2, gy=12..15) is also remapped to (px=6, py=17),
+        so the back of the hood reads as cloak.
+    """
+    w, h = 7, 18
+
+    # Palette — chosen so a single pixel reads acceptably on every face of
+    # the voxel column. Greens are slightly desaturated forest tones.
+    cloak       = ( 80, 110,  60, 255)   # mossy green — main cloak/hood
+    cloak_dark  = ( 50,  75,  40, 255)   # darker green — limbs / lower cloak
+    leather     = ( 95,  65,  35, 255)   # warm brown — boots/belt/gloves
+    boot_light  = (115,  80,  45, 255)   # slightly lighter boot leather
+    skin_tan    = (195, 160, 130, 255)   # pale tan — exposed face
+    skin_shadow = (165, 130, 100, 255)   # cheek/jaw shadow under the hood
+    eye         = ( 50,  85,  45, 255)   # muted forest-green eye
+    mouth       = (110,  75,  60, 255)   # muted lip color
+    quiver      = (110,  60,  35, 255)   # red-tinged quiver brown
+    leaf        = (160, 180,  80, 255)   # yellow-green leaf accent
+
+    p = {}
+
+    # --- Base fill: cloak green everywhere so any unused / accidentally
+    # sampled texel still reads as fabric instead of stark black. ---
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = cloak
+
+    # --- Boots (py=0) — warm leather brown ---
+    for px in range(w):
+        p[(px, 0)] = leather
+    # Slight highlight on the boot toe columns (gx=-2 / +1 are the shin/boot
+    # columns) so the boots don't read as a uniform brown smear.
+    p[(1, 0)] = boot_light    # gx=-2
+    p[(4, 0)] = boot_light    # gx=+1
+
+    # --- Shin / ankle (py=1) — dark cloak (pant leg) ---
+    for px in range(w):
+        p[(px, 1)] = cloak_dark
+
+    # --- Thighs (py=2..3) — dark green leggings ---
+    for py in (2, 3):
+        for px in range(w):
+            p[(px, py)] = cloak_dark
+    # Gloves (gx=-3 / +3 → px=0 / px=6) at py=3 — leather brown so the
+    # hands read as wrapped/gloved against the green sleeves.
+    p[(0, 3)] = leather
+    p[(6, 3)] = leather
+
+    # --- Hips / lower cloak (py=4) — main cloak green ---
+    for px in range(w):
+        p[(px, 4)] = cloak
+
+    # --- Belt row (py=5) — leather strip across the waist ---
+    for px in range(w):
+        p[(px, 5)] = leather
+    # Tiny center buckle highlight.
+    p[(3, 5)] = (140, 105, 55, 255)
+
+    # --- Waist + torso cloak (py=6..10) — main cloak green ---
+    for py in range(6, 11):
+        for px in range(w):
+            p[(px, py)] = cloak
+    # Center vertical seam line (slightly darker) — px=3 is gx=0.
+    for py in range(7, 10):
+        p[(3, py)] = cloak_dark
+
+    # --- Shoulders + upper-arm seam (py=10..11) — slight highlight on the
+    # outer columns where the arms / shoulder caps sit. ---
+    for py in (10, 11):
+        p[(0, py)] = cloak_dark    # gx=-3 (left arm)
+        p[(6, py)] = cloak_dark    # gx=+3 (right arm)
+
+    # --- Neck / chin / cheek-drape band (py=11..12) ---
+    # Inner columns (gx=-1..1 → px=2..4) hold the chin/jaw → skin tone.
+    # Outer columns (gx=-2, gx=+2 → px=1, px=5) are the hood cheek drape.
+    # Edge columns (gx=±3) are arms.
+    for py in (11, 12):
+        p[(0, py)] = cloak_dark            # left arm column (gy=11 has shoulder cap voxel)
+        p[(1, py)] = cloak                  # left hood cheek drape
+        p[(2, py)] = skin_shadow            # left jaw/cheek (under-hood shadow)
+        p[(3, py)] = skin_tan               # chin center
+        p[(4, py)] = skin_shadow            # right jaw/cheek
+        p[(5, py)] = cloak                  # right hood cheek drape
+        p[(6, py)] = cloak_dark             # right arm column
+    # Mouth — px=3 (gx=0) at py=12 reads through the carved mouth hole.
+    p[(3, 12)] = mouth
+
+    # --- Face row (py=13) — chin / jaw ---
+    p[(0, 13)] = cloak_dark
+    p[(1, 13)] = cloak           # left hood side
+    p[(2, 13)] = skin_shadow     # left cheek
+    p[(3, 13)] = skin_tan        # nose / center
+    p[(4, 13)] = skin_shadow     # right cheek
+    p[(5, 13)] = cloak           # right hood side
+    p[(6, 13)] = cloak_dark
+
+    # --- Eye row (py=14) — exposed face under the low hood ---
+    p[(0, 14)] = cloak_dark
+    p[(1, 14)] = cloak           # left hood side
+    p[(2, 14)] = eye             # left eye (gx=-1 → px=2)
+    p[(3, 14)] = skin_tan        # bridge of the nose
+    p[(4, 14)] = eye             # right eye (gx=+1 → px=4)
+    p[(5, 14)] = cloak           # right hood side
+    p[(6, 14)] = cloak_dark
+
+    # --- Forehead / brow band (py=15) ---
+    # Under the hood — paint the inner head columns as dark hood shadow
+    # so the forehead doesn't glow brighter than the cheeks.
+    for px in range(w):
+        p[(px, 15)] = cloak_dark
+    # Outer hood sides at py=15 stay main cloak so the silhouette pops.
+    p[(1, 15)] = cloak
+    p[(5, 15)] = cloak
+
+    # --- Hood top (py=16..17) — main cloak green ---
+    for py in (16, 17):
+        for px in range(w):
+            p[(px, py)] = cloak
+
+    # --- Dedicated uv-override texels (top-right corner) ---
+    # The mesh's uv_overrides aim cape body voxels at (3, 17) → px = 6,
+    # leaf voxels at (3, 16) → px = 6, quiver voxels at (3, 15) → px = 6.
+    # Hood-back voxels also point at (6, 17). Repaint those three cells
+    # with their dedicated colors (the base-fill already set them to
+    # cloak; we only need to set the special ones).
+    p[(6, 17)] = cloak       # cape body / hood-back — keep cloak green
+    p[(6, 16)] = leaf        # leaf accent
+    p[(6, 15)] = quiver      # quiver rod brown
+
+    return w, h, p
+
+
 SKIN_TYPES = {
     "skeleton":           ("skeleton_skin_42.png",           skin_skeleton),
     "spider":             ("spider_skin_42.png",             skin_spider),
@@ -3819,6 +4874,15 @@ SKIN_TYPES = {
     "mage":               ("mage_skin_42.png",               skin_mage),
     "rogue":              ("rogue_skin_42.png",              skin_rogue),
     "paladin":            ("paladin_skin_42.png",            skin_paladin),
+    "player_warrior":     ("player_warrior_skin_42.png",     skin_player_warrior),
+    "player_paladin":     ("player_paladin_skin_42.png",     skin_player_paladin),
+    "player_rogue":       ("player_rogue_skin_42.png",       skin_player_rogue),
+    "player_combat_engineer": ("player_combat_engineer_skin_42.png", skin_player_combat_engineer),
+    "player_marksman":    ("player_marksman_skin_42.png",    skin_player_marksman),
+    "player_tinkerer":    ("player_tinkerer_skin_42.png",    skin_player_tinkerer),
+    "player_sorcerer":   ("player_sorcerer_skin_42.png",   skin_player_sorcerer),
+    "player_wanderer":    ("player_wanderer_skin_42.png",    skin_player_wanderer),
+    "player_ranger":      ("player_ranger_skin_42.png",      skin_player_ranger),
     "butcher":            ("butcher_skin_42.png",            skin_butcher),
     # Bat-rig variants
     "imp":                ("imp_skin_42.png",                skin_imp),

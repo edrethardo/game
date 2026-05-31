@@ -3325,6 +3325,1188 @@ def gen_reaper(height=2.6):
     return mb
 
 
+def gen_player_warrior(height=1.8):
+    """Player Warrior class — heavy plate veteran with crimson sash + cape.
+
+    Stocky / hulking silhouette: widened torso, oversized rounded pauldrons,
+    full great-helm with a single horizontal eye-slit, short cape draped
+    behind the shoulders. Reads as a wall rather than as a tall figure.
+    Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    # 17 voxels tall — one extra row over the standard 16-voxel humanoid so
+    # the helm sits a bit higher and the build reads as "hulking" without
+    # actually being taller than a 1.8 m human in world units.
+    vs = height / 17.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Full great helm (gy=14..16) ---
+    # Wide 5-voxel block, 3 tall, 4 deep — fully encloses the head, no skin.
+    fill_box(-2, 14, -2, 5, 3, 4)
+    # Carve the FRONT face of the middle row to make a horizontal eye-slit.
+    # Only gz=-2 is discarded so the slit color shows on the helm's front
+    # but the helmet shell stays solid on its sides/back — otherwise the
+    # dark eye-slit pixel column would bleed onto the side faces too.
+    for gx in range(-1, 2):           # gx = -1, 0, 1 — slit is 3 voxels wide
+        filled.discard((gx, 15, -2))
+    # Helm crest/dome — a slightly narrower row on top so the silhouette
+    # doesn't read as a pure cube.
+    fill_box(-1, 17, -1, 3, 0, 0)     # (no-op safety; explicit add below)
+    for gx in range(-1, 2):
+        filled.add((gx, 17, -1))
+        filled.add((gx, 17, 0))
+
+    # --- Neck gorget (thick, hidden under helm rim) ---
+    fill_box(-1, 13, -1, 3, 1, 2)
+
+    # --- Broad armored torso (gy=7..12) ---
+    # 7 voxels wide (gx=-3..3) — broader than the 5-wide paladin chest so
+    # the warrior reads "wall-like" from the front.
+    fill_box(-3, 7, -1, 7, 6, 3)
+
+    # --- Crimson sash band (gy=6) ---
+    # One row across the waist — the skin texture paints this row red.
+    fill_box(-3, 6, -1, 7, 1, 3)
+
+    # --- Belt + tassets (gy=4..5) ---
+    fill_box(-3, 4, -1, 7, 2, 3)
+
+    # --- Oversized rounded pauldrons (gy=11..13) ---
+    # Extend out to gx=-5/+5, 2 voxels thick. Top corners trimmed to give
+    # a "rounded" feel (a flat 2x3 block reads as a brick).
+    fill_box(-5, 11, -1, 2, 2, 3)     # left pauldron block
+    fill_box( 4, 11, -1, 2, 2, 3)     # right pauldron block
+    # Trim the outer top corners so each pauldron has a rounded shoulder line.
+    filled.discard((-5, 12, -1))
+    filled.discard((-5, 12,  1))
+    filled.discard(( 5, 12, -1))
+    filled.discard(( 5, 12,  1))
+    # Pauldron top cap — single voxel ridge for a more sculpted look.
+    filled.add((-4, 13, 0))
+    filled.add(( 4, 13, 0))
+
+    # --- Thick armored arms ---
+    # Arms hang below the pauldron at gx=-4 / +4 so the pauldron silhouette
+    # overhangs the shoulder joint (chunky look).
+    fill_box(-4, 8, 0, 1, 3, 1)       # left upper arm
+    fill_box( 4, 8, 0, 1, 3, 1)       # right upper arm
+    fill_box(-4, 4, 0, 1, 4, 1)       # left lower arm + gauntlet upper
+    fill_box( 4, 4, 0, 1, 4, 1)       # right lower arm + gauntlet upper
+    # Gauntlet fists — protrude forward (gz=-1) so they read as fists.
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box( 4, 3, -1, 1, 1, 2)
+
+    # --- Heavy armored legs ---
+    fill_box(-2, 2, -1, 2, 2, 2)      # left thigh
+    fill_box( 1, 2, -1, 2, 2, 2)      # right thigh
+    fill_box(-2, 0, -1, 2, 2, 2)      # left greave
+    fill_box( 1, 0, -1, 2, 2, 2)      # right greave
+    # Sabatons — armored boots with extended toe (gz=-2).
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box( 1, 0, -2, 2, 1, 3)
+
+    # --- Crimson cape behind the shoulders ---
+    # Draped down the back from the pauldrons to below the waist. Placed at
+    # gz=2 (one voxel behind the torso's back face at gz=1) so it reads as a
+    # separate layer rather than just a back-coloured torso row.
+    cape_voxels = []
+    def add_cape(x, y, z):
+        v = (x, y, z)
+        filled.add(v)
+        cape_voxels.append(v)
+
+    for gy in range(7, 13):           # cape body gy=7..12 (behind pauldrons → waist)
+        for gx in range(-2, 3):
+            add_cape(gx, gy, 2)
+    for gx in range(-1, 2):           # cape tail gy=5..6 (narrower)
+        add_cape(gx, 6, 2)
+        add_cape(gx, 5, 2)
+    add_cape(0, 4, 2)                  # cape tip
+
+    # Cape voxels share (gx, gy) with torso/sash/belt columns, so we must
+    # remap them to a dedicated "cape" pixel — otherwise the cape would paint
+    # the plate-grey torso colour. We pick (gx=5, gy=17): the gx=5 column is
+    # only occupied by the pauldron at gy=11..13, and gy=17 is the helm
+    # crest row (only gx=-1..1) — so this grid cell has no natural sampler.
+    # uv_overrides values are in GRID space (line 237: ugx - min_gx), so
+    # (5, 17) -> pixel (5 - (-5), 17) = (10, 17), the top-right texel.
+    uv_overrides = {v: (5, 17) for v in cape_voxels}
+
+    # Grid: gx in [-5, 5] (w=11), gy in [0, 17] (h=18)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs), uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_player_paladin(height=1.85):
+    """Player Paladin class — holy crusader in white-and-gold plate.
+
+    Reads visibly more ornate than the existing `gen_paladin` NPC:
+      - Winged helm (small wing-flares at ear height on each side).
+      - Tall helm crest spine + flat-top crown.
+      - Centered sunburst chest emblem on a gold-trimmed white tabard
+        that hangs down the FRONT of the torso to mid-thigh.
+      - Chunky pauldrons that overhang the shoulders.
+      - Heavy plate boots that rise up the calf.
+    Origin at feet (Y=0). Tall, proud silhouette — squared shoulders.
+    """
+    mb = MeshBuilder()
+    # 17 voxels tall (matches the warrior class). vs slightly tall vs the
+    # 16-voxel NPC paladin so the figure reads as a proud crusader.
+    vs = height / 17.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Helm (gy=13..16) ---
+    # 5-wide, 3-tall block — fully encloses the head.
+    fill_box(-2, 13, -2, 5, 3, 4)
+    # Visor slit at gy=14 (eye row). Discard only the FRONT face (gz=-2);
+    # side and back faces stay solid so the dark slit colour doesn't bleed
+    # onto the helm sides via the per-voxel UV lookup.
+    for gx in range(-2, 3):
+        filled.discard((gx, 14, -2))
+
+    # --- Winged helm: small wing-flares at ear height (gy=14..15) ---
+    # Two-voxel triangular wings on each side, sloping up-and-back so the
+    # silhouette reads as feathered rather than as a brick. Wings sit at
+    # gz=0..1 (mid/back of helm) and reach out to gx=-4 / +4.
+    # Left wing: lower voxel forward, upper voxel back & slightly higher.
+    filled.add((-3, 14, 0))    # inner wing root (touches helm side)
+    filled.add((-4, 14, 0))    # outer wing tip lower
+    filled.add((-4, 15, 1))    # outer wing tip upper-back (sloped up & back)
+    # Right wing mirrored.
+    filled.add(( 3, 14, 0))
+    filled.add(( 4, 14, 0))
+    filled.add(( 4, 15, 1))
+
+    # --- Helm crest (gy=17): tall narrow spine on top of the crown ---
+    # A 3-voxel ridge along the centerline gives the proud-crusader profile
+    # and distinguishes this from the flat-top NPC paladin helm.
+    for gx in range(-1, 2):
+        filled.add((gx, 17, 0))
+    # Single peak voxel at the front of the crest for a forward-leaning
+    # plume — adds asymmetry vs the flat warrior helm cap.
+    filled.add((0, 17, -1))
+
+    # --- Neck gorget / collar (gy=12) ---
+    # 3-wide, 2-deep — visible band between helm rim and chest plate.
+    fill_box(-1, 12, -1, 3, 1, 2)
+
+    # --- Squared chest plate (gy=6..11) ---
+    # 5 wide (gx=-2..2), 3 deep — a "proud" rectangular torso rather than
+    # a 7-wide warrior wall, so the tabard reads clearly down the centre.
+    fill_box(-2, 6, -1, 5, 6, 3)
+
+    # --- Belt / tassets (gy=4..5) ---
+    fill_box(-2, 4, -1, 5, 2, 3)
+
+    # --- Chunky pauldrons (gy=10..12) ---
+    # Extend one voxel WIDER than the torso (out to gx=-5 / +5) and one
+    # voxel TALLER than the warrior's so they over-hang the shoulder.
+    fill_box(-5, 10, -1, 2, 3, 3)     # left pauldron
+    fill_box( 4, 10, -1, 2, 3, 3)     # right pauldron
+    # Round the outer top corners so the pauldrons don't read as bricks.
+    filled.discard((-5, 12, -1))
+    filled.discard((-5, 12,  1))
+    filled.discard(( 5, 12, -1))
+    filled.discard(( 5, 12,  1))
+    # Pauldron ridge cap — a single highlight voxel on each shoulder top.
+    filled.add((-4, 13, 0))
+    filled.add(( 4, 13, 0))
+
+    # --- Armoured arms (gy=4..9) ---
+    # Arms hang one column inside the pauldrons (gx=-4 / +4) so the
+    # pauldron silhouette overhangs them.
+    fill_box(-4, 7, 0, 1, 3, 1)       # left upper arm
+    fill_box( 4, 7, 0, 1, 3, 1)       # right upper arm
+    fill_box(-4, 4, 0, 1, 3, 1)       # left forearm
+    fill_box( 4, 4, 0, 1, 3, 1)       # right forearm
+    # Gauntlets — protrude forward for a clenched-fist read.
+    fill_box(-4, 3, -1, 1, 1, 2)
+    fill_box( 4, 3, -1, 1, 1, 2)
+
+    # --- Legs ---
+    fill_box(-2, 2, -1, 2, 2, 2)      # left thigh
+    fill_box( 1, 2, -1, 2, 2, 2)      # right thigh
+    # Heavy plate boots that extend up the calf (gy=0..1) and one row
+    # higher than the warrior sabatons via the greave-overlap below.
+    fill_box(-2, 0, -1, 2, 2, 2)      # left greave/upper boot
+    fill_box( 1, 0, -1, 2, 2, 2)      # right greave/upper boot
+    # Sabaton toe-caps extend forward (gz=-2) for a chunky armoured foot.
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box( 1, 0, -2, 2, 1, 3)
+
+    # --- Tabard: 3-wide vertical strip on the FRONT of the torso ---
+    # Hangs from upper chest (gy=10) to mid-thigh (gy=3) at gz=-2 (one
+    # voxel in front of the torso's front face at gz=-1). Tracking the
+    # voxels lets us paint them with a dedicated cream-tabard pixel.
+    tabard_voxels = []
+    def add_tabard(x, y, z):
+        v = (x, y, z)
+        filled.add(v)
+        tabard_voxels.append(v)
+    for gy in range(3, 11):
+        for gx in range(-1, 2):
+            add_tabard(gx, gy, -2)
+
+    # --- Sunburst chest emblem ---
+    # Central voxel on the upper-chest of the tabard, plus a small halo
+    # ring at the same row so the emblem reads from distance. The halo
+    # voxels are tracked separately so the skin can paint them lighter
+    # gold (a "rays" ring) while the centre uses rich gold.
+    sunburst_center = (0, 10, -2)      # exists already (part of tabard)
+    sunburst_halo = []
+    # Halo ring: 4 voxels around centre on the same gz=-2 plane.
+    for (hx, hy) in [(-1, 10), (1, 10), (0, 11), (0, 9)]:
+        # gy=11 / gy=9 halo voxels — add only if not already part of tabard,
+        # otherwise just track them for the UV override.
+        v = (hx, hy, -2)
+        if v not in filled:
+            filled.add(v)
+        sunburst_halo.append(v)
+
+    # --- UV overrides ----------------------------------------------------
+    # Several voxels live in (gx, gy) columns shared with plate-grey armour,
+    # so we redirect their UV sample to dedicated palette pixels in unused
+    # corners of the grid. The grid is gx in [-5, 5] (min=-5) and
+    # gy in [0, 17]; the top corners (gx=-5/5 at gy=16/17) are empty.
+    #
+    # Pixel index = (gx - min_gx, gy - min_gy) = (gx + 5, gy).
+    #   (5, 17)  -> pixel (10, 17): "tabard cream" colour cell
+    #   (-5, 17) -> pixel (0,  17): "sunburst centre" gold cell
+    #   (-5, 16) -> pixel (0,  16): "sunburst halo"   lighter gold cell
+    uv_overrides = {}
+    for v in tabard_voxels:
+        uv_overrides[v] = (5, 17)
+    # Sunburst centre takes precedence over the tabard override.
+    uv_overrides[sunburst_center] = (-5, 17)
+    for v in sunburst_halo:
+        uv_overrides[v] = (-5, 16)
+
+    # Back-of-head voxels at the eye row need the regular helm colour, not
+    # the dark visor-slit pixel. gz=-2 at gy=14 is the visor (discarded);
+    # gz=-1 is the eye behind the slit (keep). Remap gz=0 and gz=1 to a
+    # neutral helm pixel just below the visor row.
+    for gz in range(0, 2):
+        uv_overrides[(-1, 14, gz)] = (-1, 13)
+        uv_overrides[( 1, 14, gz)] = ( 1, 13)
+        uv_overrides[( 0, 14, gz)] = ( 0, 13)
+        uv_overrides[(-2, 14, gz)] = (-2, 13)
+        uv_overrides[( 2, 14, gz)] = ( 2, 13)
+
+    # Grid: gx in [-5, 5] (w=11), gy in [0, 17] (h=18)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_player_rogue(height=1.7):
+    """Player Rogue class — shadowy knife-thrower wrapped head-to-toe in black leathers.
+
+    Distinct from the NPC ``gen_rogue`` (which has a tall hood + back cape) by:
+      * Chunkier voxels (height/15 vs height/16) — slightly shorter, more compact
+        silhouette so the rogue reads as low-profile rather than towering.
+      * Deep overhanging hood with a forward brim that overhangs the eye row, casting
+        a hard shadow over the eyes (the brim sits one voxel ahead of the face plane).
+      * Cloth face wrap covering cheeks/chin below the eyes — the hood does NOT reach
+        the chin, so the wrap fabric is visible as a separate band below the brim.
+      * Narrow 3-wide torso (vs the NPC rogue's 4-wide chest) with arms tucked close.
+      * Two chest-strap rows for the throwing-knife bandoliers, painted by the skin
+        in rust-leather brown so they pop against the near-black leathers.
+      * No back cape — the rogue's back is a flat hooded shadow, not a billowing cloak.
+
+    Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    # 15-voxel tall grid -> chunkier voxels at the same world height; the in-engine
+    # renderer scales characters to ~1.8 m anyway, but the chunkier per-voxel size
+    # makes the silhouette read as more compact / crouched than the 16-voxel NPC.
+    vs = height / 15.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Head (gy=11..13) ---
+    # 5 wide, 3 tall, 4 deep — same head footprint as the humanoid baseline so the
+    # neck/shoulders attach cleanly. gy=13 = eye row, gy=12 = cheeks (face-wrap top),
+    # gy=11 = chin (covered by the cloth wrap colour).
+    fill_box(-2, 11, -2, 5, 3, 4)
+
+    # --- Deep overhanging hood (gy=13..14) ---
+    # The hood crown sits over the top of the head; the side drapes wrap down past
+    # the cheeks. The forward brim at gz=-3 physically overhangs the face plane
+    # (gz=-2), casting a dark shadow over the eye row.
+    fill_box(-2, 14, -2, 5, 1, 4)              # crown of hood
+    fill_box(-3, 13, -2, 1, 2, 4)              # left side drape (extends out to gx=-3)
+    fill_box( 2, 13, -2, 1, 2, 4)              # right side drape (extends out to gx= 3)
+    # Forward brim — one row of voxels at gz=-3 across the top so the hood
+    # overhangs the eyes. Width matches the side-drape outer extents so the brim
+    # fully shadows the face from above.
+    fill_box(-3, 14, -3, 7, 1, 1)              # full-width brim across the brow
+
+    # --- Neck (gy=10) ---
+    fill_box(0, 10, 0, 1, 1, 1)
+
+    # --- Narrow torso, 3 voxels wide (gy=6..9) ---
+    # Markedly narrower than the NPC rogue's 4-wide chest so the rogue reads "lean"
+    # and low-profile. gy=7 and gy=8 are the two horizontal strap rows — they're
+    # part of the torso block; the skin texture colours them rust-leather brown so
+    # they read as the throwing-knife bandoliers crossing the chest.
+    fill_box(-1, 6, -1, 3, 4, 3)               # torso main block
+    # Shoulders — single ridge at gy=9 just outside the torso. Hunched/compact:
+    # no separate pauldron blob, just a 1-voxel cap so the arm attaches tightly.
+    filled.add((-2, 9, 0))                     # left shoulder
+    filled.add(( 2, 9, 0))                     # right shoulder
+
+    # --- Arms (close to body, 1 voxel thick) ---
+    # Arms hang at gx=-2/+2 (tucked tight — narrower than the NPC rogue's gx=-3/+2)
+    # so the silhouette stays compact and hunched.
+    fill_box(-2, 7, 0, 1, 2, 1)                # left upper arm
+    fill_box( 2, 7, 0, 1, 2, 1)                # right upper arm
+    fill_box(-2, 4, 0, 1, 3, 1)                # left lower arm
+    fill_box( 2, 4, 0, 1, 3, 1)                # right lower arm
+    # Fingerless gloves — small forward block at the wrist (gz=-1 makes them poke
+    # forward like the humanoid's hands so they read as fists/gloves not stumps).
+    fill_box(-2, 3, -1, 1, 1, 2)               # left glove
+    fill_box( 2, 3, -1, 1, 1, 2)               # right glove
+
+    # --- Pelvis / belt (gy=4..5) ---
+    fill_box(-1, 4, -1, 3, 2, 3)               # pelvis block (matches torso width)
+
+    # --- Legs (gy=0..3), soft boots ---
+    fill_box(-1, 2, 0, 1, 2, 1)                # left thigh
+    fill_box( 1, 2, 0, 1, 2, 1)                # right thigh
+    fill_box(-1, 0, 0, 1, 2, 1)                # left shin
+    fill_box( 1, 0, 0, 1, 2, 1)                # right shin
+    # Soft boots — extend forward by one voxel (not a chunky armoured sabaton);
+    # the skin paints them slightly bluer-dark so the foot reads as a soft boot.
+    fill_box(-1, 0, -1, 1, 1, 2)               # left boot toe
+    fill_box( 1, 0, -1, 1, 1, 2)               # right boot toe
+
+    # UV remap: the two eye voxels at gy=13 paint ice-blue on the FRONT face only.
+    # The same (gx, gy) column on the BACK/SIDE faces of those voxels would also
+    # sample the ice-blue pixel — but there's no eye opening there, so we remap
+    # the rear/side voxels of the eye columns to the face-wrap pixel (gx=0, gy=12)
+    # which is neutral cloth-grey. The eye voxel itself (gz=-2) stays at its native
+    # pixel so the front face still glows ice-blue under the hood shadow.
+    uv_fix = {}
+    for gz in range(-1, 2):                    # gz=-1 (behind front face), 0, 1 (back of head)
+        uv_fix[(-1, 13, gz)] = (0, 12)
+        uv_fix[( 1, 13, gz)] = (0, 12)
+
+    # Grid: gx in [-3, 3] (w=7), gy in [0, 14] (h=15)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs), uv_overrides=uv_fix)
+    return mb
+
+
+def gen_player_combat_engineer(height=1.85):
+    """Player Combat Engineer — hazard-orange exosuit + power-pack + welder helm.
+
+    Industrial mech-jock silhouette. Broader than the warrior: pauldrons reach
+    gx=-6/+6 (w=13) versus the warrior's gx=-5/+5. Pure bulk all the way down
+    (no nipped waist), oversized rounded pauldron domes, a power-pack slab on
+    the upper back, boxy hardhat-style welder helm with a glowing goggle band,
+    chunky boots and gauntlets. Reads as "tank in a workshop suit".
+    Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    # 17 voxels tall — same vertical budget as the warrior so player heights
+    # match in world units, but we spend horizontal budget aggressively for
+    # the hulking exosuit look.
+    vs = height / 17.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Boxy welder helm (gy=14..16) ---
+    # 5 wide, 3 tall, 4 deep — fully covers the head with no skin showing.
+    # Hardhat-flat top instead of a knightly dome.
+    fill_box(-2, 14, -2, 5, 3, 4)
+    # Carve a horizontal "welder goggle" band on the FRONT face only at the
+    # eye row (gy=15). Only gz=-2 voxels are discarded so the goggle accent
+    # color shows on the helm front, but the side/back faces of those voxels
+    # stay as helm steel (avoids the goggle color bleeding around the head).
+    for gx in range(-1, 2):           # 3-voxel-wide goggle band: gx=-1,0,1
+        filled.discard((gx, 15, -2))
+    # Helm brim — a thin lip protruding forward over the goggles to read
+    # as an industrial hardhat visor (gy=16, gz=-3 one voxel forward of helm).
+    for gx in range(-2, 3):
+        filled.add((gx, 16, -3))
+
+    # --- Neck gorget / collar (gy=13) ---
+    # Wider than warrior's neck so the suit reads as one continuous bulk.
+    fill_box(-2, 13, -1, 5, 1, 3)
+
+    # --- Chunky exosuit torso (gy=7..12) ---
+    # 7 voxels wide (gx=-3..3), 3 deep. Same width as the warrior chest but
+    # carries straight down through the hips (no waist taper) to read as
+    # "tank in a suit" rather than an athletic build.
+    fill_box(-3, 7, -1, 7, 6, 3)
+
+    # --- Power-pack / backpack (gy=9..12 upper back) ---
+    # 3 wide x 4 tall x 1 deep slab sitting on the upper back, sticking out
+    # one voxel behind the torso (gz=2). Reads as a separate industrial unit
+    # rather than torso volume. We tag these voxels for a darker gunmetal
+    # palette and a cyan glow vent column via uv_overrides.
+    pack_voxels = []
+    def add_pack(x, y, z):
+        v = (x, y, z)
+        filled.add(v)
+        pack_voxels.append(v)
+    for gy in range(9, 13):
+        for gx in range(-1, 2):
+            add_pack(gx, gy, 2)
+    # Two side mounting clamps on the upper edges of the pack — single voxels
+    # sticking out further to imply hardware bolted to the suit.
+    pack_clamps = [(-2, 11, 2), (2, 11, 2)]
+    for v in pack_clamps:
+        filled.add(v)
+        pack_voxels.append(v)
+
+    # --- Wide hip/belt block (gy=3..6) ---
+    # Crucial for the "no narrow waist" silhouette — keep it as broad as the
+    # torso all the way down to the legs. 7 wide, 4 tall.
+    fill_box(-3, 3, -1, 7, 4, 3)
+
+    # --- Oversized rounded pauldron domes (gy=11..13) ---
+    # Each dome is a 2x2x2 voxel block sitting outboard of the torso, with
+    # the topmost outer corners removed so the silhouette reads as a rounded
+    # dome rather than a hard cube.
+    # Left dome: gx=-5..-4, gy=11..12, gz=-1..0
+    fill_box(-5, 11, -1, 2, 2, 2)
+    # Right dome: gx=4..5
+    fill_box( 4, 11, -1, 2, 2, 2)
+    # Round off the outer-top corners of each dome.
+    for v in [(-5, 12, -1), (-5, 12, 0),
+              ( 5, 12, -1), ( 5, 12, 0)]:
+        filled.discard(v)
+    # Pauldron outer ridge — single voxel at gx=-6/+6 mid-height to push the
+    # silhouette one voxel wider than the warrior so the engineer reads as
+    # visibly bulkier than any other player class.
+    filled.add((-6, 11, 0))
+    filled.add(( 6, 11, 0))
+
+    # --- Bulky armored upper arms (gy=8..10) ---
+    # Hang inboard of the pauldron domes (gx=-4/+4) so the dome overhangs the
+    # joint. 1 voxel wide, 3 tall.
+    fill_box(-4, 8, 0, 1, 3, 1)        # left upper arm
+    fill_box( 4, 8, 0, 1, 3, 1)        # right upper arm
+
+    # --- Bulky gauntlets / forearms (gy=4..7) ---
+    # 2 voxels wide (one wider than the upper arm) to give the "gauntlet
+    # flares wider than the bicep" industrial look. The outer column sits
+    # at gx=-5/+5 so the forearm width matches the pauldron block.
+    fill_box(-5, 4, 0, 2, 4, 2)        # left forearm + gauntlet
+    fill_box( 4, 4, 0, 2, 4, 2)        # right forearm + gauntlet
+    # Gauntlet fists — protrude one voxel forward.
+    fill_box(-5, 3, -1, 2, 1, 2)
+    fill_box( 4, 3, -1, 2, 1, 2)
+
+    # --- Thick exosuit legs (gy=1..2) ---
+    # 2 voxels wide each, 2 tall — chunky pistons feeding into big boots.
+    fill_box(-2, 1, -1, 2, 2, 2)       # left leg
+    fill_box( 1, 1, -1, 2, 2, 2)       # right leg
+
+    # --- Big square industrial boots (gy=0) ---
+    # 2 wide x 1 tall x 4 deep — bigger footprint than the legs so the boots
+    # flare out as armored stompers. Extends gz=-2 (toe forward of the body)
+    # for that planted, top-heavy look.
+    fill_box(-2, 0, -2, 2, 1, 4)
+    fill_box( 1, 0, -2, 2, 1, 4)
+
+    # uv_overrides: power-pack voxels share (gx, gy) columns with the torso,
+    # so without remapping they'd paint the suit-orange torso color. Park
+    # them on a dedicated pack pixel in the skin (gunmetal + cyan vent),
+    # following the same pattern as the warrior cape.
+    # gx range is [-6, 6] (w=13), gy range is [0, 16] (h=17). We reserve the
+    # column gx=6 (px=12) above the body for pack pixels:
+    #   pack body  -> (6, 14)  gunmetal frame
+    #   pack clamp -> (6, 13)  darker clamp
+    #   pack vent  -> (6, 15)  single cyan glow column on the back
+    uv_overrides = {}
+    for v in pack_voxels:
+        if v in pack_clamps:
+            uv_overrides[v] = (6, 13)
+        elif v[0] == 0 and v[2] == 2:
+            # Center column of the pack body = cyan glow vent.
+            uv_overrides[v] = (6, 15)
+        else:
+            uv_overrides[v] = (6, 14)
+
+    # Grid: gx in [-6, 6] (w=13), gy in [0, 16] (h=17)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_player_marksman(height=1.8):
+    """Player Marksman class — old-west sniper / frontier gunslinger.
+
+    Tall, lean silhouette built around three readable shapes:
+      * A wide-brimmed hat that overhangs the head by one voxel each side
+        (the defining feature — must read clearly as a hat from any angle).
+      * A long tan duster coat that flares one voxel wider at the hem so
+        the lower silhouette tapers outward toward mid-calf.
+      * A chest bandolier of brass cartridges across the torso.
+    Plus a monocular scope-goggle protruding from the right eye and narrow
+    heeled boots peeking out from under the coat hem.
+    Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0  # 16-voxel base height; hat adds rows above gy=14
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Heeled boots (gy=0..1) ---
+    # Narrow 1-voxel-wide boots at gx=-1/+1. Toe extends forward (gz=-1) and
+    # a small heel block sits at gz=1 — gives the "cowboy heel" outline.
+    fill_box(-1, 0, -1, 1, 1, 3)         # left boot (toe to heel, gy=0)
+    fill_box( 1, 0, -1, 1, 1, 3)         # right boot
+    filled.add((-1, 1, 1))               # left heel riser (back-only)
+    filled.add(( 1, 1, 1))               # right heel riser
+
+    # --- Coat hem flare (gy=2..3) ---
+    # 5 voxels wide (gx=-2..2) — one voxel wider per side than the body
+    # column above. This is the "duster flares slightly at the bottom"
+    # silhouette and sits at mid-calf height.
+    fill_box(-2, 2, -1, 5, 2, 3)
+
+    # --- Lower coat / thigh column (gy=4..5) ---
+    # Body-width (3 wide gx=-1..1) so the flare reads as a separate flare
+    # rather than just a continuous trapezoid.
+    fill_box(-1, 4, -1, 3, 2, 3)
+
+    # --- Torso (gy=6..10) ---
+    # Lean 3-wide chest. Bandolier strap row at gy=8 is the same width —
+    # the skin texture paints that row as leather + brass cartridges.
+    fill_box(-1, 6, -1, 3, 5, 3)
+
+    # --- Shoulder caps (gy=10) ---
+    # One-voxel outer shoulder caps at gx=-2 / +2 so the arms have something
+    # to attach under and the silhouette doesn't look pin-headed.
+    filled.add((-2, 10, 0)); filled.add((-2, 10, 1))
+    filled.add(( 2, 10, 0)); filled.add(( 2, 10, 1))
+
+    # --- Arms (gy=4..9) ---
+    # Slim 1-voxel-thick arms hanging at gx=-2 / +2 — long & lean.
+    fill_box(-2, 7, 0, 1, 3, 1)          # left upper arm
+    fill_box( 2, 7, 0, 1, 3, 1)          # right upper arm
+    fill_box(-2, 4, 0, 1, 3, 1)          # left forearm
+    fill_box( 2, 4, 0, 1, 3, 1)          # right forearm
+    # Hands protrude forward (gz=-1) — looks like fists/glove cuffs.
+    fill_box(-2, 3, -1, 1, 1, 2)
+    fill_box( 2, 3, -1, 1, 1, 2)
+
+    # --- Neck (gy=11) ---
+    fill_box(0, 11, 0, 1, 1, 2)
+
+    # --- Head (gy=12..14) ---
+    # 3-wide x 3-deep skull (gx=-1..1, gz=-1..1). Narrower than the brim so
+    # the brim visibly overhangs on every side.
+    fill_box(-1, 12, -1, 3, 3, 3)
+    # Eye sockets — front-face carve only, like the other humanoid heads.
+    filled.discard((-1, 13, -1))
+    filled.discard(( 1, 13, -1))
+    # Mouth — small carve at chin row centre.
+    filled.discard(( 0, 12, -1))
+
+    # Hat shadow notch: carve the front-face voxels of the TOP head row so
+    # there's a deep recess directly under the brim. The brim sits at gy=15
+    # and the eye-side of gy=14 reads as a shadowed band beneath it.
+    for gx in range(-1, 2):
+        filled.discard((gx, 14, -1))
+
+    # --- Scope goggle (single voxel protrusion at gy=13, right side) ---
+    # Sticks out one voxel in front of the head's front face (gz=-2). UV is
+    # overridden below so this voxel reads as gunmetal grey rather than
+    # picking up the skin colour of the right-eye column.
+    SCOPE = (1, 13, -2)
+    filled.add(SCOPE)
+
+    # --- Wide-brimmed hat (gy=15) ---
+    # 5x1x5 flat disc — overhangs the 3x3 head by ONE voxel in every
+    # horizontal direction. This is the defining silhouette feature; with
+    # the brim 2 voxels wider than the head from any side view, the figure
+    # reads unambiguously as a hat-wearer.
+    fill_box(-2, 15, -2, 5, 1, 5)
+
+    # --- Hat crown (gy=16..17) ---
+    # 3-wide x 2-tall x 3-deep block centred above the brim.
+    fill_box(-1, 16, -1, 3, 2, 3)
+
+    # --- UV overrides ---
+    # The scope voxel shares (gx, gy) = (1, 13) with the head's right-eye
+    # column, so without an override it would sample the same pixel as the
+    # face skin. We point it at (2, 17): that grid cell is unoccupied
+    # (crown only fills gx=-1..1 at gy=17) so we can dedicate it to the
+    # gunmetal scope colour in the skin texture.
+    uv_overrides = {SCOPE: (2, 17)}
+    # Back-of-head voxels in the eye columns should not show the dark eye
+    # pixel on their rear faces. gz=-1 was discarded (eye socket), but
+    # gz=0/1 (back of head) need a remap to a non-eye pixel.
+    for gz in range(0, 2):
+        uv_overrides[(-1, 13, gz)] = (0, 13)   # neutral face skin pixel
+        uv_overrides[( 1, 13, gz)] = (0, 13)
+    # Heel risers at gy=1 share columns with the boot row at gy=0 already,
+    # but py=1 is otherwise unoccupied (gap between boots and coat hem) —
+    # we paint py=1 as boot leather in the skin, so no override needed.
+
+    # Grid: gx in [-2, 2] (w=5), gy in [0, 17] (h=18)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_player_tinkerer(height=1.7):
+    """Player Tinkerer class — drone-summoning artificer.
+
+    Compact, slightly stocky inventor in a slate-blue mechanic's vest over a
+    teal undershirt, leather utility belt with tool pouches, and BRASS GOGGLES
+    PUSHED UP ONTO THE FOREHEAD (not over the eyes — that's the Combat
+    Engineer's welder goggles). A tiny chrome drone is perched on the right
+    shoulder for flavor.
+
+    vs uses height / 15 (chunkier voxels) so the figure reads as shorter and
+    blockier than the 16-voxel humanoid baseline. Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    # Chunkier voxels: 15 stacks tall instead of the usual 16 → shorter, stocky
+    # silhouette even at a smaller world height (1.7 m vs 1.8 m baseline).
+    vs = height / 15.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Boots (gy=0) — extended toe at gz=-2 reads as a workboot tip ---
+    fill_box(-1, 0, -1, 1, 1, 2)        # left boot (gx=-1, gz=-1..0)
+    fill_box( 1, 0, -1, 1, 1, 2)        # right boot
+    filled.add((-1, 0, -2))             # left toe extension forward
+    filled.add(( 1, 0, -2))             # right toe extension forward
+
+    # --- Shins (gy=1..2) ---
+    fill_box(-1, 1, -1, 1, 2, 2)        # left shin
+    fill_box( 1, 1, -1, 1, 2, 2)        # right shin
+
+    # --- Thighs (gy=3) — 2 separate legs so the gap reads ---
+    fill_box(-1, 3, -1, 1, 1, 2)
+    fill_box( 1, 3, -1, 1, 1, 2)
+
+    # --- Hips (gy=4) — 3 wide solid block bridging the legs ---
+    fill_box(-1, 4, -1, 3, 1, 3)
+
+    # --- Utility belt (gy=5) — 4 voxels wide, intentionally asymmetric.
+    #     The brief calls for "4 wide at the belt row only" to read stocky,
+    #     so we extend one voxel onto the gx=-2 side (tool-loop side).
+    fill_box(-2, 5, -1, 4, 1, 3)
+
+    # --- Tool pouches at the FRONT of the belt (gz=-2) — two 1x1x1 cubes
+    #     stuck onto the front face. They share (gx, gy) columns with the
+    #     belt strap row, so we uv-override them to a TAN pixel below.
+    filled.add((-1, 5, -2))             # left front pouch
+    filled.add(( 1, 5, -2))             # right front pouch
+
+    # --- Lower / mid torso (gy=6..8) — 3-wide undershirt+vest body.
+    #     The skin paints gx=0 column teal (undershirt) and gx=±1 columns
+    #     slate-blue (vest), so the vertical centre strip reads as exposed
+    #     undershirt between the vest flaps. ---
+    fill_box(-1, 6, -1, 3, 3, 3)
+
+    # --- Upper torso (gy=9..10) — 3-wide chest, same width all the way up ---
+    fill_box(-1, 9, -1, 3, 2, 3)
+
+    # --- Vest front overlay (gz=-2) — an extra-thin panel on the FRONT face
+    #     of the torso suggesting an unbuttoned vest open over the undershirt.
+    #     Leaves a 1-voxel vertical gap down the centre (gx=0) so the teal
+    #     undershirt column shows through. Vest flaps cover gy=6..10 at gx=-1
+    #     and gx=+1 only — those columns are vest-blue in the skin so the
+    #     panel reads as a flapping unbuttoned vest layer. ---
+    for gy in range(6, 11):
+        filled.add((-1, gy, -2))        # left vest flap
+        filled.add(( 1, gy, -2))        # right vest flap
+
+    # --- Shoulder caps (gy=10) — single voxel bumps at gx=-2/+2 so the
+    #     shoulders aren't paper-thin under the vest. ---
+    filled.add((-2, 10, 0))
+    filled.add(( 2, 10, 0))
+
+    # --- Drone perch (gx=2, gy=11) — a tiny 1x1x1 cube on the RIGHT shoulder
+    #     representing a perched chrome drone (optional flavor). Sits in a
+    #     cell that no other voxel occupies, so we just paint that single
+    #     pixel chrome-blue in the skin texture (no uv_override needed). ---
+    filled.add(( 2, 11, 0))
+
+    # --- Neck (gy=11) ---
+    filled.add((0, 11, 0))
+
+    # --- Head (gy=12..14) — 3 wide, 3 tall, 3 deep, exposed face ---
+    fill_box(-1, 12, -1, 3, 3, 3)
+
+    # Eye row — carve front face at gy=13 (MIDDLE of head) so the eye dots
+    # are clearly visible BELOW the goggles. This is the key visual cue that
+    # distinguishes the Tinkerer (goggles pushed up onto the forehead) from
+    # the Combat Engineer (goggles down over the eyes).
+    filled.discard((-1, 13, -1))
+    filled.discard(( 1, 13, -1))
+
+    # Mouth — carve front of gy=12 to leave a maniacal-grin dark slit.
+    filled.discard((0, 12, -1))
+
+    # --- Brass goggles pushed UP onto the FOREHEAD (gy=14) ---
+    # A 3-wide x 1-tall band protruding 1 voxel forward of the forehead at
+    # gz=-2. They sit ABOVE the eye row (gy=13) — CRITICAL distinction from
+    # the Engineer's welder goggles, which cover the eyes. The entire gy=14
+    # row is painted brass in the skin texture, so the goggle strap wraps
+    # around the head (front, sides, back).
+    filled.add((-1, 14, -2))
+    filled.add(( 0, 14, -2))
+    filled.add(( 1, 14, -2))
+
+    # --- Arms (gx=-2 / +2) — continuous columns wrapping the torso ---
+    # Upper + lower arm form one column gy=6..9. Hand at gy=4 protrudes
+    # forward (gz=-1..0) for a fist-like read. gy=5 of the arm column
+    # coincides with the belt row → that pixel is dark leather (cuff strap
+    # reading), which still works visually.
+    fill_box(-2, 6, 0, 1, 4, 1)         # left arm column
+    fill_box( 2, 6, 0, 1, 4, 1)         # right arm column
+    fill_box(-2, 5, 0, 1, 1, 1)         # left wrist (belt-row column = leather)
+    fill_box( 2, 5, 0, 1, 1, 1)         # right wrist
+    fill_box(-2, 4, -1, 1, 1, 2)        # left hand (forward toe)
+    fill_box( 2, 4, -1, 1, 1, 2)        # right hand
+
+    # --- UV overrides ---
+    # Pouches share (gx, gy) columns with the belt strap (gy=5), which the
+    # skin paints DARK LEATHER. To make the pouches a distinct TAN highlight
+    # we redirect their UV to a non-sampled pixel cell. (gx=-2, gy=11) is
+    # free: gx=-2 has no voxel above the shoulder cap at gy=10. We paint
+    # that pixel TAN in the skin texture.
+    uv_overrides = {}
+    uv_overrides[(-1, 5, -2)] = (-2, 11)
+    uv_overrides[( 1, 5, -2)] = (-2, 11)
+
+    # Grid: gx in [-2, 2] (w=5), gy in [0, 14] (h=15)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_player_wanderer(height=1.8):
+    """Player Wanderer class — drifter blade-dancer in a tattered robe.
+
+    Lean / athletic silhouette (intentionally NOT a mage):
+      - 3-wide torso, 4-wide robe at the hips.
+      - Knee-length tattered traveler's robe (ragged hem, NOT floor-length).
+      - Bare lower legs visible below the hem (no boots).
+      - Bare arms with a cloth wrap band on the forearm-to-elbow stretch.
+      - Dust-grey scarf wrapping the lower half of the face (mid-nose to chin).
+      - Diagonal shoulder-strap satchel across the chest with a small pouch
+        protruding at the right hip.
+    Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    # 16-voxel humanoid scale — same as gen_humanoid so weapon mounts and
+    # the standard limb attach points line up with the rest of the rig.
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Head (gy=12..15) ---
+    # 5 wide x 4 tall x 4 deep — matches the standard humanoid head box.
+    fill_box(-2, 12, -2, 5, 4, 4)
+    # Eye sockets — carve the FRONT face only of the eye row (gy=14) so the
+    # eye pixel doesn't bleed onto side/back voxels.
+    filled.discard((-1, 14, -2))
+    filled.discard(( 1, 14, -2))
+    # The scarf wrapping the lower half of the face (gy=12..13) is painted
+    # in by the skin texture — no extra geometry layer needed because every
+    # voxel in a (gx, gy) column samples the same pixel.
+
+    # --- Neck (gy=11) — slim, sits just under the scarf hem ---
+    fill_box(0, 11, -1, 1, 1, 2)
+
+    # --- Slim 3-wide torso (gy=8..10) ---
+    # Lean dancer build: gx=-1..1, 3 voxels deep.
+    fill_box(-1, 8, -1, 3, 3, 3)
+
+    # --- Hip / lower-robe widening (gy=4..7) ---
+    # Robe widens to 4 voxels at the hips: gx=-2..1. Reads as draped fabric
+    # over a slim waist rather than a tight tunic.
+    fill_box(-2, 4, -1, 4, 4, 3)
+
+    # --- Ragged knee-length robe hem (gy=2..3) ---
+    # The hem is NOT a clean horizontal cut — a deterministic tatter pattern
+    # leaves some columns dangling to gy=2 and others terminating at gy=3.
+    # All hem voxels are 3 deep so the silhouette stays consistent from any
+    # view angle. NOTE: hem skips gx=-2 / gx=2 — those columns already hold
+    # the hand fist at gy=3, so reusing those (gx, gy) cells would force one
+    # pixel to colour both hem fabric and skin. Keeping hem inside gx=-1..1
+    # avoids that collision.
+    hem_full_row     = [-1, 0, 1]    # inner robe cols reach gy=3
+    hem_long_tatters = [-1, 1]       # tattered cols dangle further to gy=2
+    for gx in hem_full_row:
+        for gz in range(-1, 2):
+            filled.add((gx, 3, gz))
+    for gx in hem_long_tatters:
+        for gz in range(-1, 2):
+            filled.add((gx, 2, gz))
+
+    # --- Bare lower legs (gy=0..1) ---
+    # Two slim 1-voxel shins. Visible below the robe hem, NO boots — keeps
+    # the wandering-martial-artist read instead of a soldier silhouette.
+    fill_box(-1, 0, 0, 1, 2, 1)
+    fill_box( 1, 0, 0, 1, 2, 1)
+
+    # --- Slim bare arms ---
+    # Arms hang from the shoulders (gy=10) down to fists at gy=3, at gx=-2 /
+    # gx=2 (one column outside the slim torso). 1 voxel wide & deep — keeps
+    # the dancer silhouette. The forearm-to-elbow wrap band (gy=4..6) is a
+    # purely skin-painted stripe over the bare-arm columns — no geometry
+    # change because every voxel in a column samples the same pixel.
+    fill_box(-2, 8, 0, 1, 3, 1)   # left upper arm  (gy=8..10) — bare skin
+    fill_box( 2, 8, 0, 1, 3, 1)   # right upper arm
+    fill_box(-2, 4, 0, 1, 4, 1)   # left lower arm  (gy=4..7) — forearm
+    fill_box( 2, 4, 0, 1, 4, 1)   # right lower arm
+    # Hands (small fists protruding forward).
+    fill_box(-2, 3, -1, 1, 1, 2)
+    fill_box( 2, 3, -1, 1, 1, 2)
+
+    # --- Satchel pouch — one protruding voxel at the right hip ---
+    # Sits in front of the robe at gx=1, gy=5, gz=-2 (one voxel forward of
+    # the robe's front face at gz=-1). Reads as a small pouch hanging off
+    # the shoulder strap.
+    filled.add((1, 5, -2))
+
+    # --- UV overrides ---
+    # The skin is one pixel per (gx, gy) — voxels that need to break out of
+    # their natural column colour must be remapped. Two cases:
+    #   1. Back of head in the eye row (gy=14): without a remap the eye
+    #      pixel bleeds to side and back faces. Re-aim those voxels at the
+    #      hair colour cell (gx=0, gy=15) — the top of the head row.
+    #   2. The satchel strap is a diagonal stripe of TORSO voxels recoloured
+    #      to leather brown. We aim those at a dedicated "strap" pixel at
+    #      (gx=-2, gy=0): gx=-2 only carries the head row (gy=12..15) and
+    #      hip/robe rows (gy=2..10), so gy=0 in that column is empty and
+    #      that pixel cell is unsampled by any other voxel — making it a
+    #      safe target for the leather-strap colour.
+    uv_overrides = {}
+    for gz in range(0, 2):
+        uv_overrides[(-1, 14, gz)] = (0, 15)
+        uv_overrides[( 1, 14, gz)] = (0, 15)
+
+    strap_pixel = (-2, 0)   # unsampled cell — see note above
+    strap_voxels = [
+        (-1, 10, -1),       # over the left shoulder front
+        (-1,  9, -1),
+        ( 0,  8, -1),
+        ( 0,  7, -1),
+        ( 1,  6, -1),
+        ( 1,  5, -1),       # right hip front
+        ( 1,  5, -2),       # satchel pouch (the protruded voxel)
+    ]
+    for v in strap_voxels:
+        uv_overrides[v] = strap_pixel
+
+    # Grid: gx in [-2, 2] (w=5), gy in [0, 15] (h=16)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_player_sorcerer(height=1.8):
+    """Player Sorcerer class - robed arcane scholar with a pointed deep hood.
+
+    Tall, lean silhouette:
+      * Continuous robe skirt (no separate legs) that flares 1 voxel wider at
+        the hem so the bottom reads as a fabric bell.
+      * Wide sash band at the waist (separate brighter palette row).
+      * Full-length sleeves that meet the robe - no exposed forearms / hands.
+      * Tall pointed hood that tapers from 5 wide to a single voxel tip 3
+        rows above the head; the carved front of the hood shows deep shadow
+        with only two glowing eye voxels visible.
+    Origin at feet (Y=0). Reads slightly taller and more imposing than the
+    16-voxel humanoid because the hood tip extends well above the head.
+    """
+    mb = MeshBuilder()
+    # 18 voxels tall - the hood's pointed tip needs 2-3 rows above the head,
+    # so we use a smaller per-voxel world size than the 16-voxel humanoid in
+    # order to keep the body proportions natural while giving the hood
+    # headroom above the skull.
+    vs = height / 18.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Robe hem flare (gy=0) ---
+    # One voxel wider on each side than the main skirt so the robe reads as
+    # flared at the bottom (one continuous mass - no separate legs).
+    fill_box(-3, 0, -1, 7, 1, 3)
+
+    # --- Robe skirt (gy=1..6) ---
+    # 5-wide continuous column down the body. No legs are carved out - the
+    # robe is solid all the way to the floor.
+    fill_box(-2, 1, -1, 5, 6, 3)
+
+    # --- Sash band (gy=7) ---
+    # One row across the waist. Its (gx,gy) pixels get a brighter blue-purple
+    # palette in the skin so the sash reads as a distinct accent stripe.
+    fill_box(-2, 7, -1, 5, 1, 3)
+
+    # --- Torso / chest (gy=8..11) ---
+    # 5-wide above the sash - same width as the skirt so the robe reads as
+    # a single continuous garment rather than a tunic-over-skirt.
+    fill_box(-2, 8, -1, 5, 4, 3)
+
+    # --- Sleeves (gy=4..11) ---
+    # Single-column sleeves on each side, hanging from the shoulder down to
+    # where they meet the robe skirt at gy=4. No exposed forearms or hands
+    # (the cuff disappears into the robe). Placed at gx=-3 / gx=3, one
+    # column beyond the torso width.
+    fill_box(-3, 4, 0, 1, 8, 1)
+    fill_box( 3, 4, 0, 1, 8, 1)
+
+    # --- Hood shell (gy=12..14) ---
+    # 5 wide, 3 deep - thick fabric on all sides of the (unseen) head. The
+    # front face of the lower part is carved below to form the face opening.
+    fill_box(-2, 12, -1, 5, 3, 3)
+
+    # --- Hood narrowing rows (gy=15..17) ---
+    # Each row drops voxels of width/depth to taper the hood to a point
+    # 3 voxels above the top of the head - that pointed-wizard-hood
+    # silhouette is what makes the figure read taller than baseline.
+    fill_box(-1, 15, 0, 3, 1, 2)   # gy=15 - 3 wide, 2 deep
+    fill_box( 0, 16, 0, 1, 1, 1)   # gy=16 - single voxel
+    fill_box( 0, 17, 0, 1, 1, 1)   # gy=17 - pointed tip
+
+    # --- Carve the face opening (front face of hood, gy=12..13) ---
+    # Discarding only the gz=-1 voxels exposes the gz=0 voxels behind them,
+    # which we paint as deep shadow in the skin - giving the illusion of a
+    # recessed face inside the hood. We KEEP gz=-1 at the two eye columns
+    # (gx=-1 and gx=1 at gy=13) so a single bright voxel reads as a glowing
+    # eye per side. Side faces of the eye voxel leak cyan, but that reads
+    # as spell-light rather than a bug.
+    for gx in range(-2, 3):
+        filled.discard((gx, 12, -1))      # whole lower face row -> pure shadow
+    for gx in [-2, 0, 2]:
+        filled.discard((gx, 13, -1))      # face row at eye height, sans eyes
+    # (gx=-1, gy=13, gz=-1) and (gx=1, gy=13, gz=-1) remain - eye voxels.
+
+    # --- UV overrides --------------------------------------------------------
+    # The shadow palette at (gx, gy=12..13) is meant only for the INSIDE of
+    # the hood (the gz=0 voxels visible through the carved front). The back
+    # voxels (gz=1) at those columns would otherwise show shadow on the rear
+    # of the hood - remap them to a normal robe-purple pixel by sampling
+    # (gx, gy=10), which lies in the plain robe-fabric row.
+    uv_fix = {}
+    for gx in range(-2, 3):
+        uv_fix[(gx, 12, 1)] = (gx, 10)    # back of hood at gy=12 -> robe
+        uv_fix[(gx, 13, 1)] = (gx, 10)    # back of hood at gy=13 -> robe
+    # The gz=0 voxel directly behind each cyan eye voxel shares the eye's
+    # (gx, gy=13) column, which would paint it cyan. Remap to the shadow
+    # column (gx, gy=12) so the inside of the hood stays dark behind eyes.
+    uv_fix[(-1, 13, 0)] = (-1, 12)
+    uv_fix[( 1, 13, 0)] = ( 1, 12)
+    # And the back-of-hood voxel behind each eye should be robe, not cyan.
+    uv_fix[(-1, 13, 1)] = (-1, 10)
+    uv_fix[( 1, 13, 1)] = ( 1, 10)
+
+    # Grid: gx in [-3, 3] (w=7), gy in [0, 17] (h=18)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_fix)
+    return mb
+
+
+def gen_player_ranger(height=1.8):
+    """Player Ranger class — wiry forest scout in a hooded leaf-trimmed cloak.
+
+    Silhouette goals (vs. baseline humanoid):
+      * Narrow 3-wide torso so the figure reads as lean / agile.
+      * Hood that covers the top, sides, and back of the head but leaves
+        the FRONT face open so the player still sees a face. Mossy-green
+        cloak, leather boots/gloves, leaf-fringed cape down the back.
+      * Two short quiver rods bumping up off the upper back behind the
+        RIGHT shoulder (player-right == +gx). Reads as "arrows on back".
+      * Slight slouch — the chest sits one voxel forward of where the
+        warrior's chest would (gz=-2..0 instead of gz=-1..1), suggesting
+        a hunched / stalking posture.
+    Origin at feet (Y=0).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0  # 16-voxel-tall baseline, same as archer/rogue
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Head (5 wide, like archer/rogue so the face row centers correctly) ---
+    # gy=13..15 main skull, gy=12 chin. gz=-2 is the FRONT face.
+    fill_box(-2, 13, -2, 5, 3, 4)
+    fill_box(-1, 12, -1, 3, 1, 3)
+    # Eye sockets — front face only, so the eye pixel stays on the front
+    # and doesn't bleed to the side/back of the head.
+    filled.discard((-1, 14, -2))
+    filled.discard(( 1, 14, -2))
+    # Mouth — front-face carve on the chin row.
+    filled.discard((0, 12, -2))
+
+    # --- Hood ---
+    # Hood TOP sits directly above the head (gy=16..17). The skin texture
+    # paints those rows mossy-green so the whole block reads as fabric.
+    fill_box(-2, 16, -2, 5, 2, 4)
+    # Hood SIDE cheek drapes — single-voxel columns of hood fabric at
+    # gx=-2 and gx=+2 BELOW the head (gy=11..12) so the hood frames past
+    # the chin. The outer columns of the head itself (gx=±2 at gy=13..15)
+    # read as hood directly via the skin texture, so no extra voxels are
+    # needed up there.
+    fill_box(-2, 11, -2, 1, 2, 4)
+    fill_box( 2, 11, -2, 1, 2, 4)
+    # Hood BACK — wraps the rear of the head at gz=2 so the back is
+    # enclosed; the front (gz=-2) stays open so the face shows.
+    fill_box(-2, 12, 2, 5, 4, 1)
+
+    # --- Neck ---
+    fill_box(0, 11, 0, 1, 1, 1)
+
+    # --- Slim torso (3 wide vs. archer's 4 / paladin's 7) ---
+    # Slouch encoded as shifted Z: torso occupies gz=-2..0 instead of the
+    # warrior's gz=-1..1 — the chest sticks a voxel forward.
+    fill_box(-1, 8, -2, 3, 3, 3)
+    # Tiny shoulder caps so arms don't look stuck onto a stick.
+    fill_box(-2, 9, -1, 1, 1, 2)
+    fill_box( 2, 9, -1, 1, 1, 2)
+
+    # --- Waist + belt (still 3 wide) ---
+    fill_box(-1, 6, -2, 3, 2, 3)
+    fill_box(-1, 5, -2, 3, 1, 3)  # belt row — painted leather brown
+
+    # --- Hips (3 wide — wiry build doesn't widen at the hips) ---
+    fill_box(-1, 4, -2, 3, 1, 3)
+
+    # --- Cape (mid-spine to lower back, leaf-fringed bottom) ---
+    # Cape sits one voxel BEHIND the torso (gz=2 — torso back face is at
+    # gz=0, gz=1 would be flush with the back, gz=2 reads as a distinct
+    # cape layer). Spans gy=5..10 across gx=-1..1 (matches torso width).
+    cape_voxels = []
+    for gy in range(5, 11):
+        for gx in range(-1, 2):
+            v = (gx, gy, 2)
+            filled.add(v); cape_voxels.append(v)
+    # Fringe — vary the bottom of the cape by ±1 voxel per column so the
+    # edge looks ragged / leaf-trimmed rather than a clean horizontal line.
+    filled.discard((-1, 5, 2))                    # tuck the left column up one row
+    extra = [(-1, 4, 2), (0, 4, 2), (0, 3, 2)]    # dangling fringe drops
+    for v in extra:
+        filled.add(v); cape_voxels.append(v)
+
+    # Leaf-accent voxels — recolor the lowest center fringe drops to
+    # yellow-green so the cape edge gets a flash of autumnal color.
+    leaf_voxels = [(0, 4, 2), (0, 3, 2)]
+
+    # --- Quiver rods (behind RIGHT shoulder, sticking up from upper back) ---
+    # Right shoulder is at gx=+1..+2. Two parallel rods at gz=2 (behind the
+    # back) at gy=11..13. Different heights so they read as two arrows of
+    # slightly different lengths poking up out of a quiver.
+    quiver_voxels = []
+    for v in [(1, 11, 2), (1, 12, 2), (1, 13, 2),
+              (2, 11, 2), (2, 12, 2)]:
+        filled.add(v); quiver_voxels.append(v)
+
+    # --- Arms (slim, 1-voxel thick, outer face at gx=-3 / gx=+3) ---
+    fill_box(-3, 7, -1, 1, 3, 2)   # left upper arm
+    fill_box( 3, 7, -1, 1, 3, 2)   # right upper arm
+    fill_box(-3, 4, -1, 1, 3, 2)   # left lower arm
+    fill_box( 3, 4, -1, 1, 3, 2)   # right lower arm
+    # Gloves — protrude forward (gz=-2) for clearer hand silhouette.
+    fill_box(-3, 3, -2, 1, 1, 2)
+    fill_box( 3, 3, -2, 1, 1, 2)
+
+    # --- Legs (slim) ---
+    fill_box(-2, 2, -1, 2, 2, 2)   # left thigh
+    fill_box( 1, 2, -1, 2, 2, 2)   # right thigh
+    fill_box(-2, 0, 0, 1, 2, 1)    # left shin
+    fill_box( 1, 0, 0, 1, 2, 1)    # right shin
+    # Light boots — short toe flap forward (gz=-1), no heavy plating.
+    fill_box(-2, 0, -1, 1, 1, 2)
+    fill_box( 1, 0, -1, 1, 1, 2)
+
+    # --- UV overrides ---
+    # Cape and quiver voxels at gz=2 share (gx,gy) with belt/waist/torso
+    # columns that get other colors (leather belt etc.), so we remap them
+    # to dedicated pixels in the top-right corner of the texture — those
+    # grid cells aren't touched by any other voxel.
+    # Grid is gx in [-3, 3], gy in [0, 17] → pixel (gx+3, gy). Unused
+    # top-right cells: (gx=3, gy=15..17) — no body voxels at those (gx,gy).
+    uv_fix = {}
+    # Eye-column UV bookkeeping:
+    #   gz=-2 → discarded (eye-socket carve, no voxel).
+    #   gz=-1 → visible eye voxel; keep its native UV so the front face
+    #           samples the eye pixel.
+    #   gz=0,1 → head interior; their external faces are all internal,
+    #           so an override is purely cosmetic safety.
+    for gz in (0, 1):
+        uv_fix[(-1, 14, gz)] = (0, 14)
+        uv_fix[( 1, 14, gz)] = (0, 14)
+    # Hood BACK layer (gz=2, gy=12..15, gx=-2..2) — its back face is the
+    # only externally-visible face per voxel, and the natural pixel for
+    # several of those (gx,gy) cells is skin or eye color. Override the
+    # whole layer to the cloak-green pixel so the back of the hood reads
+    # uniformly as fabric.
+    for hy in range(12, 16):
+        for hx in range(-2, 3):
+            uv_fix[(hx, hy, 2)] = (3, 17)
+    # Cape body → cloak-green pixel at (3, 17).
+    for v in cape_voxels:
+        uv_fix[v] = (3, 17)
+    # Leaf accents override the cape body for two voxels → (3, 16).
+    for v in leaf_voxels:
+        uv_fix[v] = (3, 16)
+    # Quivers → quiver brown pixel at (3, 15).
+    for v in quiver_voxels:
+        uv_fix[v] = (3, 15)
+
+    # Grid: gx in [-3, 3] (w=7), gy in [0, 17] (h=18)
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_fix)
+    return mb
+
+
 MESH_TYPES = {
     "humanoid": {
         "func": gen_humanoid,
@@ -3426,6 +4608,23 @@ MESH_TYPES = {
         "desc": "Male paladin NPC with heavy plate armor and helm. Params: --height",
         "default_file": "paladin.obj",
     },
+    "player_warrior": {
+        "func": gen_player_warrior,
+        "desc": "Player Warrior: plate armor + cape + horn-slit helm. Params: --height",
+        "default_file": "player_warrior.obj",
+    },
+    "player_paladin": {
+        "func": gen_player_paladin,
+        "desc": "Player Paladin: white-gold plate + winged helm + tabard. Params: --height",
+        "default_file": "player_paladin.obj",
+    },
+    "player_rogue": {"func": gen_player_rogue, "desc": "Player Rogue: hood + face wrap + knife straps. Params: --height", "default_file": "player_rogue.obj"},
+    "player_combat_engineer": {"func": gen_player_combat_engineer, "desc": "Player Combat Engineer: hazard-orange exosuit + power-pack + welder helm. Params: --height", "default_file": "player_combat_engineer.obj"},
+    "player_marksman": {"func": gen_player_marksman, "desc": "Player Marksman: duster + wide-brim hat + bandolier + scope-goggle. Params: --height", "default_file": "player_marksman.obj"},
+    "player_tinkerer": {"func": gen_player_tinkerer, "desc": "Player Tinkerer: vest + utility belt + brass goggles on forehead. Params: --height", "default_file": "player_tinkerer.obj"},
+    "player_wanderer": {"func": gen_player_wanderer, "desc": "Player Wanderer: tattered robe + face scarf + arm wraps. Params: --height", "default_file": "player_wanderer.obj"},
+    "player_sorcerer": {"func": gen_player_sorcerer, "desc": "Player Sorcerer: long robe + pointed hood + glowing eyes. Params: --height", "default_file": "player_sorcerer.obj"},
+    "player_ranger": {"func": gen_player_ranger, "desc": "Player Ranger: hooded cloak + leaf cape + quiver. Params: --height", "default_file": "player_ranger.obj"},
     "staff": {
         "func": gen_staff,
         "desc": "Staff weapon — thin rod with crystal tip. Params: --height",
