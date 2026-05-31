@@ -8,6 +8,8 @@
 #include "net/net.h"
 #include "net/net_player.h"
 
+#include <cstring>  // std::memset in WorldSnapshot default constructor
+
 // Quantized snapshot of one player (30 wire bytes — see SNAP_PLAYER_WIRE)
 struct SnapPlayer {
     u8   slotIndex;     // 1
@@ -136,7 +138,16 @@ struct WorldSnapshot {
     // bloating BSS (1024 × 18 bytes = 18KB per snapshot on PC; 512 × 18 = 9KB on Switch).
     SnapProjectile* projectiles = nullptr;
 
-    WorldSnapshot()  { projectiles = new SnapProjectile[MAX_PROJECTILES](); }
+    WorldSnapshot() {
+        // Zero-initialise all stack arrays so that memcmp-based slot equality helpers
+        // (D7.1) produce deterministic results: uninitialized padding bytes in
+        // independently-constructed snapshots can differ, causing spurious "changed"
+        // readings.  The heap array uses the () value-init form for the same reason.
+        std::memset(players,   0, sizeof(players));
+        std::memset(entities,  0, sizeof(entities));
+        std::memset(worldItems, 0, sizeof(worldItems));
+        projectiles = new SnapProjectile[MAX_PROJECTILES]();
+    }
     ~WorldSnapshot() { delete[] projectiles; }
 
     // Copy/move support (snapshot ring buffer copies these)
@@ -174,8 +185,21 @@ namespace Snapshot {
                         const WorldItemPool& worldItems);
 
     // Serialize snapshot to packet bytes. Returns byte count written.
-    u32 serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize);
+    // isFullSnapshot controls the wire header flag (D7.2). For v1 always pass 1.
+    u32 serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
+                  u8 isFullSnapshot = 1);
 
     // Deserialize snapshot from packet bytes.
     bool deserialize(WorldSnapshot& snap, const u8* data, u32 size);
+
+    // D7.1 — Per-slot equality helpers used by delta-encoding to decide which slots
+    // have changed since the last baseline snapshot.  Each compares the slot struct
+    // fields byte-for-byte via memcmp (safe because all snapshot structs are
+    // zero-initialised by WorldSnapshot's default constructor, so padding bytes
+    // are deterministically 0).  Out-of-range indices return true ("equal") so
+    // callers can treat them as "no change" without special-casing.
+    bool playerSlotsEqual    (const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
+    bool entitySlotsEqual    (const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
+    bool projectileSlotsEqual(const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
+    bool worldItemSlotsEqual (const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
 }

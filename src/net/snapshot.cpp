@@ -3,6 +3,7 @@
 #include "core/assert.h"  // ENGINE_ASSERT (debug-only) for the serialize cursor guard
 
 #include <algorithm>
+#include <cstring>  // std::memcmp for slot equality helpers
 
 // Squared distance from `p` to the nearest active player. Used to order snapshot
 // records nearest-the-action-first so that, if the serializer has to priority-drop
@@ -296,11 +297,13 @@ static constexpr u32 SNAP_ENTITY_WIRE     = 28;
 static constexpr u32 SNAP_PROJECTILE_WIRE = 22;
 // World item: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos) + 1(ownerSlot) + 1(exclusiveTimerQ) = 16.
 static constexpr u32 SNAP_WORLDITEM_WIRE  = 16;
-// Fixed prefix: 4 B packet header + snapshot header + MAX_PLAYERS u32 lastProcessedInputTick.
+// Fixed prefix: 4 B packet header + snapshot header + 1 B isFullSnapshot flag +
+// MAX_PLAYERS u32 lastProcessedInputTick.
 // Snapshot header is 9 B: serverTick(4) + playerCount(1) + entityCount(1) +
-// worldItemCount(1) + projectileCount(2). lastProcessedInputTick adds MAX_PLAYERS*4 = 16 B.
-// (Total fixed prefix = 4 + 9 + 16 = 29 B per snapshot.)
-static constexpr u32 SNAP_FIXED_BYTES     = 4 + 9 + MAX_PLAYERS * 4;
+// worldItemCount(1) + projectileCount(2).  isFullSnapshot adds 1 B (D7.2).
+// lastProcessedInputTick adds MAX_PLAYERS*4 = 16 B.
+// (Total fixed prefix = 4 + 9 + 1 + 16 = 30 B per snapshot.)
+static constexpr u32 SNAP_FIXED_BYTES     = 4 + 9 + 1 + MAX_PLAYERS * 4;
 
 // Overflow-safe serializer.
 //
@@ -316,7 +319,8 @@ static constexpr u32 SNAP_FIXED_BYTES     = 4 + 9 + MAX_PLAYERS * 4;
 // internally consistent: declared counts can never exceed the bytes present.
 // `buildFromState` already orders entities/projectiles nearest-player-first, so a
 // capped list drops the farthest (least visible) records and keeps the relevant ones.
-u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
+u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
+                        u8 isFullSnapshot) {
     // Manual bounds-checked writer over the caller's buffer. We don't use
     // PacketWriter here because its inline data[MAX_PACKET_SIZE] (4 KB) is both too
     // small for full snapshots and would bloat the stack if grown — snapshots ride
@@ -379,6 +383,11 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     w8(entityCount);
     w8(worldItemCount);
     w16(projectileCount);
+    // D7.2 — Delta-encoding flag.  1 = full snapshot (all slots present in payload),
+    // 0 = delta (changedBits bitmask precedes the payload; only marked slots are written).
+    // For v1 we always write 1 — the deserializer reads it but the delta path is not yet
+    // active, so old and new builds interoperate correctly.
+    w8(isFullSnapshot);
 
     // Per-slot ACK of newest input applied by the server (M3 uses for replay reconciliation)
     for (u32 i = 0; i < MAX_PLAYERS; i++)
@@ -495,6 +504,11 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     snap.entityCount     = r.readU8();
     snap.worldItemCount  = r.readU8();
     snap.projectileCount = r.readU16();
+    // D7.2 — Read delta flag.  1 = full snapshot; 0 = delta (D7.3 decoding path).
+    // For v1 the server always writes 1, so the delta branch is never taken; we read
+    // the byte here to keep the wire format in sync even when talking to a v1 server.
+    u8 isFullSnap = r.readU8();
+    (void)isFullSnap; // D7.3 will gate the bitmask + per-slot logic on this flag
 
     // Validate counts to prevent out-of-bounds on malformed packets
     if (snap.playerCount > MAX_PLAYERS) snap.playerCount = MAX_PLAYERS;
@@ -607,4 +621,37 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     }
 
     return r.cursor <= r.size;
+}
+
+// ---------------------------------------------------------------------------
+// D7.1 — Per-slot equality helpers
+//
+// All snapshot structs are zero-initialised (WorldSnapshot's default constructor
+// calls the default constructors of its members, which value-initialise the pod
+// arrays to 0 via {}), so padding bytes are deterministically zero and memcmp is
+// safe.  If a struct ever gains a non-pod member with opaque padding, switch to
+// field-by-field comparison here.
+//
+// Out-of-range slots return true ("equal") so callers can treat them as "no change"
+// without needing a separate bounds check.
+// ---------------------------------------------------------------------------
+
+bool Snapshot::playerSlotsEqual(const WorldSnapshot& a, const WorldSnapshot& b, u32 slot) {
+    if (slot >= MAX_PLAYERS) return true;
+    return std::memcmp(&a.players[slot], &b.players[slot], sizeof(SnapPlayer)) == 0;
+}
+
+bool Snapshot::entitySlotsEqual(const WorldSnapshot& a, const WorldSnapshot& b, u32 slot) {
+    if (slot >= MAX_ENTITIES) return true;
+    return std::memcmp(&a.entities[slot], &b.entities[slot], sizeof(SnapEntity)) == 0;
+}
+
+bool Snapshot::projectileSlotsEqual(const WorldSnapshot& a, const WorldSnapshot& b, u32 slot) {
+    if (slot >= static_cast<u32>(MAX_PROJECTILES)) return true;
+    return std::memcmp(&a.projectiles[slot], &b.projectiles[slot], sizeof(SnapProjectile)) == 0;
+}
+
+bool Snapshot::worldItemSlotsEqual(const WorldSnapshot& a, const WorldSnapshot& b, u32 slot) {
+    if (slot >= MAX_WORLD_ITEMS) return true;
+    return std::memcmp(&a.worldItems[slot], &b.worldItems[slot], sizeof(SnapWorldItem)) == 0;
 }
