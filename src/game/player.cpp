@@ -305,7 +305,7 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
 // ---------------------------------------------------------------------------
 NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 weaponId) {
     NetInput input = {};
-    input.tick = tick;
+    input.clientTick = tick;
     input.weaponId = weaponId;
 
     // Merge keyboard + left stick for movement flags

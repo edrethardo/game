@@ -160,7 +160,7 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     w.writeU8(static_cast<u8>(NetPacketType::CL_INPUT));
     w.writeU8(0);
     w.writeU16(0);
-    w.writeU32(s_latestInput.tick);
+    w.writeU32(s_latestInput.clientTick);
     w.writeU8(s_latestInput.moveFlags);
     w.writeU8(s_latestInput.weaponId);
     w.writeU16(s_latestInput.yawQ);

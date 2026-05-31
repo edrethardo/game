@@ -24,7 +24,8 @@
 // new prediction model. Do NOT add new readers of posXQ/Y/Z; new code should
 // assume the server is authoritative for position.
 struct NetInput {
-    u32 tick;           // which server tick this input is for
+    u32 clientTick;     // monotonic client-local sim tick (M1) — server uses for input
+                        // ring buffer ordering and (in M2) for lastProcessedInputTick echo.
     u8  moveFlags;      // bit0=W, bit1=S, bit2=A, bit3=D, bit4=jump, bit5=fire, bit6=lockHold
     u8  weaponId;       // currently selected weapon
     u16 yawQ;           // absolute yaw,   packed via Quantize::packAngle over [-π, π]
@@ -157,7 +158,7 @@ struct InputRingBuffer {
         // a non-concern at 60 Hz (matches the serverTick assumption in client.cpp).
         if (count > 0) {
             const NetInput& newest = inputs[(head + INPUT_BUFFER_SIZE - 1) % INPUT_BUFFER_SIZE];
-            if (input.tick <= newest.tick) return;
+            if (input.clientTick <= newest.clientTick) return;
         }
         inputs[head] = input;
         head = (head + 1) % INPUT_BUFFER_SIZE;
@@ -167,7 +168,7 @@ struct InputRingBuffer {
     const NetInput* getForTick(u32 tick) const {
         for (u32 i = 0; i < count; i++) {
             u32 idx = (head + INPUT_BUFFER_SIZE - 1 - i) % INPUT_BUFFER_SIZE;
-            if (inputs[idx].tick == tick) return &inputs[idx];
+            if (inputs[idx].clientTick == tick) return &inputs[idx];
         }
         return nullptr;
     }

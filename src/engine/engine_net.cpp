@@ -73,7 +73,7 @@ void Engine::serverNetPre(f32 dt) {
     // below), so without this its lastInputTick stays 0 forever on the wire — harmless
     // today (clients only reconcile their own slot) but a trap for any future feature
     // that reads slot 0's ack (spectate/lag-comp/debug).
-    m_players[m_localPlayerIndex].lastProcessedInputTick = localInput.tick;
+    m_players[m_localPlayerIndex].lastProcessedInputTick = localInput.clientTick;
 
     // Process inputs for remote players only (host movement handled by gameUpdate).
     //
@@ -98,12 +98,12 @@ void Engine::serverNetPre(f32 dt) {
             // oldest→newest walk: head points one past the newest write; count entries trail back from there
             u32 idx = (buf.head + INPUT_BUFFER_SIZE - buf.count + k) % INPUT_BUFFER_SIZE;
             const NetInput& in = buf.inputs[idx];
-            if (in.tick <= np.lastProcessedInputTick) continue; // already applied last tick
+            if (in.clientTick <= np.lastProcessedInputTick) continue; // already applied last tick
             // Always advance the ack and mirror the weapon, even while dead, so the
             // client's reconcile keeps a fresh ack across the death window. But DON'T
             // drive movement/aim from input while dead — a corpse that died holding a
             // move key or aiming somewhere would keep updating each tick.
-            np.lastProcessedInputTick = in.tick;
+            np.lastProcessedInputTick = in.clientTick;
             if (in.weaponId < m_weaponDefCount)
                 np.weaponState.currentWeapon = in.weaponId;
             if (!np.isDead) {
@@ -531,6 +531,7 @@ void Engine::clientNetPre(f32 dt) {
     }
 
     m_serverTick++;
+    m_clientTick++; // independent client-local tick; drives NetInput.clientTick (M1)
 
     // Clock-sync handshake — send 3 CL_TIME_PINGs ~10 ms apart immediately after
     // connection, then stop. Snapshot-driven refinement (ClockSyncOps::onSnapshotReceived,
@@ -557,7 +558,7 @@ void Engine::clientNetPre(f32 dt) {
     // — captureLocalInput defaults skillSlot to 0, and the server reads input->skillSlot
     // to pick the skill.
     WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
-    Client::captureAndSendInput(m_localPlayer, m_serverTick, ws.currentWeapon, m_activeClassSkill);
+    Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon, m_activeClassSkill);
 
     // Phase 1.1 — Retransmit the most recent CL_FIRE_WEAPON for FIRE_TX_REPEATS ticks.
     // The original send was unreliable, so a lost UDP fragment doesn't get retransmitted

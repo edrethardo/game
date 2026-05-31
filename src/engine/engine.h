@@ -151,6 +151,10 @@ private:
     // m_localPlayerIndex with the lane every frame — see activeNetSlot().
     u8         m_clientNetSlot = 0;
     u32        m_serverTick = 0;
+    // Client-local monotonic sim tick. Drives NetInput.clientTick (M1). Independent of
+    // m_serverTick. On CLIENT role, read m_clockSync.currentServerTickEst for any
+    // "what does the server think the time is" question.
+    u32        m_clientTick = 0;
     f32        m_connectingElapsed = 0.0f; // seconds spent in CONNECTING; bails out on timeout (M10)
 
     // Clock-sync subsystem (CLIENT role) — see src/net/clock_sync.h. The host

@@ -35,7 +35,7 @@ void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     r.cursor = sizeof(PacketHeader);
 
     NetInput input;
-    input.tick      = r.readU32();
+    input.clientTick = r.readU32();
     input.moveFlags = r.readU8();
     input.weaponId  = r.readU8();
     input.yawQ      = r.readU16();
