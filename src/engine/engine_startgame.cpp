@@ -763,6 +763,9 @@ void Engine::startGame(GameStart mode) {
         // M7 — Clear the pending-damage ring so visual-feedback predictions from a
         // prior session don't carry over into the new connection.
         PendingDamageRingOps::reset(m_pendingDamage);
+        // M8 — Clear the pending-pickups ring so world-item disappearance predictions
+        // from a prior session don't suppress items in the new connection's world.
+        PendingPickupRingOps::reset(m_pendingPickups);
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

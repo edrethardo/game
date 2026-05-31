@@ -659,6 +659,30 @@ void Engine::clientNetPost(f32 dt) {
     // WorldItemSystem::update (lifetime decay is server-driven for clients).
     Client::mirrorWorldItems(m_worldItems, m_itemDefs, m_itemDefCount, dt);
 
+    // M8: Re-apply local pickup predictions — mirrorWorldItems (above) unconditionally
+    // re-activates any item still present in the latest snapshot, which would undo the
+    // local hide we set in sendPickupRequest this same frame. Walk the pending ring and
+    // suppress those items again so they stay hidden until the server snapshot drops them
+    // (confirming the pickup) or the prediction expires and mirrorWorldItems wins.
+    for (u32 pi = 0; pi < m_pendingPickups.count; pi++) {
+        u32 pendingUid = m_pendingPickups.entries[pi].itemUid;
+        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+            WorldItem& wi = m_worldItems.items[i];
+            if (wi.active && wi.item.uid == pendingUid) {
+                wi.active = false;
+                break;
+            }
+        }
+    }
+
+    // Bound the ring: drop entries older than ~2 seconds (120 ticks at 60 Hz) to handle
+    // reliable-channel loss or server rejects that never explicitly re-showed the item.
+    // After expiry, mirrorWorldItems will re-activate the item from the snapshot if the
+    // server still has it (no ghost disappearance left behind).
+    if (m_clientTick > 120) {
+        PendingPickupRingOps::expireOlderThan(m_pendingPickups, m_clientTick - 120);
+    }
+
     // M3.2 — Prediction reconciliation: compare server's authoritative position for the
     // local player at the ACK'd tick against our ring's predicted position. If we diverged
     // by more than 10 cm, log it and snap to the server's value. Full smooth-correction

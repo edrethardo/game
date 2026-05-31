@@ -1072,6 +1072,18 @@ void Engine::sendPickupRequest() {
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &uid, 4);
     Net::sendToServer(buf, sizeof(buf), true);
+
+    // M8: Local prediction — hide the world item immediately so it disappears on send
+    // instead of waiting ~RTT/2 for the next snapshot mirror. If the server rejects the
+    // pickup, mirrorWorldItems re-activates it from the next authoritative snapshot.
+    PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid);
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = m_worldItems.items[i];
+        if (wi.active && wi.item.uid == uid) {
+            wi.active = false;
+            break;
+        }
+    }
 }
 
 // CLIENT: request respawn after death. A header-only reliable CL_RESPAWN packet — NOT routed

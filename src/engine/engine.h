@@ -25,6 +25,7 @@
 #include "net/render_offset.h"
 #include "net/pending_hit_ring.h"
 #include "net/pending_damage_ring.h"
+#include "net/pending_pickup_ring.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -193,6 +194,14 @@ private:
     // value to avoid flicker on mispredicts. M10's SV_DAMAGE_TO_ME will ack confirmed events.
     // Reset on every CLIENT connect.
     PendingDamageRing m_pendingDamage;
+
+    // Pending predicted world-item pickups (CLIENT role, M8) — records one entry per
+    // CL_PICKUP_ITEM sent (clientTick, itemUid). The item is immediately hidden locally so
+    // it disappears on send instead of waiting ~RTT/2 for the snapshot mirror. If the server
+    // rejects the pickup, mirrorWorldItems re-activates the item on the next snapshot tick.
+    // expireOlderThan() trims entries older than ~2 s (120 ticks) in clientNetPost.
+    // Reset on every CLIENT connect.
+    PendingPickupRing m_pendingPickups;
 
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client
