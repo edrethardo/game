@@ -666,6 +666,10 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
         // to 16 bits for comparison.
         p.clientTick = static_cast<u32>(spB.clientTickLow);
         p.predicted  = false;  // snapshot projectiles are authoritative, never predicted
+        // D3.1 — Decode server-authoritative damage for use by D3.2's predicted HP decrement
+        // on incoming-projectile impact. Inverse of the pack step: × 0.5f restores the original
+        // f32 damage with ≤ 0.25 dmg quantization error, acceptable for a pre-snapshot prediction.
+        p.damage = spB.expectedDamageQ * 0.5f;
 
         // lightColor isn't on the wire (byte-frugal) — reconstruct a glow color from
         // projFlags using the host's conventions so lit projectiles still emit light.

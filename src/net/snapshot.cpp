@@ -215,6 +215,14 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         // where it matches a locally-spawned predicted ghost so the ghost despawns when
         // the authoritative projectile lands. 0 for host/NPC/skill-spawned projectiles.
         sp.clientTickLow = static_cast<u16>(p.clientTick & 0xFFFF);
+        // D3.1 — Pack the authoritative damage so the client can predict HP decrements on
+        // incoming-projectile impact (D3.2). Multiply by 2 → 0.5-step increments in [0,127.5].
+        // Clamp to u8 max so values above 127.5 (rare, e.g. crit-boosted boss shots) saturate.
+        {
+            f32 dq = p.damage * 2.0f;
+            if (dq > 255.0f) dq = 255.0f;
+            sp.expectedDamageQ = static_cast<u8>(dq);
+        }
     }
 
     // World items (dropped loot). Server-authoritative (N5): every active world item is
@@ -283,9 +291,9 @@ static constexpr u32 SNAP_PLAYER_WIRE     = 30;
 //       after N4 gated off the local ghost AI that used to tick the timer.)
 static constexpr u32 SNAP_ENTITY_WIRE     = 28;
 // Projectile: 2(idx) + 1(flags)+1(projFlags)+1(meshId)+1(radiusQ) + 6(pos) + 6(vel) + 1(ownerSlot)
-//           + 2(clientTickLow) = 21. (clientTickLow added so firing clients can match-and-
-//           despawn locally-predicted projectile ghosts when the authoritative one arrives.)
-static constexpr u32 SNAP_PROJECTILE_WIRE = 21;
+//           + 2(clientTickLow) + 1(expectedDamageQ) = 22. (expectedDamageQ added in D3.1 so
+//           clients can predict local HP decrement on incoming-projectile impact in D3.2.)
+static constexpr u32 SNAP_PROJECTILE_WIRE = 22;
 // World item: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos) + 1(ownerSlot) + 1(exclusiveTimerQ) = 16.
 static constexpr u32 SNAP_WORLDITEM_WIRE  = 16;
 // Fixed prefix: 4 B packet header + snapshot header + MAX_PLAYERS u32 lastProcessedInputTick.
@@ -444,8 +452,9 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w16(sp.velX);
         w16(sp.velY);
         w16(sp.velZ);
-        w8(sp.ownerSlot);     // (Audit-A) firing slot for kill-credit on clients
+        w8(sp.ownerSlot);      // (Audit-A) firing slot for kill-credit on clients
         w16(sp.clientTickLow); // V2 fire prediction match key
+        w8(sp.expectedDamageQ); // D3.1 — damage × 2, decoded as × 0.5 by client (D3.2 HP predict)
     }
 
     // World items (lowest priority — written last so they drop first under a tight budget).
@@ -579,8 +588,9 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.velX      = r.readU16();
         sp.velY      = r.readU16();
         sp.velZ      = r.readU16();
-        sp.ownerSlot = r.readU8();   // (Audit-A) firing slot for kill-credit on clients
-        sp.clientTickLow = r.readU16(); // V2 fire prediction match key
+        sp.ownerSlot     = r.readU8();   // (Audit-A) firing slot for kill-credit on clients
+        sp.clientTickLow = r.readU16();  // V2 fire prediction match key
+        sp.expectedDamageQ = r.readU8(); // D3.1 — decode: proj.damage = expectedDamageQ * 0.5f
     }
 
     for (u32 i = 0; i < snap.worldItemCount; i++) {

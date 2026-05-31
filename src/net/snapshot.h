@@ -97,6 +97,11 @@ struct SnapProjectile {
     // < 0.5 s and the 16-bit tick window is ~18 min at 60 Hz, so collisions are practically
     // impossible. 0 = no prediction owner (host-fired, NPC projectile, skill orb) — skipped.
     u16  clientTickLow; // 2
+    // D3.1 — Expected damage carried from server Projectile.damage so the client can predict
+    // local HP decrement on incoming-projectile impact (D3.2). Quantized: multiply by 2 to pack,
+    // multiply by 0.5 to unpack. Covers 0–127.5 dmg in 0.5-step increments; clamp 128+ to 255.
+    // Most enemy hits are 5–30 dmg, so 0.5-step resolution is imperceptible. (1 byte vs 4 for f32.)
+    u8   expectedDamageQ; // 1
 };
 
 // Quantized snapshot of one dropped world item (16 bytes). Loot is server-
