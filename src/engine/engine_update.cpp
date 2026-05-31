@@ -265,6 +265,21 @@ void Engine::update(f32 dt) {
         // position smoothly converges toward the server-corrected sim position over ~150 ms.
         if (m_netRole == NetRole::CLIENT) RenderOffsetOps::tick(m_renderOffset, dt);
 
+        // M14: 1 Hz net-graph diagnostic log — CLIENT only. Emits RTT, server-tick estimate,
+        // and the number of prediction reconcile mismatches accumulated since the last log.
+        // m_divergenceCount is bumped in clientNetPost on each mismatch and reset here.
+        if (m_netRole == NetRole::CLIENT) {
+            f64 nowSec = Clock::getElapsedSeconds();
+            if (nowSec - m_lastDebugLogSec >= 1.0) {
+                LOG_INFO("[NET-GRAPH] rtt=%.1fms serverTickEst=%.1f divergences=%u",
+                         m_clockSync.oneWayTripMs * 2.0f,
+                         static_cast<f64>(m_clockSync.serverTickEst),
+                         m_divergenceCount);
+                m_lastDebugLogSec = nowSec;
+                m_divergenceCount = 0;
+            }
+        }
+
         // Tick the spawn-calm window once per frame (here, not in gameUpdate, so
         // couch co-op — which calls gameUpdate per player — doesn't double-decrement).
         if (m_spawnCalmTimer > 0.0f) m_spawnCalmTimer -= dt;

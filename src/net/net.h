@@ -292,4 +292,10 @@ namespace Net {
     // identical next dungeon. The run seed is unchanged across floors but is included
     // for robustness (a client that missed SV_JOIN_ACCEPT still self-corrects).
     void broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed);
+
+    // M14: fake packet-loss injection for stress testing.
+    // 0 = off (default), 1-100 = drop percentage. Applied in sendToServer (CLIENT) and
+    // broadcastSnapshot / sendReliable / sendUnreliable (SERVER) at the send callsites.
+    void setFakeLossPct(u8 pct);
+    u8   getFakeLossPct();
 }

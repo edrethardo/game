@@ -171,6 +171,16 @@ private:
     f64       m_lastPingSentSec = 0.0;
     u32       m_pingsSent       = 0;
 
+    // M14: net diagnostics — debug knobs and counters.
+    // m_netFakeLatencyMs / m_netFakeLossPct are "cvar-style" settings that net.cpp
+    // reads via s_engineForNet to inject artificial loss at send time (v1: loss only).
+    // m_divergenceCount accumulates every reconcile mismatch in clientNetPost and is
+    // reported + reset by the 1 Hz [NET-GRAPH] log emitted in update().
+    u32 m_netFakeLatencyMs = 0;    // reserved — latency simulation deferred to v2
+    u8  m_netFakeLossPct   = 0;    // 0–100: percentage of packets to drop (both directions)
+    u32 m_divergenceCount  = 0;    // count of reconcile mismatches since last log interval
+    f64 m_lastDebugLogSec  = 0.0;  // wall-clock time of last [NET-GRAPH] emission
+
     // Prediction ring (CLIENT role, M3) — stores (input, predicted-state) per clientTick
     // so that clientNetPost can compare the server's authoritative pose against what we
     // predicted and snap/correct if divergence > 10 cm. Reset on every CLIENT connect.

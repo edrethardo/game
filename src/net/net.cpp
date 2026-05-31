@@ -7,6 +7,7 @@
 #endif
 #include <enet/enet.h>
 #include <cstring>
+#include <cstdlib>  // rand()
 
 // ---------------------------------------------------------------------------
 // Static state
@@ -44,6 +45,16 @@ static Net::OnLevelSeedFn  s_onLevelSeed  = nullptr;
 
 // Channels: 0 = reliable ordered, 1 = unreliable sequenced
 static constexpr u32 NUM_CHANNELS = 2;
+
+// M14: fake-loss cvar — set via Net::setFakeLossPct(). Applied at all outgoing send
+// callsites so both CLIENT→SERVER and SERVER→CLIENT traffic is stressed uniformly.
+static u8 s_fakeLossPct = 0;
+
+// Returns true if this packet should be dropped (used at all send sites).
+// Only active when s_fakeLossPct > 0 to keep the fast path branchless.
+static inline bool shouldDropPacket() {
+    return s_fakeLossPct > 0 && (rand() % 100) < static_cast<int>(s_fakeLossPct);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -540,6 +551,8 @@ void Net::poll() {
 void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    // M14: fake-loss injection on SERVER→CLIENT direction.
+    if (shouldDropPacket()) return;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 0, pkt) < 0)
         enet_packet_destroy(pkt);
@@ -548,6 +561,8 @@ void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
 void Net::sendUnreliable(u8 playerSlot, const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    // M14: fake-loss injection on SERVER→CLIENT direction.
+    if (shouldDropPacket()) return;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
         enet_packet_destroy(pkt);
@@ -623,6 +638,8 @@ void Net::broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed) {
 
 void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     if (s_role != NetRole::CLIENT || !s_serverPeer) return;
+    // M14: fake-loss injection — silently drop this outbound packet at the configured rate.
+    if (shouldDropPacket()) return;
     u32 flags = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
     u8 channel = reliable ? 0 : 1;
     ENetPacket* pkt = enet_packet_create(data, size, flags);
@@ -676,3 +693,7 @@ void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }
 void Net::setOnLevelSeed(OnLevelSeedFn fn)   { s_onLevelSeed = fn; }
+
+// M14: fake-loss cvar accessors
+void Net::setFakeLossPct(u8 pct) { s_fakeLossPct = pct; }
+u8   Net::getFakeLossPct()       { return s_fakeLossPct; }
