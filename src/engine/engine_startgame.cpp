@@ -756,6 +756,10 @@ void Engine::startGame(GameStart mode) {
         // M10.2/M10.3 — reliable server-confirms for predicted hits and incoming damage.
         Net::setOnDamageDone(Engine::onDamageDone);
         Net::setOnDamageToMe(Engine::onDamageToMe);
+        // D1.1/D1.2/D1.3 — reliable event packets for kills, pickup results, loot spawns.
+        Net::setOnKill(Engine::onKill);
+        Net::setOnPickupResult(Engine::onPickupResult);
+        Net::setOnLootSpawn(Engine::onLootSpawn);
         Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
         // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
         // Ping state also resets so clientNetPre sends the 3 handshake pings on the

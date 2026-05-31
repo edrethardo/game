@@ -111,6 +111,33 @@ enum struct NetPacketType : u8 {
     //   u32 projectileSrcKey + f32 damage + u16 reserved.
     // Key encoding mirrors the client: (ownerSlot << 24) | (proj.clientTick & 0xFFFFFF).
     SV_DAMAGE_TO_ME   = 0x19,
+
+    // D1.1 — Server → Client: a kill was confirmed server-side.
+    // Sent reliably to ALL clients so they can drive kill-feed, sounds, and
+    // future on-kill UI effects. Payload (6 B):
+    //   u8  killerSlot   — net slot of the killing player (0xFF = environmental)
+    //   u8  victimType   — 0 = entity (NPC), 1 = player
+    //   u16 victimIdx    — entity pool index (victimType=0) or net slot (victimType=1)
+    //   u8  weaponMeshId — mesh ID of the killing weapon (0 = unknown/unarmed)
+    //   u8  isCrit       — 1 if the killing blow was a crit, 0 otherwise
+    SV_KILL           = 0x1A,
+
+    // D1.2 — Server → Client: result of a CL_PICKUP_ITEM request.
+    // Sent reliably to the requesting client only. Payload (6 B):
+    //   u8  accept    — 1 = accepted (item is in inventory), 0 = rejected
+    //   u8  reserved  — padding
+    //   u32 itemUid   — uid of the world item that was requested
+    SV_PICKUP_RESULT  = 0x1B,
+
+    // D1.3 — Server → Client: a new world item spawned (loot drop / boss drop).
+    // Broadcast reliably to ALL clients so client-side loot UIs / minimaps can
+    // react immediately rather than waiting for the next snapshot window. Payload (12 B):
+    //   u32 uid       — world item uid (matches SnapWorldItem.uid for dedup)
+    //   u16 posXQ     — packed X position via Quantize::packPos
+    //   u16 posYQ     — packed Y position via Quantize::packPos
+    //   u16 posZQ     — packed Z position via Quantize::packPos
+    //   u16 itemDefId — ItemDef index (for icon/rarity preview before full snapshot)
+    SV_LOOT_SPAWN     = 0x1C,
 };
 
 // Sub-types for SV_EVENT packets
@@ -261,6 +288,17 @@ namespace Net {
     // projectile hit the local player. The client uses this to ack the matching
     // PendingDamageRing entry.
     using OnDamageToMeFn = void(*)(u32 projectileSrcKey, f32 damage);
+    // Client-side SV_KILL handler (D1.1). Called when the server broadcasts a confirmed
+    // kill event. killerSlot=0xFF means environmental (no specific player credited).
+    // victimType: 0=entity, 1=player. weaponMeshId and isCrit available for FX.
+    using OnKillFn = void(*)(u8 killerSlot, u8 victimType, u16 victimIdx,
+                             u8 weaponMeshId, u8 isCrit);
+    // Client-side SV_PICKUP_RESULT handler (D1.2). Called when the server acknowledges
+    // or rejects a CL_PICKUP_ITEM request. accept=1 → confirmed, accept=0 → rejected.
+    using OnPickupResultFn = void(*)(u8 accept, u32 itemUid);
+    // Client-side SV_LOOT_SPAWN handler (D1.3). Called when a new world item is spawned
+    // server-side. v1 client is log-only; future UIs can pin map icons immediately.
+    using OnLootSpawnFn = void(*)(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId);
     using OnEventFn      = void(*)(const u8* data, u32 size);
     // classId is the joining client's chosen PlayerClass (validated by the callback;
     // 0xFF if the join request predates the class byte — treated as default Warrior).
@@ -282,6 +320,9 @@ namespace Net {
     void setOnTimePong(OnTimePongFn fn);
     void setOnDamageDone(OnDamageDoneFn fn);    // M10.2
     void setOnDamageToMe(OnDamageToMeFn fn);    // M10.3
+    void setOnKill(OnKillFn fn);                // D1.1
+    void setOnPickupResult(OnPickupResultFn fn);// D1.2
+    void setOnLootSpawn(OnLootSpawnFn fn);      // D1.3
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);

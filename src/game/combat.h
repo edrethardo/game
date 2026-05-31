@@ -97,6 +97,22 @@ namespace Combat {
     void setAttackingPlayer(u8 slot);
     u8   getAttackingPlayer();
 
+    // D1.1 — Weapon mesh ID of the currently active weapon, for kill-event attribution.
+    // Set by the engine around each weapon-fire pass (mirrors the setAttackingPlayer pattern).
+    // 0 = unknown/unarmed. Only the SERVER emits SV_KILL so non-server callers can leave it 0.
+    void setKillWeaponMeshId(u8 meshId);
+    u8   getKillWeaponMeshId();
+
+    // D1.1 — Kill callback, fired from killEntity with full attribution context.
+    // killerSlot: net slot of attacker (0xFF = environmental).
+    // victimType: 0=entity, 1=player (this overload always fires with victimType=0).
+    // victimIdx: entity pool index.
+    // weaponMeshId: from getKillWeaponMeshId() at time of kill.
+    // isCrit: whether the killing blow was a critical hit.
+    using OnKillFn = void(*)(u8 killerSlot, u8 victimType, u16 victimIdx,
+                             u8 weaponMeshId, u8 isCrit);
+    void setOnKill(OnKillFn fn);
+
     // Perfect block callback — called when player executes a perfect block
     using PerfectBlockCallback = void(*)(Player& player);
     void setPerfectBlockCallback(PerfectBlockCallback cb);

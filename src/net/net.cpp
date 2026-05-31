@@ -1,5 +1,6 @@
 #include "net/net.h"
 #include "net/server.h"
+#include "net/packet.h"  // Quantize::unpackPos for SV_LOOT_SPAWN decode (D1.3)
 #include "core/log.h"
 
 #ifdef __SWITCH__
@@ -36,9 +37,12 @@ static Net::OnFireWeaponFn s_onFireWeapon = nullptr;
 static Net::OnInventorySyncFn s_onInventorySync = nullptr;
 static Net::OnTimePingFn   s_onTimePing   = nullptr;
 static Net::OnTimePongFn   s_onTimePong   = nullptr;  // client-side SV_TIME_PONG decoder (M1.5)
-static Net::OnDamageDoneFn s_onDamageDone = nullptr;  // client-side SV_DAMAGE_DONE (M10.2)
-static Net::OnDamageToMeFn s_onDamageToMe = nullptr;  // client-side SV_DAMAGE_TO_ME (M10.3)
-static Net::OnEventFn      s_onEvent      = nullptr;
+static Net::OnDamageDoneFn   s_onDamageDone   = nullptr;  // client-side SV_DAMAGE_DONE (M10.2)
+static Net::OnDamageToMeFn   s_onDamageToMe   = nullptr;  // client-side SV_DAMAGE_TO_ME (M10.3)
+static Net::OnKillFn         s_onKill         = nullptr;  // client-side SV_KILL (D1.1)
+static Net::OnPickupResultFn s_onPickupResult = nullptr;  // client-side SV_PICKUP_RESULT (D1.2)
+static Net::OnLootSpawnFn    s_onLootSpawn    = nullptr;  // client-side SV_LOOT_SPAWN (D1.3)
+static Net::OnEventFn        s_onEvent        = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
 static Net::OnLevelSeedFn  s_onLevelSeed  = nullptr;
@@ -297,6 +301,52 @@ static void clientHandlePacket(const u8* data, u32 size) {
         std::memcpy(&key,    data + sizeof(PacketHeader),     4);
         std::memcpy(&damage, data + sizeof(PacketHeader) + 4, 4);
         if (s_onDamageToMe) s_onDamageToMe(key, damage);
+    } break;
+
+    case NetPacketType::SV_KILL: {
+        // D1.1 — Server broadcast: a kill was confirmed. Payload (6 B):
+        //   u8 killerSlot + u8 victimType + u16 victimIdx + u8 weaponMeshId + u8 isCrit.
+        if (size < sizeof(PacketHeader) + 6) break;
+        const u8* p = data + sizeof(PacketHeader);
+        u8  killerSlot   = p[0];
+        u8  victimType   = p[1];
+        u16 victimIdx;
+        std::memcpy(&victimIdx, p + 2, 2);
+        u8 weaponMeshId  = p[4];
+        u8 isCrit        = p[5];
+        if (s_onKill) s_onKill(killerSlot, victimType, victimIdx, weaponMeshId, isCrit);
+    } break;
+
+    case NetPacketType::SV_PICKUP_RESULT: {
+        // D1.2 — Server response to CL_PICKUP_ITEM. Payload (6 B):
+        //   u8 accept + u8 reserved + u32 itemUid.
+        if (size < sizeof(PacketHeader) + 6) break;
+        const u8* p = data + sizeof(PacketHeader);
+        u8 accept = p[0];
+        // p[1] = reserved (skip)
+        u32 uid;
+        std::memcpy(&uid, p + 2, 4);
+        if (s_onPickupResult) s_onPickupResult(accept, uid);
+    } break;
+
+    case NetPacketType::SV_LOOT_SPAWN: {
+        // D1.3 — Server broadcast: a world item spawned. Payload (12 B):
+        //   u32 uid + u16 posXQ + u16 posYQ + u16 posZQ + u16 itemDefId.
+        if (size < sizeof(PacketHeader) + 12) break;
+        const u8* p = data + sizeof(PacketHeader);
+        u32 uid;
+        std::memcpy(&uid, p, 4);
+        u16 posXQ, posYQ, posZQ, defId;
+        std::memcpy(&posXQ, p + 4, 2);
+        std::memcpy(&posYQ, p + 6, 2);
+        std::memcpy(&posZQ, p + 8, 2);
+        std::memcpy(&defId, p + 10, 2);
+        if (s_onLootSpawn) {
+            f32 x = Quantize::unpackPos(posXQ);
+            f32 y = Quantize::unpackPos(posYQ);
+            f32 z = Quantize::unpackPos(posZQ);
+            s_onLootSpawn(uid, x, y, z, defId);
+        }
     } break;
 
     default:
@@ -687,9 +737,12 @@ void Net::setOnFireWeapon(OnFireWeaponFn fn) { s_onFireWeapon = fn; }
 void Net::setOnInventorySync(OnInventorySyncFn fn) { s_onInventorySync = fn; }
 void Net::setOnTimePing(OnTimePingFn fn)   { s_onTimePing = fn; }
 void Net::setOnTimePong(OnTimePongFn fn)   { s_onTimePong = fn; }
-void Net::setOnDamageDone(OnDamageDoneFn fn) { s_onDamageDone = fn; }  // M10.2
-void Net::setOnDamageToMe(OnDamageToMeFn fn) { s_onDamageToMe = fn; }  // M10.3
-void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
+void Net::setOnDamageDone(OnDamageDoneFn fn)     { s_onDamageDone   = fn; }  // M10.2
+void Net::setOnDamageToMe(OnDamageToMeFn fn)     { s_onDamageToMe   = fn; }  // M10.3
+void Net::setOnKill(OnKillFn fn)                 { s_onKill         = fn; }  // D1.1
+void Net::setOnPickupResult(OnPickupResultFn fn) { s_onPickupResult = fn; }  // D1.2
+void Net::setOnLootSpawn(OnLootSpawnFn fn)       { s_onLootSpawn    = fn; }  // D1.3
+void Net::setOnEvent(OnEventFn fn)               { s_onEvent        = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }
 void Net::setOnLevelSeed(OnLevelSeedFn fn)   { s_onLevelSeed = fn; }

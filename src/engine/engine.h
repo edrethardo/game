@@ -721,6 +721,14 @@ private:
     // Client-side SV_DAMAGE_TO_ME handler (M10.3). Acks the matching PendingDamageRing
     // entry so predicted incoming-damage visual state is cleaned up on server confirmation.
     static void onDamageToMe(u32 projectileSrcKey, f32 damage);
+    // Client-side SV_KILL handler (D1.1). v1 logs the kill for diagnostics.
+    static void onKill(u8 killerSlot, u8 victimType, u16 victimIdx,
+                       u8 weaponMeshId, u8 isCrit);
+    // Client-side SV_PICKUP_RESULT handler (D1.2). Acks the pending-pickup ring
+    // entry regardless of accept/reject (server snapshot handles the item state).
+    static void onPickupResult(u8 accept, u32 itemUid);
+    // Client-side SV_LOOT_SPAWN handler (D1.3). v1 logs the loot event.
+    static void onLootSpawn(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId);
     // Server-pushed mid-run floor descent (SV_LEVEL_SEED). Client-only: adopt the
     // host's new floor/difficulty/seed and follow into the same FLOOR_TRANSITION path.
     static void onLevelSeed(u8 floor, u8 difficulty, u32 seed);

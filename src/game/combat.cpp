@@ -13,15 +13,28 @@ static Combat::DamageNumberCallback   s_damageNumberCallback   = nullptr;
 static Combat::DeathCallback           s_deathCallback           = nullptr;
 static Combat::PerfectBlockCallback    s_perfectBlockCallback    = nullptr;
 static Combat::DodgeThroughCallback    s_dodgeThroughCallback    = nullptr;
+static Combat::OnKillFn                s_onKill                  = nullptr;
 static ParticlePool* s_particlePool = nullptr;
 static ScreenShake*  s_screenShake  = nullptr;
 // (L8) Player slot credited for the current damage source (0xFF = none/environmental).
 // Set by the engine around weapon fire and by projectile.cpp per projectile; stamped onto
 // Entity::killerSlot in killEntity so loot drops can be reserved to the killer.
 static u8 s_attackingPlayer = 0xFF;
+// D1.1 — Weapon mesh ID for the current attack context. Set by the engine alongside
+// setAttackingPlayer so kill events can include which weapon landed the killing blow.
+static u8 s_killWeaponMeshId = 0;
+// D1.1 — isCrit flag of the hit that most recently caused a transition through applyDamage
+// into killEntity. Set by applyDamage before calling killEntity so the kill callback has
+// accurate crit info. Reset to 0 after each killEntity call.
+static u8 s_pendingKillIsCrit = 0;
 
 void Combat::setAttackingPlayer(u8 slot) { s_attackingPlayer = slot; }
 u8   Combat::getAttackingPlayer()        { return s_attackingPlayer; }
+
+void Combat::setKillWeaponMeshId(u8 meshId) { s_killWeaponMeshId = meshId; }
+u8   Combat::getKillWeaponMeshId()          { return s_killWeaponMeshId; }
+
+void Combat::setOnKill(OnKillFn fn) { s_onKill = fn; }
 
 void Combat::setDamageNumberCallback(DamageNumberCallback cb) {
     s_damageNumberCallback = cb;
@@ -173,6 +186,8 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
             e->sprintTimer = -1.0f;
             e->flashTimer = 0.2f;
         } else {
+            // D1.1 — Pass isCrit down so killEntity's s_onKill callback carries it.
+            s_pendingKillIsCrit = isCrit ? 1 : 0;
             killEntity(pool, target);
         }
     }
@@ -190,6 +205,18 @@ void Combat::killEntity(EntityPool& pool, EntityHandle target) {
     e->deathTimer = 1.0f;
     e->velocity   = {0, 0, 0};
     e->killerSlot = s_attackingPlayer; // (L8) credit the kill before the loot callback reads it
+
+    // D1.1 — Emit kill event before the death callback so the emitter fires at the same
+    // point the entity transitions to dead. victimType=0 (entity). s_pendingKillIsCrit is
+    // set by applyDamage for damage-path kills; direct killEntity calls (DoT/environment)
+    // leave it 0 (no crit context available). Reset after use so the next kill starts clean.
+    if (s_onKill) {
+        s_onKill(s_attackingPlayer, /*victimType=*/0,
+                 static_cast<u16>(target.index),
+                 s_killWeaponMeshId, s_pendingKillIsCrit);
+    }
+    s_pendingKillIsCrit = 0; // reset for next call
+
     if (s_deathCallback) {
         s_deathCallback(pool, target.index, e->position);
     }

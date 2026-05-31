@@ -106,6 +106,29 @@ void Engine::initCallbacks() {
         s_engine->handleOnKillRingPassives(pool, entityIndex, position);
     });
 
+    // D1.1 — Kill broadcast: SERVER emits SV_KILL reliably to all connected clients so
+    // they can drive kill-feed / sound FX. victimType is always 0 (entity) from this path.
+    // Player kills (victimType=1) come from applyDamageToPlayer which currently has no
+    // kill hook — that's a follow-up; singleplayer/offline runs skip this (no clients).
+    Combat::setOnKill([](u8 killerSlot, u8 victimType, u16 victimIdx,
+                         u8 weaponMeshId, u8 isCrit) {
+        if (!s_engine) return;
+        if (s_engine->m_netRole != NetRole::SERVER) return; // host only; SP/split fires the event locally
+        // Build the 6-byte SV_KILL payload after the 4-byte header.
+        u8 buf[sizeof(PacketHeader) + 6];
+        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+        hdr->type  = NetPacketType::SV_KILL;
+        hdr->flags = 0;
+        hdr->seq   = 0;
+        u32 off = sizeof(PacketHeader);
+        buf[off++] = killerSlot;
+        buf[off++] = victimType;
+        std::memcpy(buf + off, &victimIdx, 2); off += 2;
+        buf[off++] = weaponMeshId;
+        buf[off++] = isCrit;
+        Net::broadcastReliable(buf, off);
+    });
+
     // Splash effect callback — spawns fire VFX at impact point
     ProjectileSystem::setSplashCallback([](Vec3 position, f32 radius) {
         if (!s_engine) return;

@@ -840,3 +840,31 @@ void Engine::onDamageToMe(u32 projectileSrcKey, f32 damage) {
     PendingDamageRingOps::ack(s_engine->m_pendingDamage, projectileSrcKey);
 }
 
+// D1.1 — Client-side SV_KILL handler. v1: log the kill for diagnostics; future work
+// can drive a kill-feed HUD, positional audio, or XP UI from this event.
+void Engine::onKill(u8 killerSlot, u8 victimType, u16 victimIdx,
+                    u8 weaponMeshId, u8 isCrit) {
+    (void)weaponMeshId; // reserved for future kill-feed weapon icon
+    LOG_INFO("net: kill event — killer=%u victimType=%u victimIdx=%u crit=%u",
+             killerSlot, victimType, victimIdx, isCrit);
+}
+
+// D1.2 — Client-side SV_PICKUP_RESULT handler. Ack the pending-pickup ring entry
+// unconditionally so the prediction is resolved: on accept the item is already gone
+// from the snapshot; on reject mirrorWorldItems restores it from the next snapshot.
+void Engine::onPickupResult(u8 accept, u32 itemUid) {
+    if (!s_engine) return;
+    // Ack regardless of accept/reject — snapshot state is authoritative for item presence.
+    PendingPickupRingOps::ack(s_engine->m_pendingPickups, itemUid);
+    LOG_INFO("net: pickup result — uid=%u accept=%u", itemUid, accept);
+}
+
+// D1.3 — Client-side SV_LOOT_SPAWN handler. v1: log for diagnostics. The snapshot
+// already mirrors the item visually via mirrorWorldItems, so no additional client
+// state is required. Future work: pin a loot icon on the minimap immediately.
+void Engine::onLootSpawn(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId) {
+    (void)posX; (void)posY; (void)posZ; // future: minimap pin
+    LOG_INFO("net: loot spawn — uid=%u defId=%u pos=(%.1f,%.1f,%.1f)",
+             uid, itemDefId, posX, posY, posZ);
+}
+
