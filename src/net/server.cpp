@@ -68,27 +68,41 @@ void Server::updateLevel(u32 levelSeed, u8 levelFloor, u8 difficulty) {
     s_levelDifficulty = difficulty;
 }
 
+// D7.2 — File-scope snapshot scratch promoted from the former static local inside
+// sendSnapshot so that getLastSnapshot() can return a stable pointer to it.
+// Single-threaded send path: populated by buildFromState, read by getLastSnapshot.
+static WorldSnapshot s_lastSnap;
+static bool          s_snapBuilt = false; // true after the first sendSnapshot call
+
 void Server::sendSnapshot(u32 serverTick,
                            const NetPlayer* players,
                            const EntityPool& entities,
                            const ProjectilePool& projectiles,
                            const WorldItemPool& worldItems)
 {
-    static WorldSnapshot snap;
-    snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0;
-    snap.worldItemCount = 0; snap.projectileCount = 0;
-    Snapshot::buildFromState(snap, serverTick, players, entities, projectiles, worldItems);
+    s_lastSnap.serverTick = 0; s_lastSnap.playerCount = 0; s_lastSnap.entityCount = 0;
+    s_lastSnap.worldItemCount = 0; s_lastSnap.projectileCount = 0;
+    Snapshot::buildFromState(s_lastSnap, serverTick, players, entities, projectiles, worldItems);
 
     // Static scratch (server-only, single-threaded send path) — keeps the larger
     // snapshot buffer off the stack and out of the per-frame heap. serialize()
     // bounds every write by MAX_SNAPSHOT_SIZE and emits truthful counts, so the
     // packet is always internally consistent even if it has to priority-drop.
     static u8 buf[MAX_SNAPSHOT_SIZE];
-    u32 size = Snapshot::serialize(snap, buf, MAX_SNAPSHOT_SIZE);
+    u32 size = Snapshot::serialize(s_lastSnap, buf, MAX_SNAPSHOT_SIZE);
     if (size > 0) {
         // Snapshots may exceed one MTU; broadcastSnapshot fragments them unreliably.
         Net::broadcastSnapshot(buf, size);
     }
+
+    s_snapBuilt = true; // D7.2: at least one snapshot has been built
+}
+
+// D7.2 — Expose the most recently built snapshot so the engine can store it
+// as a per-client baseline immediately after Server::sendSnapshot returns.
+// Returns nullptr before the first snapshot has been built (early in startup).
+const WorldSnapshot* Server::getLastSnapshot() {
+    return s_snapBuilt ? &s_lastSnap : nullptr;
 }
 
 u32 Server::getLevelSeed() {

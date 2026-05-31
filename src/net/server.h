@@ -31,6 +31,12 @@ namespace Server {
                       const ProjectilePool& projectiles,
                       const WorldItemPool& worldItems);
 
+    // D7.2 — Return the snapshot that was built and sent on the most recent
+    // sendSnapshot call.  The server calls this once per snapshot tick to copy
+    // the result into m_baselineSnap[i] for each active remote client.
+    // Returns nullptr if no snapshot has been sent yet this session.
+    const WorldSnapshot* getLastSnapshot();
+
     u32 getLevelSeed();
     u8  getLevelFloor();
     u8  getLevelDifficulty();

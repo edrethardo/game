@@ -70,7 +70,19 @@ bool s_firstKillDropGiven = false;
 void Engine::onSnapshot(const u8* data, u32 size) {
     // M1.6: pass m_clockSync so receiveSnapshot can refine the tick estimate on each
     // successful deserialize (ClockSyncOps::onSnapshotReceived, P controller gain 0.1).
-    if (s_engine) Client::receiveSnapshot(data, size, s_engine->m_clockSync);
+    if (!s_engine) return;
+    Client::receiveSnapshot(data, size, s_engine->m_clockSync);
+    // D7.2 — After a successful deserialize, copy the latest snapshot into the
+    // client-side baseline so D7.3 can reconstruct unchanged slots from a delta
+    // packet. We read getLatestSnapshot() immediately — if receiveSnapshot accepted
+    // and pushed the new snapshot, the newest is our deserialized result; if it was
+    // discarded as stale or OOO, getLatestSnapshot() returns the prior newest, which
+    // is still the correct baseline for the next delta. The copy is cheap (~50 KB
+    // memcpy) and happens at most once per snapshot tick (60 Hz), well within budget.
+    const WorldSnapshot* latest = Client::getLatestSnapshot();
+    if (latest) {
+        s_engine->m_lastAppliedSnap = *latest;
+    }
 }
 
 void Engine::onInput(u8 playerSlot, const u8* data, u32 size) {

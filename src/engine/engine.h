@@ -20,6 +20,7 @@
 #include "game/enemy_def.h"
 #include "net/net.h"
 #include "net/net_player.h"
+#include "net/snapshot.h"    // WorldSnapshot — needed for m_baselineSnap / m_lastAppliedSnap (D7.2)
 #include "net/clock_sync.h"
 #include "net/prediction_ring.h"
 #include "net/render_offset.h"
@@ -245,6 +246,21 @@ private:
     // ackedSnapshotTick on the wire is u16 (low bits only); we reconstruct the full
     // u32 here using the high bits of m_serverTick at the time the input is received.
     u32 m_clientAckedSnap[MAX_PLAYERS] = {};
+
+    // D7.2 — Per-client full snapshot baseline (server role only).
+    // After each snapshot broadcast, the server copies the sent WorldSnapshot here
+    // indexed by player slot. D7.3 computes changedBits by comparing the current
+    // snapshot against this baseline to decide which slots need to be on the wire.
+    // Memory cost: MAX_PLAYERS (4) × ~50 KB ≈ 200 KB — all on BSS, not the stack.
+    // Slot 0 (host) is stored but unused; kept so index arithmetic is uniform.
+    WorldSnapshot m_baselineSnap[MAX_PLAYERS];
+
+    // D7.2 — Last successfully applied snapshot baseline (client role only).
+    // After Client::receiveSnapshot succeeds, the engine copies the deserialized
+    // WorldSnapshot here.  D7.3 reads it to reconstruct unchanged slots from a
+    // delta packet (i.e. slots whose bit is not set in changedBits are copied from
+    // this baseline rather than left as stale zeros).
+    WorldSnapshot m_lastAppliedSnap;
 
     // Players (networked)
     NetPlayer  m_players[MAX_PLAYERS];

@@ -512,6 +512,22 @@ void Engine::serverNetPost(f32 dt) {
             BaselineTrackerOps::store(m_baselines[slot], m_serverTick);
         }
         Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
+        // D7.2 — Store the snapshot just sent as the per-client baseline for delta
+        // encoding. After sendSnapshot returns, Server::getLastSnapshot() points to
+        // the static WorldSnapshot that was just built and broadcast. We copy it into
+        // m_baselineSnap[slot] for every active remote client so that D7.3 can compare
+        // current vs. baseline to compute changedBits. Slot 0 (host) is skipped because
+        // the host never receives its own snapshot over the wire.
+        {
+            const WorldSnapshot* sent = Server::getLastSnapshot();
+            if (sent) {
+                for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
+                    if (!m_players[slot].active) continue;
+                    if (slot == static_cast<u32>(m_localPlayerIndex)) continue; // skip host slot
+                    m_baselineSnap[slot] = *sent;
+                }
+            }
+        }
         // Phase 3.1 — Capture entity poses at this snapshot tick into the lag-comp
         // history. We push only on snapshot ticks (every TICKS_PER_SNAP server ticks)
         // because that's the cadence the client renders from — every history entry
