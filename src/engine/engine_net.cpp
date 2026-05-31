@@ -107,52 +107,21 @@ void Engine::serverNetPre(f32 dt) {
             if (in.weaponId < m_weaponDefCount)
                 np.weaponState.currentWeapon = in.weaponId;
             if (!np.isDead) {
-                // CLIENT-AUTHORITATIVE POSITION: snap NetPlayer.position to the absolute
-                // position the client reported, with a max-delta sanity clamp to keep
-                // flagrant teleport-cheats from working. This eliminates the divergence
-                // between client-side prediction-collision (against interp entities) and
-                // server-side moveAndSlide (against live entities) that produced the MED
-                // reconcile snaps (~0.2-1 m every few seconds). Combat / HP / loot stay
-                // server-authoritative; the only thing we trust the client for is its own
-                // position. Co-op trade: a cheating client could phase through enemies on
-                // their own screen but can't fake damage or steal kills.
-                Vec3 reported{Quantize::unpackPos(in.posXQ),
-                              Quantize::unpackPos(in.posYQ),
-                              Quantize::unpackPos(in.posZQ)};
-                // Cap per-tick movement at 4× the player's nominal speed × dt — a real
-                // sprint+jump+dodge is well under this; a teleport hack is way over.
-                // Reject by holding the prior position so the cheating client snaps in
-                // place visibly to others (server is still the source of truth on the wire).
-                Vec3 delta = reported - np.position;
-                f32 maxStep = np.moveSpeed * 4.0f * dt + 0.5f; // +0.5 m slack for spawns / floor transitions
-                if (lengthSq(delta) > maxStep * maxStep) {
-                    // Out-of-bounds move: keep np.position unchanged this tick.
-                    // (No log spam: a single warn-once would be fine to add if cheating
-                    //  becomes a real concern; for now silent reject is sufficient.)
-                } else {
-                    np.position = reported;
-                }
-                // Yaw/pitch + movement state (velocity, onGround) come from this call —
-                // updateNetPlayerFromInput now SETS np.yaw/pitch absolutely from the
-                // input (no longer applies a mouse delta), and runs applyMovement with
-                // zero look-delta to compute velocity / WASD-derived motion / jump.
-                // applyMovement also writes np.position, so we set position again AFTER
-                // it to keep client-authoritative.
-                Vec3 preMovePos = np.position;
+                // SERVER-AUTHORITATIVE POSITION (M2+): server runs PlayerController on the
+                // remote slot — updateNetPlayerFromInput computes yaw/pitch from the absolute
+                // quantized values in the input, then drives applyMovement with moveFlags to
+                // produce the new np.position via moveAndSlide. The M0-era client-reported
+                // posXQ/Y/Z override is removed. M3 adds client-side prediction + replay
+                // reconciliation so the local player never feels the server latency.
                 PlayerController::updateNetPlayerFromInput(np, in, dt);
-                // applyMovement integrated np.position by velocity*dt against the grid.
-                // Discard that — the client's reported position is the truth — but keep
-                // the velocity, onGround, yaw, pitch, etc. it computed.
-                np.position = preMovePos;
             }
         }
     }
 
-    // (Server-side remote moveAndSlide block intentionally removed: position is now
-    // client-authoritative, set above from in.posXQ/Y/Z. Server doesn't need to slide
-    // remote players against the grid because the client already did that during its
-    // own prediction. Removes the ghost-vs-live entity collision divergence that
-    // was producing reconcile MED snaps.)
+    // (Server-side remote moveAndSlide is now inside updateNetPlayerFromInput above —
+    // the server integrates position from moveFlags + yaw for each remote. The M0 block
+    // that snapped np.position to client-reported posXQ/Y/Z is gone; the server is the
+    // sole authority for remote player positions from M2 onward.)
 
     // Remote player weapon fire + extended actions (server-authoritative)
     for (u32 i = 0; i < MAX_PLAYERS; i++) {

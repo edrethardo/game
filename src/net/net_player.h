@@ -8,33 +8,26 @@
 
 // Input as received from a client (or captured locally for listen server host).
 //
-// Aim is sent as ABSOLUTE quantized values rather than deltas (the historic
-// mouseDeltaX/Y design). Deltas were lossy under UDP loss: a dropped CL_INPUT
-// permanently dropped its mouse delta and the server's yaw drifted behind the
-// client's live camera ("shoot where I'm not aiming"). Absolutes are idempotent —
-// a dropped packet only delays the next sync; nothing is lost. Same byte count
-// for yaw/pitch.
+// Aim is sent as ABSOLUTE quantized values rather than deltas. Deltas were lossy
+// under UDP loss: a dropped packet permanently dropped its mouse delta and the
+// server's yaw drifted behind the client's live camera. Absolutes are idempotent —
+// a dropped packet only delays the next sync; nothing is lost. Same byte count.
 //
-// DEPRECATED (M3, rewrite design doc): posXQ/Y/Z carry a "trust the client"
-// position which the server snaps onto NetPlayer with a 4× speed sanity clamp.
-// The full rewrite reverses this: server simulates movement from moveFlags +
-// yaw via PlayerController, client predicts locally and replays inputs forward
-// on snapshot reconcile. This struct will lose the position fields in M3 and
-// the input pipeline will gain a clientTick / ackedSnapshotTick header for the
-// new prediction model. Do NOT add new readers of posXQ/Y/Z; new code should
-// assume the server is authoritative for position.
+// Position is server-authoritative (M2+) — the server runs PlayerController on each
+// remote and computes np.position from moveFlags + yaw. M3 will add client-side
+// prediction + replay reconciliation on top.
 struct NetInput {
-    u32 clientTick;     // monotonic client-local sim tick (M1) — server uses for input
-                        // ring buffer ordering and (in M2) for lastProcessedInputTick echo.
-    u8  moveFlags;      // bit0=W, bit1=S, bit2=A, bit3=D, bit4=jump, bit5=fire, bit6=lockHold
-    u8  weaponId;       // currently selected weapon
-    u16 yawQ;           // absolute yaw,   packed via Quantize::packAngle over [-π, π]
-    u16 pitchQ;         // absolute pitch, packed via Quantize::packAngle over [-π, π]
-    u16 posXQ;          // absolute position, packed via Quantize::packPos over [-128, 128] m
-    u16 posYQ;
-    u16 posZQ;
-    u8  extFlags;       // extended input flags (potion, reload, skill, etc.)
-    u8  skillSlot;      // which class skill slot (0-3) to activate
+    u32 clientTick;       // monotonic client-local sim tick (M1) — server uses for input
+                          // ring buffer ordering and lastProcessedInputTick echo (M2).
+    u16 ackedSnapshotTick;// low 16 bits of the latest snapshot.serverTick the client has
+                          // applied. Server uses this in M11 (delta compression) to choose
+                          // a baseline. Unused until M11 — write zero meanwhile.
+    u8  moveFlags;        // bit0=W, bit1=S, bit2=A, bit3=D, bit4=jump, bit5=fire, bit6=lockHold
+    u8  weaponId;         // currently selected weapon
+    u16 yawQ;             // absolute yaw,   packed via Quantize::packAngle over [-π, π]
+    u16 pitchQ;           // absolute pitch, packed via Quantize::packAngle over [-π, π]
+    u8  extFlags;         // extended input flags (potion, reload, skill, etc.)
+    u8  skillSlot;        // which class skill slot (0-3) to activate
 };
 
 // Move flag bits

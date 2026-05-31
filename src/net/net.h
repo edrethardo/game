@@ -12,11 +12,11 @@ static constexpr u32 NET_TICK_RATE     = 60;
 static constexpr u32 SNAPSHOT_RATE     = 30;
 static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 2
 
-// Bumped to 2 with the absolute-aim + client-authoritative-position NetInput change:
-// the wire layout grew from 14 bytes (header(4) + tick(4) + flags(2) + dx/dy(4)) to
-// 20 bytes (header(4) + tick(4) + flags(2) + yawQ/pitchQ(4) + posXQ/Y/Z(6)). A v1
-// host paired with a v2 client (or vice versa) would silently mis-parse; the version
-// check in CL_JOIN_REQUEST handling now produces a clean SV_JOIN_REJECT instead.
+// Bumped to 2 with the absolute-aim NetInput change: the wire layout changed from
+// 14 bytes (header(4) + tick(4) + flags(2) + dx/dy(4)) to 18 bytes. M2 restructured
+// CL_INPUT further: posXQ/Y/Z removed (-6 B), ackedSnapshotTick added (+2 B), net
+// 18 B total. A v1 host paired with a v2 client (or vice versa) would silently mis-parse;
+// the PROTOCOL_VERSION check in CL_JOIN_REQUEST handling produces a clean SV_JOIN_REJECT.
 // Bumped to 3 when SnapEntity grew from 27 -> 28 B (added attackAnimQ so clients see
 // enemy attack swing/lunge animations — N4 gated off the local ghost AI that used to
 // drive them locally). A v2 client reading a v3 snapshot would misalign all entity

@@ -349,12 +349,8 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
     input.yawQ   = Quantize::packAngle(newYaw);
     input.pitchQ = Quantize::packAngle(newPitch);
 
-    // Absolute position — end-of-last-frame value (PlayerController::update will move
-    // the player later this frame; that gets sent next tick). The server adopts this
-    // as authoritative for the remote slot.
-    input.posXQ = Quantize::packPos(player.position.x);
-    input.posYQ = Quantize::packPos(player.position.y);
-    input.posZQ = Quantize::packPos(player.position.z);
+    // Position is server-authoritative (M2+) — posXQ/Y/Z removed. The server runs
+    // PlayerController::updateNetPlayerFromInput on the remote slot using moveFlags + yaw.
 
     // Extended input flags — unified keyboard + gamepad
     u8 ext = 0;

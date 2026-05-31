@@ -22,27 +22,26 @@ void Server::init(NetPlayer* players, u32 levelSeed, u8 levelFloor, u8 difficult
 void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS) return;
 
-    // Wire layout (PROTOCOL_VERSION 2):
-    //   header(4) + tick(4) + moveFlags(1) + weaponId(1) + yawQ(2) + pitchQ(2)
-    //   + posXQ(2) + posYQ(2) + posZQ(2) + extFlags(1) + skillSlot(1) = 22 B.
-    // Min size guard reflects the new layout (was 16 B before — a v1 client would
-    // be rejected here too, but the PROTOCOL_VERSION check in CL_JOIN_REQUEST already
-    // catches that with a clean SV_JOIN_REJECT before any CL_INPUT arrives).
-    if (size < sizeof(PacketHeader) + 18) return;
+    // Wire layout (M2, PROTOCOL_VERSION 2):
+    //   header(4) + tick(4) + ackedSnapshotTick(2) + moveFlags(1) + weaponId(1)
+    //   + yawQ(2) + pitchQ(2) + extFlags(1) + skillSlot(1) = 18 B.
+    // posXQ/Y/Z removed (M2); ackedSnapshotTick added (zero until M11 activates it).
+    // The PROTOCOL_VERSION check in CL_JOIN_REQUEST already rejects version-mismatched
+    // clients before any CL_INPUT arrives, so the size guard here only catches corrupt
+    // or truncated packets from the same-version handshake.
+    if (size < sizeof(PacketHeader) + 14) return;
     PacketReader r;
     r.data = data;
     r.size = size;
     r.cursor = sizeof(PacketHeader);
 
     NetInput input;
-    input.clientTick = r.readU32();
+    input.clientTick       = r.readU32();
+    input.ackedSnapshotTick= r.readU16();
     input.moveFlags = r.readU8();
     input.weaponId  = r.readU8();
     input.yawQ      = r.readU16();
     input.pitchQ    = r.readU16();
-    input.posXQ     = r.readU16();
-    input.posYQ     = r.readU16();
-    input.posZQ     = r.readU16();
     input.extFlags  = r.readU8();
     input.skillSlot = r.readU8();
 

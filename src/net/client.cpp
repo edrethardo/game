@@ -153,21 +153,22 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     s_latestInput.skillSlot = skillSlot;
     s_hasInput = true;
 
-    // Serialize and send to server. Wire layout (PROTOCOL_VERSION 2):
-    //   header(4) + tick(4) + moveFlags(1) + weaponId(1) + yawQ(2) + pitchQ(2)
-    //   + posXQ(2) + posYQ(2) + posZQ(2) + extFlags(1) + skillSlot(1) = 22 B
+    // Serialize and send to server. Wire layout (M2, PROTOCOL_VERSION 2):
+    //   header(4) + tick(4) + ackedSnapshotTick(2) + moveFlags(1) + weaponId(1)
+    //   + yawQ(2) + pitchQ(2) + extFlags(1) + skillSlot(1) = 18 B
+    // posXQ/Y/Z removed (M2) — server is now hard-authoritative for position.
+    // ackedSnapshotTick carries the low 16 bits of the latest applied snapshot tick;
+    // currently written as zero until M11 (delta compression) activates the reader.
     PacketWriter w;
     w.writeU8(static_cast<u8>(NetPacketType::CL_INPUT));
     w.writeU8(0);
     w.writeU16(0);
     w.writeU32(s_latestInput.clientTick);
+    w.writeU16(s_latestInput.ackedSnapshotTick);
     w.writeU8(s_latestInput.moveFlags);
     w.writeU8(s_latestInput.weaponId);
     w.writeU16(s_latestInput.yawQ);
     w.writeU16(s_latestInput.pitchQ);
-    w.writeU16(s_latestInput.posXQ);
-    w.writeU16(s_latestInput.posYQ);
-    w.writeU16(s_latestInput.posZQ);
     w.writeU8(s_latestInput.extFlags);
     w.writeU8(s_latestInput.skillSlot);
 
