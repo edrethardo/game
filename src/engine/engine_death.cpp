@@ -72,6 +72,33 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
+// D1.3 — Broadcast SV_LOOT_SPAWN to all connected clients when a world item is spawned
+// server-side. Called from each WorldItemSystem::spawn site in the loot-drop paths.
+// The snapshot already mirrors the item visually; this reliable event lets clients react
+// immediately (kill-feed, minimap pins) before the next snapshot window.
+// No-op in singleplayer / split-screen (no remote clients to notify).
+static void broadcastLootSpawn(const WorldItemPool& pool, u32 uid, Vec3 pos, u16 defId) {
+    // Net::getRole() is the public API for role query; avoids touching engine private state.
+    if (!s_engine || Net::getRole() != NetRole::SERVER) return;
+    // 12-byte payload: u32 uid + u16 posXQ + u16 posYQ + u16 posZQ + u16 itemDefId.
+    u8 buf[sizeof(PacketHeader) + 12];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::SV_LOOT_SPAWN;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    std::memcpy(buf + off, &uid, 4); off += 4;
+    u16 posXQ = Quantize::packPos(pos.x);
+    u16 posYQ = Quantize::packPos(pos.y);
+    u16 posZQ = Quantize::packPos(pos.z);
+    std::memcpy(buf + off, &posXQ, 2); off += 2;
+    std::memcpy(buf + off, &posYQ, 2); off += 2;
+    std::memcpy(buf + off, &posZQ, 2); off += 2;
+    std::memcpy(buf + off, &defId, 2); off += 2;
+    Net::broadcastReliable(buf, off);
+    (void)pool; // pool param reserved for future per-slot targeting
+}
+
 // Runs unconditionally for every death, before any loot logic.
 // Handles: squad reassignment, friendly NPC speech, Shadow Dance extension,
 // Wanderer mark-prey passives, Mark Prey arrow chain, and Bomber death explosion.
@@ -322,9 +349,13 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                       m_affixDefs, m_affixDefCount,
                                       idef.weaponType);
             }
+            Vec3 dropPos = pos + Vec3{0, 0.5f, 0};
             WorldItemSystem::spawn(m_worldItems, item,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
+                                   dropPos, &m_level.grid,
                                    pool.entities[idx].killerSlot); // (L8) reserve to the killer
+            // D1.3 — Notify clients of the new loot item immediately (snapshot confirms next window).
+            broadcastLootSpawn(m_worldItems, item.uid, dropPos,
+                               item.defId < m_itemDefCount ? item.defId : 0xFFFF);
         }
         return true; // skip normal drop logic for this kill
     }
@@ -367,9 +398,13 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                       m_affixDefs, m_affixDefCount,
                                       biDef.weaponType);
             }
+            Vec3 bossDropPos = pos + Vec3{0, 0.5f, 0};
             WorldItemSystem::spawn(m_worldItems, bossItem,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid,
+                                   bossDropPos, &m_level.grid,
                                    pool.entities[idx].killerSlot); // (L8) reserve to the killer
+            // D1.3 — Notify clients of boss loot spawn.
+            broadcastLootSpawn(m_worldItems, bossItem.uid, bossDropPos,
+                               bossItem.defId < m_itemDefCount ? bossItem.defId : 0xFFFF);
         }
 
         // Bonus drops for major bosses
@@ -380,10 +415,13 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                                                    m_affixDefCount);
             if (!isItemEmpty(bonus)) {
                 Vec3 offset = {(f32)(bd_i) * 0.3f - 0.15f, 0.5f, 0.2f};
+                Vec3 bonusDropPos = pos + offset;
                 WorldItemSystem::spawn(m_worldItems, bonus,
-                                       pos + offset, &m_level.grid,
+                                       bonusDropPos, &m_level.grid,
                                        pool.entities[idx].killerSlot); // (L8) reserve to the killer
-
+                // D1.3 — Notify clients of bonus boss loot.
+                broadcastLootSpawn(m_worldItems, bonus.uid, bonusDropPos,
+                                   bonus.defId < m_itemDefCount ? bonus.defId : 0xFFFF);
             }
         }
 
@@ -393,6 +431,7 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         globe.uid   = m_worldItems.nextUid++;
         WorldItemSystem::spawn(m_worldItems, globe,
                                pos + Vec3{0.2f, 0.5f, 0.0f}, &m_level.grid);
+        // Globes are auto-pickup and rarely interesting for client-side UIs — skip broadcast.
         return true; // skip normal loot path
     }
 
@@ -430,8 +469,12 @@ void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             // environmental/AoE kills, which spawn() treats as free-for-all. Globes stay
             // free-for-all auto-pickup below.
             u8 killer = pool.entities[idx].killerSlot;
+            Vec3 normalDropPos = pos + Vec3{0, 0.5f, 0};
             WorldItemSystem::spawn(m_worldItems, item,
-                                   pos + Vec3{0, 0.5f, 0}, &m_level.grid, killer);
+                                   normalDropPos, &m_level.grid, killer);
+            // D1.3 — Notify clients of normal loot spawn so UI can react immediately.
+            broadcastLootSpawn(m_worldItems, item.uid, normalDropPos,
+                               item.defId < m_itemDefCount ? item.defId : 0xFFFF);
         }
 
         // Chance to drop a globe (restores both HP and energy on pickup)
