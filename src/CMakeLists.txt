@@ -89,6 +89,7 @@ add_executable(DungeonEngine
     net/server.cpp
     net/client.cpp
     net/client_time.cpp
+    net/input_wire.cpp
     renderer/material.cpp
     renderer/obj_loader.cpp
     world/level_loader.cpp

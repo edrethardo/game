@@ -23,6 +23,13 @@ static u32           s_snapCount = 0;
 static NetInput s_latestInput = {};
 static bool     s_hasInput    = false;
 
+// Rolling send window: holds the last INPUT_WINDOW_SIZE inputs in oldest→newest order.
+// Every CL_INPUT packet carries the full window so a single dropped UDP packet no longer
+// loses an input — the next packet still carries it. Three consecutive losses are required
+// to actually drop an input.
+static NetInput s_sendWindow[INPUT_WINDOW_SIZE] = {};
+static u32      s_sendWindowCount = 0;
+
 // Set by Client::init (every client floor descend re-enters startGame -> Client::init,
 // engine_startgame.cpp). It forces receiveSnapshot to accept the FIRST snapshot after a
 // descend unconditionally, closing the reset-gap straddle window: if a late prior-floor
@@ -142,6 +149,9 @@ void Client::init(u8 localPlayerIndex) {
     s_snapHead = 0;
     s_snapCount = 0;
     s_hasInput = false;
+    // Reset the send window so stale prior-floor inputs don't bleed into the new floor's
+    // first packets (the server's input ring buffer also resets in Server::init).
+    s_sendWindowCount = 0;
     s_acceptNextSnapshot = true; // first post-(re)init snapshot is accepted unconditionally (TA-6)
     LOG_INFO("Client: initialized (local player=%u)", localPlayerIndex);
 }
@@ -153,24 +163,28 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     s_latestInput.skillSlot = skillSlot;
     s_hasInput = true;
 
-    // Serialize and send to server. Wire layout (M2, PROTOCOL_VERSION 2):
-    //   header(4) + tick(4) + ackedSnapshotTick(2) + moveFlags(1) + weaponId(1)
-    //   + yawQ(2) + pitchQ(2) + extFlags(1) + skillSlot(1) = 18 B
-    // posXQ/Y/Z removed (M2) — server is now hard-authoritative for position.
-    // ackedSnapshotTick carries the low 16 bits of the latest applied snapshot tick;
-    // currently written as zero until M11 (delta compression) activates the reader.
+    // Shift oldest out and append this input at the back (oldest→newest order).
+    if (s_sendWindowCount < INPUT_WINDOW_SIZE) {
+        s_sendWindow[s_sendWindowCount++] = s_latestInput;
+    } else {
+        for (u32 i = 0; i < INPUT_WINDOW_SIZE - 1; i++) {
+            s_sendWindow[i] = s_sendWindow[i + 1];
+        }
+        s_sendWindow[INPUT_WINDOW_SIZE - 1] = s_latestInput;
+    }
+
+    // Serialize the full window into a local buffer, then wrap it in a packet header and
+    // send. Wire layout (M2.2, PROTOCOL_VERSION 2):
+    //   PacketHeader(4) + windowPayload: u8 windowCount + u8[3] reserved + N×14 B inputs
+    //   Max total = 4 + 4 + 4*14 = 64 B per CL_INPUT.
+    u8 payload[256];
+    u32 payloadSize = serializeInputWindow(payload, sizeof(payload),
+                                           s_sendWindow, s_sendWindowCount);
     PacketWriter w;
     w.writeU8(static_cast<u8>(NetPacketType::CL_INPUT));
     w.writeU8(0);
     w.writeU16(0);
-    w.writeU32(s_latestInput.clientTick);
-    w.writeU16(s_latestInput.ackedSnapshotTick);
-    w.writeU8(s_latestInput.moveFlags);
-    w.writeU8(s_latestInput.weaponId);
-    w.writeU16(s_latestInput.yawQ);
-    w.writeU16(s_latestInput.pitchQ);
-    w.writeU8(s_latestInput.extFlags);
-    w.writeU8(s_latestInput.skillSlot);
+    for (u32 i = 0; i < payloadSize; i++) w.writeU8(payload[i]);
 
     Net::sendToServer(w.data, w.cursor, false);
 }

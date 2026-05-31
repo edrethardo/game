@@ -13,6 +13,7 @@ add_executable(dungeon_tests
     net/test_input_wire.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp
+    ${CMAKE_SOURCE_DIR}/src/net/input_wire.cpp
     ${CMAKE_SOURCE_DIR}/src/core/log.cpp
 )
 

@@ -22,40 +22,36 @@ void Server::init(NetPlayer* players, u32 levelSeed, u8 levelFloor, u8 difficult
 void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS) return;
 
-    // Wire layout (M2, PROTOCOL_VERSION 2):
-    //   header(4) + tick(4) + ackedSnapshotTick(2) + moveFlags(1) + weaponId(1)
-    //   + yawQ(2) + pitchQ(2) + extFlags(1) + skillSlot(1) = 18 B.
-    // posXQ/Y/Z removed (M2); ackedSnapshotTick added (zero until M11 activates it).
-    // The PROTOCOL_VERSION check in CL_JOIN_REQUEST already rejects version-mismatched
-    // clients before any CL_INPUT arrives, so the size guard here only catches corrupt
-    // or truncated packets from the same-version handshake.
-    if (size < sizeof(PacketHeader) + 14) return;
-    PacketReader r;
-    r.data = data;
-    r.size = size;
-    r.cursor = sizeof(PacketHeader);
+    // Wire layout (M2.2, PROTOCOL_VERSION 2): PacketHeader(4) + window payload.
+    // Window payload: u8 windowCount + u8[3] reserved + N×14 B inputs (N ≤ INPUT_WINDOW_SIZE).
+    // Min valid size = 4(header) + 4(window header) + 1×14(one input) = 22 B.
+    // deserializeInputWindow validates the exact count vs. buffer size; the guard here
+    // is just a cheap early-out for obviously-corrupt/truncated packets.
+    if (size < sizeof(PacketHeader) + 4) return;
 
-    NetInput input;
-    input.clientTick       = r.readU32();
-    input.ackedSnapshotTick= r.readU16();
-    input.moveFlags = r.readU8();
-    input.weaponId  = r.readU8();
-    input.yawQ      = r.readU16();
-    input.pitchQ    = r.readU16();
-    input.extFlags  = r.readU8();
-    input.skillSlot = r.readU8();
+    NetInput batch[INPUT_WINDOW_SIZE];
+    // Payload starts after the 4-byte PacketHeader
+    u32 count = deserializeInputWindow(data + sizeof(PacketHeader),
+                                       size - sizeof(PacketHeader),
+                                       batch, INPUT_WINDOW_SIZE);
+    if (count == 0) return;  // malformed or truncated — discard silently
 
-    // Validate input to prevent server crash from malicious clients
-    if (input.weaponId >= MAX_WEAPON_DEFS) input.weaponId = 0;
-    input.moveFlags &= 0x7F;
-    // Keep all defined INPUT_EX_* flags (bits 0-7). Previously masked 0x7F, which
-    // silently stripped INPUT_EX_DODGE (bit7) for remote clients — so a remote
-    // Wanderer's dodge never granted server-authoritative i-frames (player.cpp:266).
-    input.extFlags &= (INPUT_EX_POTION | INPUT_EX_RELOAD | INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL
-                       | INPUT_EX_HELM_SKILL | INPUT_EX_INVENTORY | INPUT_EX_DODGE);
-    if (input.skillSlot > 3) input.skillSlot = 0;
-
-    s_inputBuffers[playerSlot].push(input);
+    InputRingBuffer& buf = s_inputBuffers[playerSlot];
+    for (u32 i = 0; i < count; i++) {
+        NetInput& input = batch[i];
+        // Validate each input to prevent server crash from malicious clients
+        if (input.weaponId >= MAX_WEAPON_DEFS) input.weaponId = 0;
+        input.moveFlags &= 0x7F;
+        // Keep all defined INPUT_EX_* flags (bits 0-7). Previously masked 0x7F, which
+        // silently stripped INPUT_EX_DODGE (bit7) for remote clients — so a remote
+        // Wanderer's dodge never granted server-authoritative i-frames (player.cpp:266).
+        input.extFlags &= (INPUT_EX_POTION | INPUT_EX_RELOAD | INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL
+                           | INPUT_EX_HELM_SKILL | INPUT_EX_INVENTORY | INPUT_EX_DODGE);
+        if (input.skillSlot > 3) input.skillSlot = 0;
+        // push() filters duplicates and stale ticks via monotonic clientTick check, so
+        // re-sending earlier inputs in the window is safe even at high packet rates.
+        buf.push(input);
+    }
 }
 
 InputRingBuffer& Server::getInputBuffer(u8 playerSlot) {

@@ -130,6 +130,24 @@ struct NetPlayer {
     Vec3 eyePos() const { return position + Vec3{0, eyeHeight, 0}; }
 };
 
+// Number of consecutive inputs packed into each CL_INPUT packet (oldest→newest).
+// Redundancy benefit: one dropped UDP packet no longer drops an input — the next
+// packet still carries it. Three consecutive losses required to lose an input at all.
+static constexpr u32 INPUT_WINDOW_SIZE = 4;
+
+// Serialize up to `count` NetInputs (≤ INPUT_WINDOW_SIZE) into `outBuf`. Wire layout:
+//   u8  windowCount
+//   u8  reserved (=0, for alignment)
+//   u16 reserved (=0)
+//   N × (u32 clientTick + u16 ackedSnapshotTick + u8 moveFlags + u8 weaponId
+//        + u16 yawQ + u16 pitchQ + u8 extFlags + u8 skillSlot)  // 14 B per input
+// Returns total bytes written (0 on overflow).
+u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count);
+
+// Inverse of serializeInputWindow. Writes up to `maxCount` inputs into `outInputs`.
+// Returns the number actually decoded (0 if the buffer is truncated or malformed).
+u32 deserializeInputWindow(const u8* buf, u32 size, NetInput* outInputs, u32 maxCount);
+
 // Ring buffer for storing recent inputs (server-side per player, client-side for prediction)
 static constexpr u32 INPUT_BUFFER_SIZE = 64;
 
