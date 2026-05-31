@@ -39,6 +39,7 @@
 #include "net/client.h"
 #include "net/snapshot.h"
 #include "net/packet.h"
+#include "net/pending_hit_ring.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/frame_allocator.h"
@@ -349,6 +350,10 @@ void Engine::handleWeaponFire(f32 dt) {
                         break;
                     }
                 }
+                // M6 — Record this predicted melee hit so M10 can ack or roll back the FX.
+                // hits[i].index is the entity slot in the interpolated pool (matches the
+                // snapshot entity index the server will reference in SV_DAMAGE_DONE).
+                PendingHitRingOps::record(m_pendingHits, m_clientTick, hits[i].index, 0);
             }
             result.didFire     = true;
             result.entitiesHit = hitCount;
@@ -425,6 +430,12 @@ void Engine::handleWeaponFire(f32 dt) {
                     result.hitNormal   = hit.normal;
                     result.hitDistance = hit.distance;
                     result.entitiesHit = (hit.type == CombatHit::ENTITY) ? 1 : 0;
+                    // M6 — Record predicted entity hits so M10 can ack or roll them back.
+                    // Only record ENTITY hits (WORLD hits have no server-side damage ack).
+                    if (hit.type == CombatHit::ENTITY) {
+                        PendingHitRingOps::record(m_pendingHits, m_clientTick,
+                                                  hit.entityHandle.index, 0);
+                    }
                 }
             } else {
                 result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);

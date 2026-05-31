@@ -38,6 +38,7 @@
 #include "net/client.h"
 #include "net/snapshot.h"
 #include "net/packet.h"
+#include "net/pending_hit_ring.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/frame_allocator.h"
@@ -756,6 +757,9 @@ void Engine::startGame(GameStart mode) {
         // M4 — Clear the smooth-correction offset so any residual from a prior session
         // doesn't displace the camera at the start of the new connection.
         m_renderOffset.offset = {0, 0, 0};
+        // M6 — Clear the pending-hits ring so stale predictions from a prior session
+        // don't get acked (or mismatched) against the new connection's server events.
+        PendingHitRingOps::reset(m_pendingHits);
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

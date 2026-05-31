@@ -23,6 +23,7 @@
 #include "net/clock_sync.h"
 #include "net/prediction_ring.h"
 #include "net/render_offset.h"
+#include "net/pending_hit_ring.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -177,6 +178,13 @@ private:
     // camera position smoothly slides toward the corrected sim position (~150 ms window)
     // instead of teleporting. Reset on every CLIENT connect (see engine_startgame.cpp).
     RenderOffset m_renderOffset;
+
+    // Pending predicted hits (CLIENT role, M6) — records one entry per predicted melee
+    // or hitscan hit (clientTick, entitySlot). M10's SV_DAMAGE_DONE handler will ack
+    // confirmed hits and trigger soft FX cleanup on mismatches. Until M10 lands, entries
+    // accumulate; expireOlderThan bounds growth once M10 drives the pruning cadence.
+    // Reset on every CLIENT connect (below).
+    PendingHitRing m_pendingHits;
 
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client
