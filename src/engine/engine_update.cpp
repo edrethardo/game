@@ -1173,34 +1173,51 @@ void Engine::handleRespawnRequest(u8 playerSlot) {
     LOG_INFO("Player %u respawned (CL_RESPAWN)", playerSlot);
 }
 
+// D1.2 helper: send SV_PICKUP_RESULT to the requesting client (accept=1 or accept=0).
+// 6-byte payload: u8 accept + u8 reserved + u32 uid.
+static void sendPickupResult(u8 playerSlot, u8 accept, u32 uid) {
+    u8 buf[sizeof(PacketHeader) + 6];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::SV_PICKUP_RESULT;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    buf[off++] = accept;
+    buf[off++] = 0; // reserved
+    std::memcpy(buf + off, &uid, 4); off += 4;
+    Net::sendReliable(playerSlot, buf, off);
+}
+
 // SERVER-only (N5): apply a validated CL_PICKUP_ITEM request. Finds the world item by uid,
 // checks the requesting player's proximity + ownership against AUTHORITATIVE state, then
 // moves it into that player's inventory and frees the slot (propagates via the next
-// snapshot). Mirrors the host's local pickup rules so clients and host behave identically.
+// snapshot). D1.2: always responds with SV_PICKUP_RESULT so the client can ack its
+// pending-pickup ring and resolve the predicted disappearance.
 void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
     if (playerSlot >= MAX_PLAYERS) return;
     NetPlayer& np = m_players[playerSlot];
-    if (!np.active || np.isDead) return;
+    if (!np.active || np.isDead) { sendPickupResult(playerSlot, 0, uid); return; }
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = m_worldItems.items[i];
         if (!wi.active || wi.item.uid != uid) continue;
-        if (isGlobe(wi.item)) return; // globes are server-auto-picked, not requestable
+        if (isGlobe(wi.item)) { sendPickupResult(playerSlot, 0, uid); return; } // globes not requestable
 
         // Proximity check against the authoritative net player position (XZ, matches aim path).
         Vec3 delta = np.position - wi.position;
         f32 hDist = sqrtf(delta.x * delta.x + delta.z * delta.z);
-        if (hDist > 3.5f) return; // too far — reject (snapshot keeps the item present)
+        if (hDist > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; } // too far — reject
 
         // Ownership: free-for-all, owned by this player, or exclusive window expired.
         bool canPickup = (wi.ownerSlot == 0xFF)
                       || (wi.ownerSlot == playerSlot)
                       || (wi.exclusiveTimer <= 0.0f);
-        if (!canPickup) return;
+        if (!canPickup) { sendPickupResult(playerSlot, 0, uid); return; }
 
         ItemInstance picked = wi.item;
-        if (!Inventory::addToBackpack(m_inventories[playerSlot], picked))
-            return; // backpack full — leave the item in the world
+        if (!Inventory::addToBackpack(m_inventories[playerSlot], picked)) {
+            sendPickupResult(playerSlot, 0, uid); return; // backpack full — reject
+        }
 
         // Auto-equip an empty weapon slot (matches the host local-pickup convenience).
         if (picked.defId < m_itemDefCount &&
@@ -1218,8 +1235,12 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
 
         wi.active = false; // removal propagates to all clients via the next snapshot
         if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        // D1.2: notify the requesting client that pickup was accepted.
+        sendPickupResult(playerSlot, 1, uid);
         return;
     }
+    // uid not found in world (already gone or never existed): reject so the client cleans up.
+    sendPickupResult(playerSlot, 0, uid);
 }
 
 // True while a milestone boss is still alive on this floor. Used to lock the floor
