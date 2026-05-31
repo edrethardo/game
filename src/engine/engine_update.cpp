@@ -284,13 +284,26 @@ void Engine::update(f32 dt) {
                     // death path calls resetEnemiesToRooms), so nothing to reset on respawn —
                     // the old allDead computation here was dead code.
                     if (m_netRole == NetRole::CLIENT) {
-                        // CLIENT: request respawn and WAIT for the server. Don't touch local
-                        // health/position/m_playerDead — reconcile re-adopts authoritative HP
-                        // every frame, so an optimistic local revive just flickers. The server
-                        // clears isDead, and clientNetPre clears m_playerDead from the snapshot.
-                        // Sent reliably as a dedicated CL_RESPAWN packet (NOT via the input ring
-                        // buffer, whose monotonic-tick guard silently dropped the old respawn).
+                        // CLIENT: send the reliable respawn request and immediately predict the
+                        // transition locally (M9). The server confirms via the next snapshot; if
+                        // the server rejects (e.g. duplicate packet), it returns isDead=true and
+                        // clientNetPre will re-set m_playerDead — harmless one-frame flicker.
+                        // Mirrors handleRespawnRequest() field assignments (engine_update.cpp).
                         sendRespawnRequest();
+                        {
+                            NetPlayer& np = m_players[activeNetSlot()];
+                            m_localPlayer.health        = np.maxHealth;
+                            m_localPlayer.position      = np.spawnPosition;
+                            m_localPlayer.velocity      = {0, 0, 0};
+                            m_localPlayer.invulnTimer   = 1.5f;  // matches server's handleRespawnRequest
+                            m_localPlayer.damageFlashTimer = 0.0f;
+                            m_localPlayer.hurtVignette  = 0.0f;
+                            // Clear the net-layer isDead so clientNetPre doesn't immediately
+                            // re-gate us dead on this same frame before the snapshot arrives.
+                            np.isDead = false;
+                        }
+                        m_playerDead[sp] = false;
+                        snapCameraToPlayer();  // prevent camera-interp smear from death position
                     } else {
                         // SERVER + split-screen: direct local revive (authoritative locally).
                         m_localPlayer.health = m_localPlayer.maxHealth;
