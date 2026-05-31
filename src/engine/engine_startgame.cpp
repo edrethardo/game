@@ -749,6 +749,10 @@ void Engine::startGame(GameStart mode) {
         ClockSyncOps::reset(m_clockSync);
         m_pingsSent = 0;
         m_lastPingSentSec = 0.0;
+        // M3.2 — Clear the prediction ring and last-reconciled ack so stale tick-keyed
+        // entries from a prior session don't produce false divergence hits on reconnect.
+        PredictionRingOps::reset(m_predictionRing);
+        m_lastReconciledTick = 0;
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

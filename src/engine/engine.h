@@ -21,6 +21,7 @@
 #include "net/net.h"
 #include "net/net_player.h"
 #include "net/clock_sync.h"
+#include "net/prediction_ring.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -163,6 +164,12 @@ private:
     ClockSync m_clockSync;
     f64       m_lastPingSentSec = 0.0;
     u32       m_pingsSent       = 0;
+
+    // Prediction ring (CLIENT role, M3) — stores (input, predicted-state) per clientTick
+    // so that clientNetPost can compare the server's authoritative pose against what we
+    // predicted and snap/correct if divergence > 10 cm. Reset on every CLIENT connect.
+    PredictionRing m_predictionRing;
+    u32            m_lastReconciledTick = 0;
 
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client

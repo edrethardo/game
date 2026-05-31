@@ -535,6 +535,22 @@ void Engine::clientNetPre(f32 dt) {
     // succession and let the server's per-clientTick dedup ring squash the duplicates.
     resendPendingFire();
 
+    // M3.2 — Snapshot the local player's state into the prediction ring keyed by
+    // m_clientTick. On snapshot arrival (clientNetPost) we compare the server's
+    // authoritative position at the ACK'd tick against the matching ring entry.
+    {
+        PredictedState s;
+        s.position    = m_localPlayer.position;
+        s.velocity    = m_localPlayer.velocity;
+        s.yaw         = m_localPlayer.yaw;
+        s.pitch       = m_localPlayer.pitch;
+        s.health      = m_localPlayer.health;
+        s.invulnTimer = m_localPlayer.invulnTimer;
+        s.onGround    = m_localPlayer.onGround;
+        const NetInput* latest = Client::getLatestInput();
+        if (latest) PredictionRingOps::push(m_predictionRing, m_clientTick, *latest, s);
+    }
+
     // No client-side prediction step anymore — under the trust-client position model,
     // m_localPlayer is the authoritative source for the local camera/transform (updated
     // in gameUpdate via PlayerController::update). The server adopts the absolute yaw/
@@ -641,6 +657,44 @@ void Engine::clientNetPost(f32 dt) {
     // client needs to see/aim at loot. Runs AFTER gameUpdate so it overrides the local
     // WorldItemSystem::update (lifetime decay is server-driven for clients).
     Client::mirrorWorldItems(m_worldItems, m_itemDefs, m_itemDefCount, dt);
+
+    // M3.2 — Prediction reconciliation: compare server's authoritative position for the
+    // local player at the ACK'd tick against our ring's predicted position. If we diverged
+    // by more than 10 cm, log it and snap to the server's value. Full smooth-correction
+    // lerp is deferred to M4; for M3 this is an immediate snap with a diagnostic log so
+    // we can confirm the pipeline works before adding the visual smoothing layer.
+    {
+        const WorldSnapshot* snap = Client::getLatestSnapshot();
+        if (snap) {
+            u8 mySlot = activeNetSlot();
+            u32 ackedTick = snap->lastProcessedInputTick[mySlot];
+            // Only reconcile a fresh ACK we haven't already processed this frame.
+            if (ackedTick != 0 && ackedTick != m_lastReconciledTick) {
+                const PredictionEntry* e = PredictionRingOps::find(m_predictionRing, ackedTick);
+                if (e) {
+                    // Unpack the server's quantized position for our slot.
+                    // SnapPlayer stores posX/posY/posZ as u16 packed via Quantize::packPos;
+                    // unpack each component individually (no unpackPosVec3 helper exists).
+                    const SnapPlayer& sp = snap->players[mySlot];
+                    Vec3 serverPos = {
+                        Quantize::unpackPos(sp.posX),
+                        Quantize::unpackPos(sp.posY),
+                        Quantize::unpackPos(sp.posZ)
+                    };
+                    Vec3 diff   = serverPos - e->state.position;
+                    f32  distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
+                    if (distSq > 0.01f) {  // > 10 cm (0.1 m) squared = 0.01 m²
+                        LOG_INFO("net: prediction divergence at tick %u: %.2f m",
+                                 ackedTick, sqrtf(distSq));
+                        // M3 simple correction: snap local player to server pose.
+                        // M4 will add a smooth lerp so corrections aren't visible teleports.
+                        m_localPlayer.position = serverPos;
+                    }
+                }
+                m_lastReconciledTick = ackedTick;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
