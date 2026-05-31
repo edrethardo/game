@@ -100,6 +100,12 @@ namespace ProjectileSystem {
     using DamageNumberCallback = void(*)(Vec3 position, f32 damage);
     void setDamageNumberCallback(DamageNumberCallback cb);
 
+    // M10.3 — Callback when an enemy projectile hits a player. Receives the projectile's
+    // ownerSlot + clientTick (for key construction) + damage + the Player* that was hit.
+    // Used by the server to emit SV_DAMAGE_TO_ME to the victim's network slot.
+    using PlayerHitCallback = void(*)(u8 ownerSlot, u32 clientTick, f32 damage, Player* victim);
+    void setPlayerHitCallback(PlayerHitCallback cb);
+
     void init(ProjectilePool& pool);
 
     // Spawn a projectile. Returns the pool slot index (0xFFFF if pool full).

@@ -265,6 +265,39 @@ void Engine::initCallbacks() {
         s_engine->spawnDamageNumber(position, damage);
     });
 
+    // M10.3 — Enemy projectile hit a player. On SERVER, find which remote slot owns the
+    // victim Player view and emit SV_DAMAGE_TO_ME so the client can ack its PendingDamageRing.
+    // Key encoding mirrors the client's PendingDamageRingOps::record key:
+    //   (ownerSlot << 24) | (clientTick & 0xFFFFFF)
+    // Only sent to remote (non-host) clients; the host (slot 0) runs locally.
+    ProjectileSystem::setPlayerHitCallback([](u8 ownerSlot, u32 clientTick, f32 damage, Player* victim) {
+        if (!s_engine) return;
+        if (s_engine->m_netRole != NetRole::SERVER) return;
+        // Identify which remote NetPlayer slot the victim view belongs to by matching position.
+        // Remote views are ephemeral copies — pointer comparison won't work, so match by
+        // position proximity (sub-millimeter threshold; views are freshly built each tick).
+        u8 victimSlot = 0xFF;
+        for (u32 i = 1; i < MAX_PLAYERS; i++) { // slot 0 = host, not a remote view
+            if (!s_engine->m_players[i].active) continue;
+            Vec3 d = s_engine->m_players[i].position - victim->position;
+            f32 distSq = d.x*d.x + d.y*d.y + d.z*d.z;
+            if (distSq < 0.001f) { victimSlot = static_cast<u8>(i); break; }
+        }
+        if (victimSlot == 0xFF) return; // host or unmatched — no send needed
+        u32 key = (static_cast<u32>(ownerSlot) << 24) | (clientTick & 0xFFFFFFu);
+        u8 svBuf[sizeof(PacketHeader) + 10]; // header(4) + key(4) + damage(4) + reserved(2)
+        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(svBuf);
+        hdr->type  = NetPacketType::SV_DAMAGE_TO_ME;
+        hdr->flags = 0;
+        hdr->seq   = 0;
+        u32 off = sizeof(PacketHeader);
+        std::memcpy(svBuf + off, &key,    4); off += 4;
+        std::memcpy(svBuf + off, &damage, 4); off += 4;
+        u16 reserved = 0;
+        std::memcpy(svBuf + off, &reserved, 2); off += 2;
+        Net::sendReliable(victimSlot, svBuf, off);
+    });
+
     // Perfect block callback — legendary shield stun bash
     Combat::setPerfectBlockCallback([](Player& player) {
         if (!s_engine) return;

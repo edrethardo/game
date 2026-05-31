@@ -19,6 +19,7 @@ static f32 randf(f32 lo, f32 hi) {
 static ProjectileSystem::SplashCallback s_splashCallback = nullptr;
 static ProjectileSystem::HitCallback s_hitCallback = nullptr;
 static ProjectileSystem::DamageNumberCallback s_dmgNumCallback = nullptr;
+static ProjectileSystem::PlayerHitCallback s_playerHitCallback = nullptr;  // M10.3
 
 void ProjectileSystem::setSplashCallback(SplashCallback cb) {
     s_splashCallback = cb;
@@ -28,6 +29,9 @@ void ProjectileSystem::setHitCallback(HitCallback cb) {
 }
 void ProjectileSystem::setDamageNumberCallback(DamageNumberCallback cb) {
     s_dmgNumCallback = cb;
+}
+void ProjectileSystem::setPlayerHitCallback(PlayerHitCallback cb) {  // M10.3
+    s_playerHitCallback = cb;
 }
 
 void ProjectileSystem::init(ProjectilePool& pool) {
@@ -86,6 +90,8 @@ enum class PlayerHitResult { MISS, DEFLECTED, HIT };
 // Apply an enemy projectile to one player: Wanderer Deflect absorb (full immunity
 // incl. status), else damage + on-hit status. Factored out of the old P1-only branch
 // so every local player (split-screen) gets identical treatment.
+// M10.3: fires s_playerHitCallback on a confirmed hit so the server can emit
+// SV_DAMAGE_TO_ME to the victim's network slot.
 static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& player) {
     AABB playerBox = {
         player.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
@@ -100,6 +106,8 @@ static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& 
         return PlayerHitResult::DEFLECTED;
     }
     Combat::applyDamageToPlayer(player, p.damage, &p.position);
+    // M10.3: notify the server so it can send SV_DAMAGE_TO_ME to the victim client.
+    if (s_playerHitCallback) s_playerHitCallback(p.ownerSlot, p.clientTick, p.damage, &player);
     // Apply on-hit status effect from projectile (or default slow)
     if (p.onHitEffect == 1) {        // poison
         player.poisonTimer = fmaxf(player.poisonTimer, p.onHitDuration);
