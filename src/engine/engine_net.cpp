@@ -735,6 +735,16 @@ void Engine::clientNetPost(f32 dt) {
                     if (distSq > 0.01f) {  // > 10 cm (0.1 m) squared = 0.01 m²
                         LOG_INFO("net: prediction divergence at tick %u: %.2f m",
                                  ackedTick, sqrtf(distSq));
+
+                        // M14: count every reconcile mismatch for the 1 Hz net-graph log.
+                        m_divergenceCount++;
+
+                        // M13: large divergence (>=10 m) triggers a 0.5s screen flash so
+                        // the player knows a significant teleport correction happened.
+                        if (distSq > 100.0f) {
+                            m_localPlayer.screenFlashTimer = 0.5f;
+                        }
+
                         // M4 smooth correction: accumulate the visible delta so the camera
                         // doesn't teleport. The sim position snaps immediately (server-
                         // authoritative for replay correctness); m_renderOffset decays each

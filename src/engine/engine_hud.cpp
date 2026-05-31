@@ -579,7 +579,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         HUD::drawDamageDirection(sw, sh, -hi.angle, alpha);
     }
 
-        HUD::drawHealthBar(sw, sh, m_localPlayer.health, m_localPlayer.maxHealth);
+        // M13: use renderedHealth for bar fill so the bar smoothly lerps on hits
+        // rather than snapping. The numeric display (if added later) should read `health`.
+        HUD::drawHealthBar(sw, sh, m_localPlayer.renderedHealth, m_localPlayer.maxHealth);
 
         // Summon portraits — top-left, well below floor/potion text
         {

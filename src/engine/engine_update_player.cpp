@@ -444,6 +444,20 @@ void Engine::tickPlayerFX(f32 dt) {
 // hurt vignette decay, and low-HP visual/rumble danger pulse.
 // ---------------------------------------------------------------------------
 void Engine::tickVisualFeedback(f32 dt) {
+    // M13: HP bar lerp — the visible bar value eases toward `health` at 4 Hz so a hit
+    // doesn't look like an instant snap. The numeric readout keeps using `health` (raw).
+    {
+        const f32 HP_LERP_RATE = 4.0f;  // bar reaches ~95% of target in ~750 ms
+        f32 hpDelta = m_localPlayer.health - m_localPlayer.renderedHealth;
+        m_localPlayer.renderedHealth += hpDelta * dt * HP_LERP_RATE;
+    }
+
+    // M13: screen flash decay — counts down from 0.5 s after a large prediction divergence
+    if (m_localPlayer.screenFlashTimer > 0.0f) {
+        m_localPlayer.screenFlashTimer -= dt;
+        if (m_localPlayer.screenFlashTimer < 0.0f) m_localPlayer.screenFlashTimer = 0.0f;
+    }
+
     // Damage flash decay — play hit sound on the first tick of a fresh flash
     if (m_localPlayer.damageFlashTimer > 0.0f) {
         if (m_localPlayer.damageFlashTimer >= 0.15f - 0.001f) {

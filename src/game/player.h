@@ -38,6 +38,8 @@ struct Player {
     // Combat
     f32  health         = 100.0f;
     f32  maxHealth      = 100.0f;
+    f32  renderedHealth = 100.0f;   // M13: lerps toward `health` at 4 Hz visual rate — HP bar reads this so hits look smooth, not snapped
+    f32  screenFlashTimer = 0.0f;   // M13: 0.5 s full-screen dark flash on large prediction divergences (>=10 m teleport)
     f32  damageFlashTimer = 0.0f;
     f32  hitShakeTimer    = 0.0f;  // screen shake on taking damage
     f32  hurtVignette     = 0.0f;  // 0..1 per-hit red edge-vignette intensity, decays each frame

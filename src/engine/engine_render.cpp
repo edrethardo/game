@@ -467,6 +467,20 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
     }
+
+    // M13: big-divergence screen flash — black overlay that fades from 0.5 s back to 0.
+    // Triggered in clientNetPost when prediction correction exceeds 10 m (distSq > 100).
+    // Alpha is linear in remaining time: 1.0 at trigger, 0.0 at expiry.
+    if (m_localPlayer.screenFlashTimer > 0.0f) {
+        f32 flashAlpha = fminf(m_localPlayer.screenFlashTimer * 2.0f, 1.0f);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        // Use the vignette shader for the full-screen quad; black with flashAlpha.
+        drawScreenQuad(sw, sh, {0.0f, 0.0f, 0.0f, flashAlpha}, m_vignetteShader);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+    }
 }
 
 void Engine::render(f32 alpha) {
