@@ -61,6 +61,12 @@ extern bool s_firstKillDropGiven;
 // Server networking — pre-gameplay: process remote inputs, weapon fire
 // ---------------------------------------------------------------------------
 void Engine::serverNetPre(f32 dt) {
+    // D5: sync the fake-latency cvar into the net layer, then flush any delayed
+    // packets whose delivery timestamp has elapsed. Done first so a queued snapshot
+    // from the prior frame arrives before we build + broadcast the new one.
+    Net::setFakeLatencyMs(m_netFakeLatencyMs);
+    Net::pumpDelayQueue();
+
     m_serverTick++;
 
     // Capture local input and push into server's input buffer. Pass m_localPlayer
@@ -518,6 +524,11 @@ void Engine::serverNetPost(f32 dt) {
 // Client networking — pre-gameplay: predict, reconcile
 // ---------------------------------------------------------------------------
 void Engine::clientNetPre(f32 dt) {
+    // D5: sync the fake-latency cvar into the net layer, then flush any outgoing
+    // packets (CL_INPUT, CL_FIRE_WEAPON, etc.) whose delivery timestamp has elapsed.
+    Net::setFakeLatencyMs(m_netFakeLatencyMs);
+    Net::pumpDelayQueue();
+
     // Handle server disconnection gracefully
     if (!Net::isConnected()) {
         LOG_WARN("Lost connection to server");

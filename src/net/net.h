@@ -339,4 +339,17 @@ namespace Net {
     // broadcastSnapshot / sendReliable / sendUnreliable (SERVER) at the send callsites.
     void setFakeLossPct(u8 pct);
     u8   getFakeLossPct();
+
+    // D5: fake-latency cvar. The engine calls setFakeLatencyMs(m_netFakeLatencyMs) at
+    // the top of serverNetPre / clientNetPre (just before pumpDelayQueue) so the net
+    // layer sees the current value without holding a pointer to Engine.
+    void setFakeLatencyMs(u32 ms);
+    u32  getFakeLatencyMs();
+
+    // D5: fake-latency delay queue for manual smoke testing.
+    // When Engine::m_netFakeLatencyMs > 0 (read via s_engineForNet), every outgoing
+    // packet is enqueued with a deliverAt timestamp instead of being sent immediately.
+    // pumpDelayQueue() is called at the top of serverNetPre + clientNetPre each frame
+    // to release any packets whose deliverAt has passed.
+    void pumpDelayQueue();
 }

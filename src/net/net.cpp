@@ -2,6 +2,7 @@
 #include "net/server.h"
 #include "net/packet.h"  // Quantize::unpackPos for SV_LOOT_SPAWN decode (D1.3)
 #include "core/log.h"
+#include "platform/clock.h"  // Clock::getElapsedSeconds() for delay timestamps (D5)
 
 #ifdef __SWITCH__
 #include <sys/select.h> // needed before enet on Switch (fd_set)
@@ -53,6 +54,74 @@ static constexpr u32 NUM_CHANNELS = 2;
 // M14: fake-loss cvar — set via Net::setFakeLossPct(). Applied at all outgoing send
 // callsites so both CLIENT→SERVER and SERVER→CLIENT traffic is stressed uniformly.
 static u8 s_fakeLossPct = 0;
+
+// D5: fake-latency cvar — set via Net::setFakeLatencyMs(). When > 0, every outgoing
+// packet is enqueued with a deliverAt timestamp instead of being sent immediately.
+// Net::pumpDelayQueue() (called at the top of serverNetPre + clientNetPre) drains
+// any entries whose deliverAt <= now, simulating the requested one-way delay.
+static u32 s_fakeLatencyMs = 0;
+
+// Target type for a queued delayed packet — tells the pump which send helper to invoke.
+enum struct DelayTarget : u8 {
+    PEER_R,        // sendReliable to a specific player slot
+    PEER_U,        // sendUnreliable to a specific player slot
+    BROADCAST_R,   // broadcastReliable
+    BROADCAST_U,   // broadcastUnreliable
+    BROADCAST_SNAP,// broadcastSnapshot
+    TO_SERVER_R,   // sendToServer (reliable)
+    TO_SERVER_U,   // sendToServer (unreliable)
+};
+
+// Maximum queued delayed packets. At 60 Hz with up to 200 ms simulated latency we
+// can accumulate at most ~12 packets per sender — 256 slots is generous for 4 players.
+static constexpr u32 DELAY_QUEUE_SIZE = 256;
+
+// Maximum payload size we copy into the queue. Snapshots can be up to 8 KB; use
+// MAX_SNAPSHOT_SIZE from packet.h so we never truncate.
+static constexpr u32 DELAY_MAX_PAYLOAD = 8192;
+
+struct DelayEntry {
+    bool        active      = false;
+    DelayTarget target;
+    u8          playerSlot; // used only for PEER target
+    f64         deliverAtSec;
+    // Payload copy — avoids lifetime issues with the caller's stack buffer.
+    u8          payload[DELAY_MAX_PAYLOAD];
+    u32         payloadSize;
+};
+
+static DelayEntry s_delayQueue[DELAY_QUEUE_SIZE];
+
+// Find a free slot in the queue; returns DELAY_QUEUE_SIZE on overflow (packet dropped).
+static u32 findFreeDelaySlot() {
+    for (u32 i = 0; i < DELAY_QUEUE_SIZE; i++) {
+        if (!s_delayQueue[i].active) return i;
+    }
+    return DELAY_QUEUE_SIZE;
+}
+
+// Enqueue a packet for delayed delivery. payloadSize must be <= DELAY_MAX_PAYLOAD.
+static void enqueueDelayed(DelayTarget target, u8 playerSlot,
+                            const u8* data, u32 size) {
+    if (size > DELAY_MAX_PAYLOAD) {
+        // Oversized — deliver immediately rather than silently drop.
+        LOG_WARN("Net delay queue: oversized packet (%u B), sending immediately", size);
+        // Caller is responsible for immediate send in this case.
+        return;
+    }
+    u32 slot = findFreeDelaySlot();
+    if (slot == DELAY_QUEUE_SIZE) {
+        LOG_WARN("Net delay queue: full (%u slots), dropping packet", DELAY_QUEUE_SIZE);
+        return;
+    }
+    DelayEntry& e = s_delayQueue[slot];
+    e.active       = true;
+    e.target       = target;
+    e.playerSlot   = playerSlot;
+    e.deliverAtSec = Clock::getElapsedSeconds() + s_fakeLatencyMs * 0.001;
+    e.payloadSize  = size;
+    std::memcpy(e.payload, data, size);
+}
 
 // Returns true if this packet should be dropped (used at all send sites).
 // Only active when s_fakeLossPct > 0 to keep the fast path branchless.
@@ -595,32 +664,31 @@ void Net::poll() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// D5: sendImmediate_* helpers — the actual ENet send. Used both by the public
+// API (when fake-latency is off) and by pumpDelayQueue() (when delivering a
+// queued packet). Role guards are deliberately omitted here because the pump
+// already validated the role at enqueue time.
+// ---------------------------------------------------------------------------
+
 // ENet only takes ownership of a packet on successful enet_peer_send (return >= 0).
 // On failure (mid-handshake peer, disconnected slot) the packet leaks unless we
 // destroy it explicitly — same defensive pattern used in broadcastSnapshot below.
-void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
-    if (s_role != NetRole::SERVER) return;
+static void sendImmediate_Reliable(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
-    // M14: fake-loss injection on SERVER→CLIENT direction.
-    if (shouldDropPacket()) return;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 0, pkt) < 0)
         enet_packet_destroy(pkt);
 }
 
-void Net::sendUnreliable(u8 playerSlot, const u8* data, u32 size) {
-    if (s_role != NetRole::SERVER) return;
+static void sendImmediate_Unreliable(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
-    // M14: fake-loss injection on SERVER→CLIENT direction.
-    if (shouldDropPacket()) return;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
         enet_packet_destroy(pkt);
 }
 
-void Net::broadcastReliable(const u8* data, u32 size) {
-    if (s_role != NetRole::SERVER) return;
-    // Send only to active peers (not disconnected/empty slots)
+static void sendImmediate_BroadcastReliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
@@ -630,8 +698,7 @@ void Net::broadcastReliable(const u8* data, u32 size) {
     }
 }
 
-void Net::broadcastUnreliable(const u8* data, u32 size) {
-    if (s_role != NetRole::SERVER) return;
+static void sendImmediate_BroadcastUnreliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
@@ -641,8 +708,7 @@ void Net::broadcastUnreliable(const u8* data, u32 size) {
     }
 }
 
-void Net::broadcastSnapshot(const u8* data, u32 size) {
-    if (s_role != NetRole::SERVER) return;
+static void sendImmediate_BroadcastSnapshot(const u8* data, u32 size) {
     // UNRELIABLE_FRAGMENT: ENet fragments payloads over the MTU into MTU-sized
     // pieces sent unreliably (peer.c chooses SEND_UNRELIABLE_FRAGMENT, not the
     // reliable fragment path an UNSEQUENCED oversize packet would fall back to).
@@ -669,6 +735,116 @@ void Net::broadcastSnapshot(const u8* data, u32 size) {
     }
 }
 
+static void sendImmediate_ToServer(const u8* data, u32 size, bool reliable) {
+    if (!s_serverPeer) return;
+    u32 flags   = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
+    u8  channel = reliable ? 0 : 1;
+    ENetPacket* pkt = enet_packet_create(data, size, flags);
+    if (enet_peer_send(s_serverPeer, channel, pkt) < 0)
+        enet_packet_destroy(pkt);
+}
+
+// ---------------------------------------------------------------------------
+// D5: pumpDelayQueue — called once per frame at the top of serverNetPre and
+// clientNetPre. Scans the queue and delivers any entries whose deliverAt time
+// has elapsed, then compacts the queue by clearing their active flag.
+// ---------------------------------------------------------------------------
+void Net::pumpDelayQueue() {
+    const f64 now = Clock::getElapsedSeconds();
+    for (u32 i = 0; i < DELAY_QUEUE_SIZE; i++) {
+        DelayEntry& e = s_delayQueue[i];
+        if (!e.active) continue;
+        if (now < e.deliverAtSec) continue;
+        // Deadline reached — deliver via the matching immediate helper.
+        switch (e.target) {
+        case DelayTarget::PEER_R:
+            sendImmediate_Reliable(e.playerSlot, e.payload, e.payloadSize);
+            break;
+        case DelayTarget::PEER_U:
+            sendImmediate_Unreliable(e.playerSlot, e.payload, e.payloadSize);
+            break;
+        case DelayTarget::BROADCAST_R:
+            sendImmediate_BroadcastReliable(e.payload, e.payloadSize);
+            break;
+        case DelayTarget::BROADCAST_U:
+            sendImmediate_BroadcastUnreliable(e.payload, e.payloadSize);
+            break;
+        case DelayTarget::BROADCAST_SNAP:
+            sendImmediate_BroadcastSnapshot(e.payload, e.payloadSize);
+            break;
+        case DelayTarget::TO_SERVER_R:
+            sendImmediate_ToServer(e.payload, e.payloadSize, /*reliable=*/true);
+            break;
+        case DelayTarget::TO_SERVER_U:
+            sendImmediate_ToServer(e.payload, e.payloadSize, /*reliable=*/false);
+            break;
+        }
+        e.active = false; // free slot
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public send API — delegates to sendImmediate_* directly when fake-latency is
+// off (fast path), or enqueues for delayed delivery when s_fakeLatencyMs > 0.
+// ---------------------------------------------------------------------------
+
+void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    // M14: fake-loss injection on SERVER→CLIENT direction.
+    if (shouldDropPacket()) return;
+    // D5: enqueue if fake latency is enabled, otherwise send immediately.
+    if (s_fakeLatencyMs > 0) {
+        enqueueDelayed(DelayTarget::PEER_R, playerSlot, data, size);
+        return;
+    }
+    sendImmediate_Reliable(playerSlot, data, size);
+}
+
+void Net::sendUnreliable(u8 playerSlot, const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    // M14: fake-loss injection on SERVER→CLIENT direction.
+    if (shouldDropPacket()) return;
+    // D5: enqueue if fake latency is enabled, otherwise send immediately.
+    if (s_fakeLatencyMs > 0) {
+        enqueueDelayed(DelayTarget::PEER_U, playerSlot, data, size);
+        return;
+    }
+    sendImmediate_Unreliable(playerSlot, data, size);
+}
+
+void Net::broadcastReliable(const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    // D5: enqueue if fake latency is enabled.
+    if (s_fakeLatencyMs > 0) {
+        enqueueDelayed(DelayTarget::BROADCAST_R, 0, data, size);
+        return;
+    }
+    sendImmediate_BroadcastReliable(data, size);
+}
+
+void Net::broadcastUnreliable(const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    // D5: enqueue if fake latency is enabled.
+    if (s_fakeLatencyMs > 0) {
+        enqueueDelayed(DelayTarget::BROADCAST_U, 0, data, size);
+        return;
+    }
+    sendImmediate_BroadcastUnreliable(data, size);
+}
+
+void Net::broadcastSnapshot(const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    // D5: enqueue if fake latency is enabled. Snapshots are the primary payload we want
+    // to delay — they carry the authoritative world state the client needs to see late.
+    if (s_fakeLatencyMs > 0) {
+        enqueueDelayed(DelayTarget::BROADCAST_SNAP, 0, data, size);
+        return;
+    }
+    sendImmediate_BroadcastSnapshot(data, size);
+}
+
 void Net::broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed) {
     if (s_role != NetRole::SERVER) return;
     // 12-byte packet, same layout/size as SV_JOIN_ACCEPT so the wire stays uniform:
@@ -690,11 +866,13 @@ void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     if (s_role != NetRole::CLIENT || !s_serverPeer) return;
     // M14: fake-loss injection — silently drop this outbound packet at the configured rate.
     if (shouldDropPacket()) return;
-    u32 flags = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
-    u8 channel = reliable ? 0 : 1;
-    ENetPacket* pkt = enet_packet_create(data, size, flags);
-    if (enet_peer_send(s_serverPeer, channel, pkt) < 0)
-        enet_packet_destroy(pkt);
+    // D5: enqueue if fake latency is enabled; choose the matching target enum.
+    if (s_fakeLatencyMs > 0) {
+        DelayTarget t = reliable ? DelayTarget::TO_SERVER_R : DelayTarget::TO_SERVER_U;
+        enqueueDelayed(t, 0, data, size);
+        return;
+    }
+    sendImmediate_ToServer(data, size, reliable);
 }
 
 NetRole Net::getRole()              { return s_role; }
@@ -750,3 +928,8 @@ void Net::setOnLevelSeed(OnLevelSeedFn fn)   { s_onLevelSeed = fn; }
 // M14: fake-loss cvar accessors
 void Net::setFakeLossPct(u8 pct) { s_fakeLossPct = pct; }
 u8   Net::getFakeLossPct()       { return s_fakeLossPct; }
+
+// D5: fake-latency cvar accessors — set by the engine each frame so that
+// pumpDelayQueue can deliver queued packets at the right wall-clock time.
+void Net::setFakeLatencyMs(u32 ms) { s_fakeLatencyMs = ms; }
+u32  Net::getFakeLatencyMs()       { return s_fakeLatencyMs; }
