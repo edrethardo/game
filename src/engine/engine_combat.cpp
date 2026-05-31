@@ -518,12 +518,13 @@ void Engine::handleWeaponFire(f32 dt) {
             else if (proj.projFlags & PROJ_VOID) proj.lightColor = {0.4f, 0.0f, 0.8f}; // purple
             // V2 fire prediction: on CLIENT, mark this as a locally-predicted ghost so the
             // renderer merges it into m_renderInterp.projectiles and the matching authoritative
-            // snapshot projectile despawns it on arrival. clientTick = current tick so the
-            // server-stored counterpart will carry the same low-16-bit value back. Host/SP
-            // skip this — their fire IS the authoritative one.
+            // snapshot projectile despawns it on arrival. clientTick = m_clientTick (the
+            // client's monotonic sim counter — M1.8) so the server-stored counterpart will
+            // carry the same low-16-bit value back. Host/SP skip this — their fire IS the
+            // authoritative one.
             if (m_netRole == NetRole::CLIENT) {
                 proj.predicted     = true;
-                proj.clientTick    = m_serverTick;
+                proj.clientTick    = m_clientTick;  // M1.8: was m_serverTick; use client-local tick
                 proj.predictedLife = 0.0f;
             }
         }
@@ -801,7 +802,7 @@ void Engine::sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch) {
     hdr->flags = 0;
     hdr->seq   = 0;
     u32 off = sizeof(PacketHeader);
-    u32 tick = m_serverTick;                        // client's current tick — also serves as dedup key on the server
+    u32 tick = m_clientTick;                        // M1.8: client-local monotonic tick — dedup key on the server; was m_serverTick
     std::memcpy(buf + off, &tick, 4); off += 4;
     u16 posXQ = Quantize::packPos(origin.x);
     u16 posYQ = Quantize::packPos(origin.y);

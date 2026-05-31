@@ -90,12 +90,12 @@ struct SnapProjectile {
     u16  posX, posY, posZ;  // 6
     u16  velX, velY, velZ;  // 6
     u8   ownerSlot;     // 1: net slot that fired this projectile (0xFF = unattributed)
-    // Low 16 bits of the FIRING CLIENT's m_serverTick at fire moment (carried through
-    // CL_FIRE_WEAPON → server-stored on Projectile.clientTick → snapshotted back). Used by
-    // the firing client to find and despawn its locally-predicted ghost projectile when the
-    // authoritative one arrives. 16 bits suffice — a predicted ghost lives < 0.5 s and the
-    // 16-bit tick window is ~18 min at 60 Hz, so collisions are practically impossible.
-    // 0 = no prediction owner (host-fired, NPC projectile, skill orb) — match is skipped.
+    // Low 16 bits of the FIRING CLIENT's m_clientTick at fire moment (M1.8: was m_serverTick;
+    // carried through CL_FIRE_WEAPON → server-stored on Projectile.clientTick → snapshotted
+    // back). Used by the firing client to find and despawn its locally-predicted ghost
+    // projectile when the authoritative one arrives. 16 bits suffice — a predicted ghost lives
+    // < 0.5 s and the 16-bit tick window is ~18 min at 60 Hz, so collisions are practically
+    // impossible. 0 = no prediction owner (host-fired, NPC projectile, skill orb) — skipped.
     u16  clientTickLow; // 2
 };
 

@@ -69,11 +69,11 @@ struct Projectile {
     //     predicted ghosts into m_renderInterp.projectiles each frame (clientNetPost) so they
     //     draw alongside snapshot projectiles, and the matching snapshot projectile despawns
     //     the ghost on arrival (matched by ownerSlot + clientTick low 16 bits).
-    //   clientTick is the client's m_serverTick at spawn time — shipped to the server in
-    //     CL_FIRE_WEAPON, the server stores it on the authoritative projectile, the snapshot
-    //     carries its low 16 bits (SnapProjectile.clientTickLow), and the client uses it to
-    //     find which local predicted matches.  0 means "no prediction" (server-spawned by
-    //     host's own fire, NPC projectile, etc.) — match is skipped for these.
+    //   clientTick is the client's m_clientTick at spawn time (M1.8: was m_serverTick) —
+    //     shipped to the server in CL_FIRE_WEAPON, the server stores it on the authoritative
+    //     projectile, the snapshot carries its low 16 bits (SnapProjectile.clientTickLow),
+    //     and the client uses it to find which local predicted matches. 0 means "no prediction"
+    //     (server-spawned by host's own fire, NPC projectile, etc.) — match is skipped.
     bool predicted     = false;
     u32  clientTick    = 0;
     f32  predictedLife = 0.0f;  // seconds since spawn; predicted ghosts despawn at 0.5 s if no match arrived (UDP loss fallback)

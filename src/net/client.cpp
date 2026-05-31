@@ -229,6 +229,12 @@ void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
             // now-stale prior-floor buffer and accept the new-floor snapshot. The gap
             // (~10 s of ticks) is large enough that no legitimate same-floor reorder can
             // hit it (in-flight reordering spans at most a few snapshots).
+            //
+            // TODO(M3): the descent reset semantics here predate ClockSync. With ClockSync's
+            // LARGE_DELTA snap (>6 ticks), the explicit m_serverTick reset may be redundant.
+            // Revisit when client-side prediction lands and the ring-buffer model changes.
+            // The s_acceptNextSnapshot path (TA-6, above) already handles the primary case;
+            // this RESET_GAP remains as a backstop for in-session resets not through init.
             constexpr u32 RESET_GAP = 600; // 10 s at NET_TICK_RATE (60 Hz)
             if (newest->serverTick - snap.serverTick <= RESET_GAP) return; // genuine stale reorder
             s_snapHead = 0;

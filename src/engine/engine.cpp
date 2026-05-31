@@ -824,12 +824,16 @@ void Engine::logStats() {
                  m_projectiles.activeCount,
                  m_localPlayer.health);
     } else {
+        // SERVER: show the authoritative server tick. CLIENT: show the client-local tick
+        // (m_clientTick — M1.8); m_serverTick on a client is a leftover counter not
+        // meaningful for diagnostics (use m_clockSync.serverTickEst for clock-sync status).
+        const u32 displayTick = (m_netRole == NetRole::SERVER) ? m_serverTick : m_clientTick;
         LOG_INFO("FPS: %u | Frame: %.2f ms | Draw: %u | Ent: %u | Players: %u | Tick: %u | %s",
                  m_frameCount, avgFrameTime,
                  Renderer::getDrawCallCount(),
                  EntitySystem::activeCount(m_entities),
                  Net::getConnectedCount(),
-                 m_serverTick,
+                 displayTick,
                  m_netRole == NetRole::SERVER ? "SERVER" : "CLIENT");
     }
 }
