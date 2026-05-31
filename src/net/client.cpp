@@ -178,7 +178,7 @@ const NetInput* Client::getLatestInput() {
     return s_hasInput ? &s_latestInput : nullptr;
 }
 
-void Client::receiveSnapshot(const u8* data, u32 size) {
+void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
     static WorldSnapshot snap;
     snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
     if (Snapshot::deserialize(snap, data, size)) {
@@ -190,6 +190,16 @@ void Client::receiveSnapshot(const u8* data, u32 size) {
             LOG_INFO("[AUDIT-P1] snap rx tick=%u players=%u ents=%u projs=%u items=%u size=%u",
                      snap.serverTick, snap.playerCount, snap.entityCount,
                      snap.projectileCount, snap.worldItemCount, size);
+        }
+        // M1.6: refine the client-side server-tick estimate using this snapshot's tick.
+        // The P controller (SNAP_GAIN=0.1) smooths steady-state jitter; deltas >6 ticks
+        // (e.g. host floor reset where serverTick jumps back to 0) snap rather than smooth.
+        ClockSyncOps::onSnapshotReceived(cs, snap.serverTick, Clock::getElapsedSeconds());
+        // Throttled ~1 Hz diagnostic so convergence is eyeball-readable during manual smoke tests.
+        static u32 s_clockSyncLogCounter = 0;
+        if ((s_clockSyncLogCounter++ % 30) == 0) {
+            LOG_INFO("net: clock-sync serverTickEst=%.1f wireServerTick=%u oneWayTripMs=%.1f",
+                     cs.serverTickEst, snap.serverTick, cs.oneWayTripMs);
         }
         // TA-6: right after a descend, accept whatever arrives first as the sole newest,
         // regardless of straddle ordering. Clear the (already-emptied-by-init) ring so this

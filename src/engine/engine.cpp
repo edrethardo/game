@@ -68,7 +68,9 @@ bool s_firstKillDropGiven = false;
 // Net callbacks (static — forwarded to engine)
 // ---------------------------------------------------------------------------
 void Engine::onSnapshot(const u8* data, u32 size) {
-    Client::receiveSnapshot(data, size);
+    // M1.6: pass m_clockSync so receiveSnapshot can refine the tick estimate on each
+    // successful deserialize (ClockSyncOps::onSnapshotReceived, P controller gain 0.1).
+    if (s_engine) Client::receiveSnapshot(data, size, s_engine->m_clockSync);
 }
 
 void Engine::onInput(u8 playerSlot, const u8* data, u32 size) {

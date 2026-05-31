@@ -34,8 +34,10 @@ namespace Client {
     // Get the latest captured input (for local prediction in engine)
     const NetInput* getLatestInput();
 
-    // Receive and store a snapshot from the server.
-    void receiveSnapshot(const u8* data, u32 size);
+    // Receive and store a snapshot from the server. Also feeds snap.serverTick into
+    // ClockSyncOps::onSnapshotReceived (P controller, gain 0.1) so the clock estimate
+    // is refined on every successful deserialize.
+    void receiveSnapshot(const u8* data, u32 size, ClockSync& cs);
 
     // Get the latest received snapshot (may be null if none yet)
     const WorldSnapshot* getLatestSnapshot();
