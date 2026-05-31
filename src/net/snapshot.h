@@ -115,13 +115,14 @@ struct SnapWorldItem {
 // Full world snapshot
 struct WorldSnapshot {
     u32  serverTick       = 0;
+    u32  lastProcessedInputTick[MAX_PLAYERS] = {};  // per-slot ACK of newest input the
+                                                    // server has applied. Clients read
+                                                    // this in M3 to replay only inputs
+                                                    // newer than the ACK.
     u8   playerCount      = 0;
     u8   entityCount      = 0;
     u8   worldItemCount   = 0;  // dropped loot count (<= MAX_WORLD_ITEMS)
     u16  projectileCount  = 0;  // supports up to 4096
-
-    // Per-player last processed input tick (for client reconciliation)
-    u32  lastInputTick[MAX_PLAYERS] = {};
 
     SnapPlayer     players[MAX_PLAYERS];
     SnapEntity     entities[MAX_ENTITIES];
@@ -149,7 +150,7 @@ struct WorldSnapshot {
         entityCount = o.entityCount;
         worldItemCount = o.worldItemCount;
         projectileCount = o.projectileCount;
-        for (u32 i = 0; i < MAX_PLAYERS; i++) lastInputTick[i] = o.lastInputTick[i];
+        for (u32 i = 0; i < MAX_PLAYERS; i++) lastProcessedInputTick[i] = o.lastProcessedInputTick[i];
         for (u32 i = 0; i < MAX_PLAYERS; i++) players[i] = o.players[i];
         for (u32 i = 0; i < MAX_ENTITIES; i++) entities[i] = o.entities[i];
         for (u32 i = 0; i < o.worldItemCount; i++) worldItems[i] = o.worldItems[i];

@@ -33,7 +33,7 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
     // Players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         const NetPlayer& np = players[i];
-        snap.lastInputTick[i] = np.lastProcessedInputTick;
+        snap.lastProcessedInputTick[i] = np.lastProcessedInputTick;
 
         if (!np.active) continue;
 
@@ -288,9 +288,10 @@ static constexpr u32 SNAP_ENTITY_WIRE     = 28;
 static constexpr u32 SNAP_PROJECTILE_WIRE = 21;
 // World item: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos) + 1(ownerSlot) + 1(exclusiveTimerQ) = 16.
 static constexpr u32 SNAP_WORLDITEM_WIRE  = 16;
-// Fixed prefix: 4 B packet header + snapshot header + MAX_PLAYERS u32 input ticks.
-// Snapshot header is now 9 B: serverTick(4) + playerCount(1) + entityCount(1) +
-// worldItemCount(1) + projectileCount(2). (Was 8 B before the world-item count field.)
+// Fixed prefix: 4 B packet header + snapshot header + MAX_PLAYERS u32 lastProcessedInputTick.
+// Snapshot header is 9 B: serverTick(4) + playerCount(1) + entityCount(1) +
+// worldItemCount(1) + projectileCount(2). lastProcessedInputTick adds MAX_PLAYERS*4 = 16 B.
+// (Total fixed prefix = 4 + 9 + 16 = 29 B per snapshot.)
 static constexpr u32 SNAP_FIXED_BYTES     = 4 + 9 + MAX_PLAYERS * 4;
 
 // Overflow-safe serializer.
@@ -371,9 +372,9 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
     w8(worldItemCount);
     w16(projectileCount);
 
-    // Last input ticks per player
+    // Per-slot ACK of newest input applied by the server (M3 uses for replay reconciliation)
     for (u32 i = 0; i < MAX_PLAYERS; i++)
-        w32(snap.lastInputTick[i]);
+        w32(snap.lastProcessedInputTick[i]);
 
     // Players
     for (u32 i = 0; i < playerCount; i++) {
@@ -506,7 +507,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     if (size < requiredBytes) return false;
 
     for (u32 i = 0; i < MAX_PLAYERS; i++)
-        snap.lastInputTick[i] = r.readU32();
+        snap.lastProcessedInputTick[i] = r.readU32();
 
     for (u32 i = 0; i < snap.playerCount; i++) {
         SnapPlayer& sp = snap.players[i];

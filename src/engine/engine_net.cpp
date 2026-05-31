@@ -65,12 +65,12 @@ void Engine::serverNetPre(f32 dt) {
     // Capture local input and push into server's input buffer. Pass m_localPlayer
     // so captureLocalInput can pack absolute yaw/pitch/position (PROTOCOL_VERSION 2
     // wire layout); the host's own input still rides the same NetInput shape so the
-    // server's snapshot lastInputTick is uniform across all slots.
+    // server's snapshot lastProcessedInputTick is uniform across all slots.
     WeaponState& ws = m_players[m_localPlayerIndex].weaponState;
     NetInput localInput = PlayerController::captureLocalInput(m_localPlayer, m_serverTick, ws.currentWeapon);
     Server::getInputBuffer(m_localPlayerIndex).push(localInput);
     // Track the host's own ack too. The host moves in gameUpdate (not the remote loop
-    // below), so without this its lastInputTick stays 0 forever on the wire — harmless
+    // below), so without this its lastProcessedInputTick stays 0 forever on the wire — harmless
     // today (clients only reconcile their own slot) but a trap for any future feature
     // that reads slot 0's ack (spectate/lag-comp/debug).
     m_players[m_localPlayerIndex].lastProcessedInputTick = localInput.clientTick;
