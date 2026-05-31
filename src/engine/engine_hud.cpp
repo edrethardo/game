@@ -806,6 +806,32 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                           m_netRole == NetRole::SERVER ? "HOST" : "CLIENT");
     }
 
+    // D6: detailed net-graph overlay — toggled by F9, CLIENT only.
+    // Draws a single line of stats near the top of the screen:
+    //   "NET: rtt=<ms> est=<tick> div=<count> loss=<pct>% lat=<ms>ms"
+    // Fields:
+    //   rtt   — estimated round-trip time (oneWayTripMs * 2) from the clock-sync subsystem
+    //   est   — current server-tick estimate (ClockSyncOps::serverTickEst)
+    //   div   — prediction reconcile mismatches accumulated since last 1 Hz reset
+    //   loss  — fake-loss percentage (m_netFakeLossPct, 0 when off)
+    //   lat   — fake one-way latency in ms (m_netFakeLatencyMs, 0 when off)
+    if (m_netGraphVisible && m_netRole == NetRole::CLIENT) {
+        char netBuf[128];
+        snprintf(netBuf, sizeof(netBuf),
+                 "NET: rtt=%.1fms est=%.0f div=%u loss=%u%% lat=%ums",
+                 m_clockSync.oneWayTripMs * 2.0f,
+                 m_clockSync.serverTickEst,
+                 m_divergenceCount,
+                 static_cast<u32>(m_netFakeLossPct),
+                 m_netFakeLatencyMs);
+        // Draw near the top-right: offset from right edge by text width, a few pixels down.
+        f32 scale = 1.0f;
+        f32 tw = FontSystem::textWidth(netBuf, scale);
+        f32 x  = static_cast<f32>(sw) - tw - 8.0f;
+        f32 y  = static_cast<f32>(sh) - 14.0f; // top of screen (FontSystem y = bottom of glyph)
+        FontSystem::drawText(sw, sh, x, y, netBuf, {0.2f, 1.0f, 0.4f}, scale);
+    }
+
     // Chat log — left side of screen, above the quickbar (scaled)
     {
         f32 cs = static_cast<f32>(sh) / 720.0f;

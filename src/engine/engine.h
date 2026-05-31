@@ -176,10 +176,12 @@ private:
     // reads via s_engineForNet to inject artificial loss at send time (v1: loss only).
     // m_divergenceCount accumulates every reconcile mismatch in clientNetPost and is
     // reported + reset by the 1 Hz [NET-GRAPH] log emitted in update().
-    u32 m_netFakeLatencyMs = 0;    // reserved — latency simulation deferred to v2
-    u8  m_netFakeLossPct   = 0;    // 0–100: percentage of packets to drop (both directions)
-    u32 m_divergenceCount  = 0;    // count of reconcile mismatches since last log interval
-    f64 m_lastDebugLogSec  = 0.0;  // wall-clock time of last [NET-GRAPH] emission
+    u32  m_netFakeLatencyMs  = 0;    // D5: ms of one-way simulated latency on all sends
+    u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
+    u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
+    f64  m_lastDebugLogSec   = 0.0;  // wall-clock time of last [NET-GRAPH] emission
+    // D6: toggles an on-screen net-stats overlay (F9). Visible only on CLIENT role.
+    bool m_netGraphVisible   = false;
 
     // Prediction ring (CLIENT role, M3) — stores (input, predicted-state) per clientTick
     // so that clientNetPost can compare the server's authoritative pose against what we

@@ -331,6 +331,13 @@ void Engine::handleDebugKeys() {
             LOG_INFO("[SWITCH] Mode OFF");
         }
     }
+
+    // D6: F9 toggles the net-graph overlay (CLIENT only — shows RTT, server-tick
+    // estimate, divergence count, and fake-latency/loss settings).
+    if (Input::isKeyPressed(SDL_SCANCODE_F9)) {
+        m_netGraphVisible = !m_netGraphVisible;
+        LOG_INFO("Net graph: %s", m_netGraphVisible ? "ON" : "OFF");
+    }
 }
 
 // ---------------------------------------------------------------------------
