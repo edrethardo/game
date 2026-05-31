@@ -91,6 +91,7 @@ add_executable(DungeonEngine
     net/client_time.cpp
     net/input_wire.cpp
     net/prediction_ring.cpp
+    net/render_offset.cpp
     renderer/material.cpp
     renderer/obj_loader.cpp
     world/level_loader.cpp
