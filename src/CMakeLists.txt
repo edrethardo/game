@@ -19,6 +19,7 @@ add_executable(DungeonEngine
     engine/engine_update_skills.cpp
     engine/engine_menu.cpp
     engine/engine_inventory.cpp
+    engine/lag_comp_ring.cpp
     engine/engine_combat.cpp
     engine/engine_net.cpp
     engine/engine_render.cpp
