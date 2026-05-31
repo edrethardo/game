@@ -27,6 +27,7 @@
 #include "net/pending_damage_ring.h"
 #include "net/pending_pickup_ring.h"
 #include "net/pending_skill_ring.h"
+#include "net/snapshot_baseline.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -221,6 +222,17 @@ private:
     // Returns the server's current simulation tick — used by the server-side CL_TIME_PING
     // handler so net.cpp can stamp SV_TIME_PONG without directly accessing m_serverTick.
     u32 serverTickNow() const { return m_serverTick; }
+
+    // Per-client delta-compression baselines (server role only).
+    // Tracks the serverTick of the last snapshot sent to each remote client so that
+    // shouldSendFullSnapshot can decide whether a delta is safe for the next snapshot.
+    // Index matches the player slot (slot 0 = host; that entry is unused but kept so
+    // slot arithmetic stays simple). Reset on connect and on floor descent.
+    BaselineTracker m_baselines[MAX_PLAYERS];
+    // The full-tick ACK each remote client reported in its most recent NetInput.
+    // ackedSnapshotTick on the wire is u16 (low bits only); we reconstruct the full
+    // u32 here using the high bits of m_serverTick at the time the input is received.
+    u32 m_clientAckedSnap[MAX_PLAYERS] = {};
 
     // Players (networked)
     NetPlayer  m_players[MAX_PLAYERS];

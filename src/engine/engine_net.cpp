@@ -105,6 +105,17 @@ void Engine::serverNetPre(f32 dt) {
             // drive movement/aim from input while dead — a corpse that died holding a
             // move key or aiming somewhere would keep updating each tick.
             np.lastProcessedInputTick = in.clientTick;
+            // M11.2 — Track which snapshot this client has applied for delta-compression
+            // baseline decisions. ackedSnapshotTick on the wire is u16 (low 16 bits of
+            // serverTick); reconstruct the full u32 using the current m_serverTick high bits,
+            // then correct for the wrap-around case where the client's ack belongs to the
+            // previous 64 K window.
+            {
+                u16 lowAck = in.ackedSnapshotTick;
+                u32 fullAck = (m_serverTick & ~0xFFFFu) | lowAck;
+                if (fullAck > m_serverTick) fullAck -= 0x10000; // client ack is from prior window
+                m_clientAckedSnap[i] = fullAck;
+            }
             if (in.weaponId < m_weaponDefCount)
                 np.weaponState.currentWeapon = in.weaponId;
             if (!np.isDead) {
@@ -476,6 +487,23 @@ void Engine::serverNetPost(f32 dt) {
                      m_serverTick, activePlayers,
                      m_entities.activeCount, m_projectiles.activeCount,
                      m_worldItems.activeCount);
+        }
+        // M11.2 — Per-slot baseline tracking for delta compression.
+        // Query whether each active remote client's last ACK matches our stored baseline;
+        // log when a delta COULD be sent (but always send full for v1 — the encoder is
+        // not delta-capable yet). Store the current tick as the new baseline after sending
+        // so the next snapshot has a reference point to compare against.
+        for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
+            if (!m_players[slot].active) continue;
+            if (slot == static_cast<u32>(m_localPlayerIndex)) continue; // host has no remote baseline
+            bool sendFull = BaselineTrackerOps::shouldSendFullSnapshot(
+                                m_baselines[slot], m_clientAckedSnap[slot]);
+            if (!sendFull) {
+                LOG_INFO("[M11] slot %u could-be-delta vs baseline tick %u",
+                         slot, m_baselines[slot].baselineTick);
+            }
+            // Always send full for v1 — delta encoding is deferred.
+            BaselineTrackerOps::store(m_baselines[slot], m_serverTick);
         }
         Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
         // Phase 3.1 — Capture entity poses at this snapshot tick into the lag-comp

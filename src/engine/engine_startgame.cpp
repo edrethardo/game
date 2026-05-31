@@ -717,6 +717,16 @@ void Engine::startGame(GameStart mode) {
     // floor's history and be silently squashed as a duplicate.
     resetAllFireDedup();
 
+    // M11.2 — Clear per-client delta-compression baselines and ACK cache.
+    // m_serverTick just reset to 0; any stored baselineTick from the prior floor would
+    // never match the new session's ticks, forcing every snapshot to "send full" via
+    // the stale-ack path instead of the clean "no baseline" path. Reset makes the
+    // intent explicit and avoids spurious log noise on first-floor entry.
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        BaselineTrackerOps::reset(m_baselines[i]);
+        m_clientAckedSnap[i] = 0;
+    }
+
     // Phase 3.1 — Drop the lag-comp history. The prior floor's entity poses (in
     // geometrically unrelated rooms) would otherwise produce wildly wrong rewound
     // positions for the first ~16 ticks on the new floor.
