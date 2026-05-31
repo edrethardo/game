@@ -194,6 +194,19 @@ void Engine::initAssets() {
             {"diablo",         "assets/meshes/diablo.obj"},
             {"nyx",            "assets/meshes/nyx.obj"},
             {"reaper",         "assets/meshes/reaper.obj"},
+            // Player class meshes — resolved by name from ClassDef.meshName in the renderer.
+            // Distinct from the NPC meshes above so player and town-NPC visuals can diverge.
+            // The renderer falls back to "human" if any of these fails to load (e.g. the
+            // generator hasn't been run yet), so this is safe to register pre-asset-build.
+            {"player_warrior",         "assets/meshes/player_warrior.obj"},
+            {"player_ranger",          "assets/meshes/player_ranger.obj"},
+            {"player_sorcerer",        "assets/meshes/player_sorcerer.obj"},
+            {"player_rogue",           "assets/meshes/player_rogue.obj"},
+            {"player_paladin",         "assets/meshes/player_paladin.obj"},
+            {"player_combat_engineer", "assets/meshes/player_combat_engineer.obj"},
+            {"player_marksman",        "assets/meshes/player_marksman.obj"},
+            {"player_tinkerer",        "assets/meshes/player_tinkerer.obj"},
+            {"player_wanderer",        "assets/meshes/player_wanderer.obj"},
         };
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;

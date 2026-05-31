@@ -869,6 +869,51 @@
       "id": 142,
       "name": "phase_ripper_skin",
       "texture": "phase_ripper_skin_42.png"
+    },
+    {
+      "id": 143,
+      "name": "player_warrior_skin",
+      "texture": "player_warrior_skin_42.png"
+    },
+    {
+      "id": 144,
+      "name": "player_ranger_skin",
+      "texture": "player_ranger_skin_42.png"
+    },
+    {
+      "id": 145,
+      "name": "player_sorcerer_skin",
+      "texture": "player_sorcerer_skin_42.png"
+    },
+    {
+      "id": 146,
+      "name": "player_rogue_skin",
+      "texture": "player_rogue_skin_42.png"
+    },
+    {
+      "id": 147,
+      "name": "player_paladin_skin",
+      "texture": "player_paladin_skin_42.png"
+    },
+    {
+      "id": 148,
+      "name": "player_combat_engineer_skin",
+      "texture": "player_combat_engineer_skin_42.png"
+    },
+    {
+      "id": 149,
+      "name": "player_marksman_skin",
+      "texture": "player_marksman_skin_42.png"
+    },
+    {
+      "id": 150,
+      "name": "player_tinkerer_skin",
+      "texture": "player_tinkerer_skin_42.png"
+    },
+    {
+      "id": 151,
+      "name": "player_wanderer_skin",
+      "texture": "player_wanderer_skin_42.png"
     }
   ]
 }

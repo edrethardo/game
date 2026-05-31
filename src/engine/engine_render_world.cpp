@@ -235,11 +235,16 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 bool active = false;
                 Vec3 pos;
                 f32 yaw = 0.0f;
+                // Per-class visual identity. On CLIENT we use the wire-replicated playerClass
+                // (m_renderInterp.playerClass[i]); on HOST/SP we read NetPlayer.playerClass directly.
+                // Without this every remote rendered as the default "human" mesh regardless of class.
+                u8 classByte = 0;
 
                 if (m_netRole == NetRole::CLIENT) {
                     active = m_renderInterp.playerActive[i];
                     pos = m_renderInterp.playerPositions[i];
                     yaw = m_renderInterp.playerYaws[i];
+                    classByte = m_renderInterp.playerClass[i];
                     // Skip dead remotes: isDead rides synced animFlags bit2 (see snapshot.cpp
                     // buildFromState + interpolateRemotePlayers' outAnimFlags). Without this a
                     // dead remote keeps rendering as an upright live figure until it respawns.
@@ -248,29 +253,37 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                     active = m_players[i].active;
                     pos = m_players[i].position;
                     yaw = m_players[i].yaw;
+                    classByte = static_cast<u8>(m_players[i].playerClass);
                     // Host has the authoritative NetPlayer.isDead directly — same gate as CLIENT.
                     if (m_players[i].isDead) continue;
                 }
                 if (!active) continue;
 
-                // Human model — scale mesh to match NPC height (1.8m)
-                u8 humanMesh = findMeshByName("human");
-                u8 humanMat = MaterialSystem::getIdByName("human_skin");
+                // Resolve per-class mesh + material. classByte is clamped on the wire side
+                // (snapshot.cpp deserialize) and on join (engine.cpp onPlayerJoin) so the index
+                // is in range here — but fall back to "human" if either lookup misses (an
+                // unbuilt asset would otherwise render as the magenta default cube).
+                if (classByte >= static_cast<u8>(PlayerClass::CLASS_COUNT)) classByte = 0;
+                const ClassDef& cd = kClassDefs[classByte];
+                u8 classMesh = findMeshByName(cd.meshName);
+                u8 classMat  = MaterialSystem::getIdByName(cd.materialName);
+                if (classMesh == 0) classMesh = findMeshByName("human");
+                if (classMat  == 0) classMat  = MaterialSystem::getIdByName("human_skin");
                 f32 targetH = 1.8f; // same as NPC halfExtents.y * 2
-                f32 meshH = (humanMesh > 0) ? (m_meshDefs[humanMesh].bounds.max.y - m_meshDefs[humanMesh].bounds.min.y) : 1.0f;
+                f32 meshH = (classMesh > 0) ? (m_meshDefs[classMesh].bounds.max.y - m_meshDefs[classMesh].bounds.min.y) : 1.0f;
                 f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
                 Mat4 model = Mat4::translate(pos)
                            * Mat4::rotateY(yaw)
                            * Mat4::scale({scale, scale, scale});
                 AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
-                const Material* humanMatPtr = MaterialSystem::get(humanMat);
-                Texture humanTex = humanMatPtr ? humanMatPtr->texture : defaultTex;
-                Vec4 humanTint = humanMatPtr ? humanMatPtr->tint : Vec4{1,1,1,1};
+                const Material* classMatPtr = MaterialSystem::get(classMat);
+                Texture classTex = classMatPtr ? classMatPtr->texture : defaultTex;
+                Vec4 classTint = classMatPtr ? classMatPtr->tint : Vec4{1,1,1,1};
 
-                if (humanMesh > 0 && m_meshDefs[humanMesh].mesh.vao) {
-                    Renderer::submit(m_basicShader, humanTex, m_meshDefs[humanMesh].mesh,
-                                     model, bounds, humanTint);
+                if (classMesh > 0 && m_meshDefs[classMesh].mesh.vao) {
+                    Renderer::submit(m_basicShader, classTex, m_meshDefs[classMesh].mesh,
+                                     model, bounds, classTint);
                 } else {
                     Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds,
                                      {0.5f, 0.5f, 0.5f, 1.0f});
@@ -322,23 +335,33 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 Vec3 pos = m_localPlayers[otherP].position;
                 f32 yaw  = m_localPlayers[otherP].yaw;
 
-                u8 humanMesh = findMeshByName("human");
+                // Per-class mesh for the other split-screen player. Class is stored per-lane in
+                // m_playerClasses[otherP] (the lobby writes it before startGame). Same fallback
+                // semantics as the network branch above.
+                u8 classByte = static_cast<u8>(m_playerClasses[otherP]);
+                if (classByte >= static_cast<u8>(PlayerClass::CLASS_COUNT)) classByte = 0;
+                const ClassDef& cd = kClassDefs[classByte];
+                u8 classMesh = findMeshByName(cd.meshName);
+                u8 classMat  = MaterialSystem::getIdByName(cd.materialName);
+                if (classMesh == 0) classMesh = findMeshByName("human");
+                if (classMat  == 0) classMat  = MaterialSystem::getIdByName("human_skin");
                 f32 targetH = 1.8f;
-                f32 meshH = (humanMesh > 0) ? (m_meshDefs[humanMesh].bounds.max.y - m_meshDefs[humanMesh].bounds.min.y) : 1.0f;
+                f32 meshH = (classMesh > 0) ? (m_meshDefs[classMesh].bounds.max.y - m_meshDefs[classMesh].bounds.min.y) : 1.0f;
                 f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
                 Mat4 model = Mat4::translate(pos)
                            * Mat4::rotateY(yaw)
                            * Mat4::scale({scale, scale, scale});
                 AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
-                u8 skinMat = MaterialSystem::getIdByName("human_skin");
-                const Material* skinMatPtr = MaterialSystem::get(skinMat);
+                const Material* skinMatPtr = MaterialSystem::get(classMat);
                 Texture skinTex = skinMatPtr ? skinMatPtr->texture : defaultTex;
-                // Tint by player slot (P1=greenish, P2=bluish)
+                // Tint by player slot (P1=greenish, P2=bluish) — kept on top of the class mesh so
+                // local players can still distinguish P1 from P2 at a glance even if they picked
+                // visually similar classes.
                 Vec4 skinTint = (otherP == 0) ? Vec4{0.7f, 1.0f, 0.7f, 1} : Vec4{0.7f, 0.7f, 1.0f, 1};
 
-                if (humanMesh > 0 && m_meshDefs[humanMesh].mesh.vao) {
-                    Renderer::submit(m_basicShader, skinTex, m_meshDefs[humanMesh].mesh,
+                if (classMesh > 0 && m_meshDefs[classMesh].mesh.vao) {
+                    Renderer::submit(m_basicShader, skinTex, m_meshDefs[classMesh].mesh,
                                      model, bounds, skinTint);
                 } else {
                     Vec4 col = (otherP == 0) ? Vec4{0.2f,0.8f,0.2f,1} : Vec4{0.2f,0.5f,1,1};
