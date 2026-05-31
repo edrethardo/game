@@ -602,12 +602,16 @@ void Engine::tickSharedSystems(f32 dt) {
             }
         }
 
-        // Phase M7 — Predicted incoming-projectile hit on the local player.
+        // Phase M7 / D3.2 — Predicted incoming-projectile hit on the local player.
         // Iterate the authoritative interpolated projectile pool (m_renderInterp.projectiles)
         // rather than the local ghost pool. For each enemy-owned projectile that is
-        // approaching within PLAYER_HIT_RADIUS of the player's center, fire visual feedback
-        // immediately (damageFlash + hurtVignette) and record the key so M10 can ack it.
-        // HP is NOT modified — the next snapshot's authoritative HP drop handles that.
+        // approaching within PLAYER_HIT_RADIUS of the player's center:
+        //   • fire visual feedback (damageFlash + hurtVignette) immediately;
+        //   • decrement local HP by the server's expectedDamage (D3.1 wire field) raw —
+        //     no defence/armor applied because we don't have that pipeline client-side.
+        //     The next snapshot's authoritative HP (M4 reconcile + M13 renderedHealth lerp)
+        //     absorbs any over/under-prediction smoothly.
+        //   • record the key so M10 can ack the damage against the server's SV_DAMAGE_TO_ME.
         if (m_localPlayer.health > 0.0f) {
             static constexpr f32 PLAYER_HIT_RADIUS = 0.7f;
             // Player center at mid-body height so approaching ground-level projectiles register
@@ -641,6 +645,13 @@ void Engine::tickSharedSystems(f32 dt) {
                 //  in tickVisualFeedback). Set hurtVignette for a brief red edge flash.
                 m_localPlayer.damageFlashTimer = 0.15f;
                 m_localPlayer.hurtVignette = fmaxf(m_localPlayer.hurtVignette, 0.4f);
+                // D3.2 — Predicted HP decrement. proj.damage carries the server's authoritative
+                // value decoded from expectedDamageQ (D3.1). No defence/armor reduction applied
+                // here — worst-case mispredict (missed shot, shield block) is ~5–30 hp low for
+                // ≤ 80 ms before the next snapshot reconciles upward via Client::reconcile.
+                f32 predictedDmg = proj.damage;
+                m_localPlayer.health -= predictedDmg;
+                if (m_localPlayer.health < 0.0f) m_localPlayer.health = 0.0f;
                 PendingDamageRingOps::record(m_pendingDamage, m_clientTick, key);
             }
         }
