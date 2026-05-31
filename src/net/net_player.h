@@ -8,17 +8,21 @@
 
 // Input as received from a client (or captured locally for listen server host).
 //
-// Aim and position are sent as ABSOLUTE quantized values rather than deltas (the
-// historic mouseDeltaX/Y design). Deltas were lossy under UDP loss: a dropped CL_INPUT
-// permanently dropped its mouse delta and the server's yaw drifted behind the client's
-// live camera ("shoot where I'm not aiming"). Absolutes are idempotent — a dropped
-// packet only delays the next sync; nothing is lost. Same byte count for yaw/pitch.
+// Aim is sent as ABSOLUTE quantized values rather than deltas (the historic
+// mouseDeltaX/Y design). Deltas were lossy under UDP loss: a dropped CL_INPUT
+// permanently dropped its mouse delta and the server's yaw drifted behind the
+// client's live camera ("shoot where I'm not aiming"). Absolutes are idempotent —
+// a dropped packet only delays the next sync; nothing is lost. Same byte count
+// for yaw/pitch.
 //
-// Position is also absolute (posXQ/Y/Z) — the server snaps the remote NetPlayer to
-// this value with a max-delta sanity clamp instead of running its own moveAndSlide.
-// Co-op trust model: the client is authoritative for player position, the server is
-// authoritative for combat / HP / loot. A cheating client can only cheat their own
-// movement (visible to themselves) — they can't fake damage or steal kills.
+// DEPRECATED (M3, rewrite design doc): posXQ/Y/Z carry a "trust the client"
+// position which the server snaps onto NetPlayer with a 4× speed sanity clamp.
+// The full rewrite reverses this: server simulates movement from moveFlags +
+// yaw via PlayerController, client predicts locally and replays inputs forward
+// on snapshot reconcile. This struct will lose the position fields in M3 and
+// the input pipeline will gain a clientTick / ackedSnapshotTick header for the
+// new prediction model. Do NOT add new readers of posXQ/Y/Z; new code should
+// assume the server is authoritative for position.
 struct NetInput {
     u32 tick;           // which server tick this input is for
     u8  moveFlags;      // bit0=W, bit1=S, bit2=A, bit3=D, bit4=jump, bit5=fire, bit6=lockHold

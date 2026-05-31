@@ -51,6 +51,17 @@ struct Projectile {
     u8   onHitEffect    = 0;
     f32  onHitDuration  = 0.0f;
 
+    // DEPRECATED (M10/M11, rewrite design doc): the "predicted ghost" fire
+    // model where the client spawns a local-only Projectile with predicted=true
+    // and matches it to an authoritative server projectile via clientTickLow.
+    // The rewrite unifies this: the server spawns the projectile at the lag-comp
+    // tick (so it's born where the client launched it), and the client's
+    // predicted projectile IS the canonical one until reconciliation arrives.
+    // `predicted` and `clientTick` will be replaced by a single source-of-truth
+    // projectile flagged with its origin (server-authoritative vs unconfirmed).
+    // Do not add new readers of `predicted` outside the existing match-despawn
+    // path.
+    //
     // Client-side prediction (V2 fire prediction):
     //   predicted=true marks a local ghost spawned by the CLIENT's own handleWeaponFire so
     //     the user sees the projectile leave the wand at click-time instead of waiting the

@@ -105,6 +105,14 @@ static void recordFire(u8 slot, u32 clientTick) {
     if (r.count < FIRE_DEDUP_SIZE) r.count++;
 }
 
+// DEPRECATED (M10, rewrite design doc): manual unreliable+retransmit ring
+// reimplementing reliable transport in userspace. The rewrite replaces this
+// with ENet's reliable channel for CL_FIRE_WEAPON (smaller wire footprint,
+// ENet handles backoff). Kept for now because reliable channel scaffolding
+// arrives in M10 — removing the retransmit before M10 lands would regress
+// fire delivery under UDP loss. Do not extend this pattern to new packet
+// types.
+//
 // Phase 1.1 — Client-side fire retransmit buffer. Holds the serialized CL_FIRE_WEAPON
 // packet bytes from the most recent local fire so resendPendingFire() can retransmit
 // it for FIRE_TX_REPEATS client ticks. Only the most recent fire is tracked — a
