@@ -5,12 +5,13 @@
 static constexpr u32 MAX_PLAYERS       = 4;
 static constexpr u16 DEFAULT_PORT      = 7777;
 static constexpr u32 NET_TICK_RATE     = 60;
-// 30 Hz snapshots (up from 20 Hz) reduce inter-snap gap from 50 ms to 33 ms — the client's
-// enemy interp blends two fresher samples and the buffer-then-extrapolate window covers a
-// single dropped snap. Pairs with INTERP_DELAY_SEC = 50 ms in client.h. Bandwidth grows
-// ~50% (8 KB/s → ~12 KB/s steady state) which is well below the 8 KB / packet ceiling.
-static constexpr u32 SNAPSHOT_RATE     = 30;
-static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 2
+// 60 Hz snapshots (up from 30 Hz) reduce inter-snap gap from 33 ms to 16.6 ms — one snapshot
+// per tick. The client's enemy interp blends maximally-fresh samples and the jitter buffer
+// needs only ~2 × 16.6 ms = 33 ms of delay (INTERP_DELAY_SEC in client.h). Bandwidth roughly
+// doubles vs 30 Hz (~24 KB/s steady state) which remains well below the 8 KB / packet ceiling.
+// Delta compression (M11+) will keep wire size in check as the rate stays at 60 Hz.
+static constexpr u32 SNAPSHOT_RATE     = 60;
+static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 
 // Bumped to 2 with the absolute-aim NetInput change: the wire layout changed from
 // 14 bytes (header(4) + tick(4) + flags(2) + dx/dy(4)) to 18 bytes. M2 restructured
@@ -204,7 +205,7 @@ namespace Net {
     // (ENET_PACKET_FLAG_UNSEQUENCED), payloads larger than the MTU are split into
     // MTU-sized fragments delivered unreliably (no retransmit latency) instead of
     // being silently downgraded to reliable. A lost fragment just drops that one
-    // snapshot; the next arrives 50 ms later. Use for the 20 Hz world snapshot.
+    // snapshot; the next arrives 16.6 ms later. Use for the 60 Hz world snapshot.
     void broadcastSnapshot(const u8* data, u32 size);
 
     // Send to server (client only)

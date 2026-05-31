@@ -14,11 +14,11 @@
 struct Player;  // fwd-decl: captureAndSendInput + reconcile read/write its transform
 
 static constexpr u32 SNAP_BUFFER_SIZE = 4;  // 4 snapshots × ~66KB = 264KB (was 32 × 66KB = 2.1MB)
-// 50 ms interpolation delay paired with 30 Hz snapshots gives ~1.5 snapshots of cushion —
-// snappy enough to feel responsive against a player who now moves with no reconcile lag,
-// while still riding out a single dropped snapshot via extrapolation (computeInterpPair).
-// Was 100 ms when snapshots were 20 Hz; halved alongside the rate bump to net.h.
-static constexpr f32 INTERP_DELAY_SEC = 0.05f;
+// 33 ms interpolation delay paired with 60 Hz snapshots gives ~2 snapshots of cushion —
+// snappy enough to feel responsive while still riding out a single dropped snapshot via
+// extrapolation (computeInterpPair). Was 50 ms when snapshots were 30 Hz; reduced alongside
+// the rate bump to net.h so the render stays 2 × interval behind the latest sample.
+static constexpr f32 INTERP_DELAY_SEC = 0.033f;
 
 namespace Client {
     void init(u8 localPlayerIndex);
