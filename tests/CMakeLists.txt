@@ -1,0 +1,29 @@
+# tests/CMakeLists.txt — dungeon_tests executable.
+#
+# Gated by the top-level BUILD_TESTS option (default ON for desktop, OFF for Switch).
+# v1 ships with sanity-only — no production sources linked in yet. Future test files
+# add (a) themselves and (b) any production .cpp they need by extending the
+# add_executable() source list. When the list grows past comfortable, refactor src/
+# into a dungeon_core library that both DungeonEngine and dungeon_tests link.
+
+add_executable(dungeon_tests
+    test_main.cpp
+    sanity_test.cpp
+)
+
+target_include_directories(dungeon_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/external
+)
+
+target_compile_features(dungeon_tests PRIVATE cxx_std_17)
+
+# Faster compile of passing asserts — TDD loop friendliness. Failing asserts still
+# produce full decomposition output; this only affects the hot path.
+target_compile_definitions(dungeon_tests PRIVATE
+    DOCTEST_CONFIG_SUPER_FAST_ASSERTS
+)
+
+# CTest registration. One add_test() per binary — doctest enumerates the
+# individual TEST_CASEs inside. `--no-version` keeps the output clean.
+add_test(NAME dungeon_tests COMMAND dungeon_tests --no-version)
