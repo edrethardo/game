@@ -37,6 +37,7 @@
 #include "net/client.h"
 #include "net/snapshot.h"
 #include "net/packet.h"
+#include "net/render_offset.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/frame_allocator.h"
@@ -259,6 +260,10 @@ void Engine::update(f32 dt) {
         // Unified game loop: networking pre → gameplay → networking post
         if (m_netRole == NetRole::SERVER) serverNetPre(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPre(dt);
+
+        // M4: decay the smooth-correction offset once per CLIENT frame so the camera
+        // position smoothly converges toward the server-corrected sim position over ~150 ms.
+        if (m_netRole == NetRole::CLIENT) RenderOffsetOps::tick(m_renderOffset, dt);
 
         // Tick the spawn-calm window once per frame (here, not in gameUpdate, so
         // couch co-op — which calls gameUpdate per player — doesn't double-decrement).

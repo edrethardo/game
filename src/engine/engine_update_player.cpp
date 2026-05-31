@@ -40,6 +40,7 @@
 #include "net/client.h"
 #include "net/snapshot.h"
 #include "net/packet.h"
+#include "net/render_offset.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/frame_allocator.h"
@@ -531,7 +532,19 @@ void Engine::tickMiscTimers(f32 dt) {
     m_camera.prevPosition = m_camera.position;
     m_camera.prevYaw      = m_camera.yaw;
     m_camera.prevPitch    = m_camera.pitch;
-    PlayerController::applyToCamera(m_localPlayer, m_camera);
+
+    // M4 smooth correction: on CLIENT, temporarily shift the player's visible position by
+    // the decaying render offset so the camera eye smoothly slides toward the sim position
+    // after a prediction correction. Sim state (m_localPlayer.position) is restored
+    // immediately after so nothing downstream reads the offset-shifted value by accident.
+    if (m_netRole == NetRole::CLIENT) {
+        Vec3 savedPos = m_localPlayer.position;
+        m_localPlayer.position = RenderOffsetOps::apply(m_renderOffset, savedPos);
+        PlayerController::applyToCamera(m_localPlayer, m_camera);
+        m_localPlayer.position = savedPos;
+    } else {
+        PlayerController::applyToCamera(m_localPlayer, m_camera);
+    }
 
     // View bob: lateral head sway (figure-8 horizontal component)
     // Applied to camera yaw so it doesn't accumulate on the player

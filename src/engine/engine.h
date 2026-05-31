@@ -22,6 +22,7 @@
 #include "net/net_player.h"
 #include "net/clock_sync.h"
 #include "net/prediction_ring.h"
+#include "net/render_offset.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -170,6 +171,12 @@ private:
     // predicted and snap/correct if divergence > 10 cm. Reset on every CLIENT connect.
     PredictionRing m_predictionRing;
     u32            m_lastReconciledTick = 0;
+
+    // Smooth correction offset (CLIENT role, M4) — accumulates the visible delta when the
+    // server corrects our predicted position. Decays to zero each frame so the rendered
+    // camera position smoothly slides toward the corrected sim position (~150 ms window)
+    // instead of teleporting. Reset on every CLIENT connect (see engine_startgame.cpp).
+    RenderOffset m_renderOffset;
 
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client

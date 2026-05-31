@@ -753,6 +753,9 @@ void Engine::startGame(GameStart mode) {
         // entries from a prior session don't produce false divergence hits on reconnect.
         PredictionRingOps::reset(m_predictionRing);
         m_lastReconciledTick = 0;
+        // M4 — Clear the smooth-correction offset so any residual from a prior session
+        // doesn't displace the camera at the start of the new connection.
+        m_renderOffset.offset = {0, 0, 0};
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

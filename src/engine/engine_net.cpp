@@ -37,6 +37,7 @@
 #include "net/client.h"
 #include "net/snapshot.h"
 #include "net/packet.h"
+#include "net/render_offset.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/frame_allocator.h"
@@ -686,8 +687,13 @@ void Engine::clientNetPost(f32 dt) {
                     if (distSq > 0.01f) {  // > 10 cm (0.1 m) squared = 0.01 m²
                         LOG_INFO("net: prediction divergence at tick %u: %.2f m",
                                  ackedTick, sqrtf(distSq));
-                        // M3 simple correction: snap local player to server pose.
-                        // M4 will add a smooth lerp so corrections aren't visible teleports.
+                        // M4 smooth correction: accumulate the visible delta so the camera
+                        // doesn't teleport. The sim position snaps immediately (server-
+                        // authoritative for replay correctness); m_renderOffset decays each
+                        // frame so the rendered eye position slides toward the corrected sim
+                        // position over ~150 ms rather than popping.
+                        Vec3 visibleDelta = m_localPlayer.position - serverPos;
+                        RenderOffsetOps::accumulate(m_renderOffset, visibleDelta);
                         m_localPlayer.position = serverPos;
                     }
                 }
