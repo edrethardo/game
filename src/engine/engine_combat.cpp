@@ -1179,6 +1179,29 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     // at entity positions and we want those to use the present-time pose).
     if (lagCompTicks > 0) endLagComp();
 
+    // M10.2 — Emit SV_DAMAGE_DONE to the firing client for each entity hit so the
+    // client can ack its PendingHitRing entry and clean up the predicted hit-marker.
+    // Only emitted on a SERVER for remote (non-host) clients — slot 0 is the host
+    // and fires locally without a network round-trip. Uses Net::sendReliable so the
+    // ack is guaranteed, matching the reliable CL_FIRE_WEAPON that triggered this fire.
+    if (m_netRole == NetRole::SERVER && np.slotIndex != 0 && result.hitEntity) {
+        u32 hitCount = result.entitiesHit < MAX_ATTACK_HITS ? result.entitiesHit : MAX_ATTACK_HITS;
+        for (u32 hi = 0; hi < hitCount; hi++) {
+            u16 targetIdx = result.hitHandles[hi].index;
+            u8  svBuf[sizeof(PacketHeader) + 8]; // header(4) + clientTick(4) + targetIdx(2) + reserved(2)
+            PacketHeader* svHdr = reinterpret_cast<PacketHeader*>(svBuf);
+            svHdr->type  = NetPacketType::SV_DAMAGE_DONE;
+            svHdr->flags = 0;
+            svHdr->seq   = 0;
+            u32 off = sizeof(PacketHeader);
+            std::memcpy(svBuf + off, &pendingClientTick, 4); off += 4;
+            std::memcpy(svBuf + off, &targetIdx,         2); off += 2;
+            u16 reserved = 0;
+            std::memcpy(svBuf + off, &reserved,          2); off += 2;
+            Net::sendReliable(np.slotIndex, svBuf, off);
+        }
+    }
+
     // --- Life steal ring passive for remote player ---
     if (np.ringPassive == SkillId::LIFE_STEAL && result.hitEntity) {
         f32 heal = wpn.damage * 0.05f;

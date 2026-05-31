@@ -326,6 +326,9 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
             result.hitPosition = e->position;
             result.hitDistance  = distances[0];
         }
+        // M10.2: store per-hit handles so the server can emit SV_DAMAGE_DONE per hit.
+        u32 storeCount = hitCount < MAX_ATTACK_HITS ? hitCount : MAX_ATTACK_HITS;
+        for (u32 i = 0; i < storeCount; i++) result.hitHandles[i] = hits[i];
     }
 
     return result;
@@ -349,6 +352,7 @@ AttackResult Combat::fireHitscan(const WeaponDef& weapon,
         if (hit.type == CombatHit::ENTITY) {
             result.hitEntity   = true;
             result.entitiesHit = 1;
+            result.hitHandles[0] = hit.entityHandle; // M10.2: store for SV_DAMAGE_DONE
             // Roll crit per shot — hitscan always hits exactly one target.
             bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
             f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;

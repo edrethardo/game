@@ -743,6 +743,9 @@ void Engine::startGame(GameStart mode) {
         Net::setOnLevelSeed(Engine::onLevelSeed);
         // Clock-sync pong decoder (M1.5) — feeds incoming SV_TIME_PONG into ClockSync.
         Net::setOnTimePong(Engine::onTimePong);
+        // M10.2/M10.3 — reliable server-confirms for predicted hits and incoming damage.
+        Net::setOnDamageDone(Engine::onDamageDone);
+        Net::setOnDamageToMe(Engine::onDamageToMe);
         Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
         // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
         // Ping state also resets so clientNetPre sends the 3 handshake pings on the

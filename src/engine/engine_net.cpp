@@ -782,3 +782,23 @@ void Engine::onTimePong(const u8* data, u32 size) {
                            s_engine->m_clockSync, recvNow);
 }
 
+// M10.2 — Client-side SV_DAMAGE_DONE handler. The server confirmed that a fire from
+// this client hit an entity. Ack the matching PendingHitRing entry so the predicted
+// hit-marker state is resolved. If the tick/target pair is not found (e.g. the ring
+// was already expired by expireOlderThan), the ack is a safe no-op.
+void Engine::onDamageDone(u32 clientTick, u16 targetEntityIdx) {
+    if (!s_engine) return;
+    PendingHitRingOps::ack(s_engine->m_pendingHits, clientTick, targetEntityIdx);
+}
+
+// M10.3 — Client-side SV_DAMAGE_TO_ME handler. The server confirmed a projectile hit
+// the local player. Ack the matching PendingDamageRing entry so predicted incoming-
+// damage visual state (damageFlash / hurtVignette) is resolved correctly.
+// The damage value is received but not currently applied locally — HP follows the
+// next authoritative snapshot to avoid flicker on mispredicts.
+void Engine::onDamageToMe(u32 projectileSrcKey, f32 damage) {
+    if (!s_engine) return;
+    (void)damage; // damage value received for future use (e.g. precise HP prediction)
+    PendingDamageRingOps::ack(s_engine->m_pendingDamage, projectileSrcKey);
+}
+

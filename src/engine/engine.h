@@ -693,6 +693,12 @@ private:
     static void onEvent(const u8* data, u32 size);
     static void onPlayerJoin(u8 playerSlot, u8 classId);
     static void onPlayerLeft(u8 playerSlot);
+    // Client-side SV_DAMAGE_DONE handler (M10.2). Acks the matching PendingHitRing entry
+    // so the predicted hit-marker state is cleaned up when the server confirms the hit.
+    static void onDamageDone(u32 clientTick, u16 targetEntityIdx);
+    // Client-side SV_DAMAGE_TO_ME handler (M10.3). Acks the matching PendingDamageRing
+    // entry so predicted incoming-damage visual state is cleaned up on server confirmation.
+    static void onDamageToMe(u32 projectileSrcKey, f32 damage);
     // Server-pushed mid-run floor descent (SV_LEVEL_SEED). Client-only: adopt the
     // host's new floor/difficulty/seed and follow into the same FLOOR_TRANSITION path.
     static void onLevelSeed(u8 floor, u8 difficulty, u32 seed);

@@ -97,6 +97,19 @@ enum struct NetPacketType : u8 {
     // (unreliable) at ~1 Hz from the client; server replies immediately.
     CL_TIME_PING      = 0x0A,  // 4-byte payload: u32 clientTimeMs (echoed by SV_TIME_PONG)
     SV_TIME_PONG      = 0x17,  // 12-byte payload: u32 clientTimeMs + u32 serverTick + u32 serverTimeMs
+
+    // M10.2 — Server → Client: the server confirmed a remote player's fire hit an entity.
+    // Sent reliably to the firing client only so it can ack the PendingHitRing entry and
+    // resolve the predicted hit-marker. Payload (8 B):
+    //   u32 clientTick + u16 targetEntityIdx + u16 reserved.
+    SV_DAMAGE_DONE    = 0x18,
+
+    // M10.3 — Server → Client: the server applied projectile damage to a player.
+    // Sent reliably to the victim client so it can ack the PendingDamageRing entry.
+    // Payload (10 B):
+    //   u32 projectileSrcKey + f32 damage + u16 reserved.
+    // Key encoding mirrors the client: (ownerSlot << 24) | (proj.clientTick & 0xFFFFFF).
+    SV_DAMAGE_TO_ME   = 0x19,
 };
 
 // Sub-types for SV_EVENT packets
@@ -239,6 +252,14 @@ namespace Net {
     // starting at the header. Engine strips the 4-byte header and passes the 12-byte
     // body to Client::handleTimePong which feeds ClockSyncOps::onPongReceived.
     using OnTimePongFn = void(*)(const u8* data, u32 size);
+    // Client-side SV_DAMAGE_DONE handler (M10.2). Called when the server confirms a
+    // remote player's fire successfully hit an entity. The client uses this to ack the
+    // matching PendingHitRing entry so predicted hit-marker state is cleaned up.
+    using OnDamageDoneFn = void(*)(u32 clientTick, u16 targetEntityIdx);
+    // Client-side SV_DAMAGE_TO_ME handler (M10.3). Called when the server confirms a
+    // projectile hit the local player. The client uses this to ack the matching
+    // PendingDamageRing entry.
+    using OnDamageToMeFn = void(*)(u32 projectileSrcKey, f32 damage);
     using OnEventFn      = void(*)(const u8* data, u32 size);
     // classId is the joining client's chosen PlayerClass (validated by the callback;
     // 0xFF if the join request predates the class byte — treated as default Warrior).
@@ -258,6 +279,8 @@ namespace Net {
     void setOnInventorySync(OnInventorySyncFn fn);
     void setOnTimePing(OnTimePingFn fn);
     void setOnTimePong(OnTimePongFn fn);
+    void setOnDamageDone(OnDamageDoneFn fn);    // M10.2
+    void setOnDamageToMe(OnDamageToMeFn fn);    // M10.3
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);

@@ -14,6 +14,11 @@ struct ScreenShake;
 // Result of a player attack. Melee can hit multiple entities (cone query);
 // hitscan hits first entity or wall (raycast); projectile spawns are fire-and-forget.
 // Combat hit result from last player attack (for feedback)
+// M10.2: AttackResult now carries per-hit entity handles so the server can emit
+// SV_DAMAGE_DONE for each confirmed hit. entitiesHit is the count; hitHandles[0]
+// is always the primary (hitscan/melee first hit); MAX_ATTACK_HITS bounds the array.
+static constexpr u32 MAX_ATTACK_HITS = 16;
+
 struct AttackResult {
     bool  didFire     = false;
     bool  hitEntity   = false;
@@ -22,6 +27,8 @@ struct AttackResult {
     Vec3  hitNormal   = {0,0,0};
     f32   hitDistance  = 0.0f;
     u32   entitiesHit = 0; // melee can hit multiple
+    // M10.2: entity handles for each confirmed hit (populated by fireMelee / fireHitscan)
+    EntityHandle hitHandles[MAX_ATTACK_HITS] = {};
 };
 
 namespace Combat {

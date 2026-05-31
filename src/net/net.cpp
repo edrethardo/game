@@ -35,6 +35,8 @@ static Net::OnFireWeaponFn s_onFireWeapon = nullptr;
 static Net::OnInventorySyncFn s_onInventorySync = nullptr;
 static Net::OnTimePingFn   s_onTimePing   = nullptr;
 static Net::OnTimePongFn   s_onTimePong   = nullptr;  // client-side SV_TIME_PONG decoder (M1.5)
+static Net::OnDamageDoneFn s_onDamageDone = nullptr;  // client-side SV_DAMAGE_DONE (M10.2)
+static Net::OnDamageToMeFn s_onDamageToMe = nullptr;  // client-side SV_DAMAGE_TO_ME (M10.3)
 static Net::OnEventFn      s_onEvent      = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
@@ -260,6 +262,30 @@ static void clientHandlePacket(const u8* data, u32 size) {
         // the 12-byte body to Client::handleTimePong → ClockSyncOps::onPongReceived.
         if (size < sizeof(PacketHeader) + 12) break;
         if (s_onTimePong) s_onTimePong(data, size);
+    } break;
+
+    case NetPacketType::SV_DAMAGE_DONE: {
+        // M10.2 — Server confirms a remote player's fire hit an entity. Unpack the
+        // firing client's tick + entity index and forward to the engine's ack handler.
+        // Payload: 4B header + u32 clientTick(4) + u16 targetIdx(2) + u16 reserved(2).
+        if (size < sizeof(PacketHeader) + 8) break;
+        u32 clientTick;
+        u16 targetIdx;
+        std::memcpy(&clientTick, data + sizeof(PacketHeader),     4);
+        std::memcpy(&targetIdx,  data + sizeof(PacketHeader) + 4, 2);
+        if (s_onDamageDone) s_onDamageDone(clientTick, targetIdx);
+    } break;
+
+    case NetPacketType::SV_DAMAGE_TO_ME: {
+        // M10.3 — Server confirms a projectile hit the local player. Unpack the
+        // projectile key + damage and forward to the engine's ack handler.
+        // Payload: 4B header + u32 key(4) + f32 damage(4) + u16 reserved(2) = 14B total.
+        if (size < sizeof(PacketHeader) + 10) break;
+        u32 key;
+        f32 damage;
+        std::memcpy(&key,    data + sizeof(PacketHeader),     4);
+        std::memcpy(&damage, data + sizeof(PacketHeader) + 4, 4);
+        if (s_onDamageToMe) s_onDamageToMe(key, damage);
     } break;
 
     default:
@@ -644,6 +670,8 @@ void Net::setOnFireWeapon(OnFireWeaponFn fn) { s_onFireWeapon = fn; }
 void Net::setOnInventorySync(OnInventorySyncFn fn) { s_onInventorySync = fn; }
 void Net::setOnTimePing(OnTimePingFn fn)   { s_onTimePing = fn; }
 void Net::setOnTimePong(OnTimePongFn fn)   { s_onTimePong = fn; }
+void Net::setOnDamageDone(OnDamageDoneFn fn) { s_onDamageDone = fn; }  // M10.2
+void Net::setOnDamageToMe(OnDamageToMeFn fn) { s_onDamageToMe = fn; }  // M10.3
 void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }
