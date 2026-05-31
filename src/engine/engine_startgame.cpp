@@ -740,6 +740,8 @@ void Engine::startGame(GameStart mode) {
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         // Follow the host's mid-run floor descents (server-authoritative).
         Net::setOnLevelSeed(Engine::onLevelSeed);
+        // Clock-sync pong decoder (M1.5) — feeds incoming SV_TIME_PONG into ClockSync.
+        Net::setOnTimePong(Engine::onTimePong);
         Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
         // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
         // Ping state also resets so clientNetPre sends the 3 handshake pings on the

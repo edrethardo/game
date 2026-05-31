@@ -636,6 +636,10 @@ private:
     // Server-side CL_TIME_PING handler (M1.4): read clientTimeMs from the payload, stamp
     // serverTick + serverTimeMs, and send SV_TIME_PONG back on the unreliable channel.
     static void onTimePing(u8 playerSlot, const u8* data, u32 size);
+    // Client-side SV_TIME_PONG handler (M1.5): strip the 4-byte header, pass the 12-byte
+    // body to Client::handleTimePong, which feeds ClockSyncOps::onPongReceived using
+    // Clock::getElapsedSeconds() as the pong-arrival wall time.
+    static void onTimePong(const u8* data, u32 size);
     // Client-side helper: serialize m_inventories[localSlot] + class/skill state and ship
     // it via CL_INVENTORY_SYNC. Called once shortly after SV_JOIN_ACCEPT when the joiner
     // came from the menu's "Continue" path with a loaded save.

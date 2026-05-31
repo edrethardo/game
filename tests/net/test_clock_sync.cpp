@@ -107,3 +107,39 @@ TEST_CASE("ClockSync: onSnapshotReceived snaps on large delta (host floor reset)
     // After snap: estimate = observed = 3 + (15/1000)*60 = 3.9
     CHECK(cs.serverTickEst == doctest::Approx(3.9));
 }
+
+// --- SV_TIME_PONG byte-buffer decode tests ---
+// These exercise the wire-decode side: a SV_TIME_PONG payload as bytes goes through
+// Client::handleTimePong, which unpacks the fields and feeds them to ClockSyncOps.
+
+#include "net/client.h"   // for Client::handleTimePong
+
+TEST_CASE("Client::handleTimePong decodes payload and seeds ClockSync") {
+    // Build a 12-byte SV_TIME_PONG payload by hand.
+    u8 payload[12];
+    // clientTimeMs = 100 (little-endian u32 — matches PacketReader::readU32)
+    payload[0] = 100; payload[1] = 0; payload[2] = 0; payload[3] = 0;
+    // serverTick = 200
+    payload[4] = 200; payload[5] = 0; payload[6] = 0; payload[7] = 0;
+    // serverTimeMs = 9999 (ignored by handleTimePong but must be in payload to read)
+    payload[8] = 0x0F; payload[9] = 0x27; payload[10] = 0; payload[11] = 0;
+
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    // Pretend we received this payload at pongRecvNowSec=0.130 — same numbers as
+    // the "first pong bootstraps" test above, exercising the dispatch + decode path.
+    Client::handleTimePong(payload, sizeof(payload), cs, /*pongRecvNowSec=*/0.130);
+    CHECK(cs.bootstrapped == true);
+    CHECK(cs.pongsReceived == 1);
+    CHECK(cs.oneWayTripMs == doctest::Approx(15.0f));
+    CHECK(cs.serverTickEst == doctest::Approx(200.9));
+}
+
+TEST_CASE("Client::handleTimePong ignores too-short payloads") {
+    u8 payload[4] = { 100, 0, 0, 0 };   // 4 bytes — way too small
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    Client::handleTimePong(payload, sizeof(payload), cs, 0.130);
+    CHECK(cs.bootstrapped == false);
+    CHECK(cs.pongsReceived == 0);
+}

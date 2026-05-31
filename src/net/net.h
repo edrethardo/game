@@ -236,6 +236,10 @@ namespace Net {
     // packet starting at the header. Engine reads clientTimeMs, stamps serverTick +
     // serverTimeMs, and sends SV_TIME_PONG back on the unreliable channel.
     using OnTimePingFn = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // Client-side SV_TIME_PONG handler (M1.5). Payload is the raw SV_TIME_PONG packet
+    // starting at the header. Engine strips the 4-byte header and passes the 12-byte
+    // body to Client::handleTimePong which feeds ClockSyncOps::onPongReceived.
+    using OnTimePongFn = void(*)(const u8* data, u32 size);
     using OnEventFn      = void(*)(const u8* data, u32 size);
     // classId is the joining client's chosen PlayerClass (validated by the callback;
     // 0xFF if the join request predates the class byte — treated as default Warrior).
@@ -254,6 +258,7 @@ namespace Net {
     void setOnFireWeapon(OnFireWeaponFn fn);
     void setOnInventorySync(OnInventorySyncFn fn);
     void setOnTimePing(OnTimePingFn fn);
+    void setOnTimePong(OnTimePongFn fn);
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);

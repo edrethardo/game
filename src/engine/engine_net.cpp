@@ -710,3 +710,25 @@ void Engine::onTimePing(u8 playerSlot, const u8* data, u32 size) {
     Net::sendUnreliable(playerSlot, w.data, w.cursor);
 }
 
+// ---------------------------------------------------------------------------
+// Client-side SV_TIME_PONG handler (M1.5)
+// ---------------------------------------------------------------------------
+// Static callback — invoked by Net::poll via s_onTimePong when the client receives a
+// SV_TIME_PONG. Strips the 4-byte packet header and passes the 12-byte body to
+// Client::handleTimePong, which unpacks clientTimeMs / serverTick / serverTimeMs and
+// feeds ClockSyncOps::onPongReceived to bootstrap or refine the clock estimate.
+// Clock::getElapsedSeconds() is sampled here (decode time) as the pong-arrival wall time
+// so the RTT measurement is as accurate as the packet-receive → callback latency allows.
+void Engine::onTimePong(const u8* data, u32 size) {
+    if (!s_engine) return;
+    // Header guard: net.cpp already checks size >= 16 before dispatching, but be safe.
+    if (size < sizeof(PacketHeader) + 12) {
+        LOG_WARN("net: short SV_TIME_PONG at onTimePong (%u bytes)", size);
+        return;
+    }
+    // Pass the payload (past the 4-byte header) to the decode function.
+    const f64 recvNow = Clock::getElapsedSeconds();
+    Client::handleTimePong(data + sizeof(PacketHeader), size - sizeof(PacketHeader),
+                           s_engine->m_clockSync, recvNow);
+}
+

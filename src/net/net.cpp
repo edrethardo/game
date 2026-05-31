@@ -34,6 +34,7 @@ static Net::OnDescendRequestFn s_onDescendRequest = nullptr;
 static Net::OnFireWeaponFn s_onFireWeapon = nullptr;
 static Net::OnInventorySyncFn s_onInventorySync = nullptr;
 static Net::OnTimePingFn   s_onTimePing   = nullptr;
+static Net::OnTimePongFn   s_onTimePong   = nullptr;  // client-side SV_TIME_PONG decoder (M1.5)
 static Net::OnEventFn      s_onEvent      = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
@@ -251,6 +252,14 @@ static void clientHandlePacket(const u8* data, u32 size) {
         LOG_INFO("Net: server descended to floor %u (diff=%u seed=%u)",
                  floor, difficulty, seed);
         if (s_onLevelSeed) s_onLevelSeed(floor, difficulty, seed);
+    } break;
+
+    case NetPacketType::SV_TIME_PONG: {
+        // Clock-sync pong (M1.5). Payload: 4B header + 12B body (clientTimeMs +
+        // serverTick + serverTimeMs). Engine handler strips the header and passes
+        // the 12-byte body to Client::handleTimePong → ClockSyncOps::onPongReceived.
+        if (size < sizeof(PacketHeader) + 12) break;
+        if (s_onTimePong) s_onTimePong(data, size);
     } break;
 
     default:
@@ -634,6 +643,7 @@ void Net::setOnDescendRequest(OnDescendRequestFn fn) { s_onDescendRequest = fn; 
 void Net::setOnFireWeapon(OnFireWeaponFn fn) { s_onFireWeapon = fn; }
 void Net::setOnInventorySync(OnInventorySyncFn fn) { s_onInventorySync = fn; }
 void Net::setOnTimePing(OnTimePingFn fn)   { s_onTimePing = fn; }
+void Net::setOnTimePong(OnTimePongFn fn)   { s_onTimePong = fn; }
 void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }

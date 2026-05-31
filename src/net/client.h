@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "net/net.h"
+#include "net/clock_sync.h"
 #include "net/net_player.h"
 #include "net/snapshot.h"
 #include "game/entity.h"
@@ -84,4 +85,9 @@ namespace Client {
 
     // Get local player index
     u8 getLocalPlayerIndex();
+
+    // Decode a SV_TIME_PONG payload and feed it to ClockSync. Caller supplies the
+    // wall-clock time of the pong arrival (Clock::getElapsedSeconds at decode time).
+    // Short payloads are logged and ignored (cs unchanged).
+    void handleTimePong(const u8* data, u32 size, ClockSync& cs, f64 pongRecvNowSec);
 }
