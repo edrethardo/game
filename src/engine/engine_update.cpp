@@ -1142,6 +1142,17 @@ void Engine::sendPickupRequest() {
     // M8: Local prediction — hide the world item immediately so it disappears on send
     // instead of waiting ~RTT/2 for the next snapshot mirror. If the server rejects the
     // pickup, mirrorWorldItems re-activates it from the next authoritative snapshot.
+    //
+    // D4 (inventory item-add prediction) — DEFERRED. Requires a refactor:
+    //   1. Inventory::addToBackpack returns bool, not a slot index — can't record the
+    //      predicted slot in PendingPickupRing for rollback without API changes.
+    //   2. No Inventory::remove(inv, slot) exists — dropFromBackpack is floor-drop flavour.
+    //   3. Double-add risk: if we predict-add here AND the normal server-accept path fires
+    //      (engine_net.cpp onPickupResult), the item appears twice. Needs a "pending" item
+    //      flag (e.g. ItemInstance::predicted bool) and a guard in the accept path.
+    //   Plan: extend addToBackpack to return s8 slot (-1 = full), add removeFromBackpack
+    //   (by slot, no WorldItem spawn), set ItemInstance::predicted=true on predict-add,
+    //   clear it on accept, remove on reject. Track predictedInvSlot in PendingPickup.
     PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid);
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = m_worldItems.items[i];
