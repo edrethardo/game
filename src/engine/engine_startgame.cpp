@@ -766,6 +766,9 @@ void Engine::startGame(GameStart mode) {
         // M8 — Clear the pending-pickups ring so world-item disappearance predictions
         // from a prior session don't suppress items in the new connection's world.
         PendingPickupRingOps::reset(m_pendingPickups);
+        // M9 — Clear the pending-skills ring so skill activation predictions from a prior
+        // session don't get matched (or mismatched) against new connection's server events.
+        PendingSkillRingOps::reset(m_pendingSkills);
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

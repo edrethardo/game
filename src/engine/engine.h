@@ -26,6 +26,7 @@
 #include "net/pending_hit_ring.h"
 #include "net/pending_damage_ring.h"
 #include "net/pending_pickup_ring.h"
+#include "net/pending_skill_ring.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -202,6 +203,14 @@ private:
     // expireOlderThan() trims entries older than ~2 s (120 ticks) in clientNetPost.
     // Reset on every CLIENT connect.
     PendingPickupRing m_pendingPickups;
+
+    // Pending predicted skill activations (CLIENT role, M9) — records one entry per successful
+    // SkillSystem::tryActivate on the local player (clientTick, skillSlot). M10's SV_SKILL_RESULT
+    // handler will ack confirmed activations and detect server rejections (insufficient energy /
+    // cooldown not ready). Until M10 lands, entries accumulate; expireOlderThan bounds growth.
+    // skillSlot: 0–3 = class skill index, 0xFE = boot skill, 0xFF = helmet skill (sentinels from
+    // pending_skill_ring.h). Reset on every CLIENT connect.
+    PendingSkillRing m_pendingSkills;
 
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client

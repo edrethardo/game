@@ -172,6 +172,11 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
                                           m_projectiles, m_entities, m_level.grid, m_localPlayer,
                                           m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
                 m_skillStates[m_localPlayerIndex].energy = m_classSkillStates[slot].energy;
+                // M9: record the predicted class skill activation so M10 can ack/reject it
+                // via SV_SKILL_RESULT. CLIENT only — server is authoritative and needs no ring.
+                if (m_netRole == NetRole::CLIENT) {
+                    PendingSkillRingOps::record(m_pendingSkills, m_clientTick, slot);
+                }
             }
 
             // Restore original duration
@@ -220,6 +225,10 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
                                       m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
             m_skillStates[m_localPlayerIndex].energy = m_bootSkillStates[m_localPlayerIndex].energy; // deduct spent mana
+            // M9: record predicted boot skill activation (sentinel 0xFE — no integer slot for equipment skills).
+            if (m_netRole == NetRole::CLIENT) {
+                PendingSkillRingOps::record(m_pendingSkills, m_clientTick, PENDING_SKILL_SLOT_BOOT);
+            }
         }
     }
 
@@ -238,6 +247,10 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
                                       m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
             m_skillStates[m_localPlayerIndex].energy = m_helmetSkillStates[m_localPlayerIndex].energy; // deduct spent mana
+            // M9: record predicted helmet skill activation (sentinel 0xFF — no integer slot for equipment skills).
+            if (m_netRole == NetRole::CLIENT) {
+                PendingSkillRingOps::record(m_pendingSkills, m_clientTick, PENDING_SKILL_SLOT_HELMET);
+            }
         }
     }
 }
