@@ -1,53 +1,46 @@
-# Netplay M1: Clock Sync + Tick Cleanup Implementation Plan
+# Netplay M1 (TDD): Clock Sync + Tick Cleanup Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give the client a stable estimate of server time (`t_server_est`) via a connect-time handshake and per-snapshot refinement, separate the client's local tick (`m_clientTick`) from any server-time concept, and rename the `NetInput.tick` wire field to `NetInput.clientTick` so the prediction work in M2/M3 can build on coherent timing primitives.
+**Goal:** Give the client a stable estimate of server time (`t_server_est`) via a connect-time handshake and per-snapshot refinement, separate the client's local tick (`m_clientTick`) from any server-time concept, and rename the `NetInput.tick` wire field to `NetInput.clientTick` so the prediction work in M2/M3 can build on coherent timing primitives — implemented **test-first** using the doctest framework landed in the test-framework v1 milestone.
 
-**Architecture:** New `ClockSync` subsystem on the client tracks a smoothed estimate of the server's current tick. Two new packet types (`CL_TIME_PING` / `SV_TIME_PONG`) bootstrap the estimate at connection (3 rapid pings to absorb single-packet outliers). Every incoming snapshot's `serverTick` field then refines the estimate via a P controller (gain ~0.1). The client maintains its own monotonic `m_clientTick` for stamping outgoing inputs; reads of "what does the server think the time is" route through `ClockSync` instead of the conflated `m_serverTick`. No prediction or replay logic in M1 — this is foundation only.
+**Architecture:** New `ClockSync` subsystem on the client tracks a smoothed estimate of the server's current tick. Two new packet types (`CL_TIME_PING` / `SV_TIME_PONG`) bootstrap the estimate at connection (3 rapid pings to absorb single-packet outliers). Every incoming snapshot's `serverTick` field then refines the estimate via a P controller (gain ~0.1). The client maintains its own monotonic `m_clientTick` for stamping outgoing inputs. The pure-math parts (the ClockSync state machine + the SV_TIME_PONG byte-buffer parsing) are unit-tested via doctest; the wire-handshake and field-rename parts are verified by build + manual smoke.
 
-**Tech Stack:** C++17, ENet (existing transport), `Clock::getElapsedSeconds` for wall time, the existing PacketReader/Writer helpers.
+**Tech Stack:** C++17, ENet (existing transport), `Clock::getElapsedSeconds` for wall time, existing PacketReader/Writer helpers, doctest (header at `external/doctest/doctest.h`) for the unit-test parts.
 
-**Reference spec:** [/home/aaron/.claude/plans/multiplayer-should-feel-like-curried-coral.md](../../../../.claude/plans/multiplayer-should-feel-like-curried-coral.md) — §1 ("Clock & Tick Model") and Migration Plan → Milestone 1.
+**Reference spec:** [/home/aaron/.claude/plans/multiplayer-should-feel-like-curried-coral.md](../../../../.claude/plans/multiplayer-should-feel-like-curried-coral.md) — §1 ("Clock & Tick Model") and Migration Plan → Milestone 1. Test framework spec: [docs/superpowers/specs/2026-05-31-test-framework-design.md](../specs/2026-05-31-test-framework-design.md).
 
 ---
 
 ## Pre-flight Notes
 
-**No test framework in the project.** Verification per task is `cmake --build build` (clean build). End-of-milestone verification adds a manual two-process co-op smoke (deferred to the user — Claude can't drive a GUI).
+**TDD discipline.** For unit-testable subsystems (ClockSync state machine, SV_TIME_PONG decode), the pattern is: write the failing test → see it fail in `dungeon_tests` → write minimal code → see it pass → commit. The plan groups all ClockSync tests into one initial commit (with the class as a compile-only stub), then a second commit makes them pass. Pong-decode follows the same pattern in its own task.
 
-**Scope boundaries.** M1 only delivers the *estimator* and the *clientTick stamping*. It does NOT:
-- Apply `t_server_est` to render-tick scheduling — `computeInterpPair` continues using `Clock::getElapsedSeconds() - INTERP_DELAY_SEC` for now. (Tightening renderTime to use `t_server_est` is part of M3-M4.)
-- Apply `t_server_est` to input send-tick scheduling — inputs continue sending at the current tick rate. (Send-tick scheduling lands in M2's input-pipeline rewrite.)
-- Change snapshot rate or interp delay (already 30 Hz / 50 ms post-M0 baseline).
-- Touch lag compensation (M5).
+**Not everything is unit-testable.** The wire-handshake (sending CL_TIME_PING on connect, server echoing) involves real network state and ENet peers — that gets manual smoke. The NetInput field rename is a mechanical refactor — the build succeeding IS the test. The m_serverTick audit produces no new behavior — same deal.
 
-Doing only the foundation in M1 means the engine still ships and plays after M1 lands — no half-built state where rendering or hit detection waits on incomplete clock logic.
+**Scope boundaries (unchanged from pre-TDD draft).** M1 only delivers the *estimator* and the *clientTick stamping*. It does NOT:
+- Apply `t_server_est` to render-tick scheduling — that's M3/M4.
+- Implement the rolling input window — that's M2.
+- Touch lag compensation — that's M5.
 
-**Conflict with the deprecated NetInput.posXQ/Y/Z.** Those fields are flagged for removal in M3. M1 does not touch them. Future M3 plan removes them in one atomic change.
+**Tree state when starting:** Master is clean. Test framework lands at HEAD (4 commits ago: doctest vendored, tests/ skeleton, CMake hook, CLAUDE.md docs).
 
 **Where m_serverTick is used today.** A grep at plan-writing time showed the field is touched in `engine.h:152` (declaration), `engine_net.cpp:63, 70, 489, 506, 510, 533, 541` (server tick increment + snapshot stamping + input stamping), and `client.cpp:214` (a comment noting the host resets it on descent). M1 introduces a clear split: server tick handling stays unchanged on the host's SERVER role; client (CLIENT role) gets `m_clientTick` for its own monotonic counter, and `ClockSync` for the estimate of remote server time.
 
 ---
 
-## Task 1: Add ClockSync Class Skeleton
+## Task 1: ClockSync Test Suite (Failing) + Stub Header
 
 **Files:**
-- Create: `src/net/clock_sync.h`
-- Create: `src/net/clock_sync.cpp`
-- Modify: `CMakeLists.txt` (only if it explicitly lists source files; if it globs `src/**/*.cpp`, no change needed)
+- Create: `tests/net/test_clock_sync.cpp` — all the test cases for ClockSync, written before the class exists
+- Create: `src/net/clock_sync.h` — minimal stub so the tests compile (struct + namespace declarations)
+- Modify: `tests/CMakeLists.txt` — add the new test file + `src/net/clock_sync.cpp` (which doesn't exist yet — link error expected)
 
-- [ ] **Step 1: Check the CMakeLists.txt source-list pattern**
+This task ends with the tests **compiling and failing at link time** (or failing at runtime once we add a stub .cpp). That's the red phase.
 
-Run:
-```bash
-grep -n 'src/net' CMakeLists.txt | head
-```
-If output shows individual file names (e.g., `src/net/client.cpp`), you'll need to add `src/net/clock_sync.cpp` to the list. If it shows a glob pattern (`src/**/*.cpp` or similar), no edit needed.
+- [ ] **Step 1: Create the stub header**
 
-- [ ] **Step 2: Create the header**
-
-Write `src/net/clock_sync.h` with this content:
+Write `src/net/clock_sync.h`:
 
 ```cpp
 #pragma once
@@ -55,9 +48,8 @@ Write `src/net/clock_sync.h` with this content:
 #include "core/types.h"
 
 // Client-side estimate of the server's current simulation tick + wall-clock time.
-// Foundation for the netplay rewrite (M1 in the rewrite design doc) — the prediction
-// + replay reconciliation work in M3 needs to know *when* a snapshot represents,
-// not just *what it carries*.
+// Foundation for the netplay rewrite (M1) — the prediction + replay reconciliation
+// work in M3 needs to know *when* a snapshot represents, not just *what it carries*.
 //
 // Bootstrapped at connect by 3 CL_TIME_PING ↔ SV_TIME_PONG round-trips; refined every
 // time a WorldSnapshot arrives by feeding `snap.serverTick` through a P controller
@@ -68,49 +60,282 @@ Write `src/net/clock_sync.h` with this content:
 // Threading: single-threaded — the net layer drives this from the same callback
 // that delivers packets, on the main thread. No locking.
 struct ClockSync {
-    bool   bootstrapped     = false;   // true once at least one pong has arrived
-    f64    serverTickEst    = 0.0;     // smoothed estimate of server's current tick at `lastUpdateClockSec`
-    f64    lastUpdateClockSec = 0.0;   // local Clock::getElapsedSeconds() when serverTickEst was last refreshed
-    f32    oneWayTripMs     = 30.0f;   // smoothed half-RTT (defaults to a benign guess pre-handshake)
-    u32    pongsReceived    = 0;       // diagnostic
-    u32    snapshotsApplied = 0;       // diagnostic
+    bool   bootstrapped       = false;
+    f64    serverTickEst      = 0.0;
+    f64    lastUpdateClockSec = 0.0;
+    f32    oneWayTripMs       = 30.0f;
+    u32    pongsReceived      = 0;
+    u32    snapshotsApplied   = 0;
 
-    // Smoothing gains (tuned conservatively — raise if estimate is too sluggish in testing)
-    static constexpr f32 SNAP_GAIN     = 0.1f;   // P controller gain when ingesting snapshot.serverTick
-    static constexpr f32 OWT_GAIN      = 0.2f;   // EMA gain for one-way-trip
-    static constexpr f64 LARGE_DELTA   = 6.0;    // ticks: jump (don't smooth) if estimate is this far off
+    static constexpr f32 SNAP_GAIN   = 0.1f;
+    static constexpr f32 OWT_GAIN    = 0.2f;
+    static constexpr f64 LARGE_DELTA = 6.0;
 };
 
 namespace ClockSyncOps {
-    // Reset to pristine state — call on disconnect / before reconnect.
     void reset(ClockSync& cs);
 
-    // Process a pong reply. `clientSentMs` is what we stamped on our ping;
-    // `serverTickAtRecv` is the server tick when it processed the ping;
-    // `pongRecvNowSec` is local Clock::getElapsedSeconds() when we received the pong.
-    // Computes RTT, half-RTT (oneWayTripMs), and seeds serverTickEst.
     void onPongReceived(ClockSync& cs,
                         u32 clientSentMs,
                         u32 serverTickAtRecv,
                         f64 pongRecvNowSec);
 
-    // Refine the estimate using the serverTick stamp on an incoming snapshot.
-    // Uses the P controller to converge without phase-jumping. Skips refinement
-    // until bootstrapped (first pong has set a baseline).
     void onSnapshotReceived(ClockSync& cs, u32 snapServerTick, f64 recvNowSec);
 
-    // Current estimate of the server's tick at "now" (local clock).
-    // Returns 0.0 if not yet bootstrapped.
     f64 currentServerTickEst(const ClockSync& cs, f64 nowSec);
-
-    // Convenience: integer (floor) tick estimate.
     u32 currentServerTickEstU32(const ClockSync& cs, f64 nowSec);
 }
 ```
 
-- [ ] **Step 3: Create the implementation**
+- [ ] **Step 2: Create the test file**
 
-Write `src/net/clock_sync.cpp` with this content:
+Write `tests/net/test_clock_sync.cpp`:
+
+```cpp
+// test_clock_sync.cpp — TDD spec for the ClockSync state machine. Each TEST_CASE
+// describes one behavior the type must exhibit; tests are written before the
+// implementation. Pure math + state — no network, no engine globals.
+
+#include <doctest/doctest.h>
+#include "net/clock_sync.h"
+
+TEST_CASE("ClockSync: reset returns to pristine state") {
+    ClockSync cs;
+    cs.bootstrapped = true;
+    cs.serverTickEst = 12345.0;
+    cs.oneWayTripMs = 99.0f;
+    cs.pongsReceived = 7;
+    ClockSyncOps::reset(cs);
+    CHECK(cs.bootstrapped == false);
+    CHECK(cs.serverTickEst == 0.0);
+    CHECK(cs.oneWayTripMs == doctest::Approx(30.0f));
+    CHECK(cs.pongsReceived == 0);
+    CHECK(cs.snapshotsApplied == 0);
+}
+
+TEST_CASE("ClockSync: first pong bootstraps the estimate") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    // We sent the ping at 100 ms (clientSentMs=100), server stamped its tick at
+    // recv = 200, the pong arrived back at 130 ms (pongRecvNowSec=0.130). RTT is
+    // 30 ms, so oneWayTripMs is 15 ms.
+    ClockSyncOps::onPongReceived(cs, /*clientSentMs=*/100,
+                                     /*serverTickAtRecv=*/200,
+                                     /*pongRecvNowSec=*/0.130);
+    CHECK(cs.bootstrapped == true);
+    CHECK(cs.pongsReceived == 1);
+    CHECK(cs.oneWayTripMs == doctest::Approx(15.0f));
+    // serverTickAtPongArrival = 200 + (15/1000)*60 = 200.9 ticks.
+    CHECK(cs.serverTickEst == doctest::Approx(200.9));
+    CHECK(cs.lastUpdateClockSec == doctest::Approx(0.130));
+}
+
+TEST_CASE("ClockSync: subsequent pongs EMA-smooth oneWayTripMs") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    ClockSyncOps::onPongReceived(cs, 100, 200, 0.130);   // RTT 30 → OWT 15
+    ClockSyncOps::onPongReceived(cs, 200, 210, 0.250);   // sent@200ms, recv@250ms, RTT 50 → OWT 25
+    // After EMA(OWT_GAIN=0.2): OWT = 15 + 0.2*(25 - 15) = 17.0
+    CHECK(cs.oneWayTripMs == doctest::Approx(17.0f));
+    CHECK(cs.pongsReceived == 2);
+}
+
+TEST_CASE("ClockSync: currentServerTickEst projects forward by wall time") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    ClockSyncOps::onPongReceived(cs, 100, 600, 0.130);
+    // Right at recv time: estimate equals serverTickEst (≈600.9 — recomputed for OWT 15).
+    CHECK(ClockSyncOps::currentServerTickEst(cs, 0.130) == doctest::Approx(600.9));
+    // 100 ms later (0.230 s): 0.1 s * 60 = 6 ticks ahead → 606.9.
+    CHECK(ClockSyncOps::currentServerTickEst(cs, 0.230) == doctest::Approx(606.9));
+    // 1 second later: +60 ticks → 660.9.
+    CHECK(ClockSyncOps::currentServerTickEst(cs, 1.130) == doctest::Approx(660.9));
+}
+
+TEST_CASE("ClockSync: currentServerTickEst returns 0 before bootstrap") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    CHECK(ClockSyncOps::currentServerTickEst(cs, 0.0) == 0.0);
+    CHECK(ClockSyncOps::currentServerTickEstU32(cs, 99.0) == 0u);
+}
+
+TEST_CASE("ClockSync: currentServerTickEstU32 floors fractional ticks") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    ClockSyncOps::onPongReceived(cs, 100, 500, 0.130);
+    // est ≈ 500.9 at recv time → U32 floor is 500.
+    CHECK(ClockSyncOps::currentServerTickEstU32(cs, 0.130) == 500u);
+}
+
+TEST_CASE("ClockSync: onSnapshotReceived seeds when not bootstrapped") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    // Snapshot arrives before any pong — should bootstrap from snapshot's serverTick.
+    // OWT is still the default 30 ms, so estimate becomes 1000 + (30/1000)*60 = 1001.8.
+    ClockSyncOps::onSnapshotReceived(cs, /*snapServerTick=*/1000, /*recvNowSec=*/0.500);
+    CHECK(cs.bootstrapped == true);
+    CHECK(cs.serverTickEst == doctest::Approx(1001.8));
+    CHECK(cs.snapshotsApplied == 1);
+}
+
+TEST_CASE("ClockSync: onSnapshotReceived smooths small drift via P controller") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    ClockSyncOps::onPongReceived(cs, 100, 1000, 0.130);  // serverTickEst ≈ 1000.9 at t=0.130
+    // 100 ms later (recvNowSec=0.230), a snapshot arrives claiming serverTick=1007.
+    // Predicted now: 1000.9 + 0.1*60 = 1006.9. Observed: 1007 + 0.015*60 = 1007.9. Delta: 1.0.
+    // After P controller (gain 0.1): est = 1006.9 + 0.1 * 1.0 = 1007.0.
+    ClockSyncOps::onSnapshotReceived(cs, /*snapServerTick=*/1007, /*recvNowSec=*/0.230);
+    CHECK(cs.serverTickEst == doctest::Approx(1007.0));
+    CHECK(cs.snapshotsApplied == 1);
+}
+
+TEST_CASE("ClockSync: onSnapshotReceived snaps on large delta (host floor reset)") {
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    ClockSyncOps::onPongReceived(cs, 100, 5000, 0.130);   // serverTickEst ≈ 5000.9
+    // 50 ms later, host has just descended and reset m_serverTick = 0. Next snapshot
+    // carries snapServerTick = 3 (a few ticks past reset). Delta vs predicted is
+    // huge → should SNAP rather than smooth.
+    ClockSyncOps::onSnapshotReceived(cs, /*snapServerTick=*/3, /*recvNowSec=*/0.180);
+    // After snap: estimate = observed = 3 + (15/1000)*60 = 3.9
+    CHECK(cs.serverTickEst == doctest::Approx(3.9));
+}
+```
+
+- [ ] **Step 3: Update `tests/CMakeLists.txt` to compile the new test file and (eventually) link against clock_sync.cpp**
+
+Use the Edit tool. The current source list is:
+```
+add_executable(dungeon_tests
+    test_main.cpp
+    sanity_test.cpp
+)
+```
+
+Replace with:
+```
+add_executable(dungeon_tests
+    test_main.cpp
+    sanity_test.cpp
+    net/test_clock_sync.cpp
+    ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
+)
+```
+
+`tests/net/` directory needs to exist before CMake can find the file:
+
+```bash
+mkdir -p tests/net
+```
+
+(Step 2 wrote the test file there, but only `mkdir -p tests/net` happened implicitly via the Write tool. If `ls tests/net/` shows the test file, you're fine.)
+
+- [ ] **Step 4: Try to build — expect link failure (clock_sync.cpp doesn't exist yet)**
+
+```bash
+cmake -B build 2>&1 | tail -5
+cmake --build build --target dungeon_tests 2>&1 | tail -20
+```
+
+Expected: CMake configure succeeds (file is listed); the **build fails** when linking `dungeon_tests` because none of the `ClockSyncOps::*` functions are defined anywhere. Capture the error — it should mention undefined references to `ClockSyncOps::reset`, `ClockSyncOps::onPongReceived`, etc.
+
+If you get a *compile* error instead (e.g., `unknown type 'f64'`), the stub header is wrong — check that `#include "core/types.h"` pulls in the f64/u32 aliases on the test target's include path. The `target_include_directories` in tests/CMakeLists.txt already adds `${CMAKE_SOURCE_DIR}/src`, so the include should resolve.
+
+- [ ] **Step 5: Create a placeholder clock_sync.cpp so we get a runtime test failure instead of link failure**
+
+This step is small — a no-op .cpp that defines the functions with broken stubs. We want the tests to *compile and link* but then *fail at runtime*. Write `src/net/clock_sync.cpp`:
+
+```cpp
+// clock_sync.cpp — TDD red phase: stubs that compile but do nothing useful. The
+// actual math lands in Task 2 to make the test_clock_sync.cpp expectations pass.
+
+#include "net/clock_sync.h"
+#include "core/types.h"
+
+void ClockSyncOps::reset(ClockSync& /*cs*/) {
+    // Intentional no-op — tests will fail until Task 2 lands the real reset.
+}
+
+void ClockSyncOps::onPongReceived(ClockSync& /*cs*/,
+                                  u32 /*clientSentMs*/,
+                                  u32 /*serverTickAtRecv*/,
+                                  f64 /*pongRecvNowSec*/) {
+    // Intentional no-op — Task 2 implements.
+}
+
+void ClockSyncOps::onSnapshotReceived(ClockSync& /*cs*/,
+                                      u32 /*snapServerTick*/,
+                                      f64 /*recvNowSec*/) {
+    // Intentional no-op — Task 2 implements.
+}
+
+f64 ClockSyncOps::currentServerTickEst(const ClockSync& /*cs*/, f64 /*nowSec*/) {
+    return 0.0;  // wrong — Task 2 implements.
+}
+
+u32 ClockSyncOps::currentServerTickEstU32(const ClockSync& /*cs*/, f64 /*nowSec*/) {
+    return 0u;  // wrong — Task 2 implements.
+}
+```
+
+- [ ] **Step 6: Rebuild and run tests — expect runtime failures**
+
+```bash
+cmake --build build --target dungeon_tests 2>&1 | tail -5
+./build/tests/dungeon_tests 2>&1 | tail -30
+```
+
+Expected: build succeeds (link now resolves), test run fails with multiple FAILED cases. doctest will report which expressions failed and what the actual vs expected values were. You'll see things like:
+```
+test cases:  X |  Y passed | Z failed
+```
+
+with Z > 0. The "framework smoke" sanity tests from Task 2 of the test-framework plan still pass; the 9 new ClockSync tests fail.
+
+If the run actually succeeds (0 failures), the stubs accidentally returned correct values — re-check Step 5's stub returns are wrong (return 0.0, not the expected values).
+
+- [ ] **Step 7: Commit the red phase**
+
+```bash
+git add tests/net/test_clock_sync.cpp src/net/clock_sync.h src/net/clock_sync.cpp tests/CMakeLists.txt
+git diff --cached --stat
+git commit -m "$(cat <<'EOF'
+test(net): ClockSync test suite + stub (TDD red phase) — M1.1
+
+Adds tests/net/test_clock_sync.cpp with 9 TEST_CASEs covering:
+  - reset() returns to pristine state
+  - first pong bootstraps estimate from RTT + serverTick
+  - subsequent pongs EMA-smooth oneWayTripMs (gain 0.2)
+  - currentServerTickEst projects forward by wall time
+  - currentServerTickEst returns 0 before bootstrap
+  - currentServerTickEstU32 floors fractional ticks
+  - onSnapshotReceived seeds when not bootstrapped
+  - onSnapshotReceived smooths small drift via P controller (gain 0.1)
+  - onSnapshotReceived snaps on large delta (>6 ticks — host floor reset)
+
+Stub src/net/clock_sync.{h,cpp} compiles + links so tests run, but ops
+are no-ops returning wrong values — every ClockSync test fails by
+design. Task 2 (M1.2) lands the real impl to turn them green.
+
+tests/CMakeLists.txt extends the dungeon_tests source list to pick up
+the new test file and (the still-stubbed) clock_sync.cpp.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 2: Implement ClockSync to Pass All Tests (TDD Green)
+
+**Files:**
+- Modify: `src/net/clock_sync.cpp` — replace stub bodies with the real implementation
+
+- [ ] **Step 1: Replace the stub clock_sync.cpp with the real implementation**
+
+Use the Write tool to replace the entire file:
 
 ```cpp
 // clock_sync.cpp — client-side estimate of server simulation tick + wall time.
@@ -128,7 +353,6 @@ Write `src/net/clock_sync.cpp` with this content:
 // Tick rate is shared with the rest of the engine (NET_TICK_RATE in net.h is 60).
 // Duplicating the constant here keeps clock_sync.cpp independent of net.h's broader
 // surface — only the type aliases are needed.
-static constexpr f32 TICK_DT_SEC = 1.0f / 60.0f;
 static constexpr f32 TICKS_PER_SEC = 60.0f;
 
 void ClockSyncOps::reset(ClockSync& cs) {
@@ -144,26 +368,17 @@ void ClockSyncOps::onPongReceived(ClockSync& cs,
                                   u32 clientSentMs,
                                   u32 serverTickAtRecv,
                                   f64 pongRecvNowSec) {
-    // We can derive RTT only if we know our own clock at send-time — clientSentMs is
-    // what we stamped on the outgoing ping, captured from the same local clock now
-    // sampled as pongRecvNowSec*1000. The math doesn't need server's local wall time.
     const u32 nowMs = static_cast<u32>(pongRecvNowSec * 1000.0);
-    // u32 subtraction is wrap-safe; if our session approaches 2^32 ms (~49 days) we
-    // have bigger problems than netcode drift.
     const u32 rttMs = nowMs - clientSentMs;
     const f32 newOwt = static_cast<f32>(rttMs) * 0.5f;
 
     if (!cs.bootstrapped) {
-        cs.oneWayTripMs  = newOwt;
-        cs.bootstrapped  = true;
+        cs.oneWayTripMs = newOwt;
+        cs.bootstrapped = true;
     } else {
-        // EMA smooth — handshake sends 3 pings rapidly, this averages them.
-        cs.oneWayTripMs += OWT_GAIN * (newOwt - cs.oneWayTripMs);
+        cs.oneWayTripMs += ClockSync::OWT_GAIN * (newOwt - cs.oneWayTripMs);
     }
 
-    // Server processed the ping `oneWayTripMs` ago (their stamp was at recv). So
-    // by *now*, the server has advanced (oneWayTripMs / 1000) * 60 ticks past
-    // serverTickAtRecv. That's the moment-of-pong-arrival estimate.
     const f64 serverTickAtPongArrival =
         static_cast<f64>(serverTickAtRecv) + (cs.oneWayTripMs / 1000.0) * TICKS_PER_SEC;
 
@@ -174,9 +389,6 @@ void ClockSyncOps::onPongReceived(ClockSync& cs,
 
 void ClockSyncOps::onSnapshotReceived(ClockSync& cs, u32 snapServerTick, f64 recvNowSec) {
     if (!cs.bootstrapped) {
-        // No baseline yet — seed directly. This shouldn't happen in normal play (handshake
-        // runs before snapshots start streaming) but covers the case where the very first
-        // snapshot beats the pong reply.
         cs.serverTickEst      = static_cast<f64>(snapServerTick) +
                                 (cs.oneWayTripMs / 1000.0) * TICKS_PER_SEC;
         cs.lastUpdateClockSec = recvNowSec;
@@ -185,27 +397,20 @@ void ClockSyncOps::onSnapshotReceived(ClockSync& cs, u32 snapServerTick, f64 rec
         return;
     }
 
-    // What we would predict the server tick to be *now* based on prior state.
     const f64 elapsedSinceUpdate = recvNowSec - cs.lastUpdateClockSec;
     const f64 predictedNow       = cs.serverTickEst + elapsedSinceUpdate * TICKS_PER_SEC;
 
-    // Where snapshot says the server was when it was sent. We don't know exact send
-    // time, but the snapshot just left the server `oneWayTripMs` ago, so server is now
-    // approximately snapServerTick + oneWayTripMs/1000 * 60 ticks ahead.
     const f64 observed = static_cast<f64>(snapServerTick) +
                          (cs.oneWayTripMs / 1000.0) * TICKS_PER_SEC;
 
     const f64 delta = observed - predictedNow;
-    if (delta > LARGE_DELTA || delta < -LARGE_DELTA) {
+    if (delta > ClockSync::LARGE_DELTA || delta < -ClockSync::LARGE_DELTA) {
         // Big jump — phase change (host restarted floor → m_serverTick=0, network
         // hiccup, etc.). Snap rather than smooth so we don't lag the estimate for
         // seconds waiting for the P controller to catch up.
         cs.serverTickEst = observed;
     } else {
-        // Small drift — smooth via P controller. predictedNow + delta is the target;
-        // we move serverTickEst forward by elapsedSinceUpdate's worth of ticks *and*
-        // close some fraction of `delta`.
-        cs.serverTickEst = predictedNow + SNAP_GAIN * delta;
+        cs.serverTickEst = predictedNow + ClockSync::SNAP_GAIN * delta;
     }
     cs.lastUpdateClockSec = recvNowSec;
     cs.snapshotsApplied++;
@@ -224,42 +429,50 @@ u32 ClockSyncOps::currentServerTickEstU32(const ClockSync& cs, f64 nowSec) {
 }
 ```
 
-- [ ] **Step 4: Update CMakeLists.txt if needed**
+- [ ] **Step 2: Build and run tests — expect ALL to pass**
 
-If Step 1 showed individual files listed, add `src/net/clock_sync.cpp` to the list following the existing pattern. If the glob covers it, skip.
-
-- [ ] **Step 5: Build to verify it compiles**
-
-Run:
 ```bash
-cmake --build build 2>&1 | tail -10
+cmake --build build --target dungeon_tests 2>&1 | tail -5
+./build/tests/dungeon_tests 2>&1 | tail -10
 ```
-Expected: clean build. If you get an error about an unused parameter or include, fix it inline. If you get a duplicate-symbol or missing-symbol, the CMakeLists wasn't updated correctly.
 
-- [ ] **Step 6: Commit**
+Expected: 12 cases total (3 sanity + 9 ClockSync), 12 passed, 0 failed. doctest's footer says `Status: SUCCESS!`.
 
-Run:
+If any case still fails, read the doctest output — it shows file:line + the decomposed expression. The arithmetic in this file follows the test cases exactly; mismatch means a typo. Don't proceed to commit until green.
+
+- [ ] **Step 3: Build the game (sanity — make sure adding clock_sync.cpp didn't break anything else)**
+
+The game binary doesn't link clock_sync.cpp yet (that wiring lands in Task 3+), but compiling the file with the rest of the project is a smoke check.
+
 ```bash
-git add src/net/clock_sync.h src/net/clock_sync.cpp
-# Only stage CMakeLists.txt if you actually modified it:
+cmake --build build 2>&1 | tail -3
+```
+Expected: `Built target DungeonEngine` and `Built target dungeon_tests`, no errors.
+
+- [ ] **Step 4: Commit the green phase**
+
+```bash
+git add src/net/clock_sync.cpp
 git diff --cached --stat
-```
-If CMakeLists was touched, `git add CMakeLists.txt` too. Then:
-
-```bash
 git commit -m "$(cat <<'EOF'
-net: add ClockSync skeleton for server-time estimate (M1.1)
+feat(net): ClockSync impl — all 9 tests green (TDD green) — M1.2
 
-New subsystem on the client: tracks a smoothed estimate of the server's
-current simulation tick. Operates on f64 to absorb session-length drift
-without losing precision. Two refinement paths: onPongReceived from a
-CL_TIME_PING / SV_TIME_PONG handshake (wired next task) and
-onSnapshotReceived feeding snapshot.serverTick through a P controller
-(SNAP_GAIN=0.1). Big deltas (>6 ticks) snap rather than smooth so a
-host floor-descent reset doesn't lag the estimate for seconds.
+Replaces the no-op stubs with the real math:
 
-No callers yet — pure data type + math. Wired into the engine in M1
-follow-up tasks (handshake, snapshot hook, NetInput rename).
+  - reset(): zero out all fields, oneWayTripMs back to the 30 ms default.
+  - onPongReceived(): compute RTT from clientSentMs round-trip, halve to
+    OWT, EMA-smooth (gain 0.2) after first pong, project serverTick at
+    pong arrival forward by OWT.
+  - onSnapshotReceived(): if not bootstrapped, seed; else P-controller
+    smooth (gain 0.1) toward the observed serverTick + OWT projection.
+    Large deltas (>6 ticks, e.g. host floor-descent reset) snap rather
+    than smooth.
+  - currentServerTickEst(): project serverTickEst forward by elapsed
+    wall time × TICKS_PER_SEC. Returns 0 if not bootstrapped.
+  - currentServerTickEstU32(): floor to u32.
+
+12/12 dungeon_tests cases pass (3 sanity + 9 ClockSync). Game binary
+still builds clean.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -268,62 +481,58 @@ EOF
 
 ---
 
-## Task 2: Add CL_TIME_PING / SV_TIME_PONG Packet Types
+## Task 3: Add CL_TIME_PING / SV_TIME_PONG Packet Types
 
 **Files:**
-- Modify: `src/net/net.h` — add the new packet types to `NetPacketType` enum
-- (No serializer files — payloads are tiny; we'll inline read/write in Tasks 3-4)
+- Modify: `src/net/net.h` — add new packet types
+
+(No tests — enum addition. Wire-format roundtrip gets tested in Task 5 via the SV_TIME_PONG decode.)
 
 - [ ] **Step 1: Locate the NetPacketType enum**
 
-Run:
 ```bash
 grep -n 'enum.*NetPacketType\|CL_INPUT\|CL_REQUEST_DESCEND\|SV_LEVEL_SEED' src/net/net.h | head -10
 ```
-The enum is in `src/net/net.h`. Note its style (whether it uses `enum class` / `enum struct`, the underlying type, the existing CL_* and SV_* assignments).
 
-- [ ] **Step 2: Add CL_TIME_PING and SV_TIME_PONG values**
+Note the enum style and the existing CL_*/SV_* assignments. Pick the next free values per the project's convention (likely CL_TIME_PING=0x09 if 0x08 is the last CL_*, and SV_TIME_PONG = next free SV_*).
 
-Use the Edit tool. Find the line that defines the next-available CL_* and SV_* enum values (look at the highest existing assignments — e.g. CL_REQUEST_DESCEND=0x07, CL_FIRE_WEAPON=0x08, SV_LEVEL_SEED=0x15). Add the new values with the next free numbers — likely:
+- [ ] **Step 2: Add the new enum values via Edit tool**
+
+Locate the existing CL_* and SV_* enum members. Insert (preserving alignment):
 
 ```cpp
-    CL_TIME_PING       = 0x09,   // 8-byte payload: u32 clientTimeMs (echoed back as-is)
+    CL_TIME_PING       = 0x09,   // 4-byte payload: u32 clientTimeMs (echoed by SV_TIME_PONG)
+```
+alongside the other CL_* members, and:
+```cpp
     SV_TIME_PONG       = 0x16,   // 12-byte payload: u32 clientTimeMs + u32 serverTick + u32 serverTimeMs
 ```
+alongside the other SV_* members. If 0x09 or 0x16 collide with existing values, pick the next free numbers and document.
 
-Slot them in next to their existing CL_*/SV_* neighbors. Do NOT renumber existing values — wire compatibility with running clients (and, for now, with the M0 baseline tree) depends on stable enum integers.
-
-If actual enum values differ from the example above (e.g., the next free CL_* is 0x09, the next free SV_* is 0x17), use the actual free numbers. Verify by re-grep after the edit:
-
-```bash
-grep -n 'CL_TIME_PING\|SV_TIME_PONG' src/net/net.h
-```
-Should show your two new lines.
-
-- [ ] **Step 3: Build to verify the enum compiles**
+- [ ] **Step 3: Build to confirm enum compiles**
 
 ```bash
 cmake --build build 2>&1 | tail -5
 ```
-Expected: clean. Adding an enum value should not break anything else.
+Expected: clean build.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add src/net/net.h
 git commit -m "$(cat <<'EOF'
-net: add CL_TIME_PING / SV_TIME_PONG packet types (M1.2)
+net: add CL_TIME_PING / SV_TIME_PONG packet types — M1.3
 
 Wire types for the clock-sync handshake. Payloads:
   CL_TIME_PING:  u32 clientTimeMs (4 B)
   SV_TIME_PONG:  u32 clientTimeMs + u32 serverTick + u32 serverTimeMs (12 B)
 
 Server echoes the client's stamped time as-is so the client can compute
-RTT without needing the server's wall clock — clientTimeMs is round-tripped
-unchanged.
+RTT without needing the server's wall clock — clientTimeMs is round-
+tripped unchanged.
 
-Handlers wired in M1.3 (client send) and M1.4 (server handle / client
-recv).
+Server-side handler in M1.4. Client-side decoder + ClockSync routing
+in M1.5 (TDD against synthesized bytes).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -332,89 +541,58 @@ EOF
 
 ---
 
-## Task 3: Server Handles CL_TIME_PING; Wire Handshake on Client Connect
+## Task 4: Server Handles CL_TIME_PING, Client Sends Handshake
 
 **Files:**
-- Modify: `src/net/server.cpp` — add a CL_TIME_PING handler in the existing packet dispatch
-- Modify: `src/engine/engine_net.cpp` — invoke the handshake from `clientNetPre` (or whatever the connect path is)
-- Modify: `src/engine/engine.h` — add `ClockSync m_clockSync` member; `f64 m_lastPingSentSec`; `u32 m_pingsSent`
+- Modify: `src/net/server.cpp` — add CL_TIME_PING dispatch case
+- Modify: `src/engine/engine.h` — add `ClockSync m_clockSync; f64 m_lastPingSentSec; u32 m_pingsSent;` members + `serverTickNow()` accessor
+- Modify: `src/engine/engine.cpp` — reset m_clockSync on connect/disconnect
+- Modify: `src/engine/engine_net.cpp` — send handshake pings from clientNetPre
 
-- [ ] **Step 1: Locate the server's packet dispatch**
+This task is **not unit-tested** — it operates on live ENet peers. Verification is build + (deferred) manual smoke. The ClockSyncOps::* functions involved are already covered by the Task 1+2 tests; this task only wires the call sites.
 
-Run:
-```bash
-grep -n 'CL_INPUT\|CL_FIRE_WEAPON\|CL_REQUEST_DESCEND' src/net/server.cpp | head -10
-```
-Find the switch/if-chain that dispatches by `NetPacketType`. That's where the new handler goes.
+- [ ] **Step 1: Add ClockSync members + accessor to Engine**
 
-- [ ] **Step 2: Add the CL_TIME_PING handler in server.cpp**
-
-Use the Edit tool to add a new case alongside the existing CL_* handlers. The handler reads the client's stamped ms, samples `serverTick` and the server's current wall clock, and writes a SV_TIME_PONG back to the same peer.
-
-Sketch (adapt to the actual file's helper names — PacketReader / PacketWriter / send-back style):
+In `src/engine/engine.h`, find the line `u32 m_serverTick = 0;` (around line 152) and add immediately after it:
 
 ```cpp
-case NetPacketType::CL_TIME_PING: {
-    // Echo back immediately with serverTick + serverTimeMs. Use the same channel as
-    // CL_INPUT (unreliable, unsequenced) — the client sends 3 pings to absorb a
-    // dropped reply, and a stale pong is benign (the client validates clientTimeMs
-    // matches one it sent recently).
-    if (size < 4) { LOG_WARN("net: short CL_TIME_PING (%u bytes)", size); break; }
-    PacketReader r(data, size);
-    const u32 clientTimeMs = r.readU32();
-    const u32 serverTick   = g_engine->serverTickNow();    // accessor — see Step 4
-    const u32 serverTimeMs = static_cast<u32>(Clock::getElapsedSeconds() * 1000.0);
-    PacketWriter w;
-    w.writeU8(static_cast<u8>(NetPacketType::SV_TIME_PONG));
-    w.writeU8(0);
-    w.writeU16(0);
-    w.writeU32(clientTimeMs);
-    w.writeU32(serverTick);
-    w.writeU32(serverTimeMs);
-    Net::sendToPeer(peer, w.data, w.cursor, /*reliable=*/false);
-    break;
-}
-```
-
-If the server already has a way to access `m_serverTick` directly (e.g., as a static, or via a passed argument), use that instead of `g_engine->serverTickNow()`. If not, add a small accessor on `Engine`:
-
-```cpp
-// in engine.h, public section:
-u32 serverTickNow() const { return m_serverTick; }
-```
-
-- [ ] **Step 3: Add m_clockSync + handshake state members to Engine**
-
-Edit `src/engine/engine.h`. In the `Engine` class (locate via `grep -n 'm_serverTick' src/engine/engine.h`), near the existing `m_serverTick` declaration, add:
-
-```cpp
-    // Clock-sync subsystem (CLIENT role) — see src/net/clock_sync.h. The host (SERVER
-    // role) has direct access to its m_serverTick so it does not consult m_clockSync.
+    // Clock-sync subsystem (CLIENT role) — see src/net/clock_sync.h. The host
+    // (SERVER role) has direct access to its m_serverTick so it does not consult
+    // m_clockSync.
     ClockSync m_clockSync;
-    f64       m_lastPingSentSec = 0.0;   // last time we sent a CL_TIME_PING
-    u32       m_pingsSent       = 0;     // count sent so far in this connection; reset on disconnect
+    f64       m_lastPingSentSec = 0.0;
+    u32       m_pingsSent       = 0;
 ```
 
-Add `#include "net/clock_sync.h"` at the top of engine.h if not already pulled in by a downstream header.
+In the same file, in the public section near other small inline accessors (look for any existing `const`-returning short methods), add:
 
-- [ ] **Step 4: Reset m_clockSync on connection / disconnection**
+```cpp
+    u32 serverTickNow() const { return m_serverTick; }
+```
 
-Edit `src/engine/engine.cpp` (or wherever the client connect / disconnect handlers live). Find the spot that runs on `Net::connectToServer` success and on disconnect. Add:
+Also add `#include "net/clock_sync.h"` to the top of engine.h if not already pulled in.
 
-- On connect: `ClockSyncOps::reset(m_clockSync); m_pingsSent = 0; m_lastPingSentSec = 0.0;`
-- On disconnect: `ClockSyncOps::reset(m_clockSync); m_pingsSent = 0; m_lastPingSentSec = 0.0;`
+- [ ] **Step 2: Reset ClockSync on connect / disconnect**
 
-If you can't readily find a clean connect callback, the safest fallback is to reset at the top of `startGame()` for the CLIENT role.
+In `src/engine/engine.cpp`, find the spots where a successful connect happens and where a disconnect happens. (Likely in `startGame()` for CLIENT role and in a disconnect callback.) Add at each:
 
-- [ ] **Step 5: Send handshake pings from clientNetPre**
+```cpp
+    ClockSyncOps::reset(m_clockSync);
+    m_pingsSent = 0;
+    m_lastPingSentSec = 0.0;
+```
 
-Edit `src/engine/engine_net.cpp`. In the `Engine::clientNetPre` function (near where it currently does `Client::captureAndSendInput`), insert handshake-ping logic BEFORE the input capture:
+If you can't readily find a clean spot, the safest fallback is to call this at the top of whatever function transitions GameState to IN_GAME for a CLIENT role.
+
+- [ ] **Step 3: Send handshake pings from clientNetPre**
+
+In `src/engine/engine_net.cpp`, in `Engine::clientNetPre`, before the existing `Client::captureAndSendInput(...)` call, add:
 
 ```cpp
     // Clock-sync handshake — send 3 CL_TIME_PINGs ~10 ms apart immediately after
     // connection, then stop. Snapshot-driven refinement (ClockSyncOps::onSnapshotReceived,
-    // wired in M1.5) takes over from there.
-    constexpr u32 HANDSHAKE_PING_COUNT  = 3;
+    // wired in M1.6) takes over from there.
+    constexpr u32 HANDSHAKE_PING_COUNT       = 3;
     constexpr f64 HANDSHAKE_PING_SPACING_SEC = 0.010;
     const f64 nowSec = Clock::getElapsedSeconds();
     if (m_pingsSent < HANDSHAKE_PING_COUNT &&
@@ -431,211 +609,71 @@ Edit `src/engine/engine_net.cpp`. In the `Engine::clientNetPre` function (near w
     }
 ```
 
-- [ ] **Step 6: Build**
+- [ ] **Step 4: Server-side CL_TIME_PING handler**
 
+Locate the packet dispatch in `src/net/server.cpp`:
 ```bash
-cmake --build build 2>&1 | tail -10
-```
-Expected: clean. If you get an "undefined reference to" for `ClockSyncOps::reset`, the cpp file isn't being compiled — check CMakeLists.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/net/server.cpp src/engine/engine.h src/engine/engine.cpp src/engine/engine_net.cpp
-git commit -m "$(cat <<'EOF'
-net: wire CL_TIME_PING handshake on client connect (M1.3)
-
-Client sends 3 CL_TIME_PINGs ~10 ms apart at the top of each clientNetPre
-once a connection is up, until 3 are sent. Server handler echoes back a
-SV_TIME_PONG carrying the client's stamped time (round-tripped unchanged)
-plus serverTick and serverTimeMs.
-
-ClockSync is reset on every connect/disconnect so a reconnect bootstraps
-cleanly. m_pingsSent / m_lastPingSentSec carry the handshake state on
-Engine.
-
-Server access to serverTick exposed via a small inline accessor
-(serverTickNow) — preferable to global state and keeps the engine.h
-surface honest.
-
-Client handling of SV_TIME_PONG (calling ClockSyncOps::onPongReceived) is
-M1.4.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
+grep -n 'CL_INPUT\|CL_FIRE_WEAPON\|CL_REQUEST_DESCEND' src/net/server.cpp | head -5
 ```
 
----
-
-## Task 4: Client Handles SV_TIME_PONG
-
-**Files:**
-- Modify: `src/net/client.cpp` — add `handleTimePong` and route SV_TIME_PONG into it; wire ClockSync via a small public Client API (or, simpler, pass `Engine::m_clockSync` in by reference)
-
-There are two ways to expose `m_clockSync` to the client packet handler:
-- (a) Pass a `ClockSync&` as a parameter to whatever function processes incoming packets.
-- (b) Add a Client-level static pointer to the engine's clock sync (set on init).
-
-Option (a) is cleaner; pick it if the existing Client API already takes Engine state by reference. Option (b) matches the existing pattern if Client::receiveSnapshot already operates on file-scope statics.
-
-- [ ] **Step 1: Look at how incoming packets are dispatched on the client**
-
-Run:
-```bash
-grep -n 'CL_INPUT\|SV_SNAPSHOT\|SV_EVENT\|SV_LEVEL_SEED\|case NetPacketType' src/net/client.cpp src/engine/engine_net.cpp | head -20
-```
-This will reveal where the SV_* dispatch happens. It might be in `Net::poll`, in `Engine::clientNetPre`, or in `src/net/net.cpp`.
-
-- [ ] **Step 2: Add Client::handleTimePong**
-
-If the dispatch is in client.cpp, add a new function `Client::handleTimePong(const u8* data, u32 size, ClockSync& cs)` that:
+Find the switch/if-chain and add a CL_TIME_PING case. Sketch (adapt to the file's actual helper conventions):
 
 ```cpp
-void Client::handleTimePong(const u8* data, u32 size, ClockSync& cs) {
-    if (size < 12) { LOG_WARN("net: short SV_TIME_PONG (%u bytes)", size); return; }
+case NetPacketType::CL_TIME_PING: {
+    if (size < 4) { LOG_WARN("net: short CL_TIME_PING (%u bytes)", size); break; }
     PacketReader r(data, size);
-    const u32 clientTimeMs    = r.readU32();
-    const u32 serverTick      = r.readU32();
-    const u32 serverTimeMs    = r.readU32();
-    (void)serverTimeMs;   // currently unused; reserved if we later add wall-time diagnostics
-    const f64 recvNowSec      = Clock::getElapsedSeconds();
-    ClockSyncOps::onPongReceived(cs, clientTimeMs, serverTick, recvNowSec);
+    const u32 clientTimeMs = r.readU32();
+    const u32 serverTick   = g_engine->serverTickNow();
+    const u32 serverTimeMs = static_cast<u32>(Clock::getElapsedSeconds() * 1000.0);
+    PacketWriter w;
+    w.writeU8(static_cast<u8>(NetPacketType::SV_TIME_PONG));
+    w.writeU8(0);
+    w.writeU16(0);
+    w.writeU32(clientTimeMs);
+    w.writeU32(serverTick);
+    w.writeU32(serverTimeMs);
+    Net::sendToPeer(peer, w.data, w.cursor, /*reliable=*/false);
+    break;
 }
 ```
 
-Add a matching declaration in `src/net/client.h`:
-```cpp
-    void handleTimePong(const u8* data, u32 size, ClockSync& cs);
-```
-
-(If using Option (b), drop the ClockSync& parameter and have handleTimePong reference a file-scope `s_clockSync` set by an init call.)
-
-- [ ] **Step 3: Wire the dispatch**
-
-In the packet-dispatch site you found in Step 1, add a case for `SV_TIME_PONG`:
-
-```cpp
-case NetPacketType::SV_TIME_PONG:
-    Client::handleTimePong(data, size, engine->m_clockSync);
-    break;
-```
-
-The exact way you reach `engine->m_clockSync` from the dispatch site depends on the existing call convention. If the dispatch site already has access to the engine instance, use it directly. If not, pass it down as a parameter or use the file-scope pointer approach.
-
-- [ ] **Step 4: Build**
-
-```bash
-cmake --build build 2>&1 | tail -10
-```
-Expected: clean.
-
-- [ ] **Step 5: Add a one-line diagnostic log**
-
-To make manual smoke easy, log when the handshake bootstraps. In `handleTimePong`, after `ClockSyncOps::onPongReceived(...)`, add:
-
-```cpp
-    if (cs.pongsReceived <= 3) {
-        LOG_INFO("net: clock-sync pong #%u — oneWayTripMs=%.1f serverTickEst=%.1f",
-                 cs.pongsReceived, cs.oneWayTripMs, cs.serverTickEst);
-    }
-```
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/net/client.cpp src/net/client.h src/engine/engine_net.cpp
-# Or whichever dispatch site you actually modified.
-git diff --cached --stat
-git commit -m "$(cat <<'EOF'
-net: client handles SV_TIME_PONG, seeds ClockSync (M1.4)
-
-Each incoming SV_TIME_PONG arrives in Client::handleTimePong, which
-unpacks the round-tripped clientTimeMs + the server's tick/wall-time
-stamps and feeds them into ClockSyncOps::onPongReceived. After the 3
-handshake replies arrive, oneWayTripMs is the EMA of three samples
-(absorbs a single packet outlier) and serverTickEst is seeded.
-
-Diagnostic log fires on the first 3 pongs so manual smoke can confirm
-the handshake completed and what the estimate looks like.
-
-Snapshot-driven refinement is M1.5.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
----
-
-## Task 5: Hook ClockSync Into Snapshot Reception
-
-**Files:**
-- Modify: `src/net/client.cpp` — `Client::receiveSnapshot` calls `ClockSyncOps::onSnapshotReceived` once the snapshot is successfully deserialized
-
-- [ ] **Step 1: Locate Client::receiveSnapshot**
-
-Already mapped to `src/net/client.cpp` around line 181 (per the M0-era exploration). Verify:
-```bash
-grep -n 'void Client::receiveSnapshot' src/net/client.cpp
-```
-
-- [ ] **Step 2: Add the hook**
-
-The receiveSnapshot signature needs the ClockSync reference. Two options:
-- Add `ClockSync&` parameter (mirrors handleTimePong above)
-- Use the same Engine accessor pattern you set up in Task 4
-
-Pick whichever fits the existing pattern. Then, right after `Snapshot::deserialize(snap, data, size)` returns true and you have `snap.serverTick`, add:
-
-```cpp
-    ClockSyncOps::onSnapshotReceived(cs, snap.serverTick, Clock::getElapsedSeconds());
-```
-
-- [ ] **Step 3: Update the receiveSnapshot caller**
-
-Wherever `receiveSnapshot` is called (probably also in `engine_net.cpp` or in `net.cpp`'s packet dispatch), pass the new ClockSync& through.
-
-- [ ] **Step 4: Add a low-frequency diagnostic log**
-
-Every 30 snapshots (~1 second at 30 Hz), log the current state:
-
-```cpp
-    static u32 s_logCounter = 0;
-    if ((s_logCounter++ % 30) == 0) {
-        LOG_INFO("net: clock-sync serverTickEst=%.1f wireServerTick=%u oneWayTripMs=%.1f",
-                 cs.serverTickEst, snap.serverTick, cs.oneWayTripMs);
-    }
-```
-
-This makes drift / jitter visible during smoke testing.
+If `g_engine` isn't already declared as a global in server.cpp, pass the Engine reference into the dispatch the same way other handlers reach it.
 
 - [ ] **Step 5: Build**
 
 ```bash
 cmake --build build 2>&1 | tail -10
 ```
-Expected: clean.
+Expected: clean. Both `DungeonEngine` and `dungeon_tests` rebuild green (tests are not affected by this task).
 
-- [ ] **Step 6: Commit**
+If you get linker errors about `g_engine`, look at how existing handlers reach engine state and use the same pattern.
+
+- [ ] **Step 6: Run tests — no regressions**
 
 ```bash
-git add src/net/client.cpp src/net/client.h src/engine/engine_net.cpp
+./build/tests/dungeon_tests 2>&1 | tail -5
+```
+Expected: 12/12 pass (no new tests, none broken).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/engine/engine.h src/engine/engine.cpp src/engine/engine_net.cpp src/net/server.cpp
 git diff --cached --stat
 git commit -m "$(cat <<'EOF'
-net: refine ClockSync from snapshot serverTick (M1.5)
+net: wire CL_TIME_PING handshake (server + client) — M1.4
 
-Each Client::receiveSnapshot now calls ClockSyncOps::onSnapshotReceived
-with snap.serverTick. The P controller (gain 0.1) smooths transient
-jitter; large deltas (>6 ticks — e.g., host floor-descent reset of
-m_serverTick=0) snap rather than smooth so the estimate doesn't lag
-the host for seconds.
+Engine gets m_clockSync (ClockSync), m_lastPingSentSec, m_pingsSent
+fields + a small serverTickNow() accessor for use from server.cpp.
+ClockSync is reset on connect/disconnect so reconnects bootstrap
+cleanly.
 
-Throttled diagnostic log (1 Hz) prints estimate / wire tick / smoothed
-oneWayTripMs so manual smoke can eyeball convergence.
+clientNetPre sends 3 CL_TIME_PINGs ~10 ms apart at the top of the tick
+once connected, until 3 are sent. server.cpp's CL_TIME_PING handler
+echoes back a SV_TIME_PONG carrying the client's stamped time
+(round-tripped unchanged) plus serverTick and serverTimeMs.
 
-NetInput.tick → clientTick rename is M1.6 (will pull from a new
-client-monotonic counter rather than reusing m_serverTick).
+Client-side decoder + ClockSync routing in M1.5 (TDD).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -644,27 +682,276 @@ EOF
 
 ---
 
-## Task 6: Rename NetInput.tick → NetInput.clientTick, Add Engine::m_clientTick
+## Task 5: Client Decodes SV_TIME_PONG, Feeds ClockSync (TDD)
 
 **Files:**
-- Modify: `src/net/net_player.h` — rename the wire field
-- Modify: `src/net/client.cpp` — update `captureAndSendInput` writes
-- Modify: `src/net/server.cpp` (and possibly `src/net/snapshot.cpp` / `src/net/packet.h`) — update reads
-- Modify: `src/engine/engine.h` — add `u32 m_clientTick`
-- Modify: `src/engine/engine_net.cpp` — increment m_clientTick in clientNetPre, use it for input stamping
+- Modify: `tests/net/test_clock_sync.cpp` — append a test that exercises `Client::handleTimePong` with synthesized bytes
+- Modify: `src/net/client.h` — declare `handleTimePong`
+- Modify: `src/net/client.cpp` — implement `handleTimePong` (red → green)
+- Modify: wherever SV_* dispatch happens (likely `src/engine/engine_net.cpp` or `src/net/net.cpp`) — route SV_TIME_PONG into the handler
+- Modify: `tests/CMakeLists.txt` — add `src/net/client.cpp` to the test target's source list IF the test needs it (likely yes, since `handleTimePong` will be in client.cpp)
 
-- [ ] **Step 1: Locate NetInput.tick references**
+- [ ] **Step 1: Write the failing test**
 
-Run:
-```bash
-grep -rn 'NetInput\|\.tick\|->tick\|input\.tick\|input->tick' src/net/ src/engine/ src/game/ | grep -v 'static_cast\|tickTimer\|tickRate\|burnTimer\|//.*tick' | head -40
+Append to `tests/net/test_clock_sync.cpp`:
+
+```cpp
+// --- SV_TIME_PONG byte-buffer decode tests ---
+// These exercise the wire-decode side: a SV_TIME_PONG payload as bytes goes through
+// Client::handleTimePong, which unpacks the fields and feeds them to ClockSyncOps.
+
+#include "net/client.h"   // for Client::handleTimePong
+
+TEST_CASE("Client::handleTimePong decodes payload and seeds ClockSync") {
+    // Build a 12-byte SV_TIME_PONG payload by hand.
+    u8 payload[12];
+    // clientTimeMs = 100 (little-endian u32 — matches PacketReader::readU32)
+    payload[0] = 100; payload[1] = 0; payload[2] = 0; payload[3] = 0;
+    // serverTick = 200
+    payload[4] = 200; payload[5] = 0; payload[6] = 0; payload[7] = 0;
+    // serverTimeMs = 9999 (ignored by handleTimePong but must be in payload to read)
+    payload[8] = 0x0F; payload[9] = 0x27; payload[10] = 0; payload[11] = 0;
+
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    // Pretend we received this payload at pongRecvNowSec=0.130 — same numbers as
+    // the "first pong bootstraps" test above, exercising the dispatch + decode path.
+    Client::handleTimePong(payload, sizeof(payload), cs, /*pongRecvNowSec=*/0.130);
+    CHECK(cs.bootstrapped == true);
+    CHECK(cs.pongsReceived == 1);
+    CHECK(cs.oneWayTripMs == doctest::Approx(15.0f));
+    CHECK(cs.serverTickEst == doctest::Approx(200.9));
+}
+
+TEST_CASE("Client::handleTimePong ignores too-short payloads") {
+    u8 payload[4] = { 100, 0, 0, 0 };   // 4 bytes — way too small
+    ClockSync cs;
+    ClockSyncOps::reset(cs);
+    Client::handleTimePong(payload, sizeof(payload), cs, 0.130);
+    CHECK(cs.bootstrapped == false);
+    CHECK(cs.pongsReceived == 0);
+}
 ```
 
-(The grep is noisy because "tick" appears in many contexts — focus on NetInput-related hits.) Make a list of the actual touch points. Expect: the struct declaration (`NetInput.tick`), the InputRingBuffer logic, the client capture/send, the server handler, possibly a few diagnostic logs.
+If the project's PacketReader is not endian-portable (or uses a different byte order), adjust the byte layout accordingly. Confirm by reading `src/net/packet.h` — the existing `readU32` is the canonical layout to match.
+
+- [ ] **Step 2: Add Client::handleTimePong declaration in client.h**
+
+Use the Edit tool on `src/net/client.h`. Add this declaration alongside the other `void receive*` / `void handle*` Client functions:
+
+```cpp
+    // Decode a SV_TIME_PONG payload and feed it to ClockSync. Caller supplies the
+    // wall-clock time of the pong arrival (Clock::getElapsedSeconds at decode time).
+    // Short payloads are logged and ignored (cs unchanged).
+    void handleTimePong(const u8* data, u32 size, ClockSync& cs, f64 pongRecvNowSec);
+```
+
+Add `#include "net/clock_sync.h"` to client.h's includes if not already pulled in.
+
+- [ ] **Step 3: Add `src/net/client.cpp` to the test target so the test can link**
+
+Use the Edit tool on `tests/CMakeLists.txt` to extend the source list:
+
+```
+add_executable(dungeon_tests
+    test_main.cpp
+    sanity_test.cpp
+    net/test_clock_sync.cpp
+    ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
+    ${CMAKE_SOURCE_DIR}/src/net/client.cpp
+)
+```
+
+**Watch out:** client.cpp likely includes many other engine headers and references many other symbols. If it pulls in cross-file dependencies that don't exist in the test target, you'll get link errors. In that case, you have two options:
+
+A. Move just `handleTimePong` into a small new file `src/net/client_time.cpp` so the test only needs to link that one. (Cleaner — recommended.)
+
+B. Add all of client.cpp's dependencies to the test target source list. (Messier — fast path is to try and see how bad the link error is.)
+
+Try A first. Move the handleTimePong implementation into `src/net/client_time.cpp` (small file: just `#include "net/client.h"` + the function body). Update `src/CMakeLists.txt` (the main game one) to add `net/client_time.cpp` so the game build also picks it up. Then add `src/net/client_time.cpp` to the test source list instead of client.cpp.
+
+- [ ] **Step 4: Build — expect the test to FAIL (function doesn't exist yet)**
+
+```bash
+cmake --build build --target dungeon_tests 2>&1 | tail -10
+```
+Expected: link error mentioning undefined reference to `Client::handleTimePong`. That's the red phase confirmation.
+
+- [ ] **Step 5: Implement handleTimePong**
+
+Decide on file (`src/net/client_time.cpp` if you went with Option A, otherwise `src/net/client.cpp`). Write:
+
+```cpp
+// client_time.cpp — clock-sync pong decoder. Split out from client.cpp so the test
+// target can link it without pulling in client.cpp's full dependency tree.
+
+#include "net/client.h"
+#include "net/packet.h"     // PacketReader
+#include "net/clock_sync.h"
+#include "core/log.h"
+
+void Client::handleTimePong(const u8* data, u32 size, ClockSync& cs, f64 pongRecvNowSec) {
+    if (size < 12) {
+        LOG_WARN("net: short SV_TIME_PONG (%u bytes)", size);
+        return;
+    }
+    PacketReader r(data, size);
+    const u32 clientTimeMs = r.readU32();
+    const u32 serverTick   = r.readU32();
+    const u32 serverTimeMs = r.readU32();
+    (void)serverTimeMs;   // currently unused; reserved for future wall-time diagnostics
+    ClockSyncOps::onPongReceived(cs, clientTimeMs, serverTick, pongRecvNowSec);
+
+    if (cs.pongsReceived <= 3) {
+        LOG_INFO("net: clock-sync pong #%u — oneWayTripMs=%.1f serverTickEst=%.1f",
+                 cs.pongsReceived, cs.oneWayTripMs, cs.serverTickEst);
+    }
+}
+```
+
+If you put it in `client_time.cpp`, also update `src/CMakeLists.txt` to add `net/client_time.cpp` to the production source list so the game also picks it up.
+
+- [ ] **Step 6: Rebuild — tests pass**
+
+```bash
+cmake --build build --target dungeon_tests 2>&1 | tail -5
+./build/tests/dungeon_tests 2>&1 | tail -10
+```
+Expected: 14/14 cases pass (3 sanity + 9 original ClockSync + 2 new handleTimePong).
+
+- [ ] **Step 7: Wire SV_TIME_PONG dispatch on incoming packets**
+
+Locate where the client dispatches received SV_* packets:
+```bash
+grep -n 'SV_SNAPSHOT\|SV_EVENT\|SV_LEVEL_SEED\|case NetPacketType' src/net/client.cpp src/net/net.cpp src/engine/engine_net.cpp | head -10
+```
+
+Add a case for SV_TIME_PONG that calls `Client::handleTimePong(data, size, engine->m_clockSync, Clock::getElapsedSeconds())`. Pass through whatever pattern existing SV_* dispatches use to reach engine state.
+
+- [ ] **Step 8: Build the full game — sanity**
+
+```bash
+cmake --build build 2>&1 | tail -5
+```
+Expected: both targets build clean.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add tests/net/test_clock_sync.cpp tests/CMakeLists.txt src/net/client.h src/net/client_time.cpp src/CMakeLists.txt
+# (Plus any other files you touched, e.g. the dispatch site)
+git diff --cached --stat
+git commit -m "$(cat <<'EOF'
+feat(net): Client::handleTimePong decodes SV_TIME_PONG → ClockSync (TDD) — M1.5
+
+Adds 2 new tests in test_clock_sync.cpp synthesizing a 12-byte
+SV_TIME_PONG payload and asserting the decoder routes the bytes
+into ClockSyncOps::onPongReceived correctly (and ignores short
+payloads).
+
+Impl in src/net/client_time.cpp (split from client.cpp so the test
+target doesn't have to link all of client.cpp's deps). Picked up
+by both DungeonEngine and dungeon_tests.
+
+SV_TIME_PONG dispatch wired into the client's packet receive path.
+
+14/14 tests pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 6: Hook ClockSync Into Snapshot Reception
+
+**Files:**
+- Modify: `src/net/client.cpp` — `Client::receiveSnapshot` calls `ClockSyncOps::onSnapshotReceived` once the snapshot is deserialized
+- Modify: `src/net/client.h` — receiveSnapshot signature gains a `ClockSync&` parameter
+- Modify: `src/engine/engine_net.cpp` — pass `m_clockSync` to receiveSnapshot
+
+No new tests — Task 1's `onSnapshotReceived seeds when not bootstrapped` and `onSnapshotReceived smooths small drift` tests already cover the math. This task only wires the call site.
+
+- [ ] **Step 1: Update signature and impl**
+
+Find `void Client::receiveSnapshot(const u8* data, u32 size)` in `src/net/client.cpp` (~line 181) and `src/net/client.h`. Change signature to:
+
+```cpp
+void receiveSnapshot(const u8* data, u32 size, ClockSync& cs);
+```
+
+In the .cpp, after the snapshot is successfully deserialized (the `if (Snapshot::deserialize(snap, data, size))` branch), add:
+
+```cpp
+        ClockSyncOps::onSnapshotReceived(cs, snap.serverTick, Clock::getElapsedSeconds());
+
+        static u32 s_logCounter = 0;
+        if ((s_logCounter++ % 30) == 0) {
+            LOG_INFO("net: clock-sync serverTickEst=%.1f wireServerTick=%u oneWayTripMs=%.1f",
+                     cs.serverTickEst, snap.serverTick, cs.oneWayTripMs);
+        }
+```
+
+- [ ] **Step 2: Update callers**
+
+Find where `receiveSnapshot` is called (likely in `engine_net.cpp` or `net.cpp`'s packet dispatch). Pass `m_clockSync` through.
+
+- [ ] **Step 3: Build, run tests, build game**
+
+```bash
+cmake --build build 2>&1 | tail -5
+./build/tests/dungeon_tests 2>&1 | tail -5
+```
+Expected: both build clean, 14/14 tests still pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/net/client.cpp src/net/client.h src/engine/engine_net.cpp
+git commit -m "$(cat <<'EOF'
+net: hook ClockSync into Client::receiveSnapshot — M1.6
+
+receiveSnapshot now takes a ClockSync& and feeds snap.serverTick into
+ClockSyncOps::onSnapshotReceived after a successful deserialize. The
+P controller (gain 0.1) smooths transient jitter; large deltas (>6
+ticks, e.g. host floor-descent reset) snap rather than smooth.
+
+Throttled 1 Hz diagnostic log prints estimate / wire tick / smoothed
+oneWayTripMs so manual smoke can eyeball convergence.
+
+No new tests — Task 1's onSnapshotReceived math is already covered
+unit-test-wise; this task only wires the existing math into the live
+dispatch path.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 7: Rename NetInput.tick → NetInput.clientTick + Add m_clientTick
+
+**Files:**
+- Modify: `src/net/net_player.h` — rename `tick` to `clientTick`
+- Modify: `src/net/client.cpp`, `src/net/server.cpp`, possibly `src/net/snapshot.cpp` — update reads/writes
+- Modify: `src/engine/engine.h` — add `u32 m_clientTick = 0;`
+- Modify: `src/engine/engine_net.cpp` — increment m_clientTick in clientNetPre, pass it to captureAndSendInput
+
+No new tests — mechanical rename. The build succeeding is the test.
+
+- [ ] **Step 1: Inventory existing references**
+
+```bash
+grep -rn 's_latestInput\.tick\|\.tick = \|input->tick\|input\.tick\|inputs\[' src/net/ src/engine/ | grep -v '//.*tick\|//.*tickRate\|//.*tickTimer\|burnTimer\|tickRate\|tickTimer' | head -20
+```
+
+Make a list of every NetInput.tick reference. Sweep them all in one pass.
 
 - [ ] **Step 2: Rename the wire field**
 
-In `src/net/net_player.h`, change:
+Edit `src/net/net_player.h`. Change:
 ```cpp
     u32 tick;           // which server tick this input is for
 ```
@@ -674,60 +961,61 @@ to:
                         // ring buffer ordering and (in M2) for lastProcessedInputTick echo.
 ```
 
-- [ ] **Step 3: Update writers and readers**
+- [ ] **Step 3: Update every reader and writer**
 
-Use the Edit tool (NOT sed — we need to be precise) to rename all `tick` references on `NetInput` instances. There will be a handful: capture, serialize write (e.g., `w.writeU32(s_latestInput.tick)`), deserialize read on the server, ring buffer ordering checks in net_player.h, any diagnostic logs.
+Use the Edit tool on each call site identified in Step 1. Replace `.tick` with `.clientTick` on NetInput instances. Be careful not to rename unrelated `tick` references (e.g., `m_serverTick`, `tickTimer`).
 
-After each edit, the file should still compile.
+InputRingBuffer (also in net_player.h) checks `input.tick <= newest.tick` — rename those too.
 
-- [ ] **Step 4: Add Engine::m_clientTick**
+- [ ] **Step 4: Add m_clientTick on Engine**
 
-In `src/engine/engine.h`, near the existing `m_serverTick` declaration, add:
+In `src/engine/engine.h`, near `u32 m_serverTick = 0;`, add:
+
 ```cpp
     // Client-local monotonic sim tick. Drives NetInput.clientTick (M1). Independent of
-    // m_serverTick (which is the host-only server tick on SERVER role). On CLIENT role,
-    // m_serverTick is currently still incremented for backward-compat with prediction
-    // paths that will be reworked in M3 — read m_clockSync.currentServerTickEst for any
+    // m_serverTick. On CLIENT role, read m_clockSync.currentServerTickEst for any
     // "what does the server think the time is" question.
     u32 m_clientTick = 0;
 ```
 
-- [ ] **Step 5: Increment m_clientTick in clientNetPre and use it for input stamping**
+- [ ] **Step 5: Increment m_clientTick and use it for input stamping**
 
-In `src/engine/engine_net.cpp` `Engine::clientNetPre`, near the existing `m_serverTick++` line, add:
+In `src/engine/engine_net.cpp` `Engine::clientNetPre`, near the existing `m_serverTick++` (around line 533), add:
+
 ```cpp
     m_clientTick++;
 ```
-Then change the `Client::captureAndSendInput` call to pass `m_clientTick` instead of `m_serverTick`:
+
+Change the `Client::captureAndSendInput(...)` call to pass `m_clientTick` instead of `m_serverTick`:
+
 ```cpp
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon, m_activeClassSkill);
 ```
 
-The function signature already names the argument `clientTick` (see client.h:31), so the rename is internally consistent.
+The function already names its argument `clientTick` (see client.h:31), so the call is now self-consistent.
 
-- [ ] **Step 6: Build**
+- [ ] **Step 6: Build, test, game-build**
 
 ```bash
 cmake --build build 2>&1 | tail -10
+./build/tests/dungeon_tests 2>&1 | tail -5
 ```
-Expected: clean. If you missed a renamed reference somewhere, you'll get an "no member named 'tick' in NetInput" error — fix and rebuild.
+Expected: clean build, 14/14 tests still pass. If you get a `no member named 'tick' in NetInput` error, a reference was missed in Step 3.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/net/net_player.h src/net/client.cpp src/net/server.cpp src/engine/engine.h src/engine/engine_net.cpp
-# Plus any other files you renamed in
+git add -u src/
 git diff --cached --stat
 git commit -m "$(cat <<'EOF'
-net: rename NetInput.tick → clientTick, add Engine::m_clientTick (M1.6)
+net: rename NetInput.tick → clientTick, add Engine::m_clientTick — M1.7
 
 Two changes that look cosmetic but pry apart two previously-conflated
 concepts:
 
   1. Wire field rename — NetInput.tick is now NetInput.clientTick.
-     Same bytes on the wire (still 4 B at the same offset), but the
-     name no longer suggests it's the server's tick. The server still
-     reads it the same way (input-ring ordering by clientTick).
+     Same bytes on the wire (still 4 B at the same offset). Server
+     still reads it the same way (input-ring ordering by clientTick).
 
   2. m_clientTick on Engine — a monotonic counter incremented per
      clientNetPre tick. This now drives the wire stamp; m_serverTick
@@ -738,7 +1026,7 @@ time (snapshot.serverTick); the client-side ClockSync (added in M1.1)
 maps between them when needed.
 
 m_serverTick on the client is still incremented for now (prediction-
-adjacent code reads it); M1.7 audits those readers and routes the
+adjacent code reads it); M1.8 audits those readers and routes the
 "server time" reads through ClockSync.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -748,72 +1036,68 @@ EOF
 
 ---
 
-## Task 7: Audit Remaining m_serverTick Reads on Client
+## Task 8: Audit Remaining m_serverTick Reads on Client
 
-**Files:**
-- Modify: `src/net/client.cpp` (probable), `src/engine/engine_combat.cpp` (probable — predicted projectile clientTick), maybe others — wherever client-side code reads `m_serverTick` and *meant* "what does the server think the time is"
+**Files:** various (likely `src/net/client.cpp`, `src/engine/engine_combat.cpp`).
+
+No new tests — audit + targeted edits.
 
 - [ ] **Step 1: Inventory remaining m_serverTick reads on the CLIENT branch**
 
-Run:
 ```bash
 grep -rn 'm_serverTick' src/ | grep -v 'src/engine/engine_net.cpp:.*m_serverTick++\|server.cpp' | head -30
 ```
 
-Look for each hit. Categorize:
-- **Server-side or shared:** the read is gated by `if (m_netRole == SERVER)` or in code that only the host runs. Leave it.
-- **Predicted-fire clientTick:** stamps `Projectile.clientTick` on a predicted ghost. This currently uses `m_serverTick` but semantically wants "the client's monotonic tick at fire time" (so the server can match it via SnapProjectile.clientTickLow). Update to `m_clientTick`.
-- **Floor-reset hack:** `client.cpp:214` comment about resetting m_serverTick on descent. This was an artifact of the old conflation; ClockSync now handles the descent reset via its LARGE_DELTA snap-rather-than-smooth path. Investigate whether the reset logic at descent is still needed at all.
-- **Other:** if anything else reads m_serverTick on the CLIENT to mean "server time", replace with `ClockSyncOps::currentServerTickEstU32(m_clockSync, Clock::getElapsedSeconds())`.
+Categorize each hit:
+- **Server-side / shared:** leave it.
+- **Predicted-fire clientTick:** rewrite to use `m_clientTick`.
+- **Floor-reset hack at client.cpp:214:** ClockSync's LARGE_DELTA path handles this now; investigate whether the reset block can be simplified.
+- **Other client reads of "server time":** replace with `ClockSyncOps::currentServerTickEstU32(m_clockSync, Clock::getElapsedSeconds())`.
 
 - [ ] **Step 2: Update predicted-fire clientTick stamping**
 
-In `src/engine/engine_combat.cpp`, find where predicted projectiles are stamped (look for `predicted = true` and `clientTick = m_serverTick` or similar). Change `m_serverTick` to `m_clientTick`.
-
-Run:
+In `src/engine/engine_combat.cpp`, find where predicted projectiles are stamped:
 ```bash
 grep -n 'predicted\s*=\s*true\|\.clientTick\s*=' src/engine/engine_combat.cpp | head -10
 ```
-Use Edit tool on each match.
+Use Edit tool to replace `m_serverTick` with `m_clientTick` in those stamping calls.
 
-- [ ] **Step 3: Verify the descent-reset path**
+- [ ] **Step 3: Verify descent-reset path**
 
-Read `src/net/client.cpp` around line 214 (the comment about the host resetting m_serverTick=0 on descent). Decide:
-- If the reset is needed to keep client interp from showing weird state across the level transition, keep it but document that ClockSync now handles the temporal side via its LARGE_DELTA snap.
-- If it's dead code with ClockSync in place, remove the special case.
+Read `src/net/client.cpp` around line 214. Decide: keep, simplify, or annotate with a TODO referencing M3. If unclear, leave it alone and add a comment:
 
-If unclear, leave it alone for this milestone and add a TODO comment referencing M3 (when client-side prediction lands and this code path will be revisited).
+```cpp
+    // TODO(M3): the descent reset semantics here predate ClockSync. With ClockSync's
+    // LARGE_DELTA snap, the explicit reset may be redundant. Revisit when client-side
+    // prediction lands and the ring-buffer model changes.
+```
 
-- [ ] **Step 4: Build**
+- [ ] **Step 4: Build, test**
 
 ```bash
-cmake --build build 2>&1 | tail -10
+cmake --build build 2>&1 | tail -5
+./build/tests/dungeon_tests 2>&1 | tail -5
 ```
-Expected: clean.
+Expected: clean build, 14/14 still pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add -u src/
-git diff --cached --stat
 git commit -m "$(cat <<'EOF'
-net: route client m_serverTick reads through ClockSync where appropriate (M1.7)
+net: route client m_serverTick reads through ClockSync where appropriate — M1.8
 
 Audit of remaining client-side m_serverTick references after the
-NetInput rename in M1.6. Reclassified:
+NetInput rename in M1.7. Updates:
 
   - Predicted-projectile clientTick stamping: now reads m_clientTick.
     The matching key on the wire (SnapProjectile.clientTickLow) was
     already low-16-bits of "the client's tick at fire time" — calling
     it that explicitly cleans up the conceptual model.
 
-  - Descent reset on the client (client.cpp:214 era comment): ClockSync's
-    LARGE_DELTA snap-rather-than-smooth handles the host-side
-    m_serverTick=0 reset cleanly. [Replace this bullet with one of:
-    "Reset path kept, comment updated to reference ClockSync handling"
-    OR "Reset path removed — ClockSync absorbs the descent transition"
-    OR "Left untouched with a TODO referencing M3" — based on what you
-    decided in Step 3.]
+  - Descent-reset path on the client (client.cpp:214 era): annotated
+    with a TODO(M3) since ClockSync's LARGE_DELTA snap-rather-than-smooth
+    plausibly subsumes it. Left as-is for this milestone.
 
   - All other client m_serverTick reads are either on the SERVER role
     (host) or in code that's being reworked in M3 anyway.
@@ -825,7 +1109,7 @@ EOF
 
 ---
 
-## Task 8: Final Build + Manual Smoke (Deferred to User)
+## Task 9: Final Build + Test + Smoke (Deferred to User)
 
 **Files:** none (verification only)
 
@@ -839,58 +1123,80 @@ Expected: empty.
 - [ ] **Step 2: Confirm M1 commit trail**
 
 ```bash
-git log --oneline 67a7ccf..HEAD
+git log 376f74b..HEAD --oneline
 ```
-Expected: 7 commits (one per task above, M1.1 → M1.7). All on master.
+
+(376f74b is the commit that added the plan files; M1 commits land after it.) Expected: 8 commits in order (top = newest):
+```
+<hash> net: route client m_serverTick reads through ClockSync where appropriate — M1.8
+<hash> net: rename NetInput.tick → clientTick, add Engine::m_clientTick — M1.7
+<hash> net: hook ClockSync into Client::receiveSnapshot — M1.6
+<hash> feat(net): Client::handleTimePong decodes SV_TIME_PONG → ClockSync (TDD) — M1.5
+<hash> net: wire CL_TIME_PING handshake (server + client) — M1.4
+<hash> net: add CL_TIME_PING / SV_TIME_PONG packet types — M1.3
+<hash> feat(net): ClockSync impl — all 9 tests green (TDD green) — M1.2
+<hash> test(net): ClockSync test suite + stub (TDD red phase) — M1.1
+```
 
 - [ ] **Step 3: Clean build from scratch**
 
 ```bash
-cmake --build build 2>&1 | tail -10
+rm -rf build && cmake -B build 2>&1 | tail -3 && cmake --build build 2>&1 | tail -3
 ```
-Expected: clean.
+Expected: full configure + full build succeed. Both `DungeonEngine` and `dungeon_tests` build clean.
 
-- [ ] **Step 4: Manual two-process co-op smoke (USER, optional)**
+- [ ] **Step 4: Run tests**
 
-This is deferred to the user — Claude can't drive the GUI. Instructions:
+```bash
+./build/tests/dungeon_tests
+```
+Expected: 14 cases, all passed. Status: SUCCESS!
 
-Terminal 1: `./build/dungeon_game` → Host → New Game. Watch the log for:
+- [ ] **Step 5: CTest**
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+Expected: 1/1 passed.
+
+- [ ] **Step 6: Manual two-process co-op smoke (USER, optional)**
+
+Deferred to the user (Claude can't drive the GUI).
+
+Terminal 1: `./build/dungeon_game` → Host → New Game. Once a client connects, watch the client terminal for:
 ```
 net: clock-sync pong #1 — oneWayTripMs=0.5 serverTickEst=...
 net: clock-sync pong #2 — ...
 net: clock-sync pong #3 — ...
 ```
-on the joining-client terminal once a client connects.
+followed by 1 Hz `net: clock-sync serverTickEst=... wireServerTick=... oneWayTripMs=...` lines that should converge to within ±2 ticks of the host's `m_serverTick` and stay stable.
 
-Terminal 2: `./build/dungeon_game` → Join → 127.0.0.1. Connect. The throttled 1 Hz `net: clock-sync serverTickEst=...` log should appear and the values should be **stable** (drifting smoothly, not jumping) once the handshake completes.
+Terminal 2: `./build/dungeon_game` → Join → 127.0.0.1.
 
-If `serverTickEst` is wildly off from the host's actual tick (visible by reading host log), there's a clock-sync bug — investigate before declaring M1 done.
+**Pass conditions:** Both players spawn/move/fire/kill/descend as before (no regression). Client log shows 3 handshake pongs post-connect. 1 Hz serverTickEst log converges within ~5 snapshots (~150 ms) and stays stable.
 
-**Manual smoke pass conditions:**
-- Both players spawn, move, fire, kill enemies, descend floors as before (no regression).
-- Client log shows 3 pongs received post-connect.
-- 1 Hz `serverTickEst` log on client converges to "current host serverTick" within ~5 snapshots (~150 ms) and stays within ±2 ticks of it thereafter.
-
-If smoke fails, the symptom usually points at which subtask broke — check the diagnostic logs first.
+If smoke fails, the diagnostic logs name which step broke.
 
 ---
 
 ## What This Plan Does Not Do
 
-- **Does not apply `t_server_est` to render-tick scheduling.** `computeInterpPair` still uses `Clock::getElapsedSeconds() - INTERP_DELAY_SEC`. Tightening that to use `t_server_est` is M3/M4.
-- **Does not change snapshot rate or interp delay.** Stays at the M0 baseline (30 Hz / 50 ms).
-- **Does not implement the rolling input window.** That's M2.
-- **Does not implement replay reconciliation.** That's M3.
-- **Does not wire lag compensation.** That's M5.
+- **Does not apply `t_server_est` to render-tick scheduling.** `computeInterpPair` still uses `Clock::getElapsedSeconds() - INTERP_DELAY_SEC`. M3/M4.
+- **Does not change snapshot rate or interp delay.** Stays at 30 Hz / 50 ms.
+- **Does not implement the rolling input window.** M2.
+- **Does not implement replay reconciliation.** M3.
+- **Does not wire lag compensation.** M5.
 
 ## Definition of Done
 
 - [ ] `git status --short` empty
-- [ ] `git log 67a7ccf..HEAD --oneline | wc -l` returns 7
+- [ ] `git log 376f74b..HEAD --oneline | wc -l` returns 8
 - [ ] `cmake --build build` succeeds clean
-- [ ] `src/net/clock_sync.h` and `src/net/clock_sync.cpp` exist and are referenced
+- [ ] `./build/tests/dungeon_tests` → 14 cases / all passed / SUCCESS
+- [ ] `src/net/clock_sync.{h,cpp}` exist, referenced in `src/CMakeLists.txt`
+- [ ] `grep -c 'TEST_CASE.*ClockSync' tests/net/test_clock_sync.cpp` returns 9 (the original 9; the 2 handleTimePong cases are named `Client::handleTimePong...`)
 - [ ] `grep -c 'CL_TIME_PING\|SV_TIME_PONG' src/net/net.h` returns ≥2
 - [ ] `grep -c 'ClockSync m_clockSync' src/engine/engine.h` returns 1
 - [ ] `grep -c 'u32 m_clientTick' src/engine/engine.h` returns 1
 - [ ] `grep -c 'NetInput.*\.clientTick' src/` returns ≥3 (struct + writer + reader)
-- [ ] Manual smoke pass (user-driven, optional) — clock-sync log lines appear and converge
+- [ ] Manual smoke pass (user-driven, optional)
