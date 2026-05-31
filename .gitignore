@@ -22,3 +22,5 @@ assets/audio/
 save_*.dat
 __pycache__/
 *.pyc
+logs/
+*.log
