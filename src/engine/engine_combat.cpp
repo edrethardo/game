@@ -1076,17 +1076,17 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         -cosf(claimedYaw) * cosf(claimedPitch)
     });
 
-    // Phase 3.2 — Compute how far to rewind for this fire, then wrap the hitscan / melee
-    // path in beginLagComp / endLagComp so candidate entity poses match what the firing
-    // client was rendering. PROJECTILE doesn't rewind here — the projectile is spawned
-    // at present time and travels in present time; lag-comp for projectiles is its own
-    // (deferred) problem because the spawn position is already clamped to np.eyePos()
-    // and the in-flight collision happens on subsequent server ticks.
+    // Phase 3.2 / M5 — Lag-comp now covers ALL weapon types including PROJECTILE.
+    // For melee/hitscan, rewinding entity poses is what makes hit detection match
+    // what the firing client saw. For projectiles, the spawn position is
+    // claimedOrigin (already the client's lag-adjusted eye position clamped to
+    // within 1 m of np.position), so eyePos is correct regardless of rewind order.
+    // Wrapping PROJECTILE in the same window establishes a consistent pattern for
+    // future AOE lag-comp (M9) and ensures any per-spawn proximity checks also see
+    // rewound poses. endLagComp() below is already unconditional on lagCompTicks > 0.
     u32 lagCompTicks = 0;
-    if (wpn.type == WeaponType::MELEE || wpn.type == WeaponType::HITSCAN) {
-        lagCompTicks = computeLagCompTicks(np.slotIndex);
-        if (lagCompTicks > 0) beginLagComp(lagCompTicks);
-    }
+    lagCompTicks = computeLagCompTicks(np.slotIndex);
+    if (lagCompTicks > 0) beginLagComp(lagCompTicks);
 
     AttackResult result;
     switch (wpn.type) {
