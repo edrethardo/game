@@ -24,6 +24,7 @@
 #include "net/prediction_ring.h"
 #include "net/render_offset.h"
 #include "net/pending_hit_ring.h"
+#include "net/pending_damage_ring.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -185,6 +186,13 @@ private:
     // accumulate; expireOlderThan bounds growth once M10 drives the pruning cadence.
     // Reset on every CLIENT connect (below).
     PendingHitRing m_pendingHits;
+
+    // Pending predicted incoming damage (CLIENT role, M7) — records one entry per predicted
+    // enemy-projectile hit on the local player. Visual feedback (damageFlashTimer) fires
+    // immediately; HP is NOT touched locally — it follows the next snapshot's authoritative
+    // value to avoid flicker on mispredicts. M10's SV_DAMAGE_TO_ME will ack confirmed events.
+    // Reset on every CLIENT connect.
+    PendingDamageRing m_pendingDamage;
 
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client

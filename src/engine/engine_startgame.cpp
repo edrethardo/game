@@ -760,6 +760,9 @@ void Engine::startGame(GameStart mode) {
         // M6 — Clear the pending-hits ring so stale predictions from a prior session
         // don't get acked (or mismatched) against the new connection's server events.
         PendingHitRingOps::reset(m_pendingHits);
+        // M7 — Clear the pending-damage ring so visual-feedback predictions from a
+        // prior session don't carry over into the new connection.
+        PendingDamageRingOps::reset(m_pendingDamage);
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

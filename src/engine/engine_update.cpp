@@ -546,6 +546,49 @@ void Engine::tickSharedSystems(f32 dt) {
                 break;
             }
         }
+
+        // Phase M7 — Predicted incoming-projectile hit on the local player.
+        // Iterate the authoritative interpolated projectile pool (m_renderInterp.projectiles)
+        // rather than the local ghost pool. For each enemy-owned projectile that is
+        // approaching within PLAYER_HIT_RADIUS of the player's center, fire visual feedback
+        // immediately (damageFlash + hurtVignette) and record the key so M10 can ack it.
+        // HP is NOT modified — the next snapshot's authoritative HP drop handles that.
+        if (m_localPlayer.health > 0.0f) {
+            static constexpr f32 PLAYER_HIT_RADIUS = 0.7f;
+            // Player center at mid-body height so approaching ground-level projectiles register
+            Vec3 playerCenter = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight * 0.5f, 0};
+            for (u32 a = 0; a < m_renderInterp.projectiles.activeCount; a++) {
+                u32 idx = m_renderInterp.projectiles.activeList[a];
+                const Projectile& proj = m_renderInterp.projectiles.projectiles[idx];
+                if (!proj.active) continue;
+                // Only enemy-owned projectiles can damage us; skip our own
+                if (proj.ownerSlot == activeNetSlot()) continue;
+                // Build a stable key: high byte = owner slot, low 24 bits = projectile clientTick
+                u32 key = (static_cast<u32>(proj.ownerSlot) << 24) | (proj.clientTick & 0xFFFFFFu);
+                // Skip if we already predicted this exact projectile (avoid per-frame re-flash)
+                bool alreadyPredicted = false;
+                for (u32 i = 0; i < m_pendingDamage.count; i++) {
+                    if (m_pendingDamage.entries[i].projectileSrcKey == key) {
+                        alreadyPredicted = true; break;
+                    }
+                }
+                if (alreadyPredicted) continue;
+                Vec3 toPlayer = playerCenter - proj.position;
+                f32 distSq = lengthSq(toPlayer);
+                if (distSq >= (PLAYER_HIT_RADIUS * PLAYER_HIT_RADIUS)) continue;
+                // Confirm the projectile is actually moving toward us before predicting impact
+                // (avoids false positives from just-spawned or receding projectiles).
+                Vec3 nextStep = proj.velocity * dt;
+                f32 approachSpeed = -dot(normalize(toPlayer), nextStep);
+                if (approachSpeed <= 0.0f) continue;
+                // Predicted hit: trigger the same visual feedback path that a real hit would
+                // (damageFlashTimer first-tick fires the hit sound + camera shake + rumble
+                //  in tickVisualFeedback). Set hurtVignette for a brief red edge flash.
+                m_localPlayer.damageFlashTimer = 0.15f;
+                m_localPlayer.hurtVignette = fmaxf(m_localPlayer.hurtVignette, 0.4f);
+                PendingDamageRingOps::record(m_pendingDamage, m_clientTick, key);
+            }
+        }
     }
 }
 
