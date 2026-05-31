@@ -497,8 +497,35 @@ void Engine::tickSharedSystems(f32 dt) {
         for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) meteorPlayers[p] = &m_localPlayers[p];
         // Pass the NetPlayer array on a SERVER so a remote caster's meteor/pillar heal lands on
         // the caster's NetPlayer (H4), not silently re-routed to local lane 0.
+
+        // D2 — AOE lag-comp for meteor / holy-pillar explosions.
+        // On the SERVER, check which meteors are about to explode this tick (timer <= dt)
+        // and compute the maximum lag-comp ticks across their remote casters. Using the
+        // maximum means a simultaneous host-cast meteor (lagComp=0) and a remote-cast meteor
+        // (lagComp=N) correctly rewind for the remote's explosion without affecting host
+        // accuracy (beginLagComp with the remote's N rewound view is still correct for the
+        // host's meteor since the host sees entities at the same present-time positions).
+        // For host-only or singleplayer runs lagCompTicks stays 0 → beginLagComp is a no-op.
+        u32 meteorLagCompTicks = 0;
+        if (m_netRole == NetRole::SERVER) {
+            extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+            for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+                const PendingMeteor& pm = s_meteors[mi];
+                if (!pm.active) continue;
+                if (pm.timer > dt) continue; // won't explode this tick
+                // Only rewind for remote casters (caster != host local player index).
+                if (pm.caster == m_localPlayerIndex) continue;
+                u32 ticks = computeLagCompTicks(pm.caster);
+                if (ticks > meteorLagCompTicks) meteorLagCompTicks = ticks;
+            }
+            if (meteorLagCompTicks > 0) beginLagComp(meteorLagCompTicks);
+        }
+
         SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt,
                                     m_netRole == NetRole::SERVER ? m_players : nullptr);
+
+        // D2 — Restore present-time entity poses after the meteor explosion pass.
+        if (meteorLagCompTicks > 0) endLagComp();
     }
 
     // Chat log timers, shared FX, and particles are cosmetic — keep ticking on CLIENT so the
