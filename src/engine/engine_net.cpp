@@ -532,6 +532,25 @@ void Engine::clientNetPre(f32 dt) {
 
     m_serverTick++;
 
+    // Clock-sync handshake — send 3 CL_TIME_PINGs ~10 ms apart immediately after
+    // connection, then stop. Snapshot-driven refinement (ClockSyncOps::onSnapshotReceived,
+    // wired in M1.6) takes over from there.
+    constexpr u32 HANDSHAKE_PING_COUNT       = 3;
+    constexpr f64 HANDSHAKE_PING_SPACING_SEC = 0.010;
+    const f64 nowSec = Clock::getElapsedSeconds();
+    if (m_pingsSent < HANDSHAKE_PING_COUNT &&
+        (m_pingsSent == 0 || nowSec - m_lastPingSentSec >= HANDSHAKE_PING_SPACING_SEC)) {
+        const u32 clientTimeMs = static_cast<u32>(nowSec * 1000.0);
+        PacketWriter w;
+        w.writeU8(static_cast<u8>(NetPacketType::CL_TIME_PING));
+        w.writeU8(0);    // flags/padding
+        w.writeU16(0);   // seq reserved
+        w.writeU32(clientTimeMs);
+        Net::sendToServer(w.data, w.cursor, /*reliable=*/false);
+        m_lastPingSentSec = nowSec;
+        m_pingsSent++;
+    }
+
     // Capture and send input to server. Pass m_localPlayer so captureLocalInput can pack
     // absolute yaw/pitch/position (PROTOCOL_VERSION 2 NetInput). Pass the selected class-
     // skill slot so right-click activates the chosen skill (1-4) rather than always slot 0
@@ -652,5 +671,42 @@ void Engine::clientNetPost(f32 dt) {
     // client needs to see/aim at loot. Runs AFTER gameUpdate so it overrides the local
     // WorldItemSystem::update (lifetime decay is server-driven for clients).
     Client::mirrorWorldItems(m_worldItems, m_itemDefs, m_itemDefCount, dt);
+}
+
+// ---------------------------------------------------------------------------
+// Server-side CL_TIME_PING handler (M1.4)
+// ---------------------------------------------------------------------------
+// Static callback — invoked by Net::poll via s_onTimePing when the server receives a
+// CL_TIME_PING. Reads the client's stamped time, pairs it with the current serverTick
+// and wall-clock time, and ships SV_TIME_PONG back unreliably so the client can
+// compute RTT and bootstrap its clock-sync estimate without trusting the server's
+// absolute wall time.
+void Engine::onTimePing(u8 playerSlot, const u8* data, u32 size) {
+    if (!s_engine) return;
+    if (size < sizeof(PacketHeader) + 4) {
+        LOG_WARN("net: short CL_TIME_PING from slot %u (%u bytes)", playerSlot, size);
+        return;
+    }
+
+    // Read client-stamped time (skipping the 4-byte header).
+    PacketReader r;
+    r.data   = data;
+    r.size   = size;
+    r.cursor = sizeof(PacketHeader);
+    const u32 clientTimeMs = r.readU32();
+
+    // Stamp server state at the moment the ping arrived.
+    const u32 serverTick   = s_engine->serverTickNow();
+    const u32 serverTimeMs = static_cast<u32>(Clock::getElapsedSeconds() * 1000.0);
+
+    // Build SV_TIME_PONG: 4B header + 4B clientTimeMs + 4B serverTick + 4B serverTimeMs.
+    PacketWriter w;
+    w.writeU8(static_cast<u8>(NetPacketType::SV_TIME_PONG));
+    w.writeU8(0);   // flags/padding
+    w.writeU16(0);  // seq reserved
+    w.writeU32(clientTimeMs); // echoed unchanged so client computes RTT = now - clientTimeMs
+    w.writeU32(serverTick);
+    w.writeU32(serverTimeMs);
+    Net::sendUnreliable(playerSlot, w.data, w.cursor);
 }
 

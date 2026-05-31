@@ -20,6 +20,7 @@
 #include "game/enemy_def.h"
 #include "net/net.h"
 #include "net/net_player.h"
+#include "net/clock_sync.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -152,12 +153,22 @@ private:
     u32        m_serverTick = 0;
     f32        m_connectingElapsed = 0.0f; // seconds spent in CONNECTING; bails out on timeout (M10)
 
+    // Clock-sync subsystem (CLIENT role) — see src/net/clock_sync.h. The host
+    // (SERVER role) has direct access to its m_serverTick so it does not consult
+    // m_clockSync.
+    ClockSync m_clockSync;
+    f64       m_lastPingSentSec = 0.0;
+    u32       m_pingsSent       = 0;
+
     // The m_players[]/snapshot slotIndex/m_renderInterp index of the ACTIVE LOCAL player.
     // Use this (not m_localPlayerIndex) for net-array access of the LOCAL player: on a client
     // m_localPlayerIndex is the lane (0) but the player lives at the server-assigned slot.
     // Per-lane split-screen arrays (m_inventories/m_skillStates/m_localPlayers/... sized by
     // lane) must keep using m_localPlayerIndex.
     u8 activeNetSlot() const { return (m_netRole == NetRole::CLIENT) ? m_clientNetSlot : m_localPlayerIndex; }
+    // Returns the server's current simulation tick — used by the server-side CL_TIME_PING
+    // handler so net.cpp can stamp SV_TIME_PONG without directly accessing m_serverTick.
+    u32 serverTickNow() const { return m_serverTick; }
 
     // Players (networked)
     NetPlayer  m_players[MAX_PLAYERS];
@@ -622,6 +633,9 @@ private:
     // inventory + class state into m_inventories[slot] / m_quickbars[slot] / m_players[slot]
     // overriding whatever starting kit onPlayerJoin granted moments earlier.
     static void onInventorySync(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_TIME_PING handler (M1.4): read clientTimeMs from the payload, stamp
+    // serverTick + serverTimeMs, and send SV_TIME_PONG back on the unreliable channel.
+    static void onTimePing(u8 playerSlot, const u8* data, u32 size);
     // Client-side helper: serialize m_inventories[localSlot] + class/skill state and ship
     // it via CL_INVENTORY_SYNC. Called once shortly after SV_JOIN_ACCEPT when the joiner
     // came from the menu's "Continue" path with a loaded save.

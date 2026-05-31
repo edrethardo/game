@@ -729,6 +729,7 @@ void Engine::startGame(GameStart mode) {
         Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent
         Net::setOnFireWeapon(Engine::onFireWeapon); // client-side weapon fire prediction (CL_FIRE_WEAPON)
         Net::setOnInventorySync(Engine::onInventorySync); // join-with-save inventory push
+        Net::setOnTimePing(Engine::onTimePing); // clock-sync handshake (M1.4)
         Net::setOnPlayerJoin(Engine::onPlayerJoin);
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         Server::init(m_players, m_level.levelSeed,
@@ -740,6 +741,12 @@ void Engine::startGame(GameStart mode) {
         // Follow the host's mid-run floor descents (server-authoritative).
         Net::setOnLevelSeed(Engine::onLevelSeed);
         Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
+        // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
+        // Ping state also resets so clientNetPre sends the 3 handshake pings on the
+        // first ticks of the new session.
+        ClockSyncOps::reset(m_clockSync);
+        m_pingsSent = 0;
+        m_lastPingSentSec = 0.0;
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

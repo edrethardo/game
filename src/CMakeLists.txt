@@ -84,6 +84,7 @@ add_executable(DungeonEngine
     game/skill_tinkerer.cpp
     game/squad.cpp
     net/net.cpp
+    net/clock_sync.cpp
     net/snapshot.cpp
     net/server.cpp
     net/client.cpp

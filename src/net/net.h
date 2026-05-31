@@ -232,6 +232,10 @@ namespace Net {
     // m_quickbars[slot] / m_skillStates[slot] etc., overriding the starting kit from
     // onPlayerJoin.
     using OnInventorySyncFn = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_TIME_PING handler (M1.4). slot = pinging client; payload is the raw
+    // packet starting at the header. Engine reads clientTimeMs, stamps serverTick +
+    // serverTimeMs, and sends SV_TIME_PONG back on the unreliable channel.
+    using OnTimePingFn = void(*)(u8 playerSlot, const u8* data, u32 size);
     using OnEventFn      = void(*)(const u8* data, u32 size);
     // classId is the joining client's chosen PlayerClass (validated by the callback;
     // 0xFF if the join request predates the class byte — treated as default Warrior).
@@ -249,6 +253,7 @@ namespace Net {
     void setOnDescendRequest(OnDescendRequestFn fn);
     void setOnFireWeapon(OnFireWeaponFn fn);
     void setOnInventorySync(OnInventorySyncFn fn);
+    void setOnTimePing(OnTimePingFn fn);
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);

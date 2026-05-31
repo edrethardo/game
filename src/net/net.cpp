@@ -33,6 +33,7 @@ static Net::OnRespawnFn    s_onRespawn    = nullptr;
 static Net::OnDescendRequestFn s_onDescendRequest = nullptr;
 static Net::OnFireWeaponFn s_onFireWeapon = nullptr;
 static Net::OnInventorySyncFn s_onInventorySync = nullptr;
+static Net::OnTimePingFn   s_onTimePing   = nullptr;
 static Net::OnEventFn      s_onEvent      = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
@@ -156,6 +157,14 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // and replaces the auto-granted starting kit. Size validation is delegated to the
         // handler since the payload shape is engine-side.
         if (s_onInventorySync) s_onInventorySync(slot, data, size);
+    } break;
+
+    case NetPacketType::CL_TIME_PING: {
+        // Clock-sync handshake (M1.4). Engine handler reads clientTimeMs, stamps
+        // serverTick + serverTimeMs, and sends SV_TIME_PONG back on the unreliable
+        // channel. Minimum payload: 4B header + 4B clientTimeMs = 8 B.
+        if (size < sizeof(PacketHeader) + 4) break;
+        if (s_onTimePing) s_onTimePing(slot, data, size);
     } break;
 
     default:
@@ -624,6 +633,7 @@ void Net::setOnRespawn(OnRespawnFn fn)     { s_onRespawn = fn; }
 void Net::setOnDescendRequest(OnDescendRequestFn fn) { s_onDescendRequest = fn; }
 void Net::setOnFireWeapon(OnFireWeaponFn fn) { s_onFireWeapon = fn; }
 void Net::setOnInventorySync(OnInventorySyncFn fn) { s_onInventorySync = fn; }
+void Net::setOnTimePing(OnTimePingFn fn)   { s_onTimePing = fn; }
 void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }
