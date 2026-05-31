@@ -91,6 +91,13 @@ enum struct NetPacketType : u8 {
     // Engine::sendInventorySync / Engine::onInventorySync. Reliable on channel 0.
     CL_INVENTORY_SYNC = 0x09,
     SV_INVENTORY_SYNC = 0x16,  // server sends full inventory to client (reserved, unused)
+
+    // Clock-sync handshake (M1). Client stamps its wall-clock ms and the server echoes it
+    // back alongside its own tick + wall-clock so the client can compute RTT and clock
+    // offset without trusting the server's absolute time. Sent/received on channel 1
+    // (unreliable) at ~1 Hz from the client; server replies immediately.
+    CL_TIME_PING      = 0x0A,  // 4-byte payload: u32 clientTimeMs (echoed by SV_TIME_PONG)
+    SV_TIME_PONG      = 0x17,  // 12-byte payload: u32 clientTimeMs + u32 serverTick + u32 serverTimeMs
 };
 
 // Sub-types for SV_EVENT packets
