@@ -11,9 +11,11 @@ add_executable(dungeon_tests
     sanity_test.cpp
     net/test_clock_sync.cpp
     net/test_input_wire.cpp
+    net/test_prediction_ring.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp
     ${CMAKE_SOURCE_DIR}/src/net/input_wire.cpp
+    ${CMAKE_SOURCE_DIR}/src/net/prediction_ring.cpp
     ${CMAKE_SOURCE_DIR}/src/core/log.cpp
 )
 
