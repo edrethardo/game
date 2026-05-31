@@ -68,17 +68,16 @@ enum struct NetPacketType : u8 {
     // Server re-validates proximity + boss-dead gate, then runs the same descent flow as the
     // host pressing E and broadcasts SV_LEVEL_SEED so every client transitions in lockstep.
     CL_REQUEST_DESCEND = 0x07,
-    // Client weapon-fire request (UNRELIABLE — Phase 1.1). Replaces the prior FIRE-bit-
+    // Client weapon-fire request (RELIABLE — M10.1). Replaces the prior FIRE-bit-
     // in-NetInput trigger: the server fires from the claimed origin/yaw/pitch in this
     // packet rather than from the drain-derived np.yaw (which could lag under UDP loss).
     // Payload:
     //   u32 clientTick + u16 posXQ/YQ/ZQ + u16 yawQ + u16 pitchQ = 14 B (header + 14 = 18 B).
-    // Sent on every local fire trigger (mouse click edge OR continuous tick when LMB held
-    // and cooldown expired). The CLIENT retransmits the same packet for FIRE_TX_REPEATS
-    // (~50 ms) client ticks after the original to ride out a lost UDP datagram without
-    // waiting on ENet's RTT-paced reliable retransmit; the SERVER squashes duplicates
-    // via a per-(slot, clientTick) dedup ring so the weapon only fires once. The server
-    // also validates cooldown + clamps origin to within ~1 m of np.position before firing
+    // Sent reliably on every local fire trigger (mouse click edge OR continuous tick when
+    // LMB held and cooldown expired). The server's per-(slot, clientTick) dedup ring is
+    // retained as a cheap guard against rapid-fire scenarios where a delayed earlier
+    // reliable arrives after a subsequent fire has already processed. The server also
+    // validates cooldown + clamps origin to within ~1 m of np.position before firing
     // authoritatively.
     CL_FIRE_WEAPON    = 0x08,
     // Client → server full inventory push. Sent ONCE after SV_JOIN_ACCEPT when the

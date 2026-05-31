@@ -106,27 +106,12 @@ static void recordFire(u8 slot, u32 clientTick) {
     if (r.count < FIRE_DEDUP_SIZE) r.count++;
 }
 
-// DEPRECATED (M10, rewrite design doc): manual unreliable+retransmit ring
-// reimplementing reliable transport in userspace. The rewrite replaces this
-// with ENet's reliable channel for CL_FIRE_WEAPON (smaller wire footprint,
-// ENet handles backoff). Kept for now because reliable channel scaffolding
-// arrives in M10 — removing the retransmit before M10 lands would regress
-// fire delivery under UDP loss. Do not extend this pattern to new packet
-// types.
-//
-// Phase 1.1 — Client-side fire retransmit buffer. Holds the serialized CL_FIRE_WEAPON
-// packet bytes from the most recent local fire so resendPendingFire() can retransmit
-// it for FIRE_TX_REPEATS client ticks. Only the most recent fire is tracked — a
-// faster-than-50 ms fire cadence would overwrite the prior slot, but at that cadence
-// the prior fire's initial datagram has almost always already landed.
-static constexpr u8 FIRE_TX_REPEATS = 3;  // ≈50 ms of retransmit at 60 Hz
-struct ClientFireTx {
-    bool active         = false;
-    u8   ticksRemaining = 0;
-    u32  size           = 0;
-    u8   buf[sizeof(PacketHeader) + 14] = {};
-};
-static ClientFireTx s_clientFireTx;
+// M10.1 — ClientFireTx / FIRE_TX_REPEATS / s_clientFireTx removed.
+// CL_FIRE_WEAPON now uses ENet's reliable channel; manual retransmit is no longer
+// needed. s_fireDedupRing is kept because a client might legally queue two distinct
+// CL_FIRE_WEAPONs in rapid succession (e.g. auto-fire at max rate) and both could be
+// in-flight simultaneously; the dedup ring prevents a delayed first arrival from
+// double-firing after the second one already processed.
 
 // =====================================================================
 // Phase 3 — Server-side lag compensation for hitscan / melee
@@ -793,16 +778,12 @@ void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
 }
 
 // ---------------------------------------------------------------------------
-// Client send path: build and ship a CL_FIRE_WEAPON packet on every local
-// fire trigger. Phase 1.1: unreliable + retransmit. ENet's reliable channel
-// paces retransmits to ~RTT, so a single lost fire datagram on 100 ms ping
-// stalled the authoritative shot by ≥200 ms — while the client's predicted
-// projectile ghost auto-despawns at 0.5 s, leaving the user staring at a
-// projectile that "vanished" mid-flight. Sending unreliably and retransmitting
-// the same bytes for the next FIRE_TX_REPEATS client ticks (~50 ms) covers
-// loss within one snapshot of the original click; the server's per-clientTick
-// dedup ring (s_fireDedupRing) silently squashes the duplicates so the gun
-// only fires once. Layout (unchanged):
+// M10.1 — Client send path: build and ship a CL_FIRE_WEAPON packet on every local
+// fire trigger. Now sent reliable — ENet guarantees delivery so the old manual
+// retransmit ring (s_clientFireTx / resendPendingFire) is gone. The server's
+// per-(slot,clientTick) dedup ring (s_fireDedupRing) is kept as a cheap guard
+// against rapid-fire scenarios where a delayed earlier reliable can still arrive.
+// Layout (unchanged):
 //   header(4) + clientTick(4) + posX/Y/Z(6) + yawQ(2) + pitchQ(2) = 18 B.
 // ---------------------------------------------------------------------------
 void Engine::sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch) {
@@ -825,27 +806,8 @@ void Engine::sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch) {
     u16 pitchQ = Quantize::packAngle(pitch);
     std::memcpy(buf + off, &yawQ,   2); off += 2;
     std::memcpy(buf + off, &pitchQ, 2); off += 2;
-    Net::sendToServer(buf, off, /*reliable=*/false);
-    // Queue retransmits — clientNetPre calls resendPendingFire() once per tick.
-    s_clientFireTx.active         = true;
-    s_clientFireTx.ticksRemaining = FIRE_TX_REPEATS;
-    s_clientFireTx.size           = off;
-    std::memcpy(s_clientFireTx.buf, buf, off);
-}
-
-// Phase 1.1 — Retransmit the most recent CL_FIRE_WEAPON packet up to FIRE_TX_REPEATS
-// times to cover unreliable-channel packet loss. Called from clientNetPre each tick.
-// The retransmit is the exact same bytes (same clientTick) so the server's dedup ring
-// drops it after the first arrival. A new local fire overwrites this slot in
-// sendFireWeapon; in the (uncommon) case of a fire cadence faster than ~50 ms, the
-// prior fire's coverage is sacrificed in favor of the newer one's, which is the
-// right trade-off (the newer fire is what the player just clicked).
-void Engine::resendPendingFire() {
-    if (m_netRole != NetRole::CLIENT) return;
-    if (!s_clientFireTx.active) return;
-    if (s_clientFireTx.ticksRemaining == 0) { s_clientFireTx.active = false; return; }
-    s_clientFireTx.ticksRemaining--;
-    Net::sendToServer(s_clientFireTx.buf, s_clientFireTx.size, /*reliable=*/false);
+    // M10.1: reliable — ENet guarantees delivery, manual retransmit removed.
+    Net::sendToServer(buf, off, /*reliable=*/true);
 }
 
 // Phase 1.1 — Reset server-side CL_FIRE_WEAPON dedup state for a slot. Called by
@@ -861,9 +823,7 @@ void Engine::resetFireDedup(u8 slot) {
 // floor would be silently squashed as "duplicates".
 void Engine::resetAllFireDedup() {
     for (u32 i = 0; i < MAX_PLAYERS; i++) s_fireDedupRing[i] = FireDedupRing{};
-    // Also drop any in-flight client-side retransmits — the prior floor's fire window
-    // has no meaning on the new one.
-    s_clientFireTx = ClientFireTx{};
+    // M10.1: no client-side retransmit state to clear (s_clientFireTx removed).
 }
 
 // Phase 3.1 — Push every active entity's current pose into its per-entity history ring.

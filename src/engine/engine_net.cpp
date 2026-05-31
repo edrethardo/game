@@ -530,11 +530,7 @@ void Engine::clientNetPre(f32 dt) {
     WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon, m_activeClassSkill);
 
-    // Phase 1.1 — Retransmit the most recent CL_FIRE_WEAPON for FIRE_TX_REPEATS ticks.
-    // The original send was unreliable, so a lost UDP fragment doesn't get retransmitted
-    // by ENet on its own; we instead push the same bytes a few more times in quick
-    // succession and let the server's per-clientTick dedup ring squash the duplicates.
-    resendPendingFire();
+    // M10.1: resendPendingFire() removed — CL_FIRE_WEAPON is now reliable.
 
     // M3.2 — Snapshot the local player's state into the prediction ring keyed by
     // m_clientTick. On snapshot arrival (clientNetPost) we compare the server's

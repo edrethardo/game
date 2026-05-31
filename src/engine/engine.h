@@ -631,18 +631,12 @@ private:
     // Server: validate a remote client's descent request and run the shared descent flow.
     void handleDescendRequest(u8 playerSlot);
 
-    // Client: send a weapon-fire request (unreliable CL_FIRE_WEAPON) carrying the local
+    // Client: send a weapon-fire request (reliable CL_FIRE_WEAPON) carrying the local
     // eye position + aim at the moment of trigger. The server fires authoritatively
     // from THESE values — no drain-derived np.yaw — so a slow input queue can't
-    // produce a "fires along aim from seconds ago" stale shot. Phase 1.1: moved from
-    // reliable→unreliable so a lost datagram isn't paced behind an ~RTT retransmit;
-    // resendPendingFire() instead re-pushes the same packet for a few client ticks
-    // and the server's per-(slot,clientTick) dedup ring drops the duplicates.
+    // produce a "fires along aim from seconds ago" stale shot. M10.1: moved from
+    // unreliable+manual-retransmit to ENet reliable; resendPendingFire() is deleted.
     void sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch);
-    // Client: retransmit the most recent CL_FIRE_WEAPON packet on the unreliable channel
-    // up to FIRE_TX_REPEATS times after the original send. Called by clientNetPre once
-    // per client tick. Cheap (no-op when no fire is pending).
-    void resendPendingFire();
     // Server: clear the CL_FIRE_WEAPON dedup ring for a single slot — called from
     // onPlayerJoin so a recycled slot doesn't carry the prior occupant's tick history.
     void resetFireDedup(u8 slot);
