@@ -75,15 +75,42 @@ static f32 lerpAngle(f32 a, f32 b, f32 t) {
 struct InterpPair {
     const WorldSnapshot* older;
     const WorldSnapshot* newer;
-    f32 t; // 0 = at older snapshot, 1 = at newer
+    f32 t;                  // 0 = at older snapshot, 1 = at newer
+    f32 extrapolateAhead;   // seconds past `newer` to project via wire velocity (0 if pair brackets renderTime)
 };
+// Cap forward extrapolation at ~120 ms — Phase 4 widened from 50 ms. The prior 50 ms
+// cap meant a single dropped snapshot already freezes remote players at their last
+// known pose until the next snapshot arrives, producing a brief teleport when it
+// finally lands. 120 ms covers up to three back-to-back dropped 30 Hz snapshots
+// smoothly via velocity-only projection. Beyond that we still hold at the newest
+// — a stalled network can't drift entities across the world. The trade-off:
+// projection error grows linearly with extrapolation time, so a remote that just
+// stopped (decel from 6 m/s) overshoots by up to ~70 cm before the next snapshot
+// corrects. That's preferable to a stutter on most paths.
+static constexpr f32 MAX_EXTRAPOLATE_SEC = 0.12f;
 static bool computeInterpPair(InterpPair& out) {
+    out.extrapolateAhead = 0.0f;
     if (s_snapCount < 2) return false;
     f64 renderTime = Clock::getElapsedSeconds() - static_cast<f64>(INTERP_DELAY_SEC);
+
+    // Newest snapshot's arrival time. If renderTime is past it, we're in the extrapolation
+    // window (no future snap to bracket against). Set t=1 and emit an extrapolateAhead so
+    // callers can project `position + velocity * extrapolateAhead` — covers a single dropped
+    // snapshot smoothly instead of freezing on the newest until the next arrives.
+    const f64 tNewest = getSnapTime(0);
+    if (renderTime > tNewest) {
+        out.older = getSnapshot(0);
+        out.newer = getSnapshot(0);
+        out.t     = 1.0f;
+        f32 ahead = static_cast<f32>(renderTime - tNewest);
+        if (ahead > MAX_EXTRAPOLATE_SEC) ahead = MAX_EXTRAPOLATE_SEC;
+        out.extrapolateAhead = ahead;
+        return true;
+    }
+
     // Snapshots run newest (ago=0) to oldest with strictly decreasing arrival times. Take
     // the newest adjacent pair whose older bound is at or before renderTime: that pair
-    // straddles renderTime. If even the newest snapshot predates renderTime (we're starved),
-    // the first pair matches with t clamped to 1, so we hold on the newest.
+    // straddles renderTime.
     for (u32 ago = 0; ago + 1 < s_snapCount; ago++) {
         f64 tNewer = getSnapTime(ago);
         f64 tOlder = getSnapTime(ago + 1);
@@ -243,8 +270,30 @@ bool Client::reconcile(NetPlayer& np, Player& lp) {
         np.maxHealth = static_cast<f32>(serverState->maxHealth);
         np.health    = (serverState->health / 255.0f) * np.maxHealth;
         np.isDead    = (serverState->animFlags & (1 << 2)) != 0;
-        np.weaponState.currentClip = serverState->currentClip;
-        np.weaponState.reloading   = (serverState->animFlags & (1 << 1)) != 0;
+        // Phase 1.2 — Reconcile clip + reloading conservatively. Direct overwrite of
+        // currentClip from each snapshot would flicker the HUD under fast fire: a snapshot
+        // built before the server processed the client's CL_FIRE_WEAPON still carries the
+        // old (higher) clip → reconcile snaps the count UP → the next snapshot snaps it
+        // back DOWN once the fire lands. The local fire path predicts clip decrements
+        // (handleWeaponFire ws.currentClip--), so the local value is "ahead of" the
+        // server until lastProcessedInputTick catches up.
+        //
+        // Adopt server clip when there's a state change we don't predict perfectly:
+        //   • server is reloading (reloadTimer is server-driven during the refill);
+        //   • local was reloading but server is not (server's reload finished or never
+        //     started — adopt server's view either way);
+        //   • server clip jumped UP without a reload flag (legendary refill, weapon
+        //     swap on server, missed snapshot covering a reload completion).
+        // Otherwise, take MIN(local, server.clip) so the HUD never displays MORE ammo
+        // than was available after our most recent local fire.
+        bool serverReloading = (serverState->animFlags & (1 << 1)) != 0;
+        if (serverReloading || np.weaponState.reloading ||
+            serverState->currentClip > np.weaponState.currentClip) {
+            np.weaponState.currentClip = serverState->currentClip;
+        }
+        // else: serverState.currentClip <= local clip and no reload — local is "ahead"
+        // of server in fire processing; keep local (don't snap HUD upward).
+        np.weaponState.reloading = serverReloading;
         // Status timers (quantized 0.04 s steps; see buildFromState).
         // Take max of locally-predicted invuln vs server snapshot so a fresh dodge's
         // 0.3 s i-frame isn't briefly wiped between prediction and the next ack.
@@ -291,7 +340,8 @@ bool Client::reconcile(NetPlayer& np, Player& lp) {
 void Client::interpolateRemotePlayers(u8 localSlot,
                                        Vec3* outPositions, f32* outYaws,
                                        bool* outActive, f32* outHealth, f32* outMaxHealth,
-                                       u8* outAnimFlags, u8* outWeaponMeshId)
+                                       u8* outAnimFlags, u8* outWeaponMeshId,
+                                       u8* outPlayerClass)
 {
     // Clear all slots
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
@@ -300,6 +350,9 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         outMaxHealth[i] = 100.0f;
         if (outAnimFlags) outAnimFlags[i] = 0;
         if (outWeaponMeshId) outWeaponMeshId[i] = 0;
+        // Default to WARRIOR (0) — keeps the renderer safe pre-first-snap and matches
+        // the onPlayerJoin out-of-range fallback used server-side.
+        if (outPlayerClass) outPlayerClass[i] = 0;
     }
 
     // Interpolate at a delayed render time (computeInterpPair) for smooth, jitter-buffered
@@ -310,8 +363,10 @@ void Client::interpolateRemotePlayers(u8 localSlot,
     const WorldSnapshot* snapB;
     const WorldSnapshot* snapA;
     f32 t = 1.0f;
+    f32 extrapolateAhead = 0.0f;
     if (computeInterpPair(ip)) {
         snapB = ip.newer; snapA = ip.older; t = ip.t;
+        extrapolateAhead = ip.extrapolateAhead;
     } else {
         snapB = getSnapshot(0); snapA = nullptr;
     }
@@ -336,6 +391,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
             outHealth[slot] = (sp.health / 255.0f) * outMaxHealth[slot];
             if (outAnimFlags) outAnimFlags[slot] = sp.animFlags;
             if (outWeaponMeshId) outWeaponMeshId[slot] = sp.weaponMeshId;
+            if (outPlayerClass) outPlayerClass[slot] = sp.playerClass;
         }
         return;
     }
@@ -370,15 +426,24 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         outActive[slot] = true;
         outPositions[slot] = posA + (posB - posA) * t;
         outYaws[slot]   = lerpAngle(yawA, yawB, t);
+        // Forward extrapolation when renderTime is past the newest snapshot — project the
+        // remote's position using snapB's wire velocity. Bounded by MAX_EXTRAPOLATE_SEC.
+        if (extrapolateAhead > 0.0f) {
+            Vec3 vel{Quantize::unpackVel(spB.velX), 0.0f, Quantize::unpackVel(spB.velZ)};
+            outPositions[slot] = outPositions[slot] + vel * extrapolateAhead;
+        }
         // Absolute HP from the wired maxHealth (R7-4) — falls back to 100 pre-first-snap.
         outMaxHealth[slot] = (spB.maxHealth > 0) ? static_cast<f32>(spB.maxHealth) : 100.0f;
         outHealth[slot] = (spB.health / 255.0f) * outMaxHealth[slot];
         if (outAnimFlags) outAnimFlags[slot] = spB.animFlags; // latest snapshot's anim state
         if (outWeaponMeshId) outWeaponMeshId[slot] = spB.weaponMeshId;
+        // PlayerClass is a static identity, not a lerp-able value — take it straight from
+        // the newer snapshot. (Index is already clamped to PlayerClass::CLASS_COUNT in deserialize.)
+        if (outPlayerClass) outPlayerClass[slot] = spB.playerClass;
     }
 }
 
-void Client::interpolateEntities(EntityPool& renderEntities) {
+void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
     // Clear all (flags=0 marks every slot inactive; activeList/activeCount rebuilt below)
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         renderEntities.entities[i].flags = 0;
@@ -391,8 +456,13 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
     const WorldSnapshot* snapB;
     const WorldSnapshot* snapA;
     f32 t = 1.0f;
-    if (computeInterpPair(ip)) { snapB = ip.newer; snapA = ip.older; t = ip.t; }
-    else { snapB = getSnapshot(0); snapA = nullptr; }
+    f32 extrapolateAhead = 0.0f;
+    if (computeInterpPair(ip)) {
+        snapB = ip.newer; snapA = ip.older; t = ip.t;
+        extrapolateAhead = ip.extrapolateAhead;
+    } else {
+        snapB = getSnapshot(0); snapA = nullptr;
+    }
     if (!snapB) return;
 
     for (u32 i = 0; i < snapB->entityCount; i++) {
@@ -421,15 +491,20 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
         f32 yawB = Quantize::unpackAngle(seB.yaw);
 
         if (snapA && t < 1.0f) {
-            // Find in previous snapshot
+            // Find in previous snapshot. Slot-recycle guard: only accept the match if the
+            // entity TYPE also matches — if an enemy died and a new one of a different type
+            // spawned into the same poolIndex within an interp window, the unrelated old
+            // position would lerp through dead space (visible as a cross-room teleport).
+            // On a mismatch we leave posA == posB so the lerp degenerates to "snap to posB".
             Vec3 posA = posB;
             f32 yawA = yawB;
             for (u32 j = 0; j < snapA->entityCount; j++) {
-                if (snapA->entities[j].poolIndex == idx) {
-                    posA.x = Quantize::unpackPos(snapA->entities[j].posX);
-                    posA.y = Quantize::unpackPos(snapA->entities[j].posY);
-                    posA.z = Quantize::unpackPos(snapA->entities[j].posZ);
-                    yawA = Quantize::unpackAngle(snapA->entities[j].yaw);
+                const SnapEntity& seA = snapA->entities[j];
+                if (seA.poolIndex == idx && seA.enemyTypeId == seB.enemyTypeId) {
+                    posA.x = Quantize::unpackPos(seA.posX);
+                    posA.y = Quantize::unpackPos(seA.posY);
+                    posA.z = Quantize::unpackPos(seA.posZ);
+                    yawA = Quantize::unpackAngle(seA.yaw);
                     break;
                 }
             }
@@ -438,6 +513,12 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
         } else {
             e.position = posB;
             e.yaw = yawB;
+        }
+        // Forward extrapolation when renderTime is past the newest snapshot (single-drop
+        // recovery). Position only — yaw has no angular velocity on the wire. Bounded by
+        // MAX_EXTRAPOLATE_SEC in computeInterpPair, so overshoot is at most velocity × 50 ms.
+        if (extrapolateAhead > 0.0f) {
+            e.position = e.position + e.velocity * extrapolateAhead;
         }
 
         // Note: enemy absolute HP isn't wired (no enemy HP bar today). Reconstructing
@@ -471,10 +552,38 @@ void Client::interpolateEntities(EntityPool& renderEntities) {
         e.minionShield   = (seB.bossStatus & 0x01) != 0;
         e.bossPhase      = static_cast<u8>((seB.bossStatus >> 1) & 0x07);
 
-        // Flash timer and death timer are cosmetic — approximate
+        // Death timer state machine. Server initializes to 1.0 in Combat::killEntity
+        // and ticks it down each frame; the renderer maps deathTimer to scaleY for the
+        // squash-into-the-ground collapse (engine_render_entities.cpp:83). deathTimer
+        // is NOT on the wire — the previous code unconditionally set it to 0.5 every
+        // snapshot tick, freezing the entity halfway through the collapse forever.
+        // Mirror the server's lifecycle locally: initialize to 1.0 on the first
+        // snapshot we see ENT_DEAD (sentinel: deathTimer was 0 in the alive branch),
+        // then tick down at dt. The alive branch clamps to 0 so slot recycle into a
+        // new dead entity re-triggers a clean collapse.
         if (e.flags & ENT_DEAD) {
-            e.deathTimer = 0.5f;
+            if (e.deathTimer <= 0.0f) e.deathTimer = 1.0f;
+            else                      e.deathTimer = fmaxf(0.01f, e.deathTimer - dt);
+        } else {
+            e.deathTimer = 0.0f;
         }
+
+        // Attack swing countdown — drives the lunge / weapon-swing pose in renderEntities.
+        // Taken from snapB (newest snap) only — no lerp. The animation is brief (0.3 s)
+        // and the 30 Hz snapshot rate gives ~33 ms steps, sub-perceptible at that duration.
+        // Without this the renderer reads 0 every frame and never shows an attack pose
+        // (N4 gated off the local ghost AI that used to tick the timer down).
+        e.attackAnimT = seB.attackAnimQ * (1.0f / 255.0f);
+
+        // Procedural animation phase. `animTimer` is a continuous timer the server ticks
+        // every frame in EnemyAI::update (enemy_ai.cpp:267), feeding sinf(animTimer * X)
+        // for walk bob, arm sway, spin, pulse, glow throughout engine_render_entities.cpp.
+        // It is NOT on the wire (saves a byte per entity per snapshot). Tick it locally
+        // here so the field actually advances on CLIENT — otherwise every animation that
+        // reads animTimer is frozen at sinf(0) = 0 (sliding enemies, motionless bosses).
+        // Per-entity phase drift between host and client is irrelevant for procedural
+        // animation; we only care that the phase keeps moving forward.
+        e.animTimer += dt;
     }
 }
 
@@ -491,8 +600,13 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
     const WorldSnapshot* snapB;
     const WorldSnapshot* snapA;
     f32 t = 1.0f;
-    if (computeInterpPair(ip)) { snapB = ip.newer; snapA = ip.older; t = ip.t; }
-    else { snapB = getSnapshot(0); snapA = nullptr; }
+    f32 extrapolateAhead = 0.0f;
+    if (computeInterpPair(ip)) {
+        snapB = ip.newer; snapA = ip.older; t = ip.t;
+        extrapolateAhead = ip.extrapolateAhead;
+    } else {
+        snapB = getSnapshot(0); snapA = nullptr;
+    }
     if (!snapB) return;
 
     for (u32 i = 0; i < snapB->projectileCount; i++) {
@@ -514,6 +628,13 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
         // systems read this on the host when projectiles arrive via reconciliation paths,
         // and any other observer needs the right attribution for ring on-kill VFX/loot.
         p.ownerSlot  = spB.ownerSlot;
+        // V2 fire prediction: copy the firing client's tick low bits into the projectile
+        // so the match-and-despawn pass in clientNetPost can identify the local predicted
+        // ghost this snapshot projectile supersedes. We store only the low 16 bits since
+        // that's all the wire carries; the despawn pass also masks the ghost's clientTick
+        // to 16 bits for comparison.
+        p.clientTick = static_cast<u32>(spB.clientTickLow);
+        p.predicted  = false;  // snapshot projectiles are authoritative, never predicted
 
         // lightColor isn't on the wire (byte-frugal) — reconstruct a glow color from
         // projFlags using the host's conventions so lit projectiles still emit light.
@@ -548,11 +669,19 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
         p.velocity.y = Quantize::unpackVel(spB.velY);
         p.velocity.z = Quantize::unpackVel(spB.velZ);
 
+        // Forward extrapolation past the newest snapshot — projectiles benefit a lot from
+        // this since they fly fast and 50 ms of extrapolation covers a 1-snap gap cleanly.
+        // Bounded by MAX_EXTRAPOLATE_SEC in computeInterpPair.
+        if (extrapolateAhead > 0.0f) {
+            p.position = p.position + p.velocity * extrapolateAhead;
+        }
+
         renderProjectiles.activeCount++;
     }
 }
 
-void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, u32 itemDefCount) {
+void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, u32 itemDefCount,
+                              f32 dt) {
     (void)itemDefs; (void)itemDefCount; // reserved: client could resolve full stats later
     const WorldSnapshot* snap = getSnapshot(0); // newest — items are static, no lerp needed
     if (!snap) return;
@@ -586,6 +715,11 @@ void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, 
         wi.ownerSlot      = sw.ownerSlot;
         wi.exclusiveTimer = sw.exclusiveTimerQ * 0.04f;
         if (!sameItem) wi.bobTimer = 0.0f; // fresh drop in this slot — restart animation
+        // bobTimer is incremented every frame on the server in WorldItemSystem::update
+        // and consumed by the world-item renderer for the gentle vertical bob and slow
+        // spin (engine_render_world.cpp). It's NOT on the wire — tick it locally here
+        // so dropped items animate on the client instead of sitting frozen on the floor.
+        wi.bobTimer += dt;
         activeCount++;
     }
 

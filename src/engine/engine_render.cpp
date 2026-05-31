@@ -288,10 +288,20 @@ void Engine::selectPointLights() {
             candCount++;
         }
     }
-    // Active projectiles with non-zero lightColor
+    // Active projectiles with non-zero lightColor. N4: on CLIENT the local ghost projectile
+    // pool (m_projectiles) is frozen at spawn (ProjectileSystem::update is gated off), so
+    // sourcing lights from it parks a glow at the muzzle of every local fire — looks like a
+    // stuck "wrong direction" projectile while the snapshot-fed visible spark travels
+    // correctly. Source from m_renderInterp.projectiles on CLIENT (same switch as the entity
+    // light source at engine_render_entities.cpp:66 and the projectile sprite source at
+    // engine_render_effects.cpp:66). Client::interpolateProjectiles reconstructs lightColor
+    // from projFlags so glows still emit the right color after the swap.
+    const ProjectilePool& lightPool = (m_netRole == NetRole::CLIENT)
+                                      ? m_renderInterp.projectiles
+                                      : m_projectiles;
     u32 plSeen = 0;
-    for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES && plSeen < m_projectiles.activeCount; pi++) {
-        const Projectile& p = m_projectiles.projectiles[pi];
+    for (u32 pi = 0; pi < MAX_PROJECTILES && candCount < MAX_CANDIDATES && plSeen < lightPool.activeCount; pi++) {
+        const Projectile& p = lightPool.projectiles[pi];
         if (!p.active) continue;
         plSeen++;
         if (p.lightColor.x == 0.0f && p.lightColor.y == 0.0f && p.lightColor.z == 0.0f) continue;

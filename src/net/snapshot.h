@@ -8,7 +8,7 @@
 #include "net/net.h"
 #include "net/net_player.h"
 
-// Quantized snapshot of one player (29 wire bytes — see SNAP_PLAYER_WIRE)
+// Quantized snapshot of one player (30 wire bytes — see SNAP_PLAYER_WIRE)
 struct SnapPlayer {
     u8   slotIndex;     // 1
     u8   flags;         // 1: bit0=active, bit1=onGround, bit2=UNUSED, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
@@ -32,9 +32,15 @@ struct SnapPlayer {
     u8   weaponMeshId;  // 1: mesh ID of equipped weapon (for third-person rendering)
     // Wanderer dodge state for remote rendering: bit0=rolling, bits1-3=counterStacks (0-5)
     u8   dodgeFlags;    // 1
+    // Visual identity: the chosen PlayerClass (cast to u8). The client's NetPlayer.playerClass
+    // is only set on the local slot (CL_JOIN_REQUEST → server's onPlayerJoin), so without this
+    // remote players render with the default WARRIOR mesh until the wire carries it. Sent every
+    // snapshot rather than once-on-join so a late-joining observer or post-reconnect client
+    // converges to the right mesh without a side-channel.
+    u8   playerClass;   // 1: PlayerClass cast to u8 (0..CLASS_COUNT-1)
 };
 
-// Quantized snapshot of one entity (27 bytes — see SNAP_ENTITY_WIRE)
+// Quantized snapshot of one entity (28 bytes — see SNAP_ENTITY_WIRE)
 struct SnapEntity {
     u8   poolIndex;     // 1
     u8   flags;         // 1
@@ -47,6 +53,12 @@ struct SnapEntity {
     u8   stunTimer;     // 1: quantized 0-10s
     u8   freezeTimer;   // 1: quantized 0-10s
     u8   bossLimbConfig;// 1
+    // Attack animation countdown — Entity.attackAnimT (0.3s pulse, drives ground/bat lunge +
+    // skeleton/boss weapon swing in engine_render_entities.cpp). Quantized to 0-1.0s in
+    // ~4 ms steps (1/255 s). On CLIENT the ghost AI is gated off after N4, so this is the
+    // only path for the client to learn that an enemy swung — without it, attack
+    // animations never play on the client (renderer reads attackAnimT == 0 every frame).
+    u8   attackAnimQ;   // 1
     // Boss status (replaces the old alignment-only padding byte — wire size unchanged).
     // bit0 = minionShield (75% damage reduction active); bits1-3 = bossPhase (BossPhase::,
     // 0-4 fits in 3 bits). Lets clients render the invuln/sealed boss as un-killable.
@@ -68,7 +80,7 @@ struct SnapEntity {
     u8   halfExtentsZQ; // 1
 };
 
-// Quantized snapshot of one projectile (19 bytes)
+// Quantized snapshot of one projectile (21 bytes — see SNAP_PROJECTILE_WIRE)
 struct SnapProjectile {
     u16  poolIndex;     // 2: u16 index into the projectile pool (1024 PC / 512 Switch)
     u8   flags;         // 1: bit0=active, bit1=fromPlayer, bit2=isCrit
@@ -78,6 +90,13 @@ struct SnapProjectile {
     u16  posX, posY, posZ;  // 6
     u16  velX, velY, velZ;  // 6
     u8   ownerSlot;     // 1: net slot that fired this projectile (0xFF = unattributed)
+    // Low 16 bits of the FIRING CLIENT's m_serverTick at fire moment (carried through
+    // CL_FIRE_WEAPON → server-stored on Projectile.clientTick → snapshotted back). Used by
+    // the firing client to find and despawn its locally-predicted ghost projectile when the
+    // authoritative one arrives. 16 bits suffice — a predicted ghost lives < 0.5 s and the
+    // 16-bit tick window is ~18 min at 60 Hz, so collisions are practically impossible.
+    // 0 = no prediction owner (host-fired, NPC projectile, skill orb) — match is skipped.
+    u16  clientTickLow; // 2
 };
 
 // Quantized snapshot of one dropped world item (16 bytes). Loot is server-

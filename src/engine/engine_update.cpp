@@ -385,100 +385,163 @@ void Engine::tickSharedSystems(f32 dt) {
         }
     }
 
-    // CLIENT ghost-sim guard (R7-4 (a)): snapshot the local player's HP/status, restore after,
-    // so the locally-run ghost AI/projectiles can't overwrite the authoritative snapshot HP.
-    const u8   localIdx   = (m_localPlayerIndex < MAX_LOCAL_PLAYERS) ? m_localPlayerIndex : 0;
-    const bool ghostGuard = (m_netRole == NetRole::CLIENT);
-    f32 sH=0, sInv=0, sPoi=0, sBur=0, sFrz=0, sSlo=0, sFla=0;
-    if (ghostGuard) {
-        Player& lp = m_localPlayers[localIdx];
-        sH=lp.health; sInv=lp.invulnTimer; sPoi=lp.poisonTimer; sBur=lp.burnTimer;
-        sFrz=lp.freezeTimer; sSlo=lp.slowTimer; sFla=lp.damageFlashTimer;
-    }
+    // N4 ghost-sim removal: on CLIENT, the snapshot is the authoritative source for entities,
+    // projectiles, world items, and timers. Running the local sim here just produces a
+    // divergent "ghost" world that blocks player movement against entities the host already
+    // killed and fake-hits the local player (Combat::applyDamageToPlayer flashes through
+    // hurtVignette/sound/camera-kick even though the HP it subtracts is overwritten by the
+    // next snapshot reconcile). With the obstacle source now coming from m_renderInterp.entities
+    // (engine_update.cpp gameUpdate above) the ghost no longer has to be alive for collision,
+    // so we can finally skip every authoritative pass here. Cosmetic-only systems (chat log,
+    // shared FX, particles) hoist out below and keep running on CLIENT.
+    if (m_netRole != NetRole::CLIENT) {
+        // Enemy AI — enemies target the nearest of primary + extras.
+        {
+            PROFILE_SCOPE(1, "AI");
+            bool spawnCalm = m_spawnCalmTimer > 0.0f; // floor-start calm window
+            // Pass m_players + MAX_PLAYERS so the friendly-tether code in EnemyAI::update can
+            // resolve `Entity::ownerNetSlot` against the right NetPlayer for remote-cast minions
+            // (N4). Harmless on SP/split since all `m_players[]` slots are inactive there.
+            EnemyAI::update(m_entities, m_level.grid, primary, m_projectiles, dt, &m_level.squads,
+                            extraCount > 0 ? extras : nullptr, extraCount, &m_level.dungeon, spawnCalm,
+                            m_players, MAX_PLAYERS);
+            SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, primary.position, dt);
+        }
 
-    // Enemy AI — enemies target the nearest of primary + extras.
-    {
-        PROFILE_SCOPE(1, "AI");
-        bool spawnCalm = m_spawnCalmTimer > 0.0f; // floor-start calm window
-        // Pass m_players + MAX_PLAYERS so the friendly-tether code in EnemyAI::update can
-        // resolve `Entity::ownerNetSlot` against the right NetPlayer for remote-cast minions
-        // (N4). Harmless on SP/split since all `m_players[]` slots are inactive there.
-        EnemyAI::update(m_entities, m_level.grid, primary, m_projectiles, dt, &m_level.squads,
-                        extraCount > 0 ? extras : nullptr, extraCount, &m_level.dungeon, spawnCalm,
-                        m_players, MAX_PLAYERS);
-        SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, primary.position, dt);
-    }
-
-    // Decay enemy speech timers + log fresh speech to chat (shared entity state → once/frame;
-    // the old per-player placement double-ticked these in split-screen).
-    for (u32 a = 0; a < m_entities.activeCount; a++) {
-        u32 idx = m_entities.activeList[a];
-        Entity& e = m_entities.entities[idx];
-        if (e.speechTimer > 0.0f) {
-            if (e.speechText && e.speechTimer > 1.9f) {
-                const char* name = "???";
-                if (e.flags & ENT_FRIENDLY) {
-                    switch (e.npcClass) {
-                        case NpcClass::CLERIC:  name = "Cleric";  break;
-                        case NpcClass::ARCHER:  name = "Archer";  break;
-                        case NpcClass::MAGE:    name = "Mage";    break;
-                        case NpcClass::ROGUE:   name = "Rogue";   break;
-                        case NpcClass::PALADIN: name = "Paladin"; break;
-                        default:                name = "Ally";     break;
+        // Decay enemy speech timers + log fresh speech to chat (shared entity state → once/frame;
+        // the old per-player placement double-ticked these in split-screen).
+        for (u32 a = 0; a < m_entities.activeCount; a++) {
+            u32 idx = m_entities.activeList[a];
+            Entity& e = m_entities.entities[idx];
+            if (e.speechTimer > 0.0f) {
+                if (e.speechText && e.speechTimer > 1.9f) {
+                    const char* name = "???";
+                    if (e.flags & ENT_FRIENDLY) {
+                        switch (e.npcClass) {
+                            case NpcClass::CLERIC:  name = "Cleric";  break;
+                            case NpcClass::ARCHER:  name = "Archer";  break;
+                            case NpcClass::MAGE:    name = "Mage";    break;
+                            case NpcClass::ROGUE:   name = "Rogue";   break;
+                            case NpcClass::PALADIN: name = "Paladin"; break;
+                            default:                name = "Ally";     break;
+                        }
+                    } else if (e.enemyType == EnemyType::BOSS) {
+                        name = e.nameTag ? e.nameTag : "Boss";
                     }
-                } else if (e.enemyType == EnemyType::BOSS) {
-                    name = e.nameTag ? e.nameTag : "Boss";
+                    Vec3 chatCol = (e.flags & ENT_FRIENDLY)
+                        ? Vec3{0.4f, 1.0f, 0.5f}
+                        : Vec3{1.0f, 0.3f, 0.3f};
+                    addChatMessage(name, e.speechText, chatCol);
+                    e.speechTimer = 1.8f; // prevent re-logging on next tick
                 }
-                Vec3 chatCol = (e.flags & ENT_FRIENDLY)
-                    ? Vec3{0.4f, 1.0f, 0.5f}
-                    : Vec3{1.0f, 0.3f, 0.3f};
-                addChatMessage(name, e.speechText, chatCol);
-                e.speechTimer = 1.8f; // prevent re-logging on next tick
-            }
-            e.speechTimer -= dt;
-            if (e.speechTimer <= 0.0f) {
-                e.speechText  = nullptr;
-                e.speechTimer = 0.0f;
+                e.speechTimer -= dt;
+                if (e.speechTimer <= 0.0f) {
+                    e.speechText  = nullptr;
+                    e.speechTimer = 0.0f;
+                }
             }
         }
+
+        // Projectiles — primary + extras are collidable so enemy projectiles damage everyone.
+        {
+            PROFILE_SCOPE(2, "Projectiles");
+            SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
+            ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, primary, dt, &m_spatialGrid,
+                                     extraCount > 0 ? extras : nullptr, extraCount);
+        }
+
+        // SERVER: write AI + projectile damage/status back to the authoritative NetPlayers
+        // (serverNetPost then ticks DoT/death and the snapshot carries it to the owning client).
+        if (remoteViewCount > 0)
+            applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
+
+        EntitySystem::tickTimers(m_entities, dt);
+        WorldItemSystem::update(m_worldItems, dt);
+
+        SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
+        // Meteors: pass both local players so kill-heals credit the casting player.
+        Player* meteorPlayers[MAX_LOCAL_PLAYERS];
+        for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) meteorPlayers[p] = &m_localPlayers[p];
+        // Pass the NetPlayer array on a SERVER so a remote caster's meteor/pillar heal lands on
+        // the caster's NetPlayer (H4), not silently re-routed to local lane 0.
+        SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt,
+                                    m_netRole == NetRole::SERVER ? m_players : nullptr);
     }
+
+    // Chat log timers, shared FX, and particles are cosmetic — keep ticking on CLIENT so the
+    // chat log lines vanish on schedule, FX overlays decay, and particles dissipate.
     for (u32 i = 0; i < MAX_CHAT_LINES; i++) {
         if (m_chatLog[i].timer > 0.0f) m_chatLog[i].timer -= dt;
     }
-
-    // Projectiles — primary + extras are collidable so enemy projectiles damage everyone.
-    {
-        PROFILE_SCOPE(2, "Projectiles");
-        SpatialGridSystem::rebuild(m_spatialGrid, m_entities);
-        ProjectileSystem::update(m_projectiles, m_level.grid, m_entities, primary, dt, &m_spatialGrid,
-                                 extraCount > 0 ? extras : nullptr, extraCount);
-    }
-
-    // SERVER: write AI + projectile damage/status back to the authoritative NetPlayers
-    // (serverNetPost then ticks DoT/death and the snapshot carries it to the owning client).
-    if (remoteViewCount > 0)
-        applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
-    // CLIENT: discard any HP/status the ghost sim just inflicted (snapshot is authoritative).
-    if (ghostGuard) {
-        Player& lp = m_localPlayers[localIdx];
-        lp.health=sH; lp.invulnTimer=sInv; lp.poisonTimer=sPoi; lp.burnTimer=sBur;
-        lp.freezeTimer=sFrz; lp.slowTimer=sSlo; lp.damageFlashTimer=sFla;
-    }
-
-    EntitySystem::tickTimers(m_entities, dt);
-    WorldItemSystem::update(m_worldItems, dt);
-
-    // Shared FX pools + shared skill world-systems (once/frame).
     tickSharedFX(dt);
-    SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
-    // Meteors: pass both local players so kill-heals credit the casting player.
-    Player* meteorPlayers[MAX_LOCAL_PLAYERS];
-    for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) meteorPlayers[p] = &m_localPlayers[p];
-    // Pass the NetPlayer array on a SERVER so a remote caster's meteor/pillar heal lands on
-    // the caster's NetPlayer (H4), not silently re-routed to local lane 0.
-    SkillSystem::updateMeteors(m_entities, meteorPlayers, m_splitPlayerCount, dt,
-                                m_netRole == NetRole::SERVER ? m_players : nullptr);
     ParticleSystem::update(m_particles, dt);
+
+    // V2 fire prediction: on CLIENT, the N4 gate above skips ProjectileSystem::update, so
+    // locally-predicted ghost projectiles (spawned by handleWeaponFire on this frame) would
+    // freeze at spawn and never animate. Tick them here with a minimal update — position
+    // + gravity + lifetime — no collision, no damage (server is authoritative for both).
+    // Predicted ghosts despawn when (a) their lifetime expires, (b) the predictedLife cap
+    // is reached (0.5 s safety net if the matching authoritative snapshot never arrives —
+    // e.g. server rejected the fire or UDP loss), or (c) the matching snapshot arrives
+    // (handled in clientNetPost's match-and-despawn pass).
+    if (m_netRole == NetRole::CLIENT) {
+        for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+            Projectile& p = m_projectiles.projectiles[i];
+            if (!p.active || !p.predicted) continue;
+            p.position = p.position + p.velocity * dt;
+            if (p.gravity > 0.0f) p.velocity.y -= p.gravity * dt;
+            p.lifetime      -= dt;
+            p.predictedLife += dt;
+            // Safety cap: a predicted ghost should be replaced by the authoritative snapshot
+            // projectile within ~100 ms. If 0.5 s passes with no match, the server probably
+            // rejected the fire (cooldown drift / origin clamp / etc.) — despawn the ghost
+            // so the user doesn't see a phantom projectile that does no damage.
+            if (p.lifetime <= 0.0f || p.predictedLife >= 0.5f) {
+                p.active = false;
+                continue;
+            }
+            // Phase 2.3 — Predicted projectile-vs-entity collision against the INTERPOLATED
+            // (rendered) pool. Without this, the predicted ghost flies through the rendered
+            // enemy and the user sees the projectile pass through visibly before the
+            // server's snapshot finally despawns it. Now: spawn the impact spark / blood
+            // FX the instant the ghost reaches a rendered enemy AABB, and despawn the
+            // ghost early. The server is still authoritative on damage; this is purely a
+            // visual prediction. Skip ORB (phases through) to mirror server behavior.
+            if (!p.fromPlayer) continue;       // only the local player's predicted ghosts
+            if (p.projFlags & PROJ_ORB) continue;
+            // Grace window: if we collision-check on frame 1, the ghost's spawn position
+            // (eyePos + forward * ~0.5 m) is still inside any enemy standing within ~1 m
+            // of the player — common in melee range — so the ghost despawns on its very
+            // first tick before the renderer draws it. Visible as "fire weapon, see
+            // nothing, then a tracer arrives mid-air from the snapshot". Give the ghost
+            // 50 ms (≈3 frames at 60 Hz, ≈1-2 m at typical projectile speeds) to clear
+            // the player's immediate neighborhood before predict-impact engages.
+            if (p.predictedLife < 0.05f) continue;
+            AABB projBox = {
+                p.position - Vec3{p.radius, p.radius, p.radius},
+                p.position + Vec3{p.radius, p.radius, p.radius}
+            };
+            for (u32 a = 0; a < m_renderInterp.entities.activeCount; a++) {
+                u32 idx = m_renderInterp.entities.activeList[a];
+                Entity& e = m_renderInterp.entities.entities[idx];
+                if (e.flags & ENT_DEAD) continue;
+                if (e.flags & ENT_FRIENDLY) continue;
+                if (e.enemyType == EnemyType::PROP) continue;
+                if (!CombatQuery::aabbOverlap(projBox, entityAABB(e))) continue;
+                for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
+                    if (!m_fx.impactFX[fx].active) {
+                        Vec3 nrm = p.position - e.position; nrm.y = 0;
+                        f32 l = lengthSq(nrm);
+                        nrm = (l > 1e-6f) ? normalize(nrm) : Vec3{0,0,1};
+                        m_fx.impactFX[fx] = {e.position, nrm, 0.3f, true, true};
+                        break;
+                    }
+                }
+                p.active = false;              // ghost has done its visual job
+                break;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -618,12 +681,22 @@ void Engine::gameUpdate(f32 dt) {
         if (m_localPlayer.dodgeState.rolling) m_dodgeRolledOnce = true;
         m_localPlayer.moveSpeed = savedSpeed;
         if (!m_localPlayer.noclip) {
-            // Build obstacle list using frame allocator (avoids stack array)
+            // N4 fix: on CLIENT, source obstacles from the AUTHORITATIVE interpolated pool
+            // (m_renderInterp.entities) instead of the local ghost sim (m_entities). The
+            // ghost diverges from the host — host-side kills stay alive in the ghost; ghost
+            // entities the host already killed/never had still block movement — and used to
+            // produce "I get blocked by invisible enemies" on the client. The render path
+            // already uses the same (CLIENT ? m_renderInterp.entities : m_entities) switch
+            // (engine_render_entities.cpp:66) and Client::interpolateEntities populates
+            // flags/enemyType/halfExtents so these filters still apply.
+            const EntityPool& obsPool = (m_netRole == NetRole::CLIENT)
+                                        ? m_renderInterp.entities
+                                        : m_entities;
             auto* obstacles = static_cast<CollisionObstacle*>(
                 s_frameAllocator.alloc(MAX_ENTITIES * sizeof(CollisionObstacle)));
             u32 obsCount = 0;
-            for (u32 a = 0; a < m_entities.activeCount; a++) {
-                const Entity& e = m_entities.entities[m_entities.activeList[a]];
+            for (u32 a = 0; a < obsPool.activeCount; a++) {
+                const Entity& e = obsPool.entities[obsPool.activeList[a]];
                 if (e.flags & ENT_DEAD) continue;
                 if (e.flags & ENT_FRIENDLY) continue;
                 if (e.enemyType == EnemyType::PROP) continue;
@@ -782,8 +855,11 @@ void Engine::gameUpdate(f32 dt) {
 
     pushPlayerFromEntities();
 
-    // Update fog-of-war
-    Minimap::updateVisited(m_level.grid, m_localPlayer.position, m_entities);
+    // Update fog-of-war — on CLIENT use the authoritative interp pool so visible-enemy
+    // markers track snapshot positions rather than the frozen ghost sim (N4).
+    Minimap::updateVisited(m_level.grid, m_localPlayer.position,
+                           (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
+                                                          : m_entities);
 
     syncLocalPlayerToNetPlayer();
 }
@@ -963,6 +1039,37 @@ void Engine::sendRespawnRequest() {
     Net::sendToServer(buf, sizeof(buf), true);
 }
 
+// CLIENT: ask the host to trigger a floor descent at the portal. Header-only reliable
+// CL_REQUEST_DESCEND (no payload — the slot identifies the requester on the server side).
+// The server re-validates proximity + boss-dead and runs triggerFloorDescent(), which
+// broadcasts SV_LEVEL_SEED so we (and every other client) transition in lockstep.
+void Engine::sendDescendRequest() {
+    u8 buf[sizeof(PacketHeader)];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_REQUEST_DESCEND;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    Net::sendToServer(buf, sizeof(buf), true);
+}
+
+// SERVER-only: handle a remote client's CL_REQUEST_DESCEND. The requesting client could be a
+// cheater or a stale request, so we re-check the same gates the host's local press would
+// pass through: the floor door must be active, the requesting NetPlayer must be within the
+// door radius, and (on boss floors) the boss must be dead. If all pass, run the shared
+// descent flow. Boss-locked rejections are silent today (no client-side notify) — adding
+// feedback is a follow-up SV_EVENT.
+void Engine::handleDescendRequest(u8 playerSlot) {
+    if (playerSlot >= MAX_PLAYERS) return;
+    if (!m_level.floorDoorActive) return;
+    const NetPlayer& np = m_players[playerSlot];
+    if (!np.active || np.isDead) return;
+    Vec3 toDoor = m_level.floorDoorPos - np.position;
+    if (lengthSq(toDoor) >= 4.0f) return; // outside the 2 m portal radius
+    if (m_level.floorHasBoss && floorBossAlive()) return; // boss still gating exit
+    LOG_INFO("CL_REQUEST_DESCEND from slot %u accepted — triggering descent", playerSlot);
+    triggerFloorDescent();
+}
+
 // SERVER-only: respawn a dead client's NetPlayer in response to CL_RESPAWN. Idempotent (only
 // acts on an active, dead slot), so a duplicate/late packet is harmless. The revived state
 // (health, position, invuln, isDead=false) propagates to the client via the next snapshot.
@@ -1047,119 +1154,128 @@ bool Engine::updateFloorDoor() {
         Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
             if (Input::isActionPressed(GameAction::PICKUP)) {
-                // Server-authoritative descent: a remote CLIENT must never advance its
-                // own floor / regenerate the level locally — that would desync from the
-                // still-on-floor-N host. The host (SERVER) and offline/split-screen
-                // (NONE) run the local descend below; the host then BROADCASTS it so
-                // clients follow via onLevelSeed -> FLOOR_TRANSITION. (Remote-initiated
-                // descent — a client requesting a descend at the door — is deferred;
-                // descent is currently host-initiated only. See CLAUDE.md.)
+                // Server-authoritative descent: a remote CLIENT must never advance its own
+                // floor / regenerate the level locally (that desyncs from the still-on-floor-N
+                // host). Instead it asks the host to trigger descent via CL_REQUEST_DESCEND.
+                // The host re-validates proximity + boss-dead on its side and broadcasts
+                // SV_LEVEL_SEED back so every client transitions in lockstep.
                 if (m_netRole == NetRole::CLIENT) {
-                    m_bossLockNotifyTimer = 0.0f; // no UI nag; just wait for the host
+                    sendDescendRequest();
+                    m_bossLockNotifyTimer = 0.0f; // no local nag — server gates silently
                     return false;
                 }
+                // Local (host or offline/split) path: gate on boss, then run the shared flow.
                 // Exit is sealed only on boss floors, and only until the boss is dead.
                 if (m_level.floorHasBoss && floorBossAlive()) {
                     m_bossLockNotifyTimer = 2.0f;
                     return false;
                 }
-                m_level.currentFloor++;
-                // All players grow 1.5% stronger each floor (multiplicative).
-                // In split-screen the FLOOR_TRANSITION block grows BOTH local players once
-                // (regardless of who opened the door), so suppress the per-trigger growth
-                // here to avoid double-growing whoever reached the exit.
-                if (m_splitPlayerCount <= 1) {
-                    m_localPlayer.maxHealth *= 1.015f;
-                    m_localPlayer.health = m_localPlayer.maxHealth;
-                    m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
-                    m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
-                }
-                // Scale all networked players too
-                for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
-                    if (!m_players[pi].active) continue;
-                    m_players[pi].maxHealth *= 1.015f;
-                    m_players[pi].health = m_players[pi].maxHealth;
-                    m_players[pi].invulnTimer = 2.5f;
-                    m_players[pi].isDead = false;
-                }
-                // Upgrade equipment for NPCs that survived this floor
-                upgradeNpcEquipment(static_cast<u8>(m_level.currentFloor));
-                // Save progress before descending so death respawn returns here
-                m_level.savedFloor = m_level.currentFloor;
-                m_level.savedSeed = m_level.levelSeed; // persist the run seed (not a fresh draw)
-                saveGame(m_activeSaveSlot);
-                LOG_INFO("Descending to floor %u", m_level.currentFloor);
-
-                // Refresh all cooldowns on floor descend. m_skillStates is a direct
-                // [MAX_PLAYERS] array. Class-skill cooldowns live in the per-local-player
-                // store m_classSkillStatesPerPlayer[MAX_LOCAL_PLAYERS][4] (m_classSkillStates
-                // is only the swapped-in alias), so clear the store — not the alias — or the
-                // non-descending split player keeps its cooldowns into the next floor.
-                for (u32 p = 0; p < MAX_PLAYERS; p++)
-                    m_skillStates[p].cooldownTimer = 0.0f;
-                for (u32 lp = 0; lp < MAX_LOCAL_PLAYERS; lp++)
-                    for (u32 s = 0; s < 4; s++) m_classSkillStatesPerPlayer[lp][s].cooldownTimer = 0.0f;
-                // Keep the currently swapped-in player's active alias in sync.
-                for (u32 s = 0; s < 4; s++) m_classSkillStates[s].cooldownTimer = 0.0f;
-                // Per-player: clear every local player's equipment-skill cooldowns
-                // (boot/helmet states are indexed per slot, not swapped in/out).
-                for (u32 p = 0; p < MAX_PLAYERS; p++) {
-                    m_bootSkillStates[p].cooldownTimer = 0.0f;
-                    m_helmetSkillStates[p].cooldownTimer = 0.0f;
-                }
-
-                // Snapshot floor stats for transition screen
-                m_transition.snapshotKills = m_transition.floorKillCount;
-                m_transition.snapshotTime = m_transition.floorTime;
-
-                // Floor 50 is the final floor of each difficulty
-                if (m_level.currentFloor > 50) {
-                    if (m_difficulty < 2) {
-                        // Advance to next difficulty — reset to floor 1, keep gear
-                        m_difficulty++;
-                        m_highestUnlocked = m_difficulty;
-                        FILE* uf = std::fopen("difficulty_unlock.dat", "wb");
-                        if (uf) { std::fwrite(&m_highestUnlocked, 1, 1, uf); std::fclose(uf); }
-                        m_level.currentFloor = 1;
-                        m_level.savedFloor = 1;
-                        saveGame(m_activeSaveSlot);
-                        // Show transition with difficulty name
-                        m_transition.timer = 3.0f;
-                        m_gameState = GameState::FLOOR_TRANSITION;
-                        AudioSystem::play(SfxId::LEVEL_UP);
-                        LOG_INFO("Advancing to %s difficulty",
-                                 m_difficulty == 1 ? "Nightmare" : "Hell");
-                    } else {
-                        // Hell complete — final victory
-                        m_gameState = GameState::VICTORY;
-                        AudioSystem::stopMusic();
-                        Input::setRelativeMouseMode(false);
-                    }
-                } else {
-                    m_transition.timer = 2.0f;
-                    m_gameState = GameState::FLOOR_TRANSITION;
-                    AudioSystem::play(SfxId::LEVEL_UP);
-                }
-                // Host tells clients to follow into the same floor. Broadcast the FINAL
-                // floor/difficulty (already resolved above, incl. the floor-50->1 loop
-                // where difficulty++ and currentFloor reset to 1) plus the run seed, so
-                // clients regenerate the IDENTICAL dungeon. Skipped on VICTORY (no next
-                // floor) since that branch leaves m_gameState != FLOOR_TRANSITION.
-                if (m_netRole == NetRole::SERVER &&
-                    m_gameState == GameState::FLOOR_TRANSITION) {
-                    Net::broadcastLevelSeed(static_cast<u8>(m_level.currentFloor),
-                                            m_difficulty, m_level.levelSeed);
-                    // (M11) Advance Server's authoritative level NOW so a client joining during
-                    // the ~2 s FLOOR_TRANSITION window receives the NEW floor/seed in
-                    // SV_JOIN_ACCEPT — otherwise it generates the previous floor and desyncs.
-                    Server::updateLevel(m_level.levelSeed,
-                                        static_cast<u8>(m_level.currentFloor), m_difficulty);
-                }
-                return true;
+                return triggerFloorDescent();
             }
         }
     }
     return false;
+}
+
+// Shared floor-descent flow: bump currentFloor, grow all players, refresh cooldowns,
+// save, schedule FLOOR_TRANSITION, broadcast SV_LEVEL_SEED. Called by two paths:
+//   1. Local host-press (updateFloorDoor on SERVER/NONE) — after its own boss/proximity gate.
+//   2. Remote client request (handleDescendRequest on SERVER) — after server-side re-validation.
+// Never called on a CLIENT (the early CL_REQUEST_DESCEND branch in updateFloorDoor short-circuits).
+bool Engine::triggerFloorDescent() {
+    m_level.currentFloor++;
+    // All players grow 1.5% stronger each floor (multiplicative).
+    // In split-screen the FLOOR_TRANSITION block grows BOTH local players once
+    // (regardless of who opened the door), so suppress the per-trigger growth
+    // here to avoid double-growing whoever reached the exit.
+    if (m_splitPlayerCount <= 1) {
+        m_localPlayer.maxHealth *= 1.015f;
+        m_localPlayer.health = m_localPlayer.maxHealth;
+        m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
+        m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
+    }
+    // Scale all networked players too
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        if (!m_players[pi].active) continue;
+        m_players[pi].maxHealth *= 1.015f;
+        m_players[pi].health = m_players[pi].maxHealth;
+        m_players[pi].invulnTimer = 2.5f;
+        m_players[pi].isDead = false;
+    }
+    // Upgrade equipment for NPCs that survived this floor
+    upgradeNpcEquipment(static_cast<u8>(m_level.currentFloor));
+    // Save progress before descending so death respawn returns here
+    m_level.savedFloor = m_level.currentFloor;
+    m_level.savedSeed = m_level.levelSeed; // persist the run seed (not a fresh draw)
+    saveGame(m_activeSaveSlot);
+    LOG_INFO("Descending to floor %u", m_level.currentFloor);
+
+    // Refresh all cooldowns on floor descend. m_skillStates is a direct
+    // [MAX_PLAYERS] array. Class-skill cooldowns live in the per-local-player
+    // store m_classSkillStatesPerPlayer[MAX_LOCAL_PLAYERS][4] (m_classSkillStates
+    // is only the swapped-in alias), so clear the store — not the alias — or the
+    // non-descending split player keeps its cooldowns into the next floor.
+    for (u32 p = 0; p < MAX_PLAYERS; p++)
+        m_skillStates[p].cooldownTimer = 0.0f;
+    for (u32 lp = 0; lp < MAX_LOCAL_PLAYERS; lp++)
+        for (u32 s = 0; s < 4; s++) m_classSkillStatesPerPlayer[lp][s].cooldownTimer = 0.0f;
+    // Keep the currently swapped-in player's active alias in sync.
+    for (u32 s = 0; s < 4; s++) m_classSkillStates[s].cooldownTimer = 0.0f;
+    // Per-player: clear every local player's equipment-skill cooldowns
+    // (boot/helmet states are indexed per slot, not swapped in/out).
+    for (u32 p = 0; p < MAX_PLAYERS; p++) {
+        m_bootSkillStates[p].cooldownTimer = 0.0f;
+        m_helmetSkillStates[p].cooldownTimer = 0.0f;
+    }
+
+    // Snapshot floor stats for transition screen
+    m_transition.snapshotKills = m_transition.floorKillCount;
+    m_transition.snapshotTime = m_transition.floorTime;
+
+    // Floor 50 is the final floor of each difficulty
+    if (m_level.currentFloor > 50) {
+        if (m_difficulty < 2) {
+            // Advance to next difficulty — reset to floor 1, keep gear
+            m_difficulty++;
+            m_highestUnlocked = m_difficulty;
+            FILE* uf = std::fopen("difficulty_unlock.dat", "wb");
+            if (uf) { std::fwrite(&m_highestUnlocked, 1, 1, uf); std::fclose(uf); }
+            m_level.currentFloor = 1;
+            m_level.savedFloor = 1;
+            saveGame(m_activeSaveSlot);
+            // Show transition with difficulty name
+            m_transition.timer = 3.0f;
+            m_gameState = GameState::FLOOR_TRANSITION;
+            AudioSystem::play(SfxId::LEVEL_UP);
+            LOG_INFO("Advancing to %s difficulty",
+                     m_difficulty == 1 ? "Nightmare" : "Hell");
+        } else {
+            // Hell complete — final victory
+            m_gameState = GameState::VICTORY;
+            AudioSystem::stopMusic();
+            Input::setRelativeMouseMode(false);
+        }
+    } else {
+        m_transition.timer = 2.0f;
+        m_gameState = GameState::FLOOR_TRANSITION;
+        AudioSystem::play(SfxId::LEVEL_UP);
+    }
+    // Host tells clients to follow into the same floor. Broadcast the FINAL
+    // floor/difficulty (already resolved above, incl. the floor-50->1 loop
+    // where difficulty++ and currentFloor reset to 1) plus the run seed, so
+    // clients regenerate the IDENTICAL dungeon. Skipped on VICTORY (no next
+    // floor) since that branch leaves m_gameState != FLOOR_TRANSITION.
+    if (m_netRole == NetRole::SERVER &&
+        m_gameState == GameState::FLOOR_TRANSITION) {
+        Net::broadcastLevelSeed(static_cast<u8>(m_level.currentFloor),
+                                m_difficulty, m_level.levelSeed);
+        // (M11) Advance Server's authoritative level NOW so a client joining during
+        // the ~2 s FLOOR_TRANSITION window receives the NEW floor/seed in
+        // SV_JOIN_ACCEPT — otherwise it generates the previous floor and desyncs.
+        Server::updateLevel(m_level.levelSeed,
+                            static_cast<u8>(m_level.currentFloor), m_difficulty);
+    }
+    return true;
 }
 
 void Engine::spawnDynamicLight(Vec3 pos, Vec3 color, f32 duration) {
@@ -1199,13 +1315,40 @@ void Engine::resetEnemiesToRooms() {
 }
 
 // Spawns a floating damage number at a world position.
-// Finds the first inactive slot in the damage number pool.
+// Finds the first inactive slot in the damage number pool. On SERVER, also broadcasts
+// SV_EVENT::DAMAGE_NUMBER so connected clients spawn the same number locally — without
+// this the N4 ghost-sim removal leaves clients with no damage feedback (Combat::applyDamage
+// doesn't run on CLIENT anymore, so the local-spawn path is never reached).
 void Engine::spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal, bool isCrit) {
     for (u32 i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
         if (!m_fx.damageNumbers[i].active) {
             m_fx.damageNumbers[i] = {pos, amount, 1.0f, true, isHeal, isCrit};
-            return;
+            break;
         }
+    }
+    // Replicate to clients. Skipped on CLIENT (no remote peers to broadcast to) and on
+    // NONE (offline / split-screen) — only the host fires this branch.
+    if (m_netRole == NetRole::SERVER) {
+        u8 buf[sizeof(PacketHeader) + 18]; // hdr(4) + eventType(1) + pos(12) + amount(4) + flags(1)
+        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+        hdr->type = NetPacketType::SV_EVENT;
+        hdr->flags = 0;
+        hdr->seq   = 0;
+        u32 off = sizeof(PacketHeader);
+        buf[off++] = static_cast<u8>(NetEventType::DAMAGE_NUMBER);
+        std::memcpy(buf + off, &pos.x, 4);    off += 4;
+        std::memcpy(buf + off, &pos.y, 4);    off += 4;
+        std::memcpy(buf + off, &pos.z, 4);    off += 4;
+        std::memcpy(buf + off, &amount, 4);   off += 4;
+        u8 flagsByte = (isHeal ? 1u : 0u) | (isCrit ? 2u : 0u);
+        buf[off++] = flagsByte;
+        // Phase 2.1 — Reliable. Cosmetic, but the user-perceived "I hit, where's my
+        // damage number?" gap when an unreliable packet drops is jarring at 5%+ loss.
+        // ENet reliable retransmit (~RTT-paced) gives a worst-case ~100 ms extra delay
+        // on lossy paths versus the prior "silently lost forever". Mirrors HITSCAN_IMPACT
+        // which is already reliable. AoE bursts (~10 numbers per frame) are <0.3 KB and
+        // fit comfortably in ENet's reliable window.
+        Net::broadcastReliable(buf, off);
     }
 }
 
@@ -1217,10 +1360,19 @@ void Engine::pushPlayerFromEntities() {
         m_localPlayer.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
         m_localPlayer.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
     };
+    // N4: on CLIENT, source pushout obstacles from the authoritative interp pool, not
+    // the (now-frozen) ghost sim. Mirrors the moveAndSlide obstacle-source switch in
+    // gameUpdate — without this the safety pushout drives the player out of stale
+    // ghost positions and they can't traverse tiles where a ghost enemy was spawned.
+    // (The enemyPush factor below is 0, so writes to e.position are no-ops; safe to
+    // touch the interp pool even though it gets overwritten on the next snapshot.)
+    EntityPool& pushPool = (m_netRole == NetRole::CLIENT)
+                           ? m_renderInterp.entities
+                           : m_entities;
     // Use activeList instead of scanning all 128 entity slots
-    for (u32 a = 0; a < m_entities.activeCount; a++) {
-        u32 idx = m_entities.activeList[a];
-        Entity& e = m_entities.entities[idx];
+    for (u32 a = 0; a < pushPool.activeCount; a++) {
+        u32 idx = pushPool.activeList[a];
+        Entity& e = pushPool.entities[idx];
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;
         if (e.enemyType == EnemyType::PROP) continue;

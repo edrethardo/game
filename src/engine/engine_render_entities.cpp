@@ -396,10 +396,27 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         }
     }
 
-    // Second pass: render translucent webs with alpha blending (batched, single state change)
+    // Second pass: render translucent webs with alpha blending (batched, single state change).
+    // Detect webs by content, not floor number. The previous gate was
+    //   bool hasCavernWebs = (m_level.currentFloor >= 21 && currentFloor <= 30);
+    // which assumed webs only spawned on the cavern tier — but spawnFloorDecorations
+    // populates webs on every tier's prop list (engine_spawn.cpp:737-753, matWeb is the
+    // first entry in dungeon/catacomb/cavern/hellforge/void lists), so on floors outside
+    // 21-30 the main pass would `continue` over every web (web-matId skip above) and the
+    // second pass never ran — web props became invisible solid obstacles the player could
+    // walk into. The content scan preserves the original optimization (skip the GL_BLEND
+    // state change when no webs are present) without baking floor numbers into the gate.
     {
-        bool hasCavernWebs = (m_level.currentFloor >= 21 && m_level.currentFloor <= 30);
-        if (hasCavernWebs) {
+        bool hasAnyWebs = false;
+        for (u32 _a = 0; _a < entPool.activeCount && !hasAnyWebs; _a++) {
+            u32 i = entPool.activeList[_a];
+            const Entity& e = entPool.entities[i];
+            if (e.materialId == s_webMatIds[0] || e.materialId == s_webMatIds[1] ||
+                e.materialId == s_webMatIds[2] || e.materialId == s_webMatIds[3]) {
+                hasAnyWebs = true;
+            }
+        }
+        if (hasAnyWebs) {
         Renderer::flush();
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

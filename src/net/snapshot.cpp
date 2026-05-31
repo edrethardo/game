@@ -108,6 +108,9 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         // bit without animating a roll on every remote respawn. Until NetPlayer carries
         // real roll state, dodgeFlags stays 0 and remotes don't animate the roll.
         sp.dodgeFlags = 0;
+        // PlayerClass on the wire so clients pick the correct per-class mesh for remotes.
+        // Clamped on read in deserialize() against PlayerClass::CLASS_COUNT.
+        sp.playerClass = static_cast<u8>(np.playerClass);
     }
 
     // Entities (only active ones). entKeys[i] = squared distance of entity i to the
@@ -162,6 +165,13 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         se.halfExtentsXQ = packExt(e.halfExtents.x);
         se.halfExtentsYQ = packExt(e.halfExtents.y);
         se.halfExtentsZQ = packExt(e.halfExtents.z);
+        // Attack swing countdown: pack [0, 1.0s] into u8 (1/255s ≈ 3.9 ms per step).
+        // Set to 0.3 by AI when an attack fires; decays to 0 in EnemyAI::update. Without this
+        // on the wire, clients never see attack lunges/swings (N4 gated off the local ghost AI).
+        f32 aq = e.attackAnimT * 255.0f;
+        if (aq < 0.0f)   aq = 0.0f;
+        if (aq > 255.0f) aq = 255.0f;
+        se.attackAnimQ = static_cast<u8>(aq);
     }
 
     // Projectiles (only active ones). projKeys mirrors entKeys for distance ordering.
@@ -200,6 +210,11 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         // player for loot exclusivity / ring on-kill passives. Without this, a remote's
         // molotov in flight gets ownerSlot=0xFF on every observer and credits no one.
         sp.ownerSlot = p.ownerSlot;
+        // V2 prediction match key: low 16 bits of the firing client's tick at fire moment.
+        // Carries through CL_FIRE_WEAPON → projectile.clientTick → wire → client interp,
+        // where it matches a locally-spawned predicted ghost so the ghost despawns when
+        // the authoritative projectile lands. 0 for host/NPC/skill-spawned projectiles.
+        sp.clientTickLow = static_cast<u16>(p.clientTick & 0xFFFF);
     }
 
     // World items (dropped loot). Server-authoritative (N5): every active world item is
@@ -259,13 +274,18 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 // the structs, which include alignment padding that is never serialized).
 // Player: 1(slot)+1(flags)+1(weapon)+1(health)+2(maxHealth) + 6(pos)+4(vel)+2(yaw)+2(pitch)
 //       + 1(clip)+1(statusFlags)+1(invuln)+1(poison)+1(burn)+1(freeze)
-//       + 1(animFlags)+1(weaponMeshId)+1(dodgeFlags) = 29. (Was 31 before lockIndex was retired.)
-static constexpr u32 SNAP_PLAYER_WIRE     = 29;
+//       + 1(animFlags)+1(weaponMeshId)+1(dodgeFlags)+1(playerClass) = 30.
+//       (playerClass added so remote players render with the correct per-class mesh on clients.)
+static constexpr u32 SNAP_PLAYER_WIRE     = 30;
 // Entity: 1+1+1+1 + 6(pos) + 2(yaw) + 4(vel) + 1(stun)+1(freeze)+1(limb)+1(bossStatus)
-//       + 1(meshId)+1(materialId)+1(enemyType)+1(weaponMeshId) + 3(halfExtentsQ) = 27.
-static constexpr u32 SNAP_ENTITY_WIRE     = 27;
-// Projectile: 2(idx) + 1(flags)+1(projFlags)+1(meshId)+1(radiusQ) + 6(pos) + 6(vel) + 1(ownerSlot) = 19.
-static constexpr u32 SNAP_PROJECTILE_WIRE = 19;
+//       + 1(meshId)+1(materialId)+1(enemyType)+1(weaponMeshId) + 3(halfExtentsQ)
+//       + 1(attackAnimQ) = 28. (attackAnimQ added so clients see enemy attack animations
+//       after N4 gated off the local ghost AI that used to tick the timer.)
+static constexpr u32 SNAP_ENTITY_WIRE     = 28;
+// Projectile: 2(idx) + 1(flags)+1(projFlags)+1(meshId)+1(radiusQ) + 6(pos) + 6(vel) + 1(ownerSlot)
+//           + 2(clientTickLow) = 21. (clientTickLow added so firing clients can match-and-
+//           despawn locally-predicted projectile ghosts when the authoritative one arrives.)
+static constexpr u32 SNAP_PROJECTILE_WIRE = 21;
 // World item: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos) + 1(ownerSlot) + 1(exclusiveTimerQ) = 16.
 static constexpr u32 SNAP_WORLDITEM_WIRE  = 16;
 // Fixed prefix: 4 B packet header + snapshot header + MAX_PLAYERS u32 input ticks.
@@ -379,6 +399,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w8(sp.animFlags);
         w8(sp.weaponMeshId);
         w8(sp.dodgeFlags);  // Wanderer dodge state (bit0=rolling, bits1-3=counterStacks)
+        w8(sp.playerClass); // PlayerClass cast to u8 — drives per-class mesh on the client
     }
 
     // Entities
@@ -405,6 +426,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w8(se.halfExtentsXQ);    // (Audit P2 #4) per-entity collider extents
         w8(se.halfExtentsYQ);
         w8(se.halfExtentsZQ);
+        w8(se.attackAnimQ);      // attack swing countdown (0-1.0s in 1/255s steps)
     }
 
     // Projectiles
@@ -422,6 +444,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize) {
         w16(sp.velY);
         w16(sp.velZ);
         w8(sp.ownerSlot);     // (Audit-A) firing slot for kill-credit on clients
+        w16(sp.clientTickLow); // V2 fire prediction match key
     }
 
     // World items (lowest priority — written last so they drop first under a tight budget).
@@ -508,6 +531,12 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.animFlags    = r.readU8();
         sp.weaponMeshId = r.readU8();
         sp.dodgeFlags   = r.readU8();  // bit0=rolling, bits1-3=counterStacks
+        sp.playerClass  = r.readU8();  // PlayerClass cast to u8 — validated on read in net code
+        // Defensive clamp: a malformed/older-protocol packet would otherwise index kClassDefs
+        // out of bounds when the renderer (or anyone else) looks up cd.meshName below. Map
+        // anything past CLASS_COUNT to WARRIOR (0), matching onPlayerJoin's fallback.
+        if (sp.playerClass >= static_cast<u8>(PlayerClass::CLASS_COUNT))
+            sp.playerClass = static_cast<u8>(PlayerClass::WARRIOR);
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {
@@ -533,6 +562,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         se.halfExtentsXQ = r.readU8();   // (Audit P2 #4)
         se.halfExtentsYQ = r.readU8();
         se.halfExtentsZQ = r.readU8();
+        se.attackAnimQ   = r.readU8();   // attack swing countdown (1/255s steps)
     }
 
     for (u32 i = 0; i < snap.projectileCount; i++) {
@@ -549,6 +579,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.velY      = r.readU16();
         sp.velZ      = r.readU16();
         sp.ownerSlot = r.readU8();   // (Audit-A) firing slot for kill-credit on clients
+        sp.clientTickLow = r.readU16(); // V2 fire prediction match key
     }
 
     for (u32 i = 0; i < snap.worldItemCount; i++) {

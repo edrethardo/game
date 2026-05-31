@@ -259,6 +259,10 @@ private:
         f32            playerMaxHealth[MAX_PLAYERS];
         u8             playerAnimFlags[MAX_PLAYERS]; // bit0=attacking, bit1=reloading, bit2=dead
         u8             playerWeaponMeshId[MAX_PLAYERS]; // equipped weapon mesh (wire; clients lack remote inventories)
+        // PlayerClass (cast to u8) of each remote player — populated from SnapPlayer.playerClass
+        // each snapshot. Without this the renderer can't pick the per-class mesh for a remote
+        // (the client's NetPlayer.playerClass for non-local slots is never set).
+        u8             playerClass[MAX_PLAYERS];
     };
     RenderInterp m_renderInterp;
 
@@ -412,6 +416,11 @@ private:
     void updatePlayerPickup();
     // Returns true if the player descended (caller should return immediately)
     bool updateFloorDoor();
+    // Run the floor-descent flow (bump currentFloor, grow all players, refresh cooldowns,
+    // save, schedule FLOOR_TRANSITION, broadcast SV_LEVEL_SEED). Shared between the local
+    // host-pressed-E path (updateFloorDoor) and the remote client request path
+    // (onDescendRequest). Returns true on success — caller skips remainder of tick.
+    bool triggerFloorDescent();
     bool floorBossAlive() const; // true while a milestone boss on this floor is not yet dead
 
     // gameUpdate helpers — extracted from the god function for readability.
@@ -499,6 +508,13 @@ private:
     static constexpr u32 MAX_SAVE_SLOTS = 20;
     u8 m_activeSaveSlot = 0;  // 0 = no active slot, 1-20 = slot number
 
+    // Set by the client-side menu when the join flow picked "Continue" with a
+    // valid save slot — the save is loaded locally before connectToServer, and this
+    // flag tells (a) startGame to skip the inventory wipe + starting-kit grant and
+    // (b) updateLobby (post-SV_JOIN_ACCEPT) to push the loaded inventory to the
+    // server via CL_INVENTORY_SYNC. Cleared after the sync is sent.
+    bool m_clientLoadedFromSave = false;
+
     struct SaveSlotInfo {
         bool exists;
         u8   floor;
@@ -546,6 +562,48 @@ private:
     // Server: respawn a dead client's NetPlayer (idempotent; revival propagates via snapshot).
     void handleRespawnRequest(u8 playerSlot);
 
+    // Client: request the host trigger a floor descent at the portal (reliable
+    // CL_REQUEST_DESCEND). Server re-validates proximity + boss-dead before triggering.
+    void sendDescendRequest();
+    // Server: validate a remote client's descent request and run the shared descent flow.
+    void handleDescendRequest(u8 playerSlot);
+
+    // Client: send a weapon-fire request (unreliable CL_FIRE_WEAPON) carrying the local
+    // eye position + aim at the moment of trigger. The server fires authoritatively
+    // from THESE values — no drain-derived np.yaw — so a slow input queue can't
+    // produce a "fires along aim from seconds ago" stale shot. Phase 1.1: moved from
+    // reliable→unreliable so a lost datagram isn't paced behind an ~RTT retransmit;
+    // resendPendingFire() instead re-pushes the same packet for a few client ticks
+    // and the server's per-(slot,clientTick) dedup ring drops the duplicates.
+    void sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch);
+    // Client: retransmit the most recent CL_FIRE_WEAPON packet on the unreliable channel
+    // up to FIRE_TX_REPEATS times after the original send. Called by clientNetPre once
+    // per client tick. Cheap (no-op when no fire is pending).
+    void resendPendingFire();
+    // Server: clear the CL_FIRE_WEAPON dedup ring for a single slot — called from
+    // onPlayerJoin so a recycled slot doesn't carry the prior occupant's tick history.
+    void resetFireDedup(u8 slot);
+    // Server: clear ALL CL_FIRE_WEAPON dedup rings — called after a floor descent so
+    // post-reset client ticks (which restart near 0) aren't squashed as duplicates of
+    // ticks the ring saw on the prior floor. Also drops any in-flight client-side
+    // retransmit window so a client doesn't keep re-sending a prior-floor fire.
+    void resetAllFireDedup();
+    // Server: handle a remote client's fire request. Loose-validates (cooldown gate,
+    // origin clamped to within ~1 m of authoritative np.position) and queues a pending
+    // fire that the per-tick handleWeaponFireForPlayer consumes.
+    void handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
+                                 Vec3 claimedOrigin, f32 claimedYaw, f32 claimedPitch);
+
+    // Phase 3 — Server-side lag compensation. Snapshot every active entity's transform
+    // each tick; when a remote client's hitscan / melee is processed, rewind candidate
+    // entity poses to where they were on the firer's screen, run the hit query, then
+    // restore present-time poses before any side-effects observable outside.
+    void pushEntityHistory();        // call from serverNetPost after snapshot built
+    void resetEntityHistory();       // call from startGame (floor descent / new level)
+    u32  computeLagCompTicks(u8 slot) const;
+    void beginLagComp(u32 ticksAgo);
+    void endLagComp();
+
     // Net callbacks (static, forwarded to engine instance)
     static void onSnapshot(const u8* data, u32 size);
     static void onInput(u8 playerSlot, const u8* data, u32 size);
@@ -554,6 +612,20 @@ private:
     static void onPickup(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_RESPAWN handler (forwarded from the net layer).
     static void onRespawn(u8 playerSlot);
+    // Server-side CL_REQUEST_DESCEND handler (forwarded from the net layer). Re-validates
+    // proximity to the door + boss-dead gate, then runs the shared descent flow.
+    static void onDescendRequest(u8 playerSlot);
+    // Server-side CL_FIRE_WEAPON handler (forwarded from the net layer). Unpacks the
+    // payload (clientTick + claimed origin + yaw/pitch) and queues the fire request.
+    static void onFireWeapon(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_INVENTORY_SYNC handler: deserialize the joining client's saved
+    // inventory + class state into m_inventories[slot] / m_quickbars[slot] / m_players[slot]
+    // overriding whatever starting kit onPlayerJoin granted moments earlier.
+    static void onInventorySync(u8 playerSlot, const u8* data, u32 size);
+    // Client-side helper: serialize m_inventories[localSlot] + class/skill state and ship
+    // it via CL_INVENTORY_SYNC. Called once shortly after SV_JOIN_ACCEPT when the joiner
+    // came from the menu's "Continue" path with a loaded save.
+    void sendInventorySync();
     static void onEvent(const u8* data, u32 size);
     static void onPlayerJoin(u8 playerSlot, u8 classId);
     static void onPlayerLeft(u8 playerSlot);

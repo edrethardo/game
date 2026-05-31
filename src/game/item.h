@@ -181,6 +181,11 @@ struct ClassDef {
     u8 skillUnlockFloor[4];        // floor at which each skill becomes available
     u8 skillUpgradeFloor[4];       // floor at which each skill gets its upgrade
     WeaponType preferredWeapon;    // +20% damage with this weapon type
+    // Visual identity. Renderer resolves these to mesh/material IDs at draw time and
+    // falls back to "human" / "human_skin" if either lookup fails (e.g. an unbuilt asset),
+    // so an empty string here is a valid "use the default humanoid" sentinel.
+    const char* meshName;          // e.g. "player_warrior"
+    const char* materialName;      // e.g. "player_warrior_skin"
 };
 
 // Global class definition table (defined in engine.cpp)

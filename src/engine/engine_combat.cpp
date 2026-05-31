@@ -58,6 +58,118 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
+// Per-slot pending fire request, queued by Engine::handleFireWeaponRequest (CL_FIRE_WEAPON
+// handler) and consumed by the next handleWeaponFireForPlayer pass. The server fires from
+// THESE claimed origin/yaw/pitch values rather than the drain-derived np.yaw — which was
+// the bug source the user described as "fires from aim a few seconds ago" under input
+// queue lag. Single slot per player; a second request before the first is consumed
+// overwrites the first (rare in practice — client enforces cooldown locally too).
+struct PendingFire {
+    bool valid       = false;
+    u32  clientTick  = 0;
+    Vec3 origin      = {0,0,0};
+    f32  yaw         = 0.0f;
+    f32  pitch       = 0.0f;
+};
+static PendingFire s_pendingFires[MAX_PLAYERS];
+
+// Phase 1.1 — Server-side dedup of CL_FIRE_WEAPON arrivals. The client now sends fires
+// on the unreliable channel and retransmits the same packet for FIRE_TX_REPEATS client
+// ticks to cover UDP loss without paying ENet's RTT-paced reliable retransmit latency.
+// Without dedup, every retransmit would fire the weapon again. The ring keeps the last
+// FIRE_DEDUP_SIZE client ticks we've already processed for each slot and short-circuits
+// repeats. 32 × 4 slots × 4 B = 512 B, trivial. Cleared on floor descent (m_serverTick
+// resets, so old ticks could spuriously match new ones) and on player join (next
+// occupant of the slot starts fresh).
+static constexpr u32 FIRE_DEDUP_SIZE = 32;
+struct FireDedupRing {
+    u32 recentTicks[FIRE_DEDUP_SIZE] = {};
+    u8  head  = 0;   // next write index (LRU)
+    u8  count = 0;
+};
+static FireDedupRing s_fireDedupRing[MAX_PLAYERS];
+
+static bool fireWasSeen(u8 slot, u32 clientTick) {
+    if (slot >= MAX_PLAYERS) return false;
+    const FireDedupRing& r = s_fireDedupRing[slot];
+    for (u8 i = 0; i < r.count; i++) {
+        if (r.recentTicks[i] == clientTick) return true;
+    }
+    return false;
+}
+static void recordFire(u8 slot, u32 clientTick) {
+    if (slot >= MAX_PLAYERS) return;
+    FireDedupRing& r = s_fireDedupRing[slot];
+    r.recentTicks[r.head] = clientTick;
+    r.head = (r.head + 1) % FIRE_DEDUP_SIZE;
+    if (r.count < FIRE_DEDUP_SIZE) r.count++;
+}
+
+// Phase 1.1 — Client-side fire retransmit buffer. Holds the serialized CL_FIRE_WEAPON
+// packet bytes from the most recent local fire so resendPendingFire() can retransmit
+// it for FIRE_TX_REPEATS client ticks. Only the most recent fire is tracked — a
+// faster-than-50 ms fire cadence would overwrite the prior slot, but at that cadence
+// the prior fire's initial datagram has almost always already landed.
+static constexpr u8 FIRE_TX_REPEATS = 3;  // ≈50 ms of retransmit at 60 Hz
+struct ClientFireTx {
+    bool active         = false;
+    u8   ticksRemaining = 0;
+    u32  size           = 0;
+    u8   buf[sizeof(PacketHeader) + 14] = {};
+};
+static ClientFireTx s_clientFireTx;
+
+// =====================================================================
+// Phase 3 — Server-side lag compensation for hitscan / melee
+// =====================================================================
+//
+// Per-entity ring buffer of recent transforms. When a remote client fires a
+// hitscan or melee, the server "rewinds" candidate entities to the pose the
+// client was actually rendering at the moment of the click — RTT/2 + the
+// client's interp delay (~50 ms) in the past — runs the hit query in that
+// rewound frame, then restores present-time poses before applying damage.
+//
+// This means: "if my crosshair was on the enemy when I clicked, the server
+// agrees". Without it, fast-moving enemies at 100 ms ping appear ~0.5–1 m
+// further along their path on the server than where the client saw them →
+// hits silently miss. Counter-Strike-style: ONLY entity poses are rewound,
+// NEVER wall geometry, so you can't shoot through cover that the firer's
+// view said wasn't there. Same goes for HP and death state — they stay at
+// present-time so a corpse can't be hit retroactively.
+//
+// Sized to cover ~267 ms (16 ticks at 60 Hz) — comfortably more than any
+// realistic (RTT/2 + interp_delay) combination we'd lag-comp for. Larger
+// gaps fall back to present-time resolution; the firer's high-ping bullets
+// just behave like the un-lag-compensated baseline.
+constexpr u32 LAG_COMP_HISTORY_TICKS = 16;
+constexpr u32 LAG_COMP_MAX_TICKS     = LAG_COMP_HISTORY_TICKS - 1;
+struct EntPoseSnap {
+    Vec3 position;
+    f32  yaw;
+    Vec3 halfExtents;
+    u32  tickStamp;   // serverTick at which this entry was written; 0 = unused
+};
+static EntPoseSnap s_entHistory[MAX_ENTITIES][LAG_COMP_HISTORY_TICKS];
+static u8          s_entHistoryHead[MAX_ENTITIES];   // next write index per entity
+// Scratch saved-current pose during a beginLagComp / endLagComp window so we can
+// restore the live entity pool to present time after the rewound hit query runs.
+static EntPoseSnap s_scratchPose[MAX_ENTITIES];
+static bool        s_scratchValid[MAX_ENTITIES];
+
+static const EntPoseSnap* findHistoryAt(u32 entIdx, u32 targetTick) {
+    if (entIdx >= MAX_ENTITIES) return nullptr;
+    const EntPoseSnap* best = nullptr;
+    u32 bestDelta = UINT32_MAX;
+    for (u32 k = 0; k < LAG_COMP_HISTORY_TICKS; k++) {
+        const EntPoseSnap& e = s_entHistory[entIdx][k];
+        if (e.tickStamp == 0) continue;
+        u32 delta = (e.tickStamp >= targetTick)
+            ? (e.tickStamp - targetTick) : (targetTick - e.tickStamp);
+        if (delta < bestDelta) { bestDelta = delta; best = &e; }
+    }
+    return best;
+}
+
 
 // ---------------------------------------------------------------------------
 // Weapon fire (singleplayer — unchanged from Phase 3)
@@ -186,6 +298,15 @@ void Engine::handleWeaponFire(f32 dt) {
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
     Vec3 forward = m_localPlayer.forward;
 
+    // CLIENT-side prediction: the local fire path runs (cooldown/ammo/visuals), but the
+    // AUTHORITATIVE fire happens server-side. Send CL_FIRE_WEAPON with the eye position
+    // and aim THIS frame — the server fires from those exact values, eliminating the
+    // prior bug where the server used drain-derived np.yaw and could fire from a yaw
+    // that was seconds stale under input queue lag.
+    if (m_netRole == NetRole::CLIENT) {
+        sendFireWeapon(eyePos, m_localPlayer.yaw, m_localPlayer.pitch);
+    }
+
     AttackResult result;
     switch (wpn.type) {
     case WeaponType::MELEE: {
@@ -194,16 +315,51 @@ void Engine::handleWeaponFire(f32 dt) {
         WeaponSubtype melSub = WeaponSubtype::NONE;
         if (qbItem && !isItemEmpty(*qbItem))
             melSub = m_itemDefs[qbItem->defId].weaponSubtype;
-        result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
-        m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
+        if (m_netRole == NetRole::CLIENT) {
+            // Phase 2.2 — Client-side melee hit prediction. Cone-query against the
+            // INTERPOLATED entity pool (what the player actually sees) and spawn impact
+            // FX immediately for each hit. Skip Combat::fireMelee — it would call
+            // applyDamage against the local ghost pool (stale, since the client's
+            // entity AI doesn't tick) and produce blood at the wrong position. The
+            // server resolves the hit authoritatively and ships the real damage
+            // number via SV_EVENT::DAMAGE_NUMBER (now reliable, Phase 2.1).
+            f32 cosCone = cosf(radians(wpn.coneAngleDeg * 0.5f));
+            EntityHandle hits[MAX_ENTITIES];
+            f32 distances[MAX_ENTITIES];
+            u32 hitCount = CombatQuery::queryConeSorted(
+                m_renderInterp.entities, eyePos, forward, cosCone, wpn.range,
+                hits, distances, MAX_ENTITIES, /*horizontalCone=*/true);
+            for (u32 i = 0; i < hitCount; i++) {
+                Entity* e = handleGet(m_renderInterp.entities, hits[i]);
+                if (!e) continue;
+                for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
+                    if (!m_fx.impactFX[fx].active) {
+                        Vec3 nrm = eyePos - e->position; nrm.y = 0;
+                        f32 l = lengthSq(nrm);
+                        nrm = (l > 1e-6f) ? normalize(nrm) : Vec3{0,0,1};
+                        m_fx.impactFX[fx] = {e->position, nrm, 0.3f, true, true};
+                        break;
+                    }
+                }
+            }
+            result.didFire     = true;
+            result.entitiesHit = hitCount;
+            result.hitEntity   = (hitCount > 0);
+            m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
+            // Skip cleave prediction: cleave is 5% RNG and the server's own roll won't
+            // match the client's, so a predicted cleave would frequently mispredict.
+        } else {
+            result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
+            m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
 
-        // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
-        if (melSub != WeaponSubtype::DAGGER && melSub != WeaponSubtype::NONE &&
-            result.hitEntity && (std::rand() % 100) < 5) {
-            WeaponDef cleaveWpn = wpn;
-            cleaveWpn.coneAngleDeg = 360.0f;
-            cleaveWpn.damage *= 0.5f; // cleave deals half damage
-            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities); // cleave is never a crit
+            // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
+            if (melSub != WeaponSubtype::DAGGER && melSub != WeaponSubtype::NONE &&
+                result.hitEntity && (std::rand() % 100) < 5) {
+                WeaponDef cleaveWpn = wpn;
+                cleaveWpn.coneAngleDeg = 360.0f;
+                cleaveWpn.damage *= 0.5f; // cleave deals half damage
+                Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities); // cleave is never a crit
+            }
         }
     } break;
     case WeaponType::HITSCAN:
@@ -243,7 +399,28 @@ void Engine::handleWeaponFire(f32 dt) {
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
             result.hitEntity = (oCnt > 0);
         } else {
-            result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
+            // Phase 2.2 — On CLIENT, predict the hitscan against the INTERPOLATED entity
+            // pool (what the player sees) so impact sparks and crosshair "hit" feedback
+            // appear within one frame instead of waiting for the server's HITSCAN_IMPACT
+            // event (~RTT/2 + snapshot skew). The server still resolves the authoritative
+            // hit and ships the real damage number; this is purely a visual prediction.
+            // Host / singleplayer still use the canonical Combat::fireHitscan against the
+            // authoritative m_entities pool.
+            if (m_netRole == NetRole::CLIENT) {
+                CombatHit hit = CombatQuery::raycast(m_level.grid, m_renderInterp.entities,
+                                                     eyePos, forward, wpn.range);
+                result.didFire = true;
+                if (hit.hit) {
+                    result.hitEntity   = (hit.type == CombatHit::ENTITY);
+                    result.hitWorld    = (hit.type == CombatHit::WORLD);
+                    result.hitPosition = hit.position;
+                    result.hitNormal   = hit.normal;
+                    result.hitDistance = hit.distance;
+                    result.entitiesHit = (hit.type == CombatHit::ENTITY) ? 1 : 0;
+                }
+            } else {
+                result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
+            }
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
             if (result.hitEntity || result.hitWorld) {
                 m_lastCombatHit.hit      = true;
@@ -331,6 +508,16 @@ void Engine::handleWeaponFire(f32 dt) {
             if (isMolotov)             proj.lightColor = {1.0f, 0.5f, 0.1f}; // fire
             else if (isWand)           proj.lightColor = {0.4f, 0.6f, 1.0f}; // arcane blue
             else if (proj.projFlags & PROJ_VOID) proj.lightColor = {0.4f, 0.0f, 0.8f}; // purple
+            // V2 fire prediction: on CLIENT, mark this as a locally-predicted ghost so the
+            // renderer merges it into m_renderInterp.projectiles and the matching authoritative
+            // snapshot projectile despawns it on arrival. clientTick = current tick so the
+            // server-stored counterpart will carry the same low-16-bit value back. Host/SP
+            // skip this — their fire IS the authoritative one.
+            if (m_netRole == NetRole::CLIENT) {
+                proj.predicted     = true;
+                proj.clientTick    = m_serverTick;
+                proj.predictedLife = 0.0f;
+            }
         }
         result.didFire = true;
         m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.02f);
@@ -549,6 +736,209 @@ void Engine::handleWeaponFire(f32 dt) {
 }
 
 // ---------------------------------------------------------------------------
+// CL_FIRE_WEAPON server-side intake. Validates the request (cooldown, origin
+// sanity) and queues a per-slot pending fire that handleWeaponFireForPlayer
+// will consume on the next tick. The yaw/pitch are stored verbatim; the
+// origin is clamped to within 1 m of np.eyePos() so a slightly mis-synced
+// client position doesn't fire from an unreachable point.
+// ---------------------------------------------------------------------------
+void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
+                                     Vec3 claimedOrigin, f32 claimedYaw, f32 claimedPitch) {
+    if (playerSlot >= MAX_PLAYERS) return;
+    // Phase 1.1 — Squash unreliable-channel retransmits. The client sends the same
+    // CL_FIRE_WEAPON packet for ~3 ticks after the original fire; without this,
+    // every redundant copy would queue another PendingFire and the weapon would
+    // fire 2-4 times for a single trigger. Dedup before any side effect.
+    if (fireWasSeen(playerSlot, clientTick)) return;
+    recordFire(playerSlot, clientTick);
+    NetPlayer& np = m_players[playerSlot];
+    if (!np.active || np.isDead) return;            // dead/inactive players don't fire
+    // Loose anti-cheat: clamp claimed origin to within 1 m of the server's authoritative
+    // eye position. A normal client running at 60 Hz will be within a few cm; clamping
+    // (rather than rejecting) keeps the shot landing even if a peer is slightly out of
+    // sync, which is preferable to a missed shot in co-op.
+    Vec3 svOrigin = np.eyePos();
+    Vec3 delta    = claimedOrigin - svOrigin;
+    f32  distSq   = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+    if (distSq > 1.0f) claimedOrigin = svOrigin;    // > 1 m → snap to server origin
+    PendingFire& pending = s_pendingFires[playerSlot];
+    pending.valid      = true;
+    pending.clientTick = clientTick;
+    pending.origin     = claimedOrigin;
+    pending.yaw        = claimedYaw;
+    pending.pitch      = claimedPitch;
+    // Cooldown is checked when handleWeaponFireForPlayer consumes the pending fire — the
+    // server's cooldownTimer is decremented continuously by that function, so we don't
+    // pre-screen here (would require a redundant cooldown copy).
+}
+
+// ---------------------------------------------------------------------------
+// Client send path: build and ship a CL_FIRE_WEAPON packet on every local
+// fire trigger. Phase 1.1: unreliable + retransmit. ENet's reliable channel
+// paces retransmits to ~RTT, so a single lost fire datagram on 100 ms ping
+// stalled the authoritative shot by ≥200 ms — while the client's predicted
+// projectile ghost auto-despawns at 0.5 s, leaving the user staring at a
+// projectile that "vanished" mid-flight. Sending unreliably and retransmitting
+// the same bytes for the next FIRE_TX_REPEATS client ticks (~50 ms) covers
+// loss within one snapshot of the original click; the server's per-clientTick
+// dedup ring (s_fireDedupRing) silently squashes the duplicates so the gun
+// only fires once. Layout (unchanged):
+//   header(4) + clientTick(4) + posX/Y/Z(6) + yawQ(2) + pitchQ(2) = 18 B.
+// ---------------------------------------------------------------------------
+void Engine::sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch) {
+    if (m_netRole != NetRole::CLIENT) return;       // host fires directly via handleWeaponFire
+    u8 buf[sizeof(PacketHeader) + 14];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_FIRE_WEAPON;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    u32 tick = m_serverTick;                        // client's current tick — also serves as dedup key on the server
+    std::memcpy(buf + off, &tick, 4); off += 4;
+    u16 posXQ = Quantize::packPos(origin.x);
+    u16 posYQ = Quantize::packPos(origin.y);
+    u16 posZQ = Quantize::packPos(origin.z);
+    std::memcpy(buf + off, &posXQ, 2); off += 2;
+    std::memcpy(buf + off, &posYQ, 2); off += 2;
+    std::memcpy(buf + off, &posZQ, 2); off += 2;
+    u16 yawQ   = Quantize::packAngle(yaw);
+    u16 pitchQ = Quantize::packAngle(pitch);
+    std::memcpy(buf + off, &yawQ,   2); off += 2;
+    std::memcpy(buf + off, &pitchQ, 2); off += 2;
+    Net::sendToServer(buf, off, /*reliable=*/false);
+    // Queue retransmits — clientNetPre calls resendPendingFire() once per tick.
+    s_clientFireTx.active         = true;
+    s_clientFireTx.ticksRemaining = FIRE_TX_REPEATS;
+    s_clientFireTx.size           = off;
+    std::memcpy(s_clientFireTx.buf, buf, off);
+}
+
+// Phase 1.1 — Retransmit the most recent CL_FIRE_WEAPON packet up to FIRE_TX_REPEATS
+// times to cover unreliable-channel packet loss. Called from clientNetPre each tick.
+// The retransmit is the exact same bytes (same clientTick) so the server's dedup ring
+// drops it after the first arrival. A new local fire overwrites this slot in
+// sendFireWeapon; in the (uncommon) case of a fire cadence faster than ~50 ms, the
+// prior fire's coverage is sacrificed in favor of the newer one's, which is the
+// right trade-off (the newer fire is what the player just clicked).
+void Engine::resendPendingFire() {
+    if (m_netRole != NetRole::CLIENT) return;
+    if (!s_clientFireTx.active) return;
+    if (s_clientFireTx.ticksRemaining == 0) { s_clientFireTx.active = false; return; }
+    s_clientFireTx.ticksRemaining--;
+    Net::sendToServer(s_clientFireTx.buf, s_clientFireTx.size, /*reliable=*/false);
+}
+
+// Phase 1.1 — Reset server-side CL_FIRE_WEAPON dedup state for a slot. Called by
+// onPlayerJoin when a previously-occupied slot is reused (would otherwise carry
+// stale ticks from the previous occupant into the new joiner's reused buffer).
+void Engine::resetFireDedup(u8 slot) {
+    if (slot < MAX_PLAYERS) s_fireDedupRing[slot] = FireDedupRing{};
+}
+
+// Phase 1.1 — Reset all dedup rings. Called after a floor descent resets m_serverTick
+// to 0 — without this, the post-descent client tick 0/1/2 would collide with whatever
+// was in the ring at the end of the prior floor and the first few shots on the new
+// floor would be silently squashed as "duplicates".
+void Engine::resetAllFireDedup() {
+    for (u32 i = 0; i < MAX_PLAYERS; i++) s_fireDedupRing[i] = FireDedupRing{};
+    // Also drop any in-flight client-side retransmits — the prior floor's fire window
+    // has no meaning on the new one.
+    s_clientFireTx = ClientFireTx{};
+}
+
+// Phase 3.1 — Push every active entity's current pose into its per-entity history ring.
+// Called from serverNetPost AFTER the snapshot is built, so the entry for serverTick T
+// represents "what the snapshot for tick T contains" — which is what the client renders
+// from. Cheap: a couple of writes per active entity, no allocations.
+void Engine::pushEntityHistory() {
+    if (m_netRole != NetRole::SERVER) return;
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        Entity& e = m_entities.entities[i];
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        u8 h = s_entHistoryHead[i];
+        s_entHistory[i][h].position    = e.position;
+        s_entHistory[i][h].yaw         = e.yaw;
+        s_entHistory[i][h].halfExtents = e.halfExtents;
+        s_entHistory[i][h].tickStamp   = (m_serverTick == 0) ? 1u : m_serverTick;
+        s_entHistoryHead[i] = (h + 1) % LAG_COMP_HISTORY_TICKS;
+    }
+}
+
+// Phase 3.1 — Wipe the entire history ring (and any in-flight scratch). Called from
+// startGame so a new floor doesn't see entries from the prior floor's entities at the
+// same pool indices (which would be in geometrically unrelated rooms). Also wipes
+// scratch state defensively.
+void Engine::resetEntityHistory() {
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        for (u32 k = 0; k < LAG_COMP_HISTORY_TICKS; k++) s_entHistory[i][k] = EntPoseSnap{};
+        s_entHistoryHead[i] = 0;
+        s_scratchValid[i] = false;
+    }
+}
+
+// Phase 3.1 — Compute how many ticks to rewind for a given firing slot. Uses ENet's
+// smoothed RTT (already populated in NetPlayerSlot::rttMs by Net::poll) + the client's
+// interp delay. Clamped to LAG_COMP_MAX_TICKS so out-of-window RTTs gracefully fall
+// back to present-time hit detection rather than reading uninitialized history.
+u32 Engine::computeLagCompTicks(u8 slot) const {
+    if (slot >= MAX_PLAYERS) return 0;
+    if (slot == 0) return 0;                // host: no network delay to compensate
+    f32 rttMs = 0.0f;
+    const NetPlayerSlot* slots = Net::getSlots();
+    if (slots) rttMs = slots[slot].rttMs;
+    // Client renders at server snapshot time - INTERP_DELAY_SEC (50 ms = 3 ticks at 60 Hz).
+    // Server processes the fire RTT/2 after the client clicked, so we rewind by
+    // RTT/2 in ticks PLUS the client's interp delay.
+    constexpr f32 TICK_MS    = 1000.0f / NET_TICK_RATE;     // 16.67 ms
+    constexpr f32 INTERP_TICKS = 0.05f * NET_TICK_RATE;     // 3
+    f32 rttHalfTicks = (rttMs * 0.5f) / TICK_MS;
+    f32 ticks = rttHalfTicks + INTERP_TICKS;
+    if (ticks < 0.0f) ticks = 0.0f;
+    u32 t = static_cast<u32>(ticks + 0.5f);
+    if (t > LAG_COMP_MAX_TICKS) t = 0;       // out-of-range: don't lag-comp this fire
+    return t;
+}
+
+// Phase 3.2 — Swap every active entity's transform to its pose `ticksAgo` ticks in
+// the past, saving the present pose to scratch. Combat queries that follow read the
+// historical poses; applyDamage / death checks read the live HP/flags (which we
+// intentionally do NOT rewind — corpses can't be hit retroactively, and the server
+// is still authoritative for damage). Call endLagComp before any state observable
+// outside the fire handler (snapshot build, AI tick, etc.).
+void Engine::beginLagComp(u32 ticksAgo) {
+    if (m_netRole != NetRole::SERVER) return;
+    if (ticksAgo == 0) return;               // no rewind needed
+    u32 targetTick = (m_serverTick > ticksAgo) ? (m_serverTick - ticksAgo) : 0;
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        Entity& e = m_entities.entities[i];
+        s_scratchValid[i] = false;
+        if (!(e.flags & ENT_ACTIVE)) continue;
+        if (e.flags & ENT_DEAD) continue;    // skip corpses — present-time dead means dead
+        const EntPoseSnap* hist = findHistoryAt(i, targetTick);
+        if (!hist) continue;
+        s_scratchPose[i].position    = e.position;
+        s_scratchPose[i].yaw         = e.yaw;
+        s_scratchPose[i].halfExtents = e.halfExtents;
+        s_scratchValid[i]            = true;
+        e.position    = hist->position;
+        e.yaw         = hist->yaw;
+        e.halfExtents = hist->halfExtents;
+    }
+}
+
+void Engine::endLagComp() {
+    if (m_netRole != NetRole::SERVER) return;
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        if (!s_scratchValid[i]) continue;
+        Entity& e = m_entities.entities[i];
+        e.position    = s_scratchPose[i].position;
+        e.yaw         = s_scratchPose[i].yaw;
+        e.halfExtents = s_scratchPose[i].halfExtents;
+        s_scratchValid[i] = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Weapon fire for any NetPlayer (server-authoritative)
 // ---------------------------------------------------------------------------
 void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
@@ -608,8 +998,29 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     // after this call — so there's nothing to do here (L7: the old per-player-cooldown TODO
     // was already implemented there; this stub is removed to avoid double-applying).
 
-    if (!(input->moveFlags & INPUT_FIRE)) return;
-    if (ws.cooldownTimer > 0.0f) return;
+    // Fire trigger: CL_FIRE_WEAPON queued a pending request with the client's CLAIMED origin
+    // and aim. The drain-derived np.yaw is no longer used to fire (it could lag by seconds
+    // under input queue jitter — see PendingFire comment at top of this file). If no pending
+    // fire is queued OR cooldown is still active, return early. Cooldown drift between client
+    // and server is normally sub-frame; rare over-the-cooldown fires get dropped here.
+    PendingFire& pending = s_pendingFires[np.slotIndex];
+    if (!pending.valid) return;
+    // Phase 1.2 — Small cooldown grace window. The local client predicts its own
+    // cooldown identically to the server, but network jitter (especially on the
+    // CL_FIRE_WEAPON for the PREVIOUS shot taking a longer path than this one) can
+    // leave the server's cooldown countdown lagging by tens of milliseconds. Without
+    // the grace, a perfectly-timed follow-up shot is silently dropped here and the
+    // client's predicted-ghost projectile auto-despawns at 0.5 s with no match,
+    // showing as a vanishing projectile. The grace is far smaller than any weapon's
+    // cooldown so it can't be exploited to cheat fire rate.
+    constexpr f32 COOLDOWN_GRACE = 0.05f;
+    if (ws.cooldownTimer > COOLDOWN_GRACE) { pending.valid = false; return; }
+    // Snapshot the request and immediately clear so a second concurrent request can queue.
+    Vec3  claimedOrigin     = pending.origin;
+    f32   claimedYaw        = pending.yaw;
+    f32   claimedPitch      = pending.pitch;
+    u32   pendingClientTick = pending.clientTick;
+    pending.valid = false;
 
     ws.cooldownTimer = wpn.cooldown;
 
@@ -645,12 +1056,28 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         wpn.damage *= (1.0f + missingPct);
     }
 
-    Vec3 eyePos = np.eyePos();
+    // Fire from the CLIENT'S claimed origin + aim (queued via CL_FIRE_WEAPON). The origin
+    // is already clamped to within 1 m of np.position by handleFireWeaponRequest, so it's
+    // safe to trust. The aim is whatever the player's crosshair was pointing at when they
+    // clicked — eliminates the prior np.yaw staleness under input queue lag.
+    Vec3 eyePos = claimedOrigin;
     Vec3 forward = normalize(Vec3{
-        -sinf(np.yaw) * cosf(np.pitch),
-         sinf(np.pitch),
-        -cosf(np.yaw) * cosf(np.pitch)
+        -sinf(claimedYaw) * cosf(claimedPitch),
+         sinf(claimedPitch),
+        -cosf(claimedYaw) * cosf(claimedPitch)
     });
+
+    // Phase 3.2 — Compute how far to rewind for this fire, then wrap the hitscan / melee
+    // path in beginLagComp / endLagComp so candidate entity poses match what the firing
+    // client was rendering. PROJECTILE doesn't rewind here — the projectile is spawned
+    // at present time and travels in present time; lag-comp for projectiles is its own
+    // (deferred) problem because the spawn position is already clamped to np.eyePos()
+    // and the in-flight collision happens on subsequent server ticks.
+    u32 lagCompTicks = 0;
+    if (wpn.type == WeaponType::MELEE || wpn.type == WeaponType::HITSCAN) {
+        lagCompTicks = computeLagCompTicks(np.slotIndex);
+        if (lagCompTicks > 0) beginLagComp(lagCompTicks);
+    }
 
     AttackResult result;
     switch (wpn.type) {
@@ -757,10 +1184,20 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
             }
             if (isMolotov)   proj.lightColor = {1.0f, 0.5f, 0.1f}; // fire
             else if (isWand) proj.lightColor = {0.4f, 0.6f, 1.0f}; // arcane blue
+            // V2 fire prediction: stamp the firing client's tick onto the authoritative
+            // projectile. The snapshot's clientTickLow carries the low 16 bits back to
+            // that client so it can match-and-despawn its local predicted ghost.
+            proj.clientTick = pendingClientTick;
         }
         result.hitEntity = false; // procs handled by projectile hit callback
     } break;
     }
+
+    // Phase 3.2 — Restore present-time entity poses if we rewound earlier. Must run
+    // before any code that observes entity positions (procs below trigger on hits,
+    // which are already determined; the post-fire on-hit / on-kill paths spawn things
+    // at entity positions and we want those to use the present-time pose).
+    if (lagCompTicks > 0) endLagComp();
 
     // --- Life steal ring passive for remote player ---
     if (np.ringPassive == SkillId::LIFE_STEAL && result.hitEntity) {
@@ -844,7 +1281,10 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                         f32 halfAngle = wpn.coneAngleDeg * 0.5f * 3.14159f / 180.0f;
                         for (u32 fi = 0; fi < 5; fi++) {
                             f32 t = (fi / 4.0f) * 2.0f - 1.0f;
-                            f32 angle = np.yaw + t * halfAngle;
+                            // Center the scorch fan on the CLIENT'S claimed aim, same as the
+                            // fire direction above — keeping these in sync prevents the procs
+                            // from drifting off the user's actual crosshair under input lag.
+                            f32 angle = claimedYaw + t * halfAngle;
                             Vec3 dir = {-sinf(angle), 0.0f, -cosf(angle)};
                             Vec3 zonePos = np.position + dir * wpn.range * 0.8f;
                             for (u32 si = 0; si < MAX_SCORCH; si++) {

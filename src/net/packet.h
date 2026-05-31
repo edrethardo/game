@@ -96,6 +96,20 @@ namespace Quantize {
     static constexpr f32 ANGLE_MIN = -3.14159265f;
     static constexpr f32 ANGLE_MAX =  3.14159265f;
 
-    inline u16 packAngle(f32 rad)   { return packFloat(rad, ANGLE_MIN, ANGLE_MAX); }
+    // Wrap-then-pack: the PROXIMATE caller passes accumulated yaw from a mouse-look
+    // loop (player.cpp) that never wraps the value back into [-PI, PI]. After a few
+    // turns yaw drifts to ±3.5+ rad, and packFloat's clamp-to-range would silently
+    // saturate to ±PI on the wire — visible as the receiver's yaw being "stuck at
+    // the boundary" by tens of milliradians. Worst for client-fired PROJECTILE
+    // weapons whose travel multiplies even small aim errors into meters-wide misses;
+    // melee/hitscan still hit at close range because their cone / ray is forgiving.
+    // Wrap defensively here so EVERY caller (NetInput.yawQ, SnapPlayer.yaw,
+    // SnapEntity.yaw, CL_FIRE_WEAPON yawQ) round-trips correctly.
+    inline u16 packAngle(f32 rad) {
+        constexpr f32 TWO_PI = 2.0f * ANGLE_MAX;
+        while (rad >  ANGLE_MAX) rad -= TWO_PI;
+        while (rad <  ANGLE_MIN) rad += TWO_PI;
+        return packFloat(rad, ANGLE_MIN, ANGLE_MAX);
+    }
     inline f32 unpackAngle(u16 v)   { return unpackFloat(v, ANGLE_MIN, ANGLE_MAX); }
 }

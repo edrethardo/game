@@ -92,6 +92,132 @@ void Engine::onRespawn(u8 playerSlot) {
     s_engine->handleRespawnRequest(playerSlot);
 }
 
+// Server-side CL_REQUEST_DESCEND dispatch. The instance handler re-validates the request
+// (proximity to the floor door + boss-dead gate) and then runs the shared descent flow,
+// which broadcasts SV_LEVEL_SEED to every client.
+void Engine::onDescendRequest(u8 playerSlot) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return; // only the host services descent requests
+    s_engine->handleDescendRequest(playerSlot);
+}
+
+// Server-side CL_FIRE_WEAPON dispatch. Unpacks the payload (clientTick + claimed origin
+// + yaw/pitch) and queues the fire request for the next per-tick handleWeaponFireForPlayer
+// pass to consume — the client's claimed aim is what the projectile/hitscan/melee fires
+// from, eliminating the prior "fires from drain-derived np.yaw stale by seconds" bug.
+void Engine::onFireWeapon(u8 playerSlot, const u8* data, u32 size) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return; // only the host fires authoritatively
+    if (size < sizeof(PacketHeader) + 14) return;        // header(4) + tick(4) + pos×3(6) + yaw+pitch(4)
+    u32 off = sizeof(PacketHeader);
+    u32 clientTick;
+    std::memcpy(&clientTick, data + off, 4); off += 4;
+    u16 posXQ, posYQ, posZQ;
+    std::memcpy(&posXQ, data + off, 2); off += 2;
+    std::memcpy(&posYQ, data + off, 2); off += 2;
+    std::memcpy(&posZQ, data + off, 2); off += 2;
+    u16 yawQ, pitchQ;
+    std::memcpy(&yawQ,   data + off, 2); off += 2;
+    std::memcpy(&pitchQ, data + off, 2); off += 2;
+    Vec3 claimedOrigin = {Quantize::unpackPos(posXQ),
+                          Quantize::unpackPos(posYQ),
+                          Quantize::unpackPos(posZQ)};
+    f32 claimedYaw   = Quantize::unpackAngle(yawQ);
+    f32 claimedPitch = Quantize::unpackAngle(pitchQ);
+    s_engine->handleFireWeaponRequest(playerSlot, clientTick,
+                                      claimedOrigin, claimedYaw, claimedPitch);
+}
+
+// ---------------------------------------------------------------------------
+// Inventory sync (Continue-join). Wire layout mirrors engine_persist.cpp's
+// per-player save block so we can simply memcpy the trivially-copyable structs.
+// Versioned so future struct changes can be rejected cleanly.
+// ---------------------------------------------------------------------------
+static constexpr u32 INVENTORY_SYNC_VERSION = 1;
+
+namespace {
+struct InventorySyncBody {
+    u32             version;
+    PlayerInventory inv;
+    QuickbarState   qb;
+    SkillState      energySkill;     // m_skillStates[slot]
+    u8              cls;             // PlayerClass
+    u8              activeClassSkill;
+    SkillState      classSkills[4];
+    f32             health;
+    f32             maxHealth;
+};
+} // anonymous
+
+void Engine::sendInventorySync() {
+    if (m_netRole != NetRole::CLIENT) return;
+    // Build the body from the LOCAL split-screen lane 0 — the joiner is always lane 0
+    // on a client (split-screen is disabled when networking).
+    InventorySyncBody body{};
+    body.version          = INVENTORY_SYNC_VERSION;
+    body.inv              = m_inventories[m_localPlayerIndex];
+    body.qb               = m_quickbars[m_localPlayerIndex];
+    body.energySkill      = m_skillStates[m_localPlayerIndex];
+    body.cls              = static_cast<u8>(m_playerClasses[m_localPlayerIndex]);
+    body.activeClassSkill = m_activeClassSkills[m_localPlayerIndex];
+    std::memcpy(body.classSkills, m_classSkillStatesPerPlayer[m_localPlayerIndex],
+                sizeof(body.classSkills));
+    body.health           = m_localPlayer.health;
+    body.maxHealth        = m_localPlayer.maxHealth;
+
+    // Total wire size: PacketHeader(4) + body(~sizeof(InventorySyncBody)).
+    constexpr u32 totalSize = sizeof(PacketHeader) + sizeof(InventorySyncBody);
+    u8 buf[totalSize];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_INVENTORY_SYNC;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    std::memcpy(buf + sizeof(PacketHeader), &body, sizeof(body));
+    Net::sendToServer(buf, totalSize, /*reliable=*/true);
+    LOG_INFO("CL_INVENTORY_SYNC: sent %u B (class=%u hp=%.0f/%.0f)",
+             totalSize, body.cls, body.health, body.maxHealth);
+}
+
+void Engine::onInventorySync(u8 playerSlot, const u8* data, u32 size) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return;
+    if (playerSlot == 0 || playerSlot >= MAX_PLAYERS) return;     // host never receives this
+    if (size < sizeof(PacketHeader) + sizeof(InventorySyncBody)) {
+        LOG_WARN("CL_INVENTORY_SYNC slot %u: short packet (%u B)", playerSlot, size);
+        return;
+    }
+    InventorySyncBody body{};
+    std::memcpy(&body, data + sizeof(PacketHeader), sizeof(body));
+    if (body.version != INVENTORY_SYNC_VERSION) {
+        LOG_WARN("CL_INVENTORY_SYNC slot %u: version mismatch %u vs %u — ignored",
+                 playerSlot, body.version, INVENTORY_SYNC_VERSION);
+        return;
+    }
+
+    // Adopt as-is. Trust model: client-authoritative inventory on join, mirroring
+    // client-authoritative position. Anti-cheat would validate item-def IDs / damage
+    // bounds here; out of scope for coop.
+    s_engine->m_inventories[playerSlot] = body.inv;
+    Inventory::recalculateStats(s_engine->m_inventories[playerSlot]); // rebuild bonus cache
+    s_engine->m_quickbars[playerSlot]   = body.qb;
+    s_engine->m_skillStates[playerSlot] = body.energySkill;
+
+    NetPlayer& np = s_engine->m_players[playerSlot];
+    if (body.cls < static_cast<u8>(PlayerClass::CLASS_COUNT))
+        np.playerClass = static_cast<PlayerClass>(body.cls);
+    np.maxHealth = body.maxHealth;
+    np.health    = body.health;
+    // Resolve the equipped weapon's mesh id so the snapshot's per-player weaponMeshId
+    // reflects the loaded weapon on the next snap (serverNetPost line that maps from
+    // m_inventories[*].equipped[WEAPON].defId → m_itemDefs[*].meshId).
+    const ItemInstance& eqWpn = s_engine->m_inventories[playerSlot].equipped[
+        static_cast<u32>(ItemSlot::WEAPON)];
+    np.weaponState.weaponMeshId = (!isItemEmpty(eqWpn) && eqWpn.defId < s_engine->m_itemDefCount)
+                                  ? s_engine->m_itemDefs[eqWpn.defId].meshId : 0;
+    LOG_INFO("CL_INVENTORY_SYNC slot=%u adopted: class=%u hp=%.0f/%.0f",
+             playerSlot, body.cls, body.health, body.maxHealth);
+}
+
 void Engine::onEvent(const u8* data, u32 size) {
     if (!s_engine) return;
     // SV_EVENT is a server→client packet. The host wires `Net::setOnEvent` only on
@@ -121,6 +247,29 @@ void Engine::onEvent(const u8* data, u32 size) {
                     break;
                 }
             }
+        } break;
+        case NetEventType::DAMAGE_NUMBER: {
+            // Host-replicated damage/heal number — unpack and spawn locally on the client.
+            // Engine::spawnDamageNumber's broadcast branch is gated to NetRole::SERVER, so
+            // calling it here from a CLIENT receive handler doesn't re-broadcast.
+            //
+            // Size check: payload after the 4-byte PacketHeader is 18 bytes
+            //   (eventType(1) + pos(12) + amount(4) + flags(1)). Total wire packet = 22 B.
+            // The earlier `+ 1 + 18` here counted the eventType byte twice — `size < 23`
+            // rejected every legitimate 22-byte packet. Match the HITSCAN_IMPACT pattern:
+            // the post-header byte count INCLUDES the eventType byte.
+            if (size < sizeof(PacketHeader) + 18) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            Vec3 pos;
+            std::memcpy(&pos.x, data + off, 4); off += 4;
+            std::memcpy(&pos.y, data + off, 4); off += 4;
+            std::memcpy(&pos.z, data + off, 4); off += 4;
+            f32 amount;
+            std::memcpy(&amount, data + off, 4); off += 4;
+            u8 flagsByte = data[off];
+            bool isHeal = (flagsByte & 1) != 0;
+            bool isCrit = (flagsByte & 2) != 0;
+            s_engine->spawnDamageNumber(pos, amount, isHeal, isCrit);
         } break;
         case NetEventType::SKILL_CD_RESET: {
             // Server-authoritative skill cooldown reset (Wanderer Exploit Weakness on
@@ -214,6 +363,10 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         // Fresh input buffer for this slot — a previous occupant's stale high ticks would
         // otherwise freeze this joiner via the monotonic-tick guard (H6).
         Server::resetInputBuffer(playerSlot);
+        // Phase 1.1 — Mirror the dedup ring reset for CL_FIRE_WEAPON. A previous occupant
+        // could have left clientTicks in the ring that would now spuriously match the
+        // joiner's first few fires and silently drop them.
+        s_engine->resetFireDedup(playerSlot);
         // Health from the chosen class scaled by the host's per-floor growth, so a mid-run
         // joiner isn't dramatically under-statted on a deep floor. Use the host's
         // maxHealth/baseHealth ratio as the growth factor (self-corrects whatever formula the
@@ -295,6 +448,7 @@ void Engine::onPlayerLeft(u8 playerSlot) {
         // NetPlayer here is sufficient for a correct rejoin.
         s_engine->m_players[playerSlot] = NetPlayer{};
         Server::resetInputBuffer(playerSlot); // don't leave stale ticks for the next occupant (H6)
+        s_engine->resetFireDedup(playerSlot); // Phase 1.1: ditto for CL_FIRE_WEAPON dedup
 
         // Audit-#7 leaver sweep. Without this, a still-flying projectile / unclaimed
         // exclusive drop / pending meteor / friendly minion the leaver owned would

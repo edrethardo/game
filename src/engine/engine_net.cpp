@@ -508,6 +508,11 @@ void Engine::serverNetPost(f32 dt) {
                      m_worldItems.activeCount);
         }
         Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
+        // Phase 3.1 — Capture entity poses at this snapshot tick into the lag-comp
+        // history. We push only on snapshot ticks (every TICKS_PER_SNAP server ticks)
+        // because that's the cadence the client renders from — every history entry
+        // corresponds exactly to a snapshot the client received and could be aiming at.
+        pushEntityHistory();
     }
 }
 
@@ -535,6 +540,12 @@ void Engine::clientNetPre(f32 dt) {
     WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
     Client::captureAndSendInput(m_localPlayer, m_serverTick, ws.currentWeapon, m_activeClassSkill);
 
+    // Phase 1.1 — Retransmit the most recent CL_FIRE_WEAPON for FIRE_TX_REPEATS ticks.
+    // The original send was unreliable, so a lost UDP fragment doesn't get retransmitted
+    // by ENet on its own; we instead push the same bytes a few more times in quick
+    // succession and let the server's per-clientTick dedup ring squash the duplicates.
+    resendPendingFire();
+
     // No client-side prediction step anymore — under the trust-client position model,
     // m_localPlayer is the authoritative source for the local camera/transform (updated
     // in gameUpdate via PlayerController::update). The server adopts the absolute yaw/
@@ -558,19 +569,70 @@ void Engine::clientNetPre(f32 dt) {
 // Client networking — post-gameplay: interpolate remote state
 // ---------------------------------------------------------------------------
 void Engine::clientNetPost(f32 dt) {
-    (void)dt;
     // gameUpdate already synced m_localPlayer → NetPlayer at its end.
 
     // Interpolate remote players, entities, and projectiles from server snapshots
     Client::interpolateRemotePlayers(activeNetSlot(),
         m_renderInterp.playerPositions, m_renderInterp.playerYaws,
         m_renderInterp.playerActive, m_renderInterp.playerHealth, m_renderInterp.playerMaxHealth,
-        m_renderInterp.playerAnimFlags, m_renderInterp.playerWeaponMeshId);
-    Client::interpolateEntities(m_renderInterp.entities);
+        m_renderInterp.playerAnimFlags, m_renderInterp.playerWeaponMeshId,
+        m_renderInterp.playerClass);
+    Client::interpolateEntities(m_renderInterp.entities, dt);
     // Boss / non-boss halfExtents are now wire-authoritative per SnapEntity (Audit P2 #4).
     // The prior post-pass that looked up BossDef::halfExtents here was made redundant by
     // that wire change; removed to keep the floor lookup out of every snapshot tick.
     Client::interpolateProjectiles(m_renderInterp.projectiles);
+
+    // V2 fire prediction — match-and-despawn pass.
+    // Each snapshot projectile carrying clientTickLow != 0 and ownerSlot == this client's
+    // slot corresponds to a locally-predicted ghost we spawned in handleWeaponFire. Find
+    // the matching ghost by clientTick low 16 bits and deactivate it — the authoritative
+    // snapshot projectile (now in m_renderInterp.projectiles) takes over rendering.
+    //
+    // NOTE: we iterate the pool DIRECTLY rather than the activeList here. Client::interpolate
+    // Projectiles populates m_renderInterp.projectiles[poolIndex] and increments activeCount,
+    // but does NOT update activeList[] — so activeList is stale from previous frames' merge
+    // appends (predicted-ghost slot indices that are now inactive after the per-frame clear).
+    // The renderer iterates the pool the same way (engine_render_effects.cpp:75), using
+    // activeCount only as an early-exit hint. Match-despawn follows that canonical pattern.
+    u8 mySlot = activeNetSlot();
+    for (u32 idx = 0; idx < MAX_PROJECTILES; idx++) {
+        const Projectile& authoritative = m_renderInterp.projectiles.projectiles[idx];
+        if (!authoritative.active) continue;
+        if (authoritative.predicted) continue;   // defensive: pre-merge there are none; reorder-safe
+        if (authoritative.ownerSlot != mySlot) continue;
+        // clientTick carried back via wire as low 16 bits; recover here from the projectile's
+        // stored clientTick (Client::interpolateProjectiles writes the low bits into it).
+        u32 wireLow = authoritative.clientTick & 0xFFFF;
+        if (wireLow == 0) continue;
+        for (u32 j = 0; j < MAX_PROJECTILES; j++) {
+            Projectile& ghost = m_projectiles.projectiles[j];
+            if (!ghost.active || !ghost.predicted) continue;
+            if ((ghost.clientTick & 0xFFFF) != wireLow) continue;
+            ghost.active = false;   // authoritative has taken over rendering — despawn ghost
+            break;
+        }
+    }
+
+    // V2 fire prediction — merge surviving predicted ghosts into m_renderInterp.projectiles
+    // so the existing render path picks them up alongside snapshot projectiles. We allocate
+    // free render-pool slots starting from the TOP of the pool (so we don't collide with the
+    // snapshot's nearest-first lower-index ordering). Predicted ghosts that have been matched
+    // and despawned above won't appear here.
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        const Projectile& ghost = m_projectiles.projectiles[i];
+        if (!ghost.active || !ghost.predicted) continue;
+        // Find a free slot in renderInterp scanning from the top down — snapshot fills from
+        // the bottom up (poolIndex-driven), so this keeps the two ranges from colliding.
+        for (u32 j = MAX_PROJECTILES; j-- > 0; ) {
+            Projectile& dst = m_renderInterp.projectiles.projectiles[j];
+            if (dst.active) continue;
+            dst = ghost;
+            m_renderInterp.projectiles.activeList[m_renderInterp.projectiles.activeCount++] =
+                static_cast<u16>(j);
+            break;
+        }
+    }
 
     // [AUDIT-P1] Diagnostic: what does the RENDER pool actually contain after interp? If
     // [AUDIT-P1] snap rx showed non-zero ents/projs but this shows 0, the rebuild-activeList
@@ -589,6 +651,6 @@ void Engine::clientNetPost(f32 dt) {
     // The renderer and pickup-aim code read m_worldItems directly, so this is all the
     // client needs to see/aim at loot. Runs AFTER gameUpdate so it overrides the local
     // WorldItemSystem::update (lifetime decay is server-driven for clients).
-    Client::mirrorWorldItems(m_worldItems, m_itemDefs, m_itemDefCount);
+    Client::mirrorWorldItems(m_worldItems, m_itemDefs, m_itemDefCount, dt);
 }
 

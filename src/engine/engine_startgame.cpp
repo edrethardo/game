@@ -689,7 +689,14 @@ void Engine::startGame(GameStart mode) {
         }
     }
 
-    // Set player position — both the active alias and the per-player array
+    // Set player position — both the active alias and the per-player array.
+    // In split-screen the active alias may currently hold P2's data (the update()
+    // per-player loop always ends with sp = m_splitPlayerCount - 1, and the alias
+    // is never reset after the loop). Without this swap-in, `m_localPlayers[0] =
+    // m_localPlayer` below would clobber P0's struct (HP/maxHealth/status timers/
+    // dodgeState/etc.) with P2's. Restore the alias to P0 first so the assignment
+    // targets the right per-player slot.
+    if (m_splitPlayerCount > 1) swapInPlayer(0);
     m_localPlayer.position = spawnPos;
     m_localPlayer.yaw = 0.0f;
     m_localPlayer.pitch = 0.0f;
@@ -703,11 +710,25 @@ void Engine::startGame(GameStart mode) {
     m_serverTick = 0;
     m_hitMarkerTimer = 0.0f;
 
+    // Phase 1.1 — Wipe the CL_FIRE_WEAPON dedup rings + the client retransmit window.
+    // m_serverTick just reset to 0, so without this the very first fire on the new
+    // floor (clientTick=0) could collide with a leftover clientTick=0 from the prior
+    // floor's history and be silently squashed as a duplicate.
+    resetAllFireDedup();
+
+    // Phase 3.1 — Drop the lag-comp history. The prior floor's entity poses (in
+    // geometrically unrelated rooms) would otherwise produce wildly wrong rewound
+    // positions for the first ~16 ticks on the new floor.
+    resetEntityHistory();
+
     // Setup net callbacks
     if (m_netRole == NetRole::SERVER) {
         Net::setOnInput(Engine::onInput);
         Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
         Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
+        Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent
+        Net::setOnFireWeapon(Engine::onFireWeapon); // client-side weapon fire prediction (CL_FIRE_WEAPON)
+        Net::setOnInventorySync(Engine::onInventorySync); // join-with-save inventory push
         Net::setOnPlayerJoin(Engine::onPlayerJoin);
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         Server::init(m_players, m_level.levelSeed,
@@ -719,14 +740,18 @@ void Engine::startGame(GameStart mode) {
         // Follow the host's mid-run floor descents (server-authoritative).
         Net::setOnLevelSeed(Engine::onLevelSeed);
         Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
-        // Fresh network join only (mode != DESCEND): a brand-new joiner has no save to
-        // restore from, so locally mirror the deterministic starting loadout the server
-        // grants this slot in onPlayerJoin. Both ends thus agree on the joiner's gear for
-        // a new run. (Mid-run inventory replication still needs SV_INVENTORY_SYNC.)
-        // On DESCEND the client now re-enters startGame every floor (FLOOR_TRANSITION ->
-        // startGame(DESCEND)); it must KEEP its accumulated inventory/skills/quickbar
-        // exactly like the host's DESCEND path, so skip the wipe+re-grant entirely.
-        if (mode != GameStart::DESCEND) {
+        // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
+        // joiner has no save to restore from, so locally mirror the deterministic
+        // starting loadout the server grants this slot in onPlayerJoin. Both ends thus
+        // agree on the joiner's gear for a new run.
+        //
+        // Skip cases:
+        //   - DESCEND: re-entering startGame on floor change, must KEEP accumulated state.
+        //   - m_clientLoadedFromSave: joiner picked "Continue" with a saved character;
+        //     loadGame already populated m_inventories/m_quickbars/skills locally and
+        //     updateLobby will push them to the host via CL_INVENTORY_SYNC. Wiping here
+        //     would discard the saved gear before we even finish joining.
+        if (mode != GameStart::DESCEND && !m_clientLoadedFromSave) {
             Inventory::init(m_inventories[m_localPlayerIndex]);
             m_skillStates[m_localPlayerIndex] = SkillState{};
             Quickbar::init(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);

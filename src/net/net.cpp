@@ -30,6 +30,9 @@ static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
 static Net::OnInputFn      s_onInput      = nullptr;
 static Net::OnPickupFn     s_onPickup     = nullptr;
 static Net::OnRespawnFn    s_onRespawn    = nullptr;
+static Net::OnDescendRequestFn s_onDescendRequest = nullptr;
+static Net::OnFireWeaponFn s_onFireWeapon = nullptr;
+static Net::OnInventorySyncFn s_onInventorySync = nullptr;
 static Net::OnEventFn      s_onEvent      = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
@@ -127,6 +130,32 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // (idempotent) and the revival propagates back via the next snapshot. Sent reliably
         // so it can't be lost like the old INPUT_EX_RESPAWN-through-the-input-buffer hack.
         if (s_onRespawn) s_onRespawn(slot);
+    } break;
+
+    case NetPacketType::CL_REQUEST_DESCEND: {
+        // Client at the portal asks the host to trigger the floor descent. The engine handler
+        // re-validates proximity to m_level.floorDoorPos + the boss-dead gate (anti-cheat /
+        // race-safety) and only then runs triggerFloorDescent(), which broadcasts SV_LEVEL_SEED
+        // so the requesting client (and any other clients) transition in lockstep.
+        if (s_onDescendRequest) s_onDescendRequest(slot);
+    } break;
+
+    case NetPacketType::CL_FIRE_WEAPON: {
+        // Client wants to fire its weapon from a specific origin + aim. Engine validates
+        // (cooldown gate, origin clamp) and queues a pending fire for the next per-tick
+        // handleWeaponFireForPlayer pass to consume — replaces the old FIRE-bit-driven path
+        // that fired from drain-derived np.yaw (which could be stale by seconds under UDP
+        // loss / queue lag). Hand the raw bytes to the engine so it can unpack the payload
+        // itself; minimum size = 4(header) + 4(tick) + 6(pos) + 4(yaw+pitch) = 18 B.
+        if (size < sizeof(PacketHeader) + 14) break;
+        if (s_onFireWeapon) s_onFireWeapon(slot, data, size);
+    } break;
+
+    case NetPacketType::CL_INVENTORY_SYNC: {
+        // Client is pushing its saved inventory (Continue-join path). Engine deserializes
+        // and replaces the auto-granted starting kit. Size validation is delegated to the
+        // handler since the payload shape is engine-side.
+        if (s_onInventorySync) s_onInventorySync(slot, data, size);
     } break;
 
     default:
@@ -592,6 +621,9 @@ void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }
 void Net::setOnInput(OnInputFn fn)         { s_onInput = fn; }
 void Net::setOnPickup(OnPickupFn fn)       { s_onPickup = fn; }
 void Net::setOnRespawn(OnRespawnFn fn)     { s_onRespawn = fn; }
+void Net::setOnDescendRequest(OnDescendRequestFn fn) { s_onDescendRequest = fn; }
+void Net::setOnFireWeapon(OnFireWeaponFn fn) { s_onFireWeapon = fn; }
+void Net::setOnInventorySync(OnInventorySyncFn fn) { s_onInventorySync = fn; }
 void Net::setOnEvent(OnEventFn fn)         { s_onEvent = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }
