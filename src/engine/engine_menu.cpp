@@ -159,14 +159,20 @@ void Engine::updateMenu(f32 dt) {
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
+            // Drop the network-role hint set by main menu (Host or Join) when backing out
+            // of the chooser — otherwise the role would leak into a different next action.
+            m_netRole = NetRole::NONE;
+            m_clientLoadedFromSave = false;
             m_menu.subState = 0;
             return;
         }
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
-            // Keep m_netRole if already set to SERVER (hosting), otherwise NONE (singleplayer)
-            if (m_netRole != NetRole::SERVER) m_netRole = NetRole::NONE;
+            // Preserve m_netRole if it was set by the main menu (SERVER for Host, CLIENT
+            // for Join — both route through subState 1's New/Continue chooser). Reset to
+            // NONE only when we arrived from the singleplayer path.
+            if (m_netRole != NetRole::SERVER && m_netRole != NetRole::CLIENT) m_netRole = NetRole::NONE;
             m_localPlayerIndex = 0;
             if (m_menu.subSelection == 0) {
                 // New Game — show slot selection so the player picks where to save
@@ -233,6 +239,29 @@ void Engine::updateMenu(f32 dt) {
             if (isContinue) {
                 if (loadGame(selectedSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
+                    if (m_netRole == NetRole::CLIENT) {
+                        // Continue-Join: skip class select (class came from the save) and
+                        // connect directly. updateLobby sends CL_INVENTORY_SYNC right after
+                        // SV_JOIN_ACCEPT to push our loaded inventory to the host; the
+                        // m_clientLoadedFromSave flag also tells startGame to skip the
+                        // inventory wipe + starting-kit grant that the New-Join path uses.
+                        m_clientLoadedFromSave = true;
+                        Net::setLocalPlayerClass(static_cast<u8>(m_playerClass));
+                        m_menu.subState = 0;
+                        m_menu.msg = nullptr;
+                        m_splitPlayerCount = 1;
+                        if (Net::connectToServer(m_menu.connectAddress)) {
+                            m_gameState = GameState::CONNECTING;
+                            m_connectingElapsed = 0.0f;
+                            LOG_INFO("Connecting (continue slot %u) to %s as class %u...",
+                                     selectedSlot, m_menu.connectAddress,
+                                     static_cast<u32>(m_playerClass));
+                        } else {
+                            m_netRole = NetRole::NONE;
+                            m_clientLoadedFromSave = false;
+                        }
+                        return;
+                    }
                     if (m_netRole == NetRole::SERVER) {
                         if (!Net::hostServer()) { m_netRole = NetRole::NONE; return; }
                         LOG_INFO("Hosting game (continue slot %u)...", selectedSlot);
@@ -252,7 +281,9 @@ void Engine::updateMenu(f32 dt) {
                     m_menu.msgTimer = 5.0f;
                 }
             } else {
-                // New game — record chosen slot and proceed to class selection
+                // New game — record chosen slot and proceed to class selection. This
+                // covers all three flows (singleplayer, host, join) — the class-select
+                // confirm handler branches on m_netRole.
                 m_activeSaveSlot = selectedSlot;
                 m_level.currentFloor = 1;
                 m_menu.subState = 2; // class selection
@@ -600,12 +631,14 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;
-        case 2: // Join — pick a class first, then connect (class travels in CL_JOIN_REQUEST)
+        case 2: // Join — same flow as host: pick New/Continue → save slot → class (if New)
             m_netRole = NetRole::CLIENT;
             // Lane stays 0 on a client (networking forces split count 1). The server-assigned
             // net slot lands in m_clientNetSlot at SV_JOIN_ACCEPT; net access uses activeNetSlot().
             m_localPlayerIndex = 0;
-            m_menu.subState = 2;    // class selection (the confirm handler branches on CLIENT)
+            scanSaveSlots(); // populate m_saveSlots so the Continue option is meaningful
+            m_clientLoadedFromSave = false; // reset; set later in subState 6 on successful load
+            m_menu.subState = 1;    // New/Continue chooser (shared with Host path)
             m_menu.subSelection = 0;
             break;
         case 3: // Options — controls rebinding
@@ -639,6 +672,7 @@ void Engine::updateLobby(f32 dt) {
                      Net::joinFailed() ? "rejected/disconnected" : "timeout");
             Net::disconnect();
             m_netRole = NetRole::NONE;
+            m_clientLoadedFromSave = false; // join didn't take — don't push on a future attempt
             m_gameState = GameState::MENU;
             m_menu.subState = 0;
             m_menu.subSelection = 0;
@@ -662,6 +696,14 @@ void Engine::updateLobby(f32 dt) {
             m_level.currentFloor = Net::getServerLevelFloor();
             m_difficulty         = Net::getServerLevelDifficulty();
             startGame(GameStart::CONTINUE);
+            // Continue-Join: push the loaded inventory to the host now that we have an
+            // assigned slot. The host's onPlayerJoin granted a starting kit moments ago;
+            // onInventorySync overwrites it with our saved gear. Clear the flag so we
+            // don't re-push on a future reconnect within this menu session.
+            if (m_clientLoadedFromSave) {
+                sendInventorySync();
+                m_clientLoadedFromSave = false;
+            }
         }
     }
 }
