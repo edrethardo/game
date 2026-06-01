@@ -271,6 +271,10 @@ struct ItemInstance {
 
     // Unique instance ID for networking
     u32 uid = 0;
+
+    // M-D4: client-predicted pickup awaiting server confirm (cleared on SV_PICKUP_RESULT accept,
+    // item removed via removeFromBackpack on reject). Always false on server / singleplayer.
+    bool predicted = false;
 };
 
 inline bool isItemEmpty(const ItemInstance& item) {
@@ -502,7 +506,15 @@ namespace Inventory {
     void recalculateStats(PlayerInventory& inv);
     // Recalculate cached stat bonuses for NPC equipment (same logic, different struct)
     void recalculateNpcStats(NpcEquipment& equip);
-    bool addToBackpack(PlayerInventory& inv, const ItemInstance& item);
+    // Returns the backpack slot the item was placed in (0..MAX_INVENTORY_ITEMS-1),
+    // or -1 if the backpack is full. Callers check (slot >= 0) for success.
+    s8 addToBackpack(PlayerInventory& inv, const ItemInstance& item);
+
+    // Clear the item at the given backpack slot (sets defId=0xFFFF, clears predicted flag).
+    // Does NOT shrink backpackCount — preserves intermediate empty slots for the UI.
+    // Use this for rollback of predicted picks; use dropFromBackpack for floor-drop.
+    void removeFromBackpack(PlayerInventory& inv, u8 slot);
+
     void equip(PlayerInventory& inv, u8 backpackIndex, const ItemDef* itemDefs);
     bool unequip(PlayerInventory& inv, ItemSlot slot);
     ItemInstance dropFromBackpack(PlayerInventory& inv, u8 backpackIndex);

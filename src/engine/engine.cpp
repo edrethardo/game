@@ -436,7 +436,7 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
                 startWpn.rarity = Rarity::COMMON;
                 startWpn.itemLevel = 1;
                 startWpn.uid = static_cast<u16>(std::rand());
-                if (Inventory::addToBackpack(s_engine->m_inventories[playerSlot], startWpn)) {
+                if (Inventory::addToBackpack(s_engine->m_inventories[playerSlot], startWpn) >= 0) {
                     Inventory::equip(s_engine->m_inventories[playerSlot], 0, s_engine->m_itemDefs);
                     Quickbar::syncWeaponSlot(s_engine->m_quickbars[playerSlot],
                                               s_engine->m_inventories[playerSlot]);

@@ -120,17 +120,25 @@ void Inventory::recalculateNpcStats(NpcEquipment& equip) {
         equip.bonusCooldownReduction = 0.92f;
 }
 
-bool Inventory::addToBackpack(PlayerInventory& inv, const ItemInstance& item) {
-    // First look for an empty slot among already-used slots
+s8 Inventory::addToBackpack(PlayerInventory& inv, const ItemInstance& item) {
+    // Scan all slots for the first empty one (defId == 0xFFFF = empty sentinel).
     for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
         if (inv.backpack[i].defId == 0xFFFF) {
             inv.backpack[i] = item;
             if (i >= inv.backpackCount)
                 inv.backpackCount = static_cast<u8>(i + 1);
-            return true;
+            return static_cast<s8>(i);   // return slot index so callers can record it
         }
     }
-    return false;
+    return -1;  // backpack full
+}
+
+void Inventory::removeFromBackpack(PlayerInventory& inv, u8 slot) {
+    if (slot >= MAX_INVENTORY_ITEMS) return;
+    // Clear the slot without adjusting backpackCount — leaving a hole is safe for
+    // addToBackpack (which scans all slots) and the inventory UI (which iterates all).
+    inv.backpack[slot].defId    = 0xFFFF;
+    inv.backpack[slot].predicted = false;
 }
 
 void Inventory::equip(PlayerInventory& inv, u8 backpackIndex, const ItemDef* itemDefs) {

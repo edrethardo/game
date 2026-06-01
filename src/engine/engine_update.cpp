@@ -957,7 +957,7 @@ void Engine::gameUpdate(f32 dt) {
         ItemInstance item = ItemGen::rollItem(1, m_itemDefs, m_itemDefCount,
                                               m_affixDefs, m_affixDefCount);
         if (!isItemEmpty(item)) {
-            if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], item)) {
+            if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], item) >= 0) {
                 LOG_INFO("Debug: gave %s (rarity %u, damage %.1f)",
                          m_itemDefs[item.defId].name, (u32)item.rarity, item.damage);
             }
@@ -1069,7 +1069,8 @@ void Engine::updatePlayerPickup() {
             if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
         }
         if (!isItemEmpty(picked)) {
-            if (Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked)) {
+            s8 bpSlot = Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked);
+            if (bpSlot >= 0) {
                 AudioSystem::play(SfxId::ITEM_PICKUP);
                 if (!m_firstPickupTooltipShown) {
                     m_firstPickupTooltipShown = true;
@@ -1264,7 +1265,7 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
         if (!canPickup) { sendPickupResult(playerSlot, 0, uid); return; }
 
         ItemInstance picked = wi.item;
-        if (!Inventory::addToBackpack(m_inventories[playerSlot], picked)) {
+        if (Inventory::addToBackpack(m_inventories[playerSlot], picked) < 0) {
             sendPickupResult(playerSlot, 0, uid); return; // backpack full — reject
         }
 
