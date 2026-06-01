@@ -2,24 +2,23 @@
 // pending_pickup_ring.h — client-side ring buffer of unacknowledged predicted pickup requests.
 //
 // When the CLIENT sends CL_PICKUP_ITEM (engine_update.cpp::sendPickupRequest), it records a
-// (clientTick, itemUid) entry here and immediately deactivates the world item locally so it
-// disappears without waiting ~RTT/2 for the server's next snapshot mirror. If the server
-// rejects the pickup, the next snapshot still contains the item and mirrorWorldItems brings it
-// back — the ring entry is just a bound on how long we wait before giving up.
+// (clientTick, itemUid, predictedSlot) entry here and immediately deactivates the world item
+// AND adds the item to the local inventory (predicted=true) so the bag slot appears without
+// waiting ~RTT/2 for the server. On SV_PICKUP_RESULT accept the predicted flag is cleared;
+// on reject, removeFromBackpack(slot) rolls back the inventory add and mirrorWorldItems
+// restores the world item from the next authoritative snapshot.
 //
 // Design mirrors PendingDamageRing: fixed-capacity linear array, compacted on removal (no
 // holes). Capacity 16 is sufficient because pickups are user-initiated at human pace.
-//
-// NOTE: ONLY the inventory add stays snapshot-driven in v1. The ring predicts the world-item
-// DISAPPEARANCE only, not the bag slot appearing.
 
 #include "core/types.h"
 
 static constexpr u32 PENDING_PICKUP_RING_CAPACITY = 16;
 
 struct PendingPickup {
-    u32 clientTick = 0;   // local client tick at which the CL_PICKUP_ITEM was sent
-    u32 itemUid    = 0;   // uid of the world item being picked up
+    u32 clientTick    = 0;   // local client tick at which the CL_PICKUP_ITEM was sent
+    u32 itemUid       = 0;   // uid of the world item being picked up
+    s8  predictedSlot = -1;  // backpack slot the predicted item occupies; -1 if not predicted
 };
 
 struct PendingPickupRing {
@@ -33,7 +32,11 @@ namespace PendingPickupRingOps {
 
     // Append a new predicted-pickup entry. If full, evicts the oldest entry (ring semantics —
     // graceful degradation; mis-predicted disappearance is recovered by mirrorWorldItems).
-    void record(PendingPickupRing& r, u32 clientTick, u32 itemUid);
+    // predictedSlot is the backpack slot returned by addToBackpack (-1 if not inventory-predicted).
+    void record(PendingPickupRing& r, u32 clientTick, u32 itemUid, s8 predictedSlot = -1);
+
+    // Returns predictedSlot for the given itemUid, or -1 if the uid is not pending.
+    s8 findSlotByUid(const PendingPickupRing& r, u32 itemUid);
 
     // Return true if itemUid is currently listed as a pending predicted pickup.
     bool isPending(const PendingPickupRing& r, u32 itemUid);

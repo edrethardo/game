@@ -1104,9 +1104,16 @@ void Engine::updatePlayerPickup() {
 }
 
 // CLIENT-only (N5): pick the world item the local player is aiming at (same aim logic as
-// the host's updatePlayerPickup) and send its uid to the server as CL_PICKUP_ITEM. The
-// server validates and removes it; the removal arrives back via the next snapshot, so we
-// do NOT touch m_worldItems locally here (it's mirrored from the server).
+// the host's updatePlayerPickup) and send its uid to the server as CL_PICKUP_ITEM.
+//
+// M8/D4 prediction: we predict BOTH the world-item disappearance AND the inventory add here
+// so the player sees the change immediately without waiting ~RTT/2 for the server response.
+// On SV_PICKUP_RESULT accept: clear the predicted flag (item is real).
+// On SV_PICKUP_RESULT reject: removeFromBackpack rolls back the add; mirrorWorldItems restores
+// the world item from the next authoritative snapshot.
+// If backpack is already full we skip the send entirely — no point requesting a pickup the
+// server would reject (and the server would reject it), so we just show the "backpack full"
+// notify without sending CL_PICKUP_ITEM.
 void Engine::sendPickupRequest() {
     Vec3 fwd = m_localPlayer.forward;
     f32 bestScore = -1.0f;
@@ -1131,6 +1138,32 @@ void Engine::sendPickupRequest() {
     if (bestIdx < 0) return;
 
     u32 uid = m_worldItems.items[bestIdx].item.uid;
+
+    // M8/D4: predict the inventory add before sending so the bag slot appears immediately.
+    s8 predictedSlot = -1;
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = m_worldItems.items[i];
+        if (!wi.active || wi.item.uid != uid) continue;
+
+        ItemInstance copy = wi.item;
+        copy.predicted = true;   // mark as unconfirmed until SV_PICKUP_RESULT arrives
+        predictedSlot = Inventory::addToBackpack(m_inventories[m_localPlayerIndex], copy);
+        if (predictedSlot < 0) {
+            // Backpack full — don't even send the request; avoid a pointless round-trip
+            // that the server would reject. Show the notify so the player knows why.
+            m_fullBackpackNotifyTimer = 2.0f;
+            return;
+        }
+        wi.active = false;  // hide world item locally (M8); restored by mirrorWorldItems on reject
+        if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        break;
+    }
+    // uid disappeared from local world before we could copy it (rare race: two clients grabbing
+    // the same item in the same frame). Don't send an orphaned request.
+    if (predictedSlot < 0) return;
+
+    PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid, predictedSlot);
+
     // Packet: header(4) + uid(4). Reliable so a dropped pickup request still lands.
     u8 buf[sizeof(PacketHeader) + 4];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
@@ -1139,29 +1172,6 @@ void Engine::sendPickupRequest() {
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &uid, 4);
     Net::sendToServer(buf, sizeof(buf), true);
-
-    // M8: Local prediction — hide the world item immediately so it disappears on send
-    // instead of waiting ~RTT/2 for the next snapshot mirror. If the server rejects the
-    // pickup, mirrorWorldItems re-activates it from the next authoritative snapshot.
-    //
-    // D4 (inventory item-add prediction) — DEFERRED. Requires a refactor:
-    //   1. Inventory::addToBackpack returns bool, not a slot index — can't record the
-    //      predicted slot in PendingPickupRing for rollback without API changes.
-    //   2. No Inventory::remove(inv, slot) exists — dropFromBackpack is floor-drop flavour.
-    //   3. Double-add risk: if we predict-add here AND the normal server-accept path fires
-    //      (engine_net.cpp onPickupResult), the item appears twice. Needs a "pending" item
-    //      flag (e.g. ItemInstance::predicted bool) and a guard in the accept path.
-    //   Plan: extend addToBackpack to return s8 slot (-1 = full), add removeFromBackpack
-    //   (by slot, no WorldItem spawn), set ItemInstance::predicted=true on predict-add,
-    //   clear it on accept, remove on reject. Track predictedInvSlot in PendingPickup.
-    PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid);
-    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
-        WorldItem& wi = m_worldItems.items[i];
-        if (wi.active && wi.item.uid == uid) {
-            wi.active = false;
-            break;
-        }
-    }
 }
 
 // CLIENT: request respawn after death. A header-only reliable CL_RESPAWN packet — NOT routed

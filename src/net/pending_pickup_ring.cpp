@@ -10,18 +10,27 @@ void PendingPickupRingOps::reset(PendingPickupRing& r) {
     r.count = 0;
 }
 
-void PendingPickupRingOps::record(PendingPickupRing& r, u32 clientTick, u32 itemUid) {
+void PendingPickupRingOps::record(PendingPickupRing& r, u32 clientTick, u32 itemUid,
+                                   s8 predictedSlot) {
     // If full, evict the oldest (index 0) entry by shifting everything left one slot, then
     // decrement count so we write into the last slot below. Graceful degradation: the visual
-    // miss-prediction is corrected on the next mirrorWorldItems pass anyway.
+    // mis-prediction is corrected on the next mirrorWorldItems pass anyway.
     if (r.count >= PENDING_PICKUP_RING_CAPACITY) {
         for (u32 i = 1; i < PENDING_PICKUP_RING_CAPACITY; i++) r.entries[i-1] = r.entries[i];
         r.count = PENDING_PICKUP_RING_CAPACITY - 1;
     }
     PendingPickup& e = r.entries[r.count];
-    e.clientTick = clientTick;
-    e.itemUid    = itemUid;
+    e.clientTick    = clientTick;
+    e.itemUid       = itemUid;
+    e.predictedSlot = predictedSlot;  // -1 if no inventory prediction (legacy callers)
     r.count++;
+}
+
+s8 PendingPickupRingOps::findSlotByUid(const PendingPickupRing& r, u32 itemUid) {
+    for (u32 i = 0; i < r.count; i++) {
+        if (r.entries[i].itemUid == itemUid) return r.entries[i].predictedSlot;
+    }
+    return -1;
 }
 
 bool PendingPickupRingOps::isPending(const PendingPickupRing& r, u32 itemUid) {

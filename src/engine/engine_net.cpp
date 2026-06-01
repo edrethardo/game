@@ -876,14 +876,32 @@ void Engine::onKill(u8 killerSlot, u8 victimType, u16 victimIdx,
              killerSlot, victimType, victimIdx, isCrit);
 }
 
-// D1.2 — Client-side SV_PICKUP_RESULT handler. Ack the pending-pickup ring entry
-// unconditionally so the prediction is resolved: on accept the item is already gone
-// from the snapshot; on reject mirrorWorldItems restores it from the next snapshot.
+// D1.2/D4.2 — Client-side SV_PICKUP_RESULT handler.
+//
+// On accept: clear the predicted flag on the inventory slot — the item is now confirmed real.
+// On reject: call removeFromBackpack to roll back the predicted add. The world item will be
+//            restored by the next snapshot's mirrorWorldItems (M8 behavior).
+// Always acks the ring entry so expireOlderThan doesn't need to clean it up.
 void Engine::onPickupResult(u8 accept, u32 itemUid) {
     if (!s_engine) return;
-    // Ack regardless of accept/reject — snapshot state is authoritative for item presence.
+    s8 slot = PendingPickupRingOps::findSlotByUid(s_engine->m_pendingPickups, itemUid);
+    if (accept) {
+        // Server confirmed — promote the predicted item to a real one.
+        if (slot >= 0) {
+            PlayerInventory& inv = s_engine->m_inventories[s_engine->m_localPlayerIndex];
+            inv.backpack[static_cast<u8>(slot)].predicted = false;
+        }
+    } else {
+        // Server rejected — roll back the predicted inventory add.
+        if (slot >= 0) {
+            Inventory::removeFromBackpack(
+                s_engine->m_inventories[s_engine->m_localPlayerIndex],
+                static_cast<u8>(slot));
+        }
+        // World item presence is restored by mirrorWorldItems on the next snapshot.
+    }
     PendingPickupRingOps::ack(s_engine->m_pendingPickups, itemUid);
-    LOG_INFO("net: pickup result — uid=%u accept=%u", itemUid, accept);
+    LOG_INFO("net: pickup result — uid=%u accept=%u slot=%d", itemUid, accept, (int)slot);
 }
 
 // D1.3 — Client-side SV_LOOT_SPAWN handler. v1: log for diagnostics. The snapshot
