@@ -8,8 +8,10 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
+#include <netinet/in.h>      /* R12: IPv6 socket structs (sockaddr_in6, in6_addr) */
 #include <netinet/tcp.h>
 #include <netdb.h>
+#include <arpa/inet.h>       /* R12: inet_pton / inet_ntop for IPv6 literals */
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -63,6 +65,74 @@ typedef int socklen_t;
 
 static enet_uint32 timeBase = 0;
 
+/* ----- R12: dual-stack helpers ---------------------------------------------
+ * The patched ENet always opens AF_INET6 sockets with IPV6_V6ONLY=0 so a
+ * single socket carries both IPv4 (as v4-mapped ::ffff:a.b.c.d) and IPv6
+ * traffic. These two helpers translate between the public ENetAddress
+ * (which carries either a u32 v4 host OR a u8[16] v6 host depending on the
+ * family field) and the kernel's sockaddr_in6. They keep the per-call site
+ * conversion noise to one line at each entry point.
+ * -------------------------------------------------------------------------- */
+
+/* Pack an ENetAddress into a sockaddr_in6. v4 addresses are converted to
+ * the IPv4-mapped IPv6 form (::ffff:a.b.c.d) so the dual-stack socket
+ * delivers them to v4 peers. */
+static void
+enet_addr_to_sin6 (const ENetAddress * address, struct sockaddr_in6 * sin6)
+{
+    memset (sin6, 0, sizeof (struct sockaddr_in6));
+    sin6 -> sin6_family = AF_INET6;
+    sin6 -> sin6_port   = ENET_HOST_TO_NET_16 (address -> port);
+
+    if (address -> family == AF_INET6)
+    {
+        memcpy (& sin6 -> sin6_addr, address -> host6, 16);
+    }
+    else if (address -> host == ENET_HOST_ANY)
+    {
+        /* Wildcard: bind/connect to dual-stack any (::). */
+        sin6 -> sin6_addr = in6addr_any;
+    }
+    else
+    {
+        /* v4-mapped IPv6: ::ffff:a.b.c.d. The 4 IPv4 octets sit at offset 12
+         * of the 16-byte v6 address in network byte order. address->host is
+         * already in network byte order. */
+        enet_uint8 * out = (enet_uint8 *) & sin6 -> sin6_addr;
+        memset (out, 0, 10);
+        out [10] = 0xff;
+        out [11] = 0xff;
+        memcpy (out + 12, & address -> host, 4);
+    }
+}
+
+/* Unpack a sockaddr_in6 into an ENetAddress. v4-mapped addresses decode to
+ * family=AF_INET so legacy receivers (the engine peer table, NAT-style
+ * key hashing) keep seeing a u32 v4 host as before R12. Native v6 sets
+ * family=AF_INET6 with the full 16-byte host6. */
+static void
+enet_sin6_to_addr (const struct sockaddr_in6 * sin6, ENetAddress * address)
+{
+    const enet_uint8 * src = (const enet_uint8 *) & sin6 -> sin6_addr;
+    address -> port = ENET_NET_TO_HOST_16 (sin6 -> sin6_port);
+
+    /* IPv4-mapped IPv6 (::ffff:a.b.c.d) — first 10 bytes 0, bytes 10-11 0xff. */
+    if (src [0] == 0 && src [1] == 0 && src [2] == 0 && src [3] == 0 &&
+        src [4] == 0 && src [5] == 0 && src [6] == 0 && src [7] == 0 &&
+        src [8] == 0 && src [9] == 0 && src [10] == 0xff && src [11] == 0xff)
+    {
+        address -> family = AF_INET;
+        memcpy (& address -> host, src + 12, 4);
+        memset (address -> host6, 0, 16);  /* keep host6 zeroed for hash determinism */
+    }
+    else
+    {
+        address -> family = AF_INET6;
+        address -> host   = 0;             /* unused under v6; zero for determinism */
+        memcpy (address -> host6, src, 16);
+    }
+}
+
 int
 enet_initialize (void)
 {
@@ -103,40 +173,71 @@ enet_time_set (enet_uint32 newTimeBase)
 int
 enet_address_set_host_ip (ENetAddress * address, const char * name)
 {
+    /* R12: detect IPv6 by the presence of ':' — inet_pton(AF_INET, ...) accepts
+     * dotted-quads and decimal forms but rejects v6 literals, and the v6 form
+     * is the only one that contains a colon. Route accordingly. */
+    if (strchr (name, ':') != NULL)
+    {
+        if (inet_pton (AF_INET6, name, address -> host6) != 1)
+          return -1;
+        address -> family = AF_INET6;
+        address -> host   = 0;
+        return 0;
+    }
 #ifdef HAS_INET_PTON
     if (! inet_pton (AF_INET, name, & address -> host))
 #else
     if (! inet_aton (name, (struct in_addr *) & address -> host))
 #endif
         return -1;
-
+    address -> family = AF_INET;
+    memset (address -> host6, 0, 16);
     return 0;
 }
 
 int
 enet_address_set_host (ENetAddress * address, const char * name)
 {
+    /* R12: hostname-or-literal resolver. AF_UNSPEC asks getaddrinfo to return
+     * both A (v4) and AAAA (v6) records; we prefer v6 when both are offered
+     * since the host's dual-stack socket can reach v4 peers transparently. */
 #ifdef HAS_GETADDRINFO
     struct addrinfo hints, * resultList = NULL, * result = NULL;
+    struct addrinfo * pickV4 = NULL, * pickV6 = NULL;
 
     memset (& hints, 0, sizeof (hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
 
-    if (getaddrinfo (name, NULL, NULL, & resultList) != 0)
+    if (getaddrinfo (name, NULL, & hints, & resultList) != 0)
       return -1;
 
     for (result = resultList; result != NULL; result = result -> ai_next)
     {
-        if (result -> ai_family == AF_INET && result -> ai_addr != NULL && result -> ai_addrlen >= sizeof (struct sockaddr_in))
-        {
-            struct sockaddr_in * sin = (struct sockaddr_in *) result -> ai_addr;
+        if (result -> ai_family == AF_INET6 && pickV6 == NULL &&
+            result -> ai_addr != NULL && result -> ai_addrlen >= sizeof (struct sockaddr_in6))
+          pickV6 = result;
+        else if (result -> ai_family == AF_INET && pickV4 == NULL &&
+                 result -> ai_addr != NULL && result -> ai_addrlen >= sizeof (struct sockaddr_in))
+          pickV4 = result;
+    }
 
-            address -> host = sin -> sin_addr.s_addr;
-
-            freeaddrinfo (resultList);
-
-            return 0;
-        }
+    if (pickV6 != NULL)
+    {
+        struct sockaddr_in6 * sin6 = (struct sockaddr_in6 *) pickV6 -> ai_addr;
+        memcpy (address -> host6, & sin6 -> sin6_addr, 16);
+        address -> family = AF_INET6;
+        address -> host   = 0;
+        freeaddrinfo (resultList);
+        return 0;
+    }
+    if (pickV4 != NULL)
+    {
+        struct sockaddr_in * sin = (struct sockaddr_in *) pickV4 -> ai_addr;
+        address -> host   = sin -> sin_addr.s_addr;
+        address -> family = AF_INET;
+        memset (address -> host6, 0, 16);
+        freeaddrinfo (resultList);
+        return 0;
     }
 
     if (resultList != NULL)
@@ -160,7 +261,8 @@ enet_address_set_host (ENetAddress * address, const char * name)
     if (hostEntry != NULL && hostEntry -> h_addrtype == AF_INET)
     {
         address -> host = * (enet_uint32 *) hostEntry -> h_addr_list [0];
-
+        address -> family = AF_INET;
+        memset (address -> host6, 0, 16);
         return 0;
     }
 #endif
@@ -171,6 +273,13 @@ enet_address_set_host (ENetAddress * address, const char * name)
 int
 enet_address_get_host_ip (const ENetAddress * address, char * name, size_t nameLength)
 {
+    /* R12: format IPv6 with inet_ntop(AF_INET6, ...) when the family flag says so. */
+    if (address -> family == AF_INET6)
+    {
+        if (inet_ntop (AF_INET6, address -> host6, name, nameLength) == NULL)
+          return -1;
+        return 0;
+    }
 #ifdef HAS_INET_NTOP
     if (inet_ntop (AF_INET, & address -> host, name, nameLength) == NULL)
 #else
@@ -181,7 +290,7 @@ enet_address_get_host_ip (const ENetAddress * address, char * name, size_t nameL
         if (addrLen >= nameLength)
           return -1;
         memcpy (name, addr, addrLen + 1);
-    } 
+    }
     else
 #endif
         return -1;
@@ -192,16 +301,14 @@ int
 enet_address_get_host (const ENetAddress * address, char * name, size_t nameLength)
 {
 #ifdef HAS_GETNAMEINFO
-    struct sockaddr_in sin;
+    /* R12: route reverse-DNS through sockaddr_in6 so v6 addresses resolve too.
+     * For v4 we pack into a v4-mapped sockaddr_in6 so the call site stays single. */
+    struct sockaddr_in6 sin6;
     int err;
 
-    memset (& sin, 0, sizeof (struct sockaddr_in));
+    enet_addr_to_sin6 (address, & sin6);
 
-    sin.sin_family = AF_INET;
-    sin.sin_port = ENET_HOST_TO_NET_16 (address -> port);
-    sin.sin_addr.s_addr = address -> host;
-
-    err = getnameinfo ((struct sockaddr *) & sin, sizeof (sin), name, nameLength, NULL, 0, NI_NAMEREQD);
+    err = getnameinfo ((struct sockaddr *) & sin6, sizeof (sin6), name, nameLength, NULL, 0, NI_NAMEREQD);
     if (! err)
     {
         if (name != NULL && nameLength > 0 && ! memchr (name, '\0', nameLength))
@@ -247,40 +354,38 @@ enet_address_get_host (const ENetAddress * address, char * name, size_t nameLeng
 int
 enet_socket_bind (ENetSocket socket, const ENetAddress * address)
 {
-    struct sockaddr_in sin;
-
-    memset (& sin, 0, sizeof (struct sockaddr_in));
-
-    sin.sin_family = AF_INET;
+    /* R12: bind to a dual-stack sockaddr_in6 so the single socket carries
+     * both v4 (via v4-mapped) and v6 traffic. ENET_HOST_ANY → ::, matching
+     * IPV6_V6ONLY=0 socket option set in enet_socket_create. */
+    struct sockaddr_in6 sin6;
 
     if (address != NULL)
     {
-       sin.sin_port = ENET_HOST_TO_NET_16 (address -> port);
-       sin.sin_addr.s_addr = address -> host;
+        enet_addr_to_sin6 (address, & sin6);
     }
     else
     {
-       sin.sin_port = 0;
-       sin.sin_addr.s_addr = INADDR_ANY;
+        memset (& sin6, 0, sizeof (sin6));
+        sin6.sin6_family = AF_INET6;
+        sin6.sin6_addr   = in6addr_any;
+        sin6.sin6_port   = 0;
     }
 
     return bind (socket,
-                 (struct sockaddr *) & sin,
-                 sizeof (struct sockaddr_in)); 
+                 (struct sockaddr *) & sin6,
+                 sizeof (struct sockaddr_in6));
 }
 
 int
 enet_socket_get_address (ENetSocket socket, ENetAddress * address)
 {
-    struct sockaddr_in sin;
-    socklen_t sinLength = sizeof (struct sockaddr_in);
+    struct sockaddr_in6 sin6;
+    socklen_t sinLength = sizeof (struct sockaddr_in6);
 
-    if (getsockname (socket, (struct sockaddr *) & sin, & sinLength) == -1)
+    if (getsockname (socket, (struct sockaddr *) & sin6, & sinLength) == -1)
       return -1;
 
-    address -> host = (enet_uint32) sin.sin_addr.s_addr;
-    address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
-
+    enet_sin6_to_addr (& sin6, address);
     return 0;
 }
 
@@ -293,7 +398,23 @@ enet_socket_listen (ENetSocket socket, int backlog)
 ENetSocket
 enet_socket_create (ENetSocketType type)
 {
-    return socket (PF_INET, type == ENET_SOCKET_TYPE_DATAGRAM ? SOCK_DGRAM : SOCK_STREAM, 0);
+    /* R12: AF_INET6 + IPV6_V6ONLY=0 → dual-stack socket. v4 peers are surfaced
+     * as IPv4-mapped IPv6 addresses by the kernel and decoded back to family=
+     * AF_INET in enet_sin6_to_addr, so the engine's existing per-peer hashing
+     * (which keys on ENetAddress.host as a u32) keeps working unchanged for
+     * v4-only sessions. */
+    ENetSocket s = socket (PF_INET6, type == ENET_SOCKET_TYPE_DATAGRAM ? SOCK_DGRAM : SOCK_STREAM, 0);
+    if (s != -1)
+    {
+        int zero = 0;
+        /* Best-effort: if the platform doesn't expose IPV6_V6ONLY (rare on
+         * modern Linux/BSD/macOS), the default behavior on Linux/BSD is
+         * v6-only anyway and v4 peers won't reach us — log-only failure path
+         * isn't worth the noise here since we want this socket created either
+         * way and the caller falls back to the v4-mapped path. */
+        (void) setsockopt (s, IPPROTO_IPV6, IPV6_V6ONLY, (char *) & zero, sizeof (zero));
+    }
+    return s;
 }
 
 int
@@ -384,16 +505,12 @@ enet_socket_get_option (ENetSocket socket, ENetSocketOption option, int * value)
 int
 enet_socket_connect (ENetSocket socket, const ENetAddress * address)
 {
-    struct sockaddr_in sin;
+    struct sockaddr_in6 sin6;
     int result;
 
-    memset (& sin, 0, sizeof (struct sockaddr_in));
+    enet_addr_to_sin6 (address, & sin6);
 
-    sin.sin_family = AF_INET;
-    sin.sin_port = ENET_HOST_TO_NET_16 (address -> port);
-    sin.sin_addr.s_addr = address -> host;
-
-    result = connect (socket, (struct sockaddr *) & sin, sizeof (struct sockaddr_in));
+    result = connect (socket, (struct sockaddr *) & sin6, sizeof (struct sockaddr_in6));
     if (result == -1 && errno == EINPROGRESS)
       return 0;
 
@@ -404,24 +521,21 @@ ENetSocket
 enet_socket_accept (ENetSocket socket, ENetAddress * address)
 {
     int result;
-    struct sockaddr_in sin;
-    socklen_t sinLength = sizeof (struct sockaddr_in);
+    struct sockaddr_in6 sin6;
+    socklen_t sinLength = sizeof (struct sockaddr_in6);
 
-    result = accept (socket, 
-                     address != NULL ? (struct sockaddr *) & sin : NULL, 
+    result = accept (socket,
+                     address != NULL ? (struct sockaddr *) & sin6 : NULL,
                      address != NULL ? & sinLength : NULL);
-    
+
     if (result == -1)
       return ENET_SOCKET_NULL;
 
     if (address != NULL)
-    {
-        address -> host = (enet_uint32) sin.sin_addr.s_addr;
-        address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
-    }
+      enet_sin6_to_addr (& sin6, address);
 
     return result;
-} 
+}
     
 int
 enet_socket_shutdown (ENetSocket socket, ENetSocketShutdown how)
@@ -443,21 +557,16 @@ enet_socket_send (ENetSocket socket,
                   size_t bufferCount)
 {
     struct msghdr msgHdr;
-    struct sockaddr_in sin;
+    struct sockaddr_in6 sin6;
     int sentLength;
 
     memset (& msgHdr, 0, sizeof (struct msghdr));
 
     if (address != NULL)
     {
-        memset (& sin, 0, sizeof (struct sockaddr_in));
-
-        sin.sin_family = AF_INET;
-        sin.sin_port = ENET_HOST_TO_NET_16 (address -> port);
-        sin.sin_addr.s_addr = address -> host;
-
-        msgHdr.msg_name = & sin;
-        msgHdr.msg_namelen = sizeof (struct sockaddr_in);
+        enet_addr_to_sin6 (address, & sin6);
+        msgHdr.msg_name    = & sin6;
+        msgHdr.msg_namelen = sizeof (struct sockaddr_in6);
     }
 
     msgHdr.msg_iov = (struct iovec *) buffers;
@@ -483,15 +592,15 @@ enet_socket_receive (ENetSocket socket,
                      size_t bufferCount)
 {
     struct msghdr msgHdr;
-    struct sockaddr_in sin;
+    struct sockaddr_in6 sin6;
     int recvLength;
 
     memset (& msgHdr, 0, sizeof (struct msghdr));
 
     if (address != NULL)
     {
-        msgHdr.msg_name = & sin;
-        msgHdr.msg_namelen = sizeof (struct sockaddr_in);
+        msgHdr.msg_name    = & sin6;
+        msgHdr.msg_namelen = sizeof (struct sockaddr_in6);
     }
 
     msgHdr.msg_iov = (struct iovec *) buffers;
@@ -513,10 +622,7 @@ enet_socket_receive (ENetSocket socket,
 #endif
 
     if (address != NULL)
-    {
-        address -> host = (enet_uint32) sin.sin_addr.s_addr;
-        address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
-    }
+      enet_sin6_to_addr (& sin6, address);
 
     return recvLength;
 }

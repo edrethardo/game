@@ -89,8 +89,17 @@ typedef enum _ENetSocketShutdown
  */
 typedef struct _ENetAddress
 {
-   enet_uint32 host;
+   enet_uint32 host;        /**< IPv4 host (network byte order). Used when family == AF_INET. */
    enet_uint16 port;
+   /* IPv6 extension (R12 dual-stack patch). family==0 (the value left by memset) is
+    * treated as AF_INET so legacy callers that only set { host, port } keep working.
+    * For an IPv6 address set family=AF_INET6 and populate host6 (network byte order,
+    * 16 bytes). host is ignored when family is AF_INET6; host6 is ignored when family
+    * is AF_INET. The platform socket layer always opens an AF_INET6 dual-stack socket
+    * and converts v4 addresses to/from IPv4-mapped IPv6 ::ffff:a.b.c.d transparently,
+    * so existing IPv4 callers and IPv6 callers share the same socket. */
+   enet_uint16 family;      /**< 0 / AF_INET (default) or AF_INET6 */
+   enet_uint8  host6[16];   /**< IPv6 host (network byte order). Used when family == AF_INET6. */
 } ENetAddress;
 
 /**
