@@ -136,10 +136,43 @@ void Engine::serverNetPre(f32 dt) {
         }
     }
 
-    // (Server-side remote moveAndSlide is now inside updateNetPlayerFromInput above —
-    // the server integrates position from moveFlags + yaw for each remote. The M0 block
-    // that snapped np.position to client-reported posXQ/Y/Z is gone; the server is the
-    // sole authority for remote player positions from M2 onward.)
+    // After the input-drain loop, integrate each remote NetPlayer's position from
+    // its computed velocity via the same moveAndSlide path the local player uses.
+    // PlayerController::updateNetPlayerFromInput sets velocity (via applyMovement)
+    // but doesn't move position — that step lives here, against the level grid +
+    // entity obstacles. Without this, remote np.position stays at spawn forever
+    // and every server-side check that reads it (descent / pickup proximity,
+    // lag-comp rewinds, AOE centers) sees stale data. (This loop is structurally
+    // the pre-M0 code; the M2-era claim that updateNetPlayerFromInput integrates
+    // position was wrong — applyMovement only writes velocity.)
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (i == m_localPlayerIndex) continue;     // host moves via gameUpdate
+        NetPlayer& np = m_players[i];
+        if (!np.active || np.noclip || np.isDead) continue;
+
+        Player tempP;
+        tempP.position = np.position;
+        tempP.velocity = np.velocity;
+        tempP.onGround = np.onGround;
+        tempP.noclip   = np.noclip;
+
+        // Live enemies block; friendly NPCs + props don't (mirrors host collision pass).
+        CollisionObstacle obs[MAX_ENTITIES];
+        u32 obsCount = 0;
+        for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
+            const Entity& e = m_entities.entities[ei];
+            if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+            if (e.flags & ENT_FRIENDLY) continue;
+            if (e.enemyType == EnemyType::PROP) continue;
+            obs[obsCount++] = {e.position, e.halfExtents};
+        }
+
+        Collision::moveAndSlide(tempP, m_level.grid, dt, obs, obsCount);
+
+        np.position = tempP.position;
+        np.velocity = tempP.velocity;
+        np.onGround = tempP.onGround;
+    }
 
     // Remote player weapon fire + extended actions (server-authoritative)
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
