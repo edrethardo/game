@@ -98,6 +98,7 @@ add_executable(DungeonEngine
     net/pending_pickup_ring.cpp
     net/pending_skill_ring.cpp
     net/snapshot_baseline.cpp
+    net/upnp.cpp
     renderer/material.cpp
     renderer/obj_loader.cpp
     world/level_loader.cpp
