@@ -363,13 +363,36 @@ bool Client::reconcile(NetPlayer& np, Player& lp) {
         // Otherwise, take MIN(local, server.clip) so the HUD never displays MORE ammo
         // than was available after our most recent local fire.
         bool serverReloading = (serverState->animFlags & (1 << 1)) != 0;
+        // R11: snapshot the local clip BEFORE the conservative-clip adoption rewrites
+        // np.weaponState.currentClip — the reload-flag branch below needs to detect
+        // "server's clip just refilled" as a positive completion signal even though
+        // that value is no longer visible on np.weaponState after the adopt.
+        u8 localClipBefore = np.weaponState.currentClip;
         if (serverReloading || np.weaponState.reloading ||
             serverState->currentClip > np.weaponState.currentClip) {
             np.weaponState.currentClip = serverState->currentClip;
         }
         // else: serverState.currentClip <= local clip and no reload — local is "ahead"
         // of server in fire processing; keep local (don't snap HUD upward).
-        np.weaponState.reloading = serverReloading;
+
+        // R11: conservative reload-flag adoption (mirrors the clip path above).
+        // Previously this was an unconditional `np.weaponState.reloading = serverReloading;`
+        // which clobbered a locally-predicted reload=true with server=false during the
+        // RTT/2 ack gap — killing the reload-bar tick, letting fire-during-reload through,
+        // and producing the "reloading is broken on the client" symptom. Three cases now:
+        //   • Server reloading=true → adopt true (server confirmed input OR started its own).
+        //   • Server reloading=false AND server's clip just refilled → server completed
+        //     a reload; adopt false. Positive falling-edge confirmation.
+        //   • Server reloading=false AND clip didn't refill → server hasn't seen our input
+        //     yet; keep the local prediction. The local reload tick at engine_combat.cpp
+        //     200-206 drains its own timer and clears `reloading` itself; the next snapshot's
+        //     refilled clip then confirms completion via the case above.
+        if (serverReloading) {
+            np.weaponState.reloading = true;
+        } else if (serverState->currentClip > localClipBefore) {
+            np.weaponState.reloading = false;
+        }
+        // else: server hasn't acked yet — keep local prediction alive.
         // Status timers (quantized 0.04 s steps; see buildFromState).
         // Take max of locally-predicted invuln vs server snapshot so a fresh dodge's
         // 0.3 s i-frame isn't briefly wiped between prediction and the next ack.
