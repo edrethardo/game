@@ -700,6 +700,18 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
         p.active     = true;
         p.fromPlayer = (spB.flags & (1 << 1)) != 0;
         p.isCrit     = (spB.flags & (1 << 2)) != 0;
+        // R11: drive the visual rotation parameter on the client. The renderer's
+        // staff / wand / thrown-weapon / orb paths all use t = p.lifetime as a
+        // continuously-varying angle source (rotateY(t * 15.0f), etc.). On the host,
+        // p.lifetime is the projectile's TTL — it decreases each frame as the
+        // projectile ages, which is "monotonic" enough to drive rotation. On the
+        // client, interpolateProjectiles never touched p.lifetime, so it stayed at
+        // its default 0 → every projectile rendered at identity rotation (no spin).
+        // Use absolute elapsed time here: any monotonic value advances rotation
+        // uniformly, and Clock::getElapsedSeconds() is already used in this file
+        // for snapshot timing. All projectiles in the same frame share a value,
+        // which is fine visually since they're at different positions.
+        p.lifetime   = static_cast<f32>(Clock::getElapsedSeconds());
         // Visual fields recovered from the wire so skill/boss projectiles render with
         // their real look instead of the default energy bolt.
         p.projFlags  = spB.projFlags;
