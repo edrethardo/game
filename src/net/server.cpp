@@ -157,7 +157,10 @@ void Server::sendSnapshotDeltaToSlot(u8 slot, const WorldSnapshot& baseline) {
 
     // 4-byte packet header (mirrors serialize()'s header: type + flags + seq).
     s_deltaBuf[cursor++] = static_cast<u8>(NetPacketType::SV_SNAPSHOT);
-    s_deltaBuf[cursor++] = 0; // flags
+    // Flags byte: bit 0 = isFullSnapshot. Delta path leaves it cleared (matches the
+    // existing in-payload isFullSnapshot=0 written by serializeDelta at +20 of its
+    // own buffer). The client routes on data[1] alone — see Client::receiveSnapshot.
+    s_deltaBuf[cursor++] = 0; // flags (bit 0 cleared = delta)
     s_deltaBuf[cursor++] = 0; // seq lo
     s_deltaBuf[cursor++] = 0; // seq hi
 

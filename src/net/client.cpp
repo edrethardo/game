@@ -203,23 +203,19 @@ const NetInput* Client::getLatestInput() {
     return s_hasInput ? &s_latestInput : nullptr;
 }
 
-// D7.3 — Minimum wire bytes before the isFullSnapshot byte in an SV_SNAPSHOT packet:
-//   4 (packet header) + 4 (serverTick) + MAX_PLAYERS*4 (lastProcessedInputTick).
-// The byte at this offset is 1 for a full snapshot, 0 for a delta.
-static constexpr u32 SNAP_ISFULL_BYTE_OFFSET = 4 + 4 + MAX_PLAYERS * 4;
-
 void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
     static WorldSnapshot snap;
     snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
 
-    // D7.3 — Peek the isFullSnapshot byte to decide which deserializer to call.
-    // Full snapshots (isFullSnapshot=1) use the existing path. Delta snapshots
-    // (isFullSnapshot=0) are decoded against s_baselineSnap via deserializeDelta,
-    // which expects the buffer starting AFTER the 4-byte packet header.
-    bool isFullSnap = true;
-    if (size > SNAP_ISFULL_BYTE_OFFSET) {
-        isFullSnap = (data[SNAP_ISFULL_BYTE_OFFSET] != 0);
-    }
+    // Route on the packet-header flags byte (data[1], bit 0 = isFullSnapshot).
+    // Earlier builds peeked an offset inside the snapshot payload to find this bit,
+    // but the full and delta snapshot wire layouts disagree on where that in-payload
+    // byte sits (offset 13 for full, 24 for delta — see snapshot.cpp:374-394 vs
+    // server.cpp:148-173 + snapshot.cpp:842-847). No single offset works for both,
+    // so the bit now lives in the packet header which is identical-shape across
+    // both paths. Falling back to "treat as full" if the packet is somehow shorter
+    // than the 4-byte header lets the deserializer log a more useful error.
+    bool isFullSnap = (size >= 2) && ((data[1] & 0x01) != 0);
 
     bool decoded = false;
     if (!isFullSnap && s_hasBaseline && size > 4) {

@@ -19,6 +19,7 @@ add_executable(dungeon_tests
     net/test_pending_skill_ring.cpp
     net/test_snapshot_baseline.cpp
     net/test_snapshot_delta.cpp
+    net/test_snapshot_header.cpp
     engine/test_lag_comp_ring.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp

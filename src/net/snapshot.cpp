@@ -373,7 +373,12 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
 
     // Header
     w8(static_cast<u8>(NetPacketType::SV_SNAPSHOT));
-    w8(0);  // flags
+    // Flags byte: bit 0 = isFullSnapshot. The client peeks data[1] to route full vs
+    // delta in Client::receiveSnapshot — encoding the bit in the header avoids the
+    // layout mismatch where the in-payload isFullSnapshot byte sits at different
+    // offsets in full (13) vs delta (24) snapshots, with no single offset working
+    // for both. Other bits of this byte are reserved (must remain 0).
+    w8(isFullSnapshot ? 0x01 : 0x00);
     // Header seq is unused for snapshots: the client orders/dedupes by the snapshot's
     // own monotonic serverTick (see Client::receiveSnapshot), so we leave it zero.
     w16(0); // seq (unused — ordering is by serverTick)
@@ -383,10 +388,10 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
     w8(entityCount);
     w8(worldItemCount);
     w16(projectileCount);
-    // D7.2 — Delta-encoding flag.  1 = full snapshot (all slots present in payload),
-    // 0 = delta (changedBits bitmask precedes the payload; only marked slots are written).
-    // For v1 we always write 1 — the deserializer reads it but the delta path is not yet
-    // active, so old and new builds interoperate correctly.
+    // Redundant in-payload isFullSnapshot byte (the authoritative copy is now in
+    // header byte 1). Kept for now so deserialize() at line 510 continues to consume
+    // the same number of bytes; removing it would require coordinated wire-format
+    // changes on both sides. Safe to drop in a future cleanup.
     w8(isFullSnapshot);
 
     // Per-slot ACK of newest input applied by the server (M3 uses for replay reconciliation)
