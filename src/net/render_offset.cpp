@@ -8,6 +8,20 @@ void RenderOffsetOps::accumulate(RenderOffset& r, Vec3 delta) {
     // Sum into any existing offset so back-to-back corrections don't reset
     // partial decays — they compound smoothly instead of snapping.
     r.offset = r.offset + delta;
+    // R10: clamp magnitude to MAX_OFFSET_M. Direction is preserved so the smoothing
+    // still trends correctly toward the sim position; only magnitude is bounded.
+    // Without this, repeated small reconcile snaps in high-action combat random-walk
+    // the offset past any perceptual ceiling — visible as shaky camera motion even
+    // though each individual snap is sub-threshold tiny.
+    f32 magSq = r.offset.x * r.offset.x
+              + r.offset.y * r.offset.y
+              + r.offset.z * r.offset.z;
+    const f32 capSq = RenderOffsetOps::MAX_OFFSET_M
+                    * RenderOffsetOps::MAX_OFFSET_M;
+    if (magSq > capSq) {
+        f32 scale = RenderOffsetOps::MAX_OFFSET_M / sqrtf(magSq);
+        r.offset = r.offset * scale;
+    }
 }
 
 void RenderOffsetOps::tick(RenderOffset& r, f32 dt) {

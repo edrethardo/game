@@ -24,6 +24,16 @@ namespace RenderOffsetOps {
     // visually mostly closed in ~150 ms" feel (10% remaining at t = 0.150 s).
     static constexpr f32 DECAY_RATE = 13.0f;
 
+    // R10: cap the accumulated offset magnitude to keep the visible correction layer
+    // from running away under bursts of small reconcile snaps in high-action combat.
+    // Solo walking accumulates ~0 offset; a sustained per-tick ~13 cm delta (e.g.
+    // dodge-roll, where movement is client-predicted-only) would otherwise drive
+    // steady-state offset to ~65 cm of visible camera lag, perceived as the "movement
+    // gets shaky" symptom when those corrections fire in varying directions. Cap
+    // clamps the magnitude (direction preserved) so the rendered camera never appears
+    // more than this far behind the authoritative sim position.
+    static constexpr f32 MAX_OFFSET_M = 0.35f;
+
     // Accumulate a new correction delta into the offset. If a prior correction is still
     // decaying, the two sum together so compounding errors don't snap more than necessary.
     void accumulate(RenderOffset& r, Vec3 delta);
