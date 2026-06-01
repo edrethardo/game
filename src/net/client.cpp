@@ -559,6 +559,12 @@ void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
         e.enemyType    = static_cast<EnemyType>(seB.enemyTypeId);
         e.weaponMeshId = seB.weaponMeshId;
         e.velocity     = { Quantize::unpackVel(seB.velX), 0.0f, Quantize::unpackVel(seB.velZ) };
+        // R9: mirror the boss-status bits so floorBossAlive() on the client (reading
+        // this render pool) can identify the milestone boss and drive the portal-locked
+        // / portal-unlocked color in engine_render_effects.cpp.
+        e.isBoss       = (seB.bossStatus & (1u << 4)) != 0;
+        e.minionShield = (seB.bossStatus & 0x01) != 0;
+        e.bossPhase    = static_cast<u8>((seB.bossStatus >> 1) & 0x07);
 
         Vec3 posB;
         posB.x = Quantize::unpackPos(seB.posX);

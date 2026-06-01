@@ -21,6 +21,7 @@ add_executable(dungeon_tests
     net/test_snapshot_delta.cpp
     net/test_snapshot_header.cpp
     net/test_snapshot_world_item.cpp
+    net/test_snapshot_entity.cpp
     engine/test_lag_comp_ring.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp

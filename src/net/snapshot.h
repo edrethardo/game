@@ -63,7 +63,9 @@ struct SnapEntity {
     u8   attackAnimQ;   // 1
     // Boss status (replaces the old alignment-only padding byte — wire size unchanged).
     // bit0 = minionShield (75% damage reduction active); bits1-3 = bossPhase (BossPhase::,
-    // 0-4 fits in 3 bits). Lets clients render the invuln/sealed boss as un-killable.
+    // 0-4 fits in 3 bits); bit4 = isBoss (R9: required so the client can tell which
+    // interpolated entity is the milestone boss for the portal-locked check, since
+    // Entity.isBoss is otherwise not shipped). Bits 5-7 reserved.
     u8   bossStatus;    // 1
     // Visual identity — the client's local entity pool diverges from the server's (the client
     // predicts kills), so its poolIndex can hold a different enemy. Send identity authoritatively

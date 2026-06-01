@@ -147,9 +147,13 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         se.stunTimer     = quantTimer(e.stunTimer);
         se.freezeTimer   = quantTimer(e.freezeTimer);
         se.bossLimbConfig = e.bossLimbConfig;
-        // Pack boss invuln/shield state: bit0=minionShield, bits1-3=bossPhase (0-4).
+        // Pack boss invuln/shield state: bit0=minionShield, bits1-3=bossPhase (0-4),
+        // bit4=isBoss (R9: client needs this to know which interpolated entity is the
+        // milestone boss for the portal-locked check; Entity.isBoss isn't otherwise on
+        // the wire, so the client's floorBossAlive can't identify the boss without it).
         se.bossStatus    = (e.minionShield ? 0x01 : 0x00)
-                         | static_cast<u8>((e.bossPhase & 0x07) << 1);
+                         | static_cast<u8>((e.bossPhase & 0x07) << 1)
+                         | static_cast<u8>(e.isBoss ? (1u << 4) : 0);
         // Visual identity (authoritative — see SnapEntity comment).
         se.meshId       = e.meshId;
         se.materialId   = e.materialId;

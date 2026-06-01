@@ -1305,7 +1305,23 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
 // exit so the player must defeat the boss before descending. A boss mid-death-fade
 // (ENT_DEAD set, deathTimer running) counts as dead. Malachar counts as alive through
 // his false-death phases until the real kill.
+//
+// R9: on CLIENT the local m_entities pool is the prediction ghost (N4 gated client-side
+// AI off, so it stops updating once the server takes authority). The authoritative
+// post-snapshot world lives in m_renderInterp.entities, populated by Client::interpolate
+// Entities. Entity.isBoss is mirrored from SnapEntity.bossStatus bit 4 (R9) so the
+// client can identify the milestone boss there. Without this branch, the portal stayed
+// the locked color forever — the ghost pool never saw the boss die.
 bool Engine::floorBossAlive() const {
+    if (m_netRole == NetRole::CLIENT) {
+        // Walk the render pool's active list — interpolateEntities rebuilds it each
+        // frame, one entry per SnapEntity received.
+        for (u32 a = 0; a < m_renderInterp.entities.activeCount; a++) {
+            const Entity& e = m_renderInterp.entities.entities[m_renderInterp.entities.activeList[a]];
+            if (e.isBoss && !(e.flags & ENT_DEAD)) return true;
+        }
+        return false;
+    }
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         const Entity& e = m_entities.entities[m_entities.activeList[a]];
         if (e.isBoss && !(e.flags & ENT_DEAD)) return true;
