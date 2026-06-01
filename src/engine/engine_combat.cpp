@@ -918,6 +918,39 @@ void Engine::endLagComp() {
     }
 }
 
+// R6: lag-comp the obstacle list for player movement so server's per-input moveAndSlide
+// sees the same entity positions the client interpolated against when capturing the input.
+// Without this, the client's interp pool (33 ms / 2 ticks behind live) disagrees with
+// the server's live entity pool whenever an enemy is moving near the player, producing
+// occasional ~1-tick position divergence that fires the M3.2 reconcile path and
+// produces visible "intermittent jitter". Pure read of the s_entHistory ring — no
+// mutation, no scratch save/restore — so call sites don't need begin/end bracketing.
+void Engine::buildLagCompPlayerObstacles(u32 targetSnapTick,
+                                         CollisionObstacle* out,
+                                         u32& outCount) const {
+    outCount = 0;
+    // Live-entity filter mirrors the host's gameUpdate pass: skip inactive, dead,
+    // friendly NPCs, and props (none of which should block player movement).
+    for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
+        const Entity& e = m_entities.entities[ei];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        const EntPoseSnap* hist = findHistoryAt(ei, targetSnapTick);
+        if (hist && hist->tickStamp != 0) {
+            // Closest historical pose to the client's interp tick — both sides now
+            // see the same world for collision purposes.
+            out[outCount++] = {hist->position, hist->halfExtents};
+        } else {
+            // Ring not populated for any tick yet (first ~2 ticks after a join, or
+            // immediately after resetEntityHistory). Falling back to live pose keeps
+            // pre-fix behavior in that narrow window; subsequent inputs use the
+            // correct rewound pose once pushEntityHistory has run.
+            out[outCount++] = {e.position, e.halfExtents};
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Weapon fire for any NetPlayer (server-authoritative)
 // ---------------------------------------------------------------------------

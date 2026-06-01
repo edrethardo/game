@@ -5,6 +5,7 @@
 #include "renderer/particles.h"
 #include "renderer/shader.h"
 #include "renderer/texture.h"
+#include "world/collision.h"     // CollisionObstacle — used by buildLagCompPlayerObstacles
 #include "world/level_grid.h"
 #include "world/level_mesh.h"
 #include "world/raycast.h"
@@ -705,6 +706,17 @@ private:
     u32  computeLagCompTicks(u8 slot) const;
     void beginLagComp(u32 ticksAgo);
     void endLagComp();
+
+    // R6: build the player-collision obstacle list at a lag-comp-rewound tick so the
+    // server's per-input moveAndSlide sees the same entity positions the client used
+    // when capturing the input. `out` must have capacity for MAX_ENTITIES; `outCount`
+    // is set on return. `targetSnapTick` is the server-tick the client interpolated
+    // against (= the client's ackedSnapshotTick minus the interp-delay offset, computed
+    // by the caller). Falls back to live entity positions for any entity whose history
+    // ring is empty (first ticks after a join, after a level reset, etc.).
+    void buildLagCompPlayerObstacles(u32 targetSnapTick,
+                                     CollisionObstacle* out,
+                                     u32& outCount) const;
 
     // Net callbacks (static, forwarded to engine instance)
     static void onSnapshot(const u8* data, u32 size);

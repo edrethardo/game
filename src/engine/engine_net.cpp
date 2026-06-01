@@ -96,18 +96,14 @@ void Engine::serverNetPre(f32 dt) {
     // buffer holds INPUT_BUFFER_SIZE=64 inputs (~1 s at 60 Hz), which exceeds any
     // realistic jitter window — overflow would silently overwrite the oldest, but
     // that's a packet-loss scenario already handled by the snapshot reconcile path.
-    // Build the obstacle list ONCE for this server tick. m_entities is stable for the
-    // duration of serverNetPre — entity spawns/deaths run later in gameUpdate. Live
-    // enemies block; friendly NPCs + props don't (mirrors the host's gameUpdate pass).
-    CollisionObstacle obs[MAX_ENTITIES];
-    u32 obsCount = 0;
-    for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
-        const Entity& e = m_entities.entities[ei];
-        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-        if (e.flags & ENT_FRIENDLY) continue;
-        if (e.enemyType == EnemyType::PROP) continue;
-        obs[obsCount++] = {e.position, e.halfExtents};
-    }
+    // R6: obstacle list is now built PER INPUT, lag-comp-rewound to the tick the
+    // client interpolated against when it captured the input. The earlier "build
+    // once per server tick from live entities" optimization (b524abe) used live
+    // positions, which disagreed with the client's interp-pool view (33 ms behind)
+    // whenever an enemy was moving — producing occasional ~1-tick reconcile diffs
+    // and visible jitter. Per-input rebuild costs O(MAX_ENTITIES × inputs-this-tick);
+    // negligible at our scale (≤MAX_ENTITIES × 6 per server tick under jitter).
+    constexpr u32 INTERP_DELAY_TICKS = 2; // 33 ms ≈ 2 ticks @ 60 Hz — matches client's INTERP_DELAY_SEC
 
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (i == m_localPlayerIndex) continue; // host moves in gameUpdate
@@ -145,14 +141,19 @@ void Engine::serverNetPre(f32 dt) {
                 PlayerController::updateNetPlayerFromInput(np, in, dt);
 
                 // Integrate np.position by THIS input's velocity for one client-tick (dt).
-                // Per-input cadence matches the client's per-tick gameUpdate, so when N
-                // inputs arrive batched in one server tick (jitter / packet bursts) the
-                // server advances N ticks of motion instead of losing N-1 of them. The
-                // previous "one moveAndSlide after the drain loop" pattern under-integrated
-                // under any jitter — every dropped tick of motion produced a ~6-12 cm
-                // divergence on reconcile, visible as small render-offset jitter on the
-                // client. applyMovement writes velocity only; this is where position moves.
+                // Per-input cadence matches the client's per-tick gameUpdate (R3, b524abe).
+                // Obstacle list is lag-comp-rewound to the tick the client interpolated
+                // against when capturing this input (R6) — without that rewind, server's
+                // live entity pool disagreed with the client's 33ms-behind interp pool and
+                // produced intermittent reconcile jitter near moving enemies.
                 if (!np.noclip) {
+                    u32 ackedSnap = m_clientAckedSnap[i];
+                    u32 targetSnapTick = (ackedSnap > INTERP_DELAY_TICKS)
+                                         ? (ackedSnap - INTERP_DELAY_TICKS) : 0;
+                    CollisionObstacle obs[MAX_ENTITIES];
+                    u32 obsCount = 0;
+                    buildLagCompPlayerObstacles(targetSnapTick, obs, obsCount);
+
                     Player tempP;
                     tempP.position = np.position;
                     tempP.velocity = np.velocity;
