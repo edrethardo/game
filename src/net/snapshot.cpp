@@ -655,3 +655,56 @@ bool Snapshot::worldItemSlotsEqual(const WorldSnapshot& a, const WorldSnapshot& 
     if (slot >= MAX_WORLD_ITEMS) return true;
     return std::memcmp(&a.worldItems[slot], &b.worldItems[slot], sizeof(SnapWorldItem)) == 0;
 }
+
+// ---------------------------------------------------------------------------
+// D7.3.1 — Pool-index lookup helpers
+//
+// Linear scan over the count-bounded dense arrays. Counts are small in practice
+// (≤4 players, ≤64 entities, ≤64 projectiles, ≤32 world items) so the
+// O(n) cost is cheaper than a hash table or sorted binary search for our sizes.
+// ---------------------------------------------------------------------------
+
+const SnapPlayer* Snapshot::findPlayerByPoolIndex(const WorldSnapshot& s, u8 slotIndex) {
+    for (u8 i = 0; i < s.playerCount; i++) {
+        if (s.players[i].slotIndex == slotIndex) return &s.players[i];
+    }
+    return nullptr;
+}
+
+const SnapEntity* Snapshot::findEntityByPoolIndex(const WorldSnapshot& s, u8 poolIndex) {
+    for (u8 i = 0; i < s.entityCount; i++) {
+        if (s.entities[i].poolIndex == poolIndex) return &s.entities[i];
+    }
+    return nullptr;
+}
+
+const SnapProjectile* Snapshot::findProjectileByPoolIndex(const WorldSnapshot& s, u16 poolIndex) {
+    for (u16 i = 0; i < s.projectileCount; i++) {
+        if (s.projectiles[i].poolIndex == poolIndex) return &s.projectiles[i];
+    }
+    return nullptr;
+}
+
+const SnapWorldItem* Snapshot::findWorldItemByPoolIndex(const WorldSnapshot& s, u8 slotIndex) {
+    for (u8 i = 0; i < s.worldItemCount; i++) {
+        if (s.worldItems[i].slotIndex == slotIndex) return &s.worldItems[i];
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// D7.3.1 — 64-bit bitmask over u8[8]
+//
+// Bit N occupies byte[N/8] at position (N%8). Out-of-range (N >= 64) is
+// defensively ignored rather than silently corrupting adjacent memory.
+// ---------------------------------------------------------------------------
+
+void Snapshot::setBit64(u8* mask, u32 bit) {
+    if (bit >= 64) return;
+    mask[bit / 8] |= static_cast<u8>(1u << (bit % 8));
+}
+
+bool Snapshot::getBit64(const u8* mask, u32 bit) {
+    if (bit >= 64) return false;
+    return (mask[bit / 8] & (1u << (bit % 8))) != 0;
+}

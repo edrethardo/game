@@ -202,4 +202,18 @@ namespace Snapshot {
     bool entitySlotsEqual    (const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
     bool projectileSlotsEqual(const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
     bool worldItemSlotsEqual (const WorldSnapshot& a, const WorldSnapshot& b, u32 slot);
+
+    // D7.3.1 — Pool-index lookup helpers. Each scans the snapshot's count-bounded dense
+    // array for the record whose identity field (slotIndex / poolIndex) matches the
+    // caller's key. Returns a const pointer into the snapshot's array on hit, nullptr on
+    // miss. Linear scan is safe because pools are small (≤4 players, ≤64 entities, etc.).
+    const SnapPlayer*     findPlayerByPoolIndex   (const WorldSnapshot& s, u8  slotIndex);
+    const SnapEntity*     findEntityByPoolIndex   (const WorldSnapshot& s, u8  poolIndex);
+    const SnapProjectile* findProjectileByPoolIndex(const WorldSnapshot& s, u16 poolIndex);
+    const SnapWorldItem*  findWorldItemByPoolIndex (const WorldSnapshot& s, u8  slotIndex);
+
+    // D7.3.1 — 64-bit bitmask helpers over a u8[8] array.
+    // bit values 0-63 map to byte[bit/8] bit(bit%8). Out-of-range (>=64) are no-ops/false.
+    void setBit64(u8* mask, u32 bit);
+    bool getBit64(const u8* mask, u32 bit);
 }

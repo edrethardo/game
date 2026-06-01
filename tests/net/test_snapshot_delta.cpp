@@ -99,3 +99,45 @@ TEST_CASE("Delta: out-of-range slot indices return true (safe no-op for skip log
     CHECK(Snapshot::entitySlotsEqual(a, b, MAX_ENTITIES)    == true);
     CHECK(Snapshot::worldItemSlotsEqual(a, b, MAX_WORLD_ITEMS) == true);
 }
+
+// ---------------------------------------------------------------------------
+// D7.3.1 — TDD for pool-index lookup helpers and 64-bit bitmask ops.
+//
+// findEntityByPoolIndex / findPlayerByPoolIndex etc. are the building blocks for
+// delta encoding: they let the encoder/decoder identify which baseline record
+// corresponds to a given pool slot without relying on dense-array position order
+// (which changes each snapshot due to the nearest-player sort in buildFromState).
+// setBit64 / getBit64 drive the per-slot unchanged-bitmask wire format.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Snapshot::findEntityByPoolIndex returns null on missing") {
+    WorldSnapshot s;
+    s.entityCount = 0;
+    CHECK(Snapshot::findEntityByPoolIndex(s, 5) == nullptr);
+}
+
+TEST_CASE("Snapshot::findEntityByPoolIndex returns matching record") {
+    WorldSnapshot s;
+    s.entityCount = 2;
+    s.entities[0].poolIndex = 7;
+    s.entities[1].poolIndex = 2;
+    REQUIRE(Snapshot::findEntityByPoolIndex(s, 7) != nullptr);
+    REQUIRE(Snapshot::findEntityByPoolIndex(s, 7) == &s.entities[0]);
+    REQUIRE(Snapshot::findEntityByPoolIndex(s, 2) == &s.entities[1]);
+    CHECK(Snapshot::findEntityByPoolIndex(s, 5) == nullptr);
+}
+
+TEST_CASE("Snapshot bitmask: set/get 64-bit operations") {
+    u8 mask[8] = {};
+    Snapshot::setBit64(mask, 0);
+    Snapshot::setBit64(mask, 7);
+    Snapshot::setBit64(mask, 8);
+    Snapshot::setBit64(mask, 63);
+    CHECK(Snapshot::getBit64(mask, 0) == true);
+    CHECK(Snapshot::getBit64(mask, 7) == true);
+    CHECK(Snapshot::getBit64(mask, 8) == true);
+    CHECK(Snapshot::getBit64(mask, 63) == true);
+    CHECK(Snapshot::getBit64(mask, 1) == false);
+    CHECK(Snapshot::getBit64(mask, 32) == false);
+    CHECK(Snapshot::getBit64(mask, 64) == false);  // out of range — clamped to false
+}
