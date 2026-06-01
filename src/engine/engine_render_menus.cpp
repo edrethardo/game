@@ -426,6 +426,7 @@ void Engine::renderMenu() {
             {"nlohmann/json - Niels Lohmann (MIT)", 1, {0.7f, 0.7f, 0.7f}, false},
             {"stb_image - Sean Barrett (MIT/PD)", 1, {0.7f, 0.7f, 0.7f}, false},
             {"glad - OpenGL Loader Generator", 1, {0.7f, 0.7f, 0.7f}, false},
+            {"miniupnpc - Thomas Bernard (BSD-3)", 1, {0.7f, 0.7f, 0.7f}, false},
             {"", 1, {0,0,0}, true},
             {"--- Audio ---", 2, {1.0f, 0.6f, 0.1f}, false},
             {"Kenney.nl - RPG Audio, Impacts, UI (CC0)", 1, {0.7f, 0.7f, 0.7f}, false},
