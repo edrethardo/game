@@ -609,12 +609,17 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
-    // Host-IP entry (subState 9) — joiners only. Type a dotted-quad IP or hostname-like
-    // string (digits + dots) and Enter to confirm; advances to the New/Continue chooser
-    // that the Host path also uses. No mouse, no nav arrows — pure text entry.
+    // Host-IP entry (subState 9) — joiners only. Type a dotted-quad IPv4, a bracketed
+    // IPv6 literal (e.g. [::1] or [2001:db8::1]), or a hostname-like string, then Enter
+    // to confirm; advances to the New/Continue chooser that the Host path also uses.
+    // No mouse, no nav arrows — pure text entry.
     if (m_menu.subState == 9) {
-        // Numeric input mapped from SDL scancodes. Both the top-row digits and numpad
-        // produce the same character. Period and KP_PERIOD both produce '.'.
+        // Numeric + IPv6 input mapped from SDL scancodes. Both the top-row digits and
+        // numpad produce the same character; period and KP_PERIOD both produce '.'.
+        // R12 added the hex digits a-f, colon, and square brackets so the user can
+        // type IPv6 literals. We don't track shift state — the colon, bracket, and
+        // hex-letter scancodes emit their unshifted bare characters straight into
+        // the buffer, which is what inet_pton expects.
         struct KeyMap { s32 scancode; char ch; };
         static const KeyMap kKeyMap[] = {
             {SDL_SCANCODE_0, '0'}, {SDL_SCANCODE_1, '1'}, {SDL_SCANCODE_2, '2'},
@@ -626,6 +631,12 @@ void Engine::updateMenu(f32 dt) {
             {SDL_SCANCODE_KP_6, '6'}, {SDL_SCANCODE_KP_7, '7'}, {SDL_SCANCODE_KP_8, '8'},
             {SDL_SCANCODE_KP_9, '9'},
             {SDL_SCANCODE_PERIOD, '.'}, {SDL_SCANCODE_KP_PERIOD, '.'},
+            // R12: IPv6 syntax — hex digits, colon (as `:`), and brackets.
+            {SDL_SCANCODE_A, 'a'}, {SDL_SCANCODE_B, 'b'}, {SDL_SCANCODE_C, 'c'},
+            {SDL_SCANCODE_D, 'd'}, {SDL_SCANCODE_E, 'e'}, {SDL_SCANCODE_F, 'f'},
+            {SDL_SCANCODE_SEMICOLON,    ':'},
+            {SDL_SCANCODE_LEFTBRACKET,  '['},
+            {SDL_SCANCODE_RIGHTBRACKET, ']'},
         };
 
         for (const auto& km : kKeyMap) {

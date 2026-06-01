@@ -467,6 +467,11 @@ bool Net::hostServer(u16 port) {
     if (s_enetHost) return false;
 
     ENetAddress address;
+    // R12: zero the address struct so the new family + host6 fields default to
+    // AF_INET/0. ENET_HOST_ANY=0 plus family=AF_INET tells the patched ENet to
+    // bind to in6addr_any (dual-stack wildcard) — same socket carries both v4
+    // and v6 peers via IPv4-mapped IPv6.
+    std::memset(&address, 0, sizeof(address));
     address.host = ENET_HOST_ANY;
     address.port = port;
 
@@ -520,8 +525,27 @@ bool Net::connectToServer(const char* address, u16 port) {
         return false;
     }
 
+    // R12: strip URL-style brackets around IPv6 literals before handing the
+    // address to enet_address_set_host. The lobby ships port separately so
+    // we don't need to parse `:port` out — just the bare host inside `[]`.
+    // Examples accepted: "192.168.1.1" / "[::1]" / "[2001:db8::1]" / "host.example".
+    const char* host = address;
+    char unbracketed[64];
+    if (address && address[0] == '[') {
+        const char* end = std::strchr(address, ']');
+        if (end) {
+            size_t len = static_cast<size_t>(end - (address + 1));
+            if (len < sizeof(unbracketed)) {
+                std::memcpy(unbracketed, address + 1, len);
+                unbracketed[len] = '\0';
+                host = unbracketed;
+            }
+        }
+    }
+
     ENetAddress addr;
-    enet_address_set_host(&addr, address);
+    std::memset(&addr, 0, sizeof(addr));   // R12: zero family + host6 before set_host populates them
+    enet_address_set_host(&addr, host);
     addr.port = port;
 
     s_serverPeer = enet_host_connect(s_enetHost, &addr, NUM_CHANNELS, 0);
