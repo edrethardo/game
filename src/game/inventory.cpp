@@ -137,8 +137,7 @@ void Inventory::removeFromBackpack(PlayerInventory& inv, u8 slot) {
     if (slot >= MAX_INVENTORY_ITEMS) return;
     // Clear the slot without adjusting backpackCount — leaving a hole is safe for
     // addToBackpack (which scans all slots) and the inventory UI (which iterates all).
-    inv.backpack[slot].defId    = 0xFFFF;
-    inv.backpack[slot].predicted = false;
+    inv.backpack[slot].defId = 0xFFFF;
 }
 
 void Inventory::equip(PlayerInventory& inv, u8 backpackIndex, const ItemDef* itemDefs) {

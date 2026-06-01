@@ -271,10 +271,6 @@ struct ItemInstance {
 
     // Unique instance ID for networking
     u32 uid = 0;
-
-    // M-D4: client-predicted pickup awaiting server confirm (cleared on SV_PICKUP_RESULT accept,
-    // item removed via removeFromBackpack on reject). Always false on server / singleplayer.
-    bool predicted = false;
 };
 
 inline bool isItemEmpty(const ItemInstance& item) {

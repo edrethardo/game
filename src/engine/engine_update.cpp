@@ -1145,9 +1145,7 @@ void Engine::sendPickupRequest() {
         WorldItem& wi = m_worldItems.items[i];
         if (!wi.active || wi.item.uid != uid) continue;
 
-        ItemInstance copy = wi.item;
-        copy.predicted = true;   // mark as unconfirmed until SV_PICKUP_RESULT arrives
-        predictedSlot = Inventory::addToBackpack(m_inventories[m_localPlayerIndex], copy);
+        predictedSlot = Inventory::addToBackpack(m_inventories[m_localPlayerIndex], wi.item);
         if (predictedSlot < 0) {
             // Backpack full — don't even send the request; avoid a pointless round-trip
             // that the server would reject. Show the notify so the player knows why.

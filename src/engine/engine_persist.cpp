@@ -162,17 +162,7 @@ void Engine::saveGame(u8 slot) {
         std::fwrite(&hp,    sizeof(f32), 1, f);
         std::fwrite(&maxHp, sizeof(f32), 1, f);
 
-        // ItemInstance::predicted is a client-only pickup-pending flag (set on
-        // sendPickupRequest, cleared on SV_PICKUP_RESULT — D4). It has no meaning
-        // in saved state. Clear before persisting so a mid-pickup save never
-        // strands `predicted=true` in a slot forever, and so we can keep adding
-        // transient-only fields to ItemInstance without forcing SAVE_VERSION bumps.
-        PlayerInventory& invToSave = m_inventories[p];
-        for (u32 b = 0; b < MAX_INVENTORY_ITEMS; b++)
-            invToSave.backpack[b].predicted = false;
-        for (u32 e = 0; e < static_cast<u32>(ItemSlot::COUNT); e++)
-            invToSave.equipped[e].predicted = false;
-        std::fwrite(&invToSave,  sizeof(PlayerInventory), 1, f);
+        std::fwrite(&m_inventories[p],  sizeof(PlayerInventory), 1, f);
         std::fwrite(&m_quickbars[p],    sizeof(QuickbarState),   1, f);
         std::fwrite(&m_skillStates[p],  sizeof(SkillState),      1, f);
 

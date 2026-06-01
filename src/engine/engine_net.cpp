@@ -894,11 +894,9 @@ void Engine::onPickupResult(u8 accept, u32 itemUid) {
     if (!s_engine) return;
     s8 slot = PendingPickupRingOps::findSlotByUid(s_engine->m_pendingPickups, itemUid);
     if (accept) {
-        // Server confirmed — promote the predicted item to a real one.
-        if (slot >= 0) {
-            PlayerInventory& inv = s_engine->m_inventories[s_engine->m_localPlayerIndex];
-            inv.backpack[static_cast<u8>(slot)].predicted = false;
-        }
+        // Server confirmed — predicted slot is already in the inventory; nothing to do.
+        // Rollback would be the only divergence; since accept matched, leave as-is.
+        (void)slot;
     } else {
         // Server rejected — roll back the predicted inventory add.
         if (slot >= 0) {
