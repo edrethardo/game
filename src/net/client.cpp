@@ -166,11 +166,17 @@ void Client::init(u8 localPlayerIndex) {
     LOG_INFO("Client: initialized (local player=%u)", localPlayerIndex);
 }
 
-void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId, u8 skillSlot) {
+void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
+                                 u8 skillSlot, u8 extFlagsClearMask) {
     s_latestInput = PlayerController::captureLocalInput(player, clientTick, weaponId);
     // captureLocalInput defaults skillSlot to 0 ("set by engine before sending"); stamp the
     // engine's selected class-skill slot here so the server activates the chosen skill.
     s_latestInput.skillSlot = skillSlot;
+    // R9 client-side cooldown gate: if the engine determined our local cooldown isn't
+    // ready, clear the corresponding INPUT_EX_* bit so we don't even ask the server.
+    // Server still gates persistently as a backstop, but this is the "snappy" path —
+    // suppress spam at source.
+    s_latestInput.extFlags &= static_cast<u8>(~extFlagsClearMask);
     s_hasInput = true;
 
     // Shift oldest out and append this input at the back (oldest→newest order).

@@ -290,6 +290,12 @@ private:
     SkillState      m_skillStates[MAX_PLAYERS];
     SkillState      m_bootSkillStates[MAX_PLAYERS];
     SkillState      m_helmetSkillStates[MAX_PLAYERS];
+    // R9: per-net-slot class-skill state, server-side only. Used to give remote
+    // clients persistent cooldown timers so SkillSystem::tryActivate gates spam
+    // requests; the host's own slot is unused here (host's class skills live in
+    // m_classSkillStates / m_classSkillStatesPerPlayer above and are ticked in
+    // tickSkillCooldowns/gameUpdate). Server ticks remote slots in serverNetPre.
+    SkillState      m_classSkillStatesNet[MAX_PLAYERS][4];
     WorldItemPool   m_worldItems;
     QuickbarState   m_quickbars[MAX_PLAYERS];
     Mesh            m_handMesh;

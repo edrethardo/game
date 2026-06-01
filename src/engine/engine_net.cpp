@@ -82,6 +82,22 @@ void Engine::serverNetPre(f32 dt) {
     // that reads slot 0's ack (spectate/lag-comp/debug).
     m_players[m_localPlayerIndex].lastProcessedInputTick = localInput.clientTick;
 
+    // R9: drain remote-player skill cooldowns each server tick so the gate set by
+    // SkillSystem::tryActivate (cooldownTimer = def->cooldown on success) actually
+    // counts down. Host's own slot is ticked by tickSkillCooldowns in gameUpdate
+    // (with split-screen alias swap), so this loop only covers remote net slots.
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (i == m_localPlayerIndex || !m_players[i].active) continue;
+        for (u32 s = 0; s < 4; s++) {
+            f32& cd = m_classSkillStatesNet[i][s].cooldownTimer;
+            if (cd > 0.0f) { cd -= dt; if (cd < 0.0f) cd = 0.0f; }
+        }
+        f32& bcd = m_bootSkillStates[i].cooldownTimer;
+        if (bcd > 0.0f) { bcd -= dt; if (bcd < 0.0f) bcd = 0.0f; }
+        f32& hcd = m_helmetSkillStates[i].cooldownTimer;
+        if (hcd > 0.0f) { hcd -= dt; if (hcd < 0.0f) hcd = 0.0f; }
+    }
+
     // Process inputs for remote players only (host movement handled by gameUpdate).
     //
     // Drain ALL unprocessed inputs in tick order, not just `getLatest()`. The prior
@@ -195,7 +211,13 @@ void Engine::serverNetPre(f32 dt) {
                 if (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY) {
                     SkillId bootSkill = m_itemDefs[boots.defId].legendarySkillId;
                     if (bootSkill != SkillId::NONE) {
-                        SkillState ss; ss.activeSkill = bootSkill; ss.energy = 999.0f; ss.maxEnergy = 999.0f;
+                        // R9: use the persistent per-slot SkillState so tryActivate's cooldown
+                        // gate (cooldownTimer > 0 → reject) actually blocks spam. A throwaway
+                        // SkillState resets cooldownTimer to 0 every call and silently lets
+                        // every press through.
+                        SkillState& ss = m_bootSkillStates[i];
+                        ss.activeSkill = bootSkill;
+                        ss.energy = 999.0f; ss.maxEnergy = 999.0f;
                         Vec3 ep = m_players[i].eyePos();
                         Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
                                                     sinf(m_players[i].pitch),
@@ -226,7 +248,10 @@ void Engine::serverNetPre(f32 dt) {
                 if (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY) {
                     SkillId helmSkill = m_itemDefs[helm.defId].legendarySkillId;
                     if (helmSkill != SkillId::NONE) {
-                        SkillState ss; ss.activeSkill = helmSkill; ss.energy = 999.0f; ss.maxEnergy = 999.0f;
+                        // R9: persistent SkillState so tryActivate's cooldown gate engages.
+                        SkillState& ss = m_helmetSkillStates[i];
+                        ss.activeSkill = helmSkill;
+                        ss.energy = 999.0f; ss.maxEnergy = 999.0f;
                         Vec3 ep = m_players[i].eyePos();
                         Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
                                                     sinf(m_players[i].pitch),
@@ -259,9 +284,12 @@ void Engine::serverNetPre(f32 dt) {
                     // same depth their own HUD shows, instead of the raw floor.
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
                     if (effectiveFloor >= cls.skillUnlockFloor[slot]) {
-                        SkillState tempSS;
+                        // R9: persistent per-net-slot, per-class-slot state so the cooldown
+                        // gate in SkillSystem::tryActivate (cooldownTimer > 0 → reject)
+                        // actually fires. The old throwaway SkillState reset cooldownTimer
+                        // to 0 every press and let spam through.
+                        SkillState& tempSS = m_classSkillStatesNet[i][slot];
                         tempSS.activeSkill = cls.skills[slot];
-                        tempSS.cooldownTimer = 0.0f;
                         tempSS.energy = 999.0f;
                         tempSS.maxEnergy = 999.0f;
                         Vec3 eyePos = m_players[i].eyePos();
@@ -618,7 +646,22 @@ void Engine::clientNetPre(f32 dt) {
     // — captureLocalInput defaults skillSlot to 0, and the server reads input->skillSlot
     // to pick the skill.
     WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
-    Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon, m_activeClassSkill);
+    // R9 client-side skill-cooldown gate: clear INPUT_EX_SKILL/BOOT/HELM bits when the
+    // matching local cooldown isn't ready, so we don't send the server a request that's
+    // going to be rejected anyway. Source of truth is the same SkillState the local-side
+    // prediction already mutates in handleClassSkillActivation / handleEquipmentSkillActivation.
+    // Local visual prediction is unchanged — those paths run tryActivate against these
+    // very states and bail out on cooldown locally, so the cast simply does nothing on
+    // a spammed press (matches the singleplayer feel).
+    u8 skillClearMask = 0;
+    if (m_classSkillStates[m_activeClassSkill].cooldownTimer > 0.0f)
+        skillClearMask |= INPUT_EX_SKILL;
+    if (m_bootSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f)
+        skillClearMask |= INPUT_EX_BOOT_SKILL;
+    if (m_helmetSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f)
+        skillClearMask |= INPUT_EX_HELM_SKILL;
+    Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon,
+                                m_activeClassSkill, skillClearMask);
 
     // M10.1: resendPendingFire() removed — CL_FIRE_WEAPON is now reliable.
 

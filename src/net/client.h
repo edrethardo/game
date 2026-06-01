@@ -29,7 +29,16 @@ namespace Client {
     // selected class-skill slot (0-3); stamped into the sent input so the server
     // activates the right skill. Does not mutate the player — PlayerController::update
     // applies the same frame's input to `player` later in the tick.
-    void captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId, u8 skillSlot);
+    //
+    // R9: `extFlagsClearMask` clears those bits on the just-captured input's extFlags
+    // before the packet is sent. The engine sets each bit when the corresponding local
+    // cooldown isn't ready, so the client doesn't bother the server with a request it
+    // knows would be denied. The server still gates authoritatively (engine_net.cpp's
+    // remote-skill handlers run tryActivate against persistent SkillState), but this
+    // trims the spam at the source — "the client knows when the skills have cooldown
+    // best". Pass 0 to disable (e.g. host path, where remote inputs aren't sent).
+    void captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
+                             u8 skillSlot, u8 extFlagsClearMask = 0);
 
     // Get the latest captured input (for local prediction in engine)
     const NetInput* getLatestInput();
