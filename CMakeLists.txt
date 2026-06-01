@@ -13,7 +13,14 @@ option(BUILD_TESTS "Build unit tests" ON)
 add_subdirectory(external)
 add_subdirectory(src)
 
-if(NOT NINTENDO_SWITCH AND BUILD_TESTS)
+# Cross-compile builds (e.g. MinGW-w64 Windows from Linux for the CI release zip) skip
+# tests too. The vendored doctest header pulls in <mutex> and <thread>, and the
+# packaged mingw-w64 GCC on Ubuntu CI is the win32-threads variant which does NOT
+# implement std::mutex / std::thread — building the tests there fails with
+# "'mutex' in namespace 'std' does not name a type". Cross-compiled test binaries
+# can't run on the host without Wine anyway, so skipping is the right call:
+# the release zip never contained dungeon_tests.exe.
+if(NOT NINTENDO_SWITCH AND BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
     enable_testing()
     add_subdirectory(tests)
 endif()
