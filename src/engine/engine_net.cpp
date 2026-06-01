@@ -96,6 +96,19 @@ void Engine::serverNetPre(f32 dt) {
     // buffer holds INPUT_BUFFER_SIZE=64 inputs (~1 s at 60 Hz), which exceeds any
     // realistic jitter window — overflow would silently overwrite the oldest, but
     // that's a packet-loss scenario already handled by the snapshot reconcile path.
+    // Build the obstacle list ONCE for this server tick. m_entities is stable for the
+    // duration of serverNetPre — entity spawns/deaths run later in gameUpdate. Live
+    // enemies block; friendly NPCs + props don't (mirrors the host's gameUpdate pass).
+    CollisionObstacle obs[MAX_ENTITIES];
+    u32 obsCount = 0;
+    for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
+        const Entity& e = m_entities.entities[ei];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        obs[obsCount++] = {e.position, e.halfExtents};
+    }
+
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (i == m_localPlayerIndex) continue; // host moves in gameUpdate
         NetPlayer& np = m_players[i];
@@ -127,51 +140,31 @@ void Engine::serverNetPre(f32 dt) {
             if (!np.isDead) {
                 // SERVER-AUTHORITATIVE POSITION (M2+): server runs PlayerController on the
                 // remote slot — updateNetPlayerFromInput computes yaw/pitch from the absolute
-                // quantized values in the input, then drives applyMovement with moveFlags to
-                // produce the new np.position via moveAndSlide. The M0-era client-reported
-                // posXQ/Y/Z override is removed. M3 adds client-side prediction + replay
-                // reconciliation so the local player never feels the server latency.
+                // quantized values in the input, then drives applyMovement to produce the new
+                // np.velocity. Position integration happens immediately below, per input.
                 PlayerController::updateNetPlayerFromInput(np, in, dt);
+
+                // Integrate np.position by THIS input's velocity for one client-tick (dt).
+                // Per-input cadence matches the client's per-tick gameUpdate, so when N
+                // inputs arrive batched in one server tick (jitter / packet bursts) the
+                // server advances N ticks of motion instead of losing N-1 of them. The
+                // previous "one moveAndSlide after the drain loop" pattern under-integrated
+                // under any jitter — every dropped tick of motion produced a ~6-12 cm
+                // divergence on reconcile, visible as small render-offset jitter on the
+                // client. applyMovement writes velocity only; this is where position moves.
+                if (!np.noclip) {
+                    Player tempP;
+                    tempP.position = np.position;
+                    tempP.velocity = np.velocity;
+                    tempP.onGround = np.onGround;
+                    tempP.noclip   = false;
+                    Collision::moveAndSlide(tempP, m_level.grid, dt, obs, obsCount);
+                    np.position = tempP.position;
+                    np.velocity = tempP.velocity;
+                    np.onGround = tempP.onGround;
+                }
             }
         }
-    }
-
-    // After the input-drain loop, integrate each remote NetPlayer's position from
-    // its computed velocity via the same moveAndSlide path the local player uses.
-    // PlayerController::updateNetPlayerFromInput sets velocity (via applyMovement)
-    // but doesn't move position — that step lives here, against the level grid +
-    // entity obstacles. Without this, remote np.position stays at spawn forever
-    // and every server-side check that reads it (descent / pickup proximity,
-    // lag-comp rewinds, AOE centers) sees stale data. (This loop is structurally
-    // the pre-M0 code; the M2-era claim that updateNetPlayerFromInput integrates
-    // position was wrong — applyMovement only writes velocity.)
-    for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        if (i == m_localPlayerIndex) continue;     // host moves via gameUpdate
-        NetPlayer& np = m_players[i];
-        if (!np.active || np.noclip || np.isDead) continue;
-
-        Player tempP;
-        tempP.position = np.position;
-        tempP.velocity = np.velocity;
-        tempP.onGround = np.onGround;
-        tempP.noclip   = np.noclip;
-
-        // Live enemies block; friendly NPCs + props don't (mirrors host collision pass).
-        CollisionObstacle obs[MAX_ENTITIES];
-        u32 obsCount = 0;
-        for (u32 ei = 0; ei < MAX_ENTITIES; ei++) {
-            const Entity& e = m_entities.entities[ei];
-            if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
-            if (e.flags & ENT_FRIENDLY) continue;
-            if (e.enemyType == EnemyType::PROP) continue;
-            obs[obsCount++] = {e.position, e.halfExtents};
-        }
-
-        Collision::moveAndSlide(tempP, m_level.grid, dt, obs, obsCount);
-
-        np.position = tempP.position;
-        np.velocity = tempP.velocity;
-        np.onGround = tempP.onGround;
     }
 
     // Remote player weapon fire + extended actions (server-authoritative)
@@ -644,16 +637,18 @@ void Engine::clientNetPre(f32 dt) {
         if (latest) PredictionRingOps::push(m_predictionRing, m_clientTick, *latest, s);
     }
 
-    // No client-side prediction step anymore — under the trust-client position model,
-    // m_localPlayer is the authoritative source for the local camera/transform (updated
-    // in gameUpdate via PlayerController::update). The server adopts the absolute yaw/
-    // pitch/position the client packed in NetInput and mirrors them back via snapshot.
-    // Running a second prediction here on NetPlayer would produce a post-movement
-    // position that diverges from the pre-movement position the server adopts (every
-    // frame), and the snap-back via syncNetPlayerToLocalPlayer would feed double-applied
-    // mouse delta into the camera — caused the "can't aim" + "shaking" pair after the
-    // absolute-aim change. Reconcile is now HP/status-only (+ a loose-threshold safety
-    // snap for legitimate teleports).
+    // Reconcile compares the server's authoritative snapshot against the local-player
+    // state we pushed into m_predictionRing on this clientTick. Position is server-
+    // authoritative since M2 (posXQ/Y/Z removed from NetInput — see player.cpp:352);
+    // the server re-derives position from input moveFlags + yaw via PlayerController
+    // ::updateNetPlayerFromInput + Collision::moveAndSlide, integrated per-input in
+    // serverNetPre so the server's cadence matches the client's per-tick gameUpdate.
+    //
+    // We do NOT re-run a prediction step here — m_localPlayer is itself the prediction,
+    // updated each gameUpdate exactly as singleplayer would. Render-side smoothing
+    // flows through m_renderOffset (RenderOffsetOps::accumulate on divergence, decayed
+    // per frame at DECAY_RATE=13.0). The pre-M2 "trust-client position" comment that
+    // used to live here described the now-removed posXYZ-in-NetInput model.
     Client::reconcile(m_players[activeNetSlot()], m_localPlayer);
 
     // CLIENT death is server-authoritative: reconcile adopted the server's isDead into our net
