@@ -192,6 +192,23 @@ namespace Snapshot {
     // Deserialize snapshot from packet bytes.
     bool deserialize(WorldSnapshot& snap, const u8* data, u32 size);
 
+    // D7.3 — Delta encode/decode. serializeDelta encodes `current` as a delta against
+    // `baseline` (wire: header + masks + changed-only records). Does NOT include a packet
+    // header — the caller wraps in PacketWriter if needed; the returned buffer starts with
+    // serverTick. Returns byte count written; 0 on buffer overflow.
+    // deserializeDelta reconstructs `out` by merging baseline unchanged slots with the
+    // changed-record payload. Returns false on a truncated or malformed buffer.
+    // Wire format (after isFullSnapshot=0):
+    //   1 B unchangedPlayersMask (bit-per-slot, slots 0-3)
+    //   8 B unchangedEntitiesMask    (64 bits, bit N = poolIndex N unchanged)
+    //   8 B unchangedProjectilesMask (64 bits, poolIndex < 64 only; higher always included)
+    //   8 B unchangedWorldItemsMask  (64 bits, bit N = slotIndex N unchanged)
+    //   then count-prefixed changed records per pool (same per-record layout as full serialize)
+    u32  serializeDelta  (u8* outBuf, u32 outCap,
+                          const WorldSnapshot& current, const WorldSnapshot& baseline);
+    bool deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
+                          const WorldSnapshot& baseline);
+
     // D7.1 — Per-slot equality helpers used by delta-encoding to decide which slots
     // have changed since the last baseline snapshot.  Each compares the slot struct
     // fields byte-for-byte via memcmp (safe because all snapshot structs are

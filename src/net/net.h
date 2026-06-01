@@ -224,6 +224,10 @@ namespace Net {
     // Send to a specific player slot (server only)
     void sendReliable(u8 playerSlot, const u8* data, u32 size);
     void sendUnreliable(u8 playerSlot, const u8* data, u32 size);
+    // D7.3 — Send a snapshot (potentially large, fragmentable) to one client slot only.
+    // Uses ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT so the payload may exceed one MTU.
+    // Mirrors broadcastSnapshot but targets a single peer.
+    void sendSnapshotToSlot(u8 playerSlot, const u8* data, u32 size);
 
     // Broadcast to all connected clients (server only)
     void broadcastReliable(const u8* data, u32 size);

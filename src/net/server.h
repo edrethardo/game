@@ -24,12 +24,30 @@ namespace Server {
     // rejoiner's fresh low ticks until they climb past the departed client's stale ticks.
     void resetInputBuffer(u8 playerSlot);
 
-    // Build and broadcast a snapshot to all clients.
+    // Build the current snapshot from game state and broadcast a full copy to all
+    // connected clients (unreliable fragment channel). Used for singleplayer.
     void sendSnapshot(u32 serverTick,
                       const NetPlayer* players,
                       const EntityPool& entities,
                       const ProjectilePool& projectiles,
                       const WorldItemPool& worldItems);
+
+    // D7.3 — Build the snapshot WITHOUT broadcasting. The engine then calls
+    // sendSnapshotFullToSlot / sendSnapshotDeltaToSlot per active remote slot.
+    // Sets getLastSnapshot() so per-slot callers can read the built state.
+    void buildSnapshotOnly(u32 serverTick,
+                           const NetPlayer* players,
+                           const EntityPool& entities,
+                           const ProjectilePool& projectiles,
+                           const WorldItemPool& worldItems);
+
+    // D7.3 — Send a full snapshot to a single client slot (used when the client
+    // has no accepted baseline yet, e.g. first snapshot or baseline mismatch).
+    void sendSnapshotFullToSlot(u8 slot);
+
+    // D7.3 — Send a delta snapshot to a single client slot encoded against the
+    // given baseline. Falls back to a full send if serialization fails.
+    void sendSnapshotDeltaToSlot(u8 slot, const WorldSnapshot& baseline);
 
     // D7.2 — Return the snapshot that was built and sent on the most recent
     // sendSnapshot call.  The server calls this once per snapshot tick to copy

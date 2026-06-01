@@ -38,6 +38,13 @@ static u32      s_sendWindowCount = 0;
 // stale. Accepting the first arrival regardless makes the post-descend newest deterministic.
 static bool     s_acceptNextSnapshot = false;
 
+// D7.3 — Client-side baseline snapshot for delta decoding. Updated after each accepted
+// snapshot so the server's next delta can diff against our most recently applied state.
+// s_hasBaseline starts false and is cleared on init (floor change); the first snapshot
+// after init is always full (server's sendSnapshotFullToSlot gates on no-baseline).
+static WorldSnapshot s_baselineSnap;
+static bool          s_hasBaseline = false;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -153,6 +160,9 @@ void Client::init(u8 localPlayerIndex) {
     // first packets (the server's input ring buffer also resets in Server::init).
     s_sendWindowCount = 0;
     s_acceptNextSnapshot = true; // first post-(re)init snapshot is accepted unconditionally (TA-6)
+    // D7.3 — Clear the delta baseline so the first snapshot on the new floor is always
+    // treated as a full (no stale prior-floor baseline confusing the decoder).
+    s_hasBaseline = false;
     LOG_INFO("Client: initialized (local player=%u)", localPlayerIndex);
 }
 
@@ -193,10 +203,38 @@ const NetInput* Client::getLatestInput() {
     return s_hasInput ? &s_latestInput : nullptr;
 }
 
+// D7.3 — Minimum wire bytes before the isFullSnapshot byte in an SV_SNAPSHOT packet:
+//   4 (packet header) + 4 (serverTick) + MAX_PLAYERS*4 (lastProcessedInputTick).
+// The byte at this offset is 1 for a full snapshot, 0 for a delta.
+static constexpr u32 SNAP_ISFULL_BYTE_OFFSET = 4 + 4 + MAX_PLAYERS * 4;
+
 void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
     static WorldSnapshot snap;
     snap.serverTick = 0; snap.playerCount = 0; snap.entityCount = 0; snap.projectileCount = 0;
-    if (Snapshot::deserialize(snap, data, size)) {
+
+    // D7.3 — Peek the isFullSnapshot byte to decide which deserializer to call.
+    // Full snapshots (isFullSnapshot=1) use the existing path. Delta snapshots
+    // (isFullSnapshot=0) are decoded against s_baselineSnap via deserializeDelta,
+    // which expects the buffer starting AFTER the 4-byte packet header.
+    bool isFullSnap = true;
+    if (size > SNAP_ISFULL_BYTE_OFFSET) {
+        isFullSnap = (data[SNAP_ISFULL_BYTE_OFFSET] != 0);
+    }
+
+    bool decoded = false;
+    if (!isFullSnap && s_hasBaseline && size > 4) {
+        // Delta path: strip the 4-byte packet header — deserializeDelta starts at serverTick.
+        decoded = Snapshot::deserializeDelta(snap, data + 4, size - 4, s_baselineSnap);
+        if (!decoded) {
+            LOG_WARN("[D7.3] delta snap rx: deserializeDelta FAILED size=%u", size);
+            return;
+        }
+    } else {
+        // Full path (isFullSnapshot=1 OR no baseline yet on the client).
+        decoded = Snapshot::deserialize(snap, data, size);
+    }
+
+    if (decoded) {
         // [AUDIT-P1] Diagnostic: what did the client actually decode? Compare against the
         // server's [AUDIT-P1] snap tx line — same tick should carry the same counts (modulo
         // priority drop). Throttled to every 5th rx (~4 Hz) so the log is readable.
@@ -255,6 +293,11 @@ void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
             s_snapHead = 0;
             s_snapCount = 0; // clear prior-floor snapshots; this becomes the new newest
         }
+        // D7.3 — Update the client-side delta baseline with the just-accepted snapshot.
+        // Done BEFORE pushSnapshot so that if the ring wraps, the baseline still holds
+        // the most recently accepted tick (which the server's next delta will reference).
+        s_baselineSnap = snap;
+        s_hasBaseline  = true;
         pushSnapshot(snap);
     } else {
         // [AUDIT-P1] Diagnostic: deserialize failed (almost always size < requiredBytes from a

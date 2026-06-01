@@ -494,36 +494,44 @@ void Engine::serverNetPost(f32 dt) {
                      m_entities.activeCount, m_projectiles.activeCount,
                      m_worldItems.activeCount);
         }
-        // M11.2 — Per-slot baseline tracking for delta compression.
-        // Query whether each active remote client's last ACK matches our stored baseline;
-        // log when a delta COULD be sent (but always send full for v1 — the encoder is
-        // not delta-capable yet). Store the current tick as the new baseline after sending
-        // so the next snapshot has a reference point to compare against.
+        // D7.3 — Build the snapshot once (no broadcast yet) so we can send each remote
+        // client the appropriate encoding: delta if they have a confirmed baseline, full
+        // if this is their first snapshot or the baseline has been invalidated.
+        // Singleplayer (NetRole::NONE) never enters serverNetPost, so this path is
+        // server-only. The old Server::sendSnapshot (broadcast) is retained for any
+        // caller that needs the backwards-compatible broadcast, but here we drive
+        // per-slot sends directly.
+        Server::buildSnapshotOnly(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
+
+        // D7.3 — Per-slot send: full or delta based on baseline tracker state.
         for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
             if (!m_players[slot].active) continue;
-            if (slot == static_cast<u32>(m_localPlayerIndex)) continue; // host has no remote baseline
+            if (slot == static_cast<u32>(m_localPlayerIndex)) continue; // host has no remote peer
+
             bool sendFull = BaselineTrackerOps::shouldSendFullSnapshot(
                                 m_baselines[slot], m_clientAckedSnap[slot]);
-            if (!sendFull) {
-                LOG_INFO("[M11] slot %u could-be-delta vs baseline tick %u",
-                         slot, m_baselines[slot].baselineTick);
+
+            if (sendFull) {
+                // No confirmed baseline: send a full snapshot so the client can anchor.
+                Server::sendSnapshotFullToSlot(static_cast<u8>(slot));
+            } else {
+                // Client ACKed our stored baseline tick — send delta against that snapshot.
+                Server::sendSnapshotDeltaToSlot(static_cast<u8>(slot), m_baselineSnap[slot]);
             }
-            // Always send full for v1 — delta encoding is deferred.
+
+            // Advance the baseline after sending so the next tick has a reference point.
             BaselineTrackerOps::store(m_baselines[slot], m_serverTick);
         }
-        Server::sendSnapshot(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
-        // D7.2 — Store the snapshot just sent as the per-client baseline for delta
-        // encoding. After sendSnapshot returns, Server::getLastSnapshot() points to
-        // the static WorldSnapshot that was just built and broadcast. We copy it into
-        // m_baselineSnap[slot] for every active remote client so that D7.3 can compare
-        // current vs. baseline to compute changedBits. Slot 0 (host) is skipped because
-        // the host never receives its own snapshot over the wire.
+
+        // D7.3 — Update m_baselineSnap for every active remote slot to the snapshot just
+        // built. This is the snapshot the server will delta against on the NEXT tick if
+        // the client confirms receipt by echoing this tick's serverTick in its next input.
         {
             const WorldSnapshot* sent = Server::getLastSnapshot();
             if (sent) {
                 for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
                     if (!m_players[slot].active) continue;
-                    if (slot == static_cast<u32>(m_localPlayerIndex)) continue; // skip host slot
+                    if (slot == static_cast<u32>(m_localPlayerIndex)) continue;
                     m_baselineSnap[slot] = *sent;
                 }
             }

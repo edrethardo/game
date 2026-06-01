@@ -74,15 +74,25 @@ void Server::updateLevel(u32 levelSeed, u8 levelFloor, u8 difficulty) {
 static WorldSnapshot s_lastSnap;
 static bool          s_snapBuilt = false; // true after the first sendSnapshot call
 
+// D7.3 — Shared snapshot build helper (used by both sendSnapshot and buildSnapshotOnly).
+static void doBuildSnapshot(u32 serverTick,
+                             const NetPlayer* players,
+                             const EntityPool& entities,
+                             const ProjectilePool& projectiles,
+                             const WorldItemPool& worldItems) {
+    s_lastSnap.serverTick = 0; s_lastSnap.playerCount = 0; s_lastSnap.entityCount = 0;
+    s_lastSnap.worldItemCount = 0; s_lastSnap.projectileCount = 0;
+    Snapshot::buildFromState(s_lastSnap, serverTick, players, entities, projectiles, worldItems);
+    s_snapBuilt = true;
+}
+
 void Server::sendSnapshot(u32 serverTick,
                            const NetPlayer* players,
                            const EntityPool& entities,
                            const ProjectilePool& projectiles,
                            const WorldItemPool& worldItems)
 {
-    s_lastSnap.serverTick = 0; s_lastSnap.playerCount = 0; s_lastSnap.entityCount = 0;
-    s_lastSnap.worldItemCount = 0; s_lastSnap.projectileCount = 0;
-    Snapshot::buildFromState(s_lastSnap, serverTick, players, entities, projectiles, worldItems);
+    doBuildSnapshot(serverTick, players, entities, projectiles, worldItems);
 
     // Static scratch (server-only, single-threaded send path) — keeps the larger
     // snapshot buffer off the stack and out of the per-frame heap. serialize()
@@ -94,8 +104,17 @@ void Server::sendSnapshot(u32 serverTick,
         // Snapshots may exceed one MTU; broadcastSnapshot fragments them unreliably.
         Net::broadcastSnapshot(buf, size);
     }
+}
 
-    s_snapBuilt = true; // D7.2: at least one snapshot has been built
+// D7.3 — Build the snapshot from game state without broadcasting. Lets the engine
+// call sendSnapshotFullToSlot / sendSnapshotDeltaToSlot per active remote slot after
+// building, instead of broadcasting the same full snapshot to every client.
+void Server::buildSnapshotOnly(u32 serverTick,
+                                const NetPlayer* players,
+                                const EntityPool& entities,
+                                const ProjectilePool& projectiles,
+                                const WorldItemPool& worldItems) {
+    doBuildSnapshot(serverTick, players, entities, projectiles, worldItems);
 }
 
 // D7.2 — Expose the most recently built snapshot so the engine can store it
@@ -103,6 +122,56 @@ void Server::sendSnapshot(u32 serverTick,
 // Returns nullptr before the first snapshot has been built (early in startup).
 const WorldSnapshot* Server::getLastSnapshot() {
     return s_snapBuilt ? &s_lastSnap : nullptr;
+}
+
+// D7.3 — Send the most recently built full snapshot to a single client slot.
+// Used when a client has no accepted baseline (first snapshot after join, or
+// after a baseline mismatch). s_lastSnap must have been built by sendSnapshot()
+// before this call (guarded by s_snapBuilt).
+void Server::sendSnapshotFullToSlot(u8 slot) {
+    if (!s_snapBuilt) return;
+    // Re-serialize with isFullSnapshot=1 into a per-slot scratch buffer.
+    // Not sharing the broadcast buffer so the delay queue can hold independent copies.
+    static u8 s_perSlotBuf[MAX_SNAPSHOT_SIZE];
+    u32 size = Snapshot::serialize(s_lastSnap, s_perSlotBuf, MAX_SNAPSHOT_SIZE, /*isFullSnapshot=*/1);
+    if (size > 0) {
+        Net::sendSnapshotToSlot(slot, s_perSlotBuf, size);
+        LOG_INFO("[D7.3] full snapshot to slot %u (%u bytes)", slot, size);
+    }
+}
+
+// D7.3 — Send a delta snapshot to a single client slot, encoded against the given
+// baseline. The delta payload contains only changed/new records; the client merges
+// it with its locally-stored m_lastAppliedSnap to reconstruct the full snapshot.
+// Falls back to a full send if delta serialization produces no output (shouldn't
+// happen with a valid baseline, but guards against an empty-baseline edge case).
+void Server::sendSnapshotDeltaToSlot(u8 slot, const WorldSnapshot& baseline) {
+    if (!s_snapBuilt) return;
+    // D7.3 wire format: serializeDelta produces a self-contained buffer starting
+    // with serverTick (no outer packet header). The client peeks the isFullSnapshot
+    // byte to route to deserializeDelta vs. deserialize.
+    // We prepend the standard SV_SNAPSHOT packet header (4 bytes) so the client's
+    // existing dispatch path (which routes on NetPacketType::SV_SNAPSHOT) still fires.
+    static u8 s_deltaBuf[MAX_SNAPSHOT_SIZE];
+    u32 cursor = 0;
+
+    // 4-byte packet header (mirrors serialize()'s header: type + flags + seq).
+    s_deltaBuf[cursor++] = static_cast<u8>(NetPacketType::SV_SNAPSHOT);
+    s_deltaBuf[cursor++] = 0; // flags
+    s_deltaBuf[cursor++] = 0; // seq lo
+    s_deltaBuf[cursor++] = 0; // seq hi
+
+    u32 deltaSize = Snapshot::serializeDelta(s_deltaBuf + cursor, MAX_SNAPSHOT_SIZE - cursor,
+                                              s_lastSnap, baseline);
+    if (deltaSize == 0) {
+        // Serialization failure (shouldn't happen but be safe) — fall back to full.
+        sendSnapshotFullToSlot(slot);
+        return;
+    }
+    cursor += deltaSize;
+
+    Net::sendSnapshotToSlot(slot, s_deltaBuf, cursor);
+    LOG_INFO("[D7.3] delta snapshot to slot %u (%u bytes vs full)", slot, cursor);
 }
 
 u32 Server::getLevelSeed() {

@@ -141,3 +141,92 @@ TEST_CASE("Snapshot bitmask: set/get 64-bit operations") {
     CHECK(Snapshot::getBit64(mask, 32) == false);
     CHECK(Snapshot::getBit64(mask, 64) == false);  // out of range — clamped to false
 }
+
+// ---------------------------------------------------------------------------
+// D7.3.2 — Roundtrip tests for serializeDelta / deserializeDelta
+//
+// These tests exercise the three core behaviours:
+//   1. An unchanged entity (identical in current and baseline) is omitted from
+//      the wire and copied into the decoded output from the baseline.
+//   2. A changed entity (posX differs) is included on the wire and decoded with
+//      its new values, not the baseline values.
+//   3. A removed entity (present in baseline but absent in current) is NOT copied
+//      into the decoded output even though the baseline holds it.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Snapshot delta roundtrip: unchanged entity is copied from baseline") {
+    // Baseline has one entity at poolIndex 5, position X = 10.
+    WorldSnapshot baseline;
+    baseline.serverTick = 100;
+    baseline.entityCount = 1;
+    baseline.entities[0].poolIndex = 5;
+    baseline.entities[0].posX = 10;
+
+    // Current is identical (entity hasn't moved).
+    WorldSnapshot current = baseline;
+    current.serverTick = 101;
+
+    // Encode current as delta against baseline.
+    u8 buf[4096] = {};
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    // Decode with the baseline as the starting point.
+    WorldSnapshot decoded;
+    bool ok = Snapshot::deserializeDelta(decoded, buf, size, baseline);
+    REQUIRE(ok);
+
+    CHECK(decoded.serverTick == 101);
+    CHECK(decoded.entityCount == 1);
+    CHECK(decoded.entities[0].poolIndex == 5);
+    CHECK(decoded.entities[0].posX == 10);   // copied from baseline — not re-sent on wire
+}
+
+TEST_CASE("Snapshot delta roundtrip: changed entity uses new values") {
+    WorldSnapshot baseline;
+    baseline.serverTick = 100;
+    baseline.entityCount = 1;
+    baseline.entities[0].poolIndex = 5;
+    baseline.entities[0].posX = 10;
+
+    WorldSnapshot current = baseline;
+    current.serverTick = 101;
+    current.entities[0].posX = 50;   // entity moved — must appear in changed payload
+
+    u8 buf[4096] = {};
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    WorldSnapshot decoded;
+    bool ok = Snapshot::deserializeDelta(decoded, buf, size, baseline);
+    REQUIRE(ok);
+
+    CHECK(decoded.entityCount == 1);
+    CHECK(decoded.entities[0].posX == 50);   // new value from delta payload, not baseline 10
+}
+
+TEST_CASE("Snapshot delta roundtrip: removed entity not present") {
+    WorldSnapshot baseline;
+    baseline.serverTick = 100;
+    baseline.entityCount = 2;
+    baseline.entities[0].poolIndex = 5;
+    baseline.entities[1].poolIndex = 7;
+
+    WorldSnapshot current = baseline;
+    current.serverTick = 101;
+    current.entityCount = 1;
+    current.entities[0].poolIndex = 7;   // poolIndex 5 dropped (e.g. killed)
+    current.entities[1] = {};            // cleared slot — not in current, not in wire
+
+    u8 buf[4096] = {};
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    WorldSnapshot decoded;
+    bool ok = Snapshot::deserializeDelta(decoded, buf, size, baseline);
+    REQUIRE(ok);
+
+    // Only poolIndex 7 is present in current, so only it should appear in decoded.
+    CHECK(decoded.entityCount == 1);
+    CHECK(decoded.entities[0].poolIndex == 7);
+}

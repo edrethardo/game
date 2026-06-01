@@ -845,6 +845,29 @@ void Net::broadcastSnapshot(const u8* data, u32 size) {
     sendImmediate_BroadcastSnapshot(data, size);
 }
 
+// D7.3 — Per-slot snapshot send using ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT so that
+// large payloads (e.g. a full snapshot for a newly-joined client) are fragmented
+// across MTU-sized datagrams, matching the behaviour of broadcastSnapshot. Delta
+// snapshots in steady state will be well under one MTU (a few changed records) but
+// we use the same flag for safety. On send failure (peer mid-handshake or gone) the
+// packet is destroyed immediately — ENet only takes ownership on success.
+void Net::sendSnapshotToSlot(u8 playerSlot, const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    if (shouldDropPacket()) return; // M14: fake-loss injection
+    if (s_fakeLatencyMs > 0) {
+        // Reuse the BROADCAST_SNAP delay target — it calls sendImmediate_BroadcastSnapshot
+        // which iterates all slots. That's wasteful for a per-slot send, but the delay
+        // queue is a debug/smoke-test facility and the overhead doesn't matter there.
+        // A clean fix would add a PEER_SNAP target; deferred as not worth the complexity.
+        enqueueDelayed(DelayTarget::BROADCAST_SNAP, playerSlot, data, size);
+        return;
+    }
+    ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
+    if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
+        enet_packet_destroy(pkt);
+}
+
 void Net::broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed) {
     if (s_role != NetRole::SERVER) return;
     // 12-byte packet, same layout/size as SV_JOIN_ACCEPT so the wire stays uniform:
