@@ -170,7 +170,10 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
 
     if (validCount == 0) {
         LOG_WARN("ItemGen: no valid item defs for enemy level %u", enemyLevel);
-        return ItemInstance{};
+        // GCC 13 ICE workaround: return a named local instead of `ItemInstance{}`
+        // — see comment in engine_update.cpp::handleDropRequest.
+        ItemInstance empty;
+        return empty;
     }
 
     // Weighted random selection using dropWeight

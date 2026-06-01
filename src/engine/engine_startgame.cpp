@@ -65,9 +65,12 @@ extern bool s_firstKillDropGiven;
 // ---------------------------------------------------------------------------
 
 void Engine::rollNpcEquipment(NpcEquipment& equip, NpcClass npcClass, u8 floor) {
-    // Clear all slots
+    // Clear all slots. The named local sidesteps a GCC 13 gimplifier ICE on the
+    // direct `equip.equipped[s] = ItemInstance{};` form — see the explanatory comment
+    // in handleDropRequest (engine_update.cpp).
+    ItemInstance emptySlot;
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
-        equip.equipped[s] = ItemInstance{};
+        equip.equipped[s] = emptySlot;
     }
 
     // Roll weak equipment — always level 1, forced COMMON (no affixes),

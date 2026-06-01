@@ -1200,14 +1200,21 @@ void Engine::handleDropRequest(u8 playerSlot, u8 slotKind, u8 slotIndex,
                                 const ItemInstance& it, Vec3 dropPos) {
     if (playerSlot >= MAX_PLAYERS) return;
     PlayerInventory& inv = m_inventories[playerSlot];
+    // Hold a named default-constructed empty so the assignments below copy from a
+    // real lvalue. The `ItemInstance{}` temporary trips a GCC 13 gimplifier ICE
+    // (Ubuntu 24.04 CI: "internal compiler error: in gimple_add_tmp_var") when the
+    // struct contains the brace-initialized `Affix affixes[MAX_AFFIXES_PER_ITEM] = {}`
+    // default member init. The named-local form sidesteps the affected codegen path
+    // and is semantically identical on every compiler.
+    ItemInstance emptySlot;
     if (slotKind == 0) {
         // Backpack drop
         if (slotIndex >= MAX_INVENTORY_ITEMS) return;
-        inv.backpack[slotIndex] = ItemInstance{};   // zero the slot
+        inv.backpack[slotIndex] = emptySlot;   // zero the slot
     } else if (slotKind == 1) {
         // Equipped-slot drop
         if (slotIndex >= static_cast<u32>(ItemSlot::COUNT)) return;
-        inv.equipped[slotIndex] = ItemInstance{};
+        inv.equipped[slotIndex] = emptySlot;
     } else {
         return; // unknown kind
     }
