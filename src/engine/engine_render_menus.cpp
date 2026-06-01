@@ -447,6 +447,39 @@ void Engine::renderMenu() {
             }
             y -= lineH * line.scale;
         }
+    } else if (m_menu.subState == 9) {
+        // Host-IP entry — shown to joiners between Main Menu → Join and the New/Continue
+        // chooser. Pure text-entry screen (no list, no mouse): the user types digits + dots
+        // and presses Enter to advance. Cursor is rendered as a trailing block so the
+        // edit point is obvious.
+        const char* subTitle = "Enter Host IP";
+        f32 stW = FontSystem::textWidth(subTitle, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.62f,
+                             subTitle, {1.0f, 0.7f, 0.2f}, 3);
+
+        // Editable text box — show the current connectAddress + a blinking cursor block.
+        // We draw a chrome rect via drawMenuOption and overlay the text. If the buffer
+        // is empty (just-cleared default), the cursor still shows so the user has a
+        // visual anchor for "type here".
+        f32 boxY = sh * 0.5f;
+        f32 boxW = 480.0f * uiScale;
+        f32 boxH = 36.0f  * uiScale;
+        HUD::drawMenuOption(sw, sh, boxY, boxW, boxH, Vec3{0.15f, 0.25f, 0.35f}, true);
+
+        // Build display string: address + blinking '_' cursor (~2 Hz).
+        char display[80];
+        bool cursorOn = (static_cast<u32>(Clock::getElapsedSeconds() * 2.0) & 1u) == 0u;
+        std::snprintf(display, sizeof(display), "%s%s",
+                      m_menu.connectAddress,
+                      cursorOn ? "_" : " ");
+        f32 tw = FontSystem::textWidth(display, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, boxY + 10.0f * uiScale,
+                             display, {1.0f, 1.0f, 1.0f}, 2);
+
+        const char* hint = "Type digits and dots, Backspace to delete, Enter to confirm, ESC to cancel";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint,
+                             {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 8) {
         // Overwrite save confirmation — same style as singleplayer sub-menu
         char owTitle[64];

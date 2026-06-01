@@ -609,6 +609,80 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
+    // Host-IP entry (subState 9) — joiners only. Type a dotted-quad IP or hostname-like
+    // string (digits + dots) and Enter to confirm; advances to the New/Continue chooser
+    // that the Host path also uses. No mouse, no nav arrows — pure text entry.
+    if (m_menu.subState == 9) {
+        // Numeric input mapped from SDL scancodes. Both the top-row digits and numpad
+        // produce the same character. Period and KP_PERIOD both produce '.'.
+        struct KeyMap { s32 scancode; char ch; };
+        static const KeyMap kKeyMap[] = {
+            {SDL_SCANCODE_0, '0'}, {SDL_SCANCODE_1, '1'}, {SDL_SCANCODE_2, '2'},
+            {SDL_SCANCODE_3, '3'}, {SDL_SCANCODE_4, '4'}, {SDL_SCANCODE_5, '5'},
+            {SDL_SCANCODE_6, '6'}, {SDL_SCANCODE_7, '7'}, {SDL_SCANCODE_8, '8'},
+            {SDL_SCANCODE_9, '9'},
+            {SDL_SCANCODE_KP_0, '0'}, {SDL_SCANCODE_KP_1, '1'}, {SDL_SCANCODE_KP_2, '2'},
+            {SDL_SCANCODE_KP_3, '3'}, {SDL_SCANCODE_KP_4, '4'}, {SDL_SCANCODE_KP_5, '5'},
+            {SDL_SCANCODE_KP_6, '6'}, {SDL_SCANCODE_KP_7, '7'}, {SDL_SCANCODE_KP_8, '8'},
+            {SDL_SCANCODE_KP_9, '9'},
+            {SDL_SCANCODE_PERIOD, '.'}, {SDL_SCANCODE_KP_PERIOD, '.'},
+        };
+
+        for (const auto& km : kKeyMap) {
+            if (!Input::isKeyPressed(km.scancode)) continue;
+            // First content keystroke since entering this screen wipes the (likely-default)
+            // address so the user can type fresh without nine backspaces.
+            if (m_menu.connectAddressClearOnType) {
+                m_menu.connectAddress[0] = '\0';
+                m_menu.connectAddressClearOnType = false;
+            }
+            size_t len = std::strlen(m_menu.connectAddress);
+            if (len < sizeof(m_menu.connectAddress) - 1) {
+                m_menu.connectAddress[len]     = km.ch;
+                m_menu.connectAddress[len + 1] = '\0';
+                AudioSystem::play(SfxId::MENU_HOVER);
+            }
+        }
+
+        if (Input::isKeyPressed(SDL_SCANCODE_BACKSPACE)) {
+            // Backspace edits the live buffer; treat first edit as committing the user's
+            // intent so subsequent digit presses don't wipe what's left.
+            m_menu.connectAddressClearOnType = false;
+            size_t len = std::strlen(m_menu.connectAddress);
+            if (len > 0) {
+                m_menu.connectAddress[len - 1] = '\0';
+                AudioSystem::play(SfxId::MENU_HOVER);
+            }
+        }
+
+        if (Input::isActionPressed(GameAction::MENU_BACK) ||
+            Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            // Cancel the Join intent — back to main menu, clear the network role we set
+            // when the user picked "Join". connectAddress retains whatever was typed so
+            // re-entering Join in the same session shows the previous attempt.
+            m_netRole = NetRole::NONE;
+            m_clientLoadedFromSave = false;
+            m_menu.subState = 0;
+            m_menu.subSelection = 0;
+            return;
+        }
+
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
+            Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            // Empty buffer (e.g. user hit Enter without typing) falls back to localhost
+            // so the screen always advances to a usable state.
+            if (m_menu.connectAddress[0] == '\0') {
+                std::snprintf(m_menu.connectAddress, sizeof(m_menu.connectAddress), "127.0.0.1");
+            }
+            m_menu.subState = 1; // New/Continue chooser (shared with Host path)
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
     if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
         if (m_menu.selection > 0) m_menu.selection--;
     }
@@ -631,15 +705,16 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;
-        case 2: // Join — same flow as host: pick New/Continue → save slot → class (if New)
+        case 2: // Join — prompt for host IP first, then New/Continue → save slot → class
             m_netRole = NetRole::CLIENT;
             // Lane stays 0 on a client (networking forces split count 1). The server-assigned
             // net slot lands in m_clientNetSlot at SV_JOIN_ACCEPT; net access uses activeNetSlot().
             m_localPlayerIndex = 0;
             scanSaveSlots(); // populate m_saveSlots so the Continue option is meaningful
             m_clientLoadedFromSave = false; // reset; set later in subState 6 on successful load
-            m_menu.subState = 1;    // New/Continue chooser (shared with Host path)
+            m_menu.subState = 9;    // IP entry → on confirm advances to 1 (New/Continue chooser)
             m_menu.subSelection = 0;
+            m_menu.connectAddressClearOnType = true;
             break;
         case 3: // Options — controls rebinding
             m_menu.subState = 3;

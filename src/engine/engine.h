@@ -94,6 +94,11 @@ private:
         bool confirmQuit = false;      // "are you sure?" overlay when pressing ESC in-game
         u8   overwriteSlot = 0;        // save slot pending overwrite (subState 8)
         char connectAddress[64] = "127.0.0.1";
+        // True while the IP-entry screen (subState 9) hasn't been edited yet — the first
+        // digit/dot keystroke wipes the default 127.0.0.1 so the user can type fresh
+        // without having to backspace nine characters first. Reset each time Join is
+        // chosen from the main menu.
+        bool connectAddressClearOnType = true;
         f32  creditsScroll = 0.0f;  // Y offset for scrolling credits text
     };
     MenuState m_menu;
