@@ -106,9 +106,16 @@ struct SnapProjectile {
     u8   expectedDamageQ; // 1
 };
 
-// Quantized snapshot of one dropped world item (16 bytes). Loot is server-
-// authoritative (N5): only the host/SP rolls drops; clients mirror this list into
-// their local m_worldItems for rendering and pickup requests.
+// Quantized snapshot of one dropped world item. Loot is server-authoritative (N5):
+// only the host/SP rolls drops; clients mirror this list into their local
+// m_worldItems for rendering and pickup requests. The rolled stats (damage, affixes,
+// itemLevel, bonusHealth) are on the wire so the client's snapshot-mirrored
+// ItemInstance carries the real authoritative values — without them, the D4.2
+// client-side pickup prediction adds a zero-damage / no-affix copy into the bag
+// and the inventory UI shows "Damage: 0".
+//
+// Wire size: 16 B fixed prefix + 4 B damage + 4 B bonusHealth + 1 B itemLevel
+//           + 1 B affixCount + N*5 B affixes = 26..46 B per item (N ∈ [0,4]).
 struct SnapWorldItem {
     u8   slotIndex;     // 1: index into WorldItemPool (0..MAX_WORLD_ITEMS-1) — client mirrors directly
     u8   rarity;        // 1: Rarity enum value
@@ -117,6 +124,19 @@ struct SnapWorldItem {
     u16  posX, posY, posZ; // 6: position packed via Quantize::packPos
     u8   ownerSlot;     // 1: exclusive-pickup owner (0xFF = FFA) — drives client pickup gate (Audit-B)
     u8   exclusiveTimerQ; // 1: exclusive window quantized to 0-10.2 s in 0.04 s steps
+
+    // Rolled-stat replication for D4.2 pickup prediction. Raw f32 — quantization
+    // would invite per-affix tuning and silent rounding bugs, and the wire delta
+    // (D7.3.2) zeros out unchanged world items by memcmp so a stable item costs
+    // nothing per frame after first transmission.
+    f32  damage;        // 4: ItemInstance.damage (post-roll, post-level-scale)
+    f32  bonusHealth;   // 4: ItemInstance.bonusHealth (defensive items)
+    u8   itemLevel;     // 1: ItemInstance.itemLevel (level-scaling tier, 0..255)
+    u8   affixCount;    // 1: number of valid entries in affixes[] (clamped on read)
+    // Full fixed-size affix array — only `affixCount` entries are on the wire, but the
+    // unused tail is zero-initialised (WorldSnapshot ctor memsets worldItems[]), keeping
+    // the memcmp-based slot-equality check (worldItemSlotsEqual) deterministic.
+    Affix affixes[MAX_AFFIXES_PER_ITEM];
 };
 
 // Full world snapshot

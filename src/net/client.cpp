@@ -756,7 +756,11 @@ void Client::interpolateProjectiles(ProjectilePool& renderProjectiles) {
 
 void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, u32 itemDefCount,
                               f32 dt) {
-    (void)itemDefs; (void)itemDefCount; // reserved: client could resolve full stats later
+    // (D8) itemDefs is no longer needed — rolled stats (damage, affixes, itemLevel,
+    // bonusHealth) ride on the snapshot wire directly so the mirror can reconstruct a
+    // fully-populated ItemInstance without consulting the local ItemDef table. Params
+    // kept for API stability with the caller in engine_net.cpp.
+    (void)itemDefs; (void)itemDefCount;
     const WorldSnapshot* snap = getSnapshot(0); // newest — items are static, no lerp needed
     if (!snap) return;
 
@@ -782,6 +786,19 @@ void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, 
         wi.position.x    = Quantize::unpackPos(sw.posX);
         wi.position.y    = Quantize::unpackPos(sw.posY);
         wi.position.z    = Quantize::unpackPos(sw.posZ);
+        // D8 — rolled stats from the snapshot. Required so the D4.2 client-side pickup
+        // prediction (engine_update.cpp:1148 — `Inventory::addToBackpack(..., wi.item)`)
+        // copies authoritative damage/affixes/itemLevel/bonusHealth into the bag instead
+        // of the zero-initialised ItemInstance defaults, which is what was showing up as
+        // "Damage: 0" in the inventory HUD after a multiplayer client pickup.
+        wi.item.damage      = sw.damage;
+        wi.item.bonusHealth = sw.bonusHealth;
+        wi.item.itemLevel   = sw.itemLevel;
+        u8 ac = sw.affixCount;
+        if (ac > MAX_AFFIXES_PER_ITEM) ac = MAX_AFFIXES_PER_ITEM;
+        wi.item.affixCount  = ac;
+        for (u32 a = 0; a < ac; a++) wi.item.affixes[a] = sw.affixes[a];
+        for (u32 a = ac; a < MAX_AFFIXES_PER_ITEM; a++) wi.item.affixes[a] = Affix{};
         // (Audit-B) Pickup ownership window is now on the wire — read it instead of
         // hardcoding FFA. Drives the CV-1 client-side pickup gate
         // (engine_update.cpp:853: w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0)

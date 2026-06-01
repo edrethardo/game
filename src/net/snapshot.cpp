@@ -250,6 +250,18 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         if (et < 0.0f)   et = 0.0f;
         if (et > 255.0f) et = 255.0f;
         sw.exclusiveTimerQ = static_cast<u8>(et);
+        // D8 — rolled stats so client::mirrorWorldItems can populate the predicted
+        // ItemInstance with real values instead of zero-initialised defaults.
+        sw.damage      = wi.item.damage;
+        sw.bonusHealth = wi.item.bonusHealth;
+        sw.itemLevel   = wi.item.itemLevel;
+        u8 ac = wi.item.affixCount;
+        if (ac > MAX_AFFIXES_PER_ITEM) ac = MAX_AFFIXES_PER_ITEM;
+        sw.affixCount = ac;
+        for (u32 a = 0; a < ac; a++) sw.affixes[a] = wi.item.affixes[a];
+        // Tail-init unused slots so the memcmp-based delta check sees a stable layout
+        // even after the slot is reused for a different item with fewer affixes.
+        for (u32 a = ac; a < MAX_AFFIXES_PER_ITEM; a++) sw.affixes[a] = Affix{};
     }
 
     // Reorder entities/projectiles nearest-player-first. If serialize() later has
@@ -295,8 +307,18 @@ static constexpr u32 SNAP_ENTITY_WIRE     = 28;
 //           + 2(clientTickLow) + 1(expectedDamageQ) = 22. (expectedDamageQ added in D3.1 so
 //           clients can predict local HP decrement on incoming-projectile impact in D3.2.)
 static constexpr u32 SNAP_PROJECTILE_WIRE = 22;
-// World item: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos) + 1(ownerSlot) + 1(exclusiveTimerQ) = 16.
-static constexpr u32 SNAP_WORLDITEM_WIRE  = 16;
+// World item is variable-length: fixed prefix + variable affix tail.
+// Fixed prefix: 1(slotIndex) + 1(rarity) + 2(defId) + 4(uid) + 6(pos)
+//             + 1(ownerSlot) + 1(exclusiveTimerQ)
+//             + 4(damage) + 4(bonusHealth) + 1(itemLevel) + 1(affixCount) = 26 B.
+// Variable tail: affixCount × {1(type) + 4(value)} = 0..20 B (MAX_AFFIXES_PER_ITEM = 4).
+// Budget gating uses MAX so the priority-clamp never overcommits the buffer; the
+// required-bytes check at deserialize-time uses MIN so a packet with no-affix items
+// (the common case for low-tier loot) isn't falsely rejected.
+static constexpr u32 SNAP_WORLDITEM_WIRE_MIN = 26;
+static constexpr u32 SNAP_WORLDITEM_WIRE_MAX = 26 + MAX_AFFIXES_PER_ITEM * 5;  // = 46
+// Legacy alias — the delta skip-past path used to advance by a fixed record size;
+// see the variable-size discard read in deserializeDelta for the replacement.
 // Fixed prefix: 4 B packet header + snapshot header + 1 B isFullSnapshot flag +
 // MAX_PLAYERS u32 lastProcessedInputTick.
 // Snapshot header is 9 B: serverTick(4) + playerCount(1) + entityCount(1) +
@@ -366,10 +388,13 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
     budget -= projectileBytes;
 
     // World items have the LOWEST priority — they absorb whatever budget remains after
-    // players/entities/projectiles. (In practice 32*16=512 B always fits the 8 KB budget.)
+    // players/entities/projectiles. (In practice 32*46=1472 B always fits the 8 KB budget
+    // even when every item rolls the max affix count.) We gate on the WORST-case wire
+    // size per item because we don't yet know each item's affixCount at clamp time and
+    // we'd rather drop a couple of items than overrun the buffer.
     u8  worldItemCount = snap.worldItemCount;
-    if (worldItemCount * SNAP_WORLDITEM_WIRE > budget)
-        worldItemCount = static_cast<u8>(budget / SNAP_WORLDITEM_WIRE);
+    if (worldItemCount * SNAP_WORLDITEM_WIRE_MAX > budget)
+        worldItemCount = static_cast<u8>(budget / SNAP_WORLDITEM_WIRE_MAX);
 
     // Header
     w8(static_cast<u8>(NetPacketType::SV_SNAPSHOT));
@@ -471,6 +496,9 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w8(sp.expectedDamageQ); // D3.1 — damage × 2, decoded as × 0.5 by client (D3.2 HP predict)
     }
 
+    // f32 emitter — same shape as w32 but writes the IEEE 754 bit pattern of an f32.
+    auto wF32 = [&](f32 v) { if (cursor + 4 > maxSize) return; std::memcpy(outData + cursor, &v, 4); cursor += 4; };
+
     // World items (lowest priority — written last so they drop first under a tight budget).
     for (u32 i = 0; i < worldItemCount; i++) {
         const SnapWorldItem& sw = snap.worldItems[i];
@@ -483,13 +511,30 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w16(sw.posZ);
         w8(sw.ownerSlot);          // (Audit-B) pickup-window owner
         w8(sw.exclusiveTimerQ);    // (Audit-B) 0.04 s steps, 10.2 s range
+        // D8 — rolled stats so the client's pickup-prediction mirror (Client::mirrorWorldItems)
+        // sees authoritative damage/affixes/itemLevel/bonusHealth instead of zero-initialised
+        // ItemInstance defaults. Without this the inventory UI shows "Damage: 0" after a
+        // multiplayer client pickup.
+        wF32(sw.damage);
+        wF32(sw.bonusHealth);
+        w8(sw.itemLevel);
+        u8 affixCount = sw.affixCount;
+        if (affixCount > MAX_AFFIXES_PER_ITEM) affixCount = MAX_AFFIXES_PER_ITEM;
+        w8(affixCount);
+        for (u32 a = 0; a < affixCount; a++) {
+            w8(static_cast<u8>(sw.affixes[a].type));
+            wF32(sw.affixes[a].value);
+        }
     }
 
     // cursor == SNAP_FIXED_BYTES + playerBytes + entityBytes +
-    //           projectileCount*SNAP_PROJECTILE_WIRE + worldItemCount*SNAP_WORLDITEM_WIRE,
-    //           always <= maxSize by the caps above. The assert flags (in debug) a future
-    //           record field added without bumping its SNAP_*_WIRE; the clamp keeps a release
-    //           build from ever reporting a length past the caller's buffer.
+    //           projectileCount*SNAP_PROJECTILE_WIRE +
+    //           Σ over included items of (26 + affixCount_i × 5),
+    //           always <= maxSize by the caps above (world-item clamp uses
+    //           SNAP_WORLDITEM_WIRE_MAX so the worst-case per-item size is reserved).
+    //           The assert flags (in debug) a future record field added without
+    //           bumping its SNAP_*_WIRE; the clamp keeps a release build from ever
+    //           reporting a length past the caller's buffer.
     ENGINE_ASSERT(cursor <= maxSize, "snapshot serialize overran buffer — a SNAP_*_WIRE is stale");
     if (cursor > maxSize) cursor = maxSize;
     return cursor;
@@ -527,11 +572,16 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     // unpack to ~ -128 m positions on slot 0 and stomp it. SNAP_FIXED_BYTES covers the packet
     // header + snapshot header + the MAX_PLAYERS input ticks read in the loop below; the rest
     // is the (now-clamped) record payload. Bail with false so the caller drops the packet.
+    // World items are variable-length: use the MINIMUM (no-affix) size as the lower
+    // bound — items that actually carry affixes will tail-extend the packet beyond this,
+    // and the per-field readU8/readF32 guards stop a truncated packet from reading past
+    // the buffer (PacketReader::hasData returns false → fields stay zero, post-loop
+    // `r.cursor <= r.size` check catches under-read).
     u32 requiredBytes = SNAP_FIXED_BYTES
                       + static_cast<u32>(snap.playerCount)     * SNAP_PLAYER_WIRE
                       + static_cast<u32>(snap.entityCount)     * SNAP_ENTITY_WIRE
                       + static_cast<u32>(snap.projectileCount) * SNAP_PROJECTILE_WIRE
-                      + static_cast<u32>(snap.worldItemCount)  * SNAP_WORLDITEM_WIRE;
+                      + static_cast<u32>(snap.worldItemCount)  * SNAP_WORLDITEM_WIRE_MIN;
     if (size < requiredBytes) return false;
 
     for (u32 i = 0; i < MAX_PLAYERS; i++)
@@ -623,6 +673,23 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sw.posZ      = r.readU16();
         sw.ownerSlot       = r.readU8();   // (Audit-B)
         sw.exclusiveTimerQ = r.readU8();   // (Audit-B)
+        // D8 — rolled stats (matches writer in serialize()).
+        sw.damage      = r.readF32();
+        sw.bonusHealth = r.readF32();
+        sw.itemLevel   = r.readU8();
+        u8 affixCount  = r.readU8();
+        // Defensive clamp — a byzantine / corrupt packet can't index past the affix array.
+        if (affixCount > MAX_AFFIXES_PER_ITEM) affixCount = MAX_AFFIXES_PER_ITEM;
+        sw.affixCount = affixCount;
+        for (u32 a = 0; a < affixCount; a++) {
+            sw.affixes[a].type  = static_cast<AffixType>(r.readU8());
+            sw.affixes[a].value = r.readF32();
+        }
+        // Tail-init the unused affix slots so the memcmp-based worldItemSlotsEqual
+        // doesn't observe stale data from the prior occupant of this slot.
+        for (u32 a = affixCount; a < MAX_AFFIXES_PER_ITEM; a++) {
+            sw.affixes[a] = Affix{};
+        }
     }
 
     return r.cursor <= r.size;
@@ -762,14 +829,27 @@ static void writeSnapProjectile(u8* buf, u32 maxSize, u32& cursor, const SnapPro
     w8(sp.ownerSlot); w16(sp.clientTickLow); w8(sp.expectedDamageQ);
 }
 
-// Write one SnapWorldItem. MUST match SNAP_WORLDITEM_WIRE = 16.
+// Write one SnapWorldItem. MUST match the inline serialize() loop byte-for-byte and
+// the readSnapWorldItem reader below. Variable-length: 26 B fixed + affixCount*5 B tail.
 static void writeSnapWorldItem(u8* buf, u32 maxSize, u32& cursor, const SnapWorldItem& sw) {
     auto w8  = [&](u8 v)  { if (cursor + 1 <= maxSize) buf[cursor++] = v; };
     auto w16 = [&](u16 v) { if (cursor + 2 <= maxSize) { std::memcpy(buf + cursor, &v, 2); cursor += 2; } };
     auto w32 = [&](u32 v) { if (cursor + 4 <= maxSize) { std::memcpy(buf + cursor, &v, 4); cursor += 4; } };
+    auto wF32 = [&](f32 v) { if (cursor + 4 <= maxSize) { std::memcpy(buf + cursor, &v, 4); cursor += 4; } };
     w8(sw.slotIndex); w8(sw.rarity); w16(sw.defId); w32(sw.uid);
     w16(sw.posX); w16(sw.posY); w16(sw.posZ);
     w8(sw.ownerSlot); w8(sw.exclusiveTimerQ);
+    // D8 — rolled stats for the client's pickup-prediction mirror.
+    wF32(sw.damage);
+    wF32(sw.bonusHealth);
+    w8(sw.itemLevel);
+    u8 affixCount = sw.affixCount;
+    if (affixCount > MAX_AFFIXES_PER_ITEM) affixCount = MAX_AFFIXES_PER_ITEM;
+    w8(affixCount);
+    for (u32 a = 0; a < affixCount; a++) {
+        w8(static_cast<u8>(sw.affixes[a].type));
+        wF32(sw.affixes[a].value);
+    }
 }
 
 // Read one SnapPlayer from a PacketReader. MUST match writeSnapPlayer byte-for-byte.
@@ -814,6 +894,21 @@ static void readSnapWorldItem(PacketReader& r, SnapWorldItem& sw) {
     sw.defId = r.readU16(); sw.uid = r.readU32();
     sw.posX = r.readU16(); sw.posY = r.readU16(); sw.posZ = r.readU16();
     sw.ownerSlot = r.readU8(); sw.exclusiveTimerQ = r.readU8();
+    // D8 — rolled stats (matches writer).
+    sw.damage      = r.readF32();
+    sw.bonusHealth = r.readF32();
+    sw.itemLevel   = r.readU8();
+    u8 affixCount  = r.readU8();
+    if (affixCount > MAX_AFFIXES_PER_ITEM) affixCount = MAX_AFFIXES_PER_ITEM;
+    sw.affixCount = affixCount;
+    for (u32 a = 0; a < affixCount; a++) {
+        sw.affixes[a].type  = static_cast<AffixType>(r.readU8());
+        sw.affixes[a].value = r.readF32();
+    }
+    // Tail-init unused slots so worldItemSlotsEqual's memcmp is deterministic.
+    for (u32 a = affixCount; a < MAX_AFFIXES_PER_ITEM; a++) {
+        sw.affixes[a] = Affix{};
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -830,7 +925,7 @@ static void readSnapWorldItem(PacketReader& r, SnapWorldItem& sw) {
 //   u8  changedPlayerCount  + N × SNAP_PLAYER_WIRE
 //   u8  changedEntityCount  + N × SNAP_ENTITY_WIRE
 //   u16 changedProjectileCount + N × SNAP_PROJECTILE_WIRE
-//   u8  changedWorldItemCount  + N × SNAP_WORLDITEM_WIRE
+//   u8  changedWorldItemCount  + N × <variable> (26 B fixed + affixCount×5 B tail)
 //
 // The receiver starts with all baseline slots whose unchanged bit is set, then
 // appends the changed records from the wire — producing a fully-populated
@@ -1056,7 +1151,11 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
     u8 changedWorldItems = r.readU8();
     if (changedWorldItems > MAX_WORLD_ITEMS) return false;
     for (u8 i = 0; i < changedWorldItems; i++) {
-        if (out.worldItemCount >= MAX_WORLD_ITEMS) { r.cursor += SNAP_WORLDITEM_WIRE; continue; }
+        // World-item records are variable-length (the affix tail). We can't bump
+        // r.cursor by a constant SNAP_WORLDITEM_WIRE to skip a record once our local
+        // output array is full — read into a discard instead so the cursor advances by
+        // the actual wire size.
+        if (out.worldItemCount >= MAX_WORLD_ITEMS) { SnapWorldItem discard{}; readSnapWorldItem(r, discard); continue; }
         readSnapWorldItem(r, out.worldItems[out.worldItemCount++]);
     }
 
