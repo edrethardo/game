@@ -832,6 +832,37 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         FontSystem::drawText(sw, sh, x, y, netBuf, {0.2f, 1.0f, 0.4f}, scale);
     }
 
+    // Host info overlay — shown to the SERVER role so the host can read their
+    // external IP (UPnP success) or the UPnP error / LAN-only fallback message
+    // back to friends without leaving the game. Same F9 toggle as the CLIENT
+    // net-graph so there's a single "show me network details" key.
+    if (m_netGraphVisible && m_netRole == NetRole::SERVER) {
+        char hostBuf[160];
+        const char* extIp  = Net::getExternalIp();
+        const char* upnpErr = Net::getUpnpError();
+        if (extIp && extIp[0]) {
+            // UPnP worked — show the WAN-side address friends should type into Join.
+            snprintf(hostBuf, sizeof(hostBuf), "HOST: friends join at %s:%u (UPnP)",
+                     extIp, static_cast<u32>(DEFAULT_PORT));
+        } else if (upnpErr && upnpErr[0]) {
+            // UPnP didn't take — host is reachable on LAN, but the internet path needs
+            // either manual port-forwarding or a Tailscale-style overlay.
+            snprintf(hostBuf, sizeof(hostBuf), "HOST: LAN only (UPnP: %s)", upnpErr);
+        } else {
+            // Should not happen post-hostServer, but guard against an empty pair so
+            // a stray F9 doesn't render garbage.
+            snprintf(hostBuf, sizeof(hostBuf), "HOST: port %u",
+                     static_cast<u32>(DEFAULT_PORT));
+        }
+        f32 scale = 1.0f;
+        f32 tw = FontSystem::textWidth(hostBuf, scale);
+        f32 x  = static_cast<f32>(sw) - tw - 8.0f;
+        f32 y  = static_cast<f32>(sh) - 14.0f;
+        Vec3 col = (extIp && extIp[0]) ? Vec3{0.5f, 1.0f, 0.5f}  // green = online-reachable
+                                       : Vec3{1.0f, 0.8f, 0.4f}; // yellow = LAN-only
+        FontSystem::drawText(sw, sh, x, y, hostBuf, col, scale);
+    }
+
     // Chat log — left side of screen, above the quickbar (scaled)
     {
         f32 cs = static_cast<f32>(sh) / 720.0f;

@@ -332,11 +332,13 @@ void Engine::handleDebugKeys() {
         }
     }
 
-    // D6: F9 toggles the net-graph overlay (CLIENT only — shows RTT, server-tick
-    // estimate, divergence count, and fake-latency/loss settings).
+    // F9 toggles a network info overlay. CLIENT shows the D6 net-graph (RTT,
+    // server-tick estimate, divergence count, fake-latency/loss). SERVER shows
+    // the host info line (external IP from UPnP, or LAN-only fallback message)
+    // so the host can read out the address friends should type into Join.
     if (Input::isKeyPressed(SDL_SCANCODE_F9)) {
         m_netGraphVisible = !m_netGraphVisible;
-        LOG_INFO("Net graph: %s", m_netGraphVisible ? "ON" : "OFF");
+        LOG_INFO("Net info overlay: %s", m_netGraphVisible ? "ON" : "OFF");
     }
 }
 

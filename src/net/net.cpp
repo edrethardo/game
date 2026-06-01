@@ -1,6 +1,7 @@
 #include "net/net.h"
 #include "net/server.h"
 #include "net/packet.h"  // Quantize::unpackPos for SV_LOOT_SPAWN decode (D1.3)
+#include "net/upnp.h"    // Upnp::tryAddPortMapping for auto port-forward on Host Game
 #include "core/log.h"
 #include "platform/clock.h"  // Clock::getElapsedSeconds() for delay timestamps (D5)
 
@@ -474,8 +475,27 @@ bool Net::hostServer(u16 port) {
     s_slots[0].playerIndex = 0;
 
     LOG_INFO("Net: hosting on port %u", port);
+
+    // Best-effort UPnP IGD port mapping so friends on other networks can join
+    // without the host manually configuring their router. Blocking for up to
+    // ~1 s (SSDP discovery); fine on a one-time menu action. Failure is non-
+    // fatal — the host stays LAN-reachable either way, and the lobby UI reads
+    // Upnp::lastError() to tell the user. On Switch the wrapper is a stub
+    // that returns false instantly with "UPnP unsupported on this platform".
+    {
+        char extIp[64] = {0};
+        char errMsg[128] = {0};
+        if (Upnp::tryAddPortMapping(port, /*discoveryTimeoutMs=*/1000, extIp, errMsg)) {
+            LOG_INFO("Net: UPnP mapped UDP %u — external IP %s", port, extIp);
+        } else {
+            LOG_INFO("Net: UPnP not available (%s) — host is LAN-only unless port-forwarded", errMsg);
+        }
+    }
     return true;
 }
+
+const char* Net::getExternalIp() { return Upnp::currentExternalIp(); }
+const char* Net::getUpnpError()  { return Upnp::lastError(); }
 
 void Net::setLocalPlayerClass(u8 classId) {
     s_localPlayerClass = classId;
@@ -527,6 +547,12 @@ void Net::disconnect() {
         enet_host_destroy(s_enetHost);
         s_enetHost = nullptr;
     }
+
+    // Release the UPnP port-mapping if we held one (hostServer paired with this
+    // on success). No-op for clients and on Switch. Done before resetting slots
+    // because the wrapper logs to LOG_WARN on failure and we want that visible
+    // in the disconnect line.
+    Upnp::removePortMapping();
 
     resetSlots();
     s_role = NetRole::NONE;

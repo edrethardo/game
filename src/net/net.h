@@ -209,6 +209,16 @@ namespace Net {
     // Host a listen server. Slot 0 is the local host player.
     bool hostServer(u16 port = DEFAULT_PORT);
 
+    // Lobby/HUD accessors for the UPnP IGD result of the last hostServer call.
+    // getExternalIp() returns the WAN-side IP the router reported when UPnP
+    // succeeded, or "" if it failed / wasn't tried. getUpnpError() returns the
+    // short failure cause ("no IGD found", "UPnP unsupported on this platform"
+    // on Switch, etc.), or "" if the mapping succeeded. Used by the LOBBY_HOST
+    // render path so the host can tell friends what IP to type without leaving
+    // the lobby.
+    const char* getExternalIp();
+    const char* getUpnpError();
+
     // Set the chosen PlayerClass (cast to u8) to advertise in CL_JOIN_REQUEST.
     // Call before connectToServer() so the join request carries the right class.
     void setLocalPlayerClass(u8 classId);
