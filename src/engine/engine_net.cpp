@@ -621,21 +621,11 @@ void Engine::clientNetPre(f32 dt) {
 
     // M10.1: resendPendingFire() removed — CL_FIRE_WEAPON is now reliable.
 
-    // M3.2 — Snapshot the local player's state into the prediction ring keyed by
-    // m_clientTick. On snapshot arrival (clientNetPost) we compare the server's
-    // authoritative position at the ACK'd tick against the matching ring entry.
-    {
-        PredictedState s;
-        s.position    = m_localPlayer.position;
-        s.velocity    = m_localPlayer.velocity;
-        s.yaw         = m_localPlayer.yaw;
-        s.pitch       = m_localPlayer.pitch;
-        s.health      = m_localPlayer.health;
-        s.invulnTimer = m_localPlayer.invulnTimer;
-        s.onGround    = m_localPlayer.onGround;
-        const NetInput* latest = Client::getLatestInput();
-        if (latest) PredictionRingOps::push(m_predictionRing, m_clientTick, *latest, s);
-    }
+    // (The prediction-ring push for m_clientTick used to live here. It now lives at the
+    // top of clientNetPost — after gameUpdate has advanced m_localPlayer by this tick's
+    // input — so the ring entry describes end-of-tick state, matching the server's
+    // post-input snapshot at lastProcessedInputTick=T. Pushing pre-update state here
+    // caused a constant ~1-tick reconcile mismatch and visible jitter.)
 
     // Reconcile compares the server's authoritative snapshot against the local-player
     // state we pushed into m_predictionRing on this clientTick. Position is server-
@@ -663,6 +653,29 @@ void Engine::clientNetPre(f32 dt) {
 // ---------------------------------------------------------------------------
 void Engine::clientNetPost(f32 dt) {
     // gameUpdate already synced m_localPlayer → NetPlayer at its end.
+
+    // Snapshot the local player's POST-update state into the prediction ring, keyed by
+    // m_clientTick (the tick we just sent an input for in clientNetPre). The ring entry's
+    // position MUST describe the end-of-tick state — that's what the server reports in
+    // its snapshot at lastProcessedInputTick=T, because the server runs
+    // updateNetPlayerFromInput + moveAndSlide on input T inside serverNetPre. Pushing
+    // pre-update state in clientNetPre caused the reconcile to see a constant ~1-tick
+    // gap (~10 cm at running speed), triggering the M4 render-offset accumulator every
+    // snapshot and producing the "super shaky" jitter the client experienced. The R3
+    // per-input integration fix (b524abe) corrected the server's cadence; this push
+    // location closes the loop on the client side.
+    {
+        PredictedState s;
+        s.position    = m_localPlayer.position;
+        s.velocity    = m_localPlayer.velocity;
+        s.yaw         = m_localPlayer.yaw;
+        s.pitch       = m_localPlayer.pitch;
+        s.health      = m_localPlayer.health;
+        s.invulnTimer = m_localPlayer.invulnTimer;
+        s.onGround    = m_localPlayer.onGround;
+        const NetInput* latest = Client::getLatestInput();
+        if (latest) PredictionRingOps::push(m_predictionRing, m_clientTick, *latest, s);
+    }
 
     // Interpolate remote players, entities, and projectiles from server snapshots
     Client::interpolateRemotePlayers(activeNetSlot(),
