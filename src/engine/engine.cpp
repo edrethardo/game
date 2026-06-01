@@ -100,6 +100,26 @@ void Engine::onPickup(u8 playerSlot, const u8* data, u32 size) {
     s_engine->handlePickupRequest(playerSlot, uid);
 }
 
+// R11 — Server-side CL_DROP_ITEM dispatch. Wire layout:
+//   header(4) + u8 slotKind + u8 slotIndex + Vec3 dropPos(12) + ItemInstance(sizeof ItemInstance)
+// slotKind: 0=backpack, 1=equipment slot. The full ItemInstance rides the packet so we
+// spawn the world item with the client's rolled stats — server doesn't keep its own
+// authoritative copy (co-op trust model, matches CL_INVENTORY_SYNC).
+void Engine::onDropItem(u8 playerSlot, const u8* data, u32 size) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return;
+    constexpr u32 kFixed = sizeof(PacketHeader) + 1 + 1 + 12;
+    if (size < kFixed + sizeof(ItemInstance)) return;
+    const u8* p = data + sizeof(PacketHeader);
+    u8 slotKind  = p[0];
+    u8 slotIndex = p[1];
+    Vec3 dropPos;
+    std::memcpy(&dropPos, p + 2, 12);
+    ItemInstance it;
+    std::memcpy(&it, p + 2 + 12, sizeof(ItemInstance));
+    s_engine->handleDropRequest(playerSlot, slotKind, slotIndex, it, dropPos);
+}
+
 void Engine::onRespawn(u8 playerSlot) {
     if (!s_engine) return;
     if (s_engine->m_netRole != NetRole::SERVER) return; // only the host services respawns

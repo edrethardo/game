@@ -736,6 +736,7 @@ void Engine::startGame(GameStart mode) {
     if (m_netRole == NetRole::SERVER) {
         Net::setOnInput(Engine::onInput);
         Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
+        Net::setOnDropItem(Engine::onDropItem); // R11: server-authoritative inventory drop
         Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
         Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent
         Net::setOnFireWeapon(Engine::onFireWeapon); // client-side weapon fire prediction (CL_FIRE_WEAPON)

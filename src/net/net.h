@@ -271,6 +271,10 @@ namespace Net {
     using OnInputFn      = void(*)(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_PICKUP_ITEM handler — slot = requesting client, payload carries the uid.
     using OnPickupFn     = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // R11: client drops an inventory item. Payload carries the slot kind, slot index,
+    // drop position, and the full ItemInstance. Server removes from inventory + spawns
+    // world item — see handleDropRequest. Mirrors the OnPickupFn shape.
+    using OnDropItemFn   = void(*)(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_RESPAWN handler — slot = requesting (dead) client; no payload.
     using OnRespawnFn    = void(*)(u8 playerSlot);
     // Server-side CL_REQUEST_DESCEND handler — slot = requesting client; no payload.
@@ -326,6 +330,7 @@ namespace Net {
     void setOnSnapshot(OnSnapshotFn fn);
     void setOnInput(OnInputFn fn);
     void setOnPickup(OnPickupFn fn);
+    void setOnDropItem(OnDropItemFn fn);        // R11
     void setOnRespawn(OnRespawnFn fn);
     void setOnDescendRequest(OnDescendRequestFn fn);
     void setOnFireWeapon(OnFireWeaponFn fn);

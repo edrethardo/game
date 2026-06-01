@@ -672,6 +672,16 @@ private:
     // moving the item into that player's inventory and freeing the world slot.
     void handlePickupRequest(u8 playerSlot, u32 uid);
 
+    // R11 — Client: report an inventory drop to the server (CL_DROP_ITEM). Pass slotKind
+    // = 0 for backpack, 1 for an equipped slot; the slotIndex is interpreted accordingly.
+    // The full ItemInstance + drop position ride the packet so the server can spawn the
+    // world item with the rolled stats intact.
+    void sendDropRequest(u8 slotKind, u8 slotIndex, const ItemInstance& it, Vec3 dropPos);
+    // R11 — Server: zero the named inventory slot and spawn a world item at dropPos. No
+    // anti-cheat validation today (co-op trust model, same as onInventorySync).
+    void handleDropRequest(u8 playerSlot, u8 slotKind, u8 slotIndex,
+                           const ItemInstance& it, Vec3 dropPos);
+
     // Client: request respawn after death (reliable CL_RESPAWN). Server-authoritative.
     void sendRespawnRequest();
     // Server: respawn a dead client's NetPlayer (idempotent; revival propagates via snapshot).
@@ -730,6 +740,11 @@ private:
     // Server-side CL_PICKUP_ITEM handler (forwarded from the net layer). Validates the
     // request against authoritative world-item + player state and applies the pickup.
     static void onPickup(u8 playerSlot, const u8* data, u32 size);
+    // R11 — Server-side CL_DROP_ITEM handler. Removes the named slot from the requester's
+    // inventory and spawns a world item carrying the full rolled stats. Without this,
+    // the client's local-only drop is silently overwritten by the next inventory sync /
+    // mirrorWorldItems pass — the item vanishes and the bag drifts from the server.
+    static void onDropItem(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_RESPAWN handler (forwarded from the net layer).
     static void onRespawn(u8 playerSlot);
     // Server-side CL_REQUEST_DESCEND handler (forwarded from the net layer). Re-validates

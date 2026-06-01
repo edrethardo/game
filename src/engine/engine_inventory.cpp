@@ -129,12 +129,22 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y)) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
-                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], m_invCursorIndex);
-                if (!isItemEmpty(dropped)) { WorldItemSystem::spawn(m_worldItems, dropped, dropPos); AudioSystem::play(SfxId::ITEM_DROP); }
+                u8 idx = m_invCursorIndex;
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], idx);
+                if (!isItemEmpty(dropped)) {
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    AudioSystem::play(SfxId::ITEM_DROP);
+                    if (m_netRole == NetRole::CLIENT) sendDropRequest(0, idx, dropped, dropPos); // R11
+                }
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
+                u8 eqIdx = m_invCursorIndex;
                 ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
-                    static_cast<ItemSlot>(m_invCursorIndex));
-                if (!isItemEmpty(dropped)) { WorldItemSystem::spawn(m_worldItems, dropped, dropPos); AudioSystem::play(SfxId::ITEM_DROP); }
+                    static_cast<ItemSlot>(eqIdx));
+                if (!isItemEmpty(dropped)) {
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    AudioSystem::play(SfxId::ITEM_DROP);
+                    if (m_netRole == NetRole::CLIENT) sendDropRequest(1, eqIdx, dropped, dropPos); // R11
+                }
             }
         }
 
@@ -145,8 +155,9 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], bi);
                 if (!isItemEmpty(dropped)) {
                     f32 scatter = (bi % 5) * 0.3f - 0.6f;
-                    WorldItemSystem::spawn(m_worldItems, dropped,
-                        dropPos + Vec3{scatter, 0, (bi / 5) * 0.3f});
+                    Vec3 spawnPos = dropPos + Vec3{scatter, 0, (bi / 5) * 0.3f};
+                    WorldItemSystem::spawn(m_worldItems, dropped, spawnPos);
+                    if (m_netRole == NetRole::CLIENT) sendDropRequest(0, bi, dropped, spawnPos); // R11
                 }
             }
             m_inventoryOpen = false;
@@ -263,20 +274,24 @@ void Engine::updateInventoryInteraction(f32 dt) {
             if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
                 hit.index < MAX_INVENTORY_ITEMS &&
                 !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[hit.index])) {
-                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], hit.index);
+                u8 idx = hit.index;
+                ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], idx);
                 if (!isItemEmpty(dropped)) {
                     WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                     AudioSystem::play(SfxId::ITEM_DROP);
+                    if (m_netRole == NetRole::CLIENT) sendDropRequest(0, idx, dropped, dropPos); // R11
                 }
             } else if (hit.panel == InventoryUI::SlotHit::EQUIPMENT &&
                        hit.index < static_cast<u8>(ItemSlot::COUNT) &&
                        !isItemEmpty(m_inventories[m_localPlayerIndex].equipped[hit.index])) {
+                u8 eqIdx = hit.index;
                 ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
-                    static_cast<ItemSlot>(hit.index));
+                    static_cast<ItemSlot>(eqIdx));
                 if (!isItemEmpty(dropped)) {
                     WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_DROP);
+                    if (m_netRole == NetRole::CLIENT) sendDropRequest(1, eqIdx, dropped, dropPos); // R11
                 }
             }
         }
@@ -290,7 +305,9 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 if (!isItemEmpty(dropped)) {
                     f32 angle = si * 0.4f;
                     Vec3 offset = {sinf(angle) * 0.5f, 0, cosf(angle) * 0.5f};
-                    WorldItemSystem::spawn(m_worldItems, dropped, dropBase + offset);
+                    Vec3 spawnPos = dropBase + offset;
+                    WorldItemSystem::spawn(m_worldItems, dropped, spawnPos);
+                    if (m_netRole == NetRole::CLIENT) sendDropRequest(0, si, dropped, spawnPos); // R11
                 }
             }
             m_inventoryOpen = false;

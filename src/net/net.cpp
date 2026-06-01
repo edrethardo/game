@@ -33,6 +33,7 @@ static u8               s_serverDifficulty = 0;
 static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
 static Net::OnInputFn      s_onInput      = nullptr;
 static Net::OnPickupFn     s_onPickup     = nullptr;
+static Net::OnDropItemFn   s_onDropItem   = nullptr;   // R11
 static Net::OnRespawnFn    s_onRespawn    = nullptr;
 static Net::OnDescendRequestFn s_onDescendRequest = nullptr;
 static Net::OnFireWeaponFn s_onFireWeapon = nullptr;
@@ -212,6 +213,14 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // Client requests pickup of a world item by uid. The engine handler validates
         // proximity/ownership server-side and removes the item (propagates via snapshot).
         if (s_onPickup) s_onPickup(slot, data, size);
+    } break;
+
+    case NetPacketType::CL_DROP_ITEM: {
+        // R11: client drops an item from inventory. Engine handler removes the slot
+        // server-side and spawns the world item at the client-reported drop position.
+        // Without this the client's predicted drop is silently undone the next time
+        // mirrorWorldItems / inventory state syncs from the server.
+        if (s_onDropItem) s_onDropItem(slot, data, size);
     } break;
 
     case NetPacketType::CL_RESPAWN: {
@@ -958,6 +967,7 @@ NetStats Net::getStats(u8 playerSlot) {
 void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }
 void Net::setOnInput(OnInputFn fn)         { s_onInput = fn; }
 void Net::setOnPickup(OnPickupFn fn)       { s_onPickup = fn; }
+void Net::setOnDropItem(OnDropItemFn fn)   { s_onDropItem = fn; }   // R11
 void Net::setOnRespawn(OnRespawnFn fn)     { s_onRespawn = fn; }
 void Net::setOnDescendRequest(OnDescendRequestFn fn) { s_onDescendRequest = fn; }
 void Net::setOnFireWeapon(OnFireWeaponFn fn) { s_onFireWeapon = fn; }
