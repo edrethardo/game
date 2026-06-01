@@ -2,3 +2,6 @@
 	path = external/SDL_mixer
 	url = https://github.com/libsdl-org/SDL_mixer.git
 	branch = SDL2
+[submodule "external/miniupnp"]
+	path = external/miniupnp
+	url = https://github.com/miniupnp/miniupnp

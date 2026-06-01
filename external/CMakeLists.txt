@@ -63,3 +63,23 @@ else()
         target_link_libraries(enet PRIVATE ws2_32 winmm)
     endif()
 endif()
+
+# miniupnpc - UPnP IGD client used by Net::hostServer to auto-open the game's
+# UDP port on the user's router so friends can join without manual port-forwarding.
+# Vendored as a git submodule at external/miniupnp (pinned tag miniupnpc_2_2_8);
+# CI fetches it via `submodules: recursive` in .github/workflows/build.yml.
+# Skipped on Switch — sandboxed nn::socket can't do the SSDP multicast that UPnP
+# discovery requires, and the engine's UPnP call site is itself stubbed out on
+# Switch via the absence of the UPNP_AVAILABLE compile definition (see src/CMakeLists.txt).
+if(NOT NINTENDO_SWITCH)
+    # Force static-only; skip upstream's test/sample executables and install rules.
+    set(UPNPC_BUILD_STATIC ON  CACHE BOOL "" FORCE)
+    set(UPNPC_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(UPNPC_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+    set(UPNPC_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
+    set(UPNPC_NO_INSTALL   ON  CACHE BOOL "" FORCE)
+    add_subdirectory(miniupnp/miniupnpc)
+    # Upstream provides `miniupnpc::miniupnpc` as an alias when only the static
+    # target is built — link that instead of the bare libminiupnpc-static name
+    # so we're tracking the namespaced API rather than upstream's internal target.
+endif()

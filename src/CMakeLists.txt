@@ -145,6 +145,12 @@ else()
     if(UNIX AND NOT APPLE)
         target_link_libraries(DungeonEngine PRIVATE dl)
     endif()
+    # miniupnpc — auto port-forward on Host Game so friends can join without router
+    # config. Desktop-only (Switch's sandboxed network stack can't do SSDP); the
+    # UPNP_AVAILABLE compile define is the gate src/net/upnp.cpp uses to switch
+    # between the real implementation and the no-op stub.
+    target_link_libraries(DungeonEngine PRIVATE miniupnpc::miniupnpc)
+    target_compile_definitions(DungeonEngine PRIVATE UPNP_AVAILABLE=1)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
