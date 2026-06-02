@@ -50,6 +50,30 @@ namespace GameConst {
     static constexpr f32 POTION_ENERGY_PCT   = 0.30f;  // restores 30% max energy
     static constexpr f32 POTION_COOLDOWN     = 5.0f;
 
+    // --- Netplay activation leniency (skills + potion) ---------------------------
+    // Ticks of slack added to every skill/potion cooldown gate. In MP the client
+    // predicts its own activations locally while the server validates them; the
+    // client can legitimately run a few ticks ahead of the server (clock-sync / RTT
+    // skew), and the MAX(local,snapshot) cooldown adoption can nudge a timer forward
+    // by a tick. With a zero-tolerance gate either makes a perfectly-timed press drop
+    // silently ("I pressed it and nothing happened"). 6 ticks (~100ms) covers that
+    // skew yet stays far below any real cooldown (whole seconds = 120+ ticks), so it
+    // can't be abused to re-fire early. Client feel > 1:1 sim, per design intent.
+    static constexpr u32 ACTIVATION_GRACE_TICKS = 6;
+
+    // Shared lenient cooldown gate. Both the client prediction path and the server
+    // validation path call this with the press's tick (m_clientTick locally,
+    // input->clientTick server-side) so they agree by construction — guaranteed
+    // identical because it's one function, not two formulas kept in sync by hand.
+    // lastActivationTick == 0 is the "never activated" sentinel = always ready.
+    inline bool cooldownReady(u32 now, u32 lastActivationTick, u32 cooldownTicks) {
+        if (lastActivationTick == 0) return true;
+        // Ticks are monotonic so now >= lastActivationTick; the subtraction can't
+        // underflow. Add grace before comparing so a press up to ACTIVATION_GRACE_TICKS
+        // early still passes.
+        return (now - lastActivationTick + ACTIVATION_GRACE_TICKS) >= cooldownTicks;
+    }
+
     // World items
     static constexpr f32 ITEM_SCALE          = 1.4f;
     static constexpr f32 GLOBE_SCALE         = 0.4f;

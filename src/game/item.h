@@ -358,6 +358,14 @@ struct SkillState {
     f32     cooldownTimer  = 0.0f;
     f32     energy         = 100.0f;
     f32     maxEnergy      = 100.0f;
+    // R17: tick at which this skill was last activated. Authoritative for the gate.
+    // 0 = never activated (gate passes). On press, set to currentTick (>= 1).
+    // cooldownTimer above is now a HUD-derived value (recomputed each frame from
+    // this tick + cooldownTicks - currentTick), kept for existing HUD code that
+    // still reads it. Tick-based gating eliminates client/server divergence at
+    // the cooldown boundary — both sides compute the gate from the same input's
+    // clientTick. See R17 in the master plan for the full rationale.
+    u32     lastActivationTick = 0;
 };
 
 // ---- NPC equipment (simplified — no backpack, just 6 equipped slots) ----

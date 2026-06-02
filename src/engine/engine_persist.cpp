@@ -188,13 +188,26 @@ void Engine::saveGame(u8 slot) {
 
         std::fwrite(&m_inventories[p],  sizeof(PlayerInventory), 1, f);
         std::fwrite(&m_quickbars[p],    sizeof(QuickbarState),   1, f);
-        std::fwrite(&m_skillStates[p],  sizeof(SkillState),      1, f);
+        // R17: SkillState gained lastActivationTick (u32), so `sizeof(SkillState)`
+        // grew 16 → 20 bytes. To keep the save format byte-identical to pre-R17
+        // saves, write only the four legacy fields (activeSkill / cooldownTimer /
+        // energy / maxEnergy). lastActivationTick is intentionally NOT persisted —
+        // it's in the per-session clientTick frame, so loading should start a
+        // fresh session with all skills "never activated" (lastActivationTick = 0
+        // = sentinel gate-clear), which is exactly what default-init gives us.
+        auto writeSkillStateLegacy = [&](const SkillState& ss) {
+            std::fwrite(&ss.activeSkill,   sizeof(SkillId), 1, f);
+            std::fwrite(&ss.cooldownTimer, sizeof(f32),     1, f);
+            std::fwrite(&ss.energy,        sizeof(f32),     1, f);
+            std::fwrite(&ss.maxEnergy,     sizeof(f32),     1, f);
+        };
+        writeSkillStateLegacy(m_skillStates[p]);
 
         u8 cls        = static_cast<u8>(m_playerClasses[p]);
         u8 activeSkill = m_activeClassSkills[p];
         std::fwrite(&cls,         sizeof(u8), 1, f);
         std::fwrite(&activeSkill, sizeof(u8), 1, f);
-        std::fwrite(m_classSkillStatesPerPlayer[p], sizeof(SkillState) * 4, 1, f);
+        for (u32 s = 0; s < 4; s++) writeSkillStateLegacy(m_classSkillStatesPerPlayer[p][s]);
     }
 
     std::fclose(f);
@@ -272,16 +285,30 @@ bool Engine::loadGame(u8 slot) {
     }
     u8 restoreCount = (m_splitPlayerCount < playerCount) ? m_splitPlayerCount : playerCount;
 
+    // R17 — match the writer in saveGame: SkillState's persisted form is only the
+    // four legacy fields (activeSkill / cooldownTimer / energy / maxEnergy = 16 B).
+    // The new lastActivationTick field is per-session-clientTick and is left at
+    // its default-init 0 (= "never activated, gate clear") on load.
+    auto readSkillStateLegacy = [&](SkillState& ss) -> bool {
+        bool r = true;
+        r = r && std::fread(&ss.activeSkill,   sizeof(SkillId), 1, f) == 1;
+        r = r && std::fread(&ss.cooldownTimer, sizeof(f32),     1, f) == 1;
+        r = r && std::fread(&ss.energy,        sizeof(f32),     1, f) == 1;
+        r = r && std::fread(&ss.maxEnergy,     sizeof(f32),     1, f) == 1;
+        ss.lastActivationTick = 0;
+        return r;
+    };
+
     for (u8 p = 0; p < playerCount; p++) {
         bool pok = true;
         pok = pok && std::fread(&pdata[p].hp,    sizeof(f32),            1, f) == 1;
         pok = pok && std::fread(&pdata[p].maxHp, sizeof(f32),            1, f) == 1;
         pok = pok && std::fread(&pdata[p].inv,   sizeof(PlayerInventory), 1, f) == 1;
         pok = pok && std::fread(&pdata[p].qb,    sizeof(QuickbarState),  1, f) == 1;
-        pok = pok && std::fread(&pdata[p].skill, sizeof(SkillState),     1, f) == 1;
+        pok = pok && readSkillStateLegacy(pdata[p].skill);
         pok = pok && std::fread(&pdata[p].cls,   sizeof(u8),             1, f) == 1;
         pok = pok && std::fread(&pdata[p].activeSkill, sizeof(u8),       1, f) == 1;
-        pok = pok && std::fread(pdata[p].classSkills, sizeof(SkillState) * 4, 1, f) == 1;
+        for (u32 s = 0; s < 4; s++) pok = pok && readSkillStateLegacy(pdata[p].classSkills[s]);
         if (!pok) { ok = false; break; }
     }
 

@@ -10,6 +10,7 @@
 // declarations in skill_internal.h.
 
 #include "game/skill_internal.h"
+#include "game/game_constants.h" // GameConst::cooldownReady — shared lenient cooldown gate
 #include "net/net_player.h" // NetPlayer for updateMeteors remote-caster heal routing (H4)
 
 // ---------------------------------------------------------------------------
@@ -342,17 +343,40 @@ static void spawnActivationParticles(SkillId id, Vec3 eyePos, Vec3 forward)
 
 // ---------------------------------------------------------------------------
 
+u32 SkillSystem::computeCooldownTicks(f32 defCooldown, f32 cooldownReduction) {
+    // Round-half-up to ticks; minimum 3 ticks (~50ms) matches the pre-R17
+    // tryActivate floor for cooldownTimer.
+    f32 sec = defCooldown * (1.0f - cooldownReduction);
+    if (sec < 0.0f) sec = 0.0f;
+    u32 ticks = static_cast<u32>(sec * 60.0f + 0.5f);
+    if (ticks < 3) ticks = 3;
+    return ticks;
+}
+
 bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 skillDefCount,
                                Vec3 eyePos, Vec3 forward, f32 /*yaw*/,
                                ProjectilePool& projectiles, EntityPool& entities,
                                const LevelGrid& grid, Player& player,
+                               u32 currentTick,
                                f32 cooldownReduction)
 {
     if (ss.activeSkill == SkillId::NONE)  return false;
-    if (ss.cooldownTimer > 0.0f)          return false;
 
     const SkillDef* def = findSkillDef(skillDefs, skillDefCount, ss.activeSkill);
     if (!def) return false;
+
+    // R17: tick-based cooldown gate. Sentinel lastActivationTick == 0 means
+    // "never activated, gate is clear". Otherwise the gate passes iff at least
+    // cooldownTicks have elapsed since the last activation. Both client and
+    // server evaluate this with the press's clientTick (carried on the wire in
+    // NetInput.clientTick) — agreement is by construction, not by tuning.
+    // GameConst::cooldownReady adds ACTIVATION_GRACE_TICKS of slack so a client a
+    // few ticks ahead of the server (clock-sync/RTT skew, or a MAX-adopt nudge) is
+    // never dropped; the grace is far below any real cooldown so it can't be abused.
+    const u32 cooldownTicks = computeCooldownTicks(def->cooldown, cooldownReduction);
+    if (!GameConst::cooldownReady(currentTick, ss.lastActivationTick, cooldownTicks)) {
+        return false;
+    }
 
     // Resource AVAILABILITY check only — do NOT commit cost yet. A whiffed skill
     // (no target / no LOS / nothing to mark) must be free and trigger no
@@ -601,8 +625,15 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
     } else {
         ss.energy -= def->energyCost;
     }
-    ss.cooldownTimer = def->cooldown * (1.0f - cooldownReduction);
-    if (ss.cooldownTimer < 0.05f) ss.cooldownTimer = 0.05f; // hard minimum
+    // R17: authoritative cooldown state — record the activation's tick. Both
+    // client and server set this to the press's clientTick (well, currentTick
+    // — host/SP uses m_serverTick), so subsequent gate checks on either side
+    // see the same value. max(.., 1) avoids the 0 sentinel which means "never
+    // activated".
+    ss.lastActivationTick = (currentTick == 0) ? 1u : currentTick;
+    // HUD shim: keep cooldownTimer for existing HUD code that reads it.
+    // tickSkillCooldowns re-derives it each frame from lastActivationTick.
+    ss.cooldownTimer = static_cast<f32>(cooldownTicks) * (1.0f / 60.0f);
 
     // Feedback only on a real activation — no cast sound/particles on a whiff.
     playActivationSound(ss.activeSkill);

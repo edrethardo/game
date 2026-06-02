@@ -62,29 +62,37 @@ extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
 // ---------------------------------------------------------------------------
-// tickSkillCooldowns — drains the main skill energy/cooldown pool via
-// SkillSystem::update, then individually drains all four class skill cooldowns
-// and both equipment (boot/helmet) skill cooldowns.
+// tickSkillCooldowns — energy regen (via SkillSystem::update), then
+// re-derives cooldownTimer for class/boot/helm from the authoritative
+// lastActivationTick (R17). cooldownTimer stays as a HUD-only value; the
+// real cooldown gate lives in tryActivate via tick comparison.
 // ---------------------------------------------------------------------------
 void Engine::tickSkillCooldowns(f32 dt) {
-    // Update skill state (energy regen, cooldowns)
+    // Energy regen + any non-cooldown skill state (SkillSystem::update no longer
+    // drains cooldownTimer post-R17, but keeps energy regen / projectile housekeeping).
     SkillSystem::update(m_skillStates[m_localPlayerIndex], dt);
-    // Tick class skill cooldowns (shared energy synced from main pool)
-    for (u32 s = 0; s < 4; s++) {
-        if (m_classSkillStates[s].cooldownTimer > 0.0f) {
-            m_classSkillStates[s].cooldownTimer -= dt;
-            if (m_classSkillStates[s].cooldownTimer < 0.0f) m_classSkillStates[s].cooldownTimer = 0.0f;
+
+    // R17: HUD-derive cooldownTimer from authoritative lastActivationTick. The gate
+    // doesn't read cooldownTimer — only HUD does — so any small drift between f32
+    // accumulation and the integer-derived value is invisible to gameplay logic.
+    const u32 nowTick = currentLocalTick();
+    auto deriveCooldownTimer = [&](SkillState& ss, f32 cdr) {
+        if (ss.activeSkill == SkillId::NONE || ss.lastActivationTick == 0) {
+            ss.cooldownTimer = 0.0f;
+            return;
         }
-    }
-    // Tick equipment skill cooldowns (boots F, helmet G)
-    if (m_bootSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f) {
-        m_bootSkillStates[m_localPlayerIndex].cooldownTimer -= dt;
-        if (m_bootSkillStates[m_localPlayerIndex].cooldownTimer < 0.0f) m_bootSkillStates[m_localPlayerIndex].cooldownTimer = 0.0f;
-    }
-    if (m_helmetSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f) {
-        m_helmetSkillStates[m_localPlayerIndex].cooldownTimer -= dt;
-        if (m_helmetSkillStates[m_localPlayerIndex].cooldownTimer < 0.0f) m_helmetSkillStates[m_localPlayerIndex].cooldownTimer = 0.0f;
-    }
+        const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, ss.activeSkill);
+        if (!def) { ss.cooldownTimer = 0.0f; return; }
+        const u32 cooldownTicks = SkillSystem::computeCooldownTicks(def->cooldown, cdr);
+        const u32 elapsed = nowTick - ss.lastActivationTick;
+        ss.cooldownTimer = (elapsed < cooldownTicks)
+                           ? static_cast<f32>(cooldownTicks - elapsed) * (1.0f / 60.0f)
+                           : 0.0f;
+    };
+    const f32 itemCdr = m_inventories[m_localPlayerIndex].bonusCooldownReduction;
+    for (u32 s = 0; s < 4; s++) deriveCooldownTimer(m_classSkillStates[s], itemCdr);
+    deriveCooldownTimer(m_bootSkillStates[m_localPlayerIndex],   itemCdr);
+    deriveCooldownTimer(m_helmetSkillStates[m_localPlayerIndex], itemCdr);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,10 +178,14 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                           m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                                          currentLocalTick(),
                                           m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
                 m_skillStates[m_localPlayerIndex].energy = m_classSkillStates[slot].energy;
-                // M9: record the predicted class skill activation so M10 can ack/reject it
-                // via SV_SKILL_RESULT. CLIENT only — server is authoritative and needs no ring.
+                // R17: tryActivate set m_classSkillStates[slot].lastActivationTick =
+                // currentLocalTick() on success. Server-side gate for the matching
+                // INPUT_EX_SKILL will evaluate the same tick comparison and agree.
+                // M9: record the predicted class skill activation so M10 can ack/reject
+                // it via SV_SKILL_RESULT. CLIENT only.
                 if (m_netRole == NetRole::CLIENT) {
                     PendingSkillRingOps::record(m_pendingSkills, m_clientTick, slot);
                 }
@@ -223,9 +235,10 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         if (SkillSystem::tryActivate(m_bootSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                                      currentLocalTick(),
                                       m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
             m_skillStates[m_localPlayerIndex].energy = m_bootSkillStates[m_localPlayerIndex].energy; // deduct spent mana
-            // M9: record predicted boot skill activation (sentinel 0xFE — no integer slot for equipment skills).
+            // R17: tryActivate stamped lastActivationTick. Server's same-tick gate agrees by construction.
             if (m_netRole == NetRole::CLIENT) {
                 PendingSkillRingOps::record(m_pendingSkills, m_clientTick, PENDING_SKILL_SLOT_BOOT);
             }
@@ -245,9 +258,10 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         if (SkillSystem::tryActivate(m_helmetSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                                      currentLocalTick(),
                                       m_inventories[m_localPlayerIndex].bonusCooldownReduction)) {
             m_skillStates[m_localPlayerIndex].energy = m_helmetSkillStates[m_localPlayerIndex].energy; // deduct spent mana
-            // M9: record predicted helmet skill activation (sentinel 0xFF — no integer slot for equipment skills).
+            // R17: tryActivate stamped lastActivationTick. Server's same-tick gate agrees by construction.
             if (m_netRole == NetRole::CLIENT) {
                 PendingSkillRingOps::record(m_pendingSkills, m_clientTick, PENDING_SKILL_SLOT_HELMET);
             }

@@ -98,8 +98,32 @@ namespace Input {
 
     // Gyro (motion sensor) — returns angular velocity in deg/s
     // dx = yaw (horizontal turn), dy = pitch (vertical tilt)
-    void getGyro(f32& dx, f32& dy, s32 gamepadIndex = 0);
+    //
+    // getGyro is consume-on-read on Switch: the gyro cache is zeroed after the
+    // call so only the FIRST PlayerController::update substep in a render frame
+    // applies the delta. Engine::run's fixed-timestep accumulator can run up to
+    // 4 substeps per render frame; without the consume, every substep would
+    // re-apply the same buffered gyro delta and over-rotate proportional to
+    // substep count.
+    //
+    // peekGyro returns the same delta WITHOUT consuming. Use it from non-mutating
+    // readers that need to see the same gyro the gameplay step will apply this
+    // frame — specifically, PlayerController::captureLocalInput packs gyro into
+    // the wire's NetInput before gameUpdate runs, so it must peek (consuming
+    // here would starve PlayerController::update's getGyro and the local screen
+    // wouldn't rotate). PC sensor read is a state query, so peek and consume are
+    // behaviorally identical there.
+    void getGyro (f32& dx, f32& dy, s32 gamepadIndex = 0);
+    void peekGyro(f32& dx, f32& dy, s32 gamepadIndex = 0);
     bool isGyroAvailable(s32 gamepadIndex = 0);
+
+    // Switch software keyboard. Opens a modal on-screen keyboard so the user can type text
+    // (e.g. a multiplayer host IP) without a physical keyboard. Blocks until the user accepts
+    // or cancels. `initial` (may be empty) prefills the field; `headerText` shows above it.
+    // Returns true if the user accepted with a non-empty result (written to `outBuf`).
+    // On PC this is a no-op stub returning false (PC has SDL text input from the keyboard).
+    bool openVirtualKeyboard(const char* headerText, const char* initial,
+                             char* outBuf, size_t outBufSize);
 
     // --- Binding management ---
     const InputBinding& getBinding(GameAction action);

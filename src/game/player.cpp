@@ -333,8 +333,14 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
         mx += rsX * stickScale;
         my += rsY * stickScale * (Input::getStickInvertY() ? -1.0f : 1.0f);
     }
+    // R14: peek — captureLocalInput is the wire packer, not the gameplay
+    // consumer. The matching consuming read happens in PlayerController::update
+    // (player.cpp:96, called from gameUpdate) and is what actually rotates
+    // m_localPlayer.yaw. Pre-R14 this site called Input::getGyro (consume)
+    // and starved the gameplay consumer on CLIENT/HOST in MP — wire packet
+    // got the gyro contribution but the local screen never rotated.
     f32 gyroDx, gyroDy;
-    Input::getGyro(gyroDx, gyroDy);
+    Input::peekGyro(gyroDx, gyroDy);
     if (gyroDx != 0.0f || gyroDy != 0.0f) {
         mx += gyroDx * Input::getGyroSensitivity();
         my += gyroDy * Input::getGyroSensitivity() * (Input::getGyroInvertY() ? -1.0f : 1.0f);

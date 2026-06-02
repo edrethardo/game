@@ -469,7 +469,13 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.62f;
 
-        HUD::drawKeySymbol(sw, sh, cx, cy, cp ? "B" : "Shift", keyLit);
+        // Gamepad label comes from the live DODGE binding (currently R3 / right-stick click)
+        // so this tooltip stays correct if the action is ever rebound. Pre-fix this was a
+        // hardcoded "B" that drifted out of sync when DODGE moved to RIGHTSTICK.
+        const char* dodgeLabel = cp
+            ? Input::buttonName(Input::getBinding(GameAction::DODGE).button)
+            : "Shift";
+        HUD::drawKeySymbol(sw, sh, cx, cy, dodgeLabel, keyLit);
         FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
                              {0.9f * alpha, 0.7f * alpha, 0.3f * alpha}, 3);
     }

@@ -124,6 +124,10 @@ const WorldSnapshot* Server::getLastSnapshot() {
     return s_snapBuilt ? &s_lastSnap : nullptr;
 }
 
+WorldSnapshot* Server::getLastSnapshotMutable() {
+    return s_snapBuilt ? &s_lastSnap : nullptr;
+}
+
 // D7.3 — Send the most recently built full snapshot to a single client slot.
 // Used when a client has no accepted baseline (first snapshot after join, or
 // after a baseline mismatch). s_lastSnap must have been built by sendSnapshot()

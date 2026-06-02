@@ -112,6 +112,15 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         // PlayerClass on the wire so clients pick the correct per-class mesh for remotes.
         // Clamped on read in deserialize() against PlayerClass::CLASS_COUNT.
         sp.playerClass = static_cast<u8>(np.playerClass);
+
+        // R17 — default cooldown fields. Engine post-build (populateSnapshotCooldowns)
+        // overwrites these with the authoritative per-slot lastActivationTick values
+        // pulled from m_classSkillStates / m_classSkillStatesNet / m_bootSkillStates /
+        // m_helmetSkillStates / m_players[i].potionLastActivationTick.
+        for (u32 s = 0; s < 4; s++) sp.classSkillLastActivationTick[s] = 0;
+        sp.bootSkillLastActivationTick   = 0;
+        sp.helmetSkillLastActivationTick = 0;
+        sp.potionLastActivationTick      = np.potionLastActivationTick;
     }
 
     // Entities (only active ones). entKeys[i] = squared distance of entity i to the
@@ -301,7 +310,8 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 //       + 1(clip)+1(statusFlags)+1(invuln)+1(poison)+1(burn)+1(freeze)
 //       + 1(animFlags)+1(weaponMeshId)+1(dodgeFlags)+1(playerClass) = 30.
 //       (playerClass added so remote players render with the correct per-class mesh on clients.)
-static constexpr u32 SNAP_PLAYER_WIRE     = 30;
+// SNAP_PLAYER_WIRE — R17 bump from 30 → 58 (added 7 u32 lastActivationTick fields).
+static constexpr u32 SNAP_PLAYER_WIRE     = 58;
 // Entity: 1+1+1+1 + 6(pos) + 2(yaw) + 4(vel) + 1(stun)+1(freeze)+1(limb)+1(bossStatus)
 //       + 1(meshId)+1(materialId)+1(enemyType)+1(weaponMeshId) + 3(halfExtentsQ)
 //       + 1(attackAnimQ) = 28. (attackAnimQ added so clients see enemy attack animations
@@ -452,6 +462,14 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w8(sp.weaponMeshId);
         w8(sp.dodgeFlags);  // Wanderer dodge state (bit0=rolling, bits1-3=counterStacks)
         w8(sp.playerClass); // PlayerClass cast to u8 — drives per-class mesh on the client
+        // R17 — lastActivationTick fields (28 bytes per player). 4 class slots + boot +
+        // helm + potion. In the owning player's clientTick frame (server's m_serverTick
+        // for the host's slot, the remote's m_clientTick for remote slots). Client
+        // adopts MAX(local, snapshot) in Client::reconcile.
+        for (u32 s = 0; s < 4; s++) w32(sp.classSkillLastActivationTick[s]);
+        w32(sp.bootSkillLastActivationTick);
+        w32(sp.helmetSkillLastActivationTick);
+        w32(sp.potionLastActivationTick);
     }
 
     // Entities
@@ -620,6 +638,11 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         // anything past CLASS_COUNT to WARRIOR (0), matching onPlayerJoin's fallback.
         if (sp.playerClass >= static_cast<u8>(PlayerClass::CLASS_COUNT))
             sp.playerClass = static_cast<u8>(PlayerClass::WARRIOR);
+        // R17 lastActivationTick fields — must match the writer in serialize().
+        for (u32 s = 0; s < 4; s++) sp.classSkillLastActivationTick[s] = r.readU32();
+        sp.bootSkillLastActivationTick   = r.readU32();
+        sp.helmetSkillLastActivationTick = r.readU32();
+        sp.potionLastActivationTick      = r.readU32();
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {
@@ -796,10 +819,12 @@ bool Snapshot::getBit64(const u8* mask, u32 bit) {
 // ---------------------------------------------------------------------------
 
 // Write one SnapPlayer to the caller's bounds-checked buffer.
-// Byte layout MUST match the full serializer's player loop above (SNAP_PLAYER_WIRE = 30).
+// Byte layout MUST match the full serializer's player loop above
+// (SNAP_PLAYER_WIRE = 30 base + R17 28 = 58).
 static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer& sp) {
     auto w8  = [&](u8 v)  { if (cursor + 1 <= maxSize) buf[cursor++] = v; };
     auto w16 = [&](u16 v) { if (cursor + 2 <= maxSize) { std::memcpy(buf + cursor, &v, 2); cursor += 2; } };
+    auto w32 = [&](u32 v) { if (cursor + 4 <= maxSize) { std::memcpy(buf + cursor, &v, 4); cursor += 4; } };
     w8(sp.slotIndex); w8(sp.flags); w8(sp.weaponId); w8(sp.health);
     w16(sp.maxHealth);
     w16(sp.posX); w16(sp.posY); w16(sp.posZ);
@@ -808,6 +833,11 @@ static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer&
     w8(sp.currentClip); w8(sp.statusFlags);
     w8(sp.invulnTimer); w8(sp.poisonTimer); w8(sp.burnTimer); w8(sp.freezeTimer);
     w8(sp.animFlags); w8(sp.weaponMeshId); w8(sp.dodgeFlags); w8(sp.playerClass);
+    // R17 lastActivationTick tail.
+    for (u32 s = 0; s < 4; s++) w32(sp.classSkillLastActivationTick[s]);
+    w32(sp.bootSkillLastActivationTick);
+    w32(sp.helmetSkillLastActivationTick);
+    w32(sp.potionLastActivationTick);
 }
 
 // Write one SnapEntity. MUST match SNAP_ENTITY_WIRE = 28.
@@ -868,6 +898,11 @@ static void readSnapPlayer(PacketReader& r, SnapPlayer& sp) {
     sp.burnTimer = r.readU8(); sp.freezeTimer = r.readU8();
     sp.animFlags = r.readU8(); sp.weaponMeshId = r.readU8();
     sp.dodgeFlags = r.readU8(); sp.playerClass = r.readU8();
+    // R17 lastActivationTick tail — must match writeSnapPlayer.
+    for (u32 s = 0; s < 4; s++) sp.classSkillLastActivationTick[s] = r.readU32();
+    sp.bootSkillLastActivationTick   = r.readU32();
+    sp.helmetSkillLastActivationTick = r.readU32();
+    sp.potionLastActivationTick      = r.readU32();
 }
 
 // Read one SnapEntity from a PacketReader. MUST match writeSnapEntity.

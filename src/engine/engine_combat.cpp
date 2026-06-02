@@ -655,9 +655,12 @@ void Engine::handleWeaponFire(f32 dt) {
                           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
                         SkillSystem::setClassDamageMult(1.0f);
                         Vec3 dir = m_localPlayer.forward;
+                        // R17: tempSS.lastActivationTick=0 makes the gate always pass; currentTick is unused
+                        // for the gate but threaded for consistency.
                         SkillSystem::tryActivate(tempSS, &procDef, 1,
                             procPos, dir, m_localPlayer.yaw,
-                            m_projectiles, m_entities, m_level.grid, m_localPlayer);
+                            m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                            currentLocalTick());
                     } break;
                     case SkillId::METEOR_STRIKE: {
                         // Drop a meteor on the hit position
@@ -1283,9 +1286,11 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)].itemLevel;
                           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
                         SkillSystem::setClassDamageMult(1.0f);
+                        // R17: tempSS.lastActivationTick=0 always-pass; tick threaded for consistency.
                         SkillSystem::tryActivate(tempSS, &procDef, 1,
                             procPos, forward, np.yaw,
-                            m_projectiles, m_entities, m_level.grid, m_localPlayer);
+                            m_projectiles, m_entities, m_level.grid, m_localPlayer,
+                            currentLocalTick());
                     } break;
                     case SkillId::METEOR_STRIKE: {
                         extern PendingMeteor s_meteors[MAX_PENDING_METEORS];

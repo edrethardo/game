@@ -55,6 +55,12 @@ namespace Server {
     // Returns nullptr if no snapshot has been sent yet this session.
     const WorldSnapshot* getLastSnapshot();
 
+    // R17 — mutable accessor used by Engine immediately after buildSnapshotOnly
+    // to populate per-slot cooldown fields (SnapPlayer.classSkillLastActivationTick
+    // etc.) that aren't reachable from NetPlayer alone (they live in Engine's
+    // skill-state arrays). Returns null if no snapshot has been built yet.
+    WorldSnapshot* getLastSnapshotMutable();
+
     u32 getLevelSeed();
     u8  getLevelFloor();
     u8  getLevelDifficulty();

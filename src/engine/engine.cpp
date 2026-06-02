@@ -625,6 +625,7 @@ void Engine::run() {
     X(m_inventoryOpen,    m_inventoryOpenArr) \
     X(m_hitMarkerTimer,   m_hitMarkerTimers)\
     X(m_potionCooldown,   m_potionCooldowns)\
+    X(m_potionLastActivationTick, m_potionLastActivationTicks) \
     X(m_invCursorPanel,   m_invCursorPanels)\
     X(m_invCursorIndex,   m_invCursorIndices) \
     X(m_dragState,        m_dragStates)     \

@@ -96,6 +96,11 @@ struct NetPlayer {
     f32  blockTimer        = 0.0f;
     bool isDead            = false;
     f32  potionCooldown    = 0.0f;
+    // R17: tick at which this player last activated a potion. Authoritative for the
+    // gate on server-side remote-player processing. 0 = never (gate passes). On
+    // server: set to input->clientTick on successful gate. potionCooldown above is
+    // HUD-derived.
+    u32  potionLastActivationTick = 0;
     // Near-death lifesaver i-frame (TA-1): server-side mirror of Player.lifesaverArmed so the
     // one-shot below-20%-HP invuln stays one-shot across frames for remotes (consumed on use,
     // re-earned only at >=40% HP). NOT serialized — server-only state, never on the wire.
@@ -189,3 +194,28 @@ struct InputRingBuffer {
         return &inputs[(head + INPUT_BUFFER_SIZE - 1) % INPUT_BUFFER_SIZE];
     }
 };
+
+// Select every UNPROCESSED input (clientTick > cursor), oldest→newest, into out[],
+// advancing `cursor` to the newest one visited. Returns how many were written
+// (clamped to outCap). This is the canonical "drain all new inputs once each"
+// selection the server's serverNetPre loop relies on for BOTH movement and
+// activation edges: an edge bit (potion/skill) is set on exactly one client tick,
+// so reading only getLatest() drops it whenever a newer input arrived first (the
+// common jitter case). Walking every new tick instead guarantees each press is
+// seen exactly once. push() keeps the ring monotonic by clientTick, so the resend
+// window collapses to one entry per tick and the cursor never revisits a tick →
+// no double-fire. Pure + header-only so it can be unit-tested without the Engine.
+inline u32 collectUnprocessedInputs(const InputRingBuffer& buf, u32& cursor,
+                                    const NetInput** out, u32 outCap) {
+    u32 n = 0;
+    for (u32 k = 0; k < buf.count && n < outCap; k++) {
+        // Same index math as serverNetPre's drain loop: head points one past the
+        // newest write, so the oldest live entry is `count` slots back from head.
+        u32 idx = (buf.head + INPUT_BUFFER_SIZE - buf.count + k) % INPUT_BUFFER_SIZE;
+        const NetInput& in = buf.inputs[idx];
+        if (in.clientTick <= cursor) continue; // already applied on a prior server tick
+        cursor = in.clientTick;
+        out[n++] = &buf.inputs[idx];
+    }
+    return n;
+}

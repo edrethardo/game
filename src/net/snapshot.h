@@ -10,7 +10,8 @@
 
 #include <cstring>  // std::memset in WorldSnapshot default constructor
 
-// Quantized snapshot of one player (30 wire bytes — see SNAP_PLAYER_WIRE)
+// Quantized snapshot of one player (58 wire bytes — see SNAP_PLAYER_WIRE; was 30 pre-R17,
+// +28 for the seven u32 lastActivationTick fields at the tail)
 struct SnapPlayer {
     u8   slotIndex;     // 1
     u8   flags;         // 1: bit0=active, bit1=onGround, bit2=UNUSED, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
@@ -40,6 +41,18 @@ struct SnapPlayer {
     // snapshot rather than once-on-join so a late-joining observer or post-reconnect client
     // converges to the right mesh without a side-channel.
     u8   playerClass;   // 1: PlayerClass cast to u8 (0..CLASS_COUNT-1)
+    // R17 — belt-and-suspenders cooldown sync. Authoritative lastActivationTick
+    // (in the OWNING PLAYER's clientTick frame — i.e. each remote client's own
+    // m_clientTick for its slot, m_serverTick for the host's slot). Client
+    // adopts MAX(local, snapshot) in Client::reconcile so a benign client
+    // over-prediction (server rejected for non-cooldown reasons → server didn't
+    // bump its lastActivationTick) is never under-gated. Sentinel 0 = never
+    // activated. 28 bytes per player per snapshot — at 60 Hz × 4 players,
+    // ~6.7 KB/s overhead within the netcode budget.
+    u32  classSkillLastActivationTick[4];  // 16
+    u32  bootSkillLastActivationTick;      //  4
+    u32  helmetSkillLastActivationTick;    //  4
+    u32  potionLastActivationTick;         //  4
 };
 
 // Quantized snapshot of one entity (28 bytes — see SNAP_ENTITY_WIRE)

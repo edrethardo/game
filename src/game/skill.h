@@ -62,11 +62,23 @@ namespace SkillSystem {
     // Tick cooldowns, energy regen, pending meteors
     void update(SkillState& ss, f32 dt);
 
-    // Try to activate the player's current skill (returns true if activated)
+    // R17: compute the cooldown in ticks for a given def + cdr. Both client and
+    // server must use this identical formula so the tick-based gate agrees by
+    // construction. Floor of 3 ticks (~50ms) matches tryActivate's pre-R17 floor.
+    u32 computeCooldownTicks(f32 defCooldown, f32 cooldownReduction);
+
+    // Try to activate the player's current skill (returns true if activated).
+    // R17: currentTick is the press's tick reference — m_clientTick on a CLIENT,
+    // input->clientTick on the server-side remote path, m_serverTick on host/SP.
+    // The gate is `currentTick - ss.lastActivationTick >= cooldownTicks`. On
+    // success, ss.lastActivationTick is set to max(currentTick, 1) so the gate
+    // sees this activation on the next press. ss.cooldownTimer is set to the
+    // initial value for HUD; tickSkillCooldowns derives subsequent frames.
     bool tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 skillDefCount,
                      Vec3 eyePos, Vec3 forward, f32 yaw,
                      ProjectilePool& projectiles, EntityPool& entities,
                      const LevelGrid& grid, Player& player,
+                     u32 currentTick,
                      f32 cooldownReduction = 0.0f);
 
     // Update orb projectiles (spawn shards) -- called from projectile update or engine update

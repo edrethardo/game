@@ -25,7 +25,7 @@ static s32 s_mouseWheelY = 0;
 static SDL_GameController* s_controllers[Input::MAX_GAMEPADS] = {};
 
 // Sensitivity settings (adjustable from options menu)
-static f32  s_stickSensitivity = 1.5f;
+static f32  s_stickSensitivity = 1.0f;
 static f32  s_gyroSensitivity  = 5.0f;
 static bool s_stickInvertY     = false;
 static bool s_gyroInvertY      = true;
@@ -500,72 +500,87 @@ bool Input::isModifierHeld(s32 gamepadIndex) {
 #ifdef __SWITCH__
 #include <switch.h>
 static bool s_gyroInitialized = false;
-static HidSixAxisSensorHandle s_gyroHandles[4]; // P1: pro, handheld, joydual-right, spare
-static u32 s_gyroHandleCount = 0;
 
-static HidSixAxisSensorHandle s_gyroHandlesP2[4]; // P2 sensor handles
-static u32 s_gyroHandleCountP2 = 0;
+// Each gyro handle carries the npad style it was acquired for. We read only the handle
+// whose style matches the pad's CURRENT active style (padGetStyleSet) — otherwise a
+// started-but-unconnected sensor (e.g. the Pro handle in handheld mode) emits zero-valued
+// samples and the old break-on-first-count>0 loop would starve the actually-active sensor.
+struct GyroEntry {
+    HidSixAxisSensorHandle handle;
+    u64                    style; // HidNpadStyleTag_* bit
+};
+static GyroEntry s_gyroEntries[4];   // P1: Pro, Handheld, dual-JoyCon
+static u32       s_gyroEntryCount = 0;
+static GyroEntry s_gyroEntriesP2[4]; // P2: Pro, dual-JoyCon (only one player can be Handheld)
+static u32       s_gyroEntryCountP2 = 0;
 
 static void initGyro() {
     if (s_gyroInitialized) return;
     s_gyroInitialized = true;
 
-    s_gyroHandleCount = 0;
+    s_gyroEntryCount = 0;
 
     // P1: Pro Controller
-    hidGetSixAxisSensorHandles(&s_gyroHandles[s_gyroHandleCount], 1,
+    hidGetSixAxisSensorHandles(&s_gyroEntries[s_gyroEntryCount].handle, 1,
                                HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
-    hidStartSixAxisSensor(s_gyroHandles[s_gyroHandleCount]);
-    s_gyroHandleCount++;
+    s_gyroEntries[s_gyroEntryCount].style = HidNpadStyleTag_NpadFullKey;
+    hidStartSixAxisSensor(s_gyroEntries[s_gyroEntryCount].handle);
+    s_gyroEntryCount++;
 
     // P1: Handheld (attached joycons)
-    hidGetSixAxisSensorHandles(&s_gyroHandles[s_gyroHandleCount], 1,
+    hidGetSixAxisSensorHandles(&s_gyroEntries[s_gyroEntryCount].handle, 1,
                                HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
-    hidStartSixAxisSensor(s_gyroHandles[s_gyroHandleCount]);
-    s_gyroHandleCount++;
+    s_gyroEntries[s_gyroEntryCount].style = HidNpadStyleTag_NpadHandheld;
+    hidStartSixAxisSensor(s_gyroEntries[s_gyroEntryCount].handle);
+    s_gyroEntryCount++;
 
     // P1: Dual joycons (detached, used as one controller — right joycon has gyro)
-    hidGetSixAxisSensorHandles(&s_gyroHandles[s_gyroHandleCount], 1,
+    hidGetSixAxisSensorHandles(&s_gyroEntries[s_gyroEntryCount].handle, 1,
                                HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
-    hidStartSixAxisSensor(s_gyroHandles[s_gyroHandleCount]);
-    s_gyroHandleCount++;
+    s_gyroEntries[s_gyroEntryCount].style = HidNpadStyleTag_NpadJoyDual;
+    hidStartSixAxisSensor(s_gyroEntries[s_gyroEntryCount].handle);
+    s_gyroEntryCount++;
 
     // P2: Pro Controller
-    s_gyroHandleCountP2 = 0;
-    hidGetSixAxisSensorHandles(&s_gyroHandlesP2[s_gyroHandleCountP2], 1,
+    s_gyroEntryCountP2 = 0;
+    hidGetSixAxisSensorHandles(&s_gyroEntriesP2[s_gyroEntryCountP2].handle, 1,
                                HidNpadIdType_No2, HidNpadStyleTag_NpadFullKey);
-    hidStartSixAxisSensor(s_gyroHandlesP2[s_gyroHandleCountP2]);
-    s_gyroHandleCountP2++;
+    s_gyroEntriesP2[s_gyroEntryCountP2].style = HidNpadStyleTag_NpadFullKey;
+    hidStartSixAxisSensor(s_gyroEntriesP2[s_gyroEntryCountP2].handle);
+    s_gyroEntryCountP2++;
 
     // P2: Dual joycons
-    hidGetSixAxisSensorHandles(&s_gyroHandlesP2[s_gyroHandleCountP2], 1,
+    hidGetSixAxisSensorHandles(&s_gyroEntriesP2[s_gyroEntryCountP2].handle, 1,
                                HidNpadIdType_No2, HidNpadStyleTag_NpadJoyDual);
-    hidStartSixAxisSensor(s_gyroHandlesP2[s_gyroHandleCountP2]);
-    s_gyroHandleCountP2++;
+    s_gyroEntriesP2[s_gyroEntryCountP2].style = HidNpadStyleTag_NpadJoyDual;
+    hidStartSixAxisSensor(s_gyroEntriesP2[s_gyroEntryCountP2].handle);
+    s_gyroEntryCountP2++;
 
-    LOG_INFO("Gyro: initialized P1=%u P2=%u sensor handles", s_gyroHandleCount, s_gyroHandleCountP2);
+    LOG_INFO("Gyro: initialized P1=%u P2=%u sensor handles", s_gyroEntryCount, s_gyroEntryCountP2);
 }
 
-// Read gyro sensor for one player into the per-player cache slot.
-static void readGyroForPlayer(u8 playerIdx, HidSixAxisSensorHandle* handles, u32 handleCount) {
+// Read gyro sensor for one player into the per-player cache slot. Only the sensor whose
+// style is currently active for `pad` is read — see GyroEntry comment for why.
+static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryCount, PadState& pad) {
     s_gyroDx[playerIdx] = 0.0f;
     s_gyroDy[playerIdx] = 0.0f;
-    for (u32 i = 0; i < handleCount; i++) {
+    const u64 activeStyle = padGetStyleSet(&pad);
+    for (u32 i = 0; i < entryCount; i++) {
+        if (!(activeStyle & entries[i].style)) continue; // skip handles whose npad style isn't active
         HidSixAxisSensorState states[16];
-        s32 count = hidGetSixAxisSensorStates(handles[i], states, 16);
-        if (count > 0) {
-            f32 yaw = 0.0f, pitch = 0.0f;
-            for (s32 s = 0; s < count; s++) {
-                yaw   += states[s].angular_velocity.y + states[s].angular_velocity.z;
-                pitch += states[s].angular_velocity.x;
-            }
-            yaw   /= static_cast<f32>(count);
-            pitch /= static_cast<f32>(count);
-            // No deadzone — the multi-sample average already smooths sensor noise
-            s_gyroDx[playerIdx] = -yaw  * (180.0f / 3.14159f);
-            s_gyroDy[playerIdx] = pitch * (180.0f / 3.14159f);
-            break;
+        s32 count = hidGetSixAxisSensorStates(entries[i].handle, states, 16);
+        if (count <= 0) continue;
+        f32 yaw = 0.0f, pitch = 0.0f;
+        for (s32 s = 0; s < count; s++) {
+            yaw   += states[s].angular_velocity.y + states[s].angular_velocity.z;
+            pitch += states[s].angular_velocity.x;
         }
+        yaw   /= static_cast<f32>(count);
+        pitch /= static_cast<f32>(count);
+        // No deadzone — the multi-sample average already smooths sensor noise
+        s_gyroDx[playerIdx] = -yaw  * (180.0f / 3.14159f);
+        s_gyroDy[playerIdx] = pitch * (180.0f / 3.14159f);
+        return; // active-style handle read; nothing else to consider this frame
     }
 }
 
@@ -573,29 +588,38 @@ static void readGyroForPlayer(u8 playerIdx, HidSixAxisSensorHandle* handles, u32
 // Reads both players' sensors so each gets their own gyro data.
 static void updateGyroCache() {
     initGyro();
-    readGyroForPlayer(0, s_gyroHandles, s_gyroHandleCount);
+    readGyroForPlayer(0, s_gyroEntries,   s_gyroEntryCount,   s_pads[0]);
     if (s_splitActive) {
-        readGyroForPlayer(1, s_gyroHandlesP2, s_gyroHandleCountP2);
+        readGyroForPlayer(1, s_gyroEntriesP2, s_gyroEntryCountP2, s_pads[1]);
     }
 }
 #endif
 
-void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
+// Shared gyro read body. `consume` controls whether the Switch cache is zeroed
+// after read: getGyro passes true (substep gating — only the first
+// PlayerController::update tick in a render frame applies the delta), peekGyro
+// passes false (NetInput packing must not starve the gameplay consumer). PC
+// sensor read is a stateless query; the `consume` flag is ignored there.
+static void readGyroInto(f32& dx, f32& dy, s32 gamepadIndex, bool consume) {
     dx = 0.0f;
     dy = 0.0f;
 
 #ifdef __SWITCH__
-    // Return cached gyro for the active player and consume — only the first
-    // tick per frame gets the gyro delta, subsequent ticks get zero.
+    (void)gamepadIndex;
     u8 pi = s_activePlayer;
     if (pi > 1) pi = 0;
     dx = s_gyroDx[pi];
     dy = s_gyroDy[pi];
-    s_gyroDx[pi] = 0.0f;
-    s_gyroDy[pi] = 0.0f;
+    if (consume) {
+        s_gyroDx[pi] = 0.0f;
+        s_gyroDy[pi] = 0.0f;
+    }
 #else
-    // PC: try SDL2 sensor API (works with DS4/DualSense controllers)
-    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return;
+    // PC: try SDL2 sensor API (works with DS4/DualSense controllers).
+    // The query itself doesn't consume — calling it twice returns the current
+    // sensor state both times — so peek and consume behave identically here.
+    (void)consume;
+    if (gamepadIndex < 0 || gamepadIndex >= Input::MAX_GAMEPADS) return;
     if (!s_controllers[gamepadIndex]) return;
     if (!SDL_GameControllerHasSensor(s_controllers[gamepadIndex], SDL_SENSOR_GYRO)) return;
     f32 data[3] = {};
@@ -606,6 +630,9 @@ void Input::getGyro(f32& dx, f32& dy, s32 gamepadIndex) {
 #endif
 }
 
+void Input::getGyro (f32& dx, f32& dy, s32 gamepadIndex) { readGyroInto(dx, dy, gamepadIndex, /*consume=*/true);  }
+void Input::peekGyro(f32& dx, f32& dy, s32 gamepadIndex) { readGyroInto(dx, dy, gamepadIndex, /*consume=*/false); }
+
 bool Input::isGyroAvailable(s32 gamepadIndex) {
 #ifdef __SWITCH__
     (void)gamepadIndex;
@@ -614,6 +641,30 @@ bool Input::isGyroAvailable(s32 gamepadIndex) {
     if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
     if (!s_controllers[gamepadIndex]) return false;
     return SDL_GameControllerHasSensor(s_controllers[gamepadIndex], SDL_SENSOR_GYRO);
+#endif
+}
+
+// Switch software keyboard. Used for typing the multiplayer host IP, which is otherwise
+// impossible on a console with no physical keyboard. Blocks until the user accepts/cancels.
+bool Input::openVirtualKeyboard(const char* headerText, const char* initial,
+                                char* outBuf, size_t outBufSize) {
+    if (!outBuf || outBufSize == 0) return false;
+    outBuf[0] = '\0';
+#ifdef __SWITCH__
+    SwkbdConfig kbd;
+    if (R_FAILED(swkbdCreate(&kbd, 0))) return false;
+    swkbdConfigMakePresetDefault(&kbd);
+    if (headerText && *headerText) swkbdConfigSetHeaderText(&kbd, headerText);
+    if (initial && *initial)       swkbdConfigSetInitialText(&kbd, initial);
+    // Cap the length so the result always fits the caller's buffer.
+    swkbdConfigSetStringLenMax(&kbd, static_cast<u32>(outBufSize - 1));
+    Result rc = swkbdShow(&kbd, outBuf, outBufSize);
+    swkbdClose(&kbd);
+    return R_SUCCEEDED(rc) && outBuf[0] != '\0';
+#else
+    // PC has a physical keyboard; the lobby's SDL scancode path handles text entry.
+    (void)headerText; (void)initial;
+    return false;
 #endif
 }
 

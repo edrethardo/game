@@ -13,6 +13,7 @@
 static bool isControllerLabel(const char* label) {
     static const char* kNames[] = {
         "A", "B", "X", "Y", "L", "R", "ZL", "ZR",
+        "L3", "R3",                           // stick clicks — drawn as a small gray circle
         "+", "-", "Up", "Rt", "Dn", "Lt",
         "L+A", "L+B", nullptr
     };
@@ -81,6 +82,33 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
         // Draw face button circle (drawControllerButton handles the swap internally)
         char face[2] = {label[2], 0};
         drawControllerButton(sw, sh, x + 28.0f, y, face, highlighted);
+        return;
+    }
+
+    // Stick click (L3/R3) — small unsaturated circle with the label, evoking a
+    // top-down view of an analog stick that's been pressed in. Smaller than face
+    // buttons so the visual weight reads as "auxiliary action" rather than "primary".
+    if ((label[0] == 'L' || label[0] == 'R') && label[1] == '3' && label[2] == '\0') {
+        f32 r = 7.0f;
+        f32 cx = x + r;
+        f32 cy = y + r;
+        Vec3 col = Vec3{0.42f, 0.42f, 0.48f} * dim;
+        // Filled disc — scanline fill matches the face-button look.
+        for (f32 dy = -r; dy <= r; dy += 1.0f) {
+            f32 hw = sqrtf(r * r - dy * dy);
+            pushLine(cx - hw, cy + dy, cx + hw, cy + dy, col);
+        }
+        // Outline ring — slightly darker than the fill, same step-angle pattern as A/B/X/Y.
+        Vec3 border = col * 0.55f;
+        for (f32 a = 0; a < 6.28f; a += 0.18f) {
+            f32 px = cx + cosf(a) * r;
+            f32 py = cy + sinf(a) * r;
+            pushLine(px, py, px + 0.5f, py, border);
+        }
+        flushHUD();
+        Vec3 tc = {0.92f * dim, 0.92f * dim, 0.95f * dim};
+        f32 tw = FontSystem::textWidth(label, 1);
+        FontSystem::drawText(sw, sh, cx - tw * 0.5f, cy - 3.0f, label, tc, 1);
         return;
     }
 

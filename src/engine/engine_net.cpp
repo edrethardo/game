@@ -32,6 +32,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "audio/audio.h" // AudioSystem::stopMusic on host-left save-and-return-to-menu
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -82,21 +83,13 @@ void Engine::serverNetPre(f32 dt) {
     // that reads slot 0's ack (spectate/lag-comp/debug).
     m_players[m_localPlayerIndex].lastProcessedInputTick = localInput.clientTick;
 
-    // R9: drain remote-player skill cooldowns each server tick so the gate set by
-    // SkillSystem::tryActivate (cooldownTimer = def->cooldown on success) actually
-    // counts down. Host's own slot is ticked by tickSkillCooldowns in gameUpdate
-    // (with split-screen alias swap), so this loop only covers remote net slots.
-    for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        if (i == m_localPlayerIndex || !m_players[i].active) continue;
-        for (u32 s = 0; s < 4; s++) {
-            f32& cd = m_classSkillStatesNet[i][s].cooldownTimer;
-            if (cd > 0.0f) { cd -= dt; if (cd < 0.0f) cd = 0.0f; }
-        }
-        f32& bcd = m_bootSkillStates[i].cooldownTimer;
-        if (bcd > 0.0f) { bcd -= dt; if (bcd < 0.0f) bcd = 0.0f; }
-        f32& hcd = m_helmetSkillStates[i].cooldownTimer;
-        if (hcd > 0.0f) { hcd -= dt; if (hcd < 0.0f) hcd = 0.0f; }
-    }
+    // R17: per-tick cooldown drains removed. Cooldown gating is now tick-based —
+    // both client and server evaluate `(input.clientTick - lastActivationTick) >=
+    // cooldownTicks` using identical formulas on identical data. The f32
+    // cooldownTimer fields on SkillState / NetPlayer.potionCooldown are now
+    // HUD-derived only (re-computed each frame from lastActivationTick); no
+    // f32-drift gate to maintain. (dt is still used below for moveAndSlide and
+    // handleWeaponFireForPlayer.)
 
     // Process inputs for remote players only (host movement handled by gameUpdate).
     //
@@ -180,148 +173,257 @@ void Engine::serverNetPre(f32 dt) {
                     np.velocity = tempP.velocity;
                     np.onGround = tempP.onGround;
                 }
+
+                // Activation EDGES (potion + class/boot/helm skills) are processed HERE,
+                // per-input, inside the same drain that walks every unprocessed input — NOT
+                // via getLatest() outside the loop. extFlags bits are set for exactly one
+                // client tick per press; under jitter ≥2 inputs land between server ticks, so
+                // getLatest() (newest only) silently dropped the press whenever a newer input
+                // arrived first. Walking every input fixes that, and np.yaw/pitch already hold
+                // THIS input's aim (set by updateNetPlayerFromInput above) so skills fire from
+                // the pose the client held at press time. push()+cursor guarantee once-only.
+                processRemoteActivation(static_cast<u8>(i), in, dt);
             }
         }
     }
 
-    // Remote player weapon fire + extended actions (server-authoritative)
+    // Remote player weapon fire (server-authoritative). FIRE rides the reliable
+    // CL_FIRE_WEAPON channel (PendingFire), not an input edge bit, so it's immune to the
+    // getLatest() edge-drop and stays in its own per-tick loop. Activation edges moved
+    // into the drain loop above.
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (!m_players[i].active) continue;
         if (i == m_localPlayerIndex) continue; // host handled by gameUpdate
-        // Don't let a dead remote keep firing: getLatest() repeats the last input on
-        // packet loss/idle, so a corpse that died holding FIRE would shoot every tick
-        // until it respawns. Mirrors the !isDead gate on the potion/skill actions below.
+        // Don't let a dead remote keep firing: a corpse that died holding FIRE would shoot
+        // every tick until it respawns.
         if (!m_players[i].isDead) handleWeaponFireForPlayer(m_players[i], dt);
+    }
+}
 
-        const NetInput* input = Server::getInputBuffer(static_cast<u8>(i)).getLatest();
-        if (input) {
-            // Potion (with per-player cooldown)
-            if ((input->extFlags & INPUT_EX_POTION) &&
-                m_players[i].potionCooldown <= 0.0f && !m_players[i].isDead) {
-                f32 healAmt = m_players[i].maxHealth * GameConst::POTION_HEAL_PCT;
-                m_players[i].health += healAmt;
-                if (m_players[i].health > m_players[i].maxHealth)
-                    m_players[i].health = m_players[i].maxHealth;
-                m_players[i].potionCooldown = GameConst::POTION_COOLDOWN;
-            }
+// ---------------------------------------------------------------------------
+// processRemoteActivation — apply ONE remote input's activation edges (potion +
+// class/boot/helm skills). Called per-input from serverNetPre's drain loop, so
+// every press is processed exactly once even under jitter (the old getLatest()
+// read saw only the newest buffered input and dropped edges riding an older one —
+// the client unreliable-activation bug). Caller guarantees !isDead and that this
+// is a remote slot (host activates in gameUpdate). np.yaw/pitch already reflect
+// THIS input's aim (updateNetPlayerFromInput ran first), so skills fire from the
+// pose the client held at press time. `in.clientTick` drives the same tick-based
+// cooldown gate the client predicted with (GameConst::cooldownReady).
+// ---------------------------------------------------------------------------
+void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
+    const u32 i = slot; // keep the original per-slot indexing identical to the old block
 
-            // Equipment skills (F = boots, G = helmet)
-            if ((input->extFlags & INPUT_EX_BOOT_SKILL) && !m_players[i].isDead) {
-                const ItemInstance& boots = m_inventories[i].equipped[static_cast<u32>(ItemSlot::BOOTS)];
-                if (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY) {
-                    SkillId bootSkill = m_itemDefs[boots.defId].legendarySkillId;
-                    if (bootSkill != SkillId::NONE) {
-                        // R9: use the persistent per-slot SkillState so tryActivate's cooldown
-                        // gate (cooldownTimer > 0 → reject) actually blocks spam. A throwaway
-                        // SkillState resets cooldownTimer to 0 every call and silently lets
-                        // every press through.
-                        SkillState& ss = m_bootSkillStates[i];
-                        ss.activeSkill = bootSkill;
-                        ss.energy = 999.0f; ss.maxEnergy = 999.0f;
-                        Vec3 ep = m_players[i].eyePos();
-                        Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
-                                                    sinf(m_players[i].pitch),
-                                                   -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
-                        // TA-7: set skill-scaling globals from the REMOTE's own data so the
-                        // guest's skill damage isn't inherited from the host's last cast.
-                        // Item skills scale by item level (boots) and use base class damage (1.0).
-                        SkillSystem::setSkillPower(boots.itemLevel > 1
-                            ? static_cast<f32>(boots.itemLevel - 1) / 149.0f : 0.0f);
-                        SkillSystem::setClassDamageMult(1.0f);
-                        // Stamp the remote's net slot so per-slot skill state (overcharge buff,
-                        // meteor/holy kill-heal target) lands on the actual caster, not the host.
-                        // (H4/H5: overcharge arrays are MAX_PLAYERS-sized; updateMeteors resolves
-                        //  the heal target against m_players by net slot.)
-                        SkillSystem::setCastingPlayer(static_cast<u8>(i));
-                        // TA-3: cast against the GUEST's own view, not the host's m_localPlayer,
-                        // so position/health-mutating skills (PhaseDash, Blood Nova) hit the guest.
-                        Player view; buildRemotePlayerView(static_cast<u8>(i), view);
-                        SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
-                                                  ep, fwd, m_players[i].yaw,
-                                                  m_projectiles, m_entities, m_level.grid, view);
-                        applyRemotePlayerView(view, static_cast<u8>(i));
-                    }
-                }
-            }
-            if ((input->extFlags & INPUT_EX_HELM_SKILL) && !m_players[i].isDead) {
-                const ItemInstance& helm = m_inventories[i].equipped[static_cast<u32>(ItemSlot::HELMET)];
-                if (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY) {
-                    SkillId helmSkill = m_itemDefs[helm.defId].legendarySkillId;
-                    if (helmSkill != SkillId::NONE) {
-                        // R9: persistent SkillState so tryActivate's cooldown gate engages.
-                        SkillState& ss = m_helmetSkillStates[i];
-                        ss.activeSkill = helmSkill;
-                        ss.energy = 999.0f; ss.maxEnergy = 999.0f;
-                        Vec3 ep = m_players[i].eyePos();
-                        Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
-                                                    sinf(m_players[i].pitch),
-                                                   -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
-                        // TA-7: scale from the REMOTE's own helmet item level (see boot note).
-                        SkillSystem::setSkillPower(helm.itemLevel > 1
-                            ? static_cast<f32>(helm.itemLevel - 1) / 149.0f : 0.0f);
-                        SkillSystem::setClassDamageMult(1.0f);
-                        SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
-                        // TA-3: cast against the GUEST's own view (see boot-skill note above).
-                        Player view; buildRemotePlayerView(static_cast<u8>(i), view);
-                        SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
-                                                  ep, fwd, m_players[i].yaw,
-                                                  m_projectiles, m_entities, m_level.grid, view);
-                        applyRemotePlayerView(view, static_cast<u8>(i));
-                    }
-                }
-            }
+    // Potion (tick-based gate against the remote's clientTick frame).
+    if (in.extFlags & INPUT_EX_POTION) {
+        // potion cooldown reduction is 10% of itemCdr (matches client). Both sides compute
+        // the same cooldownTicks; CL_INVENTORY_SYNC keeps bonusCooldownReduction in step.
+        const f32 cdr = m_inventories[i].bonusCooldownReduction * 0.1f;
+        const u32 cooldownTicks = static_cast<u32>(GameConst::POTION_COOLDOWN * (1.0f - cdr) * 60.0f + 0.5f);
+        const u32 prev = m_players[i].potionLastActivationTick;
+        // Same lenient gate the client predicts with — the grace absorbs a few ticks of
+        // client-ahead skew so a legit potion press isn't rejected here while the client
+        // already healed locally.
+        if (GameConst::cooldownReady(in.clientTick, prev, cooldownTicks)) {
+            f32 healAmt = m_players[i].maxHealth * GameConst::POTION_HEAL_PCT;
+            m_players[i].health += healAmt;
+            if (m_players[i].health > m_players[i].maxHealth)
+                m_players[i].health = m_players[i].maxHealth;
+            m_players[i].potionLastActivationTick = (in.clientTick == 0) ? 1u : in.clientTick;
+            // HUD-derived (server tracks for snapshot completeness; the client derives its own).
+            m_players[i].potionCooldown = static_cast<f32>(cooldownTicks) * (1.0f / 60.0f);
+        }
+    }
 
-            // Class skill activation (right-click) — use remote player's class.
-            // Gate on !isDead like potion/boot/helm above; a latched INPUT_EX_SKILL on a
-            // dead remote would otherwise keep casting (teleporting/healing the corpse).
-            if ((input->extFlags & INPUT_EX_SKILL) && !m_players[i].isDead) {
-                u8 slot = input->skillSlot;
-                PlayerClass remoteClass = m_players[i].playerClass;
-                if (slot < 4 && static_cast<u32>(remoteClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
-                    const ClassDef& cls = kClassDefs[static_cast<u32>(remoteClass)];
-                    // Mirror the host's effectiveFloor gate (engine_update_skills.cpp):
-                    // difficulty adds +50/floor so remote clients unlock skills at the
-                    // same depth their own HUD shows, instead of the raw floor.
-                    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-                    if (effectiveFloor >= cls.skillUnlockFloor[slot]) {
-                        // R9: persistent per-net-slot, per-class-slot state so the cooldown
-                        // gate in SkillSystem::tryActivate (cooldownTimer > 0 → reject)
-                        // actually fires. The old throwaway SkillState reset cooldownTimer
-                        // to 0 every press and let spam through.
-                        SkillState& tempSS = m_classSkillStatesNet[i][slot];
-                        tempSS.activeSkill = cls.skills[slot];
-                        tempSS.energy = 999.0f;
-                        tempSS.maxEnergy = 999.0f;
-                        Vec3 eyePos = m_players[i].eyePos();
-                        Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw) * cosf(m_players[i].pitch),
-                                                    sinf(m_players[i].pitch),
-                                                   -cosf(m_players[i].yaw) * cosf(m_players[i].pitch)});
-                        // TA-7: set skill-scaling globals from the REMOTE's own data (mirror the
-                        // host's class-skill block in engine_update_skills.cpp) so the guest's
-                        // skill damage uses its own floor/weapon, not the host's last cast.
-                        SkillSystem::setSkillPower(0.0f); // class skills use base power
-                        // Class skill damage scales 6% per effective floor (reuse effectiveFloor above).
-                        SkillSystem::setClassDamageMult(1.0f + (effectiveFloor - 1) * 0.06f);
-                        // Weapon damage for Marksman skills that scale off the equipped weapon.
-                        { const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-                          WeaponDef wd = !isItemEmpty(wpn)
-                              ? Inventory::getWeaponFromItem(m_inventories[i], m_itemDefs, wpn)
-                              : m_weaponDefs[0];
-                          SkillSystem::setWeaponDamage(wd.damage); }
-                        SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
-                        // TA-3: cast against the GUEST's own view (see boot-skill note above)
-                        // so class dash/blink/Blood Nova mutate the guest, never the host.
-                        Player view; buildRemotePlayerView(static_cast<u8>(i), view);
-                        SkillSystem::tryActivate(tempSS, m_skillDefs, m_skillDefCount,
-                                                  eyePos, fwd, m_players[i].yaw,
-                                                  m_projectiles, m_entities, m_level.grid, view);
-                        applyRemotePlayerView(view, static_cast<u8>(i));
-                    }
-                }
+    // Equipment skills (F = boots, G = helmet)
+    if (in.extFlags & INPUT_EX_BOOT_SKILL) {
+        const ItemInstance& boots = m_inventories[i].equipped[static_cast<u32>(ItemSlot::BOOTS)];
+        if (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY) {
+            SkillId bootSkill = m_itemDefs[boots.defId].legendarySkillId;
+            if (bootSkill != SkillId::NONE) {
+                // R9: use the persistent per-slot SkillState so tryActivate's cooldown
+                // gate (cooldownTimer > 0 → reject) actually blocks spam. A throwaway
+                // SkillState resets cooldownTimer to 0 every call and silently lets
+                // every press through.
+                SkillState& ss = m_bootSkillStates[i];
+                ss.activeSkill = bootSkill;
+                ss.energy = 999.0f; ss.maxEnergy = 999.0f;
+                Vec3 ep = m_players[i].eyePos();
+                Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
+                                            sinf(m_players[i].pitch),
+                                           -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
+                // TA-7: set skill-scaling globals from the REMOTE's own data so the
+                // guest's skill damage isn't inherited from the host's last cast.
+                // Item skills scale by item level (boots) and use base class damage (1.0).
+                SkillSystem::setSkillPower(boots.itemLevel > 1
+                    ? static_cast<f32>(boots.itemLevel - 1) / 149.0f : 0.0f);
+                SkillSystem::setClassDamageMult(1.0f);
+                // Stamp the remote's net slot so per-slot skill state (overcharge buff,
+                // meteor/holy kill-heal target) lands on the actual caster, not the host.
+                // (H4/H5: overcharge arrays are MAX_PLAYERS-sized; updateMeteors resolves
+                //  the heal target against m_players by net slot.)
+                SkillSystem::setCastingPlayer(static_cast<u8>(i));
+                // TA-3: cast against the GUEST's own view, not the host's m_localPlayer,
+                // so position/health-mutating skills (PhaseDash, Blood Nova) hit the guest.
+                Player view; buildRemotePlayerView(static_cast<u8>(i), view);
+                // R17: tick gate uses the input's clientTick (this remote's frame).
+                // Matches what the remote client used locally — no divergence.
+                SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
+                                          ep, fwd, m_players[i].yaw,
+                                          m_projectiles, m_entities, m_level.grid, view,
+                                          in.clientTick,
+                                          m_inventories[i].bonusCooldownReduction);
+                applyRemotePlayerView(view, static_cast<u8>(i));
+            }
+        }
+    }
+    if (in.extFlags & INPUT_EX_HELM_SKILL) {
+        const ItemInstance& helm = m_inventories[i].equipped[static_cast<u32>(ItemSlot::HELMET)];
+        if (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY) {
+            SkillId helmSkill = m_itemDefs[helm.defId].legendarySkillId;
+            if (helmSkill != SkillId::NONE) {
+                // R9: persistent SkillState so tryActivate's cooldown gate engages.
+                SkillState& ss = m_helmetSkillStates[i];
+                ss.activeSkill = helmSkill;
+                ss.energy = 999.0f; ss.maxEnergy = 999.0f;
+                Vec3 ep = m_players[i].eyePos();
+                Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
+                                            sinf(m_players[i].pitch),
+                                           -cosf(m_players[i].yaw)*cosf(m_players[i].pitch)});
+                // TA-7: scale from the REMOTE's own helmet item level (see boot note).
+                SkillSystem::setSkillPower(helm.itemLevel > 1
+                    ? static_cast<f32>(helm.itemLevel - 1) / 149.0f : 0.0f);
+                SkillSystem::setClassDamageMult(1.0f);
+                SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
+                // TA-3: cast against the GUEST's own view (see boot-skill note above).
+                Player view; buildRemotePlayerView(static_cast<u8>(i), view);
+                // R17: same tick-gate as boot — input.clientTick is the remote's frame.
+                SkillSystem::tryActivate(ss, m_skillDefs, m_skillDefCount,
+                                          ep, fwd, m_players[i].yaw,
+                                          m_projectiles, m_entities, m_level.grid, view,
+                                          in.clientTick,
+                                          m_inventories[i].bonusCooldownReduction);
+                applyRemotePlayerView(view, static_cast<u8>(i));
             }
         }
     }
 
+    // Class skill activation (right-click) — use remote player's class.
+    if (in.extFlags & INPUT_EX_SKILL) {
+        u8 cskSlot = in.skillSlot;
+        PlayerClass remoteClass = m_players[i].playerClass;
+        if (cskSlot < 4 && static_cast<u32>(remoteClass) < static_cast<u32>(PlayerClass::CLASS_COUNT)) {
+            const ClassDef& cls = kClassDefs[static_cast<u32>(remoteClass)];
+            // Mirror the host's effectiveFloor gate (engine_update_skills.cpp):
+            // difficulty adds +50/floor so remote clients unlock skills at the
+            // same depth their own HUD shows, instead of the raw floor.
+            u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+            if (effectiveFloor >= cls.skillUnlockFloor[cskSlot]) {
+                // R9: persistent per-net-slot, per-class-slot state so the cooldown
+                // gate in SkillSystem::tryActivate (cooldownTimer > 0 → reject)
+                // actually fires. The old throwaway SkillState reset cooldownTimer
+                // to 0 every press and let spam through.
+                SkillState& tempSS = m_classSkillStatesNet[i][cskSlot];
+                tempSS.activeSkill = cls.skills[cskSlot];
+                tempSS.energy = 999.0f;
+                tempSS.maxEnergy = 999.0f;
+                Vec3 eyePos = m_players[i].eyePos();
+                Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw) * cosf(m_players[i].pitch),
+                                            sinf(m_players[i].pitch),
+                                           -cosf(m_players[i].yaw) * cosf(m_players[i].pitch)});
+                // TA-7: set skill-scaling globals from the REMOTE's own data (mirror the
+                // host's class-skill block in engine_update_skills.cpp) so the guest's
+                // skill damage uses its own floor/weapon, not the host's last cast.
+                SkillSystem::setSkillPower(0.0f); // class skills use base power
+                // Class skill damage scales 6% per effective floor (reuse effectiveFloor above).
+                SkillSystem::setClassDamageMult(1.0f + (effectiveFloor - 1) * 0.06f);
+                // Weapon damage for Marksman skills that scale off the equipped weapon.
+                { const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                  WeaponDef wd = !isItemEmpty(wpn)
+                      ? Inventory::getWeaponFromItem(m_inventories[i], m_itemDefs, wpn)
+                      : m_weaponDefs[0];
+                  SkillSystem::setWeaponDamage(wd.damage); }
+                SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
+                // TA-3: cast against the GUEST's own view (see boot-skill note above)
+                // so class dash/blink/Blood Nova mutate the guest, never the host.
+                Player view; buildRemotePlayerView(static_cast<u8>(i), view);
+                // R17: same tick-gate as boot/helm — input.clientTick is the remote's frame.
+                SkillSystem::tryActivate(tempSS, m_skillDefs, m_skillDefCount,
+                                          eyePos, fwd, m_players[i].yaw,
+                                          m_projectiles, m_entities, m_level.grid, view,
+                                          in.clientTick,
+                                          m_inventories[i].bonusCooldownReduction);
+                applyRemotePlayerView(view, static_cast<u8>(i));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R17 — populateSnapshotCooldowns: belt-and-suspenders ship of authoritative
+// lastActivationTick values for every slot's class/boot/helm/potion. Pulls
+// from Engine's skill-state arrays that Server::buildSnapshotOnly can't see.
+// Called from serverNetPost between buildSnapshotOnly and the per-slot send.
+// Client adopts MAX(local, snapshot) in Client::reconcile.
+// ---------------------------------------------------------------------------
+void Engine::populateSnapshotCooldowns() {
+    WorldSnapshot* snap = Server::getLastSnapshotMutable();
+    if (!snap) return;
+    for (u32 pi = 0; pi < snap->playerCount; pi++) {
+        SnapPlayer& sp = snap->players[pi];
+        const u8 slot = sp.slotIndex;
+        // potion's authoritative tick already lives on NetPlayer; buildFromState
+        // copied it. Skill ticks live in Engine arrays — fill those here.
+        if (slot == m_localPlayerIndex) {
+            // Host's own slot — read from the active aliases (which mirror the
+            // per-player backing arrays via swapInPlayer/swapOutPlayer).
+            for (u32 s = 0; s < 4; s++)
+                sp.classSkillLastActivationTick[s] = m_classSkillStates[s].lastActivationTick;
+        } else {
+            for (u32 s = 0; s < 4; s++)
+                sp.classSkillLastActivationTick[s] = m_classSkillStatesNet[slot][s].lastActivationTick;
+        }
+        sp.bootSkillLastActivationTick   = m_bootSkillStates[slot].lastActivationTick;
+        sp.helmetSkillLastActivationTick = m_helmetSkillStates[slot].lastActivationTick;
+        // potionLastActivationTick already copied in buildFromState from NetPlayer.
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R17 — adoptSnapshotCooldowns: CLIENT side of the wire cooldown sync. Reads
+// the latest snapshot's SnapPlayer for the local slot, and adopts MAX(local,
+// snapshot) into m_classSkillStates / m_classSkillStatesPerPlayer (per-player
+// backing for swap-victim alias) / m_bootSkillStates / m_helmetSkillStates /
+// m_potionLastActivationTick / m_potionLastActivationTicks.
+// ---------------------------------------------------------------------------
+void Engine::adoptSnapshotCooldowns() {
+    if (m_netRole != NetRole::CLIENT) return;
+    const WorldSnapshot* snap = Client::getLatestSnapshot();
+    if (!snap) return;
+    const SnapPlayer* sp = nullptr;
+    const u8 mySlot = activeNetSlot();
+    for (u32 i = 0; i < snap->playerCount; i++) {
+        if (snap->players[i].slotIndex == mySlot) { sp = &snap->players[i]; break; }
+    }
+    if (!sp) return;
+    auto adoptMax = [](u32& dst, u32 src) { if (src > dst) dst = src; };
+    // Class skill ticks — both the swap-alias and the per-player backing for
+    // the local lane (m_localPlayerIndex). swapInPlayer would otherwise copy
+    // the stale backing over the freshly-adopted alias on the next frame.
+    for (u32 s = 0; s < 4; s++) {
+        adoptMax(m_classSkillStates[s].lastActivationTick,
+                 sp->classSkillLastActivationTick[s]);
+        adoptMax(m_classSkillStatesPerPlayer[m_localPlayerIndex][s].lastActivationTick,
+                 sp->classSkillLastActivationTick[s]);
+    }
+    // Boot / helm aren't swap-victims (indexed by net slot); single write.
+    adoptMax(m_bootSkillStates[m_localPlayerIndex].lastActivationTick,
+             sp->bootSkillLastActivationTick);
+    adoptMax(m_helmetSkillStates[m_localPlayerIndex].lastActivationTick,
+             sp->helmetSkillLastActivationTick);
+    // Potion — alias + per-player backing (LOCAL_PLAYER_SWAP_FIELDS via R17 update).
+    adoptMax(m_potionLastActivationTick, sp->potionLastActivationTick);
+    adoptMax(m_potionLastActivationTicks[m_localPlayerIndex], sp->potionLastActivationTick);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +493,8 @@ void Engine::serverNetPost(f32 dt) {
             if (np.invulnTimer > 0.0f) { np.invulnTimer -= dt; if (np.invulnTimer < 0.0f) np.invulnTimer = 0.0f; }
             if (np.slowTimer > 0.0f)   np.slowTimer -= dt;
             if (np.freezeTimer > 0.0f) np.freezeTimer -= dt;
-            if (np.potionCooldown > 0.0f) np.potionCooldown -= dt;
+            // R15: potionCooldown drain moved to serverNetPre (alongside the R9 skill
+            // cooldown drain) so the input gate at line ~200 sees the post-tick value.
 
             if (np.invulnTimer <= 0.0f) {
                 if (np.poisonTimer > 0.0f) { np.poisonTimer -= dt; np.health -= np.poisonDps * dt; }
@@ -558,6 +661,13 @@ void Engine::serverNetPost(f32 dt) {
         // per-slot sends directly.
         Server::buildSnapshotOnly(m_serverTick, m_players, m_entities, m_projectiles, m_worldItems);
 
+        // R17 — post-build: fill in per-slot cooldown lastActivationTick fields that
+        // Server can't see (they live in Engine's m_classSkillStates / *Net /
+        // m_bootSkillStates / m_helmetSkillStates). Belt-and-suspenders for the
+        // tick gate: client's reconcile takes MAX(local, snapshot) so a benign
+        // server-rejected client prediction is never under-gated.
+        populateSnapshotCooldowns();
+
         // D7.3 — Per-slot send: full or delta based on baseline tracker state.
         for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
             if (!m_players[slot].active) continue;
@@ -608,12 +718,22 @@ void Engine::clientNetPre(f32 dt) {
     Net::setFakeLatencyMs(m_netFakeLatencyMs);
     Net::pumpDelayQueue();
 
-    // Handle server disconnection gracefully
+    // Handle server disconnection gracefully (host left or crashed — both surface here as
+    // a dropped connection; the host sends no explicit "leaving" packet). Save the client's
+    // game first, then return to menu — same as the pause menu's "Save and Quit".
     if (!Net::isConnected()) {
-        LOG_WARN("Lost connection to server");
+        LOG_WARN("Host left / lost connection — saving and returning to menu");
+        // Save BEFORE clearing the CLIENT role: saveGame's floor-downgrade guard
+        // (engine_persist.cpp) keys on m_netRole == CLIENT so it doesn't write the host's
+        // lower floor over our higher-progress single-player save. Resetting the role first
+        // would disable that guard. Mirrors the pause-menu "Save and Quit" ordering. The
+        // slot guard is belt-and-suspenders: an in-game client always has a slot (1-20),
+        // but slot 0 would clamp to 1 and clobber it.
+        if (m_activeSaveSlot >= 1) saveGame(m_activeSaveSlot);
         Net::disconnect();
         m_netRole = NetRole::NONE;
         m_gameState = GameState::MENU;
+        AudioSystem::stopMusic();
         Input::setRelativeMouseMode(false);
         return;
     }
@@ -646,20 +766,43 @@ void Engine::clientNetPre(f32 dt) {
     // — captureLocalInput defaults skillSlot to 0, and the server reads input->skillSlot
     // to pick the skill.
     WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
-    // R9 client-side skill-cooldown gate: clear INPUT_EX_SKILL/BOOT/HELM bits when the
-    // matching local cooldown isn't ready, so we don't send the server a request that's
-    // going to be rejected anyway. Source of truth is the same SkillState the local-side
-    // prediction already mutates in handleClassSkillActivation / handleEquipmentSkillActivation.
-    // Local visual prediction is unchanged — those paths run tryActivate against these
-    // very states and bail out on cooldown locally, so the cast simply does nothing on
-    // a spammed press (matches the singleplayer feel).
+
+    // R17 — client-side wire-spam mask. Uses the same tick comparison the server will
+    // evaluate against the input's clientTick. Identical formula on both sides → mask
+    // matches the server's gate exactly, never strips a press the server would accept
+    // (the R15-v2 `> dt` predicted-drain hack and the R16 RTT padding are gone — the
+    // integer gate is unambiguous at the boundary). f32 cooldownTimer is HUD only.
+    // Use the shared lenient gate (negated) so the mask only strips a press the
+    // server would ALSO reject — never one it would accept under the grace window.
+    auto onCooldown = [this](const SkillState& ss, f32 cdr) -> bool {
+        if (ss.activeSkill == SkillId::NONE || ss.lastActivationTick == 0) return false;
+        const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, ss.activeSkill);
+        if (!def) return false;
+        const u32 cooldownTicks = SkillSystem::computeCooldownTicks(def->cooldown, cdr);
+        return !GameConst::cooldownReady(m_clientTick, ss.lastActivationTick, cooldownTicks);
+    };
+    const f32 itemCdr = m_inventories[m_localPlayerIndex].bonusCooldownReduction;
     u8 skillClearMask = 0;
-    if (m_classSkillStates[m_activeClassSkill].cooldownTimer > 0.0f)
-        skillClearMask |= INPUT_EX_SKILL;
-    if (m_bootSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f)
-        skillClearMask |= INPUT_EX_BOOT_SKILL;
-    if (m_helmetSkillStates[m_localPlayerIndex].cooldownTimer > 0.0f)
-        skillClearMask |= INPUT_EX_HELM_SKILL;
+    if (onCooldown(m_classSkillStates[m_activeClassSkill],         itemCdr)) skillClearMask |= INPUT_EX_SKILL;
+    if (onCooldown(m_bootSkillStates[m_localPlayerIndex],          itemCdr)) skillClearMask |= INPUT_EX_BOOT_SKILL;
+    if (onCooldown(m_helmetSkillStates[m_localPlayerIndex],        itemCdr)) skillClearMask |= INPUT_EX_HELM_SKILL;
+    // Inventory-open send/predict parity: the local skill PREDICT paths gate on
+    // !m_inventoryOpen (engine_update_skills.cpp), but captureLocalInput sets the skill
+    // ext bits unconditionally — so a right-click while the inventory is open would cast
+    // server-side with no local prediction (a desync + an unintended cast over inventory
+    // clicks). Strip the skill bits here so send matches predict. Potion is intentionally
+    // NOT stripped: its predict path does not gate on inventory, so the two stay in sync.
+    if (m_inventoryOpen)
+        skillClearMask |= (INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL | INPUT_EX_HELM_SKILL);
+    // Potion was previously missing from the wire mask (the asymmetry that let the
+    // potion bit ride to the server even while locally on cooldown → phantom heals +
+    // forward cooldown bumps). Gate it the same lenient way as skills.
+    {
+        const f32 potionCdr = itemCdr * 0.1f; // potion gets 10% of item CDR (matches both gates)
+        const u32 potionCdTicks = static_cast<u32>(GameConst::POTION_COOLDOWN * (1.0f - potionCdr) * 60.0f + 0.5f);
+        if (!GameConst::cooldownReady(m_clientTick, m_potionLastActivationTick, potionCdTicks))
+            skillClearMask |= INPUT_EX_POTION;
+    }
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon,
                                 m_activeClassSkill, skillClearMask);
 
@@ -684,6 +827,12 @@ void Engine::clientNetPre(f32 dt) {
     // per frame at DECAY_RATE=13.0). The pre-M2 "trust-client position" comment that
     // used to live here described the now-removed posXYZ-in-NetInput model.
     Client::reconcile(m_players[activeNetSlot()], m_localPlayer);
+
+    // R17 — adopt server's lastActivationTick values for skills + potion. MAX(local,
+    // snapshot) keeps any benign client over-prediction (server rejected non-cooldown
+    // gate; local advanced anyway) intact, while catching the rare edge case where
+    // server has a newer value than client.
+    adoptSnapshotCooldowns();
 
     // CLIENT death is server-authoritative: reconcile adopted the server's isDead into our net
     // slot; mirror it into the lane-indexed m_playerDead that the dead-branch + HUD overlay read

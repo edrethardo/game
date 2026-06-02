@@ -220,10 +220,12 @@ void Engine::initCallbacks() {
                 SkillState tempSS;
                 tempSS.activeSkill = SkillId::CHAIN_LIGHTNING;
                 tempSS.energy = 999.0f; tempSS.maxEnergy = 999.0f;
+                // R17: tempSS.lastActivationTick=0 always-pass; currentTick threaded for consistency.
                 SkillSystem::tryActivate(tempSS, s_engine->m_skillDefs, s_engine->m_skillDefCount,
                     position, s_engine->m_localPlayer.forward, 0,
                     s_engine->m_projectiles, s_engine->m_entities,
-                    s_engine->m_level.grid, s_engine->m_localPlayer);
+                    s_engine->m_level.grid, s_engine->m_localPlayer,
+                    s_engine->currentLocalTick());
             } break;
             case SkillId::BLOOD_NOVA: {
                 EntityHandle hits[MAX_ENTITIES];

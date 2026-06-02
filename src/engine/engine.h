@@ -149,6 +149,9 @@ private:
     bool           m_inventoryOpenArr[MAX_LOCAL_PLAYERS] = {};
     f32            m_hitMarkerTimers[MAX_LOCAL_PLAYERS] = {};
     f32            m_potionCooldowns[MAX_LOCAL_PLAYERS] = {};
+    // R17: tick at which each local player last activated a potion. Authoritative for
+    // gate. 0 = never (gate passes). m_potionCooldowns above is HUD-derived from this.
+    u32            m_potionLastActivationTicks[MAX_LOCAL_PLAYERS] = {};
 
     // Active-player aliases (gameUpdate reads/writes these, swapped per player)
     PlayerClass m_playerClass = PlayerClass::WARRIOR;
@@ -311,6 +314,9 @@ private:
     Camera     m_camera;
     f32        m_hitMarkerTimer = 0.0f;
     f32        m_potionCooldown = 0.0f;
+    // R17: tick at which the active local player last activated a potion. Source-of-
+    // truth gate; m_potionCooldown is HUD-derived. Swap-victim alongside m_potionCooldown.
+    u32        m_potionLastActivationTick = 0;
     Shader  m_basicShader;
     Shader  m_unlitShader;
     Shader  m_vignetteShader;  // fullscreen radial red damage vignette (BioShock-style)
@@ -520,8 +526,39 @@ private:
     void clientNetPre(f32 dt);      // client: predict + reconcile before gameplay
     void clientNetPost(f32 dt);     // client: interpolate remote state after gameplay
 
+    // R17 — local-player tick reference for tick-based gates (e.g. SkillSystem::
+    // tryActivate, potion gate). Returns m_clientTick on CLIENT, m_serverTick on
+    // HOST/SP. For server-side processing of remote-client INPUT_EX_X, callers pass
+    // input->clientTick directly (that's the remote client's frame, matching what
+    // the client used locally for its own gate — divergence-free by construction).
+    u32 currentLocalTick() const { return (m_netRole == NetRole::CLIENT) ? m_clientTick : m_serverTick; }
+
+    // R17 — populate per-slot lastActivationTick fields in the snapshot built by
+    // Server::buildSnapshotOnly. Pulls from Engine's skill-state arrays (which
+    // Server can't see directly). Called from serverNetPost between buildSnapshotOnly
+    // and the per-slot send loop. Belt-and-suspenders: the tick gate already
+    // produces by-construction agreement; shipping these values lets reconcile
+    // catch any edge case (rejected activation, lost packet) where client's
+    // local state drifted from server's view.
+    void populateSnapshotCooldowns();
+
+    // R17 — CLIENT side of the belt-and-suspenders sync. Reads the latest snapshot
+    // and adopts MAX(local, snapshot) for every lastActivationTick. MAX (not
+    // direct overwrite) preserves any client over-prediction: if server rejected
+    // a press for non-cooldown reasons, server's tick is older → local stays
+    // (client over-gates briefly, never under-gates). Called from clientNetPre
+    // after Client::reconcile so the cooldown adoption sees the same snapshot
+    // reconcile used for HP/clip/etc.
+    void adoptSnapshotCooldowns();
+
     // Shared logic
     void handleWeaponFireForPlayer(NetPlayer& np, f32 dt);
+    // Apply a remote player's one-shot activation EDGES (potion + class/boot/helm skills)
+    // carried in `in.extFlags` for a single processed input. Called PER-INPUT from the
+    // serverNetPre drain loop so every press is seen exactly once (the old getLatest()
+    // read dropped edges that weren't on the newest buffered input — the unreliable-
+    // activation bug). `slot` is the remote's net slot; gated on !isDead by the caller.
+    void processRemoteActivation(u8 slot, const NetInput& in, f32 dt);
     void handleWeaponFire(f32 dt); // singleplayer legacy
     // Lock-on is inert (lockActive never set true); this now only handles the
     // quickbar-use action. Name kept to avoid churning call sites (R7-6).

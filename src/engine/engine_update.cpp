@@ -777,8 +777,17 @@ void Engine::gameUpdate(f32 dt) {
     }
 
     // Healing potion (Q key) — restores 60% HP + 30% energy
-    if (m_potionCooldown > 0.0f) m_potionCooldown -= dt;
-    if (Input::isActionPressed(GameAction::POTION) && m_potionCooldown <= 0.0f) {
+    // R17 — tick-based gate using m_potionLastActivationTick. Both client and server
+    // evaluate `(currentTick - lastActivationTick) >= cooldownTicks` with currentTick
+    // = client's m_clientTick locally, input->clientTick server-side. Divergence-free
+    // by construction. m_potionCooldown is HUD-derived below.
+    const f32 potionCdr  = m_inventories[m_localPlayerIndex].bonusCooldownReduction * 0.1f;
+    const u32 potionCdTicks = static_cast<u32>(GameConst::POTION_COOLDOWN * (1.0f - potionCdr) * 60.0f + 0.5f);
+    const u32 nowTickPotion = currentLocalTick();
+    // Lenient gate (shared with the server) so the local heal predicts even if a snapshot
+    // nudged m_potionLastActivationTick forward by a tick — feel over exactness.
+    const bool potionReady  = GameConst::cooldownReady(nowTickPotion, m_potionLastActivationTick, potionCdTicks);
+    if (Input::isActionPressed(GameAction::POTION) && potionReady) {
         f32 healAmount = m_localPlayer.maxHealth * GameConst::POTION_HEAL_PCT;
         m_localPlayer.health += healAmount;
         if (m_localPlayer.health > m_localPlayer.maxHealth)
@@ -787,11 +796,16 @@ void Engine::gameUpdate(f32 dt) {
         f32 energyAmt = ss.maxEnergy * GameConst::POTION_ENERGY_PCT;
         ss.energy += energyAmt;
         if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
-        // Potion cooldown benefits from 10% of item CDR
-        f32 cdr = m_inventories[m_localPlayerIndex].bonusCooldownReduction * 0.1f;
-        m_potionCooldown = GameConst::POTION_COOLDOWN * (1.0f - cdr);
+        m_potionLastActivationTick = (nowTickPotion == 0) ? 1u : nowTickPotion;
         AudioSystem::play(SfxId::POTION_USE);
         LOG_INFO("Used potion: +%.0f HP, +%.0f EN", healAmount, energyAmt);
+    }
+    // HUD: derive m_potionCooldown from authoritative tick state.
+    {
+        const u32 e = nowTickPotion - m_potionLastActivationTick;
+        m_potionCooldown = (m_potionLastActivationTick != 0 && e < potionCdTicks)
+                           ? static_cast<f32>(potionCdTicks - e) * (1.0f / 60.0f)
+                           : 0.0f;
     }
 
     // Player movement/aiming — disabled while inventory is open
