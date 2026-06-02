@@ -637,6 +637,9 @@ private:
         u8   playerClasses[2];  // PlayerClass cast to u8; index 1 is 0xFF if single-player
         u32  timestamp;         // seconds since epoch
         f32  totalPlayTime;
+        u8   difficulty;        // R13: 0=Normal, 1=Nightmare, 2=Hell — paired with `floor`
+                                //      for the effective-floor comparison saveGame uses to
+                                //      avoid downgrading a joined CLIENT's on-disk progress.
     };
     SaveSlotInfo m_saveSlots[MAX_SAVE_SLOTS];
 

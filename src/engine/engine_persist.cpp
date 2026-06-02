@@ -116,6 +116,7 @@ void Engine::scanSaveSlots() {
         info.playerClasses[1] = classes[1];
         info.timestamp        = timestamp;
         info.totalPlayTime    = totalTime;
+        info.difficulty       = difficulty;  // R13 — paired with floor for the effective-floor compare in saveGame.
     }
 }
 
@@ -135,6 +136,29 @@ void Engine::saveGame(u8 slot) {
     std::fwrite(&ver, sizeof(u32), 1, f);
 
     u8 floor        = static_cast<u8>(m_level.savedFloor);
+    u8 difficulty   = m_difficulty;
+
+    // R13 — joined CLIENT: never downgrade on-disk floor + difficulty. The run is
+    // happening inside the host's level, not the client's own. A floor-descend
+    // auto-save (engine_update.cpp:1454) or difficulty-loop reset (line 1490)
+    // otherwise writes the host's lower effective floor over a higher-progress SP
+    // save. Preserve the larger effective floor (formula matches the runtime
+    // skill-unlock gate at engine_update_skills.cpp:131-132) along with the
+    // matching difficulty so the pair stays consistent. Inventory and per-player
+    // state below still write from the live MP run — loot collected during the
+    // session lands in the save as expected.
+    if (m_netRole == NetRole::CLIENT && slot >= 1 && slot <= MAX_SAVE_SLOTS) {
+        const SaveSlotInfo& existing = m_saveSlots[slot - 1];
+        if (existing.exists) {
+            u32 oldEff = static_cast<u32>(existing.floor) + static_cast<u32>(existing.difficulty) * 50;
+            u32 newEff = static_cast<u32>(floor)          + static_cast<u32>(difficulty)          * 50;
+            if (oldEff > newEff) {
+                floor      = existing.floor;
+                difficulty = existing.difficulty;
+            }
+        }
+    }
+
     u8 playerCount  = m_splitPlayerCount;
     // Second class slot is 0xFF when only one player is saved
     u8 cls1 = static_cast<u8>(m_playerClasses[0]);
@@ -148,7 +172,7 @@ void Engine::saveGame(u8 slot) {
     std::fwrite(classes,        sizeof(u8),  2, f);
     std::fwrite(&timestamp,     sizeof(u32), 1, f);
     std::fwrite(&totalTime,     sizeof(f32), 1, f);
-    std::fwrite(&m_difficulty,  sizeof(u8),  1, f); // difficulty tier
+    std::fwrite(&difficulty,    sizeof(u8),  1, f); // difficulty tier (R13: paired with `floor` above)
 
     // Level seed (after header, before per-player data)
     std::fwrite(&m_level.savedSeed, sizeof(u32), 1, f);
