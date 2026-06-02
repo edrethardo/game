@@ -717,6 +717,17 @@ void Engine::startGame(GameStart mode) {
     m_serverTick = 0;
     m_hitMarkerTimer = 0.0f;
 
+    // R17 cooldown coherence: m_serverTick just reset to 0, but the tick-based skill/potion cooldown
+    // gate compares against these lastActivationTick values via currentLocalTick() (= m_serverTick for
+    // NONE/SERVER). A stale prior-floor tick would make (0 - staleLarge + grace) u32-underflow; zero
+    // them so the new floor starts with the LOCAL player's skills/potion "never activated" = ready
+    // (the pre-R17 fresh-floor behaviour, made explicit instead of relying on the underflow).
+    // Remotes gate on their own advancing clientTick, so they're unaffected by this host-side reset.
+    m_potionLastActivationTick = 0;
+    for (u32 s = 0; s < 4; s++) m_classSkillStates[s].lastActivationTick = 0;
+    m_bootSkillStates[m_localPlayerIndex].lastActivationTick   = 0;
+    m_helmetSkillStates[m_localPlayerIndex].lastActivationTick = 0;
+
     // Phase 1.1 — Wipe the CL_FIRE_WEAPON dedup rings + the client retransmit window.
     // m_serverTick just reset to 0, so without this the very first fire on the new
     // floor (clientTick=0) could collide with a leftover clientTick=0 from the prior

@@ -361,21 +361,50 @@ void Engine::update(f32 dt) {
         // Unified game loop: networking pre → gameplay → networking post
         if (m_netRole == NetRole::SERVER) serverNetPre(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPre(dt);
+        // Singleplayer/split-screen have no net pre-step, so advance the sim tick here. The R17
+        // tick-based skill/potion cooldown gate reads it via currentLocalTick() (= m_serverTick for
+        // NONE); without this it stays 0 and every cooldown jams after the first use (the gate then
+        // computes (0 - lastActivationTick + grace) which u32-underflows below any real cooldown).
+        // SERVER advances m_serverTick in serverNetPre (engine_net.cpp:71); CLIENT advances
+        // m_clientTick in clientNetPost. Once per fixed update — m_serverTick is the shared sim clock.
+        if (m_netRole == NetRole::NONE) m_serverTick++;
 
         // M4: decay the smooth-correction offset once per CLIENT frame so the camera
         // position smoothly converges toward the server-corrected sim position over ~150 ms.
         if (m_netRole == NetRole::CLIENT) RenderOffsetOps::tick(m_renderOffset, dt);
 
-        // M14: 1 Hz net-graph diagnostic log — CLIENT only. Emits RTT, server-tick estimate,
-        // and the number of prediction reconcile mismatches accumulated since the last log.
-        // m_divergenceCount is bumped in clientNetPost on each mismatch and reset here.
-        if (m_netRole == NetRole::CLIENT) {
+        // M14 + net-diagnostics: 1 Hz net-graph window. Runs for SERVER and CLIENT so the F9
+        // overlay (engine_hud.cpp) and this log read fresh per-second bandwidth/snapshot metrics.
+        // Net::tickMetricsWindow folds the raw counters into per-slot NetMetrics and resets the
+        // window. m_divergenceCount is bumped in clientNetPost on each reconcile mismatch.
+        if (m_netRole != NetRole::NONE) {
             f64 nowSec = Clock::getElapsedSeconds();
             if (nowSec - m_lastDebugLogSec >= 1.0) {
-                LOG_INFO("[NET-GRAPH] rtt=%.1fms serverTickEst=%.1f divergences=%u",
-                         m_clockSync.oneWayTripMs * 2.0f,
-                         static_cast<f64>(m_clockSync.serverTickEst),
-                         m_divergenceCount);
+                Net::tickMetricsWindow(static_cast<f32>(nowSec - m_lastDebugLogSec));
+                if (m_netRole == NetRole::CLIENT) {
+                    // Baseline age = how far the estimated server clock is ahead of the newest
+                    // applied snapshot (engine-side state Net can't see, so computed here).
+                    NetMetrics m = Net::getMetrics();
+                    u32 bage = NetMetricsOps::baselineAgeTicks(
+                        static_cast<u32>(m_clockSync.serverTickEst), m_lastAppliedSnap.serverTick);
+                    LOG_INFO("[NET-GRAPH] rtt=%.1fms est=%.1f div=%u in=%.1fKB/s(wire~%.1f) snap=%.1fHz bage=%ut",
+                             m_clockSync.oneWayTripMs * 2.0f,
+                             static_cast<f64>(m_clockSync.serverTickEst),
+                             m_divergenceCount,
+                             m.kbInTotal, m.wireKbIn, m.snapsInPerSec, bage);
+                } else {
+                    // SERVER: one line per connected remote client — the M12 read-off surface.
+                    const NetPlayerSlot* slots = Net::getSlots();
+                    for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
+                        if (slot == static_cast<u32>(m_localPlayerIndex)) continue;
+                        if (!slots || slots[slot].state != SlotState::ACTIVE) continue;
+                        NetMetrics m = Net::getMetricsForSlot(static_cast<u8>(slot));
+                        u32 bage = NetMetricsOps::baselineAgeTicks(m_serverTick, m_clientAckedSnap[slot]);
+                        LOG_INFO("[NET-GRAPH] cli s%u out=%.1fKB/s(wire~%.1f) delta=%.0f%% loss=%.1f%% bage=%ut",
+                                 slot, m.kbOutTotal, m.wireKbOut, m.deltaFullRatio * 100.0f,
+                                 m.packetLoss * 100.0f, bage);
+                    }
+                }
                 m_lastDebugLogSec = nowSec;
                 m_divergenceCount = 0;
             }
@@ -672,11 +701,16 @@ void Engine::tickSharedSystems(f32 dt) {
             if (p.gravity > 0.0f) p.velocity.y -= p.gravity * dt;
             p.lifetime      -= dt;
             p.predictedLife += dt;
-            // Safety cap: a predicted ghost should be replaced by the authoritative snapshot
-            // projectile within ~100 ms. If 0.5 s passes with no match, the server probably
-            // rejected the fire (cooldown drift / origin clamp / etc.) — despawn the ghost
-            // so the user doesn't see a phantom projectile that does no damage.
-            if (p.lifetime <= 0.0f || p.predictedLife >= 0.5f) {
+            // Despawn timeout. A ghost that the match-and-keep pass (clientNetPost) has CONFIRMED —
+            // i.e. found its authoritative snapshot copy and is keeping THIS ghost as the canonical
+            // render — has its predictedLife reset every frame the authoritative still matches, so
+            // predictedLife only grows once the server's copy is GONE (real impact / expiry). Despawn
+            // it after a short CONFIRMED_LOST window then = a clean handoff with no fly-through-walls.
+            // An UNCONFIRMED ghost (its authoritative never arrived) keeps the 0.5 s safety net: the
+            // server likely rejected the fire (cooldown drift / origin clamp) or the snapshot was lost.
+            constexpr f32 CONFIRMED_LOST_SEC = 0.1f;
+            const f32 ghostTimeout = p.confirmed ? CONFIRMED_LOST_SEC : 0.5f;
+            if (p.lifetime <= 0.0f || p.predictedLife >= ghostTimeout) {
                 p.active = false;
                 continue;
             }

@@ -77,6 +77,14 @@ struct Projectile {
     bool predicted     = false;
     u32  clientTick    = 0;
     f32  predictedLife = 0.0f;  // seconds since spawn; predicted ghosts despawn at 0.5 s if no match arrived (UDP loss fallback)
+    // V2 handoff smoothing: set true the first time the match pass finds this ghost's authoritative
+    // snapshot copy (clientNetPost). A confirmed ghost STAYS the canonical render (the authoritative
+    // is hidden while it agrees) instead of being replaced — the authoritative lags one interp-delay
+    // behind, so swapping looked like the projectile jumping back. While confirmed, the match pass
+    // resets predictedLife each frame the authoritative still matches, so predictedLife only grows
+    // once the server's copy is GONE (real impact/expiry) — then the ghost despawns after a short
+    // CONFIRMED_LOST window (clean handoff, no fly-through-walls). 0 = never matched yet.
+    bool confirmed     = false;
 };
 
 struct ProjectilePool {

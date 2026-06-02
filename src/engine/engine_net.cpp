@@ -247,6 +247,8 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // every press through.
                 SkillState& ss = m_bootSkillStates[i];
                 ss.activeSkill = bootSkill;
+                // energy=999 → tryActivate's energy gate is a no-op here; energy is enforced on
+                // the firing client (clientNetPre wire-mask strips the bit when unaffordable).
                 ss.energy = 999.0f; ss.maxEnergy = 999.0f;
                 Vec3 ep = m_players[i].eyePos();
                 Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
@@ -285,6 +287,7 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // R9: persistent SkillState so tryActivate's cooldown gate engages.
                 SkillState& ss = m_helmetSkillStates[i];
                 ss.activeSkill = helmSkill;
+                // energy=999 → no-op energy gate; enforced client-side (clientNetPre wire-mask).
                 ss.energy = 999.0f; ss.maxEnergy = 999.0f;
                 Vec3 ep = m_players[i].eyePos();
                 Vec3 fwd = normalize(Vec3{-sinf(m_players[i].yaw)*cosf(m_players[i].pitch),
@@ -325,6 +328,14 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // to 0 every press and let spam through.
                 SkillState& tempSS = m_classSkillStatesNet[i][cskSlot];
                 tempSS.activeSkill = cls.skills[cskSlot];
+                // Energy is NOT enforced here (server has no copy of the remote's pool — energy
+                // has no snapshot field). 999 makes tryActivate's energy gate a no-op; the real
+                // enforcement is the firing client's wire-mask (clientNetPre), which strips
+                // INPUT_EX_SKILL when the local pool can't afford the skill, so an unaffordable
+                // press never reaches here. Cooldown IS enforced server-side via the persistent
+                // m_classSkillStatesNet tick gate above. (Cheat-resistance for energy would need
+                // a server-side per-slot energy sim; deferred — it risks float-regen drift that
+                // would wrongly reject legit client-predicted casts.)
                 tempSS.energy = 999.0f;
                 tempSS.maxEnergy = 999.0f;
                 Vec3 eyePos = m_players[i].eyePos();
@@ -683,6 +694,9 @@ void Engine::serverNetPost(f32 dt) {
                 // Client ACKed our stored baseline tick — send delta against that snapshot.
                 Server::sendSnapshotDeltaToSlot(static_cast<u8>(slot), m_baselineSnap[slot]);
             }
+            // Net-metrics: tally full vs delta so the F9 overlay can show the delta/full ratio
+            // (a spike in fulls means baseline churn — what we want to see under packet loss).
+            Net::noteSnapshotKind(static_cast<u8>(slot), sendFull);
 
             // Advance the baseline after sending so the next tick has a reference point.
             BaselineTrackerOps::store(m_baselines[slot], m_serverTick);
@@ -786,6 +800,30 @@ void Engine::clientNetPre(f32 dt) {
     if (onCooldown(m_classSkillStates[m_activeClassSkill],         itemCdr)) skillClearMask |= INPUT_EX_SKILL;
     if (onCooldown(m_bootSkillStates[m_localPlayerIndex],          itemCdr)) skillClearMask |= INPUT_EX_BOOT_SKILL;
     if (onCooldown(m_helmetSkillStates[m_localPlayerIndex],        itemCdr)) skillClearMask |= INPUT_EX_HELM_SKILL;
+    // Energy parity: the local predict (tryActivate) refuses an unaffordable press (energy <
+    // energyCost), but captureLocalInput sets the skill ext bits on the raw press regardless.
+    // Without stripping them here the bit rides to the server, which casts ALL of class/boot/helm
+    // with a throwaway energy=999 (processRemoteActivation) and never checks the real pool — so
+    // the player "casts with insufficient energy". Class, boot AND helmet skills all draw from
+    // the shared pool (handleClassSkillActivation / handleEquipmentSkillActivation), so gate all
+    // three the same way. BLOOD_NOVA spends health (its own gate), never energy. Energy is client-
+    // authoritative (no snapshot field), so this mask IS the enforcement — same model as the
+    // potion/cooldown masks above; client-side also avoids the float-regen drift a server energy
+    // gate would suffer (which would wrongly reject legit client-predicted casts).
+    {
+        const f32 energy = m_skillStates[m_localPlayerIndex].energy;
+        auto unaffordable = [this, energy](SkillId active) -> bool {
+            if (active == SkillId::NONE || active == SkillId::BLOOD_NOVA) return false;
+            const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, active);
+            return def && energy < def->energyCost;
+        };
+        // Active CLASS skill: resolve from the class def — m_classSkillStates[].activeSkill is
+        // only set on cast (can be stale here); boot/helm SkillStates are refreshed every frame.
+        const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+        if (unaffordable(cls.skills[m_activeClassSkill]))                      skillClearMask |= INPUT_EX_SKILL;
+        if (unaffordable(m_bootSkillStates[m_localPlayerIndex].activeSkill))   skillClearMask |= INPUT_EX_BOOT_SKILL;
+        if (unaffordable(m_helmetSkillStates[m_localPlayerIndex].activeSkill)) skillClearMask |= INPUT_EX_HELM_SKILL;
+    }
     // Send/predict parity while a blocking UI is open (inventory OR pause menu): the local
     // skill PREDICT paths gate on !gameplayInputFrozen() (engine_update_skills.cpp), but
     // captureLocalInput sets the skill ext bits unconditionally — so a click while a menu is
@@ -885,21 +923,28 @@ void Engine::clientNetPost(f32 dt) {
     // that wire change; removed to keep the floor lookup out of every snapshot tick.
     Client::interpolateProjectiles(m_renderInterp.projectiles);
 
-    // V2 fire prediction — match-and-despawn pass.
-    // Each snapshot projectile carrying clientTickLow != 0 and ownerSlot == this client's
-    // slot corresponds to a locally-predicted ghost we spawned in handleWeaponFire. Find
-    // the matching ghost by clientTick low 16 bits and deactivate it — the authoritative
-    // snapshot projectile (now in m_renderInterp.projectiles) takes over rendering.
+    // V2 fire prediction — match-and-KEEP pass (formerly match-and-despawn).
+    // Each snapshot projectile with clientTickLow != 0 and ownerSlot == this client's slot is the
+    // authoritative copy of a locally-predicted ghost we spawned in handleWeaponFire. The OLD path
+    // despawned the ghost and rendered the authoritative — but the authoritative is interpolated to
+    // render-time = now - interp_delay, so it lags ~1 m+ BEHIND the smooth client-rate ghost, and the
+    // swap looked like the projectile jumping backwards ("the ghost being replaced"). Instead we KEEP
+    // the ghost as the canonical render and HIDE the authoritative while they agree (M10/M11 intent:
+    // the predicted projectile IS canonical until reconciliation diverges). The ghost and the
+    // authoritative fire from the SAME claimed origin/aim (handleWeaponFire sends them; the server
+    // fires from those exact values) with identical speed/gravity, so their trajectories are identical
+    // — the ghost is always a valid stand-in. We snap to the authoritative only on a pathological
+    // divergence (e.g. server origin-clamp) larger than the worst-case interp-lag offset.
     //
     // NOTE: we iterate the pool DIRECTLY rather than the activeList here. Client::interpolate
-    // Projectiles populates m_renderInterp.projectiles[poolIndex] and increments activeCount,
-    // but does NOT update activeList[] — so activeList is stale from previous frames' merge
-    // appends (predicted-ghost slot indices that are now inactive after the per-frame clear).
-    // The renderer iterates the pool the same way (engine_render_effects.cpp:75), using
-    // activeCount only as an early-exit hint. Match-despawn follows that canonical pattern.
+    // Projectiles populates m_renderInterp.projectiles[poolIndex] and increments activeCount, but does
+    // NOT update activeList[]. The renderer gates on .active (engine_render_effects.cpp:77), so
+    // toggling .active is sufficient; activeCount stays a loose early-exit hint.
+    constexpr f32 GHOST_HANDOFF_BASE_M     = 1.0f; // base divergence tolerance (metres)
+    constexpr f32 GHOST_HANDOFF_INTERP_SEC = 0.2f; // × projectile speed = worst-case interp-lag offset (WiFi jitter)
     u8 mySlot = activeNetSlot();
     for (u32 idx = 0; idx < MAX_PROJECTILES; idx++) {
-        const Projectile& authoritative = m_renderInterp.projectiles.projectiles[idx];
+        Projectile& authoritative = m_renderInterp.projectiles.projectiles[idx];
         if (!authoritative.active) continue;
         if (authoritative.predicted) continue;   // defensive: pre-merge there are none; reorder-safe
         if (authoritative.ownerSlot != mySlot) continue;
@@ -911,7 +956,16 @@ void Engine::clientNetPost(f32 dt) {
             Projectile& ghost = m_projectiles.projectiles[j];
             if (!ghost.active || !ghost.predicted) continue;
             if ((ghost.clientTick & 0xFFFF) != wireLow) continue;
-            ghost.active = false;   // authoritative has taken over rendering — despawn ghost
+            // Speed-relative safety valve: keep the ghost unless the authoritative diverged further
+            // than one worst-case interp-lag of travel (compare squared — avoid the sqrt).
+            const f32 tol = GHOST_HANDOFF_BASE_M + length(ghost.velocity) * GHOST_HANDOFF_INTERP_SEC;
+            if (lengthSq(authoritative.position - ghost.position) <= tol * tol) {
+                authoritative.active = false; // hide the lagging authoritative; render the smooth ghost
+                ghost.confirmed     = true;   // matched at least once
+                ghost.predictedLife = 0.0f;   // confirmed this frame — defer the lost/expiry timeout
+            } else {
+                ghost.active = false;         // genuine correction — show the authoritative instead
+            }
             break;
         }
     }

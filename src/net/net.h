@@ -1,8 +1,13 @@
 #pragma once
 
 #include "core/types.h"
+#include "net/net_metrics.h"   // NetCounters / NetMetrics / NetMetricsOps (pure, header-only)
 
 static constexpr u32 MAX_PLAYERS       = 4;
+// net_metrics.h keeps its own copy of the slot count to stay dependency-free (no include
+// cycle); pin it to the real value so any drift is a compile error, not a silent mismatch.
+static_assert(NET_METRICS_SLOTS == MAX_PLAYERS,
+              "NET_METRICS_SLOTS (net_metrics.h) must match MAX_PLAYERS");
 static constexpr u16 DEFAULT_PORT      = 7777;
 static constexpr u32 NET_TICK_RATE     = 60;
 // 60 Hz snapshots (up from 30 Hz) reduce inter-snap gap from 33 ms to 16.6 ms — one snapshot
@@ -279,6 +284,15 @@ namespace Net {
     const NetPlayerSlot* getSlots(); // array of MAX_PLAYERS
     u32     getConnectedCount();
     NetStats getStats(u8 playerSlot);
+
+    // Net-metrics for the F9 net-graph overlay and the 1 Hz [NET-GRAPH] log. The send/recv
+    // paths accumulate raw byte/packet/snapshot counters on the net thread (no atomics —
+    // single-threaded). tickMetricsWindow() folds them into per-slot NetMetrics once per
+    // second and zeroes the counters; call it from the existing 1 Hz gate.
+    void       noteSnapshotKind(u8 playerSlot, bool isFull); // server: tally full vs delta snapshot sends
+    void       tickMetricsWindow(f32 elapsedSec);            // compute per-slot metrics + reset counters
+    NetMetrics getMetrics();                                 // local view (client: server stream as slot 0)
+    NetMetrics getMetricsForSlot(u8 playerSlot);             // one remote client's stream (server read-off)
 
     // Callback types — set before poll()
     using OnSnapshotFn   = void(*)(const u8* data, u32 size);

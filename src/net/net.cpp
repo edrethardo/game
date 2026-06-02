@@ -52,6 +52,24 @@ static Net::OnLevelSeedFn  s_onLevelSeed  = nullptr;
 
 // Channels: 0 = reliable ordered, 1 = unreliable sequenced
 static constexpr u32 NUM_CHANNELS = 2;
+static_assert(NET_METRICS_CHANNELS == NUM_CHANNELS,
+              "NET_METRICS_CHANNELS (net_metrics.h) must match NUM_CHANNELS");
+
+// Net-metrics accumulators (F9 net-graph / 1 Hz [NET-GRAPH] log). Touched only on the net
+// thread — Net::poll() inbound and the sendImmediate_* outbound path, both main-thread — so
+// plain u32, no atomics. s_counters accumulates the live 1 s window; tickMetricsWindow folds
+// it into s_lastMetrics[] and zeroes it. See net_metrics.h for the math + rationale.
+static NetCounters s_counters;
+static NetMetrics  s_lastMetrics[MAX_PLAYERS];
+
+// Count one outbound datagram's payload. Called at the sendImmediate_* layer (after the
+// fake-loss drop guard at the public layer) so each real datagram is counted once, with
+// broadcasts naturally multiplied per peer. ch: 0 = reliable, 1 = unreliable.
+static inline void countOut(u8 slot, u8 ch, u32 size) {
+    if (slot >= MAX_PLAYERS || ch >= NET_METRICS_CHANNELS) return;
+    s_counters.bytesOut[slot][ch] += size;
+    s_counters.pktsOut[slot][ch]++;
+}
 
 // M14: fake-loss cvar — set via Net::setFakeLossPct(). Applied at all outgoing send
 // callsites so both CLIENT→SERVER and SERVER→CLIENT traffic is stressed uniformly.
@@ -652,6 +670,15 @@ void Net::poll() {
             const u8* data = event.packet->data;
             u32 size = static_cast<u32>(event.packet->dataLength);
 
+            // Net-metrics: count inbound payload by channel (ch0=reliable, ch1=unreliable).
+            // Single hook covers client RX (snapshots/events) and server RX (input). snapsIn
+            // is meaningful on the client; the server simply never receives SV_SNAPSHOT.
+            u8 inCh = (event.channelID < NET_METRICS_CHANNELS) ? static_cast<u8>(event.channelID) : 1;
+            s_counters.bytesIn[inCh] += size;
+            s_counters.pktsIn[inCh]++;
+            if (size >= 1 && data[0] == static_cast<u8>(NetPacketType::SV_SNAPSHOT))
+                s_counters.snapsIn++;
+
             if (s_role == NetRole::SERVER) {
                 u8 slot = static_cast<u8>(reinterpret_cast<uintptr_t>(event.peer->data));
                 serverHandlePacket(slot, data, size);
@@ -741,6 +768,7 @@ void Net::poll() {
 // destroy it explicitly — same defensive pattern used in broadcastSnapshot below.
 static void sendImmediate_Reliable(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    countOut(playerSlot, 0, size); // ch0 = reliable
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 0, pkt) < 0)
         enet_packet_destroy(pkt);
@@ -748,6 +776,7 @@ static void sendImmediate_Reliable(u8 playerSlot, const u8* data, u32 size) {
 
 static void sendImmediate_Unreliable(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
+    countOut(playerSlot, 1, size); // ch1 = unreliable
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
         enet_packet_destroy(pkt);
@@ -756,6 +785,7 @@ static void sendImmediate_Unreliable(u8 playerSlot, const u8* data, u32 size) {
 static void sendImmediate_BroadcastReliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
+            countOut(static_cast<u8>(i), 0, size); // per-peer fan-out
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
             if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 0, pkt) < 0)
                 enet_packet_destroy(pkt);
@@ -766,6 +796,7 @@ static void sendImmediate_BroadcastReliable(const u8* data, u32 size) {
 static void sendImmediate_BroadcastUnreliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
+            countOut(static_cast<u8>(i), 1, size); // per-peer fan-out
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
             if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
                 enet_packet_destroy(pkt);
@@ -784,6 +815,8 @@ static void sendImmediate_BroadcastSnapshot(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             activePeers++;
+            countOut(static_cast<u8>(i), 1, size);   // ch1, per-peer fan-out
+            s_counters.snapsOut[i]++;                // one snapshot send to this slot
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
             if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
                 enet_packet_destroy(pkt);
@@ -804,6 +837,7 @@ static void sendImmediate_ToServer(const u8* data, u32 size, bool reliable) {
     if (!s_serverPeer) return;
     u32 flags   = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
     u8  channel = reliable ? 0 : 1;
+    countOut(0, channel, size); // client has a single server peer — attribute to slot 0
     ENetPacket* pkt = enet_packet_create(data, size, flags);
     if (enet_peer_send(s_serverPeer, channel, pkt) < 0)
         enet_packet_destroy(pkt);
@@ -928,6 +962,8 @@ void Net::sendSnapshotToSlot(u8 playerSlot, const u8* data, u32 size) {
         enqueueDelayed(DelayTarget::BROADCAST_SNAP, playerSlot, data, size);
         return;
     }
+    countOut(playerSlot, 1, size);            // ch1, per-slot snapshot send
+    s_counters.snapsOut[playerSlot]++;
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
     if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
         enet_packet_destroy(pkt);
@@ -992,6 +1028,37 @@ NetStats Net::getStats(u8 playerSlot) {
         stats.packetLoss = s_serverPeer->packetLoss / 65536.0f;
     }
     return stats;
+}
+
+// Net-metrics accessors (F9 net-graph / 1 Hz [NET-GRAPH] log). See net_metrics.h.
+void Net::noteSnapshotKind(u8 playerSlot, bool isFull) {
+    if (playerSlot >= MAX_PLAYERS) return;
+    if (isFull) s_counters.fullSnaps[playerSlot]++;
+    else        s_counters.deltaSnaps[playerSlot]++;
+}
+
+void Net::tickMetricsWindow(f32 elapsedSec) {
+    // Fold each slot's accumulated counters into per-second metrics, then reset the window.
+    // packetLoss comes from the ENet peer (getStats). baselineAge is engine-derived state
+    // (server tick vs the client's acked tick) that Net can't see, so it's left 0 here and
+    // filled in by the display path (HUD/log) via NetMetricsOps::baselineAgeTicks().
+    for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
+        f32 loss = getStats(static_cast<u8>(slot)).packetLoss;
+        s_lastMetrics[slot] = NetMetricsOps::compute(s_counters, static_cast<u8>(slot),
+                                                     elapsedSec, loss, /*baselineAge=*/0);
+    }
+    s_counters = NetCounters{};
+}
+
+NetMetrics Net::getMetrics() {
+    // Client: outbound is attributed to slot 0 (single server peer) and inbound is role-global,
+    // so slot 0 is the local view. The server reads each remote client via getMetricsForSlot().
+    return s_lastMetrics[0];
+}
+
+NetMetrics Net::getMetricsForSlot(u8 playerSlot) {
+    if (playerSlot >= MAX_PLAYERS) return NetMetrics{};
+    return s_lastMetrics[playerSlot];
 }
 
 void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }

@@ -831,7 +831,11 @@ u32 Engine::buildRemotePlayerViews(Player* views, Player** ptrs, u8* slots) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (i == m_localPlayerIndex) continue;           // host slot handled via m_localPlayer
         const NetPlayer& np = m_players[i];
-        if (!np.active || np.isDead) continue;           // only live remotes are targetable
+        // Only LIVE remotes are targetable. Check health<=0 too, not just isDead: np.isDead is set
+        // in serverNetPost (AFTER the AI/projectile pass that consumes these views), so on the death
+        // frame isDead still reads false — the health guard excludes the corpse the same frame so
+        // enemies don't get a one-frame window to attack a just-killed remote.
+        if (!np.active || np.isDead || np.health <= 0.0f) continue;
         slots[count] = static_cast<u8>(i);
         seedRemoteView(np, views[count]);
         ptrs[count] = &views[count];

@@ -19,7 +19,9 @@ struct LagCompPose {
     u32  tickStamp   = 0;   // 0 = empty
 };
 
-static constexpr u32 LAG_COMP_HISTORY_TICKS_MAX = 16;
+// Matches the live ring depth in engine_combat.cpp (LAG_COMP_HISTORY_TICKS) — the doc's stated
+// ~1 s window (64 ticks at 60 Hz). The rewind itself is bounded separately by the caller.
+static constexpr u32 LAG_COMP_HISTORY_TICKS_MAX = 64;
 
 // Single-entity ring of recent poses. Owners (engine_combat.cpp) maintain one per
 // entity slot. tickStamp == 0 means the slot is empty.

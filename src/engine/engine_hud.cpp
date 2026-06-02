@@ -376,7 +376,9 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
     // Potion cooldown indicator (below floor text, Q key icon + label)
     {
         f32 hs = static_cast<f32>(sh) / 720.0f;
-        f32 potY = static_cast<f32>(sh) - 45.0f * hs;
+        // HUD y is y-up (origin bottom), so a larger subtraction sits lower on screen. Nudged
+        // from 45 -> 60 px so the potion indicator drops a touch below the floor text.
+        f32 potY = static_cast<f32>(sh) - 60.0f * hs;
         bool potReady = (m_potionCooldown <= 0.0f);
         HUD::drawKeySymbol(sw, sh, 20.0f * hs, potY, Input::isGamepadConnected(0) ? "B" : "Q", potReady);
         if (potReady) {
@@ -801,6 +803,16 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                              fpsBuf, {0.6f, 0.6f, 0.6f}, 1);
     }
 
+    // Latency readout — one row below the FPS counter, CLIENT only. Surfaces ENet's smoothed
+    // RTT so the player always sees their ping without opening the detailed F9 net-graph.
+    if (m_netRole == NetRole::CLIENT) {
+        char pingBuf[24];
+        u32 rtt = static_cast<u32>(Net::getStats(activeNetSlot()).rttMs);
+        std::snprintf(pingBuf, sizeof(pingBuf), "Ping: %ums", rtt);
+        FontSystem::drawText(sw, sh, 8.0f, static_cast<f32>(sh) - 28.0f,
+                             pingBuf, {0.6f, 0.6f, 0.6f}, 1);
+    }
+
     // Net stats overlay in multiplayer
     if (m_netRole != NetRole::NONE) {
         u32 ping = 0;
@@ -822,20 +834,29 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     //   loss  — fake-loss percentage (m_netFakeLossPct, 0 when off)
     //   lat   — fake one-way latency in ms (m_netFakeLatencyMs, 0 when off)
     if (m_netGraphVisible && m_netRole == NetRole::CLIENT) {
-        char netBuf[128];
-        snprintf(netBuf, sizeof(netBuf),
-                 "NET: rtt=%.1fms est=%.0f div=%u loss=%u%% lat=%ums",
-                 m_clockSync.oneWayTripMs * 2.0f,
-                 m_clockSync.serverTickEst,
-                 m_divergenceCount,
-                 static_cast<u32>(m_netFakeLossPct),
-                 m_netFakeLatencyMs);
-        // Draw near the top-right: offset from right edge by text width, a few pixels down.
+        // Detailed net-graph (D6 + net-diagnostics): real measured bandwidth / loss / snapshot
+        // rate / baseline age so the M12 target (<=25 KB/s @ 60 Hz delta) can be verified with
+        // the M14 fake-loss harness. The displayed values must stay in sync with what
+        // Net::getMetrics() computes — see net_metrics.h. Four right-aligned lines, top-right.
+        NetMetrics m = Net::getMetrics();
+        f32 measLoss = Net::getStats(activeNetSlot()).packetLoss * 100.0f; // ENet-measured, not the injected %
+        u32 bage = NetMetricsOps::baselineAgeTicks(
+                       static_cast<u32>(m_clockSync.serverTickEst), m_lastAppliedSnap.serverTick);
+        char lines[4][96];
+        snprintf(lines[0], sizeof(lines[0]), "NET rtt=%.0fms est=%.0f loss=%.1f%%",
+                 m_clockSync.oneWayTripMs * 2.0f, m_clockSync.serverTickEst, measLoss);
+        snprintf(lines[1], sizeof(lines[1]), "BW in=%.1fKB/s (wire ~%.1f) snap=%.1f evt=%.1f",
+                 m.kbInTotal, m.wireKbIn, m.kbInPerSec[1], m.kbInPerSec[0]); // ch1=snap, ch0=evt
+        snprintf(lines[2], sizeof(lines[2]), "SNAP rx=%.1fHz bage=%ut", m.snapsInPerSec, bage);
+        snprintf(lines[3], sizeof(lines[3]), "SIM div=%u fakeloss=%u%% fakelat=%ums",
+                 m_divergenceCount, static_cast<u32>(m_netFakeLossPct), m_netFakeLatencyMs);
         f32 scale = 1.0f;
-        f32 tw = FontSystem::textWidth(netBuf, scale);
-        f32 x  = static_cast<f32>(sw) - tw - 8.0f;
-        f32 y  = static_cast<f32>(sh) - 14.0f; // top of screen (FontSystem y = bottom of glyph)
-        FontSystem::drawText(sw, sh, x, y, netBuf, {0.2f, 1.0f, 0.4f}, scale);
+        for (u32 i = 0; i < 4; i++) {
+            f32 tw = FontSystem::textWidth(lines[i], scale);
+            f32 x  = static_cast<f32>(sw) - tw - 8.0f;
+            f32 y  = static_cast<f32>(sh) - 14.0f - static_cast<f32>(i) * 12.0f; // stack downward
+            FontSystem::drawText(sw, sh, x, y, lines[i], {0.2f, 1.0f, 0.4f}, scale);
+        }
     }
 
     // Host info overlay — shown to the SERVER role so the host can read their
@@ -867,6 +888,28 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         Vec3 col = (extIp && extIp[0]) ? Vec3{0.5f, 1.0f, 0.5f}  // green = online-reachable
                                        : Vec3{1.0f, 0.8f, 0.4f}; // yellow = LAN-only
         FontSystem::drawText(sw, sh, x, y, hostBuf, col, scale);
+
+        // Per-client bandwidth — the M12 read-off surface. One right-aligned line per connected
+        // remote slot, stacked below the host-IP line. Values mirror getMetricsForSlot()
+        // (net_metrics.h): payload + estimated-wire out-KB/s, measured loss, delta ratio,
+        // baseline age. Read these while the M14 fake-loss harness injects loss to verify M12.
+        const NetPlayerSlot* slots = Net::getSlots();
+        u32 rowsDrawn = 0;
+        for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
+            if (slot == static_cast<u32>(m_localPlayerIndex)) continue;       // host has no remote peer
+            if (!slots || slots[slot].state != SlotState::ACTIVE) continue;
+            NetMetrics cm = Net::getMetricsForSlot(static_cast<u8>(slot));
+            f32 cliLoss   = Net::getStats(static_cast<u8>(slot)).packetLoss * 100.0f;
+            u32 bage      = NetMetricsOps::baselineAgeTicks(m_serverTick, m_clientAckedSnap[slot]);
+            char cliBuf[128];
+            snprintf(cliBuf, sizeof(cliBuf),
+                     "CLI s%u: out=%.1fKB/s (wire ~%.1f) loss=%.1f%% delta=%.0f%% bage=%ut",
+                     slot, cm.kbOutTotal, cm.wireKbOut, cliLoss, cm.deltaFullRatio * 100.0f, bage);
+            f32 ctw = FontSystem::textWidth(cliBuf, scale);
+            f32 cx  = static_cast<f32>(sw) - ctw - 8.0f;
+            f32 cy  = static_cast<f32>(sh) - 14.0f - static_cast<f32>(++rowsDrawn) * 12.0f;
+            FontSystem::drawText(sw, sh, cx, cy, cliBuf, {0.5f, 1.0f, 0.5f}, scale);
+        }
     }
 
     // Chat log — left side of screen, above the quickbar (scaled)

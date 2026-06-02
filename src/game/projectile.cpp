@@ -93,6 +93,11 @@ enum class PlayerHitResult { MISS, DEFLECTED, HIT };
 // M10.3: fires s_playerHitCallback on a confirmed hit so the server can emit
 // SV_DAMAGE_TO_ME to the victim's network slot.
 static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& player) {
+    // A dead player (corpse) doesn't collide — the projectile passes through and is still tested
+    // against any living players after this one. Single guard here covers the primary AND every
+    // extra (and any future caller), mirroring EnemyAI skipping dead targets. Without it an enemy
+    // projectile would "hit" a corpse: wasted damage + the SV_DAMAGE_TO_ME callback to a dead slot.
+    if (player.health <= 0.0f) return PlayerHitResult::MISS;
     AABB playerBox = {
         player.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
         player.position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}

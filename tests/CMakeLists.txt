@@ -20,6 +20,7 @@ add_executable(dungeon_tests
     net/test_pending_pickup_ring.cpp
     net/test_pending_skill_ring.cpp
     net/test_snapshot_baseline.cpp
+    net/test_net_metrics.cpp
     net/test_snapshot_delta.cpp
     net/test_snapshot_header.cpp
     net/test_snapshot_world_item.cpp

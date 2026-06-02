@@ -131,12 +131,16 @@ static void recordFire(u8 slot, u32 clientTick) {
 // view said wasn't there. Same goes for HP and death state — they stay at
 // present-time so a corpse can't be hit retroactively.
 //
-// Sized to cover ~267 ms (16 ticks at 60 Hz) — comfortably more than any
-// realistic (RTT/2 + interp_delay) combination we'd lag-comp for. Larger
-// gaps fall back to present-time resolution; the firer's high-ping bullets
-// just behave like the un-lag-compensated baseline.
-constexpr u32 LAG_COMP_HISTORY_TICKS = 16;
-constexpr u32 LAG_COMP_MAX_TICKS     = LAG_COMP_HISTORY_TICKS - 1;
+// Sized to the design doc's stated ~1 s window (64 ticks at 60 Hz) of pose history — generous
+// buffer headroom so a lookup never falls off the end under interp/jitter slack. The REWIND is
+// bounded SEPARATELY (LAG_COMP_MAX_REWIND_TICKS) so widening this buffer does NOT widen how far
+// back the server rewinds. Rewinds beyond the cap fall back to present-time resolution; the
+// firer's high-ping bullets just behave like the un-lag-compensated baseline.
+constexpr u32 LAG_COMP_HISTORY_TICKS = 64;
+// Max ticks the server will rewind for a fire — decoupled from the buffer depth above (was
+// HISTORY-1). Held at 15 (~250 ms) to preserve the prior rewind feel exactly; the design doc's
+// LAG_COMP_MAX_MS = 200 (~12 ticks) is the value to use if we ever want to tighten fairness.
+constexpr u32 LAG_COMP_MAX_REWIND_TICKS = 15;
 struct EntPoseSnap {
     Vec3 position;
     f32  yaw;
@@ -522,6 +526,7 @@ void Engine::handleWeaponFire(f32 dt) {
                 proj.predicted     = true;
                 proj.clientTick    = m_clientTick;  // M1.8: was m_serverTick; use client-local tick
                 proj.predictedLife = 0.0f;
+                proj.confirmed     = false;         // not yet matched to an authoritative snapshot copy
             }
         }
         result.didFire = true;
@@ -861,7 +866,7 @@ void Engine::resetEntityHistory() {
 
 // Phase 3.1 — Compute how many ticks to rewind for a given firing slot. Uses ENet's
 // smoothed RTT (already populated in NetPlayerSlot::rttMs by Net::poll) + the client's
-// interp delay. Clamped to LAG_COMP_MAX_TICKS so out-of-window RTTs gracefully fall
+// interp delay. Clamped to LAG_COMP_MAX_REWIND_TICKS so out-of-window RTTs gracefully fall
 // back to present-time hit detection rather than reading uninitialized history.
 u32 Engine::computeLagCompTicks(u8 slot) const {
     if (slot >= MAX_PLAYERS) return 0;
@@ -878,7 +883,7 @@ u32 Engine::computeLagCompTicks(u8 slot) const {
     f32 ticks = rttHalfTicks + INTERP_TICKS;
     if (ticks < 0.0f) ticks = 0.0f;
     u32 t = static_cast<u32>(ticks + 0.5f);
-    if (t > LAG_COMP_MAX_TICKS) t = 0;       // out-of-range: don't lag-comp this fire
+    if (t > LAG_COMP_MAX_REWIND_TICKS) t = 0; // out-of-range: don't lag-comp this fire
     return t;
 }
 

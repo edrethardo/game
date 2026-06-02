@@ -247,18 +247,28 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         // Skip static props — they have no AI, no movement, no combat
         if (e.enemyType == EnemyType::PROP) continue;
 
-        // Select nearest player as target (for co-op/multiplayer)
-        // Uses pointer so damage is applied to the correct player
+        // Select nearest LIVING player as target (for co-op/multiplayer). Health-check BOTH the
+        // primary and the extras: a dead player's corpse stays where it fell, so without this an
+        // enemy keeps attacking the corpse instead of retargeting to a living player. On a SERVER the
+        // primary can itself be the dead host (tickSharedSystems falls back to P0 when the host dies),
+        // and a just-killed remote can linger one frame in extras (np.isDead is set in serverNetPost,
+        // AFTER this AI pass). Fall back to &player only if EVERYONE is dead (all-dead / game-over
+        // edge) so downstream code keeps a non-null targetPlayer. Pointer so damage hits the right player.
         Player* targetPlayer = &player;
-        if (extraPlayers && extraPlayerCount > 0) {
-            f32 bestDist = lengthSq(e.position - player.position);
-            for (u32 ep = 0; ep < extraPlayerCount; ep++) {
-                if (!extraPlayers[ep]) continue;
-                f32 d = lengthSq(e.position - extraPlayers[ep]->position);
-                if (d < bestDist) {
-                    bestDist = d;
-                    targetPlayer = extraPlayers[ep];
-                }
+        f32  bestDist    = 3.4e38f;
+        bool foundLiving = false;
+        if (player.health > 0.0f) {
+            targetPlayer = &player;
+            bestDist     = lengthSq(e.position - player.position);
+            foundLiving  = true;
+        }
+        for (u32 ep = 0; extraPlayers && ep < extraPlayerCount; ep++) {
+            if (!extraPlayers[ep] || extraPlayers[ep]->health <= 0.0f) continue; // skip null AND dead
+            f32 d = lengthSq(e.position - extraPlayers[ep]->position);
+            if (!foundLiving || d < bestDist) {
+                bestDist     = d;
+                targetPlayer = extraPlayers[ep];
+                foundLiving  = true;
             }
         }
         Vec3 playerEye = targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0};

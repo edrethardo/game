@@ -221,7 +221,9 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     }
 
     // --- Boot skill activation (F key) ---
-    // Equipment legendary skills are cooldown-only (no energy cost deducted from player)
+    // Equipment legendary skills DO cost energy — they draw from the shared pool like class
+    // skills (see below), so the clientNetPre wire-mask must also strip the boot/helm ext bits
+    // when the pool can't afford them (the server casts with energy=999 and won't re-check).
     if (Input::isActionPressed(GameAction::BOOT_SKILL) && !gameplayInputFrozen() &&
         m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class
