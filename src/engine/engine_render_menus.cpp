@@ -64,9 +64,9 @@ void Engine::renderMenu() {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
     FontSystem::setUIScale(uiScale);
 
-    // Title text — hidden on the Single Player submenu (1) and the save-slot
-    // select screen (6) to keep them uncluttered.
-    if (m_menu.subState != 1 && m_menu.subState != 6) {
+    // Title text — hidden on the Single Player submenu (1), Host-mode chooser
+    // (10), and the save-slot select screen (6) to keep them uncluttered.
+    if (m_menu.subState != 1 && m_menu.subState != 6 && m_menu.subState != 10) {
         const char* title = "CURSE OF THE DUNGEON ENGINE";
         f32 titleW = FontSystem::textWidth(title, 3);
         f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;
@@ -74,7 +74,43 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, titleX, titleY, title, {0.9f, 0.85f, 0.7f}, 3);
     }
 
-    if (m_menu.subState == 1) {
+    if (m_menu.subState == 10) {
+        // Host-mode chooser — LAN-only (no UPnP) vs Online (UPnP IGD port mapping).
+        // Mirrors subState 1's two-option layout. The description sub-line under each
+        // option explains the difference so the player doesn't have to guess.
+        const char* subTitle = "Host Game";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
+
+        static const char* subLabels[] = {"LAN only", "Online"};
+        static const char* subDescs[]  = {
+            "Same-network friends only (no router changes)",
+            "Open the port via UPnP so friends across the internet can join"
+        };
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = sh * 0.38f + (1 - i) * 50.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 tw = FontSystem::textWidth(subLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale,
+                                 subLabels[i], tc, 2);
+        }
+
+        // Sub-line description for the highlighted option.
+        u8 hi = (m_menu.subSelection < 2) ? m_menu.subSelection : static_cast<u8>(0);
+        const char* desc = subDescs[hi];
+        f32 dw = FontSystem::textWidth(desc, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - dw) * 0.5f, sh * 0.30f,
+                             desc, {0.7f, 0.7f, 0.8f}, 1);
+
+        const char* hint = Input::isGamepadConnected(0)
+            ? "D-pad, A to confirm, B to go back"
+            : "Up/Down, Enter to confirm, ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 1) {
         // Single player sub-menu — replaces main menu options
         const char* subTitle = "Single Player";
         f32 stW = FontSystem::textWidth(subTitle, 2);

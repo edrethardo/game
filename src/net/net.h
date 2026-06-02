@@ -207,7 +207,14 @@ namespace Net {
     void shutdown();
 
     // Host a listen server. Slot 0 is the local host player.
-    bool hostServer(u16 port = DEFAULT_PORT);
+    // useUpnp=true (default) attempts a UPnP IGD port mapping so friends on other
+    // networks can join without manual router config. Pass false for a strictly
+    // LAN-only host — the engine skips the SSDP discovery (saving the ~1 s
+    // blocking wait) and never asks the router to open a port. Both modes are
+    // identical on the wire; the only difference is whether the WAN gets a
+    // mapping. Switch builds always behave like useUpnp=false (the wrapper is
+    // a stub that returns false instantly).
+    bool hostServer(u16 port = DEFAULT_PORT, bool useUpnp = true);
 
     // Lobby/HUD accessors for the UPnP IGD result of the last hostServer call.
     // getExternalIp() returns the WAN-side IP the router reported when UPnP

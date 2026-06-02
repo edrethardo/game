@@ -89,6 +89,7 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
         return menuMouseHit(sw, sh, sh * 0.2f, 50.0f * uiScale, 6,
                             250.0f * uiScale, 35.0f * uiScale, false);
     case 1: // Singleplayer: 2 items, Y = sh*0.38 + (1-i)*50*uiScale
+    case 10: // Host-mode chooser (LAN/Online): same 2-option layout as subState 1
         return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
                             250.0f * uiScale, 35.0f * uiScale, false);
     case 2: // Class selection: N items top-down
@@ -195,6 +196,36 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
+    // Host-mode chooser (subState 10) — LAN-only vs Online (UPnP). Reached from
+    // the main menu's "Host Game" pick before the shared New/Continue chooser.
+    // The two options differ ONLY in whether Net::hostServer asks the router for
+    // a UPnP IGD mapping; on the wire everything is identical, so a LAN-mode
+    // host can still accept connections from any peer that can reach the LAN IP
+    // (port-forwarded manually, Tailscale, etc.). The default highlight is LAN
+    // (subSelection=0) because that's the strictly-safer / no-side-effects mode.
+    if (m_menu.subState == 10) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_netRole = NetRole::NONE;     // drop the SERVER hint set by main menu
+            m_menu.subState = 0;
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            m_menu.hostOnline = (m_menu.subSelection == 1);  // 0 = LAN, 1 = Online
+            m_menu.subState = 1;            // fall into the shared New/Continue chooser
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
     // Save-slot selection screen (subState 6)
     // m_menu.msg is "new" or "continue" to remember which path brought us here.
     if (m_menu.subState == 6) {
@@ -263,8 +294,11 @@ void Engine::updateMenu(f32 dt) {
                         return;
                     }
                     if (m_netRole == NetRole::SERVER) {
-                        if (!Net::hostServer()) { m_netRole = NetRole::NONE; return; }
-                        LOG_INFO("Hosting game (continue slot %u)...", selectedSlot);
+                        if (!Net::hostServer(DEFAULT_PORT, m_menu.hostOnline)) {
+                            m_netRole = NetRole::NONE; return;
+                        }
+                        LOG_INFO("Hosting game (continue slot %u, mode=%s)...",
+                                 selectedSlot, m_menu.hostOnline ? "Online/UPnP" : "LAN");
                     }
                     m_menu.subState = 0;
                     m_menu.msg = nullptr;
@@ -356,12 +390,13 @@ void Engine::updateMenu(f32 dt) {
                 }
             } else if (m_netRole == NetRole::SERVER) {
                 // Network hosting — skip couch co-op, start server directly
-                if (!Net::hostServer()) {
+                if (!Net::hostServer(DEFAULT_PORT, m_menu.hostOnline)) {
                     m_netRole = NetRole::NONE;
                     LOG_WARN("Failed to start server");
                     return;
                 }
-                LOG_INFO("Hosting game...");
+                LOG_INFO("Hosting game (mode=%s)...",
+                         m_menu.hostOnline ? "Online/UPnP" : "LAN");
                 m_menu.subState = 0;
                 m_splitPlayerCount = 1;
                 startGame(GameStart::NEW_GAME); // wipes + grants starting loadout
@@ -523,7 +558,7 @@ void Engine::updateMenu(f32 dt) {
                     m_splitMode = m_splitMode == 0 ? 1 : 0;
                 } else if (m_menu.subSelection == OPT_RESET) {
                     Input::resetBindingsToDefaults();
-                    Input::setStickSensitivity(1.5f);
+                    Input::setStickSensitivity(1.25f);
                     Input::setGyroSensitivity(5.0f);
                     Input::setStickInvertY(false);
                     Input::setGyroInvertY(true);
@@ -709,12 +744,13 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;
-        case 1: // Host — same flow as singleplayer (new/continue → class selection)
+        case 1: // Host — first pick LAN vs Online (subState 10), then fall into the
+                // shared New/Continue → class selection flow (same as singleplayer).
             m_netRole = NetRole::SERVER;
             m_localPlayerIndex = 0;
             scanSaveSlots();
-            m_menu.subState = 1;
-            m_menu.subSelection = 0;
+            m_menu.subState = 10;
+            m_menu.subSelection = 0;     // default highlight: LAN
             break;
         case 2: // Join — prompt for host IP first, then New/Continue → save slot → class
             m_netRole = NetRole::CLIENT;
@@ -723,9 +759,31 @@ void Engine::updateMenu(f32 dt) {
             m_localPlayerIndex = 0;
             scanSaveSlots(); // populate m_saveSlots so the Continue option is meaningful
             m_clientLoadedFromSave = false; // reset; set later in subState 6 on successful load
+#ifdef __SWITCH__
+            {
+                // Switch has no physical keyboard — pop the system swkbd to type the IP, then
+                // skip the SDL-scancode entry screen (subState 9) and go straight to the
+                // New/Continue chooser. Cancel → back to the main menu (clear the netRole).
+                char buf[sizeof(m_menu.connectAddress)];
+                std::strncpy(buf, m_menu.connectAddress, sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                if (Input::openVirtualKeyboard("Host IP (e.g. 192.168.1.10 or [::1]:7777)",
+                                               buf, buf, sizeof(buf))) {
+                    std::strncpy(m_menu.connectAddress, buf, sizeof(m_menu.connectAddress) - 1);
+                    m_menu.connectAddress[sizeof(m_menu.connectAddress) - 1] = '\0';
+                    m_menu.subState = 1; // proceed straight to New/Continue chooser
+                    m_menu.subSelection = 0;
+                } else {
+                    m_netRole = NetRole::NONE;
+                    m_menu.subState = 0;
+                    m_menu.subSelection = 0;
+                }
+            }
+#else
             m_menu.subState = 9;    // IP entry → on confirm advances to 1 (New/Continue chooser)
             m_menu.subSelection = 0;
             m_menu.connectAddressClearOnType = true;
+#endif
             break;
         case 3: // Options — controls rebinding
             m_menu.subState = 3;

@@ -462,7 +462,7 @@ void Net::shutdown() {
     LOG_INFO("Net: shut down");
 }
 
-bool Net::hostServer(u16 port) {
+bool Net::hostServer(u16 port, bool useUpnp) {
     if (!s_initialized) return false;
     if (s_enetHost) return false;
 
@@ -496,7 +496,11 @@ bool Net::hostServer(u16 port) {
     // fatal — the host stays LAN-reachable either way, and the lobby UI reads
     // Upnp::lastError() to tell the user. On Switch the wrapper is a stub
     // that returns false instantly with "UPnP unsupported on this platform".
-    {
+    //
+    // useUpnp=false (LAN-only host) skips the SSDP discovery entirely — saves
+    // the ~1 s blocking wait at host time and avoids creating any router-level
+    // mapping that would outlive the session.
+    if (useUpnp) {
         char extIp[64] = {0};
         char errMsg[128] = {0};
         if (Upnp::tryAddPortMapping(port, /*discoveryTimeoutMs=*/1000, extIp, errMsg)) {
@@ -504,6 +508,8 @@ bool Net::hostServer(u16 port) {
         } else {
             LOG_INFO("Net: UPnP not available (%s) — host is LAN-only unless port-forwarded", errMsg);
         }
+    } else {
+        LOG_INFO("Net: hosting LAN-only on port %u (UPnP skipped by user choice)", port);
     }
     return true;
 }

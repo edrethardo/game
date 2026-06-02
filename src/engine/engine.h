@@ -100,6 +100,12 @@ private:
         // without having to backspace nine characters first. Reset each time Join is
         // chosen from the main menu.
         bool connectAddressClearOnType = true;
+        // Host-mode selector (subState 10). true → ask the router for a UPnP IGD port
+        // mapping at host time so friends on other networks can join; false → strictly
+        // LAN-only, skip the SSDP discovery and never touch the router. Defaults to the
+        // historical behavior (always-attempt UPnP) so launches that bypass subState 10
+        // don't regress.
+        bool hostOnline = true;
         f32  creditsScroll = 0.0f;  // Y offset for scrolling credits text
     };
     MenuState m_menu;
