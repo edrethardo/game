@@ -343,6 +343,9 @@ void Engine::equipStartingLoadout(u8 playerIdx) {
 void Engine::startGame(GameStart mode) {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
+    // Death-overlay cursor edge flag: clear so a stale value from a prior session can't
+    // suppress freeing the cursor on the next networked death (engine_update.cpp loop).
+    m_deathCursorFree = false;
 
     // Reset per-floor stats for transition screen
     m_transition.floorKillCount = 0;

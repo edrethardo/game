@@ -163,6 +163,13 @@ private:
     bool        m_inventoryOpen = false;
     ViewmodelState  m_viewmodelState;
 
+    // Death-screen mouse control. m_deathHover is the option the mouse is over on the SP
+    // GAME_OVER screen (0=Respawn, 1=Reload, 2=Quit; -1 = none) so the renderer can highlight
+    // it. m_deathCursorFree tracks whether we've freed the cursor for the networked-MP dead
+    // overlay (edge flag — the dead-branch runs every frame, so toggle the OS cursor once).
+    s8          m_deathHover = -1;
+    bool        m_deathCursorFree = false;
+
     // Gameplay input (movement/aim/fire/skills/block/dodge) is frozen while a blocking UI is
     // open — the inventory OR the in-game pause menu (m_menu.confirmQuit). In SP the pause
     // early-returns and freezes the whole world; in MP the world keeps running for everyone

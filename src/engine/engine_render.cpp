@@ -207,6 +207,10 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
         f32 floorW = FontSystem::textWidth(floorStr, 2);
         FontSystem::drawText(sw, sh, (sw - floorW) * 0.5f, sh * 0.48f, floorStr, {0.6f, 0.6f, 0.6f}, 2);
 
+        // Mouse hover highlight: m_deathHover is the option/button under the cursor (set in the
+        // GAME_OVER input handler). Hovered rows render white; the layout here MUST match the
+        // hit-tests in engine_update.cpp (deathOptionHit / deathConfirmHit).
+        const Vec3 kHoverCol = {1.0f, 1.0f, 1.0f};
         if (m_menu.confirmQuit) {
             // "Are you sure?" overlay
             const char* confirmTxt = "Quit to menu?";
@@ -217,9 +221,11 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
             f32 cx = static_cast<f32>(sw) * 0.5f;
             bool qp = Input::isGamepadConnected(0);
             HUD::drawKeySymbol(sw, sh, cx - 60.0f, cy, qp ? "A" : "Ent", true);
-            FontSystem::drawText(sw, sh, cx - 30.0f, cy + 4.0f, "Yes", {0.8f, 0.8f, 0.8f}, 1);
+            FontSystem::drawText(sw, sh, cx - 30.0f, cy + 4.0f, "Yes",
+                                 m_deathHover == 0 ? kHoverCol : Vec3{0.8f, 0.8f, 0.8f}, 1);
             HUD::drawKeySymbol(sw, sh, cx + 15.0f, cy, qp ? "B" : "Esc", true);
-            FontSystem::drawText(sw, sh, cx + 43.0f, cy + 4.0f, "No", {0.8f, 0.8f, 0.8f}, 1);
+            FontSystem::drawText(sw, sh, cx + 43.0f, cy + 4.0f, "No",
+                                 m_deathHover == 1 ? kHoverCol : Vec3{0.8f, 0.8f, 0.8f}, 1);
         } else {
             // Three options with key icons
             f32 cx = static_cast<f32>(sw) * 0.5f;
@@ -228,19 +234,19 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
             bool pad = Input::isGamepadConnected(0);
             HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "A" : "Spc", true);
             FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Respawn at entrance",
-                                 {0.5f, 0.9f, 0.5f}, 1);
+                                 m_deathHover == 0 ? kHoverCol : Vec3{0.5f, 0.9f, 0.5f}, 1);
 
             optY -= 25.0f;
             // Only show "Reload last save" in singleplayer
             if (m_netRole == NetRole::NONE) {
                 HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "X" : "Ent", true);
                 FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
-                                     {0.5f, 0.6f, 0.9f}, 1);
+                                     m_deathHover == 1 ? kHoverCol : Vec3{0.5f, 0.6f, 0.9f}, 1);
                 optY -= 25.0f;
             }
             HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "-" : "Esc", true);
             FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Quit to menu",
-                                 {0.7f, 0.4f, 0.4f}, 1);
+                                 m_deathHover == 2 ? kHoverCol : Vec3{0.7f, 0.4f, 0.4f}, 1);
         }
 
         HUD::flush(sw, sh);
@@ -678,7 +684,11 @@ void Engine::render(f32 alpha) {
                              deathText, {0.8f, 0.1f, 0.1f}, 3);
 
         bool pad = Input::isGamepadConnected(0);
-        const char* respawnText = pad ? "Press A to respawn" : "Press Space to respawn";
+        // Networked MP frees the cursor while dead (engine_update.cpp), so the prompt is
+        // clickable; advertise that. Split-screen co-op keeps the cursor captured (key only).
+        const char* respawnText = pad ? "Press A to respawn"
+                                : (m_netRole != NetRole::NONE) ? "Press Space or click to respawn"
+                                : "Press Space to respawn";
         f32 rw = FontSystem::textWidth(respawnText, 2);
         FontSystem::drawText(vpW, vpH, (vpW - rw) * 0.5f, vpH * 0.4f,
                              respawnText, {0.7f, 0.7f, 0.7f}, 2);

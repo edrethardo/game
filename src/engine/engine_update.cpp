@@ -58,6 +58,65 @@ extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
 // ---------------------------------------------------------------------------
+// Death-screen mouse hit-tests. Layout MUST match the renderer in engine_render.cpp
+// (the SP GAME_OVER screen): options at optY = sh*0.35 with -25 px per row
+// (0=Respawn, 1=Reload, 2=Quit); the quit-confirm Yes/No sit at cy = sh*0.26. HUD coords
+// are y-up, so flip the mouse Y (hudY = sh - my) — same convention as menuMouseHit
+// (engine_menu.cpp). Returns the index under the cursor, or -1.
+// ---------------------------------------------------------------------------
+static s8 deathOptionHit(u32 sw, u32 sh) {
+    s32 mx, my; Input::getMousePosition(mx, my);
+    f32 hudX = static_cast<f32>(mx);
+    f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
+    f32 cx   = static_cast<f32>(sw) * 0.5f;
+    if (hudX < cx - 90.0f || hudX > cx + 200.0f) return -1; // key icon (cx-80) + label span
+    const f32 base = static_cast<f32>(sh) * 0.35f;
+    for (s8 i = 0; i < 3; i++) {
+        f32 rowY = base - static_cast<f32>(i) * 25.0f; // matches render: optY -= 25 per option
+        if (hudY >= rowY - 6.0f && hudY <= rowY + 18.0f) return i;
+    }
+    return -1;
+}
+// Quit-confirm overlay: 0 = Yes (≈cx-60), 1 = No (≈cx+15), -1 = none.
+static s8 deathConfirmHit(u32 sw, u32 sh) {
+    s32 mx, my; Input::getMousePosition(mx, my);
+    f32 hudX = static_cast<f32>(mx);
+    f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
+    f32 cx   = static_cast<f32>(sw) * 0.5f;
+    f32 cy   = static_cast<f32>(sh) * 0.26f;
+    if (hudY < cy - 6.0f || hudY > cy + 18.0f) return -1;
+    if (hudX >= cx - 65.0f && hudX <= cx + 5.0f)  return 0; // Yes
+    if (hudX >= cx + 10.0f && hudX <= cx + 85.0f) return 1; // No
+    return -1;
+}
+// Networked-MP dead overlay: is the cursor over the "Press … to respawn" prompt
+// (centered, y = vpH*0.4)? Networked MP viewport == full window.
+static bool deathRespawnPromptHit(u32 sw, u32 sh) {
+    s32 mx, my; Input::getMousePosition(mx, my);
+    f32 hudX = static_cast<f32>(mx);
+    f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
+    f32 cx   = static_cast<f32>(sw) * 0.5f;
+    f32 y    = static_cast<f32>(sh) * 0.4f;
+    return hudX >= cx - 220.0f && hudX <= cx + 220.0f && hudY >= y - 8.0f && hudY <= y + 28.0f;
+}
+// In-game pause menu (m_menu.confirmQuit while IN_GAME): two 250×28 options centered at cx,
+// y = sh*0.5 + 10 - i*35 (0=Continue, 1=Save and Quit). Layout MUST match engine_hud.cpp's
+// pause overlay. Returns the option under the cursor, or -1.
+static s8 pauseMenuHit(u32 sw, u32 sh) {
+    s32 mx, my; Input::getMousePosition(mx, my);
+    f32 hudX = static_cast<f32>(mx);
+    f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
+    f32 cx   = static_cast<f32>(sw) * 0.5f;
+    f32 cy   = static_cast<f32>(sh) * 0.5f;
+    if (hudX < cx - 125.0f || hudX > cx + 125.0f) return -1; // 250-wide centered box
+    for (s8 i = 0; i < 2; i++) {
+        f32 y = cy + 10.0f - static_cast<f32>(i) * 35.0f;
+        if (hudY >= y && hudY <= y + 28.0f) return i;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
 // Update (60 Hz fixed timestep) — dispatches based on role
 // ---------------------------------------------------------------------------
 void Engine::update(f32 dt) {
@@ -68,20 +127,35 @@ void Engine::update(f32 dt) {
 
     // Death screen input — handle before the generic ESC check so ESC goes to menu
     if (m_gameState == GameState::GAME_OVER) {
+        // Mouse control: the cursor was freed on death entry. Hover highlights an option
+        // (m_deathHover, read by the renderer) and a left-click activates it, alongside the
+        // keyboard/gamepad bindings. The hit-test layout mirrors engine_render.cpp.
+        const u32  dsw    = Window::getWidth();
+        const u32  dsh    = Window::getHeight();
+        const bool dclick = Input::isMouseButtonPressed(MOUSE_LEFT);
         if (m_menu.confirmQuit) {
+            const s8 ch = deathConfirmHit(dsw, dsh);
+            m_deathHover = ch;
             // "Are you sure?" confirmation before quitting to menu
-            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_Y)) {
+            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_Y)
+                || (dclick && ch == 0)) {
                 m_menu.confirmQuit = false;
+                m_deathHover = -1;
                 m_gameState = GameState::MENU;
                 AudioSystem::stopMusic();
                 Input::setRelativeMouseMode(false);
             }
-            if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_N)) {
+            if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_N)
+                || (dclick && ch == 1)) {
                 m_menu.confirmQuit = false;
+                m_deathHover = -1;
             }
         } else {
-            // A / Space = revive at entrance
-            if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            const s8 hov = deathOptionHit(dsw, dsh);
+            if (hov != m_deathHover) { m_deathHover = hov; if (hov >= 0) AudioSystem::play(SfxId::MENU_HOVER); }
+            // A / Space / click = revive at entrance
+            if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+                || (dclick && hov == 0)) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local player's net slot
                 m_localPlayer.velocity = {0, 0, 0};
@@ -105,11 +179,14 @@ void Engine::update(f32 dt) {
                     // this path correct rather than leaving the old dropped-input hack.
                     sendRespawnRequest();
                 }
+                m_deathHover = -1;
+                Input::setRelativeMouseMode(true); // back to gameplay — re-capture the cursor
                 m_gameState = GameState::IN_GAME;
             }
-            // Enter/X = reload last save (singleplayer only)
+            // Enter/X / click = reload last save (singleplayer only)
             if (m_netRole == NetRole::NONE &&
-                (Input::isActionPressed(GameAction::PICKUP) || Input::isKeyPressed(SDL_SCANCODE_RETURN))) {
+                (Input::isActionPressed(GameAction::PICKUP) || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+                 || (dclick && hov == 1))) {
                 if (loadGame(m_activeSaveSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
                 } else {
@@ -118,12 +195,15 @@ void Engine::update(f32 dt) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.invulnTimer = 2.5f;
                 m_inventoryOpen = false;
+                m_deathHover = -1;
+                Input::setRelativeMouseMode(true); // re-capture the cursor for gameplay
                 startGame(GameStart::CONTINUE); // loadGame already restored gear/HP
                 m_gameState = GameState::IN_GAME;
             }
-            // ESC/B = ask to quit
-            if (Input::isActionPressed(GameAction::PAUSE)) {
+            // ESC/B / click = ask to quit
+            if (Input::isActionPressed(GameAction::PAUSE) || (dclick && hov == 2)) {
                 m_menu.confirmQuit = true;
+                m_deathHover = -1;
             }
         }
         // Keep enemies and projectiles ticking while dead so they walk home
@@ -147,6 +227,15 @@ void Engine::update(f32 dt) {
 
     // Pause/quit selection menu
     if (m_menu.confirmQuit) {
+        // Mouse control: the cursor was freed when the pause opened. Hover selects an option
+        // and a left-click confirms it, alongside the keyboard/gamepad bindings. Layout-matched
+        // hit-test in pauseMenuHit (mirrors engine_hud.cpp).
+        const s8   ph     = pauseMenuHit(Window::getWidth(), Window::getHeight());
+        const bool pclick = Input::isMouseButtonPressed(MOUSE_LEFT);
+        if (ph >= 0 && static_cast<u8>(ph) != m_menu.subSelection) {
+            m_menu.subSelection = static_cast<u8>(ph);
+            AudioSystem::play(SfxId::MENU_HOVER);
+        }
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) m_menu.subSelection--;
         }
@@ -157,7 +246,8 @@ void Engine::update(f32 dt) {
             m_menu.confirmQuit = false;          // ESC/B = resume
             Input::setRelativeMouseMode(true);   // recapture the cursor for gameplay
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || (pclick && ph >= 0)) {
             if (m_menu.subSelection == 0) {
                 // Continue Playing
                 m_menu.confirmQuit = false;
@@ -300,12 +390,31 @@ void Engine::update(f32 dt) {
             swapInPlayer(sp);             // sets m_localPlayerIndex = sp (the active player)
             Input::setActivePlayer(sp);
 
+            // Networked-MP dead overlay cursor: free while this (single, local) player is dead so
+            // the "Respawn" prompt is clickable, re-capture once alive. Single owner, edge-driven
+            // via m_deathCursorFree so we only hit the OS on a transition. Gated to networked play
+            // (split-screen shares one mouse with a still-alive teammate — leave it captured), and
+            // reset on startGame so a stale flag from a prior session can't suppress the free.
+            if (m_netRole != NetRole::NONE) {
+                if (m_playerDead[sp] && !m_deathCursorFree) {
+                    Input::setRelativeMouseMode(false); m_deathCursorFree = true;
+                } else if (!m_playerDead[sp] && m_deathCursorFree) {
+                    Input::setRelativeMouseMode(true);  m_deathCursorFree = false;
+                }
+            }
+
             if (m_playerDead[sp]) {
+                // Networked-MP dead overlay: the cursor is freed at the top of the loop, so a
+                // click on the "Respawn" prompt counts as respawn input (split-screen leaves the
+                // cursor captured — see the loop-top block — so this stays false there).
+                const bool deadClickRespawn = (m_netRole != NetRole::NONE) &&
+                    Input::isMouseButtonPressed(MOUSE_LEFT) &&
+                    deathRespawnPromptHit(Window::getWidth(), Window::getHeight());
                 // Dead player: check for respawn input, skip gameplay. Gamepad JUMP is routed
                 // to this player's controller (setActivePlayer above); keyboard Space counts
                 // only for P0 (L4 — Space is P0's key and must not respawn the controller P2).
                 if (Input::isActionPressed(GameAction::JUMP) ||
-                    (sp == 0 && Input::isKeyPressed(SDL_SCANCODE_SPACE))) {
+                    (sp == 0 && Input::isKeyPressed(SDL_SCANCODE_SPACE)) || deadClickRespawn) {
                     // (M4) Enemies are already sent home when the last player dies (the co-op
                     // death path calls resetEnemiesToRooms), so nothing to reset on respawn —
                     // the old allDead computation here was dead code.
@@ -753,6 +862,10 @@ void Engine::gameUpdate(f32 dt) {
         // True singleplayer: full game over screen — send enemies home immediately
         resetEnemiesToRooms();
         m_gameState = GameState::GAME_OVER;
+        // Free the cursor so the death-screen options are clickable (the screen is a full-screen
+        // takeover; re-captured on respawn/reload). Mirrors the menu's setRelativeMouseMode(false).
+        Input::setRelativeMouseMode(false);
+        m_deathHover = -1;
         AudioSystem::play(SfxId::PLAYER_DEATH);
         return;
     }
