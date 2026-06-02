@@ -92,6 +92,14 @@ struct NetPlayer {
     f32  burnTimer         = 0.0f;
     f32  burnDps           = 0.0f;
     f32  freezeTimer       = 0.0f;
+    // Server-side Wanderer dodge-roll movement state (mirrors the client's DodgeState roll
+    // fields). Previously the server only granted i-frames and let the client predict the
+    // 4 m roll alone, so a guest's dodge diverged ~4 m from the server and rubber-banded.
+    // The server now replays the same velocity burst from these. Not serialized as fields —
+    // SnapPlayer.dodgeFlags bit0 carries `rollTimer > 0` so remotes animate the roll.
+    Vec3 rollDirection     = {0,0,0}; // normalized XZ roll direction, captured at dodge-start
+    f32  rollTimer         = 0.0f;    // countdown during the 0.5 s roll
+    f32  rollCooldownTimer = 0.0f;    // 1.0 s lockout after a roll (mirrors client cooldown)
     bool blocking          = false;
     f32  blockTimer        = 0.0f;
     bool isDead            = false;
@@ -137,8 +145,12 @@ struct NetPlayer {
 
 // Number of consecutive inputs packed into each CL_INPUT packet (oldest→newest).
 // Redundancy benefit: one dropped UDP packet no longer drops an input — the next
-// packet still carries it. Three consecutive losses required to lose an input at all.
-static constexpr u32 INPUT_WINDOW_SIZE = 4;
+// packet still carries it. At 8, seven consecutive losses (~120 ms at 60 Hz) are
+// needed to actually lose an input, covering bursty Wi-Fi/cellular loss. Cost is
+// 8×14+4 = 116 B per CL_INPUT (~7 KB/s up) — negligible. The server's per-input drain
+// (collectUnprocessedInputs) processes each new clientTick once, so the extra
+// redundancy never double-applies. Was 4 (~50 ms of cover).
+static constexpr u32 INPUT_WINDOW_SIZE = 8;
 
 // Serialize up to `count` NetInputs (≤ INPUT_WINDOW_SIZE) into `outBuf`. Wire layout:
 //   u8  windowCount

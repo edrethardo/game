@@ -1,0 +1,38 @@
+#pragma once
+
+#include "core/types.h"
+
+// Adaptive interpolation-delay helpers (consumed by client.cpp). Pure + header-only so they
+// can be unit-tested without the heavy Client translation unit (SDL/GL/etc.).
+//
+// Remote players/entities/projectiles render at a delayed "render time" = now - delay, so the
+// snapshot ring acts as a jitter buffer. With a FIXED delay, a single late snapshot pushes the
+// render time past the newest sample → freeze/extrapolation/stutter. Widening the delay with
+// observed snapshot-arrival jitter rides spikes out; it must shrink back SLOWLY when the link
+// calms, because shrinking fast jumps the render clock forward and skips a snapshot (a visible
+// stutter — the opposite of what we want).
+
+// RFC 3550-style smoothed jitter: EMA (gain 1/16) of the absolute deviation of the latest
+// inter-arrival interval from the nominal send interval. All times in seconds.
+inline f32 updateArrivalJitter(f32 prevJitter, f32 deltaSec, f32 nominalSec) {
+    f32 dev = deltaSec - nominalSec;
+    if (dev < 0.0f) dev = -dev;
+    return prevJitter + (dev - prevJitter) * (1.0f / 16.0f);
+}
+
+// New render delay from the smoothed jitter. Target = base + K*jitter, clamped to
+// [base, maxd]; approached asymmetrically — grow fast toward a larger target (cover the
+// spike now), shrink slow toward a smaller one (never jump the render clock forward).
+inline f32 computeInterpDelay(f32 prevDelay, f32 jitterSec, f32 baseSec, f32 maxSec) {
+    constexpr f32 JITTER_K    = 2.5f;   // headroom = 2.5× smoothed jitter
+    constexpr f32 GROW_RATE   = 0.5f;   // approach a larger target fast
+    constexpr f32 SHRINK_RATE = 0.05f;  // approach a smaller target slowly
+    f32 target = baseSec + JITTER_K * jitterSec;
+    if (target < baseSec) target = baseSec;
+    if (target > maxSec)  target = maxSec;
+    const f32 rate = (target > prevDelay) ? GROW_RATE : SHRINK_RATE;
+    f32 next = prevDelay + rate * (target - prevDelay);
+    if (next < baseSec) next = baseSec;
+    if (next > maxSec)  next = maxSec;
+    return next;
+}

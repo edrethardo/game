@@ -131,7 +131,7 @@ void Engine::tickPassiveEquipment() {
 // ---------------------------------------------------------------------------
 void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
     // --- Class skill selection (keys 1-4) ---
-    if (!m_inventoryOpen) {
+    if (!gameplayInputFrozen()) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         for (u8 s = 0; s < 4; s++) {
             if (Input::isActionPressed(static_cast<GameAction>(static_cast<u8>(GameAction::SKILL_1) + s))) {
@@ -145,7 +145,7 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
     }
 
     // --- Class skill activation (right-click) ---
-    if (Input::isActionPressed(GameAction::CLASS_SKILL) && !m_inventoryOpen) {
+    if (Input::isActionPressed(GameAction::CLASS_SKILL) && !gameplayInputFrozen()) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         u8 slot = m_activeClassSkill;
         u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
@@ -222,7 +222,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
 
     // --- Boot skill activation (F key) ---
     // Equipment legendary skills are cooldown-only (no energy cost deducted from player)
-    if (Input::isActionPressed(GameAction::BOOT_SKILL) && !m_inventoryOpen &&
+    if (Input::isActionPressed(GameAction::BOOT_SKILL) && !gameplayInputFrozen() &&
         m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class
         // skills): copy the pool in, let tryActivate spend energyCost, copy back on success.
@@ -246,7 +246,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     }
 
     // --- Helmet skill activation (G key) ---
-    if (Input::isActionPressed(GameAction::HELMET_SKILL) && !m_inventoryOpen &&
+    if (Input::isActionPressed(GameAction::HELMET_SKILL) && !gameplayInputFrozen() &&
         m_helmetSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class skills).
         m_helmetSkillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].energy;

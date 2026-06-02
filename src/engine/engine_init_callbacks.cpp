@@ -61,6 +61,29 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
+// Spawn the projectile AoE splash VFX at an impact point: a floor-snapped fire-FX ring,
+// an explosion particle burst, and a small camera shake. Shared by the host's splash
+// callback and the CLIENT's PROJECTILE_SPLASH event handler so both render identically —
+// the client can't fire the callback itself (its ProjectileSystem::update is gated off).
+void Engine::spawnSplashFX(Vec3 position, f32 radius) {
+    // Snap the fire effect to floor level so it doesn't render underground.
+    u32 gx, gz;
+    Vec3 fxPos = position;
+    if (LevelGridSystem::worldToGrid(m_level.grid, position, gx, gz) &&
+        !LevelGridSystem::isSolid(m_level.grid, gx, gz)) {
+        fxPos.y = LevelGridSystem::getFloorHeight(m_level.grid, gx, gz) + 0.1f;
+    }
+    for (u32 i = 0; i < Engine::MAX_FIRE_FX; i++) {
+        if (!m_fx.fireFX[i].active) {
+            m_fx.fireFX[i] = {fxPos, radius, 1.0f, true};
+            break;
+        }
+    }
+    // Fiery burst at the impact point.
+    ParticleSystem::spawnExplosion(m_particles, position, radius);
+    m_camera.shake.trigger(0.06f, 0.3f);
+}
+
 void Engine::initCallbacks() {
     // Wire particle pool and screen shake into combat, skill, and projectile systems
     Combat::setFXTargets(&m_particles, &m_camera.shake);
@@ -129,25 +152,30 @@ void Engine::initCallbacks() {
         Net::broadcastReliable(buf, off);
     });
 
-    // Splash effect callback — spawns fire VFX at impact point
+    // Splash effect callback — spawns fire VFX at impact point. Fires only inside
+    // ProjectileSystem::update, which is gated off on CLIENT (N4 ghost-sim removal), so the
+    // host additionally broadcasts a PROJECTILE_SPLASH event (below) for guests to replay.
     ProjectileSystem::setSplashCallback([](Vec3 position, f32 radius) {
         if (!s_engine) return;
-        // Snap fire effect to floor level so it doesn't render underground
-        u32 gx, gz;
-        Vec3 fxPos = position;
-        if (LevelGridSystem::worldToGrid(s_engine->m_level.grid, position, gx, gz) &&
-            !LevelGridSystem::isSolid(s_engine->m_level.grid, gx, gz)) {
-            fxPos.y = LevelGridSystem::getFloorHeight(s_engine->m_level.grid, gx, gz) + 0.1f;
+        s_engine->spawnSplashFX(position, radius); // local FX (host + singleplayer)
+
+        // SERVER: replicate to clients — their local sim never fires this callback. Send the
+        // RAW (pre-floor-snap) position so the client re-runs the identical snap in
+        // spawnSplashFX. Mirrors the DAMAGE_NUMBER broadcast idiom (engine_update.cpp).
+        if (s_engine->m_netRole == NetRole::SERVER) {
+            u8 buf[sizeof(PacketHeader) + 17]; // hdr(4) + eventType(1) + pos(12) + radius(4)
+            PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+            hdr->type  = NetPacketType::SV_EVENT;
+            hdr->flags = 0;
+            hdr->seq   = 0;
+            u32 off = sizeof(PacketHeader);
+            buf[off++] = static_cast<u8>(NetEventType::PROJECTILE_SPLASH);
+            std::memcpy(buf + off, &position.x, 4); off += 4;
+            std::memcpy(buf + off, &position.y, 4); off += 4;
+            std::memcpy(buf + off, &position.z, 4); off += 4;
+            std::memcpy(buf + off, &radius,     4); off += 4;
+            Net::broadcastReliable(buf, off);
         }
-        for (u32 i = 0; i < Engine::MAX_FIRE_FX; i++) {
-            if (!s_engine->m_fx.fireFX[i].active) {
-                s_engine->m_fx.fireFX[i] = {fxPos, radius, 1.0f, true};
-                break;
-            }
-        }
-        // Fireball splash particles — fiery burst at impact point
-        ParticleSystem::spawnExplosion(s_engine->m_particles, position, radius);
-        s_engine->m_camera.shake.trigger(0.06f, 0.3f);
     });
 
     // Projectile hit callback — triggers weapon on-hit procs for projectile weapons

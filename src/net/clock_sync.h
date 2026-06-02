@@ -22,6 +22,13 @@ struct ClockSync {
     u32    pongsReceived      = 0;
     u32    snapshotsApplied   = 0;
 
+    // Bootstrap OWT outlier rejection. Only ~3 handshake pongs are ever sent (RTT is
+    // frozen after — runtime refinement is snapshot-driven), so a single bad handshake
+    // sample would otherwise skew the entire session's clock. Collect the samples and use
+    // their MEDIAN instead of seeding from the first and EMA-ing.
+    f32    owtSamples[3]      = {0.0f, 0.0f, 0.0f};
+    u8     owtSampleCount     = 0;
+
     static constexpr f32 SNAP_GAIN   = 0.1f;
     static constexpr f32 OWT_GAIN    = 0.2f;
     static constexpr f64 LARGE_DELTA = 6.0;
@@ -39,4 +46,8 @@ namespace ClockSyncOps {
 
     f64 currentServerTickEst(const ClockSync& cs, f64 nowSec);
     u32 currentServerTickEstU32(const ClockSync& cs, f64 nowSec);
+
+    // Median of up to 3 one-way-trip samples (pure; used for robust bootstrap). Odd count
+    // returns the middle element (rejects one outlier); even count averages the two middle.
+    f32 medianOwt(const f32* samples, u8 n);
 }

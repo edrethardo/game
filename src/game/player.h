@@ -121,4 +121,11 @@ namespace PlayerController {
     // `player.yaw/pitch/position` without mutating them (PlayerController::update later
     // in the frame produces the identical update via applyMovement).
     NetInput captureLocalInput(const Player& player, u32 tick, u8 weaponId);
+
+    // Wanderer dodge roll direction from the WASD held at dodge-start + facing yaw.
+    // Pure + shared so the client (PlayerController::update) and the server
+    // (updateNetPlayerFromInput, deriving w/s/a/d from NetInput.moveFlags) compute the
+    // IDENTICAL roll vector — they must agree or the server-replicated dodge diverges
+    // from the client's prediction. No directional input held → rolls straight forward.
+    Vec3 computeRollDirection(bool w, bool s, bool a, bool d, f32 yaw);
 }

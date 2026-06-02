@@ -808,8 +808,11 @@ void Engine::gameUpdate(f32 dt) {
                            : 0.0f;
     }
 
-    // Player movement/aiming — disabled while inventory is open
-    if (!m_inventoryOpen) {
+    // Player movement/aiming — disabled while a blocking UI is open (inventory or, in MP, the
+    // pause menu). gameplayInputFrozen() generalizes the old !m_inventoryOpen so a paused MP
+    // player stands still like an inventory-open one (dodge activation lives in
+    // PlayerController::update below, so it's frozen too).
+    if (!gameplayInputFrozen()) {
         // Speed modifiers: blocking slows, buffs speed up
         f32 savedSpeed = m_localPlayer.moveSpeed;
         if (m_localPlayer.blocking) m_localPlayer.moveSpeed *= 0.4f;
@@ -848,8 +851,8 @@ void Engine::gameUpdate(f32 dt) {
     // Sync to NetPlayer for consistent rendering
     syncLocalPlayerToNetPlayer();
 
-    // Target lock and weapon fire — disabled while inventory is open
-    if (!m_inventoryOpen) {
+    // Target lock and weapon fire — disabled while a blocking UI is open (inventory / pause menu).
+    if (!gameplayInputFrozen()) {
         updateTargetLock(dt);
         handleWeaponFire(dt);
     }
@@ -860,9 +863,9 @@ void Engine::gameUpdate(f32 dt) {
     // View bobs at FINEANGLES/20 per tic (period = 0.571s at 35Hz).
     {
         // Bob amplitude from speed squared (Doom: momentum² / 4, capped)
-        // Freeze bob while inventory is open so the view stays still
-        f32 vx = m_inventoryOpen ? 0.0f : m_localPlayer.velocity.x;
-        f32 vz = m_inventoryOpen ? 0.0f : m_localPlayer.velocity.z;
+        // Freeze bob while a blocking UI is open (inventory / pause menu) so the view stays still
+        f32 vx = gameplayInputFrozen() ? 0.0f : m_localPlayer.velocity.x;
+        f32 vz = gameplayInputFrozen() ? 0.0f : m_localPlayer.velocity.z;
         f32 speedSq = vx * vx + vz * vz;
         // Normalize: at max run speed (~6 m/s), speedSq=36. Scale so max=1.0
         f32 bob = speedSq * 0.028f; // ~1.0 at full sprint
@@ -931,7 +934,7 @@ void Engine::gameUpdate(f32 dt) {
 
     // --- Shield blocking (Ctrl / Left Trigger) ---
     {
-        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !m_inventoryOpen;
+        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !gameplayInputFrozen();
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;
             m_localPlayer.blockTimer = 0.0f; // start perfect block window

@@ -155,6 +155,13 @@ enum struct NetEventType : u8 {
     //   bit0=isHeal, bit1=isCrit). Phase 2.1: now reliable so packet loss doesn't
     //   silently drop the user-facing "I hit them" feedback.
     DAMAGE_NUMBER   = 0x03,
+    // Projectile AoE splash impact (fireball/molotov/explosive-round/freeze-trap). The splash
+    // VFX callback fires inside ProjectileSystem::update, which is gated off on CLIENT (N4
+    // ghost-sim removal) — so the host must signal it or guests see no splash. Payload:
+    //   posX, posY, posZ (f32×3 = 12 B) + radius (f32 = 4 B). The client re-runs the same
+    //   floor-snap + FX spawn via Engine::spawnSplashFX. Mirrors HITSCAN_IMPACT; reliable
+    //   (splashes are infrequent and a missed explosion is jarring).
+    PROJECTILE_SPLASH = 0x04,
 };
 
 // 4-byte packet header on every packet.

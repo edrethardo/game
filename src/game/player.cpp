@@ -10,6 +10,21 @@
 
 static constexpr f32 MAX_PITCH = 89.0f * 3.14159265f / 180.0f;
 
+// Shared roll-direction math (see player.h). Pure so client + server agree exactly.
+Vec3 PlayerController::computeRollDirection(bool w, bool s, bool a, bool d, f32 yaw) {
+    f32 cosY = cosf(yaw);
+    f32 sinY = sinf(yaw);
+    Vec3 flatFwd   = normalize(Vec3{-sinY, 0.0f, -cosY});
+    Vec3 flatRight = normalize(cross(flatFwd, {0.0f, 1.0f, 0.0f}));
+    Vec3 dir = {0, 0, 0};
+    if (w) dir += flatFwd;
+    if (s) dir -= flatFwd;
+    if (d) dir += flatRight;
+    if (a) dir -= flatRight;
+    if (lengthSq(dir) < 0.001f) dir = flatFwd; // no WASD held → roll straight forward
+    return normalize(dir);
+}
+
 // ---------------------------------------------------------------------------
 // Shared movement logic (operates on raw values, shared by Player & NetPlayer)
 // ---------------------------------------------------------------------------
@@ -121,6 +136,14 @@ void PlayerController::update(Player& player, f32 dt) {
         effectiveSpeed *= 0.4f; // 60% slow
         player.slowTimer -= dt;
     }
+    // Freeze stops all movement — predicted locally to match the server
+    // (updateNetPlayerFromInput zeroes speed when frozen). Without this the client kept
+    // walking at full speed while the server held position → frozen players slid forward
+    // then snapped back. freezeTimer decay stays server-authoritative + snapshot-driven
+    // (we apply the effect but don't tick the timer here), same as slow's ownership split.
+    if (player.freezeTimer > 0.0f) {
+        effectiveSpeed = 0.0f;
+    }
 
     // Merge keyboard + left stick for movement
     bool w = Input::isActionDown(GameAction::MOVE_FORWARD)  || Input::getStickY(false) < -0.3f;
@@ -138,19 +161,13 @@ void PlayerController::update(Player& player, f32 dt) {
         ds.rollAngle = 0.0f;
         ds.pitchAngle = 0.0f;
 
-        // Direction from WASD, or forward if no directional input held
+        // Direction from WASD, or forward if no directional input held (shared with
+        // the server's dodge replication so both compute the identical roll vector).
         f32 cosY = cosf(player.yaw);
         f32 sinY = sinf(player.yaw);
         Vec3 flatFwd   = normalize(Vec3{-sinY, 0.0f, -cosY});
         Vec3 flatRight = normalize(cross(flatFwd, {0.0f, 1.0f, 0.0f}));
-
-        Vec3 dir = {0, 0, 0};
-        if (w) dir += flatFwd;
-        if (s) dir -= flatFwd;
-        if (d) dir += flatRight;
-        if (a) dir -= flatRight;
-        if (lengthSq(dir) < 0.001f) dir = flatFwd;
-        ds.rollDirection = normalize(dir);
+        ds.rollDirection = computeRollDirection(w, s, a, d, player.yaw);
 
         // Camera rotation axis depends on dodge direction relative to facing:
         // Forward  = front flip (pitch), Backward = back flip (pitch),
@@ -278,14 +295,41 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
                   (input.moveFlags & INPUT_JUMP)     != 0,
                   dt);
 
-    // Server-side Wanderer dodge: grant i-frames for the roll duration.
-    // Full dodge movement is client-predicted; server only needs to track invulnerability.
-    // Replayed during reconcile too: setting invulnTimer = 0.3 if it's currently <=0 is
-    // idempotent for the same input, and re-arming here keeps the local view honest after
-    // reconcile snaps invulnTimer back to the (older) snapshot value — otherwise a freshly
-    // predicted dodge briefly looks like it had no i-frames until the server's ack catches up.
-    if ((input.extFlags & INPUT_EX_DODGE) && np.invulnTimer <= 0.0f) {
-        np.invulnTimer = 0.3f;
+    // Server-side Wanderer dodge replication. The server now replays the SAME 4 m roll the
+    // client predicts (previously it only granted i-frames, so a guest's dodge diverged ~4 m
+    // and rubber-banded). rollDirection is recomputed from THIS input's WASD + yaw — identical
+    // to what the client computed at dodge-start — so no wire field is needed. Timers only
+    // advance on live server processing (!movementOnly); during a reconcile replay the
+    // snapshot owns timer decay, but the velocity override still runs so position re-integrates.
+    constexpr f32 ROLL_SPEED = 8.0f; // 4 m over 0.5 s — matches client ROLL_SPEED
+    if (!movementOnly) {
+        // Start a roll on the dodge edge when not already rolling and off cooldown (mirrors
+        // PlayerController::update's gate). invulnTimer = 0.3 matches the client (set
+        // unconditionally there) so server and client agree on the i-frame window.
+        if ((input.extFlags & INPUT_EX_DODGE) && np.rollTimer <= 0.0f && np.rollCooldownTimer <= 0.0f) {
+            const bool w = (input.moveFlags & INPUT_FORWARD)  != 0;
+            const bool s = (input.moveFlags & INPUT_BACKWARD) != 0;
+            const bool a = (input.moveFlags & INPUT_LEFT)     != 0;
+            const bool d = (input.moveFlags & INPUT_RIGHT)    != 0;
+            np.rollDirection = PlayerController::computeRollDirection(w, s, a, d, np.yaw);
+            np.rollTimer     = 0.5f; // matches client ROLL_DURATION
+            np.invulnTimer   = 0.3f;
+        }
+    }
+    // Override horizontal velocity for every rolling frame (BEFORE the timer decrements, as the
+    // client does) so serverNetPre's per-input moveAndSlide carries the 8 m/s burst.
+    if (np.rollTimer > 0.0f) {
+        np.velocity.x = np.rollDirection.x * ROLL_SPEED;
+        np.velocity.z = np.rollDirection.z * ROLL_SPEED;
+    }
+    if (!movementOnly) {
+        if (np.rollTimer > 0.0f) {
+            np.rollTimer -= dt;
+            if (np.rollTimer <= 0.0f) { np.rollTimer = 0.0f; np.rollCooldownTimer = 1.0f; }
+        } else if (np.rollCooldownTimer > 0.0f) {
+            np.rollCooldownTimer -= dt;
+            if (np.rollCooldownTimer < 0.0f) np.rollCooldownTimer = 0.0f;
+        }
     }
 }
 

@@ -163,6 +163,13 @@ private:
     bool        m_inventoryOpen = false;
     ViewmodelState  m_viewmodelState;
 
+    // Gameplay input (movement/aim/fire/skills/block/dodge) is frozen while a blocking UI is
+    // open — the inventory OR the in-game pause menu (m_menu.confirmQuit). In SP the pause
+    // early-returns and freezes the whole world; in MP the world keeps running for everyone
+    // else, so these gates are what hold the paused player's own character still. Potion is
+    // intentionally NOT gated (matches inventory — you can drink while a menu is open).
+    bool gameplayInputFrozen() const { return m_inventoryOpen || m_menu.confirmQuit; }
+
     // Networking
     NetRole    m_netRole = NetRole::NONE;
     u8         m_localPlayerIndex = 0;
@@ -464,6 +471,11 @@ private:
 
     void spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal = false, bool isCrit = false);
     void renderDamageNumbers(u32 sw, u32 sh);
+    // Spawn the projectile AoE splash VFX (floor-snapped fire FX + explosion particles +
+    // camera shake) at an impact point. Shared by the host's splash callback and the CLIENT's
+    // PROJECTILE_SPLASH SV_EVENT handler so both render identical splashes (the client's
+    // ProjectileSystem::update is gated off, so it can't fire the callback itself).
+    void spawnSplashFX(Vec3 position, f32 radius);
 
     // Pre-cached mesh IDs (resolved once in init, avoids strcmp in startGame)
     enum MeshId : u8 {

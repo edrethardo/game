@@ -22,6 +22,23 @@ void ClockSyncOps::reset(ClockSync& cs) {
     cs.oneWayTripMs       = 30.0f;
     cs.pongsReceived      = 0;
     cs.snapshotsApplied   = 0;
+    cs.owtSampleCount     = 0;
+}
+
+// Median of up to 3 OWT samples (pure). Insertion-sorts a local copy — n is tiny.
+f32 ClockSyncOps::medianOwt(const f32* samples, u8 n) {
+    if (n == 0) return 0.0f;
+    if (n > 3) n = 3;
+    f32 s[3] = {0.0f, 0.0f, 0.0f};
+    for (u8 i = 0; i < n; i++) s[i] = samples[i];
+    for (u8 i = 1; i < n; i++) {
+        f32 v = s[i];
+        s32 j = static_cast<s32>(i) - 1;
+        while (j >= 0 && s[j] > v) { s[j + 1] = s[j]; j--; }
+        s[j + 1] = v;
+    }
+    if (n & 1u) return s[n / 2];                       // odd: middle element (n=3 rejects outlier)
+    return 0.5f * (s[n / 2 - 1] + s[n / 2]);           // even: average the two middle (n=2)
 }
 
 void ClockSyncOps::onPongReceived(ClockSync& cs,
@@ -32,8 +49,11 @@ void ClockSyncOps::onPongReceived(ClockSync& cs,
     const u32 rttMs = nowMs - clientSentMs;
     const f32 newOwt = static_cast<f32>(rttMs) * 0.5f;
 
-    if (!cs.bootstrapped) {
-        cs.oneWayTripMs = newOwt;
+    // Collect the handshake samples and use their median (robust to one bad RTT). Once the
+    // 3-sample bootstrap window is full, any late pong falls back to EMA smoothing.
+    if (cs.owtSampleCount < 3) {
+        cs.owtSamples[cs.owtSampleCount++] = newOwt;
+        cs.oneWayTripMs = medianOwt(cs.owtSamples, cs.owtSampleCount);
         cs.bootstrapped = true;
     } else {
         // EMA smoothing: blend new OWT measurement toward current estimate (gain 0.2).

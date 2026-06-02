@@ -786,13 +786,14 @@ void Engine::clientNetPre(f32 dt) {
     if (onCooldown(m_classSkillStates[m_activeClassSkill],         itemCdr)) skillClearMask |= INPUT_EX_SKILL;
     if (onCooldown(m_bootSkillStates[m_localPlayerIndex],          itemCdr)) skillClearMask |= INPUT_EX_BOOT_SKILL;
     if (onCooldown(m_helmetSkillStates[m_localPlayerIndex],        itemCdr)) skillClearMask |= INPUT_EX_HELM_SKILL;
-    // Inventory-open send/predict parity: the local skill PREDICT paths gate on
-    // !m_inventoryOpen (engine_update_skills.cpp), but captureLocalInput sets the skill
-    // ext bits unconditionally — so a right-click while the inventory is open would cast
-    // server-side with no local prediction (a desync + an unintended cast over inventory
-    // clicks). Strip the skill bits here so send matches predict. Potion is intentionally
-    // NOT stripped: its predict path does not gate on inventory, so the two stay in sync.
-    if (m_inventoryOpen)
+    // Send/predict parity while a blocking UI is open (inventory OR pause menu): the local
+    // skill PREDICT paths gate on !gameplayInputFrozen() (engine_update_skills.cpp), but
+    // captureLocalInput sets the skill ext bits unconditionally — so a click while a menu is
+    // open would cast server-side with no local prediction (a desync + an unintended cast).
+    // Strip the skill bits so send matches predict. Potion is intentionally NOT stripped: its
+    // predict path doesn't gate on the UI, so the two stay in sync (you can drink while paused).
+    const bool frozen = gameplayInputFrozen();
+    if (frozen)
         skillClearMask |= (INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL | INPUT_EX_HELM_SKILL);
     // Potion was previously missing from the wire mask (the asymmetry that let the
     // potion bit ride to the server even while locally on cooldown → phantom heals +
@@ -803,8 +804,10 @@ void Engine::clientNetPre(f32 dt) {
         if (!GameConst::cooldownReady(m_clientTick, m_potionLastActivationTick, potionCdTicks))
             skillClearMask |= INPUT_EX_POTION;
     }
+    // freezeMovement: while frozen the local sim skips PlayerController::update, so zero the
+    // wire movement too or the server walks the player from held keys (rubber-band on close).
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon,
-                                m_activeClassSkill, skillClearMask);
+                                m_activeClassSkill, skillClearMask, /*freezeMovement=*/frozen);
 
     // M10.1: resendPendingFire() removed — CL_FIRE_WEAPON is now reliable.
 

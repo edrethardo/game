@@ -102,13 +102,11 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.animFlags = anim;
         sp.weaponMeshId = np.weaponState.weaponMeshId; // resolved MeshDef index (refreshed each snap)
 
-        // Dodge state: the Wanderer roll (rolling flag + counterStacks) lives only on
-        // the local-only Player.dodgeState (player.h) and is NOT mirrored to NetPlayer.
-        // The server only tracks dodge i-frames as invulnTimer (player.cpp:266), which is
-        // also set by respawn (engine_net.cpp:265) — so it can't be reused as a "rolling"
-        // bit without animating a roll on every remote respawn. Until NetPlayer carries
-        // real roll state, dodgeFlags stays 0 and remotes don't animate the roll.
-        sp.dodgeFlags = 0;
+        // Dodge state: the server now replicates the Wanderer roll (NetPlayer.rollTimer,
+        // set in updateNetPlayerFromInput), so bit0 = rolling drives the remote roll
+        // animation on observers. counterStacks (bits1-3) still live only on the local
+        // Player.dodgeState and aren't mirrored, so they stay 0 here.
+        sp.dodgeFlags = (np.rollTimer > 0.0f) ? 0x01 : 0x00;
         // PlayerClass on the wire so clients pick the correct per-class mesh for remotes.
         // Clamped on read in deserialize() against PlayerClass::CLASS_COUNT.
         sp.playerClass = static_cast<u8>(np.playerClass);

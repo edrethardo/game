@@ -37,8 +37,14 @@ namespace Client {
     // remote-skill handlers run tryActivate against persistent SkillState), but this
     // trims the spam at the source — "the client knows when the skills have cooldown
     // best". Pass 0 to disable (e.g. host path, where remote inputs aren't sent).
+    // `freezeMovement` zeroes the sent input's moveFlags (W/S/A/D/jump/fire/lock) so the
+    // server holds the player still while a blocking UI is open (inventory / pause menu) —
+    // the local sim already skips PlayerController::update, and without this the server would
+    // still walk the player from any held key, causing a reconcile rubber-band. Aim
+    // (yaw/pitch) is left intact so the body facing doesn't snap.
     void captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
-                             u8 skillSlot, u8 extFlagsClearMask = 0);
+                             u8 skillSlot, u8 extFlagsClearMask = 0,
+                             bool freezeMovement = false);
 
     // Get the latest captured input (for local prediction in engine)
     const NetInput* getLatestInput();

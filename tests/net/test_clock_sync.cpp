@@ -36,14 +36,30 @@ TEST_CASE("ClockSync: first pong bootstraps the estimate") {
     CHECK(cs.lastUpdateClockSec == doctest::Approx(0.130));
 }
 
-TEST_CASE("ClockSync: subsequent pongs EMA-smooth oneWayTripMs") {
+TEST_CASE("ClockSync: bootstrap uses the median of the handshake pongs (rejects an outlier)") {
     ClockSync cs;
     ClockSyncOps::reset(cs);
-    ClockSyncOps::onPongReceived(cs, 100, 200, 0.130);   // RTT 30 → OWT 15
-    ClockSyncOps::onPongReceived(cs, 200, 210, 0.250);   // sent@200ms, recv@250ms, RTT 50 → OWT 25
-    // After EMA(OWT_GAIN=0.2): OWT = 15 + 0.2*(25 - 15) = 17.0
-    CHECK(cs.oneWayTripMs == doctest::Approx(17.0f));
-    CHECK(cs.pongsReceived == 2);
+    ClockSyncOps::onPongReceived(cs, 100, 200, 0.130);   // RTT 30  → OWT 15  → median(15)        = 15
+    CHECK(cs.oneWayTripMs == doctest::Approx(15.0f));
+    ClockSyncOps::onPongReceived(cs, 200, 210, 0.250);   // RTT 50  → OWT 25  → median(15,25)      = 20
+    CHECK(cs.oneWayTripMs == doctest::Approx(20.0f));
+    ClockSyncOps::onPongReceived(cs, 300, 220, 0.540);   // RTT 240 → OWT 120 → median(15,25,120)  = 25
+    // The 120 ms outlier is REJECTED — the session clock keeps the median 25, not an EMA that
+    // would have been dragged toward 120.
+    CHECK(cs.oneWayTripMs == doctest::Approx(25.0f));
+    CHECK(cs.pongsReceived == 3);
+}
+
+TEST_CASE("ClockSync: medianOwt handles 1/2/3 samples") {
+    f32 one[1]   = {30.0f};
+    f32 two[2]   = {30.0f, 40.0f};
+    f32 three[3] = {30.0f, 31.0f, 120.0f};   // 120 is the outlier
+    CHECK(ClockSyncOps::medianOwt(one,   1) == doctest::Approx(30.0f));
+    CHECK(ClockSyncOps::medianOwt(two,   2) == doctest::Approx(35.0f));  // average of the two
+    CHECK(ClockSyncOps::medianOwt(three, 3) == doctest::Approx(31.0f));  // middle — rejects 120
+    // Order-independence of the n=3 median.
+    f32 shuffled[3] = {120.0f, 30.0f, 31.0f};
+    CHECK(ClockSyncOps::medianOwt(shuffled, 3) == doctest::Approx(31.0f));
 }
 
 TEST_CASE("ClockSync: currentServerTickEst projects forward by wall time") {

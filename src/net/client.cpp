@@ -1,5 +1,6 @@
 #include "net/client.h"
 #include "net/packet.h"
+#include "net/interp_delay.h" // adaptive render-delay helpers (jitter-driven)
 #include "game/player.h"
 #include "world/collision.h"
 #include "platform/clock.h"   // wall-clock for time-based snapshot interpolation
@@ -18,6 +19,14 @@ static WorldSnapshot s_snapshots[SNAP_BUFFER_SIZE];
 static f64           s_snapRecvTime[SNAP_BUFFER_SIZE] = {}; // wall-clock arrival time per slot
 static u32           s_snapHead  = 0;
 static u32           s_snapCount = 0;
+
+// Adaptive interpolation delay (jitter buffer width). s_interpDelaySec starts at the fixed
+// base and widens with snapshot-arrival jitter so a late snapshot doesn't freeze remotes;
+// see interp_delay.h. Snapshots broadcast every tick (60 Hz) → nominal arrival interval 1/60.
+static constexpr f32 SNAP_NOMINAL_INTERVAL_SEC = 1.0f / 60.0f;
+static constexpr f32 MAX_INTERP_DELAY_SEC      = 0.15f; // cap so remotes don't lag absurdly
+static f32           s_arrivalJitter           = 0.0f;
+static f32           s_interpDelaySec          = INTERP_DELAY_SEC;
 
 // Latest input captured this frame
 static NetInput s_latestInput = {};
@@ -55,8 +64,18 @@ static const WorldSnapshot* getSnapshot(u32 ago) {
 }
 
 static void pushSnapshot(const WorldSnapshot& snap) {
+    const f64 now = Clock::getElapsedSeconds();
+    // Update arrival jitter from the gap since the previous snapshot, then re-derive the
+    // adaptive render delay. Skip on the very first snapshot (no previous arrival).
+    if (s_snapCount >= 1) {
+        const u32 prevIdx = (s_snapHead + SNAP_BUFFER_SIZE - 1) % SNAP_BUFFER_SIZE;
+        const f32 delta = static_cast<f32>(now - s_snapRecvTime[prevIdx]);
+        s_arrivalJitter = updateArrivalJitter(s_arrivalJitter, delta, SNAP_NOMINAL_INTERVAL_SEC);
+        s_interpDelaySec = computeInterpDelay(s_interpDelaySec, s_arrivalJitter,
+                                              INTERP_DELAY_SEC, MAX_INTERP_DELAY_SEC);
+    }
     s_snapshots[s_snapHead] = snap;
-    s_snapRecvTime[s_snapHead] = Clock::getElapsedSeconds();
+    s_snapRecvTime[s_snapHead] = now;
     s_snapHead = (s_snapHead + 1) % SNAP_BUFFER_SIZE;
     if (s_snapCount < SNAP_BUFFER_SIZE) s_snapCount++;
 }
@@ -105,7 +124,10 @@ static constexpr f32 MAX_EXTRAPOLATE_SEC = 0.12f;
 static bool computeInterpPair(InterpPair& out) {
     out.extrapolateAhead = 0.0f;
     if (s_snapCount < 2) return false;
-    f64 renderTime = Clock::getElapsedSeconds() - static_cast<f64>(INTERP_DELAY_SEC);
+    // Adaptive delay: widens with arrival jitter (interp_delay.h) so a late snapshot is
+    // covered by the buffer instead of forcing extrapolation; falls back to INTERP_DELAY_SEC
+    // on a calm link. Updated per arrival in pushSnapshot.
+    f64 renderTime = Clock::getElapsedSeconds() - static_cast<f64>(s_interpDelaySec);
 
     // Newest snapshot's arrival time. If renderTime is past it, we're in the extrapolation
     // window (no future snap to bracket against). Set t=1 and emit an extrapolateAhead so
@@ -155,6 +177,8 @@ void Client::init(u8 localPlayerIndex) {
     s_localPlayerIndex = localPlayerIndex;
     s_snapHead = 0;
     s_snapCount = 0;
+    s_arrivalJitter  = 0.0f;            // reset adaptive-delay state on (re)init / floor change
+    s_interpDelaySec = INTERP_DELAY_SEC;
     s_hasInput = false;
     // Reset the send window so stale prior-floor inputs don't bleed into the new floor's
     // first packets (the server's input ring buffer also resets in Server::init).
@@ -167,11 +191,15 @@ void Client::init(u8 localPlayerIndex) {
 }
 
 void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
-                                 u8 skillSlot, u8 extFlagsClearMask) {
+                                 u8 skillSlot, u8 extFlagsClearMask, bool freezeMovement) {
     s_latestInput = PlayerController::captureLocalInput(player, clientTick, weaponId);
     // captureLocalInput defaults skillSlot to 0 ("set by engine before sending"); stamp the
     // engine's selected class-skill slot here so the server activates the chosen skill.
     s_latestInput.skillSlot = skillSlot;
+    // Freeze: blocking UI open (inventory / pause menu) → don't drive the server from held
+    // movement keys. The local sim already isn't moving the player; zero the wire movement so
+    // the server-side NetPlayer stays put too (yaw/pitch kept so facing doesn't snap).
+    if (freezeMovement) s_latestInput.moveFlags = 0;
     // R9 client-side cooldown gate: if the engine determined our local cooldown isn't
     // ready, clear the corresponding INPUT_EX_* bit so we don't even ask the server.
     // Server still gates persistently as a backstop, but this is the "snappy" path —
@@ -192,7 +220,7 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     // Serialize the full window into a local buffer, then wrap it in a packet header and
     // send. Wire layout (M2.2, PROTOCOL_VERSION 2):
     //   PacketHeader(4) + windowPayload: u8 windowCount + u8[3] reserved + N×14 B inputs
-    //   Max total = 4 + 4 + 4*14 = 64 B per CL_INPUT.
+    //   Max total = 4 + 4 + INPUT_WINDOW_SIZE*14 = 120 B per CL_INPUT (window=8).
     u8 payload[256];
     u32 payloadSize = serializeInputWindow(payload, sizeof(payload),
                                            s_sendWindow, s_sendWindowCount);

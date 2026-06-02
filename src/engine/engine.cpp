@@ -323,6 +323,21 @@ void Engine::onEvent(const u8* data, u32 size) {
                     s_engine->m_classSkillStatesPerPlayer[0][s].cooldownTimer = 0.0f;
             }
         } break;
+        case NetEventType::PROJECTILE_SPLASH: {
+            // Host-replicated projectile AoE splash — the client's ProjectileSystem::update
+            // is gated off (N4), so the splash callback never fires locally. Replay the same
+            // FX via spawnSplashFX (it re-runs the floor-snap from the raw position).
+            // Payload after the 4-byte header: eventType(1) + pos(12) + radius(4) = 17 B.
+            if (size < sizeof(PacketHeader) + 17) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            Vec3 pos;
+            std::memcpy(&pos.x, data + off, 4); off += 4;
+            std::memcpy(&pos.y, data + off, 4); off += 4;
+            std::memcpy(&pos.z, data + off, 4); off += 4;
+            f32 radius;
+            std::memcpy(&radius, data + off, 4); off += 4;
+            s_engine->spawnSplashFX(pos, radius);
+        } break;
         default: break;
     }
 }

@@ -10,6 +10,7 @@ add_executable(dungeon_tests
     test_main.cpp
     sanity_test.cpp
     net/test_clock_sync.cpp
+    net/test_interp_delay.cpp
     net/test_input_wire.cpp
     net/test_input_drain.cpp
     net/test_prediction_ring.cpp
