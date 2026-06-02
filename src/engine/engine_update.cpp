@@ -175,7 +175,18 @@ void Engine::update(f32 dt) {
                 Input::setRelativeMouseMode(false);
             }
         }
-        return;
+        // R12 — SP: the pause menu freezes the world (the early-return below skips
+        // gameUpdate for the whole frame). MP: never freeze — remote peers can't be
+        // held hostage by anyone's pause press. The menu still renders and accepts
+        // input on top of the running world; the pausing player's character stays
+        // in the world (still hittable, still processed by the server). Matches
+        // Quake / Hellgate / Diablo II MP semantics: pause is a personal UI, not a
+        // session-wide gate.
+        if (m_netRole == NetRole::NONE) {
+            return;
+        }
+        // MP fall-through: continue into the gameState switch so gameUpdate + net
+        // pre/post run normally with the menu overlaid.
     }
 
     // Check pause from any player — in split-screen, active player may be P2 from last frame
