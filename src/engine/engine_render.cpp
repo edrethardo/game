@@ -489,6 +489,32 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
     }
 }
 
+// Lazily (re)create the offscreen scene render target at w x h — a linear-filtered RGB colour texture
+// + 24-bit depth renderbuffer. Backs the internal render-scale path (render the 3D scene low-res, then
+// upscale-blit to the window). Recreated only when the size changes.
+static void ensureSceneFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& curH, u32 w, u32 h) {
+    if (fbo && curW == w && curH == h) return;
+    if (!fbo)      glGenFramebuffers(1, &fbo);
+    if (!colorTex) glGenTextures(1, &colorTex);
+    if (!depthRbo) glGenRenderbuffers(1, &depthRbo);
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, (s32)w, (s32)h, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindRenderbuffer(GL_RENDERBUFFER, depthRbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, (s32)w, (s32)h);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTex, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRbo);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        LOG_ERROR("Scene FBO incomplete (%ux%u)", w, h);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    curW = w; curH = h;
+}
+
 void Engine::render(f32 alpha) {
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -501,12 +527,30 @@ void Engine::render(f32 alpha) {
 
     PROFILE_SCOPE(3, "Render");
 
-    // Switch constraint mode shrinks the *base* render area. Split offsets below are derived
-    // from this base so the viewport origin and size always live in one coordinate space —
-    // the old code forced vpW/vpH to the Switch res but left vpX/vpY in real-window space,
-    // which placed the second player's view in the wrong spot at the wrong size (H3).
-    u32 baseW = m_switchMode ? SWITCH_RES_W : sw;
-    u32 baseH = m_switchMode ? SWITCH_RES_H : sh;
+    // Internal render-scale: when m_renderScale < 1, render the whole frame into an offscreen FBO at
+    // baseW x baseH = scale * window, then upscale-blit it to the window after the player loop (below).
+    // Cuts fragment fill/overdraw on the fill-bound Switch GPU while the upscale still fills the screen.
+    // 1.0 = native (FBO bypassed). One FBO backs all split-screen viewports.
+    // Gated to single-player: the Switch (the only place scale < 1) is single-player, and desktop
+    // split-screen runs at scale 1.0 — so the native HUD pass below is simply sw x sh, no scaled
+    // sub-viewport math.
+    const bool useFbo = (m_renderScale < 0.999f) && (m_splitPlayerCount == 1);
+    u32 baseW = sw, baseH = sh;
+    if (useFbo) {
+        baseW = (u32)((f32)sw * m_renderScale); if (baseW < 16) baseW = 16;
+        baseH = (u32)((f32)sh * m_renderScale); if (baseH < 16) baseH = 16;
+        ensureSceneFbo(m_sceneFbo, m_sceneColorTex, m_sceneDepthRbo, m_sceneFboW, m_sceneFboH, baseW, baseH);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_sceneFbo);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+#ifdef __SWITCH__
+    // Distance fog ramps in over the last ~half of the clamped far plane so the far-plane cull fades
+    // into the background color instead of hard-popping. Fog color matches the in-game clear color.
+    // Tracks m_camera.farPlane, so the F6 / L+R3 A/B (60 / 70 / 200) moves the fog with it. Desktop
+    // never calls setFog → fog stays off (start/end remain huge).
+    Renderer::setFog({0.05f, 0.05f, 0.08f}, m_camera.farPlane * 0.5f, m_camera.farPlane * 0.95f);
+#endif
 
     // Split-screen: render each player's view
     for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
@@ -670,7 +714,26 @@ void Engine::render(f32 alpha) {
     // First-person viewmodel (hand + weapon) — drawn after world, before HUD
     renderViewmodel();
 
-    renderHUD(vpW, vpH);
+    // 3D scene is complete. If it was rendered into the low-res FBO, upscale-blit it to the window
+    // now, switch to the native viewport, and draw the 2D HUD below at full resolution so UI/text stay
+    // crisp (3D-only scaling). hudW/hudH carry the native dims (== vp dims when the FBO isn't used).
+    u32 hudW = vpW, hudH = vpH;
+    if (useFbo) {
+        glDisable(GL_SCISSOR_TEST);   // glBlitFramebuffer is scissor-clipped: the per-player scissor is
+                                      // still the SCALED viewport here, so without this the upscale only
+                                      // fills that ~65% corner of the window instead of the whole screen.
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_sceneFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, (s32)baseW, (s32)baseH, 0, 0, (s32)sw, (s32)sh,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, (s32)sw, (s32)sh);
+        glScissor(0, 0, (s32)sw, (s32)sh);
+        glEnable(GL_SCISSOR_TEST);    // re-enable (full-window) for the native HUD pass; loop disables it after
+        hudW = sw; hudH = sh;
+    }
+
+    renderHUD(hudW, hudH);
 
     // Dead player overlay — shows "YOU DIED" on this player's viewport while game continues
     if (m_playerDead[sp]) {
@@ -680,7 +743,7 @@ void Engine::render(f32 alpha) {
 
         const char* deathText = "YOU DIED";
         f32 dw = FontSystem::textWidth(deathText, 3);
-        FontSystem::drawText(vpW, vpH, (vpW - dw) * 0.5f, vpH * 0.55f,
+        FontSystem::drawText(hudW, hudH, (hudW - dw) * 0.5f, hudH * 0.55f,
                              deathText, {0.8f, 0.1f, 0.1f}, 3);
 
         bool pad = Input::isGamepadConnected(0);
@@ -690,24 +753,26 @@ void Engine::render(f32 alpha) {
                                 : (m_netRole != NetRole::NONE) ? "Press Space or click to respawn"
                                 : "Press Space to respawn";
         f32 rw = FontSystem::textWidth(respawnText, 2);
-        FontSystem::drawText(vpW, vpH, (vpW - rw) * 0.5f, vpH * 0.4f,
+        FontSystem::drawText(hudW, hudH, (hudW - rw) * 0.5f, hudH * 0.4f,
                              respawnText, {0.7f, 0.7f, 0.7f}, 2);
 
         glDisable(GL_BLEND);
     }
 
     // Flush all accumulated HUD lines in a single draw call (was 36 per frame)
-    HUD::flush(vpW, vpH);
+    HUD::flush(hudW, hudH);
 
     // Per-player damage vignette / low-HP glow — drawn into THIS player's viewport
     // (scissor still enabled) from the swapped-in m_localPlayer, so each split-screen
     // player sees only their own feedback instead of P1's covering the whole window.
-    renderPostOverlays(vpW, vpH);
+    renderPostOverlays(hudW, hudH);
 
     } // end split-screen player loop
 
     glDisable(GL_SCISSOR_TEST);
-    glViewport(0, 0, sw, sh); // restore full viewport
+
+    glViewport(0, 0, sw, sh); // restore full viewport (the FBO upscale-blit now happens in-loop,
+                              // before the native HUD pass, so the 3D scales but the HUD stays sharp)
 
     // Default the active aliases back to player 0 for any code that reads them outside
     // render. This also reloads m_camera from the persistent (tick-accurate) store, so the

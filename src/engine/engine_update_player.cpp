@@ -277,8 +277,16 @@ void Engine::handleDebugKeys() {
         LOG_INFO("Noclip: %s", m_localPlayer.noclip ? "ON" : "OFF");
     }
 
-    // Toggle profiler overlay
-    if (Input::isKeyPressed(SDL_SCANCODE_F3)) {
+    // Toggle profiler overlay (F3 on desktop; on Switch use a controller chord: hold L (left
+    // shoulder) + click L3 (left stick). Both debug chords share L as the modifier — L+R3 toggles
+    // Switch-mode, L+L3 toggles this profiler. The overlay's stacked per-scope bars
+    // (Update/AI/Projectiles/Render/Flush) against the 16.67 ms marker reveal whether the frame is
+    // CPU-bound: if the bars are SHORT but FPS is still ~40, the GPU is the limiter (fill/overdraw);
+    // a long bar names the CPU system to chase.
+    bool padProfilerToggle = Input::isGamepadConnected(0) &&
+                             Input::isButtonDown(0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) &&
+                             Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_LEFTSTICK);
+    if (Input::isKeyPressed(SDL_SCANCODE_F3) || padProfilerToggle) {
         Profiler& prof = getProfiler();
         prof.enabled = !prof.enabled;
         LOG_INFO("Profiler: %s", prof.enabled ? "ON" : "OFF");
@@ -320,16 +328,17 @@ void Engine::handleDebugKeys() {
         LOG_INFO("Spawned %u enemies (total: %u)", spawned, EntitySystem::activeCount(m_entities));
     }
 
-    // Switch constraint mode (F6)
+    // Internal render-scale CYCLE (F6, desktop only): cycles m_renderScale 1.0 -> 0.8 -> 0.65 -> 0.5 ->
+    // 1.0. The 3D scene renders to an FBO at that fraction and is upscaled to fill the screen, trading
+    // sharpness for fill/overdraw savings on the fill-bound Switch GPU. 1.0 bypasses the FBO (native).
+    // The Switch L+R3 controller chord was retired now that the scale is baked at 0.65 (engine.h): this
+    // stays a desktop-only dev tuner for finding a new value, never reachable from a gamepad in play.
     if (Input::isKeyPressed(SDL_SCANCODE_F6)) {
-        m_switchMode = !m_switchMode;
-        if (m_switchMode) {
-            m_camera.farPlane = SWITCH_FAR_PLANE;
-            LOG_INFO("[SWITCH] Mode ON — far=%.0f, res=%ux%u", SWITCH_FAR_PLANE, SWITCH_RES_W, SWITCH_RES_H);
-        } else {
-            m_camera.farPlane = 200.0f;
-            LOG_INFO("[SWITCH] Mode OFF");
-        }
+        if      (m_renderScale > 0.95f) m_renderScale = 0.8f;
+        else if (m_renderScale > 0.75f) m_renderScale = 0.65f;
+        else if (m_renderScale > 0.60f) m_renderScale = 0.5f;
+        else                            m_renderScale = 1.0f;
+        LOG_INFO("[PERF] render scale: %.2f", m_renderScale);
     }
 
     // F9 toggles a network info overlay. CLIENT shows the D6 net-graph (RTT,

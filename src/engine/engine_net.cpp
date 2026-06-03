@@ -737,13 +737,12 @@ void Engine::clientNetPre(f32 dt) {
     // game first, then return to menu — same as the pause menu's "Save and Quit".
     if (!Net::isConnected()) {
         LOG_WARN("Host left / lost connection — saving and returning to menu");
-        // Save BEFORE clearing the CLIENT role: saveGame's floor-downgrade guard
-        // (engine_persist.cpp) keys on m_netRole == CLIENT so it doesn't write the host's
-        // lower floor over our higher-progress single-player save. Resetting the role first
-        // would disable that guard. Mirrors the pause-menu "Save and Quit" ordering. The
-        // slot guard is belt-and-suspenders: an in-game client always has a slot (1-20),
-        // but slot 0 would clamp to 1 and clobber it.
-        if (m_activeSaveSlot >= 1) saveGame(m_activeSaveSlot);
+        // Save BEFORE clearing the CLIENT role. saveCharacter's no-downgrade guard preserves the
+        // higher on-disk effective floor regardless of role, so the host's lower floor never
+        // overwrites our higher-progress save. Mirrors the pause-menu "Save and Quit" ordering. The
+        // slot guard is belt-and-suspenders: an in-game client always has a slot (1-20), but slot 0
+        // would clamp to 1 and clobber it. A client is a single local lane (0).
+        if (m_activeSaveSlot >= 1) saveCharacter(0, m_activeSaveSlot);
         Net::disconnect();
         m_netRole = NetRole::NONE;
         m_gameState = GameState::MENU;

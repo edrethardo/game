@@ -22,6 +22,9 @@ namespace Renderer {
 
     void setDirectionalLight(Vec3 direction, Vec3 color, Vec3 ambient);
     void setPointLights(const Vec3* positions, const Vec3* colors, u32 count);
+    // Distance fog for the lit shader. Default OFF (start/end huge); call per frame to enable.
+    // start/end are forward view-space distances; lit color fades to `color` across [start,end].
+    void setFog(Vec3 color, f32 start, f32 end);
 
     u32 getDrawCallCount();
     u32 getVisibleCount();

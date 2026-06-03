@@ -36,6 +36,12 @@ static Vec3 s_lightDir     = normalize(Vec3{-0.3f, -1.0f, -0.5f});
 static Vec3 s_lightColor   = {1.0f, 0.95f, 0.9f};
 static Vec3 s_lightAmbient = {0.15f, 0.15f, 0.2f};
 
+// Distance fog — default OFF: with start/end at 1e9 the lit shader's fog factor is always 0, so
+// non-Switch builds (which never call setFog) are visually unchanged. setFog() enables it per frame.
+static Vec3 s_fogColor = {0.05f, 0.05f, 0.08f};
+static f32  s_fogStart = 1.0e9f;
+static f32  s_fogEnd   = 1.0e9f;
+
 static Vec3 s_pointLightPos[4];
 static Vec3 s_pointLightColor[4];
 static u32  s_pointLightCount = 0;
@@ -46,6 +52,12 @@ void Renderer::init() {
 
 void Renderer::shutdown() {
     LOG_INFO("Renderer shut down");
+}
+
+void Renderer::setFog(Vec3 color, f32 start, f32 end) {
+    s_fogColor = color;
+    s_fogStart = start;
+    s_fogEnd   = end;
 }
 
 void Renderer::setDirectionalLight(Vec3 direction, Vec3 color, Vec3 ambient) {
@@ -130,6 +142,13 @@ void Renderer::flush() {
                 glUniform3f(sh.loc_lightColor, s_lightColor.x, s_lightColor.y, s_lightColor.z);
             if (sh.loc_ambientColor >= 0)
                 glUniform3f(sh.loc_ambientColor, s_lightAmbient.x, s_lightAmbient.y, s_lightAmbient.z);
+
+            // Distance fog (uploaded every shader bind so the default huge start/end keeps fog off
+            // on non-Switch builds; the lit shader ignores it when loc_* are -1).
+            if (sh.loc_fogColor >= 0)
+                glUniform3f(sh.loc_fogColor, s_fogColor.x, s_fogColor.y, s_fogColor.z);
+            if (sh.loc_fogParams >= 0)
+                glUniform2f(sh.loc_fogParams, s_fogStart, s_fogEnd);
 
             // Point lights — count is always uploaded so the loop in the shader terminates correctly
             if (sh.loc_pointLightCount >= 0)

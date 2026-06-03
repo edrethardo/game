@@ -340,7 +340,28 @@ void Engine::equipStartingLoadout(u8 playerIdx) {
     }
 }
 
-void Engine::startGame(GameStart mode) {
+// Fully initialize one local lane as a brand-new character: wipe inventory/quickbar/skills, grant
+// the class starting loadout, and set class base HP / move / energy. m_playerClasses[lane] must
+// already be set (the menu's class-select does this). Shared by startGame's NEW_GAME path and by
+// the couch menu, which prepares each fresh lane before a `lanesPrepared` start so New and Continue
+// heroes can coexist without the NEW_GAME wipe erasing a loaded character.
+void Engine::equipFreshLane(u8 lane) {
+    if (lane >= MAX_LOCAL_PLAYERS) return;
+    Inventory::init(m_inventories[lane]);
+    m_skillStates[lane] = SkillState{};
+    Quickbar::init(m_quickbars[lane], m_inventories[lane]);
+    equipStartingLoadout(lane);
+
+    const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[lane])];
+    m_skillStates[lane].maxEnergy        = cls.baseEnergy + m_inventories[lane].bonusEnergyFlat;
+    m_skillStates[lane].energy           = m_skillStates[lane].maxEnergy;
+    m_localPlayers[lane].maxHealth       = cls.baseHealth;
+    m_localPlayers[lane].health          = cls.baseHealth;
+    m_localPlayers[lane].moveSpeed       = cls.baseMoveSpeed;
+    m_localPlayers[lane].damageReduction = (m_playerClasses[lane] == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
+}
+
+void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
     // Death-overlay cursor edge flag: clear so a stale value from a prior session can't
@@ -570,24 +591,19 @@ void Engine::startGame(GameStart mode) {
     // Clear cross-floor SkillSystem state (meteors, overcharge, holy bombardment/nova timers)
     // so a skill warming up on the old floor doesn't trigger on the new one.
     SkillSystem::resetGameplayState();
-    if (mode == GameStart::NEW_GAME) {
+    if (mode == GameStart::NEW_GAME && !lanesPrepared) {
+        // Clear every slot (including inactive ones) so no stale gear leaks in, then fully equip
+        // each active local lane (loadout + class base stats + per-lane energy via equipFreshLane).
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
             Inventory::init(m_inventories[i]);
             m_skillStates[i] = SkillState{};
             Quickbar::init(m_quickbars[i], m_inventories[i]);
         }
-        // Grant the class starting weapon to each active local player.
-        for (u8 pi = 0; pi < m_splitPlayerCount; pi++) equipStartingLoadout(pi);
-        // The stats-changed callback recomputes maxEnergy from the *active* alias
-        // (m_localPlayerIndex / m_playerClass), but no swapInPlayer has run yet in this
-        // loop, so it wrote P0's energy for every iteration. Set each local player's
-        // energy ceiling explicitly from its own class + energy affixes.
-        for (u8 pi = 0; pi < m_splitPlayerCount; pi++) {
-            const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
-            m_skillStates[pi].maxEnergy = cls.baseEnergy + m_inventories[pi].bonusEnergyFlat;
-            m_skillStates[pi].energy    = m_skillStates[pi].maxEnergy;
-        }
+        for (u8 pi = 0; pi < m_splitPlayerCount; pi++) equipFreshLane(pi);
     }
+    // When lanesPrepared (couch co-op start), the menu already populated every lane — Continue'd
+    // heroes keep their loaded gear/HP and fresh lanes were set up via equipFreshLane — so the
+    // wipe+grant above is skipped to avoid erasing a loaded Player 2 (mixed New/Continue couch).
 
     // Clear per-local-player death flags on any floor/game (re)entry so nobody starts a
     // floor frozen behind the respawn overlay (defensive; the descend path also clears).
@@ -636,7 +652,10 @@ void Engine::startGame(GameStart mode) {
     // Reset health to the class base only on a brand-new run. CONTINUE keeps the
     // saved HP and DESCEND keeps the current run's HP (the old code hard-reset to
     // 100 on every floor<=1 entry, which clobbered class HP and continued saves).
-    if (mode == GameStart::NEW_GAME) {
+    // lanesPrepared (couch) also skips this: each lane's NetPlayer HP syncs from the
+    // prepared/loaded m_localPlayers[lane] on the first per-player frame, so a Continue'd
+    // hero isn't reset to class base.
+    if (mode == GameStart::NEW_GAME && !lanesPrepared) {
         for (u8 pi = 0; pi < m_splitPlayerCount; pi++) {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
             m_players[pi].health = cls.baseHealth;

@@ -681,6 +681,20 @@ void Engine::positionLocalPlayersAtSpawn() {
     m_players[1].spawnPosition   = m_localPlayers[1].position;
 }
 
+// Begin a 2-player couch game once the menu has prepared both lanes. Player 2 was already loaded
+// (Continue) or freshly equipped (New); here we prep a fresh Player 1 lane if needed, flip on
+// split-screen, and start the world on Player 1's floor with lanes already populated — so a mixed
+// New/Continue couch keeps each hero's gear instead of the NEW_GAME wipe erasing the loaded one.
+void Engine::startCouchGame() {
+    if (!m_menu.p1Continue) equipFreshLane(0); // a continued P1 was already loaded by loadGame
+    m_splitPlayerCount = 2;
+    Input::setSplitScreen(true);
+    startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME, /*lanesPrepared=*/true);
+    positionLocalPlayersAtSpawn();             // self-guards to split-screen
+    m_menu.subState = 0;
+    m_menu.msg = nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // Sync helpers between Player and NetPlayer
 // ---------------------------------------------------------------------------

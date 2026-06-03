@@ -795,22 +795,26 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // Profiler overlay (F3)
     HUD::drawProfiler(sw, sh);
 
-    // FPS counter — always visible, top-left
-    {
-        char fpsBuf[16];
-        std::snprintf(fpsBuf, sizeof(fpsBuf), "%u FPS", m_displayFps);
+    // Perf/net debug line — shown ONLY with the profiler overlay (F3 desktop / L+L3 chord on Switch).
+    // Sits just above the profiler's scope bars (which start at y0 = sh-30). FPS / frame-ms (1000/FPS,
+    // 1 Hz avg) / draw-calls (D, Switch budget ~300-500) / frustum-visible (V), plus the netplay
+    // client's smoothed RTT. Gating it behind the profiler keeps the normal HUD clean now that the
+    // Switch perf work is done — this used to be an always-on FPS line + a separate "Ping:" line.
+    if (getProfiler().enabled) {
+        char dbgBuf[96];
+        f32 frameMs = (m_displayFps > 0) ? (1000.0f / static_cast<f32>(m_displayFps)) : 0.0f;
+        if (m_netRole == NetRole::CLIENT) {
+            u32 rtt = static_cast<u32>(Net::getStats(activeNetSlot()).rttMs);
+            std::snprintf(dbgBuf, sizeof(dbgBuf), "%u FPS  %.1fms  D:%u V:%u  RTT:%ums",
+                          m_displayFps, frameMs, Renderer::getDrawCallCount(),
+                          Renderer::getVisibleCount(), rtt);
+        } else {
+            std::snprintf(dbgBuf, sizeof(dbgBuf), "%u FPS  %.1fms  D:%u V:%u",
+                          m_displayFps, frameMs, Renderer::getDrawCallCount(),
+                          Renderer::getVisibleCount());
+        }
         FontSystem::drawText(sw, sh, 8.0f, static_cast<f32>(sh) - 16.0f,
-                             fpsBuf, {0.6f, 0.6f, 0.6f}, 1);
-    }
-
-    // Latency readout — one row below the FPS counter, CLIENT only. Surfaces ENet's smoothed
-    // RTT so the player always sees their ping without opening the detailed F9 net-graph.
-    if (m_netRole == NetRole::CLIENT) {
-        char pingBuf[24];
-        u32 rtt = static_cast<u32>(Net::getStats(activeNetSlot()).rttMs);
-        std::snprintf(pingBuf, sizeof(pingBuf), "Ping: %ums", rtt);
-        FontSystem::drawText(sw, sh, 8.0f, static_cast<f32>(sh) - 28.0f,
-                             pingBuf, {0.6f, 0.6f, 0.6f}, 1);
+                             dbgBuf, {0.4f, 1.0f, 0.5f}, 1);
     }
 
     // Net stats overlay in multiplayer

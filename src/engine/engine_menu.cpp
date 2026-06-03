@@ -259,6 +259,7 @@ void Engine::updateMenu(f32 dt) {
             if (!isContinue && slotExists) {
                 AudioSystem::play(SfxId::UI_CONFIRM);
                 m_menu.overwriteSlot = static_cast<u8>(m_menu.subSelection);
+                m_menu.overwriteLane = 0; // Player 1's slot
                 m_menu.subState = 8;
                 m_menu.subSelection = 0; // default to "Yes"
                 return;
@@ -300,12 +301,21 @@ void Engine::updateMenu(f32 dt) {
                         LOG_INFO("Hosting game (continue slot %u, mode=%s)...",
                                  selectedSlot, m_menu.hostOnline ? "Online/UPnP" : "LAN");
                     }
-                    m_menu.subState = 0;
-                    m_menu.msg = nullptr;
-                    startGame(GameStart::CONTINUE);
-                    // Position the couch-co-op pair at the new dungeon spawn (M5 helper;
-                    // self-guards to split-screen).
-                    positionLocalPlayersAtSpawn();
+                    // Singleplayer: route through the couch lobby (subState 4) so Player 2 can join
+                    // and pick their OWN save. A legacy 2-player bundle already restored both heroes
+                    // (m_splitPlayerCount==2), so it starts directly — back-compat. A 1-player save
+                    // becomes Player 1 of a potential couch game; the world is this hero's floor.
+                    if (m_splitPlayerCount >= 2) {
+                        m_menu.subState = 0;
+                        m_menu.msg = nullptr;
+                        startGame(GameStart::CONTINUE);
+                        positionLocalPlayersAtSpawn();
+                    } else {
+                        m_menu.p1Continue   = true;
+                        m_menu.subState     = 4;   // couch lobby — P2 may join, or P1 starts solo
+                        m_menu.subSelection = 0;
+                        m_menu.msg          = nullptr;
+                    }
                 } else {
                     // File corrupt or version mismatch — fall back to new game
                     m_level.currentFloor = 1;
@@ -318,7 +328,9 @@ void Engine::updateMenu(f32 dt) {
                 // New game — record chosen slot and proceed to class selection. This
                 // covers all three flows (singleplayer, host, join) — the class-select
                 // confirm handler branches on m_netRole.
-                m_activeSaveSlot = selectedSlot;
+                m_activeSaveSlot    = selectedSlot;
+                m_playerSaveSlot[0] = selectedSlot; // P1's per-character slot
+                m_menu.p1Continue   = false;        // fresh hero → NEW_GAME world
                 m_level.currentFloor = 1;
                 m_menu.subState = 2; // class selection
                 m_menu.subSelection = 0;
@@ -412,32 +424,41 @@ void Engine::updateMenu(f32 dt) {
 
     // (Difficulty selection removed — difficulty is automatic per save, Diablo-style)
 
-    // Couch co-op join screen — P1 selected class, waiting for P2 (subState 4)
+    // Couch co-op lobby (subState 4) — Player 1 is set up (New or Continue); wait for Player 2.
+    // Every character now owns its own save, so P2 picks their OWN slot rather than just a class.
     if (m_menu.subState == 4) {
-        // P2 presses A on their controller to join
+        // P2 presses A on their controller to join → they choose New/Continue + a slot of their own.
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A)) {
-            m_splitPlayerCount = 2;
-            Input::setSplitScreen(true);
-            m_menu.subState = 5; // P2 class selection
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            scanSaveSlots();
+            m_menu.subState = 11;        // P2 New/Continue chooser
             m_menu.subSelection = 0;
+            return;
         }
-        // +/Start or Enter/Space = start solo (skip P2)
+        // +/Start or Enter/Space = start solo (skip P2). The world follows Player 1's mode.
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_START) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
             m_splitPlayerCount = 1;
             Input::setSplitScreen(false);
             m_menu.subState = 0;
-            startGame(GameStart::NEW_GAME); // wipes + grants starting loadout
+            // Solo: CONTINUE keeps the loaded hero, NEW_GAME wipes+grants P1. Single lane, so the
+            // default (lanesPrepared=false) legacy path is correct.
+            startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
+            return;
         }
-        // ESC/B goes back to P1 class selection
+        // ESC/B: a continued P1 returns to its slot list; a fresh P1 returns to class select.
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
-            m_menu.subState = 2;
+            AudioSystem::play(SfxId::UI_BACK);
+            if (m_menu.p1Continue) { m_menu.subState = 6; m_menu.msg = "continue"; }
+            else                   { m_menu.subState = 2; }
             m_menu.subSelection = 0;
         }
         return;
     }
 
-    // P2 class selection (subState 5) — P2 navigates with their own controller
+    // P2 class selection (subState 5) — P2 navigates with their own controller. Reached from the
+    // P2 slot screen (subState 12) once a New slot is chosen, so m_playerSaveSlot[1] is already set.
     if (m_menu.subState == 5) {
         u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
         // Read from both controllers so either player can navigate for P2
@@ -471,14 +492,80 @@ void Engine::updateMenu(f32 dt) {
                 m_classSkillStatesPerPlayer[1][s].energy = cls2.baseEnergy;
             }
 
-            // Both players ready — start the game.
-            // startGame(NEW_GAME) wipes inventories and grants both players their
-            // class starting loadout (m_splitPlayerCount == 2 here).
-            m_menu.subState = 0;
-            startGame(GameStart::NEW_GAME);
+            // Fresh P2 lane: init inventory + grant the class loadout (class base stats were set
+            // just above; equipFreshLane re-applies them harmlessly), then begin the couch game.
+            equipFreshLane(1);
+            startCouchGame();
+        }
+        return;
+    }
 
-            // Place the couch-co-op pair at the spawn (P2 beside P1) — M5 helper.
-            positionLocalPlayersAtSpawn();
+    // Player 2 New/Continue chooser (subState 11) — driven by P2's controller (index 1), with a
+    // keyboard fallback for desktop testing. Mirrors subState 1 but seats the result in lane 1.
+    if (m_menu.subState == 11) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B) || Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 4;            // back to the lobby
+            m_menu.subSelection = 0;
+            return;
+        }
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            m_menu.p2Continue = (m_menu.subSelection == 1); // 0 = New, 1 = Continue
+            scanSaveSlots();
+            m_menu.subState = 12;          // P2 slot select
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
+    // Player 2 slot select (subState 12) — driven by P2's controller. P2 cannot pick Player 1's
+    // slot (that would share one file). Continue loads the hero into lane 1 WITHOUT touching the
+    // world (it stays Player 1's floor); New goes to P2 class select (overwrite-confirm if occupied).
+    if (m_menu.subState == 12) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+            if (m_menu.subSelection < MAX_SAVE_SLOTS - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B) || Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 11;
+            m_menu.subSelection = 0;
+            return;
+        }
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            u8 sel        = static_cast<u8>(m_menu.subSelection);
+            u8 slot       = static_cast<u8>(sel + 1);
+            bool slotUsed = m_saveSlots[sel].exists;
+            // Can't share Player 1's slot — both would write the same file.
+            if (slot == m_playerSaveSlot[0]) { AudioSystem::play(SfxId::UI_BACK); return; }
+
+            if (m_menu.p2Continue) {
+                if (!slotUsed) { AudioSystem::play(SfxId::UI_BACK); return; }       // can't continue empty
+                AudioSystem::play(SfxId::UI_CONFIRM);
+                if (!loadCharacterIntoLane(slot, 1)) { AudioSystem::play(SfxId::UI_BACK); return; }
+                startCouchGame();                                                   // world stays P1's
+            } else if (slotUsed) {
+                // New P2 over an existing save — confirm overwrite (subState 8, lane 1).
+                AudioSystem::play(SfxId::UI_CONFIRM);
+                m_menu.overwriteSlot = sel;
+                m_menu.overwriteLane = 1;
+                m_menu.subState = 8;
+                m_menu.subSelection = 0;
+            } else {
+                AudioSystem::play(SfxId::UI_CONFIRM);
+                m_playerSaveSlot[1] = slot;
+                m_menu.subState = 5;            // P2 class select
+                m_menu.subSelection = 0;
+            }
         }
         return;
     }
@@ -617,9 +704,11 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
             if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
+        // overwriteLane routes the back/No/Yes paths to the right player's slot+class screens.
+        u8 slotScreen = (m_menu.overwriteLane == 1) ? 12 : 6;
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
-            m_menu.subState = 6;
+            m_menu.subState = slotScreen;
             m_menu.subSelection = m_menu.overwriteSlot;
             m_menu.msg = "new";
             return;
@@ -628,15 +717,25 @@ void Engine::updateMenu(f32 dt) {
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             if (m_menu.subSelection == 0) {
-                // Yes — proceed with overwrite
-                m_activeSaveSlot = m_menu.overwriteSlot + 1;
-                m_level.currentFloor = 1;
-                m_menu.subState = 2;
-                m_menu.subSelection = 0;
-                m_menu.msg = nullptr;
+                // Yes — proceed with overwrite, routed by which local lane is being set up.
+                u8 slot = static_cast<u8>(m_menu.overwriteSlot + 1);
+                if (m_menu.overwriteLane == 1) {
+                    m_playerSaveSlot[1] = slot;     // Player 2's chosen slot
+                    m_menu.subState = 5;            // → P2 class select
+                    m_menu.subSelection = 0;
+                    m_menu.msg = nullptr;
+                } else {
+                    m_activeSaveSlot    = slot;
+                    m_playerSaveSlot[0] = slot;     // Player 1's chosen slot
+                    m_menu.p1Continue   = false;
+                    m_level.currentFloor = 1;
+                    m_menu.subState = 2;            // → P1 class select
+                    m_menu.subSelection = 0;
+                    m_menu.msg = nullptr;
+                }
             } else {
                 // No — back to slot selection
-                m_menu.subState = 6;
+                m_menu.subState = slotScreen;
                 m_menu.subSelection = m_menu.overwriteSlot;
                 m_menu.msg = "new";
             }
@@ -738,6 +837,14 @@ void Engine::updateMenu(f32 dt) {
     if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
         || mouseConfirm) {
         AudioSystem::play(SfxId::UI_CONFIRM);
+        // A fresh game-setup begins here — clear any split-screen state left over from a previous
+        // couch session so a single-player New/Continue stays single (fixes the "Continue spawns a
+        // 2nd player" bug). The couch lobby raises the count back to 2 only when P2 actively joins.
+        m_splitPlayerCount  = 1;
+        Input::setSplitScreen(false);
+        m_playerSaveSlot[1] = 0;
+        m_menu.p1Continue   = false;
+        m_menu.p2Continue   = false;
         switch (m_menu.selection) {
         case 0: // Singleplayer — show sub-menu
             scanSaveSlots(); // scan early so "Continue" is available if saves exist

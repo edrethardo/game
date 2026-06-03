@@ -2,12 +2,19 @@
 in vec3 vWorldNormal;
 in vec3 vWorldPos;
 in vec2 vUV;
+in float vViewDepth;
 
 uniform sampler2D u_texture0;
 uniform vec3 u_lightDir;
 uniform vec3 u_lightColor;
 uniform vec3 u_ambientColor;
 uniform vec4 u_color;
+
+// Distance fog: lit color fades to u_fogColor between u_fogParams.x (start) and .y (end).
+// Off by default (params are huge so fog≈0); the Switch build sets them to ramp into the
+// clamped far plane so distant geometry fades to fog instead of hard-popping at the clip.
+uniform vec3 u_fogColor;
+uniform vec2 u_fogParams;
 
 // Point lights (max 4 nearest to camera, set per frame)
 uniform vec3 u_pointLightPos[4];
@@ -33,5 +40,7 @@ void main() {
     vec4 texColor = texture(u_texture0, vUV);
     float alpha = texColor.a * u_color.a;
     if (alpha < 0.05) discard;  // skip fully transparent fragments (webs, etc.)
-    FragColor = vec4(texColor.rgb * lighting * u_color.rgb, alpha);
+    vec3 lit = texColor.rgb * lighting * u_color.rgb;
+    float fog = clamp((vViewDepth - u_fogParams.x) / max(u_fogParams.y - u_fogParams.x, 0.001), 0.0, 1.0);
+    FragColor = vec4(mix(lit, u_fogColor, fog), alpha);
 }

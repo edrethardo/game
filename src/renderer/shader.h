@@ -23,6 +23,10 @@ struct Shader {
     s32 loc_pointLightPos[4]   = {-1,-1,-1,-1};
     s32 loc_pointLightColor[4] = {-1,-1,-1,-1};
     s32 loc_pointLightCount    = -1;
+
+    // Distance fog (lit shader)
+    s32 loc_fogColor  = -1;
+    s32 loc_fogParams = -1;
 };
 
 namespace ShaderSystem {

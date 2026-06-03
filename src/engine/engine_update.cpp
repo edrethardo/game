@@ -255,7 +255,7 @@ void Engine::update(f32 dt) {
             } else {
                 // Save and Quit
                 m_menu.confirmQuit = false;
-                saveGame(m_activeSaveSlot);
+                saveAllCharacters();  // per-character: each local lane to its own slot
                 if (m_netRole != NetRole::NONE) {
                     Net::disconnect();
                     m_netRole = NetRole::NONE;
@@ -1617,7 +1617,7 @@ bool Engine::triggerFloorDescent() {
     // Save progress before descending so death respawn returns here
     m_level.savedFloor = m_level.currentFloor;
     m_level.savedSeed = m_level.levelSeed; // persist the run seed (not a fresh draw)
-    saveGame(m_activeSaveSlot);
+    saveAllCharacters();  // per-character: each local lane to its own slot
     LOG_INFO("Descending to floor %u", m_level.currentFloor);
 
     // Refresh all cooldowns on floor descend. m_skillStates is a direct
@@ -1652,7 +1652,7 @@ bool Engine::triggerFloorDescent() {
             if (uf) { std::fwrite(&m_highestUnlocked, 1, 1, uf); std::fclose(uf); }
             m_level.currentFloor = 1;
             m_level.savedFloor = 1;
-            saveGame(m_activeSaveSlot);
+            saveAllCharacters();  // per-character: each local lane to its own slot
             // Show transition with difficulty name
             m_transition.timer = 3.0f;
             m_gameState = GameState::FLOOR_TRANSITION;

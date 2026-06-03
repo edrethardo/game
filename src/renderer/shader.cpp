@@ -111,6 +111,9 @@ Shader ShaderSystem::load(const char* vertPath, const char* fragPath) {
         }
         shader.loc_pointLightCount = glGetUniformLocation(shader.program, "u_pointLightCount");
 
+        shader.loc_fogColor  = glGetUniformLocation(shader.program, "u_fogColor");
+        shader.loc_fogParams = glGetUniformLocation(shader.program, "u_fogParams");
+
         LOG_INFO("Shader loaded: %s + %s (program=%u)", vertPath, fragPath, shader.program);
     }
 

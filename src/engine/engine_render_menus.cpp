@@ -442,6 +442,79 @@ void Engine::renderMenu() {
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f,
                              slotHint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 11) {
+        // Player 2 New/Continue chooser — blue P2 theme, mirrors the subState-1 chooser.
+        const char* subTitle = "Player 2: New or Continue";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.3f, 0.7f, 1.0f}, 2);
+
+        bool hasSave = false;
+        for (u32 si = 0; si < MAX_SAVE_SLOTS; si++) if (m_saveSlots[si].exists) { hasSave = true; break; }
+
+        static const char* p2Labels[] = {"New Game", "Continue"};
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = sh * 0.38f + (1 - i) * 50.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            bool available = (i == 0) || hasSave;
+            Vec3 col = sel ? Vec3{0.3f, 0.6f, 1.0f} : Vec3{0.15f, 0.25f, 0.45f};
+            if (!available) col = {0.2f, 0.2f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel && available);
+            Vec3 tc = available ? (sel ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}) : Vec3{0.35f,0.35f,0.35f};
+            f32 tw = FontSystem::textWidth(p2Labels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale, p2Labels[i], tc, 2);
+        }
+
+        const char* hint = "Player 2 pad: D-pad, A to confirm, B to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 12) {
+        // Player 2 save-slot select — blue theme. Player 1's slot is locked (can't share one file).
+        const char* screenTitle = m_menu.p2Continue ? "Player 2: Select Save — Continue"
+                                                     : "Player 2: Select Save — New Game";
+        f32 stW = FontSystem::textWidth(screenTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.88f, screenTitle, {0.3f, 0.7f, 1.0f}, 2);
+
+        static constexpr u32 VISIBLE = 14;
+        u32 scrollOffset = 0;
+        if (m_menu.subSelection >= VISIBLE) scrollOffset = m_menu.subSelection - VISIBLE + 1;
+        f32 listTop = sh * 0.82f;
+        f32 lineH   = 28.0f * uiScale;
+
+        for (u32 i = scrollOffset; i < MAX_SAVE_SLOTS && (i - scrollOffset) < VISIBLE; i++) {
+            const SaveSlotInfo& info = m_saveSlots[i];
+            bool isP1Slot = (static_cast<u8>(i + 1) == m_playerSaveSlot[0]);
+            f32 y   = listTop - static_cast<f32>(i - scrollOffset) * lineH;
+            bool sel = (i == m_menu.subSelection);
+
+            Vec3 bgCol = sel ? Vec3{0.3f, 0.6f, 1.0f} : Vec3{0.12f, 0.2f, 0.35f};
+            HUD::drawMenuOption(sw, sh, y - 2.0f * uiScale, sw * 0.7f, lineH - 4.0f * uiScale, bgCol, sel);
+
+            char label[96];
+            if (isP1Slot) {
+                std::snprintf(label, sizeof(label), "Slot %2u:  (Player 1) — locked", i + 1);
+            } else if (!info.exists) {
+                std::snprintf(label, sizeof(label), "Slot %2u:  Empty", i + 1);
+            } else {
+                u32 totalSec = static_cast<u32>(info.totalPlayTime);
+                const char* cls1 = (info.playerClasses[0] < static_cast<u8>(PlayerClass::CLASS_COUNT))
+                                    ? kClassDefs[info.playerClasses[0]].name : "?";
+                std::snprintf(label, sizeof(label), "Slot %2u:  Floor %2u — %s — %02u:%02u",
+                              i + 1, info.floor, cls1, totalSec / 60, totalSec % 60);
+            }
+
+            Vec3 textCol;
+            if (isP1Slot)          textCol = {0.5f, 0.35f, 0.35f};
+            else if (!info.exists) textCol = m_menu.p2Continue ? Vec3{0.3f,0.3f,0.3f}
+                                                               : (sel ? Vec3{0.8f,0.8f,0.8f} : Vec3{0.45f,0.45f,0.45f});
+            else                   textCol = sel ? Vec3{1,1,1} : Vec3{0.6f,0.65f,0.75f};
+
+            f32 lw = FontSystem::textWidth(label, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 7.0f * uiScale, label, textCol, 1);
+        }
+
+        const char* slotHint = "Player 2 pad: D-pad, A to confirm, B to go back";
+        f32 hintW2 = FontSystem::textWidth(slotHint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f, slotHint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 7) {
         // Credits screen — scrolling text
         f32 cx = static_cast<f32>(sw) * 0.5f;

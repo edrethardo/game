@@ -40,7 +40,14 @@ struct Camera {
     f32  roll      = 0.0f;   // radians; used by Wanderer barrel roll effect
     f32  fovY      = 70.0f;  // degrees
     f32  nearPlane = 0.1f;
+#ifdef __SWITCH__
+    // Tegra X1 (esp. downclocked in handheld) is fill/overdraw-bound: a 200 m draw distance renders
+    // far dungeon geometry on long sightlines (the cause of the constant ~40 fps). Clamp it so distant
+    // sections frustum-cull; distance fog (basic.frag) hides the nearer cut. F6 / L+R3 still A/B it.
+    f32  farPlane  = 70.0f;
+#else
     f32  farPlane  = 200.0f;
+#endif
 
     // Previous-tick state for render interpolation (reduces gyro lag)
     Vec3 prevPosition = {0.0f, 1.7f, 5.0f};

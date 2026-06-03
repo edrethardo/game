@@ -86,10 +86,18 @@ private:
     // Menu/UI state — grouped for isolation
     struct MenuState {
         u8   selection = 0;
-        u8   subState = 0;       // 0=main, 1=singleplayer, 2=class, 3=options, 8=overwrite confirm
+        u8   subState = 0;       // 0=main, 1=singleplayer, 2=P1 class, 3=options, 4=couch lobby,
+                                 // 5=P2 class, 6=P1 slot, 8=overwrite confirm, 10=host mode,
+                                 // 11=P2 New/Continue chooser, 12=P2 slot select
         u8   subSelection = 0;
         f32  msgTimer = 0.0f;    // countdown for transient menu messages
         const char* msg = nullptr;
+        // Couch co-op: each lane's New-vs-Continue intent, captured during slot selection so the
+        // shared start (subState 4/5/12) calls startGame with the right world mode (CONTINUE keeps
+        // P1's saved floor/seed; NEW_GAME makes a fresh world) and prepares each lane correctly.
+        bool p1Continue = false;
+        bool p2Continue = false;
+        u8   overwriteLane = 0;        // which local lane (0=P1, 1=P2) the subState-8 overwrite is for
         bool bindCapture = false;   // true when waiting for key/button press to rebind
         bool bindKeyboard = true;   // true=capturing keyboard, false=capturing controller
         bool confirmQuit = false;      // "are you sure?" overlay when pressing ESC in-game
@@ -521,8 +529,17 @@ private:
     u8 m_meshIdBolt     = 0;
     u8 m_matIdBatWing   = 0;
 
-    // Switch constraint mode
-    bool m_switchMode = false;
+    // Internal render-scale: the 3D scene renders to an offscreen FBO at this fraction of the window
+    // resolution, then is upscaled (linear blit) to fill the screen — cuts fragment fill/overdraw on
+    // the fill-bound Switch GPU while still filling the display. 1.0 = native (FBO bypassed). Cycled
+    // by F6 (desktop) / L+R3 (Switch). FBO objects below are created lazily in ensureSceneFbo().
+#ifdef __SWITCH__
+    f32 m_renderScale = 0.65f; // confirmed: holds a steady 60 fps in handheld with a crisp native HUD
+#else
+    f32 m_renderScale = 1.0f;
+#endif
+    u32 m_sceneFbo = 0, m_sceneColorTex = 0, m_sceneDepthRbo = 0, m_sceneFboW = 0, m_sceneFboH = 0;
+
     static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;
     static constexpr u32 SWITCH_MAX_ENTITIES  = 64;
     static constexpr u32 SWITCH_RES_W         = 1280;
@@ -534,6 +551,10 @@ private:
     void positionLocalPlayersAtSpawn(); // (M5) place the couch-co-op pair at the current spawn
                                         // (P0 from the active alias, P1 beside it) — one helper
                                         // for the floor-transition / continue-load / new-run paths
+    // Begin a 2-player couch game once both lanes are prepared by the menu (P2 loaded or freshly
+    // equipped). Preps a fresh P1 lane if needed, sets split count = 2, then starts the world on
+    // Player 1's floor (CONTINUE if P1 continued, else NEW_GAME) with lanes already prepared.
+    void startCouchGame();
 
     // Core update paths
     void update(f32 dt);
@@ -650,10 +671,18 @@ private:
     // Menu/lobby
     void updateMenu(f32 dt);
     void updateLobby(f32 dt);
-    void startGame(GameStart mode);
+    // lanesPrepared=true: the menu already populated every local lane (loaded heroes and/or
+    // freshly-equipped new lanes via equipFreshLane), so startGame only builds the world (per
+    // `mode`) and skips the NEW_GAME inventory wipe/grant + HP reset. Used by the couch-co-op
+    // start where lanes can mix New and Continue. Default false = legacy behavior.
+    void startGame(GameStart mode, bool lanesPrepared = false);
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);
+    // Fully initialize one local lane as a brand-new character: wipe inventory/quickbar/skills,
+    // grant the class starting loadout, and set class base HP/move/energy. m_playerClasses[lane]
+    // must already be set. Shared by startGame's NEW_GAME path and the couch menu's new lanes.
+    void equipFreshLane(u8 lane);
 
     // Floor-population helpers called by startGame in engine_spawn.cpp.
     // All receive dungeon by reference because spawnFloorBoss mutates room geometry.
@@ -665,8 +694,31 @@ private:
     void spawnFloorDecorations(const DungeonResult& dungeon);
     void spawnFloorNpcs(const DungeonResult& dungeon);
 
+    // Per-character persistence. A save file holds exactly ONE character (playerCount=1); a
+    // split-screen session writes each local lane to its own slot (m_playerSaveSlot[lane]).
+    // saveGame(slot) is the legacy single-character entry (== saveCharacter(0, slot)).
     void saveGame(u8 slot);
-    bool loadGame(u8 slot);
+    void saveCharacter(u8 lane, u8 slot);  // write one local lane as a 1-player file to `slot`
+    void saveAllCharacters();              // write each active lane to its own m_playerSaveSlot[lane]
+    bool loadGame(u8 slot);                // world-adopting P1 load into lane 0 (+legacy 2-player files)
+    // Load a file's first character into `lane` WITHOUT touching the world (floor/seed/difficulty
+    // stay P1's). Used to drop a Continue'd hero into the Player-2 seat. Returns false on failure.
+    bool loadCharacterIntoLane(u8 slot, u8 lane);
+    u8   firstFreeSaveSlot();              // lowest 1-based empty slot, or 0 if all 20 are taken
+
+    // One deserialized character block (the per-player portion of a save file). Shared scratch
+    // for loadGame / loadCharacterIntoLane so the deserialize + apply logic lives in one place.
+    struct SavedChar {
+        f32 hp = 0, maxHp = 0;
+        PlayerInventory inv{};
+        QuickbarState   qb{};
+        SkillState      skill{};
+        u8 cls = 0, activeSkill = 0;
+        SkillState      classSkills[4]{};
+    };
+    // Apply a deserialized character to a local lane: affix migration, stat recompute, class base
+    // stats, energy/skill rewire. Does NOT touch world state. (Defined in engine_persist.cpp.)
+    void applySavedCharToLane(u8 lane, const SavedChar& ps);
 
     void initAssets();      // load meshes/materials/JSON content + resolve visuals (called by init)
     void initCallbacks();   // wire Combat/SkillSystem/ProjectileSystem/Inventory event callbacks (called by init)
@@ -683,7 +735,12 @@ private:
 
     // Save slot management
     static constexpr u32 MAX_SAVE_SLOTS = 20;
-    u8 m_activeSaveSlot = 0;  // 0 = no active slot, 1-20 = slot number
+    u8 m_activeSaveSlot = 0;  // 0 = no active slot, 1-20 = slot number. == m_playerSaveSlot[0] (P1).
+    // Per-local-lane save destination (1-20; 0 = this lane isn't persisted this session). Lane 0
+    // tracks m_activeSaveSlot (P1); lane 1 is the Player-2 character's own slot, chosen in the couch
+    // lobby. saveAllCharacters() writes each active lane to its own slot, so characters never share
+    // a file. Reset (lane 1 -> 0) whenever a fresh game-setup begins so a solo Continue stays solo.
+    u8 m_playerSaveSlot[MAX_LOCAL_PLAYERS] = {0, 0};
 
     // Set by the client-side menu when the join flow picked "Continue" with a
     // valid save slot — the save is loaded locally before connectToServer, and this
