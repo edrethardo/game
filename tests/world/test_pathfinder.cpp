@@ -111,6 +111,28 @@ TEST_CASE("findPath: diagonal across an open room is a direct line") {
     LevelGridSystem::shutdown(g);
 }
 
+TEST_CASE("findPath: a too-wide body finds no route where a capped one does") {
+    // Why bosses path with a capped nav radius (navRadius in enemy_ai_internal.h):
+    // a 2-wide room is clearance-1 everywhere, so a 0.8 m-radius body (minClearance
+    // 2) can reach NO neighbour and gets no path — the old "stuck in the corner"
+    // behaviour — while a 0.45 m-capped body (minClearance 1) routes fine.
+    LevelGrid g = makeGrid({
+        "######",
+        "#....#",
+        "#....#",
+        "######",
+    });
+    Vec3 path[MAX_PATH_WAYPOINTS];
+    u8 wide = Pathfinder::findPath(g, center(1, 1), center(4, 2), path,
+                                   MAX_PATH_WAYPOINTS, 0.8f);
+    CHECK(wide == 0);                                   // demands clearance >= 2: no route
+    u8 capped = Pathfinder::findPath(g, center(1, 1), center(4, 2), path,
+                                     MAX_PATH_WAYPOINTS, 0.45f);
+    CHECK(capped >= 1);                                 // clearance >= 1: routes fine
+    CHECK(nearGoal(path[capped - 1], center(4, 2)));
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("getSurroundPosition: slots ring the target at radius, evenly spread") {
     // Phase-2 encircle relies on this for coordinated attack slots.
     Vec3 target = {10.0f, 0.0f, 10.0f};

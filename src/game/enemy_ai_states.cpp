@@ -180,7 +180,7 @@ void updateHostileStates(Entity& e, u32 i,
                 if (LevelGridQuery::findFlankCell(grid, e.position, targetPos,
                         e.attackRange, preferRight, flankPos)) {
                     e.pathLen = Pathfinder::findPath(grid, e.position, flankPos,
-                        e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
+                        e.pathWaypoints, MAX_PATH_WAYPOINTS, navRadius(e));
                     e.pathIdx = 0;
                     if (e.pathLen > 0) {
                         e.aiState = AIState::FLANK;
@@ -219,7 +219,7 @@ void updateHostileStates(Entity& e, u32 i,
                 if (LevelGridQuery::findFlankCell(grid, e.position, targetPos,
                         e.attackRange, preferRight, flankPos)) {
                     e.pathLen = Pathfinder::findPath(grid, e.position, flankPos,
-                        e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
+                        e.pathWaypoints, MAX_PATH_WAYPOINTS, navRadius(e));
                     e.pathIdx = 0;
                     if (e.pathLen > 0) {
                         e.aiState = AIState::FLANK;
@@ -285,7 +285,7 @@ void updateHostileStates(Entity& e, u32 i,
             Vec3 moveDir = {0, 0, 0};
             bool hasDirectLOS = hasWidthLOS(
                 e.position + Vec3{0, e.halfExtents.y, 0}, chaseGoal,
-                e.halfExtents.x, grid);
+                navRadius(e), grid);
 
             if (hasDirectLOS) {
                 // Direct line to the goal — walk straight, clear any stale path
@@ -296,7 +296,7 @@ void updateHostileStates(Entity& e, u32 i,
                 // Recompute path every ~2s or when path is exhausted.
                 if (e.pathLen == 0 || e.pathIdx >= e.pathLen || e.tacticalTimer <= 0.0f) {
                     e.pathLen = Pathfinder::findPath(grid, e.position, chaseGoal,
-                        e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
+                        e.pathWaypoints, MAX_PATH_WAYPOINTS, navRadius(e));
                     e.pathIdx = 0;
                     e.tacticalTimer = 2.0f; // recompute interval
                 }
@@ -555,7 +555,7 @@ void updateHostileStates(Entity& e, u32 i,
             Vec3 coverPos;
             if (LevelGridQuery::findCoverCell(grid, e.position, targetPos, coverPos)) {
                 e.pathLen = Pathfinder::findPath(grid, e.position, coverPos,
-                    e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
+                    e.pathWaypoints, MAX_PATH_WAYPOINTS, navRadius(e));
                 e.pathIdx = 0;
                 if (e.pathLen > 0) {
                     e.aiState = AIState::RETREAT;

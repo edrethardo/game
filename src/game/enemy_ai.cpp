@@ -159,7 +159,9 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
             if (bestScore >= 0.0f) {
                 f32 nudge = 2.0f * dt;  // gentle slide-out, ~2 m/s
                 Vec3 cand = e.position + Vec3{bestX * nudge, 0, bestZ * nudge};
-                if (!entityOverlapsGrid(cand, e.halfExtents, grid)) {
+                // Use the capped nav footprint so an oversized boss can still
+                // find a free escape cell (its full AABB never fits a 1-cell gap).
+                if (!entityOverlapsGrid(cand, navExtents(e), grid)) {
                     e.position.x = cand.x;
                     e.position.z = cand.z;
                 }
@@ -684,7 +686,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             if (e.stuckTimer > 2.0f) {
                 // Try A* path to target as recovery
                 e.pathLen = Pathfinder::findPath(grid, e.position,
-                    player.position, e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
+                    player.position, e.pathWaypoints, MAX_PATH_WAYPOINTS, navRadius(e));
                 e.pathIdx = 0;
 
                 // If A* also fails, teleport to nearest walkable cell center
@@ -693,7 +695,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
                         Vec3 cellCenter = LevelGridSystem::gridToWorld(grid, gx, gz);
                         cellCenter.y = e.position.y;
-                        if (!entityOverlapsGrid(cellCenter, e.halfExtents, grid)) {
+                        if (!entityOverlapsGrid(cellCenter, navExtents(e), grid)) {
                             e.position = cellCenter;
                         }
                     }

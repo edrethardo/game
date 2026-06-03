@@ -51,6 +51,23 @@ extern u8 s_skeletonMatId;
 // Returns true if the AABB at `centre`/`halfExtents` overlaps any solid cell.
 bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents, const LevelGrid& grid);
 
+// Grid collision / navigation radius for an entity, CAPPED so an oversized body
+// (a boss — the Butcher is 0.8 m half-width) still fits the 1 m cell grid: it
+// collides, paths, and unwedges as a ~0.9 m body and slides along walls instead
+// of jamming in corners, while its full halfExtents stay intact for hit detection
+// and rendering. Normal enemies/NPCs (<= the cap) are unaffected — navRadius is a
+// no-op for them. A body wider than ~1 cell can't be exactly grid-navigated, so
+// the visual model is allowed to clip wall faces slightly; never getting stuck is
+// the right trade for a chunky melee boss.
+static constexpr f32 ENTITY_NAV_RADIUS_CAP = 0.45f;
+inline f32 navRadius(const Entity& e) {
+    return e.halfExtents.x < ENTITY_NAV_RADIUS_CAP ? e.halfExtents.x : ENTITY_NAV_RADIUS_CAP;
+}
+inline Vec3 navExtents(const Entity& e) {
+    f32 r = navRadius(e);
+    return { r, e.halfExtents.y, r };
+}
+
 // Snaps a ground entity's Y to the floor height of its current grid cell.
 void snapEntityToFloor(Entity& e, const LevelGrid& grid);
 
