@@ -111,6 +111,26 @@ TEST_CASE("findPath: diagonal across an open room is a direct line") {
     LevelGridSystem::shutdown(g);
 }
 
+TEST_CASE("getSurroundPosition: slots ring the target at radius, evenly spread") {
+    // Phase-2 encircle relies on this for coordinated attack slots.
+    Vec3 target = {10.0f, 0.0f, 10.0f};
+    const u8 total = 4;
+    const f32 radius = 2.0f;
+    Vec3 slots[total];
+    for (u8 s = 0; s < total; s++) {
+        slots[s] = LevelGridQuery::getSurroundPosition(target, s, total, radius);
+        // Every slot sits exactly `radius` from the target on the XZ plane.
+        f32 dx = slots[s].x - target.x, dz = slots[s].z - target.z;
+        CHECK(std::sqrt(dx * dx + dz * dz) == doctest::Approx(radius));
+    }
+    // Distinct slots are distinct points (no two enemies pile on one angle).
+    for (u8 a = 0; a < total; a++)
+        for (u8 b = static_cast<u8>(a + 1); b < total; b++)
+            CHECK_FALSE(nearGoal(slots[a], slots[b]));
+    // Zero-slot guard returns the target itself (no divide-by-zero).
+    CHECK(nearGoal(LevelGridQuery::getSurroundPosition(target, 0, 0, radius), target));
+}
+
 TEST_CASE("findPath: diagonals never cut between two corner-touching walls") {
     // (1,1) and (2,2) are the only floor cells, touching only diagonally; the
     // two shared orthogonal cells are solid, so the squeeze must be rejected.

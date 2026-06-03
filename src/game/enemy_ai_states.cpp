@@ -11,6 +11,64 @@
 #include <cmath>
 #include <cstdlib>
 
+// ---------------------------------------------------------------------------
+// Phase-2 tactics helpers (encircle / archetype-distinct motion)
+// ---------------------------------------------------------------------------
+namespace {
+
+// Only spread into an encircle ring once this close. Farther out, melee approach
+// straight (and fast) so the ring forms as the pack arrives rather than having
+// distant enemies arc sideways toward empty air.
+constexpr f32 ENCIRCLE_ENGAGE_DIST = 8.0f;
+
+// A "skirmisher" is a plain melee enemy that should fan out and surround. Chargers
+// commit straight ahead and shield-bearers hold a frontal line, so both opt out
+// and approach directly — that opt-out IS their archetype-distinct motion. Ranged
+// and flyers keep their own range/orbit behaviour.
+inline bool isEncirclingMelee(const Entity& e) {
+    if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) return false;
+    if (e.flags & ENT_FLYING) return false;
+    if (e.attackRange > 5.0f)  return false;                 // ranged hold/strafe
+    if (e.enemyType == EnemyType::BOSS) return false;
+    if (e.enemyRole & (EnemyRole::CHARGER | EnemyRole::SHIELD_BEARER)) return false;
+    return true;
+}
+
+// Pick a coordinated angular "attack slot" around the target so a melee pack
+// surrounds the player instead of single-filing into one corner. Slots are
+// assigned by the entity's rank among the living skirmishers in its squad, so
+// each claims a distinct angle. Returns targetPos (a direct approach) when
+// encircling doesn't apply: lone attacker, out of the engage band, no squad, or
+// the chosen slot lands in a wall (caller then just approaches and the reliable
+// Phase-1 nav handles the corner).
+Vec3 encircleGoal(const Entity& e, EntityPool& pool, SquadPool* squads,
+                  const LevelGrid& grid, Vec3 targetPos, f32 targetDist) {
+    if (!isEncirclingMelee(e))             return targetPos;
+    if (targetDist > ENCIRCLE_ENGAGE_DIST) return targetPos;
+    if (!squads || e.squadId >= squads->squadCount) return targetPos;
+
+    const u32 selfIdx = static_cast<u32>(&e - pool.entities);
+    const Squad& sq = squads->squads[e.squadId];
+    u8 count = 0, rank = 0;
+    for (u8 m = 0; m < sq.memberCount; m++) {
+        u16 mi = sq.memberIndices[m];
+        if (!isEncirclingMelee(pool.entities[mi])) continue;
+        if (mi == selfIdx) rank = count;
+        count++;
+    }
+    if (count < 2) return targetPos;       // lone attacker has nothing to spread around
+
+    f32 radius = e.attackRange * 0.9f;
+    if (radius < 1.2f) radius = 1.2f;
+    Vec3 goal = LevelGridQuery::getSurroundPosition(targetPos, rank, count, radius);
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(grid, goal, gx, gz) ||
+        LevelGridSystem::isSolid(grid, gx, gz)) return targetPos;
+    return goal;
+}
+
+} // namespace
+
 void updateHostileStates(Entity& e, u32 i,
                           EntityPool& pool, ProjectilePool& projectiles,
                           Player& player, Player* targetPlayer,
@@ -132,14 +190,45 @@ void updateHostileStates(Entity& e, u32 i,
                 }
             }
         }
-        // HOLD role with ranged attack range: strafe while in sight instead of just chasing
-        if (e.squadRole == SquadRole::ROLE_HOLD && e.attackRange > 5.0f) {
-            if (targetDist <= e.attackRange && hasLOSToPoint(
-                    e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid)) {
+        // Ranged ground enemies play keep-away (cover/kiting): back off when the
+        // player crowds them, sidestep-and-fire when they have a clear shot, and
+        // reposition to peek when their line of sight is blocked — instead of
+        // marching blindly into melee range.
+        if (e.attackRange > 5.0f && !(e.flags & ENT_FLYING)) {
+            bool los = hasLOSToPoint(
+                e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid);
+            if (targetDist < e.attackRange * 0.55f) {
+                // Player closed the gap — fall back to preferred range (RETREAT
+                // kites backward while still firing).
+                e.aiState = AIState::RETREAT;
+                e.tacticalTimer = 2.0f;
+                break;
+            }
+            if (targetDist <= e.attackRange && los) {
+                // Clear shot at range — strafe sideways while firing.
                 e.aiState = AIState::STRAFE;
                 e.tacticalTimer = 1.0f;
                 break;
             }
+            if (targetDist <= e.detectionRange && !los &&
+                (e.pathLen == 0 || e.tacticalTimer <= 0.0f)) {
+                // Shot blocked — slide laterally to a flank cell to regain a
+                // sightline (peek-and-shoot) rather than closing distance.
+                Vec3 flankPos;
+                bool preferRight = (i % 2 == 0);
+                if (LevelGridQuery::findFlankCell(grid, e.position, targetPos,
+                        e.attackRange, preferRight, flankPos)) {
+                    e.pathLen = Pathfinder::findPath(grid, e.position, flankPos,
+                        e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
+                    e.pathIdx = 0;
+                    if (e.pathLen > 0) {
+                        e.aiState = AIState::FLANK;
+                        e.tacticalTimer = 3.0f;
+                        break;
+                    }
+                }
+            }
+            // else: fall through to a normal approach toward firing range.
         }
 
         if (isBat) {
@@ -183,24 +272,30 @@ void updateHostileStates(Entity& e, u32 i,
                 }
             }
         } else {
-            // Ground movement: direct chase only when the body actually fits the
-            // straight line (width-aware), else A* around the obstacle. Using a
-            // body-width check here is the fix for enemies wedging in corners they
-            // could "see" through with a thin ray.
+            // Ground movement: melee skirmishers aim at a coordinated attack-slot
+            // AROUND the target (encircle/pack tactics) so they surround instead of
+            // single-filing; chargers/shield-bearers and lone attackers fall back to
+            // the target itself. Movement toward the goal is direct only when the
+            // body actually fits the straight line (width-aware) — else A* around it,
+            // the fix for enemies wedging in corners a thin ray could see through.
+            // The ATTACK transition below still keys off the real targetDist.
+            Vec3 chaseGoal = encircleGoal(e, pool, squads, grid, targetPos, targetDist);
+            Vec3 toGoal = chaseGoal - e.position;
+
             Vec3 moveDir = {0, 0, 0};
             bool hasDirectLOS = hasWidthLOS(
-                e.position + Vec3{0, e.halfExtents.y, 0}, targetPos,
+                e.position + Vec3{0, e.halfExtents.y, 0}, chaseGoal,
                 e.halfExtents.x, grid);
 
             if (hasDirectLOS) {
-                // Direct line to target — walk straight, clear any stale path
-                moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                // Direct line to the goal — walk straight, clear any stale path
+                moveDir = normalize(Vec3{toGoal.x, 0.0f, toGoal.z});
                 e.pathLen = 0;
             } else {
                 // No LOS — use A* pathfinding to navigate around obstacles.
                 // Recompute path every ~2s or when path is exhausted.
                 if (e.pathLen == 0 || e.pathIdx >= e.pathLen || e.tacticalTimer <= 0.0f) {
-                    e.pathLen = Pathfinder::findPath(grid, e.position, targetPos,
+                    e.pathLen = Pathfinder::findPath(grid, e.position, chaseGoal,
                         e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
                     e.pathIdx = 0;
                     e.tacticalTimer = 2.0f; // recompute interval
@@ -221,8 +316,9 @@ void updateHostileStates(Entity& e, u32 i,
                     }
                     moveDir = normalize(Vec3{toWp.x, 0.0f, toWp.z});
                 } else {
-                    // A* failed or exhausted — fallback to direct approach
-                    moveDir = normalize(Vec3{dirToTarget.x, 0.0f, dirToTarget.z});
+                    // A* failed or exhausted — fallback to a direct approach
+                    // toward the (possibly encircle-offset) goal.
+                    moveDir = normalize(Vec3{toGoal.x, 0.0f, toGoal.z});
                 }
             }
 
