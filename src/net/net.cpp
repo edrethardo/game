@@ -21,7 +21,10 @@ static ENetPeer*        s_serverPeer = nullptr;   // client's peer to server
 static bool             s_joinFailed = false;     // client: set on SV_JOIN_REJECT or pre-accept disconnect
 static NetPlayerSlot    s_slots[MAX_PLAYERS];
 static u8               s_localPlayerIndex = 0;
+static u8               s_localPlayerIndex2 = 0xFF; // couch client: 2nd local player's slot (0xFF=none)
 static u8               s_localPlayerClass = 0; // chosen PlayerClass to send in CL_JOIN_REQUEST
+static u8               s_localPlayerClass2 = 0xFF; // couch: 2nd local player's class (0xFF=none)
+static u8               s_localJoinCount   = 1;     // couch: # local players this connection joins with (1 or 2)
 static u16              s_seq = 0;
 static bool             s_initialized = false;
 // Dungeon sync received from the server in SV_JOIN_ACCEPT (client side)
@@ -190,6 +193,12 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // validates and falls back to Warrior for out-of-range/missing values).
         u8 chosenClass = 0xFF;
         if (size >= sizeof(PacketHeader) + 5) chosenClass = data[sizeof(PacketHeader) + 4];
+        // Couch co-op (v6): optional localCount(1) + class2(1) — two local players on one connection.
+        u8 localCount = 1, chosenClass2 = 0xFF;
+        if (size >= sizeof(PacketHeader) + 7) {
+            localCount   = data[sizeof(PacketHeader) + 5];
+            chosenClass2 = data[sizeof(PacketHeader) + 6];
+        }
         if (version != PROTOCOL_VERSION) {
             // Send reject
             PacketHeader reject;
@@ -203,28 +212,58 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // Accept
         s_slots[slot].state = SlotState::ACTIVE;
         s_slots[slot].connectTimeMs = 0; // joined in time — clear the CONNECTING deadline (N12)
-        LOG_INFO("Net: player %u connected (class=%u)", slot, chosenClass);
 
-        // Send accept packet
-        u8 buf[12];
+        // Couch joiner: allocate a 2nd slot sharing this peer (best-effort — if the session is full,
+        // drop the partner and join as single). CL_INPUT/CL_FIRE route to it by absolute target slot
+        // with a same-peer ownership check, so the two slots needn't be consecutive.
+        u8 slot2 = 0xFF;
+        if (localCount >= 2) {
+            slot2 = findFreeSlot();
+            if (slot2 != 0xFF) {
+                s_slots[slot2].state        = SlotState::ACTIVE;
+                s_slots[slot2].playerIndex  = slot2;
+                s_slots[slot2].peer         = s_slots[slot].peer;
+                s_slots[slot2].connectTimeMs = 0;
+            } else {
+                LOG_WARN("Net: couch joiner %u — no free slot for partner, joining as single", slot);
+            }
+        }
+        LOG_INFO("Net: player %u connected (class=%u, localCount=%u, partnerSlot=%u)",
+                 slot, chosenClass, localCount, slot2);
+
+        // Send accept packet (13 B = legacy 12 + slot2)
+        u8 buf[13];
         PacketHeader* acc = reinterpret_cast<PacketHeader*>(buf);
         acc->type = NetPacketType::SV_JOIN_ACCEPT;
         acc->flags = 0;
         acc->seq = s_seq++;
         buf[4] = slot;                         // playerIndex
-        buf[5] = Net::getConnectedCount();     // playerCount
+        buf[5] = Net::getConnectedCount();     // playerCount (both couch slots are ACTIVE now)
         buf[6] = Server::getLevelFloor();      // current floor (client generates this floor)
         buf[7] = Server::getLevelDifficulty(); // difficulty tier (folds into the dungeon seed)
         // Send the per-run dungeon seed so the client generates the identical dungeon.
         u32 seed = Server::getLevelSeed();
         std::memcpy(buf + 8, &seed, 4);
-        Net::sendReliable(slot, buf, 12);
+        buf[12] = slot2;                       // 2nd local slot (0xFF if single)
+        Net::sendReliable(slot, buf, 13);
 
-        if (s_onPlayerJoin) s_onPlayerJoin(slot, chosenClass);
+        if (s_onPlayerJoin) {
+            s_onPlayerJoin(slot, chosenClass);
+            if (slot2 != 0xFF) s_onPlayerJoin(slot2, chosenClass2);
+        }
     } break;
 
     case NetPacketType::CL_INPUT: {
-        if (s_onInput) s_onInput(slot, data, size);
+        // Couch co-op: the input-window header's reserved byte 1 carries the ABSOLUTE target net
+        // slot (which of this peer's local players this input is for). Route there iff the SAME peer
+        // owns it (a client can't write another peer's slot). Single clients stamp their own slot.
+        u8 targetSlot = slot;
+        if (size >= sizeof(PacketHeader) + 2) {
+            u8 ts = data[sizeof(PacketHeader) + 1];
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+                targetSlot = ts;
+        }
+        if (s_onInput) s_onInput(targetSlot, data, size);
     } break;
 
     case NetPacketType::CL_PICKUP_ITEM: {
@@ -245,7 +284,16 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // Dead client requests respawn. The engine handler respawns that slot's NetPlayer
         // (idempotent) and the revival propagates back via the next snapshot. Sent reliably
         // so it can't be lost like the old INPUT_EX_RESPAWN-through-the-input-buffer hack.
-        if (s_onRespawn) s_onRespawn(slot);
+        // Online couch co-op: an optional trailing byte names WHICH of this peer's local players
+        // is respawning (a couch client owns two slots; a header-only packet = the peer's primary).
+        // Route iff the same peer owns the target slot, so P2's respawn revives P2, not P1.
+        u8 respawnSlot = slot;
+        if (size >= sizeof(PacketHeader) + 1) {
+            u8 ts = data[sizeof(PacketHeader)];
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+                respawnSlot = ts;
+        }
+        if (s_onRespawn) s_onRespawn(respawnSlot);
     } break;
 
     case NetPacketType::CL_REQUEST_DESCEND: {
@@ -264,14 +312,30 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // loss / queue lag). Hand the raw bytes to the engine so it can unpack the payload
         // itself; minimum size = 4(header) + 4(tick) + 6(pos) + 4(yaw+pitch) = 18 B.
         if (size < sizeof(PacketHeader) + 14) break;
-        if (s_onFireWeapon) s_onFireWeapon(slot, data, size);
+        // Couch co-op: optional trailing byte = absolute target net slot (which local player fired).
+        // Route iff the same peer owns it; single clients omit it (or stamp their own slot).
+        u8 fireSlot = slot;
+        if (size >= sizeof(PacketHeader) + 15) {
+            u8 ts = data[sizeof(PacketHeader) + 14];
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+                fireSlot = ts;
+        }
+        if (s_onFireWeapon) s_onFireWeapon(fireSlot, data, size);
     } break;
 
     case NetPacketType::CL_INVENTORY_SYNC: {
-        // Client is pushing its saved inventory (Continue-join path). Engine deserializes
-        // and replaces the auto-granted starting kit. Size validation is delegated to the
-        // handler since the payload shape is engine-side.
-        if (s_onInventorySync) s_onInventorySync(slot, data, size);
+        // Client is pushing one local player's inventory. Engine deserializes and replaces the
+        // auto-granted starting kit. Size validation is delegated to the handler. Online couch
+        // co-op: the LAST byte is the target net slot (which of this peer's local players) — read it
+        // here (the body offset is engine-side, but the slot is always the trailing byte) and route
+        // iff the same peer owns it; otherwise fall back to the peer's primary slot.
+        u8 invSlot = slot;
+        if (size >= 1) {
+            u8 ts = data[size - 1];
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+                invSlot = ts;
+        }
+        if (s_onInventorySync) s_onInventorySync(invSlot, data, size);
     } break;
 
     case NetPacketType::CL_TIME_PING: {
@@ -314,8 +378,15 @@ static void clientHandlePacket(const u8* data, u32 size) {
         s_serverFloor      = data[6];
         s_serverDifficulty = data[7];
         std::memcpy(&s_serverLevelSeed, data + 8, 4); // per-run dungeon seed
-        LOG_INFO("Net: joined as player %u (floor=%u seed=%u)",
-                 s_localPlayerIndex, s_serverFloor, s_serverLevelSeed);
+        // Couch co-op (v6): 13th byte = 2nd local player's slot (0xFF if we joined single, or an
+        // older 12-byte accept). Validate the same way as the primary before storing.
+        s_localPlayerIndex2 = 0xFF;
+        if (size >= 13) {
+            u8 s2 = data[12];
+            if (s2 != 0xFF && s2 >= 1 && s2 < MAX_PLAYERS && s2 != assignedSlot) s_localPlayerIndex2 = s2;
+        }
+        LOG_INFO("Net: joined as player %u (+partner %u, floor=%u seed=%u)",
+                 s_localPlayerIndex, s_localPlayerIndex2, s_serverFloor, s_serverLevelSeed);
     } break;
 
     case NetPacketType::SV_JOIN_REJECT: {
@@ -480,9 +551,14 @@ void Net::shutdown() {
     LOG_INFO("Net: shut down");
 }
 
-bool Net::hostServer(u16 port, bool useUpnp) {
+bool Net::hostServer(u16 port, bool useUpnp, u8 localPlayerCount) {
     if (!s_initialized) return false;
     if (s_enetHost) return false;
+
+    // Host-owned local slots: slot 0 (host) plus, for online couch co-op, slot 1 (the host's
+    // split-screen partner). Clamp to [1, MAX_PLAYERS-1] so at least one remote peer can still join.
+    u8 localCount = localPlayerCount < 1 ? 1
+                  : (localPlayerCount > MAX_PLAYERS - 1 ? static_cast<u8>(MAX_PLAYERS - 1) : localPlayerCount);
 
     ENetAddress address;
     // R12: zero the address struct so the new family + host6 fields default to
@@ -493,8 +569,8 @@ bool Net::hostServer(u16 port, bool useUpnp) {
     address.host = ENET_HOST_ANY;
     address.port = port;
 
-    // MAX_PLAYERS - 1 peers (slot 0 is the local host)
-    s_enetHost = enet_host_create(&address, MAX_PLAYERS - 1, NUM_CHANNELS, 0, 0);
+    // Remaining slots (MAX_PLAYERS - localCount) are the max concurrent remote peers.
+    s_enetHost = enet_host_create(&address, MAX_PLAYERS - localCount, NUM_CHANNELS, 0, 0);
     if (!s_enetHost) {
         LOG_ERROR("Net: failed to create server on port %u", port);
         return false;
@@ -503,8 +579,13 @@ bool Net::hostServer(u16 port, bool useUpnp) {
     s_role = NetRole::SERVER;
     s_localPlayerIndex = 0;
     resetSlots();
-    s_slots[0].state = SlotState::ACTIVE;
-    s_slots[0].playerIndex = 0;
+    // Reserve the host's local slots (ACTIVE, no peer — never networked) so findFreeSlot() hands
+    // remotes slots >= localCount and a couch partner at slot 1 isn't overwritten by a joiner.
+    for (u8 i = 0; i < localCount; i++) {
+        s_slots[i].state = SlotState::ACTIVE;
+        s_slots[i].playerIndex = i;
+        s_slots[i].peer = nullptr;
+    }
 
     LOG_INFO("Net: hosting on port %u", port);
 
@@ -537,6 +618,14 @@ const char* Net::getUpnpError()  { return Upnp::lastError(); }
 
 void Net::setLocalPlayerClass(u8 classId) {
     s_localPlayerClass = classId;
+    s_localPlayerClass2 = 0xFF;
+    s_localJoinCount    = 1;
+}
+
+void Net::setLocalPlayerClasses(u8 class0, u8 class1, u8 localCount) {
+    s_localPlayerClass  = class0;
+    s_localPlayerClass2 = (localCount >= 2) ? class1 : 0xFF;
+    s_localJoinCount    = (localCount >= 2) ? 2 : 1;
 }
 
 bool Net::connectToServer(const char* address, u16 port) {
@@ -654,14 +743,18 @@ void Net::poll() {
                 // work) tells the server which class to set up for this slot so a joiner
                 // isn't forced to Warrior. Older servers that only read 8 bytes simply
                 // ignore the trailing byte; the size guard below accepts >= 8.
-                u8 buf[sizeof(PacketHeader) + 5];
+                // v6: header(4) + version(4) + class1(1) + localCount(1) + class2(1) = 11 B.
+                // For a single joiner localCount=1 and class2=0xFF (the server ignores the partner).
+                u8 buf[sizeof(PacketHeader) + 7];
                 PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
                 hdr->type = NetPacketType::CL_JOIN_REQUEST;
                 hdr->flags = 0;
                 hdr->seq = s_seq++;
                 u32 version = PROTOCOL_VERSION;
                 std::memcpy(buf + sizeof(PacketHeader), &version, 4);
-                buf[sizeof(PacketHeader) + 4] = s_localPlayerClass; // chosen PlayerClass
+                buf[sizeof(PacketHeader) + 4] = s_localPlayerClass;  // P1 chosen PlayerClass
+                buf[sizeof(PacketHeader) + 5] = s_localJoinCount;     // 1 or 2 (online couch co-op)
+                buf[sizeof(PacketHeader) + 6] = s_localPlayerClass2;  // P2 class (0xFF if single)
                 sendToServer(buf, sizeof(buf), true);
             }
         } break;
@@ -707,8 +800,11 @@ void Net::poll() {
 
         case ENET_EVENT_TYPE_DISCONNECT: {
             if (s_role == NetRole::SERVER) {
-                u8 slot = findSlotByPeer(event.peer);
-                if (slot != 0xFF) {
+                // Free EVERY slot this peer owns — an online-couch client owns two. Each gets its
+                // own SV_PLAYER_LEFT + onPlayerLeft so all clients clear both. (peer is nulled per
+                // slot AFTER its match test, so the second couch slot still matches on a later pass.)
+                for (u8 slot = 0; slot < MAX_PLAYERS; slot++) {
+                    if (s_slots[slot].peer != event.peer) continue;
                     LOG_INFO("Net: player %u disconnected", slot);
                     s_slots[slot].state = SlotState::DISCONNECTED;
                     s_slots[slot].peer = nullptr;
@@ -1001,6 +1097,7 @@ void Net::sendToServer(const u8* data, u32 size, bool reliable) {
 
 NetRole Net::getRole()              { return s_role; }
 u8      Net::getLocalPlayerIndex()  { return s_localPlayerIndex; }
+u8      Net::getLocalPlayerIndex2() { return s_localPlayerIndex2; }
 bool    Net::joinFailed()           { return s_joinFailed; }
 u32     Net::getServerLevelSeed()       { return s_serverLevelSeed; }
 u8      Net::getServerLevelFloor()      { return s_serverFloor; }

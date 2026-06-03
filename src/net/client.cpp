@@ -12,7 +12,8 @@
 // ---------------------------------------------------------------------------
 // Static state
 // ---------------------------------------------------------------------------
-static u8  s_localPlayerIndex = 0;
+static constexpr u32 MAX_LOCAL = 2; // local lanes per client (online couch co-op); == Engine::MAX_LOCAL_PLAYERS
+static u8  s_localPlayerIndex = 0;   // lane 0's net slot (kept for getLocalPlayerIndex back-compat)
 
 // Snapshot ring buffer
 static WorldSnapshot s_snapshots[SNAP_BUFFER_SIZE];
@@ -28,16 +29,16 @@ static constexpr f32 MAX_INTERP_DELAY_SEC      = 0.15f; // cap so remotes don't 
 static f32           s_arrivalJitter           = 0.0f;
 static f32           s_interpDelaySec          = INTERP_DELAY_SEC;
 
-// Latest input captured this frame
-static NetInput s_latestInput = {};
-static bool     s_hasInput    = false;
+// Latest input captured this frame — PER LANE (online couch co-op sends one stream per local player).
+static NetInput s_latestInput[MAX_LOCAL] = {};
+static bool     s_hasInput[MAX_LOCAL]    = {};
 
-// Rolling send window: holds the last INPUT_WINDOW_SIZE inputs in oldest→newest order.
+// Rolling send window PER LANE: holds the last INPUT_WINDOW_SIZE inputs in oldest→newest order.
 // Every CL_INPUT packet carries the full window so a single dropped UDP packet no longer
 // loses an input — the next packet still carries it. Three consecutive losses are required
 // to actually drop an input.
-static NetInput s_sendWindow[INPUT_WINDOW_SIZE] = {};
-static u32      s_sendWindowCount = 0;
+static NetInput s_sendWindow[MAX_LOCAL][INPUT_WINDOW_SIZE] = {};
+static u32      s_sendWindowCount[MAX_LOCAL] = {};
 
 // Set by Client::init (every client floor descend re-enters startGame -> Client::init,
 // engine_startgame.cpp). It forces receiveSnapshot to accept the FIRST snapshot after a
@@ -179,10 +180,9 @@ void Client::init(u8 localPlayerIndex) {
     s_snapCount = 0;
     s_arrivalJitter  = 0.0f;            // reset adaptive-delay state on (re)init / floor change
     s_interpDelaySec = INTERP_DELAY_SEC;
-    s_hasInput = false;
-    // Reset the send window so stale prior-floor inputs don't bleed into the new floor's
+    // Reset every lane's input stream so stale prior-floor inputs don't bleed into the new floor's
     // first packets (the server's input ring buffer also resets in Server::init).
-    s_sendWindowCount = 0;
+    for (u32 l = 0; l < MAX_LOCAL; l++) { s_hasInput[l] = false; s_sendWindowCount[l] = 0; }
     s_acceptNextSnapshot = true; // first post-(re)init snapshot is accepted unconditionally (TA-6)
     // D7.3 — Clear the delta baseline so the first snapshot on the new floor is always
     // treated as a full (no stale prior-floor baseline confusing the decoder).
@@ -191,39 +191,40 @@ void Client::init(u8 localPlayerIndex) {
 }
 
 void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
-                                 u8 skillSlot, u8 extFlagsClearMask, bool freezeMovement) {
-    s_latestInput = PlayerController::captureLocalInput(player, clientTick, weaponId);
+                                 u8 skillSlot, u8 extFlagsClearMask, bool freezeMovement,
+                                 u8 laneId, u8 targetSlot) {
+    if (laneId >= MAX_LOCAL) laneId = 0;
+    NetInput& latest = s_latestInput[laneId];
+    latest = PlayerController::captureLocalInput(player, clientTick, weaponId);
     // captureLocalInput defaults skillSlot to 0 ("set by engine before sending"); stamp the
     // engine's selected class-skill slot here so the server activates the chosen skill.
-    s_latestInput.skillSlot = skillSlot;
+    latest.skillSlot = skillSlot;
     // Freeze: blocking UI open (inventory / pause menu) → don't drive the server from held
     // movement keys. The local sim already isn't moving the player; zero the wire movement so
     // the server-side NetPlayer stays put too (yaw/pitch kept so facing doesn't snap).
-    if (freezeMovement) s_latestInput.moveFlags = 0;
+    if (freezeMovement) latest.moveFlags = 0;
     // R9 client-side cooldown gate: if the engine determined our local cooldown isn't
     // ready, clear the corresponding INPUT_EX_* bit so we don't even ask the server.
     // Server still gates persistently as a backstop, but this is the "snappy" path —
     // suppress spam at source.
-    s_latestInput.extFlags &= static_cast<u8>(~extFlagsClearMask);
-    s_hasInput = true;
+    latest.extFlags &= static_cast<u8>(~extFlagsClearMask);
+    s_hasInput[laneId] = true;
 
-    // Shift oldest out and append this input at the back (oldest→newest order).
-    if (s_sendWindowCount < INPUT_WINDOW_SIZE) {
-        s_sendWindow[s_sendWindowCount++] = s_latestInput;
+    // Shift oldest out and append this input at the back of THIS lane's window (oldest→newest).
+    NetInput* window = s_sendWindow[laneId];
+    u32&      wcount = s_sendWindowCount[laneId];
+    if (wcount < INPUT_WINDOW_SIZE) {
+        window[wcount++] = latest;
     } else {
-        for (u32 i = 0; i < INPUT_WINDOW_SIZE - 1; i++) {
-            s_sendWindow[i] = s_sendWindow[i + 1];
-        }
-        s_sendWindow[INPUT_WINDOW_SIZE - 1] = s_latestInput;
+        for (u32 i = 0; i < INPUT_WINDOW_SIZE - 1; i++) window[i] = window[i + 1];
+        window[INPUT_WINDOW_SIZE - 1] = latest;
     }
 
-    // Serialize the full window into a local buffer, then wrap it in a packet header and
-    // send. Wire layout (M2.2, PROTOCOL_VERSION 2):
-    //   PacketHeader(4) + windowPayload: u8 windowCount + u8[3] reserved + N×14 B inputs
-    //   Max total = 4 + 4 + INPUT_WINDOW_SIZE*14 = 120 B per CL_INPUT (window=8).
+    // Serialize the full window, stamping `targetSlot` into the window header (byte 1) so the
+    // server routes this input to the right one of this peer's local players (couch co-op).
+    // Wire: PacketHeader(4) + payload[ windowCount, targetSlot, 0, 0, N×14 B inputs ].
     u8 payload[256];
-    u32 payloadSize = serializeInputWindow(payload, sizeof(payload),
-                                           s_sendWindow, s_sendWindowCount);
+    u32 payloadSize = serializeInputWindow(payload, sizeof(payload), window, wcount, targetSlot);
     PacketWriter w;
     w.writeU8(static_cast<u8>(NetPacketType::CL_INPUT));
     w.writeU8(0);
@@ -233,8 +234,9 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     Net::sendToServer(w.data, w.cursor, false);
 }
 
-const NetInput* Client::getLatestInput() {
-    return s_hasInput ? &s_latestInput : nullptr;
+const NetInput* Client::getLatestInput(u8 laneId) {
+    if (laneId >= MAX_LOCAL) laneId = 0;
+    return s_hasInput[laneId] ? &s_latestInput[laneId] : nullptr;
 }
 
 void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
@@ -353,14 +355,15 @@ const WorldSnapshot* Client::getLatestSnapshot() {
 // `np` is the local NetPlayer slot (gets HP/status updates flowing back into the snapshot
 // chain). `lp` is m_localPlayer — updated for HP/status (mirrored fields) and the rare
 // teleport snap so the camera follows server-driven position changes.
-bool Client::reconcile(NetPlayer& np, Player& lp) {
+bool Client::reconcile(NetPlayer& np, Player& lp, u8 localSlot) {
     const WorldSnapshot* snap = getSnapshot(0);
     if (!snap) return false; // no snapshot yet — keep pure local state
 
-    // Find our own player in the snapshot.
+    // Find this lane's player in the snapshot (localSlot = this local lane's net slot — couch co-op
+    // reconciles each lane against its own slot).
     const SnapPlayer* serverState = nullptr;
     for (u32 i = 0; i < snap->playerCount; i++) {
-        if (snap->players[i].slotIndex == s_localPlayerIndex) {
+        if (snap->players[i].slotIndex == localSlot) {
             serverState = &snap->players[i];
             break;
         }
@@ -464,12 +467,15 @@ bool Client::reconcile(NetPlayer& np, Player& lp) {
     return true;
 }
 
-void Client::interpolateRemotePlayers(u8 localSlot,
+void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
                                        Vec3* outPositions, f32* outYaws,
                                        bool* outActive, f32* outHealth, f32* outMaxHealth,
                                        u8* outAnimFlags, u8* outWeaponMeshId,
                                        u8* outPlayerClass)
 {
+    // localSlot0/localSlot1 are this client's local lanes' net slots (couch co-op has two; the 2nd
+    // is 0xFF for a single client). Both are skipped — local players render from their own predicted
+    // m_localPlayers[], not from the delayed interp snapshot.
     // Clear all slots
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         outActive[i] = false;
@@ -505,7 +511,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
             const SnapPlayer& sp = snapB->players[i];
             u8 slot = sp.slotIndex;
             if (slot >= MAX_PLAYERS) continue; // guard malformed/corrupt snapshot -> OOB write
-            if (slot == localSlot) continue;
+            if (slot == localSlot0 || slot == localSlot1) continue;
             if (!(sp.flags & 1)) continue;
 
             outActive[slot] = true;
@@ -528,7 +534,7 @@ void Client::interpolateRemotePlayers(u8 localSlot,
         const SnapPlayer& spB = snapB->players[i];
         u8 slot = spB.slotIndex;
         if (slot >= MAX_PLAYERS) continue; // guard malformed/corrupt snapshot -> OOB write
-        if (slot == localSlot) continue;
+        if (slot == localSlot0 || slot == localSlot1) continue;
         if (!(spB.flags & 1)) continue;
 
         Vec3 posB;

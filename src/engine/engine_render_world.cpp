@@ -230,7 +230,18 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         // Render network remote players
         if (m_netRole != NetRole::NONE) {
             for (u32 i = 0; i < MAX_PLAYERS; i++) {
-                if (i == activeNetSlot()) continue; // skip the local player's net slot (client slot may be >=1)
+                // Skip the LOCAL player(s) — they're drawn by the viewport's own camera + the
+                // split-screen "other local" block below. On a CLIENT the local lane lives at its
+                // server-assigned net slot; on a HOST the local lanes are slots 0..count-1 (so a
+                // host-couch partner at slot 1 renders once, via the split block — not twice here).
+                if (m_netRole == NetRole::CLIENT) {
+                    // Skip BOTH local lanes' net slots (online couch co-op) — each renders from its
+                    // own predicted state / the split-screen "other local" block, not interp.
+                    if (i == m_clientNetSlot[0] ||
+                        (m_splitPlayerCount > 1 && i == m_clientNetSlot[1])) continue;
+                } else if (i < m_splitPlayerCount) {
+                    continue;
+                }
 
                 bool active = false;
                 Vec3 pos;

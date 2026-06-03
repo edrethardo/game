@@ -98,6 +98,10 @@ private:
         bool p1Continue = false;
         bool p2Continue = false;
         u8   overwriteLane = 0;        // which local lane (0=P1, 1=P2) the subState-8 overwrite is for
+        bool couchHost = false;        // true when the host-mode chooser (10) was reached from the
+                                       // couch lobby to host an ONLINE couch game (both locals + remotes)
+        bool couchJoin = false;        // true when the IP-entry screen (9) was reached from the couch
+                                       // lobby to JOIN an online game with two local players
         bool bindCapture = false;   // true when waiting for key/button press to rebind
         bool bindKeyboard = true;   // true=capturing keyboard, false=capturing controller
         bool confirmQuit = false;      // "are you sure?" overlay when pressing ESC in-game
@@ -143,6 +147,11 @@ private:
     // loop (never in render), so the two could silently disagree — collapsed into one.
     u8   m_splitMode = 0;          // 0=horizontal (top/bottom), 1=vertical (left/right)
     bool m_playerDead[MAX_LOCAL_PLAYERS] = {}; // per-player death state for split-screen
+    // Online couch co-op: true when split-screen (m_splitPlayerCount==2) is INTENTIONALLY combined
+    // with a net role (host-couch / client-couch). Normally split-screen and networking are mutually
+    // exclusive and the dispatch guard forces count to 1 under a net role; this flag opts a genuine
+    // couch-online session out of that guard so two local players can share one connection.
+    bool m_netCouch = false;
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];
@@ -188,13 +197,13 @@ private:
     // Networking
     NetRole    m_netRole = NetRole::NONE;
     u8         m_localPlayerIndex = 0;
-    // Net slot of the local player as assigned by the server (SV_JOIN_ACCEPT). On a host or in
-    // singleplayer/split the local player's net slot equals its lane, so this stays 0 and
-    // activeNetSlot() == m_localPlayerIndex. On a CLIENT, networking forces m_splitPlayerCount=1
-    // so m_localPlayerIndex (the split-screen lane) is always 0, while the real net slot (>=1)
-    // lives here. Separating the two is required because swapInPlayer() overwrites
-    // m_localPlayerIndex with the lane every frame — see activeNetSlot().
-    u8         m_clientNetSlot = 0;
+    // Net slot of each local lane as assigned by the server (SV_JOIN_ACCEPT). On a host or in
+    // singleplayer/split a lane's net slot equals its lane index, so these stay {0,…} and
+    // activeNetSlot() == m_localPlayerIndex. On a CLIENT the server-assigned slots (≥1) live here,
+    // per lane — online couch co-op carries TWO local players over one connection, so lane 1 has its
+    // own slot. activeNetSlot() indexes by m_localPlayerIndex (the swapped-in lane). Separating slot
+    // from lane is required because swapInPlayer() overwrites m_localPlayerIndex every frame.
+    u8         m_clientNetSlot[MAX_LOCAL_PLAYERS] = {0, 0};
     u32        m_serverTick = 0;
     // Client-local monotonic sim tick. Drives NetInput.clientTick (M1). Independent of
     // m_serverTick. On CLIENT role, read m_clockSync.currentServerTickEst for any
@@ -224,14 +233,17 @@ private:
     // Prediction ring (CLIENT role, M3) — stores (input, predicted-state) per clientTick
     // so that clientNetPost can compare the server's authoritative pose against what we
     // predicted and snap/correct if divergence > 10 cm. Reset on every CLIENT connect.
-    PredictionRing m_predictionRing;
-    u32            m_lastReconciledTick = 0;
+    // PER-LANE for online couch co-op: each local player predicts/reconciles against its own
+    // net slot, indexed by m_localPlayerIndex (the swapped-in lane). Single client uses [0].
+    PredictionRing m_predictionRing[MAX_LOCAL_PLAYERS];
+    u32            m_lastReconciledTick[MAX_LOCAL_PLAYERS] = {0, 0};
 
     // Smooth correction offset (CLIENT role, M4) — accumulates the visible delta when the
     // server corrects our predicted position. Decays to zero each frame so the rendered
     // camera position smoothly slides toward the corrected sim position (~150 ms window)
     // instead of teleporting. Reset on every CLIENT connect (see engine_startgame.cpp).
-    RenderOffset m_renderOffset;
+    // Per-lane (see m_predictionRing) — each local player's camera smooths independently.
+    RenderOffset m_renderOffset[MAX_LOCAL_PLAYERS];
 
     // Pending predicted hits (CLIENT role, M6) — records one entry per predicted melee
     // or hitscan hit (clientTick, entitySlot). M10's SV_DAMAGE_DONE handler will ack
@@ -268,7 +280,7 @@ private:
     // m_localPlayerIndex is the lane (0) but the player lives at the server-assigned slot.
     // Per-lane split-screen arrays (m_inventories/m_skillStates/m_localPlayers/... sized by
     // lane) must keep using m_localPlayerIndex.
-    u8 activeNetSlot() const { return (m_netRole == NetRole::CLIENT) ? m_clientNetSlot : m_localPlayerIndex; }
+    u8 activeNetSlot() const { return (m_netRole == NetRole::CLIENT) ? m_clientNetSlot[m_localPlayerIndex] : m_localPlayerIndex; }
     // Returns the server's current simulation tick — used by the server-side CL_TIME_PING
     // handler so net.cpp can stamp SV_TIME_PONG without directly accessing m_serverTick.
     u32 serverTickNow() const { return m_serverTick; }
@@ -555,6 +567,10 @@ private:
     // equipped). Preps a fresh P1 lane if needed, sets split count = 2, then starts the world on
     // Player 1's floor (CONTINUE if P1 continued, else NEW_GAME) with lanes already prepared.
     void startCouchGame();
+    // Online couch co-op JOIN: prep a fresh Player-1 lane if needed, advertise both classes +
+    // localCount=2, and connect to m_menu.connectAddress (→ CONNECTING). Both lanes already have
+    // characters from the couch lobby. Called from the IP-entry confirm (desktop + Switch swkbd).
+    void beginCouchJoin();
 
     // Core update paths
     void update(f32 dt);
@@ -805,7 +821,7 @@ private:
                            const ItemInstance& it, Vec3 dropPos);
 
     // Client: request respawn after death (reliable CL_RESPAWN). Server-authoritative.
-    void sendRespawnRequest();
+    void sendRespawnRequest(u8 targetSlot = 0); // targetSlot = the dying lane's net slot (couch co-op)
     // Server: respawn a dead client's NetPlayer (idempotent; revival propagates via snapshot).
     void handleRespawnRequest(u8 playerSlot);
 
@@ -889,7 +905,8 @@ private:
     // Client-side helper: serialize m_inventories[localSlot] + class/skill state and ship
     // it via CL_INVENTORY_SYNC. Called once shortly after SV_JOIN_ACCEPT when the joiner
     // came from the menu's "Continue" path with a loaded save.
-    void sendInventorySync();
+    void sendInventorySync(u8 lane = 0, u8 targetSlot = 0); // push one local lane's inventory to its
+                                                            // server slot (online couch co-op: per lane)
     static void onEvent(const u8* data, u32 size);
     static void onPlayerJoin(u8 playerSlot, u8 classId);
     static void onPlayerLeft(u8 playerSlot);

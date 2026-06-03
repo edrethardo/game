@@ -571,7 +571,7 @@ void Engine::tickMiscTimers(f32 dt) {
     // immediately after so nothing downstream reads the offset-shifted value by accident.
     if (m_netRole == NetRole::CLIENT) {
         Vec3 savedPos = m_localPlayer.position;
-        m_localPlayer.position = RenderOffsetOps::apply(m_renderOffset, savedPos);
+        m_localPlayer.position = RenderOffsetOps::apply(m_renderOffset[m_localPlayerIndex], savedPos);
         PlayerController::applyToCamera(m_localPlayer, m_camera);
         m_localPlayer.position = savedPos;
     } else {

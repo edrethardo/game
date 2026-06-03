@@ -212,15 +212,29 @@ void Engine::updateMenu(f32 dt) {
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
-            m_netRole = NetRole::NONE;     // drop the SERVER hint set by main menu
-            m_menu.subState = 0;
+            m_netRole = NetRole::NONE;     // drop the SERVER hint set by main menu / couch lobby
+            m_menu.subState = m_menu.couchHost ? 13 : 0;  // couch: back to the start-mode screen
+            m_menu.couchHost = false;
             return;
         }
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_menu.hostOnline = (m_menu.subSelection == 1);  // 0 = LAN, 1 = Online
-            m_menu.subState = 1;            // fall into the shared New/Continue chooser
+            if (m_menu.couchHost) {
+                // Online couch co-op: both local players already picked characters in the lobby.
+                // Host reserving 2 local slots (slot 0 host + slot 1 partner), then start as SERVER.
+                if (Net::hostServer(DEFAULT_PORT, m_menu.hostOnline, 2)) {
+                    m_menu.couchHost = false;
+                    startCouchGame();        // m_netRole==SERVER → seats slot 1 + sets m_netCouch
+                } else {
+                    m_netRole = NetRole::NONE;
+                    m_menu.couchHost = false;
+                    m_menu.subState = 13;    // hosting failed — back to the start-mode screen
+                }
+                return;
+            }
+            m_menu.subState = 1;            // normal host: fall into the shared New/Continue chooser
             m_menu.subSelection = 0;
         }
         return;
@@ -272,26 +286,16 @@ void Engine::updateMenu(f32 dt) {
                 if (loadGame(selectedSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
                     if (m_netRole == NetRole::CLIENT) {
-                        // Continue-Join: skip class select (class came from the save) and
-                        // connect directly. updateLobby sends CL_INVENTORY_SYNC right after
-                        // SV_JOIN_ACCEPT to push our loaded inventory to the host; the
-                        // m_clientLoadedFromSave flag also tells startGame to skip the
-                        // inventory wipe + starting-kit grant that the New-Join path uses.
+                        // Continue-Join: P1's hero is loaded (class + inventory). Route through the
+                        // couch lobby (subState 4) so a 2nd local player can also join online — the
+                        // lobby's solo-start connects single, or P2 presses A to bring a partner.
+                        // m_clientLoadedFromSave drives the post-accept CL_INVENTORY_SYNC in
+                        // updateLobby; m_playerClasses[0] already holds the loaded class.
                         m_clientLoadedFromSave = true;
-                        Net::setLocalPlayerClass(static_cast<u8>(m_playerClass));
-                        m_menu.subState = 0;
-                        m_menu.msg = nullptr;
-                        m_splitPlayerCount = 1;
-                        if (Net::connectToServer(m_menu.connectAddress)) {
-                            m_gameState = GameState::CONNECTING;
-                            m_connectingElapsed = 0.0f;
-                            LOG_INFO("Connecting (continue slot %u) to %s as class %u...",
-                                     selectedSlot, m_menu.connectAddress,
-                                     static_cast<u32>(m_playerClass));
-                        } else {
-                            m_netRole = NetRole::NONE;
-                            m_clientLoadedFromSave = false;
-                        }
+                        m_menu.p1Continue   = true;
+                        m_menu.subState     = 4;
+                        m_menu.subSelection = 0;
+                        m_menu.msg          = nullptr;
                         return;
                     }
                     if (m_netRole == NetRole::SERVER) {
@@ -386,20 +390,13 @@ void Engine::updateMenu(f32 dt) {
 
             // Go to difficulty selection (subState 7) before co-op/network start
             if (m_netRole == NetRole::CLIENT) {
-                // Joining a remote game: advertise the chosen class so the server sets
-                // up this slot correctly (no more forced Warrior), then connect. The
-                // local loadout/health were already applied above from the class.
-                Net::setLocalPlayerClass(static_cast<u8>(m_playerClass));
-                m_menu.subState = 0;
-                m_splitPlayerCount = 1;
-                if (Net::connectToServer(m_menu.connectAddress)) {
-                    m_gameState = GameState::CONNECTING;
-                    m_connectingElapsed = 0.0f; // (M10) start the bail-out timer fresh
-                    LOG_INFO("Connecting to %s as class %u...",
-                             m_menu.connectAddress, static_cast<u32>(m_playerClass));
-                } else {
-                    m_netRole = NetRole::NONE; // connection failed — drop back to menu role
-                }
+                // Joining a remote game: P1's class is chosen and stored in lane 0. Route through the
+                // couch lobby (subState 4) so a 2nd local player can also join online (the gap the
+                // user hit: "Join Game" used to connect single immediately). The lobby's solo-start
+                // connects single; P2 pressing A brings a partner via beginCouchJoin.
+                m_menu.p1Continue   = false;
+                m_menu.subState     = 4;
+                m_menu.subSelection = 0;
             } else if (m_netRole == NetRole::SERVER) {
                 // Network hosting — skip couch co-op, start server directly
                 if (!Net::hostServer(DEFAULT_PORT, m_menu.hostOnline)) {
@@ -435,16 +432,30 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             return;
         }
-        // +/Start or Enter/Space = start solo (skip P2). The world follows Player 1's mode.
+        // +/Start or Enter/Space = start/join solo (skip P2).
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_START) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_splitPlayerCount = 1;
             Input::setSplitScreen(false);
             m_menu.subState = 0;
-            // Solo: CONTINUE keeps the loaded hero, NEW_GAME wipes+grants P1. Single lane, so the
-            // default (lanesPrepared=false) legacy path is correct.
-            startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
+            if (m_netRole == NetRole::CLIENT) {
+                // Join solo — connect as a single player. (This is the lobby reached from the
+                // discoverable "Join Game" flow; the single-connect logic lives here now.)
+                Net::setLocalPlayerClass(static_cast<u8>(m_playerClasses[0]));
+                if (Net::connectToServer(m_menu.connectAddress)) {
+                    m_gameState = GameState::CONNECTING;
+                    m_connectingElapsed = 0.0f;
+                    LOG_INFO("Joining %s solo as class %u...",
+                             m_menu.connectAddress, static_cast<u32>(m_playerClasses[0]));
+                } else {
+                    m_netRole = NetRole::NONE;
+                    m_clientLoadedFromSave = false;
+                }
+            } else {
+                // Local solo: CONTINUE keeps the loaded hero, NEW_GAME wipes+grants P1.
+                startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
+            }
             return;
         }
         // ESC/B: a continued P1 returns to its slot list; a fresh P1 returns to class select.
@@ -493,9 +504,14 @@ void Engine::updateMenu(f32 dt) {
             }
 
             // Fresh P2 lane: init inventory + grant the class loadout (class base stats were set
-            // just above; equipFreshLane re-applies them harmlessly), then begin the couch game.
+            // just above; equipFreshLane re-applies them harmlessly). Both players are ready.
             equipFreshLane(1);
-            startCouchGame();
+            if (m_netRole == NetRole::CLIENT) {
+                beginCouchJoin();          // Join-Game flow: connect both locals to the host now
+            } else {
+                m_menu.subState = 13;      // Singleplayer flow: choose Start Local / Host Online
+                m_menu.subSelection = 0;
+            }
         }
         return;
     }
@@ -552,7 +568,13 @@ void Engine::updateMenu(f32 dt) {
                 if (!slotUsed) { AudioSystem::play(SfxId::UI_BACK); return; }       // can't continue empty
                 AudioSystem::play(SfxId::UI_CONFIRM);
                 if (!loadCharacterIntoLane(slot, 1)) { AudioSystem::play(SfxId::UI_BACK); return; }
-                startCouchGame();                                                   // world stays P1's
+                // P2 hero loaded into lane 1 (world stays P1's) — both ready.
+                if (m_netRole == NetRole::CLIENT) {
+                    beginCouchJoin();      // Join-Game flow: connect both locals to the host now
+                } else {
+                    m_menu.subState = 13;  // Singleplayer flow: choose Start Local / Host Online
+                    m_menu.subSelection = 0;
+                }
             } else if (slotUsed) {
                 // New P2 over an existing save — confirm overwrite (subState 8, lane 1).
                 AudioSystem::play(SfxId::UI_CONFIRM);
@@ -565,6 +587,66 @@ void Engine::updateMenu(f32 dt) {
                 m_playerSaveSlot[1] = slot;
                 m_menu.subState = 5;            // P2 class select
                 m_menu.subSelection = 0;
+            }
+        }
+        return;
+    }
+
+    // Couch start-mode (subState 13) — both local players are set up; choose how to play together:
+    // 0 Start Local (offline split-screen), 1 Host Online (couch pair hosts), 2 Join Online (couch
+    // pair joins a remote host over one connection).
+    if (m_menu.subState == 13) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+            if (m_menu.subSelection < 2) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 4;               // back to the lobby
+            m_menu.subSelection = 0;
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            if (m_menu.subSelection == 0) {
+                startCouchGame();              // offline split-screen (m_netRole stays NONE)
+            } else if (m_menu.subSelection == 1) {
+                // Host online together — pick LAN/Online (subState 10), then host with 2 local slots.
+                m_netRole = NetRole::SERVER;
+                m_menu.couchHost = true;
+                m_menu.subState = 10;
+                m_menu.subSelection = 0;
+            } else {
+                // Join online together — enter the host IP, then connect with 2 local players.
+                m_netRole = NetRole::CLIENT;
+                m_menu.couchJoin = true;
+#ifdef __SWITCH__
+                {
+                    // Switch has no physical keyboard: pop the system swkbd for the IP, then connect.
+                    char buf[sizeof(m_menu.connectAddress)];
+                    std::strncpy(buf, m_menu.connectAddress, sizeof(buf) - 1);
+                    buf[sizeof(buf) - 1] = '\0';
+                    if (Input::openVirtualKeyboard("Host IP (e.g. 192.168.1.10 or [::1]:7777)",
+                                                   buf, buf, sizeof(buf))) {
+                        std::strncpy(m_menu.connectAddress, buf, sizeof(m_menu.connectAddress) - 1);
+                        m_menu.connectAddress[sizeof(m_menu.connectAddress) - 1] = '\0';
+                        beginCouchJoin();
+                    } else {
+                        m_netRole = NetRole::NONE;
+                        m_menu.couchJoin = false;
+                        m_menu.subState = 13;  // cancelled — stay on the start-mode screen
+                    }
+                }
+#else
+                m_menu.connectAddressClearOnType = true;
+                m_menu.subState = 9;           // desktop scancode IP entry → couch-connect on confirm
+                m_menu.subSelection = 0;
+#endif
             }
         }
         return;
@@ -822,8 +904,12 @@ void Engine::updateMenu(f32 dt) {
             if (m_menu.connectAddress[0] == '\0') {
                 std::snprintf(m_menu.connectAddress, sizeof(m_menu.connectAddress), "127.0.0.1");
             }
-            m_menu.subState = 1; // New/Continue chooser (shared with Host path)
-            m_menu.subSelection = 0;
+            if (m_menu.couchJoin) {
+                beginCouchJoin();    // online couch co-op: both locals already set up → connect now
+            } else {
+                m_menu.subState = 1; // New/Continue chooser (shared with Host path)
+                m_menu.subSelection = 0;
+            }
         }
         return;
     }
@@ -845,6 +931,9 @@ void Engine::updateMenu(f32 dt) {
         m_playerSaveSlot[1] = 0;
         m_menu.p1Continue   = false;
         m_menu.p2Continue   = false;
+        m_menu.couchHost    = false;
+        m_menu.couchJoin    = false;
+        m_netCouch          = false;   // clear any online-couch flag from a prior session
         switch (m_menu.selection) {
         case 0: // Singleplayer — show sub-menu
             scanSaveSlots(); // scan early so "Continue" is available if saves exist
@@ -939,7 +1028,23 @@ void Engine::updateLobby(f32 dt) {
             // (the split-screen lane, set above) — net-array access goes through
             // activeNetSlot(). Overwriting m_localPlayerIndex here would be clobbered by
             // swapInPlayer(0) every frame anyway and would mis-index the per-lane arrays.
-            m_clientNetSlot = idx;
+            m_clientNetSlot[0] = idx;
+            // Online couch co-op: the 2nd local player's slot rode in SV_JOIN_ACCEPT. If we joined
+            // with a partner and the server gave us a 2nd slot, run as a split-screen client.
+            u8 slot2 = Net::getLocalPlayerIndex2();
+            LOG_INFO("Join accept: slot=%u slot2=%u couchJoin=%d -> %s",
+                     idx, slot2, (int)m_menu.couchJoin,
+                     (m_menu.couchJoin && slot2 != 0xFF) ? "COUCH (2 local)" : "single (1 local)");
+            if (m_menu.couchJoin && slot2 != 0xFF) {
+                m_clientNetSlot[1]  = slot2;
+                m_splitPlayerCount  = 2;
+                Input::setSplitScreen(true);
+                m_netCouch          = true;
+            } else {
+                m_clientNetSlot[1]  = 0;
+                m_splitPlayerCount  = 1;
+                m_netCouch          = false;
+            }
             // Adopt the server's per-run dungeon seed, floor, and difficulty (from
             // SV_JOIN_ACCEPT) so startGame regenerates the IDENTICAL dungeon as the host
             // instead of rolling its own from local rand().
@@ -947,12 +1052,15 @@ void Engine::updateLobby(f32 dt) {
             m_level.currentFloor = Net::getServerLevelFloor();
             m_difficulty         = Net::getServerLevelDifficulty();
             startGame(GameStart::CONTINUE);
-            // Continue-Join: push the loaded inventory to the host now that we have an
-            // assigned slot. The host's onPlayerJoin granted a starting kit moments ago;
-            // onInventorySync overwrites it with our saved gear. Clear the flag so we
-            // don't re-push on a future reconnect within this menu session.
-            if (m_clientLoadedFromSave) {
-                sendInventorySync();
+            if (m_netCouch) positionLocalPlayersAtSpawn(); // place P2 beside P1 at the spawn
+            // Push each local lane's inventory to its server slot now that we have assigned slots.
+            // The host's onPlayerJoin granted each a starting kit; onInventorySync overwrites it with
+            // our real gear. Online couch co-op (m_netCouch) pushes BOTH lanes so a Continue'd Player
+            // 2's saved gear reaches the host too (a New lane just re-asserts the kit — harmless).
+            // A single client keeps the prior behavior: push only if it loaded from save.
+            if (m_netCouch || m_clientLoadedFromSave) {
+                for (u8 lane = 0; lane < m_splitPlayerCount; lane++)
+                    sendInventorySync(lane, m_clientNetSlot[lane]);
                 m_clientLoadedFromSave = false;
             }
         }

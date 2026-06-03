@@ -42,12 +42,15 @@ namespace Client {
     // the local sim already skips PlayerController::update, and without this the server would
     // still walk the player from any held key, causing a reconcile rubber-band. Aim
     // (yaw/pitch) is left intact so the body facing doesn't snap.
+    // laneId selects which local player's input stream this is (online couch co-op); targetSlot is
+    // the absolute net slot the server should route it to (stamped into the CL_INPUT window header).
     void captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
                              u8 skillSlot, u8 extFlagsClearMask = 0,
-                             bool freezeMovement = false);
+                             bool freezeMovement = false,
+                             u8 laneId = 0, u8 targetSlot = 0);
 
-    // Get the latest captured input (for local prediction in engine)
-    const NetInput* getLatestInput();
+    // Get the latest captured input for a local lane (for local prediction in engine)
+    const NetInput* getLatestInput(u8 laneId = 0);
 
     // Receive and store a snapshot from the server. Also feeds snap.serverTick into
     // ClockSyncOps::onSnapshotReceived (P controller, gain 0.1) so the clock estimate
@@ -66,13 +69,16 @@ namespace Client {
     // history, no replay, no per-tick snapping — the trust-client position model makes
     // those unnecessary and they fought with PlayerController::update's mouse + WASD.
     // Returns true if any field was adopted from the snapshot.
-    bool reconcile(NetPlayer& np, Player& lp);
+    // localSlot = this lane's net slot (couch co-op reconciles each lane against its own slot).
+    bool reconcile(NetPlayer& np, Player& lp, u8 localSlot);
 
     // Interpolate remote players between snapshots.
     // Fills outPositions/outYaws (+ active/health/anim/weapon/class) for all MAX_PLAYERS slots.
     // (Remote-player rendering doesn't use pitch — body is yaw-only — so it's omitted.)
     // outPlayerClass receives the SnapPlayer.playerClass byte; the renderer indexes kClassDefs.
-    void interpolateRemotePlayers(u8 localSlot,
+    // localSlot0/localSlot1 are this client's local lanes' net slots (both skipped — drawn from
+    // their own predicted state). localSlot1 = 0xFF for a single (non-couch) client.
+    void interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
                                    Vec3* outPositions, f32* outYaws,
                                    bool* outActive, f32* outHealth, f32* outMaxHealth,
                                    u8* outAnimFlags = nullptr, u8* outWeaponMeshId = nullptr,

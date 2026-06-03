@@ -19,14 +19,14 @@
 static constexpr u32 INPUT_BYTES  = 14;  // wire size of one serialized NetInput
 static constexpr u32 HEADER_BYTES =  4;  // windowCount (1) + reserved (3)
 
-u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count) {
+u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count, u8 targetSlot) {
     if (count > INPUT_WINDOW_SIZE) count = INPUT_WINDOW_SIZE;
     const u32 total = HEADER_BYTES + count * INPUT_BYTES;
     if (total > outCap) return 0;  // caller's buffer too small — safe no-op
 
     u32 o = 0;
     outBuf[o++] = static_cast<u8>(count);
-    outBuf[o++] = 0;  // reserved
+    outBuf[o++] = targetSlot;  // online couch co-op: absolute target net slot (server validates owner)
     outBuf[o++] = 0;  // reserved
     outBuf[o++] = 0;  // reserved
 

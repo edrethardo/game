@@ -797,20 +797,23 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         Net::setOnKill(Engine::onKill);
         Net::setOnPickupResult(Engine::onPickupResult);
         Net::setOnLootSpawn(Engine::onLootSpawn);
-        Client::init(activeNetSlot()); // client's net slot — must match snapshot slotIndex / ack key
+        // Client::init resets the (shared) snapshot ring + per-lane send windows; pass lane 0's net
+        // slot for the s_localPlayerIndex back-compat accessor. Online couch co-op reconciles each
+        // lane by the explicit slot passed to Client::reconcile, so this single call covers both.
+        Client::init(m_clientNetSlot[0]); // must match snapshot slotIndex / ack key
         // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
         // Ping state also resets so clientNetPre sends the 3 handshake pings on the
         // first ticks of the new session.
         ClockSyncOps::reset(m_clockSync);
         m_pingsSent = 0;
         m_lastPingSentSec = 0.0;
-        // M3.2 — Clear the prediction ring and last-reconciled ack so stale tick-keyed
-        // entries from a prior session don't produce false divergence hits on reconnect.
-        PredictionRingOps::reset(m_predictionRing);
-        m_lastReconciledTick = 0;
-        // M4 — Clear the smooth-correction offset so any residual from a prior session
-        // doesn't displace the camera at the start of the new connection.
-        m_renderOffset.offset = {0, 0, 0};
+        // M3.2/M4 — clear each lane's prediction ring, last-reconciled ack, and smooth-correction
+        // offset so stale tick-keyed entries from a prior session don't produce false divergence.
+        for (u8 lane = 0; lane < MAX_LOCAL_PLAYERS; lane++) {
+            PredictionRingOps::reset(m_predictionRing[lane]);
+            m_lastReconciledTick[lane] = 0;
+            m_renderOffset[lane].offset = {0, 0, 0};
+        }
         // M6 — Clear the pending-hits ring so stale predictions from a prior session
         // don't get acked (or mismatched) against the new connection's server events.
         PendingHitRingOps::reset(m_pendingHits);

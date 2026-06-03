@@ -796,7 +796,7 @@ void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
 // ---------------------------------------------------------------------------
 void Engine::sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch) {
     if (m_netRole != NetRole::CLIENT) return;       // host fires directly via handleWeaponFire
-    u8 buf[sizeof(PacketHeader) + 14];
+    u8 buf[sizeof(PacketHeader) + 15];              // +1: targetSlot (online couch co-op)
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_FIRE_WEAPON;
     hdr->flags = 0;
@@ -814,6 +814,10 @@ void Engine::sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch) {
     u16 pitchQ = Quantize::packAngle(pitch);
     std::memcpy(buf + off, &yawQ,   2); off += 2;
     std::memcpy(buf + off, &pitchQ, 2); off += 2;
+    // Online couch co-op: stamp the firing lane's net slot so the server routes the fire to the
+    // right one of this peer's local players (validated against the peer's owned slots). For a
+    // single client this is just its own slot — the server clamps to the peer's slot regardless.
+    buf[off++] = activeNetSlot();
     // M10.1: reliable — ENet guarantees delivery, manual retransmit removed.
     Net::sendToServer(buf, off, /*reliable=*/true);
 }

@@ -154,12 +154,13 @@ static constexpr u32 INPUT_WINDOW_SIZE = 8;
 
 // Serialize up to `count` NetInputs (≤ INPUT_WINDOW_SIZE) into `outBuf`. Wire layout:
 //   u8  windowCount
-//   u8  reserved (=0, for alignment)
+//   u8  targetSlot  (online couch co-op: absolute net slot this input is for; 0 for a single client,
+//                    which the server overrides with the peer's own slot)
 //   u16 reserved (=0)
 //   N × (u32 clientTick + u16 ackedSnapshotTick + u8 moveFlags + u8 weaponId
 //        + u16 yawQ + u16 pitchQ + u8 extFlags + u8 skillSlot)  // 14 B per input
 // Returns total bytes written (0 on overflow).
-u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count);
+u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count, u8 targetSlot = 0);
 
 // Inverse of serializeInputWindow. Writes up to `maxCount` inputs into `outInputs`.
 // Returns the number actually decoded (0 if the buffer is truncated or malformed).

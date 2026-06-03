@@ -183,33 +183,36 @@ struct InventorySyncBody {
 };
 } // anonymous
 
-void Engine::sendInventorySync() {
+void Engine::sendInventorySync(u8 lane, u8 targetSlot) {
     if (m_netRole != NetRole::CLIENT) return;
-    // Build the body from the LOCAL split-screen lane 0 — the joiner is always lane 0
-    // on a client (split-screen is disabled when networking).
+    if (lane >= MAX_LOCAL_PLAYERS) return;
+    // Build the body from the per-lane backing arrays (not the swapped-in alias) so online couch
+    // co-op can push BOTH local players' inventories — one call per lane, each tagged with the
+    // server slot it belongs to. targetSlot rides as a trailing byte the server validates by owner.
     InventorySyncBody body{};
     body.version          = INVENTORY_SYNC_VERSION;
-    body.inv              = m_inventories[m_localPlayerIndex];
-    body.qb               = m_quickbars[m_localPlayerIndex];
-    body.energySkill      = m_skillStates[m_localPlayerIndex];
-    body.cls              = static_cast<u8>(m_playerClasses[m_localPlayerIndex]);
-    body.activeClassSkill = m_activeClassSkills[m_localPlayerIndex];
-    std::memcpy(body.classSkills, m_classSkillStatesPerPlayer[m_localPlayerIndex],
-                sizeof(body.classSkills));
-    body.health           = m_localPlayer.health;
-    body.maxHealth        = m_localPlayer.maxHealth;
+    body.inv              = m_inventories[lane];
+    body.qb               = m_quickbars[lane];
+    body.energySkill      = m_skillStates[lane];
+    body.cls              = static_cast<u8>(m_playerClasses[lane]);
+    body.activeClassSkill = m_activeClassSkills[lane];
+    std::memcpy(body.classSkills, m_classSkillStatesPerPlayer[lane], sizeof(body.classSkills));
+    body.health           = m_localPlayers[lane].health;
+    body.maxHealth        = m_localPlayers[lane].maxHealth;
 
-    // Total wire size: PacketHeader(4) + body(~sizeof(InventorySyncBody)).
-    constexpr u32 totalSize = sizeof(PacketHeader) + sizeof(InventorySyncBody);
+    // Wire: PacketHeader(4) + body + targetSlot(1). The trailing slot byte keeps the body offset
+    // unchanged, so onInventorySync's deserialize is untouched.
+    constexpr u32 totalSize = sizeof(PacketHeader) + sizeof(InventorySyncBody) + 1;
     u8 buf[totalSize];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_INVENTORY_SYNC;
     hdr->flags = 0;
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &body, sizeof(body));
+    buf[sizeof(PacketHeader) + sizeof(InventorySyncBody)] = targetSlot;
     Net::sendToServer(buf, totalSize, /*reliable=*/true);
-    LOG_INFO("CL_INVENTORY_SYNC: sent %u B (class=%u hp=%.0f/%.0f)",
-             totalSize, body.cls, body.health, body.maxHealth);
+    LOG_INFO("CL_INVENTORY_SYNC: lane %u -> slot %u (class=%u hp=%.0f/%.0f)",
+             lane, targetSlot, body.cls, body.health, body.maxHealth);
 }
 
 void Engine::onInventorySync(u8 playerSlot, const u8* data, u32 size) {
@@ -689,10 +692,62 @@ void Engine::startCouchGame() {
     if (!m_menu.p1Continue) equipFreshLane(0); // a continued P1 was already loaded by loadGame
     m_splitPlayerCount = 2;
     Input::setSplitScreen(true);
+    // Online couch co-op runs the split-screen lane loop UNDER a net role; the flag opts this
+    // session out of the dispatch's force-to-1 guard (set before startGame so the first IN_GAME
+    // frame already sees it). For a purely local couch game (m_netRole==NONE) it stays false.
+    m_netCouch = (m_netRole != NetRole::NONE);
     startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME, /*lanesPrepared=*/true);
     positionLocalPlayersAtSpawn();             // self-guards to split-screen
+
+    if (m_netRole == NetRole::SERVER) {
+        // Host-couch: seat the second local player at net slot 1 so it rides every snapshot to
+        // remote clients (Net::hostServer already reserved slot 1 so no joiner overwrites it). The
+        // NetPlayer is initialized from the lane's prepared state; thereafter the per-frame split
+        // loop's syncLocalPlayerToNetPlayer keeps position/health/etc. current.
+        NetPlayer& np = m_players[1];
+        np.active = true;
+        np.slotIndex = 1;
+        np.playerClass = m_playerClasses[1];
+        np.position = m_localPlayers[1].position;
+        np.spawnPosition = m_localPlayers[1].position;
+        np.maxHealth = m_localPlayers[1].maxHealth;
+        np.health = m_localPlayers[1].health;
+        np.moveSpeed = m_localPlayers[1].moveSpeed;
+        np.weaponState.currentWeapon = 0;
+        np.isDead = false;
+        np.invulnTimer = 2.5f;
+        Server::resetInputBuffer(1);
+        resetFireDedup(1);
+    }
+
     m_menu.subState = 0;
     m_menu.msg = nullptr;
+}
+
+// Online couch co-op JOIN. Both lanes have characters (couch lobby); prep a fresh P1 lane if needed,
+// advertise both classes + localCount=2, and connect. updateLobby finalizes on SV_JOIN_ACCEPT
+// (records both slots, flips on split-screen + m_netCouch, starts the game). m_netRole is CLIENT.
+void Engine::beginCouchJoin() {
+    if (!m_menu.p1Continue) equipFreshLane(0); // a continued P1 was already loaded by loadGame
+    m_splitPlayerCount = 2;
+    Input::setSplitScreen(true);
+    // Tell updateLobby this is a 2-local-player join (it keys split-screen + m_netCouch on this flag
+    // when SV_JOIN_ACCEPT arrives). Without it the accept handler treats us as single and drops P2.
+    m_menu.couchJoin = true;
+    Net::setLocalPlayerClasses(static_cast<u8>(m_playerClasses[0]),
+                               static_cast<u8>(m_playerClasses[1]), 2);
+    if (Net::connectToServer(m_menu.connectAddress)) {
+        m_gameState = GameState::CONNECTING;
+        m_connectingElapsed = 0.0f;
+        m_menu.subState = 0;
+        LOG_INFO("Couch-joining %s (2 local players)...", m_menu.connectAddress);
+    } else {
+        // Connection setup failed — drop back to the couch start-mode screen.
+        m_netRole = NetRole::NONE;
+        m_menu.couchJoin = false;
+        m_splitPlayerCount = 2;          // keep the couch setup so they can retry/host
+        m_menu.subState = 13;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -843,7 +898,12 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
 u32 Engine::buildRemotePlayerViews(Player* views, Player** ptrs, u8* slots) {
     u32 count = 0;
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        if (i == m_localPlayerIndex) continue;           // host slot handled via m_localPlayer
+        // Skip ALL host-local lanes (slots 0..m_splitPlayerCount-1) — their damage flows through the
+        // local m_localPlayers[] path in tickSharedSystems, not these remote views. Using the lane
+        // count (not m_localPlayerIndex) is required: this runs in tickSharedSystems where
+        // m_localPlayerIndex is the LAST swapped lane (count-1), so a `== m_localPlayerIndex` test
+        // would mis-skip in host-couch (skip slot 1, then double-target the host at slot 0).
+        if (i < m_splitPlayerCount) continue;
         const NetPlayer& np = m_players[i];
         // Only LIVE remotes are targetable. Check health<=0 too, not just isDead: np.isDead is set
         // in serverNetPost (AFTER the AI/projectile pass that consumes these views), so on the death

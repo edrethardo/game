@@ -115,7 +115,10 @@ void Engine::serverNetPre(f32 dt) {
     constexpr u32 INTERP_DELAY_TICKS = 2; // 33 ms ≈ 2 ticks @ 60 Hz — matches client's INTERP_DELAY_SEC
 
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        if (i == m_localPlayerIndex) continue; // host moves in gameUpdate
+        // Skip ALL host-local lanes — they move in gameUpdate, not from a network buffer. Slots
+        // 0..m_splitPlayerCount-1 are the host's local players (slot 0 = host, slot 1 = couch
+        // partner in online couch co-op). For a normal host (count 1) this is just slot 0.
+        if (i < m_splitPlayerCount) continue;
         NetPlayer& np = m_players[i];
         if (!np.active) continue;
         InputRingBuffer& buf = Server::getInputBuffer(i);
@@ -193,7 +196,7 @@ void Engine::serverNetPre(f32 dt) {
     // into the drain loop above.
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (!m_players[i].active) continue;
-        if (i == m_localPlayerIndex) continue; // host handled by gameUpdate
+        if (i < m_splitPlayerCount) continue; // all host-local lanes fire via gameUpdate's local path
         // Don't let a dead remote keep firing: a corpse that died holding FIRE would shoot
         // every tick until it respawns.
         if (!m_players[i].isDead) handleWeaponFireForPlayer(m_players[i], dt);
@@ -385,11 +388,11 @@ void Engine::populateSnapshotCooldowns() {
         const u8 slot = sp.slotIndex;
         // potion's authoritative tick already lives on NetPlayer; buildFromState
         // copied it. Skill ticks live in Engine arrays — fill those here.
-        if (slot == m_localPlayerIndex) {
-            // Host's own slot — read from the active aliases (which mirror the
-            // per-player backing arrays via swapInPlayer/swapOutPlayer).
+        if (slot < m_splitPlayerCount) {
+            // Host-local lane — read its per-lane class-skill store directly (the m_classSkillStates
+            // alias only mirrors the last-swapped lane, so use the backing array to be lane-correct).
             for (u32 s = 0; s < 4; s++)
-                sp.classSkillLastActivationTick[s] = m_classSkillStates[s].lastActivationTick;
+                sp.classSkillLastActivationTick[s] = m_classSkillStatesPerPlayer[slot][s].lastActivationTick;
         } else {
             for (u32 s = 0; s < 4; s++)
                 sp.classSkillLastActivationTick[s] = m_classSkillStatesNet[slot][s].lastActivationTick;
@@ -468,7 +471,7 @@ void Engine::serverNetPost(f32 dt) {
         WorldItem& item = m_worldItems.items[wi];
         if (!item.active || !isGlobe(item.item)) continue;
         for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
-            if (pi == m_localPlayerIndex) continue; // host pickup handled in gameUpdate
+            if (pi < m_splitPlayerCount) continue; // host-local lanes pick up in gameUpdate
             if (!m_players[pi].active || m_players[pi].isDead) continue;
             Vec3 delta = m_players[pi].position - item.position;
             f32 dist = sqrtf(delta.x * delta.x + delta.z * delta.z);
@@ -486,7 +489,7 @@ void Engine::serverNetPost(f32 dt) {
 
     // Damage flash decay for remote players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        if (i == m_localPlayerIndex) continue; // host handled in gameUpdate
+        if (i < m_splitPlayerCount) continue; // host-local lanes decay in gameUpdate
         if (m_players[i].active && m_players[i].damageFlashTimer > 0.0f)
             m_players[i].damageFlashTimer -= dt;
     }
@@ -500,7 +503,7 @@ void Engine::serverNetPost(f32 dt) {
         NetPlayer& np = m_players[pi];
         if (!np.active || np.isDead) continue;
 
-        if (pi != m_localPlayerIndex) {
+        if (pi >= m_splitPlayerCount) { // host-local lanes tick status in their gameUpdate pass
             if (np.invulnTimer > 0.0f) { np.invulnTimer -= dt; if (np.invulnTimer < 0.0f) np.invulnTimer = 0.0f; }
             if (np.slowTimer > 0.0f)   np.slowTimer -= dt;
             if (np.freezeTimer > 0.0f) np.freezeTimer -= dt;
@@ -520,8 +523,8 @@ void Engine::serverNetPost(f32 dt) {
             np.health = 0.0f;
             np.isDead = true;
             LOG_INFO("Player %u died", pi);
-            if (pi == m_localPlayerIndex) {
-                m_playerDead[0] = true; // don't freeze the server
+            if (pi < m_splitPlayerCount) {
+                m_playerDead[pi] = true; // host-local lane death — flag its lane so the server doesn't freeze
             }
         }
     }
@@ -567,10 +570,10 @@ void Engine::serverNetPost(f32 dt) {
             }
         }
 
-        // (M9) Defensive ring passives for REMOTE players. The host's ring passives are ticked
-        // in gameUpdate via tickArmorRingPassives — we skip slot 0 here to avoid double-ticking
-        // Second Wind / Divine Judgment / Soul Harvest decay on the host.
-        if (pi != m_localPlayerIndex && np.ringPassive != SkillId::NONE) {
+        // (M9) Defensive ring passives for REMOTE players. Host-local lanes tick their ring
+        // passives in gameUpdate via tickArmorRingPassives — skip them here (all of slots
+        // 0..count-1) to avoid double-ticking Second Wind / Divine Judgment / Soul Harvest decay.
+        if (pi >= m_splitPlayerCount && np.ringPassive != SkillId::NONE) {
             // Soul Harvest stack window decay (also keeps M8 stacks consistent for remotes).
             if (np.soulHarvestTimer > 0.0f) {
                 np.soulHarvestTimer -= dt;
@@ -614,7 +617,7 @@ void Engine::serverNetPost(f32 dt) {
         // engine_update_player.cpp:191-211, :508-517 — applied per server tick (60 Hz).
         // Class gate kept loose (decay is safe regardless): a remote that was Wanderer
         // earlier and changed class would still benefit from draining leftover timers.
-        if (pi != m_localPlayerIndex) {
+        if (pi >= m_splitPlayerCount) { // host-local lanes drain these in their gameUpdate pass
             // Mark duration
             if (np.markTimer > 0.0f) { np.markTimer -= dt; if (np.markTimer < 0.0f) np.markTimer = 0.0f; }
             // Per-stack 3 s non-refreshing speed timers — compact down as they expire.
@@ -778,7 +781,16 @@ void Engine::clientNetPre(f32 dt) {
     // skill slot so right-click activates the chosen skill (1-4) rather than always slot 0
     // — captureLocalInput defaults skillSlot to 0, and the server reads input->skillSlot
     // to pick the skill.
-    WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
+    // PER-LANE: capture+send input, reconcile, adopt cooldowns and mirror death for EACH local
+    // player (online couch co-op carries two over one connection). swapInPlayer(sp) makes
+    // m_localPlayer / activeNetSlot() / the lane-indexed alias arrays resolve to lane `sp`, exactly
+    // like the dispatch's update loop. A single client iterates once (lane 0). NB body indent is one
+    // level shallow to keep this diff minimal.
+    for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
+    swapInPlayer(sp);
+    Input::setActivePlayer(sp);
+
+    WeaponState& ws = m_players[activeNetSlot()].weaponState; // this lane's net slot
 
     // R17 — client-side wire-spam mask. Uses the same tick comparison the server will
     // evaluate against the input's clientTick. Identical formula on both sides → mask
@@ -844,7 +856,8 @@ void Engine::clientNetPre(f32 dt) {
     // freezeMovement: while frozen the local sim skips PlayerController::update, so zero the
     // wire movement too or the server walks the player from held keys (rubber-band on close).
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon,
-                                m_activeClassSkill, skillClearMask, /*freezeMovement=*/frozen);
+                                m_activeClassSkill, skillClearMask, /*freezeMovement=*/frozen,
+                                /*laneId=*/sp, /*targetSlot=*/activeNetSlot());
 
     // M10.1: resendPendingFire() removed — CL_FIRE_WEAPON is now reliable.
 
@@ -866,7 +879,7 @@ void Engine::clientNetPre(f32 dt) {
     // flows through m_renderOffset (RenderOffsetOps::accumulate on divergence, decayed
     // per frame at DECAY_RATE=13.0). The pre-M2 "trust-client position" comment that
     // used to live here described the now-removed posXYZ-in-NetInput model.
-    Client::reconcile(m_players[activeNetSlot()], m_localPlayer);
+    Client::reconcile(m_players[activeNetSlot()], m_localPlayer, activeNetSlot());
 
     // R17 — adopt server's lastActivationTick values for skills + potion. MAX(local,
     // snapshot) keeps any benign client over-prediction (server rejected non-cooldown
@@ -875,10 +888,13 @@ void Engine::clientNetPre(f32 dt) {
     adoptSnapshotCooldowns();
 
     // CLIENT death is server-authoritative: reconcile adopted the server's isDead into our net
-    // slot; mirror it into the lane-indexed m_playerDead that the dead-branch + HUD overlay read
-    // (lane is 0 on a client). Auto-clears when the server respawns us — no sticky local flag,
-    // no optimistic-revive flicker.
+    // slot; mirror it into the lane-indexed m_playerDead that the dead-branch + HUD overlay read.
+    // Auto-clears when the server respawns us — no sticky local flag, no optimistic-revive flicker.
     m_playerDead[m_localPlayerIndex] = m_players[activeNetSlot()].isDead;
+
+    swapOutPlayer(sp);
+    } // end per-lane loop
+    swapInPlayer(0); // restore lane-0 aliases before the dispatch's own split loop runs
 }
 
 // ---------------------------------------------------------------------------
@@ -897,7 +913,10 @@ void Engine::clientNetPost(f32 dt) {
     // snapshot and producing the "super shaky" jitter the client experienced. The R3
     // per-input integration fix (b524abe) corrected the server's cadence; this push
     // location closes the loop on the client side.
-    {
+    // Per-lane: push each local player's post-update state into ITS prediction ring (online couch
+    // co-op predicts both lanes independently). swapInPlayer(sp) selects the lane.
+    for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
+        swapInPlayer(sp);
         PredictedState s;
         s.position    = m_localPlayer.position;
         s.velocity    = m_localPlayer.velocity;
@@ -906,12 +925,15 @@ void Engine::clientNetPost(f32 dt) {
         s.health      = m_localPlayer.health;
         s.invulnTimer = m_localPlayer.invulnTimer;
         s.onGround    = m_localPlayer.onGround;
-        const NetInput* latest = Client::getLatestInput();
-        if (latest) PredictionRingOps::push(m_predictionRing, m_clientTick, *latest, s);
+        const NetInput* latest = Client::getLatestInput(sp);
+        if (latest) PredictionRingOps::push(m_predictionRing[sp], m_clientTick, *latest, s);
     }
+    swapInPlayer(0);
 
-    // Interpolate remote players, entities, and projectiles from server snapshots
-    Client::interpolateRemotePlayers(activeNetSlot(),
+    // Interpolate remote players, entities, and projectiles from server snapshots. Skip BOTH local
+    // lanes' slots (online couch co-op) — they render from their own predicted state, not interp.
+    Client::interpolateRemotePlayers(m_clientNetSlot[0],
+        (m_splitPlayerCount > 1) ? m_clientNetSlot[1] : static_cast<u8>(0xFF),
         m_renderInterp.playerPositions, m_renderInterp.playerYaws,
         m_renderInterp.playerActive, m_renderInterp.playerHealth, m_renderInterp.playerMaxHealth,
         m_renderInterp.playerAnimFlags, m_renderInterp.playerWeaponMeshId,
@@ -1037,29 +1059,32 @@ void Engine::clientNetPost(f32 dt) {
     // by more than 10 cm, log it and snap to the server's value. Full smooth-correction
     // lerp is deferred to M4; for M3 this is an immediate snap with a diagnostic log so
     // we can confirm the pipeline works before adding the visual smoothing layer.
-    {
+    // Per-lane prediction reconciliation (online couch co-op): each local player compares the
+    // server's authoritative position (at its ACK'd tick) against its own ring and snaps + smooths
+    // independently. swapInPlayer(sp) selects the lane; swapOutPlayer saves the corrected position.
+    for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
+        swapInPlayer(sp);
         const WorldSnapshot* snap = Client::getLatestSnapshot();
         if (snap) {
             u8 mySlot = activeNetSlot();
             u32 ackedTick = snap->lastProcessedInputTick[mySlot];
             // Only reconcile a fresh ACK we haven't already processed this frame.
-            if (ackedTick != 0 && ackedTick != m_lastReconciledTick) {
-                const PredictionEntry* e = PredictionRingOps::find(m_predictionRing, ackedTick);
+            if (ackedTick != 0 && ackedTick != m_lastReconciledTick[sp]) {
+                const PredictionEntry* e = PredictionRingOps::find(m_predictionRing[sp], ackedTick);
                 if (e) {
-                    // Unpack the server's quantized position for our slot.
-                    // SnapPlayer stores posX/posY/posZ as u16 packed via Quantize::packPos;
-                    // unpack each component individually (no unpackPosVec3 helper exists).
-                    const SnapPlayer& sp = snap->players[mySlot];
+                    // Unpack the server's quantized position for this lane's slot. (sp_ avoids
+                    // shadowing the loop var sp.)
+                    const SnapPlayer& sp_ = snap->players[mySlot];
                     Vec3 serverPos = {
-                        Quantize::unpackPos(sp.posX),
-                        Quantize::unpackPos(sp.posY),
-                        Quantize::unpackPos(sp.posZ)
+                        Quantize::unpackPos(sp_.posX),
+                        Quantize::unpackPos(sp_.posY),
+                        Quantize::unpackPos(sp_.posZ)
                     };
                     Vec3 diff   = serverPos - e->state.position;
                     f32  distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
                     if (distSq > 0.01f) {  // > 10 cm (0.1 m) squared = 0.01 m²
-                        LOG_INFO("net: prediction divergence at tick %u: %.2f m",
-                                 ackedTick, sqrtf(distSq));
+                        LOG_INFO("net: prediction divergence (lane %u) at tick %u: %.2f m",
+                                 sp, ackedTick, sqrtf(distSq));
 
                         // M14: count every reconcile mismatch for the 1 Hz net-graph log.
                         m_divergenceCount++;
@@ -1070,20 +1095,20 @@ void Engine::clientNetPost(f32 dt) {
                             m_localPlayer.screenFlashTimer = 0.5f;
                         }
 
-                        // M4 smooth correction: accumulate the visible delta so the camera
-                        // doesn't teleport. The sim position snaps immediately (server-
-                        // authoritative for replay correctness); m_renderOffset decays each
-                        // frame so the rendered eye position slides toward the corrected sim
-                        // position over ~150 ms rather than popping.
+                        // M4 smooth correction: accumulate the visible delta so the camera doesn't
+                        // teleport. Sim position snaps immediately (server-authoritative); the
+                        // per-lane render offset decays each frame so the rendered eye slides over.
                         Vec3 visibleDelta = m_localPlayer.position - serverPos;
-                        RenderOffsetOps::accumulate(m_renderOffset, visibleDelta);
+                        RenderOffsetOps::accumulate(m_renderOffset[sp], visibleDelta);
                         m_localPlayer.position = serverPos;
                     }
                 }
-                m_lastReconciledTick = ackedTick;
+                m_lastReconciledTick[sp] = ackedTick;
             }
         }
+        swapOutPlayer(sp);
     }
+    swapInPlayer(0); // restore lane-0 aliases
 }
 
 // ---------------------------------------------------------------------------

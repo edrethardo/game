@@ -120,10 +120,12 @@ static s8 pauseMenuHit(u32 sw, u32 sh) {
 // Update (60 Hz fixed timestep) — dispatches based on role
 // ---------------------------------------------------------------------------
 void Engine::update(f32 dt) {
-    // (N6) Networking is mutually exclusive with split-screen. A path that loads a 2-player
-    // save into CONTINUE and then enters Host/Join would leave m_splitPlayerCount at 2 while
-    // net mode assumes 1 (lane-indexed arrays get cross-wired). Force it here, defensively.
-    if (m_netRole != NetRole::NONE && m_splitPlayerCount != 1) m_splitPlayerCount = 1;
+    // (N6) Networking was historically mutually exclusive with split-screen. ONLINE COUCH CO-OP
+    // (m_netCouch) is the deliberate exception: two local players share one connection, so the
+    // split-screen lane loop runs under a net role. Everywhere else the guard still forces a single
+    // local player under a net role — defensive against a 2-player CONTINUE leaking into a normal
+    // Host/Join (which would cross-wire the lane-indexed arrays).
+    if (m_netRole != NetRole::NONE && !m_netCouch && m_splitPlayerCount != 1) m_splitPlayerCount = 1;
 
     // Death screen input — handle before the generic ESC check so ESC goes to menu
     if (m_gameState == GameState::GAME_OVER) {
@@ -177,7 +179,7 @@ void Engine::update(f32 dt) {
                     // Client: request respawn (reliable CL_RESPAWN). A client never actually
                     // reaches GAME_OVER — death is handled in the IN_GAME dead-branch — but keep
                     // this path correct rather than leaving the old dropped-input hack.
-                    sendRespawnRequest();
+                    sendRespawnRequest(activeNetSlot());
                 }
                 m_deathHover = -1;
                 Input::setRelativeMouseMode(true); // back to gameplay — re-capture the cursor
@@ -369,9 +371,10 @@ void Engine::update(f32 dt) {
         // m_clientTick in clientNetPost. Once per fixed update — m_serverTick is the shared sim clock.
         if (m_netRole == NetRole::NONE) m_serverTick++;
 
-        // M4: decay the smooth-correction offset once per CLIENT frame so the camera
+        // M4: decay each local lane's smooth-correction offset once per CLIENT frame so the camera
         // position smoothly converges toward the server-corrected sim position over ~150 ms.
-        if (m_netRole == NetRole::CLIENT) RenderOffsetOps::tick(m_renderOffset, dt);
+        if (m_netRole == NetRole::CLIENT)
+            for (u8 lane = 0; lane < m_splitPlayerCount; lane++) RenderOffsetOps::tick(m_renderOffset[lane], dt);
 
         // M14 + net-diagnostics: 1 Hz net-graph window. Runs for SERVER and CLIENT so the F9
         // overlay (engine_hud.cpp) and this log read fresh per-second bandwidth/snapshot metrics.
@@ -453,7 +456,9 @@ void Engine::update(f32 dt) {
                         // the server rejects (e.g. duplicate packet), it returns isDead=true and
                         // clientNetPre will re-set m_playerDead — harmless one-frame flicker.
                         // Mirrors handleRespawnRequest() field assignments (engine_update.cpp).
-                        sendRespawnRequest();
+                        // activeNetSlot() is THIS dying lane's net slot (swapInPlayer(sp) above), so
+                        // the server revives the right couch player — P2's respawn revives P2.
+                        sendRespawnRequest(activeNetSlot());
                         {
                             NetPlayer& np = m_players[activeNetSlot()];
                             m_localPlayer.health        = np.maxHealth;
@@ -662,8 +667,9 @@ void Engine::tickSharedSystems(f32 dt) {
                 const PendingMeteor& pm = s_meteors[mi];
                 if (!pm.active) continue;
                 if (pm.timer > dt) continue; // won't explode this tick
-                // Only rewind for remote casters (caster != host local player index).
-                if (pm.caster == m_localPlayerIndex) continue;
+                // Only rewind for remote casters — host-local lanes (slots 0..count-1) have no
+                // network delay, so their meteors hit live entity positions, no lag-comp rewind.
+                if (pm.caster < m_splitPlayerCount) continue;
                 u32 ticks = computeLagCompTicks(pm.caster);
                 if (ticks > meteorLagCompTicks) meteorLagCompTicks = ticks;
             }
@@ -766,6 +772,14 @@ void Engine::tickSharedSystems(f32 dt) {
         //     The next snapshot's authoritative HP (M4 reconcile + M13 renderedHealth lerp)
         //     absorbs any over/under-prediction smoothly.
         //   • record the key so M10 can ack the damage against the server's SV_DAMAGE_TO_ME.
+        // Per-lane (online couch co-op): predict incoming projectile damage for EACH local player.
+        // This block runs in tickSharedSystems (once/frame), so without the swap it would only cover
+        // the last-swapped lane. swapInPlayer(sp) makes m_localPlayer / activeNetSlot() / the HP +
+        // vignette writes resolve to lane sp; the single m_pendingDamage ring is keyed by the inbound
+        // projectile (distinct per shot, each hitting one lane), so both lanes share it safely.
+        // (Body indent left shallow to keep the diff readable.)
+        for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
+        swapInPlayer(sp);
         if (m_localPlayer.health > 0.0f) {
             static constexpr f32 PLAYER_HIT_RADIUS = 0.7f;
             // Player center at mid-body height so approaching ground-level projectiles register
@@ -809,6 +823,9 @@ void Engine::tickSharedSystems(f32 dt) {
                 PendingDamageRingOps::record(m_pendingDamage, m_clientTick, key);
             }
         }
+        swapOutPlayer(sp);
+        } // end per-lane incoming-damage loop
+        swapInPlayer(0); // restore lane-0 aliases
     }
 }
 
@@ -1403,12 +1420,16 @@ void Engine::handleDropRequest(u8 playerSlot, u8 slotKind, u8 slotIndex,
 // through the input ring buffer (whose monotonic-tick guard silently dropped the old
 // INPUT_EX_RESPAWN input when it shared a tick with that frame's regular input). The server
 // respawns us authoritatively and the revival comes back in the next snapshot.
-void Engine::sendRespawnRequest() {
-    u8 buf[sizeof(PacketHeader)];
+void Engine::sendRespawnRequest(u8 targetSlot) {
+    u8 buf[sizeof(PacketHeader) + 1];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_RESPAWN;
     hdr->flags = 0;
     hdr->seq   = 0;
+    // Online couch co-op: stamp which local player is respawning so the server revives the right
+    // one of this peer's two slots (was header-only, which always respawned the peer's primary —
+    // so the 2nd couch player could never respawn). The server validates peer ownership.
+    buf[sizeof(PacketHeader)] = targetSlot;
     Net::sendToServer(buf, sizeof(buf), true);
 }
 

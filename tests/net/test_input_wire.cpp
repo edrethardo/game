@@ -76,3 +76,30 @@ TEST_CASE("InputWindow: deserialize rejects truncated buffer") {
     u32 count = deserializeInputWindow(buf, sizeof(buf), parsed, 4);
     CHECK(count == 0);
 }
+
+// Online couch co-op (PROTOCOL_VERSION 6): the CL_INPUT window header's byte 1 carries the absolute
+// target net slot so the server routes a couch client's two input streams to the right slots.
+TEST_CASE("InputWindow: targetSlot rides in header byte 1; default is 0; inputs unaffected") {
+    NetInput window[2];
+    for (u32 i = 0; i < 2; i++) { window[i] = NetInput{}; window[i].clientTick = 50 + i; }
+
+    // Default (single client) → byte 1 == 0, count in byte 0.
+    u8 a[64] = {};
+    u32 sa = serializeInputWindow(a, sizeof(a), window, 2);
+    REQUIRE(sa > 0);
+    CHECK(a[0] == 2);   // windowCount
+    CHECK(a[1] == 0);   // targetSlot default
+
+    // Couch lane → byte 1 == targetSlot, and the inputs still round-trip identically.
+    u8 b[64] = {};
+    u32 sb = serializeInputWindow(b, sizeof(b), window, 2, /*targetSlot=*/2);
+    REQUIRE(sb == sa);  // the slot byte reuses a reserved header byte — no size change
+    CHECK(b[0] == 2);
+    CHECK(b[1] == 2);   // targetSlot
+
+    NetInput parsed[2] = {};
+    u32 count = deserializeInputWindow(b, sb, parsed, 2);
+    REQUIRE(count == 2);
+    CHECK(parsed[0].clientTick == 50);
+    CHECK(parsed[1].clientTick == 51);
+}

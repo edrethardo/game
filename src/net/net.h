@@ -38,7 +38,8 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // despawn them on the authoritative arrival — V2 of fire prediction, "projectile
 // leaves the wand at click time"). A v4 client reading a v5 snapshot would misalign
 // every projectile field after the new bytes; clean reject instead.
-static constexpr u32 PROTOCOL_VERSION  = 5;
+static constexpr u32 PROTOCOL_VERSION  = 6; // v6: online couch co-op (join carries localCount+class2,
+                                            // accept carries slot2, CL_INPUT/CL_FIRE carry targetSlot)
 
 // A peer that finishes the ENet handshake but never sends CL_JOIN_REQUEST is dropped
 // after this many milliseconds so it can't hold a CONNECTING slot until ENet's own
@@ -226,7 +227,9 @@ namespace Net {
     // identical on the wire; the only difference is whether the WAN gets a
     // mapping. Switch builds always behave like useUpnp=false (the wrapper is
     // a stub that returns false instantly).
-    bool hostServer(u16 port = DEFAULT_PORT, bool useUpnp = true);
+    // localPlayerCount reserves that many host-owned slots starting at 0 (slot 0 = host, slot 1 =
+    // a couch partner for online couch co-op) so findFreeSlot hands remote peers slots beyond them.
+    bool hostServer(u16 port = DEFAULT_PORT, bool useUpnp = true, u8 localPlayerCount = 1);
 
     // Lobby/HUD accessors for the UPnP IGD result of the last hostServer call.
     // getExternalIp() returns the WAN-side IP the router reported when UPnP
@@ -241,6 +244,9 @@ namespace Net {
     // Set the chosen PlayerClass (cast to u8) to advertise in CL_JOIN_REQUEST.
     // Call before connectToServer() so the join request carries the right class.
     void setLocalPlayerClass(u8 classId);
+    // Online couch co-op: advertise BOTH local players' classes + how many local players are joining
+    // on this one connection (1 or 2). The server allocates that many slots. Call before connect.
+    void setLocalPlayerClasses(u8 class0, u8 class1, u8 localCount);
 
     // Connect to a remote server.
     bool connectToServer(const char* address, u16 port = DEFAULT_PORT);
@@ -274,6 +280,7 @@ namespace Net {
     // Query
     NetRole getRole();
     u8      getLocalPlayerIndex();
+    u8      getLocalPlayerIndex2();     // couch client: the 2nd local player's assigned slot (0xFF if none)
     u32     getServerLevelSeed();       // per-run dungeon seed from SV_JOIN_ACCEPT (client)
     u8      getServerLevelFloor();      // host's current floor at join time
     u8      getServerLevelDifficulty(); // host's difficulty tier at join time

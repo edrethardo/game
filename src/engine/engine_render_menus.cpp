@@ -515,6 +515,28 @@ void Engine::renderMenu() {
         const char* slotHint = "Player 2 pad: D-pad, A to confirm, B to go back";
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f, slotHint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 13) {
+        // Couch start-mode — both local players are set up; Start Local vs Host Online.
+        const char* title = "Couch Co-op Ready";
+        f32 tW = FontSystem::textWidth(title, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.6f, title, {0.3f, 1.0f, 0.5f}, 2);
+
+        static const char* modeLabels[] = {"Start Local Split-Screen",
+                                           "Host Online (Friends Can Join)",
+                                           "Join Online (Enter Host IP)"};
+        for (u32 i = 0; i < 3; i++) {
+            f32 y = sh * 0.46f + (2 - i) * 46.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 360.0f * uiScale, 35.0f * uiScale, col, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 lw = FontSystem::textWidth(modeLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 10.0f * uiScale, modeLabels[i], tc, 2);
+        }
+
+        const char* hint = "Up/Down, Enter/A to confirm, B/ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 7) {
         // Credits screen — scrolling text
         f32 cx = static_cast<f32>(sw) * 0.5f;
