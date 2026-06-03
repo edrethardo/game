@@ -29,6 +29,14 @@ struct LevelGrid {
     // per floor after level generation.
     //   Directions: 0=+X, 1=+X+Z, 2=+Z, 3=-X+Z, 4=-X, 5=-X-Z, 6=-Z, 7=+X-Z
     u8* flowDir = nullptr;
+
+    // Clearance field: per-cell Chebyshev (8-connected) step distance to the
+    // nearest solid cell, clamped to 255.  Solid cells are 0; a floor cell that
+    // touches a wall is 1 (≈0.5 m of slack at cellSize 1.0), and openness grows
+    // outward from there.  Built once per floor and used by the pathfinder to
+    // keep paths off wall faces (so a wide entity AABB doesn't clip corners) and
+    // by the AI to escape if it ever wedges.  See buildClearanceField.
+    u8* clearance = nullptr;
 };
 
 namespace LevelGridSystem {
@@ -49,6 +57,14 @@ namespace LevelGridSystem {
     // Build BFS flow field from exitWorldPos toward all reachable cells.
     // Each cell gets a direction (0-7) pointing one step closer to the exit.
     void buildFlowField(LevelGrid& grid, Vec3 exitWorldPos);
+
+    // Build the per-cell clearance field (distance to nearest wall). Call once
+    // per floor after the grid geometry is final. See LevelGrid::clearance.
+    void buildClearanceField(LevelGrid& grid);
+
+    // Clearance (cells-to-nearest-wall) at a grid cell; 0 if out of bounds or
+    // before the field is built. Higher = more open space around the cell.
+    u8 clearanceAt(const LevelGrid& grid, u32 x, u32 z);
 
     // Get the world-space direction an NPC at worldPos should move to follow
     // the flow field.  Returns zero vector if already at exit or unreachable.

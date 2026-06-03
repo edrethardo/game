@@ -122,7 +122,7 @@ void updateHostileStates(Entity& e, u32 i,
                 if (LevelGridQuery::findFlankCell(grid, e.position, targetPos,
                         e.attackRange, preferRight, flankPos)) {
                     e.pathLen = Pathfinder::findPath(grid, e.position, flankPos,
-                        e.pathWaypoints);
+                        e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
                     e.pathIdx = 0;
                     if (e.pathLen > 0) {
                         e.aiState = AIState::FLANK;
@@ -183,10 +183,14 @@ void updateHostileStates(Entity& e, u32 i,
                 }
             }
         } else {
-            // Ground movement: direct chase when LOS, A* pathfinding when blocked.
+            // Ground movement: direct chase only when the body actually fits the
+            // straight line (width-aware), else A* around the obstacle. Using a
+            // body-width check here is the fix for enemies wedging in corners they
+            // could "see" through with a thin ray.
             Vec3 moveDir = {0, 0, 0};
-            bool hasDirectLOS = hasLOSToPoint(
-                e.position + Vec3{0, e.halfExtents.y, 0}, targetPos, grid);
+            bool hasDirectLOS = hasWidthLOS(
+                e.position + Vec3{0, e.halfExtents.y, 0}, targetPos,
+                e.halfExtents.x, grid);
 
             if (hasDirectLOS) {
                 // Direct line to target — walk straight, clear any stale path
@@ -197,7 +201,7 @@ void updateHostileStates(Entity& e, u32 i,
                 // Recompute path every ~2s or when path is exhausted.
                 if (e.pathLen == 0 || e.pathIdx >= e.pathLen || e.tacticalTimer <= 0.0f) {
                     e.pathLen = Pathfinder::findPath(grid, e.position, targetPos,
-                        e.pathWaypoints);
+                        e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
                     e.pathIdx = 0;
                     e.tacticalTimer = 2.0f; // recompute interval
                 }
@@ -455,7 +459,7 @@ void updateHostileStates(Entity& e, u32 i,
             Vec3 coverPos;
             if (LevelGridQuery::findCoverCell(grid, e.position, targetPos, coverPos)) {
                 e.pathLen = Pathfinder::findPath(grid, e.position, coverPos,
-                    e.pathWaypoints);
+                    e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
                 e.pathIdx = 0;
                 if (e.pathLen > 0) {
                     e.aiState = AIState::RETREAT;

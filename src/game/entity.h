@@ -130,8 +130,9 @@ struct Entity {
     // while the player is within this radius (the arena) and can't chase out of it.
     f32  leashRadius = 0.0f;
 
-    // Pathfinding (A* waypoint cache — filled by tactical planner, consumed by FLANK/RETREAT/SURROUND)
-    Vec3 pathWaypoints[6] = {};
+    // Pathfinding (A* waypoint cache — filled by tactical planner, consumed by FLANK/RETREAT/SURROUND).
+    // Size MUST stay >= MAX_PATH_WAYPOINTS (pathfinder.h); string-pulled paths can use the full budget.
+    Vec3 pathWaypoints[16] = {};
     u8   pathLen = 0;  // number of valid waypoints
     u8   pathIdx = 0;  // next waypoint to move toward
 

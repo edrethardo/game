@@ -72,6 +72,14 @@ bool hasLOS(const Entity& e, const Player& player, const LevelGrid& grid);
 // True if there is clear LOS between two world points.
 bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid);
 
+// True if a body of the given radius can walk in a STRAIGHT line from->to without
+// any part of its width clipping a wall. Casts the centre ray plus two rays
+// offset perpendicular by `radius`, so an enemy only commits to a direct charge
+// when its whole AABB actually fits — otherwise the caller falls back to A*.
+// This is what stops wide enemies from steering into corners they can "see"
+// the player through with a thin ray.
+bool hasWidthLOS(Vec3 from, Vec3 to, f32 radius, const LevelGrid& grid);
+
 // ---------------------------------------------------------------------------
 // Extracted per-entity blocks (each declared here, defined in its own .cpp)
 // ---------------------------------------------------------------------------

@@ -104,12 +104,19 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
     // The player is blocked from walking through enemies via moveAndSlide
     // obstacles, and pushPlayerFromEntities handles any residual overlap.
 
+    // Axis-separated slide: a blocked axis stops while the other keeps moving, so
+    // a diagonal into a flat wall slides along it. Track which axes blocked so we
+    // can detect the one case this can't escape on its own — a concave corner
+    // that blocks BOTH — and nudge out of it below.
+    bool blockedX = false, blockedZ = false;
+
     // X axis — zero velocity on collision to prevent wall penetration over time
     Vec3 tryPos = e.position + Vec3{delta.x, 0, 0};
     if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
         e.position.x = tryPos.x;
     } else {
         e.velocity.x = 0.0f;
+        blockedX = true;
     }
 
     // Z axis
@@ -118,6 +125,46 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
         e.position.z = tryPos.z;
     } else {
         e.velocity.z = 0.0f;
+        blockedZ = true;
+    }
+
+    // Anti-wedge: both axes blocked while trying to move means we drove into a
+    // concave corner and would dead-stop. Slide toward the most open neighbouring
+    // cell (clearance-field gradient, tie-broken toward the intended heading) so
+    // the entity walks itself out instead of relying on the teleport safety net.
+    if (blockedX && blockedZ && (delta.x * delta.x + delta.z * delta.z) > 1e-6f &&
+        !(e.flags & ENT_FLYING)) {
+        u32 gx, gz;
+        if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz)) {
+            u8  curClr   = LevelGridSystem::clearanceAt(grid, gx, gz);
+            f32 wantLen  = sqrtf(delta.x * delta.x + delta.z * delta.z);
+            f32 wantX = delta.x / wantLen, wantZ = delta.z / wantLen;
+            const s32 ndx[8] = { 1, -1, 0,  0, 1,  1, -1, -1 };
+            const s32 ndz[8] = { 0,  0, 1, -1, 1, -1,  1, -1 };
+            f32 bestScore = -1.0f, bestX = 0.0f, bestZ = 0.0f;
+            for (u8 d = 0; d < 8; d++) {
+                s32 nx = static_cast<s32>(gx) + ndx[d];
+                s32 nz = static_cast<s32>(gz) + ndz[d];
+                if (nx < 0 || nz < 0 ||
+                    !LevelGridSystem::isInBounds(grid, (u32)nx, (u32)nz)) continue;
+                if (LevelGridSystem::isSolid(grid, (u32)nx, (u32)nz)) continue;
+                u8 clr = LevelGridSystem::clearanceAt(grid, (u32)nx, (u32)nz);
+                if (clr < curClr) continue;  // never nudge into a tighter spot
+                f32 inv = 1.0f / sqrtf((f32)(ndx[d]*ndx[d] + ndz[d]*ndz[d]));
+                f32 dirX = ndx[d] * inv, dirZ = ndz[d] * inv;
+                // Reward openness first, then agreement with the intended heading.
+                f32 score = clr * 2.0f + (dirX * wantX + dirZ * wantZ);
+                if (score > bestScore) { bestScore = score; bestX = dirX; bestZ = dirZ; }
+            }
+            if (bestScore >= 0.0f) {
+                f32 nudge = 2.0f * dt;  // gentle slide-out, ~2 m/s
+                Vec3 cand = e.position + Vec3{bestX * nudge, 0, bestZ * nudge};
+                if (!entityOverlapsGrid(cand, e.halfExtents, grid)) {
+                    e.position.x = cand.x;
+                    e.position.z = cand.z;
+                }
+            }
+        }
     }
 
     // Y axis (flying only — ground enemies snap to floor)
@@ -168,6 +215,29 @@ bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
     Vec3 dir = delta * (1.0f / dist);
     RayHit hit = Raycast::cast(grid, from, dir, dist);
     return !hit.hit || hit.distance >= dist - 0.1f;
+}
+
+bool hasWidthLOS(Vec3 from, Vec3 to, f32 radius, const LevelGrid& grid)
+{
+    // Degenerate radius — fall back to the cheap single ray.
+    if (radius <= 0.01f) return hasLOSToPoint(from, to, grid);
+
+    Vec3 delta = to - from;
+    f32 dist = length(delta);
+    if (dist < 0.001f) return true;
+    Vec3 dir = delta * (1.0f / dist);
+
+    // Perpendicular in the XZ plane, scaled to the body radius. Offsetting both
+    // endpoints by ±perp gives the two "shoulder" rays alongside the centre ray;
+    // the body only fits straight through if all three are clear.
+    Vec3 perp = {-dir.z, 0.0f, dir.x};
+    f32 plen = sqrtf(perp.x * perp.x + perp.z * perp.z);
+    if (plen > 0.001f) perp = perp * (radius / plen);
+
+    if (!hasLOSToPoint(from, to, grid)) return false;
+    if (!hasLOSToPoint(from + perp, to + perp, grid)) return false;
+    if (!hasLOSToPoint(from - perp, to - perp, grid)) return false;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,8 +667,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         }
     }
 
-    // --- Stuck detection for hostile enemies ---
-    // Mirrors the friendly NPC stuck detection. Teleports to cell center after 0.8s stuck.
+    // --- Stuck detection for hostile enemies (last-resort safety net) ---
+    // The clearance-gradient nudge in entityMoveAndSlide now walks enemies out of
+    // corners on its own, so this is demoted to a rare backstop: only after a full
+    // 2s of zero progress do we re-path, and only teleport if even A* fails.
     for (u32 a = 0; a < pool.activeCount; a++) {
         u32 idx = pool.activeList[a];
         Entity& e = pool.entities[idx];
@@ -609,10 +681,10 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         f32 movedDist = length(e.position - e.lastSeenPos);
         if (movedDist < 0.05f) {
             e.stuckTimer += dt;
-            if (e.stuckTimer > 0.8f) {
+            if (e.stuckTimer > 2.0f) {
                 // Try A* path to target as recovery
                 e.pathLen = Pathfinder::findPath(grid, e.position,
-                    player.position, e.pathWaypoints);
+                    player.position, e.pathWaypoints, MAX_PATH_WAYPOINTS, e.halfExtents.x);
                 e.pathIdx = 0;
 
                 // If A* also fails, teleport to nearest walkable cell center

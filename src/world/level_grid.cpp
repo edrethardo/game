@@ -9,8 +9,9 @@
 void LevelGridSystem::init(LevelGrid& grid, u32 width, u32 depth, f32 cellSize) {
     ENGINE_ASSERT(width > 0 && depth > 0, "Grid dimensions must be > 0");
     // Free previous allocations if re-initializing (floor descent)
-    if (grid.cells)   { std::free(grid.cells);   grid.cells   = nullptr; }
-    if (grid.flowDir) { std::free(grid.flowDir); grid.flowDir = nullptr; }
+    if (grid.cells)     { std::free(grid.cells);     grid.cells     = nullptr; }
+    if (grid.flowDir)   { std::free(grid.flowDir);   grid.flowDir   = nullptr; }
+    if (grid.clearance) { std::free(grid.clearance); grid.clearance = nullptr; }
     grid.width    = width;
     grid.depth    = depth;
     grid.cellSize = cellSize;
@@ -23,6 +24,7 @@ void LevelGridSystem::init(LevelGrid& grid, u32 width, u32 depth, f32 cellSize) 
 void LevelGridSystem::shutdown(LevelGrid& grid) {
     if (grid.cells) { std::free(grid.cells); grid.cells = nullptr; }
     if (grid.flowDir) { std::free(grid.flowDir); grid.flowDir = nullptr; }
+    if (grid.clearance) { std::free(grid.clearance); grid.clearance = nullptr; }
     grid.width = grid.depth = 0;
 }
 
@@ -135,6 +137,64 @@ void LevelGridSystem::buildFlowField(LevelGrid& grid, Vec3 exitWorldPos) {
     }
     LOG_INFO("Flow field built: %u/%u cells reachable from exit (%u,%u)",
              reachable, totalCells, exitX, exitZ);
+}
+
+u8 LevelGridSystem::clearanceAt(const LevelGrid& grid, u32 x, u32 z) {
+    if (!grid.clearance || !isInBounds(grid, x, z)) return 0;
+    return grid.clearance[z * grid.width + x];
+}
+
+void LevelGridSystem::buildClearanceField(LevelGrid& grid) {
+    u32 totalCells = grid.width * grid.depth;
+    if (totalCells == 0) return;
+
+    if (!grid.clearance) {
+        grid.clearance = static_cast<u8*>(std::malloc(totalCells));
+    }
+
+    // Multi-source BFS (8-connected) seeded from every solid cell with dist 0.
+    // Each floor cell ends up holding its Chebyshev step-distance to the nearest
+    // wall, so we get "how many cells of slack on the tightest side." Chebyshev
+    // (vs Manhattan) is the right metric: a diagonal wall is one step away, which
+    // matches how an axis-aligned AABB actually clips a diagonal corner.
+    // Each cell is enqueued at most once (FIFO BFS finalises distance on first
+    // visit), so a queue of totalCells entries is sufficient.
+    u32* queue = static_cast<u32*>(std::malloc(sizeof(u32) * totalCells));
+    if (!queue) return;
+    u32 qHead = 0, qTail = 0;
+
+    // Seed: solids are distance 0 and are the BFS frontier.
+    for (u32 i = 0; i < totalCells; i++) {
+        if (grid.cells[i].flags & CELL_SOLID) {
+            grid.clearance[i] = 0;
+            queue[qTail++] = i;
+        } else {
+            grid.clearance[i] = 0xFF; // unvisited sentinel
+        }
+    }
+
+    while (qHead < qTail) {
+        u32 idx = queue[qHead++];
+        u32 cx = idx % grid.width;
+        u32 cz = idx / grid.width;
+        u8  d  = grid.clearance[idx];
+        u8  nd = (d < 254) ? static_cast<u8>(d + 1) : 254; // clamp before 0xFF
+
+        // Expand to all 8 neighbours — a diagonally-adjacent wall still pinches
+        // a wide AABB, so it must count toward clearance.
+        for (u8 dir = 0; dir < 8; dir++) {
+            s32 nx = static_cast<s32>(cx) + kDirDx[dir];
+            s32 nz = static_cast<s32>(cz) + kDirDz[dir];
+            if (nx < 0 || nz < 0 || static_cast<u32>(nx) >= grid.width ||
+                static_cast<u32>(nz) >= grid.depth) continue;
+            u32 nIdx = static_cast<u32>(nz) * grid.width + static_cast<u32>(nx);
+            if (grid.clearance[nIdx] <= nd) continue; // already closer to a wall
+            grid.clearance[nIdx] = nd;
+            queue[qTail++] = nIdx;
+        }
+    }
+
+    std::free(queue);
 }
 
 Vec3 LevelGridSystem::flowDirection(const LevelGrid& grid, Vec3 worldPos) {

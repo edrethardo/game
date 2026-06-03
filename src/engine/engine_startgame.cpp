@@ -533,6 +533,10 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
 
     LOG_INFO("Spawned %u enemies", EntitySystem::activeCount(m_entities));
 
+    // Build the clearance field now the grid geometry is final (post boss-arena
+    // expansion). Used by enemy pathfinding to keep paths off wall corners.
+    LevelGridSystem::buildClearanceField(m_level.grid);
+
     // ---------------------------------------------------------------------------
     // Themed decorations — scatter props that fit the current depth tier.
     // ---------------------------------------------------------------------------
