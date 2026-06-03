@@ -568,6 +568,11 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 f32 arenaD = bossRoom.d * m_level.grid.cellSize;
                 boss->leashRadius = 0.5f * sqrtf(arenaW * arenaW + arenaD * arenaD) + 1.0f;
             }
+            // CHARGER bosses (the Butcher) pursue relentlessly: drop the arena
+            // leash so they chase the player OUT of the room and through the floor
+            // instead of being clamped to the arena centre. Other bosses stay
+            // confined so their set-piece encounter happens in the room.
+            if (bd && (bd->roles & EnemyRole::CHARGER)) boss->leashRadius = 0.0f;
             boss->isBoss = true; // canonical milestone-boss marker (gates the floor exit)
             if (bd) {
                 // JSON-loaded boss path

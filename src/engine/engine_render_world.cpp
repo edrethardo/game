@@ -490,6 +490,17 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
         }
     }
 
+}
+
+// ---------------------------------------------------------------------------
+// renderInteractionPrompts — screen-space floor-descend + item-pickup button
+// hints. Split out of renderSpeechBubbles and drawn in the NATIVE HUD pass: the
+// button glyph's background is a HUD line batch projected through flushHUD's
+// cached screen size, which only matches when drawn in the native pass — in the
+// scaled 3D pass it mis-projected, so the background vanished and only the
+// letter showed. The native pass also keeps the prompt crisp.
+// ---------------------------------------------------------------------------
+void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
     // Floor door interaction prompt — shown when player is within trigger range
     if (m_level.floorDoorActive && m_gameState == GameState::IN_GAME) {
         Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;

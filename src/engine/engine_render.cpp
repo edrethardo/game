@@ -735,6 +735,11 @@ void Engine::render(f32 alpha) {
 
     renderHUD(hudW, hudH);
 
+    // Interaction prompts (floor-descend / item-pickup) — native pass so the
+    // button-glyph background projects through the correct HUD ortho (was drawn
+    // in the scaled 3D pass, which dropped the background and left only the letter).
+    renderInteractionPrompts(hudW, hudH);
+
     // Dead player overlay — shows "YOU DIED" on this player's viewport while game continues
     if (m_playerDead[sp]) {
         // Dark overlay

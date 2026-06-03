@@ -19,8 +19,7 @@
       "matName": "butcher_skin",
       "weaponName": "cleaver",
       "roles": [
-        "charger",
-        "ranged_caster"
+        "charger"
       ],
       "personality": "berserker",
       "skillId": "",

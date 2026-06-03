@@ -128,6 +128,22 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
         blockedZ = true;
     }
 
+    // Corner-slip for oversized bodies: a boss whose full AABB jams on BOTH axes
+    // is wedged in a corner. Shrink it to its (smaller) nav footprint and retry
+    // the same move so it slips out/through instead of grinding to a halt — the
+    // "make large enemies slippery at corners" behaviour. Gated on `large` so the
+    // footprint only shrinks for bodies bigger than the cell grid can hold, and on
+    // both-axes-blocked so big enemies keep full collision against ordinary walls.
+    bool large = e.halfExtents.x > ENTITY_NAV_RADIUS_CAP;
+    if (large && blockedX && blockedZ && (delta.x * delta.x + delta.z * delta.z) > 1e-6f &&
+        !(e.flags & ENT_FLYING)) {
+        Vec3 slim = navExtents(e);
+        Vec3 sx = e.position + Vec3{delta.x, 0, 0};
+        if (!entityOverlapsGrid(sx, slim, grid)) { e.position.x = sx.x; blockedX = false; }
+        Vec3 sz = e.position + Vec3{0, 0, delta.z};
+        if (!entityOverlapsGrid(sz, slim, grid)) { e.position.z = sz.z; blockedZ = false; }
+    }
+
     // Anti-wedge: both axes blocked while trying to move means we drove into a
     // concave corner and would dead-stop. Slide toward the most open neighbouring
     // cell (clearance-field gradient, tie-broken toward the intended heading) so

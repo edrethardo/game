@@ -665,6 +665,10 @@ private:
     void renderProjectilesAndEffects(u32 sw, u32 sh);
     void renderWorldItems(u32 sw, u32 sh);
     void renderSpeechBubbles(u32 sw, u32 sh);
+    // Screen-space interaction prompts (floor-descend + item-pickup button hints).
+    // Drawn in the NATIVE HUD pass (not the scaled 3D pass) so the button-glyph
+    // background projects through the correct HUD ortho and stays crisp.
+    void renderInteractionPrompts(u32 sw, u32 sh);
     void renderHUD(u32 sw, u32 sh);
     void logStats();
 
