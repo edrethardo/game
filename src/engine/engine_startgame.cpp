@@ -347,6 +347,10 @@ void Engine::equipStartingLoadout(u8 playerIdx) {
 // heroes can coexist without the NEW_GAME wipe erasing a loaded character.
 void Engine::equipFreshLane(u8 lane) {
     if (lane >= MAX_LOCAL_PLAYERS) return;
+    // Fresh New Game character — it owns its target slot outright, so its saves
+    // overwrite at the real floor (the no-downgrade guard must not protect the
+    // overwritten character's old progress). See m_laneLoadedFromSave.
+    m_laneLoadedFromSave[lane] = false;
     Inventory::init(m_inventories[lane]);
     m_skillStates[lane] = SkillState{};
     Quickbar::init(m_quickbars[lane], m_inventories[lane]);
@@ -703,7 +707,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
             np.moveSpeed     = kClassDefs[static_cast<u32>(netSlotClass[i])].baseMoveSpeed;
             np.weaponState.currentWeapon = 0; // self-corrects from next client input
             np.isDead        = false;
-            np.invulnTimer   = 2.5f;          // match floor-entry spawn protection
+            np.invulnTimer   = 2.0f;          // match floor-entry spawn protection
             // Symmetric with the host's per-floor Wanderer reset above (line ~540): clear
             // transient mark-prey / shadow-dance state so timers don't carry across descend.
             np.shadowDanceTimer = 0.0f;
@@ -854,10 +858,10 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     }
 
     // Brief invulnerability on floor entry for all players
-    m_localPlayer.invulnTimer = 2.5f;
+    m_localPlayer.invulnTimer = 2.0f;
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
         if (m_players[pi].active) {
-            m_players[pi].invulnTimer = 2.5f;
+            m_players[pi].invulnTimer = 2.0f;
             m_players[pi].isDead = false;
         }
     }

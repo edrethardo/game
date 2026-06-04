@@ -158,7 +158,7 @@ enum struct SkillId : u8 {
     LIFE_STEAL,     // heal 5% of damage dealt
     THORNS,         // reflect 20% damage to attacker
     BERSERKER,      // +1% damage per 1% missing HP
-    SECOND_WIND,    // at <20% HP: heal 30% + 2s invuln (60s cooldown)
+    SECOND_WIND,    // at <20% HP: heal 30% + 1.5s invuln (60s cooldown)
     SOUL_HARVEST,   // on kill: +5% speed +3% damage for 10s (5 stacks)
     GRAVITY_PULL,   // pull enemies within 5m toward player
     PHASE_STRIKE,   // 10% on hit: teleport behind target

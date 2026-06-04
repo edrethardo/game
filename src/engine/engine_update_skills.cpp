@@ -289,7 +289,7 @@ void Engine::tickArmorRingPassives(f32 dt) {
         if (m_localPlayer.secondWindCooldown > 0.0f)
             m_localPlayer.secondWindCooldown -= dt;
 
-        // Second Wind: at <20% HP, heal 30% + 2s invuln (60s cooldown)
+        // Second Wind: at <20% HP, heal 30% + 1.5s invuln (60s cooldown)
         if (m_ringPassive == SkillId::SECOND_WIND &&
             m_localPlayer.health > 0.0f &&
             m_localPlayer.health < m_localPlayer.maxHealth * 0.2f &&
@@ -297,7 +297,7 @@ void Engine::tickArmorRingPassives(f32 dt) {
             m_localPlayer.health += m_localPlayer.maxHealth * 0.3f;
             if (m_localPlayer.health > m_localPlayer.maxHealth)
                 m_localPlayer.health = m_localPlayer.maxHealth;
-            m_localPlayer.invulnTimer = 2.0f;
+            m_localPlayer.invulnTimer = 1.5f;
             m_localPlayer.secondWindCooldown = 60.0f;
             for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
                 if (!m_fx.novaFX[ni].active) {
@@ -305,7 +305,7 @@ void Engine::tickArmorRingPassives(f32 dt) {
                     break;
                 }
             }
-            LOG_INFO("SECOND WIND triggered! Healed 30%%, 2s invuln");
+            LOG_INFO("SECOND WIND triggered! Healed 30%%, 1.5s invuln");
         }
 
         // Divine Judgment: at <25% HP, full heal + cleanse + AoE stun (45s cooldown)

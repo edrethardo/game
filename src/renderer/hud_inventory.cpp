@@ -107,7 +107,7 @@ static const char* skillDescription(SkillId id) {
         case SkillId::LIFE_STEAL:      return "Heal 5% of all damage dealt.";
         case SkillId::THORNS:          return "Reflect 20% of damage taken\nback to the nearest enemy.";
         case SkillId::BERSERKER:       return "+1% damage for each 1% of\nmissing health. Risk vs reward.";
-        case SkillId::SECOND_WIND:     return "Below 20% HP: heal 30% and\ngain 2s invulnerability. 60s cooldown.";
+        case SkillId::SECOND_WIND:     return "Below 20% HP: heal 30% and\ngain 1.5s invulnerability. 60s cooldown.";
         case SkillId::SOUL_HARVEST:    return "Each kill: +5% speed, +3% damage\nfor 10s. Stacks up to 5 times.";
         case SkillId::GRAVITY_PULL:    return "Enemies within 5m are slowly\npulled toward you.";
         case SkillId::PHASE_STRIKE:    return "20% on kill: smoke bomb that\nblinds nearby enemies for 0.5s.";

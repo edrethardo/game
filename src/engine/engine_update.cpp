@@ -195,7 +195,7 @@ void Engine::update(f32 dt) {
                     m_level.currentFloor = 1;
                 }
                 m_localPlayer.health = m_localPlayer.maxHealth;
-                m_localPlayer.invulnTimer = 2.5f;
+                m_localPlayer.invulnTimer = 2.0f;
                 m_inventoryOpen = false;
                 m_deathHover = -1;
                 Input::setRelativeMouseMode(true); // re-capture the cursor for gameplay
@@ -478,7 +478,7 @@ void Engine::update(f32 dt) {
                         m_localPlayer.health = m_localPlayer.maxHealth;
                         m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local net slot (sp is the lane)
                         m_localPlayer.velocity = {0, 0, 0};
-                        m_localPlayer.invulnTimer = 2.5f;
+                        m_localPlayer.invulnTimer = 2.0f;
                         m_localPlayer.hurtVignette = 0.0f; // no red lingering on co-op respawn
                         snapCameraToPlayer();              // no camera-interp smear on co-op respawn
                         m_playerDead[sp] = false;
@@ -487,7 +487,7 @@ void Engine::update(f32 dt) {
                             np.health = np.maxHealth;
                             np.position = np.spawnPosition;
                             np.velocity = {0, 0, 0};
-                            np.invulnTimer = 2.5f;
+                            np.invulnTimer = 2.0f;
                             np.isDead = false;
                         }
                     }
@@ -1630,7 +1630,7 @@ bool Engine::triggerFloorDescent() {
         if (!m_players[pi].active) continue;
         m_players[pi].maxHealth *= 1.015f;
         m_players[pi].health = m_players[pi].maxHealth;
-        m_players[pi].invulnTimer = 2.5f;
+        m_players[pi].invulnTimer = 2.0f;
         m_players[pi].isDead = false;
     }
     // Upgrade equipment for NPCs that survived this floor

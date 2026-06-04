@@ -60,6 +60,13 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                 revivedEnt.velocity = {0, 0, 0};
                 revivedEnt.deathTimer = 0.0f;
                 revivedEnt.flashTimer = 0.3f; // flash to show resurrection
+                // A venomous summoner (Ygara the Broodqueen) infects her thralls:
+                // raised minions inherit her poison on-hit so her whole brood poisons.
+                if (e.onHitEffect != 0) {
+                    revivedEnt.onHitEffect   = e.onHitEffect;
+                    revivedEnt.onHitDuration = e.onHitDuration;
+                    revivedEnt.onHitDps      = e.onHitDps;
+                }
                 // Ensure revived enemy isn't inside a wall
                 Collision::ensureNotInWall(revivedEnt.position, revivedEnt.halfExtents, grid);
                 if (!wasFlying) snapEntityToFloor(revivedEnt, grid);

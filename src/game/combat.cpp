@@ -286,7 +286,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
         // `lifesaverArmed` is set only from >=40% HP, so this can only save you from a healthy state.
         if (player.lifesaverArmed && player.health < critThresh) {
             if (player.health <= 0.0f) player.health = 1.0f; // cheat death: survive the otherwise-lethal hit at 1 HP
-            if (player.invulnTimer < 0.6f) player.invulnTimer = 0.6f;
+            if (player.invulnTimer < 0.3f) player.invulnTimer = 0.3f;
             player.lifesaverArmed = false;  // consume; re-earn by healing to >=40% HP
         }
     }

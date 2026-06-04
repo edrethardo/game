@@ -157,9 +157,14 @@ void Engine::saveCharacter(u8 lane, u8 slot) {
     u8 floor      = static_cast<u8>(m_level.savedFloor);
     u8 difficulty = m_difficulty;
 
-    // General no-downgrade guard: never write a lower effective floor over a higher one already
+    // No-downgrade guard: never write a lower effective floor over a higher one already
     // in this slot (formula matches the skill-unlock gate at engine_update_skills.cpp:131-132).
-    {
+    // ONLY applies to a character LOADED from a save (Continue / network join) — it protects a
+    // high-floor hero dropped into Player 1's lower world. A fresh New Game character
+    // (m_laneLoadedFromSave[lane] == false) intentionally overwrites its slot, so it must write its
+    // real (low) floor and reset the slot — otherwise selecting New Game over an old high-floor save
+    // appears to do nothing (the slot keeps the old floor). Continue is unaffected (its floor matches).
+    if (m_laneLoadedFromSave[lane]) {
         const SaveSlotInfo& existing = m_saveSlots[slot - 1];
         if (existing.exists) {
             u32 oldEff = static_cast<u32>(existing.floor) + static_cast<u32>(existing.difficulty) * 50;
@@ -380,9 +385,11 @@ bool Engine::loadGame(u8 slot) {
 
     m_activeSaveSlot    = slot;
     m_playerSaveSlot[0] = slot;
+    m_laneLoadedFromSave[0] = true; // loaded character — keep the no-downgrade guard for it
     // Legacy 2-player bundle: give P2 its own free slot so the next save migrates it to a
     // per-character file. If all 20 are taken, P2 simply won't persist this session (logged).
     if (playerCount == 2) {
+        m_laneLoadedFromSave[1] = true;
         u8 freeSlot = firstFreeSaveSlot();
         m_playerSaveSlot[1] = freeSlot;
         if (freeSlot == 0)
@@ -441,6 +448,7 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
         std::memcpy(m_classSkillStates, m_classSkillStatesPerPlayer[0], sizeof(m_classSkillStates));
     }
     m_playerSaveSlot[lane] = slot;
+    m_laneLoadedFromSave[lane] = true; // loaded character — keep the no-downgrade guard for it
     LOG_INFO("Loaded character from slot %u into lane %u (world unchanged)", slot, lane);
     return true;
 }

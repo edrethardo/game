@@ -146,16 +146,53 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
             e.speechTimer = 2.0f;
         } break;
 
-        // Floor 10: Andariel — Poison Nova (ring of 8 poison projectiles)
+        // Floor 10: Ygara, the Broodqueen — venom spit (an aimed poison-glob spread
+        // that fits her venomous theme), escalating to a poison nova ring once
+        // bloodied. EVERY projectile she throws applies poison and glows venom-green.
         case 10: {
-            e.flybyTimer = 5.0f;
-            for (u32 s = 0; s < 8; s++) {
-                f32 angle = s * (6.2832f / 8.0f);
-                Vec3 dir = {sinf(angle), 0.0f, cosf(angle)};
-                ProjectileSystem::spawn(projectiles, bossEye,
-                    dir, 10.0f, bossDmg * 0.5f, 0.12f, 2.5f, false);
+            // Hybrid cadence: when she can't reach you she spits venom rapidly
+            // (a real ranged threat while she closes the gap), then eases off once
+            // in melee range so she mixes poison swings with the occasional spit.
+            e.flybyTimer = (dist > e.attackRange * 1.5f) ? 1.6f : 4.0f;
+            const Vec3 venomGlow = {0.35f, 0.95f, 0.2f}; // sickly green venom light
+
+            // Signature ranged attack: a 3-glob venom spit aimed at the player.
+            for (s32 s = -1; s <= 1; s++) {
+                f32 spread = s * 0.13f; // ~7.5° fan around the aim line
+                Vec3 dir = normalize(Vec3{
+                    toPlayerDir.x + spread * toPlayerDir.z,
+                    toPlayerDir.y,
+                    toPlayerDir.z - spread * toPlayerDir.x});
+                u16 pi = ProjectileSystem::spawn(projectiles, bossEye,
+                    dir, 15.0f, bossDmg * 0.5f, 0.18f, 3.0f, false);
+                if (pi != 0xFFFF) {
+                    auto& pr = projectiles.projectiles[pi];
+                    pr.onHitEffect   = 1;          // poison
+                    pr.onHitDuration = 3.0f;
+                    pr.lightColor    = venomGlow;
+                }
             }
-            e.speechText = "POISON!";
+
+            // Bloodied (<50% HP): also erupt the classic poison nova ring for area
+            // denial — now actually poisonous (the old nova set no on-hit effect).
+            f32 hpPct = (e.maxHealth > 0.0f) ? (e.health / e.maxHealth) : 1.0f;
+            if (hpPct < 0.5f) {
+                for (u32 s = 0; s < 8; s++) {
+                    f32 angle = s * (6.2832f / 8.0f);
+                    Vec3 dir = {sinf(angle), 0.0f, cosf(angle)};
+                    u16 pi = ProjectileSystem::spawn(projectiles, bossEye,
+                        dir, 10.0f, bossDmg * 0.4f, 0.14f, 2.5f, false);
+                    if (pi != 0xFFFF) {
+                        auto& pr = projectiles.projectiles[pi];
+                        pr.onHitEffect   = 1;       // poison
+                        pr.onHitDuration = 3.0f;
+                        pr.lightColor    = venomGlow;
+                    }
+                }
+                e.speechText = "DROWN IN MY VENOM!";
+            } else {
+                e.speechText = "TASTE MY VENOM!";
+            }
             e.speechTimer = 2.0f;
         } break;
 

@@ -433,7 +433,7 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         np.weaponState.currentWeapon = 0;
         np.weaponState.cooldownTimer = 0.0f;
         np.isDead = false;
-        np.invulnTimer = 2.5f; // spawn protection
+        np.invulnTimer = 2.0f; // spawn protection
         np.playerClass = joinClass; // class chosen by the joining player
         // Seed moveSpeed from the joiner's class — NetPlayer's default 6.0 f isn't right for
         // every class, and `np.moveSpeed` is read by chain-damage attribution and (more
@@ -680,7 +680,7 @@ void Engine::positionLocalPlayersAtSpawn() {
     m_localPlayers[1].velocity   = {0, 0, 0};
     m_localPlayers[1].yaw        = m_localPlayer.yaw;
     m_localPlayers[1].eyeHeight  = m_localPlayer.eyeHeight;
-    m_localPlayers[1].invulnTimer = 2.5f;                  // brief spawn protection for P1
+    m_localPlayers[1].invulnTimer = 2.0f;                  // brief spawn protection for P1
     m_players[1].spawnPosition   = m_localPlayers[1].position;
 }
 
@@ -715,7 +715,7 @@ void Engine::startCouchGame() {
         np.moveSpeed = m_localPlayers[1].moveSpeed;
         np.weaponState.currentWeapon = 0;
         np.isDead = false;
-        np.invulnTimer = 2.5f;
+        np.invulnTimer = 2.0f;
         Server::resetInputBuffer(1);
         resetFireDedup(1);
     }

@@ -762,6 +762,14 @@ private:
     // a file. Reset (lane 1 -> 0) whenever a fresh game-setup begins so a solo Continue stays solo.
     u8 m_playerSaveSlot[MAX_LOCAL_PLAYERS] = {0, 0};
 
+    // Per-lane origin (runtime only, not persisted): true if this lane's character
+    // was loaded from a save (Continue / network join), false if it's a fresh New
+    // Game character. Gates the no-downgrade save guard: a loaded high-floor hero in
+    // a lower world keeps its on-disk progress, but a New Game intentionally
+    // overwrites its slot at the real (low) floor. Set false in equipFreshLane,
+    // true in loadGame / loadCharacterIntoLane.
+    bool m_laneLoadedFromSave[MAX_LOCAL_PLAYERS] = {false, false};
+
     // Set by the client-side menu when the join flow picked "Continue" with a
     // valid save slot — the save is loaded locally before connectToServer, and this
     // flag tells (a) startGame to skip the inventory wipe + starting-kit grant and
