@@ -529,7 +529,12 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                     f32 effectiveDist = (npc.npcClass == NpcClass::PALADIN) ? npcDist * 0.5f : npcDist;
                     if (effectiveDist < bestNpcDist && npcDist <= e.detectionRange) {
                         bestNpcDist = npcDist;
-                        targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
+                        // Aim at the entity's vertical CENTER (position), not its top
+                        // (position + halfExtents.y). The top is a marginal edge hit for
+                        // short targets like the Engineer turret (0.6 m tall) — a projectile
+                        // descending from the enemy's higher eye clips just over it. Center
+                        // gives a full half-height of vertical margin.
+                        targetPos = npc.position;
                         targetDist = npcDist;
                         targetIsNPC = true;
                         e.targetEntityIdx = static_cast<u16>(nIdx);
@@ -542,7 +547,7 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // Use cached NPC target
                 const Entity& npc = pool.entities[e.targetEntityIdx];
                 if ((npc.flags & ENT_FRIENDLY) && !(npc.flags & ENT_DEAD)) {
-                    targetPos = npc.position + Vec3{0, npc.halfExtents.y, 0};
+                    targetPos = npc.position; // vertical center — see rescan branch above
                     targetDist = length(npc.position - e.position);
                     targetIsNPC = true;
                 }

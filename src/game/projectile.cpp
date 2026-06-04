@@ -308,9 +308,44 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 continue;
             }
         } else {
-            // Enemy projectile — test the primary player, then each extra local player
-            // (split-screen). First DEFLECT/HIT consumes the projectile; primary wins
-            // ties so singleplayer behavior is byte-identical.
+            // Enemy projectile — it must also collide with the player's FRIENDLY entities
+            // (Engineer turret, summoned drones, party NPCs), not just the player. The enemy
+            // AI already aims at these targets; without this branch the projectile passes
+            // straight through them and could never damage a turret. Mirror the player-
+            // projectile entity loop, filtering for ENT_FRIENDLY instead of hostiles.
+            bool hitFriendly = false;
+            if (!(p.projFlags & PROJ_ORB)) {
+                u16 nearby[72];
+                u32 nearCount = 0;
+                if (spatialGrid) {
+                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, nearby, 72);
+                } else {
+                    for (u32 a = 0; a < entities.activeCount && nearCount < 72; a++)
+                        nearby[nearCount++] = static_cast<u16>(entities.activeList[a]);
+                }
+                for (u32 n = 0; n < nearCount; n++) {
+                    u32 e = nearby[n];
+                    Entity& ent = entities.entities[e];
+                    if (!(ent.flags & ENT_FRIENDLY)) continue;
+                    if (ent.flags & ENT_DEAD) continue;
+                    if (ent.flags & ENT_UNTARGETABLE) continue;
+                    if (ent.enemyType == EnemyType::PROP) continue;
+                    if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
+                        EntityHandle h = {static_cast<u16>(e), ent.generation};
+                        Combat::applyDamage(entities, h, p.damage);
+                        // Freeze is the only on-hit effect a projectile fully specifies (it
+                        // carries no DoT rate), so apply just that; basic ranged enemies set none.
+                        if (p.onHitEffect == 4) ent.freezeTimer = fmaxf(ent.freezeTimer, p.onHitDuration);
+                        hitFriendly = true;
+                        break;
+                    }
+                }
+            }
+            if (hitFriendly) { destroyProjectile(pool, i); continue; }
+
+            // Then the primary player, then each extra local player (split-screen). First
+            // DEFLECT/HIT consumes the projectile; primary wins ties so singleplayer behavior
+            // is byte-identical.
             PlayerHitResult r = tryHitPlayer(p, projBox, player);
             if (r == PlayerHitResult::MISS && extraPlayers) {
                 for (u32 ep = 0; ep < extraPlayerCount; ep++) {

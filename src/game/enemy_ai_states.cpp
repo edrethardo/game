@@ -636,8 +636,10 @@ void updateHostileStates(Entity& e, u32 i,
         // Re-check LOS here since the ATTACK state's LOS update doesn't run.
         if (e.attackRange > 5.0f && dist <= e.attackRange && shouldCheckLOS) {
             Vec3 atkEye = e.position + Vec3{0, e.halfExtents.y, 0};
-            Vec3 tgt = targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0};
-            e.hasTargetLOS = hasLOSToPoint(atkEye, tgt, grid);
+            // Aim at the actual target (player eye OR NPC/turret center via targetPos),
+            // not always the player — otherwise a kiting enemy targeting the turret fires
+            // at the player instead.
+            e.hasTargetLOS = hasLOSToPoint(atkEye, targetPos, grid);
         }
         if (e.attackRange > 5.0f && dist <= e.attackRange && e.hasTargetLOS) {
             e.attackTimer -= dt;
@@ -645,11 +647,11 @@ void updateHostileStates(Entity& e, u32 i,
                 e.attackTimer = e.attackCooldown;
                 e.attackAnimT = 0.3f;
                 Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
-                Vec3 tPos = targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0};
+                Vec3 tPos = targetPos; // player eye or NPC/turret center
                 f32 projSpeed = (e.flags & ENT_FLYING) ? 11.5f : 16.1f;
                 f32 projRadius = (e.flags & ENT_FLYING) ? 0.06f : 0.08f;
                 f32 timeToHit = dist / projSpeed;
-                Vec3 predictedPos = tPos + targetPlayer->velocity * timeToHit;
+                Vec3 predictedPos = tPos + targetVel * timeToHit; // lead the actual target
                 Vec3 atkDir = normalize(predictedPos - atkOrigin);
                 ProjectileSystem::spawn(projectiles, atkOrigin,
                     atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
