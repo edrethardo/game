@@ -229,7 +229,12 @@ void HUD::drawSpeechBubble(u32 sw, u32 sh, f32 x, f32 y,
     pushLine(triX - 3.0f, bgY0, triX,        triY, borderColor);
     pushLine(triX,        triY, triX + 3.0f, bgY0, borderColor);
 
-    flushHUD();
+    // Flush the bubble box through THIS call's resolution (sw/sh), not the stale
+    // file-static s_screenW/s_screenH. Speech bubbles render in the scaled 3D pass
+    // (vpW/vpH), so a bare flushHUD() would project the box through whatever
+    // resolution last touched the HUD (the native pass) while the text below uses
+    // sw/sh — on Switch the FBO downscale makes those differ, misaligning box vs text.
+    HUD::flush(sw, sh);
 
     // Text centered inside the bubble
     Vec3 tc = {textColor.x * alpha, textColor.y * alpha, textColor.z * alpha};

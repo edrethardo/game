@@ -508,6 +508,14 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // At 720p = 1.0, at 1080p = 1.5. HUD code passes raw font sizes (1, 2, 3).
     FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
 
+    // Pin the HUD batch resolution to native (sw/sh) for the whole pass. flushHUD()
+    // projects through a file-static screen size that the SCALED 3D pass leaves set to
+    // vpW/vpH (e.g. speech bubbles call HUD::flush(vpW,vpH)). The inventory branch below
+    // skips drawCrosshair (which is what re-pins native in the normal HUD), so without
+    // this its box backgrounds would project at the scaled size and tear. The batch is
+    // empty here (prior passes flushed), so this only sets the size — it draws nothing.
+    HUD::flush(sw, sh);
+
     if (m_menu.confirmQuit) {
         // Paused: hide the entire game HUD (and inventory). Only the pause overlay
         // below is drawn, so the screen looks unremarkable at a glance.
