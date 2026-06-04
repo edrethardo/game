@@ -54,7 +54,11 @@ enum struct AffixType : u8 {
     CLIP_SIZE_PCT,      // % extra magazine capacity
     RELOAD_SPEED_PCT,   // % faster reload
     ENERGY_FLAT,        // flat bonus to max energy
+    LIFESTEAL_PCT,      // % of damage dealt healed back (distinct from flat LIFE_ON_HIT)
     COUNT
+    // NOTE: affix type is serialized by its integer value (see _REMOVED_RANGE_BONUS
+    // and engine_persist.cpp). Only ever APPEND new types before COUNT — never insert
+    // or reorder — or existing save files remap their affixes.
 };
 
 // ---- Player class ----
@@ -397,6 +401,12 @@ struct PlayerInventory {
     ItemInstance backpack[MAX_INVENTORY_ITEMS] = {};
     u8           backpackCount = 0;
 
+    // WARNING: this struct is serialized as a RAW byte dump (engine_persist.cpp writes
+    // sizeof(PlayerInventory)). Adding/removing/reordering ANY field changes the on-disk
+    // size and breaks every existing save (SAVE_VERSION would have to bump). Do NOT add a
+    // new cached bonus* field for a new affix — compute it on demand instead (see
+    // sumLifestealPct in engine_combat.cpp). Only touch this with a save-version migration.
+
     // Computed stat bonuses (recalculated on equip/unequip)
     f32 bonusDamageFlat         = 0.0f;
     f32 bonusDamagePct          = 0.0f;
@@ -530,6 +540,10 @@ namespace Inventory {
     WeaponDef    getWeaponFromItem(const PlayerInventory& inv,
                                    const ItemDef* itemDefs, const ItemInstance& item);
     f32          getEffectiveMaxHealth(const PlayerInventory& inv, f32 baseMaxHealth);
+    // Sum of the LIFESTEAL_PCT affix across equipped items (percentage, e.g. 1.5 = 1.5%).
+    // Computed on demand rather than cached on PlayerInventory — that struct is serialized
+    // raw, so it must not gain new fields (see the WARNING on PlayerInventory).
+    f32          lifestealPct(const PlayerInventory& inv);
 }
 
 namespace WorldItemSystem {

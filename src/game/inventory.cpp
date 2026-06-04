@@ -41,11 +41,26 @@ static void accumulateCommonAffix(Equip& e, const Affix& affix) {
         } break;
         case AffixType::HEALTH_PCT:         e.bonusHealthPct          += affix.value; break;
         case AffixType::LIFE_ON_HIT:        e.bonusLifeOnHit          += affix.value; break;
+        // LIFESTEAL_PCT is intentionally NOT cached here: PlayerInventory is serialized as a
+        // raw struct (engine_persist.cpp), so adding a bonus* field would change its size and
+        // break existing save files. Combat sums the affix on demand instead (engine_combat.cpp).
         case AffixType::PROJECTILE_SPEED:   e.bonusProjectileSpeedPct += affix.value; break;
         case AffixType::CONE_ANGLE:         e.bonusConeAngle          += affix.value; break;
         case AffixType::DAMAGE_TO_FLYING:   e.bonusDamageToFlying     += affix.value; break;
         default: break;  // type-specific affixes are handled by the caller
     }
+}
+
+f32 Inventory::lifestealPct(const PlayerInventory& inv) {
+    f32 pct = 0.0f;
+    for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
+        const ItemInstance& it = inv.equipped[s];
+        if (isItemEmpty(it)) continue;
+        for (u8 a = 0; a < it.affixCount; a++)
+            if (it.affixes[a].type == AffixType::LIFESTEAL_PCT)
+                pct += it.affixes[a].value;
+    }
+    return pct;
 }
 
 void Inventory::recalculateStats(PlayerInventory& inv) {

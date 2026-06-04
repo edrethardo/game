@@ -100,8 +100,10 @@ namespace ProjectileSystem {
     using SplashCallback = void(*)(Vec3 position, f32 radius);
     void setSplashCallback(SplashCallback cb);
 
-    // Callback when a player projectile hits an entity (for weapon on-hit procs)
-    using HitCallback = void(*)(Vec3 position, EntityHandle target);
+    // Callback when a player projectile hits an entity (weapon on-hit procs + life-on-hit/
+    // lifesteal healing). ownerSlot identifies the firing player's net slot; damage is the
+    // hit's damage so the callback can apply % lifesteal.
+    using HitCallback = void(*)(Vec3 position, EntityHandle target, u8 ownerSlot, f32 damage);
     void setHitCallback(HitCallback cb);
 
     // Callback for floating damage numbers when projectile deals damage

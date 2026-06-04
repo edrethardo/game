@@ -271,7 +271,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                             ent.freezeTimer = p.freezeDuration;
                             if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);
                         }
-                        if (s_hitCallback) s_hitCallback(p.position, h);
+                        if (s_hitCallback) s_hitCallback(p.position, h, p.ownerSlot, p.damage);
                         primaryHitIdx = static_cast<u16>(e);
                         hit = true;
                         break;

@@ -608,13 +608,15 @@ void Engine::handleWeaponFire(f32 dt) {
         // Phase Strike is now on-kill (smoke bomb) — see death callback
     }
 
-    // Affix life-on-hit: heal percentage of damage dealt (works independently of ring passive)
+    // Affix life-on-hit + lifesteal (independent of ring passive). Life on Hit is now a
+    // FLAT heal per landed hit (small, weapon-speed-rewarding); Lifesteal is a % of the
+    // damage actually dealt (rewards big hits). The two stack.
     if (result.hitEntity) {
-        f32 loh = m_inventories[m_localPlayerIndex].bonusLifeOnHit;
-        if (loh > 0.0f) {
-            f32 heal = wpn.damage * loh;
+        const PlayerInventory& pin = m_inventories[m_localPlayerIndex];
+        f32 heal = pin.bonusLifeOnHit;                          // flat HP per hit
+        heal += wpn.damage * Inventory::lifestealPct(pin) * 0.01f;      // % of damage dealt
+        if (heal > 0.0f)
             m_localPlayer.health = fminf(m_localPlayer.health + heal, m_localPlayer.maxHealth);
-        }
     }
 
     // Weapon legendary on-hit proc — % chance to trigger skill at hit position
@@ -1254,13 +1256,14 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         if (np.health > np.maxHealth) np.health = np.maxHealth;
     }
 
-    // Affix life-on-hit for remote player
+    // Affix life-on-hit (flat) + lifesteal (% of damage) for remote player — mirrors
+    // the local-player path above so co-op clients heal identically.
     if (result.hitEntity) {
-        f32 loh = m_inventories[np.slotIndex].bonusLifeOnHit;
-        if (loh > 0.0f) {
-            f32 heal = wpn.damage * loh;
+        const PlayerInventory& pin = m_inventories[np.slotIndex];
+        f32 heal = pin.bonusLifeOnHit;                          // flat HP per hit
+        heal += wpn.damage * Inventory::lifestealPct(pin) * 0.01f;      // % of damage dealt
+        if (heal > 0.0f)
             np.health = fminf(np.health + heal, np.maxHealth);
-        }
     }
 
     // --- Weapon legendary on-hit proc for remote player ---

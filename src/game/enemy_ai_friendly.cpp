@@ -15,7 +15,7 @@
 
 AIStep updateFriendlyNPC(Entity& e, u32 i,
                           EntityPool& pool, ProjectilePool& projectiles,
-                          Player& player,
+                          Vec3 anchorPos, Player* anchorPlayer,
                           const LevelGrid& grid, f32 dt,
                           Vec3 playerEye)
 {
@@ -118,12 +118,14 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
         if (e.attackTimer <= 0.0f) {
             f32 healRange = 6.0f;
             bool healed = false;
-            // Heal player first
-            if (player.health < player.maxHealth * 0.5f &&
+            // Heal the owning player first — only when the owner is local (anchorPlayer
+            // non-null). A remote-cast Cleric can't reach its owner's HP from this host,
+            // so it falls through to healing nearby NPCs instead.
+            if (anchorPlayer && anchorPlayer->health < anchorPlayer->maxHealth * 0.5f &&
                 length(playerEye - e.position) < healRange) {
                 f32 amt = 8.0f + e.level * 0.5f;
-                player.health += amt;
-                if (player.health > player.maxHealth) player.health = player.maxHealth;
+                anchorPlayer->health += amt;
+                if (anchorPlayer->health > anchorPlayer->maxHealth) anchorPlayer->health = anchorPlayer->maxHealth;
                 healed = true;
             }
             // Then check other NPCs
@@ -205,7 +207,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
             } else {
                 e.velocity = {0, 0, 0};
             }
-            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+            entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
             if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
             inCombat = false; // suppress combat, fall through to speech
         }
@@ -331,7 +333,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
             }
         }
 
-        entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+        entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
 
         // -- Attack on cooldown --
         // Ranged NPCs ALWAYS require LOS to fire (prevents shooting walls)
@@ -354,7 +356,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
                     e.velocity.x = flatDir.x * npcSpeed;
                     e.velocity.z = flatDir.z * npcSpeed;
                     e.yaw = atan2f(-flatDir.x, -flatDir.z);
-                    entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+                    entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
                 }
             }
 
@@ -425,15 +427,15 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
         if (isTurret) {
             // Mobile turret bot: follow player when no enemies in range.
             // Stays put during combat (handled by the inCombat block above).
-            f32 distToPlayer = length(e.position - player.position);
+            f32 distToPlayer = length(e.position - anchorPos);
             if (distToPlayer > 4.0f) {
                 // Too far from player — walk toward them using flow field
-                Vec3 toPlayer = normalize(Vec3{player.position.x - e.position.x, 0,
-                                               player.position.z - e.position.z});
+                Vec3 toPlayer = normalize(Vec3{anchorPos.x - e.position.x, 0,
+                                               anchorPos.z - e.position.z});
                 e.velocity.x = toPlayer.x * npcSpeed;
                 e.velocity.z = toPlayer.z * npcSpeed;
                 e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
-                entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+                entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
                 if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
             } else {
                 e.velocity = {0, 0, 0};
@@ -443,7 +445,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
             // Each drone gets a distinct phase so they fan around the player.
             f32 phase = static_cast<f32>(i) * 1.618f * 6.2832f; // golden angle spread
             f32 orbitDist = 3.0f + sinf(e.animTimer * 0.8f + phase) * 1.5f;
-            Vec3 orbitTarget = player.position + Vec3{
+            Vec3 orbitTarget = anchorPos + Vec3{
                 cosf(e.animTimer * 0.5f + phase) * orbitDist, 0.0f,
                 sinf(e.animTimer * 0.5f + phase) * orbitDist
             };
@@ -457,7 +459,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
             } else {
                 e.velocity.x = 0; e.velocity.z = 0;
             }
-            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+            entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
         } else {
             // Swarm drones (flying bats): orbit player at different heights and angles.
             // Wide spread with varying orbit radii for a real swarm look.
@@ -465,7 +467,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
             f32 orbitRadius = 2.5f + sinf(phase * 3.0f) * 2.0f; // 0.5–4.5m spread
             f32 orbitSpeed = 1.2f + sinf(phase * 2.0f) * 0.5f;  // varied orbit speed
             f32 angle = e.animTimer * orbitSpeed + phase;
-            Vec3 orbitTarget = player.position + Vec3{
+            Vec3 orbitTarget = anchorPos + Vec3{
                 cosf(angle) * orbitRadius, 1.0f + sinf(angle * 1.7f) * 0.5f,
                 sinf(angle) * orbitRadius
             };
@@ -482,7 +484,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
                 e.velocity = {0, 0, 0};
             }
 
-            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+            entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
         }
     } else {
         // --- PATHFIND MODE: follow flow field toward exit ---
@@ -537,7 +539,7 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
             e.velocity.x = flowDir.x * npcSpeed * speedMult;
             e.velocity.z = flowDir.z * npcSpeed * speedMult;
             e.yaw = atan2f(-flowDir.x, -flowDir.z);
-            entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
+            entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
         }
     }
 

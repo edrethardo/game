@@ -179,8 +179,33 @@ void Engine::initCallbacks() {
     });
 
     // Projectile hit callback — triggers weapon on-hit procs for projectile weapons
-    ProjectileSystem::setHitCallback([](Vec3 position, EntityHandle target) {
+    ProjectileSystem::setHitCallback([](Vec3 position, EntityHandle target, u8 ownerSlot, f32 damage) {
         if (!s_engine) return;
+
+        // --- Life on Hit (flat) + Lifesteal (% of damage) for PROJECTILE weapons ---
+        // Melee/hitscan heal at fire-resolve time in engine_combat; projectiles resolve
+        // their hit here (deferred), so the heal must happen at the impact, crediting the
+        // firer by ownerSlot. Runs only on the authoritative sim (host/SP — clients don't
+        // tick projectile damage), so it's safe to mutate the owning player's HP directly.
+        // Local lanes occupy slots [0, m_splitPlayerCount) and are authored by
+        // m_localPlayers[] (m_players[] is a synced copy that would be overwritten); remote
+        // co-op players are authoritative in m_players[].
+        if (ownerSlot < MAX_PLAYERS) {
+            const PlayerInventory& pin = s_engine->m_inventories[ownerSlot];
+            f32 heal = pin.bonusLifeOnHit + damage * Inventory::lifestealPct(pin) * 0.01f;
+            if (heal > 0.0f) {
+                bool localLane = (s_engine->m_netRole != NetRole::CLIENT) &&
+                                 (ownerSlot < s_engine->m_splitPlayerCount);
+                if (localLane) {
+                    Player& pl = s_engine->m_localPlayers[ownerSlot];
+                    pl.health = fminf(pl.health + heal, pl.maxHealth);
+                } else if (s_engine->m_players[ownerSlot].active) {
+                    NetPlayer& np = s_engine->m_players[ownerSlot];
+                    np.health = fminf(np.health + heal, np.maxHealth);
+                }
+            }
+        }
+
         if (s_engine->m_weaponProc == SkillId::NONE) return;
 
         u32 procRoll = static_cast<u32>(std::rand()) % 100;
@@ -473,6 +498,7 @@ void Engine::initCallbacks() {
     SkillSystem::setDroneSpawnCallback([](Vec3 position, u8 type) {
         if (!s_engine) return;
         EntityPool& pool = s_engine->m_entities;
+        const LevelGrid& grid = s_engine->m_level.grid;
 
         f32 floorMult = 1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f;
 
@@ -493,6 +519,9 @@ void Engine::initCallbacks() {
                 e->aiState       = AIState::IDLE;
                 e->baseMoveSpeed      = e->moveSpeed;
                 e->baseAttackCooldown = e->attackCooldown;
+                // Never leave a drone embedded in geometry: the spawn fan can land a
+                // semicircle slot inside a wall. Push it out to the nearest open cell.
+                Collision::ensureNotInWall(e->position, e->halfExtents, grid);
             }
         } else if (type == 1) {
             // Bat drone — flying melee swarm unit. Fast, closes distance to attack.
@@ -511,6 +540,9 @@ void Engine::initCallbacks() {
                 e->aiState       = AIState::IDLE;
                 e->baseMoveSpeed      = e->moveSpeed;
                 e->baseAttackCooldown = e->attackCooldown;
+                // Push flying drones out of walls too (preserves their hover height
+                // unless relocated, in which case they re-ascend via orbit AI).
+                Collision::ensureNotInWall(e->position, e->halfExtents, grid);
             }
         } else if (type == 3) {
             // Swarm Queen — large tanky spider that auto-spawns minis every 2s for 20s
@@ -533,6 +565,7 @@ void Engine::initCallbacks() {
                 e->baseMoveSpeed      = e->moveSpeed;
                 e->baseAttackCooldown = e->attackCooldown;
                 // Scale up visually (halfExtents already larger)
+                Collision::ensureNotInWall(e->position, e->halfExtents, grid);
             }
         } else if (type == 2) {
             // Mobile turret bot — armored body on tank treads, follows player when idle.
@@ -555,6 +588,7 @@ void Engine::initCallbacks() {
                 e->aiState       = AIState::IDLE;
                 e->baseMoveSpeed      = e->moveSpeed;
                 e->baseAttackCooldown = e->attackCooldown;
+                Collision::ensureNotInWall(e->position, e->halfExtents, grid);
                 // Spark burst on deploy — visual feedback
                 ParticleSystem::spawnSparks(s_engine->m_particles, position, {0, 1, 0}, 8);
             }
@@ -583,6 +617,8 @@ void Engine::initCallbacks() {
             e->aiState       = AIState::IDLE;
             e->baseMoveSpeed      = e->moveSpeed;
             e->baseAttackCooldown = e->attackCooldown;
+            // Queen-spawned minis can pop next to a wall — shove them clear.
+            Collision::ensureNotInWall(e->position, e->halfExtents, s_engine->m_level.grid);
         }
     });
 }

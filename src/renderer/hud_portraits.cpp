@@ -117,14 +117,11 @@ void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
         flushHUD();
     }
 
-    // Name text
+    // Name text — always show the live count (e.g. "Swarm x6") so the player can
+    // read the size of their drone army at a glance, even when only one is out.
     f32 textX = x + iconSz + 6;
     char label[32];
-    if (count > 1) {
-        std::snprintf(label, sizeof(label), "%s x%u", name, count);
-    } else {
-        std::snprintf(label, sizeof(label), "%s", name);
-    }
+    std::snprintf(label, sizeof(label), "%s x%u", name, count);
     FontSystem::drawText(sw, sh, textX, y + 12, label, {0.8f, 0.8f, 0.9f}, 1);
 
     // Health bar (if requested)

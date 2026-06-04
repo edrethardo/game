@@ -46,8 +46,15 @@
       "type": "life_on_hit",
       "name": "of Leeching",
       "slots": ["weapon", "ring"],
-      "minValue": 1.0,
-      "maxValue": 5.0
+      "minValue": 0.5,
+      "maxValue": 2.0
+    },
+    {
+      "type": "lifesteal_pct",
+      "name": "of the Vampire",
+      "slots": ["weapon", "ring"],
+      "minValue": 0.1,
+      "maxValue": 1.0
     },
     {
       "type": "projectile_speed",

@@ -144,6 +144,7 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "clip_size_pct"      || s == "CLIP_SIZE_PCT")      return AffixType::CLIP_SIZE_PCT;
     if (s == "reload_speed_pct"   || s == "RELOAD_SPEED_PCT")   return AffixType::RELOAD_SPEED_PCT;
     if (s == "energy_flat"        || s == "ENERGY_FLAT")        return AffixType::ENERGY_FLAT;
+    if (s == "lifesteal_pct"      || s == "LIFESTEAL_PCT")      return AffixType::LIFESTEAL_PCT;
     return AffixType::DAMAGE_FLAT;
 }
 

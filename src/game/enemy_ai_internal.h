@@ -126,10 +126,17 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
 // Archer/Mage/Rogue) and drones. Finds enemy targets, moves, attacks, handles
 // group cohesion, separation, and speech. Always returns NextEntity because the
 // original block ended with `continue;` (friendlies skip the hostile AI path).
+//
+// Anchored on the owning player by POSITION (anchorPos / anchorEye), not a Player&,
+// so remote-cast minions (a co-op peer's drones, whose Player struct doesn't exist
+// on this host) still get full AI. anchorPlayer is the real Player* when the owner
+// is local (host / split-screen lane) and nullptr for a remote owner; only the
+// Cleric heal-the-player path needs it (writes player.health). Passing nullptr there
+// just skips healing the (non-local) owner — drones/other classes are unaffected.
 // (enemy_ai_friendly.cpp)
 AIStep updateFriendlyNPC(Entity& e, u32 i,
                           EntityPool& pool, ProjectilePool& projectiles,
-                          Player& player,
+                          Vec3 anchorPos, Player* anchorPlayer,
                           const LevelGrid& grid, f32 dt,
                           Vec3 playerEye);
 

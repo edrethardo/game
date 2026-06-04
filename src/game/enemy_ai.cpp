@@ -441,19 +441,16 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                 // Spawn-calm window: companions wait with the player instead of
                 // marching toward the exit and starting fights before the player moves.
                 e.velocity = {0, 0, 0};
-            } else if (anchorP) {
-                // Local anchor (host/split-screen P2). updateFriendlyNPC reads Player fields
-                // for Cleric heal etc., which a NetPlayer doesn't surface — so for a
-                // remote-cast minion (anchorP == nullptr) we still tick movement basics via
-                // the anchorPos/anchorEye-driven teleport above, but skip the Player-coupled
-                // routines until they're refactored to take a Vec3 anchor.
-                // KNOWN GAP (audit follow-up): today this is reached only by drone-class
-                // minions (`npcClass == NONE`) since all `ownerNetSlot`-setting callbacks in
-                // engine_init_callbacks.cpp spawn drones. If a future class skill ever
-                // summons a `NpcClass::CLERIC/ARCHER/...` for a remote, that NPC will have
-                // no AI ticked here — refactor updateFriendlyNPC to accept (anchorPos,
-                // anchorEyeH, Player* anchorPlayerOrNull) at that time.
-                updateFriendlyNPC(e, i, pool, projectiles, *anchorP, grid, dt, anchorEye);
+            } else {
+                // Always tick: updateFriendlyNPC is anchored on a POSITION (anchorPos/
+                // anchorEye), so it works whether the owner is local (anchorP = &player,
+                // host/split-screen lane) or remote (anchorP == nullptr, a co-op peer's
+                // drone). Previously this was gated on `anchorP != nullptr`, which silently
+                // froze every minion whose `ownerNetSlot` mapped to an active NetPlayer —
+                // including the LOCAL player's own drones in singleplayer (m_players[0] is
+                // active after startGame), leaving them floating at spawn height. anchorP is
+                // forwarded only for the Cleric heal-the-owner path; nullptr just skips it.
+                updateFriendlyNPC(e, i, pool, projectiles, anchorPos, anchorP, grid, dt, anchorEye);
             }
             continue; // friendly NPC path ends here; hostile AI below is skipped
         }

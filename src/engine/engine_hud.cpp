@@ -591,15 +591,24 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         // rather than snapping. The numeric display (if added later) should read `health`.
         HUD::drawHealthBar(sw, sh, m_localPlayer.renderedHealth, m_localPlayer.maxHealth);
 
-        // Summon portraits — top-left, well below floor/potion text
+        // Summon portraits — top-left, stacked directly under the Potion tooltip.
         {
-            f32 portX = 10.0f;
-            f32 portY = static_cast<f32>(sh) - 75.0f; // lower position, clear of other HUD
+            f32 hs = static_cast<f32>(sh) / 720.0f;
+            // The Potion tooltip sits at sh - 60*hs; its key symbol extends a little
+            // above that. Anchor the portrait stack at sh - 95*hs so the first box
+            // (which grows upward from its anchor) clears the potion row, and align
+            // its left edge with the floor/potion text at x = 20*hs.
+            f32 portX = 20.0f * hs;
+            f32 portY = static_cast<f32>(sh) - 95.0f * hs;
             f32 portH = 26.0f, gap = 3.0f;
 
-            // Scan for summons
-            Entity* combatDrone = nullptr;
-            u32 swarmCount = 0;
+            // Scan friendly drone-class minions (npcClass NONE). Everything the
+            // Tinkerer/Engineer deploys is a drone; split only the ground turret bot
+            // out (GENERIC body, not flying) so the rest — ground spiders AND flying
+            // bats from Swarm Deploy/Drones/Queen — aggregate into one swarm count.
+            // The old scan keyed the swarm off ENT_UNTARGETABLE (never set on these
+            // drones) and turrets off moveSpeed<=0 (turrets move), so neither counted.
+            u32 swarmCount  = 0;
             u32 turretCount = 0;
 
             for (u32 a = 0; a < m_entities.activeCount; a++) {
@@ -609,27 +618,16 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 if (ent.flags & ENT_DEAD) continue;
                 if (ent.npcClass != NpcClass::NONE) continue;
 
-                if (ent.enemyType == EnemyType::SPIDER && ent.moveSpeed > 0.0f) {
-                    combatDrone = &ent;
-                } else if (ent.flags & ENT_UNTARGETABLE) {
-                    swarmCount++;
-                } else if (ent.moveSpeed <= 0.0f) {
-                    turretCount++;
-                }
+                bool isTurret = (ent.enemyType == EnemyType::GENERIC) && !(ent.flags & ENT_FLYING);
+                if (isTurret) turretCount++;
+                else          swarmCount++;
             }
 
             u32 slot = 0;
 
-            static const u8 matDrone  = MaterialSystem::getIdByName("icon_drone");
             static const u8 matSwarm  = MaterialSystem::getIdByName("icon_swarm");
             static const u8 matTurret = MaterialSystem::getIdByName("icon_turret");
 
-            if (combatDrone) {
-                f32 hpFrac = combatDrone->health / combatDrone->maxHealth;
-                HUD::drawSummonPortrait(sw, sh, portX, portY - slot * (portH + gap),
-                                         "Drone", {0.35f, 0.33f, 0.4f}, hpFrac, 1, matDrone);
-                slot++;
-            }
             if (swarmCount > 0) {
                 HUD::drawSummonPortrait(sw, sh, portX, portY - slot * (portH + gap),
                                          "Swarm", {0.3f, 0.3f, 0.35f}, -1.0f, swarmCount, matSwarm);
