@@ -348,8 +348,10 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
                 // Projectile: must have LOS regardless of distance
                 canAttack = (eDist <= engageDist && e.hasTargetLOS);
             } else {
-                // Melee: just needs to be in range
-                canAttack = (eDist <= e.attackRange);
+                // Melee: in range AND line of sight. Without the LOS gate a drone
+                // (e.g. a spider with 4 m attackRange) deals its damage directly through
+                // a wall to any enemy within range on the other side.
+                canAttack = (eDist <= e.attackRange && e.hasTargetLOS);
             }
 
             // If ranged and no LOS, move toward enemy to get a clear shot
