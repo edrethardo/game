@@ -165,7 +165,12 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
         case NpcClass::MAGE:    engageDist = 14.0f; break;
         case NpcClass::ROGUE:   engageDist = 6.0f;  break;
         case NpcClass::NONE:
-            engageDist = (e.flags & ENT_FLYING) ? e.detectionRange : 6.0f;
+            // Flying bats hunt out to their detection range; the ground turret bot
+            // (GENERIC body) fires at its real attackRange; ground spider combat-drones
+            // stay short-range melee at 6 m.
+            if (e.flags & ENT_FLYING)                   engageDist = e.detectionRange;
+            else if (e.enemyType == EnemyType::GENERIC) engageDist = e.attackRange;
+            else                                        engageDist = 6.0f;
             break;
         default:                engageDist = 6.0f;  break;
     }
@@ -425,21 +430,32 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
         bool isCombatDrone = (e.enemyType == EnemyType::SPIDER);
 
         if (isTurret) {
-            // Mobile turret bot: follow player when no enemies in range.
-            // Stays put during combat (handled by the inCombat block above).
-            f32 distToPlayer = length(e.position - anchorPos);
-            if (distToPlayer > 4.0f) {
-                // Too far from player — walk toward them using flow field
-                Vec3 toPlayer = normalize(Vec3{anchorPos.x - e.position.x, 0,
-                                               anchorPos.z - e.position.z});
+            // Mobile turret bot (idle path — combat is handled by the inCombat block above):
+            // follow the player first; once within the player's range, drift toward the level
+            // exit via the flow field so the turret advances with the party instead of just
+            // trailing behind it.
+            constexpr f32 FOLLOW_RANGE = 7.0f; // "the player's range" — stay within this
+            f32 dpx = anchorPos.x - e.position.x, dpz = anchorPos.z - e.position.z;
+            f32 distToPlayer = sqrtf(dpx * dpx + dpz * dpz);
+            if (distToPlayer > FOLLOW_RANGE) {
+                // Too far — catch up to the player
+                Vec3 toPlayer = normalize(Vec3{dpx, 0, dpz});
                 e.velocity.x = toPlayer.x * npcSpeed;
                 e.velocity.z = toPlayer.z * npcSpeed;
                 e.yaw = atan2f(-toPlayer.x, -toPlayer.z);
-                entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
-                if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
             } else {
-                e.velocity = {0, 0, 0};
+                // Within range — head toward the exit via the flow field
+                Vec3 flowDir = LevelGridSystem::flowDirection(grid, e.position);
+                if (lengthSq(flowDir) > 0.001f) {
+                    e.velocity.x = flowDir.x * npcSpeed;
+                    e.velocity.z = flowDir.z * npcSpeed;
+                    e.yaw = atan2f(-flowDir.x, -flowDir.z);
+                } else {
+                    e.velocity = {0, 0, 0}; // at the exit
+                }
             }
+            entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
         } else if (isCombatDrone) {
             // Combat drone (spider): orbit player at unique angle, spread out.
             // Each drone gets a distinct phase so they fan around the player.

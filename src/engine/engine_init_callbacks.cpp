@@ -568,12 +568,14 @@ void Engine::initCallbacks() {
                 Collision::ensureNotInWall(e->position, e->halfExtents, grid);
             }
         } else if (type == 2) {
-            // Mobile turret bot — armored body on tank treads, follows player when idle.
-            // HP scales with floor depth so turrets stay relevant in later tiers.
+            // Mobile turret bot — armored body on tank treads, follows the player and
+            // advances toward the exit when idle. HP scales with floor depth so turrets
+            // stay relevant in later tiers. detection 20m / attackRange 15m — the friendly
+            // engageDist gate now honors a turret's attackRange (enemy_ai_friendly.cpp).
             f32 baseHp = 160.0f;
             f32 floorMult = 1.0f + (s_engine->m_level.currentFloor - 1) * 0.06f;
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.2f, 0.3f, 0.2f}, false, baseHp * floorMult, 3.0f, 15.0f, 10.0f, 1.5f, 12.0f);
+                {0.2f, 0.3f, 0.2f}, false, baseHp * floorMult, 3.0f, 20.0f, 15.0f, 1.5f, 12.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // split-screen lane (host-only path)
