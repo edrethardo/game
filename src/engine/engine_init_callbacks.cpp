@@ -504,8 +504,10 @@ void Engine::initCallbacks() {
 
         if (type == 0) {
             // Spider drone — melee ground unit. Swarm Overlord spawns many of these.
+            // halfExtents drive mesh size + hitbox; bumped up so the swarm reads clearly
+            // and is easier to hit ({0.3,0.2,0.3} -> {0.4,0.28,0.4}).
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.3f, 0.2f, 0.3f}, false, 30.0f * floorMult, 6.0f * floorMult,
+                {0.4f, 0.28f, 0.4f}, false, 30.0f * floorMult, 6.0f * floorMult,
                 12.0f, 4.0f, 0.5f, 8.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
@@ -525,8 +527,9 @@ void Engine::initCallbacks() {
             }
         } else if (type == 1) {
             // Bat drone — flying melee swarm unit. Fast, closes distance to attack.
+            // Enlarged for visibility/hittability ({0.15,0.1,0.15} -> {0.22,0.15,0.22}).
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.15f, 0.1f, 0.15f}, true, 20.0f * floorMult, 7.0f * floorMult,
+                {0.22f, 0.15f, 0.22f}, true, 20.0f * floorMult, 7.0f * floorMult,
                 12.0f, 3.0f, 0.5f, 6.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
@@ -574,8 +577,11 @@ void Engine::initCallbacks() {
             // engageDist gate now honors a turret's attackRange (enemy_ai_friendly.cpp).
             f32 baseHp = 160.0f;
             f32 floorMult = 1.0f + (s_engine->m_level.currentFloor - 1) * 0.06f;
+            // halfExtents drive BOTH the rendered mesh size and the hitbox AABB
+            // (engine_render_entities.cpp scales the mesh by halfExtents), so larger
+            // extents make the turret easier to see and to hit at once.
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.2f, 0.3f, 0.2f}, false, baseHp * floorMult, 3.0f, 20.0f, 15.0f, 1.5f, 12.0f);
+                {0.3f, 0.45f, 0.3f}, false, baseHp * floorMult, 3.0f, 20.0f, 15.0f, 1.5f, 12.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // split-screen lane (host-only path)
@@ -607,7 +613,7 @@ void Engine::initCallbacks() {
         EntityPool& pool = s_engine->m_entities;
         f32 fm = 1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f;
         EntityHandle h = EntitySystem::spawn(pool, pos,
-            {0.3f, 0.2f, 0.3f}, false, 30.0f * fm, 6.0f * fm,
+            {0.4f, 0.28f, 0.4f}, false, 30.0f * fm, 6.0f * fm,  // match the type-0 spider size
             12.0f, 4.0f, 0.5f, 8.0f);
         Entity* e = handleGet(pool, h);
         if (e) {
