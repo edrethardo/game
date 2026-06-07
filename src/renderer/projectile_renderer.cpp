@@ -27,6 +27,7 @@ static constexpr u32 MAX_INSTANCES_PER_BATCH = 4096;
 
 static Shader s_shader;
 static u32    s_instanceVBO = 0;
+static s32    s_locGroupTint = -1;  // u_groupTint — per-material-group tint for multi-color meshes
 
 // Scratch buffer for building instance data before upload (avoids per-frame alloc)
 static InstanceData s_instanceBuf[MAX_INSTANCES_PER_BATCH];
@@ -39,6 +40,7 @@ void ProjectileRenderer::init() {
         LOG_ERROR("ProjectileRenderer: failed to load instanced shader");
         return;
     }
+    s_locGroupTint = glGetUniformLocation(s_shader.program, "u_groupTint");
 
     // Create instance VBO (orphaned each frame via glBufferData)
     glGenBuffers(1, &s_instanceVBO);
@@ -86,6 +88,8 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, MaterialSystem::get(0)->texture.handle);
     glUniform1i(s_shader.loc_texture0, 0);
+    // Default group tint = identity; per-material-group meshes (arrow/bolt) override it per group.
+    if (s_locGroupTint >= 0) glUniform4f(s_locGroupTint, 1.0f, 1.0f, 1.0f, 1.0f);
 
     // Bucketed single-pass: collect all mesh-based projectiles into per-mesh buckets.
     // Skip meshId 0 (generic cubes → FX path) and FX-flagged projectiles.
@@ -175,9 +179,16 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
         inst.modelRow3[2] = p.position.z;
         inst.modelRow3[3] = 1.0f;
 
-        // Color tint
-        if (p.projFlags & PROJ_VOID) { inst.color[0]=0.6f; inst.color[1]=0.2f; inst.color[2]=1.0f; inst.color[3]=1.0f; }
-        else                          { inst.color[0]=0.8f; inst.color[1]=0.8f; inst.color[2]=0.8f; inst.color[3]=1.0f; }
+        // Color tint. Void weapons force a purple glow. Multi-material meshes (arrow/bolt)
+        // carry their colors in per-group tints, so use a white instance tint to let those
+        // render true; everything else keeps the neutral grey.
+        if (p.projFlags & PROJ_VOID) {
+            inst.color[0]=0.6f; inst.color[1]=0.2f; inst.color[2]=1.0f; inst.color[3]=1.0f;
+        } else if (meshDefs[mid].mesh.materialGroupCount > 0) {
+            inst.color[0]=1.0f; inst.color[1]=1.0f; inst.color[2]=1.0f; inst.color[3]=1.0f;
+        } else {
+            inst.color[0]=0.8f; inst.color[1]=0.8f; inst.color[2]=0.8f; inst.color[3]=1.0f;
+        }
     }
 
     // Single VBO upload for all buckets
@@ -199,8 +210,27 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
             glVertexAttribDivisor(loc, 1);
         }
 
-        glDrawElementsInstanced(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT,
-                                nullptr, bucketCount[mid]);
+        if (mesh.materialGroupCount > 0) {
+            // Multi-color mesh (arrow/bolt): draw each usemtl group with its own texture +
+            // tint so the shaft (wood), tip (steel) and fletching (white) read as distinct
+            // colors. Each group is a contiguous index sub-range, drawn instanced.
+            for (u8 g = 0; g < mesh.materialGroupCount; g++) {
+                const MeshMaterialGroup& grp = mesh.materials[g];
+                const Material* mat = MaterialSystem::get(grp.materialId);
+                glBindTexture(GL_TEXTURE_2D, mat->texture.handle);
+                if (s_locGroupTint >= 0)
+                    glUniform4f(s_locGroupTint, mat->tint.x, mat->tint.y, mat->tint.z, mat->tint.w);
+                glDrawElementsInstanced(GL_TRIANGLES, grp.indexCount, GL_UNSIGNED_INT,
+                                        (const void*)(size_t)(grp.indexStart * sizeof(u32)),
+                                        bucketCount[mid]);
+            }
+            // Restore defaults so the next (non-grouped) bucket is unaffected.
+            if (s_locGroupTint >= 0) glUniform4f(s_locGroupTint, 1.0f, 1.0f, 1.0f, 1.0f);
+            glBindTexture(GL_TEXTURE_2D, MaterialSystem::get(0)->texture.handle);
+        } else {
+            glDrawElementsInstanced(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT,
+                                    nullptr, bucketCount[mid]);
+        }
 
         for (u32 loc = 3; loc <= 7; loc++) {
             glVertexAttribDivisor(loc, 0);

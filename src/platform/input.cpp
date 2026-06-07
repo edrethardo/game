@@ -3,6 +3,7 @@
 
 #include "platform/input.h"
 #include "core/log.h"
+#include "core/imu_filter.h"
 
 #include <cstring>
 #include <cstdio>
@@ -37,11 +38,33 @@ static u8 s_activePlayer = 0;
 // returned by getGyro(). Per-player to avoid P2 sensor bleeding into P1.
 static f32 s_gyroDx[2] = {};
 static f32 s_gyroDy[2] = {};
+
+// Per-player IMU sensor-fusion filter (gyro + accel). Removes gyro zero-rate bias so the aim
+// no longer drifts; its bias-corrected gyro feeds the SAME look mapping the raw gyro used.
+static ImuFilter s_imu[2];
+
+// Per-frame dt for the IMU filter, derived from the wall clock — self-contained (no coupling to
+// the game Clock). Clamped so a frame hitch can't blow up the integrator.
+static u32 s_gyroPrevTicks = 0;
+static f32 gyroFrameDt() {
+    u32 now = SDL_GetTicks();
+    f32 dt = (s_gyroPrevTicks == 0) ? (1.0f / 60.0f) : (now - s_gyroPrevTicks) * 0.001f;
+    s_gyroPrevTicks = now;
+    if (dt < 0.001f) dt = 0.001f;
+    if (dt > 0.05f)  dt = 0.05f;
+    return dt;
+}
+
+static void updateGyroCache(); // forward decl — platform-specific definition below
 #ifdef __SWITCH__
 static void initGyro();        // forward declaration — enables sensors (defined below)
-static void updateGyroCache(); // forward declaration — defined after gyro variables
-#else
-static void updateGyroCache() {} // no-op on PC
+static void initVibration();   // forward declaration — opens rumble devices (defined below)
+static void switchRumble(u8 player, f32 strength, u32 durationMs); // libnx rumble
+static void tickRumbleStop();  // stop a pulse once its duration elapses
+// Rumble pulse end-times (SDL_GetTicks ms) per player — plain types so they live up here;
+// the libnx HidVibrationDeviceHandle table needs <switch.h> and is defined further below.
+static u32  s_rumbleEndMs[2]  = {};
+static bool s_rumbleActive[2] = {};
 #endif
 
 #ifdef __SWITCH__
@@ -151,7 +174,8 @@ void Input::init() {
 
 #ifdef __SWITCH__
     initPads();
-    initGyro();  // start sensors early so they warm up during menus
+    initGyro();       // start sensors early so they warm up during menus
+    initVibration();  // open rumble devices up front
 #endif
 
     setDefaults();
@@ -164,10 +188,14 @@ void Input::init() {
                 LOG_INFO("Gamepad %d connected: %s", i,
                          SDL_GameControllerName(s_controllers[i]));
 #ifndef __SWITCH__
-                // Enable gyro sensor if available (PC: SDL2 sensor API)
+                // Enable gyro + accel sensors if available (PC: SDL2 sensor API). The accel
+                // feeds the IMU filter's gravity reference for drift correction.
                 if (SDL_GameControllerHasSensor(s_controllers[i], SDL_SENSOR_GYRO)) {
                     SDL_GameControllerSetSensorEnabled(s_controllers[i], SDL_SENSOR_GYRO, SDL_TRUE);
                     LOG_INFO("Gamepad %d: gyro enabled", i);
+                }
+                if (SDL_GameControllerHasSensor(s_controllers[i], SDL_SENSOR_ACCEL)) {
+                    SDL_GameControllerSetSensorEnabled(s_controllers[i], SDL_SENSOR_ACCEL, SDL_TRUE);
                 }
 #endif
             }
@@ -239,10 +267,12 @@ void Input::update() {
         s_padPrevButtons[p] = padGetButtons(&s_pads[p]);
         padUpdate(&s_pads[p]);
     }
-
-    // Gyro cache updated below (after gyro variable declarations) via updateGyroCache()
-    updateGyroCache();
+    tickRumbleStop();  // end any rumble pulse whose duration has elapsed (Switch libnx rumble)
 #endif
+
+    // Gyro cache: run the IMU drift filter and refresh the per-player look delta once per frame
+    // (both platforms — the PC and Switch definitions of updateGyroCache live above).
+    updateGyroCache();
 }
 
 // Consume all "just pressed" edges so subsequent accumulator ticks see them as held,
@@ -429,10 +459,13 @@ void Input::handleControllerEvent(const SDL_Event& event) {
             if (s_controllers[index]) {
                 LOG_INFO("Gamepad %d connected: %s", index,
                          SDL_GameControllerName(s_controllers[index]));
-                // Enable gyro sensor if available
+                // Enable gyro + accel sensors if available (accel feeds the IMU drift filter)
                 if (SDL_GameControllerHasSensor(s_controllers[index], SDL_SENSOR_GYRO)) {
                     SDL_GameControllerSetSensorEnabled(s_controllers[index], SDL_SENSOR_GYRO, SDL_TRUE);
                     LOG_INFO("Gamepad %d: gyro enabled", index);
+                }
+                if (SDL_GameControllerHasSensor(s_controllers[index], SDL_SENSOR_ACCEL)) {
+                    SDL_GameControllerSetSensorEnabled(s_controllers[index], SDL_SENSOR_ACCEL, SDL_TRUE);
                 }
             }
         }
@@ -457,12 +490,18 @@ void Input::handleControllerEvent(const SDL_Event& event) {
 // ---------------------------------------------------------------------------
 void Input::rumble(u8 slot, f32 strength, u32 durationMs) {
     if (slot >= static_cast<u8>(MAX_GAMEPADS)) return;
-    SDL_GameController* gc = s_controllers[slot];
-    if (!gc) return;
     if (strength < 0.0f) strength = 0.0f;
     if (strength > 1.0f) strength = 1.0f;
+#ifdef __SWITCH__
+    // SDL_GameControllerRumble is a no-op on the libnx SDL port — drive the HID
+    // vibration devices directly. slot maps 1:1 to the libnx pad index (0/1).
+    if (slot < 2) switchRumble(slot, strength, durationMs);
+#else
+    SDL_GameController* gc = s_controllers[slot];
+    if (!gc) return;
     Uint16 mag = static_cast<Uint16>(strength * 65535.0f);
     SDL_GameControllerRumble(gc, mag, mag, durationMs);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -561,7 +600,7 @@ static void initGyro() {
 
 // Read gyro sensor for one player into the per-player cache slot. Only the sensor whose
 // style is currently active for `pad` is read — see GyroEntry comment for why.
-static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryCount, PadState& pad) {
+static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryCount, PadState& pad, f32 dt) {
     s_gyroDx[playerIdx] = 0.0f;
     s_gyroDy[playerIdx] = 0.0f;
     const u64 activeStyle = padGetStyleSet(&pad);
@@ -570,16 +609,26 @@ static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryC
         HidSixAxisSensorState states[16];
         s32 count = hidGetSixAxisSensorStates(entries[i].handle, states, 16);
         if (count <= 0) continue;
-        f32 yaw = 0.0f, pitch = 0.0f;
+        // Average the buffered samples for gyro AND accel (same struct, same frame) — the
+        // accelerometer gives the IMU filter its gravity reference / "at rest" signal.
+        f32 gxv = 0, gyv = 0, gzv = 0, axv = 0, ayv = 0, azv = 0;
         for (s32 s = 0; s < count; s++) {
-            yaw   += states[s].angular_velocity.y + states[s].angular_velocity.z;
-            pitch += states[s].angular_velocity.x;
+            gxv += states[s].angular_velocity.x;
+            gyv += states[s].angular_velocity.y;
+            gzv += states[s].angular_velocity.z;
+            axv += states[s].acceleration.x;
+            ayv += states[s].acceleration.y;
+            azv += states[s].acceleration.z;
         }
-        yaw   /= static_cast<f32>(count);
-        pitch /= static_cast<f32>(count);
-        // No deadzone — the multi-sample average already smooths sensor noise
-        s_gyroDx[playerIdx] = -yaw  * (180.0f / 3.14159f);
-        s_gyroDy[playerIdx] = pitch * (180.0f / 3.14159f);
+        const f32 inv = 1.0f / static_cast<f32>(count);
+        gxv *= inv; gyv *= inv; gzv *= inv; axv *= inv; ayv *= inv; azv *= inv;
+
+        // Fuse + bias-correct, then map the CORRECTED gyro through the original formula
+        // (yaw = -(y+z), pitch = x). Bias removal kills the resting drift on all axes.
+        ImuFilter& f = s_imu[playerIdx];
+        f.update(gxv, gyv, gzv, axv, ayv, azv, dt);
+        s_gyroDx[playerIdx] = -(f.corrGy + f.corrGz) * (180.0f / 3.14159f);
+        s_gyroDy[playerIdx] =  (f.corrGx)            * (180.0f / 3.14159f);
         return; // active-style handle read; nothing else to consider this frame
     }
 }
@@ -588,24 +637,122 @@ static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryC
 // Reads both players' sensors so each gets their own gyro data.
 static void updateGyroCache() {
     initGyro();
-    readGyroForPlayer(0, s_gyroEntries,   s_gyroEntryCount,   s_pads[0]);
+    const f32 dt = gyroFrameDt();
+    readGyroForPlayer(0, s_gyroEntries,   s_gyroEntryCount,   s_pads[0], dt);
     if (s_splitActive) {
-        readGyroForPlayer(1, s_gyroEntriesP2, s_gyroEntryCountP2, s_pads[1]);
+        readGyroForPlayer(1, s_gyroEntriesP2, s_gyroEntryCountP2, s_pads[1], dt);
     }
+}
+
+// --- Switch rumble (libnx vibration) -----------------------------------------
+// SDL_GameControllerRumble is a no-op on the libnx SDL port, so we drive the HID
+// vibration devices directly — mirroring the gyro handle setup: initialise the two
+// vibration devices for every npad style we accept, then each rumble sends to the
+// handle pair whose style is currently active (handheld / pro / dual joycon).
+// libnx vibration is continuous until stopped, so tickRumbleStop() sends zero
+// amplitude once the requested pulse duration elapses.
+struct VibEntry { HidVibrationDeviceHandle handles[2]; u64 style; };
+static VibEntry s_vibEntries[4];     // P1
+static u32      s_vibEntryCount   = 0;
+static VibEntry s_vibEntriesP2[4];   // P2
+static u32      s_vibEntryCountP2  = 0;
+static bool     s_vibInitialized   = false;
+
+static void initVibOne(VibEntry* arr, u32& count, HidNpadIdType id, u64 style) {
+    hidInitializeVibrationDevices(arr[count].handles, 2, id, static_cast<HidNpadStyleTag>(style));
+    arr[count].style = style;
+    count++;
+}
+
+static void initVibration() {
+    if (s_vibInitialized) return;
+    s_vibInitialized = true;
+    s_vibEntryCount = 0;
+    initVibOne(s_vibEntries, s_vibEntryCount, HidNpadIdType_No1,      HidNpadStyleTag_NpadFullKey);
+    initVibOne(s_vibEntries, s_vibEntryCount, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    initVibOne(s_vibEntries, s_vibEntryCount, HidNpadIdType_No1,      HidNpadStyleTag_NpadJoyDual);
+    s_vibEntryCountP2 = 0;
+    initVibOne(s_vibEntriesP2, s_vibEntryCountP2, HidNpadIdType_No2,  HidNpadStyleTag_NpadFullKey);
+    initVibOne(s_vibEntriesP2, s_vibEntryCountP2, HidNpadIdType_No2,  HidNpadStyleTag_NpadJoyDual);
+    LOG_INFO("Rumble: initialized P1=%u P2=%u vibration devices", s_vibEntryCount, s_vibEntryCountP2);
+}
+
+// Send the same vibration to both devices of whichever style is active for `player`.
+static void sendVib(u8 player, f32 amp) {
+    initVibration();
+    VibEntry* entries = (player == 0) ? s_vibEntries   : s_vibEntriesP2;
+    u32       count   = (player == 0) ? s_vibEntryCount : s_vibEntryCountP2;
+    const u64 activeStyle = padGetStyleSet(&s_pads[player]);
+    HidVibrationValue val;
+    val.amp_low   = amp;
+    val.freq_low  = 160.0f;   // low-band motor frequency (Hz)
+    val.amp_high  = amp;
+    val.freq_high = 320.0f;   // high-band motor frequency (Hz)
+    HidVibrationValue vals[2] = { val, val };
+    for (u32 i = 0; i < count; i++) {
+        if (!(activeStyle & entries[i].style)) continue; // only the active controller style
+        hidSendVibrationValues(entries[i].handles, vals, 2);
+    }
+}
+
+static void switchRumble(u8 player, f32 strength, u32 durationMs) {
+    if (player > 1) return;
+    sendVib(player, strength);
+    s_rumbleEndMs[player]  = SDL_GetTicks() + durationMs;
+    s_rumbleActive[player] = true;
+}
+
+// Called once per frame — stop any pulse whose duration has elapsed.
+static void tickRumbleStop() {
+    if (!s_vibInitialized) return;
+    u32 now = SDL_GetTicks();
+    for (u8 p = 0; p < 2; p++) {
+        if (s_rumbleActive[p] && now >= s_rumbleEndMs[p]) {
+            sendVib(p, 0.0f);            // zero amplitude = stop
+            s_rumbleActive[p] = false;
+        }
+    }
+}
+#else // ---- PC ----
+// Read SDL gyro + accel for one player's controller, run the IMU filter, and cache the
+// bias-corrected look delta (deg/s) — same per-player cache the Switch fills. Without the filter
+// the PC gyro was a stateless per-substep query; the filter needs persistent dt-stepped state,
+// so it moves here (once per frame).
+static void readGyroForPlayerPC(u8 player, s32 gamepadIndex, f32 dt) {
+    s_gyroDx[player] = 0.0f;
+    s_gyroDy[player] = 0.0f;
+    if (gamepadIndex < 0 || gamepadIndex >= Input::MAX_GAMEPADS) return;
+    SDL_GameController* gc = s_controllers[gamepadIndex];
+    if (!gc) return;
+    if (!SDL_GameControllerHasSensor(gc, SDL_SENSOR_GYRO)) return;
+    f32 g[3] = {}, a[3] = {};
+    if (SDL_GameControllerGetSensorData(gc, SDL_SENSOR_GYRO, g, 3) != 0) return;
+    // Accel is optional — if the pad has none, a[] stays {0,0,0} and the filter degrades to a
+    // gyro-only integrator + bias-cal (still removes drift via the gyro-magnitude still test).
+    SDL_GameControllerGetSensorData(gc, SDL_SENSOR_ACCEL, a, 3);
+
+    ImuFilter& f = s_imu[player];
+    f.update(g[0], g[1], g[2], a[0], a[1], a[2], dt);
+    // SDL gyro axes: [0]=x(pitch), [1]=y(yaw). Match the prior PC mapping — negate yaw and apply
+    // PC_GYRO_SCALE so the shared gyroSensitivity lands in the Switch's range (SDL reports rad/s).
+    constexpr f32 PC_GYRO_SCALE = 0.2f;
+    s_gyroDx[player] = -f.corrGy * (180.0f / 3.14159f) * PC_GYRO_SCALE;  // yaw (un-inverted)
+    s_gyroDy[player] =  f.corrGx * (180.0f / 3.14159f) * PC_GYRO_SCALE;  // pitch
+}
+
+static void updateGyroCache() {
+    const f32 dt = gyroFrameDt();
+    readGyroForPlayerPC(0, 0, dt);
+    if (s_splitActive) readGyroForPlayerPC(1, 1, dt);
 }
 #endif
 
-// Shared gyro read body. `consume` controls whether the Switch cache is zeroed
-// after read: getGyro passes true (substep gating — only the first
-// PlayerController::update tick in a render frame applies the delta), peekGyro
-// passes false (NetInput packing must not starve the gameplay consumer). PC
-// sensor read is a stateless query; the `consume` flag is ignored there.
+// Shared gyro read body. Both platforms now fill a per-player look-delta cache (deg/s) once per
+// frame in updateGyroCache() — the IMU filter needs persistent, dt-stepped state, so the read is
+// no longer a stateless query. `consume` zeroes the cache after the first read so the delta is
+// applied once per render frame (getGyro=true); NetInput packing peeks without consuming.
 static void readGyroInto(f32& dx, f32& dy, s32 gamepadIndex, bool consume) {
-    dx = 0.0f;
-    dy = 0.0f;
-
-#ifdef __SWITCH__
-    (void)gamepadIndex;
+    (void)gamepadIndex; // cache is per-player; select by the active (swapped-in) player
     u8 pi = s_activePlayer;
     if (pi > 1) pi = 0;
     dx = s_gyroDx[pi];
@@ -614,20 +761,6 @@ static void readGyroInto(f32& dx, f32& dy, s32 gamepadIndex, bool consume) {
         s_gyroDx[pi] = 0.0f;
         s_gyroDy[pi] = 0.0f;
     }
-#else
-    // PC: try SDL2 sensor API (works with DS4/DualSense controllers).
-    // The query itself doesn't consume — calling it twice returns the current
-    // sensor state both times — so peek and consume behave identically here.
-    (void)consume;
-    if (gamepadIndex < 0 || gamepadIndex >= Input::MAX_GAMEPADS) return;
-    if (!s_controllers[gamepadIndex]) return;
-    if (!SDL_GameControllerHasSensor(s_controllers[gamepadIndex], SDL_SENSOR_GYRO)) return;
-    f32 data[3] = {};
-    if (SDL_GameControllerGetSensorData(s_controllers[gamepadIndex], SDL_SENSOR_GYRO, data, 3) == 0) {
-        dx = data[1] * (180.0f / 3.14159f);
-        dy = data[0] * (180.0f / 3.14159f);
-    }
-#endif
 }
 
 void Input::getGyro (f32& dx, f32& dy, s32 gamepadIndex) { readGyroInto(dx, dy, gamepadIndex, /*consume=*/true);  }

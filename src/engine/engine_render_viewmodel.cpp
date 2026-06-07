@@ -122,7 +122,9 @@ void Engine::renderViewmodel() {
                     attackY = 0.05f * swing;
                     break;
                 case WeaponSubtype::AXE:
-                    // Heavy overhead chop — big pitch rotation + downward drop
+                case WeaponSubtype::CLEAVER:
+                    // Heavy overhead chop — big pitch rotation + downward drop.
+                    // The cleaver shares this so its blade and slash VFX both read as a chop.
                     attackPitch = -1.4f * swing;
                     attackY = -0.08f * swing;
                     attackZ = -0.15f * swing;

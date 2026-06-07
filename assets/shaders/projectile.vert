@@ -12,7 +12,8 @@ layout(location = 5) in vec4 iModelRow2;
 layout(location = 6) in vec4 iModelRow3;
 layout(location = 7) in vec4 iColor;
 
-uniform mat4 u_vp;  // View-Projection (shared across all instances)
+uniform mat4 u_vp;        // View-Projection (shared across all instances)
+uniform vec4 u_groupTint; // per-material-group tint (1,1,1,1 = none); multiplies instance color
 
 out vec3 vWorldNormal;
 out vec3 vWorldPos;
@@ -26,5 +27,5 @@ void main() {
     vWorldNormal = mat3(model) * aNormal;
     vWorldPos    = worldPos.xyz;
     vUV          = aUV;
-    vColor       = iColor;
+    vColor       = iColor * u_groupTint;
 }

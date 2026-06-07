@@ -593,16 +593,27 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
             f32 life = sw.timer / 0.18f;     // 1 -> 0 over lifetime (overall fade)
             f32 t    = 1.0f - life;          // 0 -> 1 sweep progress (leading edge)
 
-            // Diagonal stroke through the crosshair: upper-right -> lower-left, matching the
-            // sword's swing. Endpoints in the view plane (x = right, y = up), scaled by weapon arc.
-            f32 ex = 0.95f * sw.scale, ey = 0.55f * sw.scale;
-            f32 sx =  ex, sy =  ey;          // start (upper-right)
-            f32 dx = -2.0f * ex, dy = -2.0f * ey;  // delta to end (lower-left)
+            // Stroke shape (start + delta + bow, view-plane units) chosen per weapon subtype so
+            // the arc matches that weapon's viewmodel swing direction. x = right, y = up.
+            f32 sx, sy, ddx, ddy, bowBase;
+            switch (static_cast<WeaponSubtype>(sw.style)) {
+                case WeaponSubtype::CLAYMORE: // wide horizontal sweep, right -> left
+                    sx = 1.15f; sy = 0.05f; ddx = -2.30f; ddy =  0.00f; bowBase = 0.30f; break;
+                case WeaponSubtype::AXE:      // overhead vertical chop, top -> bottom
+                case WeaponSubtype::CLEAVER:  // cleaver chops overhead like the axe
+                    sx = 0.10f; sy = 0.95f; ddx = -0.20f; ddy = -1.90f; bowBase = 0.18f; break;
+                case WeaponSubtype::DAGGER:   // quick short stab, compact near the crosshair
+                    sx = 0.30f; sy = 0.22f; ddx = -0.60f; ddy = -0.44f; bowBase = 0.10f; break;
+                default:                      // SWORD / CLEAVER / fists: diagonal upper-right -> lower-left
+                    sx = 0.95f; sy = 0.55f; ddx = -1.90f; ddy = -1.10f; bowBase = 0.28f; break;
+            }
+            sx *= sw.scale; sy *= sw.scale;
+            const f32 dx = ddx * sw.scale, dy = ddy * sw.scale;  // delta to end of the stroke
             // Perpendicular (in view plane) for the bow + thickness offset.
             f32 plen = sqrtf(dx*dx + dy*dy);
             f32 pxn = (plen > 1e-4f) ? (-dy / plen) : 0.0f;
             f32 pyn = (plen > 1e-4f) ? ( dx / plen) : 0.0f;
-            constexpr f32 BOW = 0.28f;       // outward curve depth
+            const f32 BOW = bowBase;          // outward curve depth (per-subtype)
             constexpr u32 SWING_SEGS = 16;
 
             // Draw two parallel bowed strokes (offset along the perpendicular) for thickness.

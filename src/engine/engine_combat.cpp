@@ -377,7 +377,8 @@ void Engine::handleWeaponFire(f32 dt) {
             if (swScale > 1.25f) swScale = 1.25f;
             for (u32 sfx = 0; sfx < MAX_SWING_FX; sfx++) {
                 if (!m_fx.swingFX[sfx].active) {
-                    m_fx.swingFX[sfx] = {swColor, swScale, m_localPlayerIndex, 0.18f, true};
+                    m_fx.swingFX[sfx] = {swColor, swScale, m_localPlayerIndex,
+                                         static_cast<u8>(melSub), 0.18f, true};
                     break;
                 }
             }

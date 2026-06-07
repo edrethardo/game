@@ -2691,15 +2691,19 @@ def gen_iron_maiden(height=2.0):
     return mb
 
 def gen_arrow(length=0.5):
-    """Arrow — thin round shaft with triangular arrowhead and fletching."""
+    """Arrow — wood shaft, steel tip, white fletching. Three usemtl groups so the parts
+    read as distinct colors in flight (far easier to see than a flat grey arrow)."""
     mb = MeshBuilder()
-    # Shaft (thin cylinder along -Z)
+    # Shaft (thin cylinder + box along -Z) — wood
+    mb.set_material("prop_wood")
     add_cylinder(mb, base_center=(0, 0, -0.2), radius=0.005, height=0.005, sides=4)
     add_box(mb, center=(0, 0, 0), half_extents=(0.004, 0.004, 0.20))
-    # Arrowhead (diamond-shaped point)
+    # Arrowhead (diamond-shaped point) — steel
+    mb.set_material("prop_iron")
     add_box(mb, center=(0, 0, -0.24), half_extents=(0.015, 0.003, 0.035))
     add_box(mb, center=(0, 0, -0.24), half_extents=(0.003, 0.015, 0.035))
-    # Fletching (3 thin fins at the back)
+    # Fletching (3 thin fins at the back) — white feathers
+    mb.set_material("white")
     for i in range(3):
         angle = 2.0 * math.pi * i / 3
         dx = math.cos(angle) * 0.012
@@ -2708,14 +2712,18 @@ def gen_arrow(length=0.5):
     return mb
 
 def gen_bolt(length=0.35):
-    """Crossbow bolt — shorter and thicker than arrow, with flat vanes."""
+    """Crossbow bolt — wood shaft, steel head, white vanes. Three usemtl groups for the
+    same per-part coloring/visibility as the arrow."""
     mb = MeshBuilder()
-    # Shaft (thicker than arrow)
+    # Shaft (thicker than arrow) — wood
+    mb.set_material("prop_wood")
     add_box(mb, center=(0, 0, 0), half_extents=(0.006, 0.006, 0.14))
-    # Broad head (flat diamond tip)
+    # Broad head (flat diamond tip) — steel
+    mb.set_material("prop_iron")
     add_box(mb, center=(0, 0, -0.17), half_extents=(0.018, 0.004, 0.03))
     add_box(mb, center=(0, 0, -0.17), half_extents=(0.004, 0.018, 0.03))
-    # Vanes (2 flat fins at back)
+    # Vanes (2 flat fins at back) — white
+    mb.set_material("white")
     add_box(mb, center=(0.01, 0, 0.12), half_extents=(0.001, 0.008, 0.02))
     add_box(mb, center=(-0.01, 0, 0.12), half_extents=(0.001, 0.008, 0.02))
     return mb
