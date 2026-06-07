@@ -57,11 +57,19 @@ enum struct GameStart : u8 {
     DESCEND,
 };
 
+// Developer CLI launch options (launch_options.h) — forward-declared so engine.h need not pull
+// in the parser header; the definition is included where applyLaunchOptions is implemented/called.
+struct LaunchOptions;
+
 class Engine {
 public:
     void init();
     void shutdown();
     void run();
+    // Developer launch flags (engine_launch.cpp): called once between init() and run() to boot
+    // straight into a state (host/join/single + load/new), skipping the menu. Sequences the same
+    // start primitives the menu uses. No/invalid options leave the game at the normal menu.
+    void applyLaunchOptions(const LaunchOptions& opt);
 
 private:
     static constexpr f64 FIXED_DT            = 1.0 / 60.0;
@@ -229,6 +237,12 @@ private:
     f64  m_lastDebugLogSec   = 0.0;  // wall-clock time of last [NET-GRAPH] emission
     // D6: toggles an on-screen net-stats overlay (F9). Visible only on CLIENT role.
     bool m_netGraphVisible   = false;
+
+    // Screenshot / cinematic capture (F8 / F10). m_hideHud suppresses the IN_GAME HUD draws so
+    // captures are clean key art; m_screenshotPending is a one-shot set by F8 and consumed just
+    // before the IN_GAME swapBuffers in renderGame(). Used for Steam/marketing hero shots.
+    bool m_hideHud           = false;
+    bool m_screenshotPending = false;
 
     // Prediction ring (CLIENT role, M3) — stores (input, predicted-state) per clientTick
     // so that clientNetPost can compare the server's authoritative pose against what we
@@ -476,7 +490,9 @@ private:
     // impactful spot regardless of aim, like a viewmodel element. scale sizes it by weapon
     // arc; ownerLane restricts it to the swinging player's own split-screen viewport.
     static constexpr u32 MAX_SWING_FX = 4;
-    struct SwingFX { Vec3 color; f32 scale; u8 ownerLane; f32 timer; bool active; };
+    // style = WeaponSubtype of the swing, so the renderer can shape the arc to match the
+    // weapon's viewmodel motion (sword diagonal, claymore horizontal, axe overhead, dagger stab).
+    struct SwingFX { Vec3 color; f32 scale; u8 ownerLane; u8 style; f32 timer; bool active; };
     static constexpr u32 MAX_CHAIN_FX = 4;
     static constexpr u32 MAX_CHAIN_POINTS = 24;
     struct ChainFX { Vec3 points[MAX_CHAIN_POINTS]; u8 pointCount; f32 timer; bool active; };
@@ -703,6 +719,9 @@ private:
     // `mode`) and skips the NEW_GAME inventory wipe/grant + HP reset. Used by the couch-co-op
     // start where lanes can mix New and Continue. Default false = legacy behavior.
     void startGame(GameStart mode, bool lanesPrepared = false);
+    // Shared class-stat setup for lane 0 (HP/move/energy, class skills, mirror arrays). Called by
+    // the menu's class-select confirm and by applyLaunchOptions(Save::NEW) — one source of truth.
+    void applyClassToLane0(PlayerClass cls);
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);

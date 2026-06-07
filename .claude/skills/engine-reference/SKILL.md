@@ -147,7 +147,31 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 | `F5` | Spawn 50 enemies |
 | `F6` | Toggle Switch constraint mode (60 m far plane, 960×540) |
 | `F7` | (see `engine.cpp:770` — engine-version-dependent dev toggle) |
+| `F8` | Save a screenshot of the current frame to `screenshot_<frame>.png` in the CWD (`Screenshot::capture`, serviced before the IN_GAME swap in `engine_render.cpp`). Pair with `F10` for clean key art — feeds `tools/gen_steam_capsules.py` |
 | `F9` | Toggle net-graph overlay (CLIENT: bandwidth/loss/snap metrics; SERVER: host IP + per-client bandwidth — the M12 read-off) |
+| `F10` | Toggle "cinematic" mode — hides the HUD/overlays (`m_hideHud`) so `F8` captures clean marketing shots; 3D scene still renders |
+
+## CLI launch options (desktop dev)
+
+Command-line flags boot straight into a state, skipping the menu. Parsed by `parseLaunchArgs`
+(`src/engine/launch_options.{h,cpp}`) and applied by `Engine::applyLaunchOptions`
+(`src/engine/engine_launch.cpp`), called once between `init()` and `run()` in `main.cpp` (guarded
+`#ifndef __SWITCH__`). It replays the **same** start primitives the menu uses — `loadGame`,
+`Net::hostServer`, `Net::connectToServer`, `startGame` — so there is one path into gameplay; the
+class-stat setup is shared via `Engine::applyClassToLane0` (also called by the menu's class-select).
+No flags / `--help` / any invalid value → a warning + usage and a normal menu boot (never crashes).
+
+| Flag | Effect |
+|---|---|
+| `--host` \| `--join <ip>` | role; neither = single-player |
+| `--load <slot>` | continue `save_<slot>.dat` (1-20) → `GameStart::CONTINUE` |
+| `--new <class>` | fresh run (`warrior`,`ranger`,`sorcerer`,`rogue`,`paladin`,`combat_engineer`,`marksman`,`tinkerer`,`wanderer`) → `NEW_GAME` |
+| `--floor <n>` / `--difficulty <0-2>` | for `--new` (CONTINUE takes difficulty from the save) |
+| `--port <n>` / `--lan` | host/join port; `--lan` hosts without UPnP |
+
+Examples: `DungeonEngine --host --load 1` · `--host --new sorcerer --floor 5 --lan` ·
+`--join 192.168.1.5 --load 2` · `--load 3`. JOIN ends in `CONNECTING` (the server drives the
+client in); HOST/SINGLE call `startGame` directly.
 
 ## Maintenance
 

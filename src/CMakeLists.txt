@@ -13,6 +13,8 @@ add_executable(DungeonEngine
     engine/engine_death.cpp
     engine/engine_persist.cpp
     engine/engine_startgame.cpp
+    engine/engine_launch.cpp
+    engine/launch_options.cpp
     engine/engine_spawn.cpp
     engine/engine_update.cpp
     engine/engine_update_player.cpp
@@ -33,6 +35,7 @@ add_executable(DungeonEngine
     renderer/shader.cpp
     renderer/mesh.cpp
     renderer/texture.cpp
+    renderer/screenshot.cpp
     renderer/camera.cpp
     renderer/renderer.cpp
     renderer/debug_draw.cpp

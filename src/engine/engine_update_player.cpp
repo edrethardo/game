@@ -349,6 +349,19 @@ void Engine::handleDebugKeys() {
         m_netGraphVisible = !m_netGraphVisible;
         LOG_INFO("Net info overlay: %s", m_netGraphVisible ? "ON" : "OFF");
     }
+
+    // F8 — screenshot. Sets a one-shot flag; the actual glReadPixels must run AFTER the frame
+    // is fully composited, so it is serviced just before the IN_GAME swapBuffers (engine_render.cpp).
+    if (Input::isKeyPressed(SDL_SCANCODE_F8)) {
+        m_screenshotPending = true;
+    }
+
+    // F10 — "cinematic" toggle: hides the HUD so screenshots capture clean key art (the 3D scene
+    // still renders). Pair with F2 noclip for framing. Used to grab Steam/marketing hero shots.
+    if (Input::isKeyPressed(SDL_SCANCODE_F10)) {
+        m_hideHud = !m_hideHud;
+        LOG_INFO("Cinematic mode (HUD hidden): %s", m_hideHud ? "ON" : "OFF");
+    }
 }
 
 // ---------------------------------------------------------------------------

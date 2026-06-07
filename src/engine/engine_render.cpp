@@ -20,6 +20,7 @@
 #include "renderer/material.h"
 #include "renderer/projectile_renderer.h"
 #include "renderer/obj_loader.h"
+#include "renderer/screenshot.h"
 #include "world/level_gen.h"
 #include "world/level_mesh.h"
 #include "world/level_loader.h"
@@ -733,6 +734,11 @@ void Engine::render(f32 alpha) {
         hudW = sw; hudH = sh;
     }
 
+    // Cinematic mode (F10) hides all HUD/overlay UI so F8 screenshots capture clean key art;
+    // the 3D scene above still rendered normally. HUD::flush below stays UNCONDITIONAL so any
+    // world-overlay verts queued earlier (speech bubbles / damage numbers) are emitted and the
+    // shared HUD vertex buffer never leaks into the next frame.
+    if (!m_hideHud) {
     renderHUD(hudW, hudH);
 
     // Interaction prompts (floor-descend / item-pickup) — native pass so the
@@ -764,13 +770,18 @@ void Engine::render(f32 alpha) {
         glDisable(GL_BLEND);
     }
 
-    // Flush all accumulated HUD lines in a single draw call (was 36 per frame)
+    } // end if (!m_hideHud) — HUD/overlay UI block
+
+    // Flush all accumulated HUD lines in a single draw call (was 36 per frame). Unconditional:
+    // see the cinematic-mode note above.
     HUD::flush(hudW, hudH);
 
     // Per-player damage vignette / low-HP glow — drawn into THIS player's viewport
     // (scissor still enabled) from the swapped-in m_localPlayer, so each split-screen
     // player sees only their own feedback instead of P1's covering the whole window.
-    renderPostOverlays(hudW, hudH);
+    if (!m_hideHud) {
+        renderPostOverlays(hudW, hudH);
+    }
 
     } // end split-screen player loop
 
@@ -783,6 +794,17 @@ void Engine::render(f32 alpha) {
     // render. This also reloads m_camera from the persistent (tick-accurate) store, so the
     // visual-only interpolation applied above is discarded — no manual restore needed.
     swapInPlayer(0);
+
+    // Service a pending F8 screenshot now: the full frame (3D scene, and HUD unless F10 hid it)
+    // is composited but not yet presented, so glReadPixels sees exactly what's on screen. Written
+    // to the CWD as screenshot_<frame>.png (matches the save_NN.dat relative-path convention; no
+    // subdirectory to create). Cleared immediately so it fires once per F8 press.
+    if (m_screenshotPending) {
+        m_screenshotPending = false;
+        char path[64];
+        std::snprintf(path, sizeof(path), "screenshot_%05u.png", m_frameCount);
+        Screenshot::capture(path, sw, sh);
+    }
 
     GLContext::swapBuffers(Window::getHandle());
 }

@@ -362,31 +362,9 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
-            m_playerClass = static_cast<PlayerClass>(m_menu.subSelection);
-            m_activeClassSkill = 0;
-
-            // Apply class stats to player
-            const ClassDef& cls = kClassDefs[m_menu.subSelection];
-            m_localPlayer.maxHealth = cls.baseHealth;
-            m_localPlayer.health = cls.baseHealth;
-            m_localPlayer.moveSpeed = cls.baseMoveSpeed;
-            m_skillStates[m_localPlayerIndex].maxEnergy = cls.baseEnergy;
-            m_skillStates[m_localPlayerIndex].energy = cls.baseEnergy;
-            // Warrior passive: 30% damage reduction
-            m_localPlayer.damageReduction = (m_playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
-
-            // Init class skill cooldown states
-            for (u32 s = 0; s < 4; s++) {
-                m_classSkillStates[s] = SkillState{};
-                m_classSkillStates[s].activeSkill = cls.skills[s];
-                m_classSkillStates[s].maxEnergy = cls.baseEnergy;
-                m_classSkillStates[s].energy = cls.baseEnergy;
-            }
-
-            // Store P1 state into split-screen arrays
-            m_localPlayers[0] = m_localPlayer;
-            m_playerClasses[0] = m_playerClass;
-            std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
+            // Configure lane 0 for the chosen class (HP/move/energy, class skills, mirror arrays).
+            // Shared with the CLI launch path (engine_launch.cpp) — one source of truth.
+            applyClassToLane0(static_cast<PlayerClass>(m_menu.subSelection));
 
             // Go to difficulty selection (subState 7) before co-op/network start
             if (m_netRole == NetRole::CLIENT) {

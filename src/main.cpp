@@ -21,6 +21,9 @@
 #endif
 
 #include "engine/engine.h"
+#ifndef __SWITCH__
+#include "engine/launch_options.h"   // desktop-only CLI launch flags
+#endif
 
 // Change CWD to the directory containing the executable so that relative
 // asset paths ("assets/...") resolve correctly regardless of where the
@@ -68,11 +71,10 @@ static void setCwdToExeDir([[maybe_unused]] const char* argv0) {
 }
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-
 #ifndef __SWITCH__
     setCwdToExeDir(argv[0]);
 #else
+    (void)argc;
     (void)argv;
 #endif
 
@@ -97,6 +99,11 @@ int main(int argc, char* argv[]) {
     // Heap-allocate Engine to avoid ~500KB on the stack (Switch stack is limited)
     Engine* engine = new Engine();
     engine->init();
+#ifndef __SWITCH__
+    // Desktop dev convenience: parse launch flags and jump straight into the requested state
+    // (host/join/single + load/new). No flags, bad flags, or --help → normal menu boot.
+    engine->applyLaunchOptions(parseLaunchArgs(argc, argv));
+#endif
     engine->run();
     engine->shutdown();
     delete engine;

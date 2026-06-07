@@ -82,7 +82,8 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 | `assets/meshes/` | Wavefront `.obj` (low-poly enemies, weapons, props) |
 | `assets/textures/` | 42×42 PNG tiles (suffix `_42`); a few non-tile textures (skins) |
 | `assets/shaders/` | GLSL: `basic` (lit textured), `unlit` (HUD/debug), `debug` |
-| `tools/` | Auxiliary scripts/utilities |
+| `tools/` | Auxiliary scripts/utilities (incl. `gen_steam_capsules.py` → `store/steam/`) |
+| `store/` | Marketing/store assets (Steam capsules); not loaded by the engine |
 | `phase*.md`, `plan.md` | Design docs (historical) |
 
 ## Conventions

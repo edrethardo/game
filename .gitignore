@@ -20,6 +20,7 @@ save.dat
 assets/config/controls.json
 assets/audio/
 save_*.dat
+screenshot_*.png
 __pycache__/
 *.pyc
 logs/
