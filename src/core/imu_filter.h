@@ -30,6 +30,14 @@ struct ImuFilter {
     // gyro in rad/s, accel in any consistent units (normalised internally), dt in seconds.
     void update(f32 gx, f32 gy, f32 gz, f32 ax, f32 ay, f32 az, f32 dt) {
         // --- tuning knobs (single place to adjust feel) ---
+        // BASELINE auto-calibration: only learns the resting bias when the gyro itself reads near
+        // zero (< STILL_GYRO) and the gravity field is steady. On PC controllers (small bias) this
+        // reliably zeroes the tiny drift. On Switch Joy-Cons the resting bias exceeds STILL_GYRO so
+        // this gate never fires → no bias is learned → raw gyro (the original mild handheld drift).
+        // That deadlock is intentional here: handheld can't be held still enough to sample a CLEAN
+        // bias, and a contaminated sample makes the drift WORSE, so we'd rather not calibrate than
+        // mis-calibrate. (A deliberate "hold still + press to recalibrate" is the real Switch fix
+        // if we revisit it — it gives a clean sample without ever touching live aim.)
         constexpr f32 BETA       = 0.05f;  // Madgwick accel-correction gain
         constexpr f32 STILL_GYRO = 0.05f;  // rad/s (~3 deg/s): below = "not deliberately turning"
         constexpr f32 STILL_HOLD = 0.3f;   // s of stillness before trusting the bias estimate
@@ -40,9 +48,8 @@ struct ImuFilter {
         const f32 accMag  = sqrtf(ax*ax + ay*ay + az*az);
         const bool accelValid = accMag > 1e-6f;  // false if the controller has no accelerometer
 
-        // --- 1. stillness detection (unit-free): low rotation AND (if available) a steady
-        //        gravity field. With no accel, fall back to a gyro-only "not turning" test so
-        //        bias calibration still works. ---
+        // --- 1. stillness detection: low rotation AND (if available) a steady gravity field.
+        //        With no accel, fall back to the gyro-only test. ---
         f32 accDev = 0.0f;
         if (accelValid) {
             if (!accelMagInit) { accelMagEma = accMag; accelMagInit = true; }

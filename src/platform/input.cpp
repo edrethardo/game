@@ -609,26 +609,23 @@ static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryC
         HidSixAxisSensorState states[16];
         s32 count = hidGetSixAxisSensorStates(entries[i].handle, states, 16);
         if (count <= 0) continue;
-        // Average the buffered samples for gyro AND accel (same struct, same frame) — the
-        // accelerometer gives the IMU filter its gravity reference / "at rest" signal.
-        f32 gxv = 0, gyv = 0, gzv = 0, axv = 0, ayv = 0, azv = 0;
+        // Average the buffered gyro samples and use them RAW. The Switch system already
+        // bias-corrects the gyro — it reads EXACTLY 0.0 at rest (confirmed via nxlink capture),
+        // so it has no zero-rate drift to remove. Running our own bias calibration here was
+        // actively harmful: the still-detector fired on the motion-settling tail when you stop
+        // turning, learned a SPURIOUS bias, then subtracted it from the already-zero rest gyro
+        // → injecting drift that worsened every time you stopped aiming. (PC's SDL gyro is
+        // genuinely raw/uncalibrated, so the PC path keeps the ImuFilter bias correction.)
+        (void)dt; // no per-frame filter integration on Switch — raw gyro is already clean
+        f32 gxv = 0, gyv = 0, gzv = 0;
         for (s32 s = 0; s < count; s++) {
             gxv += states[s].angular_velocity.x;
             gyv += states[s].angular_velocity.y;
             gzv += states[s].angular_velocity.z;
-            axv += states[s].acceleration.x;
-            ayv += states[s].acceleration.y;
-            azv += states[s].acceleration.z;
         }
         const f32 inv = 1.0f / static_cast<f32>(count);
-        gxv *= inv; gyv *= inv; gzv *= inv; axv *= inv; ayv *= inv; azv *= inv;
-
-        // Fuse + bias-correct, then map the CORRECTED gyro through the original formula
-        // (yaw = -(y+z), pitch = x). Bias removal kills the resting drift on all axes.
-        ImuFilter& f = s_imu[playerIdx];
-        f.update(gxv, gyv, gzv, axv, ayv, azv, dt);
-        s_gyroDx[playerIdx] = -(f.corrGy + f.corrGz) * (180.0f / 3.14159f);
-        s_gyroDy[playerIdx] =  (f.corrGx)            * (180.0f / 3.14159f);
+        s_gyroDx[playerIdx] = -((gyv + gzv) * inv) * (180.0f / 3.14159f); // yaw
+        s_gyroDy[playerIdx] =  ( gxv        * inv) * (180.0f / 3.14159f); // pitch
         return; // active-style handle read; nothing else to consider this frame
     }
 }

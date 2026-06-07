@@ -15,6 +15,8 @@ struct DodgeState {
     Vec3 rollDirection  = {0,0,0}; // normalized XZ direction of roll
     f32  rollAngle      = 0.0f;    // camera roll axis (barrel roll, radians)
     f32  pitchAngle     = 0.0f;    // camera pitch axis (front/back flip, radians)
+    f32  rollProg       = 0.0f;    // 0->1->0 arc over the roll (peaks mid-roll): drives the
+                                   // camera head-dip + viewmodel lean so they stay in sync
     f32  rollWeight     = 0.0f;    // blend: 0 = pure pitch flip, 1 = pure barrel roll
     f32  pitchWeight    = 0.0f;    // blend: how much front/back flip
     bool rolling        = false;   // true during the 0.5s roll

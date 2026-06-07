@@ -20,7 +20,8 @@ which writes screenshot_*.png to the game's working directory. Point this tool a
     python3 tools/gen_steam_capsules.py --landscape screenshot_00042.png \
                                         --portrait  screenshot_00088.png
 
-With no shots given it falls back to the procedural background and still emits all five, so the
+With no shots given it falls back to the logo's own dungeon scene art (gen_logo.draw_scene_art,
+the same render as assets/logo_wide.png, minus the baked title) and still emits all five, so the
 set is never broken. Deterministic (fixed seed) so reruns are stable.
 
 Usage:
@@ -29,15 +30,18 @@ Usage:
 
 import argparse
 import glob
-import math
 import os
 import random
 import sys
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageFilter
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
 except ImportError:
     sys.exit("Pillow is required: pip install Pillow")
+
+# Reuse the logo's rich dungeon scene art (text-free) as the procedural background — same quality
+# as assets/logo_wide.png. gen_logo lives in this same tools/ dir (on sys.path when run as a script).
+import gen_logo
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -84,77 +88,30 @@ def fit_cover(src, w, h, focus_x=0.5, focus_y=0.5):
     return resized.crop((left, top, left + w, top + h))
 
 
-def _radial_mask(w, h, cx, cy, inner, outer, lo=0, hi=255):
-    """Low-res radial gradient (lo..hi by distance), upscaled — cheap soft falloff."""
-    bw, bh = 96, max(1, int(96 * h / w))
-    m = Image.new("L", (bw, bh), 0)
-    px = m.load()
-    bcx, bcy = cx * bw / w, cy * bh / h
-    bin_r, bout_r = inner * bw / w, outer * bw / w
-    span = max(1.0, (bout_r - bin_r))
-    for y in range(bh):
-        for x in range(bw):
-            d = math.hypot(x - bcx, y - bcy)
-            t = (d - bin_r) / span
-            t = 0.0 if t < 0 else (1.0 if t > 1 else t)
-            px[x, y] = int(lo + (hi - lo) * t)
-    return m.resize((w, h), Image.BILINEAR)
+def render_scene_bg(w, h, portrait=False):
+    """High-quality procedural dungeon background: the SAME scene art as assets/logo_wide.png,
+    minus the baked title (gen_logo.draw_scene_art + apply_vignette), so the capsule can place
+    its own wordmark cleanly. Textured stone pillars, arch lintel, dark doorway, perspective
+    stairs, hanging torches with flames/embers, an adventurer silhouette, hell-glow and vignette.
 
+    The scene is composed for a landscape aspect, so we render it wide and then resize/focal-crop
+    to the target — rather than stretching it into odd capsule ratios. Render is capped and
+    upscaled with LANCZOS to stay fast at large sizes."""
+    gen_logo.random.seed(42)   # deterministic noise regardless of how many capsules ran before
+    if portrait:
+        bw, bh = 1000, 560     # render landscape, then focal-crop to the tall capsule
+    else:
+        scale = min(1.0, 1100.0 / w)
+        bw, bh = max(2, int(w * scale)), max(2, int(h * scale))
 
-def draw_ambient_scene(size):
-    """Procedural dungeon-entrance ambiance (NO text) — the key-art fallback when no
-    screenshot is supplied. Uses ImageDraw/ImageChops only (no per-pixel Python loops over
-    the full image) so it is fast at any capsule size. Mirrors gen_logo.py's mood: dark
-    blue-black gradient, warm hell-glow from below, stone pillars + arch, torch flames."""
-    w, h = size
-    img = Image.new("RGBA", size, (0, 0, 0, 255))
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (bw, bh), (0, 0, 0, 255))
+    gen_logo.draw_scene_art(img)
+    gen_logo.apply_vignette(img)
 
-    # 1. Vertical gradient (deep blue-black at top → slightly warmer/lighter at bottom).
-    for y in range(h):
-        t = y / h
-        draw.line([(0, y), (w, y)],
-                  fill=(int(8 + t * 14), int(8 + t * 9), int(15 + t * 6), 255))
-
-    # 2. Warm "hell glow" rising from the bottom-center (additive, soft radial).
-    glow = _radial_mask(w, h, w * 0.5, h * 1.02, h * 0.0, h * 0.85, lo=200, hi=0)
-    glow_rgb = Image.merge("RGB", (
-        glow.point(lambda v: int(v * 0.85)),   # R
-        glow.point(lambda v: int(v * 0.35)),   # G
-        glow.point(lambda v: int(v * 0.08)),   # B
-    ))
-    img = Image.alpha_composite(img, glow_rgb.convert("RGBA"))
-    draw = ImageDraw.Draw(img)
-
-    # 3. Stone pillars (flat gray slabs with darker edges) + connecting arch.
-    pillar_w = int(w * 0.11)
-    pillar_top = int(h * 0.06)
-    pillar_bot = int(h * 0.92)
-    for px in (int(w * 0.16), int(w * 0.84) - pillar_w):
-        draw.rectangle([px, pillar_top, px + pillar_w, pillar_bot], fill=(58, 58, 62, 255))
-        draw.rectangle([px, pillar_top, px + 4, pillar_bot], fill=(34, 34, 38, 255))            # left edge
-        draw.rectangle([px + pillar_w - 4, pillar_top, px + pillar_w, pillar_bot], fill=(34, 34, 38, 255))
-        draw.rectangle([px - 5, pillar_top - int(h * 0.04), px + pillar_w + 5, pillar_top],
-                       fill=(72, 72, 76, 255))     # cap block
-
-    arch_box = [int(w * 0.16), pillar_top - int(h * 0.16),
-                int(w * 0.84), pillar_top + int(h * 0.22)]
-    draw.arc(arch_box, start=180, end=360, fill=(70, 68, 66, 255), width=max(6, int(h * 0.05)))
-
-    # 4. Torch flames on the inner pillar faces (layered warm ellipses).
-    for tx in (int(w * 0.16) + pillar_w + int(w * 0.02),
-               int(w * 0.84) - pillar_w - int(w * 0.02)):
-        ty = int(h * 0.30)
-        for rad, col in ((int(h * 0.05), (255, 80, 20, 255)),
-                         (int(h * 0.035), (255, 150, 30, 255)),
-                         (int(h * 0.02), (255, 220, 90, 255))):
-            draw.ellipse([tx - rad, ty - rad * 2, tx + rad, ty + rad], fill=col)
-
-    # 5. Vignette: darken edges by multiplying with a radial brightness mask.
-    vign = _radial_mask(w, h, w * 0.5, h * 0.5, min(w, h) * 0.25, max(w, h) * 0.72, lo=255, hi=70)
-    img = ImageChops.multiply(img, Image.merge("RGBA", (vign, vign, vign,
-                                                        Image.new("L", size, 255))))
-    return img
+    if portrait:
+        # Keep the arch + doorway + top of the stairs in frame (the visually busy upper band).
+        return fit_cover(img, w, h, focus_y=0.30)
+    return img.resize((w, h), Image.LANCZOS)
 
 
 def darken_region(img, top_frac, bottom_frac, strength=160):
@@ -223,12 +180,24 @@ def make_wordmark(target_w, max_h=None):
 
 def paste_wordmark(canvas, target_w, cx_frac=0.5, cy_frac=0.5, anchor="center", max_h=None):
     """Scale the wordmark to `target_w` (clamped to `max_h` tall) and paste it onto `canvas`
-    (alpha-composited). anchor: 'center' aligns by middle, 'top' aligns the mark's top to cy_frac."""
+    (alpha-composited). A soft dark halo is laid behind it first so the text stays legible over
+    busy art. anchor: 'center' aligns by middle, 'top' aligns the mark's top to cy_frac."""
     mark = make_wordmark(target_w, max_h=max_h)
     w, h = canvas.size
     mw, mh = mark.size
     x = int(w * cx_frac - mw / 2)
     y = int(h * cy_frac) if anchor == "top" else int(h * cy_frac - mh / 2)
+
+    # Dark halo: a blurred black silhouette of the wordmark, composited a couple of times so the
+    # gold/red pops against textured stone or a screenshot (the logo relied on its black doorway).
+    halo = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    silhouette = Image.new("RGBA", mark.size, (0, 0, 0, 0))
+    silhouette.putalpha(mark.split()[3])           # black, masked by the wordmark's alpha
+    halo.paste(silhouette, (x, y), silhouette)
+    halo = halo.filter(ImageFilter.GaussianBlur(radius=max(3, mh // 12)))
+    canvas = Image.alpha_composite(canvas, halo)
+    canvas = Image.alpha_composite(canvas, halo)   # twice = denser core, still soft at the edge
+
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     layer.paste(mark, (x, y), mark)
     return Image.alpha_composite(canvas, layer)
@@ -237,11 +206,11 @@ def paste_wordmark(canvas, target_w, cx_frac=0.5, cy_frac=0.5, anchor="center", 
 # ---------------------------------------------------------------------------
 # Background resolution
 # ---------------------------------------------------------------------------
-def background(size, shot_path, focus_y=0.5):
-    """Key-art background filling `size`: a real screenshot if available, else procedural."""
+def background(size, shot_path, focus_y=0.5, portrait=False):
+    """Key-art background filling `size`: a real screenshot if available, else the logo scene art."""
     if shot_path and os.path.isfile(shot_path):
         return fit_cover(Image.open(shot_path), size[0], size[1], focus_y=focus_y)
-    return draw_ambient_scene(size)
+    return render_scene_bg(size[0], size[1], portrait=portrait)
 
 
 def newest_screenshot():
@@ -253,41 +222,45 @@ def newest_screenshot():
 # ---------------------------------------------------------------------------
 # Per-capsule composition
 # ---------------------------------------------------------------------------
+# Composition mirrors the logo: wordmark in the UPPER band over the dark doorway, with the
+# arch / stairs / torches reading below it. The dark halo (paste_wordmark) carries legibility, so
+# the darken bands are light — they just deepen the doorway, they don't flatten the art.
 def build_header(land):
     img = background(HEADER, land)
-    img = darken_region(img, 0.45, 1.0, strength=150)            # darken lower half for text
-    img = paste_wordmark(img, int(HEADER[0] * 0.74), cy_frac=0.52, max_h=int(HEADER[1] * 0.86))
+    img = darken_region(img, 0.0, 0.62, strength=95)
+    img = paste_wordmark(img, int(HEADER[0] * 0.72), cy_frac=0.09, anchor="top",
+                         max_h=int(HEADER[1] * 0.60))
     return img
 
 
 def build_small(land):
     img = background(SMALL, land)
-    img = darken_region(img, 0.0, 1.0, strength=140)             # heavy overall darken
-    # Logo nearly fills (Steam legibility rule), but clamp height so ENGINE isn't clipped.
-    img = paste_wordmark(img, int(SMALL[0] * 0.92), cy_frac=0.5, max_h=int(SMALL[1] * 0.84))
+    img = darken_region(img, 0.0, 1.0, strength=120)             # tiny — keep the logo dominant
+    # Logo nearly fills (Steam legibility rule), clamped so ENGINE isn't clipped.
+    img = paste_wordmark(img, int(SMALL[0] * 0.92), cy_frac=0.5, max_h=int(SMALL[1] * 0.82))
     return img
 
 
 def build_main(land):
     img = background(MAIN, land)
-    img = darken_region(img, 0.5, 1.0, strength=150)
-    img = paste_wordmark(img, int(MAIN[0] * 0.58), cy_frac=0.76,  # lower third, art breathes above
-                         max_h=int(MAIN[1] * 0.42))
+    img = darken_region(img, 0.0, 0.52, strength=90)
+    img = paste_wordmark(img, int(MAIN[0] * 0.56), cy_frac=0.07, anchor="top",
+                         max_h=int(MAIN[1] * 0.34))                # art breathes below
     return img
 
 
 def build_vertical(port):
-    img = background(VERTICAL, port, focus_y=0.4)
-    img = darken_region(img, 0.0, 0.40, strength=170)            # darken top for the wordmark
-    img = paste_wordmark(img, int(VERTICAL[0] * 0.82), cy_frac=0.06, anchor="top",
-                         max_h=int(VERTICAL[1] * 0.34))
+    img = background(VERTICAL, port, portrait=True)
+    img = darken_region(img, 0.0, 0.44, strength=115)
+    img = paste_wordmark(img, int(VERTICAL[0] * 0.82), cy_frac=0.05, anchor="top",
+                         max_h=int(VERTICAL[1] * 0.30))
     return img
 
 
 def build_background(land):
     img = background(BACKGROUND, land)
     # Ambient only — NO wordmark. Mild contrast reduction; Steam applies its own blue tint + fade.
-    img = Image.blend(img, Image.new("RGBA", BACKGROUND, (20, 22, 30, 255)), 0.18)
+    img = Image.blend(img, Image.new("RGBA", BACKGROUND, (20, 22, 30, 255)), 0.15)
     return img
 
 

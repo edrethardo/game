@@ -223,6 +223,9 @@ void PlayerController::update(Player& player, f32 dt) {
             f32 smooth = t * t * (3.0f - 2.0f * t);
             ds.rollAngle  = smooth * TWO_PI * static_cast<f32>(ds.rollSign)  * ds.rollWeight;
             ds.pitchAngle = smooth * TWO_PI * static_cast<f32>(ds.pitchSign) * ds.pitchWeight;
+            // 0->1->0 arc peaking at mid-roll — drives the camera head-dip + viewmodel lean
+            // so the roll reads as a forward tumble (head dips toward the floor and back).
+            ds.rollProg = sinf(t * 3.14159265f);
 
             if (ds.rollTimer <= 0.0f) {
                 // Roll finished — reset angle and start cooldown
@@ -230,6 +233,7 @@ void PlayerController::update(Player& player, f32 dt) {
                 ds.rollTimer = 0.0f;
                 ds.rollAngle = 0.0f;
                 ds.pitchAngle = 0.0f;
+                ds.rollProg = 0.0f;
                 ds.cooldownTimer = 1.0f;
             }
         } else if (ds.cooldownTimer > 0.0f) {
@@ -422,6 +426,11 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
 // ---------------------------------------------------------------------------
 void PlayerController::applyToCamera(const Player& player, Camera& cam) {
     cam.position = player.position + Vec3{0.0f, player.eyeHeight, 0.0f};
+    // Dodge head-dip: tuck the eye toward the floor at mid-roll and back up, so the roll reads
+    // as a real forward tumble on top of the existing forward slide + pitch flip. Visual only —
+    // player.position (collision) and aim (player.yaw/pitch) are untouched.
+    constexpr f32 HEAD_DIP = 0.35f;
+    cam.position.y -= player.dodgeState.rollProg * HEAD_DIP;
     cam.yaw      = player.yaw;
     cam.pitch    = player.pitch;
     cam.roll     = player.dodgeState.rollAngle;  // barrel roll component (sideways dodge)

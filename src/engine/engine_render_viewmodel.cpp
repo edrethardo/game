@@ -91,13 +91,28 @@ void Engine::renderViewmodel() {
     f32 speedSqR = vxR * vxR + vzR * vzR;
     f32 bobR = speedSqR * 0.028f;
     if (bobR > 1.0f) bobR = 1.0f;
+    // During a dodge roll the player moves at 8 m/s, which would slam the velocity-driven bob to
+    // max and make the weapon flail. Suppress bob + sway and instead lean/tuck the weapon with the
+    // roll (computed below) so it reads as part of the tumble.
+    const DodgeState& ds = m_localPlayer.dodgeState;
+    if (ds.rolling) bobR = 0.0f;
 
     f32 weaponAngle = m_viewmodelState.bobTimer * 5.5f; // match view bob frequency
     f32 bobX = bobR * 0.035f * sinf(weaponAngle);             // wide lateral swing
     f32 bobY = bobR * 0.025f * sinf(weaponAngle * 2.0f);      // 2× freq = figure-8 vertical
-    // Add look sway — weapon trails behind camera rotation
-    bobX += m_viewmodelState.swayYaw;
-    bobY += m_viewmodelState.swayPitch;
+    // Add look sway — weapon trails behind camera rotation (skipped mid-roll for a clean lean)
+    if (!ds.rolling) {
+        bobX += m_viewmodelState.swayYaw;
+        bobY += m_viewmodelState.swayPitch;
+    }
+
+    // Dodge lean/tuck: the weapon leans into the roll (matching the camera's roll/pitch blend)
+    // and tucks toward the body, instead of staying pinned upright while the view tumbles.
+    // Scaled well below the camera's 360° so the weapon leans rather than spinning in hand.
+    f32 rp = ds.rollProg;
+    f32 dodgeRoll  = rp * 0.5f * static_cast<f32>(ds.rollSign)  * ds.rollWeight;
+    f32 dodgePitch = rp * 0.5f * static_cast<f32>(ds.pitchSign) * ds.pitchWeight;
+    f32 dodgeTuck  = rp * 0.12f;
 
     // Viewmodel-only recoil (doesn't affect camera)
     f32 recoilPitch = -m_viewmodelState.recoilKick * 0.12f;
@@ -299,6 +314,10 @@ void Engine::renderViewmodel() {
             break;
     }
 
+    // Dodge tuck — pull the weapon down and toward the body during the roll
+    offset.y -= dodgeTuck;
+    offset.z += dodgeTuck;
+
     // Rapid vibration while firing ranged weapons
     if (m_viewmodelState.fireShakeTimer > 0.0f) {
         f32 intensity = m_viewmodelState.fireShakeTimer / 0.15f;
@@ -331,8 +350,8 @@ void Engine::renderViewmodel() {
     bool useGripPivot = (attackRoll != 0.0f) || (def.weaponType == WeaponType::HITSCAN);
 
     Mat4 weaponModel = Mat4::translate(offset)
-                     * Mat4::rotateZ(attackRoll)
-                     * Mat4::rotateX(recoilPitch + attackPitch + holdPitch)
+                     * Mat4::rotateZ(attackRoll + dodgeRoll)
+                     * Mat4::rotateX(recoilPitch + attackPitch + holdPitch + dodgePitch)
                      * Mat4::rotateY(holdYaw + attackYaw)
                      * Mat4::scale({weaponScale, weaponScale, weaponScale})
                      * Mat4::translate(useGripPivot ? gripPivot : centerPivot);

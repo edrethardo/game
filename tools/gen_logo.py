@@ -33,8 +33,11 @@ def lerp_color(c1, c2, t):
     return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(len(c1)))
 
 
-def draw_scene(img):
-    """Draw the full dungeon entrance scene."""
+def draw_scene_art(img):
+    """Draw the dungeon entrance scene WITHOUT the title text or vignette, so the art can be
+    reused as a text-free background (the Steam capsule tool composites its own wordmark over
+    this — see tools/gen_steam_capsules.py). draw_scene() below adds the title + vignette to
+    reproduce the original full logo."""
     draw = ImageDraw.Draw(img)
     W, H = img.size
 
@@ -213,7 +216,15 @@ def draw_scene(img):
             img.putpixel((sx, fig_y + dy), (80, 80, 90, 255))
             img.putpixel((sx + 1, fig_y + dy), (60, 60, 70, 255))
 
-    # --- 9. Title text ---
+    # (Title text and vignette moved to draw_title() / apply_vignette() so draw_scene_art stays
+    #  text-free and reusable. draw_scene() re-composes all three for the original logo.)
+
+
+def draw_title(img):
+    """Overlay the stacked title wordmark: CURSE OF THE / DUNGEON / ENGINE (gold + red, shadowed)."""
+    draw = ImageDraw.Draw(img)
+    W, H = img.size
+
     try:
         font_title = ImageFont.truetype(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -258,7 +269,10 @@ def draw_scene(img):
     draw.text(((W - engine_w) // 2, engine_y), engine_text,
               fill=(200, 40, 30, 255), font=font_engine)
 
-    # Vignette: darken edges
+
+def apply_vignette(img):
+    """Darken the scene's edges with a soft radial falloff."""
+    W, H = img.size
     for y in range(H):
         for x in range(W):
             dx = (x - W / 2) / (W / 2)
@@ -270,6 +284,13 @@ def draw_scene(img):
                     int(px[0] * vignette),
                     int(px[1] * vignette),
                     int(px[2] * vignette), px[3]))
+
+
+def draw_scene(img):
+    """Full logo art = dungeon scene + title wordmark + vignette (original behavior/output)."""
+    draw_scene_art(img)
+    draw_title(img)
+    apply_vignette(img)
 
 
 def main():
