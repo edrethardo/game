@@ -576,6 +576,40 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
+    // --- Melee swing slash arc — a crescent that sweeps across the weapon's hit cone ---
+    for (u32 i = 0; i < MAX_SWING_FX; i++) {
+        if (!m_fx.swingFX[i].active) continue;
+        const SwingFX& sw = m_fx.swingFX[i];
+        f32 life = sw.timer / 0.18f;          // 1 -> 0 over lifetime
+        f32 t    = 1.0f - life;               // 0 -> 1 progress
+        // Horizontalised aim so the crescent stays in a clean ground-parallel plane even
+        // when the player looks up/down; sw.right is already horizontal.
+        Vec3 fwdH = sw.forward; fwdH.y = 0.0f;
+        f32 fl = lengthSq(fwdH);
+        fwdH = (fl > 1e-6f) ? normalize(fwdH) : Vec3{sw.right.z, 0.0f, -sw.right.x};
+
+        f32 half = sw.arcRad * 0.5f;
+        f32 lead = half - sw.arcRad * t;      // leading edge sweeps +half -> -half
+        static constexpr u32 SWING_SEGS = 14;
+        Vec3 prevOuter = {0,0,0};
+        bool havePrev = false;
+        for (u32 s = 0; s <= SWING_SEGS; s++) {
+            f32 frac = static_cast<f32>(s) / static_cast<f32>(SWING_SEGS);
+            f32 ang  = half - sw.arcRad * frac;   // +half -> -half across the cone
+            if (ang < lead) { havePrev = false; continue; }  // blade hasn't swept here yet
+            // Brightest right at the cutting edge, fading along the trail behind it.
+            f32 trail = (ang - lead) / (sw.arcRad + 1e-4f);   // 0 at edge .. 1 at start
+            f32 a = life * (1.0f - trail * 0.85f);
+            Vec3 dir   = fwdH * cosf(ang) + sw.right * sinf(ang);
+            Vec3 outer = sw.origin + dir * sw.reach;
+            Vec3 inner = sw.origin + dir * (sw.reach * 0.5f);
+            DebugDraw::line(inner, outer, sw.color * a);          // radial blade glint
+            if (havePrev) DebugDraw::line(prevOuter, outer, sw.color * a); // crescent edge
+            prevOuter = outer;
+            havePrev  = true;
+        }
+    }
+
     // --- Phase Dash — ghostly afterimage trail with energy wisps ---
     for (u32 i = 0; i < MAX_DASH_FX; i++) {
         if (!m_fx.dashFX[i].active) continue;

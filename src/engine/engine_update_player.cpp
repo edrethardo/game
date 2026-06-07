@@ -388,6 +388,12 @@ void Engine::tickSharedFX(f32 dt) {
             if (m_fx.beamFX[i].timer <= 0.0f) m_fx.beamFX[i].active = false;
         }
     }
+    for (u32 i = 0; i < MAX_SWING_FX; i++) {
+        if (m_fx.swingFX[i].active) {
+            m_fx.swingFX[i].timer -= dt;
+            if (m_fx.swingFX[i].timer <= 0.0f) m_fx.swingFX[i].active = false;
+        }
+    }
     // Tick dynamic lights (weapon muzzle flashes)
     for (u32 i = 0; i < MAX_DYNAMIC_LIGHTS; i++) {
         if (m_dynamicLights[i].timer > 0.0f) {

@@ -145,10 +145,13 @@ void Engine::renderViewmodel() {
                 } break;
                 case WeaponSubtype::SWORD:
                 default:
-                    // Wide lateral slash with follow-through
-                    attackYaw = -1.3f * swing;
-                    attackPitch = -0.25f * swing;
-                    attackZ = -0.12f * swing;
+                    // Committed diagonal slash: wide lateral sweep + downward bite, blade
+                    // rolls into the cut and reaches forward so it reads as a real swing
+                    // rather than a flick.
+                    attackYaw   = -1.9f * swing;
+                    attackPitch = -0.5f * swing;
+                    attackRoll  = -0.5f * swing;
+                    attackZ     = -0.28f * swing;
                     break;
             }
         } else if (def.weaponType == WeaponType::PROJECTILE) {

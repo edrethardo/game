@@ -471,6 +471,11 @@ private:
     struct DashFX { Vec3 start; Vec3 end; f32 timer; bool active; };
     static constexpr u32 MAX_BEAM_FX = 8;
     struct BeamFX { Vec3 start; Vec3 end; Vec3 color; f32 timer; bool active; };
+    // Melee swing slash arc — a crescent that sweeps in front of the attacker on every
+    // melee swing (hit or miss). origin/forward/right define the swing plane; reach is the
+    // weapon range and arcRad the full cone width, so the trail matches the actual hit arc.
+    static constexpr u32 MAX_SWING_FX = 4;
+    struct SwingFX { Vec3 origin; Vec3 forward; Vec3 right; f32 reach; f32 arcRad; Vec3 color; f32 timer; bool active; };
     static constexpr u32 MAX_CHAIN_FX = 4;
     static constexpr u32 MAX_CHAIN_POINTS = 24;
     struct ChainFX { Vec3 points[MAX_CHAIN_POINTS]; u8 pointCount; f32 timer; bool active; };
@@ -485,6 +490,7 @@ private:
         NovaFX        novaFX[MAX_NOVA_FX] = {};
         DashFX        dashFX[MAX_DASH_FX] = {};
         BeamFX        beamFX[MAX_BEAM_FX] = {};
+        SwingFX       swingFX[MAX_SWING_FX] = {};
         ChainFX       chainFX[MAX_CHAIN_FX] = {};
         ScorchZone    scorchZones[MAX_SCORCH] = {};
         DamageNumber  damageNumbers[MAX_DAMAGE_NUMBERS] = {};

@@ -343,6 +343,11 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
         // hit-feedback recipe); crit selects the CRIT tier. No inline FX here —
         // that would double up with the tier system.
         applyDamage(pool, hits[i], dmg, &eyePos, crit);
+        // Brief hit-flinch ("hitstop") so a melee connect has weight. At a ~0.4 s swing
+        // cadence a 0.06 s stun is a flinch, never a stun-lock. Bosses ignore it (they
+        // already shrug off knockback) so it can't trivialise milestone fights.
+        Entity* he = handleGet(pool, hits[i]);
+        if (he && he->bossDefIdx == 0xFF) he->stunTimer = fmaxf(he->stunTimer, 0.06f);
     }
 
     result.entitiesHit = hitCount;
