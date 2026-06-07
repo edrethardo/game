@@ -365,17 +365,19 @@ void Engine::handleWeaponFire(f32 dt) {
         }
 
         // Slash-arc VFX + swing kick for EVERY melee swing (hit or miss), client and host.
-        // The crescent matches the weapon's actual hit arc (range + coneAngleDeg), brightens
-        // on a connect, and is purely cosmetic. A small camera kick gives the swing weight
-        // (the old hitShakeTimer alone was near-imperceptible).
+        // The arc is drawn camera-relative (anchored to the crosshair) at render time; here we
+        // only record colour, a size scaled by the weapon's arc, and the owning lane. Brightens
+        // on a connect. A small camera kick gives the swing weight (the old hitShakeTimer alone
+        // was near-imperceptible).
         {
-            Vec3 swRight = normalize(Vec3{forward.z, 0.0f, -forward.x});
             Vec3 swColor = result.hitEntity ? Vec3{1.0f, 0.97f, 0.85f}   // bright on connect
                                             : Vec3{0.8f, 0.85f, 1.0f};   // cool steel on whiff
+            f32 swScale = wpn.coneAngleDeg / 90.0f;                       // wider weapon -> bigger slash
+            if (swScale < 0.85f) swScale = 0.85f;
+            if (swScale > 1.25f) swScale = 1.25f;
             for (u32 sfx = 0; sfx < MAX_SWING_FX; sfx++) {
                 if (!m_fx.swingFX[sfx].active) {
-                    m_fx.swingFX[sfx] = {eyePos, forward, swRight, wpn.range,
-                                         radians(wpn.coneAngleDeg), swColor, 0.18f, true};
+                    m_fx.swingFX[sfx] = {swColor, swScale, m_localPlayerIndex, 0.18f, true};
                     break;
                 }
             }

@@ -576,37 +576,55 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
-    // --- Melee swing slash arc — a crescent that sweeps across the weapon's hit cone ---
-    for (u32 i = 0; i < MAX_SWING_FX; i++) {
-        if (!m_fx.swingFX[i].active) continue;
-        const SwingFX& sw = m_fx.swingFX[i];
-        f32 life = sw.timer / 0.18f;          // 1 -> 0 over lifetime
-        f32 t    = 1.0f - life;               // 0 -> 1 progress
-        // Horizontalised aim so the crescent stays in a clean ground-parallel plane even
-        // when the player looks up/down; sw.right is already horizontal.
-        Vec3 fwdH = sw.forward; fwdH.y = 0.0f;
-        f32 fl = lengthSq(fwdH);
-        fwdH = (fl > 1e-6f) ? normalize(fwdH) : Vec3{sw.right.z, 0.0f, -sw.right.x};
+    // --- Melee swing slash arc — a diagonal slash drawn in CAMERA space so it always sits
+    //     in the same impactful spot relative to the crosshair (like a viewmodel element),
+    //     instead of drifting with aim. Built from the live camera each frame; ownerLane
+    //     keeps it to the swinging player's own viewport in split-screen. ---
+    {
+        const Camera& cam = m_camera;
+        Vec3 camUp = cross(cam.right, cam.forward);   // orthonormal view up
+        constexpr f32 DEPTH = 1.8f;                   // metres in front of the camera
+        Vec3 anchor = cam.position + cam.forward * DEPTH;
+        for (u32 i = 0; i < MAX_SWING_FX; i++) {
+            if (!m_fx.swingFX[i].active) continue;
+            const SwingFX& sw = m_fx.swingFX[i];
+            if (sw.ownerLane != m_localPlayerIndex) continue;  // only the swinger's viewport
 
-        f32 half = sw.arcRad * 0.5f;
-        f32 lead = half - sw.arcRad * t;      // leading edge sweeps +half -> -half
-        static constexpr u32 SWING_SEGS = 14;
-        Vec3 prevOuter = {0,0,0};
-        bool havePrev = false;
-        for (u32 s = 0; s <= SWING_SEGS; s++) {
-            f32 frac = static_cast<f32>(s) / static_cast<f32>(SWING_SEGS);
-            f32 ang  = half - sw.arcRad * frac;   // +half -> -half across the cone
-            if (ang < lead) { havePrev = false; continue; }  // blade hasn't swept here yet
-            // Brightest right at the cutting edge, fading along the trail behind it.
-            f32 trail = (ang - lead) / (sw.arcRad + 1e-4f);   // 0 at edge .. 1 at start
-            f32 a = life * (1.0f - trail * 0.85f);
-            Vec3 dir   = fwdH * cosf(ang) + sw.right * sinf(ang);
-            Vec3 outer = sw.origin + dir * sw.reach;
-            Vec3 inner = sw.origin + dir * (sw.reach * 0.5f);
-            DebugDraw::line(inner, outer, sw.color * a);          // radial blade glint
-            if (havePrev) DebugDraw::line(prevOuter, outer, sw.color * a); // crescent edge
-            prevOuter = outer;
-            havePrev  = true;
+            f32 life = sw.timer / 0.18f;     // 1 -> 0 over lifetime (overall fade)
+            f32 t    = 1.0f - life;          // 0 -> 1 sweep progress (leading edge)
+
+            // Diagonal stroke through the crosshair: upper-right -> lower-left, matching the
+            // sword's swing. Endpoints in the view plane (x = right, y = up), scaled by weapon arc.
+            f32 ex = 0.95f * sw.scale, ey = 0.55f * sw.scale;
+            f32 sx =  ex, sy =  ey;          // start (upper-right)
+            f32 dx = -2.0f * ex, dy = -2.0f * ey;  // delta to end (lower-left)
+            // Perpendicular (in view plane) for the bow + thickness offset.
+            f32 plen = sqrtf(dx*dx + dy*dy);
+            f32 pxn = (plen > 1e-4f) ? (-dy / plen) : 0.0f;
+            f32 pyn = (plen > 1e-4f) ? ( dx / plen) : 0.0f;
+            constexpr f32 BOW = 0.28f;       // outward curve depth
+            constexpr u32 SWING_SEGS = 16;
+
+            // Draw two parallel bowed strokes (offset along the perpendicular) for thickness.
+            for (s32 layer = -1; layer <= 1; layer++) {
+                f32 off = static_cast<f32>(layer) * 0.06f * sw.scale;
+                Vec3 prev = {0,0,0};
+                bool havePrev = false;
+                for (u32 s = 0; s <= SWING_SEGS; s++) {
+                    f32 p = static_cast<f32>(s) / static_cast<f32>(SWING_SEGS);
+                    if (p > t) break;                       // not yet swept past the leading edge
+                    f32 bow = sinf(p * 3.14159f) * BOW * sw.scale;
+                    f32 vx = sx + dx * p + pxn * (bow + off);
+                    f32 vy = sy + dy * p + pyn * (bow + off);
+                    Vec3 cur = anchor + cam.right * vx + camUp * vy;
+                    // Brightest at the cutting (leading) edge, fading down the trail + overall.
+                    f32 a = life * (1.0f - (t - p) * 0.8f);
+                    if (a < 0.0f) a = 0.0f;
+                    if (havePrev) DebugDraw::line(prev, cur, sw.color * a);
+                    prev = cur;
+                    havePrev = true;
+                }
+            }
         }
     }
 
