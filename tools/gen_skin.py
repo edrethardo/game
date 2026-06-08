@@ -739,9 +739,9 @@ def skin_baal():
     return w, h, p
 
 
-def skin_diablo():
-    """Diablo boss: deep crimson + charred black, burning orange cracks, blazing orange eyes.
-    Grid matches gen_diablo: w=15, h=26. min_gx=-7 so pixel col = gx+7."""
+def skin_diabro():
+    """DiaBRO boss: deep crimson + charred black, burning orange cracks, blazing orange eyes.
+    Grid matches gen_diabro: w=15, h=26. min_gx=-7 so pixel col = gx+7."""
     w, h = 15, 26
     p = {}
     for py in range(h):
@@ -3746,8 +3746,8 @@ def skin_boss_baal():
     p[(3, 20)] = gold; p[(7, 20)] = gold
     return w, h, p
 
-def skin_boss_diablo():
-    """Diablo — dark red scales, black horns, fiery orange belly. Butcher mesh 11x21."""
+def skin_boss_diabro():
+    """DiaBRO — dark red scales, black horns, fiery orange belly. Butcher mesh 11x21."""
     w, h = 12, 21
     p = {}
     scale  = (140, 30, 15, 255)
@@ -4896,7 +4896,7 @@ SKIN_TYPES = {
     "boss_andariel":      ("boss_andariel_42.png",      skin_andariel),
     "boss_mephisto":      ("boss_mephisto_42.png",      skin_mephisto),
     "boss_baal":          ("boss_baal_42.png",          skin_baal),
-    "boss_diablo":        ("boss_diablo_42.png",        skin_diablo),
+    "boss_diabro":        ("boss_diabro_42.png",        skin_diabro),
     "boss_reaper":        ("boss_reaper_42.png",        skin_reaper),
     "boss_lich":          ("boss_lich_42.png",          skin_lich_lord),
     "boss_spider_queen":  ("boss_spider_queen_42.png",  skin_spider_queen),

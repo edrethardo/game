@@ -3107,8 +3107,8 @@ def gen_azhar(height=2.2):
     return mb
 
 
-def gen_diablo(height=2.6):
-    """Diablo — iconic demon terror. Distinct hunched bestial posture.
+def gen_diabro(height=2.6):
+    """DiaBRO — iconic demon terror. Distinct hunched bestial posture.
 
     Long curving ram/bull horns sweeping back and up (multi-voxel curve).
     Elongated bestial maw (carved mouth). Hunched powerful torso leaning
@@ -4909,10 +4909,10 @@ MESH_TYPES = {
         "desc": "Lean demon duelist with swept horns and baked blade. Params: --height",
         "default_file": "azhar.obj",
     },
-    "diablo": {
-        "func": lambda height=2.6: gen_diablo(height),
+    "diabro": {
+        "func": lambda height=2.6: gen_diabro(height),
         "desc": "Iconic demon terror — hunched bestial posture with ridged spine. Params: --height",
-        "default_file": "diablo.obj",
+        "default_file": "diabro.obj",
     },
     "nyx": {
         "func": lambda height=2.2: gen_nyx(height),

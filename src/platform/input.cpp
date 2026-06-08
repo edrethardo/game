@@ -617,15 +617,21 @@ static void readGyroForPlayer(u8 playerIdx, const GyroEntry* entries, u32 entryC
         // → injecting drift that worsened every time you stopped aiming. (PC's SDL gyro is
         // genuinely raw/uncalibrated, so the PC path keeps the ImuFilter bias correction.)
         (void)dt; // no per-frame filter integration on Switch — raw gyro is already clean
-        f32 gxv = 0, gyv = 0, gzv = 0;
+        f32 gxv = 0, gzv = 0;
         for (s32 s = 0; s < count; s++) {
-            gxv += states[s].angular_velocity.x;
-            gyv += states[s].angular_velocity.y;
-            gzv += states[s].angular_velocity.z;
+            gxv += states[s].angular_velocity.x;   // pitch axis (verified by nxlink capture)
+            gzv += states[s].angular_velocity.z;   // yaw axis
         }
         const f32 inv = 1.0f / static_cast<f32>(count);
-        s_gyroDx[playerIdx] = -((gyv + gzv) * inv) * (180.0f / 3.14159f); // yaw
-        s_gyroDy[playerIdx] =  ( gxv        * inv) * (180.0f / 3.14159f); // pitch
+        // Axis mapping confirmed empirically (nxlink capture): a left/right TURN drives Z, an
+        // up/down TILT drives X; Y is roll. The old `yaw = -(Y+Z)` folded roll into yaw, so any
+        // incidental wrist-roll while moving turned the view ("working against me") — use Z alone.
+        // SW_GYRO_SCALE tunes Switch gyro sensitivity. Started at the PC path's 0.2 but that felt
+        // sluggish on Switch (libnx reports smaller per-motion values than SDL), so it's raised.
+        // Single knob — increase for snappier aim, decrease if it feels twitchy.
+        constexpr f32 SW_GYRO_SCALE = 1.0f;
+        s_gyroDx[playerIdx] = -(gzv * inv) * (180.0f / 3.14159f) * SW_GYRO_SCALE; // yaw  = Z
+        s_gyroDy[playerIdx] =  (gxv * inv) * (180.0f / 3.14159f) * SW_GYRO_SCALE; // pitch = X
         return; // active-style handle read; nothing else to consider this frame
     }
 }

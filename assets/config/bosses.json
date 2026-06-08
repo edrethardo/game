@@ -303,7 +303,7 @@
       "speech": "FEEL THE FLAME!"
     },
     {
-      "name": "Diablo",
+      "name": "DiaBRO",
       "floor": 40,
       "isMajor": true,
       "baseHp": 1600,
@@ -317,8 +317,8 @@
         1.3,
         0.65
       ],
-      "meshName": "diablo",
-      "matName": "boss_diablo",
+      "meshName": "diabro",
+      "matName": "boss_diabro",
       "weaponName": "sword",
       "roles": [
         "charger",

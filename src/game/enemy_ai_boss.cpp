@@ -303,7 +303,7 @@ void updateLegacyBossAbilities(Entity& e, u32 i,
             e.speechTimer = 2.0f;
         } break;
 
-        // Floor 40: Diablo — Fire Storm (dense splash ring + wide inner nova)
+        // Floor 40: DiaBRO — Fire Storm (dense splash ring + wide inner nova)
         case 40: {
             e.flybyTimer = 2.5f; // frequent nova
             // Inner nova damage — wide radius, hard to dodge up close

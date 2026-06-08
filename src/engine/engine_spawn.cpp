@@ -177,7 +177,7 @@ static const BossTemplate kBosses[BOSS_COUNT] = {
     { 10, "Andariel",      "Die, insect!",       1000, 65, 4.0f, 3.5f, 0.4f, {0.7f,1.1f, 0.7f}, true,  "andariel", "boss_andariel",     nullptr},
     { 20, "Mephisto",      "You cannot stop me.",1200, 30, 2.5f, 14.f, 0.5f, {0.6f,1.1f, 0.6f}, true,  "skeleton", "boss_mephisto",     "staff"},
     { 30, "Baal",          "I am undefeated!",   1800, 30, 3.0f, 4.0f, 0.4f, {0.9f,1.3f, 0.9f}, true,  "butcher",  "boss_baal",         nullptr},
-    { 40, "Diablo",        "NOT EVEN DEATH...",  1600, 30, 3.5f, 4.0f, 0.35f,{0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diablo",       "sword"},
+    { 40, "DiaBRO",        "NOT EVEN DEATH...",  1600, 30, 3.5f, 4.0f, 0.35f,{0.8f,1.3f, 0.8f}, true,  "butcher",  "boss_diabro",       "sword"},
     { 50, "Grim Reaper",   "YOUR TIME HAS COME.",2500, 30, 4.0f, 4.0f, 0.3f, {0.7f,1.4f, 0.7f}, true,  "skeleton", "boss_reaper",       "axe"},
 };
 
@@ -617,7 +617,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 // Hardcoded limb config per floor
                 if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
                 if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles
-                if (bt->floor == 40) boss->bossLimbConfig = 3; // Diablo: back spikes
+                if (bt->floor == 40) boss->bossLimbConfig = 3; // DiaBRO: back spikes
                 if (bt->floor == 50) boss->bossLimbConfig = 4; // Reaper: blade arms
                 if (bt->weaponName) {
                     boss->weaponMeshId = findMeshByName(bt->weaponName);

@@ -375,7 +375,16 @@ bool Engine::loadGame(u8 slot) {
     m_transition.totalPlayTime = totalTime;
     m_difficulty = (difficulty <= 2) ? difficulty : 0;
 
-    for (u8 p = 0; p < restoreCount; p++) applySavedCharToLane(p, pdata[p]);
+    for (u8 p = 0; p < restoreCount; p++) {
+        // The per-player `cls` byte sits AFTER the raw inventory/quickbar/skill blobs, whose on-disk
+        // size has drifted across builds within SAVE_VERSION 2 (ItemInstance gained/lost a field; the
+        // skill block shrank 20->16 B in R17), so on an OLD save it decodes as garbage and clamps to
+        // WARRIOR. The header `classes[]` is read BEFORE any blob and is intact (the select screen
+        // reads it correctly), so it is authoritative. New saves write the same value to both, so this
+        // is a no-op for them; an invalid header (e.g. the 0xFF P2 sentinel) falls back to ps.cls.
+        if (classes[p] < static_cast<u8>(PlayerClass::CLASS_COUNT)) pdata[p].cls = classes[p];
+        applySavedCharToLane(p, pdata[p]);
+    }
 
     // Sync active aliases for player 0 (swapInPlayer would overwrite these otherwise)
     m_localPlayer           = m_localPlayers[0];
@@ -425,7 +434,7 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     ok = ok && std::fread(&totalTime,   sizeof(f32), 1, f) == 1;
     ok = ok && std::fread(&difficulty,  sizeof(u8),  1, f) == 1;
     ok = ok && std::fread(&seed,        sizeof(u32), 1, f) == 1;
-    (void)floor; (void)playerCount; (void)classes; (void)difficulty;
+    (void)floor; (void)playerCount; (void)difficulty;
     (void)timestamp; (void)totalTime; (void)seed;
 
     SavedChar ps{};
@@ -440,6 +449,10 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     std::fclose(f);
     if (!ok) return false;
 
+    // Source the class from the intact header (see loadGame): the per-player `cls` byte can be
+    // misaligned on old saves whose blob layout drifted under a frozen SAVE_VERSION. Per-character
+    // files store the class in classes[0]; an invalid value falls back to the read ps.cls.
+    if (classes[0] < static_cast<u8>(PlayerClass::CLASS_COUNT)) ps.cls = classes[0];
     applySavedCharToLane(lane, ps);
     if (lane == 0) {
         m_localPlayer      = m_localPlayers[0];

@@ -332,8 +332,8 @@ static const LimbConfig s_bossMephistoConfig = {
     }
 };
 
-// Diablo: base legs (2) + 2 back spikes
-static const LimbConfig s_bossDiabloConfig = {
+// DiaBRO: base legs (2) + 2 back spikes
+static const LimbConfig s_bossDiabroConfig = {
     4,
     {
         SKEL_BASE_LIMBS,
@@ -388,7 +388,7 @@ const LimbConfig& LimbSystem::getBossConfig(u8 configId) {
     switch (configId) {
         case 1: return s_bossAndarielConfig;
         case 2: return s_bossMephistoConfig;
-        case 3: return s_bossDiabloConfig;
+        case 3: return s_bossDiabroConfig;
         case 4: return s_bossReaperConfig;
         case 5: return s_bossLichConfig;
         case 6: return s_bossNyxConfig;

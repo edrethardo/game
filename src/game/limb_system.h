@@ -57,7 +57,7 @@ namespace LimbSystem {
     u8 getLimbMeshId(EnemyType type, u32 limbIdx);
 
     // Boss-specific limb config (extra limbs on top of base skeleton rig).
-    // configId: 1=Andariel, 2=Mephisto, 3=Diablo, 4=Reaper. 0=none.
+    // configId: 1=Andariel, 2=Mephisto, 3=DiaBRO, 4=Reaper. 0=none.
     const LimbConfig& getBossConfig(u8 configId);
     u8 getBossLimbMeshId(u8 configId, u32 limbIdx);
 }

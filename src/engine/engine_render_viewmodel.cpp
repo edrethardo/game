@@ -290,6 +290,14 @@ void Engine::renderViewmodel() {
                 // Axe blade extends in -X; rotate -90° so it faces forward (away from player)
                 holdYaw = 0.4f - 1.5708f;
                 holdPitch = -0.2f;
+            } else if (def.weaponSubtype == WeaponSubtype::CLEAVER) {
+                // Cleaver uses the sword mesh (blade runs along +Y; broad flats on ±Z, edges on
+                // ±X). At the sword's holdYaw the FLAT faces forward, so an overhead chop hit
+                // with the flat. Yaw the hold an extra 90° about Y so the EDGE (±X) faces forward
+                // and leads the chop. Pure yaw — the blade stays vertical, so the chop animation
+                // is unchanged.
+                holdYaw = 0.4f + 1.5708f;
+                holdPitch = -0.2f;
             } else {
                 holdYaw = 0.4f;
                 holdPitch = -0.2f;

@@ -191,7 +191,7 @@ void Engine::initAssets() {
             {"spider_queen",   "assets/meshes/spider_queen.obj"},
             {"korvath",        "assets/meshes/korvath.obj"},
             {"azhar",          "assets/meshes/azhar.obj"},
-            {"diablo",         "assets/meshes/diablo.obj"},
+            {"diabro",         "assets/meshes/diabro.obj"},
             {"nyx",            "assets/meshes/nyx.obj"},
             {"reaper",         "assets/meshes/reaper.obj"},
             // Player class meshes — resolved by name from ClassDef.meshName in the renderer.
