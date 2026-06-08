@@ -55,7 +55,7 @@ def build_meshes():
         ["--type", "spider_queen","--radius",  "0.7", "--out", os.path.join(mesh_dir, "spider_queen.obj")],
         ["--type", "korvath",     "--height", "2.4", "--out", os.path.join(mesh_dir, "korvath.obj")],
         ["--type", "azhar",       "--height", "2.2", "--out", os.path.join(mesh_dir, "azhar.obj")],
-        ["--type", "diablo",      "--height", "2.6", "--out", os.path.join(mesh_dir, "diablo.obj")],
+        ["--type", "diabro",      "--height", "2.6", "--out", os.path.join(mesh_dir, "diabro.obj")],
         ["--type", "nyx",         "--height", "2.2", "--out", os.path.join(mesh_dir, "nyx.obj")],
         ["--type", "reaper",      "--height", "2.6", "--out", os.path.join(mesh_dir, "reaper.obj")],
         # Limb parts
@@ -171,7 +171,7 @@ def build_skins():
         ("boss_andariel",             "boss_andariel_42.png"),
         ("boss_mephisto",             "boss_mephisto_42.png"),
         ("boss_baal",                 "boss_baal_42.png"),
-        ("boss_diablo",               "boss_diablo_42.png"),
+        ("boss_diabro",               "boss_diabro_42.png"),
         ("boss_reaper",               "boss_reaper_42.png"),
         ("boss_lich",                 "boss_lich_42.png"),
         ("boss_spider_queen",         "boss_spider_queen_42.png"),
