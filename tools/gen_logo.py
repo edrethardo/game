@@ -33,11 +33,15 @@ def lerp_color(c1, c2, t):
     return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(len(c1)))
 
 
-def draw_scene_art(img):
+def draw_scene_art(img, with_figure=True):
     """Draw the dungeon entrance scene WITHOUT the title text or vignette, so the art can be
     reused as a text-free background (the Steam capsule tool composites its own wordmark over
     this — see tools/gen_steam_capsules.py). draw_scene() below adds the title + vignette to
-    reproduce the original full logo."""
+    reproduce the original full logo.
+
+    with_figure=True (default) draws the static adventurer silhouette at the top of the stairs,
+    matching the original logo. Pass False to omit it — the logo-walk clip (tools/gen_logo_walk.py)
+    renders a figure-free scene so it can composite its own animated walker."""
     draw = ImageDraw.Draw(img)
     W, H = img.size
 
@@ -192,29 +196,30 @@ def draw_scene_art(img):
             if 0 <= ex < W and 0 <= ey < H:
                 img.putpixel((ex, ey), (255, 200, 50, 255))
 
-    # --- 8. Adventurer silhouette at top of stairs ---
-    fig_x = W // 2
-    fig_y = stair_start - 2
-    fig_col = (15, 12, 10, 255)
-    # Body
-    for dy in range(-20, 0):
-        w = 3 if dy < -14 else (5 if dy < -8 else 4)
-        for dx in range(-w, w + 1):
-            if 0 <= fig_x + dx < W and 0 <= fig_y + dy < H:
-                img.putpixel((fig_x + dx, fig_y + dy), fig_col)
-    # Head (circle)
-    for dx in range(-3, 4):
-        for dy in range(-4, 1):
-            if dx * dx + dy * dy <= 12:
-                px_x, px_y = fig_x + dx, fig_y - 22 + dy
-                if 0 <= px_x < W and 0 <= px_y < H:
-                    img.putpixel((px_x, px_y), fig_col)
-    # Sword (right side)
-    for dy in range(-18, -5):
-        sx = fig_x + 7
-        if 0 <= sx < W and 0 <= fig_y + dy < H:
-            img.putpixel((sx, fig_y + dy), (80, 80, 90, 255))
-            img.putpixel((sx + 1, fig_y + dy), (60, 60, 70, 255))
+    # --- 8. Adventurer silhouette at top of stairs (skipped for the animated walk clip) ---
+    if with_figure:
+        fig_x = W // 2
+        fig_y = stair_start - 2
+        fig_col = (15, 12, 10, 255)
+        # Body
+        for dy in range(-20, 0):
+            w = 3 if dy < -14 else (5 if dy < -8 else 4)
+            for dx in range(-w, w + 1):
+                if 0 <= fig_x + dx < W and 0 <= fig_y + dy < H:
+                    img.putpixel((fig_x + dx, fig_y + dy), fig_col)
+        # Head (circle)
+        for dx in range(-3, 4):
+            for dy in range(-4, 1):
+                if dx * dx + dy * dy <= 12:
+                    px_x, px_y = fig_x + dx, fig_y - 22 + dy
+                    if 0 <= px_x < W and 0 <= px_y < H:
+                        img.putpixel((px_x, px_y), fig_col)
+        # Sword (right side)
+        for dy in range(-18, -5):
+            sx = fig_x + 7
+            if 0 <= sx < W and 0 <= fig_y + dy < H:
+                img.putpixel((sx, fig_y + dy), (80, 80, 90, 255))
+                img.putpixel((sx + 1, fig_y + dy), (60, 60, 70, 255))
 
     # (Title text and vignette moved to draw_title() / apply_vignette() so draw_scene_art stays
     #  text-free and reusable. draw_scene() re-composes all three for the original logo.)
