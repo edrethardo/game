@@ -140,6 +140,16 @@ void Engine::initAssets() {
             {"helmet",         "assets/meshes/helmet.obj"},
             {"armor",          "assets/meshes/armor.obj"},
             {"boots",          "assets/meshes/boots.obj"},
+            // Armor tier variants (MEDIUM reuses the bare meshes above; chest MEDIUM = "armor").
+            // Resolved per armor ItemDef into ItemDef.tierMeshId; rendered on the body / inspect screen.
+            {"helmet_light",   "assets/meshes/helmet_light.obj"},
+            {"helmet_heavy",   "assets/meshes/helmet_heavy.obj"},
+            {"chest_light",    "assets/meshes/chest_light.obj"},
+            {"chest_heavy",    "assets/meshes/chest_heavy.obj"},
+            {"boots_light",    "assets/meshes/boots_light.obj"},
+            {"boots_heavy",    "assets/meshes/boots_heavy.obj"},
+            {"gloves_light",   "assets/meshes/gloves_light.obj"},
+            {"gloves_heavy",   "assets/meshes/gloves_heavy.obj"},
             {"ring",           "assets/meshes/ring.obj"},
             {"shield",         "assets/meshes/shield.obj"},
             {"human",          "assets/meshes/human.obj"},
