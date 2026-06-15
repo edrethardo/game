@@ -2566,10 +2566,14 @@ def add_torus(mb, center, major_r, minor_r, major_segs=12, minor_segs=6):
 # Equipment, props, and projectile meshes
 # ---------------------------------------------------------------------------
 
-def gen_helmet(height=0.3):
-    """Helmet — simple round dome (half-sphere)."""
+def gen_helmet(height=0.3, bulk=1.0):
+    """Helmet — simple round dome (half-sphere).
+
+    bulk scales the dome radius uniformly (LIGHT<1.0 = slimmer cap, HEAVY>1.0 = chunkier plate).
+    At bulk=1.0 the output is byte-identical to the original.
+    """
     mb = MeshBuilder()
-    r = 0.15
+    r = 0.15 * bulk  # overall dome radius; bulk=1.0 → same as original 0.15
     segs = 10
     rings = 4
     # Bottom ring vertices (equator)
@@ -2603,71 +2607,87 @@ def gen_helmet(height=0.3):
         prev_row = row
     return mb
 
-def gen_armor(height=0.5):
-    """Body armor — chest plate with shoulder pauldrons and belt."""
+def gen_armor(height=0.5, bulk=1.0):
+    """Body armor — chest plate with shoulder pauldrons and belt.
+
+    bulk scales plate depth (Z) and pauldron radius/height (LIGHT<1.0 = cloth-thin,
+    HEAVY>1.0 = thick plate with larger pauldrons).  X/Y silhouette is unchanged so
+    the piece still fits the character frame.  At bulk=1.0 output is byte-identical
+    to the original.
+    """
     mb = MeshBuilder()
-    # Chest plate (slightly tapered — wider at top)
-    add_box(mb, center=(0, 0.25, 0), half_extents=(0.18, 0.20, 0.08))
-    # Belly section (slightly narrower)
-    add_box(mb, center=(0, 0.02, 0), half_extents=(0.15, 0.06, 0.07))
-    # Left pauldron (shoulder)
-    add_cylinder(mb, base_center=(-0.20, 0.38, 0), radius=0.07, height=0.06, sides=8)
+    # Chest plate — Z depth scales with bulk (plate thickness), X/Y silhouette fixed
+    add_box(mb, center=(0, 0.25, 0), half_extents=(0.18, 0.20, 0.08 * bulk))
+    # Belly section — Z depth scales with bulk
+    add_box(mb, center=(0, 0.02, 0), half_extents=(0.15, 0.06, 0.07 * bulk))
+    # Left pauldron — radius and height scale with bulk (thicker shoulder cap)
+    add_cylinder(mb, base_center=(-0.20, 0.38, 0), radius=0.07 * bulk, height=0.06 * bulk, sides=8)
     # Right pauldron
-    add_cylinder(mb, base_center=(0.20, 0.38, 0), radius=0.07, height=0.06, sides=8)
-    # Belt
-    add_box(mb, center=(0, -0.04, 0), half_extents=(0.17, 0.02, 0.09))
-    # Belt buckle
+    add_cylinder(mb, base_center=(0.20, 0.38, 0), radius=0.07 * bulk, height=0.06 * bulk, sides=8)
+    # Belt — Z depth scales with bulk
+    add_box(mb, center=(0, -0.04, 0), half_extents=(0.17, 0.02, 0.09 * bulk))
+    # Belt buckle — kept fixed (decorative detail, not thickness-related)
     add_box(mb, center=(0, -0.04, -0.10), half_extents=(0.03, 0.02, 0.01))
     return mb
 
-def gen_boots(height=0.2):
-    """Boots — a pair of armored boots with shin guards."""
+def gen_boots(height=0.2, bulk=1.0):
+    """Boots — a pair of armored boots with shin guards.
+
+    bulk scales the X width and Z depth of each section (LIGHT<1.0 = slim cloth boot,
+    HEAVY>1.0 = thick plated greave with chunky sole).  Y heights (shin length, foot
+    height) are preserved so the boot stays properly proportioned.  At bulk=1.0 the
+    output is byte-identical to the original.
+    """
     mb = MeshBuilder()
-    # Left boot — shin
-    add_box(mb, center=(-0.06, 0.12, 0), half_extents=(0.04, 0.10, 0.04))
-    # Left boot — foot
-    add_box(mb, center=(-0.06, 0.02, -0.03), half_extents=(0.04, 0.02, 0.07))
-    # Left boot — toe cap
-    add_box(mb, center=(-0.06, 0.03, -0.11), half_extents=(0.035, 0.025, 0.02))
-    # Left boot — heel
-    add_box(mb, center=(-0.06, 0.01, 0.04), half_extents=(0.03, 0.01, 0.02))
+    # Left boot — shin (X width + Z depth scale with bulk)
+    add_box(mb, center=(-0.06, 0.12, 0), half_extents=(0.04 * bulk, 0.10, 0.04 * bulk))
+    # Left boot — foot (X width + Z depth scale with bulk)
+    add_box(mb, center=(-0.06, 0.02, -0.03), half_extents=(0.04 * bulk, 0.02, 0.07 * bulk))
+    # Left boot — toe cap (scales with bulk for matching thickness)
+    add_box(mb, center=(-0.06, 0.03, -0.11), half_extents=(0.035 * bulk, 0.025, 0.02 * bulk))
+    # Left boot — heel (scales with bulk)
+    add_box(mb, center=(-0.06, 0.01, 0.04), half_extents=(0.03 * bulk, 0.01, 0.02 * bulk))
     # Right boot — shin
-    add_box(mb, center=(0.06, 0.12, 0), half_extents=(0.04, 0.10, 0.04))
+    add_box(mb, center=(0.06, 0.12, 0), half_extents=(0.04 * bulk, 0.10, 0.04 * bulk))
     # Right boot — foot
-    add_box(mb, center=(0.06, 0.02, -0.03), half_extents=(0.04, 0.02, 0.07))
+    add_box(mb, center=(0.06, 0.02, -0.03), half_extents=(0.04 * bulk, 0.02, 0.07 * bulk))
     # Right boot — toe cap
-    add_box(mb, center=(0.06, 0.03, -0.11), half_extents=(0.035, 0.025, 0.02))
+    add_box(mb, center=(0.06, 0.03, -0.11), half_extents=(0.035 * bulk, 0.025, 0.02 * bulk))
     # Right boot — heel
-    add_box(mb, center=(0.06, 0.01, 0.04), half_extents=(0.03, 0.01, 0.02))
+    add_box(mb, center=(0.06, 0.01, 0.04), half_extents=(0.03 * bulk, 0.01, 0.02 * bulk))
     return mb
 
-def gen_gloves(height=0.16):
+def gen_gloves(height=0.16, bulk=1.0):
     """Gloves — a detailed pair of armored gauntlets standing UPRIGHT (fingers pointing up).
 
     Each hand, bottom→top: a flared cuff, a back-of-hand/palm plate (tall in Y, thin in Z so
     the palm faces -Z), a raised knuckle guard, four segmented fingers pointing UP (+Y), and an
     angled two-part thumb on the outboard side. Hands sit at ±0.06 X. The vertical fingers-up
     pose makes dropped gloves read distinctly from the toes-forward boots mesh as ground loot.
+
+    bulk scales cuff width/depth and palm plate Z thickness (LIGHT<1.0 = slim cloth glove,
+    HEAVY>1.0 = thick plated gauntlet with wider cuffs).  Finger/knuckle Y lengths are
+    preserved.  At bulk=1.0 the output is byte-identical to the original.
     """
     mb = MeshBuilder()
     finger_dx = (-0.024, -0.008, 0.008, 0.024)  # four fingers across the hand width
     for sx in (-1.0, 1.0):
         x = 0.06 * sx
-        # Flared cuff at the bottom (wide base lip + band)
-        add_box(mb, center=(x, 0.005, 0.0), half_extents=(0.050, 0.011, 0.030))
-        add_box(mb, center=(x, 0.030, 0.0), half_extents=(0.044, 0.020, 0.026))
-        # Back-of-hand / palm plate — tall in Y, thin in Z (palm faces -Z)
-        add_box(mb, center=(x, 0.078, 0.0), half_extents=(0.036, 0.034, 0.018))
-        # Raised knuckle guard across the top of the hand (where the fingers start)
-        add_box(mb, center=(x, 0.112, -0.004), half_extents=(0.034, 0.011, 0.020))
-        # Four segmented fingers pointing UP (+Y): proximal block + distal tip each
+        # Flared cuff — X width and Z depth scale with bulk (thicker rim for heavy gauntlet)
+        add_box(mb, center=(x, 0.005, 0.0), half_extents=(0.050 * bulk, 0.011, 0.030 * bulk))
+        add_box(mb, center=(x, 0.030, 0.0), half_extents=(0.044 * bulk, 0.020, 0.026 * bulk))
+        # Back-of-hand / palm plate — Z thickness scales with bulk; Y height kept fixed
+        add_box(mb, center=(x, 0.078, 0.0), half_extents=(0.036, 0.034, 0.018 * bulk))
+        # Raised knuckle guard — Z depth scales with bulk
+        add_box(mb, center=(x, 0.112, -0.004), half_extents=(0.034, 0.011, 0.020 * bulk))
+        # Four segmented fingers — Z depth scales with bulk; Y length and X spacing fixed
         for dx in finger_dx:
             fx = x + dx
-            add_box(mb, center=(fx, 0.138, -0.002), half_extents=(0.0075, 0.022, 0.013))
-            add_box(mb, center=(fx, 0.168, -0.002), half_extents=(0.0065, 0.014, 0.011))
-        # Angled two-part thumb on the outboard side (mirrored by sx), rising alongside the hand
-        add_box(mb, center=(x + 0.040 * sx, 0.088, 0.004), half_extents=(0.011, 0.018, 0.012))
-        add_box(mb, center=(x + 0.050 * sx, 0.110, 0.004), half_extents=(0.009, 0.014, 0.010))
+            add_box(mb, center=(fx, 0.138, -0.002), half_extents=(0.0075, 0.022, 0.013 * bulk))
+            add_box(mb, center=(fx, 0.168, -0.002), half_extents=(0.0065, 0.014, 0.011 * bulk))
+        # Two-part thumb — Z depth scales with bulk
+        add_box(mb, center=(x + 0.040 * sx, 0.088, 0.004), half_extents=(0.011, 0.018, 0.012 * bulk))
+        add_box(mb, center=(x + 0.050 * sx, 0.110, 0.004), half_extents=(0.009, 0.014, 0.010 * bulk))
     return mb
 
 def gen_ring(radius=0.05):
@@ -4910,20 +4930,60 @@ MESH_TYPES = {
         "desc": "Armor helmet — dome with rim band.",
         "default_file": "helmet.obj",
     },
+    "helmet_light": {
+        "func": lambda: gen_helmet(bulk=0.8),
+        "desc": "Light helmet — slimmer cloth-cap dome (bulk=0.8).",
+        "default_file": "helmet_light.obj",
+    },
+    "helmet_heavy": {
+        "func": lambda: gen_helmet(bulk=1.25),
+        "desc": "Heavy helmet — chunkier plate dome (bulk=1.25).",
+        "default_file": "helmet_heavy.obj",
+    },
     "armor": {
         "func": gen_armor,
         "desc": "Body armor — torso plate with shoulder pads.",
         "default_file": "armor.obj",
+    },
+    "chest_light": {
+        "func": lambda: gen_armor(bulk=0.8),
+        "desc": "Light chest — thin cloth chest piece (bulk=0.8).",
+        "default_file": "chest_light.obj",
+    },
+    "chest_heavy": {
+        "func": lambda: gen_armor(bulk=1.25),
+        "desc": "Heavy chest — thick plate chest with large pauldrons (bulk=1.25).",
+        "default_file": "chest_heavy.obj",
     },
     "boots": {
         "func": gen_boots,
         "desc": "Boots — short box with toe extension.",
         "default_file": "boots.obj",
     },
+    "boots_light": {
+        "func": lambda: gen_boots(bulk=0.8),
+        "desc": "Light boots — slim cloth boot (bulk=0.8).",
+        "default_file": "boots_light.obj",
+    },
+    "boots_heavy": {
+        "func": lambda: gen_boots(bulk=1.25),
+        "desc": "Heavy boots — chunky plated greave (bulk=1.25).",
+        "default_file": "boots_heavy.obj",
+    },
     "gloves": {
         "func": gen_gloves,
         "desc": "Gloves — paired gauntlets with thumbs and flared cuffs.",
         "default_file": "gloves.obj",
+    },
+    "gloves_light": {
+        "func": lambda: gen_gloves(bulk=0.8),
+        "desc": "Light gloves — slim cloth gloves (bulk=0.8).",
+        "default_file": "gloves_light.obj",
+    },
+    "gloves_heavy": {
+        "func": lambda: gen_gloves(bulk=1.25),
+        "desc": "Heavy gloves — wide plated gauntlets (bulk=1.25).",
+        "default_file": "gloves_heavy.obj",
     },
     "ring": {
         "func": gen_ring,

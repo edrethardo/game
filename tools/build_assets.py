@@ -123,11 +123,20 @@ def build_meshes():
         # Projectiles
         ["--type", "arrow",          "--out", os.path.join(mesh_dir, "arrow.obj")],
         ["--type", "bolt",           "--out", os.path.join(mesh_dir, "bolt.obj")],
-        # Equipment
+        # Equipment — medium tier (unchanged originals)
         ["--type", "helmet",         "--out", os.path.join(mesh_dir, "helmet.obj")],
         ["--type", "armor",          "--out", os.path.join(mesh_dir, "armor.obj")],
         ["--type", "boots",          "--out", os.path.join(mesh_dir, "boots.obj")],
         ["--type", "gloves",         "--out", os.path.join(mesh_dir, "gloves.obj")],
+        # Equipment — light tier (slimmer/cloth, bulk=0.8)
+        ["--type", "helmet_light",   "--out", os.path.join(mesh_dir, "helmet_light.obj")],
+        ["--type", "helmet_heavy",   "--out", os.path.join(mesh_dir, "helmet_heavy.obj")],
+        ["--type", "chest_light",    "--out", os.path.join(mesh_dir, "chest_light.obj")],
+        ["--type", "chest_heavy",    "--out", os.path.join(mesh_dir, "chest_heavy.obj")],
+        ["--type", "boots_light",    "--out", os.path.join(mesh_dir, "boots_light.obj")],
+        ["--type", "boots_heavy",    "--out", os.path.join(mesh_dir, "boots_heavy.obj")],
+        ["--type", "gloves_light",   "--out", os.path.join(mesh_dir, "gloves_light.obj")],
+        ["--type", "gloves_heavy",   "--out", os.path.join(mesh_dir, "gloves_heavy.obj")],
         ["--type", "ring",           "--out", os.path.join(mesh_dir, "ring.obj")],
         ["--type", "shield",         "--out", os.path.join(mesh_dir, "shield.obj")],
         # Props
