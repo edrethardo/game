@@ -1142,6 +1142,31 @@ void Engine::gameUpdate(f32 dt) {
         Input::setRelativeMouseMode(true);
     }
 
+    // Toggle character inspect screen (C / LB+R3). Mirrors the inventory overlay:
+    // frees the mouse for P0, freezes gameplay input via gameplayInputFrozen().
+    // Closing re-acquires the mouse only if inventory is also closed so a player
+    // who has both screens open doesn't accidentally re-capture mid-UI.
+    if (Input::isActionPressed(GameAction::CHARACTER_SCREEN)) {
+        m_characterScreenOpen = !m_characterScreenOpen;
+        if (m_localPlayerIndex == 0)
+            Input::setRelativeMouseMode(!m_characterScreenOpen && !m_inventoryOpen);
+        AudioSystem::play(SfxId::UI_CONFIRM);
+    }
+    if (Input::isActionPressed(GameAction::MENU_BACK) && m_characterScreenOpen) {
+        m_characterScreenOpen = false;
+        if (m_localPlayerIndex == 0 && !m_inventoryOpen)
+            Input::setRelativeMouseMode(true);
+    }
+    if (m_characterScreenOpen) {
+        // Accumulate inspect-model yaw from mouse-X drag, right-stick X, and a
+        // gentle idle auto-spin so the player can see all sides without input.
+        s32 mdx = 0, mdy = 0;
+        Input::getMouseDelta(mdx, mdy);
+        m_inspectYaw += static_cast<f32>(mdx) * 0.01f;                // mouse drag
+        m_inspectYaw += Input::getStickX(true) * 0.04f;               // right-stick X (with deadzone)
+        m_inspectYaw += 0.0025f;                                       // idle auto-spin (tune later)
+    }
+
     updateInventoryInteraction(dt);
 
     // Debug: F7 gives random item

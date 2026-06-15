@@ -648,8 +648,10 @@ void Engine::run() {
     X(m_weaponProc,       m_weaponProcs)    \
     X(m_ringPassive,      m_ringPassives)   \
     X(m_glovesPassive,    m_glovesPassives) \
-    X(m_inventoryOpen,    m_inventoryOpenArr) \
-    X(m_hitMarkerTimer,   m_hitMarkerTimers)\
+    X(m_inventoryOpen,        m_inventoryOpenArr)      \
+    X(m_characterScreenOpen,  m_characterScreenOpenArr) \
+    X(m_inspectYaw,           m_inspectYawArr)          \
+    X(m_hitMarkerTimer,       m_hitMarkerTimers)        \
     X(m_potionCooldown,   m_potionCooldowns)\
     X(m_potionLastActivationTick, m_potionLastActivationTicks) \
     X(m_invCursorPanel,   m_invCursorPanels)\

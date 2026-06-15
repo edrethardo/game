@@ -153,8 +153,11 @@ static void setDefaults() {
     set(GameAction::HELMET_SKILL,  SDL_SCANCODE_G,      0, SDL_CONTROLLER_BUTTON_B,    SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 
     // UI
-    set(GameAction::INVENTORY,     SDL_SCANCODE_TAB,    0, SDL_CONTROLLER_BUTTON_START);
-    set(GameAction::PAUSE,         SDL_SCANCODE_ESCAPE, 0, SDL_CONTROLLER_BUTTON_BACK);
+    set(GameAction::INVENTORY,       SDL_SCANCODE_TAB,    0, SDL_CONTROLLER_BUTTON_START);
+    set(GameAction::PAUSE,           SDL_SCANCODE_ESCAPE, 0, SDL_CONTROLLER_BUTTON_BACK);
+    // Character inspect screen. Keyboard: C. Gamepad: LB + R3 chord (avoids conflict with
+    // DODGE on R3 alone and right-stick look/aim while in normal gameplay).
+    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_C,      0, SDL_CONTROLLER_BUTTON_RIGHTSTICK, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
     set(GameAction::QUICKBAR_PREV, -1,                  0, SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
     set(GameAction::QUICKBAR_NEXT, -1,                  0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 
@@ -1019,7 +1022,8 @@ const char* Input::actionName(GameAction action) {
         case GameAction::MENU_UP:       return "Menu Up";
         case GameAction::MENU_DOWN:     return "Menu Down";
         case GameAction::MENU_CONFIRM:  return "Confirm";
-        case GameAction::MENU_BACK:     return "Back";
+        case GameAction::MENU_BACK:          return "Back";
+        case GameAction::CHARACTER_SCREEN:   return "Character Screen";
         default: return "Unknown";
     }
 }

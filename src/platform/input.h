@@ -15,6 +15,7 @@ enum struct GameAction : u8 {
     QUICKBAR_PREV, QUICKBAR_NEXT,
     MENU_UP, MENU_DOWN, MENU_CONFIRM, MENU_BACK,
     DODGE,
+    CHARACTER_SCREEN,
     COUNT
 };
 

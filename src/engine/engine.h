@@ -173,6 +173,9 @@ private:
     SkillId        m_ringPassives[MAX_LOCAL_PLAYERS] = {};
     SkillId        m_glovesPassives[MAX_LOCAL_PLAYERS] = {};
     bool           m_inventoryOpenArr[MAX_LOCAL_PLAYERS] = {};
+    bool           m_characterScreenOpenArr[MAX_LOCAL_PLAYERS] = {};
+    // Pre-seeded to 0.6 rad so the model isn't front-facing on first open.
+    f32            m_inspectYawArr[MAX_LOCAL_PLAYERS] = {0.6f, 0.6f};
     f32            m_hitMarkerTimers[MAX_LOCAL_PLAYERS] = {};
     f32            m_potionCooldowns[MAX_LOCAL_PLAYERS] = {};
     // R17: tick at which each local player last activated a potion. Authoritative for
@@ -188,6 +191,12 @@ private:
     SkillId     m_ringPassive = SkillId::NONE;
     SkillId     m_glovesPassive = SkillId::NONE;  // FRENZY while legendary gloves equipped
     bool        m_inventoryOpen = false;
+    // Character inspect overlay: toggled by CHARACTER_SCREEN action (C / LB+R3).
+    // Frees the mouse (like inventory) and freezes gameplay input. m_inspectYaw
+    // accumulates per-tick from mouse-X drag, right-stick X, and an idle auto-spin
+    // so the renderer can rotate the paper-doll model around the Y axis.
+    bool        m_characterScreenOpen = false;
+    f32         m_inspectYaw = 0.6f;   // inspect-model rotation in radians (initial angle)
     ViewmodelState  m_viewmodelState;
 
     // Death-screen mouse control. m_deathHover is the option the mouse is over on the SP
@@ -202,7 +211,7 @@ private:
     // early-returns and freezes the whole world; in MP the world keeps running for everyone
     // else, so these gates are what hold the paused player's own character still. Potion is
     // intentionally NOT gated (matches inventory — you can drink while a menu is open).
-    bool gameplayInputFrozen() const { return m_inventoryOpen || m_menu.confirmQuit; }
+    bool gameplayInputFrozen() const { return m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit; }
 
     // Networking
     NetRole    m_netRole = NetRole::NONE;
