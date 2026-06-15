@@ -3,7 +3,7 @@
     {
       "type": "damage_flat",
       "name": "of Striking",
-      "slots": ["weapon"],
+      "slots": ["weapon", "gloves"],
       "minValue": 2.0,
       "maxValue": 15.0
     },
@@ -17,7 +17,7 @@
     {
       "type": "health_flat",
       "name": "of Vitality",
-      "slots": ["helmet", "armor", "boots", "ring", "offhand"],
+      "slots": ["helmet", "armor", "boots", "ring", "offhand", "gloves"],
       "minValue": 5.0,
       "maxValue": 40.0
     },
@@ -45,14 +45,14 @@
     {
       "type": "life_on_hit",
       "name": "of Leeching",
-      "slots": ["weapon", "ring"],
+      "slots": ["weapon", "ring", "gloves"],
       "minValue": 0.5,
       "maxValue": 2.0
     },
     {
       "type": "lifesteal_pct",
       "name": "of the Vampire",
-      "slots": ["weapon", "ring"],
+      "slots": ["weapon", "ring", "gloves"],
       "minValue": 0.1,
       "maxValue": 1.0
     },
@@ -87,7 +87,7 @@
     {
       "type": "reload_speed_pct",
       "name": "of Quick Hands",
-      "slots": ["weapon", "ring"],
+      "slots": ["weapon", "ring", "gloves"],
       "minValue": 10.0,
       "maxValue": 35.0
     },
@@ -97,6 +97,13 @@
       "slots": ["weapon", "helmet", "ring"],
       "minValue": 10.0,
       "maxValue": 30.0
+    },
+    {
+      "type": "attack_speed_pct",
+      "name": "of Alacrity",
+      "slots": ["gloves"],
+      "minValue": 4.0,
+      "maxValue": 12.0
     }
   ]
 }

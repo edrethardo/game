@@ -14,6 +14,7 @@ static constexpr u8 PROJ_GRAVITY   = 1 << 2;  // Affected by gravity (arcing tra
 static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
 static constexpr u8 PROJ_SPARK     = 1 << 4;  // Lightning bolt visual (jagged line)
 static constexpr u8 PROJ_VOID      = 1 << 5;  // Void weapon projectile (purple tint)
+static constexpr u8 PROJ_BOUNCE    = 1 << 6;  // Ricochets off walls (chakram) instead of despawning
 
 // Switch: smaller pool for better cache utilization on Tegra X1 (A57 at 1 GHz)
 #ifdef __SWITCH__
@@ -37,6 +38,8 @@ struct Projectile {
                              // Combat::s_attackingPlayer around this projectile's damage so a
                              // kill credits the firer even though it resolves frames later
     u8   projFlags  = 0;       // bit 0: isOrb, bit 1: isOrbShard
+    u8   bouncesLeft = 0;      // PROJ_BOUNCE: wall ricochets remaining before it despawns (chakram).
+                               // Runtime-only (server-authoritative); NOT serialized in SnapProjectile.
     f32  subTimer   = 0.0f;    // orb shard spawn interval timer
     f32  orbAngle   = 0.0f;    // current rotation angle for shard spawning
     f32  gravity      = 0.0f;   // downward acceleration in units/s^2 (0 = straight line)

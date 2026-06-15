@@ -914,6 +914,16 @@
       "id": 151,
       "name": "player_wanderer_skin",
       "texture": "player_wanderer_skin_42.png"
+    },
+    {
+      "id": 152,
+      "name": "gloves_plate",
+      "texture": "gloves_plate_tex_42.png"
+    },
+    {
+      "id": 153,
+      "name": "gloves_leather",
+      "texture": "gloves_leather_tex_42.png"
     }
   ]
 }

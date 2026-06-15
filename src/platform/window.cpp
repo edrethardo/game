@@ -9,6 +9,8 @@
 #include "core/log.h"
 #include "core/assert.h"
 
+#include <cstring>
+
 static SDL_Window* s_window = nullptr;
 static s32 s_width = 0;
 static s32 s_height = 0;
@@ -73,6 +75,39 @@ bool Window::init(const char* title, s32 width, s32 height) {
 
     LOG_INFO("Window created: %dx%d", width, height);
     return true;
+}
+
+void Window::enterFullscreenExternal() {
+    if (!s_window) return;
+    const int n = SDL_GetNumVideoDisplays();
+    int target = -1;
+    SDL_Rect best{};
+    for (int i = 0; i < n; ++i) {
+        SDL_Rect b;
+        if (SDL_GetDisplayBounds(i, &b) != 0) continue;
+        const char* name = SDL_GetDisplayName(i);
+        const bool isEdp = name && (std::strstr(name, "eDP") || std::strstr(name, "edp"));
+        const bool landscape = b.w >= b.h;          // skip portrait monitors
+        if (isEdp || !landscape) continue;          // want an external widescreen panel
+        // Prefer the left-most qualifying display (the external monitor sits left of eDP here).
+        if (target < 0 || b.x < best.x) { target = i; best = b; }
+    }
+    if (target < 0) target = 0;                     // fallback: primary display
+    SDL_GetDisplayBounds(target, &best);
+    const char* tname = SDL_GetDisplayName(target);
+    LOG_INFO("Fullscreen on display %d '%s' %dx%d @ (%d,%d)",
+             target, tname ? tname : "?", best.w, best.h, best.x, best.y);
+
+    // Move onto the target display (windowed first), then go fullscreen-desktop = its native res.
+    SDL_SetWindowFullscreen(s_window, 0);
+    SDL_SetWindowPosition(s_window, best.x, best.y);
+    SDL_SetWindowSize(s_window, best.w, best.h);
+    SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+
+    int dw = 0, dh = 0;
+    SDL_GL_GetDrawableSize(s_window, &dw, &dh);      // GL drawable = what glViewport/glReadPixels use
+    if (dw > 0 && dh > 0) { s_width = dw; s_height = dh; }
+    LOG_INFO("Window now %dx%d (drawable)", s_width, s_height);
 }
 
 void Window::shutdown() {

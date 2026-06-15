@@ -17,6 +17,7 @@ static ItemSlot slotFromString(const std::string& s) {
     if (s == "armor"   || s == "ARMOR")   return ItemSlot::ARMOR;
     if (s == "boots"   || s == "BOOTS")   return ItemSlot::BOOTS;
     if (s == "ring"    || s == "RING")    return ItemSlot::RING;
+    if (s == "gloves"  || s == "GLOVES")  return ItemSlot::GLOVES;
     return ItemSlot::WEAPON;
 }
 
@@ -50,6 +51,7 @@ static WeaponSubtype weaponSubtypeFromString(const std::string& s) {
     if (s == "throwing_knife" || s == "THROWING_KNIFE") return WeaponSubtype::THROWING_KNIFE;
     if (s == "molotov"        || s == "MOLOTOV")        return WeaponSubtype::MOLOTOV;
     if (s == "wand"           || s == "WAND")           return WeaponSubtype::WAND;
+    if (s == "chakram"        || s == "CHAKRAM")        return WeaponSubtype::CHAKRAM;
     return WeaponSubtype::NONE;
 }
 
@@ -122,6 +124,7 @@ SkillId skillIdFromString(const std::string& s) {
     if (s == "phase_strike")    return SkillId::PHASE_STRIKE;
     if (s == "void_kill")       return SkillId::VOID_KILL;
     if (s == "arc_fire")        return SkillId::ARC_FIRE;
+    if (s == "frenzy")          return SkillId::FRENZY;   // glove on-hit passive
     // Wanderer
     if (s == "deflect")           return SkillId::DEFLECT;
     if (s == "exploit_weakness")  return SkillId::EXPLOIT_WEAKNESS;
@@ -145,6 +148,7 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "reload_speed_pct"   || s == "RELOAD_SPEED_PCT")   return AffixType::RELOAD_SPEED_PCT;
     if (s == "energy_flat"        || s == "ENERGY_FLAT")        return AffixType::ENERGY_FLAT;
     if (s == "lifesteal_pct"      || s == "LIFESTEAL_PCT")      return AffixType::LIFESTEAL_PCT;
+    if (s == "attack_speed_pct"   || s == "ATTACK_SPEED_PCT")   return AffixType::ATTACK_SPEED_PCT;
     return AffixType::DAMAGE_FLAT;
 }
 

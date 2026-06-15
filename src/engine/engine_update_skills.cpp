@@ -120,6 +120,12 @@ void Engine::tickPassiveEquipment() {
             ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
         m_localPlayer.ringPassive = static_cast<u8>(m_ringPassive);
     }
+    // Gloves on-hit passive (Frenzy)
+    {
+        const ItemInstance& gl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];
+        m_glovesPassive = (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[gl.defId].legendarySkillId : SkillId::NONE;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +287,14 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
 void Engine::tickArmorRingPassives(f32 dt) {
     // --- Armor aura + ring passives: single merged entity pass ---
     // Ring-specific timers (no entity iteration needed)
+    // Frenzy (glove passive) buff decay — single shared timer, all stacks drop together.
+    // Ticked unconditionally (not gated on m_glovesPassive) so stacks still fade if the
+    // gloves are unequipped mid-buff.
+    if (m_localPlayer.frenzyTimer > 0.0f) {
+        m_localPlayer.frenzyTimer -= dt;
+        if (m_localPlayer.frenzyTimer <= 0.0f) m_localPlayer.frenzyStacks = 0;
+    }
+
     if (m_ringPassive != SkillId::NONE) {
         if (m_localPlayer.soulHarvestTimer > 0.0f) {
             m_localPlayer.soulHarvestTimer -= dt;

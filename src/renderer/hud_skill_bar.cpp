@@ -133,6 +133,11 @@ static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
             cols[1] = {1.0f, 0.5f, 0.1f}; cols[2] = {0.9f, 0.3f, 0.05f};
             cols[3] = {0.7f, 0.2f, 0.05f}; cols[4] = {1.0f, 0.85f, 0.2f};
             break;
+        // Frenzy (glove passive) — amber gauntlet with hot speed chevrons
+        case SkillId::FRENZY:
+            cols[1] = {0.9f, 0.6f, 0.2f}; cols[2] = {0.7f, 0.35f, 0.1f};
+            cols[3] = {0.5f, 0.3f, 0.15f}; cols[4] = {1.0f, 0.9f, 0.4f};
+            break;
         // Warrior — red/steel
         case SkillId::CLEAVE: case SkillId::WAR_CRY:
         case SkillId::THUNDERCLAP: case SkillId::WHIRLWIND: case SkillId::EARTHQUAKE:
@@ -209,6 +214,7 @@ static const u8* getSkillIcon(u8 skillId) {
         case SkillId::BLOOD_NOVA:          return &kIcon32_BloodNova[0][0];
         case SkillId::PHASE_DASH:          return &kIcon32_PhaseDash[0][0];
         case SkillId::ARC_FIRE:            return &kIcon32_ArcFire[0][0];
+        case SkillId::FRENZY:              return &kIcon32_Frenzy[0][0];
         // Combat Engineer
         case SkillId::SHOCK_BOLT:          return &kIcon32_ShockBolt[0][0];
         case SkillId::DEPLOY_TURRET:       return &kIcon32_DeployTurret[0][0];

@@ -529,6 +529,28 @@ def icon_arc_fire():
     return ic
 
 
+def icon_frenzy():
+    """Frenzy (glove passive) — clenched fist with speed chevrons trailing left."""
+    ic = new_icon()
+    # Fist body — rounded block right of center
+    fill_rect(ic, 14, 12, 25, 22, 1)
+    fill_circle(ic, 19, 12, 4, 1)
+    # Knuckle highlights (4 bumps along the top)
+    for kx in (15, 18, 21, 24):
+        set_px(ic, kx, 10, 4); set_px(ic, kx, 11, 4)
+    # Thumb fold across the lower fist
+    fill_rect(ic, 14, 19, 20, 21, 2)
+    # Wrist/cuff at bottom right
+    fill_rect(ic, 17, 23, 26, 26, 3)
+    # Speed chevrons trailing to the left (motion = attack speed)
+    for ci, cxs in enumerate((4, 8)):
+        c = 4 if ci == 1 else 2
+        for d in range(4):
+            set_px(ic, cxs + d, 13 + d, c); set_px(ic, cxs + d + 1, 13 + d, c)
+            set_px(ic, cxs + d, 21 - d, c); set_px(ic, cxs + d + 1, 21 - d, c)
+    return ic
+
+
 # --- WARRIOR ICONS (red/steel theme) ---
 
 def icon_cleave():
@@ -774,6 +796,8 @@ def main():
         ("BloodNova",        icon_blood_nova()),
         ("PhaseDash",        icon_phase_dash()),
         ("ArcFire",          icon_arc_fire()),
+        # Glove passive
+        ("Frenzy",           icon_frenzy()),
     ]
 
     write_header(icons, out_path)

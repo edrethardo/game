@@ -12,6 +12,7 @@
 
 #include "core/log.h"
 #include "net/net.h"
+#include "platform/window.h"
 
 #include <cstring>
 
@@ -45,7 +46,15 @@ void Engine::applyClassToLane0(PlayerClass cls) {
 }
 
 void Engine::applyLaunchOptions(const LaunchOptions& opt) {
-    if (!opt.active || !opt.valid) return;  // no directive (or parse failed) → normal menu boot
+    if (!opt.valid) return;  // parse failed → normal menu boot
+
+    // Display / capture modifiers apply whether or not a game-jump (host/join/load/new) was asked.
+    if (opt.fullscreen) Window::enterFullscreenExternal();
+    m_shotInterval = (f64)opt.shotInterval;
+    if (opt.shotInterval > 0)
+        LOG_INFO("Launch: auto-screenshot every %us -> screenshot_NNNN.png in the run dir", opt.shotInterval);
+
+    if (!opt.active) return;  // no game-jump directive → normal menu boot
 
     // --- Resolve the hero + the start mode (CONTINUE for a save, NEW_GAME for a fresh class) ---
     GameStart mode;

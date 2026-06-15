@@ -34,6 +34,9 @@ enum struct ItemSlot : u8 {
     ARMOR,
     BOOTS,
     RING,
+    GLOVES,  // appended AFTER RING (not inserted) so existing slot indices in saved
+             // PlayerInventory.equipped[] stay stable — the v2→v3 save migration copies
+             // the old 6 slots 1:1 and gloves start empty. Also bit 6 of AffixDef.validSlots.
     COUNT
 };
 
@@ -55,6 +58,7 @@ enum struct AffixType : u8 {
     RELOAD_SPEED_PCT,   // % faster reload
     ENERGY_FLAT,        // flat bonus to max energy
     LIFESTEAL_PCT,      // % of damage dealt healed back (distinct from flat LIFE_ON_HIT)
+    ATTACK_SPEED_PCT,   // % faster weapon attacks (divides effective cooldown) — gloves signature
     COUNT
     // NOTE: affix type is serialized by its integer value (see _REMOVED_RANGE_BONUS
     // and engine_persist.cpp). Only ever APPEND new types before COUNT — never insert
@@ -169,8 +173,17 @@ enum struct SkillId : u8 {
     VOID_KILL,      // on kill: 15% chance void zone on corpse
     ARC_FIRE,       // melee proc: 20% chance spawn fire in swing arc (1.5s)
 
+    // Glove passives (on-hit, while legendary gloves equipped)
+    FRENZY,         // on hit: +5% attack speed per stack, max 6, 4s refresh
+
     COUNT
 };
+
+// Frenzy (glove legendary) tuning — shared by the local fire path, the remote
+// (server-authoritative) fire path, and the projectile hit callback.
+static constexpr u8  FRENZY_MAX_STACKS        = 6;
+static constexpr f32 FRENZY_ATKSPD_PER_STACK  = 0.05f;  // +5% attack rate per stack (max +30%)
+static constexpr f32 FRENZY_DURATION_SEC      = 4.0f;   // refresh-on-hit window
 
 // ---- Class definition (static template per class) ----
 
@@ -402,10 +415,12 @@ struct PlayerInventory {
     u8           backpackCount = 0;
 
     // WARNING: this struct is serialized as a RAW byte dump (engine_persist.cpp writes
-    // sizeof(PlayerInventory)). Adding/removing/reordering ANY field changes the on-disk
-    // size and breaks every existing save (SAVE_VERSION would have to bump). Do NOT add a
-    // new cached bonus* field for a new affix — compute it on demand instead (see
-    // sumLifestealPct in engine_combat.cpp). Only touch this with a save-version migration.
+    // sizeof(PlayerInventory)) and the layout is VERSIONED. Adding/removing/reordering ANY
+    // field changes the on-disk size: you MUST bump SAVE_VERSION, keep a Legacy*V<n> mirror
+    // struct of the previous layout in engine_persist.cpp, and read old saves through it
+    // (see LegacyPlayerInventoryV2 / readPlayerInventory there). static_asserts in
+    // engine_persist.cpp pin the current size so a silent drift fails the build instead of
+    // corrupting saves. New cached fields go at the END (keeps prefix-compatibility obvious).
 
     // Computed stat bonuses (recalculated on equip/unequip)
     f32 bonusDamageFlat         = 0.0f;
@@ -422,6 +437,7 @@ struct PlayerInventory {
     f32 bonusClipSizePct        = 0.0f;
     f32 bonusReloadSpeedPct     = 0.0f;
     f32 bonusEnergyFlat         = 0.0f;
+    f32 bonusAttackSpeedPct     = 0.0f;  // v3 field (gloves) — appended last, see WARNING above
 };
 
 // ---- World item (dropped loot on the ground) ----

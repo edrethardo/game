@@ -638,6 +638,11 @@ void Engine::serverNetPost(f32 dt) {
                     np.shadowDanceTimer = 0.0f;
                 }
             }
+            // Frenzy (glove passive) — mirror of the local decay in tickArmorRingPassives.
+            if (np.frenzyTimer > 0.0f) {
+                np.frenzyTimer -= dt;
+                if (np.frenzyTimer <= 0.0f) np.frenzyStacks = 0;
+            }
         }
     }
 

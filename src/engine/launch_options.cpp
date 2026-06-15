@@ -61,6 +61,8 @@ void logUsage() {
     LOG_INFO("  --floor <n>            starting floor for --new (default 1)");
     LOG_INFO("  --difficulty <0-2>     difficulty for --new");
     LOG_INFO("  --port <n>  --lan      host/join port; --lan skips UPnP");
+    LOG_INFO("  --fullscreen           real fullscreen on the external widescreen monitor");
+    LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
     LOG_INFO("  --help                 this message");
     LOG_INFO("  e.g.  DungeonEngine --host --load 1   |   --join 1.2.3.4 --load 2");
 }
@@ -126,6 +128,14 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             opt.port = (u16)n;
         } else if (ieq(a, "--lan")) {
             opt.upnp = false;
+        } else if (ieq(a, "--fullscreen")) {
+            opt.fullscreen = true;          // display modifier — not a game-jump directive
+        } else if (ieq(a, "--screenshot-interval") || ieq(a, "--shot-interval")) {
+            const char* v = nextVal(i); if (!v) break;
+            long n; if (!parseInt(v, n) || n < 1 || n > 3600) {
+                LOG_WARN("--screenshot-interval expects 1-3600 seconds (got '%s')", v); opt.valid = false; break;
+            }
+            opt.shotInterval = (u32)n;      // display modifier — not a game-jump directive
         } else {
             LOG_WARN("Unknown launch arg '%s' (try --help)", a);
             opt.valid = false; break;

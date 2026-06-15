@@ -120,6 +120,10 @@ struct NetPlayer {
     f32  soulHarvestTimer  = 0.0f;
     u8   soulHarvestStacks = 0;
     f32  secondWindCooldown = 0.0f;
+    // Frenzy glove passive (mirrors Player::{frenzyStacks,frenzyTimer}; not on the wire) —
+    // server-side so a remote's on-hit attack-speed stacks speed up the REMOTE's fire path.
+    u8   frenzyStacks      = 0;
+    f32  frenzyTimer       = 0.0f;
     f32  smokeTimer        = 0.0f;  // Phase Strike post-kill stealth (mirrors Player::smokeTimer)
     // Wanderer mark-prey state (death-preamble follow-up batch): server-only mirror so a remote
     // Wanderer's Shadow Dance / mark-spread / speed stacks credit the *remote*, not the host

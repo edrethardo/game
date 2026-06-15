@@ -204,7 +204,9 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
 
         // Equipment skill bar — shows active legendary equipment skills above class bar
         {
-            HUD::EquipSkillSlot equipSlots[4];
+            // 6 sources can push here: boots, helmet, armor aura, weapon proc, ring passive,
+            // gloves passive. (Was [4] — a latent overflow with 5 legendary effects equipped.)
+            HUD::EquipSkillSlot equipSlots[6];
             u32 equipCount = 0;
 
             bool eqPad = Input::isGamepadConnected(0);
@@ -252,6 +254,20 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
                     static_cast<u8>(m_ringPassive),
                     m_localPlayer.secondWindCooldown, maxCD,
                     "", sd ? sd->name : "???", true
+                };
+            }
+            // Gloves passive (Frenzy) — the key label doubles as a live stack counter ("x3");
+            // per-lane buffer so split-screen players don't clobber each other's label.
+            if (m_glovesPassive != SkillId::NONE) {
+                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_glovesPassive);
+                static char frenzyLbl[MAX_LOCAL_PLAYERS][8];
+                frenzyLbl[m_localPlayerIndex][0] = '\0';
+                if (m_localPlayer.frenzyStacks > 0 && m_localPlayer.frenzyTimer > 0.0f)
+                    std::snprintf(frenzyLbl[m_localPlayerIndex], sizeof(frenzyLbl[0]), "x%u",
+                                  static_cast<u32>(m_localPlayer.frenzyStacks));
+                equipSlots[equipCount++] = {
+                    static_cast<u8>(m_glovesPassive), 0.0f, 0.0f,
+                    frenzyLbl[m_localPlayerIndex], sd ? sd->name : "???", true
                 };
             }
 

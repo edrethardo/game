@@ -1444,6 +1444,23 @@ def gen_throwing_knife(length=0.25):
     return mb
 
 
+def gen_chakram(radius=0.13):
+    """Chakram — flat circular throwing blade (a metal ring) lying flat in the XZ plane.
+
+    Reused as BOTH the in-hand weapon mesh and the spinning projectile. A main tube ring forms
+    the body; a thinner, slightly larger ring accents the sharpened cutting rim.
+    """
+    mb = MeshBuilder()
+    mb.set_material("prop_iron")
+    # Body ring
+    add_torus(mb, center=(0.0, 0.0, 0.0), major_r=radius, minor_r=0.022,
+              major_segs=20, minor_segs=6)
+    # Sharpened outer edge — thin ring just outside the body for a bladed silhouette
+    add_torus(mb, center=(0.0, 0.0, 0.0), major_r=radius + 0.012, minor_r=0.006,
+              major_segs=20, minor_segs=4)
+    return mb
+
+
 def gen_molotov(height=0.25):
     """Molotov cocktail — bottle body + neck.
 
@@ -2606,6 +2623,35 @@ def gen_boots(height=0.2):
     add_box(mb, center=(0.06, 0.03, -0.11), half_extents=(0.035, 0.025, 0.02))
     # Right boot — heel
     add_box(mb, center=(0.06, 0.01, 0.04), half_extents=(0.03, 0.01, 0.02))
+    return mb
+
+def gen_gloves(height=0.16):
+    """Gloves — a detailed pair of armored gauntlets standing UPRIGHT (fingers pointing up).
+
+    Each hand, bottom→top: a flared cuff, a back-of-hand/palm plate (tall in Y, thin in Z so
+    the palm faces -Z), a raised knuckle guard, four segmented fingers pointing UP (+Y), and an
+    angled two-part thumb on the outboard side. Hands sit at ±0.06 X. The vertical fingers-up
+    pose makes dropped gloves read distinctly from the toes-forward boots mesh as ground loot.
+    """
+    mb = MeshBuilder()
+    finger_dx = (-0.024, -0.008, 0.008, 0.024)  # four fingers across the hand width
+    for sx in (-1.0, 1.0):
+        x = 0.06 * sx
+        # Flared cuff at the bottom (wide base lip + band)
+        add_box(mb, center=(x, 0.005, 0.0), half_extents=(0.050, 0.011, 0.030))
+        add_box(mb, center=(x, 0.030, 0.0), half_extents=(0.044, 0.020, 0.026))
+        # Back-of-hand / palm plate — tall in Y, thin in Z (palm faces -Z)
+        add_box(mb, center=(x, 0.078, 0.0), half_extents=(0.036, 0.034, 0.018))
+        # Raised knuckle guard across the top of the hand (where the fingers start)
+        add_box(mb, center=(x, 0.112, -0.004), half_extents=(0.034, 0.011, 0.020))
+        # Four segmented fingers pointing UP (+Y): proximal block + distal tip each
+        for dx in finger_dx:
+            fx = x + dx
+            add_box(mb, center=(fx, 0.138, -0.002), half_extents=(0.0075, 0.022, 0.013))
+            add_box(mb, center=(fx, 0.168, -0.002), half_extents=(0.0065, 0.014, 0.011))
+        # Angled two-part thumb on the outboard side (mirrored by sx), rising alongside the hand
+        add_box(mb, center=(x + 0.040 * sx, 0.088, 0.004), half_extents=(0.011, 0.018, 0.012))
+        add_box(mb, center=(x + 0.050 * sx, 0.110, 0.004), half_extents=(0.009, 0.014, 0.010))
     return mb
 
 def gen_ring(radius=0.05):
@@ -4828,6 +4874,11 @@ MESH_TYPES = {
         "desc": "Molotov cocktail — bottle + neck. Params: --height",
         "default_file": "molotov.obj",
     },
+    "chakram": {
+        "func": gen_chakram,
+        "desc": "Chakram — flat metal throwing ring. Params: --radius",
+        "default_file": "chakram.obj",
+    },
     "wand": {
         "func": gen_wand,
         "desc": "Wand weapon — shaft + crystal tip. Params: --height (as length)",
@@ -4847,6 +4898,11 @@ MESH_TYPES = {
         "func": gen_boots,
         "desc": "Boots — short box with toe extension.",
         "default_file": "boots.obj",
+    },
+    "gloves": {
+        "func": gen_gloves,
+        "desc": "Gloves — paired gauntlets with thumbs and flared cuffs.",
+        "default_file": "gloves.obj",
     },
     "ring": {
         "func": gen_ring,
@@ -5028,6 +5084,9 @@ def main():
     elif mtype == "crossbow":
         if args.width is not None:
             kwargs["width"] = args.width
+    elif mtype == "chakram":
+        if args.radius is not None:
+            kwargs["radius"] = args.radius
     # bones and brazier use defaults — no special args needed
 
     mb = MESH_TYPES[mtype]["func"](**kwargs)

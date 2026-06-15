@@ -283,6 +283,12 @@ void Engine::handleWeaponFire(f32 dt) {
     if (m_localPlayer.shadowDanceTimer > 0.0f) {
         wpn.damage *= 2.0f;
     }
+    // Frenzy gloves: stacks shorten the effective cooldown (attack speed). Same divide as
+    // the Alacrity affix in buildWeaponDef so the stacking math matches; max +30% at 6 stacks.
+    if (m_glovesPassive == SkillId::FRENZY && m_localPlayer.frenzyStacks > 0 &&
+        m_localPlayer.frenzyTimer > 0.0f) {
+        wpn.cooldown /= (1.0f + FRENZY_ATKSPD_PER_STACK * m_localPlayer.frenzyStacks);
+    }
     // Berserker ring: +1% damage per 1% missing HP
     if (m_ringPassive == SkillId::BERSERKER) {
         f32 missingPct = 1.0f - m_localPlayer.health / m_localPlayer.maxHealth;
@@ -529,6 +535,14 @@ void Engine::handleWeaponFire(f32 dt) {
             } else if (sub == WeaponSubtype::THROWING_KNIFE || sub == WeaponSubtype::MOLOTOV) {
                 u8 wpnMesh = m_itemDefs[qbItem->defId].meshId;
                 if (wpnMesh > 0) m_projectiles.projectiles[projIdx].meshId = wpnMesh;
+            } else if (sub == WeaponSubtype::CHAKRAM) {
+                // Chakram flies as its own (thrown disc) mesh and ricochets off walls.
+                Projectile& cp = m_projectiles.projectiles[projIdx];
+                u8 wpnMesh = m_itemDefs[qbItem->defId].meshId;
+                if (wpnMesh > 0) cp.meshId = wpnMesh;
+                cp.projFlags  |= PROJ_BOUNCE;
+                cp.bouncesLeft = 3;     // ricochet up to 3× (confirmed feel)
+                cp.lifetime    = 5.0f;  // backstop so a throw that never hits a wall still dies
             }
         }
         // Assign projectile light color based on weapon subtype
@@ -638,6 +652,13 @@ void Engine::handleWeaponFire(f32 dt) {
         heal += wpn.damage * Inventory::lifestealPct(pin) * 0.01f;      // % of damage dealt
         if (heal > 0.0f)
             m_localPlayer.health = fminf(m_localPlayer.health + heal, m_localPlayer.maxHealth);
+    }
+
+    // Frenzy gloves: every landed melee/hitscan hit grants an attack-speed stack and
+    // refreshes the shared window (projectile hits grant theirs in the hit callback).
+    if (result.hitEntity && m_glovesPassive == SkillId::FRENZY) {
+        if (m_localPlayer.frenzyStacks < FRENZY_MAX_STACKS) m_localPlayer.frenzyStacks++;
+        m_localPlayer.frenzyTimer = FRENZY_DURATION_SEC;
     }
 
     // Weapon legendary on-hit proc — % chance to trigger skill at hit position
@@ -1007,6 +1028,19 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         wpn = m_weaponDefs[ws.currentWeapon];
     }
 
+    // Frenzy gloves (remote): apply attack speed HERE, before the cooldown is consumed
+    // below (ws.cooldownTimer = wpn.cooldown) — the damage-only buffs (Soul Harvest, Shadow
+    // Dance, Berserker) sit after that line and would be too late for a rate change. The
+    // gear check keeps a lingering buff from a just-unequipped pair inert (mirrors the
+    // local path's m_glovesPassive gate).
+    if (np.frenzyStacks > 0 && np.frenzyTimer > 0.0f) {
+        const ItemInstance& gl = m_inventories[np.slotIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];
+        if (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY &&
+            m_itemDefs[gl.defId].legendarySkillId == SkillId::FRENZY) {
+            wpn.cooldown /= (1.0f + FRENZY_ATKSPD_PER_STACK * np.frenzyStacks);
+        }
+    }
+
     // Detect weapon switch — reset clip
     u16 curDefId = isItemEmpty(eqWpn) ? 0xFFFF : eqWpn.defId;
     if (curDefId != ws.lastWeaponDef) {
@@ -1229,6 +1263,13 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
             } else if (sub == WeaponSubtype::THROWING_KNIFE || sub == WeaponSubtype::MOLOTOV) {
                 u8 wpnMesh = m_itemDefs[eqWpn.defId].meshId;
                 if (wpnMesh > 0) proj.meshId = wpnMesh;
+            } else if (sub == WeaponSubtype::CHAKRAM) {
+                // Mirror the SP path: thrown-disc mesh + wall ricochet (server-authoritative).
+                u8 wpnMesh = m_itemDefs[eqWpn.defId].meshId;
+                if (wpnMesh > 0) proj.meshId = wpnMesh;
+                proj.projFlags  |= PROJ_BOUNCE;
+                proj.bouncesLeft = 3;     // ricochet up to 3× (confirmed feel)
+                proj.lifetime    = 5.0f;  // backstop so a throw that never hits a wall still dies
             }
             if (isMolotov)   proj.lightColor = {1.0f, 0.5f, 0.1f}; // fire
             else if (isWand) proj.lightColor = {0.4f, 0.6f, 1.0f}; // arcane blue
@@ -1285,6 +1326,18 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         heal += wpn.damage * Inventory::lifestealPct(pin) * 0.01f;      // % of damage dealt
         if (heal > 0.0f)
             np.health = fminf(np.health + heal, np.maxHealth);
+    }
+
+    // Frenzy gloves (remote) — mirrors the local grant; this slot's gloves are checked from
+    // its inventory (no m_glovesPassive alias for remotes), stacks live on the NetPlayer and
+    // feed this same fire path's attack-speed divide next shot.
+    if (result.hitEntity) {
+        const ItemInstance& gl = m_inventories[np.slotIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];
+        if (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY &&
+            m_itemDefs[gl.defId].legendarySkillId == SkillId::FRENZY) {
+            if (np.frenzyStacks < FRENZY_MAX_STACKS) np.frenzyStacks++;
+            np.frenzyTimer = FRENZY_DURATION_SEC;
+        }
     }
 
     // --- Weapon legendary on-hit proc for remote player ---

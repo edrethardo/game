@@ -14,6 +14,8 @@
 //   --difficulty <0-2>       difficulty for --new (0=Normal,1=Nightmare,2=Hell)
 //   --port <n>               host/join port (default DEFAULT_PORT)
 //   --lan                    host: LAN-only, skip UPnP (default attempts UPnP, like the menu)
+//   --fullscreen             real fullscreen on the external widescreen monitor (native res)
+//   --screenshot-interval <s>  auto-save a screenshot every <s> seconds while in-game
 //   --help                   print usage
 //
 // Examples:
@@ -21,6 +23,7 @@
 //   DungeonEngine --host --new warrior --floor 5 --lan
 //   DungeonEngine --join 192.168.1.5 --load 2
 //   DungeonEngine --load 3
+//   DungeonEngine --fullscreen --screenshot-interval 60   (play + auto-capture 1080p store shots)
 
 #include "core/types.h"
 #include "game/item.h"   // PlayerClass
@@ -42,7 +45,10 @@ struct LaunchOptions {
     bool upnp = true;                          // host: --lan clears this
     char address[64] = "127.0.0.1";            // for Role::JOIN
 
-    bool active = false;   // any launch directive present (else: normal menu boot)
+    bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
+    u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
+
+    bool active = false;   // any GAME-JUMP directive present (else: normal menu boot)
     bool valid  = true;    // parse succeeded (else: warn + fall back to menu)
 };
 

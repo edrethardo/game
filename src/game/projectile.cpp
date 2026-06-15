@@ -171,6 +171,19 @@ void ProjectileSystem::update(ProjectilePool& pool,
         // Wall collision via short raycast
         RayHit wallHit = Raycast::cast(grid, p.position, dir, travel + p.radius);
         if (wallHit.hit && wallHit.distance <= travel + p.radius) {
+            // Chakram ricochet: reflect off the wall instead of despawning, up to bouncesLeft times.
+            // The raycast already gives the outward face normal (axis-aligned ±X/±Z/±Y), so a bounce
+            // is the standard reflection v' = v - 2(v·n)n. Speed is preserved across bounces; the
+            // projectile dies on the next wall once bounces run out (falls through below) or when its
+            // lifetime backstop expires.
+            if ((p.projFlags & PROJ_BOUNCE) && p.bouncesLeft > 0) {
+                p.bouncesLeft--;
+                // Sit just off the struck face (along its normal) so next tick's raycast doesn't
+                // immediately re-hit the same wall and consume another bounce.
+                p.position = wallHit.position + wallHit.normal * (p.radius + 0.02f);
+                p.velocity = p.velocity - wallHit.normal * (2.0f * dot(p.velocity, wallHit.normal));
+                continue; // keep flying; skip this frame's despawn + move (already repositioned)
+            }
             // AoE splash on wall impact
             if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
                 for (u32 a = 0; a < entities.activeCount; a++) {

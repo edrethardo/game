@@ -29,6 +29,7 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::CLIP_SIZE_PCT:      return "+Clip Size %";
         case AffixType::RELOAD_SPEED_PCT:   return "+Reload Speed %";
         case AffixType::ENERGY_FLAT:        return "+Max Energy";
+        case AffixType::ATTACK_SPEED_PCT:   return "+Attack Speed %";
         default:                            return "Unknown";
     }
 }
@@ -51,6 +52,7 @@ static const char* slotName(ItemSlot slot) {
         case ItemSlot::ARMOR:   return "Armor";
         case ItemSlot::BOOTS:   return "Boots";
         case ItemSlot::RING:    return "Ring";
+        case ItemSlot::GLOVES:  return "Gloves";
         default:                return "";
     }
 }
@@ -93,6 +95,7 @@ static const char* skillDisplayName(SkillId id) {
         case SkillId::PHASE_STRIKE:    return "Phase Strike";
         case SkillId::VOID_KILL:       return "Void Kill";
         case SkillId::ARC_FIRE:        return "Blazing Arc";
+        case SkillId::FRENZY:          return "Frenzy";
         default: return "Unknown";
     }
 }
@@ -114,6 +117,7 @@ static const char* skillDescription(SkillId id) {
         case SkillId::PHASE_STRIKE:    return "20% on kill: smoke bomb that\nblinds nearby enemies for 0.5s.";
         case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
         case SkillId::ARC_FIRE:        return "20% on hit: ignite the ground\nacross the full swing arc for 1.5s.";
+        case SkillId::FRENZY:          return "Each hit: +5% attack speed for 4s.\nStacks up to 6 times (+30%).";
         default: return "";
     }
 }
@@ -212,7 +216,8 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                  def.name, rarityColor(item.rarity), 2);
         } else {
             // Slot type label for empty slots
-            static const char* slotLabels[] = {"Weapon", "Offhand", "Helmet", "Armor", "Boots", "Ring"};
+            // Order MUST match the ItemSlot enum (GLOVES is appended after RING there).
+            static const char* slotLabels[] = {"Weapon", "Offhand", "Helmet", "Armor", "Boots", "Ring", "Gloves"};
             Vec3 dimColor = {0.25f, 0.25f, 0.3f};
             FontSystem::drawText(sw, sh, eqX + 6.0f * uiScale, y + 8.0f * uiScale,
                                  slotLabels[i], dimColor, 1);
@@ -534,6 +539,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
             case ItemSlot::HELMET:  activationLabel = "Press G"; activationColor = {0.5f, 0.8f, 1.0f}; break;
             case ItemSlot::ARMOR:   activationLabel = "Passive Aura"; activationColor = {0.7f, 0.7f, 1.0f}; break;
             case ItemSlot::OFFHAND: activationLabel = "Perfect Block"; activationColor = {0.9f, 0.9f, 1.0f}; break;
+            case ItemSlot::GLOVES:  activationLabel = "On Hit"; activationColor = {0.9f, 0.6f, 0.2f}; break;
             default: break;
         }
 

@@ -58,8 +58,55 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
-// Version 2 = adds m_difficulty byte to header. Version 1 saves are incompatible.
-static constexpr u32 SAVE_VERSION = 2;
+// Version 3 = GLOVES equipment slot (PlayerInventory.equipped grows 6→7) + the
+//             bonusAttackSpeedPct cache field. Header layout is UNCHANGED.
+// Version 2 = adds m_difficulty byte to header. Still READABLE (see LegacyPlayerInventoryV2
+//             below) — loaded v2 characters migrate to v3 on their next save.
+// Version 1 saves are incompatible.
+static constexpr u32 SAVE_VERSION           = 3;
+static constexpr u32 SAVE_VERSION_LEGACY_V2 = 2;
+
+// True for any version this build can read (the current one or a supported legacy one).
+static bool saveVersionReadable(u32 ver) {
+    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V2;
+}
+
+// --- Legacy v2 on-disk mirror of PlayerInventory -----------------------------------------
+// v2 saves dumped the then-current PlayerInventory as one raw blob: 6 equipped slots (no
+// GLOVES) and 14 bonus f32s (no bonusAttackSpeedPct). This mirror reproduces that exact
+// layout (same member types ⇒ same compiler padding) so a v2 blob can be fread in one piece
+// and mapped into the v3 struct. ItemInstance itself is unchanged between v2 and v3.
+struct LegacyPlayerInventoryV2 {
+    ItemInstance equipped[6] = {};                     // v2 slot order == v3 (GLOVES appended)
+    ItemInstance backpack[MAX_INVENTORY_ITEMS] = {};
+    u8           backpackCount = 0;
+    f32 bonusDamageFlat, bonusDamagePct, bonusHealthFlat, bonusHealthPct, bonusMoveSpeed,
+        bonusCooldownReduction, bonusLifeOnHit, bonusProjectileSpeedPct, bonusConeAngle,
+        bonusRange, bonusDamageToFlying, bonusClipSizePct, bonusReloadSpeedPct, bonusEnergyFlat;
+};
+
+// Size guards: if any of these fire, the on-disk layout drifted — bump SAVE_VERSION, add a
+// new Legacy*V<n> mirror for the previous layout, and extend the readers. NEVER ship a layout
+// change under an unchanged version (that's what silently corrupted pre-v3 saves' class byte).
+static_assert(sizeof(ItemInstance)            == 52,   "ItemInstance layout drifted — see comment above");
+static_assert(sizeof(LegacyPlayerInventoryV2) == 1620, "v2 mirror must match the historical v2 blob size");
+static_assert(sizeof(PlayerInventory)         == 1676, "PlayerInventory layout drifted — see comment above");
+static_assert(sizeof(QuickbarState)           == 36,   "QuickbarState layout drifted — see comment above");
+
+// Read one PlayerInventory blob at the given save version. v3 reads the struct directly;
+// v2 reads the legacy mirror and maps it (GLOVES starts empty; bonus caches are rebuilt by
+// applySavedCharToLane → recalculateStats, so only items/backpack need copying).
+static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
+    if (ver == SAVE_VERSION)
+        return std::fread(&out, sizeof(PlayerInventory), 1, f) == 1;
+    LegacyPlayerInventoryV2 legacy;
+    if (std::fread(&legacy, sizeof(LegacyPlayerInventoryV2), 1, f) != 1) return false;
+    out = PlayerInventory{};
+    for (u32 s = 0; s < 6; s++) out.equipped[s] = legacy.equipped[s];
+    for (u32 b = 0; b < MAX_INVENTORY_ITEMS; b++) out.backpack[b] = legacy.backpack[b];
+    out.backpackCount = legacy.backpackCount;
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Path helper
@@ -88,7 +135,7 @@ void Engine::scanSaveSlots() {
 
         // Read just the header block — version + floor + playerCount + classes + timestamp + time
         u32 ver = 0;
-        if (std::fread(&ver, sizeof(u32), 1, f) != 1 || ver != SAVE_VERSION) {
+        if (std::fread(&ver, sizeof(u32), 1, f) != 1 || !saveVersionReadable(ver)) {
             std::fclose(f);
             continue;
         }
@@ -141,7 +188,8 @@ u8 Engine::firstFreeSaveSlot() {
 // (floor + difficulty*50): this protects a high-floor hero dropped into Player 1's lower world,
 // and a joined CLIENT inside the host's level, while normal descent / difficulty-loop saves
 // (which only raise the effective floor) pass through unchanged. The per-record byte layout is
-// IDENTICAL to the legacy writer (version 2), so old tooling/readers stay valid.
+// the version-3 layout (v2 files remain readable via LegacyPlayerInventoryV2 and migrate to
+// v3 on their next save).
 void Engine::saveCharacter(u8 lane, u8 slot) {
     if (slot < 1 || slot > MAX_SAVE_SLOTS || lane >= MAX_LOCAL_PLAYERS) return;
 
@@ -250,14 +298,39 @@ void Engine::saveAllCharacters() {
 // Read one persisted SkillState. R17: its persisted form is only the four legacy fields (16 B, not
 // the in-memory 20); the per-session lastActivationTick is reset to 0 (= "never activated, gate
 // clear"). Returns false on a short read. Shared by both loaders below.
-static bool readSkillLegacy(FILE* f, SkillState& ss) {
+// wideSkillId: early-v2 files were written while SkillId was still 4 bytes (it was later
+// narrowed to u8 WITHOUT a version bump — the drift that misaligned the class byte). The two
+// v2 flavors are told apart by per-player block size, derived from the file size (see
+// v2HasWideSkillId below). SkillId values are tiny, so the u32→u8 cast is lossless.
+static bool readSkillLegacy(FILE* f, SkillState& ss, bool wideSkillId) {
     bool r = true;
-    r = r && std::fread(&ss.activeSkill,   sizeof(SkillId), 1, f) == 1;
+    if (wideSkillId) {
+        u32 wide = 0;
+        r = r && std::fread(&wide, sizeof(u32), 1, f) == 1;
+        ss.activeSkill = static_cast<SkillId>(static_cast<u8>(wide));
+    } else {
+        r = r && std::fread(&ss.activeSkill, sizeof(SkillId), 1, f) == 1;
+    }
     r = r && std::fread(&ss.cooldownTimer, sizeof(f32),     1, f) == 1;
     r = r && std::fread(&ss.energy,        sizeof(f32),     1, f) == 1;
     r = r && std::fread(&ss.maxEnergy,     sizeof(f32),     1, f) == 1;
     ss.lastActivationTick = 0;
     return r;
+}
+
+// Detect the early-v2 "wide SkillId" flavor from the bytes remaining after the header: each
+// per-player block is hp(4)+maxHp(4)+inv(1620)+quickbar(36)+5 skill blocks+cls(1)+skill(1),
+// where a skill block is 16 B (wide) or 13 B (narrow). Verified against real saves:
+// wide = 1746 B/player (file 1767 for 1 player), narrow = 1731 B/player (file 1752).
+static bool v2HasWideSkillId(FILE* f, u8 playerCount) {
+    if (playerCount < 1) return false;
+    long pos = std::ftell(f);                 // just past the header
+    std::fseek(f, 0, SEEK_END);
+    long fileSize = std::ftell(f);
+    std::fseek(f, pos, SEEK_SET);
+    const long blockWide = 8 + static_cast<long>(sizeof(LegacyPlayerInventoryV2))
+                             + static_cast<long>(sizeof(QuickbarState)) + 5 * 16 + 2;
+    return (fileSize - pos) == static_cast<long>(playerCount) * blockWide;
 }
 
 // Apply a deserialized character block to a local lane. World state (floor/seed/difficulty) is NOT
@@ -322,9 +395,9 @@ bool Engine::loadGame(u8 slot) {
     if (!f) return false;
 
     u32 ver = 0;
-    if (std::fread(&ver, sizeof(u32), 1, f) != 1 || ver != SAVE_VERSION) {
-        LOG_WARN("loadGame slot %u: version mismatch (got %u, expected %u) — ignoring",
-                 slot, ver, SAVE_VERSION);
+    if (std::fread(&ver, sizeof(u32), 1, f) != 1 || !saveVersionReadable(ver)) {
+        LOG_WARN("loadGame slot %u: version mismatch (got %u, expected %u or %u) — ignoring",
+                 slot, ver, SAVE_VERSION, SAVE_VERSION_LEGACY_V2);
         std::fclose(f);
         return false;
     }
@@ -344,18 +417,21 @@ bool Engine::loadGame(u8 slot) {
     // Clamp to sane bounds — don't trust file contents blindly
     if (playerCount < 1 || playerCount > MAX_LOCAL_PLAYERS) playerCount = 1;
 
+    // Early-v2 files serialized SkillId as 4 bytes — detect via per-player block size.
+    bool wideSkill = (ver == SAVE_VERSION_LEGACY_V2) && v2HasWideSkillId(f, playerCount);
+
     SavedChar pdata[MAX_LOCAL_PLAYERS] = {};
     for (u8 p = 0; p < playerCount; p++) {
         SavedChar& ps = pdata[p];
         bool pok = true;
         pok = pok && std::fread(&ps.hp,    sizeof(f32),             1, f) == 1;
         pok = pok && std::fread(&ps.maxHp, sizeof(f32),             1, f) == 1;
-        pok = pok && std::fread(&ps.inv,   sizeof(PlayerInventory), 1, f) == 1;
+        pok = pok && readPlayerInventory(f, ps.inv, ver); // version-aware (v2 blob is smaller)
         pok = pok && std::fread(&ps.qb,    sizeof(QuickbarState),   1, f) == 1;
-        pok = pok && readSkillLegacy(f, ps.skill);
+        pok = pok && readSkillLegacy(f, ps.skill, wideSkill);
         pok = pok && std::fread(&ps.cls,         sizeof(u8),        1, f) == 1;
         pok = pok && std::fread(&ps.activeSkill, sizeof(u8),        1, f) == 1;
-        for (u32 s = 0; s < 4; s++) pok = pok && readSkillLegacy(f, ps.classSkills[s]);
+        for (u32 s = 0; s < 4; s++) pok = pok && readSkillLegacy(f, ps.classSkills[s], wideSkill);
         if (!pok) { ok = false; break; }
     }
     std::fclose(f);
@@ -421,7 +497,7 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     if (!f) return false;
 
     u32 ver = 0;
-    if (std::fread(&ver, sizeof(u32), 1, f) != 1 || ver != SAVE_VERSION) { std::fclose(f); return false; }
+    if (std::fread(&ver, sizeof(u32), 1, f) != 1 || !saveVersionReadable(ver)) { std::fclose(f); return false; }
 
     // Skip the rest of the header — the world stays P1's, so floor/seed/difficulty are ignored.
     u8  floor = 0, playerCount = 0, classes[2] = {}, difficulty = 0;
@@ -437,15 +513,19 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     (void)floor; (void)playerCount; (void)difficulty;
     (void)timestamp; (void)totalTime; (void)seed;
 
+    // Early-v2 files serialized SkillId as 4 bytes — detect via per-player block size.
+    bool wideSkill = (ver == SAVE_VERSION_LEGACY_V2) &&
+                     v2HasWideSkillId(f, (playerCount >= 1) ? playerCount : 1);
+
     SavedChar ps{};
     ok = ok && std::fread(&ps.hp,    sizeof(f32),             1, f) == 1;
     ok = ok && std::fread(&ps.maxHp, sizeof(f32),             1, f) == 1;
-    ok = ok && std::fread(&ps.inv,   sizeof(PlayerInventory), 1, f) == 1;
+    ok = ok && readPlayerInventory(f, ps.inv, ver); // version-aware (v2 blob is smaller)
     ok = ok && std::fread(&ps.qb,    sizeof(QuickbarState),   1, f) == 1;
-    ok = ok && readSkillLegacy(f, ps.skill);
+    ok = ok && readSkillLegacy(f, ps.skill, wideSkill);
     ok = ok && std::fread(&ps.cls,         sizeof(u8),        1, f) == 1;
     ok = ok && std::fread(&ps.activeSkill, sizeof(u8),        1, f) == 1;
-    for (u32 s = 0; s < 4; s++) ok = ok && readSkillLegacy(f, ps.classSkills[s]);
+    for (u32 s = 0; s < 4; s++) ok = ok && readSkillLegacy(f, ps.classSkills[s], wideSkill);
     std::fclose(f);
     if (!ok) return false;
 

@@ -3234,6 +3234,43 @@ def skin_boots_leather_tex():
     return w, h, p
 
 
+def skin_gloves_plate_tex():
+    """Plate gauntlets: steel body, dark knuckle band, riveted cuff highlight on top row."""
+    w, h = 4, 4
+    p = {}
+    steel   = (150, 150, 160, 255)
+    knuckle = (70,  70,  80,  255)
+    cuff    = (175, 175, 185, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    # Dark knuckle band across row 1 (just below mid)
+    for px in range(w):
+        p[(px, 1)] = knuckle
+    # Cuff highlight on top row (wrist flare)
+    for px in range(w):
+        p[(px, 3)] = cuff
+    return w, h, p
+
+
+def skin_gloves_leather_tex():
+    """Leather gloves: brown body, dark palm row, stitch dots near the cuff."""
+    w, h = 4, 4
+    p = {}
+    brown  = (120, 85, 45, 255)
+    palm   = (75,  52, 26, 255)
+    stitch = (160, 120, 70, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = brown
+    # Dark palm band on bottom row
+    for px in range(w):
+        p[(px, 0)] = palm
+    # Stitch dots on row 2
+    p[(1, 2)] = stitch; p[(2, 2)] = stitch
+    return w, h, p
+
+
 def skin_ring_bone_tex():
     """Bone ring: white bone band with carved line and dark center."""
     w, h = 4, 4
@@ -4935,6 +4972,8 @@ SKIN_TYPES = {
     "armor_cloth_tex":       ("armor_cloth_skin_42.png",       skin_armor_cloth_tex),
     "boots_plate_tex":       ("boots_plate_skin_42.png",       skin_boots_plate_tex),
     "boots_leather_tex":     ("boots_leather_skin_42.png",     skin_boots_leather_tex),
+    "gloves_plate_tex":      ("gloves_plate_tex_42.png",       skin_gloves_plate_tex),
+    "gloves_leather_tex":    ("gloves_leather_tex_42.png",     skin_gloves_leather_tex),
     "ring_bone_tex":         ("ring_bone_skin_42.png",         skin_ring_bone_tex),
     "ring_gold_tex":         ("ring_gold_skin_42.png",         skin_ring_gold_tex),
     "shield_wood_tex":       ("shield_wood_skin_42.png",       skin_shield_wood_tex),

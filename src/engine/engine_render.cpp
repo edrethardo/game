@@ -51,6 +51,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdio>
+#include <ctime>
 #include <cstdlib>
 
 // Shared statics defined in engine.cpp
@@ -795,14 +796,19 @@ void Engine::render(f32 alpha) {
     // visual-only interpolation applied above is discarded — no manual restore needed.
     swapInPlayer(0);
 
-    // Service a pending F8 screenshot now: the full frame (3D scene, and HUD unless F10 hid it)
-    // is composited but not yet presented, so glReadPixels sees exactly what's on screen. Written
-    // to the CWD as screenshot_<frame>.png (matches the save_NN.dat relative-path convention; no
-    // subdirectory to create). Cleared immediately so it fires once per F8 press.
+    // Service a pending screenshot now (F8 or the --screenshot-interval auto-timer): the full frame
+    // (3D scene, and HUD unless F10 hid it) is composited but not yet presented, so glReadPixels sees
+    // exactly what's on screen. Written to the CWD as screenshot_NNNN.png using a monotonic counter
+    // (m_frameCount resets every second, so it can't name files). Cleared immediately = one per shot.
     if (m_screenshotPending) {
         m_screenshotPending = false;
+        // Timestamped name so sessions never overwrite each other's shots (the seq counter resets
+        // per launch); the trailing seq disambiguates two captures in the same second.
+        std::time_t t = std::time(nullptr);
+        char ts[24];
+        std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", std::localtime(&t));
         char path[64];
-        std::snprintf(path, sizeof(path), "screenshot_%05u.png", m_frameCount);
+        std::snprintf(path, sizeof(path), "screenshot_%s_%02u.png", ts, ++m_screenshotSeq);
         Screenshot::capture(path, sw, sh);
     }
 

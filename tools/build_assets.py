@@ -118,6 +118,7 @@ def build_meshes():
         ["--type", "crossbow",       "--out", os.path.join(mesh_dir, "crossbow.obj")],
         ["--type", "throwing_knife", "--out", os.path.join(mesh_dir, "throwing_knife.obj")],
         ["--type", "molotov",        "--out", os.path.join(mesh_dir, "molotov.obj")],
+        ["--type", "chakram",        "--out", os.path.join(mesh_dir, "chakram.obj")],
         # Projectiles
         ["--type", "arrow",          "--out", os.path.join(mesh_dir, "arrow.obj")],
         ["--type", "bolt",           "--out", os.path.join(mesh_dir, "bolt.obj")],
@@ -125,6 +126,7 @@ def build_meshes():
         ["--type", "helmet",         "--out", os.path.join(mesh_dir, "helmet.obj")],
         ["--type", "armor",          "--out", os.path.join(mesh_dir, "armor.obj")],
         ["--type", "boots",          "--out", os.path.join(mesh_dir, "boots.obj")],
+        ["--type", "gloves",         "--out", os.path.join(mesh_dir, "gloves.obj")],
         ["--type", "ring",           "--out", os.path.join(mesh_dir, "ring.obj")],
         ["--type", "shield",         "--out", os.path.join(mesh_dir, "shield.obj")],
         # Props
@@ -167,6 +169,9 @@ def build_skins():
         ("weapon_throwing_knife_tex", "weapon_throwing_knife_tex_42.png"),
         ("weapon_wand_tex",           "weapon_wand_tex_42.png"),
         ("weapon_cleaver_tex",        "weapon_cleaver_tex_42.png"),
+        # Equipment skins (gloves; older armor/boots/helmet skins were generated manually)
+        ("gloves_plate_tex",          "gloves_plate_tex_42.png"),
+        ("gloves_leather_tex",        "gloves_leather_tex_42.png"),
         # Boss skins
         ("boss_andariel",             "boss_andariel_42.png"),
         ("boss_mephisto",             "boss_mephisto_42.png"),
@@ -245,6 +250,11 @@ def main():
     if args.all:
         print("\n=== Generating Skill Icons ===")
         ok = run([sys.executable, os.path.join(SCRIPT_DIR, "gen_skill_icons.py")]) and ok
+
+    # Always generate item icon header (tool-built inventory icons → item_icons_gen.h)
+    if args.all:
+        print("\n=== Generating Item Icons ===")
+        ok = run([sys.executable, os.path.join(SCRIPT_DIR, "gen_item_icons.py")]) and ok
 
     # Compress music WAVs to OGG if they exist (reduces binary size ~10×)
     if args.all:

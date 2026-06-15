@@ -77,6 +77,10 @@ struct Player {
     u8   soulHarvestStacks  = 0;     // current Soul Harvest kill streak stacks (max 5)
     f32  soulHarvestTimer   = 0.0f;  // time remaining on Soul Harvest buff
 
+    // Glove passive state (Frenzy: on-hit attack-speed stacks, legendary gloves)
+    u8   frenzyStacks       = 0;     // +5% attack speed each, max 6
+    f32  frenzyTimer        = 0.0f;  // shared buff duration; refreshed on hit, drops all stacks at 0
+
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;
     f32  blockTimer        = 0.0f;  // time since block started (for perfect block window)

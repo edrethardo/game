@@ -192,16 +192,32 @@ void Engine::initCallbacks() {
         // co-op players are authoritative in m_players[].
         if (ownerSlot < MAX_PLAYERS) {
             const PlayerInventory& pin = s_engine->m_inventories[ownerSlot];
+            bool localLane = (s_engine->m_netRole != NetRole::CLIENT) &&
+                             (ownerSlot < s_engine->m_splitPlayerCount);
             f32 heal = pin.bonusLifeOnHit + damage * Inventory::lifestealPct(pin) * 0.01f;
             if (heal > 0.0f) {
-                bool localLane = (s_engine->m_netRole != NetRole::CLIENT) &&
-                                 (ownerSlot < s_engine->m_splitPlayerCount);
                 if (localLane) {
                     Player& pl = s_engine->m_localPlayers[ownerSlot];
                     pl.health = fminf(pl.health + heal, pl.maxHealth);
                 } else if (s_engine->m_players[ownerSlot].active) {
                     NetPlayer& np = s_engine->m_players[ownerSlot];
                     np.health = fminf(np.health + heal, np.maxHealth);
+                }
+            }
+            // Frenzy gloves: projectile hits grant the firer an attack-speed stack — same
+            // local-lane / remote-NetPlayer routing as the heal above (deferred hit, so the
+            // melee/hitscan grant in engine_combat never sees projectile impacts).
+            const ItemInstance& gl = pin.equipped[static_cast<u32>(ItemSlot::GLOVES)];
+            if (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY &&
+                s_engine->m_itemDefs[gl.defId].legendarySkillId == SkillId::FRENZY) {
+                if (localLane) {
+                    Player& pl = s_engine->m_localPlayers[ownerSlot];
+                    if (pl.frenzyStacks < FRENZY_MAX_STACKS) pl.frenzyStacks++;
+                    pl.frenzyTimer = FRENZY_DURATION_SEC;
+                } else if (s_engine->m_players[ownerSlot].active) {
+                    NetPlayer& np = s_engine->m_players[ownerSlot];
+                    if (np.frenzyStacks < FRENZY_MAX_STACKS) np.frenzyStacks++;
+                    np.frenzyTimer = FRENZY_DURATION_SEC;
                 }
             }
         }

@@ -77,6 +77,7 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusClipSizePct        = 0.0f;
     inv.bonusReloadSpeedPct     = 0.0f;
     inv.bonusEnergyFlat         = 0.0f;  // was missing — accumulated across every recalc
+    inv.bonusAttackSpeedPct     = 0.0f;
 
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
         const ItemInstance& equipped = inv.equipped[s];
@@ -85,11 +86,12 @@ void Inventory::recalculateStats(PlayerInventory& inv) {
         for (u8 a = 0; a < equipped.affixCount; a++) {
             const Affix& affix = equipped.affixes[a];
             accumulateCommonAffix(inv, affix);
-            // Player-only affixes (NpcEquipment has no clip/reload/energy fields):
+            // Player-only affixes (NpcEquipment has no clip/reload/energy/attack-speed fields):
             switch (affix.type) {
                 case AffixType::CLIP_SIZE_PCT:      inv.bonusClipSizePct        += affix.value; break;
                 case AffixType::RELOAD_SPEED_PCT:   inv.bonusReloadSpeedPct     += affix.value; break;
                 case AffixType::ENERGY_FLAT:        inv.bonusEnergyFlat         += affix.value; break;
+                case AffixType::ATTACK_SPEED_PCT:   inv.bonusAttackSpeedPct     += affix.value; break;
                 default: break;
             }
         }
@@ -242,6 +244,10 @@ static WeaponDef buildWeaponDef(const ItemDef& def, const PlayerInventory& inv, 
 
     // Cooldown reduced by cooldownReduction (0.0–0.5)
     wd.cooldown        = def.baseCooldown * (1.0f - inv.bonusCooldownReduction);
+    // Attack speed (gloves affix): +X% attack rate = cooldown / (1 + X/100). Dividing (not
+    // subtracting) keeps stacking sane — +100% attack speed exactly doubles the rate and the
+    // cooldown can never reach zero from this affix alone.
+    wd.cooldown        = wd.cooldown / (1.0f + inv.bonusAttackSpeedPct / 100.0f);
     if (wd.cooldown < 0.05f) wd.cooldown = 0.05f; // hard minimum to prevent division by zero
 
     wd.range           = def.baseRange;

@@ -171,6 +171,7 @@ private:
     SkillId        m_armorAuras[MAX_LOCAL_PLAYERS] = {};
     SkillId        m_weaponProcs[MAX_LOCAL_PLAYERS] = {};
     SkillId        m_ringPassives[MAX_LOCAL_PLAYERS] = {};
+    SkillId        m_glovesPassives[MAX_LOCAL_PLAYERS] = {};
     bool           m_inventoryOpenArr[MAX_LOCAL_PLAYERS] = {};
     f32            m_hitMarkerTimers[MAX_LOCAL_PLAYERS] = {};
     f32            m_potionCooldowns[MAX_LOCAL_PLAYERS] = {};
@@ -185,6 +186,7 @@ private:
     SkillId     m_armorAura = SkillId::NONE;
     SkillId     m_weaponProc = SkillId::NONE;
     SkillId     m_ringPassive = SkillId::NONE;
+    SkillId     m_glovesPassive = SkillId::NONE;  // FRENZY while legendary gloves equipped
     bool        m_inventoryOpen = false;
     ViewmodelState  m_viewmodelState;
 
@@ -243,6 +245,11 @@ private:
     // before the IN_GAME swapBuffers in renderGame(). Used for Steam/marketing hero shots.
     bool m_hideHud           = false;
     bool m_screenshotPending = false;
+    u32  m_screenshotSeq     = 0;    // monotonic counter for screenshot_NNNN.png filenames
+    // Auto-screenshot (CLI --screenshot-interval): capture every m_shotInterval seconds while
+    // IN_GAME (0 = off). m_shotTimer accumulates in-game frame time toward the next shot.
+    f64  m_shotInterval      = 0.0;
+    f64  m_shotTimer         = 0.0;
 
     // Prediction ring (CLIENT role, M3) — stores (input, predicted-state) per clientTick
     // so that clientNetPost can compare the server's authoritative pose against what we

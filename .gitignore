@@ -21,6 +21,11 @@ assets/config/controls.json
 assets/audio/
 save_*.dat
 screenshot_*.png
+# Generated marketing/store assets — all regenerable via the tools/ scripts
+# (gen_steam_capsules.py, gen_steam_library.py, gen_trailer_frames.py, gen_logo_walk.py, gen_manual.py)
+store/
+*.mp4
+*.gif
 __pycache__/
 *.pyc
 logs/

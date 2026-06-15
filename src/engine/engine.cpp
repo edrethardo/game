@@ -167,7 +167,7 @@ void Engine::onFireWeapon(u8 playerSlot, const u8* data, u32 size) {
 // per-player save block so we can simply memcpy the trivially-copyable structs.
 // Versioned so future struct changes can be rejected cleanly.
 // ---------------------------------------------------------------------------
-static constexpr u32 INVENTORY_SYNC_VERSION = 1;
+static constexpr u32 INVENTORY_SYNC_VERSION = 2; // v2: PlayerInventory gained GLOVES slot + attack-speed cache (save v3)
 
 namespace {
 struct InventorySyncBody {
@@ -605,6 +605,13 @@ void Engine::run() {
             }
         }
 
+        // Auto-screenshot (CLI --screenshot-interval): once IN_GAME, flag a capture every
+        // m_shotInterval seconds. Set before render() so it is serviced (and saved) this frame.
+        if (m_shotInterval > 0.0 && m_gameState == GameState::IN_GAME) {
+            m_shotTimer += frameTime;
+            if (m_shotTimer >= m_shotInterval) { m_shotTimer = 0.0; m_screenshotPending = true; }
+        }
+
         render(static_cast<f32>(m_accumulator / FIXED_DT));
         m_frameCount++;
 
@@ -640,6 +647,7 @@ void Engine::run() {
     X(m_armorAura,        m_armorAuras)     \
     X(m_weaponProc,       m_weaponProcs)    \
     X(m_ringPassive,      m_ringPassives)   \
+    X(m_glovesPassive,    m_glovesPassives) \
     X(m_inventoryOpen,    m_inventoryOpenArr) \
     X(m_hitMarkerTimer,   m_hitMarkerTimers)\
     X(m_potionCooldown,   m_potionCooldowns)\

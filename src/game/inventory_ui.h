@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "game/item.h"  // ItemSlot::COUNT — keeps the equipment-panel row count in lockstep
 
 // Shared layout constants and hit-testing for inventory, equipment, and quickbar panels.
 // Used by both HUD rendering (hud.cpp) and interaction logic (engine.cpp).
@@ -16,7 +17,10 @@ namespace InventoryUI {
     static constexpr f32 EQ_W   = 240.0f;
     static constexpr f32 EQ_H   = 32.0f;
     static constexpr f32 EQ_GAP = 5.0f;
-    static constexpr u32 EQ_SLOTS = 6;
+    // Derived from the item-slot enum so adding a slot (e.g. GLOVES) automatically extends the
+    // equipment panel's controller cursor range AND its mouse hit-test (was a hardcoded 6, which
+    // left a newly-added 7th slot unreachable on controller-only platforms like Switch).
+    static constexpr u32 EQ_SLOTS = static_cast<u32>(ItemSlot::COUNT);
 
     // Quickbar (bottom center)
     static constexpr f32 QB_SIZE = 40.0f;
