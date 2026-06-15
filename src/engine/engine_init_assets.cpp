@@ -400,6 +400,38 @@ void Engine::initAssets() {
         }
     }
 
+    // Resolve per-slot tier mesh IDs for armor items (helmet/chest/boots/gloves × light/medium/heavy).
+    // MEDIUM tier reuses the base mesh name (chest slot uses "armor" to match the existing mesh);
+    // LIGHT/HEAVY append "_light"/"_heavy". Falls back to the item's own meshId if the tier mesh
+    // isn't registered (e.g. during development when only some tiers have generated meshes).
+    for (u32 i = 0; i < m_itemDefCount; i++) {
+        ItemDef& d = m_itemDefs[i];
+        if (d.slot == ItemSlot::HELMET || d.slot == ItemSlot::ARMOR ||
+            d.slot == ItemSlot::BOOTS  || d.slot == ItemSlot::GLOVES) {
+            const char* base = (d.slot == ItemSlot::HELMET) ? "helmet"
+                             : (d.slot == ItemSlot::ARMOR)  ? "chest"
+                             : (d.slot == ItemSlot::BOOTS)  ? "boots" : "gloves";
+            ArmorTier tier = armorTierFromMaterial(d.materialName);
+            char tierMeshName[40];
+            if (tier == ArmorTier::MEDIUM)
+                std::snprintf(tierMeshName, sizeof(tierMeshName), "%s",
+                              (d.slot == ItemSlot::ARMOR) ? "armor" : base);
+            else
+                std::snprintf(tierMeshName, sizeof(tierMeshName), "%s%s", base,
+                              tier == ArmorTier::LIGHT ? "_light" : "_heavy");
+
+            // Walk the mesh registry for a name match (same pattern as meshId resolution above)
+            u8 found = d.meshId; // fallback to the item's own mesh if tier mesh not registered
+            for (u32 m = 0; m < m_meshDefCount; m++) {
+                if (std::strcmp(tierMeshName, m_meshDefs[m].name) == 0) {
+                    found = static_cast<u8>(m);
+                    break;
+                }
+            }
+            d.tierMeshId = found;
+        }
+    }
+
     // Resolve enemy def visuals (material names → IDs, mesh names → mesh registry IDs)
     EnemyLoader::resolveVisuals(m_enemyDefs);
     for (u32 i = 0; i < m_enemyDefs.count; i++) {
