@@ -698,6 +698,10 @@ private:
     void renderEntities(u32 sw, u32 sh);
     void renderProjectilesAndEffects(u32 sw, u32 sh);
     void renderWorldItems(u32 sw, u32 sh);
+    // Draw the equipped weapon + armor overlays onto a 3rd-person body at (pos, yaw, scale).
+    // `anim` = weapon anim flag bits (bit0 attacking, bit1 reloading). Used by the split-screen
+    // partner, remote players, and the character-inspect screen.
+    void submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim, const PlayerInventory& inv);
     void renderSpeechBubbles(u32 sw, u32 sh);
     // Screen-space interaction prompts (floor-descend + item-pickup button hints).
     // Drawn in the NATIVE HUD pass (not the scaled 3D pass) so the button-glyph

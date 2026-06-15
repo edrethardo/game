@@ -379,26 +379,96 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                     Renderer::submit(m_unlitShader, defaultTex, m_cubeMesh, model, bounds, col);
                 }
 
-                // Render equipped weapon in hand
-                const ItemInstance& wpn = m_inventories[otherP].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-                if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
-                    u8 wpnMeshId = m_itemDefs[wpn.defId].meshId;
-                    u8 wpnMatId  = m_itemDefs[wpn.defId].materialId;
-                    if (wpnMeshId > 0 && m_meshDefs[wpnMeshId].mesh.vao) {
-                        Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
-                        Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
-                        Vec3 wpnPos = pos + Vec3{0, 0.8f, 0} + right * 0.35f + fwd * 0.3f;
-                        Mat4 wpnModel = Mat4::translate(wpnPos)
-                                      * Mat4::rotateY(yaw)
-                                      * Mat4::scale({0.4f, 0.4f, 0.4f});
-                        AABB wpnBounds = {wpnPos - Vec3{0.2f,0.2f,0.2f}, wpnPos + Vec3{0.2f,0.2f,0.2f}};
-                        const Material* wm = MaterialSystem::get(wpnMatId);
-                        Renderer::submit(m_basicShader, wm ? wm->texture : defaultTex,
-                                         m_meshDefs[wpnMeshId].mesh, wpnModel, wpnBounds,
-                                         wm ? wm->tint : Vec4{1,1,1,1});
-                    }
-                }
+                // Compute anim flags for the partner (same bits used by the network path:
+                // bit0=attacking, bit1=reloading) so weapon thrust/drop reflects live state.
+                // WeaponState lives in the NetPlayer at the same index as the local lane.
+                u8 partnerAnim = 0;
+                if (m_players[otherP].weaponState.cooldownTimer > 0.0f) partnerAnim |= 1;
+                if (m_players[otherP].weaponState.reloading)             partnerAnim |= 2;
+
+                // Draw weapon + all equipped armor overlays via the shared helper.
+                submitPlayerEquipment(pos, yaw, scale, partnerAnim, m_inventories[otherP]);
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// submitPlayerEquipment — renders the equipped weapon + 4 armor-slot overlays
+// on a 3rd-person body at (pos, yaw, scale). Called for the split-screen partner
+// and (in later tasks) remote players and the character-inspect screen.
+// ---------------------------------------------------------------------------
+void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
+                                   const PlayerInventory& inv) {
+    // Fallback texture: material slot 0 is always the white placeholder.
+    const Texture& defaultTex = MaterialSystem::get(0)->texture;
+
+    // --- Weapon: hand-attach math mirrored from the net remote-player block ---
+    const ItemInstance& wpn = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
+    if (wpn.defId < m_itemDefCount) {
+        u8 wMesh = m_itemDefs[wpn.defId].meshId;
+        u8 wMat  = m_itemDefs[wpn.defId].materialId;
+        if (wMesh > 0 && wMesh < m_meshDefCount && m_meshDefs[wMesh].mesh.vao) {
+            // Thrust forward while attacking, drop while reloading (same telegraph as net path).
+            f32 thrust = (anim & 1) ? 0.25f : 0.0f;
+            f32 drop   = (anim & 2) ? -0.25f : 0.0f;
+            Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+            Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
+            Vec3 wp = pos + Vec3{0, 0.8f + drop, 0}
+                          + right * (0.35f * scale)
+                          + fwd   * ((0.3f + thrust) * scale);
+            Mat4 mm = Mat4::translate(wp)
+                    * Mat4::rotateY(yaw)
+                    * Mat4::scale({0.4f * scale, 0.4f * scale, 0.4f * scale});
+            AABB wb = {wp - Vec3{0.2f, 0.2f, 0.2f}, wp + Vec3{0.2f, 0.2f, 0.2f}};
+            const Material* m = MaterialSystem::get(wMat);
+            Renderer::submit(m_basicShader, m ? m->texture : defaultTex,
+                             m_meshDefs[wMesh].mesh, mm, wb,
+                             m ? m->tint : Vec4{1, 1, 1, 1});
+        }
+    }
+
+    // --- Armor overlays: helmet, chest, boots, gloves ---
+    // Each slot's tierMeshId is a pre-resolved mesh that matches the item's weight tier
+    // (light/medium/heavy) and body region, registered in init_assets.
+    struct ArmorSlot { ItemSlot slot; Vec3 bodyOffset; };
+    const ArmorSlot kArmorSlots[] = {
+        { ItemSlot::HELMET, {0, 0.92f, 0} },   // sits at head height
+        { ItemSlot::ARMOR,  {0, 0.55f, 0} },   // torso center
+        { ItemSlot::BOOTS,  {0, 0.06f, 0} },   // just off floor
+        { ItemSlot::GLOVES, {0, 0.55f, 0} },   // hands (arm-height ≈ torso)
+    };
+    for (const ArmorSlot& as : kArmorSlots) {
+        const ItemInstance& it = inv.equipped[static_cast<u32>(as.slot)];
+        if (it.defId >= m_itemDefCount) continue;          // empty slot
+        const ItemDef& def = m_itemDefs[it.defId];
+        u8 mesh = def.tierMeshId;
+        if (mesh == 0 || mesh >= m_meshDefCount) continue; // no tier mesh registered
+        if (!m_meshDefs[mesh].mesh.vao) continue;
+
+        const Material* mat = MaterialSystem::get(def.materialId);
+        Vec4 tint = mat ? mat->tint : Vec4{1, 1, 1, 1};
+        // Legendary items get a warm golden cast to hint at their quality on the body.
+        if (it.rarity == Rarity::LEGENDARY) {
+            tint = {tint.x * 1.3f, tint.y * 1.15f, tint.z * 0.7f, tint.w};
+        }
+
+        Vec3 ap = pos + as.bodyOffset * scale;
+        Mat4 mm = Mat4::translate(ap)
+                * Mat4::rotateY(yaw)
+                * Mat4::scale({scale, scale, scale});
+        Renderer::submit(m_basicShader, mat ? mat->texture : defaultTex,
+                         m_meshDefs[mesh].mesh, mm, m_meshDefs[mesh].bounds, tint);
+
+        // Gloves: a second copy mirrored to the off-hand side. Both hands share the
+        // same mesh (and therefore same tier/material) so we just translate laterally.
+        if (as.slot == ItemSlot::GLOVES) {
+            Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+            Mat4 m2 = Mat4::translate(ap + right * (-0.5f * scale))
+                    * Mat4::rotateY(yaw)
+                    * Mat4::scale({scale, scale, scale});
+            Renderer::submit(m_basicShader, mat ? mat->texture : defaultTex,
+                             m_meshDefs[mesh].mesh, m2, m_meshDefs[mesh].bounds, tint);
         }
     }
 }
