@@ -40,6 +40,10 @@ enum struct ItemSlot : u8 {
     COUNT
 };
 
+// Armor visual weight class, derived from an armor item's material (cloth/leather/plate).
+// Drives which tier mesh renders on the body (see armorTierFromMaterial / engine_init_assets).
+enum struct ArmorTier : u8 { LIGHT, MEDIUM, HEAVY, COUNT };
+
 // ---- Affix stat types ----
 
 enum struct AffixType : u8 {
@@ -59,6 +63,9 @@ enum struct AffixType : u8 {
     ENERGY_FLAT,        // flat bonus to max energy
     LIFESTEAL_PCT,      // % of damage dealt healed back (distinct from flat LIFE_ON_HIT)
     ATTACK_SPEED_PCT,   // % faster weapon attacks (divides effective cooldown) — gloves signature
+    ARMOR,              // flat armor rating → diminishing-returns incoming-damage mitigation (defensive pack)
+    HEALTH_REGEN,       // flat HP restored per second (passive regen) — defensive pack
+    THORNS_PCT,         // % of damage taken reflected back at the attacker — defensive pack
     COUNT
     // NOTE: affix type is serialized by its integer value (see _REMOVED_RANGE_BONUS
     // and engine_persist.cpp). Only ever APPEND new types before COUNT — never insert
@@ -262,9 +269,15 @@ struct ItemDef {
     // Visual identity — resolved at init from mesh/material name strings
     u8  meshId     = 0;   // index into Engine::m_meshDefs (0 = cube fallback)
     u8  materialId = 0;   // index into MaterialSystem
+    u8  tierMeshId = 0;   // armor slots only: resolved tier mesh (helmet/chest/boots/gloves _light/_medium/_heavy)
 
     // Loot generation weight (higher = more likely to drop)
     f32 dropWeight = 1.0f;
+
+    // Infinity Chakram: a chakram whose thrown disc never expires and ricochets forever, despawning
+    // only on hitting a target. Drives both the projectile flags at fire time and the ∞ icon. Lives
+    // on ItemDef (the JSON-loaded table) which is NOT serialized — adding it is save-safe.
+    bool infiniteFlight = false;
 
     // Mesh/material name strings for deferred resolution (not serialized at runtime)
     char meshName[32]     = {};
@@ -501,6 +514,10 @@ inline bool isDragActive(const InventoryDragState& ds) {
     return ds.source != DragSource::NONE && ds.dragging;
 }
 
+// Derive armor weight class from a material name: contains "plate"->HEAVY, "leather"->MEDIUM,
+// "cloth"->LIGHT; anything else (incl. legendary_*) -> MEDIUM. Case-insensitive substring match.
+ArmorTier armorTierFromMaterial(const char* materialName);
+
 // Skill ID string lookup (used by item and boss loaders)
 #include <string>
 SkillId skillIdFromString(const std::string& s);
@@ -560,6 +577,12 @@ namespace Inventory {
     // Computed on demand rather than cached on PlayerInventory — that struct is serialized
     // raw, so it must not gain new fields (see the WARNING on PlayerInventory).
     f32          lifestealPct(const PlayerInventory& inv);
+    // Defensive pack — summed on demand for the same save-safety reason as lifestealPct (no cached
+    // PlayerInventory field). armorRating = flat armor; healthRegenRate = HP/sec; thornsPct = % of
+    // damage-taken reflected. Stamped into the Player's transient combat cache each frame.
+    f32          armorRating(const PlayerInventory& inv);
+    f32          healthRegenRate(const PlayerInventory& inv);
+    f32          thornsPct(const PlayerInventory& inv);
 }
 
 namespace WorldItemSystem {

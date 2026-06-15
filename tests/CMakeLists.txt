@@ -27,7 +27,9 @@ add_executable(dungeon_tests
     net/test_snapshot_entity.cpp
     engine/test_lag_comp_ring.cpp
     game/test_cooldown_gate.cpp
+    game/test_armor_tier.cpp
     world/test_pathfinder.cpp
+    world/test_raycast.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp
     ${CMAKE_SOURCE_DIR}/src/net/input_wire.cpp
@@ -41,6 +43,8 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/net/snapshot.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/lag_comp_ring.cpp
     ${CMAKE_SOURCE_DIR}/src/core/log.cpp
+    ${CMAKE_SOURCE_DIR}/src/game/item_loader.cpp
+    stubs_material.cpp
     ${CMAKE_SOURCE_DIR}/src/world/pathfinder.cpp
     ${CMAKE_SOURCE_DIR}/src/world/level_grid.cpp
     ${CMAKE_SOURCE_DIR}/src/world/raycast.cpp

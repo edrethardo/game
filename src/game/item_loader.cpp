@@ -3,10 +3,29 @@
 #include "core/log.h"
 #include "renderer/material.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <json/nlohmann/json.hpp>
+
+// Case-insensitive substring search (no <algorithm>/locale dependency in hot paths).
+static bool containsCI(const char* hay, const char* needle) {
+    if (!hay || !needle || !*needle) return false;
+    for (; *hay; ++hay) {
+        const char* h = hay; const char* n = needle;
+        while (*h && *n && std::tolower((unsigned char)*h) == std::tolower((unsigned char)*n)) { ++h; ++n; }
+        if (!*n) return true;
+    }
+    return false;
+}
+
+ArmorTier armorTierFromMaterial(const char* materialName) {
+    if (containsCI(materialName, "plate"))   return ArmorTier::HEAVY;
+    if (containsCI(materialName, "cloth"))   return ArmorTier::LIGHT;
+    if (containsCI(materialName, "leather")) return ArmorTier::MEDIUM;
+    return ArmorTier::MEDIUM;  // sensible default (incl. legendary_* and unknowns)
+}
 
 using json = nlohmann::json;
 
@@ -149,6 +168,9 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "energy_flat"        || s == "ENERGY_FLAT")        return AffixType::ENERGY_FLAT;
     if (s == "lifesteal_pct"      || s == "LIFESTEAL_PCT")      return AffixType::LIFESTEAL_PCT;
     if (s == "attack_speed_pct"   || s == "ATTACK_SPEED_PCT")   return AffixType::ATTACK_SPEED_PCT;
+    if (s == "armor"              || s == "ARMOR")              return AffixType::ARMOR;
+    if (s == "health_regen"       || s == "HEALTH_REGEN")       return AffixType::HEALTH_REGEN;
+    if (s == "thorns_pct"         || s == "THORNS_PCT")         return AffixType::THORNS_PCT;
     return AffixType::DAMAGE_FLAT;
 }
 
@@ -229,6 +251,7 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
             def.weaponSubtype = weaponSubtypeFromString(subtypeStr);
 
             def.dropWeight = entry.value("dropWeight", 1.0f);
+            def.infiniteFlight = entry.value("infiniteFlight", false);
 
             // Store mesh/material names for deferred resolution
             std::string meshStr = entry.value("mesh", "");
