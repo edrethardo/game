@@ -251,6 +251,19 @@ void Engine::shutdown() {
     LevelGridSystem::shutdown(m_level.grid);
 
     ParticleSystem::shutdownBatchBuffers(m_particles);
+
+    // Character-inspect offscreen FBO (created lazily in renderInspectModelToFbo). The render-scale
+    // m_sceneFbo is owned by the GL context teardown, but the inspect target is explicit here so the
+    // texture/renderbuffer don't leak across an init/shutdown cycle (e.g. window recreation).
+    if (m_inspectFbo)      glDeleteFramebuffers(1, &m_inspectFbo);
+    if (m_inspectColorTex) glDeleteTextures(1, &m_inspectColorTex);
+    if (m_inspectDepthRbo) glDeleteRenderbuffers(1, &m_inspectDepthRbo);
+    m_inspectFbo = m_inspectColorTex = m_inspectDepthRbo = m_inspectFboW = m_inspectFboH = 0;
+    // Unit quad used by drawTexturedQuad to composite the inspect FBO into screen-space.
+    if (m_inspectQuadVao) glDeleteVertexArrays(1, &m_inspectQuadVao);
+    if (m_inspectQuadVbo) glDeleteBuffers(1, &m_inspectQuadVbo);
+    m_inspectQuadVao = m_inspectQuadVbo = 0;
+
     MaterialSystem::shutdown();
     ShaderSystem::destroy(m_basicShader);
     ShaderSystem::destroy(m_unlitShader);

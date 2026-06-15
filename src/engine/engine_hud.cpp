@@ -531,6 +531,11 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     if (m_menu.confirmQuit) {
         // Paused: hide the entire game HUD (and inventory). Only the pause overlay
         // below is drawn, so the screen looks unremarkable at a glance.
+    } else if (m_characterScreenOpen) {
+        // Character-inspect overlay: live rotatable armored model (left) + grouped stats sheet
+        // (right). The 3D model was rendered into m_inspectColorTex earlier in render(); this
+        // composites it and draws the stat text. Takes priority over the inventory branch.
+        renderCharacterInspect(sw, sh);
     } else if (m_inventoryOpen) {
         renderInventoryHUD(sw, sh);
     } else {
@@ -793,7 +798,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         FontSystem::drawText(sw, sh, cx - hintW * 0.5f, cy - 50.0f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 
-    renderTutorials(sw, sh);
+    // Tutorial tooltips are suppressed on the character-inspect screen so they don't draw over the
+    // stats sheet (the inspect overlay owns the whole screen while open).
+    if (!m_characterScreenOpen)
+        renderTutorials(sw, sh);
 
     // Quickbar — always visible at bottom of screen
     {

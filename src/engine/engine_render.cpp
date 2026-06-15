@@ -491,10 +491,11 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
     }
 }
 
-// Lazily (re)create the offscreen scene render target at w x h — a linear-filtered RGB colour texture
+// Lazily (re)create an offscreen render target at w x h — a linear-filtered RGB colour texture
 // + 24-bit depth renderbuffer. Backs the internal render-scale path (render the 3D scene low-res, then
-// upscale-blit to the window). Recreated only when the size changes.
-static void ensureSceneFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& curH, u32 w, u32 h) {
+// upscale-blit to the window) AND the character-inspect model panel. Recreated only when the size
+// changes. A method (not a file-static) so engine_render_character.cpp can reuse it.
+void Engine::ensureFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& curH, u32 w, u32 h) {
     if (fbo && curW == w && curH == h) return;
     if (!fbo)      glGenFramebuffers(1, &fbo);
     if (!colorTex) glGenTextures(1, &colorTex);
@@ -541,7 +542,7 @@ void Engine::render(f32 alpha) {
     if (useFbo) {
         baseW = (u32)((f32)sw * m_renderScale); if (baseW < 16) baseW = 16;
         baseH = (u32)((f32)sh * m_renderScale); if (baseH < 16) baseH = 16;
-        ensureSceneFbo(m_sceneFbo, m_sceneColorTex, m_sceneDepthRbo, m_sceneFboW, m_sceneFboH, baseW, baseH);
+        ensureFbo(m_sceneFbo, m_sceneColorTex, m_sceneDepthRbo, m_sceneFboW, m_sceneFboH, baseW, baseH);
         glBindFramebuffer(GL_FRAMEBUFFER, m_sceneFbo);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
@@ -733,6 +734,20 @@ void Engine::render(f32 alpha) {
         glScissor(0, 0, (s32)sw, (s32)sh);
         glEnable(GL_SCISSOR_TEST);    // re-enable (full-window) for the native HUD pass; loop disables it after
         hudW = sw; hudH = sh;
+    }
+
+    // Character-inspect screen: render the rotatable armored model into its offscreen FBO now (it
+    // binds its own framebuffer + viewport and restores framebuffer 0 / the native viewport after),
+    // so the 2D composite in renderCharacterInspect (driven from the HUD pass below) can sample it.
+    // Done before the HUD pass and only for the active lane (the inspect screen is mouse-driven /
+    // single-player; split-screen runs at render scale 1.0 so no FBO upscale is in flight here).
+    if (m_characterScreenOpen && !m_hideHud) {
+        renderInspectModelToFbo();
+        // renderInspectModelToFbo restores framebuffer 0; re-assert the native HUD viewport/scissor
+        // (it set the inspect-sized viewport internally) so the HUD pass below draws full-window.
+        glViewport(0, 0, (s32)hudW, (s32)hudH);
+        glScissor(0, 0, (s32)hudW, (s32)hudH);
+        glEnable(GL_SCISSOR_TEST);
     }
 
     // Cinematic mode (F10) hides all HUD/overlay UI so F8 screenshots capture clean key art;

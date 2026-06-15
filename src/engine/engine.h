@@ -587,13 +587,19 @@ private:
     // Internal render-scale: the 3D scene renders to an offscreen FBO at this fraction of the window
     // resolution, then is upscaled (linear blit) to fill the screen — cuts fragment fill/overdraw on
     // the fill-bound Switch GPU while still filling the display. 1.0 = native (FBO bypassed). Cycled
-    // by F6 (desktop) / L+R3 (Switch). FBO objects below are created lazily in ensureSceneFbo().
+    // by F6 (desktop) / L+R3 (Switch). FBO objects below are created lazily in ensureFbo().
 #ifdef __SWITCH__
     f32 m_renderScale = 0.65f; // confirmed: holds a steady 60 fps in handheld with a crisp native HUD
 #else
     f32 m_renderScale = 1.0f;
 #endif
     u32 m_sceneFbo = 0, m_sceneColorTex = 0, m_sceneDepthRbo = 0, m_sceneFboW = 0, m_sceneFboH = 0;
+    // Character-inspect offscreen render target: the player model + equipment is drawn 3D into this
+    // FBO each frame the screen is open, then composited as a 2D panel by renderCharacterInspect.
+    // All five FBO objects + the two quad GL objects below are created lazily in ensureFbo() /
+    // drawTexturedQuad() and freed explicitly in Engine::shutdown().
+    u32 m_inspectFbo = 0, m_inspectColorTex = 0, m_inspectDepthRbo = 0, m_inspectFboW = 0, m_inspectFboH = 0;
+    u32 m_inspectQuadVao = 0, m_inspectQuadVbo = 0; // unit quad for compositing the FBO into screen-space
 
     static constexpr f32 SWITCH_FAR_PLANE     = 60.0f;
     static constexpr u32 SWITCH_MAX_ENTITIES  = 64;
@@ -729,6 +735,14 @@ private:
 
     // renderHUD helpers — extracted contiguous blocks, called in original order
     void renderInventoryHUD(u32 sw, u32 sh);          // inventory screen branch
+    // Character-inspect screen (C key / LB+R3): a live rotatable armored model rendered into an
+    // offscreen FBO (renderInspectModelToFbo) composited beside a grouped stats sheet
+    // (renderCharacterInspect). Implemented in engine_render_character.cpp.
+    void renderInspectModelToFbo();
+    void renderCharacterInspect(u32 sw, u32 sh);
+    // Lazily (re)create an offscreen FBO (RGB color tex + depth RBO) at w x h. Body moved from the
+    // former file-static ensureSceneFbo so both the render-scale path and the inspect screen share it.
+    void ensureFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& curH, u32 w, u32 h);
     void renderSkillsHUD(u32 sw, u32 sh);             // class skill bar + equip bar + active skill display
     void renderMinimapAndFloor(u32 sw, u32 sh);       // minimap + door blip + floor text + potion cooldown
     void renderTutorials(u32 sw, u32 sh);             // tutorial tooltip blocks
