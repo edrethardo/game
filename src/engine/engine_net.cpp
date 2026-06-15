@@ -696,6 +696,33 @@ void Engine::serverNetPost(f32 dt) {
         // server-rejected client prediction is never under-gated.
         populateSnapshotCooldowns();
 
+        // Post-build: fill armor tier-mesh ids per player slot. buildFromState has no
+        // inventory access, so we patch via getLastSnapshotMutable() (same pattern as
+        // populateSnapshotCooldowns). armorMeshId[k] is the tierMeshId of the equipped
+        // piece in slot k (0=HELMET, 1=ARMOR/chest, 2=BOOTS, 3=GLOVES); 0 means empty.
+        {
+            WorldSnapshot* snap = Server::getLastSnapshotMutable();
+            if (snap) {
+                const ItemSlot kArmorSlots[4] = {
+                    ItemSlot::HELMET, ItemSlot::ARMOR, ItemSlot::BOOTS, ItemSlot::GLOVES
+                };
+                for (u32 pi = 0; pi < snap->playerCount; ++pi) {
+                    SnapPlayer& sp = snap->players[pi];
+                    const u8 slot = sp.slotIndex;
+                    if (slot >= MAX_PLAYERS || !m_players[slot].active) {
+                        for (int k = 0; k < 4; ++k) sp.armorMeshId[k] = 0;
+                        continue;
+                    }
+                    const PlayerInventory& inv = m_inventories[slot];
+                    for (int k = 0; k < 4; ++k) {
+                        const ItemInstance& it = inv.equipped[static_cast<u32>(kArmorSlots[k])];
+                        sp.armorMeshId[k] = (!isItemEmpty(it) && it.defId < m_itemDefCount)
+                                            ? m_itemDefs[it.defId].tierMeshId : 0;
+                    }
+                }
+            }
+        }
+
         // D7.3 — Per-slot send: full or delta based on baseline tracker state.
         for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
             if (!m_players[slot].active) continue;
@@ -951,7 +978,7 @@ void Engine::clientNetPost(f32 dt) {
         m_renderInterp.playerPositions, m_renderInterp.playerYaws,
         m_renderInterp.playerActive, m_renderInterp.playerHealth, m_renderInterp.playerMaxHealth,
         m_renderInterp.playerAnimFlags, m_renderInterp.playerWeaponMeshId,
-        m_renderInterp.playerClass);
+        m_renderInterp.playerClass, m_renderInterp.playerArmorMeshId);
     Client::interpolateEntities(m_renderInterp.entities, dt);
     // Boss / non-boss halfExtents are now wire-authoritative per SnapEntity (Audit P2 #4).
     // The prior post-pass that looked up BossDef::halfExtents here was made redundant by

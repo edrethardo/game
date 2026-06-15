@@ -82,7 +82,8 @@ namespace Client {
                                    Vec3* outPositions, f32* outYaws,
                                    bool* outActive, f32* outHealth, f32* outMaxHealth,
                                    u8* outAnimFlags = nullptr, u8* outWeaponMeshId = nullptr,
-                                   u8* outPlayerClass = nullptr);
+                                   u8* outPlayerClass = nullptr,
+                                   u8 (*outArmorMeshId)[4] = nullptr);
 
     // Interpolate entities from snapshots into a render-only pool. `dt` is the
     // frame delta time; used to tick each entity's procedural `animTimer` locally

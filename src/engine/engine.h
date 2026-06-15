@@ -441,6 +441,10 @@ private:
         f32            playerMaxHealth[MAX_PLAYERS];
         u8             playerAnimFlags[MAX_PLAYERS]; // bit0=attacking, bit1=reloading, bit2=dead
         u8             playerWeaponMeshId[MAX_PLAYERS]; // equipped weapon mesh (wire; clients lack remote inventories)
+        // Equipped armor tier-mesh ids per player slot — [slot][k] where k: 0=helmet,
+        // 1=chest, 2=boots, 3=gloves. 0 = empty. Populated from SnapPlayer.armorMeshId
+        // each snapshot so clients render remote players' armor without holding inventories.
+        u8             playerArmorMeshId[MAX_PLAYERS][4];
         // PlayerClass (cast to u8) of each remote player — populated from SnapPlayer.playerClass
         // each snapshot. Without this the renderer can't pick the per-class mesh for a remote
         // (the client's NetPlayer.playerClass for non-local slots is never set).
@@ -702,6 +706,10 @@ private:
     // `anim` = weapon anim flag bits (bit0 attacking, bit1 reloading). Used by the split-screen
     // partner, remote players, and the character-inspect screen.
     void submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim, const PlayerInventory& inv);
+    // Mesh-id variant for clients that have wire mesh ids but no remote inventory.
+    // Material resolves to default texture/tint (material id 0) — adequate for remote view.
+    void submitPlayerEquipmentIds(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
+                                  u8 weaponMeshId, const u8 armorMeshId[4]);
     void renderSpeechBubbles(u32 sw, u32 sh);
     // Screen-space interaction prompts (floor-descend + item-pickup button hints).
     // Drawn in the NATIVE HUD pass (not the scaled 3D pass) so the button-glyph

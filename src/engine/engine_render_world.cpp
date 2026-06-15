@@ -300,41 +300,20 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                                      {0.5f, 0.5f, 0.5f, 1.0f});
                 }
 
-                // Render equipped weapon in hand. The weapon MESH is authoritative: on a CLIENT
-                // the remote's inventory isn't replicated yet (SV_INVENTORY_SYNC TODO), so use the
-                // wired weaponMeshId (material isn't wired → default texture). The host has the
-                // full inventory and uses the item's real mesh + material.
-                u8 wpnMeshId = 0, wpnMatId = 0; bool haveWpnMat = false;
-                u8 anim = 0; // bit0=attacking, bit1=reloading — drives the M7 telegraph below
+                // Render equipped weapon + armor overlays. CLIENT uses wire mesh ids from the
+                // snapshot (no remote inventory); HOST uses the real inventory for correct
+                // mesh + material. submitPlayerEquipment / submitPlayerEquipmentIds share
+                // the same body-attach math so the visual result is consistent.
                 if (m_netRole == NetRole::CLIENT) {
-                    wpnMeshId = m_renderInterp.playerWeaponMeshId[i];
-                    anim = m_renderInterp.playerAnimFlags[i];
+                    u8 anim = m_renderInterp.playerAnimFlags[i];
+                    submitPlayerEquipmentIds(pos, yaw, scale, anim,
+                                            m_renderInterp.playerWeaponMeshId[i],
+                                            m_renderInterp.playerArmorMeshId[i]);
                 } else {
-                    const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-                    if (!isItemEmpty(wpn) && wpn.defId < m_itemDefCount) {
-                        wpnMeshId = m_itemDefs[wpn.defId].meshId;
-                        wpnMatId  = m_itemDefs[wpn.defId].materialId;
-                        haveWpnMat = true;
-                    }
+                    u8 anim = 0;
                     if (m_players[i].weaponState.cooldownTimer > 0.0f) anim |= 1;
                     if (m_players[i].weaponState.reloading)            anim |= 2;
-                }
-                if (wpnMeshId > 0 && m_meshDefs[wpnMeshId].mesh.vao) {
-                    Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
-                    Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
-                    // M7: thrust the weapon forward while attacking and drop it while reloading so
-                    // remote players visibly telegraph their actions (anim state rides the wire).
-                    f32 thrust = (anim & 1) ? 0.25f : 0.0f;
-                    f32 drop   = (anim & 2) ? -0.25f : 0.0f;
-                    Vec3 wpnPos = pos + Vec3{0, 0.8f + drop, 0} + right * 0.35f + fwd * (0.3f + thrust);
-                    Mat4 wpnModel = Mat4::translate(wpnPos)
-                                  * Mat4::rotateY(yaw)
-                                  * Mat4::scale({0.4f, 0.4f, 0.4f});
-                    AABB wpnBounds = {wpnPos - Vec3{0.2f,0.2f,0.2f}, wpnPos + Vec3{0.2f,0.2f,0.2f}};
-                    const Material* wm = haveWpnMat ? MaterialSystem::get(wpnMatId) : nullptr;
-                    Renderer::submit(m_basicShader, wm ? wm->texture : defaultTex,
-                                     m_meshDefs[wpnMeshId].mesh, wpnModel, wpnBounds,
-                                     wm ? wm->tint : Vec4{1,1,1,1});
+                    submitPlayerEquipment(pos, yaw, scale, anim, m_inventories[i]);
                 }
             }
         }
@@ -469,6 +448,66 @@ void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
                     * Mat4::scale({scale, scale, scale});
             Renderer::submit(m_basicShader, mat ? mat->texture : defaultTex,
                              m_meshDefs[mesh].mesh, m2, m_meshDefs[mesh].bounds, tint);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// submitPlayerEquipmentIds — mesh-id variant of submitPlayerEquipment for the
+// CLIENT path, where remote inventories are unavailable. weaponMeshId and
+// armorMeshId[4] (helmet, chest, boots, gloves) are the wire-carried tier-mesh
+// indices from SnapPlayer. Material resolves to the default texture/tint (mat 0)
+// which is acceptable for remote-player view; the host path uses real materials.
+// ---------------------------------------------------------------------------
+void Engine::submitPlayerEquipmentIds(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
+                                      u8 weaponMeshId, const u8 armorMeshId[4]) {
+    const Texture& defaultTex = MaterialSystem::get(0)->texture;
+
+    // --- Weapon: same hand-attach math as submitPlayerEquipment and the old inline block ---
+    if (weaponMeshId > 0 && weaponMeshId < m_meshDefCount && m_meshDefs[weaponMeshId].mesh.vao) {
+        f32 thrust = (anim & 1) ? 0.25f : 0.0f;  // attacking: thrust forward
+        f32 drop   = (anim & 2) ? -0.25f : 0.0f; // reloading: drop hand
+        Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+        Vec3 fwd   = {-sinf(yaw), 0, -cosf(yaw)};
+        Vec3 wp = pos + Vec3{0, 0.8f + drop, 0}
+                      + right * (0.35f * scale)
+                      + fwd   * ((0.3f + thrust) * scale);
+        Mat4 mm = Mat4::translate(wp)
+                * Mat4::rotateY(yaw)
+                * Mat4::scale({0.4f * scale, 0.4f * scale, 0.4f * scale});
+        AABB wb = {wp - Vec3{0.2f, 0.2f, 0.2f}, wp + Vec3{0.2f, 0.2f, 0.2f}};
+        Renderer::submit(m_basicShader, defaultTex, m_meshDefs[weaponMeshId].mesh, mm, wb,
+                         Vec4{1, 1, 1, 1});
+    }
+
+    // --- Armor overlays: same body offsets as submitPlayerEquipment ---
+    struct ArmorSlotInfo { Vec3 bodyOffset; bool isGloves; };
+    const ArmorSlotInfo kSlots[4] = {
+        { {0, 0.92f, 0}, false }, // helmet
+        { {0, 0.55f, 0}, false }, // chest
+        { {0, 0.06f, 0}, false }, // boots
+        { {0, 0.55f, 0}, true  }, // gloves (mirrored to both hands)
+    };
+    for (int k = 0; k < 4; ++k) {
+        u8 mesh = armorMeshId[k];
+        if (mesh == 0 || mesh >= m_meshDefCount) continue;
+        if (!m_meshDefs[mesh].mesh.vao) continue;
+
+        Vec3 ap = pos + kSlots[k].bodyOffset * scale;
+        Mat4 mm = Mat4::translate(ap)
+                * Mat4::rotateY(yaw)
+                * Mat4::scale({scale, scale, scale});
+        Renderer::submit(m_basicShader, defaultTex,
+                         m_meshDefs[mesh].mesh, mm, m_meshDefs[mesh].bounds, Vec4{1, 1, 1, 1});
+
+        if (kSlots[k].isGloves) {
+            // Second copy mirrored to the off-hand side (matches submitPlayerEquipment).
+            Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
+            Mat4 m2 = Mat4::translate(ap + right * (-0.5f * scale))
+                    * Mat4::rotateY(yaw)
+                    * Mat4::scale({scale, scale, scale});
+            Renderer::submit(m_basicShader, defaultTex,
+                             m_meshDefs[mesh].mesh, m2, m_meshDefs[mesh].bounds, Vec4{1, 1, 1, 1});
         }
     }
 }

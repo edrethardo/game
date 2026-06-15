@@ -10,8 +10,8 @@
 
 #include <cstring>  // std::memset in WorldSnapshot default constructor
 
-// Quantized snapshot of one player (58 wire bytes — see SNAP_PLAYER_WIRE; was 30 pre-R17,
-// +28 for the seven u32 lastActivationTick fields at the tail)
+// Quantized snapshot of one player (62 wire bytes — see SNAP_PLAYER_WIRE; was 30 pre-R17,
+// +28 for the seven u32 lastActivationTick fields at the tail, +4 for armorMeshId[4])
 struct SnapPlayer {
     u8   slotIndex;     // 1
     u8   flags;         // 1: bit0=active, bit1=onGround, bit2=UNUSED, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
@@ -33,6 +33,7 @@ struct SnapPlayer {
     // Animation state for remote player rendering
     u8   animFlags;     // 1: bit0=attacking (cooldown active), bit1=reloading, bit2=isDead
     u8   weaponMeshId;  // 1: mesh ID of equipped weapon (for third-person rendering)
+    u8   armorMeshId[4]; // 4: helmet, chest, boots, gloves tier-mesh ids (0 = empty). 3rd-person rendering.
     // Wanderer dodge state for remote rendering: bit0=rolling, bits1-3=counterStacks (0-5)
     u8   dodgeFlags;    // 1
     // Visual identity: the chosen PlayerClass (cast to u8). The client's NetPlayer.playerClass

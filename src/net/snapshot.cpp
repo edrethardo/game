@@ -306,10 +306,11 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 // the structs, which include alignment padding that is never serialized).
 // Player: 1(slot)+1(flags)+1(weapon)+1(health)+2(maxHealth) + 6(pos)+4(vel)+2(yaw)+2(pitch)
 //       + 1(clip)+1(statusFlags)+1(invuln)+1(poison)+1(burn)+1(freeze)
-//       + 1(animFlags)+1(weaponMeshId)+1(dodgeFlags)+1(playerClass) = 30.
-//       (playerClass added so remote players render with the correct per-class mesh on clients.)
-// SNAP_PLAYER_WIRE — R17 bump from 30 → 58 (added 7 u32 lastActivationTick fields).
-static constexpr u32 SNAP_PLAYER_WIRE     = 58;
+//       + 1(animFlags)+1(weaponMeshId)+4(armorMeshId)+1(dodgeFlags)+1(playerClass) = 34.
+//       (armorMeshId[4] added so clients render equipped armor on remote players without inventories.)
+// SNAP_PLAYER_WIRE — R17 bump from 30 → 58 (added 7 u32 lastActivationTick fields),
+//                    armor bump from 58 → 62 (added 4-byte armorMeshId[4]).
+static constexpr u32 SNAP_PLAYER_WIRE     = 62;
 // Entity: 1+1+1+1 + 6(pos) + 2(yaw) + 4(vel) + 1(stun)+1(freeze)+1(limb)+1(bossStatus)
 //       + 1(meshId)+1(materialId)+1(enemyType)+1(weaponMeshId) + 3(halfExtentsQ)
 //       + 1(attackAnimQ) = 28. (attackAnimQ added so clients see enemy attack animations
@@ -458,6 +459,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w8(sp.freezeTimer);
         w8(sp.animFlags);
         w8(sp.weaponMeshId);
+        for (int k = 0; k < 4; ++k) w8(sp.armorMeshId[k]); // helmet/chest/boots/gloves tier-mesh ids
         w8(sp.dodgeFlags);  // Wanderer dodge state (bit0=rolling, bits1-3=counterStacks)
         w8(sp.playerClass); // PlayerClass cast to u8 — drives per-class mesh on the client
         // R17 — lastActivationTick fields (28 bytes per player). 4 class slots + boot +
@@ -629,6 +631,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.freezeTimer  = r.readU8();
         sp.animFlags    = r.readU8();
         sp.weaponMeshId = r.readU8();
+        for (int k = 0; k < 4; ++k) sp.armorMeshId[k] = r.readU8(); // helmet/chest/boots/gloves tier-mesh ids
         sp.dodgeFlags   = r.readU8();  // bit0=rolling, bits1-3=counterStacks
         sp.playerClass  = r.readU8();  // PlayerClass cast to u8 — validated on read in net code
         // Defensive clamp: a malformed/older-protocol packet would otherwise index kClassDefs
@@ -830,7 +833,9 @@ static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer&
     w16(sp.yaw); w16(sp.pitch);
     w8(sp.currentClip); w8(sp.statusFlags);
     w8(sp.invulnTimer); w8(sp.poisonTimer); w8(sp.burnTimer); w8(sp.freezeTimer);
-    w8(sp.animFlags); w8(sp.weaponMeshId); w8(sp.dodgeFlags); w8(sp.playerClass);
+    w8(sp.animFlags); w8(sp.weaponMeshId);
+    for (int k = 0; k < 4; ++k) w8(sp.armorMeshId[k]); // helmet/chest/boots/gloves tier-mesh ids
+    w8(sp.dodgeFlags); w8(sp.playerClass);
     // R17 lastActivationTick tail.
     for (u32 s = 0; s < 4; s++) w32(sp.classSkillLastActivationTick[s]);
     w32(sp.bootSkillLastActivationTick);
@@ -895,6 +900,7 @@ static void readSnapPlayer(PacketReader& r, SnapPlayer& sp) {
     sp.invulnTimer = r.readU8(); sp.poisonTimer = r.readU8();
     sp.burnTimer = r.readU8(); sp.freezeTimer = r.readU8();
     sp.animFlags = r.readU8(); sp.weaponMeshId = r.readU8();
+    for (int k = 0; k < 4; ++k) sp.armorMeshId[k] = r.readU8(); // helmet/chest/boots/gloves tier-mesh ids
     sp.dodgeFlags = r.readU8(); sp.playerClass = r.readU8();
     // R17 lastActivationTick tail — must match writeSnapPlayer.
     for (u32 s = 0; s < 4; s++) sp.classSkillLastActivationTick[s] = r.readU32();

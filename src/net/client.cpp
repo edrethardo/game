@@ -471,7 +471,7 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
                                        Vec3* outPositions, f32* outYaws,
                                        bool* outActive, f32* outHealth, f32* outMaxHealth,
                                        u8* outAnimFlags, u8* outWeaponMeshId,
-                                       u8* outPlayerClass)
+                                       u8* outPlayerClass, u8 (*outArmorMeshId)[4])
 {
     // localSlot0/localSlot1 are this client's local lanes' net slots (couch co-op has two; the 2nd
     // is 0xFF for a single client). Both are skipped — local players render from their own predicted
@@ -486,6 +486,7 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
         // Default to WARRIOR (0) — keeps the renderer safe pre-first-snap and matches
         // the onPlayerJoin out-of-range fallback used server-side.
         if (outPlayerClass) outPlayerClass[i] = 0;
+        if (outArmorMeshId) for (int k = 0; k < 4; ++k) outArmorMeshId[i][k] = 0;
     }
 
     // Interpolate at a delayed render time (computeInterpPair) for smooth, jitter-buffered
@@ -524,6 +525,7 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
             outHealth[slot] = (sp.health / 255.0f) * outMaxHealth[slot];
             if (outAnimFlags) outAnimFlags[slot] = sp.animFlags;
             if (outWeaponMeshId) outWeaponMeshId[slot] = sp.weaponMeshId;
+            if (outArmorMeshId) for (int k = 0; k < 4; ++k) outArmorMeshId[slot][k] = sp.armorMeshId[k];
             if (outPlayerClass) outPlayerClass[slot] = sp.playerClass;
         }
         return;
@@ -570,6 +572,8 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
         outHealth[slot] = (spB.health / 255.0f) * outMaxHealth[slot];
         if (outAnimFlags) outAnimFlags[slot] = spB.animFlags; // latest snapshot's anim state
         if (outWeaponMeshId) outWeaponMeshId[slot] = spB.weaponMeshId;
+        // Armor mesh ids are identity fields (not lerp-able) — take from the newer snapshot.
+        if (outArmorMeshId) for (int k = 0; k < 4; ++k) outArmorMeshId[slot][k] = spB.armorMeshId[k];
         // PlayerClass is a static identity, not a lerp-able value — take it straight from
         // the newer snapshot. (Index is already clamped to PlayerClass::CLASS_COUNT in deserialize.)
         if (outPlayerClass) outPlayerClass[slot] = spB.playerClass;
