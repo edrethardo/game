@@ -10,7 +10,8 @@ namespace MaterialSystem {
 
     const Material* get(u8) { return nullptr; }
 
-    // Always returns -1 (not found) — resolveVisuals is not exercised by unit tests.
+    // Returns 0 — matches production behavior (0 is the not-found sentinel in the real impl);
+    // resolveVisuals isn't exercised by these unit tests anyway.
     u8 getIdByName(const char*) { return 0; }
 
     u32 count() { return 0; }

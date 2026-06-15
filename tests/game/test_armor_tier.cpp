@@ -10,4 +10,5 @@ TEST_CASE("armorTierFromMaterial maps material class to weight tier") {
     CHECK(armorTierFromMaterial("Cloth_Robe")     == ArmorTier::LIGHT);
     CHECK(armorTierFromMaterial("legendary_armor")== ArmorTier::MEDIUM);
     CHECK(armorTierFromMaterial("")               == ArmorTier::MEDIUM);
+    CHECK(armorTierFromMaterial(nullptr)          == ArmorTier::MEDIUM); // null-safe
 }
