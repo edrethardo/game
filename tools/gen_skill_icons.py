@@ -725,6 +725,75 @@ def icon_poison_cloud():
     return ic
 
 
+# --- WANDERER ICONS (windsteel theme — colours applied in hud_skill_bar.cpp) ---
+
+def icon_deflect():
+    """Curved parry guard turning aside an incoming diagonal strike, glint at the contact point."""
+    ic = new_icon()
+    cx, cy = 19, 16
+    # Left-bowed curved guard (the parry), 2px thick with a bright inner edge.
+    for a in range(96, 265):
+        ang = math.radians(a)
+        x = cx + int(12 * math.cos(ang))
+        y = cy + int(12 * math.sin(ang))
+        set_px(ic, x, y, 1); set_px(ic, x, y - 1, 1)
+        set_px(ic, x + 1, y, 4)
+    # Incoming strike from the upper right, deflecting off the guard.
+    draw_line(ic, 30, 2, 11, 13, 2, 2)
+    draw_line(ic, 11, 13, 28, 7, 2, 1)
+    # Glint / sparks at the contact point.
+    fill_circle(ic, 9, 13, 2, 4)
+    draw_line(ic, 9, 13, 15, 8, 4)
+    return ic
+
+def icon_exploit_weakness():
+    """Targeting reticle on a cracked weak-point with a bright center pip."""
+    ic = new_icon()
+    cx, cy = 16, 16
+    draw_circle(ic, cx, cy, 11, 1, 1.5)              # reticle ring
+    # Crosshair ticks (gap at the center).
+    draw_line(ic, cx, 2, cx, 9, 1, 1);  draw_line(ic, cx, 23, cx, 30, 1, 1)
+    draw_line(ic, 2, cy, 9, cy, 1, 1);  draw_line(ic, 23, cy, 30, cy, 1, 1)
+    # Jagged crack through the target — the exploited weakness.
+    draw_line(ic, 11, 8, 15, 15, 2); draw_line(ic, 15, 15, 12, 19, 2)
+    draw_line(ic, 12, 19, 18, 25, 2)
+    fill_circle(ic, cx, cy, 2, 4)                    # bright center pip
+    return ic
+
+def icon_adrenaline_surge():
+    """Three rising speed chevrons over a heartbeat/pulse spike (haste rush)."""
+    ic = new_icon()
+    # Stacked upward chevrons, brighter toward the top.
+    for k, yb in enumerate([23, 17, 11]):
+        c = 4 if k == 2 else (1 if k == 1 else 3)
+        draw_line(ic, 8, yb, 16, yb - 6, c, 2)
+        draw_line(ic, 16, yb - 6, 24, yb, c, 2)
+    # Heartbeat/pulse line across the bottom.
+    draw_line(ic, 3, 28, 11, 28, 2, 1)
+    draw_line(ic, 11, 28, 14, 23, 2, 1)
+    draw_line(ic, 14, 23, 17, 30, 2, 1)
+    draw_line(ic, 17, 30, 20, 28, 2, 1)
+    draw_line(ic, 20, 28, 29, 28, 2, 1)
+    return ic
+
+def icon_deaths_dance():
+    """Two crossed curved sabres inside a circular motion arc (a spinning blade dance)."""
+    ic = new_icon()
+    cx, cy = 16, 16
+    # Crossed sabres (X).
+    draw_line(ic, 5, 5, 27, 27, 1, 2)
+    draw_line(ic, 27, 5, 5, 27, 1, 2)
+    # Blade highlights along the upper edges + tip glints.
+    draw_line(ic, 6, 5, 15, 14, 4); draw_line(ic, 26, 5, 17, 14, 4)
+    set_px(ic, 26, 26, 4); set_px(ic, 6, 26, 4)
+    # Dashed circular motion arc (the spin).
+    for a in range(0, 360, 14):
+        ang = math.radians(a)
+        set_px(ic, cx + int(13 * math.cos(ang)), cy + int(13 * math.sin(ang)), 2)
+    fill_circle(ic, cx, cy, 2, 3)                    # hub
+    return ic
+
+
 def write_header(icons, path):
     """Write all icons as C++ static arrays to a header file."""
     with open(path, 'w') as f:
@@ -798,6 +867,11 @@ def main():
         ("ArcFire",          icon_arc_fire()),
         # Glove passive
         ("Frenzy",           icon_frenzy()),
+        # Wanderer
+        ("Deflect",          icon_deflect()),
+        ("ExploitWeakness",  icon_exploit_weakness()),
+        ("AdrenalineSurge",  icon_adrenaline_surge()),
+        ("DeathsDance",      icon_deaths_dance()),
     ]
 
     write_header(icons, out_path)

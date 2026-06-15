@@ -81,6 +81,79 @@ def draw_chakram():
     return g
 
 
+def draw_pistol():
+    """Compact handgun, side profile, muzzle right. A thin horizontal slide/barrel up top, a short
+    grip raked down-back, and an open trigger guard between them. The defining read: SHORT barrel +
+    chunky grip + guard hole. Kept small so it's clearly the most compact of the four guns."""
+    g = grid()
+    # Slide / barrel: 2px-tall horizontal bar, short.
+    rect(g, 5, 5, 12, 6)
+    px(g, 13, 5)                       # muzzle tip (front sight)
+    rect(g, 6, 4, 8, 4)                # rear-sight hump on the slide
+    # Frame under the rear of the slide.
+    rect(g, 5, 7, 9, 7)
+    # Grip — raked down and back from the rear.
+    rect(g, 4, 7, 6, 11)
+    rect(g, 3, 9, 5, 12)               # rake/back-lean + heel
+    # Open trigger guard (hollow center) just in front of the grip.
+    rect(g, 7, 8, 10, 8)               # guard top + trigger bar
+    px(g, 7, 9); px(g, 10, 9)          # guard sides
+    rect(g, 7, 10, 10, 10)             # guard bottom  (hollow at 8-9,9)
+    return g
+
+
+def draw_revolver():
+    """Revolver, side profile, muzzle right. A thin barrel, a round CYLINDER bulge behind it (the
+    unmistakable tell), and a curved grip. The fat cylinder + thin barrel separate it from the
+    boxy pistol/SMG."""
+    g = grid()
+    rect(g, 9, 5, 15, 6)               # thin barrel (long, toward the muzzle)
+    px(g, 7, 4)                        # hammer spur
+    ring(g, 6, 6, 3.2, 0.0)            # cylinder — a solid round bulge behind the barrel
+    rect(g, 4, 8, 7, 9)                # frame under the cylinder
+    # Curved grip, swept down-back from the frame.
+    rect(g, 3, 9, 5, 11)
+    rect(g, 2, 11, 4, 13)
+    # Small trigger guard.
+    rect(g, 6, 9, 8, 9)
+    px(g, 8, 10)
+    return g
+
+
+def draw_smg():
+    """Submachine gun, side profile, muzzle right. A slim barrel + a slim 2px receiver, a stubby
+    grip and a separate curved MAGAZINE jutting down ahead of it (the tell), plus a short rear
+    stock. A clear gap between grip and magazine keeps the bottom from blobbing."""
+    g = grid()
+    rect(g, 9, 5, 14, 5)               # slim barrel toward the muzzle
+    px(g, 15, 5)                       # muzzle tip
+    rect(g, 3, 4, 9, 5)                # slim 2px receiver
+    px(g, 5, 3); px(g, 6, 3)           # charging-handle / sight bump
+    rect(g, 1, 4, 2, 5); px(g, 0, 5)   # short rear stock
+    rect(g, 3, 6, 4, 9)                # stubby pistol grip (rear)
+    px(g, 5, 6)                        # trigger nub  (gap at x5 below = separates grip from mag)
+    rect(g, 6, 6, 7, 9)                # magazine upper
+    rect(g, 7, 9, 8, 12)               # magazine lower (curves forward = banana mag)
+    return g
+
+
+def draw_carbine():
+    """Carbine/rifle, side profile, muzzle right. The LONGEST gun: a full-length thin barrel with a
+    front sight, a slim receiver, an angled shoulder STOCK at the rear (the tell vs the SMG), a
+    pistol grip and a straight box magazine."""
+    g = grid()
+    rect(g, 8, 4, 15, 4)               # long thin barrel to the muzzle
+    px(g, 11, 3)                       # front sight post
+    rect(g, 3, 4, 8, 5)                # slim receiver
+    px(g, 4, 3); px(g, 5, 3)           # rear sight / carry handle
+    # Angled shoulder stock at the very rear (comb on top, heel dropping back-down).
+    rect(g, 0, 4, 2, 4)
+    rect(g, 0, 5, 1, 6); px(g, 2, 5)
+    rect(g, 4, 6, 5, 9)                # pistol grip
+    rect(g, 6, 6, 7, 10)               # straight box magazine
+    return g
+
+
 def pack(g):
     """Pack a 16x16 boolean grid into 16 u16 rows (bit 15 = leftmost pixel)."""
     rows = []
@@ -111,6 +184,10 @@ def main():
     icons = [
         ("GLOVES", pack(draw_gloves())),
         ("CHAKRAM", pack(draw_chakram())),
+        ("PISTOL", pack(draw_pistol())),
+        ("SMG", pack(draw_smg())),
+        ("CARBINE", pack(draw_carbine())),
+        ("REVOLVER", pack(draw_revolver())),
     ]
     write_header(icons, out_path)
 

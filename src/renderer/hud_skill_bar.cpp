@@ -190,6 +190,12 @@ static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
             cols[1] = {0.4f, 0.7f, 0.2f}; cols[2] = {0.6f, 0.4f, 0.1f};
             cols[3] = {0.3f, 0.2f, 0.1f}; cols[4] = {0.6f, 0.9f, 0.3f};
             break;
+        // Wanderer — pale steel / windsteel (silver-blue, distinct from the other classes)
+        case SkillId::DEFLECT: case SkillId::EXPLOIT_WEAKNESS:
+        case SkillId::ADRENALINE_SURGE: case SkillId::DEATHS_DANCE:
+            cols[1] = {0.70f, 0.82f, 0.88f}; cols[2] = {0.40f, 0.52f, 0.60f};
+            cols[3] = {0.25f, 0.32f, 0.40f}; cols[4] = {0.92f, 0.98f, 1.0f};
+            break;
         default:
             cols[1] = {0.6f, 0.6f, 0.6f}; cols[2] = {0.3f, 0.3f, 0.3f};
             cols[3] = {0.4f, 0.4f, 0.4f}; cols[4] = {0.9f, 0.9f, 0.9f};
@@ -246,6 +252,11 @@ static const u8* getSkillIcon(u8 skillId) {
         case SkillId::PIERCING_SHOT:       return &kIcon32_PiercingShot[0][0];
         case SkillId::BARRAGE:             return &kIcon32_Barrage[0][0];
         case SkillId::MARK_PREY:           return &kIcon32_MarkPrey[0][0];
+        // Wanderer
+        case SkillId::DEFLECT:             return &kIcon32_Deflect[0][0];
+        case SkillId::EXPLOIT_WEAKNESS:    return &kIcon32_ExploitWeakness[0][0];
+        case SkillId::ADRENALINE_SURGE:    return &kIcon32_AdrenalineSurge[0][0];
+        case SkillId::DEATHS_DANCE:        return &kIcon32_DeathsDance[0][0];
         default:                           return nullptr;
     }
 }
