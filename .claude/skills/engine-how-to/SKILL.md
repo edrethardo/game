@@ -37,6 +37,8 @@ debug keys) lives in the `engine-reference` skill.
 
 **New material**: edit `assets/materials.json`. ID must equal array index. Look up at runtime by name with `MaterialSystem::getIdByName`. Tint blends with sampled texture color (1,1,1,1 = unmodified).
 
+**Armor visuals on the player body (inspect screen).** Equipped armor renders on the class body mesh in the Character inspect screen (C / LB+R3) via `Engine::submitPlayerEquipment()`. Each armor `ItemDef` resolves to a per-tier mesh at init: `armorTierFromMaterial()` maps the material name suffix (`_light` / `_medium` / `_heavy`) to `ArmorTier::LIGHT/MEDIUM/HEAVY`, and the matching `ItemDef.tierMeshId` is filled by `ItemLoader::resolveVisuals`. The 3-D model render path lives in `engine_render_character.cpp::renderInspectModelToFbo()` — it creates an offscreen FBO (square, same aspect as the panel), renders via the normal `Renderer::submit/flush` pipeline with a standalone orbit camera (yaw driven by mouse drag / right-stick), then composites the result into the 2-D overlay in `renderCharacterInspect()`. **FBO size is platform-gated:** `kInspectFboSize = 320` on `__SWITCH__` (weaker GPU), 512 on desktop — the panel upscales either way so quality loss is minimal. The camera `projection` aspect is always 1.0 regardless of the FBO size; only the pixel dimensions change.
+
 **New level layout**: procedural BSP gen in `LevelGen::generate` (`world/level_gen.cpp`) is the production path — pass a seed and grid dimensions. `LevelGen::generateTestDungeon` is a hardcoded fallback. Hand-authored levels can be loaded via `LevelLoader::loadFromJson` (`world/level_loader.h`) but no level JSON files ship by default.
 
 ## Pitfalls / Gotchas

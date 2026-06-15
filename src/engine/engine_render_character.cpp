@@ -34,8 +34,14 @@
 // renderInspectModelToFbo — render the class body + equipment into m_inspectColorTex.
 // ---------------------------------------------------------------------------
 void Engine::renderInspectModelToFbo() {
-    // 512 is plenty for the desktop panel (composited at ~0.42*screen height); square aspect.
-    const u32 size = 512;
+    // Inspect model render target. Switch's GPU is far weaker, so render the
+    // model at a lower resolution (it's upscaled into the panel either way).
+#ifdef __SWITCH__
+    constexpr u32 kInspectFboSize = 320;
+#else
+    constexpr u32 kInspectFboSize = 512;
+#endif
+    const u32 size = kInspectFboSize;
     ensureFbo(m_inspectFbo, m_inspectColorTex, m_inspectDepthRbo, m_inspectFboW, m_inspectFboH, size, size);
     if (!m_inspectFbo) return;
 
