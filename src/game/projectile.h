@@ -15,6 +15,8 @@ static constexpr u8 PROJ_SPLASH    = 1 << 3;  // AoE splash damage on impact
 static constexpr u8 PROJ_SPARK     = 1 << 4;  // Lightning bolt visual (jagged line)
 static constexpr u8 PROJ_VOID      = 1 << 5;  // Void weapon projectile (purple tint)
 static constexpr u8 PROJ_BOUNCE    = 1 << 6;  // Ricochets off walls (chakram) instead of despawning
+static constexpr u8 PROJ_INFINITE_BOUNCE = 1 << 7;  // Infinity Chakram: no lifetime, unlimited
+                                                    // ricochets — despawns ONLY on hitting a target
 
 // Switch: smaller pool for better cache utilization on Tegra X1 (A57 at 1 GHz)
 #ifdef __SWITCH__
@@ -126,6 +128,10 @@ namespace ProjectileSystem {
               Vec3 origin, Vec3 direction, f32 speed,
               f32 damage, f32 radius, f32 lifetime,
               bool fromPlayer, u8 extraFlags = 0);
+
+    // Retire a projectile by pool index (deactivate + remove from the active list). Public so the
+    // engine can cap a player's airborne Infinity Chakrams. No-op if idx is out of range/inactive.
+    void despawn(ProjectilePool& pool, u16 idx);
 
     // Update all projectiles: move, collide with grid and entities/player.
     // extraPlayers/extraPlayerCount: additional local players (split-screen) that enemy

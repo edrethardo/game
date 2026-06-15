@@ -1461,6 +1461,22 @@ def gen_chakram(radius=0.13):
     return mb
 
 
+def gen_infinity_chakram(radius=0.05):
+    """Infinity Chakram — two linked metal rings forming a figure-8 (∞), lying flat in the XZ
+    plane. Reused as BOTH the in-hand weapon mesh and the spinning projectile (legendary chakram).
+    The two rings cross at the origin so the silhouette reads as ∞ from above.
+    """
+    mb = MeshBuilder()
+    mb.set_material("prop_iron")
+    for cx in (-radius, radius):  # centers ±radius so the two rings overlap at the origin → ∞
+        add_torus(mb, center=(cx, 0.0, 0.0), major_r=radius, minor_r=0.016,
+                  major_segs=18, minor_segs=6)
+        # Thin sharpened rim, like the regular chakram
+        add_torus(mb, center=(cx, 0.0, 0.0), major_r=radius + 0.010, minor_r=0.005,
+                  major_segs=18, minor_segs=4)
+    return mb
+
+
 def gen_molotov(height=0.25):
     """Molotov cocktail — bottle body + neck.
 
@@ -4878,6 +4894,11 @@ MESH_TYPES = {
         "func": gen_chakram,
         "desc": "Chakram — flat metal throwing ring. Params: --radius",
         "default_file": "chakram.obj",
+    },
+    "infinity_chakram": {
+        "func": gen_infinity_chakram,
+        "desc": "Infinity Chakram — two linked rings forming an ∞. Params: --radius",
+        "default_file": "infinity_chakram.obj",
     },
     "wand": {
         "func": gen_wand,

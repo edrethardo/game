@@ -63,6 +63,14 @@ struct Player {
     f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection)
+    u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting
+
+    // Defensive-pack equipment cache (recomputed each frame from equipped affixes in
+    // tickPassiveEquipment; transient/never serialized, like damageReduction above). Summed on
+    // demand via Inventory::armorRating/healthRegenRate/thornsPct so PlayerInventory gains no field.
+    f32  armorRating      = 0.0f; // flat armor → diminishing-returns mitigation in applyDamageToPlayer
+    f32  healthRegen      = 0.0f; // HP restored per second by HEALTH_REGEN affixes
+    f32  thornsPctBonus   = 0.0f; // % of damage-taken reflected (affix; stacks with the THORNS ring passive)
 
     // CS-style directional damage indicators — arcs showing where hits came from
     static constexpr u32 MAX_HIT_INDICATORS = 4;

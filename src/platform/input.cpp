@@ -103,6 +103,13 @@ static constexpr s32 MAX_AXES = 8;
 static f32 s_currentAxisValues[Input::MAX_GAMEPADS][MAX_AXES];
 static f32 s_previousAxisValues[Input::MAX_GAMEPADS][MAX_AXES];
 
+// Left-stick MENU navigation edge state (per pad, per StickNav direction). `pressed` is the
+// this-frame edge (set in update(), cleared by consumePressedState() like a button press);
+// `latched` stays true while the stick is held past the deflect threshold so a held stick fires
+// exactly once until it returns toward center (hysteresis re-arm). See isMenuStickPressed().
+static bool s_menuStickPressed[Input::MAX_GAMEPADS][4];
+static bool s_menuStickLatched[Input::MAX_GAMEPADS][4];
+
 // ---------------------------------------------------------------------------
 // Default bindings table
 // ---------------------------------------------------------------------------
@@ -270,6 +277,44 @@ void Input::update() {
     tickRumbleStop();  // end any rumble pulse whose duration has elapsed (Switch libnx rumble)
 #endif
 
+    // Menu-stick navigation: turn each pad's left-stick deflection into a debounced edge "press"
+    // so the analog stick drives menus like a D-pad tap. Uses getAxis + the same deadzone remap as
+    // getStickX/Y (so platform behavior matches in-game movement), with hysteresis: fire once at
+    // DEFLECT, re-arm only below RELEASE. Computed here (once per frame); consumePressedState()
+    // clears `pressed` so it can't multi-fire across the fixed-timestep substeps.
+    {
+        constexpr f32 NAV_DEFLECT = 0.6f;   // post-deadzone magnitude to register a nav "press"
+        constexpr f32 NAV_RELEASE = 0.35f;  // must fall back below this before the next press
+        memset(s_menuStickPressed, 0, sizeof(s_menuStickPressed));
+        auto axisMag = [](s32 pad, s32 axis) -> f32 {
+            f32 v = getAxis(pad, axis);
+            if (v > -STICK_DEADZONE && v < STICK_DEADZONE) return 0.0f;
+            f32 sign = (v > 0) ? 1.0f : -1.0f;
+            return sign * (fabsf(v) - STICK_DEADZONE) / (1.0f - STICK_DEADZONE);
+        };
+        for (s32 c = 0; c < Input::MAX_GAMEPADS; c++) {
+            f32 lx = axisMag(c, SDL_CONTROLLER_AXIS_LEFTX);
+            f32 ly = axisMag(c, SDL_CONTROLLER_AXIS_LEFTY);  // SDL convention: up is negative
+            // Per-direction signed magnitude (positive = deflected that way).
+            const f32 dirMag[4] = {
+                -ly,  // StickNav::Up
+                 ly,  // StickNav::Down
+                -lx,  // StickNav::Left
+                 lx,  // StickNav::Right
+            };
+            for (s32 d = 0; d < 4; d++) {
+                if (dirMag[d] >= NAV_DEFLECT) {
+                    if (!s_menuStickLatched[c][d]) {
+                        s_menuStickPressed[c][d] = true;
+                        s_menuStickLatched[c][d] = true;
+                    }
+                } else if (dirMag[d] < NAV_RELEASE) {
+                    s_menuStickLatched[c][d] = false;
+                }
+            }
+        }
+    }
+
     // Gyro cache: run the IMU drift filter and refresh the per-player look delta once per frame
     // (both platforms — the PC and Switch definitions of updateGyroCache live above).
     updateGyroCache();
@@ -282,6 +327,8 @@ void Input::consumePressedState() {
     memcpy(s_previousMouseButtons, s_currentMouseButtons, NUM_MOUSE_BUTTONS);
     memcpy(s_previousPadButtons, s_currentPadButtons, sizeof(s_currentPadButtons));
     memcpy(s_previousAxisValues, s_currentAxisValues, sizeof(s_currentAxisValues));
+    // Menu-stick edges are one-shot per frame too (the latch in update() handles re-arming).
+    memset(s_menuStickPressed, 0, sizeof(s_menuStickPressed));
 #ifdef __SWITCH__
     // Also consume libnx pad edges — isButtonPressed on Switch reads
     // s_padPrevButtons (libnx), not the SDL s_previousPadButtons arrays.
@@ -526,6 +573,12 @@ f32 Input::getStickY(bool rightStick, s32 gamepadIndex) {
     f32 sign = (v > 0) ? 1.0f : -1.0f;
     f32 mag = (fabsf(v) - STICK_DEADZONE) / (1.0f - STICK_DEADZONE);
     return sign * mag;
+}
+
+bool Input::isMenuStickPressed(StickNav dir, s32 gamepadIndex) {
+    if (gamepadIndex == 0) gamepadIndex = s_activePlayer; // route to active player like getStick*
+    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
+    return s_menuStickPressed[gamepadIndex][static_cast<u32>(dir)];
 }
 
 bool Input::isModifierHeld(s32 gamepadIndex) {
@@ -827,6 +880,14 @@ static bool checkActionRaw(GameAction action, bool pressed) {
     if (idx >= static_cast<u32>(GameAction::COUNT)) return false;
     const InputBinding& b = s_bindings[idx];
     s32 padIdx = static_cast<s32>(s_activePlayer); // which controller to read
+
+    // Left-stick menu navigation: MENU_UP/DOWN also fire on a debounced left-stick edge so the
+    // analog stick drives every menu that goes through these actions. Pressed-only (edge), and
+    // safe because MENU_* actions are read exclusively in menus, never in-game.
+    if (pressed) {
+        if (action == GameAction::MENU_UP   && Input::isMenuStickPressed(Input::StickNav::Up))   return true;
+        if (action == GameAction::MENU_DOWN && Input::isMenuStickPressed(Input::StickNav::Down)) return true;
+    }
 
     // Keyboard + mouse only for player 0 (player 2 is controller-only in split-screen)
     if (s_activePlayer == 0) {

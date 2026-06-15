@@ -104,6 +104,27 @@
       "slots": ["gloves"],
       "minValue": 4.0,
       "maxValue": 12.0
+    },
+    {
+      "type": "armor",
+      "name": "of Warding",
+      "slots": ["armor", "helmet", "boots", "offhand", "gloves"],
+      "minValue": 8.0,
+      "maxValue": 40.0
+    },
+    {
+      "type": "health_regen",
+      "name": "of Renewal",
+      "slots": ["ring", "armor", "helmet", "boots", "offhand"],
+      "minValue": 0.5,
+      "maxValue": 3.0
+    },
+    {
+      "type": "thorns_pct",
+      "name": "of Brambles",
+      "slots": ["armor", "offhand", "gloves", "ring"],
+      "minValue": 3.0,
+      "maxValue": 12.0
     }
   ]
 }

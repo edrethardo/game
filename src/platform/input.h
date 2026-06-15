@@ -84,6 +84,13 @@ namespace Input {
     f32  getStickX(bool rightStick, s32 gamepadIndex = 0);
     f32  getStickY(bool rightStick, s32 gamepadIndex = 0);
 
+    // Left-stick MENU navigation as an edge-triggered "press" (like a D-pad tap): fires once per
+    // deflection, debounced with hysteresis, and consumed each frame so it can't multi-fire across
+    // the fixed-timestep substeps. Computed in update(); read by the menu MENU_UP/DOWN path and the
+    // couch screens. gamepadIndex 0 → active player.
+    enum class StickNav : u8 { Up, Down, Left, Right };
+    bool isMenuStickPressed(StickNav dir, s32 gamepadIndex = 0);
+
     // L shoulder modifier state
     bool isModifierHeld(s32 gamepadIndex = 0);
 

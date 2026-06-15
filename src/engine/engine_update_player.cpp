@@ -258,6 +258,17 @@ void Engine::tickPlayerStatusEffects(f32 dt) {
     if (m_localPlayer.freezeTimer > 0.0f) {
         m_localPlayer.freezeTimer -= dt;
     }
+
+    // Passive health regen (HEALTH_REGEN affixes — defensive pack). Authoritative side only
+    // (CLIENT returned above; remote players regen in serverNetPost). Additive + clamped to max,
+    // and gated on being alive so it never revives a corpse. healthRegen is refreshed each frame
+    // from equipped affixes in tickPassiveEquipment.
+    if (m_localPlayer.healthRegen > 0.0f &&
+        m_localPlayer.health > 0.0f && m_localPlayer.health < m_localPlayer.maxHealth) {
+        m_localPlayer.health += m_localPlayer.healthRegen * dt;
+        if (m_localPlayer.health > m_localPlayer.maxHealth)
+            m_localPlayer.health = m_localPlayer.maxHealth;
+    }
 }
 
 // ---------------------------------------------------------------------------

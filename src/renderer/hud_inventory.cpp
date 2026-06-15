@@ -30,6 +30,9 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::RELOAD_SPEED_PCT:   return "+Reload Speed %";
         case AffixType::ENERGY_FLAT:        return "+Max Energy";
         case AffixType::ATTACK_SPEED_PCT:   return "+Attack Speed %";
+        case AffixType::ARMOR:              return "+Armor";
+        case AffixType::HEALTH_REGEN:       return "+HP Regen";
+        case AffixType::THORNS_PCT:         return "Thorns %";
         default:                            return "Unknown";
     }
 }
@@ -565,5 +568,16 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
             curY -= lineH;
             line = (*eol == '\n') ? eol + 1 : eol;
         }
+    }
+
+    // Infinity Chakram: it has no legendarySkill (the endless flight IS its gimmick), so give it
+    // its own descriptor line. Shown whenever the def is flagged — the behavior is always active.
+    if (def.infiniteFlight) {
+        curY -= lineH;
+        FontSystem::drawText(sw, sh, textX, curY, "Endless Flight", {1.0f, 0.82f, 0.2f}, bodyScale);
+        curY -= lineH;
+        FontSystem::drawText(sw, sh, textX, curY, "Bounces forever until it strikes a foe.",
+                             {0.9f, 0.75f, 0.3f}, bodyScale);
+        curY -= lineH;
     }
 }

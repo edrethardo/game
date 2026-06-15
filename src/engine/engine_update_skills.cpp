@@ -126,6 +126,16 @@ void Engine::tickPassiveEquipment() {
         m_glovesPassive = (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[gl.defId].legendarySkillId : SkillId::NONE;
     }
+    // Defensive-pack affix cache (armor/regen/thorns). Summed on demand from equipped affixes —
+    // PlayerInventory holds no bonus* field for these (keeps the save format unchanged), so we
+    // stamp them into the Player's transient combat cache here, once per frame, for the damage
+    // and regen paths to read cheaply (mirrors how damageReduction is read in applyDamageToPlayer).
+    {
+        const PlayerInventory& inv = m_inventories[m_localPlayerIndex];
+        m_localPlayer.armorRating    = Inventory::armorRating(inv);
+        m_localPlayer.healthRegen    = Inventory::healthRegenRate(inv);
+        m_localPlayer.thornsPctBonus = Inventory::thornsPct(inv);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,15 +365,21 @@ void Engine::tickArmorRingPassives(f32 dt) {
         }
     }
 
+    // Total thorns reflect fraction: legendary THORNS ring (20%) + the thorns_pct affix sum
+    // (stored as percentage points, e.g. 15.0 → 0.15), so a thorns ring and thorns gear stack.
+    // Only meaningful on a frame where the player actually took damage (lastDamageTaken > 0).
+    f32 thornsFrac = (m_ringPassive == SkillId::THORNS ? 0.20f : 0.0f)
+                   + m_localPlayer.thornsPctBonus * 0.01f;
+
     // Single pass over entities for armor aura + gravity pull + thorns
     bool needEntityPass = (m_armorAura != SkillId::NONE) ||
                           (m_ringPassive == SkillId::GRAVITY_PULL) ||
-                          (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f);
+                          (thornsFrac > 0.0f && m_localPlayer.lastDamageTaken > 0.0f);
     if (needEntityPass) {
         Vec3 pPos = m_localPlayer.position;
         bool doGravity = (m_ringPassive == SkillId::GRAVITY_PULL);
-        bool doThorns  = (m_ringPassive == SkillId::THORNS && m_localPlayer.lastDamageTaken > 0.0f);
-        f32  reflectDmg = doThorns ? m_localPlayer.lastDamageTaken * 0.2f : 0.0f;
+        bool doThorns  = (thornsFrac > 0.0f && m_localPlayer.lastDamageTaken > 0.0f);
+        f32  reflectDmg = doThorns ? m_localPlayer.lastDamageTaken * thornsFrac : 0.0f;
         f32  bestThornsDist2 = 25.0f; // 5m squared
         EntityHandle bestThornsH = {};
 
@@ -414,9 +430,25 @@ void Engine::tickArmorRingPassives(f32 dt) {
             }
         }
 
-        if (doThorns && bestThornsDist2 < 25.0f) {
-            Combat::applyDamage(m_entities, bestThornsH, reflectDmg);
+        if (doThorns && reflectDmg > 0.0f) {
+            // Prefer the actual attacker (melee/boss hits stamp an entity index into
+            // lastDamageAttackerIdx); fall back to the nearest enemy within 5m for sources that
+            // carry no attacker entity (e.g. enemy projectiles → idx 0xFFFF). Validation mirrors
+            // the dodge-through riposte (engine_init_callbacks.cpp).
+            u16 atk = m_localPlayer.lastDamageAttackerIdx;
+            bool hitAttacker = false;
+            if (atk < MAX_ENTITIES) {
+                Entity& ae = m_entities.entities[atk];
+                if ((ae.flags & ENT_ACTIVE) && !(ae.flags & ENT_DEAD) && !(ae.flags & ENT_FRIENDLY)) {
+                    EntityHandle h; h.index = atk; h.generation = ae.generation;
+                    Combat::applyDamage(m_entities, h, reflectDmg, &pPos);
+                    hitAttacker = true;
+                }
+            }
+            if (!hitAttacker && bestThornsDist2 < 25.0f)
+                Combat::applyDamage(m_entities, bestThornsH, reflectDmg, &pPos);
         }
     }
-    m_localPlayer.lastDamageTaken = 0.0f;
+    m_localPlayer.lastDamageTaken      = 0.0f;
+    m_localPlayer.lastDamageAttackerIdx = 0xFFFF;
 }

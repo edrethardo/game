@@ -256,18 +256,14 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
                     "", sd ? sd->name : "???", true
                 };
             }
-            // Gloves passive (Frenzy) — the key label doubles as a live stack counter ("x3");
-            // per-lane buffer so split-screen players don't clobber each other's label.
+            // Gloves passive (Frenzy) — equip bar shows the "you have this passive" icon (like the
+            // armor/weapon/ring passives below); the LIVE stack count is surfaced in the status bar
+            // (drawStatusIcons "FRN"), since passive equip slots render "auto" and ignore the label.
             if (m_glovesPassive != SkillId::NONE) {
                 const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_glovesPassive);
-                static char frenzyLbl[MAX_LOCAL_PLAYERS][8];
-                frenzyLbl[m_localPlayerIndex][0] = '\0';
-                if (m_localPlayer.frenzyStacks > 0 && m_localPlayer.frenzyTimer > 0.0f)
-                    std::snprintf(frenzyLbl[m_localPlayerIndex], sizeof(frenzyLbl[0]), "x%u",
-                                  static_cast<u32>(m_localPlayer.frenzyStacks));
                 equipSlots[equipCount++] = {
                     static_cast<u8>(m_glovesPassive), 0.0f, 0.0f,
-                    frenzyLbl[m_localPlayerIndex], sd ? sd->name : "???", true
+                    "", sd ? sd->name : "???", true
                 };
             }
 
@@ -691,10 +687,14 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 // Adrenaline: lightning-bolt icon + stack count (electric yellow)
                 {"ADR", {1.0f, 0.85f, 0.2f}, adrTimer,
                     adrDs.counterStacks > 0 ? static_cast<f32>(adrDs.counterStacks) : -1.0f},
+                // Frenzy (gloves): timer drives visibility/blink, displayValue shows the stack count
+                {"FRN", {1.0f, 0.7f, 0.2f}, m_localPlayer.frenzyTimer,
+                    m_localPlayer.frenzyTimer > 0.0f
+                        ? static_cast<f32>(m_localPlayer.frenzyStacks) : -1.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap (scaled)
             f32 hs2 = static_cast<f32>(sh) / 720.0f;
-            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses, 7);
+            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses, 8);
         }
 
         // Ammo display for hitscan weapons (right side of health bar area)

@@ -517,6 +517,15 @@ void Engine::serverNetPost(f32 dt) {
                 np.poisonTimer = 0.0f; np.burnTimer = 0.0f;
                 np.freezeTimer = 0.0f; np.slowTimer = 0.0f;
             }
+
+            // Passive health regen (HEALTH_REGEN affixes — defensive pack) for REMOTE players,
+            // authoritatively. Read from the server's copy of this slot's inventory; additive +
+            // clamped to max. Host-local lanes regen in their own tickPlayerStatusEffects pass.
+            f32 regen = Inventory::healthRegenRate(m_inventories[pi]);
+            if (regen > 0.0f && np.health < np.maxHealth) {
+                np.health += regen * dt;
+                if (np.health > np.maxHealth) np.health = np.maxHealth;
+            }
         }
 
         if (np.health <= 0.0f) {

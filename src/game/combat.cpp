@@ -222,12 +222,24 @@ void Combat::killEntity(EntityPool& pool, EntityHandle target) {
     }
 }
 
+f32 Combat::armorMitigation(f32 armor) {
+    if (armor <= 0.0f) return 0.0f;
+    f32 mit = armor / (armor + 100.0f); // diminishing returns: 100 armor = 50%
+    return (mit > 0.80f) ? 0.80f : mit;  // hard cap so a stacked build can't become invulnerable
+}
+
 void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos,
                                    u16 attackerIdx) {
-    // Dodge-through detection: if mid-roll and an attack connects, trigger riposte.
-    // This fires regardless of i-frame state — the roll itself is the dodge.
+    // Dodge-through detection: if mid-roll and an attack connects, trigger riposte + Adrenaline.
+    // This fires regardless of i-frame state — the roll itself is the dodge. Fire for ANY attack
+    // that lands mid-roll: melee (valid attackerIdx → riposte counter-hit) AND projectiles/AoE
+    // (attackerIdx 0xFFFF → no riposte, but still a dodge-through that fuels Adrenaline Surge).
+    // Previously gated on `attackerIdx != 0xFFFF`, which silently excluded every projectile dodge
+    // — the main thing a Wanderer rolls through — so adrenaline stacks almost never built. The
+    // callback is robust to 0xFFFF: its riposte/Exploit-Weakness blocks are guarded by
+    // `attackerIdx < MAX_ENTITIES`, so they self-skip and only the stack grant runs.
     if (player.dodgeState.rolling) {
-        if (s_dodgeThroughCallback && attackerIdx != 0xFFFF) {
+        if (s_dodgeThroughCallback) {
             s_dodgeThroughCallback(attackerIdx, attackerPos ? *attackerPos : Vec3{0, 0, 0});
         }
         // During i-frames (first 0.3s), block all damage
@@ -265,11 +277,19 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
         }
     }
 
+    // Armor (defensive pack): flat rating → diminishing-returns mitigation (armorMitigation),
+    // applied after the class/block reductions and capped at 80% so a stacked armor build can't
+    // become invulnerable. armorRating is refreshed each frame from equipped affixes in
+    // tickPassiveEquipment. Direct hits only — poison/burn DoT is intentionally unmitigated.
+    damage *= (1.0f - armorMitigation(player.armorRating));
+
     player.health -= damage;
     player.damageFlashTimer = 0.15f;
     player.hitShakeTimer = 0.15f;
-    // Track damage taken this frame for ring passives (thorns, etc.)
+    // Track damage taken this frame for ring passives (thorns, etc.) and remember who dealt it so
+    // thorns can reflect at the actual attacker (0xFFFF for sources with no attacker entity).
     player.lastDamageTaken = damage;
+    player.lastDamageAttackerIdx = attackerIdx;
 
     // Near-death grace ("lifesaver"): when a hit drops the player into critical HP
     // (<20%) — OR would have killed them outright (a one-shot) — grant a brief invisible

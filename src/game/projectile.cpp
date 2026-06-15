@@ -84,6 +84,12 @@ static void destroyProjectile(ProjectilePool& pool, u32 idx) {
     if (pool.activeCount > 0) pool.activeCount--;
 }
 
+// Public wrapper so the engine can retire a projectile (Infinity Chakram per-owner cap).
+void ProjectileSystem::despawn(ProjectilePool& pool, u16 idx) {
+    if (idx >= MAX_PROJECTILES || !pool.projectiles[idx].active) return;
+    destroyProjectile(pool, idx);
+}
+
 // Result of testing one enemy projectile against one player.
 enum class PlayerHitResult { MISS, DEFLECTED, HIT };
 
@@ -152,11 +158,17 @@ void ProjectileSystem::update(ProjectilePool& pool,
         // (fromPlayer=false) damage players, not entities, so 0xFF is the safe default.
         Combat::setAttackingPlayer(p.fromPlayer ? p.ownerSlot : 0xFF);
 
-        // Lifetime
-        p.lifetime -= dt;
-        if (p.lifetime <= 0.0f) {
-            destroyProjectile(pool, i);
-            continue;
+        // Lifetime. Infinity Chakram (PROJ_INFINITE_BOUNCE) never expires on time — it only
+        // despawns on hitting a target — so its lifetime instead counts UP as an age that the
+        // engine's per-owner cap uses to retire the oldest one. Everything else decays + dies.
+        if (p.projFlags & PROJ_INFINITE_BOUNCE) {
+            p.lifetime += dt; // age only
+        } else {
+            p.lifetime -= dt;
+            if (p.lifetime <= 0.0f) {
+                destroyProjectile(pool, i);
+                continue;
+            }
         }
 
         // Compute travel this frame
@@ -176,8 +188,11 @@ void ProjectileSystem::update(ProjectilePool& pool,
             // is the standard reflection v' = v - 2(v·n)n. Speed is preserved across bounces; the
             // projectile dies on the next wall once bounces run out (falls through below) or when its
             // lifetime backstop expires.
-            if ((p.projFlags & PROJ_BOUNCE) && p.bouncesLeft > 0) {
-                p.bouncesLeft--;
+            // PROJ_INFINITE_BOUNCE (Infinity Chakram) bounces forever; the normal chakram bounces
+            // until bouncesLeft runs out.
+            bool infinite = (p.projFlags & PROJ_INFINITE_BOUNCE) != 0;
+            if ((p.projFlags & PROJ_BOUNCE) && (infinite || p.bouncesLeft > 0)) {
+                if (!infinite) p.bouncesLeft--;
                 // Sit just off the struck face (along its normal) so next tick's raycast doesn't
                 // immediately re-hit the same wall and consume another bounce.
                 p.position = wallHit.position + wallHit.normal * (p.radius + 0.02f);

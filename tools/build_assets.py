@@ -119,6 +119,7 @@ def build_meshes():
         ["--type", "throwing_knife", "--out", os.path.join(mesh_dir, "throwing_knife.obj")],
         ["--type", "molotov",        "--out", os.path.join(mesh_dir, "molotov.obj")],
         ["--type", "chakram",        "--out", os.path.join(mesh_dir, "chakram.obj")],
+        ["--type", "infinity_chakram", "--out", os.path.join(mesh_dir, "infinity_chakram.obj")],
         # Projectiles
         ["--type", "arrow",          "--out", os.path.join(mesh_dir, "arrow.obj")],
         ["--type", "bolt",           "--out", os.path.join(mesh_dir, "bolt.obj")],

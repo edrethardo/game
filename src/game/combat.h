@@ -46,9 +46,16 @@ namespace Combat {
 
     // Apply damage to the player. Optional attackerPos enables directional indicator.
     // attackerIdx: entity pool index of the attacker (0xFFFF if unknown/environmental).
-    // Used by dodge-through detection to fire riposte counter-hits.
+    // Used by dodge-through detection to fire riposte counter-hits, and stamped onto the player so
+    // thorns can reflect at the actual attacker.
     void applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr,
                              u16 attackerIdx = 0xFFFF);
+
+    // Defensive pack — armor rating → fraction of incoming damage mitigated, on a diminishing-
+    // returns curve `armor / (armor + 100)` hard-capped at 0.80. Pure function (no engine state),
+    // exposed for unit testing. 100 armor = 50% reduction; the cap stops stacked armor reaching
+    // invulnerability. Negative/zero armor yields 0.
+    f32 armorMitigation(f32 armor);
 
     // Dodge-through callback: called when damage is blocked during a dodge roll
     using DodgeThroughCallback = void(*)(u16 attackerIdx, Vec3 attackerPos);

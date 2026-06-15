@@ -543,6 +543,13 @@ void Engine::handleWeaponFire(f32 dt) {
                 cp.projFlags  |= PROJ_BOUNCE;
                 cp.bouncesLeft = 3;     // ricochet up to 3× (confirmed feel)
                 cp.lifetime    = 5.0f;  // backstop so a throw that never hits a wall still dies
+                // Infinity Chakram (legendary): never expires, ricochets forever, despawns only on
+                // a target hit. Cap the firer's airborne count so it can't fill the shared pool.
+                if (m_itemDefs[qbItem->defId].infiniteFlight) {
+                    cp.projFlags |= PROJ_INFINITE_BOUNCE;
+                    cp.lifetime   = 0.0f; // age counts up from 0 (used to retire the oldest)
+                    capInfinityChakrams(m_localPlayerIndex, projIdx);
+                }
             }
         }
         // Assign projectile light color based on weapon subtype
@@ -1007,6 +1014,25 @@ void Engine::buildLagCompPlayerObstacles(u32 targetSnapTick,
     }
 }
 
+// Cap a player's airborne Infinity Chakrams so they can never fill the shared projectile pool.
+// Each Infinity Chakram only despawns on a target hit, so without a cap, firing into an enemy-free
+// space would leak pool slots. We keep at most INFINITY_CHAKRAM_CAP per owner: once exceeded, retire
+// the OLDEST (its `lifetime` counts UP as an age for PROJ_INFINITE_BOUNCE — see projectile.cpp).
+void Engine::capInfinityChakrams(u8 ownerSlot, u16 keepIdx) {
+    constexpr u32 INFINITY_CHAKRAM_CAP = 64; // per owner; 64×4 players still well under MAX_PROJECTILES
+    u32 count = 0;
+    u16 oldestIdx = 0xFFFF;
+    f32 oldestAge = -1.0f;
+    for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+        const Projectile& p = m_projectiles.projectiles[i];
+        if (!p.active || !(p.projFlags & PROJ_INFINITE_BOUNCE) || p.ownerSlot != ownerSlot) continue;
+        count++;
+        if (i != keepIdx && p.lifetime > oldestAge) { oldestAge = p.lifetime; oldestIdx = static_cast<u16>(i); }
+    }
+    if (count > INFINITY_CHAKRAM_CAP && oldestIdx != 0xFFFF)
+        ProjectileSystem::despawn(m_projectiles, oldestIdx);
+}
+
 // ---------------------------------------------------------------------------
 // Weapon fire for any NetPlayer (server-authoritative)
 // ---------------------------------------------------------------------------
@@ -1270,6 +1296,12 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                 proj.projFlags  |= PROJ_BOUNCE;
                 proj.bouncesLeft = 3;     // ricochet up to 3× (confirmed feel)
                 proj.lifetime    = 5.0f;  // backstop so a throw that never hits a wall still dies
+                // Infinity Chakram — mirror the SP path (despawns only on a target hit).
+                if (m_itemDefs[eqWpn.defId].infiniteFlight) {
+                    proj.projFlags |= PROJ_INFINITE_BOUNCE;
+                    proj.lifetime   = 0.0f;
+                    capInfinityChakrams(np.slotIndex, projIdx);
+                }
             }
             if (isMolotov)   proj.lightColor = {1.0f, 0.5f, 0.1f}; // fire
             else if (isWand) proj.lightColor = {0.4f, 0.6f, 1.0f}; // arcane blue

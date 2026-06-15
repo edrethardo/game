@@ -51,16 +51,36 @@ static void accumulateCommonAffix(Equip& e, const Affix& affix) {
     }
 }
 
-f32 Inventory::lifestealPct(const PlayerInventory& inv) {
-    f32 pct = 0.0f;
+// Sum a single affix type across every equipped item. Used for affixes that are deliberately
+// NOT cached in a PlayerInventory bonus* field (lifesteal and the defensive pack), because adding
+// a bonus* field changes the serialized struct size and would break existing saves. The O(slots ×
+// affixes) walk is tiny (≤7×4) and only runs where the stat is consumed, not per-frame in hot code.
+static f32 sumEquippedAffix(const PlayerInventory& inv, AffixType type) {
+    f32 total = 0.0f;
     for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
         const ItemInstance& it = inv.equipped[s];
         if (isItemEmpty(it)) continue;
         for (u8 a = 0; a < it.affixCount; a++)
-            if (it.affixes[a].type == AffixType::LIFESTEAL_PCT)
-                pct += it.affixes[a].value;
+            if (it.affixes[a].type == type)
+                total += it.affixes[a].value;
     }
-    return pct;
+    return total;
+}
+
+f32 Inventory::lifestealPct(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::LIFESTEAL_PCT);
+}
+
+// Defensive pack — all computed on demand (no cached field → no save-format change). The caller
+// stamps these into the Player's transient per-frame combat cache (see tickPassiveEquipment).
+f32 Inventory::armorRating(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::ARMOR);
+}
+f32 Inventory::healthRegenRate(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::HEALTH_REGEN);
+}
+f32 Inventory::thornsPct(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::THORNS_PCT);
 }
 
 void Inventory::recalculateStats(PlayerInventory& inv) {

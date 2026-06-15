@@ -135,6 +135,7 @@ void Engine::initAssets() {
             {"throwing_knife", "assets/meshes/throwing_knife.obj"},
             {"molotov",        "assets/meshes/molotov.obj"},
             {"chakram",        "assets/meshes/chakram.obj"},
+            {"infinity_chakram", "assets/meshes/infinity_chakram.obj"},
             {"gloves",         "assets/meshes/gloves.obj"},
             {"helmet",         "assets/meshes/helmet.obj"},
             {"armor",          "assets/meshes/armor.obj"},

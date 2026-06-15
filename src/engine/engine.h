@@ -646,6 +646,10 @@ private:
     // activation bug). `slot` is the remote's net slot; gated on !isDead by the caller.
     void processRemoteActivation(u8 slot, const NetInput& in, f32 dt);
     void handleWeaponFire(f32 dt); // singleplayer legacy
+    // Cap a player's airborne Infinity Chakrams: if `ownerSlot` already has the max
+    // PROJ_INFINITE_BOUNCE projectiles aloft, retire the oldest (largest count-up lifetime),
+    // skipping `keepIdx` (the just-spawned one). Keeps them from filling the shared pool.
+    void capInfinityChakrams(u8 ownerSlot, u16 keepIdx);
     // Lock-on is inert (lockActive never set true); this now only handles the
     // quickbar-use action. Name kept to avoid churning call sites (R7-6).
     void updateTargetLock(f32 dt); // singleplayer legacy

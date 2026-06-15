@@ -46,8 +46,50 @@ RayHit Raycast::cast(const LevelGrid& grid,
     else
         tMaxZ = FLT_MAX;
 
+    // Floor/ceiling crossing inside cell (fcx,fcz) within t ∈ (0, tExit]. Returns {.hit=false} if
+    // none. Used for the STARTING cell (below) AND each cell the ray enters. Without the starting-
+    // cell call, a ray that stays inside one cell (e.g. a projectile's short per-tick cast) never
+    // gets a floor/ceiling test, so projectiles passed through the floor/ceiling instead of bouncing.
+    auto tryFloorCeil = [&](s32 fcx, s32 fcz, f32 tExit) -> RayHit {
+        RayHit none;
+        if (dir.y == 0.0f) return none;
+        if (dir.y < 0.0f) {
+            f32 floorH = LevelGridSystem::getFloorHeight(grid, (u32)fcx, (u32)fcz);
+            f32 tF = (floorH - origin.y) / dir.y;
+            if (tF > 0.0f && tF <= tExit) {
+                Vec3 hp = origin + dir * tF;
+                if (static_cast<s32>(std::floor(hp.x / cs)) == fcx &&
+                    static_cast<s32>(std::floor(hp.z / cs)) == fcz) {
+                    RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, 1.0f, 0.0f};
+                    hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tF; return hit;
+                }
+            }
+        } else { // dir.y > 0 — ceiling
+            f32 ceilH = LevelGridSystem::getCeilingHeight(grid, (u32)fcx, (u32)fcz);
+            f32 tC = (ceilH - origin.y) / dir.y;
+            if (tC > 0.0f && tC <= tExit) {
+                Vec3 hp = origin + dir * tC;
+                if (static_cast<s32>(std::floor(hp.x / cs)) == fcx &&
+                    static_cast<s32>(std::floor(hp.z / cs)) == fcz) {
+                    RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, -1.0f, 0.0f};
+                    hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tC; return hit;
+                }
+            }
+        }
+        return none;
+    };
+
     Vec3 lastNormal = {0, 0, 0};
     f32  t = 0.0f;
+
+    // Starting cell first — the DDA loop only checks cells it ADVANCES into (see lambda note).
+    if (cx >= 0 && cz >= 0 && (u32)cx < grid.width && (u32)cz < grid.depth &&
+        !LevelGridSystem::isSolid(grid, (u32)cx, (u32)cz)) {
+        f32 tExit0 = (tMaxX < tMaxZ) ? tMaxX : tMaxZ;
+        if (tExit0 > maxDistance) tExit0 = maxDistance;
+        RayHit fc = tryFloorCeil(cx, cz, tExit0);
+        if (fc.hit) return fc;
+    }
 
     while (t < maxDistance) {
         // Advance to next cell
@@ -101,55 +143,11 @@ RayHit Raycast::cast(const LevelGrid& grid,
             return hit;
         }
 
-        // Empty cell — check floor/ceiling intersection for looking up/down.
-        // tNext is when we leave this cell; floor/ceiling hits must be within [0, tNext].
+        // Empty cell — floor/ceiling crossing within this cell (tNext = when we leave it).
         f32 tNext = (tMaxX < tMaxZ) ? tMaxX : tMaxZ;
         if (tNext > maxDistance) tNext = maxDistance;
-
-        if (dir.y != 0.0f) {
-            f32 floorH = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
-            f32 ceilH  = LevelGridSystem::getCeilingHeight(grid, (u32)cx, (u32)cz);
-
-            // Floor hit (ray going down)
-            if (dir.y < 0.0f) {
-                f32 tFloor = (floorH - origin.y) / dir.y;
-                if (tFloor > 0.0f && tFloor <= tNext) {
-                    Vec3 hitPos = origin + dir * tFloor;
-                    s32 hcx = static_cast<s32>(std::floor(hitPos.x / cs));
-                    s32 hcz = static_cast<s32>(std::floor(hitPos.z / cs));
-                    if (hcx == cx && hcz == cz) {
-                        RayHit hit;
-                        hit.hit      = true;
-                        hit.position = hitPos;
-                        hit.normal   = {0.0f, 1.0f, 0.0f};
-                        hit.cellX    = (u32)cx;
-                        hit.cellZ    = (u32)cz;
-                        hit.distance = tFloor;
-                        return hit;
-                    }
-                }
-            }
-
-            // Ceiling hit (ray going up)
-            if (dir.y > 0.0f) {
-                f32 tCeil = (ceilH - origin.y) / dir.y;
-                if (tCeil > 0.0f && tCeil <= tNext) {
-                    Vec3 hitPos = origin + dir * tCeil;
-                    s32 hcx = static_cast<s32>(std::floor(hitPos.x / cs));
-                    s32 hcz = static_cast<s32>(std::floor(hitPos.z / cs));
-                    if (hcx == cx && hcz == cz) {
-                        RayHit hit;
-                        hit.hit      = true;
-                        hit.position = hitPos;
-                        hit.normal   = {0.0f, -1.0f, 0.0f};
-                        hit.cellX    = (u32)cx;
-                        hit.cellZ    = (u32)cz;
-                        hit.distance = tCeil;
-                        return hit;
-                    }
-                }
-            }
-        }
+        RayHit fc = tryFloorCeil(cx, cz, tNext);
+        if (fc.hit) return fc;
     }
 
     return miss; // no hit within maxDistance

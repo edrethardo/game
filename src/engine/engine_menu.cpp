@@ -453,11 +453,15 @@ void Engine::updateMenu(f32 dt) {
         // Read from both controllers so either player can navigate for P2
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
             Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+            Input::isMenuStickPressed(Input::StickNav::Up, 0) ||
+            Input::isMenuStickPressed(Input::StickNav::Up, 1) ||
             Input::isKeyPressed(SDL_SCANCODE_W) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
             Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+            Input::isMenuStickPressed(Input::StickNav::Down, 0) ||
+            Input::isMenuStickPressed(Input::StickNav::Down, 1) ||
             Input::isKeyPressed(SDL_SCANCODE_S) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
             if (m_menu.subSelection < classCount - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
@@ -497,10 +501,10 @@ void Engine::updateMenu(f32 dt) {
     // Player 2 New/Continue chooser (subState 11) — driven by P2's controller (index 1), with a
     // keyboard fallback for desktop testing. Mirrors subState 1 but seats the result in lane 1.
     if (m_menu.subState == 11) {
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isMenuStickPressed(Input::StickNav::Up, 1) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isMenuStickPressed(Input::StickNav::Down, 1) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
             if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B) || Input::isActionPressed(GameAction::MENU_BACK)) {
@@ -523,10 +527,10 @@ void Engine::updateMenu(f32 dt) {
     // slot (that would share one file). Continue loads the hero into lane 1 WITHOUT touching the
     // world (it stays Player 1's floor); New goes to P2 class select (overwrite-confirm if occupied).
     if (m_menu.subState == 12) {
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isMenuStickPressed(Input::StickNav::Up, 1) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isMenuStickPressed(Input::StickNav::Down, 1) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
             if (m_menu.subSelection < MAX_SAVE_SLOTS - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B) || Input::isActionPressed(GameAction::MENU_BACK)) {
@@ -713,7 +717,8 @@ void Engine::updateMenu(f32 dt) {
             }
             // Left/Right adjusts sensitivity sliders or toggles column
             if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) ||
+                Input::isMenuStickPressed(Input::StickNav::Left)) {
                 if (m_menu.subSelection == OPT_STICK_SENS) {
                     Input::setStickSensitivity(Input::getStickSensitivity() - 0.25f);
                     if (Input::getStickSensitivity() < 0.25f) Input::setStickSensitivity(0.25f);
@@ -725,7 +730,8 @@ void Engine::updateMenu(f32 dt) {
                 }
             }
             if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
+                Input::isMenuStickPressed(Input::StickNav::Right)) {
                 if (m_menu.subSelection == OPT_STICK_SENS) {
                     Input::setStickSensitivity(Input::getStickSensitivity() + 0.25f);
                     if (Input::getStickSensitivity() > 5.0f) Input::setStickSensitivity(5.0f);

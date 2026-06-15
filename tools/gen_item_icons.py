@@ -154,6 +154,15 @@ def draw_carbine():
     return g
 
 
+def draw_infinity():
+    """Infinity Chakram icon — two linked hollow rings forming an ∞ symbol (distinct from the
+    single-ring CHAKRAM icon)."""
+    g = grid()
+    ring(g, 5, 8, 3.8, 1.6)   # left loop (hollow)
+    ring(g, 10, 8, 3.8, 1.6)  # right loop (overlaps the left at the center → linked ∞)
+    return g
+
+
 def pack(g):
     """Pack a 16x16 boolean grid into 16 u16 rows (bit 15 = leftmost pixel)."""
     rows = []
@@ -188,6 +197,7 @@ def main():
         ("SMG", pack(draw_smg())),
         ("CARBINE", pack(draw_carbine())),
         ("REVOLVER", pack(draw_revolver())),
+        ("INFINITY", pack(draw_infinity())),
     ]
     write_header(icons, out_path)
 

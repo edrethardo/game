@@ -83,13 +83,25 @@ static const u8 kIconAdrenaline[8][8] = {
     {0,1,4,0,0,0,0,0},
 };
 
+// Frenzy (gloves) — clenched gauntlet fist; stack count shown as displayValue
+static const u8 kIconFrenzy[8][8] = {
+    {0,0,1,1,1,1,0,0},
+    {0,1,4,4,4,4,1,0},
+    {0,1,4,2,2,4,1,0},
+    {0,1,4,4,4,4,1,4},  // thumb jutting out to the right
+    {0,1,4,2,2,4,1,0},
+    {0,1,4,4,4,4,1,0},
+    {0,0,1,1,1,1,0,0},
+    {0,0,0,3,3,0,0,0},  // wrist cuff
+};
+
 static const u8* getStatusIcon(u32 idx) {
     static const u8* icons[] = {
         &kIconPoison[0][0], &kIconBurn[0][0], &kIconFreeze[0][0],
         &kIconSlow[0][0], &kIconInvuln[0][0], &kIconSoulHarvest[0][0],
-        &kIconAdrenaline[0][0]
+        &kIconAdrenaline[0][0], &kIconFrenzy[0][0]
     };
-    return (idx < 7) ? icons[idx] : nullptr;
+    return (idx < 8) ? icons[idx] : nullptr;
 }
 
 // Status-specific color palettes: [0]=unused, [1]=primary, [2]=secondary, [3]=detail, [4]=highlight
@@ -123,6 +135,10 @@ static void getStatusColors(u32 idx, Vec3 cols[5]) {
         case 6: // Adrenaline (electric yellow)
             cols[1] = {0.95f, 0.8f, 0.1f};   cols[2] = {0.7f, 0.45f, 0.05f};
             cols[3] = {0.8f, 0.6f, 0.1f};    cols[4] = {1.0f, 1.0f, 0.6f};
+            break;
+        case 7: // Frenzy (amber/gold gauntlet)
+            cols[1] = {0.9f, 0.6f, 0.2f};    cols[2] = {0.6f, 0.35f, 0.1f};
+            cols[3] = {0.5f, 0.3f, 0.15f};   cols[4] = {1.0f, 0.9f, 0.4f};
             break;
         default:
             cols[1] = cols[2] = cols[3] = cols[4] = {0.5f, 0.5f, 0.5f};
