@@ -138,7 +138,7 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 | `Esc` | Back to menu (in lobby) / quit (in-game) |
 | `1`/`2`/`3` | Select weapon (legacy slots; 1=Sword, 2=Pistol, 3=Fireball) |
 | `Tab` | Toggle inventory screen (releases mouse) |
-| `C` (or `LB+R3` on gamepad) | Open / close the Character inspect screen (rotatable equipped-model panel + OFFENSE/DEFENSE/UTILITY stat sheet; drag mouse or right-stick to spin the model; freezes gameplay input while open) |
+| `C` (or `LB` + `+` on gamepad) | Open / close the Character inspect screen (rotatable equipped-model panel + OFFENSE/DEFENSE/UTILITY stat sheet; drag mouse or right-stick to spin the model; freezes gameplay input while open). The `LB`-chord shares the `+` (START) button with `INVENTORY` — disambiguated by `chordClaimsButton()` in `input.cpp` (a bare-button action yields to a same-button chord while its modifier is held; this also fixes equipment-skill chords like `LB+B` from double-firing `POTION`) |
 | `E` | Pickup nearest world item |
 | `Right click` | Activate equipped legendary skill |
 | `F1` | Toggle `DebugDraw` overlay (entity AABBs, rays) |

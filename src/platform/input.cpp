@@ -155,9 +155,10 @@ static void setDefaults() {
     // UI
     set(GameAction::INVENTORY,       SDL_SCANCODE_TAB,    0, SDL_CONTROLLER_BUTTON_START);
     set(GameAction::PAUSE,           SDL_SCANCODE_ESCAPE, 0, SDL_CONTROLLER_BUTTON_BACK);
-    // Character inspect screen. Keyboard: C. Gamepad: LB + R3 chord (avoids conflict with
-    // DODGE on R3 alone and right-stick look/aim while in normal gameplay).
-    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_C,      0, SDL_CONTROLLER_BUTTON_RIGHTSTICK, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    // Character inspect screen. Keyboard: C. Gamepad: L + "+" chord (LEFTSHOULDER + START).
+    // INVENTORY is bare "+" (START); the shared-button collision is resolved in checkActionRaw,
+    // where a bare binding yields to a chord that claims the same button while L is held.
+    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_C,      0, SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
     set(GameAction::QUICKBAR_PREV, -1,                  0, SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
     set(GameAction::QUICKBAR_NEXT, -1,                  0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 
@@ -878,6 +879,22 @@ void Input::setSplitScreen(bool active)  { s_splitActive = active; }
 // ---------------------------------------------------------------------------
 // Action-based input — merges keyboard + mouse + gamepad
 // ---------------------------------------------------------------------------
+
+// A bare gamepad-button binding (no modifier) must yield to a chord binding that
+// shares the same physical button when that chord's modifier is currently held.
+// Example: "+" (START) alone opens the Inventory, but L+"+" opens the Character
+// screen — without this, pressing L+"+" would fire BOTH on the same frame. L is
+// reserved as a modifier-only button by design, so this only ever suppresses the
+// bare action while a real chord on that button is active.
+static bool chordClaimsButton(s32 padIdx, s32 button) {
+    for (u32 i = 0; i < static_cast<u32>(GameAction::COUNT); ++i) {
+        const InputBinding& o = s_bindings[i];
+        if (o.button == button && o.modifier >= 0 && Input::isButtonDown(padIdx, o.modifier))
+            return true;
+    }
+    return false;
+}
+
 static bool checkActionRaw(GameAction action, bool pressed) {
     u32 idx = static_cast<u32>(action);
     if (idx >= static_cast<u32>(GameAction::COUNT)) return false;
@@ -909,6 +926,8 @@ static bool checkActionRaw(GameAction action, bool pressed) {
     if (b.button >= 0) {
         bool modOk = (b.modifier < 0) || Input::isButtonDown(padIdx, b.modifier);
         if (b.modifier >= 0 && !Input::isButtonDown(padIdx, b.modifier)) modOk = false;
+        // Bare binding yields to an active chord on the same button (see chordClaimsButton).
+        if (modOk && b.modifier < 0 && chordClaimsButton(padIdx, b.button)) modOk = false;
         if (modOk) {
             if (pressed ? Input::isButtonPressed(padIdx, b.button) : Input::isButtonDown(padIdx, b.button))
                 return true;
