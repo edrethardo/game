@@ -1142,7 +1142,7 @@ void Engine::gameUpdate(f32 dt) {
         Input::setRelativeMouseMode(true);
     }
 
-    // Toggle character inspect screen (C / LB+R3). Mirrors the inventory overlay:
+    // Toggle character inspect screen (C / LB+Plus). Mirrors the inventory overlay:
     // frees the mouse for P0, freezes gameplay input via gameplayInputFrozen().
     // Closing re-acquires the mouse only if inventory is also closed so a player
     // who has both screens open doesn't accidentally re-capture mid-UI.

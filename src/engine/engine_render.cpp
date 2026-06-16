@@ -512,7 +512,7 @@ void Engine::ensureFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& c
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTex, 0);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRbo);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        LOG_ERROR("Scene FBO incomplete (%ux%u)", w, h);
+        LOG_ERROR("FBO incomplete (%ux%u)", w, h); // shared by scene render-scale + inspect FBO
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     curW = w; curH = h;
