@@ -224,7 +224,11 @@ void Engine::initAssets() {
         for (auto& entry : kMeshes) {
             if (m_meshDefCount >= MAX_MESH_DEFS) break;
             AABB bounds;
-            Mesh mesh = ObjLoader::load(ASSET_PATH(entry.path), &bounds);
+            // Measure body-part regions only for player body meshes (armor auto-fit reads them).
+            bool isBody = std::strncmp(entry.name, "player_", 7) == 0;
+            BodyRegions regions;
+            Mesh mesh = ObjLoader::load(ASSET_PATH(entry.path), &bounds,
+                                        isBody ? &regions : nullptr);
             if (mesh.vao != 0) {
                 // Resolve usemtl material names → IDs now that MaterialSystem is initialised.
                 // MaterialSystem::init() runs before this loop so getIdByName is safe to call.
@@ -236,6 +240,7 @@ void Engine::initAssets() {
                 std::strncpy(def.name, entry.name, sizeof(def.name) - 1);
                 def.mesh = mesh;
                 def.bounds = bounds;
+                if (isBody && regions.valid) m_bodyRegions[m_meshDefCount] = regions;
                 m_meshDefCount++;
             }
         }

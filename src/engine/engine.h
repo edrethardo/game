@@ -5,6 +5,7 @@
 #include "renderer/particles.h"
 #include "renderer/shader.h"
 #include "renderer/texture.h"
+#include "renderer/obj_loader.h"  // BodyRegions (armor auto-fit)
 #include "world/collision.h"     // CollisionObstacle — used by buildLagCompPlayerObstacles
 #include "world/level_grid.h"
 #include "world/level_mesh.h"
@@ -392,6 +393,9 @@ private:
     static constexpr u32 MAX_MESH_DEFS = 96;
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
+    // Per-body-mesh region boxes (head/torso/feet/hands) for armor auto-fit, keyed by mesh id.
+    // Only player body meshes have .valid=true; filled at load in engine_init_assets.
+    BodyRegions m_bodyRegions[MAX_MESH_DEFS] = {};
 
     // Level, dungeon, and world state
     struct LevelState {
@@ -720,11 +724,28 @@ private:
     // Draw the equipped weapon + armor overlays onto a 3rd-person body at (pos, yaw, scale).
     // `anim` = weapon anim flag bits (bit0 attacking, bit1 reloading). Used by the split-screen
     // partner, remote players, and the character-inspect screen.
-    void submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim, const PlayerInventory& inv);
+    void submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
+                               u8 bodyMeshId, const PlayerInventory& inv);
     // Mesh-id variant for clients that have wire mesh ids but no remote inventory.
     // Material resolves to default texture/tint (material id 0) — adequate for remote view.
     void submitPlayerEquipmentIds(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
-                                  u8 weaponMeshId, const u8 armorMeshId[4]);
+                                  u8 bodyMeshId, u8 weaponMeshId, const u8 armorMeshId[4]);
+    // Armor auto-fit helpers (engine_render_world.cpp): bodyRegionsFor returns the measured
+    // head/torso/feet/hand boxes for a body mesh (synthesizing coarse ones from the mesh AABB if
+    // unmeasured); armorFitMatrix builds the world transform that scales an armor mesh to enclose
+    // a region (+margin) on a body drawn at (pos,yaw,bodyScale). Replaces hand-tuned offsets.
+    BodyRegions bodyRegionsFor(u8 bodyMeshId) const;
+    // Single armor-fit transform: scale an armor mesh's local AABB to a target box (center + per-axis
+    // half-extents in body-local space) and seat it, then apply the body's pos/yaw/scale. Driven by
+    // the per-slot specs in submitPlayerEquipment — replaces the old per-piece margin/skullcap magic.
+    Mat4 fitMeshToBox(u8 armorMesh, const Vec3& center, const Vec3& half,
+                      const Vec3& pos, f32 yaw, f32 bodyScale) const;
+    // The slot-spec table: compute the body-local target box (center + half-extents) for an armor
+    // slot (0=helmet,1=chest,2=boots,3=gloves) from measured landmarks. Returns false when the
+    // slot's landmark is invalid (e.g. a robed body with no hands) so the piece is skipped. All the
+    // meaningful "how big / where" tuning lives here in one place.
+    bool armorSlotBox(int slot, const BodyRegions& reg, f32 bodyH,
+                      Vec3& outCenter, Vec3& outHalf) const;
     void renderSpeechBubbles(u32 sw, u32 sh);
     // Screen-space interaction prompts (floor-descend + item-pickup button hints).
     // Drawn in the NATIVE HUD pass (not the scaled 3D pass) so the button-glyph

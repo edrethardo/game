@@ -306,14 +306,14 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 // the same body-attach math so the visual result is consistent.
                 if (m_netRole == NetRole::CLIENT) {
                     u8 anim = m_renderInterp.playerAnimFlags[i];
-                    submitPlayerEquipmentIds(pos, yaw, scale, anim,
+                    submitPlayerEquipmentIds(pos, yaw, scale, anim, classMesh,
                                             m_renderInterp.playerWeaponMeshId[i],
                                             m_renderInterp.playerArmorMeshId[i]);
                 } else {
                     u8 anim = 0;
                     if (m_players[i].weaponState.cooldownTimer > 0.0f) anim |= 1;
                     if (m_players[i].weaponState.reloading)            anim |= 2;
-                    submitPlayerEquipment(pos, yaw, scale, anim, m_inventories[i]);
+                    submitPlayerEquipment(pos, yaw, scale, anim, classMesh, m_inventories[i]);
                 }
             }
         }
@@ -366,7 +366,7 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 if (m_players[otherP].weaponState.reloading)             partnerAnim |= 2;
 
                 // Draw weapon + all equipped armor overlays via the shared helper.
-                submitPlayerEquipment(pos, yaw, scale, partnerAnim, m_inventories[otherP]);
+                submitPlayerEquipment(pos, yaw, scale, partnerAnim, classMesh, m_inventories[otherP]);
             }
         }
     }
@@ -377,8 +377,105 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 // on a 3rd-person body at (pos, yaw, scale). Called for the split-screen partner
 // and (in later tasks) remote players and the character-inspect screen.
 // ---------------------------------------------------------------------------
+// Return the measured body-part regions for a body mesh; if unmeasured (non-player body or
+// missing-asset fallback), synthesize coarse regions from the mesh's overall AABB so armor still
+// fits something sensible. Regions are in body-LOCAL space (pre body-scale).
+BodyRegions Engine::bodyRegionsFor(u8 bodyMeshId) const {
+    if (bodyMeshId < MAX_MESH_DEFS && m_bodyRegions[bodyMeshId].valid)
+        return m_bodyRegions[bodyMeshId];
+    BodyRegions r;
+    AABB b = (bodyMeshId > 0 && bodyMeshId < m_meshDefCount)
+                 ? m_meshDefs[bodyMeshId].bounds
+                 : AABB{{-0.3f, 0.0f, -0.3f}, {0.3f, 1.8f, 0.3f}};
+    f32 base = b.min.y, H = b.max.y - b.min.y;
+    auto band = [&](f32 lo, f32 hi) {
+        return AABB{{b.min.x, base + lo * H, b.min.z}, {b.max.x, base + hi * H, b.max.z}};
+    };
+    r.head  = band(0.80f, 1.0f);  r.headValid  = true;
+    r.torso = band(0.42f, 0.68f); r.torsoValid = true;
+    r.feet  = band(0.0f,  0.16f); r.feetValid  = true;
+    r.shoulderHalfW = fmaxf(fabsf(b.min.x), fabsf(b.max.x));
+    f32 reach = r.shoulderHalfW;
+    r.handL = {{b.min.x, base + 0.10f * H, b.min.z}, {-0.45f * reach, base + 0.32f * H, b.max.z}};
+    r.handR = {{0.45f * reach, base + 0.10f * H, b.min.z}, {b.max.x, base + 0.32f * H, b.max.z}};
+    r.handsValid = true;
+    r.valid = true;
+    return r;
+}
+
+// Single armor-fit transform: scale an armor mesh's local AABB so it exactly fills a target box
+// (center + per-axis half-extents, body-local), then apply the body's pos/yaw/scale. One function
+// serves every slot — the per-slot box is computed from measured landmarks + the spec table, which
+// is where all the meaningful tuning lives.
+Mat4 Engine::fitMeshToBox(u8 armorMesh, const Vec3& center, const Vec3& half,
+                          const Vec3& pos, f32 yaw, f32 bodyScale) const {
+    const AABB& ab = m_meshDefs[armorMesh].bounds;
+    Vec3 aCenter = (ab.min + ab.max) * 0.5f;
+    Vec3 aHalf   = (ab.max - ab.min) * 0.5f;
+    Vec3 sc = {half.x / fmaxf(aHalf.x, 1e-4f),
+               half.y / fmaxf(aHalf.y, 1e-4f),
+               half.z / fmaxf(aHalf.z, 1e-4f)};
+    Mat4 fit = Mat4::translate(center) * Mat4::scale(sc)
+             * Mat4::translate(Vec3{-aCenter.x, -aCenter.y, -aCenter.z});
+    return Mat4::translate(pos) * Mat4::rotateY(yaw)
+         * Mat4::scale({bodyScale, bodyScale, bodyScale}) * fit;
+}
+
+// THE SLOT-SPEC TABLE. Given measured body landmarks, produce the target box each armor piece fills.
+// This is the single place that decides "how big / where" — meaningful factors, not scattered magic:
+//   HELMET: skullcap — rim at the brow, apex above the crown, 1.4x the head width (sits ON the head).
+//   CHEST : width spans the SHOULDERS (with a floor so slim bodies still get a substantial cuirass),
+//           extra depth so it wraps front/back.
+//   BOOTS : the feet box, slightly enlarged.
+//   GLOVES: the span enclosing BOTH measured hands (x already spans them), enlarged in Y/Z.
+// Returns false when the slot's landmark is invalid (e.g. a robed body with no hands/feet) → skip.
+bool Engine::armorSlotBox(int slot, const BodyRegions& reg, f32 bodyH,
+                          Vec3& outCenter, Vec3& outHalf) const {
+    auto boxOf = [](const AABB& a, Vec3& c, Vec3& h) {
+        c = (a.min + a.max) * 0.5f;
+        h = (a.max - a.min) * 0.5f;
+    };
+    if (slot == 0) {                       // HELMET
+        if (!reg.headValid) return false;
+        f32 hh = reg.head.max.y - reg.head.min.y;
+        f32 yMin = reg.head.min.y + 0.50f * hh;   // brow
+        f32 yMax = reg.head.max.y + 0.30f * hh;   // apex above the crown
+        f32 hw = (reg.head.max.x - reg.head.min.x) * 0.5f;
+        f32 hd = (reg.head.max.z - reg.head.min.z) * 0.5f;
+        outCenter = {(reg.head.min.x + reg.head.max.x) * 0.5f, (yMin + yMax) * 0.5f,
+                     (reg.head.min.z + reg.head.max.z) * 0.5f};
+        outHalf   = {hw * 1.4f, (yMax - yMin) * 0.5f, hd * 1.4f};
+        return true;
+    }
+    if (slot == 1) {                       // CHEST
+        if (!reg.torsoValid) return false;
+        Vec3 c, h; boxOf(reg.torso, c, h);
+        f32 wHalf = fmaxf(reg.shoulderHalfW * 1.25f, bodyH * 0.20f); // spans shoulders, min floor
+        outCenter = c;
+        outHalf   = {wHalf, h.y * 1.3f, h.z * 1.75f};
+        return true;
+    }
+    if (slot == 2) {                       // BOOTS
+        if (!reg.feetValid) return false;
+        Vec3 c, h; boxOf(reg.feet, c, h);
+        outCenter = c;
+        outHalf   = {h.x * 1.5f, h.y * 1.45f, h.z * 1.4f};
+        return true;
+    }
+    // slot == 3: GLOVES — box enclosing both measured hands.
+    if (!reg.handsValid) return false;
+    AABB hands = {{fminf(reg.handL.min.x, reg.handR.min.x), fminf(reg.handL.min.y, reg.handR.min.y),
+                   fminf(reg.handL.min.z, reg.handR.min.z)},
+                  {fmaxf(reg.handL.max.x, reg.handR.max.x), fmaxf(reg.handL.max.y, reg.handR.max.y),
+                   fmaxf(reg.handL.max.z, reg.handR.max.z)}};
+    Vec3 c, h; boxOf(hands, c, h);
+    outCenter = c;
+    outHalf   = {h.x * 1.05f, h.y * 1.3f, h.z * 1.3f}; // x already spans both hands
+    return true;
+}
+
 void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
-                                   const PlayerInventory& inv) {
+                                   u8 bodyMeshId, const PlayerInventory& inv) {
     // Fallback texture: material slot 0 is always the white placeholder.
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
@@ -396,10 +493,26 @@ void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
             Vec3 wp = pos + Vec3{0, 0.8f + drop, 0}
                           + right * (0.35f * scale)
                           + fwd   * ((0.3f + thrust) * scale);
+            // Normalize the held weapon to ~0.85 m longest (its native mesh size varies a lot),
+            // so daggers and claymores both read at a sensible held size instead of the old
+            // fixed 0.4 that shrank larger meshes to nothing.
+            const AABB& wmb = m_meshDefs[wMesh].bounds;
+            f32 wMax = fmaxf(wmb.max.x - wmb.min.x, fmaxf(wmb.max.y - wmb.min.y, wmb.max.z - wmb.min.z));
+            f32 wScale = ((wMax > 0.001f) ? (0.85f / wMax) : 0.4f) * scale;
+            // Per-type orientation (mirrors the FP viewmodel): gun barrels are authored toward +Z,
+            // which rotateY(yaw) alone points BEHIND the body — flip them π so they face forward.
+            // Melee/bows stay upright (blade along +Y reads fine held vertically).
+            const ItemDef& wdef = m_itemDefs[wpn.defId];
+            f32 holdYaw = 0.0f;
+            if (wdef.weaponType == WeaponType::HITSCAN ||
+                (wdef.weaponType == WeaponType::PROJECTILE &&
+                 wdef.weaponSubtype == WeaponSubtype::CROSSBOW)) {
+                holdYaw = 3.14159f; // barrel/stock faces forward
+            }
             Mat4 mm = Mat4::translate(wp)
-                    * Mat4::rotateY(yaw)
-                    * Mat4::scale({0.4f * scale, 0.4f * scale, 0.4f * scale});
-            AABB wb = {wp - Vec3{0.2f, 0.2f, 0.2f}, wp + Vec3{0.2f, 0.2f, 0.2f}};
+                    * Mat4::rotateY(yaw + holdYaw)
+                    * Mat4::scale({wScale, wScale, wScale});
+            AABB wb = {wp - Vec3{0.5f, 0.5f, 0.5f}, wp + Vec3{0.5f, 0.5f, 0.5f}};
             const Material* m = MaterialSystem::get(wMat);
             Renderer::submit(m_basicShader, m ? m->texture : defaultTex,
                              m_meshDefs[wMesh].mesh, mm, wb,
@@ -407,48 +520,28 @@ void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
         }
     }
 
-    // --- Armor overlays: helmet, chest, boots, gloves ---
-    // Each slot's tierMeshId is a pre-resolved mesh that matches the item's weight tier
-    // (light/medium/heavy) and body region, registered in init_assets.
-    struct ArmorSlot { ItemSlot slot; Vec3 bodyOffset; };
-    const ArmorSlot kArmorSlots[] = {
-        { ItemSlot::HELMET, {0, 0.92f, 0} },   // sits at head height
-        { ItemSlot::ARMOR,  {0, 0.55f, 0} },   // torso center
-        { ItemSlot::BOOTS,  {0, 0.06f, 0} },   // just off floor
-        { ItemSlot::GLOVES, {0, 0.55f, 0} },   // hands (arm-height ≈ torso)
-    };
-    for (const ArmorSlot& as : kArmorSlots) {
-        const ItemInstance& it = inv.equipped[static_cast<u32>(as.slot)];
+    // --- Armor overlays — landmark-anchored, driven by the slot-spec table (armorSlotBox) ---
+    // One loop: each piece's target box comes from the spec; fitMeshToBox seats the mesh there.
+    // Invalid landmarks (e.g. a robed body's missing hands/feet) skip that piece.
+    const BodyRegions reg = bodyRegionsFor(bodyMeshId);
+    f32 bodyH = (bodyMeshId > 0 && bodyMeshId < m_meshDefCount)
+                  ? (m_meshDefs[bodyMeshId].bounds.max.y - m_meshDefs[bodyMeshId].bounds.min.y) : 1.8f;
+    const AABB worldBox = {pos - Vec3{0.8f, 0.0f, 0.8f}, pos + Vec3{0.8f, 2.2f, 0.8f}}; // cull box
+    const ItemSlot kSlot[4] = {ItemSlot::HELMET, ItemSlot::ARMOR, ItemSlot::BOOTS, ItemSlot::GLOVES};
+    for (int s = 0; s < 4; ++s) {
+        const ItemInstance& it = inv.equipped[static_cast<u32>(kSlot[s])];
         if (it.defId >= m_itemDefCount) continue;          // empty slot
         const ItemDef& def = m_itemDefs[it.defId];
         u8 mesh = def.tierMeshId;
-        if (mesh == 0 || mesh >= m_meshDefCount) continue; // no tier mesh registered
-        if (!m_meshDefs[mesh].mesh.vao) continue;
-
+        if (mesh == 0 || mesh >= m_meshDefCount || !m_meshDefs[mesh].mesh.vao) continue;
+        Vec3 center, half;
+        if (!armorSlotBox(s, reg, bodyH, center, half)) continue; // invalid landmark → skip
         const Material* mat = MaterialSystem::get(def.materialId);
         Vec4 tint = mat ? mat->tint : Vec4{1, 1, 1, 1};
-        // Legendary items get a warm golden cast to hint at their quality on the body.
-        if (it.rarity == Rarity::LEGENDARY) {
-            tint = {tint.x * 1.3f, tint.y * 1.15f, tint.z * 0.7f, tint.w};
-        }
-
-        Vec3 ap = pos + as.bodyOffset * scale;
-        Mat4 mm = Mat4::translate(ap)
-                * Mat4::rotateY(yaw)
-                * Mat4::scale({scale, scale, scale});
+        if (it.rarity == Rarity::LEGENDARY) tint = {tint.x * 1.3f, tint.y * 1.15f, tint.z * 0.7f, tint.w};
+        Mat4 mm = fitMeshToBox(mesh, center, half, pos, yaw, scale);
         Renderer::submit(m_basicShader, mat ? mat->texture : defaultTex,
-                         m_meshDefs[mesh].mesh, mm, m_meshDefs[mesh].bounds, tint);
-
-        // Gloves: a second copy mirrored to the off-hand side. Both hands share the
-        // same mesh (and therefore same tier/material) so we just translate laterally.
-        if (as.slot == ItemSlot::GLOVES) {
-            Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
-            Mat4 m2 = Mat4::translate(ap + right * (-0.5f * scale))
-                    * Mat4::rotateY(yaw)
-                    * Mat4::scale({scale, scale, scale});
-            Renderer::submit(m_basicShader, mat ? mat->texture : defaultTex,
-                             m_meshDefs[mesh].mesh, m2, m_meshDefs[mesh].bounds, tint);
-        }
+                         m_meshDefs[mesh].mesh, mm, worldBox, tint);
     }
 }
 
@@ -460,7 +553,7 @@ void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
 // which is acceptable for remote-player view; the host path uses real materials.
 // ---------------------------------------------------------------------------
 void Engine::submitPlayerEquipmentIds(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
-                                      u8 weaponMeshId, const u8 armorMeshId[4]) {
+                                      u8 bodyMeshId, u8 weaponMeshId, const u8 armorMeshId[4]) {
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
     // --- Weapon: same hand-attach math as submitPlayerEquipment and the old inline block ---
@@ -472,43 +565,32 @@ void Engine::submitPlayerEquipmentIds(const Vec3& pos, f32 yaw, f32 scale, u8 an
         Vec3 wp = pos + Vec3{0, 0.8f + drop, 0}
                       + right * (0.35f * scale)
                       + fwd   * ((0.3f + thrust) * scale);
+        // Normalize held weapon to ~0.85 m longest (matches submitPlayerEquipment).
+        const AABB& wmb = m_meshDefs[weaponMeshId].bounds;
+        f32 wMax = fmaxf(wmb.max.x - wmb.min.x, fmaxf(wmb.max.y - wmb.min.y, wmb.max.z - wmb.min.z));
+        f32 wScale = ((wMax > 0.001f) ? (0.85f / wMax) : 0.4f) * scale;
         Mat4 mm = Mat4::translate(wp)
                 * Mat4::rotateY(yaw)
-                * Mat4::scale({0.4f * scale, 0.4f * scale, 0.4f * scale});
-        AABB wb = {wp - Vec3{0.2f, 0.2f, 0.2f}, wp + Vec3{0.2f, 0.2f, 0.2f}};
+                * Mat4::scale({wScale, wScale, wScale});
+        AABB wb = {wp - Vec3{0.5f, 0.5f, 0.5f}, wp + Vec3{0.5f, 0.5f, 0.5f}};
         Renderer::submit(m_basicShader, defaultTex, m_meshDefs[weaponMeshId].mesh, mm, wb,
                          Vec4{1, 1, 1, 1});
     }
 
-    // --- Armor overlays: same body offsets as submitPlayerEquipment ---
-    struct ArmorSlotInfo { Vec3 bodyOffset; bool isGloves; };
-    const ArmorSlotInfo kSlots[4] = {
-        { {0, 0.92f, 0}, false }, // helmet
-        { {0, 0.55f, 0}, false }, // chest
-        { {0, 0.06f, 0}, false }, // boots
-        { {0, 0.55f, 0}, true  }, // gloves (mirrored to both hands)
-    };
-    for (int k = 0; k < 4; ++k) {
-        u8 mesh = armorMeshId[k];
-        if (mesh == 0 || mesh >= m_meshDefCount) continue;
-        if (!m_meshDefs[mesh].mesh.vao) continue;
-
-        Vec3 ap = pos + kSlots[k].bodyOffset * scale;
-        Mat4 mm = Mat4::translate(ap)
-                * Mat4::rotateY(yaw)
-                * Mat4::scale({scale, scale, scale});
-        Renderer::submit(m_basicShader, defaultTex,
-                         m_meshDefs[mesh].mesh, mm, m_meshDefs[mesh].bounds, Vec4{1, 1, 1, 1});
-
-        if (kSlots[k].isGloves) {
-            // Second copy mirrored to the off-hand side (matches submitPlayerEquipment).
-            Vec3 right = {-sinf(yaw + 1.57f), 0, -cosf(yaw + 1.57f)};
-            Mat4 m2 = Mat4::translate(ap + right * (-0.5f * scale))
-                    * Mat4::rotateY(yaw)
-                    * Mat4::scale({scale, scale, scale});
-            Renderer::submit(m_basicShader, defaultTex,
-                             m_meshDefs[mesh].mesh, m2, m_meshDefs[mesh].bounds, Vec4{1, 1, 1, 1});
-        }
+    // --- Armor overlays — same landmark spec-table fit as submitPlayerEquipment so remote players
+    // match the local view. armorMeshId order: [helmet, chest, boots, gloves] = slots 0..3. ---
+    const BodyRegions reg = bodyRegionsFor(bodyMeshId);
+    f32 bodyH = (bodyMeshId > 0 && bodyMeshId < m_meshDefCount)
+                  ? (m_meshDefs[bodyMeshId].bounds.max.y - m_meshDefs[bodyMeshId].bounds.min.y) : 1.8f;
+    const AABB worldBox = {pos - Vec3{0.8f, 0.0f, 0.8f}, pos + Vec3{0.8f, 2.2f, 0.8f}};
+    for (int s = 0; s < 4; ++s) {
+        u8 mesh = armorMeshId[s];
+        if (mesh == 0 || mesh >= m_meshDefCount || !m_meshDefs[mesh].mesh.vao) continue;
+        Vec3 center, half;
+        if (!armorSlotBox(s, reg, bodyH, center, half)) continue;
+        Mat4 mm = fitMeshToBox(mesh, center, half, pos, yaw, scale);
+        Renderer::submit(m_basicShader, defaultTex, m_meshDefs[mesh].mesh, mm, worldBox,
+                         Vec4{1, 1, 1, 1});
     }
 }
 

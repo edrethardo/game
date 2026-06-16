@@ -507,7 +507,15 @@ void Engine::update(f32 dt) {
         // Shared world systems run EXACTLY once, after every local player has been updated
         // (M3) — independent of who is alive, so FX/AI/projectiles never freeze when P1 is
         // dead, and they're no longer duplicated across the alive/dead code paths.
-        tickSharedSystems(dt);
+        //
+        // Singleplayer pause: while the character inspect screen is open, freeze the world
+        // (enemy AI, projectiles, combat) so the player can't be attacked/killed while looking
+        // at their stats. The inspect-model rotation lives in gameUpdate (already run above) so
+        // it keeps responding. MP never pauses — remote peers can't be held hostage by one
+        // player's screen (mirrors the m_menu.confirmQuit pause policy).
+        if (m_netRole != NetRole::NONE || !m_characterScreenOpen) {
+            tickSharedSystems(dt);
+        }
 
         if (m_netRole == NetRole::SERVER) serverNetPost(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPost(dt);
@@ -1142,14 +1150,15 @@ void Engine::gameUpdate(f32 dt) {
         Input::setRelativeMouseMode(true);
     }
 
-    // Toggle character inspect screen (C / LB+Plus). Mirrors the inventory overlay:
-    // frees the mouse for P0, freezes gameplay input via gameplayInputFrozen().
-    // Closing re-acquires the mouse only if inventory is also closed so a player
-    // who has both screens open doesn't accidentally re-capture mid-UI.
+    // Toggle character inspect screen (C / LB+Plus). Freezes gameplay input via
+    // gameplayInputFrozen(). Unlike the inventory (which frees the cursor for slot
+    // clicks), the inspect screen has no clickable UI and instead uses mouse-drag to
+    // rotate the model, so it KEEPS the cursor captured (relative mode ON) while open.
+    // Closing restores relative mode unless the inventory is open (which wants it free).
     if (Input::isActionPressed(GameAction::CHARACTER_SCREEN)) {
         m_characterScreenOpen = !m_characterScreenOpen;
         if (m_localPlayerIndex == 0)
-            Input::setRelativeMouseMode(!m_characterScreenOpen && !m_inventoryOpen);
+            Input::setRelativeMouseMode(m_characterScreenOpen || !m_inventoryOpen);
         AudioSystem::play(SfxId::UI_CONFIRM);
     }
     if (Input::isActionPressed(GameAction::MENU_BACK) && m_characterScreenOpen) {
@@ -1158,13 +1167,15 @@ void Engine::gameUpdate(f32 dt) {
             Input::setRelativeMouseMode(true);
     }
     if (m_characterScreenOpen) {
-        // Accumulate inspect-model yaw from mouse-X drag, right-stick X, and a
-        // gentle idle auto-spin so the player can see all sides without input.
+        // Rotate the inspect model from mouse-X drag (relative-mode delta) + right-stick X.
+        // The gentle idle auto-spin only applies when the player ISN'T actively rotating,
+        // so manual input always wins and the model stops where you leave it.
         s32 mdx = 0, mdy = 0;
         Input::getMouseDelta(mdx, mdy);
-        m_inspectYaw += static_cast<f32>(mdx) * 0.01f;                // mouse drag
-        m_inspectYaw += Input::getStickX(true) * 0.04f;               // right-stick X (with deadzone)
-        m_inspectYaw += 0.0025f;                                       // idle auto-spin (tune later)
+        f32 stick  = Input::getStickX(true);                          // right-stick X (deadzone applied)
+        f32 manual = static_cast<f32>(mdx) * 0.01f + stick * 0.04f;
+        m_inspectYaw += manual;
+        if (mdx == 0 && stick == 0.0f) m_inspectYaw += 0.0025f;       // idle showcase spin only
     }
 
     updateInventoryInteraction(dt);

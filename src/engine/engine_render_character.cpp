@@ -52,12 +52,14 @@ void Engine::renderInspectModelToFbo() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
 
-    // Orbit camera: look at the model's mid-torso from a fixed-radius point that swings with
-    // m_inspectYaw. Built as a standalone Camera so Renderer::beginFrame consumes its viewProjection;
-    // we set the matrices directly (Mat4::lookAt/perspective) rather than going through yaw/pitch.
+    // FIXED front camera looking at the model's mid-torso. The MODEL spins (bodyModel +
+    // submitPlayerEquipment both rotateY(m_inspectYaw)); the camera must NOT also orbit by
+    // m_inspectYaw or the two cancel — the camera would track the same face and the model would
+    // appear static while only the world-fixed light slides across it. Built as a standalone Camera
+    // so Renderer::beginFrame consumes its viewProjection; matrices set directly via lookAt/perspective.
     const Vec3 target = {0.0f, 0.9f, 0.0f};
     Camera cam;
-    cam.position = target + Vec3{ sinf(m_inspectYaw) * 2.6f, 0.35f, cosf(m_inspectYaw) * 2.6f };
+    cam.position = target + Vec3{ 0.0f, 0.35f, 2.6f };
     cam.view = Mat4::lookAt(cam.position, target, {0.0f, 1.0f, 0.0f});
     cam.projection = Mat4::perspective(radians(50.0f), 1.0f, 0.1f, 20.0f);
     cam.viewProjection = cam.projection * cam.view;
@@ -97,7 +99,7 @@ void Engine::renderInspectModelToFbo() {
     // Equipment overlays at the same scaled body origin. submitPlayerEquipment applies its own
     // body-relative offsets * scale, so passing the same scale keeps the armor attached correctly.
     submitPlayerEquipment({0, 0, 0}, m_inspectYaw, scale, /*anim*/ 0,
-                          m_inventories[m_localPlayerIndex]);
+                          classMesh, m_inventories[m_localPlayerIndex]);
 
     // Emit everything into the FBO.
     Renderer::flush();

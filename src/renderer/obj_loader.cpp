@@ -42,7 +42,25 @@ static bool parseface(const char* token, u32& posIdx, u32& uvIdx, u32& normIdx) 
     return posIdx > 0;
 }
 
-Mesh ObjLoader::load(const char* path, AABB* outBounds) {
+// Bounding box of all positions inside a Y band [ylo,yhi] (and optional X window [xlo,xhi]),
+// used to measure a body's head/torso/feet/hand regions for armor auto-fit.
+static AABB aabbInBand(const std::vector<Vec3>& pts, f32 ylo, f32 yhi,
+                       f32 xlo = -1e30f, f32 xhi = 1e30f) {
+    AABB box = {{1e30f, 1e30f, 1e30f}, {-1e30f, -1e30f, -1e30f}};
+    for (const Vec3& p : pts) {
+        if (p.y < ylo || p.y > yhi) continue;
+        if (p.x < xlo || p.x > xhi) continue;
+        if (p.x < box.min.x) box.min.x = p.x;
+        if (p.y < box.min.y) box.min.y = p.y;
+        if (p.z < box.min.z) box.min.z = p.z;
+        if (p.x > box.max.x) box.max.x = p.x;
+        if (p.y > box.max.y) box.max.y = p.y;
+        if (p.z > box.max.z) box.max.z = p.z;
+    }
+    return box;
+}
+
+Mesh ObjLoader::load(const char* path, AABB* outBounds, BodyRegions* outRegions) {
     FILE* f = std::fopen(path, "r");
     if (!f) {
         LOG_WARN("ObjLoader: could not open %s", path);
@@ -168,6 +186,42 @@ Mesh ObjLoader::load(const char* path, AABB* outBounds) {
     if (outBounds) {
         outBounds->min = bmin;
         outBounds->max = bmax;
+    }
+
+    // Body-part regions for armor auto-fit (proportional height bands of the upright body).
+    // Bands are relative to this mesh's own height so they adapt across class bodies of
+    // different proportions. Hands = lateral arm clusters in the lower-arm band, isolated
+    // from the central legs by an X threshold relative to the band's reach.
+    if (outRegions && !positions.empty()) {
+        f32 base = bmin.y, H = bmax.y - bmin.y;
+        BodyRegions r;
+        auto nondegenerate = [](const AABB& b) {
+            return b.min.x <= b.max.x && (b.max.x - b.min.x) > 1e-3f;
+        };
+        // Landmark bands (fractions of body height) — see the design doc; validated across classes.
+        // Head band starts high (0.80) so wide pauldrons/shoulders (which top out ~0.76H on the
+        // hulking classes) don't inflate the measured head width and balloon the helmet.
+        r.head  = aabbInBand(positions, base + 0.80f * H, base + 1.001f * H);
+        r.torso = aabbInBand(positions, base + 0.42f * H, base + 0.68f * H);  // chest block
+        r.feet  = aabbInBand(positions, base,             base + 0.16f * H);
+        r.headValid  = nondegenerate(r.head);
+        r.torsoValid = nondegenerate(r.torso);
+        r.feetValid  = nondegenerate(r.feet);
+        // Shoulder span: the widest |x| in the shoulder band — the body's frame half-width.
+        AABB shoulders = aabbInBand(positions, base + 0.58f * H, base + 0.74f * H);
+        r.shoulderHalfW = nondegenerate(shoulders)
+                            ? fmaxf(fabsf(shoulders.min.x), fabsf(shoulders.max.x)) : 0.0f;
+        // Hands: lateral arm clusters in the lower-arm band, split by X sign and isolated from the
+        // central legs by an X threshold. A robed body with no arms leaves these degenerate.
+        f32 hlo = base + 0.10f * H, hhi = base + 0.32f * H;
+        AABB armBand = aabbInBand(positions, hlo, hhi);
+        f32 reach  = fmaxf(fabsf(armBand.min.x), fabsf(armBand.max.x));
+        f32 thresh = 0.45f * reach;
+        r.handL = aabbInBand(positions, hlo, hhi, -1e30f,  -thresh);
+        r.handR = aabbInBand(positions, hlo, hhi,  thresh,  1e30f);
+        r.handsValid = nondegenerate(r.handL) && nondegenerate(r.handR) && reach > 1e-3f;
+        r.valid = true;
+        *outRegions = r;
     }
 
     // Upload geometry; copy material group metadata into the returned mesh.
