@@ -3,6 +3,8 @@ build-rel/
 build-dbg/
 build-switch/
 build-win/
+build-demo/
+build-switch-demo/
 *.zip
 difficulty_unlock.dat
 *.o
