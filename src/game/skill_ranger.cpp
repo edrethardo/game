@@ -150,9 +150,12 @@ void firePiercingShot(Vec3 origin, Vec3 forward, const SkillDef* def,
 
         EntityHandle h = {static_cast<u16>(idx), e.generation};
         Combat::applyDamage(entities, h, damage);
-        // Apply bleed DoT: 20% of hit damage per second for 3s
+        // Apply bleed DoT: 20% of hit damage per second for 3s, crediting the caster (the engine
+        // sets s_attackingPlayer to the caster's slot around skill activation) so the bleed kill
+        // grants mana-on-kill / loot to them.
         e.poisonTimer = 3.0f;
         e.poisonDps   = damage * 0.2f;
+        e.poisonSrcSlot = Combat::getAttackingPlayer();
         if (s_particlePool) ParticleSystem::spawnDebris(*s_particlePool, e.position, 3);
         hitCount++;
     }

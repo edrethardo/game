@@ -48,6 +48,7 @@ static Net::OnDamageToMeFn   s_onDamageToMe   = nullptr;  // client-side SV_DAMA
 static Net::OnKillFn         s_onKill         = nullptr;  // client-side SV_KILL (D1.1)
 static Net::OnPickupResultFn s_onPickupResult = nullptr;  // client-side SV_PICKUP_RESULT (D1.2)
 static Net::OnLootSpawnFn    s_onLootSpawn    = nullptr;  // client-side SV_LOOT_SPAWN (D1.3)
+static Net::OnEnergyGainFn   s_onEnergyGain   = nullptr;  // client-side SV_ENERGY_GAIN
 static Net::OnEventFn        s_onEvent        = nullptr;
 static Net::OnPlayerJoinFn s_onPlayerJoin = nullptr;
 static Net::OnPlayerLeftFn s_onPlayerLeft = nullptr;
@@ -469,6 +470,15 @@ static void clientHandlePacket(const u8* data, u32 size) {
         std::memcpy(&key,    data + sizeof(PacketHeader),     4);
         std::memcpy(&damage, data + sizeof(PacketHeader) + 4, 4);
         if (s_onDamageToMe) s_onDamageToMe(key, damage);
+    } break;
+
+    case NetPacketType::SV_ENERGY_GAIN: {
+        // Server granted the local player energy it computed authoritatively (projectile
+        // manasteal / mana-on-kill). Payload: 4B header + f32 amount.
+        if (size < sizeof(PacketHeader) + 4) break;
+        f32 amount;
+        std::memcpy(&amount, data + sizeof(PacketHeader), 4);
+        if (s_onEnergyGain) s_onEnergyGain(amount);
     } break;
 
     case NetPacketType::SV_KILL: {
@@ -1173,6 +1183,7 @@ void Net::setOnDamageToMe(OnDamageToMeFn fn)     { s_onDamageToMe   = fn; }  // 
 void Net::setOnKill(OnKillFn fn)                 { s_onKill         = fn; }  // D1.1
 void Net::setOnPickupResult(OnPickupResultFn fn) { s_onPickupResult = fn; }  // D1.2
 void Net::setOnLootSpawn(OnLootSpawnFn fn)       { s_onLootSpawn    = fn; }  // D1.3
+void Net::setOnEnergyGain(OnEnergyGainFn fn)     { s_onEnergyGain   = fn; }
 void Net::setOnEvent(OnEventFn fn)               { s_onEvent        = fn; }
 void Net::setOnPlayerJoin(OnPlayerJoinFn fn) { s_onPlayerJoin = fn; }
 void Net::setOnPlayerLeft(OnPlayerLeftFn fn) { s_onPlayerLeft = fn; }

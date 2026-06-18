@@ -57,6 +57,13 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.minionShield = false;
     e.leashRadius  = 0.0f;
     e.provoked     = false;
+    // Status effects must not carry over to a recycled slot: a freed enemy can still have a live
+    // DoT/CC timer when its slot is reused (e.g. a 3s bleed outlasting the 1s death timer), which
+    // would phantom-damage/freeze the fresh spawn and — for DoT — mis-credit its kill via
+    // poison/burnSrcSlot. Clear them all.
+    e.poisonTimer = e.poisonDps = e.burnTimer = e.burnDps = 0.0f;
+    e.poisonSrcSlot = e.burnSrcSlot = 0xFF;
+    e.freezeTimer = e.stunTimer = 0.0f;
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;
@@ -102,13 +109,23 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         if (e.poisonTimer > 0.0f) {
             e.poisonTimer -= dt;
             e.health -= e.poisonDps * dt;
-            // Route death through killEntity so DoT kills still drop loot / fire procs.
-            if (e.health <= 0.0f) Combat::killEntity(pool, {static_cast<u16>(i), e.generation});
+            // Route death through killEntity so DoT kills still drop loot / fire procs, and credit
+            // the player who applied the poison (mana-on-kill / loot / kill-feed) via the global
+            // attacker slot — the shared tick reset it to 0xFF, so set it just for this kill.
+            if (e.health <= 0.0f) {
+                Combat::setAttackingPlayer(e.poisonSrcSlot);
+                Combat::killEntity(pool, {static_cast<u16>(i), e.generation});
+                Combat::setAttackingPlayer(0xFF);
+            }
         }
         if (e.burnTimer > 0.0f) {
             e.burnTimer -= dt;
             e.health -= e.burnDps * dt;
-            if (e.health <= 0.0f) Combat::killEntity(pool, {static_cast<u16>(i), e.generation});
+            if (e.health <= 0.0f) {
+                Combat::setAttackingPlayer(e.burnSrcSlot);
+                Combat::killEntity(pool, {static_cast<u16>(i), e.generation});
+                Combat::setAttackingPlayer(0xFF);
+            }
         }
         if (e.freezeTimer > 0.0f) e.freezeTimer -= dt;
         if (e.stunTimer > 0.0f) e.stunTimer -= dt;

@@ -659,6 +659,13 @@ void Engine::handleWeaponFire(f32 dt) {
         heal += wpn.damage * Inventory::lifestealPct(pin) * 0.01f;      // % of damage dealt
         if (heal > 0.0f)
             m_localPlayer.health = fminf(m_localPlayer.health + heal, m_localPlayer.maxHealth);
+        // Mana steal: restore energy = % of weapon damage (mirrors lifesteal — weapon attacks
+        // only; activated skills never reach this path). Energy lives in m_skillStates[lane].
+        f32 mana = wpn.damage * Inventory::manastealPct(pin) * 0.01f;
+        if (mana > 0.0f) {
+            SkillState& ss = m_skillStates[m_localPlayerIndex];
+            ss.energy = fminf(ss.energy + mana, ss.maxEnergy);
+        }
     }
 
     // Frenzy gloves: every landed melee/hitscan hit grants an attack-speed stack and

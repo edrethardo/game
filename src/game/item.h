@@ -66,6 +66,8 @@ enum struct AffixType : u8 {
     ARMOR,              // flat armor rating → diminishing-returns incoming-damage mitigation (defensive pack)
     HEALTH_REGEN,       // flat HP restored per second (passive regen) — defensive pack
     THORNS_PCT,         // % of damage taken reflected back at the attacker — defensive pack
+    MANASTEAL_PCT,      // % of weapon damage restored as energy ("mana") — weapon attacks only, like lifesteal
+    MANA_ON_KILL,       // flat energy ("mana") restored on each kill (any damage source)
     COUNT
     // NOTE: affix type is serialized by its integer value (see _REMOVED_RANGE_BONUS
     // and engine_persist.cpp). Only ever APPEND new types before COUNT — never insert
@@ -583,6 +585,10 @@ namespace Inventory {
     f32          armorRating(const PlayerInventory& inv);
     f32          healthRegenRate(const PlayerInventory& inv);
     f32          thornsPct(const PlayerInventory& inv);
+    // Energy ("mana") sustain — same on-demand, save-safe pattern. manastealPct = % of weapon
+    // damage restored as energy (mirrors lifestealPct); manaOnKill = flat energy per kill.
+    f32          manastealPct(const PlayerInventory& inv);
+    f32          manaOnKill(const PlayerInventory& inv);
 }
 
 namespace WorldItemSystem {

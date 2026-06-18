@@ -198,6 +198,10 @@ struct Entity {
     f32  poisonDps      = 0.0f;  // damage per second while poisoned
     f32  burnTimer      = 0.0f;
     f32  burnDps        = 0.0f;
+    u8   poisonSrcSlot  = 0xFF;  // net slot of the player who applied poison (0xFF = environmental);
+                                 // credits the DoT kill (mana-on-kill / loot / kill-feed). Re-stamped
+                                 // on every (re)application, so a stale value is inert while timer==0.
+    u8   burnSrcSlot    = 0xFF;  // net slot of the player who applied burn — same DoT-kill credit.
     f32  freezeTimer    = 0.0f;  // halves movement speed
     f32  stunTimer      = 0.0f;  // fully immobilized, no AI, no attacks
     f32  overclockTimer = 0.0f;  // Tinkerer overclock buff: 2× dmg, 1.5× speed

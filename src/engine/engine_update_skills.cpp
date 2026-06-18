@@ -191,6 +191,9 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
                   ? Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex], m_itemDefs, wpn)
                   : m_weaponDefs[0];
               SkillSystem::setWeaponDamage(wd.damage); }
+            // Credit this caster for kills the skill lands — direct hits AND DoT (poison/burn) the
+            // skill applies, which kill later in EntitySystem::tickTimers via the stamped src slot.
+            Combat::setAttackingPlayer(activeNetSlot());
             if (SkillSystem::tryActivate(m_classSkillStates[slot], m_skillDefs, m_skillDefCount,
                                           eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                           m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -397,13 +400,13 @@ void Engine::tickArmorRingPassives(f32 dt) {
             if (m_armorAura != SkillId::NONE) {
                 switch (m_armorAura) {
                     case SkillId::METEOR_STRIKE:
-                        if (distSq < 9.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; }
+                        if (distSq < 9.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; ent.burnSrcSlot = activeNetSlot(); }
                         break;
                     case SkillId::FROZEN_ORB:
                         if (distSq < 16.0f) { ent.freezeTimer = 0.5f; }
                         break;
                     case SkillId::BLOOD_NOVA:
-                        if (distSq < 9.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; }
+                        if (distSq < 9.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; ent.poisonSrcSlot = activeNetSlot(); }
                         break;
                     case SkillId::CHAIN_LIGHTNING:
                         if (distSq < 9.0f) { ent.freezeTimer = 0.3f; }

@@ -136,6 +136,16 @@ void Engine::initCallbacks() {
     Combat::setOnKill([](u8 killerSlot, u8 victimType, u16 victimIdx,
                          u8 weaponMeshId, u8 isCrit) {
         if (!s_engine) return;
+        // Mana on kill — restore energy to the killer on ANY kill (weapon or spell). Runs BEFORE
+        // the SERVER-only broadcast guard below so singleplayer benefits too. grantEnergy routes
+        // it: a local lane applies now; a remote guest's gain ships as SV_ENERGY_GAIN. The killer's
+        // inventory is read from m_inventories[killerSlot] (synced for remotes on the host); the
+        // killerSlot < MAX_PLAYERS bound rejects the 0xFF environmental sentinel. Fires from
+        // killEntity (host/SP).
+        if (killerSlot < MAX_PLAYERS) {
+            f32 mana = Inventory::manaOnKill(s_engine->m_inventories[killerSlot]);
+            s_engine->grantEnergy(killerSlot, mana);
+        }
         if (s_engine->m_netRole != NetRole::SERVER) return; // host only; SP/split fires the event locally
         // Build the 6-byte SV_KILL payload after the 4-byte header.
         u8 buf[sizeof(PacketHeader) + 6];
@@ -204,6 +214,13 @@ void Engine::initCallbacks() {
                     np.health = fminf(np.health + heal, np.maxHealth);
                 }
             }
+            // Mana steal (energy) for projectile weapons. grantEnergy routes it: a local lane
+            // applies immediately; a remote guest's gain ships as a coalesced SV_ENERGY_GAIN event
+            // (the guest can't predict its own projectile hits — ProjectileSystem::update is gated
+            // off on CLIENT). Melee/hitscan manasteal reaches a guest separately via its predicted
+            // result.hitEntity in the engine_combat path.
+            f32 mana = damage * Inventory::manastealPct(pin) * 0.01f;
+            if (mana > 0.0f) s_engine->grantEnergy(ownerSlot, mana);
             // Frenzy gloves: projectile hits grant the firer an attack-speed stack — same
             // local-lane / remote-NetPlayer routing as the heal above (deferred hit, so the
             // melee/hitscan grant in engine_combat never sees projectile impacts).

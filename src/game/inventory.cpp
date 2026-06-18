@@ -83,6 +83,16 @@ f32 Inventory::thornsPct(const PlayerInventory& inv) {
     return sumEquippedAffix(inv, AffixType::THORNS_PCT);
 }
 
+// Energy ("mana") sustain — on-demand sums, same save-safe pattern as lifestealPct (no cached
+// PlayerInventory field). manastealPct is consumed in the weapon-fire heal paths (mirroring
+// lifesteal); manaOnKill is consumed in the kill callback.
+f32 Inventory::manastealPct(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::MANASTEAL_PCT);
+}
+f32 Inventory::manaOnKill(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::MANA_ON_KILL);
+}
+
 void Inventory::recalculateStats(PlayerInventory& inv) {
     inv.bonusDamageFlat         = 0.0f;
     inv.bonusDamagePct          = 0.0f;

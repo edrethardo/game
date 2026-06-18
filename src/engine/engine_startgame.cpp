@@ -805,6 +805,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         Net::setOnKill(Engine::onKill);
         Net::setOnPickupResult(Engine::onPickupResult);
         Net::setOnLootSpawn(Engine::onLootSpawn);
+        Net::setOnEnergyGain(Engine::onEnergyGain); // server-granted manasteal / mana-on-kill
         // Client::init resets the (shared) snapshot ring + per-lane send windows; pass lane 0's net
         // slot for the s_localPlayerIndex back-compat accessor. Online couch co-op reconciles each
         // lane by the explicit slot passed to Client::reconcile, so this single call covers both.

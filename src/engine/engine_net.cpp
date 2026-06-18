@@ -569,9 +569,9 @@ void Engine::serverNetPost(f32 dt) {
                 if (ent.enemyType == EnemyType::PROP) continue;
                 f32 dist = length(ent.position - np.position);
                 switch (np.armorAura) {
-                    case SkillId::METEOR_STRIKE: if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; } break;
+                    case SkillId::METEOR_STRIKE: if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; ent.burnSrcSlot = np.slotIndex; } break;
                     case SkillId::FROZEN_ORB: if (dist < 4.0f) { ent.freezeTimer = 0.5f; } break;
-                    case SkillId::BLOOD_NOVA: if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; } break;
+                    case SkillId::BLOOD_NOVA: if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; ent.poisonSrcSlot = np.slotIndex; } break;
                     case SkillId::CHAIN_LIGHTNING: if (dist < 3.0f) { ent.freezeTimer = 0.3f; } break;
                     case SkillId::PHASE_DASH: if (dist < 3.0f) { ent.freezeTimer = 0.4f; } break;
                     default: break;
@@ -764,6 +764,22 @@ void Engine::serverNetPost(f32 dt) {
         // because that's the cadence the client renders from — every history entry
         // corresponds exactly to a snapshot the client received and could be aiming at.
         pushEntityHistory();
+    }
+
+    // Flush coalesced energy grants to remote guests (SV_ENERGY_GAIN): one reliable 4-byte packet
+    // per guest per tick carrying the manasteal / mana-on-kill the host computed on its behalf.
+    // grantEnergy() applied local lanes directly, so only remote slots accumulate here.
+    for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
+        if (m_pendingEnergyGain[slot] <= 0.0f) continue;
+        if (!m_players[slot].active) { m_pendingEnergyGain[slot] = 0.0f; continue; }
+        u8 buf[sizeof(PacketHeader) + 4];
+        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+        hdr->type  = NetPacketType::SV_ENERGY_GAIN;
+        hdr->flags = 0;
+        hdr->seq   = 0;
+        std::memcpy(buf + sizeof(PacketHeader), &m_pendingEnergyGain[slot], 4);
+        Net::sendReliable(static_cast<u8>(slot), buf, sizeof(buf));
+        m_pendingEnergyGain[slot] = 0.0f;
     }
 }
 
@@ -1238,6 +1254,34 @@ void Engine::onKill(u8 killerSlot, u8 victimType, u16 victimIdx,
     (void)weaponMeshId; // reserved for future kill-feed weapon icon
     LOG_INFO("net: kill event — killer=%u victimType=%u victimIdx=%u crit=%u",
              killerSlot, victimType, victimIdx, isCrit);
+}
+
+// Grant energy ("mana") to a player slot from a host-authoritative source (projectile manasteal /
+// mana-on-kill). Local lanes (SP / host-local) apply immediately; a remote guest's gain is
+// coalesced into m_pendingEnergyGain and shipped as one SV_ENERGY_GAIN per guest per tick in
+// serverNetPost — the guest can't observe its own projectile hits / kills to predict them.
+void Engine::grantEnergy(u8 slot, f32 amount) {
+    if (amount <= 0.0f || slot >= MAX_PLAYERS) return;
+    bool localLane = (m_netRole != NetRole::CLIENT) && (slot < m_splitPlayerCount);
+    if (localLane) {
+        SkillState& ss = m_skillStates[slot];
+        ss.energy += amount;
+        if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
+    } else if (m_netRole == NetRole::SERVER && m_players[slot].active) {
+        m_pendingEnergyGain[slot] += amount; // flushed in serverNetPost
+    }
+}
+
+// Client-side SV_ENERGY_GAIN handler. Adds server-granted energy (manasteal / mana-on-kill the
+// guest couldn't predict) to the local player's pool, clamped to max.
+// TODO(client-couch): the payload carries no lane discriminator, so this credits m_localPlayerIndex.
+// Correct while a client has one local lane; client-couch (two lanes on one connection) will need a
+// u8 target-lane byte in the SV_ENERGY_GAIN payload (+ a matching size-guard bump) to address it.
+void Engine::onEnergyGain(f32 amount) {
+    if (!s_engine || amount <= 0.0f) return;
+    SkillState& ss = s_engine->m_skillStates[s_engine->m_localPlayerIndex];
+    ss.energy += amount;
+    if (ss.energy > ss.maxEnergy) ss.energy = ss.maxEnergy;
 }
 
 // D1.2/D4.2 — Client-side SV_PICKUP_RESULT handler.

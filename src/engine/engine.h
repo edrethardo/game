@@ -87,7 +87,10 @@ private:
     // Game state
     GameState m_gameState = GameState::MENU;
 
-    // Difficulty — 0=Normal, 1=Nightmare (2x HP/1.5x dmg), 2=Hell (3x HP/2x dmg)
+    // Difficulty — 0=Normal, 1=Nightmare, 2=Hell. Each tier adds +50 "effective floors"
+    // to every enemy (incl. bosses). Enemy HP compounds off the effective floor while
+    // damage stays linear + a flat per-tier bump (x1.5 NM / x2 Hell). See GameConst::
+    // floorHealthMult / floorDamageMult / difficultyDamageBump.
     u8 m_difficulty        = 0;
     // Highest difficulty unlocked globally (persisted in difficulty_unlock.dat)
     u8 m_highestUnlocked   = 0;
@@ -364,6 +367,10 @@ private:
     SkillState      m_skillStates[MAX_PLAYERS];
     SkillState      m_bootSkillStates[MAX_PLAYERS];
     SkillState      m_helmetSkillStates[MAX_PLAYERS];
+    // Per-tick coalesced energy grants for REMOTE guests (SV_ENERGY_GAIN). grantEnergy()
+    // accumulates here; serverNetPost flushes one reliable packet per guest then zeroes it.
+    // Transient scratch — never serialized.
+    f32             m_pendingEnergyGain[MAX_PLAYERS] = {};
     // R9: per-net-slot class-skill state, server-side only. Used to give remote
     // clients persistent cooldown timers so SkillSystem::tryActivate gates spam
     // requests; the host's own slot is unused here (host's class skills live in
@@ -544,6 +551,10 @@ private:
     u8 m_particleSparkMatId = 0;   // material ID for geometric spark cubes
 
     void spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal = false, bool isCrit = false);
+    // Grant energy ("mana") to a player slot from a host-authoritative source (projectile
+    // manasteal / mana-on-kill). Local lanes apply immediately; a remote guest's gain is
+    // coalesced into m_pendingEnergyGain and shipped as SV_ENERGY_GAIN in serverNetPost.
+    void grantEnergy(u8 slot, f32 amount);
     void renderDamageNumbers(u32 sw, u32 sh);
     // Spawn the projectile AoE splash VFX (floor-snapped fire FX + explosion particles +
     // camera shake) at an impact point. Shared by the host's splash callback and the CLIENT's
@@ -1029,6 +1040,8 @@ private:
     static void onPickupResult(u8 accept, u32 itemUid);
     // Client-side SV_LOOT_SPAWN handler (D1.3). v1 logs the loot event.
     static void onLootSpawn(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId);
+    // Client-side SV_ENERGY_GAIN handler. Adds server-granted energy to the local player's pool.
+    static void onEnergyGain(f32 amount);
     // Server-pushed mid-run floor descent (SV_LEVEL_SEED). Client-only: adopt the
     // host's new floor/difficulty/seed and follow into the same FLOOR_TRANSITION path.
     static void onLevelSeed(u8 floor, u8 difficulty, u32 seed);

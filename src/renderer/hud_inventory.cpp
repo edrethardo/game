@@ -33,6 +33,8 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::ARMOR:              return "+Armor";
         case AffixType::HEALTH_REGEN:       return "+HP Regen";
         case AffixType::THORNS_PCT:         return "Thorns %";
+        case AffixType::MANASTEAL_PCT:      return "Mana Steal %";
+        case AffixType::MANA_ON_KILL:       return "+Mana on Kill";
         default:                            return "Unknown";
     }
 }

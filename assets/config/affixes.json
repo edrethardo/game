@@ -125,6 +125,20 @@
       "slots": ["armor", "offhand", "gloves", "ring"],
       "minValue": 3.0,
       "maxValue": 12.0
+    },
+    {
+      "type": "manasteal_pct",
+      "name": "of the Mystic",
+      "slots": ["weapon", "ring", "gloves", "helmet"],
+      "minValue": 0.1,
+      "maxValue": 1.0
+    },
+    {
+      "type": "mana_on_kill",
+      "name": "of Harvesting",
+      "slots": ["ring", "helmet", "gloves", "weapon"],
+      "minValue": 1.0,
+      "maxValue": 5.0
     }
   ]
 }

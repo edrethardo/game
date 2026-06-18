@@ -167,6 +167,8 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "reload_speed_pct"   || s == "RELOAD_SPEED_PCT")   return AffixType::RELOAD_SPEED_PCT;
     if (s == "energy_flat"        || s == "ENERGY_FLAT")        return AffixType::ENERGY_FLAT;
     if (s == "lifesteal_pct"      || s == "LIFESTEAL_PCT")      return AffixType::LIFESTEAL_PCT;
+    if (s == "manasteal_pct"      || s == "MANASTEAL_PCT")      return AffixType::MANASTEAL_PCT;
+    if (s == "mana_on_kill"       || s == "MANA_ON_KILL")       return AffixType::MANA_ON_KILL;
     if (s == "attack_speed_pct"   || s == "ATTACK_SPEED_PCT")   return AffixType::ATTACK_SPEED_PCT;
     if (s == "armor"              || s == "ARMOR")              return AffixType::ARMOR;
     if (s == "health_regen"       || s == "HEALTH_REGEN")       return AffixType::HEALTH_REGEN;

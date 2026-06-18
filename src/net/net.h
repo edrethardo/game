@@ -144,6 +144,12 @@ enum struct NetPacketType : u8 {
     //   u16 posZQ     — packed Z position via Quantize::packPos
     //   u16 itemDefId — ItemDef index (for icon/rarity preview before full snapshot)
     SV_LOOT_SPAWN     = 0x1C,
+
+    // Server → Client: energy ("mana") the server computed on a guest's behalf that the guest
+    // could NOT predict (projectile manasteal, mana-on-kill — both resolved host-side). Sent
+    // reliably to that guest only; it adds the amount to its own energy pool (clamped to max).
+    // Coalesced server-side to <=1 packet per guest per tick. Payload (4 B): f32 amount.
+    SV_ENERGY_GAIN    = 0x1D,
 };
 
 // Sub-types for SV_EVENT packets
@@ -352,6 +358,10 @@ namespace Net {
     // Client-side SV_LOOT_SPAWN handler (D1.3). Called when a new world item is spawned
     // server-side. v1 client is log-only; future UIs can pin map icons immediately.
     using OnLootSpawnFn = void(*)(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId);
+    // Client-side SV_ENERGY_GAIN handler. Called when the server grants the local player energy
+    // it computed authoritatively (projectile manasteal / mana-on-kill). The client adds `amount`
+    // to its own pool, clamped to maxEnergy.
+    using OnEnergyGainFn = void(*)(f32 amount);
     using OnEventFn      = void(*)(const u8* data, u32 size);
     // classId is the joining client's chosen PlayerClass (validated by the callback;
     // 0xFF if the join request predates the class byte — treated as default Warrior).
@@ -377,6 +387,7 @@ namespace Net {
     void setOnKill(OnKillFn fn);                // D1.1
     void setOnPickupResult(OnPickupResultFn fn);// D1.2
     void setOnLootSpawn(OnLootSpawnFn fn);      // D1.3
+    void setOnEnergyGain(OnEnergyGainFn fn);
     void setOnEvent(OnEventFn fn);
     void setOnPlayerJoin(OnPlayerJoinFn fn);
     void setOnPlayerLeft(OnPlayerLeftFn fn);

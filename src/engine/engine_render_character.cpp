@@ -225,6 +225,8 @@ void Engine::renderCharacterInspect(u32 sw, u32 sh) {
     f32 regen      = Inventory::healthRegenRate(inv);
     f32 lifesteal  = Inventory::lifestealPct(inv);
     f32 thorns     = Inventory::thornsPct(inv);
+    f32 manasteal  = Inventory::manastealPct(inv);
+    f32 manaPerKill = Inventory::manaOnKill(inv);
     f32 maxEnergy  = m_skillStates[m_localPlayerIndex].maxEnergy;
 
     // Layout: a column on the right half. NOTE: FontSystem's ortho is BOTTOM-ORIGIN (y grows
@@ -287,6 +289,8 @@ void Engine::renderCharacterInspect(u32 sw, u32 sh) {
     std::snprintf(buf, sizeof(buf), "%.0f%%", inv.bonusCooldownReduction * 100.0f);
                                                                   row("Cooldown Reduction", buf);
     std::snprintf(buf, sizeof(buf), "%.0f", maxEnergy);           row("Energy", buf);
+    std::snprintf(buf, sizeof(buf), "%.1f%%", manasteal);         row("Mana Steal", buf);
+    std::snprintf(buf, sizeof(buf), "%.0f", manaPerKill);         row("Mana / Kill", buf);
 
     // Footer hint near the bottom of the screen (low y == near bottom).
     const char* footer = "Drag to rotate  -  C to close";
