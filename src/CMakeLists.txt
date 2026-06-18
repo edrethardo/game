@@ -162,6 +162,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
     target_compile_definitions(DungeonEngine PRIVATE ENGINE_DEBUG=1)
 endif()
 
+# Demo variant gate (see top-level option(DEMO_BUILD ...)). Read only by
+# src/game/game_constants.h, which exposes GameConst::kDemoBuild to the rest of the engine.
+if(DEMO_BUILD)
+    target_compile_definitions(DungeonEngine PRIVATE DEMO_BUILD=1)
+endif()
+
 # Auto-fetch CC0 audio assets on first build (requires internet + ffmpeg).
 # On Switch, audio must be pre-fetched on the host before the Docker build
 # since the Docker container may lack internet/ffmpeg. The romfs bundles

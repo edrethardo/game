@@ -1637,6 +1637,17 @@ bool Engine::updateFloorDoor() {
                     m_bossLockNotifyTimer = 2.0f;
                     return false;
                 }
+                // Demo ends after clearing the final floor (FINAL_FLOOR=20). Intercept here —
+                // before triggerFloorDescent bumps currentFloor and saves — so the run ends
+                // without persisting a phantom "floor 21" save; the player's save stays at
+                // floor 20. Reuses the VICTORY state (its press-any-key->MENU handler is exactly
+                // what we want); the victory render shows the demo "thanks for playing" text.
+                if (GameConst::kDemoBuild && m_level.currentFloor >= GameConst::FINAL_FLOOR) {
+                    m_gameState = GameState::VICTORY;
+                    AudioSystem::stopMusic();
+                    Input::setRelativeMouseMode(false);
+                    return true;
+                }
                 return triggerFloorDescent();
             }
         }
@@ -1699,7 +1710,9 @@ bool Engine::triggerFloorDescent() {
     m_transition.snapshotKills = m_transition.floorKillCount;
     m_transition.snapshotTime = m_transition.floorTime;
 
-    // Floor 50 is the final floor of each difficulty
+    // Floor 50 is the final floor of each difficulty. (The demo ends earlier, at FINAL_FLOOR=20,
+    // but it's intercepted at the door in updateFloorDoor() before this point so no phantom
+    // next-floor save is written — this full-game branch is never reached in a demo build.)
     if (m_level.currentFloor > 50) {
         if (m_difficulty < 2) {
             // Advance to next difficulty — reset to floor 1, keep gear

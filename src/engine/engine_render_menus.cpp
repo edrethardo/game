@@ -524,8 +524,10 @@ void Engine::renderMenu() {
         static const char* modeLabels[] = {"Start Local Split-Screen",
                                            "Host Online (Friends Can Join)",
                                            "Join Online (Enter Host IP)"};
-        for (u32 i = 0; i < 3; i++) {
-            f32 y = sh * 0.46f + (2 - i) * 46.0f * uiScale;
+        // Demo: only local split-screen co-op; the two online options are hidden.
+        const u32 modeCount = GameConst::kDemoBuild ? 1u : 3u;
+        for (u32 i = 0; i < modeCount; i++) {
+            f32 y = sh * 0.46f + (modeCount - 1 - i) * 46.0f * uiScale;
             bool sel = (i == m_menu.subSelection);
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
             HUD::drawMenuOption(sw, sh, y, 360.0f * uiScale, 35.0f * uiScale, col, sel);
@@ -634,9 +636,11 @@ void Engine::renderMenu() {
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else {
-        // Main menu options
-        static const char* labels[] = {"Single Player", "Host Game", "Join Game", "Options", "Credits", "Exit Game"};
-        Vec3 colors[] = {
+        // Main menu options. The demo build (kDemoBuild, constexpr) hides the online
+        // Host/Join entries — it ships singleplayer + local couch only — leaving a 4-item
+        // menu; the full build keeps all 6 with the demo branch dead-stripped.
+        static const char* fullLabels[] = {"Single Player", "Host Game", "Join Game", "Options", "Credits", "Exit Game"};
+        static const Vec3 fullColors[] = {
             {0.2f, 0.9f, 0.2f},
             {0.2f, 0.5f, 1.0f},
             {1.0f, 0.7f, 0.2f},
@@ -644,9 +648,16 @@ void Engine::renderMenu() {
             {1.0f, 0.6f, 0.1f},   // orange for Credits
             {0.7f, 0.2f, 0.2f},
         };
+        static const char* demoLabels[] = {"Single Player", "Options", "Credits", "Exit Game"};
+        static const Vec3 demoColors[] = {
+            {0.2f, 0.9f, 0.2f}, {0.6f, 0.6f, 0.8f}, {1.0f, 0.6f, 0.1f}, {0.7f, 0.2f, 0.2f},
+        };
+        const char* const* labels = GameConst::kDemoBuild ? demoLabels : fullLabels;
+        const Vec3*        colors = GameConst::kDemoBuild ? demoColors : fullColors;
+        const u32          count  = GameConst::kDemoBuild ? 4u : 6u;
 
-        for (u32 i = 0; i < 6; i++) {
-            f32 y = sh * 0.2f + (5 - i) * 50.0f * uiScale;
+        for (u32 i = 0; i < count; i++) {
+            f32 y = sh * 0.2f + (count - 1 - i) * 50.0f * uiScale;
             Vec3 color = colors[i];
             bool selected = (i == m_menu.selection);
             if (!selected) color = color * 0.4f;

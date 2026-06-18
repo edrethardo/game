@@ -6,6 +6,7 @@
 #include "engine/launch_options.h"
 
 #include "core/log.h"
+#include "game/game_constants.h"   // GameConst::FINAL_FLOOR — demo caps --floor at 20
 
 #include <cstring>
 #include <cstdlib>
@@ -110,8 +111,9 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             opt.save = LaunchOptions::Save::NEW; opt.active = true;
         } else if (ieq(a, "--floor")) {
             const char* v = nextVal(i); if (!v) break;
-            long n; if (!parseInt(v, n) || n < 1 || n > 50) {
-                LOG_WARN("--floor expects 1-50 (got '%s')", v); opt.valid = false; break;
+            // Cap at FINAL_FLOOR so the demo (20) can't be launched out of scope; full game = 50.
+            long n; if (!parseInt(v, n) || n < 1 || n > (long)GameConst::FINAL_FLOOR) {
+                LOG_WARN("--floor expects 1-%u (got '%s')", GameConst::FINAL_FLOOR, v); opt.valid = false; break;
             }
             opt.floor = (u32)n;
         } else if (ieq(a, "--difficulty")) {

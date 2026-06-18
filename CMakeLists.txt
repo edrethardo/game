@@ -10,6 +10,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # -DBUILD_TESTS=OFF for a game-only desktop build.
 option(BUILD_TESTS "Build unit tests" ON)
 
+# Demo variant: configure with -DDEMO_BUILD=ON to produce a demo binary that exposes only
+# singleplayer + local couch co-op (no online host/join) and ends after floor 20. Surfaced to
+# C++ as GameConst::kDemoBuild (see src/CMakeLists.txt + src/game/game_constants.h); every
+# demo-only branch is a constexpr `if` the compiler dead-strips in the normal build.
+option(DEMO_BUILD "Build the demo (singleplayer + couch only, ends at floor 20)" OFF)
+
 add_subdirectory(external)
 add_subdirectory(src)
 

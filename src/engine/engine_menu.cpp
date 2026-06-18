@@ -85,9 +85,13 @@ static s32 menuMouseHit(u32 sw, u32 sh,
 // Layouts must match renderMenu() in engine_hud.cpp exactly.
 static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCount) {
     switch (subState) {
-    case 0: // Main menu: 6 items, Y = sh*0.2 + (5-i)*50*uiScale
-        return menuMouseHit(sw, sh, sh * 0.2f, 50.0f * uiScale, 6,
+    case 0: { // Main menu: 6 items (4 in the demo, which hides Host/Join), Y = sh*0.2 + (count-1-i)*50.
+              // Must use the same count as renderMenu() or hover misaligns AND can return an index
+              // past the demo's 4-entry action map (out-of-bounds). kDemoBuild is constexpr.
+        const u8 mainCount = GameConst::kDemoBuild ? 4 : 6;
+        return menuMouseHit(sw, sh, sh * 0.2f, 50.0f * uiScale, mainCount,
                             250.0f * uiScale, 35.0f * uiScale, false);
+    }
     case 1: // Singleplayer: 2 items, Y = sh*0.38 + (1-i)*50*uiScale
     case 10: // Host-mode chooser (LAN/Online): same 2-option layout as subState 1
         return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
@@ -204,6 +208,11 @@ void Engine::updateMenu(f32 dt) {
     // (port-forwarded manually, Tailscale, etc.). The default highlight is LAN
     // (subSelection=0) because that's the strictly-safer / no-side-effects mode.
     if (m_menu.subState == 10) {
+        // Defense-in-depth: subState 10 (Host LAN/Online chooser) and subState 9 (Join IP entry)
+        // are the only gateways to Net::hostServer / Net::connectToServer. The demo's menus can't
+        // reach them, but if a future code path ever did, bounce straight back to the main menu so
+        // the demo can never start a network session.
+        if (GameConst::kDemoBuild) { m_netRole = NetRole::NONE; m_menu.subState = 0; m_menu.subSelection = 0; return; }
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
@@ -584,7 +593,9 @@ void Engine::updateMenu(f32 dt) {
         }
         if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S) ||
             Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
-            if (m_menu.subSelection < 2) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+            // Demo hides the two online options, leaving only "Start Local Co-op" (index 0).
+            const u8 maxCouch = GameConst::kDemoBuild ? 0 : 2;
+            if (m_menu.subSelection < maxCouch) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
@@ -595,8 +606,9 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
-            if (m_menu.subSelection == 0) {
-                startCouchGame();              // offline split-screen (m_netRole stays NONE)
+            if (m_menu.subSelection == 0 || GameConst::kDemoBuild) {
+                startCouchGame();              // offline split-screen (m_netRole stays NONE);
+                                               // demo always lands here (online options hidden)
             } else if (m_menu.subSelection == 1) {
                 // Host online together — pick LAN/Online (subState 10), then host with 2 local slots.
                 m_netRole = NetRole::SERVER;
@@ -814,6 +826,9 @@ void Engine::updateMenu(f32 dt) {
     // to confirm; advances to the New/Continue chooser that the Host path also uses.
     // No mouse, no nav arrows — pure text entry.
     if (m_menu.subState == 9) {
+        // Defense-in-depth (see subState 10): the demo never reaches the Join IP-entry screen;
+        // if it ever did, abandon it and return to the main menu rather than connect out.
+        if (GameConst::kDemoBuild) { m_netRole = NetRole::NONE; m_menu.subState = 0; m_menu.subSelection = 0; return; }
         // Numeric + IPv6 input mapped from SDL scancodes. Both the top-row digits and
         // numpad produce the same character; period and KP_PERIOD both produce '.'.
         // R12 added the hex digits a-f, colon, and square brackets so the user can
@@ -902,7 +917,9 @@ void Engine::updateMenu(f32 dt) {
         if (m_menu.selection > 0) m_menu.selection--;
     }
     if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-        if (m_menu.selection < 5) m_menu.selection++;
+        // Demo's main menu has 4 items (max index 3); full game has 6 (max index 5).
+        const u8 maxSel = GameConst::kDemoBuild ? 3 : 5;
+        if (m_menu.selection < maxSel) m_menu.selection++;
     }
     if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
         || mouseConfirm) {
@@ -918,7 +935,15 @@ void Engine::updateMenu(f32 dt) {
         m_menu.couchHost    = false;
         m_menu.couchJoin    = false;
         m_netCouch          = false;   // clear any online-couch flag from a prior session
-        switch (m_menu.selection) {
+        // The demo menu drops Host (case 1) and Join (case 2), so its 4 visible rows map to
+        // actions {Single Player, Options, Credits, Exit} = full-menu cases {0, 3, 4, 5}.
+        // Remap the demo selection to the full action index so the switch below stays intact.
+        u32 menuAction = m_menu.selection;
+        if (GameConst::kDemoBuild) {
+            static const u8 demoActionMap[4] = {0, 3, 4, 5};
+            menuAction = demoActionMap[m_menu.selection];
+        }
+        switch (menuAction) {
         case 0: // Singleplayer — show sub-menu
             scanSaveSlots(); // scan early so "Continue" is available if saves exist
             m_menu.subState = 1;

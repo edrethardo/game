@@ -154,7 +154,10 @@ void Engine::init() {
     // (m_level.levelSeed), so multiplayer determinism is unaffected by this.
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
-    if (!Window::init("Curse of the Dungeon Engine", 1280, 720)) {
+    // Demo builds advertise themselves in the title bar (kDemoBuild is constexpr).
+    const char* windowTitle = GameConst::kDemoBuild ? "Curse of the Dungeon Engine - DEMO"
+                                                    : "Curse of the Dungeon Engine";
+    if (!Window::init(windowTitle, 1280, 720)) {
         LOG_ERROR("Failed to initialize window");
         return;
     }

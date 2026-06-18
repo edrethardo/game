@@ -151,9 +151,14 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
 
         FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
 
-        // Final victory — only shown after Hell floor 50
-        const char* title = "You conquered the Dungeon Engine.";
-        const char* subtitle = nullptr;
+        // Final victory — shown after Hell floor 50 (full game), or after floor 20 in the demo.
+        // The demo reuses this same VICTORY state but swaps in a "thanks for playing" headline
+        // plus a one-line nudge toward the full game; the stats + prompt below are unchanged.
+        const char* title = GameConst::kDemoBuild ? "Thanks for playing the demo!"
+                                                  : "You conquered the Dungeon Engine.";
+        const char* subtitle = GameConst::kDemoBuild
+            ? "The full game: 50 floors, 9 classes, 3 difficulties, and the Grim Reaper."
+            : nullptr;
 
         f32 titleW = FontSystem::textWidth(title, 4);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - titleW) * 0.5f, sh * 0.65f,

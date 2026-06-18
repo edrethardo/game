@@ -9,6 +9,7 @@
 
 #include "engine/engine.h"
 #include "engine/launch_options.h"
+#include "game/game_constants.h"   // GameConst::kDemoBuild — gate --host/--join in the demo
 
 #include "core/log.h"
 #include "net/net.h"
@@ -55,6 +56,16 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         LOG_INFO("Launch: auto-screenshot every %us -> screenshot_NNNN.png in the run dir", opt.shotInterval);
 
     if (!opt.active) return;  // no game-jump directive → normal menu boot
+
+    // The demo build exposes ONLY singleplayer + local couch co-op, so the CLI must not open a
+    // network session either — the menu hides Host/Join, but the --host/--join launch flags are a
+    // separate entry point that calls Net::hostServer/connectToServer directly. Reject them and
+    // fall back to the menu rather than start an online game.
+    if (GameConst::kDemoBuild &&
+        (opt.role == LaunchOptions::Role::HOST || opt.role == LaunchOptions::Role::JOIN)) {
+        LOG_WARN("Launch: --host/--join are disabled in the demo build — staying at menu");
+        return;
+    }
 
     // --- Resolve the hero + the start mode (CONTINUE for a save, NEW_GAME for a fresh class) ---
     GameStart mode;
