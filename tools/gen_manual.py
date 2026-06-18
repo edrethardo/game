@@ -291,7 +291,8 @@ def story():
           P("Brave the dungeon with up to <b>four</b> players. <b>Host</b> a game and friends <b>Join</b> by "
             "address, or share one PC in <b>two-player split-screen</b> co-op &mdash; you can even mix the two "
             "(local + online together). Everyone explores the same seeded dungeon; downed heroes can respawn so "
-            "the party fights on.", BODY),
+            "the party fights on. For the full step-by-step on connecting over the internet &mdash; including "
+            "port forwarding &mdash; see <b>Playing Online</b> at the end of this manual.", BODY),
           P("Difficulty", H2),
           P("Clear Floor 50 on <b>Normal</b> to unlock <b>Nightmare</b>, then <b>Hell</b> &mdash; the same fifty "
             "floors, far more lethal, with richer rewards. Enemies also grow ~10% stronger every floor you "
@@ -309,6 +310,65 @@ def story():
         "Time your dodge roll through attacks for the invulnerability window.",
         "Hunt Legendary boots and helmets: the extra F / G skills define your build.",
     ])
+    s += [PageBreak()]
+
+    # ---- PLAYING ONLINE ----
+    # Player-facing guide to actually connecting a co-op game over the internet. Facts are pulled
+    # from the net layer: ENet/UDP on DEFAULT_PORT 7777 (net.h), best-effort UPnP on Host->Online
+    # with the F9 host overlay reporting the external IP / LAN-only fallback (engine_hud.cpp), and
+    # PROTOCOL_VERSION gating that rejects mismatched builds at join (net.cpp CL_JOIN_REQUEST).
+    s += [P("Playing Online", H1),
+          P("Up to four heroes can share one dungeon over the internet or a local network. The game runs a "
+            "<b>listen-server</b>: one player <b>Hosts</b> (and plays at the same time), the others <b>Join</b> "
+            "by the host's address.", LEAD),
+          P("What You Need", H2)]
+    s += bullets([
+        "<b>The same game version</b> for everyone &mdash; a mismatched build is refused at the join screen.",
+        "The game talks over <b>UDP port 7777</b>; the host's network has to let friends reach that port.",
+        "The <b>host's IP address</b>, for friends to type into <b>Join</b>.",
+        "A decent connection &mdash; the netcode is tuned for round-trips up to roughly <b>100&nbsp;ms</b>.",
+    ])
+    s += [P("On the Same Network (LAN)", H2),
+          P("The easy case &mdash; no setup at all. The host picks <b>Host</b>; friends pick <b>Join</b> and "
+            "enter the host's <b>local</b> IP (something like <font face='Courier'>192.168.1.10</font>). Done.", BODY),
+          P("Over the Internet", H2),
+          P("When you choose <b>Host &rarr; Online</b>, the game first tries to open the port for you "
+            "automatically using <b>UPnP</b>. Press <b>F9</b> in-game to see how it went: a green line reading "
+            "&ldquo;<i>friends join at &lt;your-ip&gt;:7777</i>&rdquo; means it worked &mdash; just give friends "
+            "that address. A yellow &ldquo;<i>LAN only</i>&rdquo; line means your router refused UPnP (very "
+            "common); use one of the two options below.", BODY),
+          P("Option A &mdash; Forward the port", H2),
+          P("Open UDP <b>7777</b> on your router and aim it at your PC:", BODY)]
+    s += bullets([
+        "Find your PC's <b>local IP</b> (e.g. <font face='Courier'>192.168.1.10</font>).",
+        "Open your router's admin page in a browser (usually <font face='Courier'>192.168.1.1</font>).",
+        "Add a <b>Port Forward</b> / <b>Virtual Server</b> rule: external port <b>7777</b>, internal port "
+        "<b>7777</b>, protocol <b>UDP</b> (or <i>Both</i>), pointed at your PC's local IP.",
+        "If the router rejects the entry, type a <b>single</b> port number "
+        "(<font face='Courier'>7777</font>) &mdash; not a range like <font face='Courier'>7777-7777</font>.",
+        "Find your <b>public IP</b> (search &ldquo;what is my IP&rdquo;, or read it off the F9 overlay) and "
+        "give it to your friends. They <b>Join</b> with that address.",
+    ])
+    s += [P("Option B &mdash; Tailscale (recommended &mdash; no router setup)", H2),
+          P("A free, private network overlay that tunnels straight through home routers and even carrier-grade "
+            "NAT. It's the most reliable route when port forwarding is blocked or fiddly, and it needs no router "
+            "changes at all.", BODY)]
+    s += bullets([
+        "Install <b>Tailscale</b> on every player's PC and sign in (everyone on the same free tailnet).",
+        "<b>Host</b> the game exactly as normal &mdash; no port forwarding required.",
+        "Friends <b>Join</b> using your <b>Tailscale IP</b> (the <font face='Courier'>100.x.x.x</font> address "
+        "shown in the Tailscale app).",
+    ])
+    s += [P("If a Friend Can't Connect", H2)]
+    s += bullets([
+        "<b>Stuck on &ldquo;Connecting&rdquo;</b> &mdash; they can't reach the port. Re-check the IP, confirm "
+        "UDP 7777 is forwarded (or switch to Tailscale), and make sure no firewall is blocking the game.",
+        "<b>Rejected at the join screen</b> &mdash; someone is on a different version. Update everyone to the "
+        "same build.",
+        "<b>Hosting from a Switch</b> &mdash; the Switch can't UPnP or port-forward itself, so host over LAN, "
+        "or let a PC running Tailscale host instead.",
+    ])
+
     s += [Spacer(1, 16),
           P("<font color='#7a5a20'><b>Curse of the Dungeon Engine</b> &mdash; now go break it.</font>",
             ParagraphStyle("end", parent=BODY, alignment=TA_CENTER, fontSize=11))]
