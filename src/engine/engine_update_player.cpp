@@ -303,7 +303,10 @@ void Engine::handleDebugKeys() {
         LOG_INFO("Profiler: %s", prof.enabled ? "ON" : "OFF");
     }
 
-    // Stress spawner: F4 = 10 enemies, F5 = 50 enemies
+    // Stress spawner: F4 = 10 enemies, F5 = 50 enemies. Deliberately spawns fixed-stat,
+    // low-HP dummies (NOT floor/difficulty-scaled) — these exist to stress entity count /
+    // rendering / AI throughput, so they must stay quick to clear; scaling them to a Hell
+    // enemy's HP would defeat the purpose. Production enemy scaling lives in engine_spawn.cpp.
     if (Input::isKeyPressed(SDL_SCANCODE_F4)) {
         u32 spawned = 0;
         for (u32 s = 0; s < 10 && m_entities.freeCount > 0; s++) {

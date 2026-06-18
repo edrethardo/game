@@ -311,14 +311,19 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     // Floor scaling
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
                     ent->level = static_cast<u16>(effectiveFloor);
-                    f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
-                    ent->health    *= floorMult;
+                    // HP compounds with the effective floor (Nightmare/Hell ramp
+                    // exponentially); damage stays on the linear floor curve plus a flat
+                    // per-difficulty bump — compounding damage would one-shot the player.
+                    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+                    f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
+                                  * GameConst::difficultyDamageBump(m_difficulty);
+                    ent->health    *= hpMult;
                     ent->maxHealth  = ent->health;
-                    ent->damage    *= floorMult;
+                    ent->damage    *= dmgMult;
 
                     ent->onHitEffect   = def.onHitEffect;
                     ent->onHitDuration = def.onHitDuration;
-                    ent->onHitDps      = def.onHitDps * floorMult;
+                    ent->onHitDps      = def.onHitDps * dmgMult;
 
                     // Weapon assignment for skeleton-rig enemies
                     if (ent->enemyType == EnemyType::SKELETON) {
@@ -391,13 +396,16 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
                     ent->level = static_cast<u16>(effectiveFloor);
-                    f32 floorMult = 1.0f + (effectiveFloor - 1) * GameConst::FLOOR_STAT_MULT;
-                    ent->health    *= floorMult;
+                    // HP compounds; damage linear + per-difficulty bump (see other spawn path).
+                    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+                    f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
+                                  * GameConst::difficultyDamageBump(m_difficulty);
+                    ent->health    *= hpMult;
                     ent->maxHealth  = ent->health;
-                    ent->damage    *= floorMult;
+                    ent->damage    *= dmgMult;
                     ent->onHitEffect   = tmpl.onHitEffect;
                     ent->onHitDuration = tmpl.onHitDuration;
-                    ent->onHitDps      = tmpl.onHitDps * floorMult;
+                    ent->onHitDps      = tmpl.onHitDps * dmgMult;
 
                     if (ent->enemyType == EnemyType::SKELETON) {
                         if (ent->attackRange > 5.0f) {
@@ -541,7 +549,15 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
         f32 bx = (bossRoom.x + bossRoom.w * 0.5f) * m_level.grid.cellSize;
         f32 bz = (bossRoom.z + bossRoom.d * 0.5f) * m_level.grid.cellSize;
         f32 by = bossRoom.floorHeight;
-        f32 floorMult = 1.0f + (m_level.currentFloor - 1) * GameConst::FLOOR_STAT_MULT;
+        // Bosses previously scaled off the RAW floor with no difficulty term, so a Hell boss
+        // had the same HP/damage as a Normal boss (only ability keying changed via level).
+        // Use the effective floor so bosses ramp with difficulty like every other enemy:
+        // HP compounds, damage is linear + the per-tier bump. (bossEffFloor is reused below
+        // for boss->level / ability keying.)
+        u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
+        f32 bossHpMult   = GameConst::floorHealthMult(bossEffFloor);
+        f32 bossDmgMult  = GameConst::floorDamageMult(bossEffFloor)
+                           * GameConst::difficultyDamageBump(m_difficulty);
 
         // Extract stats from whichever source is active (JSON bd or hardcoded bt)
         Vec3 bossHalf    = bd ? bd->halfExtents  : bt->halfExtents;
@@ -554,8 +570,8 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
 
         EntityHandle bh = EntitySystem::spawn(m_entities,
             Vec3{bx, by + bossHalf.y, bz}, bossHalf, false,
-            bossHp * floorMult, bossSpd, bossDetect,
-            bossAtkRng, bossAtkCool, bossDmg * floorMult);
+            bossHp * bossHpMult, bossSpd, bossDetect,
+            bossAtkRng, bossAtkCool, bossDmg * bossDmgMult);
         Entity* boss = handleGet(m_entities, bh);
         if (boss) {
             // Boss-room leash: confine the boss to its arena and only wake it when
@@ -580,8 +596,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 boss->materialId = MaterialSystem::getIdByName(bd->matName);
                 boss->enemyType = EnemyType::BOSS;
                 boss->nameTag = bd->name;
-                u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
-                boss->level = static_cast<u16>(bossEffFloor);
+                boss->level = static_cast<u16>(bossEffFloor);  // bossEffFloor computed above
                 boss->bossLimbConfig = bd->limbConfig;
                 if (bd->weaponName[0] != '\0') {
                     boss->weaponMeshId = findMeshByName(bd->weaponName);
@@ -596,7 +611,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 boss->bossPhase = bd->secondPhase ? BossPhase::ARMED : BossPhase::NONE;
                 boss->onHitEffect = bd->onHitEffect;
                 boss->onHitDuration = bd->onHitDuration;
-                boss->onHitDps = bd->onHitDps;
+                boss->onHitDps = bd->onHitDps * bossDmgMult;  // boss DoT scales with floor/difficulty too
                 boss->baseMoveSpeed      = boss->moveSpeed;
                 boss->baseAttackCooldown = boss->attackCooldown;
 
@@ -612,8 +627,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
                 boss->materialId = MaterialSystem::getIdByName(bt->matName);
                 boss->enemyType = EnemyType::BOSS;
                 boss->nameTag = bt->name;
-                u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
-                boss->level = static_cast<u16>(bossEffFloor);
+                boss->level = static_cast<u16>(bossEffFloor);  // bossEffFloor computed above
                 // Hardcoded limb config per floor
                 if (bt->floor == 10) boss->bossLimbConfig = 1; // Andariel: spider legs
                 if (bt->floor == 20) boss->bossLimbConfig = 2; // Mephisto: tentacles
@@ -637,8 +651,8 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
         if (boss) Collision::ensureNotInWall(boss->position, boss->halfExtents, m_level.grid);
         const char* bossName = bd ? bd->name : bt->name;
         LOG_INFO("Spawned boss '%s' on floor %u (%.0f HP, %.0f DMG, arena %ux%u, limbConfig=%u, src=%s)",
-                 bossName, m_level.currentFloor, bossHp * floorMult,
-                 bossDmg * floorMult, expandW, expandD,
+                 bossName, m_level.currentFloor, bossHp * bossHpMult,
+                 bossDmg * bossDmgMult, expandW, expandD,
                  boss ? boss->bossLimbConfig : 0,
                  bd ? "json" : "hardcoded");
     }
@@ -689,14 +703,22 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
         if (isNearSpawn(r)) isMimic = false; // no monsters in the spawn room / the room after
 
         if (isMimic) {
+            // Mimics are hostile ambush enemies — scale them with floor/difficulty exactly
+            // like every other enemy (HP compounds, damage linear + per-tier bump) so a
+            // late-Hell mimic isn't a trivial 60 HP. effectiveFloor also drives loot/DoT credit.
+            u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+            f32 mimicHp  = GameConst::MIMIC_HEALTH * GameConst::floorHealthMult(effectiveFloor);
+            f32 mimicDmg = GameConst::MIMIC_DAMAGE * GameConst::floorDamageMult(effectiveFloor)
+                           * GameConst::difficultyDamageBump(m_difficulty);
             EntityHandle h = EntitySystem::spawn(m_entities,
                 Vec3{cx, cy + 0.4f, cz}, {0.45f, 0.4f, 0.45f}, false,
-                GameConst::MIMIC_HEALTH, 4.0f, GameConst::MIMIC_TRIGGER_DIST,
-                2.0f, 0.6f, GameConst::MIMIC_DAMAGE);
+                mimicHp, 4.0f, GameConst::MIMIC_TRIGGER_DIST,
+                2.0f, 0.6f, mimicDmg);
             Entity* ent = handleGet(m_entities, h);
             if (ent) {
                 ent->meshId = chestMeshId;
                 ent->enemyType = EnemyType::MIMIC;
+                ent->level = static_cast<u16>(effectiveFloor); // loot/DoT-credit scale with depth
                 ent->aiState = AIState::DORMANT;
                 Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
             }

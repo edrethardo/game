@@ -7,6 +7,23 @@
 // Changing a value here takes effect everywhere it's consumed.
 
 namespace GameConst {
+    // --- Demo build -------------------------------------------------------------
+    // kDemoBuild is true only when the engine is compiled with -DDEMO_BUILD=ON (see the
+    // top-level CMakeLists option). It's a compile-time constant so every demo-only branch
+    // (`if (GameConst::kDemoBuild)`) is dead-stripped in the normal build and vice-versa —
+    // no runtime cost, and the full game's behavior is byte-for-byte unchanged.
+    // The demo exposes only singleplayer + local couch co-op and ends after FINAL_FLOOR.
+#ifdef DEMO_BUILD
+    static constexpr bool kDemoBuild = true;
+#else
+    static constexpr bool kDemoBuild = false;
+#endif
+    // Last playable floor before the game ends: the demo stops at floor 20; the full game
+    // ends a difficulty tier at floor 50 (then advances Normal->Nightmare->Hell). NOTE: this
+    // is ONLY the end-of-run boundary — the "50" used for effective-floor enemy scaling
+    // (floor + difficulty*50) is a separate, unchanged quantity.
+    static constexpr u32 FINAL_FLOOR = kDemoBuild ? 20u : 50u;
+
     // Enemy base stats (before floor scaling) — all HP includes +20% buff
     static constexpr f32 SKELETON_HEALTH     = 55.0f;   // was 40, buffed (+20% + stronger)
     static constexpr f32 SKELETON_SPEED      = 2.8f;
@@ -34,6 +51,52 @@ namespace GameConst {
 
     // Floor scaling — 10% per floor so difficulty ramps steadily to floor 50
     static constexpr f32 FLOOR_STAT_MULT     = 0.10f;
+
+    // --- Difficulty / floor enemy scaling ----------------------------------------
+    // Every enemy scales by its "effective floor" = raw floor + difficulty*50
+    // (Normal +0, Nightmare +50, Hell +100). Two curves feed off that number:
+    //   * HEALTH compounds (floorHealthMult) so the +50/+100 difficulty offset ramps
+    //     enemies EXPONENTIALLY. The old flat +10%/floor made Nightmare/Hell feel barely
+    //     tougher than late Normal (linear growth flattens relatively as it climbs).
+    //   * DAMAGE stays linear (floorDamageMult) with a flat per-tier bump
+    //     (difficultyDamageBump) instead — compounding damage would one-shot the player,
+    //     whose HP scales far slower than the enemy's effective-floor count.
+    //
+    // Per-floor compounding rate for HEALTH. 3% is chosen so the compounding curve stays
+    // BELOW the legacy linear curve through all of Normal and only overtakes it around
+    // mid-Nightmare, reaching ~82x base by Hell floor 50 (effective floor 150).
+    static constexpr f32 DIFFICULTY_HP_COMPOUND_RATE = 0.03f;
+
+    // Compounding HEALTH multiplier for an effective floor (1-based: floor 1 -> 1.0x).
+    // Returns max(legacy-linear, compounding) so the change can only ever make enemies
+    // TOUGHER, never weaker — Normal (and early Nightmare, before compounding overtakes
+    // linear) is left exactly as it was. Called once per enemy spawn, never per frame.
+    inline f32 floorHealthMult(u32 effectiveFloor) {
+        if (effectiveFloor < 1) effectiveFloor = 1;
+        f32 linear = 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_STAT_MULT;
+        // (1 + rate)^(effectiveFloor-1) by repeated multiply — keeps this header free of
+        // <cmath> and is exact enough; effectiveFloor <= ~150 so the loop is trivial.
+        f32 comp = 1.0f;
+        for (u32 i = 1; i < effectiveFloor; ++i) comp *= (1.0f + DIFFICULTY_HP_COMPOUND_RATE);
+        return comp > linear ? comp : linear;
+    }
+
+    // Linear DAMAGE multiplier for an effective floor — the original +10%/floor curve.
+    // Enemy damage intentionally does NOT compound (see difficultyDamageBump).
+    inline f32 floorDamageMult(u32 effectiveFloor) {
+        if (effectiveFloor < 1) effectiveFloor = 1;
+        return 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_STAT_MULT;
+    }
+
+    // Flat per-difficulty DAMAGE bump applied on top of floorDamageMult so Nightmare/Hell
+    // are more lethal without compounding damage into instant-kills.
+    inline f32 difficultyDamageBump(u8 difficulty) {
+        switch (difficulty) {
+            case 1:  return 1.5f;  // Nightmare
+            case 2:  return 2.0f;  // Hell
+            default: return 1.0f;  // Normal (and any unexpected value)
+        }
+    }
 
     // Seconds of "calm" at the start of each floor: hostile enemies don't
     // auto-aggro and friendly NPCs hold position with the player, so the world
