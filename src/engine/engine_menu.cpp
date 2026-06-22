@@ -32,6 +32,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "engine/menu_osk.h"   // controller on-screen keyboard for the Host-IP screen (subState 9)
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -660,36 +661,34 @@ void Engine::updateMenu(f32 dt) {
         static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 6;
 
         if (m_menu.bindCapture) {
-            // Waiting for player to press a key or button to rebind
-            if (m_menu.bindKeyboard) {
-                // Scan all keys for a press
-                for (s32 sc = 0; sc < 512; sc++) {
-                    if (Input::isKeyPressed(sc)) {
-                        GameAction act = static_cast<GameAction>(m_menu.subSelection);
-                        Input::setKeyBinding(act, sc);
-                        m_menu.bindCapture = false;
-                        break;
-                    }
-                }
-            } else {
-                // Scan gamepad buttons for a press
-                for (s32 b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
-                    if (Input::isButtonPressed(0, b)) {
-                        GameAction act = static_cast<GameAction>(m_menu.subSelection);
-                        // If L is held, set as modified binding
-                        if (Input::isModifierHeld() && b != SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
-                            Input::setButtonBinding(act, b, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-                        } else {
-                            Input::setButtonBinding(act, b);
-                        }
-                        m_menu.bindCapture = false;
-                        break;
-                    }
-                }
-            }
-            // ESC cancels capture
-            if (Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+            // Capture a new binding for the selected action. Steam "Full Controller Support":
+            // the old code forced KEYBOARD capture (bindKeyboard was reset to true on confirm) and
+            // only ESC could cancel, so a controller-only user could neither bind a controller
+            // button nor escape this screen. Now: cancel is checked FIRST (controller B or keyboard
+            // ESC) so the cancel input isn't itself captured and a gamepad user is never trapped;
+            // then we bind whichever input type they press first — a KEY rebinds the keyboard
+            // binding, a controller BUTTON rebinds the controller binding (no column toggle needed).
+            GameAction act = static_cast<GameAction>(m_menu.subSelection);
+            if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
                 m_menu.bindCapture = false;
+            } else {
+                bool bound = false;
+                for (s32 sc = 0; sc < 512 && !bound; sc++) {
+                    if (sc == SDL_SCANCODE_ESCAPE) continue;          // reserved for cancel
+                    if (Input::isKeyPressed(sc)) { Input::setKeyBinding(act, sc); bound = true; }
+                }
+                for (s32 b = 0; b < SDL_CONTROLLER_BUTTON_MAX && !bound; b++) {
+                    if (b == SDL_CONTROLLER_BUTTON_B) continue;       // reserved for cancel (MENU_BACK)
+                    if (Input::isButtonPressed(0, b)) {
+                        // Hold L while pressing to register a MODIFIED (L + button) binding.
+                        if (Input::isModifierHeld() && b != SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
+                            Input::setButtonBinding(act, b, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+                        else
+                            Input::setButtonBinding(act, b);
+                        bound = true;
+                    }
+                }
+                if (bound) m_menu.bindCapture = false;
             }
         } else {
             // Normal navigation
@@ -894,9 +893,52 @@ void Engine::updateMenu(f32 dt) {
             return;
         }
 
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
-            Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
-            Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)) {
+        // --- Controller on-screen keyboard (Steam "Full Controller Support"): the IP screen is
+        // otherwise keyboard-only, so a gamepad user could never type a host address. D-pad moves
+        // over the MenuOsk character grid, A types the highlighted key (or DEL/GO), and X is a
+        // quick backspace. Physical-keyboard entry above is unchanged. Shown only when a pad is
+        // connected (the renderer gates the grid the same way).
+        const bool gpadJoin = Input::isGamepadConnected(0) || Input::isGamepadConnected(1);
+        bool oskConnect = false;
+        if (gpadJoin) {
+            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+                { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, -1, 0)); AudioSystem::play(SfxId::MENU_HOVER); }
+            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+                { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, +1, 0)); AudioSystem::play(SfxId::MENU_HOVER); }
+            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP))
+                { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, 0, -1)); AudioSystem::play(SfxId::MENU_HOVER); }
+            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN))
+                { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, 0, +1)); AudioSystem::play(SfxId::MENU_HOVER); }
+
+            bool oskBack = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_X);   // quick backspace
+            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
+                if (MenuOsk::isDone(m_menu.oskCursor))           oskConnect = true;   // "GO" → connect
+                else if (MenuOsk::isBackspace(m_menu.oskCursor)) oskBack = true;      // "DEL"
+                else {
+                    // Type the highlighted character; first input wipes the 127.0.0.1 default,
+                    // mirroring the keyboard path's connectAddressClearOnType behaviour.
+                    if (m_menu.connectAddressClearOnType) { m_menu.connectAddress[0] = '\0'; m_menu.connectAddressClearOnType = false; }
+                    size_t len = std::strlen(m_menu.connectAddress);
+                    if (len < sizeof(m_menu.connectAddress) - 1) {
+                        m_menu.connectAddress[len]     = MenuOsk::KEYS[m_menu.oskCursor];
+                        m_menu.connectAddress[len + 1] = '\0';
+                        AudioSystem::play(SfxId::MENU_HOVER);
+                    }
+                }
+            }
+            if (oskBack) {
+                m_menu.connectAddressClearOnType = false;
+                size_t len = std::strlen(m_menu.connectAddress);
+                if (len > 0) { m_menu.connectAddress[len - 1] = '\0'; AudioSystem::play(SfxId::MENU_HOVER); }
+            }
+        }
+
+        // Connect on keyboard Enter, the OSK "GO" key, or — only WITHOUT a gamepad — the generic
+        // confirm action. With a pad, A is consumed above as "type a character", so it must NOT
+        // also trigger a connect here (otherwise every A press would jump to the localhost fallback).
+        bool kbConnect  = Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER);
+        bool actConnect = !gpadJoin && Input::isActionPressed(GameAction::MENU_CONFIRM);
+        if (oskConnect || kbConnect || actConnect) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             // Empty buffer (e.g. user hit Enter without typing) falls back to localhost
             // so the screen always advances to a usable state.

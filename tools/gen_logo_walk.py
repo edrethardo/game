@@ -108,13 +108,14 @@ def draw_voxel(d, x, y, s, color):
     d.rectangle([x + s - b, y, x + s - 1, y + s - 1], fill=_shade(color, 0.78))  # right shadow
 
 
-def draw_rogue(frame, cx, walk_phase, look):
+def draw_rogue(frame, cx, walk_phase, look, feet_y=GROUND_Y, fig_h=FIG_H):
     """Composite the hooded voxel rogue onto `frame` (RGBA), front-facing (oriented like the logo).
     cx = horizontal centre (px); walk_phase cycles the legs/arms/bob; look (0..1) dips the hood and
-    kills the eye-glint to gaze down the stairs."""
+    kills the eye-glint to gaze down the stairs. feet_y/fig_h default to the trailer's frame geometry
+    but can be overridden (e.g. by the Steam icon tool) to place/size the same rogue elsewhere."""
     look = max(0.0, min(1.0, look))
     walking = 1.0 - look
-    s = FIG_H / ROGUE_H                                    # voxel size (px)
+    s = fig_h / ROGUE_H                                    # voxel size (px)
     swing = math.sin(2 * math.pi * walk_phase) * walking   # +1 = right foot up / left foot up alt
     bob = -abs(math.sin(2 * math.pi * walk_phase)) * 0.5 * s * walking   # body bounce
     lean = look * 1.0 * s                                  # forward lean when looking down
@@ -125,7 +126,6 @@ def draw_rogue(frame, cx, walk_phase, look):
 
     # origin: bottom-centre voxel (px=3, gy=0) sits at the feet. Grid is 7 wide, centred on cx.
     grid_left = cx - 3.5 * s
-    feet_y = GROUND_Y
 
     # ground shadow under the feet
     sr = 3.0 * s

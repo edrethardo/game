@@ -31,6 +31,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "engine/menu_osk.h"   // shared on-screen-keyboard layout (controller IP entry)
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -362,8 +363,8 @@ void Engine::renderMenu() {
 
         // Hint text
         const char* hint = m_menu.bindCapture
-            ? "Press a key/button to rebind, ESC to cancel"
-            : "Up/Down select, Left/Right adjust, Enter rebind/toggle, ESC back";
+            ? "Press a key or controller button to bind  -  B / ESC to cancel"
+            : "Up/Down select, Left/Right adjust, A/Enter rebind, B/ESC back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.04f,
                              hint, {0.5f, 0.5f, 0.6f}, 1);
@@ -610,10 +611,44 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, boxY + 10.0f * uiScale,
                              display, {1.0f, 1.0f, 1.0f}, 2);
 
-        const char* hint = "Type digits and dots, Backspace to delete, Enter to confirm, ESC to cancel";
-        f32 hintW = FontSystem::textWidth(hint, 1);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint,
-                             {0.4f, 0.4f, 0.5f}, 1);
+        // When a controller is connected, draw an on-screen keyboard grid (MenuOsk) so a
+        // gamepad-only user can enter the address — keyboard users keep the plain type-in hint.
+        // Same gate as the input handler in engine_menu.cpp::updateMenu (subState 9).
+        if (Input::isGamepadConnected(0) || Input::isGamepadConnected(1)) {
+            const f32 cell = 44.0f * uiScale;          // square cell pitch
+            const f32 inset = 4.0f * uiScale;          // gap between cells
+            const f32 gridW = MenuOsk::COLS * cell;
+            const f32 startX = (static_cast<f32>(sw) - gridW) * 0.5f;
+            const f32 row0Y  = boxY - 56.0f * uiScale; // first row sits below the IP box
+            for (u32 i = 0; i < MenuOsk::COUNT; i++) {
+                const u32 r = i / MenuOsk::COLS;
+                const u32 c = i % MenuOsk::COLS;
+                const f32 cx = startX + c * cell;
+                const f32 cy = row0Y - r * cell;       // lower rows = smaller y (bottom-origin)
+                const bool sel = (i == m_menu.oskCursor);
+                // Cell background — gold highlight on the cursor, dim slate otherwise.
+                const Vec3 bg = sel ? Vec3{0.90f, 0.72f, 0.18f} : Vec3{0.16f, 0.21f, 0.30f};
+                HUD::drawFilledBar(sw, sh, cx, cy, cell - inset, cell - inset, 1.0f, bg, bg);
+                // Label: digit/symbol verbatim, or DEL / GO for the control keys.
+                char lbl[4];
+                if (MenuOsk::isBackspace(i))   { lbl[0]='D'; lbl[1]='E'; lbl[2]='L'; lbl[3]='\0'; }
+                else if (MenuOsk::isDone(i))   { lbl[0]='G'; lbl[1]='O'; lbl[2]='\0'; }
+                else                           { lbl[0]=MenuOsk::KEYS[i]; lbl[1]='\0'; }
+                const f32 lw = FontSystem::textWidth(lbl, 2);
+                const Vec3 tc = sel ? Vec3{0.10f,0.08f,0.04f} : Vec3{0.85f,0.85f,0.92f};
+                FontSystem::drawText(sw, sh, cx + (cell - inset - lw) * 0.5f,
+                                     cy + 12.0f * uiScale, lbl, tc, 2);
+            }
+            const char* ghint = "D-pad: move    A: type    X: backspace    GO: connect    B: cancel";
+            f32 ghw = FontSystem::textWidth(ghint, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - ghw) * 0.5f, sh * 0.06f, ghint,
+                                 {0.45f, 0.5f, 0.62f}, 1);
+        } else {
+            const char* hint = "Type digits and dots, Backspace to delete, Enter to confirm, ESC to cancel";
+            f32 hintW = FontSystem::textWidth(hint, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint,
+                                 {0.4f, 0.4f, 0.5f}, 1);
+        }
     } else if (m_menu.subState == 8) {
         // Overwrite save confirmation — same style as singleplayer sub-menu
         char owTitle[64];

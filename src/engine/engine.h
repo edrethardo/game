@@ -124,6 +124,9 @@ private:
         // without having to backspace nine characters first. Reset each time Join is
         // chosen from the main menu.
         bool connectAddressClearOnType = true;
+        // Cursor index into the on-screen keyboard grid (MenuOsk) on the desktop Host-IP
+        // screen (subState 9), for controller-only text entry. Transient UI state.
+        u8   oskCursor = 0;
         // Host-mode selector (subState 10). true → ask the router for a UPnP IGD port
         // mapping at host time so friends on other networks can join; false → strictly
         // LAN-only, skip the SSDP discovery and never touch the router. Defaults to the
