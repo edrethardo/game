@@ -50,6 +50,20 @@ namespace HUD {
     // Energy bar (blue bar below health bar)
     void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
 
+    // Potion belt flask — drawn beside the health/energy bars. Shows cooldown state
+    // (same language as the skill slots) plus a low-HP red "drink now" pulse. The
+    // potion is an infinite 5s-cooldown heal, so there is no count.
+    struct PotionHudState {
+        f32 cooldownRemaining; // seconds; >0 = cooling
+        f32 maxCooldown;       // denominator for the radial sweep
+        f32 healthFrac;        // 0..1 current HP fraction
+        f32 readyFlash;        // 0..POP_DURATION; >0 = just came ready (green pop)
+        bool urgent;           // low HP + ready -> red breathing pulse (shares the vignette's red + low-HP trigger)
+        f32 pulsePhase;        // shared HUD pulse clock (m_statsTimer); drawn at a 2*pi-multiple Hz so it's continuous across its 1 s wrap
+        const char* keyLabel;  // "Q" / "B"
+    };
+    void drawPotionFlask(u32 sw, u32 sh, f32 x, f32 y, const PotionHudState& st);
+
     // Keyboard key symbol — small key-shaped box with label centered inside.
     // Auto-detects controller button names (A/B/X/Y/ZR etc.) when gamepad connected
     // and draws colored Nintendo-style button shapes instead.
@@ -62,10 +76,19 @@ namespace HUD {
 
     // Radial pie-sweep cooldown overlay — draws clockwise from 12 o'clock.
     // fraction=1.0 fills entire circle, fraction=0.0 draws nothing.
-    void drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction, Vec3 color);
+    // edgeColor draws a bright line along the sweep boundary so progress is legible
+    // against the dark cover.
+    void drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction,
+                            Vec3 color, Vec3 edgeColor);
+
+    // Shared "ability is back" pop — an expanding, fading square ring drawn around a
+    // slot/flask. t01 MUST be pre-clamped to [0,1] (pass HudCooldown::readyPopT(flashTimer)):
+    // 1 = the instant of readiness, 0 = pop finished. scale = caller uiScale. Fades toward
+    // black, so it reads as a dissolve only over the dark HUD backdrop.
+    void drawReadyPop(f32 cx, f32 cy, f32 baseHalf, f32 t01, f32 scale, Vec3 color);
 
     // Class skill bar — 4 skill slots with key icons, selection, cooldown
-    // flashTimers: per-slot countdown (seconds) — slot border flashes white when > 0
+    // flashTimers: per-slot pop timer (0..POP_DURATION) — drives the green "ready" pop when > 0
     void drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                             u8 activeSlot, u32 currentFloor,
                             const u8* unlockFloors, const u8* upgradeFloors,
@@ -83,6 +106,7 @@ namespace HUD {
         const char* keyLabel;   // "F", "G", etc.
         const char* skillName;  // display name
         bool isPassive;    // armor aura / weapon proc (no key activation)
+        f32  readyFlash = 0.0f; // 0..POP_DURATION; drives the green "ready" pop (set by caller)
     };
     void drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                             const EquipSkillSlot* slots, u32 slotCount);
@@ -99,9 +123,6 @@ namespace HUD {
                              const char* name, Vec3 iconColor,
                              f32 healthFrac, u32 count, u8 iconMatId = 0);
 
-    // Skill cooldown indicator (small square near weapon indicator)
-    void drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct);
-
     // Loot notification bar (center-top, fades out)
     void drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha);
 
@@ -109,12 +130,13 @@ namespace HUD {
     void drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
                          const ItemInstance& item, const ItemDef& def);
 
-    // Quickbar — 8 slots at bottom-center of screen
+    // Quickbar — slots at bottom-center of screen. xShift nudges the whole bar right of
+    // its centered position (used to clear the potion flask on the bottom-left).
     void drawQuickbar(u32 sw, u32 sh,
                       const QuickbarState& qb,
                       const PlayerInventory& inv,
                       const ItemDef* itemDefs,
-                      f32 cooldownPct);
+                      f32 cooldownPct, f32 xShift = 0.0f);
 
     // Status effect icons above health bar — shows active debuffs/buffs with timers
     struct StatusEffect {

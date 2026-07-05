@@ -31,6 +31,7 @@ add_executable(dungeon_tests
     game/test_difficulty_scaling.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
+    renderer/test_hud_cooldown.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp
     ${CMAKE_SOURCE_DIR}/src/net/input_wire.cpp

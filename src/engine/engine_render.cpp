@@ -465,8 +465,8 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
     f32 hpFrac = (m_localPlayer.maxHealth > 0.0f)
                ? (m_localPlayer.health / m_localPlayer.maxHealth) : 1.0f;
     f32 lowHp = 0.0f;
-    if (hpFrac > 0.0f && hpFrac < 0.25f)
-        lowHp = (0.25f - hpFrac) / 0.25f * 0.40f;   // 0 at 25% HP -> 0.40 near death, constant per frame
+    if (hpFrac > 0.0f && hpFrac < GameConst::LOW_HP_FRACTION)
+        lowHp = (GameConst::LOW_HP_FRACTION - hpFrac) / GameConst::LOW_HP_FRACTION * 0.40f;   // 0 at threshold -> 0.40 near death, constant per frame
     f32 vig = fmaxf(m_localPlayer.hurtVignette, lowHp);
     if (vig > 0.60f) vig = 0.60f;
     if (vig > 0.0f) {

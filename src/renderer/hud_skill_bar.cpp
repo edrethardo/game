@@ -1,9 +1,11 @@
 // hud_skill_bar.cpp — HUD skill bar drawing: class skill slots, equipment skill
-// slots, radial cooldown overlay, and skill cooldown indicator. Part of the HUD
-// namespace split from hud.cpp. Calls pushLine/pushQuad/flushHUD via hud_internal.h.
+// slots, and the radial cooldown overlay (bright leading edge + centered seconds
+// countdown + green "ready" pop). Part of the HUD namespace split from hud.cpp.
+// Calls pushLine/pushQuad/flushHUD via hud_internal.h.
 
 #include "renderer/hud.h"
 #include "renderer/hud_internal.h"
+#include "renderer/hud_cooldown_util.h"
 #include "renderer/font.h"
 #include "renderer/skill_icons_data.h"
 #include "platform/input.h"
@@ -16,7 +18,8 @@
 // Uses line-fan triangulation: each of STEPS angular wedges is filled by
 // 5 lines from center to the arc edge, giving a dense fill at any slot size.
 // ---------------------------------------------------------------------------
-void HUD::drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction, Vec3 color) {
+void HUD::drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction,
+                             Vec3 color, Vec3 edgeColor) {
     if (fraction <= 0.0f) return;
     if (fraction > 1.0f) fraction = 1.0f;
     constexpr u32 STEPS = 24;
@@ -38,6 +41,9 @@ void HUD::drawRadialCooldown(f32 cx, f32 cy, f32 radius, f32 fraction, Vec3 colo
             pushLine(cx, cy, px, py, color);
         }
     }
+    // Bright leading edge along the sweep boundary — the visible "hand" of the cooldown.
+    f32 re = endAngle - 1.5708f;
+    pushLine(cx, cy, cx + cosf(re) * radius, cy + sinf(re) * radius, edgeColor);
 }
 
 // 8x8 pixel-art icons for legendary equipment skills.
@@ -288,7 +294,10 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         Vec3 borderCol = selected ? Vec3{0.4f, 0.9f, 0.5f} : Vec3{0.25f, 0.25f, 0.35f};
         if (!unlocked) borderCol = {0.12f, 0.12f, 0.18f};
         if (upgraded) borderCol = {0.9f, 0.8f, 0.3f};
-        if (flashTimers && flashTimers[s] > 0.0f) borderCol = {1.0f, 1.0f, 1.0f};
+        if (flashTimers && flashTimers[s] > 0.0f) {
+            f32 t = HudCooldown::readyPopT(flashTimers[s]);
+            borderCol = {0.4f + 0.6f * t, 0.9f, 0.5f + 0.3f * t};   // green ready flash, fades in over the pop
+        }
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
 
         // 32×32 skill icon centered in slot
@@ -327,10 +336,29 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             f32 cx = sx + slotW * 0.5f;
             f32 cy = y + slotH * 0.5f;
             f32 radius = slotW * 0.45f;
-            drawRadialCooldown(cx, cy, radius, cdFrac, {0.05f, 0.05f, 0.08f});
+            drawRadialCooldown(cx, cy, radius, cdFrac, {0.05f, 0.05f, 0.08f}, {1.0f, 0.8f, 0.3f});
         }
 
         flushHUD();
+
+        // Green "ready" pop when the skill just came off cooldown (shared with the potion).
+        if (flashTimers && flashTimers[s] > 0.0f) {
+            f32 cxp = sx + slotW * 0.5f, cyp = y + slotH * 0.5f;
+            drawReadyPop(cxp, cyp, slotW * 0.5f, HudCooldown::readyPopT(flashTimers[s]), uiScale,
+                         {0.42f, 0.88f, 0.54f});
+            flushHUD();
+        }
+
+        // Seconds countdown centered in the slot while cooling.
+        if (unlocked && cooldownTimers[s] > 0.0f &&
+            HudCooldown::showCooldownNumber(cooldownTimers[s])) {
+            f32 cxp = sx + slotW * 0.5f, cyp = y + slotH * 0.5f;
+            char cdBuf[8];
+            std::snprintf(cdBuf, sizeof(cdBuf), "%d", HudCooldown::cooldownSeconds(cooldownTimers[s]));
+            f32 tw = FontSystem::textWidth(cdBuf, 2);
+            FontSystem::drawText(sw, sh, cxp - tw * 0.5f, cyp - 7.0f * uiScale, cdBuf,
+                                 {1.0f, 1.0f, 1.0f}, 2);
+        }
 
         // Key symbol — show D-pad directions on controller, number keys on keyboard
         const char* skillLabel;
@@ -374,6 +402,10 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
         // Border — gold for legendary feel
         Vec3 borderCol = ready ? Vec3{0.7f, 0.55f, 0.2f} : Vec3{0.3f, 0.25f, 0.15f};
         if (slot.isPassive) borderCol = ready ? Vec3{0.5f, 0.4f, 0.7f} : Vec3{0.25f, 0.2f, 0.35f};
+        if (slot.readyFlash > 0.0f) {
+            f32 t = HudCooldown::readyPopT(slot.readyFlash);
+            borderCol = {0.4f + 0.6f * t, 0.9f, 0.5f + 0.3f * t};
+        }
         pushQuad(sx, y, sx + slotW, y + slotH, borderCol);
 
         // Radial cooldown overlay — pie sweep from 12 o'clock, clockwise
@@ -385,7 +417,7 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             f32 cy = y + slotH * 0.5f;
             f32 radius = slotW * 0.45f;
             // Brighter overlay color so it's visible against the dark slot background
-            drawRadialCooldown(cx, cy, radius, cdFrac, {0.15f, 0.12f, 0.2f});
+            drawRadialCooldown(cx, cy, radius, cdFrac, {0.15f, 0.12f, 0.2f}, {1.0f, 0.85f, 0.4f});
         }
 
         // Draw 32x32 skill icon at 1:1 pixel scale, centered in 64px slot
@@ -417,6 +449,24 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
 
         flushHUD();
 
+        // Green "ready" pop when a legendary skill just came off cooldown.
+        if (slot.readyFlash > 0.0f) {
+            f32 cxp = sx + slotW * 0.5f, cyp = y + slotH * 0.5f;
+            drawReadyPop(cxp, cyp, slotW * 0.5f, HudCooldown::readyPopT(slot.readyFlash), uiScale,
+                         {0.42f, 0.88f, 0.54f});
+            flushHUD();
+        }
+
+        // Seconds countdown centered while cooling (passives have cooldownTimer 0 -> skipped).
+        if (slot.cooldownTimer > 0.0f && HudCooldown::showCooldownNumber(slot.cooldownTimer)) {
+            f32 cxp = sx + slotW * 0.5f, cyp = y + slotH * 0.5f;
+            char cdBuf[8];
+            std::snprintf(cdBuf, sizeof(cdBuf), "%d", HudCooldown::cooldownSeconds(slot.cooldownTimer));
+            f32 tw = FontSystem::textWidth(cdBuf, 2);
+            FontSystem::drawText(sw, sh, cxp - tw * 0.5f, cyp - 7.0f * uiScale, cdBuf,
+                                 {1.0f, 1.0f, 1.0f}, 2);
+        }
+
         // Key label or "Auto" for passives — adjusted for larger 64px slot
         if (slot.isPassive) {
             FontSystem::drawText(sw, sh, sx + 8.0f * uiScale, y + 4.0f * uiScale, "auto",
@@ -425,30 +475,4 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             drawKeySymbol(sw, sh, sx + 14.0f * uiScale, y - 22.0f * uiScale, slot.keyLabel, ready);
         }
     }
-}
-
-void HUD::drawSkillCooldown(u32 sw, u32 sh, f32 cooldownPct) {
-    // Weapon indicator is at (sw - 120, 20) with size 100x16.
-    // Place the skill cooldown square just below it.
-    f32 x0 = static_cast<f32>(sw) - 120.0f;
-    f32 y0 = 20.0f + 16.0f + 6.0f; // below weapon indicator
-
-    f32 size = 16.0f;
-
-    if (cooldownPct < 0.0f) cooldownPct = 0.0f;
-    if (cooldownPct > 1.0f) cooldownPct = 1.0f;
-
-    // Outline
-    Vec3 outlineColor = (cooldownPct == 0.0f) ? Vec3{0.0f, 1.0f, 1.0f} : Vec3{0.2f, 0.2f, 0.3f};
-    pushQuad(x0, y0, x0 + size, y0 + size, outlineColor);
-
-    // Fill from bottom to top proportional to (1 - cooldownPct)
-    f32 fillAmount = 1.0f - cooldownPct;
-    f32 fillH = size * fillAmount;
-    Vec3 fillColor = (cooldownPct == 0.0f) ? Vec3{0.0f, 1.0f, 1.0f} : Vec3{0.2f, 0.2f, 0.3f};
-    for (f32 y = y0 + 2; y < y0 + 2 + fillH - 2; y += 1.0f) {
-        pushLine(x0 + 2, y, x0 + size - 2, y, fillColor);
-    }
-
-    flushHUD();
 }

@@ -12,6 +12,7 @@
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
 #include "renderer/hud.h"
+#include "renderer/hud_cooldown_util.h"
 #include "renderer/minimap.h"
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
@@ -156,6 +157,13 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
 }
 
 // ---------------------------------------------------------------------------
+// Rightward nudge (720p px; callers scale by hs) applied to the bottom action cluster
+// — class/equip skill bars + quickbar — and to the ammo readout, so they clear the potion
+// flask that now occupies the old bottom-left gutter (flask spans x≈228..272 at baseline).
+// This reopens an ammo gutter to the flask's right wide enough for the full "N / M"
+// readout (~88px for the widest SMG clips) before the class skill bar begins.
+static constexpr f32 kFlaskClusterShift = 100.0f;
+
 // renderSkillsHUD — class skill bar + equip skill bar + active skill display.
 // Called only in the non-inventory (normal) HUD branch.
 // ---------------------------------------------------------------------------
@@ -169,6 +177,10 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
         f32 qbX = (static_cast<f32>(sw) - qbTotalW) * 0.5f;
         // Skill bar: 4×64px slots + 3×4px gaps = 268px (scaled)
         f32 skillBarW = 4 * 64.0f * hs4 + 3 * 4.0f * hs4;
+        // Nudge the whole cluster right of the potion flask (see kFlaskClusterShift). qbX
+        // moves too so the quickbar (drawn separately in renderHUD with the same shift) and
+        // this skill bar keep their relative spacing.
+        qbX += kFlaskClusterShift * hs4;
         f32 skillBarX = qbX - skillBarW - 12.0f * hs4;
         f32 skillBarY = 14.0f * hs4; // align with quickbar bottom area
 
@@ -180,16 +192,18 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
             maxCooldowns[s] = sd ? sd->cooldown : 1.0f;
         }
 
-        // Flash effect: briefly highlight slot border white when a skill comes off cooldown
-        static f32 s_classSkillFlash[4] = {};
-        static f32 s_prevCooldowns[4]   = {};
+        // Flash effect: green "ready" pop when a skill comes off cooldown. Per-player
+        // (split-screen renders each local player's HUD in turn) and POP_DURATION long
+        // so the pop is felt, not a one-frame blink.
+        static f32 s_classSkillFlash[MAX_LOCAL_PLAYERS][4] = {};
+        static f32 s_prevCooldowns[MAX_LOCAL_PLAYERS][4]   = {};
+        u32 clp = m_localPlayerIndex;
         for (u8 s = 0; s < 4; s++) {
-            if (s_classSkillFlash[s] > 0.0f) s_classSkillFlash[s] -= 1.0f / 60.0f;
-            // Transition from on-cooldown to ready triggers the flash
-            if (cooldowns[s] <= 0.0f && s_prevCooldowns[s] > 0.0f) {
-                s_classSkillFlash[s] = 0.15f;
+            if (s_classSkillFlash[clp][s] > 0.0f) s_classSkillFlash[clp][s] -= 1.0f / 60.0f;
+            if (cooldowns[s] <= 0.0f && s_prevCooldowns[clp][s] > 0.0f) {
+                s_classSkillFlash[clp][s] = HudCooldown::POP_DURATION;
             }
-            s_prevCooldowns[s] = cooldowns[s];
+            s_prevCooldowns[clp][s] = cooldowns[s];
         }
 
         // Pass skill IDs as u8 array for icon rendering
@@ -200,7 +214,7 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
         HUD::drawClassSkillBar(sw, sh, skillBarX, skillBarY,
                                 m_activeClassSkill, effectiveFloor,
                                 cls.skillUnlockFloor, cls.skillUpgradeFloor,
-                                cooldowns, maxCooldowns, s_classSkillFlash, skillIdBytes);
+                                cooldowns, maxCooldowns, s_classSkillFlash[clp], skillIdBytes);
 
         // Equipment skill bar — shows active legendary equipment skills above class bar
         {
@@ -265,6 +279,20 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
                     static_cast<u8>(m_glovesPassive), 0.0f, 0.0f,
                     "", sd ? sd->name : "???", true
                 };
+            }
+
+            // Green "ready" pop tracking for equip skills — parallels the class bar.
+            // Index-keyed (equipped set is stable during combat); passives stay at 0.
+            static f32 s_equipFlash[MAX_LOCAL_PLAYERS][6]  = {};
+            static f32 s_prevEquipCd[MAX_LOCAL_PLAYERS][6] = {};
+            u32 eqp = m_localPlayerIndex;
+            for (u32 i = 0; i < equipCount; i++) {
+                if (s_equipFlash[eqp][i] > 0.0f) s_equipFlash[eqp][i] -= 1.0f / 60.0f;
+                if (equipSlots[i].cooldownTimer <= 0.0f && s_prevEquipCd[eqp][i] > 0.0f) {
+                    s_equipFlash[eqp][i] = HudCooldown::POP_DURATION;
+                }
+                s_prevEquipCd[eqp][i] = equipSlots[i].cooldownTimer;
+                equipSlots[i].readyFlash = s_equipFlash[eqp][i];
             }
 
             if (equipCount > 0) {
@@ -385,24 +413,6 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
                              floorStr, {0.7f, 0.7f, 0.7f}, 2);
     }
 
-    // Potion cooldown indicator (below floor text, Q key icon + label)
-    {
-        f32 hs = static_cast<f32>(sh) / 720.0f;
-        // HUD y is y-up (origin bottom), so a larger subtraction sits lower on screen. Nudged
-        // from 45 -> 60 px so the potion indicator drops a touch below the floor text.
-        f32 potY = static_cast<f32>(sh) - 60.0f * hs;
-        bool potReady = (m_potionCooldown <= 0.0f);
-        HUD::drawKeySymbol(sw, sh, 20.0f * hs, potY, Input::isGamepadConnected(0) ? "B" : "Q", potReady);
-        if (potReady) {
-            FontSystem::drawText(sw, sh, 44.0f * hs, potY + 2.0f * hs,
-                                 "Potion", {0.3f, 0.8f, 0.3f}, 2);
-        } else {
-            char potStr[32];
-            std::snprintf(potStr, sizeof(potStr), "Potion: %.0fs", m_potionCooldown);
-            FontSystem::drawText(sw, sh, 44.0f * hs, potY + 2.0f * hs,
-                                 potStr, {0.8f, 0.3f, 0.3f}, 2);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -616,13 +626,12 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         // rather than snapping. The numeric display (if added later) should read `health`.
         HUD::drawHealthBar(sw, sh, m_localPlayer.renderedHealth, m_localPlayer.maxHealth);
 
-        // Summon portraits — top-left, stacked directly under the Potion tooltip.
+        // Summon portraits — top-left, stacked under the floor-text row.
         {
             f32 hs = static_cast<f32>(sh) / 720.0f;
-            // The Potion tooltip sits at sh - 60*hs; its key symbol extends a little
-            // above that. Anchor the portrait stack at sh - 95*hs so the first box
-            // (which grows upward from its anchor) clears the potion row, and align
-            // its left edge with the floor/potion text at x = 20*hs.
+            // Anchor the portrait stack at sh - 95*hs (below the floor text at the top-left)
+            // so the first box, which grows upward from its anchor, clears that row; align
+            // its left edge with the floor text at x = 20*hs.
             f32 portX = 20.0f * hs;
             f32 portY = static_cast<f32>(sh) - 95.0f * hs;
             f32 portH = 26.0f, gap = 3.0f;
@@ -667,6 +676,35 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Energy bar
         HUD::drawEnergyBar(sw, sh, m_skillStates[m_localPlayerIndex].energy, m_skillStates[m_localPlayerIndex].maxEnergy);
+
+        // Potion belt flask — welded to the right of the health/energy bars, where the
+        // eye already sits when hurt. Per-player ready-pop tracking mirrors the skill bars.
+        {
+            f32 phs = static_cast<f32>(sh) / 720.0f;
+            static f32 s_potionFlash[MAX_LOCAL_PLAYERS]  = {};
+            static f32 s_prevPotionCd[MAX_LOCAL_PLAYERS] = {};
+            u32 pp = m_localPlayerIndex;
+            if (s_potionFlash[pp] > 0.0f) s_potionFlash[pp] -= 1.0f / 60.0f;
+            if (m_potionCooldown <= 0.0f && s_prevPotionCd[pp] > 0.0f) {
+                s_potionFlash[pp] = HudCooldown::POP_DURATION;
+            }
+            s_prevPotionCd[pp] = m_potionCooldown;
+
+            f32 hpFrac = (m_localPlayer.maxHealth > 0.0f)
+                       ? m_localPlayer.health / m_localPlayer.maxHealth : 1.0f;
+            HUD::PotionHudState ps;
+            ps.cooldownRemaining = m_potionCooldown;
+            ps.maxCooldown       = GameConst::POTION_COOLDOWN;
+            ps.healthFrac        = hpFrac;
+            ps.readyFlash        = s_potionFlash[pp];
+            ps.urgent            = HudCooldown::potionUrgent(hpFrac, m_potionCooldown,
+                                                             GameConst::LOW_HP_FRACTION);
+            ps.pulsePhase        = m_statsTimer;
+            ps.keyLabel          = Input::isGamepadConnected(0) ? "B" : "Q";
+            // x = health bar x0(20) + barW(200) + 8px gap; y = 10px centers the 46px cell on
+            // the health+energy stack and keeps its top clear of the status-icon row above.
+            HUD::drawPotionFlask(sw, sh, 228.0f * phs, 10.0f * phs, ps);
+        }
 
         // Status effect icons above the energy bar
         {
@@ -714,7 +752,9 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             }
             if (wpn.clipSize > 0) {
                 f32 hs3 = static_cast<f32>(sh) / 720.0f;
-                f32 ammoX = 230.0f * hs3;
+                // Sits in the gutter reopened to the right of the potion flask (which now
+                // fills the flask's old x≈230 spot); the skill bar was nudged right to match.
+                f32 ammoX = 280.0f * hs3;
                 f32 ammoY = 20.0f * hs3;
                 if (ws.reloading) {
                     f32 maxReload = (wpn.reloadTime > 0.0f) ? wpn.reloadTime : 1.0f;
@@ -818,8 +858,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 if (cdPct > 1.0f) cdPct = 1.0f;
             }
         }
+        // Same rightward nudge as the skill bar so both clear the potion flask (kFlaskClusterShift).
+        f32 qbShift = kFlaskClusterShift * (static_cast<f32>(sh) / 720.0f);
         HUD::drawQuickbar(sw, sh, m_quickbars[m_localPlayerIndex],
-                           m_inventories[m_localPlayerIndex], m_itemDefs, cdPct);
+                           m_inventories[m_localPlayerIndex], m_itemDefs, cdPct, qbShift);
     }
 
     // Profiler overlay (F3)

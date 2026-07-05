@@ -147,15 +147,16 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
                         const QuickbarState& qb,
                         const PlayerInventory& inv,
                         const ItemDef* itemDefs,
-                        f32 cooldownPct) {
+                        f32 cooldownPct, f32 xShift) {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
     f32 SLOT_SIZE = 40.0f * uiScale;
     f32 SLOT_GAP  = 4.0f * uiScale;
-    // Total width of all 8 slots plus gaps between them
+    // Total width of all slots plus gaps between them
     f32 TOTAL_W   = QUICKBAR_SLOTS * SLOT_SIZE + (QUICKBAR_SLOTS - 1) * SLOT_GAP;
     f32 Y_OFFSET  = 20.0f * uiScale; // distance from bottom edge
 
-    f32 startX = (static_cast<f32>(sw) - TOTAL_W) * 0.5f;
+    // Centered, then nudged right by xShift (to clear the bottom-left potion flask).
+    f32 startX = (static_cast<f32>(sw) - TOTAL_W) * 0.5f + xShift;
     f32 baseY  = Y_OFFSET;
 
     for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {

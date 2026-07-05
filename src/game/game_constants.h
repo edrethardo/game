@@ -113,6 +113,10 @@ namespace GameConst {
     static constexpr f32 POTION_ENERGY_PCT   = 0.30f;  // restores 30% max energy
     static constexpr f32 POTION_COOLDOWN     = 5.0f;
 
+    // Shared low-HP threshold: HP fraction at/below which the screen-edge red vignette
+    // ramps up AND the potion flask pulses red. One constant so both fire together.
+    static constexpr f32 LOW_HP_FRACTION     = 0.25f;
+
     // --- Netplay activation leniency (skills + potion) ---------------------------
     // Ticks of slack added to every skill/potion cooldown gate. In MP the client
     // predicts its own activations locally while the server validates them; the

@@ -12,6 +12,7 @@
 //   hud_portraits.cpp     — summon portrait, quickbar
 
 #include "renderer/hud.h"
+#include "renderer/hud_cooldown_util.h"
 #include "renderer/shader.h"
 #include "renderer/font.h"
 #include "core/log.h"
@@ -180,6 +181,80 @@ void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
     }
 
     flushHUD();
+}
+
+// Potion belt flask — a primitive-drawn flask (no asset) welded beside the health bar.
+// States: cooling (radial sweep + seconds number, dimmed) | urgent (steady red pulse when
+// low HP + ready) | ready. A green "ready" pop plays on the cooling->ready transition.
+void HUD::drawPotionFlask(u32 sw, u32 sh, f32 x, f32 y, const PotionHudState& st) {
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    f32 w = 44.0f * uiScale;
+    f32 h = 46.0f * uiScale;
+    f32 cx = x + w * 0.5f;
+    f32 cy = y + h * 0.5f;
+    bool cooling = st.cooldownRemaining > 0.0f;
+
+    // Gentle red breathing pulse (1 Hz, no strobe) when urgent. pulsePhase is the shared
+    // HUD clock (m_statsTimer), which wraps by exactly 1.0 s each second — so we use an
+    // angular frequency of 2*pi (an integer # of cycles per wrap) to keep the sine
+    // CONTINUOUS across that wrap (no once-a-second jump). 1 Hz is well under any
+    // photosensitivity threshold and shares the red + low-HP trigger of the screen vignette.
+    f32 pulse = st.urgent ? (0.55f + 0.45f * std::sin(st.pulsePhase * 6.2832f)) : 0.0f;
+
+    // Rim / border color per state.
+    Vec3 rim = cooling ? Vec3{0.45f, 0.18f, 0.15f}
+             : st.urgent ? Vec3{0.7f + 0.3f * pulse, 0.22f, 0.16f}
+                         : Vec3{0.75f, 0.28f, 0.22f};
+
+    // Glass body: rounded rect over the lower ~72% of the cell.
+    f32 bx0 = x + 10.0f * uiScale, bx1 = x + w - 10.0f * uiScale;
+    f32 by0 = y + 2.0f * uiScale,  by1 = y + h * 0.72f;
+    pushQuad(bx0, by0, bx1, by1, rim);
+
+    // Red liquid fill (horizontal lines), dim while cooling, brighter/pulsing when urgent.
+    f32 lum = cooling ? 0.42f : (st.urgent ? 0.7f + 0.3f * pulse : 0.9f);
+    Vec3 liquid = {0.85f * lum, 0.16f * lum + 0.04f, 0.12f * lum + 0.03f};
+    for (f32 ly = by0 + 2.0f * uiScale; ly < by1 - 1.0f * uiScale; ly += 1.0f * uiScale) {
+        pushLine(bx0 + 2.0f * uiScale, ly, bx1 - 2.0f * uiScale, ly, liquid);
+    }
+
+    // Neck + cork.
+    f32 nk = 6.0f * uiScale;
+    pushLine(cx - nk, by1, cx - nk, y + h - 8.0f * uiScale, rim);
+    pushLine(cx + nk, by1, cx + nk, y + h - 8.0f * uiScale, rim);
+    pushQuad(cx - nk - 1.0f * uiScale, y + h - 8.0f * uiScale,
+             cx + nk + 1.0f * uiScale, y + h - 3.0f * uiScale, {0.55f, 0.4f, 0.25f});
+
+    // Urgent glow: a red ring around the whole cell, breathing with the 1 Hz pulse.
+    if (st.urgent) {
+        Vec3 glow = Vec3{0.9f, 0.25f, 0.2f} * (0.4f + 0.6f * pulse);
+        pushQuad(x + 1.0f * uiScale, y + 1.0f * uiScale,
+                 x + w - 1.0f * uiScale, y + h - 1.0f * uiScale, glow);
+    }
+    flushHUD();
+
+    // Cooling: radial sweep + centered seconds number (same language as skills).
+    if (cooling) {
+        f32 frac = (st.maxCooldown > 0.0f) ? st.cooldownRemaining / st.maxCooldown : 0.0f;
+        drawRadialCooldown(cx, cy, w * 0.42f, frac, {0.05f, 0.04f, 0.05f}, {1.0f, 0.5f, 0.4f});
+        flushHUD();
+        if (HudCooldown::showCooldownNumber(st.cooldownRemaining)) {
+            char buf[8];
+            std::snprintf(buf, sizeof(buf), "%d", HudCooldown::cooldownSeconds(st.cooldownRemaining));
+            f32 tw = FontSystem::textWidth(buf, 2);
+            FontSystem::drawText(sw, sh, cx - tw * 0.5f, cy - 7.0f * uiScale, buf, {1.0f, 1.0f, 1.0f}, 2);
+        }
+    }
+
+    // Key label above the flask (highlighted when ready to drink).
+    drawKeySymbol(sw, sh, x + 4.0f * uiScale, y + h + 2.0f * uiScale, st.keyLabel, !cooling);
+
+    // Green "ready" pop (shared with skills) on the cooling->ready transition.
+    if (st.readyFlash > 0.0f) {
+        drawReadyPop(cx, cy, w * 0.5f, HudCooldown::readyPopT(st.readyFlash), uiScale,
+                     {0.42f, 0.88f, 0.54f});
+        flushHUD();
+    }
 }
 
 void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) {
@@ -366,4 +441,14 @@ void HUD::drawFilledBar(u32 sw, u32 sh, f32 x, f32 y, f32 barW, f32 barH,
         }
     }
     flushHUD();
+}
+
+// Expanding, fading ring for the "ability is back" pop. The HUD batch has no alpha,
+// so the ring color is lerped toward black by the pop's remaining life (readyPopAlpha).
+// Caller is responsible for flushHUD() afterward.
+void HUD::drawReadyPop(f32 cx, f32 cy, f32 baseHalf, f32 t01, f32 scale, Vec3 color) {
+    f32 r = HudCooldown::readyPopRadius(t01, baseHalf, scale);
+    f32 a = HudCooldown::readyPopAlpha(t01);
+    Vec3 c = color * a;                            // fade toward black as it grows
+    pushQuad(cx - r, cy - r, cx + r, cy + r, c);   // pushQuad draws a hollow outline = ring
 }
