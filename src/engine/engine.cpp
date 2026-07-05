@@ -63,6 +63,16 @@ Engine* s_engine = nullptr;
 // First-kill guaranteed drop flag (reset each floor in startGame)
 bool s_firstKillDropGiven = false;
 
+// --- The Dungeon Engine secret superboss: session-only state (NEVER serialized) ---
+// Same lifetime contract as s_firstKillDropGiven above: a file-scope global, extern'd into the few
+// TUs that touch it, absent from engine_persist.cpp. It MUST survive a DESCEND (so shards persist
+// across the floor-50 → next-tier loop) but reset on a true run boundary (New Game / load / menu).
+// s_sourceShards is a 10-bit set keyed by floor/5-1 (floor 5→bit0 … floor 50→bit9); complete = 0x3FF.
+u16 s_sourceShards = 0;
+// Set when the Engine is slain, so the VICTORY screen can show the secret ending instead of the
+// ordinary Hell-clear text. Reset alongside s_sourceShards.
+bool s_engineSlain = false;
+
 
 // ---------------------------------------------------------------------------
 // Net callbacks (static — forwarded to engine)
@@ -365,6 +375,13 @@ void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
     if (s_engine->m_gameState != GameState::IN_GAME &&
         s_engine->m_gameState != GameState::FLOOR_TRANSITION) {
         LOG_WARN("Net: SV_LEVEL_SEED dropped — wrong game state");
+        return;
+    }
+    // Sentinel floor 99 = the host entered The Source (secret superboss). Build the same
+    // deterministic chamber and follow — do NOT touch currentFloor or run normal level gen. The
+    // Engine + its summoned waves are server-authoritative and arrive via snapshots.
+    if (floor == GameConst::SOURCE_SENTINEL_FLOOR) {
+        s_engine->enterSourceChamberClient();
         return;
     }
     // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe).

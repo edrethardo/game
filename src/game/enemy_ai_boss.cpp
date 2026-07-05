@@ -11,12 +11,150 @@
 #include <cmath>
 #include <cstdlib>
 
+// ===========================================================================
+// The Dungeon Engine secret superboss — see ~/.claude/plans (the-dungeon-engine).
+// The Engine is immobile and immune while any wave-boss it summoned lives (combat.cpp keys that
+// on e.isEngine). At HP thresholds it "recompiles" a wave of its past bosses; clearing the wave
+// reopens it for damage. This lives in the game layer, so it can't call Engine:: methods — it
+// summons real boss entities directly from s_bossDefTable, the same way Malachar erupts guardians.
+// ===========================================================================
+
+// Summon one wave-boss (a real milestone boss) as an Engine add. spawnerIdx == the Engine's index,
+// which is what (a) the Engine's damage-immunity scan and (b) the "wave cleared?" check both read.
+// The add keeps isEngine == false, so it takes full damage. It is leashed to the arena so it can
+// never wander out (the chamber is closed anyway). Scaled down for feasibility ("unstable recompile").
+static void summonWaveBoss(EntityPool& pool, const Entity& engine, u16 engineIdx,
+                           u8 bossFloor, Vec3 pos, f32 hpScale) {
+    if (!s_bossDefTable) return;
+    u8 di = findBossDefIdx(*s_bossDefTable, bossFloor);
+    if (di == 0xFF) return;
+    const BossDef& def = s_bossDefTable->defs[di];
+
+    // Scale like the Engine (off its effective floor), then reduce for feasibility. diff is recovered
+    // from the Engine's level (50 + diff*50). The add's level must recover to its own raw floor so
+    // its signature abilities fire (e.g. a Malachar-add → 20 → Chain Lightning + false-death).
+    u8  diff   = (engine.level >= 50) ? static_cast<u8>((engine.level - 1) / 50) : 0;
+    f32 hpMult = GameConst::floorHealthMult(engine.level);
+    f32 dmgMult= GameConst::floorDamageMult(engine.level) * GameConst::difficultyDamageBump(diff);
+    f32 hp     = def.baseHp  * hpMult  * hpScale;
+    f32 dmg    = def.baseDmg * dmgMult * hpScale;
+
+    EntityHandle h = EntitySystem::spawn(pool, pos, def.halfExtents, false,
+        hp, def.speed, def.detectionRange, def.atkRange, def.atkCooldown, dmg);
+    Entity* a = handleGet(pool, h);
+    if (!a) return;
+
+    a->meshId        = def.meshId;        // resolved IDs (filled at init)
+    a->materialId    = def.materialId;
+    a->weaponMeshId  = def.weaponMeshId;
+    a->enemyType     = EnemyType::BOSS;
+    a->isBoss        = true;
+    a->bossDefIdx    = di;
+    a->enemyRole     = def.roles;
+    a->bossLimbConfig= def.limbConfig;
+    a->nameTag       = def.name;
+    a->level         = static_cast<u16>(bossFloor + diff * 50);  // recovers to bossFloor for ability keying
+    a->minionShield  = def.minionShield;
+    a->bossPhase     = def.secondPhase ? BossPhase::ARMED : BossPhase::NONE;  // Malachar keeps false-death
+    a->onHitEffect   = def.onHitEffect;
+    a->onHitDuration = def.onHitDuration;
+    a->onHitDps      = def.onHitDps * dmgMult * hpScale;
+    a->baseMoveSpeed      = a->moveSpeed;
+    a->baseAttackCooldown = a->attackCooldown;
+    if (def.atkRange > 5.0f) {
+        a->npcWeaponType = WeaponType::PROJECTILE;
+        a->npcProjectileSpeed = 18.0f;
+        a->npcProjectileRadius = 0.15f;
+    }
+    a->spawnerIdx   = engineIdx;          // ties the add to the Engine (immunity + wave-clear scans)
+    a->aiState      = AIState::CHASE;
+    a->homePosition = engine.homePosition;// arena centre
+    a->leashRadius  = 20.0f;              // covers the whole closed arena; never the CHARGER leash=0 exception
+    BossAI::magicBurst(pos, 0.6f, 0.2f, 0.9f, 12);  // "recompile" flash
+}
+
+// Drive the Engine's shielded-wave ladder. e is the Engine (e.isEngine == true); i is its index.
+static void updateEngineBoss(Entity& e, u32 i, EntityPool& pool, ProjectilePool& projectiles,
+                             Player& target, f32 dt, f32 dist) {
+    // Immobile turret: face the player, never move.
+    Vec3 toP = target.position - e.position; toP.y = 0.0f;
+    if (toP.x * toP.x + toP.z * toP.z > 0.01f) e.yaw = atan2f(toP.x, toP.z);
+    e.velocity = {0, 0, 0};
+
+    // HP thresholds (fractions of maxHealth) at which each wave fires, and the bosses each summons.
+    // Escalates minis → majors → the heavy hitters (Malachar's false-death, DiaBRO, the Reaper).
+    static const f32 kThresh[4]      = {0.80f, 0.55f, 0.30f, 0.08f};
+    static const u8  kWaveFloors[4][3] = {
+        { 5, 15, 25},   // wave 0 — minis
+        {35, 45, 10},   // wave 1
+        {25, 30, 40},   // wave 2 — majors
+        {20, 40, 50},   // wave 3 — Malachar (false-death) + DiaBRO + Reaper
+    };
+    u8& wave = e.resurrectCount;          // repurposed on the Engine: next wave index (0..4; 4 = done)
+    u16 engineIdx = static_cast<u16>(i);
+
+    if (e.bossPhase == BossPhase::ENG_SHIELDED) {
+        // Immune (enforced in combat.cpp) until every add from this wave is dead. A summoned
+        // Malachar stays alive through his own false-death, so his sub-fight gates the reopen.
+        if (!BossAI::hasMinionAlive(pool, engineIdx)) {
+            e.bossPhase    = BossPhase::ENG_OPEN;
+            e.minionShield = false;
+            e.speechText   = "Recompiling...";
+            e.speechTimer  = 2.0f;
+            BossAI::magicBurst(e.position + Vec3{0, 1.5f, 0}, 0.9f, 0.3f, 1.0f, 24);
+        }
+        return;  // no abilities while shielded
+    }
+
+    // ENG_OPEN: crossing the next threshold triggers the next wave.
+    if (wave < 4) {
+        f32 hpPct = e.health / e.maxHealth;
+        if (hpPct <= kThresh[wave]) {
+            e.health     = e.maxHealth * kThresh[wave];   // clamp so one crit can't skip a wave
+            e.bossPhase  = BossPhase::ENG_SHIELDED;
+            f32 hpScale  = 0.30f + 0.05f * static_cast<f32>(wave);  // 0.30 → 0.45, escalate slightly
+            for (u32 s = 0; s < 3; s++) {
+                f32 ang = static_cast<f32>(s) * (6.2832f / 3.0f) + e.animTimer;
+                Vec3 pos = e.position + Vec3{sinf(ang) * 4.5f, 0.0f, cosf(ang) * 4.5f};
+                summonWaveBoss(pool, e, engineIdx, kWaveFloors[wave][s], pos, hpScale);
+            }
+            wave++;
+            BossAI::magicBurst(e.position + Vec3{0, 1.5f, 0}, 1.0f, 0.4f, 1.0f, 36);
+            e.speechText  = (wave >= 4) ? "My finest drafts. KILL THEM." : "Behold my drafts.";
+            e.speechTimer = 3.0f;
+            return;
+        }
+    }
+
+    // OPEN window: fire a 3-bolt "code purge" fan at the player on cooldown (flybyTimer).
+    e.flybyTimer -= dt;
+    if (e.flybyTimer <= 0.0f && dist < 60.0f) {
+        e.flybyTimer = 1.2f;
+        Vec3 eye = e.position + Vec3{0, e.halfExtents.y, 0};
+        Vec3 aim = normalize((target.position + Vec3{0, 0.9f, 0}) - eye);
+        for (s32 s = -1; s <= 1; s++) {
+            f32 spread = static_cast<f32>(s) * 0.12f;
+            Vec3 dir = normalize(Vec3{aim.x + spread * aim.z, aim.y, aim.z - spread * aim.x});
+            u16 pi = ProjectileSystem::spawn(projectiles, eye, dir, 16.0f, e.damage * 0.5f, 0.2f, 4.0f, false);
+            if (pi != 0xFFFF) projectiles.projectiles[pi].lightColor = Vec3{0.7f, 0.3f, 1.0f};
+        }
+    }
+}
+
 void updateLegacyBossAbilities(Entity& e, u32 i,
                                 EntityPool& pool, ProjectilePool& projectiles,
                                 Player& player, Player* targetPlayer,
                                 const LevelGrid& grid, f32 dt,
                                 f32 dist, Vec3 playerEye)
 {
+    // The Dungeon Engine superboss runs its own bespoke shielded-wave machine — branch out before
+    // the legacy personality/false-death/per-floor switch (its floor-99 def would otherwise alias
+    // raw floor 49 in the modulo recovery). Keyed on isEngine, set only on the Source boss.
+    if (e.isEngine) {
+        updateEngineBoss(e, i, pool, projectiles, *targetPlayer, dt, dist);
+        return;
+    }
+
     // Delegate to BossAI personality system if this boss has a loaded def.
     // Skipped while ENTOMBING so the boss stays rooted during its false-death channel.
     if (e.bossDefIdx != 0xFF && s_bossDefTable && e.bossDefIdx < s_bossDefTable->count

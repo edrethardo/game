@@ -68,6 +68,13 @@ namespace BossPhase {
     constexpr u8 ENTOMBING = 2; // invulnerable, rooted channel; ends by summoning guardians
     constexpr u8 SEALED    = 3; // guardians up → 75% damage reduction (minionShield) until they die
     constexpr u8 ENRAGED   = 4; // shield broken, faster/more aggressive, mortal again
+
+    // The Dungeon Engine superboss (The Source) reuses this raw-u8 field for its own ladder.
+    // Values are kept clear of Malachar's 1-4 so the two state machines never alias. After the
+    // final wave clears, the Engine simply stays ENG_OPEN with no adds — so it dies normally; no
+    // separate "dead" phase is needed.
+    constexpr u8 ENG_OPEN     = 10; // vulnerable — taking damage toward the next wave threshold
+    constexpr u8 ENG_SHIELDED = 11; // immune while a summoned wave lives; clear it to reopen
 }
 
 // Squad role assigned by room coordinator to spread tactics across a group
@@ -165,6 +172,11 @@ struct Entity {
                            // leash "wait" gate and engages even when the player is outside the arena.
     u16 spawnerIdx = 0xFFFF; // entity pool index of boss that spawned this minion
     bool minionShield = false; // boss takes 75% reduced damage while alive minions exist
+    // The Dungeon Engine secret superboss. Set ONLY on the Source boss — never on its wave-adds
+    // (which are real bosses with isBoss/bossDefIdx, so the immunity check must key on THIS flag,
+    // not isBoss, or the adds would be immune too). While true, the Engine takes zero damage as
+    // long as any entity it spawned (spawnerIdx == its index) is alive.
+    bool isEngine = false;
     u8  bossPhase = 0;     // BossPhase:: false-death state machine (NONE=normal death)
     u8  ownerLocalPlayer = 0;  // split-screen: local player a friendly NPC/drone serves (0=P1)
     // (N4) Net-slot owner for friendly NPCs/drones in NET mode — when a remote casts a summon

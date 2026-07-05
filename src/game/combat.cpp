@@ -76,6 +76,15 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
         return;
     }
 
+    // The Dungeon Engine superboss: fully immune while any wave-boss it summoned is alive. The
+    // player must clear those adds to crack its shield. Gated on isEngine (only the Engine is
+    // shielded) — the predicate itself is keyed on spawnerIdx, which the summoned wave-bosses carry
+    // (they have isEngine == false, so they always take full damage). See updateEngineBoss.
+    if (e->isEngine && Combat::engineShieldActive(pool, target.index)) {
+        e->flashTimer = 0.12f;   // registers a hit, deals no damage
+        return;
+    }
+
     // Shield Bearer frontal damage reduction — forces player to flank
     if ((e->enemyRole & EnemyRole::SHIELD_BEARER) && damageOrigin) {
         Vec3 toSource = *damageOrigin - e->position;

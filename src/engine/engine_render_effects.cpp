@@ -378,6 +378,31 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
+    // --- The Source portal — the hidden second portal beside the floor-50 exit (secret superboss) ---
+    // Distinct void-violet so it reads as "other" next to the green exit. Host/SP only (a client
+    // never sets sourcePortalActive — it's teleported by the host's sentinel broadcast instead).
+    if (m_level.sourcePortalActive) {
+        Vec3 dp = m_level.sourcePortalPos;
+        f32 t = static_cast<f32>(m_statsTimer);
+        f32 pulse = 0.5f + 0.5f * sinf(t * 3.0f);
+        f32 fastPulse = 0.5f + 0.5f * sinf(t * 8.0f);
+        Vec3 beamCol = {0.62f * pulse + 0.2f, 0.18f, 0.95f * pulse};
+        for (f32 ox = -0.08f; ox <= 0.08f; ox += 0.04f) {
+            DebugDraw::line(dp + Vec3{ox, 0, 0}, dp + Vec3{ox, 4.5f, 0}, beamCol);
+            DebugDraw::line(dp + Vec3{0, 0, ox}, dp + Vec3{0, 4.5f, ox}, beamCol);
+        }
+        f32 ringR = 0.7f + fastPulse * 0.12f;
+        Vec3 ringCol = {0.7f * pulse, 0.25f * pulse, 1.0f * pulse};
+        for (u32 s = 0; s < 14; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / 14.0f) + t * 2.5f;
+            f32 a1 = a0 + (6.28318f / 14.0f);
+            DebugDraw::line(dp + Vec3{cosf(a0) * ringR, 1.0f, sinf(a0) * ringR},
+                            dp + Vec3{cosf(a1) * ringR, 1.0f, sinf(a1) * ringR}, ringCol);
+            DebugDraw::line(dp + Vec3{cosf(a0) * ringR * 0.7f, 2.2f, sinf(a0) * ringR * 0.7f},
+                            dp + Vec3{cosf(a1) * ringR * 0.7f, 2.2f, sinf(a1) * ringR * 0.7f}, ringCol);
+        }
+    }
+
     // --- Fire AoE effects (molotov splash) ---
     for (u32 i = 0; i < MAX_FIRE_FX; i++) {
         if (!m_fx.fireFX[i].active) continue;

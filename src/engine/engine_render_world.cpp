@@ -86,7 +86,8 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 
         static constexpr f32 ITEM_SCALE = 1.4f;
         bool isGlobeItem = isGlobe(wi.item);
-        f32 renderScale = isGlobeItem ? 0.4f : ITEM_SCALE;
+        bool isShard     = isSourceShard(wi.item);   // secret superboss key — render the crystal mesh
+        f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : ITEM_SCALE);
         f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
         Vec3 pos = {wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
 
@@ -105,6 +106,13 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 
         if (isGlobeItem) {
             tint = {0.3f, 0.9f, 0.5f, 1.0f};
+        } else if (isShard) {
+            // Distinct faceted crystal in emissive void-cyan so it reads as "not loot".
+            if (m_meshIdShard > 0 && m_meshIdShard < m_meshDefCount)
+                itemMesh = &m_meshDefs[m_meshIdShard].mesh;
+            const Material* sm = MaterialSystem::get(MaterialSystem::getIdByName("shard_glow"));
+            if (sm) { itemTex = sm->texture; tint = {sm->tint.x, sm->tint.y, sm->tint.z, 1.0f}; }
+            else    { tint = {0.45f, 0.95f, 1.0f, 1.0f}; }
         } else if (wi.item.defId < m_itemDefCount) {
             const ItemDef& def = m_itemDefs[wi.item.defId];
             if (def.meshId > 0 && def.meshId < m_meshDefCount) {
@@ -166,14 +174,15 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({renderScale, renderScale, renderScale});
             }
         } else {
-            f32 cubeS = isGlobeItem ? renderScale : 0.3f;
+            // Shards render their crystal mesh at full renderScale (like globes); plain item cubes use 0.3.
+            f32 cubeS = (isGlobeItem || isShard) ? renderScale : 0.3f;
             model = Mat4::translate(pos) * Mat4::rotateY(spin) * Mat4::scale({cubeS, cubeS, cubeS});
         }
         AABB bounds = {pos - Vec3{renderScale,renderScale,renderScale},
                        pos + Vec3{renderScale,renderScale,renderScale}};
 
-        // Collect disc billboard for batched rendering below
-        if (!isGlobeItem && discCount < MAX_WORLD_ITEMS) {
+        // Collect disc billboard for batched rendering below (skip globes + shards — not loot)
+        if (!isGlobeItem && !isShard && discCount < MAX_WORLD_ITEMS) {
             Vec4 discColor = {0.9f, 0.9f, 0.9f, 0.3f};
             f32 discSize = renderScale * 1.2f;
             switch (wi.item.rarity) {

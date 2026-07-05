@@ -313,8 +313,18 @@ inline bool isItemEmpty(const ItemInstance& item) {
 static constexpr u16 GLOBE_HEALTH_ID = 0xFFFE;
 static constexpr u16 GLOBE_ENERGY_ID = 0xFFFD;
 
+// Secret superboss key: each milestone boss drops a "source shard" (also a sentinel, not a real
+// item — auto-pickup, no inventory slot). Carrying all 10 in one session opens the way to The
+// Source. The shard's itemLevel field carries the source floor (5,10,…,50) so the pickup handler
+// can pick the right lore whisper. See ~/.claude/plans (the-dungeon-engine superboss).
+static constexpr u16 SOURCE_SHARD_ID = 0xFFFC;
+
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
+}
+
+inline bool isSourceShard(const ItemInstance& item) {
+    return item.defId == SOURCE_SHARD_ID;
 }
 
 // ---- Rarity color lookup ----

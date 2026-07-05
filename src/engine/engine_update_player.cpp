@@ -448,7 +448,11 @@ void Engine::tickSharedFX(f32 dt) {
             if (ent.enemyType == EnemyType::PROP) continue;
             f32 distSq = lengthSq(ent.position - sz.pos);
             if (distSq < sz.radius * sz.radius) {
-                ent.health -= sz.dps * dt;
+                // The Dungeon Engine superboss is immune to scorch DoT while shielded, same as
+                // direct hits and poison/burn — otherwise a scorch pool under it would bleed it
+                // through the shield and could kill it mid-wave (firing VICTORY with adds alive).
+                if (!(ent.isEngine && Combat::engineShieldActive(m_entities, static_cast<u16>(idx))))
+                    ent.health -= sz.dps * dt;
                 // Route death through killEntity so scorch kills still drop loot / fire procs.
                 if (ent.health <= 0.0f)
                     Combat::killEntity(m_entities, {static_cast<u16>(idx), ent.generation});

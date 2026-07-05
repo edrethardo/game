@@ -59,6 +59,8 @@
 extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
+extern u16  s_sourceShards;   // secret superboss key — session-only set of collected shards
+extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
 // ---------------------------------------------------------------------------
 // NPC equipment and spawning helpers
@@ -406,6 +408,12 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     if (mode == GameStart::NEW_GAME) {
         m_level.levelSeed = static_cast<u32>(std::rand()); // global RNG is srand()-seeded at init
         m_level.savedSeed = m_level.levelSeed;             // persist the run seed
+        // Secret superboss key is session-only and resets on a true run-start (NOT on DESCEND, so
+        // shards persist across the floor-50 → next-tier loop). See ~/.claude/plans.
+        s_sourceShards = 0;
+        s_engineSlain  = false;
+        m_level.inSourceChamber    = false;
+        m_level.sourcePortalActive = false;
     }
     // Floor + difficulty fold in so each floor and each difficulty-loop tier differs.
     u32 dungeonSeed = m_level.levelSeed

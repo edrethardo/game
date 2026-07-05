@@ -29,6 +29,8 @@ add_executable(dungeon_tests
     game/test_cooldown_gate.cpp
     game/test_armor_tier.cpp
     game/test_difficulty_scaling.cpp
+    game/test_free_play.cpp
+    game/test_engine_shield.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
     renderer/test_hud_cooldown.cpp

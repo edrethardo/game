@@ -207,6 +207,9 @@ void Engine::initAssets() {
             {"diabro",         "assets/meshes/diabro.obj"},
             {"nyx",            "assets/meshes/nyx.obj"},
             {"reaper",         "assets/meshes/reaper.obj"},
+            // Secret superboss: The Dungeon Engine + its source-shard pickup key.
+            {"engine",         "assets/meshes/engine.obj"},
+            {"shard",          "assets/meshes/shard.obj"},
             // Player class meshes — resolved by name from ClassDef.meshName in the renderer.
             // Distinct from the NPC meshes above so player and town-NPC visuals can diverge.
             // The renderer falls back to "human" if any of these fails to load (e.g. the
@@ -283,6 +286,7 @@ void Engine::initAssets() {
     m_meshIdIronMaiden = findMeshByName("iron_maiden");
     m_meshIdArrow      = findMeshByName("arrow");
     m_meshIdBolt       = findMeshByName("bolt");
+    m_meshIdShard      = findMeshByName("shard");  // source-shard pickup (secret superboss key)
     SkillSystem::setArrowMeshIds(m_meshIdArrow, m_meshIdBolt);
     m_matIdBatWing     = MaterialSystem::getIdByName("bat_wing");
 

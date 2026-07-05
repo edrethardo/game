@@ -57,6 +57,8 @@
 extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
+extern u16  s_sourceShards;   // secret superboss key — session-only set of collected shards
+extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
 // Version 3 = GLOVES equipment slot (PlayerInventory.equipped grows 6→7) + the
 //             bonusAttackSpeedPct cache field. Header layout is UNCHANGED.
@@ -450,6 +452,13 @@ bool Engine::loadGame(u8 slot) {
     m_level.levelSeed  = seed; // restore the run seed so startGame regenerates the saved dungeon
     m_transition.totalPlayTime = totalTime;
     m_difficulty = (difficulty <= 2) ? difficulty : 0;
+
+    // Secret superboss key is session-only and never serialized — a loaded run starts with no
+    // shards collected (in-fiction: the curse resets you). See ~/.claude/plans (the-dungeon-engine).
+    s_sourceShards = 0;
+    s_engineSlain  = false;
+    m_level.inSourceChamber    = false;
+    m_level.sourcePortalActive = false;
 
     for (u8 p = 0; p < restoreCount; p++) {
         // The per-player `cls` byte sits AFTER the raw inventory/quickbar/skill blobs, whose on-disk

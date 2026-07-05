@@ -71,6 +71,8 @@
 extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
+extern u16  s_sourceShards;   // secret superboss key — session-only set of collected shards
+extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
 // D1.3 — Broadcast SV_LOOT_SPAWN to all connected clients when a world item is spawned
 // server-side. Called from each WorldItemSystem::spawn site in the loot-drop paths.
@@ -103,6 +105,18 @@ static void broadcastLootSpawn(const WorldItemPool& pool, u32 uid, Vec3 pos, u16
 // Handles: squad reassignment, friendly NPC speech, Shadow Dance extension,
 // Wanderer mark-prey passives, Mark Prey arrow chain, and Bomber death explosion.
 void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
+    // The Dungeon Engine secret superboss is slain → the run's true ending. This handler runs on
+    // the authoritative host/SP (enemy deaths aren't simulated on a client), so the host enters
+    // VICTORY here; the s_engineSlain flag steers the victory screen to the secret ending. (Co-op
+    // clients follow the same limitation as the normal Hell-50 victory, which also isn't broadcast.)
+    if (pool.entities[idx].isEngine) {
+        s_engineSlain = true;
+        m_gameState   = GameState::VICTORY;
+        AudioSystem::stopMusic();
+        Input::setRelativeMouseMode(false);
+        addChatMessage("\?\?\?", "halt. the curse... ends.", Vec3{0.62f, 0.30f, 0.95f});
+    }
+
     // Remove from squad so roles are reassigned before next AI tick
     SquadSystem::onMemberDeath(m_level.squads, idx, pool);
 
@@ -367,8 +381,14 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
 // Returns true if a boss loot drop was handled — caller must return immediately
 // to skip normal loot path (matches original `return; // skip normal loot path`).
 bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
+    // Only ROOT bosses drop the guaranteed boss haul (spawnerIdx == 0xFFFF). The Dungeon Engine's
+    // recompiled wave-adds are real bosses (bossDefIdx set) but summoned (spawnerIdx == Engine),
+    // so they fall through to normal loot — otherwise a single Source fight would dump ~12
+    // guaranteed legendaries and saturate the 32-slot world-item pool. The Engine itself is a root
+    // boss (spawnerIdx 0xFFFF), so its haul is unaffected.
     if (pool.entities[idx].bossDefIdx != 0xFF &&
-        pool.entities[idx].bossDefIdx < m_bossDefs.count) {
+        pool.entities[idx].bossDefIdx < m_bossDefs.count &&
+        pool.entities[idx].spawnerIdx == 0xFFFF) {
         const BossDef& bd = m_bossDefs.defs[pool.entities[idx].bossDefIdx];
         // Loot level is u8 (save-bound ItemInstance.itemLevel) — cap effective floor at 255.
         u16 bossEntLvl = pool.entities[idx].level;
@@ -432,6 +452,26 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         WorldItemSystem::spawn(m_worldItems, globe,
                                pos + Vec3{0.2f, 0.5f, 0.0f}, &m_level.grid);
         // Globes are auto-pickup and rarely interesting for client-side UIs — skip broadcast.
+
+        // --- Secret superboss key: milestone bosses drop a hidden source shard ---
+        // Dead-stripped from the demo (constexpr guard). NEVER for the Engine itself: its
+        // effective level recovers to raw floor 50, which would otherwise re-drop a floor-50
+        // shard inside The Source. Like globes, the shard is auto-pickup and not broadcast —
+        // both host and client pick it from their own world-item view (see updatePlayerPickup).
+        if (!GameConst::kDemoBuild && !pool.entities[idx].isEngine) {
+            u8 rawFloor = static_cast<u8>(((bossEntLvl - 1) % 50) + 1); // 5→5 … 50→50, 55→5 …
+            if (rawFloor >= 5 && rawFloor <= 50 && rawFloor % 5 == 0) {
+                u8 bit = static_cast<u8>(rawFloor / 5 - 1);             // floor 5→bit0 … 50→bit9
+                if (!(s_sourceShards & (1u << bit))) {                  // skip if already held this session
+                    ItemInstance shard;
+                    shard.defId     = SOURCE_SHARD_ID;
+                    shard.itemLevel = rawFloor;                        // carries the lore-whisper index
+                    shard.uid       = m_worldItems.nextUid++;
+                    WorldItemSystem::spawn(m_worldItems, shard,
+                                           pos + Vec3{-0.2f, 0.5f, 0.0f}, &m_level.grid);
+                }
+            }
+        }
         return true; // skip normal loot path
     }
 

@@ -32,6 +32,20 @@ struct AttackResult {
 };
 
 namespace Combat {
+    // The Dungeon Engine secret superboss is damage-immune while any wave-boss it summoned is alive
+    // (clear the adds to crack its shield). Returns true iff some active entity carries
+    // spawnerIdx == engineIdx and isn't dead. Factored out of applyDamage so it is independently
+    // testable. IMPORTANT: this is keyed on spawnerIdx, NOT isEngine/isBoss — the summoned wave-adds
+    // also carry isBoss/bossDefIdx, so the caller must gate this on target.isEngine (only the Engine
+    // is shielded; its adds are always damageable). See updateEngineBoss + ~/.claude/plans.
+    inline bool engineShieldActive(const EntityPool& pool, u16 engineIdx) {
+        for (u32 a = 0; a < pool.activeCount; a++) {
+            const Entity& m = pool.entities[pool.activeList[a]];
+            if (m.spawnerIdx == engineIdx && !(m.flags & ENT_DEAD)) return true;
+        }
+        return false;
+    }
+
     // Apply damage to an entity. Handles health, flash, death transition.
     // Optional damageOrigin enables directional checks (e.g. shield bearer frontal reduction).
     void applyDamage(EntityPool& pool, EntityHandle target, f32 damage,

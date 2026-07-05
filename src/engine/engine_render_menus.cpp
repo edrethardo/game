@@ -540,6 +540,37 @@ void Engine::renderMenu() {
         const char* hint = "Up/Down, Enter/A to confirm, B/ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 14) {
+        // Free-Play level select — a cleared hero (Hell, floor > 50) picks difficulty + floor 1-50
+        // to farm. Non-destructive: the no-downgrade save guard keeps the cleared slot pinned.
+        const char* title = "Free Play";
+        f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.68f, title,
+                             {0.3f, 1.0f, 0.5f}, 3);
+
+        static const char* diffNames[3] = {"Normal", "Nightmare", "Hell"};
+
+        // Row 0 — difficulty (y = sh*0.50), Row 1 — floor (y = sh*0.50 - 46px). Matches the mouse
+        // hit-test in engine_menu.cpp's sub-state-14 handler — keep both in sync.
+        for (u32 row = 0; row < 2; row++) {
+            bool sel = (m_menu.subSelection == row);
+            f32 y = sh * 0.50f - static_cast<f32>(row) * 46.0f * uiScale;
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 360.0f * uiScale, 35.0f * uiScale, col, sel);
+            char buf[48];
+            if (row == 0)
+                std::snprintf(buf, sizeof(buf), "Difficulty:  < %s >", diffNames[m_menu.freePlayDifficulty]);
+            else
+                std::snprintf(buf, sizeof(buf), "Floor:  < %u >", static_cast<u32>(m_menu.freePlayFloor));
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 lw = FontSystem::textWidth(buf, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 10.0f * uiScale, buf, tc, 2);
+        }
+
+        const char* hint = "Up/Down select   Left/Right change   Enter/A Descend   B/ESC Back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint,
+                             {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 7) {
         // Credits screen — scrolling text
         f32 cx = static_cast<f32>(sw) * 0.5f;

@@ -3415,6 +3415,85 @@ def gen_reaper(height=2.6):
     return mb
 
 
+def gen_engine(height=3.2):
+    """The Dungeon Engine secret superboss — a towering machine-monolith core.
+
+    A grounded faceted obelisk: a broad stepped pedestal, a tapering shaft, a
+    central "core housing" with a deep-set horizontal eye-slit cavity, four
+    orbiting gear/ring shards around the core, and a thin apex spire. Reads as
+    an imposing immobile machine rather than a creature. Grid ~13w x 23h.
+    Origin at floor (Y=0). Single material — the glow comes from its emissive
+    material tint (engine_core), the eye is a sculpted recess.
+    """
+    mb = MeshBuilder()
+    vs = height / 23.0   # 23 voxels tall
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Stepped pedestal base (wide, grounded) ---
+    fill_box(-5, 0, -5, 11, 2, 11)   # broad base slab
+    fill_box(-4, 2, -4, 9, 2, 9)     # second tier
+    fill_box(-3, 4, -3, 7, 3, 7)     # lower shaft
+
+    # --- Core housing (holds the eye) gy 7..14 ---
+    fill_box(-4, 7, -4, 9, 7, 9)
+    # Deep-set eye cavity: carve a 5-wide x 3-tall recess in the front (-Z) face
+    for gy in range(9, 12):
+        for gx in range(-2, 3):
+            filled.discard((gx, gy, -4))
+    # The "iris": a horizontal slit bar deep inside the cavity (the glowing eye)
+    fill_box(-2, 10, -3, 5, 1, 1)
+
+    # --- Four orbiting gear/ring shards around the core (gy 10) ---
+    fill_box(-6, 10, -1, 1, 2, 2)    # left  ring shard (juts out)
+    fill_box( 5, 10, -1, 1, 2, 2)    # right ring shard
+    fill_box(-1, 10,  5, 2, 2, 1)    # back  ring shard (+Z)
+    fill_box(-1, 13, -1, 2, 1, 2)    # a small top-of-core accent
+
+    # --- Tapering upper shaft ---
+    fill_box(-3, 14, -3, 7, 3, 7)
+    fill_box(-2, 17, -2, 5, 3, 5)
+    fill_box(-1, 20, -1, 3, 2, 3)
+
+    # --- Apex spire ---
+    filled.add((0, 22, 0))
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
+def gen_shard(size=0.32):
+    """Source shard pickup — a small faceted crystal spike that the milestone
+
+    bosses drop (the secret superboss key). Elongated vertical diamond with a
+    cross-shaped mid bulge so it reads as a gem from any angle. Origin at its
+    base; the world-item renderer floats/​spins it. Single emissive material.
+    """
+    mb = MeshBuilder()
+    vs = size / 8.0   # 8 voxels tall
+    filled = set()
+
+    # Central spike column
+    for y in range(0, 8):
+        filled.add((0, y, 0))
+    # Mid bulge — a 4-way cross at the widest point so it faceted from all sides
+    for y in (3, 4):
+        filled.add(( 1, y, 0))
+        filled.add((-1, y, 0))
+        filled.add(( 0, y,  1))
+        filled.add(( 0, y, -1))
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs))
+    return mb
+
+
 def gen_player_warrior(height=1.8):
     """Player Warrior class — heavy plate veteran with crimson sash + cape.
 
@@ -4623,6 +4702,16 @@ MESH_TYPES = {
         "desc": "Large demon boss with horns. Params: --height",
         "default_file": "butcher.obj",
     },
+    "engine": {
+        "func": lambda height=3.2: gen_engine(height),
+        "desc": "The Dungeon Engine superboss — floating monolith core with a glowing eye. Params: --height",
+        "default_file": "engine.obj",
+    },
+    "shard": {
+        "func": lambda size=0.32: gen_shard(size),
+        "desc": "Source shard pickup crystal (secret superboss key). Params: --radius (size)",
+        "default_file": "shard.obj",
+    },
     "butcher_torso": {
         "func": lambda height=2.5: gen_butcher_torso(height),
         "desc": "Butcher torso only (no arms/legs). Params: --height",
@@ -5139,9 +5228,12 @@ def main():
     elif mtype == "chest":
         if args.width is not None:
             kwargs["width"] = args.width
-    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "necromancer", "shaman", "herald"):
+    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "necromancer", "shaman", "herald", "engine"):
         if args.height is not None:
             kwargs["height"] = args.height
+    elif mtype == "shard":
+        if args.radius is not None:
+            kwargs["size"] = args.radius
     elif mtype == "web":
         if args.radius is not None:
             kwargs["size"] = args.radius

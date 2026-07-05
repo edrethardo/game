@@ -32,3 +32,6 @@ __pycache__/
 *.pyc
 logs/
 *.log
+
+# Superpowers brainstorm companion (regenerable mockups)
+.superpowers/

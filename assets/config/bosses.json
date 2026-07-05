@@ -431,6 +431,31 @@
       "bonusDrops": 2,
       "limbConfig": 4,
       "speech": "YOUR TIME HAS COME!"
+    },
+    {
+      "name": "The Dungeon Engine",
+      "floor": 99,
+      "isMajor": true,
+      "baseHp": 4000,
+      "baseDmg": 28,
+      "speed": 1.0,
+      "atkRange": 30.0,
+      "atkCooldown": 1.0,
+      "detectionRange": 80.0,
+      "halfExtents": [
+        0.9,
+        1.7,
+        0.9
+      ],
+      "meshName": "engine",
+      "matName": "engine_core",
+      "personality": "kiter",
+      "enrageFactor": 0.0,
+      "minionShield": false,
+      "lootGuarantee": "legendary",
+      "bonusDrops": 3,
+      "limbConfig": 0,
+      "speech": "I built you a world. Did you think it had an exit?"
     }
   ]
 }

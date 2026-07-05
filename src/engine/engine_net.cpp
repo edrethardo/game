@@ -487,6 +487,26 @@ void Engine::serverNetPost(f32 dt) {
         }
     }
 
+    // Server-side source-shard auto-pickup for remote players (mirrors globes above). The host's
+    // s_sourceShards is the AUTHORITATIVE key for the Source-portal spawn, so a shard a remote
+    // grabs must still register on the host. collectSourceShard sets the bit + whispers (host-side).
+    for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
+        WorldItem& item = m_worldItems.items[wi];
+        if (!item.active || !isSourceShard(item.item)) continue;
+        for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+            if (pi < m_splitPlayerCount) continue; // host-local lanes pick up in gameUpdate
+            if (!m_players[pi].active || m_players[pi].isDead) continue;
+            Vec3 delta = m_players[pi].position - item.position;
+            f32 dist = sqrtf(delta.x * delta.x + delta.z * delta.z);
+            if (dist < 3.0f) {
+                collectSourceShard(item.item);
+                item.active = false;
+                if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+                break;
+            }
+        }
+    }
+
     // Damage flash decay for remote players
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (i < m_splitPlayerCount) continue; // host-local lanes decay in gameUpdate

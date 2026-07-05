@@ -32,6 +32,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "game/free_play.h"
 #include "engine/menu_osk.h"   // controller on-screen keyboard for the Host-IP screen (subState 9)
 #include "net/net.h"
 #include "net/server.h"
@@ -441,8 +442,18 @@ void Engine::updateMenu(f32 dt) {
                     m_clientLoadedFromSave = false;
                 }
             } else {
-                // Local solo: CONTINUE keeps the loaded hero, NEW_GAME wipes+grants P1.
-                startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
+                // Local solo. A CLEARED hero (Hell, floor > 50) opens the Free-Play level select to
+                // farm any difficulty + floor 1-50 (non-destructive); everyone else starts now.
+                // loadGame() already set m_level.savedFloor / m_difficulty for the continued hero.
+                if (m_menu.p1Continue &&
+                    FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) {
+                    m_menu.freePlayDifficulty = 2;   // default Hell
+                    m_menu.freePlayFloor      = 1;   // default floor 1
+                    m_menu.subState           = 14;  // Free-Play level select (renders + handles input next frame)
+                    m_menu.subSelection       = 0;
+                } else {
+                    startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
+                }
             }
             return;
         }
@@ -452,6 +463,83 @@ void Engine::updateMenu(f32 dt) {
             if (m_menu.p1Continue) { m_menu.subState = 6; m_menu.msg = "continue"; }
             else                   { m_menu.subState = 2; }
             m_menu.subSelection = 0;
+        }
+        return;
+    }
+
+    // Free-Play level select (post-clear). subSelection: 0 = difficulty row, 1 = floor row.
+    if (m_menu.subState == 14) {
+        // --- keyboard + gamepad navigation (P1 == controller 0) ---
+        bool up    = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)    ||
+                     Input::isMenuStickPressed(Input::StickNav::Up, 0)    || Input::isKeyPressed(SDL_SCANCODE_UP);
+        bool down  = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  ||
+                     Input::isMenuStickPressed(Input::StickNav::Down, 0)  || Input::isKeyPressed(SDL_SCANCODE_DOWN);
+        bool left  = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  ||
+                     Input::isMenuStickPressed(Input::StickNav::Left, 0)  || Input::isKeyPressed(SDL_SCANCODE_LEFT);
+        bool right = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
+                     Input::isMenuStickPressed(Input::StickNav::Right, 0) || Input::isKeyPressed(SDL_SCANCODE_RIGHT);
+
+        if (up   && m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        if (down && m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+
+        // Left/Right adjusts the active row's value (difficulty or floor), clamped.
+        if (left || right) {
+            s32 delta = right ? 1 : -1;
+            if (m_menu.subSelection == 0)
+                m_menu.freePlayDifficulty = FreePlay::clampDifficulty(static_cast<s32>(m_menu.freePlayDifficulty) + delta);
+            else
+                m_menu.freePlayFloor = FreePlay::clampFloor(static_cast<s32>(m_menu.freePlayFloor) + delta);
+            AudioSystem::play(SfxId::MENU_HOVER);
+        }
+
+        // --- mouse: hover selects a row; left-click on a row's right/left half steps its value ---
+        {
+            s32 mx, my; Input::getMousePosition(mx, my);
+            f32 uiScale = static_cast<f32>(Window::getHeight()) / 720.0f;
+            f32 sw = static_cast<f32>(Window::getWidth());
+            f32 sh = static_cast<f32>(Window::getHeight());
+            f32 boxW = 360.0f * uiScale, boxH = 35.0f * uiScale;
+            f32 hudY = sh - static_cast<f32>(my);                 // HUD coords are y-up
+            f32 cxL = (sw - boxW) * 0.5f, cxR = cxL + boxW;       // box spans [cxL, cxR]; render matches
+            for (u32 row = 0; row < 2; row++) {
+                f32 y = sh * 0.50f - static_cast<f32>(row) * 46.0f * uiScale;   // MUST match the render layout
+                if (static_cast<f32>(mx) >= cxL && static_cast<f32>(mx) <= cxR && hudY >= y && hudY <= y + boxH) {
+                    if (m_menu.subSelection != row) { m_menu.subSelection = static_cast<u8>(row); AudioSystem::play(SfxId::MENU_HOVER); }
+                    if (Input::isMouseButtonPressed(MOUSE_LEFT)) {
+                        s32 delta = (static_cast<f32>(mx) > cxL + boxW * 0.5f) ? 1 : -1;   // right half = +, left = -
+                        if (row == 0)
+                            m_menu.freePlayDifficulty = FreePlay::clampDifficulty(static_cast<s32>(m_menu.freePlayDifficulty) + delta);
+                        else
+                            m_menu.freePlayFloor = FreePlay::clampFloor(static_cast<s32>(m_menu.freePlayFloor) + delta);
+                        AudioSystem::play(SfxId::MENU_HOVER);
+                    }
+                }
+            }
+        }
+
+        // --- confirm (Descend): apply the pick and start ---
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            m_difficulty         = m_menu.freePlayDifficulty;      // override the loaded save's difficulty
+            m_level.currentFloor = m_menu.freePlayFloor;           // startGame(CONTINUE) generates this floor
+            m_level.savedFloor   = m_menu.freePlayFloor;           // keep savedFloor == currentFloor for the session:
+                                                                   // the primary "Respawn" revives on the current floor
+                                                                   // (spawnPosition), so a death retries THIS floor;
+                                                                   // "Reload last save" intentionally returns to the
+                                                                   // cleared save; and the no-downgrade guard keeps the
+                                                                   // slot on disk pinned at Hell 57 regardless.
+            m_menu.subState      = 0;
+            m_menu.subSelection  = 0;
+            startGame(GameStart::CONTINUE);
+            return;
+        }
+
+        // --- back: return to the slot list ---
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState     = 6;          // save-slot list
+            m_menu.subSelection = 0;
+            m_menu.msg          = "continue";
         }
         return;
     }

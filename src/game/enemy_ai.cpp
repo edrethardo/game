@@ -622,6 +622,9 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             // Entombed boss (Malachar's false-death channel) stays put — skip the
             // role/FSM passes so he doesn't drift while invulnerable and channeling.
             if (e.bossPhase == BossPhase::ENTOMBING) { e.velocity = {0,0,0}; continue; }
+            // The Dungeon Engine is an immobile turret: updateEngineBoss already faced the player
+            // and ran its wave machine; skip the FSM/movement/attack passes so it never drifts.
+            if (e.isEngine) { e.velocity = {0,0,0}; continue; }
         }
 
         // Archetype role modifiers + far-enemy stagger early-exit.

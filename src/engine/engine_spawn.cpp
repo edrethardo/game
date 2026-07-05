@@ -424,6 +424,48 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 }
 
 // ---------------------------------------------------------------------------
+// initBossEntity — apply a BossDef's visuals/role/phase/on-hit fields to an already-spawned entity.
+// Factored out of spawnFloorBoss so the milestone bosses, the Engine superboss, and the Engine's
+// recompiled wave-adds all build from one code path. HP is set at EntitySystem::spawn time and the
+// leash is owned by the caller's arena, so neither is touched here. `def` MUST be an element of
+// m_bossDefs.defs — bossDefIdx is recovered from its address.
+// ---------------------------------------------------------------------------
+void Engine::initBossEntity(Entity& e, const BossDef& def, u32 effFloor)
+{
+    // boss DoT scales with floor/difficulty like its hit damage (matches the old inline path)
+    f32 dmgMult = GameConst::floorDamageMult(effFloor) * GameConst::difficultyDamageBump(m_difficulty);
+
+    e.isBoss     = true;
+    e.meshId     = findMeshByName(def.meshName);
+    e.materialId = MaterialSystem::getIdByName(def.matName);
+    e.enemyType  = EnemyType::BOSS;
+    e.nameTag    = def.name;
+    e.level      = static_cast<u16>(effFloor);
+    e.bossLimbConfig = def.limbConfig;
+    if (def.weaponName[0] != '\0') e.weaponMeshId = findMeshByName(def.weaponName);
+    e.speechText  = def.speech;
+    e.speechTimer = 6.0f;
+
+    // Recover the def's index in the table from its address (valid because def is a table element).
+    e.bossDefIdx    = static_cast<u8>(&def - m_bossDefs.defs);
+    e.enemyRole     = def.roles;
+    e.minionShield  = def.minionShield;
+    e.bossPhase     = def.secondPhase ? BossPhase::ARMED : BossPhase::NONE;
+    e.onHitEffect   = def.onHitEffect;
+    e.onHitDuration = def.onHitDuration;
+    e.onHitDps      = def.onHitDps * dmgMult;
+    e.baseMoveSpeed      = e.moveSpeed;
+    e.baseAttackCooldown = e.attackCooldown;
+
+    // Ranged bosses use projectile attacks — weapon mesh rides the projectile
+    if (def.atkRange > 5.0f) {
+        e.npcWeaponType = WeaponType::PROJECTILE;
+        e.npcProjectileSpeed = 18.0f;
+        e.npcProjectileRadius = 0.15f;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // spawnFloorBoss — place the milestone boss (if one exists for this floor).
 // Mutates dungeon.rooms[bossRoomIdx] to expand the arena, writes m_level.grid
 // cells to blood materials, and rebuilds the level mesh (which the exit-portal
@@ -591,36 +633,9 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
             if (bd && (bd->roles & EnemyRole::CHARGER)) boss->leashRadius = 0.0f;
             boss->isBoss = true; // canonical milestone-boss marker (gates the floor exit)
             if (bd) {
-                // JSON-loaded boss path
-                boss->meshId = findMeshByName(bd->meshName);
-                boss->materialId = MaterialSystem::getIdByName(bd->matName);
-                boss->enemyType = EnemyType::BOSS;
-                boss->nameTag = bd->name;
-                boss->level = static_cast<u16>(bossEffFloor);  // bossEffFloor computed above
-                boss->bossLimbConfig = bd->limbConfig;
-                if (bd->weaponName[0] != '\0') {
-                    boss->weaponMeshId = findMeshByName(bd->weaponName);
-                }
-                boss->speechText = bd->speech;
-                boss->speechTimer = 6.0f;
-
-                // New BossDef-specific fields
-                boss->bossDefIdx = bossIdx;
-                boss->enemyRole = bd->roles;
-                boss->minionShield = bd->minionShield;
-                boss->bossPhase = bd->secondPhase ? BossPhase::ARMED : BossPhase::NONE;
-                boss->onHitEffect = bd->onHitEffect;
-                boss->onHitDuration = bd->onHitDuration;
-                boss->onHitDps = bd->onHitDps * bossDmgMult;  // boss DoT scales with floor/difficulty too
-                boss->baseMoveSpeed      = boss->moveSpeed;
-                boss->baseAttackCooldown = boss->attackCooldown;
-
-                // Ranged bosses use projectile attacks — weapon mesh rides the projectile
-                if (bd->atkRange > 5.0f) {
-                    boss->npcWeaponType = WeaponType::PROJECTILE;
-                    boss->npcProjectileSpeed = 18.0f;
-                    boss->npcProjectileRadius = 0.15f;
-                }
+                // JSON-loaded boss path — all the def-driven fields live in initBossEntity now so
+                // spawnSourceBoss and the Engine's wave-summons build identical boss entities.
+                initBossEntity(*boss, *bd, bossEffFloor);
             } else {
                 // Hardcoded fallback path (kBosses)
                 boss->meshId = findMeshByName(bt->meshName);
@@ -658,6 +673,44 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
     }
 
     return bossRoomForExit;
+}
+
+// ---------------------------------------------------------------------------
+// spawnSourceBoss — spawn The Dungeon Engine superboss at the centre of The Source.
+// Off the numbered ladder (floor-99 BossDef), so it can't go through spawnFloorBoss (which keys
+// on currentFloor). Scales like every boss off the effective floor (50 + difficulty*50), so the
+// Engine is tougher the deeper into the curse you reached it. Marked isEngine for the bespoke
+// "immune while any summoned wave-boss lives" rule and its dedicated AI dispatch.
+// Returns the Engine's entity pool index (0xFFFF on failure).
+// ---------------------------------------------------------------------------
+u16 Engine::spawnSourceBoss(Vec3 center)
+{
+    u8 idx = findBossDefIdx(m_bossDefs, 99);
+    if (idx == 0xFF) { LOG_WARN("spawnSourceBoss: no floor-99 Engine boss def loaded"); return 0xFFFF; }
+    const BossDef& def = m_bossDefs.defs[idx];
+
+    u32 effFloor = 50u + static_cast<u32>(m_difficulty) * 50u;       // currentFloor is 50 in The Source
+    f32 hpMult   = GameConst::floorHealthMult(effFloor);
+    f32 dmgMult  = GameConst::floorDamageMult(effFloor) * GameConst::difficultyDamageBump(m_difficulty);
+
+    EntityHandle h = EntitySystem::spawn(m_entities,
+        Vec3{center.x, def.halfExtents.y, center.z}, def.halfExtents, false,
+        def.baseHp * hpMult, def.speed, def.detectionRange,
+        def.atkRange, def.atkCooldown, def.baseDmg * dmgMult);
+    Entity* e = handleGet(m_entities, h);
+    if (!e) return 0xFFFF;
+
+    initBossEntity(*e, def, effFloor);          // visuals/role/level/bossDefIdx (+ isBoss)
+    e->isEngine    = true;                       // bespoke immunity + AI dispatch marker
+    e->bossPhase   = BossPhase::ENG_OPEN;        // start the shielded-wave ladder (override NONE)
+    e->homePosition = Vec3{center.x, 0.0f, center.z};
+    e->leashRadius = 0.0f;                        // immobile turret — never leashes/chases
+    e->aiState     = AIState::CHASE;             // active immediately (no LOS warm-up needed)
+    Collision::ensureNotInWall(e->position, e->halfExtents, m_level.grid);
+
+    LOG_INFO("Spawned The Dungeon Engine at (%.1f,%.1f) — effFloor %u, %.0f HP",
+             center.x, center.z, effFloor, def.baseHp * hpMult);
+    return h.index;
 }
 
 // ---------------------------------------------------------------------------

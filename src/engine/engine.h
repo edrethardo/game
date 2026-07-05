@@ -100,8 +100,14 @@ private:
         u8   selection = 0;
         u8   subState = 0;       // 0=main, 1=singleplayer, 2=P1 class, 3=options, 4=couch lobby,
                                  // 5=P2 class, 6=P1 slot, 8=overwrite confirm, 10=host mode,
-                                 // 11=P2 New/Continue chooser, 12=P2 slot select
+                                 // 11=P2 New/Continue chooser, 12=P2 slot select,
+                                 // 14=free-play level select (post-clear)
         u8   subSelection = 0;
+        // Free-Play (post-clear level select, sub-state 14): a cleared character's chosen difficulty
+        // (0-2) and floor (1-50) for a non-destructive farming session. subSelection picks the active
+        // row (0 = difficulty, 1 = floor).
+        u8   freePlayDifficulty = 2;   // default Hell
+        u8   freePlayFloor      = 1;   // default floor 1
         f32  msgTimer = 0.0f;    // countdown for transient menu messages
         const char* msg = nullptr;
         // Couch co-op: each lane's New-vs-Continue intent, captured during slot selection so the
@@ -399,8 +405,10 @@ private:
     Mesh    m_cubeMesh;
     Mesh    m_quadMesh;   // flat quad for billboard sprites
 
-    // Mesh registry for entities (MeshDef struct defined in limb_system.h)
-    static constexpr u32 MAX_MESH_DEFS = 96;
+    // Mesh registry for entities (MeshDef struct defined in limb_system.h). The OBJ load table in
+    // engine_init_assets.cpp now fills 96 slots (the secret-superboss engine + shard pushed it to
+    // the old cap exactly); keep headroom so future meshes don't silently drop at the cap.
+    static constexpr u32 MAX_MESH_DEFS = 112;
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
     // Per-body-mesh region boxes (head/torso/feet/hands) for armor auto-fit, keyed by mesh id.
@@ -421,6 +429,13 @@ private:
         Vec3          floorDoorPos;
         bool          floorDoorActive = false;
         bool          floorHasBoss    = false; // this floor spawned a milestone boss (gates the exit lock)
+
+        // The Source — the secret superboss chamber. None of these are serialized (LevelState is
+        // rebuilt from seed on load), so they cost no save-format change. inSourceChamber routes the
+        // game out of the normal floor flow: no descent, no floor boss, Engine-death → victory.
+        bool          inSourceChamber    = false; // we are inside The Source fighting the Engine
+        bool          sourcePortalActive = false; // the second hidden portal is live in the floor-50 arena
+        Vec3          sourcePortalPos;            // its world position (valid while sourcePortalActive)
     };
     LevelState m_level;
 
@@ -600,6 +615,7 @@ private:
     // Cached IDs for render-loop lookups (avoid per-frame string searches)
     u8 m_meshIdArrow    = 0;
     u8 m_meshIdBolt     = 0;
+    u8 m_meshIdShard    = 0;  // source-shard world-item pickup (secret superboss key)
     u8 m_matIdBatWing   = 0;
 
     // Internal render-scale: the 3D scene renders to an offscreen FBO at this fraction of the window
@@ -699,6 +715,10 @@ private:
     // Update sub-functions (called from singleplayerUpdate())
     void updateInventoryInteraction(f32 dt);
     void updatePlayerPickup();
+    // Auto-pickup of a source shard (secret superboss key): set the session bit for its floor and
+    // fire its one-line lore whisper (idempotent — re-collecting an already-held floor does nothing).
+    // Called from updatePlayerPickup (host-local lanes) and serverNetPost (remote lanes).
+    void collectSourceShard(const ItemInstance& shard);
     // Returns true if the player descended (caller should return immediately)
     bool updateFloorDoor();
     // Run the floor-descent flow (bump currentFloor, grow all players, refresh cooldowns,
@@ -707,6 +727,19 @@ private:
     // (onDescendRequest). Returns true on success — caller skips remainder of tick.
     bool triggerFloorDescent();
     bool floorBossAlive() const; // true while a milestone boss on this floor is not yet dead
+
+    // --- The Source (secret superboss) flow. See ~/.claude/plans (the-dungeon-engine). ---
+    // Per-tick on the host: once the floor-50 boss is dead AND the full shard set is held, spawn the
+    // hidden second portal; if the player stands in it and presses pickup, enter The Source.
+    // Returns true if the player entered (caller skips the rest of the tick, like updateFloorDoor).
+    bool updateSourcePortal();
+    // Carve the fixed closed arena into the grid and rebuild the mesh; returns the arena centre.
+    Vec3 buildSourceChamber();
+    // Host: transition into The Source — build the chamber, move players in, spawn the Engine,
+    // broadcast the sentinel-floor seed so clients follow. Does NOT bump currentFloor or save.
+    void enterSourceChamber();
+    // Client: mirror of enterSourceChamber driven by the sentinel-floor SV_LEVEL_SEED.
+    void enterSourceChamberClient();
 
     // gameUpdate helpers — extracted from the god function for readability.
     // Each is called exactly once, in the same order they appear in gameUpdate.
@@ -817,6 +850,14 @@ private:
     // Returns the index of the boss room used for exit-portal placement,
     // or 0xFFFFFFFF if no boss was spawned this floor.
     u32  spawnFloorBoss(DungeonResult& dungeon);
+    // Initialise an already-spawned entity as a boss from its def + effective floor (visuals,
+    // role/phase/on-hit fields). Factored out of spawnFloorBoss so spawnSourceBoss and the Engine's
+    // wave-summons build identical boss entities. Does NOT touch HP (set at spawn) or leash (the
+    // caller owns its arena). `def` must be an element of m_bossDefs.defs (bossDefIdx is derived
+    // from its address).
+    void initBossEntity(Entity& e, const BossDef& def, u32 effFloor);
+    // Spawn the Dungeon Engine superboss at the centre of The Source. Returns its pool index.
+    u16  spawnSourceBoss(Vec3 center);
     void spawnFloorChests(const DungeonResult& dungeon);
     void spawnFloorDecorations(const DungeonResult& dungeon);
     void spawnFloorNpcs(const DungeonResult& dungeon);

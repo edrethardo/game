@@ -57,6 +57,11 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.minionShield = false;
     e.leashRadius  = 0.0f;
     e.provoked     = false;
+    // Same hazard for the secret-superboss fields: a recycled Engine slot would otherwise stay
+    // damage-immune (isEngine), and a recycled wave-add/guardian slot would keep a stale spawnerIdx
+    // and be mis-counted as some boss's living minion. Callers that summon set these AFTER spawn.
+    e.isEngine     = false;
+    e.spawnerIdx   = 0xFFFF;
     // Status effects must not carry over to a recycled slot: a freed enemy can still have a live
     // DoT/CC timer when its slot is reused (e.g. a 3s bleed outlasting the 1s death timer), which
     // would phantom-damage/freeze the fresh spawn and — for DoT — mis-credit its kill via
@@ -105,10 +110,16 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
             if (e.knockbackTimer <= 0.0f) { e.velocity.x = 0.0f; e.velocity.z = 0.0f; }
         }
 
+        // The Dungeon Engine superboss must be immune to DoT while shielded, exactly like direct
+        // hits (Combat::applyDamage). Without this, poison/burn would bleed the shielded Engine and
+        // could even tick it to 0 mid-wave — firing VICTORY while its adds are still alive. Timers
+        // still count down (the debuff just deals no damage during the shield window).
+        bool engineShielded = e.isEngine && Combat::engineShieldActive(pool, static_cast<u16>(i));
+
         // Tick status effects (poison/burn deal DoT, freeze checked at move time)
         if (e.poisonTimer > 0.0f) {
             e.poisonTimer -= dt;
-            e.health -= e.poisonDps * dt;
+            if (!engineShielded) e.health -= e.poisonDps * dt;
             // Route death through killEntity so DoT kills still drop loot / fire procs, and credit
             // the player who applied the poison (mana-on-kill / loot / kill-feed) via the global
             // attacker slot — the shared tick reset it to 0xFF, so set it just for this kill.
@@ -120,7 +131,7 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         }
         if (e.burnTimer > 0.0f) {
             e.burnTimer -= dt;
-            e.health -= e.burnDps * dt;
+            if (!engineShielded) e.health -= e.burnDps * dt;
             if (e.health <= 0.0f) {
                 Combat::setAttackingPlayer(e.burnSrcSlot);
                 Combat::killEntity(pool, {static_cast<u16>(i), e.generation});

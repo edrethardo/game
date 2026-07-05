@@ -24,6 +24,12 @@ namespace GameConst {
     // (floor + difficulty*50) is a separate, unchanged quantity.
     static constexpr u32 FINAL_FLOOR = kDemoBuild ? 20u : 50u;
 
+    // Sentinel "floor" for The Source — the secret superboss chamber that lives OFF the numbered
+    // 1-50 ladder. Used as the floor-99 BossDef key (assets/config/bosses.json) and as the
+    // SV_LEVEL_SEED floor value that tells co-op clients to build The Source instead of a normal
+    // floor (floor is a u8 on the wire, so this needs no packet-format change). See ~/.claude/plans.
+    static constexpr u8 SOURCE_SENTINEL_FLOOR = 99u;
+
     // Enemy base stats (before floor scaling) — all HP includes +20% buff
     static constexpr f32 SKELETON_HEALTH     = 55.0f;   // was 40, buffed (+20% + stronger)
     static constexpr f32 SKELETON_SPEED      = 2.8f;

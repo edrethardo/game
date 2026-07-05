@@ -924,6 +924,28 @@
       "id": 153,
       "name": "gloves_leather",
       "texture": "gloves_leather_tex_42.png"
+    },
+    {
+      "id": 154,
+      "name": "engine_core",
+      "texture": "stone_wall_42.png",
+      "tint": [
+        0.62,
+        0.18,
+        0.85,
+        1.0
+      ]
+    },
+    {
+      "id": 155,
+      "name": "shard_glow",
+      "texture": "stone_floor_42.png",
+      "tint": [
+        0.45,
+        0.95,
+        1.0,
+        1.0
+      ]
     }
   ]
 }

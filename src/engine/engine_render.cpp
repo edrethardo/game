@@ -59,6 +59,7 @@
 extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
+extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
 // ---------------------------------------------------------------------------
 // renderTransitionScreens — draws non-IN_GAME full-screen states
@@ -151,14 +152,21 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
 
         FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
 
-        // Final victory — shown after Hell floor 50 (full game), or after floor 20 in the demo.
-        // The demo reuses this same VICTORY state but swaps in a "thanks for playing" headline
-        // plus a one-line nudge toward the full game; the stats + prompt below are unchanged.
-        const char* title = GameConst::kDemoBuild ? "Thanks for playing the demo!"
-                                                  : "You conquered the Dungeon Engine.";
-        const char* subtitle = GameConst::kDemoBuild
-            ? "The full game: 50 floors, 9 classes, 3 difficulties, and the Grim Reaper."
-            : nullptr;
+        // Final victory — three variants: the secret superboss ending (Engine slain in The Source),
+        // the demo "thanks for playing" headline, or the ordinary Hell-floor-50 clear. The stats +
+        // prompt below are unchanged across all three.
+        const char* title;
+        const char* subtitle;
+        if (s_engineSlain) {
+            title    = "You unmade the Dungeon Engine.";
+            subtitle = "The curse is broken. The loop will run no more.";
+        } else if (GameConst::kDemoBuild) {
+            title    = "Thanks for playing the demo!";
+            subtitle = "The full game: 50 floors, 9 classes, 3 difficulties, and the Grim Reaper.";
+        } else {
+            title    = "You conquered the Dungeon Engine.";
+            subtitle = nullptr;
+        }
 
         f32 titleW = FontSystem::textWidth(title, 4);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - titleW) * 0.5f, sh * 0.65f,
@@ -239,9 +247,12 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
             f32 optY = sh * 0.35f;
 
             bool pad = Input::isGamepadConnected(0);
+            // Respawn is the preferred option — render it big (scale 2) and bright green so
+            // players read it as "do this". Baseline stays at optY so deathOptionHit (row 0,
+            // band [rowY-6, rowY+18]) still covers it without a hit-test change.
             HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "A" : "Spc", true);
-            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Respawn at entrance",
-                                 m_deathHover == 0 ? kHoverCol : Vec3{0.5f, 0.9f, 0.5f}, 1);
+            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Respawn",
+                                 m_deathHover == 0 ? kHoverCol : Vec3{0.4f, 1.0f, 0.55f}, 2);
 
             optY -= 25.0f;
             // Only show "Reload last save" in singleplayer

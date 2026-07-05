@@ -56,6 +56,8 @@
 extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
+extern u16  s_sourceShards;   // secret superboss key — session-only set of collected shards
+extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
 // ---------------------------------------------------------------------------
 // Death-screen mouse hit-tests. Layout MUST match the renderer in engine_render.cpp
@@ -531,6 +533,12 @@ void Engine::update(f32 dt) {
             m_gameState = GameState::MENU;
             AudioSystem::stopMusic();
             Input::setRelativeMouseMode(false);
+            // Belt-and-suspenders: clear the session-only secret-superboss state on return to menu
+            // (NEW_GAME / loadGame also reset it; this guards a lingering s_engineSlain ending flag).
+            s_sourceShards = 0;
+            s_engineSlain  = false;
+            m_level.inSourceChamber    = false;
+            m_level.sourcePortalActive = false;
         }
         break;
     }
@@ -1126,6 +1134,10 @@ void Engine::gameUpdate(f32 dt) {
     // updateFloorDoor returns true when the player descends — skip remainder of tick
     if (updateFloorDoor()) return;
 
+    // The Source (secret superboss): spawn the hidden portal once floor 50 is cleared with the
+    // full shard set, and enter when the player steps into it. Returns true on entry (world rebuilt).
+    if (updateSourcePortal()) return;
+
     // Toggle inventory (Tab key). Co-op decision (L3): opening an inventory does NOT pause
     // the game — the other player and all enemies keep running. This is intentional couch
     // co-op behavior (a shared session can't freeze for one player); inventory is simply not
@@ -1211,6 +1223,33 @@ void Engine::gameUpdate(f32 dt) {
 // ---------------------------------------------------------------------------
 
 // Auto-pickup health/energy globes (walk-over) and E-key item pickup.
+// The Engine's lore, leaked one fragment per source shard. Indexed by floor/5-1 (floor 5→[0] …
+// floor 50→[9]). Kept ≤47 chars to fit a ChatLine. The arc reveals that the player is themselves
+// an iteration of the curse — see ~/.claude/plans (the-dungeon-engine).
+static const char* kShardLore[10] = {
+    "Draft 001. It only knew how to cut.",            // 5  Butcher
+    "I taught the brood to multiply.",                // 10 Ygara
+    "Death? Merely a feature I shipped.",             // 15 Sethrak
+    "He begged not to be recompiled.",                // 20 Malachar
+    "Every cavern, every child: my syntax.",          // 25 Ixara
+    "I raise walls so you will break them.",          // 30 Korvath
+    "The blade was mine before his.",                 // 35 Azhar
+    "You have fought this one before.",               // 40 DiaBRO
+    "The Void is only my empty memory.",              // 45 Nyx
+    "The Reaper was my first draft. You are my last.",// 50 Reaper
+};
+
+// Record a collected source shard and whisper its lore line. Idempotent per floor.
+void Engine::collectSourceShard(const ItemInstance& shard) {
+    if (shard.itemLevel < 5 || shard.itemLevel > 50 || shard.itemLevel % 5 != 0) return;
+    u8 bit = static_cast<u8>(shard.itemLevel / 5 - 1);
+    if (s_sourceShards & (1u << bit)) return;  // already held this session
+    s_sourceShards |= (1u << bit);
+    AudioSystem::play(SfxId::ITEM_PICKUP);     // a soft chime; same cue as item pickup
+    addChatMessage("\?\?\?", kShardLore[bit], Vec3{0.62f, 0.30f, 0.95f}); // void-violet whisper
+    LOG_INFO("Source shard collected (floor %u); set = 0x%03X", shard.itemLevel, s_sourceShards);
+}
+
 // Globes are consumed immediately; regular items go to the backpack.
 void Engine::updatePlayerPickup() {
     // CLIENT: pickups are SERVER-AUTHORITATIVE (N5). The client never consumes globes or
@@ -1246,6 +1285,20 @@ void Engine::updatePlayerPickup() {
                 if (ss.energy > ss.maxEnergy)
                     ss.energy = ss.maxEnergy;
             }
+            wi.active = false;
+            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        }
+    }
+
+    // Auto-pickup source shards (secret superboss key) — walk-over, like globes. Host/SP only;
+    // remote lanes are handled server-side in serverNetPost (mirrors the globe split above).
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = m_worldItems.items[i];
+        if (!wi.active || !isSourceShard(wi.item)) continue;
+        Vec3 delta = m_localPlayer.position - wi.position;
+        f32 dist = sqrtf(delta.x * delta.x + delta.z * delta.z);
+        if (dist < 3.0f) {
+            collectSourceShard(wi.item);
             wi.active = false;
             if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
         }
@@ -1756,6 +1809,154 @@ bool Engine::triggerFloorDescent() {
                             static_cast<u8>(m_level.currentFloor), m_difficulty);
     }
     return true;
+}
+
+// ===========================================================================
+// The Source — the secret superboss chamber (The Dungeon Engine).
+// See ~/.claude/plans (the-dungeon-engine). Session-only key, no save change.
+// ===========================================================================
+
+// Carve a fixed, fully-enclosed void arena into the grid and rebuild the render mesh + nav fields.
+// Deterministic (fixed dimensions, no RNG) so host and client build identical geometry. Returns
+// the arena centre (where the Engine spawns and the nav flow-field converges).
+Vec3 Engine::buildSourceChamber() {
+    constexpr u32 W = 28, D = 28;          // grid cells → ~26x26 m open interior, 1-cell solid border
+    constexpr f32 CS = 1.0f;
+    LevelGridSystem::init(m_level.grid, W, D, CS);  // calloc → all cells empty; we fill every one below
+
+    u8 vFloor = MaterialSystem::getIdByName("void_floor");
+    u8 vWall  = MaterialSystem::getIdByName("void_wall");
+    u8 vCeil  = MaterialSystem::getIdByName("void_ceiling");
+    for (u32 z = 0; z < D; z++) {
+        for (u32 x = 0; x < W; x++) {
+            GridCell& c = LevelGridSystem::getCell(m_level.grid, x, z);
+            bool border = (x == 0 || z == 0 || x == W - 1 || z == D - 1);
+            if (border) {
+                c.flags = CELL_SOLID;          // closed walls — no corridor leaks out of The Source
+                c.wallMaterialId = vWall;
+            } else {
+                c.flags = CELL_FLOOR | CELL_CEILING;
+                c.floorHeight   = 0;
+                c.ceilingHeight = 20;          // tall (5 m) — clears the 3.2 m Engine + grand feel
+                c.floorMaterialId = vFloor;
+                c.wallMaterialId  = vWall;
+                c.ceilMaterialId  = vCeil;
+            }
+        }
+    }
+    m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, m_level.sections, MAX_LEVEL_SECTIONS);
+    LevelGridSystem::buildClearanceField(m_level.grid);
+    // Re-init the minimap to the new grid size — it caches grid dimensions + a visited mask, so
+    // without this it keeps the floor-50 48x48 bounds and reads OOB against the 28x28 grid (an
+    // assert-crash in Debug). Mirrors the normal floor path in startGame.
+    Minimap::init(m_level.grid.width, m_level.grid.depth);
+    Vec3 center = {(W * 0.5f) * CS, 0.0f, (D * 0.5f) * CS};
+    LevelGridSystem::buildFlowField(m_level.grid, center);   // wave-adds path toward the Engine
+    return center;
+}
+
+// Host: transition into The Source. Wipe the floor-50 world, build the arena, move players in,
+// spawn the Engine, and tell clients to follow via the sentinel-floor seed. Does NOT bump
+// currentFloor or save (nothing about The Source touches disk — quitting reloads at floor 50).
+void Engine::enterSourceChamber() {
+    EntitySystem::init(m_entities);          // clear the dead Reaper + any leftover floor-50 enemies
+    ProjectileSystem::init(m_projectiles);
+    WorldItemSystem::init(m_worldItems);
+    Vec3 center = buildSourceChamber();
+
+    m_level.inSourceChamber    = true;
+    m_level.sourcePortalActive = false;      // consumed
+    m_level.floorDoorActive    = false;      // no ordinary exit in The Source (also disarms updateFloorDoor)
+    m_level.floorHasBoss       = false;      // Engine death routes to victory, not the exit lock
+
+    // Players enter from the south edge facing the Engine (centre, to the north). The lane that
+    // triggered entry is the live m_localPlayer alias (swapOut writes it back to its array slot at
+    // the end of this frame's per-player pass); other couch lanes are positioned in their slots.
+    Vec3 base = {center.x, 0.0f, center.z + 10.0f};
+    const f32 faceEngine = 3.14159f;         // yaw to face -Z toward the centre
+    m_localPlayer.position    = base;
+    m_localPlayer.yaw         = faceEngine;
+    m_localPlayer.pitch       = 0.0f;
+    m_localPlayer.invulnTimer = 2.0f;
+    for (u8 lane = 0; lane < m_splitPlayerCount && lane < MAX_LOCAL_PLAYERS; lane++) {
+        if (lane == m_localPlayerIndex) continue;
+        m_localPlayers[lane].position    = base + Vec3{(f32)lane * 1.6f, 0.0f, 0.0f};
+        m_localPlayers[lane].yaw         = faceEngine;
+        m_localPlayers[lane].pitch       = 0.0f;
+        m_localPlayers[lane].invulnTimer = 2.0f;
+    }
+    snapCameraToPlayer();                     // no interp smear from the floor-50 camera
+
+    // Networked players (remote slots) enter too.
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        if (!m_players[pi].active) continue;
+        m_players[pi].position    = base + Vec3{(f32)pi * 1.2f - 0.6f, 0.0f, 0.0f};
+        m_players[pi].invulnTimer = 2.0f;
+        m_players[pi].isDead      = false;
+    }
+
+    spawnSourceBoss(center);
+    AudioSystem::play(SfxId::BOSS_ROAR);
+    addChatMessage("\?\?\?", "So. You assembled me. Then meet the others.", Vec3{0.62f, 0.30f, 0.95f});
+
+    // Tell clients to build the same chamber (sentinel floor 99 — no packet-format change). They
+    // do NOT bump currentFloor; the Engine + waves replicate over the normal snapshot path.
+    if (m_netRole == NetRole::SERVER) {
+        Net::broadcastLevelSeed(GameConst::SOURCE_SENTINEL_FLOOR, m_difficulty, m_level.levelSeed);
+        Server::updateLevel(m_level.levelSeed, GameConst::SOURCE_SENTINEL_FLOOR, m_difficulty);
+    }
+    LOG_INFO("Entered The Source (host).");
+}
+
+// Client: mirror of enterSourceChamber driven by the sentinel-floor SV_LEVEL_SEED (see onLevelSeed).
+// Builds the identical deterministic geometry and moves the local player in; the Engine + its
+// summoned waves are server-authoritative and arrive via snapshots — the client spawns nothing.
+void Engine::enterSourceChamberClient() {
+    Vec3 center = buildSourceChamber();
+    m_level.inSourceChamber    = true;
+    m_level.floorDoorActive    = false;
+    m_level.sourcePortalActive = false;
+
+    Vec3 base = {center.x, 0.0f, center.z + 10.0f};
+    m_localPlayer.position    = base;
+    m_localPlayer.yaw         = 3.14159f;
+    m_localPlayer.pitch       = 0.0f;
+    m_localPlayer.invulnTimer = 2.0f;
+    m_localPlayers[0]         = m_localPlayer;   // client is single-lane (m_localPlayerIndex == 0)
+    snapCameraToPlayer();
+    addChatMessage("\?\?\?", "So. You assembled me. Then meet the others.", Vec3{0.62f, 0.30f, 0.95f});
+    LOG_INFO("Entered The Source (client).");
+}
+
+// Per-tick (host/SP only): once floor 50 is cleared with the full shard set, spawn the hidden
+// second portal beside the exit; then enter The Source when a player stands in it and presses
+// pickup. Returns true if the player entered (caller returns immediately — the world is rebuilt).
+bool Engine::updateSourcePortal() {
+    if (GameConst::kDemoBuild) return false;          // secret is absent from the demo
+    if (m_netRole == NetRole::CLIENT) return false;   // host-authoritative; clients follow the broadcast
+    if (m_level.inSourceChamber) return false;        // already inside
+
+    if (!m_level.sourcePortalActive) {
+        // Open the portal once: on floor 50, boss dead, and every shard collected this session.
+        if (m_level.currentFloor == 50 && s_sourceShards == 0x03FFu && !floorBossAlive()) {
+            // A few metres off the (now-open) exit portal — far enough that their 2 m pickup zones
+            // don't overlap, so the player chooses between descending and entering The Source. The
+            // floor-50 boss arena is a 4x major arena, so this stays well inside open floor.
+            m_level.sourcePortalPos    = m_level.floorDoorPos + Vec3{6.0f, 0.0f, 0.0f};
+            m_level.sourcePortalActive = true;
+            AudioSystem::play(SfxId::BOSS_ROAR);
+            addChatMessage("\?\?\?", "The Engine has noticed you.", Vec3{0.62f, 0.30f, 0.95f});
+            LOG_INFO("The Source portal opened on floor 50.");
+        }
+        return false;
+    }
+
+    Vec3 toPortal = m_level.sourcePortalPos - m_localPlayer.position;
+    if (lengthSq(toPortal) < 4.0f && Input::isActionPressed(GameAction::PICKUP)) {
+        enterSourceChamber();
+        return true;
+    }
+    return false;
 }
 
 void Engine::spawnDynamicLight(Vec3 pos, Vec3 color, f32 duration) {

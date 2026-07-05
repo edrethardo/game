@@ -58,6 +58,9 @@ def build_meshes():
         ["--type", "diabro",      "--height", "2.6", "--out", os.path.join(mesh_dir, "diabro.obj")],
         ["--type", "nyx",         "--height", "2.2", "--out", os.path.join(mesh_dir, "nyx.obj")],
         ["--type", "reaper",      "--height", "2.6", "--out", os.path.join(mesh_dir, "reaper.obj")],
+        # Secret superboss: The Dungeon Engine + its source-shard pickup key.
+        ["--type", "engine",      "--height", "3.2", "--out", os.path.join(mesh_dir, "engine.obj")],
+        ["--type", "shard",       "--radius", "0.32", "--out", os.path.join(mesh_dir, "shard.obj")],
         # Limb parts
         ["--type", "skeleton_arm",   "--out", os.path.join(mesh_dir, "skeleton_arm.obj")],
         ["--type", "skeleton_leg",   "--out", os.path.join(mesh_dir, "skeleton_leg.obj")],
