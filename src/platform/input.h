@@ -74,6 +74,11 @@ namespace Input {
     void setStickInvertY(bool v);
     bool getGyroInvertY();
     void setGyroInvertY(bool v);
+    // Mouse look sensitivity — a unitless MULTIPLIER (1.0 = default) on the base radians/pixel
+    // used in player.cpp mouse-look. Adjustable from the Keyboard & Mouse options submenu.
+    f32  getMouseSensitivity();
+    void setMouseSensitivity(f32 v);
+    static constexpr f32 MOUSE_SENS_DEFAULT = 1.0f;  // shared reset value (menu + save)
 
     f32  getAxis(s32 gamepadIndex, s32 axis);
     bool isButtonDown(s32 gamepadIndex, s32 button);
@@ -138,6 +143,10 @@ namespace Input {
     void setKeyBinding(GameAction action, s32 scancode);
     void setButtonBinding(GameAction action, s32 button, s32 modifier = -1);
     void resetBindingsToDefaults();
+    // Per-category resets (rebindable actions 0..INVENTORY only) for the options submenus:
+    // keyboard-only restores just .key/.mouseButton; controller-only just .button/.modifier/.axis.
+    void resetKeyboardBindingsToDefaults();
+    void resetControllerBindingsToDefaults();
     void saveBindings(const char* path);
     void loadBindings(const char* path);
 

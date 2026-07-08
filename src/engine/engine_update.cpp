@@ -1844,7 +1844,11 @@ Vec3 Engine::buildSourceChamber() {
             }
         }
     }
-    m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, m_level.sections, MAX_LEVEL_SECTIONS);
+    // Per-floor mesh seed (levelSeed + floor) — matches startGame so a mid-run rebuild keeps
+    // the same baked tile-shade + prop layout for this floor.
+    m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
+                             m_level.levelSeed + m_level.currentFloor * 7919u,
+                             m_level.sections, MAX_LEVEL_SECTIONS);
     LevelGridSystem::buildClearanceField(m_level.grid);
     // Re-init the minimap to the new grid size — it caches grid dimensions + a visited mask, so
     // without this it keeps the floor-50 48x48 bounds and reads OOB against the 28x28 grid (an

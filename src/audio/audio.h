@@ -56,4 +56,15 @@ namespace AudioSystem {
     void setMasterVolume(f32 vol);
     void setSfxVolume(f32 vol);
     void setMusicVolume(f32 vol);
+
+    // Current volume levels (0.0-1.0) — read back by the options-menu sliders.
+    f32 getMasterVolume();
+    f32 getSfxVolume();
+    f32 getMusicVolume();
+
+    // Persist the three volume levels to a small plain-text file (mirrors controls.json).
+    // saveSettings writes the current levels; loadSettings parses + applies them via the setters
+    // and is a no-op on a missing/corrupt file (defaults are kept).
+    void saveSettings(const char* path);
+    void loadSettings(const char* path);
 }

@@ -3,6 +3,7 @@
 // play() fires on the first free mixing channel. playAt() adds distance attenuation.
 
 #include "audio/audio.h"
+#include "audio/audio_settings.h"
 #include "core/log.h"
 
 #include <SDL_mixer.h>
@@ -225,5 +226,35 @@ void AudioSystem::setMusicVolume(f32 vol) {
     s_musicVol = vol;
     if (s_initialized && s_music) {
         Mix_VolumeMusic(static_cast<int>(s_musicVol * s_masterVol * MIX_MAX_VOLUME));
+    }
+}
+
+f32 AudioSystem::getMasterVolume() { return s_masterVol; }
+f32 AudioSystem::getSfxVolume()    { return s_sfxVol; }
+f32 AudioSystem::getMusicVolume()  { return s_musicVol; }
+
+// Persist the three volume levels as one float per line (master, sfx, music). Plain text to mirror
+// controls.json (which, despite its extension, is also plain text). Silently no-ops on I/O failure.
+void AudioSystem::saveSettings(const char* path) {
+    FILE* f = std::fopen(path, "w");
+    if (!f) { LOG_WARN("Audio: could not open %s for writing", path); return; }
+    std::fprintf(f, "%.4f\n%.4f\n%.4f\n", s_masterVol, s_sfxVol, s_musicVol);
+    std::fclose(f);
+    LOG_INFO("Audio: saved settings to %s", path);
+}
+
+// Load the three volume levels and apply them through the setters. A missing file (first launch)
+// or a short/garbled read leaves the corresponding level at its current default — never fails.
+void AudioSystem::loadSettings(const char* path) {
+    FILE* f = std::fopen(path, "r");
+    if (!f) return;  // no saved settings yet — keep defaults
+    f32 master = s_masterVol, sfx = s_sfxVol, music = s_musicVol;
+    int got = std::fscanf(f, "%f %f %f", &master, &sfx, &music);
+    std::fclose(f);
+    if (got >= 1) {
+        setMasterVolume(AudioSettings::clampVol(master));
+        setSfxVolume(AudioSettings::clampVol(sfx));
+        setMusicVolume(AudioSettings::clampVol(music));
+        LOG_INFO("Audio: loaded settings from %s", path);
     }
 }

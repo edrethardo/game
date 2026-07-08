@@ -94,8 +94,12 @@ void PlayerController::update(Player& player, f32 dt) {
     // loop — spinning P2's camera whenever P1 moves the mouse.
     s32 rawMx = 0, rawMy = 0;
     if (Input::getActivePlayer() == 0) Input::getMouseDelta(rawMx, rawMy);
-    f32 mx = static_cast<f32>(rawMx);
-    f32 my = static_cast<f32>(rawMy);
+    // User mouse-sensitivity multiplier — applied to the MOUSE delta only (stick/gyro added
+    // below carry their own sensitivity sliders). captureLocalInput scales identically so the
+    // netplay prediction (yawQ/pitchQ) matches this look update exactly.
+    f32 mouseSens = Input::getMouseSensitivity();
+    f32 mx = static_cast<f32>(rawMx) * mouseSens;
+    f32 my = static_cast<f32>(rawMy) * mouseSens;
 
     // Add right stick look (controller)
     f32 rsX = Input::getStickX(true);
@@ -372,8 +376,11 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
     // the frame and produce the identical look update).
     s32 rawMx, rawMy;
     Input::getMouseDelta(rawMx, rawMy);
-    f32 mx = static_cast<f32>(rawMx);
-    f32 my = static_cast<f32>(rawMy);
+    // Same mouse-sensitivity multiplier as PlayerController::update (mouse delta only) so the
+    // predicted yaw/pitch packed below matches what the look update will actually produce.
+    f32 mouseSens = Input::getMouseSensitivity();
+    f32 mx = static_cast<f32>(rawMx) * mouseSens;
+    f32 my = static_cast<f32>(rawMy) * mouseSens;
     f32 rsX = Input::getStickX(true);
     f32 rsY = Input::getStickY(true);
     if (rsX != 0.0f || rsY != 0.0f) {

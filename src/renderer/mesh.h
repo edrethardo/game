@@ -7,6 +7,9 @@ struct Vertex {
     Vec3 position;
     Vec3 normal;
     Vec2 uv;
+    Vec3 color = {1.0f, 1.0f, 1.0f};  // per-vertex tint (attr loc 3); white = neutral. Used by the
+                                      // level mesh to bake subtle per-tile shade variance; all other
+                                      // producers leave it white (default), so they're unaffected.
 };
 
 // Describes a contiguous range of indices that share one material.

@@ -60,7 +60,8 @@ static AABB aabbInBand(const std::vector<Vec3>& pts, f32 ylo, f32 yhi,
     return box;
 }
 
-Mesh ObjLoader::load(const char* path, AABB* outBounds, BodyRegions* outRegions) {
+Mesh ObjLoader::load(const char* path, AABB* outBounds, BodyRegions* outRegions,
+                     std::vector<Vertex>* outVerts, std::vector<u32>* outIndices) {
     FILE* f = std::fopen(path, "r");
     if (!f) {
         LOG_WARN("ObjLoader: could not open %s", path);
@@ -223,6 +224,10 @@ Mesh ObjLoader::load(const char* path, AABB* outBounds, BodyRegions* outRegions)
         r.valid = true;
         *outRegions = r;
     }
+
+    // Hand back the parsed CPU geometry if requested (props bake these into the level mesh).
+    if (outVerts)   *outVerts   = vertices;
+    if (outIndices) *outIndices = indices;
 
     // Upload geometry; copy material group metadata into the returned mesh.
     Mesh mesh = MeshSystem::create(vertices.data(), static_cast<u32>(vertices.size()),

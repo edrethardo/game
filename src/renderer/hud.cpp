@@ -55,6 +55,15 @@ void pushQuad(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
     pushLine(x1, y0, x1, y1, color);
 }
 
+// Solid rectangle fill in HUD pixel space. Fills every integer row (1px step in REAL pixels) so it
+// stays gapless at any uiScale — the old striped bar fill (2px*uiScale step, unscaled line width)
+// left see-through gaps at high resolution.
+static void pushSolidRect(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
+    if (x1 <= x0 || y1 <= y0) return;
+    for (f32 y = y0; y < y1; y += 1.0f)
+        pushLine(x0, y, x1, y, color);
+}
+
 void flushHUD() {
     if (s_vertCount == 0 || !s_vao) return;
 
@@ -169,17 +178,17 @@ void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
 
-    // Background outline
-    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.3f, 0.3f, 0.3f});
+    // Solid dark track (whole interior) so the bar reads opaque against the world.
+    f32 border = 1.0f * uiScale;
+    pushSolidRect(x0, y0, x0 + barW, y0 + barH, {0.10f, 0.10f, 0.12f});
 
-    // Filled portion (draw as horizontal lines to simulate fill)
-    Vec3 barColor = (frac > 0.3f) ? Vec3{0.2f, 0.8f, 0.2f} : Vec3{0.9f, 0.2f, 0.2f};
-    f32 fillW = barW * frac;
-    f32 fillPad = 2.0f * uiScale;
-    for (f32 y = y0 + fillPad; y < y0 + barH - fillPad; y += 2.0f * uiScale) {
-        pushLine(x0 + fillPad, y, x0 + fillPad + fillW - fillPad * 2.0f, y, barColor);
-    }
+    // Solid bright fill for the current-health portion — brightened for at-a-glance readability.
+    Vec3 barColor = (frac > 0.3f) ? Vec3{0.30f, 0.90f, 0.30f} : Vec3{1.00f, 0.28f, 0.28f};
+    f32 fillW = (barW - 2.0f * border) * frac;
+    pushSolidRect(x0 + border, y0 + border, x0 + border + fillW, y0 + barH - border, barColor);
 
+    // Bright border on top.
+    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.55f, 0.55f, 0.60f});
     flushHUD();
 }
 
@@ -411,16 +420,13 @@ void HUD::drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy) {
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
 
-    // Background outline
-    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.3f, 0.3f, 0.3f});
-
-    // Filled portion in blue
-    Vec3 barColor = {0.2f, 0.4f, 1.0f};
-    f32 fillW = barW * frac;
-    f32 fillPad = 2.0f * uiScale;
-    for (f32 y = y0 + fillPad; y < y0 + barH - fillPad; y += 2.0f * uiScale) {
-        pushLine(x0 + fillPad, y, x0 + fillPad + fillW - fillPad * 2.0f, y, barColor);
-    }
+    // Solid dark track + solid bright blue fill + bright border (mirrors drawHealthBar).
+    f32 border = 1.0f * uiScale;
+    pushSolidRect(x0, y0, x0 + barW, y0 + barH, {0.10f, 0.10f, 0.14f});
+    Vec3 barColor = {0.30f, 0.55f, 1.00f};   // brightened blue (was 0.2,0.4,1.0)
+    f32 fillW = (barW - 2.0f * border) * frac;
+    pushSolidRect(x0 + border, y0 + border, x0 + border + fillW, y0 + barH - border, barColor);
+    pushQuad(x0, y0, x0 + barW, y0 + barH, {0.55f, 0.55f, 0.60f});
 
     flushHUD();
 }

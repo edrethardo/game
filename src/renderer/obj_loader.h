@@ -3,6 +3,7 @@
 #include "core/math.h"
 #include "renderer/mesh.h"
 #include "renderer/frustum.h"
+#include <vector>
 
 // Per-region local-space bounding boxes of an upright humanoid body mesh, used to AUTO-FIT
 // equipped armor (helmet/chest/boots/gloves) onto bodies of differing proportions without
@@ -31,5 +32,10 @@ namespace ObjLoader {
     // Returns mesh with vao=0 on failure.
     // If outRegions is non-null, fills it with humanoid body-part AABBs (see BodyRegions);
     // only meaningful for upright player/humanoid body meshes.
-    Mesh load(const char* path, AABB* outBounds = nullptr, BodyRegions* outRegions = nullptr);
+    // If outVerts/outIndices are non-null, they receive a copy of the parsed CPU vertex/index
+    // data (the GPU Mesh keeps none) — used to bake small decoration props straight into the
+    // level mesh (see LevelMeshSystem::setPropMeshes / level_mesh.cpp) instead of drawing them
+    // per-instance, so scattered props cost no extra draw calls.
+    Mesh load(const char* path, AABB* outBounds = nullptr, BodyRegions* outRegions = nullptr,
+              std::vector<Vertex>* outVerts = nullptr, std::vector<u32>* outIndices = nullptr);
 }

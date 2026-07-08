@@ -3,6 +3,7 @@ in vec3 vWorldNormal;
 in vec3 vWorldPos;
 in vec2 vUV;
 in float vViewDepth;
+in vec3 vColor;
 
 uniform sampler2D u_texture0;
 uniform vec3 u_lightDir;
@@ -40,7 +41,7 @@ void main() {
     vec4 texColor = texture(u_texture0, vUV);
     float alpha = texColor.a * u_color.a;
     if (alpha < 0.05) discard;  // skip fully transparent fragments (webs, etc.)
-    vec3 lit = texColor.rgb * lighting * u_color.rgb;
+    vec3 lit = texColor.rgb * lighting * u_color.rgb * vColor;  // vColor = baked per-tile shade (white elsewhere)
     float fog = clamp((vViewDepth - u_fogParams.x) / max(u_fogParams.y - u_fogParams.x, 0.001), 0.0, 1.0);
     FragColor = vec4(mix(lit, u_fogColor, fog), alpha);
 }

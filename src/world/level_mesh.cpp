@@ -1,4 +1,5 @@
 #include "world/level_mesh.h"
+#include "world/tile_noise.h"
 #include "renderer/renderer.h"
 #include "renderer/material.h"
 #include "core/log.h"
@@ -6,6 +7,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 // -------------------------------------------------------------------------
 // Scratch buffer per material bucket
@@ -74,9 +76,73 @@ static void pushQuad(MaterialBucket& bkt,
 }
 
 // -------------------------------------------------------------------------
+// Decoration props — registered CPU geometry baked into floor sections
+// -------------------------------------------------------------------------
+static constexpr u32 MAX_PROP_MESHES = 8;
+
+// One registered prop's CPU geometry (owned copy). Scattered onto floors and appended into the
+// section's material bucket in buildSection, so props add no per-frame draw calls of their own.
+struct PropMeshData {
+    std::vector<Vertex> verts;
+    std::vector<u32>    indices;
+    u8   materialId = 0;
+    f32  radius     = 0.3f;
+};
+static PropMeshData s_propMeshes[MAX_PROP_MESHES];
+static u32          s_propMeshCount = 0;
+
+// Fraction of eligible (open, wall-clear) floor cells that get a prop. Kept low so decorations
+// read as occasional accents, not clutter. Deterministic per cell via the floor seed.
+static constexpr f32 PROP_DENSITY = 0.10f;
+
+void LevelMeshSystem::addPropMesh(const Vertex* verts, u32 vertCount,
+                                  const u32* indices, u32 indexCount,
+                                  u8 materialId, f32 radius)
+{
+    if (s_propMeshCount >= MAX_PROP_MESHES || vertCount == 0 || indexCount == 0) return;
+    PropMeshData& p = s_propMeshes[s_propMeshCount++];
+    p.verts.assign(verts, verts + vertCount);
+    p.indices.assign(indices, indices + indexCount);
+    p.materialId = materialId;
+    p.radius     = radius;
+}
+
+void LevelMeshSystem::clearPropMeshes() {
+    for (u32 i = 0; i < MAX_PROP_MESHES; i++) {
+        s_propMeshes[i].verts.clear();
+        s_propMeshes[i].indices.clear();
+    }
+    s_propMeshCount = 0;
+}
+
+// Transform a prop's local geometry by `xf` (translate * rotateY only — no scale, so the normal
+// transform is just the rotation) and append it into `bkt`, remapping indices to the bucket's
+// current vertex base. Props keep white vertex color (they aren't tile-shaded). Silently skips
+// if the bucket lacks scratch room, so a crowded section just drops the last few props.
+static void appendProp(MaterialBucket& bkt, const PropMeshData& prop, const Mat4& xf) {
+    const u32 vc = (u32)prop.verts.size();
+    const u32 ic = (u32)prop.indices.size();
+    if (bkt.vertCount + vc > SCRATCH_VERTS || bkt.indexCount + ic > SCRATCH_INDICES) return;
+
+    const u32 base = bkt.vertCount;
+    for (u32 i = 0; i < vc; i++) {
+        Vertex v = prop.verts[i];
+        Vec4 wp = xf * vec4(v.position, 1.0f);   // point: w=1 applies translation
+        Vec4 wn = xf * vec4(v.normal,   0.0f);   // direction: w=0 drops translation
+        v.position = {wp.x, wp.y, wp.z};
+        v.normal   = normalize(Vec3{wn.x, wn.y, wn.z});
+        v.color    = {1.0f, 1.0f, 1.0f};
+        bkt.verts[base + i] = v;
+    }
+    bkt.vertCount += vc;
+    for (u32 i = 0; i < ic; i++)
+        bkt.indices[bkt.indexCount++] = base + prop.indices[i];
+}
+
+// -------------------------------------------------------------------------
 // Per-section mesh build
 // -------------------------------------------------------------------------
-static void buildSection(const LevelGrid& grid,
+static void buildSection(const LevelGrid& grid, u32 seed,
                          u32 startX, u32 startZ,
                          u32 endX,   u32 endZ,
                          LevelSection& out)
@@ -99,6 +165,12 @@ static void buildSection(const LevelGrid& grid,
         for (u32 x = startX; x < endX; x++) {
             f32 wx = x * cs;
             f32 wz = z * cs;
+
+            // Subtle baked per-tile shade (soft ±8% blobs, ~3-cell frequency) — breaks up the
+            // otherwise-identical tiling. Baked into vertex color, so it's free per-frame and
+            // deterministic per floor (seed = levelSeed → host/clients match).
+            f32 shade = 0.92f + TileNoise::value(wx * 0.35f, wz * 0.35f, seed) * 0.16f;
+            Vec3 tileTint{shade, shade, shade};
 
             const GridCell& cell = LevelGridSystem::getCell(grid, x, z);
             bool solid = (cell.flags & CELL_SOLID) != 0;
@@ -161,6 +233,7 @@ static void buildSection(const LevelGrid& grid,
                     Vertex v1{p1, n, {uSpan, 0.0f  }};
                     Vertex v2{p2, n, {uSpan, vSpan }};
                     Vertex v3{p3, n, {0.0f,  vSpan }};
+                    v0.color = v1.color = v2.color = v3.color = tileTint;
 
                     pushQuad(*bkt, v0, v1, v2, v3);
                     expand(p0.x, p0.y, p0.z); expand(p1.x, p1.y, p1.z);
@@ -182,8 +255,41 @@ static void buildSection(const LevelGrid& grid,
                     Vertex v1{p1, n, {cs,   cs  }};
                     Vertex v2{p2, n, {cs,   0.0f}};
                     Vertex v3{p3, n, {0.0f, 0.0f}};
+                    v0.color = v1.color = v2.color = v3.color = tileTint;
                     pushQuad(*bkt, v0, v1, v2, v3);
                     expand(wx, floorH, wz); expand(wx+cs, floorH, wz+cs);
+
+                    // Scatter a decoration prop onto some open floor cells and bake it in.
+                    // Deterministic in (cell, floor seed) so host + clients build identical
+                    // floors with zero netcode, and it costs no extra draw calls.
+                    if (s_propMeshCount > 0 &&
+                        TileNoise::hash2((s32)x, (s32)z, seed ^ 0x9E3779B9u) < PROP_DENSITY) {
+                        // Only place where all 4 orthogonal neighbours are open, so props sit in
+                        // room/corridor interiors and never clip a wall base or a doorway.
+                        bool clear = true;
+                        static constexpr s32 kOff[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+                        for (auto& o : kOff) {
+                            u32 nnx = (u32)((s32)x + o[0]);
+                            u32 nnz = (u32)((s32)z + o[1]);
+                            if (!LevelGridSystem::isInBounds(grid, nnx, nnz) ||
+                                 LevelGridSystem::isSolid(grid, nnx, nnz)) { clear = false; break; }
+                        }
+                        if (clear) {
+                            // Independent hashes (distinct seed salts) → uncorrelated pick /
+                            // jitter / rotation, so props look randomly placed, not gridded.
+                            u32 pick = (u32)(TileNoise::hash2((s32)x, (s32)z, seed ^ 0x85EBCA6Bu)
+                                             * (f32)s_propMeshCount);
+                            if (pick >= s_propMeshCount) pick = s_propMeshCount - 1;
+                            f32 jx  = (TileNoise::hash2((s32)x, (s32)z, seed ^ 0xC2B2AE35u) - 0.5f) * cs * 0.4f;
+                            f32 jz  = (TileNoise::hash2((s32)x, (s32)z, seed ^ 0x27D4EB2Fu) - 0.5f) * cs * 0.4f;
+                            f32 rot =  TileNoise::hash2((s32)x, (s32)z, seed ^ 0x165667B1u) * 6.2831853f;
+                            Vec3 pos{wx + cs * 0.5f + jx, floorH, wz + cs * 0.5f + jz};
+                            Mat4 xf = Mat4::translate(pos) * Mat4::rotateY(rot);
+                            const PropMeshData& prop = s_propMeshes[pick];
+                            appendProp(*getBucket(prop.materialId), prop, xf);
+                            expand(pos.x, floorH + 0.6f, pos.z);  // cover prop height in bounds
+                        }
+                    }
                 }
 
                 // Ceiling quad
@@ -198,6 +304,7 @@ static void buildSection(const LevelGrid& grid,
                     Vertex v1{p1, n, {cs,   0.0f}};
                     Vertex v2{p2, n, {cs,   cs  }};
                     Vertex v3{p3, n, {0.0f, cs  }};
+                    v0.color = v1.color = v2.color = v3.color = tileTint;
                     pushQuad(*bkt, v0, v1, v2, v3);
                     expand(wx, ceilH, wz); expand(wx+cs, ceilH, wz+cs);
                 }
@@ -232,7 +339,7 @@ static void buildSection(const LevelGrid& grid,
 // -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
-u32 LevelMeshSystem::buildAll(const LevelGrid& grid,
+u32 LevelMeshSystem::buildAll(const LevelGrid& grid, u32 seed,
                                LevelSection* outSections, u32 maxSects)
 {
     // Allocate scratch buckets on heap (3.6MB — too large for BSS on Switch)
@@ -250,7 +357,7 @@ u32 LevelMeshSystem::buildAll(const LevelGrid& grid,
             u32 z0 = gz * SECTION_SIZE;
             u32 x1 = (x0 + SECTION_SIZE < grid.width)  ? x0 + SECTION_SIZE : grid.width;
             u32 z1 = (z0 + SECTION_SIZE < grid.depth)  ? z0 + SECTION_SIZE : grid.depth;
-            buildSection(grid, x0, z0, x1, z1, outSections[count]);
+            buildSection(grid, seed, x0, z0, x1, z1, outSections[count]);
             count++;
         }
     }

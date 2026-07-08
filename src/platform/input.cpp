@@ -30,6 +30,18 @@ static f32  s_stickSensitivity = 1.0f;
 static f32  s_gyroSensitivity  = 5.0f;
 static bool s_stickInvertY     = false;
 static bool s_gyroInvertY      = true;
+static f32  s_mouseSensitivity = Input::MOUSE_SENS_DEFAULT; // multiplier on base mouse rad/px
+
+// Trailing "settings" rows appended to controls.json — sentinel indices ABOVE GameAction::COUNT
+// so older readers (which guard `idx < COUNT`) skip them, and so a controls.json written before
+// this feature simply leaves the defaults in place. Lets us persist look sensitivity + invert-Y
+// in the same flat file without changing its per-line format. (Before this, none of these
+// settings persisted across launches — they reset to the defaults above every run.)
+static constexpr u32 CFG_STICK_SENS   = 1000;
+static constexpr u32 CFG_GYRO_SENS    = 1001;
+static constexpr u32 CFG_MOUSE_SENS   = 1002;
+static constexpr u32 CFG_STICK_INVERT = 1003;
+static constexpr u32 CFG_GYRO_INVERT  = 1004;
 
 // Split-screen: which player's controller to read (0=player1, 1=player2)
 static u8 s_activePlayer = 0;
@@ -116,8 +128,10 @@ static bool s_menuStickLatched[Input::MAX_GAMEPADS][4];
 // key, mouseButton, button, modifier, axis, axisThreshold
 static InputBinding s_bindings[static_cast<u32>(GameAction::COUNT)];
 
-static void setDefaults() {
-    auto& b = s_bindings;
+// Fill `out` with the default binding table. Split out from setDefaults() so the per-category
+// resets (resetKeyboard/ControllerBindingsToDefaults) can restore just half of each binding.
+static void buildDefaults(InputBinding out[static_cast<u32>(GameAction::COUNT)]) {
+    auto& b = out;
     auto set = [&](GameAction a, s32 key, u8 mouse, s32 btn, s32 mod = -1, s32 ax = -1, f32 axT = 0.0f) {
         u32 i = static_cast<u32>(a);
         b[i] = {key, mouse, btn, mod, ax, axT};
@@ -168,6 +182,8 @@ static void setDefaults() {
     set(GameAction::MENU_CONFIRM,  SDL_SCANCODE_RETURN, 0, SDL_CONTROLLER_BUTTON_A);
     set(GameAction::MENU_BACK,     SDL_SCANCODE_ESCAPE, 0, SDL_CONTROLLER_BUTTON_B);
 }
+
+static void setDefaults() { buildDefaults(s_bindings); }
 
 // ---------------------------------------------------------------------------
 // Init / shutdown
@@ -872,6 +888,8 @@ bool Input::getStickInvertY()            { return s_stickInvertY; }
 void Input::setStickInvertY(bool v)      { s_stickInvertY = v; }
 bool Input::getGyroInvertY()             { return s_gyroInvertY; }
 void Input::setGyroInvertY(bool v)       { s_gyroInvertY = v; }
+f32  Input::getMouseSensitivity()        { return s_mouseSensitivity; }
+void Input::setMouseSensitivity(f32 v)   { s_mouseSensitivity = v; }
 void Input::setActivePlayer(u8 index)    { s_activePlayer = index; }
 u8   Input::getActivePlayer()            { return s_activePlayer; }
 void Input::setSplitScreen(bool active)  { s_splitActive = active; }
@@ -977,6 +995,30 @@ void Input::resetBindingsToDefaults() {
     setDefaults();
 }
 
+// Restore only the keyboard/mouse half of the rebindable actions (0..INVENTORY) — used by the
+// "Keyboard & Mouse" options submenu's reset so it leaves controller bindings untouched.
+void Input::resetKeyboardBindingsToDefaults() {
+    InputBinding d[static_cast<u32>(GameAction::COUNT)];
+    buildDefaults(d);
+    for (u32 i = 0; i <= static_cast<u32>(GameAction::INVENTORY); i++) {
+        s_bindings[i].key         = d[i].key;
+        s_bindings[i].mouseButton = d[i].mouseButton;
+    }
+}
+
+// Restore only the controller half of the rebindable actions (0..INVENTORY) — used by the
+// "Controller" options submenu's reset so it leaves keyboard bindings untouched.
+void Input::resetControllerBindingsToDefaults() {
+    InputBinding d[static_cast<u32>(GameAction::COUNT)];
+    buildDefaults(d);
+    for (u32 i = 0; i <= static_cast<u32>(GameAction::INVENTORY); i++) {
+        s_bindings[i].button        = d[i].button;
+        s_bindings[i].modifier      = d[i].modifier;
+        s_bindings[i].axis          = d[i].axis;
+        s_bindings[i].axisThreshold = d[i].axisThreshold;
+    }
+}
+
 // Save/load use a simple text format (one line per action)
 void Input::saveBindings(const char* path) {
     FILE* f = fopen(path, "w");
@@ -986,6 +1028,14 @@ void Input::saveBindings(const char* path) {
         fprintf(f, "%u %d %u %d %d %d %.2f\n",
                 i, b.key, (u32)b.mouseButton, b.button, b.modifier, b.axis, b.axisThreshold);
     }
+    // Sensitivity / invert-Y settings as trailing sentinel rows (see CFG_* above). The value
+    // rides in the final float field; the other fields are unused padding so the line still has
+    // the 7 tokens the binding reader expects (older builds read + harmlessly skip these).
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_STICK_SENS,   s_stickSensitivity);
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_GYRO_SENS,    s_gyroSensitivity);
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_MOUSE_SENS,   s_mouseSensitivity);
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_STICK_INVERT, s_stickInvertY ? 1.0f : 0.0f);
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_GYRO_INVERT,  s_gyroInvertY  ? 1.0f : 0.0f);
     fclose(f);
     LOG_INFO("Input: saved bindings to %s", path);
 }
@@ -1005,7 +1055,13 @@ void Input::loadBindings(const char* path) {
             s_bindings[idx].modifier = mod;
             s_bindings[idx].axis = ax;
             s_bindings[idx].axisThreshold = axT;
+        } else if (idx == CFG_STICK_SENS)   { s_stickSensitivity = axT;
+        } else if (idx == CFG_GYRO_SENS)    { s_gyroSensitivity  = axT;
+        } else if (idx == CFG_MOUSE_SENS)   { s_mouseSensitivity = axT;
+        } else if (idx == CFG_STICK_INVERT) { s_stickInvertY = (axT != 0.0f);
+        } else if (idx == CFG_GYRO_INVERT)  { s_gyroInvertY  = (axT != 0.0f);
         }
+        // Any other idx >= COUNT: unknown/future setting — ignore (forward-compatible).
     }
     fclose(f);
     LOG_INFO("Input: loaded bindings from %s", path);

@@ -4,6 +4,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include "audio/audio.h"
+#include "audio/audio_settings.h"
 
 #include "engine/engine.h"
 #include "platform/window.h"
@@ -163,12 +164,22 @@ void Engine::init() {
     }
 
     AudioSystem::init(); // non-fatal — game works without audio
-    AudioSystem::setMusicVolume(0.3f); // ambient music sits below SFX
+    AudioSystem::setMusicVolume(AudioSettings::DEFAULT_MUSIC); // ambient music sits below SFX
+    // Restore the player's saved volume levels — overrides the defaults just set. No-op on first
+    // launch (missing file keeps defaults). Must come AFTER the setMusicVolume default above.
+    AudioSystem::loadSettings(ASSET_PATH("assets/config/audio.json"));
 
     if (!GLContext::init(Window::getHandle())) {
         LOG_ERROR("Failed to initialize GL context");
         return;
     }
+
+#ifndef __SWITCH__
+    // Restore the saved borderless-fullscreen preference now that the window + GL context exist,
+    // so the very first rendered frame is at the right viewport. Desktop-only (Switch is always
+    // fullscreen). No-op on first launch (missing file keeps the windowed default).
+    Window::loadVideoSettings(ASSET_PATH("assets/config/video.cfg"));
+#endif
 
     Clock::init();
     Input::init();

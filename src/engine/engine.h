@@ -98,10 +98,12 @@ private:
     // Menu/UI state — grouped for isolation
     struct MenuState {
         u8   selection = 0;
-        u8   subState = 0;       // 0=main, 1=singleplayer, 2=P1 class, 3=options, 4=couch lobby,
-                                 // 5=P2 class, 6=P1 slot, 8=overwrite confirm, 10=host mode,
-                                 // 11=P2 New/Continue chooser, 12=P2 slot select,
-                                 // 14=free-play level select (post-clear)
+        u8   subState = 0;       // 0=main, 1=singleplayer, 2=P1 class, 3=options category list,
+                                 // 4=couch lobby, 5=P2 class, 6=P1 slot, 8=overwrite confirm,
+                                 // 10=host mode, 11=P2 New/Continue chooser, 12=P2 slot select,
+                                 // 14=free-play level select (post-clear),
+                                 // 15=options:audio, 16=options:keyboard&mouse, 17=options:controller,
+                                 // 18=options:display
         u8   subSelection = 0;
         // Free-Play (post-clear level select, sub-state 14): a cleared character's chosen difficulty
         // (0-2) and floor (1-50) for a non-destructive farming session. subSelection picks the active
@@ -827,6 +829,10 @@ private:
 
     // Menu/lobby
     void updateMenu(f32 dt);
+    // Rebind capture for the options submenus. keyboardMode=true binds only keys (Keyboard & Mouse
+    // submenu); false binds only controller buttons/axes (Controller submenu). Sets m_menu.bindCapture
+    // false once bound or cancelled (B/ESC).
+    void captureRebind(bool keyboardMode);
     void updateLobby(f32 dt);
     // lanesPrepared=true: the menu already populated every local lane (loaded heroes and/or
     // freshly-equipped new lanes via equipFreshLane), so startGame only builds the world (per

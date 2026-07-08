@@ -35,6 +35,11 @@ Mesh MeshSystem::create(const Vertex* vertices, u32 vertexCount,
                           (void*)offsetof(Vertex, uv));
     glEnableVertexAttribArray(2);
 
+    // Color (location 3) — per-vertex tint (white by default; baked tile shade on the level mesh)
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          (void*)offsetof(Vertex, color));
+    glEnableVertexAttribArray(3);
+
     glBindVertexArray(0);
     return mesh;
 }

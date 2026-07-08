@@ -249,6 +249,36 @@ void Engine::initAssets() {
         }
     }
 
+    // --- Decoration props: load CPU geometry once and hand to the level mesher --------------
+    // These small meshes are BAKED into floor sections (LevelMeshSystem::buildAll) rather than
+    // drawn as entities, so any number of them costs no extra draw calls and — unlike the prop
+    // ENTITIES in spawnFloorDecorations — they have no collision, so they can sit in room
+    // interiors without blocking movement or item pickups (which is why bones/rubble live here,
+    // not there). Tint-only materials (prop_iron/bone/wood) give a clean solid voxel look.
+    {
+        struct PropEntry { const char* path; const char* material; f32 radius; };
+        static constexpr PropEntry kProps[] = {
+            {"assets/meshes/rubble.obj",   "prop_iron", 0.30f},
+            {"assets/meshes/rock.obj",     "prop_iron", 0.30f},
+            {"assets/meshes/bones.obj",    "prop_bone", 0.30f},
+            {"assets/meshes/mushroom.obj", "prop_wood", 0.20f},
+            {"assets/meshes/crackbit.obj", "prop_iron", 0.30f},
+        };
+        LevelMeshSystem::clearPropMeshes();
+        for (auto& pe : kProps) {
+            std::vector<Vertex> verts;
+            std::vector<u32>    indices;
+            // Load only to harvest CPU verts; the returned GPU mesh is unused (destroy it so we
+            // don't leak a VAO/VBO we never draw). Skip cleanly if the OBJ is missing.
+            Mesh tmp = ObjLoader::load(ASSET_PATH(pe.path), nullptr, nullptr, &verts, &indices);
+            if (verts.empty() || indices.empty()) { if (tmp.vao) MeshSystem::destroy(tmp); continue; }
+            u8 matId = MaterialSystem::getIdByName(pe.material);
+            LevelMeshSystem::addPropMesh(verts.data(), (u32)verts.size(),
+                                         indices.data(), (u32)indices.size(), matId, pe.radius);
+            if (tmp.vao) MeshSystem::destroy(tmp);
+        }
+    }
+
     // Build limb meshes AFTER OBJ meshes are loaded (needs valid meshDefCount)
     LimbSystem::init(m_meshDefs, m_meshDefCount);
     // Override box limb meshes with OBJ voxel limbs for better visuals

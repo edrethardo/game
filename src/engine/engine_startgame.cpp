@@ -483,7 +483,12 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         }
     }
 
-    m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, m_level.sections, MAX_LEVEL_SECTIONS);
+    // Fold the floor number into the mesh seed so each floor's baked tile-shade + scatter-prop
+    // pattern is distinct (levelSeed alone is constant across a run's floors). Deterministic:
+    // host + clients share both levelSeed and currentFloor, so baked floors match everywhere.
+    m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
+                             m_level.levelSeed + m_level.currentFloor * 7919u,
+                             m_level.sections, MAX_LEVEL_SECTIONS);
     Minimap::init(m_level.grid.width, m_level.grid.depth);
 
     // Init entities

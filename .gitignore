@@ -20,6 +20,8 @@ compile_commands.json
 *.swo
 save.dat
 assets/config/controls.json
+assets/config/audio.json
+assets/config/video.cfg
 assets/audio/
 save_*.dat
 screenshot_*.png

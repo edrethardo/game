@@ -84,7 +84,7 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             floorY = LevelGridSystem::getFloorHeight(m_level.grid, gx, gz);
         }
 
-        static constexpr f32 ITEM_SCALE = 1.4f;
+        static constexpr f32 ITEM_SCALE = 1.1f;   // trimmed from 1.4 — loot was cluttering the floor
         bool isGlobeItem = isGlobe(wi.item);
         bool isShard     = isSourceShard(wi.item);   // secret superboss key — render the crystal mesh
         f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : ITEM_SCALE);
@@ -181,14 +181,15 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         AABB bounds = {pos - Vec3{renderScale,renderScale,renderScale},
                        pos + Vec3{renderScale,renderScale,renderScale}};
 
-        // Collect disc billboard for batched rendering below (skip globes + shards — not loot)
-        if (!isGlobeItem && !isShard && discCount < MAX_WORLD_ITEMS) {
-            Vec4 discColor = {0.9f, 0.9f, 0.9f, 0.3f};
-            f32 discSize = renderScale * 1.2f;
+        // Collect disc billboard for batched rendering below. Skip globes + shards (not loot) AND
+        // COMMON loot — a subtle rarity glow only for magic+ keeps the floor from being a light show.
+        if (!isGlobeItem && !isShard && wi.item.rarity != Rarity::COMMON && discCount < MAX_WORLD_ITEMS) {
+            Vec4 discColor = {0.2f, 0.9f, 0.2f, 0.28f};   // magic default (dimmed from 0.4)
+            f32 discSize = renderScale * 0.9f;            // was 1.2
             switch (wi.item.rarity) {
-                case Rarity::MAGIC:     discColor = {0.2f, 0.9f, 0.2f, 0.4f}; break;
-                case Rarity::RARE:      discColor = {0.2f, 0.4f, 1.0f, 0.4f}; break;
-                case Rarity::LEGENDARY: discColor = {1.0f, 0.8f, 0.2f, 0.5f}; discSize = renderScale * 1.5f; break;
+                case Rarity::MAGIC:     discColor = {0.2f, 0.9f, 0.2f, 0.28f}; break;
+                case Rarity::RARE:      discColor = {0.2f, 0.4f, 1.0f, 0.28f}; break;
+                case Rarity::LEGENDARY: discColor = {1.0f, 0.8f, 0.2f, 0.35f}; discSize = renderScale * 1.2f; break;
                 default: break;
             }
             Vec3 bRight = m_camera.right;

@@ -45,6 +45,7 @@
 #include "core/allocation_tracker.h"
 #include "core/profiler.h"
 #include "audio/audio.h"
+#include "audio/audio_settings.h"
 
 #include <glad/glad.h>
 #include <cmath>
@@ -105,6 +106,9 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
     case 8: // Overwrite confirm: 2 items (Yes/No), same layout as singleplayer sub-menu
         return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
                             250.0f * uiScale, 35.0f * uiScale, false);
+    case 3: // Options category list: 4 items — layout MUST match the subState-3 render (baseY sh*0.44)
+        return menuMouseHit(sw, sh, sh * 0.44f, 46.0f * uiScale, 4,
+                            360.0f * uiScale, 35.0f * uiScale, false);
     case 6: { // Save slot selection: scrollable list, top-down from sh*0.82
         // Must account for scroll offset — compute it the same way as render
         static constexpr u32 VISIBLE = 14;
@@ -121,6 +125,48 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
     default:
         return -1;
     }
+}
+
+// Persist the options settings (input bindings + audio volumes) to disk. Called when backing out
+// of any options screen — settings already apply live, this just writes them. Guarded off on
+// Switch (the asset dir is read-only there), mirroring the old single save-on-exit.
+static void persistOptions() {
+#ifndef __SWITCH__
+    Input::saveBindings("assets/config/controls.json");
+    AudioSystem::saveSettings("assets/config/audio.json");
+    Window::saveVideoSettings("assets/config/video.cfg");   // borderless-fullscreen preference
+#endif
+}
+
+// Rebind capture for the options submenus. keyboardMode=true binds only keys (Keyboard & Mouse
+// submenu); false binds only controller buttons/axes (Controller submenu). B / ESC cancels first
+// so the cancel input is never itself captured. Clears m_menu.bindCapture once bound or cancelled.
+void Engine::captureRebind(bool keyboardMode) {
+    GameAction act = static_cast<GameAction>(m_menu.subSelection);
+    if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+        m_menu.bindCapture = false;
+        return;
+    }
+    bool bound = false;
+    if (keyboardMode) {
+        for (s32 sc = 0; sc < 512 && !bound; sc++) {
+            if (sc == SDL_SCANCODE_ESCAPE) continue;            // reserved for cancel
+            if (Input::isKeyPressed(sc)) { Input::setKeyBinding(act, sc); bound = true; }
+        }
+    } else {
+        for (s32 b = 0; b < SDL_CONTROLLER_BUTTON_MAX && !bound; b++) {
+            if (b == SDL_CONTROLLER_BUTTON_B) continue;         // reserved for cancel (MENU_BACK)
+            if (Input::isButtonPressed(0, b)) {
+                // Hold L while pressing to register a MODIFIED (L + button) binding.
+                if (Input::isModifierHeld() && b != SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
+                    Input::setButtonBinding(act, b, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+                else
+                    Input::setButtonBinding(act, b);
+                bound = true;
+            }
+        }
+    }
+    if (bound) m_menu.bindCapture = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -735,111 +781,233 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
-    // Options / controls rebinding screen (subState 3)
+    // Options — top-level category list (subState 3). Each row opens a focused submenu.
     if (m_menu.subState == 3) {
-        // Number of rebindable actions (skip menu navigation actions)
-        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
-        // Extra options after rebind actions: stick sens, gyro sens, stick invertY, gyro invertY, reset
-        static constexpr u32 OPT_STICK_SENS   = REBIND_COUNT;
-        static constexpr u32 OPT_GYRO_SENS    = REBIND_COUNT + 1;
-        static constexpr u32 OPT_STICK_INVERT = REBIND_COUNT + 2;
-        static constexpr u32 OPT_GYRO_INVERT  = REBIND_COUNT + 3;
-        static constexpr u32 OPT_SPLIT_MODE   = REBIND_COUNT + 4;
-        static constexpr u32 OPT_RESET        = REBIND_COUNT + 5;
-        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 6;
+        static constexpr u32 CAT_COUNT = 4;   // Audio, Keyboard & Mouse, Controller, Display
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < CAT_COUNT - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            persistOptions();
+            m_menu.subState = 0; m_menu.subSelection = 0;
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            static const u8 catSub[CAT_COUNT] = {15, 16, 17, 18};  // Audio / K&M / Controller / Display
+            m_menu.subState = catSub[m_menu.subSelection];
+            m_menu.subSelection = 0;
+            m_menu.bindCapture = false;
+        }
+        return;
+    }
 
-        if (m_menu.bindCapture) {
-            // Capture a new binding for the selected action. Steam "Full Controller Support":
-            // the old code forced KEYBOARD capture (bindKeyboard was reset to true on confirm) and
-            // only ESC could cancel, so a controller-only user could neither bind a controller
-            // button nor escape this screen. Now: cancel is checked FIRST (controller B or keyboard
-            // ESC) so the cancel input isn't itself captured and a gamepad user is never trapped;
-            // then we bind whichever input type they press first — a KEY rebinds the keyboard
-            // binding, a controller BUTTON rebinds the controller binding (no column toggle needed).
-            GameAction act = static_cast<GameAction>(m_menu.subSelection);
-            if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-                m_menu.bindCapture = false;
-            } else {
-                bool bound = false;
-                for (s32 sc = 0; sc < 512 && !bound; sc++) {
-                    if (sc == SDL_SCANCODE_ESCAPE) continue;          // reserved for cancel
-                    if (Input::isKeyPressed(sc)) { Input::setKeyBinding(act, sc); bound = true; }
-                }
-                for (s32 b = 0; b < SDL_CONTROLLER_BUTTON_MAX && !bound; b++) {
-                    if (b == SDL_CONTROLLER_BUTTON_B) continue;       // reserved for cancel (MENU_BACK)
-                    if (Input::isButtonPressed(0, b)) {
-                        // Hold L while pressing to register a MODIFIED (L + button) binding.
-                        if (Input::isModifierHeld() && b != SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
-                            Input::setButtonBinding(act, b, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-                        else
-                            Input::setButtonBinding(act, b);
-                        bound = true;
-                    }
-                }
-                if (bound) m_menu.bindCapture = false;
+    // Options — Audio submenu (subState 15): Master / SFX / Music sliders + reset.
+    if (m_menu.subState == 15) {
+        static constexpr u32 A_MASTER = 0, A_SFX = 1, A_MUSIC = 2, A_RESET = 3, A_TOTAL = 4;
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < A_TOTAL - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            persistOptions();
+            m_menu.subState = 3; m_menu.subSelection = 0;
+            return;
+        }
+        // Left/Right steps the selected volume by ±5%.
+        f32 dir = 0.0f;
+        if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
+        if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+        if (dir != 0.0f) {
+            if (m_menu.subSelection == A_MASTER) {
+                AudioSystem::setMasterVolume(AudioSettings::stepVol(AudioSystem::getMasterVolume(), dir));
+                AudioSystem::play(SfxId::MENU_HOVER);   // ping at the new level for feedback
+            } else if (m_menu.subSelection == A_SFX) {
+                AudioSystem::setSfxVolume(AudioSettings::stepVol(AudioSystem::getSfxVolume(), dir));
+                AudioSystem::play(SfxId::MENU_HOVER);
+            } else if (m_menu.subSelection == A_MUSIC) {
+                AudioSystem::setMusicVolume(AudioSettings::stepVol(AudioSystem::getMusicVolume(), dir)); // applies live
             }
-        } else {
-            // Normal navigation
-            if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
-                if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            if (m_menu.subSelection == A_RESET) {
+                AudioSystem::setMasterVolume(AudioSettings::DEFAULT_MASTER);
+                AudioSystem::setSfxVolume(AudioSettings::DEFAULT_SFX);
+                AudioSystem::setMusicVolume(AudioSettings::DEFAULT_MUSIC);
+                AudioSystem::play(SfxId::UI_CONFIRM);
             }
-            if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-                if (m_menu.subSelection < TOTAL_OPTIONS - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
-            }
-            if (Input::isActionPressed(GameAction::MENU_BACK)) {
-                // Save and return to main menu
-#ifndef __SWITCH__
-                Input::saveBindings("assets/config/controls.json");
-#endif
-                m_menu.subState = 0;
-                m_menu.subSelection = 0;
-                return;
-            }
-            if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
-                || mouseConfirm) {
-                if (m_menu.subSelection < REBIND_COUNT) {
-                    m_menu.bindCapture = true;
-                    m_menu.bindKeyboard = true;
-                } else if (m_menu.subSelection == OPT_STICK_INVERT) {
-                    Input::setStickInvertY(!Input::getStickInvertY());
-                } else if (m_menu.subSelection == OPT_GYRO_INVERT) {
-                    Input::setGyroInvertY(!Input::getGyroInvertY());
-                } else if (m_menu.subSelection == OPT_SPLIT_MODE) {
-                    m_splitMode = m_splitMode == 0 ? 1 : 0;
-                } else if (m_menu.subSelection == OPT_RESET) {
-                    Input::resetBindingsToDefaults();
-                    Input::setStickSensitivity(1.25f);
-                    Input::setGyroSensitivity(5.0f);
-                    Input::setStickInvertY(false);
-                    Input::setGyroInvertY(true);
-                }
-            }
-            // Left/Right adjusts sensitivity sliders or toggles column
+        }
+        return;
+    }
+
+    // Options — Keyboard & Mouse submenu (subState 16): rebind the 19 actions (keyboard only) +
+    // a mouse-sensitivity slider + reset.
+    if (m_menu.subState == 16) {
+        static constexpr u32 REBIND_COUNT  = static_cast<u32>(GameAction::INVENTORY) + 1;
+        static constexpr u32 KM_MOUSE_SENS = REBIND_COUNT;      // mouse sensitivity slider row
+        static constexpr u32 KM_RESET      = REBIND_COUNT + 1;  // reset row after the slider
+        static constexpr u32 KM_TOTAL      = REBIND_COUNT + 2;
+        if (m_menu.bindCapture) { captureRebind(true); return; }
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < KM_TOTAL - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            persistOptions();
+            m_menu.subState = 3; m_menu.subSelection = 0;
+            return;
+        }
+        // Left/Right adjusts the mouse sensitivity slider (multiplier 0.25–4.0, step 0.25;
+        // 1.0 = the classic feel). Mirrors the controller submenu's slider handling.
+        if (m_menu.subSelection == KM_MOUSE_SENS) {
+            f32 dir = 0.0f;
             if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) ||
-                Input::isMenuStickPressed(Input::StickNav::Left)) {
-                if (m_menu.subSelection == OPT_STICK_SENS) {
-                    Input::setStickSensitivity(Input::getStickSensitivity() - 0.25f);
-                    if (Input::getStickSensitivity() < 0.25f) Input::setStickSensitivity(0.25f);
-                } else if (m_menu.subSelection == OPT_GYRO_SENS) {
-                    Input::setGyroSensitivity(Input::getGyroSensitivity() - 1.0f);
-                    if (Input::getGyroSensitivity() < 1.0f) Input::setGyroSensitivity(1.0f);
-                } else {
-                    m_menu.bindKeyboard = true;
-                }
-            }
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
             if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
-                Input::isMenuStickPressed(Input::StickNav::Right)) {
-                if (m_menu.subSelection == OPT_STICK_SENS) {
-                    Input::setStickSensitivity(Input::getStickSensitivity() + 0.25f);
-                    if (Input::getStickSensitivity() > 5.0f) Input::setStickSensitivity(5.0f);
-                } else if (m_menu.subSelection == OPT_GYRO_SENS) {
-                    Input::setGyroSensitivity(Input::getGyroSensitivity() + 1.0f);
-                    if (Input::getGyroSensitivity() > 20.0f) Input::setGyroSensitivity(20.0f);
-                } else {
-                    m_menu.bindKeyboard = false;
-                }
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+            if (dir != 0.0f) {
+                f32 v = Input::getMouseSensitivity() + dir * 0.25f;
+                if (v < 0.25f) v = 0.25f;
+                if (v > 4.0f)  v = 4.0f;
+                Input::setMouseSensitivity(v);
+            }
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            if (m_menu.subSelection < REBIND_COUNT) {
+                m_menu.bindCapture = true;
+                m_menu.bindKeyboard = true;    // this submenu binds keys
+            } else if (m_menu.subSelection == KM_RESET) {
+                Input::resetKeyboardBindingsToDefaults();
+                Input::setMouseSensitivity(Input::MOUSE_SENS_DEFAULT);  // reset restores default sens too
+                AudioSystem::play(SfxId::UI_CONFIRM);
+            }
+        }
+        return;
+    }
+
+    // Options — Controller submenu (subState 17): rebind the 19 actions (controller only) +
+    // stick/gyro sensitivity + invert-Y + reset.
+    if (m_menu.subState == 17) {
+        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
+        static constexpr u32 C_STICK_SENS = REBIND_COUNT;
+        static constexpr u32 C_GYRO_SENS  = REBIND_COUNT + 1;
+        static constexpr u32 C_STICK_INV  = REBIND_COUNT + 2;
+        static constexpr u32 C_GYRO_INV   = REBIND_COUNT + 3;
+        static constexpr u32 C_RESET      = REBIND_COUNT + 4;
+        static constexpr u32 C_TOTAL      = REBIND_COUNT + 5;
+        if (m_menu.bindCapture) { captureRebind(false); return; }
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < C_TOTAL - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            persistOptions();
+            m_menu.subState = 3; m_menu.subSelection = 0;
+            return;
+        }
+        // Left/Right adjusts the sensitivity sliders.
+        f32 dir = 0.0f;
+        if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
+        if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+        if (dir != 0.0f) {
+            if (m_menu.subSelection == C_STICK_SENS) {
+                f32 v = Input::getStickSensitivity() + dir * 0.25f;
+                if (v < 0.25f) v = 0.25f;
+                if (v > 5.0f)  v = 5.0f;
+                Input::setStickSensitivity(v);
+            } else if (m_menu.subSelection == C_GYRO_SENS) {
+                f32 v = Input::getGyroSensitivity() + dir * 1.0f;
+                if (v < 1.0f)  v = 1.0f;
+                if (v > 20.0f) v = 20.0f;
+                Input::setGyroSensitivity(v);
+            }
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            if (m_menu.subSelection < REBIND_COUNT) {
+                m_menu.bindCapture = true;
+                m_menu.bindKeyboard = false;   // this submenu binds controller buttons
+            } else if (m_menu.subSelection == C_STICK_INV) {
+                Input::setStickInvertY(!Input::getStickInvertY());
+            } else if (m_menu.subSelection == C_GYRO_INV) {
+                Input::setGyroInvertY(!Input::getGyroInvertY());
+            } else if (m_menu.subSelection == C_RESET) {
+                Input::resetControllerBindingsToDefaults();
+                Input::setStickSensitivity(1.25f);
+                Input::setGyroSensitivity(5.0f);
+                Input::setStickInvertY(false);
+                Input::setGyroInvertY(true);
+                AudioSystem::play(SfxId::UI_CONFIRM);
+            }
+        }
+        return;
+    }
+
+    // Options — Display submenu (subState 18): borderless fullscreen + monitor selection +
+    // split-screen orientation + reset. The monitor row only appears on multi-display rigs, so
+    // the row indices are computed dynamically (must match the subState-18 render layout).
+    if (m_menu.subState == 18) {
+        const bool multiDisplay = Window::getDisplayCount() > 1;
+        const u32 D_FULLSCREEN = 0;
+        const u32 D_DISPLAY    = multiDisplay ? 1u : 0xFFu;   // sentinel = absent (single monitor)
+        const u32 D_SPLIT      = multiDisplay ? 2u : 1u;
+        const u32 D_RESET      = multiDisplay ? 3u : 2u;
+        const u32 D_TOTAL      = multiDisplay ? 4u : 3u;
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < D_TOTAL - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            persistOptions();
+            m_menu.subState = 3; m_menu.subSelection = 0;
+            return;
+        }
+        // Left/Right cycles the monitor selector (wraps around all detected displays).
+        if (multiDisplay && m_menu.subSelection == D_DISPLAY) {
+            f32 dir = 0.0f;
+            if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
+            if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
+                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+            if (dir != 0.0f) {
+                int n = Window::getDisplayCount();
+                int next = ((Window::getDisplayIndex() + (dir < 0 ? -1 : 1)) % n + n) % n;
+                Window::setDisplay(next);
+                AudioSystem::play(SfxId::MENU_HOVER);
+            }
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+            if (m_menu.subSelection == D_FULLSCREEN) {
+                // Toggle borderless fullscreen live (applies immediately; persisted on back-out).
+                Window::setBorderlessFullscreen(!Window::isBorderlessFullscreen());
+                AudioSystem::play(SfxId::MENU_HOVER);
+            } else if (multiDisplay && m_menu.subSelection == D_DISPLAY) {
+                // Enter also advances to the next monitor (for pads whose menu L/R isn't obvious here).
+                int n = Window::getDisplayCount();
+                Window::setDisplay((Window::getDisplayIndex() + 1) % n);
+                AudioSystem::play(SfxId::MENU_HOVER);
+            } else if (m_menu.subSelection == D_SPLIT) {
+                m_splitMode = m_splitMode == 0 ? 1 : 0;
+                AudioSystem::play(SfxId::MENU_HOVER);
+            } else if (m_menu.subSelection == D_RESET) {
+                m_splitMode = 0;
+                Window::setBorderlessFullscreen(false);   // reset display = windowed, primary, horizontal
+                Window::setDisplay(0);
+                AudioSystem::play(SfxId::UI_CONFIRM);
             }
         }
         return;

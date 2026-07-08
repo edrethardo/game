@@ -564,7 +564,10 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
 
         // Rebuild mesh so the arena geometry is visible immediately.
         // The exit portal and flow-field build that follows depend on this grid state.
-        m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, m_level.sections, MAX_LEVEL_SECTIONS);
+        // Same per-floor mesh seed as startGame so the rebuilt arena keeps a matching look.
+        m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
+                                 m_level.levelSeed + m_level.currentFloor * 7919u,
+                                 m_level.sections, MAX_LEVEL_SECTIONS);
 
         // Iron maidens in corners for major bosses
         if (isMajor && m_meshIdIronMaiden > 0) {

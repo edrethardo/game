@@ -1600,6 +1600,41 @@ def gen_brazier(height=0.6):
     return mb
 
 
+# --- Small floor-decoration props (scattered by the level mesh; origin at feet Y=0, ~0.2-0.3 wide) ---
+
+def gen_rubble():
+    """A small pile of broken stone chunks."""
+    mb = MeshBuilder()
+    add_box(mb, center=(-0.06, 0.05, 0.02), half_extents=(0.08, 0.05, 0.07))
+    add_box(mb, center=( 0.09, 0.04, -0.04), half_extents=(0.06, 0.04, 0.05))
+    add_box(mb, center=( 0.02, 0.03, 0.10), half_extents=(0.05, 0.03, 0.04))
+    return mb
+
+
+def gen_rock():
+    """A single lumpy boulder (two stacked blocks)."""
+    mb = MeshBuilder()
+    add_box(mb, center=(0.0,  0.08, 0.0),  half_extents=(0.13, 0.09, 0.11))
+    add_box(mb, center=(0.05, 0.16, 0.03), half_extents=(0.06, 0.05, 0.06))
+    return mb
+
+
+def gen_mushroom():
+    """A small mushroom: thin stem + wide flat cap."""
+    mb = MeshBuilder()
+    add_cylinder(mb, base_center=(0, 0, 0), radius=0.03, height=0.12, sides=6)
+    add_box(mb, center=(0.0, 0.145, 0.0), half_extents=(0.08, 0.03, 0.08))
+    return mb
+
+
+def gen_crackbit():
+    """A thin cracked-stone plate lying flush with the floor."""
+    mb = MeshBuilder()
+    add_box(mb, center=(0.0,  0.015, 0.0),  half_extents=(0.14, 0.015, 0.10))
+    add_box(mb, center=(0.06, 0.022, 0.05), half_extents=(0.05, 0.012, 0.04))
+    return mb
+
+
 def gen_butcher(height=2.5):
     """Large demon boss — The Butcher. Massive build, horns, red-tinted.
 
@@ -4848,6 +4883,26 @@ MESH_TYPES = {
         "func": gen_brazier,
         "desc": "Standing brazier/fire bowl. Params: --height",
         "default_file": "brazier.obj",
+    },
+    "rubble": {
+        "func": gen_rubble,
+        "desc": "Small pile of broken stone chunks (floor decoration).",
+        "default_file": "rubble.obj",
+    },
+    "rock": {
+        "func": gen_rock,
+        "desc": "Single lumpy boulder (floor decoration).",
+        "default_file": "rock.obj",
+    },
+    "mushroom": {
+        "func": gen_mushroom,
+        "desc": "Small mushroom with cap (floor decoration).",
+        "default_file": "mushroom.obj",
+    },
+    "crackbit": {
+        "func": gen_crackbit,
+        "desc": "Thin cracked-stone plate flush with the floor (floor decoration).",
+        "default_file": "crackbit.obj",
     },
     "spider": {
         "func": gen_spider,

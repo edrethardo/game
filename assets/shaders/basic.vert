@@ -2,6 +2,7 @@
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
+layout(location = 3) in vec3 aColor;   // per-vertex tint (white by default; baked tile shade)
 
 uniform mat4 u_mvp;
 uniform mat4 u_model;
@@ -10,6 +11,7 @@ out vec3 vWorldNormal;
 out vec3 vWorldPos;
 out vec2 vUV;
 out float vViewDepth; // forward view-space distance (gl_Position.w) for distance fog
+out vec3 vColor;
 
 void main() {
     gl_Position  = u_mvp * vec4(aPos, 1.0);
@@ -17,4 +19,5 @@ void main() {
     vWorldPos    = (u_model * vec4(aPos, 1.0)).xyz;
     vUV          = aUV;
     vViewDepth   = gl_Position.w;
+    vColor       = aColor;
 }

@@ -7,6 +7,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "audio/audio.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -56,6 +57,40 @@ extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
 
+// Draws one rebindable action's label + its SINGLE binding column, for the Keyboard & Mouse
+// (keyboardMode=true → key/mouse name) and Controller (false → button/modifier/axis name) options
+// submenus. `capturing` tints the value orange while this row is being rebound. Lifts the old
+// two-column formatters into one place so both submenus share the 19-action rendering.
+static void drawRebindRow(u32 sw, u32 sh, f32 colLabel, f32 colBind, f32 y,
+                          GameAction act, bool sel, bool capturing, bool keyboardMode) {
+    FontSystem::drawText(sw, sh, colLabel, y, Input::actionName(act),
+        sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+
+    const InputBinding& bind = Input::getBinding(act);
+    char buf[32] = "-";
+    if (keyboardMode) {
+        if (bind.key >= 0)
+            std::snprintf(buf, sizeof(buf), "%s", SDL_GetScancodeName(static_cast<SDL_Scancode>(bind.key)));
+        if (bind.mouseButton == MOUSE_LEFT)   std::snprintf(buf, sizeof(buf), "LMB");
+        if (bind.mouseButton == MOUSE_RIGHT)  std::snprintf(buf, sizeof(buf), "RMB");
+        if (bind.mouseButton == MOUSE_MIDDLE) std::snprintf(buf, sizeof(buf), "MMB");
+    } else {
+        if (bind.button >= 0) {
+            if (bind.modifier >= 0)
+                std::snprintf(buf, sizeof(buf), "%s+%s", Input::buttonName(bind.modifier), Input::buttonName(bind.button));
+            else
+                std::snprintf(buf, sizeof(buf), "%s", Input::buttonName(bind.button));
+        } else if (bind.axis >= 0) {
+            std::snprintf(buf, sizeof(buf), "%s",
+                bind.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT ? "ZR" :
+                bind.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT  ? "ZL" : "Axis");
+        }
+    }
+    Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.5f, 0.5f, 0.5f};
+    if (capturing) col = {1.0f, 0.5f, 0.2f};  // orange while awaiting the new binding
+    FontSystem::drawText(sw, sh, colBind, y, buf, col, 1);
+}
+
 // ---------------------------------------------------------------------------
 // Menu rendering (simple text-based using HUD lines)
 // ---------------------------------------------------------------------------
@@ -65,9 +100,12 @@ void Engine::renderMenu() {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
     FontSystem::setUIScale(uiScale);
 
-    // Title text — hidden on the Single Player submenu (1), Host-mode chooser
-    // (10), and the save-slot select screen (6) to keep them uncluttered.
-    if (m_menu.subState != 1 && m_menu.subState != 6 && m_menu.subState != 10) {
+    // Title text — hidden on screens that fill the vertical space with their own layout: the
+    // Single Player submenu (1), Host-mode chooser (10), save-slot select (6), and all of the
+    // options screens (3 category list + 15/16/17/18 submenus) so it doesn't bleed over their lists.
+    if (m_menu.subState != 1 && m_menu.subState != 6 && m_menu.subState != 10 &&
+        m_menu.subState != 3 && m_menu.subState != 15 && m_menu.subState != 16 &&
+        m_menu.subState != 17 && m_menu.subState != 18) {
         const char* title = "CURSE OF THE DUNGEON ENGINE";
         f32 titleW = FontSystem::textWidth(title, 3);
         f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;
@@ -251,123 +289,163 @@ void Engine::renderMenu() {
                              hint, {0.4f, 0.4f, 0.5f}, 2);
     // (subState 7 difficulty selection removed — difficulty is automatic per save)
     } else if (m_menu.subState == 3) {
-        // Options / controls rebinding screen
-        const char* subTitle = "Controls";
-        f32 stW = FontSystem::textWidth(subTitle, 3);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.9f,
-                             subTitle, {0.9f, 0.8f, 0.3f}, 3);
+        // Options — top-level category list (modeled on the couch-start list, subState 13).
+        // The game title is suppressed for this screen, so "Options" is the heading.
+        const char* title = "Options";
+        f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.72f, title, {0.9f, 0.8f, 0.3f}, 3);
 
-        // Column headers
-        f32 colAction = sw * 0.1f;
-        f32 colKey    = sw * 0.5f;
-        f32 colBtn    = sw * 0.72f;
-        f32 headerY   = sh * 0.82f;
-        FontSystem::drawText(sw, sh, colAction, headerY, "Action",     {0.7f, 0.7f, 0.7f}, 1);
-        FontSystem::drawText(sw, sh, colKey,    headerY, "Keyboard",   {0.7f, 0.7f, 0.7f}, 1);
-        FontSystem::drawText(sw, sh, colBtn,    headerY, "Controller", {0.7f, 0.7f, 0.7f}, 1);
+        static const char* cats[4] = {"Audio", "Keyboard & Mouse", "Controller", "Display"};
+        for (u32 i = 0; i < 4; i++) {
+            // y MUST match menuMouseForState case 3 (baseY + (count-1-i)*spacing, item 0 at top).
+            f32 y = sh * 0.44f + static_cast<f32>(4 - 1 - i) * 46.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 boxCol = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 360.0f * uiScale, 35.0f * uiScale, boxCol, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 lw = FontSystem::textWidth(cats[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 10.0f * uiScale, cats[i], tc, 2);
+        }
+        const char* hint = "Up/Down select, Enter/A to open, B/ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 15) {
+        // Options — Audio submenu: 3 volume sliders + reset.
+        const char* title = "Audio";
+        f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.9f, title, {0.9f, 0.8f, 0.3f}, 3);
 
+        f32 colLabel = sw * 0.3f, colHint = sw * 0.62f;
+        f32 listTop = sh * 0.62f, lineH = 40.0f * uiScale;
+        for (u32 i = 0; i < 4; i++) {
+            f32 y = listTop - static_cast<f32>(i) * lineH;
+            bool sel = (i == m_menu.subSelection);
+            if (i == 3) {
+                FontSystem::drawText(sw, sh, colLabel, y, "Reset Audio to Defaults",
+                    sel ? Vec3{1.0f, 0.4f, 0.4f} : Vec3{0.5f, 0.3f, 0.3f}, 1);
+            } else {
+                f32 v = (i == 0) ? AudioSystem::getMasterVolume()
+                      : (i == 1) ? AudioSystem::getSfxVolume() : AudioSystem::getMusicVolume();
+                const char* nm = (i == 0) ? "Master Volume" : (i == 1) ? "SFX Volume" : "Music Volume";
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "%s: %.0f%%", nm, v * 100.0f);
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colHint, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            }
+        }
+        const char* hint = "Up/Down select, Left/Right adjust, B/ESC back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.5f, 0.5f, 0.6f}, 1);
+    } else if (m_menu.subState == 16 || m_menu.subState == 17) {
+        // Options — rebind submenu: Keyboard & Mouse (16, keyboard column) OR Controller
+        // (17, controller column + sensitivity/invert). Shared render; `kb` selects the variant.
+        bool kb = (m_menu.subState == 16);
         static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
-        static constexpr u32 OPT_STICK_SENS   = REBIND_COUNT;
-        static constexpr u32 OPT_GYRO_SENS    = REBIND_COUNT + 1;
-        static constexpr u32 OPT_STICK_INVERT = REBIND_COUNT + 2;
-        static constexpr u32 OPT_GYRO_INVERT  = REBIND_COUNT + 3;
-        static constexpr u32 OPT_SPLIT_MODE   = REBIND_COUNT + 4;
-        static constexpr u32 OPT_RESET        = REBIND_COUNT + 5;
-        static constexpr u32 TOTAL_OPTIONS     = REBIND_COUNT + 6;
+        // Keyboard & Mouse adds 1 extra row (Mouse Sensitivity); Controller adds 4 (stick/gyro
+        // sensitivity + invert-Y). Both variants share this rebind-list render.
+        const u32 extra = kb ? 1u : 4u;
+        const u32 RESET_ROW = REBIND_COUNT + extra;     // trailing Reset row
+        const u32 TOTAL = REBIND_COUNT + extra + 1;
 
-        f32 listTop = sh * 0.78f;
-        f32 lineH = 22.0f * uiScale;
+        const char* title = kb ? "Keyboard & Mouse" : "Controller";
+        f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.9f, title, {0.9f, 0.8f, 0.3f}, 3);
 
+        f32 colLabel = sw * 0.2f, colBind = sw * 0.62f;
+        FontSystem::drawText(sw, sh, colLabel, sh * 0.82f, "Action", {0.7f, 0.7f, 0.7f}, 1);
+        FontSystem::drawText(sw, sh, colBind, sh * 0.82f, kb ? "Keyboard" : "Controller", {0.7f, 0.7f, 0.7f}, 1);
+
+        f32 listTop = sh * 0.78f, lineH = 22.0f * uiScale;
         u32 visibleRows = static_cast<u32>((listTop - sh * 0.1f) / lineH);
         u32 scrollOffset = 0;
         if (m_menu.subSelection >= visibleRows) scrollOffset = m_menu.subSelection - visibleRows + 1;
 
-        for (u32 i = scrollOffset; i < TOTAL_OPTIONS && i - scrollOffset < visibleRows; i++) {
-            f32 y = listTop - (i - scrollOffset) * lineH;
+        for (u32 i = scrollOffset; i < TOTAL && i - scrollOffset < visibleRows; i++) {
+            f32 y = listTop - static_cast<f32>(i - scrollOffset) * lineH;
             bool sel = (i == m_menu.subSelection);
-
             if (i < REBIND_COUNT) {
-                GameAction act = static_cast<GameAction>(i);
-                const char* name = Input::actionName(act);
-                const InputBinding& bind = Input::getBinding(act);
-
-                // Action name
-                FontSystem::drawText(sw, sh, colAction, y, name,
-                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-
-                // Keyboard binding
-                const char* keyName = (bind.key >= 0) ? SDL_GetScancodeName(static_cast<SDL_Scancode>(bind.key)) : "";
-                // Mouse button name
-                char keyBuf[32] = "";
-                if (bind.key >= 0) std::snprintf(keyBuf, sizeof(keyBuf), "%s", keyName);
-                if (bind.mouseButton == MOUSE_LEFT)   std::snprintf(keyBuf, sizeof(keyBuf), "LMB");
-                if (bind.mouseButton == MOUSE_RIGHT)  std::snprintf(keyBuf, sizeof(keyBuf), "RMB");
-                if (bind.mouseButton == MOUSE_MIDDLE) std::snprintf(keyBuf, sizeof(keyBuf), "MMB");
-
-                Vec3 keyCol = sel && m_menu.bindKeyboard ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.5f, 0.5f, 0.5f};
-                if (sel && m_menu.bindCapture && m_menu.bindKeyboard) keyCol = {1.0f, 0.5f, 0.2f};
-                FontSystem::drawText(sw, sh, colKey, y, keyBuf[0] ? keyBuf : "-", keyCol, 1);
-
-                // Controller binding
-                char btnBuf[32] = "-";
-                if (bind.button >= 0) {
-                    if (bind.modifier >= 0) {
-                        std::snprintf(btnBuf, sizeof(btnBuf), "%s+%s",
-                            Input::buttonName(bind.modifier), Input::buttonName(bind.button));
-                    } else {
-                        std::snprintf(btnBuf, sizeof(btnBuf), "%s", Input::buttonName(bind.button));
-                    }
-                } else if (bind.axis >= 0) {
-                    std::snprintf(btnBuf, sizeof(btnBuf), "%s",
-                        bind.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT ? "ZR" :
-                        bind.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT  ? "ZL" : "Axis");
-                }
-                Vec3 btnCol = sel && !m_menu.bindKeyboard ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.5f, 0.5f, 0.5f};
-                if (sel && m_menu.bindCapture && !m_menu.bindKeyboard) btnCol = {1.0f, 0.5f, 0.2f};
-                FontSystem::drawText(sw, sh, colBtn, y, btnBuf, btnCol, 1);
-            } else if (i == OPT_STICK_SENS) {
+                drawRebindRow(sw, sh, colLabel, colBind, y, static_cast<GameAction>(i),
+                              sel, sel && m_menu.bindCapture, kb);
+            } else if (kb && i == REBIND_COUNT + 0) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Mouse Sensitivity: %.2f", Input::getMouseSensitivity());
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBind, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (!kb && i == REBIND_COUNT + 0) {
                 char buf[48];
                 std::snprintf(buf, sizeof(buf), "Stick Sensitivity: %.2f", Input::getStickSensitivity());
-                FontSystem::drawText(sw, sh, colAction, y, buf,
-                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
-            } else if (i == OPT_GYRO_SENS) {
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBind, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (!kb && i == REBIND_COUNT + 1) {
                 char buf[48];
                 std::snprintf(buf, sizeof(buf), "Gyro Sensitivity: %.1f", Input::getGyroSensitivity());
-                FontSystem::drawText(sw, sh, colAction, y, buf,
-                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
-            } else if (i == OPT_STICK_INVERT) {
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBind, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (!kb && i == REBIND_COUNT + 2) {
                 char buf[48];
                 std::snprintf(buf, sizeof(buf), "Stick Invert Y: %s", Input::getStickInvertY() ? "ON" : "OFF");
-                FontSystem::drawText(sw, sh, colAction, y, buf,
-                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
-            } else if (i == OPT_SPLIT_MODE) {
-                char buf[48];
-                std::snprintf(buf, sizeof(buf), "Split Screen: %s", m_splitMode == 0 ? "Horizontal" : "Vertical");
-                FontSystem::drawText(sw, sh, colAction, y, buf,
-                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
-            } else if (i == OPT_GYRO_INVERT) {
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBind, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (!kb && i == REBIND_COUNT + 3) {
                 char buf[48];
                 std::snprintf(buf, sizeof(buf), "Gyro Invert Y: %s", Input::getGyroInvertY() ? "ON" : "OFF");
-                FontSystem::drawText(sw, sh, colAction, y, buf,
-                    sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-                if (sel) FontSystem::drawText(sw, sh, colBtn, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
-            } else if (i == OPT_RESET) {
-                FontSystem::drawText(sw, sh, colAction, y, "Reset to Defaults",
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBind, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == RESET_ROW) {
+                FontSystem::drawText(sw, sh, colLabel, y,
+                    kb ? "Reset Keyboard Bindings" : "Reset Controller to Defaults",
                     sel ? Vec3{1.0f, 0.4f, 0.4f} : Vec3{0.5f, 0.3f, 0.3f}, 1);
             }
         }
 
-        // Hint text
         const char* hint = m_menu.bindCapture
-            ? "Press a key or controller button to bind  -  B / ESC to cancel"
+            ? (kb ? "Press a key to bind  -  B / ESC to cancel"
+                  : "Press a controller button to bind  -  B / ESC to cancel")
+            // Both variants now carry a slider row, so both mention Left/Right adjust.
             : "Up/Down select, Left/Right adjust, A/Enter rebind, B/ESC back";
         f32 hintW = FontSystem::textWidth(hint, 1);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.04f,
-                             hint, {0.5f, 0.5f, 0.6f}, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.04f, hint, {0.5f, 0.5f, 0.6f}, 1);
+    } else if (m_menu.subState == 18) {
+        // Options — Display submenu: borderless fullscreen + split-screen orientation + reset.
+        const char* title = "Display";
+        f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.9f, title, {0.9f, 0.8f, 0.3f}, 3);
+
+        f32 colLabel = sw * 0.3f, colHint = sw * 0.62f;
+        f32 listTop = sh * 0.62f, lineH = 40.0f * uiScale;
+        // Dynamic row layout — MUST match updateMenu's subState-18 handler. The monitor selector
+        // row only exists on multi-display rigs.
+        const bool multiDisplay = Window::getDisplayCount() > 1;
+        const u32 D_FULLSCREEN = 0;
+        const u32 D_DISPLAY    = multiDisplay ? 1u : 0xFFu;
+        const u32 D_SPLIT      = multiDisplay ? 2u : 1u;
+        const u32 D_RESET      = multiDisplay ? 3u : 2u;
+        const u32 D_TOTAL      = multiDisplay ? 4u : 3u;
+        for (u32 i = 0; i < D_TOTAL; i++) {
+            f32 y = listTop - static_cast<f32>(i) * lineH;
+            bool sel = (i == m_menu.subSelection);
+            char buf[64];
+            if (i == D_FULLSCREEN) {
+                std::snprintf(buf, sizeof(buf), "Fullscreen: %s",
+                              Window::isBorderlessFullscreen() ? "On (Borderless)" : "Off (Windowed)");
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colHint, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == D_DISPLAY) {
+                std::snprintf(buf, sizeof(buf), "Monitor: %s", Window::getDisplayName(Window::getDisplayIndex()));
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colHint, y, "<  Left/Right  >", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (i == D_SPLIT) {
+                std::snprintf(buf, sizeof(buf), "Split Screen: %s", m_splitMode == 0 ? "Horizontal" : "Vertical");
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colHint, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else {  // D_RESET
+                FontSystem::drawText(sw, sh, colLabel, y, "Reset Display to Defaults",
+                    sel ? Vec3{1.0f, 0.4f, 0.4f} : Vec3{0.5f, 0.3f, 0.3f}, 1);
+            }
+        }
+        const char* hint = "Up/Down select, Enter / Left-Right adjust, B/ESC back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.5f, 0.5f, 0.6f}, 1);
     } else if (m_menu.subState == 6) {
         // Save-slot selection screen — shown for both New Game and Continue.
         bool isContinue = (m_menu.msg && m_menu.msg[0] == 'c');

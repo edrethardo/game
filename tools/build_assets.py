@@ -152,6 +152,11 @@ def build_meshes():
         ["--type", "bones",          "--out", os.path.join(mesh_dir, "bones.obj")],
         ["--type", "brazier",        "--out", os.path.join(mesh_dir, "brazier.obj")],
         ["--type", "iron_maiden",    "--out", os.path.join(mesh_dir, "iron_maiden.obj")],
+        # Scatter decoration props — baked into floor sections (no collision, no draw-call cost)
+        ["--type", "rubble",         "--out", os.path.join(mesh_dir, "rubble.obj")],
+        ["--type", "rock",           "--out", os.path.join(mesh_dir, "rock.obj")],
+        ["--type", "mushroom",       "--out", os.path.join(mesh_dir, "mushroom.obj")],
+        ["--type", "crackbit",       "--out", os.path.join(mesh_dir, "crackbit.obj")],
         # Gadgets
         ["--type", "turret",         "--out", os.path.join(mesh_dir, "turret.obj")],
     ]
