@@ -1,0 +1,171 @@
+{
+  "generated_by": "pick_sfx.py",
+  "slots": {
+    "sfx_reload": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "kenney_rpg-audio/Audio/metalClick.ogg"
+    },
+    "sfx_weapon_axe": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 0.9,
+        "reverb": 0.0,
+        "stretch": 0.95,
+        "trim": false
+      },
+      "source": "kenney_rpg-audio/Audio/chop.ogg"
+    },
+    "sfx_weapon_bow": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_swishes/swishes/swish-3.wav"
+    },
+    "sfx_weapon_carbine": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_100-cc0-sfx/hit_03.ogg"
+    },
+    "sfx_weapon_claymore": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 8600,
+        "pitch": 0.69,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_rpg-sound-pack/RPG Sound Pack/battle/sword-unsheathe.wav"
+    },
+    "sfx_weapon_crossbow": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 9800,
+        "pitch": 0.76,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_thwack/PCM/thwack-01.wav"
+    },
+    "sfx_weapon_dagger": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 11800,
+        "pitch": 0.84,
+        "reverb": 0.0,
+        "stretch": 1.07,
+        "trim": false
+      },
+      "source": "kenney_rpg-audio/Audio/knifeSlice.ogg"
+    },
+    "sfx_weapon_molotov": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_swishes/swishes/swish-13.wav"
+    },
+    "sfx_weapon_pistol": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 12600,
+        "pitch": 0.64,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_100-cc0-sfx/shot_01.ogg"
+    },
+    "sfx_weapon_revolver": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_50-retro-synth/shot_02.ogg"
+    },
+    "sfx_weapon_smg": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 14000,
+        "pitch": 0.94,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_100-cc0-sfx/shot_02.ogg"
+    },
+    "sfx_weapon_staff": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 13700,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_80-rpg-sfx/spell_fire_01.ogg"
+    },
+    "sfx_weapon_sword": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 12800,
+        "pitch": 0.74,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "kenney_rpg-audio/Audio/knifeSlice.ogg"
+    },
+    "sfx_weapon_throw": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_swishes/swishes/swish-9.wav"
+    },
+    "sfx_weapon_wand": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 11900,
+        "pitch": 1.0,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_rpg-sound-pack/RPG Sound Pack/battle/magic1.wav"
+    }
+  },
+  "version": 1
+}

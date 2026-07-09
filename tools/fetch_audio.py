@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import json
 import math
 import os
 import shutil
@@ -36,6 +37,26 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GAME_ROOT = os.path.dirname(SCRIPT_DIR)
 CACHE_DIR = os.path.join(GAME_ROOT, "build", "audio_cache")
 OUTPUT_DIR = os.path.join(GAME_ROOT, "assets", "audio")
+
+
+# Slots hand-picked via pick_sfx.py are recorded in tools/sound_selection.json. fetch_audio
+# must NOT auto-map or pitch-shift those — pick_sfx.py owns them (applied in Phase 4 of main()).
+def _load_manifest_slots():
+    """Return the set of hand-picked slot stems (e.g. {"sfx_weapon_pistol", ...}).
+
+    Empty set if the manifest is absent or malformed.
+    """
+    path = os.path.join(SCRIPT_DIR, "sound_selection.json")
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path) as f:
+            m = json.load(f)
+        if isinstance(m, dict) and isinstance(m.get("slots"), dict):
+            return set(m["slots"].keys())
+    except (OSError, ValueError):
+        pass
+    return set()
 
 # ---------------------------------------------------------------------------
 # CC0 sound packs to download
@@ -740,8 +761,12 @@ def find_best_matches(wav_files):
     matches = {}
     # Track which source files have been used to avoid duplicates
     used_files = set()
+    manifest_slots = _load_manifest_slots()  # hand-picked slots are owned by pick_sfx.py
 
     for sfx_name, (keywords, preference) in SOUND_MAP.items():
+        # Hand-picked slots are rendered by pick_sfx.py from the manifest — never auto-match.
+        if sfx_name in manifest_slots:
+            continue
         # Check manual override first
         if sfx_name in MANUAL_OVERRIDES:
             override_path = os.path.join(CACHE_DIR, MANUAL_OVERRIDES[sfx_name])
@@ -824,11 +849,18 @@ def map_and_copy(pack_dirs, dry_run=False):
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    manifest_slots = _load_manifest_slots()  # owned by pick_sfx.py — never overwrite/pitch here
+    if manifest_slots:
+        print(f"  hand-picked (skipped): {len(manifest_slots)} slot(s) owned by pick_sfx.py")
+
     mapped = 0
     fallback = 0
     missing = 0
 
     for sfx_name in sorted(SOUND_MAP.keys()):
+        # Skip hand-picked slots (no copy, no normalize, no gen_audio fallback) — Phase 4 applies them.
+        if sfx_name in manifest_slots:
+            continue
         src = matches.get(sfx_name)
         # Use the source file's extension (OGG or WAV)
         src_ext = os.path.splitext(src)[1].lower() if src else ".wav"
@@ -979,12 +1011,16 @@ def main():
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg and not args.dry_run:
         print("\n--- Phase 3: Apply per-sound pitch shifts (ffmpeg) ---")
+        manifest_slots = _load_manifest_slots()  # never pitch-shift a hand-picked slot
         pitched = 0
         skipped = 0
         for fname in os.listdir(OUTPUT_DIR):
             if not fname.endswith((".wav", ".ogg")):
                 continue
             sfx_name = os.path.splitext(fname)[0]
+            if sfx_name in manifest_slots:
+                skipped += 1
+                continue  # hand-picked — pick_sfx.py owns its effects (applied in Phase 4)
             pitch = PITCH_SHIFTS.get(sfx_name, 0.6)  # default to old behavior if missing
 
             src = os.path.join(OUTPUT_DIR, fname)
@@ -1029,6 +1065,22 @@ def main():
         print(f"  Pitched {pitched} files, {skipped} kept at original pitch")
     elif not ffmpeg:
         print("\n[NOTE] ffmpeg not found — skipping pitch processing")
+
+    # Phase 4: render hand-picked slots from tools/sound_selection.json. They were skipped
+    # above (never keyword-mapped or pitch-shifted), so pick_sfx.py --apply reproduces each
+    # from its raw CC0 source with only the user's saved params. Run as a subprocess to avoid
+    # a circular import (pick_sfx imports fetch_audio); --apply needs only ffmpeg.
+    if not args.dry_run and _load_manifest_slots():
+        print("\n--- Phase 4: Apply hand-picked SFX (pick_sfx.py --apply) ---")
+        import subprocess
+        pick = os.path.join(SCRIPT_DIR, "pick_sfx.py")
+        if os.path.isfile(pick):
+            ret = subprocess.run([sys.executable, pick, "--apply"])
+            if ret.returncode != 0:
+                print("  WARNING: pick_sfx.py --apply reported an error; "
+                      "hand-picked slots may be stale.")
+        else:
+            print("  WARNING: tools/pick_sfx.py not found — hand-picked slots not applied.")
 
 
 if __name__ == "__main__":

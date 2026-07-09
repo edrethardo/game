@@ -13,11 +13,31 @@ Usage:
 """
 
 import argparse
+import json
 import math
 import os
 import random
 import struct
 import wave
+
+
+def _load_manifest_slots():
+    """Slot stems hand-picked via pick_sfx.py (tools/sound_selection.json).
+
+    Bulk regeneration (--all) must not clobber these — pick_sfx.py owns them. Returns e.g.
+    {"sfx_weapon_pistol", ...}; empty set if the manifest is absent/malformed.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sound_selection.json")
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path) as f:
+            m = json.load(f)
+        if isinstance(m, dict) and isinstance(m.get("slots"), dict):
+            return set(m["slots"].keys())
+    except (OSError, ValueError):
+        pass
+    return set()
 
 
 # ---------------------------------------------------------------------------
@@ -986,8 +1006,13 @@ def main():
         return
 
     if args.all:
+        manifest_slots = _load_manifest_slots()  # hand-picked slots owned by pick_sfx.py
         print(f"Generating {len(SOUND_PRESETS)} sound effects...")
         for name in SOUND_PRESETS:
+            # Don't clobber hand-picks on a bulk regen (explicit --type still generates them).
+            if ("sfx_" + name) in manifest_slots:
+                print(f"  skipping {name} (hand-picked — owned by pick_sfx.py)")
+                continue
             generate_sound(name)
         print("Done.")
         return
