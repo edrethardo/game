@@ -362,7 +362,7 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
 
         // Key symbol — show D-pad directions on controller, number keys on keyboard
         const char* skillLabel;
-        if (Input::isGamepadConnected(0)) {
+        if (Input::activeDeviceIsGamepad()) {
             static const char* dpadLabels[] = {"Up", "Rt", "Dn", "Lt"};
             skillLabel = dpadLabels[s];
         } else {

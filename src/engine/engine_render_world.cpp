@@ -712,7 +712,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
             f32 totalW = 22.0f + textW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.4f;
-            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::isGamepadConnected(0) ? "X" : "E", true);
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::activeDeviceIsGamepad() ? "X" : "E", true);
             FontSystem::drawText(sw, sh, cx + 22.0f, cy, doorStr, {0.3f, 1.0f, 0.4f}, 1);
         }
     }
@@ -769,7 +769,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
             f32 totalW = 22.0f + hintW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.35f;
-            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::isGamepadConnected(0) ? "X" : "E", true);
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::activeDeviceIsGamepad() ? "X" : "E", true);
             FontSystem::drawText(sw, sh, cx + 22.0f, cy, hintBuf, rColor, 1);
         }
     }

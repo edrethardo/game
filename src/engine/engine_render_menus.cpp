@@ -144,7 +144,7 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - dw) * 0.5f, sh * 0.30f,
                              desc, {0.7f, 0.7f, 0.8f}, 1);
 
-        const char* hint = Input::isGamepadConnected(0)
+        const char* hint = Input::activeDeviceIsGamepad()
             ? "D-pad, A to confirm, B to go back"
             : "Up/Down, Enter to confirm, ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
@@ -174,7 +174,7 @@ void Engine::renderMenu() {
             FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale, subLabels[i], tc, 2);
         }
 
-        const char* hint = Input::isGamepadConnected(0)
+        const char* hint = Input::activeDeviceIsGamepad()
             ? "D-pad, A to confirm, B to go back"
             : "Up/Down, Enter to confirm, ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
@@ -223,7 +223,7 @@ void Engine::renderMenu() {
                                  statLine, {0.6f, 0.8f, 0.6f}, 2);
         }
 
-        const char* hint2 = Input::isGamepadConnected(0)
+        const char* hint2 = Input::activeDeviceIsGamepad()
             ? "D-pad to select, A to confirm, B to go back"
             : "Up/Down to select, Enter to confirm, ESC to go back";
         f32 hintW2 = FontSystem::textWidth(hint2, 2);
@@ -250,7 +250,7 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - waitW) * 0.5f, sh * 0.42f,
                              waitText, {0.7f, 0.7f, 0.9f}, 2);
 
-        bool pad = Input::isGamepadConnected(0);
+        bool pad = Input::activeDeviceIsGamepad();
         const char* soloText = pad ? "Press + to start solo" : "Press Enter to start solo";
         f32 soloW = FontSystem::textWidth(soloText, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - soloW) * 0.5f, sh * 0.32f,
@@ -515,7 +515,7 @@ void Engine::renderMenu() {
             FontSystem::drawText(sw, sh, sw * 0.88f, sh * 0.88f, scrollBuf, {0.5f, 0.5f, 0.6f}, 1);
         }
 
-        const char* slotHint = Input::isGamepadConnected(0)
+        const char* slotHint = Input::activeDeviceIsGamepad()
             ? "D-pad to select, A to confirm, B to go back"
             : "Up/Down to select, Enter/Click to confirm, ESC to go back";
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
@@ -813,7 +813,7 @@ void Engine::renderMenu() {
                 selected ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f}, 2);
         }
 
-        const char* hint = Input::isGamepadConnected(0)
+        const char* hint = Input::activeDeviceIsGamepad()
             ? "D-pad to select, A to confirm"
             : "Up/Down to select, Enter to confirm";
         f32 hintW = FontSystem::textWidth(hint, 1);

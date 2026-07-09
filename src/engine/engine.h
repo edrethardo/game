@@ -221,6 +221,16 @@ private:
     s8          m_deathHover = -1;
     bool        m_deathCursorFree = false;
 
+    // Menu "last input device" gate. While keyboard/controller drives a menu-like screen (main
+    // menu, options, class-select, save slots, free-play, the SP death screen, the pause menu) the
+    // mouse pointer neither hovers nor clicks and the OS cursor is hidden; it re-activates only when
+    // the mouse is OBVIOUSLY used (moved >= MENU_MOUSE_MOVE_PX, or a click). updateMenuMouseActive()
+    // maintains m_menuMouseActive once per render frame. m_menuMouseDeltaPrimed discards the one
+    // bogus mouse delta SDL emits when relative-mouse mode is switched off on entry from gameplay.
+    static constexpr s32 MENU_MOUSE_MOVE_PX = 4;   // Manhattan px to count as intentional motion
+    bool        m_menuMouseActive     = false;
+    bool        m_menuMouseDeltaPrimed = false;
+
     // Gameplay input (movement/aim/fire/skills/block/dodge) is frozen while a blocking UI is
     // open — the inventory OR the in-game pause menu (m_menu.confirmQuit). In SP the pause
     // early-returns and freezes the whole world; in MP the world keeps running for everyone
@@ -829,6 +839,10 @@ private:
 
     // Menu/lobby
     void updateMenu(f32 dt);
+    // Maintains the menu "last input device" gate (see m_menuMouseActive) once per render frame and
+    // returns whether the mouse pointer should drive menus this frame. Also hides/shows the OS
+    // cursor to match. Call at the top of every cursor-free screen's update (menu, death, pause).
+    bool updateMenuMouseActive();
     // Rebind capture for the options submenus. keyboardMode=true binds only keys (Keyboard & Mouse
     // submenu); false binds only controller buttons/axes (Controller submenu). Sets m_menu.bindCapture
     // false once bound or cancelled (B/ESC).

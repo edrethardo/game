@@ -182,7 +182,7 @@ void HUD::drawKeySymbol(u32 sw, u32 sh, f32 x, f32 y,
                           const char* label, bool highlighted)
 {
     // Auto-detect controller button labels and draw proper symbols
-    if (Input::isGamepadConnected(0) && isControllerLabel(label)) {
+    if (Input::activeDeviceIsGamepad() && isControllerLabel(label)) {
         drawControllerButton(sw, sh, x, y, label, highlighted);
         return;
     }

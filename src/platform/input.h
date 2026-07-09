@@ -58,6 +58,15 @@ namespace Input {
     bool isMouseButtonPressed(u8 button);
     bool isMouseButtonReleased(u8 button);
     void setRelativeMouseMode(bool enabled);
+    // Show/hide the OS cursor (menus hide it while keyboard/controller drives them). Edge-tracked
+    // internally, so calling it every frame is cheap. setRelativeMouseMode() re-shows the cursor as
+    // a baseline whenever it runs, so a menu that hid the cursor can never leave it stuck hidden
+    // after any state transition (which all go through setRelativeMouseMode).
+    void setCursorVisible(bool visible);
+    // True exactly once after relative-mouse mode goes ON→OFF — i.e. gameplay handed control to a
+    // cursor screen (menu/pause/death). Menus consume this to re-arm their "last input device" gate
+    // (start with the pointer disabled + discard the bogus first mouse delta the mode switch emits).
+    bool consumeRelativeReleased();
     s32  getMouseWheelDelta();
     void handleMouseWheel(s32 y);
 
@@ -85,6 +94,18 @@ namespace Input {
     bool isButtonPressed(s32 gamepadIndex, s32 button);  // frame-edge detection
     bool isGamepadConnected(s32 gamepadIndex = 0);
     void handleControllerEvent(const SDL_Event& event);
+
+    // Which input device the player is ACTIVELY using — distinct from isGamepadConnected() (physical
+    // presence). On Steam Deck a gamepad is ALWAYS connected, so presence can't decide whether to
+    // show keyboard/mouse vs controller button prompts; this tracks per-frame activity (last device
+    // wins, sticky), updated at the end of update(). Use it to pick which glyphs/prompts to draw.
+    // NOTE: orthogonal to the menu mouse gate (Engine::updateMenuMouseActive), which is a
+    // mouse-vs-everything axis — a DIFFERENT grouping; don't conflate the two.
+    // Caveat: the Steam Deck's trackpads/gyro surface as SDL mouse motion, so trackpad use may read
+    // as keyboard/mouse (accepted limitation; filtered by a small movement threshold).
+    enum struct InputDevice : u8 { KeyboardMouse, Gamepad };
+    InputDevice activeDevice();
+    bool        activeDeviceIsGamepad();   // convenience: activeDevice() == Gamepad
 
     // Analog stick with deadzone applied (returns 0 inside deadzone)
     f32  getStickX(bool rightStick, s32 gamepadIndex = 0);

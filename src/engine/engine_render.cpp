@@ -234,7 +234,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
 
             f32 cy = sh * 0.26f;
             f32 cx = static_cast<f32>(sw) * 0.5f;
-            bool qp = Input::isGamepadConnected(0);
+            bool qp = Input::activeDeviceIsGamepad();
             HUD::drawKeySymbol(sw, sh, cx - 60.0f, cy, qp ? "A" : "Ent", true);
             FontSystem::drawText(sw, sh, cx - 30.0f, cy + 4.0f, "Yes",
                                  m_deathHover == 0 ? kHoverCol : Vec3{0.8f, 0.8f, 0.8f}, 1);
@@ -246,7 +246,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
             f32 cx = static_cast<f32>(sw) * 0.5f;
             f32 optY = sh * 0.35f;
 
-            bool pad = Input::isGamepadConnected(0);
+            bool pad = Input::activeDeviceIsGamepad();
             // Respawn is the preferred option — render it big (scale 2) and bright green so
             // players read it as "do this". Baseline stays at optY so deathOptionHit (row 0,
             // band [rowY-6, rowY+18]) still covers it without a hit-test change.
@@ -789,7 +789,7 @@ void Engine::render(f32 alpha) {
         FontSystem::drawText(hudW, hudH, (hudW - dw) * 0.5f, hudH * 0.55f,
                              deathText, {0.8f, 0.1f, 0.1f}, 3);
 
-        bool pad = Input::isGamepadConnected(0);
+        bool pad = Input::activeDeviceIsGamepad();
         // Networked MP frees the cursor while dead (engine_update.cpp), so the prompt is
         // clickable; advertise that. Split-screen co-op keeps the cursor captured (key only).
         const char* respawnText = pad ? "Press A to respawn"

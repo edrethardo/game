@@ -170,14 +170,79 @@ void Engine::captureRebind(bool keyboardMode) {
 }
 
 // ---------------------------------------------------------------------------
+// Menu "last input device" gate — see m_menuMouseActive / MENU_MOUSE_MOVE_PX (engine.h).
+// Runs its logic ONCE per render frame (m_firstTick guard: menu/death/pause updates can run several
+// fixed-timestep substeps, but this frame's mouse delta and pressed-edges are identical across them,
+// and the edges are cleared after substep 1). The mouse takes over on OBVIOUS use (moved past the
+// threshold, or a button press/hold); any keyboard/controller menu-nav input hands control back and
+// hides the cursor; otherwise the state is sticky. Shared by updateMenu and the death/pause menus.
+// ---------------------------------------------------------------------------
+bool Engine::updateMenuMouseActive() {
+    if (m_firstTick) {
+        // A fresh entry from gameplay (relative-mouse mode just turned OFF) re-arms the gate: start
+        // with the pointer disabled, and discard the one bogus mouse delta the mode switch emits.
+        if (Input::consumeRelativeReleased()) {
+            m_menuMouseActive      = false;
+            m_menuMouseDeltaPrimed = false;
+        }
+
+        s32 dx = 0, dy = 0;
+        Input::getMouseDelta(dx, dy);
+        if (!m_menuMouseDeltaPrimed) {
+            m_menuMouseDeltaPrimed = true;   // swallow the first delta after entry; buttons/nav still count
+            dx = dy = 0;
+        }
+        s32 moved = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);   // Manhattan distance
+
+        bool mouseUsed = (moved >= MENU_MOUSE_MOVE_PX)
+                      || Input::isMouseButtonPressed(MOUSE_LEFT)
+                      || Input::isMouseButtonPressed(MOUSE_RIGHT)
+                      || Input::isMouseButtonDown(MOUSE_LEFT);   // holding keeps it active on a still frame
+
+        // Keyboard/controller menu navigation this frame — the exact set the menus actually read
+        // (deliberately NOT a blanket "any key", which would let unrelated keys — IP-entry digits,
+        // debug keys — hide the cursor mid-use). Covers both couch pads (0 and 1).
+        bool nav =
+            Input::isActionPressed(GameAction::MENU_UP)      ||
+            Input::isActionPressed(GameAction::MENU_DOWN)    ||
+            Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isActionPressed(GameAction::MENU_BACK)    ||
+            Input::isKeyPressed(SDL_SCANCODE_W)     || Input::isKeyPressed(SDL_SCANCODE_S)     ||
+            Input::isKeyPressed(SDL_SCANCODE_A)     || Input::isKeyPressed(SDL_SCANCODE_D)     ||
+            Input::isKeyPressed(SDL_SCANCODE_UP)    || Input::isKeyPressed(SDL_SCANCODE_DOWN)  ||
+            Input::isKeyPressed(SDL_SCANCODE_LEFT)  || Input::isKeyPressed(SDL_SCANCODE_RIGHT) ||
+            Input::isKeyPressed(SDL_SCANCODE_SPACE) || Input::isKeyPressed(SDL_SCANCODE_RETURN)||
+            Input::isMenuStickPressed(Input::StickNav::Up)    || Input::isMenuStickPressed(Input::StickNav::Down)  ||
+            Input::isMenuStickPressed(Input::StickNav::Left)  || Input::isMenuStickPressed(Input::StickNav::Right) ||
+            Input::isMenuStickPressed(Input::StickNav::Up, 1) || Input::isMenuStickPressed(Input::StickNav::Down, 1)  ||
+            Input::isMenuStickPressed(Input::StickNav::Left,1)|| Input::isMenuStickPressed(Input::StickNav::Right,1) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)    || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)          ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP)    || Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A);
+
+        if (mouseUsed)   m_menuMouseActive = true;
+        else if (nav)    m_menuMouseActive = false;
+        // else: leave sticky (last device wins)
+
+        Input::setCursorVisible(m_menuMouseActive);   // no-ops unless the visibility actually changes
+    }
+    return m_menuMouseActive;
+}
+
+// ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
 void Engine::updateMenu(f32 dt) {
     if (m_menu.msgTimer > 0.0f) m_menu.msgTimer -= dt;
 
     // --- Unified mouse handling for all menu screens ---
-    // Release mouse capture so cursor is visible, compute hover + click once.
+    // Release mouse capture so the cursor CAN be shown; the "last input device" gate below decides
+    // whether the pointer actually drives the menu this frame (and whether the cursor is visible).
     Input::setRelativeMouseMode(false);
+    bool mouseActive = updateMenuMouseActive();   // false while keyboard/controller is in use
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
@@ -190,16 +255,18 @@ void Engine::updateMenu(f32 dt) {
     else if (m_menu.subState == 6)
         mouseItemCount = m_menu.subSelection; // pass current selection for scroll offset calc
 
-    s32 mouseHit = menuMouseForState(sw, sh, uiScale, m_menu.subState, mouseItemCount);
+    // Only hit-test when the pointer is active — otherwise a resting cursor must not hover/click.
+    s32 mouseHit = mouseActive ? menuMouseForState(sw, sh, uiScale, m_menu.subState, mouseItemCount) : -1;
 
-    // Apply hover: update selection when mouse moves over an item
+    // Apply hover: update selection when mouse moves over an item (mouseActive-gated via mouseHit)
     u8* selPtr = (m_menu.subState == 0) ? &m_menu.selection : &m_menu.subSelection;
     if (mouseHit >= 0 && static_cast<u8>(mouseHit) != *selPtr) {
         *selPtr = static_cast<u8>(mouseHit);
         AudioSystem::play(SfxId::MENU_HOVER);
     }
 
-    // mouseConfirm is true when the user clicks a valid menu item
+    // mouseConfirm is true when the user clicks a valid menu item. A click also activates the gate
+    // in this same frame (updateMenuMouseActive treats a press as obvious use), so clicks never miss.
     bool mouseConfirm = (mouseHit >= 0 && mouseClicked);
 
     // Sub-menu for single player: New Game / Continue
@@ -539,7 +606,9 @@ void Engine::updateMenu(f32 dt) {
         }
 
         // --- mouse: hover selects a row; left-click on a row's right/left half steps its value ---
-        {
+        // Gated on the last-input-device flag so a resting pointer can't hijack the row/value while
+        // the player uses keyboard/controller (mouseActive comes from updateMenuMouseActive above).
+        if (mouseActive) {
             s32 mx, my; Input::getMousePosition(mx, my);
             f32 uiScale = static_cast<f32>(Window::getHeight()) / 720.0f;
             f32 sw = static_cast<f32>(Window::getWidth());

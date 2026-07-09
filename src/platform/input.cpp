@@ -32,6 +32,14 @@ static bool s_stickInvertY     = false;
 static bool s_gyroInvertY      = true;
 static f32  s_mouseSensitivity = Input::MOUSE_SENS_DEFAULT; // multiplier on base mouse rad/px
 
+// Active-input-device tracking (see input.h). Declared up here so init() (below) can set the
+// launch default. Thresholds are deliberately above the movement deadzones so a resting/drifting
+// stick or tiny mouse jitter never flips the on-screen glyphs.
+static Input::InputDevice s_activeDevice = Input::InputDevice::KeyboardMouse; // fixed up in init()
+static constexpr s32 DEVICE_MOUSE_MOVE_PX     = 6;    // Manhattan px/frame to count as mouse use
+static constexpr f32 DEVICE_STICK_DEADZONE    = 0.5f; // normalized stick magnitude for "pad in use"
+static constexpr f32 DEVICE_TRIGGER_THRESHOLD = 0.5f;
+
 // Trailing "settings" rows appended to controls.json — sentinel indices ABOVE GameAction::COUNT
 // so older readers (which guard `idx < COUNT`) skip them, and so a controls.json written before
 // this feature simply leaves the defaults in place. Lets us persist look sensitivity + invert-Y
@@ -229,6 +237,16 @@ void Input::init() {
         }
     }
 
+    // Default active device: if a pad is already connected at launch, start showing controller
+    // glyphs (preserves Steam Deck "controller by default" until the player touches keyboard/mouse).
+    // Runs AFTER the controller-open loop so s_controllers[] is populated.
+#ifdef __SWITCH__
+    s_activeDevice = InputDevice::Gamepad;
+#else
+    s_activeDevice = InputDevice::KeyboardMouse;
+    for (s32 i = 0; i < MAX_GAMEPADS; ++i) if (s_controllers[i]) { s_activeDevice = InputDevice::Gamepad; break; }
+#endif
+
     // Try to load saved bindings
     loadBindings(ASSET_PATH("assets/config/controls.json"));
 
@@ -244,6 +262,9 @@ void Input::shutdown() {
     }
     LOG_INFO("Input system shut down");
 }
+
+Input::InputDevice Input::activeDevice()      { return s_activeDevice; }
+bool Input::activeDeviceIsGamepad()           { return s_activeDevice == InputDevice::Gamepad; }
 
 void Input::update() {
     // Copy current state to previous
@@ -338,6 +359,42 @@ void Input::update() {
     // Gyro cache: run the IMU drift filter and refresh the per-player look delta once per frame
     // (both platforms — the PC and Switch definitions of updateGyroCache live above).
     updateGyroCache();
+
+    // --- Active input device (KBM vs Gamepad) --------------------------------------------------
+    // Decide which device the player is actively using so prompts/glyphs show the matching symbols
+    // even when a controller is also connected (Steam Deck). LEVEL detection: a held key or pushed
+    // stick counts as "in use" (resting devices read 0 thanks to the thresholds). Last-device-wins:
+    // switch only when exactly one device is active this frame; hold on both/neither.
+#ifdef __SWITCH__
+    s_activeDevice = InputDevice::Gamepad;   // console: no KBM, and the pad path is libnx (above)
+#else
+    bool kbmActive = false;
+    for (s32 i = 0; i < NUM_KEYS && !kbmActive; ++i) if (s_currentKeys[i]) kbmActive = true;
+    if (!kbmActive) {
+        s32 md = (s_mouseDX < 0 ? -s_mouseDX : s_mouseDX) + (s_mouseDY < 0 ? -s_mouseDY : s_mouseDY);
+        kbmActive = (md >= DEVICE_MOUSE_MOVE_PX);
+        for (s32 i = 0; i < NUM_MOUSE_BUTTONS && !kbmActive; ++i) if (s_currentMouseButtons[i]) kbmActive = true;
+    }
+
+    bool padActive = false;
+    for (s32 c = 0; c < MAX_GAMEPADS && !padActive; ++c) {
+        if (!s_controllers[c]) continue;
+        for (s32 b = 0; b < NUM_PAD_BUTTONS && !padActive; ++b) if (s_currentPadButtons[c][b]) padActive = true;
+        // Sticks rest near 0 and swing both ways → magnitude test past a generous deadzone.
+        if (!padActive && (fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_LEFTX])  >= DEVICE_STICK_DEADZONE ||
+                           fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_LEFTY])  >= DEVICE_STICK_DEADZONE ||
+                           fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_RIGHTX]) >= DEVICE_STICK_DEADZONE ||
+                           fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_RIGHTY]) >= DEVICE_STICK_DEADZONE))
+            padActive = true;
+        // Triggers rest near 0 → one-sided threshold.
+        if (!padActive && (s_currentAxisValues[c][SDL_CONTROLLER_AXIS_TRIGGERLEFT]  >= DEVICE_TRIGGER_THRESHOLD ||
+                           s_currentAxisValues[c][SDL_CONTROLLER_AXIS_TRIGGERRIGHT] >= DEVICE_TRIGGER_THRESHOLD))
+            padActive = true;
+    }
+
+    if (kbmActive != padActive)   // exactly one device active → adopt it (else keep the last one)
+        s_activeDevice = kbmActive ? InputDevice::KeyboardMouse : InputDevice::Gamepad;
+#endif
 }
 
 // Consume all "just pressed" edges so subsequent accumulator ticks see them as held,
@@ -392,8 +449,33 @@ bool Input::isMouseButtonReleased(u8 button) {
     if (button == 0 || button > NUM_MOUSE_BUTTONS) return false;
     return !s_currentMouseButtons[button - 1] && s_previousMouseButtons[button - 1];
 }
+// Relative-mouse mode is the gameplay aim mode (cursor hidden + warped). Menus/pause/death turn it
+// OFF. We track the state so we can (a) latch the ON→OFF edge — "gameplay just handed off to a
+// cursor screen" — for the menu input-mode gate, and (b) re-show the cursor as a baseline on every
+// transition so a menu that hid it can't strand it hidden on the next screen.
+static bool s_relativeMode     = false;
+static bool s_relativeReleased = false;  // latched ON->OFF edge, consumed by consumeRelativeReleased()
+static bool s_cursorVisible    = true;    // our SDL_ShowCursor state (edge-tracked)
+
 void Input::setRelativeMouseMode(bool enabled) {
+    if (s_relativeMode && !enabled) s_relativeReleased = true;  // gameplay -> cursor screen edge
+    s_relativeMode = enabled;
     SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
+    // Baseline: any mode transition restores a visible cursor (relative mode hides the real cursor
+    // while active anyway). The menu gate is the only thing that hides it, via setCursorVisible.
+    if (!s_cursorVisible) { SDL_ShowCursor(SDL_ENABLE); s_cursorVisible = true; }
+}
+
+void Input::setCursorVisible(bool visible) {
+    if (visible == s_cursorVisible) return;   // only hit SDL on a transition
+    s_cursorVisible = visible;
+    SDL_ShowCursor(visible ? SDL_ENABLE : SDL_DISABLE);
+}
+
+bool Input::consumeRelativeReleased() {
+    bool v = s_relativeReleased;
+    s_relativeReleased = false;
+    return v;
 }
 s32 Input::getMouseWheelDelta() { return s_mouseWheelY; }
 void Input::handleMouseWheel(s32 y) { s_mouseWheelY += y; }
@@ -549,6 +631,11 @@ void Input::handleControllerEvent(const SDL_Event& event) {
                 }
             }
         }
+        // If that was the last pad, revert glyphs to keyboard/mouse (the only device left) so we're
+        // never stranded on controller prompts with no controller present.
+        bool anyPad = false;
+        for (s32 k = 0; k < MAX_GAMEPADS; ++k) if (s_controllers[k]) { anyPad = true; break; }
+        if (!anyPad) s_activeDevice = InputDevice::KeyboardMouse;
     }
 }
 

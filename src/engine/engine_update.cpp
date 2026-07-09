@@ -136,9 +136,13 @@ void Engine::update(f32 dt) {
         // keyboard/gamepad bindings. The hit-test layout mirrors engine_render.cpp.
         const u32  dsw    = Window::getWidth();
         const u32  dsh    = Window::getHeight();
-        const bool dclick = Input::isMouseButtonPressed(MOUSE_LEFT);
+        // Last-input-device gate: the pointer hovers/clicks the death screen only when the mouse is
+        // actually in use (see updateMenuMouseActive); keyboard/gamepad bindings always work, and the
+        // cursor stays hidden while they drive.
+        const bool mouseActive = updateMenuMouseActive();
+        const bool dclick = mouseActive && Input::isMouseButtonPressed(MOUSE_LEFT);
         if (m_menu.confirmQuit) {
-            const s8 ch = deathConfirmHit(dsw, dsh);
+            const s8 ch = mouseActive ? deathConfirmHit(dsw, dsh) : static_cast<s8>(-1);
             m_deathHover = ch;
             // "Are you sure?" confirmation before quitting to menu
             if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_Y)
@@ -155,7 +159,7 @@ void Engine::update(f32 dt) {
                 m_deathHover = -1;
             }
         } else {
-            const s8 hov = deathOptionHit(dsw, dsh);
+            const s8 hov = mouseActive ? deathOptionHit(dsw, dsh) : static_cast<s8>(-1);
             if (hov != m_deathHover) { m_deathHover = hov; if (hov >= 0) AudioSystem::play(SfxId::MENU_HOVER); }
             // A / Space / click = revive at entrance
             if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
@@ -234,8 +238,11 @@ void Engine::update(f32 dt) {
         // Mouse control: the cursor was freed when the pause opened. Hover selects an option
         // and a left-click confirms it, alongside the keyboard/gamepad bindings. Layout-matched
         // hit-test in pauseMenuHit (mirrors engine_hud.cpp).
-        const s8   ph     = pauseMenuHit(Window::getWidth(), Window::getHeight());
-        const bool pclick = Input::isMouseButtonPressed(MOUSE_LEFT);
+        // Last-input-device gate (see updateMenuMouseActive): a resting pointer must not hijack the
+        // pause selection while the player uses keyboard/controller; the cursor hides while they do.
+        const bool mouseActive = updateMenuMouseActive();
+        const s8   ph     = mouseActive ? pauseMenuHit(Window::getWidth(), Window::getHeight()) : static_cast<s8>(-1);
+        const bool pclick = mouseActive && Input::isMouseButtonPressed(MOUSE_LEFT);
         if (ph >= 0 && static_cast<u8>(ph) != m_menu.subSelection) {
             m_menu.subSelection = static_cast<u8>(ph);
             AudioSystem::play(SfxId::MENU_HOVER);

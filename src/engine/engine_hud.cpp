@@ -122,7 +122,7 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
     }
 
     // Inventory button hints (always visible when inventory is open)
-    if (Input::isGamepadConnected(0)) {
+    if (Input::activeDeviceIsGamepad()) {
         f32 hintY = 10.0f;
         f32 hintX = 10.0f;
         HUD::drawKeySymbol(sw, sh, hintX, hintY, "A", true);
@@ -142,7 +142,7 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
         f32 alpha = 1.0f;
         bool mouseLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
 
-        bool ep = Input::isGamepadConnected(0);
+        bool ep = Input::activeDeviceIsGamepad();
         const char* eqText = ep ? "Press A to equip" : "Double-click to equip";
         f32 textW = FontSystem::textWidth(eqText, 3);
         f32 totalW = 22.0f + 6.0f + textW;
@@ -223,7 +223,7 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
             HUD::EquipSkillSlot equipSlots[6];
             u32 equipCount = 0;
 
-            bool eqPad = Input::isGamepadConnected(0);
+            bool eqPad = Input::activeDeviceIsGamepad();
             // Boots (F key / L+A)
             if (m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
                 const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
@@ -322,7 +322,7 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
 
         // Skill activation button icon
         bool skillReady = (m_classSkillStates[slot].cooldownTimer <= 0.0f && unlocked);
-        if (Input::isGamepadConnected(0))
+        if (Input::activeDeviceIsGamepad())
             HUD::drawKeySymbol(sw, sh, rmbX, rmbY + 8.0f * hs5, "R", skillReady);
         else
             HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8.0f * hs5, 1, skillReady);
@@ -448,7 +448,7 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         f32 cx = static_cast<f32>(sw) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.72f;
 
-        bool cp = Input::isGamepadConnected(0);
+        bool cp = Input::activeDeviceIsGamepad();
         // Attack button
         if (cp) HUD::drawKeySymbol(sw, sh, cx - 120.0f, cy, "ZR", mouseLit);
         else    HUD::drawMouseButton(sw, sh, cx - 120.0f, cy, 0, mouseLit);
@@ -469,7 +469,7 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         if (hasShield) {
             f32 alpha = 1.0f;
             bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
-            bool cp = Input::isGamepadConnected(0);
+            bool cp = Input::activeDeviceIsGamepad();
             const char* text = cp ? "Block" : "Block";
             f32 textW = FontSystem::textWidth(text, 3);
             f32 totalW = 28.0f + textW;
@@ -486,7 +486,7 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
     if (m_shieldBlockedOnce && !m_dodgeRolledOnce) {
         f32 alpha = 1.0f;
         bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
-        bool cp = Input::isGamepadConnected(0);
+        bool cp = Input::activeDeviceIsGamepad();
         const char* text = "Dodge Roll";
         f32 textW = FontSystem::textWidth(text, 3);
         f32 totalW = 28.0f + textW;
@@ -515,7 +515,7 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.65f;
 
-        HUD::drawKeySymbol(sw, sh, cx, cy, Input::isGamepadConnected(0) ? "+" : "Tab", keyLit);
+        HUD::drawKeySymbol(sw, sh, cx, cy, Input::activeDeviceIsGamepad() ? "+" : "Tab", keyLit);
         FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
                              {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 3);
     }
@@ -700,7 +700,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             ps.urgent            = HudCooldown::potionUrgent(hpFrac, m_potionCooldown,
                                                              GameConst::LOW_HP_FRACTION);
             ps.pulsePhase        = m_statsTimer;
-            ps.keyLabel          = Input::isGamepadConnected(0) ? "B" : "Q";
+            ps.keyLabel          = Input::activeDeviceIsGamepad() ? "B" : "Q";
             // x = health bar x0(20) + barW(200) + 8px gap; y = 10px centers the 46px cell on
             // the health+energy stack and keeps its top clear of the status-icon row above.
             HUD::drawPotionFlask(sw, sh, 228.0f * phs, 10.0f * phs, ps);
@@ -831,7 +831,7 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             FontSystem::drawText(sw, sh, cx - tw * 0.5f, y + 7.0f, options[i], tc, 2);
         }
 
-        const char* hint = Input::isGamepadConnected(0)
+        const char* hint = Input::activeDeviceIsGamepad()
             ? "D-pad, A to select, B to resume"
             : "Up/Down, Enter to select, ESC to resume";
         f32 hintW = FontSystem::textWidth(hint, 1);
