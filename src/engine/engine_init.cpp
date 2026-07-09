@@ -10,6 +10,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/user_paths.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -163,11 +164,21 @@ void Engine::init() {
         return;
     }
 
+    // Relocate legacy CWD / assets-config user files (saves, progression, settings) into the
+    // per-user data dir on first run, so the loads below and Steam Cloud both see them. Desktop
+    // only; no-op on Switch. Runs after Window::init (SDL is up) and before any user-file load/scan.
+    Platform::migrateLegacyUserData(MAX_SAVE_SLOTS);
+
     AudioSystem::init(); // non-fatal — game works without audio
     AudioSystem::setMusicVolume(AudioSettings::DEFAULT_MUSIC); // ambient music sits below SFX
     // Restore the player's saved volume levels — overrides the defaults just set. No-op on first
     // launch (missing file keeps defaults). Must come AFTER the setMusicVolume default above.
-    AudioSystem::loadSettings(ASSET_PATH("assets/config/audio.json"));
+#ifdef __SWITCH__
+    AudioSystem::loadSettings(ASSET_PATH("assets/config/audio.json"));  // romfs default on Switch
+#else
+    char audioCfgPath[512];
+    AudioSystem::loadSettings(Platform::userDataPath("audio.json", audioCfgPath, sizeof(audioCfgPath)));
+#endif
 
     if (!GLContext::init(Window::getHandle())) {
         LOG_ERROR("Failed to initialize GL context");
@@ -177,8 +188,10 @@ void Engine::init() {
 #ifndef __SWITCH__
     // Restore the saved borderless-fullscreen preference now that the window + GL context exist,
     // so the very first rendered frame is at the right viewport. Desktop-only (Switch is always
-    // fullscreen). No-op on first launch (missing file keeps the windowed default).
-    Window::loadVideoSettings(ASSET_PATH("assets/config/video.cfg"));
+    // fullscreen). No-op on first launch (missing file keeps the windowed default). Read from the
+    // per-user dir; video.cfg is deliberately NOT Steam-Cloud-synced (display is machine-specific).
+    char videoCfgPath[512];
+    Window::loadVideoSettings(Platform::userDataPath("video.cfg", videoCfgPath, sizeof(videoCfgPath)));
 #endif
 
     Clock::init();
@@ -235,7 +248,8 @@ void Engine::init() {
 
     // Load global difficulty unlock so the menu can gray out locked tiers
     {
-        FILE* f = std::fopen("difficulty_unlock.dat", "rb");
+        char diffPath[512];
+        FILE* f = std::fopen(Platform::userDataPath("difficulty_unlock.dat", diffPath, sizeof(diffPath)), "rb");
         if (f) {
             (void)std::fread(&m_highestUnlocked, 1, 1, f);
             std::fclose(f);

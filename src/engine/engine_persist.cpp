@@ -11,6 +11,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/user_paths.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -117,8 +118,11 @@ static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
 const char* Engine::getSaveSlotPath(u8 slot, char* buf, u32 bufSize) {
     // Slots are 1-based externally; clamp to valid range just in case.
     if (slot < 1 || slot > MAX_SAVE_SLOTS) slot = 1;
-    std::snprintf(buf, bufSize, "save_%02u.dat", static_cast<u32>(slot));
-    return buf;
+    // Route through the per-user data dir: desktop -> Steam-Cloud-synced pref path; Switch ->
+    // userDataDir() is empty so this collapses to the bare CWD filename (unchanged behavior).
+    char name[24];
+    std::snprintf(name, sizeof(name), "save_%02u.dat", static_cast<u32>(slot));
+    return Platform::userDataPath(name, buf, bufSize);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +130,7 @@ const char* Engine::getSaveSlotPath(u8 slot, char* buf, u32 bufSize) {
 // ---------------------------------------------------------------------------
 
 void Engine::scanSaveSlots() {
-    char path[32];
+    char path[512];  // holds the full per-user data dir prefix + save_NN.dat
     for (u32 i = 0; i < MAX_SAVE_SLOTS; i++) {
         SaveSlotInfo& info = m_saveSlots[i];
         info = {};  // default: does not exist
@@ -195,10 +199,15 @@ u8 Engine::firstFreeSaveSlot() {
 void Engine::saveCharacter(u8 lane, u8 slot) {
     if (slot < 1 || slot > MAX_SAVE_SLOTS || lane >= MAX_LOCAL_PLAYERS) return;
 
-    char path[32];
+    char path[512];  // holds the full per-user data dir prefix + save_NN.dat
     getSaveSlotPath(slot, path, sizeof(path));
-    FILE* f = std::fopen(path, "wb");
-    if (!f) { LOG_WARN("saveCharacter: failed to open %s for writing", path); return; }
+    // Crash-safe write: serialize to a sibling temp file, then atomically replace the slot below.
+    // An interrupted write (crash / power loss / disk full) leaves the existing save intact instead
+    // of corrupting it — the temp is simply never promoted.
+    char tmpPath[520];
+    std::snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path);
+    FILE* f = std::fopen(tmpPath, "wb");
+    if (!f) { LOG_WARN("saveCharacter: failed to open %s for writing", tmpPath); return; }
 
     // --- Header (must match scanSaveSlots / loadGame readers) ---
     u32 ver = SAVE_VERSION;
@@ -259,7 +268,15 @@ void Engine::saveCharacter(u8 lane, u8 slot) {
     std::fwrite(&activeSkill, sizeof(u8), 1, f);
     for (u32 s = 0; s < 4; s++) writeSkillStateLegacy(m_classSkillStatesPerPlayer[lane][s]);
 
+    // Only promote the temp over the real slot if every write succeeded (ferror catches a disk-full
+    // or I/O error along the way). On any failure, drop the temp and keep the previous good save.
+    bool writeError = (std::ferror(f) != 0);
     std::fclose(f);
+    if (writeError || !Platform::atomicReplace(tmpPath, path)) {
+        std::remove(tmpPath);
+        LOG_WARN("saveCharacter: write/replace failed for slot %u — previous save kept", slot);
+        return;
+    }
 
     // Refresh the in-memory header so the menu + the next save's guard see the new state.
     SaveSlotInfo& info    = m_saveSlots[slot - 1];
@@ -390,7 +407,7 @@ void Engine::applySavedCharToLane(u8 lane, const SavedChar& ps) {
 // playerCount=2 bundle). Sets m_playerSaveSlot[0]; for a legacy bundle it also hands P2 its own
 // free slot so the next save migrates it to a per-character file.
 bool Engine::loadGame(u8 slot) {
-    char path[32];
+    char path[512];  // holds the full per-user data dir prefix + save_NN.dat
     getSaveSlotPath(slot, path, sizeof(path));
 
     FILE* f = std::fopen(path, "rb");
@@ -500,7 +517,7 @@ bool Engine::loadGame(u8 slot) {
 bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     if (lane >= MAX_LOCAL_PLAYERS) return false;
 
-    char path[32];
+    char path[512];  // holds the full per-user data dir prefix + save_NN.dat
     getSaveSlotPath(slot, path, sizeof(path));
     FILE* f = std::fopen(path, "rb");
     if (!f) return false;

@@ -6,6 +6,7 @@ add_executable(DungeonEngine
     platform/window.cpp
     platform/clock.cpp
     platform/input.cpp
+    platform/user_paths.cpp
     engine/engine.cpp
     engine/engine_init.cpp
     engine/engine_init_assets.cpp

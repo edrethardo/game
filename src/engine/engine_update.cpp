@@ -8,6 +8,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/user_paths.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -1778,7 +1779,8 @@ bool Engine::triggerFloorDescent() {
             // Advance to next difficulty — reset to floor 1, keep gear
             m_difficulty++;
             m_highestUnlocked = m_difficulty;
-            FILE* uf = std::fopen("difficulty_unlock.dat", "wb");
+            char diffPath[512];  // per-user data dir (Steam-Cloud-synced); CWD on Switch
+            FILE* uf = std::fopen(Platform::userDataPath("difficulty_unlock.dat", diffPath, sizeof(diffPath)), "wb");
             if (uf) { std::fwrite(&m_highestUnlocked, 1, 1, uf); std::fclose(uf); }
             m_level.currentFloor = 1;
             m_level.savedFloor = 1;

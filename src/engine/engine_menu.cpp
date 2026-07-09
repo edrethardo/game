@@ -8,6 +8,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/user_paths.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -132,9 +133,12 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
 // Switch (the asset dir is read-only there), mirroring the old single save-on-exit.
 static void persistOptions() {
 #ifndef __SWITCH__
-    Input::saveBindings("assets/config/controls.json");
-    AudioSystem::saveSettings("assets/config/audio.json");
-    Window::saveVideoSettings("assets/config/video.cfg");   // borderless-fullscreen preference
+    // Write into the per-user data dir so Steam Cloud picks them up (controls.json + audio.json are
+    // in the Auto-Cloud pattern; video.cfg is deliberately excluded — display is machine-specific).
+    char ctrlPath[512], audioPath[512], videoPath[512];
+    Input::saveBindings(Platform::userDataPath("controls.json", ctrlPath, sizeof(ctrlPath)));
+    AudioSystem::saveSettings(Platform::userDataPath("audio.json", audioPath, sizeof(audioPath)));
+    Window::saveVideoSettings(Platform::userDataPath("video.cfg", videoPath, sizeof(videoPath)));
 #endif
 }
 

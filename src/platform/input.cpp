@@ -2,6 +2,7 @@
 #include <SDL.h>
 
 #include "platform/input.h"
+#include "platform/user_paths.h"
 #include "core/log.h"
 #include "core/imu_filter.h"
 
@@ -247,8 +248,14 @@ void Input::init() {
     for (s32 i = 0; i < MAX_GAMEPADS; ++i) if (s_controllers[i]) { s_activeDevice = InputDevice::Gamepad; break; }
 #endif
 
-    // Try to load saved bindings
+    // Try to load saved bindings. Desktop reads from the per-user data dir (Steam-Cloud-synced);
+    // Switch keeps the read-only romfs default via ASSET_PATH.
+#ifdef __SWITCH__
     loadBindings(ASSET_PATH("assets/config/controls.json"));
+#else
+    char ctrlPath[512];
+    loadBindings(Platform::userDataPath("controls.json", ctrlPath, sizeof(ctrlPath)));
+#endif
 
     LOG_INFO("Input system initialized");
 }
