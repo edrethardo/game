@@ -11,14 +11,20 @@
 #include "steam/isteamnetworkingutils.h"
 #include "steam/isteammatchmaking.h"
 #include "steam/isteamfriends.h"
+// The "flat" C API (SteamAPI_ISteamXxx_Method(self, ...)). REQUIRED on the mingw-cross Windows build:
+// steamclient64.dll is MSVC-built, and MSVC vs. GCC/mingw disagree on how a small (<=8-byte) *non-POD*
+// class is returned/passed by value. CSteamID is exactly that (8 bytes, user-defined ctors) — MSVC
+// returns it in RAX, mingw expects a hidden return pointer — so a C++ call like SteamUser()->GetSteamID()
+// misaligns registers and faults inside steamclient64.dll. That is the confirmed Windows-Steam startup
+// crash (deref of 0x1). The flat wrappers substitute uint64_steamid (a plain uint64, "Used when passing
+// or returning CSteamID") which both compilers pass/return identically, so every CSteamID-by-value call
+// below goes through the flat API. void/primitive virtual calls are ABI-identical on Win64 (only one
+// calling convention) and stay as ordinary C++ calls — e.g. InitRelayNetworkAccess() works untouched.
+#include "steam/steam_api_flat.h"
 #include <cstdio>   // snprintf for the rich-presence connect string
 #include <cstdlib>  // atoi — parse the host-published "players" lobby metadata for the browser
 
 static bool s_available = false;
-
-// CSteamID from our u64: the cSteamId(u64) constructor is ambiguous (Steam's uint64 is
-// unsigned long long, our u64 is unsigned long), so build it via SetFromUint64.
-static CSteamID cSteamId(u64 id) { CSteamID s; s.SetFromUint64(static_cast<uint64>(id)); return s; }
 
 // --- Lobby / matchmaking (P2) --------------------------------------------------------------------
 static u64 s_currentLobby = 0;
@@ -35,7 +41,8 @@ public:
         m_createResult.Set(SteamMatchmaking()->CreateLobby(t, maxMembers), this, &SteamLobbyMgr::onCreated);
     }
     void join(u64 lobbyId) {
-        m_enterResult.Set(SteamMatchmaking()->JoinLobby(cSteamId(lobbyId)), this, &SteamLobbyMgr::onEntered);
+        m_enterResult.Set(SteamAPI_ISteamMatchmaking_JoinLobby(SteamMatchmaking(), lobbyId),
+                          this, &SteamLobbyMgr::onEntered);
     }
     void requestList(const char* version) {
         SteamMatchmaking()->AddRequestLobbyListStringFilter("version", version, k_ELobbyComparisonEqual);
@@ -53,7 +60,7 @@ private:
         if (!ioFail) {
             int n = static_cast<int>(r->m_nLobbiesMatching);
             if (n > MAX_LIST) n = MAX_LIST;
-            for (int i = 0; i < n; i++) m_list[i] = SteamMatchmaking()->GetLobbyByIndex(i).ConvertToUint64();
+            for (int i = 0; i < n; i++) m_list[i] = SteamAPI_ISteamMatchmaking_GetLobbyByIndex(SteamMatchmaking(), i);
             m_listCount = n;
         }
         LOG_INFO("Steam: lobby list — %d matching", m_listCount);
@@ -80,7 +87,7 @@ private:
             return;
         }
         s_currentLobby = r->m_ulSteamIDLobby;
-        u64 owner = SteamMatchmaking()->GetLobbyOwner(cSteamId(s_currentLobby)).ConvertToUint64();
+        u64 owner = SteamAPI_ISteamMatchmaking_GetLobbyOwner(SteamMatchmaking(), s_currentLobby);
         LOG_INFO("Steam: entered lobby %llu (host %llu)",
                  (unsigned long long)s_currentLobby, (unsigned long long)owner);
         if (s_onLobbyEntered) s_onLobbyEntered(s_currentLobby, owner);
@@ -100,9 +107,11 @@ namespace Steam {
 
 bool init() {
 #ifdef USE_STEAM
-    // [diag] Granular markers (flushed per line by log.cpp) to pinpoint which Steam call crashes the
-    // Windows build — the mingw↔MSVC C++ ABI makes virtual interface calls into steamclient64.dll fault.
-    // The LAST "[diag]" line in DungeonEngine.log before the crash names the exact culprit call.
+    // [diag] Granular markers (flushed per line by log.cpp), kept for one more Windows-Steam confirmation
+    // run. They pinned the startup crash to SteamUser()->GetSteamID() — a CSteamID-by-value return that
+    // faults across the mingw↔MSVC struct-ABI (see the flat-API note at the top of this file); the fix
+    // routes every CSteamID call through the flat C API. If it ever crashes here again, the LAST "[diag]"
+    // line in DungeonEngine.log before the crash names the offending call.
     LOG_INFO("Steam: [diag] calling SteamAPI_Init...");
     // Needs steam_appid.txt next to the binary (dev) or a Steam launch, and a running Steam client.
     if (!SteamAPI_Init()) {
@@ -154,7 +163,7 @@ bool isAvailable() {
 u64 localSteamId() {
 #ifdef USE_STEAM
     if (!s_available || !SteamUser()) return 0;
-    return SteamUser()->GetSteamID().ConvertToUint64();
+    return SteamAPI_ISteamUser_GetSteamID(SteamUser());
 #else
     return 0;
 #endif
@@ -181,7 +190,7 @@ void joinLobby(u64 lobbyId) {
 void leaveLobby() {
 #ifdef USE_STEAM
     if (s_available && s_currentLobby) {
-        SteamMatchmaking()->LeaveLobby(cSteamId(s_currentLobby));
+        SteamAPI_ISteamMatchmaking_LeaveLobby(SteamMatchmaking(), s_currentLobby);
         SteamFriends()->ClearRichPresence();
         s_currentLobby = 0;
     }
@@ -193,7 +202,7 @@ void closeLobby() {
     // Mark non-joinable first (while we still own the lobby and can set flags) so a new joiner is
     // refused even if Steam transfers ownership to a remaining member instead of destroying the lobby.
     if (s_available && s_currentLobby) {
-        SteamMatchmaking()->SetLobbyJoinable(cSteamId(s_currentLobby), false);
+        SteamAPI_ISteamMatchmaking_SetLobbyJoinable(SteamMatchmaking(), s_currentLobby, false);
     }
     leaveLobby();   // removes it from discovery, clears our "Join Game" rich presence, zeroes s_currentLobby
 #endif
@@ -209,7 +218,7 @@ u64 currentLobbyId() {
 
 u64 lobbyOwner(u64 lobbyId) {
 #ifdef USE_STEAM
-    if (s_available) return SteamMatchmaking()->GetLobbyOwner(cSteamId(lobbyId)).ConvertToUint64();
+    if (s_available) return SteamAPI_ISteamMatchmaking_GetLobbyOwner(SteamMatchmaking(), lobbyId);
 #else
     (void)lobbyId;
 #endif
@@ -218,7 +227,7 @@ u64 lobbyOwner(u64 lobbyId) {
 
 void setLobbyData(const char* key, const char* value) {
 #ifdef USE_STEAM
-    if (s_available && s_currentLobby) SteamMatchmaking()->SetLobbyData(cSteamId(s_currentLobby), key, value);
+    if (s_available && s_currentLobby) SteamAPI_ISteamMatchmaking_SetLobbyData(SteamMatchmaking(), s_currentLobby, key, value);
 #else
     (void)key; (void)value;
 #endif
@@ -226,7 +235,7 @@ void setLobbyData(const char* key, const char* value) {
 
 void setLobbyJoinable(bool joinable) {
 #ifdef USE_STEAM
-    if (s_available && s_currentLobby) SteamMatchmaking()->SetLobbyJoinable(cSteamId(s_currentLobby), joinable);
+    if (s_available && s_currentLobby) SteamAPI_ISteamMatchmaking_SetLobbyJoinable(SteamMatchmaking(), s_currentLobby, joinable);
 #else
     (void)joinable;
 #endif
@@ -234,7 +243,7 @@ void setLobbyJoinable(bool joinable) {
 
 void openInviteOverlay() {
 #ifdef USE_STEAM
-    if (s_available && s_currentLobby) SteamFriends()->ActivateGameOverlayInviteDialog(cSteamId(s_currentLobby));
+    if (s_available && s_currentLobby) SteamAPI_ISteamFriends_ActivateGameOverlayInviteDialog(SteamFriends(), s_currentLobby);
 #endif
 }
 
@@ -277,9 +286,9 @@ u64 lobbyListEntry(int i, char* nameBuf, int nameCap, int* memberCount, int* max
     if (!s_available || !s_lobbyMgr) return 0;
     u64 id = s_lobbyMgr->listEntry(i);
     if (!id) return 0;
-    CSteamID cid = cSteamId(id);
+    ISteamMatchmaking* mm = SteamMatchmaking();
     if (nameBuf && nameCap > 0) {
-        const char* nm = SteamMatchmaking()->GetLobbyData(cid, "name");
+        const char* nm = SteamAPI_ISteamMatchmaking_GetLobbyData(mm, id, "name");
         std::snprintf(nameBuf, nameCap, "%s", (nm && nm[0]) ? nm : "Dungeon Engine");
     }
     if (memberCount) {
@@ -287,11 +296,11 @@ u64 lobbyListEntry(int i, char* nameBuf, int nameCap, int* memberCount, int* max
         // count: joiners connect over the relay independently of lobby membership, so GetNumLobbyMembers
         // can lag or diverge from the real number of players in the game. Fall back to it if the host
         // hasn't published yet (older lobby / pre-creation-data race).
-        const char* pl = SteamMatchmaking()->GetLobbyData(cid, "players");
+        const char* pl = SteamAPI_ISteamMatchmaking_GetLobbyData(mm, id, "players");
         int published = (pl && pl[0]) ? std::atoi(pl) : 0;
-        *memberCount = (published > 0) ? published : SteamMatchmaking()->GetNumLobbyMembers(cid);
+        *memberCount = (published > 0) ? published : SteamAPI_ISteamMatchmaking_GetNumLobbyMembers(mm, id);
     }
-    if (maxMembers)  *maxMembers  = SteamMatchmaking()->GetLobbyMemberLimit(cid);
+    if (maxMembers)  *maxMembers  = SteamAPI_ISteamMatchmaking_GetLobbyMemberLimit(mm, id);
     return id;
 #else
     (void)i; (void)nameBuf; (void)nameCap; (void)memberCount; (void)maxMembers; return 0;
