@@ -1,6 +1,7 @@
 build/
 build-rel/
 build-steam/
+build-steam-lin/
 build-dbg/
 build-switch/
 build-win/

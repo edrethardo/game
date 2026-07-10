@@ -7,7 +7,10 @@
 
 static SDL_GLContext s_context = nullptr;
 
-#ifdef ENGINE_DEBUG
+// Compiled unconditionally so the Release/Steam triage path (DE_GLDEBUG) can use it too — not just
+// ENGINE_DEBUG builds. Logs every non-notification driver message; on a synchronous debug context the
+// line lands on the calling thread immediately before any subsequent fault, which is exactly what we
+// need to name the GL call that trips the Intel driver in the floor-8 crash.
 static void APIENTRY glDebugCallback(GLenum source, GLenum type, GLuint id,
                                       GLenum severity, GLsizei length,
                                       const char* message, const void* userParam) {
@@ -21,7 +24,6 @@ static void APIENTRY glDebugCallback(GLenum source, GLenum type, GLuint id,
     }
     LOG_WARN("GL [%s]: %s", sevStr, message);
 }
-#endif
 
 bool GLContext::init(SDL_Window* window) {
     s_context = SDL_GL_CreateContext(window);
@@ -50,17 +52,26 @@ bool GLContext::init(SDL_Window* window) {
         SDL_GL_SetSwapInterval(1); // fallback to hard vsync if adaptive not supported
     }
 
+    // GL debug output: on for debug engine builds, and opt-in on Release/Steam via DE_GLDEBUG=1 (triage
+    // for the Intel-driver in-draw crash). Needs the debug context requested in window.cpp plus GL 4.3
+    // core OR the GL_KHR_debug extension — glDebugMessageCallback is null otherwise (e.g. macOS 4.1), so
+    // guard against it. SYNCHRONOUS makes the driver report on the calling thread, so the offending call
+    // is logged immediately before any fault it causes.
+    bool wantGlDebug = false;
 #ifdef ENGINE_DEBUG
-    // glDebugMessageCallback requires GL 4.3; macOS caps at 4.1, so guard against null
-    if (glDebugMessageCallback) {
-        glEnable(GL_DEBUG_OUTPUT);
-        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-        glDebugMessageCallback(glDebugCallback, nullptr);
-        LOG_INFO("GL debug output enabled");
-    } else {
-        LOG_INFO("GL debug output not available (GL < 4.3)");
-    }
+    wantGlDebug = true;
 #endif
+    if (SDL_getenv("DE_GLDEBUG")) wantGlDebug = true;
+    if (wantGlDebug) {
+        if (glDebugMessageCallback) {
+            glEnable(GL_DEBUG_OUTPUT);
+            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            glDebugMessageCallback(glDebugCallback, nullptr);
+            LOG_INFO("GL debug output enabled");
+        } else {
+            LOG_WARN("GL debug output requested but unavailable (need GL 4.3 or GL_KHR_debug)");
+        }
+    }
 
     return true;
 }

@@ -50,9 +50,17 @@ bool Window::init(const char* title, s32 width, s32 height) {
 #endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    // Request a GL *debug* context when this is a debug engine build OR when DE_GLDEBUG is set at runtime.
+    // The latter is an opt-in triage switch for the Intel-driver in-draw crash on the Steam/Release build:
+    // with a debug context, gl_context.cpp routes the driver's own diagnostics to the log (naming the
+    // offending GL call), and the driver often demotes the faulting draw to a logged no-op. Must be set
+    // before SDL_CreateWindow. Normal players never set the env var, so they get a plain context.
+    bool wantGlDebug = false;
 #ifdef ENGINE_DEBUG
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+    wantGlDebug = true;
 #endif
+    if (SDL_getenv("DE_GLDEBUG")) wantGlDebug = true;
+    if (wantGlDebug) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 
     s_window = SDL_CreateWindow(
         title,

@@ -146,6 +146,10 @@ def build_meshes():
         ["--type", "pillar",         "--out", os.path.join(mesh_dir, "pillar.obj")],
         ["--type", "chest",          "--out", os.path.join(mesh_dir, "chest.obj")],
         ["--type", "web",            "--out", os.path.join(mesh_dir, "web.obj")],
+        # web_wall = the upright wall-mounted spider web (engine_spawn.cpp draws it via findMeshByName).
+        # It was missing from this list, so CI never generated it and the shipped build fell back to
+        # mesh 0 for wall webs (they rendered wrong on the Windows/Steam build). Keep next to "web".
+        ["--type", "web_wall",       "--out", os.path.join(mesh_dir, "web_wall.obj")],
         ["--type", "shackles",       "--out", os.path.join(mesh_dir, "shackles.obj")],
         ["--type", "barrel",         "--out", os.path.join(mesh_dir, "barrel.obj")],
         ["--type", "cage",           "--out", os.path.join(mesh_dir, "cage.obj")],
