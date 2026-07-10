@@ -12,12 +12,29 @@
 #include <cstring>
 #include <cstdlib>  // rand()
 
+#ifdef USE_STEAM
+#include "platform/steam.h"                    // Steam::isAvailable (gate callback registration)
+#include "steam/steam_api.h"
+#include "steam/isteamnetworkingmessages.h"    // ISteamNetworkingMessages — relay (SDR) P2P transport
+#include "steam/isteamnetworkingutils.h"
+#endif
+
 // ---------------------------------------------------------------------------
 // Static state
 // ---------------------------------------------------------------------------
 static NetRole          s_role = NetRole::NONE;
 static ENetHost*        s_enetHost = nullptr;         // server or client host
-static ENetPeer*        s_serverPeer = nullptr;   // client's peer to server
+// Client's handle to the server: an ENet ENetPeer* (as uintptr) or, on Steam, the host's SteamID. 0=none.
+static u64              s_serverPeer = 0;
+
+// Active byte-transport for this session. ENet (LAN / direct IP) is the default; STEAM is set for relay
+// sessions started via hostServerSteam / connectToSteamHost, and reset to ENET in disconnect().
+enum class Transport : u8 { ENET, STEAM };
+static Transport        s_transport = Transport::ENET;
+
+// The slot/serverPeer fields hold an opaque u64. For ENet sessions it's an ENetPeer* — these cast back.
+static inline ENetPeer* asEnet(u64 h) { return reinterpret_cast<ENetPeer*>(static_cast<uintptr_t>(h)); }
+static inline u64 enetHandle(ENetPeer* p) { return static_cast<u64>(reinterpret_cast<uintptr_t>(p)); }
 static bool             s_joinFailed = false;     // client: set on SV_JOIN_REJECT or pre-accept disconnect
 static NetPlayerSlot    s_slots[MAX_PLAYERS];
 static u8               s_localPlayerIndex = 0;
@@ -164,9 +181,49 @@ static u8 findFreeSlot() {
     return 0xFF;
 }
 
+#ifdef USE_STEAM
+// --- Steam relay transport (ISteamNetworkingMessages / SDR) --------------------------------------
+static SteamNetworkingIdentity steamIdentOf(u64 sid) {
+    SteamNetworkingIdentity id; id.SetSteamID64(sid); return id;
+}
+static u8 findSlotBySteamId(u64 sid) {
+    for (u8 i = 0; i < MAX_PLAYERS; i++) if (s_slots[i].peer == sid) return i;
+    return 0xFF;
+}
+// Set by the session-failed callback, drained in pollSteam. One pending id suffices for <=4 players.
+static u64 s_steamFailedPeer = 0;
+
+// Persistent object holding the Steam Networking Messages callbacks (STEAM_CALLBACK auto-registers
+// via `this`). Constructed in Net::init when Steam is available.
+struct SteamNetCallbacks {
+    STEAM_CALLBACK(SteamNetCallbacks, onSessionRequest, SteamNetworkingMessagesSessionRequest_t);
+    STEAM_CALLBACK(SteamNetCallbacks, onSessionFailed,  SteamNetworkingMessagesSessionFailed_t);
+};
+inline void SteamNetCallbacks::onSessionRequest(SteamNetworkingMessagesSessionRequest_t* e) {
+    // Accept every incoming P2P session; game-level validation happens at CL_JOIN_REQUEST (protocol
+    // version + server-full). Only the listen-server ever receives these.
+    if (SteamNetworkingMessages())
+        SteamNetworkingMessages()->AcceptSessionWithUser(e->m_identityRemote);
+}
+inline void SteamNetCallbacks::onSessionFailed(SteamNetworkingMessagesSessionFailed_t* e) {
+    s_steamFailedPeer = e->m_info.m_identityRemote.GetSteamID64();
+}
+static SteamNetCallbacks* s_steamNetCb = nullptr;
+
+static void steamSend(u64 sid, u8 channel, const u8* data, u32 size, bool reliable) {
+    if (!sid || !SteamNetworkingMessages()) return;
+    // Unreliable game traffic (snapshots/inputs at 60 Hz) wants NoNagle so it isn't batched/delayed.
+    // Unreliable still fragments+reassembles large payloads (whole-message-drop on loss) like ENet's
+    // UNRELIABLE_FRAGMENT, so 8 KB snapshots are fine.
+    int flags = reliable ? k_nSteamNetworkingSend_Reliable : k_nSteamNetworkingSend_UnreliableNoNagle;
+    SteamNetworkingMessages()->SendMessageToUser(steamIdentOf(sid), data, size, flags, channel);
+}
+#endif  // USE_STEAM
+
 static u8 findSlotByPeer(ENetPeer* peer) {
+    u64 h = enetHandle(peer);
     for (u8 i = 0; i < MAX_PLAYERS; i++) {
-        if (s_slots[i].peer == peer)
+        if (s_slots[i].peer == h)
             return i;
     }
     return 0xFF;
@@ -261,7 +318,7 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         u8 targetSlot = slot;
         if (size >= sizeof(PacketHeader) + 2) {
             u8 ts = data[sizeof(PacketHeader) + 1];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
                 targetSlot = ts;
         }
         if (s_onInput) s_onInput(targetSlot, data, size);
@@ -291,7 +348,7 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         u8 respawnSlot = slot;
         if (size >= sizeof(PacketHeader) + 1) {
             u8 ts = data[sizeof(PacketHeader)];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
                 respawnSlot = ts;
         }
         if (s_onRespawn) s_onRespawn(respawnSlot);
@@ -318,7 +375,7 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         u8 fireSlot = slot;
         if (size >= sizeof(PacketHeader) + 15) {
             u8 ts = data[sizeof(PacketHeader) + 14];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
                 fireSlot = ts;
         }
         if (s_onFireWeapon) s_onFireWeapon(fireSlot, data, size);
@@ -333,7 +390,7 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         u8 invSlot = slot;
         if (size >= 1) {
             u8 ts = data[size - 1];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != nullptr && s_slots[ts].peer == s_slots[slot].peer)
+            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
                 invSlot = ts;
         }
         if (s_onInventorySync) s_onInventorySync(invSlot, data, size);
@@ -545,15 +602,23 @@ bool Net::init() {
     resetSlots();
     s_role = NetRole::NONE;
     s_enetHost = nullptr;
-    s_serverPeer = nullptr;
+    s_serverPeer = 0;
     s_localPlayerIndex = 0;
     s_seq = 0;
+#ifdef USE_STEAM
+    // Register the Steam Networking Messages callbacks (session request/failed) once, so incoming relay
+    // sessions are accepted even before a session starts. Requires Steam::init() (ran before Net::init).
+    if (Steam::isAvailable() && !s_steamNetCb) s_steamNetCb = new SteamNetCallbacks();
+#endif
     LOG_INFO("Net: initialized");
     return true;
 }
 
 void Net::shutdown() {
     disconnect();
+#ifdef USE_STEAM
+    if (s_steamNetCb) { delete s_steamNetCb; s_steamNetCb = nullptr; }
+#endif
     if (s_initialized) {
         enet_deinitialize();
         s_initialized = false;
@@ -594,7 +659,7 @@ bool Net::hostServer(u16 port, bool useUpnp, u8 localPlayerCount) {
     for (u8 i = 0; i < localCount; i++) {
         s_slots[i].state = SlotState::ACTIVE;
         s_slots[i].playerIndex = i;
-        s_slots[i].peer = nullptr;
+        s_slots[i].peer = 0;
     }
 
     LOG_INFO("Net: hosting on port %u", port);
@@ -625,6 +690,58 @@ bool Net::hostServer(u16 port, bool useUpnp, u8 localPlayerCount) {
 
 const char* Net::getExternalIp() { return Upnp::currentExternalIp(); }
 const char* Net::getUpnpError()  { return Upnp::lastError(); }
+
+bool Net::hostServerSteam(u8 localPlayerCount) {
+#ifdef USE_STEAM
+    if (!s_initialized || s_enetHost) return false;
+    if (!Steam::isAvailable()) { LOG_WARN("Net: hostServerSteam — Steam unavailable"); return false; }
+    u8 localCount = localPlayerCount < 1 ? 1
+                  : (localPlayerCount > MAX_PLAYERS - 1 ? static_cast<u8>(MAX_PLAYERS - 1) : localPlayerCount);
+    s_transport = Transport::STEAM;   // relay transport (no ENet host, no UPnP)
+    s_role = NetRole::SERVER;
+    s_localPlayerIndex = 0;
+    resetSlots();
+    for (u8 i = 0; i < localCount; i++) {   // reserve host-local slots exactly as hostServer does
+        s_slots[i].state = SlotState::ACTIVE;
+        s_slots[i].playerIndex = i;
+        s_slots[i].peer = 0;
+    }
+    // The relay "listens" implicitly (InitRelayNetworkAccess ran in Steam::init). Joiners surface via
+    // the auto-accepted SteamNetworkingMessagesSessionRequest_t callback, then their CL_JOIN_REQUEST.
+    LOG_INFO("Net: hosting via Steam relay (SteamID %llu, %u local slot(s))",
+             (unsigned long long)Steam::localSteamId(), localCount);
+    return true;
+#else
+    (void)localPlayerCount; return false;
+#endif
+}
+
+bool Net::connectToSteamHost(u64 hostSteamId) {
+#ifdef USE_STEAM
+    if (!s_initialized || s_enetHost) return false;
+    if (!Steam::isAvailable() || hostSteamId == 0) { LOG_WARN("Net: connectToSteamHost — Steam off / bad id"); return false; }
+    s_transport = Transport::STEAM;
+    s_role = NetRole::CLIENT;
+    s_joinFailed = false;
+    resetSlots();
+    s_serverPeer = hostSteamId;
+    // Steam relay needs no handshake — the first SendMessageToUser opens the session. Send CL_JOIN_REQUEST
+    // immediately, mirroring the ENet CONNECT branch (header + version + class1 + localCount + class2 = 11 B).
+    u8 buf[sizeof(PacketHeader) + 7];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type = NetPacketType::CL_JOIN_REQUEST; hdr->flags = 0; hdr->seq = s_seq++;
+    u32 version = PROTOCOL_VERSION;
+    std::memcpy(buf + sizeof(PacketHeader), &version, 4);
+    buf[sizeof(PacketHeader) + 4] = s_localPlayerClass;
+    buf[sizeof(PacketHeader) + 5] = s_localJoinCount;
+    buf[sizeof(PacketHeader) + 6] = s_localPlayerClass2;
+    sendToServer(buf, sizeof(buf), true);
+    LOG_INFO("Net: connecting via Steam relay to host %llu...", (unsigned long long)hostSteamId);
+    return true;
+#else
+    (void)hostSteamId; return false;
+#endif
+}
 
 void Net::setLocalPlayerClass(u8 classId) {
     s_localPlayerClass = classId;
@@ -671,13 +788,15 @@ bool Net::connectToServer(const char* address, u16 port) {
     enet_address_set_host(&addr, host);
     addr.port = port;
 
-    s_serverPeer = enet_host_connect(s_enetHost, &addr, NUM_CHANNELS, 0);
-    if (!s_serverPeer) {
+    ENetPeer* sp = enet_host_connect(s_enetHost, &addr, NUM_CHANNELS, 0);
+    if (!sp) {
         LOG_ERROR("Net: failed to initiate connection to %s:%u", address, port);
         enet_host_destroy(s_enetHost);
         s_enetHost = nullptr;
         return false;
     }
+    s_serverPeer = enetHandle(sp);
+    s_transport  = Transport::ENET;   // direct-IP join uses ENet
 
     s_role = NetRole::CLIENT;
     s_joinFailed = false; // fresh attempt
@@ -687,8 +806,8 @@ bool Net::connectToServer(const char* address, u16 port) {
 }
 
 void Net::disconnect() {
-    if (s_role == NetRole::CLIENT && s_serverPeer) {
-        enet_peer_disconnect(s_serverPeer, 0);
+    if (s_role == NetRole::CLIENT && s_serverPeer && s_transport == Transport::ENET) {
+        enet_peer_disconnect(asEnet(s_serverPeer), 0);
         // Flush disconnect
         ENetEvent event;
         while (enet_host_service(s_enetHost, &event, 200) > 0) {
@@ -696,8 +815,19 @@ void Net::disconnect() {
             if (event.type == ENET_EVENT_TYPE_RECEIVE)
                 enet_packet_destroy(event.packet);
         }
-        s_serverPeer = nullptr;
+        s_serverPeer = 0;
     }
+
+#ifdef USE_STEAM
+    // Steam relay: close every open P2P session (host peers or the client's host) so the relay tears
+    // them down promptly instead of relying on inactivity timeout.
+    if (s_transport == Transport::STEAM && SteamNetworkingMessages()) {
+        for (u8 i = 0; i < MAX_PLAYERS; i++)
+            if (s_slots[i].peer) SteamNetworkingMessages()->CloseSessionWithUser(steamIdentOf(s_slots[i].peer));
+        if (s_serverPeer) SteamNetworkingMessages()->CloseSessionWithUser(steamIdentOf(s_serverPeer));
+        s_serverPeer = 0;
+    }
+#endif
 
     if (s_enetHost) {
         enet_host_destroy(s_enetHost);
@@ -712,6 +842,7 @@ void Net::disconnect() {
 
     resetSlots();
     s_role = NetRole::NONE;
+    s_transport = Transport::ENET;   // next session defaults back to ENet until a Steam entry point sets it
     s_localPlayerIndex = 0;
     // Hygiene (CV-3): clear server-level statics so a stale value can't be read by a future
     // lobby probe between connect attempts. They're refreshed by the next SV_JOIN_ACCEPT.
@@ -720,7 +851,105 @@ void Net::disconnect() {
     s_serverDifficulty = 0;
 }
 
+// Server-side: fully release a slot a peer owned — mark DISCONNECTED, tell everyone (SV_PLAYER_LEFT +
+// onPlayerLeft), then free it for reuse. Shared by the ENet disconnect event and the Steam
+// session-failed path so both transports behave identically. An online-couch client owns two slots;
+// the caller invokes this once per owned slot.
+static void serverDropSlot(u8 slot) {
+    LOG_INFO("Net: player %u disconnected", slot);
+    s_slots[slot].state = SlotState::DISCONNECTED;
+    s_slots[slot].peer  = 0;
+    u8 buf[sizeof(PacketHeader) + 1];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type = NetPacketType::SV_PLAYER_LEFT; hdr->flags = 0; hdr->seq = s_seq++;
+    buf[sizeof(PacketHeader)] = slot;
+    Net::broadcastReliable(buf, sizeof(buf));
+    if (s_onPlayerLeft) s_onPlayerLeft(slot);
+    s_slots[slot].state = SlotState::EMPTY;
+    s_slots[slot].playerIndex = 0xFF;
+}
+
+// N12: evict peers stuck in CONNECTING (handshake done, no CL_JOIN_REQUEST) so an abandoned connection
+// can't hold a slot until the transport's own long timeout. Transport-agnostic (ENet clock is always
+// available since enet_initialize ran in Net::init).
+static void sweepConnecting() {
+    if (s_role != NetRole::SERVER) return;
+    u32 nowMs = enet_time_get();
+    for (u32 i = 1; i < MAX_PLAYERS; i++) {  // slot 0 = host, never CONNECTING
+        if (s_slots[i].state != SlotState::CONNECTING) continue;
+        if (nowMs - s_slots[i].connectTimeMs < CONNECTING_TIMEOUT_MS) continue;
+        LOG_WARN("Net: dropping slot %u — no join request within %u ms", i, CONNECTING_TIMEOUT_MS);
+        if (s_slots[i].peer) {
+#ifdef USE_STEAM
+            if (s_transport == Transport::STEAM) {
+                if (SteamNetworkingMessages())
+                    SteamNetworkingMessages()->CloseSessionWithUser(steamIdentOf(s_slots[i].peer));
+            } else
+#endif
+            enet_peer_disconnect_now(asEnet(s_slots[i].peer), 0);
+        }
+        s_slots[i] = NetPlayerSlot{};
+    }
+}
+
+#ifdef USE_STEAM
+// Steam relay poll: drain queued session failures + inbound messages on both channels, mapping
+// SteamID -> slot and dispatching through the SAME packet handlers the ENet path uses.
+static void pollSteam() {
+    ISteamNetworkingMessages* msgs = SteamNetworkingMessages();
+    if (!msgs) return;
+
+    if (s_steamFailedPeer) {
+        u64 failed = s_steamFailedPeer; s_steamFailedPeer = 0;
+        if (s_role == NetRole::SERVER) {
+            for (u8 slot = 0; slot < MAX_PLAYERS; slot++)
+                if (s_slots[slot].peer == failed) serverDropSlot(slot);
+        } else if (s_serverPeer == failed) {
+            LOG_INFO("Net: Steam session to host failed");
+            s_serverPeer = 0; s_joinFailed = true;
+        }
+    }
+
+    SteamNetworkingMessage_t* inbox[32];
+    for (u32 ch = 0; ch < NUM_CHANNELS; ch++) {
+        int n = msgs->ReceiveMessagesOnChannel(static_cast<int>(ch), inbox, 32);
+        for (int i = 0; i < n; i++) {
+            SteamNetworkingMessage_t* m = inbox[i];
+            u64 sid = m->m_identityPeer.GetSteamID64();
+            const u8* data = static_cast<const u8*>(m->m_pData);
+            u32 size = static_cast<u32>(m->m_cbSize);
+
+            u8 inCh = (ch < NET_METRICS_CHANNELS) ? static_cast<u8>(ch) : 1;
+            s_counters.bytesIn[inCh] += size; s_counters.pktsIn[inCh]++;
+            if (size >= 1 && data[0] == static_cast<u8>(NetPacketType::SV_SNAPSHOT)) s_counters.snapsIn++;
+
+            if (s_role == NetRole::SERVER) {
+                u8 slot = findSlotBySteamId(sid);
+                if (slot == 0xFF) {
+                    // First contact from a new SteamID — mirror the ENet CONNECT seat.
+                    slot = findFreeSlot();
+                    if (slot == 0xFF) { m->Release(); continue; } // server full: ignore; client times out
+                    s_slots[slot].state = SlotState::CONNECTING;
+                    s_slots[slot].playerIndex = slot;
+                    s_slots[slot].peer = sid;
+                    s_slots[slot].connectTimeMs = enet_time_get();
+                    LOG_INFO("Net: Steam peer connecting to slot %u", slot);
+                }
+                serverHandlePacket(slot, data, size);
+            } else {
+                clientHandlePacket(data, size);
+            }
+            m->Release();
+        }
+    }
+    sweepConnecting();
+}
+#endif  // USE_STEAM
+
 void Net::poll() {
+#ifdef USE_STEAM
+    if (s_transport == Transport::STEAM) { pollSteam(); return; }
+#endif
     if (!s_enetHost) return;
 
     ENetEvent event;
@@ -737,7 +966,7 @@ void Net::poll() {
                 }
                 s_slots[slot].state = SlotState::CONNECTING;
                 s_slots[slot].playerIndex = slot;
-                s_slots[slot].peer = event.peer;
+                s_slots[slot].peer = enetHandle(event.peer);
                 s_slots[slot].connectTimeMs = enet_time_get(); // start the join deadline (N12)
                 event.peer->data = reinterpret_cast<void*>(static_cast<uintptr_t>(slot));
                 // Tighten ENet's own keep-alive timeout (default ~30 s) so a peer that
@@ -814,29 +1043,12 @@ void Net::poll() {
                 // own SV_PLAYER_LEFT + onPlayerLeft so all clients clear both. (peer is nulled per
                 // slot AFTER its match test, so the second couch slot still matches on a later pass.)
                 for (u8 slot = 0; slot < MAX_PLAYERS; slot++) {
-                    if (s_slots[slot].peer != event.peer) continue;
-                    LOG_INFO("Net: player %u disconnected", slot);
-                    s_slots[slot].state = SlotState::DISCONNECTED;
-                    s_slots[slot].peer = nullptr;
-
-                    // Broadcast player left
-                    u8 buf[sizeof(PacketHeader) + 1];
-                    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
-                    hdr->type = NetPacketType::SV_PLAYER_LEFT;
-                    hdr->flags = 0;
-                    hdr->seq = s_seq++;
-                    buf[sizeof(PacketHeader)] = slot;
-                    broadcastReliable(buf, sizeof(buf));
-
-                    if (s_onPlayerLeft) s_onPlayerLeft(slot);
-
-                    // Free slot for reuse
-                    s_slots[slot].state = SlotState::EMPTY;
-                    s_slots[slot].playerIndex = 0xFF;
+                    if (s_slots[slot].peer != enetHandle(event.peer)) continue;
+                    serverDropSlot(slot);
                 }
             } else {
                 LOG_INFO("Net: disconnected from server");
-                s_serverPeer = nullptr;
+                s_serverPeer = 0;
                 s_joinFailed = true; // covers server-full reject (peer dropped) + any pre-accept drop (M10)
             }
         } break;
@@ -846,20 +1058,8 @@ void Net::poll() {
         }
     }
 
-    // N12: evict peers stuck in CONNECTING (handshake done, no CL_JOIN_REQUEST) so an
-    // idle/abandoned connection can't hold a slot until ENet's own long timeout. A
-    // real joiner flips to ACTIVE (clearing connectTimeMs) well within the window.
-    if (s_role == NetRole::SERVER) {
-        u32 nowMs = enet_time_get();
-        for (u32 i = 1; i < MAX_PLAYERS; i++) { // slot 0 = host, never CONNECTING
-            if (s_slots[i].state != SlotState::CONNECTING) continue;
-            if (nowMs - s_slots[i].connectTimeMs < CONNECTING_TIMEOUT_MS) continue;
-            LOG_WARN("Net: dropping slot %u — no join request within %u ms", i, CONNECTING_TIMEOUT_MS);
-            if (s_slots[i].peer)
-                enet_peer_disconnect_now(static_cast<ENetPeer*>(s_slots[i].peer), 0);
-            s_slots[i] = NetPlayerSlot{}; // back to EMPTY so findFreeSlot reuses it
-        }
-    }
+    // N12: evict peers stuck in CONNECTING (see sweepConnecting — transport-agnostic).
+    sweepConnecting();
 }
 
 // ---------------------------------------------------------------------------
@@ -875,16 +1075,22 @@ void Net::poll() {
 static void sendImmediate_Reliable(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
     countOut(playerSlot, 0, size); // ch0 = reliable
+#ifdef USE_STEAM
+    if (s_transport == Transport::STEAM) { steamSend(s_slots[playerSlot].peer, 0, data, size, true); return; }
+#endif
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
-    if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 0, pkt) < 0)
+    if (enet_peer_send(asEnet(s_slots[playerSlot].peer), 0, pkt) < 0)
         enet_packet_destroy(pkt);
 }
 
 static void sendImmediate_Unreliable(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
     countOut(playerSlot, 1, size); // ch1 = unreliable
+#ifdef USE_STEAM
+    if (s_transport == Transport::STEAM) { steamSend(s_slots[playerSlot].peer, 1, data, size, false); return; }
+#endif
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
-    if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
+    if (enet_peer_send(asEnet(s_slots[playerSlot].peer), 1, pkt) < 0)
         enet_packet_destroy(pkt);
 }
 
@@ -892,8 +1098,11 @@ static void sendImmediate_BroadcastReliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             countOut(static_cast<u8>(i), 0, size); // per-peer fan-out
+#ifdef USE_STEAM
+            if (s_transport == Transport::STEAM) { steamSend(s_slots[i].peer, 0, data, size, true); continue; }
+#endif
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
-            if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 0, pkt) < 0)
+            if (enet_peer_send(asEnet(s_slots[i].peer), 0, pkt) < 0)
                 enet_packet_destroy(pkt);
         }
     }
@@ -903,8 +1112,11 @@ static void sendImmediate_BroadcastUnreliable(const u8* data, u32 size) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (s_slots[i].state == SlotState::ACTIVE && s_slots[i].peer) {
             countOut(static_cast<u8>(i), 1, size); // per-peer fan-out
+#ifdef USE_STEAM
+            if (s_transport == Transport::STEAM) { steamSend(s_slots[i].peer, 1, data, size, false); continue; }
+#endif
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNSEQUENCED);
-            if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
+            if (enet_peer_send(asEnet(s_slots[i].peer), 1, pkt) < 0)
                 enet_packet_destroy(pkt);
         }
     }
@@ -923,8 +1135,12 @@ static void sendImmediate_BroadcastSnapshot(const u8* data, u32 size) {
             activePeers++;
             countOut(static_cast<u8>(i), 1, size);   // ch1, per-peer fan-out
             s_counters.snapsOut[i]++;                // one snapshot send to this slot
+#ifdef USE_STEAM
+            // Steam messages fragment/reassemble large payloads natively — a plain unreliable send.
+            if (s_transport == Transport::STEAM) { steamSend(s_slots[i].peer, 1, data, size, false); continue; }
+#endif
             ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
-            if (enet_peer_send(static_cast<ENetPeer*>(s_slots[i].peer), 1, pkt) < 0)
+            if (enet_peer_send(asEnet(s_slots[i].peer), 1, pkt) < 0)
                 enet_packet_destroy(pkt);
         }
     }
@@ -944,8 +1160,11 @@ static void sendImmediate_ToServer(const u8* data, u32 size, bool reliable) {
     u32 flags   = reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
     u8  channel = reliable ? 0 : 1;
     countOut(0, channel, size); // client has a single server peer — attribute to slot 0
+#ifdef USE_STEAM
+    if (s_transport == Transport::STEAM) { steamSend(s_serverPeer, channel, data, size, reliable); return; }
+#endif
     ENetPacket* pkt = enet_packet_create(data, size, flags);
-    if (enet_peer_send(s_serverPeer, channel, pkt) < 0)
+    if (enet_peer_send(asEnet(s_serverPeer), channel, pkt) < 0)
         enet_packet_destroy(pkt);
 }
 
@@ -1070,8 +1289,11 @@ void Net::sendSnapshotToSlot(u8 playerSlot, const u8* data, u32 size) {
     }
     countOut(playerSlot, 1, size);            // ch1, per-slot snapshot send
     s_counters.snapsOut[playerSlot]++;
+#ifdef USE_STEAM
+    if (s_transport == Transport::STEAM) { steamSend(s_slots[playerSlot].peer, 1, data, size, false); return; }
+#endif
     ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
-    if (enet_peer_send(static_cast<ENetPeer*>(s_slots[playerSlot].peer), 1, pkt) < 0)
+    if (enet_peer_send(asEnet(s_slots[playerSlot].peer), 1, pkt) < 0)
         enet_packet_destroy(pkt);
 }
 
@@ -1112,7 +1334,15 @@ bool    Net::joinFailed()           { return s_joinFailed; }
 u32     Net::getServerLevelSeed()       { return s_serverLevelSeed; }
 u8      Net::getServerLevelFloor()      { return s_serverFloor; }
 u8      Net::getServerLevelDifficulty() { return s_serverDifficulty; }
-bool    Net::isConnected()          { return s_enetHost != nullptr; }
+bool    Net::isConnected()          {
+#ifdef USE_STEAM
+    // Steam sessions never create an ENet host, so s_enetHost stays null — check the relay state
+    // instead, or the client-loop's host-loss detector bounces every Steam session back to the menu.
+    if (s_transport == Transport::STEAM)
+        return s_role == NetRole::SERVER || (s_role == NetRole::CLIENT && s_serverPeer != 0);
+#endif
+    return s_enetHost != nullptr;
+}
 
 const NetPlayerSlot* Net::getSlots() { return s_slots; }
 
@@ -1126,13 +1356,31 @@ u32 Net::getConnectedCount() {
 
 NetStats Net::getStats(u8 playerSlot) {
     NetStats stats = {};
+#ifdef USE_STEAM
+    if (s_transport == Transport::STEAM) {
+        // NEVER cast the SteamID handle to an ENetPeer* — read ping/quality from the relay session.
+        u64 peer = (s_role == NetRole::SERVER && playerSlot < MAX_PLAYERS) ? s_slots[playerSlot].peer
+                 : (s_role == NetRole::CLIENT ? s_serverPeer : 0);
+        if (peer && SteamNetworkingMessages()) {
+            SteamNetConnectionRealTimeStatus_t rt;
+            std::memset(&rt, 0, sizeof(rt));
+            if (SteamNetworkingMessages()->GetSessionConnectionInfo(steamIdentOf(peer), nullptr, &rt)
+                    != k_ESteamNetworkingConnectionState_None) {
+                stats.rttMs = static_cast<f32>(rt.m_nPing);
+                if (rt.m_flConnectionQualityLocal >= 0.0f && rt.m_flConnectionQualityLocal <= 1.0f)
+                    stats.packetLoss = 1.0f - rt.m_flConnectionQualityLocal;   // quality 1.0 = no loss
+            }
+        }
+        return stats;
+    }
+#endif
     if (s_role == NetRole::SERVER && playerSlot < MAX_PLAYERS && s_slots[playerSlot].peer) {
-        ENetPeer* p = static_cast<ENetPeer*>(s_slots[playerSlot].peer);
+        ENetPeer* p = asEnet(s_slots[playerSlot].peer);
         stats.rttMs = static_cast<f32>(p->roundTripTime);
         stats.packetLoss = p->packetLoss / 65536.0f;
     } else if (s_role == NetRole::CLIENT && s_serverPeer) {
-        stats.rttMs = static_cast<f32>(s_serverPeer->roundTripTime);
-        stats.packetLoss = s_serverPeer->packetLoss / 65536.0f;
+        stats.rttMs = static_cast<f32>(asEnet(s_serverPeer)->roundTripTime);
+        stats.packetLoss = asEnet(s_serverPeer)->packetLoss / 65536.0f;
     }
     return stats;
 }

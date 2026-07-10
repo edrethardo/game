@@ -10,6 +10,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/steam.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -84,7 +85,39 @@ void Engine::spawnSplashFX(Vec3 position, f32 radius) {
     m_camera.shake.trigger(0.06f, 0.3f);
 }
 
+// --- Steam matchmaking callbacks (P2) → engine glue via s_engine ---
+// Host: on lobby creation, publish discovery data (version + name) and the initial player count so the
+// browser shows an accurate "N/4" immediately (before anyone joins). Joiner: on entering a lobby
+// (accepted invite / friends-list join / browse), route the host's SteamID into the join flow — unless
+// it's our own lobby (owner == us).
+static void steamOnLobbyCreated(u64 lobbyId, bool ok) {
+    (void)lobbyId;
+    if (!s_engine || !ok) return;
+    char ver[16]; std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
+    Steam::setLobbyData("version", ver);
+    Steam::setLobbyData("name", "Curse of the Dungeon Engine");
+    // Publish the starting roster ("players"/"slots_free") + joinable state. m_netRole is already SERVER
+    // by now (set at the Host menu, before netHostGame), so this reflects the host's reserved slot(s)
+    // (1 solo / 2 couch) instead of leaving the count blank until the first remote join/leave.
+    s_engine->updateSteamLobbyRoster();
+}
+static void steamOnLobbyEntered(u64 lobbyId, u64 owner) {
+    (void)lobbyId;
+    if (!s_engine) return;
+    if (owner == 0 || owner == Steam::localSteamId()) return;   // our own lobby — we're the host
+    s_engine->beginSteamJoin(owner);   // guards internally to MENU-only
+}
+static void steamOnLobbyList(int count) {   // P3 browser/quickmatch result
+    if (s_engine) s_engine->onSteamLobbyList(count);
+}
+
 void Engine::initCallbacks() {
+    // Steam matchmaking (P2): host publishes lobby data; a joiner routes an accepted invite into the
+    // join flow. No-ops when Steam isn't built / available.
+    Steam::setOnLobbyCreated(steamOnLobbyCreated);
+    Steam::setOnLobbyEntered(steamOnLobbyEntered);
+    Steam::setOnLobbyList(steamOnLobbyList);
+
     // Wire particle pool and screen shake into combat, skill, and projectile systems
     Combat::setFXTargets(&m_particles, &m_camera.shake);
     SkillSystem::setFXTargets(&m_particles, &m_camera.shake);

@@ -48,6 +48,11 @@ struct LaunchOptions {
     bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
     u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
 
+    // Steam cold-start: `+connect_lobby <id>` (Steam appends this when a friend accepts an invite /
+    // clicks Join while the game is closed). Non-zero → Engine::applyLaunchOptions joins that lobby,
+    // which routes into the join flow. Handled separately from `active` (it stays at the menu).
+    u64 connectLobbyId = 0;
+
     bool active = false;   // any GAME-JUMP directive present (else: normal menu boot)
     bool valid  = true;    // parse succeeded (else: warn + fall back to menu)
 };

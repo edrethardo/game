@@ -77,20 +77,24 @@ SR = 44100  # engine SFX sample rate
 # The 15 slots this tool owns (display order). Names match SfxId filenames.
 SLOTS = [
     "sfx_weapon_sword", "sfx_weapon_dagger", "sfx_weapon_axe", "sfx_weapon_claymore",
+    "sfx_weapon_cleaver",
     "sfx_weapon_pistol", "sfx_weapon_smg", "sfx_weapon_carbine", "sfx_weapon_revolver",
     "sfx_weapon_bow", "sfx_weapon_crossbow", "sfx_weapon_throw", "sfx_weapon_molotov",
+    "sfx_weapon_chakram",
     "sfx_weapon_wand", "sfx_weapon_staff", "sfx_reload",
+    "sfx_ricochet",  # chakram/bounce-projectile wall reflect
 ]
 
 SLOT_CLASS = {
     "sfx_weapon_sword": "melee", "sfx_weapon_dagger": "melee",
-    "sfx_weapon_axe": "melee", "sfx_weapon_claymore": "melee",
+    "sfx_weapon_axe": "melee", "sfx_weapon_claymore": "melee", "sfx_weapon_cleaver": "melee",
     "sfx_weapon_pistol": "gun", "sfx_weapon_smg": "gun",
     "sfx_weapon_carbine": "gun", "sfx_weapon_revolver": "gun",
     "sfx_weapon_bow": "bow", "sfx_weapon_crossbow": "bow",
-    "sfx_weapon_throw": "throw", "sfx_weapon_molotov": "throw",
+    "sfx_weapon_throw": "throw", "sfx_weapon_molotov": "throw", "sfx_weapon_chakram": "throw",
     "sfx_weapon_wand": "magic", "sfx_weapon_staff": "magic",
     "sfx_reload": "reload",
+    "sfx_ricochet": "ricochet",
 }
 
 # Per acoustic-class ranking profile:
@@ -129,6 +133,11 @@ CLASS_PROFILES = {
         "strong": ["reload", "mag", "magazine", "clip", "cock", "rack", "latch", "lever", "bolt"],
         "weak": ["metal", "click", "mechanical", "gun", "load", "chamber", "slide"],
         "dur": (0.30, 1.20), "centroid": 3500, "sharp": False, "multi": True,
+    },
+    "ricochet": {
+        "strong": ["ricochet", "ping", "ting", "zing", "clink", "metal", "bounce"],
+        "weak": ["hit", "impact", "clank", "tink", "spark"],
+        "dur": (0.05, 0.50), "centroid": 5000, "sharp": True, "multi": False,
     },
 }
 

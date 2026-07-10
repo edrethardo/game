@@ -617,6 +617,7 @@ void Engine::handleWeaponFire(f32 dt) {
             case WeaponSubtype::DAGGER:  AudioSystem::play(SfxId::WEAPON_DAGGER, 0.5f); break;
             case WeaponSubtype::AXE:     AudioSystem::play(SfxId::WEAPON_AXE, 0.5f); break;
             case WeaponSubtype::CLAYMORE:AudioSystem::play(SfxId::WEAPON_CLAYMORE, 0.5f); break;
+            case WeaponSubtype::CLEAVER: AudioSystem::play(SfxId::WEAPON_CLEAVER, 0.5f); break;
             case WeaponSubtype::PISTOL:  AudioSystem::play(SfxId::WEAPON_PISTOL, 0.5f); break;
             case WeaponSubtype::SMG:     AudioSystem::play(SfxId::WEAPON_SMG, 0.5f); break;
             case WeaponSubtype::CARBINE: AudioSystem::play(SfxId::WEAPON_CARBINE, 0.5f); break;
@@ -625,6 +626,7 @@ void Engine::handleWeaponFire(f32 dt) {
             case WeaponSubtype::CROSSBOW:AudioSystem::play(SfxId::WEAPON_CROSSBOW, 0.5f); break;
             case WeaponSubtype::THROWING_KNIFE: AudioSystem::play(SfxId::WEAPON_THROW, 0.5f); break;
             case WeaponSubtype::MOLOTOV: AudioSystem::play(SfxId::WEAPON_MOLOTOV, 0.5f); break;
+            case WeaponSubtype::CHAKRAM: AudioSystem::play(SfxId::WEAPON_CHAKRAM, 0.5f); break;
             case WeaponSubtype::WAND:    AudioSystem::play(SfxId::WEAPON_WAND, 0.5f); break;
             default: break;
         }

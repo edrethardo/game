@@ -12,6 +12,17 @@
       },
       "source": "kenney_rpg-audio/Audio/metalClick.ogg"
     },
+    "sfx_ricochet": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 11000,
+        "pitch": 0.93,
+        "reverb": 0.75,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "kenney_impact-sounds/Audio/impactMetal_light_003.ogg"
+    },
     "sfx_weapon_axe": {
       "params": {
         "gain": 0.0,
@@ -45,6 +56,17 @@
       },
       "source": "oga_100-cc0-sfx/hit_03.ogg"
     },
+    "sfx_weapon_chakram": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 0.98,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_swishes/swishes/swish-9.wav"
+    },
     "sfx_weapon_claymore": {
       "params": {
         "gain": 0.0,
@@ -55,6 +77,17 @@
         "trim": false
       },
       "source": "oga_rpg-sound-pack/RPG Sound Pack/battle/sword-unsheathe.wav"
+    },
+    "sfx_weapon_cleaver": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 12900,
+        "pitch": 0.64,
+        "reverb": 0.2,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "kenney_rpg-audio/Audio/chop.ogg"
     },
     "sfx_weapon_crossbow": {
       "params": {

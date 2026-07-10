@@ -90,6 +90,10 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             logUsage();
             opt.valid = false;        // show menu rather than launching into a state
             return opt;
+        } else if (ieq(a, "+connect_lobby")) {
+            // Steam cold-start: friend accepted an invite / clicked Join while the game was closed.
+            const char* v = nextVal(i); if (!v) break;
+            opt.connectLobbyId = std::strtoull(v, nullptr, 10);   // stays at the menu (not `active`)
         } else if (ieq(a, "--host")) {
             opt.role = LaunchOptions::Role::HOST; opt.active = true;
         } else if (ieq(a, "--join")) {

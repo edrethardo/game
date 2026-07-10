@@ -213,7 +213,9 @@ enum struct SlotState : u8 {
 struct NetPlayerSlot {
     SlotState state       = SlotState::EMPTY;
     u8        playerIndex = 0xFF;
-    void*     peer        = nullptr; // ENetPeer* (opaque)
+    // Opaque transport handle. ENet: (u64)(uintptr_t)ENetPeer*. Steam relay: the peer's SteamID.
+    // 0 = none. The net layer never dereferences it directly — asEnet() casts back for ENet.
+    u64       peer        = 0;
     u32       lastInputTick = 0;
     f32       rttMs       = 0.0f;
     // enet_time_get() ms when the peer entered CONNECTING. Used to evict a peer that
@@ -236,6 +238,15 @@ namespace Net {
     // localPlayerCount reserves that many host-owned slots starting at 0 (slot 0 = host, slot 1 =
     // a couch partner for online couch co-op) so findFreeSlot hands remote peers slots beyond them.
     bool hostServer(u16 port = DEFAULT_PORT, bool useUpnp = true, u8 localPlayerCount = 1);
+
+    // Steam relay variants (P1). Same listen-server / drop-in model as hostServer/connectToServer,
+    // but the transport is Steam Networking Messages (SDR relay) addressed by SteamID — no IP/port,
+    // no UPnP, NAT-traversal for free. Only meaningful when built with USE_STEAM and Steam::isAvailable();
+    // otherwise they return false and the caller falls back to the ENet path. hostServerSteam reserves
+    // localPlayerCount host slots exactly like hostServer. connectToSteamHost joins the host identified
+    // by its SteamID (obtained from a lobby / invite). Set the local class(es) first, as with ENet.
+    bool hostServerSteam(u8 localPlayerCount = 1);
+    bool connectToSteamHost(u64 hostSteamId);
 
     // Lobby/HUD accessors for the UPnP IGD result of the last hostServer call.
     // getExternalIp() returns the WAN-side IP the router reported when UPnP

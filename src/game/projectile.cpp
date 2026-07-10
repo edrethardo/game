@@ -6,6 +6,7 @@
 #include "world/raycast.h"
 #include "world/collision.h"
 #include "world/spatial_grid.h"
+#include "audio/audio.h"
 #include <cstdlib>
 
 // Set by Engine::init() so projectiles can spawn trail particles
@@ -197,6 +198,9 @@ void ProjectileSystem::update(ProjectilePool& pool,
                 // immediately re-hit the same wall and consume another bounce.
                 p.position = wallHit.position + wallHit.normal * (p.radius + 0.02f);
                 p.velocity = p.velocity - wallHit.normal * (2.0f * dot(p.velocity, wallHit.normal));
+                // Metallic ricochet at the bounce (chakram / any PROJ_BOUNCE projectile). Positional
+                // so it attenuates with distance; player is the listener.
+                AudioSystem::playAt(SfxId::RICOCHET, wallHit.position, player.position);
                 continue; // keep flying; skip this frame's despawn + move (already repositioned)
             }
             // AoE splash on wall impact

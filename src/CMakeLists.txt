@@ -7,6 +7,7 @@ add_executable(DungeonEngine
     platform/clock.cpp
     platform/input.cpp
     platform/user_paths.cpp
+    platform/steam.cpp
     engine/engine.cpp
     engine/engine_init.cpp
     engine/engine_init_assets.cpp
@@ -157,6 +158,27 @@ else()
     # between the real implementation and the no-op stub.
     target_link_libraries(DungeonEngine PRIVATE miniupnpc::miniupnpc)
     target_compile_definitions(DungeonEngine PRIVATE UPNP_AVAILABLE=1)
+
+    # Steamworks — relay networking + matchmaking. USE_STEAM is defined in external/CMakeLists.txt
+    # (auto-ON when external/steamworks/ exists). When absent, src/platform/steam.cpp compiles as
+    # no-op stubs and nothing here runs, so non-Steam / CI builds are unaffected.
+    if(USE_STEAM)
+        target_link_libraries(DungeonEngine PRIVATE steam_api)
+        target_compile_definitions(DungeonEngine PRIVATE USE_STEAM=1)
+        # Find the co-located Steam runtime lib at runtime (dev + packaged) without LD_LIBRARY_PATH.
+        if(APPLE)
+            set_target_properties(DungeonEngine PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+        elseif(UNIX)
+            set_target_properties(DungeonEngine PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+        endif()
+        # Ship the Steam runtime lib + a dev steam_appid.txt next to the binary.
+        add_custom_command(TARGET DungeonEngine POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_PROPERTY:steam_api,IMPORTED_LOCATION> $<TARGET_FILE_DIR:DungeonEngine>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_SOURCE_DIR}/tools/steam_appid.txt $<TARGET_FILE_DIR:DungeonEngine>/steam_appid.txt
+            COMMENT "Copying Steam runtime lib + steam_appid.txt next to the binary")
+    endif()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")

@@ -7,7 +7,9 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/steam.h"
 #include "audio/audio.h"
+#include <cstdio>
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -149,6 +151,55 @@ void Engine::renderMenu() {
             : "Up/Down, Enter to confirm, ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 19) {
+        // Steam join chooser (P3): Quick Join / Browse Games / Enter IP.
+        const char* subTitle = "Join Game";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.60f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
+        static const char* jLabels[] = {"Quick Join", "Browse Games", "Enter IP (LAN)"};
+        for (u32 i = 0; i < 3; i++) {
+            f32 y = sh * 0.30f + (2 - i) * 50.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 tw = FontSystem::textWidth(jLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale, jLabels[i], tc, 2);
+        }
+        const char* hint = Input::activeDeviceIsGamepad() ? "D-pad, A to confirm, B to go back"
+                                                          : "Up/Down, Enter to confirm, ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 20) {
+        // Steam public lobby browser (P3): list of open games.
+        const char* subTitle = "Public Games";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.78f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
+        int n = Steam::lobbyListCount();
+        if (n <= 0) {
+            const char* none = "No public games found — press B / ESC to go back";
+            f32 nw = FontSystem::textWidth(none, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - nw) * 0.5f, sh * 0.50f, none, {0.7f, 0.7f, 0.8f}, 1);
+        } else {
+            int shown = n > 8 ? 8 : n;
+            for (int i = 0; i < shown; i++) {
+                char nm[64]; int mc = 0, mm = 0;
+                Steam::lobbyListEntry(i, nm, sizeof(nm), &mc, &mm);
+                // mc = authoritative in-game roster (host-published "players"); mm = lobby member limit.
+                // Guard the denominator so a lobby that reports a 0 limit still shows the real cap, not "/0".
+                if (mm <= 0) mm = static_cast<int>(MAX_PLAYERS);
+                char row[96]; std::snprintf(row, sizeof(row), "%s  (%d/%d)", nm, mc, mm);
+                bool sel = (i == m_steamBrowserSel);
+                f32 y = sh * 0.62f - i * 34.0f * uiScale;
+                Vec3 tc = sel ? Vec3{1.0f, 1.0f, 0.5f} : Vec3{0.6f, 0.6f, 0.6f};
+                f32 tw = FontSystem::textWidth(row, 1);
+                FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y, row, tc, 1);
+            }
+        }
+        const char* hint = Input::activeDeviceIsGamepad() ? "D-pad, A to join, B to go back"
+                                                          : "Up/Down, Enter to join, ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.10f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 1) {
         // Single player sub-menu — replaces main menu options
         const char* subTitle = "Single Player";

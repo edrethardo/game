@@ -130,6 +130,7 @@ SOUND_MAP = {
     "sfx_weapon_dagger":    (["dagger", "knife", "stab", "slice"], "short"),
     "sfx_weapon_axe":       (["axe", "chop", "cleave"], "short"),
     "sfx_weapon_claymore":  (["sword", "heavy", "slash", "blade"], "short"),
+    "sfx_weapon_cleaver":   (["cleave", "chop", "blade", "heavy", "slash"], "short"),
     # Weapons — ranged
     "sfx_weapon_pistol":    (["pistol", "gun", "shot", "bang", "shoot"], "short"),
     "sfx_weapon_smg":       (["gun", "shot", "pop", "bang", "shoot"], "short"),
@@ -139,6 +140,7 @@ SOUND_MAP = {
     "sfx_weapon_crossbow":  (["crossbow", "bolt", "thwack", "crack", "snap"], "short"),
     "sfx_weapon_throw":     (["swish", "whoosh", "throw", "wind"], "short"),
     "sfx_weapon_molotov":   (["glass", "break", "fire", "shatter"], "short"),
+    "sfx_weapon_chakram":   (["swish", "whoosh", "throw", "metal", "blade"], "short"),
     "sfx_weapon_wand":      (["magic", "spell", "zap", "magical"], "short"),
     "sfx_weapon_staff":     (["magic", "spell", "cast", "magical"], "medium"),
     "sfx_reload":           (["reload", "cock", "click", "metal", "latch"], "short"),
@@ -146,6 +148,7 @@ SOUND_MAP = {
     "sfx_hit_melee":        (["hit", "punch", "impact", "thud", "melee"], "short"),
     "sfx_hit_hitscan":      (["hit", "impact", "bullet", "soft"], "short"),
     "sfx_hit_projectile":   (["hit", "arrow", "impact", "plate"], "short"),
+    "sfx_ricochet":         (["ricochet", "metal", "ping", "clink", "ting"], "short"),
     "sfx_enemy_hit":        (["hit", "impact", "flesh", "tin"], "short"),
     "sfx_enemy_death":      (["death", "die", "creature", "monster"], "medium"),
     "sfx_player_hit":       (["hurt", "pain", "hit", "creature_hurt"], "short"),
@@ -192,6 +195,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_dagger":    "kenney_rpg-audio/Audio/knifeSlice.ogg",        # was drawKnife1 (unsheathing, not attacking)
     "sfx_weapon_axe":       "kenney_rpg-audio/Audio/chop.ogg",
     "sfx_weapon_claymore":  "oga_80-rpg-sfx/blade_03.ogg",                  # was blade_02 (too similar to sword's blade_01)
+    "sfx_weapon_cleaver":   "oga_80-rpg-sfx/blade_02.ogg",                  # heavy chopping blade (pitched deep)
     # Ranged weapons
     "sfx_weapon_pistol":    "oga_100-cc0-sfx/shot_01.ogg",
     "sfx_weapon_smg":       "oga_100-cc0-sfx/shot_02.ogg",
@@ -201,6 +205,7 @@ MANUAL_OVERRIDES = {
     "sfx_weapon_crossbow":  "oga_thwack/PCM/thwack-01.wav",
     "sfx_weapon_throw":     "oga_swishes/swishes/swish-9.wav",
     "sfx_weapon_molotov":   "kenney_impact-sounds/Audio/impactGlass_heavy_004.ogg",  # was variant 000
+    "sfx_weapon_chakram":   "oga_swishes/swishes/swish-7.wav",             # spinning disc throw
     # Magic weapons
     "sfx_weapon_wand":      "oga_80-rpg-sfx/spell_fire_06.ogg",            # short dark fire pulse — sci-fantasy energy weapon
     "sfx_weapon_staff":     "oga_80-rpg-sfx/spell_02.ogg",
@@ -210,6 +215,7 @@ MANUAL_OVERRIDES = {
     "sfx_hit_melee":        "kenney_impact-sounds/Audio/impactPunch_heavy_000.ogg",  # was variant 002
     "sfx_hit_hitscan":      "kenney_impact-sounds/Audio/impactMetal_light_002.ogg",
     "sfx_hit_projectile":   "kenney_impact-sounds/Audio/impactWood_medium_001.ogg",
+    "sfx_ricochet":         "oga_100-cc0-sfx/metal_05.ogg",               # metallic wall ricochet ping
     "sfx_enemy_hit":        "kenney_impact-sounds/Audio/impactSoft_heavy_001.ogg",
     "sfx_enemy_death":      "oga_80-rpg-sfx/creature_die_01.ogg",
     "sfx_player_hit":       "oga_80-rpg-sfx/creature_hurt_02.ogg",          # was variant 01
@@ -257,6 +263,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_dagger":    0.90,
     "sfx_weapon_axe":       0.65,
     "sfx_weapon_claymore":  0.65,
+    "sfx_weapon_cleaver":   0.55,   # heavy meaty cleave
     # Ranged weapons — weight hierarchy: SMG(snappy) > pistol=carbine > revolver(boomy)
     "sfx_weapon_pistol":    0.45,
     "sfx_weapon_smg":       0.80,
@@ -266,6 +273,7 @@ PITCH_SHIFTS = {
     "sfx_weapon_crossbow":  0.80,
     "sfx_weapon_throw":     0.90,
     "sfx_weapon_molotov":   0.70,
+    "sfx_weapon_chakram":   0.85,   # spinning disc swish
     "sfx_weapon_wand":      0.70,   # dark fire pulse pitched low
     "sfx_weapon_staff":     0.80,
     # Reload
@@ -274,6 +282,7 @@ PITCH_SHIFTS = {
     "sfx_hit_melee":        0.70,
     "sfx_hit_hitscan":      0.80,
     "sfx_hit_projectile":   0.75,
+    "sfx_ricochet":         1.15,   # bright metallic ping
     "sfx_enemy_hit":        0.75,
     "sfx_enemy_death":      0.65,
     "sfx_player_hit":       0.75,

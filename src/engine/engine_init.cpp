@@ -11,6 +11,7 @@
 #include "platform/clock.h"
 #include "platform/input.h"
 #include "platform/user_paths.h"
+#include "platform/steam.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -234,6 +235,10 @@ void Engine::init() {
     // Wire all Combat/SkillSystem/ProjectileSystem/Inventory event callbacks
     initCallbacks();
 
+    // Init Steam before networking so the relay is warming up and lobby callbacks are live. No-op /
+    // returns false when the SDK is absent or no Steam client is running (game runs Steam-less).
+    Steam::init();
+
     // Init networking
     Net::init();
 
@@ -266,6 +271,7 @@ void Engine::shutdown() {
 
     AudioSystem::shutdown();
     Net::shutdown();
+    Steam::shutdown();
 
     // Destroy loaded OBJ meshes (skip index 0 = cube, destroyed below)
     for (u32 i = 1; i < m_meshDefCount; i++) {

@@ -13,6 +13,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/steam.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -503,6 +504,8 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         LOG_INFO("Engine: player %u joined, spawned at (%.1f, %.1f, %.1f)",
                  playerSlot, np.position.x, np.position.y, np.position.z);
     }
+    // A slot filled — refresh slots_free and, if we just hit MAX_PLAYERS, close the lobby to joiners.
+    s_engine->updateSteamLobbyRoster();
 }
 
 void Engine::onPlayerLeft(u8 playerSlot) {
@@ -559,6 +562,24 @@ void Engine::onPlayerLeft(u8 playerSlot) {
 
         LOG_INFO("Engine: player %u left", playerSlot);
     }
+    // A slot freed — re-advertise the lobby as joinable and refresh slots_free.
+    s_engine->updateSteamLobbyRoster();
+}
+
+// Reflect the live roster into the Steam lobby so matchmaking doesn't hand out a full game.
+// Only the Steam-relay host that actually owns a lobby does anything here: clients (not SERVER)
+// and ENet/LAN hosts (no lobby) fall through as no-ops. setLobbyData/setLobbyJoinable are
+// owner-only Steam calls, and the m_netRole guard keeps us from calling them as a client.
+void Engine::updateSteamLobbyRoster() {
+    if (m_netRole != NetRole::SERVER) return;      // only the host owns the lobby
+    if (Steam::currentLobbyId() == 0) return;      // ENet/LAN host, or no lobby -> nothing to update
+    const u32 connected = Net::getConnectedCount();       // ACTIVE slots incl. host (and both couch slots)
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "%u", connected);
+    Steam::setLobbyData("players", buf);                  // authoritative roster count the browser displays
+    std::snprintf(buf, sizeof(buf), "%u", connected < MAX_PLAYERS ? (MAX_PLAYERS - connected) : 0u);
+    Steam::setLobbyData("slots_free", buf);               // discovery metadata (kept for the list filter)
+    Steam::setLobbyJoinable(connected < MAX_PLAYERS);     // full -> invites/join stop working until a slot frees
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +609,9 @@ u8 Engine::findMeshByName(const char* name) const {
 
 void Engine::run() {
     while (m_running) {
+        // Pump Steam callbacks every frame, unconditionally — lobby invites / join requests arrive
+        // even while sitting at the menu. No-op when Steam isn't built/initialized.
+        Steam::runCallbacks();
         Clock::update();
         f64 frameTime = Clock::getDeltaSeconds();
         f64 maxFrameTime = FIXED_DT * MAX_STEPS_PER_FRAME;
@@ -763,11 +787,20 @@ void Engine::beginCouchJoin() {
     m_menu.couchJoin = true;
     Net::setLocalPlayerClasses(static_cast<u8>(m_playerClasses[0]),
                                static_cast<u8>(m_playerClasses[1]), 2);
-    if (Net::connectToServer(m_menu.connectAddress)) {
+    // Route the couch join through Steam relay when the join came from an invite/browse (m_steamJoinHost
+    // set by beginSteamJoin), else ENet direct-IP. One-shot: clear the stashed SteamID like the
+    // single-player join site so a later ENet couch join can't accidentally reuse a stale host.
+    const u64 steamHost = m_steamJoinHost;
+    m_steamJoinHost = 0;
+    const bool connected = steamHost ? Net::connectToSteamHost(steamHost)
+                                     : Net::connectToServer(m_menu.connectAddress);
+    if (connected) {
         m_gameState = GameState::CONNECTING;
         m_connectingElapsed = 0.0f;
         m_menu.subState = 0;
-        LOG_INFO("Couch-joining %s (2 local players)...", m_menu.connectAddress);
+        if (steamHost) LOG_INFO("Couch-joining Steam host %llu (2 local players)...",
+                                (unsigned long long)steamHost);
+        else           LOG_INFO("Couch-joining %s (2 local players)...", m_menu.connectAddress);
     } else {
         // Connection setup failed — drop back to the couch start-mode screen.
         m_netRole = NetRole::NONE;

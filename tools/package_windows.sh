@@ -16,7 +16,8 @@ GAME_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$GAME_ROOT/build-win"
 PACKAGE_DIR="$GAME_ROOT/build-win/package"
 EXE="$BUILD_DIR/src/DungeonEngine.exe"
-ZIP_NAME="DungeonEngine-Windows.zip"
+# Zip name is overridable (CI builds both an itch and a Steam variant): ZIP_NAME=... ./package_windows.sh
+ZIP_NAME="${ZIP_NAME:-DungeonEngine-Windows.zip}"
 
 # Check exe exists
 if [ ! -f "$EXE" ]; then
@@ -53,6 +54,15 @@ for lib in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do
         echo "  Copied $lib (MinGW runtime)"
     fi
 done
+
+# Steam build only: bundle the Steam runtime DLL (the CMake USE_STEAM POST_BUILD copies it next to the
+# exe). Absent for the itch/non-Steam build. steam_appid.txt is intentionally NOT shipped — the Steam
+# client injects the real App ID at launch; a stray file would mask it.
+steamdll=$(find "$BUILD_DIR/src" -maxdepth 1 -name "steam_api64.dll" 2>/dev/null | head -1)
+if [ -n "$steamdll" ]; then
+    cp "$steamdll" "$PACKAGE_DIR/"
+    echo "  Copied steam_api64.dll (Steam build)"
+fi
 
 # Copy assets
 cp -r "$GAME_ROOT/assets" "$PACKAGE_DIR/assets"

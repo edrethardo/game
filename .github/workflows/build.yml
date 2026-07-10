@@ -1,5 +1,14 @@
 name: Build & Release
 
+# Builds TWO variants per platform so the game can ship on both stores:
+#   - itch  : Steam-free (default build; zero libsteam_api dependency) — for itch.io / DRM-free.
+#   - steam : -DUSE_STEAM=ON (relay networking + matchmaking; bundles libsteam_api) — for Steam.
+# The Steam variant needs the proprietary Steamworks SDK, which is gitignored (Valve's SDK Access
+# Agreement forbids public redistribution). It's supplied by a PRIVATE companion repo
+# github.com/edrethardo/steamworks-sdk, cloned into external/steamworks/ by the steam-only step using the
+# repo secret STEAMWORKS_SDK_TOKEN (a fine-grained PAT, Contents: read). Without it the steam jobs fail
+# with a clear message; the itch jobs still succeed (they never touch the SDK / never clone the private repo).
+
 on:
   push:
     tags:
@@ -7,8 +16,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  windows:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [itch, steam]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -17,8 +30,25 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 python3 python3-pip ffmpeg zip
+          # mingw-w64-tools provides gendef, used to derive a mingw import lib from steam_api64.dll.
+          sudo apt-get install -y mingw-w64 mingw-w64-tools python3 python3-pip ffmpeg zip unzip
           pip3 install Pillow
+
+      - name: Provision Steamworks SDK
+        if: matrix.variant == 'steam'
+        env:
+          STEAMWORKS_SDK_TOKEN: ${{ secrets.STEAMWORKS_SDK_TOKEN }}
+        run: |
+          if [ -f external/steamworks/public/steam/steam_api.h ]; then echo "SDK already present"; exit 0; fi
+          if [ -z "$STEAMWORKS_SDK_TOKEN" ]; then
+            echo "::error::Steam build needs the private Steamworks SDK repo. Set the repo secret STEAMWORKS_SDK_TOKEN to a fine-grained PAT (Contents: read-only) scoped to github.com/edrethardo/steamworks-sdk."
+            exit 1
+          fi
+          # Clone the private SDK repo into place. Token is masked in logs by Actions; --depth 1 keeps it fast.
+          rm -rf external/steamworks
+          git clone --depth 1 "https://x-access-token:${STEAMWORKS_SDK_TOKEN}@github.com/edrethardo/steamworks-sdk.git" external/steamworks
+          test -f external/steamworks/public/steam/steam_api.h || { echo "::error::private SDK repo missing public/steam/steam_api.h — check its layout"; exit 1; }
+          echo "Provisioned Steamworks SDK from the private repo"
 
       - name: Fetch audio + music
         run: |
@@ -30,22 +60,25 @@ jobs:
 
       - name: Cross-compile
         run: |
-          cmake -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/windows.cmake -DCMAKE_BUILD_TYPE=Release
+          STEAM=""; [ "${{ matrix.variant }}" = "steam" ] && STEAM="-DUSE_STEAM=ON"
+          cmake -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/windows.cmake -DCMAKE_BUILD_TYPE=Release $STEAM
           cmake --build build-win -j$(nproc)
 
       - name: Package
-        run: ./tools/package_windows.sh
+        run: ZIP_NAME="DungeonEngine-${{ matrix.variant }}-Windows.zip" ./tools/package_windows.sh
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DungeonEngine-Windows
-          path: DungeonEngine-Windows.zip
+          name: DungeonEngine-${{ matrix.variant }}-Windows
+          path: DungeonEngine-${{ matrix.variant }}-Windows.zip
 
-  build-linux:
+  linux:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
+        variant: [itch, steam]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,10 +88,26 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake python3 python3-pip ffmpeg zip \
+          sudo apt-get install -y build-essential cmake python3 python3-pip ffmpeg zip unzip \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
             libgl-dev libasound2-dev libpulse-dev libudev-dev
           pip3 install Pillow || pip3 install Pillow --break-system-packages
+
+      - name: Provision Steamworks SDK
+        if: matrix.variant == 'steam'
+        env:
+          STEAMWORKS_SDK_TOKEN: ${{ secrets.STEAMWORKS_SDK_TOKEN }}
+        run: |
+          if [ -f external/steamworks/public/steam/steam_api.h ]; then echo "SDK already present"; exit 0; fi
+          if [ -z "$STEAMWORKS_SDK_TOKEN" ]; then
+            echo "::error::Steam build needs the private Steamworks SDK repo. Set the repo secret STEAMWORKS_SDK_TOKEN to a fine-grained PAT (Contents: read-only) scoped to github.com/edrethardo/steamworks-sdk."
+            exit 1
+          fi
+          # Clone the private SDK repo into place. Token is masked in logs by Actions; --depth 1 keeps it fast.
+          rm -rf external/steamworks
+          git clone --depth 1 "https://x-access-token:${STEAMWORKS_SDK_TOKEN}@github.com/edrethardo/steamworks-sdk.git" external/steamworks
+          test -f external/steamworks/public/steam/steam_api.h || { echo "::error::private SDK repo missing public/steam/steam_api.h — check its layout"; exit 1; }
+          echo "Provisioned Steamworks SDK from the private repo"
 
       - name: Fetch audio + music
         run: |
@@ -70,33 +119,44 @@ jobs:
 
       - name: Build
         run: |
-          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+          STEAM=""; [ "${{ matrix.variant }}" = "steam" ] && STEAM="-DUSE_STEAM=ON"
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release $STEAM
           cmake --build build-rel -j$(nproc)
 
       - name: Package
         run: |
           SUFFIX=$(echo "${{ matrix.os }}" | sed 's/ubuntu-//')
-          mkdir -p package-linux
+          ZIP="DungeonEngine-${{ matrix.variant }}-Linux-${SUFFIX}.zip"
+          rm -rf package-linux && mkdir -p package-linux
           cp build-rel/src/DungeonEngine package-linux/
           chmod +x package-linux/DungeonEngine
           cp -r assets package-linux/assets
-          rm -f package-linux/assets/audio/.fetched
+          rm -f package-linux/assets/audio/.fetched package-linux/assets/config/controls.json
+          # Steam build: bundle the runtime lib (found via the $ORIGIN rpath). steam_appid.txt is NOT
+          # shipped — the Steam client injects the real App ID at launch.
+          if [ "${{ matrix.variant }}" = "steam" ] && [ -f build-rel/src/libsteam_api.so ]; then
+            cp build-rel/src/libsteam_api.so package-linux/
+          fi
           cat > package-linux/run.sh << 'SH'
           #!/bin/bash
           cd "$(dirname "$0")"
           ./DungeonEngine "$@"
           SH
           chmod +x package-linux/run.sh
-          cd package-linux && zip -r ../DungeonEngine-Linux-${SUFFIX}.zip . && cd ..
+          cd package-linux && zip -r "../$ZIP" . && cd ..
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DungeonEngine-Linux-${{ matrix.os }}
-          path: DungeonEngine-Linux-*.zip
+          name: DungeonEngine-${{ matrix.variant }}-Linux-${{ matrix.os }}
+          path: DungeonEngine-${{ matrix.variant }}-Linux-*.zip
 
-  build-macos:
+  macos:
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [itch, steam]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,6 +168,22 @@ jobs:
       - name: Install Pillow
         run: pip3 install Pillow --break-system-packages
 
+      - name: Provision Steamworks SDK
+        if: matrix.variant == 'steam'
+        env:
+          STEAMWORKS_SDK_TOKEN: ${{ secrets.STEAMWORKS_SDK_TOKEN }}
+        run: |
+          if [ -f external/steamworks/public/steam/steam_api.h ]; then echo "SDK already present"; exit 0; fi
+          if [ -z "$STEAMWORKS_SDK_TOKEN" ]; then
+            echo "::error::Steam build needs the private Steamworks SDK repo. Set the repo secret STEAMWORKS_SDK_TOKEN to a fine-grained PAT (Contents: read-only) scoped to github.com/edrethardo/steamworks-sdk."
+            exit 1
+          fi
+          # Clone the private SDK repo into place. Token is masked in logs by Actions; --depth 1 keeps it fast.
+          rm -rf external/steamworks
+          git clone --depth 1 "https://x-access-token:${STEAMWORKS_SDK_TOKEN}@github.com/edrethardo/steamworks-sdk.git" external/steamworks
+          test -f external/steamworks/public/steam/steam_api.h || { echo "::error::private SDK repo missing public/steam/steam_api.h — check its layout"; exit 1; }
+          echo "Provisioned Steamworks SDK from the private repo"
+
       - name: Fetch audio + music
         run: |
           python3 tools/fetch_audio.py
@@ -118,16 +194,22 @@ jobs:
 
       - name: Build
         run: |
-          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+          STEAM=""; [ "${{ matrix.variant }}" = "steam" ] && STEAM="-DUSE_STEAM=ON"
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release $STEAM
           cmake --build build-rel -j$(sysctl -n hw.ncpu)
 
       - name: Package
         run: |
-          mkdir -p DungeonEngine.app/Contents/MacOS
-          mkdir -p DungeonEngine.app/Contents/Resources
+          ZIP="DungeonEngine-${{ matrix.variant }}-macOS.zip"
+          rm -rf DungeonEngine.app
+          mkdir -p DungeonEngine.app/Contents/MacOS DungeonEngine.app/Contents/Resources
           cp build-rel/src/DungeonEngine DungeonEngine.app/Contents/MacOS/
           cp -r assets DungeonEngine.app/Contents/Resources/assets
           rm -f DungeonEngine.app/Contents/Resources/assets/audio/.fetched
+          # Steam build: bundle the runtime dylib next to the binary (found via @loader_path rpath).
+          if [ "${{ matrix.variant }}" = "steam" ] && [ -f build-rel/src/libsteam_api.dylib ]; then
+            cp build-rel/src/libsteam_api.dylib DungeonEngine.app/Contents/MacOS/
+          fi
           cat > DungeonEngine.app/Contents/Info.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -143,15 +225,12 @@ jobs:
           </dict>
           </plist>
           PLIST
-          # Ad-hoc sign so the bundle carries a valid signature. Apple Silicon
-          # rejects unsigned/invalidly-signed downloaded apps with an "is damaged"
-          # error; a clean ad-hoc signature avoids that. No --deep needed because
-          # SDL2/SDL_mixer/glad/enet are statically linked (single self-contained
-          # Mach-O, no embedded dylibs/frameworks). --verify fails the job if bad.
-          codesign --force --sign - DungeonEngine.app
+          # Ad-hoc sign so Gatekeeper doesn't reject the downloaded app as "damaged". The Steam variant
+          # embeds libsteam_api.dylib, so it needs --deep (sign nested code); the itch variant is a single
+          # self-contained Mach-O (SDL2/mixer/glad/enet static) and doesn't. --verify fails the job if bad.
+          DEEP=""; [ "${{ matrix.variant }}" = "steam" ] && DEEP="--deep"
+          codesign $DEEP --force --sign - DungeonEngine.app
           codesign --verify --verbose DungeonEngine.app
-          # Ship launch instructions: the app is unsigned by an Apple Developer ID,
-          # so users must clear the quarantine attribute before macOS will run it.
           cat > README-macOS.txt << 'TXT'
           DungeonEngine for macOS (Apple Silicon)
 
@@ -165,16 +244,16 @@ jobs:
                    xattr -cr /path/to/DungeonEngine.app
             3. Double-click the app, or run:  open /path/to/DungeonEngine.app
           TXT
-          zip -r DungeonEngine-macOS.zip DungeonEngine.app README-macOS.txt
+          zip -r "$ZIP" DungeonEngine.app README-macOS.txt
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DungeonEngine-macOS
-          path: DungeonEngine-macOS.zip
+          name: DungeonEngine-${{ matrix.variant }}-macOS
+          path: DungeonEngine-${{ matrix.variant }}-macOS.zip
 
   release:
-    needs: [build-windows, build-linux, build-macos]
+    needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -186,9 +265,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # All variants for all platforms: DungeonEngine-{itch,steam}-{Windows,Linux-*,macOS}.zip
           files: |
-            DungeonEngine-Windows/DungeonEngine-Windows.zip
-            DungeonEngine-Linux-ubuntu-22.04/DungeonEngine-Linux-22.04.zip
-            DungeonEngine-Linux-ubuntu-24.04/DungeonEngine-Linux-24.04.zip
-            DungeonEngine-macOS/DungeonEngine-macOS.zip
+            **/DungeonEngine-*.zip
           generate_release_notes: true

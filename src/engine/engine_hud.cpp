@@ -36,6 +36,7 @@
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
+#include "platform/steam.h"   // Steam::currentLobbyId — show the host's "Close Lobby" pause row when applicable
 #include "net/snapshot.h"
 #include "net/packet.h"
 #include "core/log.h"
@@ -820,8 +821,16 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         f32 titleW = FontSystem::textWidth(title, 3);
         FontSystem::drawText(sw, sh, cx - titleW * 0.5f, cy + 50.0f, title, {0.9f, 0.85f, 0.7f}, 3);
 
-        static const char* options[] = {"Continue Playing", "Save and Quit"};
-        for (u32 i = 0; i < 2; i++) {
+        // Option list is dynamic: the host of an open Steam lobby gets a middle "Close Lobby" row.
+        // currentLobbyId()==0 for SP / ENet host / client / non-Steam builds, so it stays 2 rows there.
+        // Ordering MUST match the input handler in engine_update.cpp: [Continue, (Close Lobby), Save/Quit].
+        const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
+        const char* options[3];
+        u32 optCount = 0;
+        options[optCount++] = "Continue Playing";
+        if (canCloseLobby) options[optCount++] = "Close Lobby";
+        options[optCount++] = "Save and Quit";
+        for (u32 i = 0; i < optCount; i++) {
             f32 y = cy + 10.0f - i * 35.0f;
             bool sel = (i == m_menu.subSelection);
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.4f, 0.4f, 0.5f};

@@ -29,6 +29,27 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 Release: `cmake -B build-rel -DCMAKE_BUILD_TYPE=Release && cmake --build build-rel`.
 SDL2 is fetched via `fetch_sdl2.sh` if missing. Single binary, no install step.
 
+**Steam vs non-Steam (itch.io) builds.** Steamworks is **opt-in via `USE_STEAM`** so one tree feeds both
+stores. The **default build is Steam-free** (itch.io / DRM-free — zero `libsteam_api` dependency;
+`src/platform/steam.cpp` compiles to no-ops). For the **Steam release**, unzip the Steamworks SDK into
+`external/steamworks/` (gitignored, proprietary) and add `-DUSE_STEAM=ON`:
+`cmake -B build-steam -DCMAKE_BUILD_TYPE=Release -DUSE_STEAM=ON && cmake --build build-steam` — this links
+`libsteam_api` (mingw derives an import lib from the DLL via `gendef`/`dlltool`), copies the runtime lib +
+a dev `tools/steam_appid.txt` next to the binary, and enables relay networking + matchmaking. Never
+enabled on Switch. (Steam Cloud config for saves is separate — `docs/steam_cloud.md`.) **CI**
+(`.github/workflows/build.yml`) builds BOTH variants for Windows/Linux/macOS on a tag push; the Steam jobs
+clone the SDK from a **private companion repo** (`github.com/edrethardo/steamworks-sdk`, holding
+`public/` + `redistributable_bin/`) into `external/steamworks/` using the repo secret `STEAMWORKS_SDK_TOKEN`
+(a fine-grained PAT, Contents: read) — itch jobs never need it. Keeping the SDK in a *private* repo (not the
+public tree) satisfies Valve's no-public-redistribution rule. The Steam **networking transport** (relay + `ISteamMatchmaking` lobbies/invites/browser/
+quickmatch) lives in `src/net/net.cpp` (`Transport::STEAM` branch) + `src/platform/steam.{h,cpp}`; App ID
+is `4819550`.
+
+**Releasing to stores.** `docs/DEPLOYMENT.md` is the release-agent runbook: which CI artifact goes to which
+Steam depot / itch channel / Switch console, the `steamcmd`/`butler`/`nxlink` steps, the beta→default
+promotion gate, and the required secrets. Releases are tag-driven — `tools/release.sh <bump> --push` cuts a
+`v*` tag and CI publishes the 8 zips (`itch`/`steam` × Win/Linux-22.04/Linux-24.04/macOS) to a GitHub Release.
+
 ## Testing
 
 doctest-based unit tests live in `tests/` (mirrors `src/` structure). The framework is vendored as a single header at `external/doctest/doctest.h`.

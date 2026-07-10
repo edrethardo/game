@@ -8,6 +8,7 @@
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/steam.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -1337,5 +1338,77 @@ void Engine::onLootSpawn(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId) {
     (void)posX; (void)posY; (void)posZ; // future: minimap pin
     LOG_INFO("net: loot spawn — uid=%u defId=%u pos=(%.1f,%.1f,%.1f)",
              uid, itemDefId, posX, posY, posZ);
+}
+
+// ---------------------------------------------------------------------------
+// Steam matchmaking glue (P2). netHostGame picks the transport at host time;
+// beginSteamJoin routes an accepted lobby invite into the join flow.
+// ---------------------------------------------------------------------------
+bool Engine::netHostGame(u8 localPlayerCount) {
+    // Online + Steam available → relay host + a discoverable friends-only lobby (invites "just work").
+    // Otherwise fall back to the ENet path (Online = UPnP, else LAN-only).
+    if (m_menu.hostOnline && Steam::isAvailable()) {
+        if (!Net::hostServerSteam(localPlayerCount)) return false;
+        Steam::createLobby(/*friendsOnly=*/true, static_cast<int>(MAX_PLAYERS));  // data set in onLobbyCreated
+        LOG_INFO("Steam: hosting via relay + lobby (%u local)", localPlayerCount);
+        return true;
+    }
+    return Net::hostServer(DEFAULT_PORT, m_menu.hostOnline, localPlayerCount);
+}
+
+void Engine::beginSteamJoin(u64 hostSteamId) {
+    if (m_gameState != GameState::MENU) {   // v1: only join from the menu (finish current game first)
+        LOG_WARN("Steam: ignoring lobby join while not at the menu");
+        return;
+    }
+    m_steamJoinHost        = hostSteamId;
+    m_netRole              = NetRole::CLIENT;
+    m_localPlayerIndex     = 0;
+    m_clientLoadedFromSave = false;
+    scanSaveSlots();
+    // Skip the "Enter Host IP" screen — go straight to New/Continue, then class, then the connect
+    // step (which routes through connectToSteamHost because m_steamJoinHost is set).
+    m_menu.subState    = 1;
+    m_menu.subSelection = 0;
+    LOG_INFO("Steam: joining host %llu — pick New/Continue then class", (unsigned long long)hostSteamId);
+}
+
+void Engine::steamQuickJoin() {
+    if (!Steam::isAvailable()) return;
+    m_steamMenuMode = 1;
+    char ver[16]; std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
+    Steam::requestLobbyList(ver);   // -> onSteamLobbyList
+    LOG_INFO("Steam: quickmatch — searching for a game...");
+}
+
+void Engine::steamBrowse() {
+    if (!Steam::isAvailable()) return;
+    m_steamMenuMode = 2;
+    m_steamBrowserSel = 0;
+    char ver[16]; std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
+    Steam::requestLobbyList(ver);
+    LOG_INFO("Steam: browsing public lobbies...");
+}
+
+void Engine::onSteamLobbyList(int count) {
+    if (m_gameState != GameState::MENU) { m_steamMenuMode = 0; return; }
+    if (m_steamMenuMode == 1) {           // quickmatch
+        m_steamMenuMode = 0;
+        if (count > 0) {
+            char nm[64]; int mc = 0, mm = 0;
+            u64 id = Steam::lobbyListEntry(0, nm, sizeof(nm), &mc, &mm);  // Steam sorts best-first
+            if (id) { Steam::joinLobby(id); return; }   // -> onLobbyEntered -> beginSteamJoin
+        }
+        // No public games found → route to the host flow (Online preselected) so we become joinable.
+        LOG_INFO("Steam: no games found — host one");
+        m_netRole = NetRole::SERVER;
+        m_localPlayerIndex = 0;
+        m_menu.hostOnline  = true;
+        scanSaveSlots();
+        m_menu.subState     = 10;   // LAN/Online chooser
+        m_menu.subSelection = 1;    // Online
+    } else if (m_steamMenuMode == 2) {    // browser: the list substate renders Steam::lobbyList*
+        m_steamBrowserSel = 0;
+    }
 }
 

@@ -18,6 +18,7 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     "sfx_weapon_dagger.wav",
     "sfx_weapon_axe.wav",
     "sfx_weapon_claymore.wav",
+    "sfx_weapon_cleaver.wav",
     "sfx_weapon_pistol.wav",
     "sfx_weapon_smg.wav",
     "sfx_weapon_carbine.wav",
@@ -26,6 +27,7 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     "sfx_weapon_crossbow.wav",
     "sfx_weapon_throw.wav",
     "sfx_weapon_molotov.wav",
+    "sfx_weapon_chakram.wav",
     "sfx_weapon_wand.wav",
     "sfx_weapon_staff.wav",
     "sfx_reload.wav",
@@ -33,6 +35,7 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     "sfx_hit_melee.wav",
     "sfx_hit_hitscan.wav",
     "sfx_hit_projectile.wav",
+    "sfx_ricochet.wav",
     "sfx_enemy_hit.wav",
     "sfx_enemy_death.wav",
     "sfx_player_hit.wav",
@@ -70,6 +73,11 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     "sfx_door_open.wav",
     "sfx_level_up.wav",
 };
+
+// Compile-time guard: this positional table must stay index-aligned with SfxId. If it fires, an
+// SfxId was added/removed without updating s_sfxFiles (or vice-versa).
+static_assert(sizeof(s_sfxFiles) / sizeof(s_sfxFiles[0]) == static_cast<u32>(SfxId::SFX_COUNT),
+              "s_sfxFiles is out of sync with SfxId::SFX_COUNT");
 
 static Mix_Chunk* s_sfx[static_cast<u32>(SfxId::SFX_COUNT)] = {};
 static Mix_Music* s_music = nullptr;

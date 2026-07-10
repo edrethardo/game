@@ -36,6 +36,7 @@
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
+#include "platform/steam.h"   // Steam::currentLobbyId / closeLobby for the host's pause-menu "Close Lobby" row
 #include "net/snapshot.h"
 #include "net/packet.h"
 #include "net/render_offset.h"
@@ -105,14 +106,16 @@ static bool deathRespawnPromptHit(u32 sw, u32 sh) {
 // In-game pause menu (m_menu.confirmQuit while IN_GAME): two 250×28 options centered at cx,
 // y = sh*0.5 + 10 - i*35 (0=Continue, 1=Save and Quit). Layout MUST match engine_hud.cpp's
 // pause overlay. Returns the option under the cursor, or -1.
-static s8 pauseMenuHit(u32 sw, u32 sh) {
+static s8 pauseMenuHit(u32 sw, u32 sh, u8 optCount) {
     s32 mx, my; Input::getMousePosition(mx, my);
     f32 hudX = static_cast<f32>(mx);
     f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
     f32 cx   = static_cast<f32>(sw) * 0.5f;
     f32 cy   = static_cast<f32>(sh) * 0.5f;
     if (hudX < cx - 125.0f || hudX > cx + 125.0f) return -1; // 250-wide centered box
-    for (s8 i = 0; i < 2; i++) {
+    // Rows are laid out top-down from cy+10 in 35 px steps; optCount varies (2, or 3 when the host can
+    // close its Steam lobby) so the hit-test must match the renderer's dynamic option list exactly.
+    for (s8 i = 0; i < static_cast<s8>(optCount); i++) {
         f32 y = cy + 10.0f - static_cast<f32>(i) * 35.0f;
         if (hudY >= y && hudY <= y + 28.0f) return i;
     }
@@ -242,7 +245,13 @@ void Engine::update(f32 dt) {
         // Last-input-device gate (see updateMenuMouseActive): a resting pointer must not hijack the
         // pause selection while the player uses keyboard/controller; the cursor hides while they do.
         const bool mouseActive = updateMenuMouseActive();
-        const s8   ph     = mouseActive ? pauseMenuHit(Window::getWidth(), Window::getHeight()) : static_cast<s8>(-1);
+        // The host of an open Steam lobby gets an extra middle option, "Close Lobby" (stop new joiners
+        // without ending the game). currentLobbyId()==0 for SP / ENet hosts / clients / non-Steam builds,
+        // so the option auto-hides everywhere else and the menu stays 2 rows. Layout must match the
+        // renderer in engine_hud.cpp: [Continue, (Close Lobby), Save and Quit].
+        const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
+        const u8   pauseOptCount = canCloseLobby ? 3 : 2;
+        const s8   ph     = mouseActive ? pauseMenuHit(Window::getWidth(), Window::getHeight(), pauseOptCount) : static_cast<s8>(-1);
         const bool pclick = mouseActive && Input::isMouseButtonPressed(MOUSE_LEFT);
         if (ph >= 0 && static_cast<u8>(ph) != m_menu.subSelection) {
             m_menu.subSelection = static_cast<u8>(ph);
@@ -252,7 +261,7 @@ void Engine::update(f32 dt) {
             if (m_menu.subSelection > 0) m_menu.subSelection--;
         }
         if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-            if (m_menu.subSelection < 1) m_menu.subSelection++;
+            if (m_menu.subSelection < pauseOptCount - 1) m_menu.subSelection++;
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             m_menu.confirmQuit = false;          // ESC/B = resume
@@ -264,8 +273,16 @@ void Engine::update(f32 dt) {
                 // Continue Playing
                 m_menu.confirmQuit = false;
                 Input::setRelativeMouseMode(true); // recapture the cursor for gameplay
+            } else if (canCloseLobby && m_menu.subSelection == 1) {
+                // Close Lobby — stop advertising + refuse new joiners; the game continues over the relay
+                // with whoever's already in. Resume gameplay afterward (this isn't a quit).
+                Steam::closeLobby();
+                addChatMessage("System", "Lobby closed — no new players can join.", {1.0f, 0.85f, 0.4f});
+                m_menu.confirmQuit = false;
+                m_menu.subSelection = 0;            // reset highlight; the option is gone next time
+                Input::setRelativeMouseMode(true);  // recapture the cursor for gameplay
             } else {
-                // Save and Quit
+                // Save and Quit (always the last row)
                 m_menu.confirmQuit = false;
                 saveAllCharacters();  // per-character: each local lane to its own slot
                 if (m_netRole != NetRole::NONE) {

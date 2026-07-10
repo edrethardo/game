@@ -9,6 +9,7 @@
 #include "platform/clock.h"
 #include "platform/input.h"
 #include "platform/user_paths.h"
+#include "platform/steam.h"
 #include "renderer/gl_context.h"
 #include "renderer/renderer.h"
 #include "renderer/debug_draw.h"
@@ -352,7 +353,7 @@ void Engine::updateMenu(f32 dt) {
             if (m_menu.couchHost) {
                 // Online couch co-op: both local players already picked characters in the lobby.
                 // Host reserving 2 local slots (slot 0 host + slot 1 partner), then start as SERVER.
-                if (Net::hostServer(DEFAULT_PORT, m_menu.hostOnline, 2)) {
+                if (netHostGame(2)) {
                     m_menu.couchHost = false;
                     startCouchGame();        // m_netRole==SERVER → seats slot 1 + sets m_netCouch
                 } else {
@@ -364,6 +365,54 @@ void Engine::updateMenu(f32 dt) {
             }
             m_menu.subState = 1;            // normal host: fall into the shared New/Continue chooser
             m_menu.subSelection = 0;
+        }
+        return;
+    }
+
+    // Steam join chooser (subState 19, P3) — reachable from "Join Game" when Steam is available:
+    // 0=Quick Join, 1=Browse Games, 2=Enter IP (LAN/direct).
+    if (m_menu.subState == 19) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < 2) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_netRole = NetRole::NONE; m_menu.subState = 0; m_menu.subSelection = 0; return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            if (m_menu.subSelection == 0) {        // Quick Join — async: onSteamLobbyList joins or hosts
+                steamQuickJoin();
+            } else if (m_menu.subSelection == 1) { // Browse Games
+                steamBrowse();
+                m_menu.subState = 20; m_steamBrowserSel = 0;
+            } else {                                // Enter IP (LAN/direct)
+                m_steamJoinHost = 0;
+                m_menu.subState = 9; m_menu.connectAddressClearOnType = true;
+            }
+        }
+        return;
+    }
+
+    // Steam public lobby browser (subState 20, P3): up/down pick a lobby, confirm joins it.
+    if (m_menu.subState == 20) {
+        int n = Steam::lobbyListCount();
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_steamBrowserSel > 0) { m_steamBrowserSel--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (n > 0 && m_steamBrowserSel < n - 1) { m_steamBrowserSel++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK); m_menu.subState = 19; m_menu.subSelection = 1; return;
+        }
+        if ((Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) && n > 0) {
+            char nm[64]; int mc = 0, mm = 0;
+            u64 id = Steam::lobbyListEntry(m_steamBrowserSel, nm, sizeof(nm), &mc, &mm);
+            if (id) { AudioSystem::play(SfxId::UI_CONFIRM); Steam::joinLobby(id); }  // -> onLobbyEntered -> beginSteamJoin
         }
         return;
     }
@@ -427,7 +476,7 @@ void Engine::updateMenu(f32 dt) {
                         return;
                     }
                     if (m_netRole == NetRole::SERVER) {
-                        if (!Net::hostServer(DEFAULT_PORT, m_menu.hostOnline)) {
+                        if (!netHostGame()) {
                             m_netRole = NetRole::NONE; return;
                         }
                         LOG_INFO("Hosting game (continue slot %u, mode=%s)...",
@@ -505,7 +554,7 @@ void Engine::updateMenu(f32 dt) {
                 m_menu.subSelection = 0;
             } else if (m_netRole == NetRole::SERVER) {
                 // Network hosting — skip couch co-op, start server directly
-                if (!Net::hostServer(DEFAULT_PORT, m_menu.hostOnline)) {
+                if (!netHostGame()) {
                     m_netRole = NetRole::NONE;
                     LOG_WARN("Failed to start server");
                     return;
@@ -549,11 +598,17 @@ void Engine::updateMenu(f32 dt) {
                 // Join solo — connect as a single player. (This is the lobby reached from the
                 // discoverable "Join Game" flow; the single-connect logic lives here now.)
                 Net::setLocalPlayerClass(static_cast<u8>(m_playerClasses[0]));
-                if (Net::connectToServer(m_menu.connectAddress)) {
+                // Steam invite/browse join routes by SteamID; otherwise the typed IP (ENet). One-shot.
+                u64 steamHost = m_steamJoinHost;
+                m_steamJoinHost = 0;
+                bool connected = steamHost ? Net::connectToSteamHost(steamHost)
+                                           : Net::connectToServer(m_menu.connectAddress);
+                if (connected) {
                     m_gameState = GameState::CONNECTING;
                     m_connectingElapsed = 0.0f;
                     LOG_INFO("Joining %s solo as class %u...",
-                             m_menu.connectAddress, static_cast<u32>(m_playerClasses[0]));
+                             steamHost ? "Steam host" : m_menu.connectAddress,
+                             static_cast<u32>(m_playerClasses[0]));
                 } else {
                     m_netRole = NetRole::NONE;
                     m_clientLoadedFromSave = false;
@@ -1330,6 +1385,7 @@ void Engine::updateMenu(f32 dt) {
             break;
         case 2: // Join — prompt for host IP first, then New/Continue → save slot → class
             m_netRole = NetRole::CLIENT;
+            m_steamJoinHost = 0;   // explicit IP-join path — clear any stale Steam target so the connect step uses the typed IP
             // Lane stays 0 on a client (networking forces split count 1). The server-assigned
             // net slot lands in m_clientNetSlot at SV_JOIN_ACCEPT; net access uses activeNetSlot().
             m_localPlayerIndex = 0;
@@ -1356,9 +1412,17 @@ void Engine::updateMenu(f32 dt) {
                 }
             }
 #else
-            m_menu.subState = 9;    // IP entry → on confirm advances to 1 (New/Continue chooser)
-            m_menu.subSelection = 0;
-            m_menu.connectAddressClearOnType = true;
+            // Steam available → Quick Join / Browse / Enter-IP chooser (subState 19). Otherwise the
+            // classic IP-entry screen (subState 9). Steam host discovery replaces manual IP typing.
+            m_steamJoinHost = 0;
+            if (Steam::isAvailable()) {
+                m_menu.subState = 19;
+                m_menu.subSelection = 0;
+            } else {
+                m_menu.subState = 9;    // IP entry → on confirm advances to 1 (New/Continue chooser)
+                m_menu.subSelection = 0;
+                m_menu.connectAddressClearOnType = true;
+            }
 #endif
             break;
         case 3: // Options — controls rebinding

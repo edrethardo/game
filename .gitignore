@@ -1,5 +1,6 @@
 build/
 build-rel/
+build-steam/
 build-dbg/
 build-switch/
 build-win/
@@ -37,3 +38,7 @@ logs/
 
 # Superpowers brainstorm companion (regenerable mockups)
 .superpowers/
+
+# Steamworks SDK (proprietary, user-downloaded — not redistributable)
+external/steamworks/
+steamworks_sdk_*.zip

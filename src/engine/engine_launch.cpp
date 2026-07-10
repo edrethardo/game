@@ -14,6 +14,7 @@
 #include "core/log.h"
 #include "net/net.h"
 #include "platform/window.h"
+#include "platform/steam.h"   // Steam::joinLobby for +connect_lobby cold-start
 
 #include <cstring>
 
@@ -54,6 +55,15 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     m_shotInterval = (f64)opt.shotInterval;
     if (opt.shotInterval > 0)
         LOG_INFO("Launch: auto-screenshot every %us -> screenshot_NNNN.png in the run dir", opt.shotInterval);
+
+    // Steam cold-start: a friend accepted an invite / clicked Join while the game was closed. Join that
+    // lobby now; the lobby-entered callback (initCallbacks) routes it into the join flow once Steam
+    // confirms. Stays at the menu (not a `--host/--join` game-jump). No-op if Steam isn't available;
+    // gated off in the demo (no online).
+    if (opt.connectLobbyId != 0 && !GameConst::kDemoBuild) {
+        LOG_INFO("Launch: Steam +connect_lobby %llu", (unsigned long long)opt.connectLobbyId);
+        Steam::joinLobby(opt.connectLobbyId);
+    }
 
     if (!opt.active) return;  // no game-jump directive → normal menu boot
 

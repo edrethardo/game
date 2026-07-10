@@ -22,3 +22,9 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
 # Static linking so the exe doesn't need mingw DLLs at runtime
 set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+
+# Steamworks (external/CMakeLists.txt) derives a mingw import lib from steam_api64.dll because the
+# shipped steam_api64.lib is MSVC-format. Point at the toolchain-prefixed binutils. `gendef` comes
+# from the mingw-w64-tools package (apt install mingw-w64-tools).
+set(DLLTOOL_EXE    x86_64-w64-mingw32-dlltool)
+set(DLLTOOL_GENDEF x86_64-w64-mingw32-gendef)

@@ -60,6 +60,14 @@ Apply `templates/weapon_subtype_snippets.md`:
    dagger `else if` is the pattern; default is 5% / 2×);
 4. *if firing differs* — branch in `Combat::fireMelee`/`fireHitscan`/`fireProjectile`
    (`src/game/combat.cpp`) and/or the dispatch in `Engine::handleWeaponFireForPlayer`.
+5. **Fire sound (don't forget — a new subtype is otherwise silent).** Add a
+   `SfxId::WEAPON_<X>` + `"sfx_weapon_<x>.wav"` **in lockstep** in `src/audio/audio.{h,cpp}`
+   (the `static_assert` guards the enum/table alignment), then a
+   `case WeaponSubtype::<X>: AudioSystem::play(SfxId::WEAPON_<X>, 0.5f); break;` in the
+   fire-sound switch (`engine_combat.cpp` ~615). Make the slot **hand-pickable** (`tools/pick_sfx.py`
+   SLOTS/SLOT_CLASS + a `fetch_audio.py` default) and **let the user pick the actual sound** —
+   see the `pick-sfx` skill. A bounce projectile also wants a wall-reflect sound at its ricochet
+   site (`projectile.cpp`).
 
 ## Step 5 — Build assets + compile
 

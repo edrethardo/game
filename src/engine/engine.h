@@ -945,6 +945,35 @@ private:
     // server via CL_INVENTORY_SYNC. Cleared after the sync is sent.
     bool m_clientLoadedFromSave = false;
 
+    // Steam relay join target (P2): the host's SteamID from an accepted lobby invite / browse. Non-zero
+    // routes the menu's connect step through Net::connectToSteamHost instead of connectToServer.
+    // Cleared on connect / return to menu.
+    u64 m_steamJoinHost = 0;
+    // P3 lobby browser/quickmatch: pending request mode (0=none,1=quickmatch,2=browse) + browser cursor.
+    u8  m_steamMenuMode = 0;
+    u8  m_steamBrowserSel = 0;
+public:
+    // Start a network host from the menu: Steam relay + a lobby when Online is chosen and Steam is
+    // available, else ENet + UPnP. Returns true on success.
+    bool netHostGame(u8 localPlayerCount = 1);
+    // Enter the join flow for a Steam-relay host (from an accepted invite): stash the host SteamID and
+    // route the menu to New/Continue -> class. Guards internally to only act from the MENU state.
+    // Called from the Steam lobby-entered callback (a free function).
+    void beginSteamJoin(u64 hostSteamId);
+    // P3: kick off a quickmatch (join best public lobby, else host) / a public browser request.
+    void steamQuickJoin();
+    void steamBrowse();
+    // Steam lobby-list result handler (from the Steam callback): drives quickmatch / opens the browser.
+    void onSteamLobbyList(int count);
+    // Push the current roster into the Steam lobby (P2): publishes "players"/"slots_free" (the browser
+    // shows the "players" count) and flips the lobby joinable flag off when full / back on when a slot
+    // frees. No-op unless we're the Steam-relay host that owns a lobby. Called from onPlayerJoin/
+    // onPlayerLeft (roster changes) and steamOnLobbyCreated (initial publish) — the latter is a free
+    // function, so this must be public. Stops friends-list/browser "Join" from offering a full game.
+    void updateSteamLobbyRoster();
+private:
+
+
     struct SaveSlotInfo {
         bool exists;
         u8   floor;

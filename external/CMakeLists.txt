@@ -83,3 +83,62 @@ if(NOT NINTENDO_SWITCH)
     # target is built — link that instead of the bare libminiupnpc-static name
     # so we're tracking the namespaced API rather than upstream's internal target.
 endif()
+
+# --- Steamworks SDK (optional, proprietary, user-downloaded → external/steamworks/, gitignored) ---
+# Provides Steam relay networking (ISteamNetworkingMessages) + matchmaking (ISteamMatchmaking).
+# Steam is OPT-IN so ONE source tree builds both stores from a single flag:
+#   Steam release:   cmake -B build-steam -DUSE_STEAM=ON   (requires external/steamworks/)
+#   itch.io / other: cmake -B build                        (DEFAULT — no Steamworks dependency)
+# When OFF, src/platform/steam.cpp compiles as no-op stubs so the game is byte-for-byte Steam-free.
+# Never available on Switch.
+option(USE_STEAM "Build with Steamworks (relay networking + matchmaking) — Steam release only" OFF)
+if(USE_STEAM AND NINTENDO_SWITCH)
+    message(FATAL_ERROR "USE_STEAM is not supported on Switch.")
+endif()
+
+if(USE_STEAM)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/steamworks/public/steam/steam_api.h")
+        message(FATAL_ERROR "USE_STEAM=ON but the Steamworks SDK is missing. Unzip it to "
+                "external/steamworks/ so external/steamworks/public/steam/steam_api.h exists "
+                "(proprietary — gitignored, not committed).")
+    endif()
+    set(STEAM_SDK    "${CMAKE_CURRENT_SOURCE_DIR}/steamworks")
+    set(STEAM_REDIST "${STEAM_SDK}/redistributable_bin")
+    add_library(steam_api SHARED IMPORTED GLOBAL)
+    target_include_directories(steam_api INTERFACE "${STEAM_SDK}/public")
+
+    if(WIN32)
+        # Steam ships an MSVC steam_api64.lib that mingw's linker can't consume. Derive a
+        # mingw-compatible import lib from the DLL at configure time (gendef + dlltool).
+        set(_STEAM_DLL    "${STEAM_REDIST}/win64/steam_api64.dll")
+        set(_STEAM_IMPLIB "${CMAKE_CURRENT_BINARY_DIR}/libsteam_api64.a")
+        if(NOT EXISTS "${_STEAM_IMPLIB}")
+            if(NOT DLLTOOL_GENDEF OR NOT DLLTOOL_EXE)
+                message(FATAL_ERROR "USE_STEAM on Windows needs DLLTOOL_GENDEF/DLLTOOL_EXE "
+                        "(cmake/windows.cmake) + mingw-w64-tools (gendef).")
+            endif()
+            message(STATUS "Steam: generating mingw import lib from steam_api64.dll")
+            execute_process(COMMAND ${DLLTOOL_GENDEF} "${_STEAM_DLL}"
+                            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RESULT_VARIABLE _rc)
+            if(_rc)
+                message(FATAL_ERROR "gendef failed for steam_api64.dll (rc=${_rc})")
+            endif()
+            execute_process(COMMAND ${DLLTOOL_EXE} --dllname steam_api64.dll
+                            --def "${CMAKE_CURRENT_BINARY_DIR}/steam_api64.def"
+                            --output-lib "${_STEAM_IMPLIB}" RESULT_VARIABLE _rc2)
+            if(_rc2)
+                message(FATAL_ERROR "dlltool failed for steam_api64.dll (rc=${_rc2})")
+            endif()
+        endif()
+        set_target_properties(steam_api PROPERTIES
+            IMPORTED_LOCATION "${_STEAM_DLL}"
+            IMPORTED_IMPLIB   "${_STEAM_IMPLIB}")
+    elseif(APPLE)
+        set_target_properties(steam_api PROPERTIES
+            IMPORTED_LOCATION "${STEAM_REDIST}/osx/libsteam_api.dylib")
+    else() # Linux
+        set_target_properties(steam_api PROPERTIES
+            IMPORTED_LOCATION "${STEAM_REDIST}/linux64/libsteam_api.so")
+    endif()
+    message(STATUS "Steam: USE_STEAM=ON (SDK at ${STEAM_SDK})")
+endif()
