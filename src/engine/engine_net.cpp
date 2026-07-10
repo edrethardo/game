@@ -1161,8 +1161,54 @@ void Engine::clientNetPost(f32 dt) {
                     Vec3 diff   = serverPos - e->state.position;
                     f32  distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
                     if (distSq > 0.01f) {  // > 10 cm (0.1 m) squared = 0.01 m²
-                        LOG_INFO("net: prediction divergence (lane %u) at tick %u: %.2f m",
-                                 sp, ackedTick, sqrtf(distSq));
+                        const f32 mag = sqrtf(distSq);
+
+                        // --- Shaky-client-FOV diagnostic ---------------------------------------
+                        // Was this correction fired while the local player was brushing a MOVING
+                        // enemy? That's the signature of the client/server obstacle-time mismatch
+                        // (client samples enemies at the adaptive interp delay + an interpolated
+                        // pose; the server rewinds a FIXED 2 ticks to a discrete pose — see
+                        // buildLagCompPlayerObstacles). Scan the interpolated render pool (same
+                        // pool the client's local moveAndSlide uses as obstacles) for the nearest
+                        // active enemy in the XZ plane; within ~1.5 m (≈2× the ~0.8 m player+enemy
+                        // contact distance) counts as "near". Cheap — only runs on a correction.
+                        constexpr f32 BRUSH_RANGE_SQ = 1.5f * 1.5f;
+                        f32 nearestEnemySq = 1e9f;
+                        for (u32 a = 0; a < m_renderInterp.entities.activeCount; a++) {
+                            const Entity& e = m_renderInterp.entities.entities[
+                                m_renderInterp.entities.activeList[a]];
+                            if (e.flags & ENT_DEAD) continue;
+                            if (e.flags & ENT_FRIENDLY) continue;
+                            if (e.enemyType == EnemyType::PROP) continue;
+                            f32 dx = e.position.x - m_localPlayer.position.x;
+                            f32 dz = e.position.z - m_localPlayer.position.z;
+                            f32 d2 = dx * dx + dz * dz;
+                            if (d2 < nearestEnemySq) nearestEnemySq = d2;
+                        }
+                        const bool nearEnemy = nearestEnemySq <= BRUSH_RANGE_SQ;
+
+                        // Fold into the 1 Hz [NET-GRAPH] window (mean = sum/count, plus max +
+                        // near-enemy tally). A high rate with most corrections NEAR an enemy and
+                        // a widened interpDelay confirms the obstacle-time-mismatch root cause.
+                        m_divergenceSumM += mag;
+                        if (mag > m_divergenceMaxM) m_divergenceMaxM = mag;
+                        if (nearEnemy) m_divergenceNearEnemyCount++;
+
+                        // Per-correction detail, throttled to ~1-in-12 (~5 Hz on a maximally shaky
+                        // floor) so up to 60 corrections/s don't flood the log — the summary above
+                        // carries the rate/mean/max, this shows representative individual samples.
+                        static u32 s_divLogThrottle = 0;
+                        if ((s_divLogThrottle++ % 12) == 0) {
+                            if (nearestEnemySq < 1e8f)
+                                LOG_INFO("net: prediction divergence (lane %u) tick %u: %.2f m  "
+                                         "interpDelay=%.0fms  %snearest-enemy=%.2fm",
+                                         sp, ackedTick, mag, Client::getInterpDelaySec() * 1000.0f,
+                                         nearEnemy ? "NEAR " : "", sqrtf(nearestEnemySq));
+                            else
+                                LOG_INFO("net: prediction divergence (lane %u) tick %u: %.2f m  "
+                                         "interpDelay=%.0fms  (no enemy nearby)",
+                                         sp, ackedTick, mag, Client::getInterpDelaySec() * 1000.0f);
+                        }
 
                         // M14: count every reconcile mismatch for the 1 Hz net-graph log.
                         m_divergenceCount++;

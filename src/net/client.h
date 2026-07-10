@@ -110,6 +110,13 @@ namespace Client {
     // Get local player index
     u8 getLocalPlayerIndex();
 
+    // Current adaptive interpolation delay (seconds). Starts at INTERP_DELAY_SEC and widens
+    // with snapshot-arrival jitter (see interp_delay.h). Exposed for the [NET-GRAPH]
+    // shaky-FOV diagnostic: the client samples enemy collision obstacles at THIS delay, while
+    // the server rewinds a FIXED 2 ticks — so a widened value means a bigger client/server
+    // obstacle-time mismatch and thus more prediction divergence (the shake). Read-only.
+    f32 getInterpDelaySec();
+
     // Decode a SV_TIME_PONG payload and feed it to ClockSync. Caller supplies the
     // wall-clock time of the pong arrival (Clock::getElapsedSeconds at decode time).
     // Short payloads are logged and ignored (cs unchanged).

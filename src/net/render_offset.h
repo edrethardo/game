@@ -32,7 +32,19 @@ namespace RenderOffsetOps {
     // gets shaky" symptom when those corrections fire in varying directions. Cap
     // clamps the magnitude (direction preserved) so the rendered camera never appears
     // more than this far behind the authoritative sim position.
-    static constexpr f32 MAX_OFFSET_M = 0.35f;
+    //
+    // Tightened 0.35 → 0.15 m (shaky-client-FOV dampener): on enemy-dense / tight-corridor
+    // floors the M3.2 reconcile fires nearly every snapshot with a varying direction (the
+    // client's interpolated+adaptive-delay enemy obstacles disagree with the server's
+    // discrete+fixed-delay lag-comp rewind — see buildLagCompPlayerObstacles), so the
+    // offset random-walks inside this ball. Now that apply() adds the offset with the correct
+    // sign (the mirror-jump bug is fixed), this ball is a pure wander bound: it caps how far
+    // the eye can trail the sim under a burst of small corrections. ±15 cm still smooths a
+    // legitimate one-off correction while keeping the residual sub-perceptible; it can be
+    // relaxed back toward the old 0.35 m later if big single corrections feel too abrupt.
+    // The underlying per-tick divergence itself (the [NET-GRAPH] div stats measure it) still
+    // wants the obstacle-time-mismatch fix, but the sign correction removes the shake driver.
+    static constexpr f32 MAX_OFFSET_M = 0.15f;
 
     // Accumulate a new correction delta into the offset. If a prior correction is still
     // decaying, the two sum together so compounding errors don't snap more than necessary.
@@ -42,7 +54,10 @@ namespace RenderOffsetOps {
     // No-op when dt <= 0 so the identity case is exact.
     void tick(RenderOffset& r, f32 dt);
 
-    // Return the visually-smoothed position: simPos minus the current offset.
+    // Return the visually-smoothed position: simPos PLUS the current offset. The offset holds
+    // (pre-snap camera pos − snapped sim pos), so adding it back holds the camera where it was
+    // right after a reconcile snap, then the decay eases it onto simPos. (Was `minus` — an
+    // inverted sign that mirror-jumped the eye and caused the shaky-client-FOV bug.)
     // The caller renders from this rather than the raw sim position.
     Vec3 apply(const RenderOffset& r, Vec3 simPos);
 }

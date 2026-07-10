@@ -417,10 +417,20 @@ void Engine::update(f32 dt) {
                     NetMetrics m = Net::getMetrics();
                     u32 bage = NetMetricsOps::baselineAgeTicks(
                         static_cast<u32>(m_clockSync.serverTickEst), m_lastAppliedSnap.serverTick);
-                    LOG_INFO("[NET-GRAPH] rtt=%.1fms est=%.1f div=%u in=%.1fKB/s(wire~%.1f) snap=%.1fHz bage=%ut",
+                    // Shaky-FOV diagnostic: div= corrections/s (each snaps the camera → shake when
+                    // frequent). mean/max = correction magnitude. near= how many fired while brushing
+                    // an enemy (root-cause signature). idelay= client's adaptive interp delay — the
+                    // wider it is vs the server's fixed 33 ms rewind, the bigger the obstacle-time
+                    // mismatch that drives the divergence. Smooth floor ≈ div=0; shaky floor = high
+                    // div, near≈div, idelay>33 ms.
+                    f32 divMean = (m_divergenceCount > 0)
+                                  ? m_divergenceSumM / static_cast<f32>(m_divergenceCount) : 0.0f;
+                    LOG_INFO("[NET-GRAPH] rtt=%.1fms est=%.1f div=%u(near=%u mean=%.2fm max=%.2fm) "
+                             "idelay=%.0fms in=%.1fKB/s(wire~%.1f) snap=%.1fHz bage=%ut",
                              m_clockSync.oneWayTripMs * 2.0f,
                              static_cast<f64>(m_clockSync.serverTickEst),
-                             m_divergenceCount,
+                             m_divergenceCount, m_divergenceNearEnemyCount, divMean, m_divergenceMaxM,
+                             Client::getInterpDelaySec() * 1000.0f,
                              m.kbInTotal, m.wireKbIn, m.snapsInPerSec, bage);
                 } else {
                     // SERVER: one line per connected remote client — the M12 read-off surface.
@@ -437,6 +447,11 @@ void Engine::update(f32 dt) {
                 }
                 m_lastDebugLogSec = nowSec;
                 m_divergenceCount = 0;
+                // Reset the shaky-FOV diagnostic accumulators alongside the count so each
+                // [NET-GRAPH] line reports a fresh 1 s window.
+                m_divergenceSumM = 0.0f;
+                m_divergenceMaxM = 0.0f;
+                m_divergenceNearEnemyCount = 0;
             }
         }
 

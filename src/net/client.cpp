@@ -909,3 +909,10 @@ void Client::mirrorWorldItems(WorldItemPool& outItems, const ItemDef* itemDefs, 
 u8 Client::getLocalPlayerIndex() {
     return s_localPlayerIndex;
 }
+
+f32 Client::getInterpDelaySec() {
+    // Live adaptive delay (widens with arrival jitter in pushSnapshot). See the header
+    // comment — the [NET-GRAPH] shaky-FOV diagnostic reads this to correlate camera shake
+    // with the client/server obstacle-sampling-time mismatch under jitter.
+    return s_interpDelaySec;
+}

@@ -33,7 +33,21 @@ void RenderOffsetOps::tick(RenderOffset& r, f32 dt) {
 }
 
 Vec3 RenderOffsetOps::apply(const RenderOffset& r, Vec3 simPos) {
-    // Visual position = sim position minus the current offset remainder.
-    // When offset is zero (fully decayed) this returns simPos unchanged.
-    return simPos - r.offset;
+    // Visual position = sim position PLUS the current offset remainder.
+    //
+    // The offset stores (pre-snap camera position − snapped sim position): accumulate() is
+    // fed `m_localPlayer.position − serverPos` at the reconcile site, i.e. the vector FROM
+    // the new sim target TO where the camera visually is. Adding it back to the snapped sim
+    // reconstructs exactly where the camera was right before the snap (no teleport), and the
+    // per-frame decay then slides that remainder to zero so the eye eases onto the true sim
+    // position. When offset is zero (fully decayed) this returns simPos unchanged.
+    //
+    // BUG FIX (shaky client FOV): this was `simPos - r.offset`, which INVERTED the
+    // correction — it rendered at `2·simPos − camera`, mirroring the eye to the far side of
+    // the sim position and DOUBLING the error instead of hiding it. Invisible in normal play
+    // (corrections rarely exceed the 10 cm reconcile threshold, so offset ≈ 0), but on
+    // enemy-dense / tight-corridor floors the reconcile fires nearly every snapshot in
+    // varying directions, and each mirror-jump read as camera shake. Adding is what the
+    // module's own design note ("keep the camera where it was, slide toward sim") requires.
+    return simPos + r.offset;
 }

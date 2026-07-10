@@ -270,6 +270,15 @@ private:
     u32  m_netFakeLatencyMs  = 0;    // D5: ms of one-way simulated latency on all sends
     u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
     u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
+    // Shaky-client-FOV diagnostic (accumulated per-correction in clientNetPost, reported +
+    // reset by the 1 Hz [NET-GRAPH] log). Together these show whether the camera shake is
+    // driven by frequent, enemy-correlated prediction divergence: divSum/divCount = mean
+    // correction magnitude, divMax = worst this window, divNearEnemy = how many corrections
+    // fired while the local player was brushing a moving enemy (the suspected root cause —
+    // client/server obstacle-time mismatch, see buildLagCompPlayerObstacles).
+    f32  m_divergenceSumM        = 0.0f; // Σ correction magnitude (m) since last log interval
+    f32  m_divergenceMaxM        = 0.0f; // max single correction magnitude (m) this interval
+    u32  m_divergenceNearEnemyCount = 0; // corrections that fired within brush-range of an enemy
     f64  m_lastDebugLogSec   = 0.0;  // wall-clock time of last [NET-GRAPH] emission
     // D6: toggles an on-screen net-stats overlay (F9). Visible only on CLIENT role.
     bool m_netGraphVisible   = false;
