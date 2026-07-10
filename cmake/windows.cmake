@@ -24,7 +24,10 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 
 # Steamworks (external/CMakeLists.txt) derives a mingw import lib from steam_api64.dll because the
-# shipped steam_api64.lib is MSVC-format. Point at the toolchain-prefixed binutils. `gendef` comes
-# from the mingw-w64-tools package (apt install mingw-w64-tools).
-set(DLLTOOL_EXE    x86_64-w64-mingw32-dlltool)
-set(DLLTOOL_GENDEF x86_64-w64-mingw32-gendef)
+# shipped steam_api64.lib is MSVC-format. `dlltool` is toolchain-prefixed (mingw binutils), but `gendef`
+# (from mingw-w64-tools) installs UNPREFIXED on Debian/Ubuntu as plain `gendef` — there is no
+# x86_64-w64-mingw32-gendef, so hardcoding that name made CMake fail with "no such file or directory".
+# Resolve each by trying either name. CMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER (above) makes find_program
+# search the host PATH, which is where these build tools live.
+find_program(DLLTOOL_EXE    NAMES x86_64-w64-mingw32-dlltool dlltool)
+find_program(DLLTOOL_GENDEF NAMES gendef x86_64-w64-mingw32-gendef)
