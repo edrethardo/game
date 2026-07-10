@@ -1345,11 +1345,15 @@ void Engine::onLootSpawn(u32 uid, f32 posX, f32 posY, f32 posZ, u16 itemDefId) {
 // beginSteamJoin routes an accepted lobby invite into the join flow.
 // ---------------------------------------------------------------------------
 bool Engine::netHostGame(u8 localPlayerCount) {
-    // Online + Steam available → relay host + a discoverable friends-only lobby (invites "just work").
+    // Online + Steam available → relay host + a PUBLIC lobby. Public (not friends-only) is required for
+    // the in-game public browser (RequestLobbyList only returns k_ELobbyTypePublic lobbies — a
+    // friends-only lobby is invite/friends-joinable but invisible to the browser, which is exactly why
+    // "Browse Games" returned 0 results). Public is a strict superset: invites, friends-list "Join Game",
+    // AND browser discovery all work. (A future "friends-only" host toggle could pass true here.)
     // Otherwise fall back to the ENet path (Online = UPnP, else LAN-only).
     if (m_menu.hostOnline && Steam::isAvailable()) {
         if (!Net::hostServerSteam(localPlayerCount)) return false;
-        Steam::createLobby(/*friendsOnly=*/true, static_cast<int>(MAX_PLAYERS));  // data set in onLobbyCreated
+        Steam::createLobby(/*friendsOnly=*/false, static_cast<int>(MAX_PLAYERS));  // data set in onLobbyCreated
         LOG_INFO("Steam: hosting via relay + lobby (%u local)", localPlayerCount);
         return true;
     }
