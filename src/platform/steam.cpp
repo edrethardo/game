@@ -100,15 +100,22 @@ namespace Steam {
 
 bool init() {
 #ifdef USE_STEAM
+    // [diag] Granular markers (flushed per line by log.cpp) to pinpoint which Steam call crashes the
+    // Windows build — the mingw↔MSVC C++ ABI makes virtual interface calls into steamclient64.dll fault.
+    // The LAST "[diag]" line in DungeonEngine.log before the crash names the exact culprit call.
+    LOG_INFO("Steam: [diag] calling SteamAPI_Init...");
     // Needs steam_appid.txt next to the binary (dev) or a Steam launch, and a running Steam client.
     if (!SteamAPI_Init()) {
         LOG_WARN("Steam: SteamAPI_Init failed (no Steam client, or bad/missing App ID) — Steam features off");
         return false;
     }
+    LOG_INFO("Steam: [diag] SteamAPI_Init OK — calling SteamNetworkingUtils()->InitRelayNetworkAccess...");
     // Warm the Steam Datagram Relay early so the first P2P connect isn't stalled waiting for a route.
     if (SteamNetworkingUtils()) SteamNetworkingUtils()->InitRelayNetworkAccess();
+    LOG_INFO("Steam: [diag] InitRelayNetworkAccess OK — creating SteamLobbyMgr (registers callback)...");
     s_available = true;
     s_lobbyMgr = new SteamLobbyMgr();   // registers the invite/join-request callback
+    LOG_INFO("Steam: [diag] SteamLobbyMgr OK — calling SteamUser()->GetSteamID (localSteamId)...");
     LOG_INFO("Steam: initialized (SteamID %llu)", (unsigned long long)localSteamId());
     return true;
 #else
@@ -125,7 +132,14 @@ void shutdown() {
 
 void runCallbacks() {
 #ifdef USE_STEAM
-    if (s_available) SteamAPI_RunCallbacks();
+    if (s_available) {
+        // [diag] Mark the first dispatch — if the crash lands here (not in init), it's the auto-dispatch
+        // callback path (STEAM_CALLBACK/CCallResult) rather than a synchronous interface call.
+        static bool s_firstCb = true;
+        if (s_firstCb) LOG_INFO("Steam: [diag] first SteamAPI_RunCallbacks...");
+        SteamAPI_RunCallbacks();
+        if (s_firstCb) { LOG_INFO("Steam: [diag] first SteamAPI_RunCallbacks OK"); s_firstCb = false; }
+    }
 #endif
 }
 

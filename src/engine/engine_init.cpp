@@ -149,7 +149,18 @@ const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)] = {
 void Engine::init() {
     s_engine = this;
 
-    Log::init();
+#ifdef __SWITCH__
+    Log::init();  // Switch: console only (app storage may be read-only)
+#else
+    // Write a persistent log to the user-data dir so Windows Release (console output is compiled off in
+    // log.cpp) and any hard crash leave a diagnosable trail. Path:
+    //   Windows: %APPDATA%\EdRethardo\DungeonEngine\DungeonEngine.log
+    //   Linux:   ~/.local/share/EdRethardo/DungeonEngine/DungeonEngine.log
+    // SDL_GetPrefPath needs no SDL_Init, and log.cpp fflushes every line, so the last line written
+    // survives a hard crash — which is exactly what we need to localize a startup crash.
+    static char s_logPath[512];
+    Log::init(Platform::userDataPath("DungeonEngine.log", s_logPath, sizeof(s_logPath)));
+#endif
     LOG_INFO("Engine initializing...");
 
     // Seed the global RNG once from wall-clock entropy so gameplay RNG (loot/procs/
