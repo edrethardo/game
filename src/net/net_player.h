@@ -28,6 +28,12 @@ struct NetInput {
     u16 pitchQ;           // absolute pitch, packed via Quantize::packAngle over [-π, π]
     u8  extFlags;         // extended input flags (potion, reload, skill, etc.)
     u8  skillSlot;        // which class skill slot (0-3) to activate
+    u8  interpDelayMs;    // the interpolation delay the client ACTUALLY used when it captured
+                          // this input (33–150 ms, adaptive with jitter). The server rewinds
+                          // enemies by exactly this much when it replays the input, so both
+                          // sides collide against the same world. 0 = not stamped -> server
+                          // falls back to the baseline. See net/lag_comp.h for why guessing
+                          // this value server-side could never work.
 };
 
 // Move flag bits

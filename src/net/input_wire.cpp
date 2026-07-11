@@ -3,20 +3,20 @@
 // Isolated from client.cpp so the test binary (tests/CMakeLists.txt) can link only
 // this file and net_player.h without pulling in the full net/client.cpp dependency chain.
 //
-// Wire layout per input (14 B):
+// Wire layout per input (15 B):
 //   u32 clientTick  + u16 ackedSnapshotTick + u8 moveFlags + u8 weaponId
-//   + u16 yawQ + u16 pitchQ + u8 extFlags + u8 skillSlot
-// Packet payload layout (4-byte header + N*14 B body):
+//   + u16 yawQ + u16 pitchQ + u8 extFlags + u8 skillSlot + u8 interpDelayMs
+// Packet payload layout (4-byte header + N*15 B body):
 //   u8  windowCount   (how many inputs follow, 1–INPUT_WINDOW_SIZE)
 //   u8  reserved = 0
 //   u16 reserved = 0
-//   [N × 14-byte input structs in oldest→newest order]
+//   [N × 15-byte input structs in oldest→newest order]
 
 #include "net/net_player.h"
 #include "core/types.h"
 
 // Wire sizes (must stay in sync with the struct field layout above)
-static constexpr u32 INPUT_BYTES  = 14;  // wire size of one serialized NetInput
+static constexpr u32 INPUT_BYTES  = 15;  // wire size of one serialized NetInput
 static constexpr u32 HEADER_BYTES =  4;  // windowCount (1) + reserved (3)
 
 u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count, u8 targetSlot) {
@@ -51,6 +51,9 @@ u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 cou
         // single-byte extended fields
         outBuf[o++] = in.extFlags;
         outBuf[o++] = in.skillSlot;
+        // The client's ACTUAL interp delay for this input — the server rewinds enemies by it
+        // when replaying, so both sides collide against the same world (net/lag_comp.h).
+        outBuf[o++] = in.interpDelayMs;
     }
     return total;
 }
@@ -82,6 +85,7 @@ u32 deserializeInputWindow(const u8* buf, u32 size, NetInput* outInputs, u32 max
         out.pitchQ= static_cast<u16>(buf[o]) | (static_cast<u16>(buf[o+1]) << 8); o += 2;
         out.extFlags  = buf[o++];
         out.skillSlot = buf[o++];
+        out.interpDelayMs = buf[o++];   // 0 = unstamped; LagComp::sanitize maps it to the baseline
     }
     return toRead;
 }

@@ -4,6 +4,7 @@
 #include "core/math.h"
 #include "net/net.h"
 #include "net/clock_sync.h"
+#include "net/lag_comp.h"     // canonical interp-delay bounds (shared with the server's rewind)
 #include "net/net_player.h"
 #include "net/snapshot.h"
 #include "game/entity.h"
@@ -18,7 +19,10 @@ static constexpr u32 SNAP_BUFFER_SIZE = 4;  // 4 snapshots × ~66KB = 264KB (was
 // snappy enough to feel responsive while still riding out a single dropped snapshot via
 // extrapolation (computeInterpPair). Was 50 ms when snapshots were 30 Hz; reduced alongside
 // the rate bump to net.h so the render stays 2 × interval behind the latest sample.
-static constexpr f32 INTERP_DELAY_SEC = 0.033f;
+// Derived from the shared client/server contract in lag_comp.h rather than declared here:
+// the server rewinds enemies by the delay the client reports, so the two must be the same
+// number by construction, not by two constants that happen to agree today.
+static constexpr f32 INTERP_DELAY_SEC = LagComp::DEFAULT_INTERP_DELAY_MS / 1000.0f;
 
 namespace Client {
     void init(u8 localPlayerIndex);

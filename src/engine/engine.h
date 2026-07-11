@@ -1142,11 +1142,13 @@ private:
     // R6: build the player-collision obstacle list at a lag-comp-rewound tick so the
     // server's per-input moveAndSlide sees the same entity positions the client used
     // when capturing the input. `out` must have capacity for MAX_ENTITIES; `outCount`
-    // is set on return. `targetSnapTick` is the server-tick the client interpolated
-    // against (= the client's ackedSnapshotTick minus the interp-delay offset, computed
-    // by the caller). Falls back to live entity positions for any entity whose history
-    // ring is empty (first ticks after a join, after a level reset, etc.).
-    void buildLagCompPlayerObstacles(u32 targetSnapTick,
+    // is set on return. `targetSnapTickF` is the FRACTIONAL server-tick the client
+    // interpolated against — build it with LagComp::targetTick(ackedSnap, in.interpDelayMs)
+    // so the rewind matches the delay that client actually applied (it is adaptive; see
+    // net/lag_comp.h). Poses are lerped between the bracketing history entries. Falls back to
+    // live entity positions for any entity whose history ring is empty (first ticks after a
+    // join, after a level reset, etc.).
+    void buildLagCompPlayerObstacles(f32 targetSnapTickF,
                                      CollisionObstacle* out,
                                      u32& outCount) const;
 

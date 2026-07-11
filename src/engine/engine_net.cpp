@@ -37,6 +37,7 @@
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
+#include "net/lag_comp.h"   // client-reported interp delay -> server rewind (shared contract)
 #include "net/snapshot.h"
 #include "net/packet.h"
 #include "net/render_offset.h"
@@ -113,7 +114,9 @@ void Engine::serverNetPre(f32 dt) {
     // whenever an enemy was moving — producing occasional ~1-tick reconcile diffs
     // and visible jitter. Per-input rebuild costs O(MAX_ENTITIES × inputs-this-tick);
     // negligible at our scale (≤MAX_ENTITIES × 6 per server tick under jitter).
-    constexpr u32 INTERP_DELAY_TICKS = 2; // 33 ms ≈ 2 ticks @ 60 Hz — matches client's INTERP_DELAY_SEC
+    // The rewind amount is no longer a server-side constant: each input carries the interp delay
+    // the client actually used (in.interpDelayMs), because that delay is ADAPTIVE and a hardcoded
+    // guess is wrong for every client that isn't sitting exactly at the jitter floor. See lag_comp.h.
 
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         // Skip ALL host-local lanes — they move in gameUpdate, not from a network buffer. Slots
@@ -160,12 +163,13 @@ void Engine::serverNetPre(f32 dt) {
                 // live entity pool disagreed with the client's 33ms-behind interp pool and
                 // produced intermittent reconcile jitter near moving enemies.
                 if (!np.noclip) {
-                    u32 ackedSnap = m_clientAckedSnap[i];
-                    u32 targetSnapTick = (ackedSnap > INTERP_DELAY_TICKS)
-                                         ? (ackedSnap - INTERP_DELAY_TICKS) : 0;
+                    // Fractional target tick from the delay THIS input reported — the exact
+                    // instant of world-state the client's own moveAndSlide collided against.
+                    const f32 targetSnapTickF =
+                        LagComp::targetTick(m_clientAckedSnap[i], in.interpDelayMs);
                     CollisionObstacle obs[MAX_ENTITIES];
                     u32 obsCount = 0;
-                    buildLagCompPlayerObstacles(targetSnapTick, obs, obsCount);
+                    buildLagCompPlayerObstacles(targetSnapTickF, obs, obsCount);
 
                     Player tempP;
                     tempP.position = np.position;

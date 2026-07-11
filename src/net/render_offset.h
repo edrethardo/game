@@ -34,16 +34,16 @@ namespace RenderOffsetOps {
     // more than this far behind the authoritative sim position.
     //
     // Tightened 0.35 → 0.15 m (shaky-client-FOV dampener): on enemy-dense / tight-corridor
-    // floors the M3.2 reconcile fires nearly every snapshot with a varying direction (the
-    // client's interpolated+adaptive-delay enemy obstacles disagree with the server's
-    // discrete+fixed-delay lag-comp rewind — see buildLagCompPlayerObstacles), so the
-    // offset random-walks inside this ball. Now that apply() adds the offset with the correct
-    // sign (the mirror-jump bug is fixed), this ball is a pure wander bound: it caps how far
-    // the eye can trail the sim under a burst of small corrections. ±15 cm still smooths a
-    // legitimate one-off correction while keeping the residual sub-perceptible; it can be
-    // relaxed back toward the old 0.35 m later if big single corrections feel too abrupt.
-    // The underlying per-tick divergence itself (the [NET-GRAPH] div stats measure it) still
-    // wants the obstacle-time-mismatch fix, but the sign correction removes the shake driver.
+    // floors the M3.2 reconcile used to fire nearly every snapshot with a varying direction,
+    // so the offset random-walked inside this ball. Two fixes since removed the drivers —
+    // apply() now adds the offset with the correct sign (the mirror-jump bug), and the server
+    // rewinds enemy obstacles by the delay the client REPORTS instead of a hardcoded guess
+    // (net/lag_comp.h), which closes the client-interpolated vs server-discrete obstacle-time
+    // mismatch that produced the divergence in the first place. This ball is now a pure wander
+    // bound: it caps how far the eye can trail the sim under a burst of small corrections.
+    // ±15 cm still smooths a legitimate one-off correction while keeping the residual
+    // sub-perceptible; it can be relaxed back toward 0.35 m if big single corrections ever
+    // feel too abrupt. The [NET-GRAPH] div stats measure whatever divergence remains.
     static constexpr f32 MAX_OFFSET_M = 0.15f;
 
     // Accumulate a new correction delta into the offset. If a prior correction is still

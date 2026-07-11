@@ -70,6 +70,34 @@ TEST_CASE("InputWindow: serializes and deserializes 4 inputs cleanly") {
     }
 }
 
+// PROTOCOL_VERSION 8: each input carries the interp delay the client actually used, so the
+// server can rewind enemies to the same instant the client collided against. It rides at the
+// END of the 15-byte input, so a serializer that forgot to widen INPUT_BYTES would silently
+// shear every subsequent input in the window — check a MULTI-input window, not just one.
+TEST_CASE("InputWindow: interpDelayMs round-trips per input across a window") {
+    NetInput window[3];
+    for (u32 i = 0; i < 3; i++) {
+        window[i] = NetInput{};
+        window[i].clientTick = 900 + i;
+        window[i].skillSlot  = 2;
+        // Distinct per input on purpose: the delay is adaptive and can change between two
+        // inputs inside a single send window, so it must be per-input, not per-packet.
+        window[i].interpDelayMs = static_cast<u8>(33 + i * 40);   // 33, 73, 113
+    }
+    u8 buf[256] = {};
+    u32 size = serializeInputWindow(buf, sizeof(buf), window, 3);
+    REQUIRE(size > 0);
+
+    NetInput parsed[3] = {};
+    u32 count = deserializeInputWindow(buf, size, parsed, 3);
+    REQUIRE(count == 3);
+    for (u32 i = 0; i < 3; i++) {
+        CHECK(parsed[i].clientTick    == 900 + i);
+        CHECK(parsed[i].skillSlot     == 2);               // field ahead of the new byte survives
+        CHECK(parsed[i].interpDelayMs == 33 + i * 40);
+    }
+}
+
 TEST_CASE("InputWindow: deserialize rejects truncated buffer") {
     u8 buf[3] = { 0, 0, 4 };  // claims 4 inputs but no input bytes follow
     NetInput parsed[4] = {};

@@ -37,6 +37,7 @@
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
+#include "net/lag_comp.h"   // client-reported interp delay -> server rewind (shared contract)
 #include "net/snapshot.h"
 #include "net/packet.h"
 #include "net/pending_hit_ring.h"
@@ -166,6 +167,48 @@ static const EntPoseSnap* findHistoryAt(u32 entIdx, u32 targetTick) {
         if (delta < bestDelta) { bestDelta = delta; best = &e; }
     }
     return best;
+}
+
+// Sample an entity's pose at a FRACTIONAL tick, lerping between the two stored history entries
+// that bracket it. The client interpolates its view continuously between snapshots, so the tick
+// it actually collided against is virtually never an integer; snapping to the nearest stored
+// tick (findHistoryAt) would hand the server up to half a tick of enemy motion as error — small,
+// but it is exactly the residual that keeps firing the reconcile path near a moving enemy.
+//
+// Returns false if the ring has no usable entry (first ticks after a join / resetEntityHistory),
+// leaving the caller to fall back to the live pose.
+static bool sampleHistoryAt(u32 entIdx, f32 targetTickF, Vec3& outPos, Vec3& outHalf) {
+    if (entIdx >= MAX_ENTITIES) return false;
+    if (targetTickF < 0.0f) targetTickF = 0.0f;
+
+    // Tightest bracket around targetTickF: newest entry at or below it, oldest at or above it.
+    const EntPoseSnap* lo = nullptr;  // tickStamp <= target, maximal
+    const EntPoseSnap* hi = nullptr;  // tickStamp >= target, minimal
+    for (u32 k = 0; k < LAG_COMP_HISTORY_TICKS; k++) {
+        const EntPoseSnap& e = s_entHistory[entIdx][k];
+        if (e.tickStamp == 0) continue;   // 0 = unused slot
+        const f32 t = static_cast<f32>(e.tickStamp);
+        if (t <= targetTickF && (!lo || e.tickStamp > lo->tickStamp)) lo = &e;
+        if (t >= targetTickF && (!hi || e.tickStamp < hi->tickStamp)) hi = &e;
+    }
+
+    if (!lo && !hi) return false;             // ring empty for this entity
+    if (!lo) { lo = hi; }                     // target older than everything we kept
+    if (!hi) { hi = lo; }                     // target newer than our newest entry
+
+    if (lo == hi || hi->tickStamp == lo->tickStamp) {
+        outPos  = lo->position;
+        outHalf = lo->halfExtents;
+        return true;
+    }
+
+    const f32 span = static_cast<f32>(hi->tickStamp) - static_cast<f32>(lo->tickStamp);
+    f32 a = (targetTickF - static_cast<f32>(lo->tickStamp)) / span;   // span > 0 by the check above
+    if (a < 0.0f) a = 0.0f;
+    if (a > 1.0f) a = 1.0f;
+    outPos  = lo->position    + (hi->position    - lo->position)    * a;
+    outHalf = lo->halfExtents + (hi->halfExtents - lo->halfExtents) * a;
+    return true;
 }
 
 
@@ -950,13 +993,16 @@ u32 Engine::computeLagCompTicks(u8 slot) const {
     f32 rttMs = 0.0f;
     const NetPlayerSlot* slots = Net::getSlots();
     if (slots) rttMs = slots[slot].rttMs;
-    // Client renders at server snapshot time - INTERP_DELAY_SEC (50 ms = 3 ticks at 60 Hz).
-    // Server processes the fire RTT/2 after the client clicked, so we rewind by
-    // RTT/2 in ticks PLUS the client's interp delay.
-    constexpr f32 TICK_MS    = 1000.0f / NET_TICK_RATE;     // 16.67 ms
-    constexpr f32 INTERP_TICKS = 0.05f * NET_TICK_RATE;     // 3
+    // The client renders (and therefore AIMED) at snapshot time minus ITS interp delay, and the
+    // server sees the fire RTT/2 later — so rewind RTT/2 plus that delay. The delay is read from
+    // the client's latest input rather than hardcoded: this used to assume a fixed 50 ms, which
+    // both disagreed with the movement rewind's hardcoded 33 ms AND with the client's real
+    // adaptive delay, so a jittered client's shots resolved against enemies it never saw there.
+    const NetInput* latest = Server::getInputBuffer(slot).getLatest();
+    const u8 interpMs = latest ? latest->interpDelayMs : 0;   // 0 -> LagComp falls back to baseline
+    constexpr f32 TICK_MS = 1000.0f / NET_TICK_RATE;          // 16.67 ms
     f32 rttHalfTicks = (rttMs * 0.5f) / TICK_MS;
-    f32 ticks = rttHalfTicks + INTERP_TICKS;
+    f32 ticks = rttHalfTicks + LagComp::rewindTicks(interpMs);
     if (ticks < 0.0f) ticks = 0.0f;
     u32 t = static_cast<u32>(ticks + 0.5f);
     if (t > LAG_COMP_MAX_REWIND_TICKS) t = 0; // out-of-range: don't lag-comp this fire
@@ -1004,12 +1050,19 @@ void Engine::endLagComp() {
 
 // R6: lag-comp the obstacle list for player movement so server's per-input moveAndSlide
 // sees the same entity positions the client interpolated against when capturing the input.
-// Without this, the client's interp pool (33 ms / 2 ticks behind live) disagrees with
-// the server's live entity pool whenever an enemy is moving near the player, producing
-// occasional ~1-tick position divergence that fires the M3.2 reconcile path and
-// produces visible "intermittent jitter". Pure read of the s_entHistory ring — no
-// mutation, no scratch save/restore — so call sites don't need begin/end bracketing.
-void Engine::buildLagCompPlayerObstacles(u32 targetSnapTick,
+// Without this, the client's interp pool disagrees with the server's live entity pool
+// whenever an enemy is moving near the player, producing position divergence that fires the
+// M3.2 reconcile path and shows up as visible "intermittent jitter". Pure read of the
+// s_entHistory ring — no mutation, no scratch save/restore — so call sites don't need
+// begin/end bracketing.
+//
+// `targetSnapTickF` is FRACTIONAL and comes from LagComp::targetTick(ackedSnap, in.interpDelayMs)
+// — i.e. derived from the delay the client REPORTED for this very input, not from a server-side
+// guess. The old code rewound a hardcoded 2 ticks, which was only ever right for a client whose
+// adaptive jitter buffer happened to sit at its 33 ms floor; the moment jitter widened it (up to
+// 150 ms = 9 ticks) the server was colliding against a world up to 7 ticks newer than the one the
+// client saw. See net/lag_comp.h.
+void Engine::buildLagCompPlayerObstacles(f32 targetSnapTickF,
                                          CollisionObstacle* out,
                                          u32& outCount) const {
     outCount = 0;
@@ -1020,11 +1073,11 @@ void Engine::buildLagCompPlayerObstacles(u32 targetSnapTick,
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
         if (e.flags & ENT_FRIENDLY) continue;
         if (e.enemyType == EnemyType::PROP) continue;
-        const EntPoseSnap* hist = findHistoryAt(ei, targetSnapTick);
-        if (hist && hist->tickStamp != 0) {
-            // Closest historical pose to the client's interp tick — both sides now
-            // see the same world for collision purposes.
-            out[outCount++] = {hist->position, hist->halfExtents};
+        Vec3 histPos, histHalf;
+        if (sampleHistoryAt(ei, targetSnapTickF, histPos, histHalf)) {
+            // The pose interpolated at the client's exact render tick — both sides now see the
+            // same world for collision purposes.
+            out[outCount++] = {histPos, histHalf};
         } else {
             // Ring not populated for any tick yet (first ~2 ticks after a join, or
             // immediately after resetEntityHistory). Falling back to live pose keeps

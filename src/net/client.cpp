@@ -25,7 +25,9 @@ static u32           s_snapCount = 0;
 // base and widens with snapshot-arrival jitter so a late snapshot doesn't freeze remotes;
 // see interp_delay.h. Snapshots broadcast every tick (60 Hz) → nominal arrival interval 1/60.
 static constexpr f32 SNAP_NOMINAL_INTERVAL_SEC = 1.0f / 60.0f;
-static constexpr f32 MAX_INTERP_DELAY_SEC      = 0.15f; // cap so remotes don't lag absurdly
+// Cap so remotes don't lag absurdly — and the same number the server clamps a reported delay
+// to (LagComp::sanitize), so a jittered client can never claim a rewind the server won't honor.
+static constexpr f32 MAX_INTERP_DELAY_SEC      = LagComp::MAX_INTERP_DELAY_MS / 1000.0f;
 static f32           s_arrivalJitter           = 0.0f;
 static f32           s_interpDelaySec          = INTERP_DELAY_SEC;
 
@@ -208,6 +210,12 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     // Server still gates persistently as a backstop, but this is the "snappy" path —
     // suppress spam at source.
     latest.extFlags &= static_cast<u8>(~extFlagsClearMask);
+    // Tell the server which interp delay we used THIS tick. Our local moveAndSlide collided
+    // against m_renderInterp.entities sampled at (now - s_interpDelaySec), and s_interpDelaySec
+    // widens with jitter — so the server can only reproduce our collision result if it rewinds
+    // enemies by this exact amount. Stamping it per-input (not per-session) matters: the delay
+    // can change between two inputs in the same send window. See net/lag_comp.h.
+    latest.interpDelayMs = LagComp::toWireMs(s_interpDelaySec);
     s_hasInput[laneId] = true;
 
     // Shift oldest out and append this input at the back of THIS lane's window (oldest→newest).

@@ -48,7 +48,9 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 //     and reports them. A v6 client never sends CL_METEOR, so on a v7 server its meteor procs would
 //     do no damage at all, and it would ignore the relay for everyone else's.
 // Clean SV_JOIN_REJECT beats silently broken combat (same reasoning as the v4 bump above).
-static constexpr u32 PROTOCOL_VERSION  = 7; // v7: client-authoritative ammo/reload + CL_METEOR
+// v8: CL_INPUT grew a byte — NetInput.interpDelayMs (14 -> 15 B per input). A v7 host would
+// mis-parse a v8 input window (every field after skillSlot shifts), so this MUST reject.
+static constexpr u32 PROTOCOL_VERSION  = 8; // v8: NetInput.interpDelayMs (client-reported lag-comp rewind)
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
                                             // carry targetSlot)
