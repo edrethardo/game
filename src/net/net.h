@@ -50,7 +50,9 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // Clean SV_JOIN_REJECT beats silently broken combat (same reasoning as the v4 bump above).
 // v8: CL_INPUT grew a byte — NetInput.interpDelayMs (14 -> 15 B per input). A v7 host would
 // mis-parse a v8 input window (every field after skillSlot shifts), so this MUST reject.
-static constexpr u32 PROTOCOL_VERSION  = 8; // v8: NetInput.interpDelayMs (client-reported lag-comp rewind)
+// v9: SV_EVENT gained NOVA_FX (0x06). Additive (an older client would just ignore the unknown
+// event byte), but the Blood Nova armor aura is invisible without it, so pair the two builds.
+static constexpr u32 PROTOCOL_VERSION  = 9; // v9: SV_EVENT NOVA_FX (replicated nova rings)
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
                                             // carry targetSlot)
@@ -209,6 +211,14 @@ enum struct NetEventType : u8 {
     // Payload: posX, posY, posZ (f32×3 = 12 B) + radius (f32 = 4 B) + delay (f32 = 4 B) = 20 B.
     // Reliable — a missing meteor telegraph is jarring, and they're infrequent.
     METEOR            = 0x05,
+    // An expanding nova ring belonging to ANY player, replicated so everyone sees it.
+    // Needed because the Blood Nova armor aura is server-authoritative (it fires on taking
+    // damage, and only the server knows a guest was hit — SV_DAMAGE_TO_ME covers projectile
+    // hits only, not melee), so without this the guest wearing the armor would watch enemies
+    // die and 5% of its health vanish with no ring to explain why.
+    // Payload: posX, posY, posZ (f32×3 = 12 B) + radius (f32 = 4 B) + r,g,b (f32×3 = 12 B) = 28 B.
+    // Purely cosmetic; reliable, since novas are infrequent and a missing one is confusing.
+    NOVA_FX           = 0x06,
 };
 
 // 4-byte packet header on every packet.

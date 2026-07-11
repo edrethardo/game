@@ -609,12 +609,26 @@ void Engine::serverNetPost(f32 dt) {
                 switch (np.armorAura) {
                     case SkillId::METEOR_STRIKE: if (dist < 3.0f) { ent.burnTimer = 0.5f; ent.burnDps = 2.0f; ent.burnSrcSlot = np.slotIndex; } break;
                     case SkillId::FROZEN_ORB: if (dist < 4.0f) { ent.freezeTimer = 0.5f; } break;
-                    case SkillId::BLOOD_NOVA: if (dist < 3.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; ent.poisonSrcSlot = np.slotIndex; } break;
+                    // BLOOD_NOVA is handled below, not here — it retaliates on being STRUCK
+                    // rather than as a proximity aura (mirrors tickArmorRingPassives).
                     case SkillId::CHAIN_LIGHTNING: if (dist < 3.0f) { ent.freezeTimer = 0.3f; } break;
                     case SkillId::PHASE_DASH: if (dist < 3.0f) { ent.freezeTimer = 0.4f; } break;
                     default: break;
                 }
             }
+        }
+
+        // Blood Nova ARMOR aura for a REMOTE (host-local lanes fire theirs in gameUpdate via
+        // tickArmorRingPassives — skipping them here avoids a double detonation). This runs in
+        // serverNetPost, which is AFTER tickSharedSystems, so np.lastDamageTaken written back from
+        // this tick's Player view (writeBackRemoteView) is fresh: the guest erupts on the same tick
+        // it was hit. Consume it, then clear — otherwise one hit would re-trigger every tick.
+        if (pi >= m_splitPlayerCount) {
+            if (np.bloodNovaCooldown > 0.0f) np.bloodNovaCooldown -= dt;
+            if (np.armorAura == SkillId::BLOOD_NOVA && np.lastDamageTaken > 0.0f) {
+                detonateBloodNova(np.position, np.slotIndex, np.health, np.bloodNovaCooldown);
+            }
+            np.lastDamageTaken = 0.0f;
         }
 
         // (M9) Defensive ring passives for REMOTE players. Host-local lanes tick their ring

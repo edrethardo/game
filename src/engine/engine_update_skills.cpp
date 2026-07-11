@@ -368,6 +368,18 @@ void Engine::tickArmorRingPassives(f32 dt) {
         }
     }
 
+    // Blood Nova ARMOR aura (Demonhide Cuirass) — retaliate when STRUCK: sacrifice 5% of current
+    // health and erupt in the full Blood Nova (def damage + radius + red ring), on the def's 5 s
+    // internal cooldown. Reads lastDamageTaken, exactly like thorns below — and like thorns it is
+    // therefore inert on a CLIENT, whose lastDamageTaken is never set (Combat::applyDamageToPlayer
+    // runs inside the N4-gated EnemyAI/projectile passes). The guest's nova is fired
+    // authoritatively by the server (serverNetPost) and its ring arrives as a NOVA_FX event.
+    if (m_localPlayer.bloodNovaCooldown > 0.0f) m_localPlayer.bloodNovaCooldown -= dt;
+    if (m_armorAura == SkillId::BLOOD_NOVA && m_localPlayer.lastDamageTaken > 0.0f) {
+        detonateBloodNova(m_localPlayer.position, activeNetSlot(),
+                          m_localPlayer.health, m_localPlayer.bloodNovaCooldown);
+    }
+
     // Total thorns reflect fraction: legendary THORNS ring (20%) + the thorns_pct affix sum
     // (stored as percentage points, e.g. 15.0 → 0.15), so a thorns ring and thorns gear stack.
     // Only meaningful on a frame where the player actually took damage (lastDamageTaken > 0).
@@ -405,9 +417,11 @@ void Engine::tickArmorRingPassives(f32 dt) {
                     case SkillId::FROZEN_ORB:
                         if (distSq < 16.0f) { ent.freezeTimer = 0.5f; }
                         break;
-                    case SkillId::BLOOD_NOVA:
-                        if (distSq < 9.0f) { ent.poisonTimer = 0.5f; ent.poisonDps = 1.0f; ent.poisonSrcSlot = activeNetSlot(); }
-                        break;
+                    // BLOOD_NOVA is deliberately absent here — it is no longer a per-entity
+                    // proximity aura. It retaliates when the wearer is STRUCK (below), which is
+                    // what its tooltip has always claimed. The old case applied a 1 dps / 0.5 s
+                    // poison within 3 m: not a weakened Blood Nova, just a different effect
+                    // wearing its name.
                     case SkillId::CHAIN_LIGHTNING:
                         if (distSq < 9.0f) { ent.freezeTimer = 0.3f; }
                         break;

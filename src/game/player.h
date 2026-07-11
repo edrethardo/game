@@ -64,8 +64,10 @@ struct Player {
     u8   shrineBuff       = 0;     // 0=none, 1=power(+30%dmg), 2=speed(+25%), 3=vitality(+40%hp)
     f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
-    f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection)
+    f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection + Blood Nova armor retaliation)
     u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting
+    f32  bloodNovaCooldown = 0.0f; // Blood Nova ARMOR aura (Demonhide Cuirass): internal retaliation cooldown.
+                                   // Transient — Player is serialized field-by-field, so this adds no save-format change.
 
     // Defensive-pack equipment cache (recomputed each frame from equipped affixes in
     // tickPassiveEquipment; transient/never serialized, like damageReduction above). Summed on

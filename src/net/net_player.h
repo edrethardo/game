@@ -130,6 +130,12 @@ struct NetPlayer {
     f32  soulHarvestTimer  = 0.0f;
     u8   soulHarvestStacks = 0;
     f32  secondWindCooldown = 0.0f;
+    // Blood Nova ARMOR aura (Demonhide Cuirass) for a REMOTE. `lastDamageTaken` is written back
+    // from the throwaway Player view by writeBackRemoteView — it is the ONLY way the server learns
+    // a guest got hit (SV_DAMAGE_TO_ME only covers projectile hits, and it flows the other way).
+    // Consumed and cleared each tick in serverNetPost. Not on the wire.
+    f32  lastDamageTaken    = 0.0f;
+    f32  bloodNovaCooldown  = 0.0f;
     // Frenzy glove passive (mirrors Player::{frenzyStacks,frenzyTimer}; not on the wire) —
     // server-side so a remote's on-hit attack-speed stacks speed up the REMOTE's fire path.
     u8   frenzyStacks      = 0;

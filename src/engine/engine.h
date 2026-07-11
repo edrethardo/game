@@ -642,6 +642,31 @@ private:
     // Server: relay a meteor to clients (SV_EVENT::METEOR). exceptSlot = the predicting caster to
     // skip (0xFF = send to everyone). No-op unless SERVER.
     void broadcastMeteorEvent(Vec3 position, f32 radius, f32 delay, u8 exceptSlot = 0xFF);
+
+    // Blood Nova ARMOR aura (Demonhide Cuirass): 20% of CURRENT health per retaliation — the same
+    // fraction skills.json charges the active cast (healthCostPct), so wearing the nova costs what
+    // casting it costs. A fraction of CURRENT (not max) health, so the sacrifice decays
+    // asymptotically and, with the floor guard in detonateBloodNova, can never itself be lethal.
+    // Paired with the ~0.1 s re-arm below, this is the item's real limiter: it bleeds you hard and
+    // fast while you are being hit, and that is the intended trade.
+    static constexpr f32 BLOOD_NOVA_ARMOR_COST_PCT = 0.20f;
+    // Retaliation cooldown — deliberately NOT SkillDef.cooldown (5 s, which still gates the active
+    // cast). At 0.1 s this is barely a cooldown at all: it exists only to stop a single frame's
+    // multi-hit (a swarm landing several blows at once, or a multi-hit AoE) from stacking several
+    // novas in one instant. In practice the wearer erupts on essentially every hit taken, and the
+    // 5%-of-current-health cost per eruption is what actually limits it.
+    static constexpr f32 BLOOD_NOVA_ARMOR_COOLDOWN_SEC = 0.1f;
+
+    // Spawn a nova ring locally; on the SERVER also replicate it (SV_EVENT / NOVA_FX) so the ring
+    // is visible to the guest whose armor fired it — it cannot predict a nova triggered by a melee
+    // hit it never observed. Safe to call from the CLIENT event handler (broadcast is SERVER-gated).
+    void emitNovaFX(Vec3 position, f32 radius, Vec3 color);
+
+    // Blood Nova fired from EQUIPMENT: Demonhide Cuirass (struck) and Aegis of Blood (perfect
+    // block). The CALLER owns the trigger condition; this owns the health cost, cooldown, damage
+    // and ring. health/cooldown are by reference because Player and NetPlayer share no base type.
+    // SERVER/SP only (a CLIENT's entity pool is the N4 ghost sim). True = it detonated.
+    bool detonateBloodNova(Vec3 origin, u8 ownerSlot, f32& health, f32& cooldown);
     // Server-side CL_METEOR handler: validate + spawn the authoritative meteor for `slot`, then
     // relay it to the other clients.
     static void onMeteor(u8 playerSlot, const u8* data, u32 size);

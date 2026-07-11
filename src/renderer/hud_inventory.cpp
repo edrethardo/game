@@ -101,10 +101,32 @@ static const char* skillDisplayName(SkillId id) {
         case SkillId::VOID_KILL:       return "Void Kill";
         case SkillId::ARC_FIRE:        return "Blazing Arc";
         case SkillId::FRENZY:          return "Frenzy";
+        case SkillId::DIVINE_JUDGMENT: return "Divine Judgment";
+        case SkillId::SHADOW_RICOCHET: return "Shadow Ricochet";
         default: return "Unknown";
     }
 }
-static const char* skillDescription(SkillId id) {
+
+// Slot-aware: a few legendary skills behave DIFFERENTLY depending on the slot they ride in, so a
+// single shared string would necessarily lie about one of them. Blood Nova is the clearest case —
+// as a weapon it is a free on-hit proc, as armor it is a health-sacrificing retaliation. Anything
+// slot-independent just falls through to the shared text below.
+static const char* skillDescription(SkillId id, ItemSlot slot) {
+    // ---- Slot-specific overrides ----
+    if (id == SkillId::BLOOD_NOVA) {
+        switch (slot) {
+            case ItemSlot::WEAPON:
+                // The weapon proc costs no health — it is not a "sacrifice", and saying so was wrong.
+                return "20% on hit: erupt in a ring of\nblood, savaging nearby enemies.";
+            case ItemSlot::ARMOR:
+                return "When struck: sacrifice 20% health to\nerupt in a blood nova.";
+            case ItemSlot::OFFHAND:
+                return "On perfect block: sacrifice 20% health\nto erupt in a blood nova.";
+            default:
+                break;  // active cast (right-click / quickbar) — the shared text below is accurate
+        }
+    }
+
     switch (id) {
         case SkillId::FROZEN_ORB:      return "Launches an icy orb that spirals\nout frost shards in all directions.";
         case SkillId::CHAIN_LIGHTNING: return "Fires a bolt of lightning that\nbounces between nearby enemies.";
@@ -123,6 +145,11 @@ static const char* skillDescription(SkillId id) {
         case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
         case SkillId::ARC_FIRE:        return "20% on hit: ignite the ground\nacross the full swing arc for 1.5s.";
         case SkillId::FRENZY:          return "Each hit: +5% attack speed for 4s.\nStacks up to 6 times (+30%).";
+        // Phoenix Band. Rises from near-death — matches tickArmorRingPassives / serverNetPost:
+        // below 25% HP, full heal + cleanse + 1.5s invuln + a 5m 1.5s stun, on a 45s cooldown.
+        case SkillId::DIVINE_JUDGMENT: return "Below 25% HP: full heal, cleanse all\ndebuffs, stun nearby foes. 45s cooldown.";
+        // Shadow Scepter / Phantom Knives (engine_init_callbacks.cpp SHADOW_RICOCHET).
+        case SkillId::SHADOW_RICOCHET: return "30% on hit: two shadow bolts seek\nnearby enemies. Can chain again.";
         default: return "";
     }
 }
@@ -539,7 +566,12 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         Vec3 activationColor = {1.0f, 0.82f, 0.2f};
         switch (def.slot) {
             case ItemSlot::WEAPON:  activationLabel = "On Hit"; activationColor = {1.0f, 0.6f, 0.2f}; break;
-            case ItemSlot::RING:    activationLabel = "Right Click"; break;
+            // Rings are PASSIVE, not right-clickable. Every ring legendary in items.json (Berserker,
+            // Life Steal, Thorns, Phase Strike, Soul Harvest, Void Kill, Gravity Pull, Divine
+            // Judgment) is consumed by m_ringPassive in tickArmorRingPassives / serverNetPost — none
+            // is reachable from the right-click skill path, which fires class skills only. The old
+            // "Right Click" label told the player to press a button that does nothing.
+            case ItemSlot::RING:    activationLabel = "Passive"; break;
             case ItemSlot::BOOTS:   activationLabel = "Press F"; activationColor = {0.3f, 1.0f, 0.5f}; break;
             case ItemSlot::HELMET:  activationLabel = "Press G"; activationColor = {0.5f, 0.8f, 1.0f}; break;
             case ItemSlot::ARMOR:   activationLabel = "Passive Aura"; activationColor = {0.7f, 0.7f, 1.0f}; break;
@@ -555,7 +587,7 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         curY -= lineH;
 
         // Skill description (split on \n)
-        const char* desc = skillDescription(def.legendarySkillId);
+        const char* desc = skillDescription(def.legendarySkillId, def.slot);
         const char* line = desc;
         while (*line) {
             // Find end of line

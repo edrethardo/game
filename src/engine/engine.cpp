@@ -296,6 +296,24 @@ void Engine::onEvent(const u8* data, u32 size) {
                 }
             }
         } break;
+        case NetEventType::NOVA_FX: {
+            // A nova ring fired by server-authoritative code (Blood Nova armor aura) — including
+            // THIS client's own, which it cannot predict (it never sees the melee hit that
+            // triggered it). Cosmetic only; the damage and the health cost are the server's.
+            // Post-header byte count INCLUDES the eventType byte: 1 + 12 + 4 + 12 = 29.
+            if (size < sizeof(PacketHeader) + 29) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            Vec3 pos, color;
+            f32  radius;
+            std::memcpy(&pos.x,   data + off, 4); off += 4;
+            std::memcpy(&pos.y,   data + off, 4); off += 4;
+            std::memcpy(&pos.z,   data + off, 4); off += 4;
+            std::memcpy(&radius,  data + off, 4); off += 4;
+            std::memcpy(&color.x, data + off, 4); off += 4;
+            std::memcpy(&color.y, data + off, 4); off += 4;
+            std::memcpy(&color.z, data + off, 4); off += 4;
+            s_engine->emitNovaFX(pos, radius, color);  // broadcast branch is SERVER-gated — no echo
+        } break;
         case NetEventType::DAMAGE_NUMBER: {
             // Host-replicated damage/heal number — unpack and spawn locally on the client.
             // Engine::spawnDamageNumber's broadcast branch is gated to NetRole::SERVER, so
@@ -400,6 +418,85 @@ void Engine::broadcastMeteorEvent(Vec3 position, f32 radius, f32 delay, u8 excep
     std::memcpy(buf + off, &delay,      4); off += 4;
     if (exceptSlot == 0xFF) Net::broadcastReliable(buf, off);
     else                    Net::broadcastReliableExcept(exceptSlot, buf, off);
+}
+
+// Spawn an expanding nova ring locally AND — on the SERVER — replicate it to every client, so a
+// nova triggered by server-authoritative code (the Blood Nova armor aura) is visible to the player
+// it belongs to. Safe to call from the CLIENT's SV_EVENT handler: the broadcast is SERVER-gated,
+// so replaying a received event can't echo it back.
+void Engine::emitNovaFX(Vec3 position, f32 radius, Vec3 color) {
+    for (u32 i = 0; i < MAX_NOVA_FX; i++) {
+        if (!m_fx.novaFX[i].active) {
+            m_fx.novaFX[i] = {position, radius, 0.6f, true, color};
+            break;
+        }
+    }
+    if (m_netRole != NetRole::SERVER) return;
+
+    u8 buf[sizeof(PacketHeader) + 29]; // hdr(4) + eventType(1) + pos(12) + radius(4) + color(12)
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::SV_EVENT;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    buf[off++] = static_cast<u8>(NetEventType::NOVA_FX);
+    std::memcpy(buf + off, &position.x, 4); off += 4;
+    std::memcpy(buf + off, &position.y, 4); off += 4;
+    std::memcpy(buf + off, &position.z, 4); off += 4;
+    std::memcpy(buf + off, &radius,     4); off += 4;
+    std::memcpy(buf + off, &color.x,    4); off += 4;
+    std::memcpy(buf + off, &color.y,    4); off += 4;
+    std::memcpy(buf + off, &color.z,    4); off += 4;
+    Net::broadcastReliable(buf, off);
+}
+
+// Blood Nova worn as EQUIPMENT — the health-sacrificing nova the tooltip has always promised.
+// Shared by every non-weapon path that fires it (hence health/cooldown by reference: a Player and a
+// NetPlayer have no common base, but both own an f32 health and an f32 cooldown):
+//   • Demonhide Cuirass (armor) — retaliates when the wearer is STRUCK.
+//   • Aegis of Blood (offhand)  — erupts on a PERFECT BLOCK.
+// The CALLER owns the trigger condition; this owns the cost, the cooldown, the damage and the ring.
+//
+// Neither used to do anything of the sort: the armor applied a 1 dps / 0.5 s poison within 3 m, and
+// the shield did the same generic freeze-bash as every other legendary shield. Both shared nothing
+// with Blood Nova but the name printed in their tooltip.
+//
+// SERVER/SP ONLY. On a CLIENT the entity pool is the N4 ghost sim, so damage applied here would be
+// meaningless; the guest gets its ring from the replicated NOVA_FX event instead.
+//
+// Returns true if it detonated (caller may log).
+bool Engine::detonateBloodNova(Vec3 origin, u8 ownerSlot, f32& health, f32& cooldown) {
+    if (m_netRole == NetRole::CLIENT) return false;
+    if (cooldown > 0.0f)     return false;   // BLOOD_NOVA_ARMOR_COOLDOWN_SEC — anti-multi-hit only
+    if (health <= 0.0f)      return false;   // corpses don't erupt
+
+    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, SkillId::BLOOD_NOVA);
+    if (!sd) return false;
+
+    // 20% of CURRENT health — a fraction, so it decays asymptotically and can never itself be
+    // lethal. The floor guard mirrors SkillSystem::tryActivate's refuse-to-suicide rule: an
+    // automatic passive the player cannot decline must never be the thing that kills them (it
+    // would turn an otherwise survivable hit lethal, which no tooltip warns about).
+    const f32 cost = health * BLOOD_NOVA_ARMOR_COST_PCT;
+    if (health <= cost + 1.0f) return false;
+    health -= cost;
+
+    // Same 360° query the active skill and the weapon proc use (cosAngle -1 = all directions),
+    // at the skill def's full damage and radius — so all three roles of Blood Nova finally agree.
+    EntityHandle hits[MAX_ENTITIES];
+    f32          dists[MAX_ENTITIES];
+    u32 hitCount = CombatQuery::queryConeSorted(m_entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f,
+                                                sd->radius, hits, dists, MAX_ENTITIES);
+    Combat::setAttackingPlayer(ownerSlot);    // credit kills to the wearer
+    for (u32 h = 0; h < hitCount; h++)
+        Combat::applyDamage(m_entities, hits[h], sd->damage);
+
+    // NOT sd->cooldown: the 5 s in skills.json gates the ACTIVE cast, where the player chooses to
+    // pay. Worn as equipment the nova is a reflex, so it re-arms almost immediately (see the
+    // constant's comment) and the health cost is the real limiter.
+    cooldown = BLOOD_NOVA_ARMOR_COOLDOWN_SEC;
+    emitNovaFX(origin, sd->radius, {1.0f, 0.15f, 0.1f});   // the red blood ring
+    return true;
 }
 
 // The LOCAL player just rolled a weapon on-hit PROC meteor. Each player predicts their own (the
@@ -1130,6 +1227,10 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.burnDps          = v.burnDps;
     np.freezeTimer      = v.freezeTimer;
     np.damageFlashTimer = v.damageFlashTimer; // drives the remote damage-flash render
+    // The only channel by which the server learns a REMOTE took a hit this tick: enemy AI /
+    // projectiles damage the throwaway view, not the NetPlayer. serverNetPost reads this to fire
+    // the Blood Nova armor retaliation, then clears it.
+    np.lastDamageTaken  = v.lastDamageTaken;
     np.lifesaverArmed   = v.lifesaverArmed;   // TA-1: persist consume/re-arm across frames
     np.graceInvuln      = v.graceInvuln;      // persist grace tag (set when the lifesaver fires on the view)
     // Persist ring-passive state mutations across frames (e.g., a stack decay that some skill
