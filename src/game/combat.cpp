@@ -316,6 +316,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
         if (player.lifesaverArmed && player.health < critThresh) {
             if (player.health <= 0.0f) player.health = 1.0f; // cheat death: survive the otherwise-lethal hit at 1 HP
             if (player.invulnTimer < 0.3f) player.invulnTimer = 0.3f;
+            player.graceInvuln = true;      // tag so the "clear grace once healthy" rule can cancel THIS invuln
             player.lifesaverArmed = false;  // consume; re-earn by healing to >=40% HP
         }
     }

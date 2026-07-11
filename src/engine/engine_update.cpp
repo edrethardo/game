@@ -756,6 +756,33 @@ void Engine::tickSharedSystems(f32 dt) {
     // e.g. server rejected the fire or UDP loss), or (c) the matching snapshot arrives
     // (handled in clientNetPost's match-and-despawn pass).
     if (m_netRole == NetRole::CLIENT) {
+        // Client-side VISUAL-only meteor tick. Every player PREDICTS THEIR OWN meteors, so on a
+        // CLIENT s_meteors is fed by:
+        //   • Its OWN skill casts (class / boot / helm via tryActivate) — deterministic, predicted.
+        //   • Its OWN weapon on-hit procs — melee/hitscan (engine_combat.cpp) and projectile (the
+        //     predicted-impact site just above). The proc roll is a local std::rand() nobody else
+        //     can reproduce, so the firing player owns it and reports it via CL_METEOR; the server
+        //     spawns the one authoritative damaging copy.
+        //   • OTHER players' meteors, relayed as SV_EVENT::METEOR (never our own — the server skips
+        //     the caster when relaying, so our prediction is never double-spawned).
+        // SkillSystem::updateMeteors is server-gated (runs only under `!CLIENT` above), so without
+        // this tick every one of those would just freeze — telegraph never resolves, no impact ("the
+        // meteor doesn't work on the client"). Advance their timers and detonate VISUALLY
+        // (spawnSplashFX = fire ring + explosion + shake) with NO damage: damage is always the
+        // server's, and enemies die via the snapshot.
+        {
+            extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+            for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+                PendingMeteor& pm = s_meteors[mi];
+                if (!pm.active) continue;
+                pm.timer -= dt;
+                if (pm.timer <= 0.0f) {
+                    spawnSplashFX(pm.position, pm.radius); // visual impact only (no damage on CLIENT)
+                    pm.active = false;
+                }
+            }
+        }
+
         for (u32 i = 0; i < MAX_PROJECTILES; i++) {
             Projectile& p = m_projectiles.projectiles[i];
             if (!p.active || !p.predicted) continue;
@@ -812,6 +839,20 @@ void Engine::tickSharedSystems(f32 dt) {
                         m_fx.impactFX[fx] = {e.position, nrm, 0.3f, true, true};
                         break;
                     }
+                }
+                // Each player predicts their OWN weapon on-hit proc meteors. A CLIENT's projectile
+                // impact is only ever detected HERE — ProjectileSystem::update (and with it the
+                // host's proc hit-callback) is gated off on CLIENT — so this is the one place a
+                // PROJECTILE-weapon METEOR_STRIKE proc can be rolled and predicted client-side.
+                // Same roll + 10% chance as the melee/hitscan path (engine_combat.cpp) and the
+                // host's projectile callback (engine_init_callbacks.cpp). predictProcMeteor spawns
+                // the instant telegraph locally and reports it via CL_METEOR, so the server spawns
+                // the single authoritative damaging meteor and relays it to the other players.
+                if (m_weaponProc == SkillId::METEOR_STRIKE &&
+                    (static_cast<u32>(std::rand()) % 100) < 10) {
+                    const SkillDef* msd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
+                                                                    SkillId::METEOR_STRIKE);
+                    if (msd) predictProcMeteor(p.position, msd->damage, msd->radius, msd->delay);
                 }
                 p.active = false;              // ghost has done its visual job
                 break;
@@ -916,6 +957,21 @@ void Engine::gameUpdate(f32 dt) {
     if (m_localPlayer.invulnTimer > 0.0f) {
         m_localPlayer.invulnTimer -= dt;
         if (m_localPlayer.invulnTimer < 0.0f) m_localPlayer.invulnTimer = 0.0f;
+    }
+    // Reset the near-death lifesaver grace once the player has recovered to a safe HP (>85%): the
+    // grace is an emergency low-HP i-frame, so a regen/heal build shouldn't keep riding it while
+    // already healthy. graceInvuln tags ONLY the lifesaver-sourced invuln (combat.cpp), so dodge /
+    // spawn / skill i-frames are untouched. Authoritative side only — a CLIENT adopts invuln from
+    // the snapshot (the host clears it server-side and it decays down via reconcile). Also drop the
+    // tag on natural expiry so it can never leak onto a subsequent dodge's i-frame.
+    if (m_localPlayer.graceInvuln) {
+        if (m_localPlayer.invulnTimer <= 0.0f) {
+            m_localPlayer.graceInvuln = false;
+        } else if (m_netRole != NetRole::CLIENT &&
+                   m_localPlayer.health > m_localPlayer.maxHealth * 0.85f) {
+            m_localPlayer.invulnTimer = 0.0f;
+            m_localPlayer.graceInvuln = false;
+        }
     }
 
     tickWandererTimers(dt);
@@ -1843,6 +1899,9 @@ bool Engine::triggerFloorDescent() {
         m_gameState == GameState::FLOOR_TRANSITION) {
         Net::broadcastLevelSeed(static_cast<u8>(m_level.currentFloor),
                                 m_difficulty, m_level.levelSeed);
+        // Republish the Steam lobby metadata so the public browser's "Floor N" reflects the floor we
+        // just descended to instead of the one we started on (no-op off a Steam-relay host).
+        updateSteamLobbyRoster();
         // (M11) Advance Server's authoritative level NOW so a client joining during
         // the ~2 s FLOOR_TRANSITION window receives the NEW floor/seed in
         // SV_JOIN_ACCEPT — otherwise it generates the previous floor and desyncs.

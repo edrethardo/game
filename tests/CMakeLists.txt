@@ -15,6 +15,7 @@ add_executable(dungeon_tests
     net/test_input_drain.cpp
     net/test_prediction_ring.cpp
     net/test_render_offset.cpp
+    net/test_lobby_code.cpp     # header-only codec — no production .cpp to link
     net/test_pending_hit_ring.cpp
     net/test_pending_damage_ring.cpp
     net/test_pending_pickup_ring.cpp

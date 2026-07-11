@@ -98,9 +98,13 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
                             250.0f * uiScale, 35.0f * uiScale, false);
     }
     case 1: // Singleplayer: 2 items, Y = sh*0.38 + (1-i)*50*uiScale
-    case 10: // Host-mode chooser (LAN/Online): same 2-option layout as subState 1
         return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
                             250.0f * uiScale, 35.0f * uiScale, false);
+    case 10: // Host-mode chooser: same layout as subState 1, but the row COUNT is dynamic (2 without
+             // Steam, 3 with — LAN / Online-Public / Online-Private), so the caller passes it in
+             // via itemCount. Boxes are wider (320) to fit "Online - Private (Code)".
+        return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, itemCount,
+                            320.0f * uiScale, 35.0f * uiScale, false);
     case 2: // Class selection: N items top-down
     case 5: // P2 class selection: same layout
         return menuMouseHit(sw, sh, sh * 0.54f, 38.0f * uiScale, itemCount,
@@ -121,6 +125,45 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
         // Hit-test visible slots only
         s32 hit = menuMouseHit(sw, sh, sh * 0.82f, lineH, VISIBLE,
                                sw * 0.7f, lineH - 4.0f * (static_cast<f32>(sh) / 720.0f), true);
+        if (hit >= 0) return static_cast<s32>(hit + scrollOff);
+        return -1;
+    }
+    // --- Newer subscreens (couch co-op + Steam matchmaking). These already routed `mouseConfirm`
+    // through their confirm branches, but had no case here, so the hit-test always returned -1 and
+    // the mouse silently did nothing. Layouts below MUST mirror renderMenu() in
+    // engine_render_menus.cpp exactly (same baseY / spacing / box size / ordering).
+    case 11: // P2 New/Continue chooser: 2 items, Y = sh*0.38 + (1-i)*50*uiScale (mirrors subState 1)
+        return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
+                            250.0f * uiScale, 35.0f * uiScale, false);
+    case 19: // Steam join chooser: 4 items (Quick / Browse / Code / IP), Y = sh*0.30 + (3-i)*50*uiScale
+        return menuMouseHit(sw, sh, sh * 0.30f, 50.0f * uiScale, 4,
+                            250.0f * uiScale, 35.0f * uiScale, false);
+    case 13: { // Couch start-mode: Y = sh*0.46 + (count-1-i)*46*uiScale, 360-wide boxes.
+        // The demo hides both online options, so the count must match the render's (kDemoBuild
+        // is constexpr) — otherwise hover misaligns and can return an out-of-range index.
+        const u32 modeCount = GameConst::kDemoBuild ? 1u : 3u;
+        return menuMouseHit(sw, sh, sh * 0.46f, 46.0f * uiScale, modeCount,
+                            360.0f * uiScale, 35.0f * uiScale, false);
+    }
+    case 12: { // P2 save-slot list: same scrollable layout as subState 6 (blue theme).
+        static constexpr u32 VISIBLE = 14;
+        u32 scrollOff = 0;
+        if (itemCount >= VISIBLE) scrollOff = itemCount - VISIBLE + 1; // itemCount = subSelection
+        f32 lineH = 28.0f * uiScale;
+        s32 hit = menuMouseHit(sw, sh, sh * 0.82f, lineH, VISIBLE,
+                               sw * 0.7f, lineH - 4.0f * uiScale, true);
+        if (hit >= 0) return static_cast<s32>(hit + scrollOff);
+        return -1;
+    }
+    case 20: { // Steam lobby browser. Layout constants are single-sourced in engine.h and shared with
+               // the renderer so the two can't drift. itemCount = the CURRENT SELECTION (used for the
+               // scroll offset), mirroring the subState-6/12 convention.
+        const u32 shown = STEAM_BROWSER_VISIBLE;
+        u32 scrollOff = 0;
+        if (itemCount >= shown) scrollOff = itemCount - shown + 1;
+        f32 rowH = STEAM_BROWSER_ROW_H * uiScale;
+        s32 hit = menuMouseHit(sw, sh, sh * STEAM_BROWSER_LIST_TOP, rowH, shown,
+                               sw * STEAM_BROWSER_PANEL_W, rowH - 5.0f * uiScale, true);
         if (hit >= 0) return static_cast<s32>(hit + scrollOff);
         return -1;
     }
@@ -257,14 +300,27 @@ void Engine::updateMenu(f32 dt) {
     u8 mouseItemCount = 0;
     if (m_menu.subState == 2 || m_menu.subState == 5)
         mouseItemCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
-    else if (m_menu.subState == 6)
+    else if (m_menu.subState == 6 || m_menu.subState == 12)
         mouseItemCount = m_menu.subSelection; // pass current selection for scroll offset calc
+    else if (m_menu.subState == 20)
+        mouseItemCount = m_steamBrowserSel;   // browser scrolls off its own cursor (same convention)
+    else if (m_menu.subState == 10)
+        mouseItemCount = static_cast<u8>(hostModeOptionCount()); // 2 without Steam, 3 with
 
     // Only hit-test when the pointer is active — otherwise a resting cursor must not hover/click.
     s32 mouseHit = mouseActive ? menuMouseForState(sw, sh, uiScale, m_menu.subState, mouseItemCount) : -1;
 
-    // Apply hover: update selection when mouse moves over an item (mouseActive-gated via mouseHit)
-    u8* selPtr = (m_menu.subState == 0) ? &m_menu.selection : &m_menu.subSelection;
+    // The lobby browser draws a fixed-height panel that is often only partly filled. Reject a hover
+    // on an empty row below the last game — otherwise a click there would try to join a lobby that
+    // doesn't exist (index past the list).
+    if (m_menu.subState == 20 && mouseHit >= 0 && mouseHit >= Steam::lobbyListCount()) mouseHit = -1;
+
+    // Apply hover: update selection when mouse moves over an item (mouseActive-gated via mouseHit).
+    // The Steam lobby browser keeps its selection in m_steamBrowserSel, not m_menu.subSelection —
+    // point at the right one or hovering a lobby row would move an invisible cursor instead.
+    u8* selPtr = (m_menu.subState == 0)  ? &m_menu.selection
+               : (m_menu.subState == 20) ? &m_steamBrowserSel
+                                         : &m_menu.subSelection;
     if (mouseHit >= 0 && static_cast<u8>(mouseHit) != *selPtr) {
         *selPtr = static_cast<u8>(mouseHit);
         AudioSystem::play(SfxId::MENU_HOVER);
@@ -337,7 +393,7 @@ void Engine::updateMenu(f32 dt) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+            if (m_menu.subSelection + 1u < hostModeOptionCount()) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
@@ -349,7 +405,10 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
-            m_menu.hostOnline = (m_menu.subSelection == 1);  // 0 = LAN, 1 = Online
+            // 0 = LAN, 1 = Online (Public), 2 = Online (Private / code-only). Row 2 only exists when
+            // Steam is available — without it there's no lobby to make private (see hostModeOptionCount).
+            m_menu.hostOnline  = (m_menu.subSelection >= 1);
+            m_menu.hostPrivate = (m_menu.subSelection == 2);
             if (m_menu.couchHost) {
                 // Online couch co-op: both local players already picked characters in the lobby.
                 // Host reserving 2 local slots (slot 0 host + slot 1 partner), then start as SERVER.
@@ -369,14 +428,14 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
-    // Steam join chooser (subState 19, P3) — reachable from "Join Game" when Steam is available:
-    // 0=Quick Join, 1=Browse Games, 2=Enter IP (LAN/direct).
+    // Steam join chooser (subState 19) — reachable from "Join Game" when Steam is available:
+    // 0=Quick Join, 1=Browse Games, 2=Join by Code, 3=Enter IP (LAN/direct).
     if (m_menu.subState == 19) {
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-            if (m_menu.subSelection < 2) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+            if (m_menu.subSelection < 3) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
@@ -389,6 +448,12 @@ void Engine::updateMenu(f32 dt) {
             } else if (m_menu.subSelection == 1) { // Browse Games
                 steamBrowse();
                 m_menu.subState = 20; m_steamBrowserSel = 0;
+            } else if (m_menu.subSelection == 2) { // Join by Code — the only way into a PRIVATE lobby
+                                                   // for a non-friend. Its own screen + keyboard (21).
+                m_menu.lobbyCodeInput[0] = '\0';
+                m_menu.codeOskCursor = 0;
+                m_menu.codeNotFound  = false;
+                m_menu.subState = 21;
             } else {                                // Enter IP (LAN/direct)
                 m_steamJoinHost = 0;
                 m_menu.subState = 9; m_menu.connectAddressClearOnType = true;
@@ -400,6 +465,16 @@ void Engine::updateMenu(f32 dt) {
     // Steam public lobby browser (subState 20, P3): up/down pick a lobby, confirm joins it.
     if (m_menu.subState == 20) {
         int n = Steam::lobbyListCount();
+        // REFRESH (R / gamepad Y) — re-run the query in place. The list is a one-shot snapshot from
+        // when the screen opened, so without this you had to back out to subState 19 and re-enter to
+        // see a game that came up (or drop one that filled/ended). steamBrowse() re-requests, resets
+        // the cursor and flips m_steamBrowserSearching so the panel shows "Searching...".
+        if (Input::isKeyPressed(SDL_SCANCODE_R) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_Y)) {
+            AudioSystem::play(SfxId::MENU_HOVER);
+            steamBrowse();
+            return;
+        }
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_steamBrowserSel > 0) { m_steamBrowserSel--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
@@ -412,8 +487,92 @@ void Engine::updateMenu(f32 dt) {
         if ((Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) && n > 0) {
             char nm[64]; int mc = 0, mm = 0;
             u64 id = Steam::lobbyListEntry(m_steamBrowserSel, nm, sizeof(nm), &mc, &mm);
-            if (id) { AudioSystem::play(SfxId::UI_CONFIRM); Steam::joinLobby(id); }  // -> onLobbyEntered -> beginSteamJoin
+            if (!id) return;
+            if (mm <= 0) mm = static_cast<int>(MAX_PLAYERS);
+            // Refuse a FULL game up front (the row is drawn muted + "FULL"). The host sets the lobby
+            // non-joinable when it fills, so attempting it would just fail silently after a round-trip
+            // — a rejection sound now is far clearer than a join that quietly does nothing.
+            if (mc >= mm) { AudioSystem::play(SfxId::UI_BACK); return; }
+            AudioSystem::play(SfxId::UI_CONFIRM); Steam::joinLobby(id);  // -> onLobbyEntered -> beginSteamJoin
         }
+        return;
+    }
+
+    // Lobby-code entry (subState 21) — type the host's 4-glyph code to join their game, including a
+    // PRIVATE one that never appears in the browser. Own screen + own on-screen keyboard (CodeOsk),
+    // deliberately not sharing the Host-IP screen (see menu_osk.h).
+    if (m_menu.subState == 21) {
+        const u32 len = static_cast<u32>(std::strlen(m_menu.lobbyCodeInput));
+
+        // Append one code glyph. Folds through charValue so what lands in the field is already the
+        // canonical glyph the host published (an 'i' becomes '1', an 'o' becomes '0') — the player
+        // sees exactly what will be queried, instead of a mismatch they can't see.
+        auto typeChar = [&](char c) {
+            if (std::strlen(m_menu.lobbyCodeInput) >= LobbyCode::CODE_LEN) return;
+            const int d = LobbyCode::charValue(c);
+            if (d < 0) return;                       // not a code glyph (e.g. 'U') — ignore the press
+            const u32 n = static_cast<u32>(std::strlen(m_menu.lobbyCodeInput));
+            m_menu.lobbyCodeInput[n]     = LobbyCode::ALPHABET[d];
+            m_menu.lobbyCodeInput[n + 1] = '\0';
+            m_menu.codeNotFound = false;             // editing clears the stale "no such game" notice
+            AudioSystem::play(SfxId::MENU_HOVER);
+        };
+        auto backspace = [&]() {
+            const u32 n = static_cast<u32>(std::strlen(m_menu.lobbyCodeInput));
+            if (n == 0) return;
+            m_menu.lobbyCodeInput[n - 1] = '\0';
+            m_menu.codeNotFound = false;
+            AudioSystem::play(SfxId::UI_BACK);
+        };
+        auto confirm = [&]() {
+            char norm[LobbyCode::BUF_SIZE];
+            if (!LobbyCode::normalize(m_menu.lobbyCodeInput, norm, sizeof(norm))) {
+                AudioSystem::play(SfxId::UI_BACK);   // incomplete / invalid — don't query for nothing
+                return;
+            }
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            steamJoinByCode(norm);                    // async -> onSteamLobbyList -> join or "not found"
+        };
+
+        // Physical keyboard: letters + digits (both rows), backspace, enter.
+        for (s32 sc = SDL_SCANCODE_A; sc <= SDL_SCANCODE_Z; sc++)
+            if (Input::isKeyPressed(sc)) typeChar(static_cast<char>('A' + (sc - SDL_SCANCODE_A)));
+        for (s32 d = 0; d < 10; d++) {
+            const s32 top = (d == 0) ? SDL_SCANCODE_0 : (SDL_SCANCODE_1 + d - 1);
+            const s32 kp  = (d == 0) ? SDL_SCANCODE_KP_0 : (SDL_SCANCODE_KP_1 + d - 1);
+            if (Input::isKeyPressed(top) || Input::isKeyPressed(kp))
+                typeChar(static_cast<char>('0' + d));
+        }
+        if (Input::isKeyPressed(SDL_SCANCODE_BACKSPACE)) backspace();
+
+        // Controller: D-pad/stick walks the CodeOsk grid, A types the highlighted key, X backspaces.
+        if (Input::isActionPressed(GameAction::MENU_UP))
+            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, 0, -1);
+        if (Input::isActionPressed(GameAction::MENU_DOWN))
+            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, 0, 1);
+        if (Input::isKeyPressed(SDL_SCANCODE_LEFT)  || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, -1, 0);
+        if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, 1, 0);
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_X)) backspace();
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
+            const u32 k = m_menu.codeOskCursor;
+            if      (CodeOsk::isDone(k))      confirm();
+            else if (CodeOsk::isBackspace(k)) backspace();
+            else if (k < CodeOsk::COUNT)      typeChar(CodeOsk::KEYS[k]);
+            return;
+        }
+
+        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)) {
+            confirm();
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 19; m_menu.subSelection = 2;   // back onto "Join by Code"
+            return;
+        }
+        (void)len;
         return;
     }
 
@@ -773,10 +932,15 @@ void Engine::updateMenu(f32 dt) {
     // Player 2 New/Continue chooser (subState 11) — driven by P2's controller (index 1), with a
     // keyboard fallback for desktop testing. Mirrors subState 1 but seats the result in lane 1.
     if (m_menu.subState == 11) {
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isMenuStickPressed(Input::StickNav::Up, 1) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+        // Player 2's pad is the primary device here, but keyboard (arrows AND WASD) and the mouse
+        // also work — the P2 lane can be taken on a keyboard, and a mouse user shouldn't hit a
+        // dead screen. P2's left stick is already covered by isMenuStickPressed(..., 1).
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isMenuStickPressed(Input::StickNav::Up, 1) ||
+            Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isMenuStickPressed(Input::StickNav::Down, 1) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isMenuStickPressed(Input::StickNav::Down, 1) ||
+            Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
             if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B) || Input::isActionPressed(GameAction::MENU_BACK)) {
@@ -785,7 +949,8 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             return;
         }
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+            || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_menu.p2Continue = (m_menu.subSelection == 1); // 0 = New, 1 = Continue
             scanSaveSlots();
@@ -799,10 +964,13 @@ void Engine::updateMenu(f32 dt) {
     // slot (that would share one file). Continue loads the hero into lane 1 WITHOUT touching the
     // world (it stays Player 1's floor); New goes to P2 class select (overwrite-confirm if occupied).
     if (m_menu.subState == 12) {
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isMenuStickPressed(Input::StickNav::Up, 1) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+        // Same input surface as subState 11: P2's pad + stick, keyboard arrows AND WASD, and mouse.
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) || Input::isMenuStickPressed(Input::StickNav::Up, 1) ||
+            Input::isKeyPressed(SDL_SCANCODE_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isMenuStickPressed(Input::StickNav::Down, 1) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || Input::isMenuStickPressed(Input::StickNav::Down, 1) ||
+            Input::isKeyPressed(SDL_SCANCODE_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
             if (m_menu.subSelection < MAX_SAVE_SLOTS - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B) || Input::isActionPressed(GameAction::MENU_BACK)) {
@@ -811,7 +979,8 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             return;
         }
-        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+        if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+            || mouseConfirm) {
             u8 sel        = static_cast<u8>(m_menu.subSelection);
             u8 slot       = static_cast<u8>(sel + 1);
             bool slotUsed = m_saveSlots[sel].exists;

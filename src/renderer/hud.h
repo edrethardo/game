@@ -32,6 +32,10 @@ namespace HUD {
     void drawMenuOption(u32 screenWidth, u32 screenHeight,
                         f32 y, f32 width, f32 height,
                         Vec3 color, bool selected);
+    // Filled rect at an arbitrary x (drawMenuOption is centre-anchored, so it can't lay out a grid).
+    // Used by the lobby-code screen for its glyph slots and on-screen keyboard cells.
+    void drawRectAt(u32 screenWidth, u32 screenHeight,
+                    f32 x, f32 y, f32 width, f32 height, Vec3 color);
 
     // Network stats overlay
     void drawNetStats(u32 screenWidth, u32 screenHeight,

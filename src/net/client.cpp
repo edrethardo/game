@@ -377,53 +377,16 @@ bool Client::reconcile(NetPlayer& np, Player& lp, u8 localSlot) {
         np.maxHealth = static_cast<f32>(serverState->maxHealth);
         np.health    = (serverState->health / 255.0f) * np.maxHealth;
         np.isDead    = (serverState->animFlags & (1 << 2)) != 0;
-        // Phase 1.2 — Reconcile clip + reloading conservatively. Direct overwrite of
-        // currentClip from each snapshot would flicker the HUD under fast fire: a snapshot
-        // built before the server processed the client's CL_FIRE_WEAPON still carries the
-        // old (higher) clip → reconcile snaps the count UP → the next snapshot snaps it
-        // back DOWN once the fire lands. The local fire path predicts clip decrements
-        // (handleWeaponFire ws.currentClip--), so the local value is "ahead of" the
-        // server until lastProcessedInputTick catches up.
-        //
-        // Adopt server clip when there's a state change we don't predict perfectly:
-        //   • server is reloading (reloadTimer is server-driven during the refill);
-        //   • local was reloading but server is not (server's reload finished or never
-        //     started — adopt server's view either way);
-        //   • server clip jumped UP without a reload flag (legendary refill, weapon
-        //     swap on server, missed snapshot covering a reload completion).
-        // Otherwise, take MIN(local, server.clip) so the HUD never displays MORE ammo
-        // than was available after our most recent local fire.
-        bool serverReloading = (serverState->animFlags & (1 << 1)) != 0;
-        // R11: snapshot the local clip BEFORE the conservative-clip adoption rewrites
-        // np.weaponState.currentClip — the reload-flag branch below needs to detect
-        // "server's clip just refilled" as a positive completion signal even though
-        // that value is no longer visible on np.weaponState after the adopt.
-        u8 localClipBefore = np.weaponState.currentClip;
-        if (serverReloading || np.weaponState.reloading ||
-            serverState->currentClip > np.weaponState.currentClip) {
-            np.weaponState.currentClip = serverState->currentClip;
-        }
-        // else: serverState.currentClip <= local clip and no reload — local is "ahead"
-        // of server in fire processing; keep local (don't snap HUD upward).
-
-        // R11: conservative reload-flag adoption (mirrors the clip path above).
-        // Previously this was an unconditional `np.weaponState.reloading = serverReloading;`
-        // which clobbered a locally-predicted reload=true with server=false during the
-        // RTT/2 ack gap — killing the reload-bar tick, letting fire-during-reload through,
-        // and producing the "reloading is broken on the client" symptom. Three cases now:
-        //   • Server reloading=true → adopt true (server confirmed input OR started its own).
-        //   • Server reloading=false AND server's clip just refilled → server completed
-        //     a reload; adopt false. Positive falling-edge confirmation.
-        //   • Server reloading=false AND clip didn't refill → server hasn't seen our input
-        //     yet; keep the local prediction. The local reload tick at engine_combat.cpp
-        //     200-206 drains its own timer and clears `reloading` itself; the next snapshot's
-        //     refilled clip then confirms completion via the case above.
-        if (serverReloading) {
-            np.weaponState.reloading = true;
-        } else if (serverState->currentClip > localClipBefore) {
-            np.weaponState.reloading = false;
-        }
-        // else: server hasn't acked yet — keep local prediction alive.
+        // Ammo + reload are CLIENT-AUTHORITATIVE. The client's own handleWeaponFire owns
+        // currentClip / reloading / reloadTimer (predict the decrement on fire, run the reload
+        // timer locally, trigger the throwaway) — the player holding the weapon needs it instant
+        // and correct. We deliberately DON'T adopt the server's clip here anymore: the old
+        // conservative adopt raised the client's just-decremented clip back to the server's
+        // RTT/2-stale (higher) value nearly every snapshot, so the local decrements never stuck,
+        // the clip never reached 0, and "the client never had to reload". The server also no
+        // longer gates the client's fire on its own reload state (engine_combat.cpp), so it can't
+        // drop an authoritative shot at a reload boundary. Nothing overwrites the local clip now,
+        // so there's also no HUD flicker (the symptom the old conservative path guarded against).
         // Status timers (quantized 0.04 s steps; see buildFromState).
         // Take max of locally-predicted invuln vs server snapshot so a fresh dodge's
         // 0.3 s i-frame isn't briefly wiped between prediction and the next ack.

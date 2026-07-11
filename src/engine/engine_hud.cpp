@@ -349,8 +349,36 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
 // Called only in the non-inventory (normal) HUD branch.
 // ---------------------------------------------------------------------------
 void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
-    // Minimap (top-right corner)
-    Minimap::draw(sw, sh, m_level.grid, m_localPlayer.position, m_localPlayer.yaw, m_entities);
+    // Minimap (top-right corner). On CLIENT the authoritative entities — including
+    // server-summoned minions the local ghost never spawned — live in the interp pool, not
+    // m_entities. Mirror the fog-of-war source switch (engine_update.cpp:1254) so minion
+    // dots actually appear for clients instead of reading the frozen/empty ghost pool.
+    const EntityPool& minimapEntities = (m_netRole == NetRole::CLIENT)
+                                        ? m_renderInterp.entities : m_entities;
+
+    // Remote co-op players → cyan dots. Source differs by role: a CLIENT reads the
+    // interpolated remote-player pool (its own slot(s) are already inactive there, set by
+    // interpolateRemotePlayers); the SERVER reads authoritative NetPlayers, skipping the
+    // host's own local lane(s). Singleplayer leaves every slot inactive → no extra dots.
+    Vec3 otherPos[MAX_PLAYERS];
+    bool otherActive[MAX_PLAYERS] = {};
+    if (m_netRole == NetRole::CLIENT) {
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            otherActive[i] = m_renderInterp.playerActive[i];
+            otherPos[i]    = m_renderInterp.playerPositions[i];
+        }
+    } else if (m_netRole == NetRole::SERVER) {
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            if (i < m_splitPlayerCount) continue;      // host's own local lane(s)
+            const NetPlayer& np = m_players[i];
+            if (!np.active || np.isDead) continue;
+            otherActive[i] = true;
+            otherPos[i]    = np.position;
+        }
+    }
+
+    Minimap::draw(sw, sh, m_level.grid, m_localPlayer.position, m_localPlayer.yaw,
+                  minimapEntities, otherPos, otherActive, MAX_PLAYERS);
 
     // Legendary item dots on minimap — gold "+" cross at each active legendary world item
     {
@@ -820,6 +848,20 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         const char* title = "PAUSED";
         f32 titleW = FontSystem::textWidth(title, 3);
         FontSystem::drawText(sw, sh, cx - titleW * 0.5f, cy + 50.0f, title, {0.9f, 0.85f, 0.7f}, 3);
+
+        // The host's SHARE CODE. This is the only place the host can actually read it, and for a
+        // PRIVATE lobby it's the only way anyone who isn't a Steam friend can get in — so it has to
+        // be somewhere they can pull up mid-game to read out. Shown only while we own a live lobby.
+        if (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0 && m_lobbyCode[0]) {
+            char line[64];
+            std::snprintf(line, sizeof(line), "Lobby Code:  %s", m_lobbyCode);
+            f32 lw = FontSystem::textWidth(line, 2);
+            FontSystem::drawText(sw, sh, cx - lw * 0.5f, cy + 105.0f, line, {0.4f, 1.0f, 0.6f}, 2);
+            const char* share = m_menu.hostPrivate ? "Private game - share this code to let friends in"
+                                                   : "Friends can join with this code, or from the browser";
+            f32 sw2 = FontSystem::textWidth(share, 1);
+            FontSystem::drawText(sw, sh, cx - sw2 * 0.5f, cy + 88.0f, share, {0.45f, 0.5f, 0.55f}, 1);
+        }
 
         // Option list is dynamic: the host of an open Steam lobby gets a middle "Close Lobby" row.
         // currentLobbyId()==0 for SP / ENet host / client / non-Steam builds, so it stays 2 rows there.

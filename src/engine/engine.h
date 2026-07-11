@@ -24,6 +24,8 @@
 #include "net/net_player.h"
 #include "net/snapshot.h"    // WorldSnapshot — needed for m_baselineSnap / m_lastAppliedSnap (D7.2)
 #include "net/clock_sync.h"
+#include "net/lobby_code.h"  // LobbyCode::BUF_SIZE — the host's shareable lobby code buffer
+#include "platform/steam.h"  // Steam::isAvailable() — gates the Public/Private lobby rows
 #include "net/prediction_ring.h"
 #include "net/render_offset.h"
 #include "net/pending_hit_ring.h"
@@ -61,6 +63,15 @@ enum struct GameStart : u8 {
 // Developer CLI launch options (launch_options.h) — forward-declared so engine.h need not pull
 // in the parser header; the definition is included where applyLaunchOptions is implemented/called.
 struct LaunchOptions;
+
+// Steam lobby-browser layout. SHARED deliberately: the renderer (engine_render_menus.cpp, subState
+// 20) and the mouse hit-test (engine_menu.cpp, menuMouseForState case 20) must agree exactly, and
+// every mouse-driven menu in this codebase has the same standing hazard — a layout tweak in one file
+// silently desyncs clicks in the other. Single-sourcing them here removes that failure mode.
+static constexpr u32 STEAM_BROWSER_VISIBLE  = 8;      // rows shown at once
+static constexpr f32 STEAM_BROWSER_ROW_H    = 32.0f;  // row pitch, × uiScale
+static constexpr f32 STEAM_BROWSER_LIST_TOP = 0.60f;  // y of row 0's box, × screen height
+static constexpr f32 STEAM_BROWSER_PANEL_W  = 0.66f;  // panel width, × screen width
 
 class Engine {
 public:
@@ -141,6 +152,17 @@ private:
         // historical behavior (always-attempt UPnP) so launches that bypass subState 10
         // don't regress.
         bool hostOnline = true;
+        // Steam lobby visibility chosen on the host-mode screen (subState 10). PRIVATE creates an
+        // unlisted lobby: it never appears in the public browser and can only be entered by invite,
+        // by a friend, or by someone typing the lobby CODE the host shares. Public is the default.
+        bool hostPrivate = false;
+        // Lobby-code entry (subState 21). Its own screen and its own on-screen keyboard (CodeOsk)
+        // rather than sharing the Host-IP screen — the address screen only wants digits + hex + IP
+        // punctuation, and stuffing 26 letters into it to serve a different screen would make typing
+        // an IP worse for everyone.
+        char lobbyCodeInput[LobbyCode::BUF_SIZE] = {};
+        u32  codeOskCursor = 0;        // cursor into CodeOsk::KEYS (controller entry)
+        bool codeNotFound = false;     // set when a lookup came back empty — shown under the field
         f32  creditsScroll = 0.0f;  // Y offset for scrolling credits text
     };
     MenuState m_menu;
@@ -599,7 +621,31 @@ private:
     // camera shake) at an impact point. Shared by the host's splash callback and the CLIENT's
     // PROJECTILE_SPLASH SV_EVENT handler so both render identical splashes (the client's
     // ProjectileSystem::update is gated off, so it can't fire the callback itself).
+    // Rows on the host-mode chooser (subState 10). With Steam, Online splits into Public / Private
+    // (unlisted, code-only); without Steam there's no lobby at all (ENet + UPnP), so the split would
+    // be meaningless. Single-sourced: the render, the input bounds and the mouse hit-test must agree.
+    u32 hostModeOptionCount() const { return Steam::isAvailable() ? 3u : 2u; }
+
     void spawnSplashFX(Vec3 position, f32 radius);
+
+    // --- Weapon on-hit PROC meteors: each player predicts their OWN, then tells the server ---
+    // The proc roll rides a local std::rand() the other side can't reproduce, so the FIRING player
+    // owns the roll. See CL_METEOR / SV_EVENT::METEOR in net.h for the full model.
+    //
+    // predictProcMeteor: called at the local player's proc site (melee/hitscan hit, or a predicted
+    // projectile impact). CLIENT → spawn a predicted visual meteor NOW (instant telegraph) + send
+    // CL_METEOR so the server spawns the one authoritative damaging meteor. SERVER (host) → spawn
+    // the real one + relay to all clients. Singleplayer → just spawn it.
+    void predictProcMeteor(Vec3 position, f32 damage, f32 radius, f32 delay);
+    // Client → server: "I predicted a proc meteor here." Reliable. No-op unless CLIENT.
+    void sendMeteorRequest(Vec3 position, f32 radius, f32 delay, f32 damage);
+    // Server: relay a meteor to clients (SV_EVENT::METEOR). exceptSlot = the predicting caster to
+    // skip (0xFF = send to everyone). No-op unless SERVER.
+    void broadcastMeteorEvent(Vec3 position, f32 radius, f32 delay, u8 exceptSlot = 0xFF);
+    // Server-side CL_METEOR handler: validate + spawn the authoritative meteor for `slot`, then
+    // relay it to the other clients.
+    static void onMeteor(u8 playerSlot, const u8* data, u32 size);
+    void handleMeteorRequest(u8 playerSlot, const u8* data, u32 size);
 
     // Pre-cached mesh IDs (resolved once in init, avoids strcmp in startGame)
     enum MeshId : u8 {
@@ -961,6 +1007,14 @@ private:
     // P3 lobby browser/quickmatch: pending request mode (0=none,1=quickmatch,2=browse) + browser cursor.
     u8  m_steamMenuMode = 0;
     u8  m_steamBrowserSel = 0;
+    // The shareable code for the lobby WE host ("K3M7-Q2XA-9BTC-F"), filled in when the lobby is
+    // created. Shown in the pause menu so the host can read it out / copy it (C) — this is the only
+    // way into a PRIVATE lobby for someone who isn't a Steam friend. Empty when we host no lobby.
+    char m_lobbyCode[LobbyCode::BUF_SIZE] = {};
+    // True from the moment the browser fires a RequestLobbyList until onSteamLobbyList answers.
+    // Lets the browser show "Searching…" instead of flashing "No public games found" during the
+    // round-trip (the old screen was indistinguishable from a genuinely empty result).
+    bool m_steamBrowserSearching = false;
 public:
     // Start a network host from the menu: Steam relay + a lobby when Online is chosen and Steam is
     // available, else ENet + UPnP. Returns true on success.
@@ -972,6 +1026,9 @@ public:
     // P3: kick off a quickmatch (join best public lobby, else host) / a public browser request.
     void steamQuickJoin();
     void steamBrowse();
+    // Join by the host's 4-glyph share code — the only route into a PRIVATE lobby for a non-friend.
+    // `code` must be normalized (LobbyCode::normalize) so it matches the host's published value.
+    void steamJoinByCode(const char* code);
     // Steam lobby-list result handler (from the Steam callback): drives quickmatch / opens the browser.
     void onSteamLobbyList(int count);
     // Push the current roster into the Steam lobby (P2): publishes "players"/"slots_free" (the browser
@@ -980,6 +1037,9 @@ public:
     // onPlayerLeft (roster changes) and steamOnLobbyCreated (initial publish) — the latter is a free
     // function, so this must be public. Stops friends-list/browser "Join" from offering a full game.
     void updateSteamLobbyRoster();
+    // Host: publish the lobby's identity, visibility and 4-glyph share code (called from the Steam
+    // onLobbyCreated callback). Kept as an Engine method because it needs private engine state.
+    void publishLobbyIdentity();
 private:
 
 

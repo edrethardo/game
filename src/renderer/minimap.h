@@ -21,8 +21,14 @@ namespace Minimap {
     void updateVisited(const LevelGrid& grid, Vec3 playerPos,
                        const EntityPool& entities);
 
-    // Render minimap with NPC dots.
+    // Render minimap with NPC dots + optional remote co-op player dots.
+    // otherPlayers/otherActive are parallel arrays of length otherPlayerCount (may be
+    // null / 0 in singleplayer); each active slot draws as a distinct cyan dot. The local
+    // player is always the green dot+arrow — callers pass their REMOTE players here with
+    // the local slot(s) marked inactive so the local marker is never duplicated.
     void draw(u32 screenWidth, u32 screenHeight,
               const LevelGrid& grid, Vec3 playerPos, f32 playerYaw,
-              const EntityPool& entities);
+              const EntityPool& entities,
+              const Vec3* otherPlayers = nullptr, const bool* otherActive = nullptr,
+              u32 otherPlayerCount = 0);
 }

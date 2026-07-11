@@ -93,13 +93,10 @@ void Engine::spawnSplashFX(Vec3 position, f32 radius) {
 static void steamOnLobbyCreated(u64 lobbyId, bool ok) {
     (void)lobbyId;
     if (!s_engine || !ok) return;
-    char ver[16]; std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
-    Steam::setLobbyData("version", ver);
-    Steam::setLobbyData("name", "Curse of the Dungeon Engine");
-    // Publish the starting roster ("players"/"slots_free") + joinable state. m_netRole is already SERVER
-    // by now (set at the Host menu, before netHostGame), so this reflects the host's reserved slot(s)
-    // (1 solo / 2 couch) instead of leaving the count blank until the first remote join/leave.
-    s_engine->updateSteamLobbyRoster();
+    // All the lobby metadata (identity, visibility, share code, roster) is published from one Engine
+    // method — it needs private engine state, and keeping it in one place stops the browser's columns
+    // and the code lookup from silently disagreeing about what a lobby advertises.
+    s_engine->publishLobbyIdentity();
 }
 static void steamOnLobbyEntered(u64 lobbyId, u64 owner) {
     (void)lobbyId;
@@ -362,13 +359,16 @@ void Engine::initCallbacks() {
                 }
             } break;
             case SkillId::METEOR_STRIKE: {
-                extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
-                for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
-                    if (!s_meteors[mi].active) {
-                        s_meteors[mi] = {position, sd->damage, sd->radius, sd->delay, true};
-                        break;
-                    }
-                }
+                // Each player predicts their OWN proc meteors. On a SERVER this callback also fires
+                // for projectiles owned by a REMOTE client — but that client already rolled, spawned
+                // its predicted meteor and reported it via CL_METEOR, so rolling again here would
+                // double-spawn. Defer to the firing client and only handle the host's own shots.
+                // (Guests never reach this callback at all — ProjectileSystem::update is gated off
+                // on CLIENT; a client predicts its projectile-proc meteor at its OWN predicted
+                // impact instead, in tickSharedSystems.)
+                if (s_engine->m_netRole == NetRole::SERVER &&
+                    ownerSlot >= s_engine->m_splitPlayerCount) break;
+                s_engine->predictProcMeteor(position, sd->damage, sd->radius, sd->delay);
             } break;
             case SkillId::SHADOW_RICOCHET: {
                 // Find 2 nearest enemies (excluding the one we just hit) and fire

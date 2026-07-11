@@ -209,7 +209,7 @@ void Engine::handleWeaponFire(f32 dt) {
         }
     }
 
-    // Throwaway legendary: throw weapon as projectile on reload
+    // Throwaway legendary: throw weapon as projectile on reload.
     auto throwWeaponOnReload = [&]() {
         if (isItemEmpty(eqWpn)) return;
         if (m_itemDefs[eqWpn.defId].legendarySkillId != SkillId::THROWAWAY) return;
@@ -222,9 +222,22 @@ void Engine::handleWeaponFire(f32 dt) {
         u16 projIdx = ProjectileSystem::spawn(m_projectiles, spawnPos,
             forward, 20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
         if (projIdx != 0xFFFF) {
-            m_projectiles.projectiles[projIdx].meshId = m_itemDefs[eqWpn.defId].meshId;
-            m_projectiles.projectiles[projIdx].splashRadius = 2.0f;
-            m_projectiles.projectiles[projIdx].splashDamage = throwDmg * 0.5f;
+            Projectile& p = m_projectiles.projectiles[projIdx];
+            p.meshId       = m_itemDefs[eqWpn.defId].meshId;
+            p.splashRadius = 2.0f;
+            p.splashDamage = throwDmg * 0.5f;
+            p.ownerSlot    = activeNetSlot();
+            // NET: on a CLIENT the throw is CLIENT-PREDICTED for snappy feel — flag it predicted
+            // with this tick so tickSharedSystems renders/moves it immediately (the gun leaves the
+            // hand NOW, no RTT wait). The server fires the authoritative throwaway at its own reload
+            // trigger stamped with the same clientTick (handleWeaponFireForPlayer), and the existing
+            // match-and-keep pass (clientNetPost) keeps this smooth ghost while hiding the lagging
+            // authoritative. Damage/replication stay server-authoritative (this ghost deals no
+            // damage — Combat::applyDamage is gated off on CLIENT). Host/SP spawn a normal live one.
+            if (m_netRole == NetRole::CLIENT) {
+                p.predicted  = true;
+                p.clientTick = m_clientTick;
+            }
         }
         m_viewmodelState.attackAnimT = 0.3f;
     };
@@ -728,14 +741,13 @@ void Engine::handleWeaponFire(f32 dt) {
                             currentLocalTick());
                     } break;
                     case SkillId::METEOR_STRIKE: {
-                        // Drop a meteor on the hit position
-                        extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
-                        for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
-                            if (!s_meteors[mi].active) {
-                                s_meteors[mi] = {procPos, sd->damage, sd->radius, sd->delay, true};
-                                break;
-                            }
-                        }
+                        // Drop a meteor on the hit position. Each player PREDICTS THEIR OWN proc
+                        // meteors: the roll above is a local std::rand() the other side can't
+                        // reproduce, so the FIRING player owns it. predictProcMeteor spawns the
+                        // meteor here for an instant telegraph and — on a CLIENT — sends CL_METEOR
+                        // so the server spawns the one authoritative damaging copy and relays it to
+                        // the other players. On the host it spawns the real one and relays it.
+                        predictProcMeteor(procPos, sd->damage, sd->radius, sd->delay);
                     } break;
                     case SkillId::BLOOD_NOVA: {
                         // Nova centered on hit target
@@ -1094,21 +1106,52 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         }
     }
 
+    // Throwaway legendary (server-authoritative half): when a reload triggers on a THROWAWAY
+    // weapon, hurl it as an explosive projectile from the player's authoritative eye/aim. The
+    // CLIENT already spawned a PREDICTED ghost of this throw locally for a snappy feel; here the
+    // server fires the real one that deals damage + replicates via snapshot. It's stamped with the
+    // triggering input's clientTick (+ ownerSlot) so the client's match-and-keep pass reconciles
+    // the two — keeping the smooth predicted ghost and hiding this lagging authoritative while they
+    // agree, exactly like a normal predicted shot. Thrown at the reload TRIGGER, before the clip
+    // refills, so damage scales with the ammo being thrown (matches the host's scaling).
+    auto throwWeaponOnReloadServer = [&]() {
+        if (isItemEmpty(eqWpn)) return;
+        if (m_itemDefs[eqWpn.defId].legendarySkillId != SkillId::THROWAWAY) return;
+        Vec3 eyePos = np.eyePos();
+        Vec3 fwd = normalize(Vec3{-sinf(np.yaw) * cosf(np.pitch),
+                                    sinf(np.pitch),
+                                   -cosf(np.yaw) * cosf(np.pitch)});
+        Vec3 right = normalize(Vec3{-fwd.z, 0, fwd.x});
+        Vec3 spawnPos = eyePos + fwd * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
+        f32 throwDmg = wpn.damage * ws.currentClip * 0.5f;   // scales with remaining ammo
+        if (throwDmg < wpn.damage) throwDmg = wpn.damage;    // minimum 1 shot worth
+        Combat::setAttackingPlayer(np.slotIndex);            // credit this player's kills
+        u16 projIdx = ProjectileSystem::spawn(m_projectiles, spawnPos, fwd,
+                                              20.0f, throwDmg, 0.2f, 3.0f, true, PROJ_SPLASH);
+        if (projIdx != 0xFFFF) {
+            Projectile& p  = m_projectiles.projectiles[projIdx];
+            p.meshId       = m_itemDefs[eqWpn.defId].meshId;
+            p.splashRadius = 2.0f;
+            p.splashDamage = throwDmg * 0.5f;
+            p.ownerSlot    = np.slotIndex;                   // attribution + snapshot ownerSlot
+            p.clientTick   = input->clientTick;              // key for the client's match-and-keep
+        }
+    };
+
     // Manual reload (R key)
     if ((input->extFlags & INPUT_EX_RELOAD) && wpn.clipSize > 0 &&
         !ws.reloading && ws.currentClip < wpn.clipSize) {
+        throwWeaponOnReloadServer();   // throw BEFORE the refill so damage scales by thrown ammo
         ws.reloading = true;
         ws.reloadTimer = wpn.reloadTime;
     }
 
     // Auto-reload on empty clip
     if (wpn.clipSize > 0 && ws.currentClip == 0 && !ws.reloading) {
+        throwWeaponOnReloadServer();
         ws.reloading = true;
         ws.reloadTimer = wpn.reloadTime;
     }
-
-    // Can't fire while reloading
-    if (ws.reloading) return;
 
     // Potion: handled by the caller (serverNetPre in engine_net.cpp) with the remote's own
     // per-player cooldown (NetPlayer::potionCooldown, decremented in serverNetPost), right
@@ -1121,6 +1164,22 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     // fire is queued OR cooldown is still active, return early. Cooldown drift between client
     // and server is normally sub-frame; rare over-the-cooldown fires get dropped here.
     PendingFire& pending = s_pendingFires[np.slotIndex];
+
+    // CLIENT-AUTHORITATIVE ammo/reload: the client owns its clip + reload timing (Client::reconcile
+    // no longer adopts the server clip). This server-side clip is only a SHADOW that follows the
+    // client's shots to TIME THE THROWAWAY — it must never GATE the client's fire. So instead of
+    // the old `if (ws.reloading) return;` (which dropped the first shot fired in the RTT/2 window
+    // after the client's authoritative reload finished but before this shadow's timer did), treat
+    // an incoming fire as proof the client's reload is done: complete the shadow reload (refill +
+    // clear) and honor the shot. This also keeps the shadow clip synced to the client (both land at
+    // clipSize-1 after the shot), so the throwaway still empties on the same shot for both sides. No
+    // pending fire while reloading = genuinely mid-reload this tick, so there's nothing to fire.
+    if (ws.reloading) {
+        if (!pending.valid) return;
+        ws.reloading   = false;
+        ws.currentClip = wpn.clipSize;
+        ws.reloadTimer = 0.0f;
+    }
     if (!pending.valid) return;
     // Phase 1.2 — Small cooldown grace window. The local client predicts its own
     // cooldown identically to the server, but network jitter (especially on the
@@ -1420,13 +1479,12 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                             currentLocalTick());
                     } break;
                     case SkillId::METEOR_STRIKE: {
-                        extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
-                        for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
-                            if (!s_meteors[mi].active) {
-                                s_meteors[mi] = {procPos, sd->damage, sd->radius, sd->delay, true};
-                                break;
-                            }
-                        }
+                        // NOT rolled here. A remote player PREDICTS THEIR OWN meteor procs with
+                        // their own roll and reports each via CL_METEOR (handleMeteorRequest spawns
+                        // the authoritative one). Rolling again on the server would double-spawn —
+                        // one meteor from the client's message plus a second from this independent
+                        // roll — so the server defers to the firing client entirely. (The roll just
+                        // above still governs this remote's OTHER procs, which aren't predicted.)
                     } break;
                     case SkillId::BLOOD_NOVA: {
                         EntityHandle hits[MAX_ENTITIES];

@@ -284,6 +284,16 @@ void HUD::drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot) 
     flushHUD();
 }
 
+// Filled rect at an ARBITRARY x (drawMenuOption is centre-anchored, which can't lay out a grid).
+// Added for the lobby-code screen: four glyph slots and an on-screen keyboard, both of which need
+// per-cell x positions.
+void HUD::drawRectAt(u32 screenWidth, u32 screenHeight,
+                     f32 x, f32 y, f32 width, f32 height, Vec3 color)
+{
+    s_screenW = screenWidth; s_screenH = screenHeight;
+    pushQuad(x, y, x + width, y + height, color);
+}
+
 void HUD::drawMenuOption(u32 screenWidth, u32 screenHeight,
                           f32 y, f32 width, f32 height,
                           Vec3 color, bool selected)

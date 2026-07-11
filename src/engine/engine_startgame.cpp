@@ -793,6 +793,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     if (m_netRole == NetRole::SERVER) {
         Net::setOnInput(Engine::onInput);
         Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
+        Net::setOnMeteor(Engine::onMeteor); // client-predicted proc meteor → authoritative spawn
         Net::setOnDropItem(Engine::onDropItem); // R11: server-authoritative inventory drop
         Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
         Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent

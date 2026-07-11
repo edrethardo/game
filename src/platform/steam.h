@@ -19,6 +19,10 @@ void runCallbacks();
 bool isAvailable();
 // The local user's SteamID (0 if unavailable).
 u64  localSteamId();
+// The local user's Steam display name. Returns "" when Steam is unavailable. The host publishes this
+// as the lobby's "name" so the public browser can actually tell games apart (every lobby used to
+// advertise the same hardcoded title). Pointer is owned by Steam — copy it if you need to keep it.
+const char* localPersonaName();
 
 // --- Matchmaking / lobbies (P2) ---
 // A Steam lobby is just a rendezvous carrying the host's SteamID; the actual game traffic runs over
@@ -49,11 +53,18 @@ void setOnLobbyEntered(OnLobbyEnteredFn fn);
 void setOnLobbyCreated(OnLobbyCreatedFn fn);
 
 // --- Public lobby browser / quickmatch (P3) ---
-// Request the public lobby list, filtered to matching `version` and >=1 open slot. Async -> onLobbyList.
+// Request the public lobby list: matching `version`, >=1 open slot, and NOT private. Async -> onLobbyList.
 void requestLobbyList(const char* version);
+// Look up the single lobby publishing `code` (the host's 4-glyph share code) — the only way into a
+// PRIVATE lobby for someone who isn't a Steam friend. Private lobbies are excluded from the browser
+// above but remain searchable by code. Async -> onLobbyList (count 0 = no such game).
+void requestLobbyListByCode(const char* version, const char* code);
 int  lobbyListCount();
 // Read entry i (0-based). Returns the lobby id (0 if out of range); fills name/memberCount/maxMembers.
 u64  lobbyListEntry(int i, char* nameBuf, int nameCap, int* memberCount, int* maxMembers);
+// Read one host-published metadata key off browsed entry i (e.g. "floor", "difficulty"). Writes ""
+// when Steam/the entry/the key is unavailable, so callers can always print the buffer.
+void lobbyListData(int i, const char* key, char* buf, int cap);
 using OnLobbyListFn = void(*)(int count);
 void setOnLobbyList(OnLobbyListFn fn);
 

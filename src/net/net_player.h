@@ -113,6 +113,10 @@ struct NetPlayer {
     // one-shot below-20%-HP invuln stays one-shot across frames for remotes (consumed on use,
     // re-earned only at >=40% HP). NOT serialized — server-only state, never on the wire.
     bool lifesaverArmed    = true;
+    // Server-only mirror of Player.graceInvuln: tags this slot's invulnTimer as near-death-grace-
+    // sourced so the "clear grace once healthy (>85% HP)" rule in serverNetPost can cancel it
+    // without touching dodge i-frames (which also set invulnTimer=0.3). NOT on the wire.
+    bool graceInvuln       = false;
     // Ring-passive state (M8/M9 follow-up batch): server-only mirror of the Player fields so a
     // remote with Soul Harvest / Second Wind / Phase Strike actually accumulates stacks, gets
     // the emergency heal, and runs stealth — instead of all of it landing on the host. Not on

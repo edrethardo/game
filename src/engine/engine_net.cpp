@@ -526,6 +526,14 @@ void Engine::serverNetPost(f32 dt) {
 
         if (pi >= m_splitPlayerCount) { // host-local lanes tick status in their gameUpdate pass
             if (np.invulnTimer > 0.0f) { np.invulnTimer -= dt; if (np.invulnTimer < 0.0f) np.invulnTimer = 0.0f; }
+            // Reset the near-death lifesaver grace once this remote player is healthy again (>85% HP)
+            // — mirrors the local-player rule in engine_update.cpp. graceInvuln tags only the
+            // lifesaver invuln, so a client's dodge i-frames (also 0.3 s) survive. The cleared
+            // invulnTimer rides the next snapshot back to the client. Drop the tag on expiry too.
+            if (np.graceInvuln) {
+                if (np.invulnTimer <= 0.0f)                 { np.graceInvuln = false; }
+                else if (np.health > np.maxHealth * 0.85f)  { np.invulnTimer = 0.0f; np.graceInvuln = false; }
+            }
             if (np.slowTimer > 0.0f)   np.slowTimer -= dt;
             if (np.freezeTimer > 0.0f) np.freezeTimer -= dt;
             // R15: potionCooldown drain moved to serverNetPre (alongside the R9 skill
@@ -542,8 +550,13 @@ void Engine::serverNetPost(f32 dt) {
             // Passive health regen (HEALTH_REGEN affixes — defensive pack) for REMOTE players,
             // authoritatively. Read from the server's copy of this slot's inventory; additive +
             // clamped to max. Host-local lanes regen in their own tickPlayerStatusEffects pass.
+            // Gate on health > 0 so regen NEVER revives a downed player: this pass applies
+            // regen BEFORE the np.health<=0 death check below, so without the guard a hit
+            // that drove a remote to 0 HP gets nudged back positive by regen and the death
+            // never latches — a client with HEALTH_REGEN then "won't die reliably". Mirrors
+            // the local path's guard (engine_update_player.cpp: "never revives a corpse").
             f32 regen = Inventory::healthRegenRate(m_inventories[pi]);
-            if (regen > 0.0f && np.health < np.maxHealth) {
+            if (regen > 0.0f && np.health > 0.0f && np.health < np.maxHealth) {
                 np.health += regen * dt;
                 if (np.health > np.maxHealth) np.health = np.maxHealth;
             }
@@ -1395,12 +1408,20 @@ bool Engine::netHostGame(u8 localPlayerCount) {
     // the in-game public browser (RequestLobbyList only returns k_ELobbyTypePublic lobbies — a
     // friends-only lobby is invite/friends-joinable but invisible to the browser, which is exactly why
     // "Browse Games" returned 0 results). Public is a strict superset: invites, friends-list "Join Game",
-    // AND browser discovery all work. (A future "friends-only" host toggle could pass true here.)
+    // AND browser discovery all work.
+    //
+    // PRIVATE lobbies are created as the SAME public Steam lobby TYPE, and hidden by our own
+    // `private` metadata flag (the browser query filters private=="0"; a code lookup ignores it).
+    // This is deliberate and load-bearing: a k_ELobbyTypeFriendsOnly lobby is not returned by
+    // RequestLobbyList AT ALL, so a 4-glyph code — which works by *searching* for the lobby that
+    // published it — could never find one. Making the lobby friends-only would silently break the
+    // very feature the private option exists to enable. See lobby_code.h for the full trade.
     // Otherwise fall back to the ENet path (Online = UPnP, else LAN-only).
     if (m_menu.hostOnline && Steam::isAvailable()) {
         if (!Net::hostServerSteam(localPlayerCount)) return false;
-        Steam::createLobby(/*friendsOnly=*/false, static_cast<int>(MAX_PLAYERS));  // data set in onLobbyCreated
-        LOG_INFO("Steam: hosting via relay + lobby (%u local)", localPlayerCount);
+        Steam::createLobby(/*friendsOnly=*/false, static_cast<int>(MAX_PLAYERS)); // data set in onLobbyCreated
+        LOG_INFO("Steam: hosting via relay + %s lobby (%u local)",
+                 m_menu.hostPrivate ? "PRIVATE (code/invite only)" : "public", localPlayerCount);
         return true;
     }
     return Net::hostServer(DEFAULT_PORT, m_menu.hostOnline, localPlayerCount);
@@ -1435,13 +1456,43 @@ void Engine::steamBrowse() {
     if (!Steam::isAvailable()) return;
     m_steamMenuMode = 2;
     m_steamBrowserSel = 0;
+    m_steamBrowserSearching = true;   // render "Searching…" until onSteamLobbyList answers
     char ver[16]; std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
     Steam::requestLobbyList(ver);
     LOG_INFO("Steam: browsing public lobbies...");
 }
 
+// Join a game by its 4-glyph share code. The code is a LOOKUP KEY, not an encoding of the lobby id
+// (4 glyphs = 20 bits can't hold 64), so we ask Steam for the lobby that published this exact code.
+// Private lobbies are excluded from the browser but remain findable this way — that's the whole
+// point of the feature. `code` must already be normalized (LobbyCode::normalize) so it matches the
+// host's published string byte-for-byte.
+void Engine::steamJoinByCode(const char* code) {
+    if (!Steam::isAvailable() || !code || !code[0]) return;
+    m_steamMenuMode = 3;                  // -> onSteamLobbyList's code branch
+    m_steamBrowserSearching = true;       // the code screen shows "Searching..." while we wait
+    m_menu.codeNotFound = false;
+    char ver[16]; std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
+    Steam::requestLobbyListByCode(ver, code);
+    LOG_INFO("Steam: looking up lobby code %s...", code);
+}
+
 void Engine::onSteamLobbyList(int count) {
     if (m_gameState != GameState::MENU) { m_steamMenuMode = 0; return; }
+    if (m_steamMenuMode == 3) {           // join-by-code lookup
+        m_steamMenuMode = 0;
+        m_steamBrowserSearching = false;
+        if (count > 0) {
+            char nm[64]; int mc = 0, mm = 0;
+            u64 id = Steam::lobbyListEntry(0, nm, sizeof(nm), &mc, &mm);   // filter matched exactly one
+            if (id) { Steam::joinLobby(id); return; }  // -> onLobbyEntered -> beginSteamJoin
+        }
+        // No lobby published that code: it's mistyped, or the game ended/filled. Say so on the code
+        // screen instead of bouncing the player somewhere unexpected — they'll want to retype it.
+        m_menu.codeNotFound = true;
+        LOG_INFO("Steam: no game found for that lobby code");
+        return;
+    }
     if (m_steamMenuMode == 1) {           // quickmatch
         m_steamMenuMode = 0;
         if (count > 0) {
@@ -1459,6 +1510,8 @@ void Engine::onSteamLobbyList(int count) {
         m_menu.subSelection = 1;    // Online
     } else if (m_steamMenuMode == 2) {    // browser: the list substate renders Steam::lobbyList*
         m_steamBrowserSel = 0;
+        m_steamBrowserSearching = false;  // results are in — the list (or the empty state) can render
+        LOG_INFO("Steam: browser found %d public game(s)", count);
     }
 }
 

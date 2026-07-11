@@ -352,8 +352,156 @@ void Engine::onEvent(const u8* data, u32 size) {
             std::memcpy(&radius, data + off, 4); off += 4;
             s_engine->spawnSplashFX(pos, radius);
         } break;
+        case NetEventType::METEOR: {
+            // A meteor cast by SOMEONE ELSE (the host, or another guest), relayed so we can see it.
+            // Our OWN meteors never arrive here — we predicted those locally and the server skips
+            // the caster when relaying (broadcastReliableExcept), so this can't double-spawn ours.
+            // Spawn a VISUAL-ONLY PendingMeteor: the client-side meteor tick (tickSharedSystems)
+            // advances its telegraph and detonates it into FX. damage=0 — the server owns the
+            // damage, and the client's meteor tick never applies any.
+            // Payload after the 4-byte header: eventType(1) + pos(12) + radius(4) + delay(4) = 21 B.
+            if (size < sizeof(PacketHeader) + 21) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            Vec3 pos;
+            std::memcpy(&pos.x, data + off, 4); off += 4;
+            std::memcpy(&pos.y, data + off, 4); off += 4;
+            std::memcpy(&pos.z, data + off, 4); off += 4;
+            f32 radius, delay;
+            std::memcpy(&radius, data + off, 4); off += 4;
+            std::memcpy(&delay,  data + off, 4); off += 4;
+            extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+            for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+                if (!s_meteors[mi].active) {
+                    s_meteors[mi] = {pos, 0.0f /*damage: server-authoritative*/, radius, delay, true};
+                    break;
+                }
+            }
+        } break;
         default: break;
     }
+}
+
+// Relay a meteor to clients (SV_EVENT::METEOR). exceptSlot skips the client that already PREDICTED
+// this meteor (echoing it back would double-spawn); 0xFF = send to everyone (host-cast meteors).
+// No-op off SERVER. Mirrors the PROJECTILE_SPLASH broadcast idiom.
+void Engine::broadcastMeteorEvent(Vec3 position, f32 radius, f32 delay, u8 exceptSlot) {
+    if (m_netRole != NetRole::SERVER) return;
+    u8 buf[sizeof(PacketHeader) + 21]; // hdr(4) + eventType(1) + pos(12) + radius(4) + delay(4)
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::SV_EVENT;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    buf[off++] = static_cast<u8>(NetEventType::METEOR);
+    std::memcpy(buf + off, &position.x, 4); off += 4;
+    std::memcpy(buf + off, &position.y, 4); off += 4;
+    std::memcpy(buf + off, &position.z, 4); off += 4;
+    std::memcpy(buf + off, &radius,     4); off += 4;
+    std::memcpy(buf + off, &delay,      4); off += 4;
+    if (exceptSlot == 0xFF) Net::broadcastReliable(buf, off);
+    else                    Net::broadcastReliableExcept(exceptSlot, buf, off);
+}
+
+// The LOCAL player just rolled a weapon on-hit PROC meteor. Each player predicts their own (the
+// roll is a local std::rand() the other side can't reproduce), so:
+//   • CLIENT — spawn a PREDICTED, visual-only meteor right now (instant telegraph; the client-side
+//     meteor tick animates + detonates it and applies no damage), and tell the server via CL_METEOR
+//     so it spawns the single authoritative damaging meteor and relays it to the other players.
+//   • SERVER (host) — spawn the real damaging meteor and relay it to every client.
+//   • Singleplayer — just spawn it.
+void Engine::predictProcMeteor(Vec3 position, f32 damage, f32 radius, f32 delay) {
+    const bool isClient = (m_netRole == NetRole::CLIENT);
+    extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+    for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+        if (!s_meteors[mi].active) {
+            PendingMeteor pm;
+            pm.position = position;
+            // On CLIENT the local copy is a pure visual prediction — zero damage makes the "server
+            // owns damage" contract explicit (its meteor tick never applies any regardless).
+            pm.damage   = isClient ? 0.0f : damage;
+            pm.radius   = radius;
+            pm.timer    = delay;
+            pm.active   = true;
+            pm.caster   = static_cast<u8>(m_localPlayerIndex);
+            s_meteors[mi] = pm;
+            break;
+        }
+    }
+    if (isClient)                          sendMeteorRequest(position, radius, delay, damage);
+    else if (m_netRole == NetRole::SERVER) broadcastMeteorEvent(position, radius, delay, 0xFF);
+}
+
+// Client → server: "I predicted a proc meteor here." Reliable — a dropped one costs the shot its
+// damage entirely (the client would show a telegraph that never hurts anything).
+void Engine::sendMeteorRequest(Vec3 position, f32 radius, f32 delay, f32 damage) {
+    if (m_netRole != NetRole::CLIENT) return;
+    u8 buf[sizeof(PacketHeader) + 24]; // hdr(4) + pos(12) + radius(4) + delay(4) + damage(4)
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_METEOR;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    std::memcpy(buf + off, &position.x, 4); off += 4;
+    std::memcpy(buf + off, &position.y, 4); off += 4;
+    std::memcpy(buf + off, &position.z, 4); off += 4;
+    std::memcpy(buf + off, &radius,     4); off += 4;
+    std::memcpy(buf + off, &delay,      4); off += 4;
+    std::memcpy(buf + off, &damage,     4); off += 4;
+    Net::sendToServer(buf, off, /*reliable=*/true);
+}
+
+void Engine::onMeteor(u8 playerSlot, const u8* data, u32 size) {
+    if (s_engine) s_engine->handleMeteorRequest(playerSlot, data, size);
+}
+
+// Server: a client PREDICTED a proc meteor and told us. Spawn the single AUTHORITATIVE (damaging)
+// meteor credited to that caster, then relay it to the OTHER clients so they see it too — never
+// back to the caster, which already has its own prediction on screen.
+void Engine::handleMeteorRequest(u8 playerSlot, const u8* data, u32 size) {
+    if (m_netRole != NetRole::SERVER) return;
+    if (playerSlot >= MAX_PLAYERS || !m_players[playerSlot].active) return;
+    if (size < sizeof(PacketHeader) + 24) return;
+
+    u32 off = sizeof(PacketHeader);
+    Vec3 pos;
+    std::memcpy(&pos.x, data + off, 4); off += 4;
+    std::memcpy(&pos.y, data + off, 4); off += 4;
+    std::memcpy(&pos.z, data + off, 4); off += 4;
+    f32 radius, delay, damage;
+    std::memcpy(&radius, data + off, 4); off += 4;
+    std::memcpy(&delay,  data + off, 4); off += 4;
+    std::memcpy(&damage, data + off, 4); off += 4;
+
+    // Sanity-gate the client-supplied values against the authoritative METEOR_STRIKE def so a
+    // malformed/hostile packet can't drop a world-sized nuke. Co-op, so this is a sanity bound,
+    // not a full anti-cheat: the roll itself is deliberately the client's to own.
+    const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, SkillId::METEOR_STRIKE);
+    if (!sd) return;
+    const f32 maxDamage = sd->damage * 10.0f;   // generous headroom for item-level scaling
+    if (!(damage > 0.0f) || damage > maxDamage) damage = sd->damage;
+    if (!(radius > 0.0f) || radius > sd->radius * 4.0f) radius = sd->radius;
+    if (!(delay  > 0.0f) || delay  > 10.0f)             delay  = sd->delay;
+    // The meteor must land near the caster's authoritative position (the proc fires at a hit point
+    // in front of them, so allow the weapon's reach plus slack).
+    Vec3 d = pos - m_players[playerSlot].position;
+    if (d.x*d.x + d.y*d.y + d.z*d.z > 80.0f * 80.0f) return;
+
+    extern PendingMeteor s_meteors[MAX_PENDING_METEORS];
+    for (u32 mi = 0; mi < MAX_PENDING_METEORS; mi++) {
+        if (!s_meteors[mi].active) {
+            PendingMeteor pm;
+            pm.position = pos;
+            pm.damage   = damage;
+            pm.radius   = radius;
+            pm.timer    = delay;
+            pm.active   = true;
+            pm.caster   = playerSlot;   // credit kills / route the D2 AoE lag-comp rewind
+            s_meteors[mi] = pm;
+            break;
+        }
+    }
+    // Relay to the other players — skip the caster, which already predicted this exact meteor.
+    broadcastMeteorEvent(pos, radius, delay, playerSlot);
 }
 
 // Server-authoritative mid-run floor descent. The host has already advanced to the
@@ -570,6 +718,42 @@ void Engine::onPlayerLeft(u8 playerSlot) {
 // Only the Steam-relay host that actually owns a lobby does anything here: clients (not SERVER)
 // and ENet/LAN hosts (no lobby) fall through as no-ops. setLobbyData/setLobbyJoinable are
 // owner-only Steam calls, and the m_netRole guard keeps us from calling them as a client.
+// Host: publish everything a browser row / code lookup needs, right after the lobby is created.
+//   • version    — the join filter (a mismatched build must never be listed to us)
+//   • name       — the HOST'S Steam persona. This used to be a hardcoded title, identical for every
+//                  lobby, which is exactly why the browser was useless: every row read the same.
+//   • code       — the 4-glyph share code. A RANDOM lookup key, not an encoding of the 64-bit lobby
+//                  id (4 glyphs = 20 bits can't hold 64): a joiner finds us by asking Steam for the
+//                  lobby whose "code" matches. Must exist before anyone can join by code.
+//   • private    — what makes an unlisted game unlisted. The browser query filters private=="0"; a
+//                  code lookup ignores it. (The lobby itself stays searchable — that's the trade a
+//                  short code requires; see lobby_code.h.)
+//   • roster/floor/difficulty — via updateSteamLobbyRoster.
+void Engine::publishLobbyIdentity() {
+    if (m_netRole != NetRole::SERVER) return;
+    if (Steam::currentLobbyId() == 0) return;
+
+    char ver[16];
+    std::snprintf(ver, sizeof(ver), "%u", PROTOCOL_VERSION);
+    Steam::setLobbyData("version", ver);
+
+    const char* persona = Steam::localPersonaName();
+    char lobbyName[80];
+    if (persona && persona[0]) std::snprintf(lobbyName, sizeof(lobbyName), "%s's Game", persona);
+    else                       std::snprintf(lobbyName, sizeof(lobbyName), "Dungeon Engine Game");
+    Steam::setLobbyData("name", lobbyName);
+
+    LobbyCode::generate(static_cast<u32>(std::rand()), m_lobbyCode, sizeof(m_lobbyCode));
+    Steam::setLobbyData("code", m_lobbyCode);
+    Steam::setLobbyData("private", m_menu.hostPrivate ? "1" : "0");
+
+    LOG_INFO("Steam: hosting a %s lobby - share code %s",
+             m_menu.hostPrivate ? "PRIVATE (code/invite only)" : "public", m_lobbyCode);
+
+    // Roster + floor/difficulty, so the browser shows an accurate row immediately (before any join).
+    updateSteamLobbyRoster();
+}
+
 void Engine::updateSteamLobbyRoster() {
     if (m_netRole != NetRole::SERVER) return;      // only the host owns the lobby
     if (Steam::currentLobbyId() == 0) return;      // ENet/LAN host, or no lobby -> nothing to update
@@ -579,6 +763,13 @@ void Engine::updateSteamLobbyRoster() {
     Steam::setLobbyData("players", buf);                  // authoritative roster count the browser displays
     std::snprintf(buf, sizeof(buf), "%u", connected < MAX_PLAYERS ? (MAX_PLAYERS - connected) : 0u);
     Steam::setLobbyData("slots_free", buf);               // discovery metadata (kept for the list filter)
+    // Progress metadata the public browser shows so a game is actually identifiable at a glance
+    // (a floor-30 Hell run is a very different invitation from a fresh floor-1 Normal one). Republished
+    // here on every roster change AND on floor descent, so a browsed row never shows a stale floor.
+    std::snprintf(buf, sizeof(buf), "%u", m_level.currentFloor);
+    Steam::setLobbyData("floor", buf);
+    std::snprintf(buf, sizeof(buf), "%u", static_cast<u32>(m_difficulty));
+    Steam::setLobbyData("difficulty", buf);
     Steam::setLobbyJoinable(connected < MAX_PLAYERS);     // full -> invites/join stop working until a slot frees
 }
 
@@ -908,6 +1099,7 @@ static void seedRemoteView(const NetPlayer& np, Player& v) {
     v.blocking        = np.blocking;
     v.blockTimer      = np.blockTimer;
     v.lifesaverArmed  = np.lifesaverArmed; // TA-1: mirror so the i-frame isn't re-armed each frame
+    v.graceInvuln     = np.graceInvuln;    // mirror grace tag so the 85%-HP clear persists across frames
     // M-3/M-4: ring-passive state on a remote — Soul Harvest stacks drive the gun-damage /
     // move-speed bonus the AI/combat code reads from the Player view; smokeTimer drives the
     // Phase Strike stealth check in enemy_ai_states.cpp. Without mirroring these, M8 credits
@@ -939,6 +1131,7 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.freezeTimer      = v.freezeTimer;
     np.damageFlashTimer = v.damageFlashTimer; // drives the remote damage-flash render
     np.lifesaverArmed   = v.lifesaverArmed;   // TA-1: persist consume/re-arm across frames
+    np.graceInvuln      = v.graceInvuln;      // persist grace tag (set when the lifesaver fires on the view)
     // Persist ring-passive state mutations across frames (e.g., a stack decay that some skill
     // path applied to the view) — mirrors the seed list above.
     np.soulHarvestStacks  = v.soulHarvestStacks;

@@ -123,16 +123,33 @@ void Engine::renderMenu() {
         f32 stW = FontSystem::textWidth(subTitle, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
 
-        static const char* subLabels[] = {"LAN only", "Online"};
-        static const char* subDescs[]  = {
+        // With Steam we additionally split Online into PUBLIC vs PRIVATE lobby visibility. A private
+        // lobby is unlisted — it never shows in the public browser, and the only ways in are an
+        // invite, being a Steam friend of the host, or typing the lobby CODE the host shares. Without
+        // Steam there is no lobby at all (ENet + UPnP direct connect), so the split is meaningless and
+        // we fall back to the original two rows. hostModeOptionCount() single-sources the count for
+        // the render, the input bounds AND the mouse hit-test.
+        static const char* labelsSteam[] = {"LAN only", "Online - Public", "Online - Private (Code)"};
+        static const char* descsSteam[]  = {
+            "Same-network friends only (no router changes)",
+            "Listed in the public game browser - anyone can join",
+            "Unlisted - only an invite, a friend, or the lobby code gets in"
+        };
+        static const char* labelsPlain[] = {"LAN only", "Online"};
+        static const char* descsPlain[]  = {
             "Same-network friends only (no router changes)",
             "Open the port via UPnP so friends across the internet can join"
         };
-        for (u32 i = 0; i < 2; i++) {
-            f32 y = sh * 0.38f + (1 - i) * 50.0f * uiScale;
+        const u32 hostModeCount = hostModeOptionCount();
+        const bool steamLobbies = (hostModeCount == 3);
+        const char* const* subLabels = steamLobbies ? labelsSteam : labelsPlain;
+        const char* const* subDescs  = steamLobbies ? descsSteam  : descsPlain;
+
+        for (u32 i = 0; i < hostModeCount; i++) {
+            f32 y = sh * 0.38f + (hostModeCount - 1 - i) * 50.0f * uiScale;
             bool sel = (i == m_menu.subSelection);
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
-            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel);
+            HUD::drawMenuOption(sw, sh, y, 320.0f * uiScale, 35.0f * uiScale, col, sel);
             Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
             f32 tw = FontSystem::textWidth(subLabels[i], 2);
             FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale,
@@ -140,7 +157,7 @@ void Engine::renderMenu() {
         }
 
         // Sub-line description for the highlighted option.
-        u8 hi = (m_menu.subSelection < 2) ? m_menu.subSelection : static_cast<u8>(0);
+        u8 hi = (m_menu.subSelection < hostModeCount) ? m_menu.subSelection : static_cast<u8>(0);
         const char* desc = subDescs[hi];
         f32 dw = FontSystem::textWidth(desc, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - dw) * 0.5f, sh * 0.30f,
@@ -156,9 +173,11 @@ void Engine::renderMenu() {
         const char* subTitle = "Join Game";
         f32 stW = FontSystem::textWidth(subTitle, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.60f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
-        static const char* jLabels[] = {"Quick Join", "Browse Games", "Enter IP (LAN)"};
-        for (u32 i = 0; i < 3; i++) {
-            f32 y = sh * 0.30f + (2 - i) * 50.0f * uiScale;
+        // "Join by Code" is the only route into a PRIVATE (unlisted) lobby for someone who isn't a
+        // Steam friend of the host — those never appear in Browse Games by design.
+        static const char* jLabels[] = {"Quick Join", "Browse Games", "Join by Code", "Enter IP (LAN)"};
+        for (u32 i = 0; i < 4; i++) {
+            f32 y = sh * 0.30f + (3 - i) * 50.0f * uiScale;
             bool sel = (i == m_menu.subSelection);
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.15f, 0.4f, 0.2f};
             HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel);
@@ -170,34 +189,224 @@ void Engine::renderMenu() {
                                                           : "Up/Down, Enter to confirm, ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
-    } else if (m_menu.subState == 20) {
-        // Steam public lobby browser (P3): list of open games.
-        const char* subTitle = "Public Games";
-        f32 stW = FontSystem::textWidth(subTitle, 2);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.78f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
-        int n = Steam::lobbyListCount();
-        if (n <= 0) {
-            const char* none = "No public games found — press B / ESC to go back";
-            f32 nw = FontSystem::textWidth(none, 1);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - nw) * 0.5f, sh * 0.50f, none, {0.7f, 0.7f, 0.8f}, 1);
-        } else {
-            int shown = n > 8 ? 8 : n;
-            for (int i = 0; i < shown; i++) {
-                char nm[64]; int mc = 0, mm = 0;
-                Steam::lobbyListEntry(i, nm, sizeof(nm), &mc, &mm);
-                // mc = authoritative in-game roster (host-published "players"); mm = lobby member limit.
-                // Guard the denominator so a lobby that reports a 0 limit still shows the real cap, not "/0".
-                if (mm <= 0) mm = static_cast<int>(MAX_PLAYERS);
-                char row[96]; std::snprintf(row, sizeof(row), "%s  (%d/%d)", nm, mc, mm);
-                bool sel = (i == m_steamBrowserSel);
-                f32 y = sh * 0.62f - i * 34.0f * uiScale;
-                Vec3 tc = sel ? Vec3{1.0f, 1.0f, 0.5f} : Vec3{0.6f, 0.6f, 0.6f};
-                f32 tw = FontSystem::textWidth(row, 1);
-                FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y, row, tc, 1);
+    } else if (m_menu.subState == 21) {
+        // Lobby-code entry: four big glyph boxes + a dedicated on-screen keyboard (CodeOsk). The
+        // boxes make the code's length obvious at a glance, so nobody wonders how much more to type.
+        const char* title = "Enter Lobby Code";
+        f32 tW = FontSystem::textWidth(title, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.82f, title, {0.2f, 0.9f, 0.2f}, 2);
+
+        const char* sub = "Ask the host for their 4-character code";
+        f32 subW = FontSystem::textWidth(sub, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - subW) * 0.5f, sh * 0.76f, sub, {0.55f, 0.55f, 0.65f}, 1);
+
+        // The four glyph slots.
+        {
+            const u32 typed = static_cast<u32>(std::strlen(m_menu.lobbyCodeInput));
+            const f32 boxW  = 54.0f * uiScale;
+            const f32 gap   = 14.0f * uiScale;
+            const f32 boxH  = 62.0f * uiScale;
+            const f32 total = LobbyCode::CODE_LEN * boxW + (LobbyCode::CODE_LEN - 1) * gap;
+            const f32 left  = (static_cast<f32>(sw) - total) * 0.5f;
+            const f32 boxY  = sh * 0.60f;
+            for (u32 i = 0; i < LobbyCode::CODE_LEN; i++) {
+                const bool filled = (i < typed);
+                const bool cursor = (i == typed);   // the slot we're about to fill
+                Vec3 col = filled ? Vec3{0.18f, 0.42f, 0.22f}
+                                  : (cursor ? Vec3{0.22f, 0.30f, 0.24f} : Vec3{0.10f, 0.11f, 0.14f});
+                // drawMenuOption centers on screen, so draw each box via its own centered rect by
+                // offsetting the "width" trick isn't possible — use the HUD quad directly.
+                HUD::drawRectAt(sw, sh, left + i * (boxW + gap), boxY, boxW, boxH, col);
+                if (filled) {
+                    char g[2] = {m_menu.lobbyCodeInput[i], '\0'};
+                    f32 gw = FontSystem::textWidth(g, 3);
+                    FontSystem::drawText(sw, sh, left + i * (boxW + gap) + (boxW - gw) * 0.5f,
+                                         boxY + 18.0f * uiScale, g, {1, 1, 1}, 3);
+                }
             }
         }
-        const char* hint = Input::activeDeviceIsGamepad() ? "D-pad, A to join, B to go back"
-                                                          : "Up/Down, Enter to join, ESC to go back";
+
+        if (m_steamBrowserSearching) {
+            const char* msg = "Searching...";
+            f32 mw = FontSystem::textWidth(msg, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - mw) * 0.5f, sh * 0.53f, msg, {0.7f, 0.7f, 0.8f}, 1);
+        } else if (m_menu.codeNotFound) {
+            const char* msg = "No game found with that code";
+            f32 mw = FontSystem::textWidth(msg, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - mw) * 0.5f, sh * 0.53f, msg, {1.0f, 0.45f, 0.4f}, 1);
+        }
+
+        // Dedicated code keyboard (controller). Same grid contract as the IP screen's MenuOsk, but a
+        // separate layout — see menu_osk.h.
+        {
+            const f32 keyW = 44.0f * uiScale, keyH = 34.0f * uiScale;
+            const f32 gapx = 6.0f * uiScale,  gapy = 6.0f * uiScale;
+            const f32 gridW = CodeOsk::COLS * keyW + (CodeOsk::COLS - 1) * gapx;
+            const f32 left  = (static_cast<f32>(sw) - gridW) * 0.5f;
+            const f32 top   = sh * 0.44f;
+            for (u32 i = 0; i < CodeOsk::COUNT; i++) {
+                const u32 r = i / CodeOsk::COLS, c = i % CodeOsk::COLS;
+                const f32 x = left + c * (keyW + gapx);
+                const f32 y = top - r * (keyH + gapy);
+                const bool sel = (i == m_menu.codeOskCursor);
+                Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.12f, 0.16f, 0.14f};
+                HUD::drawRectAt(sw, sh, x, y, keyW, keyH, col);
+
+                char label[8];
+                if      (CodeOsk::isBackspace(i)) std::snprintf(label, sizeof(label), "DEL");
+                else if (CodeOsk::isDone(i))      std::snprintf(label, sizeof(label), "GO");
+                else                              std::snprintf(label, sizeof(label), "%c", CodeOsk::KEYS[i]);
+                Vec3 tc = sel ? Vec3{0, 0, 0} : Vec3{0.7f, 0.75f, 0.7f};
+                f32 lw = FontSystem::textWidth(label, 1);
+                FontSystem::drawText(sw, sh, x + (keyW - lw) * 0.5f, y + 10.0f * uiScale, label, tc, 1);
+            }
+        }
+
+        const char* hint = Input::activeDeviceIsGamepad()
+                         ? "D-pad move  -  A type  -  X delete  -  GO to join  -  B back"
+                         : "Type the code  -  Enter to join  -  Backspace to delete  -  ESC back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.10f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 20) {
+        // Steam public lobby browser: a real server list — framed panel, column headers, one row per
+        // game showing HOST / FLOOR / DIFFICULTY / PLAYERS, with full games dimmed and unjoinable.
+        // The layout constants below are mirrored EXACTLY by menuMouseForState()'s case 20 hit-test
+        // (engine_menu.cpp) — change one, change the other or the mouse desyncs from what's drawn.
+        static constexpr u32 BROWSER_VISIBLE = STEAM_BROWSER_VISIBLE; // rows on screen at once
+        const f32 rowH     = STEAM_BROWSER_ROW_H * uiScale;
+        const f32 listTop  = sh * STEAM_BROWSER_LIST_TOP;   // y of row 0's box
+        const f32 panelW   = sw * STEAM_BROWSER_PANEL_W;
+        const f32 panelLeft = (static_cast<f32>(sw) - panelW) * 0.5f;
+
+        const char* subTitle = "Public Games";
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.80f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
+
+        int n = Steam::lobbyListCount();
+        if (n < 0) n = 0;
+
+        // Scroll so the cursor is always on screen (same rule as the save-slot list).
+        u32 scrollOff = 0;
+        if (m_steamBrowserSel >= BROWSER_VISIBLE) scrollOff = m_steamBrowserSel - BROWSER_VISIBLE + 1;
+        const u32 shown = (static_cast<u32>(n) - scrollOff) < BROWSER_VISIBLE
+                        ? (static_cast<u32>(n) - scrollOff) : BROWSER_VISIBLE;
+
+        // Backing panel behind the header + rows so the list reads as one object, not floating text.
+        {
+            f32 panelBot = listTop - (BROWSER_VISIBLE - 1) * rowH - 10.0f * uiScale;
+            f32 panelTop = listTop + rowH + 22.0f * uiScale;   // room for the header row
+            HUD::drawMenuOption(sw, sh, panelBot, panelW + 12.0f * uiScale,
+                                panelTop - panelBot, {0.05f, 0.06f, 0.10f}, false);
+        }
+
+        // Column x positions (shared by the header and every row).
+        const f32 colHost    = panelLeft + 18.0f * uiScale;
+        const f32 colFloor   = panelLeft + panelW * 0.56f;
+        const f32 colDiff    = panelLeft + panelW * 0.67f;
+        const f32 colPlayers = panelLeft + panelW * 0.85f;
+
+        // Header row.
+        {
+            f32 hy = listTop + rowH + 4.0f * uiScale;
+            Vec3 hc = {0.45f, 0.55f, 0.45f};
+            FontSystem::drawText(sw, sh, colHost,    hy, "HOST",    hc, 1);
+            FontSystem::drawText(sw, sh, colFloor,   hy, "FLOOR",   hc, 1);
+            FontSystem::drawText(sw, sh, colDiff,    hy, "DIFF",    hc, 1);
+            FontSystem::drawText(sw, sh, colPlayers, hy, "PLAYERS", hc, 1);
+        }
+
+        if (m_steamBrowserSearching) {
+            // Distinguish "still asking Steam" from "genuinely nothing out there" — the old screen
+            // flashed "No public games found" during the round-trip, which read as a broken browser.
+            const char* msg = "Searching for games...";
+            f32 mw = FontSystem::textWidth(msg, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - mw) * 0.5f, listTop - 2.0f * rowH,
+                                 msg, {0.7f, 0.7f, 0.8f}, 1);
+        } else if (n == 0) {
+            const char* none = "No public games found";
+            f32 nw = FontSystem::textWidth(none, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - nw) * 0.5f, listTop - 2.0f * rowH,
+                                 none, {0.7f, 0.7f, 0.8f}, 1);
+            const char* tip = "Press R to refresh, or host one yourself";
+            f32 tw = FontSystem::textWidth(tip, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, listTop - 3.2f * rowH,
+                                 tip, {0.45f, 0.45f, 0.55f}, 1);
+        } else {
+            static const char* diffNames[3] = {"Normal", "Nightmare", "Hell"};
+            for (u32 i = 0; i < shown; i++) {
+                const u32 idx = scrollOff + i;
+                char nm[64]; int mc = 0, mm = 0;
+                Steam::lobbyListEntry(static_cast<int>(idx), nm, sizeof(nm), &mc, &mm);
+                // mc = authoritative in-game roster (host-published "players"); mm = lobby member limit.
+                // Guard the denominator so a lobby reporting a 0 limit still shows the real cap, not "/0".
+                if (mm <= 0) mm = static_cast<int>(MAX_PLAYERS);
+
+                char fbuf[16], dbuf[16];
+                Steam::lobbyListData(static_cast<int>(idx), "floor",      fbuf, sizeof(fbuf));
+                Steam::lobbyListData(static_cast<int>(idx), "difficulty", dbuf, sizeof(dbuf));
+                int floorNo = fbuf[0] ? std::atoi(fbuf) : 0;
+                int diffNo  = dbuf[0] ? std::atoi(dbuf) : 0;
+                if (diffNo < 0 || diffNo > 2) diffNo = 0;
+
+                const bool full = (mc >= mm);
+                const bool sel  = (idx == m_steamBrowserSel);
+                f32 y = listTop - static_cast<f32>(i) * rowH;
+
+                // Row background: highlighted when selected, faint stripe otherwise. A full game is
+                // muted (and the input path refuses to join it), so it reads as "not for you".
+                Vec3 bg = sel ? (full ? Vec3{0.30f, 0.16f, 0.16f} : Vec3{0.18f, 0.45f, 0.24f})
+                              : (i & 1 ? Vec3{0.09f, 0.10f, 0.14f} : Vec3{0.07f, 0.08f, 0.11f});
+                HUD::drawMenuOption(sw, sh, y - 2.0f * uiScale, panelW, rowH - 5.0f * uiScale, bg, sel);
+
+                Vec3 tc = full ? Vec3{0.42f, 0.40f, 0.42f}
+                               : (sel ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.66f, 0.70f, 0.74f});
+                f32 ty = y + 6.0f * uiScale;
+
+                // Truncate the host name to its column so a long persona can't run into FLOOR.
+                // Sized to match `nm` so the copy itself never truncates (the ellipsis loop below is
+                // what shortens it, by measured pixel width rather than a blind byte count).
+                char hostCol[sizeof(nm)];
+                std::snprintf(hostCol, sizeof(hostCol), "%s", nm);
+                const f32 hostMaxW = colFloor - colHost - 12.0f * uiScale;
+                for (u32 c = static_cast<u32>(std::strlen(hostCol));
+                     c > 3 && FontSystem::textWidth(hostCol, 1) > hostMaxW; c--) {
+                    hostCol[c - 1] = '\0';
+                    if (c >= 2) { hostCol[c - 2] = '.'; hostCol[c - 3] = '.'; }
+                }
+                FontSystem::drawText(sw, sh, colHost, ty, hostCol, tc, 1);
+
+                char fstr[16];   // wide enough for any int the host could publish, not just a sane floor
+                if (floorNo > 0) std::snprintf(fstr, sizeof(fstr), "%d", floorNo);
+                else             std::snprintf(fstr, sizeof(fstr), "-");
+                FontSystem::drawText(sw, sh, colFloor, ty, fstr, tc, 1);
+
+                // Tint difficulty so a Hell run is legible at a glance.
+                Vec3 dc = full ? tc
+                        : (diffNo == 2 ? Vec3{1.0f, 0.45f, 0.35f}
+                        : (diffNo == 1 ? Vec3{1.0f, 0.80f, 0.40f} : tc));
+                FontSystem::drawText(sw, sh, colDiff, ty, diffNames[diffNo], dc, 1);
+
+                char pstr[16];
+                std::snprintf(pstr, sizeof(pstr), "%d/%d", mc, mm);
+                Vec3 pc = full ? Vec3{0.85f, 0.35f, 0.35f} : tc;
+                FontSystem::drawText(sw, sh, colPlayers, ty, full ? "FULL" : pstr, pc, 1);
+            }
+
+            // Result count + a scroll hint when the list runs past the panel.
+            char status[64];
+            if (static_cast<u32>(n) > BROWSER_VISIBLE)
+                std::snprintf(status, sizeof(status), "%d games  -  showing %u-%u",
+                              n, scrollOff + 1, scrollOff + shown);
+            else
+                std::snprintf(status, sizeof(status), "%d game%s found", n, n == 1 ? "" : "s");
+            f32 sw2 = FontSystem::textWidth(status, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - sw2) * 0.5f,
+                                 listTop - (BROWSER_VISIBLE - 1) * rowH - 26.0f * uiScale,
+                                 status, {0.5f, 0.55f, 0.6f}, 1);
+        }
+
+        const char* hint = Input::activeDeviceIsGamepad() ? "D-pad to move  -  A join  -  Y refresh  -  B back"
+                                                          : "Up/Down or mouse  -  Enter join  -  R refresh  -  ESC back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.10f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 1) {

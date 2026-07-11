@@ -241,7 +241,9 @@ static Mat4 buildOrtho(f32 w, f32 h) {
 // ---------------------------------------------------------------------------
 void Minimap::draw(u32 screenWidth, u32 screenHeight,
                    const LevelGrid& grid, Vec3 playerPos, f32 playerYaw,
-                   const EntityPool& entities)
+                   const EntityPool& entities,
+                   const Vec3* otherPlayers, const bool* otherActive,
+                   u32 otherPlayerCount)
 {
     if (s_gridW == 0 || s_gridD == 0) return;
     if (s_dirty) rebuildTexture(grid);
@@ -459,6 +461,46 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
                 glUniform4f(s_minimapShader.loc_color, 0.4f, 0.9f, 0.5f, 0.85f);
             glBufferSubData(GL_ARRAY_BUFFER, 0, npcVertCount * sizeof(MinimapVertex), npcBatch);
             glDrawArrays(GL_TRIANGLES, 0, npcVertCount);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 5. Remote co-op player dots (cyan, slightly larger than NPC dots).
+    //    Parallel arrays; the caller has already marked the local slot(s) inactive so
+    //    the local green marker is never duplicated. Same world→minimap mapping as the
+    //    player/NPC markers (flip Z: low-Z → top). Batched into one upload + draw.
+    // ------------------------------------------------------------------
+    if (otherPlayers && otherActive && otherPlayerCount > 0) {
+        static constexpr f32 PLR_DOT      = 2.5f;
+        static constexpr u32 MAX_PLR_DOTS = 8;   // MAX_PLAYERS is 4; headroom, stack-safe
+        MinimapVertex plrBatch[MAX_PLR_DOTS * 6];
+        u32 vc = 0;
+
+        for (u32 i = 0; i < otherPlayerCount && vc + 6 <= MAX_PLR_DOTS * 6; i++) {
+            if (!otherActive[i]) continue;
+
+            u32 nx, nz;
+            if (!LevelGridSystem::worldToGrid(grid, otherPlayers[i], nx, nz)) continue;
+
+            f32 normX = (static_cast<f32>(nx) + 0.5f) / static_cast<f32>(s_gridW);
+            f32 normZ = (static_cast<f32>(nz) + 0.5f) / static_cast<f32>(s_gridD);
+            f32 pdX = mapX + normX * MAP_SIZE;
+            f32 pdY = mapY + (1.0f - normZ) * MAP_SIZE;
+
+            plrBatch[vc++] = {{pdX - PLR_DOT, pdY - PLR_DOT, 0}, {0, 0}};
+            plrBatch[vc++] = {{pdX + PLR_DOT, pdY - PLR_DOT, 0}, {1, 0}};
+            plrBatch[vc++] = {{pdX + PLR_DOT, pdY + PLR_DOT, 0}, {1, 1}};
+            plrBatch[vc++] = {{pdX - PLR_DOT, pdY - PLR_DOT, 0}, {0, 0}};
+            plrBatch[vc++] = {{pdX + PLR_DOT, pdY + PLR_DOT, 0}, {1, 1}};
+            plrBatch[vc++] = {{pdX - PLR_DOT, pdY + PLR_DOT, 0}, {0, 1}};
+        }
+
+        if (vc > 0) {
+            glBindTexture(GL_TEXTURE_2D, s_whiteTex);
+            if (s_minimapShader.loc_color >= 0)
+                glUniform4f(s_minimapShader.loc_color, 0.3f, 0.7f, 1.0f, 1.0f); // cyan teammates
+            glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(MinimapVertex), plrBatch);
+            glDrawArrays(GL_TRIANGLES, 0, vc);
         }
     }
 

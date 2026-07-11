@@ -44,10 +44,22 @@ public:
         m_enterResult.Set(SteamAPI_ISteamMatchmaking_JoinLobby(SteamMatchmaking(), lobbyId),
                           this, &SteamLobbyMgr::onEntered);
     }
-    void requestList(const char* version) {
-        SteamMatchmaking()->AddRequestLobbyListStringFilter("version", version, k_ELobbyComparisonEqual);
-        SteamMatchmaking()->AddRequestLobbyListFilterSlotsAvailable(1);   // >=1 open slot
-        m_listResult.Set(SteamMatchmaking()->RequestLobbyList(), this, &SteamLobbyMgr::onList);
+    // code == nullptr → the public BROWSER query: version-matched, has a free slot, and NOT private.
+    // code != nullptr → a CODE lookup: the one lobby publishing that code, private or not.
+    //
+    // Note a private lobby is still *searchable* — that is precisely what makes a 4-glyph code
+    // possible (the code is a lookup key, not an encoding of the 64-bit lobby id). "Private" is
+    // enforced by the `private` filter below excluding it from the browser, not by Steam hiding it.
+    void requestList(const char* version, const char* code) {
+        ISteamMatchmaking* mm = SteamMatchmaking();
+        mm->AddRequestLobbyListStringFilter("version", version, k_ELobbyComparisonEqual);
+        mm->AddRequestLobbyListFilterSlotsAvailable(1);   // >=1 open slot
+        if (code && code[0]) {
+            mm->AddRequestLobbyListStringFilter("code", code, k_ELobbyComparisonEqual);
+        } else {
+            mm->AddRequestLobbyListStringFilter("private", "0", k_ELobbyComparisonEqual);
+        }
+        m_listResult.Set(mm->RequestLobbyList(), this, &SteamLobbyMgr::onList);
     }
     int listCount() const { return m_listCount; }
     u64 listEntry(int i) const { return (i >= 0 && i < m_listCount) ? m_list[i] : 0; }
@@ -267,9 +279,17 @@ void setOnLobbyCreated(OnLobbyCreatedFn fn) {
 
 void requestLobbyList(const char* version) {
 #ifdef USE_STEAM
-    if (s_available && s_lobbyMgr) s_lobbyMgr->requestList(version);
+    if (s_available && s_lobbyMgr) s_lobbyMgr->requestList(version, nullptr);  // browser: public only
 #else
     (void)version;
+#endif
+}
+
+void requestLobbyListByCode(const char* version, const char* code) {
+#ifdef USE_STEAM
+    if (s_available && s_lobbyMgr) s_lobbyMgr->requestList(version, code);
+#else
+    (void)version; (void)code;
 #endif
 }
 
@@ -278,6 +298,32 @@ int lobbyListCount() {
     return s_lobbyMgr ? s_lobbyMgr->listCount() : 0;
 #else
     return 0;
+#endif
+}
+
+const char* localPersonaName() {
+#ifdef USE_STEAM
+    if (!s_available) return "";
+    // Flat API, like every other call in this file: this one returns a const char* (a POINTER —
+    // ABI-identical under mingw), not a by-value CSteamID, so it would have been safe either way.
+    const char* n = SteamAPI_ISteamFriends_GetPersonaName(SteamFriends());
+    return (n && n[0]) ? n : "";
+#else
+    return "";
+#endif
+}
+
+void lobbyListData(int i, const char* key, char* buf, int cap) {
+    if (!buf || cap <= 0) return;
+    buf[0] = '\0';                      // always leave the caller a printable string
+#ifdef USE_STEAM
+    if (!s_available || !s_lobbyMgr || !key) return;
+    u64 id = s_lobbyMgr->listEntry(i);
+    if (!id) return;
+    const char* v = SteamAPI_ISteamMatchmaking_GetLobbyData(SteamMatchmaking(), id, key);
+    if (v && v[0]) std::snprintf(buf, cap, "%s", v);
+#else
+    (void)i; (void)key;
 #endif
 }
 

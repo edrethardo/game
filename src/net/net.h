@@ -38,8 +38,20 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // despawn them on the authoritative arrival — V2 of fire prediction, "projectile
 // leaves the wand at click time"). A v4 client reading a v5 snapshot would misalign
 // every projectile field after the new bytes; clean reject instead.
-static constexpr u32 PROTOCOL_VERSION  = 6; // v6: online couch co-op (join carries localCount+class2,
-                                            // accept carries slot2, CL_INPUT/CL_FIRE carry targetSlot)
+// Bumped to 7 for client-authoritative ammo + client-predicted meteors. Two behavioural breaks,
+// neither of which misaligns a field — so a version check is the ONLY thing that catches them:
+//   • Ammo/reload is now the CLIENT's (Client::reconcile no longer adopts the server clip, and the
+//     server no longer gates a client's fire on its own reload). A v6 client on a v7 server would
+//     still let the server's stale clip overwrite its own — reviving the "the client never has to
+//     reload" bug — while the v7 server no longer gates its fire. Silently inconsistent ammo.
+//   • New CL_METEOR (0x0B) + SV_EVENT::METEOR (0x05): each player predicts their own proc meteors
+//     and reports them. A v6 client never sends CL_METEOR, so on a v7 server its meteor procs would
+//     do no damage at all, and it would ignore the relay for everyone else's.
+// Clean SV_JOIN_REJECT beats silently broken combat (same reasoning as the v4 bump above).
+static constexpr u32 PROTOCOL_VERSION  = 7; // v7: client-authoritative ammo/reload + CL_METEOR
+                                            // (v6: online couch co-op — join carries localCount+
+                                            // class2, accept carries slot2, CL_INPUT/CL_FIRE
+                                            // carry targetSlot)
 
 // A peer that finishes the ENet handshake but never sends CL_JOIN_REQUEST is dropped
 // after this many milliseconds so it can't hold a CONNECTING slot until ENet's own
@@ -103,6 +115,16 @@ enum struct NetPacketType : u8 {
     // offset without trusting the server's absolute time. Sent/received on channel 1
     // (unreliable) at ~1 Hz from the client; server replies immediately.
     CL_TIME_PING      = 0x0A,  // 4-byte payload: u32 clientTimeMs (echoed by SV_TIME_PONG)
+    // Client-predicted weapon on-hit PROC meteor, communicated to the server (reliable).
+    // Each player PREDICTS THEIR OWN meteors: the proc roll rides a local `std::rand()` the server
+    // cannot reproduce (host/client RNG streams diverge), so the CLIENT owns the roll — it spawns
+    // its predicted meteor immediately for an instant telegraph, then tells the server here. The
+    // server spawns the single AUTHORITATIVE (damaging) meteor from this message and relays
+    // SV_EVENT::METEOR to the OTHER clients only — never back to the caster, which already has its
+    // prediction (that would double-spawn). Payload after the 4-byte header:
+    //   posX, posY, posZ (f32×3 = 12 B) + radius (4 B) + delay (4 B) + damage (4 B) = 24 B.
+    // Damage is clamped server-side against the METEOR_STRIKE SkillDef.
+    CL_METEOR         = 0x0B,
     SV_TIME_PONG      = 0x17,  // 12-byte payload: u32 clientTimeMs + u32 serverTick + u32 serverTimeMs
 
     // M10.2 — Server → Client: the server confirmed a remote player's fire hit an entity.
@@ -174,6 +196,17 @@ enum struct NetEventType : u8 {
     //   floor-snap + FX spawn via Engine::spawnSplashFX. Mirrors HITSCAN_IMPACT; reliable
     //   (splashes are infrequent and a missed explosion is jarring).
     PROJECTILE_SPLASH = 0x04,
+    // A meteor belonging to SOMEONE ELSE, relayed so this client can see it.
+    // Every player PREDICTS THEIR OWN meteors — skill casts (deterministic) and weapon on-hit procs
+    // (the roll is a local std::rand() nobody else can reproduce, so the FIRING player owns it and
+    // reports the result via CL_METEOR). This event carries the meteors a client did NOT cast: the
+    // host's own, and other guests' (the server relays those via broadcastReliableExcept, skipping
+    // the caster — echoing one back to the player who predicted it would double-spawn).
+    // The receiver spawns a visual-only PendingMeteor; its client-side meteor tick animates and
+    // detonates it and applies NO damage — damage is always the server's.
+    // Payload: posX, posY, posZ (f32×3 = 12 B) + radius (f32 = 4 B) + delay (f32 = 4 B) = 20 B.
+    // Reliable — a missing meteor telegraph is jarring, and they're infrequent.
+    METEOR            = 0x05,
 };
 
 // 4-byte packet header on every packet.
@@ -283,6 +316,10 @@ namespace Net {
 
     // Broadcast to all connected clients (server only)
     void broadcastReliable(const u8* data, u32 size);
+    // Reliable broadcast to every ACTIVE client EXCEPT one slot. Used to relay a CLIENT-ORIGINATED
+    // event (a predicted proc meteor) onward to the other players: the originating client already
+    // spawned its own prediction, so echoing it back would double-spawn.
+    void broadcastReliableExcept(u8 exceptSlot, const u8* data, u32 size);
     void broadcastUnreliable(const u8* data, u32 size);
     // Broadcast a snapshot: unreliable but fragmentable. Unlike broadcastUnreliable
     // (ENET_PACKET_FLAG_UNSEQUENCED), payloads larger than the MTU are split into
@@ -327,6 +364,10 @@ namespace Net {
     // drop position, and the full ItemInstance. Server removes from inventory + spawns
     // world item — see handleDropRequest. Mirrors the OnPickupFn shape.
     using OnDropItemFn   = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_METEOR handler — slot = the client that PREDICTED this proc meteor; payload
+    // carries pos + radius + delay + damage. Server spawns the authoritative meteor and relays it
+    // to the other clients. See CL_METEOR.
+    using OnMeteorFn     = void(*)(u8 playerSlot, const u8* data, u32 size);
     // Server-side CL_RESPAWN handler — slot = requesting (dead) client; no payload.
     using OnRespawnFn    = void(*)(u8 playerSlot);
     // Server-side CL_REQUEST_DESCEND handler — slot = requesting client; no payload.
@@ -386,6 +427,7 @@ namespace Net {
     void setOnSnapshot(OnSnapshotFn fn);
     void setOnInput(OnInputFn fn);
     void setOnPickup(OnPickupFn fn);
+    void setOnMeteor(OnMeteorFn fn);            // client-predicted proc meteor → authoritative spawn
     void setOnDropItem(OnDropItemFn fn);        // R11
     void setOnRespawn(OnRespawnFn fn);
     void setOnDescendRequest(OnDescendRequestFn fn);

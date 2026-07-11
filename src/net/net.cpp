@@ -53,6 +53,7 @@ static u8               s_serverDifficulty = 0;
 static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
 static Net::OnInputFn      s_onInput      = nullptr;
 static Net::OnPickupFn     s_onPickup     = nullptr;
+static Net::OnMeteorFn     s_onMeteor     = nullptr;   // client-predicted proc meteor → authoritative
 static Net::OnDropItemFn   s_onDropItem   = nullptr;   // R11
 static Net::OnRespawnFn    s_onRespawn    = nullptr;
 static Net::OnDescendRequestFn s_onDescendRequest = nullptr;
@@ -328,6 +329,13 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // Client requests pickup of a world item by uid. The engine handler validates
         // proximity/ownership server-side and removes the item (propagates via snapshot).
         if (s_onPickup) s_onPickup(slot, data, size);
+    } break;
+
+    case NetPacketType::CL_METEOR: {
+        // Client PREDICTED a weapon on-hit proc meteor (it owns the roll — see CL_METEOR) and is
+        // telling us where it landed. The engine handler validates + spawns the single authoritative
+        // (damaging) meteor and relays it to the OTHER clients.
+        if (s_onMeteor) s_onMeteor(slot, data, size);
     } break;
 
     case NetPacketType::CL_DROP_ITEM: {
@@ -1248,6 +1256,26 @@ void Net::broadcastReliable(const u8* data, u32 size) {
     sendImmediate_BroadcastReliable(data, size);
 }
 
+// Reliable broadcast to every ACTIVE client EXCEPT one slot — used to relay a client-originated
+// predicted proc meteor onward to the other players without echoing it back to the caster (which
+// already spawned its own prediction; an echo would double-spawn it). Sends immediately: unlike
+// broadcastReliable this bypasses the D5 fake-latency queue, whose DelayTarget enum has no
+// per-slot-exclusion variant. That queue is a debug-only harness, so the omission is acceptable.
+void Net::broadcastReliableExcept(u8 exceptSlot, const u8* data, u32 size) {
+    if (s_role != NetRole::SERVER) return;
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        if (i == exceptSlot) continue;
+        if (s_slots[i].state != SlotState::ACTIVE || !s_slots[i].peer) continue;
+        countOut(static_cast<u8>(i), 0, size); // per-peer fan-out (mirrors sendImmediate_BroadcastReliable)
+#ifdef USE_STEAM
+        if (s_transport == Transport::STEAM) { steamSend(s_slots[i].peer, 0, data, size, true); continue; }
+#endif
+        ENetPacket* pkt = enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE);
+        if (enet_peer_send(asEnet(s_slots[i].peer), 0, pkt) < 0)
+            enet_packet_destroy(pkt);
+    }
+}
+
 void Net::broadcastUnreliable(const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     // D5: enqueue if fake latency is enabled.
@@ -1419,6 +1447,7 @@ NetMetrics Net::getMetricsForSlot(u8 playerSlot) {
 void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }
 void Net::setOnInput(OnInputFn fn)         { s_onInput = fn; }
 void Net::setOnPickup(OnPickupFn fn)       { s_onPickup = fn; }
+void Net::setOnMeteor(OnMeteorFn fn)       { s_onMeteor = fn; }
 void Net::setOnDropItem(OnDropItemFn fn)   { s_onDropItem = fn; }   // R11
 void Net::setOnRespawn(OnRespawnFn fn)     { s_onRespawn = fn; }
 void Net::setOnDescendRequest(OnDescendRequestFn fn) { s_onDescendRequest = fn; }

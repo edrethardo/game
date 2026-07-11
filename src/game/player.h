@@ -58,6 +58,8 @@ struct Player {
     f32  shadowDanceTimer = 0.0f;  // Shadow Dance: 2× damage + 20% speed, kills extend by 0.3s
     f32  invulnTimer      = 0.0f;  // damage immunity countdown (respawn/floor entry)
     bool lifesaverArmed   = true;  // near-death i-frame available; consumed on use, re-armed only at >=40% HP
+    bool graceInvuln      = false; // tags invulnTimer as near-death-grace-sourced (not dodge/spawn/skill) so
+                                   // the "clear grace once healthy (>85% HP)" rule can't strip dodge i-frames
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
     u8   shrineBuff       = 0;     // 0=none, 1=power(+30%dmg), 2=speed(+25%), 3=vitality(+40%hp)
     f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount
