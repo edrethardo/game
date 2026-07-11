@@ -1120,6 +1120,58 @@ void Engine::clientNetPost(f32 dt) {
         }
     }
 
+    // Chakram ricochet "pling" for EVERY OTHER player's chakrams — DETECTED, not replicated.
+    //
+    // Our own chakram already plings from its predicted ghost (engine_update.cpp), which is the
+    // right source for it: the ghost is immediate, whereas anything derived from the snapshot
+    // arrives one interp delay late — fine for someone else's chakram across the room, wrong for
+    // the weapon in your own hands. But ghosts exist ONLY for our own projectiles, so the host's
+    // and other guests' chakrams were silent.
+    //
+    // The snapshot already carries everything needed to spot a bounce, so this costs no wire
+    // change: SnapProjectile has a stable `poolIndex`, the full `projFlags` byte (PROJ_BOUNCE
+    // included), and the velocity — and interpolateProjectiles takes velocity STRAIGHT from the
+    // newer snapshot rather than lerping it, so a reflection appears as one sharp direction flip
+    // rather than a gradual turn. Track each bounce-projectile's unit velocity per render slot and
+    // pling whenever it swings hard.
+    //
+    // Both double-pling hazards are handled by running AFTER the ghost merge above:
+    //   • predicted ghosts (merged into this pool) would otherwise re-trigger the sound their own
+    //     local sim already played — skipped explicitly via `p.predicted`;
+    //   • our own authoritative copy is hidden (`active=false`) by the match-and-keep pass while
+    //     its ghost is canonical, so it is skipped for free — and once the ghost is gone it
+    //     becomes visible again and transparently takes over as the sound source.
+    {
+        // Last-seen unit velocity per RENDER slot ({0,0,0} = unseeded) + the owner that seeded it,
+        // so a pool slot recycled by a different player's chakram reseeds instead of firing a
+        // phantom bounce on the direction discontinuity between two unrelated projectiles.
+        static Vec3 s_bounceDir[MAX_PROJECTILES]   = {};
+        static u8   s_bounceOwner[MAX_PROJECTILES] = {};
+        // cos(~25°). A wall reflection flips the velocity component along the face normal, so a
+        // square-on hit reverses hard (dot ≈ -1) and trips this easily. A very shallow graze
+        // barely changes direction and is missed — inaudible in practice, and far preferable to
+        // a threshold loose enough to fire on ordinary steering.
+        constexpr f32 BOUNCE_DOT_THRESH = 0.9f;
+
+        for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+            const Projectile& p = m_renderInterp.projectiles.projectiles[i];
+            if (!p.active || p.predicted || !(p.projFlags & PROJ_BOUNCE)) {
+                s_bounceDir[i] = {0.0f, 0.0f, 0.0f};   // slot free/irrelevant — drop its tracking
+                continue;
+            }
+            const f32 speed = length(p.velocity);
+            if (speed < 0.0001f) continue;
+            const Vec3 dir  = p.velocity * (1.0f / speed);
+            const Vec3 prev = s_bounceDir[i];
+            const bool seeded = (prev.x != 0.0f || prev.y != 0.0f || prev.z != 0.0f) &&
+                                s_bounceOwner[i] == p.ownerSlot;
+            if (seeded && dot(prev, dir) < BOUNCE_DOT_THRESH)
+                AudioSystem::playAt(SfxId::RICOCHET, p.position, m_localPlayer.position);
+            s_bounceDir[i]   = dir;
+            s_bounceOwner[i] = p.ownerSlot;
+        }
+    }
+
     // [AUDIT-P1] Diagnostic: what does the RENDER pool actually contain after interp? If
     // [AUDIT-P1] snap rx showed non-zero ents/projs but this shows 0, the rebuild-activeList
     // path (the C1 fix) is broken or m_renderInterp is being clobbered post-interp. Throttled

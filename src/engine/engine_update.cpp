@@ -22,6 +22,7 @@
 #include "world/level_mesh.h"
 #include "world/level_loader.h"
 #include "world/collision.h"
+#include "world/raycast.h"     // client-side chakram bounce prediction (predicted-ghost tick)
 #include "world/combat_query.h"
 #include "game/player.h"
 #include "game/combat.h"
@@ -786,10 +787,48 @@ void Engine::tickSharedSystems(f32 dt) {
         for (u32 i = 0; i < MAX_PROJECTILES; i++) {
             Projectile& p = m_projectiles.projectiles[i];
             if (!p.active || !p.predicted) continue;
-            p.position = p.position + p.velocity * dt;
-            if (p.gravity > 0.0f) p.velocity.y -= p.gravity * dt;
-            p.lifetime      -= dt;
+
+            // Lifetime — mirrors the server's special case (projectile.cpp): an Infinity Chakram
+            // (PROJ_INFINITE_BOUNCE) never times out, its `lifetime` counts UP as an age used by the
+            // per-owner cap. Decrementing it here (as this did) killed the ghost a few seconds in,
+            // and with it the locally-simulated bounces below.
+            if (p.projFlags & PROJ_INFINITE_BOUNCE) p.lifetime += dt;
+            else                                    p.lifetime -= dt;
             p.predictedLife += dt;
+
+            // Chakram wall ricochet — SIMULATED locally rather than replicated. The client can't
+            // hear the server's "pling" (ProjectileSystem::update, which plays it, is gated off on
+            // CLIENT) and the bounce never crosses the wire (guests just interpolate the already-
+            // reflected path), so the ghost used to sail straight THROUGH walls in silence.
+            //
+            // Re-simulating is safe because the bounce is deterministic and cheap to agree on: the
+            // client holds the identical LevelGrid, and reflecting off an axis-aligned face flips
+            // exactly one velocity component — so client and server produce the same outgoing
+            // DIRECTION even if their impact points differ by a few centimetres. Residual position
+            // error stays inside the speed-relative ghost-handoff tolerance in clientNetPost.
+            // Same reflection as projectile.cpp: v' = v - 2(v·n)n, sat just off the struck face so
+            // the next tick's ray doesn't re-hit it and burn another bounce.
+            bool bounced = false;
+            if (p.projFlags & PROJ_BOUNCE) {
+                const f32 speed = length(p.velocity);
+                const f32 travel = speed * dt;
+                const bool infinite = (p.projFlags & PROJ_INFINITE_BOUNCE) != 0;
+                if (travel > 0.0001f && (infinite || p.bouncesLeft > 0)) {
+                    Vec3 dir = p.velocity * (1.0f / speed);
+                    RayHit wallHit = Raycast::cast(m_level.grid, p.position, dir, travel + p.radius);
+                    if (wallHit.hit && wallHit.distance <= travel + p.radius) {
+                        if (!infinite) p.bouncesLeft--;
+                        p.position = wallHit.position + wallHit.normal * (p.radius + 0.02f);
+                        p.velocity = p.velocity - wallHit.normal * (2.0f * dot(p.velocity, wallHit.normal));
+                        AudioSystem::playAt(SfxId::RICOCHET, wallHit.position, m_localPlayer.position);
+                        bounced = true;   // already repositioned — skip this frame's integrate
+                    }
+                }
+            }
+            if (!bounced) {
+                p.position = p.position + p.velocity * dt;
+                if (p.gravity > 0.0f) p.velocity.y -= p.gravity * dt;
+            }
             // Despawn timeout. A ghost that the match-and-keep pass (clientNetPost) has CONFIRMED —
             // i.e. found its authoritative snapshot copy and is keeping THIS ghost as the canonical
             // render — has its predictedLife reset every frame the authoritative still matches, so
