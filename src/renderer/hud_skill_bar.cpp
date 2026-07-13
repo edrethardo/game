@@ -267,6 +267,13 @@ static const u8* getSkillIcon(u8 skillId) {
     }
 }
 
+// Where the key/button glyph sits inside a 64px skill slot, as an offset from the slot's bottom-left
+// (drawKeySymbol's x/y is the glyph's bottom-left corner). Shared by BOTH bars so they cannot drift:
+// the equip bar previously used a NEGATIVE y here, which drew its glyph *below* the slot — and since
+// the equip bar sits only 8px above the class bar, that landed in the gap and clipped the class bar.
+static constexpr f32 KEY_GLYPH_DX = 14.0f;
+static constexpr f32 KEY_GLYPH_DY = 16.0f;
+
 void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
                               u8 activeSlot, u32 currentFloor,
                               const u8* unlockFloors, const u8* upgradeFloors,
@@ -369,8 +376,8 @@ void HUD::drawClassSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             static char numBuf[4][2] = {{'1',0}, {'2',0}, {'3',0}, {'4',0}};
             skillLabel = numBuf[s];
         }
-        // Adjusted positions for the larger 64px slot
-        drawKeySymbol(sw, sh, sx + 14.0f * uiScale, y + 16.0f * uiScale, skillLabel, selected && unlocked);
+        drawKeySymbol(sw, sh, sx + KEY_GLYPH_DX * uiScale, y + KEY_GLYPH_DY * uiScale,
+                      skillLabel, selected && unlocked);
 
         // Locked text
         if (!unlocked) {
@@ -472,7 +479,8 @@ void HUD::drawEquipSkillBar(u32 sw, u32 sh, f32 x, f32 y,
             FontSystem::drawText(sw, sh, sx + 8.0f * uiScale, y + 4.0f * uiScale, "auto",
                                  {0.5f, 0.4f, 0.7f}, 1);
         } else {
-            drawKeySymbol(sw, sh, sx + 14.0f * uiScale, y - 22.0f * uiScale, slot.keyLabel, ready);
+            drawKeySymbol(sw, sh, sx + KEY_GLYPH_DX * uiScale, y + KEY_GLYPH_DY * uiScale,
+                          slot.keyLabel, ready);
         }
     }
 }
