@@ -3,6 +3,8 @@
 #include "core/types.h"
 #include "core/math.h"
 
+#include "game/item.h"   // SkillId / ItemSlot / SkillDef — the skill tooltip is typed on them
+
 struct PlayerInventory;
 struct ItemDef;
 struct ItemInstance;
@@ -44,12 +46,39 @@ namespace HUD {
     // Profiler overlay (F3)
     void drawProfiler(u32 screenWidth, u32 screenHeight);
 
-    // Inventory screen (replaces normal HUD when Tab is open)
+    // Inventory screen (replaces normal HUD when Tab is open).
+    // `skillDefs` feeds the legendary block's description resolver (see resolveSkillDescription):
+    // without it the tooltip would fall back to the legendary-only C++ table and could disagree
+    // with the skill-bar tooltip on the same screen.
+    // selectedSlot == 0xFF means "no item selected" — used when the controller cursor is parked on a
+    // skill bar, so neither item panel paints a phantom highlight.
     void drawInventoryScreen(u32 sw, u32 sh,
                               const PlayerInventory& inv,
                               const ItemDef* itemDefs,
+                              const SkillDef* skillDefs, u32 skillDefCount,
                               u8 selectedSlot, bool selectedIsEquipped,
                               s32 mouseX = -1, s32 mouseY = -1);
+
+    // Skill name / description resolution — the SINGLE entry point, used by both the item tooltip's
+    // legendary block and the skill-bar tooltip, so one skill can't describe itself two ways.
+    // Resolution: slot-specific override -> SkillDef (skills.json) -> legacy table (for the
+    // legendary passives that have no SkillDef at all). Pass ItemSlot::COUNT for a class skill.
+    const char* resolveSkillName(SkillId id, const SkillDef* skillDefs, u32 skillDefCount);
+    const char* resolveSkillDescription(SkillId id, ItemSlot slot,
+                                        const SkillDef* skillDefs, u32 skillDefCount);
+
+    // Tooltip for a skill-bar slot (hover with mouse / select with gamepad on the inventory screen).
+    struct SkillTooltipInfo {
+        const char*    name        = "";
+        const char*    subtitle    = "";      // "Class Skill" / "Legendary - Armor" ...
+        const char*    description = "";      // from resolveSkillDescription
+        const SkillDef* def        = nullptr; // nullptr for a def-less passive -> stats block omitted
+        u8   unlockFloor  = 0;                // class skills only (0 = not applicable)
+        u8   upgradeFloor = 0;
+        bool unlocked     = true;
+        bool upgraded     = false;
+    };
+    void drawSkillTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY, const SkillTooltipInfo& info);
 
     // Energy bar (blue bar below health bar)
     void drawEnergyBar(u32 sw, u32 sh, f32 energy, f32 maxEnergy);
@@ -130,17 +159,21 @@ namespace HUD {
     // Loot notification bar (center-top, fades out)
     void drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha);
 
-    // Item tooltip — drawn near the hovered item slot
+    // Item tooltip — drawn near the hovered item slot. `skillDefs` feeds the legendary block through
+    // resolveSkillDescription (see drawInventoryScreen).
     void drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
-                         const ItemInstance& item, const ItemDef& def);
+                         const ItemInstance& item, const ItemDef& def,
+                         const SkillDef* skillDefs = nullptr, u32 skillDefCount = 0);
 
-    // Quickbar — slots at bottom-center of screen. xShift nudges the whole bar right of
-    // its centered position (used to clear the potion flask on the bottom-left).
+    // Quickbar — slots at bottom-center of screen. Geometry comes from
+    // InventoryUI::quickbarLayout(sw, sh), which also bakes in the rightward nudge that clears the
+    // bottom-left potion flask. There is deliberately NO xShift parameter: a caller-supplied shift
+    // is how the drawn bar and the hit-test rects drifted apart in the first place.
     void drawQuickbar(u32 sw, u32 sh,
                       const QuickbarState& qb,
                       const PlayerInventory& inv,
                       const ItemDef* itemDefs,
-                      f32 cooldownPct, f32 xShift = 0.0f);
+                      f32 cooldownPct);
 
     // Status effect icons above health bar — shows active debuffs/buffs with timers
     struct StatusEffect {

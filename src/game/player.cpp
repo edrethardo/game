@@ -368,7 +368,9 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
     if (Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f) flags |= INPUT_LEFT;
     if (Input::isActionPressed(GameAction::JUMP))    flags |= INPUT_JUMP;
     if (Input::isActionDown(GameAction::FIRE))       flags |= INPUT_FIRE;
-    if (Input::isActionDown(GameAction::TARGET_LOCK)) flags |= INPUT_LOCK;
+    // INPUT_LOCK is deliberately never set: it was fed by the cut lock-on feature and is read by
+    // nobody on the server. The bit stays reserved in the flags byte so the wire layout is
+    // unchanged (it simply always reads 0) — see net_player.h.
     input.moveFlags = flags;
 
     // Peek at this frame's mouse/stick/gyro delta WITHOUT consuming it (Input::getMouseDelta

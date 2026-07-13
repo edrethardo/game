@@ -303,6 +303,16 @@ void ProjectileSystem::update(ProjectilePool& pool,
                             ent.freezeTimer = p.freezeDuration;
                             if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);
                         }
+                        // Stun (Stun Grenade). fmaxf so a weaker stun can't cut a stronger one short.
+                        if (p.stunDuration > 0.0f)
+                            ent.stunTimer = fmaxf(ent.stunTimer, p.stunDuration);
+                        // Poison DoT (Poison Arrow). poisonSrcSlot credits the kill to the firer —
+                        // the DoT resolves frames later, long after this call returns.
+                        if (p.poisonDuration > 0.0f && p.poisonDps > 0.0f) {
+                            ent.poisonTimer   = fmaxf(ent.poisonTimer, p.poisonDuration);
+                            ent.poisonDps     = fmaxf(ent.poisonDps, p.poisonDps);
+                            ent.poisonSrcSlot = p.ownerSlot;
+                        }
                         if (s_hitCallback) s_hitCallback(p.position, h, p.ownerSlot, p.damage);
                         primaryHitIdx = static_cast<u16>(e);
                         hit = true;
@@ -332,6 +342,10 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         if (distSq < p.splashRadius * p.splashRadius) {
                             EntityHandle h2 = {static_cast<u16>(e2), ent2.generation};
                             Combat::applyDamage(entities, h2, p.splashDamage);
+                            // A stun grenade must stun what it BLASTS, not just what it happens to
+                            // strike — the blast is the whole point of the weapon.
+                            if (p.stunDuration > 0.0f)
+                                ent2.stunTimer = fmaxf(ent2.stunTimer, p.stunDuration);
                         }
                     }
                     if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);

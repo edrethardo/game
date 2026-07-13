@@ -1076,19 +1076,35 @@ void Engine::gameUpdate(f32 dt) {
 
     handleDebugKeys();
 
-    // Quickbar slot switching (mouse wheel only — keys 1-4 are for class skills)
-    s32 wheel = Input::getMouseWheelDelta();
-    {
+    // ---- Quickbar slot selection ----
+    // KB/M: the mouse wheel cycles the active slot (there are no number keys — 1-4 are the class
+    // skills) and middle-click equips it (updateTargetLock). The wheel is a GLOBAL device while
+    // gameUpdate runs once per split-screen lane, so it must be gated to lane 0 — exactly as
+    // player.cpp gates the mouse look delta — or P1 scrolling would move P2's active slot too.
+    s32 wheel = (Input::getActivePlayer() == 0) ? Input::getMouseWheelDelta() : 0;
+    if (wheel != 0) {
         s32 slot = static_cast<s32>(m_quickbars[m_localPlayerIndex].activeSlot);
-        if (wheel != 0) {
-            slot -= wheel; // scroll up = previous slot, down = next
-            if (slot < 0) slot = QUICKBAR_SLOTS - 1;
-            if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0;
-        }
-        // Controller quickbar switching
-        if (Input::isActionPressed(GameAction::QUICKBAR_PREV)) { slot--; if (slot < 0) slot = QUICKBAR_SLOTS - 1; }
-        if (Input::isActionPressed(GameAction::QUICKBAR_NEXT)) { slot++; if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0; }
+        slot -= wheel; // scroll up = previous slot, down = next
+        if (slot < 0) slot = QUICKBAR_SLOTS - 1;
+        if (slot >= static_cast<s32>(QUICKBAR_SLOTS)) slot = 0;
         m_quickbars[m_localPlayerIndex].activeSlot = static_cast<u8>(slot);
+    }
+
+    // Gamepad: L + D-pad picks a slot DIRECTLY (one direction per slot, same Up/Right/Down/Left
+    // order as the bare-D-pad class skills) and equips it in the same press. Cycling with a
+    // separate use button used to be the plan, but a pad has only four D-pad directions and the
+    // bar has exactly four slots — so select-and-equip is both the natural mapping and the reason
+    // no gamepad "use" button is needed. Before this the pad could only CYCLE the bar and had no
+    // way to use it at all, which made the quickbar dead on the entire Switch build.
+    static constexpr GameAction kQuickbarSlots[QUICKBAR_SLOTS] = {
+        GameAction::QUICKBAR_SLOT_1, GameAction::QUICKBAR_SLOT_2,
+        GameAction::QUICKBAR_SLOT_3, GameAction::QUICKBAR_SLOT_4,
+    };
+    for (u8 i = 0; i < QUICKBAR_SLOTS; i++) {
+        if (!Input::isActionPressed(kQuickbarSlots[i])) continue;
+        m_quickbars[m_localPlayerIndex].activeSlot = i;
+        useQuickbarSlot(i);
+        break;  // one slot per frame — a chord can't legitimately claim two directions at once
     }
 
     // Healing potion (Q key) — restores 60% HP + 30% energy

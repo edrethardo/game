@@ -343,6 +343,12 @@ inline Vec3 rarityColor(Rarity r) {
 
 struct SkillDef {
     char    name[32] = {};
+    // Player-facing tooltip prose (skills.json "description"), '\n'-separated, <= 2 lines.
+    // THE source of truth for any skill that has a def — the HUD's resolver prefers this over its
+    // legacy C++ table so the same skill can't say two different things in two different tooltips.
+    // Empty for a def whose JSON omits the key. NOT serialized in saves (defs are loaded from JSON
+    // at startup), so growing this struct costs no SAVE_VERSION bump.
+    char    description[128] = {};
     SkillId id       = SkillId::NONE;
     f32     cooldown = 1.0f;
     f32     energyCost = 0.0f;
@@ -351,6 +357,9 @@ struct SkillDef {
     f32     duration = 0.0f;
     f32     projectileSpeed = 0.0f;
     u8      projectileCount = 0;
+
+    // Poison Arrow: DoT applied to a direct hit (rate; duration comes from `duration`).
+    f32 poisonDps = 0.0f;
 
     // Frozen Orb specifics
     f32 shardDamage   = 0.0f;
@@ -485,7 +494,12 @@ struct WorldItemPool {
     u32       nextUid     = 1;           // server assigns unique IDs
 };
 
-// ---- Quickbar (8 assignable hotbar slots, keys 1-8) ----
+// ---- Quickbar ----
+// A WEAPON-SWAP bar, not a consumable hotbar: slots hold refs to items, and "use" means EQUIP.
+// (There are no consumable items — the healing flask is a separate, item-less infinite heal on a
+// cooldown; see GameConst::POTION_*.) Selected with the mouse wheel or L + D-pad Left/Right, and
+// used with GameAction::QUICKBAR_USE (middle-click / L + D-pad Up). There are NO number-key
+// bindings — keys 1-4 are the class skills.
 
 static constexpr u32 QUICKBAR_SLOTS = 4;
 
@@ -498,7 +512,7 @@ struct QuickbarSlot {
 
 struct QuickbarState {
     QuickbarSlot slots[QUICKBAR_SLOTS] = {};
-    u8 activeSlot = 0;  // 0-7, selected via keys 1-8
+    u8 activeSlot = 0;  // 0..QUICKBAR_SLOTS-1 — cycled by wheel / L+D-pad, never a direct key
 };
 
 // ---- Inventory drag-and-drop state ----
@@ -613,11 +627,13 @@ namespace WorldItemSystem {
 
 namespace Quickbar {
     void init(QuickbarState& qb, const PlayerInventory& inv);
-    // Assign item from backpack to first free slot (slot 0 is reserved for weapon)
+    // Assign item from backpack to the first free slot. No slot is reserved or protected — any
+    // slot holds any item.
     void assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 backpackIdx);
-    // Remove item from a slot (slot 0 protected)
+    // Remove item from a slot
     void removeItem(QuickbarState& qb, u8 slotIdx);
-    // Keep slot 0 in sync with equipped weapon
+    // Point a slot at the equipped weapon (the first FREE slot, not necessarily slot 0), repair
+    // stale EQUIPPED_REFs, and reclaim BACKPACK_REFs whose item is gone.
     void syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv);
     // Returns pointer to the ItemInstance for a slot, or nullptr if empty/stale
     const ItemInstance* resolveSlot(const QuickbarState& qb, const PlayerInventory& inv, u8 slot);

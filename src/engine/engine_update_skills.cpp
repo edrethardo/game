@@ -95,6 +95,37 @@ void Engine::tickSkillCooldowns(f32 dt) {
     deriveCooldownTimer(m_helmetSkillStates[m_localPlayerIndex], itemCdr);
 }
 
+// Thunderclap's floor upgrade. fireThunderclap reads its stun straight off the shared SkillDef, so
+// the upgrade is applied by scaling that def around the cast and restoring it immediately after.
+// Call begin* before SkillSystem::tryActivate and end* after, ALWAYS as a pair.
+//
+// Three things were wrong with the version this replaces, all silent:
+//   1. It ASSIGNED a hardcoded 0.5 s. That was written when the def's stun was 0.2 s; skills.json
+//      now says 0.8 s, so "upgrading" past the upgrade floor SHORTENED the stun. A multiplier can't
+//      invert like that whatever the def says.
+//   2. It gated on the RAW floor, while the HUD paints its gold "upgraded" border using
+//      effectiveFloor (floor + difficulty*50) — so on Nightmare/Hell the skill bar showed the skill
+//      upgraded while the code never applied it.
+//   3. It lived only in the LOCAL cast path, so in co-op a GUEST's Warrior never got the upgrade at
+//      all. The server's remote-cast path (engine_net.cpp processRemoteActivation) now calls this
+//      too, which is the whole reason it is a shared helper rather than an inline block.
+SkillDef* Engine::beginThunderclapUpgrade(SkillId skill, u8 upgradeFloor, u32 effectiveFloor,
+                                          f32& outOrigDuration) {
+    constexpr f32 THUNDERCLAP_UPGRADE_MULT = 1.5f;   // 0.8 s base -> 1.2 s upgraded
+    outOrigDuration = 0.0f;
+    if (skill != SkillId::THUNDERCLAP || effectiveFloor < upgradeFloor) return nullptr;
+    SkillDef* def = const_cast<SkillDef*>(
+        SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, SkillId::THUNDERCLAP));
+    if (!def) return nullptr;
+    outOrigDuration = def->duration;
+    def->duration   = outOrigDuration * THUNDERCLAP_UPGRADE_MULT;
+    return def;
+}
+
+void Engine::endThunderclapUpgrade(SkillDef* def, f32 origDuration) {
+    if (def) def->duration = origDuration;
+}
+
 // ---------------------------------------------------------------------------
 // tickPassiveEquipment — reads equipped weapon/armor/ring legendary skills and
 // caches them into m_weaponProc / m_armorAura / m_ringPassive each tick.
@@ -171,14 +202,14 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
             m_classSkillStates[slot].energy = m_skillStates[m_localPlayerIndex].energy;
             m_classSkillStates[slot].maxEnergy = m_skillStates[m_localPlayerIndex].maxEnergy;
 
-            // Thunderclap upgrade: increase stun from 0.2s to 0.5s past upgrade floor
-            SkillDef* tcDef = nullptr;
+            // Thunderclap's floor upgrade. Shared with the SERVER's remote-cast path so a guest's
+            // Warrior gets the same upgrade the host's does (it previously did not — see
+            // beginThunderclapUpgrade).
             f32 origDuration = 0.0f;
-            if (cls.skills[slot] == SkillId::THUNDERCLAP &&
-                m_level.currentFloor >= cls.skillUpgradeFloor[slot]) {
-                tcDef = const_cast<SkillDef*>(SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
-                                                                         SkillId::THUNDERCLAP));
-                if (tcDef) { origDuration = tcDef->duration; tcDef->duration = 0.5f; }
+            SkillDef* tcDef = beginThunderclapUpgrade(cls.skills[slot],
+                                                      cls.skillUpgradeFloor[slot],
+                                                      effectiveFloor, origDuration);
+            {
             }
 
             SkillSystem::setSkillPower(0.0f);  // class skills use base power
@@ -210,8 +241,7 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
                 }
             }
 
-            // Restore original duration
-            if (tcDef) tcDef->duration = origDuration;
+            endThunderclapUpgrade(tcDef, origDuration);
         }
     }
 }

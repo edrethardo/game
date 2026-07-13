@@ -18,6 +18,8 @@
 #include "game/weapon.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
+#include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
 #include "game/enemy_def.h"
 #include "net/net.h"
@@ -795,6 +797,11 @@ private:
     // PROJ_INFINITE_BOUNCE projectiles aloft, retire the oldest (largest count-up lifetime),
     // skipping `keepIdx` (the just-spawned one). Keeps them from filling the shared pool.
     void capInfinityChakrams(u8 ownerSlot, u16 keepIdx);
+    // Equip the item in quickbar slot `slot` (the bar's only "use" verb — it holds weapons, not
+    // consumables). Shared by both input routes: middle-click on the wheel-selected slot, and a
+    // gamepad's L + D-pad, which selects and equips in one press. Pushes sendInventorySync() so a
+    // client's swap reaches the authoritative server.
+    void useQuickbarSlot(u8 slot);
     // Lock-on is inert (lockActive never set true); this now only handles the
     // quickbar-use action. Name kept to avoid churning call sites (R7-6).
     void updateTargetLock(f32 dt); // singleplayer legacy
@@ -903,7 +910,45 @@ private:
     // Lazily (re)create an offscreen FBO (RGB color tex + depth RBO) at w x h. Body moved from the
     // former file-static ensureSceneFbo so both the render-scale path and the inspect screen share it.
     void ensureFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& curH, u32 w, u32 h);
+    // Thunderclap's floor upgrade scales the stun on the SHARED SkillDef, so it must be applied
+    // around a cast and restored right after. Call as a PAIR, and from BOTH the local cast path and
+    // the server's remote-cast path — a guest's Warrior must get the same upgrade the host's does.
+    SkillDef* beginThunderclapUpgrade(SkillId skill, u8 upgradeFloor, u32 effectiveFloor,
+                                      f32& outOrigDuration);
+    static void endThunderclapUpgrade(SkillDef* def, f32 origDuration);
+
     void renderSkillsHUD(u32 sw, u32 sh);             // class skill bar + equip bar + active skill display
+
+    // Max legendary equipment skills that can be on the equip bar at once: boots, helmet, armor
+    // aura, weapon proc, ring passive, gloves passive.
+    static constexpr u32 MAX_EQUIP_SKILL_SLOTS = 6;
+    // Fill `out` (capacity MAX_EQUIP_SKILL_SLOTS) with the equipped legendary skills in a fixed
+    // order; returns the count. Shared by renderSkillsHUD and the inventory screen so both draw the
+    // identical bar and a slot index means the same skill in both.
+    // `outSlots` (optional, same capacity) records which ItemSlot each entry came from — the skill
+    // tooltip needs it, because a skill can read differently per slot (Blood Nova on a weapon vs on
+    // armor), and resolving without it would make the skill-bar tooltip disagree with the item's.
+    u32 buildEquipSkillSlots(HUD::EquipSkillSlot* out, ItemSlot* outSlots = nullptr) const;
+
+    // Inventory cursor panels (m_invCursorPanel). Was a 2-value bool-ish flip; the skill bars added
+    // two more, so it is now a proper cycle. INV_PANEL_EQUIP_SKILL is skipped when nothing equipped
+    // grants an equipment skill.
+    static constexpr u8 INV_PANEL_BACKPACK    = 0;
+    static constexpr u8 INV_PANEL_EQUIPMENT   = 1;
+    static constexpr u8 INV_PANEL_CLASS_SKILL = 2;
+    static constexpr u8 INV_PANEL_EQUIP_SKILL = 3;
+    static constexpr u8 INV_PANEL_COUNT       = 4;
+
+    // Park the synthetic cursor on the D-pad-selected slot, so the gamepad drives the SAME hover
+    // path the mouse does (items and skills alike) instead of needing its own.
+    void inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const;
+
+    // Class + equipment skill bars ON the inventory screen, plus the hover/selection tooltip.
+    void renderInventorySkillBars(u32 sw, u32 sh,
+                                  const InventoryUI::SkillBarRects& sb,
+                                  const HUD::EquipSkillSlot* equipSlots, u32 equipCount,
+                                  const ItemSlot* equipSources,
+                                  s32 mx, s32 my);
     void renderMinimapAndFloor(u32 sw, u32 sh);       // minimap + door blip + floor text + potion cooldown
     void renderTutorials(u32 sw, u32 sh);             // tutorial tooltip blocks
 

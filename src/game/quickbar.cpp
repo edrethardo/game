@@ -7,7 +7,8 @@
 
 void Quickbar::init(QuickbarState& qb, const PlayerInventory& inv) {
     qb = QuickbarState{};
-    // Slot 0 always references equipped weapon
+    // Seed the bar with the equipped weapon (syncWeaponSlot picks the first FREE slot — on a fresh
+    // bar that is slot 0, but no slot is reserved).
     syncWeaponSlot(qb, inv);
 }
 
@@ -63,6 +64,18 @@ void Quickbar::syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv) {
                 qb.slots[i] = QuickbarSlot{}; // item gone entirely, clear slot
             }
         }
+    }
+
+    // Reclaim dead BACKPACK_REFs: a slot whose item was dropped/consumed still resolves to nullptr
+    // (the UID check fails) so it DRAWS blank — but the free-slot scans below test `type == EMPTY`,
+    // so a blank-looking slot kept blocking assignment forever. With only 4 slots and auto-assign
+    // on weapon pickup, that permanently jammed the bar. Note the backpack never compacts
+    // (removeFromBackpack leaves holes), so a still-valid sourceIndex stays valid — only genuinely
+    // vanished items are cleared here.
+    for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+        if (qb.slots[i].type != QuickbarSlot::BACKPACK_REF) continue;
+        if (!resolveSlot(qb, inv, static_cast<u8>(i)))
+            qb.slots[i] = QuickbarSlot{};
     }
 
     // Now handle the newly equipped weapon

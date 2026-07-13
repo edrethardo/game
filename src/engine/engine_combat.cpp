@@ -1588,29 +1588,50 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
 }
 
 // ---------------------------------------------------------------------------
+// Equip whatever quickbar slot `slot` holds. The single "use a quickbar slot" path, shared by both
+// input routes: KB/M selects with the mouse wheel and presses QUICKBAR_USE (middle-click), while a
+// gamepad's L + D-pad picks a slot and equips it in one press (engine_update.cpp). A slot holding
+// an already-equipped item (EQUIPPED_REF) is a no-op — there is nothing to swap in.
+// ---------------------------------------------------------------------------
+void Engine::useQuickbarSlot(u8 slot) {
+    if (slot >= QUICKBAR_SLOTS) return;
+    PlayerInventory& inv = m_inventories[m_localPlayerIndex];
+    QuickbarSlot&    qs  = m_quickbars[m_localPlayerIndex].slots[slot];
+
+    if (qs.type != QuickbarSlot::BACKPACK_REF ||
+        qs.sourceIndex >= MAX_INVENTORY_ITEMS ||
+        isItemEmpty(inv.backpack[qs.sourceIndex])) return;
+
+    u32      uid      = qs.itemUid;
+    ItemSlot itemSlot = m_itemDefs[inv.backpack[qs.sourceIndex].defId].slot;
+    Inventory::equip(inv, qs.sourceIndex, m_itemDefs);
+    AudioSystem::play(SfxId::ITEM_EQUIP);
+
+    // Convert the quickbar ref from backpack to equipment so it stays valid (the item moved).
+    qs.type        = QuickbarSlot::EQUIPPED_REF;
+    qs.sourceIndex = static_cast<u8>(itemSlot);
+    qs.itemUid     = uid;
+    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], inv);
+
+    // R7: push the new equipped state so the host's fire/reload dispatch sees the right weapon
+    // (no-op off-client). This was the ONE equip path that omitted it — the server fires from its
+    // OWN copy of the client's inventory (handleWeaponFireForPlayer), so a guest swapping via the
+    // quickbar kept dealing the OLD weapon's damage while their screen showed the new one.
+    sendInventorySync();
+}
+
+// ---------------------------------------------------------------------------
 // Soft target lock (singleplayer). Lock-on itself is currently inert — lockActive
-// is never set true, so this only handles the TARGET_LOCK action's quickbar-use
+// is never set true, so this only handles the QUICKBAR_USE action's quickbar-use
 // behaviour. The trailing lockActive=false keeps the (unused) state pinned off (R7-6).
 // ---------------------------------------------------------------------------
 void Engine::updateTargetLock(f32 dt) {
     (void)dt;
-    // Middle-click / quickbar-use outside inventory: equip active quickbar item (keeps ref in quickbar)
-    if (Input::isActionPressed(GameAction::TARGET_LOCK)) {
-        u8 slot = m_quickbars[m_localPlayerIndex].activeSlot;
-        QuickbarSlot& qs = m_quickbars[m_localPlayerIndex].slots[slot];
-        if (qs.type == QuickbarSlot::BACKPACK_REF &&
-            qs.sourceIndex < MAX_INVENTORY_ITEMS &&
-            !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex])) {
-            u32 uid = qs.itemUid;
-            ItemSlot itemSlot = m_itemDefs[m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex].defId].slot;
-            Inventory::equip(m_inventories[m_localPlayerIndex], qs.sourceIndex, m_itemDefs);
-            // Convert quickbar ref from backpack to equipment so it stays valid
-            qs.type = QuickbarSlot::EQUIPPED_REF;
-            qs.sourceIndex = static_cast<u8>(itemSlot);
-            qs.itemUid = uid;
-            Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-        }
-    }
+    // KB/M quickbar use: middle-click equips the wheel-selected slot. (A gamepad never reaches
+    // here — L + D-pad selects and equips in one press, in gameUpdate.)
+    if (Input::isActionPressed(GameAction::QUICKBAR_USE))
+        useQuickbarSlot(m_quickbars[m_localPlayerIndex].activeSlot);
+
     m_localPlayer.lockActive = false;
 }
 

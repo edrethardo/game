@@ -58,6 +58,47 @@ extern bool s_firstKillDropGiven;
 
 // Inventory drag-and-drop state machine — handles click, double-click, and drag
 // across backpack, equipment, and quickbar panels.
+// Place the synthetic cursor at the centre of the D-pad-selected slot.
+//
+// This is what lets the gamepad reuse the MOUSE hover path instead of growing a second one: every
+// hover test on this screen (items and now skills) reads a cursor position, and on a gamepad we
+// simply write that position ourselves. Previously the math lived in TWO copies (here and in
+// renderInventoryHUD) which had to be kept in step by hand; this is now the only one.
+void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
+    const f32 uiScale = static_cast<f32>(sh) / 720.0f;
+
+    if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
+        HUD::EquipSkillSlot slots[MAX_EQUIP_SKILL_SLOTS];
+        const u32 n = buildEquipSkillSlots(slots);
+        const auto sb = InventoryUI::skillBarLayout(sw, sh, n);
+        const bool classBar = (m_invCursorPanel == INV_PANEL_CLASS_SKILL);
+        const f32 x = (classBar ? sb.classX : sb.equipX) + m_invCursorIndex * (sb.slot + sb.gap);
+        const f32 y = (classBar ? sb.classY : sb.equipY);
+        mx = static_cast<s32>(x + sb.slot * 0.5f);
+        my = static_cast<s32>(y + sb.slot * 0.5f);
+        return;
+    }
+
+    if (m_invCursorPanel == INV_PANEL_BACKPACK) {
+        const f32 bpCell = InventoryUI::BP_CELL * uiScale;
+        const f32 bpGap  = InventoryUI::BP_GAP  * uiScale;
+        const u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
+        const u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
+        const f32 bpX = static_cast<f32>(sw) * 0.42f;
+        const f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
+        mx = static_cast<s32>(bpX + col * (bpCell + bpGap) + bpCell * 0.5f);
+        my = static_cast<s32>(bpStartY - row * (bpCell + bpGap) + bpCell * 0.5f);
+    } else {
+        const f32 eqH = InventoryUI::EQ_H   * uiScale;
+        const f32 eqW = InventoryUI::EQ_W   * uiScale;
+        const f32 eqGap = InventoryUI::EQ_GAP * uiScale;
+        const f32 eqX = static_cast<f32>(sw) * 0.12f;
+        const f32 eqStartY = static_cast<f32>(sh) * 0.5f + 220.0f * uiScale;
+        mx = static_cast<s32>(eqX + eqW * 0.5f);
+        my = static_cast<s32>(eqStartY - m_invCursorIndex * (eqH + eqGap) + eqH * 0.5f);
+    }
+}
+
 void Engine::updateInventoryInteraction(f32 dt) {
     if (!m_inventoryOpen) return;
 
@@ -71,39 +112,73 @@ void Engine::updateInventoryInteraction(f32 dt) {
     // --- D-pad inventory navigation (controller — routes to active player's controller) ---
     s32 padIdx = static_cast<s32>(m_localPlayerIndex);
     if (Input::isGamepadConnected(padIdx)) {
+        // How many equipment skills are on the bar right now — the equip-skill panel only exists
+        // when something is equipped that grants one, so the cursor must skip it otherwise.
+        HUD::EquipSkillSlot navEquip[MAX_EQUIP_SKILL_SLOTS];
+        const u32 navEquipCount = buildEquipSkillSlots(navEquip);
+        // Slots in the panel the cursor is currently on.
+        const u8 panelSlots =
+            (m_invCursorPanel == INV_PANEL_BACKPACK)  ? static_cast<u8>(InventoryUI::BP_COLS * InventoryUI::BP_ROWS) :
+            (m_invCursorPanel == INV_PANEL_EQUIPMENT) ? static_cast<u8>(InventoryUI::EQ_SLOTS) :
+            (m_invCursorPanel == INV_PANEL_CLASS_SKILL) ? static_cast<u8>(InventoryUI::CLASS_SKILL_SLOTS)
+                                                        : static_cast<u8>(navEquipCount);
+
         // Navigate cursor with D-pad
         if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
-            if (m_invCursorPanel == 0) {
+            if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col < InventoryUI::BP_COLS - 1) m_invCursorIndex++;
+            } else if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
+                // Skill bars are horizontal rows — left/right walks along them.
+                if (panelSlots > 0 && m_invCursorIndex + 1 < panelSlots) m_invCursorIndex++;
             }
         }
         if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
-            if (m_invCursorPanel == 0) {
+            if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col > 0) m_invCursorIndex--;
-            }
-        }
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
-            if (m_invCursorPanel == 0) {
-                if (m_invCursorIndex + InventoryUI::BP_COLS < InventoryUI::BP_COLS * InventoryUI::BP_ROWS)
-                    m_invCursorIndex += InventoryUI::BP_COLS;
-            } else {
-                if (m_invCursorIndex < InventoryUI::EQ_SLOTS - 1) m_invCursorIndex++;
-            }
-        }
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
-            if (m_invCursorPanel == 0) {
-                if (m_invCursorIndex >= InventoryUI::BP_COLS)
-                    m_invCursorIndex -= InventoryUI::BP_COLS;
-            } else {
+            } else if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
                 if (m_invCursorIndex > 0) m_invCursorIndex--;
             }
         }
-        // L/R shoulder to switch between backpack and equipment panels
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+            if (m_invCursorPanel == INV_PANEL_BACKPACK) {
+                if (m_invCursorIndex + InventoryUI::BP_COLS < InventoryUI::BP_COLS * InventoryUI::BP_ROWS)
+                    m_invCursorIndex += InventoryUI::BP_COLS;
+            } else if (m_invCursorPanel == INV_PANEL_EQUIPMENT) {
+                if (m_invCursorIndex < InventoryUI::EQ_SLOTS - 1) m_invCursorIndex++;
+            } else if (m_invCursorPanel == INV_PANEL_EQUIP_SKILL) {
+                // The equip bar sits directly ABOVE the class bar on screen, so "down" drops to it.
+                m_invCursorPanel = INV_PANEL_CLASS_SKILL;
+                if (m_invCursorIndex >= InventoryUI::CLASS_SKILL_SLOTS)
+                    m_invCursorIndex = static_cast<u8>(InventoryUI::CLASS_SKILL_SLOTS - 1);
+            }
+        }
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
+            if (m_invCursorPanel == INV_PANEL_BACKPACK) {
+                if (m_invCursorIndex >= InventoryUI::BP_COLS)
+                    m_invCursorIndex -= InventoryUI::BP_COLS;
+            } else if (m_invCursorPanel == INV_PANEL_EQUIPMENT) {
+                if (m_invCursorIndex > 0) m_invCursorIndex--;
+            } else if (m_invCursorPanel == INV_PANEL_CLASS_SKILL && navEquipCount > 0) {
+                m_invCursorPanel = INV_PANEL_EQUIP_SKILL;
+                if (m_invCursorIndex >= navEquipCount)
+                    m_invCursorIndex = static_cast<u8>(navEquipCount - 1);
+            }
+        }
+        // L/R shoulder cycles the panels: backpack -> equipment -> class skills -> equip skills.
+        // Was a binary flip between the two item panels; now a cycle, skipping the equip-skill panel
+        // when nothing grants an equipment skill (an empty panel you can land on but not leave in any
+        // meaningful way is worse than no panel).
         if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
             Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
-            m_invCursorPanel = m_invCursorPanel == 0 ? 1 : 0;
+            const bool fwd = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+            for (u8 step = 0; step < INV_PANEL_COUNT; step++) {
+                m_invCursorPanel = fwd
+                    ? static_cast<u8>((m_invCursorPanel + 1) % INV_PANEL_COUNT)
+                    : static_cast<u8>((m_invCursorPanel + INV_PANEL_COUNT - 1) % INV_PANEL_COUNT);
+                if (m_invCursorPanel != INV_PANEL_EQUIP_SKILL || navEquipCount > 0) break;
+            }
             m_invCursorIndex = 0;
         }
         // A = equip (backpack → equipment) or unequip (equipment → backpack)
@@ -165,29 +240,9 @@ void Engine::updateInventoryInteraction(f32 dt) {
             Input::setRelativeMouseMode(true);
         }
 
-        // Move mouse cursor to match D-pad selection (so tooltip renders at right position)
-        // Scale relative to 720p reference (matches hud.cpp layout)
-        f32 uiScale = static_cast<f32>(sh) / 720.0f;
-        f32 bpCell = InventoryUI::BP_CELL * uiScale;
-        f32 bpGap  = InventoryUI::BP_GAP * uiScale;
-        f32 eqH    = InventoryUI::EQ_H * uiScale;
-        f32 eqW    = InventoryUI::EQ_W * uiScale;
-        f32 eqGap  = InventoryUI::EQ_GAP * uiScale;
-
-        if (m_invCursorPanel == 0) {
-            u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
-            u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
-            f32 bpX = static_cast<f32>(sw) * 0.42f;
-            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
-            mx = static_cast<s32>(bpX + col * (bpCell + bpGap) + bpCell * 0.5f);
-            my = static_cast<s32>(bpStartY - row * (bpCell + bpGap) + bpCell * 0.5f);
-        } else {
-            f32 eqX = static_cast<f32>(sw) * 0.12f;
-            f32 centerY = static_cast<f32>(sh) * 0.5f;
-            f32 eqStartY = centerY + 220.0f * uiScale;
-            mx = static_cast<s32>(eqX + eqW * 0.5f);
-            my = static_cast<s32>(eqStartY - m_invCursorIndex * (eqH + eqGap) + eqH * 0.5f);
-        }
+        // Park the cursor on the selected slot so the hover tooltip follows the D-pad. One helper,
+        // shared with renderInventoryHUD — this math used to be copy-pasted in both.
+        inventoryCursorToMouse(sw, sh, mx, my);
     }
 
     // The physical mouse belongs to local player 0; couch co-op P2 uses the D-pad path
@@ -318,23 +373,12 @@ void Engine::updateInventoryInteraction(f32 dt) {
         // Middle mouse: equip from quickbar (item stays in quickbar as EQUIPPED_REF)
         if (Input::isMouseButtonPressed(SDL_BUTTON_MIDDLE)) {
             InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
-            if (hit.panel == InventoryUI::SlotHit::QUICKBAR) {
-                QuickbarSlot& qs = m_quickbars[m_localPlayerIndex].slots[hit.index];
-                if (qs.type == QuickbarSlot::BACKPACK_REF &&
-                    qs.sourceIndex < MAX_INVENTORY_ITEMS &&
-                    !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex])) {
-                    u32 uid = qs.itemUid;
-                    ItemSlot itemSlot = m_itemDefs[m_inventories[m_localPlayerIndex].backpack[qs.sourceIndex].defId].slot;
-                    Inventory::equip(m_inventories[m_localPlayerIndex], qs.sourceIndex, m_itemDefs);
-                    AudioSystem::play(SfxId::ITEM_EQUIP);
-                    // Update this quickbar slot to point to the equipment slot
-                    qs.type = QuickbarSlot::EQUIPPED_REF;
-                    qs.sourceIndex = static_cast<u8>(itemSlot);
-                    qs.itemUid = uid;
-                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-                    sendInventorySync(); // R7
-                }
-            }
+            // useQuickbarSlot bounds-checks the index and owns the equip + ref fixup +
+            // sendInventorySync (R7). This site used to inline all of that AND index straight into
+            // slots[] with no bounds check — an over-range index from the old broken hit-test wrote
+            // past the array, into activeSlot and the NEXT player's QuickbarState.
+            if (hit.panel == InventoryUI::SlotHit::QUICKBAR)
+                useQuickbarSlot(hit.index);
         }
 
     } else if (!m_dragState.dragging) {

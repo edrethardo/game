@@ -57,8 +57,16 @@ void firePoisonArrow(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 22.0f;
     f32 damage = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
     // Spawn with PROJ_SPARK flag repurposed as green-tint hint for renderer
-    ProjectileSystem::spawn(pool, origin, forward, speed, damage, 0.12f, 3.0f,
-                            true, PROJ_SPARK);
+    u16 slot = ProjectileSystem::spawn(pool, origin, forward, speed, damage, 0.12f, 3.0f,
+                                       true, PROJ_SPARK);
+    // The poison. This skill previously applied NONE — it spawned a bare projectile whose only
+    // "poison" was PROJ_SPARK, a renderer TINT flag. The DoT was left as a TODO and never landed,
+    // so Poison Arrow was a plain arrow with a green trail.
+    if (slot != 0xFFFF) {
+        Projectile& p = pool.projectiles[slot];
+        p.poisonDuration = def->duration > 0.0f ? def->duration : 4.0f;
+        p.poisonDps      = (def->poisonDps > 0.0f ? def->poisonDps : 6.0f) * s_classDmgMult;
+    }
     LOG_INFO("Poison Arrow fired");
 }
 

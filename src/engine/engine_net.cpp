@@ -363,6 +363,13 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                       : m_weaponDefs[0];
                   SkillSystem::setWeaponDamage(wd.damage); }
                 SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
+                // Thunderclap's floor upgrade — applied here too, not just on the host. Without
+                // this a GUEST's Warrior cast the un-upgraded stun forever while the host's scaled,
+                // because the upgrade lives on the shared SkillDef and only the local path set it.
+                f32 tcOrig = 0.0f;
+                SkillDef* tcDef = beginThunderclapUpgrade(cls.skills[cskSlot],
+                                                          cls.skillUpgradeFloor[cskSlot],
+                                                          effectiveFloor, tcOrig);
                 // TA-3: cast against the GUEST's own view (see boot-skill note above)
                 // so class dash/blink/Blood Nova mutate the guest, never the host.
                 Player view; buildRemotePlayerView(static_cast<u8>(i), view);
@@ -372,6 +379,7 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                                           m_projectiles, m_entities, m_level.grid, view,
                                           in.clientTick,
                                           m_inventories[i].bonusCooldownReduction);
+                endThunderclapUpgrade(tcDef, tcOrig);
                 applyRemotePlayerView(view, static_cast<u8>(i));
             }
         }

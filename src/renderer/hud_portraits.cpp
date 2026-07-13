@@ -7,6 +7,7 @@
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
 #include "game/item.h"
+#include "game/inventory_ui.h"  // quickbarLayout — single source for the bar's on-screen geometry
 #include <cstdio>
 #include <cstring>
 
@@ -147,17 +148,15 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
                         const QuickbarState& qb,
                         const PlayerInventory& inv,
                         const ItemDef* itemDefs,
-                        f32 cooldownPct, f32 xShift) {
+                        f32 cooldownPct) {
     f32 uiScale = static_cast<f32>(sh) / 720.0f;
-    f32 SLOT_SIZE = 40.0f * uiScale;
-    f32 SLOT_GAP  = 4.0f * uiScale;
-    // Total width of all slots plus gaps between them
-    f32 TOTAL_W   = QUICKBAR_SLOTS * SLOT_SIZE + (QUICKBAR_SLOTS - 1) * SLOT_GAP;
-    f32 Y_OFFSET  = 20.0f * uiScale; // distance from bottom edge
 
-    // Centered, then nudged right by xShift (to clear the bottom-left potion flask).
-    f32 startX = (static_cast<f32>(sw) - TOTAL_W) * 0.5f + xShift;
-    f32 baseY  = Y_OFFSET;
+    // Shared with InventoryUI::hitTest, so what is drawn here is exactly what is clickable.
+    const InventoryUI::QuickbarRects r = InventoryUI::quickbarLayout(sw, sh);
+    f32 SLOT_SIZE = r.slot;
+    f32 SLOT_GAP  = r.gap;
+    f32 startX    = r.startX;
+    f32 baseY     = r.baseY;
 
     for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
         f32 x0 = startX + static_cast<f32>(i) * (SLOT_SIZE + SLOT_GAP);

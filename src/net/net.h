@@ -103,8 +103,12 @@ enum struct NetPacketType : u8 {
     // validates cooldown + clamps origin to within ~1 m of np.position before firing
     // authoritatively.
     CL_FIRE_WEAPON    = 0x08,
-    // Client → server full inventory push. Sent ONCE after SV_JOIN_ACCEPT when the
-    // joining client opted to "Continue" a saved character from the menu. The server's
+    // Client → server full inventory push. Sent after SV_JOIN_ACCEPT when the joining client
+    // opted to "Continue" a saved character from the menu, AND again on every subsequent local
+    // equip/unequip (see the `// R7` call sites in engine_inventory.cpp + engine_combat.cpp) —
+    // the server fires a client's weapon from its OWN copy of that client's inventory
+    // (handleWeaponFireForPlayer), so it must be told when the client swaps gear or the damage
+    // math keeps using the old item. The server's
     // onPlayerJoin grants a deterministic class-starting kit by default; if this packet
     // arrives, the server replaces the kit with the client's saved equipped / backpack /
     // quickbar / skill state. Wire payload is a single binary blob mirroring the

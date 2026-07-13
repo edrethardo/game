@@ -49,14 +49,14 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
     }
 
     // --- Quickbar (bottom center) ---
+    // Geometry comes from the shared quickbarLayout() so these rects land exactly on the drawn
+    // slots. Iterates QUICKBAR_SLOTS, so the returned index is always one the Quickbar:: API will
+    // accept — which is what makes drag-assign / reorder / remove work at all.
     {
-        f32 totalW = QB_SLOTS * QB_SIZE + (QB_SLOTS - 1) * QB_GAP;
-        f32 startX = (static_cast<f32>(sw) - totalW) * 0.5f;
-        f32 baseY = 20.0f;
-
-        for (u32 i = 0; i < QB_SLOTS; i++) {
-            f32 x = startX + static_cast<f32>(i) * (QB_SIZE + QB_GAP);
-            if (fmx >= x && fmx <= x + QB_SIZE && fmy >= baseY && fmy <= baseY + QB_SIZE) {
+        const QuickbarRects qb = quickbarLayout(sw, sh);
+        for (u32 i = 0; i < QUICKBAR_SLOTS; i++) {
+            f32 x = qb.startX + static_cast<f32>(i) * (qb.slot + qb.gap);
+            if (fmx >= x && fmx <= x + qb.slot && fmy >= qb.baseY && fmy <= qb.baseY + qb.slot) {
                 result.panel = SlotHit::QUICKBAR;
                 result.index = static_cast<u8>(i);
                 return result;
@@ -67,6 +67,81 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
     return result; // NONE
 }
 
+// The one definition of where the quickbar sits. Mirrors HUD::drawQuickbar's anchor: the bar is
+// centred horizontally, then nudged right by FLASK_CLUSTER_SHIFT to clear the potion flask.
+InventoryUI::QuickbarRects InventoryUI::quickbarLayout(u32 sw, u32 sh) {
+    QuickbarRects r;
+    const f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    r.slot = QB_SIZE * uiScale;
+    r.gap  = QB_GAP  * uiScale;
+
+    const f32 totalW = QUICKBAR_SLOTS * r.slot + (QUICKBAR_SLOTS - 1) * r.gap;
+    r.startX = (static_cast<f32>(sw) - totalW) * 0.5f + FLASK_CLUSTER_SHIFT * uiScale;
+    r.baseY  = 20.0f * uiScale;
+    return r;
+}
+
 bool InventoryUI::isInsideAnyPanel(u32 sw, u32 sh, s32 mx, s32 my) {
     return hitTest(sw, sh, mx, my).panel != SlotHit::NONE;
+}
+
+// Anchor math for the two skill bars, kept here (pure, testable) instead of copied into the HUD and
+// the inventory screen. Mirrors renderSkillsHUD: the class bar sits immediately LEFT of the
+// quickbar, and the equip bar is centred 8px above it. The whole cluster is nudged right by
+// FLASK_CLUSTER_SHIFT to clear the potion flask.
+InventoryUI::SkillBarRects InventoryUI::skillBarLayout(u32 sw, u32 sh, u32 equipCount) {
+    SkillBarRects r;
+    const f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    r.slot = SKILL_SLOT * uiScale;
+    r.gap  = SKILL_GAP  * uiScale;
+    if (equipCount > MAX_EQUIP_SKILL_SLOTS) equipCount = MAX_EQUIP_SKILL_SLOTS;
+    r.equipCount = equipCount;
+
+    // Anchor off the shared quickbar layout rather than re-deriving it, so the class bar can never
+    // drift away from the left edge of the bar it is supposed to sit flush against.
+    const f32 qbX = quickbarLayout(sw, sh).startX;
+
+    const f32 classW = CLASS_SKILL_SLOTS * r.slot + (CLASS_SKILL_SLOTS - 1) * r.gap;
+    r.classX = qbX - classW - 12.0f * uiScale;
+    r.classY = 14.0f * uiScale;
+
+    if (equipCount > 0) {
+        const f32 equipW = equipCount * r.slot + (equipCount - 1) * r.gap;
+        r.equipX = r.classX + (classW - equipW) * 0.5f;   // centred over the class bar
+        r.equipY = r.classY + r.slot + 8.0f * uiScale;    // one slot + 8px above
+    }
+    return r;
+}
+
+bool InventoryUI::skillSlotAt(const SkillBarRects& r, s32 mx, s32 my,
+                              bool& outIsClassBar, u8& outIndex) {
+    const f32 fmx = static_cast<f32>(mx);
+    const f32 fmy = static_cast<f32>(my);
+    const f32 stride = r.slot + r.gap;
+
+    // Class bar (always present).
+    if (fmy >= r.classY && fmy <= r.classY + r.slot) {
+        for (u32 s = 0; s < CLASS_SKILL_SLOTS; s++) {
+            const f32 sx = r.classX + s * stride;
+            // Upper bound is sx + slot, NOT sx + stride — the gap between two slots belongs to
+            // neither, so hovering it must show no tooltip rather than the slot to its left.
+            if (fmx >= sx && fmx <= sx + r.slot) {
+                outIsClassBar = true;
+                outIndex = static_cast<u8>(s);
+                return true;
+            }
+        }
+    }
+    // Equip bar (only when something is equipped that grants a skill).
+    if (r.equipCount > 0 && fmy >= r.equipY && fmy <= r.equipY + r.slot) {
+        for (u32 s = 0; s < r.equipCount; s++) {
+            const f32 sx = r.equipX + s * stride;
+            if (fmx >= sx && fmx <= sx + r.slot) {
+                outIsClassBar = false;
+                outIndex = static_cast<u8>(s);
+                return true;
+            }
+        }
+    }
+    return false;
 }

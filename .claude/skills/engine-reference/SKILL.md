@@ -21,7 +21,7 @@ skill.
 | `Entity` | `game/entity.h` | Enemy NPC. `flags` bitmask: `ENT_ACTIVE/FLYING/DEAD`. `aiState`: `IDLE/CHASE/ATTACK/FLYBY/DEAD`. `enemyRole` is a u8 bitmask (see `EnemyRole` namespace). `bossDefIdx` links to `BossDefTable`. |
 | `BossDef` / `BossDefTable` | `game/boss_def.h` | Boss definition loaded from `bosses.json`. Stats, role bitmask, AI personality, skill, projectile, loot guarantee. |
 | `BossPersonality` | `game/boss_def.h` | `BERSERKER/KITER/TELEPORTER/DUELIST` — overrides FSM state selection for bosses |
-| `Projectile` | `game/projectile.h` | `projFlags`: `PROJ_ORB/ORB_SHARD/GRAVITY/SPLASH/SPARK/VOID/BOUNCE`. `PROJ_BOUNCE` (chakram) reflects off walls `v'=v-2(v·n)n` using the raycast normal, up to `bouncesLeft` times (server-authoritative, runtime-only — NOT on the wire; clients interpolate the bounced path). **The CLIENT re-simulates the bounce on its own predicted ghosts** (the `p.predicted` tick in `tickSharedSystems`, `engine_update.cpp`) rather than replicating it: the reflection is deterministic (an axis-aligned face flips exactly one velocity component, so both sides agree on the outgoing direction) and the client holds the same `LevelGrid`, so the ghost follows the real path instead of sailing through the wall — and that is also the only way the client hears the ricochet SFX, since `ProjectileSystem::update` (which plays it) is gated off on CLIENT. That tick must ALSO mirror the `PROJ_INFINITE_BOUNCE` lifetime rule (counts UP as an age, never times out) or the Infinity Chakram's ghost dies a few seconds in and takes its bounces with it. Ghosts exist only for the local player's own projectiles, so OTHER players' chakrams are covered by a second, complementary mechanism: a **snapshot-side bounce DETECTOR** in `clientNetPost` (`engine_net.cpp`). It needs no wire change — `SnapProjectile` already carries a stable `poolIndex`, the full `projFlags` byte and the velocity, and `Client::interpolateProjectiles` takes velocity straight from the newer snapshot instead of lerping it, so a reflection shows up as one sharp direction flip; the detector tracks each bounce-projectile's unit velocity per render slot and plays the SFX when it swings past ~25°. It runs AFTER the ghost merge, which is what keeps it from double-playing: predicted ghosts are skipped explicitly (`p.predicted`), and our own authoritative copy is `active=false` while match-and-keep holds its ghost canonical. **Own chakram → ghost (immediate); everyone else's → detector (one interp delay late, which is correct for a remote event).** |
+| `Projectile` | `game/projectile.h` | `projFlags`: `PROJ_ORB/ORB_SHARD/GRAVITY/SPLASH/SPARK/VOID/BOUNCE`. `PROJ_BOUNCE` (chakram) reflects off walls `v'=v-2(v·n)n` using the raycast normal, up to `bouncesLeft` times (server-authoritative, runtime-only — NOT on the wire; clients interpolate the bounced path). **The CLIENT re-simulates the bounce on its own predicted ghosts** (the `p.predicted` tick in `tickSharedSystems`, `engine_update.cpp`) rather than replicating it: the reflection is deterministic (an axis-aligned face flips exactly one velocity component, so both sides agree on the outgoing direction) and the client holds the same `LevelGrid`, so the ghost follows the real path instead of sailing through the wall — and that is also the only way the client hears the ricochet SFX, since `ProjectileSystem::update` (which plays it) is gated off on CLIENT. That tick must ALSO mirror the `PROJ_INFINITE_BOUNCE` lifetime rule (counts UP as an age, never times out) or the Infinity Chakram's ghost dies a few seconds in and takes its bounces with it. Ghosts exist only for the local player's own projectiles, so OTHER players' chakrams are covered by a second, complementary mechanism: a **snapshot-side bounce DETECTOR** in `clientNetPost` (`engine_net.cpp`). It needs no wire change — `SnapProjectile` already carries a stable `poolIndex`, the full `projFlags` byte and the velocity, and `Client::interpolateProjectiles` takes velocity straight from the newer snapshot instead of lerping it, so a reflection shows up as one sharp direction flip; the detector tracks each bounce-projectile's unit velocity per render slot and plays the SFX when it swings past ~25°. It runs AFTER the ghost merge, which is what keeps it from double-playing: predicted ghosts are skipped explicitly (`p.predicted`), and our own authoritative copy is `active=false` while match-and-keep holds its ghost canonical. **Own chakram → ghost (immediate); everyone else's → detector (one interp delay late, which is correct for a remote event).** | A player projectile can also carry an on-hit STATUS for the entity it strikes: `freezeDuration`, `stunDuration` (also applied across the whole splash radius), and `poisonDuration`/`poisonDps` (DoT credited to `ownerSlot` so a kill lands on the firer). These are distinct from `onHitEffect`/`onHitDuration`, which are the mirror image — what an ENEMY projectile applies to the PLAYER — and are NOT read on the entity path.
 | `ItemDef` / `ItemInstance` | `game/item.h` | Static template vs rolled runtime item. `defId == 0xFFFF` ⇒ empty |
 | `AffixDef` / `Affix` | `game/item.h` | `validSlots` is a bitmask of `ItemSlot` values |
 | `WeaponDef` / `WeaponState` | `game/weapon.h` | `WeaponType`: MELEE/HITSCAN/PROJECTILE selects path in `Combat` |
@@ -43,6 +43,75 @@ Important caps (search the header for the constant if you need to grow it):
 (Full mechanics behind the condensed Split-screen principle in `CLAUDE.md`.)
 
 **Split-screen (couch co-op).** Up to `MAX_LOCAL_PLAYERS` (=2, `static_assert`-locked) local players, mutually exclusive with networking (`m_splitPlayerCount` forced to 1 when `NetRole != NONE`). Per-player state lives in `m_localPlayers[]`/`m_cameras[]`/… and is copied into "active aliases" (`m_localPlayer`/`m_camera`/…) by `swapInPlayer(idx)` before each player's `gameUpdate`, then copied back by `swapOutPlayer(idx)`. **The alias↔array field list is single-sourced** by the `LOCAL_PLAYER_SWAP_FIELDS` X-macro in `engine.cpp` — add a per-player field there (and the matching array in `engine.h`) and both swap directions follow automatically; the `m_classSkillStates` array is the one manually-paired exception. `m_localPlayerIndex` (set by `swapInPlayer`) is the **single** "current player" index — there is no separate `m_activePlayerIndex`. **Shared world systems run exactly once per frame in `Engine::tickSharedSystems`** (`engine_update.cpp`), called AFTER the per-player loop — AI, projectiles, entity timers, world items, shared FX, meteors, particles, enemy speech/chat decay. It picks the first **alive** local player as the AI/projectile primary and passes the other living locals (or, on SERVER, remote `Player` views) as extras, so nothing freezes when one local player is dead. Per-viewport rendering loops the same `swapInPlayer(sp)` and interpolates each player's camera *inside* the loop (`engine_render.cpp`); keyboard+mouse are gated to player 0 (`Input::getActivePlayer()==0`), controllers route per-slot via `Input::setActivePlayer`.
+
+## Inventory (Tab) screen — skill bars
+
+The Tab screen draws the **class skill bar + equipment skill bar** at the SAME anchor the in-game HUD
+uses (bottom, left of the quickbar), so they don't move when you open it. Hovering a slot with the
+mouse — or selecting it with the D-pad — pops a skill tooltip (name, description, and the stats read
+straight off `SkillDef`, printed only when non-zero so the block can't claim a cost the skill doesn't
+charge).
+
+- **Geometry is single-sourced** in `InventoryUI::skillBarLayout` / `skillSlotAt`
+  (`game/inventory_ui.{h,cpp}`, pure + unit-tested in `tests/game/test_skill_bar_hit.cpp`). Both
+  `renderSkillsHUD` and the inventory screen anchor off it — the panel/slot math on this screen was
+  already copy-pasted in four places, so **do not add a fifth**.
+- **Draw order IS the layering.** `renderInventoryHUD` draws the bars BEFORE `HUD::drawInventoryScreen`;
+  HUD primitives are batched in submission order, so the item tooltips (drawn last, inside it) paint
+  OVER the bars. That is deliberate — while an item tooltip is up the player is reading the item.
+  There is no repositioning or z-logic; if you reorder those calls the bars will cover the tooltips.
+- **The gamepad synthesizes a cursor position** (`Engine::inventoryCursorToMouse`) so hover and
+  selection are ONE code path, not two. `m_invCursorPanel` is now a 4-way cycle
+  (`INV_PANEL_BACKPACK/EQUIPMENT/CLASS_SKILL/EQUIP_SKILL`, L/R shoulder), skipping the equip-skill
+  panel when nothing equipped grants one. Pass `selectedSlot = 0xFF` while on a skill panel so neither
+  item panel paints a phantom highlight.
+- `Engine::buildEquipSkillSlots` builds the equip bar for BOTH screens (fixed order: boots, helmet,
+  armor aura, weapon proc, ring passive, gloves passive) and reports each entry's source `ItemSlot` —
+  the tooltip needs it, since Blood Nova reads differently on a weapon vs on armor.
+
+## Quickbar
+
+**It is a WEAPON-SWAP bar, not a consumable hotbar.** There are no consumable items in the game
+(`ItemSlot` has no CONSUMABLE, `ItemInstance` has no stack count); the healing flask is a separate,
+item-less infinite heal on a cooldown (`GameConst::POTION_*`, `GameAction::POTION` = Q / pad B).
+`QuickbarState` (`game/item.h`) is `QUICKBAR_SLOTS` (=4) refs into the backpack/equipment
+(`BACKPACK_REF`/`EQUIPPED_REF`, UID-validated), and the bar's only verb is **equip**.
+
+- **Controls.** KB/M: mouse wheel selects, middle-click (`GameAction::QUICKBAR_USE`) equips.
+  Gamepad: **L + D-pad Up/Right/Down/Left = slots 1-4**, selecting AND equipping in one press —
+  four directions, four slots, and no pad "use" button is needed. Same direction order as the
+  bare-D-pad class skills. There are **no number-key bindings** (1-4 are the class skills).
+  `Engine::useQuickbarSlot(slot)` is the single equip path both routes call.
+- **`sendInventorySync()` is mandatory on every equip.** The server fires a client's weapon from
+  its OWN copy of that client's inventory (`handleWeaponFireForPlayer`), so an equip that doesn't
+  push leaves the guest dealing the OLD weapon's damage while their screen shows the new one.
+  (`CL_EQUIP_ITEM` in `net.h` is a dead enum value — never sent, never handled. Don't reach for it;
+  `CL_INVENTORY_SYNC` is the live path.)
+- **Geometry is single-sourced** in `InventoryUI::quickbarLayout` (`game/inventory_ui.{h,cpp}`,
+  pure + unit-tested in `tests/game/test_quickbar.cpp`). `HUD::drawQuickbar`, `InventoryUI::hitTest`
+  and `skillBarLayout` all derive from it. `drawQuickbar` deliberately has **no `xShift` parameter** —
+  a caller-supplied offset is exactly how the drawn bar and the click rects drifted apart before.
+- `Quickbar::syncWeaponSlot` also **reclaims** `BACKPACK_REF`s whose item is gone. Without that a
+  dropped item's slot still reads `BACKPACK_REF` (so it draws blank but the `type == EMPTY` free-slot
+  scan skips it) and permanently jams one of the four slots.
+
+## Input bindings — the enum ordinal IS the file format
+
+`Input::saveBindings` writes `controls.json` as one row per action **keyed by `GameAction` ordinal**.
+So: **rename members in place, append new ones before `COUNT`, never insert or remove** — any shift
+silently re-maps every existing player's bindings onto the wrong actions. (`DODGE`,
+`CHARACTER_SCREEN`, `QUICKBAR_SLOT_3/4` sit out of thematic order at the tail for this reason.)
+
+Two further constraints:
+- Only actions `0..INVENTORY` appear in the rebind UI (`REBIND_COUNT`, `engine_render_menus.cpp`).
+  An action past that is unrebindable — fine for chords like the quickbar slots, wrong for anything
+  a player expects to remap.
+- **Changing an action's DEFAULT binding needs a migration.** `loadBindings` overwrites defaults
+  row-by-row, so a previously-saved file's stale row silently beats the new default. Bump
+  `BINDINGS_REV` (written as the `CFG_BINDINGS_REV` sentinel row, index 1005) and repair the
+  affected actions at the tail of `loadBindings` — restoring only the controller *or* keyboard half
+  so the player's other customizations survive. Sentinel rows are ignored by readers that guard
+  `idx < COUNT`, so the format stays backward-compatible.
 
 ## Game Loop (per frame)
 
@@ -101,7 +170,7 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 
 `assets/config/affixes.json` — array under `"affixes"`. Per entry: `type` (one of the `AffixType` enum values, snake_case), `name`, `slots` (array of slot strings — converted to bitmask), `minValue`, `maxValue`. Loader: `ItemLoader::loadAffixDefs`.
 
-`assets/config/skills.json` — array under `"skills"`. Common fields: `id` (matches `SkillId` enum), `name`, `cooldown`, `energyCost`, `damage`. Per-skill specifics: orb (`orbDamage`/`shardDamage`/`shardCount`/`shardInterval`/`orbSpeed`/`shardSpeed`/`orbRadius`/`shardRadius`/`duration`/`angleStepDeg`), chain (`bounces`/`bounceRange`/`damageFalloff`), nova (`healthCostPct`/`radius`), meteor (`delay`/`radius`), dash (`distance`/`corridorWidth`/`invulnDuration`).
+`assets/config/skills.json` — array under `"skills"`. Common fields: `id` (matches `SkillId` enum), `name`, **`description`** (player-facing tooltip prose, `\n`-separated, ≤2 lines, ≤127 B — it lands in `SkillDef.description[128]`, so a longer string is silently truncated by `strncpy`), `cooldown`, `energyCost`, `damage`. Per-skill specifics: orb (`orbDamage`/`shardDamage`/`shardCount`/`shardInterval`/`orbSpeed`/`shardSpeed`/`orbRadius`/`shardRadius`/`duration`/`angleStepDeg`), chain (`bounces`/`bounceRange`/`damageFalloff`), nova (`healthCostPct`/`radius`), meteor (`delay`/`radius`), dash (`distance`/`corridorWidth`/`invulnDuration`), **poison (`poisonDps` + `duration` — Poison Arrow), stun (`stunDuration` — Stun Grenade)**.
 
 `assets/config/weapons.json` — currently a static fallback table; the live weapon table is built in code by `initWeaponTable` in `game/weapon.h`. Weapon stats actually used in-game come from equipped `ItemInstance`s via `Inventory::getEffectiveWeapon`.
 

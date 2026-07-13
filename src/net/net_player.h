@@ -43,6 +43,8 @@ static constexpr u8 INPUT_RIGHT    = 1 << 2;
 static constexpr u8 INPUT_LEFT     = 1 << 3;
 static constexpr u8 INPUT_JUMP     = 1 << 4;
 static constexpr u8 INPUT_FIRE     = 1 << 5;
+// RESERVED — always 0. Fed by the cut lock-on feature and read by nobody. Kept so the flags byte
+// layout (and therefore the wire format) is unchanged; reuse this bit rather than growing the byte.
 static constexpr u8 INPUT_LOCK     = 1 << 6;
 
 // Extended input (sent in a second byte)

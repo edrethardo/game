@@ -68,36 +68,39 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
     Input::getMousePosition(invMX, invMY);
     invMY = static_cast<s32>(sh) - invMY; // flip to HUD coords
 
-    // When using controller, override mouse position with D-pad cursor
+    // On a controller, drive the cursor from the D-pad selection instead of the physical mouse — the
+    // hover tooltip (items AND skills) then follows the selection with no second code path.
+    // Shared with updateInventoryInteraction; this used to be a second copy of the same math.
     if (Input::isGamepadConnected(0)) {
-        // Scale layout relative to 720p reference (matches hud.cpp / inventory_ui.cpp)
-        f32 uiScale = static_cast<f32>(sh) / 720.0f;
-        f32 bpCell = InventoryUI::BP_CELL * uiScale;
-        f32 bpGap  = InventoryUI::BP_GAP * uiScale;
-        f32 eqH    = InventoryUI::EQ_H * uiScale;
-        f32 eqW    = InventoryUI::EQ_W * uiScale;
-        f32 eqGap  = InventoryUI::EQ_GAP * uiScale;
-
-        if (m_invCursorPanel == 0) {
-            u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
-            u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
-            f32 bpX = static_cast<f32>(sw) * 0.42f;
-            f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
-            invMX = static_cast<s32>(bpX + col * (bpCell + bpGap) + bpCell * 0.5f);
-            invMY = static_cast<s32>(bpStartY - row * (bpCell + bpGap) + bpCell * 0.5f);
-        } else {
-            f32 eqX = static_cast<f32>(sw) * 0.12f;
-            f32 eqStartY = static_cast<f32>(sh) * 0.5f + 220.0f * uiScale;
-            invMX = static_cast<s32>(eqX + eqW * 0.5f);
-            invMY = static_cast<s32>(eqStartY - m_invCursorIndex * (eqH + eqGap) + eqH * 0.5f);
-        }
+        inventoryCursorToMouse(sw, sh, invMX, invMY);
     }
 
-    // Pass controller cursor selection for highlight rendering
-    u8 selSlot = Input::isGamepadConnected(0) ? m_invCursorIndex : 0;
+    // --- Skill bars ---------------------------------------------------------------------------
+    // Drawn BEFORE drawInventoryScreen on purpose. HUD primitives are batched in submission order,
+    // so anything drawn later paints on top — which is exactly how the item tooltips (drawn last,
+    // inside drawInventoryScreen) end up OBSTRUCTING these bars. That is the intended behavior:
+    // while an item tooltip is up the player is reading the item, not the skills. No repositioning,
+    // no z-logic — just order.
+    //
+    // Position is the in-game anchor (shared layout), so the bars don't move when you open the Tab
+    // screen. The quickbar is still drawn during inventory and sits to the RIGHT of this, so nothing
+    // collides.
+    HUD::EquipSkillSlot equipSlots[MAX_EQUIP_SKILL_SLOTS];
+    ItemSlot            equipSources[MAX_EQUIP_SKILL_SLOTS];   // which slot each skill came from
+    const u32 equipCount = buildEquipSkillSlots(equipSlots, equipSources);
+    const auto sb = InventoryUI::skillBarLayout(sw, sh, equipCount);
+    renderInventorySkillBars(sw, sh, sb, equipSlots, equipCount, equipSources, invMX, invMY);
+
+    // Pass controller cursor selection for highlight rendering.
+    // 0xFF = "no item selected": when the controller cursor is parked on a skill bar, neither item
+    // panel may paint a highlight. (Note the pre-existing quirk this also sidesteps — selEquip=false
+    // with selSlot=0 always lit backpack cell 0.)
+    const bool onSkillPanel = Input::isGamepadConnected(0) && m_invCursorPanel >= 2;
+    u8 selSlot = (Input::isGamepadConnected(0) && !onSkillPanel) ? m_invCursorIndex : 0xFF;
     bool selEquip = Input::isGamepadConnected(0) && m_invCursorPanel == 1;
     HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
-                              m_itemDefs, selSlot, selEquip, invMX, invMY);
+                              m_itemDefs, m_skillDefs, m_skillDefCount,
+                              selSlot, selEquip, invMX, invMY);
 
     // Draw dragged item icon at cursor position
     if (isDragActive(m_dragState)) {
@@ -135,7 +138,8 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
         HUD::drawKeySymbol(sw, sh, hintX + 240.0f, hintY, "L", true);
         FontSystem::drawText(sw, sh, hintX + 262.0f, hintY + 3.0f, "/", {0.6f, 0.6f, 0.6f}, 1);
         HUD::drawKeySymbol(sw, sh, hintX + 272.0f, hintY, "R", true);
-        FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Panel", {0.6f, 0.6f, 0.6f}, 1);
+        // L/R now cycles four panels (backpack / equipment / class skills / equip skills), not two.
+        FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Panels", {0.6f, 0.6f, 0.6f}, 1);
     }
 
     // Equip tutorial — shown until the player equips an item (floor 1 only)
@@ -163,7 +167,142 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
 // flask that now occupies the old bottom-left gutter (flask spans x≈228..272 at baseline).
 // This reopens an ammo gutter to the flask's right wide enough for the full "N / M"
 // readout (~88px for the widest SMG clips) before the class skill bar begins.
-static constexpr f32 kFlaskClusterShift = 100.0f;
+// Single-sourced from InventoryUI so the skill-bar layout helper and the quickbar/ammo
+// callers here can never disagree about where the bottom cluster sits.
+static constexpr f32 kFlaskClusterShift = InventoryUI::FLASK_CLUSTER_SHIFT;
+
+// Draw the class + equipment skill bars on the INVENTORY screen, plus the hover/selection tooltip.
+//
+// The bars themselves are the same widgets the in-game HUD draws, at the same anchor — the point is
+// that they don't move when you open Tab. What's new here is that a slot can be interrogated:
+// hovering it with the mouse (or selecting it with the D-pad, which synthesizes the same cursor
+// position) pops a tooltip explaining what the skill actually does.
+//
+// Called BEFORE HUD::drawInventoryScreen so the item tooltips paint over these — see the call site.
+void Engine::renderInventorySkillBars(u32 sw, u32 sh,
+                                      const InventoryUI::SkillBarRects& sb,
+                                      const HUD::EquipSkillSlot* equipSlots, u32 equipCount,
+                                      const ItemSlot* equipSources,
+                                      s32 mx, s32 my) {
+    const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
+    // Effective floor folds in difficulty, so Nightmare/Hell show everything unlocked — same rule the
+    // in-game bar uses, so a skill can't look locked here and usable there.
+    const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+
+    f32 cooldowns[4], maxCooldowns[4];
+    u8  skillIdBytes[4];
+    for (u32 s = 0; s < 4; s++) {
+        cooldowns[s] = m_classSkillStates[s].cooldownTimer;
+        const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, cls.skills[s]);
+        maxCooldowns[s] = sd ? sd->cooldown : 1.0f;
+        skillIdBytes[s] = static_cast<u8>(cls.skills[s]);
+    }
+
+    // flashTimers = nullptr: the green "ready" pop is combat feedback and means nothing on a paused
+    // inventory screen (and its timers are private statics inside renderSkillsHUD anyway).
+    HUD::drawClassSkillBar(sw, sh, sb.classX, sb.classY,
+                           m_activeClassSkill, effectiveFloor,
+                           cls.skillUnlockFloor, cls.skillUpgradeFloor,
+                           cooldowns, maxCooldowns, nullptr, skillIdBytes);
+    if (equipCount > 0) {
+        HUD::drawEquipSkillBar(sw, sh, sb.equipX, sb.equipY, equipSlots, equipCount);
+    }
+
+    // --- Hover / selection -------------------------------------------------------------------
+    bool isClassBar = false;
+    u8   idx = 0;
+    if (!InventoryUI::skillSlotAt(sb, mx, my, isClassBar, idx)) return;
+
+    // Cursor ring on the hovered slot. Drawn here rather than by passing the index as
+    // drawClassSkillBar's `activeSlot`, which means "the skill bound to right-click" — a different
+    // concept that we must not clobber just to show a hover.
+    const f32 hx = (isClassBar ? sb.classX : sb.equipX) + idx * (sb.slot + sb.gap);
+    const f32 hy = (isClassBar ? sb.classY : sb.equipY);
+    const Vec3 hoverCol = {1.0f, 0.9f, 0.4f};
+    HUD::drawRectAt(sw, sh, hx - 2.0f, hy - 2.0f, sb.slot + 4.0f, 2.0f, hoverCol);              // bottom
+    HUD::drawRectAt(sw, sh, hx - 2.0f, hy + sb.slot, sb.slot + 4.0f, 2.0f, hoverCol);           // top
+    HUD::drawRectAt(sw, sh, hx - 2.0f, hy - 2.0f, 2.0f, sb.slot + 4.0f, hoverCol);              // left
+    HUD::drawRectAt(sw, sh, hx + sb.slot, hy - 2.0f, 2.0f, sb.slot + 4.0f, hoverCol);           // right
+
+    HUD::SkillTooltipInfo info;
+    SkillId id = SkillId::NONE;
+    // ItemSlot::COUNT = "not riding in an item", which is what suppresses the per-slot overrides for
+    // a class skill (a Paladin CASTING Divine Judgment must not get the Phoenix Band's ring text).
+    ItemSlot slot = ItemSlot::COUNT;
+    char subtitle[48];
+
+    if (isClassBar) {
+        id = cls.skills[idx];
+        info.unlockFloor  = cls.skillUnlockFloor[idx];
+        info.upgradeFloor = cls.skillUpgradeFloor[idx];
+        info.unlocked     = effectiveFloor >= info.unlockFloor;
+        info.upgraded     = effectiveFloor >= info.upgradeFloor;
+        std::snprintf(subtitle, sizeof(subtitle), "Class Skill - %s", cls.name);
+    } else {
+        id   = static_cast<SkillId>(equipSlots[idx].skillId);
+        slot = equipSources[idx];
+        info.unlocked = true;   // if it's on the bar, it's equipped and live
+        std::snprintf(subtitle, sizeof(subtitle), "Legendary - %s",
+                      slot == ItemSlot::WEAPON  ? "Weapon"  :
+                      slot == ItemSlot::ARMOR   ? "Armor"   :
+                      slot == ItemSlot::BOOTS   ? "Boots"   :
+                      slot == ItemSlot::HELMET  ? "Helmet"  :
+                      slot == ItemSlot::RING    ? "Ring"    :
+                      slot == ItemSlot::GLOVES  ? "Gloves"  : "Offhand");
+    }
+    if (id == SkillId::NONE) return;   // an empty class slot (class has fewer than 4) — nothing to say
+
+    info.name        = HUD::resolveSkillName(id, m_skillDefs, m_skillDefCount);
+    info.description = HUD::resolveSkillDescription(id, slot, m_skillDefs, m_skillDefCount);
+    info.def         = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, id);
+    info.subtitle    = subtitle;
+
+    // Anchor above the hovered slot; drawSkillTooltip clamps itself to the screen, so a slot near the
+    // left edge is handled without special-casing.
+    HUD::drawSkillTooltip(sw, sh, hx, hy + sb.slot + 8.0f, info);
+}
+
+// Gather the legendary equipment skills into the equip-bar slot list, in a FIXED order (boots,
+// helmet, armor aura, weapon proc, ring passive, gloves passive). Shared by the in-game HUD and the
+// inventory screen so both render the same bar and a hovered slot index means the same thing in
+// both — if the inventory screen rebuilt this list itself, the two could silently drift and a
+// tooltip would describe the wrong skill.
+//
+// `out` must hold MAX_EQUIP_SKILL_SLOTS. Returns the number filled. readyFlash is left at 0; only
+// the in-game HUD tracks the pop (it is combat feedback, meaningless on a paused inventory screen).
+u32 Engine::buildEquipSkillSlots(HUD::EquipSkillSlot* out, ItemSlot* outSlots) const {
+    u32 n = 0;
+    const bool pad = Input::activeDeviceIsGamepad();
+
+    // outSlots records WHICH equipment slot each entry came from. The tooltip needs it: a skill can
+    // read differently per slot (Blood Nova is a free proc on a weapon but a health-sacrificing
+    // retaliation on armor), and without the slot the skill-bar tooltip would show the generic text
+    // while the item's own tooltip showed the specific one — the exact disagreement this feature is
+    // built to prevent.
+    auto push = [&](SkillId id, ItemSlot from, f32 cd, f32 maxCd, const char* key, bool passive) {
+        if (id == SkillId::NONE || n >= MAX_EQUIP_SKILL_SLOTS) return;
+        const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, id);
+        if (outSlots) outSlots[n] = from;
+        out[n++] = { static_cast<u8>(id), cd, maxCd, key, sd ? sd->name : "???", passive, 0.0f };
+    };
+
+    const SkillState& boots = m_bootSkillStates[m_localPlayerIndex];
+    const SkillState& helm  = m_helmetSkillStates[m_localPlayerIndex];
+    const SkillDef* bootDef = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, boots.activeSkill);
+    const SkillDef* helmDef = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, helm.activeSkill);
+
+    push(boots.activeSkill, ItemSlot::BOOTS,  boots.cooldownTimer, bootDef ? bootDef->cooldown : 1.0f, pad ? "L+A" : "F", false);
+    push(helm.activeSkill,  ItemSlot::HELMET, helm.cooldownTimer,  helmDef ? helmDef->cooldown : 1.0f, pad ? "L+B" : "G", false);
+    push(m_armorAura,  ItemSlot::ARMOR,  0.0f, 0.0f, "", true);
+    push(m_weaponProc, ItemSlot::WEAPON, 0.0f, 0.0f, "", true);
+    // Ring passive shares the Second Wind cooldown slot; Divine Judgment's is 45 s, the rest 60 s.
+    push(m_ringPassive, ItemSlot::RING, m_localPlayer.secondWindCooldown,
+         (m_ringPassive == SkillId::DIVINE_JUDGMENT) ? 45.0f : 60.0f, "", true);
+    // Gloves (Frenzy): the bar shows the "you have this passive" icon; the live stack count is in the
+    // status bar ("FRN"), since passive slots render "auto" and ignore the key label.
+    push(m_glovesPassive, ItemSlot::GLOVES, 0.0f, 0.0f, "", true);
+    return n;
+}
 
 // renderSkillsHUD — class skill bar + equip skill bar + active skill display.
 // Called only in the non-inventory (normal) HUD branch.
@@ -171,19 +310,13 @@ static constexpr f32 kFlaskClusterShift = 100.0f;
 void Engine::renderSkillsHUD(u32 sw, u32 sh) {
     // Class skill bar — 4 slots to the LEFT of the quickbar
     {
-        f32 hs4 = static_cast<f32>(sh) / 720.0f;
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
-        // Quickbar is 4 slots × 40px + 3 gaps × 4px = 172px, centered (scaled)
-        f32 qbTotalW = QUICKBAR_SLOTS * 40.0f * hs4 + (QUICKBAR_SLOTS - 1) * 4.0f * hs4;
-        f32 qbX = (static_cast<f32>(sw) - qbTotalW) * 0.5f;
-        // Skill bar: 4×64px slots + 3×4px gaps = 268px (scaled)
-        f32 skillBarW = 4 * 64.0f * hs4 + 3 * 4.0f * hs4;
-        // Nudge the whole cluster right of the potion flask (see kFlaskClusterShift). qbX
-        // moves too so the quickbar (drawn separately in renderHUD with the same shift) and
-        // this skill bar keep their relative spacing.
-        qbX += kFlaskClusterShift * hs4;
-        f32 skillBarX = qbX - skillBarW - 12.0f * hs4;
-        f32 skillBarY = 14.0f * hs4; // align with quickbar bottom area
+        // Anchors come from the shared, unit-tested layout (game/inventory_ui.h) instead of being
+        // computed here: the inventory screen re-draws these same bars and hit-tests their slots, so
+        // the geometry has to have exactly ONE definition or the tooltip lands on the wrong skill.
+        const auto sb0 = InventoryUI::skillBarLayout(sw, sh, 0);
+        f32 skillBarX = sb0.classX;
+        f32 skillBarY = sb0.classY;
 
         f32 cooldowns[4];
         f32 maxCooldowns[4];
@@ -219,68 +352,10 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
 
         // Equipment skill bar — shows active legendary equipment skills above class bar
         {
-            // 6 sources can push here: boots, helmet, armor aura, weapon proc, ring passive,
-            // gloves passive. (Was [4] — a latent overflow with 5 legendary effects equipped.)
-            HUD::EquipSkillSlot equipSlots[6];
-            u32 equipCount = 0;
-
-            bool eqPad = Input::activeDeviceIsGamepad();
-            // Boots (F key / L+A)
-            if (m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
-                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
-                                                                 m_bootSkillStates[m_localPlayerIndex].activeSkill);
-                equipSlots[equipCount++] = {
-                    static_cast<u8>(m_bootSkillStates[m_localPlayerIndex].activeSkill),
-                    m_bootSkillStates[m_localPlayerIndex].cooldownTimer, sd ? sd->cooldown : 1.0f,
-                    eqPad ? "L+A" : "F", sd ? sd->name : "???", false
-                };
-            }
-            // Helmet (G key / L+B)
-            if (m_helmetSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
-                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount,
-                                                                 m_helmetSkillStates[m_localPlayerIndex].activeSkill);
-                equipSlots[equipCount++] = {
-                    static_cast<u8>(m_helmetSkillStates[m_localPlayerIndex].activeSkill),
-                    m_helmetSkillStates[m_localPlayerIndex].cooldownTimer, sd ? sd->cooldown : 1.0f,
-                    eqPad ? "L+B" : "G", sd ? sd->name : "???", false
-                };
-            }
-            // Armor (passive aura)
-            if (m_armorAura != SkillId::NONE) {
-                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_armorAura);
-                equipSlots[equipCount++] = {
-                    static_cast<u8>(m_armorAura), 0.0f, 0.0f,
-                    "", sd ? sd->name : "???", true
-                };
-            }
-            // Weapon (on-hit proc)
-            if (m_weaponProc != SkillId::NONE) {
-                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_weaponProc);
-                equipSlots[equipCount++] = {
-                    static_cast<u8>(m_weaponProc), 0.0f, 0.0f,
-                    "", sd ? sd->name : "???", true
-                };
-            }
-            // Ring passive (proc on low HP — shows cooldown)
-            if (m_ringPassive != SkillId::NONE) {
-                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_ringPassive);
-                f32 maxCD = (m_ringPassive == SkillId::DIVINE_JUDGMENT) ? 45.0f : 60.0f;
-                equipSlots[equipCount++] = {
-                    static_cast<u8>(m_ringPassive),
-                    m_localPlayer.secondWindCooldown, maxCD,
-                    "", sd ? sd->name : "???", true
-                };
-            }
-            // Gloves passive (Frenzy) — equip bar shows the "you have this passive" icon (like the
-            // armor/weapon/ring passives below); the LIVE stack count is surfaced in the status bar
-            // (drawStatusIcons "FRN"), since passive equip slots render "auto" and ignore the label.
-            if (m_glovesPassive != SkillId::NONE) {
-                const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_glovesPassive);
-                equipSlots[equipCount++] = {
-                    static_cast<u8>(m_glovesPassive), 0.0f, 0.0f,
-                    "", sd ? sd->name : "???", true
-                };
-            }
+            // Gathered by buildEquipSkillSlots so the inventory screen re-draws the IDENTICAL bar
+            // (same slots, same order) instead of assembling its own and quietly drifting.
+            HUD::EquipSkillSlot equipSlots[MAX_EQUIP_SKILL_SLOTS];
+            u32 equipCount = buildEquipSkillSlots(equipSlots);
 
             // Green "ready" pop tracking for equip skills — parallels the class bar.
             // Index-keyed (equipped set is stable during combat); passives stay at 0.
@@ -297,14 +372,10 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
             }
 
             if (equipCount > 0) {
-                // Position above the class skill bar (scaled).
-                // Equip bar: N×64px slots + (N-1)×4px gaps
-                f32 equipBarW = equipCount * 64.0f * hs4 + (equipCount - 1) * 4.0f * hs4;
-                f32 equipBarX = skillBarX + (skillBarW - equipBarW) * 0.5f;
-                // Class bar is now 64px tall; place equip bar 8px above it
-                f32 equipBarY = skillBarY + 64.0f * hs4 + 8.0f * hs4;
-                HUD::drawEquipSkillBar(sw, sh, equipBarX, equipBarY,
-                                        equipSlots, equipCount);
+                // Anchor from the shared layout (InventoryUI::skillBarLayout) rather than repeating
+                // the math — the inventory screen must land the bar in exactly the same place.
+                const auto sb = InventoryUI::skillBarLayout(sw, sh, equipCount);
+                HUD::drawEquipSkillBar(sw, sh, sb.equipX, sb.equipY, equipSlots, equipCount);
             }
         }
     }
@@ -909,10 +980,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 if (cdPct > 1.0f) cdPct = 1.0f;
             }
         }
-        // Same rightward nudge as the skill bar so both clear the potion flask (kFlaskClusterShift).
-        f32 qbShift = kFlaskClusterShift * (static_cast<f32>(sh) / 720.0f);
+        // The flask-clearing nudge now lives inside InventoryUI::quickbarLayout, which drawQuickbar
+        // and the inventory hit-test both read — so there is nothing to pass here.
         HUD::drawQuickbar(sw, sh, m_quickbars[m_localPlayerIndex],
-                           m_inventories[m_localPlayerIndex], m_itemDefs, cdPct, qbShift);
+                           m_inventories[m_localPlayerIndex], m_itemDefs, cdPct);
     }
 
     // Profiler overlay (F3)

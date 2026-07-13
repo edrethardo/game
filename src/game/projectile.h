@@ -48,6 +48,12 @@ struct Projectile {
     f32  splashRadius = 0.0f;   // AoE radius on impact (0 = single target)
     f32  splashDamage = 0.0f;   // damage dealt in splash zone
     f32  freezeDuration = 0.0f; // freeze target on hit for this many seconds (0 = no freeze)
+    // On-hit status a PLAYER projectile applies to an ENTITY. (onHitEffect/onHitDuration below are
+    // the mirror image — what an ENEMY projectile applies to the player — and are not read on the
+    // entity path.) Both default to 0 = "applies nothing", so existing projectiles are unaffected.
+    f32  stunDuration   = 0.0f; // fully immobilize target on hit + in the splash radius (0 = none)
+    f32  poisonDuration = 0.0f; // poison DoT on a direct hit (0 = none)
+    f32  poisonDps      = 0.0f; // ...at this rate. Credit rides p.ownerSlot so a DoT kill is scored.
     Vec3 lightColor   = {0,0,0}; // dynamic point light color (zero = no light emitted)
     u8   meshId       = 0;     // weapon mesh to render (0 = default cube)
 

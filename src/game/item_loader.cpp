@@ -368,6 +368,11 @@ bool ItemLoader::loadSkillDefs(const char* path, SkillDef* defs, u32& count) {
             std::string name = entry.value("name", "unnamed");
             std::strncpy(def.name, name.c_str(), sizeof(def.name) - 1);
 
+            // Tooltip prose. Optional (same forgiving entry.value pattern as every field here), so a
+            // def that omits it still loads — the HUD then falls back to its legacy table.
+            std::string desc = entry.value("description", "");
+            std::strncpy(def.description, desc.c_str(), sizeof(def.description) - 1);
+
             def.cooldown        = entry.value("cooldown",        1.0f);
             def.energyCost      = entry.value("energyCost",      0.0f);
             def.damage          = entry.value("damage", entry.value("orbDamage", 0.0f));
@@ -375,6 +380,8 @@ bool ItemLoader::loadSkillDefs(const char* path, SkillDef* defs, u32& count) {
             def.duration        = entry.value("duration",        0.0f);
             def.projectileSpeed = entry.value("projectileSpeed", entry.value("orbSpeed", 0.0f));
             def.projectileCount = static_cast<u8>(entry.value("projectileCount", 0));
+
+            def.poisonDps     = entry.value("poisonDps",      0.0f);
 
             // Frozen Orb specifics
             def.shardDamage   = entry.value("shardDamage",   0.0f);

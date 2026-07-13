@@ -6,16 +6,29 @@ union SDL_Event;
 
 // Abstract game actions — used for rebindable input
 enum struct GameAction : u8 {
+    // ORDINALS ARE THE ON-DISK FORMAT. saveBindings() writes one row per action keyed by its enum
+    // ordinal, so members are RENAMED IN PLACE and new ones APPENDED — never inserted or removed,
+    // or every existing controls.json silently re-maps onto the wrong actions. Where a rename also
+    // changes an action's DEFAULT binding, bump CFG_BINDINGS_REV and repair it in loadBindings.
     MOVE_FORWARD, MOVE_BACKWARD, MOVE_LEFT, MOVE_RIGHT,
-    JUMP, FIRE, BLOCK, CLASS_SKILL, TARGET_LOCK,
+    // QUICKBAR_USE was TARGET_LOCK until the lock-on feature was cut (its lockActive was never set
+    // true). Kept at this ordinal because it must stay <= INVENTORY to remain listed in the rebind
+    // UI — see REBIND_COUNT in engine_render_menus.cpp.
+    JUMP, FIRE, BLOCK, CLASS_SKILL, QUICKBAR_USE,
     POTION, PICKUP, RELOAD,
     SKILL_1, SKILL_2, SKILL_3, SKILL_4,
     BOOT_SKILL, HELMET_SKILL,
     INVENTORY, PAUSE,
-    QUICKBAR_PREV, QUICKBAR_NEXT,
+    // The 4 quickbar slots, on L + D-pad (Up/Right/Down/Left) — the same direction order as the
+    // bare-D-pad class skills. Slots 1-2 reuse the ordinals of the old QUICKBAR_PREV/QUICKBAR_NEXT
+    // cycle actions they replace; slots 3-4 are appended at the tail. Ugly split, but ordinals are
+    // the file format. (These sit above INVENTORY, so like PREV/NEXT before them they are not in
+    // the rebind UI.)
+    QUICKBAR_SLOT_1, QUICKBAR_SLOT_2,
     MENU_UP, MENU_DOWN, MENU_CONFIRM, MENU_BACK,
     DODGE,
     CHARACTER_SCREEN,
+    QUICKBAR_SLOT_3, QUICKBAR_SLOT_4,
     COUNT
 };
 

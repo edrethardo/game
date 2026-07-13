@@ -51,6 +51,17 @@ static constexpr u32 CFG_GYRO_SENS    = 1001;
 static constexpr u32 CFG_MOUSE_SENS   = 1002;
 static constexpr u32 CFG_STICK_INVERT = 1003;
 static constexpr u32 CFG_GYRO_INVERT  = 1004;
+// Binding-table revision. Bumped when a DEFAULT binding changes in a way a previously-saved
+// controls.json would otherwise clobber: loadBindings overwrites defaults row-by-row, so an old
+// file's stale row silently wins over the new default. A file with no CFG_BINDINGS_REV row reads
+// as rev 0. See the migration at the tail of loadBindings().
+//   rev 1 — the quickbar moved to L + D-pad direct slot select. QUICKBAR_PREV/NEXT (ordinals 20/21)
+//           became QUICKBAR_SLOT_1/2 and their default buttons changed, so an old file's rows 20/21
+//           would restore the OLD cycle chords onto the new slot actions — leaving slot 1 on
+//           L+D-pad Left, colliding with slot 4, and slot 1's real chord dead. Slots 3/4 are new
+//           ordinals with no rows in an old file, so their defaults survive untouched.
+static constexpr u32 CFG_BINDINGS_REV = 1005;
+static constexpr s32 BINDINGS_REV     = 1;
 
 // Split-screen: which player's controller to read (0=player1, 1=player2)
 static u8 s_activePlayer = 0;
@@ -158,7 +169,9 @@ static void buildDefaults(InputBinding out[static_cast<u32>(GameAction::COUNT)])
     set(GameAction::BLOCK,         SDL_SCANCODE_LCTRL,  0, -1, -1, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 0.5f);
     set(GameAction::DODGE,         SDL_SCANCODE_LSHIFT, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
     set(GameAction::CLASS_SKILL,   -1, MOUSE_RIGHT,      SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
-    set(GameAction::TARGET_LOCK,   -1, MOUSE_MIDDLE,     -1); // L is modifier-only on gamepad, not target lock
+    // Quickbar use = equip whatever the active slot holds. KB/M only (middle-click): a gamepad has
+    // no separate "use" button because L + D-pad selects a slot AND equips it in one press (below).
+    set(GameAction::QUICKBAR_USE,  -1, MOUSE_MIDDLE,     -1);
 
     // Items / utility
     set(GameAction::POTION,        SDL_SCANCODE_Q,      0, SDL_CONTROLLER_BUTTON_B);
@@ -182,8 +195,17 @@ static void buildDefaults(InputBinding out[static_cast<u32>(GameAction::COUNT)])
     // INVENTORY is bare "+" (START); the shared-button collision is resolved in checkActionRaw,
     // where a bare binding yields to a chord that claims the same button while L is held.
     set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_C,      0, SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-    set(GameAction::QUICKBAR_PREV, -1,                  0, SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-    set(GameAction::QUICKBAR_NEXT, -1,                  0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    // Quickbar slots 1-4 on L + D-pad, in the SAME direction order as the bare-D-pad class skills
+    // (Up/Right/Down/Left) so the two bars feel like one system. Each press selects that slot AND
+    // equips it — on a pad this is the whole interaction; there is no separate use button.
+    // Bare D-pad is SKILL_1..4; checkActionRaw's bare-yields-to-chord rule resolves the overlap
+    // (the same mechanism that lets L+"+" be CHARACTER_SCREEN while bare "+" is INVENTORY).
+    // Keyboard is deliberately unbound: keys 1-4 are the class skills, and KB/M selects with the
+    // mouse wheel and equips with middle-click instead.
+    set(GameAction::QUICKBAR_SLOT_1, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_UP,    SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::QUICKBAR_SLOT_2, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::QUICKBAR_SLOT_3, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_DOWN,  SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::QUICKBAR_SLOT_4, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_LEFT,  SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 
     // Menu navigation
     set(GameAction::MENU_UP,       SDL_SCANCODE_UP,     0, SDL_CONTROLLER_BUTTON_DPAD_UP);
@@ -279,7 +301,11 @@ void Input::update() {
     memcpy(s_previousMouseButtons, s_currentMouseButtons, sizeof(s_currentMouseButtons));
     memcpy(s_previousPadButtons, s_currentPadButtons, sizeof(s_currentPadButtons));
 
-    s_mouseWheelY = 0;
+    // NOTE: s_mouseWheelY is deliberately NOT reset here. Window::pollEvents() runs BEFORE this
+    // (engine.cpp) and is what accumulates the wheel delta; the only reader (the quickbar) runs
+    // LATER, inside the fixed-timestep loop. Zeroing here wiped the delta between the write and
+    // the read, so getMouseWheelDelta() always returned 0 and the wheel never worked at all.
+    // The reset now lives in consumePressedState() — see the comment there for why.
 
     // Snapshot keyboard
     int numKeys = 0;
@@ -413,6 +439,12 @@ void Input::consumePressedState() {
     memcpy(s_previousAxisValues, s_currentAxisValues, sizeof(s_currentAxisValues));
     // Menu-stick edges are one-shot per frame too (the latch in update() handles re-arming).
     memset(s_menuStickPressed, 0, sizeof(s_menuStickPressed));
+    // The mouse wheel is an edge, not a state, so it is consumed here rather than reset in
+    // update(). This is what makes it survive the gap between Window::pollEvents() (which
+    // accumulates it) and the fixed-timestep tick that reads it. It also means a frame that runs
+    // ZERO fixed ticks — common above 60 FPS — does NOT clear it, so the notch carries over to
+    // the next tick instead of being silently dropped.
+    s_mouseWheelY = 0;
 #ifdef __SWITCH__
     // Also consume libnx pad edges — isButtonPressed on Switch reads
     // s_padPrevButtons (libnx), not the SDL s_previousPadButtons arrays.
@@ -1130,6 +1162,7 @@ void Input::saveBindings(const char* path) {
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_MOUSE_SENS,   s_mouseSensitivity);
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_STICK_INVERT, s_stickInvertY ? 1.0f : 0.0f);
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_GYRO_INVERT,  s_gyroInvertY  ? 1.0f : 0.0f);
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_BINDINGS_REV, static_cast<f32>(BINDINGS_REV));
     fclose(f);
     LOG_INFO("Input: saved bindings to %s", path);
 }
@@ -1141,6 +1174,7 @@ void Input::loadBindings(const char* path) {
     s32 key, btn, mod, ax;
     u32 mouse;
     f32 axT;
+    s32 fileRev = 0;  // no CFG_BINDINGS_REV row => a file written before revisioning existed
     while (fscanf(f, "%u %d %u %d %d %d %f", &idx, &key, &mouse, &btn, &mod, &ax, &axT) == 7) {
         if (idx < static_cast<u32>(GameAction::COUNT)) {
             s_bindings[idx].key = key;
@@ -1154,10 +1188,35 @@ void Input::loadBindings(const char* path) {
         } else if (idx == CFG_MOUSE_SENS)   { s_mouseSensitivity = axT;
         } else if (idx == CFG_STICK_INVERT) { s_stickInvertY = (axT != 0.0f);
         } else if (idx == CFG_GYRO_INVERT)  { s_gyroInvertY  = (axT != 0.0f);
+        } else if (idx == CFG_BINDINGS_REV) { fileRev = static_cast<s32>(axT);
         }
         // Any other idx >= COUNT: unknown/future setting — ignore (forward-compatible).
     }
     fclose(f);
+
+    // --- Migration: repair defaults an older file would otherwise clobber ---
+    // Only the CONTROLLER half of the affected action is restored, so a player's custom keyboard
+    // binding (and every other action, both halves) survives untouched.
+    if (fileRev < 1) {
+        // rev 0 -> 1: ordinals 20/21 held QUICKBAR_PREV/NEXT (the old L + D-pad Left/Right cycle)
+        // and now hold QUICKBAR_SLOT_1/2 (L + D-pad Up/Right). Keeping the file's rows would put
+        // slot 1 on L + D-pad Left — colliding with slot 4 and leaving slot 1's real chord dead.
+        InputBinding d[static_cast<u32>(GameAction::COUNT)];
+        buildDefaults(d);
+        const GameAction repair[] = {
+            GameAction::QUICKBAR_SLOT_1, GameAction::QUICKBAR_SLOT_2, GameAction::QUICKBAR_USE,
+        };
+        for (GameAction a : repair) {
+            const u32 i = static_cast<u32>(a);
+            s_bindings[i].button   = d[i].button;
+            s_bindings[i].modifier = d[i].modifier;
+            LOG_INFO("Input:   repaired '%s' -> button=%d modifier=%d",
+                     actionName(a), s_bindings[i].button, s_bindings[i].modifier);
+        }
+        LOG_INFO("Input: migrated controls.json rev %d -> %d (restored quickbar gamepad chords)",
+                 fileRev, BINDINGS_REV);
+    }
+
     LOG_INFO("Input: loaded bindings from %s", path);
 }
 
@@ -1174,7 +1233,7 @@ const char* Input::actionName(GameAction action) {
         case GameAction::FIRE:          return "Attack / Fire";
         case GameAction::BLOCK:         return "Block / Shield";
         case GameAction::CLASS_SKILL:   return "Class Skill";
-        case GameAction::TARGET_LOCK:   return "Target Lock";
+        case GameAction::QUICKBAR_USE:  return "Quickbar Use";
         case GameAction::POTION:        return "Potion";
         case GameAction::PICKUP:        return "Pickup / Interact";
         case GameAction::RELOAD:        return "Reload";
@@ -1186,8 +1245,10 @@ const char* Input::actionName(GameAction action) {
         case GameAction::HELMET_SKILL:  return "Helmet Skill (G)";
         case GameAction::INVENTORY:     return "Inventory";
         case GameAction::PAUSE:         return "Pause / Menu";
-        case GameAction::QUICKBAR_PREV: return "Quickbar Prev";
-        case GameAction::QUICKBAR_NEXT: return "Quickbar Next";
+        case GameAction::QUICKBAR_SLOT_1: return "Quickbar Slot 1";
+        case GameAction::QUICKBAR_SLOT_2: return "Quickbar Slot 2";
+        case GameAction::QUICKBAR_SLOT_3: return "Quickbar Slot 3";
+        case GameAction::QUICKBAR_SLOT_4: return "Quickbar Slot 4";
         case GameAction::MENU_UP:       return "Menu Up";
         case GameAction::MENU_DOWN:     return "Menu Down";
         case GameAction::MENU_CONFIRM:  return "Confirm";

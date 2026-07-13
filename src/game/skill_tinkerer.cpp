@@ -40,6 +40,10 @@ void fireStunGrenade(Vec3 origin, Vec3 forward, const SkillDef* def,
         p.gravity      = 9.8f;
         p.splashRadius = splashR;
         p.splashDamage = damage;
+        // The stun. This skill previously did NOT stun: it never set any stun/freeze field, and the
+        // hit path only stuns when one is > 0 — so the "Stun Grenade" was a plain frag grenade.
+        // Applied to everything in the blast, not just a direct hit (see projectile.cpp splash).
+        p.stunDuration = def->stunDuration > 0.0f ? def->stunDuration : 1.5f;
     }
     LOG_INFO("Stun Grenade thrown");
 }

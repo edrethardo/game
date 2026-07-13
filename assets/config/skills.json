@@ -3,6 +3,7 @@
     {
       "id": "frozen_orb",
       "name": "Frozen Orb",
+      "description": "Launches an icy orb that spirals\nout frost shards in all directions.",
       "cooldown": 0.3,
       "energyCost": 35.0,
       "orbDamage": 20.0,
@@ -19,6 +20,7 @@
     {
       "id": "chain_lightning",
       "name": "Chain Lightning",
+      "description": "Fires a bolt of lightning that\nbounces between nearby enemies.",
       "cooldown": 0.3,
       "energyCost": 25.0,
       "damage": 35.0,
@@ -29,6 +31,7 @@
     {
       "id": "blood_nova",
       "name": "Blood Nova",
+      "description": "Sacrifices health to unleash a\ndevastating ring of blood energy.",
       "cooldown": 5.0,
       "healthCostPct": 0.2,
       "damage": 40.0,
@@ -37,6 +40,7 @@
     {
       "id": "meteor_strike",
       "name": "Meteor Strike",
+      "description": "Calls down a massive meteor that\nscorches the ground on impact.",
       "cooldown": 0.5,
       "energyCost": 60.0,
       "damage": 120.0,
@@ -46,6 +50,7 @@
     {
       "id": "phase_dash",
       "name": "Phase Dash",
+      "description": "Teleports forward through enemies,\ndamaging all in the corridor.",
       "cooldown": 3.0,
       "energyCost": 20.0,
       "damage": 15.0,
@@ -53,92 +58,454 @@
       "corridorWidth": 1.0,
       "invulnDuration": 0.3
     },
-    { "id": "cleave",          "name": "Cleave",          "cooldown": 1.0, "energyCost": 10.0, "damage": 35.0, "radius": 3.0 },
-    { "id": "thunderclap",     "name": "Thunderclap",     "cooldown": 4.0, "energyCost": 20.0, "damage": 25.0, "radius": 5.0, "duration": 0.8 },
-    { "id": "war_cry",         "name": "War Cry",         "cooldown": 8.0, "energyCost": 25.0, "damage": 0.0,  "radius": 6.0 },
-    { "id": "whirlwind",       "name": "Whirlwind",       "cooldown": 4.0, "energyCost": 30.0, "damage": 30.0, "radius": 3.5 },
-    { "id": "earthquake",      "name": "Earthquake",      "cooldown": 8.0, "energyCost": 40.0, "damage": 40.0, "radius": 4.0, "delay": 0.05 },
-    { "id": "multi_shot",      "name": "Multi-Shot",      "cooldown": 0.8, "energyCost": 10.0, "damage": 20.0, "projectileSpeed": 28.8 },
-    { "id": "rain_of_arrows",  "name": "Rain of Arrows",  "cooldown": 5.0, "energyCost": 30.0, "damage": 25.0, "radius": 3.5, "delay": 0.5 },
-    { "id": "poison_arrow",    "name": "Poison Arrow",    "cooldown": 1.5, "energyCost": 12.0, "damage": 18.0, "projectileSpeed": 25.3 },
-    { "id": "shadow_shot",     "name": "Shadow Shot",     "cooldown": 5.0, "energyCost": 25.0, "damage": 60.0 },
-    { "id": "volley",          "name": "Volley",          "cooldown": 4.0, "energyCost": 15.0, "damage": 0.0, "radius": 4.0, "delay": 0.5 },
-    { "id": "piercing_shot",   "name": "Piercing Shot",   "cooldown": 2.5, "energyCost": 15.0, "damage": 0.0, "projectileSpeed": 35.0 },
-    { "id": "barrage",         "name": "Barrage",         "cooldown": 3.0, "energyCost": 20.0, "damage": 0.0, "projectileSpeed": 30.0 },
-    { "id": "mark_prey",       "name": "Mark Prey",       "cooldown": 8.0, "energyCost": 30.0, "damage": 0.0, "radius": 6.0, "duration": 5.0 },
-    { "id": "fireball",        "name": "Fireball",        "cooldown": 0.3, "energyCost": 20.0, "damage": 35.0, "radius": 2.5, "projectileSpeed": 20.7 },
-    { "id": "knife_burst",     "name": "Knife Burst",     "cooldown": 0.6, "energyCost": 8.0,  "damage": 12.0, "projectileSpeed": 32.2 },
-    { "id": "poison_cloud",    "name": "Smoke Bomb",      "cooldown": 5.0, "energyCost": 20.0, "damage": 8.0,  "radius": 3.0 },
-    { "id": "shadow_strike",   "name": "Shadow Strike",   "cooldown": 5.0, "energyCost": 30.0, "damage": 45.0, "distance": 8.0 },
-    { "id": "fan_of_knives",   "name": "Fan of Knives",   "cooldown": 1.0, "energyCost": 10.0, "damage": 10.0, "projectileSpeed": 28.0 },
-    { "id": "shadow_step",     "name": "Shadow Step",     "cooldown": 3.0, "energyCost": 20.0, "damage": 40.0, "distance": 15.0 },
-    { "id": "shadow_dance",    "name": "Shadow Dance",    "cooldown": 10.0,"energyCost": 35.0, "damage": 0.0,  "duration": 2.0 },
-    { "id": "holy_smite",        "name": "Holy Smite",        "cooldown": 0.9, "energyCost": 10.0, "damage": 35.0, "radius": 1.5, "distance": 3.0 },
-    { "id": "consecration",      "name": "Consecration",      "cooldown": 6.0, "energyCost": 30.0, "damage": 5.0,  "radius": 4.0, "duration": 5.0 },
-    { "id": "divine_shield",     "name": "Divine Shield",     "cooldown": 10.0,"energyCost": 40.0, "damage": 0.0,  "radius": 3.0 },
-    { "id": "holy_bombardment",  "name": "Holy Bombardment",  "cooldown": 7.0, "energyCost": 35.0, "damage": 18.0, "radius": 6.0, "duration": 4.0 },
-    { "id": "holy_nova",         "name": "Holy Nova",         "cooldown": 5.0, "energyCost": 30.0, "damage": 25.0, "radius": 5.0, "secondaryDamage": 20.0, "allyHealPct": 0.08 },
-    { "id": "divine_judgment",   "name": "Divine Judgment",   "cooldown": 12.0,"energyCost": 45.0, "damage": 60.0, "radius": 2.5 },
-    { "id": "shock_bolt",      "name": "Shock Bolt",      "cooldown": 1.0, "energyCost": 10.0, "damage": 20.0 },
-    { "id": "deploy_turret",   "name": "Deploy Turret",   "cooldown": 10.0,"energyCost": 40.0, "damage": 10.0 },
-    { "id": "tesla_coil",      "name": "Tesla Coil",      "cooldown": 5.0, "energyCost": 25.0, "damage": 25.0, "radius": 4.0 },
-    { "id": "mech_overdrive",  "name": "Mech Overdrive",  "cooldown": 10.0,"energyCost": 35.0, "damage": 0.0,  "duration": 5.0 },
-    { "id": "aimed_shot",           "name": "Aimed Shot",           "cooldown": 2.0, "energyCost": 15.0, "damage": 30.0 },
-    { "id": "explosive_round",     "name": "Explosive Round",      "cooldown": 3.0, "energyCost": 20.0, "damage": 25.0, "radius": 3.5 },
-    { "id": "rapid_fire",          "name": "Rapid Fire",           "cooldown": 3.0, "energyCost": 20.0, "damage": 15.0 },
-    { "id": "overcharged_magazine","name": "Overcharged Magazine", "cooldown": 5.0, "energyCost": 25.0, "damage": 0.0,  "duration": 4.0 },
-    { "id": "headshot",            "name": "Headshot",             "cooldown": 6.0, "energyCost": 30.0, "damage": 50.0 },
-    { "id": "combat_drone",    "name": "Combat Drone",    "cooldown": 5.0, "energyCost": 15.0, "damage": 8.0 },
-    { "id": "swarm_drones",    "name": "Swarm Drones",    "cooldown": 8.0, "energyCost": 25.0, "damage": 3.0 },
-    { "id": "stun_grenade",    "name": "Stun Grenade",    "cooldown": 4.0, "energyCost": 20.0, "damage": 15.0, "radius": 3.0 },
-    { "id": "swarm_deploy",    "name": "Swarm Deploy",    "cooldown": 6.0, "energyCost": 12.0, "damage": 6.0 },
-    { "id": "overclock",       "name": "Overclock",       "cooldown": 8.0, "energyCost": 25.0, "damage": 0.0, "duration": 5.0 },
-    { "id": "detonate_swarm",  "name": "Detonate Swarm",  "cooldown": 6.0, "energyCost": 20.0, "damage": 15.0, "radius": 5.0 },
-    { "id": "swarm_queen",     "name": "Swarm Queen",     "cooldown": 20.0,"energyCost": 40.0, "damage": 6.0, "duration": 20.0 },
-    { "id": "void_zone",      "name": "Void Zone",       "cooldown": 0.0, "energyCost": 0.0,  "damage": 10.0, "radius": 2.0 },
-    { "id": "shadow_ricochet","name": "Shadow Ricochet", "cooldown": 0.0, "energyCost": 0.0,  "damage": 35.0, "radius": 12.0 },
     {
-        "id": "deflect",
-        "name": "Deflect",
-        "cooldown": 2.0,
-        "energyCost": 20,
-        "damage": 0,
-        "activeWindow": 0.4,
-        "stunDuration": 2.0
+      "id": "cleave",
+      "name": "Cleave",
+      "description": "Sweeps a wide melee arc, healing you\nfor 5% of its damage per enemy hit.",
+      "cooldown": 1.0,
+      "energyCost": 10.0,
+      "damage": 35.0,
+      "radius": 3.0
     },
     {
-        "id": "exploit_weakness",
-        "name": "Exploit Weakness",
-        "cooldown": 2.5,
-        "energyCost": 25,
-        "damage": 0,
-        "markDuration": 5.0,
-        "damageMultiplier": 1.6
+      "id": "thunderclap",
+      "name": "Thunderclap",
+      "description": "Ground stomp that damages, stuns and\nslows foes, leaving a burning zone.",
+      "cooldown": 4.0,
+      "energyCost": 20.0,
+      "damage": 25.0,
+      "radius": 5.0,
+      "duration": 0.8
     },
     {
-        "id": "adrenaline_surge",
-        "name": "Adrenaline Surge",
-        "cooldown": 0,
-        "energyCost": 0,
-        "damage": 0
+      "id": "war_cry",
+      "name": "War Cry",
+      "description": "War shout: stuns nearby enemies for 2s,\nspeeds you up and empowers allies.",
+      "cooldown": 8.0,
+      "energyCost": 25.0,
+      "damage": 0.0,
+      "radius": 6.0
     },
     {
-        "id": "deaths_dance",
-        "name": "Death's Dance",
-        "cooldown": 30.0,
-        "energyCost": 40,
-        "damage": 0,
-        "duration": 8.0,
-        "slashRadius": 3.0,
-        "slashDamageMult": 1.0
+      "id": "whirlwind",
+      "name": "Whirlwind",
+      "description": "Spins in place, striking every enemy\naround you at once.",
+      "cooldown": 4.0,
+      "energyCost": 30.0,
+      "damage": 30.0,
+      "radius": 3.5
     },
     {
-        "id": "frenzy",
-        "name": "Frenzy",
-        "cooldown": 0,
-        "energyCost": 0,
-        "damage": 0,
-        "duration": 4.0
+      "id": "earthquake",
+      "name": "Earthquake",
+      "description": "Slams the ground for damage around you,\nknocking every nearby enemy back.",
+      "cooldown": 8.0,
+      "energyCost": 40.0,
+      "damage": 40.0,
+      "radius": 4.0,
+      "delay": 0.05
+    },
+    {
+      "id": "multi_shot",
+      "name": "Multi-Shot",
+      "description": "Fires five arrows at once in a\nwide horizontal fan.",
+      "cooldown": 0.8,
+      "energyCost": 10.0,
+      "damage": 20.0,
+      "projectileSpeed": 28.8
+    },
+    {
+      "id": "rain_of_arrows",
+      "name": "Rain of Arrows",
+      "description": "Instantly showers arrows on the point\nyou aim at, hitting everything in it.",
+      "cooldown": 5.0,
+      "energyCost": 30.0,
+      "damage": 25.0,
+      "radius": 3.5,
+      "delay": 0.5
+    },
+    {
+      "id": "poison_arrow",
+      "name": "Poison Arrow",
+      "description": "Fires an arrow that poisons its\ntarget, damaging it over time.",
+      "cooldown": 1.5,
+      "energyCost": 12.0,
+      "damage": 18.0,
+      "projectileSpeed": 25.3,
+      "duration": 4.0,
+      "poisonDps": 6.0
+    },
+    {
+      "id": "shadow_shot",
+      "name": "Shadow Shot",
+      "description": "Instant long-range shot that strikes\nthe first enemy in your crosshair.",
+      "cooldown": 5.0,
+      "energyCost": 25.0,
+      "damage": 60.0
+    },
+    {
+      "id": "volley",
+      "name": "Volley",
+      "description": "Rains 80 arrows in four waves over\nthe zone you aim at.",
+      "cooldown": 4.0,
+      "energyCost": 15.0,
+      "damage": 0.0,
+      "radius": 4.0,
+      "delay": 0.5
+    },
+    {
+      "id": "piercing_shot",
+      "name": "Piercing Shot",
+      "description": "Pierces every enemy in a line and\nleaves them bleeding for 3s.",
+      "cooldown": 2.5,
+      "energyCost": 15.0,
+      "damage": 0.0,
+      "projectileSpeed": 35.0
+    },
+    {
+      "id": "barrage",
+      "name": "Barrage",
+      "description": "Unleashes ten arrows in a rapid,\ntight forward spread.",
+      "cooldown": 3.0,
+      "energyCost": 20.0,
+      "damage": 0.0,
+      "projectileSpeed": 30.0
+    },
+    {
+      "id": "mark_prey",
+      "name": "Mark Prey",
+      "description": "Marks the enemy you aim at - it takes\ndouble damage until the mark fades.",
+      "cooldown": 8.0,
+      "energyCost": 30.0,
+      "damage": 0.0,
+      "radius": 6.0,
+      "duration": 5.0
+    },
+    {
+      "id": "fireball",
+      "name": "Fireball",
+      "description": "Lobs an arcing fireball that explodes\non impact, splashing nearby enemies.",
+      "cooldown": 0.3,
+      "energyCost": 20.0,
+      "damage": 35.0,
+      "radius": 2.5,
+      "projectileSpeed": 20.7
+    },
+    {
+      "id": "knife_burst",
+      "name": "Knife Burst",
+      "description": "Throws three fast knives in a\ntight forward spread.",
+      "cooldown": 0.6,
+      "energyCost": 8.0,
+      "damage": 12.0,
+      "projectileSpeed": 32.2
+    },
+    {
+      "id": "poison_cloud",
+      "name": "Smoke Bomb",
+      "description": "Drops a toxic cloud that poisons foes\nand breaks their aggro. Cloaks you 2s.",
+      "cooldown": 5.0,
+      "energyCost": 20.0,
+      "damage": 8.0,
+      "radius": 3.0
+    },
+    {
+      "id": "shadow_strike",
+      "name": "Shadow Strike",
+      "description": "Blinks behind the nearest enemy and\nstrikes its back for triple damage.",
+      "cooldown": 5.0,
+      "energyCost": 30.0,
+      "damage": 45.0,
+      "distance": 8.0
+    },
+    {
+      "id": "fan_of_knives",
+      "name": "Fan of Knives",
+      "description": "Hurls a storm of knives in every\ndirection around you.",
+      "cooldown": 1.0,
+      "energyCost": 10.0,
+      "damage": 10.0,
+      "projectileSpeed": 28.0
+    },
+    {
+      "id": "shadow_step",
+      "name": "Shadow Step",
+      "description": "Blinks behind a visible enemy and\nstrikes - 3x from stealth. Cloaks you.",
+      "cooldown": 3.0,
+      "energyCost": 20.0,
+      "damage": 40.0,
+      "distance": 15.0
+    },
+    {
+      "id": "shadow_dance",
+      "name": "Shadow Dance",
+      "description": "Cloaks you: double weapon damage and\n+20% speed. Kills extend it by 0.3s.",
+      "cooldown": 10.0,
+      "energyCost": 35.0,
+      "damage": 0.0,
+      "duration": 2.0
+    },
+    {
+      "id": "holy_smite",
+      "name": "Holy Smite",
+      "description": "Dashes into the first enemy ahead and\nsmites it with a pillar that heals you.",
+      "cooldown": 0.9,
+      "energyCost": 10.0,
+      "damage": 35.0,
+      "radius": 1.5,
+      "distance": 3.0
+    },
+    {
+      "id": "consecration",
+      "name": "Consecration",
+      "description": "Consecrates the ground: holy pillars\nrain on enemies inside, healing you.",
+      "cooldown": 6.0,
+      "energyCost": 30.0,
+      "damage": 5.0,
+      "radius": 4.0,
+      "duration": 5.0
+    },
+    {
+      "id": "divine_shield",
+      "name": "Divine Shield",
+      "description": "Cleanses you, heals, and grants 1.5s\ninvulnerability. Stuns and smites foes.",
+      "cooldown": 10.0,
+      "energyCost": 40.0,
+      "damage": 0.0,
+      "radius": 3.0
+    },
+    {
+      "id": "holy_bombardment",
+      "name": "Holy Bombardment",
+      "description": "Marks a zone where holy pillars rain\non enemies. Each hit heals you.",
+      "cooldown": 7.0,
+      "energyCost": 35.0,
+      "damage": 18.0,
+      "radius": 6.0,
+      "duration": 4.0
+    },
+    {
+      "id": "holy_nova",
+      "name": "Holy Nova",
+      "description": "Bursts holy light around you, damaging\nenemies twice and healing allies.",
+      "cooldown": 5.0,
+      "energyCost": 30.0,
+      "damage": 25.0,
+      "radius": 5.0,
+      "secondaryDamage": 20.0,
+      "allyHealPct": 0.08
+    },
+    {
+      "id": "divine_judgment",
+      "name": "Divine Judgment",
+      "description": "Cleanses, heals and shields you, then\ncalls 3 pillars down on nearby foes.",
+      "cooldown": 12.0,
+      "energyCost": 45.0,
+      "damage": 60.0,
+      "radius": 2.5
+    },
+    {
+      "id": "shock_bolt",
+      "name": "Shock Bolt",
+      "description": "Fires a trio of electric bolts that\nslow and stagger what they hit.",
+      "cooldown": 1.0,
+      "energyCost": 10.0,
+      "damage": 20.0
+    },
+    {
+      "id": "deploy_turret",
+      "name": "Deploy Turret",
+      "description": "Deploys a mobile turret bot that\nfollows you and shoots enemies.",
+      "cooldown": 10.0,
+      "energyCost": 40.0,
+      "damage": 10.0
+    },
+    {
+      "id": "tesla_coil",
+      "name": "Tesla Coil",
+      "description": "Discharges lightning around you,\nzapping and staggering nearby foes.",
+      "cooldown": 5.0,
+      "energyCost": 25.0,
+      "damage": 25.0,
+      "radius": 4.0
+    },
+    {
+      "id": "mech_overdrive",
+      "name": "Mech Overdrive",
+      "description": "Restores health, clears slows and\nfreezes, and boosts your move speed.",
+      "cooldown": 10.0,
+      "energyCost": 35.0,
+      "damage": 0.0,
+      "duration": 5.0
+    },
+    {
+      "id": "aimed_shot",
+      "name": "Aimed Shot",
+      "description": "Fires a piercing rail through every\nenemy in a line, slowing them all.",
+      "cooldown": 2.0,
+      "energyCost": 15.0,
+      "damage": 30.0
+    },
+    {
+      "id": "explosive_round",
+      "name": "Explosive Round",
+      "description": "Hitscan round that detonates on impact,\nblasting and knocking back nearby foes.",
+      "cooldown": 3.0,
+      "energyCost": 20.0,
+      "damage": 25.0,
+      "radius": 3.5
+    },
+    {
+      "id": "rapid_fire",
+      "name": "Rapid Fire",
+      "description": "Overcharges your gun: the next 5 shots\ndeal 3x damage and pierce enemies.",
+      "cooldown": 3.0,
+      "energyCost": 20.0,
+      "damage": 15.0
+    },
+    {
+      "id": "overcharged_magazine",
+      "name": "Overcharged Magazine",
+      "description": "Supercharges your magazine - the next\n5 shots deal 3x damage and pierce.",
+      "cooldown": 5.0,
+      "energyCost": 25.0,
+      "damage": 0.0,
+      "duration": 4.0
+    },
+    {
+      "id": "headshot",
+      "name": "Headshot",
+      "description": "Precision shot that instantly executes\nfoes under 25% HP, chaining to nearby.",
+      "cooldown": 6.0,
+      "energyCost": 30.0,
+      "damage": 50.0
+    },
+    {
+      "id": "combat_drone",
+      "name": "Combat Drone",
+      "description": "Deploys a spider drone that fights\nat your side.",
+      "cooldown": 5.0,
+      "energyCost": 15.0,
+      "damage": 8.0
+    },
+    {
+      "id": "swarm_drones",
+      "name": "Swarm Drones",
+      "description": "Releases two flying drones that\nharry nearby enemies.",
+      "cooldown": 8.0,
+      "energyCost": 25.0,
+      "damage": 3.0
+    },
+    {
+      "id": "stun_grenade",
+      "name": "Stun Grenade",
+      "description": "Lobs an arcing grenade that explodes\non impact, stunning nearby foes.",
+      "cooldown": 4.0,
+      "energyCost": 20.0,
+      "damage": 15.0,
+      "radius": 3.0,
+      "stunDuration": 1.5
+    },
+    {
+      "id": "swarm_deploy",
+      "name": "Swarm Deploy",
+      "description": "Deploys three spider drones and three\nflying drones at once.",
+      "cooldown": 6.0,
+      "energyCost": 12.0,
+      "damage": 6.0
+    },
+    {
+      "id": "overclock",
+      "name": "Overclock",
+      "description": "Overclocks your drones: double damage\nand +50% speed while it lasts.",
+      "cooldown": 8.0,
+      "energyCost": 25.0,
+      "damage": 0.0,
+      "duration": 5.0
+    },
+    {
+      "id": "detonate_swarm",
+      "name": "Detonate Swarm",
+      "description": "Every drone you control explodes,\nblasting enemies around it, then dies.",
+      "cooldown": 6.0,
+      "energyCost": 20.0,
+      "damage": 15.0,
+      "radius": 5.0
+    },
+    {
+      "id": "swarm_queen",
+      "name": "Swarm Queen",
+      "description": "Summons a tough queen drone that\nspawns a new mini drone every 2s.",
+      "cooldown": 20.0,
+      "energyCost": 40.0,
+      "damage": 6.0,
+      "duration": 20.0
+    },
+    {
+      "id": "void_zone",
+      "name": "Void Zone",
+      "description": "5% on hit: dark void zone dealing\nflat damage + 60% missing HP.",
+      "cooldown": 0.0,
+      "energyCost": 0.0,
+      "damage": 10.0,
+      "radius": 2.0
+    },
+    {
+      "id": "shadow_ricochet",
+      "name": "Shadow Ricochet",
+      "description": "30% on hit: two shadow bolts seek\nnearby enemies. Can chain again.",
+      "cooldown": 0.0,
+      "energyCost": 0.0,
+      "damage": 35.0,
+      "radius": 12.0
+    },
+    {
+      "id": "deflect",
+      "name": "Deflect",
+      "description": "Briefly absorbs all damage, then\nerupts it back as a blast and bolts.",
+      "cooldown": 2.0,
+      "energyCost": 20,
+      "damage": 0,
+      "activeWindow": 0.4,
+      "stunDuration": 2.0
+    },
+    {
+      "id": "exploit_weakness",
+      "name": "Exploit Weakness",
+      "description": "Marks enemies near your aim for bonus\ndamage. Killing one resets the cooldown.",
+      "cooldown": 2.5,
+      "energyCost": 25,
+      "damage": 0,
+      "markDuration": 5.0,
+      "damageMultiplier": 1.6
+    },
+    {
+      "id": "adrenaline_surge",
+      "name": "Adrenaline Surge",
+      "description": "Passive: dodge through an attack to\ngain +10% attack speed for 4s. Stacks.",
+      "cooldown": 0,
+      "energyCost": 0,
+      "damage": 0
+    },
+    {
+      "id": "deaths_dance",
+      "name": "Death's Dance",
+      "description": "While active, every dodge-through\nunleashes a slash at all foes near you.",
+      "cooldown": 30.0,
+      "energyCost": 40,
+      "damage": 0,
+      "duration": 8.0,
+      "slashRadius": 3.0,
+      "slashDamageMult": 1.0
+    },
+    {
+      "id": "frenzy",
+      "name": "Frenzy",
+      "description": "Each hit: +5% attack speed for 4s.\nStacks up to 6 times (+30%).",
+      "cooldown": 0,
+      "energyCost": 0,
+      "damage": 0,
+      "duration": 4.0
     }
   ]
 }

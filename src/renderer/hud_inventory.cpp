@@ -9,6 +9,7 @@
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
 #include "game/item.h"
+#include "game/skill.h"   // SkillSystem::findSkillDef — tier 2 of the description resolver
 #include <cstdio>
 #include <cstring>
 
@@ -81,7 +82,25 @@ static const char* subtypeName(WeaponSubtype st) {
     }
 }
 
-// Skill name + description for legendary tooltip display
+// ---------------------------------------------------------------------------
+// Skill name + description resolution.
+//
+// THREE sources, because no single one covers every skill:
+//   1. a slot-specific override — for a skill that genuinely behaves differently depending on the
+//      slot it rides in (BLOOD_NOVA: a FREE on-hit proc on a weapon, but a health-sacrificing
+//      retaliation on armor/offhand). One shared string would have to lie about one of them.
+//   2. SkillDef (skills.json) — the source of truth for anything that HAS a def, which is every
+//      class skill and every castable legendary.
+//   3. the legacy C++ tables below — the ONLY source for the ~10 legendary PASSIVES that have no
+//      SkillDef at all (Thorns, Berserker, Second Wind, ...; the proc code notes as much:
+//      "No def = this legendary isn't a weapon proc").
+//
+// Both the item tooltip and the skill-bar tooltip resolve through here, so the same skill can never
+// describe itself two different ways in two different places.
+// ---------------------------------------------------------------------------
+
+// Fallback name table — legendary-only, and returns "Unknown" for every class skill, so it is a
+// FALLBACK, not the primary: SkillDef.name is what actually covers the class skills.
 static const char* skillDisplayName(SkillId id) {
     switch (id) {
         case SkillId::FROZEN_ORB:      return "Frozen Orb";
@@ -107,12 +126,24 @@ static const char* skillDisplayName(SkillId id) {
     }
 }
 
-// Slot-aware: a few legendary skills behave DIFFERENTLY depending on the slot they ride in, so a
-// single shared string would necessarily lie about one of them. Blood Nova is the clearest case —
-// as a weapon it is a free on-hit proc, as armor it is a health-sacrificing retaliation. Anything
-// slot-independent just falls through to the shared text below.
+// Tier 1 + tier 3 of the resolver (see the block comment above): the slot-specific overrides, then
+// the fallback table. Tier 2 (SkillDef.description, skills.json) is applied by
+// resolveSkillDescription below, which reaches this only when the def has nothing to say.
+//
+// The table below therefore holds ONLY the legendary passives that have NO SkillDef — every skill
+// that has one is described in skills.json instead. Do not re-add a case for a skill with a def:
+// tier 2 wins, so the line would be unreachable, and unreachable text that looks authoritative is
+// exactly how a tooltip rots away from what the code does.
 static const char* skillDescription(SkillId id, ItemSlot slot) {
     // ---- Slot-specific overrides ----
+    // Divine Judgment is TWO different things. Cast actively (the Paladin's 4th class skill) it
+    // cleanses/heals/shields and calls pillars down. Worn as a RING (Phoenix Band) it is instead an
+    // automatic below-25%-HP rescue (engine_update_skills.cpp tickArmorRingPassives). skills.json
+    // describes the ACTIVE cast, so without this override the def would win and the Phoenix Band
+    // would go back to describing something it does not do.
+    if (id == SkillId::DIVINE_JUDGMENT && slot == ItemSlot::RING) {
+        return "Below 25% HP: full heal, cleanse all\ndebuffs, stun nearby foes. 45s cooldown.";
+    }
     if (id == SkillId::BLOOD_NOVA) {
         switch (slot) {
             case ItemSlot::WEAPON:
@@ -128,13 +159,7 @@ static const char* skillDescription(SkillId id, ItemSlot slot) {
     }
 
     switch (id) {
-        case SkillId::FROZEN_ORB:      return "Launches an icy orb that spirals\nout frost shards in all directions.";
-        case SkillId::CHAIN_LIGHTNING: return "Fires a bolt of lightning that\nbounces between nearby enemies.";
-        case SkillId::METEOR_STRIKE:   return "Calls down a massive meteor that\nscorches the ground on impact.";
-        case SkillId::BLOOD_NOVA:      return "Sacrifices health to unleash a\ndevastating ring of blood energy.";
-        case SkillId::PHASE_DASH:      return "Teleports forward through enemies,\ndamaging all in the corridor.";
         case SkillId::THROWAWAY:       return "On empty clip, throw weapon as\nan explosive projectile.";
-        case SkillId::VOID_ZONE:       return "5% on hit: dark void zone dealing\nflat damage + 60% missing HP.";
         case SkillId::LIFE_STEAL:      return "Heal 5% of all damage dealt.";
         case SkillId::THORNS:          return "Reflect 20% of damage taken\nback to the nearest enemy.";
         case SkillId::BERSERKER:       return "+1% damage for each 1% of\nmissing health. Risk vs reward.";
@@ -144,13 +169,178 @@ static const char* skillDescription(SkillId id, ItemSlot slot) {
         case SkillId::PHASE_STRIKE:    return "20% on kill: smoke bomb that\nblinds nearby enemies for 0.5s.";
         case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
         case SkillId::ARC_FIRE:        return "20% on hit: ignite the ground\nacross the full swing arc for 1.5s.";
-        case SkillId::FRENZY:          return "Each hit: +5% attack speed for 4s.\nStacks up to 6 times (+30%).";
-        // Phoenix Band. Rises from near-death — matches tickArmorRingPassives / serverNetPost:
-        // below 25% HP, full heal + cleanse + 1.5s invuln + a 5m 1.5s stun, on a 45s cooldown.
-        case SkillId::DIVINE_JUDGMENT: return "Below 25% HP: full heal, cleanse all\ndebuffs, stun nearby foes. 45s cooldown.";
-        // Shadow Scepter / Phantom Knives (engine_init_callbacks.cpp SHADOW_RICOCHET).
-        case SkillId::SHADOW_RICOCHET: return "30% on hit: two shadow bolts seek\nnearby enemies. Can chain again.";
         default: return "";
+    }
+}
+
+// The full three-tier resolution. `slot` may be ItemSlot::COUNT for a skill that isn't riding in an
+// item at all (a class skill), which simply means no slot override applies.
+const char* HUD::resolveSkillDescription(SkillId id, ItemSlot slot,
+                                         const SkillDef* skillDefs, u32 skillDefCount) {
+    // 1. slot override wins outright — it exists precisely because the def's single description
+    //    would be wrong for this slot. Both of these skills have a SkillDef, so without this gate
+    //    tier 2 would silently overwrite the correct per-slot text with the generic one.
+    if ((id == SkillId::BLOOD_NOVA &&
+         (slot == ItemSlot::WEAPON || slot == ItemSlot::ARMOR || slot == ItemSlot::OFFHAND)) ||
+        (id == SkillId::DIVINE_JUDGMENT && slot == ItemSlot::RING)) {
+        return skillDescription(id, slot);
+    }
+    // 2. the def (skills.json).
+    if (skillDefs) {
+        const SkillDef* sd = SkillSystem::findSkillDef(skillDefs, skillDefCount, id);
+        if (sd && sd->description[0] != '\0') return sd->description;
+    }
+    // 3. the def-less passives.
+    return skillDescription(id, slot);
+}
+
+const char* HUD::resolveSkillName(SkillId id, const SkillDef* skillDefs, u32 skillDefCount) {
+    if (skillDefs) {
+        const SkillDef* sd = SkillSystem::findSkillDef(skillDefs, skillDefCount, id);
+        if (sd && sd->name[0] != '\0') return sd->name;
+    }
+    return skillDisplayName(id);   // def-less passives (and the "Unknown" backstop)
+}
+
+// Skill tooltip — deliberately the same frame as drawItemTooltip below (same width, padding, fill,
+// border, screen-clamp and \n-split body), so a skill reads like an item on this screen.
+//
+// The stats block is printed straight off the SkillDef and only for NON-ZERO fields, which is what
+// makes it structurally unable to claim a cost the skill doesn't charge — the failure mode that
+// produced the Phoenix Band / Blood armor tooltip bugs.
+void HUD::drawSkillTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY, const SkillTooltipInfo& info) {
+    f32 uiScale   = static_cast<f32>(sh) / 720.0f;
+    f32 nameScale = 2.5f;
+    f32 bodyScale = 1.5f;
+    f32 lineH     = FontSystem::textHeight(bodyScale) + 3.0f;
+    f32 nameH     = FontSystem::textHeight(nameScale) + 4.0f;
+    f32 padX      = 10.0f;
+    f32 padY      = 8.0f;
+    const f32 tooltipW = 320.0f;   // matches drawItemTooltip
+
+    // Count body lines up front so the frame can be sized before anything is drawn.
+    u32 lineCount = 1;                       // subtitle ("Class Skill" / "Legendary - Armor")
+    const char* d = info.description;
+    if (d && *d) {
+        lineCount++;                         // separator
+        lineCount++;                         // first description line
+        for (const char* c = d; *c; c++) if (*c == '\n') lineCount++;
+    }
+    u32 statLines = 0;
+    if (info.def) {
+        if (info.def->cooldown     > 0.0f) statLines++;
+        if (info.def->energyCost   > 0.0f) statLines++;
+        if (info.def->healthCostPct> 0.0f) statLines++;
+        if (info.def->damage       > 0.0f) statLines++;
+        if (info.def->radius       > 0.0f) statLines++;
+        if (info.def->duration     > 0.0f) statLines++;
+    }
+    if (statLines > 0) lineCount += statLines + 1;   // + separator
+    if (info.unlockFloor > 0) lineCount += 1;        // unlock / locked line
+    if (info.upgraded)        lineCount += 1;
+
+    f32 tooltipH = nameH + lineCount * lineH + padY * 2.0f;
+
+    // Clamp into the screen — the bars sit at the bottom-left, so an un-clamped tooltip would run
+    // off both edges. (drawItemTooltip does the same.)
+    if (tipX + tooltipW > static_cast<f32>(sw)) tipX = static_cast<f32>(sw) - tooltipW - 4.0f;
+    if (tipX < 4.0f) tipX = 4.0f;
+    if (tipY + tooltipH > static_cast<f32>(sh)) tipY = static_cast<f32>(sh) - tooltipH - 4.0f;
+    if (tipY < 4.0f) tipY = 4.0f;
+
+    // Frame: dark fill + border. Locked skills get a muted border so "you can't use this yet" reads
+    // before any text does.
+    // Same construction as drawItemTooltip: scanline fill, then pushQuad as the outline.
+    const Vec3 bgColor = {0.06f, 0.06f, 0.10f};
+    for (f32 y = tipY; y < tipY + tooltipH; y += 1.0f) {
+        pushLine(tipX, y, tipX + tooltipW, y, bgColor);
+    }
+    const Vec3 border = info.unlocked ? Vec3{0.45f, 0.42f, 0.30f} : Vec3{0.35f, 0.20f, 0.20f};
+    pushQuad(tipX, tipY, tipX + tooltipW, tipY + tooltipH, border);
+    flushHUD();
+
+    const f32 textX = tipX + padX;
+    f32 curY = tipY + tooltipH - padY - nameH;
+
+    FontSystem::drawText(sw, sh, textX, curY, info.name,
+                         info.unlocked ? Vec3{1.0f, 0.9f, 0.5f} : Vec3{0.6f, 0.5f, 0.4f}, nameScale);
+    curY -= lineH;
+
+    char buf[96];
+    FontSystem::drawText(sw, sh, textX, curY, info.subtitle, {0.55f, 0.55f, 0.65f}, bodyScale);
+    curY -= lineH;
+
+    if (d && *d) {
+        pushLine(textX, curY + lineH * 0.4f, tipX + tooltipW - padX, curY + lineH * 0.4f,
+                 {0.3f, 0.3f, 0.35f});
+        flushHUD();
+        curY -= lineH * 0.2f;
+        const char* line = d;
+        while (*line) {
+            const char* eol = line;
+            while (*eol && *eol != '\n') eol++;
+            char descLine[80];
+            u32 len = static_cast<u32>(eol - line);
+            if (len >= sizeof(descLine)) len = sizeof(descLine) - 1;
+            std::memcpy(descLine, line, len);
+            descLine[len] = '\0';
+            FontSystem::drawText(sw, sh, textX, curY, descLine, {0.75f, 0.75f, 0.80f}, bodyScale);
+            curY -= lineH;
+            line = (*eol == '\n') ? eol + 1 : eol;
+        }
+    }
+
+    // Stats — only the fields this skill actually uses.
+    if (statLines > 0) {
+        pushLine(textX, curY + lineH * 0.4f, tipX + tooltipW - padX, curY + lineH * 0.4f,
+                 {0.3f, 0.3f, 0.35f});
+        flushHUD();
+        curY -= lineH * 0.2f;
+        const Vec3 statCol = {0.65f, 0.75f, 0.85f};
+        const SkillDef& sd = *info.def;
+        if (sd.cooldown > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "Cooldown   %.1fs", static_cast<double>(sd.cooldown));
+            FontSystem::drawText(sw, sh, textX, curY, buf, statCol, bodyScale); curY -= lineH;
+        }
+        if (sd.energyCost > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "Energy     %.0f", static_cast<double>(sd.energyCost));
+            FontSystem::drawText(sw, sh, textX, curY, buf, statCol, bodyScale); curY -= lineH;
+        }
+        if (sd.healthCostPct > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "Health     %.0f%%",
+                          static_cast<double>(sd.healthCostPct * 100.0f));
+            FontSystem::drawText(sw, sh, textX, curY, buf, {0.85f, 0.45f, 0.45f}, bodyScale); curY -= lineH;
+        }
+        if (sd.damage > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "Damage     %.0f", static_cast<double>(sd.damage));
+            FontSystem::drawText(sw, sh, textX, curY, buf, statCol, bodyScale); curY -= lineH;
+        }
+        if (sd.radius > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "Radius     %.1fm", static_cast<double>(sd.radius));
+            FontSystem::drawText(sw, sh, textX, curY, buf, statCol, bodyScale); curY -= lineH;
+        }
+        if (sd.duration > 0.0f) {
+            std::snprintf(buf, sizeof(buf), "Duration   %.1fs", static_cast<double>(sd.duration));
+            FontSystem::drawText(sw, sh, textX, curY, buf, statCol, bodyScale); curY -= lineH;
+        }
+    }
+
+    // Class-skill progression. A LOCKED skill must say what unlocks it — an empty tooltip on a
+    // greyed slot tells the player nothing.
+    if (info.unlockFloor > 0) {
+        if (info.unlocked) {
+            std::snprintf(buf, sizeof(buf), "Unlocked (floor %u)", info.unlockFloor);
+            FontSystem::drawText(sw, sh, textX, curY, buf, {0.5f, 0.75f, 0.5f}, bodyScale);
+        } else {
+            std::snprintf(buf, sizeof(buf), "Locked - unlocks on floor %u", info.unlockFloor);
+            FontSystem::drawText(sw, sh, textX, curY, buf, {0.85f, 0.45f, 0.45f}, bodyScale);
+        }
+        curY -= lineH;
+    }
+    if (info.upgraded) {
+        std::snprintf(buf, sizeof(buf), "Upgraded (floor %u)", info.upgradeFloor);
+        FontSystem::drawText(sw, sh, textX, curY, buf, {0.9f, 0.8f, 0.3f}, bodyScale);
+        curY -= lineH;
     }
 }
 
@@ -181,6 +371,7 @@ void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
 void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                const PlayerInventory& inv,
                                const ItemDef* itemDefs,
+                               const SkillDef* skillDefs, u32 skillDefCount,
                                u8 selectedSlot, bool selectedIsEquipped,
                                s32 mouseX, s32 mouseY)
 {
@@ -362,7 +553,8 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             if (mx >= eqX && mx <= eqX + slotW && my >= y && my <= y + slotH) {
                 if (!isItemEmpty(inv.equipped[i])) {
                     drawItemTooltip(sw, sh, eqX + slotW + 8.0f, y,
-                                    inv.equipped[i], itemDefs[inv.equipped[i].defId]);
+                                    inv.equipped[i], itemDefs[inv.equipped[i].defId],
+                                    skillDefs, skillDefCount);
                 }
                 break;
             }
@@ -391,7 +583,8 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                     if (!isItemEmpty(inv.equipped[eqIdx])) {
                         drawItemTooltip(sw, sh, leftTipX, tooltipY,
                                         inv.equipped[eqIdx],
-                                        itemDefs[inv.equipped[eqIdx].defId]);
+                                        itemDefs[inv.equipped[eqIdx].defId],
+                                        skillDefs, skillDefCount);
                         // "EQUIPPED" label below the left tooltip
                         f32 boxW = 80.0f, boxH = 16.0f;
                         f32 boxX = leftTipX + (320.0f - boxW) * 0.5f;
@@ -417,7 +610,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 
                     // Right: hovered backpack item
                     drawItemTooltip(sw, sh, rightTipX, tooltipY,
-                                    inv.backpack[i], bpDef);
+                                    inv.backpack[i], bpDef, skillDefs, skillDefCount);
                 }
                 break;
             }
@@ -428,7 +621,8 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 }
 
 void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
-                            const ItemInstance& item, const ItemDef& def)
+                            const ItemInstance& item, const ItemDef& def,
+                            const SkillDef* skillDefs, u32 skillDefCount)
 {
     if (isItemEmpty(item)) return;
 
@@ -581,13 +775,16 @@ void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         }
 
         curY -= lineH; // extra line before skill text
-        const char* sName = skillDisplayName(def.legendarySkillId);
+        // Resolve through the shared entry point so this text is IDENTICAL to what the skill-bar
+        // tooltip shows for the same skill.
+        const char* sName = resolveSkillName(def.legendarySkillId, skillDefs, skillDefCount);
         std::snprintf(buf, sizeof(buf), "[%s] %s", activationLabel, sName);
         FontSystem::drawText(sw, sh, textX, curY, buf, activationColor, bodyScale);
         curY -= lineH;
 
         // Skill description (split on \n)
-        const char* desc = skillDescription(def.legendarySkillId, def.slot);
+        const char* desc = resolveSkillDescription(def.legendarySkillId, def.slot,
+                                                  skillDefs, skillDefCount);
         const char* line = desc;
         while (*line) {
             // Find end of line
