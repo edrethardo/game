@@ -55,6 +55,26 @@
 #include <cstdio>
 #include <cstdlib>
 
+// ---------------------------------------------------------------------------
+// menuConfirmPressed — the ONE definition of "confirm" in the menu.
+//
+// Enter and Space ALWAYS confirm, alongside the bound MENU_CONFIRM action (gamepad A). They are
+// hardcoded rather than left to the binding: MENU_CONFIRM defaults to Enter, so rebinding Confirm
+// to anything else silently took Enter away from every menu in the game.
+//
+// This exists because the 17 confirm sites each rolled their own check and had already drifted:
+// all 17 accepted the action, 15 accepted Space, and NOT ONE accepted Enter explicitly. That is the
+// same way the main menu ended up as the only screen with no navigation sound — 30-odd copies of a
+// rule, and one of them forgotten.
+// ---------------------------------------------------------------------------
+static bool menuConfirmPressed() {
+    return Input::isActionPressed(GameAction::MENU_CONFIRM)
+        || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+        || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER);
+}
+
+
 // Shared statics defined in engine.cpp
 // Shared statics defined in engine.cpp
 extern Engine* s_engine;
@@ -253,7 +273,7 @@ bool Engine::updateMenuMouseActive() {
         bool nav =
             Input::isActionPressed(GameAction::MENU_UP)      ||
             Input::isActionPressed(GameAction::MENU_DOWN)    ||
-            Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            menuConfirmPressed() ||
             Input::isActionPressed(GameAction::MENU_BACK)    ||
             Input::isKeyPressed(SDL_SCANCODE_W)     || Input::isKeyPressed(SDL_SCANCODE_S)     ||
             Input::isKeyPressed(SDL_SCANCODE_A)     || Input::isKeyPressed(SDL_SCANCODE_D)     ||
@@ -283,6 +303,7 @@ bool Engine::updateMenuMouseActive() {
 // ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
+
 void Engine::updateMenu(f32 dt) {
     if (m_menu.msgTimer > 0.0f) m_menu.msgTimer -= dt;
 
@@ -347,7 +368,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 0;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        if (menuConfirmPressed()
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             // Preserve m_netRole if it was set by the main menu (SERVER for Host, CLIENT
@@ -402,7 +423,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.couchHost = false;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        if (menuConfirmPressed()
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             // 0 = LAN, 1 = Online (Public), 2 = Online (Private / code-only). Row 2 only exists when
@@ -441,7 +462,7 @@ void Engine::updateMenu(f32 dt) {
             AudioSystem::play(SfxId::UI_BACK);
             m_netRole = NetRole::NONE; m_menu.subState = 0; m_menu.subSelection = 0; return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) {
+        if (menuConfirmPressed() || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             if (m_menu.subSelection == 0) {        // Quick Join — async: onSteamLobbyList joins or hosts
                 steamQuickJoin();
@@ -484,7 +505,7 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK); m_menu.subState = 19; m_menu.subSelection = 1; return;
         }
-        if ((Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) && n > 0) {
+        if ((menuConfirmPressed() || mouseConfirm) && n > 0) {
             char nm[64]; int mc = 0, mm = 0;
             u64 id = Steam::lobbyListEntry(m_steamBrowserSel, nm, sizeof(nm), &mc, &mm);
             if (!id) return;
@@ -546,14 +567,19 @@ void Engine::updateMenu(f32 dt) {
         if (Input::isKeyPressed(SDL_SCANCODE_BACKSPACE)) backspace();
 
         // Controller: D-pad/stick walks the CodeOsk grid, A types the highlighted key, X backspaces.
-        if (Input::isActionPressed(GameAction::MENU_UP))
-            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, 0, -1);
-        if (Input::isActionPressed(GameAction::MENU_DOWN))
-            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, 0, 1);
+        // Same omission as the main menu: walking the on-screen keyboard made no sound at all.
+        // Only fires when the cursor actually moves (the grid clamps at its edges).
+        auto oskMove = [&](s8 dx, s8 dy) {
+            const u8 was = m_menu.codeOskCursor;
+            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, dx, dy);
+            if (m_menu.codeOskCursor != was) AudioSystem::play(SfxId::MENU_HOVER);
+        };
+        if (Input::isActionPressed(GameAction::MENU_UP))   oskMove(0, -1);
+        if (Input::isActionPressed(GameAction::MENU_DOWN)) oskMove(0, 1);
         if (Input::isKeyPressed(SDL_SCANCODE_LEFT)  || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
-            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, -1, 0);
+            oskMove(-1, 0);
         if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
-            m_menu.codeOskCursor = CodeOsk::moveCursor(m_menu.codeOskCursor, 1, 0);
+            oskMove(1, 0);
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_X)) backspace();
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
             const u32 k = m_menu.codeOskCursor;
@@ -595,7 +621,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.msg = nullptr;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        if (menuConfirmPressed()
             || mouseConfirm) {
             bool slotExists = m_saveSlots[m_menu.subSelection].exists;
 
@@ -695,7 +721,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        if (menuConfirmPressed()
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             // Configure lane 0 for the chosen class (HP/move/energy, class skills, mirror arrays).
@@ -851,7 +877,7 @@ void Engine::updateMenu(f32 dt) {
         }
 
         // --- confirm (Descend): apply the pick and start ---
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (menuConfirmPressed()) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_difficulty         = m_menu.freePlayDifficulty;      // override the loaded save's difficulty
             m_level.currentFloor = m_menu.freePlayFloor;           // startGame(CONTINUE) generates this floor
@@ -1036,7 +1062,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        if (menuConfirmPressed()
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             if (m_menu.subSelection == 0 || GameConst::kDemoBuild) {
@@ -1093,7 +1119,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 0; m_menu.subSelection = 0;
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE) || mouseConfirm) {
+        if (menuConfirmPressed() || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             static const u8 catSub[CAT_COUNT] = {15, 16, 17, 18};  // Audio / K&M / Controller / Display
             m_menu.subState = catSub[m_menu.subSelection];
@@ -1134,7 +1160,7 @@ void Engine::updateMenu(f32 dt) {
                 AudioSystem::setMusicVolume(AudioSettings::stepVol(AudioSystem::getMusicVolume(), dir)); // applies live
             }
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (menuConfirmPressed()) {
             if (m_menu.subSelection == A_RESET) {
                 AudioSystem::setMasterVolume(AudioSettings::DEFAULT_MASTER);
                 AudioSystem::setSfxVolume(AudioSettings::DEFAULT_SFX);
@@ -1179,7 +1205,7 @@ void Engine::updateMenu(f32 dt) {
                 Input::setMouseSensitivity(v);
             }
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (menuConfirmPressed()) {
             if (m_menu.subSelection < REBIND_COUNT) {
                 m_menu.bindCapture = true;
                 m_menu.bindKeyboard = true;    // this submenu binds keys
@@ -1233,7 +1259,7 @@ void Engine::updateMenu(f32 dt) {
                 Input::setGyroSensitivity(v);
             }
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (menuConfirmPressed()) {
             if (m_menu.subSelection < REBIND_COUNT) {
                 m_menu.bindCapture = true;
                 m_menu.bindKeyboard = false;   // this submenu binds controller buttons
@@ -1288,7 +1314,7 @@ void Engine::updateMenu(f32 dt) {
                 AudioSystem::play(SfxId::MENU_HOVER);
             }
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
+        if (menuConfirmPressed()) {
             if (m_menu.subSelection == D_FULLSCREEN) {
                 // Toggle borderless fullscreen live (applies immediately; persisted on back-out).
                 Window::setBorderlessFullscreen(!Window::isBorderlessFullscreen());
@@ -1344,7 +1370,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.msg = "new";
             return;
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        if (menuConfirmPressed()
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             if (m_menu.subSelection == 0) {
@@ -1491,7 +1517,7 @@ void Engine::updateMenu(f32 dt) {
         // confirm action. With a pad, A is consumed above as "type a character", so it must NOT
         // also trigger a connect here (otherwise every A press would jump to the localhost fallback).
         bool kbConnect  = Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER);
-        bool actConnect = !gpadJoin && Input::isActionPressed(GameAction::MENU_CONFIRM);
+        bool actConnect = !gpadJoin && menuConfirmPressed();
         if (oskConnect || kbConnect || actConnect) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             // Empty buffer (e.g. user hit Enter without typing) falls back to localhost
@@ -1509,15 +1535,19 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
+    // The MAIN menu was the one screen with no navigation sound: every submenu plays MENU_HOVER on
+    // move, this one did not, so a controller (or keyboard) user heard nothing until they confirmed.
+    // A mouse still clicked, because pointer hover has its own sound path — which is exactly why it
+    // went unnoticed. Sound only on an actual move, matching every other menu.
     if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
-        if (m_menu.selection > 0) m_menu.selection--;
+        if (m_menu.selection > 0) { m_menu.selection--; AudioSystem::play(SfxId::MENU_HOVER); }
     }
     if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
         // Demo's main menu has 4 items (max index 3); full game has 6 (max index 5).
         const u8 maxSel = GameConst::kDemoBuild ? 3 : 5;
-        if (m_menu.selection < maxSel) m_menu.selection++;
+        if (m_menu.selection < maxSel) { m_menu.selection++; AudioSystem::play(SfxId::MENU_HOVER); }
     }
-    if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+    if (menuConfirmPressed()
         || mouseConfirm) {
         AudioSystem::play(SfxId::UI_CONFIRM);
         // A fresh game-setup begins here — clear any split-screen state left over from a previous

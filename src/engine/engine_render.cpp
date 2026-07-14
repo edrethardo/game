@@ -257,7 +257,9 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
             optY -= 25.0f;
             // Only show "Reload last save" in singleplayer
             if (m_netRole == NetRole::NONE) {
-                HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "X" : "Ent", true);
+                // "Tab", not "Ent": Enter respawns now. A prompt that names the wrong key is worse
+                // than no prompt — it actively teaches the player to press the destructive one.
+                HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "X" : "Tab", true);
                 FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
                                      m_deathHover == 1 ? kHoverCol : Vec3{0.5f, 0.6f, 0.9f}, 1);
                 optY -= 25.0f;

@@ -169,8 +169,17 @@ void Engine::update(f32 dt) {
         } else {
             const s8 hov = mouseActive ? deathOptionHit(dsw, dsh) : static_cast<s8>(-1);
             if (hov != m_deathHover) { m_deathHover = hov; if (hov >= 0) AudioSystem::play(SfxId::MENU_HOVER); }
-            // A / Space / click = revive at entrance
-            if (Input::isActionPressed(GameAction::JUMP) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            // A / Space / ENTER / click = revive at entrance.
+            //
+            // Enter respawns now too. It used to trigger "reload last save" — i.e. the most natural
+            // confirm key on the screen did the DESTRUCTIVE thing, and reloading silently wipes the
+            // run's collected source shards (loadGame resets them), so an instinctive Enter after a
+            // death quietly ended any attempt at the secret superboss. Respawn is the safe default;
+            // reloading a save is still available from the mouse and from the PICKUP action.
+            if (Input::isActionPressed(GameAction::JUMP)
+                || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+                || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+                || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)
                 || (dclick && hov == 0)) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
                 m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local player's net slot
@@ -199,9 +208,15 @@ void Engine::update(f32 dt) {
                 Input::setRelativeMouseMode(true); // back to gameplay — re-capture the cursor
                 m_gameState = GameState::IN_GAME;
             }
-            // Enter/X / click = reload last save (singleplayer only)
+            // TAB / gamepad X / click = reload last save (singleplayer only).
+            //
+            // Deliberately NOT Enter, and no longer the PICKUP action either. This is the
+            // DESTRUCTIVE option — loadGame silently wipes the run's collected source shards, so an
+            // instinctive Enter (or E) after a death quietly ends any attempt at the secret
+            // superboss. It now sits on a key nobody presses by reflex to dismiss a death screen.
             if (m_netRole == NetRole::NONE &&
-                (Input::isActionPressed(GameAction::PICKUP) || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+                (Input::isKeyPressed(SDL_SCANCODE_TAB)
+                 || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_X)
                  || (dclick && hov == 1))) {
                 if (loadGame(m_activeSaveSlot)) {
                     m_level.currentFloor = m_level.savedFloor;
