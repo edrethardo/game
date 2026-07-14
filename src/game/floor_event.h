@@ -42,7 +42,9 @@ struct FloorEventTable {
 namespace Goblin {
     constexpr f32 SPEED_MULT     = 1.35f;  // of the player's base speed — outruns you if you dawdle
     constexpr f32 HEALTH         = 60.0f;  // scaled by the floor's HP curve at spawn
-    constexpr f32 ESCAPE_SECONDS = 22.0f;  // then it portals out, paying nothing further
+    constexpr f32 ESCAPE_SECONDS = 22.0f;  // counted from the moment it is ATTACKED, not from spawn:
+                                           // it idles on its hoard until provoked, then has this long
+                                           // to reach the exit, paying nothing further if it makes it
     constexpr f32 BLEED_SECONDS  = 2.0f;   // one item dropped per this interval while alive
     constexpr u8  BLEED_MAX      = 4;      // items it can bleed before it is out of pocket
     constexpr u8  DEATH_DROPS    = 3;      // the rest of the sack, if you actually catch it

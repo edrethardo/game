@@ -1,4 +1,5 @@
 #include "game/combat.h"
+#include "game/floor_event.h"   // Goblin::ESCAPE_SECONDS (a hit starts its escape clock)
 #include "game/champion.h"  // champion affix behaviours (VAMPIRIC / SHIELDING / HEALTH_LINK)
 #include "game/hit_feedback.h"
 #include "game/player.h"
@@ -88,6 +89,17 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     Entity* e = handleGet(pool, target);
     if (!e) return;
     if (e->flags & ENT_DEAD) return;
+
+    // A loot goblin bolts the moment it is HIT — not before. It spawns IDLE, guarding its hoard, and
+    // this is what starts the chase: the escape clock only begins ticking now, so the goblin cannot
+    // quietly time out and vanish while the player is still two rooms away and has never seen it.
+    // Placed at the very top of the single funnel every player-sourced hit passes through, so it
+    // fires for a sword, an arrow, a skill or a burning floor alike — before any of the immunity or
+    // shield branches below can return early and swallow the provocation.
+    if ((e->flags & ENT_LOOT_GOBLIN) && e->aiState != AIState::FLEE) {
+        e->aiState   = AIState::FLEE;
+        e->lifeTimer = Goblin::ESCAPE_SECONDS;
+    }
 
     // Entombed boss (Malachar's false-death channel) is fully invulnerable —
     // hits register as a flash but deal no damage until the channel ends.

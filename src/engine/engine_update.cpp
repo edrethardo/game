@@ -783,6 +783,10 @@ void Engine::tickLootGoblins(f32 dt) {
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         Entity& e = m_entities.entities[m_entities.activeList[a]];
         if (!(e.flags & ENT_LOOT_GOBLIN) || (e.flags & ENT_DEAD)) continue;
+        // Only a FLEEING goblin bleeds. The loot shakes out of the sack as it runs — an un-provoked
+        // one sitting on its hoard would otherwise quietly drip items onto the floor for free, and
+        // the player could just stand back and farm it without ever swinging.
+        if (e.aiState != AIState::FLEE) continue;
         if (e.resurrectCount >= Goblin::BLEED_MAX) continue;   // out of pocket (reused as a counter)
 
         e.tacticalTimer -= dt;

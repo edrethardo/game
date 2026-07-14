@@ -1177,20 +1177,26 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
     g->enemyType  = EnemyType::GENERIC;
     g->enemyRole  = EnemyRole::NORMAL;
     g->flags     |= ENT_LOOT_GOBLIN;      // survives death, unlike aiState — the drop handler needs it
-    g->aiState    = AIState::FLEE;        // never leaves this state — see enemy_ai_states.cpp
+    // Starts IDLE, guarding its hoard. It only bolts once the player ATTACKS it (Combat::applyDamage
+    // flips it to FLEE) — a goblin already sprinting for the exit the instant the floor loads is a
+    // chase the player never chose to start, and usually never even sees.
+    g->aiState    = AIState::IDLE;
     g->level      = static_cast<u16>(effFloor);
     g->maxHealth  = g->health;
     g->baseMoveSpeed      = g->moveSpeed;
     g->baseAttackCooldown = g->attackCooldown;
-    // The escape clock. On expiry EntitySystem::tickTimers frees the slot WITHOUT firing the death
-    // callback, so an escaped goblin pays out nothing — which is what makes the chase a real choice.
-    g->lifeTimer  = Goblin::ESCAPE_SECONDS;
+    // The escape clock does NOT start here — it starts the moment the player provokes it (see
+    // Combat::applyDamage). Otherwise the goblin could quietly time out and vanish while the player
+    // was still two rooms away, and the whole event would happen off-screen. On expiry
+    // EntitySystem::tickTimers frees the slot WITHOUT firing the death callback, so an escaped
+    // goblin pays out nothing — which is what makes the chase a real choice.
+    g->lifeTimer  = 0.0f;
     // tacticalTimer is the bleed cadence. Free to reuse here: it is only otherwise read for the
     // SUMMONER/HEALER roles, and the goblin has neither.
     g->tacticalTimer = Goblin::BLEED_SECONDS;
     Collision::ensureNotInWall(g->position, g->halfExtents, m_level.grid);
 
-    LOG_INFO("LootGoblin: spawned in room %u (%.0f HP, escapes in %.0fs)",
+    LOG_INFO("LootGoblin: spawned in room %u (%.0f HP, idle until attacked, then %.0fs to escape)",
              best, static_cast<f64>(hp), static_cast<f64>(Goblin::ESCAPE_SECONDS));
 }
 

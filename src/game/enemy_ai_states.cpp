@@ -105,6 +105,11 @@ void updateHostileStates(Entity& e, u32 i,
     switch (e.aiState) {
 
     case AIState::IDLE: {
+        // A loot goblin guards its hoard and does nothing else until it is hit. It has no attack at
+        // all (damage 0, attackRange 0), so letting the normal aggro run would have it chase the
+        // player around harmlessly. Combat::applyDamage is what starts the chase.
+        if (e.flags & ENT_LOOT_GOBLIN) break;
+
         // Idle roaming — enemies wander slowly when no target detected.
         // Uses flybyTimer as roam countdown (unused in IDLE for non-bats).
         e.flybyTimer -= dt;
