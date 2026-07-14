@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "engine/asset_manifest.h"   // mesh manifest + MESH_DEF_CAPACITY (sizes m_meshDefs)
 #include "renderer/camera.h"
 #include "renderer/particles.h"
 #include "renderer/shader.h"
@@ -452,10 +453,10 @@ private:
     Mesh    m_cubeMesh;
     Mesh    m_quadMesh;   // flat quad for billboard sprites
 
-    // Mesh registry for entities (MeshDef struct defined in limb_system.h). The OBJ load table in
-    // engine_init_assets.cpp now fills 96 slots (the secret-superboss engine + shard pushed it to
-    // the old cap exactly); keep headroom so future meshes don't silently drop at the cap.
-    static constexpr u32 MAX_MESH_DEFS = 112;
+    // Mesh registry for entities (MeshDef struct defined in limb_system.h). The mesh table lives in
+    // engine/asset_manifest.h, which static_asserts that it fits here — an overflow would silently
+    // drop the TAIL of the table (the player meshes), so the capacity and the table must not drift.
+    static constexpr u32 MAX_MESH_DEFS = MESH_DEF_CAPACITY;
     MeshDef  m_meshDefs[MAX_MESH_DEFS] = {};
     u32      m_meshDefCount = 0;
     // Per-body-mesh region boxes (head/torso/feet/hands) for armor auto-fit, keyed by mesh id.

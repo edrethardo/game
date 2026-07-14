@@ -7,6 +7,7 @@
 #include "audio/audio.h"
 
 #include "engine/engine.h"
+#include "engine/asset_manifest.h"
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -115,142 +116,53 @@ void Engine::initAssets() {
     m_meshDefs[0].bounds = {{-0.5f,-0.5f,-0.5f},{0.5f,0.5f,0.5f}};
     m_meshDefCount = 1;
 
-    // Load OBJ meshes if they exist
+    // Load the OBJ meshes named by the shared manifest (src/engine/asset_manifest.h).
+    //
+    // A mesh that fails to load here used to be skipped in total silence, which is how an entity
+    // whose .obj was never generated could ship looking like a 0.3-scale cube. Every failure is now
+    // an ERROR: the manifest is the contract, and a missing file means the asset build is broken.
     {
-        struct MeshEntry { const char* name; const char* path; };
-        static constexpr MeshEntry kMeshes[] = {
-            {"skeleton",       "assets/meshes/skeleton.obj"},
-            {"spider",         "assets/meshes/spider.obj"},
-            {"bat",            "assets/meshes/bat.obj"},
-            {"pillar",         "assets/meshes/pillar.obj"},
-            {"chest",          "assets/meshes/chest.obj"},
-            {"goblin",         "assets/meshes/goblin.obj"},   // loot goblin (floor event)
-            {"shrine",         "assets/meshes/shrine.obj"},   // walk-up buff shrine
-            {"sword",          "assets/meshes/sword.obj"},
-            {"dagger",         "assets/meshes/dagger.obj"},
-            {"axe",            "assets/meshes/axe.obj"},
-            {"pistol",         "assets/meshes/pistol.obj"},
-            {"smg",            "assets/meshes/smg.obj"},
-            {"carbine",        "assets/meshes/carbine.obj"},
-            {"revolver",       "assets/meshes/revolver.obj"},
-            {"bow",            "assets/meshes/bow.obj"},
-            {"crossbow",       "assets/meshes/crossbow.obj"},
-            {"throwing_knife", "assets/meshes/throwing_knife.obj"},
-            {"molotov",        "assets/meshes/molotov.obj"},
-            {"chakram",        "assets/meshes/chakram.obj"},
-            {"infinity_chakram", "assets/meshes/infinity_chakram.obj"},
-            {"gloves",         "assets/meshes/gloves.obj"},
-            {"helmet",         "assets/meshes/helmet.obj"},
-            {"armor",          "assets/meshes/armor.obj"},
-            {"boots",          "assets/meshes/boots.obj"},
-            // Armor tier variants (MEDIUM reuses the bare meshes above; chest MEDIUM = "armor").
-            // Resolved per armor ItemDef into ItemDef.tierMeshId; rendered on the body / inspect screen.
-            {"helmet_light",   "assets/meshes/helmet_light.obj"},
-            {"helmet_heavy",   "assets/meshes/helmet_heavy.obj"},
-            {"chest_light",    "assets/meshes/chest_light.obj"},
-            {"chest_heavy",    "assets/meshes/chest_heavy.obj"},
-            {"boots_light",    "assets/meshes/boots_light.obj"},
-            {"boots_heavy",    "assets/meshes/boots_heavy.obj"},
-            {"gloves_light",   "assets/meshes/gloves_light.obj"},
-            {"gloves_heavy",   "assets/meshes/gloves_heavy.obj"},
-            {"ring",           "assets/meshes/ring.obj"},
-            {"shield",         "assets/meshes/shield.obj"},
-            {"human",          "assets/meshes/human.obj"},
-            {"wand",           "assets/meshes/wand.obj"},
-            {"mace",           "assets/meshes/mace.obj"},
-            {"cleric",         "assets/meshes/cleric.obj"},
-            {"archer",         "assets/meshes/archer.obj"},
-            {"mage",           "assets/meshes/mage.obj"},
-            {"rogue",          "assets/meshes/rogue.obj"},
-            {"paladin",        "assets/meshes/paladin.obj"},
-            {"staff",          "assets/meshes/staff.obj"},
-            {"web",            "assets/meshes/web.obj"},
-            {"web_wall",       "assets/meshes/web_wall.obj"},
-            {"shackles",       "assets/meshes/shackles.obj"},
-            {"barrel",         "assets/meshes/barrel.obj"},
-            {"cage",           "assets/meshes/cage.obj"},
-            {"bones",          "assets/meshes/bones.obj"},
-            {"brazier",        "assets/meshes/brazier.obj"},
-            {"butcher",        "assets/meshes/butcher.obj"},
-            {"cleaver",        "assets/meshes/cleaver.obj"},
-            {"iron_maiden",    "assets/meshes/iron_maiden.obj"},
-            {"arrow",          "assets/meshes/arrow.obj"},
-            {"bolt",           "assets/meshes/bolt.obj"},
-            {"skeleton_arm",   "assets/meshes/skeleton_arm.obj"},
-            {"skeleton_leg",   "assets/meshes/skeleton_leg.obj"},
-            {"bat_wing_mesh",  "assets/meshes/bat_wing_mesh.obj"},
-            {"butcher_arm",    "assets/meshes/butcher_arm.obj"},
-            {"butcher_leg",    "assets/meshes/butcher_leg.obj"},
-            {"bat_foot",       "assets/meshes/bat_foot.obj"},
-            {"andariel",       "assets/meshes/andariel.obj"},
-            {"spider_leg_pair","assets/meshes/spider_leg_pair.obj"},
-            {"claymore",       "assets/meshes/claymore.obj"},
-            {"turret",         "assets/meshes/turret.obj"},
-            {"gargoyle",       "assets/meshes/gargoyle.obj"},
-            {"necromancer",    "assets/meshes/necromancer.obj"},
-            {"shaman",         "assets/meshes/shaman.obj"},
-            {"herald",         "assets/meshes/herald.obj"},
-            // New enemy meshes (roster rework)
-            {"hellhound",      "assets/meshes/hellhound.obj"},
-            {"wraith",         "assets/meshes/wraith.obj"},
-            {"sentinel",       "assets/meshes/sentinel.obj"},
-            {"cave_troll",     "assets/meshes/cave_troll.obj"},
-            {"pit_fiend",      "assets/meshes/pit_fiend.obj"},
-            {"pit_fiend_wing","assets/meshes/pit_fiend_wing.obj"},
-            {"hellforge_smith","assets/meshes/hellforge_smith.obj"},
-            {"succubus",       "assets/meshes/succubus.obj"},
-            {"abyssal_titan",  "assets/meshes/abyssal_titan.obj"},
-            {"entropy_weaver", "assets/meshes/entropy_weaver.obj"},
-            // New boss meshes (visual rework) — each major boss now has a dedicated OBJ
-            {"lich",           "assets/meshes/lich.obj"},
-            {"warden",         "assets/meshes/warden.obj"},
-            {"spider_queen",   "assets/meshes/spider_queen.obj"},
-            {"korvath",        "assets/meshes/korvath.obj"},
-            {"azhar",          "assets/meshes/azhar.obj"},
-            {"diabro",         "assets/meshes/diabro.obj"},
-            {"nyx",            "assets/meshes/nyx.obj"},
-            {"reaper",         "assets/meshes/reaper.obj"},
-            // Secret superboss: The Dungeon Engine + its source-shard pickup key.
-            {"engine",         "assets/meshes/engine.obj"},
-            {"shard",          "assets/meshes/shard.obj"},
-            // Player class meshes — resolved by name from ClassDef.meshName in the renderer.
-            // Distinct from the NPC meshes above so player and town-NPC visuals can diverge.
-            // The renderer falls back to "human" if any of these fails to load (e.g. the
-            // generator hasn't been run yet), so this is safe to register pre-asset-build.
-            {"player_warrior",         "assets/meshes/player_warrior.obj"},
-            {"player_ranger",          "assets/meshes/player_ranger.obj"},
-            {"player_sorcerer",        "assets/meshes/player_sorcerer.obj"},
-            {"player_rogue",           "assets/meshes/player_rogue.obj"},
-            {"player_paladin",         "assets/meshes/player_paladin.obj"},
-            {"player_combat_engineer", "assets/meshes/player_combat_engineer.obj"},
-            {"player_marksman",        "assets/meshes/player_marksman.obj"},
-            {"player_tinkerer",        "assets/meshes/player_tinkerer.obj"},
-            {"player_wanderer",        "assets/meshes/player_wanderer.obj"},
-        };
-        for (auto& entry : kMeshes) {
-            if (m_meshDefCount >= MAX_MESH_DEFS) break;
+        u32 missing = 0;
+        for (u32 mi = 0; mi < kMeshAssetCount; mi++) {
+            const MeshAsset& entry = kMeshAssets[mi];
+            if (m_meshDefCount >= MAX_MESH_DEFS) {
+                // Unreachable — asset_manifest.h static_asserts the table fits. Kept as a runtime
+                // backstop because the consequence (the tail of the table silently vanishing) is
+                // exactly the failure mode this whole file is defending against.
+                LOG_ERROR("Mesh registry full at %u — '%s' and everything after it was DROPPED",
+                          m_meshDefCount, entry.name);
+                break;
+            }
             AABB bounds;
             // Measure body-part regions only for player body meshes (armor auto-fit reads them).
             bool isBody = std::strncmp(entry.name, "player_", 7) == 0;
             BodyRegions regions;
             Mesh mesh = ObjLoader::load(ASSET_PATH(entry.path), &bounds,
                                         isBody ? &regions : nullptr);
-            if (mesh.vao != 0) {
-                // Resolve usemtl material names → IDs now that MaterialSystem is initialised.
-                // MaterialSystem::init() runs before this loop so getIdByName is safe to call.
-                for (u8 g = 0; g < mesh.materialGroupCount; g++) {
-                    mesh.materials[g].materialId =
-                        MaterialSystem::getIdByName(mesh.materials[g].materialName);
-                }
-                MeshDef& def = m_meshDefs[m_meshDefCount];
-                std::strncpy(def.name, entry.name, sizeof(def.name) - 1);
-                def.mesh = mesh;
-                def.bounds = bounds;
-                if (isBody && regions.valid) m_bodyRegions[m_meshDefCount] = regions;
-                m_meshDefCount++;
+            if (mesh.vao == 0) {
+                LOG_ERROR("Mesh MISSING: '%s' (%s) — run tools/build_assets.py; this asset will "
+                          "render as a fallback cube", entry.name, entry.path);
+                missing++;
+                continue;
             }
+            // Resolve usemtl material names → IDs now that MaterialSystem is initialised.
+            // MaterialSystem::init() runs before this loop so getIdByName is safe to call.
+            for (u8 g = 0; g < mesh.materialGroupCount; g++) {
+                mesh.materials[g].materialId =
+                    MaterialSystem::getIdByName(mesh.materials[g].materialName);
+            }
+            MeshDef& def = m_meshDefs[m_meshDefCount];
+            std::strncpy(def.name, entry.name, sizeof(def.name) - 1);
+            def.mesh = mesh;
+            def.bounds = bounds;
+            if (isBody && regions.valid) m_bodyRegions[m_meshDefCount] = regions;
+            m_meshDefCount++;
         }
+        if (missing > 0)
+            LOG_ERROR("Asset build incomplete: %u of %u meshes missing. Run tools/build_assets.py",
+                      missing, kMeshAssetCount);
     }
+
 
     // --- Decoration props: load CPU geometry once and hand to the level mesher --------------
     // These small meshes are BAKED into floor sections (LevelMeshSystem::buildAll) rather than
@@ -259,22 +171,21 @@ void Engine::initAssets() {
     // interiors without blocking movement or item pickups (which is why bones/rubble live here,
     // not there). Tint-only materials (prop_iron/bone/wood) give a clean solid voxel look.
     {
-        struct PropEntry { const char* path; const char* material; f32 radius; };
-        static constexpr PropEntry kProps[] = {
-            {"assets/meshes/rubble.obj",   "prop_iron", 0.30f},
-            {"assets/meshes/rock.obj",     "prop_iron", 0.30f},
-            {"assets/meshes/bones.obj",    "prop_bone", 0.30f},
-            {"assets/meshes/mushroom.obj", "prop_wood", 0.20f},
-            {"assets/meshes/crackbit.obj", "prop_iron", 0.30f},
-        };
         LevelMeshSystem::clearPropMeshes();
-        for (auto& pe : kProps) {
+        for (u32 pi = 0; pi < kPropAssetCount; pi++) {
+            const PropAsset& pe = kPropAssets[pi];
             std::vector<Vertex> verts;
             std::vector<u32>    indices;
             // Load only to harvest CPU verts; the returned GPU mesh is unused (destroy it so we
-            // don't leak a VAO/VBO we never draw). Skip cleanly if the OBJ is missing.
+            // don't leak a VAO/VBO we never draw).
             Mesh tmp = ObjLoader::load(ASSET_PATH(pe.path), nullptr, nullptr, &verts, &indices);
-            if (verts.empty() || indices.empty()) { if (tmp.vao) MeshSystem::destroy(tmp); continue; }
+            if (verts.empty() || indices.empty()) {
+                // Not "skip cleanly" any more: the manifest promised this file, so its absence means
+                // the asset build is broken — say so instead of quietly meshing a floor without it.
+                LOG_ERROR("Prop mesh MISSING: %s — run tools/build_assets.py", pe.path);
+                if (tmp.vao) MeshSystem::destroy(tmp);
+                continue;
+            }
             u8 matId = MaterialSystem::getIdByName(pe.material);
             LevelMeshSystem::addPropMesh(verts.data(), (u32)verts.size(),
                                          indices.data(), (u32)indices.size(), matId, pe.radius);

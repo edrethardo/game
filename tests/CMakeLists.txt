@@ -38,6 +38,7 @@ add_executable(dungeon_tests
     game/test_quickbar.cpp
     game/test_champion.cpp
     game/test_floor_event.cpp
+    engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
@@ -79,6 +80,9 @@ target_compile_features(dungeon_tests PRIVATE cxx_std_17)
 # produce full decomposition output; this only affects the hot path.
 target_compile_definitions(dungeon_tests PRIVATE
     DOCTEST_CONFIG_SUPER_FAST_ASSERTS
+    # test_asset_manifest.cpp stats the generated .obj files, which live at paths relative to the
+    # repo root — the test binary runs from the build dir, so it cannot use a relative path.
+    DUNGEON_REPO_ROOT="${CMAKE_SOURCE_DIR}"
 )
 
 # CTest registration. One add_test() per binary — doctest enumerates the

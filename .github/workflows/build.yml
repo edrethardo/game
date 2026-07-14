@@ -123,6 +123,12 @@ jobs:
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release $STEAM
           cmake --build build-rel -j$(nproc)
 
+      # The suite has never run in CI — it was built and then thrown away, so a red test could not
+      # stop a release. It runs natively here (the Windows job cross-compiles, so it cannot execute
+      # its own binary). Assets are generated above, which is what test_asset_manifest.cpp needs.
+      - name: Run tests
+        run: ctest --test-dir build-rel --output-on-failure
+
       - name: Package
         run: |
           SUFFIX=$(echo "${{ matrix.os }}" | sed 's/ubuntu-//')
@@ -197,6 +203,9 @@ jobs:
           STEAM=""; [ "${{ matrix.variant }}" = "steam" ] && STEAM="-DUSE_STEAM=ON"
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release $STEAM
           cmake --build build-rel -j$(sysctl -n hw.ncpu)
+
+      - name: Run tests
+        run: ctest --test-dir build-rel --output-on-failure
 
       - name: Package
         run: |

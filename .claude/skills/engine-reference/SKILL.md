@@ -35,7 +35,7 @@ Important caps (search the header for the constant if you need to grow it):
 `MAX_PLAYERS=4`, `MAX_ENTITIES=128`, `MAX_PROJECTILES=1024` (512 on Switch), `MAX_ITEM_DEFS=160`,
 `MAX_AFFIX_DEFS=32`, `MAX_AFFIXES_PER_ITEM=4`, `MAX_INVENTORY_ITEMS=24`,
 `MAX_SKILL_DEFS=64`, `MAX_ENEMY_DEFS=64`, `MAX_WORLD_ITEMS=32`, `MAX_WEAPON_DEFS=16`, `MAX_MATERIALS=160`,
-`MAX_MESH_DEFS=96` (Engine-local), `MAX_LEVEL_SECTIONS=64`, `MAX_DUNGEON_ROOMS=32`,
+`MAX_MESH_DEFS=112` (= `MESH_DEF_CAPACITY` in `engine/asset_manifest.h`, which `static_assert`s that the mesh table fits — an overflow makes the load loop `break`, silently dropping the TAIL of the table), `MAX_LEVEL_SECTIONS=64`, `MAX_DUNGEON_ROOMS=32`,
 `SECTION_SIZE=16` cells, `NET_TICK_RATE=60`, `SNAPSHOT_RATE=60`, `INPUT_BUFFER_SIZE=64`.
 
 ## Architecture deep-dive: split-screen & shared systems
