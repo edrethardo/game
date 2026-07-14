@@ -1,0 +1,12 @@
+{
+  "_comment": "Floor events. One (or none) is rolled per floor — see FloorEventTable::floorChance. Adding an event here is data, not code, once its spawner exists in Engine::spawnFloorEvent.",
+  "floorChance": 0.35,
+  "events": [
+    {
+      "id": "loot_goblin",
+      "weight": 100,
+      "minFloor": 2,
+      "_comment": "Flees on sight, bleeds loot while you chase it, and portals out if you are too slow."
+    }
+  ]
+}

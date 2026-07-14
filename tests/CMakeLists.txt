@@ -37,6 +37,7 @@ add_executable(dungeon_tests
     game/test_skill_bar_hit.cpp
     game/test_quickbar.cpp
     game/test_champion.cpp
+    game/test_floor_event.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
     world/test_tile_noise.cpp
@@ -58,6 +59,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/game/inventory_ui.cpp   # skill-bar + panel hit-test geometry
     ${CMAKE_SOURCE_DIR}/src/game/quickbar.cpp       # quickbar slot bookkeeping
     ${CMAKE_SOURCE_DIR}/src/game/champion.cpp       # champion affix roll rules (pure)
+    ${CMAKE_SOURCE_DIR}/src/game/floor_event.cpp   # floor-event weighted pick (pure)
     stubs_material.cpp
     ${CMAKE_SOURCE_DIR}/src/world/pathfinder.cpp
     ${CMAKE_SOURCE_DIR}/src/world/level_grid.cpp

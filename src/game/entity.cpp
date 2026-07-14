@@ -74,6 +74,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     // bit itself is cleared with the rest of `flags` by the caller, but these two are not.
     e.champAffixes   = 0;
     e.champLeaderIdx = 0xFFFF;
+    e.lifeTimer      = 0.0f;   // recycled slot must not inherit a goblin's escape countdown
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;
@@ -106,6 +107,19 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         Entity& e = pool.entities[i];
 
         if (e.flashTimer > 0.0f) e.flashTimer -= dt;
+
+        // Generic despawn countdown (the loot goblin's escape). Expiry is deliberately NOT routed
+        // through Combat::killEntity — that always fires the death/loot callback, and a goblin that
+        // got away must pay out nothing. Setting ENT_DEAD + a tiny deathTimer reuses the normal
+        // free-the-slot path (the Swarm Queen expires the same way).
+        if (e.lifeTimer > 0.0f && !(e.flags & ENT_DEAD)) {
+            e.lifeTimer -= dt;
+            if (e.lifeTimer <= 0.0f) {
+                e.flags     |= ENT_DEAD;
+                e.aiState    = AIState::DEAD;
+                e.deathTimer = 0.01f;
+            }
+        }
 
         if (e.knockbackTimer > 0.0f) {
             e.knockbackTimer -= dt;

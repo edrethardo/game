@@ -163,6 +163,9 @@ void Engine::initCallbacks() {
         // champion) and BEFORE the normal roll, so a champion never also rolls the 40% table.
         // Like every phase here it is behind the CLIENT gate above — loot is server-authoritative.
         if (s_engine->handleChampionLootDrop(pool, entityIndex, position)) return;
+        // The goblin's sack. Only reached if it was actually killed — an escaped goblin expires via
+        // lifeTimer, which never fires this callback.
+        if (s_engine->handleGoblinLootDrop(pool, entityIndex, position)) return;
         s_engine->handleNormalLootDrop(pool, entityIndex, position);
         s_engine->handleOnKillRingPassives(pool, entityIndex, position);
     });

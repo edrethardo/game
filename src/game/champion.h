@@ -81,7 +81,12 @@ constexpr u8  MIN_FLOOR          = 3;      // no champions in the first two floo
 constexpr u8  MIN_MINIONS        = 2;
 constexpr u8  MAX_MINIONS        = 4;
 constexpr u8  MAX_PACKS_PER_FLOOR = 2;     // hard cap — the entity pool is only 128
-constexpr f32 SPAWN_CHANCE       = 0.06f;  // per eligible enemy, until MAX_PACKS_PER_FLOOR is hit
+// Per eligible enemy, until MAX_PACKS_PER_FLOOR is hit. A floor holds ~25 enemies early and ~43
+// later, so this compounds fast — at 6% a pack appeared on 79% of early floors and 93% of deep ones,
+// which is often enough that "champion" stops meaning anything and hands out a guaranteed rare
+// nearly every floor. At 3% it is ~54% early / ~73% deep: a champion is a thing that HAPPENS to a
+// floor, not furniture. Tune here, not at the call site.
+constexpr f32 SPAWN_CHANCE       = 0.03f;
 // Never let champion bodies crowd out the floor's normal spawns. A pack needs this much free room
 // in the 128-entity pool before it may spawn at all.
 constexpr u32 ENTITY_HEADROOM    = 12;

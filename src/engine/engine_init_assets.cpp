@@ -39,6 +39,7 @@
 #include "game/boss_ai.h"
 #include "game/boss_loader.h"
 #include "game/enemy_loader.h"
+#include "game/floor_event_loader.h"
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -123,6 +124,7 @@ void Engine::initAssets() {
             {"bat",            "assets/meshes/bat.obj"},
             {"pillar",         "assets/meshes/pillar.obj"},
             {"chest",          "assets/meshes/chest.obj"},
+            {"goblin",         "assets/meshes/goblin.obj"},   // loot goblin (floor event)
             {"sword",          "assets/meshes/sword.obj"},
             {"dagger",         "assets/meshes/dagger.obj"},
             {"axe",            "assets/meshes/axe.obj"},
@@ -298,6 +300,7 @@ void Engine::initAssets() {
     m_meshIdBat      = findMeshByName("bat");
     m_meshIdSpider   = findMeshByName("spider");
     m_meshIdChest    = findMeshByName("chest");
+    m_goblinMeshId   = findMeshByName("goblin");
     m_meshIdHuman    = findMeshByName("human");
     m_meshIdSword    = findMeshByName("sword");
     m_meshIdDagger   = findMeshByName("dagger");
@@ -354,6 +357,10 @@ void Engine::initAssets() {
         LOG_WARN("Failed to load enemy defs — using fallback kTier arrays");
         m_enemyDefs.count = 0;
     }
+
+    // Floor events (the loot goblin, and whatever follows it). A missing/!malformed file leaves the
+    // table empty, which simply means no floor events — not a crash.
+    FloorEventLoader::load(ASSET_PATH("assets/config/events.json"), m_floorEvents);
 
     // Register skill visual FX callbacks
     SkillSystem::setNovaCallback([](Vec3 position, f32 radius, Vec3 color) {

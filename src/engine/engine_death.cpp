@@ -44,6 +44,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/champion.h"  // champion death novas (MOLTEN / FROZEN)
+#include "game/floor_event.h"  // Goblin:: tunables (death payout)
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -558,6 +559,37 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
 // the boss's own guaranteed haul + bonusDrops in a single room. The world-item pool is finite (64),
 // and a full pool makes WorldItemSystem::spawn fail SILENTLY — so over-generous guarantees don't
 // produce more loot, they produce *vanished* loot.
+// The loot goblin's payout: the rest of the sack, but ONLY if you actually caught it. A goblin that
+// escapes expires via Entity::lifeTimer in EntitySystem::tickTimers, which frees the slot WITHOUT
+// firing this callback at all — so escaping costs you the sack, which is the entire point of the
+// chase. Nothing here needs to check "did it escape": by construction, it can't have.
+bool Engine::handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
+    const Entity& e = pool.entities[idx];
+    if (!(e.flags & ENT_LOOT_GOBLIN)) return false;
+
+    u8 lvl = static_cast<u8>(e.level > 255 ? 255 : e.level);
+    if (lvl < 1) lvl = 1;
+
+    u8 dropped = 0;
+    for (u8 i = 0; i < Goblin::DEATH_DROPS; i++) {
+        ItemInstance item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
+                                              m_affixDefs, m_affixDefCount);
+        if (isItemEmpty(item)) continue;
+        // Fan them out so the pile is readable rather than one item stacked on three others.
+        const f32 ang = (6.2831853f * static_cast<f32>(i)) / static_cast<f32>(Goblin::DEATH_DROPS);
+        Vec3 dropPos = pos + Vec3{ cosf(ang) * 0.6f, 0.5f, sinf(ang) * 0.6f };
+        if (!WorldItemSystem::spawn(m_worldItems, item, dropPos, &m_level.grid, e.killerSlot)) {
+            LOG_WARN("LootGoblin: death drop lost — world-item pool full");
+            break;
+        }
+        broadcastLootSpawn(m_worldItems, item.uid, dropPos,
+                           item.defId < m_itemDefCount ? item.defId : 0xFFFF);
+        dropped++;
+    }
+    LOG_INFO("LootGoblin: caught — dropped %u item(s)", dropped);
+    return true;   // never also roll the normal 40% table
+}
+
 bool Engine::handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     const Entity& e = pool.entities[idx];
     if (!(e.flags & ENT_CHAMPION) || e.champAffixes == 0) return false;

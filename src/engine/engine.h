@@ -22,6 +22,7 @@
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
 #include "game/enemy_def.h"
+#include "game/floor_event.h"
 #include "net/net.h"
 #include "net/net_player.h"
 #include "net/snapshot.h"    // WorldSnapshot — needed for m_baselineSnap / m_lastAppliedSnap (D7.2)
@@ -1002,6 +1003,19 @@ private:
     bool tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& room, u32 effFloor);
     // Champion packs already placed on this floor — the MAX_PACKS_PER_FLOOR gate. Reset per floor.
     u8   m_championPacksThisFloor = 0;
+
+    // --- Floor events (game/floor_event.h) ---
+    FloorEventTable m_floorEvents;              // loaded once from assets/config/events.json
+    // Roll this floor's event (0 or 1) and spawn it. Called from startGame AFTER spawnFloorBoss and
+    // buildClearanceField: the boss call MUTATES the boss room's geometry and rebuilds the level
+    // mesh, so anything placed earlier can be swallowed by the arena expansion — and the goblin
+    // needs the clearance field to path.
+    void spawnFloorEvents(DungeonResult& dungeon);
+    // The loot goblin: flees, bleeds loot while chased, and expires (paying nothing) if it escapes.
+    void spawnLootGoblin(const DungeonResult& dungeon);
+    // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
+    void tickLootGoblins(f32 dt);
+    u8   m_goblinMeshId = 0;
     // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
     // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative
     // sim only — called from tickSharedSystems inside its NetRole::CLIENT gate.
@@ -1061,6 +1075,9 @@ private:
     // Returns true if it handled the drop (caller then skips the normal roll). Minions deliberately
     // fall through to the normal path — see the pool-saturation note in the implementation.
     bool handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
+    // The loot goblin's death payout. An ESCAPED goblin never reaches this: it expires via
+    // Entity::lifeTimer, which frees the slot without firing the death callback.
+    bool handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
     void handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
     void handleOnKillRingPassives(EntityPool& pool, u16 idx, Vec3 pos);
 

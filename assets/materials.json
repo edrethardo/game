@@ -946,6 +946,11 @@
         1.0,
         1.0
       ]
+    },
+    {
+      "id": 156,
+      "name": "goblin",
+      "texture": "goblin_skin_42.png"
     }
   ]
 }

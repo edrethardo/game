@@ -32,6 +32,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/champion.h"  // cycle-driven champion affixes (tickChampions)
+#include "game/floor_event.h"  // Goblin:: tunables (loot bleed)
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -707,6 +708,44 @@ void Engine::tickChampions(f32 dt) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// tickLootGoblins — drip the goblin's loot while you chase it.
+//
+// Bleeding the sack over time (rather than dumping it all on death) does two jobs: every second of
+// the chase visibly pays, so the pursuit feels worth it even if it escapes; and it spreads the
+// drops out instead of bursting them, which is what would otherwise overrun the world-item pool.
+// Authoritative sim only — the caller gates it.
+// ---------------------------------------------------------------------------
+void Engine::tickLootGoblins(f32 dt) {
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (!(e.flags & ENT_LOOT_GOBLIN) || (e.flags & ENT_DEAD)) continue;
+        if (e.resurrectCount >= Goblin::BLEED_MAX) continue;   // out of pocket (reused as a counter)
+
+        e.tacticalTimer -= dt;
+        if (e.tacticalTimer > 0.0f) continue;
+        e.tacticalTimer = Goblin::BLEED_SECONDS;
+
+        u8 lvl = static_cast<u8>(e.level > 255 ? 255 : e.level);
+        if (lvl < 1) lvl = 1;
+        ItemInstance drop = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
+                                              m_affixDefs, m_affixDefCount);
+        if (isItemEmpty(drop)) continue;
+
+        Vec3 pos = e.position + Vec3{0.0f, 0.3f, 0.0f};
+        // Check the return — a full pool makes spawn() fail silently, which for a chase reward would
+        // read as "the goblin dropped nothing", i.e. a broken feature rather than a full pool.
+        if (!WorldItemSystem::spawn(m_worldItems, drop, pos, &m_level.grid, 0xFF)) {
+            LOG_WARN("LootGoblin: bled item lost — world-item pool full");
+            continue;
+        }
+        // No broadcastLootSpawn here (it is a file-static in engine_death.cpp): that packet is only
+        // an *early* notify for kill-feed/minimap. World items replicate through the snapshot
+        // regardless (Client::mirrorWorldItems), so a guest still sees every bled item.
+        e.resurrectCount++;   // free on a goblin: only SUMMONER resurrection reads it
+    }
+}
+
 void Engine::tickSharedSystems(f32 dt) {
     // (L8) Default kill-credit to "none" so AI / skill / DoT entity kills drop free-for-all;
     // projectile.cpp re-asserts each player projectile's own firer around its damage below.
@@ -763,6 +802,7 @@ void Engine::tickSharedSystems(f32 dt) {
             // Runs right after the AI that advances animTimer, which is what their phase is derived
             // from. Authoritative-sim only — a client would double-apply these and desync.
             tickChampions(dt);
+            tickLootGoblins(dt);   // drip the sack while it runs (same authoritative-only reason)
         }
 
         // Decay enemy speech timers + log fresh speech to chat (shared entity state → once/frame;

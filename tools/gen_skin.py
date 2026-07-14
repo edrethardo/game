@@ -1708,6 +1708,61 @@ def skin_void_skeleton():
 # New archetype enemy skins (w=7, h=16 skeleton rig)
 # ---------------------------------------------------------------------------
 
+def skin_goblin():
+    """Loot goblin — sickly green hide, gold-glinting sack, yellow eyes.
+    Grid matches gen_mesh.gen_goblin: x=[-2,2] (w=5), y=[0,11] (h=12). px=gx+2, py=gy.
+    The sack is deliberately the brightest thing on the model: the player has to understand,
+    with no tooltip and about half a second of sight, that this thing is carrying loot and
+    running away with it."""
+    w, h = 5, 12
+    p = {}
+    hide      = (86, 140, 62, 255)    # sickly green
+    hide_dark = (64, 108, 48, 255)
+    sack      = (150, 116, 66, 255)   # burlap
+    sack_lit  = (196, 160, 88, 255)   # sunlit burlap — the "there is loot in here" read
+    gold      = (228, 190, 76, 255)   # coins spilling from the cinch
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = hide
+
+    # Head (py 8-10) — slightly lighter than the body
+    for py in range(8, 11):
+        for px in range(1, 4):
+            p[(px, py)] = (100, 156, 72, 255)
+    # Ears (py 10) — the silhouette read, darker so they separate from the head
+    p[(0, 10)] = hide_dark
+    p[(4, 10)] = hide_dark
+    # Yellow eyes
+    p[(1, 9)] = (240, 214, 92, 255)
+    p[(3, 9)] = (240, 214, 92, 255)
+    # Snout / grin
+    p[(2, 8)] = (58, 96, 44, 255)
+
+    # THE SACK — upper back, py 5-10. Brightest region on the whole skin.
+    for py in range(5, 11):
+        for px in range(0, 5):
+            p[(px, py)] = sack if (px + py) % 2 else sack_lit
+    # Cinched neck of the sack, with coins glinting out of it
+    for px in range(1, 4):
+        p[(px, 10)] = gold
+
+    # Torso below the sack
+    for py in range(4, 6):
+        for px in range(1, 4):
+            p[(px, py)] = hide
+    # Arms — darker, clutching the strap
+    for py in range(5, 8):
+        p[(0, py)] = hide_dark
+        p[(4, py)] = hide_dark
+    # Legs / big flat feet
+    for py in range(0, 4):
+        for px in range(1, 4):
+            p[(px, py)] = hide_dark
+    for px in range(0, 5):
+        p[(px, 0)] = (48, 80, 36, 255)
+    return w, h, p
+
+
 def skin_gargoyle():
     """Gargoyle — grey stone body, amber eyes, mossy green patches.
     Grid: x=[-4,4] (w=9), y=[0,13] (h=14). min_x=-4, min_y=0.
@@ -5010,6 +5065,7 @@ SKIN_TYPES = {
     "void_skeleton":      ("void_skeleton_skin_42.png",      skin_void_skeleton),
     # New archetype enemy skins
     "gargoyle":           ("gargoyle_skin_42.png",           skin_gargoyle),
+    "goblin":             ("goblin_skin_42.png",             skin_goblin),
     "necromancer":        ("necromancer_skin_42.png",        skin_necromancer),
     "cavern_shaman":      ("cavern_shaman_skin_42.png",     skin_cavern_shaman),
     "cavern_herald":      ("cavern_herald_skin_42.png",      skin_cavern_herald),

@@ -1094,6 +1094,52 @@ def gen_gargoyle(height=1.6):
     return mb
 
 
+def gen_goblin(height=1.1):
+    """Loot goblin — small, hunched, big-eared thief hauling a swollen sack on its back.
+    Origin at feet (Y=0). 12 voxels tall: deliberately SHORT so it reads as prey rather than
+    threat the moment you see it, and the sack is oversized so the reason to chase it is legible
+    from across a room (the player never gets a tooltip explaining this thing)."""
+    mb = MeshBuilder()
+    vs = height / 12.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head, hunched forward over the shoulders
+    fill_box(-1, 8, -2, 3, 3, 3)
+    # Ears — the silhouette read. Big, swept back, one per side.
+    fill_box(-2, 10, -1, 1, 1, 2)
+    fill_box(2, 10, -1, 1, 1, 2)
+    # Snout
+    fill_box(0, 8, -3, 1, 1, 1)
+    # Torso — small and stooped
+    fill_box(-1, 5, -1, 3, 3, 2)
+    # THE SACK — oversized, slung on the back (+Z). This is the whole point of the creature.
+    fill_box(-2, 5, 1, 5, 5, 3)
+    fill_box(-1, 10, 2, 3, 1, 2)   # cinched neck of the sack
+    # Arms, clutching the sack strap
+    fill_box(-2, 5, -1, 1, 3, 1)
+    fill_box(2, 5, -1, 1, 3, 1)
+    # Hands
+    fill_box(-2, 4, -2, 1, 1, 2)
+    fill_box(2, 4, -2, 1, 1, 2)
+    # Pelvis
+    fill_box(-1, 3, -1, 3, 2, 2)
+    # Legs — short and bandy
+    fill_box(-1, 1, -1, 1, 2, 1)
+    fill_box(1, 1, -1, 1, 2, 1)
+    # Big flat feet (it runs on these)
+    fill_box(-2, 0, -2, 2, 1, 3)
+    fill_box(1, 0, -2, 2, 1, 3)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
 def gen_necromancer(height=2.0):
     """Necromancer — tall hooded skeleton mage. Robed, thin arms.
     Origin at feet (Y=0). 18 voxels tall."""
@@ -4934,6 +4980,11 @@ MESH_TYPES = {
         "desc": "Gargoyle ambush enemy — hunched stone humanoid. Params: --height",
         "default_file": "gargoyle.obj",
     },
+    "goblin": {
+        "func": gen_goblin,
+        "desc": "Loot goblin — small hunched thief with big ears and a swollen sack. Params: --height",
+        "default_file": "goblin.obj",
+    },
     "necromancer": {
         "func": gen_necromancer,
         "desc": "Necromancer — tall hooded skeleton mage. Params: --height",
@@ -5283,7 +5334,7 @@ def main():
     elif mtype == "chest":
         if args.width is not None:
             kwargs["width"] = args.width
-    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "necromancer", "shaman", "herald", "engine"):
+    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "goblin", "necromancer", "shaman", "herald", "engine"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "shard":

@@ -33,6 +33,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/champion.h"  // champion affix roll + pack tunables
+#include "game/floor_event.h"  // floor-event pick + loot-goblin tunables
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -1104,6 +1105,85 @@ void Engine::spawnFloorDecorations(const DungeonResult& dungeon)
 // spawn room. Equipment is handled inside spawnFriendlyNpc (which stays in
 // engine_startgame.cpp).
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// spawnFloorEvents — roll this floor's one-off event (or none) and spawn it.
+//
+// Called AFTER spawnFloorBoss + buildClearanceField: the boss call mutates the boss room's geometry
+// and rebuilds the level mesh, so anything placed before it can be swallowed by the arena
+// expansion — and the goblin needs the clearance field to path away from you.
+//
+// Host/SP only. The goblin is a normal entity, so it reaches clients through the snapshot like any
+// other; nothing here is re-rolled client-side.
+// ---------------------------------------------------------------------------
+void Engine::spawnFloorEvents(DungeonResult& dungeon)
+{
+    if (m_netRole == NetRole::CLIENT) return;
+
+    const u32 effFloor = m_level.currentFloor + m_difficulty * 50;
+    u32 rng = static_cast<u32>(std::rand());
+    const FloorEventId id = FloorEvent::pick(m_floorEvents, effFloor, rng);
+    if (id == FloorEventId::NONE) return;
+
+    switch (id) {
+        case FloorEventId::LOOT_GOBLIN: spawnLootGoblin(dungeon); break;
+        default: break;   // an id with no spawner would be a silent no-op event; the loader rejects those
+    }
+}
+
+// The loot goblin. Spawns far from the player so the chase has somewhere to happen.
+void Engine::spawnLootGoblin(const DungeonResult& dungeon)
+{
+    if (dungeon.roomCount < 2) return;
+
+    // Farthest room from the spawn room, so you have to commit to the chase rather than trip over it.
+    u32 best = 1; f32 bestDist = -1.0f;
+    const DungeonRoom& start = dungeon.rooms[0];
+    for (u32 r = 1; r < dungeon.roomCount; r++) {
+        const DungeonRoom& room = dungeon.rooms[r];
+        f32 dx = static_cast<f32>(room.x) - static_cast<f32>(start.x);
+        f32 dz = static_cast<f32>(room.z) - static_cast<f32>(start.z);
+        f32 d2 = dx * dx + dz * dz;
+        if (d2 > bestDist) { bestDist = d2; best = r; }
+    }
+    const DungeonRoom& room = dungeon.rooms[best];
+
+    Vec3 pos = { (room.x + room.w * 0.5f) * m_level.grid.cellSize,
+                 room.floorHeight + 0.5f,
+                 (room.z + room.d * 0.5f) * m_level.grid.cellSize };
+
+    const u32 effFloor = m_level.currentFloor + m_difficulty * 50;
+    const f32 hp = Goblin::HEALTH * GameConst::floorHealthMult(effFloor);
+    const f32 speed = 5.0f * Goblin::SPEED_MULT;   // ~player base speed, scaled
+
+    // damage 0 and attackRange 0: it has no attack at all. The FLEE state never attacks either —
+    // belt and braces, because a goblin that fights back is just a fast monster.
+    EntityHandle h = EntitySystem::spawn(m_entities, pos, {0.35f, 0.5f, 0.35f}, false,
+                                         hp, speed, Goblin::DETECT_RANGE, 0.0f, 1.0f, 0.0f);
+    Entity* g = handleGet(m_entities, h);
+    if (!g) { LOG_WARN("LootGoblin: entity pool full — event skipped"); return; }
+
+    g->meshId     = m_goblinMeshId;
+    g->materialId = MaterialSystem::getIdByName("goblin");
+    g->enemyType  = EnemyType::GENERIC;
+    g->enemyRole  = EnemyRole::NORMAL;
+    g->flags     |= ENT_LOOT_GOBLIN;      // survives death, unlike aiState — the drop handler needs it
+    g->aiState    = AIState::FLEE;        // never leaves this state — see enemy_ai_states.cpp
+    g->level      = static_cast<u16>(effFloor);
+    g->maxHealth  = g->health;
+    g->baseMoveSpeed      = g->moveSpeed;
+    g->baseAttackCooldown = g->attackCooldown;
+    // The escape clock. On expiry EntitySystem::tickTimers frees the slot WITHOUT firing the death
+    // callback, so an escaped goblin pays out nothing — which is what makes the chase a real choice.
+    g->lifeTimer  = Goblin::ESCAPE_SECONDS;
+    // tacticalTimer is the bleed cadence. Free to reuse here: it is only otherwise read for the
+    // SUMMONER/HEALER roles, and the goblin has neither.
+    g->tacticalTimer = Goblin::BLEED_SECONDS;
+    Collision::ensureNotInWall(g->position, g->halfExtents, m_level.grid);
+
+    LOG_INFO("LootGoblin: spawned in room %u (%.0f HP, escapes in %.0fs)",
+             best, static_cast<f64>(hp), static_cast<f64>(Goblin::ESCAPE_SECONDS));
+}
+
 void Engine::spawnFloorNpcs(const DungeonResult& dungeon)
 {
     // Clear NPC equipment pool on floor 1, preserve on descent

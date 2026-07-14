@@ -798,6 +798,47 @@ void updateHostileStates(Entity& e, u32 i,
         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
     } break;
 
+    // The loot goblin. Runs from the nearest player and never attacks, ever — there is no exit from
+    // this state except death or the lifeTimer expiring. That absoluteness is the point: RETREAT
+    // (the obvious candidate to reuse) auto-exits to CHASE the moment a player is inside
+    // detectionRange, so a goblin built on it would turn and fight the instant you got close.
+    case AIState::FLEE: {
+        Vec3 away = e.position - targetPos;
+        away.y = 0.0f;
+        if (lengthSq(away) > 0.01f) {
+            away = normalize(away);
+        } else {
+            // Player is standing exactly on it — bolt in an arbitrary direction rather than freeze.
+            away = {1.0f, 0.0f, 0.0f};
+        }
+
+        // Steer along the wall when running straight away would bury it in one. Sampling a few
+        // headings either side is cheap and stops the goblin cornering itself, which would turn the
+        // chase into a free kill and make the escape timer meaningless.
+        Vec3  bestDir  = away;
+        f32   bestOpen = -1.0f;
+        constexpr f32 kProbe = 1.6f;
+        for (s32 s = -2; s <= 2; s++) {
+            const f32 a = static_cast<f32>(s) * 0.5f;           // ±57° in 28.6° steps
+            const f32 ca = cosf(a), sa = sinf(a);
+            Vec3 d = { away.x * ca - away.z * sa, 0.0f, away.x * sa + away.z * ca };
+            Vec3 probe = e.position + d * kProbe;
+            u32 gx, gz;
+            const bool blocked = LevelGridSystem::worldToGrid(grid, probe, gx, gz)
+                               ? LevelGridSystem::isSolid(grid, gx, gz) : true;
+            // Prefer open headings, and among those the one closest to straight-away.
+            const f32 score = (blocked ? -1.0f : 1.0f) - fabsf(a) * 0.1f;
+            if (score > bestOpen) { bestOpen = score; bestDir = d; }
+        }
+
+        e.velocity.x = bestDir.x * effectiveSpeed;
+        e.velocity.z = bestDir.z * effectiveSpeed;
+        e.yaw = atan2f(bestDir.x, bestDir.z);   // faces the way it is running
+        entityMoveAndSlide(e, grid, dt, targetPos, 0.3f);
+        if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+        e.animTimer += dt;
+    } break;
+
     case AIState::DEAD:
         break;
     }

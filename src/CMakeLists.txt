@@ -78,6 +78,8 @@ add_executable(DungeonEngine
     game/world_item.cpp
     game/quickbar.cpp
     game/champion.cpp
+    game/floor_event.cpp
+    game/floor_event_loader.cpp
     game/inventory_ui.cpp
     game/limb_system.cpp
     game/skill_system.cpp

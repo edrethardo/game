@@ -17,7 +17,10 @@ enum EntityFlags : u8 {
     // because `flags` is copied verbatim into SnapEntity (snapshot.cpp), so this bit reaches the
     // client with no wire-size change — the client needs it to draw the champion tell.
     ENT_CHAMPION     = 1 << 5,
-    // bits 6-7 free
+    // The loot goblin. A flag rather than an aiState test because aiState becomes DEAD the moment it
+    // is killed — which is exactly when the death handler needs to know what it was.
+    ENT_LOOT_GOBLIN  = 1 << 6,
+    // bit 7 free
 };
 
 enum struct AIState : u8 {
@@ -32,6 +35,13 @@ enum struct AIState : u8 {
     STRAFE,   // ranged: sidestepping while firing
     SURROUND, // melee: spreading to surround target
     DEAD,
+    // Runs AWAY from the nearest player and never attacks. The loot goblin's whole behaviour.
+    // RETREAT is deliberately not reused: it auto-exits to CHASE the moment a player is inside
+    // detectionRange, and its backpedal fallback is gated on attackRange > 5 — so a melee-range
+    // goblin would simply turn around and charge you.
+    // APPENDED, never inserted: aiState is serialized (SnapEntity.aiState), so inserting a value
+    // here would renumber DEAD and every state after it.
+    FLEE,
 };
 
 // Enemy type determines limb configuration and animation behavior
@@ -247,19 +257,27 @@ struct Entity {
                                   // the loot drop to reserve the drop to that player for a few seconds
 
     // --- Champion (see game/champion.h) ---
-    // These land in what was pure tail padding after killerSlot, so they cost ZERO bytes — the
-    // static_assert below pins that. They are NOT part of EnemyRole because that u8 bitmask is
-    // full (all 8 bits assigned).
+    // These land in what was pure tail padding after killerSlot, so they cost ZERO bytes. They are
+    // NOT part of EnemyRole because that u8 bitmask is full (all 8 bits assigned).
     u8   champAffixes   = 0;       // ChampAffix bitmask. 0 = not a champion. Leader-only.
     u16  champLeaderIdx = 0xFFFF;  // pool index of this minion's pack leader; 0xFFFF = none/is-leader.
                                    // Deliberately NOT spawnerIdx: Combat::engineShieldActive scans
                                    // every entity for spawnerIdx == engineIdx without gating on
                                    // isEngine, so a colliding index would make The Source immune.
+
+    // Generic despawn countdown. > 0 = this entity expires when it reaches 0; 0 = lives forever.
+    // Ticked for ALL entities in EntitySystem::tickTimers (the authoritative sim), which is why the
+    // loot goblin can use it — queenLifeTimer, the existing despawn countdown, only ticks for
+    // FRIENDLY entities and so would never fire for a hostile.
+    // Expiry deliberately does NOT go through Combat::killEntity: that always fires the death/loot
+    // callback, and a goblin that escapes must pay out nothing.
+    f32  lifeTimer      = 0.0f;
 };
 
-// Pins the "champion fields are free" claim: they must sit in the existing tail padding. If this
-// fires, Entity grew — re-check the layout before assuming the fields are still free.
-static_assert(sizeof(Entity) == 504, "Entity layout changed — champion fields may no longer be free");
+// Pins the entity layout. The champion fields fit in what was tail padding (504), and lifeTimer
+// then grew it by one aligned float. If this fires, check whether new fields are still landing in
+// padding before assuming they are free.
+static_assert(sizeof(Entity) == 512, "Entity layout changed — re-check field packing");
 
 struct EntityHandle {
     u16 index      = 0xFFFF;
