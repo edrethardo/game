@@ -739,12 +739,12 @@ void Engine::serverNetPost(f32 dt) {
             if (np.shrineBuffTimer > 0.0f) {
                 np.shrineBuffTimer -= dt;
                 if (np.shrineBuffTimer <= 0.0f) {
-                    if (np.shrineBuff == ShrineBuff::VITALITY) {
-                        const f32 bonus = np.maxHealth
-                                        * (np.shrineBuffValue / (1.0f + np.shrineBuffValue));
-                        np.maxHealth -= bonus;
+                    // Unconditional — see the matching local path in engine_update_player.cpp.
+                    if (np.shrineHealthBonus > 0.0f) {
+                        np.maxHealth -= np.shrineHealthBonus;
                         if (np.maxHealth < 1.0f) np.maxHealth = 1.0f;
                         if (np.health > np.maxHealth) np.health = np.maxHealth;
+                        np.shrineHealthBonus = 0.0f;
                     }
                     np.shrineBuff      = ShrineBuff::NONE;
                     np.shrineBuffValue = 0.0f;

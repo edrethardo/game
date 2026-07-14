@@ -1215,6 +1215,7 @@ static void seedRemoteView(const NetPlayer& np, Player& v) {
     v.shrineBuff         = np.shrineBuff;
     v.shrineBuffValue    = np.shrineBuffValue;
     v.shrineBuffTimer    = np.shrineBuffTimer;
+    v.shrineHealthBonus  = np.shrineHealthBonus;
     for (u32 ms = 0; ms < 20; ms++) v.markSpeedTimers[ms] = np.markSpeedTimers[ms];
 }
 
@@ -1252,6 +1253,7 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.shrineBuff         = v.shrineBuff;
     np.shrineBuffValue    = v.shrineBuffValue;
     np.shrineBuffTimer    = v.shrineBuffTimer;
+    np.shrineHealthBonus  = v.shrineHealthBonus;
     for (u32 ms = 0; ms < 20; ms++) np.markSpeedTimers[ms] = v.markSpeedTimers[ms];
 }
 

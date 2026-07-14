@@ -67,6 +67,12 @@ struct Player {
     u8   shrineBuff       = 0;     // ShrineBuff::NONE/POWER/SPEED/VITALITY
     f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount
     f32  shrineBuffTimer  = 0.0f;  // countdown; 0 = no buff
+    // The EXACT max-HP that VITALITY added, so it can always be given back. Deriving the amount
+    // from shrineBuffValue at expiry (the old approach) only worked while the buff slot still SAID
+    // vitality — and there is one slot, so taking any other shrine overwrote it and the max-HP grant
+    // was never reverted. It became permanent, compounded on every re-take, and was written to the
+    // save. A live character reached 44,922 HP against a legitimate ~1,195.
+    f32  shrineHealthBonus = 0.0f;
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection + Blood Nova armor retaliation)
     u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting

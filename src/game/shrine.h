@@ -89,4 +89,58 @@ inline Vec3 colorOf(u8 buff) {
     }
 }
 
+// --- Applying / revoking a shrine buff -------------------------------------------------------
+//
+// Templated over Player/NetPlayer: the host grants onto its local Player and the server grants onto
+// a remote's NetPlayer, and if those two ever drifted a shrine would mean different things depending
+// on who touched it.
+//
+// THE BUG THIS ENCODES AGAINST. VITALITY raises maxHealth. The original code derived the amount to
+// give back from shrineBuffValue at expiry, and only did so if the buff slot still SAID vitality.
+// But there is exactly ONE buff slot: taking any other shrine while vitality was live overwrote it,
+// so the max-HP grant was never reverted. It became permanent, compounded every time it happened,
+// and got written into the save. A live Hell-50 paladin reached 44,922 maxHealth against a
+// legitimate ~1,195 — about eleven leaked shrines.
+//
+// So the granted amount is now stored EXPLICITLY (P::shrineHealthBonus) and returned unconditionally
+// — on expiry, and before any new shrine overwrites the slot. Revoking is idempotent.
+
+template <typename P>
+inline void revokeHealth(P& p) {
+    if (p.shrineHealthBonus <= 0.0f) return;
+    p.maxHealth -= p.shrineHealthBonus;
+    if (p.maxHealth < 1.0f) p.maxHealth = 1.0f;
+    if (p.health > p.maxHealth) p.health = p.maxHealth;   // never sit above your own cap
+    p.shrineHealthBonus = 0.0f;
+}
+
+template <typename P>
+inline void apply(P& p, u8 buff) {
+    revokeHealth(p);                  // never stack, never orphan a previous grant
+
+    const f32 bonus = bonusFor(buff);
+    p.shrineBuff      = buff;
+    p.shrineBuffValue = bonus;
+    p.shrineBuffTimer = DURATION_SEC;
+    if (buff == ShrineBuff::VITALITY) {
+        const f32 add = p.maxHealth * bonus;
+        p.maxHealth += add;
+        p.health    += add;           // keeps health/maxHealth ratio constant -> no HP-bar lurch
+        p.shrineHealthBonus = add;    // the EXACT amount, so it can always be returned
+    }
+}
+
+// Tick the buff down; revoke cleanly on expiry. Returns true if the buff just ended.
+template <typename P>
+inline bool tick(P& p, f32 dt) {
+    if (p.shrineBuffTimer <= 0.0f) return false;
+    p.shrineBuffTimer -= dt;
+    if (p.shrineBuffTimer > 0.0f) return false;
+    revokeHealth(p);                  // unconditional — not gated on the slot still saying VITALITY
+    p.shrineBuff      = ShrineBuff::NONE;
+    p.shrineBuffValue = 0.0f;
+    p.shrineBuffTimer = 0.0f;
+    return true;
+}
+
 } // namespace Shrine

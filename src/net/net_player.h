@@ -161,6 +161,7 @@ struct NetPlayer {
     u8   shrineBuff        = 0;      // ShrineBuff::
     f32  shrineBuffValue   = 0.0f;
     f32  shrineBuffTimer   = 0.0f;
+    f32  shrineHealthBonus = 0.0f;   // exact max-HP VITALITY added; see Player::shrineHealthBonus
     // Per-player equipment passives (read from inventory each tick)
     SkillId weaponProc     = SkillId::NONE;
     SkillId armorAura      = SkillId::NONE;

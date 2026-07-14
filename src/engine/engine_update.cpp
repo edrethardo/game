@@ -759,21 +759,8 @@ void Engine::tickLootGoblins(f32 dt) {
 // DOWNWARD at the exact moment they picked up a health buff. So heal by the same absolute amount:
 // the ratio is preserved and the bar grows instead of dropping.
 // ---------------------------------------------------------------------------
-template <typename P>
-static void applyShrine(P& p, u8 buff) {
-    const f32 bonus = Shrine::bonusFor(buff);
-    p.shrineBuff      = buff;
-    p.shrineBuffValue = bonus;
-    p.shrineBuffTimer = Shrine::DURATION_SEC;
-    if (buff == ShrineBuff::VITALITY) {
-        const f32 add = p.maxHealth * bonus;
-        p.maxHealth += add;
-        p.health    += add;      // keeps health/maxHealth constant → no HP-bar lurch
-    }
-}
-
-void Engine::grantShrineBuff(Player& p, u8 buff)    { applyShrine(p, buff); }
-void Engine::grantShrineBuff(NetPlayer& p, u8 buff) { applyShrine(p, buff); }
+void Engine::grantShrineBuff(Player& p, u8 buff)    { Shrine::apply(p, buff); }
+void Engine::grantShrineBuff(NetPlayer& p, u8 buff) { Shrine::apply(p, buff); }
 
 void Engine::tickSharedSystems(f32 dt) {
     // (L8) Default kill-credit to "none" so AI / skill / DoT entity kills drop free-for-all;

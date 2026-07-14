@@ -41,6 +41,7 @@ add_executable(dungeon_tests
     engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
     game/test_interact.cpp           # interact button: item > shrine > exit, tap vs hold
     game/test_source_shard.cpp       # secret superboss key must survive to be picked up
+    game/test_shrine_buff.cpp        # VITALITY must never leak permanent max HP
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp

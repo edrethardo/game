@@ -586,13 +586,15 @@ void Engine::tickMiscTimers(f32 dt) {
     if (m_netRole != NetRole::CLIENT && m_localPlayer.shrineBuffTimer > 0.0f) {
         m_localPlayer.shrineBuffTimer -= dt;
         if (m_localPlayer.shrineBuffTimer <= 0.0f) {
-            if (m_localPlayer.shrineBuff == ShrineBuff::VITALITY) {
-                const f32 bonus = m_localPlayer.maxHealth
-                                * (m_localPlayer.shrineBuffValue / (1.0f + m_localPlayer.shrineBuffValue));
-                m_localPlayer.maxHealth -= bonus;
+            // Unconditional: give back exactly what was granted, whatever the slot now says. The old
+            // code gated this on `shrineBuff == VITALITY`, so a second shrine taken during the buff
+            // silently made the max-HP permanent.
+            if (m_localPlayer.shrineHealthBonus > 0.0f) {
+                m_localPlayer.maxHealth -= m_localPlayer.shrineHealthBonus;
                 if (m_localPlayer.maxHealth < 1.0f) m_localPlayer.maxHealth = 1.0f;
                 if (m_localPlayer.health > m_localPlayer.maxHealth)
                     m_localPlayer.health = m_localPlayer.maxHealth;
+                m_localPlayer.shrineHealthBonus = 0.0f;
             }
             m_localPlayer.shrineBuff      = ShrineBuff::NONE;
             m_localPlayer.shrineBuffValue = 0.0f;
