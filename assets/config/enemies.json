@@ -1,7 +1,7 @@
 {
   "enemies": [
     {
-      "name": "Shambling Corpse",
+      "name": "Revenant",
       "tier": 1,
       "meshName": "human",
       "materialName": "zombie_skin",
