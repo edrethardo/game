@@ -642,6 +642,12 @@ namespace WorldItemSystem {
     void update(WorldItemPool& pool, f32 dt);
     bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
                const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 3.0f);
+    // For an item the run CANNOT afford to lose (the source shard). A full pool makes spawn() fail,
+    // and every caller ignored the return — so the key just wasn't there, silently. This evicts the
+    // most expendable drop on the floor (the ordinary item closest to expiring anyway) and takes its
+    // slot. Never evicts a legendary or another sentinel.
+    bool spawnEssential(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
+                        const LevelGrid* grid = nullptr);
     // Returns true if pickup succeeded, fills outItem
     bool tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
                    ItemInstance& outItem);

@@ -536,8 +536,15 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                     shard.defId     = SOURCE_SHARD_ID;
                     shard.itemLevel = rawFloor;                        // carries the lore-whisper index
                     shard.uid       = m_worldItems.nextUid++;
-                    WorldItemSystem::spawn(m_worldItems, shard,
-                                           pos + Vec3{-0.2f, 0.5f, 0.0f}, &m_level.grid);
+                    // spawnEssential, NOT spawn: the shard is created LAST — after the guaranteed
+                    // haul, the bonus drops and the globe — so on a crowded boss floor it is the
+                    // first thing a full pool refuses. spawn() returns false there and every caller
+                    // ignored it, which means the key simply never existed and the run lost the
+                    // superboss without a single line of feedback.
+                    if (!WorldItemSystem::spawnEssential(m_worldItems, shard,
+                                                         pos + Vec3{-0.2f, 0.5f, 0.0f}, &m_level.grid))
+                        LOG_ERROR("Source shard (floor %u) could not be placed — superboss unreachable "
+                                  "this run", rawFloor);
                 }
             }
         }
