@@ -102,7 +102,7 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 | `src/game/` | Player, entities (enemy NPCs), projectiles, weapons, combat resolution, items+affixes+inventory, skills, enemy AI FSM |
 | `src/engine/` | Top-level `Engine` class, game loop, system orchestration, mode/lobby/menu logic |
 | `src/net/` | ENet wrapper, packet read/write, input ring buffer, snapshot serialization, server, client (prediction + interpolation) |
-| `assets/config/` | JSON content: `items.json`, `affixes.json`, `skills.json`, `weapons.json`, `enemies.json` |
+| `assets/config/` | JSON content: `items.json`, `affixes.json`, `skills.json`, `weapons.json`, `enemies.json`, `events.json` |
 | `assets/materials.json` | Material → texture+tint table (loaded at init) |
 | `assets/meshes/` | Wavefront `.obj` (low-poly enemies, weapons, props) |
 | `assets/textures/` | 42×42 PNG tiles (suffix `_42`); a few non-tile textures (skins) |

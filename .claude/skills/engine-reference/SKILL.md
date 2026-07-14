@@ -113,6 +113,52 @@ Two further constraints:
   so the player's other customizations survive. Sentinel rows are ignored by readers that guard
   `idx < COUNT`, so the format stays backward-compatible.
 
+## Champions, Floor Events & Shrines
+
+**Champions** (`game/champion.h`) — elite pack leaders with rolled, *behavioural* affixes, escorted by
+buffed minions of the same type. They exist because the enemy pool is tier-gated to 6-9 types per
+10-floor band: champions multiply a small pool into fights the player must *read*.
+
+- `Entity.champAffixes` (u8 bitmask) + `champLeaderIdx`. These land in what was tail padding, so they
+  cost **zero bytes** — `static_assert(sizeof(Entity) == 512)` pins the layout. **`EnemyRole` could
+  not be reused: its u8 bitmask is FULL** (all 8 bits assigned). `ENT_CHAMPION` rides in `Entity.flags`,
+  which is copied verbatim into `SnapEntity`, so it replicates for free.
+- **Affixes are LEADER-ONLY** (Diablo 2 style); minions are buffed copies with none. `HEALTH_LINK` is
+  the one affix whose effect still reaches them (damage is split onto living minions).
+- Each affix hangs off an EXISTING hook: `Combat::applyDamage` (Vampiric/Shielding/Health Link),
+  `Engine::handleDeathPreamble` (Molten/Frozen death novas), `Engine::tickChampions`
+  (Molten eruptions / Thundering novas / Teleport blinks — timed off `animTimer` phase, so they need
+  no new per-entity state).
+- Roll rules are **pure** and unit-tested (`tests/game/test_champion.cpp`): affix count by depth
+  (1/2/3), an exclusion table (`EXTRA_FAST + TELEPORTING` is unfightable; `HEALTH_LINK` needs minions),
+  and `tintFor` total over all 256 masks.
+- Rate: `SPAWN_CHANCE` 3%/enemy, ≤2 packs/floor, floor ≥3. That compounds to ~54% of early floors and
+  ~73% of deep ones — tune there, not at the call site.
+- Guaranteed drop (`handleChampionLootDrop`), **leader only**. Minions are excluded for the reason the
+  Engine's wave-adds already are: guaranteed drops per pack member saturate the world-item pool.
+
+**Floor events** (`game/floor_event.h`, `assets/config/events.json`) — a weighted table, 0-1 per floor.
+The chance roll happens BEFORE the weighted pick, so adding an event makes floors more *varied*, not
+more eventful. An unknown id in the JSON degrades to "no event" and logs. `spawnFloorEvents` runs
+**after `spawnFloorBoss` + `buildClearanceField`** — the boss call mutates the boss room's geometry and
+rebuilds the level mesh, so anything placed earlier can be swallowed by the arena expansion.
+
+**Loot goblin** — `AIState::FLEE` (never attacks, no exit from the state; `RETREAT` could not be reused
+because it auto-exits to CHASE inside `detectionRange`). It **bleeds** loot while chased and drops the
+rest if caught. Escape uses the new generic `Entity::lifeTimer`, ticked in `EntitySystem::tickTimers`;
+expiry sets `ENT_DEAD` directly and does **NOT** call `Combat::killEntity`, which always fires the
+death/loot callback — so an escaped goblin pays nothing, which is the whole point of the chase.
+
+**Shrines** (`game/shrine.h`) — walk-up, press-E, 45 s buff (power/speed/vitality). They are `WorldItem`
+**sentinels** (`SHRINE_*_ID`; note `0xFFFC` was already `SOURCE_SHARD_ID`), which inherits spawn +
+snapshot replication + the server-validated pickup path. They are **exempt from the 60 s world-item
+despawn** or they would evaporate before the player found them. The co-op replication chain is the hard
+part — see the buff pitfall in `engine-how-to`.
+
+`MAX_WORLD_ITEMS` is **64** (was 32). Delta encoding means empty slots cost nothing on the wire, so
+this is a memory cost only — and `WorldItemSystem::spawn` fails **silently** on a full pool, which for
+a *guaranteed* drop means loot that simply never existed.
+
 ## Game Loop (per frame)
 
 1. `Clock::update`, reset frame allocator + alloc tracker.
