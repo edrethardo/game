@@ -46,6 +46,11 @@ def build_meshes():
         # Enemy bodies — full body meshes (limbs overlay for animation)
         ["--type", "humanoid", "--height", "1.8", "--out", os.path.join(mesh_dir, "skeleton.obj")],
         ["--type", "spider",   "--radius", "0.6", "--out", os.path.join(mesh_dir, "spider.obj")],
+        # Floor-event + shrine props. *.obj is gitignored (meshes are BUILT, not committed), so a
+        # mesh missing from this list simply does not exist on CI or in a release build — the game
+        # would ship a loot goblin and a shrine with no model at all.
+        ["--type", "goblin",   "--height", "1.1", "--out", os.path.join(mesh_dir, "goblin.obj")],
+        ["--type", "shrine",   "--height", "2.0", "--out", os.path.join(mesh_dir, "shrine.obj")],
         ["--type", "bat",      "--wingspan", "1.0", "--out", os.path.join(mesh_dir, "bat.obj")],
         ["--type", "butcher",       "--height", "2.5", "--out", os.path.join(mesh_dir, "butcher.obj")],
         ["--type", "andariel",      "--height", "2.0", "--out", os.path.join(mesh_dir, "andariel.obj")],
@@ -178,6 +183,7 @@ def build_skins():
     tex_dir = os.path.join(ROOT_DIR, "assets", "textures")
 
     skins = [
+        ("goblin",                    "goblin_skin_42.png"),   # loot goblin (floor event)
         ("weapon_sword_tex",          "weapon_sword_tex_42.png"),
         ("weapon_dagger_tex",         "weapon_dagger_tex_42.png"),
         ("weapon_axe_tex",            "weapon_axe_tex_42.png"),

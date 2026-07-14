@@ -1094,30 +1094,36 @@ def gen_gargoyle(height=1.6):
     return mb
 
 
-def gen_shrine(height=1.6):
-    """Shrine — a stone plinth with a floating rune-lit crystal above it. Origin at feet (Y=0).
-    Deliberately tall, narrow and symmetrical so it reads as ARCHITECTURE, not loot: the player
-    must not mistake it for a dropped item and must be able to spot it across a room."""
+def gen_shrine(height=2.0):
+    """Shrine — a broad stone plinth with a floating rune crystal above it. Origin at feet (Y=0).
+    Deliberately WIDE and chunky: an earlier, slimmer version rendered as a thin white pole from a
+    few metres away and players walked straight past it. A shrine has to read as ARCHITECTURE at a
+    glance, from across a room, with no label — so it gets a heavy stepped base, a thick column, a
+    flared capital, and a crystal big enough to be the thing you notice."""
     mb = MeshBuilder()
-    vs = height / 16.0
+    vs = height / 20.0
     filled = set()
     def fill_box(x0, y0, z0, w, h, d):
         for y in range(y0, y0 + h):
             for x in range(x0, x0 + w):
                 for z in range(z0, z0 + d):
                     filled.add((x, y, z))
-    # Stepped base — wide, planted
-    fill_box(-3, 0, -3, 7, 1, 7)
-    fill_box(-2, 1, -2, 5, 1, 5)
-    # Plinth column
-    fill_box(-1, 2, -1, 3, 6, 3)
+    # Stepped base — broad and planted, so it looks built rather than dropped
+    fill_box(-5, 0, -5, 11, 2, 11)
+    fill_box(-4, 2, -4,  9, 1,  9)
+    fill_box(-3, 3, -3,  7, 1,  7)
+    # Column — thick enough to have mass at range
+    fill_box(-2, 4, -2, 5, 8, 5)
     # Flared capital
-    fill_box(-2, 8, -2, 5, 1, 5)
-    # Floating crystal (a gap at y=9 sells the "hovering" read)
-    fill_box(-1, 10, -1, 3, 3, 3)
-    fill_box(0, 13, 0, 1, 2, 1)     # crystal tip
-    return_offset = (-0.5 * vs, 0, -0.5 * vs)
-    add_voxel_model(mb, filled, vs, offset=return_offset)
+    fill_box(-3, 12, -3, 7, 1, 7)
+    fill_box(-4, 13, -4, 9, 1, 9)
+    # Floating crystal — the eye-catcher. The 1-voxel gap at y=14 sells the hover.
+    fill_box(-2, 15, -2, 5, 3, 5)
+    fill_box(-1, 18, -1, 3, 1, 3)
+    fill_box( 0, 19,  0, 1, 1, 1)   # tip
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
     return mb
 
 

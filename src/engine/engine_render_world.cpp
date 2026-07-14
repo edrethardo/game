@@ -90,12 +90,16 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         bool isShard     = isSourceShard(wi.item);   // secret superboss key — render the crystal mesh
         bool isShrineObj = isShrine(wi.item);        // walk-up buff shrine — architecture, not loot
         f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : (isShrineObj ? 1.6f : ITEM_SCALE));
-        f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
-        Vec3 pos = {wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
+        // Shrines are FIXTURES: no bob, no spin, feet on the floor. Loot hovers and turns to catch
+        // the eye; a shrine that did the same would read as a pickup.
+        f32 bobY = isShrineObj ? 0.0f : sinf(wi.bobTimer * 3.0f) * 0.08f;
+        Vec3 pos = isShrineObj
+                 ? Vec3{wi.position.x, floorY, wi.position.z}
+                 : Vec3{wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
 
         bool isWeaponSlot = (wi.item.defId < m_itemDefCount &&
                              m_itemDefs[wi.item.defId].slot == ItemSlot::WEAPON);
-        f32 spin = isWeaponSlot ? wi.bobTimer * 2.0f : wi.bobTimer * 0.8f;
+        f32 spin = isShrineObj ? 0.0f : (isWeaponSlot ? wi.bobTimer * 2.0f : wi.bobTimer * 0.8f);
 
         if (!isGlobeItem && wi.item.defId < m_itemDefCount &&
             m_itemDefs[wi.item.defId].slot == ItemSlot::HELMET) {
@@ -163,7 +167,13 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 
         // Item mesh — normalize size
         Mat4 model;
-        if (itemMesh != &m_cubeMesh && !isGlobeItem && wi.item.defId < m_itemDefCount) {
+        if (isShrineObj) {
+            // Own branch, because the item-mesh path below is gated on `defId < m_itemDefCount` and a
+            // shrine's SENTINEL defId is far outside the real item range — it fell straight through to
+            // the 0.3-scale cube fallback, which is why shrines looked like a pebble on the floor.
+            // gen_mesh's shrine has its origin at the FEET, so it just sits at floorY, unscaled.
+            model = Mat4::translate(pos);
+        } else if (itemMesh != &m_cubeMesh && !isGlobeItem && wi.item.defId < m_itemDefCount) {
             const ItemDef& idef = m_itemDefs[wi.item.defId];
             if (idef.meshId > 0 && idef.meshId < m_meshDefCount) {
                 const AABB& mb = m_meshDefs[idef.meshId].bounds;
