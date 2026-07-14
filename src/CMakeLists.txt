@@ -133,7 +133,7 @@ if(NINTENDO_SWITCH)
     # Generate NACP metadata (required for romfs embedding)
     add_custom_command(TARGET DungeonEngine POST_BUILD
         COMMAND $ENV{DEVKITPRO}/tools/bin/nacptool --create
-            "Curse of the Dungeon Engine" "ed_rethardo" "1.3.6"
+            "Curse of the Dungeon Engine" "ed_rethardo" "1.3.7"
             ${CMAKE_BINARY_DIR}/DungeonEngine.nacp
         COMMENT "Creating NACP..."
     )
