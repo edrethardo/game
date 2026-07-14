@@ -64,9 +64,9 @@ void Minimap::init(u32 gridWidth, u32 gridDepth) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
 
-    // VAO / VBO — dynamic buffer sized for all minimap geometry per frame:
-    // frame(6) + bg(6) + map(6) + player dot(6) + arrow(3) + up to 128 entity dots(6 each)
-    // = 27 + 768 = 795 verts max. Round up to 896.
+    // VAO / VBO — every batch below re-uploads at offset 0, so this only has to fit the LARGEST
+    // single batch, not their sum. That is the 128 entity dots (128 * 6 = 768 verts); the shrine
+    // icons (16 * 6 = 96) and everything else are far smaller. Round up to 896.
     static constexpr u32 MINIMAP_MAX_VERTS = 896;
     if (!s_minimapVAO) {
         glGenVertexArrays(1, &s_minimapVAO);
@@ -243,7 +243,8 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
                    const LevelGrid& grid, Vec3 playerPos, f32 playerYaw,
                    const EntityPool& entities,
                    const Vec3* otherPlayers, const bool* otherActive,
-                   u32 otherPlayerCount)
+                   u32 otherPlayerCount,
+                   const WorldItemPool* worldItems)
 {
     if (s_gridW == 0 || s_gridD == 0) return;
     if (s_dirty) rebuildTexture(grid);
@@ -501,6 +502,97 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
                 glUniform4f(s_minimapShader.loc_color, 0.3f, 0.7f, 1.0f, 1.0f); // cyan teammates
             glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(MinimapVertex), plrBatch);
             glDrawArrays(GL_TRIANGLES, 0, vc);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 6. Shrine icons — a colour-coded DIAMOND, drawn last so it sits on top.
+    //
+    //    Shape carries "shrine" and colour carries "which": every other marker on this map is an
+    //    axis-aligned square (the player's arrow being the one triangle), so a 45°-rotated diamond
+    //    with a white core reads as its own class of thing at 9 px, even for a player who cannot
+    //    separate the red one from the green one. The colours are Shrine::colorOf — the same values
+    //    the crystal is tinted with in the world, so the map teaches the room and vice versa.
+    //
+    //    FOG GATE: a shrine is only drawn once its cell has been revealed. Otherwise the minimap
+    //    would hand the player a map of things they have not found — the same wallhack the target
+    //    bar had. NPC-revealed cells (visit level 1) show it dimmer, matching the map's own
+    //    convention that second-hand knowledge is less certain than what you saw yourself.
+    //
+    //    Deliberately NOT pulsing: this project holds a no-flashing rule (WCAG 2.3.1), and a
+    //    steady icon is just as findable.
+    // ------------------------------------------------------------------
+    if (worldItems) {
+        static constexpr f32 SHRINE_R    = 4.5f;   // outer diamond half-extent, px
+        static constexpr f32 SHRINE_CORE = 1.6f;   // white centre pip half-extent, px
+        static constexpr u32 MAX_SHRINE_ICONS = 16;   // Shrine::MAX_PER_FLOOR is 2 — pure headroom
+
+        // Emit the two triangles of a diamond centred on (cx, cy).
+        //
+        // WINDING IS LOAD-BEARING: GL_CULL_FACE is enabled globally and this function never turns it
+        // off, so the vertices must run COUNTER-clockwise (right → top → left → bottom) exactly like
+        // every other quad in this file. Wound the intuitive way — clockwise from the top — both
+        // triangles are back-faces and the icon is silently culled to nothing.
+        auto emitDiamond = [](MinimapVertex* v, f32 cx, f32 cy, f32 r) {
+            const Vec3 right  = {cx + r, cy,     0};
+            const Vec3 top    = {cx,     cy + r, 0};
+            const Vec3 left   = {cx - r, cy,     0};
+            const Vec3 bottom = {cx,     cy - r, 0};
+            v[0] = {right,  {1.0f, 0.5f}};
+            v[1] = {top,    {0.5f, 1.0f}};
+            v[2] = {left,   {0.0f, 0.5f}};
+            v[3] = {right,  {1.0f, 0.5f}};
+            v[4] = {left,   {0.0f, 0.5f}};
+            v[5] = {bottom, {0.5f, 0.0f}};
+        };
+
+        MinimapVertex coreBatch[MAX_SHRINE_ICONS * 6];
+        u32 coreVerts = 0;
+
+        glBindTexture(GL_TEXTURE_2D, s_whiteTex);
+        if (s_minimapShader.loc_texture0 >= 0)
+            glUniform1i(s_minimapShader.loc_texture0, 0);
+
+        u32 drawn = 0;
+        for (u32 i = 0; i < MAX_WORLD_ITEMS && drawn < MAX_SHRINE_ICONS; i++) {
+            const WorldItem& wi = worldItems->items[i];
+            if (!wi.active || !isShrine(wi.item)) continue;
+
+            u32 sx, sz;
+            if (!LevelGridSystem::worldToGrid(grid, wi.position, sx, sz)) continue;
+
+            const u32 cellIdx = sz * s_gridW + sx;
+            if (cellIdx >= MAX_MINIMAP_CELLS) continue;
+            const u8 vis = s_visited[cellIdx];
+            if (vis == 0) continue;                 // unexplored — the player has not found it yet
+            const f32 alpha = (vis == 1) ? 0.55f : 1.0f;
+
+            f32 normX = (static_cast<f32>(sx) + 0.5f) / static_cast<f32>(s_gridW);
+            f32 normZ = (static_cast<f32>(sz) + 0.5f) / static_cast<f32>(s_gridD);
+            f32 icoX  = mapX + normX * MAP_SIZE;
+            f32 icoY  = mapY + (1.0f - normZ) * MAP_SIZE;   // flip Z, as every other marker does
+
+            // Outer diamond: one draw per shrine, because each carries its own colour uniform.
+            // MAX_PER_FLOOR is 2, so this is at most 2 extra draw calls against a 300-500 budget.
+            const Vec3 c = Shrine::colorOf(Shrine::buffOf(wi.item));
+            MinimapVertex diamond[6];
+            emitDiamond(diamond, icoX, icoY, SHRINE_R);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), diamond);
+            if (s_minimapShader.loc_color >= 0)
+                glUniform4f(s_minimapShader.loc_color, c.x, c.y, c.z, alpha);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+
+            // Centre pip — same white for all, so every shrine's core batches into one draw.
+            emitDiamond(&coreBatch[coreVerts], icoX, icoY, SHRINE_CORE);
+            coreVerts += 6;
+            drawn++;
+        }
+
+        if (coreVerts > 0) {
+            glBufferSubData(GL_ARRAY_BUFFER, 0, coreVerts * sizeof(MinimapVertex), coreBatch);
+            if (s_minimapShader.loc_color >= 0)
+                glUniform4f(s_minimapShader.loc_color, 1.0f, 1.0f, 1.0f, 0.95f);
+            glDrawArrays(GL_TRIANGLES, 0, coreVerts);
         }
     }
 

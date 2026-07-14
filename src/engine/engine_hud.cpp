@@ -450,8 +450,11 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
         }
     }
 
+    // m_worldItems carries the shrines. On a CLIENT it is mirrored from the server's snapshot every
+    // frame, so a guest's minimap shows exactly the shrines the host's does (and loses one the
+    // moment anybody activates it).
     Minimap::draw(sw, sh, m_level.grid, m_localPlayer.position, m_localPlayer.yaw,
-                  minimapEntities, otherPos, otherActive, MAX_PLAYERS);
+                  minimapEntities, otherPos, otherActive, MAX_PLAYERS, &m_worldItems);
 
     // Legendary item dots on minimap — gold "+" cross at each active legendary world item
     {

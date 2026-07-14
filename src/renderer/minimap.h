@@ -4,6 +4,7 @@
 #include "core/math.h"
 #include "world/level_grid.h"
 #include "game/entity.h"
+#include "game/shrine.h"   // WorldItemPool + Shrine::buffOf/colorOf (shrine icons)
 
 // Minimap with fog-of-war. Renders a top-down view of the dungeon
 // in the top-right corner of the screen. Cells visited by the player
@@ -21,14 +22,21 @@ namespace Minimap {
     void updateVisited(const LevelGrid& grid, Vec3 playerPos,
                        const EntityPool& entities);
 
-    // Render minimap with NPC dots + optional remote co-op player dots.
+    // Render minimap with NPC dots + optional remote co-op player dots + shrine icons.
     // otherPlayers/otherActive are parallel arrays of length otherPlayerCount (may be
     // null / 0 in singleplayer); each active slot draws as a distinct cyan dot. The local
     // player is always the green dot+arrow — callers pass their REMOTE players here with
     // the local slot(s) marked inactive so the local marker is never duplicated.
+    //
+    // worldItems (optional): shrines in it are drawn as colour-coded diamonds, but ONLY where the
+    // fog of war has been lifted — the reveal test reads the visited mask, which lives in
+    // minimap.cpp, so it is deliberately not something a caller can forget to apply. Activating a
+    // shrine frees its world slot, so a used shrine drops off the map by itself. Clients mirror the
+    // server's world items every frame, so guests see shrines on the same terms as the host.
     void draw(u32 screenWidth, u32 screenHeight,
               const LevelGrid& grid, Vec3 playerPos, f32 playerYaw,
               const EntityPool& entities,
               const Vec3* otherPlayers = nullptr, const bool* otherActive = nullptr,
-              u32 otherPlayerCount = 0);
+              u32 otherPlayerCount = 0,
+              const WorldItemPool* worldItems = nullptr);
 }

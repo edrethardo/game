@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/types.h"
+#include "core/math.h"
+#include "game/item.h"   // SHRINE_*_ID sentinels + ItemInstance (item.h does NOT include this file)
 
 // shrine.h — walk-up shrines that grant a timed buff.
 //
@@ -50,6 +52,40 @@ inline const char* nameOf(u8 buff) {
         case ShrineBuff::SPEED:    return "Shrine of Speed";
         case ShrineBuff::VITALITY: return "Shrine of Vitality";
         default:                   return "Shrine";
+    }
+}
+
+// Which buff a shrine world-item grants. The sentinel-defId → buff mapping had been written out
+// longhand at every site that needed it (spawn, render, the pickup handler); the minimap would have
+// been a fourth copy, which is where that kind of duplication starts silently disagreeing.
+inline u8 buffOf(const ItemInstance& item) {
+    switch (item.defId) {
+        case SHRINE_POWER_ID:    return ShrineBuff::POWER;
+        case SHRINE_SPEED_ID:    return ShrineBuff::SPEED;
+        case SHRINE_VITALITY_ID: return ShrineBuff::VITALITY;
+        default:                 return ShrineBuff::NONE;
+    }
+}
+
+// The inverse of buffOf, used at spawn to stamp the sentinel onto the WorldItem. Kept next to its
+// partner so the two directions of one mapping cannot drift.
+inline u16 defIdFor(u8 buff) {
+    switch (buff) {
+        case ShrineBuff::POWER:    return SHRINE_POWER_ID;
+        case ShrineBuff::SPEED:    return SHRINE_SPEED_ID;
+        default:                   return SHRINE_VITALITY_ID;
+    }
+}
+
+// A shrine's signature colour. The in-world crystal and the minimap icon both read it from here, so
+// the colour you learn in the room is the colour you hunt for on the map — that is the entire value
+// of colour-coding, and it evaporates the moment the two are allowed to drift apart.
+inline Vec3 colorOf(u8 buff) {
+    switch (buff) {
+        case ShrineBuff::POWER:    return {1.00f, 0.35f, 0.30f};   // red
+        case ShrineBuff::SPEED:    return {0.40f, 0.85f, 1.00f};   // cyan
+        case ShrineBuff::VITALITY: return {0.45f, 1.00f, 0.55f};   // green
+        default:                   return {1.00f, 1.00f, 1.00f};
     }
 }
 

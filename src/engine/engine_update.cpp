@@ -1466,7 +1466,7 @@ void Engine::gameUpdate(f32 dt) {
 
     tickArmorRingPassives(dt);
 
-    updatePlayerPickup();
+    updatePlayerPickup(dt);
 
     // updateFloorDoor returns true when the player descends — skip remainder of tick
     if (updateFloorDoor()) return;
@@ -1588,15 +1588,95 @@ void Engine::collectSourceShard(const ItemInstance& shard) {
 }
 
 // Globes are consumed immediately; regular items go to the backpack.
-void Engine::updatePlayerPickup() {
+// ---------------------------------------------------------------------------
+// resolveInteractTargets — the ONE answer to "what is this player pointing at?"
+//
+// Every consumer (host pickup, client pickup request, the on-screen prompt, the exit door) reads
+// this instead of running its own scan. They used to run four, and the four had drifted.
+// ---------------------------------------------------------------------------
+void Engine::resolveInteractTargets(InteractState& st) {
+    st.itemIdx = -1;
+    st.shrineIdx = -1;
+    st.nearExit = false;
+    if (m_inventoryOpen) return;
+
+    const Vec3 fwd  = m_localPlayer.forward;
+    const f32  hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
+    f32 bestItem = -1.0f, bestShrine = -1.0f;
+
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        const WorldItem& w = m_worldItems.items[i];
+        if (!w.active) continue;
+        if (isGlobe(w.item) || isSourceShard(w.item)) continue;   // walk-over pickups, never aimed
+
+        const bool shrine = isShrine(w.item);
+        // The defId bound check must NOT be applied to a shrine: its sentinel defId (0xFFFB) sits
+        // far outside the real item range, so this exact line — copied into the client's scan —
+        // is what made shrines impossible to activate as a guest.
+        if (!shrine && w.item.defId >= m_itemDefCount) continue;
+        // Loot-ownership window: another player's kill is theirs for 3 s. A shrine is never owned.
+        if (!shrine && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
+            continue;
+
+        Vec3 to = w.position - m_localPlayer.position;
+        f32 hDist = sqrtf(to.x * to.x + to.z * to.z);
+        if (hDist > GameConst::INTERACT_RANGE) continue;
+        // Horizontal-only dot so floor items stay reachable while looking down at them.
+        f32 dot = (hDist > 0.1f && hLen > 0.01f)
+                ? (fwd.x * to.x + fwd.z * to.z) / (hDist * hLen)
+                : 1.0f;   // standing on top of it — always eligible
+        if (dot < GameConst::INTERACT_MIN_DOT) continue;
+
+        f32 score = dot - hDist * 0.1f;   // prefer what you're looking straight at, then what's near
+        if (shrine) {
+            if (score > bestShrine) { bestShrine = score; st.shrineIdx = static_cast<s32>(i); }
+        } else {
+            if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;   // legendaries win ties
+            if (score > bestItem) { bestItem = score; st.itemIdx = static_cast<s32>(i); }
+        }
+    }
+
+    st.nearExit = m_level.floorDoorActive &&
+                  lengthSq(m_level.floorDoorPos - m_localPlayer.position) < 4.0f;
+    st.nearPortal = m_level.sourcePortalActive &&
+                    lengthSq(m_level.sourcePortalPos - m_localPlayer.position) < 4.0f;
+}
+
+void Engine::updatePlayerPickup(f32 dt) {
+    m_descendRequested = false;   // updateFloorDoor consumes this later in the same tick
+    m_portalRequested  = false;   // ...and updateSourcePortal right after it
+
+    InteractState& st = m_interact[m_localPlayerIndex];
+    resolveInteractTargets(st);
+
+    // The button rule itself is pure and lives in game/interact.h (and is unit-tested there): an
+    // item always wins a tap; a hold reaches past it to the shrine, then the exit.
+    // The exit and The Source portal are one priority class: both are "leave the floor", both are
+    // outranked by loot, and both are reachable by holding.
+    const bool hasExitTarget = st.nearExit || st.nearPortal;
+    const bool hasHoldTarget = (st.shrineIdx >= 0) || hasExitTarget;
+    const bool down = !m_inventoryOpen && Input::isActionDown(GameAction::PICKUP);
+    const Interact::Intent intent =
+        Interact::poll(st.hold, down, hasHoldTarget, dt, GameConst::INTERACT_HOLD_SEC);
+    const Interact::Target target =
+        Interact::choose(intent, st.itemIdx >= 0, st.shrineIdx >= 0, hasExitTarget);
+
+    const bool wantItem   = (target == Interact::Target::ITEM);
+    const bool wantShrine = (target == Interact::Target::SHRINE);
+    if (target == Interact::Target::EXIT) {
+        // The portal wins a tie: it only exists where you deliberately went looking for it.
+        if (st.nearPortal) m_portalRequested = true;
+        else               m_descendRequested = true;   // updateFloorDoor owns the boss gate + net path
+    }
+
     // CLIENT: pickups are SERVER-AUTHORITATIVE (N5). The client never consumes globes or
     // removes world items locally — instead it requests a pickup of the aimed item via
     // CL_PICKUP_ITEM, and the server validates proximity/ownership, applies the effect, and
     // removes the item (which propagates back via the next snapshot). Globe auto-pickup for
     // the client is handled server-side in serverNetPost (the client is a "remote" slot there).
     if (m_netRole == NetRole::CLIENT) {
-        if (!m_inventoryOpen && Input::isActionPressed(GameAction::PICKUP))
-            sendPickupRequest();
+        if (wantItem)        sendPickupRequest(st.itemIdx);
+        else if (wantShrine) sendPickupRequest(st.shrineIdx);   // same packet; server grants the buff
         return;
     }
 
@@ -1641,69 +1721,24 @@ void Engine::updatePlayerPickup() {
         }
     }
 
-    // Item pickup (E key / action) — pick up the nearest item the player is roughly facing
-    if (!m_inventoryOpen && Input::isActionPressed(GameAction::PICKUP)) {
-        // Find the best item: prefer aimed (high dot), fall back to nearest in range.
-        // Use XZ-only alignment so items on the floor are reachable.
-        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-        Vec3 fwd = m_localPlayer.forward;
-        f32 bestScore = -1.0f;
-        s32 bestIdx = -1;
-        for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
-            WorldItem& w = m_worldItems.items[wi];
-            if (!w.active) continue;
-            if (isGlobe(w.item)) continue;
-            // Shrines ARE aimable (you activate them with E) even though their sentinel defId is far
-            // outside the real item range — hence testing before the defId bound check below, which
-            // would otherwise silently make every shrine un-interactable.
-            if (!isShrine(w.item) && w.item.defId >= m_itemDefCount) continue;
-            // Loot-ownership window: skip items reserved to another local player (3s, then free).
-            // (L8) Now active — drops are stamped with the killer's slot (Combat::s_attackingPlayer
-            // → Entity::killerSlot → WorldItem::ownerSlot). Environmental/AoE kills stay 0xFF
-            // (free-for-all). So in split-screen each player's kills are briefly theirs to grab.
-            if (w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
-                continue;
-            Vec3 toItem = w.position - m_localPlayer.position;
-            f32 hDist = sqrtf(toItem.x * toItem.x + toItem.z * toItem.z);
-            if (hDist > 3.5f) continue;
-            // Horizontal-only dot product (ignore Y so floor items work)
-            f32 hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
-            f32 dot = 0.0f;
-            if (hDist > 0.1f && hLen > 0.01f) {
-                dot = (fwd.x * toItem.x + fwd.z * toItem.z) / (hDist * hLen);
-            } else {
-                dot = 1.0f; // very close = always pickable
-            }
-            if (dot < 0.3f) continue; // must be in front half (~70 degrees each side)
-            // Score: prefer high dot, penalize distance
-            f32 score = dot - hDist * 0.1f;
-            // Legendary items get pickup priority
-            if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;
-            if (score > bestScore) {
-                bestScore = score; bestIdx = static_cast<s32>(wi);
-            }
-        }
-        // Shrine: activate rather than pick up. Handled before the inventory path because a shrine
-        // must never enter the backpack — it is a fixture, not loot.
-        if (bestIdx >= 0 && isShrine(m_worldItems.items[bestIdx].item)) {
-            const u16 defId = m_worldItems.items[bestIdx].item.defId;
-            const u8 buff = (defId == SHRINE_POWER_ID)    ? ShrineBuff::POWER
-                          : (defId == SHRINE_SPEED_ID)    ? ShrineBuff::SPEED
-                                                          : ShrineBuff::VITALITY;
-            grantShrineBuff(m_localPlayer, buff);
-            m_worldItems.items[bestIdx].active = false;
-            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
-            AudioSystem::play(SfxId::POTION_USE);
-            addChatMessage("", Shrine::nameOf(buff), Vec3{0.6f, 0.9f, 1.0f});
-            return;
-        }
+    // Shrine: activate rather than pick up — it is a fixture, not loot, and must never reach the
+    // backpack. Reached on a HOLD, or on a tap when there is no item competing for the button.
+    if (wantShrine) {
+        const u8 buff = Shrine::buffOf(m_worldItems.items[st.shrineIdx].item);
+        grantShrineBuff(m_localPlayer, buff);
+        m_worldItems.items[st.shrineIdx].active = false;
+        if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+        AudioSystem::play(SfxId::SHRINE_ACTIVATE);
+        addChatMessage("", Shrine::nameOf(buff), Vec3{0.6f, 0.9f, 1.0f});
+        return;
+    }
 
-        ItemInstance picked = {};
-        if (bestIdx >= 0) {
-            picked = m_worldItems.items[bestIdx].item;
-            m_worldItems.items[bestIdx].active = false;
-            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
-        }
+    // Item pickup (E / X) — the aimed item resolved above.
+    if (wantItem) {
+        const s32 bestIdx = st.itemIdx;
+        ItemInstance picked = m_worldItems.items[bestIdx].item;
+        m_worldItems.items[bestIdx].active = false;
+        if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
         if (!isItemEmpty(picked)) {
             s8 bpSlot = Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked);
             if (bpSlot >= 0) {
@@ -1750,30 +1785,23 @@ void Engine::updatePlayerPickup() {
 // If backpack is already full we skip the send entirely — no point requesting a pickup the
 // server would reject (and the server would reject it), so we just show the "backpack full"
 // notify without sending CL_PICKUP_ITEM.
-void Engine::sendPickupRequest() {
-    Vec3 fwd = m_localPlayer.forward;
-    f32 bestScore = -1.0f;
-    s32 bestIdx = -1;
-    for (u32 wi = 0; wi < MAX_WORLD_ITEMS; wi++) {
-        const WorldItem& w = m_worldItems.items[wi];
-        if (!w.active) continue;
-        if (isGlobe(w.item)) continue;            // globes are auto-picked server-side
-        if (w.item.defId >= m_itemDefCount) continue;
-        Vec3 toItem = w.position - m_localPlayer.position;
-        f32 hDist = sqrtf(toItem.x * toItem.x + toItem.z * toItem.z);
-        if (hDist > 3.5f) continue;
-        f32 hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
-        f32 dot = (hDist > 0.1f && hLen > 0.01f)
-            ? (fwd.x * toItem.x + fwd.z * toItem.z) / (hDist * hLen)
-            : 1.0f;
-        if (dot < 0.3f) continue;
-        f32 score = dot - hDist * 0.1f;
-        if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;
-        if (score > bestScore) { bestScore = score; bestIdx = static_cast<s32>(wi); }
-    }
-    if (bestIdx < 0) return;
+void Engine::sendPickupRequest(s32 worldIdx) {
+    if (worldIdx < 0 || worldIdx >= static_cast<s32>(MAX_WORLD_ITEMS)) return;
+    const WorldItem& target = m_worldItems.items[worldIdx];
+    if (!target.active) return;
 
-    u32 uid = m_worldItems.items[bestIdx].item.uid;
+    const u32 uid = target.item.uid;
+
+    // A SHRINE is requested through the same packet, but predicts NOTHING. It grants a buff, never
+    // a backpack slot, and the buff is applied to the authoritative NetPlayer and returned through
+    // SnapPlayer — predicting either the bag add or the buff would be predicting state we don't own.
+    // (This whole branch is new: the scan that used to live here rejected any defId past the real
+    // item range, so a guest's request never even named a shrine and the server's shrine handler
+    // was unreachable in co-op.)
+    if (isShrine(target.item)) {
+        sendPickupPacket(uid);
+        return;
+    }
 
     // M8/D4: predict the inventory add before sending so the bag slot appears immediately.
     s8 predictedSlot = -1;
@@ -1797,8 +1825,13 @@ void Engine::sendPickupRequest() {
     if (predictedSlot < 0) return;
 
     PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid, predictedSlot);
+    sendPickupPacket(uid);
+}
 
-    // Packet: header(4) + uid(4). Reliable so a dropped pickup request still lands.
+// The wire half of a pickup request, shared by the item path (which predicts first) and the shrine
+// path (which predicts nothing). Packet: header(4) + uid(4). Reliable, so a dropped request doesn't
+// silently cost the player an item.
+void Engine::sendPickupPacket(u32 uid) {
     u8 buf[sizeof(PacketHeader) + 4];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_PICKUP_ITEM;
@@ -1960,9 +1993,7 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
         if (isShrine(wi.item)) {
             Vec3 d = np.position - wi.position;
             if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; }
-            const u8 buff = (wi.item.defId == SHRINE_POWER_ID) ? ShrineBuff::POWER
-                          : (wi.item.defId == SHRINE_SPEED_ID) ? ShrineBuff::SPEED
-                                                               : ShrineBuff::VITALITY;
+            const u8 buff = Shrine::buffOf(wi.item);
             grantShrineBuff(np, buff);
             wi.active = false;
             if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
@@ -2046,7 +2077,11 @@ bool Engine::updateFloorDoor() {
     if (m_level.floorDoorActive) {
         Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;
         if (lengthSq(toDoor) < 4.0f) {
-            if (Input::isActionPressed(GameAction::PICKUP)) {
+            // NOT a raw button read any more: the exit is the LOWEST-priority interact target, so
+            // updatePlayerPickup arbitrates the button against nearby loot first and sets this flag
+            // only when the exit actually won (a tap with no loot in reach, or a deliberate hold).
+            // Reading the button here directly would let one press both grab an item AND descend.
+            if (m_descendRequested) {
                 // Server-authoritative descent: a remote CLIENT must never advance its own
                 // floor / regenerate the level locally (that desyncs from the still-on-floor-N
                 // host). Instead it asks the host to trigger descent via CL_REQUEST_DESCEND.
@@ -2332,8 +2367,9 @@ bool Engine::updateSourcePortal() {
         return false;
     }
 
-    Vec3 toPortal = m_level.sourcePortalPos - m_localPlayer.position;
-    if (lengthSq(toPortal) < 4.0f && Input::isActionPressed(GameAction::PICKUP)) {
+    // Arbitrated, not a raw button read (see updatePlayerPickup): entering The Source is
+    // irreversible, and a tap aimed at the loot on the floor must never trigger it.
+    if (m_portalRequested) {
         enterSourceChamber();
         return true;
     }

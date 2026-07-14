@@ -575,6 +575,13 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         LevelGridSystem::buildFlowField(m_level.grid, m_level.floorDoorPos);
     }
 
+    // Clear the world-item pool BEFORE anything is placed into it. This used to sit ~30 lines below,
+    // AFTER spawnFloorShrines — so every shrine was created, logged ("Shrine of Power placed in room
+    // 3"), and then wiped by this reset before the first frame. Shrines could not appear in a real
+    // game at all; the log line was true at the moment it printed and false a moment later.
+    // Anything that spawns a WorldItem must therefore stay below this call.
+    WorldItemSystem::init(m_worldItems);
+
     // Floor event (0 or 1 per floor — currently the loot goblin). Deliberately AFTER spawnFloorBoss
     // and buildClearanceField: the boss call mutates the boss room's geometry and rebuilds the level
     // mesh, so anything placed earlier could be swallowed by the arena expansion, and the goblin
@@ -611,8 +618,8 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         ent.targetEntityIdx = 0xFFFF;
     }
 
-    // Init inventory & world items
-    WorldItemSystem::init(m_worldItems);
+    // Init inventory. (The world-item pool is reset ABOVE, before the floor's shrines and event
+    // items are placed into it — resetting it here destroyed them.)
     // Inventory is reset + starter gear granted ONLY on a brand-new run. CONTINUE
     // keeps what loadGame() restored; DESCEND keeps the current run's gear. The mode
     // makes the intent explicit instead of guessing from floor/difficulty/empty-slot.

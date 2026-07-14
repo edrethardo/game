@@ -19,6 +19,7 @@
 #include "game/weapon.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/interact.h"   // tap/hold interact rule (pure)
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
@@ -816,7 +817,31 @@ private:
 
     // Update sub-functions (called from singleplayerUpdate())
     void updateInventoryInteraction(f32 dt);
-    void updatePlayerPickup();
+    // --- Interact (E) targeting + tap/hold arbitration -------------------------------------
+    // Resolved ONCE per tick per local player by updatePlayerPickup, then consumed by
+    // updateFloorDoor and renderInteractionPrompts. Before this, four places each ran their own
+    // "what am I looking at" scan (host pickup, client pickup, the prompt renderer, the door) and
+    // they had already drifted: the CLIENT's scan rejected any defId past the real item range,
+    // which silently made every shrine un-activatable in co-op, and the prompt used a pure
+    // proximity test so it could advertise a shrine that pressing E would not activate.
+    struct InteractState {
+        s32  itemIdx   = -1;         // best aimed world item (never a shrine)
+        s32  shrineIdx = -1;         // best aimed shrine
+        bool nearExit   = false;     // standing in the floor-exit trigger
+        bool nearPortal = false;     // standing in The Source portal trigger (floor 50 secret)
+        Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
+    };
+    InteractState m_interact[MAX_LOCAL_PLAYERS];
+    // Set by updatePlayerPickup, consumed by updateFloorDoor later in the SAME tick (the door
+    // no longer reads the button itself — the tap/hold rule has to arbitrate it against loot).
+    bool m_descendRequested = false;
+    // Same arbitration for The Source portal (updateSourcePortal). It is EXIT-class: entering the
+    // superboss chamber is irreversible, so a tap meant for the loot at your feet must never do it.
+    bool m_portalRequested = false;
+
+    void resolveInteractTargets(InteractState& st);
+
+    void updatePlayerPickup(f32 dt);
     // Auto-pickup of a source shard (secret superboss key): set the session bit for its floor and
     // fire its one-line lore whisper (idempotent — re-collecting an already-held floor does nothing).
     // Called from updatePlayerPickup (host-local lanes) and serverNetPost (remote lanes).
@@ -1211,7 +1236,8 @@ private:
 
     // Client: pick the aimed world item and request its pickup from the server
     // (CL_PICKUP_ITEM, server-authoritative pickups — N5).
-    void sendPickupRequest();
+    void sendPickupRequest(s32 worldIdx);
+    void sendPickupPacket(u32 uid);
     // Server: validate and apply a client's CL_PICKUP_ITEM request (proximity + ownership),
     // moving the item into that player's inventory and freeing the world slot.
     void handlePickupRequest(u8 playerSlot, u32 uid);

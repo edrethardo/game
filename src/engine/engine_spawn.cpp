@@ -1217,9 +1217,7 @@ void Engine::spawnFloorShrines(const DungeonResult& dungeon)
 
         const u8 kind = static_cast<u8>(1 + (std::rand() % 3));   // POWER / SPEED / VITALITY
         ItemInstance s;
-        s.defId = (kind == ShrineBuff::POWER)    ? SHRINE_POWER_ID
-                : (kind == ShrineBuff::SPEED)    ? SHRINE_SPEED_ID
-                                                 : SHRINE_VITALITY_ID;
+        s.defId = Shrine::defIdFor(kind);
         s.uid   = m_worldItems.nextUid++;
         // ownerSlot 0xFF: a shrine is never reserved to one player — in co-op it is first-come.
         if (!WorldItemSystem::spawn(m_worldItems, s, pos, &m_level.grid, 0xFF)) {

@@ -110,6 +110,15 @@ namespace GameConst {
     // Damage-driven aggro (Combat::applyDamage) is never gated by this.
     static constexpr f32 SPAWN_CALM_SECONDS  = 0.4f;
 
+    // Interaction (the E / X button)
+    // Loot is what the hand reaches for a hundred times a floor, so an ITEM always wins a tap —
+    // a shrine or an exit you happen to be standing on must never eat the grab. Holding is the
+    // deliberate override for the two things you do once. 0.35 s is long enough that no ordinary
+    // grab trips it and short enough that it never feels like waiting.
+    static constexpr f32 INTERACT_HOLD_SEC   = 0.35f;
+    static constexpr f32 INTERACT_RANGE      = 3.5f;   // XZ range for aimed pickup / activation
+    static constexpr f32 INTERACT_MIN_DOT    = 0.3f;   // must be in the front ~140° arc
+
     // Combat
     static constexpr f32 LOOT_DROP_CHANCE    = 0.40f;
     static constexpr f32 GLOBE_DROP_CHANCE   = 0.55f;  // single globe type, drops often

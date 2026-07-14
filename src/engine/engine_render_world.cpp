@@ -115,9 +115,10 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             // close enough to read the prompt, so the colour has to carry the meaning from range.
             if (m_shrineMeshId > 0 && m_shrineMeshId < m_meshDefCount)
                 itemMesh = &m_meshDefs[m_shrineMeshId].mesh;
-            tint = (wi.item.defId == SHRINE_POWER_ID) ? Vec4{1.0f, 0.35f, 0.30f, 1.0f}   // power: red
-                 : (wi.item.defId == SHRINE_SPEED_ID) ? Vec4{0.40f, 0.85f, 1.00f, 1.0f}   // speed: cyan
-                                                      : Vec4{0.45f, 1.00f, 0.55f, 1.0f};  // vitality: green
+            // Same colours the minimap icon uses — single-sourced in Shrine::colorOf so the crystal
+            // in the room and the diamond on the map can never disagree about which shrine this is.
+            const Vec3 sc = Shrine::colorOf(Shrine::buffOf(wi.item));
+            tint = {sc.x, sc.y, sc.z, 1.0f};
         } else if (isGlobeItem) {
             tint = {0.3f, 0.9f, 0.5f, 1.0f};
         } else if (isShard) {
@@ -722,48 +723,57 @@ void Engine::renderSpeechBubbles(u32 sw, u32 sh) {
 // letter showed. The native pass also keeps the prompt crisp.
 // ---------------------------------------------------------------------------
 void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
-    // Floor door interaction prompt — shown when player is within trigger range
-    if (m_level.floorDoorActive && m_gameState == GameState::IN_GAME) {
-        Vec3 toDoor = m_level.floorDoorPos - m_localPlayer.position;
-        if (lengthSq(toDoor) < 4.0f) {
-            char doorStr[32];
-            std::snprintf(doorStr, sizeof(doorStr), "Descend to Floor %u", m_level.currentFloor + 1);
-            f32 textW = FontSystem::textWidth(doorStr, 1);
-            f32 totalW = 22.0f + textW;
-            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
-            f32 cy = static_cast<f32>(sh) * 0.4f;
-            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::activeDeviceIsGamepad() ? "X" : "E", true);
-            FontSystem::drawText(sw, sh, cx + 22.0f, cy, doorStr, {0.3f, 1.0f, 0.4f}, 1);
+    // The prompts read the SAME resolved targets the button acts on (Engine::resolveInteractTargets),
+    // so what is offered here and what E does can no longer disagree. They used to be independent
+    // scans on different rules — the shrine prompt was pure proximity, while activation required aim,
+    // so it happily advertised a shrine that pressing E would not activate.
+    const InteractState& st = m_interact[m_localPlayerIndex];
+    const bool  gamepad   = Input::activeDeviceIsGamepad();
+    const char* keyGlyph  = gamepad ? "X" : "E";
+    // An item outranks a shrine/exit on a tap, so those two are reachable only by HOLDING — say so,
+    // and only when the conflict actually exists. With no loot in reach a tap still works and the
+    // prompt stays the plain one; a hint that lies about the cheaper input is worse than none.
+    const bool  needHold  = (st.itemIdx >= 0);
+    const f32   heldSec   = st.hold.held;
+    const f32   holdFrac  = (heldSec <= 0.0f) ? 0.0f
+                          : (heldSec >= GameConst::INTERACT_HOLD_SEC ? 1.0f
+                             : heldSec / GameConst::INTERACT_HOLD_SEC);
+
+    // Draws "[E] Label" (or "[E] Hold — Label"), plus a fill bar tracking the hold. The bar is the
+    // only thing telling the player the press is being counted rather than ignored.
+    auto drawPrompt = [&](const char* label, Vec3 col, f32 cy) {
+        char line[64];
+        if (needHold) std::snprintf(line, sizeof(line), "Hold - %s", label);
+        else          std::snprintf(line, sizeof(line), "%s", label);
+
+        f32 textW  = FontSystem::textWidth(line, 1);
+        f32 totalW = 22.0f + textW;
+        f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+        HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, keyGlyph, true);
+        FontSystem::drawText(sw, sh, cx + 22.0f, cy, line, col, 1);
+
+        if (needHold && holdFrac > 0.0f) {
+            const f32 barH = 3.0f;
+            const f32 barY = cy - 8.0f;
+            HUD::drawRectAt(sw, sh, cx + 22.0f, barY, textW, barH, {0.18f, 0.18f, 0.20f});
+            HUD::drawRectAt(sw, sh, cx + 22.0f, barY, textW * holdFrac, barH, col);
         }
+    };
+
+    // Floor exit — the lowest-priority target, so it is listed first but yields to everything.
+    if (st.nearExit && m_gameState == GameState::IN_GAME) {
+        char doorStr[32];
+        std::snprintf(doorStr, sizeof(doorStr), "Descend to Floor %u", m_level.currentFloor + 1);
+        drawPrompt(doorStr, {0.3f, 1.0f, 0.4f}, static_cast<f32>(sh) * 0.4f);
     }
 
-    // Shrine prompt. Same proximity+key shape as the portal above — a shrine you cannot tell is
-    // interactable is just scenery, and the player has no other way to learn what it does.
-    if (m_gameState == GameState::IN_GAME) {
-        const WorldItem* nearest = nullptr;
-        f32 bestDist = 3.5f;   // matches the activation range in updatePlayerPickup
-        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
-            const WorldItem& wi = m_worldItems.items[i];
-            if (!wi.active || !isShrine(wi.item)) continue;
-            Vec3 d = wi.position - m_localPlayer.position;
-            f32 dist = sqrtf(d.x * d.x + d.z * d.z);
-            if (dist < bestDist) { bestDist = dist; nearest = &wi; }
-        }
-        if (nearest) {
-            const u8 buff = (nearest->item.defId == SHRINE_POWER_ID) ? ShrineBuff::POWER
-                          : (nearest->item.defId == SHRINE_SPEED_ID) ? ShrineBuff::SPEED
-                                                                     : ShrineBuff::VITALITY;
-            const char* label = Shrine::nameOf(buff);
-            f32 textW  = FontSystem::textWidth(label, 1);
-            f32 totalW = 22.0f + textW;
-            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
-            f32 cy = static_cast<f32>(sh) * 0.45f;
-            Vec3 col = (buff == ShrineBuff::POWER) ? Vec3{1.0f, 0.45f, 0.40f}
-                     : (buff == ShrineBuff::SPEED) ? Vec3{0.45f, 0.85f, 1.00f}
-                                                   : Vec3{0.50f, 1.00f, 0.60f};
-            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::activeDeviceIsGamepad() ? "X" : "E", true);
-            FontSystem::drawText(sw, sh, cx + 22.0f, cy, label, col, 1);
-        }
+    // Shrine. A shrine you cannot tell is interactable is just scenery, and the prompt is the only
+    // place the player learns which of the three it is before spending it.
+    if (st.shrineIdx >= 0 && m_gameState == GameState::IN_GAME) {
+        const u8 buff = Shrine::buffOf(m_worldItems.items[st.shrineIdx].item);
+        const Vec3 c = Shrine::colorOf(buff);
+        drawPrompt(Shrine::nameOf(buff), {c.x * 0.9f + 0.1f, c.y * 0.9f + 0.1f, c.z * 0.9f + 0.1f},
+                   static_cast<f32>(sh) * 0.45f);
     }
 
     // Item pickup prompt — show item name in rarity color when aiming at a nearby item

@@ -39,6 +39,7 @@ add_executable(dungeon_tests
     game/test_champion.cpp
     game/test_floor_event.cpp
     engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
+    game/test_interact.cpp           # interact button: item > shrine > exit, tap vs hold
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
