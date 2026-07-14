@@ -67,10 +67,18 @@ namespace GameConst {
     // a Hell-50 paladin went from ~1,195 to ~3,722 HP. Gear health grows with ITEM LEVEL, i.e. with
     // depth, so the compensation has to grow with depth too.
     //
-    // 0.10 -> 0.13 -> 0.16. This slope feeds EVERY difficulty, which is exactly why it moves in
-    // small steps: it is the one lever that cannot be aimed at Hell alone. See difficultyDamageBump
-    // below, which is per-tier and carries the heavy end of the Hell increase.
-    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.16f;
+    // 0.10 -> 0.13 -> 0.16 -> 0.18 -> 0.17. This slope feeds EVERY difficulty, which is exactly why it
+    // moves in small steps: it is the one lever that cannot be aimed at Hell alone. See
+    // difficultyDamageBump below, which is per-tier and carries the heavy end of the Hell increase.
+    //
+    // WORTH KNOWING BEFORE YOU TOUCH THIS: raising the slope does essentially NOTHING to Hell. Hell
+    // sits at effective floors 101-150, where (1 + slope*149) is dominated by the slope term and the
+    // "+1" is noise — so steepening the slope and solving the Hell bump back down to hit the same
+    // target cancels almost exactly (measured: Hell 1/25/50 land within 0.5% of each other whether the
+    // slope is 0.18, 0.19 or 0.20). The slope is therefore a NORMAL-difficulty dial, not a Hell one.
+    // 0.17 keeps Normal's tax to a whisker: +2% at Normal floor 5, +6% at Normal floor 50. Do not
+    // reach for this to make the endgame hurt — reach for the bump.
+    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.17f;
 
     // --- Difficulty / floor enemy scaling ----------------------------------------
     // Every enemy scales by its "effective floor" = raw floor + difficulty*50
@@ -82,19 +90,26 @@ namespace GameConst {
     //     (difficultyDamageBump) instead — compounding damage would one-shot the player,
     //     whose HP scales far slower than the enemy's effective-floor count.
     //
-    // Per-floor compounding rate for HEALTH: 3% -> 3.64%, solved so an enemy at the end of Hell has
-    // exactly 2.5x the HP it used to (81.8x -> 205.9x of base).
+    // Per-floor compounding rate for HEALTH: 3% -> 3.64% -> 4.41% -> 3.9%.
     //
-    // It is a COMPOUNDING rate, so it aims itself: compounding only overtakes the legacy linear
-    // curve at effective floor 52, which means the whole of NORMAL is bit-for-bit untouched, and the
-    // increase lands where it was asked for — Nightmare 50 x1.85, Hell 50 x2.52.
+    // 4.41% tripled Hell's HP and made a Hell-50 trash mob a 23-swing slog, so it was pulled back to
+    // 3.9%: Hell floor 50 now sits at 299x base (1.45x what the 3.64% curve gave), which is a mob you
+    // grind down in ~11 hits rather than 23.
     //
-    // Paired with the damage raise (see difficultyDamageBump), this also RESTORES the invariant that
-    // enemy HP outscales enemy damage: tripling the damage alone had inverted it (147x damage vs 82x
-    // HP), which would have made deep enemies glass cannons. At 205.9x HP vs 146.7x damage the
-    // ordering holds again, and a Hell-50 trash mob is a real fight: it kills a geared paladin in
-    // 3.4 hits and takes 7.8 to put down.
-    static constexpr f32 DIFFICULTY_HP_COMPOUND_RATE = 0.0364f;
+    // It is a COMPOUNDING rate, so it largely aims itself: it only overtakes the legacy linear curve
+    // at effective floor 46, so NORMAL FLOORS 1-45 ARE BIT-FOR-BIT UNTOUCHED and floor 50 gains only
+    // +10% HP. The base game really is left alone.
+    //
+    // Compounding CANNOT be aimed at Hell alone — that is the nature of the lever, and it cuts BOTH
+    // ways. It also sets Nightmare's HP (now x1.28), which is why Nightmare's DAMAGE bump has to be
+    // re-solved whenever this number moves (see difficultyDamageBump). At 4.41% Nightmare was heading
+    // for a bullet sponge; pulling back to 3.9% without touching its bump would have flipped it to the
+    // opposite failure — a glass cannon hitting x1.97 while only x1.28 tankier. Neither is a fight.
+    //
+    // This preserves the invariant that enemy HP outscales enemy damage... EXCEPT at the very end of
+    // Hell, where it no longer does (299x HP vs 416x damage). See difficultyDamageBump: that is a
+    // live consequence of the Hell bump being left at 15.80, not an accident.
+    static constexpr f32 DIFFICULTY_HP_COMPOUND_RATE = 0.039f;
 
     // Compounding HEALTH multiplier for an effective floor (1-based: floor 1 -> 1.0x).
     // Returns max(legacy-linear, compounding) so the change can only ever make enemies
@@ -120,26 +135,39 @@ namespace GameConst {
     // Flat per-difficulty DAMAGE bump applied on top of floorDamageMult so Nightmare/Hell
     // are more lethal without compounding damage into instant-kills.
     inline f32 difficultyDamageBump(u8 difficulty) {
-        // Raised again: Hell's endgame still wasn't lethal. The brief was "3x the damage at the end
-        // of Hell", and the split matters because the two levers have different blast radii:
+        // Raised again: the brief was "3x the damage AND 3x the HP at the end of Hell, and Normal
+        // only a wee bit harder". This bump is the ONLY Hell-isolated lever there is, so it carries
+        // essentially the whole increase — the shared slope cannot help (see FLOOR_DAMAGE_MULT: at
+        // Hell's effective floors the slope and the bump cancel, so steepening the slope moves Hell
+        // by <1% and only taxes Normal).
         //
-        //   * the SLOPE (FLOOR_DAMAGE_MULT, 0.13 -> 0.16) feeds EVERY tier, so it can only move a
-        //     little before Normal takes collateral damage — it buys +17% at Normal 5, +30% at
-        //     Normal 50.
-        //   * this per-tier BUMP is the only Hell-ISOLATED lever, so it carries the rest. 5.90 is
-        //     not a taste value: it is solved so that (1 + 0.16*149) * bump lands exactly on 3.00x
-        //     the old Hell-50 damage (48.9x -> 146.7x).
+        // 11.20 is BOXED IN, not chosen by taste. Two hard requirements bracket it, and at the 3.9%
+        // HP rate the window between them is only [11.14, 11.36]:
         //
-        // Consequence worth knowing: the bump is flat across the tier, so Hell FLOOR 1 is also ~3x,
-        // not just floor 50. Making ONLY the tier's end 3x would need the slope to carry it, and the
-        // slope cannot be steepened that far without making Normal brutal.
+        //   * damage must be >= 2x the previous Hell-50 damage (146.6x)  =>  bump >= 11.14
+        //   * enemy HP must still OUTSCALE enemy damage (299x HP)        =>  bump <  11.36
         //
-        // For the real geared paladin (3,722 HP, 61% armour) a Hell-50 trash mob goes from hitting
-        // for 362 to 1,087 — from 10.3 hits to kill him down to 3.4.
+        // The second is the invariant that stops deep enemies becoming glass cannons that delete the
+        // player before they can be hit back. An earlier pass at 15.80 broke it outright (416x damage
+        // against 299x HP) and one-shot a fully geared paladin. Do not raise this bump without either
+        // raising DIFFICULTY_HP_COMPOUND_RATE to buy headroom, or knowingly inverting the invariant.
+        //
+        // Result: a Hell-50 trash mob hits a 3,722 HP geared paladin for ~2,187 — it kills him in 1.7
+        // hits and takes ~11 to put down. Lethal, but not a one-shot.
+        //
+        // NIGHTMARE is re-solved every time the HP rate moves, and not for feel. Compounding cannot be
+        // aimed at one tier, so the rate sets Nightmare's HP too (now x1.28). Its damage comes from
+        // THIS bump, so if the two drift apart Nightmare breaks in one of two directions: too high a
+        // bump makes a glass cannon (at 3.53 it would hit x1.97 while only x1.28 tankier), too low
+        // makes a bullet sponge. 2.30 is solved so its damage growth tracks its own x1.28 HP growth.
+        //
+        // Consequence worth knowing: the bump is flat across a tier, so Hell FLOOR 1 is also ~2x, not
+        // just floor 50. That is unavoidable — the slope cannot carry a tier's ramp (see
+        // FLOOR_DAMAGE_MULT: at Hell's effective floors the slope and bump cancel).
         switch (difficulty) {
-            case 1:  return 1.90f;  // Nightmare (was 1.75)
-            case 2:  return 5.90f;  // Hell      (was 2.40) — solved for exactly 3x at floor 50
-            default: return 1.25f;  // Normal    (was 1.15)
+            case 1:  return 2.30f;  // Nightmare (was 1.90) — solved to match its own x1.28 HP growth
+            case 2:  return 11.20f; // Hell      (was 5.90) — 2x damage, the most the invariant allows
+            default: return 1.25f;  // Normal    (unchanged; its +6% comes from the slope alone)
         }
     }
 
