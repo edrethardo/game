@@ -147,6 +147,18 @@ namespace GameConst {
     static constexpr f32 OPEN_STRIKE_SURROUND = 0.20f;  // unchanged — taking an encircle slot
     static constexpr f32 OPEN_STRIKE_CHASE    = 0.20f;  // 0.30 -> 0.20: the plain charge into range
 
+    // --- Melee commit ------------------------------------------------------------------------
+    // A squad's melee enemies are assigned ROLE_RUSH for the first two and ROLE_FLANK for everyone
+    // else, and a flanker in CHASE diverts to a flank cell for 4 s. That redirect had NO distance
+    // gate: a melee enemy standing right next to the player would turn around and walk away to
+    // "flank" — repeatedly, since the tactical timer refreshes. Measured at 24-30% of all enemy
+    // time, and the single biggest drain on melee pressure in the game.
+    //
+    // Inside this multiple of its attack range, a flanker COMMITS: it stops manoeuvring and goes
+    // for the kill. Flanking stays what it should be — a way to APPROACH from an angle — instead of
+    // a reason to disengage from a fight you are already in.
+    static constexpr f32 MELEE_COMMIT_RANGE_MULT = 2.0f;
+
     // Seconds of "calm" at the start of each floor: hostile enemies don't
     // auto-aggro and friendly NPCs hold position with the player, so the world
     // isn't already fighting at spawn. Ends early the moment the player attacks.

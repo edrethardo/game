@@ -173,7 +173,15 @@ void updateHostileStates(Entity& e, u32 i,
 
     case AIState::CHASE: {
         // Squad role: redirect flankers and hold-and-fire enemies to their tactical states.
-        if (e.squadRole == SquadRole::ROLE_FLANK && !(e.flags & ENT_FLYING)) {
+        // A flanker already within striking distance COMMITS — it does not turn around and circle.
+        // The redirect below had NO distance gate, so a melee enemy standing right next to the
+        // player would path AWAY to a flank cell for 4 s, and again when the timer refreshed.
+        // Flanking should be how you APPROACH from an angle, never a reason to leave a fight you
+        // are already in. (See GameConst::MELEE_COMMIT_RANGE_MULT.)
+        const bool meleeCommitted =
+            (e.attackRange <= 5.0f) &&
+            (targetDist <= e.attackRange * GameConst::MELEE_COMMIT_RANGE_MULT);
+        if (e.squadRole == SquadRole::ROLE_FLANK && !(e.flags & ENT_FLYING) && !meleeCommitted) {
             if (e.pathLen == 0 || e.tacticalTimer <= 0.0f) {
                 Vec3 flankPos;
                 bool preferRight = (i % 2 == 0);
@@ -329,7 +337,7 @@ void updateHostileStates(Entity& e, u32 i,
                     e.velocity.x = 0.0f;
                     e.velocity.z = 0.0f;
                     e.aiState = AIState::ATTACK;
-                    e.attackTimer = GameConst::OPEN_STRIKE_INRANGE; // already in range on arrival
+                    e.attackTimer = fminf(e.attackTimer, GameConst::OPEN_STRIKE_INRANGE); // already in range on arrival
                 } else {
                     // Enemies sprint at 1.3x speed when chasing
                     f32 speed = effectiveSpeed * 1.3f;
@@ -365,7 +373,7 @@ void updateHostileStates(Entity& e, u32 i,
         f32 atkTransition = (e.enemyRole & EnemyRole::CHARGER) ? e.attackRange * 1.3f : e.attackRange;
         if (targetDist <= atkTransition) {
             e.aiState = AIState::ATTACK;
-            e.attackTimer = GameConst::OPEN_STRIKE_CHASE; // opening strike on entering range
+            e.attackTimer = fminf(e.attackTimer, GameConst::OPEN_STRIKE_CHASE); // opening strike on entering range
         }
         // Lost interest: fall back to idle only if target is extremely far
         if (targetDist > e.detectionRange * 5.0f) {
@@ -621,13 +629,18 @@ void updateHostileStates(Entity& e, u32 i,
         } else {
             // Arrived at flank position — switch to attack immediately
             e.aiState = AIState::ATTACK;
-            e.attackTimer = GameConst::OPEN_STRIKE_FLANK;    // arrives already committed
+            e.attackTimer = fminf(e.attackTimer, GameConst::OPEN_STRIKE_FLANK);    // arrives already committed
             e.hasRetreated = false;
         }
         entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
         // Timeout: give up and chase directly if flanking takes too long
         e.tacticalTimer -= dt;
+        // Same commit rule mid-detour: if the fight came to us, take it.
+        if (e.attackRange <= 5.0f &&
+            targetDist <= e.attackRange * GameConst::MELEE_COMMIT_RANGE_MULT) {
+            e.aiState = AIState::CHASE;   // CHASE hands straight over to ATTACK on this same tick
+        }
         if (e.tacticalTimer <= 0.0f) e.aiState = AIState::CHASE;
     } break;
 
@@ -792,7 +805,7 @@ void updateHostileStates(Entity& e, u32 i,
         } else {
             // In position — begin attacking
             e.aiState = AIState::ATTACK;
-            e.attackTimer = GameConst::OPEN_STRIKE_SURROUND; // taking an encircle slot
+            e.attackTimer = fminf(e.attackTimer, GameConst::OPEN_STRIKE_SURROUND); // taking an encircle slot
         }
         entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
