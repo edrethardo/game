@@ -184,12 +184,25 @@ static const LimbConfig s_genericConfig = {0, {}};
 // ============================================================
 //  Init: build limb meshes
 // ============================================================
-void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount) {
-    // Helper lambda: build a box mesh and register it in the shared mesh array
+void LimbSystem::init(MeshDef* meshDefs, u32& meshDefCount, u32 capacity) {
+    // Helper lambda: build a box mesh and register it in the shared mesh array.
+    //
+    // Both failure paths are LOUD. Returning 0 here does not mean "no limb" — 0 is the cube
+    // fallback, so a silent failure bolts a 1x1x1 cube onto the entity. That is precisely how the
+    // spiders ended up wearing cube mandibles for release after release: the old guard read
+    // `meshDefCount >= 64` against a registry that had since grown to 112, so it rejected all six
+    // limbs and nobody heard a thing.
     auto registerMesh = [&](const char* name, Vec3 halfSize) -> u8 {
-        if (meshDefCount >= 64) return 0;
+        if (meshDefCount >= capacity) {
+            LOG_ERROR("LimbSystem: mesh registry FULL at %u/%u — limb '%s' fell back to the CUBE. "
+                      "Raise MESH_DEF_CAPACITY.", meshDefCount, capacity, name);
+            return 0;
+        }
         Mesh m = buildBoxMesh(halfSize);
-        if (m.vao == 0) return 0;
+        if (m.vao == 0) {
+            LOG_ERROR("LimbSystem: buildBoxMesh failed for limb '%s' — it will render as the CUBE.", name);
+            return 0;
+        }
         MeshDef& def = meshDefs[meshDefCount];
         std::strncpy(def.name, name, sizeof(def.name) - 1);
         def.mesh = m;

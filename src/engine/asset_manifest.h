@@ -144,9 +144,19 @@ static constexpr MeshAsset kMeshAssets[] = {
 };
 constexpr u32 kMeshAssetCount = sizeof(kMeshAssets) / sizeof(kMeshAssets[0]);
 
-static_assert(kMeshAssetCount + 1 <= MESH_DEF_CAPACITY,
-              "mesh table exceeds MESH_DEF_CAPACITY — the loader would silently drop the tail "
-              "of this list (+1 is the cube fallback in slot 0). Raise MESH_DEF_CAPACITY.");
+// The registry has a SECOND producer: after this table loads, LimbSystem::init appends its
+// procedural box limbs (arm/leg/spider-leg/mandible/wing/claw) into the same array. They must be
+// budgeted here or they overflow — and an overflowed limb resolves to mesh 0, the fallback CUBE.
+// That is not hypothetical: the limb registration carried a hardcoded cap of 64 while this registry
+// grew to 112, so all six limbs silently became cubes and every spider wore two of them as
+// mandibles. engine_init_assets.cpp static_asserts that this number still equals
+// LimbSystem::LIMB_MESH_COUNT, so the two cannot drift.
+constexpr u32 kLimbMeshReserve = 6;
+
+static_assert(kMeshAssetCount + 1 + kLimbMeshReserve <= MESH_DEF_CAPACITY,
+              "mesh registry too small — the loader would silently drop the tail of this list, and "
+              "a dropped mesh renders as the fallback CUBE. Budget = this table + 1 (the cube in "
+              "slot 0) + LimbSystem's box limbs. Raise MESH_DEF_CAPACITY.");
 
 // Decoration props: loaded for their CPU geometry only and BAKED into floor sections by the level
 // mesher, so they cost no draw calls and have no collision. Same gitignore trap applies.

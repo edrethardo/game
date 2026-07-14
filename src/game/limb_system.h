@@ -36,9 +36,21 @@ struct MeshDef {
 };
 
 namespace LimbSystem {
+    // How many procedural box limb meshes init() appends to the mesh registry. The registry has
+    // MORE THAN ONE PRODUCER (the OBJ manifest fills it first, then this), so whoever sizes the
+    // registry must reserve these slots on top of the manifest — see the static_assert in
+    // engine_init_assets.cpp. Keep in step with the registerMesh() calls in init().
+    constexpr u32 LIMB_MESH_COUNT = 6;
+
     // Build limb box meshes and register them in the mesh registry.
     // Call once during Engine::init() after loading OBJ meshes.
-    void init(MeshDef* meshDefs, u32& meshDefCount);
+    //
+    // `capacity` is the registry's true size. It is a PARAMETER because it used to be a hardcoded
+    // 64 in the .cpp while the registry had grown to 112: by the time this ran, meshDefCount was
+    // already 99, so every single limb registration tripped the guard and returned 0 — and 0 is the
+    // cube fallback. The OBJ overrides in setObjMeshIds() then masked it for every limb EXCEPT the
+    // mandible, which has no OBJ version, so all five spider variants wore two 1x1x1 cubes.
+    void init(MeshDef* meshDefs, u32& meshDefCount, u32 capacity);
 
     // Override limb mesh IDs with OBJ-loaded meshes (call after init + OBJ loading)
     void setObjMeshIds(u8 armId, u8 legId, u8 wingId, u8 butcherArmId, u8 butcherLegId, u8 batFootId, u8 spiderLegPairId);

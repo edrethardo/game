@@ -193,8 +193,16 @@ void Engine::initAssets() {
         }
     }
 
-    // Build limb meshes AFTER OBJ meshes are loaded (needs valid meshDefCount)
-    LimbSystem::init(m_meshDefs, m_meshDefCount);
+    // Build limb meshes AFTER OBJ meshes are loaded (needs valid meshDefCount).
+    //
+    // The registry has TWO producers — the OBJ manifest above and LimbSystem here — so its capacity
+    // must cover both. The manifest's own static_assert only ever checked the first, which is how
+    // the limb meshes came to overflow a hardcoded cap in total silence and hand every spider a pair
+    // of cube mandibles. This assert is the one that would have caught it.
+    static_assert(kLimbMeshReserve == LimbSystem::LIMB_MESH_COUNT,
+                  "asset_manifest.h reserves a different number of limb slots than LimbSystem "
+                  "actually registers — the registry budget is wrong and the tail will become cubes.");
+    LimbSystem::init(m_meshDefs, m_meshDefCount, MAX_MESH_DEFS);
     // Override box limb meshes with OBJ voxel limbs for better visuals
     LimbSystem::setObjMeshIds(
         findMeshByName("skeleton_arm"),

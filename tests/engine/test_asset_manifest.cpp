@@ -58,6 +58,23 @@ TEST_CASE("AssetManifest: the mesh table fits the registry") {
     CHECK(kMeshAssetCount > 0);
 }
 
+TEST_CASE("AssetManifest: the registry budgets its SECOND producer too") {
+    // The check above is the one that shipped, and it was not enough: it counts only the OBJ table,
+    // but LimbSystem::init appends six more procedural box meshes to the SAME registry afterwards.
+    // Because a mesh that doesn't fit resolves to id 0 — the fallback cube — under-budgeting is
+    // invisible. It stayed invisible: the limb registration guarded against a hardcoded 64 while the
+    // registry grew to 112, so at meshDefCount=99 every limb was rejected, and the mandible (the one
+    // limb with no OBJ override) turned all five spider variants into cube-jawed monsters.
+    //
+    // Pin the FULL budget, not just the part that was easy to see.
+    CHECK(kMeshAssetCount + 1 + kLimbMeshReserve <= MESH_DEF_CAPACITY);
+
+    // And leave room to actually add a mesh — a table that exactly fills the registry is a table
+    // where the next addition silently becomes a cube.
+    INFO("mesh registry: ", kMeshAssetCount + 1 + kLimbMeshReserve, " / ", MESH_DEF_CAPACITY, " used");
+    CHECK(kMeshAssetCount + 1 + kLimbMeshReserve < MESH_DEF_CAPACITY);
+}
+
 TEST_CASE("AssetManifest: no duplicate mesh names") {
     // Meshes are resolved BY NAME into an integer id once at startup. A duplicate name is not an
     // error anywhere: the second entry loads, occupies a registry slot, and is then unreachable
