@@ -56,7 +56,7 @@ struct SnapPlayer {
     u32  potionLastActivationTick;         //  4
 };
 
-// Quantized snapshot of one entity (28 bytes — see SNAP_ENTITY_WIRE)
+// Quantized snapshot of one entity (29 bytes — see SNAP_ENTITY_WIRE)
 struct SnapEntity {
     u8   poolIndex;     // 1
     u8   flags;         // 1
@@ -96,6 +96,22 @@ struct SnapEntity {
     u8   halfExtentsXQ; // 1
     u8   halfExtentsYQ; // 1
     u8   halfExtentsZQ; // 1
+    // Champion affix bitmask (ChampAffix::, game/champion.h). The client derives the champion's
+    // tint from this ALONE (Champion::tintFor is a pure function of the mask) — so the tell can
+    // never depend on host-only state. Entity.hasAuraBuff is the cautionary tale: it drives a tint
+    // and is NOT replicated, so that tell is invisible to every guest.
+    // Constant for an entity's lifetime, and snapshots are delta-encoded, so it costs one byte once.
+    // (ENT_CHAMPION itself rides in `flags`, which is already copied verbatim.)
+    u8   champAffixes;  // 1
+    // Explicit padding, and it EARNS its byte. SnapEntity contains u16s, so it aligns to 2: with
+    // champAffixes the struct would be 29 on the wire but 30 in memory. That gap breaks the
+    // `sizeof(SnapEntity) == SNAP_ENTITY_WIRE` static_assert in snapshot.cpp — which is the canary
+    // that catches a field being added to the struct but forgotten in one of the FOUR (de)serializers
+    // (a silent stream corruption, since every later field would then be read at the wrong offset).
+    // Naming the pad keeps the struct padding-free so that canary keeps working, and hands the next
+    // feature a free byte. It is written/read like any other field; delta encoding makes a constant
+    // zero cost nothing.
+    u8   reserved0;     // 1 — always 0
 };
 
 // Quantized snapshot of one projectile (21 bytes — see SNAP_PROJECTILE_WIRE)

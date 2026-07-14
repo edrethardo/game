@@ -13,6 +13,11 @@ enum EntityFlags : u8 {
     ENT_DEAD         = 1 << 2,
     ENT_FRIENDLY     = 1 << 3,  // allied NPC, not targeted by player weapons
     ENT_UNTARGETABLE = 1 << 4,  // enemies ignore this entity (swarm drones, effects)
+    // Champion pack LEADER (the one carrying champAffixes). Lives in `flags` rather than a bool
+    // because `flags` is copied verbatim into SnapEntity (snapshot.cpp), so this bit reaches the
+    // client with no wire-size change — the client needs it to draw the champion tell.
+    ENT_CHAMPION     = 1 << 5,
+    // bits 6-7 free
 };
 
 enum struct AIState : u8 {
@@ -240,7 +245,21 @@ struct Entity {
     u8   killerSlot      = 0xFF;  // (L8) player slot credited with the kill, 0xFF = none/environmental;
                                   // set in Combat::killEntity from Combat::s_attackingPlayer, read by
                                   // the loot drop to reserve the drop to that player for a few seconds
+
+    // --- Champion (see game/champion.h) ---
+    // These land in what was pure tail padding after killerSlot, so they cost ZERO bytes — the
+    // static_assert below pins that. They are NOT part of EnemyRole because that u8 bitmask is
+    // full (all 8 bits assigned).
+    u8   champAffixes   = 0;       // ChampAffix bitmask. 0 = not a champion. Leader-only.
+    u16  champLeaderIdx = 0xFFFF;  // pool index of this minion's pack leader; 0xFFFF = none/is-leader.
+                                   // Deliberately NOT spawnerIdx: Combat::engineShieldActive scans
+                                   // every entity for spawnerIdx == engineIdx without gating on
+                                   // isEngine, so a colliding index would make The Source immune.
 };
+
+// Pins the "champion fields are free" claim: they must sit in the existing tail padding. If this
+// fires, Entity grew — re-check the layout before assuming the fields are still free.
+static_assert(sizeof(Entity) == 504, "Entity layout changed — champion fields may no longer be free");
 
 struct EntityHandle {
     u16 index      = 0xFFFF;

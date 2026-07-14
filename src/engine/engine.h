@@ -992,6 +992,20 @@ private:
     // Floor-population helpers called by startGame in engine_spawn.cpp.
     // All receive dungeon by reference because spawnFloorBoss mutates room geometry.
     void spawnFloorEnemies(DungeonResult& dungeon, u8 tier);
+    // Promote a just-spawned enemy to a CHAMPION pack leader and spawn its minions around it.
+    // Returns true if it did. Called from BOTH spawn paths in spawnFloorEnemies (JSON + fallback)
+    // so the two can't drift. Minions are cloned from the leader's PRE-buff stats, which is why
+    // this takes the entity rather than a def — EnemyDef and EnemyTemplate are different types and
+    // duplicating the logic per branch is exactly how these two paths rot apart.
+    // Server/SP only: champions roll with std::rand() on the host and reach clients via the
+    // replicated champAffixes byte, never by re-rolling locally.
+    bool tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& room, u32 effFloor);
+    // Champion packs already placed on this floor — the MAX_PACKS_PER_FLOOR gate. Reset per floor.
+    u8   m_championPacksThisFloor = 0;
+    // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
+    // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative
+    // sim only — called from tickSharedSystems inside its NetRole::CLIENT gate.
+    void tickChampions(f32 dt);
     // Returns the index of the boss room used for exit-portal placement,
     // or 0xFFFFFFFF if no boss was spawned this floor.
     u32  spawnFloorBoss(DungeonResult& dungeon);
@@ -1043,6 +1057,10 @@ private:
     void handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos);
     bool handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos);
     bool handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
+    // Champion pack LEADERS drop a guaranteed item whose rarity floor scales with affix count.
+    // Returns true if it handled the drop (caller then skips the normal roll). Minions deliberately
+    // fall through to the normal path — see the pool-saturation note in the implementation.
+    bool handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
     void handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos);
     void handleOnKillRingPassives(EntityPool& pool, u16 idx, Vec3 pos);
 

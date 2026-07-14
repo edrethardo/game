@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 #include "engine/engine.h"
+#include "game/champion.h"  // Champion::tintFor — the champion colour tell
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -188,6 +189,21 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             tint.x = tint.x * (1.0f - amt) + 0.55f * amt;
             tint.y = tint.y * (1.0f - amt) + 0.75f * amt;
             tint.z = tint.z * (1.0f - amt) + 1.0f  * amt;
+        }
+
+        // Champion tell — the player must be able to READ an elite before it kills them. Colour is
+        // Champion::tintFor(mask), a PURE function of the replicated champAffixes byte, so the host
+        // and every guest derive the same colour from the same data and cannot disagree. (Contrast
+        // the hasAuraBuff shift a few lines up: that field is NOT on the wire, so its tell is
+        // invisible to co-op guests. This one deliberately does not repeat that.)
+        // The size half of the tell needs no code here at all — halfExtents is scaled at spawn and
+        // is already replicated, and it drives both the model scale and the hitbox.
+        if ((e.flags & ENT_CHAMPION) && e.champAffixes != 0) {
+            const Vec3 ct = Champion::tintFor(e.champAffixes);
+            constexpr f32 amt = 0.55f;   // strong enough to read at a glance across a lit room
+            tint.x = tint.x * (1.0f - amt) + ct.x * amt;
+            tint.y = tint.y * (1.0f - amt) + ct.y * amt;
+            tint.z = tint.z * (1.0f - amt) + ct.z * amt;
         }
 
         // Skip webs in main pass — rendered in a translucent second pass below

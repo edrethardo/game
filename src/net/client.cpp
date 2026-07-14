@@ -597,6 +597,10 @@ void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
         e.isBoss       = (seB.bossStatus & (1u << 4)) != 0;
         e.minionShield = (seB.bossStatus & 0x01) != 0;
         e.bossPhase    = static_cast<u8>((seB.bossStatus >> 1) & 0x07);
+        // Champion affixes. The ENT_CHAMPION bit already arrived inside `flags` (copied verbatim),
+        // but the renderer needs the MASK to pick the tint — Champion::tintFor is pure, so host and
+        // guest derive the same colour from the same byte and cannot disagree.
+        e.champAffixes = seB.champAffixes;
 
         Vec3 posB;
         posB.x = Quantize::unpackPos(seB.posX);

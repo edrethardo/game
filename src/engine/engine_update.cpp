@@ -31,6 +31,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/champion.h"  // cycle-driven champion affixes (tickChampions)
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -598,6 +599,114 @@ void Engine::update(f32 dt) {
 // extras are throwaway views of the remote NetPlayers (R7-3); on a CLIENT the local player's
 // HP/status is saved/restored around the passes so the ghost sim can't fight the
 // authoritative snapshot HP (R7-4 option (a)).
+// ---------------------------------------------------------------------------
+// tickChampions — the champion affixes that fire on a CYCLE rather than on a hit or a death:
+// MOLTEN's fire eruptions, THUNDERING's lightning novas, TELEPORTING's blink.
+//
+// All three are timed off the entity's own animTimer instead of new per-entity timer fields: Entity
+// has no spare bytes (the champion fields already consumed its tail padding), and a phase derived
+// from a value the host already ticks needs no state at all. The edge test is "did the phase wrap
+// this frame", which fires exactly once per period regardless of frame rate.
+//
+// Server/SP only — the caller gates it. Every player-facing effect goes through emitNovaFX, which
+// BROADCASTS, so a guest sees the thing that is hurting them rather than taking damage from thin
+// air. (Entity.hasAuraBuff is the standing counter-example in this codebase: it drives a tint, is
+// not replicated, and so is invisible to every guest.)
+// ---------------------------------------------------------------------------
+void Engine::tickChampions(f32 dt) {
+    if (dt <= 0.0f) return;
+
+    // Fires once per `period`, on the frame the phase wraps.
+    auto cyclePassed = [dt](f32 animTimer, f32 period) -> bool {
+        if (period <= 0.0f) return false;
+        const f32 prev = fmodf(animTimer - dt, period);
+        const f32 cur  = fmodf(animTimer, period);
+        return cur < prev;   // wrapped
+    };
+
+    // AoE onto every player — local lanes directly, remotes through the throwaway-view path so the
+    // hit rides the snapshot (same shape as the BOMBER explosion in engine_death.cpp).
+    auto novaDamagePlayers = [&](Vec3 pos, f32 radius, f32 dmg) {
+        for (u8 p = 0; p < m_splitPlayerCount; p++) {
+            if (m_playerDead[p]) continue;
+            Player& lp = m_localPlayers[p];
+            Vec3 d = lp.position - pos;
+            if (sqrtf(d.x * d.x + d.z * d.z) < radius)
+                Combat::applyDamageToPlayer(lp, dmg, &pos);
+        }
+        if (m_netRole == NetRole::SERVER) {
+            for (u8 s = 0; s < MAX_PLAYERS; s++) {
+                if (s == m_localPlayerIndex) continue;
+                const NetPlayer& np = m_players[s];
+                if (!np.active || np.isDead) continue;
+                Vec3 d = np.position - pos;
+                if (sqrtf(d.x * d.x + d.z * d.z) >= radius) continue;
+                Player view;
+                buildRemotePlayerView(s, view);
+                Combat::applyDamageToPlayer(view, dmg, &pos);
+                applyRemotePlayerView(view, s);
+            }
+        }
+    };
+
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (!(e.flags & ENT_CHAMPION) || (e.flags & ENT_DEAD) || e.champAffixes == 0) continue;
+
+        if ((e.champAffixes & ChampAffix::MOLTEN) &&
+            cyclePassed(e.animTimer, Champion::MOLTEN_ERUPT_SEC)) {
+            novaDamagePlayers(e.position, Champion::MOLTEN_ERUPT_RAD,
+                              e.damage * Champion::MOLTEN_ERUPT_PCT);
+            emitNovaFX(e.position, Champion::MOLTEN_ERUPT_RAD, {1.0f, 0.45f, 0.12f});
+        }
+
+        if ((e.champAffixes & ChampAffix::THUNDERING) &&
+            cyclePassed(e.animTimer, Champion::THUNDER_PERIOD_SEC)) {
+            novaDamagePlayers(e.position, Champion::THUNDER_RADIUS,
+                              e.damage * Champion::THUNDER_DMG_PCT);
+            emitNovaFX(e.position, Champion::THUNDER_RADIUS, {0.55f, 0.85f, 1.0f});
+        }
+
+        if ((e.champAffixes & ChampAffix::TELEPORTING) &&
+            cyclePassed(e.animTimer, Champion::TELEPORT_PERIOD_SEC)) {
+            // Only blinks if you have actually opened a gap — otherwise it would teleport on top of
+            // a player it is already meleeing, which reads as a bug rather than a threat.
+            Vec3 target{}; f32 bestSq = Champion::TELEPORT_MIN_DIST * Champion::TELEPORT_MIN_DIST;
+            bool found = false;
+            for (u8 p = 0; p < m_splitPlayerCount; p++) {
+                if (m_playerDead[p]) continue;
+                Vec3 d = m_localPlayers[p].position - e.position;
+                f32 dSq = d.x * d.x + d.z * d.z;
+                if (dSq > bestSq) { bestSq = dSq; target = m_localPlayers[p].position; found = true; }
+            }
+            if (m_netRole == NetRole::SERVER) {
+                for (u8 s = 0; s < MAX_PLAYERS; s++) {
+                    if (s == m_localPlayerIndex) continue;
+                    const NetPlayer& np = m_players[s];
+                    if (!np.active || np.isDead) continue;
+                    Vec3 d = np.position - e.position;
+                    f32 dSq = d.x * d.x + d.z * d.z;
+                    if (dSq > bestSq) { bestSq = dSq; target = np.position; found = true; }
+                }
+            }
+            if (found) {
+                emitNovaFX(e.position, 1.5f, {0.70f, 0.35f, 1.0f});   // departure flash
+                Vec3 toChamp = e.position - target;
+                f32  len = sqrtf(toChamp.x * toChamp.x + toChamp.z * toChamp.z);
+                Vec3 dir = (len > 0.001f) ? Vec3{toChamp.x / len, 0.0f, toChamp.z / len}
+                                          : Vec3{1.0f, 0.0f, 0.0f};
+                Vec3 dest = target + dir * Champion::TELEPORT_LAND_DIST;
+                dest.y = e.position.y;
+                // Never blink into geometry — a champion inside a wall is unkillable and unfair.
+                Collision::ensureNotInWall(dest, e.halfExtents, m_level.grid);
+                e.position = dest;
+                e.velocity = {0.0f, 0.0f, 0.0f};
+                emitNovaFX(e.position, 1.5f, {0.70f, 0.35f, 1.0f});   // arrival flash
+            }
+        }
+    }
+}
+
 void Engine::tickSharedSystems(f32 dt) {
     // (L8) Default kill-credit to "none" so AI / skill / DoT entity kills drop free-for-all;
     // projectile.cpp re-asserts each player projectile's own firer around its damage below.
@@ -650,6 +759,10 @@ void Engine::tickSharedSystems(f32 dt) {
                             extraCount > 0 ? extras : nullptr, extraCount, &m_level.dungeon, spawnCalm,
                             m_players, MAX_PLAYERS);
             SquadSystem::update(m_level.squads, m_level.dungeon, m_entities, primary.position, dt);
+            // Champion affixes that fire on a cycle (Molten eruptions, Thundering novas, blinks).
+            // Runs right after the AI that advances animTimer, which is what their phase is derived
+            // from. Authoritative-sim only — a client would double-apply these and desync.
+            tickChampions(dt);
         }
 
         // Decay enemy speech timers + log fresh speech to chat (shared entity state → once/frame;

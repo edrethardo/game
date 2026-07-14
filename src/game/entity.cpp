@@ -69,6 +69,11 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.poisonTimer = e.poisonDps = e.burnTimer = e.burnDps = 0.0f;
     e.poisonSrcSlot = e.burnSrcSlot = 0xFF;
     e.freezeTimer = e.stunTimer = 0.0f;
+    // Same hazard again for champions: a recycled slot would otherwise stay a phantom champion —
+    // still tinted/scaled and still running Molten/Vampiric/etc. on a plain enemy. The ENT_CHAMPION
+    // bit itself is cleared with the rest of `flags` by the caller, but these two are not.
+    e.champAffixes   = 0;
+    e.champLeaderIdx = 0xFFFF;
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;

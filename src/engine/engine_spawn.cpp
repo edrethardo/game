@@ -32,6 +32,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/champion.h"  // champion affix roll + pack tunables
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -184,12 +185,126 @@ static const BossTemplate kBosses[BOSS_COUNT] = {
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
+// tryMakeChampion — promote a just-spawned enemy into a champion pack leader.
+//
+// Champions exist because the enemy pool is tier-gated to 6-9 types per 10-floor band: the player
+// fights the same handful of monsters for ten floors. An affixed leader turns that small pool into
+// a fight the player has to read.
+//
+// Minions are cloned from the leader's stats BEFORE the champion buffs are applied — that is what
+// lets one helper serve both the JSON and the fallback spawn path (EnemyDef and EnemyTemplate are
+// different types; duplicating this per branch is how those two paths would rot apart).
+// ---------------------------------------------------------------------------
+bool Engine::tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& room, u32 effFloor)
+{
+    if (effFloor < Champion::MIN_FLOOR) return false;
+    if (m_championPacksThisFloor >= Champion::MAX_PACKS_PER_FLOOR) return false;
+    // Never promote something that isn't a plain hostile: bosses have their own encounter design,
+    // ambushers are placed in doorways, and mimics masquerade as chests.
+    if (leader.isBoss || (leader.flags & ENT_FRIENDLY)) return false;
+    if (leader.enemyType == EnemyType::MIMIC || leader.enemyType == EnemyType::PROP) return false;
+    if (leader.enemyRole & EnemyRole::AMBUSH) return false;
+
+    if (static_cast<f32>(std::rand()) / static_cast<f32>(RAND_MAX) >= Champion::SPAWN_CHANCE)
+        return false;
+
+    // Entity budget: MAX_ENTITIES is 128 and is NOT being raised, so a pack must never crowd out the
+    // floor's normal spawns. Bail before touching the leader if the whole pack won't fit.
+    const u32 free = (m_entities.activeCount < MAX_ENTITIES)
+                   ? (MAX_ENTITIES - m_entities.activeCount) : 0;
+    if (free < Champion::ENTITY_HEADROOM) return false;
+
+    u8 minions = static_cast<u8>(Champion::MIN_MINIONS +
+        std::rand() % (Champion::MAX_MINIONS - Champion::MIN_MINIONS + 1));
+    if (minions > free - 1) minions = static_cast<u8>(free - 1);   // leader already occupies a slot
+
+    // Snapshot the base stats to clone minions from, BEFORE the leader is buffed.
+    const f32       baseHealth   = leader.maxHealth;
+    const f32       baseDamage   = leader.damage;
+    const f32       baseSpeed    = leader.baseMoveSpeed;
+    const Vec3      baseHalf     = leader.halfExtents;
+    const bool      flying       = (leader.flags & ENT_FLYING) != 0;
+    const u8        meshId       = leader.meshId;
+    const u8        materialId   = leader.materialId;
+    const EnemyType enemyType    = leader.enemyType;
+    const u8        enemyRole    = leader.enemyRole;
+    const u8        weaponMeshId = leader.weaponMeshId;
+    const f32       detection    = leader.detectionRange;
+    const f32       atkRange     = leader.attackRange;
+    const f32       atkCooldown  = leader.baseAttackCooldown;
+    const u16       level        = leader.level;
+
+    // --- Promote the leader ---
+    u32 rng = static_cast<u32>(std::rand());
+    leader.champAffixes = Champion::rollAffixes(effFloor, minions > 0, rng);
+    leader.flags       |= ENT_CHAMPION;
+
+    leader.maxHealth  = baseHealth * Champion::HEALTH_MULT;
+    leader.health     = leader.maxHealth;
+    leader.damage     = baseDamage * Champion::DAMAGE_MULT;
+    // halfExtents drives the model scale AND the hitbox AND is already replicated — so this one
+    // assignment gives the guest the size tell for free.
+    leader.halfExtents = baseHalf * Champion::SCALE_MULT;
+
+    if (leader.champAffixes & ChampAffix::EXTRA_FAST) {
+        // BOTH must move: the AURA herald role restores moveSpeed from baseMoveSpeed, so buffing
+        // only moveSpeed would have the aura system silently stomp the affix back to normal.
+        leader.moveSpeed     = baseSpeed * Champion::EXTRA_FAST_MULT;
+        leader.baseMoveSpeed = leader.moveSpeed;
+    }
+    Collision::ensureNotInWall(leader.position, leader.halfExtents, m_level.grid);
+
+    // --- Escort ---
+    u8 spawned = 0;
+    for (u8 i = 0; i < minions; i++) {
+        f32 ang = (6.2831853f * static_cast<f32>(i)) / static_cast<f32>(minions);
+        Vec3 pos = leader.position + Vec3{ cosf(ang) * 1.8f, 0.0f, sinf(ang) * 1.8f };
+
+        EntityHandle mh = EntitySystem::spawn(m_entities, pos, baseHalf, flying,
+                                              baseHealth * Champion::MINION_HEALTH_MULT,
+                                              baseSpeed, detection, atkRange, atkCooldown,
+                                              baseDamage * Champion::MINION_DAMAGE_MULT);
+        Entity* m = handleGet(m_entities, mh);
+        if (!m) break;   // pool exhausted — the leader simply escorts fewer
+
+        m->meshId       = meshId;
+        m->materialId   = materialId;
+        m->enemyType    = enemyType;
+        m->enemyRole    = enemyRole;
+        m->weaponMeshId = weaponMeshId;
+        m->level        = level;
+        m->maxHealth    = m->health;
+        m->baseMoveSpeed      = m->moveSpeed;
+        m->baseAttackCooldown = m->attackCooldown;
+        // Minions carry NO affixes (leader-only, Diablo 2 style) — but they ARE the pack, so the
+        // link is what lets HEALTH_LINK split the leader's damage onto them.
+        m->champAffixes   = 0;
+        m->champLeaderIdx = leaderIdx;
+        Collision::ensureNotInWall(m->position, m->halfExtents, m_level.grid);
+        spawned++;
+    }
+
+    // If the pool starved us of every minion, HEALTH_LINK would advertise a power the champion does
+    // not have (it splits damage onto minions that don't exist). Strip it rather than lie.
+    if (spawned == 0) leader.champAffixes &= static_cast<u8>(~ChampAffix::HEALTH_LINK);
+
+    m_championPacksThisFloor++;
+    LOG_INFO("Champion: %s pack (mask 0x%02X, %u minions) in room at %.1f,%.1f",
+             Champion::affixName(static_cast<u8>(leader.champAffixes & (~leader.champAffixes + 1))),
+             leader.champAffixes, spawned, static_cast<f64>(room.x), static_cast<f64>(room.z));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // spawnFloorEnemies — fill all rooms (except spawn + its neighbors) with
 // tier-appropriate hostile entities. Reads tier to pick kTier* fallback table
 // and collectTierDefs for the JSON path. Writes into m_entities and m_level.grid.
 // ---------------------------------------------------------------------------
 void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 {
+    // Fresh floor, fresh pack budget.
+    m_championPacksThisFloor = 0;
+
     // Collect JSON defs for this tier
     const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
     u32 tierDefCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
@@ -339,6 +454,10 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     }
                     // Validate spawn position — nudge out of walls if AABB overlaps
                     Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
+
+                    // Champion promotion (both spawn paths call the same helper — see the fallback
+                    // branch below — so the two can't drift apart).
+                    tryMakeChampion(*ent, h.index, room, effectiveFloor);
                 }
 
             } else {
@@ -417,6 +536,9 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     }
                     // Validate spawn position — nudge out of walls if AABB overlaps
                     Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
+
+                    // Champion promotion — same helper as the JSON path above, deliberately.
+                    tryMakeChampion(*ent, h.index, room, effectiveFloor);
                 }
             }
         }

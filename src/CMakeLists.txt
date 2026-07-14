@@ -77,6 +77,7 @@ add_executable(DungeonEngine
     game/inventory.cpp
     game/world_item.cpp
     game/quickbar.cpp
+    game/champion.cpp
     game/inventory_ui.cpp
     game/limb_system.cpp
     game/skill_system.cpp

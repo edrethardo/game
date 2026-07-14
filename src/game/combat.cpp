@@ -1,4 +1,5 @@
 #include "game/combat.h"
+#include "game/champion.h"  // champion affix behaviours (VAMPIRIC / SHIELDING / HEALTH_LINK)
 #include "game/hit_feedback.h"
 #include "game/player.h"
 #include "game/projectile.h"
@@ -16,6 +17,11 @@ static Combat::DodgeThroughCallback    s_dodgeThroughCallback    = nullptr;
 static Combat::OnKillFn                s_onKill                  = nullptr;
 static ParticlePool* s_particlePool = nullptr;
 static ScreenShake*  s_screenShake  = nullptr;
+// The authoritative entity pool. applyDamageToPlayer receives only an attackerIdx, so without this
+// there is no way to reach the attacker — which is what the VAMPIRIC champion affix needs in order
+// to heal the thing that just hit you. Set once in Engine::init; null on a client (where the whole
+// damage path is gated off anyway), so every use is null-checked.
+static EntityPool*   s_entityPool   = nullptr;
 // (L8) Player slot credited for the current damage source (0xFF = none/environmental).
 // Set by the engine around weapon fire and by projectile.cpp per projectile; stamped onto
 // Entity::killerSlot in killEntity so loot drops can be reserved to the killer.
@@ -63,6 +69,8 @@ void Combat::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
     s_screenShake  = shake;
 }
 
+void Combat::setEntityPool(EntityPool* pool) { s_entityPool = pool; }
+
 void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
                           const Vec3* damageOrigin, bool isCrit) {
     Entity* e = handleGet(pool, target);
@@ -83,6 +91,49 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     if (e->isEngine && Combat::engineShieldActive(pool, target.index)) {
         e->flashTimer = 0.12f;   // registers a hit, deals no damage
         return;
+    }
+
+    // --- Champion: SHIELDING ---
+    // A recurring immunity window. The point is to punish pure burst-DPS: you have to notice the
+    // shield is up and stop feeding damage into it. The cycle is derived from the entity's own
+    // animTimer rather than a new timer field, so it needs no extra state (Entity has no spare
+    // bytes) and stays a pure function of data the host already ticks. `minionShield` is set as the
+    // TELL because it is already on the wire and already drives a blue-white shimmer in the
+    // renderer — so the guest sees the shield without any new replication.
+    if ((e->flags & ENT_CHAMPION) && (e->champAffixes & ChampAffix::SHIELDING)) {
+        const f32 period = Champion::SHIELDING_UP_SEC + Champion::SHIELDING_GAP_SEC;
+        const f32 phase  = fmodf(e->animTimer, period);
+        const bool up    = (phase < Champion::SHIELDING_UP_SEC);
+        e->minionShield  = up;   // replicated tell (bossStatus bit0)
+        if (up) {
+            e->flashTimer = 0.12f;   // the hit registers, but deals nothing
+            return;
+        }
+    }
+
+    // --- Champion: HEALTH_LINK ---
+    // Damage to the leader is shared with its living minions, so the pack cannot be defeated by
+    // focusing the big one — you have to clear the escort first. Redirected damage is dealt as a
+    // real hit on each minion (recursion is impossible: minions carry no affixes, so they can never
+    // re-enter this branch).
+    if ((e->flags & ENT_CHAMPION) && (e->champAffixes & ChampAffix::HEALTH_LINK)) {
+        u16 minions[MAX_ENTITIES];
+        u32 minionCount = 0;
+        for (u32 a = 0; a < pool.activeCount && minionCount < MAX_ENTITIES; a++) {
+            const u32 mi = pool.activeList[a];
+            const Entity& m = pool.entities[mi];
+            if (m.champLeaderIdx == target.index && !(m.flags & ENT_DEAD))
+                minions[minionCount++] = static_cast<u16>(mi);
+        }
+        if (minionCount > 0) {
+            const f32 shared = damage * Champion::HEALTH_LINK_SHARE;
+            damage -= shared;                                 // the leader eats the remainder
+            const f32 each = shared / static_cast<f32>(minionCount);
+            for (u32 i = 0; i < minionCount; i++) {
+                EntityHandle mh{ minions[i], pool.entities[minions[i]].generation };
+                applyDamage(pool, mh, each, damageOrigin, false);
+            }
+        }
     }
 
     // Shield Bearer frontal damage reduction — forces player to flank
@@ -239,6 +290,22 @@ f32 Combat::armorMitigation(f32 armor) {
 
 void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos,
                                    u16 attackerIdx) {
+    // --- Champion: VAMPIRIC ---
+    // The champion heals for a share of the damage it deals, so trading blows with it is a losing
+    // proposition — you have to out-damage the lifesteal or disengage. Hooked here, at the single
+    // point every enemy-to-player hit funnels through, rather than at the individual AI attack call
+    // sites: doing it per-site is how you end up with an affix that works for melee and silently
+    // does nothing for a ranged champion. Runs before mitigation so it steals the swing's full
+    // value, which is also what the player sees in the damage number.
+    if (s_entityPool && attackerIdx < MAX_ENTITIES) {
+        Entity& att = s_entityPool->entities[attackerIdx];
+        if ((att.flags & ENT_ACTIVE) && !(att.flags & ENT_DEAD) &&
+            (att.flags & ENT_CHAMPION) && (att.champAffixes & ChampAffix::VAMPIRIC)) {
+            att.health += damage * Champion::VAMPIRIC_HEAL_PCT;
+            if (att.health > att.maxHealth) att.health = att.maxHealth;
+        }
+    }
+
     // Dodge-through detection: if mid-roll and an attack connects, trigger riposte + Adrenaline.
     // This fires regardless of i-frame state — the roll itself is the dodge. Fire for ANY attack
     // that lands mid-roll: melee (valid attackerIdx → riposte counter-hit) AND projectiles/AoE

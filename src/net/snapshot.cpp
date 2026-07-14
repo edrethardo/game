@@ -184,6 +184,8 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         if (aq < 0.0f)   aq = 0.0f;
         if (aq > 255.0f) aq = 255.0f;
         se.attackAnimQ = static_cast<u8>(aq);
+        // Champion affixes — the client derives the tint/scale tell from this byte alone.
+        se.champAffixes = e.champAffixes;
     }
 
     // Projectiles (only active ones). projKeys mirrors entKeys for distance ordering.
@@ -313,9 +315,17 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 static constexpr u32 SNAP_PLAYER_WIRE     = 62;
 // Entity: 1+1+1+1 + 6(pos) + 2(yaw) + 4(vel) + 1(stun)+1(freeze)+1(limb)+1(bossStatus)
 //       + 1(meshId)+1(materialId)+1(enemyType)+1(weaponMeshId) + 3(halfExtentsQ)
-//       + 1(attackAnimQ) = 28. (attackAnimQ added so clients see enemy attack animations
-//       after N4 gated off the local ghost AI that used to tick the timer.)
-static constexpr u32 SNAP_ENTITY_WIRE     = 28;
+//       + 1(attackAnimQ) + 1(champAffixes) + 1(reserved0) = 30. (attackAnimQ added so clients see enemy attack
+//       animations after N4 gated off the local ghost AI that used to tick the timer;
+//       champAffixes so the client can draw the champion tell — it is constant per entity, and
+//       snapshots are delta-encoded, so it costs one byte once, not one byte per tick.)
+static constexpr u32 SNAP_ENTITY_WIRE     = 30;
+// The delta encoder compares whole SnapEntity slots with memcmp (entitySlotsEqual) and the wire
+// writer emits exactly SNAP_ENTITY_WIRE bytes. If the struct ever gains padding, or a field is
+// added to the struct but not to BOTH writers and BOTH readers, those two numbers diverge and the
+// stream silently corrupts — every field after the missing one is read at the wrong offset. Pin it.
+static_assert(sizeof(SnapEntity) == SNAP_ENTITY_WIRE,
+              "SnapEntity has padding or a field is missing from the (de)serializers");
 // Projectile: 2(idx) + 1(flags)+1(projFlags)+1(meshId)+1(radiusQ) + 6(pos) + 6(vel) + 1(ownerSlot)
 //           + 2(clientTickLow) + 1(expectedDamageQ) = 22. (expectedDamageQ added in D3.1 so
 //           clients can predict local HP decrement on incoming-projectile impact in D3.2.)
@@ -401,10 +411,11 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
     budget -= projectileBytes;
 
     // World items have the LOWEST priority — they absorb whatever budget remains after
-    // players/entities/projectiles. (In practice 32*46=1472 B always fits the 8 KB budget
-    // even when every item rolls the max affix count.) We gate on the WORST-case wire
-    // size per item because we don't yet know each item's affixCount at clamp time and
-    // we'd rather drop a couple of items than overrun the buffer.
+    // players/entities/projectiles. At MAX_WORLD_ITEMS=64 the worst case is 64*46 = 2944 B, which
+    // still fits the 8 KB budget alongside a full entity pool at any realistic projectile count
+    // (projectiles are clamped just above and would only starve items during an extreme barrage).
+    // We gate on the WORST-case wire size per item because we don't yet know each item's affixCount
+    // at clamp time and we'd rather drop a couple of items than overrun the buffer.
     u8  worldItemCount = snap.worldItemCount;
     if (worldItemCount * SNAP_WORLDITEM_WIRE_MAX > budget)
         worldItemCount = static_cast<u8>(budget / SNAP_WORLDITEM_WIRE_MAX);
@@ -497,6 +508,8 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w8(se.halfExtentsYQ);
         w8(se.halfExtentsZQ);
         w8(se.attackAnimQ);      // attack swing countdown (0-1.0s in 1/255s steps)
+        w8(se.champAffixes);     // champion affix mask — drives the client's tint/scale tell
+        w8(se.reserved0);        // always 0 — keeps SnapEntity padding-free (see snapshot.h)
     }
 
     // Projectiles
@@ -670,6 +683,8 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         se.halfExtentsYQ = r.readU8();
         se.halfExtentsZQ = r.readU8();
         se.attackAnimQ   = r.readU8();   // attack swing countdown (1/255s steps)
+        se.champAffixes  = r.readU8();   // champion affix mask
+        se.reserved0     = r.readU8();
     }
 
     for (u32 i = 0; i < snap.projectileCount; i++) {
@@ -843,7 +858,7 @@ static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer&
     w32(sp.potionLastActivationTick);
 }
 
-// Write one SnapEntity. MUST match SNAP_ENTITY_WIRE = 28.
+// Write one SnapEntity. MUST match SNAP_ENTITY_WIRE = 30.
 static void writeSnapEntity(u8* buf, u32 maxSize, u32& cursor, const SnapEntity& se) {
     auto w8  = [&](u8 v)  { if (cursor + 1 <= maxSize) buf[cursor++] = v; };
     auto w16 = [&](u16 v) { if (cursor + 2 <= maxSize) { std::memcpy(buf + cursor, &v, 2); cursor += 2; } };
@@ -854,6 +869,7 @@ static void writeSnapEntity(u8* buf, u32 maxSize, u32& cursor, const SnapEntity&
     w8(se.meshId); w8(se.materialId); w8(se.enemyTypeId); w8(se.weaponMeshId);
     w8(se.halfExtentsXQ); w8(se.halfExtentsYQ); w8(se.halfExtentsZQ);
     w8(se.attackAnimQ);
+    w8(se.champAffixes); w8(se.reserved0);
 }
 
 // Write one SnapProjectile. MUST match SNAP_PROJECTILE_WIRE = 22.
@@ -920,6 +936,7 @@ static void readSnapEntity(PacketReader& r, SnapEntity& se) {
     se.enemyTypeId = r.readU8(); se.weaponMeshId = r.readU8();
     se.halfExtentsXQ = r.readU8(); se.halfExtentsYQ = r.readU8(); se.halfExtentsZQ = r.readU8();
     se.attackAnimQ = r.readU8();
+    se.champAffixes = r.readU8(); se.reserved0 = r.readU8();
 }
 
 // Read one SnapProjectile from a PacketReader. MUST match writeSnapProjectile.

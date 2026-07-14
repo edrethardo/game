@@ -117,6 +117,10 @@ void Engine::initCallbacks() {
 
     // Wire particle pool and screen shake into combat, skill, and projectile systems
     Combat::setFXTargets(&m_particles, &m_camera.shake);
+    // Lets applyDamageToPlayer reach the attacker from its attackerIdx — the VAMPIRIC champion
+    // affix needs to heal the thing that just hit you, and that is the one place every enemy-to-
+    // player hit funnels through.
+    Combat::setEntityPool(&m_entities);
     SkillSystem::setFXTargets(&m_particles, &m_camera.shake);
     extern void ProjectileSystem_setTrailPool(ParticlePool* pool);
     ProjectileSystem_setTrailPool(&m_particles);
@@ -155,6 +159,10 @@ void Engine::initCallbacks() {
         if (s_engine->m_netRole == NetRole::CLIENT) return;
         if (s_engine->handleFirstKillDrop(pool, entityIndex, position)) return;
         if (s_engine->handleBossLootDrop(pool, entityIndex, position)) return;
+        // Champion leaders drop a guaranteed item. Sits AFTER the boss path (a boss is never a
+        // champion) and BEFORE the normal roll, so a champion never also rolls the 40% table.
+        // Like every phase here it is behind the CLIENT gate above — loot is server-authoritative.
+        if (s_engine->handleChampionLootDrop(pool, entityIndex, position)) return;
         s_engine->handleNormalLootDrop(pool, entityIndex, position);
         s_engine->handleOnKillRingPassives(pool, entityIndex, position);
     });

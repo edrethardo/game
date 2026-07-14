@@ -141,4 +141,7 @@ namespace Combat {
     // Wire in the particle pool and screen shake so combat events emit visual FX.
     // Both pointers are stored as file-scope statics in combat.cpp.
     void setFXTargets(ParticlePool* particles, ScreenShake* shake);
+    // The authoritative entity pool, so applyDamageToPlayer (which only gets an attackerIdx) can
+    // reach the attacker — needed by the VAMPIRIC champion affix. Set once from Engine::init.
+    void setEntityPool(EntityPool* pool);
 }

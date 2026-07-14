@@ -43,6 +43,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/champion.h"  // champion death novas (MOLTEN / FROZEN)
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -319,6 +320,73 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
         // Visual: spawn explosion particles
         ParticleSystem::spawnExplosion(m_particles, pos, explosionRadius * 0.5f);
     }
+
+    // --- Champion death novas (MOLTEN / FROZEN) ---
+    // Killing a champion is not the end of the encounter: Molten leaves a fire blast you must not be
+    // standing in, Frozen locks you in place while the rest of the pack closes. Mirrors the BOMBER
+    // block above — including the remote-NetPlayer path, without which the blast would exist only on
+    // the host's screen and hit nobody else.
+    {
+        const Entity& champ = pool.entities[idx];
+        if ((champ.flags & ENT_CHAMPION) && champ.champAffixes != 0) {
+            const bool molten = (champ.champAffixes & ChampAffix::MOLTEN) != 0;
+            const bool frozen = (champ.champAffixes & ChampAffix::FROZEN) != 0;
+
+            if (molten) {
+                const f32 dmg    = champ.damage * Champion::MOLTEN_NOVA_PCT;
+                const f32 radius = Champion::MOLTEN_NOVA_RADIUS;
+                for (u8 p = 0; p < m_splitPlayerCount; p++) {
+                    if (m_playerDead[p]) continue;
+                    Player& lp = m_localPlayers[p];
+                    Vec3 d = lp.position - pos;
+                    if (sqrtf(d.x * d.x + d.z * d.z) < radius)
+                        Combat::applyDamageToPlayer(lp, dmg, &pos);
+                }
+                if (m_netRole == NetRole::SERVER) {
+                    for (u8 s = 0; s < MAX_PLAYERS; s++) {
+                        if (s == m_localPlayerIndex) continue;
+                        const NetPlayer& np = m_players[s];
+                        if (!np.active || np.isDead) continue;
+                        Vec3 d = np.position - pos;
+                        if (sqrtf(d.x * d.x + d.z * d.z) >= radius) continue;
+                        Player view;
+                        buildRemotePlayerView(s, view);
+                        Combat::applyDamageToPlayer(view, dmg, &pos);
+                        applyRemotePlayerView(view, s);
+                    }
+                }
+                // emitNovaFX spawns locally AND broadcasts SV_EVENT/NOVA_FX on the server, so the
+                // ring is visible to every guest — not just whoever's machine ran the death.
+                emitNovaFX(pos, radius, {1.0f, 0.45f, 0.12f});
+                ParticleSystem::spawnExplosion(m_particles, pos, radius * 0.5f);
+            }
+
+            if (frozen) {
+                // No damage — the threat is the freeze, not the hit.
+                const f32 radius = Champion::FROZEN_NOVA_RADIUS;
+                for (u8 p = 0; p < m_splitPlayerCount; p++) {
+                    if (m_playerDead[p]) continue;
+                    Player& lp = m_localPlayers[p];
+                    Vec3 d = lp.position - pos;
+                    if (sqrtf(d.x * d.x + d.z * d.z) < radius)
+                        lp.freezeTimer = fmaxf(lp.freezeTimer, Champion::FROZEN_FREEZE_SEC);
+                }
+                if (m_netRole == NetRole::SERVER) {
+                    for (u8 s = 0; s < MAX_PLAYERS; s++) {
+                        if (s == m_localPlayerIndex) continue;
+                        NetPlayer& np = m_players[s];
+                        if (!np.active || np.isDead) continue;
+                        Vec3 d = np.position - pos;
+                        if (sqrtf(d.x * d.x + d.z * d.z) >= radius) continue;
+                        // freezeTimer lives on NetPlayer and is already replicated in SnapPlayer, so
+                        // the guest both sees and feels the freeze.
+                        np.freezeTimer = fmaxf(np.freezeTimer, Champion::FROZEN_FREEZE_SEC);
+                    }
+                }
+                emitNovaFX(pos, radius, {0.45f, 0.80f, 1.0f});
+            }
+        }
+    }
 }
 
 // Tracks hostile kills, then checks the floor 1-3 first-kill magic-drop guarantee.
@@ -481,6 +549,71 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
 // Normal (non-boss, non-first-kill) loot roll + globe drop.
 // Drop chance scales with enemy level/floor depth. Floor 1 forces shield drops
 // so the tutorial teaches blocking. Void return — no early exit in original.
+// Champion pack LEADERS drop a guaranteed item. An elite you must read, kite and out-play has to
+// pay, or players learn to walk around them — which would make the whole feature a nuisance tax.
+//
+// MINIONS are deliberately excluded and fall through to the normal 40% roll. This mirrors the
+// decision recorded above for the Engine's wave-adds: a guaranteed drop per pack member would put
+// 5 rares on the floor per pack, and with champions now allowed on BOSS floors that lands on top of
+// the boss's own guaranteed haul + bonusDrops in a single room. The world-item pool is finite (64),
+// and a full pool makes WorldItemSystem::spawn fail SILENTLY — so over-generous guarantees don't
+// produce more loot, they produce *vanished* loot.
+bool Engine::handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
+    const Entity& e = pool.entities[idx];
+    if (!(e.flags & ENT_CHAMPION) || e.champAffixes == 0) return false;
+
+    // Pool-headroom guard. If the floor is already awash in loot, drop nothing rather than roll an
+    // item that spawn() would silently swallow.
+    u32 activeItems = 0;
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++)
+        if (m_worldItems.items[i].active) activeItems++;
+    if (activeItems + 2 >= MAX_WORLD_ITEMS) {
+        LOG_WARN("Champion: world-item pool nearly full (%u/%u) — skipping guaranteed drop",
+                 activeItems, MAX_WORLD_ITEMS);
+        return false;
+    }
+
+    u16 lvl16 = e.level;
+    u8  lvl   = static_cast<u8>(lvl16 > 255 ? 255 : lvl16);
+    if (lvl < 1) lvl = 1;
+
+    // Rarity floor scales with how nasty the champion was: a 3-affix champion is a real fight.
+    u8 affixCount = 0;
+    for (u8 b = 0; b < ChampAffix::COUNT; b++)
+        if (e.champAffixes & static_cast<u8>(1u << b)) affixCount++;
+    const Rarity minRarity = (affixCount >= 3) ? Rarity::LEGENDARY : Rarity::RARE;
+
+    // Same re-roll-then-force-upgrade shape as handleBossLootDrop: roll until we find a def that
+    // can legitimately BE this rarity, then upgrade and re-roll its affixes at the new tier.
+    ItemInstance item;
+    for (u32 attempt = 0; attempt < 50; attempt++) {
+        item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount, m_affixDefs, m_affixDefCount);
+        if (isItemEmpty(item)) break;
+        if (m_itemDefs[item.defId].maxRarity >= minRarity) break;
+    }
+    if (isItemEmpty(item)) return false;
+
+    if (item.rarity < minRarity) {
+        item.rarity     = minRarity;
+        item.affixCount = 0;
+        const ItemDef& d = m_itemDefs[item.defId];
+        ItemGen::rollAffixes(item, lvl, d.slot, m_affixDefs, m_affixDefCount, d.weaponType);
+    }
+
+    Vec3 dropPos = pos + Vec3{0, 0.5f, 0};
+    // Check the return: spawn() reports a full pool by returning false, and every OTHER caller in
+    // this file ignores it — which is how a *guaranteed* drop can silently not exist.
+    if (!WorldItemSystem::spawn(m_worldItems, item, dropPos, &m_level.grid, e.killerSlot)) {
+        LOG_WARN("Champion: guaranteed drop LOST — world-item pool full");
+        return false;
+    }
+    broadcastLootSpawn(m_worldItems, item.uid, dropPos,
+                       item.defId < m_itemDefCount ? item.defId : 0xFFFF);
+    LOG_INFO("Champion: guaranteed %s drop (mask 0x%02X, %u affixes)",
+             minRarity == Rarity::LEGENDARY ? "LEGENDARY" : "RARE", e.champAffixes, affixCount);
+    return true;
+}
+
 void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     // Hostile enemies only drop loot; chance scales with floor depth.
     // Loot level is u8 (save-bound ItemInstance.itemLevel) — cap effective floor at 255.

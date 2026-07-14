@@ -13,7 +13,11 @@ static constexpr u32 MAX_AFFIX_DEFS      = 32;
 static constexpr u32 MAX_AFFIXES_PER_ITEM = 4;
 static constexpr u32 MAX_INVENTORY_ITEMS = 24;
 static constexpr u32 MAX_SKILL_DEFS      = 64;
-static constexpr u32 MAX_WORLD_ITEMS     = 32;
+// Raised 32 -> 64 for champions + the loot goblin. The pool is replicated (SnapWorldItem), but
+// snapshots are delta-encoded and empty slots compare equal, so this costs MEMORY, not bandwidth.
+// It matters because a full pool makes WorldItemSystem::spawn fail SILENTLY — and champions/bosses
+// hand out *guaranteed* drops, which would then simply vanish.
+static constexpr u32 MAX_WORLD_ITEMS     = 64;
 
 // ---- Rarity tiers ----
 

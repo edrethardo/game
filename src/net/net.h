@@ -52,7 +52,9 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // mis-parse a v8 input window (every field after skillSlot shifts), so this MUST reject.
 // v9: SV_EVENT gained NOVA_FX (0x06). Additive (an older client would just ignore the unknown
 // event byte), but the Blood Nova armor aura is invisible without it, so pair the two builds.
-static constexpr u32 PROTOCOL_VERSION  = 9; // v9: SV_EVENT NOVA_FX (replicated nova rings)
+// v10: SnapEntity grew a byte — champAffixes (28 -> 29 B per entity). A v9 client would read every
+// field after it at the wrong offset for the NEXT entity in the stream, so this MUST reject.
+static constexpr u32 PROTOCOL_VERSION  = 10; // v10: SnapEntity.champAffixes (champion tell)
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
                                             // carry targetSlot)
