@@ -361,6 +361,7 @@ void Engine::equipFreshLane(u8 lane) {
     const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[lane])];
     m_skillStates[lane].maxEnergy        = cls.baseEnergy + m_inventories[lane].bonusEnergyFlat;
     m_skillStates[lane].energy           = m_skillStates[lane].maxEnergy;
+    m_localPlayers[lane].baseMaxHealth   = cls.baseHealth;   // maxHealth is derived from this + gear
     m_localPlayers[lane].maxHealth       = cls.baseHealth;
     m_localPlayers[lane].health          = cls.baseHealth;
     m_localPlayers[lane].moveSpeed       = cls.baseMoveSpeed;
@@ -651,7 +652,8 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // would copy into m_localPlayer, clobbering carried HP + per-floor growth. Preserve
     // the local slot's HP/maxHealth across the reset so the descend keeps it.
     f32 carriedHealth = m_players[activeNetSlot()].health;       // local player's net slot
-    f32 carriedMaxHealth = m_players[activeNetSlot()].maxHealth;
+    f32 carriedMaxHealth  = m_players[activeNetSlot()].maxHealth;
+    f32 carriedBaseHealth = m_players[activeNetSlot()].baseMaxHealth;   // the growth component
     // Net host only: the wipe below clears every slot's `active`, and just below we
     // re-activate ONLY the local (host) slot — which would silently drop every connected
     // client on a floor DESCEND (onPlayerJoin runs on connect, not on descend). Remember
@@ -674,7 +676,8 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     }
     if (m_netRole == NetRole::CLIENT && mode == GameStart::DESCEND) {
         m_players[activeNetSlot()].health    = carriedHealth;
-        m_players[activeNetSlot()].maxHealth = carriedMaxHealth;
+        m_players[activeNetSlot()].maxHealth     = carriedMaxHealth;
+        m_players[activeNetSlot()].baseMaxHealth = carriedBaseHealth;   // or the floor growth resets
     }
 
     // Setup local player at its NET slot (client slot may be >=1; m_localPlayerIndex is the
@@ -694,7 +697,8 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         for (u8 pi = 0; pi < m_splitPlayerCount; pi++) {
             const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClasses[pi])];
             m_players[pi].health = cls.baseHealth;
-            m_players[pi].maxHealth = cls.baseHealth;
+            m_players[pi].baseMaxHealth = cls.baseHealth;
+            m_players[pi].maxHealth     = cls.baseHealth;
             m_players[pi].moveSpeed = cls.baseMoveSpeed;
         }
     }

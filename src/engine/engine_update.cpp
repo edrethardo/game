@@ -376,7 +376,12 @@ void Engine::update(f32 dt) {
                 // Runs AFTER positionLocalPlayersAtSpawn (which set m_localPlayers[0]) so
                 // P0's growth isn't clobbered.
                 for (u8 p = 0; p < m_splitPlayerCount; p++) {
-                    m_localPlayers[p].maxHealth *= 1.015f;
+                    // Grow the BASE, not maxHealth: maxHealth is derived (base + gear + buffs), so
+                    // growing it directly would be overwritten by the next refresh — and, worse, a
+                    // derived value that anything may permanently nudge is exactly what let a leaked
+                    // shrine buff compound into the save.
+                    m_localPlayers[p].baseMaxHealth *= 1.015f;
+                    Inventory::refreshMaxHealth(m_localPlayers[p], m_inventories[p]);
                     m_localPlayers[p].health = m_localPlayers[p].maxHealth;
                     m_skillStates[p].maxEnergy *= 1.015f;
                     m_skillStates[p].energy = m_skillStates[p].maxEnergy;
@@ -2115,7 +2120,8 @@ bool Engine::triggerFloorDescent() {
     // (regardless of who opened the door), so suppress the per-trigger growth
     // here to avoid double-growing whoever reached the exit.
     if (m_splitPlayerCount <= 1) {
-        m_localPlayer.maxHealth *= 1.015f;
+        m_localPlayer.baseMaxHealth *= 1.015f;       // grow the base; maxHealth is derived from it
+        Inventory::refreshMaxHealth(m_localPlayer, m_inventories[m_localPlayerIndex]);
         m_localPlayer.health = m_localPlayer.maxHealth;
         m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
         m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
@@ -2123,7 +2129,8 @@ bool Engine::triggerFloorDescent() {
     // Scale all networked players too
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
         if (!m_players[pi].active) continue;
-        m_players[pi].maxHealth *= 1.015f;
+        m_players[pi].baseMaxHealth *= 1.015f;
+        Inventory::refreshMaxHealth(m_players[pi], m_inventories[pi]);
         m_players[pi].health = m_players[pi].maxHealth;
         m_players[pi].invulnTimer = 2.0f;
         m_players[pi].isDead = false;

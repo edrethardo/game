@@ -42,6 +42,7 @@ add_executable(dungeon_tests
     game/test_interact.cpp           # interact button: item > shrine > exit, tap vs hold
     game/test_source_shard.cpp       # secret superboss key must survive to be picked up
     game/test_shrine_buff.cpp        # VITALITY must never leak permanent max HP
+    game/test_max_health.cpp         # max HP = class base x growth + gear + buff (gear was DEAD)
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
@@ -66,6 +67,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/game/champion.cpp       # champion affix roll rules (pure)
     ${CMAKE_SOURCE_DIR}/src/game/floor_event.cpp   # floor-event weighted pick (pure)
     ${CMAKE_SOURCE_DIR}/src/game/world_item.cpp    # world-item pool: spawn + lifetime expiry
+    ${CMAKE_SOURCE_DIR}/src/game/inventory.cpp    # stat cache + derived max health
     ${CMAKE_SOURCE_DIR}/src/world/collision.cpp   # (world_item.cpp -> ensureNotInWall)
     stubs_material.cpp
     ${CMAKE_SOURCE_DIR}/src/world/pathfinder.cpp

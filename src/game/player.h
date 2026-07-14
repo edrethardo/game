@@ -73,6 +73,13 @@ struct Player {
     // was never reverted. It became permanent, compounded on every re-take, and was written to the
     // save. A live character reached 44,922 HP against a legitimate ~1,195.
     f32  shrineHealthBonus = 0.0f;
+
+    // The CLASS component of max HP: class base, compounded by the +1.5%-per-floor descent growth.
+    // maxHealth is now DERIVED from this plus the equipped gear (Inventory::refreshMaxHealth), so it
+    // is no longer a free-running accumulator that anything could permanently nudge — which is how a
+    // leaked shrine buff compounded to 44,922 HP and got written to disk. Only this base is saved;
+    // gear and buffs are recomputed at runtime and can never contaminate the file.
+    f32  baseMaxHealth    = 100.0f;
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection + Blood Nova armor retaliation)
     u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting

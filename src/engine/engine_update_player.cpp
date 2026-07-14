@@ -583,6 +583,16 @@ void Engine::tickMiscTimers(f32 dt) {
     // VITALITY has to undo itself: it raised maxHealth, so on expiry the bonus must come back off,
     // and current HP must be clamped under the new (lower) cap or the player would sit above their
     // own maximum.
+    // Max HP is DERIVED: class base (grown per floor) + equipped gear + any active buff. Recomputed
+    // every tick rather than at each equip/unequip/pickup/drop/sync site, because there are many of
+    // those and missing one silently drops the player's gear health — which is the very bug this
+    // fixes (getEffectiveMaxHealth was correct and simply never called from anywhere). Cost is a
+    // 7-slot loop per player per tick.
+    //
+    // CLIENT is excluded: a guest's maxHealth is server-authoritative and adopted from SnapPlayer.
+    if (m_netRole != NetRole::CLIENT)
+        Inventory::refreshMaxHealth(m_localPlayer, m_inventories[m_localPlayerIndex]);
+
     if (m_netRole != NetRole::CLIENT && m_localPlayer.shrineBuffTimer > 0.0f) {
         m_localPlayer.shrineBuffTimer -= dt;
         if (m_localPlayer.shrineBuffTimer <= 0.0f) {

@@ -256,7 +256,13 @@ void Engine::saveCharacter(u8 lane, u8 slot) {
     };
 
     f32 hp    = m_localPlayers[lane].health;
-    f32 maxHp = m_localPlayers[lane].maxHealth;
+    // Persist the BASE max HP (class base x floor growth), NOT the derived total. Gear health and
+    // shrine buffs are recomputed at runtime, so they can never be baked into the file — which is
+    // precisely how a leaked Vitality buff compounded across sessions to 44,922. The byte layout is
+    // unchanged (same f32, same offset), so this is NOT a save-format change: a v3 file written
+    // before this commit simply holds a base that already had gear/buffs folded in, which the
+    // load-time clamp below corrects.
+    f32 maxHp = m_localPlayers[lane].baseMaxHealth;
     std::fwrite(&hp,    sizeof(f32), 1, f);
     std::fwrite(&maxHp, sizeof(f32), 1, f);
     std::fwrite(&m_inventories[lane], sizeof(PlayerInventory), 1, f);
@@ -358,8 +364,35 @@ static bool v2HasWideSkillId(FILE* f, u8 playerCount) {
 void Engine::applySavedCharToLane(u8 lane, const SavedChar& ps) {
     if (lane >= MAX_LOCAL_PLAYERS) return;
 
+    // Restore the BASE max HP. maxHealth itself is derived (base + gear + buffs) and is recomputed
+    // below — never trusted from disk.
+    //
+    // CLAMP: a legitimate base can only ever be classBase * 1.015^(descents), and descents can never
+    // exceed effectiveFloor-1. Anything above that is corruption — from the Vitality-shrine leak that
+    // ran before it was fixed, which permanently inflated maxHealth and wrote it to the file. A real
+    // character reached 44,922 against a legitimate ~1,195. Clamping repairs those saves on load
+    // instead of leaving players with a silently broken hero (and no way to know).
+    {
+        const u8 cls = (ps.cls < static_cast<u8>(PlayerClass::CLASS_COUNT)) ? ps.cls : 0;
+        const f32 classBase = kClassDefs[cls].baseHealth;
+        const u32 effFloor  = m_level.savedFloor + static_cast<u32>(m_difficulty) * 50u;
+        f32 maxLegit = classBase;
+        for (u32 i = 1; i < effFloor; ++i) maxLegit *= 1.015f;   // the +1.5%-per-descent growth
+        maxLegit *= 1.02f;                                        // float-drift headroom
+
+        f32 base = ps.maxHp;
+        if (base > maxLegit) {
+            LOG_WARN("Save repair: base max HP %.0f exceeds the legitimate maximum %.0f for a "
+                     "level-%u %s — clamping (pre-fix Vitality-shrine leak).",
+                     static_cast<f64>(base), static_cast<f64>(maxLegit), effFloor,
+                     kClassDefs[cls].name);
+            base = maxLegit;
+        }
+        if (base < 1.0f) base = classBase;
+        m_localPlayers[lane].baseMaxHealth = base;
+    }
     m_localPlayers[lane].health    = ps.hp;
-    m_localPlayers[lane].maxHealth = ps.maxHp;
+    m_localPlayers[lane].maxHealth = m_localPlayers[lane].baseMaxHealth;   // refreshed after gear loads
 
     m_inventories[lane] = ps.inv;
     // Reroll deprecated affixes from old saves (e.g. removed RANGE_BONUS)
@@ -376,6 +409,12 @@ void Engine::applySavedCharToLane(u8 lane, const SavedChar& ps) {
                 item.affixes[a].type = AffixType::DAMAGE_FLAT;
     }
     Inventory::recalculateStats(m_inventories[lane]);  // rebuild bonus cache from affixes
+
+    // Now that the gear is in, derive maxHealth from it. Before this, item health simply never
+    // reached the player: getEffectiveMaxHealth was correct and called by nothing.
+    Inventory::refreshMaxHealth(m_localPlayers[lane], m_inventories[lane]);
+    if (m_localPlayers[lane].health > m_localPlayers[lane].maxHealth)
+        m_localPlayers[lane].health = m_localPlayers[lane].maxHealth;
 
     m_quickbars[lane]   = ps.qb;
     m_skillStates[lane] = ps.skill;

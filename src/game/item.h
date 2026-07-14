@@ -621,6 +621,19 @@ namespace Inventory {
     WeaponDef    getWeaponFromItem(const PlayerInventory& inv,
                                    const ItemDef* itemDefs, const ItemInstance& item);
     f32          getEffectiveMaxHealth(const PlayerInventory& inv, f32 baseMaxHealth);
+
+    // Derive maxHealth from the class base + equipped gear + any active buff, and clamp current HP
+    // under it. Call this after ANY of those three change.
+    //
+    // getEffectiveMaxHealth existed, was correct, and was called by NOTHING: every HEALTH_FLAT roll,
+    // every HEALTH_PCT roll and every item's base health contributed exactly zero to the player. Max
+    // HP was only ever class base x floor growth. This is the missing call.
+    template <typename P>
+    inline void refreshMaxHealth(P& p, const PlayerInventory& inv) {
+        p.maxHealth = getEffectiveMaxHealth(inv, p.baseMaxHealth) + p.shrineHealthBonus;
+        if (p.maxHealth < 1.0f) p.maxHealth = 1.0f;
+        if (p.health > p.maxHealth) p.health = p.maxHealth;   // never sit above your own cap
+    }
     // Sum of the LIFESTEAL_PCT affix across equipped items (percentage, e.g. 1.5 = 1.5%).
     // Computed on demand rather than cached on PlayerInventory — that struct is serialized
     // raw, so it must not gain new fields (see the WARNING on PlayerInventory).

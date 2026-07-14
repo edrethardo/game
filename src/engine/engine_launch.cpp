@@ -26,7 +26,8 @@ void Engine::applyClassToLane0(PlayerClass cls) {
     m_activeClassSkill = 0;
 
     const ClassDef& def = kClassDefs[static_cast<u8>(cls)];
-    m_localPlayer.maxHealth = def.baseHealth;
+    m_localPlayer.baseMaxHealth = def.baseHealth;
+    m_localPlayer.maxHealth     = def.baseHealth;
     m_localPlayer.health = def.baseHealth;
     m_localPlayer.moveSpeed = def.baseMoveSpeed;
     m_skillStates[m_localPlayerIndex].maxEnergy = def.baseEnergy;

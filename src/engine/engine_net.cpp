@@ -736,6 +736,10 @@ void Engine::serverNetPost(f32 dt) {
             // its own buff locally in engine_update_player.cpp — ticking it in both places would
             // burn it down at double speed).
             // VITALITY must undo its own max-HP bump, and clamp current HP under the new cap.
+            // Remote lanes: same derived max HP as the host's local player (gear health reaches a
+            // guest too). The server owns this; the guest adopts it through SnapPlayer.
+            Inventory::refreshMaxHealth(np, m_inventories[pi]);
+
             if (np.shrineBuffTimer > 0.0f) {
                 np.shrineBuffTimer -= dt;
                 if (np.shrineBuffTimer <= 0.0f) {

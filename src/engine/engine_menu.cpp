@@ -903,7 +903,8 @@ void Engine::updateMenu(f32 dt) {
             // P2 selected their class
             m_playerClasses[1] = static_cast<PlayerClass>(m_menu.subSelection);
             const ClassDef& cls2 = kClassDefs[m_menu.subSelection];
-            m_localPlayers[1].maxHealth = cls2.baseHealth;
+            m_localPlayers[1].baseMaxHealth = cls2.baseHealth;
+            m_localPlayers[1].maxHealth     = cls2.baseHealth;
             m_localPlayers[1].health = cls2.baseHealth;
             m_localPlayers[1].moveSpeed = cls2.baseMoveSpeed;
             m_localPlayers[1].damageReduction = (m_playerClasses[1] == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
