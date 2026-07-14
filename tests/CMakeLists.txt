@@ -48,6 +48,7 @@ add_executable(dungeon_tests
     world/test_pathfinder.cpp
     world/test_raycast.cpp
     world/test_tile_noise.cpp
+    world/test_collision_push.cpp    # a push may crowd the player, never shove them into a wall
     renderer/test_hud_cooldown.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp

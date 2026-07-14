@@ -145,3 +145,55 @@ TEST_CASE("Interact: a hold target appearing mid-press does not retro-fire a tap
     for (int i = 0; i < 60; i++)
         CHECK(Interact::poll(st, true, /*hasHoldTarget=*/true, DT, HOLD) == Intent::NONE);
 }
+
+// ---------------------------------------------------------------------------
+// inReach — the aim cone must not apply to the item you are standing on.
+//
+// The bug: the "standing on it" exemption was hDist <= 0.1 m, on a player 0.7 m wide. Walk over an
+// item and stop, and it typically sits 0.2-0.5 m away — outside the exemption, and as often behind
+// your eyeline as in front of it. The dot then went negative, the cone refused the grab, and the
+// pickup silently did nothing. Whether it worked depended on exactly where you stopped, which is
+// what "picking up items is sometimes flaky" looks like from the player's side.
+// ---------------------------------------------------------------------------
+
+static constexpr f32 RANGE = 3.5f;
+static constexpr f32 GRAB  = 1.2f;
+static constexpr f32 MIN_DOT = 0.3f;
+
+TEST_CASE("InReach: THE BUG — an item underfoot but BEHIND you is reachable") {
+    // 0.3 m away, dot = -1 (directly behind). Old rule: 0.3 > 0.1, so the cone applied, -1 < 0.3,
+    // refused. This is the exact case that ate the pickup.
+    CHECK(Interact::inReach(0.3f, -1.0f, RANGE, GRAB, MIN_DOT));
+}
+
+TEST_CASE("InReach: anywhere inside the grab radius is reachable, whatever the facing") {
+    for (f32 d = 0.0f; d <= GRAB; d += 0.1f) {
+        INFO("dist ", d);
+        CHECK(Interact::inReach(d, -1.0f, RANGE, GRAB, MIN_DOT));   // facing dead away
+        CHECK(Interact::inReach(d,  0.0f, RANGE, GRAB, MIN_DOT));   // side-on
+        CHECK(Interact::inReach(d,  1.0f, RANGE, GRAB, MIN_DOT));   // looking right at it
+    }
+}
+
+TEST_CASE("InReach: beyond the grab radius you must still AIM") {
+    // The cone is what lets you pick ONE item out of a scattered pile at range. Keep it.
+    CHECK_FALSE(Interact::inReach(2.0f, -1.0f, RANGE, GRAB, MIN_DOT));   // behind you, out of reach
+    CHECK_FALSE(Interact::inReach(2.0f,  0.0f, RANGE, GRAB, MIN_DOT));   // side-on
+    CHECK_FALSE(Interact::inReach(2.0f,  0.29f, RANGE, GRAB, MIN_DOT));  // just outside the cone
+    CHECK(Interact::inReach(2.0f,  0.30f, RANGE, GRAB, MIN_DOT));        // just inside it
+    CHECK(Interact::inReach(2.0f,  1.0f, RANGE, GRAB, MIN_DOT));         // straight ahead
+}
+
+TEST_CASE("InReach: range still bounds everything") {
+    // Even looking straight at it, past INTERACT_RANGE is out of reach — the grab radius widens the
+    // near field, it must not extend the far one.
+    CHECK_FALSE(Interact::inReach(3.6f, 1.0f, RANGE, GRAB, MIN_DOT));
+    CHECK(Interact::inReach(3.4f, 1.0f, RANGE, GRAB, MIN_DOT));
+}
+
+TEST_CASE("InReach: the grab radius sits between the body and the aimed range") {
+    // A grab radius inside the player's own half-width would reintroduce the bug; one at/over the
+    // full range would delete the aim cone entirely and let you vacuum up loot behind you.
+    CHECK(GRAB > 0.35f);     // wider than the player's half-width (PLAYER_HALF_WIDTH)
+    CHECK(GRAB < RANGE);     // but the cone still governs the far field
+}

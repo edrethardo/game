@@ -196,6 +196,12 @@ namespace GameConst {
     static constexpr f32 INTERACT_HOLD_SEC   = 0.35f;
     static constexpr f32 INTERACT_RANGE      = 3.5f;   // XZ range for aimed pickup / activation
     static constexpr f32 INTERACT_MIN_DOT    = 0.3f;   // must be in the front ~140° arc
+    // ...but only BEYOND this radius. Inside it you are standing on the thing, and which way you
+    // happen to be facing must not decide whether you can pick it up. The old exemption was 0.1 m on
+    // a 0.7 m-wide player, so an item you had just walked over was routinely behind your eyeline and
+    // the aim cone refused it — the "pickup is sometimes flaky" bug. 1.2 m is a comfortable arm's
+    // reach: well outside the body, well inside the 3.5 m aimed range.
+    static constexpr f32 INTERACT_GRAB_RADIUS = 1.2f;
 
     // Combat
     static constexpr f32 LOOT_DROP_CHANCE    = 0.40f;

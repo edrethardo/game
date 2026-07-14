@@ -1673,12 +1673,15 @@ void Engine::resolveInteractTargets(InteractState& st) {
 
         Vec3 to = w.position - m_localPlayer.position;
         f32 hDist = sqrtf(to.x * to.x + to.z * to.z);
-        if (hDist > GameConst::INTERACT_RANGE) continue;
         // Horizontal-only dot so floor items stay reachable while looking down at them.
-        f32 dot = (hDist > 0.1f && hLen > 0.01f)
+        f32 dot = (hDist > 0.01f && hLen > 0.01f)
                 ? (fwd.x * to.x + fwd.z * to.z) / (hDist * hLen)
-                : 1.0f;   // standing on top of it — always eligible
-        if (dot < GameConst::INTERACT_MIN_DOT) continue;
+                : 1.0f;   // exactly underfoot — no meaningful direction to compare against
+        // Interact::inReach owns the rule (and the reason): the aim cone applies only BEYOND
+        // INTERACT_GRAB_RADIUS, so the item at your feet can never be refused for the way you face.
+        if (!Interact::inReach(hDist, dot, GameConst::INTERACT_RANGE,
+                               GameConst::INTERACT_GRAB_RADIUS, GameConst::INTERACT_MIN_DOT))
+            continue;
 
         f32 score = dot - hDist * 0.1f;   // prefer what you're looking straight at, then what's near
         if (shrine) {
@@ -2505,9 +2508,16 @@ void Engine::spawnDamageNumber(Vec3 pos, f32 amount, bool isHeal, bool isCrit) {
     }
 }
 
+// Thin wrapper over Collision::tryPushXZ (which owns the rule and the reasoning) that supplies the
+// player's XZ footprint. A push that would drive the player into geometry is refused.
+static bool tryPushPlayerXZ(Player& p, const LevelGrid& grid, f32 dx, f32 dz) {
+    const Vec3 half = {PLAYER_HALF_WIDTH, PLAYER_HEIGHT * 0.5f, PLAYER_HALF_WIDTH};
+    return Collision::tryPushXZ(p.position, half, grid, dx, dz);
+}
+
 // Pushes the local player out of all active hostile entity AABBs.
 // Uses the minimal-penetration axis to avoid tunneling on corners.
-// Reverts push if it would land the player inside solid geometry.
+// Pushes that would land the player inside solid geometry are refused (see tryPushPlayerXZ).
 void Engine::pushPlayerFromEntities() {
     AABB playerBox = {
         m_localPlayer.position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
@@ -2535,16 +2545,19 @@ void Engine::pushPlayerFromEntities() {
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
-                // Safety net — entities are solid, push the player out fully
+                // Safety net — entities are solid, push the player out fully. The push is applied
+                // through tryPushPlayerXZ, so an enemy can crowd the player against a wall but can
+                // never drive them into it; when the minimal-penetration axis is blocked by geometry
+                // the two are simply left overlapping until the player walks out.
                 f32 playerPush = 1.0f;
                 f32 enemyPush  = 0.0f;
                 if (pushX < pushZ) {
                     f32 dir = (toPlayer.x > 0) ? 1.0f : -1.0f;
-                    m_localPlayer.position.x += dir * pushX * playerPush;
+                    tryPushPlayerXZ(m_localPlayer, m_level.grid, dir * pushX * playerPush, 0.0f);
                     e.position.x -= dir * pushX * enemyPush;
                 } else {
                     f32 dir = (toPlayer.z > 0) ? 1.0f : -1.0f;
-                    m_localPlayer.position.z += dir * pushZ * playerPush;
+                    tryPushPlayerXZ(m_localPlayer, m_level.grid, 0.0f, dir * pushZ * playerPush);
                     e.position.z -= dir * pushZ * enemyPush;
                 }
             }
@@ -2566,8 +2579,10 @@ void Engine::pushPlayerFromEntities() {
             if (dist > 0.01f && dist < minSep) {
                 f32 push = (minSep - dist) * 0.5f;
                 Vec3 dir = {toMe.x / dist, 0, toMe.z / dist};
-                m_localPlayer.position.x += dir.x * push;
-                m_localPlayer.position.z += dir.z * push;
+                // Same rule as the entity push: co-op partners can crowd each other, but neither may
+                // shove the other into geometry. Without this, two players squeezing through a
+                // doorway push each other into the door frame.
+                tryPushPlayerXZ(m_localPlayer, m_level.grid, dir.x * push, dir.z * push);
             }
         }
     }

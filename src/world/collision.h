@@ -40,4 +40,20 @@ namespace Collision {
     // Nudge an entity out of walls by spiral-searching nearby cell centres.
     // Call after spawning to guarantee the entity isn't embedded in geometry.
     void ensureNotInWall(Vec3& position, Vec3 halfExtents, const LevelGrid& grid);
+
+    // Apply an XZ displacement to `position`, but ONLY if doing so would not push the body INTO
+    // solid geometry. Returns true if the push was applied.
+    //
+    // This is the rule for every push that moves a body without going through moveAndSlide —
+    // enemy-vs-player crowding, co-op partner separation. Those used to write position directly and
+    // rely on a wall push-out afterwards to repair the damage, which cannot work: once a body has
+    // been shoved inside a wall, the ejection pass must GUESS an exit axis, and while the push keeps
+    // being re-applied every frame (an enemy leaning on a cornered player) push and eject fight each
+    // other — the player jitters, and through a thin wall they pop out the far side. Validate the
+    // push instead of repairing it.
+    //
+    // A push made while ALREADY overlapping geometry is allowed through: refusing it would strand a
+    // body that spawned or teleported inside a wall. This function only refuses pushes that would
+    // CREATE an overlap.
+    bool tryPushXZ(Vec3& position, Vec3 halfExtents, const LevelGrid& grid, f32 dx, f32 dz);
 }

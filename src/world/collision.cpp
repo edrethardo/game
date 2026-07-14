@@ -293,6 +293,22 @@ void Collision::snapEntityToFloor(Vec3& position, Vec3 halfExtents, const LevelG
     }
 }
 
+// See the header for why a push is validated rather than repaired afterwards.
+bool Collision::tryPushXZ(Vec3& position, Vec3 halfExtents, const LevelGrid& grid, f32 dx, f32 dz) {
+    Vec3 cand = position;
+    cand.x += dx;
+    cand.z += dz;
+    // Refuse only a push that CREATES an overlap. If the body is already embedded (spawn, teleport,
+    // a rebuilt level), let it move and leave the ejection pass to dig it out — otherwise we would
+    // lock it inside the wall forever.
+    if (!entityOverlapsGrid(position, halfExtents, grid) &&
+         entityOverlapsGrid(cand,     halfExtents, grid)) {
+        return false;
+    }
+    position = cand;
+    return true;
+}
+
 void Collision::ensureNotInWall(Vec3& position, Vec3 halfExtents, const LevelGrid& grid) {
     if (!entityOverlapsGrid(position, halfExtents, grid)) return;
 

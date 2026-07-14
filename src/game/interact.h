@@ -62,6 +62,25 @@ inline Intent poll(HoldState& st, bool down, bool hasHoldTarget, f32 dt, f32 hol
     return Intent::NONE;
 }
 
+// Is a target at horizontal distance `hDist` with facing-dot `dot` actually reachable?
+//
+// The aim cone (minDot) exists so that when several items lie on the floor a few metres away you can
+// pick out the ONE you are looking at. It must not apply to the item you are standing on — and it
+// used to. The exemption was `hDist <= 0.1f`: ten centimetres, on a player who is seventy wide. So an
+// item you had just walked over sat 0.2-0.5 m away, BEHIND your eyeline as often as in front of it,
+// the dot went negative, and the pickup was silently refused. Whether the grab worked came down to
+// exactly where you happened to stop — which is precisely what "picking up items is sometimes flaky"
+// feels like from the outside.
+//
+// So: inside `grabRadius` you are standing on it and facing is irrelevant. Outside it, aim. Scoring
+// still uses the dot, so with a pile at your feet the one you look at still wins — this only decides
+// ELIGIBILITY, not preference.
+inline bool inReach(f32 hDist, f32 dot, f32 range, f32 grabRadius, f32 minDot) {
+    if (hDist > range)       return false;
+    if (hDist <= grabRadius) return true;    // close enough to be standing on it
+    return dot >= minDot;
+}
+
 // The priority table. An item outranks a shrine outranks the exit on a TAP; a HOLD reaches past the
 // item to the shrine, and past the shrine to the exit only when there is no shrine.
 inline Target choose(Intent intent, bool hasItem, bool hasShrine, bool hasExit) {
