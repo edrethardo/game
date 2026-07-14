@@ -941,12 +941,13 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Option list is dynamic: the host of an open Steam lobby gets a middle "Close Lobby" row.
         // currentLobbyId()==0 for SP / ENet host / client / non-Steam builds, so it stays 2 rows there.
-        // Ordering MUST match the input handler in engine_update.cpp: [Continue, (Close Lobby), Save/Quit].
+        // Ordering MUST match the input handler in engine_update.cpp: [Continue, (Close Lobby), Options, Save/Quit].
         const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
-        const char* options[3];
+        const char* options[4];
         u32 optCount = 0;
         options[optCount++] = "Continue Playing";
         if (canCloseLobby) options[optCount++] = "Close Lobby";
+        options[optCount++] = "Options";          // opens the real options screens mid-run
         options[optCount++] = "Save and Quit";
         for (u32 i = 0; i < optCount; i++) {
             f32 y = cy + 10.0f - i * 35.0f;

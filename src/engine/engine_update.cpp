@@ -269,30 +269,59 @@ void Engine::update(f32 dt) {
         // so the option auto-hides everywhere else and the menu stays 2 rows. Layout must match the
         // renderer in engine_hud.cpp: [Continue, (Close Lobby), Save and Quit].
         const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
-        const u8   pauseOptCount = canCloseLobby ? 3 : 2;
+        // Row indices are derived, not hardcoded, so the renderer and this handler cannot drift when
+        // a row appears or disappears. Order: [Continue, (Close Lobby), Options, Save and Quit].
+        u8 pauseIdx = 0;
+        const u8 iContinue   = pauseIdx++;
+        const u8 iCloseLobby = canCloseLobby ? pauseIdx++ : 0xFF;
+        const u8 iOptions    = pauseIdx++;
+        const u8 iSaveQuit   = pauseIdx++;
+        const u8 pauseOptCount = pauseIdx;
+        (void)iSaveQuit;
         const s8   ph     = mouseActive ? pauseMenuHit(Window::getWidth(), Window::getHeight(), pauseOptCount) : static_cast<s8>(-1);
         const bool pclick = mouseActive && Input::isMouseButtonPressed(MOUSE_LEFT);
         if (ph >= 0 && static_cast<u8>(ph) != m_menu.subSelection) {
             m_menu.subSelection = static_cast<u8>(ph);
             AudioSystem::play(SfxId::MENU_HOVER);
         }
+        // Hover sound on move — the pause menu was silent here for the same reason the main menu was.
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
-            if (m_menu.subSelection > 0) m_menu.subSelection--;
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-            if (m_menu.subSelection < pauseOptCount - 1) m_menu.subSelection++;
+            if (m_menu.subSelection < pauseOptCount - 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             m_menu.confirmQuit = false;          // ESC/B = resume
             Input::setRelativeMouseMode(true);   // recapture the cursor for gameplay
         }
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+        // Enter and Space always confirm here too (matches menuConfirmPressed() in engine_menu.cpp).
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM)
+            || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+            || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)
             || (pclick && ph >= 0)) {
-            if (m_menu.subSelection == 0) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            if (m_menu.subSelection == iContinue) {
                 // Continue Playing
                 m_menu.confirmQuit = false;
                 Input::setRelativeMouseMode(true); // recapture the cursor for gameplay
-            } else if (canCloseLobby && m_menu.subSelection == 1) {
+            } else if (m_menu.subSelection == iOptions) {
+                // Options — the same screens the main menu uses (audio / bindings / display), opened
+                // mid-run. They live in GameState::MENU, so we leave IN_GAME and flag WHY, and the
+                // BACK handler in engine_menu.cpp brings us straight back to this paused game.
+                // The world is untouched: nothing is torn down by the state switch.
+                m_menu.optionsFromPause = true;
+                // confirmQuit MUST be cleared: the pause handler runs early in update() and RETURNS
+                // whenever it is set, so leaving it true would swallow every input before the options
+                // screen ever saw it — and would keep drawing the pause overlay on top of it.
+                m_menu.confirmQuit  = false;
+                m_menu.subState     = 3;   // options category list
+                m_menu.subSelection = 0;
+                m_menu.bindCapture  = false;
+                m_gameState = GameState::MENU;
+                Input::setRelativeMouseMode(false);   // the options screens are cursor-driven
+            } else if (canCloseLobby && m_menu.subSelection == iCloseLobby) {
                 // Close Lobby — stop advertising + refuse new joiners; the game continues over the relay
                 // with whoever's already in. Resume gameplay afterward (this isn't a quit).
                 Steam::closeLobby();
@@ -303,6 +332,7 @@ void Engine::update(f32 dt) {
             } else {
                 // Save and Quit (always the last row)
                 m_menu.confirmQuit = false;
+                m_menu.optionsFromPause = false;   // leaving the game: never resume into it later
                 saveAllCharacters();  // per-character: each local lane to its own slot
                 if (m_netRole != NetRole::NONE) {
                     Net::disconnect();

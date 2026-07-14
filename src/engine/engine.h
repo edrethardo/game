@@ -142,6 +142,11 @@ private:
         bool bindCapture = false;   // true when waiting for key/button press to rebind
         bool bindKeyboard = true;   // true=capturing keyboard, false=capturing controller
         bool confirmQuit = false;      // "are you sure?" overlay when pressing ESC in-game
+        // Options was opened from the PAUSE menu, not the main menu. The options screens live in
+        // GameState::MENU, so opening them mid-game means leaving IN_GAME — this flag is what makes
+        // BACK come home to the paused game instead of dumping the player at the main menu with
+        // their run still loaded behind it.
+        bool optionsFromPause = false;
         u8   overwriteSlot = 0;        // save slot pending overwrite (subState 8)
         char connectAddress[64] = "127.0.0.1";
         // True while the IP-entry screen (subState 9) hasn't been edited yet — the first

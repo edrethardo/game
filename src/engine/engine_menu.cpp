@@ -1116,6 +1116,17 @@ void Engine::updateMenu(f32 dt) {
         }
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             persistOptions();
+            // Opened from the pause menu? Go back to the PAUSED GAME, not the main menu — the run is
+            // still loaded and dropping the player at the title screen would look like it was lost.
+            if (m_menu.optionsFromPause) {
+                m_menu.optionsFromPause = false;
+                m_menu.subState     = 0;
+                m_menu.subSelection = 0;   // highlight "Continue Playing" on return
+                m_menu.confirmQuit  = true;            // re-open the pause overlay
+                m_gameState = GameState::IN_GAME;
+                AudioSystem::play(SfxId::UI_BACK);
+                return;
+            }
             m_menu.subState = 0; m_menu.subSelection = 0;
             return;
         }
@@ -1626,6 +1637,9 @@ void Engine::updateMenu(f32 dt) {
 #endif
             break;
         case 3: // Options — controls rebinding
+            // Opened from the MAIN menu: BACK must go to the title screen, never try to resume a
+            // game that isn't running. Cleared explicitly so a stale flag can't strand the player.
+            m_menu.optionsFromPause = false;
             m_menu.subState = 3;
             m_menu.subSelection = 0;
             m_menu.bindCapture = false;
