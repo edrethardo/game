@@ -35,22 +35,12 @@ TEST_CASE("floorHealthMult: floor 1 is the 1.0x baseline (and 0 is guarded)") {
     CHECK(floorDamageMult(0) == doctest::Approx(1.0f));
 }
 
-TEST_CASE("floorHealthMult: floors below the crossover are bit-for-bit the legacy linear curve") {
-    // At the 4% rate the compounding term only overtakes linear at effective floor 44, so
-    // everything below it must still reproduce the old curve exactly. This is the guarantee that
-    // raising the rate did not quietly re-tune the early game: floors 1-43 are untouched.
-    for (u32 eff = 1; eff <= 43; ++eff) {
+TEST_CASE("floorHealthMult: Normal tier is byte-for-byte the legacy linear curve") {
+    // Normal = effective floors 1..50. At 3% the compounding curve stays below linear here,
+    // so the max() clamp must reproduce the old curve exactly — the base game is untouched.
+    for (u32 eff = 1; eff <= 50; ++eff) {
         CHECK(floorHealthMult(eff) == doctest::Approx(legacyLinear(eff)));
     }
-}
-
-TEST_CASE("floorHealthMult: the top of Normal is now deliberately tougher than linear") {
-    // The 3% -> 4% raise was chosen to lift ALL THREE tiers, not just Hell, so the last handful of
-    // Normal floors DO get harder. Pinned so nobody "restores" the old behaviour by accident while
-    // believing they are fixing a regression.
-    CHECK(floorHealthMult(43) == doctest::Approx(legacyLinear(43)));   // last linear floor
-    CHECK(floorHealthMult(44) > legacyLinear(44));                     // crossover
-    CHECK(floorHealthMult(50) == doctest::Approx(6.83f).epsilon(0.01)); // was 5.9x
 }
 
 TEST_CASE("floorHealthMult: never below linear anywhere (change only ever adds difficulty)") {
@@ -88,27 +78,19 @@ TEST_CASE("floorDamageMult: stays linear (does NOT compound)") {
     }
 }
 
-TEST_CASE("difficultyDamageBump: Normal x1, Nightmare x1.5, Hell x3") {
+TEST_CASE("difficultyDamageBump: Normal x1, Nightmare x1.5, Hell x2") {
     CHECK(difficultyDamageBump(0) == doctest::Approx(1.0f));
     CHECK(difficultyDamageBump(1) == doctest::Approx(1.5f));
-    CHECK(difficultyDamageBump(2) == doctest::Approx(3.0f));   // 2.0 -> 3.0: Hell was too easy
+    CHECK(difficultyDamageBump(2) == doctest::Approx(2.0f));
     // Unexpected values fall back to Normal (no scaling) rather than misbehaving.
     CHECK(difficultyDamageBump(99) == doctest::Approx(1.0f));
 }
 
 TEST_CASE("Combined enemy damage = linear floor curve x per-tier bump") {
-    // What the spawn sites actually compute for enemy damage. A Hell floor-50 enemy:
-    // linear(eff150) * 3.0 = 15.9 * 3 = 47.7x base damage.
+    // What the spawn sites actually compute for enemy damage. Sanity-check a Hell floor-50
+    // enemy: linear(eff150) * 2.0 = 15.9 * 2 = 31.8x base, well below the ~82x HP multiplier
+    // (so enemies are spongy but don't one-shot).
     f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
-    CHECK(hellF50Dmg == doctest::Approx(15.9f * 3.0f).epsilon(0.001));
-    // HP must still outscale damage by a wide margin. Damage is deliberately LINEAR while HP
-    // compounds: if this inverted, a Hell enemy would one-shot a player whose HP grows far slower.
-    CHECK(floorHealthMult(150) > hellF50Dmg);
-}
-
-TEST_CASE("floorHealthMult: the new Hell/Nightmare curve is pinned") {
-    // The whole point of the 3% -> 4% raise. Pin the endpoints so a future tweak to the rate is a
-    // conscious act with a visible diff, not a silent balance drift.
-    CHECK(floorHealthMult(100) == doctest::Approx(48.56f).epsilon(0.01));   // Nightmare 50: was 18.7x
-    CHECK(floorHealthMult(150) == doctest::Approx(345.1f).epsilon(0.01));   // Hell 50:      was 81.8x
+    CHECK(hellF50Dmg == doctest::Approx(15.9f * 2.0f).epsilon(0.001));
+    CHECK(floorHealthMult(150) > hellF50Dmg);  // HP outscales damage by a wide margin
 }

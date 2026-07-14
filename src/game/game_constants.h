@@ -68,30 +68,15 @@ namespace GameConst {
     //     (difficultyDamageBump) instead — compounding damage would one-shot the player,
     //     whose HP scales far slower than the enemy's effective-floor count.
     //
-    // Per-floor compounding rate for HEALTH.
-    //
-    // Raised 3% -> 4% because Hell was too easy, and the reason is worth writing down: the
-    // PLAYER's power curve is super-linear while the enemy's was not. Every affix value is
-    // multiplied by (1 + 0.06 * itemLevel) in ItemGen — and that scalar is applied to PERCENTAGE
-    // affixes too, so at Hell 50 (ilvl 150) it is 10x and a "+5-25% damage" affix rolls as
-    // +50-250%. Four of those put player damage around 91x base, against the old 82x enemy HP —
-    // i.e. an enemy died in about the same number of hits as a floor-1 enemy did on floor 1. The
-    // difficulty curve was flat by construction.
-    //
-    // At 4%, compounding overtakes the legacy linear curve at effective floor 44 (was ~floor 78),
-    // so the top of NORMAL now gets tougher too: Normal 50 goes 5.9x -> 6.8x HP (+16%), Nightmare
-    // 50 18.7x -> 48.6x, Hell 50 81.8x -> 345x. That was a deliberate call — the curve is meant to
-    // lift all three tiers, not just Hell. Floors 1-43 are untouched (linear still wins there).
-    //
-    // NOTE this makes enemies TANKIER, not smarter: it lengthens the fight rather than sharpening
-    // it. The root cause above (percent affixes scaling with item level) is still live; fixing THAT
-    // would raise difficulty without adding HP. Left as a deliberate, separate decision.
-    static constexpr f32 DIFFICULTY_HP_COMPOUND_RATE = 0.04f;
+    // Per-floor compounding rate for HEALTH. 3% is chosen so the compounding curve stays
+    // BELOW the legacy linear curve through all of Normal and only overtakes it around
+    // mid-Nightmare, reaching ~82x base by Hell floor 50 (effective floor 150).
+    static constexpr f32 DIFFICULTY_HP_COMPOUND_RATE = 0.03f;
 
     // Compounding HEALTH multiplier for an effective floor (1-based: floor 1 -> 1.0x).
-    // Returns max(legacy-linear, compounding) so the curve can only ever make enemies TOUGHER,
-    // never weaker — below the crossover floor (44) the linear term still wins and those floors are
-    // bit-for-bit unchanged. Called once per enemy spawn, never per frame.
+    // Returns max(legacy-linear, compounding) so the change can only ever make enemies
+    // TOUGHER, never weaker — Normal (and early Nightmare, before compounding overtakes
+    // linear) is left exactly as it was. Called once per enemy spawn, never per frame.
     inline f32 floorHealthMult(u32 effectiveFloor) {
         if (effectiveFloor < 1) effectiveFloor = 1;
         f32 linear = 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_STAT_MULT;
@@ -114,10 +99,7 @@ namespace GameConst {
     inline f32 difficultyDamageBump(u8 difficulty) {
         switch (difficulty) {
             case 1:  return 1.5f;  // Nightmare
-            // Hell 2.0 -> 3.0. Damage stays LINEAR in the floor (compounding it would one-shot the
-            // player, whose HP scales far slower), so the per-tier bump is the only lever that makes
-            // Hell actually lethal rather than merely slow: enemy damage at Hell 50 goes 31.8x -> 47.7x.
-            case 2:  return 3.0f;  // Hell
+            case 2:  return 2.0f;  // Hell
             default: return 1.0f;  // Normal (and any unexpected value)
         }
     }
