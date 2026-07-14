@@ -46,8 +46,14 @@ bool CombatQuery::rayVsAABB(Vec3 origin, Vec3 dir,
         }
     }
 
+    // The box is entirely BEHIND the ray origin. Without this, tmin and tmax are both negative,
+    // `tmin > tmax` is false, and the "starts inside box" branch below happily reports a hit at
+    // t = 0 — i.e. the ray hits things behind you. (CombatQuery::raycast only got away with it
+    // because its `t > 0.01f` guard threw those away, along with genuine point-blank overlaps.)
+    if (tmax < 0.0f) return false;
+
     if (tmin < 0.0f) {
-        // Ray starts inside box
+        // Ray starts inside the box (point-blank overlap) — the surface is at the origin.
         outT = 0.0f;
         outNormal = {0,0,0};
         return true;
@@ -56,6 +62,40 @@ bool CombatQuery::rayVsAABB(Vec3 origin, Vec3 dir,
     outT = tmin;
     outNormal = nmin;
     return true;
+}
+
+// Nearest hostile entity whose collider the ray actually passes through.
+//
+// This is the correct primitive for a PRECISION shot, and the reason is geometric: a cone test
+// (queryConeSorted) measures the angle to an entity's CENTRE, so its *linear* tolerance is
+// dist * tan(coneAngle) — it shrinks to nothing as the target gets closer. Headshot's 2° cone
+// allowed ~70 cm of aim error at 20 m but only ~5 cm at 1.5 m, so a point-blank enemy filling the
+// screen was nearly impossible to hit. A ray-vs-AABB test has the SAME tolerance at every range:
+// the size of the target. Aim anywhere on the body and you hit it.
+bool CombatQuery::rayNearestEntity(const EntityPool& pool,
+                                    Vec3 origin, Vec3 direction, f32 maxDistance,
+                                    EntityHandle& outHandle, f32& outT)
+{
+    bool  found = false;
+    f32   bestT = maxDistance;
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        const u32 i = pool.activeList[a];
+        const Entity& e = pool.entities[i];
+        if (e.flags & ENT_DEAD)     continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;   // decorations are not targets
+
+        f32 t; Vec3 n;
+        if (!rayVsAABB(origin, direction, entityAABB(e), t, n)) continue;
+        if (t > maxDistance) continue;
+        if (t > bestT && found) continue;
+
+        bestT = t;
+        outHandle = { static_cast<u16>(i), e.generation };
+        outT   = t;
+        found  = true;
+    }
+    return found;
 }
 
 // -----------------------------------------------------------------------

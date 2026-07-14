@@ -17,29 +17,22 @@ void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     f32 damage = s_weaponDamage * 1.2f * s_classDmgMult;
     f32 range  = 80.0f;
 
-    // Penetrating rail: test ray against every entity AABB along the line.
-    // This gives precise aim (like hitscan) but pierces through all of them.
+    // Penetrating rail: test the ray against every entity AABB along the line. Precise like a
+    // hitscan, but pierces all of them.
+    // Uses the shared CombatQuery::rayVsAABB rather than a hand-rolled slab test — the duplicate
+    // copy that used to live here silently disagreed with the shared one (it reported a hit for
+    // boxes entirely BEHIND the player, which the shared version now rejects).
     u32 hitCount = 0;
     for (u32 a = 0; a < entities.activeCount; a++) {
         u32 idx = entities.activeList[a];
         Entity& e = entities.entities[idx];
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;   // don't waste the rail on decorations
 
-        // Ray-AABB intersection test
-        AABB box = entityAABB(e);
-        Vec3 invDir = {1.0f / (forward.x != 0.0f ? forward.x : 0.0001f),
-                       1.0f / (forward.y != 0.0f ? forward.y : 0.0001f),
-                       1.0f / (forward.z != 0.0f ? forward.z : 0.0001f)};
-        f32 t1 = (box.min.x - origin.x) * invDir.x;
-        f32 t2 = (box.max.x - origin.x) * invDir.x;
-        f32 t3 = (box.min.y - origin.y) * invDir.y;
-        f32 t4 = (box.max.y - origin.y) * invDir.y;
-        f32 t5 = (box.min.z - origin.z) * invDir.z;
-        f32 t6 = (box.max.z - origin.z) * invDir.z;
-        f32 tmin = fmaxf(fmaxf(fminf(t1, t2), fminf(t3, t4)), fminf(t5, t6));
-        f32 tmax = fminf(fminf(fmaxf(t1, t2), fmaxf(t3, t4)), fmaxf(t5, t6));
-        if (tmax < 0.0f || tmin > tmax || tmin > range) continue;
+        f32 t; Vec3 n;
+        if (!CombatQuery::rayVsAABB(origin, forward, entityAABB(e), t, n)) continue;
+        if (t > range) continue;
 
         // Ray intersects this entity's AABB — apply damage
         EntityHandle h = {static_cast<u16>(idx), e.generation};
@@ -144,27 +137,34 @@ void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
                   const LevelGrid& grid, EntityPool& entities,
                   SkillState& skillState)
 {
-    // Find target in narrow cone
-    EntityHandle eHits[MAX_ENTITIES];
-    f32          eDists[MAX_ENTITIES];
-    u32 cnt = CombatQuery::queryConeSorted(entities, origin, forward,
-                                           cosf(radians(2.0f)), 80.0f,
-                                           eHits, eDists, MAX_ENTITIES);
+    // Nearest enemy the shot actually passes THROUGH.
+    //
+    // This was a 2° cone (queryConeSorted), and that is why Headshot could not hit anything close.
+    // A cone measures the angle from the eye to the entity's CENTRE, so its linear aim tolerance is
+    // dist * tan(2°): about 70 cm at 20 m, but only 10 cm at 3 m and 5 cm at 1.5 m. A point-blank
+    // enemy filling the screen therefore had a hit window of a few centimetres around one exact
+    // point — and aiming at its HEAD, for a skill called Headshot, missed at every range under 20 m.
+    // A ray-vs-AABB test has the same tolerance at every distance: the size of the target.
+    // (The melee cone hit the same wall and was patched with `horizontalCone`; see combat_query.cpp.)
+    EntityHandle target;
+    f32          targetT = 0.0f;
+    const bool   found = CombatQuery::rayNearestEntity(entities, origin, forward, 80.0f,
+                                                       target, targetT);
 
     // Beam trail to wall/target regardless of hit
     RayHit wallHit = Raycast::cast(grid, origin, forward, 80.0f);
     Vec3 beamEnd = wallHit.hit ? (origin + forward * wallHit.distance)
                                : (origin + forward * 80.0f);
 
-    if (cnt > 0) {
-        Entity* e = handleGet(entities, eHits[0]);
+    if (found) {
+        Entity* e = handleGet(entities, target);
         if (e && !(e->flags & ENT_DEAD) && !(e->flags & ENT_FRIENDLY)) {
             bool isExecute = (e->health < e->maxHealth * 0.25f);
             // Non-execute: scales off weapon damage (Marksman gimmick)
             f32 damage = isExecute
                          ? e->health + 1.0f
                          : s_weaponDamage * 2.5f * s_classDmgMult;
-            Combat::applyDamage(entities, eHits[0], damage);
+            Combat::applyDamage(entities, target, damage);
             beamEnd = e->position; // beam goes to target
 
             if (isExecute) {
@@ -189,7 +189,7 @@ void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
                     chainHits, chainDists, MAX_ENTITIES);
                 u32 chainKills = 0;
                 for (u32 j = 0; j < chainCnt; j++) {
-                    if (chainHits[j].index == eHits[0].index) continue; // skip primary
+                    if (chainHits[j].index == target.index) continue; // skip primary
                     Entity* ce = handleGet(entities, chainHits[j]);
                     if (!ce || (ce->flags & ENT_DEAD) || (ce->flags & ENT_FRIENDLY)) continue;
                     if (ce->health < ce->maxHealth * 0.25f) {

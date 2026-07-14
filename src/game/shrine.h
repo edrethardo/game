@@ -29,9 +29,10 @@ constexpr f32 POWER_BONUS    = 0.30f;   // +30% damage
 constexpr f32 SPEED_BONUS    = 0.25f;   // +25% move speed
 constexpr f32 VITALITY_BONUS = 0.40f;   // +40% max HP
 
-// Chance a given room contains a shrine, and the cap per floor. A shrine you find every floor is
-// furniture; one you find sometimes is a decision about whether to detour for it.
-constexpr f32 ROOM_CHANCE    = 0.12f;
+// Chance a given room contains a shrine, and the cap per floor. At 25% across the ~12 candidate
+// rooms of a floor, ~97% of floors hold at least one — shrines are meant to be found, and the
+// decision is which one to detour for, not whether one exists.
+constexpr f32 ROOM_CHANCE    = 0.25f;
 constexpr u8  MAX_PER_FLOOR  = 2;
 
 inline f32 bonusFor(u8 buff) {

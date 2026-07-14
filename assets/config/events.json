@@ -1,6 +1,6 @@
 {
-  "_comment": "Floor events. One (or none) is rolled per floor — see FloorEventTable::floorChance. Adding an event here is data, not code, once its spawner exists in Engine::spawnFloorEvent.",
-  "floorChance": 0.35,
+  "_comment": "Floor events. One (or none) is rolled per floor \u2014 floorChance is the chance a floor gets one at all. Adding an event here is data, not code, once its spawner exists in Engine::spawnFloorEvent.",
+  "floorChance": 0.9,
   "events": [
     {
       "id": "loot_goblin",

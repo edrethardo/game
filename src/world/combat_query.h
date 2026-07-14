@@ -22,8 +22,20 @@ namespace CombatQuery {
                       Vec3 origin, Vec3 direction, f32 maxDistance);
 
     // Ray vs AABB slab test. Returns true if hit, outT = distance along ray.
+    // outT is 0 when the origin is INSIDE the box (point-blank overlap). Boxes entirely behind the
+    // origin return false.
     bool rayVsAABB(Vec3 origin, Vec3 direction,
                    const AABB& box, f32& outT, Vec3& outNormal);
+
+    // Nearest hostile entity whose collider the ray passes through (skips dead/friendly/props).
+    //
+    // Use this for PRECISION shots instead of a narrow queryConeSorted. A cone measures the angle to
+    // an entity's CENTRE, so its linear aim tolerance is dist*tan(angle) — it collapses at close
+    // range, which is why a 2° cone made a point-blank enemy filling the screen nearly unhittable.
+    // A ray-vs-AABB test has the same tolerance at every distance: the size of the target.
+    bool rayNearestEntity(const EntityPool& pool,
+                          Vec3 origin, Vec3 direction, f32 maxDistance,
+                          EntityHandle& outHandle, f32& outT);
 
     // AABB overlap test
     bool aabbOverlap(const AABB& a, const AABB& b);

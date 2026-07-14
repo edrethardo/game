@@ -38,6 +38,7 @@ add_executable(dungeon_tests
     game/test_quickbar.cpp
     game/test_champion.cpp
     game/test_floor_event.cpp
+    world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
     world/test_tile_noise.cpp
@@ -64,6 +65,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/world/pathfinder.cpp
     ${CMAKE_SOURCE_DIR}/src/world/level_grid.cpp
     ${CMAKE_SOURCE_DIR}/src/world/raycast.cpp
+    ${CMAKE_SOURCE_DIR}/src/world/combat_query.cpp  # ray/cone targeting geometry
 )
 
 target_include_directories(dungeon_tests PRIVATE
