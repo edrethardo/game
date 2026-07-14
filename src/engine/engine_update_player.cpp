@@ -32,6 +32,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -575,6 +576,29 @@ void Engine::tickMiscTimers(f32 dt) {
         m_localPlayer.smokeTimer -= dt;
     if (m_localPlayer.overdriveTimer > 0.0f)
         m_localPlayer.overdriveTimer -= dt;
+    // Shrine buff expiry — AUTHORITATIVE SIM ONLY. A CLIENT adopts the whole buff (type, timer, and
+    // the VITALITY max-HP bump via SnapPlayer.maxHealth) straight from the snapshot in clientNetPost,
+    // so expiring it locally would fight the adoption and, worse, subtract the vitality bonus from a
+    // maxHealth the server already owns.
+    // VITALITY has to undo itself: it raised maxHealth, so on expiry the bonus must come back off,
+    // and current HP must be clamped under the new (lower) cap or the player would sit above their
+    // own maximum.
+    if (m_netRole != NetRole::CLIENT && m_localPlayer.shrineBuffTimer > 0.0f) {
+        m_localPlayer.shrineBuffTimer -= dt;
+        if (m_localPlayer.shrineBuffTimer <= 0.0f) {
+            if (m_localPlayer.shrineBuff == ShrineBuff::VITALITY) {
+                const f32 bonus = m_localPlayer.maxHealth
+                                * (m_localPlayer.shrineBuffValue / (1.0f + m_localPlayer.shrineBuffValue));
+                m_localPlayer.maxHealth -= bonus;
+                if (m_localPlayer.maxHealth < 1.0f) m_localPlayer.maxHealth = 1.0f;
+                if (m_localPlayer.health > m_localPlayer.maxHealth)
+                    m_localPlayer.health = m_localPlayer.maxHealth;
+            }
+            m_localPlayer.shrineBuff      = ShrineBuff::NONE;
+            m_localPlayer.shrineBuffValue = 0.0f;
+            m_localPlayer.shrineBuffTimer = 0.0f;
+        }
+    }
     // Shadow Dance: tick timer, keep smokeTimer synced, apply speed bonus
     if (m_localPlayer.shadowDanceTimer > 0.0f) {
         m_localPlayer.shadowDanceTimer -= dt;

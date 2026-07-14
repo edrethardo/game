@@ -31,6 +31,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/champion.h"  // cycle-driven champion affixes (tickChampions)
 #include "game/floor_event.h"  // Goblin:: tunables (loot bleed)
 #include "game/skill.h"
@@ -746,6 +747,34 @@ void Engine::tickLootGoblins(f32 dt) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// grantShrineBuff — apply a shrine's buff to a player. ONE implementation, deliberately templated
+// over Player/NetPlayer, because the host grants onto its local Player and the server grants onto a
+// remote's NetPlayer — and if those two drifted, a shrine would mean different things depending on
+// who touched it.
+//
+// VITALITY is the fiddly one. It raises maxHealth, and SnapPlayer sends health as a RATIO of
+// maxHealth: a bare max bump would leave the player's absolute HP unchanged while the denominator
+// grew, so every HP bar (theirs and, in co-op, the one everyone else sees) would visibly LURCH
+// DOWNWARD at the exact moment they picked up a health buff. So heal by the same absolute amount:
+// the ratio is preserved and the bar grows instead of dropping.
+// ---------------------------------------------------------------------------
+template <typename P>
+static void applyShrine(P& p, u8 buff) {
+    const f32 bonus = Shrine::bonusFor(buff);
+    p.shrineBuff      = buff;
+    p.shrineBuffValue = bonus;
+    p.shrineBuffTimer = Shrine::DURATION_SEC;
+    if (buff == ShrineBuff::VITALITY) {
+        const f32 add = p.maxHealth * bonus;
+        p.maxHealth += add;
+        p.health    += add;      // keeps health/maxHealth constant → no HP-bar lurch
+    }
+}
+
+void Engine::grantShrineBuff(Player& p, u8 buff)    { applyShrine(p, buff); }
+void Engine::grantShrineBuff(NetPlayer& p, u8 buff) { applyShrine(p, buff); }
+
 void Engine::tickSharedSystems(f32 dt) {
     // (L8) Default kill-credit to "none" so AI / skill / DoT entity kills drop free-for-all;
     // projectile.cpp re-asserts each player projectile's own firer around its damage below.
@@ -1301,7 +1330,11 @@ void Engine::gameUpdate(f32 dt) {
         f32 savedSpeed = m_localPlayer.moveSpeed;
         if (m_localPlayer.blocking) m_localPlayer.moveSpeed *= 0.4f;
         if (m_localPlayer.shadowDanceTimer > 0.0f) m_localPlayer.moveSpeed *= 1.2f;
-        if (m_localPlayer.shrineBuff == 2) m_localPlayer.moveSpeed *= (1.0f + m_localPlayer.shrineBuffValue);
+        // Shrine of Speed. Now gated on the timer too — the old line checked only the buff id, and
+        // since nothing ever cleared it (there was no duration field at all), a buff would have
+        // lasted the rest of the run.
+        if (m_localPlayer.shrineBuff == ShrineBuff::SPEED && m_localPlayer.shrineBuffTimer > 0.0f)
+            m_localPlayer.moveSpeed *= (1.0f + m_localPlayer.shrineBuffValue);
         if (m_localPlayer.overdriveTimer > 0.0f) m_localPlayer.moveSpeed *= 1.3f;
         PlayerController::update(m_localPlayer, dt);
         if (m_localPlayer.dodgeState.rolling) m_dodgeRolledOnce = true;
@@ -1620,7 +1653,10 @@ void Engine::updatePlayerPickup() {
             WorldItem& w = m_worldItems.items[wi];
             if (!w.active) continue;
             if (isGlobe(w.item)) continue;
-            if (w.item.defId >= m_itemDefCount) continue;
+            // Shrines ARE aimable (you activate them with E) even though their sentinel defId is far
+            // outside the real item range — hence testing before the defId bound check below, which
+            // would otherwise silently make every shrine un-interactable.
+            if (!isShrine(w.item) && w.item.defId >= m_itemDefCount) continue;
             // Loot-ownership window: skip items reserved to another local player (3s, then free).
             // (L8) Now active — drops are stamped with the killer's slot (Combat::s_attackingPlayer
             // → Entity::killerSlot → WorldItem::ownerSlot). Environmental/AoE kills stay 0xFF
@@ -1647,6 +1683,21 @@ void Engine::updatePlayerPickup() {
                 bestScore = score; bestIdx = static_cast<s32>(wi);
             }
         }
+        // Shrine: activate rather than pick up. Handled before the inventory path because a shrine
+        // must never enter the backpack — it is a fixture, not loot.
+        if (bestIdx >= 0 && isShrine(m_worldItems.items[bestIdx].item)) {
+            const u16 defId = m_worldItems.items[bestIdx].item.defId;
+            const u8 buff = (defId == SHRINE_POWER_ID)    ? ShrineBuff::POWER
+                          : (defId == SHRINE_SPEED_ID)    ? ShrineBuff::SPEED
+                                                          : ShrineBuff::VITALITY;
+            grantShrineBuff(m_localPlayer, buff);
+            m_worldItems.items[bestIdx].active = false;
+            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+            AudioSystem::play(SfxId::POTION_USE);
+            addChatMessage("", Shrine::nameOf(buff), Vec3{0.6f, 0.9f, 1.0f});
+            return;
+        }
+
         ItemInstance picked = {};
         if (bestIdx >= 0) {
             picked = m_worldItems.items[bestIdx].item;
@@ -1901,6 +1952,24 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
         WorldItem& wi = m_worldItems.items[i];
         if (!wi.active || wi.item.uid != uid) continue;
         if (isGlobe(wi.item)) { sendPickupResult(playerSlot, 0, uid); return; } // globes not requestable
+
+        // Shrine: a guest pressed E on it. Grant the buff onto the AUTHORITATIVE NetPlayer — this is
+        // what makes a shrine-buffed guest actually move faster on the server too, instead of
+        // predicting a speed the server never simulates and rubber-banding every tick. The buff then
+        // reaches them through the snapshot.
+        if (isShrine(wi.item)) {
+            Vec3 d = np.position - wi.position;
+            if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; }
+            const u8 buff = (wi.item.defId == SHRINE_POWER_ID) ? ShrineBuff::POWER
+                          : (wi.item.defId == SHRINE_SPEED_ID) ? ShrineBuff::SPEED
+                                                               : ShrineBuff::VITALITY;
+            grantShrineBuff(np, buff);
+            wi.active = false;
+            if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+            sendPickupResult(playerSlot, 1, uid);
+            LOG_INFO("Shrine: slot %u activated %s", playerSlot, Shrine::nameOf(buff));
+            return;
+        }
 
         // Proximity check against the authoritative net player position (XZ, matches aim path).
         Vec3 delta = np.position - wi.position;

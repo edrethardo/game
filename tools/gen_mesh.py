@@ -1094,6 +1094,33 @@ def gen_gargoyle(height=1.6):
     return mb
 
 
+def gen_shrine(height=1.6):
+    """Shrine — a stone plinth with a floating rune-lit crystal above it. Origin at feet (Y=0).
+    Deliberately tall, narrow and symmetrical so it reads as ARCHITECTURE, not loot: the player
+    must not mistake it for a dropped item and must be able to spot it across a room."""
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Stepped base — wide, planted
+    fill_box(-3, 0, -3, 7, 1, 7)
+    fill_box(-2, 1, -2, 5, 1, 5)
+    # Plinth column
+    fill_box(-1, 2, -1, 3, 6, 3)
+    # Flared capital
+    fill_box(-2, 8, -2, 5, 1, 5)
+    # Floating crystal (a gap at y=9 sells the "hovering" read)
+    fill_box(-1, 10, -1, 3, 3, 3)
+    fill_box(0, 13, 0, 1, 2, 1)     # crystal tip
+    return_offset = (-0.5 * vs, 0, -0.5 * vs)
+    add_voxel_model(mb, filled, vs, offset=return_offset)
+    return mb
+
+
 def gen_goblin(height=1.1):
     """Loot goblin — small, hunched, big-eared thief hauling a swollen sack on its back.
     Origin at feet (Y=0). 12 voxels tall: deliberately SHORT so it reads as prey rather than
@@ -4980,6 +5007,11 @@ MESH_TYPES = {
         "desc": "Gargoyle ambush enemy — hunched stone humanoid. Params: --height",
         "default_file": "gargoyle.obj",
     },
+    "shrine": {
+        "func": gen_shrine,
+        "desc": "Shrine — stone plinth with a floating rune crystal. Params: --height",
+        "default_file": "shrine.obj",
+    },
     "goblin": {
         "func": gen_goblin,
         "desc": "Loot goblin — small hunched thief with big ears and a swollen sack. Params: --height",
@@ -5334,7 +5366,7 @@ def main():
     elif mtype == "chest":
         if args.width is not None:
             kwargs["width"] = args.width
-    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "goblin", "necromancer", "shaman", "herald", "engine"):
+    elif mtype in ("shackles", "brazier", "turret", "gargoyle", "goblin", "shrine", "necromancer", "shaman", "herald", "engine"):
         if args.height is not None:
             kwargs["height"] = args.height
     elif mtype == "shard":

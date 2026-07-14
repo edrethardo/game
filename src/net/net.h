@@ -54,7 +54,9 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // event byte), but the Blood Nova armor aura is invisible without it, so pair the two builds.
 // v10: SnapEntity grew a byte — champAffixes (28 -> 29 B per entity). A v9 client would read every
 // field after it at the wrong offset for the NEXT entity in the stream, so this MUST reject.
-static constexpr u32 PROTOCOL_VERSION  = 10; // v10: SnapEntity.champAffixes (champion tell)
+// v11: SnapPlayer grew 2 B — shrineTimerQ + reserved0 (62 -> 64), and statusFlags bits 5-6 now
+// carry the shrine-buff type. A v10 client would read every later field at the wrong offset.
+static constexpr u32 PROTOCOL_VERSION  = 11; // v11: SnapPlayer shrine buff (replicated shrines)
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
                                             // carry targetSlot)

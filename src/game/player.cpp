@@ -2,6 +2,7 @@
 #include <SDL.h>
 
 #include "game/player.h"
+#include "game/shrine.h"
 #include "game/game_constants.h"
 #include "net/net_player.h"
 #include "net/packet.h"  // Quantize::packAngle / packPos for absolute-aim NetInput
@@ -278,6 +279,11 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
         effectiveSpeed *= (1.0f + np.soulHarvestStacks * 0.05f);
     }
     // Shadow Dance: +20% move speed while active (mirrors host at engine_update.cpp:614).
+    // Shrine of Speed. THIS is the line that stops a shrine-buffed guest rubber-banding: the client
+    // predicts the faster movement locally, and without the same multiplier here the server would
+    // keep integrating that NetPlayer at base speed and the next snapshot would yank them back.
+    if (np.shrineBuff == ShrineBuff::SPEED && np.shrineBuffTimer > 0.0f)
+        effectiveSpeed *= (1.0f + np.shrineBuffValue);
     if (np.shadowDanceTimer > 0.0f) {
         effectiveSpeed *= 1.2f;
     }

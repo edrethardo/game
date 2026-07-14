@@ -1,5 +1,6 @@
 // world_item.cpp — World item pool: spawn, update (lifetime/bob), and pickup logic.
 #include "game/item.h"
+#include "game/shrine.h"
 #include "core/log.h"
 #include "world/collision.h"
 
@@ -25,8 +26,11 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
         WorldItem& wi = pool.items[i];
         if (!wi.active) continue;
 
-        // Legendary items never despawn — persist until floor exit
-        if (wi.item.rarity != Rarity::LEGENDARY) {
+        // Legendary items never despawn — persist until floor exit.
+        // Shrines never despawn either: they are world FIXTURES you walk over to and activate, not
+        // loot lying on the floor. Without this they would quietly evaporate 60 s after the floor
+        // loaded — usually before the player had even found the room.
+        if (wi.item.rarity != Rarity::LEGENDARY && !isShrine(wi.item)) {
             wi.lifetime -= dt;
         }
         wi.bobTimer       += dt;

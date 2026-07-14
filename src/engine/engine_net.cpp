@@ -30,6 +30,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -451,6 +452,23 @@ void Engine::adoptSnapshotCooldowns() {
     // Potion — alias + per-player backing (LOCAL_PLAYER_SWAP_FIELDS via R17 update).
     adoptMax(m_potionLastActivationTick, sp->potionLastActivationTick);
     adoptMax(m_potionLastActivationTicks[m_localPlayerIndex], sp->potionLastActivationTick);
+
+    // Shrine buff — ADOPT, don't predict. The server owns the grant (a guest's E-press goes through
+    // CL_PICKUP_ITEM and lands on the authoritative NetPlayer), so this is how the client's local
+    // Player learns it has a buff at all. Without it the client would keep predicting BASE speed
+    // while the server moved it faster, and the reconcile would drag it forward every tick.
+    // Straight assignment, not adoptMax: the server is the sole author, so its value is the truth —
+    // including when it expires (a max-merge would make the buff immortal on the client).
+    {
+        const u8  type = static_cast<u8>((sp->statusFlags >> 5) & 0x03u);
+        const f32 remaining = static_cast<f32>(sp->shrineTimerQ) * 0.2f;
+        // VITALITY's max-HP bump is applied server-side and already rides in SnapPlayer.maxHealth,
+        // which the client reconstructs absolute HP from — so the client must NOT re-apply it here
+        // or it would double the bonus locally.
+        m_localPlayer.shrineBuff      = (remaining > 0.0f) ? type : ShrineBuff::NONE;
+        m_localPlayer.shrineBuffValue = Shrine::bonusFor(m_localPlayer.shrineBuff);
+        m_localPlayer.shrineBuffTimer = remaining;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +495,13 @@ void Engine::serverNetPost(f32 dt) {
         host.burnDps         = hp.burnDps;
         host.slowTimer       = hp.slowTimer;
         host.freezeTimer     = hp.freezeTimer;
+        // Shrine buff: the host grants onto its local Player (it is its own authority), so mirror it
+        // into the host's NetPlayer or the host's own snapshot slot would advertise no buff — and
+        // VITALITY's raised maxHealth would not reach anyone reading that slot.
+        host.shrineBuff      = hp.shrineBuff;
+        host.shrineBuffValue = hp.shrineBuffValue;
+        host.shrineBuffTimer = hp.shrineBuffTimer;
+        host.maxHealth       = hp.maxHealth;
     }
 
     // Server-side globe auto-pickup for remote players
@@ -705,6 +730,25 @@ void Engine::serverNetPost(f32 dt) {
                     if (np.smokeTimer < np.shadowDanceTimer) np.smokeTimer = np.shadowDanceTimer;
                 } else {
                     np.shadowDanceTimer = 0.0f;
+                }
+            }
+            // Shrine buff expiry for REMOTE lanes (this loop already skips the host, which expires
+            // its own buff locally in engine_update_player.cpp — ticking it in both places would
+            // burn it down at double speed).
+            // VITALITY must undo its own max-HP bump, and clamp current HP under the new cap.
+            if (np.shrineBuffTimer > 0.0f) {
+                np.shrineBuffTimer -= dt;
+                if (np.shrineBuffTimer <= 0.0f) {
+                    if (np.shrineBuff == ShrineBuff::VITALITY) {
+                        const f32 bonus = np.maxHealth
+                                        * (np.shrineBuffValue / (1.0f + np.shrineBuffValue));
+                        np.maxHealth -= bonus;
+                        if (np.maxHealth < 1.0f) np.maxHealth = 1.0f;
+                        if (np.health > np.maxHealth) np.health = np.maxHealth;
+                    }
+                    np.shrineBuff      = ShrineBuff::NONE;
+                    np.shrineBuffValue = 0.0f;
+                    np.shrineBuffTimer = 0.0f;
                 }
             }
             // Frenzy (glove passive) — mirror of the local decay in tickArmorRingPassives.

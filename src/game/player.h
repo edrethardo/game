@@ -61,8 +61,12 @@ struct Player {
     bool graceInvuln      = false; // tags invulnTimer as near-death-grace-sourced (not dodge/spawn/skill) so
                                    // the "clear grace once healthy (>85% HP)" rule can't strip dodge i-frames
     f32  damageReduction  = 0.0f;  // 0.0–1.0, fraction of damage absorbed (class passive)
-    u8   shrineBuff       = 0;     // 0=none, 1=power(+30%dmg), 2=speed(+25%), 3=vitality(+40%hp)
+    // Shrine buff (see ShrineBuff:: in game/shrine.h). Timed: without shrineBuffTimer a buff, once
+    // granted, would simply never expire — which is the state this field was actually in for a long
+    // time, being read every frame and written by nothing.
+    u8   shrineBuff       = 0;     // ShrineBuff::NONE/POWER/SPEED/VITALITY
     f32  shrineBuffValue  = 0.0f;  // multiplier/bonus amount
+    f32  shrineBuffTimer  = 0.0f;  // countdown; 0 = no buff
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection + Blood Nova armor retaliation)
     u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting

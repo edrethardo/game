@@ -151,6 +151,16 @@ struct NetPlayer {
     f32  markTimer         = 0.0f;
     u8   markSpeedStacks   = 0;
     f32  markSpeedTimers[20] = {};
+
+    // Shrine buff. The server MUST hold this: it integrates remote movement in
+    // PlayerController::updateNetPlayerFromInput, so a speed buff that lived only in the client's
+    // local Player would be predicted client-side while the server kept moving that NetPlayer at
+    // base speed — and the snapshot would drag them back every single tick. (Contrast
+    // Player::overdriveTimer, which has NO NetPlayer field: that is precisely why a remote
+    // Engineer's Mech Overdrive and a remote Warrior's War Cry already do nothing in co-op.)
+    u8   shrineBuff        = 0;      // ShrineBuff::
+    f32  shrineBuffValue   = 0.0f;
+    f32  shrineBuffTimer   = 0.0f;
     // Per-player equipment passives (read from inventory each tick)
     SkillId weaponProc     = SkillId::NONE;
     SkillId armorAura      = SkillId::NONE;

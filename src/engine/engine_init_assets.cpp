@@ -125,6 +125,7 @@ void Engine::initAssets() {
             {"pillar",         "assets/meshes/pillar.obj"},
             {"chest",          "assets/meshes/chest.obj"},
             {"goblin",         "assets/meshes/goblin.obj"},   // loot goblin (floor event)
+            {"shrine",         "assets/meshes/shrine.obj"},   // walk-up buff shrine
             {"sword",          "assets/meshes/sword.obj"},
             {"dagger",         "assets/meshes/dagger.obj"},
             {"axe",            "assets/meshes/axe.obj"},
@@ -301,6 +302,7 @@ void Engine::initAssets() {
     m_meshIdSpider   = findMeshByName("spider");
     m_meshIdChest    = findMeshByName("chest");
     m_goblinMeshId   = findMeshByName("goblin");
+    m_shrineMeshId   = findMeshByName("shrine");
     m_meshIdHuman    = findMeshByName("human");
     m_meshIdSword    = findMeshByName("sword");
     m_meshIdDagger   = findMeshByName("dagger");

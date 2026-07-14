@@ -323,12 +323,30 @@ static constexpr u16 GLOBE_ENERGY_ID = 0xFFFD;
 // can pick the right lore whisper. See ~/.claude/plans (the-dungeon-engine superboss).
 static constexpr u16 SOURCE_SHARD_ID = 0xFFFC;
 
+// Shrines. Also sentinels rather than real items: they are world objects you ACTIVATE (press E),
+// not loot you carry. Riding the WorldItem system gets spawning, snapshot replication and
+// server-authoritative pickup for free — the alternative was a whole parallel object system.
+// NOTE 0xFFFC is already SOURCE_SHARD_ID, hence starting at 0xFFFB.
+static constexpr u16 SHRINE_POWER_ID    = 0xFFFB;  // +damage
+static constexpr u16 SHRINE_SPEED_ID    = 0xFFFA;  // +move speed
+static constexpr u16 SHRINE_VITALITY_ID = 0xFFF9;  // +max HP (and heals to match — see below)
+
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
 }
 
 inline bool isSourceShard(const ItemInstance& item) {
     return item.defId == SOURCE_SHARD_ID;
+}
+
+inline bool isShrine(const ItemInstance& item) {
+    return item.defId == SHRINE_POWER_ID || item.defId == SHRINE_SPEED_ID ||
+           item.defId == SHRINE_VITALITY_ID;
+}
+
+// Any sentinel — i.e. "not a real item". Anything that must not enter the inventory or be dropped.
+inline bool isSentinelItem(const ItemInstance& item) {
+    return isGlobe(item) || isSourceShard(item) || isShrine(item);
 }
 
 // ---- Rarity color lookup ----

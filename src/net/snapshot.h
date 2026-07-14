@@ -25,7 +25,9 @@ struct SnapPlayer {
     u16  pitch;         // 2
     // Status/clip sync
     u8   currentClip;   // 1: rounds remaining
-    u8   statusFlags;   // 1: bit0=invuln, bit1=poisoned, bit2=burning, bit3=frozen, bit4=slowed
+    // bits 5-6 now carry the shrine-buff TYPE (ShrineBuff::, 0-3) — see shrineTimerQ below.
+    u8   statusFlags;   // 1: bit0=invuln, bit1=poisoned, bit2=burning, bit3=frozen, bit4=slowed,
+                        //    bits5-6=shrineBuff type, bit7 free
     u8   invulnTimer;   // 1: quantized 0-10s in 0.04s steps
     u8   poisonTimer;   // 1: quantized
     u8   burnTimer;     // 1: quantized
@@ -54,6 +56,16 @@ struct SnapPlayer {
     u32  bootSkillLastActivationTick;      //  4
     u32  helmetSkillLastActivationTick;    //  4
     u32  potionLastActivationTick;         //  4
+    // Shrine buff remaining, quantized to 0-51 s in 0.2 s steps. WITHOUT this a client would never
+    // learn it had a shrine buff at all: the server grants it onto the authoritative NetPlayer, so
+    // the client's local Player would keep predicting BASE speed while the server moved it faster —
+    // rubber-banding it forward every tick. The type rides in statusFlags bits 5-6; the magnitude is
+    // a constant per type (Shrine::bonusFor), so it needs no bytes.
+    u8   shrineTimerQ;  // 1
+    // Explicit pad, keeping the wire size even. (Unlike SnapEntity, SnapPlayer is NOT padding-free —
+    // the u32 tick block above forces interior padding — so `sizeof == wire` is not an invariant here
+    // and snapshot.cpp deliberately does not assert it.)
+    u8   reserved0;     // 1 — always 0
 };
 
 // Quantized snapshot of one entity (29 bytes — see SNAP_ENTITY_WIRE)

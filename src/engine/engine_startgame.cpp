@@ -580,6 +580,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // mesh, so anything placed earlier could be swallowed by the arena expansion, and the goblin
     // needs the clearance/flow fields to path away from the player.
     spawnFloorEvents(dungeon);
+    spawnFloorShrines(dungeon);
 
     // Spawn friendly NPCs in the spawn room (cleric, archer, rogue)
     spawnFloorNpcs(dungeon);

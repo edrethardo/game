@@ -31,6 +31,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -353,6 +354,12 @@ void Engine::handleWeaponFire(f32 dt) {
     // Soul Harvest ring: +3% damage per stack
     if (m_localPlayer.soulHarvestStacks > 0) {
         wpn.damage *= (1.0f + m_localPlayer.soulHarvestStacks * 0.03f);
+    }
+    // Shrine of Power. This consumer did not exist: shrineBuff == POWER was documented in player.h
+    // as "+30% dmg" and was read by NOTHING, so even if something had granted it, it would have done
+    // nothing at all.
+    if (m_localPlayer.shrineBuff == ShrineBuff::POWER && m_localPlayer.shrineBuffTimer > 0.0f) {
+        wpn.damage *= (1.0f + m_localPlayer.shrineBuffValue);
     }
 
     Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};

@@ -28,6 +28,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -87,7 +88,8 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         static constexpr f32 ITEM_SCALE = 1.1f;   // trimmed from 1.4 — loot was cluttering the floor
         bool isGlobeItem = isGlobe(wi.item);
         bool isShard     = isSourceShard(wi.item);   // secret superboss key — render the crystal mesh
-        f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : ITEM_SCALE);
+        bool isShrineObj = isShrine(wi.item);        // walk-up buff shrine — architecture, not loot
+        f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : (isShrineObj ? 1.6f : ITEM_SCALE));
         f32 bobY = sinf(wi.bobTimer * 3.0f) * 0.08f;
         Vec3 pos = {wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
 
@@ -104,7 +106,15 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         Texture itemTex = defaultTex;
         Vec4 tint = {color.x, color.y, color.z, 1.0f};
 
-        if (isGlobeItem) {
+        if (isShrineObj) {
+            // The three shrines are told apart by COLOUR — the player has no tooltip until they are
+            // close enough to read the prompt, so the colour has to carry the meaning from range.
+            if (m_shrineMeshId > 0 && m_shrineMeshId < m_meshDefCount)
+                itemMesh = &m_meshDefs[m_shrineMeshId].mesh;
+            tint = (wi.item.defId == SHRINE_POWER_ID) ? Vec4{1.0f, 0.35f, 0.30f, 1.0f}   // power: red
+                 : (wi.item.defId == SHRINE_SPEED_ID) ? Vec4{0.40f, 0.85f, 1.00f, 1.0f}   // speed: cyan
+                                                      : Vec4{0.45f, 1.00f, 0.55f, 1.0f};  // vitality: green
+        } else if (isGlobeItem) {
             tint = {0.3f, 0.9f, 0.5f, 1.0f};
         } else if (isShard) {
             // Distinct faceted crystal in emissive void-cyan so it reads as "not loot".
@@ -714,6 +724,35 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
             f32 cy = static_cast<f32>(sh) * 0.4f;
             HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::activeDeviceIsGamepad() ? "X" : "E", true);
             FontSystem::drawText(sw, sh, cx + 22.0f, cy, doorStr, {0.3f, 1.0f, 0.4f}, 1);
+        }
+    }
+
+    // Shrine prompt. Same proximity+key shape as the portal above — a shrine you cannot tell is
+    // interactable is just scenery, and the player has no other way to learn what it does.
+    if (m_gameState == GameState::IN_GAME) {
+        const WorldItem* nearest = nullptr;
+        f32 bestDist = 3.5f;   // matches the activation range in updatePlayerPickup
+        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+            const WorldItem& wi = m_worldItems.items[i];
+            if (!wi.active || !isShrine(wi.item)) continue;
+            Vec3 d = wi.position - m_localPlayer.position;
+            f32 dist = sqrtf(d.x * d.x + d.z * d.z);
+            if (dist < bestDist) { bestDist = dist; nearest = &wi; }
+        }
+        if (nearest) {
+            const u8 buff = (nearest->item.defId == SHRINE_POWER_ID) ? ShrineBuff::POWER
+                          : (nearest->item.defId == SHRINE_SPEED_ID) ? ShrineBuff::SPEED
+                                                                     : ShrineBuff::VITALITY;
+            const char* label = Shrine::nameOf(buff);
+            f32 textW  = FontSystem::textWidth(label, 1);
+            f32 totalW = 22.0f + textW;
+            f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
+            f32 cy = static_cast<f32>(sh) * 0.45f;
+            Vec3 col = (buff == ShrineBuff::POWER) ? Vec3{1.0f, 0.45f, 0.40f}
+                     : (buff == ShrineBuff::SPEED) ? Vec3{0.45f, 0.85f, 1.00f}
+                                                   : Vec3{0.50f, 1.00f, 0.60f};
+            HUD::drawKeySymbol(sw, sh, cx, cy - 2.0f, Input::activeDeviceIsGamepad() ? "X" : "E", true);
+            FontSystem::drawText(sw, sh, cx + 22.0f, cy, label, col, 1);
         }
     }
 

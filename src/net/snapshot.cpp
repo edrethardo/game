@@ -119,6 +119,15 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.bootSkillLastActivationTick   = 0;
         sp.helmetSkillLastActivationTick = 0;
         sp.potionLastActivationTick      = np.potionLastActivationTick;
+        // Shrine buff: type in statusFlags bits 5-6, remaining quantized to 0-51 s / 0.2 s steps.
+        sp.statusFlags = static_cast<u8>(sp.statusFlags | ((np.shrineBuff & 0x03u) << 5));
+        {
+            f32 q = np.shrineBuffTimer / 0.2f;
+            if (q < 0.0f)   q = 0.0f;
+            if (q > 255.0f) q = 255.0f;
+            sp.shrineTimerQ = static_cast<u8>(q);
+        }
+        sp.reserved0 = 0;
     }
 
     // Entities (only active ones). entKeys[i] = squared distance of entity i to the
@@ -312,7 +321,12 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 //       (armorMeshId[4] added so clients render equipped armor on remote players without inventories.)
 // SNAP_PLAYER_WIRE — R17 bump from 30 → 58 (added 7 u32 lastActivationTick fields),
 //                    armor bump from 58 → 62 (added 4-byte armorMeshId[4]).
-static constexpr u32 SNAP_PLAYER_WIRE     = 62;
+static constexpr u32 SNAP_PLAYER_WIRE     = 64;   // +2 for shrineTimerQ + reserved0 (was 62)
+// NOTE: unlike SnapEntity, SnapPlayer is NOT padding-free, so `sizeof == wire` is NOT an invariant
+// here and must not be asserted. Its tail is a block of u32s, which forces 2 bytes of INTERIOR
+// padding after the u8 run (playerClass) to align them — so the struct has always been larger in
+// memory than on the wire. The memcmp-based delta is still correct because WorldSnapshot's ctor
+// zero-initialises every slot, making the padding deterministic.
 // Entity: 1+1+1+1 + 6(pos) + 2(yaw) + 4(vel) + 1(stun)+1(freeze)+1(limb)+1(bossStatus)
 //       + 1(meshId)+1(materialId)+1(enemyType)+1(weaponMeshId) + 3(halfExtentsQ)
 //       + 1(attackAnimQ) + 1(champAffixes) + 1(reserved0) = 30. (attackAnimQ added so clients see enemy attack
@@ -470,6 +484,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w8(sp.freezeTimer);
         w8(sp.animFlags);
         w8(sp.weaponMeshId);
+        // (shrineTimerQ + reserved0 are written at the tail, below, with the tick fields)
         for (int k = 0; k < 4; ++k) w8(sp.armorMeshId[k]); // helmet/chest/boots/gloves tier-mesh ids
         w8(sp.dodgeFlags);  // Wanderer dodge state (bit0=rolling, bits1-3=counterStacks)
         w8(sp.playerClass); // PlayerClass cast to u8 — drives per-class mesh on the client
@@ -481,6 +496,9 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w32(sp.bootSkillLastActivationTick);
         w32(sp.helmetSkillLastActivationTick);
         w32(sp.potionLastActivationTick);
+    w8(sp.shrineTimerQ); w8(sp.reserved0);
+        w8(sp.shrineTimerQ);
+        w8(sp.reserved0);
     }
 
     // Entities
@@ -657,6 +675,9 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.bootSkillLastActivationTick   = r.readU32();
         sp.helmetSkillLastActivationTick = r.readU32();
         sp.potionLastActivationTick      = r.readU32();
+    sp.shrineTimerQ = r.readU8(); sp.reserved0 = r.readU8();
+        sp.shrineTimerQ = r.readU8();
+        sp.reserved0    = r.readU8();
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {
@@ -856,6 +877,7 @@ static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer&
     w32(sp.bootSkillLastActivationTick);
     w32(sp.helmetSkillLastActivationTick);
     w32(sp.potionLastActivationTick);
+    w8(sp.shrineTimerQ); w8(sp.reserved0);
 }
 
 // Write one SnapEntity. MUST match SNAP_ENTITY_WIRE = 30.
@@ -923,6 +945,7 @@ static void readSnapPlayer(PacketReader& r, SnapPlayer& sp) {
     sp.bootSkillLastActivationTick   = r.readU32();
     sp.helmetSkillLastActivationTick = r.readU32();
     sp.potionLastActivationTick      = r.readU32();
+    sp.shrineTimerQ = r.readU8(); sp.reserved0 = r.readU8();
 }
 
 // Read one SnapEntity from a PacketReader. MUST match writeSnapEntity.

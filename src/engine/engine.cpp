@@ -1210,6 +1210,11 @@ static void seedRemoteView(const NetPlayer& np, Player& v) {
     v.shadowDanceTimer   = np.shadowDanceTimer;
     v.markTimer          = np.markTimer;
     v.markSpeedStacks    = np.markSpeedStacks;
+    // Shrine buff. MUST be mirrored: seedRemoteView begins with `v = Player{}`, so any field not
+    // copied here is silently zeroed on this remote's view every single frame.
+    v.shrineBuff         = np.shrineBuff;
+    v.shrineBuffValue    = np.shrineBuffValue;
+    v.shrineBuffTimer    = np.shrineBuffTimer;
     for (u32 ms = 0; ms < 20; ms++) v.markSpeedTimers[ms] = np.markSpeedTimers[ms];
 }
 
@@ -1243,6 +1248,10 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.shadowDanceTimer   = v.shadowDanceTimer;
     np.markTimer          = v.markTimer;
     np.markSpeedStacks    = v.markSpeedStacks;
+    // Shrine buff — the other half of the mirror (see seedRemoteView).
+    np.shrineBuff         = v.shrineBuff;
+    np.shrineBuffValue    = v.shrineBuffValue;
+    np.shrineBuffTimer    = v.shrineBuffTimer;
     for (u32 ms = 0; ms < 20; ms++) np.markSpeedTimers[ms] = v.markSpeedTimers[ms];
 }
 

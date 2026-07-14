@@ -32,6 +32,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/champion.h"  // champion affix roll + pack tunables
 #include "game/floor_event.h"  // floor-event pick + loot-goblin tunables
 #include "game/skill.h"
@@ -1182,6 +1183,43 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
 
     LOG_INFO("LootGoblin: spawned in room %u (%.0f HP, escapes in %.0fs)",
              best, static_cast<f64>(hp), static_cast<f64>(Goblin::ESCAPE_SECONDS));
+}
+
+// ---------------------------------------------------------------------------
+// spawnFloorShrines — scatter walk-up shrines through the floor.
+//
+// Shrines are WorldItem SENTINELS, not entities or props: that inherits spawning, snapshot
+// replication and the server-authoritative pickup path for free, instead of building a parallel
+// interactable-object system for one feature.
+// ---------------------------------------------------------------------------
+void Engine::spawnFloorShrines(const DungeonResult& dungeon)
+{
+    if (m_netRole == NetRole::CLIENT) return;   // world state is the server's to author
+
+    u8 placed = 0;
+    for (u32 r = 1; r < dungeon.roomCount && placed < Shrine::MAX_PER_FLOOR; r++) {
+        if (static_cast<f32>(std::rand()) / static_cast<f32>(RAND_MAX) >= Shrine::ROOM_CHANCE)
+            continue;
+
+        const DungeonRoom& room = dungeon.rooms[r];
+        Vec3 pos = { (room.x + room.w * 0.5f) * m_level.grid.cellSize,
+                     room.floorHeight + 0.5f,
+                     (room.z + room.d * 0.5f) * m_level.grid.cellSize };
+
+        const u8 kind = static_cast<u8>(1 + (std::rand() % 3));   // POWER / SPEED / VITALITY
+        ItemInstance s;
+        s.defId = (kind == ShrineBuff::POWER)    ? SHRINE_POWER_ID
+                : (kind == ShrineBuff::SPEED)    ? SHRINE_SPEED_ID
+                                                 : SHRINE_VITALITY_ID;
+        s.uid   = m_worldItems.nextUid++;
+        // ownerSlot 0xFF: a shrine is never reserved to one player — in co-op it is first-come.
+        if (!WorldItemSystem::spawn(m_worldItems, s, pos, &m_level.grid, 0xFF)) {
+            LOG_WARN("Shrine: world-item pool full — shrine skipped");
+            break;
+        }
+        placed++;
+        LOG_INFO("Shrine: %s placed in room %u", Shrine::nameOf(kind), r);
+    }
 }
 
 void Engine::spawnFloorNpcs(const DungeonResult& dungeon)

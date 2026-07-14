@@ -23,6 +23,7 @@
 #include "game/boss_def.h"
 #include "game/enemy_def.h"
 #include "game/floor_event.h"
+#include "game/shrine.h"
 #include "net/net.h"
 #include "net/net_player.h"
 #include "net/snapshot.h"    // WorldSnapshot — needed for m_baselineSnap / m_lastAppliedSnap (D7.2)
@@ -1011,11 +1012,19 @@ private:
     // mesh, so anything placed earlier can be swallowed by the arena expansion — and the goblin
     // needs the clearance field to path.
     void spawnFloorEvents(DungeonResult& dungeon);
+    // Walk-up shrines (game/shrine.h). WorldItem sentinels, so they inherit replication + the
+    // server-validated pickup path rather than needing a parallel interactable system.
+    void spawnFloorShrines(const DungeonResult& dungeon);
+    // ONE grant path, overloaded for the host's local Player and a remote's authoritative NetPlayer
+    // — if these two drifted, a shrine would mean different things depending on who touched it.
+    void grantShrineBuff(Player& p, u8 buff);
+    void grantShrineBuff(NetPlayer& p, u8 buff);
     // The loot goblin: flees, bleeds loot while chased, and expires (paying nothing) if it escapes.
     void spawnLootGoblin(const DungeonResult& dungeon);
     // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
     void tickLootGoblins(f32 dt);
     u8   m_goblinMeshId = 0;
+    u8   m_shrineMeshId = 0;
     // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
     // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative
     // sim only — called from tickSharedSystems inside its NetRole::CLIENT gate.
