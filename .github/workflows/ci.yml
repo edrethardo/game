@@ -1,0 +1,60 @@
+name: CI
+
+# Per-commit signal.
+#
+# WHY THIS IS A SEPARATE WORKFLOW. build.yml triggers ONLY on a `v*` tag, so until this file existed
+# the test suite gated exactly one thing: the release. A commit that broke the suite sat on master
+# looking healthy, and the first symptom was a failed release build on the day you tried to ship.
+# That is the same shape as the bug class this repo keeps getting bitten by — a check that exists,
+# passes locally, and never actually runs where it matters.
+#
+# It is deliberately NOT folded into build.yml: adding a branch trigger there would fire all EIGHT
+# release builds (2 variants x Win/Linux-22.04/Linux-24.04/macOS) on every push. This is one job.
+#
+# Steam-free by design (the default build). It needs no Steamworks SDK and no STEAMWORKS_SDK_TOKEN,
+# so it also runs green on forks and outside pull requests, which the steam jobs cannot.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the old run — don't queue up stale builds.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 python3-pip \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
+            libgl-dev libasound2-dev libpulse-dev libudev-dev
+          pip3 install Pillow || pip3 install Pillow --break-system-packages
+
+      # Meshes/textures/skins are GENERATED and gitignored, so they must be built before anything can
+      # use them. This step is itself a check: build_assets.py hard-fails when the engine names a mesh
+      # it does not produce — the trap that used to ship an invisible fallback cube.
+      #
+      # Audio is skipped on purpose: nothing in the suite reads it, and fetching it is the slowest
+      # step in the release build. The release job still fetches it (build.yml).
+      - name: Generate assets (meshes, textures, skins)
+        run: python3 tools/build_assets.py
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+
+      # The whole point of the file. test_asset_manifest.cpp needs the assets generated above.
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
