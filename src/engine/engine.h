@@ -1034,6 +1034,9 @@ private:
     static constexpr f32 TARGET_LINGER_SEC = 4.0f;
     static constexpr f32 TARGET_FADE_SEC   = 0.6f;   // tail of the linger spent fading out
     void renderTargetBar(u32 sw, u32 sh);
+    // True if the local player can actually SEE this point (no wall between eye and target).
+    // Used to keep the target bar from becoming a wallhack.
+    bool hasLineOfSightTo(Vec3 target) const;
     u8   m_shrineMeshId = 0;
     // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
     // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative

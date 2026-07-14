@@ -22,7 +22,8 @@
 #include "world/level_mesh.h"
 #include "world/level_loader.h"
 #include "world/collision.h"
-#include "world/combat_query.h"
+#include "world/combat_query.h"  // rayVsAABB — target-under-crosshair
+#include "world/raycast.h"       // grid raycast — line-of-sight gate for the target bar
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
@@ -1133,6 +1134,30 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
 // renderMenu() and renderLobby() moved to engine_render_menus.cpp
 
+// Can the local player actually SEE this point? A grid raycast from the eye; a wall closer than the
+// target means no.
+//
+// Tests the target's CENTRE and a point near its head, and accepts if EITHER is visible. Testing the
+// centre alone makes the bar flicker on and off whenever an enemy is half-behind cover or coming up
+// a step — which reads as a bug rather than as occlusion. Two samples is enough to be stable without
+// pretending to be a real visibility volume.
+bool Engine::hasLineOfSightTo(Vec3 target) const {
+    const Vec3 eye = m_localPlayer.position + Vec3{0.0f, m_localPlayer.eyeHeight, 0.0f};
+    const Vec3 samples[2] = { target, target + Vec3{0.0f, 0.5f, 0.0f} };
+
+    for (const Vec3& s : samples) {
+        Vec3 d = s - eye;
+        const f32 dist = length(d);
+        if (dist < 0.01f) return true;              // standing inside it — trivially visible
+        d = d * (1.0f / dist);
+        const RayHit wall = Raycast::cast(m_level.grid, eye, d, dist);
+        // A hit slightly SHORT of the target is the wall the target is standing against, not a wall
+        // between us — the epsilon stops an enemy pressed against a wall from occluding itself.
+        if (!wall.hit || wall.distance >= dist - 0.25f) return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // renderTargetBar — the Diablo 2 enemy health bar at the top of the screen.
 //
@@ -1156,9 +1181,16 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
     //    pixel-perfect aim just to READ an enemy's health would be miserable.
     constexpr f32 AIM_RANGE   = 40.0f;
     constexpr f32 AIM_INFLATE = 0.35f;
+
+    // LINE OF SIGHT. Without this the bar is a wallhack: sweep the crosshair across a wall and it
+    // names and health-bars every enemy in the room behind it. Clip the aim ray at the first wall
+    // and only accept entities in FRONT of it.
+    const RayHit aimWall = Raycast::cast(m_level.grid, eye, fwd, AIM_RANGE);
+    const f32    losRange = aimWall.hit ? aimWall.distance : AIM_RANGE;
+
     EntityHandle aimed;
     bool found = false;
-    f32  bestT = AIM_RANGE;
+    f32  bestT = losRange;
     for (u32 a = 0; a < pool.activeCount; a++) {
         const u32 i = pool.activeList[a];
         const Entity& e = pool.entities[i];
@@ -1171,7 +1203,7 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
         box.max = box.max + Vec3{AIM_INFLATE, AIM_INFLATE, AIM_INFLATE};
         f32 t; Vec3 n;
         if (!CombatQuery::rayVsAABB(eye, fwd, box, t, n)) continue;
-        if (t > bestT) continue;
+        if (t > bestT) continue;   // bestT starts at the WALL distance, so anything behind it is out
         bestT = t;
         aimed = EntityHandle{ static_cast<u16>(i), e.generation };
         found = true;
@@ -1184,8 +1216,10 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
     } else {
         // 2. Fall back to whatever we last hit. Combat records it at the single point every
         //    player-sourced hit passes through, so no damage source can forget to report itself.
+        //    LOS applies here too: without it, hitting an enemy once and then stepping behind a wall
+        //    would let you watch its live health through the wall — the same exploit, one step later.
         const EntityHandle lastHit = Combat::getLastHitEntity(activeNetSlot());
-        if (handleValid(pool, lastHit)) {
+        if (handleValid(pool, lastHit) && hasLineOfSightTo(pool.entities[lastHit.index].position)) {
             // Only ADOPT the last-hit target if we have nothing; never let it steal focus from a
             // target we are actively aiming at (handled above by the early assignment).
             if (!handleValid(pool, m_targetEnt) || m_targetLinger <= 0.0f) {
@@ -1194,6 +1228,15 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
             }
         }
         if (m_targetLinger > 0.0f) m_targetLinger -= dt;
+    }
+
+    // Whatever we ended up showing, stop showing it the moment a wall comes between us. The linger
+    // keeps DRAINING rather than being cut to zero, so an enemy ducking behind a pillar fades the
+    // bar out over ~0.6 s instead of blinking it off — occlusion should feel like losing sight of
+    // something, not like the HUD glitching.
+    if (handleValid(pool, m_targetEnt) &&
+        !hasLineOfSightTo(pool.entities[m_targetEnt.index].position)) {
+        if (m_targetLinger > TARGET_FADE_SEC) m_targetLinger = TARGET_FADE_SEC;
     }
 
     if (m_targetLinger <= 0.0f) return;
