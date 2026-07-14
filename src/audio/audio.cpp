@@ -72,6 +72,7 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     // Environment
     "sfx_door_open.wav",
     "sfx_level_up.wav",
+    "sfx_shrine_activate.wav",
 };
 
 // Compile-time guard: this positional table must stay index-aligned with SfxId. If it fires, an

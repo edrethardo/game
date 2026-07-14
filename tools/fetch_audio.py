@@ -149,6 +149,7 @@ SOUND_MAP = {
     "sfx_hit_hitscan":      (["hit", "impact", "bullet", "soft"], "short"),
     "sfx_hit_projectile":   (["hit", "arrow", "impact", "plate"], "short"),
     "sfx_ricochet":         (["ricochet", "metal", "ping", "clink", "ting"], "short"),
+    "sfx_shrine_activate":  (["magic", "holy", "chime", "bell", "power", "buff", "spell"], "medium"),
     "sfx_enemy_hit":        (["hit", "impact", "flesh", "tin"], "short"),
     "sfx_enemy_death":      (["death", "die", "creature", "monster"], "medium"),
     "sfx_player_hit":       (["hurt", "pain", "hit", "creature_hurt"], "short"),
@@ -216,6 +217,7 @@ MANUAL_OVERRIDES = {
     "sfx_hit_hitscan":      "kenney_impact-sounds/Audio/impactMetal_light_002.ogg",
     "sfx_hit_projectile":   "kenney_impact-sounds/Audio/impactWood_medium_001.ogg",
     "sfx_ricochet":         "oga_100-cc0-sfx/metal_05.ogg",               # metallic wall ricochet ping
+    "sfx_shrine_activate":  "oga_magic-spell-sfx/magical_1.ogg",   # baseline only — hand-picked via tools/pick_sfx.py
     "sfx_enemy_hit":        "kenney_impact-sounds/Audio/impactSoft_heavy_001.ogg",
     "sfx_enemy_death":      "oga_80-rpg-sfx/creature_die_01.ogg",
     "sfx_player_hit":       "oga_80-rpg-sfx/creature_hurt_02.ogg",          # was variant 01
@@ -283,6 +285,7 @@ PITCH_SHIFTS = {
     "sfx_hit_hitscan":      0.80,
     "sfx_hit_projectile":   0.75,
     "sfx_ricochet":         1.15,   # bright metallic ping
+    "sfx_shrine_activate":  1.00,
     "sfx_enemy_hit":        0.75,
     "sfx_enemy_death":      0.65,
     "sfx_player_hit":       0.75,

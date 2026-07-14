@@ -23,6 +23,17 @@
       },
       "source": "kenney_impact-sounds/Audio/impactMetal_light_003.ogg"
     },
+    "sfx_shrine_activate": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 7300,
+        "pitch": 0.62,
+        "reverb": 0.8,
+        "stretch": 0.91,
+        "trim": false
+      },
+      "source": "oga_magic-spell-sfx/magical_6.ogg"
+    },
     "sfx_weapon_axe": {
       "params": {
         "gain": 0.0,

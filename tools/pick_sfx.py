@@ -83,6 +83,7 @@ SLOTS = [
     "sfx_weapon_chakram",
     "sfx_weapon_wand", "sfx_weapon_staff", "sfx_reload",
     "sfx_ricochet",  # chakram/bounce-projectile wall reflect
+    "sfx_shrine_activate",  # walk-up buff shrine (press E)
 ]
 
 SLOT_CLASS = {
@@ -95,6 +96,7 @@ SLOT_CLASS = {
     "sfx_weapon_wand": "magic", "sfx_weapon_staff": "magic",
     "sfx_reload": "reload",
     "sfx_ricochet": "ricochet",
+    "sfx_shrine_activate": "shrine",
 }
 
 # Per acoustic-class ranking profile:
@@ -138,6 +140,15 @@ CLASS_PROFILES = {
         "strong": ["ricochet", "ping", "ting", "zing", "clink", "metal", "bounce"],
         "weak": ["hit", "impact", "clank", "tink", "spark"],
         "dur": (0.05, 0.50), "centroid": 5000, "sharp": True, "multi": False,
+    },
+    # Shrine: a boon being granted, not a spell being thrown. Wants a resonant, sustained
+    # swell/chime that rings out (hence the long window and sharp=False) rather than a percussive
+    # hit — the sound has to feel like a reward for the detour.
+    "shrine": {
+        "strong": ["magic", "magical", "holy", "bless", "chime", "bell", "power", "powerup",
+                   "power_up", "buff", "heal", "divine", "sacred", "spell"],
+        "weak": ["glow", "shimmer", "sparkle", "energy", "pulse", "charge", "rise", "up"],
+        "dur": (0.30, 2.00), "centroid": 2600, "sharp": False, "multi": False,
     },
 }
 

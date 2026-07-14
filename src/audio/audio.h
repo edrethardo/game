@@ -33,6 +33,7 @@ enum struct SfxId : u8 {
     BOSS_ROAR, BOSS_STOMP,
     // Environment
     DOOR_OPEN, LEVEL_UP,
+    SHRINE_ACTIVATE,   // walk-up buff shrine (press E) — hand-picked via tools/pick_sfx.py
     // Count sentinel
     SFX_COUNT
 };
