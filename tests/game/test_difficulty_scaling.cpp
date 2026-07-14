@@ -20,6 +20,7 @@ using GameConst::floorHealthMult;
 using GameConst::floorDamageMult;
 using GameConst::difficultyDamageBump;
 using GameConst::FLOOR_STAT_MULT;
+using GameConst::FLOOR_DAMAGE_MULT;
 using GameConst::DIFFICULTY_HP_COMPOUND_RATE;
 
 // The legacy linear curve every spawn site used before the compounding change.
@@ -72,25 +73,45 @@ TEST_CASE("floorHealthMult: monotonic non-decreasing in effective floor") {
     }
 }
 
-TEST_CASE("floorDamageMult: stays linear (does NOT compound)") {
+TEST_CASE("floorDamageMult: stays LINEAR (it must never compound)") {
+    // Damage is deliberately linear while HP compounds. If damage ever compounded, a deep-floor
+    // enemy would one-shot a player whose HP grows far slower — that asymmetry is the whole design.
     for (u32 eff = 1; eff <= 200; ++eff) {
-        CHECK(floorDamageMult(eff) == doctest::Approx(legacyLinear(eff)));
+        const f32 expect = 1.0f + static_cast<f32>(eff - 1) * FLOOR_DAMAGE_MULT;
+        CHECK(floorDamageMult(eff) == doctest::Approx(expect));
     }
+    CHECK(floorDamageMult(1) == doctest::Approx(1.0f));   // floor 1 is still the baseline
 }
 
-TEST_CASE("difficultyDamageBump: Normal x1, Nightmare x1.5, Hell x2") {
-    CHECK(difficultyDamageBump(0) == doctest::Approx(1.0f));
-    CHECK(difficultyDamageBump(1) == doctest::Approx(1.5f));
-    CHECK(difficultyDamageBump(2) == doctest::Approx(2.0f));
-    // Unexpected values fall back to Normal (no scaling) rather than misbehaving.
-    CHECK(difficultyDamageBump(99) == doctest::Approx(1.0f));
+TEST_CASE("floorDamageMult: the damage slope is STEEPER than the health slope") {
+    // Raised 0.10 -> 0.13 to pay for the gear-health fix: item health had never reached the player,
+    // so a geared character is ~3x tankier than every enemy number was tuned against. Gear health
+    // grows with item level (i.e. with depth), so the compensation grows with depth too — a flat
+    // multiplier would have left the endgame soft while making floor 5 brutal.
+    CHECK(FLOOR_DAMAGE_MULT > FLOOR_STAT_MULT);
+    CHECK(FLOOR_DAMAGE_MULT == doctest::Approx(0.13f));
+    CHECK(floorDamageMult(150) == doctest::Approx(1.0f + 149.0f * 0.13f));   // 20.4x at Hell 50
+}
+
+TEST_CASE("difficultyDamageBump: Normal x1.15, Nightmare x1.75, Hell x2.4") {
+    // Nudged up (was 1.0/1.5/2.0) alongside the steeper slope, for the same reason. Note Normal is
+    // no longer the identity: a Normal player gets item health too, so a Normal enemy hits harder.
+    CHECK(difficultyDamageBump(0) == doctest::Approx(1.15f));
+    CHECK(difficultyDamageBump(1) == doctest::Approx(1.75f));
+    CHECK(difficultyDamageBump(2) == doctest::Approx(2.4f));
+    // Unexpected values fall back to Normal rather than misbehaving.
+    CHECK(difficultyDamageBump(99) == doctest::Approx(1.15f));
+    // Ordering is the invariant that actually matters: deeper tier => strictly more damage.
+    CHECK(difficultyDamageBump(0) < difficultyDamageBump(1));
+    CHECK(difficultyDamageBump(1) < difficultyDamageBump(2));
 }
 
 TEST_CASE("Combined enemy damage = linear floor curve x per-tier bump") {
-    // What the spawn sites actually compute for enemy damage. Sanity-check a Hell floor-50
-    // enemy: linear(eff150) * 2.0 = 15.9 * 2 = 31.8x base, well below the ~82x HP multiplier
-    // (so enemies are spongy but don't one-shot).
-    f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
-    CHECK(hellF50Dmg == doctest::Approx(15.9f * 2.0f).epsilon(0.001));
-    CHECK(floorHealthMult(150) > hellF50Dmg);  // HP outscales damage by a wide margin
+    // What the spawn sites actually compute. A Hell floor-50 enemy: (1 + 149*0.13) * 2.4 = 49.0x.
+    const f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
+    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.13f) * 2.4f).epsilon(0.001));
+
+    // HP must still outscale damage by a wide margin. Damage is linear while HP compounds: if that
+    // ever inverted, deep-floor enemies would one-shot the player.
+    CHECK(floorHealthMult(150) > hellF50Dmg);
 }

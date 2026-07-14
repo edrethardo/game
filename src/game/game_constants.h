@@ -55,8 +55,21 @@ namespace GameConst {
     // Global speed multiplier — applied to player, NPCs, and enemies
     static constexpr f32 SPEED_MULT            = 1.6675f; // was 1.45, +15% global speed
 
-    // Floor scaling — 10% per floor so difficulty ramps steadily to floor 50
+    // Floor scaling — 10% per floor so difficulty ramps steadily to floor 50.
+    // This is the HEALTH slope (and the legacy linear baseline that floorHealthMult clamps against).
     static constexpr f32 FLOOR_STAT_MULT     = 0.10f;
+
+    // Enemy DAMAGE has its own, steeper slope (0.10 -> 0.13).
+    //
+    // It was raised to pay for a real bug fix, not a feel tweak: item health used to reach the
+    // player not at all (Inventory::getEffectiveMaxHealth was correct and called by nothing), so a
+    // geared character is now roughly 3x tankier than every enemy number was ever tuned against —
+    // a Hell-50 paladin went from ~1,195 to ~3,722 HP. Gear health grows with ITEM LEVEL, i.e. with
+    // depth, so the compensation has to grow with depth too. A flat multiplier would have left the
+    // endgame soft while making floor 5 brutal; steepening the slope puts the damage exactly where
+    // the new HP is. Floor 5 barely moves (10.4 -> 8.4 hits to kill the player); Hell 50 goes
+    // 15.8 -> 10.3.
+    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.13f;
 
     // --- Difficulty / floor enemy scaling ----------------------------------------
     // Every enemy scales by its "effective floor" = raw floor + difficulty*50
@@ -91,16 +104,19 @@ namespace GameConst {
     // Enemy damage intentionally does NOT compound (see difficultyDamageBump).
     inline f32 floorDamageMult(u32 effectiveFloor) {
         if (effectiveFloor < 1) effectiveFloor = 1;
-        return 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_STAT_MULT;
+        return 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_DAMAGE_MULT;
     }
 
     // Flat per-difficulty DAMAGE bump applied on top of floorDamageMult so Nightmare/Hell
     // are more lethal without compounding damage into instant-kills.
     inline f32 difficultyDamageBump(u8 difficulty) {
+        // Nudged up alongside the steeper damage slope above (1.0/1.5/2.0 -> 1.15/1.75/2.4) to pay
+        // for the ~3x player HP that the gear-health fix restored. Normal is no longer the identity:
+        // a Normal player gets item health too, so a Normal enemy has to hit for more.
         switch (difficulty) {
-            case 1:  return 1.5f;  // Nightmare
-            case 2:  return 2.0f;  // Hell
-            default: return 1.0f;  // Normal (and any unexpected value)
+            case 1:  return 1.75f;  // Nightmare
+            case 2:  return 2.4f;   // Hell
+            default: return 1.15f;  // Normal (and any unexpected value)
         }
     }
 
