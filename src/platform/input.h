@@ -52,7 +52,9 @@ struct InputBinding {
 namespace Input {
     void init();
     void shutdown();
-    void update();              // Call once per frame after pollEvents
+    // Call once per RENDER frame after pollEvents. `dt` is real elapsed frame time (not the fixed
+    // timestep) — it drives the menu hold-to-repeat clock in isMenuNavPressed().
+    void update(f32 dt);
     void consumePressedState(); // Call after first accumulator tick to prevent multi-fire
 
     // --- Action-based input (keyboard + gamepad unified) ---
@@ -130,6 +132,22 @@ namespace Input {
     // couch screens. gamepadIndex 0 → active player.
     enum class StickNav : u8 { Up, Down, Left, Right };
     bool isMenuStickPressed(StickNav dir, s32 gamepadIndex = 0);
+
+    // Menu directional navigation as ONE question: "is the player asking to go LEFT right now?"
+    // Unions the arrow keys, WASD, the D-pad and the left stick, so no menu screen ever has to
+    // spell that union out again. Every screen used to, and they had all drifted — of the six
+    // left/right sites, four accepted A/D, two didn't, and one ignored the stick entirely. Same
+    // failure mode that left the main menu as the only screen with no navigation sound.
+    //
+    // HOLD-TO-REPEAT: fires on the press edge, then — while still held — after MENU_REPEAT_DELAY
+    // and once per MENU_REPEAT_PERIOD after that, so a 50-floor list or a volume slider can be
+    // scrolled by holding rather than machine-gunning the key. Fires are consumed per frame like
+    // every other pressed-edge, so one repeat can never double-step across fixed-timestep substeps.
+    //
+    // `wasd`: pass FALSE on the two text-entry screens (the lobby-code and Join-IP on-screen
+    // keyboards), where a physical 'A' must type the letter A rather than pan the cursor. That is
+    // the ONLY reason this parameter exists; everywhere else the default is what you want.
+    bool isMenuNavPressed(StickNav dir, s32 gamepadIndex = 0, bool wasd = true);
 
     // L shoulder modifier state
     bool isModifierHeld(s32 gamepadIndex = 0);

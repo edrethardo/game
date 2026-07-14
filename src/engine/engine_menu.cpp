@@ -74,6 +74,21 @@ static bool menuConfirmPressed() {
         || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER);
 }
 
+// ---------------------------------------------------------------------------
+// menuLeftPressed / menuRightPressed — the ONE definition of "left"/"right" in the menu, exactly as
+// menuConfirmPressed above is the one definition of "confirm". A/D count as Left/Right everywhere,
+// alongside the arrow keys, the D-pad and the left stick, and holding a direction auto-repeats
+// (Input::isMenuNavPressed owns that union and the repeat clock).
+//
+// Same story as confirm: the six left/right sites had each rolled their own check and drifted —
+// four accepted A/D, two didn't, one ignored the stick. Now there is one place to get it wrong.
+//
+// `wasd=false` on the two TEXT-ENTRY screens (lobby-code + Join-IP on-screen keyboards), where the
+// physical keyboard types letters: there, 'A' must produce an A, not pan the cursor left.
+// ---------------------------------------------------------------------------
+static bool menuLeftPressed (bool wasd = true) { return Input::isMenuNavPressed(Input::StickNav::Left,  0, wasd); }
+static bool menuRightPressed(bool wasd = true) { return Input::isMenuNavPressed(Input::StickNav::Right, 0, wasd); }
+
 
 // Shared statics defined in engine.cpp
 // Shared statics defined in engine.cpp
@@ -576,10 +591,11 @@ void Engine::updateMenu(f32 dt) {
         };
         if (Input::isActionPressed(GameAction::MENU_UP))   oskMove(0, -1);
         if (Input::isActionPressed(GameAction::MENU_DOWN)) oskMove(0, 1);
-        if (Input::isKeyPressed(SDL_SCANCODE_LEFT)  || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
-            oskMove(-1, 0);
-        if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
-            oskMove(1, 0);
+        // wasd=false: this screen types letters (the A-Z loop above), so a physical 'A' must produce
+        // an A rather than walk the cursor left. Arrows / D-pad / stick still move it, and hold-to-
+        // repeat now walks the grid.
+        if (menuLeftPressed (/*wasd=*/false)) oskMove(-1, 0);
+        if (menuRightPressed(/*wasd=*/false)) oskMove( 1, 0);
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_X)) backspace();
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A)) {
             const u32 k = m_menu.codeOskCursor;
@@ -831,10 +847,10 @@ void Engine::updateMenu(f32 dt) {
                      Input::isMenuStickPressed(Input::StickNav::Up, 0)    || Input::isKeyPressed(SDL_SCANCODE_UP);
         bool down  = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  ||
                      Input::isMenuStickPressed(Input::StickNav::Down, 0)  || Input::isKeyPressed(SDL_SCANCODE_DOWN);
-        bool left  = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  ||
-                     Input::isMenuStickPressed(Input::StickNav::Left, 0)  || Input::isKeyPressed(SDL_SCANCODE_LEFT);
-        bool right = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
-                     Input::isMenuStickPressed(Input::StickNav::Right, 0) || Input::isKeyPressed(SDL_SCANCODE_RIGHT);
+        // Hold-to-repeat matters most here: the floor row spans 1-50, and stepping it used to mean
+        // 49 discrete taps.
+        bool left  = menuLeftPressed();
+        bool right = menuRightPressed();
 
         if (up   && m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
         if (down && m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
@@ -1157,10 +1173,8 @@ void Engine::updateMenu(f32 dt) {
         }
         // Left/Right steps the selected volume by ±5%.
         f32 dir = 0.0f;
-        if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
-            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
-        if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
-            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+        if (menuLeftPressed())  dir = -1.0f;
+        if (menuRightPressed()) dir = +1.0f;
         if (dir != 0.0f) {
             if (m_menu.subSelection == A_MASTER) {
                 AudioSystem::setMasterVolume(AudioSettings::stepVol(AudioSystem::getMasterVolume(), dir));
@@ -1206,10 +1220,8 @@ void Engine::updateMenu(f32 dt) {
         // 1.0 = the classic feel). Mirrors the controller submenu's slider handling.
         if (m_menu.subSelection == KM_MOUSE_SENS) {
             f32 dir = 0.0f;
-            if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
-            if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+            if (menuLeftPressed())  dir = -1.0f;
+            if (menuRightPressed()) dir = +1.0f;
             if (dir != 0.0f) {
                 f32 v = Input::getMouseSensitivity() + dir * 0.25f;
                 if (v < 0.25f) v = 0.25f;
@@ -1254,10 +1266,8 @@ void Engine::updateMenu(f32 dt) {
         }
         // Left/Right adjusts the sensitivity sliders.
         f32 dir = 0.0f;
-        if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
-            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
-        if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
-            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+        if (menuLeftPressed())  dir = -1.0f;
+        if (menuRightPressed()) dir = +1.0f;
         if (dir != 0.0f) {
             if (m_menu.subSelection == C_STICK_SENS) {
                 f32 v = Input::getStickSensitivity() + dir * 0.25f;
@@ -1315,10 +1325,8 @@ void Engine::updateMenu(f32 dt) {
         // Left/Right cycles the monitor selector (wraps around all detected displays).
         if (multiDisplay && m_menu.subSelection == D_DISPLAY) {
             f32 dir = 0.0f;
-            if (Input::isKeyPressed(SDL_SCANCODE_LEFT) || Input::isKeyPressed(SDL_SCANCODE_A) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || Input::isMenuStickPressed(Input::StickNav::Left))  dir = -1.0f;
-            if (Input::isKeyPressed(SDL_SCANCODE_RIGHT) || Input::isKeyPressed(SDL_SCANCODE_D) ||
-                Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || Input::isMenuStickPressed(Input::StickNav::Right)) dir = +1.0f;
+            if (menuLeftPressed())  dir = -1.0f;
+            if (menuRightPressed()) dir = +1.0f;
             if (dir != 0.0f) {
                 int n = Window::getDisplayCount();
                 int next = ((Window::getDisplayIndex() + (dir < 0 ? -1 : 1)) % n + n) % n;
@@ -1493,9 +1501,10 @@ void Engine::updateMenu(f32 dt) {
         const bool gpadJoin = Input::isGamepadConnected(0) || Input::isGamepadConnected(1);
         bool oskConnect = false;
         if (gpadJoin) {
-            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+            // wasd=false: like the lobby-code screen, this one types letters — 'A' must produce an A.
+            if (menuLeftPressed(/*wasd=*/false))
                 { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, -1, 0)); AudioSystem::play(SfxId::MENU_HOVER); }
-            if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+            if (menuRightPressed(/*wasd=*/false))
                 { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, +1, 0)); AudioSystem::play(SfxId::MENU_HOVER); }
             if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP))
                 { m_menu.oskCursor = static_cast<u8>(MenuOsk::moveCursor(m_menu.oskCursor, 0, -1)); AudioSystem::play(SfxId::MENU_HOVER); }

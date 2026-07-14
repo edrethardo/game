@@ -142,6 +142,35 @@ static f32 s_previousAxisValues[Input::MAX_GAMEPADS][MAX_AXES];
 static bool s_menuStickPressed[Input::MAX_GAMEPADS][4];
 static bool s_menuStickLatched[Input::MAX_GAMEPADS][4];
 
+// --- Menu nav hold-to-repeat (see Input::isMenuNavPressed) -------------------------------------
+// Timers advance in update(), which runs once per RENDER frame, so they tick on real frame time.
+// The fire flags are cleared by consumePressedState() so a single repeat is seen by exactly one
+// menu tick even when the accumulator runs several fixed substeps in one frame.
+static constexpr f32 MENU_REPEAT_DELAY  = 0.40f;   // hold this long before auto-repeat kicks in
+static constexpr f32 MENU_REPEAT_PERIOD = 0.09f;   // then ~11 steps/sec while it stays held
+static f32  s_menuNavTimer[Input::MAX_GAMEPADS][4];
+static bool s_menuNavHeld [Input::MAX_GAMEPADS][4];
+static bool s_menuNavFire [Input::MAX_GAMEPADS][4];
+
+// Is direction `d` HELD right now, from any source? Index order matches StickNav (Up/Down/Left/Right).
+// Keyboard is player-0 only, matching checkActionRaw: in couch co-op, P2 is controller-only.
+static bool menuNavHeldRaw(s32 pad, s32 d, bool wasd) {
+    static const s32 kArrow[4] = { SDL_SCANCODE_UP, SDL_SCANCODE_DOWN,
+                                   SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT };
+    static const s32 kWasd [4] = { SDL_SCANCODE_W, SDL_SCANCODE_S,
+                                   SDL_SCANCODE_A, SDL_SCANCODE_D };
+    static const s32 kDpad [4] = { SDL_CONTROLLER_BUTTON_DPAD_UP,   SDL_CONTROLLER_BUTTON_DPAD_DOWN,
+                                   SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT };
+    if (pad == 0) {
+        if (Input::isKeyDown(kArrow[d]))          return true;
+        if (wasd && Input::isKeyDown(kWasd[d]))   return true;
+    }
+    if (Input::isButtonDown(pad, kDpad[d]))       return true;
+    // The stick's hysteresis latch (set at NAV_DEFLECT, cleared below NAV_RELEASE) already IS a
+    // debounced "held that way" signal — reuse it rather than re-deriving a second threshold.
+    return s_menuStickLatched[pad][d];
+}
+
 // ---------------------------------------------------------------------------
 // Default bindings table
 // ---------------------------------------------------------------------------
@@ -295,11 +324,28 @@ void Input::shutdown() {
 Input::InputDevice Input::activeDevice()      { return s_activeDevice; }
 bool Input::activeDeviceIsGamepad()           { return s_activeDevice == InputDevice::Gamepad; }
 
-void Input::update() {
-    // Copy current state to previous
-    memcpy(s_previousKeys, s_currentKeys, sizeof(s_currentKeys));
-    memcpy(s_previousMouseButtons, s_currentMouseButtons, sizeof(s_currentMouseButtons));
-    memcpy(s_previousPadButtons, s_currentPadButtons, sizeof(s_currentPadButtons));
+void Input::update(f32 dt) {
+    // NOTE: the previous<-current rolls that USED to sit here are gone. They are done in
+    // consumePressedState() instead, and moving them is what makes press edges survive.
+    //
+    // WHY. update() runs once per RENDER frame; the game logic that reads an edge runs inside the
+    // FIXED-TIMESTEP loop, which may run zero times in a frame — increasingly often the faster the
+    // machine is. Rolling previous forward here destroyed any edge that no tick had observed yet, so
+    // the press was silently dropped. Measured on a 60 Hz vsync box that is ~0.3% of frames and you
+    // never notice; but vsync is ADAPTIVE (gl_context.cpp), so on a 144 Hz display it is ~58% of
+    // frames, and uncapped it measured 95%. That is the "menu confirm is sometimes unreliable" bug,
+    // and it got worse the better your hardware was.
+    //
+    // With the roll owned solely by consumePressedState(), `previous` only advances once a fixed tick
+    // has actually SEEN the state — so an edge persists across zero-tick frames and is consumed
+    // exactly once, by the first tick that runs. Held state (isKeyDown / isActionDown) was never
+    // affected, which is why walking and firing always felt fine while taps did not.
+    //
+    // This is the same fix the mouse wheel already got (see consumePressedState) — generalised from
+    // the one input that had been noticed to every input that has an edge.
+    //
+    // Residual limit, stated honestly: a press AND release that both land inside one zero-tick gap
+    // (<16.7 ms) is still invisible, because SDL state is polled, not queued. No human taps that fast.
 
     // NOTE: s_mouseWheelY is deliberately NOT reset here. Window::pollEvents() runs BEFORE this
     // (engine.cpp) and is what accumulates the wheel delta; the only reader (the quickbar) runs
@@ -313,8 +359,18 @@ void Input::update() {
     s32 copyCount = (numKeys < NUM_KEYS) ? numKeys : NUM_KEYS;
     memcpy(s_currentKeys, state, copyCount);
 
-    // Mouse
-    u32 mouseState = SDL_GetRelativeMouseState(&s_mouseDX, &s_mouseDY);
+    // Mouse. The relative delta ACCUMULATES across render frames and is cleared in
+    // consumePressedState(), for the same reason as the wheel and the press edges above:
+    // SDL_GetRelativeMouseState DRAINS its accumulator on read, and the only reader (mouse-look) runs
+    // in the fixed-timestep loop. Overwriting it here threw the motion away on every zero-tick frame
+    // — ~58% of them on a 144 Hz display — so mouse look silently lost most of its input and felt
+    // weak and steppy on exactly the machines that should have felt best. At 60 Hz (one tick per
+    // frame) accumulate-then-clear is bit-for-bit identical to the old overwrite, so nothing changes
+    // for anyone already running vsync-locked.
+    s32 frameDX = 0, frameDY = 0;
+    u32 mouseState = SDL_GetRelativeMouseState(&frameDX, &frameDY);
+    s_mouseDX += frameDX;
+    s_mouseDY += frameDY;
     SDL_GetMouseState(&s_mouseX, &s_mouseY);
     for (s32 i = 0; i < NUM_MOUSE_BUTTONS; ++i) {
         s_currentMouseButtons[i] = (mouseState & SDL_BUTTON(i + 1)) ? 1 : 0;
@@ -330,8 +386,10 @@ void Input::update() {
         }
     }
 
-    // Axis value snapshot — edge detection for trigger-based "pressed" queries
-    memcpy(s_previousAxisValues, s_currentAxisValues, sizeof(s_currentAxisValues));
+    // Axis value snapshot — edge detection for trigger-based "pressed" queries.
+    // The previous<-current roll lives in consumePressedState() with the other edges (see the note at
+    // the top of this function): a trigger-bound action is edge-detected too, so rolling it here lost
+    // the press on exactly the same zero-tick frames.
     memset(s_currentAxisValues, 0, sizeof(s_currentAxisValues));
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
         if (!s_controllers[c]) continue;
@@ -359,7 +417,10 @@ void Input::update() {
     {
         constexpr f32 NAV_DEFLECT = 0.6f;   // post-deadzone magnitude to register a nav "press"
         constexpr f32 NAV_RELEASE = 0.35f;  // must fall back below this before the next press
-        memset(s_menuStickPressed, 0, sizeof(s_menuStickPressed));
+        // NOT cleared here. Clearing an unconsumed edge every render frame is the same bug as the
+        // previous<-current roll above: on a zero-tick frame the stick's deflection edge was set and
+        // then wiped before any menu tick could read it. consumePressedState() owns the clear; the
+        // hysteresis latch below is what stops it re-firing while the stick stays deflected.
         auto axisMag = [](s32 pad, s32 axis) -> f32 {
             f32 v = getAxis(pad, axis);
             if (v > -STICK_DEADZONE && v < STICK_DEADZONE) return 0.0f;
@@ -384,6 +445,43 @@ void Input::update() {
                     }
                 } else if (dirMag[d] < NAV_RELEASE) {
                     s_menuStickLatched[c][d] = false;
+                }
+            }
+        }
+    }
+
+    // Menu nav hold-to-repeat: turn a HELD direction into a stream of edges — one on press, a pause,
+    // then a steady stream — so a long list or a slider can be scrolled by holding the key instead of
+    // tapping it 50 times. Must run AFTER the menu-stick block above, which refreshes the latches
+    // menuNavHeldRaw() reads.
+    //
+    // The clock is driven by the WASD-INCLUSIVE union; isMenuNavPressed() filters the letter keys
+    // back out for the callers that pass wasd=false. Sharing one clock is safe precisely because
+    // those callers ignore a fire they didn't ask for — they never see a stale one.
+    {
+        // Like the stick edge above, a fire is NOT cleared here — consumePressedState() clears it once
+        // a fixed tick has actually stepped the menu. Clearing per render frame would drop the very
+        // first step of a hold on any zero-tick frame.
+        for (s32 c = 0; c < Input::MAX_GAMEPADS; c++) {
+            for (s32 d = 0; d < 4; d++) {
+                if (!menuNavHeldRaw(c, d, /*wasd=*/true)) {
+                    s_menuNavHeld[c][d]  = false;    // released: re-arm the initial delay
+                    s_menuNavTimer[c][d] = 0.0f;
+                    continue;
+                }
+                if (!s_menuNavHeld[c][d]) {          // press edge: step once, then wait out the delay
+                    s_menuNavHeld[c][d]  = true;
+                    s_menuNavFire[c][d]  = true;
+                    s_menuNavTimer[c][d] = MENU_REPEAT_DELAY;
+                    continue;
+                }
+                s_menuNavTimer[c][d] -= dt;
+                if (s_menuNavTimer[c][d] <= 0.0f) {  // repeating: one step per period
+                    s_menuNavFire[c][d]  = true;
+                    // Advance by one period rather than resetting, so the repeat rate doesn't drift
+                    // with frame time — but never bank multiple steps from one long hitch.
+                    s_menuNavTimer[c][d] += MENU_REPEAT_PERIOD;
+                    if (s_menuNavTimer[c][d] < 0.0f) s_menuNavTimer[c][d] = 0.0f;
                 }
             }
         }
@@ -439,12 +537,19 @@ void Input::consumePressedState() {
     memcpy(s_previousAxisValues, s_currentAxisValues, sizeof(s_currentAxisValues));
     // Menu-stick edges are one-shot per frame too (the latch in update() handles re-arming).
     memset(s_menuStickPressed, 0, sizeof(s_menuStickPressed));
+    // Same for menu nav repeats: one fire = exactly one menu step, never one per substep.
+    memset(s_menuNavFire, 0, sizeof(s_menuNavFire));
     // The mouse wheel is an edge, not a state, so it is consumed here rather than reset in
     // update(). This is what makes it survive the gap between Window::pollEvents() (which
     // accumulates it) and the fixed-timestep tick that reads it. It also means a frame that runs
     // ZERO fixed ticks — common above 60 FPS — does NOT clear it, so the notch carries over to
     // the next tick instead of being silently dropped.
     s_mouseWheelY = 0;
+    // The relative mouse delta accumulates in update() (SDL drains its own accumulator on read), so
+    // it is cleared HERE, once the tick that reads it has run. Clearing it in update() would throw
+    // away all the motion from any frame that ran no tick.
+    s_mouseDX = 0;
+    s_mouseDY = 0;
 #ifdef __SWITCH__
     // Also consume libnx pad edges — isButtonPressed on Switch reads
     // s_padPrevButtons (libnx), not the SDL s_previousPadButtons arrays.
@@ -725,6 +830,18 @@ bool Input::isMenuStickPressed(StickNav dir, s32 gamepadIndex) {
     if (gamepadIndex == 0) gamepadIndex = s_activePlayer; // route to active player like getStick*
     if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
     return s_menuStickPressed[gamepadIndex][static_cast<u32>(dir)];
+}
+
+bool Input::isMenuNavPressed(StickNav dir, s32 gamepadIndex, bool wasd) {
+    if (gamepadIndex == 0) gamepadIndex = s_activePlayer;  // route to active player, like isMenuStickPressed
+    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
+    const s32 d = static_cast<s32>(dir);
+    if (!s_menuNavFire[gamepadIndex][d]) return false;
+    // The repeat clock is driven by the WASD-inclusive union. A caller that excluded the letter keys
+    // must not see a repeat that ONLY a letter key is driving — otherwise holding 'A' to type an A
+    // would also pan the on-screen keyboard's cursor left.
+    if (!wasd && !menuNavHeldRaw(gamepadIndex, d, /*wasd=*/false)) return false;
+    return true;
 }
 
 bool Input::isModifierHeld(s32 gamepadIndex) {

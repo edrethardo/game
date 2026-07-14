@@ -918,8 +918,10 @@ void Engine::run() {
             Net::poll();
         }
 
-        // Poll input once per rendered frame — decoupled from physics tick rate
-        Input::update();
+        // Poll input once per rendered frame — decoupled from physics tick rate. Real frame time is
+        // passed in (not FIXED_DT) because this runs once per RENDER frame: it clocks the menu
+        // hold-to-repeat, which must advance in wall time regardless of how many substeps follow.
+        Input::update(static_cast<f32>(frameTime));
         m_accumulator += frameTime;
         m_firstTick = true;
         while (m_accumulator >= FIXED_DT) {
