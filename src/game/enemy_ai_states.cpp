@@ -803,38 +803,61 @@ void updateHostileStates(Entity& e, u32 i,
     // (the obvious candidate to reuse) auto-exits to CHASE the moment a player is inside
     // detectionRange, so a goblin built on it would turn and fight the instant you got close.
     case AIState::FLEE: {
-        Vec3 away = e.position - targetPos;
+        // It runs for the EXIT, not just "somewhere over there".
+        //
+        // The first version fled from `targetPos` — and that was a real bug: the AI re-targets onto
+        // friendly NPCs (see the NPC-retarget block in enemy_ai.cpp), so `targetPos` is not
+        // necessarily the player. A goblin fleeing an NPC would happily sprint straight AT you.
+        // It also had no destination, so it eventually cornered itself and became a free kill.
+        //
+        // Now: follow the BFS flow field to the floor exit (the same field the friendly NPCs use to
+        // march out), and BIAS that heading away from the nearest player. It makes for a real chase
+        // — the goblin is going somewhere, it will not trap itself, and cutting it off is on you.
+        //
+        // Flee from the nearest PLAYER explicitly, never from `targetPos`. targetPlayer is the
+        // nearest player the AI picked; it only differs from `player` in split-screen. When the AI
+        // has re-targeted an NPC, targetPos points at the NPC — which is exactly the trap this
+        // avoids — so fall back to the primary player rather than trusting it.
+        const Vec3 fleeFrom = (!targetIsNPC && targetPlayer) ? targetPlayer->position
+                                                             : player.position;
+        Vec3 away = e.position - fleeFrom;
         away.y = 0.0f;
-        if (lengthSq(away) > 0.01f) {
-            away = normalize(away);
-        } else {
-            // Player is standing exactly on it — bolt in an arbitrary direction rather than freeze.
-            away = {1.0f, 0.0f, 0.0f};
-        }
+        away = (lengthSq(away) > 0.01f) ? normalize(away)
+                                        : Vec3{1.0f, 0.0f, 0.0f};  // stood on: bolt, don't freeze
 
-        // Steer along the wall when running straight away would bury it in one. Sampling a few
-        // headings either side is cheap and stops the goblin cornering itself, which would turn the
-        // chase into a free kill and make the escape timer meaningless.
-        Vec3  bestDir  = away;
+        // Where the exit is, from here. Zero if the field is unbuilt or we're on the exit cell.
+        Vec3 flow = LevelGridSystem::flowDirection(grid, e.position);
+        flow.y = 0.0f;
+        const bool haveFlow = lengthSq(flow) > 0.001f;
+        if (haveFlow) flow = normalize(flow);
+
+        // Blend: mostly "head for the door", partly "get away from them". Without the away-bias it
+        // would run past you to reach the exit; without the flow it would just back into a corner.
+        Vec3 desired = haveFlow ? normalize(flow * 0.75f + away * 0.55f) : away;
+
+        // Steer around walls: probe a fan of headings and take the most open one nearest `desired`.
+        Vec3  bestDir  = desired;
         f32   bestOpen = -1.0f;
         constexpr f32 kProbe = 1.6f;
-        for (s32 s = -2; s <= 2; s++) {
-            const f32 a = static_cast<f32>(s) * 0.5f;           // ±57° in 28.6° steps
+        for (s32 s = -3; s <= 3; s++) {
+            const f32 a = static_cast<f32>(s) * 0.4f;           // ±69° in ~23° steps
             const f32 ca = cosf(a), sa = sinf(a);
-            Vec3 d = { away.x * ca - away.z * sa, 0.0f, away.x * sa + away.z * ca };
+            Vec3 d = { desired.x * ca - desired.z * sa, 0.0f, desired.x * sa + desired.z * ca };
             Vec3 probe = e.position + d * kProbe;
             u32 gx, gz;
             const bool blocked = LevelGridSystem::worldToGrid(grid, probe, gx, gz)
                                ? LevelGridSystem::isSolid(grid, gx, gz) : true;
-            // Prefer open headings, and among those the one closest to straight-away.
-            const f32 score = (blocked ? -1.0f : 1.0f) - fabsf(a) * 0.1f;
+            // Open headings win; among those, prefer the one closest to `desired`, and never pick a
+            // heading that walks back INTO the player.
+            const f32 towardPlayer = -(d.x * away.x + d.z * away.z);   // +1 = straight at them
+            f32 score = (blocked ? -1.0f : 1.0f) - fabsf(a) * 0.1f - fmaxf(towardPlayer, 0.0f) * 0.8f;
             if (score > bestOpen) { bestOpen = score; bestDir = d; }
         }
 
         e.velocity.x = bestDir.x * effectiveSpeed;
         e.velocity.z = bestDir.z * effectiveSpeed;
         e.yaw = atan2f(bestDir.x, bestDir.z);   // faces the way it is running
-        entityMoveAndSlide(e, grid, dt, targetPos, 0.3f);
+        entityMoveAndSlide(e, grid, dt, fleeFrom, PLAYER_HALF_WIDTH);
         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
         e.animTimer += dt;
     } break;

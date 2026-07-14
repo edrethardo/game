@@ -1279,10 +1279,19 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
     } else if (e->isBoss) {
         name   = e->nameTag ? e->nameTag : "Boss";
         accent = {1.0f, 0.35f, 0.35f};
+    } else if (e->enemyDefIdx < m_enemyDefs.count) {
+        // The monster's REAL authored name — "Bone Archer", "Crypt Herald", "Broodmother".
+        // Looked up through the replicated def index, so the guest names it identically.
+        //
+        // EnemyType is deliberately NOT used: it is only the RIG. The 38 authored monsters share
+        // about 16 rigs between them, so naming from it called a Bone Archer, a Bone Mage, a
+        // Necromancer and a Demon Caster all "Skeleton" — which is why this index is on the wire at
+        // all. Material+mesh could not disambiguate either: Crypt Spider/Broodmother and Hellforged
+        // Reaver/Demon Caster are identical in both.
+        name = m_enemyDefs.defs[e->enemyDefIdx].name;
     } else {
-        // Derived from enemyType, which IS replicated — so a guest never sees a blank bar.
-        // (Entity::nameTag would be richer, but it is a pointer and cannot cross the wire, so the
-        // host and the guest would disagree about what they are fighting.)
+        // Not from an enemy def: a drone, a summoned add, or the kTier fallback path (which only
+        // runs if enemies.json failed to load). EnemyType is all we have, and it is at least honest.
         switch (e->enemyType) {
             case EnemyType::SKELETON:        name = "Skeleton";   break;
             case EnemyType::BAT:             name = "Bat";        break;

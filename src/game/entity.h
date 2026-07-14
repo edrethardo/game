@@ -276,6 +276,13 @@ struct Entity {
     // The NAME is not stored — only this index — because a pointer cannot cross the wire, and the
     // client must rebuild the identical name from replicated data.
     u8   champNameIdx   = 0;
+
+    // Index into EnemyDefTable — i.e. WHICH of the 38 authored monsters this is ("Bone Archer",
+    // "Crypt Herald", "Broodmother"). 0xFF = not from an enemy def (boss / NPC / prop / goblin).
+    // Needed because EnemyType is only the RIG (skeleton/bat/spider), which 38 monsters share
+    // between ~16 of; naming from it produced "Skeleton" for a dozen different creatures.
+    // Also lands in tail padding, so Entity stays 512 bytes.
+    u8   enemyDefIdx    = 0xFF;
 };
 
 // Pins the entity layout. The champion fields fit in what was tail padding (504), and lifeTimer

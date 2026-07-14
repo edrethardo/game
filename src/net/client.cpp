@@ -602,6 +602,7 @@ void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
         // guest derive the same colour from the same byte and cannot disagree.
         e.champAffixes = seB.champAffixes;
         e.champNameIdx = seB.champNameIdx;
+        e.enemyDefIdx  = seB.enemyDefIdx;
 
         Vec3 posB;
         posB.x = Quantize::unpackPos(seB.posX);

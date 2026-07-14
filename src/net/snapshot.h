@@ -122,6 +122,17 @@ struct SnapEntity {
     // the struct but forgotten in one of the FOUR (de)serializers. Giving the pad a job costs nothing
     // and needs no protocol bump. Constant per entity, so delta encoding sends it once.
     u8   champNameIdx;  // 1
+    // Which authored monster this is (index into EnemyDefTable; 0xFF = not an enemy def). EnemyType
+    // is only the RIG — 38 monsters share ~16 of them — so without this a guest (and the target bar)
+    // could only ever say "Skeleton" for a Bone Archer, a Bone Mage and a Demon Caster alike.
+    // Constant per entity, so delta encoding sends it once.
+    u8   enemyDefIdx;   // 1
+    // Explicit pad, and it has a job: SnapEntity contains u16s and so aligns to 2. Without this the
+    // struct would be 31 on the wire but 32 in memory, breaking the
+    // `sizeof(SnapEntity) == SNAP_ENTITY_WIRE` static_assert in snapshot.cpp — the canary that
+    // catches a field added to the struct but forgotten in one of the FOUR (de)serializers.
+    // (champNameIdx above was this pad until it earned a job; the next feature gets this one.)
+    u8   reserved0;     // 1 — always 0
 };
 
 // Quantized snapshot of one projectile (21 bytes — see SNAP_PROJECTILE_WIRE)

@@ -405,6 +405,12 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     ent->materialId = def.materialId;
                     ent->enemyType  = def.enemyType;
                     ent->enemyRole  = def.role;
+                    // WHICH monster this is, not just which rig it wears. Replicated, so a guest can
+                    // name it too. Derived from the pointer's offset into the table — tierDefs holds
+                    // pointers INTO m_enemyDefs.defs, so this is its real index.
+                    const ptrdiff_t defSlot = &def - m_enemyDefs.defs;
+                    ent->enemyDefIdx = (defSlot >= 0 && defSlot < static_cast<ptrdiff_t>(m_enemyDefs.count))
+                                     ? static_cast<u8>(defSlot) : 0xFF;
 
                     ent->baseMoveSpeed      = ent->moveSpeed;
                     ent->baseAttackCooldown = ent->attackCooldown;

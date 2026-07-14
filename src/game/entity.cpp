@@ -75,6 +75,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.champAffixes   = 0;
     e.champLeaderIdx = 0xFFFF;
     e.champNameIdx   = 0;
+    e.enemyDefIdx    = 0xFF;   // recycled slot must not inherit the previous monster's identity
     e.lifeTimer      = 0.0f;   // recycled slot must not inherit a goblin's escape countdown
 
     // Add to active list
