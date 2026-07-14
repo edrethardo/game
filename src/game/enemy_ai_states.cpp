@@ -557,8 +557,16 @@ void updateHostileStates(Entity& e, u32 i,
         }
 
         // Retreat when low HP: find cover and path toward it.
-        // Only ground non-boss enemies retreat (flying enemies can always escape freely).
-        if (e.health < e.maxHealth * 0.3f && !e.hasRetreated &&
+        //
+        // RANGED ONLY. This used to fire for every ground non-boss enemy, so a wounded MELEE enemy
+        // would break off and run for cover at exactly the moment the player was closing the kill —
+        // measured at up to a quarter of all enemy time, and it reads as the monster chickening out.
+        // Repositioning is a RANGED tactic: a bowman backing to his preferred range is playing his
+        // role, a swordsman fleeing the sword is just deleting the pressure he exists to apply.
+        // A melee enemy now fights to the death.
+        // (Flying enemies were already excluded — they can escape freely; bosses never retreat.)
+        if (e.attackRange > 5.0f &&
+            e.health < e.maxHealth * 0.3f && !e.hasRetreated &&
             !(e.flags & ENT_FLYING) && e.enemyType != EnemyType::BOSS) {
             Vec3 coverPos;
             if (LevelGridQuery::findCoverCell(grid, e.position, targetPos, coverPos)) {
