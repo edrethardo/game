@@ -120,6 +120,33 @@ namespace GameConst {
         }
     }
 
+    // --- Enemy opening strike -----------------------------------------------------------------
+    // How long after an enemy ENTERS attack range its first swing lands. This is NOT the attack
+    // cooldown: an arriving enemy has always skipped straight to a short opening window rather than
+    // waiting a full attack cycle.
+    //
+    // ONLY the plain charge moves (0.30 -> 0.20). It was the slowest opening of the four and the one
+    // the player meets most, so it is where the pressure was missing; the ambush / flank / surround
+    // openings were already fast and are left exactly as they were.
+    //
+    // No value here is ever ABOVE the one it replaced, so an enemy can only open faster, never
+    // slower. That guarantee is the point: taking "first hit at half the attack delay" literally
+    // would have been a NERF — 20 of the 38 enemies have cooldowns above 0.6 s, and half of those is
+    // LONGER than the 0.30 s opening they already used, so pressure would have gone DOWN while
+    // looking like it went up.
+    //
+    // The spread is tactical: an ambusher bursts on reveal, a flanker arrives already committed, a
+    // surrounder is taking a slot, and a straight charge is the most telegraphed of the four.
+    //
+    // The spread between them is tactical and deliberate: an ambusher bursts on reveal, a flanker
+    // arrives already committed, a surrounder is taking a slot, and a straight charge is the most
+    // telegraphed of the four — so it stays the slowest.
+    static constexpr f32 OPEN_STRIKE_AMBUSH   = 0.00f;  // burst immediately on reveal (unchanged)
+    static constexpr f32 OPEN_STRIKE_FLANK    = 0.10f;  // unchanged — arrives already committed
+    static constexpr f32 OPEN_STRIKE_INRANGE  = 0.10f;  // unchanged — already in range on arrival
+    static constexpr f32 OPEN_STRIKE_SURROUND = 0.20f;  // unchanged — taking an encircle slot
+    static constexpr f32 OPEN_STRIKE_CHASE    = 0.20f;  // 0.30 -> 0.20: the plain charge into range
+
     // Seconds of "calm" at the start of each floor: hostile enemies don't
     // auto-aggro and friendly NPCs hold position with the player, so the world
     // isn't already fighting at spawn. Ends early the moment the player attacks.

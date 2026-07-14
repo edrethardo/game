@@ -43,6 +43,7 @@ add_executable(dungeon_tests
     game/test_source_shard.cpp       # secret superboss key must survive to be picked up
     game/test_shrine_buff.cpp        # VITALITY must never leak permanent max HP
     game/test_max_health.cpp         # max HP = class base x growth + gear + buff (gear was DEAD)
+    game/test_opening_strike.cpp     # arriving enemies must never open SLOWER
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp

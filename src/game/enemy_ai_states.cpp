@@ -329,7 +329,7 @@ void updateHostileStates(Entity& e, u32 i,
                     e.velocity.x = 0.0f;
                     e.velocity.z = 0.0f;
                     e.aiState = AIState::ATTACK;
-                    e.attackTimer = 0.1f; // attack almost immediately
+                    e.attackTimer = GameConst::OPEN_STRIKE_INRANGE; // already in range on arrival
                 } else {
                     // Enemies sprint at 1.3x speed when chasing
                     f32 speed = effectiveSpeed * 1.3f;
@@ -365,7 +365,7 @@ void updateHostileStates(Entity& e, u32 i,
         f32 atkTransition = (e.enemyRole & EnemyRole::CHARGER) ? e.attackRange * 1.3f : e.attackRange;
         if (targetDist <= atkTransition) {
             e.aiState = AIState::ATTACK;
-            e.attackTimer = 0.3f; // fast first strike for all enemies
+            e.attackTimer = GameConst::OPEN_STRIKE_CHASE; // opening strike on entering range
         }
         // Lost interest: fall back to idle only if target is extremely far
         if (targetDist > e.detectionRange * 5.0f) {
@@ -621,7 +621,7 @@ void updateHostileStates(Entity& e, u32 i,
         } else {
             // Arrived at flank position — switch to attack immediately
             e.aiState = AIState::ATTACK;
-            e.attackTimer = 0.1f;
+            e.attackTimer = GameConst::OPEN_STRIKE_FLANK;    // arrives already committed
             e.hasRetreated = false;
         }
         entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
@@ -733,7 +733,7 @@ void updateHostileStates(Entity& e, u32 i,
         }
         if (dist <= 4.0f && hasLOS(e, *targetPlayer, grid) && targetPlayer->smokeTimer <= 0.0f) {
             e.aiState = AIState::ATTACK;
-            e.attackTimer = 0.0f; // burst immediately on reveal
+            e.attackTimer = GameConst::OPEN_STRIKE_AMBUSH;   // burst immediately on reveal
         }
     } break;
 
@@ -792,7 +792,7 @@ void updateHostileStates(Entity& e, u32 i,
         } else {
             // In position — begin attacking
             e.aiState = AIState::ATTACK;
-            e.attackTimer = 0.2f;
+            e.attackTimer = GameConst::OPEN_STRIKE_SURROUND; // taking an encircle slot
         }
         entityMoveAndSlide(e, grid, dt, player.position, PLAYER_HALF_WIDTH);
         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
