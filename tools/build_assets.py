@@ -334,6 +334,13 @@ def main():
         print("\n=== Generating Skill Icons ===")
         ok = run([sys.executable, os.path.join(SCRIPT_DIR, "gen_skill_icons.py")]) and ok
 
+    # Status-bar glyphs (shrine buffs). Generated like the skill/item icons: the art lives in the
+    # script as ASCII, the header is build output. Wired in here so it regenerates with everything
+    # else instead of quietly rotting the way a mesh missing from the manifest would.
+    if args.all:
+        print("\n=== Generating Status Icons ===")
+        ok = run([sys.executable, os.path.join(SCRIPT_DIR, "gen_status_icons.py")]) and ok
+
     # Always generate item icon header (tool-built inventory icons → item_icons_gen.h)
     if args.all:
         print("\n=== Generating Item Icons ===")

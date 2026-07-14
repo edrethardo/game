@@ -31,6 +31,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/shrine.h"
 #include "game/champion.h"  // champion name + tint for the target bar
 #include "game/skill.h"
 #include "game/inventory_ui.h"
@@ -839,10 +840,22 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 {"FRN", {1.0f, 0.7f, 0.2f}, m_localPlayer.frenzyTimer,
                     m_localPlayer.frenzyTimer > 0.0f
                         ? static_cast<f32>(m_localPlayer.frenzyStacks) : -1.0f},
+                // --- Shrine buffs (rows 8/9/10 — MUST stay in this order: getStatusIcon() in
+                // hud_status.cpp keys the glyph off the ROW INDEX, so reordering these silently
+                // shows the wrong icon for the effect). Only one can be live at a time (there is a
+                // single shrine slot), so at most one of the three ever has a timer > 0.
+                // Colours are Shrine::colorOf — same red/cyan/green as the crystal and the minimap.
+                {"POW", Shrine::colorOf(ShrineBuff::POWER),
+                    m_localPlayer.shrineBuff == ShrineBuff::POWER    ? m_localPlayer.shrineBuffTimer : 0.0f, -1.0f},
+                {"SPD", Shrine::colorOf(ShrineBuff::SPEED),
+                    m_localPlayer.shrineBuff == ShrineBuff::SPEED    ? m_localPlayer.shrineBuffTimer : 0.0f, -1.0f},
+                {"VIT", Shrine::colorOf(ShrineBuff::VITALITY),
+                    m_localPlayer.shrineBuff == ShrineBuff::VITALITY ? m_localPlayer.shrineBuffTimer : 0.0f, -1.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap (scaled)
             f32 hs2 = static_cast<f32>(sh) / 720.0f;
-            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses, 8);
+            HUD::drawStatusIcons(sw, sh, 20.0f * hs2, 58.0f * hs2, statuses,
+                                 sizeof(statuses) / sizeof(statuses[0]));
         }
 
         // Ammo display for hitscan weapons (right side of health bar area)
