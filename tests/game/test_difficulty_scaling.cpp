@@ -37,8 +37,10 @@ TEST_CASE("floorHealthMult: floor 1 is the 1.0x baseline (and 0 is guarded)") {
 }
 
 TEST_CASE("floorHealthMult: Normal tier is byte-for-byte the legacy linear curve") {
-    // Normal = effective floors 1..50. At 3% the compounding curve stays below linear here,
-    // so the max() clamp must reproduce the old curve exactly — the base game is untouched.
+    // Normal = effective floors 1..50. Even at the raised 3.64% rate the compounding curve stays
+    // below linear here (it only overtakes at effective floor 52), so the max() clamp must reproduce
+    // the old curve exactly — the base game is untouched. This is the guarantee that makes Hell
+    // safe to crank: the lever aims itself.
     for (u32 eff = 1; eff <= 50; ++eff) {
         CHECK(floorHealthMult(eff) == doctest::Approx(legacyLinear(eff)));
     }
@@ -84,34 +86,68 @@ TEST_CASE("floorDamageMult: stays LINEAR (it must never compound)") {
 }
 
 TEST_CASE("floorDamageMult: the damage slope is STEEPER than the health slope") {
-    // Raised 0.10 -> 0.13 to pay for the gear-health fix: item health had never reached the player,
-    // so a geared character is ~3x tankier than every enemy number was tuned against. Gear health
-    // grows with item level (i.e. with depth), so the compensation grows with depth too — a flat
-    // multiplier would have left the endgame soft while making floor 5 brutal.
+    // 0.10 -> 0.13 -> 0.16, to pay for the gear-health fix: item health had never reached the player,
+    // so a geared character is ~3x tankier than every enemy number was tuned against. This slope
+    // feeds EVERY difficulty, which is why it only ever moves in small steps — it is the one lever
+    // that cannot be aimed at Hell alone (difficultyDamageBump is, and carries the rest).
     CHECK(FLOOR_DAMAGE_MULT > FLOOR_STAT_MULT);
-    CHECK(FLOOR_DAMAGE_MULT == doctest::Approx(0.13f));
-    CHECK(floorDamageMult(150) == doctest::Approx(1.0f + 149.0f * 0.13f));   // 20.4x at Hell 50
+    CHECK(FLOOR_DAMAGE_MULT == doctest::Approx(0.16f));
+    CHECK(floorDamageMult(150) == doctest::Approx(1.0f + 149.0f * 0.16f));   // 24.8x at Hell 50
 }
 
-TEST_CASE("difficultyDamageBump: Normal x1.15, Nightmare x1.75, Hell x2.4") {
-    // Nudged up (was 1.0/1.5/2.0) alongside the steeper slope, for the same reason. Note Normal is
-    // no longer the identity: a Normal player gets item health too, so a Normal enemy hits harder.
-    CHECK(difficultyDamageBump(0) == doctest::Approx(1.15f));
-    CHECK(difficultyDamageBump(1) == doctest::Approx(1.75f));
-    CHECK(difficultyDamageBump(2) == doctest::Approx(2.4f));
+TEST_CASE("difficultyDamageBump: Normal x1.25, Nightmare x1.90, Hell x5.90") {
+    // The per-tier bump is the only HELL-ISOLATED lever, so it carries the heavy end of the increase
+    // while the shared slope moves only a little. Normal is no longer the identity: a Normal player
+    // gets item health too, so a Normal enemy has to hit harder.
+    CHECK(difficultyDamageBump(0) == doctest::Approx(1.25f));
+    CHECK(difficultyDamageBump(1) == doctest::Approx(1.90f));
+    CHECK(difficultyDamageBump(2) == doctest::Approx(5.90f));
     // Unexpected values fall back to Normal rather than misbehaving.
-    CHECK(difficultyDamageBump(99) == doctest::Approx(1.15f));
+    CHECK(difficultyDamageBump(99) == doctest::Approx(1.25f));
     // Ordering is the invariant that actually matters: deeper tier => strictly more damage.
     CHECK(difficultyDamageBump(0) < difficultyDamageBump(1));
     CHECK(difficultyDamageBump(1) < difficultyDamageBump(2));
 }
 
-TEST_CASE("Combined enemy damage = linear floor curve x per-tier bump") {
-    // What the spawn sites actually compute. A Hell floor-50 enemy: (1 + 149*0.13) * 2.4 = 49.0x.
-    const f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
-    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.13f) * 2.4f).epsilon(0.001));
+TEST_CASE("Hell floor 50 has 2.5x the HP it used to") {
+    // The other half of the brief. The rate is SOLVED, not eyeballed: (1+r)^149 must land on 2.5x
+    // the old 3%-curve value. Pinned so a later nudge to the rate shows up as a broken promise
+    // rather than as a quietly different endgame.
+    const f32 oldHell50 = std::pow(1.03f, 149.0f);            // the previous curve: ~81.8x
+    CHECK(floorHealthMult(150) / oldHell50 == doctest::Approx(2.5f).epsilon(0.02));
+    CHECK(floorHealthMult(150) == doctest::Approx(205.9f).epsilon(0.02));
+}
 
-    // HP must still outscale damage by a wide margin. Damage is linear while HP compounds: if that
-    // ever inverted, deep-floor enemies would one-shot the player.
+TEST_CASE("Hell floor 50 deals exactly 3x the damage it used to") {
+    // The brief, as an assertion. 5.90 is not a taste value — it is SOLVED so that
+    // (1 + 0.16*149) * bump lands on 3.00x the previous Hell-50 damage. If someone later nudges the
+    // slope or the bump "a little", this is what tells them they moved the endgame off its target.
+    const f32 oldHell50 = (1.0f + 149.0f * 0.13f) * 2.40f;   // the previous curve: 48.9x
+    const f32 newHell50 = floorDamageMult(150) * difficultyDamageBump(2);
+    CHECK(newHell50 / oldHell50 == doctest::Approx(3.0f).epsilon(0.01));
+    CHECK(newHell50 == doctest::Approx(146.7f).epsilon(0.01));
+}
+
+TEST_CASE("The shared slope keeps Normal's collateral small") {
+    // The slope feeds every tier, so raising it taxes Normal too. That is tolerable only while it
+    // stays small: Normal floor 5 must not become a meat grinder because Hell needed to be harder.
+    const f32 oldNormal5  = (1.0f + 4.0f * 0.13f) * 1.15f;
+    const f32 newNormal5  = floorDamageMult(5) * difficultyDamageBump(0);
+    CHECK(newNormal5 / oldNormal5 < 1.25f);      // ~+17%: a nudge, not a re-tune
+
+    const f32 oldNormal50 = (1.0f + 49.0f * 0.13f) * 1.15f;
+    const f32 newNormal50 = floorDamageMult(50) * difficultyDamageBump(0);
+    CHECK(newNormal50 / oldNormal50 < 1.40f);    // ~+30%
+}
+
+TEST_CASE("Combined enemy damage = linear floor curve x per-tier bump") {
+    // What the spawn sites actually compute. A Hell floor-50 enemy: (1 + 149*0.16) * 5.90 = 146.7x.
+    const f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
+    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.16f) * 5.90f).epsilon(0.001));
+
+    // HP must still outscale damage. Damage is linear while HP compounds, and this ordering is what
+    // keeps deep enemies from becoming glass cannons that delete the player before they can be hit
+    // back. Tripling the damage briefly INVERTED it (147x damage vs 82x HP) until the HP raise
+    // landed — this check is what caught that, so do not weaken it to make a damage tweak pass.
     CHECK(floorHealthMult(150) > hellF50Dmg);
 }
