@@ -192,6 +192,54 @@ void HUD::drawHealthBar(u32 screenWidth, u32 screenHeight,
     flushHUD();
 }
 
+// Enemy health bar across the TOP of the screen — the Diablo 2 read: you always know WHAT you are
+// fighting and HOW MUCH of it is left, without a nameplate cluttering every monster in the room.
+// `fade` (0..1) drives the whole thing out gently when the target goes stale, so the bar never
+// blinks out mid-swing.
+void HUD::drawTargetBar(u32 sw, u32 sh,
+                        const char* name, const char* subtitle,
+                        f32 hpFrac, Vec3 accent, f32 fade)
+{
+    if (!name || fade <= 0.0f) return;
+    s_screenW = sw; s_screenH = sh;
+
+    const f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    if (hpFrac < 0.0f) hpFrac = 0.0f;
+    if (hpFrac > 1.0f) hpFrac = 1.0f;
+    if (fade > 1.0f) fade = 1.0f;
+
+    const f32 barW   = 340.0f * uiScale;
+    const f32 barH   = 12.0f  * uiScale;
+    const f32 x0     = (static_cast<f32>(sw) - barW) * 0.5f;
+    // HUD coords are Y-up (origin bottom-left), so "top of the screen" is a HIGH y.
+    const f32 y0     = static_cast<f32>(sh) - 46.0f * uiScale;
+    const f32 border = 1.0f * uiScale;
+
+    // Name, centred above the bar. Tinted by the accent so a champion's name reads in its own
+    // colour — the same colour its body is tinted, so the two tells reinforce each other.
+    const f32 nameW = FontSystem::textWidth(name, 2);
+    FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - nameW) * 0.5f,
+                         y0 + barH + 8.0f * uiScale, name, accent * fade, 2);
+
+    pushSolidRect(x0, y0, x0 + barW, y0 + barH, Vec3{0.10f, 0.10f, 0.12f} * fade);
+    // Deep red rather than the player's green: at a glance you must never confuse THEIR health
+    // bar with YOURS.
+    const Vec3 fill = Vec3{0.80f, 0.16f, 0.16f} * fade;
+    const f32  fillW = (barW - 2.0f * border) * hpFrac;
+    pushSolidRect(x0 + border, y0 + border, x0 + border + fillW, y0 + barH - border, fill);
+    pushQuad(x0, y0, x0 + barW, y0 + barH, Vec3{0.55f, 0.55f, 0.60f} * fade);
+    flushHUD();
+
+    // Champion affix list, under the bar — this is the actionable half. The name is flavour; "Molten
+    // · Vampiric" is what tells you not to stand next to it and not to trade hits with it.
+    if (subtitle && subtitle[0]) {
+        const f32 subW = FontSystem::textWidth(subtitle, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - subW) * 0.5f,
+                             y0 - 14.0f * uiScale, subtitle,
+                             Vec3{0.75f, 0.75f, 0.80f} * fade, 1);
+    }
+}
+
 // Potion belt flask — a primitive-drawn flask (no asset) welded beside the health bar.
 // States: cooling (radial sweep + seconds number, dimmed) | urgent (steady red pulse when
 // low HP + ready) | ready. A green "ready" pop plays on the cooling->ready transition.

@@ -8,6 +8,7 @@
 #include <doctest/doctest.h>
 #include "game/champion.h"
 #include <initializer_list>
+#include <cstring>
 
 TEST_CASE("Champion: affix count scales with depth") {
     CHECK(Champion::affixCountForFloor(1)  == 1);
@@ -114,4 +115,59 @@ TEST_CASE("Champion: pack-size constants stay inside the entity budget") {
     CHECK(worstCasePackBodies <= 10);
     CHECK(Champion::MIN_MINIONS <= Champion::MAX_MINIONS);
     CHECK(Champion::MIN_FLOOR >= 1);
+}
+
+// --- Rolled names ---
+// The name is a rolled INDEX plus the affix mask, and BOTH are replicated — so the client rebuilds
+// the name with the same pure functions the host used. If these ever stopped agreeing, a champion
+// would be called one thing on the host's screen and another on the guest's, which is the co-op
+// version of a lie.
+
+TEST_CASE("Champion: formatName is total and never overflows") {
+    // Swept over every name index and every affix mask: a champion with no name would render an
+    // empty bar, and an overflow here is a stack smash in the HUD path.
+    for (u32 idx = 0; idx < 300; idx++) {          // deliberately past NAME_COUNT — it must wrap
+        for (u32 mask = 0; mask <= 0xFF; mask++) {
+            char buf[64];
+            Champion::formatName(buf, sizeof(buf), static_cast<u8>(idx), static_cast<u8>(mask));
+            CHECK(buf[0] != '\0');                  // always produces a name
+            CHECK(std::strlen(buf) < sizeof(buf));  // always NUL-terminated in range
+        }
+    }
+}
+
+TEST_CASE("Champion: formatName is deterministic — host and guest agree") {
+    char a[64], b[64];
+    Champion::formatName(a, sizeof(a), 7, ChampAffix::MOLTEN | ChampAffix::VAMPIRIC);
+    Champion::formatName(b, sizeof(b), 7, ChampAffix::MOLTEN | ChampAffix::VAMPIRIC);
+    CHECK(std::strcmp(a, b) == 0);
+}
+
+TEST_CASE("Champion: the title matches the colour's dominant affix") {
+    // The name and the body tint must describe the SAME affix, or the player learns two conflicting
+    // cues for one monster. Both pick the dominant affix in the same priority order.
+    char buf[64];
+    Champion::formatName(buf, sizeof(buf), 0, ChampAffix::MOLTEN | ChampAffix::HEALTH_LINK);
+    CHECK(std::strstr(buf, "Molten") != nullptr);      // MOLTEN outranks HEALTH_LINK
+    CHECK(Champion::tintFor(ChampAffix::MOLTEN | ChampAffix::HEALTH_LINK).x >
+          Champion::tintFor(ChampAffix::MOLTEN | ChampAffix::HEALTH_LINK).z);  // ember, not green
+}
+
+TEST_CASE("Champion: a tiny buffer truncates safely instead of overflowing") {
+    char buf[4];
+    Champion::formatName(buf, sizeof(buf), 3, ChampAffix::FROZEN);
+    CHECK(std::strlen(buf) < sizeof(buf));
+}
+
+TEST_CASE("Champion: an out-of-range name index wraps rather than reading past the table") {
+    CHECK(Champion::baseName(0) == Champion::baseName(Champion::NAME_COUNT));
+    CHECK(Champion::baseName(255) != nullptr);
+}
+
+TEST_CASE("Champion: every mask has a title") {
+    for (u32 mask = 0; mask <= 0xFF; mask++) {
+        const char* t = Champion::titleFor(static_cast<u8>(mask));
+        REQUIRE(t != nullptr);
+        CHECK(t[0] != '\0');
+    }
 }

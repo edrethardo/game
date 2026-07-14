@@ -30,6 +30,7 @@
 #include "game/limb_system.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/champion.h"  // champion name + tint for the target bar
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -960,6 +961,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         FontSystem::drawText(sw, sh, cx - hintW * 0.5f, cy - 50.0f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 
+    // Enemy health bar at the top of the screen (Diablo 2 style).
+    if (!m_characterScreenOpen)
+        renderTargetBar(sw, sh);
+
     // Tutorial tooltips are suppressed on the character-inspect screen so they don't draw over the
     // stats sheet (the inspect overlay owns the whole screen while open).
     if (!m_characterScreenOpen)
@@ -1127,3 +1132,132 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 }
 
 // renderMenu() and renderLobby() moved to engine_render_menus.cpp
+
+// ---------------------------------------------------------------------------
+// renderTargetBar — the Diablo 2 enemy health bar at the top of the screen.
+//
+// Target preference:
+//   1. the enemy you are AIMING at (a ray through its collider, with a little forgiveness);
+//   2. otherwise the last enemy you HIT, held for a short linger.
+// The linger is what stops the bar strobing every time the crosshair slips off a moving target
+// mid-fight — which is exactly when you most want to see how much of it is left.
+//
+// Render-only: nothing here feeds the simulation, so it reads whichever pool the RENDERER uses
+// (m_renderInterp on a client, m_entities otherwise) and never writes to it.
+// ---------------------------------------------------------------------------
+void Engine::renderTargetBar(u32 sw, u32 sh) {
+    const EntityPool& pool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities : m_entities;
+
+    const Vec3 eye = m_localPlayer.position + Vec3{0.0f, m_localPlayer.eyeHeight, 0.0f};
+    const Vec3 fwd = m_localPlayer.forward;
+
+    // 1. What are we aiming at? The collider is inflated slightly so the bar is easier to summon
+    //    than a shot is to land — this is an information display, not a hit test, and demanding
+    //    pixel-perfect aim just to READ an enemy's health would be miserable.
+    constexpr f32 AIM_RANGE   = 40.0f;
+    constexpr f32 AIM_INFLATE = 0.35f;
+    EntityHandle aimed;
+    bool found = false;
+    f32  bestT = AIM_RANGE;
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        const u32 i = pool.activeList[a];
+        const Entity& e = pool.entities[i];
+        if (e.flags & ENT_DEAD)     continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+
+        AABB box = entityAABB(e);
+        box.min = box.min - Vec3{AIM_INFLATE, AIM_INFLATE, AIM_INFLATE};
+        box.max = box.max + Vec3{AIM_INFLATE, AIM_INFLATE, AIM_INFLATE};
+        f32 t; Vec3 n;
+        if (!CombatQuery::rayVsAABB(eye, fwd, box, t, n)) continue;
+        if (t > bestT) continue;
+        bestT = t;
+        aimed = EntityHandle{ static_cast<u16>(i), e.generation };
+        found = true;
+    }
+
+    const f32 dt = static_cast<f32>(Clock::getDeltaSeconds());
+    if (found) {
+        m_targetEnt    = aimed;
+        m_targetLinger = TARGET_LINGER_SEC;      // refreshed for as long as you keep it in your sights
+    } else {
+        // 2. Fall back to whatever we last hit. Combat records it at the single point every
+        //    player-sourced hit passes through, so no damage source can forget to report itself.
+        const EntityHandle lastHit = Combat::getLastHitEntity(activeNetSlot());
+        if (handleValid(pool, lastHit)) {
+            // Only ADOPT the last-hit target if we have nothing; never let it steal focus from a
+            // target we are actively aiming at (handled above by the early assignment).
+            if (!handleValid(pool, m_targetEnt) || m_targetLinger <= 0.0f) {
+                m_targetEnt    = lastHit;
+                m_targetLinger = TARGET_LINGER_SEC;
+            }
+        }
+        if (m_targetLinger > 0.0f) m_targetLinger -= dt;
+    }
+
+    if (m_targetLinger <= 0.0f) return;
+    if (!handleValid(pool, m_targetEnt)) return;
+    // Indexed directly rather than via handleGet, which wants a non-const pool — this is a
+    // render-only read and must not be able to mutate the world. handleValid already checked the
+    // generation, so a recycled slot can't be mistaken for the old target.
+    const Entity* e = &pool.entities[m_targetEnt.index];
+    if ((e->flags & ENT_DEAD) || e->maxHealth <= 0.0f) return;
+
+    // --- Name + accent ---
+    char  nameBuf[64];
+    char  subBuf[96];
+    subBuf[0] = '\0';
+    const char* name   = nullptr;
+    Vec3        accent = {1.0f, 1.0f, 1.0f};
+
+    if ((e->flags & ENT_CHAMPION) && e->champAffixes != 0) {
+        // Rebuilt from the REPLICATED name index + affix mask, both pure — so the guest reads the
+        // same name the host does. The accent is the same colour its body is tinted, so the name
+        // and the monster reinforce each other rather than being two unrelated cues.
+        Champion::formatName(nameBuf, sizeof(nameBuf), e->champNameIdx, e->champAffixes);
+        name   = nameBuf;
+        accent = Champion::tintFor(e->champAffixes);
+
+        // The affix list is the ACTIONABLE half — the name is flavour, "Molten · Vampiric" is what
+        // tells you not to stand next to it and not to trade hits with it.
+        u32 w = 0;
+        for (u8 b = 0; b < ChampAffix::COUNT; b++) {
+            const u8 bit = static_cast<u8>(1u << b);
+            if (!(e->champAffixes & bit)) continue;
+            const char* an = Champion::affixName(bit);
+            if (w > 0 && w + 3 < sizeof(subBuf)) { subBuf[w++] = ' '; subBuf[w++] = '-'; subBuf[w++] = ' '; }
+            for (const char* p = an; *p && w + 1 < sizeof(subBuf); ++p) subBuf[w++] = *p;
+        }
+        subBuf[w] = '\0';
+    } else if (e->flags & ENT_LOOT_GOBLIN) {
+        name   = "Loot Goblin";
+        accent = {0.45f, 0.95f, 0.45f};
+    } else if (e->isBoss) {
+        name   = e->nameTag ? e->nameTag : "Boss";
+        accent = {1.0f, 0.35f, 0.35f};
+    } else {
+        // Derived from enemyType, which IS replicated — so a guest never sees a blank bar.
+        // (Entity::nameTag would be richer, but it is a pointer and cannot cross the wire, so the
+        // host and the guest would disagree about what they are fighting.)
+        switch (e->enemyType) {
+            case EnemyType::SKELETON:        name = "Skeleton";   break;
+            case EnemyType::BAT:             name = "Bat";        break;
+            case EnemyType::SPIDER:          name = "Spider";     break;
+            case EnemyType::MIMIC:           name = "Mimic";      break;
+            case EnemyType::HELLHOUND:       name = "Hellhound";  break;
+            case EnemyType::SENTINEL:        name = "Sentinel";   break;
+            case EnemyType::SUCCUBUS:        name = "Succubus";   break;
+            case EnemyType::PIT_FIEND:       name = "Pit Fiend";  break;
+            case EnemyType::HELLFORGE_SMITH: name = "Smith";      break;
+            default:                         name = "Enemy";      break;
+        }
+    }
+
+    // Fade out over the last of the linger so the bar leaves gently instead of blinking off.
+    f32 fade = 1.0f;
+    if (m_targetLinger < TARGET_FADE_SEC) fade = m_targetLinger / TARGET_FADE_SEC;
+
+    HUD::drawTargetBar(sw, sh, name, subBuf[0] ? subBuf : nullptr,
+                       e->health / e->maxHealth, accent, fade);
+}

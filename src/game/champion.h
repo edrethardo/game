@@ -114,4 +114,21 @@ Vec3 tintFor(u8 mask);
 // Human-readable affix name, for the kill feed / debug overlay. Never null.
 const char* affixName(u8 singleBit);
 
+// --- Rolled names (Diablo-style "Grimfang the Molten") ---
+//
+// The name is a rolled INDEX into a fixed table, not a string: it has to survive the wire, and a
+// pointer cannot. The index rides in a byte SnapEntity already had spare, so the whole feature costs
+// zero extra bandwidth and no protocol bump.
+//
+// formatName is a PURE function of (nameIdx, affix mask), exactly like tintFor — so the client
+// reconstructs the identical name from replicated data and host and guest can never disagree about
+// what a champion is called.
+constexpr u8 NAME_COUNT = 24;
+
+const char* baseName(u8 nameIdx);            // "Grimfang" — never null, wraps on out-of-range
+const char* titleFor(u8 mask);               // "the Molten" — from the dominant affix
+
+// Writes "Grimfang the Molten" into `out`. Always NUL-terminates.
+void formatName(char* out, u32 outSize, u8 nameIdx, u8 mask);
+
 } // namespace Champion

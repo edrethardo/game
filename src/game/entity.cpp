@@ -74,6 +74,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     // bit itself is cleared with the rest of `flags` by the caller, but these two are not.
     e.champAffixes   = 0;
     e.champLeaderIdx = 0xFFFF;
+    e.champNameIdx   = 0;
     e.lifeTimer      = 0.0f;   // recycled slot must not inherit a goblin's escape countdown
 
     // Add to active list

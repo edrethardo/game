@@ -1024,6 +1024,16 @@ private:
     // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
     void tickLootGoblins(f32 dt);
     u8   m_goblinMeshId = 0;
+
+    // --- Target health bar (Diablo 2 style, top of screen) ---
+    // Preference: the enemy you are AIMING at; if none, the last one you hit, held for a moment so
+    // the bar doesn't flicker out the instant your crosshair drifts. Resolved once per frame in
+    // renderTargetBar (render-only state — it never feeds the simulation).
+    EntityHandle m_targetEnt;          // currently displayed target
+    f32          m_targetLinger = 0.0f; // seconds the target stays up after you stop aiming at it
+    static constexpr f32 TARGET_LINGER_SEC = 4.0f;
+    static constexpr f32 TARGET_FADE_SEC   = 0.6f;   // tail of the linger spent fading out
+    void renderTargetBar(u32 sw, u32 sh);
     u8   m_shrineMeshId = 0;
     // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
     // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative

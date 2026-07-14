@@ -26,6 +26,10 @@ static EntityPool*   s_entityPool   = nullptr;
 // Set by the engine around weapon fire and by projectile.cpp per projectile; stamped onto
 // Entity::killerSlot in killEntity so loot drops can be reserved to the killer.
 static u8 s_attackingPlayer = 0xFF;
+// Last enemy each player damaged (see Combat::getLastHitEntity). 4 = MAX_PLAYERS; combat.cpp
+// deliberately doesn't include net.h, so the size is pinned by a static_assert at the use site.
+static constexpr u8 kMaxTrackedPlayers = 4;
+static EntityHandle s_lastHitEntity[kMaxTrackedPlayers] = {};
 // D1.1 — Weapon mesh ID for the current attack context. Set by the engine alongside
 // setAttackingPlayer so kill events can include which weapon landed the killing blow.
 static u8 s_killWeaponMeshId = 0;
@@ -70,6 +74,14 @@ void Combat::setFXTargets(ParticlePool* particles, ScreenShake* shake) {
 }
 
 void Combat::setEntityPool(EntityPool* pool) { s_entityPool = pool; }
+
+EntityHandle Combat::getLastHitEntity(u8 slot) {
+    if (slot >= kMaxTrackedPlayers) return EntityHandle{};
+    return s_lastHitEntity[slot];
+}
+void Combat::clearLastHitEntities() {
+    for (u8 i = 0; i < kMaxTrackedPlayers; i++) s_lastHitEntity[i] = EntityHandle{};
+}
 
 void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
                           const Vec3* damageOrigin, bool isCrit) {
@@ -170,6 +182,12 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
 
     // If this IDLE enemy survives the hit, alert nearby hostiles within 6m
     bool wasIdle = (e->aiState == AIState::IDLE);
+
+    // Remember what this player just hit — the health bar falls back to it when the crosshair
+    // drifts off. Recorded here because this is the single point every player-sourced hit passes
+    // through; doing it at the call sites is how a new damage source silently stops reporting.
+    if (s_attackingPlayer < kMaxTrackedPlayers)
+        s_lastHitEntity[s_attackingPlayer] = target;
 
     e->health -= damage;
     e->flashTimer = 0.12f;

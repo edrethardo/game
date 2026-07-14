@@ -239,6 +239,7 @@ bool Engine::tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& r
     // --- Promote the leader ---
     u32 rng = static_cast<u32>(std::rand());
     leader.champAffixes = Champion::rollAffixes(effFloor, minions > 0, rng);
+    leader.champNameIdx = static_cast<u8>(std::rand() % Champion::NAME_COUNT);
     leader.flags       |= ENT_CHAMPION;
 
     leader.maxHealth  = baseHealth * Champion::HEALTH_MULT;
@@ -291,9 +292,11 @@ bool Engine::tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& r
     if (spawned == 0) leader.champAffixes &= static_cast<u8>(~ChampAffix::HEALTH_LINK);
 
     m_championPacksThisFloor++;
-    LOG_INFO("Champion: %s pack (mask 0x%02X, %u minions) in room at %.1f,%.1f",
-             Champion::affixName(static_cast<u8>(leader.champAffixes & (~leader.champAffixes + 1))),
-             leader.champAffixes, spawned, static_cast<f64>(room.x), static_cast<f64>(room.z));
+    char cname[48];
+    Champion::formatName(cname, sizeof(cname), leader.champNameIdx, leader.champAffixes);
+    LOG_INFO("Champion: %s (mask 0x%02X, %u minions) in room at %.1f,%.1f",
+             cname, leader.champAffixes, spawned,
+             static_cast<f64>(room.x), static_cast<f64>(room.z));
     return true;
 }
 

@@ -272,6 +272,10 @@ struct Entity {
     // Expiry deliberately does NOT go through Combat::killEntity: that always fires the death/loot
     // callback, and a goblin that escapes must pay out nothing.
     f32  lifeTimer      = 0.0f;
+    // Rolled champion name index (see Champion::formatName). Lands in tail padding, so it is free.
+    // The NAME is not stored — only this index — because a pointer cannot cross the wire, and the
+    // client must rebuild the identical name from replicated data.
+    u8   champNameIdx   = 0;
 };
 
 // Pins the entity layout. The champion fields fit in what was tail padding (504), and lifeTimer

@@ -116,6 +116,14 @@ namespace Combat {
     // its damage); killEntity stamps it onto Entity::killerSlot so loot can be reserved to
     // the killer. 0xFF = none/environmental (free-for-all drop).
     void setAttackingPlayer(u8 slot);
+
+    // The last enemy this player damaged. Feeds the target health bar's fallback: you keep seeing
+    // what you just hit even after your crosshair drifts off it (Diablo 2 behaviour). Returns an
+    // invalid handle if that player hasn't hit anything.
+    // Recorded inside applyDamage — the one point every player-sourced hit funnels through, so a
+    // new damage source can't forget to report itself.
+    EntityHandle getLastHitEntity(u8 slot);
+    void         clearLastHitEntities();   // on floor change: last floor's target must not persist
     u8   getAttackingPlayer();
 
     // D1.1 — Weapon mesh ID of the currently active weapon, for kill-event attribution.

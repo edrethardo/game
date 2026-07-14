@@ -84,6 +84,50 @@ Vec3 Champion::tintFor(u8 mask) {
     return {1.0f, 1.0f, 1.0f};  // not a champion — no tint
 }
 
+namespace {
+// Rolled champion names. Deliberately a fixed table indexed by a rolled byte rather than generated
+// strings: the index is what goes on the wire, so the client rebuilds the same name from the same
+// data. Add to the end freely — the index simply wraps, so a short table can never crash.
+constexpr const char* kChampNames[Champion::NAME_COUNT] = {
+    "Grimfang",  "Skarn",     "Vorlok",    "Mordath",
+    "Bilewretch","Ashgrave",  "Thornclaw", "Rotmaw",
+    "Draghul",   "Sorrowbane","Ironhusk",  "Nightmar",
+    "Gorehowl",  "Cindervex", "Blackmire", "Zhargul",
+    "Ruinspite", "Hollowfen", "Baelgrim",  "Vexmourn",
+    "Duskrender","Foulhorn",  "Direlok",   "Gravewhisper",
+};
+} // namespace
+
+const char* Champion::baseName(u8 nameIdx) {
+    return kChampNames[nameIdx % NAME_COUNT];   // wrap, so an out-of-range roll can never crash
+}
+
+const char* Champion::titleFor(u8 mask) {
+    // Dominant affix, in the SAME priority order as tintFor — so the name and the colour always
+    // describe the same thing. A player who learns "orange = Molten" must not then meet a
+    // differently-titled orange champion.
+    if (mask & ChampAffix::MOLTEN)      return "the Molten";
+    if (mask & ChampAffix::FROZEN)      return "the Frozen";
+    if (mask & ChampAffix::VAMPIRIC)    return "the Vampiric";
+    if (mask & ChampAffix::EXTRA_FAST)  return "the Swift";
+    if (mask & ChampAffix::SHIELDING)   return "the Warded";
+    if (mask & ChampAffix::TELEPORTING) return "the Blinking";
+    if (mask & ChampAffix::THUNDERING)  return "the Thundering";
+    if (mask & ChampAffix::HEALTH_LINK) return "the Bound";
+    return "the Champion";   // total: a champion always has a title, even on a mask we don't know
+}
+
+void Champion::formatName(char* out, u32 outSize, u8 nameIdx, u8 mask) {
+    if (!out || outSize == 0) return;
+    const char* base  = baseName(nameIdx);
+    const char* title = titleFor(mask);
+    u32 w = 0;
+    for (const char* p = base;  *p && w + 1 < outSize; ++p) out[w++] = *p;
+    if (w + 1 < outSize) out[w++] = ' ';
+    for (const char* p = title; *p && w + 1 < outSize; ++p) out[w++] = *p;
+    out[w] = '\0';
+}
+
 const char* Champion::affixName(u8 singleBit) {
     switch (singleBit) {
         case ChampAffix::MOLTEN:      return "Molten";

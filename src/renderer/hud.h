@@ -27,6 +27,16 @@ namespace HUD {
     void drawHealthBar(u32 screenWidth, u32 screenHeight,
                        f32 health, f32 maxHealth);
 
+    // Enemy health bar across the TOP of the screen (Diablo 2 style): the name of what you are
+    // aiming at (or last hit), and how much of it is left.
+    //   name      — "Grimfang the Molten", "Skeleton", a boss's name…
+    //   subtitle  — affix list for a champion, or nullptr
+    //   hpFrac    — 0..1
+    //   accent    — name colour (champion tint / boss red / plain white)
+    void drawTargetBar(u32 screenWidth, u32 screenHeight,
+                       const char* name, const char* subtitle,
+                       f32 hpFrac, Vec3 accent, f32 fade);
+
     // Render weapon name text indicator (just a colored bar placeholder).
     void drawWeaponIndicator(u32 screenWidth, u32 screenHeight, u8 weaponSlot);
 
