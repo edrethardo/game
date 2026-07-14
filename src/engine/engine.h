@@ -455,6 +455,7 @@ private:
     Shader  m_basicShader;
     Shader  m_unlitShader;
     Shader  m_vignetteShader;  // fullscreen radial red damage vignette (BioShock-style)
+    Shader  m_dimShader;       // flat fullscreen scrim (in-game options overlay); see dim.frag
     Shader  m_particleShader;  // batched per-vertex-color shader for billboard particles
     Mesh    m_cubeMesh;
     Mesh    m_quadMesh;   // flat quad for billboard sprites

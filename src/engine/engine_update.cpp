@@ -311,6 +311,11 @@ void Engine::update(f32 dt) {
                 // mid-run. They live in GameState::MENU, so we leave IN_GAME and flag WHY, and the
                 // BACK handler in engine_menu.cpp brings us straight back to this paused game.
                 // The world is untouched: nothing is torn down by the state switch.
+                // Stay in IN_GAME: the options screens are drawn as an OVERLAY over the live, frozen
+                // scene (see render() and the optionsFromPause branch at the top of update()).
+                // Switching to GameState::MENU would have worked, but renderTransitionScreens
+                // early-outs on MENU and never draws the world — the player would be looking at the
+                // title backdrop, which reads as "I left my run" rather than "I paused it".
                 m_menu.optionsFromPause = true;
                 // confirmQuit MUST be cleared: the pause handler runs early in update() and RETURNS
                 // whenever it is set, so leaving it true would swallow every input before the options
@@ -319,7 +324,6 @@ void Engine::update(f32 dt) {
                 m_menu.subState     = 3;   // options category list
                 m_menu.subSelection = 0;
                 m_menu.bindCapture  = false;
-                m_gameState = GameState::MENU;
                 Input::setRelativeMouseMode(false);   // the options screens are cursor-driven
             } else if (canCloseLobby && m_menu.subSelection == iCloseLobby) {
                 // Close Lobby — stop advertising + refuse new joiners; the game continues over the relay
@@ -366,6 +370,14 @@ void Engine::update(f32 dt) {
         }
         Input::setActivePlayer(0); // restore default
     }
+    // Options opened from the pause menu: the world is frozen (no gameUpdate, no shared systems) and
+    // every input goes to the menu. This sits BEFORE the pause handler below, which would otherwise
+    // eat ESC and re-open the pause overlay instead of letting MENU_BACK leave the options screen.
+    if (m_gameState == GameState::IN_GAME && m_menu.optionsFromPause) {
+        updateMenu(dt);
+        return;
+    }
+
     if (anyPause) {
         // Inventory open: gamepad minus (-) skips the pause handler entirely
         // so it falls through to drop-all in updateInventoryInteraction.

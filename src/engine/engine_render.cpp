@@ -829,6 +829,25 @@ void Engine::render(f32 alpha) {
     // visual-only interpolation applied above is discarded — no manual restore needed.
     swapInPlayer(0);
 
+    if (m_gameState == GameState::IN_GAME && m_menu.optionsFromPause) {
+        // Scrim first. The options screens are mostly thin text (the key-binding list especially) and
+        // would be unreadable straight over a lit dungeon — but a fully opaque backdrop would hide the
+        // run, which is the whole thing we are trying not to do. 0.80 alpha reads cleanly while the
+        // scene stays plainly visible behind it.
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        drawScreenQuad(sw, sh, {0.02f, 0.02f, 0.04f, 0.80f}, m_dimShader);
+
+        // renderMenu() draws no title on the options substates (3, 15-18), so what lands on top is
+        // exactly the options UI and nothing else.
+        renderMenu();
+        HUD::flush(sw, sh);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+    }
+
     // Service a pending screenshot now (F8 or the --screenshot-interval auto-timer): the full frame
     // (3D scene, and HUD unless F10 hid it) is composited but not yet presented, so glReadPixels sees
     // exactly what's on screen. Written to the CWD as screenshot_NNNN.png using a monotonic counter
@@ -844,6 +863,18 @@ void Engine::render(f32 alpha) {
         std::snprintf(path, sizeof(path), "screenshot_%s_%02u.png", ts, ++m_screenshotSeq);
         Screenshot::capture(path, sw, sh);
     }
+
+    // Options opened from the pause menu: draw the real options screens OVER the live (frozen) scene.
+    //
+    // Composited here, at the very end, so it lands on top of the finished frame — world, HUD and
+    // all — and beneath nothing. The alternative was switching to GameState::MENU, but
+    // renderTransitionScreens early-outs there and never draws the world, so the player would be
+    // staring at the title backdrop with their run invisible behind it. A paused game should still
+    // look like the game.
+    //
+    // A dim scrim goes down first: the options text is thin and would be unreadable over a lit
+    // dungeon. renderMenu() draws no title on the options substates (3, 15-18), so what lands here
+    // is exactly the options UI and nothing else.
 
     GLContext::swapBuffers(Window::getHandle());
 }

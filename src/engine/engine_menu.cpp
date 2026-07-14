@@ -1119,11 +1119,12 @@ void Engine::updateMenu(f32 dt) {
             // Opened from the pause menu? Go back to the PAUSED GAME, not the main menu — the run is
             // still loaded and dropping the player at the title screen would look like it was lost.
             if (m_menu.optionsFromPause) {
+                // We never left IN_GAME — the options were an overlay on the frozen scene. Just
+                // hand the screen back to the pause menu.
                 m_menu.optionsFromPause = false;
                 m_menu.subState     = 0;
                 m_menu.subSelection = 0;   // highlight "Continue Playing" on return
                 m_menu.confirmQuit  = true;            // re-open the pause overlay
-                m_gameState = GameState::IN_GAME;
                 AudioSystem::play(SfxId::UI_BACK);
                 return;
             }

@@ -230,6 +230,9 @@ void Engine::init() {
     // Reuses unlit.vert (it forwards UVs); only the fragment stage differs.
     m_vignetteShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
                                           ASSET_PATH("assets/shaders/vignette.frag"));
+    // Flat scrim for the in-game options overlay. Shares unlit.vert; dim.frag just emits u_color.
+    m_dimShader = ShaderSystem::load(ASSET_PATH("assets/shaders/unlit.vert"),
+                                     ASSET_PATH("assets/shaders/dim.frag"));
     m_particleShader = ShaderSystem::load(ASSET_PATH("assets/shaders/particle.vert"),
                                            ASSET_PATH("assets/shaders/particle.frag"));
 
@@ -313,6 +316,7 @@ void Engine::shutdown() {
     ShaderSystem::destroy(m_basicShader);
     ShaderSystem::destroy(m_unlitShader);
     ShaderSystem::destroy(m_vignetteShader);
+    ShaderSystem::destroy(m_dimShader);
     ShaderSystem::destroy(m_particleShader);
 
     FontSystem::shutdown();
