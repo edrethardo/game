@@ -783,6 +783,17 @@ void Engine::tickLootGoblins(f32 dt) {
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         Entity& e = m_entities.entities[m_entities.activeList[a]];
         if (!(e.flags & ENT_LOOT_GOBLIN) || (e.flags & ENT_DEAD)) continue;
+
+        // Stand up the instant the chase starts: swap the seated hoard-guarding mesh for the
+        // runner and restore the full-height hitbox (both replicated — see spawnLootGoblin's pose
+        // note). Done here rather than in Combat::applyDamage because combat code has no access to
+        // the engine's mesh ids; one tick after the provoking hit is imperceptible. The next
+        // snapEntityToFloor re-seats the taller box on the ground.
+        if (e.aiState == AIState::FLEE && e.meshId == m_goblinSitMeshId) {
+            e.meshId = m_goblinMeshId;
+            e.halfExtents.y = Goblin::RUN_HALF_HEIGHT;
+        }
+
         // Only a FLEEING goblin bleeds. The loot shakes out of the sack as it runs — an un-provoked
         // one sitting on its hoard would otherwise quietly drip items onto the floor for free, and
         // the player could just stand back and farm it without ever swinging.
@@ -2545,6 +2556,27 @@ void Engine::pushPlayerFromEntities() {
             f32 pushX = (e.halfExtents.x + PLAYER_HALF_WIDTH) - fabsf(toPlayer.x);
             f32 pushZ = (e.halfExtents.z + PLAYER_HALF_WIDTH) - fabsf(toPlayer.z);
             if (pushX > 0.0f && pushZ > 0.0f) {
+                // A RUNNING loot goblin sheds the player SIDEWAYS, never along its heading. The
+                // minimal-penetration push below re-resolves along the goblin's travel axis every
+                // tick while it advances, so a head-on goblin used to bulldoze the player in front
+                // of it for the whole contact — a free stationary kill riding its nose. Pushing
+                // perpendicular to its velocity (toward whichever flank the player is already on)
+                // pops the player off its path and lets it slip past. Seated/stationary goblins
+                // (velocity ~0) fall through to the normal axis push like everything else.
+                if (e.flags & ENT_LOOT_GOBLIN) {
+                    Vec3 v = {e.velocity.x, 0.0f, e.velocity.z};
+                    if (lengthSq(v) > 0.01f) {
+                        v = normalize(v);
+                        const f32 along = toPlayer.x * v.x + toPlayer.z * v.z;
+                        Vec3 lat = {toPlayer.x - v.x * along, 0.0f, toPlayer.z - v.z * along};
+                        // Player dead-center on the path has no lateral component — pick a flank.
+                        if (lengthSq(lat) < 1e-4f) lat = {v.z, 0.0f, -v.x};
+                        lat = normalize(lat);
+                        const f32 depth = fminf(pushX, pushZ);
+                        tryPushPlayerXZ(m_localPlayer, m_level.grid, lat.x * depth, lat.z * depth);
+                        continue;
+                    }
+                }
                 // Safety net — entities are solid, push the player out fully. The push is applied
                 // through tryPushPlayerXZ, so an enemy can crowd the player against a wall but can
                 // never drive them into it; when the minimal-penetration axis is blocked by geometry

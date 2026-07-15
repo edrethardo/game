@@ -221,6 +221,7 @@ void Engine::initAssets() {
     m_meshIdSpider   = findMeshByName("spider");
     m_meshIdChest    = findMeshByName("chest");
     m_goblinMeshId   = findMeshByName("goblin");
+    m_goblinSitMeshId = findMeshByName("goblin_sit");
     m_shrineMeshId   = findMeshByName("shrine");
     m_meshIdHuman    = findMeshByName("human");
     m_meshIdSword    = findMeshByName("sword");

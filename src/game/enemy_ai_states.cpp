@@ -8,6 +8,7 @@
 
 #include "game/enemy_ai_internal.h"
 #include "game/game_constants.h"
+#include "game/floor_event.h"   // Goblin:: tunables (the FLEE serpentine)
 #include <cmath>
 #include <cstdlib>
 
@@ -105,9 +106,11 @@ void updateHostileStates(Entity& e, u32 i,
     switch (e.aiState) {
 
     case AIState::IDLE: {
-        // A loot goblin guards its hoard and does nothing else until it is hit. It has no attack at
-        // all (damage 0, attackRange 0), so letting the normal aggro run would have it chase the
-        // player around harmlessly. Combat::applyDamage is what starts the chase.
+        // A loot goblin SITS on its hoard (seated mesh + lowered halfExtents, set at spawn) and
+        // does nothing else until it is hit — the early break also skips the idle roam below, which
+        // is what keeps it planted. It has no attack at all (damage 0, attackRange 0), so letting
+        // the normal aggro run would have it chase the player around harmlessly.
+        // Combat::applyDamage is what starts the chase; tickLootGoblins stands it up.
         if (e.flags & ENT_LOOT_GOBLIN) break;
 
         // Idle roaming — enemies wander slowly when no target detected.
@@ -829,21 +832,18 @@ void updateHostileStates(Entity& e, u32 i,
     // (the obvious candidate to reuse) auto-exits to CHASE the moment a player is inside
     // detectionRange, so a goblin built on it would turn and fight the instant you got close.
     case AIState::FLEE: {
-        // It runs for the EXIT, not just "somewhere over there".
+        // Frantic panic scatter (Diablo-3 style), not a beeline. The previous version steered
+        // along the exit flow field "so it has a destination" — which in practice marched every
+        // goblin straight to the exit door and PARKED it there once the field zeroed out (the flow
+        // is zero on the exit cell), which is exactly where the player ends every floor anyway.
+        // Now it has no destination at all: it runs away from the nearest player in a serpentine
+        // of random swerves, and the steering probe below prefers OPEN floor via the clearance
+        // field — which is the one real job (don't corner yourself) the flow field was doing.
         //
-        // The first version fled from `targetPos` — and that was a real bug: the AI re-targets onto
+        // Flee from the nearest PLAYER explicitly, never from `targetPos`: the AI re-targets onto
         // friendly NPCs (see the NPC-retarget block in enemy_ai.cpp), so `targetPos` is not
-        // necessarily the player. A goblin fleeing an NPC would happily sprint straight AT you.
-        // It also had no destination, so it eventually cornered itself and became a free kill.
-        //
-        // Now: follow the BFS flow field to the floor exit (the same field the friendly NPCs use to
-        // march out), and BIAS that heading away from the nearest player. It makes for a real chase
-        // — the goblin is going somewhere, it will not trap itself, and cutting it off is on you.
-        //
-        // Flee from the nearest PLAYER explicitly, never from `targetPos`. targetPlayer is the
-        // nearest player the AI picked; it only differs from `player` in split-screen. When the AI
-        // has re-targeted an NPC, targetPos points at the NPC — which is exactly the trap this
-        // avoids — so fall back to the primary player rather than trusting it.
+        // necessarily the player — a goblin fleeing an NPC would happily sprint straight AT you.
+        // targetPlayer only differs from `player` in split-screen.
         const Vec3 fleeFrom = (!targetIsNPC && targetPlayer) ? targetPlayer->position
                                                              : player.position;
         Vec3 away = e.position - fleeFrom;
@@ -851,19 +851,30 @@ void updateHostileStates(Entity& e, u32 i,
         away = (lengthSq(away) > 0.01f) ? normalize(away)
                                         : Vec3{1.0f, 0.0f, 0.0f};  // stood on: bolt, don't freeze
 
-        // Where the exit is, from here. Zero if the field is unbuilt or we're on the exit cell.
-        Vec3 flow = LevelGridSystem::flowDirection(grid, e.position);
-        flow.y = 0.0f;
-        const bool haveFlow = lengthSq(flow) > 0.001f;
-        if (haveFlow) flow = normalize(flow);
-
-        // Blend: mostly "head for the door", partly "get away from them". Without the away-bias it
-        // would run past you to reach the exit; without the flow it would just back into a corner.
-        Vec3 desired = haveFlow ? normalize(flow * 0.75f + away * 0.55f) : away;
+        // The serpentine. Every JINK_MIN..JINK_MAX seconds the heading re-rolls as `away` swerved
+        // by a random ±JINK_ARC; between re-rolls it steers its CURRENT heading (persisted in
+        // velocity — no extra state needed) blended back toward `away`, so it visibly zig-zags
+        // while still, on average, getting away. flybyTimer is free scratch in this state: only
+        // FLYBY (bats) and the IDLE roam use it, and the goblin is neither. A knockback zeroes
+        // velocity on expiry, which lands in the !haveHeading branch — i.e. being smacked makes it
+        // pick a fresh panic direction immediately, which is exactly the right look.
+        e.flybyTimer -= dt;
+        Vec3 desired;
+        const Vec3 velDir = {e.velocity.x, 0.0f, e.velocity.z};
+        const bool haveHeading = lengthSq(velDir) > 0.01f;
+        if (e.flybyTimer <= 0.0f || !haveHeading) {
+            e.flybyTimer = Goblin::JINK_MIN
+                         + (std::rand() % 100) * 0.01f * (Goblin::JINK_MAX - Goblin::JINK_MIN);
+            const f32 swerve = ((std::rand() % 201) - 100) * 0.01f * Goblin::JINK_ARC;
+            const f32 cs = cosf(swerve), sn = sinf(swerve);
+            desired = { away.x * cs - away.z * sn, 0.0f, away.x * sn + away.z * cs };
+        } else {
+            desired = normalize(velDir * 0.6f + away * 0.4f);
+        }
 
         // Steer around walls: probe a fan of headings and take the most open one nearest `desired`.
         Vec3  bestDir  = desired;
-        f32   bestOpen = -1.0f;
+        f32   bestScore = -1e9f;
         constexpr f32 kProbe = 1.6f;
         for (s32 s = -3; s <= 3; s++) {
             const f32 a = static_cast<f32>(s) * 0.4f;           // ±69° in ~23° steps
@@ -871,13 +882,22 @@ void updateHostileStates(Entity& e, u32 i,
             Vec3 d = { desired.x * ca - desired.z * sa, 0.0f, desired.x * sa + desired.z * ca };
             Vec3 probe = e.position + d * kProbe;
             u32 gx, gz;
-            const bool blocked = LevelGridSystem::worldToGrid(grid, probe, gx, gz)
-                               ? LevelGridSystem::isSolid(grid, gx, gz) : true;
-            // Open headings win; among those, prefer the one closest to `desired`, and never pick a
-            // heading that walks back INTO the player.
+            const bool inGrid  = LevelGridSystem::worldToGrid(grid, probe, gx, gz);
+            const bool blocked = inGrid ? LevelGridSystem::isSolid(grid, gx, gz) : true;
+            // Openness: the clearance field (per-cell distance to the nearest wall) rewards
+            // headings toward open floor, so the panic never serpentines it into a dead end it
+            // could see past. Capped so away-from-player still dominates in the open.
+            f32 open = 0.0f;
+            if (inGrid) {
+                const u8 clr = LevelGridSystem::clearanceAt(grid, gx, gz);
+                open = static_cast<f32>(clr > 6 ? 6 : clr) * (1.0f / 6.0f);
+            }
+            // Open headings win; among those, prefer the one closest to `desired`, and never pick
+            // a heading that walks back INTO the player.
             const f32 towardPlayer = -(d.x * away.x + d.z * away.z);   // +1 = straight at them
-            f32 score = (blocked ? -1.0f : 1.0f) - fabsf(a) * 0.1f - fmaxf(towardPlayer, 0.0f) * 0.8f;
-            if (score > bestOpen) { bestOpen = score; bestDir = d; }
+            f32 score = (blocked ? -1.0f : 1.0f) + open * 0.45f
+                      - fabsf(a) * 0.1f - fmaxf(towardPlayer, 0.0f) * 0.8f;
+            if (score > bestScore) { bestScore = score; bestDir = d; }
         }
 
         e.velocity.x = bestDir.x * effectiveSpeed;

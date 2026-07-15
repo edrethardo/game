@@ -1145,20 +1145,32 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
 {
     if (dungeon.roomCount < 2) return;
 
-    // Farthest room from the spawn room, so you have to commit to the chase rather than trip over it.
-    u32 best = 1; f32 bestDist = -1.0f;
+    // Farthest room from the spawn room, so you have to commit to the chase rather than trip over
+    // it — but NEVER the exit room. The farthest room is very often exactly where the exit door
+    // lands, which parked the goblin at the exit on most floors: the player tripped over it while
+    // leaving instead of ever choosing to hunt it.
+    const u32 doorGX = static_cast<u32>(m_level.floorDoorPos.x / m_level.grid.cellSize);
+    const u32 doorGZ = static_cast<u32>(m_level.floorDoorPos.z / m_level.grid.cellSize);
+    u32 best = 0xFFFFFFFF; f32 bestDist = -1.0f;
     const DungeonRoom& start = dungeon.rooms[0];
     for (u32 r = 1; r < dungeon.roomCount; r++) {
         const DungeonRoom& room = dungeon.rooms[r];
+        const bool holdsExit = doorGX >= room.x && doorGX < room.x + room.w &&
+                               doorGZ >= room.z && doorGZ < room.z + room.d;
+        if (holdsExit) continue;
         f32 dx = static_cast<f32>(room.x) - static_cast<f32>(start.x);
         f32 dz = static_cast<f32>(room.z) - static_cast<f32>(start.z);
         f32 d2 = dx * dx + dz * dz;
         if (d2 > bestDist) { bestDist = d2; best = r; }
     }
+    // Two-room floor whose only other room holds the exit: better a goblin at the exit than none.
+    if (best == 0xFFFFFFFF) best = 1;
     const DungeonRoom& room = dungeon.rooms[best];
 
+    // Center y = floor + the SEATED half height — it spawns sitting (see below), and its IDLE
+    // state deliberately runs no movement/floor-snap, so a wrong height here would just persist.
     Vec3 pos = { (room.x + room.w * 0.5f) * m_level.grid.cellSize,
-                 room.floorHeight + 0.5f,
+                 room.floorHeight + Goblin::SIT_HALF_HEIGHT,
                  (room.z + room.d * 0.5f) * m_level.grid.cellSize };
 
     const u32 effFloor = m_level.currentFloor + m_difficulty * 50;
@@ -1172,13 +1184,18 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
     Entity* g = handleGet(m_entities, h);
     if (!g) { LOG_WARN("LootGoblin: entity pool full — event skipped"); return; }
 
-    g->meshId     = m_goblinMeshId;
+    // Seated pose while idle: the sit MESH and the sit HALF-HEIGHT travel together — the renderer
+    // stretches any mesh to 2*halfExtents.y, so one without the other is either a stretched-back-
+    // to-standing statue or a squashed runner. Both fields are on the wire (SnapEntity), so co-op
+    // guests see the same seated goblin. tickLootGoblins stands it up when FLEE begins.
+    g->meshId     = m_goblinSitMeshId;
+    g->halfExtents.y = Goblin::SIT_HALF_HEIGHT;
     g->materialId = MaterialSystem::getIdByName("goblin");
     g->enemyType  = EnemyType::GENERIC;
     g->enemyRole  = EnemyRole::NORMAL;
     g->flags     |= ENT_LOOT_GOBLIN;      // survives death, unlike aiState — the drop handler needs it
-    // Starts IDLE, guarding its hoard. It only bolts once the player ATTACKS it (Combat::applyDamage
-    // flips it to FLEE) — a goblin already sprinting for the exit the instant the floor loads is a
+    // Starts IDLE, sitting on its hoard. It only bolts once the player ATTACKS it (Combat::applyDamage
+    // flips it to FLEE) — a goblin already scattering the instant the floor loads is a
     // chase the player never chose to start, and usually never even sees.
     g->aiState    = AIState::IDLE;
     g->level      = static_cast<u16>(effFloor);

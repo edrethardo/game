@@ -37,18 +37,36 @@ struct FloorEventTable {
 };
 
 // --- Loot goblin tunables ---
-// The chase is the content. It has to be fast enough that you must commit to catching it, fragile
-// enough that committing works, and short-lived enough that the choice actually costs you something.
+// The chase is the content. It has to be fast enough that you must commit to catching it, meaty
+// enough that a couple of opportunistic hits don't end it on the spot (killing it inside the
+// escape window is a sustained-DPS check), and short-lived enough that the choice costs you.
 namespace Goblin {
     constexpr f32 SPEED_MULT     = 1.35f;  // of the player's base speed — outruns you if you dawdle
-    constexpr f32 HEALTH         = 60.0f;  // scaled by the floor's HP curve at spawn
+    constexpr f32 HEALTH         = 1200.0f; // scaled by the floor's HP curve at spawn. Was 60 — one
+                                            // playtest showed it evaporating to incidental swings
+                                            // before the chase ever happened
     constexpr f32 ESCAPE_SECONDS = 22.0f;  // counted from the moment it is ATTACKED, not from spawn:
-                                           // it idles on its hoard until provoked, then has this long
-                                           // to reach the exit, paying nothing further if it makes it
+                                           // it sits on its hoard until provoked, then has this long
+                                           // of frantic scatter; if it survives it, it vanishes
+                                           // with whatever it has not bled — paying nothing further
     constexpr f32 BLEED_SECONDS  = 2.0f;   // one item dropped per this interval while alive
     constexpr u8  BLEED_MAX      = 4;      // items it can bleed before it is out of pocket
     constexpr u8  DEATH_DROPS    = 3;      // the rest of the sack, if you actually catch it
     constexpr f32 DETECT_RANGE   = 18.0f;  // it notices you from a long way off
+
+    // Poses. The renderer stretches every entity mesh to 2*halfExtents.y (and halfExtents is on
+    // the wire), so the seated/running swap is a mesh id AND a half-height together — the mesh
+    // alone would be stretched right back to standing height.
+    constexpr f32 SIT_HALF_HEIGHT = 0.33f; // seated silhouette is 8 voxels vs the runner's 12
+    constexpr f32 RUN_HALF_HEIGHT = 0.5f;  // the spawn-time hitbox of the running pose
+
+    // Panic serpentine (the D3-style frantic scatter). Every JINK_MIN..JINK_MAX seconds the flee
+    // heading is re-rolled as "directly away from the player" swerved by a random angle up to
+    // ±JINK_ARC — big enough to visibly zig-zag, small enough that it never charges back through
+    // the player on its own (the steering probe additionally penalizes headings toward them).
+    constexpr f32 JINK_MIN = 0.35f;
+    constexpr f32 JINK_MAX = 0.80f;
+    constexpr f32 JINK_ARC = 1.2f;   // radians (~69 degrees)
 }
 
 namespace FloorEvent {

@@ -1076,6 +1076,7 @@ private:
     // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
     void tickLootGoblins(f32 dt);
     u8   m_goblinMeshId = 0;
+    u8   m_goblinSitMeshId = 0;   // seated idle pose — swapped for m_goblinMeshId when provoked
 
     // --- Target health bar (Diablo 2 style, top of screen) ---
     // Preference: the enemy you are AIMING at; if none, the last one you hit, held for a moment so

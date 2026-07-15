@@ -39,7 +39,8 @@ static constexpr MeshAsset kMeshAssets[] = {
     {"bat",            "assets/meshes/bat.obj"},
     {"pillar",         "assets/meshes/pillar.obj"},
     {"chest",          "assets/meshes/chest.obj"},
-    {"goblin",         "assets/meshes/goblin.obj"},   // loot goblin (floor event)
+    {"goblin",         "assets/meshes/goblin.obj"},   // loot goblin (floor event) — running pose
+    {"goblin_sit",     "assets/meshes/goblin_sit.obj"}, // loot goblin seated idle (swapped on provoke)
     {"shrine",         "assets/meshes/shrine.obj"},   // walk-up buff shrine
     {"sword",          "assets/meshes/sword.obj"},
     {"dagger",         "assets/meshes/dagger.obj"},

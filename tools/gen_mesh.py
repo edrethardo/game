@@ -1173,6 +1173,52 @@ def gen_goblin(height=1.1):
     return mb
 
 
+def gen_goblin_sit(height=1.1):
+    """Loot goblin, SEATED — the idle pose while it guards its hoard (D3-style: it sits on the
+    floor beside the sack until provoked, then the engine swaps to the running mesh).
+    Same voxel scale as gen_goblin (height/12) so the two poses read as the same creature;
+    the seated silhouette tops out at 8 voxels. Origin at feet/ground (Y=0)."""
+    mb = MeshBuilder()
+    vs = height / 12.0
+    filled = set()
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+    # Head, hunched over the knees
+    fill_box(-1, 5, -2, 3, 3, 3)
+    # Ears — same silhouette read as the running pose
+    fill_box(-2, 7, -1, 1, 1, 2)
+    fill_box(2, 7, -1, 1, 1, 2)
+    # Snout
+    fill_box(0, 5, -3, 1, 1, 1)
+    # Torso, slumped
+    fill_box(-1, 2, -1, 3, 3, 2)
+    # THE SACK — resting on the ground behind it now, still oversized
+    fill_box(-2, 0, 1, 5, 5, 3)
+    fill_box(-1, 5, 2, 3, 1, 2)    # cinched neck of the sack
+    # Pelvis flat on the ground
+    fill_box(-1, 0, -1, 3, 2, 2)
+    # Legs stretched out in front (-Z), flat on the floor
+    fill_box(-1, 0, -3, 1, 1, 2)
+    fill_box(1, 0, -3, 1, 1, 2)
+    # Feet flopped up at the ends
+    fill_box(-1, 1, -4, 1, 1, 1)
+    fill_box(1, 1, -4, 1, 1, 1)
+    # Arms resting down the sides onto the legs
+    fill_box(-2, 2, -1, 1, 3, 1)
+    fill_box(2, 2, -1, 1, 3, 1)
+    # Hands on the shins
+    fill_box(-2, 1, -2, 1, 1, 2)
+    fill_box(2, 1, -2, 1, 1, 2)
+
+    ox = -0.5 * vs
+    oz = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, oz))
+    return mb
+
+
 def gen_necromancer(height=2.0):
     """Necromancer — tall hooded skeleton mage. Robed, thin arms.
     Origin at feet (Y=0). 18 voxels tall."""
@@ -5022,6 +5068,11 @@ MESH_TYPES = {
         "func": gen_goblin,
         "desc": "Loot goblin — small hunched thief with big ears and a swollen sack. Params: --height",
         "default_file": "goblin.obj",
+    },
+    "goblin_sit": {
+        "func": gen_goblin_sit,
+        "desc": "Loot goblin, seated idle pose — sits on the floor beside its sack. Params: --height",
+        "default_file": "goblin_sit.obj",
     },
     "necromancer": {
         "func": gen_necromancer,
