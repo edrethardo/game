@@ -168,13 +168,15 @@ void PlayerController::update(Player& player, f32 dt) {
         effectiveSpeed *= 0.4f; // 60% slow
         player.slowTimer -= dt;
     }
-    // Freeze stops all movement — predicted locally to match the server
-    // (updateNetPlayerFromInput zeroes speed when frozen). Without this the client kept
-    // walking at full speed while the server held position → frozen players slid forward
-    // then snapped back. freezeTimer decay stays server-authoritative + snapshot-driven
-    // (we apply the effect but don't tick the timer here), same as slow's ownership split.
+    // Freeze is a 95% slow (a frozen player can still creep, not walk) — predicted locally to
+    // match the server (updateNetPlayerFromInput applies the same factor; the two MUST stay
+    // identical or a frozen client slides forward then snaps back on reconcile). Deliberately
+    // not a full stop anymore: an immobilized player just watches themselves die, a crawling
+    // one still gets to fight for the escape. freezeTimer decay stays server-authoritative +
+    // snapshot-driven (we apply the effect but don't tick the timer here), same as slow's
+    // ownership split.
     if (player.freezeTimer > 0.0f) {
-        effectiveSpeed = 0.0f;
+        effectiveSpeed *= 0.05f;
     }
 
     // Merge keyboard + left stick for movement
@@ -304,9 +306,10 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
         // PlayerController::update / serverNetPost to avoid the previous double-decay where
         // the client decayed slowTimer twice per frame — once here and once in update()).
     }
-    // Freeze stops all movement
+    // Freeze is a 95% slow — MUST mirror PlayerController::update's factor exactly (this is the
+    // server drain AND the reconcile-replay step; a mismatch rubber-bands every frozen client).
     if (np.freezeTimer > 0.0f) {
-        effectiveSpeed = 0.0f;
+        effectiveSpeed *= 0.05f;
     }
     // (M-3) Soul Harvest ring: +5% speed per stack while the buff window is active. Mirrors
     // PlayerController::update's host bonus at player.cpp:104-106 so a remote with stacks

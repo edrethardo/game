@@ -50,7 +50,7 @@ struct Player {
     f32  poisonDps        = 0.0f;
     f32  burnTimer        = 0.0f;
     f32  burnDps          = 0.0f;
-    f32  freezeTimer      = 0.0f;  // halves movement speed
+    f32  freezeTimer      = 0.0f;  // 95% slow while active (5% speed — was a full immobilize)
     f32  curseTimer       = 0.0f;  // necromancer curse — increased damage taken
     u8   curseStacks      = 0;     // 5% increased damage per stack, max 4
     f32  overdriveTimer   = 0.0f;  // Mech Overdrive buff countdown (damage/speed boost)
