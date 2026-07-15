@@ -2189,6 +2189,15 @@ bool Engine::triggerFloorDescent() {
         m_localPlayer.baseMaxHealth *= 1.015f;       // grow the base; maxHealth is derived from it
         Inventory::refreshMaxHealth(m_localPlayer, m_inventories[m_localPlayerIndex]);
         m_localPlayer.health = m_localPlayer.maxHealth;
+        // Write-through to the per-player ARRAY, not just the alias: this function has a second
+        // caller — handleDescendRequest, fired from a net callback when a REMOTE client presses
+        // the door — and net callbacks run OUTSIDE the swapIn/swapOut window, where m_localPlayer
+        // is a dead copy that the next swapInPlayer overwrites from the array. An alias-only write
+        // here silently cost the HOST both the descend heal and the +1.5% growth whenever a client
+        // triggered the descent (the local door press, inside gameUpdate, never hit this).
+        m_localPlayers[m_localPlayerIndex].baseMaxHealth = m_localPlayer.baseMaxHealth;
+        m_localPlayers[m_localPlayerIndex].maxHealth     = m_localPlayer.maxHealth;
+        m_localPlayers[m_localPlayerIndex].health        = m_localPlayer.health;
         m_skillStates[m_localPlayerIndex].maxEnergy *= 1.015f;
         m_skillStates[m_localPlayerIndex].energy = m_skillStates[m_localPlayerIndex].maxEnergy;
     }
