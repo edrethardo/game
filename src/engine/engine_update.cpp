@@ -783,17 +783,6 @@ void Engine::tickLootGoblins(f32 dt) {
     for (u32 a = 0; a < m_entities.activeCount; a++) {
         Entity& e = m_entities.entities[m_entities.activeList[a]];
         if (!(e.flags & ENT_LOOT_GOBLIN) || (e.flags & ENT_DEAD)) continue;
-
-        // Stand up the instant the chase starts: swap the seated hoard-guarding mesh for the
-        // runner and restore the full-height hitbox (both replicated — see spawnLootGoblin's pose
-        // note). Done here rather than in Combat::applyDamage because combat code has no access to
-        // the engine's mesh ids; one tick after the provoking hit is imperceptible. The next
-        // snapEntityToFloor re-seats the taller box on the ground.
-        if (e.aiState == AIState::FLEE && e.meshId == m_goblinSitMeshId) {
-            e.meshId = m_goblinMeshId;
-            e.halfExtents.y = Goblin::RUN_HALF_HEIGHT;
-        }
-
         // Only a FLEEING goblin bleeds. The loot shakes out of the sack as it runs — an un-provoked
         // one sitting on its hoard would otherwise quietly drip items onto the floor for free, and
         // the player could just stand back and farm it without ever swinging.

@@ -144,16 +144,18 @@ more eventful. An unknown id in the JSON degrades to "no event" and logs. `spawn
 rebuilds the level mesh, so anything placed earlier can be swallowed by the arena expansion.
 
 **Loot goblin** — `AIState::FLEE` (never attacks, no exit from the state; `RETREAT` could not be reused
-because it auto-exits to CHASE inside `detectionRange`). It **sits** on its hoard until first hit
-(D3-style): spawn uses the `goblin_sit` mesh + `Goblin::SIT_HALF_HEIGHT`, and `tickLootGoblins` swaps
-to the running mesh + full half-height when FLEE begins — mesh and half-height MUST travel together
-(the renderer stretches any mesh to `2*halfExtents.y`; both are on the wire, so guests see the pose).
+because it auto-exits to CHASE inside `detectionRange`). It stands **motionless** over its hoard until
+first hit, **channeling an escape portal** — the portal is a pure render-side line effect
+(`engine_render_effects.cpp`, beside the Source portal) keyed on replicated state (`ENT_LOOT_GOBLIN` +
+`aiState==IDLE` + yaw/pos, all in `SnapEntity`): no entity slot, no wire change, not interactable, and
+it vanishes by construction the instant the goblin leaves IDLE (flees/dies/escapes).
 FLEE is a **frantic serpentine**, not a beeline: away-from-nearest-player re-swerved every
 `JINK_MIN..MAX` s by ±`JINK_ARC` (heading persists in `velocity`; `flybyTimer` is the free jink clock),
 with the probe fan biased toward open floor via the **clearance field** — do NOT reintroduce the exit
 flow-field steering; it marched every goblin to the exit door and parked it there. Spawn picks the
-farthest room from spawn **excluding the exit room** (same failure mode). It **bleeds** loot while
-chased and drops the rest if caught. Escape uses the generic `Entity::lifeTimer`, ticked in
+farthest room from spawn **excluding the exit room** (same failure mode). It **bleeds** random loot
+while chased and drops **3 guaranteed LEGENDARIES** if caught (`handleGoblinLootDrop` forces the
+rarity, boss/champion style). Escape uses the generic `Entity::lifeTimer`, ticked in
 `EntitySystem::tickTimers`; expiry sets `ENT_DEAD` directly and does **NOT** call `Combat::killEntity`,
 which always fires the death/loot callback — so an escaped goblin pays nothing, which is the whole
 point of the chase.

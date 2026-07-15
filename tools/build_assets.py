@@ -51,10 +51,6 @@ def build_meshes():
         # mesh missing from this list simply does not exist on CI or in a release build — the game
         # would ship a loot goblin and a shrine with no model at all.
         ["--type", "goblin",   "--height", "1.1", "--out", os.path.join(mesh_dir, "goblin.obj")],
-        # Same --height as the running goblin: the two poses share the voxel scale (height/12), so
-        # the seated silhouette is naturally shorter — the engine also lowers halfExtents while
-        # seated (the renderer stretches any mesh to 2*halfExtents.y, so mesh alone is not enough).
-        ["--type", "goblin_sit", "--height", "1.1", "--out", os.path.join(mesh_dir, "goblin_sit.obj")],
         ["--type", "shrine",   "--height", "2.0", "--out", os.path.join(mesh_dir, "shrine.obj")],
         ["--type", "bat",      "--wingspan", "1.0", "--out", os.path.join(mesh_dir, "bat.obj")],
         ["--type", "butcher",       "--height", "2.5", "--out", os.path.join(mesh_dir, "butcher.obj")],

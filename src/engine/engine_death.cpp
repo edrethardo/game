@@ -579,9 +579,24 @@ bool Engine::handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
 
     u8 dropped = 0;
     for (u8 i = 0; i < Goblin::DEATH_DROPS; i++) {
-        ItemInstance item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
-                                              m_affixDefs, m_affixDefCount);
+        // Every death drop is a guaranteed LEGENDARY — with 1200 base HP the kill is a committed
+        // DPS race against the escape clock, and the sack is what that race is for. Same
+        // re-roll-then-force-upgrade shape as the boss/champion payouts: roll until the def can
+        // legitimately BE legendary, then upgrade and re-roll its affixes at the new tier.
+        ItemInstance item;
+        for (u32 attempt = 0; attempt < 50; attempt++) {
+            item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
+                                     m_affixDefs, m_affixDefCount);
+            if (isItemEmpty(item)) break;
+            if (m_itemDefs[item.defId].maxRarity >= Rarity::LEGENDARY) break;
+        }
         if (isItemEmpty(item)) continue;
+        if (item.rarity < Rarity::LEGENDARY) {
+            item.rarity     = Rarity::LEGENDARY;
+            item.affixCount = 0;
+            const ItemDef& d = m_itemDefs[item.defId];
+            ItemGen::rollAffixes(item, lvl, d.slot, m_affixDefs, m_affixDefCount, d.weaponType);
+        }
         // Fan them out so the pile is readable rather than one item stacked on three others.
         const f32 ang = (6.2831853f * static_cast<f32>(i)) / static_cast<f32>(Goblin::DEATH_DROPS);
         Vec3 dropPos = pos + Vec3{ cosf(ang) * 0.6f, 0.5f, sinf(ang) * 0.6f };
@@ -593,7 +608,7 @@ bool Engine::handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                            item.defId < m_itemDefCount ? item.defId : 0xFFFF);
         dropped++;
     }
-    LOG_INFO("LootGoblin: caught — dropped %u item(s)", dropped);
+    LOG_INFO("LootGoblin: caught — dropped %u legendary item(s)", dropped);
     return true;   // never also roll the normal 40% table
 }
 

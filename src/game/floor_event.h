@@ -51,14 +51,10 @@ namespace Goblin {
                                            // with whatever it has not bled — paying nothing further
     constexpr f32 BLEED_SECONDS  = 2.0f;   // one item dropped per this interval while alive
     constexpr u8  BLEED_MAX      = 4;      // items it can bleed before it is out of pocket
-    constexpr u8  DEATH_DROPS    = 3;      // the rest of the sack, if you actually catch it
+    constexpr u8  DEATH_DROPS    = 3;      // the rest of the sack, if you actually catch it — every
+                                           // one a guaranteed LEGENDARY (engine_death.cpp forces the
+                                           // rarity, boss/champion style); the bleed stays random
     constexpr f32 DETECT_RANGE   = 18.0f;  // it notices you from a long way off
-
-    // Poses. The renderer stretches every entity mesh to 2*halfExtents.y (and halfExtents is on
-    // the wire), so the seated/running swap is a mesh id AND a half-height together — the mesh
-    // alone would be stretched right back to standing height.
-    constexpr f32 SIT_HALF_HEIGHT = 0.33f; // seated silhouette is 8 voxels vs the runner's 12
-    constexpr f32 RUN_HALF_HEIGHT = 0.5f;  // the spawn-time hitbox of the running pose
 
     // Panic serpentine (the D3-style frantic scatter). Every JINK_MIN..JINK_MAX seconds the flee
     // heading is re-rolled as "directly away from the player" swerved by a random angle up to

@@ -106,11 +106,11 @@ void updateHostileStates(Entity& e, u32 i,
     switch (e.aiState) {
 
     case AIState::IDLE: {
-        // A loot goblin SITS on its hoard (seated mesh + lowered halfExtents, set at spawn) and
-        // does nothing else until it is hit — the early break also skips the idle roam below, which
-        // is what keeps it planted. It has no attack at all (damage 0, attackRange 0), so letting
-        // the normal aggro run would have it chase the player around harmlessly.
-        // Combat::applyDamage is what starts the chase; tickLootGoblins stands it up.
+        // A loot goblin stands MOTIONLESS over its hoard, channeling its escape portal (a render-
+        // side effect keyed on exactly this state — see engine_render_effects.cpp), until it is
+        // hit — the early break also skips the idle roam below, which is what keeps it planted.
+        // It has no attack at all (damage 0, attackRange 0), so letting the normal aggro run would
+        // have it chase the player around harmlessly. Combat::applyDamage is what starts the chase.
         if (e.flags & ENT_LOOT_GOBLIN) break;
 
         // Idle roaming — enemies wander slowly when no target detected.

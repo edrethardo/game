@@ -403,6 +403,59 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
+    // --- Loot goblin escape portal — drawn while it stands channeling over its hoard ---
+    // Goblin-only flavor, NOT an interactable (contrast the two real portals above): the player
+    // can't use it, so there is no interact/priority plumbing — it exists purely so the idle
+    // goblin reads as "caught mid-escape" rather than parked. Keyed entirely on replicated state
+    // (ENT_LOOT_GOBLIN flag + IDLE aiState + yaw/pos, all in SnapEntity), so it needs no entity
+    // slot, no wire change, and vanishes BY CONSTRUCTION the instant the goblin flees, dies or
+    // escapes — every path leaves IDLE. Amber/gold (loot!), distinct from the green exit and the
+    // void-violet Source portal. CLIENTs read the interpolated pool, same switch as projPool above.
+    {
+        const EntityPool& portalPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
+                                                                      : m_entities;
+        for (u32 a = 0; a < portalPool.activeCount; a++) {
+            const Entity& g = portalPool.entities[portalPool.activeList[a]];
+            if (!(g.flags & ENT_LOOT_GOBLIN) || (g.flags & ENT_DEAD)) continue;
+            if (g.aiState != AIState::IDLE) continue;
+
+            // In front of the goblin along its facing, on the floor it stands on.
+            const Vec3 fwd = {sinf(g.yaw), 0.0f, cosf(g.yaw)};
+            const Vec3 pp  = {g.position.x + fwd.x * 1.4f,
+                              g.position.y - g.halfExtents.y,
+                              g.position.z + fwd.z * 1.4f};
+            const f32 t = static_cast<f32>(m_statsTimer);
+            const f32 pulse     = 0.5f + 0.5f * sinf(t * 3.0f);
+            const f32 fastPulse = 0.5f + 0.5f * sinf(t * 8.0f);
+
+            // Two counter-rotating rings, goblin-sized (the Source portal's construction at ~60%).
+            const Vec3 ringCol = {1.0f * pulse, 0.75f * pulse, 0.2f * pulse};
+            const f32  ringR   = 0.45f + fastPulse * 0.08f;
+            for (u32 s = 0; s < 12; s++) {
+                f32 a0 = static_cast<f32>(s) * (6.28318f / 12.0f) + t * 2.2f;
+                f32 a1 = a0 + (6.28318f / 12.0f);
+                DebugDraw::line(pp + Vec3{cosf(a0) * ringR, 0.7f, sinf(a0) * ringR},
+                                pp + Vec3{cosf(a1) * ringR, 0.7f, sinf(a1) * ringR}, ringCol);
+                f32 b0 = -a0, b1 = b0 - (6.28318f / 12.0f);   // counter-rotation
+                DebugDraw::line(pp + Vec3{cosf(b0) * ringR * 0.65f, 1.4f, sinf(b0) * ringR * 0.65f},
+                                pp + Vec3{cosf(b1) * ringR * 0.65f, 1.4f, sinf(b1) * ringR * 0.65f},
+                                ringCol);
+            }
+            // Channel wisps: three slow arcs from the goblin's hands toward the ring — the
+            // "it is summoning this" read.
+            const Vec3 hands = {g.position.x, g.position.y + 0.1f, g.position.z};
+            const Vec3 wispCol = {0.95f * fastPulse, 0.65f * fastPulse, 0.15f * fastPulse};
+            for (u32 w = 0; w < 3; w++) {
+                f32 ph  = t * 1.7f + static_cast<f32>(w) * 2.09f;
+                Vec3 mid = (hands + pp) * 0.5f;
+                mid.y += 0.6f + 0.15f * sinf(ph);
+                Vec3 tgt = pp + Vec3{cosf(ph) * ringR * 0.5f, 1.0f, sinf(ph) * ringR * 0.5f};
+                DebugDraw::line(hands, mid, wispCol);
+                DebugDraw::line(mid, tgt, wispCol);
+            }
+        }
+    }
+
     // --- Fire AoE effects (molotov splash) ---
     for (u32 i = 0; i < MAX_FIRE_FX; i++) {
         if (!m_fx.fireFX[i].active) continue;

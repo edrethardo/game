@@ -1167,10 +1167,10 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
     if (best == 0xFFFFFFFF) best = 1;
     const DungeonRoom& room = dungeon.rooms[best];
 
-    // Center y = floor + the SEATED half height — it spawns sitting (see below), and its IDLE
-    // state deliberately runs no movement/floor-snap, so a wrong height here would just persist.
+    // Center y = floor + half height. Its IDLE state deliberately runs no movement/floor-snap,
+    // so a wrong height here would just persist.
     Vec3 pos = { (room.x + room.w * 0.5f) * m_level.grid.cellSize,
-                 room.floorHeight + Goblin::SIT_HALF_HEIGHT,
+                 room.floorHeight + 0.5f,
                  (room.z + room.d * 0.5f) * m_level.grid.cellSize };
 
     const u32 effFloor = m_level.currentFloor + m_difficulty * 50;
@@ -1184,19 +1184,18 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
     Entity* g = handleGet(m_entities, h);
     if (!g) { LOG_WARN("LootGoblin: entity pool full — event skipped"); return; }
 
-    // Seated pose while idle: the sit MESH and the sit HALF-HEIGHT travel together — the renderer
-    // stretches any mesh to 2*halfExtents.y, so one without the other is either a stretched-back-
-    // to-standing statue or a squashed runner. Both fields are on the wire (SnapEntity), so co-op
-    // guests see the same seated goblin. tickLootGoblins stands it up when FLEE begins.
-    g->meshId     = m_goblinSitMeshId;
-    g->halfExtents.y = Goblin::SIT_HALF_HEIGHT;
+    g->meshId     = m_goblinMeshId;
     g->materialId = MaterialSystem::getIdByName("goblin");
     g->enemyType  = EnemyType::GENERIC;
     g->enemyRole  = EnemyRole::NORMAL;
     g->flags     |= ENT_LOOT_GOBLIN;      // survives death, unlike aiState — the drop handler needs it
-    // Starts IDLE, sitting on its hoard. It only bolts once the player ATTACKS it (Combat::applyDamage
-    // flips it to FLEE) — a goblin already scattering the instant the floor loads is a
-    // chase the player never chose to start, and usually never even sees.
+    // Starts IDLE: it stands motionless over its hoard, channeling its escape portal — the portal
+    // is a pure render-side effect keyed on this replicated state (ENT_LOOT_GOBLIN + IDLE + yaw are
+    // all on the wire), drawn in front of the goblin along its facing; see engine_render_effects.cpp.
+    // It only bolts once the player ATTACKS it (Combat::applyDamage flips it to FLEE, which is also
+    // the instant the portal effect vanishes — the summoning was interrupted). A goblin already
+    // scattering the instant the floor loads is a chase the player never chose to start, and
+    // usually never even sees.
     g->aiState    = AIState::IDLE;
     g->level      = static_cast<u16>(effFloor);
     g->maxHealth  = g->health;
