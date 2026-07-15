@@ -419,6 +419,24 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
     }
     budget -= entityBytes;
 
+    // World items are budgeted BEFORE projectiles (this is a clamp-priority order, not the wire
+    // order — the sections are still written players/entities/projectiles/items). They used to be
+    // last, and a Frozen-Orb barrage or boss bullet storm would eat the entire remaining budget:
+    // every piece of loot on the floor then vanished from the snapshot, the client read absence as
+    // DESPAWN, and the floor's items (plus their pickup-exclusivity state) blinked out until the
+    // storm passed. Items are bounded and tiny (64 x 46 B = 2,944 B worst case) and carry gameplay
+    // state; the tail of a projectile storm is the most numerous, least individually meaningful
+    // thing on the wire — so the storm is what gets clipped. We gate on the WORST-case wire size
+    // per item because affixCount isn't known at clamp time; dropping a couple of items beats
+    // overrunning the buffer.
+    u8  worldItemCount = snap.worldItemCount;
+    u32 worldItemBytes = worldItemCount * SNAP_WORLDITEM_WIRE_MAX;
+    if (worldItemBytes > budget) {
+        worldItemCount = static_cast<u8>(budget / SNAP_WORLDITEM_WIRE_MAX);
+        worldItemBytes = worldItemCount * SNAP_WORLDITEM_WIRE_MAX;
+    }
+    budget -= worldItemBytes;
+
     u16 projectileCount = snap.projectileCount;
     u32 projectileBytes = projectileCount * SNAP_PROJECTILE_WIRE;
     if (projectileBytes > budget) {
@@ -426,16 +444,6 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         projectileBytes = projectileCount * SNAP_PROJECTILE_WIRE;
     }
     budget -= projectileBytes;
-
-    // World items have the LOWEST priority — they absorb whatever budget remains after
-    // players/entities/projectiles. At MAX_WORLD_ITEMS=64 the worst case is 64*46 = 2944 B, which
-    // still fits the 8 KB budget alongside a full entity pool at any realistic projectile count
-    // (projectiles are clamped just above and would only starve items during an extreme barrage).
-    // We gate on the WORST-case wire size per item because we don't yet know each item's affixCount
-    // at clamp time and we'd rather drop a couple of items than overrun the buffer.
-    u8  worldItemCount = snap.worldItemCount;
-    if (worldItemCount * SNAP_WORLDITEM_WIRE_MAX > budget)
-        worldItemCount = static_cast<u8>(budget / SNAP_WORLDITEM_WIRE_MAX);
 
     // Header
     w8(static_cast<u8>(NetPacketType::SV_SNAPSHOT));
@@ -499,7 +507,10 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w32(sp.bootSkillLastActivationTick);
         w32(sp.helmetSkillLastActivationTick);
         w32(sp.potionLastActivationTick);
-    w8(sp.shrineTimerQ); w8(sp.reserved0);
+        // Exactly ONCE. A botched merge had this pair written twice (66 B on the wire against
+        // SNAP_PLAYER_WIRE = 64), so the budget clamp overcommitted by 2 B/player and the full
+        // and delta player-record layouts silently disagreed. The reader mirrored the double,
+        // which is why it round-tripped and nobody noticed.
         w8(sp.shrineTimerQ);
         w8(sp.reserved0);
     }
@@ -680,7 +691,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.bootSkillLastActivationTick   = r.readU32();
         sp.helmetSkillLastActivationTick = r.readU32();
         sp.potionLastActivationTick      = r.readU32();
-    sp.shrineTimerQ = r.readU8(); sp.reserved0 = r.readU8();
+        // Exactly ONCE — mirrors the writer (see the note there about the double-write bug).
         sp.shrineTimerQ = r.readU8();
         sp.reserved0    = r.readU8();
     }
@@ -849,6 +860,20 @@ void Snapshot::setBit64(u8* mask, u32 bit) {
 
 bool Snapshot::getBit64(const u8* mask, u32 bit) {
     if (bit >= 64) return false;
+    return (mask[bit / 8] & (1u << (bit % 8))) != 0;
+}
+
+// 128-bit twins for the ENTITY mask: MAX_ENTITIES is 128, and the old 64-bit mask silently
+// no-opped for poolIndex >= 64 — the upper half of the entity pool could never be marked
+// unchanged, so a crowded floor lost up to half its delta savings (64 idle entities x 32 B
+// x 60 Hz = ~123 KB/s of avoidable resend).
+void Snapshot::setBit128(u8* mask, u32 bit) {
+    if (bit >= 128) return;
+    mask[bit / 8] |= static_cast<u8>(1u << (bit % 8));
+}
+
+bool Snapshot::getBit128(const u8* mask, u32 bit) {
+    if (bit >= 128) return false;
     return (mask[bit / 8] & (1u << (bit % 8))) != 0;
 }
 
@@ -1027,15 +1052,26 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
                               const WorldSnapshot& current, const WorldSnapshot& baseline) {
     u32 cursor = 0;
 
-    // Bounds-checked inline write helpers (same pattern as serialize()).
-    auto w8  = [&](u8 v)  { if (cursor + 1 <= outCap) outBuf[cursor++] = v; };
-    auto w16 = [&](u16 v) { if (cursor + 2 <= outCap) { std::memcpy(outBuf + cursor, &v, 2); cursor += 2; } };
-    auto w32 = [&](u32 v) { if (cursor + 4 <= outCap) { std::memcpy(outBuf + cursor, &v, 4); cursor += 4; } };
+    // Overflow is a HARD failure here, honoured by returning 0 (the documented contract, and
+    // what server.cpp's full-snapshot fallback keys on). The old code "bounds-checked" by
+    // silently dropping whatever didn't fit while the counts written EARLIER in the buffer
+    // still promised the full record list — the receiver then parsed records that were never
+    // written, i.e. the exact phantom-record bug the full path documents as fixed.
+    bool overflowed = false;
+    auto w8  = [&](u8 v)  { if (cursor + 1 <= outCap) outBuf[cursor++] = v; else overflowed = true; };
+    auto w16 = [&](u16 v) { if (cursor + 2 <= outCap) { std::memcpy(outBuf + cursor, &v, 2); cursor += 2; } else overflowed = true; };
+    auto w32 = [&](u32 v) { if (cursor + 4 <= outCap) { std::memcpy(outBuf + cursor, &v, 4); cursor += 4; } else overflowed = true; };
 
-    // Header: tick + per-slot input acks + full/delta flag.
+    // Header: tick + per-slot input acks + full/delta flag + the NAMED baseline tick.
     w32(current.serverTick);
     for (u32 i = 0; i < MAX_PLAYERS; i++) w32(current.lastProcessedInputTick[i]);
     w8(0);  // isFullSnapshot = 0
+    // Which snapshot this delta is encoded AGAINST. The old scheme left it implicit ("the one I
+    // sent you last tick"), which forces the server's stored baseline and the client's newest
+    // decode to match exactly — impossible once the ack takes longer than one tick to round-trip,
+    // i.e. for every real internet client. Naming it lets the server delta against whatever the
+    // client actually CONFIRMED, however old.
+    w32(baseline.serverTick);
 
     // --- Compute unchanged bitmasks by comparing against baseline via poolIndex ---
 
@@ -1049,12 +1085,12 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
         }
     }
 
-    u8 unchangedEntities[8] = {};
+    u8 unchangedEntities[16] = {};   // 128 bits — covers the WHOLE entity pool (see setBit128)
     for (u8 i = 0; i < current.entityCount; i++) {
         u8 pi = current.entities[i].poolIndex;
         const SnapEntity* base = findEntityByPoolIndex(baseline, pi);
         if (base && std::memcmp(base, &current.entities[i], sizeof(SnapEntity)) == 0) {
-            setBit64(unchangedEntities, pi);
+            setBit128(unchangedEntities, pi);
         }
     }
 
@@ -1079,7 +1115,7 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
 
     // Write masks to the wire.
     w8(unchangedPlayers);
-    for (u32 i = 0; i < 8; i++) w8(unchangedEntities[i]);
+    for (u32 i = 0; i < 16; i++) w8(unchangedEntities[i]);
     for (u32 i = 0; i < 8; i++) w8(unchangedProjectiles[i]);
     for (u32 i = 0; i < 8; i++) w8(unchangedWorldItems[i]);
 
@@ -1094,21 +1130,25 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
     for (u8 i = 0; i < current.playerCount; i++) {
         u8 slot = current.players[i].slotIndex;
         if (slot < MAX_PLAYERS && (unchangedPlayers & (1u << slot))) continue;
+        const u32 before = cursor;
         writeSnapPlayer(outBuf, outCap, cursor, current.players[i]);
+        if (cursor - before != SNAP_PLAYER_WIRE) overflowed = true;   // record was cut short
     }
 
     // --- Changed entities ---
     u8 changedEntityCount = 0;
     for (u8 i = 0; i < current.entityCount; i++) {
         u8 pi = current.entities[i].poolIndex;
-        if (getBit64(unchangedEntities, pi)) continue;
+        if (getBit128(unchangedEntities, pi)) continue;
         changedEntityCount++;
     }
     w8(changedEntityCount);
     for (u8 i = 0; i < current.entityCount; i++) {
         u8 pi = current.entities[i].poolIndex;
-        if (getBit64(unchangedEntities, pi)) continue;
+        if (getBit128(unchangedEntities, pi)) continue;
+        const u32 before = cursor;
         writeSnapEntity(outBuf, outCap, cursor, current.entities[i]);
+        if (cursor - before != SNAP_ENTITY_WIRE) overflowed = true;
     }
 
     // --- Changed projectiles ---
@@ -1122,7 +1162,9 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
     for (u16 i = 0; i < current.projectileCount; i++) {
         u16 pi = current.projectiles[i].poolIndex;
         if (pi < 64 && getBit64(unchangedProjectiles, pi)) continue;
+        const u32 before = cursor;
         writeSnapProjectile(outBuf, outCap, cursor, current.projectiles[i]);
+        if (cursor - before != SNAP_PROJECTILE_WIRE) overflowed = true;
     }
 
     // --- Changed world items ---
@@ -1136,10 +1178,15 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
     for (u8 i = 0; i < current.worldItemCount; i++) {
         u8 si = current.worldItems[i].slotIndex;
         if (getBit64(unchangedWorldItems, si)) continue;
+        const u32 before = cursor;
         writeSnapWorldItem(outBuf, outCap, cursor, current.worldItems[i]);
+        // Variable-length record: expected = base + clamped-affix tail (5 B per affix).
+        u8 ac = current.worldItems[i].affixCount;
+        if (ac > MAX_AFFIXES_PER_ITEM) ac = MAX_AFFIXES_PER_ITEM;
+        if (cursor - before != SNAP_WORLDITEM_WIRE_MIN + ac * 5u) overflowed = true;
     }
 
-    return cursor;
+    return overflowed ? 0 : cursor;   // 0 = didn't fit; caller falls back to a full snapshot
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,9 +1213,16 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
     u8 isFull = r.readU8();
     if (isFull != 0) return false; // caller should use deserialize() for full snapshots
 
+    // Verify the caller handed us exactly the baseline this delta names — decoding against any
+    // other snapshot silently reconstructs a franken-state (unchanged slots seeded from the
+    // wrong tick). The client looks the tick up in its ring BEFORE calling; this check is the
+    // backstop against a lookup bug.
+    const u32 namedBaselineTick = r.readU32();
+    if (namedBaselineTick != baseline.serverTick) return false;
+
     // Read unchanged bitmasks from the wire.
     u8 unchangedPlayers = r.readU8();
-    u8 unchangedEntities[8];   for (u32 i = 0; i < 8; i++) unchangedEntities[i]    = r.readU8();
+    u8 unchangedEntities[16];  for (u32 i = 0; i < 16; i++) unchangedEntities[i]   = r.readU8();
     u8 unchangedProjectiles[8];for (u32 i = 0; i < 8; i++) unchangedProjectiles[i] = r.readU8();
     u8 unchangedWorldItems[8]; for (u32 i = 0; i < 8; i++) unchangedWorldItems[i]  = r.readU8();
 
@@ -1186,7 +1240,7 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
     out.entityCount = 0;
     for (u8 i = 0; i < baseline.entityCount; i++) {
         u8 pi = baseline.entities[i].poolIndex;
-        if (getBit64(unchangedEntities, pi)) {
+        if (getBit128(unchangedEntities, pi)) {
             if (out.entityCount < MAX_ENTITIES)
                 out.entities[out.entityCount++] = baseline.entities[i];
         }

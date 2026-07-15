@@ -48,6 +48,13 @@ struct LaunchOptions {
     bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
     u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
 
+    // Netcode adversity harness (M14/D5). These are the ONLY way to turn the fake-loss /
+    // fake-latency cvars on: they existed since M14 but nothing ever set them, so the whole
+    // loss-resilience test rig was unreachable at runtime and the net-graph read "loss 0" forever.
+    u8  netLossPct   = 0;                      // --net-loss <0-90>: % of packets dropped, both directions
+    u32 netLatencyMs = 0;                      // --net-latency <0-1000>: one-way ms added to every send
+    bool botWalk     = false;                  // --bot-walk: deterministic movement bot (divergence probe)
+
     // Steam cold-start: `+connect_lobby <id>` (Steam appends this when a friend accepts an invite /
     // clicks Join while the game is closed). Non-zero → Engine::applyLaunchOptions joins that lobby,
     // which routes into the join flow. Handled separately from `active` (it stays at the menu).

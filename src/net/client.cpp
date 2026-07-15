@@ -50,12 +50,14 @@ static u32      s_sendWindowCount[MAX_LOCAL] = {};
 // stale. Accepting the first arrival regardless makes the post-descend newest deterministic.
 static bool     s_acceptNextSnapshot = false;
 
-// D7.3 — Client-side baseline snapshot for delta decoding. Updated after each accepted
-// snapshot so the server's next delta can diff against our most recently applied state.
-// s_hasBaseline starts false and is cleared on init (floor change); the first snapshot
-// after init is always full (server's sendSnapshotFullToSlot gates on no-baseline).
-static WorldSnapshot s_baselineSnap;
-static bool          s_hasBaseline = false;
+// D7.3v2 — ack-based delta decoding. The server names the baseline TICK inside every delta
+// (the snapshot the client last ACKED via NetInput.ackedSnapshotTick), and the client finds
+// that snapshot in its own decoded ring. This replaced the "baseline = whatever I decoded
+// last" scheme, which required the server's single stored baseline to match EXACTLY — a
+// condition that a >1-tick RTT makes permanently false, which is why delta compression had
+// never engaged for a real client: the ack was also never stamped (always 0), so every
+// snapshot ever sent in production was a full one.
+static u32 s_lastDecodedTick = 0;   // newest successfully decoded+applied snapshot tick (0 = none)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,6 +66,16 @@ static const WorldSnapshot* getSnapshot(u32 ago) {
     if (ago >= s_snapCount) return nullptr;
     u32 idx = (s_snapHead + SNAP_BUFFER_SIZE - 1 - ago) % SNAP_BUFFER_SIZE;
     return &s_snapshots[idx];
+}
+
+// Find a decoded snapshot by its serverTick (linear over the ring — SNAP_BUFFER_SIZE is small).
+// Used to locate the baseline a delta names; nullptr = it aged out and the delta is undecodable.
+static const WorldSnapshot* getSnapshotByTick(u32 tick) {
+    for (u32 ago = 0; ago < s_snapCount; ago++) {
+        const WorldSnapshot* sn = getSnapshot(ago);
+        if (sn && sn->serverTick == tick) return sn;
+    }
+    return nullptr;
 }
 
 static void pushSnapshot(const WorldSnapshot& snap) {
@@ -188,7 +200,7 @@ void Client::init(u8 localPlayerIndex) {
     s_acceptNextSnapshot = true; // first post-(re)init snapshot is accepted unconditionally (TA-6)
     // D7.3 — Clear the delta baseline so the first snapshot on the new floor is always
     // treated as a full (no stale prior-floor baseline confusing the decoder).
-    s_hasBaseline = false;
+    s_lastDecodedTick = 0;
     LOG_INFO("Client: initialized (local player=%u)", localPlayerIndex);
 }
 
@@ -216,6 +228,11 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     // enemies by this exact amount. Stamping it per-input (not per-session) matters: the delay
     // can change between two inputs in the same send window. See net/lag_comp.h.
     latest.interpDelayMs = LagComp::toWireMs(s_interpDelaySec);
+    // Ack the newest snapshot we decoded, low 16 bits (the server reconstructs the full u32
+    // against its current tick). THIS was the missing line that kept delta compression dead:
+    // NetInput zero-inits, nothing ever stamped the field, so the server saw ack=0 forever and
+    // sent full snapshots to every client at 60 Hz for the feature's whole shipped life.
+    latest.ackedSnapshotTick = static_cast<u16>(s_lastDecodedTick & 0xFFFF);
     s_hasInput[laneId] = true;
 
     // Shift oldest out and append this input at the back of THIS lane's window (oldest→newest).
@@ -262,9 +279,21 @@ void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
     bool isFullSnap = (size >= 2) && ((data[1] & 0x01) != 0);
 
     bool decoded = false;
-    if (!isFullSnap && s_hasBaseline && size > 4) {
-        // Delta path: strip the 4-byte packet header — deserializeDelta starts at serverTick.
-        decoded = Snapshot::deserializeDelta(snap, data + 4, size - 4, s_baselineSnap);
+    if (!isFullSnap && size > 4 + 25) {
+        // Delta path. The wire names its baseline tick (payload offset 21: after serverTick(4) +
+        // per-slot acks(16) + isFull(1)); decode is only possible against exactly that snapshot.
+        // A miss (aged out of our ring after heavy loss) is not an error — drop the delta and
+        // wait: our ack stops advancing, so the server keeps delta-ing against ever-older
+        // baselines until ITS history misses too and it falls back to a full. Self-healing.
+        u32 wireBaseTick;
+        std::memcpy(&wireBaseTick, data + 4 + 21, 4);
+        const WorldSnapshot* base = getSnapshotByTick(wireBaseTick);
+        if (!base) {
+            LOG_WARN("[D7.3] delta names baseline tick %u — not in ring, dropping (awaiting full)",
+                     wireBaseTick);
+            return;
+        }
+        decoded = Snapshot::deserializeDelta(snap, data + 4, size - 4, *base);
         if (!decoded) {
             LOG_WARN("[D7.3] delta snap rx: deserializeDelta FAILED size=%u", size);
             return;
@@ -279,7 +308,7 @@ void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
         // server's [AUDIT-P1] snap tx line — same tick should carry the same counts (modulo
         // priority drop). Throttled to every 5th rx (~4 Hz) so the log is readable.
         static u32 s_snapRxLogCounter = 0;
-        if ((s_snapRxLogCounter++ % 5) == 0) {
+        if ((s_snapRxLogCounter++ % 1800) == 0) {
             LOG_INFO("[AUDIT-P1] snap rx tick=%u players=%u ents=%u projs=%u items=%u size=%u",
                      snap.serverTick, snap.playerCount, snap.entityCount,
                      snap.projectileCount, snap.worldItemCount, size);
@@ -290,7 +319,7 @@ void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
         ClockSyncOps::onSnapshotReceived(cs, snap.serverTick, Clock::getElapsedSeconds());
         // Throttled ~1 Hz diagnostic so convergence is eyeball-readable during manual smoke tests.
         static u32 s_clockSyncLogCounter = 0;
-        if ((s_clockSyncLogCounter++ % 30) == 0) {
+        if ((s_clockSyncLogCounter++ % 1800) == 0) {   // ~once/30s — was ~1 Hz, drowned the log
             LOG_INFO("net: clock-sync serverTickEst=%.1f wireServerTick=%u oneWayTripMs=%.1f",
                      cs.serverTickEst, snap.serverTick, cs.oneWayTripMs);
         }
@@ -336,8 +365,7 @@ void Client::receiveSnapshot(const u8* data, u32 size, ClockSync& cs) {
         // D7.3 — Update the client-side delta baseline with the just-accepted snapshot.
         // Done BEFORE pushSnapshot so that if the ring wraps, the baseline still holds
         // the most recently accepted tick (which the server's next delta will reference).
-        s_baselineSnap = snap;
-        s_hasBaseline  = true;
+        s_lastDecodedTick = snap.serverTick;   // what we'll ack on the next input
         pushSnapshot(snap);
     } else {
         // [AUDIT-P1] Diagnostic: deserialize failed (almost always size < requiredBytes from a
@@ -414,20 +442,27 @@ bool Client::reconcile(NetPlayer& np, Player& lp, u8 localSlot) {
         }
     }
 
-    // Loose-threshold safety snap: under normal play the client's m_localPlayer is the
-    // truth and the server mirrors it exactly (within quantization), so position will
-    // never diverge by more than a few millimetres. But legitimate server-driven moves
-    // — knockback impulse, respawn teleport, anti-cheat clamp on a flagrant move — need
-    // to pull the local camera along. 1 m threshold is far above any quantization or
-    // tick-of-lag drift, so it only triggers on real teleports. No snap below threshold:
-    // m_localPlayer keeps advancing smoothly from PlayerController::update.
+    // Loose-threshold safety snap for genuine TELEPORTS only (respawn, floor door).
+    //
+    // This comparison is time-skewed by construction: lp.position is the client's CURRENT
+    // predicted position, serverPos is the server's ACKED (~RTT-old) state, so their diff is
+    // dominated by legitimate in-flight movement — about speed x RTT, which at run speed
+    // (~6.7 m/s) crosses 1 m from ~150 ms of effective RTT. The old 1 m threshold therefore
+    // false-fired on perfectly healthy fast-moving clients (measured: 8 spurious hard snaps in
+    // a 90 s soak at 15% loss + 100 ms RTT — one rubber-band every 11 seconds from nothing).
+    //
+    // Everything below 5 m is now owned by the time-ALIGNED reconcile (prediction ring @ acked
+    // tick + rollback-replay in engine_net.cpp), which corrects real errors — including
+    // knockback and anti-cheat clamps — without eating in-flight inputs. 5 m of in-flight
+    // movement would need ~750 ms of RTT; every real teleport (respawn, floor door) is tens of
+    // metres. Matches the replay path's own teleport guard, which resets the ring at the same 5 m.
     Vec3 serverPos{
         Quantize::unpackPos(serverState->posX),
         Quantize::unpackPos(serverState->posY),
         Quantize::unpackPos(serverState->posZ),
     };
     Vec3 diff = lp.position - serverPos;
-    if (lengthSq(diff) > 1.0f * 1.0f) {
+    if (lengthSq(diff) > 5.0f * 5.0f) {
         lp.position = serverPos;
         lp.velocity = {0.0f, 0.0f, 0.0f}; // teleport zeros momentum
         np.position = serverPos;          // keep NetPlayer mirror in sync for snapshot ack

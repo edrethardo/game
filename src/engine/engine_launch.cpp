@@ -10,6 +10,7 @@
 #include "engine/engine.h"
 #include "engine/launch_options.h"
 #include "game/game_constants.h"   // GameConst::kDemoBuild — gate --host/--join in the demo
+#include "game/player.h"           // PlayerController::setBotWalk — the --bot-walk probe
 
 #include "core/log.h"
 #include "net/net.h"
@@ -56,6 +57,19 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     m_shotInterval = (f64)opt.shotInterval;
     if (opt.shotInterval > 0)
         LOG_INFO("Launch: auto-screenshot every %us -> screenshot_NNNN.png in the run dir", opt.shotInterval);
+
+    // Netcode adversity harness: the ONLY runtime path that arms the fake-loss / fake-latency
+    // cvars (serverNetPre/clientNetPre push them into Net:: each frame). Applied regardless of
+    // game-jump so `--host --net-loss 10` and a menu-hosted session behave identically.
+    m_netFakeLossPct   = opt.netLossPct;
+    m_netFakeLatencyMs = opt.netLatencyMs;
+    if (opt.netLossPct > 0 || opt.netLatencyMs > 0)
+        LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency (net-graph: F9)",
+                 (u32)opt.netLossPct, opt.netLatencyMs);
+    if (opt.botWalk) {
+        PlayerController::setBotWalk(true);
+        LOG_INFO("Launch: BOT-WALK ON — deterministic movement pattern (divergence probe)");
+    }
 
     // Steam cold-start: a friend accepted an invite / clicked Join while the game was closed. Join that
     // lobby now; the lobby-entered callback (initCallbacks) routes it into the join flow once Steam

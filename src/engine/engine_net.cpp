@@ -65,10 +65,13 @@ extern bool s_firstKillDropGiven;
 // Server networking — pre-gameplay: process remote inputs, weapon fire
 // ---------------------------------------------------------------------------
 void Engine::serverNetPre(f32 dt) {
-    // D5: sync the fake-latency cvar into the net layer, then flush any delayed
+    // D5/M14: sync the fake-latency + fake-loss cvars into the net layer, then flush any delayed
     // packets whose delivery timestamp has elapsed. Done first so a queued snapshot
     // from the prior frame arrives before we build + broadcast the new one.
+    // (The loss push was MISSING until the --net-loss flag landed: Net::setFakeLossPct existed
+    // with zero callers, so the whole M14 loss harness was unreachable at runtime.)
     Net::setFakeLatencyMs(m_netFakeLatencyMs);
+    Net::setFakeLossPct(m_netFakeLossPct);
     Net::pumpDelayQueue();
 
     m_serverTick++;
@@ -125,13 +128,26 @@ void Engine::serverNetPre(f32 dt) {
         // partner in online couch co-op). For a normal host (count 1) this is just slot 0.
         if (i < m_splitPlayerCount) continue;
         NetPlayer& np = m_players[i];
-        if (!np.active) continue;
+        if (!np.active) { m_starvedRepeats[i] = 0; continue; }
         InputRingBuffer& buf = Server::getInputBuffer(i);
+        bool appliedRealInput = false;   // did any FRESH input drive this slot this tick?
         for (u32 k = 0; k < buf.count; k++) {
             // oldest→newest walk: head points one past the newest write; count entries trail back from there
             u32 idx = (buf.head + INPUT_BUFFER_SIZE - buf.count + k) % INPUT_BUFFER_SIZE;
             const NetInput& in = buf.inputs[idx];
-            if (in.clientTick <= np.lastProcessedInputTick) continue; // already applied last tick
+            if (in.clientTick <= np.lastProcessedInputTick) {
+                // Movement for this tick is already covered — either it was genuinely applied, or
+                // the dry-out coast below CLAIMED it (advanced the watermark) while approximating
+                // the lost input. A coast never fires activation edges though, so a late-arriving
+                // press (potion, skill) must still fire — exactly once, which is what the separate
+                // m_lastActivationTick watermark guarantees (each tick enters the ring once; this
+                // watermark stops a re-walk of the ring from re-firing it).
+                if (!np.isDead && in.clientTick > m_lastActivationTick[i]) {
+                    processRemoteActivation(static_cast<u8>(i), in, dt);
+                    m_lastActivationTick[i] = in.clientTick;
+                }
+                continue;
+            }
             // Always advance the ack and mirror the weapon, even while dead, so the
             // client's reconcile keeps a fresh ack across the death window. But DON'T
             // drive movement/aim from input while dead — a corpse that died holding a
@@ -151,6 +167,7 @@ void Engine::serverNetPre(f32 dt) {
             if (in.weaponId < m_weaponDefCount)
                 np.weaponState.currentWeapon = in.weaponId;
             if (!np.isDead) {
+                appliedRealInput = true;
                 // SERVER-AUTHORITATIVE POSITION (M2+): server runs PlayerController on the
                 // remote slot — updateNetPlayerFromInput computes yaw/pitch from the absolute
                 // quantized values in the input, then drives applyMovement to produce the new
@@ -192,6 +209,59 @@ void Engine::serverNetPre(f32 dt) {
                 // THIS input's aim (set by updateNetPlayerFromInput above) so skills fire from
                 // the pose the client held at press time. push()+cursor guarantee once-only.
                 processRemoteActivation(static_cast<u8>(i), in, dt);
+                m_lastActivationTick[i] = in.clientTick;
+            }
+        }
+
+        if (appliedRealInput) {
+            m_starvedRepeats[i] = 0;   // link recovered — coasting budget refills
+        } else if (!np.isDead) {
+            // ---- Input dry-out: keep a starved player moving (last-input coast) -------------
+            // Under burst loss (>8 consecutive CL_INPUT packets: WiFi fade, route flap) the
+            // buffer runs dry and this player used to STATUE-FREEZE on the host — not even
+            // gravity — while their own client kept predicting; the divergence blew past 1 m
+            // and hard-snapped them back (16 teleport snaps in a 90 s soak at 45% loss).
+            //
+            // Coast on the last known input instead, for up to 250 ms — and CLAIM the tick by
+            // advancing lastProcessedInputTick. The claim is the load-bearing part, twice over:
+            //   * the snapshot's position now stays consistent with its ack tag. The first cut
+            //     of this feature moved the player but not the watermark, so every snapshot
+            //     reported a coasted position against a pre-coast ack — the client compared it
+            //     against the wrong ring entry, "corrected", double-counted the movement, and
+            //     the soak got WORSE (237 snaps). Time-tag integrity is not optional.
+            //   * a late-delivered real input for a claimed tick is then dropped by the
+            //     ordinary monotonic check above — no double integration, no debt bookkeeping.
+            //     Only its activation edge still fires (the m_lastActivationTick branch).
+            // Edge bits are stripped — a coast must never re-jump or re-fire an activation.
+            // Held-key movement is almost always exactly what the lost input contained, so the
+            // approximation is usually perfect; a mid-gap direction change surfaces as a small
+            // reconcile correction on the client, which the replay path absorbs.
+            constexpr u8 STARVE_REPEAT_CAP = 15;   // 250 ms of coasting, then freezing is honest
+            const NetInput* last = buf.getLatest();
+            if (last && m_starvedRepeats[i] < STARVE_REPEAT_CAP) {
+                NetInput synth = *last;
+                synth.moveFlags &= static_cast<u8>(~INPUT_JUMP);
+                synth.extFlags   = 0;
+                PlayerController::updateNetPlayerFromInput(np, synth, dt, /*movementOnly=*/true);
+                if (!np.noclip) {
+                    // Same integration step as a real input, lag-comp obstacles included.
+                    const f32 targetSnapTickF =
+                        LagComp::targetTick(m_clientAckedSnap[i], synth.interpDelayMs);
+                    CollisionObstacle obs[MAX_ENTITIES];
+                    u32 obsCount = 0;
+                    buildLagCompPlayerObstacles(targetSnapTickF, obs, obsCount);
+                    Player tempP;
+                    tempP.position = np.position;
+                    tempP.velocity = np.velocity;
+                    tempP.onGround = np.onGround;
+                    tempP.noclip   = false;
+                    Collision::moveAndSlide(tempP, m_level.grid, dt, obs, obsCount);
+                    np.position = tempP.position;
+                    np.velocity = tempP.velocity;
+                    np.onGround = tempP.onGround;
+                }
+                np.lastProcessedInputTick++;   // claim the approximated tick (see above)
+                m_starvedRepeats[i]++;
             }
         }
     }
@@ -780,7 +850,7 @@ void Engine::serverNetPost(f32 dt) {
         // Throttled to every 5th broadcast (~4 Hz) — enough to confirm steady-state, quiet enough
         // to read. Remove once the no-enemies/no-projectiles symptom is root-caused.
         static u32 s_snapTxLogCounter = 0;
-        if ((s_snapTxLogCounter++ % 5) == 0) {
+        if ((s_snapTxLogCounter++ % 1800) == 0) {
             u32 activePlayers = 0;
             for (u32 i = 0; i < MAX_PLAYERS; i++) if (m_players[i].active) activePlayers++;
             LOG_INFO("[AUDIT-P1] snap tx tick=%u players=%u ents=%u projs=%u items=%u",
@@ -836,35 +906,36 @@ void Engine::serverNetPost(f32 dt) {
             if (!m_players[slot].active) continue;
             if (slot == static_cast<u32>(m_localPlayerIndex)) continue; // host has no remote peer
 
-            bool sendFull = BaselineTrackerOps::shouldSendFullSnapshot(
-                                m_baselines[slot], m_clientAckedSnap[slot]);
-
-            if (sendFull) {
-                // No confirmed baseline: send a full snapshot so the client can anchor.
-                Server::sendSnapshotFullToSlot(static_cast<u8>(slot));
-            } else {
-                // Client ACKed our stored baseline tick — send delta against that snapshot.
-                Server::sendSnapshotDeltaToSlot(static_cast<u8>(slot), m_baselineSnap[slot]);
+            // Delta against whatever snapshot this client has CONFIRMED decoding (its input
+            // acks name it), looked up in the global history ring. A miss — new joiner (ack 0),
+            // client stalled past the ring depth (~533 ms), floor transition — falls back to a
+            // full snapshot, which re-anchors the ack loop. This is what finally lets deltas
+            // ENGAGE: the old exact-match gate (ack == last-sent-tick) was permanently false at
+            // any real RTT, so production had only ever sent full snapshots.
+            const WorldSnapshot* base = nullptr;
+            const u32 ack = m_clientAckedSnap[slot];
+            if (ack != 0) {
+                for (u32 h = 0; h < m_snapHistoryCount; h++) {
+                    if (m_snapHistory[h].serverTick == ack) { base = &m_snapHistory[h]; break; }
+                }
             }
+            const bool sendFull = (base == nullptr);
+            if (sendFull) Server::sendSnapshotFullToSlot(static_cast<u8>(slot));
+            else          Server::sendSnapshotDeltaToSlot(static_cast<u8>(slot), *base);
             // Net-metrics: tally full vs delta so the F9 overlay can show the delta/full ratio
             // (a spike in fulls means baseline churn — what we want to see under packet loss).
             Net::noteSnapshotKind(static_cast<u8>(slot), sendFull);
-
-            // Advance the baseline after sending so the next tick has a reference point.
-            BaselineTrackerOps::store(m_baselines[slot], m_serverTick);
         }
 
-        // D7.3 — Update m_baselineSnap for every active remote slot to the snapshot just
-        // built. This is the snapshot the server will delta against on the NEXT tick if
-        // the client confirms receipt by echoing this tick's serverTick in its next input.
+        // D7.3v2 — Push the just-built snapshot into the global baseline history. ONE copy per
+        // tick, shared by every client (payloads are recipient-independent) — cheaper than the
+        // per-slot copies it replaces.
         {
             const WorldSnapshot* sent = Server::getLastSnapshot();
             if (sent) {
-                for (u32 slot = 0; slot < MAX_PLAYERS; slot++) {
-                    if (!m_players[slot].active) continue;
-                    if (slot == static_cast<u32>(m_localPlayerIndex)) continue;
-                    m_baselineSnap[slot] = *sent;
-                }
+                m_snapHistory[m_snapHistoryHead] = *sent;
+                m_snapHistoryHead = (m_snapHistoryHead + 1) % SNAP_HISTORY_DEPTH;
+                if (m_snapHistoryCount < SNAP_HISTORY_DEPTH) m_snapHistoryCount++;
             }
         }
         // Phase 3.1 — Capture entity poses at this snapshot tick into the lag-comp
@@ -895,9 +966,10 @@ void Engine::serverNetPost(f32 dt) {
 // Client networking — pre-gameplay: predict, reconcile
 // ---------------------------------------------------------------------------
 void Engine::clientNetPre(f32 dt) {
-    // D5: sync the fake-latency cvar into the net layer, then flush any outgoing
+    // D5/M14: sync the fake-latency + fake-loss cvars into the net layer, then flush any outgoing
     // packets (CL_INPUT, CL_FIRE_WEAPON, etc.) whose delivery timestamp has elapsed.
     Net::setFakeLatencyMs(m_netFakeLatencyMs);
+    Net::setFakeLossPct(m_netFakeLossPct);
     Net::pumpDelayQueue();
 
     // Handle server disconnection gracefully (host left or crashed — both surface here as
@@ -1234,7 +1306,7 @@ void Engine::clientNetPost(f32 dt) {
     // to every 30th frame (~2 Hz at 60 fps) — interp runs once per CLIENT update tick.
     {
         static u32 s_interpLogCounter = 0;
-        if ((s_interpLogCounter++ % 30) == 0) {
+        if ((s_interpLogCounter++ % 1800) == 0) {
             LOG_INFO("[AUDIT-P1] interp render: ents=%u projs=%u",
                      m_renderInterp.entities.activeCount,
                      m_renderInterp.projectiles.activeCount);
@@ -1288,10 +1360,14 @@ void Engine::clientNetPost(f32 dt) {
             // Only reconcile a fresh ACK we haven't already processed this frame.
             if (ackedTick != 0 && ackedTick != m_lastReconciledTick[sp]) {
                 const PredictionEntry* e = PredictionRingOps::find(m_predictionRing[sp], ackedTick);
-                if (e) {
-                    // Unpack the server's quantized position for this lane's slot. (sp_ avoids
-                    // shadowing the loop var sp.)
-                    const SnapPlayer& sp_ = snap->players[mySlot];
+                // players[] is PACKED (players[playerCount++], true slot in .slotIndex), so it must
+                // be searched, never indexed by slot. Indexing worked in every 2-player session by
+                // pure accident (no slot gaps) and read the WRONG player's position the moment a
+                // mid-slot player left a 3-4 player game — every higher slot then "reconciled"
+                // against someone else's body.
+                const SnapPlayer* spp = Snapshot::findPlayerByPoolIndex(*snap, mySlot);
+                if (e && spp && !m_players[mySlot].isDead) {
+                    const SnapPlayer& sp_ = *spp;
                     Vec3 serverPos = {
                         Quantize::unpackPos(sp_.posX),
                         Quantize::unpackPos(sp_.posY),
@@ -1299,8 +1375,13 @@ void Engine::clientNetPost(f32 dt) {
                     };
                     Vec3 diff   = serverPos - e->state.position;
                     f32  distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
-                    if (distSq > 0.01f) {  // > 10 cm (0.1 m) squared = 0.01 m²
+                    // Correct anything above quantization noise (u16 position precision is ~2 mm,
+                    // so 2 cm is comfortably signal). The 10 cm tier inside only gates TELEMETRY,
+                    // keeping the [NET-GRAPH] divergence stats comparable with their M14 baselines.
+                    constexpr f32 REPLAY_EPS_SQ = 0.02f * 0.02f;
+                    if (distSq > REPLAY_EPS_SQ) {
                         const f32 mag = sqrtf(distSq);
+                        if (distSq > 0.01f) {  // > 10 cm — telemetry tier
 
                         // --- Shaky-client-FOV diagnostic ---------------------------------------
                         // Was this correction fired while the local player was brushing a MOVING
@@ -1357,13 +1438,98 @@ void Engine::clientNetPost(f32 dt) {
                         if (distSq > 100.0f) {
                             m_localPlayer.screenFlashTimer = 0.5f;
                         }
+                        }  // end 10 cm telemetry tier
 
-                        // M4 smooth correction: accumulate the visible delta so the camera doesn't
-                        // teleport. Sim position snaps immediately (server-authoritative); the
-                        // per-lane render offset decays each frame so the rendered eye slides over.
-                        Vec3 visibleDelta = m_localPlayer.position - serverPos;
-                        RenderOffsetOps::accumulate(m_renderOffset[sp], visibleDelta);
-                        m_localPlayer.position = serverPos;
+                        // ---- Rollback-replay reconciliation ------------------------------------
+                        //
+                        // The old correction snapped the CURRENT position to the server's state at
+                        // ackedTick — a position ~RTT old — discarding every input still in flight.
+                        // At 100 ms RTT and run speed that rewound the player ~0.5 m on every real
+                        // correction. Worse, it wrote only the m_localPlayer alias, and the next
+                        // tick's syncNetPlayerToLocalPlayer copied the (uncorrected) NetPlayer
+                        // mirror straight back over it — sub-metre corrections were silently ERASED
+                        // one tick after being applied. (The >1 m teleport snap in Client::reconcile
+                        // writes both mirrors; this path didn't.)
+                        //
+                        // Now: rewind a scratch NetPlayer to the server's acked state, re-apply
+                        // every stored input newer than the ack through the SAME per-input step the
+                        // server drain runs (updateNetPlayerFromInput movementOnly + moveAndSlide),
+                        // and commit to BOTH mirrors. In-flight inputs survive the correction, so
+                        // the render offset only hides the true error, not an artificial rewind.
+                        if (distSq > 25.0f) {
+                            // Server-driven teleport (respawn, floor door, anti-cheat clamp):
+                            // Client::reconcile's >1 m snap already moved both mirrors this tick,
+                            // and the ring's history belongs to the pre-teleport world — replaying
+                            // it on top of the jump would be nonsense. Teleports are MEANT to cut;
+                            // restart prediction history from here.
+                            PredictionRingOps::reset(m_predictionRing[sp]);
+                        } else {
+                            NetPlayer rp = m_players[mySlot];   // carries status/speed for the replay
+                            rp.position = serverPos;
+                            rp.velocity = { Quantize::unpackVel(sp_.velX),
+                                            e->state.velocity.y,   // velY isn't on the wire; predicted value
+                                            Quantize::unpackVel(sp_.velZ) };
+                            rp.onGround = (sp_.flags & (1 << 1)) != 0;
+
+                            // Same obstacle source as the local move (N4: interp pool on CLIENT).
+                            auto* obs = static_cast<CollisionObstacle*>(
+                                s_frameAllocator.alloc(MAX_ENTITIES * sizeof(CollisionObstacle)));
+                            u32 obsCount = 0;
+                            for (u32 a = 0; a < m_renderInterp.entities.activeCount; a++) {
+                                const Entity& oe = m_renderInterp.entities.entities[
+                                    m_renderInterp.entities.activeList[a]];
+                                if (oe.flags & ENT_DEAD) continue;
+                                if (oe.flags & ENT_FRIENDLY) continue;
+                                if (oe.enemyType == EnemyType::PROP) continue;
+                                obs[obsCount++] = {oe.position, oe.halfExtents};
+                            }
+
+                            // Replay oldest→newest. Static: 256 × sizeof(NetInput) is too big to
+                            // put on the stack every correction; single-threaded engine, safe.
+                            static NetInput s_replayInputs[PREDICTION_RING_CAPACITY];
+                            const u32 n = PredictionRingOps::collectInputsAfter(
+                                m_predictionRing[sp], ackedTick, s_replayInputs, PREDICTION_RING_CAPACITY);
+                            constexpr f32 STEP = 1.0f / 60.0f;   // inputs are captured per fixed tick
+                            for (u32 k = 0; k < n; k++) {
+                                const NetInput& in = s_replayInputs[k];
+                                PlayerController::updateNetPlayerFromInput(rp, in, STEP, /*movementOnly=*/true);
+                                if (!rp.noclip) {
+                                    // Mirror of the server drain's integration step (engine_net.cpp
+                                    // serverNetPre): temp Player through the shared moveAndSlide.
+                                    Player tp;
+                                    tp.position = rp.position;
+                                    tp.velocity = rp.velocity;
+                                    tp.onGround = rp.onGround;
+                                    tp.noclip   = false;
+                                    Collision::moveAndSlide(tp, m_level.grid, STEP, obs, obsCount);
+                                    rp.position = tp.position;
+                                    rp.velocity = tp.velocity;
+                                    rp.onGround = tp.onGround;
+                                }
+                                // Rewrite history so the NEXT ack compares the server against the
+                                // corrected prediction — otherwise this one divergence would re-fire
+                                // on every ack until the stale entries aged out of the ring.
+                                if (PredictionEntry* pe =
+                                        PredictionRingOps::findMut(m_predictionRing[sp], in.clientTick)) {
+                                    pe->state.position = rp.position;
+                                    pe->state.velocity = rp.velocity;
+                                    pe->state.onGround = rp.onGround;
+                                }
+                            }
+
+                            // Commit to BOTH mirrors: the alias write persists via swapOutPlayer;
+                            // the NetPlayer write is what survives the next tick's
+                            // syncNetPlayerToLocalPlayer (this is the fix for the erased corrections).
+                            const Vec3 visibleDelta = m_localPlayer.position - rp.position;
+                            m_localPlayer.position = rp.position;
+                            m_localPlayer.velocity = rp.velocity;
+                            m_localPlayer.onGround = rp.onGround;
+                            NetPlayer& live = m_players[mySlot];
+                            live.position = rp.position;
+                            live.velocity = rp.velocity;
+                            live.onGround = rp.onGround;
+                            RenderOffsetOps::accumulate(m_renderOffset[sp], visibleDelta);
+                        }
                     }
                 }
                 m_lastReconciledTick[sp] = ackedTick;

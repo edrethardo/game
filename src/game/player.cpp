@@ -9,6 +9,33 @@
 #include "platform/input.h"
 #include <cmath>
 
+// --bot-walk: synthesize deterministic input for netcode verification (see player.h).
+//
+// The stash below is what keeps the bot HONEST: on a client, captureLocalInput (clientNetPre,
+// early in the tick) decides the flags and both sends them AND stashes them; update() (later in
+// the same tick) simulates from the stash. Wire and local sim therefore see byte-identical input.
+// If update() read the real (idle) devices instead, the local body would stand still while the
+// server walked it — manufacturing divergence that says nothing about the netcode.
+static bool s_botWalk = false;
+static u8   s_botFlagsThisTick = 0;
+void PlayerController::setBotWalk(bool on) { s_botWalk = on; }
+
+// A 10-second loop (600 ticks) of the movements that stress prediction hardest: long straight
+// runs (walk into a wall and keep pushing), abrupt reversals (velocity sign flip), diagonal
+// strafes (two-axis slide), jumps (Y prediction) and fire bursts (CL_FIRE_WEAPON + lag comp).
+static u8 botWalkFlags(u32 tick) {
+    const u32 t = tick % 600;
+    u8 f = 0;
+    if      (t < 150) f = INPUT_FORWARD;
+    else if (t < 210) f = INPUT_FORWARD | INPUT_LEFT;
+    else if (t < 360) f = INPUT_BACKWARD;
+    else if (t < 420) f = INPUT_RIGHT;
+    else              f = INPUT_FORWARD | INPUT_RIGHT;
+    if (tick % 180 == 0)  f |= INPUT_JUMP;
+    if (tick % 240 < 30)  f |= INPUT_FIRE;
+    return f;
+}
+
 static constexpr f32 MAX_PITCH = 89.0f * 3.14159265f / 180.0f;
 
 // Shared roll-direction math (see player.h). Pure so client + server agree exactly.
@@ -155,6 +182,12 @@ void PlayerController::update(Player& player, f32 dt) {
     bool s = Input::isActionDown(GameAction::MOVE_BACKWARD) || Input::getStickY(false) > 0.3f;
     bool a = Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f;
     bool d = Input::isActionDown(GameAction::MOVE_RIGHT)    || Input::getStickX(false) > 0.3f;
+    if (s_botWalk) {   // --bot-walk: simulate the SAME flags captureLocalInput put on the wire
+        w = (s_botFlagsThisTick & INPUT_FORWARD)  != 0;
+        s = (s_botFlagsThisTick & INPUT_BACKWARD) != 0;
+        a = (s_botFlagsThisTick & INPUT_LEFT)     != 0;
+        d = (s_botFlagsThisTick & INPUT_RIGHT)    != 0;
+    }
 
     // --- Wanderer dodge roll activation ---
     // Triggered on Shift press when not already rolling and cooldown has expired.
@@ -203,7 +236,10 @@ void PlayerController::update(Player& player, f32 dt) {
                   effectiveSpeed, player.sensitivity,
                   mx, my,
                   w, s, a, d,
-                  Input::isActionPressed(GameAction::JUMP),
+                  // Bot jump comes from the stash (already edge-shaped: set for exactly one tick),
+                  // so wire and local sim jump on the same tick.
+                  s_botWalk ? (s_botFlagsThisTick & INPUT_JUMP) != 0
+                            : Input::isActionPressed(GameAction::JUMP),
                   dt);
 
     // --- Wanderer dodge roll tick ---
@@ -374,6 +410,7 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
     if (Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f) flags |= INPUT_LEFT;
     if (Input::isActionPressed(GameAction::JUMP))    flags |= INPUT_JUMP;
     if (Input::isActionDown(GameAction::FIRE))       flags |= INPUT_FIRE;
+    if (s_botWalk) { flags = botWalkFlags(tick); s_botFlagsThisTick = flags; }   // bot overrides devices
     // INPUT_LOCK is deliberately never set: it was fed by the cut lock-on feature and is read by
     // nobody on the server. The bit stays reserved in the flags byte so the wire layout is
     // unchanged (it simply always reads 0) — see net_player.h.

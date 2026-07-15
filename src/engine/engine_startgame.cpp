@@ -792,15 +792,15 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // floor's history and be silently squashed as a duplicate.
     resetAllFireDedup();
 
-    // M11.2 — Clear per-client delta-compression baselines and ACK cache.
-    // m_serverTick just reset to 0; any stored baselineTick from the prior floor would
-    // never match the new session's ticks, forcing every snapshot to "send full" via
-    // the stale-ack path instead of the clean "no baseline" path. Reset makes the
-    // intent explicit and avoids spurious log noise on first-floor entry.
+    // M11.2/D7.3v2 — Clear the delta-compression ACK cache AND the snapshot history ring.
+    // m_serverTick just reset to 0; a prior floor's history entries would otherwise collide
+    // with the new session's small tick numbers and delta against a snapshot of a DIFFERENT
+    // WORLD. Every client re-anchors with full snapshots until its first new ack round-trips.
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
-        BaselineTrackerOps::reset(m_baselines[i]);
         m_clientAckedSnap[i] = 0;
     }
+    m_snapHistoryHead  = 0;
+    m_snapHistoryCount = 0;
 
     // Phase 3.1 — Drop the lag-comp history. The prior floor's entity poses (in
     // geometrically unrelated rooms) would otherwise produce wildly wrong rewound
@@ -822,6 +822,13 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         Net::setOnPlayerLeft(Engine::onPlayerLeft);
         Server::init(m_players, m_level.levelSeed,
                      static_cast<u8>(m_level.currentFloor), m_difficulty);
+        // The input-tick space restarts with the buffers Server::init just cleared, so both
+        // drain-side watermarks restart with it — a stale activation watermark from the previous
+        // floor would silently swallow every press until the new ticks caught up to it.
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            m_starvedRepeats[i]     = 0;
+            m_lastActivationTick[i] = 0;
+        }
     } else if (m_netRole == NetRole::CLIENT) {
         Net::setOnSnapshot(Engine::onSnapshot);
         Net::setOnEvent(Engine::onEvent);

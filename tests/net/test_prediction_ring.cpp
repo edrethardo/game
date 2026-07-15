@@ -54,3 +54,26 @@ TEST_CASE("PredictionRing: replayInputsAfter returns inputs in clientTick order"
     CHECK(out[0].clientTick == 103);
     CHECK(out[1].clientTick == 104);
 }
+
+TEST_CASE("PredictionRing: findMut returns a WRITABLE entry that find() then observes") {
+    // The replay path rewrites each replayed tick's predicted state so the NEXT ack compares
+    // the server against the corrected history. Without that rewrite, a single real mispredict
+    // re-fires a "divergence" on every subsequent ack (60/s) until the stale entries age out of
+    // the 256-tick ring — 4 seconds of phantom corrections from one event.
+    PredictionRing r;
+    NetInput in = {};
+    PredictedState s;
+    s.position = {1.0f, 0.0f, 1.0f};
+    PredictionRingOps::push(r, 100, in, s);
+    PredictionRingOps::push(r, 101, in, s);
+
+    PredictionEntry* e = PredictionRingOps::findMut(r, 101);
+    REQUIRE(e != nullptr);
+    e->state.position = {9.0f, 0.0f, 9.0f};              // the corrected replay result
+
+    const PredictionEntry* seen = PredictionRingOps::find(r, 101);
+    REQUIRE(seen != nullptr);
+    CHECK(seen->state.position.x == doctest::Approx(9.0f));  // correction visible to the next ack
+    CHECK(PredictionRingOps::find(r, 100)->state.position.x == doctest::Approx(1.0f)); // neighbour untouched
+    CHECK(PredictionRingOps::findMut(r, 999) == nullptr);    // miss behaves like find()
+}

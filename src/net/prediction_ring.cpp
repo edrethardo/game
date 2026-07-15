@@ -38,6 +38,16 @@ const PredictionEntry* PredictionRingOps::find(const PredictionRing& r, u32 clie
     return nullptr;
 }
 
+// Mutable twin — same walk. (Not implemented via const_cast-around-find so the two stay
+// trivially greppable and a future divergence between them is impossible to hide.)
+PredictionEntry* PredictionRingOps::findMut(PredictionRing& r, u32 clientTick) {
+    for (u32 i = 0; i < r.count; i++) {
+        PredictionEntry& e = r.entries[i];
+        if (e.occupied && e.clientTick == clientTick) return &e;
+    }
+    return nullptr;
+}
+
 // Two-pass: collect matching indices, insertion-sort by clientTick, copy inputs.
 // n is bounded by PREDICTION_RING_CAPACITY (256) so insertion sort is fine.
 u32 PredictionRingOps::collectInputsAfter(const PredictionRing& r, u32 afterTick, NetInput* out, u32 outCap) {

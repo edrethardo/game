@@ -157,6 +157,14 @@ namespace PlayerController {
     // in the frame produces the identical update via applyMovement).
     NetInput captureLocalInput(const Player& player, u32 tick, u8 weaponId);
 
+    // Netcode verification bot (--bot-walk): when armed, captureLocalInput IGNORES the real
+    // devices and synthesizes a deterministic movement/fire pattern from the tick counter.
+    // Exists because divergence numbers from an idle headless client are hollow — a player who
+    // never moves can never mispredict. The bot walks into walls, reverses, strafes, jumps and
+    // fires, which is exactly the collision + knockback pressure that exposes prediction bugs.
+    // Deterministic on purpose: two runs at the same loss/latency are comparable A/B.
+    void setBotWalk(bool on);
+
     // Wanderer dodge roll direction from the WASD held at dodge-start + facing yaw.
     // Pure + shared so the client (PlayerController::update) and the server
     // (updateNetPlayerFromInput, deriving w/s/a/d from NetInput.moveFlags) compute the

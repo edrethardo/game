@@ -1223,8 +1223,12 @@ void Net::pumpDelayQueue() {
 void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     if (playerSlot >= MAX_PLAYERS || !s_slots[playerSlot].peer) return;
-    // M14: fake-loss injection on SERVER→CLIENT direction.
-    if (shouldDropPacket()) return;
+    // NO fake-loss here. Dropping a reliable packet BEFORE ENet simulates a network that cannot
+    // exist: real loss on the reliable channel means retransmit-and-delay, never permanent loss.
+    // The pre-ENet drop permanently vanished CL_FIRE_WEAPON / pickup / damage events, so the
+    // adversity harness was testing failure modes the game can never actually experience while
+    // NOT testing the retransmit latency it can. Loss on unreliable sends + the latency knob
+    // together cover the realistic envelope.
     // D5: enqueue if fake latency is enabled, otherwise send immediately.
     if (s_fakeLatencyMs > 0) {
         enqueueDelayed(DelayTarget::PEER_R, playerSlot, data, size);
@@ -1344,8 +1348,9 @@ void Net::broadcastLevelSeed(u8 floor, u8 difficulty, u32 seed) {
 
 void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     if (s_role != NetRole::CLIENT || !s_serverPeer) return;
-    // M14: fake-loss injection — silently drop this outbound packet at the configured rate.
-    if (shouldDropPacket()) return;
+    // M14: fake-loss injection — UNRELIABLE sends only (see sendReliable for why dropping a
+    // reliable packet pre-ENet simulates an impossible network).
+    if (!reliable && shouldDropPacket()) return;
     // D5: enqueue if fake latency is enabled; choose the matching target enum.
     if (s_fakeLatencyMs > 0) {
         DelayTarget t = reliable ? DelayTarget::TO_SERVER_R : DelayTarget::TO_SERVER_U;

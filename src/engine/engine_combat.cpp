@@ -1012,7 +1012,14 @@ u32 Engine::computeLagCompTicks(u8 slot) const {
     f32 ticks = rttHalfTicks + LagComp::rewindTicks(interpMs);
     if (ticks < 0.0f) ticks = 0.0f;
     u32 t = static_cast<u32>(ticks + 0.5f);
-    if (t > LAG_COMP_MAX_REWIND_TICKS) t = 0; // out-of-range: don't lag-comp this fire
+    // Out-of-range rewinds CLAMP to the cap rather than collapsing to zero. The old `t = 0`
+    // ("don't lag-comp this fire") created a hit-reg cliff: a player whose RTT/2 + interp delay
+    // hovered near the cap flipped per-shot between FULL compensation and NONE — the worst
+    // possible behaviour for a high-latency player, whose shots alternated between landing where
+    // they aimed and landing a quarter-second behind it. The original rationale ("don't read
+    // uninitialized history") predates the warm ring: history is pushed every snapshot tick from
+    // the first tick of the floor, so the capped depth is always populated.
+    if (t > LAG_COMP_MAX_REWIND_TICKS) t = LAG_COMP_MAX_REWIND_TICKS;
     return t;
 }
 

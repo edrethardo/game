@@ -58,7 +58,8 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // carry the shrine-buff type. A v10 client would read every later field at the wrong offset.
 // v12: SnapEntity grew 2 B — enemyDefIdx + reserved0 (30 -> 32). WHICH monster an entity is, so a
 // guest can name it: EnemyType is only the rig, and 38 authored monsters share ~16 rigs between them.
-static constexpr u32 PROTOCOL_VERSION  = 12; // v12: SnapEntity.enemyDefIdx (real monster names)
+static constexpr u32 PROTOCOL_VERSION  = 13; // v13: player record single shrineTimerQ pair (was
+                                             // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
                                             // carry targetSlot)

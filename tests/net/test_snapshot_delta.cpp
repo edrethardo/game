@@ -230,3 +230,82 @@ TEST_CASE("Snapshot delta roundtrip: removed entity not present") {
     CHECK(decoded.entityCount == 1);
     CHECK(decoded.entities[0].poolIndex == 7);
 }
+
+// ---------------------------------------------------------------------------
+// D7.3v2 — the three contracts that turned delta compression from dead code
+// into something that can actually engage on a real (RTT > 1 tick) link.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Snapshot delta: overflow returns 0, never a truncated buffer with lying counts") {
+    // The old writer "bounds-checked" by silently dropping whatever didn't fit while the
+    // record counts written earlier still promised the full list — the receiver then parsed
+    // records that were never written. server.cpp's full-snapshot fallback keys on 0.
+    WorldSnapshot baseline;
+    baseline.serverTick = 100;
+    WorldSnapshot current = baseline;
+    current.serverTick = 101;
+    current.entityCount = 40;                       // ~40 x 32 B of changed records
+    for (u8 i = 0; i < 40; i++) { current.entities[i].poolIndex = i; current.entities[i].posX = 1000 + i; }
+
+    u8 tiny[128] = {};                              // way too small for header + 40 records
+    CHECK(Snapshot::serializeDelta(tiny, sizeof(tiny), current, baseline) == 0);
+
+    u8 big[8192] = {};                              // sanity: same encode fits fine
+    CHECK(Snapshot::serializeDelta(big, sizeof(big), current, baseline) > 0);
+}
+
+TEST_CASE("Snapshot delta: names its baseline tick and refuses to decode against any other") {
+    // The wire names the baseline it was encoded against; decoding against anything else would
+    // silently seed "unchanged" slots from the wrong world state. The client looks the tick up
+    // in its ring first — this check is the backstop against a lookup bug.
+    WorldSnapshot baseline;
+    baseline.serverTick = 500;
+    baseline.entityCount = 1;
+    baseline.entities[0].poolIndex = 3;
+
+    WorldSnapshot current = baseline;
+    current.serverTick = 510;
+    current.entities[0].posX = 77;                  // changed vs baseline
+
+    u8 buf[4096] = {};
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    WorldSnapshot decoded;
+    CHECK(Snapshot::deserializeDelta(decoded, buf, size, baseline));        // right baseline: OK
+
+    WorldSnapshot wrongBase = baseline;
+    wrongBase.serverTick = 499;                     // one tick off — must be rejected
+    WorldSnapshot decoded2;
+    CHECK_FALSE(Snapshot::deserializeDelta(decoded2, buf, size, wrongBase));
+}
+
+TEST_CASE("Snapshot delta: entity poolIndex >= 64 can be marked unchanged (128-bit mask)") {
+    // MAX_ENTITIES is 128 but the mask was 64 bits wide with silently no-oping helpers, so the
+    // upper half of the entity pool was re-sent every tick forever — up to half the delta
+    // savings lost on exactly the crowded floors that needed them.
+    WorldSnapshot baseline;
+    baseline.serverTick = 200;
+    baseline.entityCount = 2;
+    baseline.entities[0].poolIndex = 70;            // upper half of the pool
+    baseline.entities[0].posX = 42;
+    baseline.entities[1].poolIndex = 100;
+    baseline.entities[1].posX = 43;
+
+    WorldSnapshot current = baseline;
+    current.serverTick = 201;                       // nothing changed but the tick
+
+    u8 buf[4096] = {};
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    WorldSnapshot decoded;
+    REQUIRE(Snapshot::deserializeDelta(decoded, buf, size, baseline));
+    REQUIRE(decoded.entityCount == 2);              // both survived as baseline-seeded slots
+    CHECK(decoded.entities[0].posX == 42);
+    CHECK(decoded.entities[1].posX == 43);
+
+    // And the wire actually shrank: an unchanged-only delta must be far smaller than two
+    // full 32 B entity records + header.
+    CHECK(size < 64);
+}

@@ -272,8 +272,9 @@ namespace Snapshot {
     // deserializeDelta reconstructs `out` by merging baseline unchanged slots with the
     // changed-record payload. Returns false on a truncated or malformed buffer.
     // Wire format (after isFullSnapshot=0):
+    //   4 B baselineTick — the serverTick of the snapshot this delta is encoded against
     //   1 B unchangedPlayersMask (bit-per-slot, slots 0-3)
-    //   8 B unchangedEntitiesMask    (64 bits, bit N = poolIndex N unchanged)
+    //  16 B unchangedEntitiesMask    (128 bits, bit N = poolIndex N unchanged — full MAX_ENTITIES)
     //   8 B unchangedProjectilesMask (64 bits, poolIndex < 64 only; higher always included)
     //   8 B unchangedWorldItemsMask  (64 bits, bit N = slotIndex N unchanged)
     //   then count-prefixed changed records per pool (same per-record layout as full serialize)
@@ -306,4 +307,7 @@ namespace Snapshot {
     // bit values 0-63 map to byte[bit/8] bit(bit%8). Out-of-range (>=64) are no-ops/false.
     void setBit64(u8* mask, u32 bit);
     bool getBit64(const u8* mask, u32 bit);
+    // 128-bit twins for the entity mask (MAX_ENTITIES=128; the 64-bit mask covered half the pool).
+    void setBit128(u8* mask, u32 bit);
+    bool getBit128(const u8* mask, u32 bit);
 }

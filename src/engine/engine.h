@@ -38,7 +38,6 @@
 #include "net/pending_damage_ring.h"
 #include "net/pending_pickup_ring.h"
 #include "net/pending_skill_ring.h"
-#include "net/snapshot_baseline.h"
 #include "game/squad.h"
 #include "world/level_gen.h"
 
@@ -387,19 +386,37 @@ private:
     // shouldSendFullSnapshot can decide whether a delta is safe for the next snapshot.
     // Index matches the player slot (slot 0 = host; that entry is unused but kept so
     // slot arithmetic stays simple). Reset on connect and on floor descent.
-    BaselineTracker m_baselines[MAX_PLAYERS];
+
     // The full-tick ACK each remote client reported in its most recent NetInput.
     // ackedSnapshotTick on the wire is u16 (low bits only); we reconstruct the full
     // u32 here using the high bits of m_serverTick at the time the input is received.
     u32 m_clientAckedSnap[MAX_PLAYERS] = {};
 
-    // D7.2 — Per-client full snapshot baseline (server role only).
-    // After each snapshot broadcast, the server copies the sent WorldSnapshot here
-    // indexed by player slot. D7.3 computes changedBits by comparing the current
-    // snapshot against this baseline to decide which slots need to be on the wire.
-    // Memory cost: MAX_PLAYERS (4) × ~50 KB ≈ 200 KB — all on BSS, not the stack.
-    // Slot 0 (host) is stored but unused; kept so index arithmetic is uniform.
-    WorldSnapshot m_baselineSnap[MAX_PLAYERS];
+    // Input dry-out coasting (server role): consecutive synthetic last-input repeats applied to
+    // this slot while its input buffer is dry. Each coast CLAIMS its tick (advances the slot's
+    // lastProcessedInputTick) so snapshots stay time-consistent and late real inputs are dropped
+    // by the ordinary monotonic check. Zeroed when real input resumes, on slot deactivation, and
+    // at Server::init (floor transition). Cap lives at the use site (STARVE_REPEAT_CAP).
+    u8 m_starvedRepeats[MAX_PLAYERS] = {};
+
+    // Activation-edge watermark (server role): the newest clientTick whose activation edges
+    // (potion / class / boot / helm presses) have fired for this slot. Separate from
+    // lastProcessedInputTick because dry-out coasting advances THAT watermark past ticks whose
+    // real inputs are still in flight — when those arrive their movement is (correctly) dropped,
+    // but a press riding one must still fire, exactly once. Reset with Server::init.
+    u32 m_lastActivationTick[MAX_PLAYERS] = {};
+
+    // D7.3v2 — Global ring of the last SNAP_HISTORY_DEPTH built snapshots (server role only).
+    // Snapshot payloads are recipient-independent (world state + the full per-slot ack array),
+    // so ONE history serves every client: when a client's input acks tick T, the server deltas
+    // against history[T] if it is still in range. 32 deep = 533 ms of ack latitude before a
+    // client falls back to full snapshots. Replaces the per-slot m_baselineSnap copies + the
+    // exact-match BaselineTracker, which required ack == last-sent-tick — permanently false at
+    // any real RTT, so deltas never engaged.
+    static constexpr u32 SNAP_HISTORY_DEPTH = 32;
+    WorldSnapshot m_snapHistory[SNAP_HISTORY_DEPTH];
+    u32           m_snapHistoryHead = 0;   // next write slot
+    u32           m_snapHistoryCount = 0;  // valid entries
 
     // D7.2 — Last successfully applied snapshot baseline (client role only).
     // After Client::receiveSnapshot succeeds, the engine copies the deserialized

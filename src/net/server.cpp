@@ -140,7 +140,9 @@ void Server::sendSnapshotFullToSlot(u8 slot) {
     u32 size = Snapshot::serialize(s_lastSnap, s_perSlotBuf, MAX_SNAPSHOT_SIZE, /*isFullSnapshot=*/1);
     if (size > 0) {
         Net::sendSnapshotToSlot(slot, s_perSlotBuf, size);
-        LOG_INFO("[D7.3] full snapshot to slot %u (%u bytes)", slot, size);
+        // No per-send logging here: this used to LOG_INFO on every send — 60 lines/s per client
+        // in the hottest net path (and every send WAS full while the ack bug kept deltas dead).
+        // Net::noteSnapshotKind owns full/delta accounting; the F9 overlay shows the ratio.
     }
 }
 
@@ -178,7 +180,6 @@ void Server::sendSnapshotDeltaToSlot(u8 slot, const WorldSnapshot& baseline) {
     cursor += deltaSize;
 
     Net::sendSnapshotToSlot(slot, s_deltaBuf, cursor);
-    LOG_INFO("[D7.3] delta snapshot to slot %u (%u bytes vs full)", slot, cursor);
 }
 
 u32 Server::getLevelSeed() {

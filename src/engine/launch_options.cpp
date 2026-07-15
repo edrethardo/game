@@ -64,6 +64,9 @@ void logUsage() {
     LOG_INFO("  --port <n>  --lan      host/join port; --lan skips UPnP");
     LOG_INFO("  --fullscreen           real fullscreen on the external widescreen monitor");
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
+    LOG_INFO("  --net-loss <0-90>      drop this %% of packets both directions (netcode stress rig)");
+    LOG_INFO("  --net-latency <ms>     add one-way fake latency to every send (0-1000)");
+    LOG_INFO("  --bot-walk             deterministic movement bot (netcode divergence probe)");
     LOG_INFO("  --help                 this message");
     LOG_INFO("  e.g.  DungeonEngine --host --load 1   |   --join 1.2.3.4 --load 2");
 }
@@ -142,6 +145,21 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
                 LOG_WARN("--screenshot-interval expects 1-3600 seconds (got '%s')", v); opt.valid = false; break;
             }
             opt.shotInterval = (u32)n;      // display modifier — not a game-jump directive
+        } else if (ieq(a, "--net-loss")) {
+            const char* v = nextVal(i); if (!v) break;
+            // 90 cap: 100% loss is a disconnect test, not a netcode test — ENet just times out.
+            long n; if (!parseInt(v, n) || n < 0 || n > 90) {
+                LOG_WARN("--net-loss expects 0-90 percent (got '%s')", v); opt.valid = false; break;
+            }
+            opt.netLossPct = (u8)n;         // adversity harness — not a game-jump directive
+        } else if (ieq(a, "--net-latency")) {
+            const char* v = nextVal(i); if (!v) break;
+            long n; if (!parseInt(v, n) || n < 0 || n > 1000) {
+                LOG_WARN("--net-latency expects 0-1000 ms (got '%s')", v); opt.valid = false; break;
+            }
+            opt.netLatencyMs = (u32)n;      // adversity harness — not a game-jump directive
+        } else if (ieq(a, "--bot-walk")) {
+            opt.botWalk = true;             // adversity harness — not a game-jump directive
         } else {
             LOG_WARN("Unknown launch arg '%s' (try --help)", a);
             opt.valid = false; break;

@@ -54,6 +54,12 @@ namespace PredictionRingOps {
     // Search is linear over count entries — fine for PREDICTION_RING_CAPACITY=256.
     const PredictionEntry* find(const PredictionRing& r, u32 clientTick);
 
+    // Mutable twin of find(). The replay path uses it to overwrite each replayed tick's
+    // predicted state with the corrected one, so the NEXT ack compares the server against
+    // the corrected history — without this, one real mispredict would re-fire a "divergence"
+    // on every subsequent ack until the bad entries aged out of the ring.
+    PredictionEntry* findMut(PredictionRing& r, u32 clientTick);
+
     // Collect inputs whose clientTick > afterTick into out[], sorted ascending by tick.
     // Returns number written (capped at outCap). Used by the replay path to re-apply
     // all inputs newer than the last server-acknowledged tick.
