@@ -953,6 +953,9 @@ private:
 
     // renderHUD helpers — extracted contiguous blocks, called in original order
     void renderInventoryHUD(u32 sw, u32 sh);          // inventory screen branch
+    // True while the inventory's item comparison is on screen (cursor on a non-empty backpack
+    // cell): the skill bars + quickbar hide for that frame — the two tooltips land on top of them.
+    bool inventoryComparisonActive(u32 sw, u32 sh) const;
     // Character-inspect screen (C key / LB+Plus): a live rotatable armored model rendered into an
     // offscreen FBO (renderInspectModelToFbo) composited beside a grouped stats sheet
     // (renderCharacterInspect). Implemented in engine_render_character.cpp.

@@ -62,6 +62,31 @@ extern bool s_firstKillDropGiven;
 
 
 // ---------------------------------------------------------------------------
+// inventoryComparisonActive — true while the inventory's item-comparison view is on screen: the
+// inventory branch is the one being rendered AND the mouse (or the pad cursor, mapped through the
+// same inventoryCursorToMouse the interaction path uses) is parked on a non-empty backpack cell,
+// which is exactly the condition under which drawInventoryScreen lays its two side-by-side
+// tooltips across the bottom action cluster. The skill bars and the quickbar hide for that frame
+// (see renderInventoryHUD and renderHUD's quickbar block) instead of half-showing through the gap
+// between the tooltips.
+// ---------------------------------------------------------------------------
+bool Engine::inventoryComparisonActive(u32 sw, u32 sh) const {
+    // Same priority chain as renderHUD's branch selection: if the pause-quit overlay or the
+    // character-inspect screen is covering the inventory, no comparison is visible.
+    if (m_menu.confirmQuit || m_characterScreenOpen || !m_inventoryOpen) return false;
+
+    s32 mx, my;
+    Input::getMousePosition(mx, my);
+    my = static_cast<s32>(sh) - my;   // flip to HUD coords (Y up)
+    if (Input::isGamepadConnected(0)) {
+        inventoryCursorToMouse(sw, sh, mx, my);
+    }
+    const InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+    return hit.panel == InventoryUI::SlotHit::BACKPACK &&
+           !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[hit.index]);
+}
+
+// ---------------------------------------------------------------------------
 // renderInventoryHUD — the entire m_inventoryOpen branch:
 // controller cursor, drawInventoryScreen, drag icon, button hints, equip tutorial.
 // ---------------------------------------------------------------------------
@@ -80,19 +105,23 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
 
     // --- Skill bars ---------------------------------------------------------------------------
     // Drawn BEFORE drawInventoryScreen on purpose. HUD primitives are batched in submission order,
-    // so anything drawn later paints on top — which is exactly how the item tooltips (drawn last,
-    // inside drawInventoryScreen) end up OBSTRUCTING these bars. That is the intended behavior:
-    // while an item tooltip is up the player is reading the item, not the skills. No repositioning,
-    // no z-logic — just order.
+    // so anything drawn later paints on top — which is how the single equip-slot tooltip (drawn
+    // last, inside drawInventoryScreen) paints over these bars when they graze each other.
+    //
+    // While the item COMPARISON is up (backpack hover) the bars are hidden outright instead: the
+    // two side-by-side tooltips land exactly on the bars' screen area, and bars peeking through
+    // the gap between the frames read as clutter while the player is reading items, not skills.
     //
     // Position is the in-game anchor (shared layout), so the bars don't move when you open the Tab
-    // screen. The quickbar is still drawn during inventory and sits to the RIGHT of this, so nothing
-    // collides.
-    HUD::EquipSkillSlot equipSlots[MAX_EQUIP_SKILL_SLOTS];
-    ItemSlot            equipSources[MAX_EQUIP_SKILL_SLOTS];   // which slot each skill came from
-    const u32 equipCount = buildEquipSkillSlots(equipSlots, equipSources);
-    const auto sb = InventoryUI::skillBarLayout(sw, sh, equipCount);
-    renderInventorySkillBars(sw, sh, sb, equipSlots, equipCount, equipSources, invMX, invMY);
+    // screen. The quickbar is still drawn during inventory (renderHUD's common tail — hidden there
+    // under the same comparison predicate) and sits to the RIGHT of this, so nothing collides.
+    if (!inventoryComparisonActive(sw, sh)) {
+        HUD::EquipSkillSlot equipSlots[MAX_EQUIP_SKILL_SLOTS];
+        ItemSlot            equipSources[MAX_EQUIP_SKILL_SLOTS];   // which slot each skill came from
+        const u32 equipCount = buildEquipSkillSlots(equipSlots, equipSources);
+        const auto sb = InventoryUI::skillBarLayout(sw, sh, equipCount);
+        renderInventorySkillBars(sw, sh, sb, equipSlots, equipCount, equipSources, invMX, invMY);
+    }
 
     // Pass controller cursor selection for highlight rendering.
     // 0xFF = "no item selected": when the controller cursor is parked on a skill bar, neither item
@@ -988,8 +1017,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     if (!m_characterScreenOpen)
         renderTutorials(sw, sh);
 
-    // Quickbar — always visible at bottom of screen
-    {
+    // Quickbar — always visible at bottom of screen, EXCEPT while the inventory's item comparison
+    // is up: the side-by-side tooltips land on the bottom action cluster, so the bar hides for
+    // that frame just like the skill bars do (see inventoryComparisonActive).
+    if (!inventoryComparisonActive(sw, sh)) {
         f32 cdPct = 0.0f;
         WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
         // Get cooldown percentage for active quickbar weapon

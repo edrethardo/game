@@ -170,10 +170,13 @@ namespace HUD {
     void drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha);
 
     // Item tooltip — drawn near the hovered item slot. `skillDefs` feeds the legendary block through
-    // resolveSkillDescription (see drawInventoryScreen).
-    void drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
-                         const ItemInstance& item, const ItemDef& def,
-                         const SkillDef* skillDefs = nullptr, u32 skillDefCount = 0);
+    // resolveSkillDescription (see drawInventoryScreen). The frame self-sizes to its content (a
+    // scaled 320px minimum, widened to the longest line) and returns that final frame width, so a
+    // caller laying out side-by-side tooltips can place the neighbour off the real edge instead of
+    // a guessed constant. Returns 0 for an empty item (nothing drawn).
+    f32 drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
+                        const ItemInstance& item, const ItemDef& def,
+                        const SkillDef* skillDefs = nullptr, u32 skillDefCount = 0);
 
     // Quickbar — slots at bottom-center of screen. Geometry comes from
     // InventoryUI::quickbarLayout(sw, sh), which also bakes in the rightward nudge that clears the

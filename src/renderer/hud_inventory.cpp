@@ -209,22 +209,24 @@ const char* HUD::resolveSkillName(SkillId id, const SkillDef* skillDefs, u32 ski
 // makes it structurally unable to claim a cost the skill doesn't charge — the failure mode that
 // produced the Phoenix Band / Blood armor tooltip bugs.
 void HUD::drawSkillTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY, const SkillTooltipInfo& info) {
-    f32 uiScale   = static_cast<f32>(sh) / 720.0f;
+    // Frame metrics scale by the same factor FontSystem bakes into every glyph (see drawItemTooltip
+    // — this frame is contractually identical to that one, so it scales the same way).
+    f32 ui        = FontSystem::getUIScale();
     f32 nameScale = 2.5f;
     f32 bodyScale = 1.5f;
-    f32 lineH     = FontSystem::textHeight(bodyScale) + 3.0f;
-    f32 nameH     = FontSystem::textHeight(nameScale) + 4.0f;
-    f32 padX      = 10.0f;
-    f32 padY      = 8.0f;
-    const f32 tooltipW = 320.0f;   // matches drawItemTooltip
+    f32 lineH     = FontSystem::textHeight(bodyScale) + 3.0f * ui;
+    f32 nameH     = FontSystem::textHeight(nameScale) + 4.0f * ui;
+    f32 padX      = 10.0f * ui;
+    f32 padY      = 8.0f * ui;
 
-    // Count body lines up front so the frame can be sized before anything is drawn.
-    u32 lineCount = 1;                       // subtitle ("Class Skill" / "Legendary - Armor")
+    // Count body lines up front so the frame can be sized before anything is drawn. Fractional
+    // because the separators consume half a line each, matching drawItemTooltip's rule().
+    f32 lineCount = 1.0f;                    // subtitle ("Class Skill" / "Legendary - Armor")
     const char* d = info.description;
     if (d && *d) {
-        lineCount++;                         // separator
-        lineCount++;                         // first description line
-        for (const char* c = d; *c; c++) if (*c == '\n') lineCount++;
+        lineCount += 0.5f;                   // separator
+        lineCount += 1.0f;                   // first description line
+        for (const char* c = d; *c; c++) if (*c == '\n') lineCount += 1.0f;
     }
     u32 statLines = 0;
     if (info.def) {
@@ -235,9 +237,35 @@ void HUD::drawSkillTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY, const SkillToolti
         if (info.def->radius       > 0.0f) statLines++;
         if (info.def->duration     > 0.0f) statLines++;
     }
-    if (statLines > 0) lineCount += statLines + 1;   // + separator
-    if (info.unlockFloor > 0) lineCount += 1;        // unlock / locked line
-    if (info.upgraded)        lineCount += 1;
+    if (statLines > 0) lineCount += static_cast<f32>(statLines) + 0.5f;   // + separator
+    if (info.unlockFloor > 0) lineCount += 1.0f;     // unlock / locked line
+    if (info.upgraded)        lineCount += 1.0f;
+
+    // Width: scaled 320 minimum (matches drawItemTooltip), widened to fit the longest measured
+    // line. Only the name and the description lines can realistically exceed the minimum — the
+    // stat/unlock rows are bounded snprintf formats, always narrower.
+    f32 maxW = FontSystem::textWidth(info.name, nameScale);
+    {
+        f32 w = FontSystem::textWidth(info.subtitle, bodyScale);
+        if (w > maxW) maxW = w;
+    }
+    if (d && *d) {
+        const char* seg = d;
+        while (*seg) {
+            const char* eol = seg;
+            while (*eol && *eol != '\n') eol++;
+            char tmp[80];   // same truncation as the draw loop below, so we measure what is drawn
+            u32 len = static_cast<u32>(eol - seg);
+            if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
+            std::memcpy(tmp, seg, len);
+            tmp[len] = '\0';
+            f32 w = FontSystem::textWidth(tmp, bodyScale);
+            if (w > maxW) maxW = w;
+            seg = (*eol == '\n') ? eol + 1 : eol;
+        }
+    }
+    f32 tooltipW = 320.0f * ui;
+    if (maxW + padX * 2.0f > tooltipW) tooltipW = maxW + padX * 2.0f;
 
     f32 tooltipH = nameH + lineCount * lineH + padY * 2.0f;
 
@@ -271,10 +299,12 @@ void HUD::drawSkillTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY, const SkillToolti
     curY -= lineH;
 
     if (d && *d) {
-        pushLine(textX, curY + lineH * 0.4f, tipX + tooltipW - padX, curY + lineH * 0.4f,
+        // 0.3 offset / 0.5 consumption keep the rule clear of the neighbouring rows' glyphs — the
+        // old 0.4/0.2 drew it through the ascenders of the first description line.
+        pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f,
                  {0.3f, 0.3f, 0.35f});
         flushHUD();
-        curY -= lineH * 0.2f;
+        curY -= lineH * 0.5f;
         const char* line = d;
         while (*line) {
             const char* eol = line;
@@ -292,10 +322,11 @@ void HUD::drawSkillTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY, const SkillToolti
 
     // Stats — only the fields this skill actually uses.
     if (statLines > 0) {
-        pushLine(textX, curY + lineH * 0.4f, tipX + tooltipW - padX, curY + lineH * 0.4f,
+        // Same 0.3/0.5 separator geometry as above (and as drawItemTooltip's rule()).
+        pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f,
                  {0.3f, 0.3f, 0.35f});
         flushHUD();
-        curY -= lineH * 0.2f;
+        curY -= lineH * 0.5f;
         const Vec3 statCol = {0.65f, 0.75f, 0.85f};
         const SkillDef& sd = *info.def;
         if (sd.cooldown > 0.0f) {
@@ -552,7 +583,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
             f32 y = eqStartY - static_cast<f32>(i) * (slotH + slotGap);
             if (mx >= eqX && mx <= eqX + slotW && my >= y && my <= y + slotH) {
                 if (!isItemEmpty(inv.equipped[i])) {
-                    drawItemTooltip(sw, sh, eqX + slotW + 8.0f, y,
+                    drawItemTooltip(sw, sh, eqX + slotW + 8.0f * uiScale, y,
                                     inv.equipped[i], itemDefs[inv.equipped[i].defId],
                                     skillDefs, skillDefCount);
                 }
@@ -573,22 +604,25 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                     ItemSlot eqSlot = bpDef.slot;
                     u32 eqIdx = static_cast<u32>(eqSlot);
 
-                    // Both tooltips below the inventory panels, side by side
-                    // Left = equipped (matches equipment panel), Right = backpack item
+                    // Both tooltips below the inventory panels, side by side.
+                    // Left = equipped (matches equipment panel), Right = backpack item.
+                    // The right tooltip is placed off the LEFT frame's real (content-fitted,
+                    // returned) width — the old fixed offset left a dead gap at 1080p and made the
+                    // pair overlap in split-screen, where the frames are narrower than the offset.
                     f32 tooltipY = 80.0f * uiScale;
                     f32 leftTipX = eqX;
-                    f32 rightTipX = eqX + 336.0f * uiScale;
+                    f32 leftW    = 320.0f * uiScale;   // frame minimum — stands in when slot empty
 
                     // Left: currently equipped in matching slot
                     if (!isItemEmpty(inv.equipped[eqIdx])) {
-                        drawItemTooltip(sw, sh, leftTipX, tooltipY,
+                        leftW = drawItemTooltip(sw, sh, leftTipX, tooltipY,
                                         inv.equipped[eqIdx],
                                         itemDefs[inv.equipped[eqIdx].defId],
                                         skillDefs, skillDefCount);
-                        // "EQUIPPED" label below the left tooltip
-                        f32 boxW = 80.0f, boxH = 16.0f;
-                        f32 boxX = leftTipX + (320.0f - boxW) * 0.5f;
-                        f32 boxY = tooltipY - boxH - 4.0f;
+                        // "EQUIPPED" label below the left tooltip, centered under its real width
+                        f32 boxW = 80.0f * uiScale, boxH = 16.0f * uiScale;
+                        f32 boxX = leftTipX + (leftW - boxW) * 0.5f;
+                        f32 boxY = tooltipY - boxH - 4.0f * uiScale;
                         Vec3 gold = {1.0f, 0.85f, 0.3f};
                         for (f32 fy = 0; fy < boxH; fy += 1.0f)
                             pushLine(boxX, boxY + fy, boxX + boxW, boxY + fy, {0.08f, 0.08f, 0.12f});
@@ -598,7 +632,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                         pushLine(boxX + boxW, boxY, boxX + boxW, boxY + boxH, gold * 0.6f);
                         flushHUD();
                         f32 labelW = FontSystem::textWidth("EQUIPPED", 1);
-                        FontSystem::drawText(sw, sh, boxX + (boxW - labelW) * 0.5f, boxY + 3.0f,
+                        FontSystem::drawText(sw, sh, boxX + (boxW - labelW) * 0.5f, boxY + 3.0f * uiScale,
                                             "EQUIPPED", gold, 1);
                     } else {
                         char emptyLabel[32];
@@ -609,7 +643,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                     }
 
                     // Right: hovered backpack item
-                    drawItemTooltip(sw, sh, rightTipX, tooltipY,
+                    drawItemTooltip(sw, sh, leftTipX + leftW + 16.0f * uiScale, tooltipY,
                                     inv.backpack[i], bpDef, skillDefs, skillDefCount);
                 }
                 break;
@@ -620,195 +654,204 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     flushHUD();
 }
 
-void HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
+f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
                             const ItemInstance& item, const ItemDef& def,
                             const SkillDef* skillDefs, u32 skillDefCount)
 {
-    if (isItemEmpty(item)) return;
+    if (isItemEmpty(item)) return 0.0f;
 
     Vec3 rColor = rarityColor(item.rarity);
 
+    // Frame metrics scale by the SAME factor FontSystem bakes into every glyph (sh/720, set by
+    // renderHUD before this runs). The frame used to be fixed raw pixels while the text inside
+    // auto-scaled, so above 720p every long line ran straight through the right border.
+    f32 ui = FontSystem::getUIScale();
     f32 nameScale = 2.5f;
     f32 bodyScale = 1.5f;
-    f32 lineH = FontSystem::textHeight(bodyScale) + 3.0f;
-    f32 nameH = FontSystem::textHeight(nameScale) + 6.0f;
-    f32 padX = 10.0f;
-    f32 padY = 8.0f;
+    f32 lineH = FontSystem::textHeight(bodyScale) + 3.0f * ui;
+    f32 nameH = FontSystem::textHeight(nameScale) + 6.0f * ui;
+    f32 padX = 10.0f * ui;
+    f32 padY = 8.0f * ui;
 
-    // Count lines for sizing
-    u32 lineCount = 3; // rarity, slot, separator
-    if (def.slot == ItemSlot::WEAPON) {
-        lineCount += 1; // subtype
-        lineCount += 3; // damage, cooldown, range
-        if (def.weaponType == WeaponType::HITSCAN && def.baseClipSize > 0)
-            lineCount += 1; // clip + reload
-    } else {
-        if (item.bonusHealth > 0.0f) lineCount += 1;
-    }
-    lineCount += item.affixCount;
-    if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
-        lineCount += 6; // extra spacing + separator + skill name + 3 description lines
-    }
+    // The frame is sized by a dry run (pass 0) of the same emitters that later draw the content
+    // (pass 1), so the box cannot disagree with what lands in it. The old hand-maintained line
+    // count drifted from the draw code twice — the Endless Flight lines were never counted and the
+    // weapon subtype was counted even when absent — and every such drift is text outside the frame.
+    bool measuring = true;
+    f32  used = 0.0f;    // vertical consumption in lineH units (separators take fractions)
+    f32  maxW = 0.0f;    // widest line; textWidth already includes the UI scale
+    f32  frameW = 0.0f;  // fixed between the passes; separators span it in pass 1
+    f32  curY = 0.0f;
 
-    f32 tooltipW = 320.0f;
-    f32 tooltipH = padY * 2 + nameH + lineCount * lineH;
+    auto line = [&](const char* s, Vec3 c, f32 scale) {
+        if (measuring) {
+            f32 w = FontSystem::textWidth(s, scale);
+            if (w > maxW) maxW = w;
+            used += 1.0f;
+        } else {
+            FontSystem::drawText(sw, sh, tipX + padX, curY, s, c, scale);
+            curY -= lineH;
+        }
+    };
+    auto gap = [&](f32 frac) {
+        if (measuring) used += frac;
+        else           curY -= lineH * frac;
+    };
+    // Separator rule. The 0.3 offset inside a 0.5 consumption is what keeps the line clear of both
+    // the previous row's descenders and the next row's ascenders.
+    auto rule = [&](Vec3 c) {
+        if (measuring) { used += 0.5f; return; }
+        pushLine(tipX + padX, curY + lineH * 0.3f, tipX + frameW - padX, curY + lineH * 0.3f, c);
+        flushHUD();
+        curY -= lineH * 0.5f;
+    };
+
+    auto emitBody = [&]() {
+        char buf[80];
+
+        line(rarityName(item.rarity), rColor, bodyScale);
+        line(slotName(def.slot), {0.7f, 0.7f, 0.75f}, bodyScale);
+
+        if (def.slot == ItemSlot::WEAPON && def.weaponSubtype != WeaponSubtype::NONE) {
+            line(subtypeName(def.weaponSubtype), {0.55f, 0.55f, 0.6f}, bodyScale);
+        }
+
+        rule({0.3f, 0.3f, 0.35f});
+
+        // Stats
+        if (def.slot == ItemSlot::WEAPON) {
+            std::snprintf(buf, sizeof(buf), "Damage: %.0f", item.damage);
+            line(buf, {1.0f, 0.9f, 0.7f}, bodyScale);
+
+            std::snprintf(buf, sizeof(buf), "Speed: %.2fs", def.baseCooldown);
+            line(buf, {0.7f, 0.9f, 0.7f}, bodyScale);
+
+            if (def.weaponType == WeaponType::MELEE) {
+                std::snprintf(buf, sizeof(buf), "Range: %.1fm", def.baseRange);
+            } else if (def.weaponType == WeaponType::HITSCAN) {
+                std::snprintf(buf, sizeof(buf), "Range: %.0fm", def.baseRange);
+            } else {
+                std::snprintf(buf, sizeof(buf), "Proj Speed: %.0f", def.baseProjectileSpeed);
+            }
+            line(buf, {0.7f, 0.7f, 0.9f}, bodyScale);
+
+            // Clip size + reload time for hitscan weapons
+            if (def.weaponType == WeaponType::HITSCAN && def.baseClipSize > 0) {
+                std::snprintf(buf, sizeof(buf), "Clip: %u  Reload: %.1fs",
+                              def.baseClipSize, def.baseReloadTime);
+                line(buf, {0.9f, 0.7f, 0.9f}, bodyScale);
+            }
+        } else {
+            if (item.bonusHealth > 0.0f) {
+                std::snprintf(buf, sizeof(buf), "+%.0f Health", item.bonusHealth);
+                line(buf, {0.7f, 1.0f, 0.7f}, bodyScale);
+            }
+        }
+
+        // Affixes
+        for (u8 a = 0; a < item.affixCount; a++) {
+            const Affix& affix = item.affixes[a];
+            std::snprintf(buf, sizeof(buf), "%s: +%.1f", affixTypeName(affix.type), affix.value);
+            line(buf, {0.4f, 0.85f, 1.0f}, bodyScale);
+        }
+
+        // Legendary skill — only shown on legendary-rarity items
+        if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
+            gap(1.0f);                    // extra spacing before legendary section
+            rule({0.6f, 0.5f, 0.15f});    // gold separator
+            gap(1.0f);                    // extra line before skill text
+
+            // Activation method depends on equipment slot
+            const char* activationLabel = "Skill";
+            Vec3 activationColor = {1.0f, 0.82f, 0.2f};
+            switch (def.slot) {
+                case ItemSlot::WEAPON:  activationLabel = "On Hit"; activationColor = {1.0f, 0.6f, 0.2f}; break;
+                // Rings are PASSIVE, not right-clickable. Every ring legendary in items.json (Berserker,
+                // Life Steal, Thorns, Phase Strike, Soul Harvest, Void Kill, Gravity Pull, Divine
+                // Judgment) is consumed by m_ringPassive in tickArmorRingPassives / serverNetPost — none
+                // is reachable from the right-click skill path, which fires class skills only. The old
+                // "Right Click" label told the player to press a button that does nothing.
+                case ItemSlot::RING:    activationLabel = "Passive"; break;
+                case ItemSlot::BOOTS:   activationLabel = "Press F"; activationColor = {0.3f, 1.0f, 0.5f}; break;
+                case ItemSlot::HELMET:  activationLabel = "Press G"; activationColor = {0.5f, 0.8f, 1.0f}; break;
+                case ItemSlot::ARMOR:   activationLabel = "Passive Aura"; activationColor = {0.7f, 0.7f, 1.0f}; break;
+                case ItemSlot::OFFHAND: activationLabel = "Perfect Block"; activationColor = {0.9f, 0.9f, 1.0f}; break;
+                case ItemSlot::GLOVES:  activationLabel = "On Hit"; activationColor = {0.9f, 0.6f, 0.2f}; break;
+                default: break;
+            }
+
+            // Resolve through the shared entry point so this text is IDENTICAL to what the skill-bar
+            // tooltip shows for the same skill.
+            const char* sName = resolveSkillName(def.legendarySkillId, skillDefs, skillDefCount);
+            std::snprintf(buf, sizeof(buf), "[%s] %s", activationLabel, sName);
+            line(buf, activationColor, bodyScale);
+
+            // Skill description (split on \n)
+            const char* desc = resolveSkillDescription(def.legendarySkillId, def.slot,
+                                                      skillDefs, skillDefCount);
+            const char* seg = desc;
+            while (*seg) {
+                const char* eol = seg;
+                while (*eol && *eol != '\n') eol++;
+                char descLine[80];
+                u32 len = static_cast<u32>(eol - seg);
+                if (len >= sizeof(descLine)) len = sizeof(descLine) - 1;
+                std::memcpy(descLine, seg, len);
+                descLine[len] = '\0';
+                line(descLine, {0.9f, 0.75f, 0.3f}, bodyScale);
+                seg = (*eol == '\n') ? eol + 1 : eol;
+            }
+        }
+
+        // Infinity Chakram: it has no legendarySkill (the endless flight IS its gimmick), so give it
+        // its own descriptor line. Shown whenever the def is flagged — the behavior is always active.
+        if (def.infiniteFlight) {
+            gap(1.0f);
+            line("Endless Flight", {1.0f, 0.82f, 0.2f}, bodyScale);
+            line("Bounces forever until it strikes a foe.", {0.9f, 0.75f, 0.3f}, bodyScale);
+        }
+    };
+
+    // --- Pass 0: measure. The name header lives outside emitBody (it has its own row height), so
+    // seed the width with it here.
+    maxW = FontSystem::textWidth(def.name, nameScale);
+    emitBody();
+
+    frameW = 320.0f * ui;                    // minimum — keeps short tooltips from looking starved
+    if (maxW + padX * 2.0f > frameW) frameW = maxW + padX * 2.0f;
+    // The name header consumes TWO nameH rows in the draw path below (its baseline is offset by
+    // nameH from the top pad, then curY steps down another nameH past it) — budget both. The last
+    // body line needs no trailing advance, hence used-1: its baseline then lands exactly on the
+    // bottom pad.
+    f32 frameH = padY * 2.0f + nameH * 2.0f + (used - 1.0f) * lineH;
 
     // Clamp to screen
-    if (tipX + tooltipW > static_cast<f32>(sw)) tipX = static_cast<f32>(sw) - tooltipW - 4.0f;
-    if (tipY + tooltipH > static_cast<f32>(sh)) tipY = static_cast<f32>(sh) - tooltipH - 4.0f;
+    if (tipX + frameW > static_cast<f32>(sw)) tipX = static_cast<f32>(sw) - frameW - 4.0f;
+    if (tipY + frameH > static_cast<f32>(sh)) tipY = static_cast<f32>(sh) - frameH - 4.0f;
     if (tipX < 0) tipX = 4.0f;
     if (tipY < 0) tipY = 4.0f;
 
     // Dark background
     Vec3 bgColor = {0.06f, 0.06f, 0.10f};
-    for (f32 y = tipY; y < tipY + tooltipH; y += 1.0f) {
-        pushLine(tipX, y, tipX + tooltipW, y, bgColor);
+    for (f32 y = tipY; y < tipY + frameH; y += 1.0f) {
+        pushLine(tipX, y, tipX + frameW, y, bgColor);
     }
 
     // Border in rarity color (double border for legendaries)
     Vec3 borderColor = {rColor.x * 0.6f, rColor.y * 0.6f, rColor.z * 0.6f};
-    pushQuad(tipX, tipY, tipX + tooltipW, tipY + tooltipH, borderColor);
+    pushQuad(tipX, tipY, tipX + frameW, tipY + frameH, borderColor);
     if (item.rarity == Rarity::LEGENDARY) {
-        pushQuad(tipX + 1, tipY + 1, tipX + tooltipW - 1, tipY + tooltipH - 1, borderColor);
+        pushQuad(tipX + 1, tipY + 1, tipX + frameW - 1, tipY + frameH - 1, borderColor);
     }
 
     flushHUD();
 
-    f32 textX = tipX + padX;
-    f32 curY = tipY + tooltipH - padY - nameH;
-
-    // Item name (large)
-    FontSystem::drawText(sw, sh, textX, curY, def.name, rColor, nameScale);
+    // --- Pass 1: draw. Same emitters, now with a real cursor.
+    curY = tipY + frameH - padY - nameH;
+    FontSystem::drawText(sw, sh, tipX + padX, curY, def.name, rColor, nameScale);
     curY -= nameH;
+    measuring = false;
+    emitBody();
 
-    // Rarity
-    FontSystem::drawText(sw, sh, textX, curY, rarityName(item.rarity), rColor, bodyScale);
-    curY -= lineH;
-
-    // Slot type
-    FontSystem::drawText(sw, sh, textX, curY, slotName(def.slot), {0.7f, 0.7f, 0.75f}, bodyScale);
-    curY -= lineH;
-
-    // Weapon subtype
-    if (def.slot == ItemSlot::WEAPON && def.weaponSubtype != WeaponSubtype::NONE) {
-        FontSystem::drawText(sw, sh, textX, curY, subtypeName(def.weaponSubtype), {0.55f, 0.55f, 0.6f}, bodyScale);
-        curY -= lineH;
-    }
-
-    // Separator
-    pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.3f, 0.3f, 0.35f});
-    flushHUD();
-    curY -= lineH * 0.5f;
-
-    // Stats
-    char buf[80];
-    if (def.slot == ItemSlot::WEAPON) {
-        std::snprintf(buf, sizeof(buf), "Damage: %.0f", item.damage);
-        FontSystem::drawText(sw, sh, textX, curY, buf, {1.0f, 0.9f, 0.7f}, bodyScale);
-        curY -= lineH;
-
-        std::snprintf(buf, sizeof(buf), "Speed: %.2fs", def.baseCooldown);
-        FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 0.9f, 0.7f}, bodyScale);
-        curY -= lineH;
-
-        if (def.weaponType == WeaponType::MELEE) {
-            std::snprintf(buf, sizeof(buf), "Range: %.1fm", def.baseRange);
-        } else if (def.weaponType == WeaponType::HITSCAN) {
-            std::snprintf(buf, sizeof(buf), "Range: %.0fm", def.baseRange);
-        } else {
-            std::snprintf(buf, sizeof(buf), "Proj Speed: %.0f", def.baseProjectileSpeed);
-        }
-        FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 0.7f, 0.9f}, bodyScale);
-        curY -= lineH;
-
-        // Clip size + reload time for hitscan weapons
-        if (def.weaponType == WeaponType::HITSCAN && def.baseClipSize > 0) {
-            std::snprintf(buf, sizeof(buf), "Clip: %u  Reload: %.1fs",
-                          def.baseClipSize, def.baseReloadTime);
-            FontSystem::drawText(sw, sh, textX, curY, buf, {0.9f, 0.7f, 0.9f}, bodyScale);
-            curY -= lineH;
-        }
-    } else {
-        if (item.bonusHealth > 0.0f) {
-            std::snprintf(buf, sizeof(buf), "+%.0f Health", item.bonusHealth);
-            FontSystem::drawText(sw, sh, textX, curY, buf, {0.7f, 1.0f, 0.7f}, bodyScale);
-            curY -= lineH;
-        }
-    }
-
-    // Affixes
-    for (u8 a = 0; a < item.affixCount; a++) {
-        const Affix& affix = item.affixes[a];
-        const char* name = affixTypeName(affix.type);
-        std::snprintf(buf, sizeof(buf), "%s: +%.1f", name, affix.value);
-        FontSystem::drawText(sw, sh, textX, curY, buf, {0.4f, 0.85f, 1.0f}, bodyScale);
-        curY -= lineH;
-    }
-
-    // Legendary skill — only shown on legendary-rarity items
-    if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
-        // Extra spacing before legendary section
-        curY -= lineH;
-        // Gold separator
-        curY -= lineH * 0.3f;
-        pushLine(textX, curY + lineH * 0.3f, tipX + tooltipW - padX, curY + lineH * 0.3f, {0.6f, 0.5f, 0.15f});
-        flushHUD();
-        curY -= lineH * 0.2f;
-
-        // Activation method depends on equipment slot
-        const char* activationLabel = "Skill";
-        Vec3 activationColor = {1.0f, 0.82f, 0.2f};
-        switch (def.slot) {
-            case ItemSlot::WEAPON:  activationLabel = "On Hit"; activationColor = {1.0f, 0.6f, 0.2f}; break;
-            // Rings are PASSIVE, not right-clickable. Every ring legendary in items.json (Berserker,
-            // Life Steal, Thorns, Phase Strike, Soul Harvest, Void Kill, Gravity Pull, Divine
-            // Judgment) is consumed by m_ringPassive in tickArmorRingPassives / serverNetPost — none
-            // is reachable from the right-click skill path, which fires class skills only. The old
-            // "Right Click" label told the player to press a button that does nothing.
-            case ItemSlot::RING:    activationLabel = "Passive"; break;
-            case ItemSlot::BOOTS:   activationLabel = "Press F"; activationColor = {0.3f, 1.0f, 0.5f}; break;
-            case ItemSlot::HELMET:  activationLabel = "Press G"; activationColor = {0.5f, 0.8f, 1.0f}; break;
-            case ItemSlot::ARMOR:   activationLabel = "Passive Aura"; activationColor = {0.7f, 0.7f, 1.0f}; break;
-            case ItemSlot::OFFHAND: activationLabel = "Perfect Block"; activationColor = {0.9f, 0.9f, 1.0f}; break;
-            case ItemSlot::GLOVES:  activationLabel = "On Hit"; activationColor = {0.9f, 0.6f, 0.2f}; break;
-            default: break;
-        }
-
-        curY -= lineH; // extra line before skill text
-        // Resolve through the shared entry point so this text is IDENTICAL to what the skill-bar
-        // tooltip shows for the same skill.
-        const char* sName = resolveSkillName(def.legendarySkillId, skillDefs, skillDefCount);
-        std::snprintf(buf, sizeof(buf), "[%s] %s", activationLabel, sName);
-        FontSystem::drawText(sw, sh, textX, curY, buf, activationColor, bodyScale);
-        curY -= lineH;
-
-        // Skill description (split on \n)
-        const char* desc = resolveSkillDescription(def.legendarySkillId, def.slot,
-                                                  skillDefs, skillDefCount);
-        const char* line = desc;
-        while (*line) {
-            // Find end of line
-            const char* eol = line;
-            while (*eol && *eol != '\n') eol++;
-            char descLine[80];
-            u32 len = static_cast<u32>(eol - line);
-            if (len >= sizeof(descLine)) len = sizeof(descLine) - 1;
-            std::memcpy(descLine, line, len);
-            descLine[len] = '\0';
-            FontSystem::drawText(sw, sh, textX, curY, descLine, {0.9f, 0.75f, 0.3f}, bodyScale);
-            curY -= lineH;
-            line = (*eol == '\n') ? eol + 1 : eol;
-        }
-    }
-
-    // Infinity Chakram: it has no legendarySkill (the endless flight IS its gimmick), so give it
-    // its own descriptor line. Shown whenever the def is flagged — the behavior is always active.
-    if (def.infiniteFlight) {
-        curY -= lineH;
-        FontSystem::drawText(sw, sh, textX, curY, "Endless Flight", {1.0f, 0.82f, 0.2f}, bodyScale);
-        curY -= lineH;
-        FontSystem::drawText(sw, sh, textX, curY, "Bounces forever until it strikes a foe.",
-                             {0.9f, 0.75f, 0.3f}, bodyScale);
-        curY -= lineH;
-    }
+    return frameW;
 }
