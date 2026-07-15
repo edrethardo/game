@@ -676,12 +676,16 @@ void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
             e.position = e.position + e.velocity * extrapolateAhead;
         }
 
-        // Note: enemy absolute HP isn't wired (no enemy HP bar today). Reconstructing
-        // health = healthPct*maxHealth used a stale `e.maxHealth` from a possibly-different
-        // ghost entity at the same poolIndex. Zero both to make the "not authoritative on
-        // client" contract explicit — renderers don't read these. (N5)
-        e.maxHealth = 0.0f;
-        e.health    = 0.0f;
+        // Enemy HP as a RATIO carrier: health/maxHealth == healthPct/255 exactly, both freshly
+        // written from THIS snapshot every frame (the old stale-slot hazard came from reusing a
+        // previous occupant's maxHealth — a constant denominator can't go stale). Absolute enemy
+        // HP still isn't wired and these are NOT authoritative stats (N5): they exist for the
+        // render-side consumers that read a fraction or an alive-check from this pool — the
+        // target bar (name + health, engine_hud.cpp), the goblin portal effect and the ambient
+        // monster-cry picker. All three were dead on guests while these were zeroed: the bar
+        // early-returns on maxHealth<=0, the other two skip health<=0.
+        e.maxHealth = 255.0f;
+        e.health    = static_cast<f32>(seB.healthPct);
         // (Audit P2 #4) Use the wire-quantized per-entity halfExtents so non-boss
         // entities with custom collider sizes (most GENERIC enemies — 13 variants in
         // enemies.json) render and collide at their real size on the client. Fall back
