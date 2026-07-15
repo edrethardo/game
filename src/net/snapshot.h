@@ -10,8 +10,9 @@
 
 #include <cstring>  // std::memset in WorldSnapshot default constructor
 
-// Quantized snapshot of one player (62 wire bytes — see SNAP_PLAYER_WIRE; was 30 pre-R17,
-// +28 for the seven u32 lastActivationTick fields at the tail, +4 for armorMeshId[4])
+// Quantized snapshot of one player (64 wire bytes — see SNAP_PLAYER_WIRE; was 30 pre-R17,
+// +28 for the seven u32 lastActivationTick fields, +4 for armorMeshId[4], +2 for
+// shrineTimerQ + reserved0 at the tail)
 struct SnapPlayer {
     u8   slotIndex;     // 1
     u8   flags;         // 1: bit0=active, bit1=onGround, bit2=UNUSED, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
@@ -68,7 +69,7 @@ struct SnapPlayer {
     u8   reserved0;     // 1 — always 0
 };
 
-// Quantized snapshot of one entity (29 bytes — see SNAP_ENTITY_WIRE)
+// Quantized snapshot of one entity (32 bytes — see SNAP_ENTITY_WIRE)
 struct SnapEntity {
     u8   poolIndex;     // 1
     u8   flags;         // 1
@@ -135,7 +136,7 @@ struct SnapEntity {
     u8   reserved0;     // 1 — always 0
 };
 
-// Quantized snapshot of one projectile (21 bytes — see SNAP_PROJECTILE_WIRE)
+// Quantized snapshot of one projectile (22 bytes — see SNAP_PROJECTILE_WIRE)
 struct SnapProjectile {
     u16  poolIndex;     // 2: u16 index into the projectile pool (1024 PC / 512 Switch)
     u8   flags;         // 1: bit0=active, bit1=fromPlayer, bit2=isCrit

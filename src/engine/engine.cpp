@@ -682,6 +682,16 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         // could have left clientTicks in the ring that would now spuriously match the
         // joiner's first few fires and silently drop them.
         s_engine->resetFireDedup(playerSlot);
+        // Netcode-audit 2026-07 — the per-slot net trackers must not survive slot recycling
+        // either. A stale ack from the previous occupant can still sit inside the 32-deep
+        // snapshot history on a fast rejoin, making the server delta this joiner against a
+        // baseline it never decoded (self-heals in ≤533 ms, but violates the named-baseline
+        // invariant); the activation watermark would sit thousands of ticks above the joiner's
+        // fresh clientTick frame. The starve counter is already re-zeroed by the drain loop's
+        // !active branch — reset it here too so all three trackers share one lifecycle.
+        s_engine->m_clientAckedSnap[playerSlot]    = 0;
+        s_engine->m_lastActivationTick[playerSlot] = 0;
+        s_engine->m_starvedRepeats[playerSlot]     = 0;
         // Health from the chosen class scaled by the host's per-floor growth, so a mid-run
         // joiner isn't dramatically under-statted on a deep floor. Use the host's
         // maxHealth/baseHealth ratio as the growth factor (self-corrects whatever formula the

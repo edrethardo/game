@@ -309,3 +309,51 @@ TEST_CASE("Snapshot delta: entity poolIndex >= 64 can be marked unchanged (128-b
     // full 32 B entity records + header.
     CHECK(size < 64);
 }
+
+// ---------------------------------------------------------------------------
+// Netcode-audit 2026-07 — truncated-delta rejection.
+//
+// PacketReader's reads silently no-op once the buffer is exhausted (cursor stops
+// advancing), which made deserializeDelta's old final `cursor <= size` check a
+// tautology: a truncated delta "decoded" successfully into phantom zero records
+// (poolIndex 0 at ~-128 m — the exact bug class the full path's requiredBytes
+// pre-check exists to stop). ENet delivers whole packets or nothing, so only a
+// byzantine peer can produce this — but the documented contract is "returns
+// false on a truncated or malformed buffer", and it must actually hold.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Snapshot delta: EVERY truncation of a valid delta is rejected") {
+    WorldSnapshot baseline;
+    baseline.serverTick = 300;
+    baseline.playerCount = 1;
+    baseline.players[0].slotIndex = 1;
+    baseline.players[0].flags = 1;
+    baseline.entityCount = 1;
+    baseline.entities[0].poolIndex = 7;
+    baseline.entities[0].posX = 1000;
+    baseline.worldItemCount = 1;
+    baseline.worldItems[0].slotIndex = 3;
+    baseline.worldItems[0].uid = 42;
+    baseline.worldItems[0].affixCount = 2;   // exercises the variable-length tail
+
+    WorldSnapshot current = baseline;
+    current.serverTick = 301;
+    current.players[0].posX = 555;           // changed player record on the wire
+    current.entities[0].posX = 2000;         // changed entity record on the wire
+    current.worldItems[0].posX = 777;        // changed world-item record (with affix tail)
+
+    u8 buf[4096] = {};
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    WorldSnapshot ok;
+    REQUIRE(Snapshot::deserializeDelta(ok, buf, size, baseline)); // sanity: full buffer decodes
+
+    // Every strict prefix long enough to pass the named-baseline check must still be
+    // rejected. (Prefixes shorter than the 25 B header already fail the baseline-tick
+    // comparison; start there so the loop covers the masks/counts/records region.)
+    for (u32 cut = 25; cut < size; cut++) {
+        WorldSnapshot out;
+        CHECK_FALSE(Snapshot::deserializeDelta(out, buf, cut, baseline));
+    }
+}

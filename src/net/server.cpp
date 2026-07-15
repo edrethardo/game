@@ -22,9 +22,10 @@ void Server::init(NetPlayer* players, u32 levelSeed, u8 levelFloor, u8 difficult
 void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
     if (playerSlot >= MAX_PLAYERS) return;
 
-    // Wire layout (M2.2, PROTOCOL_VERSION 2): PacketHeader(4) + window payload.
-    // Window payload: u8 windowCount + u8[3] reserved + N×14 B inputs (N ≤ INPUT_WINDOW_SIZE).
-    // Min valid size = 4(header) + 4(window header) + 1×14(one input) = 22 B.
+    // Wire layout: PacketHeader(4) + window payload.
+    // Window payload: u8 windowCount + u8 targetSlot + u8[2] reserved + N×15 B inputs
+    // (N ≤ INPUT_WINDOW_SIZE; 15 B = 14 + interpDelayMs — input_wire.cpp is the authority).
+    // Min valid size = 4(header) + 4(window header) + 1×15(one input) = 23 B.
     // deserializeInputWindow validates the exact count vs. buffer size; the guard here
     // is just a cheap early-out for obviously-corrupt/truncated packets.
     if (size < sizeof(PacketHeader) + 4) return;

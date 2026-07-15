@@ -181,7 +181,7 @@ struct NetPlayer {
 // Redundancy benefit: one dropped UDP packet no longer drops an input — the next
 // packet still carries it. At 8, seven consecutive losses (~120 ms at 60 Hz) are
 // needed to actually lose an input, covering bursty Wi-Fi/cellular loss. Cost is
-// 8×14+4 = 116 B per CL_INPUT (~7 KB/s up) — negligible. The server's per-input drain
+// 8×15+4 = 124 B per CL_INPUT (~7.5 KB/s up) — negligible. The server's per-input drain
 // (collectUnprocessedInputs) processes each new clientTick once, so the extra
 // redundancy never double-applies. Was 4 (~50 ms of cover).
 static constexpr u32 INPUT_WINDOW_SIZE = 8;
@@ -192,7 +192,8 @@ static constexpr u32 INPUT_WINDOW_SIZE = 8;
 //                    which the server overrides with the peer's own slot)
 //   u16 reserved (=0)
 //   N × (u32 clientTick + u16 ackedSnapshotTick + u8 moveFlags + u8 weaponId
-//        + u16 yawQ + u16 pitchQ + u8 extFlags + u8 skillSlot)  // 14 B per input
+//        + u16 yawQ + u16 pitchQ + u8 extFlags + u8 skillSlot
+//        + u8 interpDelayMs)  // 15 B per input (see input_wire.cpp — the authority)
 // Returns total bytes written (0 on overflow).
 u32 serializeInputWindow(u8* outBuf, u32 outCap, const NetInput* inputs, u32 count, u8 targetSlot = 0);
 

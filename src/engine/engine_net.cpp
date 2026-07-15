@@ -160,9 +160,20 @@ void Engine::serverNetPre(f32 dt) {
             // previous 64 K window.
             {
                 u16 lowAck = in.ackedSnapshotTick;
-                u32 fullAck = (m_serverTick & ~0xFFFFu) | lowAck;
-                if (fullAck > m_serverTick) fullAck -= 0x10000; // client ack is from prior window
-                m_clientAckedSnap[i] = fullAck;
+                if (lowAck == 0) {
+                    // 0 is the client's "nothing decoded yet" sentinel (s_lastDecodedTick starts
+                    // at 0). Reconstructing it against the high bits would fabricate tick 65536·k
+                    // once a floor runs past ~18 min — and while that alias sits inside the
+                    // 32-deep history ring, the server would delta against a baseline the client
+                    // never decoded (dropped client-side until the ring ages it out). Honoring
+                    // the sentinel costs one extra full snapshot in the opposite corner: a real
+                    // ack landing exactly on a 65536 multiple (~once per 18 min per client).
+                    m_clientAckedSnap[i] = 0;
+                } else {
+                    u32 fullAck = (m_serverTick & ~0xFFFFu) | lowAck;
+                    if (fullAck > m_serverTick) fullAck -= 0x10000; // client ack is from prior window
+                    m_clientAckedSnap[i] = fullAck;
+                }
             }
             if (in.weaponId < m_weaponDefCount)
                 np.weaponState.currentWeapon = in.weaponId;

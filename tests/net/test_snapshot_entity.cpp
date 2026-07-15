@@ -85,3 +85,44 @@ TEST_CASE("SnapEntity.bossStatus: isBoss survives alongside minionShield+bossPha
     CHECK(((bs >> 1) & 0x07) == 4);        // bossPhase preserved
     CHECK((bs & (1u << 4)) != 0);          // isBoss preserved
 }
+
+// ---------------------------------------------------------------------------
+// Netcode-audit 2026-07 — healthPct pack must be total.
+//
+// buildFromState's PLAYER path clamps the HP ratio to [0,1] before the u8 cast;
+// the ENTITY path didn't. Every current mutation site happens to keep entity
+// health inside [0, maxHealth] (killEntity clamps to 0 in the same tick, all
+// heals clamp at max), so this is latent — but a float->u8 cast of an
+// out-of-range value is UB, and the wire pack is the choke-point that must not
+// depend on every present and future combat path remembering to clamp.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("buildFromState: entity healthPct clamps negative and overheal health") {
+    // Static: the pools are large (ProjectilePool alone is ~100 KB) — keep them off the stack.
+    static NetPlayer      players[MAX_PLAYERS] = {};
+    static EntityPool     entities;
+    static ProjectilePool projectiles;
+    static WorldItemPool  items;
+
+    Entity& neg = entities.entities[0];
+    neg.flags     = ENT_ACTIVE;
+    neg.health    = -50.0f;    // hypothetical overkill that skipped the killEntity clamp
+    neg.maxHealth = 100.0f;
+
+    Entity& over = entities.entities[1];
+    over.flags     = ENT_ACTIVE;
+    over.health    = 150.0f;   // hypothetical unclamped overheal
+    over.maxHealth = 100.0f;
+
+    static WorldSnapshot snap;
+    Snapshot::buildFromState(snap, 1, players, entities, projectiles, items);
+    REQUIRE(snap.entityCount == 2);
+
+    // buildFromState sorts entities nearest-player-first — look up by poolIndex, not position.
+    const SnapEntity* e0 = Snapshot::findEntityByPoolIndex(snap, 0);
+    const SnapEntity* e1 = Snapshot::findEntityByPoolIndex(snap, 1);
+    REQUIRE(e0 != nullptr);
+    REQUIRE(e1 != nullptr);
+    CHECK(e0->healthPct == 0);     // negative HP floors at 0%
+    CHECK(e1->healthPct == 255);   // overheal saturates at 100%
+}

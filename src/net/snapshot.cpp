@@ -143,9 +143,16 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         se.poolIndex = static_cast<u8>(i);
         se.flags     = e.flags;
         se.aiState   = static_cast<u8>(e.aiState);
-        se.healthPct = (e.maxHealth > 0.0f)
-            ? static_cast<u8>((e.health / e.maxHealth) * 255.0f)
-            : 0;
+        // Clamp the ratio like the player path above: every current mutation site keeps entity
+        // health inside [0, maxHealth] (killEntity zeroes it the same tick, heals clamp at max),
+        // but a float->u8 cast of an out-of-range ratio is UB and this pack is the wire
+        // choke-point — it must not depend on every future combat path remembering to clamp.
+        {
+            f32 ehp = (e.maxHealth > 0.0f) ? (e.health / e.maxHealth) : 0.0f;
+            if (ehp < 0.0f) ehp = 0.0f;
+            if (ehp > 1.0f) ehp = 1.0f;
+            se.healthPct = static_cast<u8>(ehp * 255.0f + 0.5f);
+        }
 
         se.posX = Quantize::packPos(e.position.x);
         se.posY = Quantize::packPos(e.position.y);
@@ -642,10 +649,10 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
     // header + snapshot header + the MAX_PLAYERS input ticks read in the loop below; the rest
     // is the (now-clamped) record payload. Bail with false so the caller drops the packet.
     // World items are variable-length: use the MINIMUM (no-affix) size as the lower
-    // bound — items that actually carry affixes will tail-extend the packet beyond this,
-    // and the per-field readU8/readF32 guards stop a truncated packet from reading past
-    // the buffer (PacketReader::hasData returns false → fields stay zero, post-loop
-    // `r.cursor <= r.size` check catches under-read).
+    // bound — items that actually carry affixes will tail-extend the packet beyond this;
+    // each item's actual affix tail is size-checked inside the world-item loop below
+    // (PacketReader reads no-op at exhaustion, so an unguarded truncated tail would
+    // silently "read" as zeros — a cursor-vs-size check can never catch it).
     u32 requiredBytes = SNAP_FIXED_BYTES
                       + static_cast<u32>(snap.playerCount)     * SNAP_PLAYER_WIRE
                       + static_cast<u32>(snap.entityCount)     * SNAP_ENTITY_WIRE
@@ -762,6 +769,10 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         u8 affixCount  = r.readU8();
         // Defensive clamp — a byzantine / corrupt packet can't index past the affix array.
         if (affixCount > MAX_AFFIXES_PER_ITEM) affixCount = MAX_AFFIXES_PER_ITEM;
+        // The requiredBytes pre-check above used the no-affix MINIMUM per item, so the
+        // variable tail is the one region a truncated packet can still under-run. Reject
+        // rather than let the no-op reads fill the affixes with zeros.
+        if (!r.hasData(affixCount * 5u)) return false;
         sw.affixCount = affixCount;
         for (u32 a = 0; a < affixCount; a++) {
             sw.affixes[a].type  = static_cast<AffixType>(r.readU8());
@@ -774,7 +785,10 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         }
     }
 
-    return r.cursor <= r.size;
+    // Truncation is ruled out by the requiredBytes pre-check + the per-item affix-tail
+    // guard above (the reader can't over-run the buffer, so a cursor-vs-size comparison
+    // here would be vacuously true).
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -889,7 +903,7 @@ bool Snapshot::getBit128(const u8* mask, u32 bit) {
 
 // Write one SnapPlayer to the caller's bounds-checked buffer.
 // Byte layout MUST match the full serializer's player loop above
-// (SNAP_PLAYER_WIRE = 30 base + R17 28 = 58).
+// (SNAP_PLAYER_WIRE = 34 base + R17 ticks 28 + shrineTimerQ/reserved0 2 = 64).
 static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer& sp) {
     auto w8  = [&](u8 v)  { if (cursor + 1 <= maxSize) buf[cursor++] = v; };
     auto w16 = [&](u16 v) { if (cursor + 2 <= maxSize) { std::memcpy(buf + cursor, &v, 2); cursor += 2; } };
@@ -1005,7 +1019,10 @@ static void readSnapProjectile(PacketReader& r, SnapProjectile& sp) {
 }
 
 // Read one SnapWorldItem from a PacketReader. MUST match writeSnapWorldItem.
-static void readSnapWorldItem(PacketReader& r, SnapWorldItem& sw) {
+// Returns false if the buffer can't hold the record (PacketReader reads silently
+// no-op at exhaustion, so without this check a truncated record "reads" as zeros).
+static bool readSnapWorldItem(PacketReader& r, SnapWorldItem& sw) {
+    if (!r.hasData(SNAP_WORLDITEM_WIRE_MIN)) return false;
     sw.slotIndex = r.readU8(); sw.rarity = r.readU8();
     sw.defId = r.readU16(); sw.uid = r.readU32();
     sw.posX = r.readU16(); sw.posY = r.readU16(); sw.posZ = r.readU16();
@@ -1016,6 +1033,7 @@ static void readSnapWorldItem(PacketReader& r, SnapWorldItem& sw) {
     sw.itemLevel   = r.readU8();
     u8 affixCount  = r.readU8();
     if (affixCount > MAX_AFFIXES_PER_ITEM) affixCount = MAX_AFFIXES_PER_ITEM;
+    if (!r.hasData(affixCount * 5u)) return false;   // variable tail: 1(type) + 4(value) each
     sw.affixCount = affixCount;
     for (u32 a = 0; a < affixCount; a++) {
         sw.affixes[a].type  = static_cast<AffixType>(r.readU8());
@@ -1025,6 +1043,7 @@ static void readSnapWorldItem(PacketReader& r, SnapWorldItem& sw) {
     for (u32 a = affixCount; a < MAX_AFFIXES_PER_ITEM; a++) {
         sw.affixes[a] = Affix{};
     }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1220,7 +1239,14 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
     const u32 namedBaselineTick = r.readU32();
     if (namedBaselineTick != baseline.serverTick) return false;
 
-    // Read unchanged bitmasks from the wire.
+    // Read unchanged bitmasks from the wire. Every section below pre-checks hasData()
+    // before consuming: PacketReader reads silently no-op once the buffer is exhausted
+    // (the cursor stops advancing), so WITHOUT these checks a truncated delta "decodes"
+    // into phantom zero records (poolIndex 0 at ~-128 m) and the old final
+    // `cursor <= size` return was a tautology that could never catch it. ENet delivers
+    // whole packets or nothing, so this guards byzantine/corrupt senders, but the
+    // documented contract — false on a truncated buffer — must actually hold.
+    if (!r.hasData(1 + 16 + 8 + 8)) return false;
     u8 unchangedPlayers = r.readU8();
     u8 unchangedEntities[16];  for (u32 i = 0; i < 16; i++) unchangedEntities[i]   = r.readU8();
     u8 unchangedProjectiles[8];for (u32 i = 0; i < 8; i++) unchangedProjectiles[i] = r.readU8();
@@ -1268,8 +1294,10 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
 
     // --- Append changed records from the wire payload ---
 
+    if (!r.hasData(1)) return false;
     u8 changedPlayers = r.readU8();
     if (changedPlayers > MAX_PLAYERS) return false; // guard against corrupt packet
+    if (!r.hasData(changedPlayers * SNAP_PLAYER_WIRE)) return false; // truncated record block
     for (u8 i = 0; i < changedPlayers; i++) {
         if (out.playerCount >= MAX_PLAYERS) { r.cursor += SNAP_PLAYER_WIRE; continue; }
         SnapPlayer& sp = out.players[out.playerCount++];
@@ -1279,30 +1307,43 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
             sp.playerClass = static_cast<u8>(PlayerClass::WARRIOR);
     }
 
+    if (!r.hasData(1)) return false;
     u8 changedEntities = r.readU8();
     if (changedEntities > MAX_ENTITIES) return false;
+    if (!r.hasData(changedEntities * SNAP_ENTITY_WIRE)) return false;
     for (u8 i = 0; i < changedEntities; i++) {
         if (out.entityCount >= MAX_ENTITIES) { r.cursor += SNAP_ENTITY_WIRE; continue; }
         readSnapEntity(r, out.entities[out.entityCount++]);
     }
 
+    if (!r.hasData(2)) return false;
     u16 changedProjectiles = r.readU16();
     if (changedProjectiles > MAX_PROJECTILES) return false;
+    if (!r.hasData(changedProjectiles * SNAP_PROJECTILE_WIRE)) return false;
     for (u16 i = 0; i < changedProjectiles; i++) {
         if (out.projectileCount >= MAX_PROJECTILES) { r.cursor += SNAP_PROJECTILE_WIRE; continue; }
         readSnapProjectile(r, out.projectiles[out.projectileCount++]);
     }
 
+    if (!r.hasData(1)) return false;
     u8 changedWorldItems = r.readU8();
     if (changedWorldItems > MAX_WORLD_ITEMS) return false;
     for (u8 i = 0; i < changedWorldItems; i++) {
         // World-item records are variable-length (the affix tail). We can't bump
         // r.cursor by a constant SNAP_WORLDITEM_WIRE to skip a record once our local
         // output array is full — read into a discard instead so the cursor advances by
-        // the actual wire size.
-        if (out.worldItemCount >= MAX_WORLD_ITEMS) { SnapWorldItem discard{}; readSnapWorldItem(r, discard); continue; }
-        readSnapWorldItem(r, out.worldItems[out.worldItemCount++]);
+        // the actual wire size. readSnapWorldItem returns false on truncation — a
+        // count-prefixed block whose records aren't all present means a corrupt packet.
+        if (out.worldItemCount >= MAX_WORLD_ITEMS) {
+            SnapWorldItem discard{};
+            if (!readSnapWorldItem(r, discard)) return false;
+            continue;
+        }
+        if (!readSnapWorldItem(r, out.worldItems[out.worldItemCount])) return false;
+        out.worldItemCount++;
     }
 
-    return r.cursor <= r.size;
+    // Truncation was ruled out section-by-section above (the reader can't over-run, so a
+    // cursor-vs-size comparison here would be vacuously true — it was, for years).
+    return true;
 }
