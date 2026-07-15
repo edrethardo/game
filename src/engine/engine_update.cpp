@@ -995,6 +995,45 @@ void Engine::tickSharedSystems(f32 dt) {
     tickSharedFX(dt);
     ParticleSystem::update(m_particles, dt);
 
+    // Ambient monster cries — every ~12 s ONE living hostile calls out, distance-attenuated from
+    // where it stands, so the soundscape hints (by loudness) how close the danger is. Pure
+    // per-machine ambience: each peer rolls its own pick from its own view of the world (CLIENT:
+    // the interpolated snapshot pool — its ghost sim is gone), so nothing goes on the wire, and
+    // peers hearing different cries is fine — they are standing in different places anyway.
+    m_monsterCryTimer -= dt;
+    if (m_monsterCryTimer <= 0.0f) {
+        m_monsterCryTimer = 9.0f + (std::rand() % 61) * 0.1f;   // 9–15 s, jittered — never a metronome
+        const EntityPool& cryPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
+                                                                   : m_entities;
+        // Reservoir-sample a uniformly random living hostile in one pass (no allocation).
+        const Entity* crier = nullptr;
+        u32 seen = 0;
+        for (u32 a = 0; a < cryPool.activeCount; a++) {
+            const Entity& e = cryPool.entities[cryPool.activeList[a]];
+            if (e.flags & (ENT_DEAD | ENT_FRIENDLY)) continue;
+            if (e.enemyType == EnemyType::PROP) continue;
+            if (e.health <= 0.0f) continue;
+            seen++;
+            if ((std::rand() % seen) == 0) crier = &e;
+        }
+        if (crier) {
+            // The nearest living local player listens — in split-screen whoever stands closer
+            // hears it louder, matching how every other positional SFX picks its listener.
+            Vec3 listener = m_localPlayers[0].position;
+            f32 best = lengthSq(crier->position - listener);
+            for (u8 p = 1; p < m_splitPlayerCount; p++) {
+                if (m_playerDead[p]) continue;
+                f32 d = lengthSq(crier->position - m_localPlayers[p].position);
+                if (d < best) { best = d; listener = m_localPlayers[p].position; }
+            }
+            static const SfxId kCries[3] = {SfxId::MONSTER_CRY_1, SfxId::MONSTER_CRY_2,
+                                            SfxId::MONSTER_CRY_3};
+            // 24 m audible radius: a bit past enemy detection range (18 m), so a cry you can
+            // barely hear means something is close to noticing you.
+            AudioSystem::playAt(kCries[std::rand() % 3], crier->position, listener, 24.0f);
+        }
+    }
+
     // V2 fire prediction: on CLIENT, the N4 gate above skips ProjectileSystem::update, so
     // locally-predicted ghost projectiles (spawned by handleWeaponFire on this frame) would
     // freeze at spawn and never animate. Tick them here with a minimal update — position

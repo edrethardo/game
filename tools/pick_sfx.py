@@ -84,6 +84,12 @@ SLOTS = [
     "sfx_weapon_wand", "sfx_weapon_staff", "sfx_reload",
     "sfx_ricochet",  # chakram/bounce-projectile wall reflect
     "sfx_shrine_activate",  # walk-up buff shrine (press E)
+    # Ambient monster cries — one living hostile calls out every ~12 s, distance-attenuated.
+    # Pick three DISTINCT voices (a growler, a moaner, a screecher reads well) so the ambience
+    # doesn't feel like one looping creature.
+    "sfx_monster_cry_1",
+    "sfx_monster_cry_2",
+    "sfx_monster_cry_3",
 ]
 
 SLOT_CLASS = {
@@ -97,6 +103,9 @@ SLOT_CLASS = {
     "sfx_reload": "reload",
     "sfx_ricochet": "ricochet",
     "sfx_shrine_activate": "shrine",
+    "sfx_monster_cry_1": "monster",
+    "sfx_monster_cry_2": "monster",
+    "sfx_monster_cry_3": "monster",
 }
 
 # Per acoustic-class ranking profile:
@@ -149,6 +158,15 @@ CLASS_PROFILES = {
                    "power_up", "buff", "heal", "divine", "sacred", "spell"],
         "weak": ["glow", "shimmer", "sparkle", "energy", "pulse", "charge", "rise", "up"],
         "dur": (0.30, 2.00), "centroid": 2600, "sharp": False, "multi": False,
+    },
+    "monster": {
+        # Ambient idle cries, not attack barks: guttural and mid-length, low spectral centroid
+        # (chesty growls/moans rather than bright screeches — though screech keywords stay in so
+        # variant 3 can be picked bright on purpose).
+        "strong": ["growl", "roar", "snarl", "grunt", "groan", "moan", "creature", "monster",
+                   "zombie", "beast", "demon", "goblin", "screech", "shriek", "howl", "hiss"],
+        "weak": ["breath", "throat", "angry", "idle", "voice", "cry"],
+        "dur": (0.40, 2.50), "centroid": 1200, "sharp": False, "multi": False,
     },
 }
 

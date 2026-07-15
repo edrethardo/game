@@ -183,6 +183,12 @@ SOUND_MAP = {
     "sfx_enemy_attack":     (["attack", "swipe", "claw", "creature", "roar"], "short"),
     "sfx_boss_roar":        (["roar", "growl", "monster", "boss", "creature_roar"], "long"),
     "sfx_boss_stomp":       (["stomp", "quake", "heavy", "slam", "bell"], "medium"),
+    # Ambient monster cries (3 variants, rolled randomly every ~12 s in-game). Keyword mixes
+    # deliberately differ per variant so the auto-baseline lands three DIFFERENT sounds; the
+    # final picks are hand-chosen via tools/pick_sfx.py, these are placeholders until then.
+    "sfx_monster_cry_1":    (["growl", "snarl", "creature", "monster"], "medium"),
+    "sfx_monster_cry_2":    (["creature_misc", "creature_monster", "grunt", "creature"], "medium"),
+    "sfx_monster_cry_3":    (["screech", "hiss", "shriek", "creature", "howl"], "medium"),
     # Environment
     "sfx_door_open":        (["door", "open", "creak", "doorOpen"], "medium"),
     "sfx_level_up":         (["level", "fanfare", "victory", "win", "jingle", "success"], "long"),

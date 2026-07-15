@@ -1,6 +1,39 @@
 {
   "generated_by": "pick_sfx.py",
   "slots": {
+    "sfx_monster_cry_1": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 0.95,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_80-rpg-sfx/creature_roar_03.ogg"
+    },
+    "sfx_monster_cry_2": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 1.17,
+        "reverb": 0.3,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_rpg-sound-pack/RPG Sound Pack/NPC/gutteral beast/mnstr15.wav"
+    },
+    "sfx_monster_cry_3": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 0.91,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_rpg-sound-pack/RPG Sound Pack/NPC/gutteral beast/mnstr5.wav"
+    },
     "sfx_reload": {
       "params": {
         "gain": 0.0,

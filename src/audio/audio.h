@@ -34,6 +34,9 @@ enum struct SfxId : u8 {
     // Environment
     DOOR_OPEN, LEVEL_UP,
     SHRINE_ACTIVATE,   // walk-up buff shrine (press E) — hand-picked via tools/pick_sfx.py
+    // Ambient monster cries — every ~12 s one living hostile calls out, distance-attenuated
+    // (tickSharedSystems). Three variants rolled randomly; hand-picked via tools/pick_sfx.py.
+    MONSTER_CRY_1, MONSTER_CRY_2, MONSTER_CRY_3,
     // Count sentinel
     SFX_COUNT
 };

@@ -1093,6 +1093,10 @@ private:
     // — if these two drifted, a shrine would mean different things depending on who touched it.
     void grantShrineBuff(Player& p, u8 buff);
     void grantShrineBuff(NetPlayer& p, u8 buff);
+    // Ambient monster-cry clock (tickSharedSystems): one living hostile calls out when it hits 0,
+    // then it re-arms to a jittered ~12 s. Starts small so a fresh floor speaks up early.
+    f32  m_monsterCryTimer = 5.0f;
+
     // The loot goblin: flees, bleeds loot while chased, and expires (paying nothing) if it escapes.
     void spawnLootGoblin(const DungeonResult& dungeon);
     // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
