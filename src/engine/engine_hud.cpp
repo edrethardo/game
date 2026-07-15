@@ -975,14 +975,19 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         renderMinimapAndFloor(sw, sh);
     }
 
-    // Pause menu overlay
+    // Pause menu overlay. Every vertical offset scales by the same sh/720 factor FontSystem bakes
+    // into the text (via pauseMenuLayout for the rows the hit-test shares, inline `ms` for the
+    // render-only title/lobby/hint offsets) — the layout was raw pixels while the labels scaled,
+    // so above 720p the text outgrew the boxes and the spacing bunched up.
     if (m_menu.confirmQuit) {
         f32 cx = static_cast<f32>(sw) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.5f;
+        const f32 ms = static_cast<f32>(sh) / 720.0f;
+        const PauseMenuLayout L = pauseMenuLayout(sh);
 
         const char* title = "PAUSED";
         f32 titleW = FontSystem::textWidth(title, 3);
-        FontSystem::drawText(sw, sh, cx - titleW * 0.5f, cy + 50.0f, title, {0.9f, 0.85f, 0.7f}, 3);
+        FontSystem::drawText(sw, sh, cx - titleW * 0.5f, cy + 50.0f * ms, title, {0.9f, 0.85f, 0.7f}, 3);
 
         // The host's SHARE CODE. This is the only place the host can actually read it, and for a
         // PRIVATE lobby it's the only way anyone who isn't a Steam friend can get in — so it has to
@@ -991,11 +996,11 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             char line[64];
             std::snprintf(line, sizeof(line), "Lobby Code:  %s", m_lobbyCode);
             f32 lw = FontSystem::textWidth(line, 2);
-            FontSystem::drawText(sw, sh, cx - lw * 0.5f, cy + 105.0f, line, {0.4f, 1.0f, 0.6f}, 2);
+            FontSystem::drawText(sw, sh, cx - lw * 0.5f, cy + 105.0f * ms, line, {0.4f, 1.0f, 0.6f}, 2);
             const char* share = m_menu.hostPrivate ? "Private game - share this code to let friends in"
                                                    : "Friends can join with this code, or from the browser";
             f32 sw2 = FontSystem::textWidth(share, 1);
-            FontSystem::drawText(sw, sh, cx - sw2 * 0.5f, cy + 88.0f, share, {0.45f, 0.5f, 0.55f}, 1);
+            FontSystem::drawText(sw, sh, cx - sw2 * 0.5f, cy + 88.0f * ms, share, {0.45f, 0.5f, 0.55f}, 1);
         }
 
         // Option list is dynamic: the host of an open Steam lobby gets a middle "Close Lobby" row.
@@ -1009,20 +1014,25 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         options[optCount++] = "Options";          // opens the real options screens mid-run
         options[optCount++] = "Save and Quit";
         for (u32 i = 0; i < optCount; i++) {
-            f32 y = cy + 10.0f - i * 35.0f;
+            f32 y = cy + L.firstRowOffset - i * L.rowStep;
             bool sel = (i == m_menu.subSelection);
             Vec3 col = sel ? Vec3{0.3f, 1.0f, 0.4f} : Vec3{0.4f, 0.4f, 0.5f};
-            HUD::drawMenuOption(sw, sh, y, 250, 28, col, sel);
+            HUD::drawMenuOption(sw, sh, y, L.rowW, L.rowH, col, sel);
             Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
             f32 tw = FontSystem::textWidth(options[i], 2);
-            FontSystem::drawText(sw, sh, cx - tw * 0.5f, y + 7.0f, options[i], tc, 2);
+            FontSystem::drawText(sw, sh, cx - tw * 0.5f, y + 7.0f * ms, options[i], tc, 2);
         }
 
         const char* hint = Input::activeDeviceIsGamepad()
             ? "D-pad, A to select, B to resume"
             : "Up/Down, Enter to select, ESC to resume";
         f32 hintW = FontSystem::textWidth(hint, 1);
-        FontSystem::drawText(sw, sh, cx - hintW * 0.5f, cy - 50.0f, hint, {0.4f, 0.4f, 0.5f}, 1);
+        // Below the LAST option row, wherever that is. The hint was authored at a fixed cy-50
+        // when this menu had two rows; the Options row (and the host's Close Lobby row) grew the
+        // list downward past it, so the fixed offset drew the hint straight across the bottom
+        // row's box.
+        f32 hintY = cy + L.firstRowOffset - static_cast<f32>(optCount - 1) * L.rowStep - 20.0f * ms;
+        FontSystem::drawText(sw, sh, cx - hintW * 0.5f, hintY, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 
     // Enemy health bar at the top of the screen (Diablo 2 style). Also suppressed while paused —

@@ -43,6 +43,22 @@
 
 static constexpr u32 MAX_LEVEL_SECTIONS = 64;
 
+// Pause-menu row geometry — ONE definition shared by the renderer (engine_hud.cpp pause overlay)
+// and the mouse hit-test (engine_update.cpp pauseMenuHit), which previously each hardcoded the
+// same raw-pixel numbers — the exact draw-vs-hit-test drift class the quickbar already suffered
+// (see hud.h drawQuickbar). Everything scales with viewport height, the same factor FontSystem
+// bakes into the labels, so the boxes grow with the text they hold instead of overflowing at
+// resolutions above 720p.
+struct PauseMenuLayout {
+    f32 rowW, rowH;        // option box size
+    f32 rowStep;           // vertical distance between row bottoms
+    f32 firstRowOffset;    // row 0's bottom, relative to screen-center Y
+};
+inline PauseMenuLayout pauseMenuLayout(u32 sh) {
+    const f32 s = static_cast<f32>(sh) / 720.0f;
+    return { 250.0f * s, 28.0f * s, 35.0f * s, 10.0f * s };
+}
+
 enum struct GameState : u8 {
     MENU,
     LOBBY_HOST,

@@ -107,21 +107,23 @@ static bool deathRespawnPromptHit(u32 sw, u32 sh) {
     f32 y    = static_cast<f32>(sh) * 0.4f;
     return hudX >= cx - 220.0f && hudX <= cx + 220.0f && hudY >= y - 8.0f && hudY <= y + 28.0f;
 }
-// In-game pause menu (m_menu.confirmQuit while IN_GAME): two 250×28 options centered at cx,
-// y = sh*0.5 + 10 - i*35 (0=Continue, 1=Save and Quit). Layout MUST match engine_hud.cpp's
-// pause overlay. Returns the option under the cursor, or -1.
+// In-game pause menu (m_menu.confirmQuit while IN_GAME): option rows centered at cx —
+// [Continue, (Close Lobby), Options, Save and Quit]. Geometry comes from pauseMenuLayout
+// (engine.h), the SAME source the renderer draws from, so the clickable rects cannot drift
+// from the drawn boxes. Returns the option under the cursor, or -1.
 static s8 pauseMenuHit(u32 sw, u32 sh, u8 optCount) {
     s32 mx, my; Input::getMousePosition(mx, my);
     f32 hudX = static_cast<f32>(mx);
     f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
     f32 cx   = static_cast<f32>(sw) * 0.5f;
     f32 cy   = static_cast<f32>(sh) * 0.5f;
-    if (hudX < cx - 125.0f || hudX > cx + 125.0f) return -1; // 250-wide centered box
-    // Rows are laid out top-down from cy+10 in 35 px steps; optCount varies (2, or 3 when the host can
-    // close its Steam lobby) so the hit-test must match the renderer's dynamic option list exactly.
+    const PauseMenuLayout L = pauseMenuLayout(sh);
+    if (hudX < cx - L.rowW * 0.5f || hudX > cx + L.rowW * 0.5f) return -1;
+    // Rows are laid out top-down; optCount varies (3, or 4 when the host can close its Steam
+    // lobby) so the hit-test must match the renderer's dynamic option list exactly.
     for (s8 i = 0; i < static_cast<s8>(optCount); i++) {
-        f32 y = cy + 10.0f - static_cast<f32>(i) * 35.0f;
-        if (hudY >= y && hudY <= y + 28.0f) return i;
+        f32 y = cy + L.firstRowOffset - static_cast<f32>(i) * L.rowStep;
+        if (hudY >= y && hudY <= y + L.rowH) return i;
     }
     return -1;
 }
