@@ -527,6 +527,16 @@ void Engine::update(f32 dt) {
         // couch co-op — which calls gameUpdate per player — doesn't double-decrement).
         if (m_spawnCalmTimer > 0.0f) m_spawnCalmTimer -= dt;
 
+        // Floor/total play-time clocks tick HERE, once per sim tick, for the same reason as the
+        // spawn-calm window above: they used to accumulate inside gameUpdate, which runs once PER
+        // LOCAL PLAYER — so a whole split-screen session's clock ran at double speed. This spot
+        // also pins the semantics to "time the character is actually in the world": update()
+        // returns before this switch for menus, the SP pause overlay, the death screen and floor
+        // transitions, so none of those count. (The MP pause overlay deliberately DOES count —
+        // R12 keeps the pausing player's character live and hittable in the shared world.)
+        m_transition.floorTime     += dt;
+        m_transition.totalPlayTime += dt;
+
         // Split-screen: update each local player in turn
         for (u8 sp = 0; sp < m_splitPlayerCount; sp++) {
             swapInPlayer(sp);             // sets m_localPlayerIndex = sp (the active player)
@@ -1206,8 +1216,8 @@ void Engine::tickSharedSystems(f32 dt) {
 // Singleplayer update (unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::gameUpdate(f32 dt) {
-    m_transition.floorTime += dt;
-    m_transition.totalPlayTime += dt;
+    // (The floor/total play-time clocks tick once per sim tick in update()'s IN_GAME case —
+    // NOT here: gameUpdate runs once per local player, which double-counted in split-screen.)
 
     // Player footstep sound — heavy steps every ~4.5m to match the weighty FOV bob
     {

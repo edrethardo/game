@@ -394,9 +394,14 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
 // Returns true if the first-kill guarantee fired — caller must return immediately
 // to skip boss and normal loot paths (matches original `return; // skip normal drop logic`).
 bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
-    // Track hostile kills for floor transition screen
+    // Track hostile kills for the floor transition screen. Each player tallies their OWN kills:
+    // only deaths credited to a local lane count (killerSlot is stamped by Combat::killEntity;
+    // 0xFF = environmental/AI, and a remote guest's slot is not a local lane). The guest tallies
+    // its own the same way from the SV_KILL broadcast (Engine::onKill) — its ghost sim never runs
+    // this authoritative callback, which is why its counter used to sit at zero forever.
     if (!(pool.entities[idx].flags & ENT_FRIENDLY)) {
-        m_transition.floorKillCount++;
+        if (pool.entities[idx].killerSlot < m_splitPlayerCount)
+            m_transition.floorKillCount++;
         AudioSystem::playAt(SfxId::ENEMY_DEATH, pos, m_localPlayer.position);
     }
 

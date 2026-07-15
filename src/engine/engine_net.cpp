@@ -1619,11 +1619,26 @@ void Engine::onDamageToMe(u32 projectileSrcKey, f32 damage) {
     PendingDamageRingOps::ack(s_engine->m_pendingDamage, projectileSrcKey);
 }
 
-// D1.1 — Client-side SV_KILL handler. v1: log the kill for diagnostics; future work
-// can drive a kill-feed HUD, positional audio, or XP UI from this event.
+// D1.1 — Client-side SV_KILL handler. Tallies the guest's own kills; future work can also
+// drive a kill-feed HUD, positional audio, or XP UI from this event.
 void Engine::onKill(u8 killerSlot, u8 victimType, u16 victimIdx,
                     u8 weaponMeshId, u8 isCrit) {
     (void)weaponMeshId; // reserved for future kill-feed weapon icon
+    if (!s_engine) return;
+    // Each player tallies their OWN kills — the mirror of the host-side rule in
+    // handleFirstKillDrop. The client's ghost sim never runs the authoritative death callback
+    // (N5 gates it off before the kill-tracking phase), so this broadcast is the only place a
+    // guest learns its kill was confirmed. victimType 0 = entity; player kills (1) don't count
+    // as "enemies slain". Looped over the local lanes so client-couch (two lanes, one
+    // connection) tallies both when it lands.
+    if (victimType == 0) {
+        for (u8 lane = 0; lane < s_engine->m_splitPlayerCount; lane++) {
+            if (killerSlot == s_engine->m_clientNetSlot[lane]) {
+                s_engine->m_transition.floorKillCount++;
+                break;
+            }
+        }
+    }
     LOG_INFO("net: kill event — killer=%u victimType=%u victimIdx=%u crit=%u",
              killerSlot, victimType, victimIdx, isCrit);
 }
