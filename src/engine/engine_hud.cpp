@@ -555,27 +555,39 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
 // pickup, backpack-full).  Drawn over both inventory and normal HUD branches.
 // ---------------------------------------------------------------------------
 void Engine::renderTutorials(u32 sw, u32 sh) {
+    // Shared "look here" treatment: tutorial labels render one scale step LARGER than the rest of
+    // the HUD (4 vs the standard 3) and breathe between 75% and 100% brightness on the shared
+    // tutorial clock. The breathe is a 0.5 Hz sine — same cadence family as the existing key-glyph
+    // flash and far below any photosensitivity threshold (the hit-feedback rule bans oscillating
+    // FULL-SCREEN effects; a small breathing label is the standard attention cue elsewhere in the
+    // HUD, e.g. the potion "drink now" pulse).
+    const f32 TUT_SCALE = 4.0f;
+    const f32 breathe = 0.75f + 0.25f * sinf(m_tutorialPulseTimer * 3.0f);
+
     // Backpack full notification — shown centered at 70% screen height, fades out
     if (m_fullBackpackNotifyTimer > 0.0f) {
         const char* fullText = "Backpack Full!";
-        f32 fullW = FontSystem::textWidth(fullText, 2);
+        f32 fullW = FontSystem::textWidth(fullText, 3);
         f32 alpha = (m_fullBackpackNotifyTimer < 0.5f) ? m_fullBackpackNotifyTimer * 2.0f : 1.0f;
-        Vec3 fullColor = {0.9f * alpha, 0.2f * alpha, 0.2f * alpha};
+        Vec3 fullColor = {1.0f * alpha, 0.25f * alpha, 0.25f * alpha};
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - fullW) * 0.5f,
-                             static_cast<f32>(sh) * 0.7f, fullText, fullColor, 2);
+                             static_cast<f32>(sh) * 0.7f, fullText, fullColor, 3);
     }
 
     // Exit-sealed prompt — shown when the player tries to descend with the boss alive.
     if (m_bossLockNotifyTimer > 0.0f) {
         const char* lockText = "Defeat the boss to descend!";
-        f32 lockW = FontSystem::textWidth(lockText, 2);
+        f32 lockW = FontSystem::textWidth(lockText, 3);
         f32 alpha = (m_bossLockNotifyTimer < 0.5f) ? m_bossLockNotifyTimer * 2.0f : 1.0f;
-        Vec3 lockColor = {0.95f * alpha, 0.5f * alpha, 0.15f * alpha};
+        Vec3 lockColor = {1.0f * alpha, 0.55f * alpha, 0.2f * alpha};
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lockW) * 0.5f,
-                             static_cast<f32>(sh) * 0.65f, lockText, lockColor, 2);
+                             static_cast<f32>(sh) * 0.65f, lockText, lockColor, 3);
     }
 
-    // Floor 1 controls tutorial — LMB Attack / RMB Skill
+    // Floor 1 controls tutorial — LMB Attack / RMB Skill.
+    // Layout is MEASURED left-to-right (glyph, label, gap, glyph, label centered as one strip) —
+    // the old fixed offsets (cx-120/cx-98/cx+35) only fit scale-3 labels; scale-4 "Attack" would
+    // run under the Skill glyph.
     if (m_controlsTooltipTimer > 0.0f) {
         f32 alpha = (m_controlsTooltipTimer < 1.0f)
                     ? m_controlsTooltipTimer : 1.0f;
@@ -584,16 +596,24 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         f32 cy = static_cast<f32>(sh) * 0.72f;
 
         bool cp = Input::activeDeviceIsGamepad();
+        const f32 glyphW  = 26.0f;   // key/mouse glyph footprint incl. spacing to its label
+        const f32 pairGap = 48.0f;   // between the Attack pair and the Skill pair
+        f32 attackW = FontSystem::textWidth("Attack", TUT_SCALE);
+        f32 skillW  = FontSystem::textWidth("Skill", TUT_SCALE);
+        f32 x = cx - (glyphW + attackW + pairGap + glyphW + skillW) * 0.5f;
+
+        f32 b = alpha * breathe;
         // Attack button
-        if (cp) HUD::drawKeySymbol(sw, sh, cx - 120.0f, cy, "ZR", mouseLit);
-        else    HUD::drawMouseButton(sw, sh, cx - 120.0f, cy, 0, mouseLit);
-        FontSystem::drawText(sw, sh, cx - 98.0f, cy + 5.0f, "Attack",
-                             {0.5f * alpha, 0.9f * alpha, 0.5f * alpha}, 3);
+        if (cp) HUD::drawKeySymbol(sw, sh, x, cy, "ZR", mouseLit);
+        else    HUD::drawMouseButton(sw, sh, x, cy, 0, mouseLit);
+        FontSystem::drawText(sw, sh, x + glyphW, cy, "Attack",
+                             {0.6f * b, 1.0f * b, 0.6f * b}, TUT_SCALE);
+        x += glyphW + attackW + pairGap;
         // Skill button
-        if (cp) HUD::drawKeySymbol(sw, sh, cx + 35.0f, cy, "R", mouseLit);
-        else    HUD::drawMouseButton(sw, sh, cx + 35.0f, cy, 1, mouseLit);
-        FontSystem::drawText(sw, sh, cx + 57.0f, cy + 5.0f, "Skill",
-                             {0.5f * alpha, 0.6f * alpha, 0.9f * alpha}, 3);
+        if (cp) HUD::drawKeySymbol(sw, sh, x, cy, "R", mouseLit);
+        else    HUD::drawMouseButton(sw, sh, x, cy, 1, mouseLit);
+        FontSystem::drawText(sw, sh, x + glyphW, cy, "Skill",
+                             {0.6f * b, 0.75f * b, 1.0f * b}, TUT_SCALE);
     }
 
     // Shield tutorial — shown whenever a shield is equipped until the player blocks
@@ -602,28 +622,26 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
         bool hasShield = !isItemEmpty(offhand) &&
                          m_itemDefs[offhand.defId].slot == ItemSlot::OFFHAND;
         if (hasShield) {
-            f32 alpha = 1.0f;
             bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
             bool cp = Input::activeDeviceIsGamepad();
-            const char* text = cp ? "Block" : "Block";
-            f32 textW = FontSystem::textWidth(text, 3);
+            const char* text = "Block";
+            f32 textW = FontSystem::textWidth(text, TUT_SCALE);
             f32 totalW = 28.0f + textW;
             f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
             f32 cy = static_cast<f32>(sh) * 0.62f;
 
             HUD::drawKeySymbol(sw, sh, cx, cy, cp ? "ZL" : "Ctrl", keyLit);
             FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
-                                 {0.5f * alpha, 0.7f * alpha, 0.9f * alpha}, 3);
+                                 {0.65f * breathe, 0.85f * breathe, 1.0f * breathe}, TUT_SCALE);
         }
     }
 
     // Dodge roll tutorial — shown after shield tutorial is completed, until player dodges
     if (m_shieldBlockedOnce && !m_dodgeRolledOnce) {
-        f32 alpha = 1.0f;
         bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
         bool cp = Input::activeDeviceIsGamepad();
         const char* text = "Dodge Roll";
-        f32 textW = FontSystem::textWidth(text, 3);
+        f32 textW = FontSystem::textWidth(text, TUT_SCALE);
         f32 totalW = 28.0f + textW;
         f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.62f;
@@ -636,23 +654,22 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
             : "Shift";
         HUD::drawKeySymbol(sw, sh, cx, cy, dodgeLabel, keyLit);
         FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
-                             {0.9f * alpha, 0.7f * alpha, 0.3f * alpha}, 3);
+                             {1.0f * breathe, 0.8f * breathe, 0.35f * breathe}, TUT_SCALE);
     }
 
     // First pickup tutorial — shown until the player opens inventory (floor 1 only)
     if (m_firstPickupTooltipShown && !m_inventoryOpenedOnce && m_level.currentFloor <= 1) {
-        f32 alpha = 1.0f;
         bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
 
         const char* text = "Open Inventory";
-        f32 textW = FontSystem::textWidth(text, 3);
+        f32 textW = FontSystem::textWidth(text, TUT_SCALE);
         f32 totalW = 28.0f + textW;
         f32 cx = (static_cast<f32>(sw) - totalW) * 0.5f;
         f32 cy = static_cast<f32>(sh) * 0.65f;
 
         HUD::drawKeySymbol(sw, sh, cx, cy, Input::activeDeviceIsGamepad() ? "+" : "Tab", keyLit);
         FontSystem::drawText(sw, sh, cx + 28.0f, cy + 2.0f, text,
-                             {0.9f * alpha, 0.85f * alpha, 0.5f * alpha}, 3);
+                             {1.0f * breathe, 0.95f * breathe, 0.55f * breathe}, TUT_SCALE);
     }
 }
 
