@@ -1008,13 +1008,19 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         FontSystem::drawText(sw, sh, cx - hintW * 0.5f, cy - 50.0f, hint, {0.4f, 0.4f, 0.5f}, 1);
     }
 
-    // Enemy health bar at the top of the screen (Diablo 2 style).
-    if (!m_characterScreenOpen)
+    // Enemy health bar at the top of the screen (Diablo 2 style). Also suppressed while paused —
+    // see the note below on renderTutorials; the same gap let this bleed through too.
+    if (!m_characterScreenOpen && !m_menu.confirmQuit)
         renderTargetBar(sw, sh);
 
     // Tutorial tooltips are suppressed on the character-inspect screen so they don't draw over the
-    // stats sheet (the inspect overlay owns the whole screen while open).
-    if (!m_characterScreenOpen)
+    // stats sheet (the inspect overlay owns the whole screen while open), AND while paused: they
+    // sit at fixed y ~= 0.62-0.72*sh, horizontally centered — the same screen region as the PAUSED
+    // title and option rows (also centered). The pause branch above claims "only the pause overlay
+    // is drawn, so the screen looks unremarkable at a glance", but these two calls were gated only
+    // on !m_characterScreenOpen, an unrelated flag, so a live controls/shield/dodge/pickup tooltip
+    // kept rendering through the pause overlay whenever one happened to be showing when ESC was hit.
+    if (!m_characterScreenOpen && !m_menu.confirmQuit)
         renderTutorials(sw, sh);
 
     // Quickbar — always visible at bottom of screen, EXCEPT while the inventory's item comparison
