@@ -868,6 +868,9 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         // M7 — Clear the pending-damage ring so visual-feedback predictions from a
         // prior session don't carry over into the new connection.
         PendingDamageRingOps::reset(m_pendingDamage);
+        // Companion of the unpredicted-damage detector (clientNetPost): a stale low value from a
+        // prior session is harmless (min() only ever suppresses fires), but start clean anyway.
+        for (u32 i = 0; i < MAX_LOCAL_PLAYERS; i++) m_lastAdoptedHp[i] = 0.0f;
         // M8 — Clear the pending-pickups ring so world-item disappearance predictions
         // from a prior session don't suppress items in the new connection's world.
         PendingPickupRingOps::reset(m_pendingPickups);

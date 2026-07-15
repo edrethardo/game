@@ -397,6 +397,12 @@ private:
     // handler so net.cpp can stamp SV_TIME_PONG without directly accessing m_serverTick.
     u32 serverTickNow() const { return m_serverTick; }
 
+    // Last ADOPTED authoritative HP per local lane (client role only) — one leg of the
+    // unpredicted-damage detector in clientNetPost (the other leg is the pre-adopt value; the
+    // detector takes min() of both — see the comment there for why either alone false-fires).
+    // Zero-init is safe: min(pre, 0) can never register a drop on the first snapshot.
+    f32 m_lastAdoptedHp[MAX_LOCAL_PLAYERS] = {};
+
     // Per-client delta-compression baselines (server role only).
     // Tracks the serverTick of the last snapshot sent to each remote client so that
     // shouldSendFullSnapshot can decide whether a delta is safe for the next snapshot.

@@ -1116,7 +1116,43 @@ void Engine::clientNetPre(f32 dt) {
     // flows through m_renderOffset (RenderOffsetOps::accumulate on divergence, decayed
     // per frame at DECAY_RATE=13.0). The pre-M2 "trust-client position" comment that
     // used to live here described the now-removed posXYZ-in-NetInput model.
+    const f32 hpPreAdopt = m_players[activeNetSlot()].health;
     Client::reconcile(m_players[activeNetSlot()], m_localPlayer, activeNetSlot());
+
+    // Hurt feedback for hits the client could NOT predict (melee, champion novas, burning
+    // ground, boss AoE): the snapshot is the only place a guest learns about those, and the bare
+    // HP adoption in Client::reconcile plays nothing — the guest's HP bar just slid down in
+    // silence while the host got sound/shake/rumble/vignette. An adoption that lands below the
+    // baseline fires the same damageFlash path a local hit uses (its first tick plays PLAYER_HIT
+    // + camera kick + rumble in tickVisualFeedback).
+    //
+    // The baseline is min(pre-adopt HP, last ADOPTED HP) because each alone has a false-positive:
+    //   - pre-adopt alone: the potion heal is locally PREDICTED (engine_update.cpp), so local HP
+    //     runs ahead of the server for ~RTT and the pre-heal snapshot reads as a drop — a phantom
+    //     hit on every sip;
+    //   - last-adopted alone: a PREDICTED incoming projectile (M7/D3.2 already fired feedback and
+    //     decremented local HP) fires AGAIN when its authoritative drop arrives in the sequence.
+    // min() of the two is immune to both, and still catches a real hit landing during a heal.
+    {
+        NetPlayer& npSelf   = m_players[activeNetSlot()];
+        const f32  adopted  = npSelf.health;
+        const f32  baseline = fminf(hpPreAdopt, m_lastAdoptedHp[sp]);
+        const f32  drop     = baseline - adopted;
+        m_lastAdoptedHp[sp] = adopted;
+        // 2% floor: the u8 wire quantization (~0.4% of max) and DoT drip (~dps/60 per snapshot)
+        // stay below it, so poison/burn don't strobe the flash — matching the host, where DoT
+        // ticks don't re-flash either. No isDead gate: hearing the hit that kills you is correct.
+        const f32 thresh = fmaxf(2.0f, npSelf.maxHealth * 0.02f);
+        if (drop > thresh) {
+            npSelf.damageFlashTimer        = 0.15f;  // np copy survives the lp<->np round-trip syncs
+            m_localPlayer.damageFlashTimer = 0.15f;  // alias copy persists via this lane's swapOut
+            // Same vignette curve as Combat::applyDamageToPlayer, scaled by the confirmed hit.
+            f32 frac = drop / (npSelf.maxHealth > 0.0f ? npSelf.maxHealth : 100.0f);
+            f32 v = 0.15f + frac * 0.6f;
+            if (v > 0.85f) v = 0.85f;
+            m_localPlayer.hurtVignette = fmaxf(m_localPlayer.hurtVignette, v);
+        }
+    }
 
     // R17 — adopt server's lastActivationTick values for skills + potion. MAX(local,
     // snapshot) keeps any benign client over-prediction (server rejected non-cooldown
