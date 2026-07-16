@@ -35,6 +35,8 @@ f32 s_weaponDamage = 10.0f;
 
 // Arrow mesh ID for Volley (bolt reuses s_boltMeshId set by setBoltMeshId)
 u8 s_arrowMeshId = 0;
+// Equipped-weapon projectile mesh (arrow/bolt) for Barrage — see skill.h
+u8 s_weaponProjMeshId = 0;
 
 ScreenShake*  s_screenShake  = nullptr;
 SkillSystem::NovaCallback       s_novaCallback       = nullptr;
@@ -78,6 +80,7 @@ u8   SkillSystem::getCastingPlayer() { return s_castingPlayer; }
 void SkillSystem::setClassDamageMult(f32 mult)   { s_classDmgMult  = mult;  }
 void SkillSystem::setWeaponDamage(f32 dmg)       { s_weaponDamage  = dmg;   }
 void SkillSystem::setArrowMeshIds(u8 arrow, u8 /*bolt*/) { s_arrowMeshId = arrow; }
+void SkillSystem::setWeaponProjectileMesh(u8 meshId)     { s_weaponProjMeshId = meshId; }
 void SkillSystem::setNovaCallback(NovaCallback cb)           { s_novaCallback       = cb; }
 void SkillSystem::setDashCallback(DashCallback cb)           { s_dashCallback       = cb; }
 void SkillSystem::setScorchCallback(ScorchCallback cb)       { s_scorchCallback     = cb; }

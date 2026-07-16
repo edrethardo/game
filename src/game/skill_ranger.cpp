@@ -191,7 +191,15 @@ void fireBarrage(Vec3 origin, Vec3 forward, const SkillDef* def,
         f32 pitchSpread = ((std::rand() / static_cast<f32>(RAND_MAX)) - 0.5f) * 4.0f;
         Vec3 dir = normalize(rotateY(forward, yawSpread) +
                              Vec3{0.0f, pitchSpread * 0.017f, 0.0f}); // degrees to ~radians
-        ProjectileSystem::spawn(pool, origin, dir, speed, damage, 0.08f, 1.5f, true);
+        u16 idx = ProjectileSystem::spawn(pool, origin, dir, speed, damage, 0.08f, 1.5f, true);
+        if (idx != 0xFFFF) {
+            // Fire what the weapon fires: bolts from a crossbow, arrows from everything else
+            // (the context is set at both cast paths). Without a meshId these rendered as the
+            // meshId-0 default cube — a "10-arrow blast" of dice. Replicates via
+            // SnapProjectile.meshId, so guests see arrows too.
+            pool.projectiles[idx].meshId = s_weaponProjMeshId ? s_weaponProjMeshId
+                                                              : s_arrowMeshId;
+        }
     }
 
     if (s_particlePool) ParticleSystem::spawnSparks(*s_particlePool, origin, forward, 6);

@@ -43,6 +43,10 @@ extern f32 s_weaponDamage;
 // Arrow mesh ID for Volley projectiles.
 extern u8 s_arrowMeshId;
 
+// Projectile mesh matching the caster's equipped weapon (arrow for bows, bolt for
+// crossbows) — what Barrage fires. 0 = unset; consumers fall back to s_arrowMeshId.
+extern u8 s_weaponProjMeshId;
+
 // Bolt mesh/material IDs for Shock Bolt projectiles.
 extern u8 s_boltMeshId;
 extern u8 s_shockBoltMatId;

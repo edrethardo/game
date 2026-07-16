@@ -221,7 +221,11 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
               WeaponDef wd = !isItemEmpty(wpn)
                   ? Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex], m_itemDefs, wpn)
                   : m_weaponDefs[0];
-              SkillSystem::setWeaponDamage(wd.damage); }
+              SkillSystem::setWeaponDamage(wd.damage);
+              // What Barrage fires: bolts from a crossbow, arrows from everything else.
+              SkillSystem::setWeaponProjectileMesh(
+                  (!isItemEmpty(wpn) && m_itemDefs[wpn.defId].weaponSubtype == WeaponSubtype::CROSSBOW)
+                      ? m_meshIdBolt : m_meshIdArrow); }
             // Credit this caster for kills the skill lands — direct hits AND DoT (poison/burn) the
             // skill applies, which kill later in EntitySystem::tickTimers via the stamped src slot.
             Combat::setAttackingPlayer(activeNetSlot());

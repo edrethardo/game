@@ -55,6 +55,10 @@ namespace SkillSystem {
 
     // Set equipped weapon damage — Marksman/Ranger skills scale off weapon damage.
     void setWeaponDamage(f32 dmg);
+    // Which projectile mesh weapon-scaling arrow skills (Barrage) should fire — arrow for
+    // bows (and everything else), bolt for crossbows. Set alongside setWeaponDamage at both
+    // cast paths (local + server remote-cast) from the caster's equipped weapon subtype.
+    void setWeaponProjectileMesh(u8 meshId);
 
     // Set arrow/bolt mesh IDs for Ranger Volley (needs to assign meshId on spawned projectiles).
     void setArrowMeshIds(u8 arrow, u8 bolt);
