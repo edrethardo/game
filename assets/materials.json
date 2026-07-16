@@ -951,6 +951,50 @@
       "id": 156,
       "name": "goblin",
       "texture": "goblin_skin_42.png"
+    },
+    {
+      "id": 157,
+      "name": "catacomb_wall2",
+      "texture": "stone_wall_moss_7.png",
+      "tint": [
+        0.55,
+        0.65,
+        0.45,
+        1.0
+      ]
+    },
+    {
+      "id": 158,
+      "name": "cavern_wall2",
+      "texture": "cavern_wall_web_42.png",
+      "tint": [
+        0.65,
+        0.55,
+        0.75,
+        1.0
+      ]
+    },
+    {
+      "id": 159,
+      "name": "hellforge_wall2",
+      "texture": "hellforge_wall_vent_42.png",
+      "tint": [
+        0.85,
+        0.35,
+        0.15,
+        1.0
+      ]
+    },
+    {
+      "id": 160,
+      "name": "void_wall2",
+      "texture": "void_wall_runes_42.png",
+      "tint": [
+        0.35,
+        0.35,
+        0.5,
+        1.0
+      ]
     }
   ]
 }

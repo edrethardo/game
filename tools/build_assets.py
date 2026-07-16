@@ -26,6 +26,11 @@ def build_textures():
         ("stone_ceiling", 42, 32, "dark_dungeon"),
         ("brick_wall",    42, 32, "warm_brick"),
         ("stone_wall_moss", 7, 32, "dark_dungeon"),
+        # Depth-tier wall variants (the 30% "brick rooms" of floors 11+; catacombs reuse
+        # stone_wall_moss above). Seed 42 so the files land as <name>_42.png like the rest.
+        ("cavern_wall_web",     42, 32, "dark_dungeon"),
+        ("hellforge_wall_vent", 42, 32, "warm_brick"),
+        ("void_wall_runes",     42, 32, "dark_dungeon"),
         ("wood_plank",    42, 32, "warm_brick"),
         ("metal_grate",   42, 16, "cold_stone"),
     ]

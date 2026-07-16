@@ -93,6 +93,12 @@ TEXTURE_TYPES = [
     "stone_wall",
     "stone_wall_moss",
     "brick_wall",
+    # Per-tier wall VARIANTS — the 30% "brick rooms" of floors 11+ wear these so every
+    # depth tier keeps the two-tile room mix that floors 1-10 get from stone+brick.
+    # (Catacombs reuse stone_wall_moss.) Authored neutral; the theme tint colors them.
+    "cavern_wall_web",
+    "hellforge_wall_vent",
+    "void_wall_runes",
     "stone_floor",
     "wood_plank",
     "stone_ceiling",
@@ -108,6 +114,10 @@ DEFAULT_PALETTE = {
     "stone_wall": "dark_dungeon",
     "stone_wall_moss": "dark_dungeon",
     "brick_wall": "warm_brick",
+    # Variants hardcode their base+overlay palettes internally (like stone_wall_moss)
+    "cavern_wall_web": "dark_dungeon",
+    "hellforge_wall_vent": "warm_brick",
+    "void_wall_runes": "dark_dungeon",
     "stone_floor": "cold_stone",
     "wood_plank": "warm_brick",
     "stone_ceiling": "dark_dungeon",
@@ -284,6 +294,101 @@ def gen_brick_wall(img, size, palette):
             x += brick_w
         y += brick_h
         row_idx += 1
+
+
+def gen_cavern_wall_web(img, size, palette):  # noqa: ARG001 -- palette unused by design
+    """Spider-cavern wall variant: rough stone with pale corner webs.
+
+    Base is the ordinary stone wall; overlaid with 2-3 corner webs (radial
+    spokes + concentric arcs in pale grey, blended soft). Authored NEUTRAL —
+    the cavern theme's purple material tint colors it in-engine, exactly like
+    the base cavern_wall (which is plain stone_wall + tint).
+    """
+    base_pal = PALETTES["dark_dungeon"]
+    gen_stone_wall(img, size, base_pal)
+
+    px = img.load()
+    web = (208, 208, 216)
+    corners = random.sample([(0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)],
+                            random.randint(2, 3))
+    for (cx, cy) in corners:
+        span = random.randint(size // 3, size // 2)
+        # Radial spokes from the corner
+        num_spokes = random.randint(4, 5)
+        for s in range(num_spokes):
+            ang = (math.pi / 2) * (s / (num_spokes - 1))
+            # Orient the quarter-fan into the image from whichever corner
+            dx = math.cos(ang) * (1 if cx == 0 else -1)
+            dy = math.sin(ang) * (1 if cy == 0 else -1)
+            for r in range(span):
+                x, y = int(cx + dx * r), int(cy + dy * r)
+                if 0 <= x < size and 0 <= y < size:
+                    px[x, y] = lerp_color(px[x, y], web, 0.55)
+        # Concentric arcs (sag lines between spokes)
+        for ring in range(3, span, 4):
+            steps = ring * 2
+            for s in range(steps + 1):
+                ang = (math.pi / 2) * (s / steps)
+                x = int(cx + math.cos(ang) * ring * (1 if cx == 0 else -1))
+                y = int(cy + math.sin(ang) * ring * (1 if cy == 0 else -1))
+                if 0 <= x < size and 0 <= y < size:
+                    px[x, y] = lerp_color(px[x, y], web, 0.4)
+
+
+def gen_hellforge_wall_vent(img, size, palette):  # noqa: ARG001 -- palette unused by design
+    """Hellforge wall variant: dark brick with bright magma cracks.
+
+    Base is the brick wall darkened, then 2-3 jagged crack lines wander
+    bottom-to-top in near-white hot colors with a dimmer 1px halo. Authored
+    bright-on-dark: the hellforge red tint multiplies in-engine, so the
+    cracks read as glowing orange seams while the bricks go deep red.
+    """
+    base_pal = [tuple(int(c * 0.55) for c in col) for col in PALETTES["warm_brick"]]
+    gen_brick_wall(img, size, base_pal)
+
+    px = img.load()
+    for _ in range(random.randint(2, 3)):
+        x = random.randint(2, size - 3)
+        y = size - 1
+        while y >= 0:
+            hot = (255, random.randint(215, 240), 170)
+            px[x, y] = hot
+            # dim halo so the seam has thickness without a hard edge
+            for hx in (x - 1, x + 1):
+                if 0 <= hx < size:
+                    px[hx, y] = lerp_color(px[hx, y], hot, 0.35)
+            x = max(0, min(size - 1, x + random.randint(-1, 1)))
+            y -= 1
+        # A couple of ember pockets along the crack's neighborhood
+        for _ in range(2):
+            ex = max(0, min(size - 2, x + random.randint(-4, 4)))
+            ey = random.randint(size // 3, size - 2)
+            for dy in range(2):
+                for dx in range(2):
+                    px[ex + dx, ey + dy] = (255, 200, 140)
+
+
+def gen_void_wall_runes(img, size, palette):  # noqa: ARG001 -- palette unused by design
+    """Void wall variant: dark stone etched with pale angular runes.
+
+    Base is the ordinary stone wall; 4-6 small glyphs (angular 3x5 strokes)
+    are stamped in pale silver. Authored NEUTRAL — the void theme's blue-grey
+    tint turns the marks into faint glowing runes in-engine.
+    """
+    base_pal = PALETTES["dark_dungeon"]
+    gen_stone_wall(img, size, base_pal)
+
+    px = img.load()
+    pale = (214, 218, 236)
+    # Each glyph: vertical stroke + 1-2 angular branches, 3x5 px footprint
+    for _ in range(random.randint(4, 6)):
+        gx = random.randint(1, size - 5)
+        gy = random.randint(1, size - 7)
+        for dy in range(5):
+            px[gx + 1, gy + dy] = lerp_color(px[gx + 1, gy + dy], pale, 0.8)
+        for bx, by in random.sample([(0, 1), (2, 0), (2, 3), (0, 4)], random.randint(1, 2)):
+            px[gx + bx, gy + by] = lerp_color(px[gx + bx, gy + by], pale, 0.7)
+            px[gx + bx, gy + by + 1] = lerp_color(px[gx + bx, gy + by + 1], pale, 0.55)
 
 
 def gen_stone_floor(img, size, palette):
@@ -605,6 +710,9 @@ GENERATORS = {
     "stone_wall": gen_stone_wall,
     "stone_wall_moss": gen_stone_wall_moss,
     "brick_wall": gen_brick_wall,
+    "cavern_wall_web": gen_cavern_wall_web,
+    "hellforge_wall_vent": gen_hellforge_wall_vent,
+    "void_wall_runes": gen_void_wall_runes,
     "stone_floor": gen_stone_floor,
     "wood_plank": gen_wood_plank,
     "stone_ceiling": gen_stone_ceiling,

@@ -443,38 +443,50 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     //  41-50: Void          (black/dark blue)
     // ---------------------------------------------------------------------------
     {
-        u8 themeWall = 0, themeFloor = 0, themeCeil = 0;
+        u8 themeWall = 0, themeWallVar = 0, themeFloor = 0, themeCeil = 0;
         bool applyTheme = false;
 
         if (m_level.currentFloor >= 41) {
-            themeWall  = MaterialSystem::getIdByName("void_wall");
-            themeFloor = MaterialSystem::getIdByName("void_floor");
-            themeCeil  = MaterialSystem::getIdByName("void_ceiling");
+            themeWall    = MaterialSystem::getIdByName("void_wall");
+            themeWallVar = MaterialSystem::getIdByName("void_wall2");
+            themeFloor   = MaterialSystem::getIdByName("void_floor");
+            themeCeil    = MaterialSystem::getIdByName("void_ceiling");
             applyTheme = true;
         } else if (m_level.currentFloor >= 31) {
-            themeWall  = MaterialSystem::getIdByName("hellforge_wall");
-            themeFloor = MaterialSystem::getIdByName("hellforge_floor");
-            themeCeil  = MaterialSystem::getIdByName("hellforge_ceiling");
+            themeWall    = MaterialSystem::getIdByName("hellforge_wall");
+            themeWallVar = MaterialSystem::getIdByName("hellforge_wall2");
+            themeFloor   = MaterialSystem::getIdByName("hellforge_floor");
+            themeCeil    = MaterialSystem::getIdByName("hellforge_ceiling");
             applyTheme = true;
         } else if (m_level.currentFloor >= 21) {
-            themeWall  = MaterialSystem::getIdByName("cavern_wall");
-            themeFloor = MaterialSystem::getIdByName("cavern_floor");
-            themeCeil  = MaterialSystem::getIdByName("cavern_ceiling");
+            themeWall    = MaterialSystem::getIdByName("cavern_wall");
+            themeWallVar = MaterialSystem::getIdByName("cavern_wall2");
+            themeFloor   = MaterialSystem::getIdByName("cavern_floor");
+            themeCeil    = MaterialSystem::getIdByName("cavern_ceiling");
             applyTheme = true;
         } else if (m_level.currentFloor >= 11) {
-            themeWall  = MaterialSystem::getIdByName("catacomb_wall");
-            themeFloor = MaterialSystem::getIdByName("catacomb_floor");
-            themeCeil  = MaterialSystem::getIdByName("catacomb_ceiling");
+            themeWall    = MaterialSystem::getIdByName("catacomb_wall");
+            themeWallVar = MaterialSystem::getIdByName("catacomb_wall2");
+            themeFloor   = MaterialSystem::getIdByName("catacomb_floor");
+            themeCeil    = MaterialSystem::getIdByName("catacomb_ceiling");
             applyTheme = true;
         }
+        // Missing variant material (typo'd name, trimmed json) degrades to the base theme
+        // wall — a uniform tier, never material 0 (untinted stone) bleeding through.
+        if (themeWallVar == 0) themeWallVar = themeWall;
 
         if (applyTheme) {
             for (u32 z = 0; z < m_level.grid.depth; z++) {
                 for (u32 x = 0; x < m_level.grid.width; x++) {
                     GridCell& cell = LevelGridSystem::getCell(m_level.grid, x, z);
                     if (!(cell.flags & CELL_FLOOR)) continue; // skip solid cells
-                    // Replace default materials with theme — only preserve blood (boss arenas, id >= 20)
-                    if (cell.wallMaterialId < 20) cell.wallMaterialId = themeWall;
+                    // Replace default materials with theme — only preserve blood (boss arenas, id >= 20).
+                    // The BSP marks ~30% of rooms as "brick" (material 3, level_gen.cpp) — floors 1-10
+                    // show that directly as stone/brick variety. Rethemed tiers used to FLATTEN the
+                    // mix to one wall tile; mapping brick-marked rooms onto the tier's VARIANT wall
+                    // (mossy/webbed/vented/runed) keeps the same two-tile room rhythm at every depth.
+                    if (cell.wallMaterialId == 3)      cell.wallMaterialId = themeWallVar;
+                    else if (cell.wallMaterialId < 20) cell.wallMaterialId = themeWall;
                     if (cell.floorMaterialId < 20) cell.floorMaterialId = themeFloor;
                     if (cell.ceilMaterialId < 20) cell.ceilMaterialId = themeCeil;
                 }
