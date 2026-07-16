@@ -63,6 +63,7 @@ bool Engine::tryUsePetItem(u8 backpackIndex) {
     } else {
         togglePetCompanion(static_cast<u8>(m_localPlayerIndex), it.defId);
     }
+    recordPetSummon(it.defId);   // menagerie collection — every role's use path crosses here
     AudioSystem::play(SfxId::ITEM_EQUIP);   // local feedback on the click itself
     return true;
 }

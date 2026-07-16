@@ -82,6 +82,15 @@ before the EQUIPPED_REF conversion), with `Inventory::equip`'s petSummon refusal
   follow the CL_USE_PET pattern (own reliable packet + server validation + PROTOCOL_VERSION
   bump), not a new input bit.
 
+## Menagerie
+
+Summoning is COLLECTED: `tryUsePetItem` calls `recordPetSummon(defId)`, which sets the pet's
+bit in the profile-wide `menagerie.dat` (bit = `petEnemyIdx`; the goblin has its own flag) and
+unhides the pause menu's Menagerie page. A NEW pet needs nothing here — the bitmask keys off
+the enemy-def index and the page enumerates `m_petItemForEnemy[]` — but if you ever add a pet
+whose source is NOT an enemies.json def (like the goblin), it needs its own flag + a row in
+`renderMenagerie`, and the `menagerie.dat` version bumped if the layout grows.
+
 ## Verify
 
 - `./build/tests/dungeon_tests -tc="*pet*" -tc="*Config*"` — sync pin, unrollable, equip-refusal,

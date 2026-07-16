@@ -610,3 +610,60 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     LOG_INFO("Loaded character from slot %u into lane %u (world unchanged)", slot, lane);
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// Pet menagerie — profile-wide "which minipets have I ever summoned" collection.
+// A sibling file to difficulty_unlock.dat, deliberately NOT a save-format change (the save
+// layout is frozen and versioned) and deliberately profile-wide: like difficulty unlocks,
+// the collection belongs to the player across all their characters.
+// menagerie.dat = u32 version + u64 enemy-def bitmask + u8 goblin flag (13 bytes).
+// ---------------------------------------------------------------------------
+static constexpr u32 MENAGERIE_VERSION = 1;
+
+void Engine::loadMenagerie() {
+    char path[512];
+    FILE* f = std::fopen(Platform::userDataPath("menagerie.dat", path, sizeof(path)), "rb");
+    if (!f) return;   // nothing summoned yet — the pause row stays hidden
+    u32 ver = 0;
+    u64 mask = 0;
+    u8  goblin = 0;
+    bool ok = std::fread(&ver, sizeof(u32), 1, f) == 1 && ver == MENAGERIE_VERSION;
+    ok = ok && std::fread(&mask,   sizeof(u64), 1, f) == 1;
+    ok = ok && std::fread(&goblin, sizeof(u8),  1, f) == 1;
+    std::fclose(f);
+    if (!ok) return;  // unreadable/foreign version — treat as empty rather than corrupt state
+    m_menagerieEnemyMask = mask;
+    m_menagerieGoblin    = goblin != 0;
+}
+
+void Engine::saveMenagerie() {
+    char path[512];
+    FILE* f = std::fopen(Platform::userDataPath("menagerie.dat", path, sizeof(path)), "wb");
+    if (!f) { LOG_WARN("Menagerie: failed to write menagerie.dat"); return; }
+    u32 ver = MENAGERIE_VERSION;
+    u8  goblin = m_menagerieGoblin ? 1 : 0;
+    std::fwrite(&ver,                  sizeof(u32), 1, f);
+    std::fwrite(&m_menagerieEnemyMask, sizeof(u64), 1, f);
+    std::fwrite(&goblin,               sizeof(u8),  1, f);
+    std::fclose(f);
+}
+
+// Called from tryUsePetItem — the one local entry point every pet-use path crosses on every
+// role. "Used" counts as "summoned": a dismiss implies a prior summon, and a guest's use is
+// recorded optimistically (it only fires with the item verifiably in its own backpack —
+// good enough for a cosmetic collection). Writes the file only when a NEW pet is recorded.
+void Engine::recordPetSummon(u16 petDefId) {
+    if (petDefId >= m_itemDefCount || !m_itemDefs[petDefId].petSummon) return;
+    const u8 eIdx = m_itemDefs[petDefId].petEnemyIdx;
+    if (eIdx == 0xFF) {
+        if (m_menagerieGoblin) return;
+        m_menagerieGoblin = true;
+    } else {
+        if (eIdx >= 64) return;   // mask width == MAX_ENEMY_DEFS
+        const u64 bit = 1ull << eIdx;
+        if (m_menagerieEnemyMask & bit) return;
+        m_menagerieEnemyMask |= bit;
+    }
+    saveMenagerie();
+    LOG_INFO("Menagerie: recorded '%s'", m_itemDefs[petDefId].name);
+}

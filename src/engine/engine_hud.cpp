@@ -1005,12 +1005,14 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
         // Option list is dynamic: the host of an open Steam lobby gets a middle "Close Lobby" row.
         // currentLobbyId()==0 for SP / ENet host / client / non-Steam builds, so it stays 2 rows there.
-        // Ordering MUST match the input handler in engine_update.cpp: [Continue, (Close Lobby), Options, Save/Quit].
+        // Ordering MUST match the input handler in engine_update.cpp:
+        // [Continue, (Close Lobby), (Menagerie), Options, Save/Quit].
         const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
-        const char* options[4];
+        const char* options[5];
         u32 optCount = 0;
         options[optCount++] = "Continue Playing";
         if (canCloseLobby) options[optCount++] = "Close Lobby";
+        if (menagerieUnlocked()) options[optCount++] = "Menagerie";   // hidden until the first pet summon
         options[optCount++] = "Options";          // opens the real options screens mid-run
         options[optCount++] = "Save and Quit";
         for (u32 i = 0; i < optCount; i++) {
@@ -1211,6 +1213,88 @@ void Engine::renderHUD(u32 sw, u32 sh) {
             FontSystem::drawText(sw, sh, chatX, lineY, m_chatLog[i].text, col, 1);
         }
     }
+
+    // Menagerie overlay — LAST in renderHUD so its opaque page sits above everything the
+    // per-frame HUD drew (target bar, tutorials, chat); while it is open confirmQuit is false,
+    // so the pause suppressions above don't cover us and draw order has to.
+    if (m_menagerieOpen) renderMenagerie(sw, sh);
+}
+
+// ---------------------------------------------------------------------------
+// renderMenagerie — the pet collection page (pause menu → Menagerie, hidden until the
+// profile's first summon). View-only: the goblin jackpot in gold up top, then one row per
+// enemies.json mini in enemy-table order (which is tier order, so the page fills roughly
+// top-to-bottom as the player descends). Uncollected entries show a dark "?" and "???" —
+// present-but-unknown, the collection's pull — never the pet's name (that IS the reward).
+// ---------------------------------------------------------------------------
+void Engine::renderMenagerie(u32 sw, u32 sh) {
+    const f32 ms = static_cast<f32>(sh) / 720.0f;
+    const f32 cx = static_cast<f32>(sw) * 0.5f;
+
+    // Opaque page backdrop (full takeover, like the character inspect screen).
+    HUD::drawRectAt(sw, sh, 0.0f, 0.0f, static_cast<f32>(sw), static_cast<f32>(sh),
+                    {0.06f, 0.06f, 0.08f});
+
+    const char* title = "MENAGERIE";
+    f32 titleW = FontSystem::textWidth(title, 3);
+    FontSystem::drawText(sw, sh, cx - titleW * 0.5f, static_cast<f32>(sh) - 46.0f * ms,
+                         title, {1.0f, 0.84f, 0.25f}, 3);
+
+    // Collect the entries: the goblin first (find its def: the one petSummon item with no
+    // petEnemy binding), then every enemy that actually HAS a resolved pet item.
+    u16 goblinDef = 0xFFFF;
+    for (u32 i = 0; i < m_itemDefCount; i++)
+        if (m_itemDefs[i].petSummon && m_itemDefs[i].petEnemyIdx == 0xFF) { goblinDef = static_cast<u16>(i); break; }
+
+    u32 total = 0, owned = 0;
+    struct Row { u16 defId; bool have; bool gold; };
+    Row rows[1 + MAX_ENEMY_DEFS];
+    u32 rowCount = 0;
+    if (goblinDef != 0xFFFF) {
+        rows[rowCount++] = { goblinDef, m_menagerieGoblin, true };
+        total++; if (m_menagerieGoblin) owned++;
+    }
+    for (u32 e = 0; e < m_enemyDefs.count && e < 64; e++) {
+        if (m_petItemForEnemy[e] == 0xFFFF) continue;
+        const bool have = (m_menagerieEnemyMask & (1ull << e)) != 0;
+        rows[rowCount++] = { m_petItemForEnemy[e], have, false };
+        total++; if (have) owned++;
+    }
+
+    char counter[48];
+    std::snprintf(counter, sizeof(counter), "Collected %u / %u", owned, total);
+    f32 cw = FontSystem::textWidth(counter, 2);
+    FontSystem::drawText(sw, sh, cx - cw * 0.5f, static_cast<f32>(sh) - 78.0f * ms,
+                         counter, {0.7f, 0.7f, 0.75f}, 2);
+
+    // Two-column list (39 entries → 20 rows), names in full — a name you can read is the
+    // collectable. Icons come from the item-icon atlas (goblin face / paw, rarity-colored).
+    const u32 perCol   = (rowCount + 1) / 2;
+    const f32 colW     = static_cast<f32>(sw) * 0.42f;
+    const f32 leftX    = cx - colW;
+    const f32 topY     = static_cast<f32>(sh) - 108.0f * ms;
+    const f32 rowStep  = (topY - 40.0f * ms) / static_cast<f32>(perCol > 0 ? perCol : 1);
+    const f32 iconSize = 16.0f * ms;
+    for (u32 i = 0; i < rowCount; i++) {
+        const f32 x = leftX + static_cast<f32>(i / perCol) * colW;
+        const f32 y = topY - static_cast<f32>(i % perCol + 1) * rowStep;
+        const Row& r = rows[i];
+        if (r.have) {
+            ItemIconSystem::drawIcon(sw, sh, x, y, iconSize, m_itemDefs[r.defId],
+                                     r.gold ? Rarity::LEGENDARY : Rarity::COMMON);
+            const Vec3 nameCol = r.gold ? Vec3{1.0f, 0.84f, 0.25f} : Vec3{0.85f, 0.85f, 0.9f};
+            FontSystem::drawText(sw, sh, x + iconSize + 8.0f * ms, y + 4.0f * ms,
+                                 m_itemDefs[r.defId].name, nameCol, 1);
+        } else {
+            FontSystem::drawText(sw, sh, x + 4.0f * ms, y + 4.0f * ms, "?", {0.3f, 0.3f, 0.36f}, 2);
+            FontSystem::drawText(sw, sh, x + iconSize + 8.0f * ms, y + 4.0f * ms,
+                                 "???", {0.35f, 0.35f, 0.4f}, 1);
+        }
+    }
+
+    const char* hint = Input::activeDeviceIsGamepad() ? "B to return" : "ESC to return";
+    f32 hintW = FontSystem::textWidth(hint, 1);
+    FontSystem::drawText(sw, sh, cx - hintW * 0.5f, 18.0f * ms, hint, {0.4f, 0.4f, 0.5f}, 1);
 }
 
 // renderMenu() and renderLobby() moved to engine_render_menus.cpp

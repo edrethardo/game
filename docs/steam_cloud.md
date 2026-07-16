@@ -30,6 +30,7 @@ Requires a Steam **App ID** / partner access.
 3. **Path patterns** (per mapping) — sync exactly these:
    - `save_*.dat`
    - `difficulty_unlock.dat`
+   - `menagerie.dat`   (pet-collection progress — profile-wide, should roam like unlocks)
    - `controls.json`
    - `audio.json`
    - **NOT** `video.cfg` — fullscreen/display index are machine-specific and must not roam.
@@ -54,5 +55,5 @@ build is ever run via Proton, its `%APPDATA%` lives in the Proton prefix and `Wi
 1. Local (no Steam): launch, confirm the log line `User data dir: <path>`; play/save/quit; confirm
    `save_NN.dat` appears under the pref dir; `ffprobe`-free — just `ls` the dir.
 2. Cloud round-trip (needs the depot): install via Steam, play → exit → watch the Steam Cloud sync
-   status; on a second machine (or after clearing local) confirm `save_*.dat`, `difficulty_unlock.dat`,
+   status; on a second machine (or after clearing local) confirm `save_*.dat`, `difficulty_unlock.dat`, `menagerie.dat`,
    `controls.json`, `audio.json` re-download and `video.cfg` does **not**.

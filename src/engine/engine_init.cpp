@@ -276,6 +276,9 @@ void Engine::init() {
         }
     }
 
+    // Pet menagerie collection (menagerie.dat, same profile-wide pattern as the unlock above).
+    loadMenagerie();
+
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
 
