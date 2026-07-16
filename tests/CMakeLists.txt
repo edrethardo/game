@@ -44,6 +44,7 @@ add_executable(dungeon_tests
     game/test_max_health.cpp         # max HP = class base x growth + gear + buff (gear was DEAD)
     game/test_opening_strike.cpp     # arriving enemies must never open SLOWER
     game/test_pet_item.cpp           # mini-goblin consumable: unrollable + unequippable
+    game/test_lead_assist.cpp        # throwing-knife intercept math — header-only, no .cpp to link
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp

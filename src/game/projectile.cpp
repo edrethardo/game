@@ -227,7 +227,8 @@ void ProjectileSystem::update(ProjectilePool& pool,
             p.velocity.y -= p.gravity * dt;
         }
 
-        // Move
+        // Move (pre-move position kept: swept projectiles test entities along this segment)
+        const Vec3 preMovePos = p.position;
         p.position += p.velocity * dt;
 
         // Spawn trail particles for skill projectiles (every ~3rd frame to avoid flooding)
@@ -274,13 +275,33 @@ void ProjectileSystem::update(ProjectilePool& pool,
         if (p.fromPlayer) {
             // Hit hostile enemies only. Use spatial grid for O(1) neighbor lookup
             // instead of iterating all active entities (O(N) → O(~8) per projectile).
+            //
+            // Swept projectiles (throwing knives, p.swept) test SAMPLE POINTS along the whole
+            // per-tick travel segment instead of only the post-move endpoint. Walls have always
+            // been swept (the raycast above covers travel+radius); entities were not — and a
+            // knife moves 0.42-0.58 m per tick with a 5-8 cm radius, so an endpoint-only test
+            // steps clean over grazing hits (chord through the box shorter than the step).
+            // Sample spacing ≤ radius keeps overlap gaps impossible; the LAST sample is the
+            // exact post-move position, so non-swept projectiles (samples == 1) run the
+            // byte-identical old test.
+            u32 sweepSamples = 1;
+            if (p.swept && travel > p.radius && p.radius > 0.001f) {
+                sweepSamples = static_cast<u32>(travel / p.radius) + 1;
+                if (sweepSamples > 8) sweepSamples = 8;
+            }
             bool hit = false;
             u16 primaryHitIdx = 0xFFFF;
-            if (!(p.projFlags & PROJ_ORB)) { // Frozen Orb phases through enemies
+            if (!(p.projFlags & PROJ_ORB))   // Frozen Orb phases through enemies
+            for (u32 sw = 1; sw <= sweepSamples && !hit; sw++) {
+                const Vec3 samplePos = (sw == sweepSamples)
+                    ? p.position
+                    : preMovePos + dir * (travel * static_cast<f32>(sw) / static_cast<f32>(sweepSamples));
+                projBox = { samplePos - Vec3{p.radius, p.radius, p.radius},
+                            samplePos + Vec3{p.radius, p.radius, p.radius} };
                 u16 nearby[72]; // 3x3 cells × 8 per cell max
                 u32 nearCount = 0;
                 if (spatialGrid) {
-                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, nearby, 72);
+                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, samplePos, nearby, 72);
                 } else {
                     // Fallback: scan all active entities (no grid available)
                     for (u32 a = 0; a < entities.activeCount && nearCount < 72; a++)
@@ -294,6 +315,9 @@ void ProjectileSystem::update(ProjectilePool& pool,
                     if (ent.enemyType == EnemyType::PROP) continue;
 
                     if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
+                        // Impact happened at the sample, not the endpoint — pull the projectile
+                        // back so the damage origin, splash center and destroy-FX sit on the hit.
+                        p.position = samplePos;
                         EntityHandle h = {static_cast<u16>(e), ent.generation};
                         // p.isCrit was set at spawn in Combat::fireProjectile — pass it
                         // through so the CRIT feedback tier fires on direct hits.

@@ -26,6 +26,7 @@
 #include "renderer/particles.h"
 #include "game/player.h"
 #include "game/combat.h"
+#include "game/lead_assist.h"   // throwing-knife intercept math (pure, unit-tested)
 #include "game/enemy_ai.h"
 #include "game/squad.h"
 #include "game/limb_system.h"
@@ -578,6 +579,13 @@ void Engine::handleWeaponFire(f32 dt) {
             spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
         }
 
+        // Throwing knives: lead-assisted direction + swept entity collision (knives ONLY —
+        // the rest of the ranged arsenal is untouched by design; see applyKnifeLeadAssist).
+        bool isKnife = qbItem && !isItemEmpty(*qbItem) &&
+                       m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::THROWING_KNIFE;
+        Vec3 fireDir = forward;
+        if (isKnife) applyKnifeLeadAssist(spawnPos, fireDir, wpn.projectileSpeed);
+
         u16 projIdx;
         if (isMolotov) {
             projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles,
@@ -586,8 +594,10 @@ void Engine::handleWeaponFire(f32 dt) {
             // Wands get spark visual; void weapons get purple tint via PROJ_VOID flag
             bool isVoidWand = isWand && m_weaponProc == SkillId::VOID_ZONE;
             u8 flags = isVoidWand ? PROJ_VOID : (isWand ? PROJ_SPARK : 0);
-            projIdx = Combat::fireProjectile(wpn, spawnPos, forward, m_projectiles, flags);
+            projIdx = Combat::fireProjectile(wpn, spawnPos, fireDir, m_projectiles, flags);
         }
+        if (projIdx != 0xFFFF && isKnife)
+            m_projectiles.projectiles[projIdx].swept = true;   // segment-sampled entity test
         // Assign correct mesh to projectile based on weapon subtype
         if (projIdx != 0xFFFF && qbItem && !isItemEmpty(*qbItem)) {
             WeaponSubtype sub = m_itemDefs[qbItem->defId].weaponSubtype;
@@ -1124,6 +1134,38 @@ void Engine::capInfinityChakrams(u8 ownerSlot, u16 keepIdx) {
 // ---------------------------------------------------------------------------
 // Weapon fire for any NetPlayer (server-authoritative)
 // ---------------------------------------------------------------------------
+// Throwing-knife aim assist — the one ranged weapon that gets any. Knives are the fastest,
+// thinnest projectile class thrown at targets the Phase-2 AI keeps strafing; measured hit
+// rates against a 3 m/s strafer at 8 m were ~0-7% because an on-crosshair throw physically
+// cannot land without leading (the target displaces more than its own width in flight).
+// The assist only engages when the crosshair is ALREADY within 7° of a target and bends the
+// throw at most 12° toward the intercept of the target's current velocity — rewarding good
+// aim rather than replacing it. Runs in BOTH fire paths: SP/host and the server's remote
+// fire (so a guest's knives get the same physics), plus the client's ghost prediction —
+// which reads the interp pool (what the player sees, wire velocities included) since its
+// own entity pool is the gated-off ghost sim.
+void Engine::applyKnifeLeadAssist(const Vec3& spawnPos, Vec3& dir, f32 projSpeed) {
+    EntityPool& pool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities : m_entities;
+    EntityHandle hits[8];
+    f32 dists[8];
+    u32 n = CombatQuery::queryConeSorted(pool, spawnPos, dir, LeadAssist::ACQUIRE_COS,
+                                         LeadAssist::ACQUIRE_RANGE, hits, dists, 8);
+    for (u32 i = 0; i < n; i++) {
+        const Entity* e = handleGet(pool, hits[i]);
+        if (!e || (e->flags & ENT_UNTARGETABLE)) continue;   // query filters dead/friendly/props
+        const Vec3 rel = e->position - spawnPos;
+        const Vec3 vel = {e->velocity.x, 0.0f, e->velocity.z};   // lead the XZ strafe only
+        f32 t;
+        // Unreachable intercept (target outruns the knife) still centers the throw on the
+        // target's current position — strictly better than nothing, never worse than before.
+        const Vec3 ideal = LeadAssist::interceptTime(rel, vel, projSpeed, t)
+                         ? normalize(rel + vel * t)
+                         : normalize(rel);
+        dir = LeadAssist::clampToward(dir, ideal, LeadAssist::MAX_CORRECT_RAD);
+        return;   // nearest target in the acquisition cone wins
+    }
+}
+
 void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     Combat::setAttackingPlayer(np.slotIndex); // (L8) credit this remote player's kills
     WeaponState& ws = np.weaponState;
@@ -1404,6 +1446,13 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         bool isMolotov = (sub == WeaponSubtype::MOLOTOV);
         bool isWand    = (sub == WeaponSubtype::WAND);
 
+        // Throwing knives: same lead assist + swept collision as the local path — the
+        // authoritative half of what the firing guest already predicted (server-side pool,
+        // authoritative velocities).
+        bool isKnife = (sub == WeaponSubtype::THROWING_KNIFE);
+        Vec3 fireDir = forward;
+        if (isKnife) applyKnifeLeadAssist(eyePos, fireDir, wpn.projectileSpeed);
+
         u16 projIdx;
         if (isMolotov) {
             // Gravity + splash overload — same magic numbers as the host path
@@ -1413,8 +1462,10 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
             // Wand gets a spark flag for visual; remote-fired wands don't have the
             // m_weaponProc void-zone state (that's host-local), so PROJ_VOID is omitted.
             u8 flags = isWand ? PROJ_SPARK : 0;
-            projIdx = Combat::fireProjectile(wpn, eyePos, forward, m_projectiles, flags);
+            projIdx = Combat::fireProjectile(wpn, eyePos, fireDir, m_projectiles, flags);
         }
+        if (projIdx != 0xFFFF && isKnife)
+            m_projectiles.projectiles[projIdx].swept = true;   // segment-sampled entity test
         if (projIdx != 0xFFFF) {
             Projectile& proj = m_projectiles.projectiles[projIdx];
             if (sub == WeaponSubtype::BOW) {

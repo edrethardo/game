@@ -36,6 +36,12 @@ struct Projectile {
     bool active     = false;
     bool fromPlayer = true; // false = enemy projectile
     bool isCrit     = false; // player rolled a crit at spawn — applied on direct hit, NOT splash
+    // Entity collision samples the whole per-tick travel SEGMENT instead of only the post-move
+    // endpoint. Throwing knives set this (fastest + thinnest projectiles: 0.42-0.58 m/tick vs a
+    // 5-8 cm radius — an endpoint-only test steps clean over grazes). Runtime-only, not on the
+    // wire (collision is authoritative-sim work; client ghosts never collide). projFlags is a
+    // full u8, hence a bool and not a ninth flag.
+    bool swept      = false;
     u8   ownerSlot  = 0xFF;  // (L8) firing player's slot (0xFF = none); restored into
                              // Combat::s_attackingPlayer around this projectile's damage so a
                              // kill credits the firer even though it resolves frames later
