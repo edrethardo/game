@@ -11,6 +11,7 @@
 
 #include "game/skill.h"
 #include "game/player.h"
+#include "game/teleport_dest.h"   // shared landing-spot resolver for every teleport/blink
 #include "game/combat.h"
 #include "audio/audio.h"
 #include "net/net.h"        // MAX_PLAYERS — overcharge state is per-net-slot now (H5)
@@ -174,7 +175,7 @@ void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
                      const LevelGrid& grid, EntityPool& entities, Player& player);
 
 bool fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
-                      EntityPool& entities, Player& player);  // false = no target (free)
+                      const LevelGrid& grid, EntityPool& entities, Player& player);  // false = no target (free)
 
 void fireFanOfKnives(Vec3 origin, Vec3 forward, const SkillDef* def,
                      ProjectilePool& pool, Player& player);

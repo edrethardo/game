@@ -50,6 +50,7 @@ add_executable(dungeon_tests
     game/test_legendary_pool.cpp     # legendary tier = named uniques only; rarityFloor guarantees
     game/test_ai_preference.cpp      # authored combat openers: pure map + enemies.json stat-fit lint
     game/test_dormant_watch.cpp      # weeping-angel view cone: pins the yaw/pitch forward convention
+    game/test_teleport_dest.cpp      # teleport landing resolver: never in a wall/body/sealed pocket
     world/test_ray_targeting.cpp
     world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp
@@ -75,6 +76,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/game/quickbar.cpp       # quickbar slot bookkeeping
     ${CMAKE_SOURCE_DIR}/src/game/champion.cpp       # champion affix roll rules (pure)
     ${CMAKE_SOURCE_DIR}/src/game/floor_event.cpp   # floor-event weighted pick (pure)
+    ${CMAKE_SOURCE_DIR}/src/game/teleport_dest.cpp # teleport landing-spot resolver
     ${CMAKE_SOURCE_DIR}/src/game/world_item.cpp    # world-item pool: spawn + lifetime expiry
     ${CMAKE_SOURCE_DIR}/src/game/inventory.cpp    # stat cache + derived max health
     ${CMAKE_SOURCE_DIR}/src/world/collision.cpp   # (world_item.cpp -> ensureNotInWall)

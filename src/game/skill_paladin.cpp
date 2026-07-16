@@ -54,8 +54,12 @@ void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
         break;
     }
 
-    // Teleport player to dash endpoint
-    Vec3 endPos = startPos + dashDir * actualDist;
+    // Teleport to the dash endpoint — resolved, because actualDist on an enemy hit is the
+    // distance to its CENTER (inside the body; inescapable inside anything Butcher-sized),
+    // and the wall ray above is a thin center ray a footprint can still graze past. The
+    // resolver backs off along the dash line to the nearest spot the paladin actually fits.
+    Vec3 endPos = Teleport::resolveDest(grid, entities, startPos,
+                                        startPos + dashDir * actualDist);
     player.position = endPos;
 
     // Spawn gold judgment pillar at target

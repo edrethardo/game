@@ -473,7 +473,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         firePoisonCloud(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::SHADOW_STRIKE:
-        didActivate = fireShadowStrike(eyePos, forward, def, entities, player);
+        didActivate = fireShadowStrike(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::SHADOW_STEP:
         didActivate = fireShadowStep(eyePos, forward, def, grid, entities, player);

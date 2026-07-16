@@ -63,7 +63,7 @@ void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
 // Teleport behind nearest enemy and deal 3x damage.
 // Returns false (no target) so a whiff stays free and triggers no cooldown.
 bool fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
-                      EntityPool& entities, Player& player)
+                      const LevelGrid& grid, EntityPool& entities, Player& player)
 {
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
@@ -77,10 +77,13 @@ bool fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
     Entity* target = handleGet(entities, hits[0]);
     if (!target) return false;
 
-    // Teleport to just behind the target relative to its facing
+    // Teleport to just behind the target relative to its facing — RESOLVED: "1 m behind"
+    // is inside the wall whenever the target hugs one, and inside the BODY for anything
+    // wider than ~0.6 m. The resolver walks the blink line back toward the rogue, so a
+    // blocked backstab spot degrades to a melee-range landing on the rogue's side.
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
     Vec3 startPos = player.position;
-    player.position = behind;
+    player.position = Teleport::resolveDest(grid, entities, startPos, behind);
     // Face the enemy's back: look the same direction it faces, level pitch.
     player.yaw   = target->yaw;
     player.pitch = 0.0f;
@@ -160,23 +163,13 @@ bool fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
     }
     if (!target) return false; // nothing visible — Shadow Step does nothing
 
-    // Teleport behind the target — validate destination is walkable
+    // Teleport behind the target — resolved by the shared landing-spot resolver (full
+    // footprint vs walls, no landing inside bodies, floor-snapped). The OLD validation here
+    // checked one cell center and, when blocked, fell back to teleporting INTO the target's
+    // position — which is precisely the "stuck inside enemies" report.
     Vec3 behind = target->position + Vec3{sinf(target->yaw), 0.0f, cosf(target->yaw)} * 1.0f;
-    u32 cx = static_cast<u32>(behind.x / grid.cellSize);
-    u32 cz = static_cast<u32>(behind.z / grid.cellSize);
-    if (cx >= grid.width || cz >= grid.depth ||
-        (grid.cells[cz * grid.width + cx].flags & CELL_SOLID)) {
-        // Destination blocked — teleport to target's position instead
-        behind = target->position;
-    }
-    // Snap to floor height so the player doesn't float or fall through
-    u32 fx = static_cast<u32>(behind.x / grid.cellSize);
-    u32 fz = static_cast<u32>(behind.z / grid.cellSize);
-    if (fx < grid.width && fz < grid.depth) {
-        behind.y = LevelGridSystem::getFloorHeight(grid, fx, fz);
-    }
     Vec3 startPos = player.position;
-    player.position = behind;
+    player.position = Teleport::resolveDest(grid, entities, startPos, behind);
     // Face the enemy's back: look the same direction it faces, level pitch.
     player.yaw   = target->yaw;
     player.pitch = 0.0f;

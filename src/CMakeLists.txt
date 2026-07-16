@@ -83,6 +83,7 @@ add_executable(DungeonEngine
     game/inventory_ui.cpp
     game/limb_system.cpp
     game/skill_system.cpp
+    game/teleport_dest.cpp
     game/skill_legendary.cpp
     game/skill_warrior.cpp
     game/skill_ranger.cpp

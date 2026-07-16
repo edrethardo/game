@@ -219,7 +219,9 @@ void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
         Combat::applyDamage(entities, hits[i], dashDmg);
     }
 
-    // Teleport player
+    // Teleport — resolved so a dash THROUGH the pack can't end inside the last body it
+    // passed, and a thin-ray wall graze can't leave the footprint clipped into the wall.
+    endPos = Teleport::resolveDest(grid, entities, startPos, endPos);
     player.position = endPos;
 
     // Trigger blue trail visual
