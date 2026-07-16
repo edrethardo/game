@@ -77,7 +77,12 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // P2's pickups were range-checked against P1 and landed in P1's server-side inventory, a shrine
 // P2 touched buffed P1, and P2 couldn't open chests unless P1 stood beside them. A v17 client
 // omits the byte (requests silently mis-attribute again), so reject cleanly.
-static constexpr u32 PROTOCOL_VERSION  = 18; // v13: player record single shrineTimerQ pair (was
+// v19: the dead lock-on input bit becomes INPUT_BLOCK — the server now simulates blocking
+// (damage negation, perfect-block window, 0.4x slow) for remotes; SnapPlayer.flags bits 5-7
+// carry Static Charge stacks. NO packet changes size — the bump is same-build insurance: a
+// v18 peer would take full damage while "blocking" and never see shield procs, a silent
+// parity gap of the v14/v15 class.
+static constexpr u32 PROTOCOL_VERSION  = 19; // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE

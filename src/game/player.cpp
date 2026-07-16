@@ -345,6 +345,18 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
     if (np.markSpeedStacks > 0) {
         effectiveSpeed *= (1.0f + np.markSpeedStacks * 0.05f);
     }
+    // Blocking (v19). State is input-derived (INPUT_BLOCK) so a reconcile replay reproduces it
+    // exactly; the 0.4x slow MUST mirror the local branch in engine_update.cpp (blocking slows
+    // movement) or every blocking guest rubber-bands. blockTimer only advances on live server
+    // processing — it feeds perfect-block classification (applyDamageToPlayer), which never
+    // runs during a movement-only replay.
+    const bool wantsBlock = (input.moveFlags & INPUT_BLOCK) != 0;
+    if (!movementOnly) {
+        if (wantsBlock && !np.blocking) np.blockTimer = 0.0f;   // raise edge: perfect window opens
+        else if (wantsBlock)            np.blockTimer += dt;
+        np.blocking = wantsBlock;
+    }
+    if (wantsBlock) effectiveSpeed *= 0.4f;
     // Absolute aim: SET yaw/pitch from the input's quantized fields, then run movement
     // with zero look-delta (applyMovement uses np.yaw to compute forward direction, so
     // the assignment must happen first or movement direction is one tick stale).
@@ -428,10 +440,11 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
     if (Input::isActionDown(GameAction::MOVE_LEFT)     || Input::getStickX(false) < -0.3f) flags |= INPUT_LEFT;
     if (Input::isActionPressed(GameAction::JUMP))    flags |= INPUT_JUMP;
     if (Input::isActionDown(GameAction::FIRE))       flags |= INPUT_FIRE;
+    // Block rides the input stream (v19) so the server simulates it: damage negation, the
+    // perfect window, and the 0.4x slow all happen authoritatively. Captured BEFORE the bot
+    // override so --bot-walk stays deterministic (the bot never blocks).
+    if (Input::isActionDown(GameAction::BLOCK))      flags |= INPUT_BLOCK;
     if (s_botWalk) { flags = botWalkFlags(tick); s_botFlagsThisTick = flags; }   // bot overrides devices
-    // INPUT_LOCK is deliberately never set: it was fed by the cut lock-on feature and is read by
-    // nobody on the server. The bit stays reserved in the flags byte so the wire layout is
-    // unchanged (it simply always reads 0) — see net_player.h.
     input.moveFlags = flags;
 
     // Peek at this frame's mouse/stick/gyro delta WITHOUT consuming it (Input::getMouseDelta

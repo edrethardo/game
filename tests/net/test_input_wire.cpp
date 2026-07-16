@@ -131,3 +131,25 @@ TEST_CASE("InputWindow: targetSlot rides in header byte 1; default is 0; inputs 
     CHECK(parsed[0].clientTick == 50);
     CHECK(parsed[1].clientTick == 51);
 }
+
+// PROTOCOL_VERSION 19: the dead lock-on bit becomes INPUT_BLOCK. Server-side blocking (damage
+// negation, the perfect window, the 0.4x move slow) is driven entirely by this bit, so it must
+// (a) sit exactly where the reserved bit sat — the flags byte layout is unchanged — and
+// (b) survive the wire round-trip like any other movement flag.
+TEST_CASE("INPUT_BLOCK: occupies the old reserved lock bit and survives the wire") {
+    CHECK(INPUT_BLOCK == (1 << 6));
+
+    NetInput in{};
+    in.clientTick = 9;
+    in.moveFlags  = INPUT_FORWARD | INPUT_BLOCK;
+    NetInput window[1] = { in };
+    u8 buf[64] = {};
+    u32 size = serializeInputWindow(buf, sizeof(buf), window, 1);
+    REQUIRE(size > 0);
+
+    NetInput parsed[4] = {};
+    u32 count = deserializeInputWindow(buf, size, parsed, 4);
+    REQUIRE(count == 1);
+    CHECK((parsed[0].moveFlags & INPUT_BLOCK) != 0);
+    CHECK((parsed[0].moveFlags & INPUT_FORWARD) != 0);
+}
