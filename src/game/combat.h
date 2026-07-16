@@ -58,12 +58,23 @@ namespace Combat {
     // damage number (DoTs tick every frame and would otherwise spam).
     void killEntity(EntityPool& pool, EntityHandle target);
 
+    // How a hit interacted with the shield. PERFECT (raise-to-hit < 0.2s) negates all damage
+    // and triggers the legendary-shield effects; BLOCKED halves it. Pure — the single source
+    // for the window, consumed by applyDamageToPlayer and pinned by test_block_outcome.cpp.
+    enum struct BlockOutcome : u8 { NONE, BLOCKED, PERFECT };
+    inline BlockOutcome classifyBlock(bool blocking, f32 blockTimer) {
+        if (!blocking) return BlockOutcome::NONE;
+        return (blockTimer < 0.2f) ? BlockOutcome::PERFECT : BlockOutcome::BLOCKED;
+    }
+
     // Apply damage to the player. Optional attackerPos enables directional indicator.
     // attackerIdx: entity pool index of the attacker (0xFFFF if unknown/environmental).
     // Used by dodge-through detection to fire riposte counter-hits, and stamped onto the player so
     // thorns can reflect at the actual attacker.
-    void applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr,
-                             u16 attackerIdx = 0xFFFF);
+    // Returns how the shield handled the hit (NONE for i-frame/deflect early-outs too), so the
+    // projectile path can reflect on PERFECT (Mirror Aegis) instead of consuming the shot.
+    BlockOutcome applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos = nullptr,
+                                     u16 attackerIdx = 0xFFFF);
 
     // Defensive pack — armor rating → fraction of incoming damage mitigated, on a diminishing-
     // returns curve `armor / (armor + 100)` hard-capped at 0.80. Pure function (no engine state),

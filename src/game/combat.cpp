@@ -334,8 +334,8 @@ f32 Combat::armorMitigation(f32 armor) {
     return (mit > 0.80f) ? 0.80f : mit;  // hard cap so a stacked build can't become invulnerable
 }
 
-void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attackerPos,
-                                   u16 attackerIdx) {
+Combat::BlockOutcome Combat::applyDamageToPlayer(Player& player, f32 damage,
+                                                 const Vec3* attackerPos, u16 attackerIdx) {
     // --- Champion: VAMPIRIC ---
     // The champion heals for a share of the damage it deals, so trading blows with it is a losing
     // proposition — you have to out-damage the lifesteal or disengage. Hooked here, at the single
@@ -365,19 +365,19 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
             s_dodgeThroughCallback(player, attackerIdx, attackerPos ? *attackerPos : Vec3{0, 0, 0});
         }
         // During i-frames (first 0.3s), block all damage
-        if (player.invulnTimer > 0.0f) return;
+        if (player.invulnTimer > 0.0f) return BlockOutcome::NONE;
         // Recovery frames (last 0.2s): damage still goes through below
     }
 
     // Non-roll invulnerability (respawn/floor entry grace period)
-    if (player.invulnTimer > 0.0f) return;
+    if (player.invulnTimer > 0.0f) return BlockOutcome::NONE;
 
     // Wanderer Deflect: full immunity — absorb raw damage and hit count.
     // When window expires, fires 8 projectiles per absorbed hit.
     if (player.deflectTimer > 0.0f) {
         player.deflectAbsorbed += damage;
         player.deflectHitCount++;
-        return; // fully immune, no damage applied
+        return BlockOutcome::NONE; // fully immune, no damage applied
     }
 
     // Class passive damage reduction (e.g. Warrior 30%)
@@ -388,15 +388,14 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
         damage *= (1.0f + player.curseStacks * 0.05f);
     }
 
-    if (player.blocking) {
-        if (player.blockTimer < 0.2f) {
-            // Perfect block — negate all damage, trigger shield bash via callback
-            damage = 0.0f;
-            if (s_perfectBlockCallback) s_perfectBlockCallback(player);
-        } else {
-            // Normal block — halve damage
-            damage *= 0.5f;
-        }
+    const BlockOutcome blockOutcome = classifyBlock(player.blocking, player.blockTimer);
+    if (blockOutcome == BlockOutcome::PERFECT) {
+        // Perfect block — negate all damage, trigger the legendary-shield effect via callback
+        damage = 0.0f;
+        if (s_perfectBlockCallback) s_perfectBlockCallback(player);
+    } else if (blockOutcome == BlockOutcome::BLOCKED) {
+        // Normal block — halve damage
+        damage *= 0.5f;
     }
 
     // Armor (defensive pack): flat rating → diminishing-returns mitigation (armorMitigation),
@@ -463,6 +462,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     if (player.health <= 0.0f) {
         player.health = 0.0f;
     }
+    return blockOutcome;
 }
 
 AttackResult Combat::fireMelee(const WeaponDef& weapon,

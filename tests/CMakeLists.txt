@@ -51,6 +51,7 @@ add_executable(dungeon_tests
     game/test_ai_preference.cpp      # authored combat openers: pure map + enemies.json stat-fit lint
     game/test_dormant_watch.cpp      # weeping-angel view cone: pins the yaw/pitch forward convention
     game/test_teleport_dest.cpp      # teleport landing resolver: never in a wall/body/sealed pocket
+    game/test_block_outcome.cpp      # perfect-block window: strict <0.2s, the legendary-shield trigger
     world/test_ray_targeting.cpp
     world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp
