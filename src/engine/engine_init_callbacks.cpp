@@ -453,51 +453,51 @@ void Engine::initCallbacks() {
         Net::sendReliable(victimSlot, svBuf, off);
     });
 
-    // Perfect block callback — legendary shield stun bash
-    Combat::setPerfectBlockCallback([](Player& player) {
+    // Perfect block callback — legendary shield effects, dispatched on the BLOCKER's cached
+    // offhand skill (stamped by tickPassiveEquipment for local lanes, serverNetPost +
+    // seedRemoteView for remote views). The old inventory lookup went through
+    // m_localPlayerIndex, so a remote's block would have read the HOST's shield; and
+    // bloodNovaCooldown now round-trips through NetPlayer, so the old "view resets the
+    // cooldown every frame -> detonate on every block" hazard is gone, and the address pin
+    // to the local player with it. Fires server-side only in netplay — a CLIENT never runs
+    // applyDamageToPlayer on itself; guests see the result via snapshots + FX events.
+    Combat::setPerfectBlockCallback([](Player& player, u16 attackerIdx) {
         if (!s_engine) return;
-
-        // Check if offhand is a legendary shield
-        const ItemInstance& shield = s_engine->m_inventories[s_engine->m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
-        bool hasLegendaryShield = !isItemEmpty(shield) && shield.rarity == Rarity::LEGENDARY;
-
-        // Aegis of Blood: its legendarySkill is BLOOD_NOVA, and the tooltip says so — but every
-        // legendary shield used to run the same generic freeze-bash below, ignoring the skill
-        // entirely. Dispatch on it so the shield does what it advertises: a perfect block makes
-        // your blood erupt (20% health, full nova).
-        //
-        // Local lane only. The inventory above is indexed by m_localPlayerIndex, so for a REMOTE's
-        // blocked hit (the server damages a throwaway Player view) this callback would read the
-        // HOST's offhand — and a view's bloodNovaCooldown is a fresh 0 every frame, so it would
-        // detonate on every single block. The address test pins us to the real local Player.
-        // (The generic bash below has the same mis-indexing bug; it is only a freeze, and
-        // untangling remote blocks is out of scope here.)
-        if (hasLegendaryShield &&
-            s_engine->m_itemDefs[shield.defId].legendarySkillId == SkillId::BLOOD_NOVA &&
-            &player == &s_engine->m_localPlayer) {
-            s_engine->detonateBloodNova(player.position, s_engine->activeNetSlot(),
-                                        player.health, player.bloodNovaCooldown);
-            return;
+        switch (static_cast<SkillId>(player.offhandSkill)) {
+            case SkillId::NONE:
+                return;                       // no legendary shield — no proc
+            case SkillId::BLOOD_NOVA:         // Aegis of Blood: sacrifice 20% health, erupt
+                s_engine->detonateBloodNova(player.position, player.netSlot,
+                                            player.health, player.bloodNovaCooldown);
+                return;
+            case SkillId::CHAIN_LIGHTNING:    // Thunderwall: riposte lightning at the attacker
+                s_engine->staticDischarge(player.position, player.netSlot, attackerIdx);
+                return;
+            case SkillId::PROJECTILE_PARRY:
+                // Mirror Aegis: projectile blocks reflect at the projectile-hit site (which
+                // passes attackerIdx 0xFFFF). A MELEE perfect block has no projectile to send
+                // back — fall through to the generic freeze bash instead.
+                if (attackerIdx >= MAX_ENTITIES) return;
+                break;
+            default:
+                break;                        // any other legendary shield: generic freeze bash
         }
-
-        if (hasLegendaryShield) {
-            for (u32 a = 0; a < s_engine->m_entities.activeCount; a++) {
-                u32 idx = s_engine->m_entities.activeList[a];
-                Entity& ent = s_engine->m_entities.entities[idx];
-                if (ent.flags & ENT_DEAD) continue;
-                if (ent.flags & ENT_FRIENDLY) continue;
-                if (ent.enemyType == EnemyType::PROP) continue;
-                f32 dist = length(ent.position - player.position);
-                if (dist < 3.0f) {
-                    ent.freezeTimer = 1.0f;
-                }
+        for (u32 a = 0; a < s_engine->m_entities.activeCount; a++) {
+            u32 idx = s_engine->m_entities.activeList[a];
+            Entity& ent = s_engine->m_entities.entities[idx];
+            if (ent.flags & ENT_DEAD) continue;
+            if (ent.flags & ENT_FRIENDLY) continue;
+            if (ent.enemyType == EnemyType::PROP) continue;
+            f32 dist = length(ent.position - player.position);
+            if (dist < 3.0f) {
+                ent.freezeTimer = 1.0f;
             }
-            // Visual nova feedback
-            for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
-                if (!s_engine->m_fx.novaFX[ni].active) {
-                    s_engine->m_fx.novaFX[ni] = {player.position, 3.0f, 0.4f, true, Vec3{0.8f, 0.8f, 1.0f}};
-                    break;
-                }
+        }
+        // Visual nova feedback
+        for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+            if (!s_engine->m_fx.novaFX[ni].active) {
+                s_engine->m_fx.novaFX[ni] = {player.position, 3.0f, 0.4f, true, Vec3{0.8f, 0.8f, 1.0f}};
+                break;
             }
         }
     });

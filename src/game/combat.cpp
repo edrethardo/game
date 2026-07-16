@@ -392,7 +392,7 @@ Combat::BlockOutcome Combat::applyDamageToPlayer(Player& player, f32 damage,
     if (blockOutcome == BlockOutcome::PERFECT) {
         // Perfect block — negate all damage, trigger the legendary-shield effect via callback
         damage = 0.0f;
-        if (s_perfectBlockCallback) s_perfectBlockCallback(player);
+        if (s_perfectBlockCallback) s_perfectBlockCallback(player, attackerIdx);
     } else if (blockOutcome == BlockOutcome::BLOCKED) {
         // Normal block — halve damage
         damage *= 0.5f;

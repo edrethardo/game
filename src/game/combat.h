@@ -157,8 +157,10 @@ namespace Combat {
                              u8 weaponMeshId, u8 isCrit);
     void setOnKill(OnKillFn fn);
 
-    // Perfect block callback — called when player executes a perfect block
-    using PerfectBlockCallback = void(*)(Player& player);
+    // Perfect block callback — fired for the BLOCKER (local player on host/SP, or a server-side
+    // remote view: identity via Player::netSlot, shield via Player::offhandSkill). attackerIdx
+    // is the striking entity (0xFFFF for projectiles/AoE), so ripostes can aim at it.
+    using PerfectBlockCallback = void(*)(Player& player, u16 attackerIdx);
     void setPerfectBlockCallback(PerfectBlockCallback cb);
 
     // Wire in the particle pool and screen shake so combat events emit visual FX.
