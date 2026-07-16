@@ -31,6 +31,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/shrine.h"
+#include "game/static_charge.h"   // Capacitor Mail stacks for REMOTE lanes (serverNetPost)
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
@@ -558,6 +559,13 @@ void Engine::adoptSnapshotCooldowns() {
         m_localPlayer.shrineBuffValue = Shrine::bonusFor(m_localPlayer.shrineBuff);
         m_localPlayer.shrineBuffTimer = remaining;
     }
+
+    // Static Charge stacks — ADOPT, don't predict (same reasoning as the shrine buff above):
+    // they accumulate from server-authoritative damage the client never simulates on itself.
+    // chargeTimer here is only the HUD row's visibility driver; the server refreshes the stack
+    // count every snapshot, so a constant beats mirroring the real 10s window.
+    m_localPlayer.chargeStacks = static_cast<u8>((sp->flags >> 5) & 0x07u);
+    m_localPlayer.chargeTimer  = (m_localPlayer.chargeStacks > 0) ? 1.0f : 0.0f;
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +768,17 @@ void Engine::serverNetPost(f32 dt) {
             if (np.armorAura == SkillId::BLOOD_NOVA && np.lastDamageTaken > 0.0f) {
                 detonateBloodNova(np.position, np.slotIndex, np.health, np.bloodNovaCooldown);
             }
+            // Static Charge / Hemophage for a REMOTE (host lanes run theirs in
+            // tickArmorRingPassives — both are damaging/stateful, NOT idempotent like the
+            // burn/freeze aura timers above, so running them for host lanes here would double).
+            if (np.armorAura == SkillId::STATIC_CHARGE) {
+                if (StaticCharge::accumulate(np.chargeStacks, np.chargeTimer,
+                                             np.lastDamageTaken > 0.0f, dt))
+                    staticDischarge(np.position, np.slotIndex, np.lastDamageAttackerIdx);
+            }
+            if (np.armorAura == SkillId::HEMOPHAGE)
+                hemophageAuraTick(np.position, np.slotIndex, np.hemoTickTimer,
+                                  np.health, np.maxHealth, dt);
             np.lastDamageTaken = 0.0f;
         }
 

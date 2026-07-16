@@ -46,6 +46,10 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         if (np.onGround)                flags |= (1 << 1);
         if (np.weaponState.reloading)   flags |= (1 << 3);
         if (np.blocking)                flags |= (1 << 4);
+        // Static Charge stacks (0-5) in bits 5-7 — the pose byte's spare bits, so the guest's
+        // HUD can show its own count. (statusFlags' bits 5-6 belong to the shrine-buff type;
+        // do NOT move these there.)
+        flags |= static_cast<u8>((np.chargeStacks & 0x07u) << 5);
         sp.flags = flags;
 
         sp.weaponId = np.weaponState.currentWeapon;

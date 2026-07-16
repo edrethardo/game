@@ -86,6 +86,25 @@ ICONS = [
         (0.30, 0.70, 0.35),   # 3 outline
         (0.50, 1.00, 0.60),   # 4 body (the shrine's green)
     ]),
+
+    # --- Static Charge (Capacitor Mail): a lightning bolt, electric blue. Matches the item's
+    #     arc-blue tint (materials.json armor_capacitor) so the buff reads as "the armor". ---
+    ("Capacitor", [
+        "....44..",
+        "...44...",
+        "..443...",
+        ".444444.",
+        "...344..",
+        "..44....",
+        ".44.....",
+        ".4......",
+    ], [
+        (0.00, 0.00, 0.00),
+        (0.15, 0.30, 0.45),
+        (0.30, 0.50, 0.70),
+        (0.55, 0.80, 1.00),   # 3 arc fringe
+        (0.75, 0.95, 1.00),   # 4 the bolt
+    ]),
 ]
 
 

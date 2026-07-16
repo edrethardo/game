@@ -897,6 +897,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                     m_localPlayer.shrineBuff == ShrineBuff::SPEED    ? m_localPlayer.shrineBuffTimer : 0.0f, -1.0f},
                 {"VIT", Shrine::colorOf(ShrineBuff::VITALITY),
                     m_localPlayer.shrineBuff == ShrineBuff::VITALITY ? m_localPlayer.shrineBuffTimer : 0.0f, -1.0f},
+                // Static Charge (Capacitor Mail, row 11): timer drives visibility, value shows
+                // stacks. On a CLIENT both are adopted from SnapPlayer.flags in clientNetPost.
+                {"CHG", {0.45f, 0.80f, 1.00f}, m_localPlayer.chargeTimer,
+                    m_localPlayer.chargeStacks > 0 ? static_cast<f32>(m_localPlayer.chargeStacks) : -1.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap (scaled)
             f32 hs2 = static_cast<f32>(sh) / 720.0f;

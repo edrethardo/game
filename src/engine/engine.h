@@ -729,6 +729,11 @@ private:
     // and ring. health/cooldown are by reference because Player and NetPlayer share no base type.
     // SERVER/SP only (a CLIENT's entity pool is the N4 ghost sim). True = it detonated.
     bool detonateBloodNova(Vec3 origin, u8 ownerSlot, f32& health, f32& cooldown);
+    // Legendary armor/shield procs (2026-07-16 batch; both server/SP-only — N5):
+    // full chain lightning at whoever hit the wearer (Capacitor Mail discharge; Thunderwall's
+    // perfect-block riposte reuses it), and the Hemophage Shroud's 4m life-drain aura tick.
+    void staticDischarge(Vec3 pos, u8 wearerSlot, u16 attackerIdx);
+    void hemophageAuraTick(Vec3 pos, u8 wearerSlot, f32& tickTimer, f32& health, f32 maxHealth, f32 dt);
     // Server-side CL_METEOR handler: validate + spawn the authoritative meteor for `slot`, then
     // relay it to the other clients.
     static void onMeteor(u8 playerSlot, const u8* data, u32 size);

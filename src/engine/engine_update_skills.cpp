@@ -38,6 +38,8 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "game/skill_internal.h"   // fireChainLightning — Static Charge / Thunderwall proc
+#include "game/static_charge.h"    // Capacitor Mail stack accumulator (pure, tested)
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -422,6 +424,23 @@ void Engine::tickArmorRingPassives(f32 dt) {
                           m_localPlayer.health, m_localPlayer.bloodNovaCooldown);
     }
 
+    // Static Charge (Capacitor Mail): being struck charges the armor; the 5th stack discharges
+    // chain lightning into the attacker. Same lastDamageTaken source as Blood Nova above — and
+    // like it, inert on a CLIENT (a guest's stacks tick server-side in serverNetPost; the HUD
+    // adopts them from SnapPlayer.flags in clientNetPost).
+    if (m_armorAura == SkillId::STATIC_CHARGE) {
+        if (StaticCharge::accumulate(m_localPlayer.chargeStacks, m_localPlayer.chargeTimer,
+                                     m_localPlayer.lastDamageTaken > 0.0f, dt))
+            staticDischarge(m_localPlayer.position, activeNetSlot(),
+                            m_localPlayer.lastDamageAttackerIdx);
+    }
+
+    // Hemophage (Hemophage Shroud): 4m life-drain aura. Damaging — NOT idempotent like the
+    // burn/freeze aura timers — so host lanes run it here and remotes ONLY in serverNetPost.
+    if (m_armorAura == SkillId::HEMOPHAGE)
+        hemophageAuraTick(m_localPlayer.position, activeNetSlot(), m_localPlayer.hemoTickTimer,
+                          m_localPlayer.health, m_localPlayer.maxHealth, dt);
+
     // Total thorns reflect fraction: legendary THORNS ring (20%) + the thorns_pct affix sum
     // (stored as percentage points, e.g. 15.0 → 0.15), so a thorns ring and thorns gear stack.
     // Only meaningful on a frame where the player actually took damage (lastDamageTaken > 0).
@@ -510,4 +529,84 @@ void Engine::tickArmorRingPassives(f32 dt) {
     }
     m_localPlayer.lastDamageTaken      = 0.0f;
     m_localPlayer.lastDamageAttackerIdx = 0xFFFF;
+}
+
+// ---------------------------------------------------------------------------
+// staticDischarge — fire a full chain lightning at whoever hit the wearer (Capacitor Mail's
+// 5-stack discharge; Thunderwall's perfect-block riposte reuses it). Server/SP only: damage
+// is authoritative (N5). Falls back to the nearest living hostile within 5m when the hit had
+// no source entity (projectiles/AoE stamp attackerIdx 0xFFFF), thorns-style.
+// ---------------------------------------------------------------------------
+void Engine::staticDischarge(Vec3 pos, u8 wearerSlot, u16 attackerIdx) {
+    if (m_netRole == NetRole::CLIENT) return;
+
+    Vec3 target{};
+    bool found = false;
+    if (attackerIdx < MAX_ENTITIES) {
+        const Entity& ae = m_entities.entities[attackerIdx];
+        if ((ae.flags & ENT_ACTIVE) && !(ae.flags & ENT_DEAD) && !(ae.flags & ENT_FRIENDLY)) {
+            target = ae.position;
+            found = true;
+        }
+    }
+    if (!found) {
+        f32 best = 25.0f;   // 5m squared
+        for (u32 a = 0; a < m_entities.activeCount; a++) {
+            const Entity& e = m_entities.entities[m_entities.activeList[a]];
+            if ((e.flags & ENT_DEAD) || (e.flags & ENT_FRIENDLY)) continue;
+            if (e.enemyType == EnemyType::PROP) continue;
+            Vec3 d = e.position - pos;
+            f32 d2 = d.x * d.x + d.z * d.z;
+            if (d2 < best) { best = d2; target = e.position; found = true; }
+        }
+    }
+    if (!found) return;   // struck by something with no target to answer — the charge is spent
+
+    const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, SkillId::CHAIN_LIGHTNING);
+    if (!def) return;
+    Vec3 origin = pos + Vec3{0, 1.2f, 0};   // chest height, so the first-hop cone sees the attacker
+    Vec3 dir    = normalize(target - origin);
+    // Neutral scaling: a proc must not ride whatever class-damage/skill-power multipliers the
+    // last class cast left in the SkillSystem statics. Kill credit rides setAttackingPlayer
+    // (the projectile.cpp save/restore pattern).
+    SkillSystem::setClassDamageMult(1.0f);
+    SkillSystem::setSkillPower(0.0f);
+    u8 prev = Combat::getAttackingPlayer();
+    Combat::setAttackingPlayer(wearerSlot);
+    fireChainLightning(origin, dir, def, m_level.grid, m_entities);
+    Combat::setAttackingPlayer(prev);
+}
+
+// ---------------------------------------------------------------------------
+// hemophageAuraTick — Hemophage Shroud: enemies within 4m bleed 3 damage every 0.5s (6 dps)
+// to the wearer, who heals for the total. Ticked (not per-frame) to bound applyDamage calls;
+// heals are ratio-safe on the wire (health up, maxHealth untouched — no HP-bar lurch).
+// Server/SP only: the client's entity pool is a discarded ghost (N5).
+// ---------------------------------------------------------------------------
+void Engine::hemophageAuraTick(Vec3 pos, u8 wearerSlot, f32& tickTimer, f32& health,
+                               f32 maxHealth, f32 dt) {
+    if (m_netRole == NetRole::CLIENT) return;
+    tickTimer -= dt;
+    if (tickTimer > 0.0f) return;
+    tickTimer = 0.5f;
+
+    constexpr f32 DRAIN_PER_TICK = 3.0f;   // x2 ticks/s = 6 dps per enemy in the aura
+    u8 prev = Combat::getAttackingPlayer();
+    Combat::setAttackingPlayer(wearerSlot);   // drain kills credit (and reserve loot to) the wearer
+    f32 drained = 0.0f;
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        u32 idx = m_entities.activeList[a];
+        Entity& ent = m_entities.entities[idx];
+        if ((ent.flags & ENT_DEAD) || (ent.flags & ENT_FRIENDLY)) continue;
+        if (ent.enemyType == EnemyType::PROP) continue;
+        Vec3 d = ent.position - pos;
+        if (d.x * d.x + d.z * d.z > 16.0f) continue;   // 4m XZ radius, squared
+        EntityHandle h;
+        h.index      = static_cast<u16>(idx);
+        h.generation = ent.generation;
+        Combat::applyDamage(m_entities, h, DRAIN_PER_TICK, &pos);
+        drained += DRAIN_PER_TICK;
+    }
+    Combat::setAttackingPlayer(prev);
+    if (drained > 0.0f && health > 0.0f) health = fminf(health + drained, maxHealth);
 }
