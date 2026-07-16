@@ -53,6 +53,7 @@ add_executable(dungeon_tests
     game/test_teleport_dest.cpp      # teleport landing resolver: never in a wall/body/sealed pocket
     game/test_block_outcome.cpp      # perfect-block window: strict <0.2s, the legendary-shield trigger
     game/test_static_charge.cpp      # Capacitor Mail stack window (header-only)
+    game/test_projectile_parry.cpp   # Mirror Aegis reflect (header-only)
     world/test_ray_targeting.cpp
     world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp

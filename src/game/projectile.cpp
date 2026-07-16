@@ -1,6 +1,7 @@
 #include "game/projectile.h"
 #include "game/player.h"
 #include "game/combat.h"
+#include "game/item.h"      // SkillId::PROJECTILE_PARRY (Mirror Aegis reflect check)
 #include "renderer/particles.h"
 #include "world/combat_query.h"
 #include "world/raycast.h"
@@ -91,8 +92,9 @@ void ProjectileSystem::despawn(ProjectilePool& pool, u16 idx) {
     destroyProjectile(pool, idx);
 }
 
-// Result of testing one enemy projectile against one player.
-enum class PlayerHitResult { MISS, DEFLECTED, HIT };
+// Result of testing one enemy projectile against one player. REFLECTED = Mirror Aegis parry:
+// the projectile SURVIVES, now player-owned and outbound — the caller must not destroy it.
+enum class PlayerHitResult { MISS, DEFLECTED, HIT, REFLECTED };
 
 // Apply an enemy projectile to one player: Wanderer Deflect absorb (full immunity
 // incl. status), else damage + on-hit status. Factored out of the old P1-only branch
@@ -117,7 +119,15 @@ static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& 
         p.lifetime = 0.0f; // destroy absorbed projectile (reaped next frame)
         return PlayerHitResult::DEFLECTED;
     }
-    Combat::applyDamageToPlayer(player, p.damage, &p.position);
+    Combat::BlockOutcome outcome = Combat::applyDamageToPlayer(player, p.damage, &p.position);
+    // Mirror Aegis: a PERFECT block reflects the projectile instead of eating it. Checked
+    // before the on-hit status below — a parried shot must not also poison/slow the blocker —
+    // and before the damage callback (a fully-negated, returned hit is not damage feedback).
+    if (outcome == Combat::BlockOutcome::PERFECT &&
+        player.offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY)) {
+        ProjectileSystem::reflectAsParry(p, player.netSlot);
+        return PlayerHitResult::REFLECTED;
+    }
     // M10.3: notify the server so it can send SV_DAMAGE_TO_ME to the victim client.
     if (s_playerHitCallback) s_playerHitCallback(p.ownerSlot, p.clientTick, p.damage, &player);
     // Apply on-hit status effect from projectile (or default slow)
@@ -426,6 +436,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
             }
             if (r == PlayerHitResult::HIT)       { destroyProjectile(pool, i); continue; }
             if (r == PlayerHitResult::DEFLECTED) { continue; } // lifetime already 0
+            if (r == PlayerHitResult::REFLECTED) { continue; } // parried: lives on, player-owned
         }
     }
 }

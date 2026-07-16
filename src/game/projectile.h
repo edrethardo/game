@@ -113,6 +113,20 @@ struct ProjectilePool {
 struct Player;
 
 namespace ProjectileSystem {
+    // Mirror Aegis perfect-block parry: flip the projectile to the blocker and send it back the
+    // way it came at double damage. fromPlayer=true also removes it from every player AABB pass,
+    // so a reflected shot can never re-hit the blocker or a teammate; the enemy's on-hit rider
+    // (poison/slow/...) dies with the parry. Pure — pinned by test_projectile_parry.cpp.
+    inline void reflectAsParry(Projectile& p, u8 newOwnerSlot) {
+        p.velocity      = p.velocity * -1.0f;
+        p.fromPlayer    = true;
+        p.ownerSlot     = newOwnerSlot;
+        p.damage       *= 2.0f;
+        p.lifetime      = 3.0f;   // fresh flight window for the return trip
+        p.onHitEffect   = 0;
+        p.onHitDuration = 0.0f;
+    }
+
     // Callback when a splash projectile explodes (for visual effects)
     using SplashCallback = void(*)(Vec3 position, f32 radius);
     void setSplashCallback(SplashCallback cb);
