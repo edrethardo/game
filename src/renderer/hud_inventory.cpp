@@ -194,7 +194,8 @@ const char* HUD::resolveSkillDescription(SkillId id, ItemSlot slot,
     //    tier 2 would silently overwrite the correct per-slot text with the generic one.
     if ((id == SkillId::BLOOD_NOVA &&
          (slot == ItemSlot::WEAPON || slot == ItemSlot::ARMOR || slot == ItemSlot::OFFHAND)) ||
-        (id == SkillId::DIVINE_JUDGMENT && slot == ItemSlot::RING)) {
+        (id == SkillId::DIVINE_JUDGMENT && slot == ItemSlot::RING) ||
+        (id == SkillId::CHAIN_LIGHTNING && slot == ItemSlot::OFFHAND)) {   // Thunderwall riposte
         return skillDescription(id, slot);
     }
     // 2. the def (skills.json).
