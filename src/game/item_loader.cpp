@@ -81,6 +81,10 @@ SkillId skillIdFromString(const std::string& s) {
     if (s == "meteor_strike")   return SkillId::METEOR_STRIKE;
     if (s == "blood_nova")      return SkillId::BLOOD_NOVA;
     if (s == "phase_dash")      return SkillId::PHASE_DASH;
+    // Armor/shield passives (2026-07-16 legendary batch)
+    if (s == "static_charge")    return SkillId::STATIC_CHARGE;
+    if (s == "hemophage")        return SkillId::HEMOPHAGE;
+    if (s == "projectile_parry") return SkillId::PROJECTILE_PARRY;
     // Warrior
     if (s == "cleave")          return SkillId::CLEAVE;
     if (s == "war_cry")         return SkillId::WAR_CRY;

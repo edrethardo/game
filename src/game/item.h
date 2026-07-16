@@ -189,6 +189,12 @@ enum struct SkillId : u8 {
     // Glove passives (on-hit, while legendary gloves equipped)
     FRENZY,         // on hit: +5% attack speed per stack, max 6, 4s refresh
 
+    // Armor/shield passives (2026-07-16 legendary batch) — dispatched on the armor-aura
+    // tick and the perfect-block callback; none is castable, so none has a skills.json def.
+    STATIC_CHARGE,      // Capacitor Mail: hits taken build 5 stacks -> chain-lightning discharge
+    HEMOPHAGE,          // Hemophage Shroud: 4m life-drain aura, heals the wearer
+    PROJECTILE_PARRY,   // Mirror Aegis: perfect-blocked projectiles reflect at 2x
+
     COUNT
 };
 

@@ -122,6 +122,9 @@ static const char* skillDisplayName(SkillId id) {
         case SkillId::FRENZY:          return "Frenzy";
         case SkillId::DIVINE_JUDGMENT: return "Divine Judgment";
         case SkillId::SHADOW_RICOCHET: return "Shadow Ricochet";
+        case SkillId::STATIC_CHARGE:    return "Static Charge";
+        case SkillId::HEMOPHAGE:        return "Hemophage";
+        case SkillId::PROJECTILE_PARRY: return "Mirror Parry";
         default: return "Unknown";
     }
 }
@@ -143,6 +146,12 @@ static const char* skillDescription(SkillId id, ItemSlot slot) {
     // would go back to describing something it does not do.
     if (id == SkillId::DIVINE_JUDGMENT && slot == ItemSlot::RING) {
         return "Below 25% HP: full heal, cleanse all\ndebuffs, stun nearby foes. 45s cooldown.";
+    }
+    // Thunderwall: chain_lightning on an OFFHAND is a perfect-block riposte, not a cast.
+    // (chain_lightning HAS a skills.json def, so without this tier-1 override the def's
+    // castable-skill text would win and the shield would describe something it doesn't do.)
+    if (id == SkillId::CHAIN_LIGHTNING && slot == ItemSlot::OFFHAND) {
+        return "On perfect block: arc lightning\nthrough your attacker.";
     }
     if (id == SkillId::BLOOD_NOVA) {
         switch (slot) {
@@ -169,6 +178,9 @@ static const char* skillDescription(SkillId id, ItemSlot slot) {
         case SkillId::PHASE_STRIKE:    return "20% on kill: smoke bomb that\nblinds nearby enemies for 0.5s.";
         case SkillId::VOID_KILL:       return "15% on kill: void zone on corpse\ndealing 60% missing HP to nearby.";
         case SkillId::ARC_FIRE:        return "20% on hit: ignite the ground\nacross the full swing arc for 1.5s.";
+        case SkillId::STATIC_CHARGE:    return "Hits you take build charge. At 5\nstacks: discharge chain lightning.";
+        case SkillId::HEMOPHAGE:        return "Enemies within 4m constantly\nbleed life to you.";
+        case SkillId::PROJECTILE_PARRY: return "Perfectly blocked projectiles\nreflect back at double damage.";
         default: return "";
     }
 }
