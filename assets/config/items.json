@@ -48,7 +48,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Phase Saber",
@@ -66,7 +67,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "phase_dash",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Rusty Dagger",
@@ -116,7 +118,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "phase_dash",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Hand Axe",
@@ -166,7 +169,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Pistol",
@@ -219,7 +223,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "chain_lightning",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Rusty SMG",
@@ -272,7 +277,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.7
+      "dropWeight": 0.7,
+      "minRarity": "legendary"
     },
     {
       "name": "Throwaway",
@@ -291,7 +297,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "throwaway",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Hunting Carbine",
@@ -344,7 +351,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "chain_lightning",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Revolver",
@@ -397,7 +405,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "frozen_orb",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Wand of Sparks",
@@ -480,7 +489,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "frozen_orb",
-      "dropWeight": 0.7
+      "dropWeight": 0.7,
+      "minRarity": "legendary"
     },
     {
       "name": "Light Crossbow",
@@ -530,7 +540,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Throwing Knives",
@@ -660,7 +671,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "infiniteFlight": true,
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Balanced Knives",
@@ -694,7 +706,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "chain_lightning",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Molotov Cocktail",
@@ -744,7 +757,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Leather Cap",
@@ -786,7 +800,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "chain_lightning",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Cloth Robe",
@@ -838,7 +853,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Cloth Boots",
@@ -880,7 +896,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "phase_dash",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Plated Warboots",
@@ -982,7 +999,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "frenzy",
-      "dropWeight": 0.6
+      "dropWeight": 0.6,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Talons",
@@ -994,7 +1012,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "frenzy",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Bone Ring",
@@ -1026,7 +1045,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "berserker",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Band of Frost",
@@ -1038,7 +1058,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "life_steal",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Wooden Shield",
@@ -1080,7 +1101,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Apprentice Staff",
@@ -1132,7 +1154,8 @@
       "maxLevel": 10,
       "maxRarity": "legendary",
       "legendarySkill": "void_zone",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt Sword",
@@ -1270,7 +1293,8 @@
       "maxLevel": 18,
       "maxRarity": "legendary",
       "legendarySkill": "thorns",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Bone Shield",
@@ -1298,7 +1322,8 @@
       "maxLevel": 18,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt King's Crown",
@@ -1310,7 +1335,8 @@
       "maxLevel": 18,
       "maxRarity": "legendary",
       "legendarySkill": "chain_lightning",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Shadow Blade",
@@ -1448,7 +1474,8 @@
       "maxLevel": 28,
       "maxRarity": "legendary",
       "legendarySkill": "phase_strike",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Carapace Shield",
@@ -1476,7 +1503,8 @@
       "maxLevel": 28,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Shadow Scepter",
@@ -1494,7 +1522,8 @@
       "maxLevel": 28,
       "maxRarity": "legendary",
       "legendarySkill": "shadow_ricochet",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Hellforged Blade",
@@ -1632,7 +1661,8 @@
       "maxLevel": 38,
       "maxRarity": "legendary",
       "legendarySkill": "soul_harvest",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Demon Shield",
@@ -1660,7 +1690,8 @@
       "maxLevel": 38,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Ember Crown",
@@ -1672,7 +1703,8 @@
       "maxLevel": 38,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Edge",
@@ -1770,7 +1802,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "void_zone",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Crown",
@@ -1812,7 +1845,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "void_kill",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Shield",
@@ -1840,7 +1874,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Orb",
@@ -1852,7 +1887,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "gravity_pull",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Phoenix Band",
@@ -1864,7 +1900,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "divine_judgment",
-      "dropWeight": 0.3
+      "dropWeight": 0.3,
+      "minRarity": "legendary"
     },
     {
       "name": "The Claymore",
@@ -1882,7 +1919,8 @@
       "maxLevel": 99,
       "maxRarity": "legendary",
       "legendarySkill": "arc_fire",
-      "dropWeight": 0.5
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt Cleaver",
@@ -1931,7 +1969,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt Carbine",
@@ -1980,7 +2019,8 @@
       "maxLevel": 38,
       "maxRarity": "legendary",
       "legendarySkill": "chain_lightning",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Carbine",
@@ -1997,7 +2037,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "frozen_orb",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt Pistol",
@@ -2046,7 +2087,8 @@
       "maxLevel": 38,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Pistol",
@@ -2127,7 +2169,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt Knives",
@@ -2179,7 +2222,8 @@
       "maxLevel": 38,
       "maxRarity": "legendary",
       "legendarySkill": "shadow_ricochet",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Void Shuriken",
@@ -2197,7 +2241,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "frozen_orb",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Crypt Flask",
@@ -2232,7 +2277,8 @@
       "maxLevel": 28,
       "maxRarity": "legendary",
       "legendarySkill": "blood_nova",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Hellfire Bomb",
@@ -2267,7 +2313,8 @@
       "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "meteor_strike",
-      "dropWeight": 0.4
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     },
     {
       "name": "Cavern Axe",

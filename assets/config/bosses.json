@@ -37,7 +37,7 @@
         "onHitEffect": 2,
         "onHitDuration": 1.0
       },
-      "lootGuarantee": "rare",
+      "lootGuarantee": "legendary",
       "bonusDrops": 0,
       "limbConfig": 0,
       "speech": "FRESH MEAT!"
@@ -124,7 +124,7 @@
         "onHitEffect": 0,
         "onHitDuration": 0.0
       },
-      "lootGuarantee": "rare",
+      "lootGuarantee": "legendary",
       "bonusDrops": 0,
       "limbConfig": 5,
       "speech": "You disturb my eternal slumber, mortal... now JOIN the dead!"
@@ -211,7 +211,7 @@
         "onHitEffect": 0,
         "onHitDuration": 0.0
       },
-      "lootGuarantee": "rare",
+      "lootGuarantee": "legendary",
       "bonusDrops": 0,
       "limbConfig": 0,
       "speech": "FEED, MY CHILDREN!"
@@ -297,7 +297,7 @@
         "onHitEffect": 3,
         "onHitDuration": 2.5
       },
-      "lootGuarantee": "rare",
+      "lootGuarantee": "legendary",
       "bonusDrops": 0,
       "limbConfig": 0,
       "speech": "FEEL THE FLAME!"
@@ -383,7 +383,7 @@
         "onHitEffect": 4,
         "onHitDuration": 1.5
       },
-      "lootGuarantee": "rare",
+      "lootGuarantee": "legendary",
       "bonusDrops": 0,
       "limbConfig": 6,
       "speech": "THE VOID CONSUMES!"

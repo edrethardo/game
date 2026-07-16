@@ -229,6 +229,11 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
             std::string maxRarityStr = entry.value("maxRarity", "COMMON");
             def.maxRarity = rarityFromString(maxRarityStr);
 
+            // Rarity window floor — "legendary" marks a def as a legendary-exclusive unique
+            // (see ItemDef::minRarity). Absent on ordinary gear → COMMON.
+            std::string minRarityStr = entry.value("minRarity", "COMMON");
+            def.minRarity = rarityFromString(minRarityStr);
+
             std::string weaponTypeStr = entry.value("weaponType", "MELEE");
             def.weaponType = weaponTypeFromString(weaponTypeStr);
 

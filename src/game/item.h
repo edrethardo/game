@@ -246,6 +246,13 @@ struct ItemDef {
     char     name[32] = {};
     ItemSlot slot     = ItemSlot::WEAPON;
     Rarity   maxRarity = Rarity::COMMON;
+    // Rarity window floor. Defaults to COMMON (ordinary gear rolls at any tier up to
+    // maxRarity). The named uniques set `"minRarity": "legendary"` in items.json, which makes
+    // them LEGENDARY-EXCLUSIVE both ways: rollItem only considers a def whose
+    // [minRarity, maxRarity] window contains the rolled tier — so an orange drop is always a
+    // real unique (skill-bearing identity item), and a unique never drops as a grey stat
+    // stick. NOT serialized (JSON-loaded) — save-safe to have added.
+    Rarity   minRarity = Rarity::COMMON;
 
     // Weapon base stats (0 for non-weapons)
     WeaponType weaponType            = WeaponType::MELEE;
@@ -343,6 +350,14 @@ static constexpr u16 SHRINE_POWER_ID    = 0xFFFB;  // +damage
 static constexpr u16 SHRINE_SPEED_ID    = 0xFFFA;  // +move speed
 static constexpr u16 SHRINE_VITALITY_ID = 0xFFF9;  // +max HP (and heals to match — see below)
 
+// A closed treasure chest — the OTHER thing the chest mesh can be (the dormant mimic is the
+// first, and the whole point: with no real chests, a chest mesh WAS a mimic, and the disguise
+// had nothing to hide among). Renders identically to the mimic and offers the identical
+// "Open Chest" prompt; only opening tells them apart. A chest stores no item — itemLevel
+// carries the loot LEVEL and the item is rolled at open time on the authoritative sim
+// (Engine::openChest), so there is nothing to desync or persist.
+static constexpr u16 CHEST_ID = 0xFFF8;
+
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
 }
@@ -356,9 +371,13 @@ inline bool isShrine(const ItemInstance& item) {
            item.defId == SHRINE_VITALITY_ID;
 }
 
+inline bool isChest(const ItemInstance& item) {
+    return item.defId == CHEST_ID;
+}
+
 // Any sentinel — i.e. "not a real item". Anything that must not enter the inventory or be dropped.
 inline bool isSentinelItem(const ItemInstance& item) {
-    return isGlobe(item) || isSourceShard(item) || isShrine(item);
+    return isGlobe(item) || isSourceShard(item) || isShrine(item) || isChest(item);
 }
 
 // ---- Rarity color lookup ----
@@ -519,13 +538,18 @@ struct WorldItem {
     f32          lifetime      = 60.0f;
     bool         active        = false;
     u8           ownerSlot     = 0xFF;   // 0xFF = free for all, else exclusive to one player
-    f32          exclusiveTimer = 3.0f;
+    f32          exclusiveTimer = 0.0f;  // 0 = shared loot (see WorldItemSystem::spawn)
 };
 
 struct WorldItemPool {
     WorldItem items[MAX_WORLD_ITEMS] = {};
     u32       activeCount = 0;
-    u32       nextUid     = 1;           // server assigns unique IDs
+    // Server-assigned uids for DIRECT-CONSTRUCTED sentinels (globes/shards/shrines/pets/
+    // chests). Starts in the high half of u32 because ROLLED items get their uid from
+    // ItemGen's own counter, which (like this one) restarts low every floor — with both
+    // ranges starting at 1, a shrine and a rolled drop could share a uid, and a guest's
+    // CL_PICKUP_ITEM (matched by uid, first hit wins) could act on the wrong object.
+    u32       nextUid     = 0x80000000u;
 };
 
 // ---- Quickbar ----
@@ -595,8 +619,16 @@ namespace ItemLoader {
 
 namespace ItemGen {
     void init(u32 seed);
+    // Rolls rarity FIRST, then picks a def whose [minRarity, maxRarity] window contains that
+    // tier (weighted by dropWeight within the level band) — so the legendary tier draws only
+    // from the unique pool and the uniques never appear below it. `rarityFloor` raises the
+    // rolled tier for guaranteed drops (boss/champion/goblin payouts): pass LEGENDARY and the
+    // result is always a real unique — the old "re-roll 50× then force-upgrade + re-roll
+    // affixes" caller loops are obsolete. If the level band holds no def at the tier, the
+    // band widens before the tier ever degrades (a guarantee outranks the drop schedule).
     ItemInstance rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
-                          const AffixDef* affixDefs, u32 affixDefCount);
+                          const AffixDef* affixDefs, u32 affixDefCount,
+                          Rarity rarityFloor = Rarity::COMMON);
     Rarity rollRarity(u8 enemyLevel);
     void   rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
                        const AffixDef* affixDefs, u32 affixDefCount,
@@ -670,8 +702,13 @@ namespace WorldItemSystem {
     // picks up and later drops again keeps its immunity through EVERY spawn path for free.
     void update(WorldItemPool& pool, f32 dt,
                 const ItemDef* defs = nullptr, u32 defCount = 0);
+    // exclusiveSeconds defaults to 0: ALL ground loot is shared from the instant it drops —
+    // either co-op partner may grab it (the party decides who needs it, not a kill-credit
+    // timer). The killer's slot still rides along as inert metadata. The mechanism (ownerSlot +
+    // exclusiveTimer + the SnapWorldItem wire fields + both pickup gates) is kept intact so a
+    // future FFA/public-lobby mode can re-arm it per spawn site without another wire change.
     bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-               const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 3.0f);
+               const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 0.0f);
     // For an item the run CANNOT afford to lose (the source shard). A full pool makes spawn() fail,
     // and every caller ignored the return — so the key just wasn't there, silently. This evicts the
     // most expendable drop on the floor (the ordinary item closest to expiring anyway) and takes its

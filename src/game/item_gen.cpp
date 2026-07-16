@@ -84,7 +84,10 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
         case Rarity::COMMON:    minAffixes = 0; maxAffixes = 0; break;
         case Rarity::MAGIC:     minAffixes = 1; maxAffixes = 2; break;
         case Rarity::RARE:      minAffixes = 2; maxAffixes = 4; break;
-        case Rarity::LEGENDARY: minAffixes = 2; maxAffixes = 3; break;
+        // Legendaries are the exclusive named uniques (skill identity + top tier) — they never
+        // roll BELOW a good rare. The old 2-3 band meant an orange could carry fewer affixes
+        // than a yellow, which is exactly the "just a legendary-colored normal item" feel.
+        case Rarity::LEGENDARY: minAffixes = 3; maxAffixes = 4; break;
         default: break;
     }
 
@@ -148,24 +151,45 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
 }
 
 ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
-                                const AffixDef* affixDefs, u32 affixDefCount) {
+                                const AffixDef* affixDefs, u32 affixDefCount,
+                                Rarity rarityFloor) {
     // Wrap enemy level into 1-50 range so Nightmare/Hell repeat the same drop tables.
     // Level 51 (Nightmare floor 1) → wrappedLevel 1, level 100 → 50, level 101 → 1, etc.
     u8 wrappedLevel = ((enemyLevel - 1) % 50) + 1;
 
-    // Collect valid defs matching the wrapped level range
+    // Rarity FIRST — the tier decides which pool the def comes from. A def is a candidate
+    // only when its [minRarity, maxRarity] window contains the tier, which makes the named
+    // uniques (minRarity == LEGENDARY) the ONLY possible legendary drops and keeps them out
+    // of every lower tier. This replaced the old def-first roll that clamped rarity to
+    // def.maxRarity — under that scheme "legendary" was just a color a normal item could
+    // wear, and a unique spent most of its drops as a grey stat stick.
+    Rarity rolled = rollRarity(enemyLevel);
+    if (rolled < rarityFloor) rolled = rarityFloor;  // guaranteed drops raise the tier
+
     u32 validIndices[MAX_ITEM_DEFS];
     u32 validCount = 0;
-    for (u32 i = 0; i < defCount; i++) {
-        if (wrappedLevel >= defs[i].minLevel && wrappedLevel <= defs[i].maxLevel)
-            validIndices[validCount++] = i;
-    }
-    if (validCount == 0) {
-        // Fallback: any item the player could have seen at this wrapped level
-        for (u32 i = 0; i < defCount; i++) {
-            if (wrappedLevel >= defs[i].minLevel)
+
+    // Candidate search: three widening level passes per tier, degrading the tier only when
+    // NO def anywhere supports it. Pass order matters — a guarantee (rarityFloor) must
+    // out-rank the level schedule, so the band widens before the tier drops:
+    //   pass 0: def's authored level band contains wrappedLevel (the normal case)
+    //   pass 1: any def the player could have seen by now (wrappedLevel >= minLevel)
+    //   pass 2: any ROLLABLE def at this tier (minLevel <= 50 — keeps minLevel-255
+    //           unrollables like pet consumables excluded from even this last resort)
+    Rarity tier = rolled;
+    for (;;) {
+        for (u32 pass = 0; pass < 3 && validCount == 0; pass++) {
+            for (u32 i = 0; i < defCount; i++) {
+                if (defs[i].minRarity > tier || defs[i].maxRarity < tier) continue;
+                if (pass == 0 && !(wrappedLevel >= defs[i].minLevel &&
+                                   wrappedLevel <= defs[i].maxLevel)) continue;
+                if (pass == 1 && wrappedLevel < defs[i].minLevel) continue;
+                if (pass == 2 && defs[i].minLevel > 50) continue;
                 validIndices[validCount++] = i;
+            }
         }
+        if (validCount > 0 || tier == Rarity::COMMON) break;
+        tier = static_cast<Rarity>(static_cast<u8>(tier) - 1); // no def at this tier at all
     }
 
     if (validCount == 0) {
@@ -198,10 +222,8 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     item.itemLevel = enemyLevel;
     item.uid       = s_uidCounter++;
 
-    // Roll rarity, capped by the definition's maxRarity
-    Rarity rolled = rollRarity(enemyLevel);
-    if (rolled > def.maxRarity) rolled = def.maxRarity;
-    item.rarity = rolled;
+    // The candidate window guarantees def.minRarity <= tier <= def.maxRarity — no clamp.
+    item.rarity = tier;
 
     // Scale base stats — gentle curve so early-floor items aren't overpowered
     f32 levelMult = 1.0f + 0.08f * static_cast<f32>(enemyLevel);
