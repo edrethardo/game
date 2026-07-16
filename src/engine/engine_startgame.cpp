@@ -427,10 +427,16 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     else if (m_level.currentFloor <= 6)  gridSize = 32;  // small, few branches
     else if (m_level.currentFloor <= 9)  gridSize = 40;  // medium, some exploration
 
+    // Structural layout style — derived from the same dungeonSeed both sides of a
+    // net game already share, so host and clients agree without any wire traffic.
+    // Floors 1-3 stay classic BSP (tiny tutorial grids); deeper floors mix in
+    // caverns / gauntlets / vault hubs with per-tier weights (level_gen.cpp).
+    LevelGen::LayoutStyle layoutStyle = LevelGen::pickLayoutStyle(dungeonSeed, m_level.currentFloor);
+
     // Generate the level once — spawn/exit room selection always succeeds
     // by falling back to the best available rooms.
     LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
-    m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed, gridSize, gridSize);
+    m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed, gridSize, gridSize, layoutStyle);
     DungeonResult& dungeon = m_level.dungeon;
     Vec3 spawnPos = dungeon.spawnPos;
 

@@ -46,6 +46,7 @@ add_executable(dungeon_tests
     game/test_pet_item.cpp           # mini-goblin consumable: unrollable + unequippable
     game/test_lead_assist.cpp        # throwing-knife intercept math — header-only, no .cpp to link
     world/test_ray_targeting.cpp
+    world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp
     world/test_raycast.cpp
     world/test_tile_noise.cpp
@@ -74,6 +75,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/world/collision.cpp   # (world_item.cpp -> ensureNotInWall)
     stubs_material.cpp
     ${CMAKE_SOURCE_DIR}/src/world/pathfinder.cpp
+    ${CMAKE_SOURCE_DIR}/src/world/level_gen.cpp   # structural floor generators
     ${CMAKE_SOURCE_DIR}/src/world/level_grid.cpp
     ${CMAKE_SOURCE_DIR}/src/world/raycast.cpp
     ${CMAKE_SOURCE_DIR}/src/world/combat_query.cpp  # ray/cone targeting geometry

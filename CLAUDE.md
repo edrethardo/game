@@ -102,7 +102,7 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 | `src/core/` | Types (`u8`/`f32` aliases), math (Vec/Mat4), pools, logging, profiler, frame allocator, asserts |
 | `src/platform/` | SDL2 abstraction: window, input (kb/mouse/gamepad), wall-clock |
 | `src/renderer/` | OpenGL 3.3: shaders, meshes, OBJ loader, materials/textures, camera, frustum, debug-draw, HUD, font, minimap |
-| `src/world/` | Cell grid, BSP level gen, geometry meshing, raycast (DDA), collision (move-and-slide), combat queries (cone/raycast/AABB) |
+| `src/world/` | Cell grid, structural level gen (4 layout styles: BSP rooms / cavern / gauntlet / hub, seed-picked per floor), geometry meshing, raycast (DDA), collision (move-and-slide), combat queries (cone/raycast/AABB) |
 | `src/game/` | Player, entities (enemy NPCs), projectiles, weapons, combat resolution, items+affixes+inventory, skills, enemy AI FSM |
 | `src/engine/` | Top-level `Engine` class, game loop, system orchestration, mode/lobby/menu logic |
 | `src/net/` | ENet wrapper, packet read/write, input ring buffer, snapshot serialization, server, client (prediction + interpolation) |

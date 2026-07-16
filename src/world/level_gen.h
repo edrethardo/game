@@ -27,10 +27,35 @@ struct DungeonResult {
 };
 
 namespace LevelGen {
+    // Structural layout algorithms. Every style fills the same DungeonResult
+    // contract (rect rooms, adjacency, reachable spawn->exit), so all downstream
+    // consumers (enemy/chest/boss/light/event placement, squads, exit portal)
+    // work unchanged — the styles differ only in how the space is carved.
+    enum struct LayoutStyle : u8 {
+        BSP_ROOMS = 0,  // classic: BSP partition rooms + L-corridors (the original)
+        CAVERN,         // cellular-automata cave with carved rect clearings as rooms
+        GAUNTLET,       // serpentine chain of arenas — one long fight toward the exit
+        HUB,            // grand central chamber, spoke corridors to perimeter vaults
+        COUNT
+    };
+
+    // Human-readable style name for logs.
+    const char* styleName(LayoutStyle style);
+
+    // Deterministic per-floor style pick — host and client call this with the same
+    // (dungeonSeed, floor), so both sides always agree. Floors 1-3 (the tiny
+    // tutorial grids) are always classic BSP; deeper floors mix styles with
+    // per-tier weights (caves peak in the Spider Caverns, gauntlets in the
+    // Hellforge, hubs in the Catacombs/Void).
+    LayoutStyle pickLayoutStyle(u32 seed, u32 floor);
+
     // Legacy test dungeon (kept for fallback)
     Vec3 generateTestDungeon(LevelGrid& grid);
 
-    // Procedural BSP dungeon generation. Always produces a valid result —
-    // spawn is the room with fewest corridor exits, exit is the BFS-farthest room.
-    DungeonResult generate(LevelGrid& grid, u32 seed, u32 gridWidth = 48, u32 gridDepth = 48);
+    // Procedural dungeon generation. Always produces a valid result — spawn is
+    // the room with fewest corridor exits, exit is the farthest room. A style
+    // that degenerates on a given seed/size falls back to BSP_ROOMS internally
+    // (deterministically), so the caller never sees an unplayable floor.
+    DungeonResult generate(LevelGrid& grid, u32 seed, u32 gridWidth = 48, u32 gridDepth = 48,
+                           LayoutStyle style = LayoutStyle::BSP_ROOMS);
 }
