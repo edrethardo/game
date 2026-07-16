@@ -843,10 +843,12 @@ void Engine::updateMenu(f32 dt) {
     // Free-Play level select (post-clear). subSelection: 0 = difficulty row, 1 = floor row.
     if (m_menu.subState == 14) {
         // --- keyboard + gamepad navigation (P1 == controller 0) ---
-        bool up    = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)    ||
-                     Input::isMenuStickPressed(Input::StickNav::Up, 0)    || Input::isKeyPressed(SDL_SCANCODE_UP);
-        bool down  = Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  ||
-                     Input::isMenuStickPressed(Input::StickNav::Down, 0)  || Input::isKeyPressed(SDL_SCANCODE_DOWN);
+        // Same idiom as every other menu screen in this file: the MENU_UP/DOWN action already
+        // covers arrow keys, d-pad AND the debounced left stick (input.cpp), and W/S ride
+        // alongside explicitly. The old hand-rolled dpad+stick+arrow condition silently
+        // dropped W/S — the only menu in the game where they didn't work.
+        bool up    = Input::isActionPressed(GameAction::MENU_UP)   || Input::isKeyPressed(SDL_SCANCODE_W);
+        bool down  = Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S);
         // Hold-to-repeat matters most here: the floor row spans 1-50, and stepping it used to mean
         // 49 discrete taps.
         bool left  = menuLeftPressed();
