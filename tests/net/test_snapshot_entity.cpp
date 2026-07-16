@@ -126,3 +126,59 @@ TEST_CASE("buildFromState: entity healthPct clamps negative and overheal health"
     CHECK(e0->healthPct == 0);     // negative HP floors at 0%
     CHECK(e1->healthPct == 255);   // overheal saturates at 100%
 }
+
+// v16: the old alignment pad became bossDefIdx — boss identity for guest nameplates.
+// Entity.nameTag is a host-side pointer into the BossDef table and cannot replicate,
+// so the def INDEX rides the wire and the client resolves the name from its own
+// (identical) bosses.json. 0xFF = not a boss.
+TEST_CASE("SnapEntity.bossDefIdx: boss identity round-trips through full serialize") {
+    WorldSnapshot snap{};
+    snap.serverTick  = 1;
+    snap.entityCount = 2;
+
+    SnapEntity& boss = snap.entities[0];
+    boss.poolIndex  = 3;
+    boss.flags      = static_cast<u8>(ENT_ACTIVE);
+    boss.bossStatus = static_cast<u8>(1u << 4);  // isBoss
+    boss.bossDefIdx = 7;                          // e.g. the floor-35 def
+
+    SnapEntity& mob = snap.entities[1];
+    mob.poolIndex  = 4;
+    mob.flags      = static_cast<u8>(ENT_ACTIVE);
+    mob.bossDefIdx = 0xFF;                        // ordinary monster — no boss def
+
+    u8 buf[MAX_SNAPSHOT_SIZE];
+    u32 size = Snapshot::serialize(snap, buf, sizeof(buf), /*isFullSnapshot=*/1);
+    REQUIRE(size > 0);
+
+    WorldSnapshot out{};
+    REQUIRE(Snapshot::deserialize(out, buf, size));
+    REQUIRE(out.entityCount == 2);
+    CHECK(out.entities[0].bossDefIdx == 7);
+    CHECK(out.entities[1].bossDefIdx == 0xFF);
+}
+
+// v16 delta path: bossDefIdx must also survive writeSnapEntity/readSnapEntity (the
+// delta encoder ships whole changed slots through those two, not the inline loops).
+TEST_CASE("SnapEntity.bossDefIdx: survives the delta encode/decode path") {
+    WorldSnapshot baseline{};
+    baseline.serverTick  = 10;
+    baseline.entityCount = 1;
+    baseline.entities[0].poolIndex  = 2;
+    baseline.entities[0].flags      = static_cast<u8>(ENT_ACTIVE);
+    baseline.entities[0].bossDefIdx = 0xFF;
+
+    WorldSnapshot current = baseline;
+    current.serverTick = 11;
+    current.entities[0].bossDefIdx = 5;   // slot changed → delta must carry the new byte
+    current.entities[0].healthPct  = 200;
+
+    u8 buf[MAX_SNAPSHOT_SIZE];
+    u32 size = Snapshot::serializeDelta(buf, sizeof(buf), current, baseline);
+    REQUIRE(size > 0);
+
+    WorldSnapshot out{};
+    REQUIRE(Snapshot::deserializeDelta(out, buf, size, baseline));
+    REQUIRE(out.entityCount == 1);
+    CHECK(out.entities[0].bossDefIdx == 5);
+}

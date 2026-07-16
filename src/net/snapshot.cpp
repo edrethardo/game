@@ -204,7 +204,7 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         se.champAffixes  = e.champAffixes;
         se.champNameIdx  = e.champNameIdx;
         se.enemyDefIdx   = e.enemyDefIdx;
-        se.reserved0     = 0;
+        se.bossDefIdx    = e.bossDefIdx;   // boss identity for guest nameplates (0xFF = not a boss)
     }
 
     // Projectiles (only active ones). projKeys mirrors entKeys for distance ordering.
@@ -550,7 +550,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         w8(se.champAffixes);     // champion affix mask — drives the client's tint/scale tell
         w8(se.champNameIdx);     // rolled champion name index (see snapshot.h)
         w8(se.enemyDefIdx);      // which authored monster this is
-        w8(se.reserved0);
+        w8(se.bossDefIdx);       // which BossDef this is (guest nameplate resolution)
     }
 
     // Projectiles
@@ -730,7 +730,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         se.champAffixes  = r.readU8();   // champion affix mask
         se.champNameIdx  = r.readU8();
         se.enemyDefIdx   = r.readU8();
-        se.reserved0     = r.readU8();
+        se.bossDefIdx    = r.readU8();
     }
 
     for (u32 i = 0; i < snap.projectileCount; i++) {
@@ -937,7 +937,7 @@ static void writeSnapEntity(u8* buf, u32 maxSize, u32& cursor, const SnapEntity&
     w8(se.meshId); w8(se.materialId); w8(se.enemyTypeId); w8(se.weaponMeshId);
     w8(se.halfExtentsXQ); w8(se.halfExtentsYQ); w8(se.halfExtentsZQ);
     w8(se.attackAnimQ);
-    w8(se.champAffixes); w8(se.champNameIdx); w8(se.enemyDefIdx); w8(se.reserved0);
+    w8(se.champAffixes); w8(se.champNameIdx); w8(se.enemyDefIdx); w8(se.bossDefIdx);
 }
 
 // Write one SnapProjectile. MUST match SNAP_PROJECTILE_WIRE = 22.
@@ -1006,7 +1006,7 @@ static void readSnapEntity(PacketReader& r, SnapEntity& se) {
     se.halfExtentsXQ = r.readU8(); se.halfExtentsYQ = r.readU8(); se.halfExtentsZQ = r.readU8();
     se.attackAnimQ = r.readU8();
     se.champAffixes = r.readU8(); se.champNameIdx = r.readU8();
-    se.enemyDefIdx  = r.readU8(); se.reserved0    = r.readU8();
+    se.enemyDefIdx  = r.readU8(); se.bossDefIdx   = r.readU8();
 }
 
 // Read one SnapProjectile from a PacketReader. MUST match writeSnapProjectile.

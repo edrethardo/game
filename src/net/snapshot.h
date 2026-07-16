@@ -128,12 +128,14 @@ struct SnapEntity {
     // could only ever say "Skeleton" for a Bone Archer, a Bone Mage and a Demon Caster alike.
     // Constant per entity, so delta encoding sends it once.
     u8   enemyDefIdx;   // 1
-    // Explicit pad, and it has a job: SnapEntity contains u16s and so aligns to 2. Without this the
-    // struct would be 31 on the wire but 32 in memory, breaking the
-    // `sizeof(SnapEntity) == SNAP_ENTITY_WIRE` static_assert in snapshot.cpp — the canary that
-    // catches a field added to the struct but forgotten in one of the FOUR (de)serializers.
-    // (champNameIdx above was this pad until it earned a job; the next feature gets this one.)
-    u8   reserved0;     // 1 — always 0
+    // Which BossDef this boss is (index into Engine::m_bossDefs; 0xFF = not a boss). Entity.nameTag
+    // is a host-side const char* into the def table and cannot replicate, so without this byte a
+    // guest's nameplate could only ever say "Boss" — never "The Butcher". Constant per entity, so
+    // delta encoding sends it once. (This byte was the struct's explicit alignment pad until it
+    // earned a job, exactly like champNameIdx before it: SnapEntity contains u16s and so aligns
+    // to 2 — the `sizeof(SnapEntity) == SNAP_ENTITY_WIRE` static_assert in snapshot.cpp is the
+    // canary that catches a field added here but forgotten in one of the FOUR (de)serializers.)
+    u8   bossDefIdx;    // 1
 };
 
 // Quantized snapshot of one projectile (22 bytes — see SNAP_PROJECTILE_WIRE)

@@ -614,6 +614,18 @@ void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
         if (idx >= MAX_ENTITIES) continue;
 
         Entity& e = renderEntities.entities[idx];
+        // Slot-recycle speech guard: speechText/speechTimer are CLIENT-planted (SV_EVENT::SPEECH
+        // parks the line on this interp slot) and are NOT snapshot fields, so they survive this
+        // rebuild — which is correct while the slot still holds the same monster, and wrong the
+        // moment the server recycles the pool index for a different one (the new monster would
+        // inherit the old one's bubble: "old and wrong speech bubbles" on guests). The pool
+        // persists across frames, so e.* still holds LAST frame's identity here — compare it to
+        // the incoming snapshot identity and drop the bubble on any change.
+        if (e.enemyType != static_cast<EnemyType>(seB.enemyTypeId) ||
+            e.enemyDefIdx != seB.enemyDefIdx || e.meshId != seB.meshId) {
+            e.speechText  = nullptr;
+            e.speechTimer = 0.0f;
+        }
         e.flags   = seB.flags;
         e.aiState = static_cast<AIState>(seB.aiState);
         // C1: rebuild the render pool's active list — every renderer iterates by activeList, so
@@ -638,6 +650,9 @@ void Client::interpolateEntities(EntityPool& renderEntities, f32 dt) {
         e.champAffixes = seB.champAffixes;
         e.champNameIdx = seB.champNameIdx;
         e.enemyDefIdx  = seB.enemyDefIdx;
+        // Boss identity: lets the nameplate resolve the real boss name from the local BossDef
+        // table (Entity.nameTag is a host-side pointer and can't replicate).
+        e.bossDefIdx   = seB.bossDefIdx;
 
         Vec3 posB;
         posB.x = Quantize::unpackPos(seB.posX);
