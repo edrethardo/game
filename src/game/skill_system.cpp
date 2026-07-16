@@ -78,6 +78,8 @@ void SkillSystem::setSkillPower(f32 power)       { s_skillPower    = power; }
 void SkillSystem::setCastingPlayer(u8 playerIndex) { s_castingPlayer = (playerIndex < MAX_PLAYERS) ? playerIndex : 0; }
 u8   SkillSystem::getCastingPlayer() { return s_castingPlayer; }
 void SkillSystem::setClassDamageMult(f32 mult)   { s_classDmgMult  = mult;  }
+f32  SkillSystem::getSkillPower()                { return s_skillPower;    }
+f32  SkillSystem::getClassDamageMult()           { return s_classDmgMult;  }
 void SkillSystem::setWeaponDamage(f32 dmg)       { s_weaponDamage  = dmg;   }
 void SkillSystem::setArrowMeshIds(u8 arrow, u8 /*bolt*/) { s_arrowMeshId = arrow; }
 void SkillSystem::setWeaponProjectileMesh(u8 meshId)     { s_weaponProjMeshId = meshId; }

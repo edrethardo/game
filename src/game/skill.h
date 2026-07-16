@@ -52,6 +52,12 @@ namespace SkillSystem {
     // Set class skill damage multiplier (scales with effective floor).
     // Called by engine before class skill activation. Item skills use 1.0.
     void setClassDamageMult(f32 mult);
+    // Getters for the two scaling statics above — for SAVE/RESTORE around a proc-fired skill
+    // (Engine::staticDischarge). s_skillPower is NOT purely per-cast state: updateOrbProjectiles
+    // reads it every tick for live Frozen Orb shards, so a proc that leaves it clobbered would
+    // silently rescale someone's in-flight orb.
+    f32  getSkillPower();
+    f32  getClassDamageMult();
 
     // Set equipped weapon damage — Marksman/Ranger skills scale off weapon damage.
     void setWeaponDamage(f32 dmg);

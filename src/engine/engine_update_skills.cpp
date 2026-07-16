@@ -567,14 +567,20 @@ void Engine::staticDischarge(Vec3 pos, u8 wearerSlot, u16 attackerIdx) {
     Vec3 origin = pos + Vec3{0, 1.2f, 0};   // chest height, so the first-hop cone sees the attacker
     Vec3 dir    = normalize(target - origin);
     // Neutral scaling: a proc must not ride whatever class-damage/skill-power multipliers the
-    // last class cast left in the SkillSystem statics. Kill credit rides setAttackingPlayer
-    // (the projectile.cpp save/restore pattern).
+    // last class cast left in the SkillSystem statics — and it must RESTORE them afterwards,
+    // because s_skillPower is not per-cast-only state: updateOrbProjectiles reads it every tick
+    // for live Frozen Orb shards, so leaving it zeroed would rescale someone's in-flight orb.
+    // Kill credit rides setAttackingPlayer (the projectile.cpp save/restore pattern).
+    const f32 prevPower = SkillSystem::getSkillPower();
+    const f32 prevMult  = SkillSystem::getClassDamageMult();
     SkillSystem::setClassDamageMult(1.0f);
     SkillSystem::setSkillPower(0.0f);
     u8 prev = Combat::getAttackingPlayer();
     Combat::setAttackingPlayer(wearerSlot);
     fireChainLightning(origin, dir, def, m_level.grid, m_entities);
     Combat::setAttackingPlayer(prev);
+    SkillSystem::setSkillPower(prevPower);
+    SkillSystem::setClassDamageMult(prevMult);
 }
 
 // ---------------------------------------------------------------------------
