@@ -1218,14 +1218,16 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 3; m_menu.subSelection = 0;
             return;
         }
-        // Left/Right adjusts the mouse sensitivity slider (multiplier 0.25–4.0, step 0.25;
-        // 1.0 = the classic feel). Mirrors the controller submenu's slider handling.
+        // Left/Right adjusts the mouse sensitivity slider (multiplier 0.25–4.0, step 0.05;
+        // 1.0 = the classic feel). Mirrors the controller submenu's slider handling. The step
+        // was 0.25 — far too coarse for aim feel, where the value you want usually sits
+        // BETWEEN two quarter stops; hold-to-repeat (isMenuNavPressed) keeps big moves quick.
         if (m_menu.subSelection == KM_MOUSE_SENS) {
             f32 dir = 0.0f;
             if (menuLeftPressed())  dir = -1.0f;
             if (menuRightPressed()) dir = +1.0f;
             if (dir != 0.0f) {
-                f32 v = Input::getMouseSensitivity() + dir * 0.25f;
+                f32 v = Input::getMouseSensitivity() + dir * 0.05f;
                 if (v < 0.25f) v = 0.25f;
                 if (v > 4.0f)  v = 4.0f;
                 Input::setMouseSensitivity(v);
@@ -1272,7 +1274,8 @@ void Engine::updateMenu(f32 dt) {
         if (menuRightPressed()) dir = +1.0f;
         if (dir != 0.0f) {
             if (m_menu.subSelection == C_STICK_SENS) {
-                f32 v = Input::getStickSensitivity() + dir * 0.25f;
+                // Step 0.05 (was 0.25) — same fine-tuning rationale as the mouse slider.
+                f32 v = Input::getStickSensitivity() + dir * 0.05f;
                 if (v < 0.25f) v = 0.25f;
                 if (v > 5.0f)  v = 5.0f;
                 Input::setStickSensitivity(v);
