@@ -189,6 +189,7 @@ SOUND_MAP = {
     "sfx_monster_cry_1":    (["growl", "snarl", "creature", "monster"], "medium"),
     "sfx_monster_cry_2":    (["creature_misc", "creature_monster", "grunt", "creature"], "medium"),
     "sfx_monster_cry_3":    (["screech", "hiss", "shriek", "creature", "howl"], "medium"),
+    "sfx_goblin_jingle":    (["coin", "coins", "jingle", "clink", "money", "treasure"], "short"),
     # Environment
     "sfx_door_open":        (["door", "open", "creak", "doorOpen"], "medium"),
     "sfx_level_up":         (["level", "fanfare", "victory", "win", "jingle", "success"], "long"),
@@ -224,6 +225,7 @@ MANUAL_OVERRIDES = {
     "sfx_hit_projectile":   "kenney_impact-sounds/Audio/impactWood_medium_001.ogg",
     "sfx_ricochet":         "oga_100-cc0-sfx/metal_05.ogg",               # metallic wall ricochet ping
     "sfx_shrine_activate":  "oga_magic-spell-sfx/magical_1.ogg",   # baseline only — hand-picked via tools/pick_sfx.py
+    "sfx_goblin_jingle":    "oga_80-rpg-sfx/item_coins_01.ogg",    # baseline only — hand-picked via tools/pick_sfx.py
     "sfx_enemy_hit":        "kenney_impact-sounds/Audio/impactSoft_heavy_001.ogg",
     "sfx_enemy_death":      "oga_80-rpg-sfx/creature_die_01.ogg",
     "sfx_player_hit":       "oga_80-rpg-sfx/creature_hurt_02.ogg",          # was variant 01
@@ -292,6 +294,7 @@ PITCH_SHIFTS = {
     "sfx_hit_projectile":   0.75,
     "sfx_ricochet":         1.15,   # bright metallic ping
     "sfx_shrine_activate":  1.00,
+    "sfx_goblin_jingle":    1.00,   # coins should ring at natural pitch — darkening kills the sparkle
     "sfx_enemy_hit":        0.75,
     "sfx_enemy_death":      0.65,
     "sfx_player_hit":       0.75,

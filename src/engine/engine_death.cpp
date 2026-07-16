@@ -547,7 +547,8 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                     // ignored it, which means the key simply never existed and the run lost the
                     // superboss without a single line of feedback.
                     if (!WorldItemSystem::spawnEssential(m_worldItems, shard,
-                                                         pos + Vec3{-0.2f, 0.5f, 0.0f}, &m_level.grid))
+                                                         pos + Vec3{-0.2f, 0.5f, 0.0f}, &m_level.grid,
+                                                         m_itemDefs, m_itemDefCount))  // defs → eviction spares pet drops
                         LOG_ERROR("Source shard (floor %u) could not be placed — superboss unreachable "
                                   "this run", rawFloor);
                 }
@@ -613,6 +614,35 @@ bool Engine::handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
                            item.defId < m_itemDefCount ? item.defId : 0xFFFF);
         dropped++;
     }
+
+    // 1% jackpot: the goblin can also drop a MINI version of itself — the pet-summon consumable
+    // (infinite uses; Engine::togglePetCompanion). Its def is unrollable by ItemGen (minLevel 255,
+    // dropWeight 0), so this roll is the ONLY source. LEGENDARY rarity is load-bearing, not
+    // cosmetic: legendary world items are exempt from the 60 s despawn timer, and a 1-in-100 drop
+    // must not rot on the floor while the player is still fighting across the room.
+    if ((std::rand() % 100) == 0) {
+        for (u32 di = 0; di < m_itemDefCount; di++) {
+            // petEnemyIdx 0xFF singles out the goblin's own def — every OTHER petSummon def is a
+            // "Mini <Enemy>" bound to an enemies.json entry (those drop from their enemy's
+            // 1-in-10000 roll in handleNormalLootDrop, not from the goblin).
+            if (!m_itemDefs[di].petSummon || m_itemDefs[di].petEnemyIdx != 0xFF) continue;
+            ItemInstance pet;
+            pet.defId      = static_cast<u16>(di);
+            pet.rarity     = Rarity::LEGENDARY;
+            pet.itemLevel  = 1;
+            pet.affixCount = 0;
+            pet.uid        = m_worldItems.nextUid++;   // direct-construction uid, like globes/shards
+            Vec3 dropPos = pos + Vec3{0.0f, 0.7f, 0.0f};   // dead center of the ring of legendaries
+            if (WorldItemSystem::spawn(m_worldItems, pet, dropPos, &m_level.grid, e.killerSlot)) {
+                broadcastLootSpawn(m_worldItems, pet.uid, dropPos, pet.defId);
+                LOG_INFO("LootGoblin: JACKPOT — dropped the Mini Loot Goblin companion");
+            } else {
+                LOG_WARN("LootGoblin: mini-goblin drop lost — world-item pool full");
+            }
+            break;
+        }
+    }
+
     LOG_INFO("LootGoblin: caught — dropped %u legendary item(s)", dropped);
     return true;   // never also roll the normal 40% table
 }
@@ -716,6 +746,36 @@ void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             globe.uid   = m_worldItems.nextUid++;
             WorldItemSystem::spawn(m_worldItems, globe,
                                    pos + Vec3{0.2f, 0.5f, 0.0f});
+        }
+    }
+
+    // 1-in-10000 companion jackpot: every normal enemy can drop the "Mini <itself>" pet
+    // consumable (COMMON — the drop rate is the prestige, not the border color). Independent
+    // of the regular loot roll above, and OUTSIDE it: a jackpot must never be eaten by the
+    // ordinary drop gate. The def is unrollable by ItemGen (minLevel 255, dropWeight 0), so
+    // this roll is its only source; COMMON would normally rot on the 60 s trash timer, but
+    // WorldItemSystem::update exempts petSummon defs — and the tri-beam beacon
+    // (renderWorldItems) marks it from across the room.
+    const Entity& deadEnt = pool.entities[idx];
+    if (!(deadEnt.flags & ENT_FRIENDLY) && deadEnt.enemyDefIdx < MAX_ENEMY_DEFS &&
+        (std::rand() % 10000) == 0) {
+        const u16 petDef = m_petItemForEnemy[deadEnt.enemyDefIdx];
+        if (petDef != 0xFFFF) {
+            ItemInstance petItem;
+            petItem.defId      = petDef;
+            petItem.rarity     = Rarity::COMMON;
+            petItem.itemLevel  = 1;
+            petItem.affixCount = 0;
+            petItem.uid        = m_worldItems.nextUid++;   // direct-construction uid (globes/shards pattern)
+            Vec3 petPos = pos + Vec3{-0.2f, 0.7f, 0.2f};
+            if (WorldItemSystem::spawn(m_worldItems, petItem, petPos, &m_level.grid,
+                                       deadEnt.killerSlot)) {
+                broadcastLootSpawn(m_worldItems, petItem.uid, petPos, petItem.defId);
+                LOG_INFO("Pet: JACKPOT — '%s' dropped (enemy def %u)",
+                         m_itemDefs[petDef].name, deadEnt.enemyDefIdx);
+            } else {
+                LOG_WARN("Pet: jackpot drop lost — world-item pool full");
+            }
         }
     }
 }

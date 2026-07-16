@@ -22,7 +22,9 @@ debug keys) lives in the `engine-reference` skill.
 
 ## How to Add Things
 
-**New item**: append to `assets/config/items.json`. If it needs a new mesh, drop the `.obj` into `assets/meshes/` and add it to the `kMeshes` table in `Engine::init` (`engine.cpp:175`). If it needs a new material, add an entry in `assets/materials.json`. Increase `MAX_ITEM_DEFS` if you exceed 64.
+**New item**: use the dedicated **`create-item`** skill (items.json append-only discipline, def-shape recipes — gear vs unrollable/sentinel/consumable, icon + tooltip wiring, `MAX_ITEM_DEFS` cap, despawn rules). Short version: append to `assets/config/items.json` (NEVER insert — `defId` is the array index and is saved in `ItemInstance`), generate any new mesh via the asset tools + register in `asset_manifest.h` AND `build_assets.py`, cap is `MAX_ITEM_DEFS` (224).
+
+**New pet consumable**: use the dedicated **`create-pet`** skill (petSummon def → summon path → follow AI → net use-path → beacon/icon; per-enemy pets are generated from enemies.json and pinned by a sync test).
 
 **New affix type**: use the dedicated **`create-affix`** skill (enum → loader → recalculateStats → consumption → affixes.json sync chain).
 

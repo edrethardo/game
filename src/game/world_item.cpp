@@ -21,10 +21,16 @@ void WorldItemSystem::init(WorldItemPool& pool) {
     LOG_INFO("WorldItemSystem: pool initialized (%u slots)", MAX_WORLD_ITEMS);
 }
 
-void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
+void WorldItemSystem::update(WorldItemPool& pool, f32 dt,
+                             const ItemDef* defs, u32 defCount) {
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         WorldItem& wi = pool.items[i];
         if (!wi.active) continue;
+
+        // Pet consumables (COMMON rarity, 1-in-10000 drops) are exempt from decay like
+        // legendaries: losing one to the trash timer while the player fights across the
+        // room would be brutal. Def-aware here — see the header on why not a spawn flag.
+        const bool isPet = defs && wi.item.defId < defCount && defs[wi.item.defId].petSummon;
 
         // Legendary items never despawn — persist until floor exit.
         // Shrines never despawn either: they are world FIXTURES you walk over to and activate, not
@@ -36,7 +42,8 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt) {
         // a minute to wander back over the corpse, and the run silently loses the superboss with no
         // feedback whatsoever: the portal just never opens on floor 50. Its rarity is COMMON, so it
         // was expiring exactly like the trash it drops next to.
-        if (wi.item.rarity != Rarity::LEGENDARY && !isShrine(wi.item) && !isSourceShard(wi.item)) {
+        if (wi.item.rarity != Rarity::LEGENDARY && !isShrine(wi.item) && !isSourceShard(wi.item)
+            && !isPet) {
             wi.lifetime -= dt;
         }
         wi.bobTimer       += dt;
@@ -83,7 +90,7 @@ bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 
 // run the entire superboss, with no message and no way to tell it happened. An expiring common drop
 // is a far cheaper thing to lose than the key.
 bool WorldItemSystem::spawnEssential(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-                                     const LevelGrid* grid) {
+                                     const LevelGrid* grid, const ItemDef* defs, u32 defCount) {
     if (spawn(pool, item, position, grid)) return true;
 
     // Evict the expendable item closest to expiring: it was about to vanish on its own anyway.
@@ -94,6 +101,8 @@ bool WorldItemSystem::spawnEssential(WorldItemPool& pool, const ItemInstance& it
         if (!wi.active) continue;
         if (isSentinelItem(wi.item)) continue;              // never evict a key, shrine or globe
         if (wi.item.rarity == Rarity::LEGENDARY) continue;  // legendaries never despawn; don't start
+        if (defs && wi.item.defId < defCount && defs[wi.item.defId].petSummon)
+            continue;                                       // a 1-in-10000 companion outranks a key's slot claim
         if (wi.lifetime < lowestLifetime) { lowestLifetime = wi.lifetime; victim = static_cast<s32>(i); }
     }
     if (victim < 0) {

@@ -43,6 +43,7 @@ add_executable(dungeon_tests
     game/test_shrine_buff.cpp        # VITALITY must never leak permanent max HP
     game/test_max_health.cpp         # max HP = class base x growth + gear + buff (gear was DEAD)
     game/test_opening_strike.cpp     # arriving enemies must never open SLOWER
+    game/test_pet_item.cpp           # mini-goblin consumable: unrollable + unequippable
     world/test_ray_targeting.cpp
     world/test_pathfinder.cpp
     world/test_raycast.cpp
@@ -62,6 +63,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/engine/lag_comp_ring.cpp
     ${CMAKE_SOURCE_DIR}/src/core/log.cpp
     ${CMAKE_SOURCE_DIR}/src/game/item_loader.cpp
+    ${CMAKE_SOURCE_DIR}/src/game/item_gen.cpp      # loot roll: pet def must be unrollable
     ${CMAKE_SOURCE_DIR}/src/game/inventory_ui.cpp   # skill-bar + panel hit-test geometry
     ${CMAKE_SOURCE_DIR}/src/game/quickbar.cpp       # quickbar slot bookkeeping
     ${CMAKE_SOURCE_DIR}/src/game/champion.cpp       # champion affix roll rules (pure)

@@ -325,6 +325,9 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
         }
     }
 
+    // (Pet-consumable use no longer rides the input stream: with one pet per enemy the edge
+    // must name WHICH def, so it moved to the reliable CL_USE_PET packet — Engine::onUsePet.)
+
     // Equipment skills (F = boots, G = helmet)
     if (in.extFlags & INPUT_EX_BOOT_SKILL) {
         const ItemInstance& boots = m_inventories[i].equipped[static_cast<u32>(ItemSlot::BOOTS)];

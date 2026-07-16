@@ -947,7 +947,7 @@ void Engine::tickSharedSystems(f32 dt) {
             applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
 
         EntitySystem::tickTimers(m_entities, dt);
-        WorldItemSystem::update(m_worldItems, dt);
+        WorldItemSystem::update(m_worldItems, dt, m_itemDefs, m_itemDefCount);   // def-aware: pet drops never despawn
 
         SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
         // Meteors: pass both local players so kill-heals credit the casting player.
@@ -1031,6 +1031,83 @@ void Engine::tickSharedSystems(f32 dt) {
             // 24 m audible radius: a bit past enemy detection range (18 m), so a cry you can
             // barely hear means something is close to noticing you.
             AudioSystem::playAt(kCries[std::rand() % 3], crier->position, listener, 24.0f);
+        }
+    }
+
+    // Loot-goblin chase breadcrumbs — the goblin is FAST and serpentines through door after
+    // door; once it breaks line of sight the chase used to be over. Two trails: its coin sack
+    // rattles on every sharp turn (each jink of the FLEE serpentine), positional from where it
+    // runs; and a rate-limited chat line calls out its direction relative to you. Same
+    // per-machine pattern as the ambient cries above: each peer detects turns from its own view
+    // of the goblin (ENT_LOOT_GOBLIN and velocity are both in SnapEntity), nothing on the wire.
+    {
+        m_goblinJingleCd -= dt;
+        m_goblinChatCd   -= dt;
+        const EntityPool& gobPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
+                                                                   : m_entities;
+        const Entity* gob = nullptr;
+        for (u32 a = 0; a < gobPool.activeCount; a++) {
+            const Entity& e = gobPool.entities[gobPool.activeList[a]];
+            if ((e.flags & ENT_LOOT_GOBLIN) && !(e.flags & ENT_DEAD) && e.health > 0.0f) {
+                gob = &e;
+                break;
+            }
+        }
+        const f32 gobSpeedSq = gob ? (gob->velocity.x * gob->velocity.x +
+                                      gob->velocity.z * gob->velocity.z) : 0.0f;
+        if (!gob || gobSpeedSq < 1.0f) {
+            m_goblinHeadingValid = false;   // parked on its hoard (or gone) — no trail to leave
+        } else {
+            const f32 heading = atan2f(gob->velocity.z, gob->velocity.x);
+            if (m_goblinHeadingValid) {
+                f32 turn = heading - m_goblinTrackHeading;
+                while (turn >  3.14159265f) turn -= 6.2831853f;   // shortest angular difference
+                while (turn < -3.14159265f) turn += 6.2831853f;
+                // ~30°+ in one frame = a jink, not steering noise. Debounced: the serpentine
+                // re-rolls at most ~3×/s and each roll is one sharp discontinuity.
+                if (fabsf(turn) > 0.52f && m_goblinJingleCd <= 0.0f) {
+                    m_goblinJingleCd = 0.3f;
+                    // Nearest living local player listens (split-screen: closest lane hears it
+                    // loudest) — 30 m radius, wider than the cries: the trail must outrange sight.
+                    Vec3 listener = m_localPlayers[0].position;
+                    f32  listenerYaw = m_localPlayers[0].yaw;
+                    f32  best = lengthSq(gob->position - listener);
+                    for (u8 p = 1; p < m_splitPlayerCount; p++) {
+                        if (m_playerDead[p]) continue;
+                        f32 d = lengthSq(gob->position - m_localPlayers[p].position);
+                        if (d < best) {
+                            best = d;
+                            listener    = m_localPlayers[p].position;
+                            listenerYaw = m_localPlayers[p].yaw;
+                        }
+                    }
+                    AudioSystem::playAt(SfxId::GOBLIN_JINGLE, gob->position, listener, 30.0f);
+
+                    if (m_goblinChatCd <= 0.0f) {
+                        m_goblinChatCd = 4.0f;
+                        // Direction words relative to where the listener FACES (an on-screen
+                        // compass doesn't exist, "to your left" always means something).
+                        const Vec3 fwd = {-sinf(listenerYaw), 0.0f, -cosf(listenerYaw)};
+                        const f32 dx = gob->position.x - listener.x;
+                        const f32 dz = gob->position.z - listener.z;
+                        const f32 rel = atan2f(fwd.x * dz - fwd.z * dx,   // + = to the right
+                                               fwd.x * dx + fwd.z * dz);
+                        static const char* kDirs[8] = {
+                            "just ahead", "ahead, to your right", "to your right",
+                            "behind you, right", "right behind you", "behind you, left",
+                            "to your left", "ahead, to your left"};
+                        const u32 sector =
+                            static_cast<u32>((rel + 3.14159265f + 0.3926991f) / 0.7853982f) & 7;
+                        // sector 0 starts at rel=-π (behind); rotate so 0 = ahead
+                        char msg[80];
+                        std::snprintf(msg, sizeof(msg), "*jingle jingle* — %s!",
+                                      kDirs[(sector + 4) & 7]);
+                        addChatMessage("Loot Goblin", msg, {1.0f, 0.84f, 0.25f});   // hoard gold
+                    }
+                }
+            }
+            m_goblinTrackHeading = heading;
+            m_goblinHeadingValid = true;
         }
     }
 
@@ -1945,6 +2022,19 @@ void Engine::sendPickupPacket(u32 uid) {
     hdr->flags = 0;
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &uid, 4);
+    Net::sendToServer(buf, sizeof(buf), true);
+}
+
+// CLIENT: pet-consumable use. Reliable, like the pickup request above — a discrete UI click
+// must not be lost to packet loss, and the payload names WHICH pet def to toggle (there is one
+// per enemy now, so the old payload-less input bit could not carry the choice).
+void Engine::sendUsePetPacket(u16 petDefId) {
+    u8 buf[sizeof(PacketHeader) + 2];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_USE_PET;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    std::memcpy(buf + sizeof(PacketHeader), &petDefId, 2);
     Net::sendToServer(buf, sizeof(buf), true);
 }
 

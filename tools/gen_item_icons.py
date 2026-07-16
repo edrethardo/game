@@ -163,6 +163,51 @@ def draw_infinity():
     return g
 
 
+def draw_goblin():
+    """Mini Loot Goblin consumable — a grinning goblin head with big pointy ears. The ears +
+    eye/mouth holes make it unmistakable at 16px, and nothing else in the atlas is a face —
+    the whole point: the pet item must not read as 'just another ring' in a full backpack."""
+    g = grid()
+    # Big pointy ears sweeping up and out (goblin tell #1)
+    for i in range(4):                       # left ear: rises right-to-left to a point
+        rect(g, 1 + i, 5 - i, 2 + i, 6 - i)
+    for i in range(4):                       # right ear: mirrored
+        rect(g, 13 - i, 5 - i, 14 - i, 6 - i)
+    # Head: wide dome tapering to a pointed chin
+    rect(g, 4, 3, 11, 4)                     # crown
+    rect(g, 3, 5, 12, 9)                     # face block (ears merge into this)
+    rect(g, 4, 10, 11, 11)                   # cheeks
+    rect(g, 5, 12, 10, 12)                   # jaw
+    rect(g, 6, 13, 9, 13)                    # pointed chin
+    # Eyes: two slanted holes (unlit pixels inside the fill)
+    for ex in (5, 9):
+        px(g, ex, 6, 0); px(g, ex + 1, 6, 0)
+        px(g, ex + 1, 7, 0)
+    # Wide toothy grin: a mouth slot with alternating teeth
+    for x in range(5, 11):
+        px(g, x, 10, 0)
+    for x in (6, 8, 10):                     # teeth interrupt the mouth hole
+        px(g, x, 10, 1)
+    return g
+
+
+def draw_paw():
+    """Generic pet consumable ("Mini <Enemy>" companions) — a paw print: three toe pads over a
+    big palm pad. The goblin keeps its face icon (it's THE jackpot); every other pet shares the
+    paw, which reads as 'creature' without needing 38 per-enemy glyphs in a 16 px atlas."""
+    g = grid()
+    # Three toe pads arched over the palm (round-ish 3x3 blobs)
+    for cx, cy in ((3, 4), (8, 2), (13, 4)):
+        rect(g, cx - 1, cy, cx + 1, cy + 2)
+        px(g, cx, cy - 1); px(g, cx, cy + 3)
+    # Big palm pad: a fat rounded blob, wider than tall
+    rect(g, 4, 9, 11, 13)
+    rect(g, 3, 10, 12, 12)
+    rect(g, 5, 8, 10, 8)
+    rect(g, 5, 14, 10, 14)
+    return g
+
+
 def pack(g):
     """Pack a 16x16 boolean grid into 16 u16 rows (bit 15 = leftmost pixel)."""
     rows = []
@@ -198,6 +243,8 @@ def main():
         ("CARBINE", pack(draw_carbine())),
         ("REVOLVER", pack(draw_revolver())),
         ("INFINITY", pack(draw_infinity())),
+        ("GOBLIN", pack(draw_goblin())),
+        ("PAW", pack(draw_paw())),
     ]
     write_header(icons, out_path)
 

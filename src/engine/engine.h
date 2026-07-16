@@ -1097,11 +1097,35 @@ private:
     // then it re-arms to a jittered ~12 s. Starts small so a fresh floor speaks up early.
     f32  m_monsterCryTimer = 5.0f;
 
+    // Loot-goblin chase breadcrumbs (tickSharedSystems): every sharp turn of the FLEE serpentine
+    // rattles the coin sack (positional GOBLIN_JINGLE) and, rate-limited, drops a chat line with
+    // the goblin's direction relative to the nearest player. Pure per-machine detection from the
+    // goblin's replicated velocity — nothing on the wire. One tracked goblin (one spawns per
+    // floor); heading is XZ atan2, valid only while it is actually moving.
+    f32  m_goblinTrackHeading  = 0.0f;
+    bool m_goblinHeadingValid  = false;
+    f32  m_goblinJingleCd      = 0.0f;   // debounce so one jink = one jingle
+    f32  m_goblinChatCd        = 0.0f;   // chat is rarer than the jingle or it floods the log
+
     // The loot goblin: flees, bleeds loot while chased, and expires (paying nothing) if it escapes.
     void spawnLootGoblin(const DungeonResult& dungeon);
     // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
     void tickLootGoblins(f32 dt);
     u8   m_goblinMeshId = 0;
+
+    // Pet companions (the goblin's 1% consumable drop + every enemy's 1-in-10000 "Mini <Enemy>").
+    // togglePetCompanion is the server/SP-authoritative summon-or-dismiss for the pet belonging to
+    // `petDefId` (an items.json petSummon def); tryUsePetItem is the client-side use intercept
+    // every equip entry point calls first (returns true = it was a consumable, handled). A CLIENT
+    // lane's use is sent as CL_USE_PET (reliable, defId payload — the old INPUT_EX_PET bit could
+    // not say WHICH pet once there was more than one) and lands in onUsePet on the server.
+    void togglePetCompanion(u8 ownerSlot, u16 petDefId);
+    bool tryUsePetItem(u8 backpackIndex);
+    void sendUsePetPacket(u16 petDefId);
+    static void onUsePet(u8 playerSlot, u16 itemDefId);   // Net::OnUsePetFn (defId parsed in net.cpp)
+    // enemy def index → its pet item def (0xFFFF = none). Filled at init from petEnemy names;
+    // consumed by the 1-in-10000 jackpot roll in handleNormalLootDrop.
+    u16 m_petItemForEnemy[MAX_ENEMY_DEFS] = {};
 
     // --- Target health bar (Diablo 2 style, top of screen) ---
     // Preference: the enemy you are AIMING at; if none, the last one you hit, held for a moment so

@@ -254,6 +254,13 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
 
             def.dropWeight = entry.value("dropWeight", 1.0f);
             def.infiniteFlight = entry.value("infiniteFlight", false);
+            def.petSummon      = entry.value("petSummon", false);
+            // Which enemy this pet miniaturizes, by enemies.json name — resolved to
+            // petEnemyIdx after BOTH tables are loaded (engine_init_assets.cpp). The
+            // Mini Loot Goblin has no petEnemy: its creature is the special goblin
+            // entity, not an enemy def.
+            std::string petEnemyStr = entry.value("petEnemy", "");
+            std::strncpy(def.petEnemyName, petEnemyStr.c_str(), sizeof(def.petEnemyName) - 1);
 
             // Store mesh/material names for deferred resolution
             std::string meshStr = entry.value("mesh", "");

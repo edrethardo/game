@@ -1217,6 +1217,86 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
 }
 
 // ---------------------------------------------------------------------------
+// togglePetCompanion — "use" a pet consumable (the goblin's 1% Mini Loot Goblin, or any
+// enemy's 1-in-10000 "Mini <Enemy>" — both engine_death.cpp): dismiss the owner's live pet if
+// it is the same kind, swap if it is a different kind, otherwise summon one at their side.
+// Server/SP only — the entity replicates to guests through the snapshot like any other, and a
+// guest's use-click arrives here as CL_USE_PET via Engine::onUsePet. Pets do not survive a
+// floor transition (the entity pool is rebuilt); the item has infinite uses, so re-summoning
+// is one click.
+// ---------------------------------------------------------------------------
+void Engine::togglePetCompanion(u8 ownerSlot, u16 petDefId)
+{
+    if (m_netRole == NetRole::CLIENT) return;   // authoritative path only
+    if (ownerSlot >= MAX_PLAYERS || !m_players[ownerSlot].active) return;
+    if (petDefId >= m_itemDefCount || !m_itemDefs[petDefId].petSummon) return;
+
+    // Which creature this item summons: an enemies.json def ("Mini <Enemy>"), or the special
+    // goblin entity for the original Mini Loot Goblin (petEnemyIdx 0xFF). The pet entity carries
+    // the same index in enemyDefIdx, which is how we recognise which pet is already out.
+    const u8 wantIdx = m_itemDefs[petDefId].petEnemyIdx;
+
+    // Dismiss pass: a live pet owned by this slot winks out — the same no-payout death the
+    // Swarm Queen expiry uses (never Combat::killEntity, which would fire the loot callback).
+    // Using the SAME pet's item toggles it away; using a DIFFERENT one swaps (dismiss, then
+    // fall through to summon) — one companion per player, never a menagerie.
+    bool wasSameKind = false;
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (!(e.flags & ENT_FRIENDLY) || (e.flags & ENT_DEAD)) continue;
+        if (e.npcClass != NpcClass::PET || e.ownerNetSlot != ownerSlot) continue;
+        e.flags     |= ENT_DEAD;
+        e.aiState    = AIState::DEAD;
+        e.deathTimer = 0.01f;
+        wasSameKind  = (e.enemyDefIdx == wantIdx);
+        LOG_INFO("Pet: companion dismissed (owner slot %u)", ownerSlot);
+        break;
+    }
+    if (wasSameKind) return;
+
+    // Summon beside the owner. Entity position is the CENTER, owner position is feet.
+    // Mini = half the source creature's extents — the renderer scales the shared mesh to
+    // 2×halfExtents, so every miniature costs no new asset.
+    const NetPlayer& owner = m_players[ownerSlot];
+    const EnemyDef* src = (wantIdx < m_enemyDefs.count) ? &m_enemyDefs.defs[wantIdx] : nullptr;
+    const Vec3 halfExt = src ? src->halfExtents * 0.5f
+                             : Vec3{0.18f, 0.26f, 0.18f};   // goblin: ~half the real one
+    Vec3 pos = owner.position + Vec3{0.9f, halfExt.y, 0.9f};
+
+    // Stats are cosmetic: damage/attackRange 0 (it never fights), detectionRange 0 (the friendly
+    // target scan can't acquire anything), HP nominal (applyDamage ignores pets regardless).
+    // Grounded even for flying sources — the PET follow AI walks and snaps to the floor.
+    EntityHandle h = EntitySystem::spawn(m_entities, pos, halfExt, false,
+                                         30.0f, 6.5f, 0.0f, 0.0f, 1.0f, 0.0f);
+    Entity* p = handleGet(m_entities, h);
+    if (!p) { LOG_WARN("Pet: entity pool full — summon failed"); return; }
+
+    if (src) {
+        // Miniature of a real monster: wear its rig and skin, and animate like it (the renderer
+        // keys attack/idle motion off enemyType). enemyDefIdx also lets nameplates call it by name.
+        p->meshId     = src->meshId;
+        p->materialId = src->materialId;
+        p->enemyType  = src->enemyType;
+    } else {
+        p->meshId       = m_goblinMeshId;
+        // Gilded, not green: the goblin pet is a LEGENDARY drop, so it wears the gold_trim
+        // material (the Swarm Queen's) instead of the plain goblin skin — reads as "special"
+        // at a glance and can never be mistaken for a hostile loot goblin in the same room.
+        p->materialId   = MaterialSystem::getIdByName("gold_trim");
+        if (p->materialId == 0) p->materialId = MaterialSystem::getIdByName("goblin"); // fallback
+        p->enemyType    = EnemyType::GENERIC;
+    }
+    p->enemyDefIdx  = wantIdx;
+    p->npcClass     = NpcClass::PET;
+    p->flags       |= ENT_FRIENDLY | ENT_UNTARGETABLE;  // never a combat participant on either side
+    p->ownerNetSlot = ownerSlot;                         // follow anchor (enemy_ai.cpp)
+    p->ownerLocalPlayer = (ownerSlot < m_splitPlayerCount) ? ownerSlot : 0; // split-screen fallback anchor
+    p->baseMoveSpeed = p->moveSpeed;
+    Collision::ensureNotInWall(p->position, p->halfExtents, m_level.grid);
+    LOG_INFO("Pet: %s summoned (owner slot %u)", m_itemDefs[petDefId].name, ownerSlot);
+}
+
+// ---------------------------------------------------------------------------
 // spawnFloorShrines — scatter walk-up shrines through the floor.
 //
 // Shrines are WorldItem SENTINELS, not entities or props: that inherits spawning, snapshot

@@ -90,6 +90,10 @@ SLOTS = [
     "sfx_monster_cry_1",
     "sfx_monster_cry_2",
     "sfx_monster_cry_3",
+    # Loot goblin coin-sack rattle — one jingle per serpentine jink during the chase. Wants a
+    # SHORT bright multi-transient coin sound (it fires up to ~2×/s while the goblin flees, so
+    # anything long or swelling stacks into mush).
+    "sfx_goblin_jingle",
 ]
 
 SLOT_CLASS = {
@@ -106,6 +110,7 @@ SLOT_CLASS = {
     "sfx_monster_cry_1": "monster",
     "sfx_monster_cry_2": "monster",
     "sfx_monster_cry_3": "monster",
+    "sfx_goblin_jingle": "coin",
 }
 
 # Per acoustic-class ranking profile:
@@ -167,6 +172,15 @@ CLASS_PROFILES = {
                    "zombie", "beast", "demon", "goblin", "screech", "shriek", "howl", "hiss"],
         "weak": ["breath", "throat", "angry", "idle", "voice", "cry"],
         "dur": (0.40, 2.50), "centroid": 1200, "sharp": False, "multi": False,
+    },
+    # Coin jingle: a handful of coins knocking together — bright (high centroid), several
+    # distinct transients (multi=True), and SHORT: it repeats on every goblin jink, so the
+    # duration window cuts off the long "pour out a treasure chest" candidates up front.
+    "coin": {
+        "strong": ["coin", "coins", "gold", "jingle", "chink", "clink", "money", "purse",
+                   "treasure", "loot"],
+        "weak": ["metal", "handle", "pickup", "drop", "bag", "pouch", "bell", "ting", "rattle"],
+        "dur": (0.10, 0.90), "centroid": 4500, "sharp": True, "multi": True,
     },
 }
 

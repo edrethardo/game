@@ -58,7 +58,10 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // carry the shrine-buff type. A v10 client would read every later field at the wrong offset.
 // v12: SnapEntity grew 2 B — enemyDefIdx + reserved0 (30 -> 32). WHICH monster an entity is, so a
 // guest can name it: EnemyType is only the rig, and 38 authored monsters share ~16 rigs between them.
-static constexpr u32 PROTOCOL_VERSION  = 13; // v13: player record single shrineTimerQ pair (was
+// v14: new CL_USE_PET (0x0C) — pet-consumable use with a defId payload (replaces the payload-less
+// INPUT_EX_PET input bit, which could not say WHICH pet once every enemy gained one). A v13 client
+// would never send it, so on a v14 server its pet clicks would silently do nothing — reject cleanly.
+static constexpr u32 PROTOCOL_VERSION  = 14; // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
@@ -140,6 +143,11 @@ enum struct NetPacketType : u8 {
     //   posX, posY, posZ (f32×3 = 12 B) + radius (4 B) + delay (4 B) + damage (4 B) = 24 B.
     // Damage is clamped server-side against the METEOR_STRIKE SkillDef.
     CL_METEOR         = 0x0B,
+    // Pet-consumable use (reliable). Payload after the 4-byte header: u16 itemDefId — which
+    // petSummon def to summon/dismiss. A discrete UI click, so it rides its own reliable packet
+    // like CL_PICKUP_ITEM rather than the input stream; the server validates the def is a
+    // petSummon item present in that slot's synced inventory before toggling (Engine::onUsePet).
+    CL_USE_PET        = 0x0C,
     SV_TIME_PONG      = 0x17,  // 12-byte payload: u32 clientTimeMs + u32 serverTick + u32 serverTimeMs
 
     // M10.2 — Server → Client: the server confirmed a remote player's fire hit an entity.
@@ -391,6 +399,9 @@ namespace Net {
     // carries pos + radius + delay + damage. Server spawns the authoritative meteor and relays it
     // to the other clients. See CL_METEOR.
     using OnMeteorFn     = void(*)(u8 playerSlot, const u8* data, u32 size);
+    // Server-side CL_USE_PET handler — slot = requesting client; defId already parsed (the
+    // payload is a lone u16, so the raw-buffer shape buys nothing here).
+    using OnUsePetFn     = void(*)(u8 playerSlot, u16 itemDefId);
     // Server-side CL_RESPAWN handler — slot = requesting (dead) client; no payload.
     using OnRespawnFn    = void(*)(u8 playerSlot);
     // Server-side CL_REQUEST_DESCEND handler — slot = requesting client; no payload.
@@ -451,6 +462,7 @@ namespace Net {
     void setOnInput(OnInputFn fn);
     void setOnPickup(OnPickupFn fn);
     void setOnMeteor(OnMeteorFn fn);            // client-predicted proc meteor → authoritative spawn
+    void setOnUsePet(OnUsePetFn fn);            // pet-consumable use → server-side toggle (CL_USE_PET)
     void setOnDropItem(OnDropItemFn fn);        // R11
     void setOnRespawn(OnRespawnFn fn);
     void setOnDescendRequest(OnDescendRequestFn fn);

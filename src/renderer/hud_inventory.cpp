@@ -710,13 +710,27 @@ f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         char buf[80];
 
         line(rarityName(item.rarity), rColor, bodyScale);
-        line(slotName(def.slot), {0.7f, 0.7f, 0.75f}, bodyScale);
+        // A pet consumable is not really a "Ring" — its def only claims that slot to satisfy
+        // the loader (see ItemDef.petSummon). Present it as what it is.
+        line(def.petSummon ? "Companion" : slotName(def.slot), {0.7f, 0.7f, 0.75f}, bodyScale);
 
         if (def.slot == ItemSlot::WEAPON && def.weaponSubtype != WeaponSubtype::NONE) {
             line(subtypeName(def.weaponSubtype), {0.55f, 0.55f, 0.6f}, bodyScale);
         }
 
         rule({0.3f, 0.3f, 0.35f});
+
+        // Pet consumable: no stats or affixes — say what using it does. ("Use" is the equip
+        // action: double-click / A / a quickbar slot; Engine::tryUsePetItem intercepts them all.)
+        if (def.petSummon) {
+            line("Use: summon or dismiss your", {1.0f, 0.82f, 0.2f}, bodyScale);
+            // Enemy-bound minis get the generic line — the item NAME already says which
+            // creature; the goblin jackpot keeps its bespoke one.
+            line(def.petEnemyIdx != 0xFF ? "miniature companion"
+                                         : "mini goblin companion",
+                 {1.0f, 0.82f, 0.2f}, bodyScale);
+            line("Infinite uses", {0.55f, 0.55f, 0.6f}, bodyScale);
+        }
 
         // Stats
         if (def.slot == ItemSlot::WEAPON) {

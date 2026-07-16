@@ -54,7 +54,8 @@ static constexpr u8 INPUT_EX_SKILL      = 1 << 2;  // right-click class skill
 static constexpr u8 INPUT_EX_BOOT_SKILL = 1 << 3;
 static constexpr u8 INPUT_EX_HELM_SKILL = 1 << 4;
 static constexpr u8 INPUT_EX_INVENTORY  = 1 << 5;  // Tab toggle
-// bit 6 free — respawn now uses the reliable CL_RESPAWN packet, not an input flag
+// bit 6 free (respawn moved to the reliable CL_RESPAWN packet; the pet-consumable edge that
+// briefly lived here moved to CL_USE_PET — with one pet per enemy it needs a defId payload).
 static constexpr u8 INPUT_EX_DODGE     = 1 << 7;  // Wanderer dodge roll
 
 // Networked player state — the authoritative state the server maintains.

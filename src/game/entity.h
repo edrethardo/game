@@ -109,6 +109,9 @@ enum struct NpcClass : u8 {
     MAGE,       // ranged, staff projectiles, robes
     ROGUE,      // ranged, throwing knives, fast, leather
     PALADIN,    // melee tank, mace, heavy plate
+    PET,        // cosmetic companion (mini loot goblin): follows its owner, never fights, is
+                // never targeted (spawned ENT_UNTARGETABLE) and Combat::applyDamage ignores it.
+                // See updateFriendlyNPC's PET branch + Engine::togglePetCompanion.
     COUNT
 };
 

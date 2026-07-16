@@ -8,7 +8,7 @@ struct LevelGrid; // forward declaration for WorldItemSystem::spawn
 
 // ---- Constants ----
 
-static constexpr u32 MAX_ITEM_DEFS       = 160; // expanded for full floor coverage on all weapon subtypes
+static constexpr u32 MAX_ITEM_DEFS       = 224; // 158 gear defs + one "Mini <Enemy>" pet consumable per enemies.json entry
 static constexpr u32 MAX_AFFIX_DEFS      = 32;
 static constexpr u32 MAX_AFFIXES_PER_ITEM = 4;
 static constexpr u32 MAX_INVENTORY_ITEMS = 24;
@@ -285,9 +285,21 @@ struct ItemDef {
     // on ItemDef (the JSON-loaded table) which is NOT serialized — adding it is save-safe.
     bool infiniteFlight = false;
 
+    // Pet consumable: "using" the item (the equip action — double-click / A / quickbar)
+    // summons or dismisses a cosmetic companion instead of equipping. Engine::tryUsePetItem
+    // intercepts every use path and Inventory::equip refuses these, so the declared `slot`
+    // (ring) only satisfies the loader/icon plumbing. Infinite uses — the item never leaves
+    // the backpack. Like infiniteFlight, ItemDef is not serialized: save-safe.
+    // Two flavors: the Mini Loot Goblin (petEnemyIdx 0xFF — its "enemy" is the special
+    // goblin entity, not an enemies.json def) and one "Mini <Enemy>" per normal enemy,
+    // linked by petEnemy name → petEnemyIdx (resolved in engine_init_assets.cpp).
+    bool petSummon = false;
+    u8   petEnemyIdx = 0xFF;   // index into EnemyDefTable (0xFF = goblin / not a pet)
+
     // Mesh/material name strings for deferred resolution (not serialized at runtime)
     char meshName[32]     = {};
     char materialName[32] = {};
+    char petEnemyName[48] = {};   // petSummon only: enemies.json name → petEnemyIdx at init
 };
 
 // ---- Item instance (actual rolled item at runtime) ----
@@ -652,15 +664,21 @@ namespace Inventory {
 
 namespace WorldItemSystem {
     void init(WorldItemPool& pool);
-    void update(WorldItemPool& pool, f32 dt);
+    // `defs` (optional) makes lifetime decay def-aware: petSummon items never despawn — a
+    // 1-in-10000 companion drop must not evaporate on the 60 s trash timer, and routing the
+    // exemption through update() (rather than a flag stamped at spawn) means a pet the player
+    // picks up and later drops again keeps its immunity through EVERY spawn path for free.
+    void update(WorldItemPool& pool, f32 dt,
+                const ItemDef* defs = nullptr, u32 defCount = 0);
     bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
                const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 3.0f);
     // For an item the run CANNOT afford to lose (the source shard). A full pool makes spawn() fail,
     // and every caller ignored the return — so the key just wasn't there, silently. This evicts the
     // most expendable drop on the floor (the ordinary item closest to expiring anyway) and takes its
-    // slot. Never evicts a legendary or another sentinel.
+    // slot. Never evicts a legendary, another sentinel, or (given `defs`) a pet consumable.
     bool spawnEssential(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-                        const LevelGrid* grid = nullptr);
+                        const LevelGrid* grid = nullptr,
+                        const ItemDef* defs = nullptr, u32 defCount = 0);
     // Returns true if pickup succeeded, fills outItem
     bool tryPickup(WorldItemPool& pool, Vec3 playerPos, u8 playerSlot,
                    ItemInstance& outItem);

@@ -111,6 +111,25 @@ void Engine::onPickup(u8 playerSlot, const u8* data, u32 size) {
     s_engine->handlePickupRequest(playerSlot, uid);
 }
 
+// CL_USE_PET — a client clicked a pet consumable. Validate against the server's synced copy of
+// that slot's inventory (a forged defId without the item must be a no-op) before toggling; the
+// summoned/dismissed entity reaches the client back through the ordinary snapshot.
+void Engine::onUsePet(u8 playerSlot, u16 itemDefId) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return;
+    if (playerSlot >= MAX_PLAYERS || itemDefId >= s_engine->m_itemDefCount) return;
+    if (!s_engine->m_itemDefs[itemDefId].petSummon) return;
+
+    const PlayerInventory& inv = s_engine->m_inventories[playerSlot];
+    for (u8 b = 0; b < MAX_INVENTORY_ITEMS; b++) {
+        const ItemInstance& it = inv.backpack[b];
+        if (!isItemEmpty(it) && it.defId == itemDefId) {
+            s_engine->togglePetCompanion(playerSlot, itemDefId);
+            return;
+        }
+    }
+}
+
 // R11 — Server-side CL_DROP_ITEM dispatch. Wire layout:
 //   header(4) + u8 slotKind + u8 slotIndex + Vec3 dropPos(12) + ItemInstance(sizeof ItemInstance)
 // slotKind: 0=backpack, 1=equipment slot. The full ItemInstance rides the packet so we

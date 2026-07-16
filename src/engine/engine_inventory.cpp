@@ -44,6 +44,29 @@
 #include "core/profiler.h"
 #include "audio/audio.h"
 
+// ---------------------------------------------------------------------------
+// Consumable-use intercept. The inventory has no consumable concept ("use means equip"),
+// so every use/equip entry point (A button, double-click, quickbar) calls this FIRST and
+// skips its equip path when it returns true. Infinite uses: the item never leaves the bag.
+// SP/host lanes toggle directly (lane index == net slot); a CLIENT lane defers to the
+// server with a reliable CL_USE_PET packet naming the defId (Engine::onUsePet validates
+// it) — the summon is server-authoritative and the entity comes back through the snapshot.
+// ---------------------------------------------------------------------------
+bool Engine::tryUsePetItem(u8 backpackIndex) {
+    if (backpackIndex >= MAX_INVENTORY_ITEMS) return false;
+    const ItemInstance& it = m_inventories[m_localPlayerIndex].backpack[backpackIndex];
+    if (isItemEmpty(it) || it.defId >= m_itemDefCount) return false;
+    if (!m_itemDefs[it.defId].petSummon) return false;
+
+    if (m_netRole == NetRole::CLIENT) {
+        sendUsePetPacket(it.defId);   // reliable CL_USE_PET; server validates + toggles (onUsePet)
+    } else {
+        togglePetCompanion(static_cast<u8>(m_localPlayerIndex), it.defId);
+    }
+    AudioSystem::play(SfxId::ITEM_EQUIP);   // local feedback on the click itself
+    return true;
+}
+
 #include <glad/glad.h>
 #include <cmath>
 #include <cstring>
@@ -185,11 +208,13 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_A)) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 if (!isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex])) {
+                    if (!tryUsePetItem(m_invCursorIndex)) { // consumable? A = use, not equip
                     Inventory::equip(m_inventories[m_localPlayerIndex], m_invCursorIndex, m_itemDefs);
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_EQUIP);
                     m_itemEquippedOnce = true;
                     sendInventorySync(); // R7: push the new equipped state so the host's fire/reload dispatch sees the right weapon (no-op off-client)
+                    }
                 }
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
                 if (!isItemEmpty(m_inventories[m_localPlayerIndex].equipped[m_invCursorIndex])) {
@@ -269,12 +294,14 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 if (m_dblClickState.wasBackpack &&
                     m_dblClickState.lastSlot == hit.index &&
                     m_dblClickState.timer < 0.3f) {
-                    // Double-click: equip directly
-                    Inventory::equip(m_inventories[m_localPlayerIndex], hit.index, m_itemDefs);
-                    Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
-                    AudioSystem::play(SfxId::ITEM_EQUIP);
-                    m_itemEquippedOnce = true;
-                    sendInventorySync(); // R7
+                    // Double-click: use (consumable) or equip directly
+                    if (!tryUsePetItem(hit.index)) {
+                        Inventory::equip(m_inventories[m_localPlayerIndex], hit.index, m_itemDefs);
+                        Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
+                        AudioSystem::play(SfxId::ITEM_EQUIP);
+                        m_itemEquippedOnce = true;
+                        sendInventorySync(); // R7
+                    }
                     m_dblClickState = {};
                 } else {
                     // Record for potential double-click and begin potential drag
@@ -356,6 +383,14 @@ void Engine::updateInventoryInteraction(f32 dt) {
             Vec3 dropBase = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 si = 0; si < MAX_INVENTORY_ITEMS; si++) {
                 if (isItemEmpty(m_inventories[m_localPlayerIndex].backpack[si])) continue;
+                // Pet consumables sit out the bulk drop: Q is "shed my loot", and a 1-in-10000
+                // companion is not loot — losing one to a reflexive bag-clear (then a floor
+                // descent wiping the world items) is exactly how a player deletes their rarest
+                // possession by accident. A deliberate single-item drop still works.
+                {
+                    const u16 dId = m_inventories[m_localPlayerIndex].backpack[si].defId;
+                    if (dId < m_itemDefCount && m_itemDefs[dId].petSummon) continue;
+                }
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], si);
                 if (!isItemEmpty(dropped)) {
                     f32 angle = si * 0.4f;

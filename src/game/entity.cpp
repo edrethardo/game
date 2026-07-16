@@ -44,6 +44,11 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.flashTimer   = 0.0f;
     e.deathTimer   = 0.0f;
     e.ownerLocalPlayer = 0; // default P1; friendly spawn sites override (pool slots aren't zeroed)
+    // A recycled slot must not stay tethered to a player or keep an NPC/pet class: a drone
+    // reusing a dead pet's slot would inherit PET (follow-only + damage-immune) since drone
+    // spawn sites rely on the NONE default rather than setting npcClass explicitly.
+    e.ownerNetSlot = 0xFF;
+    e.npcClass     = NpcClass::NONE;
     // Pool slots are reused without zeroing, so clear identity fields that callers
     // may not override (spiderlings set enemyType but not enemyRole, etc.). Defaulting
     // to GENERIC/NORMAL prevents a respawned slot from inheriting a stale summoner role.

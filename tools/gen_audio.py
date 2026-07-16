@@ -703,6 +703,28 @@ def sfx_level_up():
     )
 
 
+def sfx_goblin_jingle():
+    """Loot goblin coin-sack rattle — a handful of coins knocking together. Five short bright
+    sine 'chinks' at uneven pitches/spacings (evenness reads as a bell arpeggio, not coins),
+    with a touch of noise for the metallic scrape. Fires on every serpentine jink, so it must
+    stay well under half a second."""
+    def chink(freq, vol, gap):
+        return [
+            dict(waveform='sine', duration=0.05, freq_start=freq, freq_end=freq * 0.96,
+                 attack=0.001, decay=0.028, sustain_level=0.0, sustain_time=0.0,
+                 release=0.02, noise_mix=0.06, volume=vol),
+            # near-silent spacer between coin strikes (chain = concatenation)
+            dict(waveform='sine', duration=gap, freq_start=100,
+                 attack=0.0, decay=0.0, sustain_level=0.0, sustain_time=0.0,
+                 release=gap, volume=0.0),
+        ]
+    layers = []
+    for f, v, g in ((5200, 0.55, 0.018), (4300, 0.62, 0.032), (6100, 0.48, 0.014),
+                    (4800, 0.66, 0.026), (5600, 0.42, 0.02)):
+        layers.extend(chink(f, v, g))
+    return synthesize_chain(layers)
+
+
 # ---------------------------------------------------------------------------
 # Preset registry — maps name -> (default_filename, generator_function)
 # ---------------------------------------------------------------------------
@@ -764,6 +786,7 @@ SOUND_PRESETS = {
     # Environment
     'door_open':       ('sfx_door_open.wav',       sfx_door_open),
     'level_up':        ('sfx_level_up.wav',        sfx_level_up),
+    'goblin_jingle':   ('sfx_goblin_jingle.wav',   sfx_goblin_jingle),
 }
 
 

@@ -47,7 +47,8 @@ void Server::receiveInput(u8 playerSlot, const u8* data, u32 size) {
         // silently stripped INPUT_EX_DODGE (bit7) for remote clients — so a remote
         // Wanderer's dodge never granted server-authoritative i-frames (player.cpp:266).
         input.extFlags &= (INPUT_EX_POTION | INPUT_EX_RELOAD | INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL
-                           | INPUT_EX_HELM_SKILL | INPUT_EX_INVENTORY | INPUT_EX_DODGE);
+                           | INPUT_EX_HELM_SKILL | INPUT_EX_INVENTORY
+                           | INPUT_EX_DODGE);
         if (input.skillSlot > 3) input.skillSlot = 0;
         // push() filters duplicates and stale ticks via monotonic clientTick check, so
         // re-sending earlier inputs in the window is safe even at high packet rates.

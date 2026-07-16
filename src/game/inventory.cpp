@@ -193,6 +193,11 @@ void Inventory::equip(PlayerInventory& inv, u8 backpackIndex, const ItemDef* ite
     ItemInstance& bpItem = inv.backpack[backpackIndex];
     if (isItemEmpty(bpItem)) return;
 
+    // Consumables never equip. A pet-summon item is USED from the backpack — Engine::tryUsePetItem
+    // intercepts the use/equip entry points — and its def claims a slot only to satisfy the loader.
+    // Refusing here is the backstop that covers every other route (drag-to-equip, future callers).
+    if (itemDefs[bpItem.defId].petSummon) return;
+
     // Resolve slot from the item definition
     u32 slotIdx = static_cast<u32>(itemDefs[bpItem.defId].slot);
 

@@ -422,6 +422,28 @@ void Engine::initAssets() {
         }
     }
 
+    // Resolve pet consumables to their enemy defs (items.json petEnemy name → enemy index) and
+    // build the reverse map the 1-in-10000 kill roll uses (enemy index → pet item def). Runs after
+    // BOTH tables are loaded; an unmatched name degrades to "that enemy drops no pet" — loudly,
+    // because a typo here is exactly the silent sync trap the cross-JSON unit test also pins.
+    for (u32 i = 0; i < MAX_ENEMY_DEFS; i++) m_petItemForEnemy[i] = 0xFFFF;
+    for (u32 i = 0; i < m_itemDefCount; i++) {
+        ItemDef& d = m_itemDefs[i];
+        if (!d.petSummon || d.petEnemyName[0] == '\0') continue;
+        bool matched = false;
+        for (u32 e = 0; e < m_enemyDefs.count; e++) {
+            if (std::strcmp(d.petEnemyName, m_enemyDefs.defs[e].name) == 0) {
+                d.petEnemyIdx        = static_cast<u8>(e);
+                m_petItemForEnemy[e] = static_cast<u16>(i);
+                matched = true;
+                break;
+            }
+        }
+        if (!matched)
+            LOG_WARN("ItemDef '%s': petEnemy '%s' matches no enemies.json entry — pet unobtainable",
+                     d.name, d.petEnemyName);
+    }
+
     // Resolve boss def visuals (material + mesh)
     BossLoader::resolveVisuals(m_bossDefs);
     for (u32 i = 0; i < m_bossDefs.count; i++) {

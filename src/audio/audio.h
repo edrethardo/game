@@ -37,6 +37,10 @@ enum struct SfxId : u8 {
     // Ambient monster cries — every ~12 s one living hostile calls out, distance-attenuated
     // (tickSharedSystems). Three variants rolled randomly; hand-picked via tools/pick_sfx.py.
     MONSTER_CRY_1, MONSTER_CRY_2, MONSTER_CRY_3,
+    // Loot goblin coin-sack rattle — fires on every sharp turn of its FLEE serpentine so the
+    // chase can be followed by ear (goblin-breadcrumb pass, engine_update.cpp). Positional.
+    // Hand-picked via tools/pick_sfx.py (procedural gen_audio fallback until then).
+    GOBLIN_JINGLE,
     // Count sentinel
     SFX_COUNT
 };

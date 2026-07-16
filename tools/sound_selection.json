@@ -1,6 +1,17 @@
 {
   "generated_by": "pick_sfx.py",
   "slots": {
+    "sfx_goblin_jingle": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": 5600,
+        "pitch": 0.94,
+        "reverb": 0.65,
+        "stretch": 1.19,
+        "trim": false
+      },
+      "source": "oga_rpg-sound-pack/RPG Sound Pack/inventory/coin.wav"
+    },
     "sfx_monster_cry_1": {
       "params": {
         "gain": 0.0,

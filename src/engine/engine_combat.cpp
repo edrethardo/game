@@ -1616,6 +1616,11 @@ void Engine::useQuickbarSlot(u8 slot) {
         qs.sourceIndex >= MAX_INVENTORY_ITEMS ||
         isItemEmpty(inv.backpack[qs.sourceIndex])) return;
 
+    // Consumable in the bar: using the slot summons/dismisses the pet instead of equipping.
+    // Must run before the equip below — Inventory::equip refuses pet items, and converting the
+    // ref to EQUIPPED_REF for an item that never moved would orphan the quickbar slot.
+    if (tryUsePetItem(qs.sourceIndex)) return;
+
     u32      uid      = qs.itemUid;
     ItemSlot itemSlot = m_itemDefs[inv.backpack[qs.sourceIndex].defId].slot;
     Inventory::equip(inv, qs.sourceIndex, m_itemDefs);

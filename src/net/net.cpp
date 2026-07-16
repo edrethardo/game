@@ -54,6 +54,7 @@ static Net::OnSnapshotFn   s_onSnapshot   = nullptr;
 static Net::OnInputFn      s_onInput      = nullptr;
 static Net::OnPickupFn     s_onPickup     = nullptr;
 static Net::OnMeteorFn     s_onMeteor     = nullptr;   // client-predicted proc meteor → authoritative
+static Net::OnUsePetFn     s_onUsePet     = nullptr;   // pet-consumable use (CL_USE_PET)
 static Net::OnDropItemFn   s_onDropItem   = nullptr;   // R11
 static Net::OnRespawnFn    s_onRespawn    = nullptr;
 static Net::OnDescendRequestFn s_onDescendRequest = nullptr;
@@ -336,6 +337,16 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // telling us where it landed. The engine handler validates + spawns the single authoritative
         // (damaging) meteor and relays it to the OTHER clients.
         if (s_onMeteor) s_onMeteor(slot, data, size);
+    } break;
+
+    case NetPacketType::CL_USE_PET: {
+        // Client used a pet consumable. Payload = u16 itemDefId; the engine handler re-validates
+        // (petSummon def, present in that slot's synced inventory) before toggling the companion.
+        if (size >= sizeof(PacketHeader) + 2 && s_onUsePet) {
+            u16 defId;
+            std::memcpy(&defId, data + sizeof(PacketHeader), 2);
+            s_onUsePet(slot, defId);
+        }
     } break;
 
     case NetPacketType::CL_DROP_ITEM: {
@@ -1453,6 +1464,7 @@ void Net::setOnSnapshot(OnSnapshotFn fn)   { s_onSnapshot = fn; }
 void Net::setOnInput(OnInputFn fn)         { s_onInput = fn; }
 void Net::setOnPickup(OnPickupFn fn)       { s_onPickup = fn; }
 void Net::setOnMeteor(OnMeteorFn fn)       { s_onMeteor = fn; }
+void Net::setOnUsePet(OnUsePetFn fn)       { s_onUsePet = fn; }
 void Net::setOnDropItem(OnDropItemFn fn)   { s_onDropItem = fn; }   // R11
 void Net::setOnRespawn(OnRespawnFn fn)     { s_onRespawn = fn; }
 void Net::setOnDescendRequest(OnDescendRequestFn fn) { s_onDescendRequest = fn; }

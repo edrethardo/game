@@ -61,6 +61,40 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
     if (e.overclockTimer > 0.0f) npcSpeed *= 1.5f; // Overclock: +50% speed
 
     // ---------------------------------------------------------------
+    // Minipet (PET): cosmetic companion — trots after its owner and does
+    // nothing else. No target scan, no combat, no flow-field exit march.
+    // Hostiles never see it (spawned ENT_UNTARGETABLE) and applyDamage
+    // ignores it, so there is no death/respawn handling here either.
+    // ---------------------------------------------------------------
+    if (e.npcClass == NpcClass::PET) {
+        f32 dpx = anchorPos.x - e.position.x, dpz = anchorPos.z - e.position.z;
+        f32 distToOwner = sqrtf(dpx * dpx + dpz * dpz);
+        if (distToOwner > 25.0f) {
+            // Hopelessly separated (owner portaled/teleported) — pop to their
+            // side, the same recovery the Tinkerer drones use at 30 m.
+            e.position = anchorPos + Vec3{1.0f, 0.0f, 1.0f};
+            Collision::ensureNotInWall(e.position, e.halfExtents, grid);
+            e.velocity = {0, 0, 0};
+        } else if (distToOwner > 2.0f) {
+            Vec3 toOwner = normalize(Vec3{dpx, 0.0f, dpz});
+            // Scamper harder the further it falls behind, so it catches a
+            // sprinting owner instead of permanently trailing them.
+            f32 urgency = (distToOwner > 6.0f) ? 1.35f : 1.0f;
+            e.velocity.x = toOwner.x * npcSpeed * urgency;
+            e.velocity.z = toOwner.z * npcSpeed * urgency;
+            e.yaw = atan2f(-toOwner.x, -toOwner.z);
+        } else {
+            // Heel: stand by the owner, facing them.
+            e.velocity.x = 0.0f;
+            e.velocity.z = 0.0f;
+            if (distToOwner > 0.01f) e.yaw = atan2f(-dpx, -dpz);
+        }
+        entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
+        snapEntityToFloor(e, grid);
+        return AIStep::NextEntity;
+    }
+
+    // ---------------------------------------------------------------
     // Friendly NPC AI: pathfind toward the exit AND fight enemies
     // encountered along the way.  Each class has a distinct combat
     // style:

@@ -77,6 +77,7 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     "sfx_monster_cry_1.wav",
     "sfx_monster_cry_2.wav",
     "sfx_monster_cry_3.wav",
+    "sfx_goblin_jingle.wav",
 };
 
 // Compile-time guard: this positional table must stay index-aligned with SfxId. If it fires, an

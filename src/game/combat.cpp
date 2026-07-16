@@ -90,6 +90,11 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     if (!e) return;
     if (e->flags & ENT_DEAD) return;
 
+    // Cosmetic pets (mini loot goblin) are invulnerable. Hostiles never TARGET them
+    // (ENT_UNTARGETABLE), but splash/AoE and stray friendly fire funnel through here —
+    // one gate makes the companion unkillable by construction instead of by targeting luck.
+    if ((e->flags & ENT_FRIENDLY) && e->npcClass == NpcClass::PET) return;
+
     // A loot goblin bolts the moment it is HIT — not before. It spawns IDLE, guarding its hoard, and
     // this is what starts the chase: the escape clock only begins ticking now, so the goblin cannot
     // quietly time out and vanish while the player is still two rooms away and has never seen it.

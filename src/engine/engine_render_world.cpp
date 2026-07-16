@@ -66,9 +66,13 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
     const Texture& defaultTex = MaterialSystem::get(0)->texture;
 
     // Collect disc billboard data so we can draw them all in one batched pass
-    // instead of flushing per item (was 32 flushes → 1 flush).
+    // instead of flushing per item (was 32 flushes → 1 flush). Pet-item beacon beams ride the
+    // same batch (same shader/texture/blend state): 3 corners × 2 crossed quads per pet item,
+    // capped so the array stays stack-friendly — more than 8 concurrent 1-in-10000 drops is
+    // not a case worth budgeting for, and the cap only trims beams, never the item itself.
     struct DiscData { Mat4 mvp; Vec4 color; };
-    DiscData discs[MAX_WORLD_ITEMS];
+    static constexpr u32 PET_BEAM_QUADS = 8 * 6;
+    DiscData discs[MAX_WORLD_ITEMS + PET_BEAM_QUADS];
     u32 discCount = 0;
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
@@ -204,7 +208,8 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 
         // Collect disc billboard for batched rendering below. Skip globes + shards (not loot) AND
         // COMMON loot — a subtle rarity glow only for magic+ keeps the floor from being a light show.
-        if (!isGlobeItem && !isShard && wi.item.rarity != Rarity::COMMON && discCount < MAX_WORLD_ITEMS) {
+        if (!isGlobeItem && !isShard && wi.item.rarity != Rarity::COMMON &&
+            discCount < MAX_WORLD_ITEMS + PET_BEAM_QUADS) {
             Vec4 discColor = {0.2f, 0.9f, 0.2f, 0.28f};   // magic default (dimmed from 0.4)
             f32 discSize = renderScale * 0.9f;            // was 1.2
             switch (wi.item.rarity) {
@@ -222,6 +227,39 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             discMat.m[8]  = bFwd.x   * discSize; discMat.m[9]  = bFwd.y   * discSize; discMat.m[10] = bFwd.z   * discSize;
             discMat.m[12] = pos.x; discMat.m[13] = pos.y; discMat.m[14] = pos.z;
             discs[discCount++] = {m_camera.viewProjection * discMat, discColor};
+        }
+
+        // Pet-consumable beacon: three light rays rising from the corners of a slowly turning
+        // triangle around the drop (a 1-in-10000 item must be findable from across the room).
+        // Rays wear the drop's RARITY color — near-white for the COMMON enemy minis, gold for
+        // the goblin's legendary jackpot — so the beacon says "pet" AND "how special" at once.
+        // Each ray is two crossed vertical quads (readable from every angle without
+        // billboarding; the pass below disables culling), stretched from the blob's radial
+        // gradient so the shaft is soft-edged and fades at both ends.
+        if (wi.item.defId < m_itemDefCount && m_itemDefs[wi.item.defId].petSummon &&
+            discCount + 6 <= MAX_WORLD_ITEMS + PET_BEAM_QUADS) {
+            static constexpr f32 BEAM_RADIUS = 0.55f;  // triangle circumradius around the item
+            static constexpr f32 BEAM_HEIGHT = 4.5f;   // tall enough to clear prop clutter
+            static constexpr f32 BEAM_WIDTH  = 0.14f;
+            const Vec4 beamColor = {color.x, color.y, color.z, 0.45f};   // `color` = rarityColor above
+            for (u32 k = 0; k < 3; k++) {
+                const f32 a = wi.bobTimer * 0.6f + static_cast<f32>(k) * 2.0943951f; // 120° apart
+                const Vec3 base = {wi.position.x + cosf(a) * BEAM_RADIUS,
+                                   floorY + BEAM_HEIGHT * 0.5f,
+                                   wi.position.z + sinf(a) * BEAM_RADIUS};
+                // Two crossed quads per corner, aligned to the world X/Z axes.
+                for (u32 q = 0; q < 2; q++) {
+                    const Vec3 right = (q == 0) ? Vec3{BEAM_WIDTH, 0, 0} : Vec3{0, 0, BEAM_WIDTH};
+                    Mat4 beamMat = Mat4::identity();
+                    beamMat.m[0]  = right.x; beamMat.m[1]  = 0.0f;        beamMat.m[2]  = right.z;
+                    beamMat.m[4]  = 0.0f;    beamMat.m[5]  = BEAM_HEIGHT; beamMat.m[6]  = 0.0f;
+                    beamMat.m[8]  = (q == 0) ? 0.0f : 1.0f;               // sane normal column
+                    beamMat.m[9]  = 0.0f;
+                    beamMat.m[10] = (q == 0) ? 1.0f : 0.0f;
+                    beamMat.m[12] = base.x; beamMat.m[13] = base.y; beamMat.m[14] = base.z;
+                    discs[discCount++] = {m_camera.viewProjection * beamMat, beamColor};
+                }
+            }
         }
 
         Renderer::submit(m_unlitShader, itemTex, *itemMesh, model, bounds, tint);
