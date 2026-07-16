@@ -40,11 +40,16 @@ add_executable(dungeon_tests
     engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
     game/test_interact.cpp           # interact button: item > shrine > exit, tap vs hold
     game/test_source_shard.cpp       # secret superboss key must survive to be picked up
+    game/test_chest.cpp              # real chests: never despawn, sentinel-gated, high-half uids
     game/test_shrine_buff.cpp        # VITALITY must never leak permanent max HP
     game/test_max_health.cpp         # max HP = class base x growth + gear + buff (gear was DEAD)
     game/test_opening_strike.cpp     # arriving enemies must never open SLOWER
     game/test_pet_item.cpp           # mini-goblin consumable: unrollable + unequippable
     game/test_lead_assist.cpp        # throwing-knife intercept math — header-only, no .cpp to link
+    game/test_shared_loot.cpp        # ground drops are FFA instantly; exclusivity only if re-armed
+    game/test_legendary_pool.cpp     # legendary tier = named uniques only; rarityFloor guarantees
+    game/test_ai_preference.cpp      # authored combat openers: pure map + enemies.json stat-fit lint
+    game/test_dormant_watch.cpp      # weeping-angel view cone: pins the yaw/pitch forward convention
     world/test_ray_targeting.cpp
     world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp

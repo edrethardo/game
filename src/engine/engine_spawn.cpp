@@ -310,6 +310,13 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
     // Fresh floor, fresh pack budget.
     m_championPacksThisFloor = 0;
 
+    // CAVERN floors are one huge open chamber: the player can SEE an enemy from 30-40 m while
+    // its authored detectionRange (12-22 m) was tuned for corridor floors where walls hid
+    // anything unaware. Watching monsters stand oblivious across the cave reads as "the enemies
+    // are passive", so open-layout floors get a wider aggro bubble to match their sightlines.
+    const f32 detectMult =
+        (m_level.layoutStyle == LevelGen::LayoutStyle::CAVERN) ? 1.5f : 1.0f;
+
     // Collect JSON defs for this tier
     const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
     u32 tierDefCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
@@ -397,7 +404,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
                 EntityHandle h = EntitySystem::spawn(m_entities,
                     spawnPos, def.halfExtents, def.flying,
-                    def.health, def.moveSpeed, def.detectionRange,
+                    def.health, def.moveSpeed, def.detectionRange * detectMult,
                     def.attackRange, def.attackCooldown, def.damage);
                 Entity* ent = handleGet(m_entities, h);
                 if (ent) {
@@ -405,6 +412,12 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     ent->materialId = def.materialId;
                     ent->enemyType  = def.enemyType;
                     ent->enemyRole  = def.role;
+                    // Authored combat opener (strafe/flank/surround/...) — consumed by the
+                    // IDLE-aggro and damage-wake transitions. This field spent months parsed
+                    // and discarded (the spawn block below only ever read role & AMBUSH), which
+                    // flattened every roster into charge-only — worst on tier 3, where 7 of 8
+                    // defs author a non-chase opener.
+                    ent->aiPreference = def.aiPreference;
                     // WHICH monster this is, not just which rig it wears. Replicated, so a guest can
                     // name it too. Derived from the pointer's offset into the table — tierDefs holds
                     // pointers INTO m_enemyDefs.defs, so this is its real index.
@@ -415,10 +428,18 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     ent->baseMoveSpeed      = ent->moveSpeed;
                     ent->baseAttackCooldown = ent->attackCooldown;
 
-                    // Set initial AI state from JSON aiPreference
+                    // AMBUSH-role enemies start DORMANT at a doorway. (The authored
+                    // aiPreference is the COMBAT OPENER, applied at the aggro transition in
+                    // enemy_ai_states.cpp — not the initial state; a "chase" opener set here
+                    // would beeline across the whole floor from spawn.)
                     if (def.role & EnemyRole::AMBUSH) {
                         ent->aiState = AIState::DORMANT;
-                        // Reposition ambush enemies to doorways
+                        // Reposition ambush enemies to doorways — a statue flanking an
+                        // archway. They stay DORMANT there: the old AIState::AMBUSH hold
+                        // rotated its yaw to track the player (a statue that watches you
+                        // is visibly alive) and woke on plain proximity; the weeping-angel
+                        // DORMANT rule (invulnerable stone, wakes only unobserved) is the
+                        // gargoyle's whole gimmick now, doorway or not.
                         Vec3 doorPos[4];
                         u8 doorCount = LevelGridQuery::findDoorwayCells(
                             m_level.grid, room.x, room.z, room.w, room.d, doorPos, 4);
@@ -428,7 +449,6 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                                 ? (room.floorHeight + 1.5f)
                                 : (room.floorHeight + def.halfExtents.y);
                             ent->position = {doorPos[pick].x, doorY, doorPos[pick].z};
-                            ent->aiState = AIState::AMBUSH;
                         }
                     }
                     if (def.role & EnemyRole::SUMMONER) ent->tacticalTimer = 8.0f;
@@ -491,7 +511,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
                 EntityHandle h = EntitySystem::spawn(m_entities,
                     spawnPos, tmpl.halfExtents, tmpl.flying,
-                    tmpl.health, tmpl.moveSpeed, tmpl.detRange,
+                    tmpl.health, tmpl.moveSpeed, tmpl.detRange * detectMult,
                     tmpl.atkRange, tmpl.atkCool, tmpl.damage);
                 Entity* ent = handleGet(m_entities, h);
                 if (ent) {
@@ -502,6 +522,9 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
                     if (std::strstr(tmpl.matName, "gargoyle")) {
                         ent->enemyRole = EnemyRole::AMBUSH;
+                        // Stays DORMANT even at a doorway — same reasoning as the JSON
+                        // path above: the stone-statue disguise (invulnerable, wakes only
+                        // unobserved) replaces the old proximity-triggered AMBUSH hold.
                         ent->aiState = AIState::DORMANT;
                         Vec3 doorPos[4];
                         u8 doorCount = LevelGridQuery::findDoorwayCells(
@@ -511,7 +534,6 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                             ent->position = {doorPos[pick].x,
                                 tmpl.flying ? (room.floorHeight + 1.5f) : (room.floorHeight + tmpl.halfExtents.y),
                                 doorPos[pick].z};
-                            ent->aiState = AIState::AMBUSH;
                         }
                     } else if (std::strstr(tmpl.matName, "necromancer")) {
                         ent->enemyRole = EnemyRole::SUMMONER;
@@ -912,13 +934,21 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
                 Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
             }
         } else {
-            // Real chest: spawn a world item with good loot at this position
-            ItemInstance item = ItemGen::rollItem(
-                static_cast<u8>(2 + r / 3), // higher level deeper in dungeon
-                m_itemDefs, m_itemDefCount, m_affixDefs, m_affixDefCount);
-            if (!isItemEmpty(item)) {
-                WorldItemSystem::spawn(m_worldItems, item, Vec3{cx, cy + 0.3f, cz}, &m_level.grid);
-            }
+            // Real chest — a closed world-item SENTINEL (shrine pattern: replication and the
+            // server-validated E path come free), not bare loot on the floor. It renders and
+            // prompts EXACTLY like the dormant mimic above, which is what gives the mimic
+            // something to hide among. No item is rolled here: itemLevel carries the loot
+            // level and Engine::openChest rolls at open time on the authoritative sim.
+            // Level scales with effectiveFloor like the mimic's drop — if real chests paid
+            // early-floor trash while mimics paid depth-scaled loot, the LOOT would become
+            // the tell.
+            u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+            u32 lootLvl = effectiveFloor + r / 3;   // deeper rooms slightly better, as before
+            ItemInstance chest;
+            chest.defId     = CHEST_ID;
+            chest.itemLevel = static_cast<u8>(lootLvl > 255 ? 255 : lootLvl);
+            chest.uid       = m_worldItems.nextUid++;   // direct-construction uid (globes/shrines pattern)
+            WorldItemSystem::spawn(m_worldItems, chest, Vec3{cx, cy + 0.3f, cz}, &m_level.grid);
         }
     }
 }

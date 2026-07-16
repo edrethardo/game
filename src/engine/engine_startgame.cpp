@@ -353,6 +353,7 @@ void Engine::equipFreshLane(u8 lane) {
     // overwrite at the real floor (the no-downgrade guard must not protect the
     // overwritten character's old progress). See m_laneLoadedFromSave.
     m_laneLoadedFromSave[lane] = false;
+    m_totalKills[lane] = 0;   // fresh character starts its lifetime "Enemies deleted" at zero
     Inventory::init(m_inventories[lane]);
     m_skillStates[lane] = SkillState{};
     Quickbar::init(m_quickbars[lane], m_inventories[lane]);
@@ -437,6 +438,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // by falling back to the best available rooms.
     LevelGridSystem::init(m_level.grid, gridSize, gridSize, 1.0f);
     m_level.dungeon = LevelGen::generate(m_level.grid, dungeonSeed, gridSize, gridSize, layoutStyle);
+    m_level.layoutStyle = layoutStyle;   // consumed by spawnFloorEnemies (cavern detection comp)
     DungeonResult& dungeon = m_level.dungeon;
     Vec3 spawnPos = dungeon.spawnPos;
 
@@ -831,6 +833,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
         Net::setOnMeteor(Engine::onMeteor); // client-predicted proc meteor → authoritative spawn
         Net::setOnUsePet(Engine::onUsePet); // pet-consumable use → server-side companion toggle
+        Net::setOnEntityInteract(Engine::onEntityInteract); // mimic chest E-interact (v17)
         Net::setOnDropItem(Engine::onDropItem); // R11: server-authoritative inventory drop
         Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
         Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent

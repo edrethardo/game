@@ -400,8 +400,12 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     // its own the same way from the SV_KILL broadcast (Engine::onKill) — its ghost sim never runs
     // this authoritative callback, which is why its counter used to sit at zero forever.
     if (!(pool.entities[idx].flags & ENT_FRIENDLY)) {
-        if (pool.entities[idx].killerSlot < m_splitPlayerCount)
+        if (pool.entities[idx].killerSlot < m_splitPlayerCount) {
             m_transition.floorKillCount++;
+            // Lifetime counter for the killing lane (local lanes are net slots 0..count-1
+            // here) — persisted via the stats sidecar, shown on the floor transition.
+            m_totalKills[pool.entities[idx].killerSlot]++;
+        }
         AudioSystem::playAt(SfxId::ENEMY_DEATH, pos, m_localPlayer.position);
     }
 
@@ -414,13 +418,17 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         u16 entLvl = pool.entities[idx].level;
         u8 lvl = static_cast<u8>(entLvl > 255 ? 255 : entLvl);
         if (lvl < 1) lvl = 1;
-        // Floor 1: force armor drops so tutorial teaches equipping gear
+        // Floor 1: force armor drops so tutorial teaches equipping gear.
+        // MAGIC rarityFloor replaces the old post-roll force-upgrade: the rarity-window pool
+        // pick means the def actually supports the tier (the old force could paint a
+        // common-only def blue) and its affixes are rolled at that tier from the start.
         ItemInstance item;
         for (u32 attempt = 0; attempt < 20; attempt++) {
             item = ItemGen::rollItem(lvl, m_itemDefs,
                                      m_itemDefCount,
                                      m_affixDefs,
-                                     m_affixDefCount);
+                                     m_affixDefCount,
+                                     Rarity::MAGIC);
             if (isItemEmpty(item)) break;
             if (m_level.currentFloor > 1) break; // no restriction above floor 1
             // On floor 1, only allow shields so the tutorial teaches blocking
@@ -428,15 +436,6 @@ bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             if (slot == ItemSlot::OFFHAND) break;
         }
         if (!isItemEmpty(item)) {
-            // Force to at least MAGIC rarity
-            if (item.rarity < Rarity::MAGIC) item.rarity = Rarity::MAGIC;
-            // Re-roll affixes for magic quality (1-2 affixes)
-            if (item.affixCount == 0) {
-                const ItemDef& idef = m_itemDefs[item.defId];
-                ItemGen::rollAffixes(item, lvl, idef.slot,
-                                      m_affixDefs, m_affixDefCount,
-                                      idef.weaponType);
-            }
             Vec3 dropPos = pos + Vec3{0, 0.5f, 0};
             WorldItemSystem::spawn(m_worldItems, item,
                                    dropPos, &m_level.grid,
@@ -469,29 +468,14 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         u8 bossLvl = static_cast<u8>(bossEntLvl > 255 ? 255 : bossEntLvl);
         if (bossLvl < 1) bossLvl = 1;
 
-        // Guaranteed quality drop — re-roll until we get a true legendary
-        // (an item whose definition supports legendary rarity + has a skill)
+        // Guaranteed quality drop. rollItem's rarityFloor raises the rolled tier and the
+        // rarity-window pool pick does the rest: a LEGENDARY floor can only ever return one
+        // of the named uniques, with affixes rolled at that tier — the old "re-roll 50× until
+        // the def supports it, then force-upgrade + re-roll affixes" dance is obsolete.
         Rarity minRarity = static_cast<Rarity>(bd.lootGuarantee);
-        ItemInstance bossItem;
-        for (u32 attempt = 0; attempt < 50; attempt++) {
-            bossItem = ItemGen::rollItem(bossLvl, m_itemDefs,
-                                          m_itemDefCount,
-                                          m_affixDefs,
-                                          m_affixDefCount);
-            if (isItemEmpty(bossItem)) break;
-            // Accept if the item's definition can actually be this rarity
-            if (m_itemDefs[bossItem.defId].maxRarity >= minRarity) break;
-        }
+        ItemInstance bossItem = ItemGen::rollItem(bossLvl, m_itemDefs, m_itemDefCount,
+                                                  m_affixDefs, m_affixDefCount, minRarity);
         if (!isItemEmpty(bossItem)) {
-            if (bossItem.rarity < minRarity) {
-                bossItem.rarity = minRarity;
-                // Re-roll affixes for the upgraded rarity with correct weapon type
-                bossItem.affixCount = 0;
-                const ItemDef& biDef = m_itemDefs[bossItem.defId];
-                ItemGen::rollAffixes(bossItem, bossLvl, biDef.slot,
-                                      m_affixDefs, m_affixDefCount,
-                                      biDef.weaponType);
-            }
             Vec3 bossDropPos = pos + Vec3{0, 0.5f, 0};
             WorldItemSystem::spawn(m_worldItems, bossItem,
                                    bossDropPos, &m_level.grid,
@@ -586,23 +570,11 @@ bool Engine::handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     u8 dropped = 0;
     for (u8 i = 0; i < Goblin::DEATH_DROPS; i++) {
         // Every death drop is a guaranteed LEGENDARY — with 1200 base HP the kill is a committed
-        // DPS race against the escape clock, and the sack is what that race is for. Same
-        // re-roll-then-force-upgrade shape as the boss/champion payouts: roll until the def can
-        // legitimately BE legendary, then upgrade and re-roll its affixes at the new tier.
-        ItemInstance item;
-        for (u32 attempt = 0; attempt < 50; attempt++) {
-            item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
-                                     m_affixDefs, m_affixDefCount);
-            if (isItemEmpty(item)) break;
-            if (m_itemDefs[item.defId].maxRarity >= Rarity::LEGENDARY) break;
-        }
+        // DPS race against the escape clock, and the sack is what that race is for. The
+        // rarityFloor pick guarantees a real named unique (see handleBossLootDrop).
+        ItemInstance item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
+                                              m_affixDefs, m_affixDefCount, Rarity::LEGENDARY);
         if (isItemEmpty(item)) continue;
-        if (item.rarity < Rarity::LEGENDARY) {
-            item.rarity     = Rarity::LEGENDARY;
-            item.affixCount = 0;
-            const ItemDef& d = m_itemDefs[item.defId];
-            ItemGen::rollAffixes(item, lvl, d.slot, m_affixDefs, m_affixDefCount, d.weaponType);
-        }
         // Fan them out so the pile is readable rather than one item stacked on three others.
         const f32 ang = (6.2831853f * static_cast<f32>(i)) / static_cast<f32>(Goblin::DEATH_DROPS);
         Vec3 dropPos = pos + Vec3{ cosf(ang) * 0.6f, 0.5f, sinf(ang) * 0.6f };
@@ -672,22 +644,11 @@ bool Engine::handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         if (e.champAffixes & static_cast<u8>(1u << b)) affixCount++;
     const Rarity minRarity = (affixCount >= 3) ? Rarity::LEGENDARY : Rarity::RARE;
 
-    // Same re-roll-then-force-upgrade shape as handleBossLootDrop: roll until we find a def that
-    // can legitimately BE this rarity, then upgrade and re-roll its affixes at the new tier.
-    ItemInstance item;
-    for (u32 attempt = 0; attempt < 50; attempt++) {
-        item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount, m_affixDefs, m_affixDefCount);
-        if (isItemEmpty(item)) break;
-        if (m_itemDefs[item.defId].maxRarity >= minRarity) break;
-    }
+    // rarityFloor pick — a LEGENDARY floor yields a real named unique, a RARE floor a proper
+    // rare, affixes already rolled at the final tier (see handleBossLootDrop).
+    ItemInstance item = ItemGen::rollItem(lvl, m_itemDefs, m_itemDefCount,
+                                          m_affixDefs, m_affixDefCount, minRarity);
     if (isItemEmpty(item)) return false;
-
-    if (item.rarity < minRarity) {
-        item.rarity     = minRarity;
-        item.affixCount = 0;
-        const ItemDef& d = m_itemDefs[item.defId];
-        ItemGen::rollAffixes(item, lvl, d.slot, m_affixDefs, m_affixDefCount, d.weaponType);
-    }
 
     Vec3 dropPos = pos + Vec3{0, 0.5f, 0};
     // Check the return: spawn() reports a full pool by returning false, and every OTHER caller in
@@ -701,6 +662,34 @@ bool Engine::handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     LOG_INFO("Champion: guaranteed %s drop (mask 0x%02X, %u affixes)",
              minRarity == Rarity::LEGENDARY ? "LEGENDARY" : "RARE", e.champAffixes, affixCount);
     return true;
+}
+
+// Open a real chest: retire the sentinel and put its rolled loot where it stood. Lives here
+// with the other loot-drop paths (it IS one — broadcastLootSpawn above is file-static). The
+// roll happens at open time on the authoritative sim: a chest carries only a loot LEVEL
+// (itemLevel), never an item, so nothing exists to desync, duplicate, or persist. The loot
+// spawns as an ordinary free-for-all world item (rollItem assigns its uid) and reaches guests
+// through the usual snapshot mirror + SV_LOOT_SPAWN event, exactly like a monster drop.
+// SP/host tap calls this directly; a guest's CL_PICKUP_ITEM lands in handlePickupRequest's
+// chest branch.
+void Engine::openChest(u32 worldIdx) {
+    if (worldIdx >= MAX_WORLD_ITEMS) return;
+    WorldItem& wi = m_worldItems.items[worldIdx];
+    if (!wi.active || !isChest(wi.item)) return;
+
+    u8 lootLevel = wi.item.itemLevel;
+    if (lootLevel < 1) lootLevel = 1;
+    const Vec3 lootPos = wi.position + Vec3{0, 0.2f, 0};
+    wi.active = false;
+    if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
+
+    const ItemInstance loot = ItemGen::rollItem(lootLevel, m_itemDefs, m_itemDefCount,
+                                                m_affixDefs, m_affixDefCount);
+    if (isItemEmpty(loot)) return;   // failed roll = the chest was empty; nothing to place
+    if (WorldItemSystem::spawn(m_worldItems, loot, lootPos, &m_level.grid)) {
+        broadcastLootSpawn(m_worldItems, loot.uid, lootPos,
+                           loot.defId < m_itemDefCount ? loot.defId : 0xFFFF);
+    }
 }
 
 void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {

@@ -235,6 +235,58 @@ bool hasLOSToPoint(Vec3 from, Vec3 to, const LevelGrid& grid)
     return !hit.hit || hit.distance >= dist - 0.1f;
 }
 
+// ---------------------------------------------------------------------------
+// Dormant-disguise watch set (weeping-angel wake rule) — see enemy_ai_internal.h
+// ---------------------------------------------------------------------------
+const Player* s_watchPlayers[MAX_WATCH_PLAYERS] = {};
+u32 s_watchPlayerCount = 0;
+
+bool anyPlayerWatching(Vec3 point, const LevelGrid& grid)
+{
+    for (u32 i = 0; i < s_watchPlayerCount; i++) {
+        const Player* p = s_watchPlayers[i];
+        if (!p || p->health <= 0.0f) continue;          // the dead watch nothing
+        Vec3 eye = p->position + Vec3{0, p->eyeHeight, 0};
+        if (!EnemyAI::inViewCone(eye, p->yaw, p->pitch, point, WATCH_CONE_COS)) continue;
+        // Cone hit — but only real sight pins the statue: a wall between them means the
+        // player merely faces its direction, and it is free to stir.
+        if (hasLOSToPoint(eye, point, grid)) return true;
+    }
+    return false;
+}
+
+bool anyPlayerWithin(Vec3 pos, f32 range)
+{
+    for (u32 i = 0; i < s_watchPlayerCount; i++) {
+        const Player* p = s_watchPlayers[i];
+        if (!p || p->health <= 0.0f) continue;
+        if (p->smokeTimer > 0.0f) continue;             // stealthed players don't provoke
+        Vec3 d = p->position - pos;
+        if (d.x * d.x + d.z * d.z <= range * range) return true;
+    }
+    return false;
+}
+
+// The ONE wake routine for disguised ambushers — called by the DORMANT state's
+// weeping-angel trigger, the mimic damage-spring, and the Engine's E-interact path
+// (Engine::onEntityInteract / SP-host chest "open"), so the reveal always looks the same.
+void EnemyAI::wakeAmbusher(Entity& e)
+{
+    if (e.aiState != AIState::DORMANT) return;
+    e.aiState     = AIState::CHASE;
+    e.attackTimer = 0.0f;                 // attack immediately on wake
+    if (e.enemyRole & EnemyRole::AMBUSH) {
+        // Gargoyle: silent stone-shedding wake, no chomp animation
+        e.speechText  = "...";
+        e.speechTimer = 1.5f;
+    } else {
+        // Mimic: surprise chomp
+        e.attackAnimT = 0.4f;
+        e.speechText  = "*CHOMP*";
+        e.speechTimer = 2.0f;
+    }
+}
+
 bool hasWidthLOS(Vec3 from, Vec3 to, f32 radius, const LevelGrid& grid)
 {
     // Degenerate radius — fall back to the cheap single ray.
@@ -269,6 +321,14 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
                       bool spawnCalm,
                       const NetPlayer* netPlayers, u32 netPlayerCount)
 {
+    // Rebuild the dormant-disguise watch set: primary + every extra view. Dead players are
+    // kept and filtered inside the helpers (health can change mid-tick via retaliation).
+    s_watchPlayers[0]  = &player;
+    s_watchPlayerCount = 1;
+    for (u32 ep = 0; extraPlayers && ep < extraPlayerCount && s_watchPlayerCount < MAX_WATCH_PLAYERS; ep++) {
+        if (extraPlayers[ep]) s_watchPlayers[s_watchPlayerCount++] = extraPlayers[ep];
+    }
+
     // ---------------------------------------------------------------------------
     // Herald aura pass — runs before per-entity AI so movement/cooldown mods
     // are in effect for the entire tick. We reset all buffs first, then reapply

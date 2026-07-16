@@ -113,9 +113,11 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - themeW) * 0.5f, sh * 0.50f,
                              themeName, {0.7f * alpha, 0.55f * alpha, 0.2f * alpha}, 2);
 
-        // Kill count
-        char killStr[32];
-        std::snprintf(killStr, sizeof(killStr), "Enemies slain: %u", m_transition.snapshotKills);
+        // Kill count — the CHARACTER's lifetime total (stats sidecar), not this floor's tally.
+        // Lane 0 is the character whose save/floor drives the session. Live-read is safe: the
+        // counter never resets on descent (only equipFreshLane zeroes it).
+        char killStr[40];
+        std::snprintf(killStr, sizeof(killStr), "Enemies deleted: %u", m_totalKills[0]);
         f32 killW = FontSystem::textWidth(killStr, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - killW) * 0.5f, sh * 0.35f,
                              killStr, {0.8f * alpha, 0.8f * alpha, 0.8f * alpha}, 2);

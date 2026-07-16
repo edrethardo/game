@@ -130,6 +130,30 @@ void Engine::onUsePet(u8 playerSlot, u16 itemDefId) {
     }
 }
 
+// CL_INTERACT_ENTITY — a client pressed E on a dormant mimic "chest". The pool index is
+// untrusted network input, so it must PROVE it names an active, still-dormant mimic within
+// interact reach of THAT player's authoritative position before anything wakes. Reach gets
+// +1.0 m of slack over the local rule: the client aimed against its own predicted position,
+// and a request ~RTT/2 in flight must not go dead because the player kept walking. The wake
+// travels back to everyone as replicated aiState in the next snapshot — no reply packet.
+void Engine::onEntityInteract(u8 playerSlot, u8 poolIdx) {
+    if (!s_engine) return;
+    if (s_engine->m_netRole != NetRole::SERVER) return;
+    if (playerSlot >= MAX_PLAYERS || poolIdx >= MAX_ENTITIES) return;
+
+    Entity& e = s_engine->m_entities.entities[poolIdx];
+    if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) return;
+    if (e.enemyType != EnemyType::MIMIC || e.aiState != AIState::DORMANT) return;
+
+    const NetPlayer& np = s_engine->m_players[playerSlot];
+    if (!np.active) return;
+    const Vec3 d = e.position - np.position;
+    const f32 maxReach = GameConst::INTERACT_RANGE + 1.0f;
+    if (d.x * d.x + d.z * d.z > maxReach * maxReach) return;
+
+    EnemyAI::wakeAmbusher(e);
+}
+
 // R11 — Server-side CL_DROP_ITEM dispatch. Wire layout:
 //   header(4) + u8 slotKind + u8 slotIndex + Vec3 dropPos(12) + ItemInstance(sizeof ItemInstance)
 // slotKind: 0=backpack, 1=equipment slot. The full ItemInstance rides the packet so we
@@ -349,9 +373,13 @@ void Engine::onEvent(const u8* data, u32 size) {
             std::memcpy(name, data + off, nameLen); name[nameLen] = '\0'; off += nameLen;
             u8 lineLen = data[off++];
             if (lineLen == 0 || lineLen > 63 || size < off + lineLen) break;
-            // Park the line in the ring so speechText points at storage that outlives this packet.
-            char* line = s_engine->m_guestSpeechRing[s_engine->m_guestSpeechNext];
-            s_engine->m_guestSpeechNext = static_cast<u8>((s_engine->m_guestSpeechNext + 1) % 8);
+            // Park the line in the speaker's OWN per-slot buffer (m_guestSpeech is keyed by the
+            // server pool index) so speechText points at storage that outlives this packet and
+            // that no OTHER entity's speech can rewrite while the bubble is live. A malformed
+            // poolIdx still gets its chat line — parked in the overflow scratch — just no bubble.
+            static char s_speechScratch[64];
+            char* line = (poolIdx < MAX_ENTITIES) ? s_engine->m_guestSpeech[poolIdx]
+                                                  : s_speechScratch;
             std::memcpy(line, data + off, lineLen); line[lineLen] = '\0';
             s_engine->addChatMessage(name, line, {r, g, b});
             // Bubble: renderSpeechBubbles reads the INTERP pool on a client, and that pool is

@@ -95,6 +95,15 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     // one gate makes the companion unkillable by construction instead of by targeting luck.
     if ((e->flags & ENT_FRIENDLY) && e->npcClass == NpcClass::PET) return;
 
+    // STONE SLEEP: a dormant AMBUSH-role enemy (the gargoyle) is literally a statue — fully
+    // invulnerable. Deliberately ABOVE every flash/flinch/knockback/damage-number line below,
+    // so a hit leaves no mark at all: flashTimer is exactly what the DORMANT state reads as
+    // "combat nearby", so even a cosmetic flash would let players shoot statues awake from
+    // safety. The only wake path is the weeping-angel rule (someone in aggro range while
+    // nobody watches — enemy_ai_states.cpp DORMANT). Mimics are DORMANT too but carry no
+    // AMBUSH role, so they stay hittable — whacking the suspicious chest still springs it.
+    if (e->aiState == AIState::DORMANT && (e->enemyRole & EnemyRole::AMBUSH)) return;
+
     // A loot goblin bolts the moment it is HIT — not before. It spawns IDLE, guarding its hoard, and
     // this is what starts the chase: the escape clock only begins ticking now, so the goblin cannot
     // quietly time out and vanish while the player is still two rooms away and has never seen it.
@@ -238,9 +247,11 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
     // Fire the damage number callback with crit/kill flags so the renderer can style them.
     if (s_damageNumberCallback) s_damageNumberCallback(hitPos, damage, isCrit, isKill);
 
-    // Damage alert: first hit on an unalerted enemy that survives wakes neighbors
+    // Damage alert: first hit on an unalerted enemy that survives wakes neighbors.
+    // Both wakes enter the authored combat opener (a sniped strafer should kite, not
+    // beeline) — preferredCombatState is the pure map; no grid here, so no FLANK opener.
     if (wasIdle && e->health > 0.0f) {
-        e->aiState = AIState::CHASE;
+        e->aiState = preferredCombatState(*e);
         constexpr f32 ALERT_RADIUS_SQ = 6.0f * 6.0f;
         for (u32 a = 0; a < pool.activeCount; a++) {
             Entity& n = pool.entities[pool.activeList[a]];
@@ -248,7 +259,7 @@ void Combat::applyDamage(EntityPool& pool, EntityHandle target, f32 damage,
             if (n.flags & ENT_FRIENDLY) continue;
             Vec3 d = n.position - e->position;
             if (d.x*d.x + d.z*d.z < ALERT_RADIUS_SQ) {
-                n.aiState = AIState::CHASE;
+                n.aiState = preferredCombatState(n);
             }
         }
     }

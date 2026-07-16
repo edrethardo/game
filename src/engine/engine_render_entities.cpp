@@ -163,6 +163,13 @@ void Engine::renderEntities(u32 sw, u32 sh) {
             } else {
                 tint = {0.9f, 0.3f, 0.2f, 1.0f}; // angry red
             }
+        } else if (e.aiState == AIState::DORMANT) {
+            // Stone sleep: a dormant gargoyle poses as a statue. A flat cold grey OVERRIDES
+            // the skin tint so waking visibly "sheds the stone" (the amber eyes and moss of
+            // gargoyle_skin come back at full colour). Keyed on aiState — which is on the
+            // wire — so host and every guest read the same statue; only mimics (caught by
+            // the branch above) and AMBUSH gargoyles ever sit in DORMANT.
+            tint = {0.52f, 0.52f, 0.60f, 1.0f};
         } else if (e.materialId > 0) {
             tint = entMat->tint;
         } else if (e.flags & ENT_FLYING) {
@@ -170,8 +177,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         } else {
             tint = {0.8f, 0.5f, 0.3f, 1.0f};
         }
-        // Aura-buffed enemies get a subtle red-orange tint shift
-        if (e.hasAuraBuff && !(e.flags & ENT_FRIENDLY)) {
+        // Aura-buffed enemies get a subtle red-orange tint shift. Never while DORMANT —
+        // a warm glow on a "statue"/"chest" would leak the disguise.
+        if (e.hasAuraBuff && !(e.flags & ENT_FRIENDLY) && e.aiState != AIState::DORMANT) {
             tint.x = fminf(tint.x * 1.3f, 1.0f);
             tint.y *= 0.85f;
             tint.z *= 0.7f;
@@ -198,7 +206,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         // invisible to co-op guests. This one deliberately does not repeat that.)
         // The size half of the tell needs no code here at all — halfExtents is scaled at spawn and
         // is already replicated, and it drives both the model scale and the hitbox.
-        if ((e.flags & ENT_CHAMPION) && e.champAffixes != 0) {
+        // Suppressed while DORMANT: a champion-rolled gargoyle stays a plain (if oversized)
+        // statue until it wakes — the affix tint appearing early would leak the disguise.
+        if ((e.flags & ENT_CHAMPION) && e.champAffixes != 0 && e.aiState != AIState::DORMANT) {
             const Vec3 ct = Champion::tintFor(e.champAffixes);
             constexpr f32 amt = 0.55f;   // strong enough to read at a glance across a lit room
             tint.x = tint.x * (1.0f - amt) + ct.x * amt;

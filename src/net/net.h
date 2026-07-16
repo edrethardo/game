@@ -64,7 +64,13 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // v15: SV_EVENT gained SPEECH (0x07) — NPC speech bubbles + chat for guests. Additive (an older
 // client ignores the unknown event byte), but half the co-op party missing every ally taunt and
 // goblin mutter is exactly the silent-parity-gap class this bump family exists to pair away.
-static constexpr u32 PROTOCOL_VERSION  = 15; // v13: player record single shrineTimerQ pair (was
+// v16: SnapEntity's alignment pad became bossDefIdx (boss identity for guest nameplates — nameTag
+// is a host-side pointer and can't replicate). Same wire size, new semantics: a v15 peer would
+// read the byte as the old always-zero pad and misname every boss, so reject cleanly.
+// v17: new CL_INTERACT_ENTITY (0x0D) — mimic chest E-interact by entity pool index. Additive
+// (a v16 server would just log it as unknown), but a mixed pair would leave one player with
+// chests the other cannot open — the same silent-parity-gap class as v14/v15, so reject cleanly.
+static constexpr u32 PROTOCOL_VERSION  = 17; // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
@@ -151,6 +157,12 @@ enum struct NetPacketType : u8 {
     // like CL_PICKUP_ITEM rather than the input stream; the server validates the def is a
     // petSummon item present in that slot's synced inventory before toggling (Engine::onUsePet).
     CL_USE_PET        = 0x0C,
+    // Client → server: "I opened that chest" — E-interact on a dormant mimic (v17). Payload =
+    // u8 entity POOL INDEX: entities have no world-item uid, and the client's entity mirror is
+    // written in-place at the server's pool index, so the index is the shared name for the
+    // entity on both machines. Reliable. The server handler (Engine::onEntityInteract)
+    // re-validates type/state/reach against the authoritative NetPlayer before springing it.
+    CL_INTERACT_ENTITY = 0x0D,
     SV_TIME_PONG      = 0x17,  // 12-byte payload: u32 clientTimeMs + u32 serverTick + u32 serverTimeMs
 
     // M10.2 — Server → Client: the server confirmed a remote player's fire hit an entity.
@@ -414,6 +426,9 @@ namespace Net {
     // Server-side CL_USE_PET handler — slot = requesting client; defId already parsed (the
     // payload is a lone u16, so the raw-buffer shape buys nothing here).
     using OnUsePetFn     = void(*)(u8 playerSlot, u16 itemDefId);
+    // Server-side CL_INTERACT_ENTITY handler — slot = requesting client; poolIdx already
+    // parsed (lone u8). The handler owns ALL validation; the index is untrusted input.
+    using OnEntityInteractFn = void(*)(u8 playerSlot, u8 poolIdx);
     // Server-side CL_RESPAWN handler — slot = requesting (dead) client; no payload.
     using OnRespawnFn    = void(*)(u8 playerSlot);
     // Server-side CL_REQUEST_DESCEND handler — slot = requesting client; no payload.
@@ -475,6 +490,7 @@ namespace Net {
     void setOnPickup(OnPickupFn fn);
     void setOnMeteor(OnMeteorFn fn);            // client-predicted proc meteor → authoritative spawn
     void setOnUsePet(OnUsePetFn fn);            // pet-consumable use → server-side toggle (CL_USE_PET)
+    void setOnEntityInteract(OnEntityInteractFn fn); // mimic chest opened → server springs it (v17)
     void setOnDropItem(OnDropItemFn fn);        // R11
     void setOnRespawn(OnRespawnFn fn);
     void setOnDescendRequest(OnDescendRequestFn fn);

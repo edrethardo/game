@@ -5,6 +5,7 @@
 
 #include "core/types.h"
 #include "game/entity.h"
+#include "game/enemy_ai.h"   // MAX_AI_TARGETS (sizes the watch set) + inViewCone
 #include "game/player.h"
 #include "game/projectile.h"
 #include "game/squad.h"
@@ -43,6 +44,31 @@ extern const BossDefTable* s_bossDefTable;
 // Skeleton minion visuals (resolved by Engine at init) for boss summon abilities
 extern u8 s_skeletonMeshId;
 extern u8 s_skeletonMatId;
+
+// ---------------------------------------------------------------------------
+// Dormant-disguise watch set (weeping-angel wake rule)
+// ---------------------------------------------------------------------------
+// Every player view the DORMANT wake rule must consider: the primary plus the extras
+// (split-screen partners, or on SERVER the remote-player views — seedRemoteView mirrors
+// yaw/pitch/eyeHeight/smokeTimer, which is everything the checks below read). Rebuilt at
+// the top of every EnemyAI::update. The DORMANT state can't take these as parameters —
+// updateHostileStates predates extras and threading them through its 20-arg signature
+// buys nothing — so they ride file-scope like s_frameTick and friends.
+static constexpr u32 MAX_WATCH_PLAYERS = 1 + EnemyAI::MAX_AI_TARGETS;
+// Half-angle of the "being watched" cone, as a cosine. 0.5 (~60°) is deliberately WIDE:
+// anything the player can plausibly still see on screen counts as watched, so a wake can
+// only ever read as "the moment I looked away" — never "it moved while I could see it".
+static constexpr f32 WATCH_CONE_COS = 0.5f;
+extern const Player* s_watchPlayers[MAX_WATCH_PLAYERS];
+extern u32 s_watchPlayerCount;
+
+// True if any living player has `point` inside their view cone WITH line of sight —
+// staring at the wall in front of a hidden statue is not watching it. (enemy_ai.cpp)
+bool anyPlayerWatching(Vec3 point, const LevelGrid& grid);
+// True if any living, un-smoked player is within `range` (XZ) of `pos`. Smoke-stealthed
+// players don't provoke a dormant ambusher, mirroring the old per-target smokeTimer gate.
+// (enemy_ai.cpp)
+bool anyPlayerWithin(Vec3 pos, f32 range);
 
 // ---------------------------------------------------------------------------
 // Grid/movement helpers (defined in enemy_ai.cpp)

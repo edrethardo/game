@@ -271,9 +271,9 @@ void Engine::update(f32 dt) {
         return;
     }
 
-    // Pet menagerie overlay (opened from the pause menu). Freezes the game exactly like the
-    // pause it came from; any back/confirm press returns TO the pause menu, not to gameplay,
-    // so the player lands back where they left. View-only — no selection state to manage.
+    // Pet menagerie overlay (opened from the pause menu). Any back/confirm press returns TO
+    // the pause menu, not to gameplay, so the player lands back where they left. View-only —
+    // no selection state to manage.
     if (m_menagerieOpen) {
         if (Input::isActionPressed(GameAction::MENU_BACK) ||
             Input::isActionPressed(GameAction::MENU_CONFIRM) ||
@@ -282,8 +282,17 @@ void Engine::update(f32 dt) {
             m_menagerieOpen     = false;
             m_menu.confirmQuit  = true;
             m_menu.subSelection = 0;
+            // Consume this edge fully: the confirmQuit handler below reads the SAME
+            // MENU_BACK/MENU_CONFIRM press, and letting it fall through would close (or
+            // re-confirm) the pause menu we just returned to. One skipped tick, not a pause.
+            return;
         }
-        return;
+        // SP: the overlay freezes the game exactly like the pause it came from. MP: NEVER —
+        // same R12 policy as the pause overlay below. This unconditional return used to make
+        // a HOST browsing the menagerie skip serverNetPre/Post, which starved every client's
+        // input drain and froze the whole session; a guest starved its own prediction/ack
+        // stream. Fall through instead so the world keeps running under the page.
+        if (m_netRole == NetRole::NONE) return;
     }
 
     // Pause/quit selection menu
@@ -410,12 +419,19 @@ void Engine::update(f32 dt) {
         }
         Input::setActivePlayer(0); // restore default
     }
-    // Options opened from the pause menu: the world is frozen (no gameUpdate, no shared systems) and
-    // every input goes to the menu. This sits BEFORE the pause handler below, which would otherwise
-    // eat ESC and re-open the pause overlay instead of letting MENU_BACK leave the options screen.
+    // Options opened from the pause menu. This sits BEFORE the pause handler below, which would
+    // otherwise eat ESC and re-open the pause overlay instead of letting MENU_BACK leave the
+    // options screen.
+    // SP: the world is frozen under the overlay (return skips gameUpdate + shared systems).
+    // MP: NEVER freeze — R12, same as the pause overlay. The old unconditional return meant a
+    // HOST sitting in audio settings skipped serverNetPre/Post and froze every client via input
+    // starvation (and a guest froze its own sim). The menu above already consumed this frame's
+    // UI navigation, so drop the pause-press edge — ESC must page back through the options
+    // screens, not stack the pause overlay on top of them.
     if (m_gameState == GameState::IN_GAME && m_menu.optionsFromPause) {
         updateMenu(dt);
-        return;
+        if (m_netRole == NetRole::NONE) return;
+        anyPause = false;
     }
 
     if (anyPause) {
@@ -946,8 +962,14 @@ void Engine::tickSharedSystems(f32 dt) {
         {
             EntityPool& speechPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
                                                                     : m_entities;
-            for (u32 a = 0; a < speechPool.activeCount; a++) {
-                u32 idx = speechPool.activeList[a];
+            // CLIENT iterates every slot, not the active list: the interp pool's active list is
+            // rebuilt from each snapshot, so a speaker that drops out of snapshot coverage (death,
+            // record-count clamp) would otherwise FREEZE its timer — and the stale bubble would
+            // reappear, arbitrarily later, on whatever entity next used that pool index.
+            const u32 speechScan = (m_netRole == NetRole::CLIENT) ? MAX_ENTITIES
+                                                                  : speechPool.activeCount;
+            for (u32 a = 0; a < speechScan; a++) {
+                u32 idx = (m_netRole == NetRole::CLIENT) ? a : speechPool.activeList[a];
                 Entity& e = speechPool.entities[idx];
                 if (e.speechTimer <= 0.0f) continue;
                 if (m_netRole != NetRole::CLIENT && e.speechText && e.speechTimer > 1.9f) {
@@ -1903,12 +1925,14 @@ void Engine::collectSourceShard(const ItemInstance& shard) {
 void Engine::resolveInteractTargets(InteractState& st) {
     st.itemIdx = -1;
     st.shrineIdx = -1;
+    st.mimicIdx = -1;
+    st.chestIdx = -1;
     st.nearExit = false;
     if (m_inventoryOpen) return;
 
     const Vec3 fwd  = m_localPlayer.forward;
     const f32  hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
-    f32 bestItem = -1.0f, bestShrine = -1.0f;
+    f32 bestItem = -1.0f, bestShrine = -1.0f, bestChest = -1.0f;
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& w = m_worldItems.items[i];
@@ -1916,12 +1940,14 @@ void Engine::resolveInteractTargets(InteractState& st) {
         if (isGlobe(w.item) || isSourceShard(w.item)) continue;   // walk-over pickups, never aimed
 
         const bool shrine = isShrine(w.item);
-        // The defId bound check must NOT be applied to a shrine: its sentinel defId (0xFFFB) sits
-        // far outside the real item range, so this exact line — copied into the client's scan —
-        // is what made shrines impossible to activate as a guest.
-        if (!shrine && w.item.defId >= m_itemDefCount) continue;
-        // Loot-ownership window: another player's kill is theirs for 3 s. A shrine is never owned.
-        if (!shrine && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
+        const bool chest  = isChest(w.item);
+        // The defId bound check must NOT be applied to a shrine or a chest: their sentinel
+        // defIds (0xFFFB…/0xFFF8) sit far outside the real item range, so this exact line —
+        // copied into the client's scan — is what made shrines impossible to activate as a
+        // guest. A chest skipped here would be un-openable the same silent way.
+        if (!shrine && !chest && w.item.defId >= m_itemDefCount) continue;
+        // Loot-ownership window: another player's kill is theirs for 3 s. Fixtures are never owned.
+        if (!shrine && !chest && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
             continue;
 
         Vec3 to = w.position - m_localPlayer.position;
@@ -1939,10 +1965,37 @@ void Engine::resolveInteractTargets(InteractState& st) {
         f32 score = dot - hDist * 0.1f;   // prefer what you're looking straight at, then what's near
         if (shrine) {
             if (score > bestShrine) { bestShrine = score; st.shrineIdx = static_cast<s32>(i); }
+        } else if (chest) {
+            if (score > bestChest) { bestChest = score; st.chestIdx = static_cast<s32>(i); }
         } else {
             if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;   // legendaries win ties
             if (score > bestItem) { bestItem = score; st.itemIdx = static_cast<s32>(i); }
         }
+    }
+
+    // Dormant mimic "chests" are E-interactable exactly like loot — opening one IS the trap
+    // firing. Scanned with the SAME reach rule as items so the prompt and the button can
+    // never disagree. Runs identically on the CLIENT: enemyType and aiState are replicated,
+    // and the guest's entity mirror is written in-place at the SERVER's pool index, so the
+    // index found here is the very name the server validates against. The full-pool scan
+    // (not activeList) is deliberate — the client mirror doesn't maintain activeList.
+    f32 bestMimic = -1.0f;
+    for (u32 i = 0; i < MAX_ENTITIES; i++) {
+        const Entity& ent = m_entities.entities[i];
+        if (!(ent.flags & ENT_ACTIVE) || (ent.flags & ENT_DEAD)) continue;
+        if (ent.enemyType != EnemyType::MIMIC || ent.aiState != AIState::DORMANT) continue;
+
+        Vec3 to = ent.position - m_localPlayer.position;
+        f32 hDist = sqrtf(to.x * to.x + to.z * to.z);
+        f32 mdot = (hDist > 0.01f && hLen > 0.01f)
+                 ? (fwd.x * to.x + fwd.z * to.z) / (hDist * hLen)
+                 : 1.0f;
+        if (!Interact::inReach(hDist, mdot, GameConst::INTERACT_RANGE,
+                               GameConst::INTERACT_GRAB_RADIUS, GameConst::INTERACT_MIN_DOT))
+            continue;
+
+        f32 score = mdot - hDist * 0.1f;
+        if (score > bestMimic) { bestMimic = score; st.mimicIdx = static_cast<s32>(i); }
     }
 
     st.nearExit = m_level.floorDoorActive &&
@@ -1964,11 +2017,16 @@ void Engine::updatePlayerPickup(f32 dt) {
     // outranked by loot, and both are reachable by holding.
     const bool hasExitTarget = st.nearExit || st.nearPortal;
     const bool hasHoldTarget = (st.shrineIdx >= 0) || hasExitTarget;
+    // Chests — real (world-item sentinel) or fake (dormant mimic entity) — compete in the
+    // ITEM class of the tap rule: opening one is a tap, exactly like grabbing loot. Real
+    // loot still outranks both below (a chest must never steal the grab aimed at an item
+    // lying beside it).
+    const bool hasItemClass  = (st.itemIdx >= 0) || (st.chestIdx >= 0) || (st.mimicIdx >= 0);
     const bool down = !m_inventoryOpen && Input::isActionDown(GameAction::PICKUP);
     const Interact::Intent intent =
         Interact::poll(st.hold, down, hasHoldTarget, dt, GameConst::INTERACT_HOLD_SEC);
     const Interact::Target target =
-        Interact::choose(intent, st.itemIdx >= 0, st.shrineIdx >= 0, hasExitTarget);
+        Interact::choose(intent, hasItemClass, st.shrineIdx >= 0, hasExitTarget);
 
     const bool wantItem   = (target == Interact::Target::ITEM);
     const bool wantShrine = (target == Interact::Target::SHRINE);
@@ -1984,7 +2042,11 @@ void Engine::updatePlayerPickup(f32 dt) {
     // removes the item (which propagates back via the next snapshot). Globe auto-pickup for
     // the client is handled server-side in serverNetPost (the client is a "remote" slot there).
     if (m_netRole == NetRole::CLIENT) {
-        if (wantItem)        sendPickupRequest(st.itemIdx);
+        if (wantItem) {
+            if (st.itemIdx >= 0)       sendPickupRequest(st.itemIdx);
+            else if (st.chestIdx >= 0) sendPickupRequest(st.chestIdx);  // real chest → server opens it
+            else if (st.mimicIdx >= 0) sendMimicInteract(st.mimicIdx);  // "opened" a chest → server springs it
+        }
         else if (wantShrine) sendPickupRequest(st.shrineIdx);   // same packet; server grants the buff
         return;
     }
@@ -2039,6 +2101,24 @@ void Engine::updatePlayerPickup(f32 dt) {
         if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
         AudioSystem::play(SfxId::SHRINE_ACTIVATE);
         addChatMessage("", Shrine::nameOf(buff), Vec3{0.6f, 0.9f, 1.0f});
+        return;
+    }
+
+    // Real chest (SP/host lanes; a guest's request lands in handlePickupRequest instead).
+    // Only reached when no real item won the tap.
+    if (wantItem && st.itemIdx < 0 && st.chestIdx >= 0) {
+        openChest(static_cast<u32>(st.chestIdx));
+        return;
+    }
+
+    // Mimic "chest" (SP/host lanes; a guest's request lands in onEntityInteract instead).
+    // Only reached when no real item won the tap — opening it IS the trap firing.
+    if (wantItem && st.itemIdx < 0 && st.mimicIdx >= 0) {
+        Entity& mim = m_entities.entities[st.mimicIdx];
+        if ((mim.flags & ENT_ACTIVE) && !(mim.flags & ENT_DEAD) &&
+            mim.enemyType == EnemyType::MIMIC && mim.aiState == AIState::DORMANT) {
+            EnemyAI::wakeAmbusher(mim);
+        }
         return;
     }
 
@@ -2104,13 +2184,13 @@ void Engine::sendPickupRequest(s32 worldIdx) {
 
     const u32 uid = target.item.uid;
 
-    // A SHRINE is requested through the same packet, but predicts NOTHING. It grants a buff, never
-    // a backpack slot, and the buff is applied to the authoritative NetPlayer and returned through
-    // SnapPlayer — predicting either the bag add or the buff would be predicting state we don't own.
-    // (This whole branch is new: the scan that used to live here rejected any defId past the real
-    // item range, so a guest's request never even named a shrine and the server's shrine handler
-    // was unreachable in co-op.)
-    if (isShrine(target.item)) {
+    // A SHRINE or a CHEST is requested through the same packet, but predicts NOTHING. Neither
+    // grants a backpack slot: the shrine's buff lands on the authoritative NetPlayer and returns
+    // through SnapPlayer, and the chest's loot is ROLLED server-side at open time (we cannot
+    // predict an item we haven't rolled). (The shrine half of this branch replaced a scan that
+    // rejected any defId past the real item range, which made shrines unreachable in co-op —
+    // a chest would have hit the identical wall.)
+    if (isShrine(target.item) || isChest(target.item)) {
         sendPickupPacket(uid);
         return;
     }
@@ -2163,6 +2243,24 @@ void Engine::sendUsePetPacket(u16 petDefId) {
     hdr->flags = 0;
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &petDefId, 2);
+    Net::sendToServer(buf, sizeof(buf), true);
+}
+
+// CLIENT: ask the server to spring the dormant mimic this lane just "opened" (E on the
+// chest). Entities have no world-item uid, so the wire name is the u8 SERVER pool index —
+// valid cross-machine because the client's entity mirror is written in-place at that same
+// index. Reliable: losing the packet would leave a player who deliberately opened a chest
+// staring at an inert prop. No prediction — the spring comes back as replicated aiState
+// within a snapshot, and predicting a wake we don't own could disagree with a wake the
+// weeping-angel rule already fired server-side.
+void Engine::sendMimicInteract(s32 poolIdx) {
+    if (poolIdx < 0 || poolIdx >= static_cast<s32>(MAX_ENTITIES)) return;
+    u8 buf[sizeof(PacketHeader) + 1];
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::CL_INTERACT_ENTITY;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    buf[sizeof(PacketHeader)] = static_cast<u8>(poolIdx);
     Net::sendToServer(buf, sizeof(buf), true);
 }
 
@@ -2324,6 +2422,17 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
             if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
             sendPickupResult(playerSlot, 1, uid);
             LOG_INFO("Shrine: slot %u activated %s", playerSlot, Shrine::nameOf(buff));
+            return;
+        }
+
+        // Real chest: a guest opened it. Same reach rule as the shrine; the rolled loot
+        // spawns server-side and reaches every player through the ordinary snapshot mirror
+        // (the guest predicted nothing, so accept/reject only settles their request state).
+        if (isChest(wi.item)) {
+            Vec3 d = np.position - wi.position;
+            if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; }
+            openChest(i);
+            sendPickupResult(playerSlot, 1, uid);
             return;
         }
 

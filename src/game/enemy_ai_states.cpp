@@ -161,18 +161,42 @@ void updateHostileStates(Entity& e, u32 i,
             static const DungeonResult s_emptyDungeon{};
             const DungeonResult& alertDungeon = dungeon ? *dungeon : s_emptyDungeon;
 
-            if (targetIsNPC && targetDist <= e.detectionRange) {
-                e.aiState = AIState::CHASE;
+            // Aggro enters the authored COMBAT OPENER (Entity.aiPreference), not a hardcoded
+            // CHASE. The field was parsed from enemies.json and thrown away for months — every
+            // enemy opened identically, which is why rosters authored around strafe/flank/
+            // surround (worst: tier 3, 7 of 8 defs non-chase) read as "same monster, slower".
+            // preferredCombatState() maps the safe pure openers; FLANK additionally needs a
+            // path computed at entry (same peek-flank setup the CHASE state uses), and every
+            // opener state self-corrects back to CHASE — a failed setup can't stick an enemy.
+            auto enterOpener = [&](Vec3 aggroTarget) {
                 e.velocity = {0, 0, 0};
+                if (static_cast<AIState>(e.aiPreference) == AIState::FLANK) {
+                    Vec3 flankPos;
+                    bool preferRight = (i % 2 == 0);
+                    if (LevelGridQuery::findFlankCell(grid, e.position, aggroTarget,
+                            e.attackRange, preferRight, flankPos)) {
+                        e.pathLen = Pathfinder::findPath(grid, e.position, flankPos,
+                            e.pathWaypoints, MAX_PATH_WAYPOINTS, navRadius(e));
+                        e.pathIdx = 0;
+                        if (e.pathLen > 0) {
+                            e.aiState = AIState::FLANK;
+                            e.tacticalTimer = 3.0f;
+                            return;
+                        }
+                    }
+                }
+                e.aiState = preferredCombatState(e);
+                if (e.aiState == AIState::STRAFE) e.tacticalTimer = 1.0f; // strafe direction seed
+            };
+            if (targetIsNPC && targetDist <= e.detectionRange) {
+                enterOpener(targetPos);
                 if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
             } else if (dist <= e.detectionRange && hasLOS(e, *targetPlayer, grid)) {
-                e.aiState = AIState::CHASE;
-                e.velocity = {0, 0, 0};
+                enterOpener(targetPlayer->position);
                 if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
             } else if (dist <= e.detectionRange * 0.6f) {
-                // Close enough to hear — chase without LOS
-                e.aiState = AIState::CHASE;
-                e.velocity = {0, 0, 0};
+                // Close enough to hear — engage without LOS
+                enterOpener(targetPlayer->position);
                 if (squads) SquadSystem::alertSquad(*squads, static_cast<u16>(i), pool, alertDungeon);
             }
             // Aggro propagation handled by SquadSystem::alertSquad (no per-entity loop needed)
@@ -606,24 +630,33 @@ void updateHostileStates(Entity& e, u32 i,
     } break;
 
     case AIState::DORMANT: {
-        // Dormant: sits still until player gets close or combat happens nearby.
+        // Dormant disguise: a mimic posing as a chest, or a stone gargoyle (AMBUSH role)
+        // posing as a statue. Weeping-angel rule: it stirs only when someone is inside its
+        // trigger bubble AND nobody is watching it — never in front of a player's eyes.
         e.velocity = {0, 0, 0};
-        f32 triggerDist = (e.enemyRole & EnemyRole::AMBUSH) ? e.detectionRange * 0.5f : GameConst::MIMIC_TRIGGER_DIST;
-        // Also wake if damaged (flashTimer from being hit) or if player is fighting nearby
-        bool combatNearby = (e.flashTimer > 0.0f);
-        if ((dist <= triggerDist && targetPlayer->smokeTimer <= 0.0f) || combatNearby) {
-            e.aiState = AIState::CHASE;
-            e.attackTimer = 0.0f; // attack immediately on wake
-            if (e.enemyRole & EnemyRole::AMBUSH) {
-                // Gargoyle: silent wake, no chomp animation
-                e.speechText = "...";
-                e.speechTimer = 1.5f;
-            } else {
-                // Mimic: surprise chomp
-                e.attackAnimT = 0.4f;
-                e.speechText = "*CHOMP*";
-                e.speechTimer = 2.0f;
-            }
+        const bool stoneGargoyle = (e.enemyRole & EnemyRole::AMBUSH) != 0;
+        // The gargoyle uses its full authored detectionRange ("aggro range" — waking demands
+        // looking away, so the old *0.5 shrink would just make statues feel inert); the mimic
+        // only springs at arm's length — you practically have to stand on the chest.
+        const f32 triggerDist = stoneGargoyle ? e.detectionRange : GameConst::MIMIC_TRIGGER_DIST;
+
+        // Checked across EVERY player view (primary + extras): in co-op ONE player staring
+        // at the statue pins it for the whole party — a guest looking away must not be
+        // enough while the host still has it on screen. Watch point is the body's upper
+        // half, roughly what a player's eye actually rests on.
+        const Vec3 watchPoint = e.position + Vec3{0, e.halfExtents.y * 0.5f, 0};
+        const bool provoked   = anyPlayerWithin(e.position, triggerDist);
+        const bool watched    = anyPlayerWatching(watchPoint, grid);
+
+        // Damage still springs a MIMIC (whacking the suspicious chest is the classic test).
+        // A stone gargoyle can never reach this: Combat::applyDamage returns before setting
+        // flashTimer on a dormant AMBUSH-role enemy, so statues can't be shot awake.
+        const bool combatNearby = (e.flashTimer > 0.0f);
+
+        // spawnCalm suppresses the look-away trigger like it suppresses IDLE auto-aggro at
+        // floor start, but a deliberately provoked mimic (hit during the calm) still fires.
+        if ((provoked && !watched && !spawnCalm) || combatNearby) {
+            EnemyAI::wakeAmbusher(e);
         }
     } break;
 
@@ -846,6 +879,35 @@ void updateHostileStates(Entity& e, u32 i,
         // targetPlayer only differs from `player` in split-screen.
         const Vec3 fleeFrom = (!targetIsNPC && targetPlayer) ? targetPlayer->position
                                                              : player.position;
+
+        // Escape imminent — the last TAUNT_WINDOW seconds of the clock the goblin plants its
+        // feet, turns to face whoever chased it, and GLOATS. The bubble rides the ordinary
+        // entity-speech pipeline, so SP/host get bubble + gold "Loot Goblin" chat and guests get
+        // both via SV_EVENT::SPEECH — no new replication. Standing still is the point: it reads
+        // as earned arrogance AND hands the player one final stand-still burst window (a kill
+        // here still pays the full legendary death pile; the taunt gates nothing).
+        // One-shot guard: the 2.4 s bubble outlives the 1.5 s window, so speechTimer stays > 0
+        // until the portal takes it and the line can never re-roll mid-gloat.
+        if (e.lifeTimer > 0.0f && e.lifeTimer <= Goblin::TAUNT_WINDOW) {
+            if (e.speechTimer <= 0.0f) {
+                static const char* kEscapeTaunts[] = {
+                    "too slow! TOO SLOW! hee hee hee!",
+                    "bye bye now! thanks for nothing!",
+                    "all mine! forever mine!",
+                    "you chase like a Cave Troll! hee!",
+                    "the sack says farewell!",
+                };
+                e.speechText  = kEscapeTaunts[std::rand() % 5];
+                e.speechTimer = 2.4f;
+            }
+            e.velocity.x = 0.0f;
+            e.velocity.z = 0.0f;
+            Vec3 face = fleeFrom - e.position;
+            if (lengthSq(face) > 0.01f) e.yaw = atan2f(-face.x, -face.z);
+            if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
+            break;   // no fleeing during the gloat — the serpentine below is skipped
+        }
+
         Vec3 away = e.position - fleeFrom;
         away.y = 0.0f;
         away = (lengthSq(away) > 0.01f) ? normalize(away)

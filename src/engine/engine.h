@@ -280,11 +280,17 @@ private:
     bool        m_menuMouseDeltaPrimed = false;
 
     // Gameplay input (movement/aim/fire/skills/block/dodge) is frozen while a blocking UI is
-    // open — the inventory OR the in-game pause menu (m_menu.confirmQuit). In SP the pause
-    // early-returns and freezes the whole world; in MP the world keeps running for everyone
-    // else, so these gates are what hold the paused player's own character still. Potion is
-    // intentionally NOT gated (matches inventory — you can drink while a menu is open).
-    bool gameplayInputFrozen() const { return m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit; }
+    // open — the inventory, the in-game pause menu (m_menu.confirmQuit), or one of the pause
+    // menu's sub-pages (options-from-pause / menagerie, which CLEAR confirmQuit while open and
+    // so need their own terms). In SP all of these early-return and freeze the whole world; in
+    // MP the world keeps running for everyone, so these gates are what hold the menuing
+    // player's own character still — without them a host clicking audio sliders would also be
+    // walking and firing. Potion is intentionally NOT gated (matches inventory — you can
+    // drink while a menu is open).
+    bool gameplayInputFrozen() const {
+        return m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit
+            || m_menu.optionsFromPause || m_menagerieOpen;
+    }
 
     // Networking
     NetRole    m_netRole = NetRole::NONE;
@@ -519,6 +525,11 @@ private:
         u32          savedFloor   = 1;
         u32          savedSeed    = 0;
         DungeonResult dungeon;
+        // Which structural generator carved this floor (seed-derived in startGame). Gameplay may
+        // compensate for a style's geometry — e.g. CAVERN floors scale enemy detectionRange up,
+        // because a 14 m aggro bubble that corridor walls used to hide reads as "passive" when
+        // the player can watch the enemy from 35 m across an open cave.
+        LevelGen::LayoutStyle layoutStyle = LevelGen::LayoutStyle::BSP_ROOMS;
         SquadPool     squads;
         Vec3          floorDoorPos;
         bool          floorDoorActive = false;
@@ -876,6 +887,12 @@ private:
     struct InteractState {
         s32  itemIdx   = -1;         // best aimed world item (never a shrine)
         s32  shrineIdx = -1;         // best aimed shrine
+        // Best aimed dormant mimic "chest" (entity pool index, -1 = none). Item-class for the
+        // tap/hold rule: opening the chest is a tap, but real loot in reach always wins it.
+        s32  mimicIdx  = -1;
+        // Best aimed REAL chest (world-item index of a CHEST_ID sentinel, -1 = none). Same
+        // item-class tap as the mimic — from the player's side the two must be identical.
+        s32  chestIdx  = -1;
         bool nearExit   = false;     // standing in the floor-exit trigger
         bool nearPortal = false;     // standing in The Source portal trigger (floor 50 secret)
         Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
@@ -889,6 +906,11 @@ private:
     bool m_portalRequested = false;
 
     void resolveInteractTargets(InteractState& st);
+
+    // Open a real chest (CHEST_ID world-item sentinel): remove it and spawn its loot, rolled
+    // HERE at open time from the chest's stored itemLevel. Authoritative-sim only (SP/host
+    // direct; a guest's request arrives via handlePickupRequest's chest branch).
+    void openChest(u32 worldIdx);
 
     void updatePlayerPickup(f32 dt);
     // Auto-pickup of a source shard (secret superboss key): set the session bit for its floor and
@@ -1128,8 +1150,14 @@ private:
     // bytes, but Entity.speechText is a bare const char* — so a received line is parked in this
     // small ring and the interp entity points into it. Eight slots comfortably outlive any
     // 2.4 s bubble; reuse under absurd speech rates only retextures the oldest bubble.
-    char m_guestSpeechRing[8][64] = {};
-    u8   m_guestSpeechNext = 0;
+    // CLIENT-side storage for replicated speech lines (SV_EVENT::SPEECH): one 64-byte buffer PER
+    // ENTITY POOL SLOT, indexed by the server pool index the event names. This used to be an
+    // 8-entry round-robin ring — under a speech burst (goblin mutters + ally banter + boss aggro)
+    // the ring wrapped within a bubble's 2.4 s lifetime and rewrote a line out from under a LIVE
+    // bubble, so an entity's bubble silently changed into another entity's sentence. Keyed by pool
+    // slot, a new line can only ever overwrite ITS OWN entity's previous line — which is the
+    // correct semantics (a speaker starting a new sentence replaces its old one). 128×64 = 8 KB.
+    char m_guestSpeech[MAX_ENTITIES][64] = {};
 
     // The loot goblin: flees, bleeds loot while chased, and expires (paying nothing) if it escapes.
     void spawnLootGoblin(const DungeonResult& dungeon);
@@ -1155,6 +1183,14 @@ private:
     bool m_menagerieGoblin    = false;
     bool m_menagerieOpen      = false;   // pause-menu subpage overlay (view-only)
     void loadMenagerie();
+    // Per-character lifetime stats — persisted in the stats_NN.dat SIDECAR next to the save
+    // slot (save_NN.dat's frozen format is untouched; same pattern as menagerie.dat, keyed per
+    // slot). Currently one counter: total kills, shown as "Enemies deleted" on the floor
+    // transition. Incremented at both kill-credit sites (authoritative death callback for
+    // local lanes; SV_KILL for a guest's own kills).
+    u32  m_totalKills[MAX_LOCAL_PLAYERS] = {};
+    u32  loadCharStats(u8 slot);                    // sidecar read (0 if absent/foreign)
+    void saveCharStats(u8 slot, u32 totalKills);    // sidecar write (rides every character save)
     void saveMenagerie();
     void recordPetSummon(u16 petDefId);
     // The pause row only exists once something has been summoned — an empty museum is a
@@ -1163,6 +1199,12 @@ private:
     void renderMenagerie(u32 sw, u32 sh);
     void sendUsePetPacket(u16 petDefId);
     static void onUsePet(u8 playerSlot, u16 itemDefId);   // Net::OnUsePetFn (defId parsed in net.cpp)
+    // Mimic chest E-interact (CL_INTERACT_ENTITY, v17). Entities have no world-item uid; the
+    // shared name across machines is the SERVER pool index, which the client's entity mirror
+    // is keyed by. onEntityInteract re-validates everything (active, MIMIC, DORMANT, in reach
+    // of the authoritative NetPlayer) — a stale or hostile index can at worst do nothing.
+    void sendMimicInteract(s32 poolIdx);                          // CLIENT lane "opened" a chest
+    static void onEntityInteract(u8 playerSlot, u8 poolIdx);      // Net::OnEntityInteractFn
     // enemy def index → its pet item def (0xFFFF = none). Filled at init from petEnemy names;
     // consumed by the 1-in-10000 jackpot roll in handleNormalLootDrop.
     u16 m_petItemForEnemy[MAX_ENEMY_DEFS] = {};

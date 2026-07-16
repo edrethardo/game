@@ -93,17 +93,20 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         bool isGlobeItem = isGlobe(wi.item);
         bool isShard     = isSourceShard(wi.item);   // secret superboss key — render the crystal mesh
         bool isShrineObj = isShrine(wi.item);        // walk-up buff shrine — architecture, not loot
+        bool isChestObj  = isChest(wi.item);         // closed treasure chest — the mimic's twin
+        bool isFixture   = isShrineObj || isChestObj;
         f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : (isShrineObj ? 1.6f : ITEM_SCALE));
-        // Shrines are FIXTURES: no bob, no spin, feet on the floor. Loot hovers and turns to catch
-        // the eye; a shrine that did the same would read as a pickup.
-        f32 bobY = isShrineObj ? 0.0f : sinf(wi.bobTimer * 3.0f) * 0.08f;
-        Vec3 pos = isShrineObj
+        // Shrines and chests are FIXTURES: no bob, no spin, feet on the floor. Loot hovers and
+        // turns to catch the eye; a fixture that did the same would read as a pickup — and a
+        // bobbing "chest" next to a stone-still mimic would be a free mimic detector.
+        f32 bobY = isFixture ? 0.0f : sinf(wi.bobTimer * 3.0f) * 0.08f;
+        Vec3 pos = isFixture
                  ? Vec3{wi.position.x, floorY, wi.position.z}
                  : Vec3{wi.position.x, floorY + renderScale * 0.5f + bobY, wi.position.z};
 
         bool isWeaponSlot = (wi.item.defId < m_itemDefCount &&
                              m_itemDefs[wi.item.defId].slot == ItemSlot::WEAPON);
-        f32 spin = isShrineObj ? 0.0f : (isWeaponSlot ? wi.bobTimer * 2.0f : wi.bobTimer * 0.8f);
+        f32 spin = isFixture ? 0.0f : (isWeaponSlot ? wi.bobTimer * 2.0f : wi.bobTimer * 0.8f);
 
         if (!isGlobeItem && wi.item.defId < m_itemDefCount &&
             m_itemDefs[wi.item.defId].slot == ItemSlot::HELMET) {
@@ -123,6 +126,13 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             // in the room and the diamond on the map can never disagree about which shrine this is.
             const Vec3 sc = Shrine::colorOf(Shrine::buffOf(wi.item));
             tint = {sc.x, sc.y, sc.z, 1.0f};
+        } else if (isChestObj) {
+            // The dormant mimic's EXACT presentation — chest mesh, default texture, the same
+            // chest-brown the mimic tint branch uses in engine_render_entities.cpp. Any visual
+            // difference between a real chest and a disguised mimic is a tell that defeats both.
+            if (m_meshIdChest > 0 && m_meshIdChest < m_meshDefCount)
+                itemMesh = &m_meshDefs[m_meshIdChest].mesh;
+            tint = {0.6f, 0.4f, 0.2f, 1.0f};
         } else if (isGlobeItem) {
             tint = {0.3f, 0.9f, 0.5f, 1.0f};
         } else if (isShard) {
@@ -178,6 +188,16 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             // the 0.3-scale cube fallback, which is why shrines looked like a pebble on the floor.
             // gen_mesh's shrine has its origin at the FEET, so it just sits at floorY, unscaled.
             model = Mat4::translate(pos);
+        } else if (isChestObj && itemMesh != &m_cubeMesh) {
+            // Own branch for the same sentinel-defId reason as the shrine. Sized to the dormant
+            // mimic's exact silhouette — mesh scaled to 0.8 m tall (the mimic's halfExtents.y
+            // 0.4 × 2), XZ-centered, feet on the floor, unrotated — so the two are twins.
+            const AABB& mb = m_meshDefs[m_meshIdChest].bounds;
+            f32 meshH = mb.max.y - mb.min.y;
+            f32 cs = (meshH > 0.001f) ? (0.8f / meshH) : 1.0f;
+            Vec3 mc = {(mb.min.x + mb.max.x) * 0.5f, mb.min.y, (mb.min.z + mb.max.z) * 0.5f};
+            model = Mat4::translate(pos) * Mat4::scale({cs, cs, cs})
+                  * Mat4::translate({-mc.x, -mc.y, -mc.z});
         } else if (itemMesh != &m_cubeMesh && !isGlobeItem && wi.item.defId < m_itemDefCount) {
             const ItemDef& idef = m_itemDefs[wi.item.defId];
             if (idef.meshId > 0 && idef.meshId < m_meshDefCount) {
@@ -812,6 +832,18 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         const Vec3 c = Shrine::colorOf(buff);
         drawPrompt(Shrine::nameOf(buff), {c.x * 0.9f + 0.1f, c.y * 0.9f + 0.1f, c.z * 0.9f + 0.1f},
                    static_cast<f32>(sh) * 0.45f);
+    }
+
+    // Chest — real (CHEST_ID world-item sentinel) or mimic (dormant entity): ONE prompt, one
+    // label, one colour, because the design is that the player cannot tell which they are
+    // aiming at (the label must never say what it is; hiding the target bar for DORMANT
+    // entities does half the job, this prompt does the other half). Suppressed while an item
+    // is in reach: the item wins the tap anyway, and a prompt offering what the button won't
+    // do is worse than none. Nudged below the shrine line for the rare case both resolve.
+    if ((st.chestIdx >= 0 || st.mimicIdx >= 0) && st.itemIdx < 0 &&
+        m_gameState == GameState::IN_GAME) {
+        drawPrompt("Open Chest", {0.85f, 0.62f, 0.28f},
+                   static_cast<f32>(sh) * (st.shrineIdx >= 0 ? 0.5f : 0.45f));
     }
 
     // Item pickup prompt — show item name in rarity color when aiming at a nearby item

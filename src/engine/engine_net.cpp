@@ -446,7 +446,12 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                   WeaponDef wd = !isItemEmpty(wpn)
                       ? Inventory::getWeaponFromItem(m_inventories[i], m_itemDefs, wpn)
                       : m_weaponDefs[0];
-                  SkillSystem::setWeaponDamage(wd.damage); }
+                  SkillSystem::setWeaponDamage(wd.damage);
+                  // Barrage projectile mesh — set on the REMOTE-cast path too (same rule as the
+                  // Thunderclap upgrade below: context set only locally leaves guests different).
+                  SkillSystem::setWeaponProjectileMesh(
+                      (!isItemEmpty(wpn) && m_itemDefs[wpn.defId].weaponSubtype == WeaponSubtype::CROSSBOW)
+                          ? m_meshIdBolt : m_meshIdArrow); }
                 SkillSystem::setCastingPlayer(static_cast<u8>(i)); // caster's net slot (H4/H5)
                 // Thunderclap's floor upgrade — applied here too, not just on the host. Without
                 // this a GUEST's Warrior cast the un-upgraded stun forever while the host's scaled,
@@ -1744,6 +1749,7 @@ void Engine::onKill(u8 killerSlot, u8 victimType, u16 victimIdx,
         for (u8 lane = 0; lane < s_engine->m_splitPlayerCount; lane++) {
             if (killerSlot == s_engine->m_clientNetSlot[lane]) {
                 s_engine->m_transition.floorKillCount++;
+                s_engine->m_totalKills[lane]++;   // lifetime "Enemies deleted" (stats sidecar)
                 break;
             }
         }

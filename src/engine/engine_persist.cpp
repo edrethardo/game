@@ -295,6 +295,9 @@ void Engine::saveCharacter(u8 lane, u8 slot) {
     info.totalPlayTime    = totalTime;
     info.difficulty       = difficulty;
 
+    // Stats sidecar rides along with every successful character save (see charStatsPath).
+    saveCharStats(slot, m_totalKills[lane]);
+
     LOG_INFO("Saved character (lane %u) to slot %u (%s) — floor %u, time %.0fs",
              lane, slot, path, floor, totalTime);
 }
@@ -535,6 +538,9 @@ bool Engine::loadGame(u8 slot) {
 
     m_activeSaveSlot    = slot;
     m_playerSaveSlot[0] = slot;
+    // Lifetime "Enemies deleted" from the stats SIDECAR (stats_NN.dat) — save_NN.dat itself is
+    // untouched (frozen format); an absent sidecar reads as 0.
+    m_totalKills[0]     = loadCharStats(slot);
     m_laneLoadedFromSave[0] = true; // loaded character — keep the no-downgrade guard for it
     // Legacy 2-player bundle: give P2 its own free slot so the next save migrates it to a
     // per-character file. If all 20 are taken, P2 simply won't persist this session (logged).
@@ -599,6 +605,7 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     // files store the class in classes[0]; an invalid value falls back to the read ps.cls.
     if (classes[0] < static_cast<u8>(PlayerClass::CLASS_COUNT)) ps.cls = classes[0];
     applySavedCharToLane(lane, ps);
+    m_totalKills[lane] = loadCharStats(slot);   // lifetime "Enemies deleted" (sidecar; 0 if absent)
     if (lane == 0) {
         m_localPlayer      = m_localPlayers[0];
         m_playerClass      = m_playerClasses[0];
@@ -645,6 +652,43 @@ void Engine::saveMenagerie() {
     std::fwrite(&ver,                  sizeof(u32), 1, f);
     std::fwrite(&m_menagerieEnemyMask, sizeof(u64), 1, f);
     std::fwrite(&goblin,               sizeof(u8),  1, f);
+    std::fclose(f);
+}
+
+// ---------------------------------------------------------------------------
+// Per-character stats sidecar (stats_NN.dat, beside save_NN.dat) — lifetime counters that
+// are the CHARACTER's, not the profile's. Deliberately NOT inside save_NN.dat: the save
+// format is frozen/versioned and stats don't merit a format bump — same reasoning as
+// menagerie.dat, keyed per slot instead of profile-wide. Absent/unreadable file = zeros
+// (a copied save without its sidecar just restarts its counters; never an error).
+// v1 layout: u32 version, u32 totalKills.
+// ---------------------------------------------------------------------------
+static constexpr u32 CHAR_STATS_VERSION = 1;
+
+static const char* charStatsPath(u8 slot, char* buf, u32 bufSize) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "stats_%02u.dat", slot);
+    return Platform::userDataPath(name, buf, static_cast<size_t>(bufSize));
+}
+
+u32 Engine::loadCharStats(u8 slot) {
+    char path[512];
+    FILE* f = std::fopen(charStatsPath(slot, path, sizeof(path)), "rb");
+    if (!f) return 0;
+    u32 ver = 0, kills = 0;
+    bool ok = std::fread(&ver, sizeof(u32), 1, f) == 1 && ver == CHAR_STATS_VERSION;
+    ok = ok && std::fread(&kills, sizeof(u32), 1, f) == 1;
+    std::fclose(f);
+    return ok ? kills : 0;
+}
+
+void Engine::saveCharStats(u8 slot, u32 totalKills) {
+    char path[512];
+    FILE* f = std::fopen(charStatsPath(slot, path, sizeof(path)), "wb");
+    if (!f) { LOG_WARN("saveCharStats: cannot write slot %u sidecar", slot); return; }
+    u32 ver = CHAR_STATS_VERSION;
+    std::fwrite(&ver,        sizeof(u32), 1, f);
+    std::fwrite(&totalKills, sizeof(u32), 1, f);
     std::fclose(f);
 }
 

@@ -17,7 +17,7 @@ void WorldItemSystem::init(WorldItemPool& pool) {
         pool.items[i].active = false;
     }
     pool.activeCount = 0;
-    pool.nextUid     = 1;
+    pool.nextUid     = 0x80000000u;   // high half — disjoint from ItemGen's rolled-item uids (see item.h)
     LOG_INFO("WorldItemSystem: pool initialized (%u slots)", MAX_WORLD_ITEMS);
 }
 
@@ -42,8 +42,11 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt,
         // a minute to wander back over the corpse, and the run silently loses the superboss with no
         // feedback whatsoever: the portal just never opens on floor 50. Its rarity is COMMON, so it
         // was expiring exactly like the trash it drops next to.
+        // Chests are furniture, not loot: they must wait unopened however long the player
+        // takes to reach the room (and a despawning "chest" beside a permanent mimic would
+        // be a free mimic detector).
         if (wi.item.rarity != Rarity::LEGENDARY && !isShrine(wi.item) && !isSourceShard(wi.item)
-            && !isPet) {
+            && !isChest(wi.item) && !isPet) {
             wi.lifetime -= dt;
         }
         wi.bobTimer       += dt;

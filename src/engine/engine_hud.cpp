@@ -1411,6 +1411,11 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
     // generation, so a recycled slot can't be mistaken for the old target.
     const Entity* e = &pool.entities[m_targetEnt.index];
     if ((e->flags & ENT_DEAD) || e->maxHealth <= 0.0f) return;
+    // A disguised ambusher must not introduce itself: no target bar while a mimic still
+    // looks like a chest or a gargoyle like a statue — the label IS the reveal (this used
+    // to print "Mimic" over an unopened chest). aiState is replicated, so guests hide it
+    // identically; the bar appears the instant it wakes.
+    if (e->aiState == AIState::DORMANT) return;
 
     // --- Name + accent ---
     char  nameBuf[64];
@@ -1442,7 +1447,12 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
         name   = "Loot Goblin";
         accent = {0.45f, 0.95f, 0.45f};
     } else if (e->isBoss) {
-        name   = e->nameTag ? e->nameTag : "Boss";
+        // nameTag is a host-side pointer into the def table and never replicates — a guest
+        // resolves the same name through the REPLICATED bossDefIdx instead (both machines
+        // load the identical bosses.json), so "The Butcher" is "The Butcher" on every screen.
+        if (e->nameTag)                            name = e->nameTag;
+        else if (e->bossDefIdx < m_bossDefs.count) name = m_bossDefs.defs[e->bossDefIdx].name;
+        else                                       name = "Boss"; // fallback-table boss (no def)
         accent = {1.0f, 0.35f, 0.35f};
     } else if (e->enemyDefIdx < m_enemyDefs.count) {
         // The monster's REAL authored name — "Bone Archer", "Crypt Herald", "Broodmother".
