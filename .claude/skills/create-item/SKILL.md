@@ -29,6 +29,13 @@ Legendary actives/passives: `legendarySkill` (see the tooltip-rot pitfall in `en
 
 **Def-shape recipes:**
 - **Ordinary gear**: pick a level band + `dropWeight` and it enters the loot table automatically.
+  Cap `maxRarity` at `rare` — the legendary tier is reserved for marked uniques (below), and
+  `tests/game/test_legendary_pool.cpp` fails the suite on a legendary-capable def that isn't one.
+- **LEGENDARY UNIQUE** (named identity item): `"minRarity": "legendary"` + `"maxRarity":
+  "legendary"` + a `legendarySkill` (slot-appropriate — see the tooltip-rot pitfall). The rarity
+  window makes it the ONLY kind of item a legendary roll can produce AND keeps it out of every
+  lower tier; drops always carry 3-4 affixes. Give it a level band like ordinary gear — guaranteed
+  drops (boss/champion/goblin `rarityFloor`) widen the band automatically when needed.
 - **UNROLLABLE def** (only obtainable from a scripted source — jackpots, quest rewards):
   `"minLevel": 255, "maxLevel": 255, "dropWeight": 0.0`. minLevel 255 excludes it from BOTH of
   `ItemGen::rollItem`'s candidate passes; dropWeight 0 is the belt to those braces. Pinned by
@@ -38,9 +45,12 @@ Legendary actives/passives: `legendarySkill` (see the tooltip-rot pitfall in `en
   `Engine::tryUse*` BEFORE every equip path (controller-A, mouse double-click, quickbar —
   `useQuickbarSlot` must intercept before the EQUIPPED_REF conversion), and add a refusal
   backstop in `Inventory::equip`. All three entry points, or a path equips your consumable.
-- **Not-really-an-item** (globes, shards, shrines): do NOT make a def at all — use a sentinel
-  defId (`0xFFFE` down; next free is below `SHRINE_VITALITY_ID`) + an `is*()` helper in
-  `item.h`, and extend `isSentinelItem` so it can't enter inventories.
+- **Not-really-an-item** (globes, shards, shrines, chests): do NOT make a def at all — use a
+  sentinel defId (`0xFFFE` down; next free is below `CHEST_ID` 0xFFF8) + an `is*()` helper in
+  `item.h`, and extend `isSentinelItem` so it can't enter inventories. Direct-constructed
+  sentinels take `uid = m_worldItems.nextUid++`, which starts at 0x80000000 — DISJOINT from
+  ItemGen's low-range rolled-item uids, so a guest's uid-matched CL_PICKUP_ITEM can never hit
+  the wrong object. Never hand a sentinel a low uid.
 
 Cap: `MAX_ITEM_DEFS` (`item.h`, currently 224, table is at 196). Bump the constant if needed —
 memory-only, not on the wire, not in saves.
@@ -70,8 +80,8 @@ are stored as strings and resolved to IDs after all tables load — items resolv
   `affixCount 0`, and **`uid = m_worldItems.nextUid++`** (the globes/shards pattern — a 0 uid
   breaks client mirroring), then `WorldItemSystem::spawn(..., killerSlot)` +
   `broadcastLootSpawn`. **Check spawn()'s return** — a full pool silently swallows drops.
-- Despawn: world items expire after 60 s EXCEPT legendaries, shrines, shards, and petSummon
-  defs (def-aware exemption in `WorldItemSystem::update`). A rare non-legendary drop needs an
+- Despawn: world items expire after 60 s EXCEPT legendaries, shrines, shards, chests, and
+  petSummon defs (def-aware exemption in `WorldItemSystem::update`). A rare non-legendary drop needs an
   exemption or it rots; prefer extending the def-aware check over a spawn-time flag (a flag
   dies when the player drops the item again — the update-side check survives every path).
 - Guaranteed/rare drops on crowded floors: consider `spawnEssential` (evicts the most

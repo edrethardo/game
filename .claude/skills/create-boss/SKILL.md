@@ -14,8 +14,11 @@ is data-driven (personality AI, roles, loot are all JSON) — the only C++ a bos
 
 Decide: name, **floor** (milestone: 5,10,…,50), `isMajor` (major = bigger arena + iron maidens +
 bonus drops), stats, `roles` (array), `personality` (`berserker`/`kiter`/`teleporter`/`duelist`),
-`skillId` (must exist — see `create-skill`), `lootGuarantee` (`rare` for mini, `legendary` for
-major), and the projectile sub-object. Then **ask the user** which case:
+`skillId` (must exist — see `create-skill`), `lootGuarantee` (`legendary` for every shipped boss since the unique-pool
+rework — the guarantee rides rollItem's rarityFloor and always pays a named unique; `rare`
+stays valid for a deliberately lesser encounter), and the projectile sub-object. (The name needs no netcode work: `Entity.bossDefIdx`
+replicates in `SnapEntity` since v16 and guests resolve the nameplate from their own bosses.json —
+`nameTag` itself is a host-side pointer and never crosses the wire.) Then **ask the user** which case:
 
 - **(A) Data-only** — reuses an existing boss/enemy mesh, an existing `personality`, and an
   existing `limbConfig` (0–6). **No C++.** Just bosses.json (+ a material if new). Covers most
@@ -69,7 +72,7 @@ in the `engine-reference` skill (the boss-mesh/limb-config notes) per the doc-sy
   per-floor switch in `enemy_ai.cpp` (only Malachar/floor 20 implements it today). Leave it
   `false` unless you're prepared to add that code.
 - **Loot is automatic** — `handleBossLootDrop` (`src/engine/engine_death.cpp`) enforces
-  `lootGuarantee` (re-rolls/upgrades to the minimum rarity) + `bonusDrops` + a health globe.
+  `lootGuarantee` (passed to rollItem as its rarityFloor — a LEGENDARY floor can only return a named unique) + `bonusDrops` + a health globe.
   Just set the JSON fields.
 - **`limbConfig > 6` needs code** — `getBossConfig`/`getBossLimbMeshId` only handle 0–6; an
   unhandled id falls back to the base skeleton. Add a case (Step 3).

@@ -29,7 +29,10 @@ take (use the AskUserQuestion tool) — do not pick for them:
 - **(A) No new code** — compose one or more **shipped roles** and/or an **onHitEffect**.
   - Roles (combine freely as a JSON array): `ambush`, `summoner`, `healer`, `aura`,
     `ranged_caster`, `charger`, `bomber`, `shield_bearer` (see the `engine-reference` skill
-    for what each does).
+    for what each does). NOTE: `ambush` is the full stone-statue disguise (gargoyle) —
+    spawns DORMANT, **fully invulnerable**, no nameplate, stone-grey tint, wakes only via
+    the weeping-angel rule (player in `detectionRange` while NOBODY watches). Only give it
+    to an enemy that should be un-damageable until it moves.
   - `onHitEffect`: `0`=none, `1`=poison, `2`=slow, `3`=burn, `4`=freeze (+ `onHitDuration`,
     `onHitDps`). Applied to the player/NPC on the enemy's hit.
   - Covers most gimmicks (e.g. "summoner that burns" = `["summoner"]` + `onHitEffect:3`).
@@ -99,7 +102,7 @@ Headroom: `MAX_MESH_DEFS` in `src/engine/engine.h` (read the real value; bump if
 
 Append the filled-in `templates/enemy_entry.json` object to the `"enemies"` array in
 `assets/config/enemies.json`. Set `meshName: "<name>"`, `materialName: "<name>_skin"`, the
-`role` (string, or an array of role strings to combine), `aiPreference`, `onHitEffect`,
+`role` (string, or an array of role strings to combine), `aiPreference` (the COMBAT OPENER the enemy aggros into — strafe/flank/surround/retreat/chase; strafe needs attackRange > 5, surround needs grounded melee, or the stat-fit lint in tests/game/test_ai_preference.cpp fails the suite), `onHitEffect`,
 `halfExtents` (≈ the mesh's half-size in metres), `tier`, and stats.
 Headroom: `MAX_ENEMY_DEFS` in `src/game/enemy_def.h` (currently 64; ~36 used).
 Loader + the valid `role`/`aiPreference`/`onHitEffect` values: `src/game/enemy_loader.cpp`.

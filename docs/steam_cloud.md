@@ -30,7 +30,7 @@ Requires a Steam **App ID** / partner access.
 3. **Path patterns** (per mapping) — sync exactly these:
    - `save_*.dat`
    - `difficulty_unlock.dat`
-   - `menagerie.dat`   (pet-collection progress — profile-wide, should roam like unlocks)
+   - `menagerie.dat / stats_*.dat`   (pet-collection progress — profile-wide, should roam like unlocks)
    - `controls.json`
    - `audio.json`
    - **NOT** `video.cfg` — fullscreen/display index are machine-specific and must not roam.
