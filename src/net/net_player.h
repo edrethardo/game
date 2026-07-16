@@ -143,6 +143,16 @@ struct NetPlayer {
     // server-side so a remote's on-hit attack-speed stacks speed up the REMOTE's fire path.
     u8   frenzyStacks      = 0;
     f32  frenzyTimer       = 0.0f;
+    // Legendary armor/shield passives for a REMOTE (2026-07-16 batch; mirrors the Player
+    // fields; not on the wire except chargeStacks, which rides SnapPlayer.flags bits 5-7
+    // so the guest's HUD can show its own stack count).
+    u8   offhandSkill      = 0;
+    u8   chargeStacks      = 0;
+    f32  chargeTimer       = 0.0f;
+    f32  hemoTickTimer     = 0.0f;
+    // Attacker of the last hit, written back from the view like lastDamageTaken — lets the
+    // Static Charge discharge and Thunderwall riposte aim at whoever actually hit a remote.
+    u16  lastDamageAttackerIdx = 0xFFFF;
     f32  smokeTimer        = 0.0f;  // Phase Strike post-kill stealth (mirrors Player::smokeTimer)
     // Wanderer mark-prey state (death-preamble follow-up batch): server-only mirror so a remote
     // Wanderer's Shadow Dance / mark-spread / speed stacks credit the *remote*, not the host

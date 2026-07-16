@@ -1324,6 +1324,14 @@ static void seedRemoteView(const NetPlayer& np, Player& v, u8 slot, u32 currentF
     v.soulHarvestTimer   = np.soulHarvestTimer;
     v.smokeTimer         = np.smokeTimer;
     v.secondWindCooldown = np.secondWindCooldown;
+    // Legendary armor/shield passives (2026-07-16): the perfect-block callback and projectile
+    // parry read these off the view; bloodNovaCooldown round-trips so a remote Aegis of Blood
+    // can't re-detonate every block (the old reason the callback was pinned to the local player).
+    v.offhandSkill      = np.offhandSkill;
+    v.chargeStacks      = np.chargeStacks;
+    v.chargeTimer       = np.chargeTimer;
+    v.hemoTickTimer     = np.hemoTickTimer;
+    v.bloodNovaCooldown = np.bloodNovaCooldown;
     // Wanderer death-preamble state (next-batch): mirror so a remote Wanderer's Shadow Dance
     // and mark-prey stacks credit-and-read through the view consistently.
     v.shadowDanceTimer   = np.shadowDanceTimer;
@@ -1375,6 +1383,7 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     // projectiles damage the throwaway view, not the NetPlayer. serverNetPost reads this to fire
     // the Blood Nova armor retaliation, then clears it.
     np.lastDamageTaken  = v.lastDamageTaken;
+    np.lastDamageAttackerIdx = v.lastDamageAttackerIdx; // who hit them — aims Static Charge/Thunderwall
     np.lifesaverArmed   = v.lifesaverArmed;   // TA-1: persist consume/re-arm across frames
     np.graceInvuln      = v.graceInvuln;      // persist grace tag (set when the lifesaver fires on the view)
     // Persist ring-passive state mutations across frames (e.g., a stack decay that some skill
@@ -1383,6 +1392,11 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.soulHarvestTimer   = v.soulHarvestTimer;
     np.smokeTimer         = v.smokeTimer;
     np.secondWindCooldown = v.secondWindCooldown;
+    // Legendary armor/shield passives — the other half of the round-trip (see seedRemoteView).
+    np.chargeStacks       = v.chargeStacks;
+    np.chargeTimer        = v.chargeTimer;
+    np.hemoTickTimer      = v.hemoTickTimer;
+    np.bloodNovaCooldown  = v.bloodNovaCooldown;
     // Wanderer death-preamble state (next-batch) — same persistence pattern.
     np.shadowDanceTimer   = v.shadowDanceTimer;
     np.markTimer          = v.markTimer;

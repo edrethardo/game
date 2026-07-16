@@ -81,6 +81,8 @@ struct Player {
     // gear and buffs are recomputed at runtime and can never contaminate the file.
     f32  baseMaxHealth    = 100.0f;
     u8   ringPassive      = 0;    // SkillId of equipped legendary ring (0 = none)
+    u8   offhandSkill     = 0;    // SkillId of equipped legendary shield (0 = none) — read by the
+                                  // perfect-block callback + projectile parry, which only get a Player&
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection + Blood Nova armor retaliation)
     u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting
     f32  bloodNovaCooldown = 0.0f; // Blood Nova ARMOR aura (Demonhide Cuirass): internal retaliation cooldown.
@@ -109,6 +111,11 @@ struct Player {
     // Glove passive state (Frenzy: on-hit attack-speed stacks, legendary gloves)
     u8   frenzyStacks       = 0;     // +5% attack speed each, max 6
     f32  frenzyTimer        = 0.0f;  // shared buff duration; refreshed on hit, drops all stacks at 0
+
+    // Armor passive state (2026-07-16 legendary batch; transient, never serialized)
+    u8   chargeStacks       = 0;     // Static Charge (Capacitor Mail): hits-taken stacks, max 5
+    f32  chargeTimer        = 0.0f;  // 10s window from the last hit; expiry drops the stacks
+    f32  hemoTickTimer      = 0.0f;  // Hemophage aura: 0.5s drain-tick accumulator
 
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;

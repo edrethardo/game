@@ -151,6 +151,14 @@ void Engine::tickPassiveEquipment() {
             ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
         m_localPlayer.ringPassive = static_cast<u8>(m_ringPassive);
     }
+    // Offhand passive (legendary shield identity). Stamped onto the Player like ringPassive,
+    // because the perfect-block callback and the projectile parry receive only a Player& —
+    // the local player here; remote views get it via serverNetPost + seedRemoteView.
+    {
+        const ItemInstance& off = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
+        m_localPlayer.offhandSkill = static_cast<u8>((!isItemEmpty(off) && off.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[off.defId].legendarySkillId : SkillId::NONE);
+    }
     // Gloves on-hit passive (Frenzy)
     {
         const ItemInstance& gl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];

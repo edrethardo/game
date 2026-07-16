@@ -724,6 +724,9 @@ void Engine::serverNetPost(f32 dt) {
         const ItemInstance& ringItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::RING)];
         np.ringPassive = (!isItemEmpty(ringItem) && ringItem.rarity == Rarity::LEGENDARY)
             ? m_itemDefs[ringItem.defId].legendarySkillId : SkillId::NONE;
+        const ItemInstance& offItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
+        np.offhandSkill = static_cast<u8>((!isItemEmpty(offItem) && offItem.rarity == Rarity::LEGENDARY)
+            ? m_itemDefs[offItem.defId].legendarySkillId : SkillId::NONE);
 
         np.damageReduction = (np.playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
 
