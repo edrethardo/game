@@ -38,3 +38,19 @@ TEST_CASE("PendingPickupRing: expireOlderThan") {
     CHECK(PendingPickupRingOps::isPending(r, 1) == false);
     CHECK(PendingPickupRingOps::isPending(r, 2) == true);
 }
+
+TEST_CASE("PendingPickupRing: lane roundtrip (online couch co-op)") {
+    // A rejected pickup must roll back the LANE that predicted it. SV_PICKUP_RESULT arrives
+    // during Net::poll — outside the per-lane swap loop — so the handler cannot use
+    // m_localPlayerIndex; the lane has to ride the ring entry itself.
+    PendingPickupRing r;
+    PendingPickupRingOps::reset(r);
+    PendingPickupRingOps::record(r, 100, 43, /*predictedSlot=*/5);   // default lane = 0
+    PendingPickupRingOps::record(r, 101, 42, /*predictedSlot=*/3, /*lane=*/1);
+    CHECK(PendingPickupRingOps::findLaneByUid(r, 42) == 1);
+    CHECK(PendingPickupRingOps::findLaneByUid(r, 43) == 0);
+    CHECK(PendingPickupRingOps::findLaneByUid(r, 999) == 0);         // absent uid → safe lane 0
+    // The lane must survive ack()'s in-place compaction when an EARLIER entry is removed.
+    CHECK(PendingPickupRingOps::ack(r, 43) == true);
+    CHECK(PendingPickupRingOps::findLaneByUid(r, 42) == 1);
+}

@@ -610,7 +610,7 @@ void Engine::predictProcMeteor(Vec3 position, f32 damage, f32 radius, f32 delay)
 // damage entirely (the client would show a telegraph that never hurts anything).
 void Engine::sendMeteorRequest(Vec3 position, f32 radius, f32 delay, f32 damage) {
     if (m_netRole != NetRole::CLIENT) return;
-    u8 buf[sizeof(PacketHeader) + 24]; // hdr(4) + pos(12) + radius(4) + delay(4) + damage(4)
+    u8 buf[sizeof(PacketHeader) + 25]; // hdr(4) + pos(12) + radius(4) + delay(4) + damage(4) + targetSlot(1)
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_METEOR;
     hdr->flags = 0;
@@ -622,6 +622,7 @@ void Engine::sendMeteorRequest(Vec3 position, f32 radius, f32 delay, f32 damage)
     std::memcpy(buf + off, &radius,     4); off += 4;
     std::memcpy(buf + off, &delay,      4); off += 4;
     std::memcpy(buf + off, &damage,     4); off += 4;
+    buf[off++] = activeNetSlot();   // v18: which local lane cast it (kill credit / on-kill procs)
     Net::sendToServer(buf, off, /*reliable=*/true);
 }
 

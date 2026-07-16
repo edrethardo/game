@@ -1497,8 +1497,11 @@ private:
     // Client-side helper: serialize m_inventories[localSlot] + class/skill state and ship
     // it via CL_INVENTORY_SYNC. Called once shortly after SV_JOIN_ACCEPT when the joiner
     // came from the menu's "Continue" path with a loaded save.
-    void sendInventorySync(u8 lane = 0, u8 targetSlot = 0); // push one local lane's inventory to its
-                                                            // server slot (online couch co-op: per lane)
+    // Push one local lane's inventory to its server slot (online couch co-op: per lane). NO
+    // default args on purpose: the old `= 0` defaults let every in-game equip path push LANE 0
+    // to the primary slot, so a couch client's P2 fought with join-time gear forever. In-game
+    // callers pass (m_localPlayerIndex, activeNetSlot()) from inside the per-lane swap.
+    void sendInventorySync(u8 lane, u8 targetSlot);
     static void onEvent(const u8* data, u32 size);
     static void onPlayerJoin(u8 playerSlot, u8 classId);
     static void onPlayerLeft(u8 playerSlot);

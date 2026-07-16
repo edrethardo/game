@@ -1803,10 +1803,14 @@ void Engine::onPickupResult(u8 accept, u32 itemUid) {
         // packet but never enter the pending ring, so they can't count as an "item".
         if (slot >= 0) Steam::unlockAchievement("ACH_FIRST_ITEM");
     } else {
-        // Server rejected — roll back the predicted inventory add.
+        // Server rejected — roll back the predicted inventory add, in the LANE that predicted
+        // it. This handler fires during Net::poll, so m_localPlayerIndex is just whatever lane
+        // was swapped in last — on an online-couch client that could be the WRONG player's bag.
         if (slot >= 0) {
+            u8 lane = PendingPickupRingOps::findLaneByUid(s_engine->m_pendingPickups, itemUid);
+            if (lane >= MAX_LOCAL_PLAYERS) lane = 0;
             Inventory::removeFromBackpack(
-                s_engine->m_inventories[s_engine->m_localPlayerIndex],
+                s_engine->m_inventories[lane],
                 static_cast<u8>(slot));
         }
         // World item presence is restored by mirrorWorldItems on the next snapshot.

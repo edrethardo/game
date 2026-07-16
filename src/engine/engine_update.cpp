@@ -2216,20 +2216,26 @@ void Engine::sendPickupRequest(s32 worldIdx) {
     // the same item in the same frame). Don't send an orphaned request.
     if (predictedSlot < 0) return;
 
-    PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid, predictedSlot);
+    // Lane rides along so a rejected pickup rolls back THIS lane's backpack — onPickupResult
+    // fires during Net::poll, when m_localPlayerIndex is whatever lane was swapped in last.
+    PendingPickupRingOps::record(m_pendingPickups, m_clientTick, uid, predictedSlot,
+                                 m_localPlayerIndex);
     sendPickupPacket(uid);
 }
 
 // The wire half of a pickup request, shared by the item path (which predicts first) and the shrine
-// path (which predicts nothing). Packet: header(4) + uid(4). Reliable, so a dropped request doesn't
-// silently cost the player an item.
+// path (which predicts nothing). Packet: header(4) + uid(4) + targetSlot(1). Reliable, so a dropped
+// request doesn't silently cost the player an item. The trailing byte (v18) names WHICH local lane
+// is picking up — must be called with the acting lane swapped in (updatePlayerPickup's per-lane
+// loop), because activeNetSlot() reads m_localPlayerIndex.
 void Engine::sendPickupPacket(u32 uid) {
-    u8 buf[sizeof(PacketHeader) + 4];
+    u8 buf[sizeof(PacketHeader) + 5];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_PICKUP_ITEM;
     hdr->flags = 0;
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &uid, 4);
+    buf[sizeof(PacketHeader) + 4] = activeNetSlot();
     Net::sendToServer(buf, sizeof(buf), true);
 }
 
@@ -2237,12 +2243,13 @@ void Engine::sendPickupPacket(u32 uid) {
 // must not be lost to packet loss, and the payload names WHICH pet def to toggle (there is one
 // per enemy now, so the old payload-less input bit could not carry the choice).
 void Engine::sendUsePetPacket(u16 petDefId) {
-    u8 buf[sizeof(PacketHeader) + 2];
+    u8 buf[sizeof(PacketHeader) + 3];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_USE_PET;
     hdr->flags = 0;
     hdr->seq   = 0;
     std::memcpy(buf + sizeof(PacketHeader), &petDefId, 2);
+    buf[sizeof(PacketHeader) + 2] = activeNetSlot();   // v18: which local lane is using it
     Net::sendToServer(buf, sizeof(buf), true);
 }
 
@@ -2255,12 +2262,13 @@ void Engine::sendUsePetPacket(u16 petDefId) {
 // weeping-angel rule already fired server-side.
 void Engine::sendMimicInteract(s32 poolIdx) {
     if (poolIdx < 0 || poolIdx >= static_cast<s32>(MAX_ENTITIES)) return;
-    u8 buf[sizeof(PacketHeader) + 1];
+    u8 buf[sizeof(PacketHeader) + 2];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_INTERACT_ENTITY;
     hdr->flags = 0;
     hdr->seq   = 0;
-    buf[sizeof(PacketHeader)] = static_cast<u8>(poolIdx);
+    buf[sizeof(PacketHeader)]     = static_cast<u8>(poolIdx);
+    buf[sizeof(PacketHeader) + 1] = activeNetSlot();   // v18: which local lane opened it
     Net::sendToServer(buf, sizeof(buf), true);
 }
 
@@ -2272,7 +2280,7 @@ void Engine::sendMimicInteract(s32 poolIdx) {
 // the server's view. Reliable so a dropped request doesn't lose the player an item.
 void Engine::sendDropRequest(u8 slotKind, u8 slotIndex, const ItemInstance& it, Vec3 dropPos) {
     constexpr u32 kFixed = sizeof(PacketHeader) + 1 + 1 + 12;
-    u8 buf[kFixed + sizeof(ItemInstance)];
+    u8 buf[kFixed + sizeof(ItemInstance) + 1];   // +1: v18 trailing target slot
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_DROP_ITEM;
     hdr->flags = 0;
@@ -2282,6 +2290,9 @@ void Engine::sendDropRequest(u8 slotKind, u8 slotIndex, const ItemInstance& it, 
     p[1] = slotIndex;
     std::memcpy(p + 2, &dropPos, 12);
     std::memcpy(p + 2 + 12, &it, sizeof(ItemInstance));
+    // v18: trailing byte names WHICH local lane is dropping (CL_INVENTORY_SYNC's trailing-byte
+    // form) so a couch P2's drop removes from P2's server-side inventory, not P1's.
+    buf[kFixed + sizeof(ItemInstance)] = activeNetSlot();
     Net::sendToServer(buf, sizeof(buf), /*reliable=*/true);
 }
 
@@ -2338,11 +2349,16 @@ void Engine::sendRespawnRequest(u8 targetSlot) {
 // The server re-validates proximity + boss-dead and runs triggerFloorDescent(), which
 // broadcasts SV_LEVEL_SEED so we (and every other client) transition in lockstep.
 void Engine::sendDescendRequest() {
-    u8 buf[sizeof(PacketHeader)];
+    u8 buf[sizeof(PacketHeader) + 1];
     PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
     hdr->type  = NetPacketType::CL_REQUEST_DESCEND;
     hdr->flags = 0;
     hdr->seq   = 0;
+    // v18: byte names WHICH local lane pressed E at the portal — the server checks door
+    // proximity against the REQUESTER, and header-only always meant the peer's primary, so a
+    // couch client's P2 standing at the door could never descend the party unless P1 was
+    // also inside the 2 m radius.
+    buf[sizeof(PacketHeader)] = activeNetSlot();
     Net::sendToServer(buf, sizeof(buf), true);
 }
 

@@ -70,7 +70,14 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // v17: new CL_INTERACT_ENTITY (0x0D) — mimic chest E-interact by entity pool index. Additive
 // (a v16 server would just log it as unknown), but a mixed pair would leave one player with
 // chests the other cannot open — the same silent-parity-gap class as v14/v15, so reject cleanly.
-static constexpr u32 PROTOCOL_VERSION  = 17; // v13: player record single shrineTimerQ pair (was
+// v18: the whole client→server REQUEST family (CL_PICKUP_ITEM, CL_DROP_ITEM, CL_USE_PET,
+// CL_METEOR, CL_INTERACT_ENTITY, CL_REQUEST_DESCEND) now carries a target-slot byte,
+// peer-ownership-validated via routeToOwnedSlot — completing what v6 started for CL_INPUT/CL_FIRE. Before this, an online
+// couch client's SECOND local player had every request attributed to the peer's primary slot:
+// P2's pickups were range-checked against P1 and landed in P1's server-side inventory, a shrine
+// P2 touched buffed P1, and P2 couldn't open chests unless P1 stood beside them. A v17 client
+// omits the byte (requests silently mis-attribute again), so reject cleanly.
+static constexpr u32 PROTOCOL_VERSION  = 18; // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE

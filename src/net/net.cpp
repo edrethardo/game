@@ -241,6 +241,18 @@ static void resetSlots() {
 // ---------------------------------------------------------------------------
 // Server packet handlers
 // ---------------------------------------------------------------------------
+// Resolve a couch-lane target byte: a packet from a peer may act as EITHER of that peer's local
+// players (online couch co-op puts two slots on one connection). Route to the named slot iff the
+// SAME peer owns it — a client must never act as another peer's slot — else fall back to the
+// sender's primary slot (the single-local case, and any packet that omitted the byte). Every
+// couch-capable client→server request routes through here; a NEW request packet that skips this
+// re-creates the v17 bug where P2's pickups were validated against P1 and credited to P1.
+static u8 routeToOwnedSlot(u8 slot, u8 ts) {
+    if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
+        return ts;
+    return slot;
+}
+
 static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
     if (size < sizeof(PacketHeader)) return;
     const PacketHeader* hdr = reinterpret_cast<const PacketHeader*>(data);
@@ -319,42 +331,61 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // slot (which of this peer's local players this input is for). Route there iff the SAME peer
         // owns it (a client can't write another peer's slot). Single clients stamp their own slot.
         u8 targetSlot = slot;
-        if (size >= sizeof(PacketHeader) + 2) {
-            u8 ts = data[sizeof(PacketHeader) + 1];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
-                targetSlot = ts;
-        }
+        if (size >= sizeof(PacketHeader) + 2)
+            targetSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader) + 1]);
         if (s_onInput) s_onInput(targetSlot, data, size);
     } break;
 
     case NetPacketType::CL_PICKUP_ITEM: {
         // Client requests pickup of a world item by uid. The engine handler validates
         // proximity/ownership server-side and removes the item (propagates via snapshot).
-        if (s_onPickup) s_onPickup(slot, data, size);
+        // v18: byte after the uid names WHICH of this peer's local players is picking up, so a
+        // couch client's P2 is proximity-checked against P2 and the item lands in P2's inventory
+        // (attributing to the primary slot was exactly the v17 couch bug).
+        u8 pickupSlot = slot;
+        if (size >= sizeof(PacketHeader) + 5)
+            pickupSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader) + 4]);
+        if (s_onPickup) s_onPickup(pickupSlot, data, size);
     } break;
 
     case NetPacketType::CL_METEOR: {
         // Client PREDICTED a weapon on-hit proc meteor (it owns the roll — see CL_METEOR) and is
         // telling us where it landed. The engine handler validates + spawns the single authoritative
         // (damaging) meteor and relays it to the OTHER clients.
-        if (s_onMeteor) s_onMeteor(slot, data, size);
+        // v18: byte after the 24-byte payload names the casting local player, so a couch P2's
+        // meteor kills credit P2 (kill counter, on-kill procs), not the peer's primary.
+        u8 meteorSlot = slot;
+        if (size >= sizeof(PacketHeader) + 25)
+            meteorSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader) + 24]);
+        if (s_onMeteor) s_onMeteor(meteorSlot, data, size);
     } break;
 
     case NetPacketType::CL_USE_PET: {
         // Client used a pet consumable. Payload = u16 itemDefId; the engine handler re-validates
         // (petSummon def, present in that slot's synced inventory) before toggling the companion.
+        // v18: byte after the defId names the using local player, so a couch P2's pet is
+        // validated against P2's synced inventory and owned/tethered to P2.
         if (size >= sizeof(PacketHeader) + 2 && s_onUsePet) {
             u16 defId;
             std::memcpy(&defId, data + sizeof(PacketHeader), 2);
-            s_onUsePet(slot, defId);
+            u8 petSlot = slot;
+            if (size >= sizeof(PacketHeader) + 3)
+                petSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader) + 2]);
+            s_onUsePet(petSlot, defId);
         }
     } break;
 
     case NetPacketType::CL_INTERACT_ENTITY: {
         // Client "opened" a dormant mimic chest. Payload = u8 server pool index; the engine
         // handler re-validates type/state/reach — the index is untrusted network input.
+        // v18: byte after the pool index names the opening local player, so a couch P2's reach
+        // is checked against P2's position (v17 checked the peer's primary, so P2 could only
+        // open chests P1 happened to stand near).
         if (size >= sizeof(PacketHeader) + 1 && s_onEntityInteract) {
-            s_onEntityInteract(slot, data[sizeof(PacketHeader)]);
+            u8 openSlot = slot;
+            if (size >= sizeof(PacketHeader) + 2)
+                openSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader) + 1]);
+            s_onEntityInteract(openSlot, data[sizeof(PacketHeader)]);
         }
     } break;
 
@@ -363,7 +394,12 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // server-side and spawns the world item at the client-reported drop position.
         // Without this the client's predicted drop is silently undone the next time
         // mirrorWorldItems / inventory state syncs from the server.
-        if (s_onDropItem) s_onDropItem(slot, data, size);
+        // v18: the LAST byte names the dropping local player (trailing-byte form, like
+        // CL_INVENTORY_SYNC), so a couch P2's drop removes from P2's server-side inventory.
+        u8 dropSlot = slot;
+        if (size >= sizeof(PacketHeader) + 1)
+            dropSlot = routeToOwnedSlot(slot, data[size - 1]);
+        if (s_onDropItem) s_onDropItem(dropSlot, data, size);
     } break;
 
     case NetPacketType::CL_RESPAWN: {
@@ -374,11 +410,8 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // is respawning (a couch client owns two slots; a header-only packet = the peer's primary).
         // Route iff the same peer owns the target slot, so P2's respawn revives P2, not P1.
         u8 respawnSlot = slot;
-        if (size >= sizeof(PacketHeader) + 1) {
-            u8 ts = data[sizeof(PacketHeader)];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
-                respawnSlot = ts;
-        }
+        if (size >= sizeof(PacketHeader) + 1)
+            respawnSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader)]);
         if (s_onRespawn) s_onRespawn(respawnSlot);
     } break;
 
@@ -387,7 +420,12 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // re-validates proximity to m_level.floorDoorPos + the boss-dead gate (anti-cheat /
         // race-safety) and only then runs triggerFloorDescent(), which broadcasts SV_LEVEL_SEED
         // so the requesting client (and any other clients) transition in lockstep.
-        if (s_onDescendRequest) s_onDescendRequest(slot);
+        // v18: optional byte names which of this peer's local players is at the door (the
+        // proximity check is against the requester, so a couch P2 must be able to name itself).
+        u8 descendSlot = slot;
+        if (size >= sizeof(PacketHeader) + 1)
+            descendSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader)]);
+        if (s_onDescendRequest) s_onDescendRequest(descendSlot);
     } break;
 
     case NetPacketType::CL_FIRE_WEAPON: {
@@ -401,11 +439,8 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // Couch co-op: optional trailing byte = absolute target net slot (which local player fired).
         // Route iff the same peer owns it; single clients omit it (or stamp their own slot).
         u8 fireSlot = slot;
-        if (size >= sizeof(PacketHeader) + 15) {
-            u8 ts = data[sizeof(PacketHeader) + 14];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
-                fireSlot = ts;
-        }
+        if (size >= sizeof(PacketHeader) + 15)
+            fireSlot = routeToOwnedSlot(slot, data[sizeof(PacketHeader) + 14]);
         if (s_onFireWeapon) s_onFireWeapon(fireSlot, data, size);
     } break;
 
@@ -416,11 +451,8 @@ static void serverHandlePacket(u8 slot, const u8* data, u32 size) {
         // here (the body offset is engine-side, but the slot is always the trailing byte) and route
         // iff the same peer owns it; otherwise fall back to the peer's primary slot.
         u8 invSlot = slot;
-        if (size >= 1) {
-            u8 ts = data[size - 1];
-            if (ts < MAX_PLAYERS && s_slots[ts].peer != 0 && s_slots[ts].peer == s_slots[slot].peer)
-                invSlot = ts;
-        }
+        if (size >= 1)
+            invSlot = routeToOwnedSlot(slot, data[size - 1]);
         if (s_onInventorySync) s_onInventorySync(invSlot, data, size);
     } break;
 

@@ -11,7 +11,7 @@ void PendingPickupRingOps::reset(PendingPickupRing& r) {
 }
 
 void PendingPickupRingOps::record(PendingPickupRing& r, u32 clientTick, u32 itemUid,
-                                   s8 predictedSlot) {
+                                   s8 predictedSlot, u8 lane) {
     // If full, evict the oldest (index 0) entry by shifting everything left one slot, then
     // decrement count so we write into the last slot below. Graceful degradation: the visual
     // mis-prediction is corrected on the next mirrorWorldItems pass anyway.
@@ -23,6 +23,7 @@ void PendingPickupRingOps::record(PendingPickupRing& r, u32 clientTick, u32 item
     e.clientTick    = clientTick;
     e.itemUid       = itemUid;
     e.predictedSlot = predictedSlot;  // -1 if no inventory prediction (legacy callers)
+    e.lane          = lane;
     r.count++;
 }
 
@@ -31,6 +32,13 @@ s8 PendingPickupRingOps::findSlotByUid(const PendingPickupRing& r, u32 itemUid) 
         if (r.entries[i].itemUid == itemUid) return r.entries[i].predictedSlot;
     }
     return -1;
+}
+
+u8 PendingPickupRingOps::findLaneByUid(const PendingPickupRing& r, u32 itemUid) {
+    for (u32 i = 0; i < r.count; i++) {
+        if (r.entries[i].itemUid == itemUid) return r.entries[i].lane;
+    }
+    return 0;
 }
 
 bool PendingPickupRingOps::isPending(const PendingPickupRing& r, u32 itemUid) {

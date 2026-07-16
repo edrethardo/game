@@ -1687,7 +1687,7 @@ void Engine::useQuickbarSlot(u8 slot) {
     // (no-op off-client). This was the ONE equip path that omitted it — the server fires from its
     // OWN copy of the client's inventory (handleWeaponFireForPlayer), so a guest swapping via the
     // quickbar kept dealing the OLD weapon's damage while their screen showed the new one.
-    sendInventorySync();
+    sendInventorySync(m_localPlayerIndex, activeNetSlot());
 }
 
 // ---------------------------------------------------------------------------

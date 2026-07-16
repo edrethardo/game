@@ -214,7 +214,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_EQUIP);
                     m_itemEquippedOnce = true;
-                    sendInventorySync(); // R7: push the new equipped state so the host's fire/reload dispatch sees the right weapon (no-op off-client)
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7: push the new equipped state so the host's fire/reload dispatch sees the right weapon (no-op off-client)
                     }
                 }
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
@@ -222,7 +222,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     Inventory::unequip(m_inventories[m_localPlayerIndex], static_cast<ItemSlot>(m_invCursorIndex));
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_EQUIP);
-                    sendInventorySync(); // R7
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7
                 }
             }
         }
@@ -301,7 +301,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                         Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                         AudioSystem::play(SfxId::ITEM_EQUIP);
                         m_itemEquippedOnce = true;
-                        sendInventorySync(); // R7
+                        sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7
                     }
                     m_dblClickState = {};
                 } else {
@@ -453,7 +453,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 AudioSystem::play(SfxId::ITEM_EQUIP);
                 m_itemEquippedOnce = true;
-                sendInventorySync(); // R7
+                sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7
             } else if (drop.panel == InventoryUI::SlotHit::NONE) {
                 // Drop outside all panels — drop item to world
                 Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};
