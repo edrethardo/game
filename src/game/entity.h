@@ -171,6 +171,11 @@ struct Entity {
     f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
     bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
     u8 enemyRole = EnemyRole::NORMAL; // archetype bitmask (summoner, healer, aura, ambush, etc.)
+    // Authored combat OPENER (EnemyDef.aiPreference, an AIState ordinal) — the state this enemy
+    // enters when it aggros, instead of the historical hardcoded CHASE. Stamped at spawn from
+    // enemies.json; defaults to CHASE for drones/summons/pets (and is reset in spawn(), so a
+    // recycled slot can't inherit a strafer's opener). See preferredCombatState() below.
+    u8 aiPreference = 1;     // = AIState::CHASE ordinal (enum declared above this struct)
     u8  resurrectCount = 0;  // necromancer: how many dead enemies have been raised (no cap; stat only)
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
@@ -292,6 +297,26 @@ struct Entity {
 // then grew it by one aligned float. If this fires, check whether new fields are still landing in
 // padding before assuming they are free.
 static_assert(sizeof(Entity) == 512, "Entity layout changed — re-check field packing");
+
+// Combat opener for a freshly-aggroed (or damage-woken) enemy: the authored aiPreference mapped
+// onto a SAFE entry state. Pure map — no pathfinding — so damage-wake sites without a grid can
+// use it too; the IDLE-aggro path in enemy_ai_states.cpp additionally attempts a FLANK opener
+// (which needs a path computed at entry). Gates keep a mis-authored def harmless: STRAFE is a
+// firing state, so it only opens for ranged (attackRange > 5); SURROUND walks an encircle slot,
+// so it only opens for grounded melee. Everything else — and every unauthored def — opens with
+// the classic CHASE. All three target states self-correct back to CHASE, never to a stuck enemy.
+inline AIState preferredCombatState(const Entity& e) {
+    switch (static_cast<AIState>(e.aiPreference)) {
+        case AIState::STRAFE:
+            if (e.attackRange > 5.0f) return AIState::STRAFE;
+            break;
+        case AIState::SURROUND:
+            if (e.attackRange <= 5.0f && !(e.flags & ENT_FLYING)) return AIState::SURROUND;
+            break;
+        default: break;
+    }
+    return AIState::CHASE;
+}
 
 struct EntityHandle {
     u16 index      = 0xFFFF;

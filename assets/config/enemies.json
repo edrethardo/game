@@ -285,7 +285,7 @@
         0.4
       ],
       "role": "aura",
-      "aiPreference": "chase",
+      "aiPreference": "surround",
       "onHitEffect": 1,
       "onHitDuration": 3.0,
       "onHitDps": 4.0,
@@ -579,7 +579,7 @@
         "ranged_caster",
         "aura"
       ],
-      "aiPreference": "chase",
+      "aiPreference": "strafe",
       "onHitEffect": 3,
       "onHitDuration": 2.5,
       "onHitDps": 6.0,
@@ -657,7 +657,7 @@
         0.4
       ],
       "role": "aura",
-      "aiPreference": "chase",
+      "aiPreference": "surround",
       "onHitEffect": 3,
       "onHitDuration": 2.5,
       "onHitDps": 12.0,
@@ -855,7 +855,7 @@
         0.4
       ],
       "role": "aura",
-      "aiPreference": "chase",
+      "aiPreference": "surround",
       "onHitEffect": 4,
       "onHitDuration": 2.0,
       "onHitDps": 0,

@@ -51,6 +51,11 @@ namespace Goblin {
                                            // with whatever it has not bled — paying nothing further
     constexpr f32 BLEED_SECONDS  = 2.0f;   // one item dropped per this interval while alive
     constexpr u8  BLEED_MAX      = 4;      // items it can bleed before it is out of pocket
+    constexpr f32 TAUNT_WINDOW   = 1.5f;   // final stretch of the escape clock: the goblin STOPS,
+                                           // faces the player, and gloats (bubble + gold chat)
+                                           // before the portal takes it — both a victory lap and
+                                           // one last stand-still burst window to kill it through.
+                                           // Must stay < the 2.4 s bubble so the taunt can't refire.
     constexpr u8  DEATH_DROPS    = 3;      // the rest of the sack, if you actually catch it — every
                                            // one a guaranteed LEGENDARY (engine_death.cpp forces the
                                            // rarity, boss/champion style); the bleed stays random

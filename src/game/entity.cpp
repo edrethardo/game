@@ -54,11 +54,20 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     // to GENERIC/NORMAL prevents a respawned slot from inheriting a stale summoner role.
     e.enemyType = EnemyType::GENERIC;
     e.enemyRole = EnemyRole::NORMAL;
+    // Combat opener resets to plain CHASE — only the enemies.json spawn path stamps an authored
+    // preference, so a drone/summon recycling a strafer's slot must not inherit its opener.
+    e.aiPreference = static_cast<u8>(AIState::CHASE);
     // Reused slots must not inherit a dead boss's identity (it would lock the floor exit,
     // grant knockback immunity, or trigger Malachar's false-death on a normal enemy).
     e.isBoss       = false;
     e.bossDefIdx   = 0xFF;
     e.bossPhase    = BossPhase::NONE;
+    // A recycled slot must not keep the previous occupant's live speech bubble: a monster
+    // spawning into the slot of one killed mid-sentence displayed the corpse's line for the
+    // rest of the 2.4 s window ("old and wrong speech bubbles" — on the HOST; the client-side
+    // interp mirror has its own recycle guard in client.cpp).
+    e.speechText   = nullptr;
+    e.speechTimer  = 0.0f;
     e.minionShield = false;
     e.leashRadius  = 0.0f;
     e.provoked     = false;
