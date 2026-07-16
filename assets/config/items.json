@@ -2798,6 +2798,58 @@
       "dropWeight": 0.0,
       "petSummon": true,
       "petEnemy": "Abyssal Titan"
+    },
+    {
+      "name": "Capacitor Mail",
+      "slot": "armor",
+      "mesh": "armor",
+      "material": "armor_capacitor",
+      "baseHealth": 55.0,
+      "minLevel": 16,
+      "maxLevel": 28,
+      "maxRarity": "legendary",
+      "legendarySkill": "static_charge",
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
+    },
+    {
+      "name": "Hemophage Shroud",
+      "slot": "armor",
+      "mesh": "armor",
+      "material": "armor_hemophage",
+      "baseHealth": 90.0,
+      "minLevel": 32,
+      "maxLevel": 50,
+      "maxRarity": "legendary",
+      "legendarySkill": "hemophage",
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
+    },
+    {
+      "name": "Thunderwall",
+      "slot": "offhand",
+      "mesh": "shield",
+      "material": "shield_thunderwall",
+      "baseHealth": 46.0,
+      "minLevel": 16,
+      "maxLevel": 28,
+      "maxRarity": "legendary",
+      "legendarySkill": "chain_lightning",
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
+    },
+    {
+      "name": "Mirror Aegis",
+      "slot": "offhand",
+      "mesh": "shield",
+      "material": "shield_mirror",
+      "baseHealth": 75.0,
+      "minLevel": 32,
+      "maxLevel": 50,
+      "maxRarity": "legendary",
+      "legendarySkill": "projectile_parry",
+      "dropWeight": 0.5,
+      "minRarity": "legendary"
     }
   ]
 }

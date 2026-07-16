@@ -995,6 +995,50 @@
         0.5,
         1.0
       ]
+    },
+    {
+      "id": 161,
+      "name": "armor_capacitor",
+      "texture": "armor_leather_tex_42.png",
+      "tint": [
+        0.45,
+        0.65,
+        0.95,
+        1.0
+      ]
+    },
+    {
+      "id": 162,
+      "name": "armor_hemophage",
+      "texture": "armor_leather_tex_42.png",
+      "tint": [
+        0.55,
+        0.1,
+        0.15,
+        1.0
+      ]
+    },
+    {
+      "id": 163,
+      "name": "shield_thunderwall",
+      "texture": "ring_gold_tex_42.png",
+      "tint": [
+        0.35,
+        0.55,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": 164,
+      "name": "shield_mirror",
+      "texture": "ring_gold_tex_42.png",
+      "tint": [
+        0.85,
+        0.92,
+        1.0,
+        1.0
+      ]
     }
   ]
 }
