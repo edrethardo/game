@@ -462,6 +462,11 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     if (!isItemEmpty(dropped)) {
                         WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                         AudioSystem::play(SfxId::ITEM_DROP);
+                        // R11 — this drag-out path was the ONE drop route that never told the
+                        // server: on a CLIENT the predicted ground item was wiped by the next
+                        // mirrorWorldItems pass (the server never spawned it) and the server's
+                        // copy of the bag kept the item. Right-click and Q already send this.
+                        if (m_netRole == NetRole::CLIENT) sendDropRequest(0, m_dragState.sourceIndex, dropped, dropPos);
                     }
                 } else if (m_dragState.source == DragSource::EQUIPMENT) {
                     ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
@@ -470,6 +475,8 @@ void Engine::updateInventoryInteraction(f32 dt) {
                         WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
                         Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                         AudioSystem::play(SfxId::ITEM_DROP);
+                        // R11 — same fix as the backpack branch above (equipment flavor).
+                        if (m_netRole == NetRole::CLIENT) sendDropRequest(1, m_dragState.sourceIndex, dropped, dropPos);
                     }
                 } else if (m_dragState.source == DragSource::QUICKBAR) {
                     // Remove from quickbar only (item stays in backpack)
