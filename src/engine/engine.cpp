@@ -357,6 +357,26 @@ void Engine::onEvent(const u8* data, u32 size) {
             std::memcpy(&color.z, data + off, 4); off += 4;
             s_engine->emitNovaFX(pos, radius, color);  // broadcast branch is SERVER-gated — no echo
         } break;
+        case NetEventType::EXIT_PORTAL: {
+            // The Engine is dead — the way out exists. Mirror the level state locally so the
+            // portal renders and resolveInteractTargets can offer the enter (the actual enter
+            // is still server-validated via CL_REQUEST_DESCEND).
+            if (size < sizeof(PacketHeader) + 13) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            Vec3 pos;
+            std::memcpy(&pos.x, data + off, 4); off += 4;
+            std::memcpy(&pos.y, data + off, 4); off += 4;
+            std::memcpy(&pos.z, data + off, 4); off += 4;
+            s_engine->m_level.exitPortalActive = true;
+            s_engine->m_level.exitPortalPos    = pos;
+        } break;
+        case NetEventType::CREDITS: {
+            // The run's ending — roll the same credits the host rolls. startCredits guards on
+            // IN_GAME/GAME_OVER so a stray packet in a menu state is a no-op.
+            if (size < sizeof(PacketHeader) + 2) break;
+            const bool engineSlain = data[sizeof(PacketHeader) + 1] != 0;
+            s_engine->startCredits(engineSlain);
+        } break;
         case NetEventType::SPEECH: {
             // NPC speech (bubble + chat line) resolved and shipped by the server — see the
             // NetEventType doc. Wire strings are untrusted input: every length byte is checked
@@ -526,6 +546,61 @@ void Engine::emitNovaFX(Vec3 position, f32 radius, Vec3 color) {
     std::memcpy(buf + off, &color.y,    4); off += 4;
     std::memcpy(buf + off, &color.z,    4); off += 4;
     Net::broadcastReliable(buf, off);
+}
+
+// The post-Engine EXIT portal: set the level state locally and — on the SERVER — replicate it so
+// clients can see and use it (contrast the Source ENTRY portal, which is host-only-visible by
+// design). Sent once; a client joining after this is an accepted gap (the fight is the endgame).
+void Engine::spawnExitPortal(Vec3 pos) {
+    m_level.exitPortalActive = true;
+    m_level.exitPortalPos    = pos;
+    LOG_INFO("Exit portal spawned at (%.1f, %.1f, %.1f)", pos.x, pos.y, pos.z);
+    if (m_netRole != NetRole::SERVER) return;
+
+    u8 buf[sizeof(PacketHeader) + 13]; // hdr(4) + eventType(1) + pos(12)
+    PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+    hdr->type  = NetPacketType::SV_EVENT;
+    hdr->flags = 0;
+    hdr->seq   = 0;
+    u32 off = sizeof(PacketHeader);
+    buf[off++] = static_cast<u8>(NetEventType::EXIT_PORTAL);
+    std::memcpy(buf + off, &pos.x, 4); off += 4;
+    std::memcpy(buf + off, &pos.y, 4); off += 4;
+    std::memcpy(buf + off, &pos.z, 4); off += 4;
+    Net::broadcastReliable(buf, off);
+}
+
+// Server/SP entry into the run's ending: broadcast FIRST so every client rolls the same credits
+// (THE fix for "the client just hangs when the run ends" — the old flow flipped the host's local
+// m_gameState and went silent), then run the identical local flip.
+void Engine::beginCreditsSequence(bool engineSlain) {
+    if (m_gameState == GameState::CREDITS || m_gameState == GameState::VICTORY) return; // once
+    if (m_netRole == NetRole::SERVER) {
+        u8 buf[sizeof(PacketHeader) + 2]; // hdr(4) + eventType(1) + engineSlain(1)
+        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+        hdr->type  = NetPacketType::SV_EVENT;
+        hdr->flags = 0;
+        hdr->seq   = 0;
+        u32 off = sizeof(PacketHeader);
+        buf[off++] = static_cast<u8>(NetEventType::CREDITS);
+        buf[off++] = engineSlain ? 1 : 0;
+        Net::broadcastReliable(buf, off);
+    }
+    startCredits(engineSlain);
+}
+
+// The LOCAL credits flip every machine runs (host directly, clients from SV_EVENT::CREDITS).
+// Leads into the existing VICTORY screen; the net session stays connected (Net::poll runs in
+// every GameState) and is torn down when VICTORY returns to the menu.
+void Engine::startCredits(bool engineSlain) {
+    if (m_gameState != GameState::IN_GAME && m_gameState != GameState::GAME_OVER) return;
+    s_engineSlain = engineSlain;   // client copy — steers credits/victory text to the ending variant
+    m_level.exitPortalActive = false;
+    m_creditsScroll = 0.0f;
+    m_gameState = GameState::CREDITS;
+    AudioSystem::stopMusic();
+    Input::setRelativeMouseMode(false);
+    LOG_INFO("Credits rolling (%s ending)", engineSlain ? "secret" : "standard");
 }
 
 // Blood Nova worn as EQUIPMENT — the health-sacrificing nova the tooltip has always promised.

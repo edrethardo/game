@@ -108,15 +108,18 @@ static void broadcastLootSpawn(const WorldItemPool& pool, u32 uid, Vec3 pos, u16
 // Wanderer mark-prey passives, Mark Prey arrow chain, and Bomber death explosion.
 void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
     // The Dungeon Engine secret superboss is slain → the run's true ending. This handler runs on
-    // the authoritative host/SP (enemy deaths aren't simulated on a client), so the host enters
-    // VICTORY here; the s_engineSlain flag steers the victory screen to the secret ending. (Co-op
-    // clients follow the same limitation as the normal Hell-50 victory, which also isn't broadcast.)
+    // the authoritative host/SP (enemy deaths aren't simulated on a client). It used to snap the
+    // HOST's m_gameState straight to VICTORY — a purely local flip that was never broadcast, so
+    // serverUpdate stopped, snapshots stopped, and every co-op client hung on a frozen world.
+    // Now the kill spawns the EXIT PORTAL instead (replicated via SV_EVENT::EXIT_PORTAL): play
+    // continues — loot the corpse — and whoever steps into the portal starts the shared credits
+    // sequence for everyone (beginCreditsSequence broadcast).
     if (pool.entities[idx].isEngine) {
-        s_engineSlain = true;
-        m_gameState   = GameState::VICTORY;
-        AudioSystem::stopMusic();
-        Input::setRelativeMouseMode(false);
+        s_engineSlain = true;    // steers the credits/victory text to the secret ending
+        AudioSystem::stopMusic();   // dramatic silence over the corpse; credits restart nothing
         addChatMessage("\?\?\?", "halt. the curse... ends.", Vec3{0.62f, 0.30f, 0.95f});
+        // South of the corpse (toward the chamber entrance) so it never overlaps the loot pile.
+        spawnExitPortal(pos + Vec3{0.0f, 0.0f, 4.0f});
     }
 
     // Remove from squad so roles are reassigned before next AI tick

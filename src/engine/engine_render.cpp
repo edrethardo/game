@@ -7,6 +7,7 @@
 #include <SDL.h>
 
 #include "engine/engine.h"
+#include "engine/credits.h"   // credits roll rows (CREDITS state render)
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -141,6 +142,39 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
         f32 totalW = FontSystem::textWidth(totalStr, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - totalW) * 0.5f, sh * 0.21f,
                              totalStr, {0.6f * alpha, 0.6f * alpha, 0.6f * alpha}, 2);
+
+        HUD::flush(sw, sh);
+        GLContext::swapBuffers(Window::getHandle());
+        return true;
+    }
+
+    if (m_gameState == GameState::CREDITS) {
+        // --- Credits roll --- rows scroll up from the bottom edge; the table + pacing live in
+        // engine/credits.h (single-sourced with the update case's scroll-end check).
+        glClearColor(0.01f, 0.02f, 0.06f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        FontSystem::setUIScale(static_cast<f32>(sh) / 720.0f);
+
+        const f32 s = static_cast<f32>(sh) / 720.0f;   // reference px -> screen px
+        for (u32 i = 0; i < Credits::ROW_COUNT; i++) {
+            const Credits::Row& row = Credits::kRows[i];
+            if (row.text[0] == '\0') continue;   // spacer
+            // Row i rises from just below the bottom edge as the scroll advances.
+            f32 y = (m_creditsScroll - Credits::rowOffset(i)) * s - 40.0f * s;
+            if (y < -60.0f * s || y > static_cast<f32>(sh) + 60.0f * s) continue;
+            const Vec3 col = (row.size >= 4) ? Vec3{0.9f, 0.8f, 0.2f}
+                          : (row.size == 3) ? Vec3{0.95f, 0.95f, 0.95f}
+                                            : Vec3{0.62f, 0.62f, 0.68f};
+            f32 w = FontSystem::textWidth(row.text, row.size);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - w) * 0.5f, y,
+                                 row.text, col, row.size);
+        }
+
+        // Skip hint, faded in the corner.
+        const char* hint = "[Enter] skip";
+        f32 hw = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, static_cast<f32>(sw) - hw - 14.0f * s, 12.0f * s,
+                             hint, {0.4f, 0.4f, 0.45f}, 1);
 
         HUD::flush(sw, sh);
         GLContext::swapBuffers(Window::getHandle());

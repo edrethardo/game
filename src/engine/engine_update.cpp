@@ -5,6 +5,7 @@
 #include <SDL.h>
 
 #include "engine/engine.h"
+#include "engine/credits.h"   // credits roll rows + scroll end (CREDITS state)
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -454,7 +455,8 @@ void Engine::update(f32 dt) {
             Input::setRelativeMouseMode(false);
             return;
         } else if (m_gameState != GameState::GAME_OVER &&
-                   m_gameState != GameState::VICTORY) {
+                   m_gameState != GameState::VICTORY &&
+                   m_gameState != GameState::CREDITS) {   // ESC in credits = skip (handled in its case)
             // Lobby/connecting states — ESC disconnects and returns to menu
             Net::disconnect();
             m_netRole = NetRole::NONE;
@@ -696,6 +698,22 @@ void Engine::update(f32 dt) {
         break;
     case GameState::GAME_OVER:
         break; // handled above
+    case GameState::CREDITS:
+        // Scrolling credits (post-Engine portal / Hell-complete). Runs identically on every
+        // machine — the net session stays connected (Net::poll is state-independent) and is
+        // torn down when VICTORY returns to the menu. Any confirm key skips to VICTORY;
+        // otherwise the scroll's end (checked against the row count in renderCredits) lands
+        // there too via m_creditsScroll.
+        m_creditsScroll += dt * 40.0f;   // ~40 px/s at 720p reference scale
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isActionPressed(GameAction::JUMP) ||
+            Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
+            Input::isKeyPressed(SDL_SCANCODE_ESCAPE) ||
+            m_creditsScroll > Credits::scrollEnd()) {
+            m_gameState = GameState::VICTORY;
+        }
+        break;
     case GameState::VICTORY:
         // Final victory (Hell floor 50 cleared) — "You conquered the Dungeon Engine."
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
@@ -705,12 +723,21 @@ void Engine::update(f32 dt) {
             m_gameState = GameState::MENU;
             AudioSystem::stopMusic();
             Input::setRelativeMouseMode(false);
+            // Tear the net session down on the way out — the ending now REACHES clients (the
+            // credits broadcast), so both roles pass through here with a live session. Without
+            // this the host's server lingered under the main menu and a guest reconnect met a
+            // ghost lobby.
+            if (m_netRole != NetRole::NONE) {
+                Net::disconnect();
+                m_netRole = NetRole::NONE;
+            }
             // Belt-and-suspenders: clear the session-only secret-superboss state on return to menu
             // (NEW_GAME / loadGame also reset it; this guards a lingering s_engineSlain ending flag).
             s_sourceShards = 0;
             s_engineSlain  = false;
             m_level.inSourceChamber    = false;
             m_level.sourcePortalActive = false;
+            m_level.exitPortalActive   = false;
         }
         break;
     }
@@ -1803,6 +1830,10 @@ void Engine::gameUpdate(f32 dt) {
     // full shard set, and enter when the player steps into it. Returns true on entry (world rebuilt).
     if (updateSourcePortal()) return;
 
+    // Exit portal (post-Engine): entering starts the shared credits sequence — skip the rest of
+    // this player's tick exactly like a floor descent (the world is about to stop mattering).
+    if (updateExitPortal()) return;
+
     // Toggle inventory (Tab key). Co-op decision (L3): opening an inventory does NOT pause
     // the game — the other player and all enemies keep running. This is intentional couch
     // co-op behavior (a shared session can't freeze for one player); inventory is simply not
@@ -2002,11 +2033,14 @@ void Engine::resolveInteractTargets(InteractState& st) {
                   lengthSq(m_level.floorDoorPos - m_localPlayer.position) < 4.0f;
     st.nearPortal = m_level.sourcePortalActive &&
                     lengthSq(m_level.sourcePortalPos - m_localPlayer.position) < 4.0f;
+    st.nearExitPortal = m_level.exitPortalActive &&
+                        lengthSq(m_level.exitPortalPos - m_localPlayer.position) < 4.0f;
 }
 
 void Engine::updatePlayerPickup(f32 dt) {
     m_descendRequested = false;   // updateFloorDoor consumes this later in the same tick
     m_portalRequested  = false;   // ...and updateSourcePortal right after it
+    m_creditsRequested = false;   // ...and updateExitPortal after that
 
     InteractState& st = m_interact[m_localPlayerIndex];
     resolveInteractTargets(st);
@@ -2015,7 +2049,7 @@ void Engine::updatePlayerPickup(f32 dt) {
     // item always wins a tap; a hold reaches past it to the shrine, then the exit.
     // The exit and The Source portal are one priority class: both are "leave the floor", both are
     // outranked by loot, and both are reachable by holding.
-    const bool hasExitTarget = st.nearExit || st.nearPortal;
+    const bool hasExitTarget = st.nearExit || st.nearPortal || st.nearExitPortal;
     const bool hasHoldTarget = (st.shrineIdx >= 0) || hasExitTarget;
     // Chests — real (world-item sentinel) or fake (dormant mimic entity) — compete in the
     // ITEM class of the tap rule: opening one is a tap, exactly like grabbing loot. Real
@@ -2031,9 +2065,11 @@ void Engine::updatePlayerPickup(f32 dt) {
     const bool wantItem   = (target == Interact::Target::ITEM);
     const bool wantShrine = (target == Interact::Target::SHRINE);
     if (target == Interact::Target::EXIT) {
-        // The portal wins a tie: it only exists where you deliberately went looking for it.
-        if (st.nearPortal) m_portalRequested = true;
-        else               m_descendRequested = true;   // updateFloorDoor owns the boss gate + net path
+        // The portals win a tie: each only exists where you deliberately went looking for it
+        // (and the exit portal never coexists with a floor door — the chamber has none).
+        if (st.nearExitPortal)  m_creditsRequested = true;
+        else if (st.nearPortal) m_portalRequested = true;
+        else                    m_descendRequested = true;   // updateFloorDoor owns the boss gate + net path
     }
 
     // CLIENT: pickups are SERVER-AUTHORITATIVE (N5). The client never consumes globes or
@@ -2370,6 +2406,18 @@ void Engine::sendDescendRequest() {
 // feedback is a follow-up SV_EVENT.
 void Engine::handleDescendRequest(u8 playerSlot) {
     if (playerSlot >= MAX_PLAYERS) return;
+    // Post-Engine exit portal: in the Source chamber there is no floor door, so a guest's
+    // "leave" request resolves against the portal instead — same slot byte, same proximity
+    // discipline. First one in rolls the credits for everyone (beginCreditsSequence is
+    // idempotent once CREDITS/VICTORY is reached).
+    if (m_level.exitPortalActive) {
+        const NetPlayer& np = m_players[playerSlot];
+        if (!np.active || np.isDead) return;
+        if (lengthSq(m_level.exitPortalPos - np.position) >= 4.0f) return;
+        LOG_INFO("CL_REQUEST_DESCEND from slot %u accepted — exit portal, rolling credits", playerSlot);
+        beginCreditsSequence(true);   // the portal only exists after the Engine fell
+        return;
+    }
     if (!m_level.floorDoorActive) return;
     const NetPlayer& np = m_players[playerSlot];
     if (!np.active || np.isDead) return;
@@ -2653,10 +2701,10 @@ bool Engine::triggerFloorDescent() {
             LOG_INFO("Advancing to %s difficulty",
                      m_difficulty == 1 ? "Nightmare" : "Hell");
         } else {
-            // Hell complete — final victory
-            m_gameState = GameState::VICTORY;
-            AudioSystem::stopMusic();
-            Input::setRelativeMouseMode(false);
+            // Hell complete — the run's standard ending. Rolls credits on every machine (the
+            // old direct VICTORY flip was host-local and hung co-op clients, same bug class as
+            // the Engine kill) and falls through to the VICTORY screen after.
+            beginCreditsSequence(false);
         }
     } else {
         m_transition.timer = 2.0f;
@@ -2835,6 +2883,22 @@ bool Engine::updateSourcePortal() {
         return true;
     }
     return false;
+}
+
+// Post-Engine exit portal — consume the arbitrated enter request (same discipline as
+// updateSourcePortal above: entering the ending is irreversible, so it must never ride a raw
+// button read aimed at loot). SERVER/SP starts the shared credits sequence directly; a CLIENT
+// asks the server via CL_REQUEST_DESCEND, whose handler resolves proximity against the portal.
+bool Engine::updateExitPortal() {
+    if (!m_level.exitPortalActive) return false;
+    if (!m_creditsRequested) return false;
+    m_creditsRequested = false;
+    if (m_netRole == NetRole::CLIENT) {
+        sendDescendRequest();
+        return false;   // keep ticking until the server's SV_EVENT::CREDITS arrives
+    }
+    beginCreditsSequence(true);   // the portal only exists after the Engine fell
+    return true;
 }
 
 void Engine::spawnDynamicLight(Vec3 pos, Vec3 color, f32 duration) {

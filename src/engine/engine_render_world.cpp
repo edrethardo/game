@@ -825,6 +825,12 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         drawPrompt(doorStr, {0.3f, 1.0f, 0.4f}, static_cast<f32>(sh) * 0.4f);
     }
 
+    // The post-Engine exit portal — the run's ending, so the label says so. (The Source ENTRY
+    // portal deliberately has no prompt: it's a secret. This one must be found by everyone.)
+    if (st.nearExitPortal && m_gameState == GameState::IN_GAME) {
+        drawPrompt("Leave the Dungeon", {1.0f, 0.85f, 0.4f}, static_cast<f32>(sh) * 0.4f);
+    }
+
     // Shrine. A shrine you cannot tell is interactable is just scenery, and the prompt is the only
     // place the player learns which of the three it is before spending it.
     if (st.shrineIdx >= 0 && m_gameState == GameState::IN_GAME) {

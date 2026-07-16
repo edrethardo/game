@@ -68,6 +68,8 @@ enum struct GameState : u8 {
     GAME_OVER,          // player died, show death screen
     FLOOR_TRANSITION,   // between-floor title card (2s hold)
     VICTORY,            // player completed floor 50 — victory screen before menu return
+    CREDITS,            // scrolling credits (entered via the post-Engine exit portal or the
+                        // Hell-complete ending; broadcast to clients, leads into VICTORY)
 };
 
 // How a call to Engine::startGame() should treat player progression state.
@@ -541,6 +543,11 @@ private:
         bool          inSourceChamber    = false; // we are inside The Source fighting the Engine
         bool          sourcePortalActive = false; // the second hidden portal is live in the floor-50 arena
         Vec3          sourcePortalPos;            // its world position (valid while sourcePortalActive)
+        // The way OUT — spawned when the Dungeon Engine superboss dies. Unlike the (hidden,
+        // host-only) Source portal above, this one is replicated to clients via
+        // SV_EVENT::EXIT_PORTAL so everyone can see it and walk in; entering rolls the credits.
+        bool          exitPortalActive = false;
+        Vec3          exitPortalPos;              // valid while exitPortalActive
     };
     LevelState m_level;
 
@@ -900,6 +907,7 @@ private:
         s32  chestIdx  = -1;
         bool nearExit   = false;     // standing in the floor-exit trigger
         bool nearPortal = false;     // standing in The Source portal trigger (floor 50 secret)
+        bool nearExitPortal = false; // standing in the post-Engine exit portal (rolls credits)
         Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
     };
     InteractState m_interact[MAX_LOCAL_PLAYERS];
@@ -909,6 +917,8 @@ private:
     // Same arbitration for The Source portal (updateSourcePortal). It is EXIT-class: entering the
     // superboss chamber is irreversible, so a tap meant for the loot at your feet must never do it.
     bool m_portalRequested = false;
+    bool m_creditsRequested = false;   // arbitrated exit-portal enter (see m_portalRequested)
+    f32  m_creditsScroll = 0.0f;       // CREDITS state: scroll position in rows-of-text pixels
 
     void resolveInteractTargets(InteractState& st);
 
@@ -943,6 +953,14 @@ private:
     void enterSourceChamber();
     // Client: mirror of enterSourceChamber driven by the sentinel-floor SV_LEVEL_SEED.
     void enterSourceChamberClient();
+    // Post-Engine victory flow: portal spawn (host: local + broadcast; client: via SV_EVENT),
+    // the arbitrated enter (updateExitPortal), and the shared credits sequence. startCredits is
+    // the LOCAL state flip every machine runs; beginCreditsSequence is the server/SP entry that
+    // broadcasts first — this is what un-hangs co-op clients on the run's ending.
+    void spawnExitPortal(Vec3 pos);
+    bool updateExitPortal();
+    void beginCreditsSequence(bool engineSlain);
+    void startCredits(bool engineSlain);
 
     // gameUpdate helpers — extracted from the god function for readability.
     // Each is called exactly once, in the same order they appear in gameUpdate.

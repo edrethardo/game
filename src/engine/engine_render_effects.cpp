@@ -403,6 +403,32 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
         }
     }
 
+    // --- The EXIT portal — spawned when the Dungeon Engine dies; entering rolls the credits ---
+    // Warm gold/white so it reads as "the way out" against the void-violet entry portal above.
+    // Drawn on EVERY machine: unlike sourcePortalActive, exitPortalActive is replicated to
+    // clients via SV_EVENT::EXIT_PORTAL (guests must be able to find and enter it).
+    if (m_level.exitPortalActive) {
+        Vec3 dp = m_level.exitPortalPos;
+        f32 t = static_cast<f32>(m_statsTimer);
+        f32 pulse = 0.5f + 0.5f * sinf(t * 3.0f);
+        f32 fastPulse = 0.5f + 0.5f * sinf(t * 8.0f);
+        Vec3 beamCol = {1.0f * pulse, 0.85f * pulse + 0.1f, 0.35f * pulse + 0.15f};
+        for (f32 ox = -0.08f; ox <= 0.08f; ox += 0.04f) {
+            DebugDraw::line(dp + Vec3{ox, 0, 0}, dp + Vec3{ox, 4.5f, 0}, beamCol);
+            DebugDraw::line(dp + Vec3{0, 0, ox}, dp + Vec3{0, 4.5f, ox}, beamCol);
+        }
+        f32 ringR = 0.7f + fastPulse * 0.12f;
+        Vec3 ringCol = {1.0f * pulse, 0.9f * pulse, 0.55f * pulse};
+        for (u32 s = 0; s < 14; s++) {
+            f32 a0 = static_cast<f32>(s) * (6.28318f / 14.0f) + t * 2.5f;
+            f32 a1 = a0 + (6.28318f / 14.0f);
+            DebugDraw::line(dp + Vec3{cosf(a0) * ringR, 1.0f, sinf(a0) * ringR},
+                            dp + Vec3{cosf(a1) * ringR, 1.0f, sinf(a1) * ringR}, ringCol);
+            DebugDraw::line(dp + Vec3{cosf(a0) * ringR * 0.7f, 2.2f, sinf(a0) * ringR * 0.7f},
+                            dp + Vec3{cosf(a1) * ringR * 0.7f, 2.2f, sinf(a1) * ringR * 0.7f}, ringCol);
+        }
+    }
+
     // --- Loot goblin escape portal — drawn while it stands channeling over its hoard ---
     // Goblin-only flavor, NOT an interactable (contrast the two real portals above): the player
     // can't use it, so there is no interact/priority plumbing — it exists purely so the idle

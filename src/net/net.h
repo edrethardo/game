@@ -265,6 +265,16 @@ enum struct NetEventType : u8 {
     // Payload: posX, posY, posZ (f32×3 = 12 B) + radius (f32 = 4 B) + r,g,b (f32×3 = 12 B) = 28 B.
     // Purely cosmetic; reliable, since novas are infrequent and a missing one is confusing.
     NOVA_FX           = 0x06,
+    // The post-Engine exit portal spawned in the Source chamber. Unlike the (hidden, host-only)
+    // Source ENTRY portal, this one is replicated so guests can SEE it and walk in — the enter
+    // itself is server-validated (rides CL_REQUEST_DESCEND's slot+proximity path). Payload:
+    // posX, posY, posZ (f32×3 = 12 B). Reliable; sent once at Engine death.
+    EXIT_PORTAL       = 0x08,
+    // The run's ending: roll credits on EVERY machine, then the VICTORY screen. Fixes the class
+    // of bug where the host flipped its LOCAL m_gameState to VICTORY and simply stopped sending
+    // snapshots — a co-op client hung forever staring at a frozen world. Payload: engineSlain
+    // (u8, 1 = the secret superboss ending). Reliable; sent once.
+    CREDITS           = 0x09,
     // Entity speech (ally taunts, boss lines, loot-goblin mutters) — bubble + chat line for
     // guests. Speech lives on authoritative entities as static-string pointers (Entity.speechText,
     // never on the snapshot), so before this event a guest saw NO NPC speech at all. The server
