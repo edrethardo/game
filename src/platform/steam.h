@@ -43,6 +43,13 @@ void setLobbyData(const char* key, const char* value); // e.g. "version","name",
 void setLobbyJoinable(bool joinable);                  // false when the game is full
 void openInviteOverlay();                              // Steam overlay "Invite Friends" for the lobby
 
+// --- Achievements ---
+// Unlock by API name (must match an achievement defined for App 4819550 on the Steamworks
+// partner site — see docs/DEPLOYMENT.md → Achievements). Safe to call repeatedly (skips the
+// StoreStats round-trip if already unlocked) and safe without Steam (no-op in itch builds /
+// when the client isn't running), so game code calls it unconditionally at the trigger site.
+void unlockAchievement(const char* apiName);
+
 // Callbacks (set once at startup). onLobbyCreated(lobbyId, ok): the HOST then Net::hostServerSteam +
 // sets lobby data. onLobbyEntered(lobbyId, ownerSteamId): a JOINER then Net::connectToSteamHost(owner)
 // — unless ownerSteamId == localSteamId() (our own lobby, ignore). Accepting an invite / friends-list

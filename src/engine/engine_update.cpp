@@ -108,7 +108,7 @@ static bool deathRespawnPromptHit(u32 sw, u32 sh) {
     return hudX >= cx - 220.0f && hudX <= cx + 220.0f && hudY >= y - 8.0f && hudY <= y + 28.0f;
 }
 // In-game pause menu (m_menu.confirmQuit while IN_GAME): option rows centered at cx —
-// [Continue, (Close Lobby), Options, Save and Quit]. Geometry comes from pauseMenuLayout
+// [Continue, (Close Lobby), (Menagerie), Options, Save and Quit]. Geometry comes from pauseMenuLayout
 // (engine.h), the SAME source the renderer draws from, so the clickable rects cannot drift
 // from the drawn boxes. Returns the option under the cursor, or -1.
 static s8 pauseMenuHit(u32 sw, u32 sh, u8 optCount) {
@@ -119,8 +119,9 @@ static s8 pauseMenuHit(u32 sw, u32 sh, u8 optCount) {
     f32 cy   = static_cast<f32>(sh) * 0.5f;
     const PauseMenuLayout L = pauseMenuLayout(sh);
     if (hudX < cx - L.rowW * 0.5f || hudX > cx + L.rowW * 0.5f) return -1;
-    // Rows are laid out top-down; optCount varies (3, or 4 when the host can close its Steam
-    // lobby) so the hit-test must match the renderer's dynamic option list exactly.
+    // Rows are laid out top-down; optCount varies (3-5: +1 when the host can close its Steam
+    // lobby, +1 once the Menagerie is unlocked) so the hit-test must match the renderer's
+    // dynamic option list exactly.
     for (s8 i = 0; i < static_cast<s8>(optCount); i++) {
         f32 y = cy + L.firstRowOffset - static_cast<f32>(i) * L.rowStep;
         if (hudY >= y && hudY <= y + L.rowH) return i;
@@ -220,8 +221,20 @@ void Engine::update(f32 dt) {
                 (Input::isKeyPressed(SDL_SCANCODE_TAB)
                  || Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_X)
                  || (dclick && hov == 1))) {
+                // Reload restores the CHARACTER from disk but restarts the floor the player
+                // DIED on — never the save header's floor. The header floor cannot be adopted
+                // here: a cleared character's header is deliberately pinned past 50 (floor 51
+                // is the FreePlay::saveCleared marker, kept alive by the no-downgrade guard),
+                // and a Free-Play run's chosen floor/difficulty never matches the header at
+                // all — adopting it teleported a finished hero onto nonexistent "floor 51".
+                // For an ordinary mid-run death the two agree anyway (descent auto-saves).
+                // Clamped ≤50 as a backstop (in-memory floor 51 is the victory signal; a
+                // Source-run death reloads at 50, matching the quit-out path).
+                const u32 diedFloor      = (m_level.currentFloor > 50) ? 50 : m_level.currentFloor;
+                const u8  diedDifficulty = m_difficulty;
                 if (loadGame(m_activeSaveSlot)) {
-                    m_level.currentFloor = m_level.savedFloor;
+                    m_level.currentFloor = diedFloor;
+                    m_difficulty         = diedDifficulty;   // loadGame adopted the header's — keep the run's
                 } else {
                     m_level.currentFloor = 1;
                 }
@@ -258,6 +271,21 @@ void Engine::update(f32 dt) {
         return;
     }
 
+    // Pet menagerie overlay (opened from the pause menu). Freezes the game exactly like the
+    // pause it came from; any back/confirm press returns TO the pause menu, not to gameplay,
+    // so the player lands back where they left. View-only — no selection state to manage.
+    if (m_menagerieOpen) {
+        if (Input::isActionPressed(GameAction::MENU_BACK) ||
+            Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menagerieOpen     = false;
+            m_menu.confirmQuit  = true;
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
     // Pause/quit selection menu
     if (m_menu.confirmQuit) {
         // Mouse control: the cursor was freed when the pause opened. Hover selects an option
@@ -271,11 +299,15 @@ void Engine::update(f32 dt) {
         // so the option auto-hides everywhere else and the menu stays 2 rows. Layout must match the
         // renderer in engine_hud.cpp: [Continue, (Close Lobby), Save and Quit].
         const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
+        // The Menagerie row exists only once the profile has summoned at least one minipet —
+        // an empty museum row would spoil the collection's existence before the first jackpot.
+        const bool hasMenagerie = menagerieUnlocked();
         // Row indices are derived, not hardcoded, so the renderer and this handler cannot drift when
-        // a row appears or disappears. Order: [Continue, (Close Lobby), Options, Save and Quit].
+        // a row appears or disappears. Order: [Continue, (Close Lobby), (Menagerie), Options, Save and Quit].
         u8 pauseIdx = 0;
         const u8 iContinue   = pauseIdx++;
         const u8 iCloseLobby = canCloseLobby ? pauseIdx++ : 0xFF;
+        const u8 iMenagerie  = hasMenagerie ? pauseIdx++ : 0xFF;
         const u8 iOptions    = pauseIdx++;
         const u8 iSaveQuit   = pauseIdx++;
         const u8 pauseOptCount = pauseIdx;
@@ -308,6 +340,12 @@ void Engine::update(f32 dt) {
                 // Continue Playing
                 m_menu.confirmQuit = false;
                 Input::setRelativeMouseMode(true); // recapture the cursor for gameplay
+            } else if (hasMenagerie && m_menu.subSelection == iMenagerie) {
+                // Menagerie — view-only collection page (handled at the top of update()).
+                // confirmQuit is cleared for the same swallow-every-input reason as Options;
+                // the overlay's back press restores it. Cursor stays free (still "paused").
+                m_menagerieOpen    = true;
+                m_menu.confirmQuit = false;
             } else if (m_menu.subSelection == iOptions) {
                 // Options — the same screens the main menu uses (audio / bindings / display), opened
                 // mid-run. They live in GameState::MENU, so we leave IN_GAME and flag WHY, and the
@@ -901,11 +939,18 @@ void Engine::tickSharedSystems(f32 dt) {
 
         // Decay enemy speech timers + log fresh speech to chat (shared entity state → once/frame;
         // the old per-player placement double-ticked these in split-screen).
-        for (u32 a = 0; a < m_entities.activeCount; a++) {
-            u32 idx = m_entities.activeList[a];
-            Entity& e = m_entities.entities[idx];
-            if (e.speechTimer > 0.0f) {
-                if (e.speechText && e.speechTimer > 1.9f) {
+        // Pool by role: a CLIENT's speech state lives on the interp entities (planted there by
+        // the SV_EVENT::SPEECH handler — its own m_entities is the gated-off ghost pool), and it
+        // only DECAYS here: the chat line already arrived with the event, name/color resolved
+        // server-side (nameTag doesn't replicate), so re-logging locally would double-post.
+        {
+            EntityPool& speechPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
+                                                                    : m_entities;
+            for (u32 a = 0; a < speechPool.activeCount; a++) {
+                u32 idx = speechPool.activeList[a];
+                Entity& e = speechPool.entities[idx];
+                if (e.speechTimer <= 0.0f) continue;
+                if (m_netRole != NetRole::CLIENT && e.speechText && e.speechTimer > 1.9f) {
                     const char* name = "???";
                     if (e.flags & ENT_FRIENDLY) {
                         switch (e.npcClass) {
@@ -918,11 +963,41 @@ void Engine::tickSharedSystems(f32 dt) {
                         }
                     } else if (e.enemyType == EnemyType::BOSS) {
                         name = e.nameTag ? e.nameTag : "Boss";
+                    } else if (e.flags & ENT_LOOT_GOBLIN) {
+                        name = "Loot Goblin";   // hoard mutters — not an anonymous "???"
                     }
-                    Vec3 chatCol = (e.flags & ENT_FRIENDLY)
-                        ? Vec3{0.4f, 1.0f, 0.5f}
-                        : Vec3{1.0f, 0.3f, 0.3f};
+                    Vec3 chatCol = (e.flags & ENT_LOOT_GOBLIN)
+                        ? Vec3{1.0f, 0.84f, 0.25f}   // hoard gold, matching the chase trail
+                        : (e.flags & ENT_FRIENDLY)
+                            ? Vec3{0.4f, 1.0f, 0.5f}
+                            : Vec3{1.0f, 0.3f, 0.3f};
                     addChatMessage(name, e.speechText, chatCol);
+                    // Ship the line to guests: bubble + chat on their side (SV_EVENT::SPEECH).
+                    // Fires exactly once per line — same edge as the chat log above. Strings ride
+                    // the wire literally so every current and future speech site replicates
+                    // without a registry; the client bounds-checks hard on receipt.
+                    if (m_netRole == NetRole::SERVER) {
+                        u8 buf[sizeof(PacketHeader) + 6 + 24 + 64];
+                        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+                        hdr->type  = NetPacketType::SV_EVENT;
+                        hdr->flags = 0;
+                        hdr->seq   = 0;
+                        u32 off = sizeof(PacketHeader);
+                        buf[off++] = static_cast<u8>(NetEventType::SPEECH);
+                        buf[off++] = static_cast<u8>(idx);                       // server pool index
+                        buf[off++] = static_cast<u8>(chatCol.x * 255.0f);
+                        buf[off++] = static_cast<u8>(chatCol.y * 255.0f);
+                        buf[off++] = static_cast<u8>(chatCol.z * 255.0f);
+                        u8 nameLen = static_cast<u8>(std::strlen(name));
+                        if (nameLen > 23) nameLen = 23;
+                        buf[off++] = nameLen;
+                        std::memcpy(buf + off, name, nameLen); off += nameLen;
+                        u8 lineLen = static_cast<u8>(std::strlen(e.speechText));
+                        if (lineLen > 63) lineLen = 63;
+                        buf[off++] = lineLen;
+                        std::memcpy(buf + off, e.speechText, lineLen); off += lineLen;
+                        Net::broadcastReliable(buf, off);
+                    }
                     e.speechTimer = 1.8f; // prevent re-logging on next tick
                 }
                 e.speechTimer -= dt;
@@ -1046,10 +1121,13 @@ void Engine::tickSharedSystems(f32 dt) {
         const EntityPool& gobPool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities
                                                                    : m_entities;
         const Entity* gob = nullptr;
+        u32 gobIdx = 0;
         for (u32 a = 0; a < gobPool.activeCount; a++) {
-            const Entity& e = gobPool.entities[gobPool.activeList[a]];
+            const u32 idx = gobPool.activeList[a];
+            const Entity& e = gobPool.entities[idx];
             if ((e.flags & ENT_LOOT_GOBLIN) && !(e.flags & ENT_DEAD) && e.health > 0.0f) {
                 gob = &e;
+                gobIdx = idx;
                 break;
             }
         }
@@ -1057,6 +1135,43 @@ void Engine::tickSharedSystems(f32 dt) {
                                       gob->velocity.z * gob->velocity.z) : 0.0f;
         if (!gob || gobSpeedSq < 1.0f) {
             m_goblinHeadingValid = false;   // parked on its hoard (or gone) — no trail to leave
+
+            // Hoard chatter: a SITTING goblin (IDLE — it hasn't been provoked yet) mutters to
+            // itself and its sack clinks. Gated to earshot (22 m) so the tell rewards walking
+            // near, never announces the goblin from across the floor. The rustle is per-machine
+            // (aiState rides SnapEntity, so guests hear it too); the muttered line goes through
+            // the ordinary entity-speech pipeline — bubble + auto chat line — which only the
+            // authoritative sim owns, same as every other NPC's speech.
+            if (gob && gob->aiState == AIState::IDLE) {
+                m_goblinMutterTimer -= dt;
+                if (m_goblinMutterTimer <= 0.0f) {
+                    m_goblinMutterTimer = 5.0f + (std::rand() % 60) * 0.1f;   // 5-11 s, jittered
+                    Vec3 listener = m_localPlayers[0].position;
+                    f32  best = lengthSq(gob->position - listener);
+                    for (u8 p = 1; p < m_splitPlayerCount; p++) {
+                        if (m_playerDead[p]) continue;
+                        f32 d = lengthSq(gob->position - m_localPlayers[p].position);
+                        if (d < best) { best = d; listener = m_localPlayers[p].position; }
+                    }
+                    if (best < 22.0f * 22.0f) {
+                        AudioSystem::playAt(SfxId::GOBLIN_JINGLE, gob->position, listener, 18.0f);
+                        if (m_netRole != NetRole::CLIENT && (std::rand() % 2) == 0) {
+                            // gobPool IS m_entities here (only CLIENT reads the interp pool),
+                            // so writing speech through gobIdx mutates the authoritative entity.
+                            static const char* kMutters[] = {
+                                "mine, mine, all mine...",
+                                "shiny... so shiny...",
+                                "one, two... three? count again.",
+                                "hee hee... no one finds us.",
+                                "the sack stays SHUT.",
+                            };
+                            Entity& g = m_entities.entities[gobIdx];
+                            g.speechText  = kMutters[std::rand() % 5];
+                            g.speechTimer = 2.4f;
+                        }
+                    }
+                }
+            }
         } else {
             const f32 heading = atan2f(gob->velocity.z, gob->velocity.x);
             if (m_goblinHeadingValid) {
@@ -1412,6 +1527,16 @@ void Engine::gameUpdate(f32 dt) {
             m_localPlayer.deflectTimer    = 0.0f;
             m_localPlayer.markTimer       = 0.0f;
             m_localPlayer.deathsDanceTimer = 0.0f;
+        }
+        // "Butchered" achievement: the killing blow came from The Butcher (floor-5 boss).
+        // Reads the never-cleared killing-blow tracker (combat.cpp) and matches by boss
+        // nameTag, which only the authoritative sim has — so this fires for SP/host/split
+        // lanes; a network GUEST's machine can't know its killer (damage arrives as HP
+        // adoption with no attacker identity on the wire) and self-skips via 0xFFFF.
+        if (m_localPlayer.lastAttackerEntity < MAX_ENTITIES) {
+            const Entity& killer = m_entities.entities[m_localPlayer.lastAttackerEntity];
+            if (killer.nameTag && std::strstr(killer.nameTag, "Butcher"))
+                Steam::unlockAchievement("ACH_BUTCHERED");
         }
         if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
             // Multiplayer or co-op: this player dies, game keeps running
@@ -1927,6 +2052,9 @@ void Engine::updatePlayerPickup(f32 dt) {
             s8 bpSlot = Inventory::addToBackpack(m_inventories[m_localPlayerIndex], picked);
             if (bpSlot >= 0) {
                 AudioSystem::play(SfxId::ITEM_PICKUP);
+                // First WORLD pickup (SP/host lane; a guest's fires in onPickupResult).
+                // Starting-loadout grants and the F7 debug give deliberately don't count.
+                Steam::unlockAchievement("ACH_FIRST_ITEM");
                 if (!m_firstPickupTooltipShown) {
                     m_firstPickupTooltipShown = true;
                 }

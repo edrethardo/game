@@ -835,6 +835,10 @@ private:
 
     // Shared logic
     void handleWeaponFireForPlayer(NetPlayer& np, f32 dt);
+    // Throwing-knife aim assist: bends the throw (≤12°) toward the intercept point of a
+    // target already near the crosshair (7° cone). Shared by the local and remote fire
+    // paths; knives only — see game/lead_assist.h for the full rationale.
+    void applyKnifeLeadAssist(const Vec3& spawnPos, Vec3& dir, f32 projSpeed);
     // Apply a remote player's one-shot activation EDGES (potion + class/boot/helm skills)
     // carried in `in.extFlags` for a single processed input. Called PER-INPUT from the
     // serverNetPre drain loop so every press is seen exactly once (the old getLatest()
@@ -916,6 +920,15 @@ private:
     // gameUpdate helpers — extracted from the god function for readability.
     // Each is called exactly once, in the same order they appear in gameUpdate.
     void tickWandererTimers(f32 dt);             // adrenaline stacks, deflect burst, mark, Death's Dance, floor unlock
+    // Steam achievement polling (once per second from run()'s stats block): currently just the
+    // fully-equipped check — event-driven achievements (first item, Butchered) unlock inline at
+    // their trigger sites. The guard bool keeps the once-unlocked state from re-querying Steam.
+    void checkAchievements();
+    bool m_achFullyEquipped = false;
+    // Deflect window payoff (nova + projectile spread), shared by the local tick above and the
+    // server's remote-lane expiry in serverNetPost — one implementation, no host/guest drift.
+    void fireDeflectBurst(const Vec3& feetPos, const Vec3& forward, f32 eyeHeight,
+                          f32 absorbed, u8 hits, u8 ownerSlot, bool localVisuals);
     void tickPlayerStatusEffects(f32 dt);        // poison / burn / freeze DoT ticks
     void handleDebugKeys();                      // F1-F6 debug toggles and stress spawners
     void tickSharedFX(f32 dt);                   // ONCE/frame: impact/fire/nova/dash/beam/chain/light timers + scorch AoE DoT
@@ -1106,6 +1119,17 @@ private:
     bool m_goblinHeadingValid  = false;
     f32  m_goblinJingleCd      = 0.0f;   // debounce so one jink = one jingle
     f32  m_goblinChatCd        = 0.0f;   // chat is rarer than the jingle or it floods the log
+    // Hoard chatter: while the goblin SITS (aiState IDLE, pre-provocation) it mutters to itself
+    // and its sack clinks now and then — an audible "there is a goblin nearby" tell that fires
+    // only within earshot, so it never spoils the surprise from across the floor.
+    f32  m_goblinMutterTimer   = 4.0f;
+
+    // Guest-side speech-bubble storage. SV_EVENT::SPEECH delivers NPC lines as transient wire
+    // bytes, but Entity.speechText is a bare const char* — so a received line is parked in this
+    // small ring and the interp entity points into it. Eight slots comfortably outlive any
+    // 2.4 s bubble; reuse under absurd speech rates only retextures the oldest bubble.
+    char m_guestSpeechRing[8][64] = {};
+    u8   m_guestSpeechNext = 0;
 
     // The loot goblin: flees, bleeds loot while chased, and expires (paying nothing) if it escapes.
     void spawnLootGoblin(const DungeonResult& dungeon);
@@ -1121,6 +1145,22 @@ private:
     // not say WHICH pet once there was more than one) and lands in onUsePet on the server.
     void togglePetCompanion(u8 ownerSlot, u16 petDefId);
     bool tryUsePetItem(u8 backpackIndex);
+    // --- Pet menagerie: profile-wide "which minipets have I ever summoned" collection ---
+    // Persisted in menagerie.dat beside difficulty_unlock.dat — deliberately NOT part of the
+    // (frozen, versioned) save format, and profile-wide like difficulty unlocks: the collection
+    // belongs to the player, not to one character. Bit i of the mask = enemy def index i's
+    // "Mini <Enemy>"; the goblin (no enemy def) has its own flag. recordPetSummon fires from
+    // tryUsePetItem — the one local entry every use path crosses on every role.
+    u64  m_menagerieEnemyMask = 0;
+    bool m_menagerieGoblin    = false;
+    bool m_menagerieOpen      = false;   // pause-menu subpage overlay (view-only)
+    void loadMenagerie();
+    void saveMenagerie();
+    void recordPetSummon(u16 petDefId);
+    // The pause row only exists once something has been summoned — an empty museum is a
+    // spoiler ("there are 39 pets?!"), a started one is a collection.
+    bool menagerieUnlocked() const { return m_menagerieGoblin || m_menagerieEnemyMask != 0; }
+    void renderMenagerie(u32 sw, u32 sh);
     void sendUsePetPacket(u16 petDefId);
     static void onUsePet(u8 playerSlot, u16 itemDefId);   // Net::OnUsePetFn (defId parsed in net.cpp)
     // enemy def index → its pet item def (0xFFFF = none). Filled at init from petEnemy names;

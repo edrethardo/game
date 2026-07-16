@@ -89,98 +89,21 @@ void Engine::tickWandererTimers(f32 dt) {
 
     // --- Wanderer: tick deflect absorb window ---
     if (m_localPlayer.deflectTimer > 0.0f) {
-        f32 prev = m_localPlayer.deflectTimer;
         m_localPlayer.deflectTimer -= dt;
         if (m_localPlayer.deflectTimer <= 0.0f) {
             m_localPlayer.deflectTimer = 0.0f;
-            // Window expired — burst release: 8 projectiles per absorbed hit
-            u8 hits = m_localPlayer.deflectHitCount;
-            f32 absorbed = m_localPlayer.deflectAbsorbed;
-            if (hits > 0 && absorbed > 0.0f) {
-                Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-
-                // 1. Melee nova first: hit everything within 5.5m for full absorbed damage
-                {
-                    EntityHandle novaHits[MAX_ENTITIES];
-                    f32 novaDists[MAX_ENTITIES];
-                    u32 novaCount = CombatQuery::queryConeSorted(
-                        m_entities, eyePos, m_localPlayer.forward, -1.0f, 5.5f,
-                        novaHits, novaDists, MAX_ENTITIES);
-                    for (u32 ni = 0; ni < novaCount; ni++) {
-                        Combat::applyDamage(m_entities, novaHits[ni], absorbed, &eyePos);
-                    }
-                }
-                // Nova visual — double ring burst for a bigger impact feel
-                for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
-                    if (!m_fx.novaFX[ni].active) {
-                        m_fx.novaFX[ni] = {m_localPlayer.position, 5.5f, 0.6f, true, Vec3{1.0f, 0.5f, 0.1f}};
-                        break;
-                    }
-                }
-                // Second ring slightly delayed and larger for a shockwave look
-                for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
-                    if (!m_fx.novaFX[ni].active) {
-                        m_fx.novaFX[ni] = {m_localPlayer.position, 7.0f, 0.8f, true, Vec3{1.0f, 0.8f, 0.3f}};
-                        break;
-                    }
-                }
-                // Stronger screen shake
-                m_camera.shake.trigger(0.08f, 0.35f);
-
-                // 2. Projectile burst aimed at surviving enemies, split evenly
-                {
-                    // Query surviving enemies after the nova (dead ones are filtered out)
-                    EntityHandle targets[MAX_ENTITIES];
-                    f32 targetDists[MAX_ENTITIES];
-                    u32 targetCount = CombatQuery::queryConeSorted(
-                        m_entities, eyePos, m_localPlayer.forward, -1.0f, 30.0f,
-                        targets, targetDists, MAX_ENTITIES);
-                    u32 totalProj = static_cast<u32>(hits) * 8u;
-                    if (targetCount > 0) {
-                        // Split projectiles evenly across surviving enemies
-                        u32 projPerTarget = totalProj / targetCount;
-                        if (projPerTarget < 1) projPerTarget = 1;
-                        u32 spawned = 0;
-                        for (u32 ti = 0; ti < targetCount && spawned < totalProj; ti++) {
-                            Entity* tgt = handleGet(m_entities, targets[ti]);
-                            if (!tgt) continue;
-                            Vec3 targetPos = tgt->position + Vec3{0, tgt->halfExtents.y, 0};
-                            Vec3 dir = normalize(targetPos - eyePos);
-                            u32 count = (ti < targetCount - 1) ? projPerTarget : (totalProj - spawned);
-                            for (u32 pi = 0; pi < count; pi++) {
-                                for (u32 si = 0; si < MAX_PROJECTILES; si++) {
-                                    Projectile& proj = m_projectiles.projectiles[si];
-                                    if (!proj.active) {
-                                        proj = {};
-                                        proj.active = true;
-                                        proj.fromPlayer = true;
-                                        proj.position = eyePos;
-                                        proj.velocity = dir * 15.0f;
-                                        proj.damage = absorbed;
-                                        proj.radius = 0.12f;
-                                        proj.lifetime = 2.0f;
-                                        proj.lightColor = {1.0f, 0.6f, 0.2f};
-                                        m_projectiles.activeCount++;
-                                        spawned++;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // No surviving enemies = no projectiles (nova was enough)
-                }
-
-                m_localPlayer.deflectAbsorbed = 0.0f;
-                m_localPlayer.deflectHitCount = 0;
-                // 8% move speed buff for 3 seconds after burst
-                m_localPlayer.deflectSpeedTimer = 3.0f;
-                // Screen shake feedback
-                m_camera.shake.trigger(0.08f, 0.35f);
-            } else {
-                m_localPlayer.deflectAbsorbed = 0.0f;
-                m_localPlayer.deflectHitCount = 0;
-            }
+            // Window expired — burst release. Shared implementation (also fired by the server
+            // for remote Wanderers in serverNetPost); on a CLIENT this call is prediction —
+            // ghost damage corrected by the snapshot, the real hits are the server's.
+            const u8  hits     = m_localPlayer.deflectHitCount;
+            const f32 absorbed = m_localPlayer.deflectAbsorbed;
+            fireDeflectBurst(m_localPlayer.position, m_localPlayer.forward,
+                             m_localPlayer.eyeHeight, absorbed, hits,
+                             m_localPlayer.netSlot, /*localVisuals=*/true);
+            if (hits > 0 && absorbed > 0.0f)
+                m_localPlayer.deflectSpeedTimer = 3.0f;   // +8% for 3 s — only if it actually burst
+            m_localPlayer.deflectAbsorbed = 0.0f;
+            m_localPlayer.deflectHitCount = 0;
         }
     }
     // --- Wanderer: tick deflect speed buff ---
@@ -224,6 +147,112 @@ void Engine::tickWandererTimers(f32 dt) {
         m_localPlayer.adrenalineUpgraded = (m_level.currentFloor >= 30);
         // Max adrenaline stacks: 3 on floors 1-4, raised to 5 from floor 5 onward.
         m_localPlayer.adrenalineMaxStacks = (m_level.currentFloor >= 5) ? 5 : 3;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// fireDeflectBurst — the Deflect window's payoff: melee nova for the full absorbed damage,
+// then 8 projectiles per absorbed hit split across surviving enemies. ONE implementation,
+// shared by the local player's window tick (above) and the server's remote-lane expiry
+// (serverNetPost) — before the port a remote Wanderer's Deflect absorbed on a throwaway view
+// and the burst never fired at all. `ownerSlot` carries kill credit (the old inline code left
+// projectiles at ownerSlot 0, so a burst kill always credited the host); `localVisuals` gates
+// the camera shake to the machine's own player. Nova rings render locally AND replicate to
+// guests via NOVA_FX — except back to ownerSlot, whose own client already predicted the burst
+// (an echoed ring arriving ~RTT later reads as a stutter).
+// ---------------------------------------------------------------------------
+void Engine::fireDeflectBurst(const Vec3& feetPos, const Vec3& forward, f32 eyeHeight,
+                              f32 absorbed, u8 hits, u8 ownerSlot, bool localVisuals)
+{
+    if (hits == 0 || absorbed <= 0.0f) return;
+    const Vec3 eyePos = feetPos + Vec3{0, eyeHeight, 0};
+    Combat::setAttackingPlayer(ownerSlot);   // nova + projectile kills credit the deflector
+
+    // 1. Melee nova first: hit everything within 5.5m for full absorbed damage
+    {
+        EntityHandle novaHits[MAX_ENTITIES];
+        f32 novaDists[MAX_ENTITIES];
+        u32 novaCount = CombatQuery::queryConeSorted(
+            m_entities, eyePos, forward, -1.0f, 5.5f,
+            novaHits, novaDists, MAX_ENTITIES);
+        for (u32 ni = 0; ni < novaCount; ni++) {
+            Combat::applyDamage(m_entities, novaHits[ni], absorbed, &eyePos);
+        }
+    }
+
+    // Nova visual — double ring burst for a bigger impact feel; replicated to guests
+    // (minus the predicting owner) so they see the shockwave, not just enemies dying.
+    auto novaRing = [&](f32 radius, f32 duration, Vec3 color) {
+        for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+            if (!m_fx.novaFX[ni].active) {
+                m_fx.novaFX[ni] = {feetPos, radius, duration, true, color};
+                break;
+            }
+        }
+        if (m_netRole != NetRole::SERVER) return;
+        u8 buf[sizeof(PacketHeader) + 29]; // hdr(4) + eventType(1) + pos(12) + radius(4) + color(12)
+        PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);
+        hdr->type  = NetPacketType::SV_EVENT;
+        hdr->flags = 0;
+        hdr->seq   = 0;
+        u32 off = sizeof(PacketHeader);
+        buf[off++] = static_cast<u8>(NetEventType::NOVA_FX);
+        std::memcpy(buf + off, &feetPos.x, 4); off += 4;
+        std::memcpy(buf + off, &feetPos.y, 4); off += 4;
+        std::memcpy(buf + off, &feetPos.z, 4); off += 4;
+        std::memcpy(buf + off, &radius,    4); off += 4;
+        std::memcpy(buf + off, &color.x,   4); off += 4;
+        std::memcpy(buf + off, &color.y,   4); off += 4;
+        std::memcpy(buf + off, &color.z,   4); off += 4;
+        Net::broadcastReliableExcept(ownerSlot, buf, off);
+    };
+    novaRing(5.5f, 0.6f, {1.0f, 0.5f, 0.1f});
+    novaRing(7.0f, 0.8f, {1.0f, 0.8f, 0.3f});   // second ring larger for a shockwave look
+    if (localVisuals) m_camera.shake.trigger(0.08f, 0.35f);
+
+    // 2. Projectile burst aimed at surviving enemies, split evenly
+    {
+        // Query surviving enemies after the nova (dead ones are filtered out)
+        EntityHandle targets[MAX_ENTITIES];
+        f32 targetDists[MAX_ENTITIES];
+        u32 targetCount = CombatQuery::queryConeSorted(
+            m_entities, eyePos, forward, -1.0f, 30.0f,
+            targets, targetDists, MAX_ENTITIES);
+        u32 totalProj = static_cast<u32>(hits) * 8u;
+        if (targetCount > 0) {
+            // Split projectiles evenly across surviving enemies
+            u32 projPerTarget = totalProj / targetCount;
+            if (projPerTarget < 1) projPerTarget = 1;
+            u32 spawned = 0;
+            for (u32 ti = 0; ti < targetCount && spawned < totalProj; ti++) {
+                Entity* tgt = handleGet(m_entities, targets[ti]);
+                if (!tgt) continue;
+                Vec3 targetPos = tgt->position + Vec3{0, tgt->halfExtents.y, 0};
+                Vec3 dir = normalize(targetPos - eyePos);
+                u32 count = (ti < targetCount - 1) ? projPerTarget : (totalProj - spawned);
+                for (u32 pi = 0; pi < count; pi++) {
+                    for (u32 si = 0; si < MAX_PROJECTILES; si++) {
+                        Projectile& proj = m_projectiles.projectiles[si];
+                        if (!proj.active) {
+                            proj = {};
+                            proj.active = true;
+                            proj.fromPlayer = true;
+                            proj.ownerSlot = ownerSlot;   // was defaulted (0): kills credited the host
+                            proj.position = eyePos;
+                            proj.velocity = dir * 15.0f;
+                            proj.damage = absorbed;
+                            proj.radius = 0.12f;
+                            proj.lifetime = 2.0f;
+                            proj.lightColor = {1.0f, 0.6f, 0.2f};
+                            m_projectiles.activeCount++;
+                            spawned++;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // No surviving enemies = no projectiles (nova was enough)
     }
 }
 

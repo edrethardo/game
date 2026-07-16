@@ -61,7 +61,10 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // v14: new CL_USE_PET (0x0C) — pet-consumable use with a defId payload (replaces the payload-less
 // INPUT_EX_PET input bit, which could not say WHICH pet once every enemy gained one). A v13 client
 // would never send it, so on a v14 server its pet clicks would silently do nothing — reject cleanly.
-static constexpr u32 PROTOCOL_VERSION  = 14; // v13: player record single shrineTimerQ pair (was
+// v15: SV_EVENT gained SPEECH (0x07) — NPC speech bubbles + chat for guests. Additive (an older
+// client ignores the unknown event byte), but half the co-op party missing every ally taunt and
+// goblin mutter is exactly the silent-parity-gap class this bump family exists to pair away.
+static constexpr u32 PROTOCOL_VERSION  = 15; // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
@@ -238,6 +241,15 @@ enum struct NetEventType : u8 {
     // Payload: posX, posY, posZ (f32×3 = 12 B) + radius (f32 = 4 B) + r,g,b (f32×3 = 12 B) = 28 B.
     // Purely cosmetic; reliable, since novas are infrequent and a missing one is confusing.
     NOVA_FX           = 0x06,
+    // Entity speech (ally taunts, boss lines, loot-goblin mutters) — bubble + chat line for
+    // guests. Speech lives on authoritative entities as static-string pointers (Entity.speechText,
+    // never on the snapshot), so before this event a guest saw NO NPC speech at all. The server
+    // resolves the speaker name/color (nameTag only exists host-side) and ships the literal
+    // strings — rare and reliable, so the ~100 B worst case is irrelevant and no string-registry
+    // needs maintaining. Payload: poolIdx (u8) + r,g,b (u8×3) + nameLen (u8) + name (≤23 B)
+    // + lineLen (u8) + line (≤63 B). The client mirrors chat directly and parks the line in a
+    // small ring so the interp entity's speechText can point at persistent storage.
+    SPEECH            = 0x07,
 };
 
 // 4-byte packet header on every packet.

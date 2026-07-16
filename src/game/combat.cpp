@@ -351,7 +351,7 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     // `attackerIdx < MAX_ENTITIES`, so they self-skip and only the stack grant runs.
     if (player.dodgeState.rolling) {
         if (s_dodgeThroughCallback) {
-            s_dodgeThroughCallback(attackerIdx, attackerPos ? *attackerPos : Vec3{0, 0, 0});
+            s_dodgeThroughCallback(player, attackerIdx, attackerPos ? *attackerPos : Vec3{0, 0, 0});
         }
         // During i-frames (first 0.3s), block all damage
         if (player.invulnTimer > 0.0f) return;
@@ -401,6 +401,10 @@ void Combat::applyDamageToPlayer(Player& player, f32 damage, const Vec3* attacke
     // thorns can reflect at the actual attacker (0xFFFF for sources with no attacker entity).
     player.lastDamageTaken = damage;
     player.lastDamageAttackerIdx = attackerIdx;
+    // Killing-blow bookkeeping (never frame-cleared, unlike the thorns pair above — those are
+    // consumed and zeroed by the retaliation pass): only overwrite when the hit HAS a source
+    // entity, so an environmental tick can't erase the real killer between hit and death check.
+    if (attackerIdx < MAX_ENTITIES) player.lastAttackerEntity = attackerIdx;
 
     // Near-death grace ("lifesaver"): when a hit drops the player into critical HP
     // (<20%) — OR would have killed them outright (a one-shot) — grant a brief invisible

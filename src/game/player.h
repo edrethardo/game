@@ -114,6 +114,21 @@ struct Player {
     bool blocking         = false;
     f32  blockTimer        = 0.0f;  // time since block started (for perfect block window)
 
+    // Which engine player slot this Player object stands for — net slot for a server-side
+    // remote VIEW (seedRemoteView), local lane for the swapped-in alias (swapInPlayer).
+    // Transient identity for combat callbacks (dodge-through riposte/adrenaline) that
+    // receive a bare Player& and must reach the right inventory + kill credit; before it
+    // existed the callback hardcoded m_localPlayer and a guest's dodge-through fired the
+    // HOST's riposte and fed the HOST's stacks. Runtime-only, never serialized.
+    u8   netSlot          = 0;
+
+    // Entity that last actually DAMAGED this player (0xFFFF = none/environmental). Written by
+    // Combat::applyDamageToPlayer where health is subtracted — absorbed/i-framed hits don't
+    // count — so at death it names the killing blow (the "Butchered" achievement reads it).
+    // Direct attacks only; enemy projectiles carry no source entity and leave it untouched.
+    // Runtime-only, never serialized.
+    u16  lastAttackerEntity = 0xFFFF;
+
     // --- Wanderer ---
     DodgeState dodgeState;
     f32  deflectTimer     = 0.0f;  // absorb window countdown (0.4s)

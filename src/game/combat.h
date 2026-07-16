@@ -72,7 +72,11 @@ namespace Combat {
     f32 armorMitigation(f32 armor);
 
     // Dodge-through callback: called when damage is blocked during a dodge roll
-    using DodgeThroughCallback = void(*)(u16 attackerIdx, Vec3 attackerPos);
+    // `victim` is the player who dodged — the local Player OR a server-side remote view
+    // (identity via Player::netSlot). The old (attackerIdx, attackerPos)-only shape forced the
+    // handler to assume m_localPlayer, so a guest's dodge-through fired the HOST's riposte and
+    // fed the HOST's adrenaline.
+    using DodgeThroughCallback = void(*)(Player& victim, u16 attackerIdx, Vec3 attackerPos);
     void setDodgeThroughCallback(DodgeThroughCallback cb);
 
     // Execute a melee attack (cone check, damage all in cone).

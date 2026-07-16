@@ -153,12 +153,34 @@ struct NetPlayer {
     u8   markSpeedStacks   = 0;
     f32  markSpeedTimers[20] = {};
 
+    // Overdrive buff (+30% move speed) — set by a remote's Mech Overdrive (5 s) and War Cry
+    // (3 s, which reuses the same Player timer) through the remote-cast view, applied in
+    // updateNetPlayerFromInput, ticked for remote lanes in serverNetPost. Mirrors
+    // Player::overdriveTimer; not on the wire (the owning client predicts its own cast, same
+    // trust model as shadowDanceTimer above). Before this field existed a remote's Overdrive/
+    // War Cry did literally nothing in co-op — the buff died in the throwaway view.
+    f32  overdriveTimer    = 0.0f;
+
+    // Wanderer kit state (2026-07-16 parity port — before these fields existed a remote
+    // Wanderer's Deflect, Death's Dance, and Adrenaline Surge did nothing: the mechanics
+    // lived only in host-local-player code and the view mirrors had no home for the state).
+    // All mirrored through seedRemoteView/writeBackRemoteView; ticked for remote lanes in
+    // serverNetPost; none on the wire (the owning client predicts its own kit locally).
+    f32  deflectTimer      = 0.0f;   // Deflect absorb window (0.4 s; absorbs accumulate below)
+    f32  deflectAbsorbed   = 0.0f;   // damage swallowed during the window (burst payload)
+    u8   deflectHitCount   = 0;      // hits swallowed (×8 projectiles on burst)
+    f32  deflectSpeedTimer = 0.0f;   // +8% move speed for 3 s after the burst
+    f32  deathsDanceTimer  = 0.0f;   // ultimate window: AoE slash on every dodge-through
+    u8   counterStacks     = 0;      // Adrenaline Surge stacks (speed/attack-speed)
+    f32  counterTimers[5]  = {};     // per-stack 4 s decay (compact-down like markSpeedTimers)
+    // Derived per-frame in serverNetPost from playerClass + currentFloor (player.cpp's
+    // updateNetPlayerFromInput can't see the floor): gates the counterStacks speed bonus.
+    bool adrenalineUpgraded = false;
+
     // Shrine buff. The server MUST hold this: it integrates remote movement in
     // PlayerController::updateNetPlayerFromInput, so a speed buff that lived only in the client's
     // local Player would be predicted client-side while the server kept moving that NetPlayer at
-    // base speed — and the snapshot would drag them back every single tick. (Contrast
-    // Player::overdriveTimer, which has NO NetPlayer field: that is precisely why a remote
-    // Engineer's Mech Overdrive and a remote Warrior's War Cry already do nothing in co-op.)
+    // base speed — and the snapshot would drag them back every single tick.
     u8   shrineBuff        = 0;      // ShrineBuff::
     f32  shrineBuffValue   = 0.0f;
     f32  shrineBuffTimer   = 0.0f;

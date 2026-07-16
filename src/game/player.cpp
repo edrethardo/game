@@ -326,6 +326,21 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
     if (np.shadowDanceTimer > 0.0f) {
         effectiveSpeed *= 1.2f;
     }
+    // Overdrive (Mech Overdrive / War Cry): +30% move speed — MUST mirror the host's factor at
+    // engine_update.cpp (m_localPlayer.moveSpeed *= 1.3f) or a buffed remote rubber-bands: it
+    // predicts the faster movement locally and the server would keep integrating at base speed.
+    if (np.overdriveTimer > 0.0f) {
+        effectiveSpeed *= 1.3f;
+    }
+    // Wanderer Deflect burst afterglow: +8% for 3 s (mirrors the host's factor above).
+    if (np.deflectSpeedTimer > 0.0f) {
+        effectiveSpeed *= 1.08f;
+    }
+    // Wanderer Adrenaline Surge (floor-30 upgrade): +5% per stack (mirrors the host bonus
+    // above; adrenalineUpgraded is derived server-side in serverNetPost — no floor here).
+    if (np.adrenalineUpgraded && np.counterStacks > 0) {
+        effectiveSpeed *= (1.0f + np.counterStacks * 0.05f);
+    }
     // Wanderer Exploit Weakness speed stacks: +5% per stack (mirrors host at player.cpp:116).
     if (np.markSpeedStacks > 0) {
         effectiveSpeed *= (1.0f + np.markSpeedStacks * 0.05f);

@@ -502,16 +502,20 @@ void Engine::initCallbacks() {
         }
     });
 
-    // Dodge-through callback: fires an automatic riposte counter-hit when the player
-    // dodges through an incoming attack, and grants an adrenaline stack if unlocked.
-    Combat::setDodgeThroughCallback([](u16 attackerIdx, Vec3 attackerPos) {
+    // Dodge-through callback: fires an automatic riposte counter-hit when a player dodges
+    // through an incoming attack, and grants an adrenaline stack if unlocked. `victim` is
+    // whichever Player object took the mid-roll hit — the local player OR a server-side
+    // remote view (identity via victim.netSlot). It used to hardcode m_localPlayer, so a
+    // GUEST's dodge-through swung the HOST's weapon and fed the HOST's stacks.
+    Combat::setDodgeThroughCallback([](Player& victim, u16 attackerIdx, Vec3 attackerPos) {
         if (!s_engine) return;
-        Player& player = s_engine->m_localPlayer;
+        Player& player = victim;
+        const u8 slot  = victim.netSlot;   // inventory index + kill credit (lane == slot on host)
 
         // 1. Instant riposte: 50% weapon damage counter-hit on the attacker.
         // m_weaponDefs[0] is the fallback if no item is equipped (unarmed).
         WeaponDef effectiveWeapon = Inventory::getEffectiveWeapon(
-            s_engine->m_inventories[s_engine->m_localPlayerIndex],
+            s_engine->m_inventories[slot],
             s_engine->m_itemDefs, s_engine->m_weaponDefs[0]);
         f32 riposteDmg = effectiveWeapon.damage * 0.5f;
 
@@ -520,6 +524,7 @@ void Engine::initCallbacks() {
             EntityHandle h;
             h.index      = attackerIdx;
             h.generation = s_engine->m_entities.entities[attackerIdx].generation;
+            Combat::setAttackingPlayer(slot);   // riposte kills credit the dodger, not slot 0
             Combat::applyDamage(s_engine->m_entities, h, riposteDmg, &player.position);
             Combat::spawnDamageNumber(attackerPos, riposteDmg);
         }
@@ -555,7 +560,7 @@ void Engine::initCallbacks() {
         //    slash to all nearby enemies on every dodge-through
         if (player.deathsDanceTimer > 0.0f) {
             WeaponDef ew = Inventory::getEffectiveWeapon(
-                s_engine->m_inventories[s_engine->m_localPlayerIndex],
+                s_engine->m_inventories[slot],
                 s_engine->m_itemDefs, s_engine->m_weaponDefs[0]);
             f32 slashDmg = ew.damage;
             Vec3 eyePos  = player.position + Vec3{0, player.eyeHeight, 0};
@@ -567,6 +572,7 @@ void Engine::initCallbacks() {
                 s_engine->m_entities, eyePos, player.forward, -1.0f, 3.0f,
                 hits, dists, MAX_ENTITIES);
             f32 totalDmg = 0.0f;
+            Combat::setAttackingPlayer(slot);   // slash kills credit the dancing player
             for (u32 k = 0; k < hitCount; k++) {
                 Entity* he = handleGet(s_engine->m_entities, hits[k]);
                 if (he && !(he->flags & ENT_DEAD)) {
@@ -583,8 +589,10 @@ void Engine::initCallbacks() {
             }
         }
 
-        // 4. Subtle screen-shake for tactile riposte feedback
-        if (s_engine->m_camera.shake.intensity < 0.03f) {
+        // 5. Subtle screen-shake for tactile riposte feedback — LOCAL victim only (a remote
+        // view's dodge-through must not rattle the host's camera).
+        if (&victim == &s_engine->m_localPlayer &&
+            s_engine->m_camera.shake.intensity < 0.03f) {
             s_engine->m_camera.shake.trigger(0.03f, 0.2f);
         }
     });

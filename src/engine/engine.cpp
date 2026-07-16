@@ -333,6 +333,37 @@ void Engine::onEvent(const u8* data, u32 size) {
             std::memcpy(&color.z, data + off, 4); off += 4;
             s_engine->emitNovaFX(pos, radius, color);  // broadcast branch is SERVER-gated — no echo
         } break;
+        case NetEventType::SPEECH: {
+            // NPC speech (bubble + chat line) resolved and shipped by the server — see the
+            // NetEventType doc. Wire strings are untrusted input: every length byte is checked
+            // against the remaining payload and capped to the local buffers before any copy.
+            u32 off = sizeof(PacketHeader) + 1;
+            if (size < off + 6) break;               // poolIdx + rgb + nameLen + lineLen minimum
+            u8  poolIdx = data[off++];
+            f32 r = data[off++] / 255.0f;
+            f32 g = data[off++] / 255.0f;
+            f32 b = data[off++] / 255.0f;
+            u8 nameLen = data[off++];
+            if (nameLen > 23 || size < off + nameLen + 1u) break;
+            char name[24];
+            std::memcpy(name, data + off, nameLen); name[nameLen] = '\0'; off += nameLen;
+            u8 lineLen = data[off++];
+            if (lineLen == 0 || lineLen > 63 || size < off + lineLen) break;
+            // Park the line in the ring so speechText points at storage that outlives this packet.
+            char* line = s_engine->m_guestSpeechRing[s_engine->m_guestSpeechNext];
+            s_engine->m_guestSpeechNext = static_cast<u8>((s_engine->m_guestSpeechNext + 1) % 8);
+            std::memcpy(line, data + off, lineLen); line[lineLen] = '\0';
+            s_engine->addChatMessage(name, line, {r, g, b});
+            // Bubble: renderSpeechBubbles reads the INTERP pool on a client, and that pool is
+            // keyed by the server's entity pool index — exactly what poolIdx is. The speech
+            // decay loop (tickSharedSystems) picks the same pool, so the bubble fades on
+            // schedule; its chat-log branch is !CLIENT-gated, so no double-post.
+            if (poolIdx < MAX_ENTITIES) {
+                Entity& spk = s_engine->m_renderInterp.entities.entities[poolIdx];
+                spk.speechText  = line;
+                spk.speechTimer = 2.4f;   // same display window the authoritative side uses
+            }
+        } break;
         case NetEventType::DAMAGE_NUMBER: {
             // Host-replicated damage/heal number — unpack and spawn locally on the client.
             // Engine::spawnDamageNumber's broadcast branch is gated to NetRole::SERVER, so
@@ -743,6 +774,17 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         np.soulHarvestTimer  = 0.0f;
         np.soulHarvestStacks = 0;
         np.smokeTimer        = 0.0f;
+        np.overdriveTimer    = 0.0f;   // Mech Overdrive / War Cry buff must not survive a slot recycle
+        // Wanderer kit — a recycled slot must not inherit the previous occupant's absorb
+        // pool (a phantom burst on the joiner's first deflect) or leftover stacks/ult.
+        np.deflectTimer      = 0.0f;
+        np.deflectAbsorbed   = 0.0f;
+        np.deflectHitCount   = 0;
+        np.deflectSpeedTimer = 0.0f;
+        np.deathsDanceTimer  = 0.0f;
+        np.counterStacks     = 0;
+        for (u32 ct = 0; ct < 5; ct++) np.counterTimers[ct] = 0.0f;
+        np.adrenalineUpgraded = false;
         np.secondWindCooldown = 0.0f;
         np.lifesaverArmed    = true;  // one-shot near-death i-frame ready on (re)join
 
@@ -981,6 +1023,7 @@ void Engine::run() {
         m_statsTimer += frameTime;
         if (m_statsTimer >= 1.0) {
             if (m_gameState == GameState::IN_GAME) logStats();
+            checkAchievements();   // 1 Hz poll — catches every equip path incl. loaded saves
             m_displayFps   = m_frameCount;
             m_statsTimer  -= 1.0;
             m_updateCount  = 0;
@@ -1026,6 +1069,10 @@ void Engine::swapInPlayer(u8 idx) {
     // Array field — paired manually (must mirror the swapOut memcpy below).
     std::memcpy(m_classSkillStates, m_classSkillStatesPerPlayer[idx], sizeof(m_classSkillStates));
     m_localPlayerIndex = idx;
+    // Identity stamp for combat callbacks (dodge-through riposte/adrenaline): which
+    // inventory/skill-state slot this Player is. Host lanes: lane == net slot. On a CLIENT
+    // it's the local lane (0) — its callbacks are prediction against local state anyway.
+    m_localPlayer.netSlot = idx;
 }
 
 void Engine::swapOutPlayer(u8 idx) {
@@ -1198,16 +1245,28 @@ void Engine::syncNetPlayerToLocalPlayer() {
 // but remote players are `NetPlayer`s — so we build throwaway Player "views" of a remote and
 // copy the mutated fields back afterwards. The per-field copy list lives ONCE in these two
 // free helpers so the array adapter (AI/projectile path) and the single-slot helpers (skill
-// path) never duplicate it. Wanderer-only concepts NetPlayer lacks (smokeTimer, deflectTimer,
-// dodgeState, curseStacks, ...) stay at the Player default-zero — graceful (no stealth, no
-// deflect, detectable) — and, having no NetPlayer home, simply don't persist across the call.
+// path) never duplicate it. A field with no NetPlayer home stays at the Player default-zero
+// and does NOT persist across the call — that is exactly how the whole Wanderer kit silently
+// no-opped for guests until the 2026-07-16 parity port gave deflect/Death's-Dance/adrenaline
+// their NetPlayer homes. If a new mechanic reads a Player field for remotes, mirror it here
+// (BOTH directions) or it does nothing in co-op.
 
 // Seed `v` from `np` with every field the AI/projectile/skill paths read. Position/yaw/pitch
 // are included because skills (PhaseDash, ShadowStrike/Step) read the CURRENT transform to
 // compute their destination; the AI/projectile path reads position too. lifesaverArmed (TA-1)
 // is mirrored so the one-shot near-death i-frame stays one-shot for remotes.
-static void seedRemoteView(const NetPlayer& np, Player& v) {
+// `slot` stamps the view's identity (combat callbacks need the right inventory + kill credit);
+// `currentFloor` derives the Wanderer adrenaline gates the local player computes per-tick.
+static void seedRemoteView(const NetPlayer& np, Player& v, u8 slot, u32 currentFloor) {
     v = Player{};                                        // default-zero Wanderer-only fields
+    v.netSlot         = slot;
+    if (np.playerClass == PlayerClass::WANDERER) {
+        // Mirror the local player's per-tick gates (engine_update_player.cpp) — seedRemoteView
+        // starts from Player{}, so without these a remote Wanderer could never gain a stack.
+        v.adrenalineUnlocked  = true;
+        v.adrenalineUpgraded  = (currentFloor >= 30);
+        v.adrenalineMaxStacks = (currentFloor >= 5) ? 5 : 3;
+    }
     v.position        = np.position;
     v.velocity        = np.velocity;
     v.yaw             = np.yaw;
@@ -1241,6 +1300,25 @@ static void seedRemoteView(const NetPlayer& np, Player& v) {
     v.shadowDanceTimer   = np.shadowDanceTimer;
     v.markTimer          = np.markTimer;
     v.markSpeedStacks    = np.markSpeedStacks;
+    // Overdrive (Mech Overdrive / War Cry +30% speed): without the mirror a remote's cast set
+    // the timer on the throwaway view and writeBack had nothing to persist it into.
+    v.overdriveTimer     = np.overdriveTimer;
+    // Wanderer kit (Deflect / Death's Dance / Adrenaline) — the absorb pool accumulates on the
+    // view during the AI/projectile pass, so it MUST round-trip through NetPlayer every frame
+    // or a remote's absorbed damage evaporates before the burst.
+    v.deflectTimer       = np.deflectTimer;
+    v.deflectAbsorbed    = np.deflectAbsorbed;
+    v.deflectHitCount    = np.deflectHitCount;
+    v.deflectSpeedTimer  = np.deflectSpeedTimer;
+    v.deathsDanceTimer   = np.deathsDanceTimer;
+    v.dodgeState.counterStacks = np.counterStacks;
+    for (u32 cs = 0; cs < 5; cs++) v.dodgeState.counterTimers[cs] = np.counterTimers[cs];
+    // Roll state, READ-ONLY mirror (np.rollTimer is owned by the input replay; writeBack must
+    // not touch it): Combat::applyDamageToPlayer's dodge-through detection keys on
+    // dodgeState.rolling — without this line a remote's mid-roll hits never counted as a
+    // dodge-through, which is why the whole Adrenaline/riposte kit was dead for guests.
+    v.dodgeState.rollTimer = np.rollTimer;
+    v.dodgeState.rolling   = (np.rollTimer > 0.0f);
     // Shrine buff. MUST be mirrored: seedRemoteView begins with `v = Player{}`, so any field not
     // copied here is silently zeroed on this remote's view every single frame.
     v.shrineBuff         = np.shrineBuff;
@@ -1280,6 +1358,15 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.shadowDanceTimer   = v.shadowDanceTimer;
     np.markTimer          = v.markTimer;
     np.markSpeedStacks    = v.markSpeedStacks;
+    np.overdriveTimer     = v.overdriveTimer;   // Mech Overdrive / War Cry — see seedRemoteView
+    // Wanderer kit — the other half of the round-trip (see seedRemoteView).
+    np.deflectTimer       = v.deflectTimer;
+    np.deflectAbsorbed    = v.deflectAbsorbed;
+    np.deflectHitCount    = v.deflectHitCount;
+    np.deflectSpeedTimer  = v.deflectSpeedTimer;
+    np.deathsDanceTimer   = v.deathsDanceTimer;
+    np.counterStacks      = v.dodgeState.counterStacks;
+    for (u32 cs = 0; cs < 5; cs++) np.counterTimers[cs] = v.dodgeState.counterTimers[cs];
     // Shrine buff — the other half of the mirror (see seedRemoteView).
     np.shrineBuff         = v.shrineBuff;
     np.shrineBuffValue    = v.shrineBuffValue;
@@ -1307,7 +1394,7 @@ u32 Engine::buildRemotePlayerViews(Player* views, Player** ptrs, u8* slots) {
         // enemies don't get a one-frame window to attack a just-killed remote.
         if (!np.active || np.isDead || np.health <= 0.0f) continue;
         slots[count] = static_cast<u8>(i);
-        seedRemoteView(np, views[count]);
+        seedRemoteView(np, views[count], static_cast<u8>(i), m_level.currentFloor);
         ptrs[count] = &views[count];
         count++;
     }
@@ -1323,7 +1410,7 @@ void Engine::applyRemotePlayerViews(const Player* views, const u8* slots, u32 co
 // TA-3 single-slot form (skill path): seed `out` from one specific remote NetPlayer so the
 // skill computes against THAT guest's current transform/health, not the host's m_localPlayer.
 void Engine::buildRemotePlayerView(u8 slot, Player& out) {
-    seedRemoteView(m_players[slot], out);
+    seedRemoteView(m_players[slot], out, slot, m_level.currentFloor);
 }
 
 // TA-3 single-slot form: write a remote's skill-mutated view back into its NetPlayer.
@@ -1331,6 +1418,31 @@ void Engine::applyRemotePlayerView(const Player& v, u8 slot) {
     writeBackRemoteView(v, m_players[slot]);
 }
 
+
+// ---------------------------------------------------------------------------
+// Steam achievements — 1 Hz poll from run()'s stats block.
+// Polling (vs event hooks on every equip path) is deliberate: equips happen via A-button,
+// double-click, drag, quickbar, auto-equip-on-pickup AND save-loading — one lazy check
+// catches them all and can never rot when a new equip path is added. Any active LOCAL lane
+// counts (couch P2 shares P1's Steam account anyway); Steam::unlockAchievement is a no-op
+// on itch builds, so this costs a 7-slot scan per second and nothing else.
+// ---------------------------------------------------------------------------
+void Engine::checkAchievements() {
+    if (m_achFullyEquipped || m_gameState != GameState::IN_GAME) return;
+    for (u32 lane = 0; lane < m_splitPlayerCount; lane++) {
+        const PlayerInventory& inv = m_inventories[m_netRole == NetRole::CLIENT
+                                                   ? m_localPlayerIndex : lane];
+        bool full = true;
+        for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) {
+            if (isItemEmpty(inv.equipped[s])) { full = false; break; }
+        }
+        if (full) {
+            Steam::unlockAchievement("ACH_FULLY_EQUIPPED");
+            m_achFullyEquipped = true;
+            return;
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Stats

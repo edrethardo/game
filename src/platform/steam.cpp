@@ -133,6 +133,9 @@ bool init() {
     LOG_INFO("Steam: [diag] SteamAPI_Init OK — calling SteamNetworkingUtils()->InitRelayNetworkAccess...");
     // Warm the Steam Datagram Relay early so the first P2P connect isn't stalled waiting for a route.
     if (SteamNetworkingUtils()) SteamNetworkingUtils()->InitRelayNetworkAccess();
+    // NOTE: no RequestCurrentStats() here — this SDK (1.61+) removed it; the current user's
+    // stats/achievement state is auto-available after SteamAPI_Init, so Get/SetAchievement
+    // in unlockAchievement work without an explicit request.
     LOG_INFO("Steam: [diag] InitRelayNetworkAccess OK — creating SteamLobbyMgr (registers callback)...");
     s_available = true;
     s_lobbyMgr = new SteamLobbyMgr();   // registers the invite/join-request callback
@@ -169,6 +172,24 @@ bool isAvailable() {
     return s_available;
 #else
     return false;
+#endif
+}
+
+void unlockAchievement(const char* apiName) {
+#ifdef USE_STEAM
+    if (!s_available || !apiName) return;
+    ISteamUserStats* stats = SteamUserStats();
+    if (!stats) return;
+    // Skip the StoreStats round-trip when already unlocked — trigger sites call this
+    // unconditionally (e.g. a once-per-second poll for the fully-equipped check).
+    bool unlocked = false;
+    if (stats->GetAchievement(apiName, &unlocked) && unlocked) return;
+    if (stats->SetAchievement(apiName)) {
+        stats->StoreStats();   // push NOW so the overlay toast fires at the deed, not at quit
+        LOG_INFO("Steam: achievement unlocked: %s", apiName);
+    }
+#else
+    (void)apiName;
 #endif
 }
 

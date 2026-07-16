@@ -602,6 +602,13 @@ void Engine::serverNetPost(f32 dt) {
                 m_players[pi].health += healAmt;
                 if (m_players[pi].health > m_players[pi].maxHealth)
                     m_players[pi].health = m_players[pi].maxHealth;
+                // The ENERGY half of the globe — the host path grants both (engine_update.cpp
+                // globe auto-pickup), but this remote path granted HP only, so a guest's globe
+                // was worth half a globe. grantEnergy routes it as SV_ENERGY_GAIN to the owning
+                // client (the server's m_skillStates[pi].maxEnergy may lag the guest's own
+                // descent-scaled max slightly; the client clamps to its real max on receipt).
+                grantEnergy(static_cast<u8>(pi),
+                            m_skillStates[pi].maxEnergy * GameConst::GLOBE_ENERGY_PCT);
                 item.active = false;
                 if (m_worldItems.activeCount > 0) m_worldItems.activeCount--;
                 break;
@@ -816,6 +823,58 @@ void Engine::serverNetPost(f32 dt) {
                     np.shadowDanceTimer = 0.0f;
                 }
             }
+            // Overdrive (Mech Overdrive / War Cry speed buff) — remote lanes only, same as the
+            // timers above: the host expires its own in engine_update_player.cpp, and ticking
+            // both places would burn a guest's buff down at double speed.
+            if (np.overdriveTimer > 0.0f) {
+                np.overdriveTimer -= dt;
+                if (np.overdriveTimer < 0.0f) np.overdriveTimer = 0.0f;
+            }
+            // Wanderer kit, remote lanes (mirrors tickWandererTimers, which only serves the
+            // host's local player). Deflect: absorb accumulated on this remote's view during
+            // the AI/projectile pass; when the window runs out, fire the SAME shared burst
+            // the local path uses — the guest predicted its own burst locally, this is the
+            // authoritative one (real damage, real kill credit).
+            if (np.deflectTimer > 0.0f) {
+                np.deflectTimer -= dt;
+                if (np.deflectTimer <= 0.0f) {
+                    np.deflectTimer = 0.0f;
+                    // XZ facing from yaw — the burst's nova/targeting is full-circle anyway.
+                    Vec3 fwd = {-sinf(np.yaw), 0.0f, -cosf(np.yaw)};
+                    fireDeflectBurst(np.position, fwd, np.eyeHeight,
+                                     np.deflectAbsorbed, np.deflectHitCount,
+                                     static_cast<u8>(pi), /*localVisuals=*/false);
+                    if (np.deflectHitCount > 0 && np.deflectAbsorbed > 0.0f)
+                        np.deflectSpeedTimer = 3.0f;   // +8% for 3 s, matches the local path
+                    np.deflectAbsorbed = 0.0f;
+                    np.deflectHitCount = 0;
+                }
+            }
+            if (np.deflectSpeedTimer > 0.0f) {
+                np.deflectSpeedTimer -= dt;
+                if (np.deflectSpeedTimer < 0.0f) np.deflectSpeedTimer = 0.0f;
+            }
+            if (np.deathsDanceTimer > 0.0f) {
+                np.deathsDanceTimer -= dt;
+                if (np.deathsDanceTimer < 0.0f) np.deathsDanceTimer = 0.0f;
+            }
+            // Adrenaline stack decay — compact-down, mirrors tickWandererTimers exactly.
+            {
+                u8& astacks = np.counterStacks;
+                for (u8 ai = 0; ai < astacks; ) {
+                    np.counterTimers[ai] -= dt;
+                    if (np.counterTimers[ai] <= 0.0f) {
+                        for (u8 aj = ai; aj + 1 < astacks; aj++)
+                            np.counterTimers[aj] = np.counterTimers[aj + 1];
+                        astacks--;
+                    } else { ai++; }
+                }
+            }
+            // Derived gate for updateNetPlayerFromInput's adrenaline speed bonus — player.cpp
+            // can't see the floor, so the server refreshes the flag here (mirrors the local
+            // per-tick derivation in tickWandererTimers).
+            np.adrenalineUpgraded = (np.playerClass == PlayerClass::WANDERER) &&
+                                    (m_level.currentFloor >= 30);
             // Shrine buff expiry for REMOTE lanes (this loop already skips the host, which expires
             // its own buff locally in engine_update_player.cpp — ticking it in both places would
             // burn it down at double speed).
@@ -1733,7 +1792,10 @@ void Engine::onPickupResult(u8 accept, u32 itemUid) {
     if (accept) {
         // Server confirmed — predicted slot is already in the inventory; nothing to do.
         // Rollback would be the only divergence; since accept matched, leave as-is.
-        (void)slot;
+        // First WORLD pickup, guest edition (the SP/host lane unlocks at its local pickup
+        // site). slot >= 0 = a real predicted bag add — shrine activations ride the same
+        // packet but never enter the pending ring, so they can't count as an "item".
+        if (slot >= 0) Steam::unlockAchievement("ACH_FIRST_ITEM");
     } else {
         // Server rejected — roll back the predicted inventory add.
         if (slot >= 0) {
