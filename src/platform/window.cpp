@@ -16,7 +16,7 @@ static SDL_Window* s_window = nullptr;
 static s32 s_width = 0;
 static s32 s_height = 0;
 static bool s_shouldClose = false;
-static bool s_borderlessFullscreen = false;  // user Display setting; persisted in video settings
+static Window::DisplayMode s_displayMode = Window::DisplayMode::WINDOWED;  // user Display setting; persisted in video settings
 
 bool Window::init(const char* title, s32 width, s32 height) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -117,28 +117,53 @@ void Window::enterFullscreenExternal() {
     int dw = 0, dh = 0;
     SDL_GL_GetDrawableSize(s_window, &dw, &dh);      // GL drawable = what glViewport/glReadPixels use
     if (dw > 0 && dh > 0) { s_width = dw; s_height = dh; }
-    s_borderlessFullscreen = true;                   // keep the Display toggle in sync with reality
+    s_displayMode = Window::DisplayMode::BORDERLESS; // keep the Display row in sync with reality
     LOG_INFO("Window now %dx%d (drawable)", s_width, s_height);
 }
 
-void Window::setBorderlessFullscreen(bool enable) {
+void Window::setDisplayMode(DisplayMode mode) {
     if (!s_window) return;
-    // SDL_WINDOW_FULLSCREEN_DESKTOP is borderless windowed fullscreen at the desktop resolution
-    // on the window's current display (no exclusive mode switch). Passing 0 returns to the normal
-    // resizable window — SDL restores its pre-fullscreen size and position.
-    if (SDL_SetWindowFullscreen(s_window, enable ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) != 0) {
+    // Switching BETWEEN the two fullscreen kinds goes through windowed first — SDL2's direct
+    // FULLSCREEN <-> FULLSCREEN_DESKTOP transition is driver-dependent; via 0 it is not.
+    if (s_displayMode != DisplayMode::WINDOWED && mode != s_displayMode)
+        SDL_SetWindowFullscreen(s_window, 0);
+
+    u32 flag = 0;
+    if (mode == DisplayMode::BORDERLESS) {
+        // Borderless windowed fullscreen at the desktop resolution on the current display —
+        // no exclusive mode switch, so alt-tab is instant.
+        flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+    } else if (mode == DisplayMode::FULLSCREEN) {
+        // Exclusive fullscreen AT THE DESKTOP MODE: the engine always renders at native res,
+        // so exclusive buys direct scanout (compositor bypass, lower present latency) — never
+        // a resolution switch that would rearrange the player's desktop.
+        SDL_DisplayMode dm;
+        if (SDL_GetDesktopDisplayMode(getDisplayIndex(), &dm) == 0)
+            SDL_SetWindowDisplayMode(s_window, &dm);
+        flag = SDL_WINDOW_FULLSCREEN;
+    }
+    // flag 0 returns to the normal resizable window — SDL restores its pre-fullscreen size/pos.
+    if (SDL_SetWindowFullscreen(s_window, flag) != 0) {
         LOG_WARN("Window: SDL_SetWindowFullscreen failed: %s", SDL_GetError());
         return;
     }
-    s_borderlessFullscreen = enable;
+    s_displayMode = mode;
     // Refresh the cached size from the GL drawable so the renderer/HUD pick up the new viewport.
     int dw = 0, dh = 0;
     SDL_GL_GetDrawableSize(s_window, &dw, &dh);
     if (dw > 0 && dh > 0) { s_width = dw; s_height = dh; }
-    LOG_INFO("Window: borderless fullscreen %s (%dx%d)", enable ? "ON" : "OFF", s_width, s_height);
+    LOG_INFO("Window: display mode %s (%dx%d)", displayModeName(mode), s_width, s_height);
 }
 
-bool Window::isBorderlessFullscreen() { return s_borderlessFullscreen; }
+Window::DisplayMode Window::getDisplayMode() { return s_displayMode; }
+
+const char* Window::displayModeName(DisplayMode mode) {
+    switch (mode) {
+        case DisplayMode::BORDERLESS: return "Borderless";
+        case DisplayMode::FULLSCREEN: return "Fullscreen";
+        default:                      return "Windowed";
+    }
+}
 
 int Window::getDisplayCount() {
     int n = SDL_GetNumVideoDisplays();
@@ -167,26 +192,31 @@ void Window::setDisplay(int index) {
     if (index < 0)  index = 0;
     if (index >= n) index = n - 1;
     // A window can't be moved between displays while it's in fullscreen, so drop to windowed,
-    // recenter on the target display, then restore fullscreen (which now lands on that display).
-    const bool wasFs = s_borderlessFullscreen;
-    if (wasFs) SDL_SetWindowFullscreen(s_window, 0);
+    // recenter on the target display, then restore the mode — setDisplayMode re-fetches the NEW
+    // display's desktop mode, which is what makes exclusive fullscreen land at the right res.
+    const DisplayMode was = s_displayMode;
+    if (was != DisplayMode::WINDOWED) {
+        SDL_SetWindowFullscreen(s_window, 0);
+        s_displayMode = DisplayMode::WINDOWED;   // reflect reality so setDisplayMode re-applies cleanly
+    }
     SDL_SetWindowPosition(s_window,
                           SDL_WINDOWPOS_CENTERED_DISPLAY(index),
                           SDL_WINDOWPOS_CENTERED_DISPLAY(index));
-    if (wasFs) SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    if (was != DisplayMode::WINDOWED) setDisplayMode(was);
     int dw = 0, dh = 0;
     SDL_GL_GetDrawableSize(s_window, &dw, &dh);
     if (dw > 0 && dh > 0) { s_width = dw; s_height = dh; }
-    LOG_INFO("Window: moved to display %d '%s' (%dx%d%s)", index, getDisplayName(index),
-             s_width, s_height, wasFs ? ", fullscreen" : "");
+    LOG_INFO("Window: moved to display %d '%s' (%dx%d, %s)", index, getDisplayName(index),
+             s_width, s_height, displayModeName(s_displayMode));
 }
 
 void Window::saveVideoSettings(const char* path) {
     FILE* f = std::fopen(path, "w");
     if (!f) { LOG_WARN("Window: could not open %s for writing", path); return; }
-    // Line format: "<fullscreen 0|1> <displayIndex>". A pre-existing one-int file still loads
-    // (fullscreen only) — see loadVideoSettings.
-    std::fprintf(f, "%d %d\n", s_borderlessFullscreen ? 1 : 0, getDisplayIndex());
+    // Line format: "<mode 0|1|2> <displayIndex>" — 0 windowed, 1 borderless, 2 exclusive
+    // fullscreen. Pre-existing files wrote 0|1 with the SAME meanings (the old two-state
+    // toggle), so no migration is needed; a one-int file still loads (mode only).
+    std::fprintf(f, "%d %d\n", static_cast<int>(s_displayMode), getDisplayIndex());
     std::fclose(f);
     LOG_INFO("Window: saved video settings to %s", path);
 }
@@ -200,9 +230,13 @@ void Window::loadVideoSettings(const char* path) {
     // Move to the saved display FIRST so fullscreen lands on it. disp<=0 is the default primary —
     // skip the reposition so single-monitor / primary users aren't nudged from the centered spawn.
     if (got >= 2 && disp > 0) setDisplay(disp);
-    if (got >= 1 && fs != 0) {
-        setBorderlessFullscreen(true);  // apply the saved preference now (before the first frame)
-        LOG_INFO("Window: loaded video settings from %s (borderless fullscreen ON)", path);
+    if (got >= 1 && fs > 0) {
+        // Clamp unknown future values to BORDERLESS rather than guessing exclusive — the
+        // gentler of the two fullscreens is the safe misread.
+        if (fs > static_cast<int>(DisplayMode::FULLSCREEN)) fs = static_cast<int>(DisplayMode::BORDERLESS);
+        setDisplayMode(static_cast<DisplayMode>(fs));  // apply now, before the first frame
+        LOG_INFO("Window: loaded video settings from %s (%s)", path,
+                 displayModeName(static_cast<DisplayMode>(fs)));
     }
 }
 

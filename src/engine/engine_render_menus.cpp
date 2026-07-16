@@ -686,10 +686,13 @@ void Engine::renderMenu() {
             bool sel = (i == m_menu.subSelection);
             char buf[64];
             if (i == D_FULLSCREEN) {
-                std::snprintf(buf, sizeof(buf), "Fullscreen: %s",
-                              Window::isBorderlessFullscreen() ? "On (Borderless)" : "Off (Windowed)");
+                // Three states now: Windowed / Borderless (desktop fullscreen) / Fullscreen
+                // (exclusive at desktop res) — the old row was a two-state toggle whose
+                // "On (Borderless)" label read as if a windowed mode, which it never was.
+                std::snprintf(buf, sizeof(buf), "Display Mode: %s",
+                              Window::displayModeName(Window::getDisplayMode()));
                 FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
-                if (sel) FontSystem::drawText(sw, sh, colHint, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colHint, y, "Enter to cycle", {0.4f, 0.8f, 0.4f}, 1);
             } else if (i == D_DISPLAY) {
                 std::snprintf(buf, sizeof(buf), "Monitor: %s", Window::getDisplayName(Window::getDisplayIndex()));
                 FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);

@@ -1341,8 +1341,12 @@ void Engine::updateMenu(f32 dt) {
         }
         if (menuConfirmPressed()) {
             if (m_menu.subSelection == D_FULLSCREEN) {
-                // Toggle borderless fullscreen live (applies immediately; persisted on back-out).
-                Window::setBorderlessFullscreen(!Window::isBorderlessFullscreen());
+                // Cycle Windowed → Borderless → Fullscreen live (applies immediately; persisted
+                // on back-out). Borderless = desktop fullscreen (instant alt-tab); Fullscreen =
+                // exclusive at desktop res (direct scanout, lower latency).
+                const u8 next = (static_cast<u8>(Window::getDisplayMode()) + 1)
+                              % static_cast<u8>(Window::DisplayMode::COUNT);
+                Window::setDisplayMode(static_cast<Window::DisplayMode>(next));
                 AudioSystem::play(SfxId::MENU_HOVER);
             } else if (multiDisplay && m_menu.subSelection == D_DISPLAY) {
                 // Enter also advances to the next monitor (for pads whose menu L/R isn't obvious here).
@@ -1354,7 +1358,7 @@ void Engine::updateMenu(f32 dt) {
                 AudioSystem::play(SfxId::MENU_HOVER);
             } else if (m_menu.subSelection == D_RESET) {
                 m_splitMode = 0;
-                Window::setBorderlessFullscreen(false);   // reset display = windowed, primary, horizontal
+                Window::setDisplayMode(Window::DisplayMode::WINDOWED);   // reset display = windowed, primary, horizontal
                 Window::setDisplay(0);
                 AudioSystem::play(SfxId::UI_CONFIRM);
             }

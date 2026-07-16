@@ -33,7 +33,7 @@ Requires a Steam **App ID** / partner access.
    - `menagerie.dat / stats_*.dat`   (pet-collection progress — profile-wide, should roam like unlocks)
    - `controls.json`
    - `audio.json`
-   - **NOT** `video.cfg` — fullscreen/display index are machine-specific and must not roam.
+   - **NOT** `video.cfg` — display mode (windowed/borderless/exclusive fullscreen) and display index are machine-specific and must not roam.
 4. **Publish** the Steamworks changes (Cloud + Auto-Cloud only go live after publishing).
 
 Proton/Deck note: we ship native Linux/Windows/macOS, so each build uses its native root. If a Windows
