@@ -178,6 +178,8 @@ void Engine::fireDeflectBurst(const Vec3& feetPos, const Vec3& forward, f32 eyeH
         for (u32 ni = 0; ni < novaCount; ni++) {
             Combat::applyDamage(m_entities, novaHits[ni], absorbed, &eyePos);
         }
+        // PvP (Arena): the deflect burst returns absorbed damage to rival players too.
+        Combat::pvpRadius(eyePos, 5.5f, absorbed, ownerSlot);
     }
 
     // Nova visual — double ring burst for a bigger impact feel; replicated to guests

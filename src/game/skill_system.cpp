@@ -796,6 +796,11 @@ void SkillSystem::updateMeteors(EntityPool& entities, Player** players, u8 playe
                 }
             }
 
+            // PvP (Arena): the blast also hits rival players — covers meteors, Divine
+            // Judgment / Holy Smite pillars and Holy Bombardment alike, since they all
+            // detonate through this one pool. m.caster keeps self-splash excluded.
+            Combat::pvpRadius(m.position, m.radius, m.damage, m.caster);
+
             // Holy pillar heals the casting player 3% max HP on hit — same H4 routing.
             if (m.healsPlayer && enemiesHit > 0) {
                 if (m.caster < playerCount) {

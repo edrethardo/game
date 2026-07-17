@@ -119,6 +119,46 @@ void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
         (void)prevHit;
     }
 
+    // PvP (Arena): continue — or, in the entity-free arena, begin — the chain across rival
+    // players. Same rules as the entity chain: cone-aimed first arc, sphere bounces with
+    // falloff, LOS-gated, no immediate bounce-back. Players and entities share the one
+    // chainPoints budget so the visual arc stays a single unbroken bolt.
+    if (Combat::pvpActive()) {
+        u32 tn = 0;
+        const Combat::PvpTarget* ts = Combat::pvpTargets(tn);
+        u8 caster   = s_castingPlayer;
+        u8 lastSlot = 0xFF;
+        while (chainCount < MAX_CHAIN_PTS) {
+            bool firstArc = (chainCount == 1);   // nothing struck yet — aim down the cast cone
+            f32 cosCone = firstArc ? cosf(radians(15.0f)) : -1.0f;
+            f32 range   = firstArc ? 15.0f : def->bounceRange;
+            s32 best = -1;
+            f32 bestD = range;
+            Vec3 bestChest = {};
+            for (u32 k = 0; k < tn; k++) {
+                Player* v = ts[k].view;
+                if (!v || ts[k].slot == caster || ts[k].slot == lastSlot) continue;
+                if (v->health <= 0.0f) continue;
+                Vec3 chest = v->position + Vec3{0.0f, 0.9f, 0.0f};
+                Vec3 to = chest - currentPos;
+                f32 d = length(to);
+                if (d < 0.001f || d >= bestD) continue;
+                if (cosCone > -1.0f && dot(to * (1.0f / d), currentDir) < cosCone) continue;
+                if (!chainHasLOS(currentPos, chest, grid)) continue;
+                best = static_cast<s32>(k);
+                bestD = d;
+                bestChest = chest;
+            }
+            if (best < 0) break;
+            Combat::PvpHit zap{currentDamage, currentPos, caster, /*projectile=*/false, 0, 0.0f};
+            Combat::pvpApply(ts[best].slot, zap);
+            chainPoints[chainCount++] = bestChest;
+            currentPos     = bestChest;
+            currentDamage *= def->damageFalloff;
+            lastSlot       = ts[best].slot;
+        }
+    }
+
     // Emit visual chain arc via callback
     if (s_chainCallback && chainCount > 1) {
         s_chainCallback(chainPoints, chainCount);
@@ -141,6 +181,8 @@ void fireBloodNova(Vec3 origin, const SkillDef* def, EntityPool& entities)
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], novaDmg);
     }
+    // PvP (Arena): the nova ring hits rival players too (s_castingPlayer excludes the caster).
+    Combat::pvpRadius(origin, scaledRadius, novaDmg, s_castingPlayer);
 
     // Trigger expanding red ring visual
     if (s_novaCallback) s_novaCallback(origin, scaledRadius, {1.0f, 0.15f, 0.1f});
@@ -223,6 +265,10 @@ void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
     // passed, and a thin-ray wall graze can't leave the footprint clipped into the wall.
     endPos = Teleport::resolveDest(grid, entities, startPos, endPos);
     player.position = endPos;
+    // PvP (Arena): the phase-out detonates around the arrival point. One landing burst
+    // instead of corridor samples — repeated pvpRadius calls have no per-victim dedup, so
+    // sampling the corridor would multi-hit anyone near it.
+    Combat::pvpRadius(endPos, 2.0f, dashDmg, s_castingPlayer);
 
     // Trigger blue trail visual
     if (s_dashCallback) s_dashCallback(startPos, endPos);

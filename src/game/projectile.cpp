@@ -266,6 +266,10 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         Combat::applyDamage(entities, h, p.splashDamage);
                     }
                 }
+                // PvP (Arena): a player's wall splash catches rivals near the impact
+                // (ownerSlot keeps it from splashing the firer).
+                if (p.fromPlayer)
+                    Combat::pvpRadius(p.position, p.splashRadius, p.splashDamage, p.ownerSlot);
                 if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);
             }
             destroyProjectile(pool, i);
@@ -429,6 +433,8 @@ void ProjectileSystem::update(ProjectilePool& pool,
                                 ent2.stunTimer = fmaxf(ent2.stunTimer, p.stunDuration);
                         }
                     }
+                    // PvP (Arena): direct-hit splash also catches rival players near the blast.
+                    Combat::pvpRadius(p.position, p.splashRadius, p.splashDamage, p.ownerSlot);
                     if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);
                 }
                 destroyProjectile(pool, i);

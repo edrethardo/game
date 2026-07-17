@@ -51,6 +51,9 @@ void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entities)
         hits, dists, MAX_ENTITIES);
 
     f32 stunTime = def->duration > 0.0f ? def->duration : 0.2f;
+    // PvP (Arena): the stomp damages rival players — damage only, no stun/freeze (player CC
+    // is deliberately out of v1's PvP scope; applyDamageToPlayer has no CC path).
+    Combat::pvpRadius(groundPos, range, damage, s_castingPlayer);
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], damage);
         Entity* e = handleGet(entities, hits[i]);
@@ -127,6 +130,8 @@ void fireWhirlwind(Vec3 origin, const SkillDef* def, EntityPool& entities)
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], damage);
     }
+    // PvP (Arena): the spin also carves rival players in the same short ring.
+    Combat::pvpRadius(origin, range, damage, s_castingPlayer);
 
     // VFX: orange shockwave + spinning debris ring + screen shake
     if (s_novaCallback) s_novaCallback(origin, range, {0.8f, 0.3f, 0.1f});

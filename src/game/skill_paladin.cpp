@@ -142,6 +142,8 @@ void fireHolyNova(Vec3 origin, const SkillDef* def,
             enemiesHit++;
         }
     }
+    // PvP (Arena): the ring wave damages rival players (heals stay ally-only).
+    Combat::pvpRadius(origin, radius, ringDmg, s_castingPlayer);
 
     // Expanding gold ring nova (this IS the ring damage visual)
     if (s_novaCallback) s_novaCallback(origin, radius, {1.0f, 0.85f, 0.3f});
