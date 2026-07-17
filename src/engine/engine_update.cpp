@@ -2862,8 +2862,12 @@ bool Engine::updateSourcePortal() {
     if (m_level.inSourceChamber) return false;        // already inside
 
     if (!m_level.sourcePortalActive) {
-        // Open the portal once: on floor 50, boss dead, and every shard collected this session.
-        if (m_level.currentFloor == 50 && s_sourceShards == 0x03FFu && !floorBossAlive()) {
+        // Open the portal once: on HELL floor 50, boss dead, and every shard collected this
+        // session. The difficulty term is belt-and-suspenders — shards only DROP in Hell
+        // (engine_death.cpp shard gate), so a full set can't exist below it; this makes the
+        // intent explicit at the consumer too.
+        if (m_level.currentFloor == 50 && m_difficulty == 2 &&
+            s_sourceShards == 0x03FFu && !floorBossAlive()) {
             // A few metres off the (now-open) exit portal — far enough that their 2 m pickup zones
             // don't overlap, so the player chooses between descending and entering The Source. The
             // floor-50 boss arena is a 4x major arena, so this stays well inside open floor.

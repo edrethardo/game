@@ -515,11 +515,16 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         // Globes are auto-pickup and rarely interesting for client-side UIs — skip broadcast.
 
         // --- Secret superboss key: milestone bosses drop a hidden source shard ---
+        // HELL ONLY (m_difficulty 2): the key to the true ending drops exclusively at the top
+        // difficulty, so the Engine fight is earned on Hell milestone bosses (floors 5..50 —
+        // free-play floors keep working via the raw-floor wrap: Hell 100 → raw 50). Normal and
+        // Nightmare milestone bosses drop nothing extra and give no hint; the s_sourceShards
+        // set is session-only, so pre-gate saves can't smuggle shards in either.
         // Dead-stripped from the demo (constexpr guard). NEVER for the Engine itself: its
         // effective level recovers to raw floor 50, which would otherwise re-drop a floor-50
         // shard inside The Source. Like globes, the shard is auto-pickup and not broadcast —
         // both host and client pick it from their own world-item view (see updatePlayerPickup).
-        if (!GameConst::kDemoBuild && !pool.entities[idx].isEngine) {
+        if (!GameConst::kDemoBuild && m_difficulty == 2 && !pool.entities[idx].isEngine) {
             u8 rawFloor = static_cast<u8>(((bossEntLvl - 1) % 50) + 1); // 5→5 … 50→50, 55→5 …
             if (rawFloor >= 5 && rawFloor <= 50 && rawFloor % 5 == 0) {
                 u8 bit = static_cast<u8>(rawFloor / 5 - 1);             // floor 5→bit0 … 50→bit9
