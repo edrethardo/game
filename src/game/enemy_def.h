@@ -30,6 +30,8 @@ struct EnemyDef {
     // Behavior (from JSON)
     u8   role            = 0;     // EnemyRole bitmask
     u8   aiPreference    = 0;     // AIState enum value (initial state)
+    bool burrower        = false; // dormant AMBUSH spawns UNDERGROUND (ENT_BURROWED): hidden,
+                                  // unhittable, non-blocking; erupts on plain proximity
     u8   onHitEffect     = 0;     // 0=none, 1=poison, 2=slow, 3=burn, 4=freeze
     f32  onHitDuration   = 0.0f;
     f32  onHitDps        = 0.0f;

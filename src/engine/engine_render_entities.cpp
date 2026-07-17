@@ -75,9 +75,22 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         MaterialSystem::getIdByName("prop_web_d"),
     };
 
+    // Per-slot memory of the burrow bit so the FRAME a widow surfaces gets a dirt eruption.
+    // Keyed entirely on the replicated ENT_BURROWED flag, so host and guests burst identically;
+    // per-machine render state, never simulation.
+    static bool s_wasBurrowed[MAX_ENTITIES] = {};
+
     for (u32 a = 0; a < entPool.activeCount; a++) {
         u32 i = entPool.activeList[a];
         const Entity& e = entPool.entities[i];
+
+        // Burrowed ambusher (Burrowing Widow): genuinely underground — nothing to draw.
+        const bool burrowedNow = (e.flags & ENT_BURROWED) != 0;
+        if (!burrowedNow && s_wasBurrowed[i] && !(e.flags & ENT_DEAD)) {
+            ParticleSystem::spawnDebris(m_particles, e.position, 14);   // erupts through the floor
+        }
+        s_wasBurrowed[i] = burrowedNow;
+        if (burrowedNow) continue;
 
         f32 scaleY = 1.0f;
         if (e.flags & ENT_DEAD) {

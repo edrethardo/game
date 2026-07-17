@@ -275,7 +275,14 @@ void EnemyAI::wakeAmbusher(Entity& e)
     if (e.aiState != AIState::DORMANT) return;
     e.aiState     = AIState::CHASE;
     e.attackTimer = 0.0f;                 // attack immediately on wake
-    if (e.enemyRole & EnemyRole::AMBUSH) {
+    if (e.flags & ENT_BURROWED) {
+        // Burrower surfaces: the flag clear replicates (SnapEntity.flags), flipping it back to
+        // visible/hittable/solid on every machine; the renderer bursts dirt on the transition.
+        e.flags      &= static_cast<u8>(~ENT_BURROWED);
+        e.attackAnimT = 0.4f;             // erupts already lunging, like the mimic's chomp
+        e.speechText  = "*skreeeee*";
+        e.speechTimer = 2.0f;
+    } else if (e.enemyRole & EnemyRole::AMBUSH) {
         // Gargoyle: silent stone-shedding wake, no chomp animation
         e.speechText  = "...";
         e.speechTimer = 1.5f;

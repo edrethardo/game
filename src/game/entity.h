@@ -20,6 +20,11 @@ enum EntityFlags : u8 {
     // The loot goblin. A flag rather than an aiState test because aiState becomes DEAD the moment it
     // is killed — which is exactly when the death handler needs to know what it was.
     ENT_LOOT_GOBLIN  = 1 << 6,
+    // Burrower (Burrowing Widow) still underground: invisible, unhittable, and not a physical
+    // obstacle until it erupts (wakeAmbusher clears the bit). In `flags` so it replicates to
+    // clients verbatim (SnapEntity) — render/pushout/obstacle code works identically on guests.
+    // NOTE: this spends the LAST free flags bit; the next flag means widening the wire byte.
+    ENT_BURROWED     = 1 << 7,
     // bit 7 free
 };
 

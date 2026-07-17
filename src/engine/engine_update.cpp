@@ -1719,6 +1719,7 @@ void Engine::gameUpdate(f32 dt) {
                 if (e.flags & ENT_DEAD) continue;
                 if (e.flags & ENT_FRIENDLY) continue;
                 if (e.enemyType == EnemyType::PROP) continue;
+                if (e.flags & ENT_BURROWED) continue;   // underground — walk right over it
                 obstacles[obsCount++] = {e.position, e.halfExtents};
             }
             Collision::moveAndSlide(m_localPlayer, m_level.grid, dt, obstacles, obsCount);
@@ -3015,6 +3016,7 @@ void Engine::pushPlayerFromEntities() {
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;
         if (e.enemyType == EnemyType::PROP) continue;
+        if (e.flags & ENT_BURROWED) continue;   // underground — never shoves the player
         AABB entBox = entityAABB(e);
         if (CombatQuery::aabbOverlap(playerBox, entBox)) {
             Vec3 toPlayer = m_localPlayer.position - e.position;

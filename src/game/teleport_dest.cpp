@@ -34,6 +34,7 @@ bool overlapsAnyBody(EntityPool& entities, Vec3 pos) {
         const Entity& e = entities.entities[entities.activeList[a]];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
         if (e.flags & ENT_UNTARGETABLE) continue;
+        if (e.flags & ENT_BURROWED) continue;   // underground — a valid landing spot above it
         const f32 r = (e.halfExtents.x > e.halfExtents.z ? e.halfExtents.x : e.halfExtents.z)
                     + PLAYER_HALF_WIDTH + 0.05f;
         const Vec3 d = pos - e.position;

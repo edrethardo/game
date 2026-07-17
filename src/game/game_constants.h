@@ -284,6 +284,9 @@ namespace GameConst {
     // Per-floor equipment upgrade multiplier for surviving NPCs
     static constexpr f32 NPC_EQUIP_UPGRADE_MULT = 0.20f;
     static constexpr f32 MIMIC_TRIGGER_DIST  = 2.5f;
+    // Burrower eruption radius (Burrowing Widow). Proximity-only — no weeping-angel watch
+    // rule, because there is nothing to see: the trap fires under the victim's feet.
+    static constexpr f32 BURROW_TRIGGER_DIST = 3.0f;
     static constexpr f32 MIMIC_HEALTH        = 60.0f;
     static constexpr f32 MIMIC_DAMAGE        = 20.0f;
 

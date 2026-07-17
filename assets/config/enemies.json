@@ -485,6 +485,7 @@
     },
     {
       "name": "Burrowing Widow",
+      "burrower": true,
       "tier": 3,
       "meshName": "spider",
       "materialName": "burrowing_widow_skin",

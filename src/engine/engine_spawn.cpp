@@ -434,6 +434,9 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     // would beeline across the whole floor from spawn.)
                     if (def.role & EnemyRole::AMBUSH) {
                         ent->aiState = AIState::DORMANT;
+                        // Burrowers (Burrowing Widow) wait genuinely UNDERGROUND: hidden,
+                        // unhittable, non-blocking, until proximity makes them erupt.
+                        if (def.burrower) ent->flags |= ENT_BURROWED;
                         // Reposition ambush enemies to doorways — a statue flanking an
                         // archway. They stay DORMANT there: the old AIState::AMBUSH hold
                         // rotated its yaw to track the player (a statue that watches you

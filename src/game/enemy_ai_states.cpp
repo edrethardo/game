@@ -634,6 +634,17 @@ void updateHostileStates(Entity& e, u32 i,
         // posing as a statue. Weeping-angel rule: it stirs only when someone is inside its
         // trigger bubble AND nobody is watching it — never in front of a player's eyes.
         e.velocity = {0, 0, 0};
+
+        // Burrower (Burrowing Widow): genuinely underground — invisible, unhittable, not an
+        // obstacle — so the weeping-angel watch rule below is meaningless (there is nothing to
+        // see). It erupts on plain proximity, right under the victim's feet; damage can't reach
+        // it (weapons skip ENT_BURROWED entirely). spawnCalm still applies at floor start.
+        if (e.flags & ENT_BURROWED) {
+            if (anyPlayerWithin(e.position, GameConst::BURROW_TRIGGER_DIST) && !spawnCalm)
+                EnemyAI::wakeAmbusher(e);
+            break;
+        }
+
         const bool stoneGargoyle = (e.enemyRole & EnemyRole::AMBUSH) != 0;
         // The gargoyle uses its full authored detectionRange ("aggro range" — waking demands
         // looking away, so the old *0.5 shrink would just make statues feel inert); the mimic

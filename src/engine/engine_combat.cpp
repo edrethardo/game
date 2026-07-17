@@ -1095,6 +1095,7 @@ void Engine::buildLagCompPlayerObstacles(f32 targetSnapTickF,
         const Entity& e = m_entities.entities[ei];
         if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
         if (e.flags & ENT_FRIENDLY) continue;
+        if (e.flags & ENT_BURROWED) continue;   // underground — not an obstacle for anyone
         if (e.enemyType == EnemyType::PROP) continue;
         Vec3 histPos, histHalf;
         if (sampleHistoryAt(ei, targetSnapTickF, histPos, histHalf)) {

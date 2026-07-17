@@ -84,6 +84,7 @@ bool CombatQuery::rayNearestEntity(const EntityPool& pool,
         if (e.flags & ENT_DEAD)     continue;
         if (e.flags & ENT_FRIENDLY) continue;
         if (e.enemyType == EnemyType::PROP) continue;   // decorations are not targets
+        if (e.flags & ENT_BURROWED) continue;           // still underground — not a target
 
         f32 t; Vec3 n;
         if (!rayVsAABB(origin, direction, entityAABB(e), t, n)) continue;
@@ -140,6 +141,7 @@ CombatHit CombatQuery::raycast(const LevelGrid& grid, const EntityPool& pool,
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;  // don't shoot allies
         if (e.enemyType == EnemyType::PROP) continue;  // skip decorations
+        if (e.flags & ENT_BURROWED) continue;          // still underground — not a target
 
         AABB box = entityAABB(e);
         // Pad the AABB so near-misses still register
@@ -180,6 +182,7 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
         if (e.flags & ENT_DEAD) continue;
         if (e.flags & ENT_FRIENDLY) continue;  // don't hit allies with melee cone
         if (e.enemyType == EnemyType::PROP) continue;  // skip decorations
+        if (e.flags & ENT_BURROWED) continue;          // still underground — not a target
 
         Vec3 toEntity = e.position - origin;
         f32 dist = length(toEntity);

@@ -317,6 +317,7 @@ void ProjectileSystem::update(ProjectilePool& pool,
                     if (ent.flags & ENT_DEAD) continue;
                     if (ent.flags & ENT_FRIENDLY) continue;
                     if (ent.enemyType == EnemyType::PROP) continue;
+                    if (ent.flags & ENT_BURROWED) continue;   // underground — shots pass over it
 
                     if (CombatQuery::aabbOverlap(projBox, entityAABB(ent))) {
                         // Impact happened at the sample, not the endpoint — pull the projectile

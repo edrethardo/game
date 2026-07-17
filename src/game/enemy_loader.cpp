@@ -113,6 +113,7 @@ bool EnemyLoader::load(const char* path, EnemyDefTable& table) {
 
             def.health         = entry.value("health", 50.0f);
             def.moveSpeed      = entry.value("moveSpeed", 3.0f);
+            def.burrower       = entry.value("burrower", false);
             def.detectionRange = entry.value("detectionRange", 15.0f);
             def.attackRange    = entry.value("attackRange", 2.5f);
             def.attackCooldown = entry.value("attackCooldown", 1.0f);
