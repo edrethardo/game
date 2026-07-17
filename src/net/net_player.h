@@ -154,6 +154,10 @@ struct NetPlayer {
     // Attacker of the last hit, written back from the view like lastDamageTaken — lets the
     // Static Charge discharge and Thunderwall riposte aim at whoever actually hit a remote.
     u16  lastDamageAttackerIdx = 0xFFFF;
+    // Arena PvP: net slot of the last PLAYER who damaged this one (0xFF = none). Mirrored
+    // through seed/writeBackRemoteView; consumed (and cleared) by arena kill credit on death.
+    // Server-side only — never on the wire.
+    u8   lastHitByPlayerSlot   = 0xFF;
     f32  smokeTimer        = 0.0f;  // Phase Strike post-kill stealth (mirrors Player::smokeTimer)
     // Wanderer mark-prey state (death-preamble follow-up batch): server-only mirror so a remote
     // Wanderer's Shadow Dance / mark-spread / speed stacks credit the *remote*, not the host

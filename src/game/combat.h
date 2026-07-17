@@ -82,6 +82,55 @@ namespace Combat {
     // invulnerability. Negative/zero armor yields 0.
     f32 armorMitigation(f32 armor);
 
+    // --- PvP (Arena mode, sentinel floor 97) ------------------------------------------------
+    // The engine registers the tick's combatants here while the arena's authoritative window is
+    // open (Engine::arenaBeginPvpWindow / arenaEndPvpWindow); the list is EMPTY everywhere else,
+    // so every pvp* helper below is a free no-op in PvE — call sites need no arena checks beyond
+    // an optional pvpActive() guard for clarity. Views must stay valid for the whole window
+    // (remote players are seeded Player views, written back to their NetPlayers at window end).
+    // Every landed hit goes through applyDamageToPlayer — block/perfect-block/armor/i-frames all
+    // work against players — and stamps view->lastHitByPlayerSlot for arena kill credit.
+    struct PvpTarget { Player* view; u8 slot; };
+    void setPvpTargets(const PvpTarget* targets, u32 count);   // nullptr/0 clears
+    bool pvpActive();
+    // Raw registry access for call sites that resolve their own geometry (the projectile AABB
+    // test lives in projectile.cpp beside tryHitPlayer, its enemy-projectile twin).
+    const PvpTarget* pvpTargets(u32& countOut);
+    // A landed PvP hit is applied ATOMICALLY by the engine (Engine::pvpApplyHit): for a remote
+    // victim it seeds a FRESH view, lands the hit, and writes straight back to the NetPlayer.
+    // The registry views above are geometry snapshots only — never written back — because other
+    // systems (remote activations, the shared AI/projectile view pass) run their own seed→
+    // writeback cycles inside the PvP window, and a held view written back later would rewind
+    // their position/heal updates. newHealth lets the caller refresh its snapshot.
+    struct PvpHit {
+        f32  damage;
+        Vec3 origin;
+        u8   attackerSlot;
+        bool projectile;     // gates Wanderer Deflect (absorbs projectiles only)
+        u8   onHitEffect;    // 0 none, 1 poison, 2 slow, 3 burn, 4 freeze (projectile statuses)
+        f32  onHitDuration;
+    };
+    struct PvpHitOutcome {
+        BlockOutcome block     = BlockOutcome::NONE;
+        bool         deflected = false;
+        f32          newHealth = 0.0f;
+    };
+    using PvpApplyFn = PvpHitOutcome(*)(u8 slot, const PvpHit& hit);
+    void setPvpApply(PvpApplyFn fn);
+    PvpHitOutcome pvpApply(u8 slot, const PvpHit& hit);   // forwards to the engine fn
+    // Weapon geometry vs players. attackerSlot is passed EXPLICITLY (never inferred from
+    // getAttackingPlayer — the ambient value is only maintained on projectile/skill paths).
+    // pvpCone: horizontal melee cone, one shared crit roll (the fireMelee convention).
+    // pvpRay: nearest player AABB along the ray, wall-occluded via the grid DDA; outHitPos
+    // receives the impact point for tracer/spark FX. Both return whether anyone was hit.
+    u32  pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, u8 attackerSlot);
+    bool pvpRay(const WeaponDef& weapon, Vec3 origin, Vec3 forward, const LevelGrid& grid,
+                u8 attackerSlot, Vec3* outHitPos);
+    // Area damage vs players (skill AoE sites: meteors, novas, dashes, splash). No LOS gate —
+    // matches the entity AoE queries, and cover already limits who stands in the blast.
+    // attackerSlot 0xFF = "use getAttackingPlayer()" (the skill paths maintain it).
+    u32  pvpRadius(Vec3 center, f32 radius, f32 damage, u8 attackerSlot = 0xFF);
+
     // Dodge-through callback: called when damage is blocked during a dodge roll
     // `victim` is the player who dodged — the local Player OR a server-side remote view
     // (identity via Player::netSlot). The old (attackerIdx, attackerPos)-only shape forced the

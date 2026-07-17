@@ -5,6 +5,8 @@
 #include "game/player.h"
 #include "game/projectile.h"
 #include "world/combat_query.h"
+#include "world/raycast.h"     // grid DDA — pvpRay wall occlusion
+#include "world/collision.h"   // PLAYER_HALF_WIDTH / PLAYER_HEIGHT — PvP target boxes
 #include "renderer/particles.h"
 #include "renderer/camera.h"  // for ScreenShake
 #include "core/log.h"
@@ -594,4 +596,125 @@ u16 Combat::fireProjectile(const WeaponDef& weapon,
         if (splashRadius > 0.0f) p.projFlags |= PROJ_SPLASH;
     }
     return idx;
+}
+
+// ---------------------------------------------------------------------------------------------
+// PvP (Arena mode) — the combatant registry + weapon/AoE geometry vs players.
+//
+// The engine registers the tick's combatants while the arena's authoritative PvP window is open
+// (Engine::arenaBeginPvpWindow → arenaEndPvpWindow); outside it the registry is empty and every
+// helper is a no-op, which is the entire PvE-safety story: no arena checks are needed at any
+// call site. All landed hits funnel through applyDamageToPlayer, so blocking, perfect blocks,
+// armor and i-frames treat a rival player exactly like a monster — and every attempt stamps
+// lastHitByPlayerSlot on the victim, which is what the deathmatch loop turns into kill credit.
+// ---------------------------------------------------------------------------------------------
+
+static Combat::PvpTarget  s_pvpTargets[8];   // bound is MAX_PLAYERS(4); slack is harmless
+static u32                s_pvpTargetCount = 0;
+static Combat::PvpApplyFn s_pvpApplyFn     = nullptr;
+
+void Combat::setPvpTargets(const PvpTarget* targets, u32 count) {
+    if (!targets) count = 0;
+    if (count > 8) count = 8;
+    for (u32 i = 0; i < count; i++) s_pvpTargets[i] = targets[i];
+    s_pvpTargetCount = count;
+}
+
+bool Combat::pvpActive() { return s_pvpTargetCount > 0; }
+
+const Combat::PvpTarget* Combat::pvpTargets(u32& countOut) {
+    countOut = s_pvpTargetCount;
+    return s_pvpTargets;
+}
+
+void Combat::setPvpApply(PvpApplyFn fn) { s_pvpApplyFn = fn; }
+
+Combat::PvpHitOutcome Combat::pvpApply(u8 slot, const PvpHit& hit) {
+    if (!s_pvpApplyFn) return PvpHitOutcome{};
+    return s_pvpApplyFn(slot, hit);
+}
+
+// Shared landing tail for the geometry helpers below: skip corpses, hand the hit to the
+// engine's atomic apply (full player-damage pipeline + kill-credit stamp), refresh the
+// snapshot's health so a second hit in the same tick sees the first one.
+static bool pvpLand(Combat::PvpTarget& t, f32 damage, const Vec3& origin, u8 attackerSlot) {
+    if (!t.view || t.view->health <= 0.0f) return false;
+    Combat::PvpHit hit{damage, origin, attackerSlot, /*projectile=*/false, 0, 0.0f};
+    Combat::PvpHitOutcome out = Combat::pvpApply(t.slot, hit);
+    t.view->health = out.newHealth;
+    return true;
+}
+
+u32 Combat::pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, u8 attackerSlot) {
+    if (s_pvpTargetCount == 0) return 0;
+    // Horizontal cone, matching the entity melee query (queryConeSorted horizontalCone=true):
+    // flatten both the aim and the to-target vector so pitch doesn't shrink the swing.
+    Vec3 flat = {forward.x, 0.0f, forward.z};
+    f32 flatLen = sqrtf(flat.x * flat.x + flat.z * flat.z);
+    if (flatLen < 0.0001f) return 0;
+    flat = flat * (1.0f / flatLen);
+    f32 cosCone = cosf(radians(weapon.coneAngleDeg * 0.5f));
+    // One crit roll for the whole swing — the fireMelee convention.
+    bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
+    f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;
+    u32 hits = 0;
+    for (u32 i = 0; i < s_pvpTargetCount; i++) {
+        PvpTarget& t = s_pvpTargets[i];
+        if (t.slot == attackerSlot || !t.view) continue;
+        Vec3 to = t.view->position - origin;
+        to.y = 0.0f;
+        f32 dist = sqrtf(to.x * to.x + to.z * to.z);
+        if (dist > weapon.range + PLAYER_HALF_WIDTH) continue;
+        if (dist > 0.001f && (to.x * flat.x + to.z * flat.z) / dist < cosCone) continue;
+        if (pvpLand(t, dmg, origin, attackerSlot)) hits++;
+    }
+    return hits;
+}
+
+bool Combat::pvpRay(const WeaponDef& weapon, Vec3 origin, Vec3 forward, const LevelGrid& grid,
+                    u8 attackerSlot, Vec3* outHitPos) {
+    if (s_pvpTargetCount == 0) return false;
+    f32 bestT = weapon.range;
+    s32 best  = -1;
+    for (u32 i = 0; i < s_pvpTargetCount; i++) {
+        PvpTarget& t = s_pvpTargets[i];
+        if (t.slot == attackerSlot || !t.view || t.view->health <= 0.0f) continue;
+        AABB box = {
+            t.view->position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
+            t.view->position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
+        };
+        f32 tHit; Vec3 n;
+        if (CombatQuery::rayVsAABB(origin, forward, box, tHit, n) && tHit >= 0.0f && tHit < bestT) {
+            bestT = tHit;
+            best  = static_cast<s32>(i);
+        }
+    }
+    if (best < 0) return false;
+    // Wall occlusion: cover must actually stop bullets. The entity hitscan gets this from
+    // CombatQuery::raycast; here the grid DDA answers "wall before the player?" directly.
+    RayHit wall = Raycast::cast(grid, origin, forward, bestT);
+    if (wall.hit && wall.distance < bestT) return false;
+    bool crit = ((std::rand() % 10000) * 0.0001f) < weapon.critChance;
+    f32  dmg  = crit ? weapon.damage * weapon.critMult : weapon.damage;
+    if (!pvpLand(s_pvpTargets[best], dmg, origin, attackerSlot)) return false;
+    if (outHitPos) *outHitPos = origin + forward * bestT;
+    return true;
+}
+
+u32 Combat::pvpRadius(Vec3 center, f32 radius, f32 damage, u8 attackerSlot) {
+    if (s_pvpTargetCount == 0) return 0;
+    if (attackerSlot == 0xFF) attackerSlot = s_attackingPlayer;  // skill paths maintain the ambient slot
+    u32 hits = 0;
+    for (u32 i = 0; i < s_pvpTargetCount; i++) {
+        PvpTarget& t = s_pvpTargets[i];
+        if (t.slot == attackerSlot || !t.view) continue;
+        // Chest-height distance so a blast centered at feet or head still counts, padded by
+        // the body half-width — the same forgiveness the entity radius queries get from their
+        // center-position tests against fatter AABBs.
+        Vec3 d = (t.view->position + Vec3{0.0f, PLAYER_HEIGHT * 0.5f, 0.0f}) - center;
+        f32 reach = radius + PLAYER_HALF_WIDTH;
+        if (d.x * d.x + d.y * d.y + d.z * d.z > reach * reach) continue;
+        if (pvpLand(t, damage, center, attackerSlot)) hits++;
+    }
+    return hits;
 }

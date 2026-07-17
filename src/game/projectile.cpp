@@ -146,6 +146,46 @@ static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& 
     return PlayerHitResult::HIT;
 }
 
+// PvP (Arena mode): a PLAYER projectile tests the registered PvP combatants — everyone but its
+// owner. Mirrors tryHitPlayer (its enemy-projectile twin above) with three deliberate
+// differences: the owner never hits themselves, the SV_DAMAGE_TO_ME callback is skipped (a PvP
+// victim never predicted this damage — their HP adopts from the snapshot), and the enemy-only
+// DEFAULT slow is dropped (only authored on-hit statuses — poison/slow/burn/freeze — carry over).
+enum struct PvpProjResult : u8 { MISS, CONSUMED, REFLECTED };
+static PvpProjResult tryHitPvpTargets(Projectile& p, const AABB& projBox) {
+    u32 n = 0;
+    const Combat::PvpTarget* ts = Combat::pvpTargets(n);
+    for (u32 i = 0; i < n; i++) {
+        Player* v = ts[i].view;
+        if (!v || ts[i].slot == p.ownerSlot || v->health <= 0.0f) continue;
+        AABB box = {
+            v->position + Vec3{-PLAYER_HALF_WIDTH, 0.0f, -PLAYER_HALF_WIDTH},
+            v->position + Vec3{ PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_HALF_WIDTH}
+        };
+        if (!CombatQuery::aabbOverlap(projBox, box)) continue;
+        // Deflect / block / statuses / kill credit all live in the engine's atomic apply —
+        // this function owns only geometry and the projectile's fate.
+        Combat::PvpHit hit{p.damage, p.position, p.ownerSlot, /*projectile=*/true,
+                           p.onHitEffect, p.onHitDuration};
+        Combat::PvpHitOutcome out = Combat::pvpApply(ts[i].slot, hit);
+        v->health = out.newHealth;   // keep the geometry snapshot honest for later samples
+        if (out.deflected) {
+            p.lifetime = 0.0f;       // absorbed — reaped like the enemy-projectile deflect
+            return PvpProjResult::CONSUMED;
+        }
+        if (out.block == Combat::BlockOutcome::PERFECT &&
+            v->offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY)) {
+            // Mirror Aegis: the shot flies back under the blocker's ownership — in PvP that
+            // means it can kill the original shooter. Registry slot, not v->netSlot: the slot
+            // is authoritative for remote views and couch lanes alike.
+            ProjectileSystem::reflectAsParry(p, ts[i].slot);
+            return PvpProjResult::REFLECTED;
+        }
+        return PvpProjResult::CONSUMED;
+    }
+    return PvpProjResult::MISS;
+}
+
 void ProjectileSystem::update(ProjectilePool& pool,
                                const LevelGrid& grid,
                                EntityPool& entities,
@@ -346,6 +386,18 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         primaryHitIdx = static_cast<u16>(e);
                         hit = true;
                         break;
+                    }
+                }
+                // PvP (Arena): the same sweep sample also tests rival players, so cover and
+                // anti-tunneling behave identically for a monster and a human target. Runs
+                // only when the sample found no entity (registry is empty outside the arena).
+                if (!hit && Combat::pvpActive()) {
+                    PvpProjResult pr = tryHitPvpTargets(p, projBox);
+                    if (pr == PvpProjResult::CONSUMED) {
+                        p.position = samplePos;   // impact at the sample, like the entity path
+                        hit = true;               // falls into the shared destroy below
+                    } else if (pr == PvpProjResult::REFLECTED) {
+                        break;                    // parried: keeps flying under new ownership
                     }
                 }
             }

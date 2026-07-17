@@ -423,6 +423,10 @@ void Engine::handleWeaponFire(f32 dt) {
         } else {
             result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
+            // PvP (Arena): the same swing also tests rival players — free no-op in PvE
+            // (registry empty). Cleave is skipped: it requires an ENTITY hit to trigger,
+            // which can't happen in an entity-free arena.
+            if (Combat::pvpActive()) Combat::pvpCone(wpn, eyePos, forward, activeNetSlot());
 
             // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
             if (melSub != WeaponSubtype::DAGGER && melSub != WeaponSubtype::NONE &&
@@ -491,6 +495,12 @@ void Engine::handleWeaponFire(f32 dt) {
             }
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
             result.hitEntity = (oCnt > 0);
+            // PvP (Arena): an overcharged shot can still drop a rival (single target — the
+            // penetration bonus stays entity-only in v1).
+            if (Combat::pvpActive()) {
+                Vec3 ovHit;
+                Combat::pvpRay(wpn, eyePos, forward, m_level.grid, activeNetSlot(), &ovHit);
+            }
         } else {
             // Phase 2.2 — On CLIENT, predict the hitscan against the INTERPOLATED entity
             // pool (what the player sees) so impact sparks and crosshair "hit" feedback
@@ -519,6 +529,21 @@ void Engine::handleWeaponFire(f32 dt) {
                 }
             } else {
                 result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
+                // PvP (Arena): the ray also tests rival players (wall-occluded inside pvpRay).
+                // On a hit, rewrite the result so the shared FX below (spark, hit marker, R7-5
+                // impact broadcast) land ON the player, not on the wall behind them. No entity
+                // handles are stored, so the SV_DAMAGE_DONE loop stays silent (entitiesHit 0).
+                if (Combat::pvpActive()) {
+                    Vec3 pvpHit;
+                    if (Combat::pvpRay(wpn, eyePos, forward, m_level.grid, activeNetSlot(), &pvpHit)) {
+                        result.hitEntity   = true;
+                        result.hitWorld    = false;
+                        result.hitPosition = pvpHit;
+                        result.hitNormal   = forward * -1.0f;
+                        result.hitDistance = length(pvpHit - eyePos);
+                        result.entitiesHit = 0;
+                    }
+                }
             }
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.05f);
             if (result.hitEntity || result.hitWorld) {
@@ -1373,6 +1398,8 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         WeaponSubtype sub = WeaponSubtype::NONE;
         if (!isItemEmpty(eqWpn)) sub = m_itemDefs[eqWpn.defId].weaponSubtype;
         result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
+        // PvP (Arena): a remote player's swing tests rival players too (see the local twin).
+        if (Combat::pvpActive()) Combat::pvpCone(wpn, eyePos, forward, np.slotIndex);
         if (sub != WeaponSubtype::DAGGER && sub != WeaponSubtype::NONE &&
             result.hitEntity && (std::rand() % 100) < 5) {
             WeaponDef cleaveWpn = wpn;
@@ -1404,9 +1431,28 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                 if (hpBefore > 0.0f && oe->health <= 0.0f) gotKill = true;
             }
             if (gotKill) { np.weaponState.currentClip = wpn.clipSize; np.weaponState.reloading = false; }
+            // PvP (Arena): an overcharged shot can still drop a rival (single target — the
+            // penetration bonus stays entity-only in v1).
+            if (Combat::pvpActive()) {
+                Vec3 ovHit;
+                Combat::pvpRay(wpn, eyePos, forward, m_level.grid, np.slotIndex, &ovHit);
+            }
             break;
         }
         result = Combat::fireHitscan(wpn, eyePos, forward, m_level.grid, m_entities);
+        // PvP (Arena): the remote twin of the local pvpRay branch — result rewritten so the
+        // impact FX + client broadcast land on the player who was shot.
+        if (Combat::pvpActive()) {
+            Vec3 pvpHit;
+            if (Combat::pvpRay(wpn, eyePos, forward, m_level.grid, np.slotIndex, &pvpHit)) {
+                result.hitEntity   = true;
+                result.hitWorld    = false;
+                result.hitPosition = pvpHit;
+                result.hitNormal   = forward * -1.0f;
+                result.hitDistance = length(pvpHit - eyePos);
+                result.entitiesHit = 0;
+            }
+        }
         if (result.hitEntity || result.hitWorld) {
             for (u32 fx = 0; fx < MAX_IMPACT_FX; fx++) {
                 if (!m_fx.impactFX[fx].active) {

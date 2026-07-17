@@ -21,6 +21,7 @@
 #include "game/item.h"
 #include "game/stash.h"
 #include "game/arena.h"   // PvP deathmatch rules (Arena mode, floor 97)
+#include "game/combat.h"  // Combat::PvpHit/PvpHitOutcome — the arena's atomic hit apply
 #include "game/interact.h"   // tap/hold interact rule (pure)
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
@@ -573,6 +574,7 @@ private:
     f32          m_arenaRespawn[MAX_PLAYERS] = {};  // >0 = that slot is dead, counting down to auto-respawn
     f32          m_arenaOverTimer = 0.0f;           // >0 = match decided, winner banner running
     u8           m_arenaWinner    = 0xFF;           // valid while m_arenaOverTimer > 0
+    Player       m_pvpViews[MAX_PLAYERS];           // seeded remote views held open for the PvP window
 
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
@@ -998,6 +1000,16 @@ private:
     void enterArena();                // host/SP entry (seats NetPlayers, broadcasts the seed)
     void enterArenaClient();          // client mirror (position/score adopted from the server)
     Vec3 arenaPad(u8 slot) const;     // a slot's spawn/respawn pad (world coords)
+    // The authoritative PvP window: registers every living combatant with Combat::setPvpTargets
+    // for exactly the span of the tick where PvP damage can resolve (serverNetPre's input drain
+    // + remote activations, the per-lane gameUpdate fire paths, and tickSharedSystems'
+    // projectiles/meteors). Registry views are GEOMETRY SNAPSHOTS only — each landed hit is
+    // applied atomically by pvpApplyHit (fresh seed → damage → writeback), so the other
+    // seed/writeback cycles running inside the window (remote activations, the shared AI view
+    // pass) can never be clobbered. No-ops outside the arena and on CLIENTs.
+    void arenaBeginPvpWindow();
+    void arenaEndPvpWindow();
+    Combat::PvpHitOutcome pvpApplyHit(u8 slot, const Combat::PvpHit& hit);
     // Post-Engine victory flow: portal spawn (host: local + broadcast; client: via SV_EVENT),
     // the arbitrated enter (updateExitPortal), and the shared credits sequence. startCredits is
     // the LOCAL state flip every machine runs; beginCreditsSequence is the server/SP entry that

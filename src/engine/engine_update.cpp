@@ -533,7 +533,11 @@ void Engine::update(f32 dt) {
         }
         break;
     case GameState::IN_GAME:
-        // Unified game loop: networking pre → gameplay → networking post
+        // Unified game loop: networking pre → gameplay → networking post.
+        // Arena PvP: the combatant registry must be open BEFORE serverNetPre — the input
+        // drain resolves remote weapon fire and remote skill activations, both of which can
+        // damage rival players. Closed again right before serverNetPost (see below).
+        arenaBeginPvpWindow();
         if (m_netRole == NetRole::SERVER) serverNetPre(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPre(dt);
         // Singleplayer/split-screen have no net pre-step, so advance the sim tick here. The R17
@@ -714,6 +718,9 @@ void Engine::update(f32 dt) {
         if (m_netRole != NetRole::NONE || !m_characterScreenOpen) {
             tickSharedSystems(dt);
         }
+        // Arena PvP: last damage source (shared projectiles) has run — close the registry.
+        // Deliberately BEFORE serverNetPost, whose own remote-view passes must never see it.
+        arenaEndPvpWindow();
 
         if (m_netRole == NetRole::SERVER) serverNetPost(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPost(dt);

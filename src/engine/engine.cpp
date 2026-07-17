@@ -1413,6 +1413,8 @@ static void seedRemoteView(const NetPlayer& np, Player& v, u8 slot, u32 currentF
     v.freezeTimer     = np.freezeTimer;
     v.blocking        = np.blocking;
     v.blockTimer      = np.blockTimer;
+    v.lastHitByPlayerSlot = np.lastHitByPlayerSlot;  // arena PvP kill credit — must round-trip
+                                                     // or the Player{} reset erases it each seed
     v.lifesaverArmed  = np.lifesaverArmed; // TA-1: mirror so the i-frame isn't re-armed each frame
     v.graceInvuln     = np.graceInvuln;    // mirror grace tag so the 85%-HP clear persists across frames
     // M-3/M-4: ring-passive state on a remote — Soul Harvest stacks drive the gun-damage /
@@ -1478,6 +1480,7 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.burnDps          = v.burnDps;
     np.freezeTimer      = v.freezeTimer;
     np.damageFlashTimer = v.damageFlashTimer; // drives the remote damage-flash render
+    np.lastHitByPlayerSlot = v.lastHitByPlayerSlot;  // arena PvP kill credit (see seed side)
     // The only channel by which the server learns a REMOTE took a hit this tick: enemy AI /
     // projectiles damage the throwaway view, not the NetPlayer. serverNetPost reads this to fire
     // the Blood Nova armor retaliation, then clears it.
@@ -1515,6 +1518,92 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.shrineBuffTimer    = v.shrineBuffTimer;
     np.shrineHealthBonus  = v.shrineHealthBonus;
     for (u32 ms = 0; ms < 20; ms++) np.markSpeedTimers[ms] = v.markSpeedTimers[ms];
+}
+
+// --- Arena PvP: combatant registry window + the atomic hit apply -----------------------------
+
+// Land one PvP hit on a Player (a host-local lane, or a freshly seeded remote view): Wanderer
+// Deflect (projectiles only), the full applyDamageToPlayer pipeline (block / perfect-block /
+// armor / i-frames), authored projectile statuses, and the kill-credit stamp. Shared by both
+// slot kinds in Engine::pvpApplyHit.
+static Combat::PvpHitOutcome landPvpHit(Player& v, const Combat::PvpHit& hit) {
+    Combat::PvpHitOutcome out{};
+    if (hit.projectile && v.deflectTimer > 0.0f) {
+        v.deflectAbsorbed += hit.damage;
+        v.deflectHitCount++;
+        out.deflected = true;
+        out.newHealth = v.health;
+        return out;
+    }
+    out.block = Combat::applyDamageToPlayer(v, hit.damage, &hit.origin);
+    // Kill credit on ANY attempt against a living target (blocked hits included) — generous
+    // but deterministic, and it avoids re-deriving "did damage land" from the outcome matrix.
+    v.lastHitByPlayerSlot = hit.attackerSlot;
+    // Authored on-hit statuses carry into PvP (poison arrows stay poisonous). A Mirror-Aegis
+    // parry skips them — the shot is being RETURNED, not absorbed. No enemy default slow.
+    bool parried = (out.block == Combat::BlockOutcome::PERFECT &&
+                    v.offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY));
+    if (!parried) {
+        if      (hit.onHitEffect == 1) { v.poisonTimer = fmaxf(v.poisonTimer, hit.onHitDuration); v.poisonDps = 4.0f; }
+        else if (hit.onHitEffect == 2) { v.slowTimer   = fmaxf(v.slowTimer,   hit.onHitDuration); }
+        else if (hit.onHitEffect == 3) { v.burnTimer   = fmaxf(v.burnTimer,   hit.onHitDuration); }
+        else if (hit.onHitEffect == 4) { v.freezeTimer = fmaxf(v.freezeTimer, hit.onHitDuration); }
+    }
+    out.newHealth = v.health;
+    return out;
+}
+
+Combat::PvpHitOutcome Engine::pvpApplyHit(u8 slot, const Combat::PvpHit& hit) {
+    // Host-local lanes land directly on the lane ARRAY, never the swapped-in alias. Safe by
+    // construction: a lane cannot damage itself (owner-excluded), so the only swapOut that
+    // could clobber this write — the victim lane's own — never races a PvP hit.
+    if (slot < m_splitPlayerCount) {
+        Combat::PvpHitOutcome out = landPvpHit(m_localPlayers[slot], hit);
+        // If the victim lane is ALSO the currently swapped-in alias (remote fire resolving in
+        // serverNetPre, before any lane swap), mirror the damage into the alias so the next
+        // swapOut can't resurrect them from a stale copy.
+        if (slot == m_localPlayerIndex) m_localPlayer = m_localPlayers[slot];
+        return out;
+    }
+    // Remote slot: fresh seed → land → write back, all inside this one call. Atomic by
+    // construction — the other seed/writeback cycles (remote activations, the shared AI view
+    // pass) can never interleave with it.
+    Combat::PvpHitOutcome out{};
+    if (slot >= MAX_PLAYERS || !m_players[slot].active) return out;
+    NetPlayer& np = m_players[slot];
+    seedRemoteView(np, m_pvpViews[slot], slot, m_level.currentFloor);
+    out = landPvpHit(m_pvpViews[slot], hit);
+    writeBackRemoteView(m_pvpViews[slot], np);
+    return out;
+}
+
+// Open the PvP combatant registry for this authoritative tick. Targets are geometry
+// snapshots: lane targets point at the live lane arrays, remote targets at views seeded here
+// (refreshed per-hit by pvpApplyHit). Closed by arenaEndPvpWindow before serverNetPost.
+void Engine::arenaBeginPvpWindow() {
+    if (!m_level.inArena || m_gameState != GameState::IN_GAME) return;
+    if (m_netRole == NetRole::CLIENT) return;   // clients never resolve PvP
+    if (m_arenaOverTimer > 0.0f) return;        // match decided — ceasefire
+    Combat::setPvpApply([](u8 slot, const Combat::PvpHit& hit) {
+        return s_engine->pvpApplyHit(slot, hit);
+    });
+    Combat::PvpTarget targets[MAX_PLAYERS];
+    u32 n = 0;
+    for (u8 lane = 0; lane < m_splitPlayerCount && lane < MAX_LOCAL_PLAYERS; lane++)
+        targets[n++] = { &m_localPlayers[lane], lane };
+    if (m_netRole == NetRole::SERVER) {
+        for (u32 pi = m_splitPlayerCount; pi < MAX_PLAYERS; pi++) {
+            if (!m_players[pi].active) continue;
+            seedRemoteView(m_players[pi], m_pvpViews[pi], static_cast<u8>(pi), m_level.currentFloor);
+            targets[n++] = { &m_pvpViews[pi], static_cast<u8>(pi) };
+        }
+    }
+    Combat::setPvpTargets(targets, n);
+}
+
+void Engine::arenaEndPvpWindow() {
+    // Snapshots are never written back (pvpApplyHit already committed every hit) — just close.
+    Combat::setPvpTargets(nullptr, 0);
 }
 
 // Array form (AI + projectile pass): build a view of every ACTIVE, non-dead REMOTE NetPlayer
