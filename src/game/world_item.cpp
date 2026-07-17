@@ -46,7 +46,7 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt,
         // takes to reach the room (and a despawning "chest" beside a permanent mimic would
         // be a free mimic detector).
         if (wi.item.rarity != Rarity::LEGENDARY && !isShrine(wi.item) && !isSourceShard(wi.item)
-            && !isChest(wi.item) && !isPet) {
+            && !isChest(wi.item) && !isStash(wi.item) && !isPet) {
             wi.lifetime -= dt;
         }
         wi.bobTimer       += dt;

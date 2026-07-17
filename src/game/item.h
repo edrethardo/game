@@ -366,6 +366,11 @@ static constexpr u16 SHRINE_VITALITY_ID = 0xFFF9;  // +max HP (and heals to matc
 // (Engine::openChest), so there is nothing to desync or persist.
 static constexpr u16 CHEST_ID = 0xFFF8;
 
+// The town's account-stash chest — a fixed interactable (never loot, never expires). Opening
+// it is purely LOCAL UI (contents live in stash.dat on each machine), so unlike shrines/chests
+// its E-interact needs no server round-trip.
+static constexpr u16 STASH_ID = 0xFFF7;
+
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
 }
@@ -383,9 +388,13 @@ inline bool isChest(const ItemInstance& item) {
     return item.defId == CHEST_ID;
 }
 
+inline bool isStash(const ItemInstance& item) {
+    return item.defId == STASH_ID;
+}
+
 // Any sentinel — i.e. "not a real item". Anything that must not enter the inventory or be dropped.
 inline bool isSentinelItem(const ItemInstance& item) {
-    return isGlobe(item) || isSourceShard(item) || isShrine(item) || isChest(item);
+    return isGlobe(item) || isSourceShard(item) || isShrine(item) || isChest(item) || isStash(item);
 }
 
 // ---- Rarity color lookup ----

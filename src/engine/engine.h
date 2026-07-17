@@ -914,6 +914,7 @@ private:
         bool nearExit   = false;     // standing in the floor-exit trigger
         bool nearPortal = false;     // standing in The Source portal trigger (floor 50 secret)
         bool nearExitPortal = false; // standing in the post-Engine exit portal (rolls credits)
+        s32  stashIdx  = -1;         // world-item index of the town's stash chest in reach (-1 none)
         Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
     };
     InteractState m_interact[MAX_LOCAL_PLAYERS];
@@ -1217,6 +1218,11 @@ private:
     Stash::State m_stash;
     void loadStash();
     void saveStash();
+    // Stash UI rides the inventory screen: opening sets both flags; every existing inventory
+    // close path (ESC/B/Tab/respawn) also closes the stash via the per-frame reconciler in
+    // gameUpdate, which flushes stash.dat when it does.
+    bool m_stashOpen = false;
+    void openStashUI();
     // Per-character lifetime stats — persisted in the stats_NN.dat SIDECAR next to the save
     // slot (save_NN.dat's frozen format is untouched; same pattern as menagerie.dat, keyed per
     // slot). Currently one counter: total kills, shown as "Enemies deleted" on the floor

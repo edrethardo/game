@@ -1863,6 +1863,13 @@ void Engine::gameUpdate(f32 dt) {
         m_inventoryOpen = false;
         Input::setRelativeMouseMode(true);
     }
+    // Stash rides the inventory screen: whichever path closed the inventory (ESC, B, Tab,
+    // respawn, drop-all) also closes the stash — and closing flushes stash.dat (atomic,
+    // no-op when nothing changed). ONE reconciler instead of a hook in every close path.
+    if (m_stashOpen && !m_inventoryOpen) {
+        m_stashOpen = false;
+        saveStash();
+    }
 
     // Toggle character inspect screen (C / LB+Plus). Freezes gameplay input via
     // gameplayInputFrozen(). Unlike the inventory (which frees the cursor for slot
@@ -1959,17 +1966,32 @@ void Engine::collectSourceShard(const ItemInstance& shard) {
 // Every consumer (host pickup, client pickup request, the on-screen prompt, the exit door) reads
 // this instead of running its own scan. They used to run four, and the four had drifted.
 // ---------------------------------------------------------------------------
+
+// Open the account stash: it rides the inventory screen (backpack beside the stash panel).
+// Purely local — contents live in this machine's stash.dat; co-op inventory changes flow
+// through the ordinary CL_INVENTORY_SYNC that every transfer sends.
+void Engine::openStashUI() {
+    m_stashOpen     = true;
+    m_stash.page    = 0;
+    m_inventoryOpen = true;
+    m_inventoryOpenArr[m_localPlayerIndex] = true;
+    Input::setRelativeMouseMode(false);   // free the cursor for slot clicks, like the inventory
+    m_dragState = {};
+    m_dblClickState = {};
+}
+
 void Engine::resolveInteractTargets(InteractState& st) {
     st.itemIdx = -1;
     st.shrineIdx = -1;
     st.mimicIdx = -1;
     st.chestIdx = -1;
+    st.stashIdx = -1;
     st.nearExit = false;
     if (m_inventoryOpen) return;
 
     const Vec3 fwd  = m_localPlayer.forward;
     const f32  hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
-    f32 bestItem = -1.0f, bestShrine = -1.0f, bestChest = -1.0f;
+    f32 bestItem = -1.0f, bestShrine = -1.0f, bestChest = -1.0f, bestStash = -1.0f;
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& w = m_worldItems.items[i];
@@ -1978,13 +2000,14 @@ void Engine::resolveInteractTargets(InteractState& st) {
 
         const bool shrine = isShrine(w.item);
         const bool chest  = isChest(w.item);
+        const bool stash  = isStash(w.item);   // the town's account-stash chest (fixture)
         // The defId bound check must NOT be applied to a shrine or a chest: their sentinel
         // defIds (0xFFFB…/0xFFF8) sit far outside the real item range, so this exact line —
         // copied into the client's scan — is what made shrines impossible to activate as a
         // guest. A chest skipped here would be un-openable the same silent way.
-        if (!shrine && !chest && w.item.defId >= m_itemDefCount) continue;
+        if (!shrine && !chest && !stash && w.item.defId >= m_itemDefCount) continue;
         // Loot-ownership window: another player's kill is theirs for 3 s. Fixtures are never owned.
-        if (!shrine && !chest && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
+        if (!shrine && !chest && !stash && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
             continue;
 
         Vec3 to = w.position - m_localPlayer.position;
@@ -2002,6 +2025,8 @@ void Engine::resolveInteractTargets(InteractState& st) {
         f32 score = dot - hDist * 0.1f;   // prefer what you're looking straight at, then what's near
         if (shrine) {
             if (score > bestShrine) { bestShrine = score; st.shrineIdx = static_cast<s32>(i); }
+        } else if (stash) {
+            if (score > bestStash) { bestStash = score; st.stashIdx = static_cast<s32>(i); }
         } else if (chest) {
             if (score > bestChest) { bestChest = score; st.chestIdx = static_cast<s32>(i); }
         } else {
@@ -2061,7 +2086,8 @@ void Engine::updatePlayerPickup(f32 dt) {
     // ITEM class of the tap rule: opening one is a tap, exactly like grabbing loot. Real
     // loot still outranks both below (a chest must never steal the grab aimed at an item
     // lying beside it).
-    const bool hasItemClass  = (st.itemIdx >= 0) || (st.chestIdx >= 0) || (st.mimicIdx >= 0);
+    const bool hasItemClass  = (st.itemIdx >= 0) || (st.chestIdx >= 0) || (st.mimicIdx >= 0) ||
+                               (st.stashIdx >= 0);
     const bool down = !m_inventoryOpen && Input::isActionDown(GameAction::PICKUP);
     const Interact::Intent intent =
         Interact::poll(st.hold, down, hasHoldTarget, dt, GameConst::INTERACT_HOLD_SEC);
@@ -2086,6 +2112,7 @@ void Engine::updatePlayerPickup(f32 dt) {
     if (m_netRole == NetRole::CLIENT) {
         if (wantItem) {
             if (st.itemIdx >= 0)       sendPickupRequest(st.itemIdx);
+            else if (st.stashIdx >= 0) openStashUI();                   // stash is local-only UI
             else if (st.chestIdx >= 0) sendPickupRequest(st.chestIdx);  // real chest → server opens it
             else if (st.mimicIdx >= 0) sendMimicInteract(st.mimicIdx);  // "opened" a chest → server springs it
         }
@@ -2148,6 +2175,10 @@ void Engine::updatePlayerPickup(f32 dt) {
 
     // Real chest (SP/host lanes; a guest's request lands in handlePickupRequest instead).
     // Only reached when no real item won the tap.
+    if (wantItem && st.itemIdx < 0 && st.stashIdx >= 0) {
+        openStashUI();
+        return;
+    }
     if (wantItem && st.itemIdx < 0 && st.chestIdx >= 0) {
         openChest(static_cast<u32>(st.chestIdx));
         return;
