@@ -543,7 +543,8 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
     {
         f32 hs = static_cast<f32>(sh) / 720.0f;
         char floorStr[32];
-        std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
+        if (m_level.inTown) std::snprintf(floorStr, sizeof(floorStr), "The Town");
+        else                std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
         FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 22.0f * hs,
                              floorStr, {0.7f, 0.7f, 0.7f}, 2);
     }

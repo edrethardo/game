@@ -421,6 +421,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // stay-home NPC gate and the portal all key on this.
     m_level.inTown           = false;
     m_level.townPortalActive = false;
+    EnemyAI::setTownMode(false);   // dungeon companions follow + fight again
     // Floor + difficulty fold in so each floor and each difficulty-loop tier differs.
     u32 dungeonSeed = m_level.levelSeed
                     + m_level.currentFloor * 7919u

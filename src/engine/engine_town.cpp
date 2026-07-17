@@ -17,6 +17,7 @@
 #include "world/level_mesh.h"
 #include "world/collision.h"
 #include "game/game_constants.h"
+#include "game/enemy_ai.h"
 #include "renderer/material.h"
 #include "renderer/minimap.h"
 #include "net/net.h"
@@ -101,12 +102,18 @@ void Engine::spawnTownContents(Vec3 center) {
     // --- Townsfolk: the companion cast at plaza posts (server-authoritative; clients mirror) ---
     if (m_netRole != NetRole::CLIENT) {
         const u8 floor = 1;   // town NPCs use base-floor stats; they never fight anyway
-        spawnFriendlyNpc(center + Vec3{-4.0f, 0.0f, -1.0f}, NpcClass::CLERIC, floor);
-        spawnFriendlyNpc(center + Vec3{ 4.0f, 0.0f, -1.0f}, NpcClass::ROGUE,  floor);
-        spawnFriendlyNpc(center + Vec3{ 0.0f, 0.0f,  4.0f}, NpcClass::ARCHER, floor);
-        spawnFriendlyNpc(center + Vec3{-9.0f, 0.0f,  7.0f}, NpcClass::CLERIC, floor);
-        spawnFriendlyNpc(center + Vec3{ 9.0f, 0.0f,  7.0f}, NpcClass::ROGUE,  floor);
-        spawnFriendlyNpc(center + Vec3{ 0.0f, 0.0f, -8.0f}, NpcClass::ARCHER, floor);
+        const Vec3 posts[6] = {
+            center + Vec3{-4.0f, 0.0f, -1.0f}, center + Vec3{ 4.0f, 0.0f, -1.0f},
+            center + Vec3{ 0.0f, 0.0f,  4.0f}, center + Vec3{-9.0f, 0.0f,  7.0f},
+            center + Vec3{ 9.0f, 0.0f,  7.0f}, center + Vec3{ 0.0f, 0.0f, -8.0f},
+        };
+        const NpcClass kinds[6] = {NpcClass::CLERIC, NpcClass::ROGUE, NpcClass::ARCHER,
+                                   NpcClass::CLERIC, NpcClass::ROGUE, NpcClass::ARCHER};
+        for (u32 n = 0; n < 6; n++) {
+            EntityHandle h = spawnFriendlyNpc(posts[n], kinds[n], floor);
+            Entity* npc = handleGet(m_entities, h);
+            if (npc) npc->homePosition = posts[n];   // the post the town-mode AI holds
+        }
     }
 }
 
@@ -151,6 +158,7 @@ void Engine::enterTown() {
     }
 
     spawnTownContents(center);
+    EnemyAI::setTownMode(true);   // townsfolk hold posts + small talk (cleared by startGame)
     m_gameState = GameState::IN_GAME;
     Input::setRelativeMouseMode(true);
 
@@ -184,6 +192,7 @@ void Engine::enterTownClient() {
     snapCameraToPlayer();
 
     spawnTownContents(center);   // stash chest + portal are local fixtures; NPCs mirror over snapshots
+    EnemyAI::setTownMode(true);
     m_gameState = GameState::IN_GAME;
     Input::setRelativeMouseMode(true);
     LOG_INFO("Entered the town (client).");

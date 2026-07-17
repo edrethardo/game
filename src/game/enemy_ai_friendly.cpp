@@ -19,6 +19,45 @@ AIStep updateFriendlyNPC(Entity& e, u32 i,
                           const LevelGrid& grid, f32 dt,
                           Vec3 playerEye)
 {
+    // --- TOWNSFOLK mode: hold the post, greet visitors, make small talk. Replaces the whole
+    // companion brain (combat, healing, flow-field pathfinding — there is no exit to find and
+    // nothing to fight). Wander leash keeps them near homePosition so the plaza stays composed.
+    if (EnemyAI::townMode()) {
+        Vec3 toHome = e.homePosition - e.position;
+        toHome.y = 0.0f;
+        f32 homeDist = length(toHome);
+        if (homeDist > 2.0f) {
+            Vec3 dir = toHome * (1.0f / homeDist);
+            e.velocity.x = dir.x * e.moveSpeed * 0.35f;   // amble, don't march
+            e.velocity.z = dir.z * e.moveSpeed * 0.35f;
+            e.yaw = atan2f(-dir.x, -dir.z);
+        } else {
+            e.velocity.x = 0.0f;
+            e.velocity.z = 0.0f;
+            // Face a nearby visitor — a townsfolk that ignores you reads as furniture.
+            Vec3 toP = anchorPos - e.position;
+            f32 pd = length(Vec3{toP.x, 0.0f, toP.z});
+            if (pd < 5.0f && pd > 0.01f) e.yaw = atan2f(-toP.x / pd, -toP.z / pd);
+        }
+        // Ambient small talk on a slow randomized clock (tacticalTimer is free here).
+        e.tacticalTimer -= dt;
+        if (e.tacticalTimer <= 0.0f) {
+            e.tacticalTimer = 14.0f + static_cast<f32>(std::rand() % 12);
+            if (std::rand() % 2 == 0) {   // sometimes just stand quietly
+                static const char* clericLines[] = {"The light is warm out here.", "Rest a while, hero.", "It is over. Truly."};
+                static const char* rogueLines[]  = {"Quiet around here. I like it.", "Watch your purse.", "I kept a few souvenirs."};
+                static const char* archerLines[] = {"Fine weather for fletching.", "No more corridors. Good.", "The sky. Look at it."};
+                const char** lines = (e.npcClass == NpcClass::CLERIC) ? clericLines
+                                   : (e.npcClass == NpcClass::ROGUE)  ? rogueLines : archerLines;
+                e.speechText  = lines[std::rand() % 3];
+                e.speechTimer = 3.0f;
+            }
+        }
+        entityMoveAndSlide(e, grid, dt, anchorPos, PLAYER_HALF_WIDTH);
+        snapEntityToFloor(e, grid);
+        return AIStep::NextEntity;
+    }
+
     // Stuck detection: if NPC barely moved in 0.5s, teleport to cell center.
     // Uses dedicated stuckTimer to avoid conflicting with flybyTimer (used by drones).
     f32 movedDist = length(e.position - e.lastSeenPos);

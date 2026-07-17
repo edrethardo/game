@@ -270,6 +270,13 @@ bool anyPlayerWithin(Vec3 pos, f32 range)
 // The ONE wake routine for disguised ambushers — called by the DORMANT state's
 // weeping-angel trigger, the mimic damage-spring, and the Engine's E-interact path
 // (Engine::onEntityInteract / SP-host chest "open"), so the reveal always looks the same.
+// Town mode: friendly NPCs are TOWNSFOLK, not dungeon companions — they hold their posts
+// instead of chasing the flow field to a nonexistent exit. Set by enterTown/enterTownClient,
+// cleared by startGame (the setBotWalk pattern: cheap global, no per-entity flag spent).
+static bool s_townMode = false;
+void EnemyAI::setTownMode(bool on) { s_townMode = on; }
+bool EnemyAI::townMode()           { return s_townMode; }
+
 void EnemyAI::wakeAmbusher(Entity& e)
 {
     if (e.aiState != AIState::DORMANT) return;

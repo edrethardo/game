@@ -41,6 +41,10 @@ namespace EnemyAI {
     // too). No-op unless the entity is actually DORMANT. Server/SP only — on guests aiState
     // is replicated, never locally decided.
     void wakeAmbusher(Entity& e);
+    // Town mode: friendly NPCs hold their posts + make small talk instead of following the
+    // flow field / fighting. Set on town entry, cleared by startGame.
+    void setTownMode(bool on);
+    bool townMode();
 
     // Pure view-cone half of the weeping-angel wake rule ("dormant ambushers stir only while
     // unobserved"). Forward derives from yaw/pitch with the SAME convention as the server's
