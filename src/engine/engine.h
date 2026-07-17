@@ -1024,6 +1024,13 @@ private:
     void arenaSendScores(u8 toSlot);   // ARENA_SCORES refresh (0xFF = broadcast)
     void arenaLeaveToMenu();           // teardown, never saves
     void arenaPushFeed(u8 killerSlot, u8 victimSlot);
+    // SERVER net-callback wiring + Server::init, extracted from startGame so hosts that build
+    // their world WITHOUT startGame (arena Continue / --arena, town cleared-Continue) still
+    // seat joiners. Idempotent.
+    void wireServerNet();
+    // CLIENT twin: callback wiring + prediction/ring resets, so sentinel-floor joins
+    // (enterArenaClient/enterTownClient/enterSourceChamberClient) aren't connected-but-deaf.
+    void wireClientNet();
     // Post-Engine victory flow: portal spawn (host: local + broadcast; client: via SV_EVENT),
     // the arbitrated enter (updateExitPortal), and the shared credits sequence. startCredits is
     // the LOCAL state flip every machine runs; beginCreditsSequence is the server/SP entry that

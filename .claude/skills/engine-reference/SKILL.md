@@ -340,10 +340,42 @@ No flags / `--help` / any invalid value → a warning + usage and a normal menu 
 | `--new <class>` | fresh run (`warrior`,`ranger`,`sorcerer`,`rogue`,`paladin`,`combat_engineer`,`marksman`,`tinkerer`,`wanderer`) → `NEW_GAME` |
 | `--floor <n>` / `--difficulty <0-2>` | for `--new` (CONTINUE takes difficulty from the save) |
 | `--port <n>` / `--lan` | host/join port; `--lan` hosts without UPnP |
+| `--town` | dev door: land the hero in the TOWN hub (skips `startGame`) |
+| `--arena` | dev door: straight into the PvP ARENA (with `--host`: hosts it; joiners follow the sentinel seed) |
+| `--arena-couch` | local-versus arena: two fresh lanes of `--new`'s class, split-screen |
 
 Examples: `DungeonEngine --host --load 1` · `--host --new sorcerer --floor 5 --lan` ·
-`--join 192.168.1.5 --load 2` · `--load 3`. JOIN ends in `CONNECTING` (the server drives the
-client in); HOST/SINGLE call `startGame` directly.
+`--join 192.168.1.5 --load 2` · `--load 3` · `--arena --host --lan --new warrior`. JOIN ends in
+`CONNECTING` (the server drives the client in); HOST/SINGLE call `startGame` directly.
+
+## Arena mode (PvP) internals
+
+Sentinel floor **97** (`GameConst::ARENA_SENTINEL_FLOOR`); deterministic 36×36 colosseum in
+`engine_arena.cpp` (four corner pads = spawn/respawn points; cover is plain `CELL_SOLID`).
+Rules are pure in `game/arena.h` (`KILL_TARGET` 10, `RESPAWN_DELAY` 3 s, `recordKill`,
+`farthestPad` — tested in `tests/game/test_arena.cpp`).
+
+- **PvP damage lifecycle:** `Engine::arenaBeginPvpWindow()` (before `serverNetPre`) registers
+  every combatant with `Combat::setPvpTargets` — lane arrays for host-locals, seeded views for
+  remotes (geometry snapshots ONLY); `arenaEndPvpWindow()` (before `serverNetPost`) clears it.
+  Damage sites call `Combat::pvpCone/pvpRay/pvpRadius` (weapon geometry / skill AoE) or
+  `Combat::pvpApply` (projectiles, chain hops); every landed hit resolves ATOMICALLY in
+  `Engine::pvpApplyHit` — fresh remote-view seed → `applyDamageToPlayer` (block/perfect/armor/
+  i-frames all apply) → immediate writeback — so the tick's other seed/writeback cycles never
+  interleave. Registry empty ⇒ all helpers no-op (the whole PvE-safety story). Kill credit =
+  `lastHitByPlayerSlot` (Player + NetPlayer, seed/writeback-mirrored).
+- **Deathmatch loop:** deaths (remote: `serverNetPost` HP edge; local lanes: the gameUpdate
+  death path) → `arenaHandleDeath` → `ARENA_KILL` (0x0A: killer, victim, newScore); authority
+  auto-respawns via `arenaTick` at `Arena::farthestPad`; 10th kill → `beginArenaOver` broadcasts
+  `ARENA_OVER` (0x0C: winner + 4×u8 scores) BEFORE the local flip (the CREDITS rule), every peer
+  runs its own 8 s banner then `arenaLeaveToMenu` (never saves). Mid-join: pad seat +
+  `ARENA_SCORES` (0x0B) refresh in `onPlayerJoin`. `PROTOCOL_VERSION` 20.
+- **Firewall:** drops refused on both ends, no descend, `saveCharacter` hard-refuses in-arena
+  (a save would stamp floor 97 into the header), pause row = "Leave Arena".
+- **Net wiring rule:** worlds entered WITHOUT `startGame` wire callbacks explicitly —
+  `wireServerNet()` in `enterArena`/`enterTown` (host), `wireClientNet()` in
+  `enterArenaClient`/`enterTownClient`/`enterSourceChamberClient` (sentinel joins). Both are
+  idempotent extractions of `startGame`'s blocks; skipping them = unseated joiners / deaf clients.
 
 ## Maintenance
 

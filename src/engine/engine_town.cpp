@@ -163,6 +163,10 @@ void Engine::enterTown() {
     Input::setRelativeMouseMode(true);
 
     if (m_netRole == NetRole::SERVER) {
+        // Same gap as the arena: a cleared-hero Continue host reaches the town WITHOUT
+        // startGame, so the server callbacks (onPlayerJoin!) were never wired on that path —
+        // a joiner connected but was never seated. wireServerNet is idempotent.
+        wireServerNet();
         Net::broadcastLevelSeed(GameConst::TOWN_SENTINEL_FLOOR, m_difficulty, m_level.levelSeed);
         Server::updateLevel(m_level.levelSeed, GameConst::TOWN_SENTINEL_FLOOR, m_difficulty);
     }
@@ -171,6 +175,10 @@ void Engine::enterTown() {
 
 // Client: mirror of enterTown, driven by the sentinel-floor SV_LEVEL_SEED (see onLevelSeed).
 void Engine::enterTownClient() {
+    // A join-accept can route here INSTEAD of startGame (joining a host who is at home) —
+    // wire the client net callbacks or the join is connected but deaf (no snapshots, no
+    // SV_EVENTs). Harmless for the mid-session SV_LEVEL_SEED route (already wired; idempotent).
+    if (m_netRole == NetRole::CLIENT) wireClientNet();
     EntitySystem::init(m_entities);
     ProjectileSystem::init(m_projectiles);
     WorldItemSystem::init(m_worldItems);

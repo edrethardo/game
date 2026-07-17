@@ -173,6 +173,9 @@ void Engine::enterArena() {
     }
 
     if (m_netRole == NetRole::SERVER) {
+        // A host can reach the arena WITHOUT startGame (Continue hero, --arena dev door) —
+        // wire the server callbacks or joiners connect but never get seated (no onPlayerJoin).
+        wireServerNet();
         Net::broadcastLevelSeed(GameConst::ARENA_SENTINEL_FLOOR, m_difficulty, m_level.levelSeed);
         Server::updateLevel(m_level.levelSeed, GameConst::ARENA_SENTINEL_FLOOR, m_difficulty);
     }
@@ -182,6 +185,9 @@ void Engine::enterArena() {
 // Client: mirror of enterArena, driven by the sentinel-floor SV_LEVEL_SEED / join-accept.
 // Our real position/score arrive from the server (snapshot + ARENA_SCORES).
 void Engine::enterArenaClient() {
+    // Join-accept routed here INSTEAD of startGame, so the client-side net wiring (snapshot,
+    // SV_EVENT, clock sync) must happen here or this client is connected but deaf.
+    wireClientNet();
     enterArenaCommon();
     LOG_INFO("Entered the ARENA (client).");
 }

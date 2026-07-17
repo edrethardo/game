@@ -369,6 +369,95 @@ void Engine::equipFreshLane(u8 lane) {
     m_localPlayers[lane].damageReduction = (m_playerClasses[lane] == PlayerClass::WARRIOR) ? 0.3f : 0.0f;
 }
 
+// SERVER-side net callback wiring + Server::init. Extracted from startGame because it is NOT
+// the only way a listen-server starts serving a world: the arena (enterArena after a Continue,
+// or the --arena dev door) and the town (cleared-hero Continue host) build their worlds
+// without startGame — and before this extraction those hosts never wired onPlayerJoin, so a
+// joiner connected at the net layer but no NetPlayer was ever seated (invisible, unseated,
+// unkillable). Idempotent: re-setting the callbacks is free, and Server::init already handles
+// live floor transitions (startGame calls it on every descent with clients connected).
+void Engine::wireServerNet() {
+    Net::setOnInput(Engine::onInput);
+    Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
+    Net::setOnMeteor(Engine::onMeteor); // client-predicted proc meteor → authoritative spawn
+    Net::setOnUsePet(Engine::onUsePet); // pet-consumable use → server-side companion toggle
+    Net::setOnEntityInteract(Engine::onEntityInteract); // mimic chest E-interact (v17)
+    Net::setOnDropItem(Engine::onDropItem); // R11: server-authoritative inventory drop
+    Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
+    Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent
+    Net::setOnFireWeapon(Engine::onFireWeapon); // client-side weapon fire prediction (CL_FIRE_WEAPON)
+    Net::setOnInventorySync(Engine::onInventorySync); // join-with-save inventory push
+    Net::setOnTimePing(Engine::onTimePing); // clock-sync handshake (M1.4)
+    Net::setOnPlayerJoin(Engine::onPlayerJoin);
+    Net::setOnPlayerLeft(Engine::onPlayerLeft);
+    Server::init(m_players, m_level.levelSeed,
+                 static_cast<u8>(m_level.currentFloor), m_difficulty);
+    // The input-tick space restarts with the buffers Server::init just cleared, so both
+    // drain-side watermarks restart with it — a stale activation watermark from the previous
+    // floor would silently swallow every press until the new ticks caught up to it.
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        m_starvedRepeats[i]     = 0;
+        m_lastActivationTick[i] = 0;
+    }
+}
+
+// CLIENT-side net callback wiring + prediction/ring resets. Extracted from startGame for the
+// same reason as wireServerNet: a client joining a host who sits on a SENTINEL floor (arena
+// 97 / town 98 / source 99) routes into enterArenaClient/enterTownClient/
+// enterSourceChamberClient INSTEAD of startGame — and without this call those joins had no
+// snapshot handler, no SV_EVENT handler, no clock sync: a connected-but-deaf client. (This is
+// how the arena soak's client missed ARENA_OVER; the town/source joins carried the same
+// latent gap.) The startGame-only tail (starting-loadout mirror) stays in startGame.
+void Engine::wireClientNet() {
+    Net::setOnSnapshot(Engine::onSnapshot);
+    Net::setOnEvent(Engine::onEvent);
+    Net::setOnPlayerLeft(Engine::onPlayerLeft);
+    // Follow the host's mid-run floor descents (server-authoritative).
+    Net::setOnLevelSeed(Engine::onLevelSeed);
+    // Clock-sync pong decoder (M1.5) — feeds incoming SV_TIME_PONG into ClockSync.
+    Net::setOnTimePong(Engine::onTimePong);
+    // M10.2/M10.3 — reliable server-confirms for predicted hits and incoming damage.
+    Net::setOnDamageDone(Engine::onDamageDone);
+    Net::setOnDamageToMe(Engine::onDamageToMe);
+    // D1.1/D1.2/D1.3 — reliable event packets for kills, pickup results, loot spawns.
+    Net::setOnKill(Engine::onKill);
+    Net::setOnPickupResult(Engine::onPickupResult);
+    Net::setOnLootSpawn(Engine::onLootSpawn);
+    Net::setOnEnergyGain(Engine::onEnergyGain); // server-granted manasteal / mana-on-kill
+    // Client::init resets the (shared) snapshot ring + per-lane send windows; pass lane 0's net
+    // slot for the s_localPlayerIndex back-compat accessor. Online couch co-op reconciles each
+    // lane by the explicit slot passed to Client::reconcile, so this single call covers both.
+    Client::init(m_clientNetSlot[0]); // must match snapshot slotIndex / ack key
+    // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
+    // Ping state also resets so clientNetPre sends the 3 handshake pings on the
+    // first ticks of the new session.
+    ClockSyncOps::reset(m_clockSync);
+    m_pingsSent = 0;
+    m_lastPingSentSec = 0.0;
+    // M3.2/M4 — clear each lane's prediction ring, last-reconciled ack, and smooth-correction
+    // offset so stale tick-keyed entries from a prior session don't produce false divergence.
+    for (u8 lane = 0; lane < MAX_LOCAL_PLAYERS; lane++) {
+        PredictionRingOps::reset(m_predictionRing[lane]);
+        m_lastReconciledTick[lane] = 0;
+        m_renderOffset[lane].offset = {0, 0, 0};
+    }
+    // M6 — Clear the pending-hits ring so stale predictions from a prior session
+    // don't get acked (or mismatched) against the new connection's server events.
+    PendingHitRingOps::reset(m_pendingHits);
+    // M7 — Clear the pending-damage ring so visual-feedback predictions from a
+    // prior session don't carry over into the new connection.
+    PendingDamageRingOps::reset(m_pendingDamage);
+    // Companion of the unpredicted-damage detector (clientNetPost): a stale low value from a
+    // prior session is harmless (min() only ever suppresses fires), but start clean anyway.
+    for (u32 i = 0; i < MAX_LOCAL_PLAYERS; i++) m_lastAdoptedHp[i] = 0.0f;
+    // M8 — Clear the pending-pickups ring so world-item disappearance predictions
+    // from a prior session don't suppress items in the new connection's world.
+    PendingPickupRingOps::reset(m_pendingPickups);
+    // M9 — Clear the pending-skills ring so skill activation predictions from a prior
+    // session don't get matched (or mismatched) against new connection's server events.
+    PendingSkillRingOps::reset(m_pendingSkills);
+}
+
 void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
@@ -836,76 +925,9 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
 
     // Setup net callbacks
     if (m_netRole == NetRole::SERVER) {
-        Net::setOnInput(Engine::onInput);
-        Net::setOnPickup(Engine::onPickup); // server-authoritative loot pickup (N5)
-        Net::setOnMeteor(Engine::onMeteor); // client-predicted proc meteor → authoritative spawn
-        Net::setOnUsePet(Engine::onUsePet); // pet-consumable use → server-side companion toggle
-        Net::setOnEntityInteract(Engine::onEntityInteract); // mimic chest E-interact (v17)
-        Net::setOnDropItem(Engine::onDropItem); // R11: server-authoritative inventory drop
-        Net::setOnRespawn(Engine::onRespawn); // server-authoritative client respawn
-        Net::setOnDescendRequest(Engine::onDescendRequest); // remote-initiated floor descent
-        Net::setOnFireWeapon(Engine::onFireWeapon); // client-side weapon fire prediction (CL_FIRE_WEAPON)
-        Net::setOnInventorySync(Engine::onInventorySync); // join-with-save inventory push
-        Net::setOnTimePing(Engine::onTimePing); // clock-sync handshake (M1.4)
-        Net::setOnPlayerJoin(Engine::onPlayerJoin);
-        Net::setOnPlayerLeft(Engine::onPlayerLeft);
-        Server::init(m_players, m_level.levelSeed,
-                     static_cast<u8>(m_level.currentFloor), m_difficulty);
-        // The input-tick space restarts with the buffers Server::init just cleared, so both
-        // drain-side watermarks restart with it — a stale activation watermark from the previous
-        // floor would silently swallow every press until the new ticks caught up to it.
-        for (u32 i = 0; i < MAX_PLAYERS; i++) {
-            m_starvedRepeats[i]     = 0;
-            m_lastActivationTick[i] = 0;
-        }
+        wireServerNet();   // extracted so the non-startGame hosts (arena, town) can wire too
     } else if (m_netRole == NetRole::CLIENT) {
-        Net::setOnSnapshot(Engine::onSnapshot);
-        Net::setOnEvent(Engine::onEvent);
-        Net::setOnPlayerLeft(Engine::onPlayerLeft);
-        // Follow the host's mid-run floor descents (server-authoritative).
-        Net::setOnLevelSeed(Engine::onLevelSeed);
-        // Clock-sync pong decoder (M1.5) — feeds incoming SV_TIME_PONG into ClockSync.
-        Net::setOnTimePong(Engine::onTimePong);
-        // M10.2/M10.3 — reliable server-confirms for predicted hits and incoming damage.
-        Net::setOnDamageDone(Engine::onDamageDone);
-        Net::setOnDamageToMe(Engine::onDamageToMe);
-        // D1.1/D1.2/D1.3 — reliable event packets for kills, pickup results, loot spawns.
-        Net::setOnKill(Engine::onKill);
-        Net::setOnPickupResult(Engine::onPickupResult);
-        Net::setOnLootSpawn(Engine::onLootSpawn);
-        Net::setOnEnergyGain(Engine::onEnergyGain); // server-granted manasteal / mana-on-kill
-        // Client::init resets the (shared) snapshot ring + per-lane send windows; pass lane 0's net
-        // slot for the s_localPlayerIndex back-compat accessor. Online couch co-op reconciles each
-        // lane by the explicit slot passed to Client::reconcile, so this single call covers both.
-        Client::init(m_clientNetSlot[0]); // must match snapshot slotIndex / ack key
-        // Bootstrap the clock-sync subsystem so reconnects start with a clean estimate.
-        // Ping state also resets so clientNetPre sends the 3 handshake pings on the
-        // first ticks of the new session.
-        ClockSyncOps::reset(m_clockSync);
-        m_pingsSent = 0;
-        m_lastPingSentSec = 0.0;
-        // M3.2/M4 — clear each lane's prediction ring, last-reconciled ack, and smooth-correction
-        // offset so stale tick-keyed entries from a prior session don't produce false divergence.
-        for (u8 lane = 0; lane < MAX_LOCAL_PLAYERS; lane++) {
-            PredictionRingOps::reset(m_predictionRing[lane]);
-            m_lastReconciledTick[lane] = 0;
-            m_renderOffset[lane].offset = {0, 0, 0};
-        }
-        // M6 — Clear the pending-hits ring so stale predictions from a prior session
-        // don't get acked (or mismatched) against the new connection's server events.
-        PendingHitRingOps::reset(m_pendingHits);
-        // M7 — Clear the pending-damage ring so visual-feedback predictions from a
-        // prior session don't carry over into the new connection.
-        PendingDamageRingOps::reset(m_pendingDamage);
-        // Companion of the unpredicted-damage detector (clientNetPost): a stale low value from a
-        // prior session is harmless (min() only ever suppresses fires), but start clean anyway.
-        for (u32 i = 0; i < MAX_LOCAL_PLAYERS; i++) m_lastAdoptedHp[i] = 0.0f;
-        // M8 — Clear the pending-pickups ring so world-item disappearance predictions
-        // from a prior session don't suppress items in the new connection's world.
-        PendingPickupRingOps::reset(m_pendingPickups);
-        // M9 — Clear the pending-skills ring so skill activation predictions from a prior
-        // session don't get matched (or mismatched) against new connection's server events.
-        PendingSkillRingOps::reset(m_pendingSkills);
+        wireClientNet();   // extracted so the sentinel-floor joins (arena/town/source) wire too
         // Fresh network join only (mode != DESCEND AND no save loaded): a brand-new
         // joiner has no save to restore from, so locally mirror the deterministic
         // starting loadout the server grants this slot in onPlayerJoin. Both ends thus

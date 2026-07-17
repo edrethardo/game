@@ -2947,6 +2947,10 @@ void Engine::enterSourceChamber() {
 // Builds the identical deterministic geometry and moves the local player in; the Engine + its
 // summoned waves are server-authoritative and arrive via snapshots — the client spawns nothing.
 void Engine::enterSourceChamberClient() {
+    // A join-accept can route here INSTEAD of startGame (joining a host mid-Source-fight) —
+    // wire the client net callbacks or the join is connected but deaf. Idempotent for the
+    // mid-session SV_LEVEL_SEED route (already wired by the session's startGame).
+    if (m_netRole == NetRole::CLIENT) wireClientNet();
     Vec3 center = buildSourceChamber();
     m_level.inSourceChamber    = true;
     m_level.floorDoorActive    = false;
