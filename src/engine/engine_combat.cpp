@@ -579,8 +579,9 @@ void Engine::handleWeaponFire(f32 dt) {
             spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
         }
 
-        // Throwing knives: lead-assisted direction + swept entity collision (knives ONLY —
-        // the rest of the ranged arsenal is untouched by design; see applyKnifeLeadAssist).
+        // Throwing knives: lead-assisted direction (knives ONLY; see applyKnifeLeadAssist).
+        // Segment-swept entity collision is no longer a knife special: ProjectileSystem::update
+        // derives it from travel vs radius for every projectile (sweepSampleCount).
         bool isKnife = qbItem && !isItemEmpty(*qbItem) &&
                        m_itemDefs[qbItem->defId].weaponSubtype == WeaponSubtype::THROWING_KNIFE;
         Vec3 fireDir = forward;
@@ -596,8 +597,6 @@ void Engine::handleWeaponFire(f32 dt) {
             u8 flags = isVoidWand ? PROJ_VOID : (isWand ? PROJ_SPARK : 0);
             projIdx = Combat::fireProjectile(wpn, spawnPos, fireDir, m_projectiles, flags);
         }
-        if (projIdx != 0xFFFF && isKnife)
-            m_projectiles.projectiles[projIdx].swept = true;   // segment-sampled entity test
         // Assign correct mesh to projectile based on weapon subtype
         if (projIdx != 0xFFFF && qbItem && !isItemEmpty(*qbItem)) {
             WeaponSubtype sub = m_itemDefs[qbItem->defId].weaponSubtype;
@@ -1446,9 +1445,9 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         bool isMolotov = (sub == WeaponSubtype::MOLOTOV);
         bool isWand    = (sub == WeaponSubtype::WAND);
 
-        // Throwing knives: same lead assist + swept collision as the local path — the
-        // authoritative half of what the firing guest already predicted (server-side pool,
-        // authoritative velocities).
+        // Throwing knives: same lead assist as the local path — the authoritative half of what
+        // the firing guest already predicted (server-side pool, authoritative velocities).
+        // Segment sweeping is derived per-tick in ProjectileSystem::update — no flag to set.
         bool isKnife = (sub == WeaponSubtype::THROWING_KNIFE);
         Vec3 fireDir = forward;
         if (isKnife) applyKnifeLeadAssist(eyePos, fireDir, wpn.projectileSpeed);
@@ -1464,8 +1463,6 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
             u8 flags = isWand ? PROJ_SPARK : 0;
             projIdx = Combat::fireProjectile(wpn, eyePos, fireDir, m_projectiles, flags);
         }
-        if (projIdx != 0xFFFF && isKnife)
-            m_projectiles.projectiles[projIdx].swept = true;   // segment-sampled entity test
         if (projIdx != 0xFFFF) {
             Projectile& proj = m_projectiles.projectiles[projIdx];
             if (sub == WeaponSubtype::BOW) {

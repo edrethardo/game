@@ -286,19 +286,13 @@ void ProjectileSystem::update(ProjectilePool& pool,
             // Hit hostile enemies only. Use spatial grid for O(1) neighbor lookup
             // instead of iterating all active entities (O(N) → O(~8) per projectile).
             //
-            // Swept projectiles (throwing knives, p.swept) test SAMPLE POINTS along the whole
-            // per-tick travel segment instead of only the post-move endpoint. Walls have always
-            // been swept (the raycast above covers travel+radius); entities were not — and a
-            // knife moves 0.42-0.58 m per tick with a 5-8 cm radius, so an endpoint-only test
-            // steps clean over grazing hits (chord through the box shorter than the step).
-            // Sample spacing ≤ radius keeps overlap gaps impossible; the LAST sample is the
-            // exact post-move position, so non-swept projectiles (samples == 1) run the
-            // byte-identical old test.
-            u32 sweepSamples = 1;
-            if (p.swept && travel > p.radius && p.radius > 0.001f) {
-                sweepSamples = static_cast<u32>(travel / p.radius) + 1;
-                if (sweepSamples > 8) sweepSamples = 8;
-            }
+            // SAMPLE POINTS along the whole per-tick travel segment instead of only the
+            // post-move endpoint — derived from travel vs radius for EVERY projectile (see
+            // sweepSampleCount's header comment for the tunneling math; the old opt-in `swept`
+            // flag covered throwing knives only, and crossbows/shurikens/staff bolts kept
+            // stepping over grazes and small enemies). The LAST sample is the exact post-move
+            // position, so slow projectiles (samples == 1) run the byte-identical old test.
+            const u32 sweepSamples = sweepSampleCount(travel, p.radius);
             bool hit = false;
             u16 primaryHitIdx = 0xFFFF;
             if (!(p.projFlags & PROJ_ORB))   // Frozen Orb phases through enemies

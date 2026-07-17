@@ -36,12 +36,6 @@ struct Projectile {
     bool active     = false;
     bool fromPlayer = true; // false = enemy projectile
     bool isCrit     = false; // player rolled a crit at spawn — applied on direct hit, NOT splash
-    // Entity collision samples the whole per-tick travel SEGMENT instead of only the post-move
-    // endpoint. Throwing knives set this (fastest + thinnest projectiles: 0.42-0.58 m/tick vs a
-    // 5-8 cm radius — an endpoint-only test steps clean over grazes). Runtime-only, not on the
-    // wire (collision is authoritative-sim work; client ghosts never collide). projFlags is a
-    // full u8, hence a bool and not a ninth flag.
-    bool swept      = false;
     u8   ownerSlot  = 0xFF;  // (L8) firing player's slot (0xFF = none); restored into
                              // Combat::s_attackingPlayer around this projectile's damage so a
                              // kill credits the firer even though it resolves frames later
@@ -125,6 +119,22 @@ namespace ProjectileSystem {
         p.lifetime      = 3.0f;   // fresh flight window for the return trip
         p.onHitEffect   = 0;
         p.onHitDuration = 0.0f;
+    }
+
+    // Entity-collision sample count for one tick's travel. Walls have always been swept (the
+    // per-tick raycast covers travel+radius) but entities used to be tested at the post-move
+    // ENDPOINT only — so any projectile whose per-tick travel exceeded its own hitbox stepped
+    // clean over grazes and small enemies (crossbows/shurikens at 0.5-0.8 m/tick vs a 0.12-0.24 m
+    // box; staff/wand bolts on grazes; the +40% projectile_speed affix pushed everything a class
+    // worse). A `swept` opt-in flag existed but only throwing knives ever set it. Sweeping is now
+    // DERIVED — every projectile that outruns its radius gets sampled, current and future alike.
+    // Sample spacing never exceeds the radius (gap-free against any enemy size); cap 16 covers
+    // the fastest+thinnest real case (Velocity-affixed Void Shuriken: ~11 samples) with margin.
+    // Pure — pinned by tests/game/test_projectile_parry.cpp.
+    inline u32 sweepSampleCount(f32 travel, f32 radius) {
+        if (radius <= 0.001f || travel <= radius) return 1;
+        u32 n = static_cast<u32>(travel / radius) + 1;
+        return (n > 16) ? 16 : n;
     }
 
     // Callback when a splash projectile explodes (for visual effects)

@@ -28,3 +28,24 @@ TEST_CASE("reflectAsParry: flips owner/side, reverses velocity, doubles damage")
     CHECK(p.onHitEffect == 0);              // the rider dies with the parry
     CHECK(p.onHitDuration == 0.0f);
 }
+
+// sweepSampleCount — the tunneling fix: a projectile that outruns its own hitbox in one tick
+// must be sampled along its travel segment, spaced no wider than its radius, or fast bolts
+// (crossbows, shurikens, Velocity-affixed staff shots) step clean over grazes and small enemies.
+TEST_CASE("sweepSampleCount: slow projectiles keep the single endpoint test") {
+    CHECK(ProjectileSystem::sweepSampleCount(0.10f, 0.15f) == 1);   // travel <= radius
+    CHECK(ProjectileSystem::sweepSampleCount(0.15f, 0.15f) == 1);   // exactly radius: no sweep
+    CHECK(ProjectileSystem::sweepSampleCount(0.30f, 0.0f)  == 1);   // degenerate radius guard
+}
+
+TEST_CASE("sweepSampleCount: fast projectiles sample with spacing <= radius") {
+    // Heavy Crossbow: 32.2 m/s -> 0.54 m/tick, r = 0.12.
+    u32 n = ProjectileSystem::sweepSampleCount(0.54f, 0.12f);
+    CHECK(n >= 5);
+    CHECK(0.54f / static_cast<f32>(n) <= 0.12f);
+    // Velocity-affixed Void Shuriken (the worst real case): 49 m/s -> 0.82 m/tick, r = 0.08.
+    n = ProjectileSystem::sweepSampleCount(0.82f, 0.08f);
+    CHECK(n >= 11);
+    CHECK(n <= 16);                                                  // cap holds
+    CHECK(0.82f / static_cast<f32>(n) <= 0.08f);
+}
