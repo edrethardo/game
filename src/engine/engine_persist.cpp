@@ -199,6 +199,14 @@ u8 Engine::firstFreeSaveSlot() {
 // v3 on their next save).
 void Engine::saveCharacter(u8 lane, u8 slot) {
     if (slot < 1 || slot > MAX_SAVE_SLOTS || lane >= MAX_LOCAL_PLAYERS) return;
+    // Arena firewall (defense in depth): the arena NEVER saves — a character leaves exactly
+    // as it entered, and a write here would stamp sentinel floor 97 into the header, which
+    // Continue would then route back into a dead arena. Every legit arena exit skips saving
+    // already (arenaLeaveToMenu); this guard stops any path that forgets.
+    if (m_level.inArena) {
+        LOG_WARN("saveCharacter: refused inside the arena (lane %u, slot %u)", lane, slot);
+        return;
+    }
 
     char path[512];  // holds the full per-user data dir prefix + save_NN.dat
     getSaveSlotPath(slot, path, sizeof(path));

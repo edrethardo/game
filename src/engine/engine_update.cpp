@@ -333,7 +333,8 @@ void Engine::update(f32 dt) {
         // Town from anywhere (SP only): once the account has an Engine kill, every character
         // can head home mid-run — the run is saved first, and the town portal brings a
         // mid-run hero back to ITS OWN floor (see updateTownPortal), not the free-play select.
-        const bool canGoTown = (m_netRole == NetRole::NONE && m_townUnlocked && !m_level.inTown);
+        const bool canGoTown = (m_netRole == NetRole::NONE && m_townUnlocked &&
+                                !m_level.inTown && !m_level.inArena);
         const u8 iTown       = canGoTown ? pauseIdx++ : 0xFF;
         const u8 iOptions    = pauseIdx++;
         const u8 iSaveQuit   = pauseIdx++;
@@ -405,6 +406,11 @@ void Engine::update(f32 dt) {
                 m_menu.confirmQuit = false;
                 m_menu.subSelection = 0;            // reset highlight; the option is gone next time
                 Input::setRelativeMouseMode(true);  // recapture the cursor for gameplay
+            } else if (m_level.inArena) {
+                // "Leave Arena" (the last row wears that label in arena — engine_hud.cpp).
+                // Same teardown as Save and Quit MINUS the save: the arena never touches a
+                // character's file, and a New arena character is deliberately discarded.
+                arenaLeaveToMenu();
             } else {
                 // Save and Quit (always the last row)
                 m_menu.confirmQuit = false;
@@ -2436,6 +2442,10 @@ void Engine::sendDropRequest(u8 slotKind, u8 slotIndex, const ItemInstance& it, 
 // dropPos. No validation — co-op trust model (mirrors onInventorySync).
 void Engine::handleDropRequest(u8 playerSlot, u8 slotKind, u8 slotIndex,
                                 const ItemInstance& it, Vec3 dropPos) {
+    // Arena firewall: the server refuses ALL drops — the client-side deny (engine_inventory)
+    // is UX; this is the authority. A modified client's drop request simply evaporates (its
+    // own optimistic removal self-heals from the next CL_INVENTORY_SYNC-less snapshot state).
+    if (m_level.inArena) return;
     if (playerSlot >= MAX_PLAYERS) return;
     PlayerInventory& inv = m_inventories[playerSlot];
     // Hold a named default-constructed empty so the assignments below copy from a
@@ -2505,6 +2515,7 @@ void Engine::sendDescendRequest() {
 // feedback is a follow-up SV_EVENT.
 void Engine::handleDescendRequest(u8 playerSlot) {
     if (playerSlot >= MAX_PLAYERS) return;
+    if (m_level.inArena) return;   // arena firewall: no descend, no portals, no floor flow
     // Post-Engine exit portal: in the Source chamber there is no floor door, so a guest's
     // "leave" request resolves against the portal instead — same slot byte, same proximity
     // discipline. First one in rolls the credits for everyone (beginCreditsSequence is

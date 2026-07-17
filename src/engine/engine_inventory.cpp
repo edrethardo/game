@@ -275,8 +275,11 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 }
             }
         }
-        // Y = drop selected item
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y)) {
+        // Y = drop selected item. Arena: drops are refused everywhere (the progression
+        // firewall — gear can't be lost or duped in a mode that never saves).
+        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y) && m_level.inArena) {
+            AudioSystem::play(SfxId::UI_BACK);
+        } else if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y)) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 u8 idx = m_invCursorIndex;
@@ -399,8 +402,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
 
-        // Right-click: drop item to world (backpack or equipment)
-        if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) {
+        // Right-click: drop item to world (backpack or equipment). Arena: refused (firewall).
+        if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) && m_level.inArena) {
+            AudioSystem::play(SfxId::UI_BACK);
+        } else if (Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) {
             InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
@@ -428,8 +433,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
 
-        // Q key: drop all backpack items to world + close inventory
-        if (Input::isKeyPressed(SDL_SCANCODE_Q)) {
+        // Q key: drop all backpack items to world + close inventory. Arena: refused (firewall).
+        if (Input::isKeyPressed(SDL_SCANCODE_Q) && m_level.inArena) {
+            AudioSystem::play(SfxId::UI_BACK);
+        } else if (Input::isKeyPressed(SDL_SCANCODE_Q)) {
             Vec3 dropBase = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 si = 0; si < MAX_INVENTORY_ITEMS; si++) {
                 if (isItemEmpty(m_inventories[m_localPlayerIndex].backpack[si])) continue;
@@ -503,6 +510,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 AudioSystem::play(SfxId::ITEM_EQUIP);
                 m_itemEquippedOnce = true;
                 sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7
+            } else if (drop.panel == InventoryUI::SlotHit::NONE && m_level.inArena) {
+                // Arena: drag-out drops are refused (firewall) — the item snaps back to its
+                // source slot because a NONE drop with no action never removed it.
+                AudioSystem::play(SfxId::UI_BACK);
             } else if (drop.panel == InventoryUI::SlotHit::NONE) {
                 // Drop outside all panels — drop item to world
                 Vec3 dropPos = m_localPlayer.position + Vec3{0, 0.5f, 0};

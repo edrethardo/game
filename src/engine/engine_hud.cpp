@@ -1081,10 +1081,12 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         options[optCount++] = "Continue Playing";
         if (canCloseLobby) options[optCount++] = "Close Lobby";
         if (menagerieUnlocked()) options[optCount++] = "Menagerie";   // hidden until the first pet summon
-        if (m_netRole == NetRole::NONE && m_townUnlocked && !m_level.inTown)
+        if (m_netRole == NetRole::NONE && m_townUnlocked && !m_level.inTown && !m_level.inArena)
             options[optCount++] = "Go to Town";   // SP, unlocked account, not already home
         options[optCount++] = "Options";          // opens the real options screens mid-run
-        options[optCount++] = "Save and Quit";
+        // Arena: nothing to save (the character leaves as it entered), so the last row is an
+        // honest "Leave Arena". Must mirror the update-side row build (engine_update.cpp).
+        options[optCount++] = m_level.inArena ? "Leave Arena" : "Save and Quit";
         for (u32 i = 0; i < optCount; i++) {
             f32 y = cy + L.firstRowOffset - i * L.rowStep;
             bool sel = (i == m_menu.subSelection);

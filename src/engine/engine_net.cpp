@@ -1086,6 +1086,14 @@ void Engine::clientNetPre(f32 dt) {
     // a dropped connection; the host sends no explicit "leaving" packet). Save the client's
     // game first, then return to menu — same as the pause menu's "Save and Quit".
     if (!Net::isConnected()) {
+        // Arena: the host leaving (mid-match, or tearing down at match end a beat before our
+        // own banner clock) must NOT trigger the save below — the character is unchanged by
+        // construction, and saving here would write floor 97 into the header. Clean exit.
+        if (m_level.inArena) {
+            LOG_INFO("Host left the arena — returning to menu (nothing to save)");
+            arenaLeaveToMenu();
+            return;
+        }
         LOG_WARN("Host left / lost connection — saving and returning to menu");
         // Save BEFORE clearing the CLIENT role. saveCharacter's no-downgrade guard preserves the
         // higher on-disk effective floor regardless of role, so the host's lower floor never
