@@ -688,7 +688,11 @@ private:
     static constexpr u32 MAX_CHAIN_POINTS = 24;
     struct ChainFX { Vec3 points[MAX_CHAIN_POINTS]; u8 pointCount; f32 timer; bool active; };
     static constexpr u32 MAX_SCORCH = 4;
-    struct ScorchZone { Vec3 pos; f32 radius; f32 timer; f32 dps; bool active; };
+    // slowPct > 0 makes the zone ALSO a slow field (Ranger Barrage): each tick it slows enemies
+    // (and, in PvP, rival players — ownerSlot excluded) inside the radius. dps 0 + slowPct set = a
+    // pure slow zone. ownerSlot (0xFF = none) is the PvP caster, excluded from the slow. FX-only
+    // struct (never serialized), so the two extra fields cost nothing on the wire/save.
+    struct ScorchZone { Vec3 pos; f32 radius; f32 timer; f32 dps; f32 slowPct; u8 ownerSlot; bool active; };
     static constexpr u32 MAX_DAMAGE_NUMBERS = 16;
     struct DamageNumber { Vec3 position; f32 amount; f32 timer; bool active; bool isHeal; bool isCrit; };
 

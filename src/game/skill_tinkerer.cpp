@@ -126,12 +126,14 @@ void fireDetonateSwarm(const SkillDef* def, EntityPool& entities)
     f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 15.0f));
     f32 radius = def->radius > 0.0f ? def->radius : 3.0f;
     u32 detonated = 0;
+    Vec3 empCenter = {0, 0, 0};   // first detonation point — the single PvP EMP center (see below)
 
     for (u32 a = 0; a < entities.activeCount; a++) {
         u32 idx = entities.activeList[a];
         Entity& drone = entities.entities[idx];
         if (!(drone.flags & ENT_FRIENDLY) || (drone.flags & ENT_DEAD)) continue;
         if (drone.npcClass != NpcClass::NONE) continue;
+        if (detonated == 0) empCenter = drone.position;
 
         // AoE damage around this drone
         EntityHandle hits[MAX_ENTITIES];
@@ -144,6 +146,8 @@ void fireDetonateSwarm(const SkillDef* def, EntityPool& entities)
             Entity* target = handleGet(entities, hits[j]);
             if (!target || (target->flags & ENT_FRIENDLY)) continue;
             Combat::applyDamage(entities, hits[j], damage);
+            // Tinkerer CC identity: the detonation is an EMP burst — a ~0.6s AoE stun on enemies.
+            target->stunTimer = fmaxf(target->stunTimer, 0.6f);
             totalDmg += damage;
         }
         // Show explosion damage number at drone position even if no enemies hit
@@ -158,6 +162,16 @@ void fireDetonateSwarm(const SkillDef* def, EntityPool& entities)
         drone.aiState = AIState::DEAD;
         drone.deathTimer = 0.01f;
         detonated++;
+    }
+
+    // PvP EMP twin: stun rival players ONCE (not per drone) so a multi-drone detonation can't burn
+    // the victim's whole stun-DR budget in a single frame. Centered on the first detonation with a
+    // widened radius to cover the (clustered) swarm; caster excluded.
+    if (detonated > 0 && Combat::pvpActive()) {
+        Combat::PvpHit emp{0.0f, empCenter, SkillSystem::getCastingPlayer(),
+                           /*projectile=*/false, /*onHitEffect stun=*/5, /*onHitDuration=*/0.0f};
+        emp.stunDuration = 0.6f;
+        Combat::pvpRadiusHit(empCenter, radius * 1.5f, emp);
     }
 
     if (s_screenShake && detonated > 0) {

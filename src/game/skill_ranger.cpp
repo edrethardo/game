@@ -202,6 +202,18 @@ void fireBarrage(Vec3 origin, Vec3 forward, const SkillDef* def,
         }
     }
 
+    // Ranger CC identity: the volley leaves a lingering ~40% SLOW FIELD where it lands — a
+    // suppression zone that slows enemies AND (in the Arena) rival players. Placed a fixed distance
+    // ahead at ground level; the caster (getCastingPlayer) is excluded from the PvP slow. The
+    // scorch-zone tick applies it each frame; a blue nova ring is the visual tell.
+    if (s_slowZoneCallback) {
+        Vec3 flat = normalize(Vec3{forward.x, 0.0f, forward.z});
+        Vec3 zoneCenter = origin + flat * 8.0f;
+        zoneCenter.y = origin.y - 1.6f;   // drop from eye height to feet so the ground zone reads right
+        s_slowZoneCallback(zoneCenter, 4.0f, 3.0f, 0.40f, SkillSystem::getCastingPlayer());
+        if (s_novaCallback) s_novaCallback(zoneCenter, 4.0f, {0.4f, 0.6f, 1.0f});   // cold-blue suppression ring
+    }
+
     if (s_particlePool) ParticleSystem::spawnSparks(*s_particlePool, origin, forward, 6);
     if (s_screenShake) s_screenShake->trigger(0.06f, 0.3f);
     LOG_INFO("Barrage: 10 arrows, %.0f damage each", damage);

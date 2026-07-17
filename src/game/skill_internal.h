@@ -71,6 +71,7 @@ extern ScreenShake*  s_screenShake;
 extern SkillSystem::NovaCallback        s_novaCallback;
 extern SkillSystem::DashCallback        s_dashCallback;
 extern SkillSystem::ScorchCallback      s_scorchCallback;
+extern SkillSystem::SlowZoneCallback    s_slowZoneCallback;
 extern SkillSystem::DroneSpawnCallback  s_droneSpawnCallback;
 extern SkillSystem::ChainCallback       s_chainCallback;
 extern SkillSystem::BeamCallback        s_beamCallback;

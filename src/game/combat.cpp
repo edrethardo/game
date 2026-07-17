@@ -740,3 +740,24 @@ u32 Combat::pvpRadius(Vec3 center, f32 radius, f32 damage, u8 attackerSlot) {
     }
     return hits;
 }
+
+u32 Combat::pvpRadiusHit(Vec3 center, f32 radius, const PvpHit& proto) {
+    if (s_pvpTargetCount == 0) return 0;
+    u8 attackerSlot = proto.attackerSlot;
+    if (attackerSlot == 0xFF) attackerSlot = s_attackingPlayer;  // skill paths maintain the ambient slot
+    u32 hits = 0;
+    for (u32 i = 0; i < s_pvpTargetCount; i++) {
+        PvpTarget& t = s_pvpTargets[i];
+        if (t.slot == attackerSlot || !t.view || t.view->health <= 0.0f) continue;
+        Vec3 d = (t.view->position + Vec3{0.0f, PLAYER_HEIGHT * 0.5f, 0.0f}) - center;  // chest height
+        f32 reach = radius + PLAYER_HALF_WIDTH;
+        if (d.x * d.x + d.y * d.y + d.z * d.z > reach * reach) continue;
+        PvpHit hit = proto;
+        hit.origin = center;               // knockback pushes outward from the blast
+        hit.attackerSlot = attackerSlot;
+        Combat::PvpHitOutcome out = Combat::pvpApply(t.slot, hit);
+        t.view->health = out.newHealth;    // refresh (may be 0-damage CC, but keep the pattern)
+        hits++;
+    }
+    return hits;
+}

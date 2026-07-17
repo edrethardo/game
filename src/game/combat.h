@@ -142,6 +142,11 @@ namespace Combat {
     // matches the entity AoE queries, and cover already limits who stands in the blast.
     // attackerSlot 0xFF = "use getAttackingPlayer()" (the skill paths maintain it).
     u32  pvpRadius(Vec3 center, f32 radius, f32 damage, u8 attackerSlot = 0xFF);
+    // Area CROWD CONTROL / knockback vs players (the class-CC AoE sites: Ranger slow zone, Tinkerer
+    // EMP stun, Marksman knockback blast). Lands a templated PvpHit — its onHitEffect/onHitDuration/
+    // stunDuration/knockback (and any damage) — on every rival player in range. The proto's origin is
+    // overridden to `center` so knockback pushes outward. proto.attackerSlot 0xFF = getAttackingPlayer.
+    u32  pvpRadiusHit(Vec3 center, f32 radius, const PvpHit& proto);
 
     // Dodge-through callback: called when damage is blocked during a dodge roll
     // `victim` is the player who dodged — the local Player OR a server-side remote view

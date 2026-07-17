@@ -889,7 +889,7 @@ void Engine::handleWeaponFire(f32 dt) {
                             // Find a free scorch slot
                             for (u32 si = 0; si < MAX_SCORCH; si++) {
                                 if (!m_fx.scorchZones[si].active) {
-                                    m_fx.scorchZones[si] = {zonePos, 1.0f, 1.5f, arcDps, true};
+                                    m_fx.scorchZones[si] = {zonePos, 1.0f, 1.5f, arcDps, 0.0f, 0xFF, true};
                                     break;
                                 }
                             }
@@ -1685,7 +1685,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                             Vec3 zonePos = np.position + dir * wpn.range * 0.8f;
                             for (u32 si = 0; si < MAX_SCORCH; si++) {
                                 if (!m_fx.scorchZones[si].active) {
-                                    m_fx.scorchZones[si] = {zonePos, 1.0f, 1.5f, arcDps, true};
+                                    m_fx.scorchZones[si] = {zonePos, 1.0f, 1.5f, arcDps, 0.0f, 0xFF, true};
                                     break;
                                 }
                             }

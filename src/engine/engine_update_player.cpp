@@ -177,9 +177,19 @@ void Engine::fireDeflectBurst(const Vec3& feetPos, const Vec3& forward, f32 eyeH
             novaHits, novaDists, MAX_ENTITIES);
         for (u32 ni = 0; ni < novaCount; ni++) {
             Combat::applyDamage(m_entities, novaHits[ni], absorbed, &eyePos);
+            // Wanderer CC identity: a successful Deflect STAGGERS — a ~0.75s stun on everything the
+            // counter-burst catches (the attacker you just punished is right in front of you).
+            Entity* e = handleGet(m_entities, novaHits[ni]);
+            if (e) e->stunTimer = fmaxf(e->stunTimer, 0.75f);
         }
-        // PvP (Arena): the deflect burst returns absorbed damage to rival players too.
+        // PvP (Arena): the deflect burst returns absorbed damage to rival players too...
         Combat::pvpRadius(eyePos, 5.5f, absorbed, ownerSlot);
+        // ...and staggers them ~0.75s (the counter-CC identity; ownerSlot = the deflector, excluded).
+        if (Combat::pvpActive()) {
+            Combat::PvpHit stagger{0.0f, eyePos, ownerSlot, /*projectile=*/false, /*stun*/5, 0.0f};
+            stagger.stunDuration = 0.75f;
+            Combat::pvpRadiusHit(eyePos, 5.5f, stagger);
+        }
     }
 
     // Nova visual — double ring burst for a bigger impact feel; replicated to guests
@@ -494,6 +504,24 @@ void Engine::tickSharedFX(f32 dt) {
                 // Route death through killEntity so scorch kills still drop loot / fire procs.
                 if (ent.health <= 0.0f)
                     Combat::killEntity(m_entities, {static_cast<u16>(idx), ent.generation});
+            }
+        }
+        // Ranger Barrage slow field (slowPct > 0): slow everything in the zone. Enemies use the
+        // freeze-slow field topped to a short duration so it lingers ~0.5s after they leave; players
+        // (PvP) get the choke slow via pvpRadiusHit — re-topped each tick, ownerSlot excluded so the
+        // Ranger who dropped it isn't slowed. Bounded, no allocation (the RL-perf constraint).
+        if (sz.slowPct > 0.0f) {
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                u32 idx = m_entities.activeList[a];
+                Entity& ent = m_entities.entities[idx];
+                if ((ent.flags & ENT_DEAD) || (ent.flags & ENT_FRIENDLY)) continue;
+                if (ent.enemyType == EnemyType::PROP) continue;
+                if (lengthSq(ent.position - sz.pos) < sz.radius * sz.radius)
+                    ent.freezeTimer = fmaxf(ent.freezeTimer, 0.5f);
+            }
+            if (Combat::pvpActive()) {
+                Combat::PvpHit slow{0.0f, sz.pos, sz.ownerSlot, false, /*slow*/2, 0.6f};
+                Combat::pvpRadiusHit(sz.pos, sz.radius, slow);
             }
         }
     }

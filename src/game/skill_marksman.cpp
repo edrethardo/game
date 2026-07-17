@@ -99,7 +99,19 @@ void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
                 pushDir = normalize(pushDir);
                 e->position = e->position + pushDir * 3.0f;
             }
+            // Marksman CC identity: the blast STAGGERS — a brief stun on top of the knockback.
+            e->stunTimer = fmaxf(e->stunTimer, 0.2f);
         }
+    }
+    // PvP twin: the splash lands on rival players too — splash damage + a knockback impulse
+    // (displacement, NOT reduced by CC Resistance) + the 0.2s stagger stun (which IS resisted/DR'd).
+    // One PvpHit carries all three; a perfect block negates the lot. Caster excluded by attackerSlot.
+    if (Combat::pvpActive()) {
+        Combat::PvpHit blast{damage * 0.75f, detonPos, SkillSystem::getCastingPlayer(),
+                             /*projectile=*/false, /*onHitEffect stun=*/5, /*onHitDuration=*/0.0f};
+        blast.stunDuration = 0.2f;   // brief stagger
+        blast.knockback    = 8.0f;   // outward shove (velocity units)
+        Combat::pvpRadiusHit(detonPos, splashR, blast);
     }
 
     // Beam trail to detonation
