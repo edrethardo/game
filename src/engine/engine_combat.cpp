@@ -307,6 +307,10 @@ void Engine::handleWeaponFire(f32 dt) {
     // Can't fire while reloading
     if (ws.reloading) return;
 
+    // Can't fire while stunned (PvP action-lock) — the local/host firing path (the client's fire is
+    // already suppressed on the wire by captureLocalInput).
+    if (m_localPlayer.stunTimer > 0.0f) return;
+
     if (!Input::isActionDown(GameAction::FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;
 

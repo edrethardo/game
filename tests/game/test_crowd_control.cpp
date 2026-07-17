@@ -45,3 +45,36 @@ TEST_CASE("Inventory::ccResist sums equipped CC_RESIST and clamps to 0.60") {
     inv.equipped[(u32)ItemSlot::ARMOR] = mkResistItem(0.50f);           // would be 0.90
     CHECK(Inventory::ccResist(inv) == doctest::Approx(0.60f));          // clamped
 }
+
+TEST_CASE("resolveCC: resist scales, immunity/dodge negate, stun DR only in PvP") {
+    using CrowdControl::resolveCC; using CrowdControl::CcKind; using CrowdControl::StunDr;
+    StunDr dr;
+
+    // Slow scales by resist (0.5), never diminishes:
+    auto slow = resolveCC(CcKind::SLOW, 2.0f, 0.50f, false, false, dr, true);
+    CHECK(slow.apply);
+    CHECK(slow.duration == doctest::Approx(1.0f));
+
+    // Immunity fully negates — and must NOT burn a DR stack (dr untouched):
+    auto immune = resolveCC(CcKind::STUN, 2.0f, 0.0f, /*immune=*/true, false, dr, true);
+    CHECK_FALSE(immune.apply);
+    CHECK(dr.count == 0);
+
+    // Dodge i-frame negate — also no DR stack spent:
+    auto dodged = resolveCC(CcKind::STUN, 2.0f, 0.0f, false, /*dodgeNegate=*/true, dr, true);
+    CHECK_FALSE(dodged.apply);
+    CHECK(dr.count == 0);
+
+    // PvP stun: resist (0.5) then DR first-hit (1.0) -> 1.0s, and NOW a stack is spent:
+    auto stun = resolveCC(CcKind::STUN, 2.0f, 0.50f, false, false, dr, true);
+    CHECK(stun.apply);
+    CHECK(stun.duration == doctest::Approx(1.0f));
+    CHECK(dr.count == 1);
+
+    // PvE stun (isPvp=false): resist only, DR untouched (DR is PvP-victims-only):
+    StunDr dr2;
+    auto pve = resolveCC(CcKind::STUN, 2.0f, 0.0f, false, false, dr2, false);
+    CHECK(pve.apply);
+    CHECK(pve.duration == doctest::Approx(2.0f));
+    CHECK(dr2.count == 0);
+}

@@ -49,4 +49,24 @@ inline f32 advanceStunDr(StunDr& dr, f32 window) {
     return mult;
 }
 
+// The three CC kinds the resistance stat governs (poison/burn/curse are damage, not CC).
+enum struct CcKind : u8 { STUN, SLOW, FREEZE };
+
+// Outcome of resolving one CC application against a victim's defenses. `apply == false` means the
+// CC is fully negated (immunity / dodge-i-frame); otherwise `duration` is the resisted+DR'd time.
+struct CcResult { bool apply = false; f32 duration = 0.0f; };
+
+// PURE resolution of a single CC application — no Player dependency, so it is unit-testable
+// without linking the heavy combat.cpp. Combat::applyCCToPlayer is the thin wrapper that reads
+// these inputs off the Player and writes the chosen timer. Order matters: immunity/dodge FIRST
+// (a full negate short-circuits DR so a dodged stun does NOT burn a DR stack), then tenacity,
+// then PvP-only stun diminishing returns.
+inline CcResult resolveCC(CcKind kind, f32 duration, f32 resist,
+                          bool immune, bool dodgeNegate, StunDr& dr, bool isPvp) {
+    if (immune || dodgeNegate) return {false, 0.0f};
+    duration = scaleDuration(duration, resist);
+    if (kind == CcKind::STUN && isPvp) duration *= advanceStunDr(dr, DR_WINDOW);
+    return {true, duration};
+}
+
 } // namespace CrowdControl

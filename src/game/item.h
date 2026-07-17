@@ -174,6 +174,8 @@ enum struct SkillId : u8 {
     ADRENALINE_SURGE,   // stack-based burst from dodge counters
     DEATHS_DANCE,       // ultimate: AoE slash on dodge-through
 
+    BREAK_FREE,         // legendary boots active (F): cleanse all CC + brief CC-immunity
+
     // Legendary weapon effects
     THROWAWAY,      // throw weapon as projectile on reload
     VOID_ZONE,      // on-hit: dark zone dealing flat + 60% missing HP

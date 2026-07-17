@@ -130,18 +130,20 @@ static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& 
     }
     // M10.3: notify the server so it can send SV_DAMAGE_TO_ME to the victim client.
     if (s_playerHitCallback) s_playerHitCallback(p.ownerSlot, p.clientTick, p.damage, &player);
-    // Apply on-hit status effect from projectile (or default slow)
+    // Apply on-hit status effect from projectile (or default slow). This is an ENEMY projectile
+    // hitting the player (PvE), so slow/freeze route through the CC choke (CC Resistance applies,
+    // no stun DR). Poison/burn are DoT — direct writes.
     if (p.onHitEffect == 1) {        // poison
         player.poisonTimer = fmaxf(player.poisonTimer, p.onHitDuration);
         player.poisonDps = 4.0f;
     } else if (p.onHitEffect == 2) { // slow
-        player.slowTimer = fmaxf(player.slowTimer, p.onHitDuration);
+        Combat::applyCCToPlayer(player, Combat::CcType::SLOW, p.onHitDuration, false);
     } else if (p.onHitEffect == 3) { // burn
         player.burnTimer = fmaxf(player.burnTimer, p.onHitDuration);
     } else if (p.onHitEffect == 4) { // freeze
-        player.freezeTimer = fmaxf(player.freezeTimer, p.onHitDuration);
+        Combat::applyCCToPlayer(player, Combat::CcType::FREEZE, p.onHitDuration, false);
     } else {
-        player.slowTimer = 2.5f;     // default mild slow
+        Combat::applyCCToPlayer(player, Combat::CcType::SLOW, 2.5f, false);  // default mild slow
     }
     return PlayerHitResult::HIT;
 }

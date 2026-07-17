@@ -177,6 +177,14 @@ void Engine::tickPassiveEquipment() {
         m_localPlayer.armorRating    = Inventory::armorRating(inv);
         m_localPlayer.healthRegen    = Inventory::healthRegenRate(inv);
         m_localPlayer.thornsPctBonus = Inventory::thornsPct(inv);
+        m_localPlayer.ccResist       = Inventory::ccResist(inv);
+        // ccDodgeImmune: true iff the equipped boots are the Steadfast Greaves — their legendary
+        // skill is BREAK_FREE, the single marker for the anti-CC boots (Task 5 defines BREAK_FREE).
+        {
+            const ItemInstance& boots = inv.equipped[(u32)ItemSlot::BOOTS];
+            m_localPlayer.ccDodgeImmune = !isItemEmpty(boots) &&
+                m_itemDefs[boots.defId].legendarySkillId == SkillId::BREAK_FREE;
+        }
     }
 }
 
@@ -203,7 +211,10 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
     }
 
     // --- Class skill activation (right-click) ---
-    if (Input::isActionPressed(GameAction::CLASS_SKILL) && !gameplayInputFrozen()) {
+    // Stunned players can't cast (action-lock). BOOT_SKILL (Break Free) is deliberately NOT gated
+    // this way below — pressing F is how you escape the stun.
+    if (Input::isActionPressed(GameAction::CLASS_SKILL) && !gameplayInputFrozen()
+        && m_localPlayer.stunTimer <= 0.0f) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         u8 slot = m_activeClassSkill;
         u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
@@ -319,6 +330,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
 
     // --- Helmet skill activation (G key) ---
     if (Input::isActionPressed(GameAction::HELMET_SKILL) && !gameplayInputFrozen() &&
+        m_localPlayer.stunTimer <= 0.0f &&    // stunned: no helmet cast (BOOT_SKILL/Break Free is exempt)
         m_helmetSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class skills).
         m_helmetSkillStates[m_localPlayerIndex].energy    = m_skillStates[m_localPlayerIndex].energy;

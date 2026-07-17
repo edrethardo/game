@@ -191,10 +191,17 @@ void PlayerController::update(Player& player, f32 dt) {
         d = (s_botFlagsThisTick & INPUT_RIGHT)    != 0;
     }
 
+    // Stun (PvP, action-lock): no movement — the look update above still applies (camera-free), and
+    // the dodge gate below is the one exception (the Steadfast Greaves let you roll OUT of a stun).
+    const bool stunned = player.stunTimer > 0.0f;
+    if (stunned) { w = s = a = d = false; }
+
     // --- Wanderer dodge roll activation ---
     // Triggered on Shift press when not already rolling and cooldown has expired.
+    // Dodge: blocked while stunned UNLESS the Steadfast Greaves are equipped (ccDodgeImmune) — the
+    // deliberate escape hatch; the roll also clears active CC (see the CC-clear at roll start below).
     if (Input::isActionPressed(GameAction::DODGE) && !player.dodgeState.rolling
-        && player.dodgeState.cooldownTimer <= 0.0f) {
+        && player.dodgeState.cooldownTimer <= 0.0f && (!stunned || player.ccDodgeImmune)) {
         DodgeState& ds = player.dodgeState;
         ds.rolling = true;
         ds.rollTimer = 0.5f;
@@ -500,6 +507,17 @@ NetInput PlayerController::captureLocalInput(const Player& player, u32 tick, u8 
     if (Input::isActionPressed(GameAction::DODGE))         ext |= INPUT_EX_DODGE;
     input.extFlags = ext;
     input.skillSlot = 0; // set by engine before sending
+
+    // Stun (PvP, action-lock) — suppress movement + all combat inputs on the wire so the server
+    // never acts on them. Two deliberate exceptions survive: BOOT_SKILL (Break Free, the F escape —
+    // a stunned player MUST be able to press it) and INVENTORY (UI, not a sim action). DODGE survives
+    // ONLY with the Steadfast Greaves (ccDodgeImmune), the roll-out escape.
+    if (player.stunTimer > 0.0f) {
+        input.moveFlags = 0;                                     // no move / fire / jump / block
+        u8 keep = ext & (INPUT_EX_INVENTORY | INPUT_EX_BOOT_SKILL);
+        if (player.ccDodgeImmune) keep |= (ext & INPUT_EX_DODGE);
+        input.extFlags = keep;
+    }
 
     return input;
 }

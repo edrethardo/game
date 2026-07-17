@@ -281,15 +281,21 @@ void Engine::tickPlayerStatusEffects(f32 dt) {
             m_localPlayer.health -= m_localPlayer.burnDps * dt;
         }
     } else {
-        // Clear DoT effects during invulnerability
+        // Clear DoT + CC effects during invulnerability (respawn/floor-entry i-frames)
         m_localPlayer.poisonTimer = 0.0f;
         m_localPlayer.burnTimer = 0.0f;
         m_localPlayer.freezeTimer = 0.0f;
         m_localPlayer.slowTimer = 0.0f;
+        m_localPlayer.stunTimer = 0.0f;
     }
     if (m_localPlayer.freezeTimer > 0.0f) {
         m_localPlayer.freezeTimer -= dt;
     }
+    // Crowd control: decay the stun/immunity timers and tick the PvP stun DR window. stunTimer > 0
+    // is read by the input path (below) to suppress move/attack/cast/dodge (camera stays free).
+    if (m_localPlayer.stunTimer > 0.0f)     m_localPlayer.stunTimer     -= dt;
+    if (m_localPlayer.ccImmuneTimer > 0.0f) m_localPlayer.ccImmuneTimer -= dt;
+    CrowdControl::tickStunDr(m_localPlayer.stunDr, dt);
 
     // Passive health regen (HEALTH_REGEN affixes — defensive pack). Authoritative side only
     // (CLIENT returned above; remote players regen in serverNetPost). Additive + clamped to max,

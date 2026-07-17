@@ -82,6 +82,16 @@ namespace Combat {
     // invulnerability. Negative/zero armor yields 0.
     f32 armorMitigation(f32 armor);
 
+    // The three crowd-control kinds the CC-Resistance stat governs (poison/burn/curse are damage,
+    // not CC, and keep their direct timer writes).
+    enum struct CcType : u8 { STUN, SLOW, FREEZE };
+    // The SINGLE entry point for applying crowd control to a player. Applies tenacity
+    // (player.ccResist), an immunity / dodge-i-frame negate, and PvP-only stun diminishing returns
+    // (via CrowdControl::resolveCC), then raises the chosen timer. Every CC source (enemy hits,
+    // projectile onHit, arena PvP) MUST route through this — a direct timer write bypasses resist
+    // and DR and re-creates the perma-lock the ladder exists to prevent. isPvp gates the stun DR.
+    void applyCCToPlayer(Player& p, CcType type, f32 duration, bool isPvp);
+
     // --- PvP (Arena mode, sentinel floor 97) ------------------------------------------------
     // The engine registers the tick's combatants here while the arena's authoritative window is
     // open (Engine::arenaBeginPvpWindow / arenaEndPvpWindow); the list is EMPTY everywhere else,

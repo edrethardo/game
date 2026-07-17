@@ -336,6 +336,28 @@ f32 Combat::armorMitigation(f32 armor) {
     return (mit > 0.80f) ? 0.80f : mit;  // hard cap so a stacked build can't become invulnerable
 }
 
+// The single choke for player crowd control — thin wrapper over the pure CrowdControl::resolveCC
+// (immunity/dodge negate → tenacity → PvP stun DR). Reads the victim's defensive state off the
+// Player and raises the chosen timer (fmaxf so a longer CC never gets shortened by a weaker one).
+void Combat::applyCCToPlayer(Player& p, CcType type, f32 duration, bool isPvp) {
+    CrowdControl::CcKind kind = (type == CcType::STUN)   ? CrowdControl::CcKind::STUN
+                             : (type == CcType::SLOW)    ? CrowdControl::CcKind::SLOW
+                                                         : CrowdControl::CcKind::FREEZE;
+    const bool immune      = p.ccImmuneTimer > 0.0f;
+    // Boots 2a: negate during a dodge roll's i-frames — ONLY with the Steadfast Greaves flag (a
+    // base dodge must NOT shrug off CC, or CC is universally weak and the boots lose their identity).
+    // dodgeState.rolling is the roll's i-frame window (the same one the dodge-through absorb uses).
+    const bool dodgeNegate = p.ccDodgeImmune && p.dodgeState.rolling;
+    CrowdControl::CcResult r =
+        CrowdControl::resolveCC(kind, duration, p.ccResist, immune, dodgeNegate, p.stunDr, isPvp);
+    if (!r.apply) return;
+    switch (type) {
+        case CcType::STUN:   p.stunTimer   = fmaxf(p.stunTimer,   r.duration); break;
+        case CcType::SLOW:   p.slowTimer   = fmaxf(p.slowTimer,   r.duration); break;
+        case CcType::FREEZE: p.freezeTimer = fmaxf(p.freezeTimer, r.duration); break;
+    }
+}
+
 Combat::BlockOutcome Combat::applyDamageToPlayer(Player& player, f32 damage,
                                                  const Vec3* attackerPos, u16 attackerIdx) {
     // --- Champion: VAMPIRIC ---

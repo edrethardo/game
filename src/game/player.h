@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "renderer/camera.h"
+#include "game/crowd_control.h"
 
 struct EntityHandle;
 struct NetInput;
@@ -122,6 +123,13 @@ struct Player {
     // Shield blocking (Ctrl/Shift)
     bool blocking         = false;
     f32  blockTimer        = 0.0f;  // time since block started (for perfect block window)
+
+    // --- Crowd control (all TRANSIENT, never serialized — like armorRating above) ---
+    f32  ccResist       = 0.0f;  // stamped each frame from Inventory::ccResist (0..0.60)
+    f32  stunTimer      = 0.0f;  // >0 = action-locked (no move/attack/cast/dodge; camera free). PvP-only source.
+    f32  ccImmuneTimer  = 0.0f;  // >0 = immune to ALL new CC (Break Free / post-cleanse window)
+    bool ccDodgeImmune  = false; // Steadfast Greaves equipped: i-frame dodge negates+clears CC
+    CrowdControl::StunDr stunDr; // PvP stun diminishing-returns state
 
     // Which engine player slot this Player object stands for — net slot for a server-side
     // remote VIEW (seedRemoteView), local lane for the swapped-in alias (swapInPlayer).
