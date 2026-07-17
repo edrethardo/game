@@ -58,12 +58,13 @@ struct CcResult { bool apply = false; f32 duration = 0.0f; };
 
 // PURE resolution of a single CC application — no Player dependency, so it is unit-testable
 // without linking the heavy combat.cpp. Combat::applyCCToPlayer is the thin wrapper that reads
-// these inputs off the Player and writes the chosen timer. Order matters: immunity/dodge FIRST
-// (a full negate short-circuits DR so a dodged stun does NOT burn a DR stack), then tenacity,
-// then PvP-only stun diminishing returns.
+// these inputs off the Player and writes the chosen timer. Order matters: immunity/negate FIRST
+// (a full negate short-circuits DR so a negated stun does NOT burn a DR stack), then tenacity,
+// then PvP-only stun diminishing returns. `negate` folds every full-negate reason the caller has
+// — a perfect dodge (roll i-frames) OR a perfect block, both always-rewarded timing feats.
 inline CcResult resolveCC(CcKind kind, f32 duration, f32 resist,
-                          bool immune, bool dodgeNegate, StunDr& dr, bool isPvp) {
-    if (immune || dodgeNegate) return {false, 0.0f};
+                          bool immune, bool negate, StunDr& dr, bool isPvp) {
+    if (immune || negate) return {false, 0.0f};
     duration = scaleDuration(duration, resist);
     if (kind == CcKind::STUN && isPvp) duration *= advanceStunDr(dr, DR_WINDOW);
     return {true, duration};

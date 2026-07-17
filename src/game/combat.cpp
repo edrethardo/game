@@ -344,12 +344,15 @@ void Combat::applyCCToPlayer(Player& p, CcType type, f32 duration, bool isPvp) {
                              : (type == CcType::SLOW)    ? CrowdControl::CcKind::SLOW
                                                          : CrowdControl::CcKind::FREEZE;
     const bool immune      = p.ccImmuneTimer > 0.0f;
-    // Boots 2a: negate during a dodge roll's i-frames — ONLY with the Steadfast Greaves flag (a
-    // base dodge must NOT shrug off CC, or CC is universally weak and the boots lose their identity).
-    // dodgeState.rolling is the roll's i-frame window (the same one the dodge-through absorb uses).
-    const bool dodgeNegate = p.ccDodgeImmune && p.dodgeState.rolling;
-    CrowdControl::CcResult r =
-        CrowdControl::resolveCC(kind, duration, p.ccResist, immune, dodgeNegate, p.stunDr, isPvp);
+    // A perfect DODGE (any roll's i-frames — `dodgeState.rolling`, the same window the dodge-through
+    // absorb uses) and a perfect BLOCK ALWAYS negate incoming CC. Both are hard timing feats, so they
+    // are always rewarded — universal (every class, PvE AND PvP), not gated on the Steadfast Greaves.
+    // (`ccDodgeImmune` now only powers the boots-only escapes: dodging WHILE stunned + clearing
+    // already-active CC on the roll — things a base dodge can't do.)
+    const bool dodgeNegate = p.dodgeState.rolling;
+    const bool blockNegate = (classifyBlock(p.blocking, p.blockTimer) == BlockOutcome::PERFECT);
+    CrowdControl::CcResult r = CrowdControl::resolveCC(kind, duration, p.ccResist, immune,
+                                                       dodgeNegate || blockNegate, p.stunDr, isPvp);
     if (!r.apply) return;
     switch (type) {
         case CcType::STUN:   p.stunTimer   = fmaxf(p.stunTimer,   r.duration); break;

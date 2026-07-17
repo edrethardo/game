@@ -46,7 +46,7 @@ TEST_CASE("Inventory::ccResist sums equipped CC_RESIST and clamps to 0.60") {
     CHECK(Inventory::ccResist(inv) == doctest::Approx(0.60f));          // clamped
 }
 
-TEST_CASE("resolveCC: resist scales, immunity/dodge negate, stun DR only in PvP") {
+TEST_CASE("resolveCC: resist scales, immunity/negate short-circuit, stun DR only in PvP") {
     using CrowdControl::resolveCC; using CrowdControl::CcKind; using CrowdControl::StunDr;
     StunDr dr;
 
@@ -60,9 +60,9 @@ TEST_CASE("resolveCC: resist scales, immunity/dodge negate, stun DR only in PvP"
     CHECK_FALSE(immune.apply);
     CHECK(dr.count == 0);
 
-    // Dodge i-frame negate — also no DR stack spent:
-    auto dodged = resolveCC(CcKind::STUN, 2.0f, 0.0f, false, /*dodgeNegate=*/true, dr, true);
-    CHECK_FALSE(dodged.apply);
+    // A negate (perfect dodge OR perfect block) short-circuits — also no DR stack spent:
+    auto negated = resolveCC(CcKind::STUN, 2.0f, 0.0f, false, /*negate=*/true, dr, true);
+    CHECK_FALSE(negated.apply);
     CHECK(dr.count == 0);
 
     // PvP stun: resist (0.5) then DR first-hit (1.0) -> 1.0s, and NOW a stack is spent:

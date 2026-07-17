@@ -1595,14 +1595,12 @@ static Combat::PvpHitOutcome landPvpHit(Player& v, const Combat::PvpHit& hit) {
         if      (hit.onHitEffect == 1) { v.poisonTimer = fmaxf(v.poisonTimer, hit.onHitDuration); v.poisonDps = 4.0f; }
         else if (hit.onHitEffect == 3) { v.burnTimer   = fmaxf(v.burnTimer,   hit.onHitDuration); }
     }
-    // Crowd control (slow/freeze/stun) routes through the choke so CC Resistance + PvP stun DR
-    // apply (isPvp=true). ONLY a PERFECT block negates CC — a held/normal block stops damage but the
-    // CC still lands, so block can't hard-counter the CC classes (per the design's block-vs-CC rule).
-    if (!perfectBlock) {
-        if      (hit.onHitEffect == 2) Combat::applyCCToPlayer(v, Combat::CcType::SLOW,   hit.onHitDuration, true);
-        else if (hit.onHitEffect == 4) Combat::applyCCToPlayer(v, Combat::CcType::FREEZE, hit.onHitDuration, true);
-        else if (hit.onHitEffect == 5) Combat::applyCCToPlayer(v, Combat::CcType::STUN,   hit.stunDuration,  true);
-    }
+    // Crowd control (slow/freeze/stun) routes through the choke so CC Resistance + PvP stun DR apply
+    // (isPvp=true). The choke ALSO negates CC on a perfect dodge/block, so a held/normal block lets
+    // the CC land while a perfect block (or a well-timed roll) shrugs it off — no gate needed here.
+    if      (hit.onHitEffect == 2) Combat::applyCCToPlayer(v, Combat::CcType::SLOW,   hit.onHitDuration, true);
+    else if (hit.onHitEffect == 4) Combat::applyCCToPlayer(v, Combat::CcType::FREEZE, hit.onHitDuration, true);
+    else if (hit.onHitEffect == 5) Combat::applyCCToPlayer(v, Combat::CcType::STUN,   hit.stunDuration,  true);
     // Knockback (Marksman Explosive Round) — a displacement impulse, NOT a timed CC, so CC
     // Resistance does not reduce it; a perfect block negates it too (you didn't get hit). Push the
     // victim away from the blast origin along the horizontal.

@@ -105,9 +105,10 @@ leave hosts unable to seat joiners and joining clients deaf.
 
 **Crowd control (CC-Resistance + player stun).** All player crowd control (stun/slow/freeze — poison/burn/
 curse are damage, not CC) routes through ONE choke, `Combat::applyCCToPlayer`, wrapping the pure
-`CrowdControl::resolveCC` (`game/crowd_control.h`, tested): immunity/dodge-i-frame negate → **tenacity**
-(`player.ccResist`) → **PvP-only stun diminishing returns** (100→50→25%→immune within 8 s, per-victim, so
-two CC classes can't perma-lock). A direct player CC-timer write bypasses resist + DR — always call the
+`CrowdControl::resolveCC` (`game/crowd_control.h`, tested): a **perfect dodge (any roll's i-frames) or a
+perfect block ALWAYS negates** incoming CC (universal — every class, PvE + PvP; both are timing feats, always
+rewarded) → else **tenacity** (`player.ccResist`) → **PvP-only stun diminishing returns** (100→50→25%→immune
+within 8 s, per-victim, so two CC classes can't perma-lock). A direct player CC-timer write bypasses resist + DR — always call the
 choke. **CC Resistance** is one unified affix (`AffixType::CC_RESIST`, "of Steadfastness"/"of Footing"),
 **summed on demand** (`Inventory::ccResist`, no cached field → no save bump, the armor/thorns pattern),
 capped 60%, stamped into the transient `Player.ccResist` (re-stamped authoritatively in `pvpApplyHit`
@@ -116,11 +117,11 @@ and is *action-lock, camera-free* — movement/fire/class+helmet skills/dodge su
 the wire (`captureLocalInput`), sparing BOOT_SKILL (Break Free) + inventory; replicated like
 `shadowDanceTimer` (NetPlayer field + seed/writeback + `SnapPlayer.flags` bit2 + `stunTimerQ` on the reused
 `reserved0` byte) so a stunned client predicts its own lock and reconciles with no rubber-band. The
-**Steadfast Greaves** (legendary boots, `SkillId::BREAK_FREE` on the F/`BOOT_SKILL` rail) pair a
-perfect-dodge-clears-CC passive with an F cleanse (they roll CC-resist affixes like any boots — no forced
-stat). **PvP block** is energy-drained (no
-turtle) with NO perfect-block cooldown (a perfect block is always rewarded), and only a perfect block
-negates CC. Class CC (baseline-up fairness): Ranger Barrage slow-zone, Marksman Explosive knockback+stagger,
+**Steadfast Greaves** (legendary boots, `SkillId::BREAK_FREE` on the F/`BOOT_SKILL` rail) add the
+boots-only escapes (dodge WHILE stunned + clear already-active CC on the roll — `ccDodgeImmune`; the plain
+i-frame negate is universal) plus an F cleanse (they roll CC-resist affixes like any boots — no forced
+stat). **PvP block** is energy-drained (no turtle) with NO perfect-block cooldown (a perfect block is always
+rewarded); a held block stops damage but the CC lands. Class CC (baseline-up fairness): Ranger Barrage slow-zone, Marksman Explosive knockback+stagger,
 Tinkerer Detonate EMP stun, Wanderer Deflect stagger — each with a `Combat::pvp*` twin. `PROTOCOL_VERSION`
 21. (Internals: `engine-reference`; the pitfalls: `engine-how-to`.)
 

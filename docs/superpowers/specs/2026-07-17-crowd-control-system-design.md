@@ -43,7 +43,7 @@ Arena doesn't become a stun-fest.
 | **Boots active (F)** | "Break Free" on the `BOOT_SKILL` (=F) rail: cleanse all CC + brief immunity, on cooldown. |
 | **PvE stun** | **PvP-only** — enemies never hard-stun the player; in PvE the stat still cuts slow/freeze. |
 | **Block abuse fix** | **Energy drain while held** (PvP-scoped). **No perfect-block cooldown** — a perfect block is a timing feat and is *always* rewarded. |
-| **Block vs CC** | **Only a perfect block negates CC**; a held block stops damage but the CC lands. |
+| **Block vs CC** | **A perfect block (and a perfect dodge) ALWAYS negates incoming CC** (universal, PvE + PvP, in the choke); a held block stops damage but the CC lands. |
 | **Perfect block/dodge** | **Always available, never on an added cooldown** — the ~0.2 s execution window is the gate; skill is always rewarded. |
 | **Fairness model** | **Baseline-up** — fill the four have-nots, keep Warrior/Paladin as CC kings. |
 | **Ranger CC** | **Barrage → ~40% slow zone.** |
@@ -103,24 +103,25 @@ Append **one item def** to `items.json` (append-only; `defId` is the saved array
 - New mesh via `tools/gen_mesh.py`, registered in **both** `asset_manifest.h` and
   `build_assets.py` (either alone fails the asset build).
 
-**2a — Dodge beats CC (passive).** "Perfect rolls win." While the Steadfast Greaves are
-equipped, three linked effects (detected in the boots-passive dispatch — armor/ring/gloves/
-**boots** legendary dispatch already exists):
+**2a — Dodge beats CC.** "Perfect rolls win." Three effects:
 
-1. **You may dodge even while stunned** — the deliberate exception to the stun's dodge-lock
-   (Component 3). Without the boots, a stun locks dodge; with them, the roll is your escape.
-   This is **never on an added cooldown** beyond the roll's own inherent recovery — a perfect
-   dodge is a timing feat and is always rewarded.
-2. **During the dodge i-frame window, incoming CC is negated** — `applyCCToPlayer` returns
-   early while the roll's invuln is active, **gated on a boots-set `ccDodgeImmune` flag** (a
-   base dodge does NOT shrug off CC — that would make CC universally weak and rob the boots of
-   their identity). This is the "immune while dodging also negates CC" part: you must be
-   mid-roll when the CC arrives, so it rewards timing.
-3. **Starting a dodge clears active CC** — on the frame a roll begins, zero all three CC
-   timers. So even a stun already ticking is shed by rolling.
+1. **During the dodge i-frame window, incoming CC is negated — UNIVERSAL** (updated during
+   implementation, then again on Aaron's "perfect dodge and block should always negate incoming
+   CC"): `applyCCToPlayer` returns early while ANY roll's invuln (`dodgeState.rolling`) is active,
+   for every class, PvE and PvP — **not** gated on the boots. A perfect dodge is a timing feat and
+   is always rewarded (the same principle as the perfect block below). You must be mid-roll when
+   the CC arrives, so it rewards timing.
 
-(2) is prevention, (3) is cleanse; together a well-timed roll both dodges an incoming stun and
-sheds one already on you.
+The remaining two are **boots-only** (`ccDodgeImmune`), because they're escapes a base dodge
+can't do:
+
+2. **You may dodge even while stunned** — the deliberate exception to the stun's dodge-lock
+   (Component 3). Without the boots, a stun locks dodge; with them, the roll is your escape (no
+   added cooldown beyond the roll's own recovery).
+3. **Starting a dodge clears active CC** — on the frame a roll begins, zero all three CC timers.
+   So even a stun already ticking is shed by rolling.
+
+(1) is universal prevention; (2)+(3) are the boots' escape from a CC you're already locked in.
 
 **2b — "Break Free" active skill (F).** A new `SkillId::BREAK_FREE` with a `SkillDef` in
 `skills.json` (cooldown ~20 s). It **rides the existing `BOOT_SKILL` rail** — `BOOT_SKILL` is
@@ -144,7 +145,8 @@ one exception: the Steadfast Greaves passive lets a perfect dodge fire and clear
 ```
 applyCCToPlayer(p, type, dur, isPvp):
     if p.ccImmuneTimer > 0: return          # Break Free / post-CC immunity blocks ALL CC
-    if p.ccDodgeImmune and p.dodgeInvulnActive(): return  # boots 2a ONLY (not a base dodge)
+    if p.dodgeState.rolling: return         # perfect DODGE (any roll's i-frames) — UNIVERSAL
+    if classifyBlock(p.blocking,p.blockTimer)==PERFECT: return  # perfect BLOCK — UNIVERSAL
     dur *= (1 - p.ccResist)                 # transient stamped field; 60% cap in Inventory::ccResist
     if type == STUN:
         if isPvp: dur *= advanceStunDr(p)   # Comp. 6: reads AND advances the DR counter/window
@@ -181,11 +183,12 @@ to PvP** (arena / `pvpActive`) so the campaign feel is untouched:
    never punished** — only sustained turtling runs you dry. This replaces the perfect-block
    cooldown idea entirely: no `perfectBlockCd`, no PERFECT-classification gate. `classifyBlock`
    is unchanged (PERFECT stays available on every well-timed block).
-2. **Only a perfect block negates CC.** In `landPvpHit`/`pvpApply`, a **perfect** block negates
-   the hit's damage **and** its CC; a held/normal block stops damage per the −50% but **the CC
-   still lands** (routes through `applyCCToPlayer`). This stops "hold block = immune to all CC"
-   while making a timed block a genuine, repeatable skill answer to CC — exactly the reward the
-   principle calls for.
+2. **Only a perfect block negates CC — and it does so UNIVERSALLY** (updated on Aaron's "perfect
+   dodge and block should always negate incoming CC"). The negate lives in the **choke** (`resolveCC`
+   returns early when `classifyBlock == PERFECT`), so a perfect block shrugs off CC in PvE and PvP
+   alike, alongside the perfect-dodge negate — no per-site gate in `landPvpHit`. A held/normal block
+   stops damage per the −50% but **the CC still lands**. This stops "hold block = immune to all CC"
+   while making a timed block a genuine, repeatable skill answer to CC.
 
 ## Component 5 — Class CC (baseline-up)
 

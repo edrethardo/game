@@ -381,12 +381,14 @@ Rules are pure in `game/arena.h` (`KILL_TARGET` 10, `RESPAWN_DELAY` 3 s, `record
 
 - **Pure core** (`game/crowd_control.h`, tested): `RESIST_CAP=0.60`, `DR_WINDOW=8s`;
   `scaleDuration`/`capResist`; `StunDr{timer,count}` + `advanceStunDr` (1.0/0.5/0.25/0.0 ladder) +
-  `tickStunDr`; `resolveCC(kind, dur, resist, immune, dodgeNegate, dr, isPvp)` → `{apply, duration}`
-  (immunity/dodge negate FIRST so a negated stun burns no DR stack, then tenacity, then PvP-only DR).
+  `tickStunDr`; `resolveCC(kind, dur, resist, immune, negate, dr, isPvp)` → `{apply, duration}`
+  (immunity/negate FIRST so a negated stun burns no DR stack, then tenacity, then PvP-only DR).
 - **The choke:** `Combat::applyCCToPlayer(Player&, CcType{STUN,SLOW,FREEZE}, dur, isPvp)` wraps
-  `resolveCC` reading `player.{ccResist,ccImmuneTimer,ccDodgeImmune,dodgeState.rolling,stunDr}` and
-  raises the timer (`fmaxf`). EVERY player-CC source routes through it (PvE slow/freeze in
-  `enemy_ai_states`/`projectile` with `isPvp=false`; PvP in `landPvpHit` with `isPvp=true`). Poison/
+  `resolveCC` and raises the timer (`fmaxf`). `negate` = **perfect dodge (`dodgeState.rolling` — any
+  roll's i-frames) OR perfect block (`classifyBlock(blocking,blockTimer)==PERFECT`)** — both ALWAYS
+  negate incoming CC, universal (all classes, PvE + PvP), since both are timing feats. EVERY player-CC
+  source routes through the choke (PvE slow/freeze in `enemy_ai_states`/`projectile` with `isPvp=false`;
+  PvP in `landPvpHit` with `isPvp=true` — no block gate needed there, the choke handles it). Poison/
   burn/curse stay direct (damage, not CC). Enemy CC is unaffected (`entity.stunTimer` direct).
 - **CC Resistance stat:** `AffixType::CC_RESIST` ("of Steadfastness" boots 0.15-0.30 / "of Footing"
   helmet+armor 0.05-0.12), summed on demand — `Inventory::ccResist(inv)` = `capResist(sumEquippedAffix
@@ -403,12 +405,13 @@ Rules are pure in `game/arena.h` (`KILL_TARGET` 10, `RESPAWN_DELAY` 3 s, `record
   → own input-lock engages same frame (predicted+reconciled, no rubber-band). Remote-lane decay in
   `serverNetPost` (host expires its own — no double-tick).
 - **Steadfast Greaves** (legendary boots, `SkillId::BREAK_FREE`; roll CC-resist affixes like any boots,
-  force none): perfect-dodge-clears-CC (roll start zeroes CC; i-frame negates, both gated on
-  `ccDodgeImmune`) + F active (BOOT_SKILL rail): cleanse all CC + 1.5s immunity, 20s cooldown,
+  force none): the boots-only escapes gated on `ccDodgeImmune` — dodge WHILE stunned (player.cpp dodge
+  gate) + clear already-active CC on roll start; the plain i-frame CC negate is now UNIVERSAL (not
+  boots-gated). Plus F active (BOOT_SKILL rail): cleanse all CC + 1.5s immunity, 20s cooldown,
   tryActivate case.
 - **PvP block:** no perfect-block cooldown (a timing feat is always rewarded); holding block drains
-  energy (~25/s in `gameUpdate`, PvP-gated) → drops at 0; only a PERFECT block negates CC in
-  `landPvpHit` (held block stops damage, CC lands). Stunned players can't block.
+  energy (~25/s in `gameUpdate`, PvP-gated) → drops at 0; a held block stops damage but the CC lands
+  (only a perfect block negates it — handled in the choke, so PvE + PvP). Stunned players can't block.
 - **Class CC** (each entity effect + a `Combat::pvp*` twin, attacker = `getCastingPlayer`): Ranger
   Barrage `SlowZoneCallback` → `ScorchZone{slowPct,ownerSlot}` ~40% slow field (tick in
   `tickSharedFX`); Marksman Explosive Round knockback + 0.2s stagger; Tinkerer Detonate EMP ~0.6s
