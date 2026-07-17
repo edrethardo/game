@@ -17,7 +17,7 @@ void fireMultiShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                    ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 25.0f;
-    f32 damage = (def->damage > 0.0f ? def->damage : 20.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 20.0f));
     f32 angles[5] = {-20.0f, -10.0f, 0.0f, 10.0f, 20.0f};
     for (u32 i = 0; i < 5; i++) {
         Vec3 dir = normalize(rotateY(forward, angles[i]));
@@ -34,7 +34,7 @@ void fireRainOfArrows(Vec3 origin, Vec3 forward, const SkillDef* def,
     Vec3 target   = hit.hit ? (origin + forward * hit.distance)
                             : (origin + forward * 20.0f);
     f32 radius    = def->radius > 0.0f ? def->radius : 3.5f;
-    f32 damage    = (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
+    f32 damage    = spellScaled((def->damage > 0.0f ? def->damage : 25.0f));
 
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
@@ -55,7 +55,7 @@ void firePoisonArrow(Vec3 origin, Vec3 forward, const SkillDef* def,
                      ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 22.0f;
-    f32 damage = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 18.0f));
     // Spawn with PROJ_SPARK flag repurposed as green-tint hint for renderer
     u16 slot = ProjectileSystem::spawn(pool, origin, forward, speed, damage, 0.12f, 3.0f,
                                        true, PROJ_SPARK);
@@ -65,7 +65,7 @@ void firePoisonArrow(Vec3 origin, Vec3 forward, const SkillDef* def,
     if (slot != 0xFFFF) {
         Projectile& p = pool.projectiles[slot];
         p.poisonDuration = def->duration > 0.0f ? def->duration : 4.0f;
-        p.poisonDps      = (def->poisonDps > 0.0f ? def->poisonDps : 6.0f) * s_classDmgMult;
+        p.poisonDps      = spellScaled((def->poisonDps > 0.0f ? def->poisonDps : 6.0f));
     }
     LOG_INFO("Poison Arrow fired");
 }
@@ -77,7 +77,7 @@ void fireShadowShot(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name    = "Shadow Shot";
     temp.type    = WeaponType::HITSCAN;
-    temp.damage  = (def->damage > 0.0f ? def->damage * 2.5f : 60.0f) * s_classDmgMult;
+    temp.damage  = spellScaled((def->damage > 0.0f ? def->damage * 2.5f : 60.0f));
     temp.range   = 80.0f;
     temp.coneAngleDeg  = 1.0f;
     temp.cooldown      = 0.0f;
@@ -94,7 +94,7 @@ void fireVolley(Vec3 origin, Vec3 forward, const SkillDef* def,
     RayHit hit = Raycast::cast(grid, origin, forward, 20.0f);
     Vec3 target = hit.hit ? (origin + forward * hit.distance) : (origin + forward * 15.0f);
     f32 radius = (def->radius > 0.0f ? def->radius : 4.0f) * 1.2f;
-    f32 arrowDmg = s_weaponDamage * 0.6f * s_classDmgMult;
+    f32 arrowDmg = spellScaled(s_weaponDamage * 0.6f);
 
     // 80 arrows in 4 visual waves (20 per wave at staggered heights).
     // Each arrow deals real damage via projectile-entity collision.
@@ -131,7 +131,7 @@ void fireVolley(Vec3 origin, Vec3 forward, const SkillDef* def,
 void firePiercingShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                       const LevelGrid& grid, EntityPool& entities)
 {
-    f32 damage = s_weaponDamage * 1.5f * s_classDmgMult;
+    f32 damage = spellScaled(s_weaponDamage * 1.5f);
     f32 range  = 80.0f;
 
     // Ray-AABB intersection against all entities (same pattern as Aimed Shot)
@@ -183,7 +183,7 @@ void fireBarrage(Vec3 origin, Vec3 forward, const SkillDef* def,
                  ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 30.0f;
-    f32 damage = s_weaponDamage * 0.4f * s_classDmgMult;
+    f32 damage = spellScaled(s_weaponDamage * 0.4f);
 
     for (u32 i = 0; i < 10; i++) {
         // Random spread ±5° horizontal, ±2° vertical

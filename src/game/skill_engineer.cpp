@@ -9,7 +9,7 @@
 void fireShockBolt(Vec3 origin, Vec3 forward, const SkillDef* def,
                    ProjectilePool& projectiles)
 {
-    f32 damage = (def->damage > 0.0f ? def->damage : 20.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 20.0f));
 
     // Build perpendicular axes for the triangle offset
     Vec3 right = normalize(Vec3{-forward.z, 0.0f, forward.x});
@@ -56,7 +56,7 @@ void fireTeslaCoil(Vec3 origin, const SkillDef* def,
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     f32 radius = def->radius > 0.0f ? def->radius : 4.0f;
-    f32 damage = (def->damage > 0.0f ? def->damage : 30.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 30.0f));
 
     u32 hitCount = CombatQuery::queryConeSorted(
         entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, radius,

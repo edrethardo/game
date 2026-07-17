@@ -14,7 +14,7 @@ void fireAimedShot(Vec3 origin, Vec3 forward, const SkillDef* def,
                    const LevelGrid& grid, EntityPool& entities)
 {
     // Scales off weapon damage (Marksman gimmick: skills amplify weapon)
-    f32 damage = s_weaponDamage * 1.2f * s_classDmgMult;
+    f32 damage = spellScaled(s_weaponDamage * 1.2f);
     f32 range  = 80.0f;
 
     // Penetrating rail: test the ray against every entity AABB along the line. Precise like a
@@ -64,7 +64,7 @@ void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
                         const LevelGrid& grid, EntityPool& entities)
 {
     // Scales off weapon damage (Marksman gimmick: skills amplify weapon)
-    f32 damage  = s_weaponDamage * 1.2f * s_classDmgMult;
+    f32 damage  = spellScaled(s_weaponDamage * 1.2f);
     f32 splashR = def->radius > 0.0f ? def->radius : 3.5f;
 
     // Find detonation point via raycast
@@ -107,7 +107,7 @@ void fireExplosiveRound(Vec3 origin, Vec3 forward, const SkillDef* def,
 
     // Massive explosion visuals
     if (s_novaCallback) s_novaCallback(detonPos, splashR, {1.0f, 0.5f, 0.1f});
-    if (s_scorchCallback) s_scorchCallback(detonPos, splashR, 2.0f, 5.0f * s_classDmgMult);
+    if (s_scorchCallback) s_scorchCallback(detonPos, splashR, 2.0f, spellScaled(5.0f));
     if (s_particlePool) {
         ParticleSystem::spawnExplosion(*s_particlePool, detonPos, splashR);
         ParticleSystem::spawnDebris(*s_particlePool, detonPos, 12);
@@ -163,7 +163,7 @@ void fireHeadshot(Vec3 origin, Vec3 forward, const SkillDef* def,
             // Non-execute: scales off weapon damage (Marksman gimmick)
             f32 damage = isExecute
                          ? e->health + 1.0f
-                         : s_weaponDamage * 2.5f * s_classDmgMult;
+                         : spellScaled(s_weaponDamage * 2.5f);
             Combat::applyDamage(entities, target, damage);
             beamEnd = e->position; // beam goes to target
 

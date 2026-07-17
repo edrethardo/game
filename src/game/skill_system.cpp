@@ -29,6 +29,7 @@ f32 s_skillPower = 0.0f;
 // Class skill damage multiplier — scales damage/heal numbers by effective floor.
 // Set to floor-based mult for class skills, 1.0 for item skills.
 f32 s_classDmgMult = 1.0f;
+f32 s_spellDmgFlat = 0.0f;   // gear "+spell damage": per-cast, from the CASTER's equipped affixes
 
 // Equipped weapon base damage — set by engine before marksman/ranger skill activation.
 f32 s_weaponDamage = 10.0f;
@@ -80,6 +81,8 @@ u8   SkillSystem::getCastingPlayer() { return s_castingPlayer; }
 void SkillSystem::setClassDamageMult(f32 mult)   { s_classDmgMult  = mult;  }
 f32  SkillSystem::getSkillPower()                { return s_skillPower;    }
 f32  SkillSystem::getClassDamageMult()           { return s_classDmgMult;  }
+void SkillSystem::setSpellDamageFlat(f32 flat)   { s_spellDmgFlat  = flat; }
+f32  SkillSystem::getSpellDamageFlat()           { return s_spellDmgFlat; }
 void SkillSystem::setWeaponDamage(f32 dmg)       { s_weaponDamage  = dmg;   }
 void SkillSystem::setArrowMeshIds(u8 arrow, u8 /*bolt*/) { s_arrowMeshId = arrow; }
 void SkillSystem::setWeaponProjectileMesh(u8 meshId)     { s_weaponProjMeshId = meshId; }

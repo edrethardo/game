@@ -20,6 +20,8 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::HEALTH_FLAT:        return "+Health";
         case AffixType::MOVE_SPEED_FLAT:    return "+Move Speed";
         case AffixType::DAMAGE_PCT:         return "+Damage %";
+        case AffixType::SPELL_DAMAGE_FLAT:  return "+Spell Damage";
+        case AffixType::SPELL_DAMAGE_PCT:   return "+Spell Damage %";
         case AffixType::COOLDOWN_REDUCTION: return "Cooldown Reduction";
         case AffixType::HEALTH_PCT:         return "+Health %";
         case AffixType::LIFE_ON_HIT:        return "Life on Hit";

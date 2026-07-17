@@ -173,6 +173,8 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "lifesteal_pct"      || s == "LIFESTEAL_PCT")      return AffixType::LIFESTEAL_PCT;
     if (s == "manasteal_pct"      || s == "MANASTEAL_PCT")      return AffixType::MANASTEAL_PCT;
     if (s == "mana_on_kill"       || s == "MANA_ON_KILL")       return AffixType::MANA_ON_KILL;
+    if (s == "spell_damage"       || s == "SPELL_DAMAGE_FLAT")  return AffixType::SPELL_DAMAGE_FLAT;
+    if (s == "spell_damage_pct"   || s == "SPELL_DAMAGE_PCT")   return AffixType::SPELL_DAMAGE_PCT;
     if (s == "attack_speed_pct"   || s == "ATTACK_SPEED_PCT")   return AffixType::ATTACK_SPEED_PCT;
     if (s == "armor"              || s == "ARMOR")              return AffixType::ARMOR;
     if (s == "health_regen"       || s == "HEALTH_REGEN")       return AffixType::HEALTH_REGEN;

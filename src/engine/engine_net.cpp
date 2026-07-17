@@ -353,7 +353,7 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // Item skills scale by item level (boots) and use base class damage (1.0).
                 SkillSystem::setSkillPower(boots.itemLevel > 1
                     ? static_cast<f32>(boots.itemLevel - 1) / 149.0f : 0.0f);
-                SkillSystem::setClassDamageMult(1.0f);
+                applySpellScaling(m_inventories[i], 1.0f);  // remote's own gear spell dmg (TA-7)
                 // Stamp the remote's net slot so per-slot skill state (overcharge buff,
                 // meteor/holy kill-heal target) lands on the actual caster, not the host.
                 // (H4/H5: overcharge arrays are MAX_PLAYERS-sized; updateMeteors resolves
@@ -441,7 +441,7 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // skill damage uses its own floor/weapon, not the host's last cast.
                 SkillSystem::setSkillPower(0.0f); // class skills use base power
                 // Class skill damage scales 6% per effective floor (reuse effectiveFloor above).
-                SkillSystem::setClassDamageMult(1.0f + (effectiveFloor - 1) * 0.06f);
+                applySpellScaling(m_inventories[i], 1.0f + (effectiveFloor - 1) * 0.06f);
                 // Weapon damage for Marksman skills that scale off the equipped weapon.
                 { const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
                   WeaponDef wd = !isItemEmpty(wpn)

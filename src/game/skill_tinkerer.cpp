@@ -29,7 +29,7 @@ void fireSwarmDrones(Vec3 origin, Vec3 forward, EntityPool& /*entities*/)
 void fireStunGrenade(Vec3 origin, Vec3 forward, const SkillDef* def,
                      ProjectilePool& pool)
 {
-    f32 damage  = (def->damage > 0.0f ? def->damage : 15.0f) * s_classDmgMult;
+    f32 damage  = spellScaled((def->damage > 0.0f ? def->damage : 15.0f));
     f32 splashR = def->radius > 0.0f ? def->radius : 2.0f;
 
     u16 slot = ProjectileSystem::spawn(pool, origin, forward,
@@ -123,7 +123,7 @@ void fireOverclock(Vec3 origin, const SkillDef* def, EntityPool& entities)
 // Detonate Swarm: every friendly drone explodes (3m AoE each), then dies.
 void fireDetonateSwarm(const SkillDef* def, EntityPool& entities)
 {
-    f32 damage = (def->damage > 0.0f ? def->damage : 15.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 15.0f));
     f32 radius = def->radius > 0.0f ? def->radius : 3.0f;
     u32 detonated = 0;
 

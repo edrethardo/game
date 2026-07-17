@@ -38,6 +38,17 @@ extern f32 s_skillPower;
 // Class skill damage multiplier — scales all class skill damage/heal numbers.
 extern f32 s_classDmgMult;
 
+// Gear "+spell damage" (SPELL_DAMAGE_FLAT affix), stamped per cast from the CASTER's inventory.
+// The % half (SPELL_DAMAGE_PCT) has no static of its own — the cast sites fold it INTO
+// s_classDmgMult, so every existing multiplier consumer (including the orb's stored mult)
+// scales for free.
+extern f32 s_spellDmgFlat;
+
+// THE damage-base helper for skill fire code: gear flat joins the base BEFORE the class/floor
+// (+gear %) multiplier. One inline so the ~35 damage sites cannot drift — new skills should
+// write spellScaled(base) instead of touching s_classDmgMult directly.
+inline f32 spellScaled(f32 base) { return (base + s_spellDmgFlat) * s_classDmgMult; }
+
 // Equipped weapon base damage — Marksman/Ranger skills scale off this.
 extern f32 s_weaponDamage;
 

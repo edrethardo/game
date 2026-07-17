@@ -790,7 +790,7 @@ void Engine::handleWeaponFire(f32 dt) {
                         // Scale by weapon item level — proc skills use base class damage (1.0)
                         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)].itemLevel;
                           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
-                        SkillSystem::setClassDamageMult(1.0f);
+                        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f);  // proc skills: base mult + gear spell dmg
                         Vec3 dir = m_localPlayer.forward;
                         // R17: tempSS.lastActivationTick=0 makes the gate always pass; currentTick is unused
                         // for the gate but threaded for consistency.
@@ -1585,9 +1585,11 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                         tempSS.cooldownTimer = 0.0f;
                         tempSS.energy = 999.0f;
                         tempSS.maxEnergy = 999.0f;
-                        { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)].itemLevel;
+                        // The FIRER's weapon level + gear, not the host's (m_localPlayerIndex here
+                        // was a latent TA-7-class bug: a remote's proc scaled by the HOST's weapon).
+                        { u8 lvl = m_inventories[np.slotIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)].itemLevel;
                           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
-                        SkillSystem::setClassDamageMult(1.0f);
+                        applySpellScaling(m_inventories[np.slotIndex], 1.0f);  // proc skills: base mult + gear spell dmg
                         // R17: tempSS.lastActivationTick=0 always-pass; tick threaded for consistency.
                         SkillSystem::tryActivate(tempSS, &procDef, 1,
                             procPos, forward, np.yaw,

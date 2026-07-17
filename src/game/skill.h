@@ -58,6 +58,10 @@ namespace SkillSystem {
     // silently rescale someone's in-flight orb.
     f32  getSkillPower();
     f32  getClassDamageMult();
+    // Gear "+spell damage" flat (SPELL_DAMAGE_FLAT affix) — set per cast alongside the class
+    // mult; the % affix folds into setClassDamageMult's argument at the cast sites instead.
+    void setSpellDamageFlat(f32 flat);
+    f32  getSpellDamageFlat();
 
     // Set equipped weapon damage — Marksman/Ranger skills scale off weapon damage.
     void setWeaponDamage(f32 dmg);

@@ -12,7 +12,7 @@ void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
     WeaponDef temp;
     temp.name        = "Cleave";
     temp.type        = WeaponType::MELEE;
-    temp.damage      = (def->damage > 0.0f ? def->damage : 35.0f) * s_classDmgMult;
+    temp.damage      = spellScaled((def->damage > 0.0f ? def->damage : 35.0f));
     temp.range       = def->radius  > 0.0f ? def->radius : 3.0f;
     temp.coneAngleDeg = 120.0f;
     temp.cooldown    = 0.0f;
@@ -44,7 +44,7 @@ void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entities)
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     f32 range  = def->radius > 0.0f ? def->radius : 5.0f;
-    f32 damage = (def->damage > 0.0f ? def->damage : 25.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 25.0f));
     // Query from ground position with omnidirectional search
     u32 hitCount = CombatQuery::queryConeSorted(
         entities, groundPos, {0.0f, -1.0f, 0.0f}, -1.0f, range,
@@ -119,7 +119,7 @@ void fireWhirlwind(Vec3 origin, const SkillDef* def, EntityPool& entities)
     EntityHandle hits[MAX_ENTITIES];
     f32          dists[MAX_ENTITIES];
     f32 range    = def->radius > 0.0f ? def->radius : 2.5f;
-    f32 damage   = (def->damage > 0.0f ? def->damage : 30.0f) * s_classDmgMult;
+    f32 damage   = spellScaled((def->damage > 0.0f ? def->damage : 30.0f));
     u32 hitCount = CombatQuery::queryConeSorted(
         entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, range,
         hits, dists, MAX_ENTITIES);
@@ -150,7 +150,7 @@ void fireEarthquake(Vec3 origin, const SkillDef* def, EntityPool& entities)
     for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
         if (!s_meteors[i].active) {
             s_meteors[i].position = origin;
-            s_meteors[i].damage   = (def->damage > 0.0f ? def->damage : 40.0f) * s_classDmgMult;
+            s_meteors[i].damage   = spellScaled((def->damage > 0.0f ? def->damage : 40.0f));
             s_meteors[i].radius   = radius;
             // Very short delay so it fires on the next updateMeteors tick
             s_meteors[i].timer    = 0.05f;

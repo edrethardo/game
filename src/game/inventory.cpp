@@ -71,6 +71,16 @@ f32 Inventory::lifestealPct(const PlayerInventory& inv) {
     return sumEquippedAffix(inv, AffixType::LIFESTEAL_PCT);
 }
 
+// Gear spell damage — on-demand for the same save-safety reason (no cached bonus* field).
+// Consumed per CAST, not per frame: the engine stamps both into the SkillSystem scaling
+// statics right before tryActivate/processRemoteActivation.
+f32 Inventory::spellDamageFlat(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::SPELL_DAMAGE_FLAT);
+}
+f32 Inventory::spellDamagePct(const PlayerInventory& inv) {
+    return sumEquippedAffix(inv, AffixType::SPELL_DAMAGE_PCT);
+}
+
 // Defensive pack — all computed on demand (no cached field → no save-format change). The caller
 // stamps these into the Player's transient per-frame combat cache (see tickPassiveEquipment).
 f32 Inventory::armorRating(const PlayerInventory& inv) {

@@ -139,6 +139,20 @@
       "slots": ["ring", "helmet", "gloves", "weapon"],
       "minValue": 1.0,
       "maxValue": 5.0
+    },
+    {
+      "type": "spell_damage",
+      "name": "of Sorcery",
+      "slots": ["weapon", "offhand", "helmet", "ring", "gloves"],
+      "minValue": 3.0,
+      "maxValue": 12.0
+    },
+    {
+      "type": "spell_damage_pct",
+      "name": "of the Archmage",
+      "slots": ["weapon", "offhand", "helmet", "ring", "gloves"],
+      "minValue": 5.0,
+      "maxValue": 20.0
     }
   ]
 }

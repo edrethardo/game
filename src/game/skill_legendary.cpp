@@ -37,7 +37,7 @@ void fireChainLightning(Vec3 origin, Vec3 direction, const SkillDef* def,
 {
     Vec3 currentPos    = origin;
     Vec3 currentDir    = direction;
-    f32  currentDamage = def->damage * s_classDmgMult;
+    f32  currentDamage = spellScaled(def->damage);
 
     // Store chain positions for the visual arc effect
     static constexpr u32 MAX_CHAIN_PTS = 24;
@@ -137,7 +137,7 @@ void fireBloodNova(Vec3 origin, const SkillDef* def, EntityPool& entities)
         entities, origin, {0.0f, 0.0f, -1.0f}, -1.0f, scaledRadius,
         hits, dists, MAX_ENTITIES);
 
-    f32 novaDmg = def->damage * s_classDmgMult;
+    f32 novaDmg = spellScaled(def->damage);
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], novaDmg);
     }
@@ -173,7 +173,7 @@ void fireMeteorStrike(Vec3 origin, Vec3 direction, const SkillDef* def,
         for (u32 i = 0; i < MAX_PENDING_METEORS; i++) {
             if (!s_meteors[i].active) {
                 s_meteors[i].position = meteorPos;
-                s_meteors[i].damage   = def->damage * s_classDmgMult;
+                s_meteors[i].damage   = spellScaled(def->damage);
                 s_meteors[i].radius   = def->radius;
                 s_meteors[i].timer    = def->delay + m * 0.15f; // stagger impacts
                 s_meteors[i].active   = true;
@@ -214,7 +214,7 @@ void firePhaseDash(Vec3 /*eyePos*/, Vec3 forward, const SkillDef* def,
         cosf(radians(30.0f)), dashDist,
         hits, dists, MAX_ENTITIES);
 
-    f32 dashDmg = def->damage * s_classDmgMult;
+    f32 dashDmg = spellScaled(def->damage);
     for (u32 i = 0; i < hitCount; i++) {
         Combat::applyDamage(entities, hits[i], dashDmg);
     }

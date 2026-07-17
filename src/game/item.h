@@ -72,6 +72,8 @@ enum struct AffixType : u8 {
     THORNS_PCT,         // % of damage taken reflected back at the attacker — defensive pack
     MANASTEAL_PCT,      // % of weapon damage restored as energy ("mana") — weapon attacks only, like lifesteal
     MANA_ON_KILL,       // flat energy ("mana") restored on each kill (any damage source)
+    SPELL_DAMAGE_FLAT,  // flat bonus added to every SKILL's base damage (weapon attacks unaffected)
+    SPELL_DAMAGE_PCT,   // % multiplier on every SKILL's damage (folds into the class/floor mult)
     COUNT
     // NOTE: affix type is serialized by its integer value (see _REMOVED_RANGE_BONUS
     // and engine_persist.cpp). Only ever APPEND new types before COUNT — never insert
@@ -688,6 +690,11 @@ namespace Inventory {
     // Computed on demand rather than cached on PlayerInventory — that struct is serialized
     // raw, so it must not gain new fields (see the WARNING on PlayerInventory).
     f32          lifestealPct(const PlayerInventory& inv);
+    // Gear spell damage (skills only) — summed on demand like lifestealPct (no cached bonus*
+    // field: PlayerInventory is serialized raw, a new field breaks saves). Consumed per cast:
+    // the engine stamps them into the SkillSystem scaling statics before tryActivate.
+    f32          spellDamageFlat(const PlayerInventory& inv);
+    f32          spellDamagePct(const PlayerInventory& inv);
     // Defensive pack — summed on demand for the same save-safety reason as lifestealPct (no cached
     // PlayerInventory field). armorRating = flat armor; healthRegenRate = HP/sec; thornsPct = % of
     // damage-taken reflected. Stamped into the Player's transient combat cache each frame.

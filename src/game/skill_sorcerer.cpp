@@ -9,7 +9,7 @@ void fireFireball(Vec3 origin, Vec3 forward, const SkillDef* def,
                   ProjectilePool& pool)
 {
     f32 speed       = def->projectileSpeed > 0.0f ? def->projectileSpeed : 18.0f;
-    f32 damage      = (def->damage > 0.0f ? def->damage : 35.0f) * s_classDmgMult;
+    f32 damage      = spellScaled((def->damage > 0.0f ? def->damage : 35.0f));
     f32 splashR     = def->radius          > 0.0f ? def->radius          : 2.0f;
     f32 splashDmg   = damage * 0.6f;  // 60% damage in splash zone
     // PROJ_SPLASH + slight gravity arc for feel

@@ -223,9 +223,11 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
             }
 
             SkillSystem::setSkillPower(0.0f);  // class skills use base power
-            // Class skill damage scales at 6% per effective floor (slower than enemy 10%)
+            // Class skill damage scales at 6% per effective floor (slower than enemy 10%);
+            // gear spell damage (flat + %) rides on top via applySpellScaling.
             { u32 effFloor = m_level.currentFloor + m_difficulty * 50;
-              SkillSystem::setClassDamageMult(1.0f + (effFloor - 1) * 0.06f); }
+              applySpellScaling(m_inventories[m_localPlayerIndex],
+                                1.0f + (effFloor - 1) * 0.06f); }
             // Set weapon damage for Marksman skills that scale off equipped weapon
             { const ItemInstance& wpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
               WeaponDef wd = !isItemEmpty(wpn)
@@ -296,7 +298,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         // Scale by boots item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
-        SkillSystem::setClassDamageMult(1.0f);
+        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f);  // item skills: base mult + gear spell dmg
         if (SkillSystem::tryActivate(m_bootSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -319,7 +321,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         // Scale by helmet item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
-        SkillSystem::setClassDamageMult(1.0f);
+        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f);  // item skills: base mult + gear spell dmg
         if (SkillSystem::tryActivate(m_helmetSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -532,6 +534,17 @@ void Engine::tickArmorRingPassives(f32 dt) {
 }
 
 // ---------------------------------------------------------------------------
+// applySpellScaling — see engine.h. The one place gear spell damage becomes SkillSystem state;
+// call sites: local class/boot/helmet activation, both weapon-proc paths, and both remote-cast
+// paths (engine_net.cpp) — always with the CASTER's own inventory (co-op: the server's synced
+// copy of the guest's gear).
+// ---------------------------------------------------------------------------
+void Engine::applySpellScaling(const PlayerInventory& inv, f32 baseMult) {
+    SkillSystem::setClassDamageMult(baseMult * (1.0f + Inventory::spellDamagePct(inv) / 100.0f));
+    SkillSystem::setSpellDamageFlat(Inventory::spellDamageFlat(inv));
+}
+
+// ---------------------------------------------------------------------------
 // staticDischarge — fire a full chain lightning at whoever hit the wearer (Capacitor Mail's
 // 5-stack discharge; Thunderwall's perfect-block riposte reuses it). Server/SP only: damage
 // is authoritative (N5). Falls back to the nearest living hostile within 5m when the hit had
@@ -573,12 +586,15 @@ void Engine::staticDischarge(Vec3 pos, u8 wearerSlot, u16 attackerIdx) {
     // Kill credit rides setAttackingPlayer (the projectile.cpp save/restore pattern).
     const f32 prevPower = SkillSystem::getSkillPower();
     const f32 prevMult  = SkillSystem::getClassDamageMult();
+    const f32 prevFlat  = SkillSystem::getSpellDamageFlat();
     SkillSystem::setClassDamageMult(1.0f);
     SkillSystem::setSkillPower(0.0f);
+    SkillSystem::setSpellDamageFlat(0.0f);   // procs don't ride the wearer's spell-damage gear
     u8 prev = Combat::getAttackingPlayer();
     Combat::setAttackingPlayer(wearerSlot);
     fireChainLightning(origin, dir, def, m_level.grid, m_entities);
     Combat::setAttackingPlayer(prev);
+    SkillSystem::setSpellDamageFlat(prevFlat);
     SkillSystem::setSkillPower(prevPower);
     SkillSystem::setClassDamageMult(prevMult);
 }

@@ -19,7 +19,7 @@ void fireKnifeBurst(Vec3 origin, Vec3 forward, const SkillDef* def,
                     ProjectilePool& pool)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 30.0f;
-    f32 damage = (def->damage > 0.0f ? def->damage : 12.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 12.0f));
     f32 angles[3] = {-8.0f, 0.0f, 8.0f};
     for (u32 i = 0; i < 3; i++) {
         Vec3 dir = normalize(rotateY(forward, angles[i]));
@@ -36,7 +36,7 @@ void firePoisonCloud(Vec3 origin, Vec3 forward, const SkillDef* def,
     Vec3 target = hit.hit ? (origin + forward * hit.distance)
                           : (origin + forward * 15.0f);
     f32 radius  = def->radius > 0.0f ? def->radius : 2.5f;
-    f32 dps     = (def->damage > 0.0f ? def->damage * 0.4f : 10.0f) * s_classDmgMult;
+    f32 dps     = spellScaled((def->damage > 0.0f ? def->damage * 0.4f : 10.0f));
 
     // Immediate aggro reset — enemies in the cloud lose track of the player
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
@@ -88,7 +88,7 @@ bool fireShadowStrike(Vec3 origin, Vec3 forward, const SkillDef* def,
     player.yaw   = target->yaw;
     player.pitch = 0.0f;
 
-    f32 damage = (def->damage > 0.0f ? def->damage * 3.0f : 90.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage * 3.0f : 90.0f));
     Combat::applyDamage(entities, hits[0], damage);
     target->freezeTimer = 1.5f; // slow on hit (freezeTimer halves move speed)
 
@@ -103,7 +103,7 @@ void fireFanOfKnives(Vec3 origin, Vec3 forward, const SkillDef* def,
                      ProjectilePool& pool, Player& player)
 {
     f32 speed  = def->projectileSpeed > 0.0f ? def->projectileSpeed : 28.0f;
-    f32 damage = (def->damage > 0.0f ? def->damage : 10.0f) * s_classDmgMult;
+    f32 damage = spellScaled((def->damage > 0.0f ? def->damage : 10.0f));
 
     // Ring 1: 64 horizontal knives
     for (u32 i = 0; i < 64; i++) {
@@ -175,7 +175,7 @@ bool fireShadowStep(Vec3 origin, Vec3 forward, const SkillDef* def,
     player.pitch = 0.0f;
 
     // Backstab: 3× damage if attacking from stealth
-    f32 baseDmg = (def->damage > 0.0f ? def->damage : 40.0f) * s_classDmgMult;
+    f32 baseDmg = spellScaled((def->damage > 0.0f ? def->damage : 40.0f));
     f32 damage = (player.smokeTimer > 0.0f) ? baseDmg * 3.0f : baseDmg;
     Combat::applyDamage(entities, targetHandle, damage);
     target->freezeTimer = 1.5f; // slow on hit

@@ -35,8 +35,8 @@ void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
         entities, startPos + Vec3{0.0f, 0.5f, 0.0f}, dashDir,
         cosf(radians(15.0f)), actualDist, hits, dists, MAX_ENTITIES);
 
-    f32 dashDmg = def->damage * s_classDmgMult;
-    f32 pillarDmg = 15.0f * s_classDmgMult;
+    f32 dashDmg = spellScaled(def->damage);
+    f32 pillarDmg = spellScaled(15.0f);
     Vec3 pillarPos = startPos + dashDir * actualDist; // default: end of dash
     f32 totalDmg = 0.0f;
 
@@ -79,6 +79,8 @@ void fireHolySmite(Vec3 origin, Vec3 forward, const SkillDef* def,
     }
 
     // Flat heal + 20% of damage dealt
+    // Deliberately NOT spellScaled: the gear "+spell damage" FLAT must not inflate a heal
+    // (the gear % rides s_classDmgMult, which has always scaled damage and heals together).
     f32 heal = 8.0f * s_classDmgMult + totalDmg * 0.2f;
     player.health = fminf(player.health + heal, player.maxHealth);
 
@@ -95,13 +97,13 @@ void fireHolyBombardment(Vec3 origin, const SkillDef* def, Player& player)
     // Per-caster slot (N3) — `s_castingPlayer` is the canonical net-slot index.
     const u8 cp = s_castingPlayer;
     s_bombardmentRadius[cp] = def->radius > 0.0f ? def->radius : 6.0f;
-    s_bombardmentDamage[cp] = (def->damage > 0.0f ? def->damage : 18.0f) * s_classDmgMult;
+    s_bombardmentDamage[cp] = spellScaled((def->damage > 0.0f ? def->damage : 18.0f));
     s_bombardmentCenter[cp] = origin;
     s_bombardmentTimer [cp] = def->duration > 0.0f ? def->duration : 4.0f;
     s_bombardmentAccum [cp] = 0.0f;
 
     // Scorch zone for residual ground DPS
-    f32 scorchDps = 4.0f * s_classDmgMult;
+    f32 scorchDps = spellScaled(4.0f);
     if (s_scorchCallback) s_scorchCallback(origin, s_bombardmentRadius[cp], 4.0f, scorchDps);
 
     // Gold nova ring on activation
@@ -116,7 +118,7 @@ void fireHolyNova(Vec3 origin, const SkillDef* def,
                   EntityPool& entities, Player& player)
 {
     f32 radius = def->radius > 0.0f ? def->radius : 5.0f;
-    f32 ringDmg = def->damage * s_classDmgMult;
+    f32 ringDmg = spellScaled(def->damage);
     f32 healPct = def->allyHealPct > 0.0f ? def->allyHealPct : 0.08f;
 
     // Ring wave (instant) — damage enemies, heal allies
@@ -196,7 +198,7 @@ void fireHolyNova(Vec3 origin, const SkillDef* def,
     const u8 cp = s_castingPlayer;
     s_holyNovaTimer  [cp] = 0.3f;
     s_holyNovaCenter [cp] = origin;
-    s_holyNovaDamage2[cp] = (def->secondaryDamage > 0.0f ? def->secondaryDamage : 20.0f) * s_classDmgMult;
+    s_holyNovaDamage2[cp] = spellScaled((def->secondaryDamage > 0.0f ? def->secondaryDamage : 20.0f));
     s_holyNovaRadius [cp] = radius;
     (void)healPct;        // ring heal already applied above; second-hit healPct field was dead
 
@@ -245,7 +247,7 @@ void fireDivineJudgment(Player& player, EntityPool& entities, const SkillDef* de
         nearest, nearDists, MAX_ENTITIES);
 
     // Filter to hostiles only, pick up to 3
-    f32 pillarDmg = (def->damage > 0.0f ? def->damage : 60.0f) * s_classDmgMult;
+    f32 pillarDmg = spellScaled((def->damage > 0.0f ? def->damage : 60.0f));
     f32 pillarRadius = def->radius > 0.0f ? def->radius : 2.5f;
     u8 pillarsSpawned = 0;
     Vec3 pillarPositions[4]; // origin + up to 3 targets for chain visual
