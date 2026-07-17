@@ -410,8 +410,12 @@ void Engine::renderMenu() {
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.10f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 1) {
-        // Single player sub-menu — replaces main menu options
-        const char* subTitle = "Single Player";
+        // New/Continue chooser — SHARED by the Single Player, Host and Join flows, which have
+        // already stamped m_netRole (menu cases 0/1/2) by the time this screen shows. Title by
+        // role, so a joining player isn't told they're starting a single-player game.
+        const char* subTitle = (m_netRole == NetRole::CLIENT) ? "Join Game"
+                             : (m_netRole == NetRole::SERVER) ? "Host Game"
+                                                              : "Single Player";
         f32 stW = FontSystem::textWidth(subTitle, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
 
