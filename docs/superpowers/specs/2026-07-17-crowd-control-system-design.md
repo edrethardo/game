@@ -95,8 +95,10 @@ introduces it, so the stat covers the three existing timers.
 
 Append **one item def** to `items.json` (append-only; `defId` is the saved array index):
 
-- Slot `boots`, legendary, a **high built-in CC-Resist roll** (~0.35–0.50, still under the
-  60% cap so ordinary gear can't be fully replaced by it), plus a normal boots stat line.
+- Slot `boots`, legendary, a normal boots stat line (baseHealth). **No forced CC-Resist stat**
+  (updated during implementation — Aaron's call): the Greaves can *roll* CC_RESIST affixes like
+  any boots, but force none. Their signature is the two anti-CC layers below (2a + 2b), not a
+  guaranteed resist number.
 - `legendarySkillId = BREAK_FREE` (new `SkillId`, Component 2b).
 - New mesh via `tools/gen_mesh.py`, registered in **both** `asset_manifest.h` and
   `build_assets.py` (either alone fails the asset build).

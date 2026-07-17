@@ -369,13 +369,52 @@ Rules are pure in `game/arena.h` (`KILL_TARGET` 10, `RESPAWN_DELAY` 3 s, `record
   auto-respawns via `arenaTick` at `Arena::farthestPad`; 10th kill → `beginArenaOver` broadcasts
   `ARENA_OVER` (0x0C: winner + 4×u8 scores) BEFORE the local flip (the CREDITS rule), every peer
   runs its own 8 s banner then `arenaLeaveToMenu` (never saves). Mid-join: pad seat +
-  `ARENA_SCORES` (0x0B) refresh in `onPlayerJoin`. `PROTOCOL_VERSION` 20.
+  `ARENA_SCORES` (0x0B) refresh in `onPlayerJoin`. `PROTOCOL_VERSION` 21 (v21: player-facing CC — see Crowd control below).
 - **Firewall:** drops refused on both ends, no descend, `saveCharacter` hard-refuses in-arena
   (a save would stamp floor 97 into the header), pause row = "Leave Arena".
 - **Net wiring rule:** worlds entered WITHOUT `startGame` wire callbacks explicitly —
   `wireServerNet()` in `enterArena`/`enterTown` (host), `wireClientNet()` in
   `enterArenaClient`/`enterTownClient`/`enterSourceChamberClient` (sentinel joins). Both are
   idempotent extractions of `startGame`'s blocks; skipping them = unseated joiners / deaf clients.
+
+## Crowd control (CC-Resistance + player stun) — `PROTOCOL_VERSION` 21
+
+- **Pure core** (`game/crowd_control.h`, tested): `RESIST_CAP=0.60`, `DR_WINDOW=8s`;
+  `scaleDuration`/`capResist`; `StunDr{timer,count}` + `advanceStunDr` (1.0/0.5/0.25/0.0 ladder) +
+  `tickStunDr`; `resolveCC(kind, dur, resist, immune, dodgeNegate, dr, isPvp)` → `{apply, duration}`
+  (immunity/dodge negate FIRST so a negated stun burns no DR stack, then tenacity, then PvP-only DR).
+- **The choke:** `Combat::applyCCToPlayer(Player&, CcType{STUN,SLOW,FREEZE}, dur, isPvp)` wraps
+  `resolveCC` reading `player.{ccResist,ccImmuneTimer,ccDodgeImmune,dodgeState.rolling,stunDr}` and
+  raises the timer (`fmaxf`). EVERY player-CC source routes through it (PvE slow/freeze in
+  `enemy_ai_states`/`projectile` with `isPvp=false`; PvP in `landPvpHit` with `isPvp=true`). Poison/
+  burn/curse stay direct (damage, not CC). Enemy CC is unaffected (`entity.stunTimer` direct).
+- **CC Resistance stat:** `AffixType::CC_RESIST` ("of Steadfastness" boots 0.15-0.30 / "of Footing"
+  helmet+armor 0.05-0.12), summed on demand — `Inventory::ccResist(inv)` = `capResist(sumEquippedAffix
+  (CC_RESIST))` → stamped into transient `Player.ccResist` (`tickPassiveEquipment`, beside
+  `armorRating`; re-stamped in `pvpApplyHit` from `m_inventories[slot]` for authority, swap-timing
+  independent). NO cached `PlayerInventory` field (no save bump). No item forces the stat — the
+  Steadfast Greaves just roll it like any boots.
+- **Player stun** (`Player.stunTimer`, PvP-only source): *action-lock, camera-free* — the input path
+  (`player.cpp` movement/dodge, `captureLocalInput` wire flags, `engine_combat` fire,
+  `engine_update_skills` class/helmet cast) suppresses everything but BOOT_SKILL (Break Free) +
+  inventory + a boots-gated dodge. Replicated like `shadowDanceTimer`: NetPlayer `stunTimer/
+  ccImmuneTimer/stunDr` (seed/writeback-mirrored) + `SnapPlayer.flags` bit2 = stunned + `stunTimerQ`
+  (reused `reserved0`, so `sizeof(SnapPlayer)` unchanged); client adopts in `Client::reconcile`
+  → own input-lock engages same frame (predicted+reconciled, no rubber-band). Remote-lane decay in
+  `serverNetPost` (host expires its own — no double-tick).
+- **Steadfast Greaves** (legendary boots, `SkillId::BREAK_FREE`; roll CC-resist affixes like any boots,
+  force none): perfect-dodge-clears-CC (roll start zeroes CC; i-frame negates, both gated on
+  `ccDodgeImmune`) + F active (BOOT_SKILL rail): cleanse all CC + 1.5s immunity, 20s cooldown,
+  tryActivate case.
+- **PvP block:** no perfect-block cooldown (a timing feat is always rewarded); holding block drains
+  energy (~25/s in `gameUpdate`, PvP-gated) → drops at 0; only a PERFECT block negates CC in
+  `landPvpHit` (held block stops damage, CC lands). Stunned players can't block.
+- **Class CC** (each entity effect + a `Combat::pvp*` twin, attacker = `getCastingPlayer`): Ranger
+  Barrage `SlowZoneCallback` → `ScorchZone{slowPct,ownerSlot}` ~40% slow field (tick in
+  `tickSharedFX`); Marksman Explosive Round knockback + 0.2s stagger; Tinkerer Detonate EMP ~0.6s
+  stun (PvP applied ONCE, not per drone — DR budget); Wanderer Deflect burst ~0.75s stagger.
+  `Combat::pvpRadiusHit(center, radius, proto)` is the AoE analogue of `pvpApply` (lands a templated
+  PvpHit — CC/knockback/damage). `PvpHit` gained `stunDuration` (onHitEffect==5) + `knockback`.
 
 ## Maintenance
 

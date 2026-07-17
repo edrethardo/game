@@ -97,10 +97,32 @@ each landed hit applies atomically via `Engine::pvpApplyHit` (fresh remote-view 
 player-facing damage source MUST call a `Combat::pvp*` helper beside its entity query or it silently does
 nothing in PvP. The arena is a progression firewall: no XP, no loot, no drops, **no saves** (`saveCharacter`
 hard-refuses in-arena — a save would stamp floor 97 into the header). `PROTOCOL_VERSION` 20
-(ARENA_KILL/ARENA_SCORES/ARENA_OVER events). Dev doors: `--arena` (host), `--arena-couch`. **Worlds entered
+(ARENA_KILL/ARENA_SCORES/ARENA_OVER events); 21 adds player-facing CC (see Crowd control below). Dev
+doors: `--arena` (host), `--arena-couch`. **Worlds entered
 WITHOUT `startGame`** (arena, town cleared-Continue, sentinel joins) **must wire net callbacks via
 `wireServerNet()`/`wireClientNet()`** — extracted from `startGame` precisely because those paths used to
 leave hosts unable to seat joiners and joining clients deaf.
+
+**Crowd control (CC-Resistance + player stun).** All player crowd control (stun/slow/freeze — poison/burn/
+curse are damage, not CC) routes through ONE choke, `Combat::applyCCToPlayer`, wrapping the pure
+`CrowdControl::resolveCC` (`game/crowd_control.h`, tested): immunity/dodge-i-frame negate → **tenacity**
+(`player.ccResist`) → **PvP-only stun diminishing returns** (100→50→25%→immune within 8 s, per-victim, so
+two CC classes can't perma-lock). A direct player CC-timer write bypasses resist + DR — always call the
+choke. **CC Resistance** is one unified affix (`AffixType::CC_RESIST`, "of Steadfastness"/"of Footing"),
+**summed on demand** (`Inventory::ccResist`, no cached field → no save bump, the armor/thorns pattern),
+capped 60%, stamped into the transient `Player.ccResist` (re-stamped authoritatively in `pvpApplyHit`
+from `m_inventories[slot]`). **Player stun is PvP-only** (the Arena; enemies never hard-stun you)
+and is *action-lock, camera-free* — movement/fire/class+helmet skills/dodge suppressed both locally and on
+the wire (`captureLocalInput`), sparing BOOT_SKILL (Break Free) + inventory; replicated like
+`shadowDanceTimer` (NetPlayer field + seed/writeback + `SnapPlayer.flags` bit2 + `stunTimerQ` on the reused
+`reserved0` byte) so a stunned client predicts its own lock and reconciles with no rubber-band. The
+**Steadfast Greaves** (legendary boots, `SkillId::BREAK_FREE` on the F/`BOOT_SKILL` rail) pair a
+perfect-dodge-clears-CC passive with an F cleanse (they roll CC-resist affixes like any boots — no forced
+stat). **PvP block** is energy-drained (no
+turtle) with NO perfect-block cooldown (a perfect block is always rewarded), and only a perfect block
+negates CC. Class CC (baseline-up fairness): Ranger Barrage slow-zone, Marksman Explosive knockback+stagger,
+Tinkerer Detonate EMP stun, Wanderer Deflect stagger — each with a `Combat::pvp*` twin. `PROTOCOL_VERSION`
+21. (Internals: `engine-reference`; the pitfalls: `engine-how-to`.)
 
 **Persistence is per-character.** Each save file (`save_NN.dat`) holds exactly ONE character (`playerCount=1`); the per-lane destination is `m_playerSaveSlot[lane]` and `saveAllCharacters()` writes each active lane to its own slot. In couch co-op both players pick their own slot (New or Continue) in the menu lobby and the shared dungeon runs on **Player 1's floor**; mixed New/Continue lanes work because the menu prepares each lane and calls `startGame(mode, lanesPrepared=true)` (skipping the NEW_GAME wipe). Legacy `playerCount=2` bundle saves still load (and migrate to per-character on the next save). The on-disk layout is **versioned** (`SAVE_VERSION`, currently 3 = GLOVES slot + attack-speed cache in `PlayerInventory`): readers accept the previous version via a `Legacy*V<n>` mirror struct in `engine_persist.cpp`, and `static_assert`s pin the serialized struct sizes — any layout change MUST bump the version and extend the legacy readers. (Save format, menu flow, no-downgrade guard: `engine-reference`.)
 
@@ -110,7 +132,7 @@ leave hosts unable to seat joiners and joining clients deaf.
 
 **Authoritative server.** Listen-server model: host runs the full simulation in `serverUpdate` and is also player slot 0. Clients send `NetInput` packets at 60 Hz, server broadcasts `WorldSnapshot` at 60 Hz (every tick). Clients run prediction + reconciliation on the local player (`Client::reconcile`) and interpolate remote players/entities/projectiles with a 33 ms delay. Singleplayer (`NetRole::NONE`) is just the same loop without packets. (Tick/snapshot/wire details: `engine-reference`.)
 
-**Netplay stack (rewrite COMPLETE — M0–M14 + the 2026-07 hardening pass).** Server-authoritative + client prediction with **rollback-replay reconciliation**: on a mispredict the client rewinds to the server's acked state and re-applies every stored input through the same per-input step the server drain runs (`updateNetPlayerFromInput` movementOnly + `moveAndSlide`), committing to BOTH player mirrors (`m_localPlayer` alias AND `m_players[slot]` — an alias-only write is erased next tick by `syncNetPlayerToLocalPlayer`). Under input starvation the server **coasts** a remote on its last input for ≤250 ms and CLAIMS the ticks (advances `lastProcessedInputTick`) so snapshots stay time-consistent; a separate `m_lastActivationTick` watermark fires late-arriving activation edges exactly once. Delta compression is **ack-driven with a named baseline**: every delta names the snapshot tick it's encoded against (client acks via `NetInput.ackedSnapshotTick`, server deltas against its 32-deep global history ring, client decodes from its 32-deep ring) — never assume "baseline = last sent". `PROTOCOL_VERSION` 20 (v19: the dead lock-on input bit became `INPUT_BLOCK` — the server simulates blocking for remotes: damage negation, perfect-block window, 0.4× move slow; `SnapPlayer.flags` bits 5–7 carry Static Charge stacks; v20: Arena PvP — sentinel floor 97 + the ARENA_KILL/ARENA_SCORES/ARENA_OVER events). Verification rig: `--net-loss <0-90> --net-latency <ms> --bot-walk` + the F9 net-graph (`[NET-GRAPH]` 1 Hz log: rtt/div/idelay/KB/s/snap-Hz/baseline-age). Measured envelope: 15% loss + 100 ms RTT → 0 hard snaps, deltas engaged (~9 KB/s vs 39 full). (Wire/tick details: `engine-reference`.)
+**Netplay stack (rewrite COMPLETE — M0–M14 + the 2026-07 hardening pass).** Server-authoritative + client prediction with **rollback-replay reconciliation**: on a mispredict the client rewinds to the server's acked state and re-applies every stored input through the same per-input step the server drain runs (`updateNetPlayerFromInput` movementOnly + `moveAndSlide`), committing to BOTH player mirrors (`m_localPlayer` alias AND `m_players[slot]` — an alias-only write is erased next tick by `syncNetPlayerToLocalPlayer`). Under input starvation the server **coasts** a remote on its last input for ≤250 ms and CLAIMS the ticks (advances `lastProcessedInputTick`) so snapshots stay time-consistent; a separate `m_lastActivationTick` watermark fires late-arriving activation edges exactly once. Delta compression is **ack-driven with a named baseline**: every delta names the snapshot tick it's encoded against (client acks via `NetInput.ackedSnapshotTick`, server deltas against its 32-deep global history ring, client decodes from its 32-deep ring) — never assume "baseline = last sent". `PROTOCOL_VERSION` 21 (v19: the dead lock-on input bit became `INPUT_BLOCK` — the server simulates blocking for remotes: damage negation, perfect-block window, 0.4× move slow; `SnapPlayer.flags` bits 5–7 carry Static Charge stacks; v20: Arena PvP — sentinel floor 97 + the ARENA_KILL/ARENA_SCORES/ARENA_OVER events; v21: player-facing CC — `SnapPlayer.flags` bit2 = stunned + `stunTimerQ` on the reused `reserved0` byte). Verification rig: `--net-loss <0-90> --net-latency <ms> --bot-walk` + the F9 net-graph (`[NET-GRAPH]` 1 Hz log: rtt/div/idelay/KB/s/snap-Hz/baseline-age). Measured envelope: 15% loss + 100 ms RTT → 0 hard snaps, deltas engaged (~9 KB/s vs 39 full). (Wire/tick details: `engine-reference`.)
 
 ## Directory Map
 
