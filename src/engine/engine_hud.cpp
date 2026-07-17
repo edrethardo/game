@@ -132,7 +132,8 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
     bool selEquip = Input::isGamepadConnected(0) && m_invCursorPanel == 1;
     HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
                               m_itemDefs, m_skillDefs, m_skillDefCount,
-                              selSlot, selEquip, invMX, invMY);
+                              selSlot, selEquip, invMX, invMY,
+                              /*drawEquipment=*/!m_stashOpen);
 
     // Stash mode: the gold panel paints OVER the equipment side (its interactions are gated off
     // in updateInventoryInteraction while the stash is open) — backpack stays live for deposits.
@@ -1017,13 +1018,15 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         // Option list is dynamic: the host of an open Steam lobby gets a middle "Close Lobby" row.
         // currentLobbyId()==0 for SP / ENet host / client / non-Steam builds, so it stays 2 rows there.
         // Ordering MUST match the input handler in engine_update.cpp:
-        // [Continue, (Close Lobby), (Menagerie), Options, Save/Quit].
+        // [Continue, (Close Lobby), (Menagerie), (Go to Town), Options, Save/Quit].
         const bool canCloseLobby = (m_netRole == NetRole::SERVER && Steam::currentLobbyId() != 0);
-        const char* options[5];
+        const char* options[6];
         u32 optCount = 0;
         options[optCount++] = "Continue Playing";
         if (canCloseLobby) options[optCount++] = "Close Lobby";
         if (menagerieUnlocked()) options[optCount++] = "Menagerie";   // hidden until the first pet summon
+        if (m_netRole == NetRole::NONE && m_townUnlocked && !m_level.inTown)
+            options[optCount++] = "Go to Town";   // SP, unlocked account, not already home
         options[optCount++] = "Options";          // opens the real options screens mid-run
         options[optCount++] = "Save and Quit";
         for (u32 i = 0; i < optCount; i++) {

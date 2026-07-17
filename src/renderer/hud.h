@@ -62,12 +62,15 @@ namespace HUD {
     // with the skill-bar tooltip on the same screen.
     // selectedSlot == 0xFF means "no item selected" — used when the controller cursor is parked on a
     // skill bar, so neither item panel paints a phantom highlight.
+    // drawEquipment=false hides the equipment panel entirely (stash mode: the stash panel
+    // owns that side of the screen and equipment can't be stashed directly anyway).
     void drawInventoryScreen(u32 sw, u32 sh,
                               const PlayerInventory& inv,
                               const ItemDef* itemDefs,
                               const SkillDef* skillDefs, u32 skillDefCount,
                               u8 selectedSlot, bool selectedIsEquipped,
-                              s32 mouseX = -1, s32 mouseY = -1);
+                              s32 mouseX = -1, s32 mouseY = -1,
+                              bool drawEquipment = true);
     // Account stash panel — drawn OVER the equipment area while the stash is open. Geometry
     // comes from InventoryUI::stashLayout (shared with hitTestStash). `items` is the full
     // 240-slot array; `page` selects the visible 48. Hover shows name + a withdraw hint.

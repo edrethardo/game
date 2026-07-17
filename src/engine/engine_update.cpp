@@ -38,6 +38,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "game/free_play.h"   // saveCleared — town portal + pause-row routing
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -271,6 +272,15 @@ void Engine::update(f32 dt) {
         Input::setRelativeMouseMode(true);
         return;
     }
+    // Character inspect: same rule — ESC closes the screen instead of stacking the pause menu
+    // on top of it. (B already closes it via the MENU_BACK check next to its toggle; this is
+    // the ESC half, which the pause handler below would otherwise swallow.)
+    if (m_gameState == GameState::IN_GAME && m_characterScreenOpen &&
+        Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
+        m_characterScreenOpen = false;
+        Input::setRelativeMouseMode(!m_inventoryOpen);
+        return;
+    }
 
     // Pet menagerie overlay (opened from the pause menu). Any back/confirm press returns TO
     // the pause menu, not to gameplay, so the player lands back where they left. View-only —
@@ -320,6 +330,11 @@ void Engine::update(f32 dt) {
         const u8 iContinue   = pauseIdx++;
         const u8 iCloseLobby = canCloseLobby ? pauseIdx++ : 0xFF;
         const u8 iMenagerie  = hasMenagerie ? pauseIdx++ : 0xFF;
+        // Town from anywhere (SP only): once the account has an Engine kill, every character
+        // can head home mid-run — the run is saved first, and the town portal brings a
+        // mid-run hero back to ITS OWN floor (see updateTownPortal), not the free-play select.
+        const bool canGoTown = (m_netRole == NetRole::NONE && m_townUnlocked && !m_level.inTown);
+        const u8 iTown       = canGoTown ? pauseIdx++ : 0xFF;
         const u8 iOptions    = pauseIdx++;
         const u8 iSaveQuit   = pauseIdx++;
         const u8 pauseOptCount = pauseIdx;
@@ -358,6 +373,11 @@ void Engine::update(f32 dt) {
                 // the overlay's back press restores it. Cursor stays free (still "paused").
                 m_menagerieOpen    = true;
                 m_menu.confirmQuit = false;
+            } else if (canGoTown && m_menu.subSelection == iTown) {
+                // Go to Town — identical save guarantee to Save and Quit, then swap the world.
+                m_menu.confirmQuit = false;
+                saveAllCharacters();
+                enterTown();
             } else if (m_menu.subSelection == iOptions) {
                 // Options — the same screens the main menu uses (audio / bindings / display), opened
                 // mid-run. They live in GameState::MENU, so we leave IN_GAME and flag WHY, and the
@@ -2973,6 +2993,13 @@ bool Engine::updateTownPortal() {
     if (!m_townPortalRequested) return false;
     m_townPortalRequested = false;
     if (m_netRole == NetRole::CLIENT) return false;   // host picks; guests ride the descent
+    // A mid-run visitor (pause-menu "Go to Town", account-unlocked but THIS save not cleared)
+    // goes back to its own floor — same layout (seed-derived), repopulated, exactly like
+    // Save & Quit -> Continue. The free-play select is the CLEARED hero's privilege.
+    if (!FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) {
+        startGame(GameStart::CONTINUE);
+        return true;
+    }
     m_menu.freePlayDifficulty = (m_difficulty > 2) ? 2 : m_difficulty;
     m_menu.freePlayFloor      = 1;
     m_menu.freePlayFromTown   = true;

@@ -499,7 +499,8 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                const ItemDef* itemDefs,
                                const SkillDef* skillDefs, u32 skillDefCount,
                                u8 selectedSlot, bool selectedIsEquipped,
-                               s32 mouseX, s32 mouseY)
+                               s32 mouseX, s32 mouseY,
+                               bool drawEquipment)
 {
     // Scale inventory layout relative to 720p reference height so it fits
     // in split-screen viewports (e.g. horizontal split = half height)
@@ -515,7 +516,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     f32 slotGap  = 5.0f * uiScale;
 
     // Dark background behind equipment panel
-    {
+    if (drawEquipment) {
         u32 slotCount = static_cast<u32>(ItemSlot::COUNT);
         f32 topY = eqStartY + slotH;
         f32 botY = eqStartY - static_cast<f32>(slotCount - 1) * (slotH + slotGap);
@@ -527,7 +528,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
         flushHUD();
     }
 
-    for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++) {
+    for (u32 i = 0; drawEquipment && i < static_cast<u32>(ItemSlot::COUNT); i++) {
         f32 y = eqStartY - static_cast<f32>(i) * (slotH + slotGap);
         const ItemInstance& item = inv.equipped[i];
         bool selected = selectedIsEquipped && (selectedSlot == static_cast<u8>(i));
