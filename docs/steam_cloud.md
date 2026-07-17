@@ -31,6 +31,10 @@ Requires a Steam **App ID** / partner access.
    - `save_*.dat`
    - `difficulty_unlock.dat`
    - `menagerie.dat / stats_*.dat`   (pet-collection progress — profile-wide, should roam like unlocks)
+   - `stash.dat`         (the shared ACCOUNT STASH — 240 items of real gear; the most roam-worthy
+                          file in the game. Atomic-write means the cloud only ever sees complete
+                          stashes; its `.tmp` sibling never matches this exact-name pattern.)
+   - `town_unlock.dat`   (account-wide town unlock — roams like difficulty_unlock)
    - `controls.json`
    - `audio.json`
    - **NOT** `video.cfg` — display mode (windowed/borderless/exclusive fullscreen) and display index are machine-specific and must not roam.
@@ -55,5 +59,7 @@ build is ever run via Proton, its `%APPDATA%` lives in the Proton prefix and `Wi
 1. Local (no Steam): launch, confirm the log line `User data dir: <path>`; play/save/quit; confirm
    `save_NN.dat` appears under the pref dir; `ffprobe`-free — just `ls` the dir.
 2. Cloud round-trip (needs the depot): install via Steam, play → exit → watch the Steam Cloud sync
-   status; on a second machine (or after clearing local) confirm `save_*.dat`, `difficulty_unlock.dat`, `menagerie.dat`,
-   `controls.json`, `audio.json` re-download and `video.cfg` does **not**.
+   status; on a second machine (or after clearing local) confirm `save_*.dat`, `stats_*.dat`,
+   `difficulty_unlock.dat`, `menagerie.dat`, `stash.dat`, `town_unlock.dat`, `controls.json`,
+   `audio.json` re-download and `video.cfg` does **not**. Stash check: deposit an item on machine A,
+   see it in the stash on machine B — that round-trip IS the account-stash feature working.
