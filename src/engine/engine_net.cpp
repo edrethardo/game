@@ -712,6 +712,14 @@ void Engine::serverNetPost(f32 dt) {
             if (pi < m_splitPlayerCount) {
                 m_playerDead[pi] = true; // host-local lane death — flag its lane so the server doesn't freeze
             }
+            // Arena PvP: a REMOTE combatant fell — credit + auto-respawn clock. (Host-local
+            // lanes route through the gameUpdate death path, which calls arenaHandleDeath
+            // itself; this edge only fires for pi >= m_splitPlayerCount because local lanes'
+            // HP reaches the NetPlayer already clamped by that path.)
+            if (m_level.inArena && pi >= m_splitPlayerCount) {
+                arenaHandleDeath(static_cast<u8>(pi), np.lastHitByPlayerSlot);
+                np.lastHitByPlayerSlot = 0xFF;
+            }
         }
     }
 

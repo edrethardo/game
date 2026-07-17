@@ -377,6 +377,33 @@ void Engine::onEvent(const u8* data, u32 size) {
             const bool engineSlain = data[sizeof(PacketHeader) + 1] != 0;
             s_engine->startCredits(engineSlain);
         } break;
+        case NetEventType::ARENA_KILL: {
+            // A PvP kill was scored — adopt the killer's authoritative score + feed the HUD.
+            if (size < sizeof(PacketHeader) + 4) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            u8 killer = data[off++];
+            u8 victim = data[off++];
+            u8 score  = data[off++];
+            if (killer < MAX_PLAYERS) s_engine->m_arenaScore.kills[killer] = score;
+            s_engine->arenaPushFeed(killer, victim);
+        } break;
+        case NetEventType::ARENA_SCORES: {
+            // Full refresh — the mid-join sync (and any future resync). Adopt all four.
+            if (size < sizeof(PacketHeader) + 1 + MAX_PLAYERS) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            for (u32 i = 0; i < MAX_PLAYERS; i++)
+                s_engine->m_arenaScore.kills[i] = data[off++];
+        } break;
+        case NetEventType::ARENA_OVER: {
+            // Match decided. Adopt the final table and run our OWN banner + teardown clock —
+            // every peer was told, nobody waits on the host staying alive (the CREDITS lesson).
+            if (size < sizeof(PacketHeader) + 2 + MAX_PLAYERS) break;
+            u32 off = sizeof(PacketHeader) + 1;
+            u8 winner = data[off++];
+            for (u32 i = 0; i < MAX_PLAYERS; i++)
+                s_engine->m_arenaScore.kills[i] = data[off++];
+            s_engine->beginArenaOver(winner);   // CLIENT role: no broadcast, just the local flip
+        } break;
         case NetEventType::SPEECH: {
             // NPC speech (bubble + chat line) resolved and shipped by the server — see the
             // NetEventType doc. Wire strings are untrusted input: every length byte is checked
@@ -871,6 +898,9 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         np.maxHealth = cls.baseHealth * (growth > 1.0f ? growth : 1.0f);
         np.health = np.maxHealth;
         np.position = s_engine->m_players[0].spawnPosition; // spawn at host's spawn
+        // Arena: every combatant owns a corner pad — never the host's pad (spawn-camping the
+        // arrival would be free otherwise).
+        if (s_engine->m_level.inArena) np.position = s_engine->arenaPad(playerSlot);
         np.spawnPosition = np.position;
         np.weaponState.currentWeapon = 0;
         np.weaponState.cooldownTimer = 0.0f;
@@ -894,6 +924,10 @@ void Engine::onPlayerJoin(u8 playerSlot, u8 classId) {
         np.soulHarvestStacks = 0;
         np.smokeTimer        = 0.0f;
         np.overdriveTimer    = 0.0f;   // Mech Overdrive / War Cry buff must not survive a slot recycle
+        np.lastHitByPlayerSlot = 0xFF; // arena kill credit must not survive a slot recycle either
+        // Arena: sync the joiner's scoreboard (their slot may even have a leftover score if
+        // they rejoined — the table is per-slot and the refresh makes them agree with it).
+        if (s_engine->m_level.inArena) s_engine->arenaSendScores(playerSlot);
         // Wanderer kit — a recycled slot must not inherit the previous occupant's absorb
         // pool (a phantom burst on the joiner's first deflect) or leftover stacks/ult.
         np.deflectTimer      = 0.0f;

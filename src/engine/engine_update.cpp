@@ -638,6 +638,10 @@ void Engine::update(f32 dt) {
             }
 
             if (m_playerDead[sp]) {
+                // Arena PvP: no manual respawn — the authority's 3 s clock revives this lane
+                // (arenaTick → arenaRespawnSlot; a CLIENT adopts the revive from the snapshot).
+                // The lane just waits under the "Respawning in N" overlay.
+                if (m_level.inArena) { swapOutPlayer(sp); continue; }
                 // Networked-MP dead overlay: the cursor is freed at the top of the loop, so a
                 // click on the "Respawn" prompt counts as respawn input (split-screen leaves the
                 // cursor captured — see the loop-top block — so this stays false there).
@@ -721,6 +725,7 @@ void Engine::update(f32 dt) {
         // Arena PvP: last damage source (shared projectiles) has run — close the registry.
         // Deliberately BEFORE serverNetPost, whose own remote-view passes must never see it.
         arenaEndPvpWindow();
+        arenaTick(dt);   // respawn clocks + kill feed + match-over banner (no-op outside arena)
 
         if (m_netRole == NetRole::SERVER) serverNetPost(dt);
         if (m_netRole == NetRole::CLIENT) clientNetPost(dt);
@@ -1634,9 +1639,16 @@ void Engine::gameUpdate(f32 dt) {
             if (killer.nameTag && std::strstr(killer.nameTag, "Butcher"))
                 Steam::unlockAchievement("ACH_BUTCHERED");
         }
-        if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE) {
-            // Multiplayer or co-op: this player dies, game keeps running
+        if (m_splitPlayerCount > 1 || m_netRole != NetRole::NONE || m_level.inArena) {
+            // Multiplayer, co-op, or the arena: this player dies, game keeps running
             m_playerDead[m_localPlayerIndex] = true;
+            if (m_level.inArena) {
+                // Arena PvP: credit the rival who landed the last hit and start this lane's
+                // auto-respawn clock (no death screen, no GAME_OVER — see arenaTick).
+                arenaHandleDeath(activeNetSlot(), m_localPlayer.lastHitByPlayerSlot);
+                m_localPlayer.lastHitByPlayerSlot = 0xFF;
+                return;
+            }
             // If ALL players are now dead, send enemies walking home
             bool allDead = true;
             for (u32 p = 0; p < m_splitPlayerCount; p++) {

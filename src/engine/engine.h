@@ -575,6 +575,11 @@ private:
     f32          m_arenaOverTimer = 0.0f;           // >0 = match decided, winner banner running
     u8           m_arenaWinner    = 0xFF;           // valid while m_arenaOverTimer > 0
     Player       m_pvpViews[MAX_PLAYERS];           // seeded remote views held open for the PvP window
+    // Kill feed (HUD): newest first, ttl-faded. Fed by arenaHandleDeath (authority) and the
+    // ARENA_KILL event (clients).
+    static constexpr u32 ARENA_FEED_LINES = 4;
+    struct ArenaFeedEntry { u8 killer = 0xFF; u8 victim = 0xFF; f32 ttl = 0.0f; };
+    ArenaFeedEntry m_arenaFeed[ARENA_FEED_LINES];
 
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
@@ -1010,6 +1015,15 @@ private:
     void arenaBeginPvpWindow();
     void arenaEndPvpWindow();
     Combat::PvpHitOutcome pvpApplyHit(u8 slot, const Combat::PvpHit& hit);
+    // Deathmatch loop (engine_arena.cpp): authority-side kill credit + auto-respawn + match
+    // end; clients mirror via the ARENA_* events (engine.cpp onEvent).
+    void arenaHandleDeath(u8 victimSlot, u8 killerSlot);
+    void arenaRespawnSlot(u8 slot);
+    void arenaTick(f32 dt);            // respawn clocks (authority) + over-banner (everyone)
+    void beginArenaOver(u8 winner);    // broadcast-first, then the local flip (CREDITS rule)
+    void arenaSendScores(u8 toSlot);   // ARENA_SCORES refresh (0xFF = broadcast)
+    void arenaLeaveToMenu();           // teardown, never saves
+    void arenaPushFeed(u8 killerSlot, u8 victimSlot);
     // Post-Engine victory flow: portal spawn (host: local + broadcast; client: via SV_EVENT),
     // the arbitrated enter (updateExitPortal), and the shared credits sequence. startCredits is
     // the LOCAL state flip every machine runs; beginCreditsSequence is the server/SP entry that

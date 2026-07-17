@@ -82,7 +82,11 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // carry Static Charge stacks. NO packet changes size — the bump is same-build insurance: a
 // v18 peer would take full damage while "blocking" and never see shield procs, a silent
 // parity gap of the v14/v15 class.
-static constexpr u32 PROTOCOL_VERSION  = 19; // v13: player record single shrineTimerQ pair (was
+// v20: Arena PvP — sentinel floor 97 rides the existing floor routing, and SV_EVENT gains
+// ARENA_KILL/ARENA_SCORES/ARENA_OVER. Additive on the wire, but a v19 client joining an arena
+// would take PvP damage with no scoreboard, no respawn countdown and no match end — so a
+// clean SV_JOIN_REJECT beats a silently broken deathmatch.
+static constexpr u32 PROTOCOL_VERSION  = 20; // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE
@@ -284,6 +288,17 @@ enum struct NetEventType : u8 {
     // + lineLen (u8) + line (≤63 B). The client mirrors chat directly and parks the line in a
     // small ring so the interp entity's speechText can point at persistent storage.
     SPEECH            = 0x07,
+    // --- Arena PvP (v20) --------------------------------------------------------------------
+    // A PvP kill was scored. Payload: killerSlot (u8) + victimSlot (u8) + killer's NEW score
+    // (u8). Drives the client's kill feed + score-strip mirror. Reliable.
+    ARENA_KILL        = 0x0A,
+    // Full score refresh: 4×u8 kills by net slot. Sent reliably to a MID-JOINING client
+    // (join-accept can't carry it — fixed 13-byte legacy layout) and available as a resync.
+    ARENA_SCORES      = 0x0B,
+    // Match decided. Payload: winnerSlot (u8) + 4×u8 final scores. Broadcast BEFORE the host's
+    // local state flip (the CREDITS ordering rule) so no client hangs in a dead match; every
+    // peer runs its own ~8 s banner then tears down to the menu itself. Reliable; sent once.
+    ARENA_OVER        = 0x0C,
 };
 
 // 4-byte packet header on every packet.
