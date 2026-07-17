@@ -208,6 +208,14 @@ void PlayerController::update(Player& player, f32 dt) {
         ds.rollAngle = 0.0f;
         ds.pitchAngle = 0.0f;
 
+        // Steadfast Greaves (boots passive 2a): starting a roll SHEDS all active CC — "perfect rolls
+        // win". Pairs with the i-frame prevention in applyCCToPlayer (ccDodgeImmune && rolling) so a
+        // well-timed roll both dodges an incoming stun and clears one already on you. Gated on the
+        // boots flag; a base dodge does NOT clear CC.
+        if (player.ccDodgeImmune) {
+            player.stunTimer = player.slowTimer = player.freezeTimer = 0.0f;
+        }
+
         // Direction from WASD, or forward if no directional input held (shared with
         // the server's dodge replication so both compute the identical roll vector).
         f32 cosY = cosf(player.yaw);

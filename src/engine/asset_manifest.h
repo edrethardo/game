@@ -66,6 +66,7 @@ static constexpr MeshAsset kMeshAssets[] = {
     {"chest_heavy",    "assets/meshes/chest_heavy.obj"},
     {"boots_light",    "assets/meshes/boots_light.obj"},
     {"boots_heavy",    "assets/meshes/boots_heavy.obj"},
+    {"steadfast_greaves", "assets/meshes/steadfast_greaves.obj"},  // legendary anti-CC boots
     {"gloves_light",   "assets/meshes/gloves_light.obj"},
     {"gloves_heavy",   "assets/meshes/gloves_heavy.obj"},
     {"ring",           "assets/meshes/ring.obj"},

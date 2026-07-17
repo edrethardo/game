@@ -1600,6 +1600,13 @@ static Combat::PvpHitOutcome landPvpHit(Player& v, const Combat::PvpHit& hit) {
     return out;
 }
 
+f32 Engine::equippedCcResist(const PlayerInventory& inv) const {
+    f32 total = Inventory::ccResistRaw(inv);   // uncapped affix sum
+    const ItemInstance& boots = inv.equipped[(u32)ItemSlot::BOOTS];
+    if (!isItemEmpty(boots)) total += m_itemDefs[boots.defId].baseCcResist;  // guaranteed boots resist
+    return CrowdControl::capResist(total);     // single 0.60 cap over affixes + boots base
+}
+
 Combat::PvpHitOutcome Engine::pvpApplyHit(u8 slot, const Combat::PvpHit& hit) {
     // Stamp the victim's authoritative CC defenses from the server's copy of their inventory
     // (m_inventories[slot] — the same index handleWeaponFireForPlayer fires from). Doing it here,
@@ -1608,7 +1615,7 @@ Combat::PvpHitOutcome Engine::pvpApplyHit(u8 slot, const Combat::PvpHit& hit) {
     // makes applyCCToPlayer (inside landPvpHit) tenacity-scale the hit; ccDodgeImmune gates the
     // dodge-i-frame negate.
     const PlayerInventory& vinv = m_inventories[slot];
-    const f32  vResist = Inventory::ccResist(vinv);
+    const f32  vResist = equippedCcResist(vinv);   // affixes + boots baseCcResist, capped
     const ItemInstance& vBoots = vinv.equipped[(u32)ItemSlot::BOOTS];
     const bool vDodgeImmune = !isItemEmpty(vBoots) &&
         m_itemDefs[vBoots.defId].legendarySkillId == SkillId::BREAK_FREE;

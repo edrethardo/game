@@ -506,6 +506,15 @@
       "energyCost": 0,
       "damage": 0,
       "duration": 4.0
+    },
+    {
+      "id": "break_free",
+      "name": "Break Free",
+      "description": "Shatter all crowd control on you and\nbecome immune to control for 1.5s.",
+      "cooldown": 20.0,
+      "energyCost": 0,
+      "damage": 0,
+      "duration": 1.5
     }
   ]
 }

@@ -5203,6 +5203,11 @@ MESH_TYPES = {
         "desc": "Heavy boots — chunky plated greave (bulk=1.25).",
         "default_file": "boots_heavy.obj",
     },
+    "steadfast_greaves": {
+        "func": lambda: gen_boots(bulk=1.35),
+        "desc": "Steadfast Greaves — legendary anti-CC greaves, extra bulk (1.35).",
+        "default_file": "steadfast_greaves.obj",
+    },
     "gloves": {
         "func": gen_gloves,
         "desc": "Gloves — paired gauntlets with thumbs and flared cuffs.",

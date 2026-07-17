@@ -177,7 +177,7 @@ void Engine::tickPassiveEquipment() {
         m_localPlayer.armorRating    = Inventory::armorRating(inv);
         m_localPlayer.healthRegen    = Inventory::healthRegenRate(inv);
         m_localPlayer.thornsPctBonus = Inventory::thornsPct(inv);
-        m_localPlayer.ccResist       = Inventory::ccResist(inv);
+        m_localPlayer.ccResist       = equippedCcResist(inv);   // affixes + boots baseCcResist, capped
         // ccDodgeImmune: true iff the equipped boots are the Steadfast Greaves — their legendary
         // skill is BREAK_FREE, the single marker for the anti-CC boots (Task 5 defines BREAK_FREE).
         {

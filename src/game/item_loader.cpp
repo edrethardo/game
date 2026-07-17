@@ -153,6 +153,7 @@ SkillId skillIdFromString(const std::string& s) {
     if (s == "exploit_weakness")  return SkillId::EXPLOIT_WEAKNESS;
     if (s == "adrenaline_surge")  return SkillId::ADRENALINE_SURGE;
     if (s == "deaths_dance")      return SkillId::DEATHS_DANCE;
+    if (s == "break_free")        return SkillId::BREAK_FREE;  // legendary boots active (CC cleanse)
     return SkillId::NONE;
 }
 
@@ -254,6 +255,7 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
             def.baseClipSize         = static_cast<u8>(entry.value("baseClipSize", 0));
             def.baseReloadTime       = entry.value("baseReloadTime",       0.0f);
             def.baseHealth           = entry.value("baseHealth",           0.0f);
+            def.baseCcResist         = entry.value("baseCcResist",         0.0f);
 
             std::string legendaryStr = entry.value("legendarySkill", "NONE");
             def.legendarySkillId = skillIdFromString(legendaryStr);

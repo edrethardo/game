@@ -487,6 +487,17 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         fireShadowDance(player);
         break;
 
+    // ---- Legendary boots: Steadfast Greaves (Break Free) ----
+    case SkillId::BREAK_FREE:
+        // Shatter all crowd control on the caster + open a brief immunity window so a follow-up
+        // stun can't re-lock instantly. Operates on the view Player: the host's m_localPlayer, or a
+        // guest's remote view (written back via applyRemotePlayerView → the NetPlayer CC mirror), so
+        // it works in co-op. This is the deliberate escape a stunned player presses F for — its
+        // INPUT_EX_BOOT_SKILL bit is the one input NOT suppressed by the stun input-lock.
+        player.stunTimer = player.slowTimer = player.freezeTimer = 0.0f;
+        player.ccImmuneTimer = (def->duration > 0.0f) ? def->duration : 1.5f;
+        break;
+
     // ---- Paladin ----
     case SkillId::HOLY_SMITE:
         fireHolySmite(eyePos, forward, def, entities, player, grid);
