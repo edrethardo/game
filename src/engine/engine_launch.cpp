@@ -144,6 +144,14 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     }
 
     // --- SINGLE or HOST: enter the game (startGame sets m_gameState = IN_GAME) ---
+    if (opt.town) {
+        // Dev door (--town): land ANY hero in the town hub — no clear required. startGame is
+        // skipped entirely; enterTown builds the world and places the player.
+        (void)mode;
+        enterTown();
+        LOG_INFO("Launch: entered the TOWN hub (--town)");
+        return;
+    }
     startGame(mode);
     LOG_INFO("Launch: entered game (%s, %s)",
              opt.role == LaunchOptions::Role::HOST ? "host" : "single-player",

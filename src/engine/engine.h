@@ -145,6 +145,7 @@ private:
         // row (0 = difficulty, 1 = floor).
         u8   freePlayDifficulty = 2;   // default Hell
         u8   freePlayFloor      = 1;   // default floor 1
+        bool freePlayFromTown   = false; // select opened from the town portal: BACK returns to town
         f32  msgTimer = 0.0f;    // countdown for transient menu messages
         const char* msg = nullptr;
         // Couch co-op: each lane's New-vs-Continue intent, captured during slot selection so the
@@ -542,6 +543,11 @@ private:
         // rebuilt from seed on load), so they cost no save-format change. inSourceChamber routes the
         // game out of the normal floor flow: no descent, no floor boss, Engine-death → victory.
         bool          inSourceChamber    = false; // we are inside The Source fighting the Engine
+        // The post-Engine TOWN hub (sentinel floor 98). inTown flips the sky/lighting, gates the
+        // NPCs' stay-home AI, and routes saves to keep the CLEARED header floor (never 98).
+        bool          inTown             = false;
+        bool          townPortalActive   = false; // the town's to-dungeon portal (opens Free-Play select)
+        Vec3          townPortalPos;
         bool          sourcePortalActive = false; // the second hidden portal is live in the floor-50 arena
         Vec3          sourcePortalPos;            // its world position (valid while sourcePortalActive)
         // The way OUT — spawned when the Dungeon Engine superboss dies. Unlike the (hidden,
@@ -915,6 +921,7 @@ private:
         bool nearPortal = false;     // standing in The Source portal trigger (floor 50 secret)
         bool nearExitPortal = false; // standing in the post-Engine exit portal (rolls credits)
         s32  stashIdx  = -1;         // world-item index of the town's stash chest in reach (-1 none)
+        bool nearTownPortal = false; // standing in the town's to-dungeon portal
         Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
     };
     InteractState m_interact[MAX_LOCAL_PLAYERS];
@@ -925,6 +932,7 @@ private:
     // superboss chamber is irreversible, so a tap meant for the loot at your feet must never do it.
     bool m_portalRequested = false;
     bool m_creditsRequested = false;   // arbitrated exit-portal enter (see m_portalRequested)
+    bool m_townPortalRequested = false; // arbitrated town-portal enter (opens Free-Play select)
     f32  m_creditsScroll = 0.0f;       // CREDITS state: scroll position in rows-of-text pixels
 
     void resolveInteractTargets(InteractState& st);
@@ -960,12 +968,19 @@ private:
     void enterSourceChamber();
     // Client: mirror of enterSourceChamber driven by the sentinel-floor SV_LEVEL_SEED.
     void enterSourceChamberClient();
+    // Town hub (engine_town.cpp): the outdoor post-Engine home base — deterministic build
+    // (buildSourceChamber pattern), NPC + stash + portal population shared by host and client.
+    Vec3 buildTownLevel();
+    void spawnTownContents(Vec3 center);
+    void enterTown();
+    void enterTownClient();
     // Post-Engine victory flow: portal spawn (host: local + broadcast; client: via SV_EVENT),
     // the arbitrated enter (updateExitPortal), and the shared credits sequence. startCredits is
     // the LOCAL state flip every machine runs; beginCreditsSequence is the server/SP entry that
     // broadcasts first — this is what un-hangs co-op clients on the run's ending.
     void spawnExitPortal(Vec3 pos);
     bool updateExitPortal();
+    bool updateTownPortal();
     void beginCreditsSequence(bool engineSlain);
     void startCredits(bool engineSlain);
 

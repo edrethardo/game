@@ -23,6 +23,13 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 PALETTES = {
+    "meadow": [
+        (66, 110, 48),
+        (78, 124, 54),
+        (90, 138, 62),
+        (58, 98, 44),
+        (102, 148, 70),
+    ],
     "dark_dungeon": [
         (42, 42, 48),
         (58, 58, 64),
@@ -100,6 +107,7 @@ TEXTURE_TYPES = [
     "hellforge_wall_vent",
     "void_wall_runes",
     "stone_floor",
+    "grass",
     "wood_plank",
     "stone_ceiling",
     "metal_grate",
@@ -119,6 +127,7 @@ DEFAULT_PALETTE = {
     "hellforge_wall_vent": "warm_brick",
     "void_wall_runes": "dark_dungeon",
     "stone_floor": "cold_stone",
+    "grass": "meadow",
     "wood_plank": "warm_brick",
     "stone_ceiling": "dark_dungeon",
     "metal_grate": "cold_stone",
@@ -389,6 +398,33 @@ def gen_void_wall_runes(img, size, palette):  # noqa: ARG001 -- palette unused b
         for bx, by in random.sample([(0, 1), (2, 0), (2, 3), (0, 4)], random.randint(1, 2)):
             px[gx + bx, gy + by] = lerp_color(px[gx + bx, gy + by], pale, 0.7)
             px[gx + bx, gy + by + 1] = lerp_color(px[gx + bx, gy + by + 1], pale, 0.55)
+
+
+def gen_grass(img, size, palette):
+    """Town grass: soft green noise with sparse lighter blade flecks and a few dark clumps.
+    Deliberately low-contrast so a whole plaza of it reads calm, not busy."""
+    px = img.load()
+    for y in range(size):
+        for x in range(size):
+            base = random.choice(palette)
+            px[x, y] = noise_color(base, 6)
+    # Blade flecks: short 1-2px vertical highlights
+    for _ in range(size * 2):
+        x = random.randint(0, size - 1)
+        y = random.randint(1, size - 1)
+        c = brighten(random.choice(palette), 28)
+        px[x, y] = (*c[:3], 255)
+        if random.random() < 0.5:
+            px[x, y - 1] = (*c[:3], 255)
+    # Sparse dark clumps ground the field
+    for _ in range(size // 4):
+        x = random.randint(0, size - 2)
+        y = random.randint(0, size - 2)
+        d = darken(random.choice(palette), 0.7)
+        for dx2 in range(2):
+            for dy2 in range(2):
+                if random.random() < 0.75:
+                    px[x + dx2, y + dy2] = (*d[:3], 255)
 
 
 def gen_stone_floor(img, size, palette):
@@ -707,6 +743,7 @@ def gen_particle_spark(img, size, palette):  # noqa: ARG001 -- palette unused
 
 
 GENERATORS = {
+    "grass": gen_grass,
     "stone_wall": gen_stone_wall,
     "stone_wall_moss": gen_stone_wall_moss,
     "brick_wall": gen_brick_wall,

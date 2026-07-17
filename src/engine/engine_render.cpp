@@ -573,7 +573,9 @@ void Engine::ensureFbo(u32& fbo, u32& colorTex, u32& depthRbo, u32& curW, u32& c
 }
 
 void Engine::render(f32 alpha) {
-    glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
+    // The town is OUTDOORS: its cells have no ceiling, so the clear color IS the sky.
+    if (m_level.inTown) glClearColor(0.47f, 0.65f, 0.88f, 1.0f);
+    else                glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     u32 sw = Window::getWidth();
@@ -674,11 +676,22 @@ void Engine::render(f32 alpha) {
     for (u32 t = 0; t < 5; t++) {
         if (m_level.currentFloor >= kThemes[t].minFloor) theme = &kThemes[t];
     }
-    Renderer::setDirectionalLight(
-        normalize(Vec3{-0.3f, -1.0f, -0.5f}),
-        theme->lightColor,
-        theme->ambient
-    );
+    if (m_level.inTown) {
+        // DAYLIGHT: the town is outdoors. Dungeon themes light ~8m around the player and leave
+        // the rest black — under an open sky that reads as a void, so the sun does the work:
+        // warm directional + high ambient, no darkness anywhere.
+        Renderer::setDirectionalLight(
+            normalize(Vec3{-0.35f, -1.0f, -0.25f}),
+            Vec3{0.55f, 0.52f, 0.45f},
+            Vec3{0.62f, 0.64f, 0.68f}
+        );
+    } else {
+        Renderer::setDirectionalLight(
+            normalize(Vec3{-0.3f, -1.0f, -0.5f}),
+            theme->lightColor,
+            theme->ambient
+        );
+    }
 
     // Send nearest 4 point lights to the shader
     selectPointLights();

@@ -29,6 +29,9 @@ namespace GameConst {
     // SV_LEVEL_SEED floor value that tells co-op clients to build The Source instead of a normal
     // floor (floor is a u8 on the wire, so this needs no packet-format change). See ~/.claude/plans.
     static constexpr u8 SOURCE_SENTINEL_FLOOR = 99u;
+    // The town hub (post-Engine home base). Same sentinel mechanism as The Source: the host
+    // broadcasts SV_LEVEL_SEED with this floor and clients build the same deterministic town.
+    static constexpr u8 TOWN_SENTINEL_FLOOR   = 98u;
 
     // Enemy base stats (before floor scaling) — all HP includes +20% buff
     static constexpr f32 SKELETON_HEALTH     = 55.0f;   // was 40, buffed (+20% + stronger)

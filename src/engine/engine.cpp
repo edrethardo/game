@@ -773,7 +773,12 @@ void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
     // ACTIVE peers makes this hard to hit naturally, but a hostile/buggy server defeats
     // both — close the contract explicitly.
     if (s_engine->m_gameState != GameState::IN_GAME &&
-        s_engine->m_gameState != GameState::FLOOR_TRANSITION) {
+        s_engine->m_gameState != GameState::FLOOR_TRANSITION &&
+        // The TOWN sentinel legitimately arrives while this client still sits on the
+        // credits/victory screens (the host pressed through first and walked outside).
+        !(floor == GameConst::TOWN_SENTINEL_FLOOR &&
+          (s_engine->m_gameState == GameState::CREDITS ||
+           s_engine->m_gameState == GameState::VICTORY))) {
         LOG_WARN("Net: SV_LEVEL_SEED dropped — wrong game state");
         return;
     }
@@ -782,6 +787,11 @@ void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
     // Engine + its summoned waves are server-authoritative and arrive via snapshots.
     if (floor == GameConst::SOURCE_SENTINEL_FLOOR) {
         s_engine->enterSourceChamberClient();
+        return;
+    }
+    // Sentinel floor 98 = the host entered the TOWN hub — follow the same way.
+    if (floor == GameConst::TOWN_SENTINEL_FLOOR) {
+        s_engine->enterTownClient();
         return;
     }
     // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe).

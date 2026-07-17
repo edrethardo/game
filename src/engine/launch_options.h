@@ -10,6 +10,8 @@
 //   --load <slot>            continue save_<slot>.dat (1-20)
 //   --new <class>            fresh run as <class> (warrior, ranger, sorcerer, rogue, paladin,
 //                            combat_engineer, marksman, tinkerer, wanderer)
+//   --town                   land in the TOWN hub instead of the dungeon (works with any
+//                            --load/--new hero — the dev door for town testing)
 //   --floor <n>              starting floor for --new (default 1)
 //   --difficulty <0-2>       difficulty for --new (0=Normal,1=Nightmare,2=Hell)
 //   --port <n>               host/join port (default DEFAULT_PORT)
@@ -45,6 +47,7 @@ struct LaunchOptions {
     bool upnp = true;                          // host: --lan clears this
     char address[64] = "127.0.0.1";            // for Role::JOIN
 
+    bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
     u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
 

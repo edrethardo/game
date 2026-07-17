@@ -135,6 +135,9 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
                 LOG_WARN("--port expects 1-65535 (got '%s')", v); opt.valid = false; break;
             }
             opt.port = (u16)n;
+        } else if (ieq(a, "--town")) {
+            opt.town   = true;
+            opt.active = true;
         } else if (ieq(a, "--lan")) {
             opt.upnp = false;
         } else if (ieq(a, "--fullscreen")) {

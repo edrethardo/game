@@ -94,7 +94,8 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         bool isShard     = isSourceShard(wi.item);   // secret superboss key — render the crystal mesh
         bool isShrineObj = isShrine(wi.item);        // walk-up buff shrine — architecture, not loot
         bool isChestObj  = isChest(wi.item);         // closed treasure chest — the mimic's twin
-        bool isFixture   = isShrineObj || isChestObj;
+        bool isStashObj  = isStash(wi.item);         // the town's account stash — oversized + gold
+        bool isFixture   = isShrineObj || isChestObj || isStashObj;
         f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : (isShrineObj ? 1.6f : ITEM_SCALE));
         // Shrines and chests are FIXTURES: no bob, no spin, feet on the floor. Loot hovers and
         // turns to catch the eye; a fixture that did the same would read as a pickup — and a
@@ -133,6 +134,12 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             if (m_meshIdChest > 0 && m_meshIdChest < m_meshDefCount)
                 itemMesh = &m_meshDefs[m_meshIdChest].mesh;
             tint = {0.6f, 0.4f, 0.2f, 1.0f};
+        } else if (isStashObj) {
+            // The stash wants the OPPOSITE of the mimic-twin rule: unmistakably special. Same
+            // chest mesh, gold tint, drawn half again as large in the size branch below.
+            if (m_meshIdChest > 0 && m_meshIdChest < m_meshDefCount)
+                itemMesh = &m_meshDefs[m_meshIdChest].mesh;
+            tint = {1.0f, 0.82f, 0.35f, 1.0f};
         } else if (isGlobeItem) {
             tint = {0.3f, 0.9f, 0.5f, 1.0f};
         } else if (isShard) {
@@ -188,6 +195,14 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             // the 0.3-scale cube fallback, which is why shrines looked like a pebble on the floor.
             // gen_mesh's shrine has its origin at the FEET, so it just sits at floorY, unscaled.
             model = Mat4::translate(pos);
+        } else if (isStashObj && itemMesh != &m_cubeMesh) {
+            // Stash: chest silhouette scaled to 1.2 m tall (1.5x the mimic) — reads as furniture.
+            const AABB& mb = m_meshDefs[m_meshIdChest].bounds;
+            f32 meshH = mb.max.y - mb.min.y;
+            f32 cs = (meshH > 0.001f) ? (1.2f / meshH) : 1.0f;
+            Vec3 mc = {(mb.min.x + mb.max.x) * 0.5f, mb.min.y, (mb.min.z + mb.max.z) * 0.5f};
+            model = Mat4::translate(pos) * Mat4::scale({cs, cs, cs})
+                  * Mat4::translate({-mc.x, -mc.y, -mc.z});
         } else if (isChestObj && itemMesh != &m_cubeMesh) {
             // Own branch for the same sentinel-defId reason as the shrine. Sized to the dormant
             // mimic's exact silhouette — mesh scaled to 0.8 m tall (the mimic's halfExtents.y
@@ -829,6 +844,14 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
     // portal deliberately has no prompt: it's a secret. This one must be found by everyone.)
     if (st.nearExitPortal && m_gameState == GameState::IN_GAME) {
         drawPrompt("Leave the Dungeon", {1.0f, 0.85f, 0.4f}, static_cast<f32>(sh) * 0.4f);
+    }
+
+    // Town: the account stash and the to-dungeon portal.
+    if (st.stashIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
+        drawPrompt("Open Stash", {1.0f, 0.85f, 0.4f}, static_cast<f32>(sh) * 0.45f);
+    }
+    if (st.nearTownPortal && m_gameState == GameState::IN_GAME) {
+        drawPrompt("Enter the Dungeon", {0.5f, 1.0f, 0.5f}, static_cast<f32>(sh) * 0.4f);
     }
 
     // Shrine. A shrine you cannot tell is interactable is just scenery, and the prompt is the only

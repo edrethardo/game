@@ -725,6 +725,20 @@ void Engine::update(f32 dt) {
             Input::isActionPressed(GameAction::JUMP) ||
             Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            // The Engine-slayer's ending leads HOME, not to the menu: persist the cleared
+            // marker (Continue must land in town forever after) and walk out into the town.
+            // Clients keep the menu path — a guest that waits is pulled in by the host's
+            // town sentinel; pressing the key is explicitly leaving the session.
+            if (s_engineSlain && m_netRole != NetRole::CLIENT) {
+                if (m_level.currentFloor <= 50) {
+                    m_level.currentFloor = 51;              // the FreePlay::saveCleared marker
+                    m_level.savedFloor   = 51;
+                }
+                saveAllCharacters();
+                s_engineSlain = false;
+                enterTown();
+                break;
+            }
             m_gameState = GameState::MENU;
             AudioSystem::stopMusic();
             Input::setRelativeMouseMode(false);
@@ -1840,6 +1854,9 @@ void Engine::gameUpdate(f32 dt) {
     // this player's tick exactly like a floor descent (the world is about to stop mattering).
     if (updateExitPortal()) return;
 
+    // Town portal: opens the Free-Play select over the (kept-alive) town world.
+    if (updateTownPortal()) return;
+
     // Toggle inventory (Tab key). Co-op decision (L3): opening an inventory does NOT pause
     // the game — the other player and all enemies keep running. This is intentional couch
     // co-op behavior (a shared session can't freeze for one player); inventory is simply not
@@ -1986,6 +2003,7 @@ void Engine::resolveInteractTargets(InteractState& st) {
     st.mimicIdx = -1;
     st.chestIdx = -1;
     st.stashIdx = -1;
+    st.nearTownPortal = false;
     st.nearExit = false;
     if (m_inventoryOpen) return;
 
@@ -2066,12 +2084,15 @@ void Engine::resolveInteractTargets(InteractState& st) {
                     lengthSq(m_level.sourcePortalPos - m_localPlayer.position) < 4.0f;
     st.nearExitPortal = m_level.exitPortalActive &&
                         lengthSq(m_level.exitPortalPos - m_localPlayer.position) < 4.0f;
+    st.nearTownPortal = m_level.townPortalActive &&
+                        lengthSq(m_level.townPortalPos - m_localPlayer.position) < 4.0f;
 }
 
 void Engine::updatePlayerPickup(f32 dt) {
     m_descendRequested = false;   // updateFloorDoor consumes this later in the same tick
     m_portalRequested  = false;   // ...and updateSourcePortal right after it
     m_creditsRequested = false;   // ...and updateExitPortal after that
+    m_townPortalRequested = false; // ...and updateTownPortal last
 
     InteractState& st = m_interact[m_localPlayerIndex];
     resolveInteractTargets(st);
@@ -2080,7 +2101,7 @@ void Engine::updatePlayerPickup(f32 dt) {
     // item always wins a tap; a hold reaches past it to the shrine, then the exit.
     // The exit and The Source portal are one priority class: both are "leave the floor", both are
     // outranked by loot, and both are reachable by holding.
-    const bool hasExitTarget = st.nearExit || st.nearPortal || st.nearExitPortal;
+    const bool hasExitTarget = st.nearExit || st.nearPortal || st.nearExitPortal || st.nearTownPortal;
     const bool hasHoldTarget = (st.shrineIdx >= 0) || hasExitTarget;
     // Chests — real (world-item sentinel) or fake (dormant mimic entity) — compete in the
     // ITEM class of the tap rule: opening one is a tap, exactly like grabbing loot. Real
@@ -2100,6 +2121,7 @@ void Engine::updatePlayerPickup(f32 dt) {
         // The portals win a tie: each only exists where you deliberately went looking for it
         // (and the exit portal never coexists with a floor door — the chamber has none).
         if (st.nearExitPortal)  m_creditsRequested = true;
+        else if (st.nearTownPortal) m_townPortalRequested = true;
         else if (st.nearPortal) m_portalRequested = true;
         else                    m_descendRequested = true;   // updateFloorDoor owns the boss gate + net path
     }
@@ -2939,6 +2961,24 @@ bool Engine::updateExitPortal() {
         return false;   // keep ticking until the server's SV_EVENT::CREDITS arrives
     }
     beginCreditsSequence(true);   // the portal only exists after the Engine fell
+    return true;
+}
+
+// The town's to-dungeon portal — opens the Free-Play level select OVER the town (the world
+// stays built; MENU_BACK in the select simply returns to IN_GAME). In co-op only the HOST
+// drives the descent, exactly like ordinary floor doors.
+bool Engine::updateTownPortal() {
+    if (!m_level.townPortalActive) return false;
+    if (!m_townPortalRequested) return false;
+    m_townPortalRequested = false;
+    if (m_netRole == NetRole::CLIENT) return false;   // host picks; guests ride the descent
+    m_menu.freePlayDifficulty = (m_difficulty > 2) ? 2 : m_difficulty;
+    m_menu.freePlayFloor      = 1;
+    m_menu.freePlayFromTown   = true;
+    m_menu.subState           = 14;   // Free-Play level select
+    m_menu.subSelection       = 0;
+    m_gameState = GameState::MENU;
+    Input::setRelativeMouseMode(false);
     return true;
 }
 

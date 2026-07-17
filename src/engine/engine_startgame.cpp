@@ -417,6 +417,10 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         m_level.inSourceChamber    = false;
         m_level.sourcePortalActive = false;
     }
+    // Any run start leaves the town behind (portal descent, menu starts) — the sky, the
+    // stay-home NPC gate and the portal all key on this.
+    m_level.inTown           = false;
+    m_level.townPortalActive = false;
     // Floor + difficulty fold in so each floor and each difficulty-loop tier differs.
     u32 dungeonSeed = m_level.levelSeed
                     + m_level.currentFloor * 7919u

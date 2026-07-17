@@ -822,10 +822,9 @@ void Engine::updateMenu(f32 dt) {
                 // loadGame() already set m_level.savedFloor / m_difficulty for the continued hero.
                 if (m_menu.p1Continue &&
                     FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) {
-                    m_menu.freePlayDifficulty = 2;   // default Hell
-                    m_menu.freePlayFloor      = 1;   // default floor 1
-                    m_menu.subState           = 14;  // Free-Play level select (renders + handles input next frame)
-                    m_menu.subSelection       = 0;
+                    // A CLEARED hero comes home: Continue lands in the TOWN hub (stash, NPCs,
+                    // and the portal that opens the Free-Play select — which used to open here).
+                    enterTown();
                 } else {
                     startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
                 }
@@ -909,13 +908,21 @@ void Engine::updateMenu(f32 dt) {
                                                                    // slot on disk pinned at Hell 57 regardless.
             m_menu.subState      = 0;
             m_menu.subSelection  = 0;
+            m_menu.freePlayFromTown = false;
             startGame(GameStart::CONTINUE);
             return;
         }
 
-        // --- back: return to the slot list ---
+        // --- back: to the town (portal entry) or the slot list (legacy menu entry) ---
         if (Input::isActionPressed(GameAction::MENU_BACK)) {
             AudioSystem::play(SfxId::UI_BACK);
+            if (m_menu.freePlayFromTown) {
+                m_menu.freePlayFromTown = false;
+                m_menu.subState = 0;
+                m_gameState = GameState::IN_GAME;   // the town world was never torn down
+                Input::setRelativeMouseMode(true);
+                return;
+            }
             m_menu.subState     = 6;          // save-slot list
             m_menu.subSelection = 0;
             m_menu.msg          = "continue";

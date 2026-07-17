@@ -32,6 +32,7 @@ def build_textures():
         ("hellforge_wall_vent", 42, 32, "warm_brick"),
         ("void_wall_runes",     42, 32, "dark_dungeon"),
         ("wood_plank",    42, 32, "warm_brick"),
+        ("grass",         42, 32, "meadow"),      # town plaza ground
         ("metal_grate",   42, 16, "cold_stone"),
     ]
 
