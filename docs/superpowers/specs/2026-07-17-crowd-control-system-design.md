@@ -59,26 +59,33 @@ Concrete numbers below are the designer defaults; tune during implementation.
 
 ## Component 1 — CC Resistance stat
 
-A new `AffixType::CC_RESIST` following the engine's **5-point affix sync chain** (the
-`create-affix` skill):
+A new `AffixType::CC_RESIST`, wired the **save-safe on-demand way** — NOT as a cached
+`PlayerInventory` field. `PlayerInventory` is serialized raw (`static_assert(sizeof ==
+1676)`), so a new cached `bonus*` field would force a SAVE_VERSION bump. The defensive pack
+(Armor/Thorns/Health-Regen) and spell damage already dodge this by **summing on demand** and
+stamping the result into a **transient, never-serialized `Player` field** each frame — CC
+resist follows that exact pattern (no save-format change):
 
 1. `AffixType::CC_RESIST` appended **before `COUNT`** in `src/game/item.h` (never inserted —
    affix types are serialized by ordinal).
 2. `affixTypeFromString("cc_resist")` case in `item_loader.cpp`.
-3. `f32 bonusCcResist = 0.0f;` on **`PlayerInventory`** (player-only; enemies don't equip
-   CC-resist) — and its cached mirror on any struct that copies the bonus block.
-4. Accumulate in the player-only switch of `Inventory::recalculateStats()`, **clamped to the
-   0.60 cap** at accumulation end (so no gear combination exceeds 60%).
-5. **Consume** it in a single new choke function (Component 3's `applyCCToPlayer`), so every
-   CC source scales through exactly one place.
+3. **`f32 Inventory::ccResist(const PlayerInventory&)`** = `min(0.60f,
+   sumEquippedAffix(inv, AffixType::CC_RESIST))` — the same one-liner shape as
+   `Inventory::armorRating`/`thornsPct`. **No `PlayerInventory` field, no `recalculateStats`
+   change, no save bump.** (The legendary boots simply carry a high-value `CC_RESIST` affix, so
+   the sum picks it up with no special-casing.)
+4. **Stamp** `m_localPlayer.ccResist = Inventory::ccResist(inv)` into a **transient
+   never-serialized `Player.ccResist` field** in `tickPassiveEquipment`
+   (`engine_update_skills.cpp:177`, right beside `armorRating`).
+5. **Consume** `player.ccResist` in the single choke function (Component 3's
+   `applyCCToPlayer`), so every CC source scales through exactly one place.
 
 `affixes.json` gets one entry with per-slot value bands:
 
 - `boots`: 0.15–0.30 (signature)
 - `helmet`, `armor`: 0.05–0.12 (small)
 
-`validSlots` bitmask = boots | helmet | armor. Because the affix is player-only, it goes on
-the player accumulation path, not `accumulateCommonAffix()`.
+`validSlots` bitmask = boots | helmet | armor.
 
 **Reduction covers stun, slow, and freeze durations only.** Poison/burn/curse timers are set
 directly (unchanged). Root does not exist in the game and none of the chosen class CC
@@ -136,7 +143,7 @@ one exception: the Steadfast Greaves passive lets a perfect dodge fire and clear
 applyCCToPlayer(p, type, dur, isPvp):
     if p.ccImmuneTimer > 0: return          # Break Free / post-CC immunity blocks ALL CC
     if p.ccDodgeImmune and p.dodgeInvulnActive(): return  # boots 2a ONLY (not a base dodge)
-    dur *= (1 - p.bonusCcResist)            # tenacity (60% cap already applied on accumulate)
+    dur *= (1 - p.ccResist)                 # transient stamped field; 60% cap in Inventory::ccResist
     if type == STUN:
         if isPvp: dur *= advanceStunDr(p)   # Comp. 6: reads AND advances the DR counter/window
         p.stunTimer  = fmaxf(p.stunTimer, dur)
