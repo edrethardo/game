@@ -331,7 +331,7 @@ void Engine::initAssets() {
         if (!s_engine) return;
         for (u32 i = 0; i < MAX_SCORCH; i++) {
             if (!s_engine->m_fx.scorchZones[i].active) {
-                s_engine->m_fx.scorchZones[i] = {position, radius, duration, dps, true};
+                s_engine->m_fx.scorchZones[i] = {position, radius, duration, dps, 0.0f, 0xFF, true};
                 return;
             }
         }
@@ -339,6 +339,17 @@ void Engine::initAssets() {
         for (u32 i = 0; i < MAX_FIRE_FX; i++) {
             if (!s_engine->m_fx.fireFX[i].active) {
                 s_engine->m_fx.fireFX[i] = {position, radius, duration, true};
+                return;
+            }
+        }
+    });
+    // Ranger Barrage slow field — a scorch zone with dps 0 + slowPct set + the caster's ownerSlot
+    // (so PvP excludes the Ranger). The scorch-zone tick applies the slow each frame.
+    SkillSystem::setSlowZoneCallback([](Vec3 position, f32 radius, f32 duration, f32 slowPct, u8 ownerSlot) {
+        if (!s_engine) return;
+        for (u32 i = 0; i < MAX_SCORCH; i++) {
+            if (!s_engine->m_fx.scorchZones[i].active) {
+                s_engine->m_fx.scorchZones[i] = {position, radius, duration, 0.0f, slowPct, ownerSlot, true};
                 return;
             }
         }

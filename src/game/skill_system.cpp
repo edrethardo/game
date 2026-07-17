@@ -43,6 +43,7 @@ ScreenShake*  s_screenShake  = nullptr;
 SkillSystem::NovaCallback       s_novaCallback       = nullptr;
 SkillSystem::DashCallback       s_dashCallback       = nullptr;
 SkillSystem::ScorchCallback     s_scorchCallback     = nullptr;
+SkillSystem::SlowZoneCallback   s_slowZoneCallback   = nullptr;
 SkillSystem::DroneSpawnCallback s_droneSpawnCallback = nullptr;
 SkillSystem::ChainCallback      s_chainCallback      = nullptr;
 SkillSystem::BeamCallback       s_beamCallback       = nullptr;
@@ -89,6 +90,7 @@ void SkillSystem::setWeaponProjectileMesh(u8 meshId)     { s_weaponProjMeshId = 
 void SkillSystem::setNovaCallback(NovaCallback cb)           { s_novaCallback       = cb; }
 void SkillSystem::setDashCallback(DashCallback cb)           { s_dashCallback       = cb; }
 void SkillSystem::setScorchCallback(ScorchCallback cb)       { s_scorchCallback     = cb; }
+void SkillSystem::setSlowZoneCallback(SlowZoneCallback cb)   { s_slowZoneCallback   = cb; }
 void SkillSystem::setDroneSpawnCallback(DroneSpawnCallback cb) { s_droneSpawnCallback = cb; }
 void SkillSystem::setChainCallback(ChainCallback cb)         { s_chainCallback      = cb; }
 void SkillSystem::setBeamCallback(BeamCallback cb)           { s_beamCallback       = cb; }
@@ -485,6 +487,17 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
         break;
     case SkillId::SHADOW_DANCE:
         fireShadowDance(player);
+        break;
+
+    // ---- Legendary boots: Steadfast Greaves (Break Free) ----
+    case SkillId::BREAK_FREE:
+        // Shatter all crowd control on the caster + open a brief immunity window so a follow-up
+        // stun can't re-lock instantly. Operates on the view Player: the host's m_localPlayer, or a
+        // guest's remote view (written back via applyRemotePlayerView → the NetPlayer CC mirror), so
+        // it works in co-op. This is the deliberate escape a stunned player presses F for — its
+        // INPUT_EX_BOOT_SKILL bit is the one input NOT suppressed by the stun input-lock.
+        player.stunTimer = player.slowTimer = player.freezeTimer = 0.0f;
+        player.ccImmuneTimer = (def->duration > 0.0f) ? def->duration : 1.5f;
         break;
 
     // ---- Paladin ----

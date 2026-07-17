@@ -151,6 +151,7 @@ def build_meshes():
         ["--type", "chest_heavy",    "--out", os.path.join(mesh_dir, "chest_heavy.obj")],
         ["--type", "boots_light",    "--out", os.path.join(mesh_dir, "boots_light.obj")],
         ["--type", "boots_heavy",    "--out", os.path.join(mesh_dir, "boots_heavy.obj")],
+        ["--type", "steadfast_greaves", "--out", os.path.join(mesh_dir, "steadfast_greaves.obj")],
         ["--type", "gloves_light",   "--out", os.path.join(mesh_dir, "gloves_light.obj")],
         ["--type", "gloves_heavy",   "--out", os.path.join(mesh_dir, "gloves_heavy.obj")],
         ["--type", "ring",           "--out", os.path.join(mesh_dir, "ring.obj")],

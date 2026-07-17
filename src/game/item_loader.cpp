@@ -153,6 +153,7 @@ SkillId skillIdFromString(const std::string& s) {
     if (s == "exploit_weakness")  return SkillId::EXPLOIT_WEAKNESS;
     if (s == "adrenaline_surge")  return SkillId::ADRENALINE_SURGE;
     if (s == "deaths_dance")      return SkillId::DEATHS_DANCE;
+    if (s == "break_free")        return SkillId::BREAK_FREE;  // legendary boots active (CC cleanse)
     return SkillId::NONE;
 }
 
@@ -175,6 +176,7 @@ static AffixType affixTypeFromString(const std::string& s) {
     if (s == "mana_on_kill"       || s == "MANA_ON_KILL")       return AffixType::MANA_ON_KILL;
     if (s == "spell_damage"       || s == "SPELL_DAMAGE_FLAT")  return AffixType::SPELL_DAMAGE_FLAT;
     if (s == "spell_damage_pct"   || s == "SPELL_DAMAGE_PCT")   return AffixType::SPELL_DAMAGE_PCT;
+    if (s == "cc_resist"          || s == "CC_RESIST")          return AffixType::CC_RESIST;
     if (s == "attack_speed_pct"   || s == "ATTACK_SPEED_PCT")   return AffixType::ATTACK_SPEED_PCT;
     if (s == "armor"              || s == "ARMOR")              return AffixType::ARMOR;
     if (s == "health_regen"       || s == "HEALTH_REGEN")       return AffixType::HEALTH_REGEN;

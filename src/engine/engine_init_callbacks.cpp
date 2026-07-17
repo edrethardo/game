@@ -332,7 +332,7 @@ void Engine::initCallbacks() {
                 // Also spawn a dark scorch zone on the ground
                 for (u32 si = 0; si < Engine::MAX_SCORCH; si++) {
                     if (!s_engine->m_fx.scorchZones[si].active) {
-                        s_engine->m_fx.scorchZones[si] = {position, 3.0f, 1.5f, 0.0f, true};
+                        s_engine->m_fx.scorchZones[si] = {position, 3.0f, 1.5f, 0.0f, 0.0f, 0xFF, true};
                         break;
                     }
                 }

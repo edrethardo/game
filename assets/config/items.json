@@ -2850,6 +2850,18 @@
       "legendarySkill": "projectile_parry",
       "dropWeight": 0.5,
       "minRarity": "legendary"
+    },
+    {
+      "name": "Steadfast Greaves",
+      "slot": "boots",
+      "mesh": "steadfast_greaves",
+      "material": "boots_plate",
+      "baseHealth": 30.0,
+      "minLevel": 20, "maxLevel": 50,
+      "maxRarity": "legendary",
+      "legendarySkill": "break_free",
+      "dropWeight": 0.4,
+      "minRarity": "legendary"
     }
   ]
 }

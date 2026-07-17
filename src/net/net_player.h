@@ -4,6 +4,7 @@
 #include "core/math.h"
 #include "game/weapon.h"
 #include "game/item.h"
+#include "game/crowd_control.h"
 #include "net/net.h"
 
 // Input as received from a client (or captured locally for listen server host).
@@ -167,6 +168,14 @@ struct NetPlayer {
     f32  markTimer         = 0.0f;
     u8   markSpeedStacks   = 0;
     f32  markSpeedTimers[20] = {};
+
+    // Crowd-control state (mirrors Player::{stunTimer,ccImmuneTimer,stunDr}). stunTimer rides the
+    // wire (SnapPlayer) so a stunned CLIENT predicts its own input-lock and reconciles without
+    // rubber-banding; ccImmuneTimer + stunDr stay server-side (not predicted). Same trust model as
+    // shadowDanceTimer above. PvP-only source (Arena). Ticked for remote lanes in serverNetPost.
+    f32  stunTimer         = 0.0f;
+    f32  ccImmuneTimer     = 0.0f;
+    CrowdControl::StunDr stunDr;
 
     // Overdrive buff (+30% move speed) — set by a remote's Mech Overdrive (5 s) and War Cry
     // (3 s, which reuses the same Player timer) through the remote-cast view, applied in

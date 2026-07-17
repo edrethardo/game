@@ -113,6 +113,9 @@ namespace SkillSystem {
     using NovaCallback = void(*)(Vec3 position, f32 radius, Vec3 color);
     using DashCallback = void(*)(Vec3 start, Vec3 end);
     using ScorchCallback = void(*)(Vec3 position, f32 radius, f32 duration, f32 dps);
+    // Slow field (Ranger Barrage): a ground zone that slows enemies + rival players (ownerSlot
+    // excluded) each tick. Distinct from Scorch (a DoT) — this deals no damage, only slow.
+    using SlowZoneCallback = void(*)(Vec3 position, f32 radius, f32 duration, f32 slowPct, u8 ownerSlot);
     using BeamCallback = void(*)(Vec3 start, Vec3 end, Vec3 color);
     // Drone spawn callback — engine handles entity creation with proper mesh/material
     // type: 0=combat drone (spider), 1=swarm drone (bat), 2=turret
@@ -122,6 +125,7 @@ namespace SkillSystem {
     void setNovaCallback(NovaCallback cb);
     void setDashCallback(DashCallback cb);
     void setScorchCallback(ScorchCallback cb);
+    void setSlowZoneCallback(SlowZoneCallback cb);
     void setBeamCallback(BeamCallback cb);
 
     // Instant reload callback — called by skills that grant reload on kill

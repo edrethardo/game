@@ -551,11 +551,12 @@ void updateHostileStates(Entity& e, u32 i,
                 } else if (hasLOSToPoint(e.position, targetPlayer->position + Vec3{0, targetPlayer->eyeHeight, 0}, grid)) {
                     // Pass entity pool index so dodge-through detection can riposte the correct attacker
                     Combat::applyDamageToPlayer(*targetPlayer, e.damage, &e.position, static_cast<u16>(i));
-                    // Apply on-hit effect to player
+                    // Apply on-hit effect to player. Slow/freeze are CC — routed through the choke so
+                    // CC Resistance applies (isPvp=false: PvE, no stun DR). Poison/burn are DoT, direct.
                     if (e.onHitEffect == 1) { targetPlayer->poisonTimer = e.onHitDuration; targetPlayer->poisonDps = e.onHitDps; }
-                    if (e.onHitEffect == 2) { targetPlayer->slowTimer   = e.onHitDuration; }
+                    if (e.onHitEffect == 2) { Combat::applyCCToPlayer(*targetPlayer, Combat::CcType::SLOW,   e.onHitDuration, false); }
                     if (e.onHitEffect == 3) { targetPlayer->burnTimer   = e.onHitDuration; targetPlayer->burnDps   = e.onHitDps; }
-                    if (e.onHitEffect == 4) { targetPlayer->freezeTimer = e.onHitDuration; }
+                    if (e.onHitEffect == 4) { Combat::applyCCToPlayer(*targetPlayer, Combat::CcType::FREEZE, e.onHitDuration, false); }
 
                     // Drain heal: melee freeze enemies heal 50% of damage dealt (Mind Flayer)
                     if (e.onHitEffect == 4 && e.attackRange <= 5.0f) {

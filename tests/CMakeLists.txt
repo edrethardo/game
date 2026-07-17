@@ -56,6 +56,7 @@ add_executable(dungeon_tests
     game/test_projectile_parry.cpp   # Mirror Aegis reflect (header-only)
     game/test_stash.cpp              # account stash: page math + transfer rules (header-only)
     game/test_arena.cpp              # PvP deathmatch rules: kill credit / win / respawn pad (header-only)
+    game/test_crowd_control.cpp      # CC math: tenacity scaling, 60% cap, stun DR ladder (header-only)
     world/test_ray_targeting.cpp
     world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp

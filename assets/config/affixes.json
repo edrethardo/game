@@ -153,6 +153,20 @@
       "slots": ["weapon", "offhand", "helmet", "ring", "gloves"],
       "minValue": 5.0,
       "maxValue": 20.0
+    },
+    {
+      "type": "cc_resist",
+      "name": "of Steadfastness",
+      "slots": ["boots"],
+      "minValue": 0.15,
+      "maxValue": 0.30
+    },
+    {
+      "type": "cc_resist",
+      "name": "of Footing",
+      "slots": ["helmet", "armor"],
+      "minValue": 0.05,
+      "maxValue": 0.12
     }
   ]
 }

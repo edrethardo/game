@@ -18,3 +18,12 @@ TEST_CASE("classifyBlock: first 0.2s of a raise is PERFECT, after that BLOCKED")
     CHECK(Combat::classifyBlock(true, 0.2f)  == Combat::BlockOutcome::BLOCKED);  // strict <
     CHECK(Combat::classifyBlock(true, 3.0f)  == Combat::BlockOutcome::BLOCKED);
 }
+
+// A perfect block is a timing FEAT and must ALWAYS be rewarded — no cooldown gate (the user's
+// design principle). classifyBlock is stateless, so a well-timed block classifies PERFECT every
+// time, even back-to-back; the PvP throttle is the energy drain, not a lockout.
+TEST_CASE("classifyBlock: perfect is always available — no cooldown, repeated perfects classify") {
+    CHECK(Combat::classifyBlock(true, 0.05f) == Combat::BlockOutcome::PERFECT);
+    CHECK(Combat::classifyBlock(true, 0.05f) == Combat::BlockOutcome::PERFECT);  // again, no lockout
+    CHECK(Combat::classifyBlock(true, 0.05f) == Combat::BlockOutcome::PERFECT);
+}

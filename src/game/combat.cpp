@@ -336,6 +336,31 @@ f32 Combat::armorMitigation(f32 armor) {
     return (mit > 0.80f) ? 0.80f : mit;  // hard cap so a stacked build can't become invulnerable
 }
 
+// The single choke for player crowd control — thin wrapper over the pure CrowdControl::resolveCC
+// (immunity/dodge negate → tenacity → PvP stun DR). Reads the victim's defensive state off the
+// Player and raises the chosen timer (fmaxf so a longer CC never gets shortened by a weaker one).
+void Combat::applyCCToPlayer(Player& p, CcType type, f32 duration, bool isPvp) {
+    CrowdControl::CcKind kind = (type == CcType::STUN)   ? CrowdControl::CcKind::STUN
+                             : (type == CcType::SLOW)    ? CrowdControl::CcKind::SLOW
+                                                         : CrowdControl::CcKind::FREEZE;
+    const bool immune      = p.ccImmuneTimer > 0.0f;
+    // A perfect DODGE (any roll's i-frames — `dodgeState.rolling`, the same window the dodge-through
+    // absorb uses) and a perfect BLOCK ALWAYS negate incoming CC. Both are hard timing feats, so they
+    // are always rewarded — universal (every class, PvE AND PvP), not gated on the Steadfast Greaves.
+    // (`ccDodgeImmune` now only powers the boots-only escapes: dodging WHILE stunned + clearing
+    // already-active CC on the roll — things a base dodge can't do.)
+    const bool dodgeNegate = p.dodgeState.rolling;
+    const bool blockNegate = (classifyBlock(p.blocking, p.blockTimer) == BlockOutcome::PERFECT);
+    CrowdControl::CcResult r = CrowdControl::resolveCC(kind, duration, p.ccResist, immune,
+                                                       dodgeNegate || blockNegate, p.stunDr, isPvp);
+    if (!r.apply) return;
+    switch (type) {
+        case CcType::STUN:   p.stunTimer   = fmaxf(p.stunTimer,   r.duration); break;
+        case CcType::SLOW:   p.slowTimer   = fmaxf(p.slowTimer,   r.duration); break;
+        case CcType::FREEZE: p.freezeTimer = fmaxf(p.freezeTimer, r.duration); break;
+    }
+}
+
 Combat::BlockOutcome Combat::applyDamageToPlayer(Player& player, f32 damage,
                                                  const Vec3* attackerPos, u16 attackerIdx) {
     // --- Champion: VAMPIRIC ---
@@ -715,6 +740,27 @@ u32 Combat::pvpRadius(Vec3 center, f32 radius, f32 damage, u8 attackerSlot) {
         f32 reach = radius + PLAYER_HALF_WIDTH;
         if (d.x * d.x + d.y * d.y + d.z * d.z > reach * reach) continue;
         if (pvpLand(t, damage, center, attackerSlot)) hits++;
+    }
+    return hits;
+}
+
+u32 Combat::pvpRadiusHit(Vec3 center, f32 radius, const PvpHit& proto) {
+    if (s_pvpTargetCount == 0) return 0;
+    u8 attackerSlot = proto.attackerSlot;
+    if (attackerSlot == 0xFF) attackerSlot = s_attackingPlayer;  // skill paths maintain the ambient slot
+    u32 hits = 0;
+    for (u32 i = 0; i < s_pvpTargetCount; i++) {
+        PvpTarget& t = s_pvpTargets[i];
+        if (t.slot == attackerSlot || !t.view || t.view->health <= 0.0f) continue;
+        Vec3 d = (t.view->position + Vec3{0.0f, PLAYER_HEIGHT * 0.5f, 0.0f}) - center;  // chest height
+        f32 reach = radius + PLAYER_HALF_WIDTH;
+        if (d.x * d.x + d.y * d.y + d.z * d.z > reach * reach) continue;
+        PvpHit hit = proto;
+        hit.origin = center;               // knockback pushes outward from the blast
+        hit.attackerSlot = attackerSlot;
+        Combat::PvpHitOutcome out = Combat::pvpApply(t.slot, hit);
+        t.view->health = out.newHealth;    // refresh (may be 0-damage CC, but keep the pattern)
+        hits++;
     }
     return hits;
 }

@@ -82,6 +82,16 @@ namespace Combat {
     // invulnerability. Negative/zero armor yields 0.
     f32 armorMitigation(f32 armor);
 
+    // The three crowd-control kinds the CC-Resistance stat governs (poison/burn/curse are damage,
+    // not CC, and keep their direct timer writes).
+    enum struct CcType : u8 { STUN, SLOW, FREEZE };
+    // The SINGLE entry point for applying crowd control to a player. Applies tenacity
+    // (player.ccResist), an immunity / dodge-i-frame negate, and PvP-only stun diminishing returns
+    // (via CrowdControl::resolveCC), then raises the chosen timer. Every CC source (enemy hits,
+    // projectile onHit, arena PvP) MUST route through this — a direct timer write bypasses resist
+    // and DR and re-creates the perma-lock the ladder exists to prevent. isPvp gates the stun DR.
+    void applyCCToPlayer(Player& p, CcType type, f32 duration, bool isPvp);
+
     // --- PvP (Arena mode, sentinel floor 97) ------------------------------------------------
     // The engine registers the tick's combatants here while the arena's authoritative window is
     // open (Engine::arenaBeginPvpWindow / arenaEndPvpWindow); the list is EMPTY everywhere else,
@@ -107,8 +117,10 @@ namespace Combat {
         Vec3 origin;
         u8   attackerSlot;
         bool projectile;     // gates Wanderer Deflect (absorbs projectiles only)
-        u8   onHitEffect;    // 0 none, 1 poison, 2 slow, 3 burn, 4 freeze (projectile statuses)
+        u8   onHitEffect;    // 0 none, 1 poison, 2 slow, 3 burn, 4 freeze, 5 stun (class-CC sources)
         f32  onHitDuration;
+        f32  stunDuration = 0.0f;  // onHitEffect==5: resisted + DR'd on the victim (applyCCToPlayer)
+        f32  knockback    = 0.0f;  // Marksman Explosive Round: displacement impulse (NOT a timed CC)
     };
     struct PvpHitOutcome {
         BlockOutcome block     = BlockOutcome::NONE;
@@ -130,6 +142,11 @@ namespace Combat {
     // matches the entity AoE queries, and cover already limits who stands in the blast.
     // attackerSlot 0xFF = "use getAttackingPlayer()" (the skill paths maintain it).
     u32  pvpRadius(Vec3 center, f32 radius, f32 damage, u8 attackerSlot = 0xFF);
+    // Area CROWD CONTROL / knockback vs players (the class-CC AoE sites: Ranger slow zone, Tinkerer
+    // EMP stun, Marksman knockback blast). Lands a templated PvpHit — its onHitEffect/onHitDuration/
+    // stunDuration/knockback (and any damage) — on every rival player in range. The proto's origin is
+    // overridden to `center` so knockback pushes outward. proto.attackerSlot 0xFF = getAttackingPlayer.
+    u32  pvpRadiusHit(Vec3 center, f32 radius, const PvpHit& proto);
 
     // Dodge-through callback: called when damage is blocked during a dodge roll
     // `victim` is the player who dodged — the local Player OR a server-side remote view
