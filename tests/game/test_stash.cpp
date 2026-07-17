@@ -65,3 +65,52 @@ TEST_CASE("Stash: withdraw empties the slot and round-trips the item") {
     CHECK(isItemEmpty(st.items[Stash::slotIndex(3, 0)]));
     CHECK_FALSE(Stash::withdraw(st, 3, 0, out));   // already empty
 }
+
+// withdraw clears the vacated slot with `it = ItemInstance{}`. Pin that the WHOLE slot resets,
+// not just defId: the cheap-looking "optimization" of stamping defId = 0xFFFF passes every
+// isItemEmpty check while leaving stale affixes and damage behind for the next item deposited
+// into that slot to inherit.
+TEST_CASE("Stash: withdraw fully resets the vacated slot, not just defId") {
+    Stash::State st;
+    ItemInstance in = mkItem(7);
+    in.affixCount = MAX_AFFIXES_PER_ITEM;
+    for (u32 a = 0; a < MAX_AFFIXES_PER_ITEM; a++) {
+        in.affixes[a].type  = AffixType::HEALTH_FLAT;
+        in.affixes[a].value = 99.0f;
+    }
+    in.damage = 12.5f;
+    REQUIRE(Stash::deposit(st, 0, in));
+
+    ItemInstance out{};
+    REQUIRE(Stash::withdraw(st, 0, 0, out));
+    CHECK(out.affixCount == MAX_AFFIXES_PER_ITEM);          // the item itself round-trips intact
+    CHECK(out.affixes[0].value == doctest::Approx(99.0f));
+
+    const ItemInstance& slot = st.items[Stash::slotIndex(0, 0)];
+    CHECK(slot.defId == 0xFFFF);
+    CHECK(slot.affixCount == 0);
+    CHECK(slot.damage == doctest::Approx(0.0f));
+    CHECK(slot.uid == 0);
+    for (u32 a = 0; a < MAX_AFFIXES_PER_ITEM; a++) {
+        CHECK(slot.affixes[a].type  == AffixType::DAMAGE_FLAT);
+        CHECK(slot.affixes[a].value == doctest::Approx(0.0f));
+    }
+}
+
+// Stash::State declares `ItemInstance items[TOTAL_SLOTS];` and documents them as "all empty by
+// default" — that contract is pure default member initializers, and the affix array deliberately
+// carries no `= {}` of its own (it ICEs GCC 13; see item.h). So default-init alone must produce an
+// empty slot, which leans entirely on Affix's DMIs. Value-init would zero the affixes either way;
+// the default-init half is the one that fails if Affix's initializers are ever dropped.
+TEST_CASE("ItemInstance: a default-constructed instance is an empty, zeroed slot") {
+    ItemInstance defaultInit;
+    ItemInstance valueInit{};
+    for (u32 a = 0; a < MAX_AFFIXES_PER_ITEM; a++) {
+        CHECK(defaultInit.affixes[a].type  == AffixType::DAMAGE_FLAT);
+        CHECK(defaultInit.affixes[a].value == doctest::Approx(0.0f));
+        CHECK(valueInit.affixes[a].type    == AffixType::DAMAGE_FLAT);
+        CHECK(valueInit.affixes[a].value   == doctest::Approx(0.0f));
+    }
+    CHECK(defaultInit.defId == 0xFFFF);
+    CHECK(valueInit.defId   == 0xFFFF);
+}
