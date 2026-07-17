@@ -32,6 +32,10 @@ namespace GameConst {
     // The town hub (post-Engine home base). Same sentinel mechanism as The Source: the host
     // broadcasts SV_LEVEL_SEED with this floor and clients build the same deterministic town.
     static constexpr u8 TOWN_SENTINEL_FLOOR   = 98u;
+    // The PvP arena (Arena mode). Same sentinel mechanism again: SV_LEVEL_SEED carries this
+    // floor and every peer builds the same deterministic colosseum (engine_arena.cpp). The
+    // floor value IS the mode flag on the wire — nothing else marks a session as PvP.
+    static constexpr u8 ARENA_SENTINEL_FLOOR  = 97u;
 
     // Enemy base stats (before floor scaling) — all HP includes +20% buff
     static constexpr f32 SKELETON_HEALTH     = 55.0f;   // was 40, buffed (+20% + stronger)
