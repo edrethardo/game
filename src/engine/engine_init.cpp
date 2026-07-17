@@ -279,6 +279,11 @@ void Engine::init() {
     // Pet menagerie collection (menagerie.dat, same profile-wide pattern as the unlock above).
     loadMenagerie();
     loadStash();   // shared account stash (after item defs & before any UI can open it)
+    {   // account-wide town unlock (1-byte sidecar, difficulty_unlock pattern)
+        char tuPath[512];
+        FILE* tf = std::fopen(Platform::userDataPath("town_unlock.dat", tuPath, sizeof(tuPath)), "rb");
+        if (tf) { u8 v = 0; m_townUnlocked = (std::fread(&v, 1, 1, tf) == 1 && v != 0); std::fclose(tf); }
+    }
 
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }

@@ -767,6 +767,7 @@ void Engine::updateMenu(f32 dt) {
                 m_menu.subState = 0;
                 m_splitPlayerCount = 1;
                 startGame(GameStart::NEW_GAME); // wipes + grants starting loadout
+                if (m_townUnlocked) enterTown();   // new hero on a cleared account: host from home
             } else {
                 // Skip difficulty selection — difficulty is automatic per save (Diablo-style)
                 m_difficulty = 0;  // new games always start Normal
@@ -827,6 +828,11 @@ void Engine::updateMenu(f32 dt) {
                     enterTown();
                 } else {
                     startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
+                    // Account with an Engine kill: NEW heroes begin at the town gate (stash
+                    // twinking is the point of the shared stash). startGame already granted
+                    // the loadout + floor-1 state; enterTown just swaps the world under them,
+                    // so their first portal descent is the same floor 1 they'd have started on.
+                    if (!m_menu.p1Continue && m_townUnlocked) enterTown();
                 }
             }
             return;

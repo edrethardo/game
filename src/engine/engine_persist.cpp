@@ -36,6 +36,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "game/free_play.h"
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -553,6 +554,9 @@ bool Engine::loadGame(u8 slot) {
             LOG_WARN("loadGame: no free slot to migrate bundled Player 2 — P2 won't persist");
     }
 
+        // Any cleared save unlocks the town for the whole account — retroactively covers heroes
+    // who killed the Engine before the town existed (incl. tools/mark_cleared.py saves).
+    if (FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) unlockTown();
     LOG_INFO("Game loaded from slot %u — floor %u, %u player(s) restored (save had %u)",
              slot, floor, restoreCount, playerCount);
     return true;
@@ -703,6 +707,16 @@ void Engine::saveStash() {
         return;
     }
     m_stash.dirty = false;
+}
+
+// Account-wide town unlock — 1 byte, the difficulty_unlock.dat pattern.
+void Engine::unlockTown() {
+    if (m_townUnlocked) return;
+    m_townUnlocked = true;
+    char path[512];
+    FILE* f = std::fopen(Platform::userDataPath("town_unlock.dat", path, sizeof(path)), "wb");
+    if (f) { u8 one = 1; std::fwrite(&one, 1, 1, f); std::fclose(f); }
+    LOG_INFO("Town unlocked account-wide");
 }
 
 // ---------------------------------------------------------------------------

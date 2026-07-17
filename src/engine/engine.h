@@ -1238,6 +1238,12 @@ private:
     // gameUpdate, which flushes stash.dat when it does.
     bool m_stashOpen = false;
     void openStashUI();
+    // Account-wide town unlock (town_unlock.dat, the difficulty_unlock pattern): set the
+    // moment ANY character's Engine kill writes the cleared marker — and retroactively by
+    // loading any cleared save (covers pre-town slayers + tools/mark_cleared.py). New
+    // characters start at the town gate once set; the shared stash finally twinks them.
+    bool m_townUnlocked = false;
+    void unlockTown();
     // Per-character lifetime stats — persisted in the stats_NN.dat SIDECAR next to the save
     // slot (save_NN.dat's frozen format is untouched; same pattern as menagerie.dat, keyed per
     // slot). Currently one counter: total kills, shown as "Enemies deleted" on the floor

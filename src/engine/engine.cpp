@@ -1228,6 +1228,10 @@ void Engine::startCouchGame() {
     // frame already sees it). For a purely local couch game (m_netRole==NONE) it stays false.
     m_netCouch = (m_netRole != NetRole::NONE);
     startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME, /*lanesPrepared=*/true);
+    // Cleared account: couch sessions also begin at home (enterTown places both lanes).
+    // A Continue'd P1 already routed to town before reaching here only in the solo flow, so
+    // apply it for BOTH couch cases — the town is the hub whenever the account has cleared.
+    if (m_townUnlocked) enterTown();
     positionLocalPlayersAtSpawn();             // self-guards to split-screen
 
     if (m_netRole == NetRole::SERVER) {

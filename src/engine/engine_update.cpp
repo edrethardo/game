@@ -734,6 +734,7 @@ void Engine::update(f32 dt) {
                     m_level.currentFloor = 51;              // the FreePlay::saveCleared marker
                     m_level.savedFloor   = 51;
                 }
+                unlockTown();   // account-wide: every hero (incl. future ones) starts at home now
                 saveAllCharacters();
                 s_engineSlain = false;
                 enterTown();
