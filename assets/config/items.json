@@ -2857,7 +2857,6 @@
       "mesh": "steadfast_greaves",
       "material": "boots_plate",
       "baseHealth": 30.0,
-      "baseCcResist": 0.45,
       "minLevel": 20, "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "break_free",

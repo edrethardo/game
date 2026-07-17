@@ -108,11 +108,8 @@ f32 Inventory::manaOnKill(const PlayerInventory& inv) {
 // cap. Stamped into the transient Player.ccResist each frame in tickPassiveEquipment and consumed
 // by Combat::applyCCToPlayer. The legendary boots carry a high CC_RESIST affix, so they need no
 // special-casing here.
-f32 Inventory::ccResistRaw(const PlayerInventory& inv) {
-    return sumEquippedAffix(inv, AffixType::CC_RESIST);   // uncapped — caller adds def base + caps
-}
 f32 Inventory::ccResist(const PlayerInventory& inv) {
-    return CrowdControl::capResist(ccResistRaw(inv));
+    return CrowdControl::capResist(sumEquippedAffix(inv, AffixType::CC_RESIST));
 }
 
 void Inventory::recalculateStats(PlayerInventory& inv) {

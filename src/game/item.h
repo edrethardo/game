@@ -280,10 +280,6 @@ struct ItemDef {
 
     // Armor base stats
     f32 baseHealth = 0.0f;
-    // Guaranteed CC Resistance built into the item (0..0.60), added on top of any rolled CC_RESIST
-    // affix and capped once. ItemDef is JSON-loaded (never serialized), so this is save-safe. Used
-    // by the Steadfast Greaves to make their anti-CC resistance guaranteed, not roll-dependent.
-    f32 baseCcResist = 0.0f;
 
     // Legendary skill
     SkillId legendarySkillId = SkillId::NONE;
@@ -735,10 +731,7 @@ namespace Inventory {
     f32          manaOnKill(const PlayerInventory& inv);
     // CC Resistance — on-demand sum (no cached field → no save bump), clamped to the 0.60 cap.
     // Stamped into the transient Player.ccResist each frame; consumed by Combat::applyCCToPlayer.
-    // ccResistRaw is the UNCAPPED affix sum, so a caller can add an item's def-level baseCcResist
-    // before applying the single cap (the engine stamp does exactly this for the Steadfast Greaves).
     f32          ccResist(const PlayerInventory& inv);
-    f32          ccResistRaw(const PlayerInventory& inv);
 }
 
 namespace WorldItemSystem {

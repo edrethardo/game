@@ -1019,10 +1019,6 @@ private:
     void arenaBeginPvpWindow();
     void arenaEndPvpWindow();
     Combat::PvpHitOutcome pvpApplyHit(u8 slot, const Combat::PvpHit& hit);
-    // Total CC Resistance for an equipped inventory: rolled CC_RESIST affixes + the equipped boots'
-    // def-level baseCcResist (the Steadfast Greaves' guaranteed resistance), capped once at 0.60.
-    // Needs m_itemDefs, so it lives here rather than in Inventory. Stamped into Player.ccResist.
-    f32 equippedCcResist(const PlayerInventory& inv) const;
     // Deathmatch loop (engine_arena.cpp): authority-side kill credit + auto-respawn + match
     // end; clients mirror via the ARENA_* events (engine.cpp onEvent).
     void arenaHandleDeath(u8 victimSlot, u8 killerSlot);

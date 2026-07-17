@@ -255,7 +255,6 @@ bool ItemLoader::loadItemDefs(const char* path, ItemDef* defs, u32& count) {
             def.baseClipSize         = static_cast<u8>(entry.value("baseClipSize", 0));
             def.baseReloadTime       = entry.value("baseReloadTime",       0.0f);
             def.baseHealth           = entry.value("baseHealth",           0.0f);
-            def.baseCcResist         = entry.value("baseCcResist",         0.0f);
 
             std::string legendaryStr = entry.value("legendarySkill", "NONE");
             def.legendarySkillId = skillIdFromString(legendaryStr);
