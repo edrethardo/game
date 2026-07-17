@@ -706,6 +706,7 @@ void Engine::update(f32 dt) {
         // there too via m_creditsScroll.
         m_creditsScroll += dt * 40.0f;   // ~40 px/s at 720p reference scale
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isActionPressed(GameAction::MENU_BACK) ||   // ESC/B skip, like every menu
             Input::isActionPressed(GameAction::JUMP) ||
             Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
@@ -716,7 +717,9 @@ void Engine::update(f32 dt) {
         break;
     case GameState::VICTORY:
         // Final victory (Hell floor 50 cleared) — "You conquered the Dungeon Engine."
+        // MENU_BACK is in the set so ESC/B dismiss this screen like every other menu.
         if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+            Input::isActionPressed(GameAction::MENU_BACK) ||
             Input::isActionPressed(GameAction::JUMP) ||
             Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN)) {

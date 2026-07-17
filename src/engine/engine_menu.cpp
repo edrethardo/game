@@ -925,6 +925,16 @@ void Engine::updateMenu(f32 dt) {
     // P2 slot screen (subState 12) once a New slot is chosen, so m_playerSaveSlot[1] is already set.
     if (m_menu.subState == 5) {
         u8 classCount = static_cast<u8>(PlayerClass::CLASS_COUNT);
+        // Back out to P2's slot select (mirrors the forward chain 11 -> 12 -> 5). Both pads,
+        // like every other read on this screen — this was the ONE menu screen with no back.
+        if (Input::isActionPressed(GameAction::MENU_BACK) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 12;
+            m_menu.subSelection = 0;
+            m_menu.msg = nullptr;
+            return;
+        }
         // Read from both controllers so either player can navigate for P2
         if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
             Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
@@ -1684,9 +1694,14 @@ void Engine::updateLobby(f32 dt) {
         // the server never accepts us within a reasonable window (10 s).
         m_connectingElapsed += dt;
         const f32 kConnectTimeout = 10.0f;
-        if (Net::joinFailed() || m_connectingElapsed > kConnectTimeout) {
-            LOG_WARN("Connect failed (%s); returning to menu",
-                     Net::joinFailed() ? "rejected/disconnected" : "timeout");
+        // Player-initiated cancel: B (MENU_BACK) backs out of the pulsing-dot screen like any
+        // other menu. (ESC already cancels via the PAUSE branch in engine_update.cpp — this
+        // adds the controller half and keeps both on one code path with the failure exit.)
+        const bool cancelled = Input::isActionPressed(GameAction::MENU_BACK);
+        if (cancelled || Net::joinFailed() || m_connectingElapsed > kConnectTimeout) {
+            LOG_WARN("Connect ended (%s); returning to menu",
+                     cancelled ? "cancelled by player"
+                               : Net::joinFailed() ? "rejected/disconnected" : "timeout");
             Net::disconnect();
             m_netRole = NetRole::NONE;
             m_clientLoadedFromSave = false; // join didn't take — don't push on a future attempt
