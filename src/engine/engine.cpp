@@ -1364,6 +1364,9 @@ void Engine::syncLocalPlayerToNetPlayer() {
     np.burnTimer        = m_localPlayer.burnTimer;
     np.burnDps          = m_localPlayer.burnDps;
     np.freezeTimer      = m_localPlayer.freezeTimer;
+    np.stunTimer        = m_localPlayer.stunTimer;      // CC (PvP): action-lock, replicated
+    np.ccImmuneTimer    = m_localPlayer.ccImmuneTimer;
+    np.stunDr           = m_localPlayer.stunDr;
     np.blocking         = m_localPlayer.blocking;
     np.blockTimer       = m_localPlayer.blockTimer;
     np.ringPassive      = static_cast<SkillId>(m_localPlayer.ringPassive);
@@ -1398,6 +1401,9 @@ void Engine::syncNetPlayerToLocalPlayer() {
     m_localPlayer.burnTimer        = np.burnTimer;
     m_localPlayer.burnDps          = np.burnDps;
     m_localPlayer.freezeTimer      = np.freezeTimer;
+    m_localPlayer.stunTimer        = np.stunTimer;      // CC (PvP): action-lock, replicated
+    m_localPlayer.ccImmuneTimer    = np.ccImmuneTimer;
+    m_localPlayer.stunDr           = np.stunDr;
     m_localPlayer.blocking         = np.blocking;
     m_localPlayer.blockTimer       = np.blockTimer;
     m_localPlayer.ringPassive      = static_cast<u8>(np.ringPassive);
@@ -1445,6 +1451,10 @@ static void seedRemoteView(const NetPlayer& np, Player& v, u8 slot, u32 currentF
     v.burnTimer       = np.burnTimer;
     v.burnDps         = np.burnDps;
     v.freezeTimer     = np.freezeTimer;
+    v.stunTimer       = np.stunTimer;       // CC (PvP): must round-trip or the Player{} reset zeroes it
+    v.ccImmuneTimer   = np.ccImmuneTimer;
+    v.stunDr          = np.stunDr;
+    v.ccResist        = 0.0f;               // recomputed server-side per applied hit (see pvpApplyHit)
     v.blocking        = np.blocking;
     v.blockTimer      = np.blockTimer;
     v.lastHitByPlayerSlot = np.lastHitByPlayerSlot;  // arena PvP kill credit — must round-trip
@@ -1513,6 +1523,9 @@ static void writeBackRemoteView(const Player& v, NetPlayer& np) {
     np.burnTimer        = v.burnTimer;
     np.burnDps          = v.burnDps;
     np.freezeTimer      = v.freezeTimer;
+    np.stunTimer        = v.stunTimer;      // CC (PvP): the other half of the round-trip (see seed)
+    np.ccImmuneTimer    = v.ccImmuneTimer;
+    np.stunDr           = v.stunDr;         // DR advanced by the landed stun — persist it
     np.damageFlashTimer = v.damageFlashTimer; // drives the remote damage-flash render
     np.lastHitByPlayerSlot = v.lastHitByPlayerSlot;  // arena PvP kill credit (see seed side)
     // The only channel by which the server learns a REMOTE took a hit this tick: enemy AI /
@@ -1588,10 +1601,24 @@ static Combat::PvpHitOutcome landPvpHit(Player& v, const Combat::PvpHit& hit) {
 }
 
 Combat::PvpHitOutcome Engine::pvpApplyHit(u8 slot, const Combat::PvpHit& hit) {
+    // Stamp the victim's authoritative CC defenses from the server's copy of their inventory
+    // (m_inventories[slot] — the same index handleWeaponFireForPlayer fires from). Doing it here,
+    // at the atomic apply point, makes CC Resistance / the anti-CC boots independent of lane-swap
+    // timing (a lane's transient ccResist may be a frame stale in serverNetPre). ccResist is what
+    // makes applyCCToPlayer (inside landPvpHit) tenacity-scale the hit; ccDodgeImmune gates the
+    // dodge-i-frame negate.
+    const PlayerInventory& vinv = m_inventories[slot];
+    const f32  vResist = Inventory::ccResist(vinv);
+    const ItemInstance& vBoots = vinv.equipped[(u32)ItemSlot::BOOTS];
+    const bool vDodgeImmune = !isItemEmpty(vBoots) &&
+        m_itemDefs[vBoots.defId].legendarySkillId == SkillId::BREAK_FREE;
+
     // Host-local lanes land directly on the lane ARRAY, never the swapped-in alias. Safe by
     // construction: a lane cannot damage itself (owner-excluded), so the only swapOut that
     // could clobber this write — the victim lane's own — never races a PvP hit.
     if (slot < m_splitPlayerCount) {
+        m_localPlayers[slot].ccResist      = vResist;
+        m_localPlayers[slot].ccDodgeImmune = vDodgeImmune;
         Combat::PvpHitOutcome out = landPvpHit(m_localPlayers[slot], hit);
         // If the victim lane is ALSO the currently swapped-in alias (remote fire resolving in
         // serverNetPre, before any lane swap), mirror the damage into the alias so the next
@@ -1606,6 +1633,8 @@ Combat::PvpHitOutcome Engine::pvpApplyHit(u8 slot, const Combat::PvpHit& hit) {
     if (slot >= MAX_PLAYERS || !m_players[slot].active) return out;
     NetPlayer& np = m_players[slot];
     seedRemoteView(np, m_pvpViews[slot], slot, m_level.currentFloor);
+    m_pvpViews[slot].ccResist      = vResist;       // seedRemoteView zeroed it — set the real value
+    m_pvpViews[slot].ccDodgeImmune = vDodgeImmune;
     out = landPvpHit(m_pvpViews[slot], hit);
     writeBackRemoteView(m_pvpViews[slot], np);
     return out;

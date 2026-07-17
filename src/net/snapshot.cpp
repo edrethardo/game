@@ -44,6 +44,7 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         u8 flags = 0;
         flags |= 1;  // active
         if (np.onGround)                flags |= (1 << 1);
+        if (np.stunTimer > 0.0f)        flags |= (1 << 2);  // CC (PvP): stunned — client adopts to input-lock
         if (np.weaponState.reloading)   flags |= (1 << 3);
         if (np.blocking)                flags |= (1 << 4);
         // Static Charge stacks (0-5) in bits 5-7 — the pose byte's spare bits, so the guest's
@@ -132,7 +133,7 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
             if (q > 255.0f) q = 255.0f;
             sp.shrineTimerQ = static_cast<u8>(q);
         }
-        sp.reserved0 = 0;
+        sp.stunTimerQ = quantTimer(np.stunTimer);   // 0-10.2s in 0.04s steps (same scale as invulnTimer)
     }
 
     // Entities (only active ones). entKeys[i] = squared distance of entity i to the
@@ -336,7 +337,7 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
 //       (armorMeshId[4] added so clients render equipped armor on remote players without inventories.)
 // SNAP_PLAYER_WIRE — R17 bump from 30 → 58 (added 7 u32 lastActivationTick fields),
 //                    armor bump from 58 → 62 (added 4-byte armorMeshId[4]).
-static constexpr u32 SNAP_PLAYER_WIRE     = 64;   // +2 for shrineTimerQ + reserved0 (was 62)
+static constexpr u32 SNAP_PLAYER_WIRE     = 64;   // +2 for shrineTimerQ + stunTimerQ (was reserved0; was 62)
 // NOTE: unlike SnapEntity, SnapPlayer is NOT padding-free, so `sizeof == wire` is NOT an invariant
 // here and must not be asserted. Its tail is a block of u32s, which forces 2 bytes of INTERIOR
 // padding after the u8 run (playerClass) to align them — so the struct has always been larger in
@@ -524,7 +525,7 @@ u32 Snapshot::serialize(const WorldSnapshot& snap, u8* outData, u32 maxSize,
         // and delta player-record layouts silently disagreed. The reader mirrored the double,
         // which is why it round-tripped and nobody noticed.
         w8(sp.shrineTimerQ);
-        w8(sp.reserved0);
+        w8(sp.stunTimerQ);
     }
 
     // Entities
@@ -705,7 +706,7 @@ bool Snapshot::deserialize(WorldSnapshot& snap, const u8* data, u32 size) {
         sp.potionLastActivationTick      = r.readU32();
         // Exactly ONCE — mirrors the writer (see the note there about the double-write bug).
         sp.shrineTimerQ = r.readU8();
-        sp.reserved0    = r.readU8();
+        sp.stunTimerQ   = r.readU8();
     }
 
     for (u32 i = 0; i < snap.entityCount; i++) {
@@ -928,7 +929,7 @@ static void writeSnapPlayer(u8* buf, u32 maxSize, u32& cursor, const SnapPlayer&
     w32(sp.bootSkillLastActivationTick);
     w32(sp.helmetSkillLastActivationTick);
     w32(sp.potionLastActivationTick);
-    w8(sp.shrineTimerQ); w8(sp.reserved0);
+    w8(sp.shrineTimerQ); w8(sp.stunTimerQ);
 }
 
 // Write one SnapEntity. MUST match SNAP_ENTITY_WIRE = 32.
@@ -996,7 +997,7 @@ static void readSnapPlayer(PacketReader& r, SnapPlayer& sp) {
     sp.bootSkillLastActivationTick   = r.readU32();
     sp.helmetSkillLastActivationTick = r.readU32();
     sp.potionLastActivationTick      = r.readU32();
-    sp.shrineTimerQ = r.readU8(); sp.reserved0 = r.readU8();
+    sp.shrineTimerQ = r.readU8(); sp.stunTimerQ = r.readU8();
 }
 
 // Read one SnapEntity from a PacketReader. MUST match writeSnapEntity.

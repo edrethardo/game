@@ -86,7 +86,9 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // ARENA_KILL/ARENA_SCORES/ARENA_OVER. Additive on the wire, but a v19 client joining an arena
 // would take PvP damage with no scoreboard, no respawn countdown and no match end — so a
 // clean SV_JOIN_REJECT beats a silently broken deathmatch.
-static constexpr u32 PROTOCOL_VERSION  = 20; // v13: player record single shrineTimerQ pair (was
+static constexpr u32 PROTOCOL_VERSION  = 21; // v21: SnapPlayer flags bit2 = stunned + stunTimerQ
+                                             // (was reserved0) — player-facing CC (Arena PvP)
+                                             // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
                                             // (v6: online couch co-op — join carries localCount+
                                             // class2, accept carries slot2, CL_INPUT/CL_FIRE

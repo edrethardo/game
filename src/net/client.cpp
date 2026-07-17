@@ -433,6 +433,11 @@ bool Client::reconcile(NetPlayer& np, Player& lp, u8 localSlot) {
         np.poisonTimer = serverState->poisonTimer / 25.0f;
         np.burnTimer   = serverState->burnTimer   / 25.0f;
         np.freezeTimer = serverState->freezeTimer / 25.0f;
+        // CC (PvP): adopt the authoritative stun (same 25/s quantization as the timers above). The
+        // client can't self-stun, so the server is the sole source — direct assign. This flows to
+        // m_localPlayer.stunTimer via syncNetPlayerToLocalPlayer (beside freezeTimer), and the input
+        // path locks the same frame → the stun feels instant, not a round-trip late (RL-feel).
+        np.stunTimer   = serverState->stunTimerQ / 25.0f;
         // slowTimer has only a status FLAG on the wire (bit4); keep a short slow alive
         // while the flag is set so the speed debuff is visible client-side.
         if (serverState->statusFlags & (1 << 4)) {

@@ -15,7 +15,7 @@
 // shrineTimerQ + reserved0 at the tail)
 struct SnapPlayer {
     u8   slotIndex;     // 1
-    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=UNUSED, bit3=reloading, bit4=blocking (bits5-7 unused; isDead rides animFlags bit2)
+    u8   flags;         // 1: bit0=active, bit1=onGround, bit2=stunned (PvP action-lock; timer in stunTimerQ), bit3=reloading, bit4=blocking (bits5-7=Static Charge stacks; isDead rides animFlags bit2)
     u8   weaponId;      // 1
     u8   health;        // 1: 0-255 ratio of maxHealth (client reconstructs absolute = ratio*maxHealth)
     u16  maxHealth;     // 2: absolute max HP (raw, rounded) — lets the client reconstruct absolute
@@ -28,7 +28,7 @@ struct SnapPlayer {
     u8   currentClip;   // 1: rounds remaining
     // bits 5-6 now carry the shrine-buff TYPE (ShrineBuff::, 0-3) — see shrineTimerQ below.
     u8   statusFlags;   // 1: bit0=invuln, bit1=poisoned, bit2=burning, bit3=frozen, bit4=slowed,
-                        //    bits5-6=shrineBuff type, bit7 free
+                        //    bits5-7=shrineBuff type (0-7)
     u8   invulnTimer;   // 1: quantized 0-10s in 0.04s steps
     u8   poisonTimer;   // 1: quantized
     u8   burnTimer;     // 1: quantized
@@ -63,10 +63,13 @@ struct SnapPlayer {
     // rubber-banding it forward every tick. The type rides in statusFlags bits 5-6; the magnitude is
     // a constant per type (Shrine::bonusFor), so it needs no bytes.
     u8   shrineTimerQ;  // 1
-    // Explicit pad, keeping the wire size even. (Unlike SnapEntity, SnapPlayer is NOT padding-free —
-    // the u32 tick block above forces interior padding — so `sizeof == wire` is not an invariant here
-    // and snapshot.cpp deliberately does not assert it.)
-    u8   reserved0;     // 1 — always 0
+    // Player-facing stun remaining (PvP action-lock), quantized 0-10s in 0.04s steps (same scale as
+    // invulnTimer). Was `reserved0`. WITHOUT this a stunned CLIENT would never learn it is stunned:
+    // the server locks the authoritative NetPlayer, but the client keeps predicting free movement and
+    // rubber-bands every tick. The client adopts this (flags bit5 = stunned) so its own input-lock
+    // engages the same frame — the RL-feel predictive+reconciled path. Constant per event + decaying,
+    // so ack-driven delta compression sends it ~once per stun, not every tick.
+    u8   stunTimerQ;    // 1 (was reserved0 — always 0)
 };
 
 // Quantized snapshot of one entity (32 bytes — see SNAP_ENTITY_WIRE)

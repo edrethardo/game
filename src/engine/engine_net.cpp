@@ -867,6 +867,12 @@ void Engine::serverNetPost(f32 dt) {
                 np.overdriveTimer -= dt;
                 if (np.overdriveTimer < 0.0f) np.overdriveTimer = 0.0f;
             }
+            // Crowd control (PvP), remote lanes only — same split as overdrive: the host expires its
+            // own stun/immunity/DR in engine_update_player.cpp, so ticking both would burn them at
+            // double speed. stunTimer decays here, the SnapPlayer carries it out, the guest adopts it.
+            if (np.stunTimer > 0.0f)     { np.stunTimer -= dt;     if (np.stunTimer < 0.0f) np.stunTimer = 0.0f; }
+            if (np.ccImmuneTimer > 0.0f) { np.ccImmuneTimer -= dt; if (np.ccImmuneTimer < 0.0f) np.ccImmuneTimer = 0.0f; }
+            CrowdControl::tickStunDr(np.stunDr, dt);
             // Wanderer kit, remote lanes (mirrors tickWandererTimers, which only serves the
             // host's local player). Deflect: absorb accumulated on this remote's view during
             // the AI/projectile pass; when the window runs out, fire the SAME shared burst
