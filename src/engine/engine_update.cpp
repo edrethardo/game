@@ -278,7 +278,9 @@ void Engine::update(f32 dt) {
     if (m_menagerieOpen) {
         if (Input::isActionPressed(GameAction::MENU_BACK) ||
             Input::isActionPressed(GameAction::MENU_CONFIRM) ||
-            Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
+            Input::isKeyPressed(SDL_SCANCODE_KP_ENTER) ||
+            Input::isKeyPressed(SDL_SCANCODE_SPACE)) {   // Space works wherever Enter does
             AudioSystem::play(SfxId::UI_BACK);
             m_menagerieOpen     = false;
             m_menu.confirmQuit  = true;

@@ -605,7 +605,9 @@ void Engine::updateMenu(f32 dt) {
             return;
         }
 
-        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)) {
+        // Space confirms wherever Enter does (codes can't contain a space, so no typing conflict).
+        if (Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER) ||
+            Input::isKeyPressed(SDL_SCANCODE_SPACE)) {
             confirm();
             return;
         }
@@ -1005,6 +1007,7 @@ void Engine::updateMenu(f32 dt) {
             return;
         }
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+            || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_menu.p2Continue = (m_menu.subSelection == 1); // 0 = New, 1 = Continue
@@ -1035,6 +1038,7 @@ void Engine::updateMenu(f32 dt) {
             return;
         }
         if (Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) || Input::isKeyPressed(SDL_SCANCODE_RETURN)
+            || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
             || mouseConfirm) {
             u8 sel        = static_cast<u8>(m_menu.subSelection);
             u8 slot       = static_cast<u8>(sel + 1);
@@ -1556,7 +1560,8 @@ void Engine::updateMenu(f32 dt) {
         // Connect on keyboard Enter, the OSK "GO" key, or — only WITHOUT a gamepad — the generic
         // confirm action. With a pad, A is consumed above as "type a character", so it must NOT
         // also trigger a connect here (otherwise every A press would jump to the localhost fallback).
-        bool kbConnect  = Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER);
+        bool kbConnect  = Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)
+                       || Input::isKeyPressed(SDL_SCANCODE_SPACE);  // hosts/IPs can't contain a space
         bool actConnect = !gpadJoin && menuConfirmPressed();
         if (oskConnect || kbConnect || actConnect) {
             AudioSystem::play(SfxId::UI_CONFIRM);
