@@ -122,6 +122,16 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         u32 i = pool.activeList[a];
         Entity& e = pool.entities[i];
 
+        // INVARIANT: only a DORMANT entity may be ENT_BURROWED. wakeAmbusher clears the bit on
+        // the normal eruption, but any OTHER path out of DORMANT (necromancer revive, a future
+        // scripted wake) must surface the widow too — a burrowed non-dormant entity is an
+        // INVISIBLE ATTACKER (render/weapon/obstacle code all skip the bit). Self-healing here,
+        // on the authoritative sim, so whatever produced the state fixes itself within a tick
+        // and replicates; the renderer's transition burst still fires.
+        if ((e.flags & ENT_BURROWED) && e.aiState != AIState::DORMANT) {
+            e.flags &= static_cast<u8>(~ENT_BURROWED);
+        }
+
         if (e.flashTimer > 0.0f) e.flashTimer -= dt;
 
         // Generic despawn countdown (the loot goblin's escape). Expiry is deliberately NOT routed

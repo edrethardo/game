@@ -54,6 +54,9 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                 if (bestIdx == 0xFFFF) break; // no more corpses in range
                 Entity& revivedEnt = pool.entities[bestIdx];
                 bool wasFlying = (revivedEnt.flags & ENT_FLYING) != 0;
+                // Fresh assignment (not |=) deliberately strips every state bit — in particular
+                // ENT_BURROWED: a revived Burrowing Widow comes back SURFACED and visible, it
+                // does not get its ambush back (the tickTimers invariant backstops this too).
                 revivedEnt.flags = ENT_ACTIVE | (wasFlying ? ENT_FLYING : 0);
                 revivedEnt.health = revivedEnt.maxHealth * 0.3f;
                 revivedEnt.aiState = AIState::IDLE;
