@@ -74,6 +74,8 @@ enum struct AffixType : u8 {
     MANA_ON_KILL,       // flat energy ("mana") restored on each kill (any damage source)
     SPELL_DAMAGE_FLAT,  // flat bonus added to every SKILL's base damage (weapon attacks unaffected)
     SPELL_DAMAGE_PCT,   // % multiplier on every SKILL's damage (folds into the class/floor mult)
+    CC_RESIST,          // % reduction of incoming stun/slow/freeze DURATION (tenacity). Summed on
+                        // demand (no cached field, no save bump) and capped at CrowdControl::RESIST_CAP.
     COUNT
     // NOTE: affix type is serialized by its integer value (see _REMOVED_RANGE_BONUS
     // and engine_persist.cpp). Only ever APPEND new types before COUNT — never insert
@@ -725,6 +727,9 @@ namespace Inventory {
     // damage restored as energy (mirrors lifestealPct); manaOnKill = flat energy per kill.
     f32          manastealPct(const PlayerInventory& inv);
     f32          manaOnKill(const PlayerInventory& inv);
+    // CC Resistance — on-demand sum (no cached field → no save bump), clamped to the 0.60 cap.
+    // Stamped into the transient Player.ccResist each frame; consumed by Combat::applyCCToPlayer.
+    f32          ccResist(const PlayerInventory& inv);
 }
 
 namespace WorldItemSystem {

@@ -1,5 +1,6 @@
 // inventory.cpp — Player and NPC inventory management: equip/unequip, stat recalculation, effective weapon/health.
 #include "game/item.h"
+#include "game/crowd_control.h"
 #include "core/log.h"
 #include "renderer/material.h"
 
@@ -101,6 +102,14 @@ f32 Inventory::manastealPct(const PlayerInventory& inv) {
 }
 f32 Inventory::manaOnKill(const PlayerInventory& inv) {
     return sumEquippedAffix(inv, AffixType::MANA_ON_KILL);
+}
+
+// CC Resistance — on-demand sum (no cached field → no save-format change), clamped to the hard
+// cap. Stamped into the transient Player.ccResist each frame in tickPassiveEquipment and consumed
+// by Combat::applyCCToPlayer. The legendary boots carry a high CC_RESIST affix, so they need no
+// special-casing here.
+f32 Inventory::ccResist(const PlayerInventory& inv) {
+    return CrowdControl::capResist(sumEquippedAffix(inv, AffixType::CC_RESIST));
 }
 
 void Inventory::recalculateStats(PlayerInventory& inv) {
