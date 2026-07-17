@@ -326,7 +326,15 @@ struct ItemInstance {
     Rarity rarity     = Rarity::COMMON;
     u8     itemLevel  = 0;
     u8     affixCount = 0;
-    Affix  affixes[MAX_AFFIXES_PER_ITEM] = {};
+    // Deliberately NO `= {}` initializer: Affix's own default member initializers already zero
+    // every element (identical semantics for both `ItemInstance x;` and `ItemInstance{}`), and
+    // GCC 13 — Ubuntu 24.04's default compiler — ICEs on the redundant form. A `= {}` DMI on an
+    // array of class-with-DMIs builds a TARGET_EXPR that GCC fails to unshare between two
+    // `ItemInstance{}` temporaries in one translation unit, so gimplifying the second one trips
+    // `gimple_add_tmp_var` (gimplify.cc:774) at any -O level. Re-adding `= {}` compiles fine on
+    // GCC 11 (Ubuntu 22.04) and silently breaks the 24.04 release build. Layout is unaffected —
+    // DMIs never change sizeof, so the save format (SAVE_VERSION 3) is untouched.
+    Affix  affixes[MAX_AFFIXES_PER_ITEM];
 
     // Rolled base stats (after level scaling)
     f32 damage      = 0.0f;
