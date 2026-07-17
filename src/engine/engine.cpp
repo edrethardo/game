@@ -1588,13 +1588,28 @@ static Combat::PvpHitOutcome landPvpHit(Player& v, const Combat::PvpHit& hit) {
     v.lastHitByPlayerSlot = hit.attackerSlot;
     // Authored on-hit statuses carry into PvP (poison arrows stay poisonous). A Mirror-Aegis
     // parry skips them — the shot is being RETURNED, not absorbed. No enemy default slow.
-    bool parried = (out.block == Combat::BlockOutcome::PERFECT &&
-                    v.offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY));
+    const bool perfectBlock = (out.block == Combat::BlockOutcome::PERFECT);
+    bool parried = (perfectBlock && v.offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY));
+    // Poison/burn (DoT — not CC) — apply unless a Mirror-Aegis parry returned the shot. Direct.
     if (!parried) {
         if      (hit.onHitEffect == 1) { v.poisonTimer = fmaxf(v.poisonTimer, hit.onHitDuration); v.poisonDps = 4.0f; }
-        else if (hit.onHitEffect == 2) { v.slowTimer   = fmaxf(v.slowTimer,   hit.onHitDuration); }
         else if (hit.onHitEffect == 3) { v.burnTimer   = fmaxf(v.burnTimer,   hit.onHitDuration); }
-        else if (hit.onHitEffect == 4) { v.freezeTimer = fmaxf(v.freezeTimer, hit.onHitDuration); }
+    }
+    // Crowd control (slow/freeze/stun) routes through the choke so CC Resistance + PvP stun DR
+    // apply (isPvp=true). ONLY a PERFECT block negates CC — a held/normal block stops damage but the
+    // CC still lands, so block can't hard-counter the CC classes (per the design's block-vs-CC rule).
+    if (!perfectBlock) {
+        if      (hit.onHitEffect == 2) Combat::applyCCToPlayer(v, Combat::CcType::SLOW,   hit.onHitDuration, true);
+        else if (hit.onHitEffect == 4) Combat::applyCCToPlayer(v, Combat::CcType::FREEZE, hit.onHitDuration, true);
+        else if (hit.onHitEffect == 5) Combat::applyCCToPlayer(v, Combat::CcType::STUN,   hit.stunDuration,  true);
+    }
+    // Knockback (Marksman Explosive Round) — a displacement impulse, NOT a timed CC, so CC
+    // Resistance does not reduce it; a perfect block negates it too (you didn't get hit). Push the
+    // victim away from the blast origin along the horizontal.
+    if (hit.knockback > 0.0f && !perfectBlock) {
+        Vec3 dir = v.position - hit.origin; dir.y = 0.0f;
+        f32 len = length(dir);
+        if (len > 0.001f) v.velocity = v.velocity + (dir / len) * hit.knockback;
     }
     out.newHealth = v.health;
     return out;

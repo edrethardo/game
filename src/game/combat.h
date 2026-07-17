@@ -117,8 +117,10 @@ namespace Combat {
         Vec3 origin;
         u8   attackerSlot;
         bool projectile;     // gates Wanderer Deflect (absorbs projectiles only)
-        u8   onHitEffect;    // 0 none, 1 poison, 2 slow, 3 burn, 4 freeze (projectile statuses)
+        u8   onHitEffect;    // 0 none, 1 poison, 2 slow, 3 burn, 4 freeze, 5 stun (class-CC sources)
         f32  onHitDuration;
+        f32  stunDuration = 0.0f;  // onHitEffect==5: resisted + DR'd on the victim (applyCCToPlayer)
+        f32  knockback    = 0.0f;  // Marksman Explosive Round: displacement impulse (NOT a timed CC)
     };
     struct PvpHitOutcome {
         BlockOutcome block     = BlockOutcome::NONE;

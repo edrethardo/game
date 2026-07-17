@@ -1872,7 +1872,10 @@ void Engine::gameUpdate(f32 dt) {
 
     // --- Shield blocking (Ctrl / Left Trigger) ---
     {
-        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !gameplayInputFrozen();
+        // Stunned players can't block (action-lock). No perfect-block cooldown: a perfect block is a
+        // timing feat and is ALWAYS rewarded — the only PvP throttle is the energy drain below.
+        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !gameplayInputFrozen()
+                          && m_localPlayer.stunTimer <= 0.0f;
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;
             m_localPlayer.blockTimer = 0.0f; // start perfect block window
@@ -1882,6 +1885,15 @@ void Engine::gameUpdate(f32 dt) {
         }
         if (m_localPlayer.blocking) {
             m_localPlayer.blockTimer += dt;
+            // PvP block hardening: holding block drains energy so turtling can't be a free permanent
+            // -50%. A perfect block is a quick tap costing almost nothing, so timing is never
+            // punished. Gated to PvP (Combat::pvpActive) — the campaign's block feel is untouched.
+            if (Combat::pvpActive()) {
+                constexpr f32 BLOCK_DRAIN_PER_SEC = 25.0f;   // ~4-6 s of continuous block on a full pool
+                SkillState& ss = m_skillStates[m_localPlayerIndex];
+                ss.energy -= BLOCK_DRAIN_PER_SEC * dt;
+                if (ss.energy <= 0.0f) { ss.energy = 0.0f; m_localPlayer.blocking = false; }
+            }
         }
     }
 
