@@ -317,6 +317,7 @@ void Engine::saveAllCharacters() {
         u8 slot = m_playerSaveSlot[lane];
         if (slot >= 1 && slot <= MAX_SAVE_SLOTS) saveCharacter(lane, slot);
     }
+    saveStash();   // characters and the shared stash flush together (Save&Quit, descent autosave)
 }
 
 // ---------------------------------------------------------------------------
@@ -653,6 +654,55 @@ void Engine::saveMenagerie() {
     std::fwrite(&m_menagerieEnemyMask, sizeof(u64), 1, f);
     std::fwrite(&goblin,               sizeof(u8),  1, f);
     std::fclose(f);
+}
+
+// ---------------------------------------------------------------------------
+// Shared account stash (stash.dat) — ONE file for every character (gear moves between
+// heroes through it). A versioned SIDECAR like menagerie.dat, never part of save_NN.dat;
+// unlike the menagerie it holds real gear, so it writes ATOMICALLY (temp + atomicReplace,
+// the saveCharacter pattern) — a crash mid-write can't eat 240 items.
+// Layout: u32 STASH_VERSION, u32 slot count, count × raw ItemInstance.
+// Absent/unreadable file = empty stash (a fresh install; never an error).
+// ---------------------------------------------------------------------------
+void Engine::loadStash() {
+    char path[512];
+    FILE* f = std::fopen(Platform::userDataPath("stash.dat", path, sizeof(path)), "rb");
+    if (!f) return;   // no stash yet
+    u32 ver = 0, count = 0;
+    bool ok = std::fread(&ver,   sizeof(u32), 1, f) == 1 && ver == Stash::STASH_VERSION
+           && std::fread(&count, sizeof(u32), 1, f) == 1 && count <= Stash::TOTAL_SLOTS;
+    if (ok) {
+        ok = std::fread(m_stash.items, sizeof(ItemInstance), count, f) == count;
+    }
+    std::fclose(f);
+    if (!ok) {
+        LOG_WARN("Stash: stash.dat unreadable (version/size mismatch) — starting empty, file kept");
+        m_stash = Stash::State{};   // don't overwrite the file until the player stashes something
+        return;
+    }
+    m_stash.dirty = false;
+    LOG_INFO("Stash: loaded (%u slots)", count);
+}
+
+void Engine::saveStash() {
+    if (!m_stash.dirty) return;
+    char path[512], tmpPath[520];
+    Platform::userDataPath("stash.dat", path, sizeof(path));
+    std::snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path);
+    FILE* f = std::fopen(tmpPath, "wb");
+    if (!f) { LOG_WARN("Stash: failed to open %s for writing", tmpPath); return; }
+    u32 ver = Stash::STASH_VERSION, count = Stash::TOTAL_SLOTS;
+    std::fwrite(&ver,   sizeof(u32), 1, f);
+    std::fwrite(&count, sizeof(u32), 1, f);
+    std::fwrite(m_stash.items, sizeof(ItemInstance), count, f);
+    bool writeError = (std::ferror(f) != 0);
+    std::fclose(f);
+    if (writeError || !Platform::atomicReplace(tmpPath, path)) {
+        std::remove(tmpPath);
+        LOG_WARN("Stash: write/replace failed — previous stash.dat kept");
+        return;
+    }
+    m_stash.dirty = false;
 }
 
 // ---------------------------------------------------------------------------

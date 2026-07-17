@@ -19,6 +19,7 @@
 #include "game/weapon.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/stash.h"
 #include "game/interact.h"   // tap/hold interact rule (pure)
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
@@ -1211,6 +1212,11 @@ private:
     bool m_menagerieGoblin    = false;
     bool m_menagerieOpen      = false;   // pause-menu subpage overlay (view-only)
     void loadMenagerie();
+    // Shared account stash (5 pages x 48 slots, one stash.dat for all characters). Loaded once
+    // at init; saved (atomically) whenever dirty — on stash-UI close, Save&Quit, and shutdown.
+    Stash::State m_stash;
+    void loadStash();
+    void saveStash();
     // Per-character lifetime stats — persisted in the stats_NN.dat SIDECAR next to the save
     // slot (save_NN.dat's frozen format is untouched; same pattern as menagerie.dat, keyed per
     // slot). Currently one counter: total kills, shown as "Enemies deleted" on the floor

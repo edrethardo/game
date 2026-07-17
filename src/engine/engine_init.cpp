@@ -278,6 +278,7 @@ void Engine::init() {
 
     // Pet menagerie collection (menagerie.dat, same profile-wide pattern as the unlock above).
     loadMenagerie();
+    loadStash();   // shared account stash (after item defs & before any UI can open it)
 
     LOG_INFO("Engine initialized — Phase 4 multiplayer ready");
 }
@@ -285,6 +286,8 @@ void Engine::init() {
 
 void Engine::shutdown() {
     LOG_INFO("Engine shutting down...");
+
+    saveStash();   // no-op unless dirty — last-chance flush for the shared account stash
 
     AudioSystem::shutdown();
     Net::shutdown();
