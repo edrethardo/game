@@ -11,6 +11,7 @@
 #include "engine/launch_options.h"
 #include "game/game_constants.h"   // GameConst::kDemoBuild — gate --host/--join in the demo
 #include "game/player.h"           // PlayerController::setBotWalk — the --bot-walk probe
+#include "game/free_play.h"        // saveCleared — cleared heroes launch into the town
 
 #include "core/log.h"
 #include "net/net.h"
@@ -101,6 +102,23 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         }
         m_level.currentFloor = m_level.savedFloor;   // adopt the saved run's floor (as the menu does)
         mode = GameStart::CONTINUE;
+        // A CLEARED hero's Continue lands in the TOWN, exactly like the menu route — without
+        // this, --load on a cleared save would feed the marker floor (51) into the generator.
+        if (opt.role != LaunchOptions::Role::JOIN &&
+            FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) {
+            if (opt.role == LaunchOptions::Role::HOST) {
+                if (!Net::hostServer(opt.port, opt.upnp, 1)) {
+                    m_netRole = NetRole::NONE;
+                    LOG_WARN("Launch: failed to host on port %u — staying at menu", opt.port);
+                    return;
+                }
+                m_netRole = NetRole::SERVER;
+            }
+            m_splitPlayerCount = 1;
+            enterTown();
+            LOG_INFO("Launch: cleared save -> entered the TOWN hub");
+            return;
+        }
     } else {  // Save::NEW
         applyClassToLane0(opt.cls);
         m_difficulty = opt.difficulty;
