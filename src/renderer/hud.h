@@ -68,6 +68,11 @@ namespace HUD {
                               const SkillDef* skillDefs, u32 skillDefCount,
                               u8 selectedSlot, bool selectedIsEquipped,
                               s32 mouseX = -1, s32 mouseY = -1);
+    // Account stash panel — drawn OVER the equipment area while the stash is open. Geometry
+    // comes from InventoryUI::stashLayout (shared with hitTestStash). `items` is the full
+    // 240-slot array; `page` selects the visible 48. Hover shows name + a withdraw hint.
+    void drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
+                        const ItemDef* itemDefs, s32 mouseX, s32 mouseY);
 
     // Skill name / description resolution — the SINGLE entry point, used by both the item tooltip's
     // legendary block and the skill-bar tooltip, so one skill can't describe itself two ways.

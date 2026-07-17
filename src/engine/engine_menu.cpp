@@ -1755,7 +1755,17 @@ void Engine::updateLobby(f32 dt) {
             m_level.levelSeed    = Net::getServerLevelSeed();
             m_level.currentFloor = Net::getServerLevelFloor();
             m_difficulty         = Net::getServerLevelDifficulty();
-            startGame(GameStart::CONTINUE);
+            // Sentinel floors are SPECIAL AREAS, not procedural dungeons: a client joining a
+            // host who is already there must build the same deterministic level, not feed 98/99
+            // into the floor generator (mid-join into these used to be an accepted gap; the
+            // town made it a normal case — a host idling at home while friends join).
+            if (m_level.currentFloor == GameConst::TOWN_SENTINEL_FLOOR) {
+                enterTownClient();
+            } else if (m_level.currentFloor == GameConst::SOURCE_SENTINEL_FLOOR) {
+                enterSourceChamberClient();
+            } else {
+                startGame(GameStart::CONTINUE);
+            }
             if (m_netCouch) positionLocalPlayersAtSpawn(); // place P2 beside P1 at the spawn
             // Push each local lane's inventory to its server slot now that we have assigned slots.
             // The host's onPlayerJoin granted each a starting kit; onInventorySync overwrites it with

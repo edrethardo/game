@@ -5,6 +5,7 @@
 // Calls pushLine/pushQuad/flushHUD via hud_internal.h.
 
 #include "renderer/hud.h"
+#include "game/inventory_ui.h"
 #include "renderer/hud_internal.h"
 #include "renderer/font.h"
 #include "renderer/item_icons.h"
@@ -412,6 +413,85 @@ void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
     }
 
     flushHUD();
+}
+
+void HUD::drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
+                         const ItemDef* itemDefs, s32 mouseX, s32 mouseY)
+{
+    const InventoryUI::StashRects r = InventoryUI::stashLayout(sw, sh);
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+
+    // Opaque background — the equipment panel sits under this area while the stash is open.
+    {
+        f32 panelW = InventoryUI::STASH_COLS * (r.cell + r.gap) - r.gap;
+        f32 topY = r.tabY + r.tabH + 26.0f * uiScale;   // covers the tabs + title line
+        f32 botY = r.startY - (InventoryUI::STASH_ROWS - 1) * (r.cell + r.gap);
+        f32 pad = 10.0f;
+        Vec3 bg = {0.07f, 0.06f, 0.04f};   // warm dark — gold-adjacent, reads as "the chest"
+        for (f32 fy = botY - pad; fy < topY + pad; fy += 1.0f)
+            pushLine(r.x - pad, fy, r.x + panelW + pad, fy, bg);
+        flushHUD();
+    }
+
+    // Title
+    char title[32];
+    std::snprintf(title, sizeof(title), "Stash  %u/%u", page + 1, InventoryUI::STASH_TABS);
+    FontSystem::drawText(sw, sh, r.x, r.tabY + r.tabH + 8.0f * uiScale, title, {1.0f, 0.85f, 0.4f}, 2);
+
+    // Page tabs
+    for (u32 t = 0; t < InventoryUI::STASH_TABS; t++) {
+        f32 x = r.tabX + static_cast<f32>(t) * (r.tabW + r.tabGap);
+        bool cur = (t == page);
+        Vec3 col = cur ? Vec3{1.0f, 0.85f, 0.4f} : Vec3{0.4f, 0.35f, 0.25f};
+        pushLine(x,          r.tabY,          x + r.tabW, r.tabY,          col);
+        pushLine(x + r.tabW, r.tabY,          x + r.tabW, r.tabY + r.tabH, col);
+        pushLine(x + r.tabW, r.tabY + r.tabH, x,          r.tabY + r.tabH, col);
+        pushLine(x,          r.tabY + r.tabH, x,          r.tabY,          col);
+        char n[4]; std::snprintf(n, sizeof(n), "%u", t + 1);
+        FontSystem::drawText(sw, sh, x + r.tabW * 0.5f - 4.0f * uiScale, r.tabY + 5.0f * uiScale,
+                             n, cur ? Vec3{1.0f, 0.95f, 0.7f} : Vec3{0.5f, 0.5f, 0.5f}, 1);
+    }
+
+    // Slots + icons; remember the hovered occupied slot for the hint line.
+    const ItemInstance* hovered = nullptr;
+    f32 fmx = static_cast<f32>(mouseX), fmy = static_cast<f32>(mouseY);
+    for (u32 i = 0; i < InventoryUI::STASH_COLS * InventoryUI::STASH_ROWS; i++) {
+        u32 col = i % InventoryUI::STASH_COLS, row = i / InventoryUI::STASH_COLS;
+        f32 x = r.x + static_cast<f32>(col) * (r.cell + r.gap);
+        f32 y = r.startY - static_cast<f32>(row) * (r.cell + r.gap);
+        const ItemInstance& item = items[static_cast<u32>(page) * InventoryUI::STASH_COLS * InventoryUI::STASH_ROWS + i];
+        bool hover = (fmx >= x && fmx <= x + r.cell && fmy >= y && fmy <= y + r.cell);
+
+        Vec3 color = {0.3f, 0.27f, 0.18f};
+        if (!isItemEmpty(item)) color = rarityColor(item.rarity);
+        if (hover) color = {fminf(color.x * 1.5f, 1.0f), fminf(color.y * 1.5f, 1.0f), fminf(color.z * 1.5f, 1.0f)};
+
+        pushLine(x,          y,          x + r.cell, y,          color);
+        pushLine(x + r.cell, y,          x + r.cell, y + r.cell, color);
+        pushLine(x + r.cell, y + r.cell, x,          y + r.cell, color);
+        pushLine(x,          y + r.cell, x,          y,          color);
+        if (!isItemEmpty(item)) {
+            flushHUD();
+            ItemIconSystem::drawIcon(sw, sh, x + 2.0f, y + 2.0f, r.cell - 4.0f,
+                                     itemDefs[item.defId], item.rarity);
+            if (hover) hovered = &item;
+        }
+    }
+    flushHUD();
+
+    // Hover line: name (rarity-colored) + the transfer hint, under the grid.
+    f32 hintY = r.startY - (InventoryUI::STASH_ROWS - 1) * (r.cell + r.gap) - 22.0f * uiScale;
+    if (hovered) {
+        FontSystem::drawText(sw, sh, r.x, hintY, itemDefs[hovered->defId].name,
+                             rarityColor(hovered->rarity), 2);
+        FontSystem::drawText(sw, sh, r.x, hintY - 14.0f * uiScale,
+                             "click: take   arrows/LB RB: page", {0.5f, 0.5f, 0.5f}, 1);
+    } else {
+        FontSystem::drawText(sw, sh, r.x, hintY,
+                             "click a backpack item to stash it", {0.5f, 0.5f, 0.5f}, 1);
+        FontSystem::drawText(sw, sh, r.x, hintY - 14.0f * uiScale,
+                             "arrows / LB RB: page", {0.4f, 0.4f, 0.45f}, 1);
+    }
 }
 
 void HUD::drawInventoryScreen(u32 sw, u32 sh,

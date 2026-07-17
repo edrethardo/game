@@ -1,5 +1,45 @@
 #include "game/inventory_ui.h"
 
+InventoryUI::StashRects InventoryUI::stashLayout(u32 sw, u32 sh) {
+    StashRects r;
+    f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    r.cell   = BP_CELL * uiScale;
+    r.gap    = BP_GAP * uiScale;
+    r.x      = static_cast<f32>(sw) * 0.06f;
+    r.startY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;   // row 0 aligned with the backpack
+    r.tabW   = 40.0f * uiScale;
+    r.tabH   = 22.0f * uiScale;
+    r.tabGap = 6.0f * uiScale;
+    r.tabX   = r.x;
+    r.tabY   = r.startY + r.cell + 14.0f * uiScale;
+    return r;
+}
+
+InventoryUI::SlotHit InventoryUI::hitTestStash(u32 sw, u32 sh, s32 mx, s32 my) {
+    SlotHit result;
+    const StashRects r = stashLayout(sw, sh);
+    f32 fmx = static_cast<f32>(mx), fmy = static_cast<f32>(my);
+    for (u32 t = 0; t < STASH_TABS; t++) {
+        f32 x = r.tabX + static_cast<f32>(t) * (r.tabW + r.tabGap);
+        if (fmx >= x && fmx <= x + r.tabW && fmy >= r.tabY && fmy <= r.tabY + r.tabH) {
+            result.panel = SlotHit::STASH_TAB;
+            result.index = static_cast<u8>(t);
+            return result;
+        }
+    }
+    for (u32 i = 0; i < STASH_COLS * STASH_ROWS; i++) {
+        u32 col = i % STASH_COLS, row = i / STASH_COLS;
+        f32 x = r.x + static_cast<f32>(col) * (r.cell + r.gap);
+        f32 y = r.startY - static_cast<f32>(row) * (r.cell + r.gap);
+        if (fmx >= x && fmx <= x + r.cell && fmy >= y && fmy <= y + r.cell) {
+            result.panel = SlotHit::STASH;
+            result.index = static_cast<u8>(i);
+            return result;
+        }
+    }
+    return result;
+}
+
 InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
     SlotHit result;
     f32 fmx = static_cast<f32>(mx);

@@ -133,6 +133,55 @@ void Engine::updateInventoryInteraction(f32 dt) {
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
 
+    // --- Stash mode: the stash panel replaces the equipment side and CLICK means TRANSFER ---
+    // (not equip/drag). Handled exclusively so none of the drag/equip/quickbar machinery below
+    // can fire under the stash; ESC/B/Tab close via the usual paths + the gameUpdate reconciler.
+    if (m_stashOpen) {
+        PlayerInventory& inv = m_inventories[m_localPlayerIndex];
+        // Page flip: arrows, or shoulders on the active pad.
+        s32 padIdx = static_cast<s32>(m_localPlayerIndex);
+        bool prev = Input::isKeyPressed(SDL_SCANCODE_LEFT)  ||
+                    Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+        bool next = Input::isKeyPressed(SDL_SCANCODE_RIGHT) ||
+                    Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+        if (prev && m_stash.page > 0)                              m_stash.page--;
+        if (next && m_stash.page + 1 < Stash::PAGE_COUNT)          m_stash.page++;
+
+        if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+            InventoryUI::SlotHit sHit = InventoryUI::hitTestStash(sw, sh, mx, my);
+            if (sHit.panel == InventoryUI::SlotHit::STASH_TAB && sHit.index < Stash::PAGE_COUNT) {
+                m_stash.page = sHit.index;
+            } else if (sHit.panel == InventoryUI::SlotHit::STASH) {
+                // Withdraw into the backpack; a full backpack puts the item straight back.
+                ItemInstance out{};
+                if (Stash::withdraw(m_stash, m_stash.page, sHit.index, out)) {
+                    if (Inventory::addToBackpack(inv, out) >= 0) {
+                        AudioSystem::play(SfxId::ITEM_PICKUP);
+                        sendInventorySync(m_localPlayerIndex, activeNetSlot());   // no-op unless CLIENT
+                    } else {
+                        Stash::deposit(m_stash, m_stash.page, out);   // restore — nothing lost
+                        addChatMessage("Stash", "Your backpack is full.", {1.0f, 0.85f, 0.4f});
+                    }
+                }
+            } else {
+                InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
+                if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
+                    hit.index < MAX_INVENTORY_ITEMS &&
+                    !isItemEmpty(inv.backpack[hit.index])) {
+                    // Deposit onto the page the player is looking at (never spills elsewhere).
+                    if (Stash::deposit(m_stash, m_stash.page, inv.backpack[hit.index])) {
+                        inv.backpack[hit.index] = ItemInstance{};
+                        AudioSystem::play(SfxId::ITEM_PICKUP);
+                        sendInventorySync(m_localPlayerIndex, activeNetSlot());
+                    } else {
+                        addChatMessage("Stash", "That page is full.", {1.0f, 0.85f, 0.4f});
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     // --- D-pad inventory navigation (controller — routes to active player's controller) ---
     s32 padIdx = static_cast<s32>(m_localPlayerIndex);
     if (Input::isGamepadConnected(padIdx)) {

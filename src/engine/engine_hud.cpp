@@ -134,6 +134,12 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
                               m_itemDefs, m_skillDefs, m_skillDefCount,
                               selSlot, selEquip, invMX, invMY);
 
+    // Stash mode: the gold panel paints OVER the equipment side (its interactions are gated off
+    // in updateInventoryInteraction while the stash is open) — backpack stays live for deposits.
+    if (m_stashOpen) {
+        HUD::drawStashPanel(sw, sh, m_stash.items, m_stash.page, m_itemDefs, invMX, invMY);
+    }
+
     // Draw dragged item icon at cursor position
     if (isDragActive(m_dragState)) {
         s32 dmx, dmy;

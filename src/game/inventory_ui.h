@@ -30,10 +30,28 @@ namespace InventoryUI {
     static constexpr f32 QB_GAP  = 4.0f;
 
     struct SlotHit {
-        enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR };
+        enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB };
         Panel panel = NONE;
         u8    index = 0;
     };
+
+    // ---- Account stash panel (drawn over the equipment area while the stash is open) ----
+    // THE single source for the stash grid + page tabs: HUD::drawStashPanel and hitTestStash
+    // both derive from stashLayout() — the quickbarLayout discipline (draw and hit-test that
+    // each re-derive geometry WILL drift).
+    static constexpr u32 STASH_COLS = 8;
+    static constexpr u32 STASH_ROWS = 6;
+    static constexpr u32 STASH_TABS = 5;
+    struct StashRects {
+        f32 x = 0.0f, startY = 0.0f;      // slot (col 0, row 0)'s left/bottom
+        f32 cell = 0.0f, gap = 0.0f;      // scaled
+        f32 tabX = 0.0f, tabY = 0.0f;     // tab 0's left/bottom
+        f32 tabW = 0.0f, tabH = 0.0f, tabGap = 0.0f;
+    };
+    StashRects stashLayout(u32 sw, u32 sh);
+    // Hit-test ONLY the stash panel (slots + tabs). The caller checks this before the regular
+    // hitTest while the stash is open — the panel overlaps the (hidden) equipment area.
+    SlotHit hitTestStash(u32 sw, u32 sh, s32 mx, s32 my);
 
     // Hit-test a mouse position (HUD coords, Y=0 at bottom) against all panels.
     SlotHit hitTest(u32 sw, u32 sh, s32 mx, s32 my);
