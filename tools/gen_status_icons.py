@@ -105,6 +105,24 @@ ICONS = [
         (0.55, 0.80, 1.00),   # 3 arc fringe
         (0.75, 0.95, 1.00),   # 4 the bolt
     ]),
+
+    # --- Shrine of Sorcery: a four-point arcane star — purple, matches Shrine::colorOf. ---
+    ("ShrineSpell", [
+        "...44...",
+        "...44...",
+        "..3443..",
+        "44433444",
+        "44433444",
+        "..3443..",
+        "...44...",
+        "...44...",
+    ], [
+        (0.00, 0.00, 0.00),
+        (0.30, 0.15, 0.45),
+        (0.45, 0.25, 0.65),
+        (0.60, 0.32, 0.85),   # 3 inner glow
+        (0.78, 0.40, 1.00),   # 4 the star (the shrine's purple)
+    ]),
 ]
 
 

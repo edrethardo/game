@@ -751,7 +751,7 @@ private:
     // scaling statics for the cast that follows. baseMult = the pre-gear multiplier (class/floor
     // scale, or 1.0 for item/proc skills); the gear % folds INTO it so every damage site — the
     // frozen orb's stored multiplier included — scales with zero per-skill edits.
-    void applySpellScaling(const PlayerInventory& inv, f32 baseMult);
+    void applySpellScaling(const PlayerInventory& inv, f32 baseMult, f32 shrinePct = 0.0f);
     void hemophageAuraTick(Vec3 pos, u8 wearerSlot, f32& tickTimer, f32& health, f32 maxHealth, f32 dt);
     // Server-side CL_METEOR handler: validate + spawn the authoritative meteor for `slot`, then
     // relay it to the other clients.

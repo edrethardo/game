@@ -353,7 +353,8 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // Item skills scale by item level (boots) and use base class damage (1.0).
                 SkillSystem::setSkillPower(boots.itemLevel > 1
                     ? static_cast<f32>(boots.itemLevel - 1) / 149.0f : 0.0f);
-                applySpellScaling(m_inventories[i], 1.0f);  // remote's own gear spell dmg (TA-7)
+                applySpellScaling(m_inventories[i], 1.0f,
+                    Shrine::spellShrinePct(m_players[i].shrineBuff, m_players[i].shrineBuffTimer));
                 // Stamp the remote's net slot so per-slot skill state (overcharge buff,
                 // meteor/holy kill-heal target) lands on the actual caster, not the host.
                 // (H4/H5: overcharge arrays are MAX_PLAYERS-sized; updateMeteors resolves
@@ -441,7 +442,8 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
                 // skill damage uses its own floor/weapon, not the host's last cast.
                 SkillSystem::setSkillPower(0.0f); // class skills use base power
                 // Class skill damage scales 6% per effective floor (reuse effectiveFloor above).
-                applySpellScaling(m_inventories[i], 1.0f + (effectiveFloor - 1) * 0.06f);
+                applySpellScaling(m_inventories[i], 1.0f + (effectiveFloor - 1) * 0.06f,
+                    Shrine::spellShrinePct(m_players[i].shrineBuff, m_players[i].shrineBuffTimer));
                 // Weapon damage for Marksman skills that scale off the equipped weapon.
                 { const ItemInstance& wpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
                   WeaponDef wd = !isItemEmpty(wpn)
@@ -550,7 +552,7 @@ void Engine::adoptSnapshotCooldowns() {
     // Straight assignment, not adoptMax: the server is the sole author, so its value is the truth —
     // including when it expires (a max-merge would make the buff immortal on the client).
     {
-        const u8  type = static_cast<u8>((sp->statusFlags >> 5) & 0x03u);
+        const u8  type = static_cast<u8>((sp->statusFlags >> 5) & 0x07u);   // bits 5-7 since the 4th shrine
         const f32 remaining = static_cast<f32>(sp->shrineTimerQ) * 0.2f;
         // VITALITY's max-HP bump is applied server-side and already rides in SnapPlayer.maxHealth,
         // which the client reconstructs absolute HP from — so the client must NOT re-apply it here

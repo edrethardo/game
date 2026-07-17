@@ -371,6 +371,9 @@ static constexpr u16 CHEST_ID = 0xFFF8;
 // its E-interact needs no server round-trip.
 static constexpr u16 STASH_ID = 0xFFF7;
 
+// Fourth shrine: +spell damage (arcane purple). Below STASH_ID; next free sentinel is 0xFFF5.
+static constexpr u16 SHRINE_SPELL_ID = 0xFFF6;
+
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
 }
@@ -381,7 +384,7 @@ inline bool isSourceShard(const ItemInstance& item) {
 
 inline bool isShrine(const ItemInstance& item) {
     return item.defId == SHRINE_POWER_ID || item.defId == SHRINE_SPEED_ID ||
-           item.defId == SHRINE_VITALITY_ID;
+           item.defId == SHRINE_VITALITY_ID || item.defId == SHRINE_SPELL_ID;
 }
 
 inline bool isChest(const ItemInstance& item) {

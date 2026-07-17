@@ -909,6 +909,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 // stacks. On a CLIENT both are adopted from SnapPlayer.flags in clientNetPost.
                 {"CHG", {0.45f, 0.80f, 1.00f}, m_localPlayer.chargeTimer,
                     m_localPlayer.chargeStacks > 0 ? static_cast<f32>(m_localPlayer.chargeStacks) : -1.0f},
+                // Shrine of Sorcery (row 12 — appended AFTER Capacitor; inserting at the shrine
+                // block would shift the CHG icon mapping).
+                {"SPL", Shrine::colorOf(ShrineBuff::SPELL),
+                    m_localPlayer.shrineBuff == ShrineBuff::SPELL ? m_localPlayer.shrineBuffTimer : 0.0f, -1.0f},
             };
             // Energy bar top edge is at y=52, place icons above with gap (scaled)
             f32 hs2 = static_cast<f32>(sh) / 720.0f;

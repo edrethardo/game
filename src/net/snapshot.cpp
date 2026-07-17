@@ -124,7 +124,8 @@ void Snapshot::buildFromState(WorldSnapshot& snap, u32 tick,
         sp.helmetSkillLastActivationTick = 0;
         sp.potionLastActivationTick      = np.potionLastActivationTick;
         // Shrine buff: type in statusFlags bits 5-6, remaining quantized to 0-51 s / 0.2 s steps.
-        sp.statusFlags = static_cast<u8>(sp.statusFlags | ((np.shrineBuff & 0x03u) << 5));
+        // Shrine type in bits 5-7 (widened from 5-6 when the 4th shrine arrived; bit 7 was free).
+        sp.statusFlags = static_cast<u8>(sp.statusFlags | ((np.shrineBuff & 0x07u) << 5));
         {
             f32 q = np.shrineBuffTimer / 0.2f;
             if (q < 0.0f)   q = 0.0f;

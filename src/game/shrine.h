@@ -20,7 +20,8 @@ namespace ShrineBuff {
     constexpr u8 POWER    = 1;   // +damage
     constexpr u8 SPEED    = 2;   // +move speed
     constexpr u8 VITALITY = 3;   // +max HP, and heals by the same amount (see below)
-    constexpr u8 COUNT    = 4;
+    constexpr u8 SPELL    = 4;   // +spell (skill) damage — rides the applySpellScaling cast path
+    constexpr u8 COUNT    = 5;   // wire: the type now needs statusFlags bits 5-7 (was 5-6)
 }
 
 namespace Shrine {
@@ -30,6 +31,7 @@ constexpr f32 DURATION_SEC   = 45.0f;
 constexpr f32 POWER_BONUS    = 0.30f;   // +30% damage
 constexpr f32 SPEED_BONUS    = 0.25f;   // +25% move speed
 constexpr f32 VITALITY_BONUS = 0.40f;   // +40% max HP
+constexpr f32 SPELL_BONUS    = 0.40f;   // +40% spell (skill) damage
 
 // Chance a given room contains a shrine, and the cap per floor. At 25% across the ~12 candidate
 // rooms of a floor, ~97% of floors hold at least one — shrines are meant to be found, and the
@@ -42,6 +44,7 @@ inline f32 bonusFor(u8 buff) {
         case ShrineBuff::POWER:    return POWER_BONUS;
         case ShrineBuff::SPEED:    return SPEED_BONUS;
         case ShrineBuff::VITALITY: return VITALITY_BONUS;
+        case ShrineBuff::SPELL:    return SPELL_BONUS;
         default:                   return 0.0f;
     }
 }
@@ -51,6 +54,7 @@ inline const char* nameOf(u8 buff) {
         case ShrineBuff::POWER:    return "Shrine of Power";
         case ShrineBuff::SPEED:    return "Shrine of Speed";
         case ShrineBuff::VITALITY: return "Shrine of Vitality";
+        case ShrineBuff::SPELL:    return "Shrine of Sorcery";
         default:                   return "Shrine";
     }
 }
@@ -63,6 +67,7 @@ inline u8 buffOf(const ItemInstance& item) {
         case SHRINE_POWER_ID:    return ShrineBuff::POWER;
         case SHRINE_SPEED_ID:    return ShrineBuff::SPEED;
         case SHRINE_VITALITY_ID: return ShrineBuff::VITALITY;
+        case SHRINE_SPELL_ID:    return ShrineBuff::SPELL;
         default:                 return ShrineBuff::NONE;
     }
 }
@@ -73,8 +78,15 @@ inline u16 defIdFor(u8 buff) {
     switch (buff) {
         case ShrineBuff::POWER:    return SHRINE_POWER_ID;
         case ShrineBuff::SPEED:    return SHRINE_SPEED_ID;
+        case ShrineBuff::SPELL:    return SHRINE_SPELL_ID;
         default:                   return SHRINE_VITALITY_ID;
     }
+}
+
+// Cast-site helper: the shrine's spell-damage % while its window is live (0 otherwise).
+// Consumed by Engine::applySpellScaling alongside the gear affixes.
+inline f32 spellShrinePct(u8 buff, f32 timer) {
+    return (buff == ShrineBuff::SPELL && timer > 0.0f) ? SPELL_BONUS * 100.0f : 0.0f;
 }
 
 // A shrine's signature colour. The in-world crystal and the minimap icon both read it from here, so
@@ -85,6 +97,7 @@ inline Vec3 colorOf(u8 buff) {
         case ShrineBuff::POWER:    return {1.00f, 0.35f, 0.30f};   // red
         case ShrineBuff::SPEED:    return {0.40f, 0.85f, 1.00f};   // cyan
         case ShrineBuff::VITALITY: return {0.45f, 1.00f, 0.55f};   // green
+        case ShrineBuff::SPELL:    return {0.78f, 0.40f, 1.00f};   // arcane purple
         default:                   return {1.00f, 1.00f, 1.00f};
     }
 }

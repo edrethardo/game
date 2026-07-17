@@ -1350,7 +1350,7 @@ void Engine::spawnFloorShrines(const DungeonResult& dungeon)
                      room.floorHeight + 0.5f,
                      (room.z + room.d * 0.5f) * m_level.grid.cellSize };
 
-        const u8 kind = static_cast<u8>(1 + (std::rand() % 3));   // POWER / SPEED / VITALITY
+        const u8 kind = static_cast<u8>(1 + (std::rand() % 4));   // POWER / SPEED / VITALITY / SPELL
         ItemInstance s;
         s.defId = Shrine::defIdFor(kind);
         s.uid   = m_worldItems.nextUid++;

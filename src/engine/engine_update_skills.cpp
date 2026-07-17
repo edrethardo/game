@@ -40,6 +40,7 @@
 #include "game/game_constants.h"
 #include "game/skill_internal.h"   // fireChainLightning — Static Charge / Thunderwall proc
 #include "game/static_charge.h"    // Capacitor Mail stack accumulator (pure, tested)
+#include "game/shrine.h"           // Shrine of Sorcery % — applySpellScaling call sites
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -227,7 +228,9 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
             // gear spell damage (flat + %) rides on top via applySpellScaling.
             { u32 effFloor = m_level.currentFloor + m_difficulty * 50;
               applySpellScaling(m_inventories[m_localPlayerIndex],
-                                1.0f + (effFloor - 1) * 0.06f); }
+                                1.0f + (effFloor - 1) * 0.06f,
+                                Shrine::spellShrinePct(m_localPlayer.shrineBuff,
+                                                       m_localPlayer.shrineBuffTimer)); }
             // Set weapon damage for Marksman skills that scale off equipped weapon
             { const ItemInstance& wpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
               WeaponDef wd = !isItemEmpty(wpn)
@@ -298,7 +301,9 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         // Scale by boots item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
-        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f);  // item skills: base mult + gear spell dmg
+        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f,
+                          Shrine::spellShrinePct(m_localPlayer.shrineBuff,
+                                                 m_localPlayer.shrineBuffTimer));  // item skills
         if (SkillSystem::tryActivate(m_bootSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -321,7 +326,9 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
         // Scale by helmet item level — item skills use base class damage (1.0)
         { u8 lvl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)].itemLevel;
           SkillSystem::setSkillPower(lvl > 1 ? static_cast<f32>(lvl - 1) / 149.0f : 0.0f); }
-        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f);  // item skills: base mult + gear spell dmg
+        applySpellScaling(m_inventories[m_localPlayerIndex], 1.0f,
+                          Shrine::spellShrinePct(m_localPlayer.shrineBuff,
+                                                 m_localPlayer.shrineBuffTimer));  // item skills
         if (SkillSystem::tryActivate(m_helmetSkillStates[m_localPlayerIndex], m_skillDefs, m_skillDefCount,
                                       eyePos, m_localPlayer.forward, m_localPlayer.yaw,
                                       m_projectiles, m_entities, m_level.grid, m_localPlayer,
@@ -539,8 +546,11 @@ void Engine::tickArmorRingPassives(f32 dt) {
 // paths (engine_net.cpp) — always with the CASTER's own inventory (co-op: the server's synced
 // copy of the guest's gear).
 // ---------------------------------------------------------------------------
-void Engine::applySpellScaling(const PlayerInventory& inv, f32 baseMult) {
-    SkillSystem::setClassDamageMult(baseMult * (1.0f + Inventory::spellDamagePct(inv) / 100.0f));
+void Engine::applySpellScaling(const PlayerInventory& inv, f32 baseMult, f32 shrinePct) {
+    // Gear % and the Shrine of Sorcery's % stack additively, then fold into the one multiplier
+    // every skill damage site reads.
+    SkillSystem::setClassDamageMult(baseMult *
+        (1.0f + (Inventory::spellDamagePct(inv) + shrinePct) / 100.0f));
     SkillSystem::setSpellDamageFlat(Inventory::spellDamageFlat(inv));
 }
 
@@ -563,7 +573,12 @@ void Engine::staticDischarge(Vec3 pos, u8 wearerSlot, u16 attackerIdx) {
         }
     }
     if (!found) {
-        f32 best = 25.0f;   // 5m squared
+        // Sourceless hits (projectiles/AoE stamp attackerIdx 0xFFFF) are THE ranged case, and
+        // the shooter is far by definition — a 5m fallback made Thunderwall/Capacitor fizzle
+        // against every archer/caster. Scan out to chain lightning's own first-hop range (15m)
+        // so a perfect-blocked arrow answers the archer that fired it (nearest hostile is the
+        // shooter often enough, and the bolt chains onward regardless).
+        f32 best = 225.0f;  // 15m squared
         for (u32 a = 0; a < m_entities.activeCount; a++) {
             const Entity& e = m_entities.entities[m_entities.activeList[a]];
             if ((e.flags & ENT_DEAD) || (e.flags & ENT_FRIENDLY)) continue;
@@ -573,7 +588,7 @@ void Engine::staticDischarge(Vec3 pos, u8 wearerSlot, u16 attackerIdx) {
             if (d2 < best) { best = d2; target = e.position; found = true; }
         }
     }
-    if (!found) return;   // struck by something with no target to answer — the charge is spent
+    if (!found) return;   // nothing within lightning range to answer — the charge is spent
 
     const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, SkillId::CHAIN_LIGHTNING);
     if (!def) return;
