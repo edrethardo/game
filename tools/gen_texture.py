@@ -30,6 +30,13 @@ PALETTES = {
         (58, 98, 44),
         (102, 148, 70),
     ],
+    "desert": [
+        (196, 178, 128),
+        (210, 192, 140),
+        (182, 164, 116),
+        (222, 204, 152),
+        (172, 152, 106),
+    ],
     "dark_dungeon": [
         (42, 42, 48),
         (58, 58, 64),
@@ -108,6 +115,7 @@ TEXTURE_TYPES = [
     "void_wall_runes",
     "stone_floor",
     "grass",
+    "sand",
     "wood_plank",
     "stone_ceiling",
     "metal_grate",
@@ -128,6 +136,7 @@ DEFAULT_PALETTE = {
     "void_wall_runes": "dark_dungeon",
     "stone_floor": "cold_stone",
     "grass": "meadow",
+    "sand": "desert",
     "wood_plank": "warm_brick",
     "stone_ceiling": "dark_dungeon",
     "metal_grate": "cold_stone",
@@ -424,6 +433,31 @@ def gen_grass(img, size, palette):
         for dx2 in range(2):
             for dy2 in range(2):
                 if random.random() < 0.75:
+                    px[x + dx2, y + dy2] = (*d[:3], 255)
+
+
+def gen_sand(img, size, palette):
+    """Arena sand: soft tan noise with bright grain glints and sparse darker pebbles.
+    Same calm-field philosophy as gen_grass — a whole arena floor of it must not shimmer."""
+    px = img.load()
+    for y in range(size):
+        for x in range(size):
+            base = random.choice(palette)
+            px[x, y] = noise_color(base, 5)
+    # Grain glints: single bright pixels (no vertical bias — sand has no blades)
+    for _ in range(size * 2):
+        x = random.randint(0, size - 1)
+        y = random.randint(0, size - 1)
+        c = brighten(random.choice(palette), 24)
+        px[x, y] = (*c[:3], 255)
+    # Sparse pebbles ground the field
+    for _ in range(size // 5):
+        x = random.randint(0, size - 2)
+        y = random.randint(0, size - 2)
+        d = darken(random.choice(palette), 0.72)
+        for dx2 in range(2):
+            for dy2 in range(2):
+                if random.random() < 0.7:
                     px[x + dx2, y + dy2] = (*d[:3], 255)
 
 
@@ -744,6 +778,7 @@ def gen_particle_spark(img, size, palette):  # noqa: ARG001 -- palette unused
 
 GENERATORS = {
     "grass": gen_grass,
+    "sand": gen_sand,
     "stone_wall": gen_stone_wall,
     "stone_wall_moss": gen_stone_wall_moss,
     "brick_wall": gen_brick_wall,

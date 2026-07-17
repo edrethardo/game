@@ -33,6 +33,7 @@ def build_textures():
         ("void_wall_runes",     42, 32, "dark_dungeon"),
         ("wood_plank",    42, 32, "warm_brick"),
         ("grass",         42, 32, "meadow"),      # town plaza ground
+        ("sand",          42, 32, "desert"),      # PvP arena ground
         ("metal_grate",   42, 16, "cold_stone"),
     ]
 

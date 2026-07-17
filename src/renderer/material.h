@@ -4,7 +4,7 @@
 #include "core/math.h"
 #include "renderer/texture.h"
 
-static constexpr u32 MAX_MATERIALS = 192; // 161 in materials.json (per-tier wall variants pushed past 160)
+static constexpr u32 MAX_MATERIALS = 192; // 167 in materials.json (per-tier wall variants pushed past 160)
 
 struct Material {
     Texture texture;

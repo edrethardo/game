@@ -16,6 +16,7 @@
 #include "core/log.h"
 #include "net/net.h"
 #include "platform/window.h"
+#include "platform/input.h"   // Input::setSplitScreen — the --arena-couch dev door
 #include "platform/steam.h"   // Steam::joinLobby for +connect_lobby cold-start
 
 #include <cstring>
@@ -104,7 +105,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         mode = GameStart::CONTINUE;
         // A CLEARED hero's Continue lands in the TOWN, exactly like the menu route — without
         // this, --load on a cleared save would feed the marker floor (51) into the generator.
-        if (opt.role != LaunchOptions::Role::JOIN &&
+        if (opt.role != LaunchOptions::Role::JOIN && !opt.arena && !opt.arenaCouch &&
             FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) {
             if (opt.role == LaunchOptions::Role::HOST) {
                 if (!Net::hostServer(opt.port, opt.upnp, 1)) {
@@ -124,6 +125,18 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         m_difficulty = opt.difficulty;
         m_level.currentFloor = opt.floor;
         mode = GameStart::NEW_GAME;
+    }
+
+    // --- Dev door (--arena-couch): local-versus PvP with two fresh lanes of opt.cls. ---
+    if (opt.arenaCouch) {
+        m_playerClasses[1] = opt.cls;         // both lanes fight as the same class
+        equipFreshLane(0);
+        equipFreshLane(1);
+        m_splitPlayerCount = 2;
+        Input::setSplitScreen(true);
+        enterArena();
+        LOG_INFO("Launch: entered the ARENA (local versus, --arena-couch)");
+        return;
     }
 
     m_splitPlayerCount = 1;  // CLI launch is always single local player
@@ -168,6 +181,15 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         (void)mode;
         enterTown();
         LOG_INFO("Launch: entered the TOWN hub (--town)");
+        return;
+    }
+    if (opt.arena) {
+        // Dev door (--arena): straight into the PvP arena (optionally hosting — the HOST
+        // block above already brought the listen-server up, and enterArena broadcasts the
+        // sentinel seed so joiners follow).
+        (void)mode;
+        enterArena();
+        LOG_INFO("Launch: entered the ARENA (--arena)");
         return;
     }
     startGame(mode);

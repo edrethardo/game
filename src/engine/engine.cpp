@@ -794,6 +794,11 @@ void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
         s_engine->enterTownClient();
         return;
     }
+    // Sentinel floor 97 = the host started a PvP ARENA match — build the same colosseum.
+    if (floor == GameConst::ARENA_SENTINEL_FLOOR) {
+        s_engine->enterArenaClient();
+        return;
+    }
     // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe).
     // Compare announced (floor, difficulty) against current — only act on a STRICTLY newer
     // descent. This both rejects a dup for the current floor and accepts a genuinely newer

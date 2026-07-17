@@ -1769,6 +1769,8 @@ void Engine::updateLobby(f32 dt) {
                 enterTownClient();
             } else if (m_level.currentFloor == GameConst::SOURCE_SENTINEL_FLOOR) {
                 enterSourceChamberClient();
+            } else if (m_level.currentFloor == GameConst::ARENA_SENTINEL_FLOOR) {
+                enterArenaClient();   // joining a PvP arena match in progress
             } else {
                 startGame(GameStart::CONTINUE);
             }

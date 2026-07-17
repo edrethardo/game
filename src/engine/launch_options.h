@@ -48,6 +48,8 @@ struct LaunchOptions {
     char address[64] = "127.0.0.1";            // for Role::JOIN
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
+    bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA
+    bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
     u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
 

@@ -85,6 +85,8 @@ struct Player {
                                   // perfect-block callback + projectile parry, which only get a Player&
     f32  lastDamageTaken  = 0.0f; // damage from last hit (for thorns reflection + Blood Nova armor retaliation)
     u16  lastDamageAttackerIdx = 0xFFFF; // entity index of the last attacker (0xFFFF = unknown, e.g. enemy projectile) — thorns targeting
+    u8   lastHitByPlayerSlot   = 0xFF;   // net slot of the last PLAYER who damaged us (Arena PvP kill
+                                         // credit; 0xFF = none). Transient — never serialized.
     f32  bloodNovaCooldown = 0.0f; // Blood Nova ARMOR aura (Demonhide Cuirass): internal retaliation cooldown.
                                    // Transient — Player is serialized field-by-field, so this adds no save-format change.
 

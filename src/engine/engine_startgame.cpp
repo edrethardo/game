@@ -418,8 +418,10 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         m_level.sourcePortalActive = false;
     }
     // Any run start leaves the town behind (portal descent, menu starts) — the sky, the
-    // stay-home NPC gate and the portal all key on this.
+    // stay-home NPC gate and the portal all key on this. Same for the PvP arena: a normal
+    // start must drop the mode flag or PvP damage would leak into the dungeon.
     m_level.inTown           = false;
+    m_level.inArena          = false;
     m_level.townPortalActive = false;
     EnemyAI::setTownMode(false);   // dungeon companions follow + fight again
     // Floor + difficulty fold in so each floor and each difficulty-loop tier differs.

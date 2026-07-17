@@ -20,6 +20,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/stash.h"
+#include "game/arena.h"   // PvP deathmatch rules (Arena mode, floor 97)
 #include "game/interact.h"   // tap/hold interact rule (pure)
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
@@ -546,6 +547,10 @@ private:
         // The post-Engine TOWN hub (sentinel floor 98). inTown flips the sky/lighting, gates the
         // NPCs' stay-home AI, and routes saves to keep the CLEARED header floor (never 98).
         bool          inTown             = false;
+        // The PvP ARENA (Arena mode, sentinel floor 97, engine_arena.cpp). inArena shares the
+        // town's daylight rendering, gates ALL PvP damage (Combat::pvpActive), and firewalls
+        // progression: no XP, no loot, no drops, no saves. Like inTown, never serialized.
+        bool          inArena            = false;
         bool          townPortalActive   = false; // the town's to-dungeon portal (opens Free-Play select)
         Vec3          townPortalPos;
         bool          sourcePortalActive = false; // the second hidden portal is live in the floor-50 arena
@@ -557,6 +562,13 @@ private:
         Vec3          exitPortalPos;              // valid while exitPortalActive
     };
     LevelState m_level;
+
+    // --- Arena mode (PvP deathmatch, engine_arena.cpp) -----------------------------------
+    // Authoritative on the host/SP; clients mirror score + match-end via ARENA_* events.
+    Arena::Score m_arenaScore;                      // kills per net slot
+    f32          m_arenaRespawn[MAX_PLAYERS] = {};  // >0 = that slot is dead, counting down to auto-respawn
+    f32          m_arenaOverTimer = 0.0f;           // >0 = match decided, winner banner running
+    u8           m_arenaWinner    = 0xFF;           // valid while m_arenaOverTimer > 0
 
     // Entities + projectiles (authoritative on server/singleplayer)
     EntityPool     m_entities;
@@ -974,6 +986,14 @@ private:
     void spawnTownContents(Vec3 center);
     void enterTown();
     void enterTownClient();
+    // PvP arena (engine_arena.cpp): deterministic colosseum on sentinel floor 97 — same rails
+    // as the town (host broadcasts the sentinel seed, clients build the identical level).
+    Vec3 buildArenaLevel();
+    void spawnArenaContents(Vec3 center);
+    void enterArenaCommon();          // shared host/client body (build + reset + local placement)
+    void enterArena();                // host/SP entry (seats NetPlayers, broadcasts the seed)
+    void enterArenaClient();          // client mirror (position/score adopted from the server)
+    Vec3 arenaPad(u8 slot) const;     // a slot's spawn/respawn pad (world coords)
     // Post-Engine victory flow: portal spawn (host: local + broadcast; client: via SV_EVENT),
     // the arbitrated enter (updateExitPortal), and the shared credits sequence. startCredits is
     // the LOCAL state flip every machine runs; beginCreditsSequence is the server/SP entry that
