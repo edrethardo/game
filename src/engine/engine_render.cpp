@@ -841,16 +841,61 @@ void Engine::render(f32 alpha) {
         FontSystem::drawText(hudW, hudH, (hudW - dw) * 0.5f, hudH * 0.55f,
                              deathText, {0.8f, 0.1f, 0.1f}, 3);
 
-        bool pad = Input::activeDeviceIsGamepad();
-        // Networked MP frees the cursor while dead (engine_update.cpp), so the prompt is
-        // clickable; advertise that. Split-screen co-op keeps the cursor captured (key only).
-        const char* respawnText = pad ? "Press A to respawn"
-                                : (m_netRole != NetRole::NONE) ? "Press Space or click to respawn"
-                                : "Press Space to respawn";
-        f32 rw = FontSystem::textWidth(respawnText, 2);
-        FontSystem::drawText(hudW, hudH, (hudW - rw) * 0.5f, hudH * 0.4f,
-                             respawnText, {0.7f, 0.7f, 0.7f}, 2);
+        if (m_level.inArena) {
+            // Arena: no manual respawn — show the auto-respawn countdown instead. The slot's
+            // clock is authoritative on the host; a CLIENT ticks its own cosmetic copy
+            // (arenaTick), so both read the same array.
+            u8 rslot = (m_netRole == NetRole::CLIENT) ? activeNetSlot()
+                                                      : m_localPlayerIndex;
+            u32 secs = static_cast<u32>(ceilf(fmaxf(m_arenaRespawn[rslot], 0.0f)));
+            char cd[40];
+            if (secs > 0) std::snprintf(cd, sizeof(cd), "Respawning in %u...", secs);
+            else          std::snprintf(cd, sizeof(cd), "Respawning...");
+            f32 cw = FontSystem::textWidth(cd, 2);
+            FontSystem::drawText(hudW, hudH, (hudW - cw) * 0.5f, hudH * 0.4f,
+                                 cd, {0.9f, 0.75f, 0.3f}, 2);
+        } else {
+            bool pad = Input::activeDeviceIsGamepad();
+            // Networked MP frees the cursor while dead (engine_update.cpp), so the prompt is
+            // clickable; advertise that. Split-screen co-op keeps the cursor captured (key only).
+            const char* respawnText = pad ? "Press A to respawn"
+                                    : (m_netRole != NetRole::NONE) ? "Press Space or click to respawn"
+                                    : "Press Space to respawn";
+            f32 rw = FontSystem::textWidth(respawnText, 2);
+            FontSystem::drawText(hudW, hudH, (hudW - rw) * 0.5f, hudH * 0.4f,
+                                 respawnText, {0.7f, 0.7f, 0.7f}, 2);
+        }
 
+        glDisable(GL_BLEND);
+    }
+
+    // Arena match decided: winner banner + final table over the (frozen-scoring) live view,
+    // on every peer, for the ~8 s before arenaTick tears down to the menu.
+    if (m_level.inArena && m_arenaOverTimer > 0.0f) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        char winStr[32];
+        std::snprintf(winStr, sizeof(winStr), "PLAYER %u WINS", m_arenaWinner + 1);
+        f32 ww = FontSystem::textWidth(winStr, 4);
+        FontSystem::drawText(hudW, hudH, (hudW - ww) * 0.5f, hudH * 0.62f,
+                             winStr, {1.0f, 0.8f, 0.2f}, 4);
+        f32 rowY = hudH * 0.5f;
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            bool combatant = (i < m_splitPlayerCount) || m_players[i].active ||
+                             m_arenaScore.kills[i] > 0;
+            if (!combatant) continue;
+            char row[32];
+            std::snprintf(row, sizeof(row), "P%u  -  %u kills", i + 1,
+                          static_cast<u32>(m_arenaScore.kills[i]));
+            f32 rw2 = FontSystem::textWidth(row, 2);
+            Vec3 col = (i == m_arenaWinner) ? Vec3{1.0f, 0.85f, 0.3f} : Vec3{0.7f, 0.7f, 0.7f};
+            FontSystem::drawText(hudW, hudH, (hudW - rw2) * 0.5f, rowY, row, col, 2);
+            rowY -= 26.0f;
+        }
+        const char* backStr = "Returning to the menu...";
+        f32 bw = FontSystem::textWidth(backStr, 1);
+        FontSystem::drawText(hudW, hudH, (hudW - bw) * 0.5f, hudH * 0.28f,
+                             backStr, {0.6f, 0.6f, 0.6f}, 1);
         glDisable(GL_BLEND);
     }
 

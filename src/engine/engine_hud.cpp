@@ -550,10 +550,62 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
     {
         f32 hs = static_cast<f32>(sh) / 720.0f;
         char floorStr[32];
-        if (m_level.inTown) std::snprintf(floorStr, sizeof(floorStr), "The Town");
-        else                std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
+        if      (m_level.inArena) std::snprintf(floorStr, sizeof(floorStr), "Arena");
+        else if (m_level.inTown)  std::snprintf(floorStr, sizeof(floorStr), "The Town");
+        else                      std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
         FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 22.0f * hs,
                              floorStr, {0.7f, 0.7f, 0.7f}, 2);
+    }
+
+    // Arena PvP: score strip (top-center) + kill feed beneath it. Data is the authoritative
+    // m_arenaScore on the host/SP and the ARENA_* event mirror on clients — same fields either
+    // way, so this render block needs no role logic beyond "whose viewport is this".
+    if (m_level.inArena) {
+        f32 hs = static_cast<f32>(sh) / 720.0f;
+        const u8 mySlot = (m_netRole == NetRole::CLIENT) ? activeNetSlot() : m_localPlayerIndex;
+
+        // One "P<n> <kills>" segment per combatant, joined into a single centered line.
+        char strip[96];
+        u32 pos = 0;
+        for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            bool combatant = (i < m_splitPlayerCount) || m_players[i].active ||
+                             m_arenaScore.kills[i] > 0;
+            if (!combatant) continue;
+            pos += static_cast<u32>(std::snprintf(strip + pos, sizeof(strip) - pos,
+                       "%sP%u %u", pos ? "   " : "", i + 1,
+                       static_cast<u32>(m_arenaScore.kills[i])));
+            if (pos >= sizeof(strip) - 8) break;
+        }
+        if (pos > 0) {
+            f32 stw = FontSystem::textWidth(strip, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stw) * 0.5f,
+                                 static_cast<f32>(sh) - 24.0f * hs, strip,
+                                 {1.0f, 0.8f, 0.3f}, 2);
+            // Marker under the viewer's own segment would need per-segment layout; a simple
+            // "(you: P<n>)" tag keeps the strip single-sourced and unambiguous in FFA chaos.
+            char youTag[16];
+            std::snprintf(youTag, sizeof(youTag), "you are P%u", mySlot + 1);
+            f32 ytw = FontSystem::textWidth(youTag, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - ytw) * 0.5f,
+                                 static_cast<f32>(sh) - 42.0f * hs, youTag,
+                                 {0.6f, 0.55f, 0.4f}, 1);
+        }
+
+        // Kill feed: newest first, fading out over the last second of each entry's ttl.
+        for (u32 i = 0; i < ARENA_FEED_LINES; i++) {
+            if (m_arenaFeed[i].ttl <= 0.0f) continue;
+            f32 a = fminf(m_arenaFeed[i].ttl, 1.0f);
+            char line[48];
+            if (m_arenaFeed[i].killer < MAX_PLAYERS)
+                std::snprintf(line, sizeof(line), "P%u slew P%u",
+                              m_arenaFeed[i].killer + 1, m_arenaFeed[i].victim + 1);
+            else
+                std::snprintf(line, sizeof(line), "P%u died", m_arenaFeed[i].victim + 1);
+            f32 lw = FontSystem::textWidth(line, 1);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f,
+                                 static_cast<f32>(sh) - (60.0f + 16.0f * i) * hs, line,
+                                 {0.9f * a, 0.35f * a, 0.35f * a}, 1);
+        }
     }
 
 }
