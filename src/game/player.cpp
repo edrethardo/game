@@ -7,6 +7,7 @@
 #include "net/net_player.h"
 #include "net/packet.h"  // Quantize::packAngle / packPos for absolute-aim NetInput
 #include "platform/input.h"
+#include "world/collision.h"  // JUMP_SPEED (the launch impulse); GRAVITY is integrated in moveAndSlide
 #include <cmath>
 
 // --bot-walk: synthesize deterministic input for netcode verification (see player.h).
@@ -63,7 +64,7 @@ static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
                            f32 moveSpeed, f32 sensitivity,
                            f32 lookDX, f32 lookDY,
                            bool w, bool s, bool a, bool d, bool jump,
-                           f32 dt)
+                           JumpAssist::JumpState& jumpState, f32 dt)
 {
     // Mouse/stick/gyro look — float precision, no integer quantization
     yaw   -= lookDX * sensitivity;
@@ -101,13 +102,14 @@ static void applyMovement(Vec3& position, Vec3& velocity, f32& yaw, f32& pitch,
     velocity.x = horzMove.x;
     velocity.z = horzMove.z;
 
-    if (jump && onGround) {
-        velocity.y = 8.0f;
+    // Jump with coyote-time + jump-buffer grace (game/jump.h). `onGround` here is last tick's ground
+    // state (moveAndSlide, which sets it, runs AFTER this step); resolve() advances the grace timers
+    // and reports whether a (possibly buffered / coyote) jump fires now. Only the impulse lives here
+    // — gravity is integrated ONCE in Collision::moveAndSlide. Applying it a second time here (the
+    // old `velocity.y -= 20*dt`) was the double-gravity bug that halved the tuned jump arc.
+    if (JumpAssist::resolve(jumpState, jump, onGround, dt)) {
+        velocity.y = JUMP_SPEED;
         onGround   = false;
-    }
-
-    if (!onGround) {
-        velocity.y -= 20.0f * dt;
     }
 }
 
@@ -257,7 +259,7 @@ void PlayerController::update(Player& player, f32 dt) {
                   // so wire and local sim jump on the same tick.
                   s_botWalk ? (s_botFlagsThisTick & INPUT_JUMP) != 0
                             : Input::isActionPressed(GameAction::JUMP),
-                  dt);
+                  player.jumpState, dt);
 
     // --- Wanderer dodge roll tick ---
     // Override velocity during roll for a consistent 4m distance (8m/s × 0.5s).
@@ -388,7 +390,7 @@ void PlayerController::updateNetPlayerFromInput(NetPlayer& np, const NetInput& i
                   (input.moveFlags & INPUT_LEFT)     != 0,
                   (input.moveFlags & INPUT_RIGHT)    != 0,
                   (input.moveFlags & INPUT_JUMP)     != 0,
-                  dt);
+                  np.jumpState, dt);
 
     // Server-side Wanderer dodge replication. The server now replays the SAME 4 m roll the
     // client predicts (previously it only granted i-frames, so a guest's dodge diverged ~4 m

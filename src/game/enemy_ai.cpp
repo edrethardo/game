@@ -110,9 +110,16 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
     // that blocks BOTH — and nudge out of it below.
     bool blockedX = false, blockedZ = false;
 
+    // A jump-ledge (CELL_LEDGE) reads as a wall to a walking body: enemies can't jump, so their feet
+    // (position is centre-based → feet = y - halfExtents.y) are never within STEP_UP_HEIGHT of a
+    // raised ledge, and overlapsLedgeAbove blocks the step. Harmless where no ledges exist (every
+    // current level + every walkable tier), and boss arenas use plain raised floors, not CELL_LEDGE.
+    const f32 feetY = e.position.y - e.halfExtents.y;
+
     // X axis — zero velocity on collision to prevent wall penetration over time
     Vec3 tryPos = e.position + Vec3{delta.x, 0, 0};
-    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid) &&
+        !Collision::overlapsLedgeAbove({tryPos.x, feetY, tryPos.z}, e.halfExtents.x, grid)) {
         e.position.x = tryPos.x;
     } else {
         e.velocity.x = 0.0f;
@@ -121,7 +128,8 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
 
     // Z axis
     tryPos = e.position + Vec3{0, 0, delta.z};
-    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid)) {
+    if (!entityOverlapsGrid(tryPos, e.halfExtents, grid) &&
+        !Collision::overlapsLedgeAbove({tryPos.x, feetY, tryPos.z}, e.halfExtents.x, grid)) {
         e.position.z = tryPos.z;
     } else {
         e.velocity.z = 0.0f;
@@ -801,5 +809,36 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
             e.stuckTimer = 0.0f;
         }
         e.lastSeenPos = e.position;
+    }
+
+    // --- Wall-ejection safety net (invariant: no entity ends a tick embedded in geometry) ---------
+    // Routine movement — entityMoveAndSlide, squad/separation pushes, the champion blink — all
+    // VALIDATE against walls, so they can crowd a body up to a wall but never into one. A few paths
+    // still write position DIRECTLY and can embed a body: a summoner reviving a corpse that died flush
+    // against a wall (its own ensureNotInWall can be defeated in a tight spot), and a boss leash-clamp
+    // or walk-home catching knockback / teleport overshoot. Rather than harden each call site and hope
+    // the next one remembers, this final pass guarantees the invariant the way the PLAYER already gets
+    // it — a per-tick wall push-out (engine_update.cpp) that enemies never had an equivalent of. It is
+    // authoritative-sim only (EnemyAI::update never runs on a CLIENT), so the corrected position simply
+    // rides the next snapshot out to every guest.
+    //
+    // The overlap test uses the CAPPED nav footprint (navExtents), NOT full halfExtents, so it agrees
+    // with entityMoveAndSlide's own corner-slip tolerance: an oversized boss legitimately clips a wall
+    // FACE with its full AABB to avoid wedging in a 1 m corridor (the deliberate nav-rework trade), and
+    // ejecting on that would fight the corner-slip and re-wedge it. Only a body whose NAV footprint is
+    // embedded — a genuine "stuck INSIDE the wall" — is moved. For a normal enemy navExtents ==
+    // halfExtents, and entityMoveAndSlide never lets that footprint overlap, so the net fires ONLY for
+    // the unvalidated direct writes above and never jitters against ordinary wall-hugging movement.
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        Entity& e = pool.entities[pool.activeList[a]];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.enemyType == EnemyType::PROP) continue;   // props ARE decorative geometry — meant to sit in walls
+        const Vec3 foot = navExtents(e);
+        if (!Collision::entityOverlapsGrid(e.position, foot, grid)) continue;   // fast path: already clear
+        // Flyers keep their altitude: a full-height wall is solid at every Y, so the free XZ cell
+        // ensureNotInWall finds is clear at the flyer's original height; only ground bodies floor-snap.
+        const f32 origY = e.position.y;
+        Collision::ensureNotInWall(e.position, foot, grid);
+        if (e.flags & ENT_FLYING) e.position.y = origY;
     }
 }

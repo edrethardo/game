@@ -133,6 +133,21 @@ void Engine::updateInventoryInteraction(f32 dt) {
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
 
+    // Inventory input mode (player 0): the physical mouse and the WASD/E + D-pad cursor are BOTH live
+    // at once — last input wins for the highlight + tooltip. A mouse move or click switches to mouse
+    // mode HERE; the nav reads below switch to cursor mode. This is what lets keyboard+mouse keep
+    // working even with a controller connected (the old code let a connected pad hijack the pointer).
+    if (m_localPlayerIndex == 0) {
+        const s32 ddx = mx - m_invLastMouseX, ddy = my - m_invLastMouseY;
+        const bool mouseMoved = (m_invLastMouseX >= 0) && (ddx * ddx + ddy * ddy > 4);  // >2 px
+        m_invLastMouseX = mx;
+        m_invLastMouseY = my;
+        if (mouseMoved || Input::isMouseButtonPressed(SDL_BUTTON_LEFT) ||
+                          Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) {
+            m_invCursorActive = false;
+        }
+    }
+
     // --- Stash mode: the stash panel replaces the equipment side and CLICK means TRANSFER ---
     // (not equip/drag). Handled exclusively so none of the drag/equip/quickbar machinery below
     // can fire under the stash; ESC/B/Tab close via the usual paths + the gameUpdate reconciler.
@@ -182,9 +197,42 @@ void Engine::updateInventoryInteraction(f32 dt) {
         return;
     }
 
-    // --- D-pad inventory navigation (controller — routes to active player's controller) ---
+    // --- Cursor navigation: D-pad OR keyboard WASD/E (both live at once) ---
+    // This used to be gated on isGamepadConnected, so a keyboard player got no cursor nav and a
+    // connected pad hijacked the mouse. Now it runs for EVERY lane: gamepad buttons work for any pad,
+    // and WASD/E (player-0 keyboard) work alongside them. Any nav press flips player 0 into cursor
+    // mode (highlight + tooltip follow the selection; the mouse drag/click path below is skipped).
     s32 padIdx = static_cast<s32>(m_localPlayerIndex);
-    if (Input::isGamepadConnected(padIdx)) {
+    {
+        const bool kb = (m_localPlayerIndex == 0);   // the physical keyboard belongs to the player-0 lane
+        // Pointer mode as of the START of this frame: is the cursor (WASD/D-pad) the live pointer, or
+        // the physical mouse? inventoryUsesCursor() reads m_invCursorActive, which this frame's nav
+        // hasn't touched yet, so it reflects the previous frame's decision.
+        const bool cursorMode = inventoryUsesCursor();
+
+        // Navigation — always live. D-pad OR keyboard WASD (MOVE_* is bound to plain W/S/A/D with no
+        // stick/pad binding, a clean keyboard-only edge). Pressing any of these ENTERS cursor mode.
+        const bool navR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || (kb && Input::isActionPressed(GameAction::MOVE_RIGHT));
+        const bool navL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || (kb && Input::isActionPressed(GameAction::MOVE_LEFT));
+        const bool navD = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  || (kb && Input::isActionPressed(GameAction::MOVE_BACKWARD));
+        const bool navU = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)    || (kb && Input::isActionPressed(GameAction::MOVE_FORWARD));
+        const bool panelL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+        const bool panelR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+        if (navR || navL || navD || navU || panelL || panelR) m_invCursorActive = true;
+
+        // Actions on the CURRENT selection — gated on cursorMode so they fire ONLY when the cursor is
+        // the live pointer. In mouse mode a player equips with double-click and drops with right-click,
+        // so E/F/A/Y stay inert; this is what stops F from dropping a slot the mouse isn't pointing at.
+        //   A / E     = equip / unequip the selection
+        //   Y / F     = drop the selected item. F is the raw scancode, NOT GameAction::BOOT_SKILL —
+        //               that action's CONTROLLER binding is an A+LB chord, and here A=equip / LB=cycle-
+        //               panel, so routing drop through it would drop whenever a pad player equipped
+        //               while holding LB. The F key itself carries no such overload.
+        //   BACK (-)  = drop the whole backpack + close (controller only)
+        const bool equipPressed   = cursorMode && (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_A) || (kb && Input::isActionPressed(GameAction::PICKUP)));
+        const bool dropPressed    = cursorMode && (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y) || (kb && Input::isKeyPressed(SDL_SCANCODE_F)));
+        const bool dropAllPressed = cursorMode &&  Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_BACK);
+
         // How many equipment skills are on the bar right now — the equip-skill panel only exists
         // when something is equipped that grants one, so the cursor must skip it otherwise.
         HUD::EquipSkillSlot navEquip[MAX_EQUIP_SKILL_SLOTS];
@@ -196,25 +244,30 @@ void Engine::updateInventoryInteraction(f32 dt) {
             (m_invCursorPanel == INV_PANEL_CLASS_SKILL) ? static_cast<u8>(InventoryUI::CLASS_SKILL_SLOTS)
                                                         : static_cast<u8>(navEquipCount);
 
-        // Navigate cursor with D-pad
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+        // Navigate the cursor. Left/right also CROSS between the two item panels at the edges
+        // (equipment sits left of the backpack on screen) — the keyboard's substitute for the
+        // controller's shoulder cycle, and a nicety for the pad too.
+        if (navR) {
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col < InventoryUI::BP_COLS - 1) m_invCursorIndex++;
+            } else if (m_invCursorPanel == INV_PANEL_EQUIPMENT) {
+                m_invCursorPanel = INV_PANEL_BACKPACK; m_invCursorIndex = 0;   // cross right → backpack
             } else if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
                 // Skill bars are horizontal rows — left/right walks along them.
                 if (panelSlots > 0 && m_invCursorIndex + 1 < panelSlots) m_invCursorIndex++;
             }
         }
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
+        if (navL) {
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col > 0) m_invCursorIndex--;
+                else { m_invCursorPanel = INV_PANEL_EQUIPMENT; m_invCursorIndex = 0; }   // cross left → equipment
             } else if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
                 if (m_invCursorIndex > 0) m_invCursorIndex--;
             }
         }
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+        if (navD) {
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 if (m_invCursorIndex + InventoryUI::BP_COLS < InventoryUI::BP_COLS * InventoryUI::BP_ROWS)
                     m_invCursorIndex += InventoryUI::BP_COLS;
@@ -227,7 +280,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     m_invCursorIndex = static_cast<u8>(InventoryUI::CLASS_SKILL_SLOTS - 1);
             }
         }
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
+        if (navU) {
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 if (m_invCursorIndex >= InventoryUI::BP_COLS)
                     m_invCursorIndex -= InventoryUI::BP_COLS;
@@ -239,13 +292,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     m_invCursorIndex = static_cast<u8>(navEquipCount - 1);
             }
         }
-        // L/R shoulder cycles the panels: backpack -> equipment -> class skills -> equip skills.
-        // Was a binary flip between the two item panels; now a cycle, skipping the equip-skill panel
-        // when nothing grants an equipment skill (an empty panel you can land on but not leave in any
-        // meaningful way is worse than no panel).
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
-            Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
-            const bool fwd = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+        // L/R shoulder cycles the panels: backpack -> equipment -> class skills -> equip skills
+        // (controller only — the keyboard reaches the two item panels via the left/right cross above).
+        if (panelL || panelR) {
+            const bool fwd = panelR;
             for (u8 step = 0; step < INV_PANEL_COUNT; step++) {
                 m_invCursorPanel = fwd
                     ? static_cast<u8>((m_invCursorPanel + 1) % INV_PANEL_COUNT)
@@ -254,8 +304,8 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
             m_invCursorIndex = 0;
         }
-        // A = equip (backpack → equipment) or unequip (equipment → backpack)
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_A)) {
+        // A / E = equip (backpack → equipment) or unequip (equipment → backpack)
+        if (equipPressed) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 if (!isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex])) {
                     if (!tryUsePetItem(m_invCursorIndex)) { // consumable? A = use, not equip
@@ -275,11 +325,11 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 }
             }
         }
-        // Y = drop selected item. Arena: drops are refused everywhere (the progression
+        // Y / F = drop the selected item. Arena: drops are refused everywhere (the progression
         // firewall — gear can't be lost or duped in a mode that never saves).
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y) && m_level.inArena) {
+        if (dropPressed && m_level.inArena) {
             AudioSystem::play(SfxId::UI_BACK);
-        } else if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_Y)) {
+        } else if (dropPressed) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 u8 idx = m_invCursorIndex;
@@ -301,8 +351,8 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
 
-        // - button = drop entire backpack + close inventory
-        if (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_BACK)) {
+        // - button = drop entire backpack + close inventory (controller only)
+        if (dropAllPressed) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], bi);
@@ -318,15 +368,19 @@ void Engine::updateInventoryInteraction(f32 dt) {
             Input::setRelativeMouseMode(true);
         }
 
-        // Park the cursor on the selected slot so the hover tooltip follows the D-pad. One helper,
-        // shared with renderInventoryHUD — this math used to be copy-pasted in both.
+    }   // end cursor-navigation block
+
+    // Cursor mode — WASD/E or the D-pad just drove the selection, or this is a gamepad-only split
+    // lane. Park the synthetic cursor on the selected slot so the highlight + tooltip follow it (one
+    // helper, shared with renderInventoryHUD), then RETURN so the mouse drag/click machinery is
+    // skipped and the two input styles never fight over the shared m_dragState.
+    if (inventoryUsesCursor()) {
         inventoryCursorToMouse(sw, sh, mx, my);
+        return;
     }
 
-    // The physical mouse belongs to local player 0; couch co-op P2 uses the D-pad path
-    // above. Gate the shared mouse drag/double-click handling to the mouse owner so a drag
-    // begun in P1's frame can't be applied to P2's inventory (m_dragState is shared, not
-    // per-player). Singleplayer is unaffected — m_localPlayerIndex is always 0 there.
+    // Physical-mouse path below — player 0 only (a couch P2 has no mouse), and only in mouse mode.
+    // m_dragState is shared, not per-player, so a P1 drag must never reach a P2 inventory.
     if (m_localPlayerIndex != 0) return;
 
     // Tick double-click timer

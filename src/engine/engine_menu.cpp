@@ -125,11 +125,11 @@ static s32 menuMouseHit(u32 sw, u32 sh,
 // Layouts must match renderMenu() in engine_hud.cpp exactly.
 static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCount) {
     switch (subState) {
-    case 0: { // Main menu: 7 items (4 in the demo, which hides Host/Join/Arena), Y = sh*0.2 + (count-1-i)*50.
-              // Must use the same count as renderMenu() or hover misaligns AND can return an index
-              // past the demo's 4-entry action map (out-of-bounds). kDemoBuild is constexpr.
+    case 0: { // Main menu: 7 items (4 in the demo, which hides Host/Join/Arena), Y = sh*0.26 + (count-1-i)*50.
+              // Must use the same count AND baseY as renderMenu() or hover misaligns AND can return an
+              // index past the demo's 4-entry action map (out-of-bounds). kDemoBuild is constexpr.
         const u8 mainCount = GameConst::kDemoBuild ? 4 : 7;
-        return menuMouseHit(sw, sh, sh * 0.2f, 50.0f * uiScale, mainCount,
+        return menuMouseHit(sw, sh, sh * 0.26f, 50.0f * uiScale, mainCount,
                             250.0f * uiScale, 35.0f * uiScale, false);
     }
     case 1: // Singleplayer: 2 items, Y = sh*0.38 + (1-i)*50*uiScale
@@ -1332,8 +1332,9 @@ void Engine::updateMenu(f32 dt) {
         static constexpr u32 C_GYRO_SENS  = REBIND_COUNT + 1;
         static constexpr u32 C_STICK_INV  = REBIND_COUNT + 2;
         static constexpr u32 C_GYRO_INV   = REBIND_COUNT + 3;
-        static constexpr u32 C_RESET      = REBIND_COUNT + 4;
-        static constexpr u32 C_TOTAL      = REBIND_COUNT + 5;
+        static constexpr u32 C_GYRO_EN    = REBIND_COUNT + 4;   // "Gyro Aim: ON/OFF" master switch
+        static constexpr u32 C_RESET      = REBIND_COUNT + 5;
+        static constexpr u32 C_TOTAL      = REBIND_COUNT + 6;   // keep in sync with the subState-17 render (extra=5u)
         if (m_menu.bindCapture) { captureRebind(false); return; }
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
             if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
@@ -1372,12 +1373,15 @@ void Engine::updateMenu(f32 dt) {
                 Input::setStickInvertY(!Input::getStickInvertY());
             } else if (m_menu.subSelection == C_GYRO_INV) {
                 Input::setGyroInvertY(!Input::getGyroInvertY());
+            } else if (m_menu.subSelection == C_GYRO_EN) {
+                Input::setGyroEnabled(!Input::getGyroEnabled());   // gyro aim master switch (default OFF)
             } else if (m_menu.subSelection == C_RESET) {
                 Input::resetControllerBindingsToDefaults();
-                Input::setStickSensitivity(1.25f);
+                Input::setStickSensitivity(Input::STICK_SENS_DEFAULT);   // same value a fresh install gets
                 Input::setGyroSensitivity(5.0f);
                 Input::setStickInvertY(false);
                 Input::setGyroInvertY(true);
+                Input::setGyroEnabled(false);                            // reset restores gyro-off default
                 AudioSystem::play(SfxId::UI_CONFIRM);
             }
         }
@@ -1805,6 +1809,7 @@ void Engine::updateLobby(f32 dt) {
                 m_clientNetSlot[1]  = slot2;
                 m_splitPlayerCount  = 2;
                 Input::setSplitScreen(true);
+                Input::assignCouchPads();   // one controller → keyboard P1 + pad0 P2; two+ → identity
                 m_netCouch          = true;
             } else {
                 m_clientNetSlot[1]  = 0;

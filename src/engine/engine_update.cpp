@@ -1195,6 +1195,12 @@ void Engine::tickSharedSystems(f32 dt) {
             if (e.flags & (ENT_DEAD | ENT_FRIENDLY)) continue;
             if (e.enemyType == EnemyType::PROP) continue;
             if (e.health <= 0.0f) continue;
+            // A disguised or hidden ambusher is not an ambient crier: a DORMANT gargoyle/mimic posing
+            // as scenery (the HUD suppresses its target bar for the same reason) or a BURROWED widow
+            // lying in wait underground would blow its own cover AND howl from a room the player has
+            // visibly cleared. Only awake, surfaced hostiles call out — so a room the player perceives
+            // as dead stays silent even while a hidden ambush is still armed.
+            if (e.aiState == AIState::DORMANT || (e.flags & ENT_BURROWED)) continue;
             seen++;
             if ((std::rand() % seen) == 0) crier = &e;
         }
@@ -1720,7 +1726,9 @@ void Engine::gameUpdate(f32 dt) {
     // Lenient gate (shared with the server) so the local heal predicts even if a snapshot
     // nudged m_potionLastActivationTick forward by a tick — feel over exactness.
     const bool potionReady  = GameConst::cooldownReady(nowTickPotion, m_potionLastActivationTick, potionCdTicks);
-    if (Input::isActionPressed(GameAction::POTION) && potionReady) {
+    // Gated on !gameplayInputFrozen() so a potion never fires while the inventory (or pause) is open
+    // — matches the wire strip in clientNetPre, keeping predict and send in parity.
+    if (Input::isActionPressed(GameAction::POTION) && potionReady && !gameplayInputFrozen()) {
         f32 healAmount = m_localPlayer.maxHealth * GameConst::POTION_HEAL_PCT;
         m_localPlayer.health += healAmount;
         if (m_localPlayer.health > m_localPlayer.maxHealth)
@@ -1782,7 +1790,14 @@ void Engine::gameUpdate(f32 dt) {
                 if (e.flags & ENT_BURROWED) continue;   // underground — walk right over it
                 obstacles[obsCount++] = {e.position, e.halfExtents};
             }
+            const f32 velYBefore = m_localPlayer.velocity.y;
             Collision::moveAndSlide(m_localPlayer, m_level.grid, dt, obstacles, obsCount);
+            // Jump-pad launch SFX. A pad in moveAndSlide replaces velocity.y with JUMPPAD_LAUNCH (17),
+            // far above a normal jump (8), so a fresh crossing of that threshold this tick means a pad
+            // just fired under us. Local only: remote launches replicate via posY and are seen (not
+            // heard) — a positional whoosh per remote isn't worth the wire/mixing budget here.
+            if (m_localPlayer.velocity.y >= JUMPPAD_LAUNCH - 0.01f && velYBefore < JUMPPAD_LAUNCH - 0.01f)
+                AudioSystem::play(SfxId::SKILL_DASH);
         }
     }
 
@@ -1926,6 +1941,16 @@ void Engine::gameUpdate(f32 dt) {
         AudioSystem::play(SfxId::UI_CLICK);
         if (m_inventoryOpen) {
             m_inventoryOpenedOnce = true; // dismiss "Open Inventory" tooltip
+            // Seed the input mode by whichever device just opened the screen: a controller opens in
+            // cursor mode (highlight + tooltip showing), a keyboard/mouse in mouse mode. Either can
+            // switch by using the other input (updateInventoryInteraction's last-input-wins). Reset
+            // the mouse-motion baseline so the first frame doesn't read a phantom move. Player-0 only:
+            // the flag is the keyboard+mouse lane's; a split-screen P2 (always cursor) must not touch it.
+            if (m_localPlayerIndex == 0) {
+                m_invCursorActive = Input::activeDeviceIsGamepad();
+                m_invLastMouseX = -1;
+                m_invLastMouseY = -1;
+            }
             // Show equip tutorial on first inventory open after first pickup
             if (m_firstPickupTooltipShown && !m_equipTooltipShown)
                 m_equipTooltipShown = true;
@@ -2106,7 +2131,13 @@ void Engine::resolveInteractTargets(InteractState& st) {
         } else if (chest) {
             if (score > bestChest) { bestChest = score; st.chestIdx = static_cast<s32>(i); }
         } else {
-            if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;   // legendaries win ties
+            // Pickup preference tiers (soft — a decisive aim can still win): a pet outranks a plain
+            // legendary the same way a legendary outranks common loot, so when a summon pet and a
+            // legendary lie together the rare companion is the one grabbed — and, since the on-screen
+            // prompt reads this same st.itemIdx, the one shown. `petSummon` is rarity-independent, so
+            // it covers the Mini Loot Goblin and every enemy-summon pet whatever the drop rolled.
+            if (m_itemDefs[w.item.defId].petSummon)      score += 1.0f;   // pets beat legendaries
+            else if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;   // legendaries beat normals
             if (score > bestItem) { bestItem = score; st.itemIdx = static_cast<s32>(i); }
         }
     }

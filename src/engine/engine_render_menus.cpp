@@ -111,7 +111,11 @@ void Engine::renderMenu() {
         const char* title = "CURSE OF THE DUNGEON ENGINE";
         f32 titleW = FontSystem::textWidth(title, 3);
         f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;
-        f32 titleY = sh * 0.65f;
+        // On the ROOT menu the title is the hero element, so sit it near the top (0.82) with the
+        // button column centred below — the old 0.65 left it floating just above the top button with
+        // the whole upper third of the screen empty. Sub-screens keep it as a mid-height header (0.65)
+        // where it clears their own content; raising it there would collide with their own top labels.
+        f32 titleY = (m_menu.subState == 0) ? sh * 0.82f : sh * 0.65f;
         FontSystem::drawText(sw, sh, titleX, titleY, title, {0.9f, 0.85f, 0.7f}, 3);
     }
 
@@ -615,9 +619,10 @@ void Engine::renderMenu() {
         // (17, controller column + sensitivity/invert). Shared render; `kb` selects the variant.
         bool kb = (m_menu.subState == 16);
         static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
-        // Keyboard & Mouse adds 1 extra row (Mouse Sensitivity); Controller adds 4 (stick/gyro
-        // sensitivity + invert-Y). Both variants share this rebind-list render.
-        const u32 extra = kb ? 1u : 4u;
+        // Keyboard & Mouse adds 1 extra row (Mouse Sensitivity); Controller adds 5 (stick/gyro
+        // sensitivity + stick/gyro invert-Y + the Gyro Aim master switch). Both variants share this
+        // rebind-list render — keep `extra` and the row cases in sync with the subState-17 handler.
+        const u32 extra = kb ? 1u : 5u;
         const u32 RESET_ROW = REBIND_COUNT + extra;     // trailing Reset row
         const u32 TOTAL = REBIND_COUNT + extra + 1;
 
@@ -663,6 +668,11 @@ void Engine::renderMenu() {
             } else if (!kb && i == REBIND_COUNT + 3) {
                 char buf[48];
                 std::snprintf(buf, sizeof(buf), "Gyro Invert Y: %s", Input::getGyroInvertY() ? "ON" : "OFF");
+                FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
+                if (sel) FontSystem::drawText(sw, sh, colBind, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
+            } else if (!kb && i == REBIND_COUNT + 4) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Gyro Aim: %s", Input::getGyroEnabled() ? "ON" : "OFF");
                 FontSystem::drawText(sw, sh, colLabel, y, buf, sel ? Vec3{1, 1, 0.6f} : Vec3{0.6f, 0.6f, 0.6f}, 1);
                 if (sel) FontSystem::drawText(sw, sh, colBind, y, "Enter to toggle", {0.4f, 0.8f, 0.4f}, 1);
             } else if (i == RESET_ROW) {
@@ -1107,7 +1117,10 @@ void Engine::renderMenu() {
         const u32          count  = GameConst::kDemoBuild ? 4u : 7u;
 
         for (u32 i = 0; i < count; i++) {
-            f32 y = sh * 0.2f + (count - 1 - i) * 50.0f * uiScale;
+            // Bottom-anchored column, nudged up from 0.2 to 0.26 so it sits better between the raised
+            // title (0.82) and the hint (0.1). Y math is mirrored EXACTLY by menuMouseForState case 0
+            // in engine_menu.cpp — change both or the click rects drift off the buttons.
+            f32 y = sh * 0.26f + (count - 1 - i) * 50.0f * uiScale;
             Vec3 color = colors[i];
             bool selected = (i == m_menu.selection);
             if (!selected) color = color * 0.4f;

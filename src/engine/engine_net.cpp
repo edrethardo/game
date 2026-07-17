@@ -1196,15 +1196,16 @@ void Engine::clientNetPre(f32 dt) {
         if (unaffordable(m_bootSkillStates[m_localPlayerIndex].activeSkill))   skillClearMask |= INPUT_EX_BOOT_SKILL;
         if (unaffordable(m_helmetSkillStates[m_localPlayerIndex].activeSkill)) skillClearMask |= INPUT_EX_HELM_SKILL;
     }
-    // Send/predict parity while a blocking UI is open (inventory OR pause menu): the local
-    // skill PREDICT paths gate on !gameplayInputFrozen() (engine_update_skills.cpp), but
-    // captureLocalInput sets the skill ext bits unconditionally — so a click while a menu is
-    // open would cast server-side with no local prediction (a desync + an unintended cast).
-    // Strip the skill bits so send matches predict. Potion is intentionally NOT stripped: its
-    // predict path doesn't gate on the UI, so the two stay in sync (you can drink while paused).
+    // Send/predict parity while a blocking UI is open (inventory OR pause menu): the local skill AND
+    // potion PREDICT paths gate on !gameplayInputFrozen() (engine_update_skills.cpp / the potion heal
+    // in gameUpdate), but captureLocalInput sets those ext bits unconditionally — so a press while a
+    // menu is open would fire server-side with no local prediction (a desync + an unintended
+    // cast/heal). Strip them so send matches predict: you can no longer cast OR drink a potion with
+    // the inventory (or pause) open. (Potion drink-while-paused was intentional once; the inventory
+    // now navigates with WASD/E/F, so a stray potion press mid-menu is a bug, not a feature.)
     const bool frozen = gameplayInputFrozen();
     if (frozen)
-        skillClearMask |= (INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL | INPUT_EX_HELM_SKILL);
+        skillClearMask |= (INPUT_EX_SKILL | INPUT_EX_BOOT_SKILL | INPUT_EX_HELM_SKILL | INPUT_EX_POTION);
     // Potion was previously missing from the wire mask (the asymmetry that let the
     // potion bit ride to the server even while locally on cooldown → phantom heals +
     // forward cooldown bumps). Gate it the same lenient way as skills.

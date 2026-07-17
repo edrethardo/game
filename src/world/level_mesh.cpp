@@ -259,6 +259,38 @@ static void buildSection(const LevelGrid& grid, u32 seed,
                     pushQuad(*bkt, v0, v1, v2, v3);
                     expand(wx, floorH, wz); expand(wx+cs, floorH, wz+cs);
 
+                    // --- Floor-height riser faces (vertical variety) -----------------------------
+                    // Where an OPEN neighbour sits lower than this cell, emit the vertical step face
+                    // between them (neighbour's floor up to ours). Without this a raised platform or
+                    // tier renders as a floating quad with a gap at its edge. Drawn only toward LOWER
+                    // neighbours, so the HIGHER cell owns each shared riser and it is emitted exactly
+                    // once; same material + winding convention as the solid-cell wall faces above.
+                    {
+                        MaterialBucket* rbkt = getBucket(cell.wallMaterialId);
+                        static const s32 kdx[4] = {1, -1, 0, 0};
+                        static const s32 kdz[4] = {0, 0, 1, -1};
+                        for (int ei = 0; ei < 4; ei++) {
+                            s32 nx = (s32)x + kdx[ei], nz = (s32)z + kdz[ei];
+                            if (!LevelGridSystem::isInBounds(grid, (u32)nx, (u32)nz)) continue;
+                            if (LevelGridSystem::isSolid(grid, (u32)nx, (u32)nz)) continue; // solid edge already walls
+                            f32 nbF = LevelGridSystem::getFloorHeight(grid, (u32)nx, (u32)nz);
+                            if (nbF >= floorH - 0.001f) continue;   // neighbour not lower — no riser
+                            const f32 B = nbF, T = floorH, vSpan = T - B;
+                            Vec3 rn, rp0, rp1, rp2, rp3;
+                            if (kdz[ei] == -1)      { rn = {0,0,-1}; rp0={wx+cs,B,wz};    rp1={wx,B,wz};       rp2={wx,T,wz};       rp3={wx+cs,T,wz}; }
+                            else if (kdz[ei] == 1)  { rn = {0,0, 1}; rp0={wx,B,wz+cs};    rp1={wx+cs,B,wz+cs}; rp2={wx+cs,T,wz+cs}; rp3={wx,T,wz+cs}; }
+                            else if (kdx[ei] == -1) { rn = {-1,0,0}; rp0={wx,B,wz};       rp1={wx,B,wz+cs};    rp2={wx,T,wz+cs};    rp3={wx,T,wz}; }
+                            else                    { rn = { 1,0,0}; rp0={wx+cs,B,wz+cs}; rp1={wx+cs,B,wz};    rp2={wx+cs,T,wz};    rp3={wx+cs,T,wz+cs}; }
+                            Vertex rv0{rp0, rn, {0.0f, 0.0f }};
+                            Vertex rv1{rp1, rn, {cs,   0.0f }};
+                            Vertex rv2{rp2, rn, {cs,   vSpan}};
+                            Vertex rv3{rp3, rn, {0.0f, vSpan}};
+                            rv0.color = rv1.color = rv2.color = rv3.color = tileTint;
+                            pushQuad(*rbkt, rv0, rv1, rv2, rv3);
+                            expand(rp0.x, B, rp0.z); expand(rp2.x, T, rp2.z);
+                        }
+                    }
+
                     // Scatter a decoration prop onto some open floor cells and bake it in.
                     // Deterministic in (cell, floor seed) so host + clients build identical
                     // floors with zero netcode, and it costs no extra draw calls.

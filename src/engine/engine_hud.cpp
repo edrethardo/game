@@ -96,10 +96,11 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
     Input::getMousePosition(invMX, invMY);
     invMY = static_cast<s32>(sh) - invMY; // flip to HUD coords
 
-    // On a controller, drive the cursor from the D-pad selection instead of the physical mouse — the
-    // hover tooltip (items AND skills) then follows the selection with no second code path.
-    // Shared with updateInventoryInteraction; this used to be a second copy of the same math.
-    if (Input::isGamepadConnected(0)) {
+    // In cursor mode (WASD/E or the D-pad drove the selection — see inventoryUsesCursor), drive the
+    // synthetic cursor from the selection instead of the physical mouse, so the hover tooltip (items
+    // AND skills) follows it with no second code path. In mouse mode the real pointer stays. Shared
+    // with updateInventoryInteraction; this used to be a second copy of the same math.
+    if (inventoryUsesCursor()) {
         inventoryCursorToMouse(sw, sh, invMX, invMY);
     }
 
@@ -123,13 +124,16 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
         renderInventorySkillBars(sw, sh, sb, equipSlots, equipCount, equipSources, invMX, invMY);
     }
 
-    // Pass controller cursor selection for highlight rendering.
-    // 0xFF = "no item selected": when the controller cursor is parked on a skill bar, neither item
-    // panel may paint a highlight. (Note the pre-existing quirk this also sidesteps — selEquip=false
-    // with selSlot=0 always lit backpack cell 0.)
-    const bool onSkillPanel = Input::isGamepadConnected(0) && m_invCursorPanel >= 2;
-    u8 selSlot = (Input::isGamepadConnected(0) && !onSkillPanel) ? m_invCursorIndex : 0xFF;
-    bool selEquip = Input::isGamepadConnected(0) && m_invCursorPanel == 1;
+    // Pass the cursor selection for highlight rendering — driven by the D-pad OR keyboard WASD
+    // (inventoryUsesCursor), so a keyboard player gets the same bright slot highlight a controller does.
+    // 0xFF = "no item selected": when the cursor is parked on a skill bar, neither item panel may
+    // paint a highlight. (Note the pre-existing quirk this also sidesteps — selEquip=false with
+    // selSlot=0 always lit backpack cell 0.) In mouse mode nothing is force-highlighted — the mouse
+    // hover does its own.
+    const bool useCursor = inventoryUsesCursor();
+    const bool onSkillPanel = useCursor && m_invCursorPanel >= 2;
+    u8 selSlot = (useCursor && !onSkillPanel) ? m_invCursorIndex : 0xFF;
+    bool selEquip = useCursor && m_invCursorPanel == 1;
     HUD::drawInventoryScreen(sw, sh, m_inventories[m_localPlayerIndex],
                               m_itemDefs, m_skillDefs, m_skillDefCount,
                               selSlot, selEquip, invMX, invMY,

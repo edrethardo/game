@@ -5,6 +5,7 @@
 #include "game/weapon.h"
 #include "game/item.h"
 #include "game/crowd_control.h"
+#include "game/jump.h"
 #include "net/net.h"
 
 // Input as received from a client (or captured locally for listen server host).
@@ -72,6 +73,11 @@ struct NetPlayer {
     f32  pitch          = 0.0f;
     bool onGround       = false;
     bool noclip         = false;
+    // Coyote-time + jump-buffer grace timers (game/jump.h) for a REMOTE player: the server evolves
+    // them in updateNetPlayerFromInput so a guest's ledge jump is simulated authoritatively, not
+    // just predicted. Mirrored to/from the local Player via the sync helpers; not on the wire (the
+    // jump result already rides SnapPlayer as velocity/position). Same trust model as shadowDanceTimer.
+    JumpAssist::JumpState jumpState;
 
     // Combat
     f32  health         = 100.0f;

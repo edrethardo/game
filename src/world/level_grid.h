@@ -7,6 +7,19 @@
 static constexpr u8 CELL_SOLID   = 1 << 0;
 static constexpr u8 CELL_FLOOR   = 1 << 1;
 static constexpr u8 CELL_CEILING = 1 << 2;
+// A raised floor that must be JUMPED onto — collision refuses to walk a body up onto it from more
+// than STEP_UP_HEIGHT below (Collision::COLLISION step-up gate), so it reads as a Quake-style ledge
+// you hop to rather than a ramp you stroll up. ONLY cells explicitly marked get this; every existing
+// level and every walkable tier stays on the unlimited walk-up path, so it is zero-regression.
+static constexpr u8 CELL_LEDGE   = 1 << 3;
+// A Quake/Combat-Hall JUMP PAD: a walkable floor cell that flings a grounded body upward. Collision
+// fires an upward velocity impulse (Collision::JUMPPAD_LAUNCH) whenever a body is resting/landing on
+// the cell — you can't stand on it, you get launched, and air-steer the arc onto a higher tier. The
+// launch is a pure velocity.y impulse applied inside moveAndSlide (the one path every peer funnels
+// through), exactly like the jump, so it replicates in co-op with NO wire change (posY + onGround are
+// already snapshotted; the trigger is deterministic geometry on both client and server). Opt-in per
+// cell → zero regression. Enemies never jump, so a pad in an enemy route is a dead end — PvP-only.
+static constexpr u8 CELL_JUMPPAD = 1 << 4;
 
 struct GridCell {
     u8 flags;            // CELL_SOLID / CELL_FLOOR / CELL_CEILING

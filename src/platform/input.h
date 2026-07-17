@@ -92,17 +92,26 @@ namespace Input {
     // Sensitivity settings (mutable — adjustable from options menu)
     f32  getStickSensitivity();
     void setStickSensitivity(f32 v);
+    // Shared default (fresh install + menu "Reset to Defaults") for right-stick look. A saved
+    // controls.json row always overrides it, so lowering this only reaches new installations.
+    static constexpr f32 STICK_SENS_DEFAULT = 0.7f;
     f32  getGyroSensitivity();
     void setGyroSensitivity(f32 v);
     bool getStickInvertY();
     void setStickInvertY(bool v);
     bool getGyroInvertY();
     void setGyroInvertY(bool v);
-    // Mouse look sensitivity — a unitless MULTIPLIER (1.0 = default) on the base radians/pixel
-    // used in player.cpp mouse-look. Adjustable from the Keyboard & Mouse options submenu.
+    // Gyro (motion) aim master switch. OFF by default — gyro is opt-in, so a fresh install never
+    // aims from controller motion; the Controller options submenu toggles it. readGyroInto returns
+    // a zero delta while this is off, so every consumer (look + NetInput packing) sees no gyro.
+    bool getGyroEnabled();
+    void setGyroEnabled(bool v);
+    // Mouse look sensitivity — a unitless MULTIPLIER on the base radians/pixel used in player.cpp
+    // mouse-look. Adjustable from the Keyboard & Mouse options submenu. A saved row overrides this,
+    // so lowering the default only reaches new installations.
     f32  getMouseSensitivity();
     void setMouseSensitivity(f32 v);
-    static constexpr f32 MOUSE_SENS_DEFAULT = 1.0f;  // shared reset value (menu + save)
+    static constexpr f32 MOUSE_SENS_DEFAULT = 0.6f;  // shared reset value (menu + save)
 
     f32  getAxis(s32 gamepadIndex, s32 axis);
     bool isButtonDown(s32 gamepadIndex, s32 button);
@@ -158,8 +167,15 @@ namespace Input {
     // Split-screen: set which player's controller to read (0 or 1)
     void setActivePlayer(u8 index);
     u8   getActivePlayer();
-    // Enable/disable per-controller separation (disables merge-all behavior)
+    // Enable/disable per-controller separation (disables merge-all behavior). Turning it OFF also
+    // resets the couch lane->pad map to identity.
     void setSplitScreen(bool active);
+    // Number of physical SDL controllers currently connected (PC; 0 on Switch, which uses libnx pads).
+    u8   connectedGamepadCount();
+    // Assign controllers to couch lanes when a split-screen game starts. With exactly ONE controller,
+    // Player 1 is the keyboard and the controller becomes Player 2 (lane 1 -> pad 0); with two or more,
+    // the identity map (P1=pad0, P2=pad1) is kept. Fixes "one controller, both players on P1".
+    void assignCouchPads();
 
     // Gyro (motion sensor) — returns angular velocity in deg/s
     // dx = yaw (horizontal turn), dy = pitch (vertical tilt)

@@ -18,6 +18,7 @@
 #include <doctest/doctest.h>
 #include "world/collision.h"
 #include "world/level_grid.h"
+#include "game/player.h"   // Player, for the end-to-end jump-pad launch tests
 
 namespace {
 
@@ -128,4 +129,126 @@ TEST_CASE("CollisionPush: out-of-bounds counts as solid") {
     Vec3 pos = {1.35f, 0.0f, 5.0f};
     CHECK_FALSE(Collision::tryPushXZ(pos, PLAYER_HALF, room.grid, -50.0f, 0.0f));
     CHECK(pos.x == doctest::Approx(1.35f));
+}
+
+// ensureNotInWall is the primitive the enemy wall-ejection safety net (EnemyAI::update's final pass)
+// relies on: after every position write this tick, any entity left embedded in geometry is ejected,
+// so "nothing ever ends a tick inside or between walls" — the enemy counterpart to the player's
+// per-tick wall push-out. These pin the two properties that make that net correct.
+
+TEST_CASE("ensureNotInWall: an embedded body is ejected to open floor") {
+    // A summoner revives a corpse that died flush against a wall, or a boss leash-clamp overshoots
+    // into one. Whatever put the body there, the net must leave it OUT of geometry.
+    TestRoom room;
+    Vec3 pos = {0.5f, 0.9f, 5.0f};                       // dead inside the solid west border cell
+    REQUIRE(Collision::entityOverlapsGrid(pos, PLAYER_HALF, room.grid));
+    Collision::ensureNotInWall(pos, PLAYER_HALF, room.grid);
+    CHECK_FALSE(Collision::entityOverlapsGrid(pos, PLAYER_HALF, room.grid));   // the invariant
+}
+
+TEST_CASE("ensureNotInWall: a body already in the open is left exactly where it is") {
+    // The property that keeps the net from jittering ordinary movement: an enemy that isn't embedded
+    // is never nudged, so wall-hugging pathfinding (which already validates its own footprint) is
+    // untouched. The net only ever moves a body that is genuinely stuck inside geometry.
+    TestRoom room;
+    Vec3 pos = {5.0f, 0.9f, 5.0f};                       // middle of the room, nowhere near a wall
+    const Vec3 before = pos;
+    Collision::ensureNotInWall(pos, PLAYER_HALF, room.grid);
+    CHECK(pos.x == doctest::Approx(before.x));
+    CHECK(pos.z == doctest::Approx(before.z));
+}
+
+// overlapsLedgeAbove is the Quake-style jump-gate: a CELL_LEDGE cell whose floor is more than
+// STEP_UP_HEIGHT above the body's feet reads as a wall, so you must JUMP onto it. These pin the
+// three behaviours moveAndSlide relies on: grounded body blocked, mid-jump body allowed, and a
+// plain (non-LEDGE) raised floor never gated — which is what keeps every existing level and every
+// walkable tier on the unlimited walk-up path (zero regression).
+
+TEST_CASE("overlapsLedgeAbove: a jump-ledge above the step-up gate blocks a grounded body") {
+    TestRoom room;
+    GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
+    c.flags = CELL_FLOOR | CELL_LEDGE;
+    c.floorHeight = 3;                                    // 0.75 m (quarter-units)
+    // Feet on the ground: 0.75 > 0 + STEP_UP_HEIGHT (0.4) → gated.
+    CHECK(Collision::overlapsLedgeAbove({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+}
+
+TEST_CASE("overlapsLedgeAbove: jumping high enough clears the gate") {
+    TestRoom room;
+    GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
+    c.flags = CELL_FLOOR | CELL_LEDGE;
+    c.floorHeight = 3;                                    // 0.75 m
+    // Mid-jump feet at 0.5 m: 0.75 > 0.5 + 0.4 = 0.9 is false → the step onto the ledge is allowed.
+    CHECK_FALSE(Collision::overlapsLedgeAbove({5.5f, 0.5f, 5.5f}, PLAYER_HALF.x, room.grid));
+}
+
+TEST_CASE("overlapsLedgeAbove: a plain raised floor (no LEDGE flag) never gates") {
+    TestRoom room;
+    GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
+    c.flags = CELL_FLOOR;                                 // raised, but NOT a jump-ledge
+    c.floorHeight = 8;                                    // 2 m, far above the step-up
+    CHECK_FALSE(Collision::overlapsLedgeAbove({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+}
+
+// onJumpPad is the Quake/Combat-Hall launch trigger: a body RESTING on a CELL_JUMPPAD cell. These pin
+// that it detects the pad you're on, ignores a plain floor, and — the important one — ignores a pad
+// that sits well below your feet (so standing on a taller platform whose AABB happens to span a low
+// pad cell never relaunches you).
+
+TEST_CASE("onJumpPad: standing on a pad cell is detected") {
+    TestRoom room;
+    GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
+    c.flags = CELL_FLOOR | CELL_JUMPPAD;
+    c.floorHeight = 0;                                    // ground-level pad
+    CHECK(Collision::onJumpPad({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+}
+
+TEST_CASE("onJumpPad: a plain floor cell is not a pad") {
+    TestRoom room;                                        // interior cells are plain CELL_FLOOR
+    CHECK_FALSE(Collision::onJumpPad({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+}
+
+TEST_CASE("onJumpPad: a pad far below the feet does not trigger") {
+    TestRoom room;
+    GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
+    c.flags = CELL_FLOOR | CELL_JUMPPAD;
+    c.floorHeight = 0;                                    // pad at 0 m
+    // Feet at 2 m (standing on a taller platform above the pad): 0 m is more than STEP_UP_HEIGHT
+    // below, so it's not the pad we're resting on → no launch.
+    CHECK_FALSE(Collision::onJumpPad({5.5f, 2.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+}
+
+// The end-to-end behaviour: one moveAndSlide tick over a pad replaces velocity.y with JUMPPAD_LAUNCH
+// and lifts the body off the ground. This is the whole mechanic — and because every movement path
+// (local predict, server drain, reconcile replay) funnels through moveAndSlide, this one impulse is
+// what replicates the launch in co-op with no wire change.
+
+TEST_CASE("moveAndSlide: resting on a jump pad launches the body upward") {
+    TestRoom room;
+    GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
+    c.flags = CELL_FLOOR | CELL_JUMPPAD;
+    c.floorHeight = 0;
+
+    Player p;
+    p.position = {5.5f, 0.0f, 5.5f};                      // over the pad, at floor height
+    p.velocity = {0.0f, 0.0f, 0.0f};
+    p.onGround = false;                                   // gravity dips us onto the pad, floor-snap grounds us
+
+    Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+
+    CHECK(p.velocity.y == doctest::Approx(JUMPPAD_LAUNCH)); // flung up
+    CHECK(p.onGround == false);                             // and airborne
+}
+
+TEST_CASE("moveAndSlide: resting on plain floor does NOT launch") {
+    TestRoom room;                                        // cell (5,5) is plain CELL_FLOOR
+    Player p;
+    p.position = {5.5f, 0.0f, 5.5f};
+    p.velocity = {0.0f, 0.0f, 0.0f};
+    p.onGround = false;
+
+    Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+
+    CHECK(p.velocity.y == doctest::Approx(0.0f));         // grounded, not launched
+    CHECK(p.onGround == true);
 }

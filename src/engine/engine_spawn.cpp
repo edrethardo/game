@@ -713,6 +713,27 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
             }
         }
 
+        // Walkable vertical tiers (Mix design): a low raised platform in each mid-quadrant of the
+        // arena — plain raised floor, NOT CELL_LEDGE, so the boss and its adds walk up and down them
+        // exactly like the player (unlimited walk-up), leaving no unreachable ledge to cheese a boss
+        // from. Placed off the centre (boss spawn stays flat) and off the corners (iron maidens),
+        // symmetric; +0.5 m reads as a low platform. Deliberately modest — tune after a boss playtest.
+        {
+            const u8 tierQH = static_cast<u8>(floorQH + 2);   // +0.5 m over the arena floor
+            const s32 qx = static_cast<s32>(expandW / 4), qz = static_cast<s32>(expandD / 4);
+            const s32 px[2] = { startX + qx, startX + static_cast<s32>(expandW) - qx - 2 };
+            const s32 pz[2] = { startZ + qz, startZ + static_cast<s32>(expandD) - qz - 2 };
+            for (s32 tp = 0; tp < 2; tp++) for (s32 tq = 0; tq < 2; tq++)
+                for (s32 dz = 0; dz < 2; dz++) for (s32 dx = 0; dx < 2; dx++) {
+                    s32 gx = px[tp] + dx, gz = pz[tq] + dz;
+                    if (gx < 1 || gz < 1 || (u32)gx >= m_level.grid.width - 1 ||
+                        (u32)gz >= m_level.grid.depth - 1) continue;
+                    GridCell& c = LevelGridSystem::getCell(m_level.grid, (u32)gx, (u32)gz);
+                    if (!(c.flags & CELL_FLOOR)) continue;   // only raise open arena floor, never a wall
+                    c.floorHeight = tierQH;
+                }
+        }
+
         // Expand the DungeonRoom record to match the new arena geometry — the
         // exit-portal placement in startGame reads bossRoom.{x,z,w,d} after this call.
         bossRoom.x = (startX > 0) ? static_cast<u32>(startX) : 1;

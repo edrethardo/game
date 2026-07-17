@@ -4,6 +4,7 @@
 #include "core/math.h"
 #include "renderer/camera.h"
 #include "game/crowd_control.h"
+#include "game/jump.h"
 
 struct EntityHandle;
 struct NetInput;
@@ -37,6 +38,10 @@ struct Player {
     f32  sensitivity = 0.002f; // radians per pixel
     bool onGround   = false;
     bool noclip     = false;   // fly freely, no collision
+    // Coyote-time + jump-buffer grace timers (game/jump.h). Evolved by applyMovement; mirrored to
+    // NetPlayer via syncLocalPlayerToNetPlayer so the client replay + host stay coherent. Not on
+    // the wire — the jump result (velocity.y) already is.
+    JumpAssist::JumpState jumpState;
 
     // Combat
     f32  health         = 100.0f;

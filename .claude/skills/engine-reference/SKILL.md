@@ -26,7 +26,7 @@ skill.
 | `AffixDef` / `Affix` | `game/item.h` | `validSlots` is a bitmask of `ItemSlot` values |
 | `WeaponDef` / `WeaponState` | `game/weapon.h` | `WeaponType`: MELEE/HITSCAN/PROJECTILE selects path in `Combat` |
 | `SkillDef` / `SkillState` | `game/item.h` | One `SkillState` per player (cooldown + energy) |
-| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING`. Heights in quarter-units |
+| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING` + opt-in verticality `CELL_LEDGE` (jump-gated) / `CELL_JUMPPAD` (launch pad). Heights in quarter-units |
 | `WorldSnapshot`, `SnapPlayer/Entity/Projectile` | `net/snapshot.h` | Quantized server-to-client state |
 | `NetInput` | `net/net_player.h` | Client→server input: `INPUT_FORWARD/BACKWARD/LEFT/RIGHT/JUMP/FIRE/LOCK` flags |
 | `AABB` | `renderer/frustum.h` | Min/max box for collision and frustum culling |
@@ -37,6 +37,23 @@ Important caps (search the header for the constant if you need to grow it):
 `MAX_SKILL_DEFS=64`, `MAX_ENEMY_DEFS=64`, `MAX_WORLD_ITEMS=32`, `MAX_WEAPON_DEFS=16`, `MAX_MATERIALS=160`,
 `MAX_MESH_DEFS=112` (= `MESH_DEF_CAPACITY` in `engine/asset_manifest.h`, which `static_assert`s that the mesh table fits — an overflow makes the load loop `break`, silently dropping the TAIL of the table), `MAX_LEVEL_SECTIONS=64`, `MAX_DUNGEON_ROOMS=32`,
 `SECTION_SIZE=16` cells, `NET_TICK_RATE=60`, `SNAPSHOT_RATE=60`, `INPUT_BUFFER_SIZE=64`.
+
+Player movement/jump physics (`world/collision.h`): `PLAYER_HALF_WIDTH=0.3`, `PLAYER_HEIGHT=1.8`,
+`GRAVITY=-40` (m/s²; **integrated ONCE in `Collision::moveAndSlide`** — never re-add it to
+`applyMovement`, that was the double-gravity bug), `JUMP_SPEED=8` (m/s) → apex `v²/2|g|=0.8` m, air
+time `2v/|g|=0.4` s. Jump forgiveness lives in the pure `JumpAssist` (`game/jump.h`): `COYOTE_TIME=0.1`
+s (jump still fires just after leaving a ledge) + `BUFFER_TIME=0.1` s (a press just before landing
+fires on touchdown); its `JumpState` (two timers) sits on both `Player` and `NetPlayer`, mirrored by
+`syncLocal/NetPlayer…` — NOT on the wire (the jump result is `velocity.y`, already replicated via
+`SnapPlayer.posY` + `onGround`; `velY` is not sent). Arc + grace pinned by `tests/game/test_jump.cpp`.
+**Vertical-level cell flags** (opt-in, `level_grid.h`, zero-regression): `CELL_LEDGE` (`1<<3`) = a
+jump-gated raised floor — `Collision::overlapsLedgeAbove` walls it off until the feet are within
+`STEP_UP_HEIGHT=0.4` m of its floor (so ≤~0.75 m ledges are jump-reachable; plain raised floors keep
+unlimited walk-up). `CELL_JUMPPAD` (`1<<4`) = a Quake launch pad — `Collision::onJumpPad` fires
+`velocity.y = JUMPPAD_LAUNCH` (17 m/s, apex ~3.6 m) at the end of both `moveAndSlide` overloads when a
+body rests on it; a `velocity.y` impulse like the jump, so it replicates in co-op with no wire change
+(deterministic geometry on both sides; `posY`+`onGround` snapshotted). Both PvP-only (enemies never
+jump). Pinned by `tests/world/test_collision_push.cpp`.
 
 ## Architecture deep-dive: split-screen & shared systems
 
@@ -111,7 +128,29 @@ Two further constraints:
   `BINDINGS_REV` (written as the `CFG_BINDINGS_REV` sentinel row, index 1005) and repair the
   affected actions at the tail of `loadBindings` — restoring only the controller *or* keyboard half
   so the player's other customizations survive. Sentinel rows are ignored by readers that guard
-  `idx < COUNT`, so the format stays backward-compatible.
+  `idx < COUNT`, so the format stays backward-compatible. `BINDINGS_REV` is now **2**: rev 2 ADDED the
+  PC keyboard quickbar keys on the row below WASD (`QUICKBAR_SLOT_1..4` = Z/X/C/V, direct per-slot use
+  alongside the still-present mouse wheel + middle-click) and, because C was taken, moved
+  `CHARACTER_SCREEN` off C to **K** — the migration repairs only those five actions' keyboard half, so
+  an existing file gets the new keys without a C double-bind and without losing any other custom key.
+- **The quickbar HUD shows each slot's key as a glyph, like the skill bar** (`drawQuickbar` in
+  `hud_portraits.cpp` calls `HUD::drawKeySymbol`): Z/X/C/V on keyboard, L+D-pad directions (Up/Rt/Dn/Lt)
+  on a gamepad — device-picked via `Input::activeDeviceIsGamepad()`, hardcoded like the skill bar's
+  1..4 / Up..Lt (a rebind won't relabel it).
+- **The same "saved row always wins" rule governs the sentinel SETTINGS rows** (`CFG_STICK_SENS`
+  1000 / `CFG_GYRO_SENS` 1001 / `CFG_MOUSE_SENS` 1002 / `CFG_STICK_INVERT` 1003 / `CFG_GYRO_INVERT`
+  1004 / `CFG_GYRO_ENABLED` 1006). Lowering a default in code (`Input::STICK_SENS_DEFAULT` 0.7,
+  `MOUSE_SENS_DEFAULT` 0.6) therefore reaches **new installations only** — an existing
+  `controls.json` carries its own row and keeps the player's value; that is intended, not a bug, and
+  needs no rev bump. **Gyro aim is opt-in for NEW installs** (`s_gyroEnabled` default `false`, gated at
+  the single choke `readGyroInto` so look + NetInput packing both see a zero delta when off). "New
+  installs only" is enforced by **grandfathering**: `loadBindings` tracks whether it saw a
+  `CFG_GYRO_ENABLED` row, and if a `controls.json` was opened WITHOUT one (a pre-opt-in file, whose
+  player had gyro always-on) it flips gyro ON — whereas a fresh install has no file at all, returns
+  early, and keeps the OFF init. So a fresh install gets gyro off; an existing player keeps it on
+  until they choose otherwise in the menu. The Controller options submenu (subState 17) exposes the
+  "Gyro Aim: ON/OFF" toggle; its row count (`extra=5u` in the render / `C_TOTAL = REBIND_COUNT + 6` in
+  the handler) must stay in lockstep.
 
 ## Champions, Floor Events & Shrines
 
@@ -350,10 +389,15 @@ Examples: `DungeonEngine --host --load 1` · `--host --new sorcerer --floor 5 --
 
 ## Arena mode (PvP) internals
 
-Sentinel floor **97** (`GameConst::ARENA_SENTINEL_FLOOR`); deterministic 36×36 colosseum in
-`engine_arena.cpp` (four corner pads = spawn/respawn points; cover is plain `CELL_SOLID`).
-Rules are pure in `game/arena.h` (`KILL_TARGET` 10, `RESPAWN_DELAY` 3 s, `recordKill`,
-`farthestPad` — tested in `tests/game/test_arena.cpp`).
+Sentinel floor **97** (`GameConst::ARENA_SENTINEL_FLOOR`); deterministic 36×36 Quake/Combat-Hall
+multi-tier colosseum in `engine_arena.cpp` (four corner pads = spawn/respawn points). Layout is
+3-tier, fully symmetric: ground pit (spawn bays + crate cover + four diagonal `CELL_JUMPPAD` launch
+pads), a 1.5 m central tower reached by four cardinal `CELL_LEDGE` ramps (2-lane 0.25 m staircases),
+and a 3.0 m crown ringed by jump pads (a two-stage pad ascent — the commanding vantage). The
+`buildArenaLevel` helpers: `raise()` (LEDGE platform), `pad()` (jump-pad cells, `arena_pad` material),
+`ramp()` (2-lane descending LEDGE staircase), `solid()` (cover). Rules are pure in `game/arena.h`
+(`KILL_TARGET` 10, `RESPAWN_DELAY` 3 s, `recordKill`, `farthestPad` — tested in
+`tests/game/test_arena.cpp`).
 
 - **PvP damage lifecycle:** `Engine::arenaBeginPvpWindow()` (before `serverNetPre`) registers
   every combatant with `Combat::setPvpTargets` — lane arrays for host-locals, seeded views for

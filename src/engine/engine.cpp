@@ -1262,6 +1262,7 @@ void Engine::startCouchGame() {
     if (!m_menu.p1Continue) equipFreshLane(0); // a continued P1 was already loaded by loadGame
     m_splitPlayerCount = 2;
     Input::setSplitScreen(true);
+    Input::assignCouchPads();   // one controller → keyboard P1 + pad0 P2; two+ → identity
     // Online couch co-op runs the split-screen lane loop UNDER a net role; the flag opts this
     // session out of the dispatch's force-to-1 guard (set before startGame so the first IN_GAME
     // frame already sees it). For a purely local couch game (m_netRole==NONE) it stays false.
@@ -1310,6 +1311,7 @@ void Engine::beginCouchJoin() {
     if (!m_menu.p1Continue) equipFreshLane(0); // a continued P1 was already loaded by loadGame
     m_splitPlayerCount = 2;
     Input::setSplitScreen(true);
+    Input::assignCouchPads();   // one controller → keyboard P1 + pad0 P2; two+ → identity
     // Tell updateLobby this is a 2-local-player join (it keys split-screen + m_netCouch on this flag
     // when SV_JOIN_ACCEPT arrives). Without it the accept handler treats us as single and drops P2.
     m_menu.couchJoin = true;
@@ -1348,6 +1350,9 @@ void Engine::syncLocalPlayerToNetPlayer() {
     np.yaw      = m_localPlayer.yaw;
     np.pitch    = m_localPlayer.pitch;
     np.onGround = m_localPlayer.onGround;
+    np.jumpState = m_localPlayer.jumpState;  // keep the NetPlayer mirror coherent so the client's
+                                             // rollback-replay (seeds from m_players[slot]) starts
+                                             // its coyote/buffer timers from the live prediction
     np.health   = m_localPlayer.health;
     np.maxHealth = m_localPlayer.maxHealth;
     np.damageFlashTimer = m_localPlayer.damageFlashTimer;
@@ -1379,6 +1384,7 @@ void Engine::syncNetPlayerToLocalPlayer() {
     m_localPlayer.yaw      = np.yaw;
     m_localPlayer.pitch    = np.pitch;
     m_localPlayer.onGround = np.onGround;
+    m_localPlayer.jumpState = np.jumpState;  // other half of the mirror (see syncLocalPlayerToNetPlayer)
     m_localPlayer.health   = np.health;
     m_localPlayer.maxHealth = np.maxHealth;
     m_localPlayer.damageFlashTimer = np.damageFlashTimer;

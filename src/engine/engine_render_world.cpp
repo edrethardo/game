@@ -875,40 +875,24 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
                    static_cast<f32>(sh) * (st.shrineIdx >= 0 ? 0.5f : 0.45f));
     }
 
-    // Item pickup prompt — show item name in rarity color when aiming at a nearby item
-    {
-        f32 bestDot = 0.85f; // minimum alignment (must be roughly looking at it)
-        f32 bestDist = 3.5f; // max pickup range
-        const WorldItem* bestItem = nullptr;
-        const ItemDef* bestDef = nullptr;
-
-        Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-        Vec3 fwd = m_localPlayer.forward;
-
-        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
-            const WorldItem& wi = m_worldItems.items[i];
-            if (!wi.active) continue;
-            if (isGlobe(wi.item)) continue;
-
-            Vec3 toItem = wi.position - eyePos;
-            f32 dist = length(toItem);
-            if (dist > bestDist || dist < 0.1f) continue;
-
-            Vec3 dir = toItem * (1.0f / dist);
-            f32 dot = fwd.x * dir.x + fwd.y * dir.y + fwd.z * dir.z;
-            if (dot > bestDot && wi.item.defId < m_itemDefCount) {
-                bestDot = dot;
-                bestDist = dist;
-                bestItem = &wi;
-                bestDef = &m_itemDefs[wi.item.defId];
-            }
-        }
-
-        if (bestItem && bestDef) {
-            Vec3 rColor = rarityColor(bestItem->item.rarity);
+    // Item pickup prompt — names the item the button will actually grab. It reads the ONE resolved
+    // target (`st.itemIdx` from resolveInteractTargets), the exact index host pickup and the client's
+    // CL_PICKUP_ITEM both act on, so the shown name can never differ from what E picks up. This used
+    // to be an INDEPENDENT scan on entirely different rules — eye origin vs feet, 3D dot vs
+    // horizontal, max-alignment vs `dot − 0.1·dist` (+0.5 for legendaries), a 0.85/3.5 m cone vs
+    // Interact::inReach's grab-radius, and no loot-ownership check — so with two items close together
+    // it happily named one while the button grabbed the other. One resolver, one answer.
+    if (st.itemIdx >= 0) {
+        const WorldItem& wi = m_worldItems.items[st.itemIdx];
+        // st.itemIdx is only ever a real, in-range, owned-by-you item (resolveInteractTargets
+        // filters globes/shards/shrines/chests and the defId bound), but keep the guard: the draw
+        // below indexes m_itemDefs by defId.
+        if (wi.item.defId < m_itemDefCount) {
+            const ItemDef* bestDef = &m_itemDefs[wi.item.defId];
+            Vec3 rColor = rarityColor(wi.item.rarity);
             // Build display text — legendaries append the skill name in brackets
             char hintBuf[96];
-            if (bestItem->item.rarity == Rarity::LEGENDARY &&
+            if (wi.item.rarity == Rarity::LEGENDARY &&
                 bestDef->legendarySkillId != SkillId::NONE) {
                 const char* skillName = nullptr;
                 for (u32 si = 0; si < m_skillDefCount; si++) {

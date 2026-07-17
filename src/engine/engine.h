@@ -646,6 +646,13 @@ private:
     u8  m_invCursorIndex = 0;  // active alias
     u8  m_invCursorPanels[MAX_LOCAL_PLAYERS] = {};
     u8  m_invCursorIndices[MAX_LOCAL_PLAYERS] = {};
+    // Inventory input mode for the keyboard+mouse lane (player 0). The cursor (WASD/E and the D-pad)
+    // and the physical mouse are BOTH live at once — last-input-wins picks which drives the
+    // highlight + tooltip: true after a WASD/E/D-pad nav, false after the mouse moves or clicks. A
+    // gamepad-only split lane (player > 0) has no mouse, so inventoryUsesCursor() forces cursor there.
+    bool m_invCursorActive = false;
+    s32  m_invLastMouseX = -1;   // previous-frame absolute mouse pos; a change flips back to mouse mode
+    s32  m_invLastMouseY = -1;
     f32 m_fullBackpackNotifyTimer = 0.0f;
     f32 m_bossLockNotifyTimer = 0.0f;  // "defeat the boss" prompt when descend is blocked
     bool m_firstPickupTooltipShown = false;  // item picked up → show "Open Inventory"
@@ -1159,6 +1166,13 @@ private:
     // Park the synthetic cursor on the D-pad-selected slot, so the gamepad drives the SAME hover
     // path the mouse does (items and skills alike) instead of needing its own.
     void inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const;
+    // True when the inventory highlight + tooltip should follow the cursor (WASD/E or D-pad) rather
+    // than the physical mouse. Split-screen P2 (gamepad-only) is always cursor; player 0 follows the
+    // last input used (m_invCursorActive). Read by both the interaction handler and the HUD render so
+    // the two never disagree about which one is driving.
+    bool inventoryUsesCursor() const {
+        return m_localPlayerIndex != 0 ? true : m_invCursorActive;
+    }
 
     // Class + equipment skill bars ON the inventory screen, plus the hover/selection tooltip.
     void renderInventorySkillBars(u32 sw, u32 sh,

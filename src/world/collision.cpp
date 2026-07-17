@@ -47,6 +47,47 @@ static bool overlapsGrid(const Vec3& feetPos, const LevelGrid& grid) {
     return false;
 }
 
+bool Collision::overlapsLedgeAbove(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
+    const f32 minX = feetPos.x - halfWidth, maxX = feetPos.x + halfWidth;
+    const f32 minZ = feetPos.z - halfWidth, maxZ = feetPos.z + halfWidth;
+    s32 cx0, cx1, cz0, cz1;
+    cellRange(minX, maxX, grid.cellSize, cx0, cx1);
+    cellRange(minZ, maxZ, grid.cellSize, cz0, cz1);
+    for (s32 cz = cz0; cz <= cz1; cz++) {
+        for (s32 cx = cx0; cx <= cx1; cx++) {
+            if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
+            const GridCell& c = LevelGridSystem::getCell(grid, (u32)cx, (u32)cz);
+            if (!(c.flags & CELL_LEDGE)) continue;
+            if (LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz) > feetPos.y + STEP_UP_HEIGHT)
+                return true;
+        }
+    }
+    return false;
+}
+
+bool Collision::onJumpPad(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
+    const f32 minX = feetPos.x - halfWidth, maxX = feetPos.x + halfWidth;
+    const f32 minZ = feetPos.z - halfWidth, maxZ = feetPos.z + halfWidth;
+    s32 cx0, cx1, cz0, cz1;
+    cellRange(minX, maxX, grid.cellSize, cx0, cx1);
+    cellRange(minZ, maxZ, grid.cellSize, cz0, cz1);
+    for (s32 cz = cz0; cz <= cz1; cz++) {
+        for (s32 cx = cx0; cx <= cx1; cx++) {
+            if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
+            const GridCell& c = LevelGridSystem::getCell(grid, (u32)cx, (u32)cz);
+            if (!(c.flags & CELL_JUMPPAD)) continue;
+            // Only the pad the body is RESTING on counts: its floor must be at (or just below) the
+            // feet, within the same STEP_UP_HEIGHT slack the landing snap allows. This rejects a pad
+            // cell that sits far below a taller platform the body is standing on (the AABB can span
+            // both), so you don't get relaunched off a pad you're not actually touching.
+            const f32 fh = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
+            if (fh <= feetPos.y + 0.001f && fh >= feetPos.y - STEP_UP_HEIGHT)
+                return true;
+        }
+    }
+    return false;
+}
+
 // Checks whether the player AABB (given feet position) overlaps any entity
 // obstacle in the XZ plane. Y axis is ignored — entities don't block jumping.
 static bool overlapsAnyObstacle(const Vec3& feetPos,
@@ -85,9 +126,9 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
 
     Vec3 delta = player.velocity * dt;
 
-    // --- X axis ---
+    // --- X axis --- (walls OR a too-high jump-ledge block the step)
     Vec3 tryPos = player.position + Vec3{delta.x, 0.0f, 0.0f};
-    if (overlapsGrid(tryPos, grid)) {
+    if (overlapsGrid(tryPos, grid) || overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.x         = 0.0f;
         player.velocity.x = 0.0f;
     } else {
@@ -96,7 +137,7 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
 
     // --- Z axis ---
     tryPos = player.position + Vec3{0.0f, 0.0f, delta.z};
-    if (overlapsGrid(tryPos, grid)) {
+    if (overlapsGrid(tryPos, grid) || overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.z         = 0.0f;
         player.velocity.z = 0.0f;
     } else {
@@ -167,6 +208,17 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
             }
         }
     }
+
+    // --- Jump pad --- launch a grounded body upward off a CELL_JUMPPAD (Quake/Combat-Hall pad).
+    // Fires the moment the body is resting/landing on the pad (onGround, not already rising), so you
+    // can't stand on it — you get flung and air-steer the arc. A velocity.y impulse exactly like the
+    // jump: every movement path (local predict, server drain, reconcile replay) funnels through here,
+    // so it replicates in co-op with no wire change (posY + onGround are snapshotted; see CELL_JUMPPAD).
+    if (player.onGround && player.velocity.y <= 0.1f &&
+        onJumpPad(player.position, PLAYER_HALF_WIDTH, grid)) {
+        player.velocity.y = JUMPPAD_LAUNCH;
+        player.onGround   = false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,9 +233,10 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
 
     Vec3 delta = player.velocity * dt;
 
-    // --- X axis (grid + entities) ---
+    // --- X axis (grid + entities OR a too-high jump-ledge) ---
     Vec3 tryPos = player.position + Vec3{delta.x, 0.0f, 0.0f};
-    if (overlapsWorld(tryPos, grid, obstacles, obstacleCount)) {
+    if (overlapsWorld(tryPos, grid, obstacles, obstacleCount) ||
+        overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.x           = 0.0f;
         player.velocity.x = 0.0f;
     } else {
@@ -192,7 +245,8 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
 
     // --- Z axis (grid + entities) ---
     tryPos = player.position + Vec3{0.0f, 0.0f, delta.z};
-    if (overlapsWorld(tryPos, grid, obstacles, obstacleCount)) {
+    if (overlapsWorld(tryPos, grid, obstacles, obstacleCount) ||
+        overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.z           = 0.0f;
         player.velocity.z = 0.0f;
     } else {
@@ -256,6 +310,14 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
                 }
             }
         }
+    }
+
+    // --- Jump pad --- (see the grid-only overload for the full rationale) launch a grounded body
+    // upward off a CELL_JUMPPAD. velocity.y impulse, same replication story as the jump.
+    if (player.onGround && player.velocity.y <= 0.1f &&
+        onJumpPad(player.position, PLAYER_HALF_WIDTH, grid)) {
+        player.velocity.y = JUMPPAD_LAUNCH;
+        player.onGround   = false;
     }
 }
 

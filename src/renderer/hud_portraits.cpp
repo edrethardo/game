@@ -8,6 +8,7 @@
 #include "renderer/item_icons.h"
 #include "game/item.h"
 #include "game/inventory_ui.h"  // quickbarLayout — single source for the bar's on-screen geometry
+#include "platform/input.h"     // activeDeviceIsGamepad — pick the per-slot key glyph like the skill bar
 #include <cstdio>
 #include <cstring>
 
@@ -176,11 +177,14 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
         Vec3 borderColor = active ? Vec3{1.0f, 0.85f, 0.3f} : Vec3{0.35f, 0.35f, 0.4f};
         pushQuad(x0, y0, x1, y1, borderColor);
 
-        // Slot number label (top-left corner of slot, 1-indexed)
-        char numStr[4];
-        std::snprintf(numStr, sizeof(numStr), "%u", i + 1);
-        FontSystem::drawText(sw, sh, x0 + 2.0f * uiScale, y1 - 10.0f * uiScale, numStr,
-                             active ? Vec3{1.0f, 0.9f, 0.5f} : Vec3{0.5f, 0.5f, 0.5f}, 1);
+        // Key glyph in the top-left corner, drawn like the skill bar's keys (HUD::drawKeySymbol):
+        // the PC keyboard row below WASD (Z/X/C/V) direct-use keys, or the gamepad's L + D-pad
+        // directions. Hardcoded per-device exactly like the skill bar (which shows a fixed "1".."4" /
+        // "Up".."Lt"), so a rebind won't update the glyph — matching that bar's behaviour.
+        static const char* kbKeys[QUICKBAR_SLOTS]  = {"Z", "X", "C", "V"};
+        static const char* padKeys[QUICKBAR_SLOTS] = {"Up", "Rt", "Dn", "Lt"};
+        const char* keyLabel = Input::activeDeviceIsGamepad() ? padKeys[i] : kbKeys[i];
+        drawKeySymbol(sw, sh, x0 + 2.0f * uiScale, y1 - 13.0f * uiScale, keyLabel, active);
 
         // Resolve the item currently assigned to this slot
         const ItemInstance* item = Quickbar::resolveSlot(qb, inv, static_cast<u8>(i));

@@ -88,9 +88,19 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 **Town hub + account stash.** Beating the Dungeon Engine unlocks an outdoor TOWN (sentinel floor 98, `engine_town.cpp` — deterministic build on the Source-chamber rails; credits roll into it, a cleared save's Continue lands there, its portal opens the Free-Play select, `--town` is the dev door). The **stash** is 5 pages × 48 slots shared by ALL characters: pure logic in `game/stash.h` (tested), storage in `stash.dat` (versioned atomic sidecar — `save_NN.dat` untouched), UI rides the inventory screen (`InventoryUI::stashLayout` single-sources draw + hit-test).
 
 **Arena mode (PvP).** A main-menu "Arena Mode" starts an FFA deathmatch (first to 10, 3 s auto-respawn)
-on a deterministic floor-97 colosseum with cover (`engine_arena.cpp`, town rails; rules in `game/arena.h`,
-tested). Host Arena rides the normal host chain, Local Versus the couch chain; joiners use plain Join Game
-(sentinel-floor routing). **All PvP damage flows through `Combat::pvp*` helpers against a registry that is
+on a deterministic floor-97 colosseum (`engine_arena.cpp`, town rails; rules in `game/arena.h`,
+tested). The layout is a **Quake / Metroid-Prime-Hunters Combat-Hall-style 3-tier map** (fully symmetric):
+a ground pit with four corner spawn bays + crate cover + four diagonal **jump pads**, a 1.5 m central
+tower reached by four cardinal ramps, and a 3.0 m crown ringed by jump pads (a two-stage pad ascent to
+the commanding vantage). Verticality rides two opt-in cell flags — **`CELL_LEDGE`** (jump/ramp-gated
+raised floor; `Collision::overlapsLedgeAbove` + `STEP_UP_HEIGHT`) and **`CELL_JUMPPAD`** (Quake launch
+pad; `Collision::onJumpPad` flings `velocity.y = JUMPPAD_LAUNCH` at the end of both `moveAndSlide`
+overloads). Both are **a `velocity.y` impulse like the jump**, so they replicate in co-op with **no wire
+change / no PROTOCOL bump** — `moveAndSlide` is the one choke every movement path (local predict, server
+remote drain, reconcile replay) funnels through, and `SnapPlayer` already carries `posY`+`onGround`.
+**PvP-only** (enemies never jump → pads/ledges are dead ends for them; boss "arenas" in `engine_spawn.cpp`
+use plain walkable tiers so adds follow). Host Arena rides the normal host chain, Local Versus the couch
+chain; joiners use plain Join Game (sentinel-floor routing). **All PvP damage flows through `Combat::pvp*` helpers against a registry that is
 only populated inside the arena's authoritative tick window** (`arenaBeginPvpWindow`/`arenaEndPvpWindow`) —
 each landed hit applies atomically via `Engine::pvpApplyHit` (fresh remote-view seed → `applyDamageToPlayer`
 → writeback), so blocking/perfect-block/armor work vs players and PvE never pays more than one branch. A new

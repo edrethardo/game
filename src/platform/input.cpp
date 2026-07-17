@@ -27,10 +27,11 @@ static s32 s_mouseWheelY = 0;
 static SDL_GameController* s_controllers[Input::MAX_GAMEPADS] = {};
 
 // Sensitivity settings (adjustable from options menu)
-static f32  s_stickSensitivity = 1.0f;
+static f32  s_stickSensitivity = Input::STICK_SENS_DEFAULT;
 static f32  s_gyroSensitivity  = 5.0f;
 static bool s_stickInvertY     = false;
 static bool s_gyroInvertY      = true;
+static bool s_gyroEnabled      = false;   // gyro aim is opt-in; off on a fresh install (see input.h)
 static f32  s_mouseSensitivity = Input::MOUSE_SENS_DEFAULT; // multiplier on base mouse rad/px
 
 // Active-input-device tracking (see input.h). Declared up here so init() (below) can set the
@@ -51,6 +52,10 @@ static constexpr u32 CFG_GYRO_SENS    = 1001;
 static constexpr u32 CFG_MOUSE_SENS   = 1002;
 static constexpr u32 CFG_STICK_INVERT = 1003;
 static constexpr u32 CFG_GYRO_INVERT  = 1004;
+// Gyro-aim master switch (0/1). Written once the player has a controls.json; absent from any file
+// saved before gyro became opt-in, so those load with the OFF default — which is exactly the
+// intended "off unless you turned it on" behaviour, no migration needed.
+static constexpr u32 CFG_GYRO_ENABLED = 1006;   // 1005 is CFG_BINDINGS_REV
 // Binding-table revision. Bumped when a DEFAULT binding changes in a way a previously-saved
 // controls.json would otherwise clobber: loadBindings overwrites defaults row-by-row, so an old
 // file's stale row silently wins over the new default. A file with no CFG_BINDINGS_REV row reads
@@ -61,10 +66,26 @@ static constexpr u32 CFG_GYRO_INVERT  = 1004;
 //           L+D-pad Left, colliding with slot 4, and slot 1's real chord dead. Slots 3/4 are new
 //           ordinals with no rows in an old file, so their defaults survive untouched.
 static constexpr u32 CFG_BINDINGS_REV = 1005;
-static constexpr s32 BINDINGS_REV     = 1;
+//   rev 2 — the PC quickbar moved from wheel-select + middle-click to DIRECT keys on the row below
+//           WASD (Z/X/C/V direct per-slot use). That needed C, so CHARACTER_SCREEN moved off C to K,
+//           and QUICKBAR_USE's middle-click was dropped. An old file has no keyboard quickbar keys and
+//           character still on C — repaired at the tail of loadBindings (keyboard halves only).
+static constexpr s32 BINDINGS_REV     = 2;
 
 // Split-screen: which player's controller to read (0=player1, 1=player2)
 static u8 s_activePlayer = 0;
+
+// Split-screen lane -> physical SDL controller index (-1 = keyboard / no pad). Default identity, so
+// two-controller couch and Switch (JoyCon per lane) are unchanged. On PC couch with a KEYBOARD
+// Player 1, assignCouchPads() shifts the single controller to lane 1 (Player 2): {-1, 0}. This fixes
+// the "one controller, both on P1" bug — lane 1 used to read a nonexistent pad 1 while pad 0 doubled
+// onto P1. Every split-screen controller read below routes its lane through padForLane().
+static constexpr s32 NUM_SPLIT_LANES = 2;   // MAX_LOCAL_PLAYERS (engine.h) — split-screen is 2-up
+static s8 s_padForPlayer[NUM_SPLIT_LANES] = {0, 1};
+static s32 padForLane(s32 lane) {
+    if (lane < 0 || lane >= NUM_SPLIT_LANES) return lane;
+    return s_padForPlayer[lane];
+}
 
 // Cached gyro reading — updated once per frame in Input::update(),
 // returned by getGyro(). Per-player to avoid P2 sensor bleeding into P1.
@@ -198,8 +219,10 @@ static void buildDefaults(InputBinding out[static_cast<u32>(GameAction::COUNT)])
     set(GameAction::BLOCK,         SDL_SCANCODE_LCTRL,  0, -1, -1, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 0.5f);
     set(GameAction::DODGE,         SDL_SCANCODE_LSHIFT, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
     set(GameAction::CLASS_SKILL,   -1, MOUSE_RIGHT,      SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
-    // Quickbar use = equip whatever the active slot holds. KB/M only (middle-click): a gamepad has
-    // no separate "use" button because L + D-pad selects a slot AND equips it in one press (below).
+    // Quickbar use = equip/use whatever the active slot holds. KB/M middle-click, paired with the
+    // mouse-wheel slot cycling — both KEPT. The direct per-slot keys (Z/X/C/V, below) are an
+    // ADDITIONAL PC way, not a replacement. A gamepad has no separate use button (L + D-pad selects
+    // AND uses a slot in one press).
     set(GameAction::QUICKBAR_USE,  -1, MOUSE_MIDDLE,     -1);
 
     // Items / utility
@@ -220,21 +243,22 @@ static void buildDefaults(InputBinding out[static_cast<u32>(GameAction::COUNT)])
     // UI
     set(GameAction::INVENTORY,       SDL_SCANCODE_TAB,    0, SDL_CONTROLLER_BUTTON_START);
     set(GameAction::PAUSE,           SDL_SCANCODE_ESCAPE, 0, SDL_CONTROLLER_BUTTON_BACK);
-    // Character inspect screen. Keyboard: C. Gamepad: L + "+" chord (LEFTSHOULDER + START).
-    // INVENTORY is bare "+" (START); the shared-button collision is resolved in checkActionRaw,
-    // where a bare binding yields to a chord that claims the same button while L is held.
-    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_C,      0, SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-    // Quickbar slots 1-4 on L + D-pad, in the SAME direction order as the bare-D-pad class skills
-    // (Up/Right/Down/Left) so the two bars feel like one system. Each press selects that slot AND
-    // equips it — on a pad this is the whole interaction; there is no separate use button.
-    // Bare D-pad is SKILL_1..4; checkActionRaw's bare-yields-to-chord rule resolves the overlap
-    // (the same mechanism that lets L+"+" be CHARACTER_SCREEN while bare "+" is INVENTORY).
-    // Keyboard is deliberately unbound: keys 1-4 are the class skills, and KB/M selects with the
-    // mouse wheel and equips with middle-click instead.
-    set(GameAction::QUICKBAR_SLOT_1, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_UP,    SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-    set(GameAction::QUICKBAR_SLOT_2, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-    set(GameAction::QUICKBAR_SLOT_3, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_DOWN,  SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-    set(GameAction::QUICKBAR_SLOT_4, -1,                0, SDL_CONTROLLER_BUTTON_DPAD_LEFT,  SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    // Character inspect screen. Keyboard: K (moved off C, which is now quickbar slot 3 — C is the
+    // natural row-below-WASD quickbar key and character is a rarely-pressed menu, so it takes the
+    // conventional character-panel key K, safely away from the combat cluster). Gamepad: L + "+" chord
+    // (LEFTSHOULDER + START). INVENTORY is bare "+" (START); the shared-button collision is resolved in
+    // checkActionRaw, where a bare binding yields to a chord that claims the same button while L is held.
+    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_K,      0, SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    // Quickbar slots 1-4. Gamepad: L + D-pad, in the SAME direction order as the bare-D-pad class
+    // skills (Up/Right/Down/Left) so the two bars feel like one system; each press selects AND equips
+    // that slot (no separate use button). Bare D-pad is SKILL_1..4; checkActionRaw's bare-yields-to-
+    // chord rule resolves the overlap (same mechanism as L+"+" CHARACTER_SCREEN vs bare "+" INVENTORY).
+    // Keyboard: the row BELOW WASD — Z X C V — direct per-slot use (keys 1-4 are the class skills).
+    // This replaced the old wheel-select + middle-click scheme; a direct hotbar is the PC standard.
+    set(GameAction::QUICKBAR_SLOT_1, SDL_SCANCODE_Z,    0, SDL_CONTROLLER_BUTTON_DPAD_UP,    SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::QUICKBAR_SLOT_2, SDL_SCANCODE_X,    0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::QUICKBAR_SLOT_3, SDL_SCANCODE_C,    0, SDL_CONTROLLER_BUTTON_DPAD_DOWN,  SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::QUICKBAR_SLOT_4, SDL_SCANCODE_V,    0, SDL_CONTROLLER_BUTTON_DPAD_LEFT,  SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 
     // Menu navigation
     set(GameAction::MENU_UP,       SDL_SCANCODE_UP,     0, SDL_CONTROLLER_BUTTON_DPAD_UP);
@@ -647,9 +671,10 @@ f32 Input::getAxis(s32 gamepadIndex, s32 axis) {
     }
 #endif
     if (s_splitActive) {
-        if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return 0.0f;
-        if (!s_controllers[gamepadIndex]) return 0.0f;
-        s16 raw = SDL_GameControllerGetAxis(s_controllers[gamepadIndex],
+        const s32 gp = padForLane(gamepadIndex);   // lane -> physical controller (couch remap)
+        if (gp < 0 || gp >= MAX_GAMEPADS) return 0.0f;
+        if (!s_controllers[gp]) return 0.0f;
+        s16 raw = SDL_GameControllerGetAxis(s_controllers[gp],
                                              static_cast<SDL_GameControllerAxis>(axis));
         return static_cast<f32>(raw) / 32767.0f;
     }
@@ -696,9 +721,10 @@ bool Input::isButtonDown(s32 gamepadIndex, s32 button) {
     return (padGetButtons(&s_pads[gamepadIndex]) & hid) != 0;
 #else
     if (s_splitActive) {
-        if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
-        if (!s_controllers[gamepadIndex]) return false;
-        return SDL_GameControllerGetButton(s_controllers[gamepadIndex],
+        const s32 gp = padForLane(gamepadIndex);   // lane -> physical controller (couch remap)
+        if (gp < 0 || gp >= MAX_GAMEPADS) return false;
+        if (!s_controllers[gp]) return false;
+        return SDL_GameControllerGetButton(s_controllers[gp],
                                             static_cast<SDL_GameControllerButton>(button)) != 0;
     }
     // Single-player: merge all controllers
@@ -723,8 +749,9 @@ bool Input::isButtonPressed(s32 gamepadIndex, s32 button) {
     return (cur & hid) && !(prev & hid);
 #else
     if (s_splitActive) {
-        if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
-        return s_currentPadButtons[gamepadIndex][button] && !s_previousPadButtons[gamepadIndex][button];
+        const s32 gp = padForLane(gamepadIndex);   // lane -> physical controller (couch remap)
+        if (gp < 0 || gp >= MAX_GAMEPADS) return false;
+        return s_currentPadButtons[gp][button] && !s_previousPadButtons[gp][button];
     }
     for (s32 c = 0; c < MAX_GAMEPADS; c++) {
         if (s_currentPadButtons[c][button] && !s_previousPadButtons[c][button])
@@ -739,8 +766,10 @@ bool Input::isGamepadConnected(s32 gamepadIndex) {
     // Switch always has controllers (Joy-Cons or Pro Controller via libnx)
     return gamepadIndex >= 0 && gamepadIndex <= 1;
 #else
-    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
-    return s_controllers[gamepadIndex] != nullptr;
+    // In split-screen a lane maps to a physical pad via padForLane (couch remap); identity otherwise.
+    const s32 gp = s_splitActive ? padForLane(gamepadIndex) : gamepadIndex;
+    if (gp < 0 || gp >= MAX_GAMEPADS) return false;
+    return s_controllers[gp] != nullptr;
 #endif
 }
 
@@ -795,7 +824,9 @@ void Input::rumble(u8 slot, f32 strength, u32 durationMs) {
     // vibration devices directly. slot maps 1:1 to the libnx pad index (0/1).
     if (slot < 2) switchRumble(slot, strength, durationMs);
 #else
-    SDL_GameController* gc = s_controllers[slot];
+    const s32 gp = s_splitActive ? padForLane(slot) : slot;   // rumble P2's actual pad (couch remap)
+    if (gp < 0 || gp >= MAX_GAMEPADS) return;
+    SDL_GameController* gc = s_controllers[gp];
     if (!gc) return;
     Uint16 mag = static_cast<Uint16>(strength * 65535.0f);
     SDL_GameControllerRumble(gc, mag, mag, durationMs);
@@ -1061,8 +1092,10 @@ static void readGyroForPlayerPC(u8 player, s32 gamepadIndex, f32 dt) {
 
 static void updateGyroCache() {
     const f32 dt = gyroFrameDt();
-    readGyroForPlayerPC(0, 0, dt);
-    if (s_splitActive) readGyroForPlayerPC(1, 1, dt);
+    // player = the LANE (gyro cache slot); read the physical pad that lane maps to (couch remap).
+    // A keyboard lane (padForLane == -1) reads no pad — readGyroForPlayerPC guards a negative index.
+    readGyroForPlayerPC(0, s_splitActive ? padForLane(0) : 0, dt);
+    if (s_splitActive) readGyroForPlayerPC(1, padForLane(1), dt);
 }
 #endif
 
@@ -1072,6 +1105,11 @@ static void updateGyroCache() {
 // applied once per render frame (getGyro=true); NetInput packing peeks without consuming.
 static void readGyroInto(f32& dx, f32& dy, s32 gamepadIndex, bool consume) {
     (void)gamepadIndex; // cache is per-player; select by the active (swapped-in) player
+    // Gyro aim master switch: while off, report a zero delta to EVERY consumer (the look step and
+    // NetInput packing both read through here), so gyro contributes nothing. `consume` is moot —
+    // there is nothing to consume — and the per-frame cache is overwritten by the sensor next frame,
+    // so toggling gyro back on never dumps an accumulated swing.
+    if (!s_gyroEnabled) { dx = 0.0f; dy = 0.0f; return; }
     u8 pi = s_activePlayer;
     if (pi > 1) pi = 0;
     dx = s_gyroDx[pi];
@@ -1090,9 +1128,10 @@ bool Input::isGyroAvailable(s32 gamepadIndex) {
     (void)gamepadIndex;
     return true; // Switch always has gyro (Joy-Cons or Pro Controller)
 #else
-    if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) return false;
-    if (!s_controllers[gamepadIndex]) return false;
-    return SDL_GameControllerHasSensor(s_controllers[gamepadIndex], SDL_SENSOR_GYRO);
+    const s32 gp = s_splitActive ? padForLane(gamepadIndex) : gamepadIndex;   // couch remap
+    if (gp < 0 || gp >= MAX_GAMEPADS) return false;
+    if (!s_controllers[gp]) return false;
+    return SDL_GameControllerHasSensor(s_controllers[gp], SDL_SENSOR_GYRO);
 #endif
 }
 
@@ -1127,6 +1166,8 @@ f32  Input::getStickSensitivity()        { return s_stickSensitivity; }
 void Input::setStickSensitivity(f32 v)   { s_stickSensitivity = v; }
 f32  Input::getGyroSensitivity()         { return s_gyroSensitivity; }
 void Input::setGyroSensitivity(f32 v)    { s_gyroSensitivity = v; }
+bool Input::getGyroEnabled()             { return s_gyroEnabled; }
+void Input::setGyroEnabled(bool v)       { s_gyroEnabled = v; }
 bool Input::getStickInvertY()            { return s_stickInvertY; }
 void Input::setStickInvertY(bool v)      { s_stickInvertY = v; }
 bool Input::getGyroInvertY()             { return s_gyroInvertY; }
@@ -1135,7 +1176,27 @@ f32  Input::getMouseSensitivity()        { return s_mouseSensitivity; }
 void Input::setMouseSensitivity(f32 v)   { s_mouseSensitivity = v; }
 void Input::setActivePlayer(u8 index)    { s_activePlayer = index; }
 u8   Input::getActivePlayer()            { return s_activePlayer; }
-void Input::setSplitScreen(bool active)  { s_splitActive = active; }
+void Input::setSplitScreen(bool active)  {
+    s_splitActive = active;
+    if (!active) { s_padForPlayer[0] = 0; s_padForPlayer[1] = 1; }  // leaving couch → identity map
+}
+
+u8 Input::connectedGamepadCount() {
+    u8 n = 0;
+    for (s32 c = 0; c < MAX_GAMEPADS; c++) if (s_controllers[c]) n++;
+    return n;
+}
+
+void Input::assignCouchPads() {
+    // PC couch device assignment (call when a split-screen game starts). ONE controller → the
+    // keyboard is Player 1 and the controller is Player 2, so lane 1 reads physical pad 0 and lane 0
+    // reads NO pad (keyboard only). This is the fix for "one controller, both players on P1": lane 1
+    // used to read a nonexistent pad 1 while pad 0 doubled onto P1. Two+ controllers keep the identity
+    // map (P1 = pad 0, P2 = pad 1) — unchanged. On Switch s_controllers is empty (libnx pads), so this
+    // falls to identity and the JoyCon-per-lane reads are untouched.
+    if (connectedGamepadCount() == 1) { s_padForPlayer[0] = -1; s_padForPlayer[1] = 0; }
+    else                              { s_padForPlayer[0] =  0; s_padForPlayer[1] = 1; }
+}
 
 // ---------------------------------------------------------------------------
 // Action-based input — merges keyboard + mouse + gamepad
@@ -1279,6 +1340,7 @@ void Input::saveBindings(const char* path) {
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_MOUSE_SENS,   s_mouseSensitivity);
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_STICK_INVERT, s_stickInvertY ? 1.0f : 0.0f);
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_GYRO_INVERT,  s_gyroInvertY  ? 1.0f : 0.0f);
+    fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_GYRO_ENABLED, s_gyroEnabled  ? 1.0f : 0.0f);
     fprintf(f, "%u 0 0 -1 -1 -1 %.3f\n", CFG_BINDINGS_REV, static_cast<f32>(BINDINGS_REV));
     fclose(f);
     LOG_INFO("Input: saved bindings to %s", path);
@@ -1292,6 +1354,7 @@ void Input::loadBindings(const char* path) {
     u32 mouse;
     f32 axT;
     s32 fileRev = 0;  // no CFG_BINDINGS_REV row => a file written before revisioning existed
+    bool sawGyroEnabled = false;  // no CFG_GYRO_ENABLED row => a file written before gyro became opt-in
     while (fscanf(f, "%u %d %u %d %d %d %f", &idx, &key, &mouse, &btn, &mod, &ax, &axT) == 7) {
         if (idx < static_cast<u32>(GameAction::COUNT)) {
             s_bindings[idx].key = key;
@@ -1305,11 +1368,19 @@ void Input::loadBindings(const char* path) {
         } else if (idx == CFG_MOUSE_SENS)   { s_mouseSensitivity = axT;
         } else if (idx == CFG_STICK_INVERT) { s_stickInvertY = (axT != 0.0f);
         } else if (idx == CFG_GYRO_INVERT)  { s_gyroInvertY  = (axT != 0.0f);
+        } else if (idx == CFG_GYRO_ENABLED) { s_gyroEnabled = (axT != 0.0f); sawGyroEnabled = true;
         } else if (idx == CFG_BINDINGS_REV) { fileRev = static_cast<s32>(axT);
         }
         // Any other idx >= COUNT: unknown/future setting — ignore (forward-compatible).
     }
     fclose(f);
+
+    // Grandfather pre-existing installs onto gyro-ON. A controls.json written before gyro became
+    // opt-in has no CFG_GYRO_ENABLED row, and those players had gyro always-on — so preserve it. The
+    // OFF default is for FRESH installs ONLY: with no file at all, loadBindings returned early above
+    // and left s_gyroEnabled at its false init. Once an existing player touches any control setting
+    // and saves, the row is written and their explicit choice wins from then on.
+    if (!sawGyroEnabled) s_gyroEnabled = true;
 
     // --- Migration: repair defaults an older file would otherwise clobber ---
     // Only the CONTROLLER half of the affected action is restored, so a player's custom keyboard
@@ -1331,6 +1402,29 @@ void Input::loadBindings(const char* path) {
                      actionName(a), s_bindings[i].button, s_bindings[i].modifier);
         }
         LOG_INFO("Input: migrated controls.json rev %d -> %d (restored quickbar gamepad chords)",
+                 fileRev, BINDINGS_REV);
+    }
+
+    // rev 1 -> 2: ADDED direct PC keyboard keys for the quickbar on the row below WASD (Z/X/C/V), and
+    // because C was taken, moved CHARACTER_SCREEN off C to K. (The mouse wheel + middle-click stay —
+    // Z/X/C/V is an additional way, not a replacement.) An old file has those QUICKBAR_SLOT_* rows with
+    // NO keyboard key and CHARACTER_SCREEN still on C — so without this the new keys never reach
+    // existing players AND C ends up double-bound (character + quickbar slot 3). Repair only the
+    // KEYBOARD half of the five affected actions, leaving every other binding — all gamepad chords,
+    // the middle-click quickbar-use, every unrelated custom key — untouched.
+    if (fileRev < 2) {
+        InputBinding d[static_cast<u32>(GameAction::COUNT)];
+        buildDefaults(d);
+        const GameAction keyRepair[] = {
+            GameAction::QUICKBAR_SLOT_1, GameAction::QUICKBAR_SLOT_2,
+            GameAction::QUICKBAR_SLOT_3, GameAction::QUICKBAR_SLOT_4,
+            GameAction::CHARACTER_SCREEN,
+        };
+        for (GameAction a : keyRepair) {
+            const u32 i = static_cast<u32>(a);
+            s_bindings[i].key = d[i].key;
+        }
+        LOG_INFO("Input: migrated controls.json rev %d -> %d (added PC quickbar Z/X/C/V, character -> K)",
                  fileRev, BINDINGS_REV);
     }
 
