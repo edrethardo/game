@@ -413,7 +413,9 @@ void Engine::renderMenu() {
         // New/Continue chooser — SHARED by the Single Player, Host and Join flows, which have
         // already stamped m_netRole (menu cases 0/1/2) by the time this screen shows. Title by
         // role, so a joining player isn't told they're starting a single-player game.
-        const char* subTitle = (m_netRole == NetRole::CLIENT) ? "Join Game"
+        const char* subTitle = m_menu.arena ? ((m_netRole == NetRole::SERVER) ? "Arena - Host"
+                                                                             : "Arena - Local Versus")
+                             : (m_netRole == NetRole::CLIENT) ? "Join Game"
                              : (m_netRole == NetRole::SERVER) ? "Host Game"
                                                               : "Single Player";
         f32 stW = FontSystem::textWidth(subTitle, 2);
@@ -501,7 +503,15 @@ void Engine::renderMenu() {
                                  m_menu.msg, {1.0f * alpha, 0.3f * alpha, 0.3f * alpha}, 2);
         }
     } else if (m_menu.subState == 4) {
-        // Waiting for Player 2 join screen
+        // Waiting for Player 2 join screen. In Arena mode the same lobby means "opponent",
+        // not "co-op partner" — the gold tag keeps that unmissable.
+        if (m_menu.arena) {
+            char tag[64];
+            std::snprintf(tag, sizeof(tag), "ARENA - free-for-all, first to %u", Arena::KILL_TARGET);
+            f32 tagW = FontSystem::textWidth(tag, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tagW) * 0.5f, sh * 0.64f,
+                                 tag, {1.0f, 0.8f, 0.2f}, 2);
+        }
         const char* p1Class = kClassDefs[static_cast<u32>(m_playerClasses[0])].name;
         char p1Str[64];
         std::snprintf(p1Str, sizeof(p1Str), "Player 1: %s", p1Class);
@@ -861,9 +871,37 @@ void Engine::renderMenu() {
         const char* slotHint = "Player 2 pad: D-pad, A to confirm, B to go back";
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f, slotHint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 22) {
+        // Arena Mode chooser — PvP entry: host an online arena, or fight side-by-side locally.
+        const char* title = "Arena Mode";
+        f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.62f, title,
+                             {0.9f, 0.25f, 0.4f}, 3);
+        char sub[64];
+        std::snprintf(sub, sizeof(sub), "Free-for-all - first to %u kills", Arena::KILL_TARGET);
+        f32 sW = FontSystem::textWidth(sub, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - sW) * 0.5f, sh * 0.55f, sub,
+                             {0.75f, 0.55f, 0.6f}, 1);
+
+        static const char* arenaLabels[] = {"Host Arena (Friends Can Join)",
+                                            "Local Versus (Split-Screen)"};
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = sh * 0.42f + (1 - i) * 46.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 col = sel ? Vec3{1.0f, 0.35f, 0.5f} : Vec3{0.4f, 0.15f, 0.22f};
+            HUD::drawMenuOption(sw, sh, y, 360.0f * uiScale, 35.0f * uiScale, col, sel);
+            Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            f32 lw = FontSystem::textWidth(arenaLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 10.0f * uiScale,
+                                 arenaLabels[i], tc, 2);
+        }
+
+        const char* hint = "Joining a friend's arena? Use Join Game - it follows the host.";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 13) {
         // Couch start-mode — both local players are set up; Start Local vs Host Online.
-        const char* title = "Couch Co-op Ready";
+        const char* title = m_menu.arena ? "Arena Versus Ready" : "Couch Co-op Ready";
         f32 tW = FontSystem::textWidth(title, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.6f, title, {0.3f, 1.0f, 0.5f}, 2);
 
@@ -1048,13 +1086,14 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else {
         // Main menu options. The demo build (kDemoBuild, constexpr) hides the online
-        // Host/Join entries — it ships singleplayer + local couch only — leaving a 4-item
-        // menu; the full build keeps all 6 with the demo branch dead-stripped.
-        static const char* fullLabels[] = {"Single Player", "Host Game", "Join Game", "Options", "Credits", "Exit Game"};
+        // Host/Join/Arena entries — it ships singleplayer + local couch only — leaving a
+        // 4-item menu; the full build keeps all 7 with the demo branch dead-stripped.
+        static const char* fullLabels[] = {"Single Player", "Host Game", "Join Game", "Arena Mode", "Options", "Credits", "Exit Game"};
         static const Vec3 fullColors[] = {
             {0.2f, 0.9f, 0.2f},
             {0.2f, 0.5f, 1.0f},
             {1.0f, 0.7f, 0.2f},
+            {0.9f, 0.25f, 0.4f},  // crimson for Arena (PvP)
             {0.6f, 0.6f, 0.8f},
             {1.0f, 0.6f, 0.1f},   // orange for Credits
             {0.7f, 0.2f, 0.2f},
@@ -1065,7 +1104,7 @@ void Engine::renderMenu() {
         };
         const char* const* labels = GameConst::kDemoBuild ? demoLabels : fullLabels;
         const Vec3*        colors = GameConst::kDemoBuild ? demoColors : fullColors;
-        const u32          count  = GameConst::kDemoBuild ? 4u : 6u;
+        const u32          count  = GameConst::kDemoBuild ? 4u : 7u;
 
         for (u32 i = 0; i < count; i++) {
             f32 y = sh * 0.2f + (count - 1 - i) * 50.0f * uiScale;

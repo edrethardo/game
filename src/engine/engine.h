@@ -139,7 +139,7 @@ private:
                                  // 10=host mode, 11=P2 New/Continue chooser, 12=P2 slot select,
                                  // 14=free-play level select (post-clear),
                                  // 15=options:audio, 16=options:keyboard&mouse, 17=options:controller,
-                                 // 18=options:display
+                                 // 18=options:display, 22=Arena Mode chooser (Host Arena / Local Versus)
         u8   subSelection = 0;
         // Free-Play (post-clear level select, sub-state 14): a cleared character's chosen difficulty
         // (0-2) and floor (1-50) for a non-destructive farming session. subSelection picks the active
@@ -154,6 +154,10 @@ private:
         // P1's saved floor/seed; NEW_GAME makes a fresh world) and prepares each lane correctly.
         bool p1Continue = false;
         bool p2Continue = false;
+        // Arena mode (PvP): set by the Arena chooser (subState 22), consumed by every start site
+        // (class-select host start, couch-lobby solo start, startCouchGame) to route into
+        // enterArena() instead of the dungeon/town. Reset by the main-menu confirm.
+        bool arena = false;
         u8   overwriteLane = 0;        // which local lane (0=P1, 1=P2) the subState-8 overwrite is for
         bool couchHost = false;        // true when the host-mode chooser (10) was reached from the
                                        // couch lobby to host an ONLINE couch game (both locals + remotes)

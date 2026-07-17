@@ -125,10 +125,10 @@ static s32 menuMouseHit(u32 sw, u32 sh,
 // Layouts must match renderMenu() in engine_hud.cpp exactly.
 static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCount) {
     switch (subState) {
-    case 0: { // Main menu: 6 items (4 in the demo, which hides Host/Join), Y = sh*0.2 + (count-1-i)*50.
+    case 0: { // Main menu: 7 items (4 in the demo, which hides Host/Join/Arena), Y = sh*0.2 + (count-1-i)*50.
               // Must use the same count as renderMenu() or hover misaligns AND can return an index
               // past the demo's 4-entry action map (out-of-bounds). kDemoBuild is constexpr.
-        const u8 mainCount = GameConst::kDemoBuild ? 4 : 6;
+        const u8 mainCount = GameConst::kDemoBuild ? 4 : 7;
         return menuMouseHit(sw, sh, sh * 0.2f, 50.0f * uiScale, mainCount,
                             250.0f * uiScale, 35.0f * uiScale, false);
     }
@@ -173,6 +173,9 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
     case 19: // Steam join chooser: 4 items (Quick / Browse / Code / IP), Y = sh*0.30 + (3-i)*50*uiScale
         return menuMouseHit(sw, sh, sh * 0.30f, 50.0f * uiScale, 4,
                             250.0f * uiScale, 35.0f * uiScale, false);
+    case 22: // Arena Mode chooser: 2 rows, Y = sh*0.42 + (1-i)*46*uiScale, 360-wide boxes.
+        return menuMouseHit(sw, sh, sh * 0.42f, 46.0f * uiScale, 2,
+                            360.0f * uiScale, 35.0f * uiScale, false);
     case 13: { // Couch start-mode: Y = sh*0.46 + (count-1-i)*46*uiScale, 360-wide boxes.
         // The demo hides both online options, so the count must match the render's (kDemoBuild
         // is constexpr) — otherwise hover misaligns and can return an out-of-range index.
@@ -767,7 +770,8 @@ void Engine::updateMenu(f32 dt) {
                 m_menu.subState = 0;
                 m_splitPlayerCount = 1;
                 startGame(GameStart::NEW_GAME); // wipes + grants starting loadout
-                if (m_townUnlocked) enterTown();   // new hero on a cleared account: host from home
+                if (m_menu.arena)        enterArena();  // Arena host: into the colosseum
+                else if (m_townUnlocked) enterTown();   // new hero on a cleared account: host from home
             } else {
                 // Skip difficulty selection — difficulty is automatic per save (Diablo-style)
                 m_difficulty = 0;  // new games always start Normal
@@ -821,7 +825,14 @@ void Engine::updateMenu(f32 dt) {
                 // Local solo. A CLEARED hero (Hell, floor > 50) opens the Free-Play level select to
                 // farm any difficulty + floor 1-50 (non-destructive); everyone else starts now.
                 // loadGame() already set m_level.savedFloor / m_difficulty for the continued hero.
-                if (m_menu.p1Continue &&
+                if (m_menu.arena) {
+                    // Arena start (covers the SP-chain "solo" start AND a hosting P1 whose
+                    // Continue routed through this lobby). A Continue hero was fully restored by
+                    // loadGame — enter directly, never feeding a saved/marker floor into
+                    // startGame; a fresh hero needs the NEW_GAME wipe + loadout first.
+                    if (!m_menu.p1Continue) startGame(GameStart::NEW_GAME);
+                    enterArena();
+                } else if (m_menu.p1Continue &&
                     FreePlay::saveCleared(m_level.savedFloor, m_difficulty)) {
                     // A CLEARED hero comes home: Continue lands in the TOWN hub (stash, NPCs,
                     // and the portal that opens the Free-Play select — which used to open here).
@@ -1090,6 +1101,46 @@ void Engine::updateMenu(f32 dt) {
     // Couch start-mode (subState 13) — both local players are set up; choose how to play together:
     // 0 Start Local (offline split-screen), 1 Host Online (couch pair hosts), 2 Join Online (couch
     // pair joins a remote host over one connection).
+    // Arena Mode chooser (subState 22) — PvP: Host Arena (online) vs Local Versus (couch).
+    // Both routes reuse the whole existing character-setup chain; the only new thing is the
+    // m_menu.arena flag the start sites consume. Joining an arena needs NO entry here — the
+    // normal Join Game flow lands wherever the host is (join-accept sentinel-floor routing).
+    if (m_menu.subState == 22) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S) ||
+            Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 0;
+            m_menu.subSelection = 0;
+            return;
+        }
+        if (menuConfirmPressed() || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            m_menu.arena = true;
+            if (m_menu.subSelection == 0) {
+                // Host Arena — the normal host chain (LAN/Online → New/Continue → slot → class);
+                // the start sites see m_menu.arena and enter the colosseum instead of the world.
+                m_netRole = NetRole::SERVER;
+                m_localPlayerIndex = 0;
+                scanSaveSlots();
+                m_menu.subState = 10;
+            } else {
+                // Local Versus — the singleplayer chain; it flows into the couch lobby where
+                // Player 2 joins with their own save, exactly like couch co-op.
+                scanSaveSlots();
+                m_menu.subState = 1;
+            }
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
     if (m_menu.subState == 13) {
         if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W) ||
             Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP)) {
@@ -1601,8 +1652,8 @@ void Engine::updateMenu(f32 dt) {
         if (m_menu.selection > 0) { m_menu.selection--; AudioSystem::play(SfxId::MENU_HOVER); }
     }
     if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-        // Demo's main menu has 4 items (max index 3); full game has 6 (max index 5).
-        const u8 maxSel = GameConst::kDemoBuild ? 3 : 5;
+        // Demo's main menu has 4 items (max index 3); full game has 7 (max index 6).
+        const u8 maxSel = GameConst::kDemoBuild ? 3 : 6;
         if (m_menu.selection < maxSel) { m_menu.selection++; AudioSystem::play(SfxId::MENU_HOVER); }
     }
     if (menuConfirmPressed()
@@ -1619,12 +1670,13 @@ void Engine::updateMenu(f32 dt) {
         m_menu.couchHost    = false;
         m_menu.couchJoin    = false;
         m_netCouch          = false;   // clear any online-couch flag from a prior session
-        // The demo menu drops Host (case 1) and Join (case 2), so its 4 visible rows map to
-        // actions {Single Player, Options, Credits, Exit} = full-menu cases {0, 3, 4, 5}.
+        m_menu.arena        = false;   // PvP intent is re-chosen each time (subState 22 sets it)
+        // The demo menu drops Host (1), Join (2) and Arena (3), so its 4 visible rows map to
+        // actions {Single Player, Options, Credits, Exit} = full-menu cases {0, 4, 5, 6}.
         // Remap the demo selection to the full action index so the switch below stays intact.
         u32 menuAction = m_menu.selection;
         if (GameConst::kDemoBuild) {
-            static const u8 demoActionMap[4] = {0, 3, 4, 5};
+            static const u8 demoActionMap[4] = {0, 4, 5, 6};
             menuAction = demoActionMap[m_menu.selection];
         }
         switch (menuAction) {
@@ -1683,7 +1735,11 @@ void Engine::updateMenu(f32 dt) {
             }
 #endif
             break;
-        case 3: // Options — controls rebinding
+        case 3: // Arena Mode (PvP) — Host Arena vs Local Versus chooser
+            m_menu.subState = 22;
+            m_menu.subSelection = 0;
+            break;
+        case 4: // Options — controls rebinding
             // Opened from the MAIN menu: BACK must go to the title screen, never try to resume a
             // game that isn't running. Cleared explicitly so a stale flag can't strand the player.
             m_menu.optionsFromPause = false;
@@ -1691,11 +1747,11 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             m_menu.bindCapture = false;
             break;
-        case 4: // Credits
+        case 5: // Credits
             m_menu.subState = 7;
             m_menu.creditsScroll = 0.0f;
             break;
-        case 5: // Exit
+        case 6: // Exit
             m_running = false;
             break;
         }
