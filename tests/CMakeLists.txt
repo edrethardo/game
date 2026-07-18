@@ -64,6 +64,7 @@ add_executable(dungeon_tests
     world/test_raycast.cpp
     world/test_tile_noise.cpp
     world/test_collision_push.cpp    # a push may crowd the player, never shove them into a wall
+    world/test_platform.cpp          # CELL_PLATFORM slab: story selection, walk-under collision, ray planes
     renderer/test_hud_cooldown.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp
