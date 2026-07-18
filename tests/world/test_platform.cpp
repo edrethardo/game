@@ -72,3 +72,67 @@ TEST_CASE("Platform grid: helpers expose top/underside and pick the story by fee
     room.setPlat(8, 5, 1);
     CHECK(LevelGridSystem::getPlatformUnderside(room.grid, 8, 5) == doctest::Approx(0.0f));
 }
+
+TEST_CASE("Platform collision: a ground body walks UNDER the balcony unobstructed") {
+    BalconyRoom room;
+    Player p;
+    p.position = {5.5f, 0.0f, 4.5f};
+    p.velocity = {0, 0, 0};
+    p.onGround = true;
+    walk(p, room.grid, 0.0f, -3.0f, 90);            // stroll north into the band
+    CHECK(p.position.z < 2.0f);                     // deep in the arcade under the slab
+    CHECK(p.position.y == doctest::Approx(0.0f));   // never lifted onto the slab
+    CHECK(p.onGround);
+}
+
+TEST_CASE("Platform collision: a falling body lands ON the slab top") {
+    BalconyRoom room;
+    Player p;
+    p.position = {5.5f, 3.6f, 1.5f};                // over the band, above the top
+    p.velocity = {0, 0, 0};
+    p.onGround = false;
+    for (int i = 0; i < 60 && !p.onGround; i++) Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+    CHECK(p.onGround);
+    CHECK(p.position.y == doctest::Approx(3.0f));
+}
+
+TEST_CASE("Platform collision: rising under the balcony bonks the underside, never tunnels up") {
+    BalconyRoom room;
+    Player p;
+    p.position = {5.5f, 0.0f, 1.5f};                // in the arcade
+    p.velocity = {0, 17.0f, 0};                     // jump-pad-scale launch (the worst case)
+    p.onGround = false;
+    f32 maxHead = 0.0f;
+    for (int i = 0; i < 120; i++) {
+        Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+        maxHead = std::max(maxHead, p.position.y + PLAYER_HEIGHT);
+    }
+    CHECK(maxHead <= 2.5f + 0.001f);                // head stopped at the underside
+    CHECK(p.position.y == doctest::Approx(0.0f));   // and came back down to the ground story
+    CHECK(p.onGround);
+}
+
+TEST_CASE("Platform collision: a slab band the body would clip blocks XZ like a wall") {
+    BalconyRoom room;
+    room.setPlat(5, 6, 6);                          // lone 1.5 m slab (underside 1.0) in the open
+    Player p;
+    p.position = {5.5f, 0.0f, 8.0f};
+    p.velocity = {0, 0, 0};
+    p.onGround = true;
+    walk(p, room.grid, 0.0f, -3.0f, 60);            // walk north into it: head would clip the band
+    CHECK(p.position.z >= 7.0f + PLAYER_HALF_WIDTH - 0.01f);   // stopped at the cell edge
+    CHECK(p.position.y == doctest::Approx(0.0f));   // and was NOT hoisted onto it
+}
+
+TEST_CASE("Platform collision: graduated slab stairs climb like stairs") {
+    BalconyRoom room;
+    // 6 steps against the west wall: x1 top 1.5 m ... x6 top 0.25 m (0.25 m per step).
+    for (u32 i = 0; i < 6; i++) room.setPlat(1 + i, 5, static_cast<u8>(6 - i));
+    Player p;
+    p.position = {8.5f, 0.0f, 5.5f};
+    p.velocity = {0, 0, 0};
+    p.onGround = true;
+    walk(p, room.grid, -3.0f, 0.0f, 180);           // west, up the steps, into the wall
+    CHECK(p.position.y == doctest::Approx(1.5f));   // standing on the top step
+    CHECK(p.onGround);
+}

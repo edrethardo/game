@@ -3,6 +3,11 @@
 #include "core/math.h"
 #include <cmath>
 
+// The grid's story selector and the collision step gate must agree on one number, or a slab you
+// can step onto could still read as the ground story (or vice versa) for the body stepping on it.
+static_assert(PLATFORM_STEP_TOLERANCE == STEP_UP_HEIGHT,
+              "PLATFORM_STEP_TOLERANCE must track Collision::STEP_UP_HEIGHT");
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -88,6 +93,25 @@ bool Collision::onJumpPad(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
     return false;
 }
 
+bool Collision::overlapsPlatformBand(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
+    const f32 minX = feetPos.x - halfWidth, maxX = feetPos.x + halfWidth;
+    const f32 minZ = feetPos.z - halfWidth, maxZ = feetPos.z + halfWidth;
+    s32 cx0, cx1, cz0, cz1;
+    cellRange(minX, maxX, grid.cellSize, cx0, cx1);
+    cellRange(minZ, maxZ, grid.cellSize, cz0, cz1);
+    for (s32 cz = cz0; cz <= cz1; cz++) {
+        for (s32 cx = cx0; cx <= cx1; cx++) {
+            if (!LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) continue;
+            const f32 top   = LevelGridSystem::getPlatformTop(grid, (u32)cx, (u32)cz);
+            const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
+            if (feetPos.y < top - STEP_UP_HEIGHT &&                 // not stepping onto it
+                feetPos.y + PLAYER_HEIGHT > under + 0.001f)          // and poking into the band
+                return true;
+        }
+    }
+    return false;
+}
+
 // Checks whether the player AABB (given feet position) overlaps any entity
 // obstacle in the XZ plane. Y axis is ignored — entities don't block jumping.
 static bool overlapsAnyObstacle(const Vec3& feetPos,
@@ -126,9 +150,10 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
 
     Vec3 delta = player.velocity * dt;
 
-    // --- X axis --- (walls OR a too-high jump-ledge block the step)
+    // --- X axis --- (walls OR a too-high jump-ledge OR a slab band block the step)
     Vec3 tryPos = player.position + Vec3{delta.x, 0.0f, 0.0f};
-    if (overlapsGrid(tryPos, grid) || overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
+    if (overlapsGrid(tryPos, grid) || overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid) ||
+        overlapsPlatformBand(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.x         = 0.0f;
         player.velocity.x = 0.0f;
     } else {
@@ -137,7 +162,8 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
 
     // --- Z axis ---
     tryPos = player.position + Vec3{0.0f, 0.0f, delta.z};
-    if (overlapsGrid(tryPos, grid) || overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
+    if (overlapsGrid(tryPos, grid) || overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid) ||
+        overlapsPlatformBand(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.z         = 0.0f;
         player.velocity.z = 0.0f;
     } else {
@@ -146,6 +172,11 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
 
     // --- Y axis ---
     player.onGround = false;
+
+    // Story selection key: the PRE-move feet height. The post-move Y must never pick the story —
+    // a fast fall can cross the slab top within one tick and would then read as "under",
+    // tunneling the body down through the walkway.
+    const f32 preFeetY = player.position.y;
 
     tryPos = player.position + Vec3{0.0f, delta.y, 0.0f};
     if (overlapsGrid(tryPos, grid)) {
@@ -163,8 +194,9 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
                 for (s32 cx = cx0; cx <= cx1; cx++) {
                     if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
                     if (!LevelGridSystem::isSolid(grid, (u32)cx, (u32)cz)) {
-                        // Open cell — player stands on its floor
-                        f32 fh = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
+                        // Open cell — player stands on its floor (slab top if the feet started
+                        // within stepping range of it, else the ground story under a balcony)
+                        f32 fh = LevelGridSystem::effectiveFloorHeight(grid, (u32)cx, (u32)cz, preFeetY);
                         if (fh > highestFloor) highestFloor = fh;
                     }
                 }
@@ -177,6 +209,29 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
             player.velocity.y = 0.0f;
         }
     } else {
+        if (delta.y > 0.0f) {
+            // Platform underside head clamp. Open cells have never collided with their real
+            // ceilings (a 0.8 m jump can't reach one) and that legacy stays frozen — but a slab
+            // underside MUST stop a rising body (a 17 m/s pad launch under a 3 m balcony), or it
+            // tunnels up through the walkway. Only slabs the body STARTED fully below count, so a
+            // body already standing on a slab is never yanked beneath it.
+            f32 hMinX, hMaxX, hMinY, hMaxY, hMinZ, hMaxZ;
+            playerAABB(tryPos, hMinX, hMaxX, hMinY, hMaxY, hMinZ, hMaxZ);
+            s32 hx0, hx1, hz0, hz1;
+            cellRange(hMinX, hMaxX, grid.cellSize, hx0, hx1);
+            cellRange(hMinZ, hMaxZ, grid.cellSize, hz0, hz1);
+            for (s32 cz = hz0; cz <= hz1; cz++) {
+                for (s32 cx = hx0; cx <= hx1; cx++) {
+                    if (!LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) continue;
+                    const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
+                    if (preFeetY + PLAYER_HEIGHT <= under + 0.001f &&   // started below the slab
+                        tryPos.y + PLAYER_HEIGHT > under) {             // would poke into it
+                        tryPos.y          = under - PLAYER_HEIGHT;
+                        player.velocity.y = 0.0f;
+                    }
+                }
+            }
+        }
         player.position.y = tryPos.y;
 
         // Check if still standing on something
@@ -199,7 +254,7 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
             for (s32 cx = cx0; cx <= cx1; cx++) {
                 if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
                 if (LevelGridSystem::isSolid(grid, (u32)cx, (u32)cz))     continue;
-                f32 fh = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
+                f32 fh = LevelGridSystem::effectiveFloorHeight(grid, (u32)cx, (u32)cz, preFeetY);
                 if (player.position.y < fh) {
                     player.position.y = fh;
                     if (player.velocity.y < 0.0f) player.velocity.y = 0.0f;
@@ -233,10 +288,11 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
 
     Vec3 delta = player.velocity * dt;
 
-    // --- X axis (grid + entities OR a too-high jump-ledge) ---
+    // --- X axis (grid + entities OR a too-high jump-ledge OR a slab band) ---
     Vec3 tryPos = player.position + Vec3{delta.x, 0.0f, 0.0f};
     if (overlapsWorld(tryPos, grid, obstacles, obstacleCount) ||
-        overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
+        overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid) ||
+        overlapsPlatformBand(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.x           = 0.0f;
         player.velocity.x = 0.0f;
     } else {
@@ -246,7 +302,8 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
     // --- Z axis (grid + entities) ---
     tryPos = player.position + Vec3{0.0f, 0.0f, delta.z};
     if (overlapsWorld(tryPos, grid, obstacles, obstacleCount) ||
-        overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid)) {
+        overlapsLedgeAbove(tryPos, PLAYER_HALF_WIDTH, grid) ||
+        overlapsPlatformBand(tryPos, PLAYER_HALF_WIDTH, grid)) {
         delta.z           = 0.0f;
         player.velocity.z = 0.0f;
     } else {
@@ -255,6 +312,11 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
 
     // --- Y axis (grid only — entities don't block vertical movement) ---
     player.onGround = false;
+
+    // Story selection key: the PRE-move feet height. The post-move Y must never pick the story —
+    // a fast fall can cross the slab top within one tick and would then read as "under",
+    // tunneling the body down through the walkway.
+    const f32 preFeetY = player.position.y;
 
     tryPos = player.position + Vec3{0.0f, delta.y, 0.0f};
     if (overlapsGrid(tryPos, grid)) {
@@ -270,7 +332,7 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
                 for (s32 cx = cx0; cx <= cx1; cx++) {
                     if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
                     if (!LevelGridSystem::isSolid(grid, (u32)cx, (u32)cz)) {
-                        f32 fh = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
+                        f32 fh = LevelGridSystem::effectiveFloorHeight(grid, (u32)cx, (u32)cz, preFeetY);
                         if (fh > highestFloor) highestFloor = fh;
                     }
                 }
@@ -282,6 +344,29 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
             player.velocity.y = 0.0f;
         }
     } else {
+        if (delta.y > 0.0f) {
+            // Platform underside head clamp. Open cells have never collided with their real
+            // ceilings (a 0.8 m jump can't reach one) and that legacy stays frozen — but a slab
+            // underside MUST stop a rising body (a 17 m/s pad launch under a 3 m balcony), or it
+            // tunnels up through the walkway. Only slabs the body STARTED fully below count, so a
+            // body already standing on a slab is never yanked beneath it.
+            f32 hMinX, hMaxX, hMinY, hMaxY, hMinZ, hMaxZ;
+            playerAABB(tryPos, hMinX, hMaxX, hMinY, hMaxY, hMinZ, hMaxZ);
+            s32 hx0, hx1, hz0, hz1;
+            cellRange(hMinX, hMaxX, grid.cellSize, hx0, hx1);
+            cellRange(hMinZ, hMaxZ, grid.cellSize, hz0, hz1);
+            for (s32 cz = hz0; cz <= hz1; cz++) {
+                for (s32 cx = hx0; cx <= hx1; cx++) {
+                    if (!LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) continue;
+                    const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
+                    if (preFeetY + PLAYER_HEIGHT <= under + 0.001f &&   // started below the slab
+                        tryPos.y + PLAYER_HEIGHT > under) {             // would poke into it
+                        tryPos.y          = under - PLAYER_HEIGHT;
+                        player.velocity.y = 0.0f;
+                    }
+                }
+            }
+        }
         player.position.y = tryPos.y;
 
         Vec3 groundCheck = player.position + Vec3{0.0f, -0.05f, 0.0f};
@@ -302,7 +387,7 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
             for (s32 cx = cx0; cx <= cx1; cx++) {
                 if (!LevelGridSystem::isInBounds(grid, (u32)cx, (u32)cz)) continue;
                 if (LevelGridSystem::isSolid(grid, (u32)cx, (u32)cz))     continue;
-                f32 fh = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
+                f32 fh = LevelGridSystem::effectiveFloorHeight(grid, (u32)cx, (u32)cz, preFeetY);
                 if (player.position.y < fh) {
                     player.position.y = fh;
                     if (player.velocity.y < 0.0f) player.velocity.y = 0.0f;
