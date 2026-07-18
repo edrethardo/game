@@ -45,10 +45,14 @@ namespace LagComp {
 // and worse than the old hardcoded guess — so 0 on the wire means "use the baseline".
 inline constexpr u8 DEFAULT_INTERP_DELAY_MS = 33;
 
-// Upper bound on how wide the client's jitter buffer may grow. Also the trust ceiling: a
-// malicious or corrupt client could otherwise claim a huge delay and rewind enemies far into
-// the past, letting it walk through where they used to be. Clamp, don't trust.
-inline constexpr u8 MAX_INTERP_DELAY_MS = 150;
+// Upper bound on how wide the client's jitter buffer may grow — and the server's rewind trust
+// ceiling. Raised 150 -> 250 ms for long-haul play (Germany<->New Zealand, ~150 ms one-way + jitter):
+// the adaptive buffer must be allowed to ride out jitter spikes past 150 ms or remote players/enemies
+// stutter. This is ALSO the max the server will rewind for a client's lag-comp (movement + fire), so
+// a malicious client can claim at most 250 ms of rewind — bounded, and legitimate at this distance.
+// Fits the 64-tick server pose history (250 ms = 15 ticks, + half-RTT ~9 ticks << 64) and the 32-slot
+// client snapshot ring (533 ms, render time sits 15 ticks behind the 31-tick-deep oldest sample).
+inline constexpr u8 MAX_INTERP_DELAY_MS = 250;
 
 // Quantize a delay in seconds to the wire byte (used by the client when stamping an input).
 inline u8 toWireMs(f32 delaySec) {

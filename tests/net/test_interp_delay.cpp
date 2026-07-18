@@ -64,3 +64,18 @@ TEST_CASE("Interp delay: never drops below the base floor") {
     for (int i = 0; i < 50; i++) delay = computeInterpDelay(delay, 0.0f, BASE, MAXD);
     CHECK(delay >= BASE);
 }
+
+TEST_CASE("InterpDelay: adaptive buffer can now widen past the old 150 ms cap") {
+    const f32 base = 0.033f;   // 33 ms
+    const f32 maxd = 0.250f;   // NEW long-haul cap (was 0.150)
+    // Sustained high arrival jitter (~90 ms smoothed) drives the target above the OLD cap.
+    f32 delay = base;
+    for (int i = 0; i < 400; i++)
+        delay = computeInterpDelay(delay, 0.090f, base, maxd);
+    CHECK(delay > 0.150f);                    // would have been pinned at 0.150 before
+    CHECK(delay <= 0.250f + 1e-4f);           // never exceeds the new cap
+    // And it still floors at base when the link is calm.
+    f32 calm = 0.100f;
+    for (int i = 0; i < 400; i++) calm = computeInterpDelay(calm, 0.0f, base, maxd);
+    CHECK(calm == doctest::Approx(base));
+}

@@ -35,10 +35,12 @@ TEST_CASE("LagComp: absent field falls back to the legacy baseline, never to zer
 }
 
 TEST_CASE("LagComp: an over-large claimed delay is clamped, not trusted") {
-    // Untrusted input: a client claiming 255 ms would otherwise rewind enemies ~15 ticks and
-    // could walk through where they used to be.
+    // Untrusted input: the wire byte tops out at 255 ms, just above the cap; a client claiming
+    // more than the cap is clamped so it can't rewind enemies past the trust ceiling and walk
+    // through where they used to be. Reference the constant, not a literal, so the raised cap
+    // (150 -> 250) can never silently outrun this guard.
     CHECK(LagComp::sanitize(255) == LagComp::MAX_INTERP_DELAY_MS);
-    CHECK(LagComp::rewindTicks(255) == doctest::Approx(LagComp::rewindTicks(150)));
+    CHECK(LagComp::rewindTicks(255) == doctest::Approx(LagComp::rewindTicks(LagComp::MAX_INTERP_DELAY_MS)));
 }
 
 TEST_CASE("LagComp: targetTick rewinds backward from the acked snapshot") {
@@ -60,4 +62,20 @@ TEST_CASE("LagComp: toWireMs round-trips the client's adaptive delay range") {
     CHECK(LagComp::toWireMs(0.150f) == 150);
     CHECK(LagComp::toWireMs(0.500f) == LagComp::MAX_INTERP_DELAY_MS); // clamped at the cap
     CHECK(LagComp::toWireMs(-1.0f)  == 0);                            // never negative
+}
+
+TEST_CASE("LagComp: interp ceiling raised to 250 ms for long-haul (DE<->NZ)") {
+    // The cap is the trust ceiling AND the jitter-buffer max. 200 ms (a real DE<->NZ buffer under
+    // jitter) must now pass through, where the old 150 ms cap clamped it.
+    CHECK(LagComp::sanitize(200) == 200);
+    CHECK(LagComp::sanitize(250) == 250);
+    CHECK(LagComp::sanitize(255) == 250);   // above the cap clamps to the cap
+    CHECK(LagComp::sanitize(0)   == LagComp::DEFAULT_INTERP_DELAY_MS);  // absent -> baseline
+    CHECK(LagComp::toWireMs(0.25f) == 250);  // 250 ms round-trips through the wire byte
+    CHECK(LagComp::toWireMs(0.30f) == 250);  // clamped
+
+    // rewindTicks is fractional: 250 ms * 0.06 ticks/ms = 15 ticks. Must fit the server's
+    // 64-tick pose history even stacked on a 300 ms-RTT half-RTT (9 ticks): 15 + 9 = 24 < 64.
+    CHECK(LagComp::rewindTicks(250) == doctest::Approx(15.0f));
+    CHECK(15.0f + 9.0f < 64.0f);
 }
