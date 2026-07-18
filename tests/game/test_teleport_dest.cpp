@@ -120,3 +120,27 @@ TEST_CASE("resolveDest: lands on the destination cell's floor height") {
     Vec3 dest = Teleport::resolveDest(g, pool, {1.5f, 0, 1.5f}, {7.5f, 0, 1.5f});
     CHECK(dest.y == doctest::Approx(1.0f));
 }
+
+TEST_CASE("TeleportDest: a blink to a balcony target lands ON the balcony story") {
+    // 12x12 room with a 3.0 m platform band along the north wall (z=1..2) — caster and victim
+    // both stand on it. The landing Y must be the SLAB top, not the ground floor beneath.
+    LevelGrid g;
+    LevelGridSystem::init(g, 12, 12, 1.0f);
+    for (u32 z = 0; z < 12; z++)
+        for (u32 x = 0; x < 12; x++) {
+            GridCell& c = g.cells[z * 12 + x];
+            const bool border = (x == 0 || z == 0 || x == 11 || z == 11);
+            c.flags = border ? CELL_SOLID : CELL_FLOOR;
+            c.floorHeight = 0; c.ceilingHeight = 20;
+        }
+    for (u32 z = 1; z <= 2; z++)
+        for (u32 x = 1; x <= 10; x++) {
+            GridCell& c = g.cells[z * 12 + x];
+            c.flags = static_cast<u8>(CELL_FLOOR | CELL_PLATFORM);
+            c.platHeight = 12;
+        }
+    EntityPool pool{};                               // zero entities — nobody blocks the landing
+    Vec3 dest = Teleport::resolveDest(g, pool, {3.5f, 3.0f, 1.5f}, {8.5f, 3.0f, 1.5f});
+    CHECK(dest.y == doctest::Approx(3.0f));
+    LevelGridSystem::shutdown(g);
+}
