@@ -65,9 +65,10 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // game-jump so `--host --net-loss 10` and a menu-hosted session behave identically.
     m_netFakeLossPct   = opt.netLossPct;
     m_netFakeLatencyMs = opt.netLatencyMs;
-    if (opt.netLossPct > 0 || opt.netLatencyMs > 0)
-        LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency (net-graph: F9)",
-                 (u32)opt.netLossPct, opt.netLatencyMs);
+    m_netFakeJitterMs  = opt.netJitterMs;
+    if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
+        LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
+                 (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);
     if (opt.botWalk) {
         PlayerController::setBotWalk(true);
         LOG_INFO("Launch: BOT-WALK ON — deterministic movement pattern (divergence probe)");

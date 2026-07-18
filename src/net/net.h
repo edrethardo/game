@@ -566,6 +566,11 @@ namespace Net {
     void setFakeLatencyMs(u32 ms);
     u32  getFakeLatencyMs();
 
+    // Long-haul rig: fake jitter cvar. Per-packet random [0, ms] delay added on top of the fake
+    // latency (net.cpp), so the client's adaptive interp buffer is actually exercised. Pushed each
+    // frame from serverNetPre/clientNetPre like the latency/loss cvars.
+    void setFakeJitterMs(u32 ms);
+
     // D5: fake-latency delay queue for manual smoke testing.
     // When Engine::m_netFakeLatencyMs > 0 (read via s_engineForNet), every outgoing
     // packet is enqueued with a deliverAt timestamp instead of being sent immediately.

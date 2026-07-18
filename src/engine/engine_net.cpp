@@ -72,6 +72,7 @@ void Engine::serverNetPre(f32 dt) {
     // (The loss push was MISSING until the --net-loss flag landed: Net::setFakeLossPct existed
     // with zero callers, so the whole M14 loss harness was unreachable at runtime.)
     Net::setFakeLatencyMs(m_netFakeLatencyMs);
+    Net::setFakeJitterMs(m_netFakeJitterMs);
     Net::setFakeLossPct(m_netFakeLossPct);
     Net::pumpDelayQueue();
 
@@ -1085,6 +1086,7 @@ void Engine::clientNetPre(f32 dt) {
     // D5/M14: sync the fake-latency + fake-loss cvars into the net layer, then flush any outgoing
     // packets (CL_INPUT, CL_FIRE_WEAPON, etc.) whose delivery timestamp has elapsed.
     Net::setFakeLatencyMs(m_netFakeLatencyMs);
+    Net::setFakeJitterMs(m_netFakeJitterMs);
     Net::setFakeLossPct(m_netFakeLossPct);
     Net::pumpDelayQueue();
 

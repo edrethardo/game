@@ -332,6 +332,7 @@ private:
     // m_divergenceCount accumulates every reconcile mismatch in clientNetPost and is
     // reported + reset by the 1 Hz [NET-GRAPH] log emitted in update().
     u32  m_netFakeLatencyMs  = 0;    // D5: ms of one-way simulated latency on all sends
+    u32  m_netFakeJitterMs   = 0;    // --net-jitter: pushed into Net:: each frame (serverNetPre/clientNetPre)
     u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
     u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
     // Shaky-client-FOV diagnostic (accumulated per-correction in clientNetPost, reported +

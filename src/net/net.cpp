@@ -105,6 +105,13 @@ static u8 s_fakeLossPct = 0;
 // any entries whose deliverAt <= now, simulating the requested one-way delay.
 static u32 s_fakeLatencyMs = 0;
 
+// Long-haul rig: fake JITTER — set via Net::setFakeJitterMs(). Adds a per-packet random delay in
+// [0, s_fakeJitterMs] ms ON TOP of the latency floor, so inter-arrival time varies the way a real
+// long-haul link does (and, because the added delay varies per packet, packets naturally REORDER).
+// This is what actually exercises the client's adaptive jitter buffer — constant latency leaves it
+// at its floor. Applied at the same single choke as the latency (enqueueDelayed).
+static u32 s_fakeJitterMs = 0;
+
 // Target type for a queued delayed packet — tells the pump which send helper to invoke.
 enum struct DelayTarget : u8 {
     PEER_R,        // sendReliable to a specific player slot
@@ -162,7 +169,11 @@ static void enqueueDelayed(DelayTarget target, u8 playerSlot,
     e.active       = true;
     e.target       = target;
     e.playerSlot   = playerSlot;
-    e.deliverAtSec = Clock::getElapsedSeconds() + s_fakeLatencyMs * 0.001;
+    // Latency is the floor; jitter is a per-packet [0, s_fakeJitterMs] ms spread on top (rand() like
+    // shouldDropPacket). Varying it per packet reproduces long-haul reordering — the delivery pump
+    // drains by deliverAt regardless of enqueue order, so an earlier-scheduled packet can overtake.
+    const u32 jitterMs = (s_fakeJitterMs > 0) ? static_cast<u32>(rand() % (s_fakeJitterMs + 1)) : 0u;
+    e.deliverAtSec = Clock::getElapsedSeconds() + (s_fakeLatencyMs + jitterMs) * 0.001;
     e.payloadSize  = size;
     std::memcpy(e.payload, data, size);
 }
@@ -1533,3 +1544,4 @@ u8   Net::getFakeLossPct()       { return s_fakeLossPct; }
 // pumpDelayQueue can deliver queued packets at the right wall-clock time.
 void Net::setFakeLatencyMs(u32 ms) { s_fakeLatencyMs = ms; }
 u32  Net::getFakeLatencyMs()       { return s_fakeLatencyMs; }
+void Net::setFakeJitterMs(u32 ms) { s_fakeJitterMs = ms; }
