@@ -15,6 +15,13 @@
 // RFC 3550-style smoothed jitter: EMA (gain 1/16) of the absolute deviation of the latest
 // inter-arrival interval from the nominal send interval. All times in seconds.
 inline f32 updateArrivalJitter(f32 prevJitter, f32 deltaSec, f32 nominalSec) {
+    // OUTAGE GUARD: a burst outage (a gap several times the send interval) is a LOSS event, not
+    // jitter — feeding it raw would inflate the smoothed jitter (and thus the interp delay) for
+    // hundreds of ms after the link already recovered, making every wifi hiccup permanently tax
+    // remote-render latency. Clamp the sample at 3x nominal: real jitter passes untouched
+    // (spikes < 2 intervals), anything larger contributes at most a bounded nudge.
+    const f32 outageClamp = 3.0f * nominalSec;
+    if (deltaSec > outageClamp) deltaSec = outageClamp;
     f32 dev = deltaSec - nominalSec;
     if (dev < 0.0f) dev = -dev;
     return prevJitter + (dev - prevJitter) * (1.0f / 16.0f);
