@@ -20,6 +20,15 @@ inline f32 updateArrivalJitter(f32 prevJitter, f32 deltaSec, f32 nominalSec) {
     // hundreds of ms after the link already recovered, making every wifi hiccup permanently tax
     // remote-render latency. Clamp the sample at 3x nominal: real jitter passes untouched
     // (spikes < 2 intervals), anything larger contributes at most a bounded nudge.
+    //
+    // How the constants tie together (why the delay never reaches the 250 ms ceiling): with the
+    // 3x clamp the largest deviation any sample carries is (3-1)=2x nominal, so the EMA-smoothed
+    // jitter SATURATES at 2x nominal. computeInterpDelay's target is base + JITTER_K*jitter, so the
+    // jitter-driven delay tops out at base + K*2*nominal ≈ 33 + 2.5*2*16.7 ≈ 116 ms. That is the
+    // realistic steady ceiling of THIS estimator; LagComp::MAX_INTERP_DELAY_MS (250) is the separate
+    // wire/rewind TRUST ceiling (how far back the server will honor a rewind), NOT a target this
+    // estimator is meant to reach. A future high-VARIANCE-link tuner must raise the 3x outage clamp
+    // (to let genuine high jitter through), not the 250 cap — raising 250 alone changes nothing here.
     const f32 outageClamp = 3.0f * nominalSec;
     if (deltaSec > outageClamp) deltaSec = outageClamp;
     f32 dev = deltaSec - nominalSec;

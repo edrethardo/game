@@ -1176,6 +1176,15 @@ void Engine::beginLagComp(u32 ticksAgo) {
     }
 
     // --- PvP view rewind (the player twin of the entity swap above) --------------------------
+    // INVARIANT this rewind's correctness rests on: each PvP weapon query runs at most ONCE per
+    // fire and lands at most ONE hit per slot. A future pierce / multishot that re-queried an
+    // already-hit slot would read that slot's PRESENT (reseeded) pose — pvpApplyHit's
+    // seedRemoteView resets m_pvpViews[slot] back to present before landPvpHit/writeback — so the
+    // second query would test un-rewound geometry and silently defeat lag comp for it. Extend the
+    // rewind to bracket the whole multi-hit query (rewind once, resolve all hits, restore) if that
+    // ever lands. That same seedRemoteView-to-present is also what CONFINES the rewound pose to the
+    // query READ: the hit's damage/velocity/CC land on the present-time view, never propagating the
+    // past position into m_players[].
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) s_playerScratchValid[pi] = false;
     u32 pvpCount = 0;
     const Combat::PvpTarget* pvpTs = Combat::pvpTargets(pvpCount);

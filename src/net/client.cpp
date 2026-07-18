@@ -247,7 +247,7 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
 
     // Serialize the full window, stamping `targetSlot` into the window header (byte 1) so the
     // server routes this input to the right one of this peer's local players (couch co-op).
-    // Wire: PacketHeader(4) + payload[ windowCount, targetSlot, 0, 0, N×14 B inputs ].
+    // Wire: PacketHeader(4) + payload[ windowCount, targetSlot, 0, 0, N×15 B inputs ].
     u8 payload[256];
     u32 payloadSize = serializeInputWindow(payload, sizeof(payload), window, wcount, targetSlot);
     PacketWriter w;
