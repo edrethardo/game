@@ -232,12 +232,17 @@ struct NetPlayer {
 
 // Number of consecutive inputs packed into each CL_INPUT packet (oldest→newest).
 // Redundancy benefit: one dropped UDP packet no longer drops an input — the next
-// packet still carries it. At 8, seven consecutive losses (~120 ms at 60 Hz) are
-// needed to actually lose an input, covering bursty Wi-Fi/cellular loss. Cost is
-// 8×15+4 = 124 B per CL_INPUT (~7.5 KB/s up) — negligible. The server's per-input drain
-// (collectUnprocessedInputs) processes each new clientTick once, so the extra
-// redundancy never double-applies. Was 4 (~50 ms of cover).
-static constexpr u32 INPUT_WINDOW_SIZE = 8;
+// packet still carries it. At 15 the window spans 15 ticks = 250 ms at 60 Hz, which is
+// EXACTLY the server's starvation-coast budget (the ≤250 ms coast in serverUpdate). That
+// alignment is the point: any outage the coast can hide, the window can then BACKFILL with
+// the REAL inputs on the first packet that lands — so the coast's guess is corrected by
+// truth arriving in the SAME window, never a coast-guess-then-late-truth double correction
+// (which the other player sees as a rubber-band). Cost is 15×15+4 = 229 B per CL_INPUT
+// (~13.7 KB/s up at 60 Hz) — still trivial for any uplink. The server's per-input drain
+// (collectUnprocessedInputs) processes each new clientTick once, so the extra redundancy
+// never double-applies. Was 8 (133 ms — only half the coast, so ticks 9..15 of a burst
+// outage were permanently lost and coast-approximated); 4 (~50 ms) before that.
+static constexpr u32 INPUT_WINDOW_SIZE = 15;
 
 // Serialize up to `count` NetInputs (≤ INPUT_WINDOW_SIZE) into `outBuf`. Wire layout:
 //   u8  windowCount
