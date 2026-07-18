@@ -15,7 +15,7 @@
 struct Player;  // fwd-decl: captureAndSendInput + reconcile read/write its transform
 
 // 32 deep × sizeof(WorldSnapshot)=8.2KB = ~264KB. Sized by its two consumers:
-//   * the ADAPTIVE interp delay may widen to 150 ms under jitter (lag_comp.h) — the old depth of
+//   * the ADAPTIVE interp delay may widen to 250 ms under jitter (lag_comp.h) — the old depth of
 //     4 held ~50 ms, so the bracketing pair had already been evicted exactly on the links that
 //     needed the cushion, and interpolation degenerated to raw snapshot stepping;
 //   * delta decoding needs the snapshot the server's delta NAMES as baseline — that's the one we

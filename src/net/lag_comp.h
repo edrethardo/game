@@ -8,7 +8,7 @@
 // The client predicts its own movement by colliding against the *interpolated* entity pool
 // (m_renderInterp.entities), which it samples at `now - s_interpDelaySec`. That delay is
 // ADAPTIVE: it starts at INTERP_DELAY_SEC (33 ms) and widens with snapshot-arrival jitter,
-// up to 150 ms (client.cpp, interp_delay.h).
+// up to 250 ms (client.cpp, interp_delay.h).
 //
 // The server, replaying that same input, has to collide the player against the SAME view of
 // the world — otherwise the two disagree about where a moving enemy was, moveAndSlide produces
@@ -18,7 +18,7 @@
 //
 //   engine_net.cpp   INTERP_DELAY_TICKS = 2   (33 ms)   — movement rewind
 //   engine_combat.cpp INTERP_TICKS      = 3   (50 ms)   — fire rewind
-//   client.cpp       s_interpDelaySec   = 33..150 ms    — what the client ACTUALLY used
+//   client.cpp       s_interpDelaySec   = 33..250 ms    — what the client ACTUALLY used
 //
 // So the server was structurally incapable of agreeing with the client the moment jitter
 // widened the client's buffer past the hardcoded guess. The fix is to stop guessing: the

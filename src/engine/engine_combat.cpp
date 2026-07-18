@@ -1113,7 +1113,7 @@ void Engine::endLagComp() {
 // — i.e. derived from the delay the client REPORTED for this very input, not from a server-side
 // guess. The old code rewound a hardcoded 2 ticks, which was only ever right for a client whose
 // adaptive jitter buffer happened to sit at its 33 ms floor; the moment jitter widened it (up to
-// 150 ms = 9 ticks) the server was colliding against a world up to 7 ticks newer than the one the
+// 250 ms = 15 ticks) the server was colliding against a world up to 13 ticks newer than the one the
 // client saw. See net/lag_comp.h.
 void Engine::buildLagCompPlayerObstacles(f32 targetSnapTickF,
                                          CollisionObstacle* out,
