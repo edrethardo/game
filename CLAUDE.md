@@ -89,15 +89,16 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 
 **Arena mode (PvP).** A main-menu "Arena Mode" starts an FFA deathmatch (first to 10, 3 s auto-respawn)
 on a deterministic floor-97 colosseum (`engine_arena.cpp`, town rails; rules in `game/arena.h`,
-tested). The layout is a **Quake / Metroid-Prime-Hunters Combat-Hall-style 3-tier map** (fully symmetric):
-a ground pit with four corner spawn bays + crate cover + four diagonal **jump pads**, a 1.5 m central
-tower reached by four cardinal ramps, and a 3.0 m crown ringed by jump pads (a two-stage pad ascent to
-the commanding vantage). Verticality rides two opt-in cell flags — **`CELL_LEDGE`** (jump/ramp-gated
-raised floor; `Collision::overlapsLedgeAbove` + `STEP_UP_HEIGHT`) and **`CELL_JUMPPAD`** (Quake launch
-pad; `Collision::onJumpPad` flings `velocity.y = JUMPPAD_LAUNCH` at the end of both `moveAndSlide`
-overloads). Both are **a `velocity.y` impulse like the jump**, so they replicate in co-op with **no wire
-change / no PROTOCOL bump** — `moveAndSlide` is the one choke every movement path (local predict, server
-remote drain, reconcile replay) funnels through, and `SnapPlayer` already carries `posY`+`onGround`.
+tested). The layout is a **two-story Quake / MPH Combat Hall** (44×44, 4-fold symmetric): a ground pit
+(crates, wall-midpoint jump pads, central 1.5 m tower via four ramps) under TWO dueling 3.0 m
+vantages — a **perimeter sniper balcony** you stand on AND walk under (covered arcade beneath
+holds the spawn bays; corner slab **stairwells** + pads go up; open inner edge to drop/fire),
+and the tower's crown at the same height. Verticality rides three opt-in cell flags —
+`CELL_LEDGE` (jump-gated risers), `CELL_JUMPPAD` (launch pads), and **`CELL_PLATFORM`**
+(real walk-under second-story slabs: story-selecting collision via
+`LevelGridSystem::effectiveFloorHeight`, slab-aware `Raycast::cast` so nothing shoots through a
+balcony floor, mesher top/underside/rim quads). All three are deterministic seed-built geometry,
+so they replicate in co-op with **no wire change / no PROTOCOL bump**.
 **PvP-only** (enemies never jump → pads/ledges are dead ends for them; boss "arenas" in `engine_spawn.cpp`
 use plain walkable tiers so adds follow). Host Arena rides the normal host chain, Local Versus the couch
 chain; joiners use plain Join Game (sentinel-floor routing). **All PvP damage flows through `Combat::pvp*` helpers against a registry that is

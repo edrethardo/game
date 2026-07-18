@@ -26,7 +26,7 @@ skill.
 | `AffixDef` / `Affix` | `game/item.h` | `validSlots` is a bitmask of `ItemSlot` values |
 | `WeaponDef` / `WeaponState` | `game/weapon.h` | `WeaponType`: MELEE/HITSCAN/PROJECTILE selects path in `Combat` |
 | `SkillDef` / `SkillState` | `game/item.h` | One `SkillState` per player (cooldown + energy) |
-| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING` + opt-in verticality `CELL_LEDGE` (jump-gated) / `CELL_JUMPPAD` (launch pad). Heights in quarter-units |
+| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING` + opt-in verticality `CELL_LEDGE` (jump-gated) / `CELL_JUMPPAD` (launch pad) / `CELL_PLATFORM` (walk-under 2nd story). Heights in quarter-units |
 | `WorldSnapshot`, `SnapPlayer/Entity/Projectile` | `net/snapshot.h` | Quantized server-to-client state |
 | `NetInput` | `net/net_player.h` | Client→server input: `INPUT_FORWARD/BACKWARD/LEFT/RIGHT/JUMP/FIRE/LOCK` flags |
 | `AABB` | `renderer/frustum.h` | Min/max box for collision and frustum culling |
@@ -54,6 +54,18 @@ unlimited walk-up). `CELL_JUMPPAD` (`1<<4`) = a Quake launch pad — `Collision:
 body rests on it; a `velocity.y` impulse like the jump, so it replicates in co-op with no wire change
 (deterministic geometry on both sides; `posY`+`onGround` snapshotted). Both PvP-only (enemies never
 jump). Pinned by `tests/world/test_collision_push.cpp`.
+
+`CELL_PLATFORM` (flag bit 5) is the real two-story cell: `GridCell.platHeight` (quarter-units)
+is the slab TOP, thickness `PLATFORM_THICKNESS_Q` (=2 qu, 0.5 m), underside clamped to the base
+floor. The cell's `floorHeight` remains the walkable GROUND story beneath. Story selection is
+`LevelGridSystem::effectiveFloorHeight(grid,x,z,feetY)` (slab top iff feet within
+`PLATFORM_STEP_TOLERANCE` = `STEP_UP_HEIGHT` = 0.4 m below it — static_assert-pinned in
+collision.cpp). Consumers: `Collision::moveAndSlide` (story-aware landing/snap keyed on
+PRE-move feet Y, `overlapsPlatformBand` XZ gate, underside head clamp), `Raycast::cast`
+(top/underside planes + rim), the mesher (top/underside/owned-rim quads),
+`Teleport::resolveDest` (lands at the victim's story). AI/pathfinding read only the base floor
+— enemies walk under platforms; the second story is PvP-only, like pads/ledges. No wire/save
+change (the grid is seed-built, not serialized).
 
 ## Architecture deep-dive: split-screen & shared systems
 
