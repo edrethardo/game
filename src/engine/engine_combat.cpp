@@ -141,9 +141,13 @@ static void recordFire(u8 slot, u32 clientTick) {
 // firer's high-ping bullets just behave like the un-lag-compensated baseline.
 constexpr u32 LAG_COMP_HISTORY_TICKS = 64;
 // Max ticks the server will rewind for a fire — decoupled from the buffer depth above (was
-// HISTORY-1). Held at 15 (~250 ms) to preserve the prior rewind feel exactly; the design doc's
-// LAG_COMP_MAX_MS = 200 (~12 ticks) is the value to use if we ever want to tighten fairness.
-constexpr u32 LAG_COMP_MAX_REWIND_TICKS = 15;
+// HISTORY-1). 24 = RTT/2 at 300 ms (9 ticks) + the MAX stamped interp delay a client can report
+// (250 ms = 15 ticks) — the full honest look-back a long-haul (DE<->NZ, ~300 ms RTT) client needs,
+// and still far short of the 64-tick ring so a lookup never falls off the end. The old 15 was
+// sized for the 150 ms interp era: with today's adaptive jitter buffer widening to 250 ms it
+// silently under-compensated a long-haul client's fire by up to 9 ticks (~150 ms), so shots at a
+// moving enemy landed behind it exactly when jitter was worst. See computeLagCompTicks.
+constexpr u32 LAG_COMP_MAX_REWIND_TICKS = 24;
 struct EntPoseSnap {
     Vec3 position;
     f32  yaw;
@@ -913,8 +917,9 @@ void Engine::handleWeaponFire(f32 dt) {
 // CL_FIRE_WEAPON server-side intake. Validates the request (cooldown, origin
 // sanity) and queues a per-slot pending fire that handleWeaponFireForPlayer
 // will consume on the next tick. The yaw/pitch are stored verbatim; the
-// origin is clamped to within 1 m of np.eyePos() so a slightly mis-synced
-// client position doesn't fire from an unreachable point.
+// origin is clamped to within 2 m of np.eyePos() so a slightly mis-synced
+// client position doesn't fire from an unreachable point (2 m tolerates the
+// RTT/2-stale claim of a 300 ms long-haul client — see the clamp below).
 // ---------------------------------------------------------------------------
 void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
                                      Vec3 claimedOrigin, f32 claimedYaw, f32 claimedPitch) {
@@ -927,14 +932,18 @@ void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
     recordFire(playerSlot, clientTick);
     NetPlayer& np = m_players[playerSlot];
     if (!np.active || np.isDead) return;            // dead/inactive players don't fire
-    // Loose anti-cheat: clamp claimed origin to within 1 m of the server's authoritative
-    // eye position. A normal client running at 60 Hz will be within a few cm; clamping
-    // (rather than rejecting) keeps the shot landing even if a peer is slightly out of
-    // sync, which is preferable to a missed shot in co-op.
+    // Loose anti-cheat: clamp claimed origin to within 2 m of the server's authoritative
+    // eye position. The claim is RTT/2-STALE by nature — it's where the client's eye was when it
+    // clicked, which the server only sees RTT/2 later — so at 300 ms RTT an effective-10 m/s
+    // runner is legitimately ~1.5 m displaced from np.eyePos() by the time this arrives. The old
+    // 1 m radius rejected those honest long-haul shots and snapped the ray up to 1.5 m sideways
+    // off the player's real fire line. 2 m covers a 300 ms round trip with margin while still
+    // bounding a spoofed origin to roughly one body-length. Clamp (not reject) so the shot still
+    // lands even for a slightly-desynced peer, which is preferable to a dropped shot in co-op.
     Vec3 svOrigin = np.eyePos();
     Vec3 delta    = claimedOrigin - svOrigin;
     f32  distSq   = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-    if (distSq > 1.0f) claimedOrigin = svOrigin;    // > 1 m → snap to server origin
+    if (distSq > 4.0f) claimedOrigin = svOrigin;    // > 2 m → snap to server origin
     PendingFire& pending = s_pendingFires[playerSlot];
     pending.valid      = true;
     pending.clientTick = clientTick;
@@ -1372,7 +1381,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     }
 
     // Fire from the CLIENT'S claimed origin + aim (queued via CL_FIRE_WEAPON). The origin
-    // is already clamped to within 1 m of np.position by handleFireWeaponRequest, so it's
+    // is already clamped to within 2 m of np.position by handleFireWeaponRequest, so it's
     // safe to trust. The aim is whatever the player's crosshair was pointing at when they
     // clicked — eliminates the prior np.yaw staleness under input queue lag.
     Vec3 eyePos = claimedOrigin;
