@@ -340,6 +340,76 @@ static void buildSection(const LevelGrid& grid, u32 seed,
                     pushQuad(*bkt, v0, v1, v2, v3);
                     expand(wx, ceilH, wz); expand(wx+cs, ceilH, wz+cs);
                 }
+
+                // Platform slab (CELL_PLATFORM): the second story. Top drawn like a floor quad at
+                // the slab top, underside like a ceiling quad at the underside (skipped when the
+                // clamp left no under-space — low stair steps), rim faces toward every neighbour
+                // that doesn't cover our band. Ownership mirrors the riser faces: each cell draws
+                // only the part of its own rim a neighbour leaves exposed, so shared faces emit
+                // exactly once and stair runs show just their 0.25 m step slivers.
+                if (cell.flags & CELL_PLATFORM) {
+                    const f32 topH = LevelGridSystem::getPlatformTop(grid, x, z);
+                    const f32 undH = LevelGridSystem::getPlatformUnderside(grid, x, z);
+                    MaterialBucket* pbkt = getBucket(cell.platMaterialId);
+                    {   // top (+Y) — same layout/winding as the floor quad
+                        Vec3 n{0.0f, 1.0f, 0.0f};
+                        Vec3 p0{wx,      topH, wz + cs};
+                        Vec3 p1{wx + cs, topH, wz + cs};
+                        Vec3 p2{wx + cs, topH, wz};
+                        Vec3 p3{wx,      topH, wz};
+                        Vertex v0{p0, n, {0.0f, cs  }};
+                        Vertex v1{p1, n, {cs,   cs  }};
+                        Vertex v2{p2, n, {cs,   0.0f}};
+                        Vertex v3{p3, n, {0.0f, 0.0f}};
+                        v0.color = v1.color = v2.color = v3.color = tileTint;
+                        pushQuad(*pbkt, v0, v1, v2, v3);
+                        expand(wx, topH, wz); expand(wx + cs, topH, wz + cs);
+                    }
+                    if (undH > floorH + 0.001f) {   // underside (−Y) — same winding as the ceiling quad
+                        Vec3 n{0.0f, -1.0f, 0.0f};
+                        Vec3 p0{wx,      undH, wz};
+                        Vec3 p1{wx + cs, undH, wz};
+                        Vec3 p2{wx + cs, undH, wz + cs};
+                        Vec3 p3{wx,      undH, wz + cs};
+                        Vertex v0{p0, n, {0.0f, 0.0f}};
+                        Vertex v1{p1, n, {cs,   0.0f}};
+                        Vertex v2{p2, n, {cs,   cs  }};
+                        Vertex v3{p3, n, {0.0f, cs  }};
+                        v0.color = v1.color = v2.color = v3.color = tileTint;
+                        pushQuad(*pbkt, v0, v1, v2, v3);
+                        expand(wx, undH, wz); expand(wx + cs, undH, wz + cs);
+                    }
+                    {   // rim faces — same quad construction as the riser faces above
+                        MaterialBucket* rbkt = getBucket(cell.wallMaterialId);
+                        static const s32 kpdx[4] = {1, -1, 0, 0};
+                        static const s32 kpdz[4] = {0, 0, 1, -1};
+                        for (int ei = 0; ei < 4; ei++) {
+                            s32 nx = (s32)x + kpdx[ei], nz = (s32)z + kpdz[ei];
+                            if (!LevelGridSystem::isInBounds(grid, (u32)nx, (u32)nz)) continue;
+                            if (LevelGridSystem::isSolid(grid, (u32)nx, (u32)nz)) continue; // wall face covers it
+                            f32 B = undH, T = topH;
+                            if (LevelGridSystem::hasPlatform(grid, (u32)nx, (u32)nz)) {
+                                const f32 nbTop = LevelGridSystem::getPlatformTop(grid, (u32)nx, (u32)nz);
+                                if (nbTop >= topH - 0.001f) continue;   // neighbour covers our whole band
+                                if (nbTop > B) B = nbTop;               // stair sliver: only the exposed part
+                            }
+                            if (T <= B + 0.001f) continue;
+                            const f32 vSpan = T - B;
+                            Vec3 rn, rp0, rp1, rp2, rp3;
+                            if (kpdz[ei] == -1)      { rn = {0,0,-1}; rp0={wx+cs,B,wz};    rp1={wx,B,wz};       rp2={wx,T,wz};       rp3={wx+cs,T,wz}; }
+                            else if (kpdz[ei] == 1)  { rn = {0,0, 1}; rp0={wx,B,wz+cs};    rp1={wx+cs,B,wz+cs}; rp2={wx+cs,T,wz+cs}; rp3={wx,T,wz+cs}; }
+                            else if (kpdx[ei] == -1) { rn = {-1,0,0}; rp0={wx,B,wz};       rp1={wx,B,wz+cs};    rp2={wx,T,wz+cs};    rp3={wx,T,wz}; }
+                            else                     { rn = { 1,0,0}; rp0={wx+cs,B,wz+cs}; rp1={wx+cs,B,wz};    rp2={wx+cs,T,wz};    rp3={wx+cs,T,wz+cs}; }
+                            Vertex rv0{rp0, rn, {0.0f, 0.0f }};
+                            Vertex rv1{rp1, rn, {cs,   0.0f }};
+                            Vertex rv2{rp2, rn, {cs,   vSpan}};
+                            Vertex rv3{rp3, rn, {0.0f, vSpan}};
+                            rv0.color = rv1.color = rv2.color = rv3.color = tileTint;
+                            pushQuad(*rbkt, rv0, rv1, rv2, rv3);
+                            expand(rp0.x, B, rp0.z); expand(rp2.x, T, rp2.z);
+                        }
+                    }
+                }
             }
         }
     }
