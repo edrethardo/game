@@ -130,6 +130,12 @@ static constexpr u32 DELAY_QUEUE_SIZE = 256;
 // Maximum payload size we copy into the queue. Snapshots can be up to 8 KB; use
 // MAX_SNAPSHOT_SIZE from packet.h so we never truncate.
 static constexpr u32 DELAY_MAX_PAYLOAD = 8192;
+// If the largest packet the game can send exceeds the queue slot, enqueueDelayed hits its
+// oversized branch and (now) returns false so the caller sends immediately — but that path only
+// works because every call site has an immediate-send fallthrough. Pin the invariant at compile
+// time so a future MAX_SNAPSHOT_SIZE bump can't silently reintroduce the dropped-packet bug.
+static_assert(DELAY_MAX_PAYLOAD >= MAX_SNAPSHOT_SIZE,
+              "delay queue must hold the largest packet or the rig silently drops it");
 
 struct DelayEntry {
     bool        active      = false;
@@ -151,19 +157,22 @@ static u32 findFreeDelaySlot() {
     return DELAY_QUEUE_SIZE;
 }
 
-// Enqueue a packet for delayed delivery. payloadSize must be <= DELAY_MAX_PAYLOAD.
-static void enqueueDelayed(DelayTarget target, u8 playerSlot,
+// Enqueue a packet for delayed delivery (fake-latency rig). Returns true if the packet was queued;
+// returns FALSE when the caller must send it immediately instead — either it is oversized for a
+// queue slot, or the queue is full. Every call site pairs this with an immediate-send fallthrough
+// (`if (enqueueDelayed(...)) return;`), so a false is a real send, never a silent drop.
+static bool enqueueDelayed(DelayTarget target, u8 playerSlot,
                             const u8* data, u32 size) {
     if (size > DELAY_MAX_PAYLOAD) {
-        // Oversized — deliver immediately rather than silently drop.
+        // Oversized — can't buffer it; tell the caller to send it now rather than truncate/drop.
         LOG_WARN("Net delay queue: oversized packet (%u B), sending immediately", size);
-        // Caller is responsible for immediate send in this case.
-        return;
+        return false;
     }
     u32 slot = findFreeDelaySlot();
     if (slot == DELAY_QUEUE_SIZE) {
-        LOG_WARN("Net delay queue: full (%u slots), dropping packet", DELAY_QUEUE_SIZE);
-        return;
+        // Queue saturated — tell the caller to send it now rather than drop it on the floor.
+        LOG_WARN("Net delay queue: full (%u slots), sending immediately", DELAY_QUEUE_SIZE);
+        return false;
     }
     DelayEntry& e = s_delayQueue[slot];
     e.active       = true;
@@ -176,6 +185,7 @@ static void enqueueDelayed(DelayTarget target, u8 playerSlot,
     e.deliverAtSec = Clock::getElapsedSeconds() + (s_fakeLatencyMs + jitterMs) * 0.001;
     e.payloadSize  = size;
     std::memcpy(e.payload, data, size);
+    return true;
 }
 
 // Returns true if this packet should be dropped (used at all send sites).
@@ -1133,6 +1143,16 @@ void Net::poll() {
     sweepConnecting();
 }
 
+void Net::flush() {
+    // enet_peer_send only QUEUES onto the peer's outgoing command list; the datagrams don't hit
+    // the socket until the next enet_host_service (i.e. next frame's Net::poll). Flushing here,
+    // right after the update loop, pushes this tick's snapshot/inputs out this tick — recovering
+    // ~16.7 ms per direction of self-inflicted latency. Null host = singleplayer or a Steam-relay
+    // session (steamSend already sends immediately), so the guard makes this a no-op there.
+    if (!s_enetHost) return;
+    enet_host_flush(s_enetHost);
+}
+
 // ---------------------------------------------------------------------------
 // D5: sendImmediate_* helpers — the actual ENet send. Used both by the public
 // API (when fake-latency is off) and by pumpDelayQueue() (when delivering a
@@ -1294,8 +1314,7 @@ void Net::sendReliable(u8 playerSlot, const u8* data, u32 size) {
     // together cover the realistic envelope.
     // D5: enqueue if fake latency is enabled, otherwise send immediately.
     if (s_fakeLatencyMs > 0) {
-        enqueueDelayed(DelayTarget::PEER_R, playerSlot, data, size);
-        return;
+        if (enqueueDelayed(DelayTarget::PEER_R, playerSlot, data, size)) return;  // else fall through to the immediate send below
     }
     sendImmediate_Reliable(playerSlot, data, size);
 }
@@ -1307,8 +1326,7 @@ void Net::sendUnreliable(u8 playerSlot, const u8* data, u32 size) {
     if (shouldDropPacket()) return;
     // D5: enqueue if fake latency is enabled, otherwise send immediately.
     if (s_fakeLatencyMs > 0) {
-        enqueueDelayed(DelayTarget::PEER_U, playerSlot, data, size);
-        return;
+        if (enqueueDelayed(DelayTarget::PEER_U, playerSlot, data, size)) return;  // else fall through to the immediate send below
     }
     sendImmediate_Unreliable(playerSlot, data, size);
 }
@@ -1317,8 +1335,7 @@ void Net::broadcastReliable(const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     // D5: enqueue if fake latency is enabled.
     if (s_fakeLatencyMs > 0) {
-        enqueueDelayed(DelayTarget::BROADCAST_R, 0, data, size);
-        return;
+        if (enqueueDelayed(DelayTarget::BROADCAST_R, 0, data, size)) return;  // else fall through to the immediate send below
     }
     sendImmediate_BroadcastReliable(data, size);
 }
@@ -1347,8 +1364,7 @@ void Net::broadcastUnreliable(const u8* data, u32 size) {
     if (s_role != NetRole::SERVER) return;
     // D5: enqueue if fake latency is enabled.
     if (s_fakeLatencyMs > 0) {
-        enqueueDelayed(DelayTarget::BROADCAST_U, 0, data, size);
-        return;
+        if (enqueueDelayed(DelayTarget::BROADCAST_U, 0, data, size)) return;  // else fall through to the immediate send below
     }
     sendImmediate_BroadcastUnreliable(data, size);
 }
@@ -1358,8 +1374,7 @@ void Net::broadcastSnapshot(const u8* data, u32 size) {
     // D5: enqueue if fake latency is enabled. Snapshots are the primary payload we want
     // to delay — they carry the authoritative world state the client needs to see late.
     if (s_fakeLatencyMs > 0) {
-        enqueueDelayed(DelayTarget::BROADCAST_SNAP, 0, data, size);
-        return;
+        if (enqueueDelayed(DelayTarget::BROADCAST_SNAP, 0, data, size)) return;  // else fall through to the immediate send below
     }
     sendImmediate_BroadcastSnapshot(data, size);
 }
@@ -1379,8 +1394,7 @@ void Net::sendSnapshotToSlot(u8 playerSlot, const u8* data, u32 size) {
         // which iterates all slots. That's wasteful for a per-slot send, but the delay
         // queue is a debug/smoke-test facility and the overhead doesn't matter there.
         // A clean fix would add a PEER_SNAP target; deferred as not worth the complexity.
-        enqueueDelayed(DelayTarget::BROADCAST_SNAP, playerSlot, data, size);
-        return;
+        if (enqueueDelayed(DelayTarget::BROADCAST_SNAP, playerSlot, data, size)) return;  // else fall through to the immediate per-slot send below
     }
     countOut(playerSlot, 1, size);            // ch1, per-slot snapshot send
     s_counters.snapsOut[playerSlot]++;
@@ -1417,8 +1431,7 @@ void Net::sendToServer(const u8* data, u32 size, bool reliable) {
     // D5: enqueue if fake latency is enabled; choose the matching target enum.
     if (s_fakeLatencyMs > 0) {
         DelayTarget t = reliable ? DelayTarget::TO_SERVER_R : DelayTarget::TO_SERVER_U;
-        enqueueDelayed(t, 0, data, size);
-        return;
+        if (enqueueDelayed(t, 0, data, size)) return;  // else fall through to the immediate send below
     }
     sendImmediate_ToServer(data, size, reliable);
 }

@@ -403,6 +403,12 @@ namespace Net {
     // Pump network events. Call once per frame before game update.
     void poll();
 
+    // Flush queued outbound packets to the socket NOW. enet_peer_send only queues; without an
+    // explicit flush the packets ride until the NEXT frame's enet_host_service — ~16.7 ms of
+    // hidden latency per direction at 60 fps (~33 ms round-trip on top of the real link). Called
+    // once per frame after the update loop, so this tick's snapshot/inputs leave this tick.
+    void flush();
+
     // Send to a specific player slot (server only)
     void sendReliable(u8 playerSlot, const u8* data, u32 size);
     void sendUnreliable(u8 playerSlot, const u8* data, u32 size);
