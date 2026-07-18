@@ -5,17 +5,17 @@
 // engine_town.cpp pattern — same sentinel-floor rails (host broadcasts SV_LEVEL_SEED with
 // ARENA_SENTINEL_FLOOR, clients build the identical arena), same daylight rendering branch.
 //
-// The layout is a Quake/Combat-Hall-style multi-tier deathmatch map, symmetric under both diagonal
-// mirrors so no spawn corner is favored. Combat/LOS/raycast/DDA all read the grid geometry with zero
-// new systems; the vertical play rides two opt-in cell flags (CELL_LEDGE gates, CELL_JUMPPAD launches):
-//   - TIER 0 (ground pit): four corner spawn bays, each with a crate for cover, and one glowing
-//     JUMP PAD per diagonal quadrant on the run-in from spawn.
-//   - TIER 1 (1.5 m tower): a central 6x6 platform reached by four cardinal LEDGE ramps (pit->tower).
-//   - TIER 2 (3.0 m crown): a 2x2 pinnacle at the very centre — the commanding vantage — ringed by
-//     jump pads so it's reachable only by being flung up (two-stage ascent) or a pad arc.
-// Jump pads fling a grounded body upward (Collision::JUMPPAD_LAUNCH, a velocity.y impulse like the
-// jump — see CELL_JUMPPAD), so they replicate in co-op with no wire change. Enemies never jump, hence
-// pads are PvP-only (the boss "arenas" in engine_spawn.cpp use plain walkable tiers instead).
+// The layout is a two-story Quake / Metroid-Prime-Hunters COMBAT HALL (44x44, 4-fold rotational
+// symmetry — every spawn corner faces identical geometry):
+//   - TIER 0 (ground): the open pit with crate cover, wall-midpoint jump pads, and the covered
+//     perimeter ARCADE under the balcony (spawn bays live here, in cover, out of sniper LOS).
+//   - TIER 1 (1.5 m): the central tower, reached by four cardinal LEDGE ramps.
+//   - TIER 2 (3.0 m): TWO dueling vantages — the perimeter SNIPER BALCONY (CELL_PLATFORM slabs:
+//     stand on it, walk under it; open inner edge to drop/fire from; corner slab stairwells and
+//     the midpoint pads to get up) and the tower's crown at the same height across the map.
+// Verticality rides three opt-in cell flags: CELL_LEDGE (jump-gated risers), CELL_JUMPPAD
+// (launch pads), CELL_PLATFORM (walk-under slabs). All are deterministic level geometry built
+// from the seed on every peer, so co-op needs NO wire change (posY + onGround are snapshotted).
 // No enemies, no loot, no portals spawn here; the exit is the pause menu ("Leave Arena").
 
 #include "engine/engine.h"
@@ -37,14 +37,18 @@ static_assert(Arena::MAX_COMBATANTS == MAX_PLAYERS,
 
 // Arena layout constants — one place, shared by build + spawn placement so they can't drift.
 namespace {
-    constexpr u32 ARENA_W = 36, ARENA_D = 36;
+    constexpr u32 ARENA_W = 44, ARENA_D = 44;
     constexpr f32 ARENA_CS = 1.0f;
 
-    // Corner spawn pads (world coords, cell centers), one per net slot. Each pad sits behind
-    // its corner's crate cluster relative to the center — you respawn in cover, not in a lane.
+    // Spawn pads live in the ARCADE — the covered ground story under the perimeter balcony — one
+    // per wall, rotationally symmetric ((x,z) -> (43-z, x)), each tucked beside a support column
+    // and near a corner stairwell: you respawn in cover, out of every balcony sightline, with the
+    // stairs and the pit both a few steps away.
     constexpr Vec3 kArenaPads[MAX_PLAYERS] = {
-        { 4.5f, 0.0f,  4.5f}, {31.5f, 0.0f,  4.5f},
-        { 4.5f, 0.0f, 31.5f}, {31.5f, 0.0f, 31.5f},
+        { 1.5f, 0.0f, 10.5f},   // west arcade,  beside the column at (2,10)
+        {33.5f, 0.0f,  1.5f},   // north arcade, beside the column at (33,2)
+        {42.5f, 0.0f, 33.5f},   // east arcade,  beside the column at (41,33)
+        {10.5f, 0.0f, 42.5f},   // south arcade, beside the column at (10,41)
     };
 
     // Yaw that faces the arena center from a pad. Forward is {-sin(yaw), 0, -cos(yaw)}
@@ -76,20 +80,21 @@ Vec3 Engine::buildArenaLevel() {
                 c.wallMaterialId = brick;
             } else {
                 // NO CELL_CEILING — open sky (the mesher skips the lid, the daylight branch
-                // lights it). ceilingHeight doubles as adjacent walls' height: 16 quarter-units
-                // = 4 m, one meter taller than the town so the fight feels walled-in.
+                // lights it). ceilingHeight doubles as adjacent walls' height: 20 quarter-units
+                // = 5 m, tall enough that a balcony jump can't clear the perimeter.
                 c.flags = CELL_FLOOR;
                 c.floorHeight     = 0;
-                c.ceilingHeight   = 16;
+                c.ceilingHeight   = 20;   // 5 m walls: a balcony jump (3.0 + 0.8 m) cannot clear them
                 c.floorMaterialId = sand;
                 c.wallMaterialId  = brick;
             }
         }
     }
 
-    // COMBAT-HALL vertical layout (Quake / Metroid-Prime-Hunters style). Three tiers connected by
-    // walkable ramps and jump pads. Every placement is symmetric under x->35-x, z->35-z AND the
-    // diagonal swap, so all four spawn corners face identical geometry — no corner is favoured.
+    // Two-story COMBAT-HALL layout (Quake / Metroid-Prime-Hunters style). Placement is 4-fold
+    // rotationally symmetric about the arena centre (the balcony/stairwells/columns via the rotCell
+    // helper below, the centre/pads/crates by mirror pairs), so all four spawn corners face
+    // identical geometry — no corner is favoured.
     auto solid = [&](u32 sx, u32 sz, u32 w, u32 d, u8 mat) {
         for (u32 z = sz; z < sz + d; z++)
             for (u32 x = sx; x < sx + w; x++) {
@@ -139,32 +144,88 @@ Vec3 Engine::buildArenaLevel() {
         }
     };
 
-    // --- TIER 1+2: the central tower and its crown ---------------------------------------------
-    // Tower: a 6x6 platform at 1.5 m (qh 6). Its outer frame is the walkable high ground reached by
-    // the four ramps; the inner cells become the crown launch-ring below.
-    raise(15, 15, 6, 6, 6);
-    // Crown launch-ring: the inner 4x4 of the tower is JUMP PADS at 1.5 m — you can't walk up to the
-    // crown, you step onto a pad and get flung onto it (the two-stage ascent). The centre 2x2 is
-    // overwritten by the crown next, leaving a 12-cell ring of pads hugging the crown's base.
-    pad(16, 16, 4, 4, 6);
-    // Crown: a 2x2 pinnacle at 3.0 m (qh 12) — the map's commanding vantage. Too high to jump or ramp
-    // to (2x the walk-jump apex); reachable ONLY by the ring pads around its base or a pad arc.
-    raise(17, 17, 2, 2, 12);
+    // Mark a block as PLATFORM SLABS: a second story floating topQ*0.25 m over the cell's normal
+    // ground floor, which stays walkable beneath (the arcade). Plank walkway, stone rim faces.
+    auto plat = [&](u32 sx, u32 sz, u32 w, u32 d, u8 topQ) {
+        for (u32 z = sz; z < sz + d; z++)
+            for (u32 x = sx; x < sx + w; x++) {
+                GridCell& c = LevelGridSystem::getCell(m_level.grid, x, z);
+                c.flags           = static_cast<u8>(CELL_FLOOR | CELL_PLATFORM);
+                c.platHeight      = topQ;
+                c.platMaterialId  = plank;
+                c.floorMaterialId = sand;    // the arcade ground beneath stays sand
+                c.wallMaterialId  = stone;
+            }
+    };
+    // Rotate a cell k*90° about the arena centre (one turn: (x,z) -> (W-1-z, x)). Building all
+    // four corners/walls from ONE template through this guarantees perfect 4-fold symmetry — no
+    // spawn corner ever faces different geometry.
+    auto rotCell = [&](u32 x, u32 z, u32 k, u32& ox, u32& oz) {
+        ox = x; oz = z;
+        for (u32 i = 0; i < k; i++) { u32 t = ox; ox = ARENA_W - 1 - oz; oz = t; }
+    };
 
-    // --- Four cardinal ramps: pit -> tower (2 lanes wide, on the centre lanes 17/18) ------------
-    ramp(21, 17,  1,  0, 0,  1, 6, 6);   // east  (x 21..26)
-    ramp(14, 17, -1,  0, 0,  1, 6, 6);   // west  (x 14..9)
-    ramp(17, 14,  0, -1, 1,  0, 6, 6);   // north (z 14..9)
-    ramp(17, 21,  0,  1, 1,  0, 6, 6);   // south (z 21..26)
+    // --- SECOND STORY: the perimeter SNIPER BALCONY @ 3.0 m (the Combat-Hall signature) --------
+    // A 2-cell walkway hugging every wall; open inner edge (drop off / fire into the pit
+    // anywhere), covered arcade beneath (underside 2.5 m — 0.7 m of headroom over a body).
+    plat(1,  1, 42,  2, 12);   // north band (z 1..2)
+    plat(1, 41, 42,  2, 12);   // south band
+    plat(1,  3,  2, 38, 12);   // west band  (x 1..2)
+    plat(41, 3,  2, 38, 12);   // east band
 
-    // --- TIER 0: ground pads + cover ------------------------------------------------------------
-    // One 2x2 launch pad per diagonal quadrant, on the spawn->centre path: run in from your corner
-    // and pad up onto the tower frame (or arc for the crown).
-    pad(10, 10, 2, 2, 0); pad(24, 10, 2, 2, 0);
-    pad(10, 24, 2, 2, 0); pad(24, 24, 2, 2, 0);
-    // Crate clusters: one 2x2 plank block per quadrant, shielding its spawn pad from the centre.
-    solid( 8,  8, 2, 2, plank); solid(26,  8, 2, 2, plank);
-    solid( 8, 26, 2, 2, plank); solid(26, 26, 2, 2, plank);
+    // Corner STAIRWELLS: an L-switchback of graduated slabs (0.25 m steps — walkable under
+    // STEP_UP_HEIGHT), arcade -> balcony, overwriting band cells. The quiet route up; the pads
+    // below are the fast, loud one. Both lanes of each leg step together.
+    for (u32 k = 0; k < 4; k++) {
+        u32 ox, oz;
+        for (u32 i = 0; i < 6; i++)                       // leg A: h 0.25..1.5 m
+            for (u32 lane = 1; lane <= 2; lane++) {
+                rotCell(8 - i, lane, k, ox, oz);
+                plat(ox, oz, 1, 1, static_cast<u8>(1 + i));
+            }
+        for (u32 cx2 = 1; cx2 <= 2; cx2++)                // corner landing @ 1.5 m
+            for (u32 cz2 = 1; cz2 <= 2; cz2++) {
+                rotCell(cx2, cz2, k, ox, oz);
+                plat(ox, oz, 1, 1, 6);
+            }
+        for (u32 i = 0; i < 6; i++)                       // leg B: h 1.75..3.0 m, meets the band
+            for (u32 lane = 1; lane <= 2; lane++) {
+                rotCell(lane, 3 + i, k, ox, oz);
+                plat(ox, oz, 1, 1, static_cast<u8>(7 + i));
+            }
+    }
+
+    // Support COLUMNS: full-height solid pillars on the balcony's inner-edge row — arcade cover
+    // below, pillars to strafe around above (the walkway narrows to one cell at each), and the
+    // structure that visually carries the slab. Mirror-symmetric pairs (10,33) and (16,27).
+    {
+        static constexpr u32 kColX[4] = {10, 16, 27, 33};
+        for (u32 k = 0; k < 4; k++)
+            for (u32 ci = 0; ci < 4; ci++) {
+                u32 ox, oz;
+                rotCell(kColX[ci], 2, k, ox, oz);
+                solid(ox, oz, 1, 1, stone);
+            }
+    }
+
+    // Wall-midpoint JUMP PADS: pit -> balcony (launch apex 3.6 m; air-steer onto the 3.0 m band
+    // edge). Never ON or UNDER a slab — a pad launch must own its full arc.
+    pad(21,  4, 2, 2, 0); pad(38, 21, 2, 2, 0);
+    pad(21, 38, 2, 2, 0); pad( 4, 21, 2, 2, 0);
+
+    // --- CENTER: tower + crown (solid-riser tiers, as before, shifted to the 44x44 centre).
+    // The crown now sits at BALCONY height so the two commanding vantages duel across the map.
+    raise(19, 19, 6, 6, 6);            // tower @ 1.5 m, reached by the four ramps
+    pad(20, 20, 4, 4, 6);              // crown launch-ring (12 pad cells after the crown overwrite)
+    raise(21, 21, 2, 2, 12);           // crown @ 3.0 m — level with the sniper balcony
+    ramp(25, 21,  1,  0, 0,  1, 6, 6); // east  (x 25..30)
+    ramp(18, 21, -1,  0, 0,  1, 6, 6); // west  (x 18..13)
+    ramp(21, 18,  0, -1, 1,  0, 6, 6); // north (z 18..13)
+    ramp(21, 25,  0,  1, 1,  0, 6, 6); // south (z 25..30)
+
+    // --- Pit cover: one crate cluster per diagonal quadrant (mirror pairs 10 <-> 32) -----------
+    solid(10, 10, 2, 2, plank); solid(32, 10, 2, 2, plank);
+    solid(10, 32, 2, 2, plank); solid(32, 32, 2, 2, plank);
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
                              0xA12E7Au,    // constant seed — deterministic tile shading on every peer
