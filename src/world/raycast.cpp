@@ -54,6 +54,21 @@ RayHit Raycast::cast(const LevelGrid& grid,
         RayHit none;
         if (dir.y == 0.0f) return none;
         if (dir.y < 0.0f) {
+            // Platform slab TOP: a descending ray that starts above it crosses this plane before
+            // the base floor. tP <= 0 (origin at/below the top — e.g. under the slab shooting
+            // down) skips it and falls through to the base-floor test, which is then correct.
+            if (LevelGridSystem::hasPlatform(grid, (u32)fcx, (u32)fcz)) {
+                const f32 topH = LevelGridSystem::getPlatformTop(grid, (u32)fcx, (u32)fcz);
+                const f32 tP = (topH - origin.y) / dir.y;
+                if (tP > 0.0f && tP <= tExit) {
+                    Vec3 hp = origin + dir * tP;
+                    if (static_cast<s32>(std::floor(hp.x / cs)) == fcx &&
+                        static_cast<s32>(std::floor(hp.z / cs)) == fcz) {
+                        RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, 1.0f, 0.0f};
+                        hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tP; return hit;
+                    }
+                }
+            }
             f32 floorH = LevelGridSystem::getFloorHeight(grid, (u32)fcx, (u32)fcz);
             f32 tF = (floorH - origin.y) / dir.y;
             if (tF > 0.0f && tF <= tExit) {
@@ -65,6 +80,19 @@ RayHit Raycast::cast(const LevelGrid& grid,
                 }
             }
         } else { // dir.y > 0 — ceiling
+            // Platform slab UNDERSIDE: a rising ray that starts below it (the arcade shooting up).
+            if (LevelGridSystem::hasPlatform(grid, (u32)fcx, (u32)fcz)) {
+                const f32 undH = LevelGridSystem::getPlatformUnderside(grid, (u32)fcx, (u32)fcz);
+                const f32 tU = (undH - origin.y) / dir.y;
+                if (tU > 0.0f && tU <= tExit) {
+                    Vec3 hp = origin + dir * tU;
+                    if (static_cast<s32>(std::floor(hp.x / cs)) == fcx &&
+                        static_cast<s32>(std::floor(hp.z / cs)) == fcz) {
+                        RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, -1.0f, 0.0f};
+                        hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tU; return hit;
+                    }
+                }
+            }
             f32 ceilH = LevelGridSystem::getCeilingHeight(grid, (u32)fcx, (u32)fcz);
             f32 tC = (ceilH - origin.y) / dir.y;
             if (tC > 0.0f && tC <= tExit) {
@@ -141,6 +169,25 @@ RayHit Raycast::cast(const LevelGrid& grid,
             hit.distance = t;
             (void)hitY;
             return hit;
+        }
+
+        // Platform RIM: entering a slab cell with the crossing Y inside the slab band is a hit on
+        // the slab's side face (the balcony's visible edge). Strict epsilons let surface-grazing
+        // shots — a sniper firing flat across their own slab top — pass instead of snagging.
+        if (LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) {
+            const f32 yAt  = origin.y + dir.y * t;
+            const f32 topH = LevelGridSystem::getPlatformTop(grid, (u32)cx, (u32)cz);
+            const f32 undH = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
+            if (yAt > undH + 0.0001f && yAt < topH - 0.0001f) {
+                RayHit hit;
+                hit.hit      = true;
+                hit.position = origin + dir * t;
+                hit.normal   = lastNormal;
+                hit.cellX    = (u32)cx;
+                hit.cellZ    = (u32)cz;
+                hit.distance = t;
+                return hit;
+            }
         }
 
         // Empty cell — floor/ceiling crossing within this cell (tNext = when we leave it).

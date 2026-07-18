@@ -136,3 +136,45 @@ TEST_CASE("Platform collision: graduated slab stairs climb like stairs") {
     CHECK(p.position.y == doctest::Approx(1.5f));   // standing on the top step
     CHECK(p.onGround);
 }
+
+TEST_CASE("Platform raycast: the slab is solid from every side, transparent past it") {
+    BalconyRoom room;
+
+    SUBCASE("downward ray hits the slab TOP, not the ground floor beneath it") {
+        RayHit h = Raycast::cast(room.grid, {5.5f, 4.5f, 1.5f}, {0.0f, -1.0f, 0.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.position.y == doctest::Approx(3.0f));
+        CHECK(h.normal.y == doctest::Approx(1.0f));
+    }
+    SUBCASE("upward ray from the arcade hits the UNDERSIDE") {
+        RayHit h = Raycast::cast(room.grid, {5.5f, 0.5f, 1.5f}, {0.0f, 1.0f, 0.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.position.y == doctest::Approx(2.5f));
+        CHECK(h.normal.y == doctest::Approx(-1.0f));
+    }
+    SUBCASE("horizontal ray at slab height hits the RIM") {
+        RayHit h = Raycast::cast(room.grid, {5.5f, 2.75f, 5.5f}, {0.0f, 0.0f, -1.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.position.z == doctest::Approx(3.0f));    // front edge of the band (cells z=1..2)
+        CHECK(h.normal.z == doctest::Approx(1.0f));
+    }
+    SUBCASE("horizontal ray UNDER the slab passes beneath, hits the far wall") {
+        RayHit h = Raycast::cast(room.grid, {5.5f, 1.5f, 5.5f}, {0.0f, 0.0f, -1.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.position.z == doctest::Approx(1.0f));    // the north border wall, 2 cells past the band edge
+    }
+    SUBCASE("horizontal ray ABOVE the slab passes over, hits the far wall") {
+        RayHit h = Raycast::cast(room.grid, {5.5f, 3.5f, 5.5f}, {0.0f, 0.0f, -1.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.position.z == doctest::Approx(1.0f));
+    }
+    SUBCASE("balcony sniper: a down-angled shot over the edge reaches the pit floor") {
+        // Eye above the band firing south-down into the room — must clear its own slab edge.
+        Vec3 d = normalize(Vec3{0.0f, -0.8f, 1.0f});
+        RayHit h = Raycast::cast(room.grid, {5.5f, 4.6f, 2.5f}, d, 20.0f);
+        REQUIRE(h.hit);
+        CHECK(h.normal.y == doctest::Approx(1.0f));
+        CHECK(h.position.y == doctest::Approx(0.0f));    // ground story, out in the pit
+        CHECK(h.position.z > 3.0f);
+    }
+}
