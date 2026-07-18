@@ -379,21 +379,21 @@ static void buildSection(const LevelGrid& grid, u32 seed,
                         pushQuad(*pbkt, v0, v1, v2, v3);
                         expand(wx, undH, wz); expand(wx + cs, undH, wz + cs);
                     }
-                    {   // rim faces — same quad construction as the riser faces above
+                    {   // rim faces. A rim spans the part of OUR band [undH, topH] a neighbour leaves
+                        // exposed. A platform neighbour covers its OWN band [nbUnd, nbTop]; subtracting
+                        // that from ours can leave a LOWER strip (below the neighbour's underside) and/or
+                        // an UPPER strip (above its top) — a stepped slab staircase exposes a thin strip
+                        // on BOTH the taller side (upper) and the shorter side (lower), so both must be
+                        // emitted or the underside of a stair develops a see-through gap. Equal-thickness
+                        // slabs make only one strip non-empty per neighbour, so a shared edge still emits
+                        // exactly one face; an equal-height neighbour emits none (interior edge). Winding
+                        // mirrors the riser faces above.
                         MaterialBucket* rbkt = getBucket(cell.wallMaterialId);
                         static const s32 kpdx[4] = {1, -1, 0, 0};
                         static const s32 kpdz[4] = {0, 0, 1, -1};
-                        for (int ei = 0; ei < 4; ei++) {
-                            s32 nx = (s32)x + kpdx[ei], nz = (s32)z + kpdz[ei];
-                            if (!LevelGridSystem::isInBounds(grid, (u32)nx, (u32)nz)) continue;
-                            if (LevelGridSystem::isSolid(grid, (u32)nx, (u32)nz)) continue; // wall face covers it
-                            f32 B = undH, T = topH;
-                            if (LevelGridSystem::hasPlatform(grid, (u32)nx, (u32)nz)) {
-                                const f32 nbTop = LevelGridSystem::getPlatformTop(grid, (u32)nx, (u32)nz);
-                                if (nbTop >= topH - 0.001f) continue;   // neighbour covers our whole band
-                                if (nbTop > B) B = nbTop;               // stair sliver: only the exposed part
-                            }
-                            if (T <= B + 0.001f) continue;
+                        // Emit one vertical rim quad spanning [B,T] on edge ei; self-guards degenerate spans.
+                        auto emitRim = [&](int ei, f32 B, f32 T) {
+                            if (T <= B + 0.001f) return;
                             const f32 vSpan = T - B;
                             Vec3 rn, rp0, rp1, rp2, rp3;
                             if (kpdz[ei] == -1)      { rn = {0,0,-1}; rp0={wx+cs,B,wz};    rp1={wx,B,wz};       rp2={wx,T,wz};       rp3={wx+cs,T,wz}; }
@@ -407,6 +407,20 @@ static void buildSection(const LevelGrid& grid, u32 seed,
                             rv0.color = rv1.color = rv2.color = rv3.color = tileTint;
                             pushQuad(*rbkt, rv0, rv1, rv2, rv3);
                             expand(rp0.x, B, rp0.z); expand(rp2.x, T, rp2.z);
+                        };
+                        for (int ei = 0; ei < 4; ei++) {
+                            s32 nx = (s32)x + kpdx[ei], nz = (s32)z + kpdz[ei];
+                            if (!LevelGridSystem::isInBounds(grid, (u32)nx, (u32)nz)) continue;
+                            if (LevelGridSystem::isSolid(grid, (u32)nx, (u32)nz)) continue; // wall face covers it
+                            if (LevelGridSystem::hasPlatform(grid, (u32)nx, (u32)nz)) {
+                                const f32 nbTop = LevelGridSystem::getPlatformTop(grid, (u32)nx, (u32)nz);
+                                const f32 nbUnd = LevelGridSystem::getPlatformUnderside(grid, (u32)nx, (u32)nz);
+                                // exposed = our band minus the neighbour's band → up to two strips (each self-guards).
+                                emitRim(ei, undH, nbUnd < topH ? nbUnd : topH);          // lower strip
+                                emitRim(ei, nbTop > undH ? nbTop : undH, topH);          // upper strip
+                            } else {
+                                emitRim(ei, undH, topH);                                 // full exposed band
+                            }
                         }
                     }
                 }
