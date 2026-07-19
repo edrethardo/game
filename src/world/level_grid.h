@@ -21,6 +21,27 @@ static constexpr u8 CELL_LEDGE   = 1 << 3;
 // cell → zero regression. Enemies never jump, so a pad in an enemy route is a dead end — PvP-only.
 static constexpr u8 CELL_JUMPPAD = 1 << 4;
 
+// A PLATFORM SLAB: a second walkable story floating above this cell's normal floor. The cell keeps
+// its base floor (CELL_FLOOR + floorHeight) as the GROUND story — bodies below walk UNDER the slab
+// (its underside is their local ceiling), bodies above walk ON it. Real two-story, unlike
+// CELL_LEDGE risers, which are solid underneath. Consumed by exactly three chokes:
+// Collision::moveAndSlide (story selection + underside head clamp), Raycast::cast (top/underside/
+// rim planes — nothing shoots through a balcony floor), and the level mesher (top/underside/rim
+// quads). The grid is rebuilt from the seed on every peer, so slabs replicate in co-op with NO
+// wire change — the jump-pad story. Enemies never jump, so AI keeps navigating the ground story
+// and simply walks under platforms (PvP-only above, the pads/ledges policy).
+static constexpr u8 CELL_PLATFORM = 1 << 5;
+
+// Slab thickness in quarter-units (0.5 m). Underside = platHeight - this, clamped to floorHeight,
+// so a low stair step degrades gracefully into riser-like geometry with no dead under-space.
+static constexpr u8 PLATFORM_THICKNESS_Q = 2;
+
+// Feet within this many metres below a slab top interact with the SLAB story (walk on / step up);
+// further below and they belong to the ground story. Must equal Collision::STEP_UP_HEIGHT (the
+// ledge step gate) — collision.cpp static_asserts the pair; it lives here because collision.h
+// includes this header, not the other way round.
+static constexpr f32 PLATFORM_STEP_TOLERANCE = 0.4f;
+
 struct GridCell {
     u8 flags;            // CELL_SOLID / CELL_FLOOR / CELL_CEILING
     u8 floorHeight;      // quarter-units (multiply by 0.25 for metres)
@@ -28,6 +49,8 @@ struct GridCell {
     u8 wallMaterialId;   // material for wall surfaces
     u8 floorMaterialId;  // material for floor surface
     u8 ceilMaterialId;   // material for ceiling surface
+    u8 platHeight;       // CELL_PLATFORM only: slab TOP surface, quarter-units (×0.25 = metres)
+    u8 platMaterialId;   // CELL_PLATFORM only: slab top + underside material
 };
 
 struct LevelGrid {
@@ -65,6 +88,16 @@ namespace LevelGridSystem {
     bool isSolid(const LevelGrid& grid, u32 x, u32 z);
     f32  getFloorHeight(const LevelGrid& grid, u32 x, u32 z);
     f32  getCeilingHeight(const LevelGrid& grid, u32 x, u32 z);
+    // CELL_PLATFORM (two-story) queries. hasPlatform is the gate; the getters assume it passed.
+    bool hasPlatform(const LevelGrid& grid, u32 x, u32 z);
+    f32  getPlatformTop(const LevelGrid& grid, u32 x, u32 z);
+    f32  getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z);
+    // THE story selector: the walkable floor a body with feet at feetY interacts with in this
+    // cell. Slab cells return the slab top for feet within PLATFORM_STEP_TOLERANCE below it
+    // (walking the balcony, stepping up a slab stair), else the base floor (walking the arcade
+    // beneath). Every consumer that means "the floor under THIS body" must use this, never raw
+    // getFloorHeight, or bodies under a balcony get teleport-snapped up through it.
+    f32  effectiveFloorHeight(const LevelGrid& grid, u32 x, u32 z, f32 feetY);
     bool isInBounds(const LevelGrid& grid, u32 x, u32 z);
 
     // Build BFS flow field from exitWorldPos toward all reachable cells.

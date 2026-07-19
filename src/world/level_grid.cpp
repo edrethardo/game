@@ -74,6 +74,33 @@ f32 LevelGridSystem::getCeilingHeight(const LevelGrid& grid, u32 x, u32 z) {
     return grid.cells[z * grid.width + x].ceilingHeight * 0.25f;
 }
 
+bool LevelGridSystem::hasPlatform(const LevelGrid& grid, u32 x, u32 z) {
+    if (!isInBounds(grid, x, z)) return false;
+    const GridCell& c = grid.cells[z * grid.width + x];
+    // A solid cell can't carry a slab — the wall already fills the column.
+    return (c.flags & CELL_PLATFORM) != 0 && !(c.flags & CELL_SOLID);
+}
+
+f32 LevelGridSystem::getPlatformTop(const LevelGrid& grid, u32 x, u32 z) {
+    return grid.cells[z * grid.width + x].platHeight * 0.25f;
+}
+
+f32 LevelGridSystem::getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z) {
+    const GridCell& c = grid.cells[z * grid.width + x];
+    // Signed math: platHeight < thickness must clamp, not wrap the u8.
+    const s32 underQ = static_cast<s32>(c.platHeight) - PLATFORM_THICKNESS_Q;
+    const f32 under  = underQ * 0.25f;
+    const f32 fh     = c.floorHeight * 0.25f;
+    return under > fh ? under : fh;
+}
+
+f32 LevelGridSystem::effectiveFloorHeight(const LevelGrid& grid, u32 x, u32 z, f32 feetY) {
+    const f32 fh = getFloorHeight(grid, x, z);
+    if (!hasPlatform(grid, x, z)) return fh;
+    const f32 top = getPlatformTop(grid, x, z);
+    return (feetY >= top - PLATFORM_STEP_TOLERANCE) ? top : fh;
+}
+
 // 8-directional neighbor offsets: 0=+X, 1=+X+Z, 2=+Z, 3=-X+Z, 4=-X, 5=-X-Z, 6=-Z, 7=+X-Z
 static constexpr s32 kDirDx[] = { 1, 1, 0,-1,-1,-1, 0, 1};
 static constexpr s32 kDirDz[] = { 0, 1, 1, 1, 0,-1,-1,-1};

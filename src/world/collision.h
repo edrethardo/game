@@ -66,6 +66,13 @@ namespace Collision {
     // and, if true, replaces velocity.y with JUMPPAD_LAUNCH (the Quake launch). See CELL_JUMPPAD.
     bool onJumpPad(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid);
 
+    // True if an AABB (feet at feetPos, halfWidth in XZ, PLAYER_HEIGHT tall) would CLIP a
+    // CELL_PLATFORM slab band [underside, top]: the body is neither stepping ONTO the slab (feet
+    // within STEP_UP_HEIGHT of the top — slab stairs, jump landings) nor passing fully BENEATH it
+    // (head clear of the underside). moveAndSlide treats that as a wall on the X/Z axes, so a
+    // too-high slab can't be walked up onto and a body can't wedge into a slab edge mid-jump.
+    bool overlapsPlatformBand(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid);
+
     // Snap an entity's Y to the floor of its current cell (if walkable).
     void snapEntityToFloor(Vec3& position, Vec3 halfExtents, const LevelGrid& grid);
 

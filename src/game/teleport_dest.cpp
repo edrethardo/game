@@ -70,10 +70,13 @@ Vec3 Teleport::resolveDest(const LevelGrid& grid, EntityPool& entities, Vec3 sta
             if (hit.hit && hit.distance < dp - 0.1f) continue;
         }
 
-        // Land on the destination cell's floor so the player neither floats nor clips in.
+        // Land on the destination cell's floor — STORY-AWARE: resolved against the height the
+        // TARGET occupies (desired.y is the victim's feet for closing skills like Shadow Dance),
+        // so a blink to a balcony player lands ON the balcony beside them, never on the ground
+        // story underneath. Platform-free cells behave exactly as before.
         u32 gx, gz;
         if (LevelGridSystem::worldToGrid(grid, p, gx, gz))
-            p.y = LevelGridSystem::getFloorHeight(grid, gx, gz);
+            p.y = LevelGridSystem::effectiveFloorHeight(grid, gx, gz, desired.y);
         return p;
     }
     return start;   // the entire line is blocked — refuse the movement rather than guess
