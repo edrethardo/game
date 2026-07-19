@@ -103,11 +103,13 @@ void Engine::renderMenu() {
     FontSystem::setUIScale(uiScale);
 
     // Title text — hidden on screens that fill the vertical space with their own layout: the
-    // Single Player submenu (1), Host-mode chooser (10), save-slot select (6), and all of the
-    // options screens (3 category list + 15/16/17/18 submenus) so it doesn't bleed over their lists.
+    // Single Player submenu (1), Host-mode chooser (10), save-slot select (6), the Arena Mode
+    // chooser (22, which draws its OWN "Arena Mode" header — the shared title at 0.65 collided
+    // with it at 0.62), and all of the options screens (3 category list + 15/16/17/18 submenus)
+    // so it doesn't bleed over their own top labels.
     if (m_menu.subState != 1 && m_menu.subState != 6 && m_menu.subState != 10 &&
         m_menu.subState != 3 && m_menu.subState != 15 && m_menu.subState != 16 &&
-        m_menu.subState != 17 && m_menu.subState != 18) {
+        m_menu.subState != 17 && m_menu.subState != 18 && m_menu.subState != 22) {
         const char* title = "CURSE OF THE DUNGEON ENGINE";
         f32 titleW = FontSystem::textWidth(title, 3);
         f32 titleX = (static_cast<f32>(sw) - titleW) * 0.5f;
@@ -507,37 +509,38 @@ void Engine::renderMenu() {
                                  m_menu.msg, {1.0f * alpha, 0.3f * alpha, 0.3f * alpha}, 2);
         }
     } else if (m_menu.subState == 4) {
-        // Waiting for Player 2 join screen. In Arena mode the same lobby means "opponent",
-        // not "co-op partner" — the gold tag keeps that unmissable.
-        if (m_menu.arena) {
+        // Waiting lobby — a co-op partner, or (Arena mode) an opponent. The rows are laid out as a
+        // RELATIVE vertical stack anchored safely below the shared title (0.65): a top anchor plus a
+        // fixed row gap, both fractions of sh, each row auto-centred on X. Collision-proof at any
+        // resolution — the gold arena tag USED to sit at 0.64, right on top of the 0.65 title. (Font
+        // y is bottom-up, so the stack walks DOWN by subtracting the gap; Back is pinned near the
+        // bottom.) No mouse hit-test depends on these Y values — subState 4 is a key-prompt screen.
+        const bool pad = Input::activeDeviceIsGamepad();
+        auto row = [&](const char* s, u8 size, Vec3 col, f32 ry) {
+            f32 w = FontSystem::textWidth(s, size);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - w) * 0.5f, ry, s, col, size);
+        };
+        f32 y = sh * 0.56f;             // first row sits clear below the 0.65 title
+        const f32 gap = sh * 0.085f;    // relative inter-row spacing
+
+        if (m_menu.arena) {             // gold "opponent" tag — this lobby is PvP, not co-op
             char tag[64];
             std::snprintf(tag, sizeof(tag), "ARENA - free-for-all, first to %u", Arena::KILL_TARGET);
-            f32 tagW = FontSystem::textWidth(tag, 2);
-            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tagW) * 0.5f, sh * 0.64f,
-                                 tag, {1.0f, 0.8f, 0.2f}, 2);
+            row(tag, 2, {1.0f, 0.8f, 0.2f}, y);
+            y -= gap;
         }
+
         const char* p1Class = kClassDefs[static_cast<u32>(m_playerClasses[0])].name;
         char p1Str[64];
         std::snprintf(p1Str, sizeof(p1Str), "Player 1: %s", p1Class);
-        f32 p1W = FontSystem::textWidth(p1Str, 2);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - p1W) * 0.5f, sh * 0.55f,
-                             p1Str, {0.3f, 1.0f, 0.4f}, 2);
+        row(p1Str, 2, {0.3f, 1.0f, 0.4f}, y); y -= gap;
 
-        const char* waitText = "Player 2: Press A to join co-op";
-        f32 waitW = FontSystem::textWidth(waitText, 2);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - waitW) * 0.5f, sh * 0.42f,
-                             waitText, {0.7f, 0.7f, 0.9f}, 2);
+        row("Player 2: Press A to join co-op", 2, {0.7f, 0.7f, 0.9f}, y); y -= gap;
 
-        bool pad = Input::activeDeviceIsGamepad();
-        const char* soloText = pad ? "Press + to start solo" : "Press Enter to start solo";
-        f32 soloW = FontSystem::textWidth(soloText, 2);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - soloW) * 0.5f, sh * 0.32f,
-                             soloText, {0.5f, 0.5f, 0.6f}, 2);
+        row(pad ? "Press + to start solo" : "Press Enter to start solo",
+            2, {0.5f, 0.5f, 0.6f}, y);
 
-        const char* backText = pad ? "B to go back" : "ESC to go back";
-        f32 backW = FontSystem::textWidth(backText, 1);
-        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - backW) * 0.5f, sh * 0.1f,
-                             backText, {0.4f, 0.4f, 0.5f}, 1);
+        row(pad ? "B to go back" : "ESC to go back", 1, {0.4f, 0.4f, 0.5f}, sh * 0.1f);
     } else if (m_menu.subState == 5) {
         // Player 2 class selection
         const char* subTitle = "Player 2: Choose Your Class";
