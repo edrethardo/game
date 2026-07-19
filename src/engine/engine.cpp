@@ -1216,6 +1216,7 @@ void Engine::run() {
     X(m_potionLastActivationTick, m_potionLastActivationTicks) \
     X(m_invCursorPanel,   m_invCursorPanels)\
     X(m_invCursorIndex,   m_invCursorIndices) \
+    X(m_invCursorActive,  m_invCursorActiveArr) \
     X(m_dragState,        m_dragStates)     \
     X(m_dblClickState,    m_dblClickStates)
 

@@ -1947,7 +1947,10 @@ void Engine::gameUpdate(f32 dt) {
             // the mouse-motion baseline so the first frame doesn't read a phantom move. Player-0 only:
             // the flag is the keyboard+mouse lane's; a split-screen P2 (always cursor) must not touch it.
             if (m_localPlayerIndex == 0) {
-                m_invCursorActive = Input::activeDeviceIsGamepad();
+                // Seed from THIS lane's device, not the global one: in couch co-op the global
+                // flips to Gamepad the moment P2 touches a pad, which would open P1's inventory in
+                // cursor mode and make P1's mouse double-click inert.
+                m_invCursorActive = Input::laneDeviceIsGamepad(m_localPlayerIndex);
                 m_invLastMouseX = -1;
                 m_invLastMouseY = -1;
             }

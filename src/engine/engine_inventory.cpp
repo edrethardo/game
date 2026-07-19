@@ -133,6 +133,19 @@ void Engine::updateInventoryInteraction(f32 dt) {
     u32 sw = Window::getWidth();
     u32 sh = Window::getHeight();
 
+    // Split-screen: the inventory is DRAWN inside this player's viewport (half the window — see the
+    // render loop's vpW/vpH → renderInventoryHUD), but the mouse is one full-window device. Remap the
+    // pointer into P1's viewport-local space and shrink sw/sh to the viewport, or the hit-test runs in
+    // a DIFFERENT coordinate space than the draw and every click misses the drawn slots — which is why
+    // couch P1's mouse equip / drag / double-click silently did nothing (most visible in Local Versus /
+    // the Arena). P1 is always the FIRST viewport: the top half on a horizontal split, the left half on
+    // a vertical one — mirroring the vpX/vpY/vpW/vpH the render loop assigns for sp==0. (P2 is
+    // controller-only, so its lane never reaches this mouse path.)
+    if (m_splitPlayerCount > 1) {
+        if (m_splitMode == 0) { sh /= 2; my -= static_cast<s32>(sh); }  // horizontal: P1 = top half
+        else                  { sw /= 2; }                              // vertical:   P1 = left half
+    }
+
     // Inventory input mode (player 0): the physical mouse and the WASD/E + D-pad cursor are BOTH live
     // at once — last input wins for the highlight + tooltip. A mouse move or click switches to mouse
     // mode HERE; the nav reads below switch to cursor mode. This is what lets keyboard+mouse keep
@@ -142,8 +155,14 @@ void Engine::updateInventoryInteraction(f32 dt) {
         const bool mouseMoved = (m_invLastMouseX >= 0) && (ddx * ddx + ddy * ddy > 4);  // >2 px
         m_invLastMouseX = mx;
         m_invLastMouseY = my;
+        // Any physical-mouse activity — move, press, OR release — switches this lane to mouse mode.
+        // Release matters: without it a click that landed while cursor mode was momentarily true (a
+        // D-pad nav between mouse-down and mouse-up) would skip the drag-release handler and strand
+        // m_dragState, so the NEXT click can't register as a double-click.
         if (mouseMoved || Input::isMouseButtonPressed(SDL_BUTTON_LEFT) ||
-                          Input::isMouseButtonPressed(SDL_BUTTON_RIGHT)) {
+                          Input::isMouseButtonPressed(SDL_BUTTON_RIGHT) ||
+                          Input::isMouseButtonReleased(SDL_BUTTON_LEFT) ||
+                          Input::isMouseButtonReleased(SDL_BUTTON_RIGHT)) {
             m_invCursorActive = false;
         }
     }

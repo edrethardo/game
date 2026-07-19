@@ -87,6 +87,16 @@ static s32 padForLane(s32 lane) {
     return s_padForPlayer[lane];
 }
 
+// Per-lane active device (split-screen glyphs). Updated every frame in the device-activity block,
+// read by laneDevice() and the glyph-lane router below. Lane 0 is keyboard-capable; lane >=1 is
+// controller-only. Corrected on the first update frame, so the init values are just a sane default.
+static Input::InputDevice s_laneDevice[NUM_SPLIT_LANES] = { Input::InputDevice::KeyboardMouse,
+                                                            Input::InputDevice::Gamepad };
+// Current render lane for glyph queries (-1 = none → use the global s_activeDevice). Set by the
+// render loop per viewport (setGlyphLane) so activeDevice() resolves per-player during a split-screen
+// HUD pass without threading a lane through every drawKeySymbol caller.
+static s8 s_glyphLane = -1;
+
 // Cached gyro reading — updated once per frame in Input::update(),
 // returned by getGyro(). Per-player to avoid P2 sensor bleeding into P1.
 static f32 s_gyroDx[2] = {};
@@ -322,6 +332,9 @@ void Input::init() {
     s_activeDevice = InputDevice::KeyboardMouse;
     for (s32 i = 0; i < MAX_GAMEPADS; ++i) if (s_controllers[i]) { s_activeDevice = InputDevice::Gamepad; break; }
 #endif
+    // Seed the per-lane glyph devices from the global default; the per-lane block in updateDeviceActivity
+    // re-derives them every frame once a game is running.
+    for (s32 i = 0; i < NUM_SPLIT_LANES; ++i) s_laneDevice[i] = s_activeDevice;
 
     // Try to load saved bindings. Desktop reads from the per-user data dir (Steam-Cloud-synced);
     // Switch keeps the read-only romfs default via ASSET_PATH.
@@ -345,8 +358,22 @@ void Input::shutdown() {
     LOG_INFO("Input system shut down");
 }
 
-Input::InputDevice Input::activeDevice()      { return s_activeDevice; }
-bool Input::activeDeviceIsGamepad()           { return s_activeDevice == InputDevice::Gamepad; }
+Input::InputDevice Input::activeDevice() {
+    // In a split-screen HUD pass the render loop points s_glyphLane at the viewport being drawn, so
+    // the device-dependent glyphs (drawKeySymbol, skill/quick bars) resolve to THAT player's device.
+    // -1 (the default, and any non-split context) falls back to the global last-used device.
+    if (s_glyphLane >= 0 && s_splitActive && s_glyphLane < NUM_SPLIT_LANES)
+        return s_laneDevice[s_glyphLane];
+    return s_activeDevice;
+}
+bool Input::activeDeviceIsGamepad()           { return activeDevice() == InputDevice::Gamepad; }
+
+Input::InputDevice Input::laneDevice(u8 lane) {
+    if (s_splitActive && lane < NUM_SPLIT_LANES) return s_laneDevice[lane];
+    return s_activeDevice;
+}
+bool Input::laneDeviceIsGamepad(u8 lane)      { return laneDevice(lane) == InputDevice::Gamepad; }
+void Input::setGlyphLane(s8 lane)             { s_glyphLane = lane; }
 
 void Input::update(f32 dt) {
     // NOTE: the previous<-current rolls that USED to sit here are gone. They are done in
@@ -522,6 +549,7 @@ void Input::update(f32 dt) {
     // switch only when exactly one device is active this frame; hold on both/neither.
 #ifdef __SWITCH__
     s_activeDevice = InputDevice::Gamepad;   // console: no KBM, and the pad path is libnx (above)
+    s_laneDevice[0] = s_laneDevice[1] = InputDevice::Gamepad;   // both couch lanes are JoyCon
 #else
     bool kbmActive = false;
     for (s32 i = 0; i < NUM_KEYS && !kbmActive; ++i) if (s_currentKeys[i]) kbmActive = true;
@@ -531,24 +559,49 @@ void Input::update(f32 dt) {
         for (s32 i = 0; i < NUM_MOUSE_BUTTONS && !kbmActive; ++i) if (s_currentMouseButtons[i]) kbmActive = true;
     }
 
-    bool padActive = false;
-    for (s32 c = 0; c < MAX_GAMEPADS && !padActive; ++c) {
+    // Per-pad activity (kept per-index, not just OR'd, so each split lane can read the pad IT owns).
+    bool padActiveByIndex[MAX_GAMEPADS] = { false };
+    for (s32 c = 0; c < MAX_GAMEPADS; ++c) {
         if (!s_controllers[c]) continue;
-        for (s32 b = 0; b < NUM_PAD_BUTTONS && !padActive; ++b) if (s_currentPadButtons[c][b]) padActive = true;
+        bool a = false;
+        for (s32 b = 0; b < NUM_PAD_BUTTONS && !a; ++b) if (s_currentPadButtons[c][b]) a = true;
         // Sticks rest near 0 and swing both ways → magnitude test past a generous deadzone.
-        if (!padActive && (fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_LEFTX])  >= DEVICE_STICK_DEADZONE ||
-                           fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_LEFTY])  >= DEVICE_STICK_DEADZONE ||
-                           fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_RIGHTX]) >= DEVICE_STICK_DEADZONE ||
-                           fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_RIGHTY]) >= DEVICE_STICK_DEADZONE))
-            padActive = true;
+        if (!a && (fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_LEFTX])  >= DEVICE_STICK_DEADZONE ||
+                   fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_LEFTY])  >= DEVICE_STICK_DEADZONE ||
+                   fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_RIGHTX]) >= DEVICE_STICK_DEADZONE ||
+                   fabsf(s_currentAxisValues[c][SDL_CONTROLLER_AXIS_RIGHTY]) >= DEVICE_STICK_DEADZONE))
+            a = true;
         // Triggers rest near 0 → one-sided threshold.
-        if (!padActive && (s_currentAxisValues[c][SDL_CONTROLLER_AXIS_TRIGGERLEFT]  >= DEVICE_TRIGGER_THRESHOLD ||
-                           s_currentAxisValues[c][SDL_CONTROLLER_AXIS_TRIGGERRIGHT] >= DEVICE_TRIGGER_THRESHOLD))
-            padActive = true;
+        if (!a && (s_currentAxisValues[c][SDL_CONTROLLER_AXIS_TRIGGERLEFT]  >= DEVICE_TRIGGER_THRESHOLD ||
+                   s_currentAxisValues[c][SDL_CONTROLLER_AXIS_TRIGGERRIGHT] >= DEVICE_TRIGGER_THRESHOLD))
+            a = true;
+        padActiveByIndex[c] = a;
     }
+    bool padActive = false;
+    for (s32 c = 0; c < MAX_GAMEPADS; ++c) if (padActiveByIndex[c]) { padActive = true; break; }
 
     if (kbmActive != padActive)   // exactly one device active → adopt it (else keep the last one)
         s_activeDevice = kbmActive ? InputDevice::KeyboardMouse : InputDevice::Gamepad;
+
+    // Per-lane device for split-screen glyphs. Each lane resolves independently so one player's
+    // device can never flip the other's on-screen prompts:
+    //   - a lane with no assigned pad (single-controller couch P1) is keyboard/mouse, always;
+    //   - lane >=1 is controller-only (keyboard is gated to lane 0 in checkActionRaw): Gamepad while
+    //     it actually has a connected pad, keyboard otherwise;
+    //   - lane 0 with a pad can use either, so it's last-device-wins between that pad and the kbm.
+    for (s32 lane = 0; lane < NUM_SPLIT_LANES; ++lane) {
+        s32 pad = padForLane(lane);
+        if (pad < 0) { s_laneDevice[lane] = InputDevice::KeyboardMouse; continue; }
+        if (lane != 0) {
+            s_laneDevice[lane] = (pad < MAX_GAMEPADS && s_controllers[pad])
+                                 ? InputDevice::Gamepad : InputDevice::KeyboardMouse;
+            continue;
+        }
+        bool laneKbm = kbmActive;
+        bool lanePad = (pad < MAX_GAMEPADS) && padActiveByIndex[pad];
+        if (laneKbm != lanePad)
+            s_laneDevice[lane] = laneKbm ? InputDevice::KeyboardMouse : InputDevice::Gamepad;
+    }
 #endif
 }
 
@@ -808,7 +861,10 @@ void Input::handleControllerEvent(const SDL_Event& event) {
         // never stranded on controller prompts with no controller present.
         bool anyPad = false;
         for (s32 k = 0; k < MAX_GAMEPADS; ++k) if (s_controllers[k]) { anyPad = true; break; }
-        if (!anyPad) s_activeDevice = InputDevice::KeyboardMouse;
+        if (!anyPad) {
+            s_activeDevice  = InputDevice::KeyboardMouse;
+            s_laneDevice[0] = s_laneDevice[1] = InputDevice::KeyboardMouse;   // no pad left → keyboard glyphs
+        }
     }
 }
 

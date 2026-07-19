@@ -679,7 +679,11 @@ private:
     // and the physical mouse are BOTH live at once — last-input-wins picks which drives the
     // highlight + tooltip: true after a WASD/E/D-pad nav, false after the mouse moves or clicks. A
     // gamepad-only split lane (player > 0) has no mouse, so inventoryUsesCursor() forces cursor there.
-    bool m_invCursorActive = false;
+    // PER-LANE (swapped) — it used to be a single shared bool, so in couch co-op P2's D-pad nav
+    // (which sets it true) flipped P1 into cursor mode and skipped P1's mouse path, killing P1's
+    // double-click-to-equip whenever the other player touched a controller.
+    bool m_invCursorActive = false;                         // active alias (swapped per player)
+    bool m_invCursorActiveArr[MAX_LOCAL_PLAYERS] = {};
     s32  m_invLastMouseX = -1;   // previous-frame absolute mouse pos; a change flips back to mouse mode
     s32  m_invLastMouseY = -1;
     f32 m_fullBackpackNotifyTimer = 0.0f;

@@ -619,6 +619,11 @@ void Engine::render(f32 alpha) {
     // below mutates that transient copy, so repeated renders between ticks never compound.
     swapInPlayer(sp);
 
+    // Route device-dependent HUD glyphs (button prompts, skill/quick bars) to THIS viewport's
+    // player, so in couch co-op each player sees glyphs for the device they actually use instead of
+    // the single global last-used device. No-op outside split-screen (lane -1 → global device).
+    Input::setGlyphLane(m_splitPlayerCount > 1 ? static_cast<s8>(sp) : -1);
+
     // Compute viewport for this player from the base (post-Switch) dimensions.
     u32 vpX = 0, vpY = 0, vpW = baseW, vpH = baseH;
     if (m_splitPlayerCount > 1) {
@@ -913,6 +918,9 @@ void Engine::render(f32 alpha) {
     }
 
     } // end split-screen player loop
+
+    // Back to the global device for the shared overlays/menus drawn after the per-viewport loop.
+    Input::setGlyphLane(-1);
 
     glDisable(GL_SCISSOR_TEST);
 

@@ -131,6 +131,25 @@ namespace Input {
     InputDevice activeDevice();
     bool        activeDeviceIsGamepad();   // convenience: activeDevice() == Gamepad
 
+    // Split-screen glyph routing. In couch co-op each viewport's HUD/prompts must show the device
+    // THAT player is on, not the single global last-used device — otherwise P2 nudging a pad flips
+    // P1's on-screen prompts to controller glyphs (and vice-versa). Two hooks share one per-lane
+    // device tracker:
+    //   - laneDevice(lane): the device a specific local lane is on. A lane with no assigned pad
+    //     (single-controller couch P1) is keyboard/mouse; lane >=1 is controller-only by design
+    //     (keyboard is gated to lane 0 in checkActionRaw) so it's Gamepad while a pad is attached;
+    //     lane 0 with a pad is last-device-wins between that pad and the keyboard/mouse. Outside
+    //     split-screen it returns the global activeDevice(). Use where you hold a concrete lane index
+    //     (e.g. seeding a per-lane UI mode).
+    //   - setGlyphLane(lane): points the CURRENT render lane at a viewport so the activeDevice()
+    //     calls already baked into drawKeySymbol and the skill/quick bars resolve per-player with NO
+    //     signature changes. The render loop sets it per viewport and clears it (-1) afterwards; -1
+    //     (the default, and any non-split context) means "use the global device", so menus and
+    //     single-player are unchanged.
+    InputDevice laneDevice(u8 lane);
+    bool        laneDeviceIsGamepad(u8 lane);
+    void        setGlyphLane(s8 lane);
+
     // Analog stick with deadzone applied (returns 0 inside deadzone)
     f32  getStickX(bool rightStick, s32 gamepadIndex = 0);
     f32  getStickY(bool rightStick, s32 gamepadIndex = 0);
