@@ -171,7 +171,8 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
                                   f32 coneAngleCos, f32 maxDistance,
                                   EntityHandle* outHandles, f32* outDistances,
                                   u32 maxResults,
-                                  bool horizontalCone)
+                                  bool horizontalCone,
+                                  const LevelGrid* losGrid)
 {
     u32 count = 0;
 
@@ -206,6 +207,17 @@ u32 CombatQuery::queryConeSorted(const EntityPool& pool,
         } else if (dist >= 0.5f) {
             f32 d = dot(toEntity * (1.0f / dist), direction);
             if (d < coneAngleCos) continue;
+        }
+
+        // Line-of-sight gate (melee only — losGrid non-null). Cast the full 3D ray from the swing
+        // origin to the entity centre; a wall/floor/ceiling closer than the entity blocks the hit.
+        // The DDA is slab-aware, so an enemy on a platform above/below is occluded by that slab even
+        // though the melee cone above is judged horizontally. Point-blank overlaps (dist tiny) skip
+        // the test to avoid a degenerate zero-length ray.
+        if (losGrid && dist > 0.01f) {
+            Vec3 losDir = toEntity * (1.0f / dist);
+            RayHit los = Raycast::cast(*losGrid, origin, losDir, dist);
+            if (los.hit && los.distance < dist - 0.05f) continue;
         }
 
         // Insert sorted by distance (insertion sort, small N)

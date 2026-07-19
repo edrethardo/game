@@ -423,7 +423,7 @@ bool SkillSystem::tryActivate(SkillState& ss, const SkillDef* skillDefs, u32 ski
 
     // ---- Warrior ----
     case SkillId::CLEAVE:
-        fireCleave(eyePos, forward, def, entities, player);
+        fireCleave(eyePos, forward, def, grid, entities, player);
         break;
     case SkillId::THUNDERCLAP:
         fireThunderclap(eyePos, def, entities);

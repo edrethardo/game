@@ -7,7 +7,7 @@
 // Wide 120-degree melee swing — hits everything in a short, broad arc.
 // 5% lifesteal based on total damage dealt.
 void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
-                EntityPool& entities, Player& player)
+                const LevelGrid& grid, EntityPool& entities, Player& player)
 {
     WeaponDef temp;
     temp.name        = "Cleave";
@@ -17,7 +17,8 @@ void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
     temp.coneAngleDeg = 120.0f;
     temp.cooldown    = 0.0f;
     temp.recoilKick  = 0.0f;
-    AttackResult result = Combat::fireMelee(temp, origin, forward, entities);
+    // grid → the cleave arc can't reach through walls (same LOS gate as a weapon swing).
+    AttackResult result = Combat::fireMelee(temp, origin, forward, grid, entities);
 
     // Heal player for 5% of damage dealt
     f32 hitCount = static_cast<f32>(result.entitiesHit);

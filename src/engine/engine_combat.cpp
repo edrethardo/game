@@ -444,7 +444,7 @@ void Engine::handleWeaponFire(f32 dt) {
             f32 distances[MAX_ENTITIES];
             u32 hitCount = CombatQuery::queryConeSorted(
                 m_renderInterp.entities, eyePos, forward, cosCone, wpn.range,
-                hits, distances, MAX_ENTITIES, /*horizontalCone=*/true);
+                hits, distances, MAX_ENTITIES, /*horizontalCone=*/true, &m_level.grid);
             for (u32 i = 0; i < hitCount; i++) {
                 Entity* e = handleGet(m_renderInterp.entities, hits[i]);
                 if (!e) continue;
@@ -469,12 +469,12 @@ void Engine::handleWeaponFire(f32 dt) {
             // Skip cleave prediction: cleave is 5% RNG and the server's own roll won't
             // match the client's, so a predicted cleave would frequently mispredict.
         } else {
-            result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
+            result = Combat::fireMelee(wpn, eyePos, forward, m_level.grid, m_entities);
             m_localPlayer.hitShakeTimer = fmaxf(m_localPlayer.hitShakeTimer, 0.03f);
             // PvP (Arena): the same swing also tests rival players — free no-op in PvE
             // (registry empty). Cleave is skipped: it requires an ENTITY hit to trigger,
             // which can't happen in an entity-free arena.
-            if (Combat::pvpActive()) Combat::pvpCone(wpn, eyePos, forward, activeNetSlot());
+            if (Combat::pvpActive()) Combat::pvpCone(wpn, eyePos, forward, m_level.grid, activeNetSlot());
 
             // Non-dagger cleave: 5% chance to hit all enemies in a wide 360° arc
             if (melSub != WeaponSubtype::DAGGER && melSub != WeaponSubtype::NONE &&
@@ -482,7 +482,7 @@ void Engine::handleWeaponFire(f32 dt) {
                 WeaponDef cleaveWpn = wpn;
                 cleaveWpn.coneAngleDeg = 360.0f;
                 cleaveWpn.damage *= 0.5f; // cleave deals half damage
-                Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities); // cleave is never a crit
+                Combat::fireMelee(cleaveWpn, eyePos, forward, m_level.grid, m_entities); // cleave is never a crit
             }
         }
 
@@ -1521,15 +1521,15 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         // buildWeaponDef in item.cpp). No per-subtype crit logic needed here.
         WeaponSubtype sub = WeaponSubtype::NONE;
         if (!isItemEmpty(eqWpn)) sub = m_itemDefs[eqWpn.defId].weaponSubtype;
-        result = Combat::fireMelee(wpn, eyePos, forward, m_entities);
+        result = Combat::fireMelee(wpn, eyePos, forward, m_level.grid, m_entities);
         // PvP (Arena): a remote player's swing tests rival players too (see the local twin).
-        if (Combat::pvpActive()) Combat::pvpCone(wpn, eyePos, forward, np.slotIndex);
+        if (Combat::pvpActive()) Combat::pvpCone(wpn, eyePos, forward, m_level.grid, np.slotIndex);
         if (sub != WeaponSubtype::DAGGER && sub != WeaponSubtype::NONE &&
             result.hitEntity && (std::rand() % 100) < 5) {
             WeaponDef cleaveWpn = wpn;
             cleaveWpn.coneAngleDeg = 360.0f;
             cleaveWpn.damage *= 0.5f;
-            Combat::fireMelee(cleaveWpn, eyePos, forward, m_entities); // cleave is never a crit
+            Combat::fireMelee(cleaveWpn, eyePos, forward, m_level.grid, m_entities); // cleave is never a crit
         }
     } break;
     case WeaponType::HITSCAN: {

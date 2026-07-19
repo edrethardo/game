@@ -135,7 +135,8 @@ namespace Combat {
     // pvpCone: horizontal melee cone, one shared crit roll (the fireMelee convention).
     // pvpRay: nearest player AABB along the ray, wall-occluded via the grid DDA; outHitPos
     // receives the impact point for tracer/spark FX. Both return whether anyone was hit.
-    u32  pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, u8 attackerSlot);
+    u32  pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, const LevelGrid& grid,
+                 u8 attackerSlot);
     bool pvpRay(const WeaponDef& weapon, Vec3 origin, Vec3 forward, const LevelGrid& grid,
                 u8 attackerSlot, Vec3* outHitPos);
     // Area damage vs players (skill AoE sites: meteors, novas, dashes, splash). No LOS gate —
@@ -158,8 +159,10 @@ namespace Combat {
 
     // Execute a melee attack (cone check, damage all in cone).
     // Crit is rolled internally from weapon.critChance — see combat.cpp.
+    // grid is the LOS gate: the swing can't reach through a wall/floor/ceiling.
     AttackResult fireMelee(const WeaponDef& weapon,
                            Vec3 eyePos, Vec3 forward,
+                           const LevelGrid& grid,
                            EntityPool& pool);
 
     // Execute a hitscan attack (raycast, damage first entity hit).

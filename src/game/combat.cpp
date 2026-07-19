@@ -494,6 +494,7 @@ Combat::BlockOutcome Combat::applyDamageToPlayer(Player& player, f32 damage,
 
 AttackResult Combat::fireMelee(const WeaponDef& weapon,
                                 Vec3 eyePos, Vec3 forward,
+                                const LevelGrid& grid,
                                 EntityPool& pool)
 {
     AttackResult result;
@@ -504,9 +505,10 @@ AttackResult Combat::fireMelee(const WeaponDef& weapon,
 
     EntityHandle hits[MAX_ENTITIES];
     f32 distances[MAX_ENTITIES];
+    // LOS grid passed so a swing can't connect through a wall/floor/ceiling (queryConeSorted gate).
     u32 hitCount = CombatQuery::queryConeSorted(
         pool, eyePos, forward, cosCone, weapon.range,
-        hits, distances, MAX_ENTITIES, /*horizontalCone=*/true);
+        hits, distances, MAX_ENTITIES, /*horizontalCone=*/true, &grid);
 
     // Roll crit once for the whole swing — all cone hits share the same outcome.
     // Using 0..9999 * 0.0001 gives a uniform [0,1) float without float-modulo artifacts.
@@ -670,7 +672,8 @@ static bool pvpLand(Combat::PvpTarget& t, f32 damage, const Vec3& origin, u8 att
     return true;
 }
 
-u32 Combat::pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, u8 attackerSlot) {
+u32 Combat::pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, const LevelGrid& grid,
+                    u8 attackerSlot) {
     if (s_pvpTargetCount == 0) return 0;
     // Horizontal cone, matching the entity melee query (queryConeSorted horizontalCone=true):
     // flatten both the aim and the to-target vector so pitch doesn't shrink the swing.
@@ -691,6 +694,15 @@ u32 Combat::pvpCone(const WeaponDef& weapon, Vec3 origin, Vec3 forward, u8 attac
         f32 dist = sqrtf(to.x * to.x + to.z * to.z);
         if (dist > weapon.range + PLAYER_HALF_WIDTH) continue;
         if (dist > 0.001f && (to.x * flat.x + to.z * flat.z) / dist < cosCone) continue;
+        // LOS gate: no reaching through a wall/floor/platform slab. Cast eye→chest (mid-height, so
+        // a small stance/height gap doesn't graze the floor the target stands on).
+        Vec3 tgt   = t.view->position + Vec3{0.0f, PLAYER_HEIGHT * 0.5f, 0.0f};
+        Vec3 losTo = tgt - origin;
+        f32  losD  = sqrtf(losTo.x * losTo.x + losTo.y * losTo.y + losTo.z * losTo.z);
+        if (losD > 0.01f) {
+            RayHit los = Raycast::cast(grid, origin, losTo * (1.0f / losD), losD);
+            if (los.hit && los.distance < losD - 0.05f) continue;
+        }
         if (pvpLand(t, dmg, origin, attackerSlot)) hits++;
     }
     return hits;

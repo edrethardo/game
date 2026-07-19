@@ -42,10 +42,16 @@ namespace CombatQuery {
 
     // Cone query: find entities within a cone. Returns count.
     // outHandles and outDistances filled sorted by distance (nearest first).
+    // losGrid (opt-in): when non-null, an entity is only reported if it has line of sight from the
+    //   origin — a wall/floor/ceiling closer than the entity blocks it. Passed by the MELEE paths so
+    //   a swing can't reach through geometry (the DDA is slab-aware, so a balcony floor occludes an
+    //   enemy above even though the melee cone is horizontal). Left null for AoE novas/explosions,
+    //   which are radial and deliberately wrap cover.
     u32 queryConeSorted(const EntityPool& pool,
                         Vec3 origin, Vec3 direction,
                         f32 coneAngleCos, f32 maxDistance,
                         EntityHandle* outHandles, f32* outDistances,
                         u32 maxResults,
-                        bool horizontalCone = false);  // melee: judge the cone in the XZ plane
+                        bool horizontalCone = false,   // melee: judge the cone in the XZ plane
+                        const LevelGrid* losGrid = nullptr);
 }

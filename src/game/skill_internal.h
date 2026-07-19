@@ -130,7 +130,7 @@ void firePhaseDash(Vec3 eyePos, Vec3 forward, const SkillDef* def,
 // ---------------------------------------------------------------------------
 
 void fireCleave(Vec3 origin, Vec3 forward, const SkillDef* def,
-                EntityPool& entities, Player& player);
+                const LevelGrid& grid, EntityPool& entities, Player& player);
 
 void fireThunderclap(Vec3 origin, const SkillDef* def, EntityPool& entities);
 
