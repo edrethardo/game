@@ -116,6 +116,23 @@ struct Mat4 {
         return r;
     }
 
+    // Rotation by `rad` about an arbitrary axis (need NOT be unit — normalized here; zero -> identity).
+    // Standard Rodrigues matrix, written in this file's column-major m[col*4+row] layout (verified:
+    // substituting axis=(0,1,0) reproduces rotateY above exactly). Used for the directional
+    // dodge-roll tumble, where the axis = up x dodgeDir is generally not a cardinal axis.
+    static Mat4 rotate(Vec3 axis, f32 rad) {
+        f32 len = sqrtf(axis.x*axis.x + axis.y*axis.y + axis.z*axis.z);
+        if (len < 1e-6f) return identity();
+        f32 x = axis.x/len, y = axis.y/len, z = axis.z/len;
+        f32 c = cosf(rad), s = sinf(rad), t = 1.0f - c;
+        Mat4 m = identity();
+        // Column-major: m.m[col*4 + row] = R[row][col]. Columns laid out per-row below.
+        m.m[0]=t*x*x+c;    m.m[4]=t*x*y-s*z;  m.m[8] =t*x*z+s*y;
+        m.m[1]=t*x*y+s*z;  m.m[5]=t*y*y+c;    m.m[9] =t*y*z-s*x;
+        m.m[2]=t*x*z-s*y;  m.m[6]=t*y*z+s*x;  m.m[10]=t*z*z+c;
+        return m;
+    }
+
     static Mat4 perspective(f32 fovY, f32 aspect, f32 nearZ, f32 farZ) {
         f32 f = 1.0f / tanf(fovY * 0.5f);
         Mat4 r = {};

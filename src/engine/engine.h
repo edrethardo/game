@@ -630,6 +630,12 @@ private:
         // (the client's NetPlayer.playerClass for non-local slots is never set).
         u8             playerClass[MAX_PLAYERS];
         u8             playerDodgeFlags[MAX_PLAYERS]; // bit0=rolling (SnapPlayer.dodgeFlags) — drives the remote roll-tumble render
+        // Remote-roll TUMBLE DIRECTION + air-dodge gate, forwarded from the (already-wired) SnapPlayer
+        // fields — no new wire data. During a roll velocity == ROLL_SPEED*rollDirection, so the XZ
+        // wire velocity recovers the dodge direction the client lacks (rollDirection isn't on the
+        // wire). onGround (flags bit1) gates the takeoff dust so an air-dodge kicks up nothing.
+        Vec3           playerVelXZ[MAX_PLAYERS];    // wire velocity XZ (y unused) — normalized to the roll axis
+        bool           playerOnGround[MAX_PLAYERS]; // SnapPlayer.flags bit1 — grounded gate for dust
     };
     RenderInterp m_renderInterp;
 
