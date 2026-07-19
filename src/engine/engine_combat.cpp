@@ -1743,6 +1743,20 @@ void Engine::useQuickbarSlot(u8 slot) {
 }
 
 // ---------------------------------------------------------------------------
+// Bind whatever WEAPON is currently equipped to the ACTIVE quickbar slot. Called after an inventory
+// weapon equip (engine_inventory.cpp) so the flow "press X → equip a sword → slot 2 IS that sword"
+// works — the quickbar becomes the swap loadout you build from the bag. Non-weapon equips never call
+// this, so armor/rings leave the bar alone. Local UI state only (the quickbar is never on the wire).
+// ---------------------------------------------------------------------------
+void Engine::bindWeaponToActiveQuickbar() {
+    PlayerInventory& inv = m_inventories[m_localPlayerIndex];
+    if (isItemEmpty(inv.equipped[static_cast<u32>(ItemSlot::WEAPON)])) return;
+    Quickbar::assignToSlot(m_quickbars[m_localPlayerIndex], inv,
+                           m_quickbars[m_localPlayerIndex].activeSlot,
+                           DragSource::EQUIPMENT, static_cast<u8>(ItemSlot::WEAPON));
+}
+
+// ---------------------------------------------------------------------------
 // Soft target lock (singleplayer). Lock-on itself is currently inert — lockActive
 // is never set true, so this only handles the QUICKBAR_USE action's quickbar-use
 // behaviour. The trailing lockActive=false keeps the (unused) state pinned off (R7-6).

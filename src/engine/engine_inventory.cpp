@@ -309,11 +309,18 @@ void Engine::updateInventoryInteraction(f32 dt) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
                 if (!isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex])) {
                     if (!tryUsePetItem(m_invCursorIndex)) { // consumable? A = use, not equip
+                    // Capture BEFORE the equip — the item moves out of the backpack, so read its slot
+                    // now while it still holds the weapon we're about to equip.
+                    const bool qbEquipWeapon =
+                        !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex]) &&
+                        m_itemDefs[m_inventories[m_localPlayerIndex].backpack[m_invCursorIndex].defId].slot == ItemSlot::WEAPON;
                     Inventory::equip(m_inventories[m_localPlayerIndex], m_invCursorIndex, m_itemDefs);
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_EQUIP);
                     m_itemEquippedOnce = true;
                     sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7: push the new equipped state so the host's fire/reload dispatch sees the right weapon (no-op off-client)
+                    // Bind the just-equipped WEAPON to the ACTIVE quickbar slot (loadout UX). Non-weapon equips skip.
+                    if (qbEquipWeapon) bindWeaponToActiveQuickbar();
                     }
                 }
             } else if (m_invCursorPanel == 1 && m_invCursorIndex < static_cast<u8>(ItemSlot::COUNT)) {
@@ -368,6 +375,22 @@ void Engine::updateInventoryInteraction(f32 dt) {
             Input::setRelativeMouseMode(true);
         }
 
+        // Quickbar hotkeys (Z/X/C/V, or L+D-pad) work IN the inventory too — the gameplay handler
+        // (engine_update.cpp) that does this is frozen while the inventory is open. Select the slot
+        // AND equip its item, so you can build/switch your quickbar loadout from the inventory.
+        // Not gated on cursor mode — a keyboard+mouse player pressing Z should still fire; it lives
+        // per-lane here (before the cursor-mode return below), never in the mouse-only section.
+        static constexpr GameAction kQbSlots[QUICKBAR_SLOTS] = {
+            GameAction::QUICKBAR_SLOT_1, GameAction::QUICKBAR_SLOT_2,
+            GameAction::QUICKBAR_SLOT_3, GameAction::QUICKBAR_SLOT_4,
+        };
+        for (u8 qi = 0; qi < QUICKBAR_SLOTS; qi++) {
+            if (!Input::isActionPressed(kQbSlots[qi])) continue;
+            m_quickbars[m_localPlayerIndex].activeSlot = qi;
+            useQuickbarSlot(qi);   // equips slot qi's item (no-op if empty); sets EQUIPPED_REF + syncs
+            break;                 // one slot per frame (a chord can't claim two)
+        }
+
     }   // end cursor-navigation block
 
     // Cursor mode — WASD/E or the D-pad just drove the selection, or this is a gamepad-only split
@@ -403,11 +426,17 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     m_dblClickState.timer < 0.3f) {
                     // Double-click: use (consumable) or equip directly
                     if (!tryUsePetItem(hit.index)) {
+                        // Capture BEFORE the equip — the item moves out of the backpack.
+                        const bool qbEquipWeapon =
+                            !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[hit.index]) &&
+                            m_itemDefs[m_inventories[m_localPlayerIndex].backpack[hit.index].defId].slot == ItemSlot::WEAPON;
                         Inventory::equip(m_inventories[m_localPlayerIndex], hit.index, m_itemDefs);
                         Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                         AudioSystem::play(SfxId::ITEM_EQUIP);
                         m_itemEquippedOnce = true;
                         sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7
+                        // Bind the just-equipped WEAPON to the ACTIVE quickbar slot (loadout UX). Non-weapon equips skip.
+                        if (qbEquipWeapon) bindWeaponToActiveQuickbar();
                     }
                     m_dblClickState = {};
                 } else {
@@ -559,11 +588,17 @@ void Engine::updateInventoryInteraction(f32 dt) {
             } else if (drop.panel == InventoryUI::SlotHit::EQUIPMENT &&
                        m_dragState.source == DragSource::BACKPACK) {
                 // Drop backpack item on equipment slot — equip it
+                // Capture BEFORE the equip — the item moves out of the backpack.
+                const bool qbEquipWeapon =
+                    !isItemEmpty(m_inventories[m_localPlayerIndex].backpack[m_dragState.sourceIndex]) &&
+                    m_itemDefs[m_inventories[m_localPlayerIndex].backpack[m_dragState.sourceIndex].defId].slot == ItemSlot::WEAPON;
                 Inventory::equip(m_inventories[m_localPlayerIndex], m_dragState.sourceIndex, m_itemDefs);
                 Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                 AudioSystem::play(SfxId::ITEM_EQUIP);
                 m_itemEquippedOnce = true;
                 sendInventorySync(m_localPlayerIndex, activeNetSlot()); // R7
+                // Bind the just-equipped WEAPON to the ACTIVE quickbar slot (loadout UX). Non-weapon equips skip.
+                if (qbEquipWeapon) bindWeaponToActiveQuickbar();
             } else if (drop.panel == InventoryUI::SlotHit::NONE && m_level.inArena) {
                 // Arena: drag-out drops are refused (firewall) — the item snaps back to its
                 // source slot because a NONE drop with no action never removed it.
