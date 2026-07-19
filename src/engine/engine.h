@@ -953,6 +953,9 @@ private:
     // gamepad's L + D-pad, which selects and equips in one press. Pushes sendInventorySync() so a
     // client's swap reaches the authoritative server.
     void useQuickbarSlot(u8 slot);
+    // Bind the currently-equipped WEAPON to the ACTIVE quickbar slot (the inventory quickbar-loadout
+    // UX — see engine_inventory.cpp). Called after an inventory WEAPON equip. Quickbar is local state.
+    void bindWeaponToActiveQuickbar();
     // Lock-on is inert (lockActive never set true); this now only handles the
     // quickbar-use action. Name kept to avoid churning call sites (R7-6).
     void updateTargetLock(f32 dt); // singleplayer legacy
