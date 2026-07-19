@@ -50,8 +50,8 @@ inline constexpr u8 DEFAULT_INTERP_DELAY_MS = 33;
 // the adaptive buffer must be allowed to ride out jitter spikes past 150 ms or remote players/enemies
 // stutter. This is ALSO the max the server will rewind for a client's lag-comp (movement + fire), so
 // a malicious client can claim at most 250 ms of rewind — bounded, and legitimate at this distance.
-// Fits the 64-tick server pose history (250 ms = 15 ticks, + half-RTT ~9 ticks << 64) and the 32-slot
-// client snapshot ring (533 ms, render time sits 15 ticks behind the 31-tick-deep oldest sample).
+// Fits the 64-tick server pose history (250 ms = 15 ticks, + half-RTT ~9 ticks << 64) and the 64-slot
+// client snapshot ring (~1.07 s, render time sits 15 ticks behind the 63-tick-deep oldest sample).
 inline constexpr u8 MAX_INTERP_DELAY_MS = 250;
 
 // Quantize a delay in seconds to the wire byte (used by the client when stamping an input).
