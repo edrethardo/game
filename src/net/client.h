@@ -101,7 +101,10 @@ namespace Client {
                                    bool* outActive, f32* outHealth, f32* outMaxHealth,
                                    u8* outAnimFlags = nullptr, u8* outWeaponMeshId = nullptr,
                                    u8* outPlayerClass = nullptr,
-                                   u8 (*outArmorMeshId)[4] = nullptr);
+                                   u8 (*outArmorMeshId)[4] = nullptr,
+                                   u8* outDodgeFlags = nullptr,  // bit0=rolling — drives remote roll-tumble render
+                                   Vec3* outVelXZ = nullptr,     // wire velocity XZ — recovers the roll tumble direction
+                                   bool* outOnGround = nullptr); // flags bit1=onGround — grounded gate for takeoff dust
 
     // Interpolate entities from snapshots into a render-only pool. `dt` is the
     // frame delta time; used to tick each entity's procedural `animTimer` locally

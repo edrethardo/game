@@ -482,7 +482,8 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
                                        Vec3* outPositions, f32* outYaws,
                                        bool* outActive, f32* outHealth, f32* outMaxHealth,
                                        u8* outAnimFlags, u8* outWeaponMeshId,
-                                       u8* outPlayerClass, u8 (*outArmorMeshId)[4])
+                                       u8* outPlayerClass, u8 (*outArmorMeshId)[4],
+                                       u8* outDodgeFlags, Vec3* outVelXZ, bool* outOnGround)
 {
     // localSlot0/localSlot1 are this client's local lanes' net slots (couch co-op has two; the 2nd
     // is 0xFF for a single client). Both are skipped — local players render from their own predicted
@@ -498,6 +499,9 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
         // the onPlayerJoin out-of-range fallback used server-side.
         if (outPlayerClass) outPlayerClass[i] = 0;
         if (outArmorMeshId) for (int k = 0; k < 4; ++k) outArmorMeshId[i][k] = 0;
+        if (outDodgeFlags) outDodgeFlags[i] = 0;
+        if (outVelXZ) outVelXZ[i] = {0.0f, 0.0f, 0.0f};
+        if (outOnGround) outOnGround[i] = false;
     }
 
     // Interpolate at a delayed render time (computeInterpPair) for smooth, jitter-buffered
@@ -538,6 +542,14 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
             if (outWeaponMeshId) outWeaponMeshId[slot] = sp.weaponMeshId;
             if (outArmorMeshId) for (int k = 0; k < 4; ++k) outArmorMeshId[slot][k] = sp.armorMeshId[k];
             if (outPlayerClass) outPlayerClass[slot] = sp.playerClass;
+            // Roll bit is a boolean state (not lerp-able) — take it straight from the snapshot so
+            // the remote body tumbles for the roll's duration. Only dodgeFlags bit0 is read here.
+            if (outDodgeFlags) outDodgeFlags[slot] = sp.dodgeFlags;
+            // Wire velocity XZ (recovers the roll direction — velocity == ROLL_SPEED*rollDir during a
+            // roll) and onGround (flags bit1) for the tumble axis + air-dodge dust gate. Same
+            // unpackVel used by the extrapolation path below.
+            if (outVelXZ) outVelXZ[slot] = {Quantize::unpackVel(sp.velX), 0.0f, Quantize::unpackVel(sp.velZ)};
+            if (outOnGround) outOnGround[slot] = (sp.flags & (1 << 1)) != 0;
         }
         return;
     }
@@ -588,6 +600,13 @@ void Client::interpolateRemotePlayers(u8 localSlot0, u8 localSlot1,
         // PlayerClass is a static identity, not a lerp-able value — take it straight from
         // the newer snapshot. (Index is already clamped to PlayerClass::CLASS_COUNT in deserialize.)
         if (outPlayerClass) outPlayerClass[slot] = spB.playerClass;
+        // Roll bit is a boolean state (not lerp-able) — take it from the newer snapshot so the
+        // remote body tumbles for the roll's duration. Only dodgeFlags bit0 is read by the renderer.
+        if (outDodgeFlags) outDodgeFlags[slot] = spB.dodgeFlags;
+        // Wire velocity XZ (recovers the roll direction) + onGround (flags bit1) from the newer
+        // snapshot — direction/boolean state, not lerp-able. Same unpackVel as the extrapolation above.
+        if (outVelXZ) outVelXZ[slot] = {Quantize::unpackVel(spB.velX), 0.0f, Quantize::unpackVel(spB.velZ)};
+        if (outOnGround) outOnGround[slot] = (spB.flags & (1 << 1)) != 0;
     }
 }
 

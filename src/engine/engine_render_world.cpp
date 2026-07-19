@@ -55,6 +55,38 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
+// Build the body model matrix with an optional roll-tumble in the ACTUAL dodge direction. rollProg
+// in [0,1] tumbles the body a FULL revolution about the axis perpendicular to the dodge direction
+// (up x dodgeDir), pivoted at the waist, ending upright; prog<=0 is the normal upright body.
+// dodgeDir is the WORLD-space XZ dodge direction (forward/back dodge -> lateral axis -> pitch
+// somersault; left/right -> forward axis -> sideways barrel-roll; diagonal -> blended) so it matches
+// the local camera's roll/pitch blend and works for all 8 dodge directions. dodgeDir need not be
+// unit (Mat4::rotate normalizes the axis); a near-zero one falls back to facing-forward.
+static Mat4 buildBodyModel(Vec3 pos, f32 yaw, f32 scale, f32 targetH, f32 rollProg, Vec3 dodgeDir) {
+    Mat4 s = Mat4::scale({scale, scale, scale});
+    if (rollProg <= 0.0f)
+        return Mat4::translate(pos) * Mat4::rotateY(yaw) * s;
+    // Fallback if we somehow have no direction (velXZ ~0): face-forward. The engine's forward XZ is
+    // (-sin yaw, -cos yaw) — matches Camera::update and player.cpp's aim vector.
+    f32 dl = sqrtf(dodgeDir.x*dodgeDir.x + dodgeDir.z*dodgeDir.z);
+    if (dl < 1e-4f) dodgeDir = Vec3{-sinf(yaw), 0.0f, -cosf(yaw)};
+    // Tumble axis: horizontal, perpendicular to the dodge direction. cross(up, dir) orients so the
+    // body's TOP leads toward dodgeDir (verified: dir=-Z -> axis=-X -> head tips toward -Z) = a
+    // forward roll in the direction of travel. Magnitude is irrelevant — Mat4::rotate normalizes it.
+    Vec3 up{0.0f, 1.0f, 0.0f};
+    Vec3 axis = cross(up, dodgeDir);
+    const f32 half  = targetH * 0.5f;                 // waist height (world metres)
+    const f32 angle = rollProg * 6.2831853f;          // one full revolution over the roll
+    // Pivot at waist. rotateY(yaw) is now INSIDE (orients the mesh to facing FIRST); the world-space
+    // Mat4::rotate then tumbles the already-facing body about the world axis derived from dodgeDir.
+    return Mat4::translate(pos)
+         * Mat4::translate({0.0f, half, 0.0f})
+         * Mat4::rotate(axis, angle)                  // world-space tumble about the roll axis, at the waist
+         * Mat4::translate({0.0f, -half, 0.0f})
+         * Mat4::rotateY(yaw)                          // orient the mesh to facing (inside the tumble)
+         * s;
+}
+
 
 // ---------------------------------------------------------------------------
 // renderWorldItems — dropped items with mesh normalization + rarity glow lines,
@@ -387,10 +419,39 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 f32 targetH = 1.8f; // same as NPC halfExtents.y * 2
                 f32 meshH = (classMesh > 0) ? (m_meshDefs[classMesh].bounds.max.y - m_meshDefs[classMesh].bounds.min.y) : 1.0f;
                 f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
-                Mat4 model = Mat4::translate(pos)
-                           * Mat4::rotateY(yaw)
-                           * Mat4::scale({scale, scale, scale});
-                AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
+
+                // Roll-tumble: host reads the authoritative rollTimer; client has only the synced
+                // bit, so we run a local 0.5 s progress clock while it's held. Either way rollProg
+                // 0->1 drives the somersault + a one-shot takeoff dust puff. Clock::getDeltaSeconds
+                // is the real per-frame delta (render runs once per frame) — no fixed-dt guess.
+                bool rolling = false; f32 rollProg = 0.0f;
+                Vec3 dodgeDir{0.0f, 0.0f, 0.0f}; bool grounded = true;
+                if (m_netRole == NetRole::CLIENT) {
+                    rolling = (m_renderInterp.playerDodgeFlags[i] & 0x01) != 0;
+                    f32 frameDt = static_cast<f32>(Clock::getDeltaSeconds());
+                    m_rollAnimTimer[i] = rolling ? fminf(m_rollAnimTimer[i] + frameDt, 0.5f) : 0.0f;
+                    rollProg = m_rollAnimTimer[i] / 0.5f;
+                    dodgeDir = m_renderInterp.playerVelXZ[i];       // ~= ROLL_SPEED*rollDir during the roll
+                    grounded = m_renderInterp.playerOnGround[i];
+                } else {
+                    rolling = (m_players[i].rollTimer > 0.0f);
+                    rollProg = rolling ? (1.0f - m_players[i].rollTimer / 0.5f) : 0.0f;
+                    dodgeDir = m_players[i].rollDirection;          // exact world-space dodge direction
+                    grounded = m_players[i].onGround;
+                }
+                // Dust only on a GROUNDED takeoff — an air-dodge (roll while jumping) kicks up no
+                // dust from nothing. Rising edge only.
+                if (rolling && !m_wasRolling[i] && grounded)
+                    ParticleSystem::spawnSmoke(m_particles, pos + Vec3{0.0f, 0.1f, 0.0f}, 8);
+                m_wasRolling[i] = rolling;
+
+                Mat4 model = buildBodyModel(pos, yaw, scale, targetH, rollProg, dodgeDir);
+                // A tumbling body lies ~horizontal at mid-roll, reaching ~1.8 m out in XZ and only
+                // ~0.6 m tall — the static upright box would early-cull it at a screen edge. Use a
+                // generous cube around the waist while rolling so the flip never pops out.
+                AABB bounds = rolling
+                    ? AABB{pos + Vec3{-1.0f, 0.0f, -1.0f}, pos + Vec3{1.0f, 1.9f, 1.0f}}
+                    : AABB{pos - Vec3{0.35f, 0.0f, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
                 const Material* classMatPtr = MaterialSystem::get(classMat);
                 Texture classTex = classMatPtr ? classMatPtr->texture : defaultTex;
@@ -442,10 +503,29 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 f32 targetH = 1.8f;
                 f32 meshH = (classMesh > 0) ? (m_meshDefs[classMesh].bounds.max.y - m_meshDefs[classMesh].bounds.min.y) : 1.0f;
                 f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
-                Mat4 model = Mat4::translate(pos)
-                           * Mat4::rotateY(yaw)
-                           * Mat4::scale({scale, scale, scale});
-                AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
+
+                // Roll-tumble: the split-screen partner has the FULL DodgeState locally, so we read
+                // the authoritative rollTimer directly (no local clock needed like the client path).
+                // rollProg 0->1 drives the somersault; a rising edge fires the one-shot takeoff dust.
+                // Edge state lives in m_wasRollingLocal[] (indexed by LOCAL lane), NOT m_wasRolling[]
+                // (net slot) — a client-couch host-remote can share net slot 0 with local lane 0.
+                const DodgeState& ods = m_localPlayers[otherP].dodgeState;
+                bool rolling  = ods.rolling;
+                f32  rollProg = rolling ? (1.0f - ods.rollTimer / 0.5f) : 0.0f;
+                Vec3 dodgeDir = ods.rollDirection;                  // exact world-space dodge direction
+                bool grounded = m_localPlayers[otherP].onGround;
+                // Grounded takeoff only — an air-dodge kicks up no dust. Rising edge only.
+                if (rolling && !m_wasRollingLocal[otherP] && grounded)
+                    ParticleSystem::spawnSmoke(m_particles, pos + Vec3{0.0f, 0.1f, 0.0f}, 8);
+                m_wasRollingLocal[otherP] = rolling;
+
+                Mat4 model = buildBodyModel(pos, yaw, scale, targetH, rollProg, dodgeDir);
+                // A tumbling body lies ~horizontal at mid-roll, reaching ~1.8 m out in XZ and only
+                // ~0.6 m tall — the static upright box would early-cull it at a screen edge. Use a
+                // generous cube around the waist while rolling so the flip never pops out.
+                AABB bounds = rolling
+                    ? AABB{pos + Vec3{-1.0f, 0.0f, -1.0f}, pos + Vec3{1.0f, 1.9f, 1.0f}}
+                    : AABB{pos - Vec3{0.35f, 0.0f, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
                 const Material* skinMatPtr = MaterialSystem::get(classMat);
                 Texture skinTex = skinMatPtr ? skinMatPtr->texture : defaultTex;

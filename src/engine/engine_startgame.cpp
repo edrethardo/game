@@ -761,6 +761,13 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // floor frozen behind the respawn overlay (defensive; the descend path also clears).
     for (u8 p = 0; p < MAX_LOCAL_PLAYERS; p++) m_playerDead[p] = false;
 
+    // Clear the remote roll-tumble render state so a roll bit left set at floor/game exit can't
+    // carry a stale tumble or fire a phantom takeoff dust puff on (re)entry. Two index spaces:
+    // m_rollAnimTimer/m_wasRolling by net slot (network remotes), m_wasRollingLocal by local lane
+    // (split-screen partner). Zero-init already covers first construction; this is belt-and-suspenders.
+    for (u32 p = 0; p < MAX_PLAYERS; p++) { m_rollAnimTimer[p] = 0.0f; m_wasRolling[p] = false; }
+    for (u32 p = 0; p < MAX_LOCAL_PLAYERS; p++) m_wasRollingLocal[p] = false;
+
     // Init players.
     // On a CLIENT DESCEND the server hasn't re-sent our HP yet (full authoritative
     // client HP replication lands in a later wave), and NetPlayer{} defaults to
