@@ -1335,7 +1335,8 @@ void Engine::clientNetPost(f32 dt) {
         m_renderInterp.playerPositions, m_renderInterp.playerYaws,
         m_renderInterp.playerActive, m_renderInterp.playerHealth, m_renderInterp.playerMaxHealth,
         m_renderInterp.playerAnimFlags, m_renderInterp.playerWeaponMeshId,
-        m_renderInterp.playerClass, m_renderInterp.playerArmorMeshId);
+        m_renderInterp.playerClass, m_renderInterp.playerArmorMeshId,
+        m_renderInterp.playerDodgeFlags);
     Client::interpolateEntities(m_renderInterp.entities, dt);
     // Boss / non-boss halfExtents are now wire-authoritative per SnapEntity (Audit P2 #4).
     // The prior post-pass that looked up BossDef::halfExtents here was made redundant by

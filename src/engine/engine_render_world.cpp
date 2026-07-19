@@ -55,6 +55,30 @@ extern Engine* s_engine;
 extern FrameAllocator s_frameAllocator;
 extern bool s_firstKillDropGiven;
 
+// Build the body model matrix with an optional forward roll-tumble. rollProg in [0,1] flips the
+// body a FULL forward somersault (2*pi) about its waist over the roll, ending upright; prog<=0 is
+// the normal upright body. Pivot at waist (targetH*0.5) so it tumbles head-over-heels, not around
+// the ankles. The tumble axis is the body's lateral axis (rotateX in the yaw-local frame), i.e. it
+// pitches head-over-heels along facing — the readable "they rolled" tell; the body is ALSO sliding
+// via its replicated position, which sells the direction.
+static Mat4 buildBodyModel(Vec3 pos, f32 yaw, f32 scale, f32 targetH, f32 rollProg) {
+    Mat4 s = Mat4::scale({scale, scale, scale});
+    if (rollProg <= 0.0f)
+        return Mat4::translate(pos) * Mat4::rotateY(yaw) * s;
+    const f32 half  = targetH * 0.5f;                 // waist height (world metres)
+    // Negative = FORWARD somersault: the head tips toward facing. This engine faces -Z_local after
+    // rotateY(yaw) (see the weapon-attach note below — meshes authored toward +Z point BEHIND the
+    // body), and +rotateX tips the head toward +Z_local, i.e. BACKWARD. Negating tucks it forward.
+    const f32 angle = -rollProg * 6.2831853f;         // one full forward revolution over the roll
+    // pivot at waist: translate up, rotate (yaw then forward-pitch), translate down, then to world.
+    return Mat4::translate(pos)
+         * Mat4::translate({0.0f, half, 0.0f})
+         * Mat4::rotateY(yaw)
+         * Mat4::rotateX(angle)
+         * Mat4::translate({0.0f, -half, 0.0f})
+         * s;
+}
+
 
 // ---------------------------------------------------------------------------
 // renderWorldItems — dropped items with mesh normalization + rarity glow lines,
@@ -387,10 +411,32 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 f32 targetH = 1.8f; // same as NPC halfExtents.y * 2
                 f32 meshH = (classMesh > 0) ? (m_meshDefs[classMesh].bounds.max.y - m_meshDefs[classMesh].bounds.min.y) : 1.0f;
                 f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
-                Mat4 model = Mat4::translate(pos)
-                           * Mat4::rotateY(yaw)
-                           * Mat4::scale({scale, scale, scale});
-                AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
+
+                // Roll-tumble: host reads the authoritative rollTimer; client has only the synced
+                // bit, so we run a local 0.5 s progress clock while it's held. Either way rollProg
+                // 0->1 drives the somersault + a one-shot takeoff dust puff. Clock::getDeltaSeconds
+                // is the real per-frame delta (render runs once per frame) — no fixed-dt guess.
+                bool rolling = false; f32 rollProg = 0.0f;
+                if (m_netRole == NetRole::CLIENT) {
+                    rolling = (m_renderInterp.playerDodgeFlags[i] & 0x01) != 0;
+                    f32 frameDt = static_cast<f32>(Clock::getDeltaSeconds());
+                    m_rollAnimTimer[i] = rolling ? fminf(m_rollAnimTimer[i] + frameDt, 0.5f) : 0.0f;
+                    rollProg = m_rollAnimTimer[i] / 0.5f;
+                } else {
+                    rolling = (m_players[i].rollTimer > 0.0f);
+                    rollProg = rolling ? (1.0f - m_players[i].rollTimer / 0.5f) : 0.0f;
+                }
+                if (rolling && !m_wasRolling[i])
+                    ParticleSystem::spawnSmoke(m_particles, pos + Vec3{0.0f, 0.1f, 0.0f}, 8);
+                m_wasRolling[i] = rolling;
+
+                Mat4 model = buildBodyModel(pos, yaw, scale, targetH, rollProg);
+                // A tumbling body lies ~horizontal at mid-roll, reaching ~1.8 m out in XZ and only
+                // ~0.6 m tall — the static upright box would early-cull it at a screen edge. Use a
+                // generous cube around the waist while rolling so the flip never pops out.
+                AABB bounds = rolling
+                    ? AABB{pos + Vec3{-1.0f, 0.0f, -1.0f}, pos + Vec3{1.0f, 1.9f, 1.0f}}
+                    : AABB{pos - Vec3{0.35f, 0.0f, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
                 const Material* classMatPtr = MaterialSystem::get(classMat);
                 Texture classTex = classMatPtr ? classMatPtr->texture : defaultTex;
@@ -442,10 +488,26 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 f32 targetH = 1.8f;
                 f32 meshH = (classMesh > 0) ? (m_meshDefs[classMesh].bounds.max.y - m_meshDefs[classMesh].bounds.min.y) : 1.0f;
                 f32 scale = (meshH > 0.001f) ? (targetH / meshH) : 1.0f;
-                Mat4 model = Mat4::translate(pos)
-                           * Mat4::rotateY(yaw)
-                           * Mat4::scale({scale, scale, scale});
-                AABB bounds = {pos - Vec3{0.35f, 0, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
+
+                // Roll-tumble: the split-screen partner has the FULL DodgeState locally, so we read
+                // the authoritative rollTimer directly (no local clock needed like the client path).
+                // rollProg 0->1 drives the somersault; a rising edge fires the one-shot takeoff dust.
+                // Edge state lives in m_wasRollingLocal[] (indexed by LOCAL lane), NOT m_wasRolling[]
+                // (net slot) — a client-couch host-remote can share net slot 0 with local lane 0.
+                const DodgeState& ods = m_localPlayers[otherP].dodgeState;
+                bool rolling = ods.rolling;
+                f32  rollProg = rolling ? (1.0f - ods.rollTimer / 0.5f) : 0.0f;
+                if (rolling && !m_wasRollingLocal[otherP])
+                    ParticleSystem::spawnSmoke(m_particles, pos + Vec3{0.0f, 0.1f, 0.0f}, 8);
+                m_wasRollingLocal[otherP] = rolling;
+
+                Mat4 model = buildBodyModel(pos, yaw, scale, targetH, rollProg);
+                // A tumbling body lies ~horizontal at mid-roll, reaching ~1.8 m out in XZ and only
+                // ~0.6 m tall — the static upright box would early-cull it at a screen edge. Use a
+                // generous cube around the waist while rolling so the flip never pops out.
+                AABB bounds = rolling
+                    ? AABB{pos + Vec3{-1.0f, 0.0f, -1.0f}, pos + Vec3{1.0f, 1.9f, 1.0f}}
+                    : AABB{pos - Vec3{0.35f, 0.0f, 0.35f}, pos + Vec3{0.35f, 1.8f, 0.35f}};
 
                 const Material* skinMatPtr = MaterialSystem::get(classMat);
                 Texture skinTex = skinMatPtr ? skinMatPtr->texture : defaultTex;

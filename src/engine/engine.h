@@ -629,8 +629,22 @@ private:
         // each snapshot. Without this the renderer can't pick the per-class mesh for a remote
         // (the client's NetPlayer.playerClass for non-local slots is never set).
         u8             playerClass[MAX_PLAYERS];
+        u8             playerDodgeFlags[MAX_PLAYERS]; // bit0=rolling (SnapPlayer.dodgeFlags) — drives the remote roll-tumble render
     };
     RenderInterp m_renderInterp;
+
+    // Dodge-roll body-tumble render state (see engine_render_world.cpp). Local-only visual — the
+    // roll itself replicates via SnapPlayer.dodgeFlags. m_rollAnimTimer drives progress for CLIENT
+    // remotes (which receive only the rolling BIT, not the 0.5 s countdown); host/split-screen
+    // derive progress from the real rollTimer. m_wasRolling gates the one-shot takeoff dust puff.
+    f32  m_rollAnimTimer[MAX_PLAYERS] = {};   // 0..0.5 s, advances while a client-remote roll bit is held
+    bool m_wasRolling[MAX_PLAYERS]    = {};   // previous-frame rolling state, indexed by NET SLOT (network-remote loop)
+    // Separate rising-edge tracker for the split-screen partner, indexed by LOCAL lane (0/1). Kept
+    // distinct from m_wasRolling[] because the two draw paths index different spaces: the network
+    // loop uses NET SLOT, the split block uses local lane. In a client-couch (a couch pair joins a
+    // host) the host-remote lands on net slot 0 AND the local partner is local lane 0 — sharing one
+    // array would make them fight over the same cell and misfire the dust edge. Two arrays, no clash.
+    bool m_wasRollingLocal[MAX_LOCAL_PLAYERS] = {}; // previous-frame rolling state of the split-screen partner
 
     // Combat feedback
     CombatHit   m_lastCombatHit;
