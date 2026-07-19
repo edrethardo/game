@@ -21,16 +21,25 @@ TEST_CASE("Interp delay: steady arrivals keep the delay at the base") {
     CHECK(delay  == doctest::Approx(BASE));
 }
 
-TEST_CASE("Interp delay: heavy sustained jitter pins the delay at the MAX cap") {
+TEST_CASE("Interp delay: sustained huge gaps saturate at the outage clamp, not the MAX cap") {
+    // Pre-outage-guard this fed NOMINAL+0.10 s (≈7× nominal) per sample and pinned the delay at
+    // MAXD, treating a 100 ms-late feed as legitimate jitter. FIX 1's outage guard reclassifies
+    // any sample > 3× nominal as a LOSS regime — handled by the server coast + input-redundancy
+    // window, NOT by inflating the render buffer. So the smoothed jitter now SATURATES at the
+    // clamped deviation (3×−1×)·nominal = 2× nominal, and the delay settles at base + K·(2×nominal)
+    // ≈ 0.116 s — deliberately BELOW the 0.15 cap (an outage must never permanently tax render
+    // latency). NOTE: this means the raised long-haul cap is unreachable via the jitter path alone
+    // — see the report's concern on the cap becoming jitter-unreachable.
     f32 jitter = 0.0f;
     f32 delay  = BASE;
-    // Every snapshot arrives ~100 ms late → smoothed jitter ~0.10 s → target far above the cap.
     for (int i = 0; i < 500; i++) {
         jitter = updateArrivalJitter(jitter, NOMINAL + 0.10f, NOMINAL);
         delay  = computeInterpDelay(delay, jitter, BASE, MAXD);
     }
-    CHECK(delay <= MAXD);                                  // never exceeds the cap
-    CHECK(delay == doctest::Approx(MAXD).epsilon(0.01));   // pinned at the cap
+    CHECK(delay <= MAXD);                                            // still never exceeds the cap
+    CHECK(delay < MAXD);                                             // but no longer PINNED at it
+    CHECK(jitter == doctest::Approx(2.0f * NOMINAL).epsilon(0.01));  // saturated at the clamp
+    CHECK(delay == doctest::Approx(BASE + 2.5f * 2.0f * NOMINAL).epsilon(0.02));
 }
 
 TEST_CASE("Interp delay: grows faster than it shrinks (asymmetric, isolated)") {
@@ -63,4 +72,34 @@ TEST_CASE("Interp delay: never drops below the base floor") {
     f32 delay = BASE;
     for (int i = 0; i < 50; i++) delay = computeInterpDelay(delay, 0.0f, BASE, MAXD);
     CHECK(delay >= BASE);
+}
+
+TEST_CASE("InterpDelay: adaptive buffer can now widen past the old 150 ms cap") {
+    const f32 base = 0.033f;   // 33 ms
+    const f32 maxd = 0.250f;   // NEW long-haul cap (was 0.150)
+    // Sustained high arrival jitter (~90 ms smoothed) drives the target above the OLD cap.
+    f32 delay = base;
+    for (int i = 0; i < 400; i++)
+        delay = computeInterpDelay(delay, 0.090f, base, maxd);
+    CHECK(delay > 0.150f);                    // would have been pinned at 0.150 before
+    CHECK(delay <= 0.250f + 1e-4f);           // never exceeds the new cap
+    // And it still floors at base when the link is calm.
+    f32 calm = 0.100f;
+    for (int i = 0; i < 400; i++) calm = computeInterpDelay(calm, 0.0f, base, maxd);
+    CHECK(calm == doctest::Approx(base));
+}
+
+TEST_CASE("InterpDelay: an outage gap is not jitter — the EMA input is clamped") {
+    const f32 nominal = 1.0f / 60.0f;
+    // A 380 ms burst outage produces one 0.38 s inter-arrival gap. Unclamped, that single
+    // sample would jump the EMA by (0.38-0.0167)/16 ≈ 23 ms — inflating the interp delay for
+    // hundreds of ms AFTER the link already recovered. Clamped at 3x nominal, the worst any
+    // one gap can inject is (3x-1x)*nominal/16 ≈ 2 ms.
+    f32 j = 0.005f;                                       // calm-link smoothed jitter
+    f32 after = updateArrivalJitter(j, 0.380f, nominal);
+    CHECK(after - j <= (2.0f * nominal) / 16.0f + 1e-5f); // bounded by the clamp
+    // Ordinary jitter below the clamp is untouched: a 30 ms-late snapshot still registers fully.
+    f32 ordinary = updateArrivalJitter(j, nominal + 0.030f, nominal);
+    CHECK(ordinary > j);                                  // still grows
+    CHECK(ordinary - j == doctest::Approx((0.030f - j) / 16.0f).epsilon(0.05));
 }

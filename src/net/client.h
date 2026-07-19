@@ -14,17 +14,21 @@
 #include "world/level_grid.h"
 struct Player;  // fwd-decl: captureAndSendInput + reconcile read/write its transform
 
-// 32 deep × sizeof(WorldSnapshot)=8.2KB = ~264KB. Sized by its two consumers:
-//   * the ADAPTIVE interp delay may widen to 150 ms under jitter (lag_comp.h) — the old depth of
+// 64 deep × sizeof(WorldSnapshot)=8.2KB = ~528KB. Sized by its two consumers:
+//   * the ADAPTIVE interp delay may widen to 250 ms under jitter (lag_comp.h) — the old depth of
 //     4 held ~50 ms, so the bracketing pair had already been evicted exactly on the links that
 //     needed the cushion, and interpolation degenerated to raw snapshot stepping;
 //   * delta decoding needs the snapshot the server's delta NAMES as baseline — that's the one we
 //     acked ~RTT ago, i.e. ~10 pushes deep at 166 ms, and arrival batching slides it deeper. A
 //     16-deep ring measurably missed in bursts on a clean 100 ms link (ack stalls on a miss, so
-//     one miss repeats until the server falls back to a full). 32 matches the server's
-//     SNAP_HISTORY_DEPTH: both sides hold ~533 ms, so any baseline the server can name, the
-//     client can still decode. (The old "~66KB per snapshot" here was stale by 8x — 8,248 B.)
-static constexpr u32 SNAP_BUFFER_SIZE = 32;
+//     one miss repeats until the server falls back to a full). This ring MUST be >= the server's
+//     SNAP_HISTORY_DEPTH: a delta names its baseline tick, and a baseline this ring has already
+//     evicted is an undecodable delta (the client stalls on a full instead). 64 matches the server
+//     ring — both sides hold ~1.07 s, so any baseline the server can name, the client can still
+//     decode, which is what keeps deltas engaged across a 300+ ms DE<->NZ link (a measured soak saw
+//     baseline ages of 21-38 ticks — off the edge of the old 32-ring). (The old "~66KB per snapshot"
+//     here was stale by 8x — 8,248 B; the heap projectile array is a further ~24 KB/slot on PC.)
+static constexpr u32 SNAP_BUFFER_SIZE = 64;
 // 33 ms interpolation delay paired with 60 Hz snapshots gives ~2 snapshots of cushion —
 // snappy enough to feel responsive while still riding out a single dropped snapshot via
 // extrapolation (computeInterpPair). Was 50 ms when snapshots were 30 Hz; reduced alongside

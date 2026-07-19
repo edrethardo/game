@@ -12,6 +12,14 @@
 //
 // All times are doubles internally because we accumulate over a session.
 //
+// STATUS — DIAGNOSTIC-ONLY (as of the 2026-07 audit): the estimate feeds only the net-graph /
+// logs; `currentServerTickEst*` has NO functional caller (prediction/reconcile derive timing from
+// acked snapshot ticks, not from here). Corollary: `oneWayTripMs` is FROZEN after the 3-pong
+// bootstrap — there is no periodic re-ping, so on a link whose latency drifts the OWT goes stale
+// and never recovers. That is harmless WHILE this is diagnostic. Before wiring ClockSync into any
+// real logic (e.g. driving a predicted server-tick), FIRST add periodic pings to keep OWT live —
+// otherwise a stale OWT silently becomes a functional bug.
+//
 // Threading: single-threaded — the net layer drives this from the same callback
 // that delivers packets, on the main thread. No locking.
 struct ClockSync {

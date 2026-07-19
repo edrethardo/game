@@ -58,6 +58,7 @@ struct LaunchOptions {
     // loss-resilience test rig was unreachable at runtime and the net-graph read "loss 0" forever.
     u8  netLossPct   = 0;                      // --net-loss <0-90>: % of packets dropped, both directions
     u32 netLatencyMs = 0;                      // --net-latency <0-1000>: one-way ms added to every send
+    u32 netJitterMs  = 0;                      // --net-jitter <0-500>: per-packet [0,ms] jitter on top of latency
     bool botWalk     = false;                  // --bot-walk: deterministic movement bot (divergence probe)
 
     // Steam cold-start: `+connect_lobby <id>` (Steam appends this when a friend accepts an invite /

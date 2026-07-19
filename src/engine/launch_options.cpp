@@ -66,6 +66,7 @@ void logUsage() {
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
     LOG_INFO("  --net-loss <0-90>      drop this %% of packets both directions (netcode stress rig)");
     LOG_INFO("  --net-latency <ms>     add one-way fake latency to every send (0-1000)");
+    LOG_INFO("  --net-jitter <ms>      add per-packet [0,ms] jitter on top of latency (0-500)");
     LOG_INFO("  --bot-walk             deterministic movement bot (netcode divergence probe)");
     LOG_INFO("  --help                 this message");
     LOG_INFO("  e.g.  DungeonEngine --host --load 1   |   --join 1.2.3.4 --load 2");
@@ -167,6 +168,14 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
                 LOG_WARN("--net-latency expects 0-1000 ms (got '%s')", v); opt.valid = false; break;
             }
             opt.netLatencyMs = (u32)n;      // adversity harness — not a game-jump directive
+        } else if (ieq(a, "--net-jitter")) {
+            const char* v = nextVal(i); if (!v) break;
+            // 500 cap: jitter is spread on top of the latency floor; beyond this the link is
+            // effectively broken rather than long-haul, which the loss/timeout tests already cover.
+            long n; if (!parseInt(v, n) || n < 0 || n > 500) {
+                LOG_WARN("--net-jitter expects 0-500 ms (got '%s')", v); opt.valid = false; break;
+            }
+            opt.netJitterMs = (u32)n;       // adversity harness — not a game-jump directive
         } else if (ieq(a, "--bot-walk")) {
             opt.botWalk = true;             // adversity harness — not a game-jump directive
         } else {

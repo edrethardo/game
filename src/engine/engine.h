@@ -332,6 +332,7 @@ private:
     // m_divergenceCount accumulates every reconcile mismatch in clientNetPost and is
     // reported + reset by the 1 Hz [NET-GRAPH] log emitted in update().
     u32  m_netFakeLatencyMs  = 0;    // D5: ms of one-way simulated latency on all sends
+    u32  m_netFakeJitterMs   = 0;    // --net-jitter: pushed into Net:: each frame (serverNetPre/clientNetPre)
     u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
     u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
     // Shaky-client-FOV diagnostic (accumulated per-correction in clientNetPost, reported +
@@ -447,11 +448,19 @@ private:
     // D7.3v2 — Global ring of the last SNAP_HISTORY_DEPTH built snapshots (server role only).
     // Snapshot payloads are recipient-independent (world state + the full per-slot ack array),
     // so ONE history serves every client: when a client's input acks tick T, the server deltas
-    // against history[T] if it is still in range. 32 deep = 533 ms of ack latitude before a
-    // client falls back to full snapshots. Replaces the per-slot m_baselineSnap copies + the
+    // against history[T] if it is still in range. Replaces the per-slot m_baselineSnap copies + the
     // exact-match BaselineTracker, which required ack == last-sent-tick — permanently false at
     // any real RTT, so deltas never engaged.
-    static constexpr u32 SNAP_HISTORY_DEPTH = 32;
+    //
+    // Depth 64 = 1.07 s of ack latitude before a client falls back to full snapshots. At 300+ ms
+    // RTT the freshest client ack is ~18-28 ticks old (RTT + jitter + input cadence), and a measured
+    // DE<->NZ soak showed baseline ages of 21-38 ticks — off the edge of the old 32-ring, forcing
+    // 12-25% of snapshots into full-snapshot fallback (~2x bandwidth). 64 restores comfortable margin;
+    // cost is memory only (~33 KB per slot on PC — the ~8.2 KB stack struct plus its heap projectile
+    // array; ~20 KB on Switch with the smaller pool). MUST deepen in lockstep with the client's
+    // SNAP_BUFFER_SIZE: a baseline the client has already evicted is an undecodable delta, so the
+    // two rings staying equal is what lets any baseline the server names still be decoded.
+    static constexpr u32 SNAP_HISTORY_DEPTH = 64;
     WorldSnapshot m_snapHistory[SNAP_HISTORY_DEPTH];
     u32           m_snapHistoryHead = 0;   // next write slot
     u32           m_snapHistoryCount = 0;  // valid entries

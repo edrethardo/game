@@ -141,9 +141,13 @@ static void recordFire(u8 slot, u32 clientTick) {
 // firer's high-ping bullets just behave like the un-lag-compensated baseline.
 constexpr u32 LAG_COMP_HISTORY_TICKS = 64;
 // Max ticks the server will rewind for a fire — decoupled from the buffer depth above (was
-// HISTORY-1). Held at 15 (~250 ms) to preserve the prior rewind feel exactly; the design doc's
-// LAG_COMP_MAX_MS = 200 (~12 ticks) is the value to use if we ever want to tighten fairness.
-constexpr u32 LAG_COMP_MAX_REWIND_TICKS = 15;
+// HISTORY-1). 24 = RTT/2 at 300 ms (9 ticks) + the MAX stamped interp delay a client can report
+// (250 ms = 15 ticks) — the full honest look-back a long-haul (DE<->NZ, ~300 ms RTT) client needs,
+// and still far short of the 64-tick ring so a lookup never falls off the end. The old 15 was
+// sized for the 150 ms interp era: with today's adaptive jitter buffer widening to 250 ms it
+// silently under-compensated a long-haul client's fire by up to 9 ticks (~150 ms), so shots at a
+// moving enemy landed behind it exactly when jitter was worst. See computeLagCompTicks.
+constexpr u32 LAG_COMP_MAX_REWIND_TICKS = 24;
 struct EntPoseSnap {
     Vec3 position;
     f32  yaw;
@@ -156,6 +160,46 @@ static u8          s_entHistoryHead[MAX_ENTITIES];   // next write index per ent
 // restore the live entity pool to present time after the rewound hit query runs.
 static EntPoseSnap s_scratchPose[MAX_ENTITIES];
 static bool        s_scratchValid[MAX_ENTITIES];
+
+// Player pose history — the PvP twin of s_entHistory. Entities have been rewound for client fire
+// since the M-era lag comp, but PLAYER victims were always tested at PRESENT tick, so at long-haul
+// RTT a strafing target (10 m/s) sat 3-4 m from where the firer's crosshair was and arena PvP
+// shots at distance simply could not land. This ring lets beginLagComp rewind the registered PvP
+// view positions to the same past tick the entity swap uses. Position-only, on purpose: HP / block
+// / dodge / death stay present-time (the entity corpse rule — you cannot retro-kill someone who
+// already died, and a block raised NOW must still stop a rewound shot). Pushed on the SAME
+// snapshot-tick cadence as the entity ring (pushEntityHistory), cleared alongside it
+// (resetEntityHistory). tickStamp 0 = unused slot, exactly like EntPoseSnap.
+static Vec3 s_playerPoseHistory[MAX_PLAYERS][LAG_COMP_HISTORY_TICKS];
+static u32  s_playerPoseTick   [MAX_PLAYERS][LAG_COMP_HISTORY_TICKS];   // serverTick stamp; 0 = unused
+static u8   s_playerPoseHead   [MAX_PLAYERS];                            // next write index per slot
+// Scratch present-time pose during a beginLagComp / endLagComp window. We store the VIEW POINTER we
+// rewound (not just an index) because a slot's registry view can be either a live lane
+// (&m_localPlayers[s]) or a seeded remote snapshot (&m_pvpViews[s]) — the pointer is the only stable
+// handle back to the exact object to restore. Only position is saved/restored; nothing else is
+// touched, so a hit's damage/velocity/CC writes during the window survive endLagComp untouched.
+static Player* s_playerScratchView[MAX_PLAYERS];
+static Vec3    s_playerScratchPos [MAX_PLAYERS];
+static bool    s_playerScratchValid[MAX_PLAYERS];
+
+// Nearest-tick lookup into a player's pose ring — the s_playerPoseHistory twin of findHistoryAt.
+// Writes outPos and returns true on success; returns false when the ring holds no usable sample for
+// this slot yet (first ticks after resetEntityHistory / a join), so the caller keeps the present
+// pose rather than rewinding to garbage.
+static bool findPlayerPoseAt(u32 slot, u32 targetTick, Vec3& outPos) {
+    if (slot >= MAX_PLAYERS) return false;
+    const Vec3* best = nullptr;
+    u32 bestDelta = UINT32_MAX;
+    for (u32 k = 0; k < LAG_COMP_HISTORY_TICKS; k++) {
+        const u32 stamp = s_playerPoseTick[slot][k];
+        if (stamp == 0) continue;   // unused slot
+        const u32 delta = (stamp >= targetTick) ? (stamp - targetTick) : (targetTick - stamp);
+        if (delta < bestDelta) { bestDelta = delta; best = &s_playerPoseHistory[slot][k]; }
+    }
+    if (!best) return false;
+    outPos = *best;
+    return true;
+}
 
 static const EntPoseSnap* findHistoryAt(u32 entIdx, u32 targetTick) {
     if (entIdx >= MAX_ENTITIES) return nullptr;
@@ -913,8 +957,9 @@ void Engine::handleWeaponFire(f32 dt) {
 // CL_FIRE_WEAPON server-side intake. Validates the request (cooldown, origin
 // sanity) and queues a per-slot pending fire that handleWeaponFireForPlayer
 // will consume on the next tick. The yaw/pitch are stored verbatim; the
-// origin is clamped to within 1 m of np.eyePos() so a slightly mis-synced
-// client position doesn't fire from an unreachable point.
+// origin is clamped to within 2 m of np.eyePos() so a slightly mis-synced
+// client position doesn't fire from an unreachable point (2 m tolerates the
+// RTT/2-stale claim of a 300 ms long-haul client — see the clamp below).
 // ---------------------------------------------------------------------------
 void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
                                      Vec3 claimedOrigin, f32 claimedYaw, f32 claimedPitch) {
@@ -927,14 +972,18 @@ void Engine::handleFireWeaponRequest(u8 playerSlot, u32 clientTick,
     recordFire(playerSlot, clientTick);
     NetPlayer& np = m_players[playerSlot];
     if (!np.active || np.isDead) return;            // dead/inactive players don't fire
-    // Loose anti-cheat: clamp claimed origin to within 1 m of the server's authoritative
-    // eye position. A normal client running at 60 Hz will be within a few cm; clamping
-    // (rather than rejecting) keeps the shot landing even if a peer is slightly out of
-    // sync, which is preferable to a missed shot in co-op.
+    // Loose anti-cheat: clamp claimed origin to within 2 m of the server's authoritative
+    // eye position. The claim is RTT/2-STALE by nature — it's where the client's eye was when it
+    // clicked, which the server only sees RTT/2 later — so at 300 ms RTT an effective-10 m/s
+    // runner is legitimately ~1.5 m displaced from np.eyePos() by the time this arrives. The old
+    // 1 m radius rejected those honest long-haul shots and snapped the ray up to 1.5 m sideways
+    // off the player's real fire line. 2 m covers a 300 ms round trip with margin while still
+    // bounding a spoofed origin to roughly one body-length. Clamp (not reject) so the shot still
+    // lands even for a slightly-desynced peer, which is preferable to a dropped shot in co-op.
     Vec3 svOrigin = np.eyePos();
     Vec3 delta    = claimedOrigin - svOrigin;
     f32  distSq   = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-    if (distSq > 1.0f) claimedOrigin = svOrigin;    // > 1 m → snap to server origin
+    if (distSq > 4.0f) claimedOrigin = svOrigin;    // > 2 m → snap to server origin
     PendingFire& pending = s_pendingFires[playerSlot];
     pending.valid      = true;
     pending.clientTick = clientTick;
@@ -1003,8 +1052,12 @@ void Engine::resetAllFireDedup() {
 // Called from serverNetPost AFTER the snapshot is built, so the entry for serverTick T
 // represents "what the snapshot for tick T contains" — which is what the client renders
 // from. Cheap: a couple of writes per active entity, no allocations.
+//
+// Also captures every player's pose into the PvP pose ring (s_playerPoseHistory) in the SAME pass,
+// so the two lag-comp rings can never drift in cadence: one call site, one tick stamp, both rings.
 void Engine::pushEntityHistory() {
     if (m_netRole != NetRole::SERVER) return;
+    const u32 stamp = (m_serverTick == 0) ? 1u : m_serverTick;   // 0 is the "unused" sentinel
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         Entity& e = m_entities.entities[i];
         if (!(e.flags & ENT_ACTIVE)) continue;
@@ -1012,8 +1065,22 @@ void Engine::pushEntityHistory() {
         s_entHistory[i][h].position    = e.position;
         s_entHistory[i][h].yaw         = e.yaw;
         s_entHistory[i][h].halfExtents = e.halfExtents;
-        s_entHistory[i][h].tickStamp   = (m_serverTick == 0) ? 1u : m_serverTick;
+        s_entHistory[i][h].tickStamp   = stamp;
         s_entHistoryHead[i] = (h + 1) % LAG_COMP_HISTORY_TICKS;
+    }
+    // Player pose ring: host-local lanes read the live m_localPlayers[] pool, remotes the
+    // authoritative m_players[] NetPlayers — the exact objects the arena registry points its views
+    // at (arenaBeginPvpWindow). An empty slot leaves its ring frozen (stale entries fall off the
+    // 64-tick window on their own). Only position is stored; the PvP hit queries read only position.
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        Vec3 pos;
+        if (pi < m_splitPlayerCount)      pos = m_localPlayers[pi].position;   // host-local lane
+        else if (m_players[pi].active)    pos = m_players[pi].position;        // remote NetPlayer
+        else continue;                                                         // slot empty
+        u8 h = s_playerPoseHead[pi];
+        s_playerPoseHistory[pi][h] = pos;
+        s_playerPoseTick[pi][h]    = stamp;
+        s_playerPoseHead[pi]       = (h + 1) % LAG_COMP_HISTORY_TICKS;
     }
 }
 
@@ -1021,11 +1088,24 @@ void Engine::pushEntityHistory() {
 // startGame so a new floor doesn't see entries from the prior floor's entities at the
 // same pool indices (which would be in geometrically unrelated rooms). Also wipes
 // scratch state defensively.
+//
+// Wipes BOTH lag-comp rings — entity and player pose — for the same reason (a slot reused across
+// floors would otherwise rewind to a pose in an unrelated room). Kept in this one function so the
+// two rings are always cleared together; the player ring is small (4 slots) so the extra pass is
+// negligible.
 void Engine::resetEntityHistory() {
     for (u32 i = 0; i < MAX_ENTITIES; i++) {
         for (u32 k = 0; k < LAG_COMP_HISTORY_TICKS; k++) s_entHistory[i][k] = EntPoseSnap{};
         s_entHistoryHead[i] = 0;
         s_scratchValid[i] = false;
+    }
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
+        for (u32 k = 0; k < LAG_COMP_HISTORY_TICKS; k++) {
+            s_playerPoseHistory[pi][k] = Vec3{};
+            s_playerPoseTick[pi][k]    = 0;
+        }
+        s_playerPoseHead[pi]    = 0;
+        s_playerScratchValid[pi] = false;
     }
 }
 
@@ -1068,6 +1148,13 @@ u32 Engine::computeLagCompTicks(u8 slot) const {
 // intentionally do NOT rewind — corpses can't be hit retroactively, and the server
 // is still authoritative for damage). Call endLagComp before any state observable
 // outside the fire handler (snapshot build, AI tick, etc.).
+//
+// ALSO rewinds the registered arena PvP view positions (the s_pvpTargets registry) to the same past
+// tick, so a remote's PvP weapon query — Combat::pvpCone/pvpRay reads t.view->position — tests each
+// rival where the firing client actually saw them, not where they've since strafed to. Position
+// ONLY (the corpse rule again: health/block/dodge/death stay present-time; a hit's damage lands via
+// the atomic pvpApplyHit, which is unaffected by a rewound view position). Registry EMPTY in all
+// PvE / non-arena play => the player loop iterates zero times => zero cost off the arena.
 void Engine::beginLagComp(u32 ticksAgo) {
     if (m_netRole != NetRole::SERVER) return;
     if (ticksAgo == 0) return;               // no rewind needed
@@ -1087,6 +1174,30 @@ void Engine::beginLagComp(u32 ticksAgo) {
         e.yaw         = hist->yaw;
         e.halfExtents = hist->halfExtents;
     }
+
+    // --- PvP view rewind (the player twin of the entity swap above) --------------------------
+    // INVARIANT this rewind's correctness rests on: each PvP weapon query runs at most ONCE per
+    // fire and lands at most ONE hit per slot. A future pierce / multishot that re-queried an
+    // already-hit slot would read that slot's PRESENT (reseeded) pose — pvpApplyHit's
+    // seedRemoteView resets m_pvpViews[slot] back to present before landPvpHit/writeback — so the
+    // second query would test un-rewound geometry and silently defeat lag comp for it. Extend the
+    // rewind to bracket the whole multi-hit query (rewind once, resolve all hits, restore) if that
+    // ever lands. That same seedRemoteView-to-present is also what CONFINES the rewound pose to the
+    // query READ: the hit's damage/velocity/CC land on the present-time view, never propagating the
+    // past position into m_players[].
+    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) s_playerScratchValid[pi] = false;
+    u32 pvpCount = 0;
+    const Combat::PvpTarget* pvpTs = Combat::pvpTargets(pvpCount);
+    for (u32 i = 0; i < pvpCount; i++) {
+        const Combat::PvpTarget& t = pvpTs[i];
+        if (!t.view || t.slot >= MAX_PLAYERS) continue;
+        Vec3 histPos;
+        if (!findPlayerPoseAt(t.slot, targetTick, histPos)) continue;   // no sample -> keep present pose
+        s_playerScratchView[t.slot]  = t.view;              // stable handle back to this exact object
+        s_playerScratchPos[t.slot]   = t.view->position;    // save present pose for endLagComp
+        s_playerScratchValid[t.slot] = true;
+        t.view->position             = histPos;             // swap in the rewound pose
+    }
 }
 
 void Engine::endLagComp() {
@@ -1098,6 +1209,15 @@ void Engine::endLagComp() {
         e.yaw         = s_scratchPose[i].yaw;
         e.halfExtents = s_scratchPose[i].halfExtents;
         s_scratchValid[i] = false;
+    }
+    // Restore the rewound PvP view positions. Iterating all MAX_PLAYERS slots (not the current
+    // registry) via the stored view pointer guarantees a view swapped in this window is put back
+    // even if the registry changed underneath us; only slots we actually rewound carry a valid
+    // scratch. Position only — the hit's health/velocity/CC writes during the window are left intact.
+    for (u32 s = 0; s < MAX_PLAYERS; s++) {
+        if (!s_playerScratchValid[s]) continue;
+        if (s_playerScratchView[s]) s_playerScratchView[s]->position = s_playerScratchPos[s];
+        s_playerScratchValid[s] = false;
     }
 }
 
@@ -1113,7 +1233,7 @@ void Engine::endLagComp() {
 // — i.e. derived from the delay the client REPORTED for this very input, not from a server-side
 // guess. The old code rewound a hardcoded 2 ticks, which was only ever right for a client whose
 // adaptive jitter buffer happened to sit at its 33 ms floor; the moment jitter widened it (up to
-// 150 ms = 9 ticks) the server was colliding against a world up to 7 ticks newer than the one the
+// 250 ms = 15 ticks) the server was colliding against a world up to 13 ticks newer than the one the
 // client saw. See net/lag_comp.h.
 void Engine::buildLagCompPlayerObstacles(f32 targetSnapTickF,
                                          CollisionObstacle* out,
@@ -1372,7 +1492,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     }
 
     // Fire from the CLIENT'S claimed origin + aim (queued via CL_FIRE_WEAPON). The origin
-    // is already clamped to within 1 m of np.position by handleFireWeaponRequest, so it's
+    // is already clamped to within 2 m of np.position by handleFireWeaponRequest, so it's
     // safe to trust. The aim is whatever the player's crosshair was pointing at when they
     // clicked — eliminates the prior np.yaw staleness under input queue lag.
     Vec3 eyePos = claimedOrigin;

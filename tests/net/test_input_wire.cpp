@@ -153,3 +153,18 @@ TEST_CASE("INPUT_BLOCK: occupies the old reserved lock bit and survives the wire
     CHECK((parsed[0].moveFlags & INPUT_BLOCK) != 0);
     CHECK((parsed[0].moveFlags & INPUT_FORWARD) != 0);
 }
+
+TEST_CASE("InputWire: a 15-input window (250 ms — the full coast) roundtrips") {
+    // The redundancy window must cover the server's 250 ms starvation coast, or ticks 9..15 of a
+    // burst outage are permanently lost and coast-approximated (rubber-band for the other player).
+    NetInput in[INPUT_WINDOW_SIZE] = {};
+    for (u32 i = 0; i < 15; i++) { in[i].clientTick = 100 + i; in[i].moveFlags = (u8)i; }
+    u8 buf[512];
+    u32 written = serializeInputWindow(buf, sizeof(buf), in, 15, 0);
+    CHECK(written == 4 + 15 * 15);                         // header + 15 x 15 B
+    NetInput out[INPUT_WINDOW_SIZE] = {};
+    u32 got = deserializeInputWindow(buf, written, out, INPUT_WINDOW_SIZE);
+    CHECK(got == 15);
+    CHECK(out[14].clientTick == 114);
+    CHECK(out[14].moveFlags == 14);
+}

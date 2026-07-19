@@ -86,7 +86,10 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // ARENA_KILL/ARENA_SCORES/ARENA_OVER. Additive on the wire, but a v19 client joining an arena
 // would take PvP damage with no scoreboard, no respawn countdown and no match end — so a
 // clean SV_JOIN_REJECT beats a silently broken deathmatch.
-static constexpr u32 PROTOCOL_VERSION  = 21; // v21: SnapPlayer flags bit2 = stunned + stunTimerQ
+// v22: INPUT_WINDOW_SIZE 8->15 (input redundancy spans the full 250 ms coast; widens the valid
+// windowCount range, so v21 peers would silently reject v22 input packets — hence the bump).
+static constexpr u32 PROTOCOL_VERSION  = 22; // v22: input redundancy window 8->15 (250 ms coast);
+                                             // v21: SnapPlayer flags bit2 = stunned + stunTimerQ
                                              // (was reserved0) — player-facing CC (Arena PvP)
                                              // v13: player record single shrineTimerQ pair (was
                                              // doubled), delta entity mask 64->128 bits
@@ -400,6 +403,12 @@ namespace Net {
     // Pump network events. Call once per frame before game update.
     void poll();
 
+    // Flush queued outbound packets to the socket NOW. enet_peer_send only queues; without an
+    // explicit flush the packets ride until the NEXT frame's enet_host_service — ~16.7 ms of
+    // hidden latency per direction at 60 fps (~33 ms round-trip on top of the real link). Called
+    // once per frame after the update loop, so this tick's snapshot/inputs leave this tick.
+    void flush();
+
     // Send to a specific player slot (server only)
     void sendReliable(u8 playerSlot, const u8* data, u32 size);
     void sendUnreliable(u8 playerSlot, const u8* data, u32 size);
@@ -565,6 +574,11 @@ namespace Net {
     // layer sees the current value without holding a pointer to Engine.
     void setFakeLatencyMs(u32 ms);
     u32  getFakeLatencyMs();
+
+    // Long-haul rig: fake jitter cvar. Per-packet random [0, ms] delay added on top of the fake
+    // latency (net.cpp), so the client's adaptive interp buffer is actually exercised. Pushed each
+    // frame from serverNetPre/clientNetPre like the latency/loss cvars.
+    void setFakeJitterMs(u32 ms);
 
     // D5: fake-latency delay queue for manual smoke testing.
     // When Engine::m_netFakeLatencyMs > 0 (read via s_engineForNet), every outgoing

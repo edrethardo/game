@@ -1160,6 +1160,10 @@ void Engine::run() {
             }
         }
 
+        // Push this tick's queued sends (snapshot/inputs) onto the wire NOW instead of next
+        // frame's poll — recovers ~16.7 ms per direction of self-inflicted latency (audit C-Q5).
+        if (m_netRole != NetRole::NONE) Net::flush();
+
         // Auto-screenshot (CLI --screenshot-interval): once IN_GAME, flag a capture every
         // m_shotInterval seconds. Set before render() so it is serviced (and saved) this frame.
         if (m_shotInterval > 0.0 && m_gameState == GameState::IN_GAME) {
