@@ -205,6 +205,25 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
         if (hit >= 0) return static_cast<s32>(hit + scrollOff);
         return -1;
     }
+    // --- Options sub-screens. All left-of-centre row lists; a wide (sw*0.6) centred hit box covers
+    // the label→hint span. Layouts MUST mirror engine_render_menus.cpp's matching subState render. ---
+    case 15: // Audio: 4 rows, top-down from sh*0.62, 40px pitch.
+        return menuMouseHit(sw, sh, sh * 0.62f, 40.0f * uiScale, 4,
+                            sw * 0.6f, 24.0f * uiScale, true);
+    case 18: // Display: 3–4 rows (itemCount = D_TOTAL), same layout as Audio.
+        return menuMouseHit(sw, sh, sh * 0.62f, 40.0f * uiScale, itemCount,
+                            sw * 0.6f, 24.0f * uiScale, true);
+    case 16:
+    case 17: { // Rebind list (scrolling), listTop sh*0.78, 22px pitch; itemCount = subSelection (scroll calc).
+        const u32 extra = (subState == 16) ? 1u : 5u;          // K&M: +1 slider row; Controller: +5
+        const u32 total = Input::REBIND_ROWS + extra + 1;      // + the trailing Reset row
+        const f32 listTop = sh * 0.78f, lineH = 22.0f * uiScale;
+        const u32 visibleRows = static_cast<u32>((listTop - sh * 0.1f) / lineH);
+        const u32 scrollOff = (itemCount >= visibleRows) ? (itemCount - visibleRows + 1u) : 0u;
+        const u32 shown = (total - scrollOff < visibleRows) ? (total - scrollOff) : visibleRows;
+        s32 hit = menuMouseHit(sw, sh, listTop, lineH, shown, sw * 0.6f, lineH - 4.0f * uiScale, true);
+        return (hit >= 0) ? static_cast<s32>(hit + scrollOff) : -1;
+    }
     default:
         return -1;
     }
@@ -228,7 +247,9 @@ static void persistOptions() {
 // submenu); false binds only controller buttons/axes (Controller submenu). B / ESC cancels first
 // so the cancel input is never itself captured. Clears m_menu.bindCapture once bound or cancelled.
 void Engine::captureRebind(bool keyboardMode) {
-    GameAction act = static_cast<GameAction>(m_menu.subSelection);
+    // Map the UI row to its action via the shared helper — the rebind list is NOT a plain enum range
+    // (DODGE rides the explicit tail), so a raw subSelection cast would bind the wrong action for it.
+    GameAction act = Input::rebindActionAt(m_menu.subSelection);
     if (Input::isActionPressed(GameAction::MENU_BACK) || Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
         m_menu.bindCapture = false;
         return;
@@ -345,6 +366,10 @@ void Engine::updateMenu(f32 dt) {
         mouseItemCount = m_steamBrowserSel;   // browser scrolls off its own cursor (same convention)
     else if (m_menu.subState == 10)
         mouseItemCount = static_cast<u8>(hostModeOptionCount()); // 2 without Steam, 3 with
+    else if (m_menu.subState == 16 || m_menu.subState == 17)
+        mouseItemCount = m_menu.subSelection;                    // rebind list scrolls off its own cursor
+    else if (m_menu.subState == 18)
+        mouseItemCount = (Window::getDisplayCount() > 1) ? 4u : 3u;  // Display D_TOTAL (monitor row is multi-display only)
 
     // Only hit-test when the pointer is active — otherwise a resting cursor must not hover/click.
     s32 mouseHit = mouseActive ? menuMouseForState(sw, sh, uiScale, m_menu.subState, mouseItemCount) : -1;
@@ -658,7 +683,8 @@ void Engine::updateMenu(f32 dt) {
                 m_menu.overwriteSlot = static_cast<u8>(m_menu.subSelection);
                 m_menu.overwriteLane = 0; // Player 1's slot
                 m_menu.subState = 8;
-                m_menu.subSelection = 0; // default to "Yes"
+                m_menu.subSelection = 1; // default to the SAFE "No" — overwriting erases a save, so a
+                                         // reflexive second confirm shouldn't destroy it
                 return;
             }
 
@@ -888,6 +914,7 @@ void Engine::updateMenu(f32 dt) {
         // --- mouse: hover selects a row; left-click on a row's right/left half steps its value ---
         // Gated on the last-input-device flag so a resting pointer can't hijack the row/value while
         // the player uses keyboard/controller (mouseActive comes from updateMenuMouseActive above).
+        bool mouseDescend = false, mouseBack = false;   // set by the Descend/Back button hit-tests below
         if (mouseActive) {
             s32 mx, my; Input::getMousePosition(mx, my);
             f32 uiScale = static_cast<f32>(Window::getHeight()) / 720.0f;
@@ -910,10 +937,18 @@ void Engine::updateMenu(f32 dt) {
                     }
                 }
             }
+            // Descend / Back buttons — positions mirror the render (engine_render_menus.cpp).
+            if (Input::isMouseButtonPressed(MOUSE_LEFT)) {
+                const f32 btnH = 32.0f * uiScale;
+                if (static_cast<f32>(mx) >= cxL && static_cast<f32>(mx) <= cxR) {
+                    if (hudY >= sh * 0.34f && hudY <= sh * 0.34f + btnH) mouseDescend = true;
+                    if (hudY >= sh * 0.26f && hudY <= sh * 0.26f + btnH) mouseBack    = true;
+                }
+            }
         }
 
         // --- confirm (Descend): apply the pick and start ---
-        if (menuConfirmPressed()) {
+        if (menuConfirmPressed() || mouseDescend) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_difficulty         = m_menu.freePlayDifficulty;      // override the loaded save's difficulty
             m_level.currentFloor = m_menu.freePlayFloor;           // startGame(CONTINUE) generates this floor
@@ -931,7 +966,7 @@ void Engine::updateMenu(f32 dt) {
         }
 
         // --- back: to the town (portal entry) or the slot list (legacy menu entry) ---
-        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+        if (Input::isActionPressed(GameAction::MENU_BACK) || mouseBack) {
             AudioSystem::play(SfxId::UI_BACK);
             if (m_menu.freePlayFromTown) {
                 m_menu.freePlayFromTown = false;
@@ -1087,7 +1122,7 @@ void Engine::updateMenu(f32 dt) {
                 m_menu.overwriteSlot = sel;
                 m_menu.overwriteLane = 1;
                 m_menu.subState = 8;
-                m_menu.subSelection = 0;
+                m_menu.subSelection = 1;   // default to the SAFE "No" (matches the P1 path)
             } else {
                 AudioSystem::play(SfxId::UI_CONFIRM);
                 m_playerSaveSlot[1] = slot;
@@ -1251,10 +1286,18 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 3; m_menu.subSelection = 0;
             return;
         }
-        // Left/Right steps the selected volume by ±5%.
+        // Left/Right (or a mouse click on a slider row's left/right half) steps the volume by ±5%.
         f32 dir = 0.0f;
         if (menuLeftPressed())  dir = -1.0f;
         if (menuRightPressed()) dir = +1.0f;
+        bool confirm = menuConfirmPressed();
+        // Mouse: the generic hover-apply above already moved subSelection onto the hovered row, so a
+        // click adjusts the slider (left half = down, right = up) or, on Reset, fires it.
+        if (mouseConfirm) {
+            if (m_menu.subSelection == A_RESET) confirm = true;
+            else { s32 mmx, mmy; Input::getMousePosition(mmx, mmy);
+                   dir = (static_cast<f32>(mmx) > static_cast<f32>(sw) * 0.5f) ? 1.0f : -1.0f; }
+        }
         if (dir != 0.0f) {
             if (m_menu.subSelection == A_MASTER) {
                 AudioSystem::setMasterVolume(AudioSettings::stepVol(AudioSystem::getMasterVolume(), dir));
@@ -1266,7 +1309,7 @@ void Engine::updateMenu(f32 dt) {
                 AudioSystem::setMusicVolume(AudioSettings::stepVol(AudioSystem::getMusicVolume(), dir)); // applies live
             }
         }
-        if (menuConfirmPressed()) {
+        if (confirm) {
             if (m_menu.subSelection == A_RESET) {
                 AudioSystem::setMasterVolume(AudioSettings::DEFAULT_MASTER);
                 AudioSystem::setSfxVolume(AudioSettings::DEFAULT_SFX);
@@ -1280,7 +1323,7 @@ void Engine::updateMenu(f32 dt) {
     // Options — Keyboard & Mouse submenu (subState 16): rebind the 19 actions (keyboard only) +
     // a mouse-sensitivity slider + reset.
     if (m_menu.subState == 16) {
-        static constexpr u32 REBIND_COUNT  = static_cast<u32>(GameAction::INVENTORY) + 1;
+        static constexpr u32 REBIND_COUNT  = Input::REBIND_ROWS;   // 0..INVENTORY + tail (DODGE)
         static constexpr u32 KM_MOUSE_SENS = REBIND_COUNT;      // mouse sensitivity slider row
         static constexpr u32 KM_RESET      = REBIND_COUNT + 1;  // reset row after the slider
         static constexpr u32 KM_TOTAL      = REBIND_COUNT + 2;
@@ -1300,18 +1343,28 @@ void Engine::updateMenu(f32 dt) {
         // 1.0 = the classic feel). Mirrors the controller submenu's slider handling. The step
         // was 0.25 — far too coarse for aim feel, where the value you want usually sits
         // BETWEEN two quarter stops; hold-to-repeat (isMenuNavPressed) keeps big moves quick.
+        // Mouse: hover already moved subSelection onto the hovered row (KM_TOTAL bounds it). A click
+        // rebinds a rebind row (→ capture), adjusts the mouse-sensitivity slider by its half, or fires
+        // Reset. Ignored during capture (the bindCapture early-return above owns those frames).
+        bool confirm = menuConfirmPressed();
+        f32 sliderDir = 0.0f;
         if (m_menu.subSelection == KM_MOUSE_SENS) {
-            f32 dir = 0.0f;
-            if (menuLeftPressed())  dir = -1.0f;
-            if (menuRightPressed()) dir = +1.0f;
-            if (dir != 0.0f) {
-                f32 v = Input::getMouseSensitivity() + dir * 0.05f;
-                if (v < 0.25f) v = 0.25f;
-                if (v > 4.0f)  v = 4.0f;
-                Input::setMouseSensitivity(v);
-            }
+            if (menuLeftPressed())  sliderDir = -1.0f;
+            if (menuRightPressed()) sliderDir = +1.0f;
         }
-        if (menuConfirmPressed()) {
+        if (mouseConfirm) {
+            if (m_menu.subSelection == KM_MOUSE_SENS) {
+                s32 mmx, mmy; Input::getMousePosition(mmx, mmy);
+                sliderDir = (static_cast<f32>(mmx) > static_cast<f32>(sw) * 0.5f) ? 1.0f : -1.0f;
+            } else confirm = true;   // rebind row or reset
+        }
+        if (m_menu.subSelection == KM_MOUSE_SENS && sliderDir != 0.0f) {
+            f32 v = Input::getMouseSensitivity() + sliderDir * 0.05f;
+            if (v < 0.25f) v = 0.25f;
+            if (v > 4.0f)  v = 4.0f;
+            Input::setMouseSensitivity(v);
+        }
+        if (confirm) {
             if (m_menu.subSelection < REBIND_COUNT) {
                 m_menu.bindCapture = true;
                 m_menu.bindKeyboard = true;    // this submenu binds keys
@@ -1327,7 +1380,7 @@ void Engine::updateMenu(f32 dt) {
     // Options — Controller submenu (subState 17): rebind the 19 actions (controller only) +
     // stick/gyro sensitivity + invert-Y + reset.
     if (m_menu.subState == 17) {
-        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
+        static constexpr u32 REBIND_COUNT = Input::REBIND_ROWS;    // 0..INVENTORY + tail (DODGE)
         static constexpr u32 C_STICK_SENS = REBIND_COUNT;
         static constexpr u32 C_GYRO_SENS  = REBIND_COUNT + 1;
         static constexpr u32 C_STICK_INV  = REBIND_COUNT + 2;
@@ -1351,6 +1404,15 @@ void Engine::updateMenu(f32 dt) {
         f32 dir = 0.0f;
         if (menuLeftPressed())  dir = -1.0f;
         if (menuRightPressed()) dir = +1.0f;
+        // Mouse: hover already moved subSelection onto the hovered row (C_TOTAL bounds it). A click
+        // rebinds a rebind row (→ capture), adjusts a sensitivity slider by its half, or toggles/resets.
+        bool confirm = menuConfirmPressed();
+        if (mouseConfirm) {
+            if (m_menu.subSelection == C_STICK_SENS || m_menu.subSelection == C_GYRO_SENS) {
+                s32 mmx, mmy; Input::getMousePosition(mmx, mmy);
+                dir = (static_cast<f32>(mmx) > static_cast<f32>(sw) * 0.5f) ? 1.0f : -1.0f;
+            } else confirm = true;   // rebind row, toggle, or reset
+        }
         if (dir != 0.0f) {
             if (m_menu.subSelection == C_STICK_SENS) {
                 // Step 0.05 (was 0.25) — same fine-tuning rationale as the mouse slider.
@@ -1365,7 +1427,7 @@ void Engine::updateMenu(f32 dt) {
                 Input::setGyroSensitivity(v);
             }
         }
-        if (menuConfirmPressed()) {
+        if (confirm) {
             if (m_menu.subSelection < REBIND_COUNT) {
                 m_menu.bindCapture = true;
                 m_menu.bindKeyboard = false;   // this submenu binds controller buttons
@@ -1409,19 +1471,26 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 3; m_menu.subSelection = 0;
             return;
         }
-        // Left/Right cycles the monitor selector (wraps around all detected displays).
-        if (multiDisplay && m_menu.subSelection == D_DISPLAY) {
-            f32 dir = 0.0f;
-            if (menuLeftPressed())  dir = -1.0f;
-            if (menuRightPressed()) dir = +1.0f;
-            if (dir != 0.0f) {
-                int n = Window::getDisplayCount();
-                int next = ((Window::getDisplayIndex() + (dir < 0 ? -1 : 1)) % n + n) % n;
-                Window::setDisplay(next);
-                AudioSystem::play(SfxId::MENU_HOVER);
-            }
+        // Mouse: hover already moved subSelection onto the hovered row; a click activates it
+        // (Enter-equivalent), or on the monitor row cycles it by the clicked half.
+        bool confirm = menuConfirmPressed();
+        f32 dir = 0.0f;
+        if (menuLeftPressed())  dir = -1.0f;
+        if (menuRightPressed()) dir = +1.0f;
+        if (mouseConfirm) {
+            if (multiDisplay && m_menu.subSelection == D_DISPLAY) {
+                s32 mmx, mmy; Input::getMousePosition(mmx, mmy);
+                dir = (static_cast<f32>(mmx) > static_cast<f32>(sw) * 0.5f) ? 1.0f : -1.0f;
+            } else confirm = true;
         }
-        if (menuConfirmPressed()) {
+        // Left/Right cycles the monitor selector (wraps around all detected displays).
+        if (multiDisplay && m_menu.subSelection == D_DISPLAY && dir != 0.0f) {
+            int n = Window::getDisplayCount();
+            int next = ((Window::getDisplayIndex() + (dir < 0 ? -1 : 1)) % n + n) % n;
+            Window::setDisplay(next);
+            AudioSystem::play(SfxId::MENU_HOVER);
+        }
+        if (confirm) {
             if (m_menu.subSelection == D_FULLSCREEN) {
                 // Cycle Windowed → Borderless → Fullscreen live (applies immediately; persisted
                 // on back-out). Borderless = desktop fullscreen (instant alt-tab); Fullscreen =

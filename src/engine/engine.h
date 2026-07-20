@@ -264,7 +264,7 @@ private:
     SkillId     m_ringPassive = SkillId::NONE;
     SkillId     m_glovesPassive = SkillId::NONE;  // FRENZY while legendary gloves equipped
     bool        m_inventoryOpen = false;
-    // Character inspect overlay: toggled by CHARACTER_SCREEN action (C / LB+Plus).
+    // Character inspect overlay: toggled by CHARACTER_SCREEN action (T or K / LB+Plus).
     // Frees the mouse (like inventory) and freezes gameplay input. m_inspectYaw
     // accumulates per-tick from mouse-X drag, right-stick X, and an idle auto-spin
     // so the renderer can rotate the paper-doll model around the Y axis.
@@ -1169,7 +1169,7 @@ private:
     // True while the inventory's item comparison is on screen (cursor on a non-empty backpack
     // cell): the skill bars + quickbar hide for that frame — the two tooltips land on top of them.
     bool inventoryComparisonActive(u32 sw, u32 sh) const;
-    // Character-inspect screen (C key / LB+Plus): a live rotatable armored model rendered into an
+    // Character-inspect screen (T or K key / LB+Plus): a live rotatable armored model rendered into an
     // offscreen FBO (renderInspectModelToFbo) composited beside a grouped stats sheet
     // (renderCharacterInspect). Implemented in engine_render_character.cpp.
     void renderInspectModelToFbo();

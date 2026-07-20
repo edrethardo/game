@@ -70,7 +70,11 @@ static constexpr u32 CFG_BINDINGS_REV = 1005;
 //           WASD (Z/X/C/V direct per-slot use). That needed C, so CHARACTER_SCREEN moved off C to K,
 //           and QUICKBAR_USE's middle-click was dropped. An old file has no keyboard quickbar keys and
 //           character still on C — repaired at the tail of loadBindings (keyboard halves only).
-static constexpr s32 BINDINGS_REV     = 2;
+//   rev 3 — CHARACTER_SCREEN's primary keyboard key moved K -> T (K stays as a non-serialized key2
+//           alias, so both open it). A rev-2 file has the CHARACTER_SCREEN row with key=K, which would
+//           restore K as PRIMARY and never reach T — repaired at the tail of loadBindings (that one
+//           keyboard key only). key2 is not on disk, so K keeps working regardless of the migration.
+static constexpr s32 BINDINGS_REV     = 3;
 
 // Split-screen: which player's controller to read (0=player1, 1=player2)
 static u8 s_activePlayer = 0;
@@ -253,12 +257,15 @@ static void buildDefaults(InputBinding out[static_cast<u32>(GameAction::COUNT)])
     // UI
     set(GameAction::INVENTORY,       SDL_SCANCODE_TAB,    0, SDL_CONTROLLER_BUTTON_START);
     set(GameAction::PAUSE,           SDL_SCANCODE_ESCAPE, 0, SDL_CONTROLLER_BUTTON_BACK);
-    // Character inspect screen. Keyboard: K (moved off C, which is now quickbar slot 3 — C is the
-    // natural row-below-WASD quickbar key and character is a rarely-pressed menu, so it takes the
-    // conventional character-panel key K, safely away from the combat cluster). Gamepad: L + "+" chord
-    // (LEFTSHOULDER + START). INVENTORY is bare "+" (START); the shared-button collision is resolved in
+    // Character inspect screen. Keyboard: T (primary) and K (secondary alias, via key2 below) — both
+    // open it. T sits just above the WASD cluster and K is the conventional character-panel key; both
+    // are clear of the combat cluster (C is now quickbar slot 3). Gamepad: L + "+" chord (LEFTSHOULDER
+    // + START). INVENTORY is bare "+" (START); the shared-button collision is resolved in
     // checkActionRaw, where a bare binding yields to a chord that claims the same button while L is held.
-    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_K,      0, SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    set(GameAction::CHARACTER_SCREEN, SDL_SCANCODE_T,      0, SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    // K also opens the character screen. key2 is an in-memory alias (see InputBinding) — not serialized
+    // and not rebindable, so it needs no controls.json format/rev change and survives loadBindings.
+    b[static_cast<u32>(GameAction::CHARACTER_SCREEN)].key2 = SDL_SCANCODE_K;
     // Quickbar slots 1-4. Gamepad: L + D-pad, in the SAME direction order as the bare-D-pad class
     // skills (Up/Right/Down/Left) so the two bars feel like one system; each press selects AND equips
     // that slot (no separate use button). Bare D-pad is SKILL_1..4; checkActionRaw's bare-yields-to-
@@ -1293,6 +1300,11 @@ static bool checkActionRaw(GameAction action, bool pressed) {
             if (pressed ? Input::isKeyPressed(b.key) : Input::isKeyDown(b.key))
                 return true;
         }
+        // Secondary keyboard alias (e.g. K also opens the character screen alongside primary T).
+        if (b.key2 >= 0) {
+            if (pressed ? Input::isKeyPressed(b.key2) : Input::isKeyDown(b.key2))
+                return true;
+        }
         if (b.mouseButton > 0) {
             if (pressed ? Input::isMouseButtonPressed(b.mouseButton)
                         : Input::isMouseButtonDown(b.mouseButton))
@@ -1343,10 +1355,29 @@ const InputBinding& Input::getBinding(GameAction action) {
 }
 
 void Input::setKeyBinding(GameAction action, s32 scancode) {
+    // Conflict policy = "clear the other": the new action takes the key, and whatever rebindable
+    // action previously held it becomes unbound (the player must reassign it), so no listed action
+    // ever answers to a key another one also fires on. Scoped to the rebindable rows the rebind UI
+    // shows — fixed/system bindings aren't touched (clearing one invisibly could break menu nav).
+    for (u32 r = 0; r < REBIND_ROWS; r++) {
+        GameAction other = rebindActionAt(r);
+        if (other != action && s_bindings[static_cast<u32>(other)].key == scancode)
+            s_bindings[static_cast<u32>(other)].key = -1;
+    }
     s_bindings[static_cast<u32>(action)].key = scancode;
 }
 
 void Input::setButtonBinding(GameAction action, s32 button, s32 modifier) {
+    // Same "clear the other" policy as setKeyBinding, but a controller conflict is the same button
+    // AND the same modifier (a bare button and its L-chord are distinct, e.g. START vs L+START).
+    for (u32 r = 0; r < REBIND_ROWS; r++) {
+        GameAction other = rebindActionAt(r);
+        const InputBinding& b = s_bindings[static_cast<u32>(other)];
+        if (other != action && b.button == button && b.modifier == modifier) {
+            s_bindings[static_cast<u32>(other)].button   = -1;
+            s_bindings[static_cast<u32>(other)].modifier = -1;
+        }
+    }
     s_bindings[static_cast<u32>(action)].button = button;
     s_bindings[static_cast<u32>(action)].modifier = modifier;
 }
@@ -1355,23 +1386,27 @@ void Input::resetBindingsToDefaults() {
     setDefaults();
 }
 
-// Restore only the keyboard/mouse half of the rebindable actions (0..INVENTORY) — used by the
-// "Keyboard & Mouse" options submenu's reset so it leaves controller bindings untouched.
+// Restore only the keyboard/mouse half of the rebindable actions — used by the "Keyboard & Mouse"
+// options submenu's reset so it leaves controller bindings untouched. Iterates the rebindable ROWS
+// (contiguous range + the DODGE tail) so the reset covers exactly what the UI can change.
 void Input::resetKeyboardBindingsToDefaults() {
     InputBinding d[static_cast<u32>(GameAction::COUNT)];
     buildDefaults(d);
-    for (u32 i = 0; i <= static_cast<u32>(GameAction::INVENTORY); i++) {
+    for (u32 r = 0; r < REBIND_ROWS; r++) {
+        u32 i = static_cast<u32>(rebindActionAt(r));
         s_bindings[i].key         = d[i].key;
         s_bindings[i].mouseButton = d[i].mouseButton;
     }
 }
 
-// Restore only the controller half of the rebindable actions (0..INVENTORY) — used by the
-// "Controller" options submenu's reset so it leaves keyboard bindings untouched.
+// Restore only the controller half of the rebindable actions — used by the "Controller" options
+// submenu's reset so it leaves keyboard bindings untouched. Iterates the rebindable ROWS (contiguous
+// range + the DODGE tail).
 void Input::resetControllerBindingsToDefaults() {
     InputBinding d[static_cast<u32>(GameAction::COUNT)];
     buildDefaults(d);
-    for (u32 i = 0; i <= static_cast<u32>(GameAction::INVENTORY); i++) {
+    for (u32 r = 0; r < REBIND_ROWS; r++) {
+        u32 i = static_cast<u32>(rebindActionAt(r));
         s_bindings[i].button        = d[i].button;
         s_bindings[i].modifier      = d[i].modifier;
         s_bindings[i].axis          = d[i].axis;
@@ -1462,12 +1497,13 @@ void Input::loadBindings(const char* path) {
     }
 
     // rev 1 -> 2: ADDED direct PC keyboard keys for the quickbar on the row below WASD (Z/X/C/V), and
-    // because C was taken, moved CHARACTER_SCREEN off C to K. (The mouse wheel + middle-click stay —
-    // Z/X/C/V is an additional way, not a replacement.) An old file has those QUICKBAR_SLOT_* rows with
-    // NO keyboard key and CHARACTER_SCREEN still on C — so without this the new keys never reach
-    // existing players AND C ends up double-bound (character + quickbar slot 3). Repair only the
-    // KEYBOARD half of the five affected actions, leaving every other binding — all gamepad chords,
-    // the middle-click quickbar-use, every unrelated custom key — untouched.
+    // because C was taken, moved CHARACTER_SCREEN off C. (The mouse wheel + middle-click stay — Z/X/C/V
+    // is an additional way, not a replacement.) An old file has those QUICKBAR_SLOT_* rows with NO
+    // keyboard key and CHARACTER_SCREEN still on C — so without this the new keys never reach existing
+    // players AND C ends up double-bound (character + quickbar slot 3). Repair only the KEYBOARD half of
+    // the five affected actions to the CURRENT default (character's is now T; the rev 2->3 block below
+    // re-repairs it for rev-2 files), leaving every other binding — all gamepad chords, the middle-click
+    // quickbar-use, every unrelated custom key — untouched.
     if (fileRev < 2) {
         InputBinding d[static_cast<u32>(GameAction::COUNT)];
         buildDefaults(d);
@@ -1480,7 +1516,20 @@ void Input::loadBindings(const char* path) {
             const u32 i = static_cast<u32>(a);
             s_bindings[i].key = d[i].key;
         }
-        LOG_INFO("Input: migrated controls.json rev %d -> %d (added PC quickbar Z/X/C/V, character -> K)",
+        LOG_INFO("Input: migrated controls.json rev %d -> %d (added PC quickbar Z/X/C/V, character key)",
+                 fileRev, BINDINGS_REV);
+    }
+
+    // rev 2 -> 3: CHARACTER_SCREEN's primary keyboard key moved from K to T. A rev-2 file stored that
+    // row with key=K, which would win over the new T default. Repair just that one keyboard key to the
+    // current default (T). K still works — it lives in the non-serialized key2 alias that buildDefaults
+    // seeds and loadBindings never touches — so this only ensures T is ALSO bound for existing players.
+    if (fileRev < 3) {
+        InputBinding d[static_cast<u32>(GameAction::COUNT)];
+        buildDefaults(d);
+        const u32 i = static_cast<u32>(GameAction::CHARACTER_SCREEN);
+        s_bindings[i].key = d[i].key;
+        LOG_INFO("Input: migrated controls.json rev %d -> %d (character screen key K -> T; K kept as alias)",
                  fileRev, BINDINGS_REV);
     }
 
@@ -1521,6 +1570,7 @@ const char* Input::actionName(GameAction action) {
         case GameAction::MENU_CONFIRM:  return "Confirm";
         case GameAction::MENU_BACK:          return "Back";
         case GameAction::CHARACTER_SCREEN:   return "Character Screen";
+        case GameAction::DODGE:              return "Dodge / Roll";
         default: return "Unknown";
     }
 }

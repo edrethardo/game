@@ -32,6 +32,23 @@ enum struct GameAction : u8 {
     COUNT
 };
 
+// Rebindable actions shown in the options rebind UI, in display order. NOT simply the contiguous
+// [MOVE_FORWARD..INVENTORY] range: DODGE was appended after INVENTORY (ordinals are the on-disk format
+// and can't be reordered), yet it is combat-critical (its i-frames drive the whole CC-negation system),
+// so it must be rebindable — included here via an explicit tail. rebindActionAt(row) maps a UI row to
+// its action; REBIND_ROWS is the total row count. The three rebind sites (the render + the KM/controller
+// capture handlers) all key off these, so adding a late-appended rebindable action means only editing
+// kRebindTail (saveBindings already persists every ordinal). CHARACTER_SCREEN is intentionally NOT here
+// — it is a fixed T/K convenience key whose K alias lives in the non-serialized InputBinding.key2.
+namespace Input {
+    inline constexpr u32 REBIND_CONTIG = static_cast<u32>(GameAction::INVENTORY) + 1;   // rows 0..INVENTORY
+    inline constexpr GameAction kRebindTail[] = { GameAction::DODGE };
+    inline constexpr u32 REBIND_ROWS = REBIND_CONTIG + sizeof(kRebindTail) / sizeof(kRebindTail[0]);
+    inline constexpr GameAction rebindActionAt(u32 row) {
+        return row < REBIND_CONTIG ? static_cast<GameAction>(row) : kRebindTail[row - REBIND_CONTIG];
+    }
+}
+
 // Mouse button constants (matches SDL_BUTTON_*)
 static constexpr u8 MOUSE_NONE   = 0;
 static constexpr u8 MOUSE_LEFT   = 1;
@@ -47,6 +64,12 @@ struct InputBinding {
     // Axis-based binding (for triggers)
     s32 axis;           // SDL_GameControllerAxis (-1 if not axis-bound)
     f32 axisThreshold;  // trigger threshold (0.5 for triggers)
+    // Secondary keyboard alias. Checked alongside `key` in checkActionRaw so one action can answer to
+    // two keys (character screen = T and K). In-memory ONLY: seeded by buildDefaults, never written to
+    // or read from controls.json (that format is a fixed 7 tokens), so it needs no format/rev bump.
+    // Meant for FIXED, non-rebindable convenience keys — a rebindable action would lose it on save.
+    // Placed last with a default initializer so the 6-field aggregate init in buildDefaults leaves it -1.
+    s32 key2 = -1;
 };
 
 namespace Input {

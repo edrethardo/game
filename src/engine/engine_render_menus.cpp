@@ -381,16 +381,22 @@ void Engine::renderMenu() {
                 }
                 FontSystem::drawText(sw, sh, colHost, ty, hostCol, tc, 1);
 
+                // The host advertises floor 97 (ARENA_SENTINEL_FLOOR) while in the PvP arena, so that
+                // row reads "Arena" in the FLOOR cell instead of a number, and the difficulty cell is
+                // blanked (PvP has no difficulty). Any real dungeon floor prints its number as before.
+                const bool isArena = (floorNo == static_cast<int>(GameConst::ARENA_SENTINEL_FLOOR));
                 char fstr[16];   // wide enough for any int the host could publish, not just a sane floor
-                if (floorNo > 0) std::snprintf(fstr, sizeof(fstr), "%d", floorNo);
-                else             std::snprintf(fstr, sizeof(fstr), "-");
+                if (isArena)          std::snprintf(fstr, sizeof(fstr), "Arena");
+                else if (floorNo > 0) std::snprintf(fstr, sizeof(fstr), "%d", floorNo);
+                else                  std::snprintf(fstr, sizeof(fstr), "-");
                 FontSystem::drawText(sw, sh, colFloor, ty, fstr, tc, 1);
 
-                // Tint difficulty so a Hell run is legible at a glance.
+                // Tint difficulty so a Hell run is legible at a glance. Arena rows skip it (no difficulty).
                 Vec3 dc = full ? tc
                         : (diffNo == 2 ? Vec3{1.0f, 0.45f, 0.35f}
                         : (diffNo == 1 ? Vec3{1.0f, 0.80f, 0.40f} : tc));
-                FontSystem::drawText(sw, sh, colDiff, ty, diffNames[diffNo], dc, 1);
+                if (!isArena)
+                    FontSystem::drawText(sw, sh, colDiff, ty, diffNames[diffNo], dc, 1);
 
                 char pstr[16];
                 std::snprintf(pstr, sizeof(pstr), "%d/%d", mc, mm);
@@ -621,7 +627,8 @@ void Engine::renderMenu() {
         // Options — rebind submenu: Keyboard & Mouse (16, keyboard column) OR Controller
         // (17, controller column + sensitivity/invert). Shared render; `kb` selects the variant.
         bool kb = (m_menu.subState == 16);
-        static constexpr u32 REBIND_COUNT = static_cast<u32>(GameAction::INVENTORY) + 1;
+        // Rebindable rows = contiguous [0..INVENTORY] PLUS the explicit tail (DODGE) — see Input::REBIND_ROWS.
+        static constexpr u32 REBIND_COUNT = Input::REBIND_ROWS;
         // Keyboard & Mouse adds 1 extra row (Mouse Sensitivity); Controller adds 5 (stick/gyro
         // sensitivity + stick/gyro invert-Y + the Gyro Aim master switch). Both variants share this
         // rebind-list render — keep `extra` and the row cases in sync with the subState-17 handler.
@@ -646,7 +653,7 @@ void Engine::renderMenu() {
             f32 y = listTop - static_cast<f32>(i - scrollOffset) * lineH;
             bool sel = (i == m_menu.subSelection);
             if (i < REBIND_COUNT) {
-                drawRebindRow(sw, sh, colLabel, colBind, y, static_cast<GameAction>(i),
+                drawRebindRow(sw, sh, colLabel, colBind, y, Input::rebindActionAt(i),
                               sel, sel && m_menu.bindCapture, kb);
             } else if (kb && i == REBIND_COUNT + 0) {
                 char buf[48];
@@ -962,6 +969,16 @@ void Engine::renderMenu() {
             f32 lw = FontSystem::textWidth(buf, 2);
             FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 10.0f * uiScale, buf, tc, 2);
         }
+
+        // Clickable Descend + Back buttons (keyboard/gamepad still work via the hint below). Positions
+        // are mirrored by the sub-state-14 mouse hit-test in engine_menu.cpp — keep both in sync.
+        const f32 btnW = 360.0f * uiScale, btnH = 32.0f * uiScale;
+        HUD::drawMenuOption(sw, sh, sh * 0.34f, btnW, btnH, {0.2f, 0.55f, 0.3f}, false);
+        { const char* d = "Descend"; f32 dw = FontSystem::textWidth(d, 2);
+          FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - dw) * 0.5f, sh * 0.34f + 8.0f * uiScale, d, {0.7f, 1.0f, 0.8f}, 2); }
+        HUD::drawMenuOption(sw, sh, sh * 0.26f, btnW, btnH, {0.4f, 0.3f, 0.3f}, false);
+        { const char* b = "Back"; f32 bw = FontSystem::textWidth(b, 2);
+          FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - bw) * 0.5f, sh * 0.26f + 8.0f * uiScale, b, {0.9f, 0.7f, 0.7f}, 2); }
 
         const char* hint = "Up/Down select   Left/Right change   Enter/A Descend   B/ESC Back";
         f32 hintW = FontSystem::textWidth(hint, 1);

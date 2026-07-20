@@ -325,6 +325,11 @@ void Engine::tickPlayerStatusEffects(f32 dt) {
 // interaction in gameUpdate so it is left inline there.
 // ---------------------------------------------------------------------------
 void Engine::handleDebugKeys() {
+    // F1 (debug-draw overlay) and F2 (noclip) are DEV-ONLY cheat/inspection tools — compiled out of
+    // release builds. ENGINE_DEBUG is defined only for a Debug (or unspecified) CMAKE_BUILD_TYPE
+    // (src/CMakeLists.txt), so a shipped Release binary ignores these keys entirely. F3 (profiler) and
+    // the F4+ keys below deliberately stay in — F3 is a perf tool, F8/F9/F10 are player/marketing keys.
+#ifdef ENGINE_DEBUG
     // Toggle debug overlay
     if (Input::isKeyPressed(SDL_SCANCODE_F1)) {
         DebugDraw::setEnabled(!DebugDraw::isEnabled());
@@ -335,6 +340,7 @@ void Engine::handleDebugKeys() {
         m_localPlayer.noclip = !m_localPlayer.noclip;
         LOG_INFO("Noclip: %s", m_localPlayer.noclip ? "ON" : "OFF");
     }
+#endif
 
     // Toggle profiler overlay (F3 on desktop; on Switch use a controller chord: hold L (left
     // shoulder) + click L3 (left stick). Both debug chords share L as the modifier — L+R3 toggles
