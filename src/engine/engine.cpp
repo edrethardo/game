@@ -1087,7 +1087,11 @@ void Engine::updateSteamLobbyRoster() {
     // Progress metadata the public browser shows so a game is actually identifiable at a glance
     // (a floor-30 Hell run is a very different invitation from a fresh floor-1 Normal one). Republished
     // here on every roster change AND on floor descent, so a browsed row never shows a stale floor.
-    std::snprintf(buf, sizeof(buf), "%u", m_level.currentFloor);
+    // In the ARENA we advertise the sentinel floor (97) — currentFloor is never bumped to it (the arena
+    // is entered outside the descent flow) — so the browser can label the row "Arena". enterArena()
+    // must call this after wiring so the sentinel is published on entry, not just on the next join.
+    const u32 advertisedFloor = m_level.inArena ? GameConst::ARENA_SENTINEL_FLOOR : m_level.currentFloor;
+    std::snprintf(buf, sizeof(buf), "%u", advertisedFloor);
     Steam::setLobbyData("floor", buf);
     std::snprintf(buf, sizeof(buf), "%u", static_cast<u32>(m_difficulty));
     Steam::setLobbyData("difficulty", buf);
@@ -1650,11 +1654,25 @@ Combat::PvpHitOutcome Engine::pvpApplyHit(u8 slot, const Combat::PvpHit& hit) {
         if (slot == m_localPlayerIndex) m_localPlayer = m_localPlayers[slot];
         return out;
     }
-    // Remote slot: fresh seed → land → write back, all inside this one call. Atomic by
-    // construction — the other seed/writeback cycles (remote activations, the shared AI view
-    // pass) can never interleave with it.
     Combat::PvpHitOutcome out{};
     if (slot >= MAX_PLAYERS || !m_players[slot].active) return out;
+
+    // During the shared AI/projectile pass (tickSharedSystems), that slot's NetPlayer is being
+    // mutated through a throwaway view (remoteViews[]) that applyRemotePlayerViews will write back
+    // ONCE at pass end. If we did our own seed→land→writeBack(np) here, that later write-back —
+    // seeded from np BEFORE this pass — would overwrite health/CC and silently erase this hit (the
+    // "projectiles/chakrams unreliable in PvP" bug: dropped even stationary at low ping). So compose
+    // this hit onto the SAME shared view; the single write-back then persists it (and it correctly
+    // stacks with any enemy-projectile damage the same pass applied to that view).
+    if (Player* shared = m_sharedRemoteView[slot]) {
+        shared->ccResist      = vResist;   // seedRemoteView (in buildRemotePlayerViews) zeroed these
+        shared->ccDodgeImmune = vDodgeImmune;
+        return landPvpHit(*shared, hit);   // no direct np write — applyRemotePlayerViews owns it
+    }
+
+    // Not in the shared pass (e.g. melee/hitscan resolved in serverNetPre, before remoteViews exist):
+    // fresh seed → land → write back, all inside this one call. Atomic by construction — the other
+    // seed/writeback cycles (remote activations) can never interleave with it.
     NetPlayer& np = m_players[slot];
     seedRemoteView(np, m_pvpViews[slot], slot, m_level.currentFloor);
     m_pvpViews[slot].ccResist      = vResist;       // seedRemoteView zeroed it — set the real value

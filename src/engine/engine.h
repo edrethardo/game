@@ -584,6 +584,13 @@ private:
     f32          m_arenaOverTimer = 0.0f;           // >0 = match decided, winner banner running
     u8           m_arenaWinner    = 0xFF;           // valid while m_arenaOverTimer > 0
     Player       m_pvpViews[MAX_PLAYERS];           // seeded remote views held open for the PvP window
+    // Non-null ONLY during the shared AI/projectile pass in tickSharedSystems: slot -> the throwaway
+    // remote view (remoteViews[]) that applyRemotePlayerViews will write back once at pass end. While
+    // set, pvpApplyHit composes a remote PvP hit onto THIS shared view instead of writing the
+    // NetPlayer directly — otherwise the pre-pass-seeded view's write-back silently erases the PvP
+    // damage (chakrams/projectiles/AoE "unreliable in PvP"). Set right after buildRemotePlayerViews,
+    // cleared right after applyRemotePlayerViews. See pvpApplyHit / tickSharedSystems.
+    Player*      m_sharedRemoteView[MAX_PLAYERS] = {};
     // Kill feed (HUD): newest first, ttl-faded. Fed by arenaHandleDeath (authority) and the
     // ARENA_KILL event (clients).
     static constexpr u32 ARENA_FEED_LINES = 4;

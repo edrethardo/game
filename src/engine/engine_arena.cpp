@@ -288,6 +288,30 @@ void Engine::enterArenaCommon() {
 void Engine::enterArena() {
     enterArenaCommon();
 
+    // A host reaching the arena via CONTINUE (or the --arena dev door) skips startGame() — the ONLY
+    // path that activates and seeds the host's own NetPlayer slot (engine_startgame.cpp:809; a host
+    // is refused by onPlayerJoin by design). On a fresh process m_players[activeNetSlot()] is then
+    // still a default NetPlayer{}: inactive, position {0,0,0}, health 100. The seating loop below is
+    // gated on `active`, so it SKIPS the host slot, and the first gameUpdate's
+    // syncNetPlayerToLocalPlayer copies {0,0,0}/health-100 over the pad — wedging the host in the
+    // corner border wall ("arena spawns out of bounds") AND resetting a Continue'd hero's HP. It's
+    // only intermittent because a startGame earlier in the same process leaves the slot active.
+    // Seed the slot here from m_localPlayer (enterArenaCommon just placed it on its pad with the
+    // loaded HP/class), mirroring startGame's slot-0 setup; the seating loop then applies the pad.
+    // Harmless re-assert when a prior startGame already activated the slot.
+    if (m_netRole == NetRole::SERVER) {
+        const u8 hostSlot  = activeNetSlot();
+        NetPlayer& host    = m_players[hostSlot];
+        host.active        = true;
+        host.slotIndex     = hostSlot;
+        host.playerClass   = m_playerClasses[m_localPlayerIndex];
+        host.baseMaxHealth = m_localPlayer.baseMaxHealth;
+        host.maxHealth     = m_localPlayer.maxHealth;
+        host.health        = m_localPlayer.health;
+        host.moveSpeed     = m_localPlayer.moveSpeed;
+        host.weaponState.currentWeapon = 0;
+    }
+
     // Seat every active NetPlayer on its own pad; the pad is also its respawn point.
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
         if (!m_players[pi].active) continue;
@@ -304,6 +328,10 @@ void Engine::enterArena() {
         wireServerNet();
         Net::broadcastLevelSeed(GameConst::ARENA_SENTINEL_FLOOR, m_difficulty, m_level.levelSeed);
         Server::updateLevel(m_level.levelSeed, GameConst::ARENA_SENTINEL_FLOOR, m_difficulty);
+        // Republish lobby data now: entering the arena bypasses FLOOR_TRANSITION (the usual
+        // republish trigger), so without this the Steam browser row keeps the stale pre-arena floor
+        // until the next join. updateSteamLobbyRoster advertises floor 97 while inArena → "Arena".
+        updateSteamLobbyRoster();
     }
     LOG_INFO("Entered the ARENA (host) — first to %u.", Arena::KILL_TARGET);
 }
@@ -442,14 +470,18 @@ void Engine::arenaTick(f32 dt) {
     }
 
     if (m_netRole == NetRole::CLIENT) {
-        // Cosmetic countdown for OUR OWN death (the server's clock is authoritative; ours just
-        // feeds the "Respawning in N" overlay). Started when we first see ourselves dead.
-        u8 slot = activeNetSlot();
-        if (m_playerDead[m_localPlayerIndex]) {
-            if (m_arenaRespawn[slot] <= 0.0f) m_arenaRespawn[slot] = Arena::RESPAWN_DELAY;
-            m_arenaRespawn[slot] -= dt;
-        } else {
-            m_arenaRespawn[slot] = 0.0f;
+        // Cosmetic countdown for OUR OWN death(s) (the server's clock is authoritative; ours just
+        // feeds the "Respawning in N" overlay). arenaTick runs ONCE after the per-lane loop, so
+        // m_localPlayerIndex is stuck at the last lane — iterate every local lane (couch client has
+        // two) and drive each by its OWN net slot, or couch-P1's countdown never advances.
+        for (u8 lane = 0; lane < m_splitPlayerCount && lane < MAX_LOCAL_PLAYERS; lane++) {
+            u8 slot = m_clientNetSlot[lane];
+            if (m_playerDead[lane]) {
+                if (m_arenaRespawn[slot] <= 0.0f) m_arenaRespawn[slot] = Arena::RESPAWN_DELAY;
+                m_arenaRespawn[slot] -= dt;
+            } else {
+                m_arenaRespawn[slot] = 0.0f;
+            }
         }
         return;
     }

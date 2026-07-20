@@ -1002,6 +1002,9 @@ void Engine::tickSharedSystems(f32 dt) {
     if (m_netRole == NetRole::SERVER) {
         remoteViewCount = buildRemotePlayerViews(remoteViews, remotePtrs, remoteSlots);
         for (u32 i = 0; i < remoteViewCount; i++) extras[extraCount++] = remotePtrs[i];
+        // Route any PvP hit that lands during the pass below onto the SAME view we write back at the
+        // end, so it isn't erased by that (pre-pass-seeded) write-back. Cleared after the write-back.
+        for (u32 i = 0; i < remoteViewCount; i++) m_sharedRemoteView[remoteSlots[i]] = remotePtrs[i];
     } else {
         // Split-screen: the other living local players are the extra targets.
         for (u8 p = 0; p < m_splitPlayerCount; p++) {
@@ -1125,8 +1128,12 @@ void Engine::tickSharedSystems(f32 dt) {
 
         // SERVER: write AI + projectile damage/status back to the authoritative NetPlayers
         // (serverNetPost then ticks DoT/death and the snapshot carries it to the owning client).
+        // This single write-back also persists any PvP hits pvpApplyHit composed onto these shared
+        // views during the pass. Clear the redirect afterward so a later PvP hit (serverNetPre next
+        // tick, or the skill path) resumes writing the NetPlayer directly.
         if (remoteViewCount > 0)
             applyRemotePlayerViews(remoteViews, remoteSlots, remoteViewCount);
+        for (u32 i = 0; i < remoteViewCount; i++) m_sharedRemoteView[remoteSlots[i]] = nullptr;
 
         EntitySystem::tickTimers(m_entities, dt);
         WorldItemSystem::update(m_worldItems, dt, m_itemDefs, m_itemDefCount);   // def-aware: pet drops never despawn

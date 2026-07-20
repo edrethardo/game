@@ -88,7 +88,12 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // clean SV_JOIN_REJECT beats a silently broken deathmatch.
 // v22: INPUT_WINDOW_SIZE 8->15 (input redundancy spans the full 250 ms coast; widens the valid
 // windowCount range, so v21 peers would silently reject v22 input packets — hence the bump).
-static constexpr u32 PROTOCOL_VERSION  = 22; // v22: input redundancy window 8->15 (250 ms coast);
+static constexpr u32 PROTOCOL_VERSION  = 23; // v23: arena/PvP authority fixes — remote PvP projectile/
+                                             // chakram/AoE hits now persist (shared-remote-view write-
+                                             // back race) + Continue host seats its own arena slot.
+                                             // Behavior-only (no wire struct change), but old peers still
+                                             // carry the bugs, so gate them apart with a clean reject.
+                                             // v22: input redundancy window 8->15 (250 ms coast);
                                              // v21: SnapPlayer flags bit2 = stunned + stunTimerQ
                                              // (was reserved0) — player-facing CC (Arena PvP)
                                              // v13: player record single shrineTimerQ pair (was

@@ -233,6 +233,16 @@ void ProjectileSystem::update(ProjectilePool& pool,
         }
         Vec3 dir = p.velocity * (1.0f / speed);
 
+        // Chakram ricochet is DEFERRED to the loop tail: when the disc reaches a wall this frame we
+        // record the reflected state here but keep flying to the wall so the entity/player sweep below
+        // still runs on the pre-bounce segment (a rival standing between the disc and the wall must be
+        // hit this frame, not skipped). The reflection is applied after the sweep, only if nothing
+        // consumed the disc. (The old code `continue`d at the bounce and dropped every bounce-frame
+        // hit — the chakram "sometimes not hitting players in the arena" case.)
+        bool pendingBounce    = false;
+        Vec3 bounceReflectPos = p.position;
+        Vec3 bounceReflectVel = p.velocity;
+
         // Wall collision via short raycast
         RayHit wallHit = Raycast::cast(grid, p.position, dir, travel + p.radius);
         if (wallHit.hit && wallHit.distance <= travel + p.radius) {
@@ -246,36 +256,43 @@ void ProjectileSystem::update(ProjectilePool& pool,
             bool infinite = (p.projFlags & PROJ_INFINITE_BOUNCE) != 0;
             if ((p.projFlags & PROJ_BOUNCE) && (infinite || p.bouncesLeft > 0)) {
                 if (!infinite) p.bouncesLeft--;
-                // Sit just off the struck face (along its normal) so next tick's raycast doesn't
-                // immediately re-hit the same wall and consume another bounce.
-                p.position = wallHit.position + wallHit.normal * (p.radius + 0.02f);
-                p.velocity = p.velocity - wallHit.normal * (2.0f * dot(p.velocity, wallHit.normal));
+                // Store the reflection (sit just off the struck face so next tick's raycast doesn't
+                // immediately re-hit the same wall) but DON'T apply it yet — cap this frame's travel to
+                // the wall and fall through to the entity/player sweep, which then tests the segment up
+                // to the wall. If a target is on it, that hit wins and the disc is consumed; otherwise
+                // the reflection is applied at the loop tail. This is what stops bounce-frame hits from
+                // being dropped.
+                pendingBounce    = true;
+                bounceReflectPos = wallHit.position + wallHit.normal * (p.radius + 0.02f);
+                bounceReflectVel = p.velocity - wallHit.normal * (2.0f * dot(p.velocity, wallHit.normal));
+                travel           = fminf(travel, fmaxf(wallHit.distance, 0.0f));
                 // Metallic ricochet at the bounce (chakram / any PROJ_BOUNCE projectile). Positional
                 // so it attenuates with distance; player is the listener.
                 AudioSystem::playAt(SfxId::RICOCHET, wallHit.position, player.position);
-                continue; // keep flying; skip this frame's despawn + move (already repositioned)
-            }
-            // AoE splash on wall impact
-            if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
-                for (u32 a = 0; a < entities.activeCount; a++) {
-                    u32 e = entities.activeList[a];
-                    Entity& ent = entities.entities[e];
-                    if (ent.flags & ENT_DEAD) continue;
-                    Vec3 delta = ent.position - p.position;
-                    f32 dist = length(delta);
-                    if (dist < p.splashRadius) {
-                        EntityHandle h = {static_cast<u16>(e), ent.generation};
-                        Combat::applyDamage(entities, h, p.splashDamage);
+            } else {
+                // Non-bouncing projectile hits the wall and dies here (bounces fall through above).
+                // AoE splash on wall impact
+                if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
+                    for (u32 a = 0; a < entities.activeCount; a++) {
+                        u32 e = entities.activeList[a];
+                        Entity& ent = entities.entities[e];
+                        if (ent.flags & ENT_DEAD) continue;
+                        Vec3 delta = ent.position - p.position;
+                        f32 dist = length(delta);
+                        if (dist < p.splashRadius) {
+                            EntityHandle h = {static_cast<u16>(e), ent.generation};
+                            Combat::applyDamage(entities, h, p.splashDamage);
+                        }
                     }
+                    // PvP (Arena): a player's wall splash catches rivals near the impact
+                    // (ownerSlot keeps it from splashing the firer).
+                    if (p.fromPlayer)
+                        Combat::pvpRadius(p.position, p.splashRadius, p.splashDamage, p.ownerSlot);
+                    if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);
                 }
-                // PvP (Arena): a player's wall splash catches rivals near the impact
-                // (ownerSlot keeps it from splashing the firer).
-                if (p.fromPlayer)
-                    Combat::pvpRadius(p.position, p.splashRadius, p.splashDamage, p.ownerSlot);
-                if (s_splashCallback) s_splashCallback(p.position, p.splashRadius);
+                destroyProjectile(pool, i);
+                continue;
             }
-            destroyProjectile(pool, i);
-            continue;
         }
 
         // Apply gravity for arcing projectiles (e.g., molotov)
@@ -283,9 +300,12 @@ void ProjectileSystem::update(ProjectilePool& pool,
             p.velocity.y -= p.gravity * dt;
         }
 
-        // Move (pre-move position kept: swept projectiles test entities along this segment)
+        // Move (pre-move position kept: swept projectiles test entities along this segment). On a
+        // deferred bounce, stop at the wall (dir*travel, travel already capped to the wall distance)
+        // so the sweep covers only the pre-bounce path; the reflection is applied at the loop tail.
         const Vec3 preMovePos = p.position;
-        p.position += p.velocity * dt;
+        if (pendingBounce) p.position = preMovePos + dir * travel;
+        else               p.position += p.velocity * dt;
 
         // Spawn trail particles for skill projectiles (every ~3rd frame to avoid flooding)
         if (s_trailPool && p.fromPlayer && ((i + static_cast<u32>(p.lifetime * 60.0f)) % 3 == 0)) {
@@ -492,6 +512,14 @@ void ProjectileSystem::update(ProjectilePool& pool,
             if (r == PlayerHitResult::HIT)       { destroyProjectile(pool, i); continue; }
             if (r == PlayerHitResult::DEFLECTED) { continue; } // lifetime already 0
             if (r == PlayerHitResult::REFLECTED) { continue; } // parried: lives on, player-owned
+        }
+
+        // Deferred chakram bounce: the disc reached a wall this frame, we swept its pre-bounce segment
+        // for a player/entity hit above, and nothing consumed it — so reflect now (reposition off the
+        // wall + reflected velocity) for next frame. Skipped implicitly on a hit (those `continue`).
+        if (pendingBounce) {
+            p.position = bounceReflectPos;
+            p.velocity = bounceReflectVel;
         }
     }
 }
