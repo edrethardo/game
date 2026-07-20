@@ -1204,7 +1204,12 @@ private:
     static constexpr u8 INV_PANEL_EQUIPMENT   = 1;
     static constexpr u8 INV_PANEL_CLASS_SKILL = 2;
     static constexpr u8 INV_PANEL_EQUIP_SKILL = 3;
-    static constexpr u8 INV_PANEL_COUNT       = 4;
+    static constexpr u8 INV_PANEL_COUNT       = 4;   // main-inventory cycle length
+    // Stash-mode cursor panel — NOT part of the cycle above. While the stash is open the cursor lives
+    // on either the stash grid (this) or the backpack (INV_PANEL_BACKPACK), so a controller/Switch can
+    // navigate + transfer without a mouse. Value > CLASS_SKILL, so inventoryCursorToMouse handles it
+    // BEFORE its skill-bar branch.
+    static constexpr u8 INV_PANEL_STASH       = 4;
 
     // Park the synthetic cursor on the D-pad-selected slot, so the gamepad drives the SAME hover
     // path the mouse does (items and skills alike) instead of needing its own.
@@ -1354,7 +1359,8 @@ private:
     // Stash UI rides the inventory screen: opening sets both flags; every existing inventory
     // close path (ESC/B/Tab/respawn) also closes the stash via the per-frame reconciler in
     // gameUpdate, which flushes stash.dat when it does.
-    bool m_stashOpen = false;
+    bool m_stashOpen = false;                       // active alias — per-lane (swapped), like m_inventoryOpen
+    bool m_stashOpenArr[MAX_LOCAL_PLAYERS] = {};    // couch: track which lane opened the chest, no cross-bleed
     void openStashUI();
     // Account-wide town unlock (town_unlock.dat, the difficulty_unlock pattern): set the
     // moment ANY character's Engine kill writes the cleared marker — and retroactively by

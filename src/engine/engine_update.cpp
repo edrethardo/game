@@ -1981,6 +1981,9 @@ void Engine::gameUpdate(f32 dt) {
     if (m_stashOpen && !m_inventoryOpen) {
         m_stashOpen = false;
         saveStash();
+        // The stash cursor parks on INV_PANEL_STASH; the regular inventory has no such panel, so
+        // reset it or the next plain-inventory open would map the cursor to (now-hidden) stash coords.
+        if (m_invCursorPanel == INV_PANEL_STASH) { m_invCursorPanel = INV_PANEL_BACKPACK; m_invCursorIndex = 0; }
     }
 
     // Toggle character inspect screen (C / LB+Plus). Freezes gameplay input via

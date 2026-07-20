@@ -91,6 +91,18 @@ extern bool s_firstKillDropGiven;
 void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
     const f32 uiScale = static_cast<f32>(sh) / 720.0f;
 
+    // Stash grid (controller/keyboard nav while the stash is open). Handled FIRST because its panel
+    // value is > CLASS_SKILL and would otherwise fall into the skill-bar branch below. Maps to the
+    // selected stash slot's centre so drawStashPanel's hover highlight + hint line follow the cursor.
+    if (m_invCursorPanel == INV_PANEL_STASH) {
+        const InventoryUI::StashRects r = InventoryUI::stashLayout(sw, sh);
+        const u32 col = m_invCursorIndex % InventoryUI::STASH_COLS;
+        const u32 row = m_invCursorIndex / InventoryUI::STASH_COLS;
+        mx = static_cast<s32>(r.x + static_cast<f32>(col) * (r.cell + r.gap) + r.cell * 0.5f);
+        my = static_cast<s32>(r.startY - static_cast<f32>(row) * (r.cell + r.gap) + r.cell * 0.5f);
+        return;
+    }
+
     if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
         HUD::EquipSkillSlot slots[MAX_EQUIP_SKILL_SLOTS];
         const u32 n = buildEquipSkillSlots(slots);
@@ -172,8 +184,43 @@ void Engine::updateInventoryInteraction(f32 dt) {
     // can fire under the stash; ESC/B/Tab close via the usual paths + the gameUpdate reconciler.
     if (m_stashOpen) {
         PlayerInventory& inv = m_inventories[m_localPlayerIndex];
-        // Page flip: arrows, or shoulders on the active pad.
         s32 padIdx = static_cast<s32>(m_localPlayerIndex);
+
+        // Shared transfer helpers so the mouse click path and the controller/keyboard cursor path
+        // can't diverge (the quickbarLayout discipline, applied to behaviour). Both are no-ops on a
+        // full destination and never lose the item.
+        auto withdrawStashSlot = [&](u32 slot) {
+            ItemInstance out{};
+            if (Stash::withdraw(m_stash, m_stash.page, slot, out)) {
+                if (Inventory::addToBackpack(inv, out) >= 0) {
+                    AudioSystem::play(SfxId::ITEM_PICKUP);
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot());   // no-op unless CLIENT
+                } else {
+                    Stash::deposit(m_stash, m_stash.page, out);   // restore — nothing lost
+                    addChatMessage("Stash", "Your backpack is full.", {1.0f, 0.85f, 0.4f});
+                }
+            }
+        };
+        auto depositBackpackSlot = [&](u32 slot) {
+            if (slot < MAX_INVENTORY_ITEMS && !isItemEmpty(inv.backpack[slot])) {
+                if (Stash::deposit(m_stash, m_stash.page, inv.backpack[slot])) {  // onto the viewed page
+                    inv.backpack[slot] = ItemInstance{};
+                    AudioSystem::play(SfxId::ITEM_PICKUP);
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot());
+                } else {
+                    addChatMessage("Stash", "That page is full.", {1.0f, 0.85f, 0.4f});
+                }
+            }
+        };
+
+        // Cursor init: entering the stash parks the selection on the stash grid unless it's already on
+        // one of the two stash-mode panels (stash grid or backpack).
+        if (m_invCursorPanel != INV_PANEL_STASH && m_invCursorPanel != INV_PANEL_BACKPACK) {
+            m_invCursorPanel = INV_PANEL_STASH;
+            m_invCursorIndex = 0;
+        }
+
+        // Page flip: arrows, or shoulders on the active pad.
         bool prev = Input::isKeyPressed(SDL_SCANCODE_LEFT)  ||
                     Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
         bool next = Input::isKeyPressed(SDL_SCANCODE_RIGHT) ||
@@ -181,36 +228,61 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (prev && m_stash.page > 0)                              m_stash.page--;
         if (next && m_stash.page + 1 < Stash::PAGE_COUNT)          m_stash.page++;
 
+        // --- Controller / keyboard cursor nav + transfer (Switch/couch-P2 have no mouse) ---
+        // Mirrors the main inventory's cursor: D-pad OR player-0 WASD moves the highlight; the stash
+        // grid sits LEFT and the backpack RIGHT, so crossing happens at their inner edges; A / E
+        // transfers the selection (withdraw from the stash side, deposit from the backpack side).
+        {
+            const bool kb = (m_localPlayerIndex == 0);
+            const bool cursorMode = inventoryUsesCursor();   // previous-frame pointer mode (see main inv)
+            const bool navR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || (kb && Input::isActionPressed(GameAction::MOVE_RIGHT));
+            const bool navL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || (kb && Input::isActionPressed(GameAction::MOVE_LEFT));
+            const bool navD = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  || (kb && Input::isActionPressed(GameAction::MOVE_BACKWARD));
+            const bool navU = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)    || (kb && Input::isActionPressed(GameAction::MOVE_FORWARD));
+            if (navR || navL || navD || navU) m_invCursorActive = true;   // any nav flips lane 0 to cursor mode
+            const bool takePressed = cursorMode &&
+                (Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_A) || (kb && Input::isActionPressed(GameAction::PICKUP)));
+
+            const u32 SC = InventoryUI::STASH_COLS, SR = InventoryUI::STASH_ROWS;   // 8 x 6
+            const u32 BC = InventoryUI::BP_COLS,    BR = InventoryUI::BP_ROWS;      // 6 x 4
+            if (m_invCursorPanel == INV_PANEL_STASH) {
+                if (m_invCursorIndex >= SC * SR) m_invCursorIndex = 0;              // safety clamp
+                u32 col = m_invCursorIndex % SC, row = m_invCursorIndex / SC;
+                if (navU && row > 0)        m_invCursorIndex -= SC;                 // row 0 is the top
+                if (navD && row + 1 < SR)   m_invCursorIndex += SC;
+                if (navL && col > 0)        m_invCursorIndex -= 1;                  // left edge: stay
+                if (navR) {
+                    if (col + 1 < SC) m_invCursorIndex += 1;
+                    else { m_invCursorPanel = INV_PANEL_BACKPACK;                   // cross right → backpack
+                           m_invCursorIndex = static_cast<u8>((row < BR ? row : BR - 1) * BC); }
+                }
+                if (takePressed) withdrawStashSlot(m_invCursorIndex);
+            } else { // INV_PANEL_BACKPACK
+                if (m_invCursorIndex >= BC * BR) m_invCursorIndex = 0;
+                u32 col = m_invCursorIndex % BC, row = m_invCursorIndex / BC;
+                if (navU && row > 0)        m_invCursorIndex -= BC;
+                if (navD && row + 1 < BR)   m_invCursorIndex += BC;
+                if (navR && col + 1 < BC)   m_invCursorIndex += 1;                  // right edge: stay
+                if (navL) {
+                    if (col > 0) m_invCursorIndex -= 1;
+                    else { m_invCursorPanel = INV_PANEL_STASH;                      // cross left → stash
+                           m_invCursorIndex = static_cast<u8>((row < SR ? row : SR - 1) * SC + (SC - 1)); }
+                }
+                if (takePressed) depositBackpackSlot(m_invCursorIndex);
+            }
+        }
+
+        // --- Mouse click path (unchanged behaviour, now via the shared helpers) ---
         if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
             InventoryUI::SlotHit sHit = InventoryUI::hitTestStash(sw, sh, mx, my);
             if (sHit.panel == InventoryUI::SlotHit::STASH_TAB && sHit.index < Stash::PAGE_COUNT) {
                 m_stash.page = sHit.index;
             } else if (sHit.panel == InventoryUI::SlotHit::STASH) {
-                // Withdraw into the backpack; a full backpack puts the item straight back.
-                ItemInstance out{};
-                if (Stash::withdraw(m_stash, m_stash.page, sHit.index, out)) {
-                    if (Inventory::addToBackpack(inv, out) >= 0) {
-                        AudioSystem::play(SfxId::ITEM_PICKUP);
-                        sendInventorySync(m_localPlayerIndex, activeNetSlot());   // no-op unless CLIENT
-                    } else {
-                        Stash::deposit(m_stash, m_stash.page, out);   // restore — nothing lost
-                        addChatMessage("Stash", "Your backpack is full.", {1.0f, 0.85f, 0.4f});
-                    }
-                }
+                withdrawStashSlot(sHit.index);
             } else {
                 InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
-                if (hit.panel == InventoryUI::SlotHit::BACKPACK &&
-                    hit.index < MAX_INVENTORY_ITEMS &&
-                    !isItemEmpty(inv.backpack[hit.index])) {
-                    // Deposit onto the page the player is looking at (never spills elsewhere).
-                    if (Stash::deposit(m_stash, m_stash.page, inv.backpack[hit.index])) {
-                        inv.backpack[hit.index] = ItemInstance{};
-                        AudioSystem::play(SfxId::ITEM_PICKUP);
-                        sendInventorySync(m_localPlayerIndex, activeNetSlot());
-                    } else {
-                        addChatMessage("Stash", "That page is full.", {1.0f, 0.85f, 0.4f});
-                    }
-                }
+                if (hit.panel == InventoryUI::SlotHit::BACKPACK)
+                    depositBackpackSlot(hit.index);
             }
         }
         return;

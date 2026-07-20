@@ -1216,6 +1216,7 @@ void Engine::run() {
     X(m_characterScreenOpen,  m_characterScreenOpenArr) \
     X(m_inspectYaw,           m_inspectYawArr)          \
     X(m_hitMarkerTimer,       m_hitMarkerTimers)        \
+    X(m_stashOpen,            m_stashOpenArr)           \
     X(m_potionCooldown,   m_potionCooldowns)\
     X(m_potionLastActivationTick, m_potionLastActivationTicks) \
     X(m_invCursorPanel,   m_invCursorPanels)\
