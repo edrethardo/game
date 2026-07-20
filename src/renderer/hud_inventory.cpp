@@ -39,6 +39,7 @@ static const char* affixTypeName(AffixType type) {
         case AffixType::THORNS_PCT:         return "Thorns %";
         case AffixType::MANASTEAL_PCT:      return "Mana Steal %";
         case AffixType::MANA_ON_KILL:       return "+Mana on Kill";
+        case AffixType::CC_RESIST:          return "Toughness";   // CC-duration resist (tenacity); value is a 0..1 fraction — see the % formatting at the affix line
         default:                            return "Unknown";
     }
 }
@@ -485,12 +486,12 @@ void HUD::drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
         FontSystem::drawText(sw, sh, r.x, hintY, itemDefs[hovered->defId].name,
                              rarityColor(hovered->rarity), 2);
         FontSystem::drawText(sw, sh, r.x, hintY - 14.0f * uiScale,
-                             "click: take   arrows/LB RB: page", {0.5f, 0.5f, 0.5f}, 1);
+                             "A / click: take   D-pad: move   LB RB: page", {0.5f, 0.5f, 0.5f}, 1);
     } else {
         FontSystem::drawText(sw, sh, r.x, hintY,
-                             "click a backpack item to stash it", {0.5f, 0.5f, 0.5f}, 1);
+                             "A / click a backpack item to stash it", {0.5f, 0.5f, 0.5f}, 1);
         FontSystem::drawText(sw, sh, r.x, hintY - 14.0f * uiScale,
-                             "arrows / LB RB: page", {0.4f, 0.4f, 0.45f}, 1);
+                             "D-pad: move   LB RB: page", {0.4f, 0.4f, 0.45f}, 1);
     }
 }
 
@@ -708,13 +709,14 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                     f32 tooltipY = 80.0f * uiScale;
                     f32 leftTipX = eqX;
                     f32 leftW    = 320.0f * uiScale;   // frame minimum — stands in when slot empty
+                    f32 leftH    = 0.0f;               // equipped frame height (for the stacked fallback)
 
                     // Left: currently equipped in matching slot
                     if (!isItemEmpty(inv.equipped[eqIdx])) {
                         leftW = drawItemTooltip(sw, sh, leftTipX, tooltipY,
                                         inv.equipped[eqIdx],
                                         itemDefs[inv.equipped[eqIdx].defId],
-                                        skillDefs, skillDefCount);
+                                        skillDefs, skillDefCount, &leftH);
                         // "EQUIPPED" label below the left tooltip, centered under its real width
                         f32 boxW = 80.0f * uiScale, boxH = 16.0f * uiScale;
                         f32 boxX = leftTipX + (leftW - boxW) * 0.5f;
@@ -738,8 +740,21 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
                                             emptyLabel, {0.55f, 0.55f, 0.6f}, 1);
                     }
 
-                    // Right: hovered backpack item
-                    drawItemTooltip(sw, sh, leftTipX + leftW + 16.0f * uiScale, tooltipY,
+                    // Right: hovered backpack item. Normally it sits to the RIGHT of the equipped
+                    // frame (off its real width). But in a narrow viewport — vertical split-screen,
+                    // where the viewport is ~half width yet uiScale rides the full height — the two
+                    // 320*uiScale frames can't fit side by side and used to overlap / run off-screen.
+                    // Detect that (right frame's minimum would cross the viewport edge) and STACK it
+                    // ABOVE the equipped frame instead (drawItemTooltip's own top-clamp keeps it on
+                    // screen). tooltipY is the box BOTTOM, so "above" = + the equipped frame's height.
+                    f32 rightX = leftTipX + leftW + 16.0f * uiScale;
+                    f32 rightY = tooltipY;
+                    if (rightX + 320.0f * uiScale > static_cast<f32>(sw)) {
+                        rightX = leftTipX;
+                        // Stack above; fmaxf clears the "Empty <slot>" label height when leftH is 0.
+                        rightY = tooltipY + fmaxf(leftH, 18.0f * uiScale) + 8.0f * uiScale;
+                    }
+                    drawItemTooltip(sw, sh, rightX, rightY,
                                     inv.backpack[i], bpDef, skillDefs, skillDefCount);
                 }
                 break;
@@ -752,8 +767,9 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
 
 f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
                             const ItemInstance& item, const ItemDef& def,
-                            const SkillDef* skillDefs, u32 skillDefCount)
+                            const SkillDef* skillDefs, u32 skillDefCount, f32* outHeight)
 {
+    if (outHeight) *outHeight = 0.0f;
     if (isItemEmpty(item)) return 0.0f;
 
     Vec3 rColor = rarityColor(item.rarity);
@@ -861,7 +877,13 @@ f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         // Affixes
         for (u8 a = 0; a < item.affixCount; a++) {
             const Affix& affix = item.affixes[a];
-            std::snprintf(buf, sizeof(buf), "%s: +%.1f", affixTypeName(affix.type), affix.value);
+            // CC_RESIST is stored as a 0..1 fraction (0.30 = 30%, capped at 0.60), unlike the
+            // whole-number percent affixes, so render it as a percentage instead of the raw
+            // "+0.3" the generic formatter would print.
+            if (affix.type == AffixType::CC_RESIST)
+                std::snprintf(buf, sizeof(buf), "%s: +%.0f%%", affixTypeName(affix.type), affix.value * 100.0f);
+            else
+                std::snprintf(buf, sizeof(buf), "%s: +%.1f", affixTypeName(affix.type), affix.value);
             line(buf, {0.4f, 0.85f, 1.0f}, bodyScale);
         }
 
@@ -963,5 +985,6 @@ f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     measuring = false;
     emitBody();
 
+    if (outHeight) *outHeight = frameH;
     return frameW;
 }

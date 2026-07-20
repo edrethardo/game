@@ -78,7 +78,11 @@ bool Engine::inventoryComparisonActive(u32 sw, u32 sh) const {
     s32 mx, my;
     Input::getMousePosition(mx, my);
     my = static_cast<s32>(sh) - my;   // flip to HUD coords (Y up)
-    if (Input::isGamepadConnected(0)) {
+    // Use the SAME predicate the draw path uses (inventoryUsesCursor), not "is a gamepad connected":
+    // with a pad plugged in but the player on the mouse, these disagreed — the hide-gate checked the
+    // pad-cursor slot while the tooltips drew from the mouse, so the skill/quickbar bars weren't hidden
+    // and rendered through the comparison tooltips (and vice versa).
+    if (inventoryUsesCursor()) {
         inventoryCursorToMouse(sw, sh, mx, my);
     }
     const InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
@@ -442,17 +446,18 @@ void Engine::renderSkillsHUD(u32 sw, u32 sh) {
         else
             HUD::drawMouseButton(sw, sh, rmbX, rmbY + 8.0f * hs5, 1, skillReady);
 
-        // Skill name
+        // Skill name — black outline so the near-white readout stays legible over bright
+        // terrain (the town's sand floor washed it out), matching the ammo readout.
         const char* skillName = sd ? sd->name : "???";
         Vec3 nameCol = unlocked ? Vec3{0.9f, 0.9f, 1.0f} : Vec3{0.4f, 0.4f, 0.4f};
         if (m_classSkillStates[slot].cooldownTimer > 0.0f) nameCol = {0.6f, 0.4f, 0.3f};
-        FontSystem::drawText(sw, sh, rmbX + 25.0f * hs5, rmbY + 22.0f * hs5, skillName, nameCol, 2);
+        FontSystem::drawTextOutlined(sw, sh, rmbX + 25.0f * hs5, rmbY + 22.0f * hs5, skillName, nameCol, 2);
 
-        // Cooldown text
+        // Cooldown text (outlined for the same reason)
         if (m_classSkillStates[slot].cooldownTimer > 0.0f) {
             char cdTxt[8];
             std::snprintf(cdTxt, sizeof(cdTxt), "%.1fs", m_classSkillStates[slot].cooldownTimer);
-            FontSystem::drawText(sw, sh, rmbX + 25.0f * hs5, rmbY + 6.0f * hs5, cdTxt, {1.0f, 0.5f, 0.2f}, 2);
+            FontSystem::drawTextOutlined(sw, sh, rmbX + 25.0f * hs5, rmbY + 6.0f * hs5, cdTxt, {1.0f, 0.5f, 0.2f}, 2);
         }
     }
 }
@@ -476,18 +481,24 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
     // host's own local lane(s). Singleplayer leaves every slot inactive → no extra dots.
     Vec3 otherPos[MAX_PLAYERS];
     bool otherActive[MAX_PLAYERS] = {};
-    if (m_netRole == NetRole::CLIENT) {
-        for (u32 i = 0; i < MAX_PLAYERS; i++) {
-            otherActive[i] = m_renderInterp.playerActive[i];
-            otherPos[i]    = m_renderInterp.playerPositions[i];
-        }
-    } else if (m_netRole == NetRole::SERVER) {
-        for (u32 i = 0; i < MAX_PLAYERS; i++) {
-            if (i < m_splitPlayerCount) continue;      // host's own local lane(s)
-            const NetPlayer& np = m_players[i];
-            if (!np.active || np.isDead) continue;
-            otherActive[i] = true;
-            otherPos[i]    = np.position;
+    // Other-player minimap dots are ALLIES in co-op (show them) but OPPONENTS in the arena — a live
+    // radar of every enemy's position removes the map-awareness/positioning read that is the point of
+    // arena PvP, so suppress them there (also makes online arena consistent with Local Versus, which
+    // already shows none). Co-op dungeon runs keep the ally dots.
+    if (!m_level.inArena) {
+        if (m_netRole == NetRole::CLIENT) {
+            for (u32 i = 0; i < MAX_PLAYERS; i++) {
+                otherActive[i] = m_renderInterp.playerActive[i];
+                otherPos[i]    = m_renderInterp.playerPositions[i];
+            }
+        } else if (m_netRole == NetRole::SERVER) {
+            for (u32 i = 0; i < MAX_PLAYERS; i++) {
+                if (i < m_splitPlayerCount) continue;      // host's own local lane(s)
+                const NetPlayer& np = m_players[i];
+                if (!np.active || np.isDead) continue;
+                otherActive[i] = true;
+                otherPos[i]    = np.position;
+            }
         }
     }
 
@@ -572,7 +583,14 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
         char strip[96];
         u32 pos = 0;
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
-            bool combatant = (i < m_splitPlayerCount) || m_players[i].active ||
+            // A CLIENT never sets m_players[].active (remote liveness lives in the interp mirror, and
+            // the client predicts its OWN slot rather than reading it from a snapshot). Without this a
+            // guest's scoreboard showed only slot 0 + anyone who had already scored — its own segment
+            // and every 0-kill opponent were invisible at match start. Source liveness from the interp
+            // on a client, and always include the local slot.
+            bool combatant = (i < m_splitPlayerCount) || (i == activeNetSlot()) ||
+                             (m_netRole == NetRole::CLIENT ? m_renderInterp.playerActive[i]
+                                                           : m_players[i].active) ||
                              m_arenaScore.kills[i] > 0;
             if (!combatant) continue;
             pos += static_cast<u32>(std::snprintf(strip + pos, sizeof(strip) - pos,
@@ -1000,9 +1018,11 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                     const char* reloadTxt = "Reloading...";
                     f32 fullW = FontSystem::textWidth(reloadTxt, 2);
 
-                    // Dim base text (full word, dark)
-                    FontSystem::drawText(sw, sh, ammoX, ammoY + 5.0f, reloadTxt,
-                                         {0.3f, 0.2f, 0.1f}, 2);
+                    // Dim base text (full word, dark) with a black border, so the whole
+                    // "Reloading..." readout (dim base + gold fill drawn over it) stays
+                    // legible over bright terrain like the town's sand floor.
+                    FontSystem::drawTextOutlined(sw, sh, ammoX, ammoY + 5.0f, reloadTxt,
+                                                 {0.3f, 0.2f, 0.1f}, 2);
 
                     // Bright fill — clip rendering to percentage of text width
                     // Draw character by character, coloring based on fill progress
@@ -1019,25 +1039,21 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                         cx += cw;
                     }
 
-                    // Progress bar below text
-                    f32 barW = fullW;
-                    for (f32 fy = 0; fy < 3.0f; fy += 1.0f) {
-                        DebugDraw::line({ammoX, ammoY - 1.0f + fy, 0},
-                                        {ammoX + barW * pct, ammoY - 1.0f + fy, 0},
-                                        {1.0f, 0.7f, 0.2f});
-                    }
-                    // Bar background (dim)
-                    for (f32 fy = 0; fy < 3.0f; fy += 1.0f) {
-                        DebugDraw::line({ammoX + barW * pct, ammoY - 1.0f + fy, 0},
-                                        {ammoX + barW, ammoY - 1.0f + fy, 0},
-                                        {0.15f, 0.1f, 0.05f});
-                    }
+                    // Progress bar below the text. MUST go through the HUD line batch
+                    // (drawFilledBar), NOT DebugDraw::line: DebugDraw is WORLD-space and is flushed
+                    // BEFORE the HUD pass, so a bar queued here was cleared unshown every frame (and
+                    // if it had flushed it would project as coordinates ~280 m out in the world). This
+                    // is why the reload bar never rendered — only the letter-by-letter text filled.
+                    HUD::drawFilledBar(sw, sh, ammoX, ammoY - 1.0f, fullW, 3.0f, pct,
+                                       {0.15f, 0.1f, 0.05f}, {1.0f, 0.7f, 0.2f});
                 } else {
                     char ammoStr[16];
                     std::snprintf(ammoStr, sizeof(ammoStr), "%u / %u", ws.currentClip, wpn.clipSize);
                     Vec3 ammoCol = (ws.currentClip <= 3 && wpn.clipSize > 3)
                         ? Vec3{0.9f, 0.3f, 0.2f} : Vec3{0.8f, 0.8f, 0.8f};
-                    FontSystem::drawText(sw, sh, ammoX, ammoY + 5.0f, ammoStr, ammoCol, 2);
+                    // Black outline so the near-white readout stays legible over bright
+                    // terrain (the town's sand floor washed the light-grey text out).
+                    FontSystem::drawTextOutlined(sw, sh, ammoX, ammoY + 5.0f, ammoStr, ammoCol, 2);
                 }
             }
         }
@@ -1412,6 +1428,12 @@ bool Engine::hasLineOfSightTo(Vec3 target) const {
 // (m_renderInterp on a client, m_entities otherwise) and never writes to it.
 // ---------------------------------------------------------------------------
 void Engine::renderTargetBar(u32 sw, u32 sh) {
+    // Per-lane target state, indexed by the current viewport's lane. This runs once per viewport and
+    // MUTATES state (the aimed target + its linger), but the render loop never swaps lanes back out —
+    // so index the per-lane arrays directly rather than a shared member, or P2's bar shows P1's target
+    // and the linger drains twice per frame.
+    EntityHandle& targetEnt    = m_targetEnts[m_localPlayerIndex];
+    f32&          targetLinger = m_targetLingers[m_localPlayerIndex];
     const EntityPool& pool = (m_netRole == NetRole::CLIENT) ? m_renderInterp.entities : m_entities;
 
     const Vec3 eye = m_localPlayer.position + Vec3{0.0f, m_localPlayer.eyeHeight, 0.0f};
@@ -1452,8 +1474,8 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
 
     const f32 dt = static_cast<f32>(Clock::getDeltaSeconds());
     if (found) {
-        m_targetEnt    = aimed;
-        m_targetLinger = TARGET_LINGER_SEC;      // refreshed for as long as you keep it in your sights
+        targetEnt    = aimed;
+        targetLinger = TARGET_LINGER_SEC;      // refreshed for as long as you keep it in your sights
     } else {
         // 2. Fall back to whatever we last hit. Combat records it at the single point every
         //    player-sourced hit passes through, so no damage source can forget to report itself.
@@ -1463,29 +1485,29 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
         if (handleValid(pool, lastHit) && hasLineOfSightTo(pool.entities[lastHit.index].position)) {
             // Only ADOPT the last-hit target if we have nothing; never let it steal focus from a
             // target we are actively aiming at (handled above by the early assignment).
-            if (!handleValid(pool, m_targetEnt) || m_targetLinger <= 0.0f) {
-                m_targetEnt    = lastHit;
-                m_targetLinger = TARGET_LINGER_SEC;
+            if (!handleValid(pool, targetEnt) || targetLinger <= 0.0f) {
+                targetEnt    = lastHit;
+                targetLinger = TARGET_LINGER_SEC;
             }
         }
-        if (m_targetLinger > 0.0f) m_targetLinger -= dt;
+        if (targetLinger > 0.0f) targetLinger -= dt;
     }
 
     // Whatever we ended up showing, stop showing it the moment a wall comes between us. The linger
     // keeps DRAINING rather than being cut to zero, so an enemy ducking behind a pillar fades the
     // bar out over ~0.6 s instead of blinking it off — occlusion should feel like losing sight of
     // something, not like the HUD glitching.
-    if (handleValid(pool, m_targetEnt) &&
-        !hasLineOfSightTo(pool.entities[m_targetEnt.index].position)) {
-        if (m_targetLinger > TARGET_FADE_SEC) m_targetLinger = TARGET_FADE_SEC;
+    if (handleValid(pool, targetEnt) &&
+        !hasLineOfSightTo(pool.entities[targetEnt.index].position)) {
+        if (targetLinger > TARGET_FADE_SEC) targetLinger = TARGET_FADE_SEC;
     }
 
-    if (m_targetLinger <= 0.0f) return;
-    if (!handleValid(pool, m_targetEnt)) return;
+    if (targetLinger <= 0.0f) return;
+    if (!handleValid(pool, targetEnt)) return;
     // Indexed directly rather than via handleGet, which wants a non-const pool — this is a
     // render-only read and must not be able to mutate the world. handleValid already checked the
     // generation, so a recycled slot can't be mistaken for the old target.
-    const Entity* e = &pool.entities[m_targetEnt.index];
+    const Entity* e = &pool.entities[targetEnt.index];
     if ((e->flags & ENT_DEAD) || e->maxHealth <= 0.0f) return;
     // A disguised ambusher must not introduce itself: no target bar while a mimic still
     // looks like a chest or a gargoyle like a statue — the label IS the reveal (this used
@@ -1559,7 +1581,7 @@ void Engine::renderTargetBar(u32 sw, u32 sh) {
 
     // Fade out over the last of the linger so the bar leaves gently instead of blinking off.
     f32 fade = 1.0f;
-    if (m_targetLinger < TARGET_FADE_SEC) fade = m_targetLinger / TARGET_FADE_SEC;
+    if (targetLinger < TARGET_FADE_SEC) fade = targetLinger / TARGET_FADE_SEC;
 
     HUD::drawTargetBar(sw, sh, name, subBuf[0] ? subBuf : nullptr,
                        e->health / e->maxHealth, accent, fade);

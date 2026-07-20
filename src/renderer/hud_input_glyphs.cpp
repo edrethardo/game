@@ -15,7 +15,9 @@ static bool isControllerLabel(const char* label) {
         "A", "B", "X", "Y", "L", "R", "ZL", "ZR",
         "L3", "R3",                           // stick clicks — drawn as a small gray circle
         "+", "-", "Up", "Rt", "Dn", "Lt",
-        "L+A", "L+B", nullptr
+        "L+A", "L+B",
+        "L+Up", "L+Rt", "L+Dn", "L+Lt",   // quickbar chord (L + D-pad), distinct from bare-D-pad skills
+        nullptr
     };
     for (const char** p = kNames; *p; p++) {
         if (std::strcmp(label, *p) == 0) return true;
@@ -45,8 +47,11 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
 {
     f32 dim = highlighted ? 1.0f : 0.55f;
 
-    // Face buttons (A/B/X/Y) — filled circle with letter (swap for Nintendo layout)
-    if (label[0] >= 'A' && label[0] <= 'Y' && label[1] == '\0') {
+    // Face buttons (A/B/X/Y) — filled circle with letter (swap for Nintendo layout). Exclude 'L'/'R':
+    // both fall in ['A','Y'] but are SHOULDERS (pill, handled below), not face buttons — without this
+    // the single "L"/"R" skill/tutorial glyphs drew as gray face circles instead of shoulder pills.
+    if (label[0] >= 'A' && label[0] <= 'Y' && label[1] == '\0'
+        && label[0] != 'L' && label[0] != 'R') {
         const char* displayLabel = switchButtonLabel(label);
         f32 r = 9.0f;
         f32 cx = x + r;
@@ -72,16 +77,16 @@ void HUD::drawControllerButton(u32 sw, u32 sh, f32 x, f32 y,
         return;
     }
 
-    // Combo buttons (L+A, L+B) — pill + face circle
+    // Combo buttons (L+A, L+B, L+Up/Rt/Dn/Lt) — L pill + the second glyph. The suffix is passed
+    // through verbatim so it renders as a face circle (single char) OR a D-pad cross (direction),
+    // which is what makes the quickbar's "L + D-pad" chord read distinctly from the class-skill
+    // bar's bare D-pad (they used to draw identical arrows, so reading the quickbar glyph and
+    // pressing it fired a class skill instead).
     if (label[0] == 'L' && label[1] == '+') {
-        // Draw L pill
         drawControllerButton(sw, sh, x, y, "L", highlighted);
-        // Small + text
         FontSystem::drawText(sw, sh, x + 22.0f, y + 5.0f, "+",
                              {0.6f * dim, 0.6f * dim, 0.6f * dim}, 1);
-        // Draw face button circle (drawControllerButton handles the swap internally)
-        char face[2] = {label[2], 0};
-        drawControllerButton(sw, sh, x + 28.0f, y, face, highlighted);
+        drawControllerButton(sw, sh, x + 28.0f, y, label + 2, highlighted);
         return;
     }
 

@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include <glad/glad.h>
 #include <cstring>
+#include <cmath>
 
 static f32 s_uiScale = 1.0f;
 void  FontSystem::setUIScale(f32 s) { s_uiScale = s; }
@@ -201,6 +202,25 @@ f32 FontSystem::textWidth(const char* text, f32 scale) {
 
 f32 FontSystem::textHeight(f32 scale) {
     return static_cast<f32>(GLYPH_H) * scale * s_uiScale;
+}
+
+void FontSystem::drawTextOutlined(u32 screenWidth, u32 screenHeight,
+                                  f32 x, f32 y, const char* text,
+                                  Vec3 color, f32 scale, Vec3 outlineColor)
+{
+    if (!text || !text[0]) return;
+
+    // Border thickness = one on-screen glyph pixel, so the outline reads at any UI
+    // scale/resolution without swallowing thin strokes. The 8 offsets (cardinals +
+    // diagonals) give a gap-free ring; each is a full drawText pass since every call
+    // sets its own color uniform.
+    f32 o = fmaxf(1.0f, scale * s_uiScale);
+    static const f32 dx[8] = { -1, 1, 0, 0, -1, 1, -1, 1 };
+    static const f32 dy[8] = { 0, 0, -1, 1, -1, -1, 1, 1 };
+    for (u32 i = 0; i < 8; i++)
+        drawText(screenWidth, screenHeight, x + dx[i] * o, y + dy[i] * o, text, outlineColor, scale);
+
+    drawText(screenWidth, screenHeight, x, y, text, color, scale);
 }
 
 void FontSystem::drawText(u32 screenWidth, u32 screenHeight,

@@ -79,11 +79,13 @@ static s8 deathOptionHit(u32 sw, u32 sh) {
     f32 hudX = static_cast<f32>(mx);
     f32 hudY = static_cast<f32>(sh) - static_cast<f32>(my);
     f32 cx   = static_cast<f32>(sw) * 0.5f;
-    if (hudX < cx - 90.0f || hudX > cx + 200.0f) return -1; // key icon (cx-80) + label span
+    // Scale must MATCH the death render (engine_render.cpp) exactly, or hover misaligns off the rows.
+    const f32 s = static_cast<f32>(sh) / 720.0f;
+    if (hudX < cx - 90.0f * s || hudX > cx + 200.0f * s) return -1; // key icon (cx-80) + label span
     const f32 base = static_cast<f32>(sh) * 0.35f;
     for (s8 i = 0; i < 3; i++) {
-        f32 rowY = base - static_cast<f32>(i) * 25.0f; // matches render: optY -= 25 per option
-        if (hudY >= rowY - 6.0f && hudY <= rowY + 18.0f) return i;
+        f32 rowY = base - static_cast<f32>(i) * 25.0f * s; // matches render: optY -= 25*s per option
+        if (hudY >= rowY - 6.0f * s && hudY <= rowY + 18.0f * s) return i;
     }
     return -1;
 }
@@ -2002,7 +2004,9 @@ void Engine::gameUpdate(f32 dt) {
         // The gentle idle auto-spin only applies when the player ISN'T actively rotating,
         // so manual input always wins and the model stops where you leave it.
         s32 mdx = 0, mdy = 0;
-        Input::getMouseDelta(mdx, mdy);
+        // Mouse is a single global device — gate it to lane 0 (P1), like the camera look and quickbar
+        // wheel do, or P1's mouse drag spins P2's inspect model in couch co-op. P2 rotates via stick.
+        if (Input::getActivePlayer() == 0) Input::getMouseDelta(mdx, mdy);
         f32 stick  = Input::getStickX(true);                          // right-stick X (deadzone applied)
         f32 manual = static_cast<f32>(mdx) * 0.01f + stick * 0.04f;
         m_inspectYaw += manual;

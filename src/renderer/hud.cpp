@@ -448,24 +448,27 @@ void HUD::drawNetStats(u32 screenWidth, u32 screenHeight,
                         u32 playerCount, u32 ping, const char* role)
 {
     (void)role;
-    // Top-right corner: small bars indicating player count and ping
-    f32 x0 = static_cast<f32>(screenWidth) - 150.0f;
-    f32 y0 = static_cast<f32>(screenHeight) - 40.0f;
+    // The minimap owns the bottom-right ~160*uiScale square; anchor these bars just ABOVE it (and
+    // scale with resolution like the rest of the HUD) so they don't paint over the map corner — the
+    // old fixed sw-150 / sh-40 offset sat inside the minimap and was drawn on top of it.
+    const f32 uiScale = static_cast<f32>(screenHeight) / 720.0f;
+    f32 x0 = static_cast<f32>(screenWidth)  - 150.0f * uiScale;
+    f32 y0 = static_cast<f32>(screenHeight) - (160.0f + 34.0f) * uiScale;
 
     // Player count indicator (bars for each player)
     for (u32 i = 0; i < playerCount && i < 4; i++) {
-        f32 bx = x0 + i * 15.0f;
+        f32 bx = x0 + i * 15.0f * uiScale;
         Vec3 c = {0.2f, 0.8f, 0.2f};
-        pushQuad(bx, y0, bx + 10, y0 + 20, c);
+        pushQuad(bx, y0, bx + 10 * uiScale, y0 + 20 * uiScale, c);
     }
 
     // Ping indicator (bar height proportional to ping)
-    f32 pingH = (ping < 200) ? (ping / 200.0f) * 20.0f : 20.0f;
+    f32 pingH = ((ping < 200) ? (ping / 200.0f) : 1.0f) * 20.0f * uiScale;
     Vec3 pingColor = (ping < 50) ? Vec3{0.2f, 0.8f, 0.2f}
                    : (ping < 100) ? Vec3{0.8f, 0.8f, 0.2f}
                    : Vec3{0.8f, 0.2f, 0.2f};
-    pushLine(x0 + 80, y0, x0 + 80, y0 + pingH, pingColor);
-    pushLine(x0 + 82, y0, x0 + 82, y0 + pingH, pingColor);
+    pushLine(x0 + 80 * uiScale, y0, x0 + 80 * uiScale, y0 + pingH, pingColor);
+    pushLine(x0 + 82 * uiScale, y0, x0 + 82 * uiScale, y0 + pingH, pingColor);
 
     flushHUD();
 }

@@ -544,10 +544,14 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 
                 // Compute anim flags for the partner (same bits used by the network path:
                 // bit0=attacking, bit1=reloading) so weapon thrust/drop reflects live state.
-                // WeaponState lives in the NetPlayer at the same index as the local lane.
+                // WeaponState lives in the NetPlayer — index it by the partner's NET SLOT, not its
+                // lane: on a client-couch lane != net slot (m_clientNetSlot[]), so the raw lane index
+                // reads the wrong NetPlayer and the partner's swing/reload anim was wrong. Host/SP/
+                // Local-Versus have lane == slot, so they are unchanged.
+                u8 partnerSlot = (m_netRole == NetRole::CLIENT) ? m_clientNetSlot[otherP] : otherP;
                 u8 partnerAnim = 0;
-                if (m_players[otherP].weaponState.cooldownTimer > 0.0f) partnerAnim |= 1;
-                if (m_players[otherP].weaponState.reloading)             partnerAnim |= 2;
+                if (m_players[partnerSlot].weaponState.cooldownTimer > 0.0f) partnerAnim |= 1;
+                if (m_players[partnerSlot].weaponState.reloading)             partnerAnim |= 2;
 
                 // Draw weapon + all equipped armor overlays via the shared helper.
                 submitPlayerEquipment(pos, yaw, scale, partnerAnim, classMesh, m_inventories[otherP]);

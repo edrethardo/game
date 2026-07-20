@@ -76,6 +76,20 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
     }
 
     if (m_gameState == GameState::CONNECTING) {
+        // Animated "Connecting…" label + host + a cancel hint. A lone pulsing dot read as a hang and
+        // gave no clue the join could be backed out of (MENU_BACK/Esc cancels; it also times out).
+        u32 dots = static_cast<u32>(m_statsTimer * 2.0f) % 4u;   // 0..3 trailing dots
+        char msg[96];
+        if (m_menu.connectAddress[0])   // empty on a Steam invite/browse join (routed by SteamID)
+            std::snprintf(msg, sizeof(msg), "Connecting to %s%.*s", m_menu.connectAddress, dots, "...");
+        else
+            std::snprintf(msg, sizeof(msg), "Connecting%.*s", dots, "...");
+        f32 mw = FontSystem::textWidth(msg, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - mw) * 0.5f, sh * 0.52f, msg, {0.9f, 0.85f, 0.4f}, 3);
+        const char* hint = Input::activeDeviceIsGamepad() ? "Press B to cancel" : "Press Esc to cancel";
+        f32 hw = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hw) * 0.5f, sh * 0.44f, hint, {0.6f, 0.6f, 0.6f}, 1);
+
         // Pulsing dot to indicate connecting
         f32 pulse = (sinf(m_statsTimer * 6.0f) + 1.0f) * 0.5f;
         HUD::drawCrosshair(sw, sh, {pulse, pulse, 0.5f + pulse * 0.5f});
@@ -236,8 +250,9 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
                                  classStr, {0.7f, 0.7f, 0.7f}, 2);
         }
 
-        // Prompt
-        const char* prompt = "Press any key to continue";
+        // Prompt — name the keys the handler actually accepts (Enter/Space/Jump/Confirm on kb, A on
+        // pad); the old "press any key" was a lie (letter keys and mouse clicks did nothing).
+        const char* prompt = "Press Enter or A to continue";
         f32 promptW = FontSystem::textWidth(prompt, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - promptW) * 0.5f, sh * 0.18f,
                              prompt, {0.5f, 0.5f, 0.5f}, 1);
@@ -281,27 +296,31 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
             // Three options with key icons
             f32 cx = static_cast<f32>(sw) * 0.5f;
             f32 optY = sh * 0.35f;
+            // Row spacing + offsets scale with resolution (like the pause menu already does): the
+            // labels go through the scaling FontSystem, so a fixed 25 px row pitch let the rows
+            // overlap and outgrow their click bands above 720p. deathOptionHit scales identically.
+            const f32 s = static_cast<f32>(sh) / 720.0f;
+            const f32 rowGap = 25.0f * s;
 
             bool pad = Input::activeDeviceIsGamepad();
             // Respawn is the preferred option — render it big (scale 2) and bright green so
-            // players read it as "do this". Baseline stays at optY so deathOptionHit (row 0,
-            // band [rowY-6, rowY+18]) still covers it without a hit-test change.
-            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "A" : "Spc", true);
-            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Respawn",
+            // players read it as "do this".
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f * s, optY, pad ? "A" : "Spc", true);
+            FontSystem::drawText(sw, sh, cx - 50.0f * s, optY + 4.0f * s, "Respawn",
                                  m_deathHover == 0 ? kHoverCol : Vec3{0.4f, 1.0f, 0.55f}, 2);
 
-            optY -= 25.0f;
+            optY -= rowGap;
             // Only show "Reload last save" in singleplayer
             if (m_netRole == NetRole::NONE) {
                 // "Tab", not "Ent": Enter respawns now. A prompt that names the wrong key is worse
                 // than no prompt — it actively teaches the player to press the destructive one.
-                HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "X" : "Tab", true);
-                FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Reload last save",
+                HUD::drawKeySymbol(sw, sh, cx - 80.0f * s, optY, pad ? "X" : "Tab", true);
+                FontSystem::drawText(sw, sh, cx - 50.0f * s, optY + 4.0f * s, "Reload last save",
                                      m_deathHover == 1 ? kHoverCol : Vec3{0.5f, 0.6f, 0.9f}, 1);
-                optY -= 25.0f;
+                optY -= rowGap;
             }
-            HUD::drawKeySymbol(sw, sh, cx - 80.0f, optY, pad ? "-" : "Esc", true);
-            FontSystem::drawText(sw, sh, cx - 50.0f, optY + 4.0f, "Quit to menu",
+            HUD::drawKeySymbol(sw, sh, cx - 80.0f * s, optY, pad ? "-" : "Esc", true);
+            FontSystem::drawText(sw, sh, cx - 50.0f * s, optY + 4.0f * s, "Quit to menu",
                                  m_deathHover == 2 ? kHoverCol : Vec3{0.7f, 0.4f, 0.4f}, 1);
         }
 
@@ -836,7 +855,10 @@ void Engine::render(f32 alpha) {
     renderInteractionPrompts(hudW, hudH);
 
     // Dead player overlay — shows "YOU DIED" on this player's viewport while game continues
-    if (m_playerDead[sp]) {
+    // In the arena, suppress the per-viewport death overlay once the match is decided: the winner
+    // banner + final score table own the screen then, and "YOU DIED"/"Respawning in 3" (frozen,
+    // since arenaTick early-returns while m_arenaOverTimer > 0) would draw overlapping it.
+    if (m_playerDead[sp] && !(m_level.inArena && m_arenaOverTimer > 0.0f)) {
         // Dark overlay
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -886,7 +908,12 @@ void Engine::render(f32 alpha) {
                              winStr, {1.0f, 0.8f, 0.2f}, 4);
         f32 rowY = hudH * 0.5f;
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
-            bool combatant = (i < m_splitPlayerCount) || m_players[i].active ||
+            // Same combatant test as the live score strip (engine_hud.cpp): a CLIENT never sets
+            // m_players[].active, so source liveness from the interp mirror there and always include
+            // the local slot — otherwise a guest's final table drops itself and every 0-kill loser.
+            bool combatant = (i < m_splitPlayerCount) || (i == activeNetSlot()) ||
+                             (m_netRole == NetRole::CLIENT ? m_renderInterp.playerActive[i]
+                                                           : m_players[i].active) ||
                              m_arenaScore.kills[i] > 0;
             if (!combatant) continue;
             char row[32];

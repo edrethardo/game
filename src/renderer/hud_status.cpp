@@ -323,7 +323,9 @@ void HUD::drawDamageDirection(u32 sw, u32 sh, f32 angle, f32 alpha) {
     if (alpha <= 0.0f) return;
     f32 cx = static_cast<f32>(sw) * 0.5f;
     f32 cy = static_cast<f32>(sh) * 0.5f;
-    f32 r = 60.0f;
+    // Scale the arc radius with resolution like every other HUD primitive (crosshair, bars) — a fixed
+    // 60 px arc creeps toward the scaled crosshair at 1080p/1440p/4K and reads as a tiny mark.
+    f32 r = 60.0f * (static_cast<f32>(sh) / 720.0f);
     f32 arcHalf = 0.35f; // ~20° half-width
     Vec3 c = {0.9f * alpha, 0.15f * alpha, 0.1f * alpha};
     // 3 line segments forming a short arc around crosshair

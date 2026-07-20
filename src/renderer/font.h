@@ -29,6 +29,16 @@ namespace FontSystem {
                   f32 x, f32 y, const char* text,
                   Vec3 color, f32 scale = 1.0f);
 
+    // Same as drawText but first stamps the glyphs offset in every direction in
+    // outlineColor (default black), then the fill on top — a 1-glyph-pixel border
+    // that keeps light HUD text (e.g. the white ammo readout) legible over bright
+    // backgrounds like the town's sand floor. Costs 8 extra draw calls, so reserve
+    // it for the few HUD strings that overlap variable-brightness terrain.
+    void drawTextOutlined(u32 screenWidth, u32 screenHeight,
+                          f32 x, f32 y, const char* text,
+                          Vec3 color, f32 scale = 1.0f,
+                          Vec3 outlineColor = Vec3{0.0f, 0.0f, 0.0f});
+
     // Returns width in pixels of the given text at the given scale
     f32 textWidth(const char* text, f32 scale = 1.0f);
 

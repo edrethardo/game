@@ -16,9 +16,13 @@ void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
                               const char* name, Vec3 iconColor,
                               f32 healthFrac, u32 count, u8 iconMatId)
 {
-    f32 boxW = 110.0f;
-    f32 boxH = 24.0f;
-    f32 iconSz = 18.0f;
+    // Scale the whole portrait with resolution (the caller already positions it with scaled
+    // coordinates, and the label goes through the scaling FontSystem — a fixed-pixel box let the text
+    // overrun it at high DPI, e.g. "Swarm x6" past a 110 px box at 4K).
+    const f32 s = static_cast<f32>(sh) / 720.0f;
+    f32 boxW = 110.0f * s;
+    f32 boxH = 24.0f * s;
+    f32 iconSz = 18.0f * s;
 
     // Background fill
     Vec3 bg = {0.06f, 0.06f, 0.10f};
@@ -95,7 +99,7 @@ void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
             icon = nullptr;
         }
 
-        f32 ix = x + 3, iy = y + 3;
+        f32 ix = x + 3 * s, iy = y + 3 * s;
         f32 pxSz = iconSz / 8.0f; // pixel size in screen units
 
         if (icon) {
@@ -121,17 +125,17 @@ void HUD::drawSummonPortrait(u32 sw, u32 sh, f32 x, f32 y,
 
     // Name text — always show the live count (e.g. "Swarm x6") so the player can
     // read the size of their drone army at a glance, even when only one is out.
-    f32 textX = x + iconSz + 6;
+    f32 textX = x + iconSz + 6 * s;
     char label[32];
     std::snprintf(label, sizeof(label), "%s x%u", name, count);
-    FontSystem::drawText(sw, sh, textX, y + 12, label, {0.8f, 0.8f, 0.9f}, 1);
+    FontSystem::drawText(sw, sh, textX, y + 12 * s, label, {0.8f, 0.8f, 0.9f}, 1);
 
     // Health bar (if requested)
     if (healthFrac >= 0.0f) {
         f32 barX = textX;
-        f32 barW = boxW - iconSz - 12;
-        f32 barH = 4.0f;
-        f32 barY = y + 3;
+        f32 barW = boxW - iconSz - 12 * s;
+        f32 barH = 4.0f * s;
+        f32 barY = y + 3 * s;
         if (healthFrac > 1.0f) healthFrac = 1.0f;
         Vec3 hpBg = {0.15f, 0.15f, 0.2f};
         Vec3 hpCol = (healthFrac > 0.5f) ? Vec3{0.2f, 0.8f, 0.3f} : Vec3{0.9f, 0.3f, 0.1f};
@@ -182,7 +186,9 @@ void HUD::drawQuickbar(u32 sw, u32 sh,
         // directions. Hardcoded per-device exactly like the skill bar (which shows a fixed "1".."4" /
         // "Up".."Lt"), so a rebind won't update the glyph — matching that bar's behaviour.
         static const char* kbKeys[QUICKBAR_SLOTS]  = {"Z", "X", "C", "V"};
-        static const char* padKeys[QUICKBAR_SLOTS] = {"Up", "Rt", "Dn", "Lt"};
+        // L + D-pad (the quickbar chord). Shown as a chord so it can't be mistaken for the class-skill
+        // bar's bare D-pad (both used to draw plain arrows — pressing the shown arrow fired a skill).
+        static const char* padKeys[QUICKBAR_SLOTS] = {"L+Up", "L+Rt", "L+Dn", "L+Lt"};
         const char* keyLabel = Input::activeDeviceIsGamepad() ? padKeys[i] : kbKeys[i];
         drawKeySymbol(sw, sh, x0 + 2.0f * uiScale, y1 - 13.0f * uiScale, keyLabel, active);
 

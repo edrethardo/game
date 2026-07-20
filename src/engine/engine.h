@@ -1392,8 +1392,12 @@ private:
     // Preference: the enemy you are AIMING at; if none, the last one you hit, held for a moment so
     // the bar doesn't flicker out the instant your crosshair drifts. Resolved once per frame in
     // renderTargetBar (render-only state — it never feeds the simulation).
-    EntityHandle m_targetEnt;          // currently displayed target
-    f32          m_targetLinger = 0.0f; // seconds the target stays up after you stop aiming at it
+    // Per-lane target-bar state (the D2 enemy health bar). renderTargetBar runs once per viewport and
+    // MUTATES this, but the render loop never swaps lanes back out — so it indexes these arrays by
+    // m_localPlayerIndex directly (NOT the swap macro, which only persists update-path writes). A single
+    // shared member let P2's bar show P1's target and drained the linger twice per frame.
+    EntityHandle m_targetEnts[MAX_LOCAL_PLAYERS] = {};
+    f32          m_targetLingers[MAX_LOCAL_PLAYERS] = {};
     static constexpr f32 TARGET_LINGER_SEC = 4.0f;
     static constexpr f32 TARGET_FADE_SEC   = 0.6f;   // tail of the linger spent fading out
     void renderTargetBar(u32 sw, u32 sh);
