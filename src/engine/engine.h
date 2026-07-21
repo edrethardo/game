@@ -1276,6 +1276,10 @@ private:
     // VERTICAL_HALL only: place ranged "sniper nest" enemies on the balconies (ramp-top positions),
     // floor-scaled like normal spawns but at the balcony story Y (not the ground snap). See startGame.
     void spawnFloorNests(const DungeonResult& dungeon, u8 tier);
+    // FOUR_STORY only: seat ranged snipers at drop-hole EDGES (an adjacent intact-slab cell at the
+    // hole's surface story, raised eye, NO ground snap). Their multi-slab raycast LOS threads the hole
+    // to plunge-fire one story down. spawnFloorNests no-ops for FOUR_STORY (portalCount==0). See startGame.
+    void spawnFloorHoleSnipers(const DungeonResult& dungeon, u8 tier);
     // Promote a just-spawned enemy to a CHAMPION pack leader and spawn its minions around it.
     // Returns true if it did. Called from BOTH spawn paths in spawnFloorEnemies (JSON + fallback)
     // so the two can't drift. Minions are cloned from the leader's PRE-buff stats, which is why

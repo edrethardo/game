@@ -58,6 +58,11 @@
 #include <cstdio>
 #include <cstdlib>
 
+// Breeder tunables (Broodmother → Dungeon Spider). See Engine::tickBreeders.
+static constexpr f32 BREED_INTERVAL = 5.0f;   // seconds between brood spawns while engaged
+static constexpr u32 BREED_CAP      = 4;      // max living brood of the bred type near a breeder
+static constexpr f32 BREED_RADIUS   = 18.0f;  // radius the cap is counted within
+
 // ---------------------------------------------------------------------------
 // Enemy template tables — promoted from static locals in startGame so they
 // are shared across the translation unit without changing their content or
@@ -456,6 +461,9 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     }
                     if (def.role & EnemyRole::SUMMONER) ent->tacticalTimer = 8.0f;
                     if (def.role & EnemyRole::HEALER)   ent->tacticalTimer = 5.0f;
+                    // Breeder: stagger the first brood by a full interval so it doesn't drop a
+                    // spider the instant it aggros (tickBreeders also gates on being engaged).
+                    if (def.spawnEnemyIdx != 0xFFFF) ent->breedTimer = BREED_INTERVAL;
 
                     // Floor scaling
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
@@ -1350,6 +1358,53 @@ void Engine::togglePetCompanion(u8 ownerSlot, u16 petDefId)
     LOG_INFO("Pet: %s summoned (owner slot %u)", m_itemDefs[petDefId].name, ownerSlot);
 }
 
+// ---------------------------------------------------------------------------
+// Breeders (Broodmother → Dungeon Spider). tickBreeders runs once per authoritative
+// frame (server/SP, from tickSharedSystems); spawnBredEnemy builds one floor-scaled hostile
+// the SAME way the initial JSON spawn does, so a bred spider is indistinguishable from a placed
+// one. Spawns are host-authoritative and replicate to clients via the snapshot — no wire change.
+// ---------------------------------------------------------------------------
+void Engine::spawnBredEnemy(u8 defIdx, Vec3 nearPos) {
+    if (defIdx >= m_enemyDefs.count) return;
+    if (m_entities.activeCount >= MAX_ENTITIES - 2) return;   // pool headroom — never blow MAX_ENTITIES
+    const EnemyDef& def = m_enemyDefs.defs[defIdx];
+
+    // Offset from the parent so the newborn isn't stacked on it; snap Y to the destination floor.
+    Vec3 pos = nearPos + Vec3{0.8f, 0.0f, 0.8f};
+    u32 gx, gz;
+    if (LevelGridSystem::worldToGrid(m_level.grid, pos, gx, gz))
+        pos.y = LevelGridSystem::getFloorHeight(m_level.grid, gx, gz) + def.halfExtents.y;
+
+    EntityHandle h = EntitySystem::spawn(m_entities, pos, def.halfExtents, def.flying,
+        def.health, def.moveSpeed, def.detectionRange, def.attackRange, def.attackCooldown, def.damage);
+    Entity* ent = handleGet(m_entities, h);
+    if (!ent) return;
+
+    ent->meshId       = def.meshId;
+    ent->materialId   = def.materialId;
+    ent->enemyType    = def.enemyType;
+    ent->enemyRole    = def.role;
+    ent->aiPreference = def.aiPreference;
+    ent->enemyDefIdx  = defIdx;
+    ent->baseMoveSpeed      = ent->moveSpeed;
+    ent->baseAttackCooldown = ent->attackCooldown;
+
+    // Floor scaling — identical to spawnFloorEnemies, so a bred spider matches a placed one.
+    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    ent->level = static_cast<u16>(effectiveFloor);
+    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
+                  * GameConst::difficultyDamageBump(m_difficulty);
+    ent->health   *= hpMult;
+    ent->maxHealth = ent->health;
+    ent->damage   *= dmgMult;
+    ent->onHitEffect   = def.onHitEffect;
+    ent->onHitDuration = def.onHitDuration;
+    ent->onHitDps      = def.onHitDps * dmgMult;
+
+    Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
+}
+
 void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
     if (dungeon.portalCount == 0) return;
 
@@ -1405,6 +1460,132 @@ void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
             // Deliberately NO ensureNotInWall / ground snap here — that would pull the sniper down to
             // the ground story. The balcony Y is authoritative; the story-aware snap keeps it on the slab.
         }
+    }
+}
+
+
+// FOUR_STORY "Descent": seat ranged snipers at DROP-HOLE edges. Unlike spawnFloorNests (which rides
+// StoryPortal ramp tops and no-ops here because FOUR_STORY has portalCount==0), this rides the recorded
+// dropHoles: a sniper stands on the intact slab just OFF a hole, at that hole's surface story, and its
+// multi-slab raycast LOS threads the hole to plunge-fire one level down (a solid slab blocks a shot into
+// a floor). No ground snap — the hole's surfaceY is the authoritative footing.
+void Engine::spawnFloorHoleSnipers(const DungeonResult& dungeon, u8 tier) {
+    if (dungeon.dropHoleCount == 0) return;
+
+    // Ranged defs of this tier (grounded preferred so they sit ON the slab; flyers fall back). Same
+    // selection as spawnFloorNests so the two sniper sources read identically.
+    const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
+    u32 tierCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
+    const EnemyDef* ranged[MAX_ENEMY_DEFS];
+    u32 rangedCount = 0;
+    for (u32 i = 0; i < tierCount; i++)
+        if (tierDefs[i]->attackRange > 5.0f && !tierDefs[i]->flying) ranged[rangedCount++] = tierDefs[i];
+    if (rangedCount == 0)
+        for (u32 i = 0; i < tierCount; i++)
+            if (tierDefs[i]->attackRange > 5.0f) ranged[rangedCount++] = tierDefs[i];
+    if (rangedCount == 0) return;   // no ranged enemies this tier → no hole snipers
+
+    const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
+                        * GameConst::difficultyDamageBump(m_difficulty);
+
+    // A valid seat is an interior cell that is NOT a maze wall and still carries the slab at this
+    // hole's story — i.e. a real ledge overlooking the drop. The floor is a labyrinth, so a fixed
+    // "+X of the hole" offset would bury snipers inside walls; search the ring around the hole instead.
+    auto seatAt = [&](const DropHole& hole, u32 nth, Vec3& out) -> bool {
+        u32 hx, hz;
+        if (!LevelGridSystem::worldToGrid(m_level.grid, hole.pos, hx, hz)) return false;
+        const u8 q = static_cast<u8>(hole.surfaceY / 0.25f + 0.5f);
+        u32 found = 0;
+        for (s32 rad = 2; rad <= 4; rad++)
+            for (s32 dz = -rad; dz <= rad; dz++)
+                for (s32 dx = -rad; dx <= rad; dx++) {
+                    if (dx > -rad && dx < rad && dz > -rad && dz < rad) continue;   // ring only
+                    const s32 cx = (s32)hx + dx, cz = (s32)hz + dz;
+                    if (cx < 1 || cz < 1) continue;
+                    if (!LevelGridSystem::isInBounds(m_level.grid, (u32)cx, (u32)cz)) continue;
+                    if (LevelGridSystem::isSolid(m_level.grid, (u32)cx, (u32)cz)) continue;
+                    const GridCell& c = LevelGridSystem::getCell(m_level.grid, (u32)cx, (u32)cz);
+                    bool intact = false;
+                    for (u8 i = 0; i < c.platCount; i++) if (c.platHeight[i] == q) intact = true;
+                    if (!intact) continue;                       // the slab is holed here too
+                    if (found++ < nth) continue;                 // spread multiple snipers per hole
+                    out = { ((f32)cx + 0.5f) * m_level.grid.cellSize, hole.surfaceY,
+                            ((f32)cz + 0.5f) * m_level.grid.cellSize };
+                    return true;
+                }
+        return false;
+    };
+
+    for (u8 hIdx = 0; hIdx < dungeon.dropHoleCount; hIdx++) {
+        if (m_entities.activeCount >= MAX_ENTITIES - 2) break;
+        const DropHole& hole = dungeon.dropHoles[hIdx];
+        const u32 nest = 1 + (static_cast<u32>(std::rand()) & 1u);   // 1-2 snipers per hole
+        for (u32 k = 0; k < nest; k++) {
+            if (m_entities.activeCount >= MAX_ENTITIES - 2) break;
+            const EnemyDef& def = *ranged[static_cast<u32>(std::rand()) % rangedCount];
+            Vec3 seat;
+            if (!seatAt(hole, k, seat)) break;                   // no ledge here — skip this hole
+            Vec3 pos = { seat.x, seat.y + def.halfExtents.y, seat.z };
+            EntityHandle h = EntitySystem::spawn(m_entities, pos, def.halfExtents, def.flying,
+                def.health, def.moveSpeed, def.detectionRange, def.attackRange, def.attackCooldown, def.damage);
+            Entity* ent = handleGet(m_entities, h);
+            if (!ent) break;
+            ent->meshId       = def.meshId;
+            ent->materialId   = def.materialId;
+            ent->enemyType    = def.enemyType;
+            ent->enemyRole    = def.role;
+            ent->aiPreference = def.aiPreference;
+            const ptrdiff_t slot = &def - m_enemyDefs.defs;
+            ent->enemyDefIdx = (slot >= 0 && slot < static_cast<ptrdiff_t>(m_enemyDefs.count))
+                             ? static_cast<u8>(slot) : 0xFF;
+            ent->baseMoveSpeed      = ent->moveSpeed;
+            ent->baseAttackCooldown = ent->attackCooldown;
+            ent->level = static_cast<u16>(effectiveFloor);
+            ent->health   *= hpMult;
+            ent->maxHealth = ent->health;
+            ent->damage   *= dmgMult;
+            ent->onHitEffect   = def.onHitEffect;
+            ent->onHitDuration = def.onHitDuration;
+            ent->onHitDps      = def.onHitDps * dmgMult;
+            // NO ensureNotInWall / ground snap: it would pull the sniper down to the ground story. The
+            // hole surface Y is authoritative; the story-aware snap keeps it on the intact slab.
+        }
+    }
+}
+
+void Engine::tickBreeders(f32 dt) {
+    // Snapshot the count so a spawn appended this frame isn't itself scanned (a fresh spider is
+    // IDLE and not a breeder anyway, but this keeps the loop bound stable).
+    const u32 count = m_entities.activeCount;
+    for (u32 a = 0; a < count && a < m_entities.activeCount; a++) {
+        Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (e.flags & (ENT_DEAD | ENT_FRIENDLY)) continue;
+        if (e.enemyDefIdx >= m_enemyDefs.count) continue;
+        const u16 spawnIdx = m_enemyDefs.defs[e.enemyDefIdx].spawnEnemyIdx;
+        if (spawnIdx == 0xFFFF) continue;                       // not a breeder
+        // Only breed while actually engaged — otherwise a Broodmother would carpet the whole
+        // floor with spiders before the player ever arrives.
+        if (e.aiState == AIState::IDLE || e.aiState == AIState::DORMANT || e.aiState == AIState::DEAD)
+            continue;
+
+        e.breedTimer -= dt;
+        if (e.breedTimer > 0.0f) continue;
+        e.breedTimer = BREED_INTERVAL;
+
+        // Cap the living brood of that type near this breeder so it can't flood the fight.
+        u32 nearby = 0;
+        for (u32 b = 0; b < m_entities.activeCount; b++) {
+            Entity& o = m_entities.entities[m_entities.activeList[b]];
+            if (o.flags & ENT_DEAD) continue;
+            if (o.enemyDefIdx != static_cast<u8>(spawnIdx)) continue;
+            Vec3 d = o.position - e.position;
+            if (d.x * d.x + d.z * d.z <= BREED_RADIUS * BREED_RADIUS) nearby++;
+        }
+        if (nearby >= BREED_CAP) continue;
+
+        spawnBredEnemy(static_cast<u8>(spawnIdx), e.position);
     }
 }
 
