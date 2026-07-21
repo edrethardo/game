@@ -122,6 +122,71 @@ prior `startGame` in the same process leaves the slot active). The **Steam serve
 floor 97 while `m_level.inArena` so the lobby row reads "Arena" — `enterArena` re-publishes on entry
 (`updateSteamLobbyRoster`) since it bypasses the usual `FLOOR_TRANSITION` republish.
 
+**Two-story PvE floors (`VERTICAL_HALL` — "The Stacked Loop").** A 5th structural layout style
+(`world/level_gen.cpp` `carveVerticalHall`, weighted-rolled on **floor-6+ non-boss** floors, forced to a
+44-grid; `--vhall` dev door). NOT a single arena — a Quake **location-based** topology: a **LOOP of nine
+distinct areas** laid out 3×3 and stacked across two stories, circled by a route that spirals up and down.
+The **four CORNERS** are ground rooms (floor 0, cover **PILLARS**); the **four MID-SIDES** are **BALCONIES**
+(`CELL_PLATFORM` slabs @ 3 m — walk ON top, walk UNDER the arcade beneath); the **CENTRE** is an open
+**VOID** (ground, no balcony) that every balcony overlooks and drops into (the Quake sightline + a
+cross-level shortcut). A **PINWHEEL of four RAMPS** climbs each corner up to the next balcony (graduated
+slab; the enemies' chase-up route and yours after a drop); two **CATWALKS** cross the void @ 3 m linking
+opposite balconies — one **INTACT** (the high road), one **BROKEN** with a 2-cell **jump** gap — so the
+UPPER story is its own connected loop that crosses at the centre; **JUMP-PADS** in the void fling you back
+up (player-only). Circle the ring and you continuously **ASCEND** (corner→ramp→balcony) and **DESCEND**
+(balcony→drop→void); the exit sits on the FAR side AND the opposite STORY, so every floor forces a full
+traversal and a level change (a coin-flip picks ascend vs descend). The **lower story is one fully-connected
+floor** (corners + void + arcades → reachability guaranteed); the upper story hangs off it via the ramps +
+catwalks. `spawnBalconyPos`/`exitBalconyPos` are explicit positions applied in `startGame` (upper = y 3 m,
+ground = y 0; a `clearPad` opens any pillar that rolled onto a ground endpoint). Ranged "sniper nests" hold
+the balconies and plunge-fire into the void (`spawnFloorNests` at the **four** ramp tops); regular enemies
+spawn on the ground story (corners + void + arcades) and chase UP the ramps.
+Enemies traverse both stories via story-aware `snapEntityToFloor` (`effectiveFloorHeight` not raw
+`getFloorHeight`) + the ramp **`StoryPortal`** CHASE routing (`world/story_nav.h`, `DungeonResult.portals`;
+`nullptr`/portal-count-0 inert elsewhere). Slab/ramp/collision primitives pinned by
+`tests/world/test_platform.cpp`, the layout invariants by `tests/world/test_vertical_hall.cpp`; seed-built
++ server-authoritative → **no wire/save change**. (Earlier "Stacked Hall" split-pit design lives in
+`scratchpad/stacked_hall_geometry.cpp` for a possible 2nd PvP arena.) Design/plan:
+`docs/superpowers/plans/2026-07-20-two-story-vertical-hall-pve.md`.
+
+**Four-story PvE floors (`FOUR_STORY` — "The Descent").** A 6th structural layout style
+(`world/level_gen.cpp` `carveFourStory`, weighted-rolled on **floor-6+ non-boss** floors like
+VERTICAL_HALL, forced to a 44-grid; `--fourstory` dev door). A **MAZE stacked four stories deep on one
+footprint**: the L0 ground plus three `CELL_PLATFORM` slab stories at 3/6/9 m. A braided
+recursive-backtracker maze (3-wide corridors, 1-cell walls, ~34% wall bulk) is carved ONCE as
+full-height `CELL_SOLID` and **shared by all four stories**, so every level is the same labyrinth
+re-read at a new height (braiding reopens ~1 in 5 walls — a perfect maze has one route between any two
+points, which reads as tedious and gives combat nowhere to flow). You spawn on **L3 in one corner** and
+must reach the **L0 exit diagonally opposite**; the only way down is through the floor, and the split
+is derived from the movement physics rather than tuned by feel — at the 6 m/s base speed a jump reaches
+2.4 m and a 0.6 m body needs gap+0.6 of clearance, so:
+**DROP HOLES** (≥2 cells across) **cannot** be cleared → a committed one-story fall;
+**JUMP GAPS** (exactly 1 cell) can → clear them or lose a story;
+**JUMP PADS** in dead-end nodes lift ~two stories so a bad fall is recoverable.
+There are no ramps or stairs — `portalCount` stays 0 and descent is **one-way**. Hole density **thins
+with depth** (18/12/7%): the top story hands out ways down, the last one makes you hunt.
+**Express shafts are impossible by construction** — a hole is punched at level L only where the slab at
+L+1 is intact, so no column is ever open through two stories; the grid itself is the ledger (a holed
+cell simply has no slab at that height), so the rule costs no memory and can't drift from the geometry.
+`spawnFloorHoleSnipers` seats ranged enemies on intact-slab ledges overlooking each hole (the seat is
+SEARCHED, not offset — on a labyrinth a fixed "+X of the hole" buries them in walls), and
+`spawnFloorEnemies` rejects any candidate cell whose `effectiveFloorHeight` at the room story isn't
+within `PLATFORM_STEP_TOLERANCE` of it, so nothing seeds over a hole and instantly snaps down.
+Built on the multi-slab foundation (up to `MAX_PLATFORMS_PER_CELL`=3 slabs per cell → 4 walkable
+stories); seed-built + server-authoritative → **no wire/save change from the geometry itself**. The
+floor DID force `MAX_ENTITIES` 128→192 (**`PROTOCOL_VERSION` 24**) because four stories want ~4x a flat
+floor's population and 128 silently starved decorations/NPCs/adds/summons. Invariants pinned by
+`tests/world/test_four_story.cpp` — including that the floor **is a maze at all** (wall bulk 20–60%),
+the guard that would have caught the open-plain first draft. Design/plan:
+`docs/superpowers/plans/2026-07-21-four-story-descent-floor.md`.
+
+**Jump-pad strength is per-cell data.** `GridCell::jumpPadQ` (launch speed in quarter m/s, 0 = the
+global `JUMPPAD_LAUNCH`) so a map can author pads stronger than the default without rebalancing every
+map that already exists — the Arena and VERTICAL_HALL size their 3 m balconies to the default 3.6 m
+apex, and a global buff would fling players clean over them. `Collision::jumpPadSpeed` returns the
+speed (0 = not on a pad) and is **story-aware** (`effectiveFloorHeight`, not `getFloorHeight` — with
+the base-floor read a pad on ANY slab story could never fire).
+
 **Crowd control (CC-Resistance + player stun).** All player crowd control (stun/slow/freeze — poison/burn/
 curse are damage, not CC) routes through ONE choke, `Combat::applyCCToPlayer`, wrapping the pure
 `CrowdControl::resolveCC` (`game/crowd_control.h`, tested): a **perfect dodge (any roll's i-frames) or a
@@ -152,7 +217,7 @@ Tinkerer Detonate EMP stun, Wanderer Deflect stagger — each with a `Combat::pv
 
 **Authoritative server.** Listen-server model: host runs the full simulation in `serverUpdate` and is also player slot 0. Clients send `NetInput` packets at 60 Hz, server broadcasts `WorldSnapshot` at 60 Hz (every tick). Clients run prediction + reconciliation on the local player (`Client::reconcile`) and interpolate remote players/entities/projectiles with a 33 ms delay. Singleplayer (`NetRole::NONE`) is just the same loop without packets. (Tick/snapshot/wire details: `engine-reference`.)
 
-**Netplay stack (rewrite COMPLETE — M0–M14 + the 2026-07 hardening pass).** Server-authoritative + client prediction with **rollback-replay reconciliation**: on a mispredict the client rewinds to the server's acked state and re-applies every stored input through the same per-input step the server drain runs (`updateNetPlayerFromInput` movementOnly + `moveAndSlide`), committing to BOTH player mirrors (`m_localPlayer` alias AND `m_players[slot]` — an alias-only write is erased next tick by `syncNetPlayerToLocalPlayer`). Under input starvation the server **coasts** a remote on its last input for ≤250 ms and CLAIMS the ticks (advances `lastProcessedInputTick`) so snapshots stay time-consistent; a separate `m_lastActivationTick` watermark fires late-arriving activation edges exactly once. Delta compression is **ack-driven with a named baseline**: every delta names the snapshot tick it's encoded against (client acks via `NetInput.ackedSnapshotTick`, server deltas against its 64-deep global history ring, client decodes from its 64-deep ring) — never assume "baseline = last sent". `PROTOCOL_VERSION` 22 (v19: the dead lock-on input bit became `INPUT_BLOCK` — the server simulates blocking for remotes: damage negation, perfect-block window, 0.4× move slow; `SnapPlayer.flags` bits 5–7 carry Static Charge stacks; v20: Arena PvP — sentinel floor 97 + the ARENA_KILL/ARENA_SCORES/ARENA_OVER events; v21: player-facing CC — `SnapPlayer.flags` bit2 = stunned + `stunTimerQ` on the reused `reserved0` byte; v22: `INPUT_WINDOW_SIZE` 8→15 so input redundancy spans the full 250 ms coast; **v23: arena/PvP authority fixes** — remote PvP projectile/chakram/AoE hits now PERSIST (they were erased by the shared-remote-view write-back race: `applyRemotePlayerViews` wrote a pre-pass-seeded view back over the health `pvpApplyHit` committed mid-pass; fixed by composing the PvP hit onto the same shared view via `m_sharedRemoteView[]`) — and, chakram-specific, a **bounce frame no longer drops its hit**: the ricochet is DEFERRED to the loop tail so the disc's pre-bounce segment is still swept for a player/entity (`pendingBounce` in `ProjectileSystem::update`; the old code `continue`d at the bounce and skipped that frame's collision). A Continue host now seats its OWN arena NetPlayer slot; behavior-only, no wire struct change, but old peers still carry the bugs so the version gate rejects them). Verification rig: `--net-loss <0-90> --net-latency <ms> --net-jitter <ms> --bot-walk` + the F9 net-graph (`[NET-GRAPH]` 1 Hz log: rtt/div/idelay/KB/s/snap-Hz/baseline-age). Measured envelope: 15% loss + 100 ms RTT → 0 hard snaps, deltas engaged (~9 KB/s vs 39 full). 2026-07 audit hardening: the **64-tick** snapshot history (both sides) keeps deltas alive past 300+ ms RTT (was a measured 12–25% full-snapshot fallback at 32), fire lag-comp rewinds honestly to **24 ticks**, **PvP victims are now lag-compensated like entities via a per-slot player-pose ring** (arena hit-reg), and outbound is `Net::flush()`ed every frame (~33 ms of hidden RTT recovered). For long-haul links (e.g. Germany↔New Zealand, ~150 ms one-way + jitter) the adaptive interp buffer and the server lag-comp rewind share `LagComp::MAX_INTERP_DELAY_MS` (250 ms) as the wire/rewind TRUST ceiling — but the jitter estimator's own 3× outage clamp caps its realistic *steady* delay near ~116 ms, so idelay rides spikes there, NOT up toward 250; `--net-jitter` reproduces the condition locally (constant `--net-latency` alone never engages the adaptive buffer). (Wire/tick details: `engine-reference`.)
+**Netplay stack (rewrite COMPLETE — M0–M14 + the 2026-07 hardening pass).** Server-authoritative + client prediction with **rollback-replay reconciliation**: on a mispredict the client rewinds to the server's acked state and re-applies every stored input through the same per-input step the server drain runs (`updateNetPlayerFromInput` movementOnly + `moveAndSlide`), committing to BOTH player mirrors (`m_localPlayer` alias AND `m_players[slot]` — an alias-only write is erased next tick by `syncNetPlayerToLocalPlayer`). Under input starvation the server **coasts** a remote on its last input for ≤250 ms and CLAIMS the ticks (advances `lastProcessedInputTick`) so snapshots stay time-consistent; a separate `m_lastActivationTick` watermark fires late-arriving activation edges exactly once. Delta compression is **ack-driven with a named baseline**: every delta names the snapshot tick it's encoded against (client acks via `NetInput.ackedSnapshotTick`, server deltas against its 64-deep global history ring, client decodes from its 64-deep ring) — never assume "baseline = last sent". `PROTOCOL_VERSION` 24 (v19: the dead lock-on input bit became `INPUT_BLOCK` — the server simulates blocking for remotes: damage negation, perfect-block window, 0.4× move slow; `SnapPlayer.flags` bits 5–7 carry Static Charge stacks; v20: Arena PvP — sentinel floor 97 + the ARENA_KILL/ARENA_SCORES/ARENA_OVER events; v21: player-facing CC — `SnapPlayer.flags` bit2 = stunned + `stunTimerQ` on the reused `reserved0` byte; v22: `INPUT_WINDOW_SIZE` 8→15 so input redundancy spans the full 250 ms coast; **v23: arena/PvP authority fixes** — remote PvP projectile/chakram/AoE hits now PERSIST (they were erased by the shared-remote-view write-back race: `applyRemotePlayerViews` wrote a pre-pass-seeded view back over the health `pvpApplyHit` committed mid-pass; fixed by composing the PvP hit onto the same shared view via `m_sharedRemoteView[]`) — and, chakram-specific, a **bounce frame no longer drops its hit**: the ricochet is DEFERRED to the loop tail so the disc's pre-bounce segment is still swept for a player/entity (`pendingBounce` in `ProjectileSystem::update`; the old code `continue`d at the bounce and skipped that frame's collision). A Continue host now seats its OWN arena NetPlayer slot; behavior-only, no wire struct change, but old peers still carry the bugs so the version gate rejects them; **v24: `MAX_ENTITIES` 128→192** for the four-story Descent floor — `WorldSnapshot` carries `SnapEntity[MAX_ENTITIES]` and the per-slot unchanged bitmask is now `ENTITY_MASK_BYTES` (24 B, **derived** from `MAX_ENTITIES` so the two can't drift — a mask narrower than the pool silently resends its high slots forever, which is exactly the bug the old 64-bit-over-128 mask had), so both the full and delta layouts changed; idle cost is the 8 extra mask bytes, ~0.47 KB/s). Verification rig: `--net-loss <0-90> --net-latency <ms> --net-jitter <ms> --bot-walk` + the F9 net-graph (`[NET-GRAPH]` 1 Hz log: rtt/div/idelay/KB/s/snap-Hz/baseline-age). Measured envelope: 15% loss + 100 ms RTT → 0 hard snaps, deltas engaged (~9 KB/s vs 39 full). 2026-07 audit hardening: the **64-tick** snapshot history (both sides) keeps deltas alive past 300+ ms RTT (was a measured 12–25% full-snapshot fallback at 32), fire lag-comp rewinds honestly to **24 ticks**, **PvP victims are now lag-compensated like entities via a per-slot player-pose ring** (arena hit-reg), and outbound is `Net::flush()`ed every frame (~33 ms of hidden RTT recovered). For long-haul links (e.g. Germany↔New Zealand, ~150 ms one-way + jitter) the adaptive interp buffer and the server lag-comp rewind share `LagComp::MAX_INTERP_DELAY_MS` (250 ms) as the wire/rewind TRUST ceiling — but the jitter estimator's own 3× outage clamp caps its realistic *steady* delay near ~116 ms, so idelay rides spikes there, NOT up toward 250; `--net-jitter` reproduces the condition locally (constant `--net-latency` alone never engages the adaptive buffer). (Wire/tick details: `engine-reference`.)
 
 ## Directory Map
 
@@ -161,7 +226,7 @@ Tinkerer Detonate EMP stun, Wanderer Deflect stagger — each with a `Combat::pv
 | `src/core/` | Types (`u8`/`f32` aliases), math (Vec/Mat4), pools, logging, profiler, frame allocator, asserts |
 | `src/platform/` | SDL2 abstraction: window, input (kb/mouse/gamepad), wall-clock |
 | `src/renderer/` | OpenGL 3.3: shaders, meshes, OBJ loader, materials/textures, camera, frustum, debug-draw, HUD, font, minimap |
-| `src/world/` | Cell grid, structural level gen (4 layout styles: BSP rooms / cavern / gauntlet / hub, seed-picked per floor), geometry meshing, raycast (DDA), collision (move-and-slide), combat queries (cone/raycast/AABB) |
+| `src/world/` | Cell grid, structural level gen (6 layout styles: BSP rooms / cavern / gauntlet / hub / vertical-hall two-story / four-story descent maze, seed-picked per floor), geometry meshing, raycast (DDA), collision (move-and-slide), combat queries (cone/raycast/AABB) |
 | `src/game/` | Player, entities (enemy NPCs), projectiles, weapons, combat resolution, items+affixes+inventory, skills, enemy AI FSM |
 | `src/engine/` | Top-level `Engine` class, game loop, system orchestration, mode/lobby/menu logic |
 | `src/net/` | ENet wrapper, packet read/write, input ring buffer, snapshot serialization, server, client (prediction + interpolation) |
