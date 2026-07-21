@@ -51,6 +51,7 @@ struct LaunchOptions {
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool verticalHall = false;                 // --vhall: force the two-story VERTICAL_HALL layout on non-boss floors (dev)
+    bool fourStory   = false;                  // --fourstory: force the four-story FOUR_STORY "Descent" layout on non-boss floors (dev)
     bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
     u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
 

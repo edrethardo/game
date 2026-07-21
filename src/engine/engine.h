@@ -335,6 +335,7 @@ private:
     u32  m_netFakeJitterMs   = 0;    // --net-jitter: pushed into Net:: each frame (serverNetPre/clientNetPre)
     u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
     bool m_forceVerticalHall = false; // dev (--vhall): force the two-story VERTICAL_HALL on non-boss floors
+    bool m_forceFourStory    = false; // dev (--fourstory): force the four-story FOUR_STORY on non-boss floors
     u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
     // Shaky-client-FOV diagnostic (accumulated per-correction in clientNetPost, reported +
     // reset by the 1 Hz [NET-GRAPH] log). Together these show whether the camera shake is
@@ -1336,6 +1337,14 @@ private:
     // Drips the goblin's loot while it is alive and fleeing. Authoritative sim only.
     void tickLootGoblins(f32 dt);
     u8   m_goblinMeshId = 0;
+
+    // Breeders: an enemy with a resolved EnemyDef.spawnEnemyIdx (Broodmother → Dungeon Spider)
+    // periodically spawns a fresh copy of that enemy while engaged, up to a nearby cap and never
+    // past the entity-pool headroom. Authoritative sim only (spawns replicate via snapshot).
+    void tickBreeders(f32 dt);
+    // Spawn one fresh hostile of enemy def `defIdx` near `nearPos`, floor-scaled to match a
+    // normally-placed enemy (mirrors the spawnFloorEnemies JSON init).
+    void spawnBredEnemy(u8 defIdx, Vec3 nearPos);
 
     // Pet companions (the goblin's 1% consumable drop + every enemy's 1-in-10000 "Mini <Enemy>").
     // togglePetCompanion is the server/SP-authoritative summon-or-dismiss for the pet belonging to

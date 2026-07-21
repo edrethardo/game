@@ -71,6 +71,10 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // playtestable without waiting for its ~12% weighted roll (see startGame). Applied like the net
     // knobs — regardless of game-jump — so `--new warrior --floor 6 --vhall` lands straight in one.
     m_forceVerticalHall = opt.verticalHall;
+
+    // Dev door (--fourstory): force the four-story FOUR_STORY "Descent" layout on every non-boss floor
+    // so it is playtestable without waiting for its weighted roll (see startGame). Mirrors --vhall.
+    m_forceFourStory = opt.fourStory;
     if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
         LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
                  (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);
