@@ -230,11 +230,19 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
             for (s32 cz = hz0; cz <= hz1; cz++) {
                 for (s32 cx = hx0; cx <= hx1; cx++) {
                     if (!LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) continue;
-                    const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
-                    if (preFeetY + PLAYER_HEIGHT <= under + 0.001f &&   // started below the slab
-                        tryPos.y + PLAYER_HEIGHT > under) {             // would poke into it
-                        tryPos.y          = under - PLAYER_HEIGHT;
-                        player.velocity.y = 0.0f;
+                    // Multi-slab (up to a 4-story Descent stack): clamp to the LOWEST qualifying
+                    // underside among the slabs the body STARTED fully below — a running MIN, not
+                    // last-wins — so a body under L1 bonks L1's floor and never pops up into an L2/L3
+                    // band above it.
+                    const u8 n = LevelGridSystem::platformCount(grid, (u32)cx, (u32)cz);
+                    for (u8 i = 0; i < n; i++) {
+                        const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz, i);
+                        if (preFeetY + PLAYER_HEIGHT <= under + 0.001f &&   // started below this slab
+                            tryPos.y + PLAYER_HEIGHT > under) {             // would poke into it
+                            const f32 clampY = under - PLAYER_HEIGHT;
+                            if (clampY < tryPos.y) tryPos.y = clampY;       // running MIN across slabs
+                            player.velocity.y = 0.0f;
+                        }
                     }
                 }
             }
@@ -365,11 +373,19 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
             for (s32 cz = hz0; cz <= hz1; cz++) {
                 for (s32 cx = hx0; cx <= hx1; cx++) {
                     if (!LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) continue;
-                    const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
-                    if (preFeetY + PLAYER_HEIGHT <= under + 0.001f &&   // started below the slab
-                        tryPos.y + PLAYER_HEIGHT > under) {             // would poke into it
-                        tryPos.y          = under - PLAYER_HEIGHT;
-                        player.velocity.y = 0.0f;
+                    // Multi-slab (up to a 4-story Descent stack): clamp to the LOWEST qualifying
+                    // underside among the slabs the body STARTED fully below — a running MIN, not
+                    // last-wins — so a body under L1 bonks L1's floor and never pops up into an L2/L3
+                    // band above it.
+                    const u8 n = LevelGridSystem::platformCount(grid, (u32)cx, (u32)cz);
+                    for (u8 i = 0; i < n; i++) {
+                        const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz, i);
+                        if (preFeetY + PLAYER_HEIGHT <= under + 0.001f &&   // started below this slab
+                            tryPos.y + PLAYER_HEIGHT > under) {             // would poke into it
+                            const f32 clampY = under - PLAYER_HEIGHT;
+                            if (clampY < tryPos.y) tryPos.y = clampY;       // running MIN across slabs
+                            player.velocity.y = 0.0f;
+                        }
                     }
                 }
             }

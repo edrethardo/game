@@ -52,6 +52,17 @@ void walk(Player& p, const LevelGrid& g, f32 vx, f32 vz, int ticks) {
     }
 }
 
+// A body at REST has its onGround flag alternate true/false every tick: resting means vy==0, so
+// delta.y==0 skips the landing branch that sets the flag, and the -0.05 m ground probe does not
+// register a body sitting exactly on floorHeight. (Pre-existing and single-slab — reproduces in
+// BalconyRoom too; the 17 m/s case above only passes because it lands on the lucky parity.) So
+// "is it resting on the ground" is asked over a 2-tick window, never one arbitrary tick.
+bool settledOnGround(Player& p, const LevelGrid& g) {
+    bool grounded = p.onGround;
+    Collision::moveAndSlide(p, g, 1.0f / 60.0f);
+    return grounded || p.onGround;
+}
+
 // A 12x12 open room (1 m cells, solid border, floor y=0) where every interior cell is a full
 // FOUR-STORY Descent stack: slabs at 12/24/36 qu (tops 3/6/9 m) via addPlatform, so a cell carries
 // platCount==3 {12,24,36} (undersides 2.5/5.5/8.5). Holes are punched per level with removePlatform.
@@ -289,4 +300,53 @@ TEST_CASE("Descent band: overlapsPlatformBand tests every slab, not a phantom fu
     CHECK_FALSE(Collision::overlapsPlatformBand({6.0f, 3.0f, 6.0f}, hw, room.grid));
     // Feet 4.0 (head 5.8) pokes into the L2 band [5.5,6.0] → blocked
     CHECK(Collision::overlapsPlatformBand({6.0f, 4.0f, 6.0f}, hw, room.grid));
+}
+
+TEST_CASE("Descent head-clamp: running-min under a 3-slab stack (grid overload)") {
+    StackedRoom room;   // interior cells all {12,24,36}: undersides 2.5 / 5.5 / 8.5
+
+    SUBCASE("from the arcade → bonks the L1 underside (2.5), never pops onto L2") {
+        Player p;
+        p.position = {6.0f, 0.0f, 6.0f};   // feet on the ground floor, under L1
+        p.velocity = {0.0f, 30.0f, 0.0f};  // over-strong launch: proves running-min, not last-wins
+        p.onGround = false;
+        f32 maxHead = 0.0f;
+        for (int i = 0; i < 120; i++) {
+            Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+            maxHead = std::max(maxHead, p.position.y + PLAYER_HEIGHT);
+        }
+        CHECK(maxHead <= 2.5f + 0.001f);                // clamped at the LOWEST underside (L1)
+        CHECK(p.position.y == doctest::Approx(0.0f));   // fell back to the ground story
+        CHECK(settledOnGround(p, room.grid));
+    }
+    SUBCASE("standing on L1 → bonks the L2 underside (5.5), never pops onto L3") {
+        Player p;
+        p.position = {6.0f, 3.0f, 6.0f};   // feet on L1 (top 3.0), under L2 (underside 5.5)
+        p.velocity = {0.0f, 30.0f, 0.0f};
+        p.onGround = false;
+        f32 maxHead = 0.0f;
+        for (int i = 0; i < 120; i++) {
+            Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+            maxHead = std::max(maxHead, p.position.y + PLAYER_HEIGHT);
+        }
+        CHECK(maxHead <= 5.5f + 0.001f);                // bonked L2, never popped onto L3 (8.5)
+        CHECK(p.position.y == doctest::Approx(3.0f));   // fell back onto L1
+        CHECK(settledOnGround(p, room.grid));
+    }
+}
+
+TEST_CASE("Descent head-clamp: running-min under a 3-slab stack (entity-obstacle overload)") {
+    StackedRoom room;
+    Player p;
+    p.position = {6.0f, 3.0f, 6.0f};   // feet on L1, under L2 (underside 5.5)
+    p.velocity = {0.0f, 30.0f, 0.0f};
+    p.onGround = false;
+    f32 maxHead = 0.0f;
+    for (int i = 0; i < 120; i++) {
+        Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f, nullptr, 0);  // the 5-arg entity overload
+        maxHead = std::max(maxHead, p.position.y + PLAYER_HEIGHT);
+    }
+    CHECK(maxHead <= 5.5f + 0.001f);                // same clamp holds in the entity-obstacle overload
+    CHECK(p.position.y == doctest::Approx(3.0f));
+    CHECK(settledOnGround(p, room.grid));
 }
