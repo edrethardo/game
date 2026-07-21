@@ -54,19 +54,24 @@ RayHit Raycast::cast(const LevelGrid& grid,
         RayHit none;
         if (dir.y == 0.0f) return none;
         if (dir.y < 0.0f) {
-            // Platform slab TOP: a descending ray that starts above it crosses this plane before
-            // the base floor. tP <= 0 (origin at/below the top — e.g. under the slab shooting
-            // down) skips it and falls through to the base-floor test, which is then correct.
+            // Platform slab TOPS, tested HIGHEST-first (platHeight[] is strictly ascending). A
+            // descending ray from above the stack crosses higher tops at a smaller t, so top-down
+            // order returns the nearest surface. If a higher top's crossing lands OUTSIDE this cell
+            // — the ray is threading a hole or angling off an edge — CONTINUE to the next-lower slab
+            // instead of jumping to the base floor; a naive "highest else floor" would thread a ray
+            // straight past a slab it should still hit one story down. tP <= 0 (origin at/below a
+            // top) also falls through. Base floor is tested only after ALL slabs miss.
             if (LevelGridSystem::hasPlatform(grid, (u32)fcx, (u32)fcz)) {
-                const f32 topH = LevelGridSystem::getPlatformTop(grid, (u32)fcx, (u32)fcz);
-                const f32 tP = (topH - origin.y) / dir.y;
-                if (tP > 0.0f && tP <= tExit) {
+                const u8 pc = LevelGridSystem::platformCount(grid, (u32)fcx, (u32)fcz);
+                for (s32 i = (s32)pc - 1; i >= 0; --i) {
+                    const f32 topH = LevelGridSystem::getPlatformTop(grid, (u32)fcx, (u32)fcz, (u32)i);
+                    const f32 tP = (topH - origin.y) / dir.y;
+                    if (tP <= 0.0f || tP > tExit) continue;
                     Vec3 hp = origin + dir * tP;
-                    if (static_cast<s32>(std::floor(hp.x / cs)) == fcx &&
-                        static_cast<s32>(std::floor(hp.z / cs)) == fcz) {
-                        RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, 1.0f, 0.0f};
-                        hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tP; return hit;
-                    }
+                    if (static_cast<s32>(std::floor(hp.x / cs)) != fcx ||
+                        static_cast<s32>(std::floor(hp.z / cs)) != fcz) continue;
+                    RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, 1.0f, 0.0f};
+                    hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tP; return hit;
                 }
             }
             f32 floorH = LevelGridSystem::getFloorHeight(grid, (u32)fcx, (u32)fcz);
