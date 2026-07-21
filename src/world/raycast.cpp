@@ -84,18 +84,23 @@ RayHit Raycast::cast(const LevelGrid& grid,
                     hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tF; return hit;
                 }
             }
-        } else { // dir.y > 0 — ceiling
-            // Platform slab UNDERSIDE: a rising ray that starts below it (the arcade shooting up).
+        } else { // dir.y > 0 — ceiling / slab undersides
+            // Platform slab UNDERSIDES, tested LOWEST-first. A rising ray from below the stack
+            // crosses the lowest underside at a smaller t, so bottom-up order returns the nearest
+            // overhead surface — a body under L1 bonks L1's underside, never L2's two stories up. A
+            // crossing outside the cell (or origin at/above that underside → tU <= 0) CONTINUES to
+            // the next underside up; the ceiling is tested only after all undersides miss.
             if (LevelGridSystem::hasPlatform(grid, (u32)fcx, (u32)fcz)) {
-                const f32 undH = LevelGridSystem::getPlatformUnderside(grid, (u32)fcx, (u32)fcz);
-                const f32 tU = (undH - origin.y) / dir.y;
-                if (tU > 0.0f && tU <= tExit) {
+                const u8 pc = LevelGridSystem::platformCount(grid, (u32)fcx, (u32)fcz);
+                for (u32 i = 0; i < pc; ++i) {
+                    const f32 undH = LevelGridSystem::getPlatformUnderside(grid, (u32)fcx, (u32)fcz, i);
+                    const f32 tU = (undH - origin.y) / dir.y;
+                    if (tU <= 0.0f || tU > tExit) continue;
                     Vec3 hp = origin + dir * tU;
-                    if (static_cast<s32>(std::floor(hp.x / cs)) == fcx &&
-                        static_cast<s32>(std::floor(hp.z / cs)) == fcz) {
-                        RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, -1.0f, 0.0f};
-                        hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tU; return hit;
-                    }
+                    if (static_cast<s32>(std::floor(hp.x / cs)) != fcx ||
+                        static_cast<s32>(std::floor(hp.z / cs)) != fcz) continue;
+                    RayHit hit; hit.hit = true; hit.position = hp; hit.normal = {0.0f, -1.0f, 0.0f};
+                    hit.cellX = (u32)fcx; hit.cellZ = (u32)fcz; hit.distance = tU; return hit;
                 }
             }
             f32 ceilH = LevelGridSystem::getCeilingHeight(grid, (u32)fcx, (u32)fcz);

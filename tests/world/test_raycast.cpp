@@ -160,3 +160,29 @@ TEST_CASE("Raycast descends through a multi-slab stack (top-down)") {
         CHECK(h.position.y == doctest::Approx(6.0f));   // landed on L2 across the hole
     }
 }
+
+TEST_CASE("Raycast rising ray hits the nearest slab underside (bottom-up)") {
+    // Cell (1,1) stacks L1 top 3 m (qu12) and L2 top 6 m (qu24). Undersides (PLATFORM_THICKNESS_Q
+    // = 2): L1 = max(12-2,0)=10 qu = 2.5 m; L2 = max(24-2,12)=22 qu = 5.5 m. Ceiling is 12 m.
+    LevelGrid g = openGrid(3, 3, 0, 48);
+    GridCell& c = LevelGridSystem::getCell(g, 1, 1);
+    LevelGridSystem::addPlatform(c, 12, 0);
+    LevelGridSystem::addPlatform(c, 24, 0);
+
+    SUBCASE("from the ground story, a rising ray bonks the lowest underside") {
+        RayHit h = Raycast::cast(g, {1.5f, 0.5f, 1.5f}, {0.0f, 1.0f, 0.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.normal.y == doctest::Approx(-1.0f));
+        CHECK(h.position.y == doctest::Approx(2.5f));   // L1 underside
+    }
+
+    SUBCASE("from between the slabs, a rising ray hits the next underside up, not the ceiling") {
+        // Eye at y=4 is above L1's top (3) and below L2's underside (5.5). A single-underside
+        // (i=0 only) test would miss L1 (already above it) and shoot to the 12 m ceiling; the
+        // bottom-up loop finds L2's underside.
+        RayHit h = Raycast::cast(g, {1.5f, 4.0f, 1.5f}, {0.0f, 1.0f, 0.0f}, 20.0f);
+        REQUIRE(h.hit);
+        CHECK(h.normal.y == doctest::Approx(-1.0f));
+        CHECK(h.position.y == doctest::Approx(5.5f));   // L2 underside, not the ceiling
+    }
+}
