@@ -139,21 +139,36 @@ bool Collision::overlapsPlatformBand(Vec3 feetPos, f32 halfWidth, const LevelGri
     return false;
 }
 
-// Checks whether the player AABB (given feet position) overlaps any entity
-// obstacle in the XZ plane. Y axis is ignored — entities don't block jumping.
+// Checks whether the player AABB (given feet position) overlaps any entity obstacle.
+//
+// The test is a full 3-D AABB overlap, NOT the XZ-only one it used to be. Ignoring Y was harmless
+// while every floor was a single story — but on a stacked floor (VERTICAL_HALL's balconies, and
+// especially FOUR_STORY, whose four stories share ONE footprint) it means an entity standing on ANY
+// story blocks the player on EVERY story. With ~110 entities on a 44x44 footprint something is nearly
+// always directly above or below you, so XZ movement was refused while the Y axis stayed free: the
+// player could jump but could not walk. Blocking must depend on actually sharing space.
+//
+// This does NOT let you hop over enemies on flat ground: the jump apex is 0.8 m and a body is 1.8 m
+// tall, so a jumping player's AABB still overlaps a standing enemy's. Only a real height separation
+// — a different story, or a jump-pad launch — clears one, which is the intent.
 static bool overlapsAnyObstacle(const Vec3& feetPos,
                                 const CollisionObstacle* obs, u32 count) {
     f32 pMinX = feetPos.x - PLAYER_HALF_WIDTH;
     f32 pMaxX = feetPos.x + PLAYER_HALF_WIDTH;
     f32 pMinZ = feetPos.z - PLAYER_HALF_WIDTH;
     f32 pMaxZ = feetPos.z + PLAYER_HALF_WIDTH;
+    f32 pMinY = feetPos.y;
+    f32 pMaxY = feetPos.y + PLAYER_HEIGHT;
     for (u32 i = 0; i < count; i++) {
         f32 eMinX = obs[i].position.x - obs[i].halfExtents.x;
         f32 eMaxX = obs[i].position.x + obs[i].halfExtents.x;
         f32 eMinZ = obs[i].position.z - obs[i].halfExtents.z;
         f32 eMaxZ = obs[i].position.z + obs[i].halfExtents.z;
+        f32 eMinY = obs[i].position.y - obs[i].halfExtents.y;
+        f32 eMaxY = obs[i].position.y + obs[i].halfExtents.y;
         if (pMaxX > eMinX && pMinX < eMaxX &&
-            pMaxZ > eMinZ && pMinZ < eMaxZ) {
+            pMaxZ > eMinZ && pMinZ < eMaxZ &&
+            pMaxY > eMinY && pMinY < eMaxY) {
             return true;
         }
     }

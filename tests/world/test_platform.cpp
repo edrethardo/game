@@ -441,3 +441,63 @@ TEST_CASE("Jump pad never launches a body through the ceiling") {
     }
     CHECK(maxHead <= 12.0f + 0.001f);
 }
+
+TEST_CASE("Entity obstacles block by SHARED SPACE, not by XZ column") {
+    // The "I can jump but I can't walk" bug. The obstacle test was XZ-only, so on a stacked floor an
+    // entity standing on ANY story blocked the player on EVERY story — and since the Y axis stayed
+    // free, jumping still worked while walking did not. On FOUR_STORY's four stories over one 44x44
+    // footprint, something is nearly always directly below you, so the player was pinned on spawn.
+    StackedRoom room;   // slabs at 3/6/9 m
+    Player p;
+    p.position = {6.0f, 9.0f, 6.0f};   // standing on L3
+    p.onGround = true;
+
+    // An enemy on the GROUND story, directly beneath the player's column.
+    CollisionObstacle below[1];
+    below[0].position    = {6.0f, 0.9f, 5.0f};   // centre 0.9 m => occupies y 0..1.8
+    below[0].halfExtents = {0.5f, 0.9f, 0.5f};
+
+    Vec3 start = p.position;
+    for (int i = 0; i < 60; i++) {
+        p.velocity.x = 0.0f; p.velocity.z = -6.0f;   // walk toward its column
+        Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f, below, 1);
+    }
+    CHECK(p.position.z < start.z - 1.0f);            // three stories up, it must not block us
+    CHECK(p.position.y == doctest::Approx(9.0f));
+
+    // The SAME enemy on our own story does block.
+    CollisionObstacle here[1];
+    here[0].position    = {6.0f, 9.9f, 5.0f};        // centre 9.9 => occupies y 9..10.8, our story
+    here[0].halfExtents = {0.5f, 0.9f, 0.5f};
+    Player q;
+    q.position = {6.0f, 9.0f, 6.0f};
+    q.onGround = true;
+    Vec3 qStart = q.position;
+    for (int i = 0; i < 60; i++) {
+        q.velocity.x = 0.0f; q.velocity.z = -6.0f;
+        Collision::moveAndSlide(q, room.grid, 1.0f / 60.0f, here, 1);
+    }
+    CHECK(q.position.z > qStart.z - 1.0f);           // stopped against it
+}
+
+TEST_CASE("A normal jump still does not clear an enemy on flat ground") {
+    // Regression pin for the 3-D obstacle test: the jump apex is 0.8 m and a body is 1.8 m tall, so a
+    // jumping player still shares space with a standing enemy. Adding the Y test must NOT turn every
+    // jump into a free pass through an enemy.
+    BalconyRoom room;
+    CollisionObstacle e[1];
+    e[0].position    = {5.5f, 0.9f, 5.0f};           // occupies y 0..1.8
+    e[0].halfExtents = {0.5f, 0.9f, 0.5f};
+
+    Player p;
+    p.position = {5.5f, 0.0f, 6.0f};
+    p.onGround = true;
+    p.velocity.y = JUMP_SPEED;                       // jump, then walk into it at apex
+    p.onGround = false;
+    Vec3 start = p.position;
+    for (int i = 0; i < 40; i++) {
+        p.velocity.x = 0.0f; p.velocity.z = -6.0f;
+        Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f, e, 1);
+    }
+    CHECK(p.position.z > start.z - 1.0f);            // still blocked mid-jump
+}

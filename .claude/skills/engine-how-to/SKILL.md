@@ -82,6 +82,15 @@ debug keys) lives in the `engine-reference` skill.
   them; author a stronger pad on the cell instead (0 = use the global). `Collision::jumpPadSpeed` is
   story-aware — it compares the feet against `effectiveFloorHeight`, because with the old base-floor
   read a pad sitting on ANY slab story could never fire at all.
+- **An XZ-only overlap test is a story-blind test.** `overlapsAnyObstacle` (the player-vs-entity gate in
+  `moveAndSlide`) ignored Y "because entities don't block jumping". Harmless while every floor was one
+  story; on a stacked floor it means an entity standing on ANY story blocks the player on EVERY story.
+  On FOUR_STORY — four stories over one 44x44 footprint with ~110 entities — something is nearly always
+  directly below you, so XZ movement was refused while the Y axis stayed free: **the player could jump
+  but could not walk**, from the moment they spawned. Blocking must depend on actually sharing space.
+  (Adding the Y test does NOT let you hop enemies on flat ground: a 0.8 m jump apex against a 1.8 m
+  body still overlaps. `pushPlayerFromEntities` was already a full 3-D AABB test and was fine.) When you
+  add verticality, audit EVERY 2-D overlap/query for the same assumption.
 - **Enemy density is per-STORY, not per-floor.** A stacked floor has ~4× the walkable area, so
   matching a flat floor's *total* count makes each story feel empty.
 
