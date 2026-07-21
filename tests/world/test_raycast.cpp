@@ -59,3 +59,33 @@ TEST_CASE("Raycast detects floor/ceiling inside the ray's starting cell") {
         CHECK_FALSE(h.hit);
     }
 }
+
+TEST_CASE("Raycast platform rim is per-slab with band-subtraction") {
+    // 5-wide open room, floor 0, ceiling 12 m (qu 48). Cell (2,1) carries a two-slab stack:
+    // L1 top 3 m (qu12) and L2 top 6 m (qu24). Undersides (PLATFORM_THICKNESS_Q = 2) clamp UP to
+    // the next-lower surface: L1 underside = max(12-2,0)=10 qu = 2.5 m; L2 underside =
+    // max(24-2,12)=22 qu = 5.5 m. Side bands are L1 (2.5,3) and L2 (5.5,6); the story between them
+    // (3..5.5 m) is OPEN and must emit NO rim.
+    LevelGrid g = openGrid(5, 3, 0, 48);
+    GridCell& c = LevelGridSystem::getCell(g, 2, 1);
+    LevelGridSystem::addPlatform(c, 12, 0);   // L1
+    LevelGridSystem::addPlatform(c, 24, 0);   // L2
+
+    SUBCASE("horizontal ray at an upper slab's band height hits that slab's rim") {
+        // y = 5.75 lands inside the L2 band (5.5,6): the balcony's visible edge.
+        RayHit h = Raycast::cast(g, {0.5f, 5.75f, 1.5f}, {1.0f, 0.0f, 0.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.cellX == 2);                          // stopped at the slab cell, not the far wall
+        CHECK(h.position.x == doctest::Approx(2.0f));
+        CHECK(h.normal.x == doctest::Approx(-1.0f));  // entered from -x → face normal points -x
+    }
+
+    SUBCASE("horizontal ray in the open story between slabs emits no rim and reaches the far wall") {
+        // y = 4.5 is between L1 top (3) and L2 underside (5.5) — clear air. A single-band rim
+        // (2.5..6) FALSELY snags here; per-slab band-subtraction lets the ray pass through to the
+        // out-of-bounds wall at the grid's +x edge (x = 5).
+        RayHit h = Raycast::cast(g, {0.5f, 4.5f, 1.5f}, {1.0f, 0.0f, 0.0f}, 10.0f);
+        REQUIRE(h.hit);
+        CHECK(h.position.x == doctest::Approx(5.0f));
+    }
+}

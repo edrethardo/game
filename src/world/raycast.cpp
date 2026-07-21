@@ -171,22 +171,27 @@ RayHit Raycast::cast(const LevelGrid& grid,
             return hit;
         }
 
-        // Platform RIM: entering a slab cell with the crossing Y inside the slab band is a hit on
-        // the slab's side face (the balcony's visible edge). Strict epsilons let surface-grazing
-        // shots — a sniper firing flat across their own slab top — pass instead of snagging.
+        // Platform RIM (per-slab): entering a slab cell with the crossing Y inside ANY slab's side
+        // band is a hit on that slab's edge face (the balcony's visible edge). getPlatformUnderside(i)
+        // is clamped UP to the next-lower surface, so stacked/thin slab bands never overlap and no
+        // phantom rim is emitted in the open story between two slabs (band-subtraction). Strict
+        // epsilons let a surface-grazing shot — a sniper firing flat across a slab top — pass.
         if (LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) {
-            const f32 yAt  = origin.y + dir.y * t;
-            const f32 topH = LevelGridSystem::getPlatformTop(grid, (u32)cx, (u32)cz);
-            const f32 undH = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
-            if (yAt > undH + 0.0001f && yAt < topH - 0.0001f) {
-                RayHit hit;
-                hit.hit      = true;
-                hit.position = origin + dir * t;
-                hit.normal   = lastNormal;
-                hit.cellX    = (u32)cx;
-                hit.cellZ    = (u32)cz;
-                hit.distance = t;
-                return hit;
+            const f32 yAt = origin.y + dir.y * t;
+            const u8  pc  = LevelGridSystem::platformCount(grid, (u32)cx, (u32)cz);
+            for (u32 i = 0; i < pc; ++i) {
+                const f32 topH = LevelGridSystem::getPlatformTop(grid, (u32)cx, (u32)cz, i);
+                const f32 undH = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz, i);
+                if (yAt > undH + 0.0001f && yAt < topH - 0.0001f) {
+                    RayHit hit;
+                    hit.hit      = true;
+                    hit.position = origin + dir * t;
+                    hit.normal   = lastNormal;
+                    hit.cellX    = (u32)cx;
+                    hit.cellZ    = (u32)cz;
+                    hit.distance = t;
+                    return hit;
+                }
             }
         }
 
