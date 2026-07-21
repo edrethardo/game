@@ -319,7 +319,22 @@ void updateHostileStates(Entity& e, u32 i,
             // body actually fits the straight line (width-aware) — else A* around it,
             // the fix for enemies wedging in corners a thin ray could see through.
             // The ATTACK transition below still keys off the real targetDist.
-            Vec3 chaseGoal = encircleGoal(e, pool, squads, grid, targetPos, targetDist);
+            // Cross-story chase (VERTICAL_HALL two-story floors): if the PLAYER is on the other
+            // story, head to the nearest ramp end on MY story — the entity story-snap then carries me
+            // up/down it. (Descending also works by walking off the balcony edge, but routing to a
+            // ramp avoids a suicidal drop.) Inert everywhere else: no portals ⇒ normal encircle goal.
+            Vec3 chaseGoal;
+            bool crossStory = false;
+            if (dungeon && dungeon->portalCount > 0 && !targetIsNPC) {
+                bool myUpper     = StoryNav::onUpperStory(grid, e.position, e.position.y - e.halfExtents.y);
+                bool targetUpper = StoryNav::onUpperStory(grid, targetPlayer->position, targetPlayer->position.y);
+                if (myUpper != targetUpper) {
+                    chaseGoal  = StoryNav::nearestPortalGoal(*dungeon, e.position, myUpper, targetUpper);
+                    crossStory = true;
+                }
+            }
+            if (!crossStory)
+                chaseGoal = encircleGoal(e, pool, squads, grid, targetPos, targetDist);
             Vec3 toGoal = chaseGoal - e.position;
 
             Vec3 moveDir = {0, 0, 0};

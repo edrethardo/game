@@ -66,6 +66,11 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     m_netFakeLossPct   = opt.netLossPct;
     m_netFakeLatencyMs = opt.netLatencyMs;
     m_netFakeJitterMs  = opt.netJitterMs;
+
+    // Dev door: force the two-story VERTICAL_HALL layout on every non-boss floor so the feature is
+    // playtestable without waiting for its ~12% weighted roll (see startGame). Applied like the net
+    // knobs — regardless of game-jump — so `--new warrior --floor 6 --vhall` lands straight in one.
+    m_forceVerticalHall = opt.verticalHall;
     if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
         LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
                  (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);

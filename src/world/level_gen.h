@@ -18,12 +18,28 @@ struct DungeonRoom {
 
 static constexpr u32 MAX_DUNGEON_ROOMS = 32;
 
+// A ramp linking the two stories of a VERTICAL_HALL chamber: the ramp foot (ground story) and its
+// top (balcony story), in world coords. The enemy cross-story chase routes to the near end
+// (nearestPortalGoal). Empty/unused for every other layout style.
+struct StoryPortal {
+    Vec3 lowPos;   // ramp foot @ ground
+    Vec3 highPos;  // ramp top  @ balcony
+};
+static constexpr u32 MAX_STORY_PORTALS = 16;
+
 struct DungeonResult {
     Vec3 spawnPos;                         // player spawn (world coords)
     DungeonRoom rooms[MAX_DUNGEON_ROOMS];  // generated rooms
     u32 roomCount;                         // number of rooms created
     u32 spawnRoomIdx;                      // dead-end room chosen for player spawn
     u32 exitRoomIdx;                       // farthest room from spawn for exit portal
+
+    // VERTICAL_HALL two-story metadata (zero/unused for other styles).
+    StoryPortal portals[MAX_STORY_PORTALS] = {};
+    u8   portalCount     = 0;
+    bool spawnOnUpper    = false;   // coin-flip: spawn on a balcony (⇒ exit on the ground: DESCEND)
+    Vec3 spawnBalconyPos = {};      // balcony centre of the spawn chamber (world)
+    Vec3 exitBalconyPos  = {};      // balcony centre of the exit chamber (world)
 };
 
 namespace LevelGen {
@@ -36,6 +52,7 @@ namespace LevelGen {
         CAVERN,         // cellular-automata cave with carved rect clearings as rooms
         GAUNTLET,       // serpentine chain of arenas — one long fight toward the exit
         HUB,            // grand central chamber, spoke corridors to perimeter vaults
+        VERTICAL_HALL,  // two-story chambers: ground pit + walk-under balcony, ramps, opposite-story exit
         COUNT
     };
 

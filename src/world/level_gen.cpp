@@ -797,12 +797,188 @@ static void carveHub(LevelGrid& grid, GenRNG& rng, DungeonResult& result)
 // Public entry points
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Style: VERTICAL_HALL — "The Stacked Loop". NOT a single arena — a Quake *location-based* topology: a
+// LOOP of nine distinct areas laid out 3×3, stacked across two stories and circled by a route that
+// spirals up and down. The four CORNERS are ground rooms (floor 0, cover pillars); the four MID-SIDES
+// are BALCONIES (`CELL_PLATFORM` slabs @ 3 m — walk ON top, walk UNDER the arcade beneath); the CENTRE
+// is an open VOID (ground, no balcony) that every balcony overlooks and drops into (the Quake sightline
+// + a cross-level shortcut). A PINWHEEL of four RAMPS climbs each corner up to the next balcony (the
+// enemies' chase-up route and yours after a drop, recorded as StoryPortals that also seat the snipers);
+// two CATWALKS cross the void @ 3 m linking opposite balconies (one INTACT, one BROKEN — a jump gap),
+// so the UPPER story is its own connected loop too. Circle the ring and you continuously ASCEND (corner
+// →ramp→balcony) and DESCEND (balcony→drop→void/corner); the exit sits on the FAR side AND the opposite
+// STORY, so every floor forces a full traversal and a level change. Enemies spawn on the ground story
+// (corners + void + the arcades under the balconies) and chase up the ramps; snipers hold the balconies
+// and plunge-fire into the void. The ground story is one fully-connected floor (trivially reachable);
+// the upper story hangs off it via ramps + catwalks. Two full stories, seed-built ⇒ replicates in co-op
+// with no wire change. Slab/ramp primitives pinned by test_platform; loop invariants by test_vertical_hall.
+// ---------------------------------------------------------------------------
+static constexpr u8  VH_SLAB_Q = 12;   // balcony floor: 12 qu = 3.0 m (2.5 m underside clears a body)
+static constexpr f32 VH_CEIL   = 8.0f; // tall hall: generous headroom above the 3 m balconies
+static constexpr u32 VH_RAMP   = 12;   // ramp length (cells): climbs 0→3 m at 0.25 m/step (walkable by bodies)
+
+static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
+                              s32& forcedSpawn, s32& forcedExit) {
+    const u32 W = grid.width, D = grid.depth;
+    if (W < 40 || D < 40) return;   // needs a big grid → else BSP fallback
+
+    const u32 hx = 1, hz = 1, hw = W - 2, hd = D - 2;
+    const f32 cs = grid.cellSize;
+    const u8  wallMat = (rng.f01() < 0.3f) ? 3 : 0;
+
+    // 1) LOWER story: the ENTIRE interior at floor 0, tall ceiling. One fully-connected ground floor —
+    //    the corners, the void, and the arcades under the balconies are all the same walkable story, so
+    //    reachability is guaranteed no matter what hangs above.
+    carveArea(grid, hx, hz, hw, hd, 0.0f, VH_CEIL, wallMat, 1, 2);
+    const u8 floorMat = LevelGridSystem::getCell(grid, hx + 1, hz + 1).floorMaterialId;
+
+    auto slab = [&](s32 x, s32 z, u8 q) {
+        if (x < 0 || z < 0 || !LevelGridSystem::isInBounds(grid, (u32)x, (u32)z)) return;
+        GridCell& c = LevelGridSystem::getCell(grid, (u32)x, (u32)z);
+        LevelGridSystem::setPlatform(c, q, floorMat);   // REPLACE-to-single (was: |=CELL_PLATFORM; platHeight=q; platMaterialId=floorMat)
+    };
+    auto slabRect = [&](u32 x0, u32 x1, u32 z0, u32 z1, u8 q) {
+        for (u32 z = z0; z <= z1; z++) for (u32 x = x0; x <= x1; x++) slab((s32)x, (s32)z, q);
+    };
+
+    // 3×3 band boundaries (thirds of the interior). Corners + mid-sides + centre void.
+    const u32 ax = hw / 3, az = hd / 3;
+    const u32 wX0 = hx,          wX1 = hx + ax - 1;           // west band  [1..14]
+    const u32 cX0 = hx + ax,     cX1 = hx + 2 * ax - 1;       // centre     [15..28]
+    const u32 eX0 = hx + 2 * ax, eX1 = hx + hw - 1;           // east band  [29..42]
+    const u32 nZ0 = hz,          nZ1 = hz + az - 1;           // north band
+    const u32 cZ0 = hz + az,     cZ1 = hz + 2 * az - 1;       // centre
+    const u32 sZ0 = hz + 2 * az, sZ1 = hz + hd - 1;           // south band
+
+    // 2) The four MID-SIDE BALCONIES @ 3 m (each fills its whole band region → its inner edge meets the
+    //    void, its outer edge the wall; the ground floor survives beneath as the walk-under arcade).
+    slabRect(cX0, cX1, nZ0, nZ1, VH_SLAB_Q);   // N balcony (north of the void)
+    slabRect(cX0, cX1, sZ0, sZ1, VH_SLAB_Q);   // S balcony
+    slabRect(wX0, wX1, cZ0, cZ1, VH_SLAB_Q);   // W balcony
+    slabRect(eX0, eX1, cZ0, cZ1, VH_SLAB_Q);   // E balcony
+
+    // 3) PINWHEEL RAMPS: each climbs from a corner floor up to the adjacent balcony edge (top cell abuts
+    //    the balcony @ h12; foot @ h1 abuts the corner floor). 2-wide, recorded as StoryPortals (the
+    //    cross-story chase + the sniper seats). The four together rotate the same way → an asymmetric spin.
+    auto ramp = [&](s32 xf, s32 zf, s32 dx, s32 dz, s32 px, s32 pz) {
+        s32 tx = xf, tz = zf;
+        for (u32 i = 0; i < VH_RAMP; i++) {
+            u8 h = (u8)(i + 1); if (h > VH_SLAB_Q) h = VH_SLAB_Q;
+            tx = xf + dx * (s32)i; tz = zf + dz * (s32)i;
+            slab(tx, tz, h); slab(tx + px, tz + pz, h);   // 2-wide across the climb
+        }
+        Vec3 foot = { (xf + 0.5f) * cs, 0.0f,             (zf + 0.5f) * cs };
+        Vec3 top  = { (tx + 0.5f) * cs, VH_SLAB_Q * 0.25f, (tz + 0.5f) * cs };
+        if (result.portalCount < MAX_STORY_PORTALS) result.portals[result.portalCount++] = { foot, top };
+    };
+    ramp((s32)wX0 + 2, (s32)nZ0 + 6, +1,  0, 0, 1);   // NW corner → N balcony (climb east)
+    ramp((s32)eX1 - 6, (s32)nZ0 + 2,  0, +1, 1, 0);   // NE corner → E balcony (climb south)
+    ramp((s32)eX1 - 2, (s32)sZ1 - 6, -1,  0, 0, 1);   // SE corner → S balcony (climb west)
+    ramp((s32)wX0 + 5, (s32)sZ1 - 2,  0, -1, 1, 0);   // SW corner → W balcony (climb north)
+
+    // 4) CATWALKS across the void @ 3 m linking OPPOSITE balconies, so the upper story is its own loop.
+    //    N↔S is INTACT (the reliable high road); W↔E is BROKEN with a 2-cell JUMP gap (miss → fall to the
+    //    void). They cross at the centre, so all four balconies interconnect up top.
+    const u32 mx = (cX0 + cX1) / 2, mz = (cZ0 + cZ1) / 2;
+    slabRect(mx, mx + 1, nZ1, sZ0, VH_SLAB_Q);                       // N↔S catwalk (intact)
+    for (u32 x = wX1; x <= eX0; x++)                                 // W↔E catwalk (broken jump gap)
+        if (x < cX0 + 1 || x > cX0 + 2) { slab((s32)x, (s32)mz, VH_SLAB_Q); slab((s32)x, (s32)mz + 1, VH_SLAB_Q); }
+
+    // 5) COVER PILLARS — floor-to-ceiling solid columns in the four corner rooms and the void, breaking
+    //    line-of-sight for the ground fight. Only on BARE floor (never a slab), so a balcony/ramp/catwalk
+    //    is never punched through; 2×2 and sparse, so a corner or the void can never be sealed.
+    auto pillars = [&](u32 rx0, u32 rx1, u32 rz0, u32 rz1, u32 n) {
+        for (u32 k = 0; k < n; k++) {
+            u32 px = rng.range(rx0, rx1), pz = rng.range(rz0, rz1);
+            for (u32 dz = 0; dz < 2; dz++) for (u32 dx = 0; dx < 2; dx++) {
+                if (!LevelGridSystem::isInBounds(grid, px + dx, pz + dz)) continue;
+                GridCell& c = LevelGridSystem::getCell(grid, px + dx, pz + dz);
+                if (!(c.flags & CELL_PLATFORM)) c.flags = CELL_SOLID;
+            }
+        }
+    };
+    pillars(wX0 + 1, wX1 - 2, nZ0 + 1, nZ1 - 2, 2);   // NW room
+    pillars(eX0 + 1, eX1 - 2, nZ0 + 1, nZ1 - 2, 2);   // NE room
+    pillars(eX0 + 1, eX1 - 2, sZ0 + 1, sZ1 - 2, 2);   // SE room
+    pillars(wX0 + 1, wX1 - 2, sZ0 + 1, sZ1 - 2, 2);   // SW room
+    pillars(cX0 + 2, cX1 - 3, cZ0 + 2, cZ1 - 3, 3);   // the void
+
+    // 6) Player-only JUMP-PADS in the void — fling you from the ground back up onto a balcony (air-steer
+    //    to the nearest edge). Enemies never jump, so this is YOUR fast route up, off the ramps.
+    {
+        auto jpad = [&](u32 x, u32 z) {
+            if (!LevelGridSystem::isInBounds(grid, x, z)) return;
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            if (!(c.flags & (CELL_PLATFORM | CELL_LEDGE | CELL_SOLID))) c.flags |= CELL_JUMPPAD;
+        };
+        jpad(cX0 + 2, cZ0 + 2);   // NW of void → up to the N/W balcony
+        jpad(cX1 - 2, cZ1 - 2);   // SE of void → up to the S/E balcony
+    }
+
+    // 7) Rooms for enemy/loot placement — the nine areas, all at floor 0 (enemies seed on the ground
+    //    story; snipers get lifted onto the balconies by spawnFloorNests via the ramp portals).
+    auto addRoom = [&](u32 rx, u32 rz, u32 rw, u32 rd) -> u32 {
+        DungeonRoom& r = result.rooms[result.roomCount];
+        r = DungeonRoom{}; r.x = rx; r.z = rz; r.w = rw; r.d = rd; r.floorHeight = 0.0f; r.wallMat = wallMat;
+        return result.roomCount++;
+    };
+    const u32 rNW = addRoom(wX0, nZ0, ax, az), rNE = addRoom(eX0, nZ0, ax, az);
+    const u32 rSE = addRoom(eX0, sZ0, ax, az), rSW = addRoom(wX0, sZ0, ax, az);
+    (void) addRoom(cX0, cZ0, ax, az);                                   // the void (index 4)
+    const u32 rMN = addRoom(cX0, nZ0, ax, az), rME = addRoom(eX0, cZ0, ax, az);
+    const u32 rMS = addRoom(cX0, sZ0, ax, az), rMW = addRoom(wX0, cZ0, ax, az);
+
+    // Endpoints: a GROUND corner and a BALCONY mid on the FAR side (a mid this corner does NOT touch), so
+    // spawn and exit are always on opposite sides AND opposite stories. A coin-flip picks whether you
+    // ASCEND (spawn in the corner, exit up on the balcony) or DESCEND (spawn on the balcony, exit down in
+    // the corner). startGame applies spawnBalconyPos/exitBalconyPos verbatim (upper = y 3 m, ground = y 0).
+    const Vec3 cornerPos[4] = {   // NW, NE, SE, SW — inset from the true corner, clear of the ramps
+        { (wX0 + 3.5f) * cs, 0.0f, (nZ0 + 3.5f) * cs }, { (eX1 - 2.5f) * cs, 0.0f, (nZ0 + 3.5f) * cs },
+        { (eX1 - 2.5f) * cs, 0.0f, (sZ1 - 2.5f) * cs }, { (wX0 + 3.5f) * cs, 0.0f, (sZ1 - 2.5f) * cs } };
+    const Vec3 midPos[4] = {       // N, E, S, W balcony centres (y = 3 m)
+        { (cX0 + ax * 0.5f) * cs, VH_SLAB_Q * 0.25f, (nZ0 + az * 0.5f) * cs },
+        { (eX0 + ax * 0.5f) * cs, VH_SLAB_Q * 0.25f, (cZ0 + az * 0.5f) * cs },
+        { (cX0 + ax * 0.5f) * cs, VH_SLAB_Q * 0.25f, (sZ0 + az * 0.5f) * cs },
+        { (wX0 + ax * 0.5f) * cs, VH_SLAB_Q * 0.25f, (cZ0 + az * 0.5f) * cs } };
+    const u32 cornerRoom[4] = { rNW, rNE, rSE, rSW };
+    const u32 midRoom[4]    = { rMN, rME, rMS, rMW };
+    const u32 farMidOf[4][2] = { {1, 2}, {2, 3}, {0, 3}, {0, 1} };   // mids the corner does NOT touch
+    const u32 cSel   = rng.range(0, 4);
+    const u32 mSel   = farMidOf[cSel][rng.range(0, 2)];
+    const bool exitUp = rng.f01() < 0.5f;                            // true → ascend to the exit
+    result.spawnBalconyPos = exitUp ? cornerPos[cSel] : midPos[mSel];
+    result.exitBalconyPos  = exitUp ? midPos[mSel]    : cornerPos[cSel];
+    result.spawnOnUpper    = !exitUp;
+    forcedSpawn = (s32)(exitUp ? cornerRoom[cSel] : midRoom[mSel]);
+    forcedExit  = (s32)(exitUp ? midRoom[mSel]    : cornerRoom[cSel]);
+
+    // A body must never start inside a pillar: open a 2-cell pad around the GROUND endpoint (the balcony
+    // endpoint is a slab, which pillars skip). Clears pillars AND any stray jump-pad.
+    auto clearPad = [&](Vec3 p) {
+        if (p.y > 1.0f) return;
+        u32 gx, gz; if (!LevelGridSystem::worldToGrid(grid, p, gx, gz)) return;
+        for (s32 dz = -2; dz <= 2; dz++) for (s32 dx = -2; dx <= 2; dx++) {
+            s32 x = (s32)gx + dx, z = (s32)gz + dz;
+            if (x < 0 || z < 0 || !LevelGridSystem::isInBounds(grid, (u32)x, (u32)z)) continue;
+            GridCell& c = LevelGridSystem::getCell(grid, (u32)x, (u32)z);
+            if (c.flags & (CELL_SOLID | CELL_JUMPPAD)) {
+                c.flags = CELL_FLOOR | CELL_CEILING; c.floorHeight = 0;
+                c.ceilingHeight = (u8)(VH_CEIL / 0.25f); c.floorMaterialId = floorMat;
+            }
+        }
+    };
+    clearPad(result.spawnBalconyPos);
+    clearPad(result.exitBalconyPos);
+}
+
 const char* LevelGen::styleName(LayoutStyle style) {
     switch (style) {
         case LayoutStyle::BSP_ROOMS: return "rooms";
         case LayoutStyle::CAVERN:    return "cavern";
         case LayoutStyle::GAUNTLET:  return "gauntlet";
         case LayoutStyle::HUB:       return "hub";
+        case LayoutStyle::VERTICAL_HALL: return "vertical";
         default:                     return "?";
     }
 }
@@ -822,17 +998,27 @@ LevelGen::LayoutStyle LevelGen::pickLayoutStyle(u32 seed, u32 floor) {
     // vault hubs in the Catacombs. Classic stays the most common style overall
     // so the structural floors keep reading as events, not the norm.
     u8 tier = floor >= 41 ? 4 : floor >= 31 ? 3 : floor >= 21 ? 2 : floor >= 11 ? 1 : 0;
-    static constexpr u8 kWeights[5][4] = {
-        {55, 15, 15, 15},   // 4-10  Stone Dungeon
-        {35, 15, 20, 30},   // 11-20 Catacombs
-        {25, 45, 10, 20},   // 21-30 Spider Caverns
-        {25, 15, 40, 20},   // 31-40 Hellforge
-        {25, 25, 20, 30},   // 41-50 Void
+    // Per-tier weights [BSP, CAVERN, GAUNTLET, HUB, VERTICAL_HALL]; each row sums to 100.
+    static constexpr u8 kWeights[5][5] = {
+        {50, 13, 12, 12, 13},   // 4-10  Stone Dungeon
+        {30, 13, 17, 25, 15},   // 11-20 Catacombs
+        {22, 40,  8, 18, 12},   // 21-30 Spider Caverns
+        {22, 12, 36, 18, 12},   // 31-40 Hellforge
+        {22, 22, 18, 26, 12},   // 41-50 Void
     };
     u32 acc = 0;
-    for (u32 s = 0; s < 4; s++) {
+    for (u32 s = 0; s < 5; s++) {
         acc += kWeights[tier][s];
-        if (roll < acc) return static_cast<LayoutStyle>(s);
+        if (roll < acc) {
+            LayoutStyle st = static_cast<LayoutStyle>(s);
+            // VERTICAL_HALL is a NON-BOSS style: boss floors (every 5th — the milestone floors
+            // 5,10,…,50) expand a room into a boss arena and rebuild the mesh, which would stomp
+            // balcony cells; and floors 4-5 run on the tiny tutorial grid. Fall back to classic BSP
+            // there (VERTICAL_HALL only appears on floor-6+ non-boss floors).
+            if (st == LayoutStyle::VERTICAL_HALL && (floor < 6 || floor % 5 == 0))
+                return LayoutStyle::BSP_ROOMS;
+            return st;
+        }
     }
     return LayoutStyle::BSP_ROOMS;
 }
@@ -849,6 +1035,8 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
         case LayoutStyle::CAVERN:   carveCavern(grid, rng, result); break;
         case LayoutStyle::GAUNTLET: carveGauntlet(grid, rng, result, forcedSpawn, forcedExit); break;
         case LayoutStyle::HUB:      carveHub(grid, rng, result); break;
+        case LayoutStyle::VERTICAL_HALL:
+            carveVerticalHall(grid, rng, result, forcedSpawn, forcedExit); break;
         case LayoutStyle::BSP_ROOMS:
         default:                    carveRoomsBSP(grid, rng, result); break;
     }

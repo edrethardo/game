@@ -529,6 +529,13 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // Floors 1-3 stay classic BSP (tiny tutorial grids); deeper floors mix in
     // caverns / gauntlets / vault hubs with per-tier weights (level_gen.cpp).
     LevelGen::LayoutStyle layoutStyle = LevelGen::pickLayoutStyle(dungeonSeed, m_level.currentFloor);
+    // Dev door (--vhall): force the two-story layout on any non-boss floor (milestone bosses land
+    // every 5th floor and would stomp balconies) so the feature is playtestable on demand.
+    if (m_forceVerticalHall && m_level.currentFloor % 5 != 0)
+        layoutStyle = LevelGen::LayoutStyle::VERTICAL_HALL;
+    // A two-story hall needs room for two pits + wide walk-under galleries + long ramps either side
+    // of the divider — force a large grid regardless of floor so the upper floor is a real floor.
+    if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL && gridSize < 44) gridSize = 44;
 
     // Generate the level once — spawn/exit room selection always succeeds
     // by falling back to the best available rooms.
@@ -537,6 +544,14 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     m_level.layoutStyle = layoutStyle;   // consumed by spawnFloorEnemies (cavern detection comp)
     DungeonResult& dungeon = m_level.dungeon;
     Vec3 spawnPos = dungeon.spawnPos;
+
+    // VERTICAL_HALL (Chasm & Bridges): spawnBalconyPos is the explicit entrance position — the upper
+    // slab (y = 3 m) or the open chasm floor (y = 0), always on the OPPOSITE side + story from the exit
+    // (exitBalconyPos, applied at the exit-door block below). Both are honoured whether upper or lower.
+    if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
+        lengthSq(dungeon.spawnBalconyPos) > 0.0f) {
+        spawnPos = dungeon.spawnBalconyPos;
+    }
 
     // ---------------------------------------------------------------------------
     // Floor theme — retheme all cells based on the current depth tier.
@@ -620,6 +635,10 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
 
     // Spawn enemies procedurally — themed variants + unique monsters per tier
     spawnFloorEnemies(dungeon, currentTier);
+    // VERTICAL_HALL: seat ranged "sniper nests" on the balconies (the normal room spawn only places
+    // ground-story enemies). They hold + fire down while they have LOS; melee chase across stories.
+    if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL)
+        spawnFloorNests(dungeon, currentTier);
 
     // Assign entities to room-based squads now that all enemies are placed
     SquadSystem::rebuild(m_level.squads, dungeon, m_entities);
@@ -686,7 +705,16 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         f32 doorY = lastRoom.floorHeight;
         m_level.floorDoorPos    = {doorX, doorY, doorZ};
         m_level.floorDoorActive = true;
-        LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_level.currentFloor, doorX, doorY, doorZ);
+        // VERTICAL_HALL (Chasm & Bridges): spawn AND exit both sit on the upper floor, on OPPOSITE
+        // sides of the chasm — you cross to reach the door. exitBalconyPos carries the far-side slab
+        // position; move the door there (independent of spawn — both stories are the upper slab here).
+        // The portal render + 3D proximity gate handle a raised exit for free.
+        if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
+            lengthSq(dungeon.exitBalconyPos) > 0.0f) {
+            m_level.floorDoorPos = dungeon.exitBalconyPos;
+        }
+        LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_level.currentFloor,
+                 m_level.floorDoorPos.x, m_level.floorDoorPos.y, m_level.floorDoorPos.z);
 
         // Build BFS flow field so NPCs can pathfind toward the exit
         LevelGridSystem::buildFlowField(m_level.grid, m_level.floorDoorPos);

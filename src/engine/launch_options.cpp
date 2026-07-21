@@ -145,6 +145,9 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
         } else if (ieq(a, "--arena-couch")) {
             opt.arenaCouch = true;
             opt.active     = true;
+        } else if (ieq(a, "--vhall")) {
+            opt.verticalHall = true;   // modifier on normal play (needs --new/--load); not a separate entry
+            opt.active       = true;
         } else if (ieq(a, "--lan")) {
             opt.upnp = false;
         } else if (ieq(a, "--fullscreen")) {

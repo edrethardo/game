@@ -77,8 +77,11 @@ void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
     u32 gx, gz;
     if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
         !LevelGridSystem::isSolid(grid, gx, gz)) {
-        f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
-        e.position.y = floorH + e.halfExtents.y;
+        // Story-aware (see Collision::snapEntityToFloor): select the slab top vs the ground floor
+        // from the entity's FEET, so enemies can climb ramps onto a balcony, stand under one, and
+        // drop off its edge — the foundation of two-story chase. Identity off platform cells.
+        const f32 feetY = e.position.y - e.halfExtents.y;
+        e.position.y = LevelGridSystem::effectiveFloorHeight(grid, gx, gz, feetY) + e.halfExtents.y;
     }
 }
 

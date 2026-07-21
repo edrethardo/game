@@ -11,6 +11,7 @@
 #include "game/squad.h"
 #include "world/level_grid.h"
 #include "world/level_gen.h"
+#include "world/story_nav.h"   // cross-story chase helpers (onUpperStory / nearestPortalGoal)
 #include "world/pathfinder.h"
 #include "game/combat.h"
 #include "game/boss_def.h"

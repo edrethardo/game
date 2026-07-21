@@ -65,6 +65,8 @@ add_executable(dungeon_tests
     world/test_tile_noise.cpp
     world/test_collision_push.cpp    # a push may crowd the player, never shove them into a wall
     world/test_platform.cpp          # CELL_PLATFORM slab: story selection, walk-under collision, ray planes
+    world/test_vertical_hall.cpp     # VERTICAL_HALL: room-count, balconies, ramp portals, spawn/exit
+    world/test_story_nav.cpp         # pure cross-story chase helpers (onUpperStory / nearestPortalGoal)
     world/test_multislab.cpp         # multi-slab GridCell authorers/getters (FOUR_STORY foundation)
     world/test_mesh_scratch.cpp      # mesher scratch headroom: fully-slabbed same-material section fits
     renderer/test_hud_cooldown.cpp

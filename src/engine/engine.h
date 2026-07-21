@@ -334,6 +334,7 @@ private:
     u32  m_netFakeLatencyMs  = 0;    // D5: ms of one-way simulated latency on all sends
     u32  m_netFakeJitterMs   = 0;    // --net-jitter: pushed into Net:: each frame (serverNetPre/clientNetPre)
     u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
+    bool m_forceVerticalHall = false; // dev (--vhall): force the two-story VERTICAL_HALL on non-boss floors
     u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
     // Shaky-client-FOV diagnostic (accumulated per-correction in clientNetPost, reported +
     // reset by the 1 Hz [NET-GRAPH] log). Together these show whether the camera shake is
@@ -1271,6 +1272,9 @@ private:
     // Floor-population helpers called by startGame in engine_spawn.cpp.
     // All receive dungeon by reference because spawnFloorBoss mutates room geometry.
     void spawnFloorEnemies(DungeonResult& dungeon, u8 tier);
+    // VERTICAL_HALL only: place ranged "sniper nest" enemies on the balconies (ramp-top positions),
+    // floor-scaled like normal spawns but at the balcony story Y (not the ground snap). See startGame.
+    void spawnFloorNests(const DungeonResult& dungeon, u8 tier);
     // Promote a just-spawned enemy to a CHAMPION pack leader and spawn its minions around it.
     // Returns true if it did. Called from BOTH spawn paths in spawnFloorEnemies (JSON + fallback)
     // so the two can't drift. Minions are cloned from the leader's PRE-buff stats, which is why

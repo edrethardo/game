@@ -1350,6 +1350,64 @@ void Engine::togglePetCompanion(u8 ownerSlot, u16 petDefId)
     LOG_INFO("Pet: %s summoned (owner slot %u)", m_itemDefs[petDefId].name, ownerSlot);
 }
 
+void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
+    if (dungeon.portalCount == 0) return;
+
+    // Snipers = ranged defs of this tier (attackRange > 5: Bone Archer/Mage, etc.). Prefer GROUNDED
+    // ones so they sit ON the balcony (the story-snap keeps them there); fall back to flyers, which
+    // hover above it and still shoot down.
+    const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
+    u32 tierCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
+    const EnemyDef* ranged[MAX_ENEMY_DEFS];
+    u32 rangedCount = 0;
+    for (u32 i = 0; i < tierCount; i++)
+        if (tierDefs[i]->attackRange > 5.0f && !tierDefs[i]->flying) ranged[rangedCount++] = tierDefs[i];
+    if (rangedCount == 0)
+        for (u32 i = 0; i < tierCount; i++)
+            if (tierDefs[i]->attackRange > 5.0f) ranged[rangedCount++] = tierDefs[i];
+    if (rangedCount == 0) return;   // no ranged enemies this tier → no nests
+
+    const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
+                        * GameConst::difficultyDamageBump(m_difficulty);
+
+    for (u8 pIdx = 0; pIdx < dungeon.portalCount; pIdx++) {
+        if (m_entities.activeCount >= MAX_ENTITIES - 4) break;
+        const Vec3 balc = dungeon.portals[pIdx].highPos;   // ramp top = a balcony spot
+        const u32 nest = 1 + (static_cast<u32>(std::rand()) & 1u);   // 1-2 snipers per balcony
+        for (u32 k = 0; k < nest; k++) {
+            if (m_entities.activeCount >= MAX_ENTITIES - 2) break;
+            const EnemyDef& def = *ranged[static_cast<u32>(std::rand()) % rangedCount];
+            // Spread along the balcony (+X) and a touch into it (+Z), at the balcony story Y.
+            Vec3 pos = balc + Vec3{ 1.5f * static_cast<f32>(k), def.halfExtents.y, 0.8f };
+            EntityHandle h = EntitySystem::spawn(m_entities, pos, def.halfExtents, def.flying,
+                def.health, def.moveSpeed, def.detectionRange, def.attackRange, def.attackCooldown, def.damage);
+            Entity* ent = handleGet(m_entities, h);
+            if (!ent) break;
+            ent->meshId       = def.meshId;
+            ent->materialId   = def.materialId;
+            ent->enemyType    = def.enemyType;
+            ent->enemyRole    = def.role;
+            ent->aiPreference = def.aiPreference;
+            const ptrdiff_t slot = &def - m_enemyDefs.defs;
+            ent->enemyDefIdx = (slot >= 0 && slot < static_cast<ptrdiff_t>(m_enemyDefs.count))
+                             ? static_cast<u8>(slot) : 0xFF;
+            ent->baseMoveSpeed      = ent->moveSpeed;
+            ent->baseAttackCooldown = ent->attackCooldown;
+            ent->level = static_cast<u16>(effectiveFloor);
+            ent->health   *= hpMult;
+            ent->maxHealth = ent->health;
+            ent->damage   *= dmgMult;
+            ent->onHitEffect   = def.onHitEffect;
+            ent->onHitDuration = def.onHitDuration;
+            ent->onHitDps      = def.onHitDps * dmgMult;
+            // Deliberately NO ensureNotInWall / ground snap here — that would pull the sniper down to
+            // the ground story. The balcony Y is authoritative; the story-aware snap keeps it on the slab.
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // spawnFloorShrines — scatter walk-up shrines through the floor.
 //
