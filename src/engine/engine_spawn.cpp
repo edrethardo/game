@@ -322,6 +322,16 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
     const f32 detectMult =
         (m_level.layoutStyle == LevelGen::LayoutStyle::CAVERN) ? 1.5f : 1.0f;
 
+    // FOUR_STORY guard: a stacked-slab floor has drop-holes punched through its upper stories. A spawn
+    // cell over a hole has no slab at the room's story, so effectiveFloorHeight resolves to a LOWER
+    // surface — seeding there would instantly snap the enemy down a level, dumping upper-story packs
+    // onto the ground. Treat it like a wall (reject → nudge to room centre). No-op on flat/2-story
+    // floors, where every cell resolves to room.floorHeight within tolerance.
+    auto notWalkableAtStory = [&](u32 gx, u32 gz, f32 storyY) -> bool {
+        return std::fabs(LevelGridSystem::effectiveFloorHeight(m_level.grid, gx, gz, storyY) - storyY)
+               >= PLATFORM_STEP_TOLERANCE;
+    };
+
     // Collect JSON defs for this tier
     const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
     u32 tierDefCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
@@ -401,7 +411,8 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                 Vec3 spawnPos = {ex, spawnY, ez};
                 u32 spGx, spGz;
                 if (LevelGridSystem::worldToGrid(m_level.grid, spawnPos, spGx, spGz) &&
-                    LevelGridSystem::isSolid(m_level.grid, spGx, spGz)) {
+                    (LevelGridSystem::isSolid(m_level.grid, spGx, spGz) ||
+                     notWalkableAtStory(spGx, spGz, room.floorHeight))) {
                     ex = (room.x + room.w * 0.5f) * m_level.grid.cellSize;
                     ez = (room.z + room.d * 0.5f) * m_level.grid.cellSize;
                     spawnPos = {ex, spawnY, ez};
@@ -514,7 +525,8 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                 Vec3 spawnPos = {ex, spawnY, ez};
                 u32 spGx, spGz;
                 if (LevelGridSystem::worldToGrid(m_level.grid, spawnPos, spGx, spGz) &&
-                    LevelGridSystem::isSolid(m_level.grid, spGx, spGz)) {
+                    (LevelGridSystem::isSolid(m_level.grid, spGx, spGz) ||
+                     notWalkableAtStory(spGx, spGz, room.floorHeight))) {
                     ex = (room.x + room.w * 0.5f) * m_level.grid.cellSize;
                     ez = (room.z + room.d * 0.5f) * m_level.grid.cellSize;
                     spawnPos = {ex, spawnY, ez};

@@ -10,6 +10,7 @@
 #include "world/level_grid.h"
 #include "world/collision.h"   // JUMPPAD_LAUNCH, the default the maze pads must beat
 
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -276,4 +277,33 @@ TEST_CASE("FOUR_STORY: finalize adjacency is story-aware (0-vs-3 not adjacent, s
         }
     CHECK(sameStoryLinks > 0);   // the <1.5 m branch actually fires
     LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("FourStory spawnFloorEnemies guard: punched drop-hole cell fails the walkable-surface test") {
+    // Pins the exact predicate spawnFloorEnemies uses to reject a spawn cell over a hole:
+    //   accept iff |effectiveFloorHeight(grid, gx, gz, room.floorHeight) - room.floorHeight| < PLATFORM_STEP_TOLERANCE
+    LevelGrid grid;
+    LevelGridSystem::init(grid, 8, 8, 1.0f);
+    // Solid-walled interior carrying the full 3-slab stack (L1=12, L2=24, L3=36 quarter-units).
+    for (u32 z = 1; z < 7; z++)
+        for (u32 x = 1; x < 7; x++) {
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            c.flags = CELL_FLOOR;
+            c.floorHeight = 0;
+            LevelGridSystem::addPlatform(c, 12, 1);   // FS_L1_Q
+            LevelGridSystem::addPlatform(c, 24, 1);   // FS_L2_Q
+            LevelGridSystem::addPlatform(c, 36, 1);   // FS_L3_Q
+        }
+    // An L3 room seeds enemies at room.floorHeight = 9.0 m (FS_L3_Q * 0.25).
+    const f32 roomFloorY = 36 * 0.25f;   // 9.0 m
+    // Intact cell (4,4): highest slab top == 9.0 → within tolerance → ACCEPTED.
+    const f32 effIntact = LevelGridSystem::effectiveFloorHeight(grid, 4, 4, roomFloorY);
+    CHECK(effIntact == doctest::Approx(roomFloorY));
+    CHECK(std::fabs(effIntact - roomFloorY) < PLATFORM_STEP_TOLERANCE);
+    // Punch the L3 slab out of (3,3) — a drop-hole cell on the L3 story.
+    LevelGridSystem::removePlatform(LevelGridSystem::getCell(grid, 3, 3), 36);
+    // Hole cell: no L3 slab, so the story selector drops to L2 (6.0 m) → NOT within tolerance → REJECTED.
+    const f32 effHole = LevelGridSystem::effectiveFloorHeight(grid, 3, 3, roomFloorY);
+    CHECK(effHole == doctest::Approx(24 * 0.25f));   // 6.0 m
+    CHECK(std::fabs(effHole - roomFloorY) >= PLATFORM_STEP_TOLERANCE);
 }
