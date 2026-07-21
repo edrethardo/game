@@ -98,9 +98,13 @@ f32 Collision::jumpPadSpeed(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) 
                 // an over-strong pad simply flies out of the level and drops back in — on a four-story
                 // stack a top-story pad reached 15.4 m under a 12 m ceiling. Cap the launch at the
                 // speed whose apex just fits the headroom: v = sqrt(2*g*h), h = ceiling - feet - body.
-                const f32 headroom = LevelGridSystem::getCeilingHeight(grid, (u32)cx, (u32)cz)
-                                     - fh - PLAYER_HEIGHT;
-                if (headroom <= 0.0f) return 0.0f;                  // nowhere to go — don't fire
+                // A cell with no ceiling ABOVE the standing surface has no ceiling to launch through
+                // — either none was authored (height 0) or the body already spans it. Treat that as
+                // open sky and fire at full strength, so every pad authored before this clamp behaves
+                // exactly as it did; only a genuine ceiling overhead throttles the launch.
+                const f32 ceilY = LevelGridSystem::getCeilingHeight(grid, (u32)cx, (u32)cz);
+                const f32 headroom = ceilY - fh - PLAYER_HEIGHT;
+                if (headroom <= 0.0f) return want;
                 const f32 vMax = sqrtf(2.0f * -GRAVITY * headroom);
                 return (want < vMax) ? want : vMax;
             }
