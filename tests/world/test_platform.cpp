@@ -405,3 +405,39 @@ TEST_CASE("Descent fall: a high-velocity single tick still lands on the top slab
     CHECK(p.onGround);
     CHECK(p.position.y == doctest::Approx(9.0f));   // caught on L3 despite the 30 m/s descent
 }
+
+TEST_CASE("Jump pad never launches a body through the ceiling") {
+    // Open cells deliberately do NOT collide with their real ceiling (a 0.8 m jump can't reach one),
+    // so an over-strong pad does not bonk — it flies clean out of the level and drops back in. On a
+    // four-story stack a top-story pad (23 m/s, 6.6 m apex) reached 15.4 m under a 12 m ceiling.
+    // jumpPadSpeed therefore caps the launch at the speed whose apex just fits the headroom.
+    StackedRoom room;   // interior cells: slabs at 3/6/9 m, ceiling 12 m (48 qu)
+    for (u32 z = 1; z <= 10; z++)
+        for (u32 x = 1; x <= 10; x++) {
+            GridCell& c = room.grid.cells[z * 12 + x];
+            c.flags     = static_cast<u8>(c.flags | CELL_JUMPPAD);
+            c.jumpPadQ  = 92;      // 23 m/s -> 6.6 m apex, far more than the top story has room for
+        }
+
+    // On the TOP story the pad must be throttled to the 1.2 m of headroom (12 - 9 - 1.8), not fire
+    // at its authored strength.
+    const f32 vTop = Collision::jumpPadSpeed({6.0f, 9.0f, 6.0f}, PLAYER_HALF_WIDTH, room.grid);
+    CHECK(vTop > 0.0f);
+    CHECK((vTop * vTop) / 80.0f <= 1.2f + 0.01f);      // apex fits under the ceiling
+
+    // Down on the ground story there IS room, so the authored strength survives intact.
+    const f32 vGround = Collision::jumpPadSpeed({6.0f, 0.0f, 6.0f}, PLAYER_HALF_WIDTH, room.grid);
+    CHECK(vGround == doctest::Approx(23.0f));
+
+    // And simulated end-to-end: a body launched from the top story never breaks the ceiling plane.
+    Player p;
+    p.position = {6.0f, 9.0f, 6.0f};
+    p.velocity = {0, 0, 0};
+    p.onGround = true;
+    f32 maxHead = 0.0f;
+    for (int i = 0; i < 240; i++) {
+        Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+        maxHead = std::max(maxHead, p.position.y + PLAYER_HEIGHT);
+    }
+    CHECK(maxHead <= 12.0f + 0.001f);
+}

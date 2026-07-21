@@ -89,10 +89,21 @@ f32 Collision::jumpPadSpeed(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) 
             // the surface to compare against is the one the feet are actually on, not the base floor.
             // (getFloorHeight here meant a pad on any slab could never fire.)
             const f32 fh = LevelGridSystem::effectiveFloorHeight(grid, (u32)cx, (u32)cz, feetPos.y);
-            if (fh <= feetPos.y + 0.001f && fh >= feetPos.y - STEP_UP_HEIGHT)
+            if (fh <= feetPos.y + 0.001f && fh >= feetPos.y - STEP_UP_HEIGHT) {
                 // Per-cell strength (quarter m/s); 0 means "use the default", so every pad authored
                 // before jumpPadQ existed launches exactly as it always did.
-                return c.jumpPadQ ? c.jumpPadQ * 0.25f : JUMPPAD_LAUNCH;
+                const f32 want = c.jumpPadQ ? c.jumpPadQ * 0.25f : JUMPPAD_LAUNCH;
+                // Never launch a body THROUGH the ceiling. Open cells deliberately don't collide with
+                // their real ceiling (a 0.8 m jump can't reach one, and that legacy stays frozen), so
+                // an over-strong pad simply flies out of the level and drops back in — on a four-story
+                // stack a top-story pad reached 15.4 m under a 12 m ceiling. Cap the launch at the
+                // speed whose apex just fits the headroom: v = sqrt(2*g*h), h = ceiling - feet - body.
+                const f32 headroom = LevelGridSystem::getCeilingHeight(grid, (u32)cx, (u32)cz)
+                                     - fh - PLAYER_HEIGHT;
+                if (headroom <= 0.0f) return 0.0f;                  // nowhere to go — don't fire
+                const f32 vMax = sqrtf(2.0f * -GRAVITY * headroom);
+                return (want < vMax) ? want : vMax;
+            }
         }
     }
     return 0.0f;
