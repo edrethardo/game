@@ -12,6 +12,7 @@
 
 #include "world/level_gen.h"
 #include "core/log.h"
+#include <cmath>
 #include <cstring>
 
 // --- shared generation plumbing ---
@@ -225,7 +226,11 @@ static void finalizeDungeon(LevelGrid& grid, DungeonResult& result, const char* 
             DungeonRoom& rj = result.rooms[j];
             bool xOverlap = (ri.x < rj.x + rj.w + 3) && (rj.x < ri.x + ri.w + 3);
             bool zOverlap = (ri.z < rj.z + rj.d + 3) && (rj.z < ri.z + ri.d + 3);
-            if (xOverlap && zOverlap)
+            // Rooms on different STORIES (FOUR_STORY stacks four same-XZ room sets 3 m apart) are
+            // never neighbours — else all four mark mutually adjacent and spawnFloorEnemies (which
+            // skips the spawn room plus its adjacent and 2-hop rooms) seeds ZERO enemies on the whole
+            // floor. No-op for the flat styles, whose raised floors are all 0.5 m.
+            if (xOverlap && zOverlap && fabsf(ri.floorHeight - rj.floorHeight) < 1.5f)
                 addAdjacency(ri, static_cast<u16>(i), rj, static_cast<u16>(j));
         }
     }

@@ -244,3 +244,36 @@ TEST_CASE("FOUR_STORY: a sub-40 grid falls back to BSP") {
     CHECK_FALSE(r.spawnOnUpper);
     LevelGridSystem::shutdown(g);
 }
+
+TEST_CASE("FOUR_STORY: finalize adjacency is story-aware (0-vs-3 not adjacent, same-story yes)") {
+    // Without the floorHeight gate, the four same-XZ stacked room sets all mark mutually adjacent, and
+    // spawnFloorEnemies (skips spawn + adjacent + 2-hop rooms) then seeds ZERO enemies. The fix adds
+    // `&& fabsf(dhi - dhj) < 1.5f`: cross-story pairs (3/6/9 m apart) are never neighbours, while
+    // within-a-story pairs (diff 0, i.e. also the flat 0-vs-0.5 case < 1.5) still link.
+    LevelGrid g;
+    LevelGridSystem::init(g, 48, 48, 1.0f);
+    DungeonResult r = LevelGen::generate(g, 20250720u, 48, 48, LevelGen::LayoutStyle::FOUR_STORY);
+
+    auto bboxTouch = [](const DungeonRoom& a, const DungeonRoom& b) {
+        bool xo = (a.x < b.x + b.w + 3) && (b.x < a.x + a.w + 3);
+        bool zo = (a.z < b.z + b.d + 3) && (b.z < a.z + a.d + 3);
+        return xo && zo;
+    };
+    auto listed = [](const DungeonRoom& a, u16 bIdx) {
+        for (u8 k = 0; k < a.adjacentCount; k++) if (a.adjacentRooms[k] == bIdx) return true;
+        return false;
+    };
+
+    u32 sameStoryLinks = 0;
+    for (u32 i = 0; i < r.roomCount; i++)
+        for (u32 j = i + 1; j < r.roomCount; j++) {
+            const DungeonRoom& a = r.rooms[i]; const DungeonRoom& b = r.rooms[j];
+            if (!bboxTouch(a, b)) continue;
+            bool adj = listed(a, (u16)j) && listed(b, (u16)i);
+            CAPTURE(i); CAPTURE(j); CAPTURE(a.floorHeight); CAPTURE(b.floorHeight);
+            if (a.floorHeight == b.floorHeight) { CHECK(adj); sameStoryLinks++; }  // 0-vs-0 (=> 0-vs-0.5): adjacent
+            else                                 CHECK_FALSE(adj);                  // 0-vs-3/6/9: NOT adjacent
+        }
+    CHECK(sameStoryLinks > 0);   // the <1.5 m branch actually fires
+    LevelGridSystem::shutdown(g);
+}
