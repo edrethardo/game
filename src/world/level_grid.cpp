@@ -136,6 +136,23 @@ void LevelGridSystem::addPlatform(GridCell& c, u8 topQ, u8 mat) {
                       "addPlatform: same-cell slab tops within step tolerance");
 }
 
+void LevelGridSystem::removePlatform(GridCell& c, u8 topQ) {
+    // Find the slab at topQ; no-op if none matches.
+    u8 idx = 0;
+    while (idx < c.platCount && c.platHeight[idx] != topQ) idx++;
+    if (idx >= c.platCount) return;
+    // Shift strictly-higher entries down one index (preserves ascending order).
+    for (u8 i = idx; i + 1 < c.platCount; i++) {
+        c.platHeight[i]     = c.platHeight[i + 1];
+        c.platMaterialId[i] = c.platMaterialId[i + 1];
+    }
+    c.platCount--;
+    // Zero the vacated top slot (canonical byte-form: slots >= platCount MUST be zero).
+    c.platHeight[c.platCount]     = 0;
+    c.platMaterialId[c.platCount] = 0;
+    if (c.platCount == 0) c.flags &= ~CELL_PLATFORM;   // clear the flag only when the last slab is gone
+}
+
 u8 LevelGridSystem::platformCount(const LevelGrid& grid, u32 x, u32 z) {
     if (!isInBounds(grid, x, z)) return 0;
     return grid.cells[z * grid.width + x].platCount;

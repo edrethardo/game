@@ -86,3 +86,37 @@ TEST_CASE("effectiveFloorHeight over a 3-slab stack picks the highest surface at
     CHECK(LevelGridSystem::getPlatformUnderside(g, 1, 1, 0) == doctest::Approx(2.5f)); // 12-2=10 qu → 2.5, > floor 0
     LevelGridSystem::shutdown(g);
 }
+
+TEST_CASE("removePlatform punches the middle slab, shifts higher down, zeroes the vacated slot") {
+    GridCell c = {};
+    LevelGridSystem::addPlatform(c, 12, 1);
+    LevelGridSystem::addPlatform(c, 24, 2);
+    LevelGridSystem::addPlatform(c, 36, 3);
+    LevelGridSystem::removePlatform(c, 24);        // punch the L2 slab (the drop-hole puncher)
+    CHECK(c.platCount == 2);
+    CHECK(c.platHeight[0] == 12);
+    CHECK(c.platHeight[1] == 36);                  // 36 shifted down into slot 1, order preserved
+    CHECK(c.platMaterialId[1] == 3);
+    CHECK(c.platHeight[2] == 0);                   // vacated top slot zeroed (canonical byte-form)
+    CHECK(c.platMaterialId[2] == 0);
+    CHECK((c.flags & CELL_PLATFORM) != 0);         // still has slabs → flag stays set
+}
+
+TEST_CASE("removePlatform of the last slab clears the CELL_PLATFORM flag") {
+    GridCell c = {};
+    LevelGridSystem::setPlatform(c, 12, 1);
+    LevelGridSystem::removePlatform(c, 12);
+    CHECK(c.platCount == 0);
+    CHECK(c.platHeight[0] == 0);
+    CHECK((c.flags & CELL_PLATFORM) == 0);         // flag cleared only at count 0
+}
+
+TEST_CASE("removePlatform is a no-op when no slab matches the given top") {
+    GridCell c = {};
+    LevelGridSystem::addPlatform(c, 12, 1);
+    LevelGridSystem::addPlatform(c, 24, 2);
+    LevelGridSystem::removePlatform(c, 99);        // nothing at 99 qu
+    CHECK(c.platCount == 2);
+    CHECK(c.platHeight[0] == 12);
+    CHECK(c.platHeight[1] == 24);
+}

@@ -107,6 +107,7 @@ namespace LevelGridSystem {
     // and shipped geometry stays byte-identical. Keeps the ascending + canonical-byte-form invariants.
     void setPlatform(GridCell& c, u8 topQ, u8 mat);
     void addPlatform(GridCell& c, u8 topQ, u8 mat);   // ACCUMULATE (FOUR_STORY generator only)
+    void removePlatform(GridCell& c, u8 topQ);        // build-time hole puncher (drop-holes)
     u8   platformCount(const LevelGrid& grid, u32 x, u32 z);              // slab count; multi-slab loop bound
     f32  getPlatformTop(const LevelGrid& grid, u32 x, u32 z, u8 i);       // indexed slab top
     f32  getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z, u8 i); // indexed slab underside
