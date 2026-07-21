@@ -350,3 +350,58 @@ TEST_CASE("Descent head-clamp: running-min under a 3-slab stack (entity-obstacle
     CHECK(p.position.y == doctest::Approx(3.0f));
     CHECK(settledOnGround(p, room.grid));
 }
+
+TEST_CASE("Descent fall: free-fall through a 2x2 L3 hole lands one story down on L2") {
+    StackedRoom room;
+    room.punch(5, 5, 6, 6, 36);        // 2x2 L3 hole → cells (5..6,5..6) now carry {12,24}
+    Player p;
+    p.position = {6.0f, 9.5f, 6.0f};   // centred on the hole (AABB stays over holed cells), above L3
+    p.velocity = {0, 0, 0};
+    p.onGround = false;
+    f32 minY = p.position.y;
+    for (int i = 0; i < 120; i++) {
+        Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+        minY = std::min(minY, p.position.y);
+    }
+    CHECK(settledOnGround(p, room.grid));
+    CHECK(p.position.y == doctest::Approx(6.0f));   // caught on the next intact slab, L2
+    CHECK(minY >= 6.0f - 0.001f);                    // the per-tick snap never let it dip below L2
+}
+
+TEST_CASE("Descent fall: a column holed at L3 and L2 drops through to L1") {
+    StackedRoom room;
+    room.punch(5, 5, 6, 6, 36);        // L3 hole
+    room.punch(5, 5, 6, 6, 24);        // + L2 hole → those cells carry only {12}
+    Player p;
+    p.position = {6.0f, 9.5f, 6.0f};
+    p.velocity = {0, 0, 0};
+    p.onGround = false;
+    for (int i = 0; i < 120 && !p.onGround; i++) Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);
+    CHECK(p.onGround);
+    CHECK(p.position.y == doctest::Approx(3.0f));   // fell past the L2 hole onto L1
+}
+
+TEST_CASE("Descent fall: walking into a 2x2 hole completes the fall (no sticky lip)") {
+    StackedRoom room;
+    room.punch(5, 5, 6, 6, 36);        // 2x2 L3 hole (cells x5..6, z5..6)
+    Player p;
+    p.position = {6.0f, 9.0f, 7.6f};   // on L3 (feet 9.0), just north of the hole, x on the cell-5/6 seam
+    p.velocity = {0, 0, 0};
+    p.onGround = true;
+    // Modest speed so horizontal drift during the fall stays over the 2x2 hole. Once the 0.6 m AABB
+    // fully clears the intact lip it must fall — a 1-cell hole could not clear it, hence >=2 wide.
+    walk(p, room.grid, 0.0f, -1.5f, 120);
+    CHECK(p.position.y == doctest::Approx(6.0f));   // the lip did NOT re-grab it onto L3 — it fell to L2
+    CHECK(settledOnGround(p, room.grid));
+}
+
+TEST_CASE("Descent fall: a high-velocity single tick still lands on the top slab") {
+    StackedRoom room;                  // full stacks, no hole
+    Player p;
+    p.position = {6.0f, 9.3f, 6.0f};   // just above the L3 top (9.0), within step tolerance
+    p.velocity = {0.0f, -30.0f, 0.0f}; // 0.5 m in one 1/60 s tick — a velocity-gated snap would tunnel
+    p.onGround = false;
+    Collision::moveAndSlide(p, room.grid, 1.0f / 60.0f);   // exactly one tick
+    CHECK(p.onGround);
+    CHECK(p.position.y == doctest::Approx(9.0f));   // caught on L3 despite the 30 m/s descent
+}
