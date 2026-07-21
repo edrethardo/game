@@ -64,7 +64,9 @@ namespace Collision {
     // cell whose floor sits within STEP_UP_HEIGHT below the feet (i.e. the pad the body is resting on,
     // not one under a higher platform it's on). moveAndSlide calls this at the end of a grounded step
     // and, if true, replaces velocity.y with JUMPPAD_LAUNCH (the Quake launch). See CELL_JUMPPAD.
-    bool onJumpPad(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid);
+    // Launch speed (m/s) of the CELL_JUMPPAD the body is RESTING on, or 0 if it is not on one.
+    // Reads GridCell::jumpPadQ so a map can author stronger pads than JUMPPAD_LAUNCH.
+    f32 jumpPadSpeed(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid);
 
     // True if an AABB (feet at feetPos, halfWidth in XZ, PLAYER_HEIGHT tall) would CLIP a
     // CELL_PLATFORM slab band [underside, top]: the body is neither stepping ONTO the slab (feet

@@ -195,27 +195,27 @@ TEST_CASE("overlapsLedgeAbove: a plain raised floor (no LEDGE flag) never gates"
 // that sits well below your feet (so standing on a taller platform whose AABB happens to span a low
 // pad cell never relaunches you).
 
-TEST_CASE("onJumpPad: standing on a pad cell is detected") {
+TEST_CASE("jumpPadSpeed: standing on a pad cell is detected") {
     TestRoom room;
     GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
     c.flags = CELL_FLOOR | CELL_JUMPPAD;
     c.floorHeight = 0;                                    // ground-level pad
-    CHECK(Collision::onJumpPad({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+    CHECK(Collision::jumpPadSpeed({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid) == doctest::Approx(JUMPPAD_LAUNCH));
 }
 
-TEST_CASE("onJumpPad: a plain floor cell is not a pad") {
+TEST_CASE("jumpPadSpeed: a plain floor cell is not a pad") {
     TestRoom room;                                        // interior cells are plain CELL_FLOOR
-    CHECK_FALSE(Collision::onJumpPad({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+    CHECK(Collision::jumpPadSpeed({5.5f, 0.0f, 5.5f}, PLAYER_HALF.x, room.grid) == 0.0f);
 }
 
-TEST_CASE("onJumpPad: a pad far below the feet does not trigger") {
+TEST_CASE("jumpPadSpeed: a pad far below the feet does not trigger") {
     TestRoom room;
     GridCell& c = LevelGridSystem::getCell(room.grid, 5, 5);
     c.flags = CELL_FLOOR | CELL_JUMPPAD;
     c.floorHeight = 0;                                    // pad at 0 m
     // Feet at 2 m (standing on a taller platform above the pad): 0 m is more than STEP_UP_HEIGHT
     // below, so it's not the pad we're resting on → no launch.
-    CHECK_FALSE(Collision::onJumpPad({5.5f, 2.0f, 5.5f}, PLAYER_HALF.x, room.grid));
+    CHECK(Collision::jumpPadSpeed({5.5f, 2.0f, 5.5f}, PLAYER_HALF.x, room.grid) == 0.0f);
 }
 
 // The end-to-end behaviour: one moveAndSlide tick over a pad replaces velocity.y with JUMPPAD_LAUNCH

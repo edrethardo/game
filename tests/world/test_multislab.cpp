@@ -27,8 +27,9 @@ TEST_CASE("setPlatform is last-write-wins: a second call replaces, never accumul
     CHECK(c.platHeight[1] == 0);              // no phantom second slab
 }
 
-TEST_CASE("GridCell stays 13 all-u8 bytes (calloc'd per floor, never serialized)") {
-    CHECK(sizeof(GridCell) == 13);
+TEST_CASE("GridCell stays 14 all-u8 bytes (calloc'd per floor, never serialized)") {
+    // 6 base + platCount + 3 tops + 3 materials + jumpPadQ (per-cell jump-pad strength).
+    CHECK(sizeof(GridCell) == 14);
 }
 
 TEST_CASE("addPlatform keeps tops strictly ascending even when inserted out of order") {

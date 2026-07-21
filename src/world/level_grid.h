@@ -21,6 +21,12 @@ static constexpr u8 CELL_LEDGE   = 1 << 3;
 // cell → zero regression. Enemies never jump, so a pad in an enemy route is a dead end — PvP-only.
 static constexpr u8 CELL_JUMPPAD = 1 << 4;
 
+// Per-cell jump-pad STRENGTH (GridCell::jumpPadQ, quarter m/s; 0 = Collision::JUMPPAD_LAUNCH). Pad
+// power is map data, not a global: the Arena and VERTICAL_HALL size their balconies to the default
+// 3.6 m apex, so a global buff would fling players clean over them. A four-story maze wants pads that
+// climb a whole story or two, and says so per cell. Zero-default means every existing pad author is
+// unchanged with no edit.
+
 // A PLATFORM SLAB: a second walkable story floating above this cell's normal floor. The cell keeps
 // its base floor (CELL_FLOOR + floorHeight) as the GROUND story — bodies below walk UNDER the slab
 // (its underside is their local ceiling), bodies above walk ON it. Real two-story, unlike
@@ -58,9 +64,10 @@ struct GridCell {
     u8 platCount;                              // number of slabs, 0..MAX_PLATFORMS_PER_CELL
     u8 platHeight[MAX_PLATFORMS_PER_CELL];     // slab TOP surfaces, quarter-units, STRICTLY ASCENDING
     u8 platMaterialId[MAX_PLATFORMS_PER_CELL]; // per-slab top + underside material
+    u8 jumpPadQ;         // CELL_JUMPPAD launch speed in QUARTER m/s; 0 = the JUMPPAD_LAUNCH default
 };
-static_assert(sizeof(GridCell) == 13,
-    "GridCell must stay 13 all-u8 bytes: calloc'd per floor, never serialized; a size change silently "
+static_assert(sizeof(GridCell) == 14,
+    "GridCell must stay 14 all-u8 bytes: calloc'd per floor, never serialized; a size change silently "
     "breaks the test_level_gen determinism memcmp and any future grid memcpy");
 
 struct LevelGrid {

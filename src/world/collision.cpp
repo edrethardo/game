@@ -70,7 +70,7 @@ bool Collision::overlapsLedgeAbove(Vec3 feetPos, f32 halfWidth, const LevelGrid&
     return false;
 }
 
-bool Collision::onJumpPad(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
+f32 Collision::jumpPadSpeed(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
     const f32 minX = feetPos.x - halfWidth, maxX = feetPos.x + halfWidth;
     const f32 minZ = feetPos.z - halfWidth, maxZ = feetPos.z + halfWidth;
     s32 cx0, cx1, cz0, cz1;
@@ -85,12 +85,17 @@ bool Collision::onJumpPad(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
             // feet, within the same STEP_UP_HEIGHT slack the landing snap allows. This rejects a pad
             // cell that sits far below a taller platform the body is standing on (the AABB can span
             // both), so you don't get relaunched off a pad you're not actually touching.
-            const f32 fh = LevelGridSystem::getFloorHeight(grid, (u32)cx, (u32)cz);
+            // Story-aware: a pad cell in a multi-story stack is a pad on EVERY story it carries, so
+            // the surface to compare against is the one the feet are actually on, not the base floor.
+            // (getFloorHeight here meant a pad on any slab could never fire.)
+            const f32 fh = LevelGridSystem::effectiveFloorHeight(grid, (u32)cx, (u32)cz, feetPos.y);
             if (fh <= feetPos.y + 0.001f && fh >= feetPos.y - STEP_UP_HEIGHT)
-                return true;
+                // Per-cell strength (quarter m/s); 0 means "use the default", so every pad authored
+                // before jumpPadQ existed launches exactly as it always did.
+                return c.jumpPadQ ? c.jumpPadQ * 0.25f : JUMPPAD_LAUNCH;
         }
     }
-    return false;
+    return 0.0f;
 }
 
 bool Collision::overlapsPlatformBand(Vec3 feetPos, f32 halfWidth, const LevelGrid& grid) {
@@ -284,10 +289,12 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
     // can't stand on it — you get flung and air-steer the arc. A velocity.y impulse exactly like the
     // jump: every movement path (local predict, server drain, reconcile replay) funnels through here,
     // so it replicates in co-op with no wire change (posY + onGround are snapshotted; see CELL_JUMPPAD).
-    if (player.onGround && player.velocity.y <= 0.1f &&
-        onJumpPad(player.position, PLAYER_HALF_WIDTH, grid)) {
-        player.velocity.y = JUMPPAD_LAUNCH;
-        player.onGround   = false;
+    if (player.onGround && player.velocity.y <= 0.1f) {
+        const f32 padSpeed = jumpPadSpeed(player.position, PLAYER_HALF_WIDTH, grid);
+        if (padSpeed > 0.0f) {
+            player.velocity.y = padSpeed;   // per-cell strength; see GridCell::jumpPadQ
+            player.onGround   = false;
+        }
     }
 }
 
@@ -422,10 +429,12 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
 
     // --- Jump pad --- (see the grid-only overload for the full rationale) launch a grounded body
     // upward off a CELL_JUMPPAD. velocity.y impulse, same replication story as the jump.
-    if (player.onGround && player.velocity.y <= 0.1f &&
-        onJumpPad(player.position, PLAYER_HALF_WIDTH, grid)) {
-        player.velocity.y = JUMPPAD_LAUNCH;
-        player.onGround   = false;
+    if (player.onGround && player.velocity.y <= 0.1f) {
+        const f32 padSpeed = jumpPadSpeed(player.position, PLAYER_HALF_WIDTH, grid);
+        if (padSpeed > 0.0f) {
+            player.velocity.y = padSpeed;   // per-cell strength; see GridCell::jumpPadQ
+            player.onGround   = false;
+        }
     }
 }
 
