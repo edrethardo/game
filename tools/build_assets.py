@@ -35,6 +35,8 @@ def build_textures():
         ("grass",         42, 32, "meadow"),      # town plaza ground
         ("sand",          42, 32, "desert"),      # PvP arena ground
         ("metal_grate",   42, 16, "cold_stone"),
+        # Hellforge lava floors (tier-4 "melted walls" hazard surface)
+        ("lava",          42, 32, "warm_brick"),
     ]
 
     ok = True

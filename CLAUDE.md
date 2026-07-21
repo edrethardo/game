@@ -180,6 +180,27 @@ floor's population and 128 silently starved decorations/NPCs/adds/summons. Invar
 the guard that would have caught the open-plain first draft. Design/plan:
 `docs/superpowers/plans/2026-07-21-four-story-descent-floor.md`.
 
+**Hellforge LAVA floors (31-40).** The tier's walls MELT. `applyLavaTheme` (engine_startgame.cpp,
+run in the theme block after the carve) turns every INTERIOR `CELL_SOLID` cell into a **walkable**
+`CELL_LAVA` surface, so a Hellforge floor reads as islands of stone in a molten sea with **no
+sightline blockers left** — a deliberate trade of readable cover for drama. The outer ring stays
+solid (it is the only thing between the player and walking off the map). Lava **burns the player
+only** (`LAVA_DPS` 45/s in `engine_update_player.cpp`, via `applyDamageToPlayer` so armour/i-frames
+and hit feedback all behave; no `attackerPos`, so it can't be blocked or knock you back) — **monsters
+are immune and wade through to flank you**, which is the whole asymmetry of the tier. Damage is gated
+on `LevelGridSystem::feetInLava` (cell is lava AND feet at/below the surface), so being **airborne
+over it is free**: a 1-cell vein is clearable (1 m needs 1.6 m of the 2.4 m jump reach) while a wide
+lake is not. Melting alone leaves ~95% of the lava as impassable LAKE (measured), so the pass also
+lays **stepping-stone causeways** — dashed stone bridges every 7 cells with 1-cell hops — turning the
+sea into a network of optional shortcuts you can SEE before you commit. Spawn and exit both get a
+cleared stone pad (the exit's forces a mesh rebuild, since it is positioned after the mesh is built).
+The minimap paints lava hot orange in its own branch **before** the floor branch — lava carries
+`CELL_FLOOR`, so without it the map would show a lake as safe grey. **Stacked-slab styles
+(VERTICAL_HALL / FOUR_STORY) are excluded**: their slabs exist only on non-solid cells, so melting the
+walls would punch a hole down to lava through every upper story — a different (possibly great, but
+untested) level design. Pinned by `tests/world/test_lava.cpp`; grid-derived from floor+seed, so it
+replicates with **no wire or save change**.
+
 **Jump-pad strength is per-cell data.** `GridCell::jumpPadQ` (launch speed in quarter m/s, 0 = the
 global `JUMPPAD_LAUNCH`) so a map can author pads stronger than the default without rebalancing every
 map that already exists — the Arena and VERTICAL_HALL size their 3 m balconies to the default 3.6 m

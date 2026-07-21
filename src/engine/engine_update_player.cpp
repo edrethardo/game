@@ -579,6 +579,22 @@ void Engine::tickVisualFeedback(f32 dt) {
         m_localPlayer.renderedHealth += hpDelta * dt * HP_LERP_RATE;
     }
 
+    // Hellforge LAVA burn (floors 31-40). Standing in molten rock costs LAVA_DPS per second while
+    // the feet are at or below the surface — clear a 1-cell vein with a jump and you pay nothing,
+    // which is what makes the jump the answer. Monsters are deliberately immune: they wade straight
+    // through and flank you, and that asymmetry is the whole point of the tier.
+    //
+    // Routed through applyDamageToPlayer so armour, i-frames and the hit feedback (vignette/flash/
+    // rumble) all behave — a dodge roll's i-frames genuinely carrying you through a vein is a feat
+    // worth rewarding. No attackerPos: lava has no direction, so it can't be blocked or knock you back.
+    // Local/authoritative sim only (the server owns a remote's health; a guest's own burn arrives by
+    // snapshot), matching every other environmental effect.
+    if (m_netRole != NetRole::CLIENT &&
+        LevelGridSystem::feetInLava(m_level.grid, m_localPlayer.position)) {
+        static constexpr f32 LAVA_DPS = 45.0f;   // ~3 s from full on a fresh class — a real threat
+        Combat::applyDamageToPlayer(m_localPlayer, LAVA_DPS * dt);
+    }
+
     // M13: screen flash decay — counts down from 0.5 s after a large prediction divergence
     if (m_localPlayer.screenFlashTimer > 0.0f) {
         m_localPlayer.screenFlashTimer -= dt;

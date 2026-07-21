@@ -191,6 +191,14 @@ static void rebuildTexture(const LevelGrid& grid) {
                 s_pixelData[pIdx + 1] = static_cast<u8>(55 * dim);
                 s_pixelData[pIdx + 2] = static_cast<u8>(65 * dim);
                 s_pixelData[pIdx + 3] = 255;
+            } else if (cell.flags & CELL_LAVA) {
+                // Hellforge lava is WALKABLE (it carries CELL_FLOOR), so without its own branch it
+                // would paint the same grey as safe stone and the map would route you into a lake.
+                // Hot orange, checked BEFORE the floor branch.
+                s_pixelData[pIdx + 0] = static_cast<u8>(225 * dim);
+                s_pixelData[pIdx + 1] = static_cast<u8>(90  * dim);
+                s_pixelData[pIdx + 2] = static_cast<u8>(30  * dim);
+                s_pixelData[pIdx + 3] = 255;
             } else if (cell.flags & CELL_FLOOR) {
                 f32 floorH = static_cast<f32>(cell.floorHeight) * 0.25f;
                 u8 r, g, b;

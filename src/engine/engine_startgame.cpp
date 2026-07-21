@@ -470,6 +470,51 @@ void Engine::wireClientNet() {
 // upper-story pad invisible — which is exactly how the Descent's pads shipped unreadable. Applies to
 // every style that sets CELL_JUMPPAD (the Descent's dead-end pads AND the Stacked Loop's void pads,
 // which were likewise never skinned).
+// Hellforge LAVA (floors 31-40): melt the walls. Every INTERIOR solid cell becomes a walkable lava
+// surface, so the floor reads as islands of stone in a molten sea. Consequences, all deliberate:
+// there are no sightline blockers left (Aaron's call — maximum drama over readable cover), monsters
+// wade through freely while it burns you, and the widths sort themselves out — a 1-cell room wall
+// becomes a vein you can JUMP (1 m against a 2.4 m jump reach), while the thick unreachable rock
+// between rooms becomes a lake you simply cannot cross.
+//
+// The OUTER ring stays solid. It is the only thing standing between the player and walking off the
+// edge of the world, and lava is walkable by design.
+//
+// Runs in the theme block, i.e. AFTER the carve: level_gen's reachability/room contract is computed
+// on the original walls and is untouched, and both peers derive the same lava from the same floor +
+// seed, so this replicates with no wire change.
+static void applyLavaTheme(LevelGrid& grid, u8 lavaMat) {
+    for (u32 z = 1; z + 1 < grid.depth; z++)
+        for (u32 x = 1; x + 1 < grid.width; x++) {
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            if (!(c.flags & CELL_SOLID)) continue;
+            // Walkable lava at ground level: flat with the floor, so stepping in is a decision and
+            // being airborne over it is safe. CELL_CEILING is deliberately NOT set — an open molten
+            // expanse should not be roofed over.
+            c.flags           = static_cast<u8>(CELL_FLOOR | CELL_LAVA);
+            c.floorHeight     = 0;
+            c.floorMaterialId = lavaMat;
+        }
+
+    // STEPPING-STONE CAUSEWAYS. Melting the walls alone makes ~95% of the lava impassable LAKE (the
+    // thick unreachable rock between rooms) and leaves only ~5% as 1-cell veins, so "you can jump
+    // over it" would be near-dead content — measured on real BSP floors before adding this. Dashed
+    // stone bridges every CAUSEWAY_PITCH cells turn the lava sea into a network of optional
+    // shortcuts: stones sit 2 cells apart, so each hop is a 1 m gap needing 1.6 m of the 2.4 m jump
+    // reach — clearable, but only if you commit. They read as INTENTIONAL (a straight dashed line,
+    // not scattered rocks), so you can see a crossing before you risk it instead of guessing.
+    constexpr u32 CAUSEWAY_PITCH = 7;   // spacing between bridges
+    for (u32 z = 1; z + 1 < grid.depth; z++)
+        for (u32 x = 1; x + 1 < grid.width; x++) {
+            const bool onLine = (x % CAUSEWAY_PITCH == 0) || (z % CAUSEWAY_PITCH == 0);
+            if (!onLine) continue;
+            if (((x + z) & 1u) != 0u) continue;          // every other cell => 1-cell hops
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            if (!(c.flags & CELL_LAVA)) continue;
+            c.flags = CELL_FLOOR;                        // a stone step, no ceiling over the sea
+        }
+}
+
 static void applyJumpPadSkin(LevelGrid& grid) {
     const u8 padMat = MaterialSystem::getIdByName("arena_pad");
     for (u32 z = 0; z < grid.depth; z++)
@@ -645,6 +690,37 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
             LOG_INFO("Applied floor theme for depth tier %u-%u",
                      (m_level.currentFloor / 10) * 10 + 1, ((m_level.currentFloor / 10) + 1) * 10);
         }
+
+        // Hellforge (31-40) goes further than a retint: its walls MELT. Runs after the theme loop so
+        // the lava material is not overwritten by it, and after the carve so level_gen's reachability
+        // contract is computed on the original walls.
+        // Stacked-slab styles are EXCLUDED. Their upper stories are slabs added only to non-solid
+        // cells, so melting the walls would leave a hole straight down to lava wherever a wall used
+        // to be — every upper story becomes a lattice of 1-cell walkways. That might well be
+        // spectacular, but it is a different level design and it is untested; do not ship it by
+        // accident on a floor-31+ roll. Flat styles only for now.
+        if (m_level.currentFloor >= 31 && m_level.currentFloor <= 40 &&
+            !usesBalconyEndpoints(layoutStyle)) {
+            applyLavaTheme(m_level.grid, MaterialSystem::getIdByName("hellforge_lava"));
+            // Neither endpoint may sit in lava: you would burn on arrival with no way to react, and
+            // the exit portal would be unreachable. Clear a small stone pad around each.
+            auto clearLavaPad = [&](Vec3 p) {
+                u32 gx, gz;
+                if (!LevelGridSystem::worldToGrid(m_level.grid, p, gx, gz)) return;
+                for (s32 dz = -2; dz <= 2; dz++)
+                    for (s32 dx = -2; dx <= 2; dx++) {
+                        const s32 cx = (s32)gx + dx, cz = (s32)gz + dz;
+                        if (cx < 1 || cz < 1) continue;
+                        if (!LevelGridSystem::isInBounds(m_level.grid, (u32)cx, (u32)cz)) continue;
+                        GridCell& c = LevelGridSystem::getCell(m_level.grid, (u32)cx, (u32)cz);
+                        if (!(c.flags & CELL_LAVA)) continue;
+                        c.flags           = CELL_FLOOR | CELL_CEILING;
+                        c.floorMaterialId = themeFloor;
+                    }
+            };
+            clearLavaPad(spawnPos);
+            LOG_INFO("Hellforge: walls melted to lava on floor %u", m_level.currentFloor);
+        }
     }
 
     // Fold the floor number into the mesh seed so each floor's baked tile-shade + scatter-prop
@@ -748,6 +824,28 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         if (usesBalconyEndpoints(layoutStyle) &&
             lengthSq(dungeon.exitBalconyPos) > 0.0f) {
             m_level.floorDoorPos = dungeon.exitBalconyPos;   // VH far-side slab / FOUR_STORY L0 exit (y=0)
+        }
+        // Hellforge: the exit must not sit in the lava the theme pass just poured — the portal is
+        // placed from room data that predates it. Same stone pad the spawn gets. (The pass runs
+        // earlier because it needs the theme materials; the door position is only known here.)
+        if (m_level.currentFloor >= 31 && m_level.currentFloor <= 40) {
+            u32 dx, dz;
+            if (LevelGridSystem::worldToGrid(m_level.grid, m_level.floorDoorPos, dx, dz)) {
+                for (s32 oz = -2; oz <= 2; oz++)
+                    for (s32 ox = -2; ox <= 2; ox++) {
+                        const s32 cx = (s32)dx + ox, cz = (s32)dz + oz;
+                        if (cx < 1 || cz < 1) continue;
+                        if (!LevelGridSystem::isInBounds(m_level.grid, (u32)cx, (u32)cz)) continue;
+                        GridCell& c = LevelGridSystem::getCell(m_level.grid, (u32)cx, (u32)cz);
+                        if (!(c.flags & CELL_LAVA)) continue;
+                        c.flags = CELL_FLOOR | CELL_CEILING;
+                    }
+                // The mesh was built before this edit, so rebuild it or the cleared pad still
+                // renders as lava while behaving as stone.
+                m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
+                                         m_level.levelSeed + m_level.currentFloor * 7919u,
+                                         m_level.sections, MAX_LEVEL_SECTIONS);
+            }
         }
         LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_level.currentFloor,
                  m_level.floorDoorPos.x, m_level.floorDoorPos.y, m_level.floorDoorPos.z);

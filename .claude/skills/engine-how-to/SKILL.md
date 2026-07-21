@@ -82,6 +82,15 @@ debug keys) lives in the `engine-reference` skill.
   them; author a stronger pad on the cell instead (0 = use the global). `Collision::jumpPadSpeed` is
   story-aware — it compares the feet against `effectiveFloorHeight`, because with the old base-floor
   read a pad sitting on ANY slab story could never fire at all.
+- **A walkable hazard must be distinguishable on the MINIMAP, not just in 3-D.** `CELL_LAVA` carries
+  `CELL_FLOOR` (that is what makes it walkable), so the minimap painted a lava lake the same grey as
+  safe stone and would have routed the player straight into it. Any new walkable-but-dangerous cell
+  needs its own branch in `minimap.cpp` BEFORE the generic floor branch.
+- **A theme that edits GEOMETRY must respect the styles it lands on.** Hellforge melts every interior
+  wall to lava, which is fine on a flat style and destructive on a stacked one: `CELL_PLATFORM` slabs
+  are only added to non-solid cells, so melting the walls punches a hole to lava through every upper
+  story. `applyLavaTheme` is gated on `!usesBalconyEndpoints(style)` for exactly that reason. Check
+  what a global retheme does to EVERY style that can roll on those floors.
 - **A cell FLAG is not a skin, and on a stacked floor the visible surface is the SLAB, not the floor.**
   `CELL_JUMPPAD` only makes a cell launch you; it does not make it look like anything. Both the Descent
   and the Stacked Loop shipped pads that were invisible — the Descent even carried a comment claiming

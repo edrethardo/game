@@ -119,6 +119,8 @@ TEXTURE_TYPES = [
     "wood_plank",
     "stone_ceiling",
     "metal_grate",
+    # Hellforge lava floors: the tier-4 "melted walls" hazard surface.
+    "lava",
     "skeleton_skin",
     "spider_skin",
     "bat_skin",
@@ -146,6 +148,8 @@ DEFAULT_PALETTE = {
     # Particle types use no palette — white shape with alpha gradient
     "particle_blob": "dark_dungeon",
     "particle_spark": "dark_dungeon",
+    # lava authors its own molten colours; the palette arg is unused
+    "lava": "warm_brick",
 }
 
 # ---------------------------------------------------------------------------
@@ -776,6 +780,62 @@ def gen_particle_spark(img, size, palette):  # noqa: ARG001 -- palette unused
             px[x, y] = (255, 255, 255, int(alpha * 255))
 
 
+
+def gen_lava(img, size, palette):  # noqa: ARG001 -- palette unused by design
+    """Molten lava: dark crust broken by a glowing hot-yellow crack network.
+
+    Cell-noise "plates" of cooled crust with bright molten seams running between
+    them, plus a few white-hot pools. Authored BRIGHT so the material tint can
+    push it emissive — a lava floor has to read as lethal at a glance, from across
+    a room, in a dark dungeon. Deterministic from the seed like every other type.
+    """
+    px = img.load()
+    # Crust base: dark red-brown, mottled.
+    for y in range(size):
+        for x in range(size):
+            t = random.random()
+            base = lerp_color((48, 16, 8), (86, 30, 12), t)
+            px[x, y] = noise_color(base, 8)
+
+    # Molten seams: a handful of wandering cracks in each axis, hot core + falloff.
+    def seam(horizontal):
+        if horizontal:
+            y = random.randint(1, size - 2)
+            for x in range(size):
+                core = (255, random.randint(190, 235), random.randint(60, 110))
+                px[x, y] = core
+                for oy in (y - 1, y + 1):
+                    if 0 <= oy < size:
+                        px[x, oy] = lerp_color(px[x, oy], (240, 120, 30), 0.55)
+                y = max(1, min(size - 2, y + random.randint(-1, 1)))
+        else:
+            x = random.randint(1, size - 2)
+            for y in range(size):
+                core = (255, random.randint(190, 235), random.randint(60, 110))
+                px[x, y] = core
+                for ox in (x - 1, x + 1):
+                    if 0 <= ox < size:
+                        px[ox, y] = lerp_color(px[ox, y], (240, 120, 30), 0.55)
+                x = max(1, min(size - 2, x + random.randint(-1, 1)))
+
+    for _ in range(random.randint(2, 3)):
+        seam(True)
+    for _ in range(random.randint(2, 3)):
+        seam(False)
+
+    # White-hot pools where seams pool up.
+    for _ in range(random.randint(3, 5)):
+        cx = random.randint(2, size - 3)
+        cy = random.randint(2, size - 3)
+        r = random.randint(1, 2)
+        for y in range(cy - r, cy + r + 1):
+            for x in range(cx - r, cx + r + 1):
+                if 0 <= x < size and 0 <= y < size:
+                    d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+                    if d <= r:
+                        px[x, y] = lerp_color((255, 245, 200), px[x, y], d / (r + 1))
+
+
 GENERATORS = {
     "grass": gen_grass,
     "sand": gen_sand,
@@ -794,6 +854,7 @@ GENERATORS = {
     "bat_skin": gen_bat_skin,
     "particle_blob": gen_particle_blob,
     "particle_spark": gen_particle_spark,
+    "lava": gen_lava,
 }
 
 # ---------------------------------------------------------------------------

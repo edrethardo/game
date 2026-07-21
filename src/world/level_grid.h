@@ -38,6 +38,17 @@ static constexpr u8 CELL_JUMPPAD = 1 << 4;
 // and simply walks under platforms (PvP-only above, the pads/ledges policy).
 static constexpr u8 CELL_PLATFORM = 1 << 5;
 
+// Hellforge LAVA (floors 31-40). The tier's "melted walls": every interior wall becomes a molten
+// surface instead of stone, so the floor reads as islands in a lava sea with NO sightline blockers.
+// A lava cell is WALKABLE, not solid — you can cross a 1-cell vein with a jump (1 m needs 1.6 m of
+// the 2.4 m jump reach) while a wide lake is impassable. It burns the PLAYER only: monsters wade
+// through freely and use it to flank, which is the whole asymmetry. Damage is gated on the feet
+// being at or below the lava surface, so being airborne over it is safe — that is what makes the
+// jump matter. Applied by the theme pass in startGame (see applyLavaTheme), never by level_gen, so
+// the carve/reachability contract is untouched; both peers derive it from the same floor + grid, so
+// it replicates with NO wire change.
+static constexpr u8 CELL_LAVA = 1 << 6;
+
 // Slab thickness in quarter-units (0.5 m). Underside = platHeight - this, clamped to floorHeight,
 // so a low stair step degrades gracefully into riser-like geometry with no dead under-space.
 static constexpr u8 PLATFORM_THICKNESS_Q = 2;
@@ -103,6 +114,13 @@ namespace LevelGridSystem {
     Vec3 gridToWorld(const LevelGrid& grid, u32 x, u32 z);   // cell centre
 
     bool isSolid(const LevelGrid& grid, u32 x, u32 z);
+    // True if this cell is Hellforge lava (walkable, but it burns the player — see CELL_LAVA).
+    bool isLava(const LevelGrid& grid, u32 x, u32 z);
+    // True when a body's FEET are standing in lava: the cell is CELL_LAVA and the feet are at or
+    // below the molten surface. The height half is what makes a jump a real answer to a 1-cell vein
+    // — clear it and you take nothing — so the burn tick and any future lava consumer share one rule.
+    bool feetInLava(const LevelGrid& grid, Vec3 feetPos);
+
     f32  getFloorHeight(const LevelGrid& grid, u32 x, u32 z);
     f32  getCeilingHeight(const LevelGrid& grid, u32 x, u32 z);
     // CELL_PLATFORM (two-story) queries. hasPlatform is the gate; the getters assume it passed.

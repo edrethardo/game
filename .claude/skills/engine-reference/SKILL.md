@@ -26,7 +26,7 @@ skill.
 | `AffixDef` / `Affix` | `game/item.h` | `validSlots` is a bitmask of `ItemSlot` values |
 | `WeaponDef` / `WeaponState` | `game/weapon.h` | `WeaponType`: MELEE/HITSCAN/PROJECTILE selects path in `Combat` |
 | `SkillDef` / `SkillState` | `game/item.h` | One `SkillState` per player (cooldown + energy) |
-| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING` + opt-in verticality `CELL_LEDGE` (jump-gated) / `CELL_JUMPPAD` (launch pad) / `CELL_PLATFORM` (walk-under 2nd story). Heights in quarter-units |
+| `LevelGrid` / `GridCell` | `world/level_grid.h` | Cell flags `CELL_SOLID/FLOOR/CEILING` + opt-in verticality `CELL_LEDGE` (jump-gated) / `CELL_JUMPPAD` (launch pad, strength in `jumpPadQ`) / `CELL_PLATFORM` (walk-under stories, up to 3 slabs) / `CELL_LAVA` (Hellforge: walkable, burns the player only). Heights in quarter-units |
 | `WorldSnapshot`, `SnapPlayer/Entity/Projectile` | `net/snapshot.h` | Quantized server-to-client state |
 | `NetInput` | `net/net_player.h` | Client→server input: `INPUT_FORWARD/BACKWARD/LEFT/RIGHT/JUMP/FIRE/LOCK` flags |
 | `AABB` | `renderer/frustum.h` | Min/max box for collision and frustum culling |

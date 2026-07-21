@@ -64,6 +64,18 @@ bool LevelGridSystem::isSolid(const LevelGrid& grid, u32 x, u32 z) {
     return (grid.cells[z * grid.width + x].flags & CELL_SOLID) != 0;
 }
 
+bool LevelGridSystem::isLava(const LevelGrid& grid, u32 x, u32 z) {
+    if (!isInBounds(grid, x, z)) return false;
+    return (getCell(grid, x, z).flags & CELL_LAVA) != 0;
+}
+
+bool LevelGridSystem::feetInLava(const LevelGrid& grid, Vec3 feetPos) {
+    u32 gx, gz;
+    if (!worldToGrid(grid, feetPos, gx, gz)) return false;
+    if (!isLava(grid, gx, gz)) return false;
+    return feetPos.y <= getFloorHeight(grid, gx, gz) + 0.1f;
+}
+
 f32 LevelGridSystem::getFloorHeight(const LevelGrid& grid, u32 x, u32 z) {
     if (!isInBounds(grid, x, z)) return 0.0f;
     return grid.cells[z * grid.width + x].floorHeight * 0.25f;
