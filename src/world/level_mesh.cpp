@@ -28,6 +28,13 @@ struct MaterialBucket {
 // Avoids 3.6MB of BSS which crashes the Switch at static init.
 static MaterialBucket* s_buckets = nullptr;
 
+// One-shot warning latch for pushQuad scratch overflow. A dropped quad is INVISIBLE geometry —
+// e.g. a slab TOP the player then falls through — so the old silent return was dangerous. We surface
+// it once per buildAll (reset there) and total the drops, WITHOUT bumping SCRATCH_VERTS/INDICES: the
+// worst fully-slabbed same-material section needs only ~7168/10752 of the 12288/16384 scratch (see
+// tests/world/test_mesh_scratch.cpp), so an overflow is a real geometry bug, not a tight budget.
+static u32 s_quadOverflowDrops = 0;
+
 static void resetBuckets() {
     for (u32 i = 0; i < MAX_SUBMESHES_PER_SECTION; i++) {
         s_buckets[i].vertCount  = 0;
@@ -58,7 +65,14 @@ static MaterialBucket* getBucket(u8 matId) {
 static void pushQuad(MaterialBucket& bkt,
                      Vertex v0, Vertex v1, Vertex v2, Vertex v3)
 {
-    if (bkt.vertCount + 4 > SCRATCH_VERTS || bkt.indexCount + 6 > SCRATCH_INDICES) return;
+    if (bkt.vertCount + 4 > SCRATCH_VERTS || bkt.indexCount + 6 > SCRATCH_INDICES) {
+        if (s_quadOverflowDrops++ == 0)
+            LOG_WARN("LevelMesh: material-bucket scratch overflow (cap %u verts / %u indices) — "
+                     "dropping quads; INVISIBLE geometry. A fully-slabbed section should fit "
+                     "(~7168/10752); an overflow is a geometry bug, not a budget shortfall.",
+                     SCRATCH_VERTS, SCRATCH_INDICES);
+        return;
+    }
 
     u32 base = bkt.vertCount;
     bkt.verts[base+0] = v0;
@@ -460,6 +474,8 @@ u32 LevelMeshSystem::buildAll(const LevelGrid& grid, u32 seed,
 {
     // Allocate scratch buckets on heap (3.6MB — too large for BSS on Switch)
     if (!s_buckets) s_buckets = new MaterialBucket[MAX_SUBMESHES_PER_SECTION];
+
+    s_quadOverflowDrops = 0;   // fresh one-shot overflow warn per rebuild
 
     u32 sx = (grid.width + SECTION_SIZE - 1) / SECTION_SIZE;
     u32 sz = (grid.depth + SECTION_SIZE - 1) / SECTION_SIZE;
