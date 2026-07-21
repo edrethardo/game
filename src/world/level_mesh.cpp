@@ -338,8 +338,13 @@ static void buildSection(const LevelGrid& grid, u32 seed,
                     }
                 }
 
-                // Ceiling quad
-                if (cell.flags & CELL_CEILING) {
+                // Ceiling quad. Skipped for a FOUR_STORY interior cell (a full MAX_PLATFORMS_PER_CELL
+                // stack): three stacked slabs occlude the ceiling from every walkable story, so drawing
+                // it is pure overdraw down the shaft. platformCount==MAX is the render-only tell —
+                // VERTICAL_HALL/arena cells are single-slab, and a FOUR_STORY *hole* cell (L3 punched →
+                // count<MAX) KEEPS its ceiling so you don't see a black void up through the hole.
+                if ((cell.flags & CELL_CEILING) &&
+                    LevelGridSystem::platformCount(grid, x, z) < MAX_PLATFORMS_PER_CELL) {
                     MaterialBucket* bkt = getBucket(cell.ceilMaterialId);
                     Vec3 n{0.0f, -1.0f, 0.0f};
                     Vec3 p0{wx,      ceilH, wz};
