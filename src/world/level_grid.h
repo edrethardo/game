@@ -42,16 +42,26 @@ static constexpr u8 PLATFORM_THICKNESS_Q = 2;
 // includes this header, not the other way round.
 static constexpr f32 PLATFORM_STEP_TOLERANCE = 0.4f;
 
+// Up to 3 walk-under slabs per cell → 4 walkable stories. platHeight[] is STRICTLY ASCENDING by top
+// height; slots >= platCount MUST be zero (canonical byte-form: GridCell is calloc'd per floor and
+// never serialized, so the test_level_gen determinism memcmp compares raw bytes). CELL_PLATFORM is
+// set iff platCount > 0.
+static constexpr u8 MAX_PLATFORMS_PER_CELL = 3;
+
 struct GridCell {
-    u8 flags;            // CELL_SOLID / CELL_FLOOR / CELL_CEILING
+    u8 flags;            // CELL_SOLID / CELL_FLOOR / CELL_CEILING / CELL_PLATFORM / ...
     u8 floorHeight;      // quarter-units (multiply by 0.25 for metres)
     u8 ceilingHeight;    // quarter-units
     u8 wallMaterialId;   // material for wall surfaces
     u8 floorMaterialId;  // material for floor surface
     u8 ceilMaterialId;   // material for ceiling surface
-    u8 platHeight;       // CELL_PLATFORM only: slab TOP surface, quarter-units (×0.25 = metres)
-    u8 platMaterialId;   // CELL_PLATFORM only: slab top + underside material
+    u8 platCount;                              // number of slabs, 0..MAX_PLATFORMS_PER_CELL
+    u8 platHeight[MAX_PLATFORMS_PER_CELL];     // slab TOP surfaces, quarter-units, STRICTLY ASCENDING
+    u8 platMaterialId[MAX_PLATFORMS_PER_CELL]; // per-slab top + underside material
 };
+static_assert(sizeof(GridCell) == 13,
+    "GridCell must stay 13 all-u8 bytes: calloc'd per floor, never serialized; a size change silently "
+    "breaks the test_level_gen determinism memcmp and any future grid memcpy");
 
 struct LevelGrid {
     GridCell* cells = nullptr;
@@ -92,6 +102,10 @@ namespace LevelGridSystem {
     bool hasPlatform(const LevelGrid& grid, u32 x, u32 z);
     f32  getPlatformTop(const LevelGrid& grid, u32 x, u32 z);
     f32  getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z);
+    // Slab AUTHORERS (write paths, operating on a cell reference). setPlatform = REPLACE-to-single:
+    // every legacy single-slab writer routes here so its double-write junctions collapse to one slab
+    // and shipped geometry stays byte-identical. Keeps the ascending + canonical-byte-form invariants.
+    void setPlatform(GridCell& c, u8 topQ, u8 mat);
     // THE story selector: the walkable floor a body with feet at feetY interacts with in this
     // cell. Slab cells return the slab top for feet within PLATFORM_STEP_TOLERANCE below it
     // (walking the balcony, stepping up a slab stair), else the base floor (walking the arcade

@@ -136,8 +136,8 @@ TEST_CASE("TeleportDest: a blink to a balcony target lands ON the balcony story"
     for (u32 z = 1; z <= 2; z++)
         for (u32 x = 1; x <= 10; x++) {
             GridCell& c = g.cells[z * 12 + x];
-            c.flags = static_cast<u8>(CELL_FLOOR | CELL_PLATFORM);
-            c.platHeight = 12;
+            c.flags = static_cast<u8>(CELL_FLOOR);
+            LevelGridSystem::setPlatform(c, 12, 0);
         }
     EntityPool pool{};                               // zero entities — nobody blocks the landing
     Vec3 dest = Teleport::resolveDest(g, pool, {3.5f, 3.0f, 1.5f}, {8.5f, 3.0f, 1.5f});

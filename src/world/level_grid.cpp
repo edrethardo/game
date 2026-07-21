@@ -77,28 +77,45 @@ f32 LevelGridSystem::getCeilingHeight(const LevelGrid& grid, u32 x, u32 z) {
 bool LevelGridSystem::hasPlatform(const LevelGrid& grid, u32 x, u32 z) {
     if (!isInBounds(grid, x, z)) return false;
     const GridCell& c = grid.cells[z * grid.width + x];
-    // A solid cell can't carry a slab — the wall already fills the column.
-    return (c.flags & CELL_PLATFORM) != 0 && !(c.flags & CELL_SOLID);
+    // Invariant (b): CELL_PLATFORM set iff platCount>0. A solid cell can't carry a slab.
+    return c.platCount > 0 && !(c.flags & CELL_SOLID);
 }
 
 f32 LevelGridSystem::getPlatformTop(const LevelGrid& grid, u32 x, u32 z) {
-    return grid.cells[z * grid.width + x].platHeight * 0.25f;
+    const GridCell& c = grid.cells[z * grid.width + x];
+    // Highest slab top (platHeight ascending). Caller gates on hasPlatform (platCount>0).
+    return c.platHeight[c.platCount - 1] * 0.25f;
 }
 
 f32 LevelGridSystem::getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z) {
     const GridCell& c = grid.cells[z * grid.width + x];
-    // Signed math: platHeight < thickness must clamp, not wrap the u8.
-    const s32 underQ = static_cast<s32>(c.platHeight) - PLATFORM_THICKNESS_Q;
+    // Lowest slab's underside, clamped up to the base floor (thin slabs degrade to riser geometry).
+    const s32 underQ = static_cast<s32>(c.platHeight[0]) - PLATFORM_THICKNESS_Q;
     const f32 under  = underQ * 0.25f;
     const f32 fh     = c.floorHeight * 0.25f;
     return under > fh ? under : fh;
 }
 
 f32 LevelGridSystem::effectiveFloorHeight(const LevelGrid& grid, u32 x, u32 z, f32 feetY) {
-    const f32 fh = getFloorHeight(grid, x, z);
-    if (!hasPlatform(grid, x, z)) return fh;
-    const f32 top = getPlatformTop(grid, x, z);
-    return (feetY >= top - PLATFORM_STEP_TOLERANCE) ? top : fh;
+    f32 best = getFloorHeight(grid, x, z);
+    if (!hasPlatform(grid, x, z)) return best;
+    const GridCell& c = grid.cells[z * grid.width + x];
+    // Highest surface among {floor} ∪ {slab tops} at/below feet + step tolerance: a body over a hole
+    // (missing that slab) resolves to the next intact surface below; a body on a slab stays on it.
+    for (u8 i = 0; i < c.platCount; i++) {
+        const f32 top = c.platHeight[i] * 0.25f;
+        if (feetY >= top - PLATFORM_STEP_TOLERANCE && top > best) best = top;
+    }
+    return best;
+}
+
+void LevelGridSystem::setPlatform(GridCell& c, u8 topQ, u8 mat) {
+    c.platCount         = 1;
+    c.platHeight[0]     = topQ;
+    c.platMaterialId[0] = mat;
+    // Canonical byte-form: zero every slot >= platCount so logically-identical cells compare byte-equal.
+    for (u8 i = 1; i < MAX_PLATFORMS_PER_CELL; i++) { c.platHeight[i] = 0; c.platMaterialId[i] = 0; }
+    c.flags |= CELL_PLATFORM;   // OR-in: the cell keeps CELL_FLOOR as its ground story
 }
 
 // 8-directional neighbor offsets: 0=+X, 1=+X+Z, 2=+Z, 3=-X+Z, 4=-X, 5=-X-Z, 6=-Z, 7=+X-Z

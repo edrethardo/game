@@ -350,7 +350,7 @@ static void buildSection(const LevelGrid& grid, u32 seed,
                 if (cell.flags & CELL_PLATFORM) {
                     const f32 topH = LevelGridSystem::getPlatformTop(grid, x, z);
                     const f32 undH = LevelGridSystem::getPlatformUnderside(grid, x, z);
-                    MaterialBucket* pbkt = getBucket(cell.platMaterialId);
+                    MaterialBucket* pbkt = getBucket(cell.platMaterialId[0]);   // Phase 0: single-slab read
                     {   // top (+Y) — same layout/winding as the floor quad
                         Vec3 n{0.0f, 1.0f, 0.0f};
                         Vec3 p0{wx,      topH, wz + cs};

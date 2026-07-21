@@ -36,9 +36,9 @@ struct BalconyRoom {
     ~BalconyRoom() { LevelGridSystem::shutdown(grid); }
 
     void setPlat(u32 x, u32 z, u8 topQ) {
-        GridCell& c  = grid.cells[z * 12 + x];
-        c.flags      = static_cast<u8>(CELL_FLOOR | CELL_PLATFORM);
-        c.platHeight = topQ;
+        GridCell& c = grid.cells[z * 12 + x];
+        c.flags     = static_cast<u8>(CELL_FLOOR);
+        LevelGridSystem::setPlatform(c, topQ, 0);
     }
 };
 

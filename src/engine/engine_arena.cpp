@@ -150,9 +150,8 @@ Vec3 Engine::buildArenaLevel() {
         for (u32 z = sz; z < sz + d; z++)
             for (u32 x = sx; x < sx + w; x++) {
                 GridCell& c = LevelGridSystem::getCell(m_level.grid, x, z);
-                c.flags           = static_cast<u8>(CELL_FLOOR | CELL_PLATFORM);
-                c.platHeight      = topQ;
-                c.platMaterialId  = plank;
+                c.flags           = static_cast<u8>(CELL_FLOOR);
+                LevelGridSystem::setPlatform(c, topQ, plank);   // authorer: platCount=1, sets CELL_PLATFORM
                 c.floorMaterialId = sand;    // the arcade ground beneath stays sand
                 c.wallMaterialId  = stone;
             }
