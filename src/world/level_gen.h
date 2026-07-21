@@ -31,7 +31,9 @@ static constexpr u32 MAX_STORY_PORTALS = 16;
 // centre; pos.y == surfaceY == the slab TOP it pierces (world metres). Zero/unused for other styles;
 // consumed by spawnFloorHoleSnipers (ranged seats at the edge) + enemy-fall AI.
 struct DropHole { Vec3 pos; f32 surfaceY; };
-static constexpr u32 MAX_DROP_HOLES = 32;
+// 64, not 32: holes are recorded top-down (L3, then L2, then L1), so a cap the whole floor can
+// exceed silently starves the DEEPEST level of records — hole-snipers would never seat on L1.
+static constexpr u32 MAX_DROP_HOLES = 64;
 
 struct DungeonResult {
     Vec3 spawnPos;                         // player spawn (world coords)

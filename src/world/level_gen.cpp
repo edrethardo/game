@@ -973,20 +973,45 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
 }
 
 // ---------------------------------------------------------------------------
-// Style: FOUR_STORY — "The Descent". A plain dungeon floor stacked FOUR walkable stories on one
-// footprint (L0 ground + three CELL_PLATFORM slabs @ 3/6/9 m), traversed by a ONE-WAY, DROP-ONLY
-// descent: spawn L3, fall through OFFSET holes down to the L0 exit — no ramps, no stairs, no way up.
-// Loot/enemies seed evenly (per-level rooms at floorHeight 0/3/6/9). Holes go in DISJOINT quadrant sets
-// on adjacent levels (L3->{NW,SE}, L2->{NE,SW}, L1->{NW,SE}), so a dive always lands on the next intact
-// slab one story down — never a two-level express shaft (L3 & L1 reuse {NW,SE} but aren't adjacent,
-// intact L2 between). Built on the multi-slab foundation (addPlatform/removePlatform +
-// effectiveFloorHeight), GenRNG + integer quarter-units only -> byte-identical host/client grids, so it
-// replicates in co-op with NO wire/save change. Contract pinned by test_four_story.
+// Style: FOUR_STORY — "The Descent". A four-story MAZE stacked on ONE footprint: the L0 ground plus
+// three CELL_PLATFORM slab stories at 3/6/9 m, all sharing a single full-height wall skeleton (a
+// braided recursive-backtracker maze of 3-wide corridors). Every story is the same labyrinth walked
+// at a different height, so you re-read a space you already know from a new altitude. You enter on L3
+// in one corner and must reach the L0 exit DIAGONALLY OPPOSITE, and the only way down is through the
+// floor:
+//   * DROP HOLES  — >= 2 cells across. At the 6 m/s base speed a jump reaches 2.4 m and a 0.6 m body
+//                   needs gap+0.6 of clearance, so a >= 2 m gap CANNOT be cleared: it is a committed
+//                   descent of exactly one story.
+//   * JUMP GAPS   — exactly 1 cell across (needs 1.6 m of the 2.4 m reach). Clear them to keep your
+//                   height, or blow the timing and lose a story. This is the maze's own hazard.
+//   * JUMP PADS   — CELL_JUMPPAD cells in dead-end nodes, authored via GridCell::jumpPadQ at ~2
+//                   stories of lift, so a bad fall is recoverable and the maze is not a punish.
+//                   A pad cell is a pad on every story it carries — a vertical landmark column.
+// There are no ramps or stairs: portalCount stays 0 and descent is one-way by design.
+//
+// Express shafts are impossible BY CONSTRUCTION: a hole is punched at level L only where the slab at
+// L+1 is still intact, so no column is ever open through two stories and a fall always lands exactly
+// one story down. The grid itself is the ledger — a holed cell simply has no slab at that height — so
+// the rule costs no memory and cannot drift out of sync with the geometry.
+//
+// GenRNG + integer quarter-units only => byte-identical host/client grids, so the whole floor
+// replicates in co-op with NO wire or save change. Contract pinned by tests/world/test_four_story.cpp.
 // ---------------------------------------------------------------------------
-static constexpr u8 FS_L1_Q   = 12;   // slab tops: L1 @ 3 m
-static constexpr u8 FS_L2_Q   = 24;   //            L2 @ 6 m
-static constexpr u8 FS_L3_Q   = 36;   //            L3 @ 9 m
-static constexpr u8 FS_CEIL_Q = 48;   // 12 m ceiling — clears L3 @ 9 m + a 1.8 m body (VH_CEIL=8 too low)
+static constexpr u8  FS_L1_Q   = 12;   // slab tops: L1 @ 3 m
+static constexpr u8  FS_L2_Q   = 24;   //            L2 @ 6 m
+static constexpr u8  FS_L3_Q   = 36;   //            L3 @ 9 m
+static constexpr u8  FS_CEIL_Q = 48;   // 12 m ceiling — clears L3 @ 9 m plus a 1.8 m body
+static constexpr u32 FS_CORR   = 3;    // corridor width in cells (a 0.6 m body plus combat spacing)
+static constexpr u32 FS_PERIOD = FS_CORR + 1;   // corridor + its 1-cell wall
+static constexpr u32 FS_MAX_NODES = 16;         // lattice cap (a 48-grid uses 11x11)
+static constexpr u8  FS_PAD_Q  = 92;   // 23 m/s -> 6.6 m apex: a pad lifts ~two stories
+
+// True if this cell still carries a slab whose top is exactly `q` quarter-units.
+static bool fsHasSlab(const GridCell& c, u8 q) {
+    for (u8 i = 0; i < c.platCount; i++)
+        if (c.platHeight[i] == q) return true;
+    return false;
+}
 
 static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                            s32& forcedSpawn, s32& forcedExit) {
@@ -996,57 +1021,201 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
     const f32 cs = grid.cellSize;
     const u8  wallMat = (rng.f01() < 0.3f) ? 3 : 0;
 
-    // 1) L0 — the fully-connected ground story (the exit lives here, so exit reachability is trivial).
+    // 1) Open the whole interior at ground level; the maze walls are stamped back in as SOLID below.
     carveArea(grid, 1, 1, W - 2, D - 2, 0.0f, FS_CEIL_Q * 0.25f, wallMat, 1, 2);
     const u8 floorMat = LevelGridSystem::getCell(grid, 2, 2).floorMaterialId;
 
-    // 2) Three full slabs over every interior cell -> every cell carries platCount==3 {12,24,36}.
+    u32 nx = (W - 2) / FS_PERIOD, nz = (D - 2) / FS_PERIOD;
+    if (nx > FS_MAX_NODES) nx = FS_MAX_NODES;
+    if (nz > FS_MAX_NODES) nz = FS_MAX_NODES;
+
+    // The lattice rarely divides the grid evenly; CENTRE it so the remainder splits between the two
+    // sides as wall bulk instead of piling into one fat dead band on the +x/+z edges.
+    const u32 offX = 1 + ((W - 2) - (nx * FS_PERIOD - 1)) / 2;
+    const u32 offZ = 1 + ((D - 2) - (nz * FS_PERIOD - 1)) / 2;
+    // Node (i,j) owns the FS_CORR-square corridor block at (offX+i*FS_PERIOD, offZ+j*FS_PERIOD); the
+    // cells one past it are the walls it shares with its neighbours.
+    auto nodeX0 = [&](u32 i) -> u32 { return offX + i * FS_PERIOD; };
+    auto nodeZ0 = [&](u32 j) -> u32 { return offZ + j * FS_PERIOD; };
+
+    // Everything interior starts SOLID; node blocks and knocked-down walls carve it back open. Cells
+    // past the last node (the lattice rarely divides the grid evenly) stay solid as outer wall bulk.
+    for (u32 z = 1; z < D - 1; z++)
+        for (u32 x = 1; x < W - 1; x++)
+            LevelGridSystem::getCell(grid, x, z).flags = CELL_SOLID;
+
+    auto openRect = [&](u32 x0, u32 z0, u32 w, u32 d) {
+        for (u32 z = z0; z < z0 + d; z++)
+            for (u32 x = x0; x < x0 + w; x++)
+                if (LevelGridSystem::isInBounds(grid, x, z))
+                    LevelGridSystem::getCell(grid, x, z).flags = CELL_FLOOR | CELL_CEILING;
+    };
+    for (u32 j = 0; j < nz; j++)
+        for (u32 i = 0; i < nx; i++)
+            openRect(nodeX0(i), nodeZ0(j), FS_CORR, FS_CORR);
+
+    // 2) Maze over the node lattice: iterative recursive-backtracker (an explicit stack, so no
+    //    recursion and no heap), then BRAIDED by reopening a few extra walls. A perfect maze has
+    //    exactly one route between any two points, which reads as tedious and gives combat nowhere to
+    //    flow; the braids add loops so you can circle an enemy and pick between routes.
+    const s32 dxk[4] = {1, -1, 0, 0}, dzk[4] = {0, 0, 1, -1};
+    auto openWall = [&](u32 i, u32 j, u32 k) {
+        if      (k == 0) openRect(nodeX0(i) + FS_CORR, nodeZ0(j), 1, FS_CORR);
+        else if (k == 1) openRect(nodeX0(i) - 1,       nodeZ0(j), 1, FS_CORR);
+        else if (k == 2) openRect(nodeX0(i), nodeZ0(j) + FS_CORR, FS_CORR, 1);
+        else             openRect(nodeX0(i), nodeZ0(j) - 1,       FS_CORR, 1);
+    };
+    u8  visited[FS_MAX_NODES * FS_MAX_NODES] = {};
+    u16 stk[FS_MAX_NODES * FS_MAX_NODES];
+    u32 top = 0;
+    auto nidx = [&](u32 i, u32 j) -> u32 { return j * nx + i; };
+    visited[nidx(0, 0)] = 1;
+    stk[top++] = 0;
+    while (top > 0) {
+        const u32 cur = stk[top - 1];
+        const u32 ci = cur % nx, cj = cur / nx;
+        u32 cand[4], nc = 0;
+        for (u32 k = 0; k < 4; k++) {
+            const s32 ni = (s32)ci + dxk[k], nj = (s32)cj + dzk[k];
+            if (ni < 0 || nj < 0 || ni >= (s32)nx || nj >= (s32)nz) continue;
+            if (visited[nidx((u32)ni, (u32)nj)]) continue;
+            cand[nc++] = k;
+        }
+        if (nc == 0) { top--; continue; }               // dead end -> backtrack
+        const u32 k = cand[rng.range(0, nc)];
+        openWall(ci, cj, k);
+        const u32 ni = (u32)((s32)ci + dxk[k]), nj = (u32)((s32)cj + dzk[k]);
+        visited[nidx(ni, nj)] = 1;
+        stk[top++] = (u16)nidx(ni, nj);
+    }
+    for (u32 j = 0; j < nz; j++)                        // braid: ~1 in 5 remaining walls
+        for (u32 i = 0; i < nx; i++)
+            for (u32 k = 0; k < 3; k += 2) {            // +x and +z only, so each wall is offered once
+                if (i + (k == 0 ? 1u : 0u) >= nx || j + (k == 2 ? 1u : 0u) >= nz) continue;
+                if (rng.range(0, 100) >= 20) continue;
+                openWall(i, j, k);
+            }
+
+    // 3) Three slabs over every OPEN interior cell -> the maze exists identically on all four stories.
     for (u32 z = 1; z < D - 1; z++)
         for (u32 x = 1; x < W - 1; x++) {
             GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            if (c.flags & CELL_SOLID) continue;
             LevelGridSystem::addPlatform(c, FS_L1_Q, floorMat);
             LevelGridSystem::addPlatform(c, FS_L2_Q, floorMat);
             LevelGridSystem::addPlatform(c, FS_L3_Q, floorMat);
         }
 
-    // 3) Offset drop-holes (the core). Interior split into 4 quadrants at the mid lines. Each level's
-    //    holes go in a quadrant set DISJOINT from the adjacent level's (see header), so a dive always
-    //    lands one story down on intact slab.
-    const u32 midX = W / 2, midZ = D / 2;
-    struct Quad { u32 x0, x1, z0, z1; };            // inclusive interior cell bounds
-    const Quad NW = {1, midX - 1, 1, midZ - 1};
-    const Quad NE = {midX, W - 2, 1, midZ - 1};
-    const Quad SW = {1, midX - 1, midZ, D - 2};
-    const Quad SE = {midX, W - 2, midZ, D - 2};
+    // 4) Endpoints, chosen BEFORE the holes so nothing is punched out from under them: spawn on L3 in
+    //    one corner node, exit on L0 in the diagonally opposite one — the longest traverse the
+    //    footprint allows, and a full four-story descent.
+    const u32 spawnI = nx - 1, spawnJ = 0;      // NE node
+    const u32 exitI  = 0,      exitJ  = nz - 1; // SW node
+    const u32 spawnCX = nodeX0(spawnI) + FS_CORR / 2, spawnCZ = nodeZ0(spawnJ) + FS_CORR / 2;
+    const u32 exitCX  = nodeX0(exitI)  + FS_CORR / 2, exitCZ  = nodeZ0(exitJ)  + FS_CORR / 2;
 
-    auto punchHoles = [&](u8 q, const Quad* quads, u32 quadN) {
-        for (u32 iq = 0; iq < quadN; iq++) {
-            const Quad& Q = quads[iq];
-            // >=1-cell margin inside the quadrant on all sides, so a hole never touches a quadrant
-            // boundary (and thus never column-aligns with an adjacent-level hole across the seam).
-            const u32 minX = Q.x0 + 1, maxX = Q.x1 - 1, minZ = Q.z0 + 1, maxZ = Q.z1 - 1;
-            const u32 count = 1 + rng.range(0, 3);   // first hole unconditional (=> >=1/level), +0..2
-            for (u32 k = 0; k < count; k++) {
-                if (result.dropHoleCount >= DungeonResult::MAX_DROP_HOLES) return;
-                const u32 hw = rng.range(2, 4), hh = rng.range(2, 4);   // 2..3 wide -> a body falls clean
-                if (maxX < minX + hw - 1 || maxZ < minZ + hh - 1) continue;   // quadrant too small (never at >=40)
-                const u32 hx = rng.range(minX, maxX - hw + 2);
-                const u32 hz = rng.range(minZ, maxZ - hh + 2);
-                for (u32 z = hz; z < hz + hh; z++)
-                    for (u32 x = hx; x < hx + hw; x++)
-                        LevelGridSystem::removePlatform(LevelGridSystem::getCell(grid, x, z), q);
-                DropHole& dh = result.dropHoles[result.dropHoleCount++];
-                dh.pos = { (hx + hw * 0.5f) * cs, q * 0.25f, (hz + hh * 0.5f) * cs };
-                dh.surfaceY = q * 0.25f;
+    // 5) Punch the descent, TOP-DOWN. `qAbove` is the slab that must still be intact for a cell to be
+    //    eligible, which is what makes a two-story express shaft unrepresentable.
+    auto rectEligible = [&](u32 x0, u32 z0, u32 w, u32 d, u8 qAbove) -> bool {
+        for (u32 z = z0; z < z0 + d; z++)
+            for (u32 x = x0; x < x0 + w; x++) {
+                if (!LevelGridSystem::isInBounds(grid, x, z)) return false;
+                const GridCell& c = LevelGridSystem::getCell(grid, x, z);
+                if (c.flags & CELL_SOLID) return false;
+                if (qAbove && !fsHasSlab(c, qAbove)) return false;
             }
-        }
+        return true;
     };
-    const Quad nwSE[2] = { NW, SE }, neSW[2] = { NE, SW };
-    punchHoles(FS_L3_Q, nwSE, 2);   // L3 holes -> NW/SE (land on intact L2)
-    punchHoles(FS_L2_Q, neSW, 2);   // L2 holes -> NE/SW (land on intact L1)
-    punchHoles(FS_L1_Q, nwSE, 2);   // L1 holes -> NW/SE (land on L0)
+    auto punchRect = [&](u32 x0, u32 z0, u32 w, u32 d, u8 q) {
+        for (u32 z = z0; z < z0 + d; z++)
+            for (u32 x = x0; x < x0 + w; x++)
+                LevelGridSystem::removePlatform(LevelGridSystem::getCell(grid, x, z), q);
+    };
+    auto recordHole = [&](u32 x0, u32 z0, u32 w, u32 d, u8 q) {
+        if (result.dropHoleCount >= DungeonResult::MAX_DROP_HOLES) return;
+        DropHole& dh = result.dropHoles[result.dropHoleCount++];
+        dh.pos      = { (x0 + w * 0.5f) * cs, q * 0.25f, (z0 + d * 0.5f) * cs };
+        dh.surfaceY = q * 0.25f;
+    };
 
-    // 4) Per-level rooms (2x2 tiling per story) at floorHeight 0/3/6/9 — key the flat enemy/loot spread.
+    const u8 qLevels[3]  = { FS_L3_Q, FS_L2_Q, FS_L1_Q };
+    const u8 qAboveOf[3] = { 0,       FS_L3_Q, FS_L2_Q };
+    // Hole density THINS with depth. The top story hands out ways down freely; the last one makes you
+    // hunt for it. Without the gradient every descent reads the same and the floor has no shape.
+    const u32 holePct[3] = { 18, 12, 7 };
+    for (u32 lv = 0; lv < 3; lv++) {
+        const u8 q = qLevels[lv], qAbove = qAboveOf[lv];
+        u32 made = 0;
+        for (u32 j = 0; j < nz; j++)
+            for (u32 i = 0; i < nx; i++) {
+                // Never punch the spawn node's own story out from under the player.
+                if (q == FS_L3_Q && i == spawnI && j == spawnJ) continue;
+                if (rng.range(0, 100) >= holePct[lv]) continue;
+                // A 2-cell hole in a 3-cell corridor leaves an L-shaped ledge you can edge around —
+                // a choice. A full 3-cell hole spans the corridor and is a committed drop.
+                const u32 sz = (rng.range(0, 100) < 35) ? FS_CORR : 2;
+                const u32 off = (sz == FS_CORR) ? 0 : rng.range(0, 2);
+                const u32 hx = nodeX0(i) + off, hz = nodeZ0(j) + off;
+                if (!rectEligible(hx, hz, sz, sz, qAbove)) continue;
+                punchRect(hx, hz, sz, sz, q);
+                recordHole(hx, hz, sz, sz, q);
+                made++;
+            }
+        // Every story MUST offer at least one way down, or the descent dead-ends. Walk the lattice
+        // for the first eligible node rather than trusting the rolls.
+        if (made == 0)
+            for (u32 j = 0; j < nz && made == 0; j++)
+                for (u32 i = 0; i < nx && made == 0; i++) {
+                    if (q == FS_L3_Q && i == spawnI && j == spawnJ) continue;
+                    const u32 hx = nodeX0(i), hz = nodeZ0(j);
+                    if (!rectEligible(hx, hz, 2, 2, qAbove)) continue;
+                    punchRect(hx, hz, 2, 2, q);
+                    recordHole(hx, hz, 2, 2, q);
+                    made++;
+                }
+
+        // JUMP GAPS: knock the slab out of a doorway (1 cell thick, corridor-wide). Clearable at base
+        // speed — a rhythm break and a risk, not a descent you chose.
+        for (u32 j = 0; j < nz; j++)
+            for (u32 i = 0; i < nx; i++)
+                for (u32 k = 0; k < 3; k += 2) {
+                    if (i + (k == 0 ? 1u : 0u) >= nx || j + (k == 2 ? 1u : 0u) >= nz) continue;
+                    if (rng.range(0, 100) >= 14) continue;
+                    const u32 gx = (k == 0) ? nodeX0(i) + FS_CORR : nodeX0(i);
+                    const u32 gz = (k == 0) ? nodeZ0(j)           : nodeZ0(j) + FS_CORR;
+                    const u32 gw = (k == 0) ? 1u : FS_CORR, gd = (k == 0) ? FS_CORR : 1u;
+                    if (LevelGridSystem::getCell(grid, gx, gz).flags & CELL_SOLID) continue;  // shut door
+                    if (!rectEligible(gx, gz, gw, gd, qAbove)) continue;
+                    punchRect(gx, gz, gw, gd, q);   // NOT recorded: dropHoles[] means "a way down"
+                }
+    }
+
+    // 6) JUMP PADS in dead-end nodes (exactly one open doorway): the maze's reward for exploring a
+    //    spur, and the recovery route after a missed jump. Authored at ~two stories of lift so the
+    //    climb is worth the detour; a pad cell is a pad on every story it carries.
+    for (u32 j = 0; j < nz; j++)
+        for (u32 i = 0; i < nx; i++) {
+            if (i == spawnI && j == spawnJ) continue;
+            if (i == exitI  && j == exitJ)  continue;
+            u32 doors = 0;
+            for (u32 k = 0; k < 4; k++) {
+                const s32 ni = (s32)i + dxk[k], nj = (s32)j + dzk[k];
+                if (ni < 0 || nj < 0 || ni >= (s32)nx || nj >= (s32)nz) continue;
+                const u32 wx = (k == 0) ? nodeX0(i) + FS_CORR : (k == 1) ? nodeX0(i) - 1 : nodeX0(i);
+                const u32 wz = (k == 2) ? nodeZ0(j) + FS_CORR : (k == 3) ? nodeZ0(j) - 1 : nodeZ0(j);
+                if (!(LevelGridSystem::getCell(grid, wx, wz).flags & CELL_SOLID)) doors++;
+            }
+            if (doors != 1) continue;
+            const u32 px = nodeX0(i) + FS_CORR / 2, pz = nodeZ0(j) + FS_CORR / 2;
+            GridCell& pc = LevelGridSystem::getCell(grid, px, pz);
+            if (pc.flags & CELL_SOLID) continue;
+            pc.flags |= CELL_JUMPPAD;
+            pc.jumpPadQ       = FS_PAD_Q;
+            pc.floorMaterialId = floorMat;   // the pad's glow comes from the arena_pad tint below
+        }
+
+    // 7) Per-level rooms (a 2x2 tiling per story) at floorHeight 0/3/6/9 — these key the flat
+    //    enemy/loot spread, so every story gets populated instead of only the ground.
     const f32 levelY[4] = { 0.0f, 3.0f, 6.0f, 9.0f };
     const u32 halfW = (W - 2) / 2, halfD = (D - 2) / 2;
     u32 l0Base = 0, l3Base = 0;
@@ -1066,13 +1235,8 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
             }
     }
 
-    // 5) Endpoints — spawn on L3 in a quadrant with NO L3 hole (NE => guaranteed real slab), exit on L0 in
-    //    the diagonally-opposite quadrant (SW => a full four-story descent + long traverse). portalCount
-    //    stays 0 (no ramps); spawnOnUpper marks the balcony spawn (startGame applies balconyPos verbatim).
-    const u32 spawnX = (midX + (W - 2)) / 2, spawnZ = (1 + (midZ - 1)) / 2;   // NE quadrant centre
-    const u32 exitX  = (1 + (midX - 1)) / 2, exitZ  = (midZ + (D - 2)) / 2;   // SW quadrant centre
-    result.spawnBalconyPos = { (spawnX + 0.5f) * cs, FS_L3_Q * 0.25f, (spawnZ + 0.5f) * cs };
-    result.exitBalconyPos  = { (exitX  + 0.5f) * cs, 0.0f,            (exitZ  + 0.5f) * cs };
+    result.spawnBalconyPos = { (spawnCX + 0.5f) * cs, FS_L3_Q * 0.25f, (spawnCZ + 0.5f) * cs };
+    result.exitBalconyPos  = { (exitCX  + 0.5f) * cs, 0.0f,            (exitCZ  + 0.5f) * cs };
     result.spawnOnUpper    = true;
 
     auto roomAt = [&](u32 base, u32 gx, u32 gz) -> s32 {
@@ -1082,8 +1246,8 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
         }
         return (s32)base;
     };
-    forcedSpawn = roomAt(l3Base, spawnX, spawnZ);   // the L3 room containing spawn
-    forcedExit  = roomAt(l0Base, exitX,  exitZ);    // the L0 room containing exit
+    forcedSpawn = roomAt(l3Base, spawnCX, spawnCZ);
+    forcedExit  = roomAt(l0Base, exitCX,  exitCZ);
 }
 
 const char* LevelGen::styleName(LayoutStyle style) {

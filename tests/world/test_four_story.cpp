@@ -8,6 +8,7 @@
 #include "doctest/doctest.h"
 #include "world/level_gen.h"
 #include "world/level_grid.h"
+#include "world/collision.h"   // JUMPPAD_LAUNCH, the default the maze pads must beat
 
 #include <cstring>
 #include <vector>
@@ -17,7 +18,7 @@ TEST_CASE("FOUR_STORY: type + styleName wiring") {
     CHECK(std::strcmp(LevelGen::styleName(LevelGen::LayoutStyle::FOUR_STORY), "descent") == 0);
     DungeonResult r{};
     CHECK(r.dropHoleCount == 0);
-    CHECK(DungeonResult::MAX_DROP_HOLES == 32);
+    CHECK(DungeonResult::MAX_DROP_HOLES == 64);
 }
 
 TEST_CASE("FOUR_STORY: pickLayoutStyle appears on non-boss deep floors only, deterministically") {
@@ -78,6 +79,7 @@ bool descendReaches(const LevelGrid& g, u32 sx, u32 sz, u32 startLv, u32 ex, u32
         for (u32 k = 0; k < 4; k++) {
             s32 nx = (s32)x + dx[k], nz = (s32)z + dz[k];
             if (nx < 1 || nz < 1 || nx >= (s32)W - 1 || nz >= (s32)D - 1) continue;
+            if (LevelGridSystem::isSolid(g, (u32)nx, (u32)nz)) continue;   // the maze's walls
             push((u32)nx, (u32)nz, surfaceAtOrBelow((u32)nx, (u32)nz, lv));
         }
     }
@@ -108,36 +110,82 @@ TEST_CASE("FOUR_STORY: deterministic grid + room/hole counts from the seed") {
     }
 }
 
-TEST_CASE("FOUR_STORY: every upper level has a drop-hole, holes are >=2 wide and border-margined") {
+TEST_CASE("FOUR_STORY: every upper level records a way down, and every recorded hole is unjumpable") {
     for (u32 seed : {1u, 99u, 4242u}) {
         LevelGrid g;
         LevelGridSystem::init(g, 48, 48, 1.0f);
-        LevelGen::generate(g, seed, 48, 48, LevelGen::LayoutStyle::FOUR_STORY);
-        const u32 W = g.width, D = g.depth;
-        u32 h1 = 0, h2 = 0, h3 = 0;
-        for (u32 z = 1; z < D - 1; z++)
-            for (u32 x = 1; x < W - 1; x++) {
-                const f32 lvM[3] = {3.0f, 6.0f, 9.0f};
-                for (u32 L = 0; L < 3; L++) {
-                    if (hasSlabAt(g, x, z, lvM[L])) continue;       // slab present here
-                    (L == 0 ? h1 : L == 1 ? h2 : h3)++;
-                    CAPTURE(x); CAPTURE(z); CAPTURE(L);
-                    // Border margin: a hole never touches the interior edge (would spill / mis-align).
-                    CHECK(x > 1); CHECK(x < W - 2); CHECK(z > 1); CHECK(z < D - 2);
-                    // >=2 wide: a same-level missing neighbour in BOTH x and z (no 1-cell hole).
-                    const bool wideX = !hasSlabAt(g, x - 1, z, lvM[L]) || !hasSlabAt(g, x + 1, z, lvM[L]);
-                    const bool wideZ = !hasSlabAt(g, x, z - 1, lvM[L]) || !hasSlabAt(g, x, z + 1, lvM[L]);
-                    CHECK(wideX);
-                    CHECK(wideZ);
-                }
-            }
+        DungeonResult r = LevelGen::generate(g, seed, 48, 48, LevelGen::LayoutStyle::FOUR_STORY);
         CAPTURE(seed);
-        CHECK(h1 > 0); CHECK(h2 > 0); CHECK(h3 > 0);               // >=1 hole per upper level
+        u32 per[3] = {0, 0, 0};                       // recorded holes at L1 / L2 / L3
+        for (u8 i = 0; i < r.dropHoleCount; i++) {
+            const f32 y = r.dropHoles[i].surfaceY;
+            const u32 lv = (y > 8.0f) ? 2u : (y > 5.0f) ? 1u : 0u;
+            per[lv]++;
+            // A recorded hole is a COMMITTED descent: >= 2 cells across in BOTH axes. At the 6 m/s
+            // base speed a jump reaches 2.4 m and a 0.6 m body needs gap + 0.6, so a 2 m gap cannot
+            // be cleared. (1-cell JUMP gaps are deliberately not recorded — they are hazards, not
+            // ways down.) Probe outward from the hole centre for missing slab on both axes.
+            u32 hx, hz;
+            REQUIRE(LevelGridSystem::worldToGrid(g, r.dropHoles[i].pos, hx, hz));
+            const f32 top = r.dropHoles[i].surfaceY;
+            u32 spanX = 0, spanZ = 0;
+            for (u32 x = 1; x < g.width - 1; x++)  if (!hasSlabAt(g, x, hz, top) && !LevelGridSystem::isSolid(g, x, hz)) { if (x >= hx - 2 && x <= hx + 2) spanX++; }
+            for (u32 z = 1; z < g.depth - 1; z++)  if (!hasSlabAt(g, hx, z, top) && !LevelGridSystem::isSolid(g, hx, z)) { if (z >= hz - 2 && z <= hz + 2) spanZ++; }
+            CHECK(spanX >= 2);
+            CHECK(spanZ >= 2);
+        }
+        CHECK(per[0] > 0);   // L1 must record a way down to L0, or the last descent is unseatable
+        CHECK(per[1] > 0);
+        CHECK(per[2] > 0);
         LevelGridSystem::shutdown(g);
     }
 }
 
-TEST_CASE("FOUR_STORY: adjacent-level holes are quadrant-disjoint (max one story per dive)") {
+TEST_CASE("FOUR_STORY: the floor is a MAZE, not an open plain") {
+    // The guard against the failure this style shipped with first: a technically-valid four-story
+    // floor whose every level was one open 46x46 field with ~1% punched out. Structure is content —
+    // assert real wall bulk and real corridor bulk, so neither an empty box nor a solid block passes.
+    for (u32 seed : {5u, 606u, 90210u}) {
+        LevelGrid g;
+        LevelGridSystem::init(g, 48, 48, 1.0f);
+        LevelGen::generate(g, seed, 48, 48, LevelGen::LayoutStyle::FOUR_STORY);
+        CAPTURE(seed);
+        u32 interior = 0, solid = 0, pads = 0;
+        for (u32 z = 1; z < g.depth - 1; z++)
+            for (u32 x = 1; x < g.width - 1; x++) {
+                interior++;
+                if (LevelGridSystem::isSolid(g, x, z)) solid++;
+                else if (LevelGridSystem::getCell(g, x, z).flags & CELL_JUMPPAD) pads++;
+            }
+        CHECK(solid > interior / 5);           // >20% wall: a real labyrinth, not a field
+        CHECK(solid < (interior * 3) / 5);     // <60% wall: still a floor you can walk
+        CHECK(pads > 0);                       // dead-end jump pads exist
+        LevelGridSystem::shutdown(g);
+    }
+}
+
+TEST_CASE("FOUR_STORY: jump pads are authored stronger than the global default") {
+    LevelGrid g;
+    LevelGridSystem::init(g, 48, 48, 1.0f);
+    LevelGen::generate(g, 0x51EEDu, 48, 48, LevelGen::LayoutStyle::FOUR_STORY);
+    u32 checked = 0;
+    for (u32 z = 1; z < g.depth - 1 && checked == 0; z++)
+        for (u32 x = 1; x < g.width - 1; x++) {
+            const GridCell& c = LevelGridSystem::getCell(g, x, z);
+            if (!(c.flags & CELL_JUMPPAD)) continue;
+            // Per-cell strength, so the Arena/VERTICAL_HALL pads keep their tuned 3.6 m apex while
+            // the Descent's climb ~two stories. Apex = v^2 / (2*|GRAVITY|) with GRAVITY -40.
+            const f32 v = c.jumpPadQ * 0.25f;
+            CHECK(v > JUMPPAD_LAUNCH);
+            CHECK((v * v) / 80.0f > 6.0f);     // clears two 3 m stories
+            checked++;
+            break;
+        }
+    CHECK(checked == 1);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("FOUR_STORY: no column is open through two stories (max one story per dive)") {
     for (u32 seed : {2u, 808u, 31337u}) {
         LevelGrid g;
         LevelGridSystem::init(g, 48, 48, 1.0f);
@@ -145,6 +193,7 @@ TEST_CASE("FOUR_STORY: adjacent-level holes are quadrant-disjoint (max one story
         const u32 W = g.width, D = g.depth;
         for (u32 z = 1; z < D - 1; z++)
             for (u32 x = 1; x < W - 1; x++) {
+                if (LevelGridSystem::isSolid(g, x, z)) continue;   // a maze wall carries no slabs
                 bool m3 = !hasSlabAt(g, x, z, 9.0f), m2 = !hasSlabAt(g, x, z, 6.0f),
                      m1 = !hasSlabAt(g, x, z, 3.0f);
                 CAPTURE(x); CAPTURE(z);
