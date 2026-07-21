@@ -73,6 +73,8 @@ constexpr LevelGen::LayoutStyle kAllStyles[] = {
     LevelGen::LayoutStyle::CAVERN,
     LevelGen::LayoutStyle::GAUNTLET,
     LevelGen::LayoutStyle::HUB,
+    LevelGen::LayoutStyle::VERTICAL_HALL,
+    LevelGen::LayoutStyle::FOUR_STORY,
 };
 
 } // namespace

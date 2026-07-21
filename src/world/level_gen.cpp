@@ -975,6 +975,22 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     };
     clearPad(result.spawnBalconyPos);
     clearPad(result.exitBalconyPos);
+
+    // A room's CENTRE cell must never be solid: consumers place lights, the exit portal and loot
+    // there, and the generic reachability contract floods to it. The cover pillars above are scattered
+    // by RNG inside the room rects, so one can land exactly on a centre — clear any that did. (One
+    // pillar out of two per room; the cover pattern is unaffected.)
+    for (u32 i = 0; i < result.roomCount; i++) {
+        const DungeonRoom& r = result.rooms[i];
+        const u32 cx = r.x + r.w / 2, cz = r.z + r.d / 2;
+        if (!LevelGridSystem::isInBounds(grid, cx, cz)) continue;
+        GridCell& c = LevelGridSystem::getCell(grid, cx, cz);
+        if (!(c.flags & CELL_SOLID)) continue;
+        c.flags           = CELL_FLOOR | CELL_CEILING;
+        c.floorHeight     = (u8)(r.floorHeight / 0.25f);
+        c.ceilingHeight   = (u8)(VH_CEIL / 0.25f);
+        c.floorMaterialId = floorMat;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1233,8 +1249,27 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                 if (result.roomCount >= MAX_DUNGEON_ROOMS) break;
                 DungeonRoom& r = result.rooms[result.roomCount++];
                 r = DungeonRoom{};
-                r.x = 1 + rx * halfW; r.z = 1 + rz * halfD;
                 r.w = halfW;          r.d = halfD;
+                // A room's CENTRE is what downstream code probes — spawn placement, the exit portal,
+                // and the generic reachability contract all read rooms[i] centre. On an open floor any
+                // rect works, but this floor is a MAZE: a naive quadrant rect centres on a wall roughly
+                // a third of the time, which reads as "room unreachable". So snap the rect so its
+                // centre lands on the nearest NODE centre (always corridor) that keeps it in bounds.
+                const u32 wantX = 1 + rx * halfW + halfW / 2, wantZ = 1 + rz * halfD + halfD / 2;
+                auto snap = [&](u32 want, u32 half, u32 n, u32 off, u32 limit) -> u32 {
+                    u32 bestC = want, bestD = 0xFFFFFFFFu;
+                    for (u32 k = 0; k < n; k++) {
+                        const u32 c = off + k * FS_PERIOD + FS_CORR / 2;   // node centre
+                        if (c < half / 2) continue;
+                        const u32 origin = c - half / 2;                   // resulting rect origin
+                        if (origin < 1 || origin + half > limit) continue;
+                        const u32 d = (c > want) ? c - want : want - c;
+                        if (d < bestD) { bestD = d; bestC = c; }
+                    }
+                    return (bestD == 0xFFFFFFFFu) ? 1 : bestC - half / 2;
+                };
+                r.x = snap(wantX, halfW, nx, offX, W - 1);
+                r.z = snap(wantZ, halfD, nz, offZ, D - 1);
                 r.floorHeight = levelY[lv];
                 r.wallMat = wallMat;
             }
