@@ -1067,9 +1067,9 @@
       "name": "arena_pad",
       "texture": "ring_gold_tex_42.png",
       "tint": [
-        0.25,
-        1.0,
-        1.0,
+        0.5,
+        2.6,
+        3.0,
         1.0
       ]
     }
