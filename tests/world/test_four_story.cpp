@@ -19,3 +19,26 @@ TEST_CASE("FOUR_STORY: type + styleName wiring") {
     CHECK(r.dropHoleCount == 0);
     CHECK(DungeonResult::MAX_DROP_HOLES == 32);
 }
+
+TEST_CASE("FOUR_STORY: pickLayoutStyle appears on non-boss deep floors only, deterministically") {
+    // Non-boss remap (mirrors VERTICAL_HALL): FOUR_STORY never fires on floor<6 or a boss floor (floor%5==0)
+    // — the boss-arena expansion rewrites floorHeight and rebuilds the mesh, which would stomp the slabs.
+    for (u32 floor = 1; floor <= 60; floor++)
+        for (u32 seed : {5u, 500u, 50000u, 0xBEEFu}) {
+            LevelGen::LayoutStyle s = LevelGen::pickLayoutStyle(seed, floor);
+            CAPTURE(floor); CAPTURE(seed);
+            if (s == LevelGen::LayoutStyle::FOUR_STORY) {
+                CHECK(floor >= 6);
+                CHECK(floor % 5 != 0);
+            }
+            CHECK(s == LevelGen::pickLayoutStyle(seed, floor));   // host==client (deterministic)
+        }
+
+    // The style must actually occur on eligible floors (the weight column isn't dead).
+    u32 seen = 0;
+    for (u32 seed = 0; seed < 2000; seed++)
+        for (u32 floor : {7u, 13u, 22u, 34u, 46u})
+            if (LevelGen::pickLayoutStyle(seed * 2654435761u, floor) == LevelGen::LayoutStyle::FOUR_STORY)
+                seen++;
+    CHECK(seen > 0);
+}

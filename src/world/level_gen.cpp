@@ -994,29 +994,31 @@ LevelGen::LayoutStyle LevelGen::pickLayoutStyle(u32 seed, u32 floor) {
     rng.next();
     u32 roll = rng.range(0, 100);
 
-    // Per-tier weights [BSP, CAVERN, GAUNTLET, HUB]. Styles echo the tier's
-    // fiction: caves peak in the Spider Caverns, gauntlets in the Hellforge,
-    // vault hubs in the Catacombs. Classic stays the most common style overall
-    // so the structural floors keep reading as events, not the norm.
+    // Per-tier weights [BSP, CAVERN, GAUNTLET, HUB, VERTICAL_HALL, FOUR_STORY]; each row sums to 100.
+    // Styles echo the tier's fiction: caves peak in the Spider Caverns, gauntlets in the Hellforge,
+    // vault hubs in the Catacombs. Classic BSP stays the most common single style overall so the
+    // structural floors keep reading as events, not the norm. The two multi-story styles
+    // (VERTICAL_HALL, FOUR_STORY) are NON-BOSS styles — see the remap below.
     u8 tier = floor >= 41 ? 4 : floor >= 31 ? 3 : floor >= 21 ? 2 : floor >= 11 ? 1 : 0;
-    // Per-tier weights [BSP, CAVERN, GAUNTLET, HUB, VERTICAL_HALL]; each row sums to 100.
-    static constexpr u8 kWeights[5][5] = {
-        {50, 13, 12, 12, 13},   // 4-10  Stone Dungeon
-        {30, 13, 17, 25, 15},   // 11-20 Catacombs
-        {22, 40,  8, 18, 12},   // 21-30 Spider Caverns
-        {22, 12, 36, 18, 12},   // 31-40 Hellforge
-        {22, 22, 18, 26, 12},   // 41-50 Void
+    static constexpr u8 kWeights[5][6] = {
+        {46, 12, 11, 11, 12,  8},   // 4-10  Stone Dungeon
+        {28, 12, 15, 22, 13, 10},   // 11-20 Catacombs
+        {20, 36,  8, 16, 10, 10},   // 21-30 Spider Caverns
+        {20, 11, 33, 16, 10, 10},   // 31-40 Hellforge
+        {20, 20, 16, 22, 10, 12},   // 41-50 Void
     };
     u32 acc = 0;
-    for (u32 s = 0; s < 5; s++) {
+    for (u32 s = 0; s < 6; s++) {
         acc += kWeights[tier][s];
         if (roll < acc) {
             LayoutStyle st = static_cast<LayoutStyle>(s);
-            // VERTICAL_HALL is a NON-BOSS style: boss floors (every 5th — the milestone floors
-            // 5,10,…,50) expand a room into a boss arena and rebuild the mesh, which would stomp
-            // balcony cells; and floors 4-5 run on the tiny tutorial grid. Fall back to classic BSP
-            // there (VERTICAL_HALL only appears on floor-6+ non-boss floors).
-            if (st == LayoutStyle::VERTICAL_HALL && (floor < 6 || floor % 5 == 0))
+            // VERTICAL_HALL and FOUR_STORY are NON-BOSS styles: boss floors (every 5th — the
+            // milestone floors 5,10,…,50) expand a room into a boss arena and rebuild the mesh,
+            // which would stomp the balcony / stacked-slab cells; and floors 4-5 run on the tiny
+            // tutorial grid. Fall back to classic BSP there (both styles only appear on floor-6+
+            // non-boss floors).
+            if ((st == LayoutStyle::VERTICAL_HALL || st == LayoutStyle::FOUR_STORY) &&
+                (floor < 6 || floor % 5 == 0))
                 return LayoutStyle::BSP_ROOMS;
             return st;
         }
