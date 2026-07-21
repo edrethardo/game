@@ -458,6 +458,16 @@ void Engine::wireClientNet() {
     PendingSkillRingOps::reset(m_pendingSkills);
 }
 
+
+// True for the layout styles whose spawn/exit sit on an explicit balcony/slab position
+// (spawnBalconyPos/exitBalconyPos) instead of the plain room centre: the two-story VERTICAL_HALL
+// and the four-story FOUR_STORY "Descent". Gates the grid-force + endpoint overrides below so both
+// stacked-slab styles share one code path (add a style here and it inherits balcony endpoints).
+static bool usesBalconyEndpoints(LevelGen::LayoutStyle s) {
+    return s == LevelGen::LayoutStyle::VERTICAL_HALL ||
+           s == LevelGen::LayoutStyle::FOUR_STORY;
+}
+
 void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // Reset first-kill guaranteed drop for this floor
     s_firstKillDropGiven = false;
@@ -533,9 +543,13 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // every 5th floor and would stomp balconies) so the feature is playtestable on demand.
     if (m_forceVerticalHall && m_level.currentFloor % 5 != 0)
         layoutStyle = LevelGen::LayoutStyle::VERTICAL_HALL;
+    // Dev door (--fourstory): force the four-story FOUR_STORY "Descent" on any non-boss floor (bosses
+    // land every 5th floor and would stomp the stacked slabs) — mirrors the --vhall door above.
+    if (m_forceFourStory && m_level.currentFloor % 5 != 0)
+        layoutStyle = LevelGen::LayoutStyle::FOUR_STORY;
     // A two-story hall needs room for two pits + wide walk-under galleries + long ramps either side
     // of the divider — force a large grid regardless of floor so the upper floor is a real floor.
-    if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL && gridSize < 44) gridSize = 44;
+    if (usesBalconyEndpoints(layoutStyle) && gridSize < 44) gridSize = 44;
 
     // Generate the level once — spawn/exit room selection always succeeds
     // by falling back to the best available rooms.
@@ -548,9 +562,9 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // VERTICAL_HALL (Chasm & Bridges): spawnBalconyPos is the explicit entrance position — the upper
     // slab (y = 3 m) or the open chasm floor (y = 0), always on the OPPOSITE side + story from the exit
     // (exitBalconyPos, applied at the exit-door block below). Both are honoured whether upper or lower.
-    if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
+    if (usesBalconyEndpoints(layoutStyle) &&
         lengthSq(dungeon.spawnBalconyPos) > 0.0f) {
-        spawnPos = dungeon.spawnBalconyPos;
+        spawnPos = dungeon.spawnBalconyPos;   // VERTICAL_HALL entrance slab / FOUR_STORY L3 spawn (y=9)
     }
 
     // ---------------------------------------------------------------------------
@@ -639,6 +653,9 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // ground-story enemies). They hold + fire down while they have LOS; melee chase across stories.
     if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL)
         spawnFloorNests(dungeon, currentTier);
+    // FOUR_STORY: spawnFloorNests no-ops (portalCount==0); seat snipers at the drop-hole edges instead.
+    else if (layoutStyle == LevelGen::LayoutStyle::FOUR_STORY)
+        spawnFloorHoleSnipers(dungeon, currentTier);
 
     // Assign entities to room-based squads now that all enemies are placed
     SquadSystem::rebuild(m_level.squads, dungeon, m_entities);
@@ -709,9 +726,9 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         // sides of the chasm — you cross to reach the door. exitBalconyPos carries the far-side slab
         // position; move the door there (independent of spawn — both stories are the upper slab here).
         // The portal render + 3D proximity gate handle a raised exit for free.
-        if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
+        if (usesBalconyEndpoints(layoutStyle) &&
             lengthSq(dungeon.exitBalconyPos) > 0.0f) {
-            m_level.floorDoorPos = dungeon.exitBalconyPos;
+            m_level.floorDoorPos = dungeon.exitBalconyPos;   // VH far-side slab / FOUR_STORY L0 exit (y=0)
         }
         LOG_INFO("Floor %u exit portal at (%.1f, %.1f, %.1f)", m_level.currentFloor,
                  m_level.floorDoorPos.x, m_level.floorDoorPos.y, m_level.floorDoorPos.z);
