@@ -972,6 +972,120 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     clearPad(result.exitBalconyPos);
 }
 
+// ---------------------------------------------------------------------------
+// Style: FOUR_STORY — "The Descent". A plain dungeon floor stacked FOUR walkable stories on one
+// footprint (L0 ground + three CELL_PLATFORM slabs @ 3/6/9 m), traversed by a ONE-WAY, DROP-ONLY
+// descent: spawn L3, fall through OFFSET holes down to the L0 exit — no ramps, no stairs, no way up.
+// Loot/enemies seed evenly (per-level rooms at floorHeight 0/3/6/9). Holes go in DISJOINT quadrant sets
+// on adjacent levels (L3->{NW,SE}, L2->{NE,SW}, L1->{NW,SE}), so a dive always lands on the next intact
+// slab one story down — never a two-level express shaft (L3 & L1 reuse {NW,SE} but aren't adjacent,
+// intact L2 between). Built on the multi-slab foundation (addPlatform/removePlatform +
+// effectiveFloorHeight), GenRNG + integer quarter-units only -> byte-identical host/client grids, so it
+// replicates in co-op with NO wire/save change. Contract pinned by test_four_story.
+// ---------------------------------------------------------------------------
+static constexpr u8 FS_L1_Q   = 12;   // slab tops: L1 @ 3 m
+static constexpr u8 FS_L2_Q   = 24;   //            L2 @ 6 m
+static constexpr u8 FS_L3_Q   = 36;   //            L3 @ 9 m
+static constexpr u8 FS_CEIL_Q = 48;   // 12 m ceiling — clears L3 @ 9 m + a 1.8 m body (VH_CEIL=8 too low)
+
+static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
+                           s32& forcedSpawn, s32& forcedExit) {
+    const u32 W = grid.width, D = grid.depth;
+    if (W < 40 || D < 40) return;   // too small -> generate() sees roomCount==0 (<5) and re-carves BSP
+
+    const f32 cs = grid.cellSize;
+    const u8  wallMat = (rng.f01() < 0.3f) ? 3 : 0;
+
+    // 1) L0 — the fully-connected ground story (the exit lives here, so exit reachability is trivial).
+    carveArea(grid, 1, 1, W - 2, D - 2, 0.0f, FS_CEIL_Q * 0.25f, wallMat, 1, 2);
+    const u8 floorMat = LevelGridSystem::getCell(grid, 2, 2).floorMaterialId;
+
+    // 2) Three full slabs over every interior cell -> every cell carries platCount==3 {12,24,36}.
+    for (u32 z = 1; z < D - 1; z++)
+        for (u32 x = 1; x < W - 1; x++) {
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            LevelGridSystem::addPlatform(c, FS_L1_Q, floorMat);
+            LevelGridSystem::addPlatform(c, FS_L2_Q, floorMat);
+            LevelGridSystem::addPlatform(c, FS_L3_Q, floorMat);
+        }
+
+    // 3) Offset drop-holes (the core). Interior split into 4 quadrants at the mid lines. Each level's
+    //    holes go in a quadrant set DISJOINT from the adjacent level's (see header), so a dive always
+    //    lands one story down on intact slab.
+    const u32 midX = W / 2, midZ = D / 2;
+    struct Quad { u32 x0, x1, z0, z1; };            // inclusive interior cell bounds
+    const Quad NW = {1, midX - 1, 1, midZ - 1};
+    const Quad NE = {midX, W - 2, 1, midZ - 1};
+    const Quad SW = {1, midX - 1, midZ, D - 2};
+    const Quad SE = {midX, W - 2, midZ, D - 2};
+
+    auto punchHoles = [&](u8 q, const Quad* quads, u32 quadN) {
+        for (u32 iq = 0; iq < quadN; iq++) {
+            const Quad& Q = quads[iq];
+            // >=1-cell margin inside the quadrant on all sides, so a hole never touches a quadrant
+            // boundary (and thus never column-aligns with an adjacent-level hole across the seam).
+            const u32 minX = Q.x0 + 1, maxX = Q.x1 - 1, minZ = Q.z0 + 1, maxZ = Q.z1 - 1;
+            const u32 count = 1 + rng.range(0, 3);   // first hole unconditional (=> >=1/level), +0..2
+            for (u32 k = 0; k < count; k++) {
+                if (result.dropHoleCount >= DungeonResult::MAX_DROP_HOLES) return;
+                const u32 hw = rng.range(2, 4), hh = rng.range(2, 4);   // 2..3 wide -> a body falls clean
+                if (maxX < minX + hw - 1 || maxZ < minZ + hh - 1) continue;   // quadrant too small (never at >=40)
+                const u32 hx = rng.range(minX, maxX - hw + 2);
+                const u32 hz = rng.range(minZ, maxZ - hh + 2);
+                for (u32 z = hz; z < hz + hh; z++)
+                    for (u32 x = hx; x < hx + hw; x++)
+                        LevelGridSystem::removePlatform(LevelGridSystem::getCell(grid, x, z), q);
+                DropHole& dh = result.dropHoles[result.dropHoleCount++];
+                dh.pos = { (hx + hw * 0.5f) * cs, q * 0.25f, (hz + hh * 0.5f) * cs };
+                dh.surfaceY = q * 0.25f;
+            }
+        }
+    };
+    const Quad nwSE[2] = { NW, SE }, neSW[2] = { NE, SW };
+    punchHoles(FS_L3_Q, nwSE, 2);   // L3 holes -> NW/SE (land on intact L2)
+    punchHoles(FS_L2_Q, neSW, 2);   // L2 holes -> NE/SW (land on intact L1)
+    punchHoles(FS_L1_Q, nwSE, 2);   // L1 holes -> NW/SE (land on L0)
+
+    // 4) Per-level rooms (2x2 tiling per story) at floorHeight 0/3/6/9 — key the flat enemy/loot spread.
+    const f32 levelY[4] = { 0.0f, 3.0f, 6.0f, 9.0f };
+    const u32 halfW = (W - 2) / 2, halfD = (D - 2) / 2;
+    u32 l0Base = 0, l3Base = 0;
+    for (u32 lv = 0; lv < 4; lv++) {
+        const u32 base = result.roomCount;
+        if (lv == 0) l0Base = base;
+        if (lv == 3) l3Base = base;
+        for (u32 rz = 0; rz < 2; rz++)
+            for (u32 rx = 0; rx < 2; rx++) {
+                if (result.roomCount >= MAX_DUNGEON_ROOMS) break;
+                DungeonRoom& r = result.rooms[result.roomCount++];
+                r = DungeonRoom{};
+                r.x = 1 + rx * halfW; r.z = 1 + rz * halfD;
+                r.w = halfW;          r.d = halfD;
+                r.floorHeight = levelY[lv];
+                r.wallMat = wallMat;
+            }
+    }
+
+    // 5) Endpoints — spawn on L3 in a quadrant with NO L3 hole (NE => guaranteed real slab), exit on L0 in
+    //    the diagonally-opposite quadrant (SW => a full four-story descent + long traverse). portalCount
+    //    stays 0 (no ramps); spawnOnUpper marks the balcony spawn (startGame applies balconyPos verbatim).
+    const u32 spawnX = (midX + (W - 2)) / 2, spawnZ = (1 + (midZ - 1)) / 2;   // NE quadrant centre
+    const u32 exitX  = (1 + (midX - 1)) / 2, exitZ  = (midZ + (D - 2)) / 2;   // SW quadrant centre
+    result.spawnBalconyPos = { (spawnX + 0.5f) * cs, FS_L3_Q * 0.25f, (spawnZ + 0.5f) * cs };
+    result.exitBalconyPos  = { (exitX  + 0.5f) * cs, 0.0f,            (exitZ  + 0.5f) * cs };
+    result.spawnOnUpper    = true;
+
+    auto roomAt = [&](u32 base, u32 gx, u32 gz) -> s32 {
+        for (u32 i = base; i < base + 4 && i < result.roomCount; i++) {
+            const DungeonRoom& r = result.rooms[i];
+            if (gx >= r.x && gx < r.x + r.w && gz >= r.z && gz < r.z + r.d) return (s32)i;
+        }
+        return (s32)base;
+    };
+    forcedSpawn = roomAt(l3Base, spawnX, spawnZ);   // the L3 room containing spawn
+    forcedExit  = roomAt(l0Base, exitX,  exitZ);    // the L0 room containing exit
+}
+
 const char* LevelGen::styleName(LayoutStyle style) {
     switch (style) {
         case LayoutStyle::BSP_ROOMS: return "rooms";
@@ -1040,6 +1154,8 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
         case LayoutStyle::HUB:      carveHub(grid, rng, result); break;
         case LayoutStyle::VERTICAL_HALL:
             carveVerticalHall(grid, rng, result, forcedSpawn, forcedExit); break;
+        case LayoutStyle::FOUR_STORY:
+            carveFourStory(grid, rng, result, forcedSpawn, forcedExit); break;
         case LayoutStyle::BSP_ROOMS:
         default:                    carveRoomsBSP(grid, rng, result); break;
     }
