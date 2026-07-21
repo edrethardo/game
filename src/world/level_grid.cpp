@@ -84,16 +84,11 @@ bool LevelGridSystem::hasPlatform(const LevelGrid& grid, u32 x, u32 z) {
 f32 LevelGridSystem::getPlatformTop(const LevelGrid& grid, u32 x, u32 z) {
     const GridCell& c = grid.cells[z * grid.width + x];
     // Highest slab top (platHeight ascending). Caller gates on hasPlatform (platCount>0).
-    return c.platHeight[c.platCount - 1] * 0.25f;
+    return getPlatformTop(grid, x, z, static_cast<u8>(c.platCount - 1));
 }
 
 f32 LevelGridSystem::getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z) {
-    const GridCell& c = grid.cells[z * grid.width + x];
-    // Lowest slab's underside, clamped up to the base floor (thin slabs degrade to riser geometry).
-    const s32 underQ = static_cast<s32>(c.platHeight[0]) - PLATFORM_THICKNESS_Q;
-    const f32 under  = underQ * 0.25f;
-    const f32 fh     = c.floorHeight * 0.25f;
-    return under > fh ? under : fh;
+    return getPlatformUnderside(grid, x, z, 0);   // lowest slab
 }
 
 f32 LevelGridSystem::effectiveFloorHeight(const LevelGrid& grid, u32 x, u32 z, f32 feetY) {
@@ -116,6 +111,47 @@ void LevelGridSystem::setPlatform(GridCell& c, u8 topQ, u8 mat) {
     // Canonical byte-form: zero every slot >= platCount so logically-identical cells compare byte-equal.
     for (u8 i = 1; i < MAX_PLATFORMS_PER_CELL; i++) { c.platHeight[i] = 0; c.platMaterialId[i] = 0; }
     c.flags |= CELL_PLATFORM;   // OR-in: the cell keeps CELL_FLOOR as its ground story
+}
+
+void LevelGridSystem::addPlatform(GridCell& c, u8 topQ, u8 mat) {
+    // De-dup: a slab already at topQ just overwrites its material (no second entry).
+    for (u8 i = 0; i < c.platCount; i++)
+        if (c.platHeight[i] == topQ) { c.platMaterialId[i] = mat; return; }
+    if (c.platCount >= MAX_PLATFORMS_PER_CELL) return;   // full → no-op (never writes slot >= platCount)
+    // Sorted insert, keeping platHeight[] strictly ascending.
+    u8 ins = c.platCount;
+    while (ins > 0 && c.platHeight[ins - 1] > topQ) {
+        c.platHeight[ins]     = c.platHeight[ins - 1];
+        c.platMaterialId[ins] = c.platMaterialId[ins - 1];
+        ins--;
+    }
+    c.platHeight[ins]     = topQ;
+    c.platMaterialId[ins] = mat;
+    c.platCount++;
+    c.flags |= CELL_PLATFORM;
+    // Invariant (d): same-cell slab tops must differ by > PLATFORM_STEP_TOLERANCE, else a body resting
+    // on the lower slab teleport-snaps up onto the higher via effectiveFloorHeight (debug-only guard).
+    for (u8 i = 1; i < c.platCount; i++)
+        ENGINE_ASSERT((c.platHeight[i] - c.platHeight[i - 1]) * 0.25f > PLATFORM_STEP_TOLERANCE,
+                      "addPlatform: same-cell slab tops within step tolerance");
+}
+
+u8 LevelGridSystem::platformCount(const LevelGrid& grid, u32 x, u32 z) {
+    if (!isInBounds(grid, x, z)) return 0;
+    return grid.cells[z * grid.width + x].platCount;
+}
+
+f32 LevelGridSystem::getPlatformTop(const LevelGrid& grid, u32 x, u32 z, u8 i) {
+    return grid.cells[z * grid.width + x].platHeight[i] * 0.25f;
+}
+
+f32 LevelGridSystem::getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z, u8 i) {
+    const GridCell& c = grid.cells[z * grid.width + x];
+    const s32 underQ = static_cast<s32>(c.platHeight[i]) - PLATFORM_THICKNESS_Q;
+    // Clamp DOWN to the next-lower surface (previous slab top, else the base floor) so a lower slab's
+    // thickness band can't poke into an upper slab's underside.
+    const s32 floorQ = (i > 0) ? static_cast<s32>(c.platHeight[i - 1]) : static_cast<s32>(c.floorHeight);
+    return (underQ > floorQ ? underQ : floorQ) * 0.25f;
 }
 
 // 8-directional neighbor offsets: 0=+X, 1=+X+Z, 2=+Z, 3=-X+Z, 4=-X, 5=-X-Z, 6=-Z, 7=+X-Z

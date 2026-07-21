@@ -106,6 +106,10 @@ namespace LevelGridSystem {
     // every legacy single-slab writer routes here so its double-write junctions collapse to one slab
     // and shipped geometry stays byte-identical. Keeps the ascending + canonical-byte-form invariants.
     void setPlatform(GridCell& c, u8 topQ, u8 mat);
+    void addPlatform(GridCell& c, u8 topQ, u8 mat);   // ACCUMULATE (FOUR_STORY generator only)
+    u8   platformCount(const LevelGrid& grid, u32 x, u32 z);              // slab count; multi-slab loop bound
+    f32  getPlatformTop(const LevelGrid& grid, u32 x, u32 z, u8 i);       // indexed slab top
+    f32  getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z, u8 i); // indexed slab underside
     // THE story selector: the walkable floor a body with feet at feetY interacts with in this
     // cell. Slab cells return the slab top for feet within PLATFORM_STEP_TOLERANCE below it
     // (walking the balcony, stepping up a slab stair), else the base floor (walking the arcade
