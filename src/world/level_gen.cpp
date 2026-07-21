@@ -1227,12 +1227,20 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                 if (!(LevelGridSystem::getCell(grid, wx, wz).flags & CELL_SOLID)) doors++;
             }
             if (doors != 1) continue;
-            const u32 px = nodeX0(i) + FS_CORR / 2, pz = nodeZ0(j) + FS_CORR / 2;
-            GridCell& pc = LevelGridSystem::getCell(grid, px, pz);
-            if (pc.flags & CELL_SOLID) continue;
-            pc.flags |= CELL_JUMPPAD;
-            pc.jumpPadQ       = FS_PAD_Q;
-            pc.floorMaterialId = floorMat;   // the pad's glow comes from the arena_pad tint below
+            // The pad fills the WHOLE dead-end node, not its centre cell. A 1x1 pad in a 3-wide
+            // corridor is nearly impossible to spot down a dark maze passage and easy to walk past;
+            // a full 3x3 glowing floor reads as a room feature from the corridor mouth, and you
+            // cannot miss stepping on it once you commit to the spur.
+            for (u32 pz = nodeZ0(j); pz < nodeZ0(j) + FS_CORR; pz++)
+                for (u32 px = nodeX0(i); px < nodeX0(i) + FS_CORR; px++) {
+                    GridCell& pc = LevelGridSystem::getCell(grid, px, pz);
+                    if (pc.flags & CELL_SOLID) continue;
+                    pc.flags |= CELL_JUMPPAD;
+                    pc.jumpPadQ = FS_PAD_Q;
+                    // The pad SKIN (floor + every slab top) is applied by name in startGame's
+                    // applyJumpPadSkin — level_gen has no MaterialSystem, and on a stacked floor the
+                    // visible surface is the slab top, not the floor.
+                }
         }
 
     // 7) Per-level rooms (a 2x2 tiling per story) at floorHeight 0/3/6/9 — these key the flat

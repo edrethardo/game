@@ -82,6 +82,15 @@ debug keys) lives in the `engine-reference` skill.
   them; author a stronger pad on the cell instead (0 = use the global). `Collision::jumpPadSpeed` is
   story-aware — it compares the feet against `effectiveFloorHeight`, because with the old base-floor
   read a pad sitting on ANY slab story could never fire at all.
+- **A cell FLAG is not a skin, and on a stacked floor the visible surface is the SLAB, not the floor.**
+  `CELL_JUMPPAD` only makes a cell launch you; it does not make it look like anything. Both the Descent
+  and the Stacked Loop shipped pads that were invisible — the Descent even carried a comment claiming
+  the glow came from `arena_pad` while assigning the ordinary floor material. And skinning
+  `floorMaterialId` alone is only half a fix: a body standing on L1/L2/L3 sees `platMaterialId[i]`
+  (the slab top), so an upper-story pad stays invisible. `applyJumpPadSkin` in `startGame` now skins
+  the floor AND every slab top by NAME, for every style, after the carve and before the mesh build
+  (`level_gen` deals in numeric material ids and has no `MaterialSystem` dependency). Size matters too:
+  a 1x1 pad in a 3-wide corridor is unspottable — the Descent's fill their whole 3x3 dead-end node.
 - **An XZ-only overlap test is a story-blind test.** `overlapsAnyObstacle` (the player-vs-entity gate in
   `moveAndSlide`) ignored Y "because entities don't block jumping". Harmless while every floor was one
   story; on a stacked floor it means an entity standing on ANY story blocks the player on EVERY story.

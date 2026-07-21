@@ -162,7 +162,7 @@ is derived from the movement physics rather than tuned by feel — at the 6 m/s 
 2.4 m and a 0.6 m body needs gap+0.6 of clearance, so:
 **DROP HOLES** (≥2 cells across) **cannot** be cleared → a committed one-story fall;
 **JUMP GAPS** (exactly 1 cell) can → clear them or lose a story;
-**JUMP PADS** in dead-end nodes lift ~two stories so a bad fall is recoverable.
+**JUMP PADS** fill dead-end nodes (the whole 3x3, not a centre cell — a 1x1 pad is unspottable down a dark corridor) and lift ~two stories so a bad fall is recoverable; the launch is capped to real headroom so a pad can never throw you through the ceiling.
 There are no ramps or stairs — `portalCount` stays 0 and descent is **one-way**. Hole density **thins
 with depth** (18/12/7%): the top story hands out ways down, the last one makes you hunt.
 **Express shafts are impossible by construction** — a hole is punched at level L only where the slab at

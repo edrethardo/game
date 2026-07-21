@@ -463,6 +463,24 @@ void Engine::wireClientNet() {
 // (spawnBalconyPos/exitBalconyPos) instead of the plain room centre: the two-story VERTICAL_HALL
 // and the four-story FOUR_STORY "Descent". Gates the grid-force + endpoint overrides below so both
 // stacked-slab styles share one code path (add a style here and it inherits balcony endpoints).
+// Jump pads must READ as pads. level_gen deals in numeric material ids and has no MaterialSystem
+// dependency, so the pad skin is applied HERE by name, after the grid is carved and before the mesh
+// is built. BOTH the base floor and every slab top are skinned: on a stacked floor the surface you
+// actually stand on is the slab (platMaterialId), so skinning floorMaterialId alone leaves every
+// upper-story pad invisible — which is exactly how the Descent's pads shipped unreadable. Applies to
+// every style that sets CELL_JUMPPAD (the Descent's dead-end pads AND the Stacked Loop's void pads,
+// which were likewise never skinned).
+static void applyJumpPadSkin(LevelGrid& grid) {
+    const u8 padMat = MaterialSystem::getIdByName("arena_pad");
+    for (u32 z = 0; z < grid.depth; z++)
+        for (u32 x = 0; x < grid.width; x++) {
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            if (!(c.flags & CELL_JUMPPAD)) continue;
+            c.floorMaterialId = padMat;
+            for (u8 i = 0; i < c.platCount; i++) c.platMaterialId[i] = padMat;
+        }
+}
+
 static bool usesBalconyEndpoints(LevelGen::LayoutStyle s) {
     return s == LevelGen::LayoutStyle::VERTICAL_HALL ||
            s == LevelGen::LayoutStyle::FOUR_STORY;
@@ -632,6 +650,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // Fold the floor number into the mesh seed so each floor's baked tile-shade + scatter-prop
     // pattern is distinct (levelSeed alone is constant across a run's floors). Deterministic:
     // host + clients share both levelSeed and currentFloor, so baked floors match everywhere.
+    applyJumpPadSkin(m_level.grid);   // pads get their glow material before the mesh is built
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
                              m_level.levelSeed + m_level.currentFloor * 7919u,
                              m_level.sections, MAX_LEVEL_SECTIONS);
