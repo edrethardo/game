@@ -102,11 +102,18 @@ bool Collision::overlapsPlatformBand(Vec3 feetPos, f32 halfWidth, const LevelGri
     for (s32 cz = cz0; cz <= cz1; cz++) {
         for (s32 cx = cx0; cx <= cx1; cx++) {
             if (!LevelGridSystem::hasPlatform(grid, (u32)cx, (u32)cz)) continue;
-            const f32 top   = LevelGridSystem::getPlatformTop(grid, (u32)cx, (u32)cz);
-            const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz);
-            if (feetPos.y < top - STEP_UP_HEIGHT &&                 // not stepping onto it
-                feetPos.y + PLAYER_HEIGHT > under + 0.001f)          // and poking into the band
-                return true;
+            // Test EVERY slab this cell carries (up to 3 for a FOUR_STORY Descent stack): block the XZ
+            // step if the body clips ANY band — neither stepping onto that slab's top nor passing under
+            // its underside. The old single-slab read used the HIGHEST top with the LOWEST underside, a
+            // phantom full-height band that wrongly walled off a body standing on a lower slab.
+            const u8 n = LevelGridSystem::platformCount(grid, (u32)cx, (u32)cz);
+            for (u8 i = 0; i < n; i++) {
+                const f32 top   = LevelGridSystem::getPlatformTop(grid, (u32)cx, (u32)cz, i);
+                const f32 under = LevelGridSystem::getPlatformUnderside(grid, (u32)cx, (u32)cz, i);
+                if (feetPos.y < top - STEP_UP_HEIGHT &&                 // not stepping onto it
+                    feetPos.y + PLAYER_HEIGHT > under + 0.001f)          // and poking into the band
+                    return true;
+            }
         }
     }
     return false;
@@ -435,8 +442,13 @@ void Collision::snapEntityToFloor(Vec3& position, Vec3 halfExtents, const LevelG
     u32 gx, gz;
     if (LevelGridSystem::worldToGrid(grid, position, gx, gz) &&
         !LevelGridSystem::isSolid(grid, gx, gz)) {
-        f32 floorH = LevelGridSystem::getFloorHeight(grid, gx, gz);
-        position.y = floorH + halfExtents.y;
+        // Story-aware, exactly like the player's collision: pick the slab top vs the ground floor
+        // from the body's FEET (centre - halfY). So an entity that climbed a ramp stands ON the
+        // balcony, one beneath stays under it, and one that stepped off the edge (feet now over a
+        // cell with no slab) drops to the ground story. On single-story cells effectiveFloorHeight
+        // == getFloorHeight, so this is a no-op everywhere platforms don't exist (zero regression).
+        const f32 feetY = position.y - halfExtents.y;
+        position.y = LevelGridSystem::effectiveFloorHeight(grid, gx, gz, feetY) + halfExtents.y;
     }
 }
 

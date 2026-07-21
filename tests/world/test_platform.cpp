@@ -52,6 +52,37 @@ void walk(Player& p, const LevelGrid& g, f32 vx, f32 vz, int ticks) {
     }
 }
 
+// A 12x12 open room (1 m cells, solid border, floor y=0) where every interior cell is a full
+// FOUR-STORY Descent stack: slabs at 12/24/36 qu (tops 3/6/9 m) via addPlatform, so a cell carries
+// platCount==3 {12,24,36} (undersides 2.5/5.5/8.5). Holes are punched per level with removePlatform.
+struct StackedRoom {
+    LevelGrid grid;
+    StackedRoom() {
+        LevelGridSystem::init(grid, 12, 12, 1.0f);
+        for (u32 z = 0; z < 12; z++)
+            for (u32 x = 0; x < 12; x++) {
+                GridCell& c = grid.cells[z * 12 + x];
+                const bool border = (x == 0 || z == 0 || x == 11 || z == 11);
+                c.flags         = border ? CELL_SOLID : CELL_FLOOR;
+                c.floorHeight   = 0;
+                c.ceilingHeight = 48;   // FS_CEIL_Q — clears L3 @ 9 m + a 1.8 m body
+                if (!border) {
+                    LevelGridSystem::addPlatform(c, 12, 1);   // L1 top 3 m
+                    LevelGridSystem::addPlatform(c, 24, 1);   // L2 top 6 m
+                    LevelGridSystem::addPlatform(c, 36, 1);   // L3 top 9 m
+                }
+            }
+    }
+    ~StackedRoom() { LevelGridSystem::shutdown(grid); }
+
+    // Punch a hole at slab-top `topQ` over the inclusive cell rect [x0,x1]x[z0,z1].
+    void punch(u32 x0, u32 z0, u32 x1, u32 z1, u8 topQ) {
+        for (u32 z = z0; z <= z1; z++)
+            for (u32 x = x0; x <= x1; x++)
+                LevelGridSystem::removePlatform(grid.cells[z * 12 + x], topQ);
+    }
+};
+
 } // namespace
 
 TEST_CASE("Platform grid: helpers expose top/underside and pick the story by feet height") {
@@ -177,4 +208,85 @@ TEST_CASE("Platform raycast: the slab is solid from every side, transparent past
         CHECK(h.position.y == doctest::Approx(0.0f));    // ground story, out in the pit
         CHECK(h.position.z > 3.0f);
     }
+}
+
+// A 3 m solid CAUSEWAY (CELL_LEDGE @ 12 qu) is the Stacked-Hall bridge that makes the upper story the
+// ONLY crossing between two split lower pits: walkable on TOP from an adjacent 3 m gallery, a WALL to
+// a body in the pit below (splits the ground), and solid beneath (you can't walk under it). This test
+// pins that primitive before the generator builds on it.
+TEST_CASE("3 m CELL_LEDGE causeway: cross on top, blocked from the pit below") {
+    LevelGrid g;
+    LevelGridSystem::init(g, 12, 5, 1.0f);
+    for (u32 z = 0; z < 5; z++)
+        for (u32 x = 0; x < 12; x++) {
+            GridCell& c = g.cells[z * 12 + x];
+            const bool border = (x == 0 || z == 0 || x == 11 || z == 4);
+            c.flags = border ? CELL_SOLID : CELL_FLOOR;
+            c.floorHeight = 0; c.ceilingHeight = 20;
+        }
+    // gallery-left (platform @3 m) x=2..3, causeway (ledge @3 m) x=4..7, gallery-right x=8..9, z=1..3.
+    auto plat  = [&](u32 x){ for (u32 z=1; z<=3; z++){ GridCell& c=g.cells[z*12+x]; c.flags=static_cast<u8>(CELL_FLOOR); LevelGridSystem::setPlatform(c, 12, 0); } };
+    auto ledge = [&](u32 x){ for (u32 z=1; z<=3; z++){ GridCell& c=g.cells[z*12+x]; c.flags=static_cast<u8>(CELL_FLOOR|CELL_LEDGE);    c.floorHeight=12; } };
+    plat(2); plat(3); ledge(4); ledge(5); ledge(6); ledge(7); plat(8); plat(9);
+
+    SUBCASE("on the gallery: walk ACROSS the causeway, staying at 3 m") {
+        Player p{}; p.position = {2.5f, 3.0f, 2.5f};   // on gallery-left, feet at 3 m
+        // 120 ticks * 3 m/s = 6 m → reaches the gallery-RIGHT (x~8.5) without overshooting its edge
+        // at x=9 (past which is open pit at 0 m, where it would correctly fall).
+        for (int i = 0; i < 120; i++) { p.velocity.x = 3.0f; p.velocity.z = 0; Collision::moveAndSlide(p, g, 1.0f/60.0f); }
+        CHECK(p.position.x > 7.5f);                    // crossed the causeway onto the right gallery
+        CHECK(p.position.x < 9.5f);                    // still ON the gallery, not off its far edge
+        CHECK(p.position.y == doctest::Approx(3.0f));  // never fell into the pit
+    }
+    SUBCASE("in the pit: walk UNDER the gallery but get BLOCKED by the solid causeway") {
+        Player p{}; p.position = {1.5f, 0.0f, 2.5f};    // in the pit, feet at 0
+        for (int i = 0; i < 240; i++) { p.velocity.x = 3.0f; p.velocity.z = 0; Collision::moveAndSlide(p, g, 1.0f/60.0f); }
+        CHECK(p.position.y == doctest::Approx(0.0f));   // stayed on the ground (walked under the slab)
+        CHECK(p.position.x < 4.0f);                     // stopped at the causeway wall — never crossed
+    }
+    LevelGridSystem::shutdown(g);
+}
+
+// Two-story ENTITY floor-snap (Collision::snapEntityToFloor — the Vec3 twin the AI/ensureNotInWall
+// use, story-identical to enemy_ai.cpp's Entity variant). Entities are CENTRE-based, so feet =
+// position.y - halfExtents.y. This is the ONE change that lets enemies climb ramps, stand on a
+// balcony, walk under one, and drop off its edge — the foundation of two-story chase.
+TEST_CASE("Collision::snapEntityToFloor is story-aware over a balcony") {
+    BalconyRoom room;                       // slab band z=1..2, top 3.0 m
+    const Vec3 half = {0.35f, 0.5f, 0.35f}; // a small ground enemy
+
+    SUBCASE("under the balcony → stays on the GROUND story") {
+        Vec3 pos = {5.5f, 0.5f, 1.5f};      // feet ~0 under the z=1..2 slab
+        Collision::snapEntityToFloor(pos, half, room.grid);
+        CHECK(pos.y == doctest::Approx(0.5f));   // ground floor 0 + halfY
+    }
+    SUBCASE("feet near the slab top → stands ON the balcony") {
+        Vec3 pos = {5.5f, 3.5f, 1.5f};      // feet 3.0 == slab top, on a slab cell
+        Collision::snapEntityToFloor(pos, half, room.grid);
+        CHECK(pos.y == doctest::Approx(3.5f));   // slab top 3.0 + halfY
+    }
+    SUBCASE("stepping off the edge (feet high, cell has no slab) → drops to the ground story") {
+        Vec3 pos = {5.5f, 3.5f, 5.5f};      // was on the balcony, now over open floor at z=5
+        Collision::snapEntityToFloor(pos, half, room.grid);
+        CHECK(pos.y == doctest::Approx(0.5f));
+    }
+}
+
+// --- Phase 1: multi-slab (FOUR_STORY Descent) collision ------------------------------------
+// A Descent cell carries up to 3 slabs, so every band test must run PER SLAB. The single-slab
+// reads (highest top + lowest underside) describe a phantom full-height band that walls off the
+// legal standing space between two slabs.
+TEST_CASE("Descent band: overlapsPlatformBand tests every slab, not a phantom full-height band") {
+    StackedRoom room;               // interior cells all {12,24,36}: tops 3/6/9, undersides 2.5/5.5/8.5
+    const f32 hw = PLAYER_HALF_WIDTH;
+    // In the arcade (head 1.8 clears the L1 underside 2.5) → fits fully beneath, no clip
+    CHECK_FALSE(Collision::overlapsPlatformBand({6.0f, 0.0f, 6.0f}, hw, room.grid));
+    // Feet 1.0 (head 2.8) pokes into the L1 band [2.5,3.0] → blocked
+    CHECK(Collision::overlapsPlatformBand({6.0f, 1.0f, 6.0f}, hw, room.grid));
+    // Feet 3.0 standing ON L1, head 4.8 clear of the L2 underside 5.5 → must PASS. The old single-slab
+    // read (highest top 9.0 + lowest underside 2.5) was a phantom full-height band that wrongly blocked
+    // this — the discriminator for the multi-slab loop.
+    CHECK_FALSE(Collision::overlapsPlatformBand({6.0f, 3.0f, 6.0f}, hw, room.grid));
+    // Feet 4.0 (head 5.8) pokes into the L2 band [5.5,6.0] → blocked
+    CHECK(Collision::overlapsPlatformBand({6.0f, 4.0f, 6.0f}, hw, room.grid));
 }
