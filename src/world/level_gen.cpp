@@ -979,6 +979,7 @@ const char* LevelGen::styleName(LayoutStyle style) {
         case LayoutStyle::GAUNTLET:  return "gauntlet";
         case LayoutStyle::HUB:       return "hub";
         case LayoutStyle::VERTICAL_HALL: return "vertical";
+        case LayoutStyle::FOUR_STORY:    return "descent";
         default:                     return "?";
     }
 }

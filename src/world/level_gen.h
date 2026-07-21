@@ -27,6 +27,12 @@ struct StoryPortal {
 };
 static constexpr u32 MAX_STORY_PORTALS = 16;
 
+// A FOUR_STORY drop-hole: a punched gap in a slab you fall through to the level below. pos.xz = hole
+// centre; pos.y == surfaceY == the slab TOP it pierces (world metres). Zero/unused for other styles;
+// consumed by spawnFloorHoleSnipers (ranged seats at the edge) + enemy-fall AI.
+struct DropHole { Vec3 pos; f32 surfaceY; };
+static constexpr u32 MAX_DROP_HOLES = 32;
+
 struct DungeonResult {
     Vec3 spawnPos;                         // player spawn (world coords)
     DungeonRoom rooms[MAX_DUNGEON_ROOMS];  // generated rooms
@@ -40,6 +46,11 @@ struct DungeonResult {
     bool spawnOnUpper    = false;   // coin-flip: spawn on a balcony (⇒ exit on the ground: DESCEND)
     Vec3 spawnBalconyPos = {};      // balcony centre of the spawn chamber (world)
     Vec3 exitBalconyPos  = {};      // balcony centre of the exit chamber (world)
+
+    // FOUR_STORY "Descent" drop-holes (zero/unused for other styles).
+    static constexpr u32 MAX_DROP_HOLES = ::MAX_DROP_HOLES;
+    DropHole dropHoles[MAX_DROP_HOLES] = {};
+    u8       dropHoleCount = 0;
 };
 
 namespace LevelGen {
@@ -53,6 +64,7 @@ namespace LevelGen {
         GAUNTLET,       // serpentine chain of arenas — one long fight toward the exit
         HUB,            // grand central chamber, spoke corridors to perimeter vaults
         VERTICAL_HALL,  // two-story chambers: ground pit + walk-under balcony, ramps, opposite-story exit
+        FOUR_STORY,     // four dead-stacked walkable stories on one footprint; one-way drop-only descent
         COUNT
     };
 

@@ -67,6 +67,7 @@ add_executable(dungeon_tests
     world/test_platform.cpp          # CELL_PLATFORM slab: story selection, walk-under collision, ray planes
     world/test_vertical_hall.cpp     # VERTICAL_HALL: room-count, balconies, ramp portals, spawn/exit
     world/test_story_nav.cpp         # pure cross-story chase helpers (onUpperStory / nearestPortalGoal)
+    world/test_four_story.cpp        # FOUR_STORY "Descent": offset holes, quadrant disjointness, L3→L0 descent
     world/test_multislab.cpp         # multi-slab GridCell authorers/getters (FOUR_STORY foundation)
     world/test_mesh_scratch.cpp      # mesher scratch headroom: fully-slabbed same-material section fits
     renderer/test_hud_cooldown.cpp
