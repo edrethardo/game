@@ -883,17 +883,18 @@ bool Snapshot::getBit64(const u8* mask, u32 bit) {
     return (mask[bit / 8] & (1u << (bit % 8))) != 0;
 }
 
-// 128-bit twins for the ENTITY mask: MAX_ENTITIES is 128, and the old 64-bit mask silently
-// no-opped for poolIndex >= 64 — the upper half of the entity pool could never be marked
-// unchanged, so a crowded floor lost up to half its delta savings (64 idle entities x 32 B
-// x 60 Hz = ~123 KB/s of avoidable resend).
-void Snapshot::setBit128(u8* mask, u32 bit) {
-    if (bit >= 128) return;
+// Full-pool twins for the ENTITY mask. The bound is MAX_ENTITIES itself, not a literal: the old
+// 64-bit mask silently no-opped for poolIndex >= 64, so the upper half of a 128 pool could never be
+// marked unchanged and a crowded floor lost up to half its delta savings (64 idle entities x 32 B
+// x 60 Hz = ~123 KB/s of avoidable resend). Deriving the bound means raising MAX_ENTITIES can never
+// reintroduce that bug.
+void Snapshot::setBitEnt(u8* mask, u32 bit) {
+    if (bit >= MAX_ENTITIES) return;
     mask[bit / 8] |= static_cast<u8>(1u << (bit % 8));
 }
 
-bool Snapshot::getBit128(const u8* mask, u32 bit) {
-    if (bit >= 128) return false;
+bool Snapshot::getBitEnt(const u8* mask, u32 bit) {
+    if (bit >= MAX_ENTITIES) return false;
     return (mask[bit / 8] & (1u << (bit % 8))) != 0;
 }
 
@@ -1110,12 +1111,12 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
         }
     }
 
-    u8 unchangedEntities[16] = {};   // 128 bits — covers the WHOLE entity pool (see setBit128)
+    u8 unchangedEntities[ENTITY_MASK_BYTES] = {};   // one bit per pool slot (see setBitEnt)
     for (u8 i = 0; i < current.entityCount; i++) {
         u8 pi = current.entities[i].poolIndex;
         const SnapEntity* base = findEntityByPoolIndex(baseline, pi);
         if (base && std::memcmp(base, &current.entities[i], sizeof(SnapEntity)) == 0) {
-            setBit128(unchangedEntities, pi);
+            setBitEnt(unchangedEntities, pi);
         }
     }
 
@@ -1140,7 +1141,7 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
 
     // Write masks to the wire.
     w8(unchangedPlayers);
-    for (u32 i = 0; i < 16; i++) w8(unchangedEntities[i]);
+    for (u32 i = 0; i < ENTITY_MASK_BYTES; i++) w8(unchangedEntities[i]);
     for (u32 i = 0; i < 8; i++) w8(unchangedProjectiles[i]);
     for (u32 i = 0; i < 8; i++) w8(unchangedWorldItems[i]);
 
@@ -1164,13 +1165,13 @@ u32 Snapshot::serializeDelta(u8* outBuf, u32 outCap,
     u8 changedEntityCount = 0;
     for (u8 i = 0; i < current.entityCount; i++) {
         u8 pi = current.entities[i].poolIndex;
-        if (getBit128(unchangedEntities, pi)) continue;
+        if (getBitEnt(unchangedEntities, pi)) continue;
         changedEntityCount++;
     }
     w8(changedEntityCount);
     for (u8 i = 0; i < current.entityCount; i++) {
         u8 pi = current.entities[i].poolIndex;
-        if (getBit128(unchangedEntities, pi)) continue;
+        if (getBitEnt(unchangedEntities, pi)) continue;
         const u32 before = cursor;
         writeSnapEntity(outBuf, outCap, cursor, current.entities[i]);
         if (cursor - before != SNAP_ENTITY_WIRE) overflowed = true;
@@ -1254,7 +1255,7 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
     // documented contract — false on a truncated buffer — must actually hold.
     if (!r.hasData(1 + 16 + 8 + 8)) return false;
     u8 unchangedPlayers = r.readU8();
-    u8 unchangedEntities[16];  for (u32 i = 0; i < 16; i++) unchangedEntities[i]   = r.readU8();
+    u8 unchangedEntities[ENTITY_MASK_BYTES];  for (u32 i = 0; i < ENTITY_MASK_BYTES; i++) unchangedEntities[i] = r.readU8();
     u8 unchangedProjectiles[8];for (u32 i = 0; i < 8; i++) unchangedProjectiles[i] = r.readU8();
     u8 unchangedWorldItems[8]; for (u32 i = 0; i < 8; i++) unchangedWorldItems[i]  = r.readU8();
 
@@ -1272,7 +1273,7 @@ bool Snapshot::deserializeDelta(WorldSnapshot& out, const u8* buf, u32 size,
     out.entityCount = 0;
     for (u8 i = 0; i < baseline.entityCount; i++) {
         u8 pi = baseline.entities[i].poolIndex;
-        if (getBit128(unchangedEntities, pi)) {
+        if (getBitEnt(unchangedEntities, pi)) {
             if (out.entityCount < MAX_ENTITIES)
                 out.entities[out.entityCount++] = baseline.entities[i];
         }

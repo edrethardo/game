@@ -5,7 +5,13 @@
 #include "game/weapon.h"
 #include "renderer/frustum.h"
 
-static constexpr u32 MAX_ENTITIES = 128;
+// The entity pool. This is a WIRE constant as much as a memory one: WorldSnapshot carries
+// SnapEntity[MAX_ENTITIES] and delta-encodes an unchanged-bit PER pool slot, so changing it changes
+// the packet layout and REQUIRES a PROTOCOL_VERSION bump. Raised 128 -> 192 for the four-story
+// FOUR_STORY floor, which carries four same-footprint stories and so wants ~4x a flat floor's
+// population; at 128 it ran the pool to 122/128 and silently starved decorations, NPCs, boss adds,
+// pets, summons and breeders, which all draw from here and fail SILENTLY when it is full.
+static constexpr u32 MAX_ENTITIES = 192;
 
 enum EntityFlags : u8 {
     ENT_ACTIVE       = 1 << 0,
@@ -174,6 +180,7 @@ struct Entity {
     f32  tacticalTimer = 0.0f;  // re-flank interval, retreat hold duration, ambush patience
     f32  sprintTimer   = 0.0f;  // anti-kite sprint burst cooldown
     f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
+    f32  breedTimer    = 0.0f;  // breeder (Broodmother) countdown to next brood spawn — Engine::tickBreeders
     bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
     u8 enemyRole = EnemyRole::NORMAL; // archetype bitmask (summoner, healer, aura, ambush, etc.)
     // Authored combat OPENER (EnemyDef.aiPreference, an AIState ordinal) — the state this enemy
@@ -294,14 +301,13 @@ struct Entity {
     // "Crypt Herald", "Broodmother"). 0xFF = not from an enemy def (boss / NPC / prop / goblin).
     // Needed because EnemyType is only the RIG (skeleton/bat/spider), which 38 monsters share
     // between ~16 of; naming from it produced "Skeleton" for a dozen different creatures.
-    // Also lands in tail padding, so Entity stays 512 bytes.
     u8   enemyDefIdx    = 0xFF;
 };
 
 // Pins the entity layout. The champion fields fit in what was tail padding (504), and lifeTimer
 // then grew it by one aligned float. If this fires, check whether new fields are still landing in
 // padding before assuming they are free.
-static_assert(sizeof(Entity) == 512, "Entity layout changed — re-check field packing");
+static_assert(sizeof(Entity) == 520, "Entity layout changed — re-check field packing");
 
 // Combat opener for a freshly-aggroed (or damage-woken) enemy: the authored aiPreference mapped
 // onto a SAFE entry state. Pure map — no pathfinding — so damage-wake sites without a grid can

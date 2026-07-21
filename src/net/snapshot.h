@@ -10,6 +10,11 @@
 
 #include <cstring>  // std::memset in WorldSnapshot default constructor
 
+// Bytes of the per-entity "unchanged" bitmask on the wire, one bit per pool slot. DERIVED from
+// MAX_ENTITIES so the two can never drift (192 -> 24 B); a mask narrower than the pool would
+// silently resend every high-index entity forever.
+static constexpr u32 ENTITY_MASK_BYTES = (MAX_ENTITIES + 7) / 8;
+
 // Quantized snapshot of one player (64 wire bytes — see SNAP_PLAYER_WIRE; was 30 pre-R17,
 // +28 for the seven u32 lastActivationTick fields, +4 for armorMeshId[4], +2 for
 // shrineTimerQ + reserved0 at the tail)
@@ -280,7 +285,7 @@ namespace Snapshot {
     // Wire format (after isFullSnapshot=0):
     //   4 B baselineTick — the serverTick of the snapshot this delta is encoded against
     //   1 B unchangedPlayersMask (bit-per-slot, slots 0-3)
-    //  16 B unchangedEntitiesMask    (128 bits, bit N = poolIndex N unchanged — full MAX_ENTITIES)
+    //  ENTITY_MASK_BYTES unchangedEntitiesMask  (bit N = poolIndex N unchanged — full MAX_ENTITIES)
     //   8 B unchangedProjectilesMask (64 bits, poolIndex < 64 only; higher always included)
     //   8 B unchangedWorldItemsMask  (64 bits, bit N = slotIndex N unchanged)
     //   then count-prefixed changed records per pool (same per-record layout as full serialize)
@@ -313,7 +318,10 @@ namespace Snapshot {
     // bit values 0-63 map to byte[bit/8] bit(bit%8). Out-of-range (>=64) are no-ops/false.
     void setBit64(u8* mask, u32 bit);
     bool getBit64(const u8* mask, u32 bit);
-    // 128-bit twins for the entity mask (MAX_ENTITIES=128; the 64-bit mask covered half the pool).
-    void setBit128(u8* mask, u32 bit);
-    bool getBit128(const u8* mask, u32 bit);
+    // Entity-mask twins. The width is DERIVED from MAX_ENTITIES, never hardcoded: a mask narrower
+    // than the pool silently no-ops for the high slots (they can never be marked unchanged, so they
+    // are resent every tick), which is exactly the bug the 64-bit mask had over a 128 pool. Bump
+    // MAX_ENTITIES and this follows automatically — but it is WIRE layout, so bump PROTOCOL_VERSION.
+    void setBitEnt(u8* mask, u32 bit);
+    bool getBitEnt(const u8* mask, u32 bit);
 }

@@ -280,7 +280,7 @@ TEST_CASE("Snapshot delta: names its baseline tick and refuses to decode against
     CHECK_FALSE(Snapshot::deserializeDelta(decoded2, buf, size, wrongBase));
 }
 
-TEST_CASE("Snapshot delta: entity poolIndex >= 64 can be marked unchanged (128-bit mask)") {
+TEST_CASE("Snapshot delta: a high entity poolIndex can be marked unchanged (full-pool mask)") {
     // MAX_ENTITIES is 128 but the mask was 64 bits wide with silently no-oping helpers, so the
     // upper half of the entity pool was re-sent every tick forever — up to half the delta
     // savings lost on exactly the crowded floors that needed them.
@@ -305,9 +305,15 @@ TEST_CASE("Snapshot delta: entity poolIndex >= 64 can be marked unchanged (128-b
     CHECK(decoded.entities[0].posX == 42);
     CHECK(decoded.entities[1].posX == 43);
 
-    // And the wire actually shrank: an unchanged-only delta must be far smaller than two
-    // full 32 B entity records + header.
-    CHECK(size < 64);
+    // And the wire actually shrank. Compare against the FULL serialization of the same state rather
+    // than a magic byte count: the unchanged-bitmask is ENTITY_MASK_BYTES wide and grows with
+    // MAX_ENTITIES, so a hardcoded threshold turns into a false failure the next time the pool grows
+    // (it did, at MAX_ENTITIES 128 -> 192). What must hold is that a no-op tick beats a full send.
+    u8 fullBuf[8192] = {};
+    const u32 fullSize = Snapshot::serialize(current, fullBuf, sizeof(fullBuf));
+    REQUIRE(fullSize > 0);
+    CHECK(size < fullSize);
+    CHECK(size < ENTITY_MASK_BYTES + 2 * 32);   // 32 = SNAP_ENTITY_WIRE: no entity record was resent
 }
 
 // ---------------------------------------------------------------------------

@@ -392,17 +392,11 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
         // Halve enemy count in rooms 2 hops from spawn
         if (twoHopsFromSpawn && enemyCount > 1) enemyCount = (enemyCount + 1) / 2;
 
-        // Stacked-slab floors carry FOUR same-footprint stories, so the area-driven count above is
-        // applied 4x over and would eat the whole entity pool. MAX_ENTITIES (128) is ON THE WIRE —
-        // snapshot.h delta-encodes a 128-bit per-entity unchanged mask — so it cannot be raised
-        // without breaking the protocol. Halve per room instead: per-STORY density then matches a
-        // normal floor, which is the number that actually governs how a fight feels.
-        if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY && enemyCount > 1)
-            enemyCount = (enemyCount + 1) / 2;
-
         // Hard pool reserve, every style: floor enemies must never consume the slots the rest of the
         // floor still needs — decorations, friendly NPCs, boss adds, pets, summons and breeders all
-        // draw from the same pool, and WorldItem/entity spawns fail SILENTLY when it is full.
+        // draw from the same pool, and entity spawns fail SILENTLY when it is full. This is a
+        // backstop, not a density knob: FOUR_STORY keeps FULL per-story density (MAX_ENTITIES was
+        // raised to 192 for it), and the reserve only bites if a floor would still run the pool dry.
         static constexpr u32 FLOOR_ENEMY_RESERVE = 36;
         if (m_entities.activeCount + enemyCount > MAX_ENTITIES - FLOOR_ENEMY_RESERVE) break;
 

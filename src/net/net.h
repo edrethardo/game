@@ -88,7 +88,12 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // clean SV_JOIN_REJECT beats a silently broken deathmatch.
 // v22: INPUT_WINDOW_SIZE 8->15 (input redundancy spans the full 250 ms coast; widens the valid
 // windowCount range, so v21 peers would silently reject v22 input packets — hence the bump).
-static constexpr u32 PROTOCOL_VERSION  = 23; // v23: arena/PvP authority fixes — remote PvP projectile/
+static constexpr u32 PROTOCOL_VERSION  = 24; // v24: MAX_ENTITIES 128 -> 192 for the four-story
+                                             // FOUR_STORY "Descent" floor. WorldSnapshot carries
+                                             // SnapEntity[MAX_ENTITIES] and the per-slot unchanged
+                                             // bitmask is now ENTITY_MASK_BYTES (24 B, derived from
+                                             // MAX_ENTITIES so the two can never drift), so both the
+                                             // full and delta layouts changed. v23: arena/PvP authority fixes — remote PvP projectile/
                                              // chakram/AoE hits now persist (shared-remote-view write-
                                              // back race) + Continue host seats its own arena slot.
                                              // Behavior-only (no wire struct change), but old peers still
