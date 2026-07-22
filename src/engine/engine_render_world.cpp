@@ -113,12 +113,17 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
 
         Vec3 color = rarityColor(wi.item.rarity);
 
-        // Snap item to floor level of its grid cell
-        f32 floorY = 0.0f;
+        // Snap the item to the floor of its grid cell — on ITS OWN STORY. This used to read
+        // getFloorHeight, the BASE floor, which threw away the item's height: every drop on a
+        // balcony or an upper Descent story rendered down at ground level, underneath the slab the
+        // player was standing on, so loot simply vanished. The item's stored Y is authoritative
+        // (world_item spawn keeps it, snapEntityToFloor is story-aware, and posY is on the wire),
+        // so feed it to effectiveFloorHeight and the drop sits where it fell.
+        f32 floorY = wi.position.y;
         u32 gx, gz;
         if (LevelGridSystem::worldToGrid(m_level.grid, wi.position, gx, gz) &&
             !LevelGridSystem::isSolid(m_level.grid, gx, gz)) {
-            floorY = LevelGridSystem::getFloorHeight(m_level.grid, gx, gz);
+            floorY = LevelGridSystem::effectiveFloorHeight(m_level.grid, gx, gz, wi.position.y);
         }
 
         static constexpr f32 ITEM_SCALE = 1.1f;   // trimmed from 1.4 — loot was cluttering the floor

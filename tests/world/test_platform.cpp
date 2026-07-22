@@ -501,3 +501,25 @@ TEST_CASE("A normal jump still does not clear an enemy on flat ground") {
     }
     CHECK(p.position.z > start.z - 1.0f);            // still blocked mid-jump
 }
+
+TEST_CASE("A dropped item resolves to ITS OWN story, not the base floor") {
+    // "Dropped items are not visible on four story floors." The world-item renderer snapped every
+    // drop to getFloorHeight — the BASE floor — throwing the item's own height away, so loot dropped
+    // on a balcony or an upper Descent story drew down at ground level, underneath the slab the
+    // player was standing on. This pins the rule the renderer now uses.
+    StackedRoom room;   // interior cells carry slabs at 3 / 6 / 9 m
+    const u32 gx = 6, gz = 6;
+
+    // An item dropped on each story must resolve to that story's surface.
+    CHECK(LevelGridSystem::effectiveFloorHeight(room.grid, gx, gz, 9.0f) == doctest::Approx(9.0f));
+    CHECK(LevelGridSystem::effectiveFloorHeight(room.grid, gx, gz, 6.0f) == doctest::Approx(6.0f));
+    CHECK(LevelGridSystem::effectiveFloorHeight(room.grid, gx, gz, 3.0f) == doctest::Approx(3.0f));
+    CHECK(LevelGridSystem::effectiveFloorHeight(room.grid, gx, gz, 0.0f) == doctest::Approx(0.0f));
+
+    // The old behaviour, for contrast: the base floor is 0 whatever story the drop happened on.
+    CHECK(LevelGridSystem::getFloorHeight(room.grid, gx, gz) == doctest::Approx(0.0f));
+
+    // A drop over a punched hole falls to the next intact slab rather than hovering in the gap.
+    room.punch(5, 5, 6, 6, 36);   // remove L3 here
+    CHECK(LevelGridSystem::effectiveFloorHeight(room.grid, gx, gz, 9.0f) == doctest::Approx(6.0f));
+}

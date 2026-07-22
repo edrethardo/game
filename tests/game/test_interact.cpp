@@ -197,3 +197,23 @@ TEST_CASE("InReach: the grab radius sits between the body and the aimed range") 
     CHECK(GRAB > 0.35f);     // wider than the player's half-width (PLAYER_HALF_WIDTH)
     CHECK(GRAB < RANGE);     // but the cone still governs the far field
 }
+
+TEST_CASE("inReach refuses a target on another storey") {
+    // Reach was horizontal-only, so on a stacked floor you could target — and grab — loot lying one,
+    // two or three stories below your feet, through solid slab. Stories are 3 m apart.
+    const f32 range = 3.5f, grab = 1.0f, minDot = 0.5f;
+
+    // Same storey, dead ahead and close: reachable, as always.
+    CHECK(Interact::inReach(2.0f, 1.0f, range, grab, minDot, 0.0f));
+    // Same storey but on a step/ledge: still reachable — the bound must not be so tight it refuses
+    // ordinary terrain.
+    CHECK(Interact::inReach(2.0f, 1.0f, range, grab, minDot, 0.5f));
+    CHECK(Interact::inReach(2.0f, 1.0f, range, grab, minDot, 1.9f));
+    // A storey down (3 m) — refused however perfectly you are aiming or however close in XZ.
+    CHECK_FALSE(Interact::inReach(2.0f, 1.0f, range, grab, minDot, 3.0f));
+    CHECK_FALSE(Interact::inReach(0.2f, 1.0f, range, grab, minDot, 3.0f));   // even underfoot
+    // Three stories down (the Descent's full stack).
+    CHECK_FALSE(Interact::inReach(1.0f, 1.0f, range, grab, minDot, 9.0f));
+    // Default argument keeps every existing flat-floor caller behaving exactly as before.
+    CHECK(Interact::inReach(2.0f, 1.0f, range, grab, minDot));
+}

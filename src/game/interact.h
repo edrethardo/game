@@ -16,6 +16,10 @@
 
 namespace Interact {
 
+// How far VERTICALLY an interaction reaches. Stories on a stacked floor are 3 m apart, so this must
+// stay well under that: 2 m clears stairs/ledges/raised floors and stops at the next storey.
+static constexpr f32 INTERACT_VERTICAL_REACH = 2.0f;
+
 // What the button produced this tick.
 enum struct Intent : u8 { NONE, TAP, HOLD };
 
@@ -75,7 +79,15 @@ inline Intent poll(HoldState& st, bool down, bool hasHoldTarget, f32 dt, f32 hol
 // So: inside `grabRadius` you are standing on it and facing is irrelevant. Outside it, aim. Scoring
 // still uses the dot, so with a pile at your feet the one you look at still wins — this only decides
 // ELIGIBILITY, not preference.
-inline bool inReach(f32 hDist, f32 dot, f32 range, f32 grabRadius, f32 minDot) {
+// vDist is the ABSOLUTE height difference between you and the target. It matters because reach was
+// horizontal-only: on a stacked floor (VERTICAL_HALL balconies, the four-story Descent) that let you
+// target — and grab — loot lying one, two or three stories below your feet, straight through solid
+// slab. Stories are 3 m apart and same-story loot sits within ~0.6 m, so a 2 m bound passes stairs,
+// ledges and raised room floors while refusing anything on another level. Callers on flat floors can
+// pass 0 for vDist and behave exactly as before.
+inline bool inReach(f32 hDist, f32 dot, f32 range, f32 grabRadius, f32 minDot,
+                    f32 vDist = 0.0f, f32 vRange = INTERACT_VERTICAL_REACH) {
+    if (vDist > vRange)      return false;   // another story — not yours to take
     if (hDist > range)       return false;
     if (hDist <= grabRadius) return true;    // close enough to be standing on it
     return dot >= minDot;

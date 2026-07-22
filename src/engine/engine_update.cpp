@@ -2136,8 +2136,11 @@ void Engine::resolveInteractTargets(InteractState& st) {
                 : 1.0f;   // exactly underfoot — no meaningful direction to compare against
         // Interact::inReach owns the rule (and the reason): the aim cone applies only BEYOND
         // INTERACT_GRAB_RADIUS, so the item at your feet can never be refused for the way you face.
+        // fabsf(to.y): reach is no longer horizontal-only. On a stacked floor that let you target
+        // and grab loot lying whole stories below your feet, through solid slab.
         if (!Interact::inReach(hDist, dot, GameConst::INTERACT_RANGE,
-                               GameConst::INTERACT_GRAB_RADIUS, GameConst::INTERACT_MIN_DOT))
+                               GameConst::INTERACT_GRAB_RADIUS, GameConst::INTERACT_MIN_DOT,
+                               fabsf(to.y)))
             continue;
 
         f32 score = dot - hDist * 0.1f;   // prefer what you're looking straight at, then what's near
@@ -2649,7 +2652,8 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
         // reaches them through the snapshot.
         if (isShrine(wi.item)) {
             Vec3 d = np.position - wi.position;
-            if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; }
+            if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f || fabsf(d.y) > Interact::INTERACT_VERTICAL_REACH)
+                { sendPickupResult(playerSlot, 0, uid); return; }   // too far, or another story
             const u8 buff = Shrine::buffOf(wi.item);
             grantShrineBuff(np, buff);
             wi.active = false;
@@ -2664,16 +2668,19 @@ void Engine::handlePickupRequest(u8 playerSlot, u32 uid) {
         // (the guest predicted nothing, so accept/reject only settles their request state).
         if (isChest(wi.item)) {
             Vec3 d = np.position - wi.position;
-            if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; }
+            if (sqrtf(d.x * d.x + d.z * d.z) > 3.5f || fabsf(d.y) > Interact::INTERACT_VERTICAL_REACH)
+                { sendPickupResult(playerSlot, 0, uid); return; }   // too far, or another story
             openChest(i);
             sendPickupResult(playerSlot, 1, uid);
             return;
         }
 
-        // Proximity check against the authoritative net player position (XZ, matches aim path).
+        // Proximity check against the authoritative net player position — horizontal reach PLUS a
+        // vertical bound, matching the aim path, so a guest cannot request loot a storey below.
         Vec3 delta = np.position - wi.position;
         f32 hDist = sqrtf(delta.x * delta.x + delta.z * delta.z);
-        if (hDist > 3.5f) { sendPickupResult(playerSlot, 0, uid); return; } // too far — reject
+        if (hDist > 3.5f || fabsf(delta.y) > Interact::INTERACT_VERTICAL_REACH)
+            { sendPickupResult(playerSlot, 0, uid); return; }   // too far, or on another story
 
         // Ownership: free-for-all, owned by this player, or exclusive window expired.
         bool canPickup = (wi.ownerSlot == 0xFF)
