@@ -273,9 +273,11 @@ build scores as an upgrade. The build is one cell of a **3x3 grid** in the inven
 Tanky/Moderate/Glass Cannon, cols Magic/Melee/Ranged; `InventoryUI::buildGridLayout` single-sources
 draw + hit-test; controller reaches it as `INV_PANEL_BUILD` in the shoulder cycle — STASH moved to
 panel id 5). Scoring is the pure, tested `game/build_score.h`: stat-derived (base stats + rolled
-affixes — no authored tags), **weapons scored on DPS** (baseDamage/baseCooldown with the item's own
-damage + attack-speed rolls folded in multiplicatively; per-hit ranked a Heavy Crossbow 3.5x a Rusty
-Dagger whose real DPS is higher), hard weapon-family gate per column, **defense in EFFECTIVE-HP terms** (the engine's armor formula linearizes to +armor% of a 150-HP reference pool; %HP likewise; regen/life-on-hit/**lifesteal count as TANKINESS** — healing over a 10 s reference fight — not offense), **spell rolls + cooldown reduction multiply a per-column reference cast-DPS** (70 for Magic, 15 elsewhere — CDR is 1/(1-c) casts, real DPS on a caster), 1:3 / 1.5:1.5 / 3:1
+affixes — no authored tags), **weapons scored on SUSTAINED DPS, mirroring `getEffectiveWeapon`** (cooldown divided by attack
+speed AND cut by CDR — the engine applies CDR to the weapon swing; clip weapons pay the reload
+cycle `shots*cd + reload`, which reload%/clip% rolls buy back — a Pistol's sustained output is ~29%
+under its burst; projectile weapons credit projectile-speed rolls as hit reliability; per-hit had
+ranked a Heavy Crossbow 3.5x a Rusty Dagger whose real DPS is higher), hard weapon-family gate per column, **defense in EFFECTIVE-HP terms** (the engine's armor formula linearizes to +armor% of a 150-HP reference pool; %HP likewise; regen/life-on-hit/**lifesteal count as TANKINESS** — healing over a 10 s reference fight — not offense), **spell rolls + cooldown reduction multiply a per-column reference cast-DPS** (70 for Magic, 15 elsewhere — CDR is 1/(1-c) casts, real DPS on a caster), 1:3 / 1.5:1.5 / 3:1
 offense:defense row weights, 5% upgrade hysteresis, rarity tiebreak. Selecting a cell re-gears the
 whole bag on the spot (`autoEquipBackpack`); every auto-equip goes through `sendInventorySync` (the
 v16 couch lesson) and announces itself in chat (silent gear changes read as items vanishing). The inventory reasons over **all nine builds**, not just the active one:

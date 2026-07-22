@@ -101,6 +101,7 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
     f32 spellFlat = 0, spellPct = 0, cdr = 0;                // skill DPS terms
     f32 hpFlat = 0, hpPct = 0, armor = 0;                    // effective-HP terms
     f32 regen = 0, loh = 0, lifesteal = 0, thorns = 0;       // sustain (defense) terms
+    f32 clipPct = 0, reloadPct = 0, projSpd = 0;             // clip-cycle / projectile terms
     f32 utility = 0;
     for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++) {
         const Affix& a = item.affixes[i];
@@ -118,14 +119,14 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
             case AffixType::LIFE_ON_HIT:        loh      += a.value; break;
             case AffixType::LIFESTEAL_PCT:      lifesteal+= a.value; break;
             case AffixType::THORNS_PCT:         thorns   += a.value; break;
+            case AffixType::CLIP_SIZE_PCT:      clipPct  += a.value; break;
+            case AffixType::RELOAD_SPEED_PCT:   reloadPct+= a.value; break;
+            case AffixType::PROJECTILE_SPEED:   projSpd  += a.value; break;
             case AffixType::DAMAGE_TO_FLYING:   utility  += a.value * 2.0f; break; // situational dmg
             case AffixType::MOVE_SPEED_FLAT:
-            case AffixType::CLIP_SIZE_PCT:
-            case AffixType::RELOAD_SPEED_PCT:
             case AffixType::ENERGY_FLAT:
             case AffixType::MANASTEAL_PCT:
             case AffixType::MANA_ON_KILL:
-            case AffixType::PROJECTILE_SPEED:
             case AffixType::CONE_ANGLE:         utility  += a.value; break;
             default: break;   // deprecated/unknown types contribute nothing
         }
@@ -135,12 +136,29 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
     f32 off = utility * 0.25f;   // utility speeds fights up, but never beats a real damage roll
 
     if (def.slot == ItemSlot::WEAPON) {
-        // Weapons are scored on DPS, not damage per hit (per-hit ranked a Heavy Crossbow 3.5x a
-        // Rusty Dagger whose real DPS is HIGHER). The item's own rolls fold in multiplicatively —
-        // that is what they do to DPS in play; REF_SWING scales back to the shared range.
-        const f32 cd  = (def.baseCooldown > 0.2f) ? def.baseCooldown : 0.2f;
-        const f32 dps = (def.baseDamage + dmgFlat) * (1.0f + dmgPct * 0.01f)
-                        * (1.0f + atkSpd * 0.01f) / cd;
+        // Weapons are scored on SUSTAINED DPS, mirroring what getEffectiveWeapon actually computes
+        // (per-hit ranked a Heavy Crossbow 3.5x a Rusty Dagger whose real DPS is HIGHER):
+        //   * cooldown is divided by attack speed AND reduced by CDR — the engine applies CDR to
+        //     the weapon swing, not just skills, so a CDR roll is melee/ranged DPS too;
+        //   * CLIP weapons (guns) pay the reload cycle: shots*cd + reload per magazine — a Pistol's
+        //     sustained output is ~29% below its burst, and reload%/clip% rolls buy that tax back;
+        //   * PROJECTILE weapons get a hit-reliability credit from projectile-speed rolls (a faster
+        //     shot lands more; heuristic 0.4x the percent — this one cannot be derived, only tuned).
+        const f32 cdBase = (def.baseCooldown > 0.05f) ? def.baseCooldown : 0.2f;
+        const f32 cdrEffW = (cdr > 50.0f) ? 50.0f : cdr;
+        const f32 effCd  = cdBase * (1.0f - cdrEffW * 0.01f) / (1.0f + atkSpd * 0.01f);
+        const f32 perHit = (def.baseDamage + dmgFlat) * (1.0f + dmgPct * 0.01f);
+        f32 dps;
+        if (def.baseClipSize > 0) {
+            const f32 shots  = static_cast<f32>(def.baseClipSize) * (1.0f + clipPct * 0.01f);
+            f32 reload = def.baseReloadTime * (1.0f - reloadPct * 0.01f);
+            if (def.baseReloadTime > 0.0f && reload < 0.2f) reload = 0.2f;   // engine floor
+            dps = shots * perHit / (shots * effCd + reload);
+        } else {
+            dps = perHit / effCd;
+        }
+        if (def.baseProjectileSpeed > 0.0f)
+            dps *= 1.0f + projSpd * 0.004f;              // +40% roll => +16% effective DPS
         off += dps * REF_SWING;
     } else {
         // A non-weapon's damage rolls accelerate the WEAPON: convert via the reference weapon DPS
@@ -148,6 +166,9 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
         off += def.baseDamage;
         off += dmgFlat * 0.5f;
         off += REF_DPS * (dmgPct + atkSpd) * 0.01f * REF_SWING;
+        // Clip/reload/projectile rolls on a non-weapon accelerate the WEAPON (cross-slot, which a
+        // per-item score cannot see exactly) — modest reference credit rather than zero.
+        off += REF_DPS * (clipPct + reloadPct + projSpd) * 0.01f * REF_SWING * 0.3f;
     }
 
     // Skill ("spell") output, the same way: spell damage multiplies the column's cast DPS, and

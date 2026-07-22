@@ -254,3 +254,56 @@ TEST_CASE("Weapons are scored on DPS, not damage per hit") {
     weird.baseDamage = 10.0f; weird.baseCooldown = 0.0f;
     CHECK(BuildScore::score(it, weird, MOD_MELEE) > 0.0f);
 }
+
+TEST_CASE("BuildScore: sustained DPS — CDR speeds weapons, reload taxes guns, projectile speed lands shots") {
+    // Mirrors getEffectiveWeapon exactly: cooldown is divided by attack speed AND cut by CDR (the
+    // engine applies CDR to the weapon swing, not just skills), clip weapons pay the reload cycle,
+    // and projectile weapons convert projectile-speed rolls into hit reliability.
+    ItemInstance plain = instance();
+
+    SUBCASE("CDR is weapon DPS for melee and ranged, not just casters") {
+        ItemDef sword{};
+        sword.slot = ItemSlot::WEAPON; sword.weaponSubtype = WeaponSubtype::SWORD;
+        sword.baseDamage = 26.0f; sword.baseCooldown = 0.4f;
+        ItemInstance cdrRoll = instance(1);
+        cdrRoll.affixes[0] = {AffixType::COOLDOWN_REDUCTION, 15.0f};
+        // 15% CDR = 1/0.85 swings — a real DPS increase on the sword itself.
+        CHECK(BuildScore::score(cdrRoll, sword, MOD_MELEE) >
+              BuildScore::score(plain,  sword, MOD_MELEE) * 1.10f);
+    }
+    SUBCASE("guns pay their reload cycle: a Pistol's sustained DPS is below its burst") {
+        // Pistol: 10 x 0.25 s + 1.0 s reload -> 3.5 s for 10 shots vs 2.5 s burst-only.
+        ItemDef pistol{};
+        pistol.slot = ItemSlot::WEAPON; pistol.weaponSubtype = WeaponSubtype::PISTOL;
+        pistol.baseDamage = 20.0f; pistol.baseCooldown = 0.25f;
+        pistol.baseClipSize = 10; pistol.baseReloadTime = 1.0f;
+        ItemDef noClip = pistol;
+        noClip.baseClipSize = 0; noClip.baseReloadTime = 0.0f;   // hypothetical reload-free twin
+        const f32 real  = BuildScore::score(plain, pistol, MOD_RANGED);
+        const f32 burst = BuildScore::score(plain, noClip, MOD_RANGED);
+        CHECK(real < burst * 0.80f);                             // the ~29% reload tax is visible
+        // And reload% buys the tax back: a 35% reload roll must beat the same-value utility credit.
+        ItemInstance rel = instance(1);
+        rel.affixes[0] = {AffixType::RELOAD_SPEED_PCT, 35.0f};
+        CHECK(BuildScore::score(rel, pistol, MOD_RANGED) > real * 1.05f);
+        // Clip size shrinks the share of time spent reloading too.
+        ItemInstance clip = instance(1);
+        clip.affixes[0] = {AffixType::CLIP_SIZE_PCT, 40.0f};
+        CHECK(BuildScore::score(clip, pistol, MOD_RANGED) > real * 1.05f);
+    }
+    SUBCASE("projectile weapons credit projectile-speed rolls; hitscan ignores them") {
+        ItemDef bow{};
+        bow.slot = ItemSlot::WEAPON; bow.weaponSubtype = WeaponSubtype::BOW;
+        bow.baseDamage = 30.0f; bow.baseCooldown = 0.6f; bow.baseProjectileSpeed = 23.0f;
+        ItemInstance spd = instance(1);
+        spd.affixes[0] = {AffixType::PROJECTILE_SPEED, 40.0f};   // max roll -> +16% effective
+        CHECK(BuildScore::score(spd, bow, MOD_RANGED) >
+              BuildScore::score(plain, bow, MOD_RANGED) * 1.10f);
+        // A gun (no projectile) gets nothing from the same roll beyond generic handling.
+        ItemDef carbine{};
+        carbine.slot = ItemSlot::WEAPON; carbine.weaponSubtype = WeaponSubtype::CARBINE;
+        carbine.baseDamage = 30.0f; carbine.baseCooldown = 0.6f;
+        CHECK(BuildScore::score(spd, carbine, MOD_RANGED) ==
+              doctest::Approx(BuildScore::score(plain, carbine, MOD_RANGED)));
+    }
+}
