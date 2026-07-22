@@ -2862,6 +2862,23 @@
       "legendarySkill": "break_free",
       "dropWeight": 0.4,
       "minRarity": "legendary"
+    },
+    {
+      "name": "Void Scepter",
+      "slot": "weapon",
+      "weaponType": "projectile",
+      "weaponSubtype": "wand",
+      "mesh": "staff",
+      "material": "weapon_staff",
+      "baseDamage": 58.0,
+      "baseCooldown": 0.4,
+      "baseProjectileSpeed": 21.8,
+      "baseProjectileRadius": 0.15,
+      "baseRecoil": 0.012,
+      "minLevel": 32,
+      "maxLevel": 50,
+      "maxRarity": "rare",
+      "dropWeight": 1.0
     }
   ]
 }
