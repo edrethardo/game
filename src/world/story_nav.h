@@ -65,4 +65,55 @@ inline bool targetIsAbove(f32 myFeetY, f32 targetFeetY) {
     return targetFeetY - myFeetY > 1.5f;
 }
 
+// --- Gap vaulting -------------------------------------------------------------------------------
+// How far ahead (in cells) a vault probe looks for a landing. 3 cells: a 1-cell jump gap and a
+// 2-cell hole both land within it, a wider lake correctly reads as un-vaultable.
+static constexpr u32 VAULT_MAX_CELLS = 3;
+
+// The forward impulse a vaulting enemy gets, and the speed floor held while airborne over a gap.
+// 6 m/s x 0.40 s airtime = 2.4 m of reach against the ~1.6 m a 1-cell gap plus a body needs — the
+// median enemy walks at 3.5 m/s (1.4 m reach), so without the lunge most of the roster would leap in
+// and fall short. If this is ever lowered below ~5 m/s the landing check will still pass while the
+// arc fails: keep it and the airborne floor in entityMoveAndSlide in sync (they are the same number).
+static constexpr f32 VAULT_SPEED = 6.0f;
+
+struct VaultPlan {
+    bool viable;    // a gap starts one cell ahead AND a same-height landing exists within range
+    bool gapAhead;  // a gap starts one cell ahead at all (viable or not) — the "do not walk in" bit
+    Vec3 landing;   // centre of the landing cell (only meaningful when viable)
+};
+
+// Probe for a vaultable GAP along dirXZ: cell 1 must be a drop (its story-selected floor more than a
+// step below the feet), and some cell within VAULT_MAX_CELLS must come back up to feet height. Pure
+// and grid-only, so it is unit-tested; the launch itself lives in entityMoveAndSlide. Uses
+// effectiveFloorHeight — the same story selector collision uses — so it is correct on every stacked
+// style and inert on flat floors, where cell 1 is never a drop and the probe exits on one lookup.
+inline VaultPlan planVault(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dirXZ) {
+    VaultPlan plan{false, false, from};
+    const f32 len = sqrtf(dirXZ.x * dirXZ.x + dirXZ.z * dirXZ.z);
+    if (len < 1e-4f) return plan;                       // no heading — nothing to probe
+    const f32 nx = dirXZ.x / len, nz = dirXZ.z / len;
+    const f32 cs = g.cellSize;
+
+    for (u32 step = 1; step <= VAULT_MAX_CELLS; step++) {
+        const Vec3 probe{from.x + nx * cs * step, from.y, from.z + nz * cs * step};
+        u32 gx, gz;
+        if (!LevelGridSystem::worldToGrid(g, probe, gx, gz)) return plan;   // off the grid
+        if (LevelGridSystem::isSolid(g, gx, gz))             return plan;   // a wall, not a gap
+        const f32 h = LevelGridSystem::effectiveFloorHeight(g, gx, gz, feetY);
+        if (step == 1) {
+            if (h >= feetY - PLATFORM_STEP_TOLERANCE) return plan;          // no drop — common case
+            plan.gapAhead = true;
+        } else if (h >= feetY - PLATFORM_STEP_TOLERANCE &&
+                   h <= feetY + PLATFORM_STEP_TOLERANCE) {
+            // The far side: back at (or within a step of) our height. Land on the cell CENTRE.
+            plan.viable  = true;
+            plan.landing = { (gx + 0.5f) * cs, h, (gz + 0.5f) * cs };
+            return plan;
+        }
+        // still over the gap — keep looking
+    }
+    return plan;   // gapAhead but no landing in range: a lake or a real drop — do not jump
+}
+
 } // namespace StoryNav

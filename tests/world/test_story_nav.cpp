@@ -83,3 +83,58 @@ TEST_CASE("targetIsAbove distinguishes a real storey from a step") {
     CHECK_FALSE(StoryNav::targetIsAbove(0.0f, 0.0f));   // level
     CHECK_FALSE(StoryNav::targetIsAbove(3.0f, 0.0f));   // target BELOW — pads only solve "up"
 }
+
+TEST_CASE("planVault: a chasing mob vaults a jumpable gap and refuses a lake") {
+    // A 12x12 stacked room whose interior all carries the L1 slab @ 3 m, with a 1-cell gap punched
+    // at x=6 and a 3-cell lake at x∈[8..10] on row z=3 — the two shapes a Descent chase meets.
+    LevelGrid g;
+    LevelGridSystem::init(g, 12, 12, 1.0f);
+    for (u32 z = 0; z < 12; z++)
+        for (u32 x = 0; x < 12; x++) {
+            GridCell& c = g.cells[z * 12 + x];
+            const bool border = (x == 0 || z == 0 || x == 11 || z == 11);
+            c.flags         = border ? CELL_SOLID : CELL_FLOOR;
+            c.floorHeight   = 0;
+            c.ceilingHeight = 48;
+            if (!border) LevelGridSystem::addPlatform(c, 12, 1);   // L1 top 3 m
+        }
+    LevelGridSystem::removePlatform(g.cells[3 * 12 + 6], 12);                       // 1-cell gap
+    for (u32 x = 8; x <= 10; x++) LevelGridSystem::removePlatform(g.cells[5 * 12 + x], 12); // lake row z=5
+
+    const f32 feet = 3.0f;   // standing on L1
+
+    SUBCASE("1-cell gap: viable, lands on the far cell centre") {
+        StoryNav::VaultPlan p = StoryNav::planVault(g, {5.5f, feet, 3.5f}, feet, {1, 0, 0});
+        CHECK(p.gapAhead);
+        CHECK(p.viable);
+        CHECK(p.landing.x == doctest::Approx(7.5f));   // cell 7 centre — the far lip
+        CHECK(p.landing.y == doctest::Approx(3.0f));
+    }
+    SUBCASE("lake wider than the probe: gapAhead but NOT viable — do not leap in") {
+        StoryNav::VaultPlan p = StoryNav::planVault(g, {7.5f, feet, 5.5f}, feet, {1, 0, 0});
+        CHECK(p.gapAhead);
+        CHECK_FALSE(p.viable);
+    }
+    SUBCASE("2-cell hole: still viable (within VAULT_MAX_CELLS)") {
+        LevelGridSystem::removePlatform(g.cells[7 * 12 + 5], 12);
+        LevelGridSystem::removePlatform(g.cells[7 * 12 + 6], 12);
+        StoryNav::VaultPlan p = StoryNav::planVault(g, {4.5f, feet, 7.5f}, feet, {1, 0, 0});
+        CHECK(p.viable);
+        CHECK(p.landing.x == doctest::Approx(7.5f));
+    }
+    SUBCASE("flat ground ahead: no gap, common-case early exit") {
+        StoryNav::VaultPlan p = StoryNav::planVault(g, {2.5f, feet, 8.5f}, feet, {1, 0, 0});
+        CHECK_FALSE(p.gapAhead);
+        CHECK_FALSE(p.viable);
+    }
+    SUBCASE("a wall ahead is a wall, not a gap") {
+        StoryNav::VaultPlan p = StoryNav::planVault(g, {1.5f, feet, 8.5f}, feet, {-1, 0, 0});
+        CHECK_FALSE(p.gapAhead);
+        CHECK_FALSE(p.viable);
+    }
+    SUBCASE("no heading, no probe") {
+        StoryNav::VaultPlan p = StoryNav::planVault(g, {5.5f, feet, 3.5f}, feet, {0, 0, 0});
+        CHECK_FALSE(p.viable);
+    }
+    LevelGridSystem::shutdown(g);
+}

@@ -195,7 +195,16 @@ target `entityMoveAndSlide` was already passed and ignoring: firing on mere cont
 popcorn machine, since an idle enemy has no air control, lands on the same pad and bounces forever.
 Physics is universal (any enemy on any pad with upward intent), routing is opt-in per style via the
 recorded pads — the Stacked Loop deliberately records none, keeping its void pads the player's
-shortcut off the ramps.
+shortcut off the ramps. **They also VAULT jump gaps**: a grounded chaser about to step into a gap
+probes `StoryNav::planVault` (pure, tested — a drop one cell ahead AND a same-height landing within
+`VAULT_MAX_CELLS`) and, if viable, leaps with a fixed `VAULT_SPEED` lunge (6 m/s — own walk speed
+would drop the median 3.5 m/s enemy short of the ~1.6 m a 1-cell gap needs); if a gap is ahead but
+un-landable (a lake, a real drop) it REFUSES the step instead of suiciding off the lip, unless the
+target is genuinely below. While airborne over a gap the horizontal speed is floored at `VAULT_SPEED`
+— the FSM rewrites `e.velocity` every frame, which would otherwise strip the lunge mid-arc. In
+`entityMoveAndSlide` these grounded checks are SEQUENTIAL, not an else-if chain off the pad branch:
+the first cut consumed the chain slot and silently broke pad launches for enemies whose target was
+above. Verified live on floor 9: 72 vaults + 28 pad launches in 30 s, and 0/0 on a flat floor.
 
 **Hellforge LAVA floors (a FEW of 31-40).** `LevelGen::isLavaFloor(levelSeed, floor)` picks a few of the tier's floors (seed-derived, integer-only, so host and client agree — it changes GEOMETRY); the rest stay stone. **Never a BOSS floor** (35 and 40): `spawnFloorBoss` expands a room into an arena and rebuilds the mesh *after* the theme pass poured the lava, so the two would fight over the same cells, and a milestone fight staged in a lava sea is not the encounter that was designed. x9 floors are Descent mazes and stacked styles are excluded too, so in practice the eligible floors are 31-34 and 36-38. `--lava` forces it on any 31-40 floor, and because the theme skips stacked styles it also forces a flat style so the door can't silently no-op. On a molten floor the walls MELT. `applyLavaTheme` (engine_startgame.cpp,
 run in the theme block after the carve) turns every INTERIOR `CELL_SOLID` cell into a **walkable**

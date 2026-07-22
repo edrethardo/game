@@ -221,21 +221,68 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
                 e.position.y = surface + e.halfExtents.y;
                 e.velocity.y = 0.0f;
             }
+            // MID-VAULT SPEED FLOOR. The state machine rewrites e.velocity from moveDir*moveSpeed
+            // EVERY frame before calling us, so the launch frame's lunge is gone by the next tick
+            // and a 3.5 m/s walker would fall short of the far lip after all. While airborne with
+            // NO surface within a step below (i.e. actually over the gap — a pad launch climbing
+            // past its own floor never qualifies), hold horizontal speed at VAULT_SPEED along the
+            // current heading. No new state: the situation itself is the flag.
+            const f32 hSp = sqrtf(e.velocity.x * e.velocity.x + e.velocity.z * e.velocity.z);
+            if (hSp > 1e-4f && hSp < StoryNav::VAULT_SPEED &&
+                feetY > surface + PLATFORM_STEP_TOLERANCE) {
+                e.velocity.x *= StoryNav::VAULT_SPEED / hSp;
+                e.velocity.z *= StoryNav::VAULT_SPEED / hSp;
+            }
         } else {
             e.velocity.y = 0.0f;   // left the grid — abort the arc rather than fly off
         }
     }
-    // A grounded enemy on a pad gets launched — but only when it actually WANTS to go up, i.e. its
-    // target is at least a storey above. Firing on mere contact turns every pad into a popcorn
-    // machine: an idle enemy that wanders on has no air control, lands on the same pad and bounces
-    // forever. (The player gets away with contact-firing because they can steer mid-air.) targetPos
-    // is the chase target the caller already passes and previously ignored, so the intent costs
-    // nothing to know.
-    else if (!(e.flags & ENT_FLYING) &&
-             StoryNav::targetIsAbove(e.position.y - e.halfExtents.y, targetPos.y)) {
-        const f32 padSpeed = Collision::jumpPadSpeed(
-            {e.position.x, e.position.y - e.halfExtents.y, e.position.z}, e.halfExtents.x, grid);
-        if (padSpeed > 0.0f) e.velocity.y = padSpeed;
+    // Grounded ground-enemy verticality — PAD LAUNCH first, then GAP VAULT. Deliberately NOT an
+    // else-if chain off one branch: the first vault cut consumed the chain slot ahead of the pad
+    // check, so an enemy standing ON a pad with its target above probed for a gap, found none, and
+    // never launched — silently regressing the pad feature. Sequential checks with the airborne
+    // guard (velocity.y == 0) between them cannot re-order into that bug: a pad launch makes the
+    // entity airborne, which the vault check then sees and yields to.
+    else if (!(e.flags & ENT_FLYING)) {
+        const f32 feetY0 = e.position.y - e.halfExtents.y;
+
+        // PAD LAUNCH — only when the target is at least a storey ABOVE. Firing on mere contact
+        // turns every pad into a popcorn machine: an idle enemy has no air control, lands on the
+        // same pad and bounces forever. (The player can steer mid-air, so contact-fire is fine for
+        // them.) targetPos is the chase target the caller already passes.
+        if (StoryNav::targetIsAbove(feetY0, targetPos.y)) {
+            const f32 padSpeed = Collision::jumpPadSpeed(
+                {e.position.x, feetY0, e.position.z}, e.halfExtents.x, grid);
+            if (padSpeed > 0.0f) e.velocity.y = padSpeed;
+        }
+
+        // GAP VAULT — a chaser about to step into a jumpable gap leaps it instead of falling a
+        // storey and losing its target. planVault (pure, tested) confirms BOTH halves before
+        // anything moves: a drop starts one cell ahead, and a same-height landing exists within
+        // VAULT_MAX_CELLS. The lunge is a fixed VAULT_SPEED impulse, not the walk speed — the
+        // median enemy walks 3.5 m/s, whose 1.4 m of reach falls short of the ~1.6 m a 1-cell gap
+        // plus a body needs, so jumping on own momentum would drop most of the roster into the
+        // hole. Skipped when the target is BELOW (walking off the edge is then the correct move and
+        // stays free) and while knocked back (the impulse is the hit's story to tell).
+        if (e.velocity.y == 0.0f && e.knockbackTimer <= 0.0f &&
+            (delta.x * delta.x + delta.z * delta.z) > 1e-6f &&
+            !(targetPos.y < feetY0 - 1.5f)) {
+            const StoryNav::VaultPlan vp =
+                StoryNav::planVault(grid, e.position, feetY0, {delta.x, 0.0f, delta.z});
+            if (vp.viable) {
+                const f32 hl = sqrtf(delta.x * delta.x + delta.z * delta.z);
+                e.velocity.y = JUMP_SPEED;
+                e.velocity.x = (delta.x / hl) * StoryNav::VAULT_SPEED;
+                e.velocity.z = (delta.z / hl) * StoryNav::VAULT_SPEED;
+                delta = e.velocity * dt;                    // this frame moves at lunge speed too
+            } else if (vp.gapAhead) {
+                // A gap with no landing in range — a lake, or a genuine drop the target is not down
+                // in. Refuse the step rather than suicide off the lip; the encircle/A* logic then
+                // routes around it like it would a wall.
+                e.velocity.x = 0.0f; e.velocity.z = 0.0f;
+                delta.x = 0.0f; delta.z = 0.0f;
+            }
+        }
     }
 
     // Y axis (flying only — ground enemies snap to floor)
