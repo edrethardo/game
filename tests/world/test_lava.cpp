@@ -6,8 +6,11 @@
 
 #include <doctest/doctest.h>
 #include "world/level_grid.h"
+#include "world/level_gen.h"
 #include "world/collision.h"
 #include "game/player.h"
+
+#include <initializer_list>
 
 namespace {
 // A 10x10 room whose interior is stone floor, with a 1-cell lava vein running down x=5 — the
@@ -83,4 +86,29 @@ TEST_CASE("A jump clears a 1-cell lava vein without ever touching the surface") 
     }
     CHECK(p.position.x > 6.0f);      // landed on the far side
     CHECK_FALSE(burned);             // and never dipped into the molten surface
+}
+
+TEST_CASE("isLavaFloor: only a FEW Hellforge floors melt, and never one outside the tier") {
+    // Ten straight lava floors stops being an event and becomes the norm, so the rule picks a
+    // minority of the tier. It also drives GEOMETRY, so it must be a pure function of seed+floor —
+    // if host and client ever disagree, one of them melts a floor the other did not.
+    for (u32 seed : {1u, 42u, 9999u, 0xBEEFu}) {
+        for (u32 f = 1; f <= 60; f++) {
+            const bool lava = LevelGen::isLavaFloor(seed, f);
+            CAPTURE(seed); CAPTURE(f);
+            if (lava) { CHECK(f >= 31); CHECK(f <= 40); }          // never outside Hellforge
+            CHECK(lava == LevelGen::isLavaFloor(seed, f));          // deterministic
+        }
+    }
+
+    // Across the tier it must be a MINORITY but not zero — averaged over many seeds so a single
+    // unlucky run can't make this flap.
+    u32 lavaCount = 0, total = 0;
+    for (u32 s = 0; s < 400; s++)
+        for (u32 f = 31; f <= 40; f++) {
+            if (LevelGen::isLavaFloor(s * 2654435761u, f)) lavaCount++;
+            total++;
+        }
+    CHECK(lavaCount > total / 10);       // > 10% — the feature actually appears
+    CHECK(lavaCount < total / 2);        // < 50% — still the exception, not the tier
 }

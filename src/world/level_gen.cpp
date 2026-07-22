@@ -1298,6 +1298,15 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
     forcedExit  = roomAt(l0Base, exitCX,  exitCZ);
 }
 
+bool LevelGen::isLavaFloor(u32 levelSeed, u32 floor) {
+    if (floor < 31 || floor > 40) return false;
+    // Integer avalanche only (no float, no libm) — same rule as the carve: host and client must
+    // agree bit-for-bit or one of them melts a floor the other does not.
+    u32 h = levelSeed ^ (floor * 2654435761u);
+    h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+    return (h % 100u) < 30u;   // ~3 of the tier's 10 floors
+}
+
 const char* LevelGen::styleName(LayoutStyle style) {
     switch (style) {
         case LayoutStyle::BSP_ROOMS: return "rooms";

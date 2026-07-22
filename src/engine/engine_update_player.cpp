@@ -591,8 +591,17 @@ void Engine::tickVisualFeedback(f32 dt) {
     // snapshot), matching every other environmental effect.
     if (m_netRole != NetRole::CLIENT &&
         LevelGridSystem::feetInLava(m_level.grid, m_localPlayer.position)) {
-        static constexpr f32 LAVA_DPS = 45.0f;   // ~3 s from full on a fresh class — a real threat
+        static constexpr f32 LAVA_DPS         = 45.0f;  // contact: ~3 s from full on a fresh class
+        static constexpr f32 LAVA_BURN_SECS   = 3.0f;   // you keep burning after you get out
+        static constexpr f32 LAVA_BURN_DPS    = 15.0f;
         Combat::applyDamageToPlayer(m_localPlayer, LAVA_DPS * dt);
+        // Lava SETS YOU ON FIRE: the contact damage stops when you leave, the burn does not. A
+        // botched jump therefore costs ~45 more over the next 3 s, which is what makes a failed
+        // crossing a real mistake instead of a shrug. Refreshed (fmaxf, not +=) while in contact so
+        // standing in it does not stack an unbounded timer — the same shape the AURA enemies use, so
+        // it rides the existing status tick, the HUD row, and the snapshot replication for free.
+        m_localPlayer.burnTimer = fmaxf(m_localPlayer.burnTimer, LAVA_BURN_SECS);
+        m_localPlayer.burnDps   = fmaxf(m_localPlayer.burnDps, LAVA_BURN_DPS);
     }
 
     // M13: screen flash decay — counts down from 0.5 s after a large prediction divergence

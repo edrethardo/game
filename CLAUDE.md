@@ -180,13 +180,17 @@ floor's population and 128 silently starved decorations/NPCs/adds/summons. Invar
 the guard that would have caught the open-plain first draft. Design/plan:
 `docs/superpowers/plans/2026-07-21-four-story-descent-floor.md`.
 
-**Hellforge LAVA floors (31-40).** The tier's walls MELT. `applyLavaTheme` (engine_startgame.cpp,
+**Hellforge LAVA floors (a FEW of 31-40).** `LevelGen::isLavaFloor(levelSeed, floor)` picks ~3 of the tier's 10 floors (seed-derived, integer-only, so host and client agree — it changes GEOMETRY); the rest stay stone. `--lava` forces it on any 31-40 floor, and because the theme skips stacked styles it also forces a flat style so the door can't silently no-op. On a molten floor the walls MELT. `applyLavaTheme` (engine_startgame.cpp,
 run in the theme block after the carve) turns every INTERIOR `CELL_SOLID` cell into a **walkable**
 `CELL_LAVA` surface, so a Hellforge floor reads as islands of stone in a molten sea with **no
 sightline blockers left** — a deliberate trade of readable cover for drama. The outer ring stays
 solid (it is the only thing between the player and walking off the map). Lava **burns the player
 only** (`LAVA_DPS` 45/s in `engine_update_player.cpp`, via `applyDamageToPlayer` so armour/i-frames
-and hit feedback all behave; no `attackerPos`, so it can't be blocked or knock you back) — **monsters
+and hit feedback all behave; no `attackerPos`, so it can't be blocked or knock you back) **and SETS
+YOU ON FIRE** — it refreshes the standard `burnTimer`/`burnDps` status (3 s @ 15/s, `fmaxf` so
+standing in it can't stack an unbounded timer), so contact damage stops when you leave but the
+burn does not: a botched jump costs ~45 more over the next 3 s. Riding the existing status means
+the HUD row, the i-frame clear and the snapshot replication all come for free — **monsters
 are immune and wade through to flank you**, which is the whole asymmetry of the tier. Damage is gated
 on `LevelGridSystem::feetInLava` (cell is lava AND feet at/below the surface), so being **airborne
 over it is free**: a 1-cell vein is clearable (1 m needs 1.6 m of the 2.4 m jump reach) while a wide

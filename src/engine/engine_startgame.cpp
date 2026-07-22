@@ -601,6 +601,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // net game already share, so host and clients agree without any wire traffic.
     // Floors 1-3 stay classic BSP (tiny tutorial grids); deeper floors mix in
     // caverns / gauntlets / vault hubs with per-tier weights (level_gen.cpp).
+    m_level.lavaFloor = false;   // recomputed below; a stale true would clear pads on a stone floor
     LevelGen::LayoutStyle layoutStyle = LevelGen::pickLayoutStyle(dungeonSeed, m_level.currentFloor);
     // Dev door (--vhall): force the two-story layout on any non-boss floor (milestone bosses land
     // every 5th floor and would stomp balconies) so the feature is playtestable on demand.
@@ -610,6 +611,15 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     // land every 5th floor and would stomp the stacked slabs) — mirrors the --vhall door above.
     if (m_forceFourStory && m_level.currentFloor % 5 != 0)
         layoutStyle = LevelGen::LayoutStyle::FOUR_STORY;
+    // Dev door (--lava): the molten theme skips stacked-slab styles (melting their walls would hole
+    // every upper story), so on a floor that rolled one the door would silently do nothing. Force a
+    // flat style so the flag always delivers what it promises.
+    if (m_forceLava && m_level.currentFloor >= 31 && m_level.currentFloor <= 40 &&
+        usesBalconyEndpoints(layoutStyle)) {
+        LOG_INFO("Launch: --lava forced %s -> rooms (the molten theme needs a flat style)",
+                 LevelGen::styleName(layoutStyle));
+        layoutStyle = LevelGen::LayoutStyle::BSP_ROOMS;
+    }
     // A two-story hall needs room for two pits + wide walk-under galleries + long ramps either side
     // of the divider — force a large grid regardless of floor so the upper floor is a real floor.
     if (usesBalconyEndpoints(layoutStyle) && gridSize < 44) gridSize = 44;
@@ -699,8 +709,15 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         // to be — every upper story becomes a lattice of 1-cell walkways. That might well be
         // spectacular, but it is a different level design and it is untested; do not ship it by
         // accident on a floor-31+ roll. Flat styles only for now.
-        if (m_level.currentFloor >= 31 && m_level.currentFloor <= 40 &&
-            !usesBalconyEndpoints(layoutStyle)) {
+        // Only a FEW floors in the tier melt (LevelGen::isLavaFloor, ~3 of 10, seed-derived so host
+        // and client agree) — ten straight lava floors stops being an event and becomes the norm.
+        // --lava forces it on any Hellforge-range floor for testing.
+        const bool molten = (m_forceLava && m_level.currentFloor >= 31 && m_level.currentFloor <= 40)
+                          || LevelGen::isLavaFloor(m_level.levelSeed, m_level.currentFloor);
+        if (molten && usesBalconyEndpoints(layoutStyle))
+            LOG_INFO("Hellforge: floor %u rolled molten but style '%s' is stacked — kept solid",
+                     m_level.currentFloor, LevelGen::styleName(layoutStyle));
+        if (molten && !usesBalconyEndpoints(layoutStyle)) {
             applyLavaTheme(m_level.grid, MaterialSystem::getIdByName("hellforge_lava"));
             // Neither endpoint may sit in lava: you would burn on arrival with no way to react, and
             // the exit portal would be unreachable. Clear a small stone pad around each.
@@ -719,6 +736,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
                     }
             };
             clearLavaPad(spawnPos);
+            m_level.lavaFloor = true;
             LOG_INFO("Hellforge: walls melted to lava on floor %u", m_level.currentFloor);
         }
     }
@@ -828,7 +846,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         // Hellforge: the exit must not sit in the lava the theme pass just poured — the portal is
         // placed from room data that predates it. Same stone pad the spawn gets. (The pass runs
         // earlier because it needs the theme materials; the door position is only known here.)
-        if (m_level.currentFloor >= 31 && m_level.currentFloor <= 40) {
+        if (m_level.lavaFloor) {
             u32 dx, dz;
             if (LevelGridSystem::worldToGrid(m_level.grid, m_level.floorDoorPos, dx, dz)) {
                 for (s32 oz = -2; oz <= 2; oz++)

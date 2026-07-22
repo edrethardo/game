@@ -151,6 +151,9 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
         } else if (ieq(a, "--fourstory")) {
             opt.fourStory = true;      // modifier on normal play (needs --new/--load); mirrors --vhall
             opt.active    = true;
+        } else if (ieq(a, "--lava")) {
+            opt.lava   = true;         // modifier on normal play; only bites on floors 31-40
+            opt.active = true;
         } else if (ieq(a, "--lan")) {
             opt.upnp = false;
         } else if (ieq(a, "--fullscreen")) {

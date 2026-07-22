@@ -75,6 +75,10 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Dev door (--fourstory): force the four-story FOUR_STORY "Descent" layout on every non-boss floor
     // so it is playtestable without waiting for its weighted roll (see startGame). Mirrors --vhall.
     m_forceFourStory = opt.fourStory;
+
+    // Dev door (--lava): force the molten Hellforge theme on any floor in the 31-40 range, so the
+    // tier's few lava floors are reachable on demand instead of by seed roll.
+    m_forceLava = opt.lava;
     if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
         LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
                  (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);

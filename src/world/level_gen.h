@@ -73,6 +73,12 @@ namespace LevelGen {
     // Human-readable style name for logs.
     const char* styleName(LayoutStyle style);
 
+    // True if this Hellforge floor is one of the MOLTEN ones. Only a few floors in the tier melt —
+    // a whole 10-floor run of lava stops being an event and becomes the norm. Derived from
+    // seed+floor so it is stable within a run and identical on host and client (it changes the
+    // GEOMETRY, so the two must never disagree). Always false outside 31-40.
+    bool isLavaFloor(u32 levelSeed, u32 floor);
+
     // Deterministic per-floor style pick — host and client call this with the same
     // (dungeonSeed, floor), so both sides always agree. Floors 1-3 (the tiny
     // tutorial grids) are always classic BSP; deeper floors mix styles with

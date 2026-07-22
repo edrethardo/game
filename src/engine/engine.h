@@ -336,6 +336,7 @@ private:
     u8   m_netFakeLossPct    = 0;    // 0–100: percentage of packets to drop (both directions)
     bool m_forceVerticalHall = false; // dev (--vhall): force the two-story VERTICAL_HALL on non-boss floors
     bool m_forceFourStory    = false; // dev (--fourstory): force the four-story FOUR_STORY on non-boss floors
+    bool m_forceLava         = false; // dev (--lava): force the molten Hellforge theme on any 31-40 floor
     u32  m_divergenceCount   = 0;    // count of reconcile mismatches since last log interval
     // Shaky-client-FOV diagnostic (accumulated per-correction in clientNetPost, reported +
     // reset by the 1 Hz [NET-GRAPH] log). Together these show whether the camera shake is
@@ -545,6 +546,10 @@ private:
         u32          currentFloor = 1;
         u32          savedFloor   = 1;
         u32          savedSeed    = 0;
+        // Set by startGame when this floor's walls were melted to lava (a FEW Hellforge floors —
+        // LevelGen::isLavaFloor). Reset per floor; consumers key off this rather than re-deriving
+        // the floor range, so the exit-pad clear and the theme can never disagree about it.
+        bool         lavaFloor    = false;
         DungeonResult dungeon;
         // Which structural generator carved this floor (seed-derived in startGame). Gameplay may
         // compensate for a style's geometry — e.g. CAVERN floors scale enemy detectionRange up,
