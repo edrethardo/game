@@ -35,6 +35,11 @@ struct DropHole { Vec3 pos; f32 surfaceY; };
 // exceed silently starves the DEEPEST level of records — hole-snipers would never seat on L1.
 static constexpr u32 MAX_DROP_HOLES = 64;
 
+// Jump-pad LANDMARKS for enemy navigation — one entry per pad cluster (a dead-end alcove, or a
+// hole's return pad), not per cell. Enemies can't scan the grid for pads every frame, so the
+// generator records where it put them, exactly like StoryPortal does for ramps.
+static constexpr u32 MAX_JUMP_PADS = 32;
+
 struct DungeonResult {
     Vec3 spawnPos;                         // player spawn (world coords)
     DungeonRoom rooms[MAX_DUNGEON_ROOMS];  // generated rooms
@@ -53,6 +58,12 @@ struct DungeonResult {
     static constexpr u32 MAX_DROP_HOLES = ::MAX_DROP_HOLES;
     DropHole dropHoles[MAX_DROP_HOLES] = {};
     u8       dropHoleCount = 0;
+
+    // Jump-pad cluster centres (world). Enemies route to the nearest one to chase a target that is
+    // ABOVE them — on a Descent floor there are no ramps (portalCount==0), so a pad is the only way
+    // up and without this the cross-story chase is dead. Zero/unused for styles with no pads.
+    Vec3 jumpPads[MAX_JUMP_PADS] = {};
+    u8   jumpPadCount = 0;
 };
 
 namespace LevelGen {

@@ -50,3 +50,36 @@ TEST_CASE("onUpperStory reads the slab-top vs ground from the body's feet") {
     CHECK(StoryNav::onUpperStory(g, {1.5f, 0.0f, 1.5f}, 0.0f) == false); // non-slab cell → lower
     LevelGridSystem::shutdown(g);
 }
+
+TEST_CASE("nearestPadGoal: walkers route to the closest jump pad, and it's inert without pads") {
+    // A four-story Descent floor has NO ramps (portalCount == 0), so a jump pad is the only way up.
+    // Without pad routing an enemy simply loses anyone who drops a level.
+    DungeonResult d{};
+    const Vec3 from{10.0f, 0.0f, 10.0f};
+
+    // No pads recorded (every style that has none) → unchanged goal, so the caller falls through to
+    // its normal chase behaviour rather than walking to the origin.
+    CHECK(StoryNav::nearestPadGoal(d, from).x == doctest::Approx(from.x));
+    CHECK(StoryNav::nearestPadGoal(d, from).z == doctest::Approx(from.z));
+
+    d.jumpPadCount = 3;
+    d.jumpPads[0] = {40.0f, 0.0f, 40.0f};   // far
+    d.jumpPads[1] = {13.0f, 3.0f, 14.0f};   // nearest in XZ (5 m away)
+    d.jumpPads[2] = {10.0f, 6.0f, 25.0f};   // 15 m away
+    const Vec3 goal = StoryNav::nearestPadGoal(d, from);
+    CHECK(goal.x == doctest::Approx(13.0f));
+    CHECK(goal.z == doctest::Approx(14.0f));
+    // Y is left as the seeker's own: the pad supplies the vertical move, the AI only has to arrive.
+    CHECK(goal.y == doctest::Approx(from.y));
+}
+
+TEST_CASE("targetIsAbove distinguishes a real storey from a step") {
+    // Stories are 3 m apart; stairs, ledges and raised room floors are well under a metre. The gate
+    // has to catch the former without firing on the latter, or enemies would abandon a chase to go
+    // hunt a pad every time you stood on a crate.
+    CHECK(StoryNav::targetIsAbove(0.0f, 3.0f));     // one storey up
+    CHECK(StoryNav::targetIsAbove(3.0f, 9.0f));     // two up
+    CHECK_FALSE(StoryNav::targetIsAbove(0.0f, 0.5f));   // a step
+    CHECK_FALSE(StoryNav::targetIsAbove(0.0f, 0.0f));   // level
+    CHECK_FALSE(StoryNav::targetIsAbove(3.0f, 0.0f));   // target BELOW — pads only solve "up"
+}

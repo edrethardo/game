@@ -99,7 +99,7 @@ and the tower's crown at the same height. Verticality rides three opt-in cell fl
 `LevelGridSystem::effectiveFloorHeight`, slab-aware `Raycast::cast` so nothing shoots through a
 balcony floor, mesher top/underside/rim quads). All three are deterministic seed-built geometry,
 so they replicate in co-op with **no wire change / no PROTOCOL bump**.
-**PvP-only** (enemies never jump → pads/ledges are dead ends for them; boss "arenas" in `engine_spawn.cpp`
+**Mostly PvP-only** (enemies never *jump*, so LEDGES stay dead ends for them — but they DO ride **jump pads**: see "Enemies use jump pads" below; boss "arenas" in `engine_spawn.cpp`
 use plain walkable tiers so adds follow). Host Arena rides the normal host chain, Local Versus the couch
 chain; joiners use plain Join Game (sentinel-floor routing). **All PvP damage flows through `Combat::pvp*` helpers against a registry that is
 only populated inside the arena's authoritative tick window** (`arenaBeginPvpWindow`/`arenaEndPvpWindow`) —
@@ -177,6 +177,25 @@ floor's population and 128 silently starved decorations/NPCs/adds/summons. Invar
 `tests/world/test_four_story.cpp` — including that the floor **is a maze at all** (wall bulk 20–60%),
 the guard that would have caught the open-plain first draft. Design/plan:
 `docs/superpowers/plans/2026-07-21-four-story-descent-floor.md`.
+
+**Enemies use jump pads to climb.** Ground enemies have no vertical physics — they are hard-snapped
+to the floor every frame — so following a player UP a story needed a real ballistic arc. Two halves:
+**physics** (`entityMoveAndSlide`) launches a grounded enemy off a `CELL_JUMPPAD` and then integrates
+gravity, moving Y freely until the feet reach the surface `effectiveFloorHeight` picks for the height
+they have fallen to (so they land on the slab they were thrown onto, not the ground); and **routing**
+(`StoryNav::nearestPadGoal` over `DungeonResult.jumpPads[]`, recorded by the generator like
+`StoryPortal` is) sends a chaser to the nearest pad when its target is a storey up. This is what makes
+the Descent's cross-story chase work at all — those floors have `portalCount == 0` (no ramps), so a
+pad is the ONLY way up and without it an enemy loses anyone who drops a level.
+`velocity.y != 0` on a non-flying entity IS the airborne state (flags are full; knockback is XZ-only),
+and **`snapEntityToFloor` returns early for such an entity** — it is called from half a dozen places
+per frame and any one of them would otherwise cancel the arc. The launch fires only when the target is
+genuinely **above** (`StoryNav::targetIsAbove`, 1.5 m so a crate doesn't count), using the chase
+target `entityMoveAndSlide` was already passed and ignoring: firing on mere contact turns a pad into a
+popcorn machine, since an idle enemy has no air control, lands on the same pad and bounces forever.
+Physics is universal (any enemy on any pad with upward intent), routing is opt-in per style via the
+recorded pads — the Stacked Loop deliberately records none, keeping its void pads the player's
+shortcut off the ramps.
 
 **Hellforge LAVA floors (a FEW of 31-40).** `LevelGen::isLavaFloor(levelSeed, floor)` picks ~3 of the tier's 10 floors (seed-derived, integer-only, so host and client agree — it changes GEOMETRY); the rest stay stone. `--lava` forces it on any 31-40 floor, and because the theme skips stacked styles it also forces a flat style so the door can't silently no-op. On a molten floor the walls MELT. `applyLavaTheme` (engine_startgame.cpp,
 run in the theme block after the carve) turns every INTERIOR `CELL_SOLID` cell into a **walkable**

@@ -38,4 +38,31 @@ inline Vec3 nearestPortalGoal(const DungeonResult& d, Vec3 from, bool fromUpper,
     return best;
 }
 
+// The XZ goal for a body that wants to get UP but has no ramp: the nearest recorded JUMP PAD.
+// Four-story Descent floors have portalCount==0 — no ramps, no stairs — so a pad is the only way up
+// and without this an enemy simply cannot follow a player who dropped a level. Returns `from`
+// unchanged when the floor has no pads, which makes it inert on every style that has none.
+//
+// Nearest in XZ only, and deliberately so: the pads worth walking to are the ones on your own
+// level, and a pad column is a pad on every story it carries, so the horizontal choice is the
+// meaningful one. The launch itself is physics (entityMoveAndSlide), not navigation — arriving is
+// all the AI has to do.
+inline Vec3 nearestPadGoal(const DungeonResult& d, Vec3 from) {
+    if (d.jumpPadCount == 0) return from;
+    Vec3 best = from;
+    f32  bestD2 = 1e30f;
+    for (u8 i = 0; i < d.jumpPadCount; i++) {
+        const f32 dx = d.jumpPads[i].x - from.x, dz = d.jumpPads[i].z - from.z;
+        const f32 d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = d.jumpPads[i]; }
+    }
+    return { best.x, from.y, best.z };   // XZ goal; the pad does the vertical part
+}
+
+// True when `targetFeetY` is at least a story above `myFeetY`. Stories are 3 m apart, so 1.5 m is
+// comfortably clear of stairs, ledges and raised room floors while catching a real level change.
+inline bool targetIsAbove(f32 myFeetY, f32 targetFeetY) {
+    return targetFeetY - myFeetY > 1.5f;
+}
+
 } // namespace StoryNav

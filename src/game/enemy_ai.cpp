@@ -19,6 +19,7 @@
 #include "world/raycast.h"
 #include "world/combat_query.h"
 #include "world/level_grid.h"
+#include "world/story_nav.h"   // targetIsAbove: pads fire only on deliberate upward intent
 #include "world/pathfinder.h"
 #include "world/collision.h"
 #include <cmath>
@@ -74,6 +75,12 @@ bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents,
 // Snap a ground entity's Y to the floor height of its current grid cell.
 // Called after XZ movement to keep entities from floating or sinking.
 void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
+    // An AIRBORNE ground enemy — one riding a jump-pad launch — must not be yanked back down. This
+    // is the single choke point: snapEntityToFloor is called from half a dozen places every frame,
+    // and any one of them cancelling the arc would make pads silently useless to enemies. Only
+    // non-flying entities use velocity.y this way (the flying branch owns it otherwise, and
+    // knockback is XZ-only), so a non-zero Y velocity here means "mid-flight, leave me alone".
+    if (!(e.flags & ENT_FLYING) && e.velocity.y != 0.0f) return;
     u32 gx, gz;
     if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
         !LevelGridSystem::isSolid(grid, gx, gz)) {
@@ -101,7 +108,7 @@ bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,
 }
 
 void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
-                        const Vec3& /*playerPos*/, f32 /*playerHW*/) {
+                        const Vec3& targetPos, f32 /*playerHW*/) {
     Vec3 delta = e.velocity * dt;
     // Enemies walk freely toward the player — only walls block them.
     // The player is blocked from walking through enemies via moveAndSlide
@@ -194,6 +201,41 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
                 }
             }
         }
+    }
+
+    // Ground enemies riding a JUMP PAD. They have no vertical physics at all normally — they are
+    // hard-snapped to the floor every frame — so following the player UP a story needs a real
+    // ballistic arc. While velocity.y is non-zero the entity is airborne: integrate gravity, move
+    // Y freely, and land when the feet reach the surface for the height they have fallen back to
+    // (effectiveFloorHeight picks the STORY, so they land on the balcony/slab they were launched
+    // onto, not the ground). Landing zeroes velocity.y, which hands control back to the floor snap.
+    if (!(e.flags & ENT_FLYING) && e.velocity.y != 0.0f) {
+        e.velocity.y += GRAVITY * dt;
+        e.position.y += e.velocity.y * dt;
+        u32 lgx, lgz;
+        if (LevelGridSystem::worldToGrid(grid, e.position, lgx, lgz) &&
+            !LevelGridSystem::isSolid(grid, lgx, lgz)) {
+            const f32 feetY   = e.position.y - e.halfExtents.y;
+            const f32 surface = LevelGridSystem::effectiveFloorHeight(grid, lgx, lgz, feetY);
+            if (e.velocity.y <= 0.0f && feetY <= surface) {      // landed
+                e.position.y = surface + e.halfExtents.y;
+                e.velocity.y = 0.0f;
+            }
+        } else {
+            e.velocity.y = 0.0f;   // left the grid — abort the arc rather than fly off
+        }
+    }
+    // A grounded enemy on a pad gets launched — but only when it actually WANTS to go up, i.e. its
+    // target is at least a storey above. Firing on mere contact turns every pad into a popcorn
+    // machine: an idle enemy that wanders on has no air control, lands on the same pad and bounces
+    // forever. (The player gets away with contact-firing because they can steer mid-air.) targetPos
+    // is the chase target the caller already passes and previously ignored, so the intent costs
+    // nothing to know.
+    else if (!(e.flags & ENT_FLYING) &&
+             StoryNav::targetIsAbove(e.position.y - e.halfExtents.y, targetPos.y)) {
+        const f32 padSpeed = Collision::jumpPadSpeed(
+            {e.position.x, e.position.y - e.halfExtents.y, e.position.z}, e.halfExtents.x, grid);
+        if (padSpeed > 0.0f) e.velocity.y = padSpeed;
     }
 
     // Y axis (flying only — ground enemies snap to floor)

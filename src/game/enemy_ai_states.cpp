@@ -333,6 +333,16 @@ void updateHostileStates(Entity& e, u32 i,
                     crossStory = true;
                 }
             }
+            // JUMP-PAD chase: no ramps on this floor (a four-story Descent has portalCount==0), the
+            // target is at least a story ABOVE me, and I am a walker — head for the nearest pad and
+            // let it throw me up. Without this an enemy simply loses anyone who drops a level, since
+            // a pad is the only way up on those floors. Flyers already handle height themselves.
+            if (!crossStory && dungeon && dungeon->jumpPadCount > 0 && !targetIsNPC &&
+                !(e.flags & ENT_FLYING) &&
+                StoryNav::targetIsAbove(e.position.y - e.halfExtents.y, targetPlayer->position.y)) {
+                chaseGoal  = StoryNav::nearestPadGoal(*dungeon, e.position);
+                crossStory = true;
+            }
             if (!crossStory)
                 chaseGoal = encircleGoal(e, pool, squads, grid, targetPos, targetDist);
             Vec3 toGoal = chaseGoal - e.position;

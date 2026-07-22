@@ -1191,13 +1191,17 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                 // the level. One in three leaves clean holes to descend through and marks the rest
                 // as two-way lifts. Raise PAD_HOLE_ONE_IN to 1 for a pad under every hole.
                 constexpr u32 PAD_HOLE_ONE_IN = 3;
-                if (rng.range(0, PAD_HOLE_ONE_IN) == 0)
+                if (rng.range(0, PAD_HOLE_ONE_IN) == 0) {
+                    if (result.jumpPadCount < MAX_JUMP_PADS)
+                        result.jumpPads[result.jumpPadCount++] =
+                            { (hx + sz * 0.5f) * cs, (q * 0.25f) - 3.0f, (hz + sz * 0.5f) * cs };
                     for (u32 pz = hz; pz < hz + sz; pz++)
                         for (u32 px = hx; px < hx + sz; px++) {
                             GridCell& pc = LevelGridSystem::getCell(grid, px, pz);
                             pc.flags     = static_cast<u8>(pc.flags | CELL_JUMPPAD);
                             pc.jumpPadQ  = FS_PAD_Q;
                         }
+                }
                 made++;
             }
         // Every story MUST offer at least one way down, or the descent dead-ends. Walk the lattice
@@ -1249,6 +1253,9 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
             // corridor is nearly impossible to spot down a dark maze passage and easy to walk past;
             // a full 3x3 glowing floor reads as a room feature from the corridor mouth, and you
             // cannot miss stepping on it once you commit to the spur.
+            if (result.jumpPadCount < MAX_JUMP_PADS)
+                result.jumpPads[result.jumpPadCount++] =
+                    { (nodeX0(i) + FS_CORR * 0.5f) * cs, 0.0f, (nodeZ0(j) + FS_CORR * 0.5f) * cs };
             for (u32 pz = nodeZ0(j); pz < nodeZ0(j) + FS_CORR; pz++)
                 for (u32 px = nodeX0(i); px < nodeX0(i) + FS_CORR; px++) {
                     GridCell& pc = LevelGridSystem::getCell(grid, px, pz);
