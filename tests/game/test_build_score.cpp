@@ -128,3 +128,58 @@ TEST_CASE("PlayerInventory v4 tail: classic by default, deterministic bytes") {
     CHECK(inv.reservedAuto1 == 0);
     CHECK(sizeof(PlayerInventory) == 1680);   // v4 size — also pinned by engine_persist static_asserts
 }
+
+TEST_CASE("Multi-build: pickup filter, dominance prune, and the better-build signal") {
+    // The inventory keeps BEST-IN-SLOT for all nine builds: worse loot stays on the ground,
+    // dominated bag items get discarded, and a build whose achievable total pulls ahead of the
+    // active one triggers the "switch builds" nudge.
+    ItemDef defs[4] = {};
+    defs[1].slot = ItemSlot::ARMOR;  defs[1].baseHealth = 20.0f;   // defId 1: armor
+    defs[2].slot = ItemSlot::WEAPON; defs[2].weaponSubtype = WeaponSubtype::SWORD; defs[2].baseDamage = 10.0f;
+    defs[3].slot = ItemSlot::WEAPON; defs[3].weaponSubtype = WeaponSubtype::WAND;  defs[3].baseDamage = 30.0f;
+
+    PlayerInventory inv{};
+    inv.buildCell = 1 * 3 + 1;   // Moderate/Melee
+
+    // Wear a plain armor and a sword; bag has one strictly-better armor (an armor affix roll).
+    inv.equipped[static_cast<u32>(ItemSlot::ARMOR)]  = {}; inv.equipped[static_cast<u32>(ItemSlot::ARMOR)].defId = 1;
+    inv.equipped[static_cast<u32>(ItemSlot::WEAPON)] = {}; inv.equipped[static_cast<u32>(ItemSlot::WEAPON)].defId = 2;
+    inv.backpack[0] = {}; inv.backpack[0].defId = 1; inv.backpack[0].affixCount = 1;
+    inv.backpack[0].affixes[0] = {AffixType::ARMOR, 15.0f};
+    inv.backpackCount = 1;
+
+    SUBCASE("bestSlotScore sees worn AND bag, and self-exclusion works") {
+        const f32 withBag = BuildScore::bestSlotScore(inv, defs, 4, ItemSlot::ARMOR, inv.buildCell);
+        const f32 without = BuildScore::bestSlotScore(inv, defs, 4, ItemSlot::ARMOR, inv.buildCell, 0);
+        CHECK(withBag > without);                       // the bag armor is the best we can field
+    }
+    SUBCASE("a strict duplicate of gear we own is NOT worth picking up") {
+        ItemInstance dupe{}; dupe.defId = 1;            // identical to the worn armor, no rolls
+        CHECK_FALSE(BuildScore::worthPickingUp(dupe, defs[1], inv, defs, 4));
+    }
+    SUBCASE("a wand IS worth picking up even on a Melee build — the Magic builds want it") {
+        ItemInstance wand{}; wand.defId = 3;
+        CHECK(BuildScore::worthPickingUp(wand, defs[3], inv, defs, 4));
+    }
+    SUBCASE("the better bag armor is a keeper; a dominated duplicate is not") {
+        CHECK(BuildScore::isKeeper(inv, defs, 4, 0));   // beats the worn piece for every row
+        inv.backpack[1] = {}; inv.backpack[1].defId = 1;   // plain armor, dominated by BOTH others
+        inv.backpackCount = 2;
+        CHECK_FALSE(BuildScore::isKeeper(inv, defs, 4, 1));
+    }
+    SUBCASE("bestBuildCell flags the build the gear actually supports") {
+        // Add a monster wand: the Magic columns can now field 30 base damage vs the sword's 10,
+        // so the best achievable build is a Magic one and the nudge condition trips.
+        inv.backpack[1] = {}; inv.backpack[1].defId = 3;
+        inv.backpackCount = 2;
+        f32 bestScore = 0.0f;
+        const u8 best = BuildScore::bestBuildCell(inv, defs, 4, bestScore);
+        CHECK(BuildScore::buildCol(best) == 0);         // a Magic cell
+        const f32 current = BuildScore::gearScoreForCell(inv, defs, 4, inv.buildCell);
+        CHECK(bestScore > current * BuildScore::BUILD_SUGGEST_FACTOR);
+    }
+    SUBCASE("maxCellScore: a wrong-family weapon still scores via its own family") {
+        ItemInstance wand{}; wand.defId = 3;
+        CHECK(BuildScore::maxCellScore(wand, defs[3]) > 0.0f);   // 0 under Melee, >0 under Magic
+    }
+}

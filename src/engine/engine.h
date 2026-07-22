@@ -1621,6 +1621,11 @@ private:
     void autoEquipBackpack(u8 lane);
     bool autoEquipIfUpgrade(u8 lane, u8 bpIdx);
     bool autoEvictWorst(u8 lane);
+    // Slow-cadence housekeeping: discard gear no build wants, nudge toward a stronger build.
+    void autoLootHousekeeping(u8 lane);
+    f32  m_autoPruneTimer[MAX_LOCAL_PLAYERS]      = {};
+    f32  m_buildNotifyCooldown[MAX_LOCAL_PLAYERS] = {};
+    u8   m_lastSuggestedBuild[MAX_LOCAL_PLAYERS]  = {0xFF, 0xFF};
     void sendPickupPacket(u32 uid);
     // Server: validate and apply a client's CL_PICKUP_ITEM request (proximity + ownership),
     // moving the item into that player's inventory and freeing the world slot.

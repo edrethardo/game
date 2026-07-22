@@ -18,6 +18,7 @@
 #include "core/log.h"
 
 #include <cmath>
+#include <cstdio>
 
 // One auto-pickup per lane per tick. The radius reuses the interact reach so "close enough to
 // grab" means the same thing in both modes, and the vertical bound stops the vacuum pulling loot
@@ -87,7 +88,9 @@ bool Engine::autoEvictWorst(u8 lane) {
         if (it.defId == 0xFFFF || it.defId >= m_itemDefCount) continue;
         if (m_itemDefs[it.defId].petSummon) continue;
         if (Quickbar::holdsBackpackItem(m_quickbars[lane], it.uid)) continue;
-        const f32 s = BuildScore::score(it, m_itemDefs[it.defId], inv.buildCell);
+        // Max over all nine cells: the bag deliberately holds gear for OTHER builds now, so "worst"
+        // means "least useful to any build", not "worst for the one I'm wearing".
+        const f32 s = BuildScore::maxCellScore(it, m_itemDefs[it.defId]);
         if (s < worstScore) { worstScore = s; worst = bi; }
     }
     if (worst < 0) return false;                           // nothing evictable — bag stays full
@@ -104,12 +107,71 @@ bool Engine::autoEvictWorst(u8 lane) {
     return true;
 }
 
+// --- housekeeping: discard dominated gear, nudge toward a better build --------------------------
+// Runs on a slow cadence (and after every pickup): drops AT MOST one dominated bag item per call
+// (smooth, and the next pass catches the rest), then checks whether some other build could field a
+// total BUILD_SUGGEST_FACTOR ahead of the active one and says so — once per suggestion, with a
+// cooldown, so the nudge informs instead of nagging.
+static constexpr f32 AUTO_PRUNE_PERIOD   = 5.0f;
+static constexpr f32 BUILD_NOTIFY_COOLDOWN = 30.0f;
+
+void Engine::autoLootHousekeeping(u8 lane) {
+    PlayerInventory& inv = m_inventories[lane];
+
+    // Discard pass: the first dominated (non-pet, non-quickbarred) item goes. isKeeper is the
+    // >=-flavoured test, so an item we chose to keep is never dropped by the very next pass.
+    for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+        const ItemInstance& it = inv.backpack[bi];
+        if (it.defId == 0xFFFF || it.defId >= m_itemDefCount) continue;
+        if (m_itemDefs[it.defId].petSummon) continue;
+        if (Quickbar::holdsBackpackItem(m_quickbars[lane], it.uid)) continue;
+        if (BuildScore::isKeeper(inv, m_itemDefs, m_itemDefCount, bi)) continue;
+        ItemInstance dropped = Inventory::dropFromBackpack(inv, bi);
+        if (isItemEmpty(dropped)) break;
+        const Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.2f + Vec3{0, 0.5f, 0};
+        WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
+        if (m_netRole == NetRole::CLIENT)
+            sendDropRequest(0, bi, dropped, dropPos);      // R11: server mirrors the drop
+        if (dropped.defId < m_itemDefCount)
+            addChatMessage("", m_itemDefs[dropped.defId].name, Vec3{0.6f, 0.55f, 0.45f});
+        LOG_INFO("AutoDiscard[%u]: %s (dominated for every build)", lane,
+                 m_itemDefs[dropped.defId].name);
+        break;
+    }
+
+    // Better-build nudge. Suppressed while on cooldown, and re-armed only when the SUGGESTION
+    // changes — switching to the suggested build ends it naturally (best == current).
+    if (m_buildNotifyCooldown[lane] > 0.0f) return;
+    f32 bestScore = 0.0f;
+    const u8 best = BuildScore::bestBuildCell(inv, m_itemDefs, m_itemDefCount, bestScore);
+    if (best == inv.buildCell || best == m_lastSuggestedBuild[lane]) return;
+    const f32 current = BuildScore::gearScoreForCell(inv, m_itemDefs, m_itemDefCount, inv.buildCell);
+    if (bestScore <= current * BuildScore::BUILD_SUGGEST_FACTOR) return;
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "Better gear for %s %s — switch builds in the Inventory",
+                  BuildScore::rowName(best), BuildScore::colName(best));
+    addChatMessage("", msg, Vec3{1.0f, 0.85f, 0.3f});
+    LOG_INFO("BuildSuggest[%u]: %s %s (%.0f vs %.0f)", lane,
+             BuildScore::rowName(best), BuildScore::colName(best), bestScore, current);
+    m_lastSuggestedBuild[lane] = best;
+    m_buildNotifyCooldown[lane] = BUILD_NOTIFY_COOLDOWN;
+}
+
 // --- the per-tick vacuum ------------------------------------------------------------------------
-void Engine::updateAutoLoot(f32 /*dt*/) {
+void Engine::updateAutoLoot(f32 dt) {
     const u8 lane = m_localPlayerIndex;
     PlayerInventory& inv = m_inventories[lane];
     if (!inv.autoMode) return;
     if (m_level.inArena) return;                           // no loot exists in the arena; stay inert
+
+    // Slow housekeeping: discard dominated gear, and nudge when another build's achievable total
+    // pulls ahead. Also runs right after every pickup (below), so a big drop reacts immediately.
+    if (m_buildNotifyCooldown[lane] > 0.0f) m_buildNotifyCooldown[lane] -= dt;
+    m_autoPruneTimer[lane] -= dt;
+    if (m_autoPruneTimer[lane] <= 0.0f) {
+        m_autoPruneTimer[lane] = AUTO_PRUNE_PERIOD;
+        autoLootHousekeeping(lane);
+    }
 
     // Find the nearest eligible drop in reach. Sentinels (globes/shrines/chests/stash/shards) keep
     // their own flows — this vacuums LOOT only.
@@ -127,6 +189,10 @@ void Engine::updateAutoLoot(f32 /*dt*/) {
         const f32 d2 = d.x * d.x + d.z * d.z;
         if (d2 >= bestD2) continue;
         if (std::fabs(d.y) > Interact::INTERACT_VERTICAL_REACH) continue;   // another storey's loot
+        // Best-in-slot filter: only grab what would improve SOME build's best-fieldable gear.
+        // Worse and near-duplicate loot stays on the ground — Aaron's "do not pick up worse gear".
+        if (!BuildScore::worthPickingUp(wi.item, m_itemDefs[wi.item.defId], inv,
+                                        m_itemDefs, m_itemDefCount)) continue;
         bestD2 = d2; best = static_cast<s32>(i);
     }
     if (best < 0) return;
@@ -153,6 +219,9 @@ void Engine::updateAutoLoot(f32 /*dt*/) {
     AudioSystem::play(SfxId::ITEM_PICKUP);
     Steam::unlockAchievement("ACH_FIRST_ITEM");             // same as a manual world pickup
 
-    // The equip half: wear it on the spot if the build says it is an upgrade.
+    // The equip half: wear it on the spot if the build says it is an upgrade — then let the
+    // housekeeping react to the new bag state (a fresh keeper can dominate an old one, and a big
+    // drop can change which build is strongest).
     autoEquipIfUpgrade(lane, static_cast<u8>(bpSlot));
+    autoLootHousekeeping(lane);
 }

@@ -94,10 +94,16 @@ inline void affixContribution(const Affix& a, u8 col, f32& off, f32& def) {
 // Row weights: what "Tanky / Moderate / Glass Cannon" MEAN, numerically. The 3:1 spread is strong
 // enough that a defense roll beats a damage roll on a Tanky build, without making offense worthless
 // (a tank still has to kill things).
+//
+// EVERY row's weights sum to 4. That is load-bearing for the better-build nudge, which compares
+// gear totals ACROSS cells: with Moderate at 1.5/1.5 (sum 3) the middle row was penalized by
+// construction and the nudge suggested leaving Moderate on the STARTING loadout (measured: 78 vs
+// 39 — a 2x artifact of the weight sums, not of the gear). Equal sums make cross-cell totals
+// measure the gear's SHAPE, which is the thing the nudge is for.
 inline void rowWeights(u8 row, f32& offW, f32& defW) {
     switch (row) {
         case 0:  offW = 1.0f; defW = 3.0f; break;   // Tanky
-        default: offW = 1.5f; defW = 1.5f; break;   // Moderate
+        default: offW = 2.0f; defW = 2.0f; break;   // Moderate
         case 2:  offW = 3.0f; defW = 1.0f; break;   // Glass Cannon
     }
 }
@@ -133,5 +139,103 @@ inline bool isUpgrade(f32 candidateScore, f32 wornScore) {
     if (wornScore <= 0.0f) return candidateScore > 0.0f;
     return candidateScore > wornScore * UPGRADE_FACTOR;
 }
+
+// --- multi-build inventory reasoning -------------------------------------------------------------
+// Auto mode keeps the best gear for EVERY build cell, not just the active one — switching builds
+// should find gear waiting. These helpers are the pure core of that: what is the best score this
+// inventory can field for (slot, cell)? is this item the best at ANYTHING? which build could field
+// the strongest total right now?
+
+// Human names for the notification + UI ("Tanky Ranged has better gear").
+inline const char* rowName(u8 cell) {
+    switch (buildRow(cell)) { case 0: return "Tanky"; case 2: return "Glass Cannon"; default: return "Moderate"; }
+}
+inline const char* colName(u8 cell) {
+    switch (buildCol(cell)) { case 0: return "Magic"; case 2: return "Ranged"; default: return "Melee"; }
+}
+
+// Best score this inventory can field for (slot, cell), across the WORN piece and every backpack
+// item of that slot. excludeBackpackIdx lets a bag item ask "what is the best WITHOUT me?" — the
+// self-exclusion the dominance test needs.
+inline f32 bestSlotScore(const PlayerInventory& inv, const ItemDef* defs, u32 defCount,
+                         ItemSlot slot, u8 cell, s32 excludeBackpackIdx = -1) {
+    f32 best = 0.0f;
+    const ItemInstance& worn = inv.equipped[static_cast<u32>(slot)];
+    if (worn.defId != 0xFFFF && worn.defId < defCount)
+        best = score(worn, defs[worn.defId], cell);
+    for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+        if (static_cast<s32>(bi) == excludeBackpackIdx) continue;
+        const ItemInstance& it = inv.backpack[bi];
+        if (it.defId == 0xFFFF || it.defId >= defCount) continue;
+        if (defs[it.defId].slot != slot) continue;
+        const f32 s = score(it, defs[it.defId], cell);
+        if (s > best) best = s;
+    }
+    return best;
+}
+
+// PICKUP filter: grab a ground item only if it would be a real upgrade over everything we can
+// already field, for at least ONE build cell (hysteresis included, so near-duplicates of gear we
+// own stay on the ground — this is the "do not pick up worse gear" half).
+inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
+                           const PlayerInventory& inv, const ItemDef* defs, u32 defCount) {
+    for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
+        const f32 s = score(cand, def, cell);
+        if (s <= 0.0f) continue;
+        if (isUpgrade(s, bestSlotScore(inv, defs, defCount, def.slot, cell)))
+            return true;
+    }
+    return false;
+}
+
+// PRUNE test: a bag item is a KEEPER if, for at least one build cell, nothing else we own beats it
+// (>= against the best-without-me — deliberately weaker than the pickup filter, so an item we
+// decided to keep is not dropped by the very next pass: asymmetry is what prevents churn).
+inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 backpackIdx) {
+    const ItemInstance& it = inv.backpack[backpackIdx];
+    if (it.defId == 0xFFFF || it.defId >= defCount) return false;
+    const ItemDef& def = defs[it.defId];
+    for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
+        const f32 s = score(it, def, cell);
+        if (s <= 0.0f) continue;
+        if (s >= bestSlotScore(inv, defs, defCount, def.slot, cell, static_cast<s32>(backpackIdx)))
+            return true;
+    }
+    return false;
+}
+
+// Total gear score a build cell could field right now (sum of best-in-slot over every slot).
+inline f32 gearScoreForCell(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 cell) {
+    f32 total = 0.0f;
+    for (u32 sl = 0; sl < static_cast<u32>(ItemSlot::COUNT); sl++)
+        total += bestSlotScore(inv, defs, defCount, static_cast<ItemSlot>(sl), cell);
+    return total;
+}
+
+// The build cell that could field the strongest total. outScore gets its total.
+inline u8 bestBuildCell(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, f32& outScore) {
+    u8 best = 0; outScore = -1.0f;
+    for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
+        const f32 s = gearScoreForCell(inv, defs, defCount, cell);
+        if (s > outScore) { outScore = s; best = cell; }
+    }
+    return best;
+}
+
+// An item's best score over all nine cells — the eviction metric when the bag genuinely overflows
+// with keepers: the item least useful to ANY build goes first.
+inline f32 maxCellScore(const ItemInstance& it, const ItemDef& def) {
+    f32 best = 0.0f;
+    for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
+        const f32 s = score(it, def, cell);
+        if (s > best) best = s;
+    }
+    return best;
+}
+
+// A better build exists when some other cell's achievable total beats the current one by this
+// factor — 10%, comfortably past scoring noise, so the nudge only fires when switching would
+// actually matter.
+static constexpr f32 BUILD_SUGGEST_FACTOR = 1.10f;
 
 } // namespace BuildScore

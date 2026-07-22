@@ -273,9 +273,17 @@ panel id 5). Scoring is the pure, tested `game/build_score.h`: stat-derived (bas
 affixes — no authored tags), hard weapon-family gate per column, 1:3 / 1.5:1.5 / 3:1
 offense:defense row weights, 5% upgrade hysteresis, rarity tiebreak. Selecting a cell re-gears the
 whole bag on the spot (`autoEquipBackpack`); every auto-equip goes through `sendInventorySync` (the
-v16 couch lesson) and announces itself in chat (silent gear changes read as items vanishing). A full
-bag **evicts its lowest-scoring item** (Aaron's call — never pauses; pets + quickbar-assigned gear
-exempt, like "drop all"). Persisted as `PlayerInventory.autoMode`/`buildCell` — **SAVE_VERSION 4**
+v16 couch lesson) and announces itself in chat (silent gear changes read as items vanishing). The inventory reasons over **all nine builds**, not just the active one:
+loot is only picked up if it would improve some build's best-fieldable gear (`worthPickingUp` —
+worse and near-duplicate loot stays on the ground), a slow housekeeping pass (5 s, and after every
+pickup) **discards bag items dominated for every build** (`isKeeper`, the >=-flavoured twin of the
+pickup filter — the asymmetry is what prevents keep/drop churn), and when another cell's achievable
+total (`bestBuildCell`/`gearScoreForCell`) beats the active build by >10% the player gets a one-line
+chat nudge ("Better gear for Tanky Ranged…"), cooldown-limited and re-armed only when the suggestion
+changes. **Row weights all sum to 4** — this is load-bearing for the nudge, which compares totals
+ACROSS cells; Moderate at 1.5/1.5 (sum 3) made the middle row lose by construction (measured 2x
+artifact on the starting loadout). A genuinely full bag **evicts its lowest max-over-all-cells item**
+(Aaron's call — never pauses; pets + quickbar-assigned gear exempt, like "drop all"). Persisted as `PlayerInventory.autoMode`/`buildCell` — **SAVE_VERSION 4**
 (v3 readable via mirror; pre-v4 characters load as classic). EVERY `Inventory::init` on a lane that
 already chose (NEW_GAME wipe, `equipFreshLane`, the client-join wipe) explicitly preserves the two
 fields — the chooser runs BEFORE the wipes, which would otherwise silently undo it. `--autoloot` is
