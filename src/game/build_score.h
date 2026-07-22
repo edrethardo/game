@@ -2,6 +2,7 @@
 #include "core/types.h"
 #include "game/item.h"
 #include "game/weapon.h"
+#include "game/weapon_dps.h"
 
 // build_score.h — the pure scoring core of Auto Loot & Equip (spec:
 // docs/superpowers/specs/2026-07-22-auto-loot-equip-design.md).
@@ -158,9 +159,9 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
             const f32 shots  = static_cast<f32>(def.baseClipSize) * (1.0f + clipPct * 0.01f);
             f32 reload = def.baseReloadTime * (1.0f - reloadPct * 0.01f);
             if (def.baseReloadTime > 0.0f && reload < 0.2f) reload = 0.2f;   // engine floor
-            dps = shots * perHit / (shots * effCd + reload);
+            dps = WeaponDps::sustained(perHit, effCd, shots, reload);
         } else {
-            dps = perHit / effCd;
+            dps = WeaponDps::sustained(perHit, effCd, 0.0f, 0.0f);
         }
         if (def.baseProjectileSpeed > 0.0f)
             dps *= 1.0f + projSpd * 0.004f;              // +40% roll => +16% effective DPS
