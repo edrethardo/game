@@ -74,6 +74,8 @@ add_executable(dungeon_tests
     world/test_lava.cpp              # Hellforge lava: walkable, burns on the surface, jumpable vein
     world/test_multislab.cpp         # multi-slab GridCell authorers/getters (FOUR_STORY foundation)
     world/test_mesh_scratch.cpp      # mesher scratch headroom: fully-slabbed same-material section fits
+    balance/test_balance_lab.cpp     # balance lab: enemy/boss curves + typical-gear sanity pins
+    balance/balance_lab.cpp          # the lab itself (tests-only; NEVER linked into the game)
     renderer/test_hud_cooldown.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp
@@ -103,11 +105,14 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/world/level_grid.cpp
     ${CMAKE_SOURCE_DIR}/src/world/raycast.cpp
     ${CMAKE_SOURCE_DIR}/src/world/combat_query.cpp  # ray/cone targeting geometry
+    ${CMAKE_SOURCE_DIR}/src/game/enemy_loader.cpp   # balance lab reads the real roster
+    ${CMAKE_SOURCE_DIR}/src/game/boss_loader.cpp    # balance lab reads the real bosses
 )
 
 target_include_directories(dungeon_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_SOURCE_DIR}      # so tests-only headers resolve, e.g. "balance/balance_lab.h"
 )
 
 target_compile_features(dungeon_tests PRIVATE cxx_std_17)

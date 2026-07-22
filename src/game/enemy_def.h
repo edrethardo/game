@@ -54,6 +54,17 @@ struct EnemyDefTable {
     u32 count = 0;
 };
 
+// RAW floor (1-50, difficulty-independent) -> enemy tier (1-5). Single source: the spawn
+// path and the balance lab must agree on which roster a floor draws from, so the ladder
+// lives here rather than inline in engine_startgame.
+inline u8 enemyTierForFloor(u8 rawFloor) {
+    if (rawFloor >= 41) return 5;
+    if (rawFloor >= 31) return 4;
+    if (rawFloor >= 21) return 3;
+    if (rawFloor >= 11) return 2;
+    return 1;
+}
+
 // Utility: collect defs for a specific tier into a pointer array.
 // Returns count of matching defs.
 inline u32 collectTierDefs(const EnemyDefTable& table, u8 tier,

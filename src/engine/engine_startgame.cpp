@@ -771,11 +771,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     EntitySystem::init(m_entities);
 
     // Determine tier for enemy spawning (1-5 based on current floor)
-    u8 currentTier = 1;
-    if      (m_level.currentFloor >= 41) currentTier = 5;
-    else if (m_level.currentFloor >= 31) currentTier = 4;
-    else if (m_level.currentFloor >= 21) currentTier = 3;
-    else if (m_level.currentFloor >= 11) currentTier = 2;
+    u8 currentTier = enemyTierForFloor(static_cast<u8>(m_level.currentFloor));
 
     // Spawn enemies procedurally — themed variants + unique monsters per tier
     spawnFloorEnemies(dungeon, currentTier);
