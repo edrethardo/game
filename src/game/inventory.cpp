@@ -11,7 +11,8 @@
 // ============================================================
 
 void Inventory::init(PlayerInventory& inv) {
-    inv = {};
+    PlayerInventory fresh = {};
+    inv = fresh;
     for (u32 i = 0; i < static_cast<u32>(ItemSlot::COUNT); i++)
         inv.equipped[i].defId = 0xFFFF;
     for (u32 i = 0; i < MAX_INVENTORY_ITEMS; i++)

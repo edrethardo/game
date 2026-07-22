@@ -127,7 +127,8 @@ static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
         // defaults (classic, Moderate/Melee), bonus caches are rebuilt by recalculateStats.
         LegacyPlayerInventoryV3 legacy;
         if (std::fread(&legacy, sizeof(LegacyPlayerInventoryV3), 1, f) != 1) return false;
-        out = {};
+        PlayerInventory fresh = {};
+        out = fresh;
         for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) out.equipped[s] = legacy.equipped[s];
         for (u32 b = 0; b < MAX_INVENTORY_ITEMS; b++) out.backpack[b] = legacy.backpack[b];
         out.backpackCount = legacy.backpackCount;
@@ -135,7 +136,8 @@ static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
     }
     LegacyPlayerInventoryV2 legacy;
     if (std::fread(&legacy, sizeof(LegacyPlayerInventoryV2), 1, f) != 1) return false;
-    out = {};
+    PlayerInventory fresh = {};
+    out = fresh;
     for (u32 s = 0; s < 6; s++) out.equipped[s] = legacy.equipped[s];
     for (u32 b = 0; b < MAX_INVENTORY_ITEMS; b++) out.backpack[b] = legacy.backpack[b];
     out.backpackCount = legacy.backpackCount;
