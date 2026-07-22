@@ -149,9 +149,7 @@ Enemies traverse both stories via story-aware `snapEntityToFloor` (`effectiveFlo
 `scratchpad/stacked_hall_geometry.cpp` for a possible 2nd PvP arena.) Design/plan:
 `docs/superpowers/plans/2026-07-20-two-story-vertical-hall-pve.md`.
 
-**Four-story PvE floors (`FOUR_STORY` — "The Descent").** A 6th structural layout style
-(`world/level_gen.cpp` `carveFourStory`, weighted-rolled on **floor-6+ non-boss** floors like
-VERTICAL_HALL, forced to a 44-grid; `--fourstory` dev door). A **MAZE stacked four stories deep on one
+**Four-story PvE floors (`FOUR_STORY` — "The Descent").** A 6th structural layout style (`world/level_gen.cpp` `carveFourStory`, forced to a 44-grid; `--fourstory` dev door). It is **SCHEDULED, not rolled**: every floor ending in **9** (9/19/29/39/49) is a Descent maze and no other floor ever is, so it lands as a predictable landmark in a run rather than a surprise — none of those are boss floors, so there is no clash, and `pickLayoutStyle` returns it before the weight table, which no longer carries a FOUR_STORY column. A **MAZE stacked four stories deep on one
 footprint**: the L0 ground plus three `CELL_PLATFORM` slab stories at 3/6/9 m. A braided
 recursive-backtracker maze (3-wide corridors, 1-cell walls, ~34% wall bulk) is carved ONCE as
 full-height `CELL_SOLID` and **shared by all four stories**, so every level is the same labyrinth
@@ -162,7 +160,7 @@ is derived from the movement physics rather than tuned by feel — at the 6 m/s 
 2.4 m and a 0.6 m body needs gap+0.6 of clearance, so:
 **DROP HOLES** (≥2 cells across) **cannot** be cleared → a committed one-story fall;
 **JUMP GAPS** (exactly 1 cell) can → clear them or lose a story;
-**JUMP PADS** fill dead-end nodes (the whole 3x3, not a centre cell — a 1x1 pad is unspottable down a dark corridor) and lift ~two stories so a bad fall is recoverable; the launch is capped to real headroom so a pad can never throw you through the ceiling.
+**JUMP PADS** sit under ~1 in 3 drop holes as RETURN LIFTS — fall through, land a story down, get flung back up through the hole you came from (a pad fires the instant you are grounded, so a pad under *every* hole would bounce you straight back and make descending a fight with the level; the rest stay clean descents). They also fill dead-end nodes (the whole 3x3, not a centre cell — a 1x1 pad is unspottable down a dark corridor) and lift ~two stories so a bad fall is recoverable; the launch is capped to real headroom so a pad can never throw you through the ceiling.
 There are no ramps or stairs — `portalCount` stays 0 and descent is **one-way**. Hole density **thins
 with depth** (18/12/7%): the top story hands out ways down, the last one makes you hunt.
 **Express shafts are impossible by construction** — a hole is punched at level L only where the slab at

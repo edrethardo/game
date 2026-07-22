@@ -1180,6 +1180,24 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                 if (!rectEligible(hx, hz, sz, sz, qAbove)) continue;
                 punchRect(hx, hz, sz, sz, q);
                 recordHole(hx, hz, sz, sz, q);
+                // RETURN PADS: mark the hole's footprint as a jump pad, so the surface you land on
+                // one story down flings you back up through the hole you just fell through. A pad
+                // cell is a pad on every story it carries, and the hole itself has no slab at this
+                // level, so the pad can only fire from BELOW — exactly the lift we want.
+                //
+                // Only some holes get one, and that is deliberate rather than shy: a pad fires the
+                // instant you are grounded on it, so a pad under EVERY hole would bounce you
+                // straight back up the moment you dropped and descending would become a fight with
+                // the level. One in three leaves clean holes to descend through and marks the rest
+                // as two-way lifts. Raise PAD_HOLE_ONE_IN to 1 for a pad under every hole.
+                constexpr u32 PAD_HOLE_ONE_IN = 3;
+                if (rng.range(0, PAD_HOLE_ONE_IN) == 0)
+                    for (u32 pz = hz; pz < hz + sz; pz++)
+                        for (u32 px = hx; px < hx + sz; px++) {
+                            GridCell& pc = LevelGridSystem::getCell(grid, px, pz);
+                            pc.flags     = static_cast<u8>(pc.flags | CELL_JUMPPAD);
+                            pc.jumpPadQ  = FS_PAD_Q;
+                        }
                 made++;
             }
         // Every story MUST offer at least one way down, or the descent dead-ends. Walk the lattice
@@ -1329,31 +1347,37 @@ LevelGen::LayoutStyle LevelGen::pickLayoutStyle(u32 seed, u32 floor) {
     rng.next();
     u32 roll = rng.range(0, 100);
 
-    // Per-tier weights [BSP, CAVERN, GAUNTLET, HUB, VERTICAL_HALL, FOUR_STORY]; each row sums to 100.
+    // FOUR_STORY is SCHEDULED, not rolled: every floor ending in 9 (9, 19, 29, 39, 49) is a Descent
+    // maze and no other floor ever is, so the four-story floor lands as a predictable landmark in the
+    // run rather than a surprise. None of those are boss floors (every 5th), so there is no clash,
+    // and startGame forces the >=44 grid the style needs. Checked before the weight table, which no
+    // longer carries a FOUR_STORY column at all.
+    if (floor % 10 == 9) return LayoutStyle::FOUR_STORY;
+
+    // Per-tier weights [BSP, CAVERN, GAUNTLET, HUB, VERTICAL_HALL]; each row sums to 100.
     // Styles echo the tier's fiction: caves peak in the Spider Caverns, gauntlets in the Hellforge,
     // vault hubs in the Catacombs. Classic BSP stays the most common single style overall so the
     // structural floors keep reading as events, not the norm. The two multi-story styles
     // (VERTICAL_HALL, FOUR_STORY) are NON-BOSS styles — see the remap below.
     u8 tier = floor >= 41 ? 4 : floor >= 31 ? 3 : floor >= 21 ? 2 : floor >= 11 ? 1 : 0;
-    static constexpr u8 kWeights[5][6] = {
-        {46, 12, 11, 11, 12,  8},   // 4-10  Stone Dungeon
-        {28, 12, 15, 22, 13, 10},   // 11-20 Catacombs
-        {20, 36,  8, 16, 10, 10},   // 21-30 Spider Caverns
-        {20, 11, 33, 16, 10, 10},   // 31-40 Hellforge
-        {20, 20, 16, 22, 10, 12},   // 41-50 Void
+    static constexpr u8 kWeights[5][5] = {
+        {50, 13, 12, 12, 13},   // 4-10  Stone Dungeon
+        {31, 13, 17, 24, 15},   // 11-20 Catacombs
+        {22, 40,  9, 17, 12},   // 21-30 Spider Caverns
+        {22, 12, 37, 17, 12},   // 31-40 Hellforge
+        {22, 22, 18, 26, 12},   // 41-50 Void
     };
     u32 acc = 0;
-    for (u32 s = 0; s < 6; s++) {
+    for (u32 s = 0; s < 5; s++) {
         acc += kWeights[tier][s];
         if (roll < acc) {
             LayoutStyle st = static_cast<LayoutStyle>(s);
-            // VERTICAL_HALL and FOUR_STORY are NON-BOSS styles: boss floors (every 5th — the
-            // milestone floors 5,10,…,50) expand a room into a boss arena and rebuild the mesh,
-            // which would stomp the balcony / stacked-slab cells; and floors 4-5 run on the tiny
-            // tutorial grid. Fall back to classic BSP there (both styles only appear on floor-6+
-            // non-boss floors).
-            if ((st == LayoutStyle::VERTICAL_HALL || st == LayoutStyle::FOUR_STORY) &&
-                (floor < 6 || floor % 5 == 0))
+            // VERTICAL_HALL is a NON-BOSS style: boss floors (every 5th — the milestone floors
+            // 5,10,…,50) expand a room into a boss arena and rebuild the mesh, which would stomp the
+            // balcony cells; and floors 4-5 run on the tiny tutorial grid. Fall back to classic BSP
+            // there. (FOUR_STORY needs no such guard — it is scheduled onto x9 floors above, none of
+            // which are boss floors.)
+            if (st == LayoutStyle::VERTICAL_HALL && (floor < 6 || floor % 5 == 0))
                 return LayoutStyle::BSP_ROOMS;
             return st;
         }

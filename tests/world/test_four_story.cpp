@@ -22,29 +22,6 @@ TEST_CASE("FOUR_STORY: type + styleName wiring") {
     CHECK(DungeonResult::MAX_DROP_HOLES == 64);
 }
 
-TEST_CASE("FOUR_STORY: pickLayoutStyle appears on non-boss deep floors only, deterministically") {
-    // Non-boss remap (mirrors VERTICAL_HALL): FOUR_STORY never fires on floor<6 or a boss floor (floor%5==0)
-    // — the boss-arena expansion rewrites floorHeight and rebuilds the mesh, which would stomp the slabs.
-    for (u32 floor = 1; floor <= 60; floor++)
-        for (u32 seed : {5u, 500u, 50000u, 0xBEEFu}) {
-            LevelGen::LayoutStyle s = LevelGen::pickLayoutStyle(seed, floor);
-            CAPTURE(floor); CAPTURE(seed);
-            if (s == LevelGen::LayoutStyle::FOUR_STORY) {
-                CHECK(floor >= 6);
-                CHECK(floor % 5 != 0);
-            }
-            CHECK(s == LevelGen::pickLayoutStyle(seed, floor));   // host==client (deterministic)
-        }
-
-    // The style must actually occur on eligible floors (the weight column isn't dead).
-    u32 seen = 0;
-    for (u32 seed = 0; seed < 2000; seed++)
-        for (u32 floor : {7u, 13u, 22u, 34u, 46u})
-            if (LevelGen::pickLayoutStyle(seed * 2654435761u, floor) == LevelGen::LayoutStyle::FOUR_STORY)
-                seen++;
-    CHECK(seen > 0);
-}
-
 namespace {
 // A slab TOP (metres) is present at this cell iff some platform index reports it.
 bool hasSlabAt(const LevelGrid& g, u32 x, u32 z, f32 topM) {
@@ -87,6 +64,24 @@ bool descendReaches(const LevelGrid& g, u32 sx, u32 sz, u32 startLv, u32 ex, u32
     return false;
 }
 } // namespace
+
+TEST_CASE("FOUR_STORY is SCHEDULED on every x9 floor and on no other") {
+    // The Descent is a landmark, not a surprise: floors 9/19/29/39/49 are always the four-story maze
+    // and nothing else ever is, so a run has a predictable rhythm. Also pins that no x9 floor is a
+    // boss floor (bosses are every 5th and would expand a room over the stacked slabs).
+    for (u32 seed : {5u, 500u, 50000u, 0xBEEFu})
+        for (u32 floor = 1; floor <= 60; floor++) {
+            const LevelGen::LayoutStyle s = LevelGen::pickLayoutStyle(seed, floor);
+            CAPTURE(seed); CAPTURE(floor);
+            if (floor % 10 == 9) {
+                CHECK(s == LevelGen::LayoutStyle::FOUR_STORY);
+                CHECK(floor % 5 != 0);                 // never collides with a boss floor
+            } else {
+                CHECK(s != LevelGen::LayoutStyle::FOUR_STORY);
+            }
+            CHECK(s == LevelGen::pickLayoutStyle(seed, floor));   // host == client
+        }
+}
 
 TEST_CASE("FOUR_STORY: deterministic grid + room/hole counts from the seed") {
     for (u32 seed : {7u, 12345u, 0xDEADBEEFu}) {
@@ -306,4 +301,35 @@ TEST_CASE("FourStory spawnFloorEnemies guard: punched drop-hole cell fails the w
     const f32 effHole = LevelGridSystem::effectiveFloorHeight(grid, 3, 3, roomFloorY);
     CHECK(effHole == doctest::Approx(24 * 0.25f));   // 6.0 m
     CHECK(std::fabs(effHole - roomFloorY) >= PLATFORM_STEP_TOLERANCE);
+}
+
+TEST_CASE("FOUR_STORY: return pads sit under holes, and always have a surface to fire from") {
+    // A pad marked on a hole's footprint is a pad on every STORY that cell carries. The hole itself
+    // has no slab at its own level, so the pad can only fire from BELOW — which is the point: fall
+    // through, land one story down, get flung back up through the hole you came from.
+    //
+    // Only some holes get one, deliberately: a pad fires the instant you are grounded on it, so a
+    // pad under EVERY hole would bounce you straight back up the moment you dropped and descending
+    // would become a fight with the level. What MUST hold is that any pad that exists has a real
+    // landing surface one story down — a pad over nothing is a pad that never fires.
+    for (u32 seed : {7u, 99u, 4242u}) {
+        LevelGrid g;
+        LevelGridSystem::init(g, 44, 44, 1.0f);
+        DungeonResult r = LevelGen::generate(g, seed, 44, 44, LevelGen::LayoutStyle::FOUR_STORY);
+        CAPTURE(seed);
+        u32 padded = 0, cleanHoles = 0;
+        for (u8 i = 0; i < r.dropHoleCount; i++) {
+            u32 hx, hz;
+            REQUIRE(LevelGridSystem::worldToGrid(g, r.dropHoles[i].pos, hx, hz));
+            if (!(LevelGridSystem::getCell(g, hx, hz).flags & CELL_JUMPPAD)) { cleanHoles++; continue; }
+            padded++;
+            // The surface one story below must exist: either the next slab down, or L0 itself.
+            const f32 below = r.dropHoles[i].surfaceY - 3.0f;
+            CAPTURE(hx); CAPTURE(hz); CAPTURE(below);
+            CHECK((below < 0.01f || hasSlabAt(g, hx, hz, below)));
+        }
+        CHECK(padded > 0);        // return pads exist at all
+        CHECK(cleanHoles > 0);    // and plain descend-only holes still exist, or you could not descend
+        LevelGridSystem::shutdown(g);
+    }
 }
