@@ -433,6 +433,23 @@ void Engine::initAssets() {
         }
     }
 
+    // Resolve breeder targets (enemies.json "spawnEnemy" name → enemy index) so a breeder
+    // (Broodmother) can spawn fresh copies of another enemy (Dungeon Spider) at runtime. Same
+    // name-sync trap as pets: an unmatched name degrades to "not a breeder", logged loudly.
+    for (u32 i = 0; i < m_enemyDefs.count; i++) {
+        EnemyDef& d = m_enemyDefs.defs[i];
+        if (d.spawnEnemyName[0] == '\0') continue;
+        for (u32 e = 0; e < m_enemyDefs.count; e++) {
+            if (std::strcmp(d.spawnEnemyName, m_enemyDefs.defs[e].name) == 0) {
+                d.spawnEnemyIdx = static_cast<u16>(e);
+                break;
+            }
+        }
+        if (d.spawnEnemyIdx == 0xFFFF)
+            LOG_WARN("EnemyDef '%s': spawnEnemy '%s' matches no enemies.json entry — will not breed",
+                     d.name, d.spawnEnemyName);
+    }
+
     // Resolve pet consumables to their enemy defs (items.json petEnemy name → enemy index) and
     // build the reverse map the 1-in-10000 kill roll uses (enemy index → pet item def). Runs after
     // BOTH tables are loaded; an unmatched name degrades to "that enemy drops no pet" — loudly,

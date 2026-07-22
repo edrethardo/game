@@ -34,7 +34,14 @@ take (use the AskUserQuestion tool) — do not pick for them:
     the weeping-angel rule (player in `detectionRange` while NOBODY watches). Only give it
     to an enemy that should be un-damageable until it moves.
   - `onHitEffect`: `0`=none, `1`=poison, `2`=slow, `3`=burn, `4`=freeze (+ `onHitDuration`,
-    `onHitDps`). Applied to the player/NPC on the enemy's hit.
+    `onHitDps`). Applied to the player/NPC on the enemy's hit — by **melee AND ranged** attacks
+    (a ranged shot carries the shooter's effect on the projectile), except a **ranged freeze is
+    hard-capped to 0.15 s** (then further cut by the player's Toughness/CC-Resist) so ranged
+    casters can't chain-lock. `onHitEffect 0` ranged shots keep their existing default mild slow.
+  - `spawnEnemy`: `"<enemy name>"` → **breeder**. While engaged, this enemy periodically spawns a
+    fresh copy of the named enemy (Broodmother → `"Dungeon Spider"`), up to a nearby cap and never
+    past the pool. Resolved to `EnemyDef.spawnEnemyIdx` at init; run by the authoritative
+    `Engine::tickBreeders` (tunables `BREED_INTERVAL`/`BREED_CAP`/`BREED_RADIUS` in `engine_spawn.cpp`).
   - Covers most gimmicks (e.g. "summoner that burns" = `["summoner"]` + `onHitEffect:3`).
 - **(B) New EnemyRole + behavior** — a genuinely novel behavior needs a new role bit and an
   AI branch. **Costs a type widening** (see Step 8): all 8 bits of the `u8` role mask are

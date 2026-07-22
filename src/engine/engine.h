@@ -1347,6 +1347,13 @@ private:
     void tickLootGoblins(f32 dt);
     u8   m_goblinMeshId = 0;
 
+    // Breeders: an enemy with a resolved EnemyDef.spawnEnemyIdx (Broodmother → Dungeon Spider)
+    // periodically spawns a fresh copy of that enemy while engaged, up to a nearby cap and never
+    // past the entity-pool headroom. Authoritative sim only (spawns replicate via snapshot).
+    void tickBreeders(f32 dt);
+    // Spawn one fresh hostile of enemy def `defIdx` near `nearPos`, floor-scaled to match a
+    // normally-placed enemy (mirrors the spawnFloorEnemies JSON init).
+    void spawnBredEnemy(u8 defIdx, Vec3 nearPos);
 
     // Pet companions (the goblin's 1% consumable drop + every enemy's 1-in-10000 "Mini <Enemy>").
     // togglePetCompanion is the server/SP-authoritative summon-or-dismiss for the pet belonging to

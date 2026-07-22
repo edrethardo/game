@@ -58,6 +58,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+// Breeder tunables (Broodmother → Dungeon Spider). See Engine::tickBreeders.
+static constexpr f32 BREED_INTERVAL = 5.0f;   // seconds between brood spawns while engaged
+static constexpr u32 BREED_CAP      = 4;      // max living brood of the bred type near a breeder
+static constexpr f32 BREED_RADIUS   = 18.0f;  // radius the cap is counted within
 
 // ---------------------------------------------------------------------------
 // Enemy template tables — promoted from static locals in startGame so they
@@ -476,6 +480,9 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     }
                     if (def.role & EnemyRole::SUMMONER) ent->tacticalTimer = 8.0f;
                     if (def.role & EnemyRole::HEALER)   ent->tacticalTimer = 5.0f;
+                    // Breeder: stagger the first brood by a full interval so it doesn't drop a
+                    // spider the instant it aggros (tickBreeders also gates on being engaged).
+                    if (def.spawnEnemyIdx != 0xFFFF) ent->breedTimer = BREED_INTERVAL;
 
                     // Floor scaling
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
@@ -1371,6 +1378,52 @@ void Engine::togglePetCompanion(u8 ownerSlot, u16 petDefId)
     LOG_INFO("Pet: %s summoned (owner slot %u)", m_itemDefs[petDefId].name, ownerSlot);
 }
 
+// ---------------------------------------------------------------------------
+// Breeders (Broodmother → Dungeon Spider). tickBreeders runs once per authoritative
+// frame (server/SP, from tickSharedSystems); spawnBredEnemy builds one floor-scaled hostile
+// the SAME way the initial JSON spawn does, so a bred spider is indistinguishable from a placed
+// one. Spawns are host-authoritative and replicate to clients via the snapshot — no wire change.
+// ---------------------------------------------------------------------------
+void Engine::spawnBredEnemy(u8 defIdx, Vec3 nearPos) {
+    if (defIdx >= m_enemyDefs.count) return;
+    if (m_entities.activeCount >= MAX_ENTITIES - 2) return;   // pool headroom — never blow MAX_ENTITIES
+    const EnemyDef& def = m_enemyDefs.defs[defIdx];
+
+    // Offset from the parent so the newborn isn't stacked on it; snap Y to the destination floor.
+    Vec3 pos = nearPos + Vec3{0.8f, 0.0f, 0.8f};
+    u32 gx, gz;
+    if (LevelGridSystem::worldToGrid(m_level.grid, pos, gx, gz))
+        pos.y = LevelGridSystem::getFloorHeight(m_level.grid, gx, gz) + def.halfExtents.y;
+
+    EntityHandle h = EntitySystem::spawn(m_entities, pos, def.halfExtents, def.flying,
+        def.health, def.moveSpeed, def.detectionRange, def.attackRange, def.attackCooldown, def.damage);
+    Entity* ent = handleGet(m_entities, h);
+    if (!ent) return;
+
+    ent->meshId       = def.meshId;
+    ent->materialId   = def.materialId;
+    ent->enemyType    = def.enemyType;
+    ent->enemyRole    = def.role;
+    ent->aiPreference = def.aiPreference;
+    ent->enemyDefIdx  = defIdx;
+    ent->baseMoveSpeed      = ent->moveSpeed;
+    ent->baseAttackCooldown = ent->attackCooldown;
+
+    // Floor scaling — identical to spawnFloorEnemies, so a bred spider matches a placed one.
+    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    ent->level = static_cast<u16>(effectiveFloor);
+    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
+                  * GameConst::difficultyDamageBump(m_difficulty);
+    ent->health   *= hpMult;
+    ent->maxHealth = ent->health;
+    ent->damage   *= dmgMult;
+    ent->onHitEffect   = def.onHitEffect;
+    ent->onHitDuration = def.onHitDuration;
+    ent->onHitDps      = def.onHitDps * dmgMult;
+
+    Collision::ensureNotInWall(ent->position, ent->halfExtents, m_level.grid);
+}
 
 void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
     if (dungeon.portalCount == 0) return;
@@ -1522,6 +1575,39 @@ void Engine::spawnFloorHoleSnipers(const DungeonResult& dungeon, u8 tier) {
     }
 }
 
+void Engine::tickBreeders(f32 dt) {
+    // Snapshot the count so a spawn appended this frame isn't itself scanned (a fresh spider is
+    // IDLE and not a breeder anyway, but this keeps the loop bound stable).
+    const u32 count = m_entities.activeCount;
+    for (u32 a = 0; a < count && a < m_entities.activeCount; a++) {
+        Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (e.flags & (ENT_DEAD | ENT_FRIENDLY)) continue;
+        if (e.enemyDefIdx >= m_enemyDefs.count) continue;
+        const u16 spawnIdx = m_enemyDefs.defs[e.enemyDefIdx].spawnEnemyIdx;
+        if (spawnIdx == 0xFFFF) continue;                       // not a breeder
+        // Only breed while actually engaged — otherwise a Broodmother would carpet the whole
+        // floor with spiders before the player ever arrives.
+        if (e.aiState == AIState::IDLE || e.aiState == AIState::DORMANT || e.aiState == AIState::DEAD)
+            continue;
+
+        e.breedTimer -= dt;
+        if (e.breedTimer > 0.0f) continue;
+        e.breedTimer = BREED_INTERVAL;
+
+        // Cap the living brood of that type near this breeder so it can't flood the fight.
+        u32 nearby = 0;
+        for (u32 b = 0; b < m_entities.activeCount; b++) {
+            Entity& o = m_entities.entities[m_entities.activeList[b]];
+            if (o.flags & ENT_DEAD) continue;
+            if (o.enemyDefIdx != static_cast<u8>(spawnIdx)) continue;
+            Vec3 d = o.position - e.position;
+            if (d.x * d.x + d.z * d.z <= BREED_RADIUS * BREED_RADIUS) nearby++;
+        }
+        if (nearby >= BREED_CAP) continue;
+
+        spawnBredEnemy(static_cast<u8>(spawnIdx), e.position);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // spawnFloorShrines — scatter walk-up shrines through the floor.

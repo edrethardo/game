@@ -356,8 +356,9 @@
         0.65,
         0.85
       ],
-      "role": "summoner",
+      "role": "normal",
       "aiPreference": "retreat",
+      "spawnEnemy": "Dungeon Spider",
       "onHitEffect": 2,
       "onHitDuration": 2.5,
       "onHitDps": 0,
@@ -380,7 +381,7 @@
         0.45,
         0.7
       ],
-      "role": "bomber",
+      "role": "healer",
       "aiPreference": "strafe",
       "onHitEffect": 2,
       "onHitDuration": 2.5,

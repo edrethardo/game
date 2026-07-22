@@ -37,9 +37,15 @@ struct EnemyDef {
     f32  onHitDps        = 0.0f;
     f32  dropWeight      = 1.0f;
 
+    // Breeder: this enemy periodically spawns a fresh copy of another enemy (Broodmother →
+    // Dungeon Spider). Name from JSON ("spawnEnemy"); resolved to an index after all defs load.
+    // 0xFFFF ⇒ not a breeder. The breed cadence/cap lives in the engine breeder pass (tickBreeders).
+    char spawnEnemyName[32] = {};
+
     // Resolved IDs (filled after mesh/material systems init)
     u8   meshId          = 0;
     u8   materialId      = 0;
+    u16  spawnEnemyIdx   = 0xFFFF; // resolved from spawnEnemyName (0xFFFF = not a breeder)
     EnemyType enemyType  = EnemyType::SKELETON;
 };
 

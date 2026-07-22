@@ -139,6 +139,10 @@ bool EnemyLoader::load(const char* path, EnemyDefTable& table) {
             def.onHitDps      = entry.value("onHitDps", 0.0f);
             def.dropWeight    = entry.value("dropWeight", 1.0f);
 
+            // Breeder target (optional): name resolved to spawnEnemyIdx after all defs load.
+            std::string spawnName = entry.value("spawnEnemy", std::string{});
+            std::strncpy(def.spawnEnemyName, spawnName.c_str(), sizeof(def.spawnEnemyName) - 1);
+
             def.enemyType = inferEnemyType(def.meshName);
 
             table.count++;

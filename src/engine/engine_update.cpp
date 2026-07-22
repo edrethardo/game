@@ -1138,6 +1138,10 @@ void Engine::tickSharedSystems(f32 dt) {
         for (u32 i = 0; i < remoteViewCount; i++) m_sharedRemoteView[remoteSlots[i]] = nullptr;
 
         EntitySystem::tickTimers(m_entities, dt);
+        // Breeders (Broodmother → Dungeon Spider) spawn brood while engaged. Authoritative sim
+        // only — a CLIENT's entity pool is a snapshot-driven ghost, so it must never breed locally
+        // (the host's spawns replicate to it via the snapshot).
+        if (m_netRole != NetRole::CLIENT) tickBreeders(dt);
         WorldItemSystem::update(m_worldItems, dt, m_itemDefs, m_itemDefCount);   // def-aware: pet drops never despawn
 
         SkillSystem::updateOrbProjectiles(m_projectiles, m_skillDefs, m_skillDefCount, dt);
