@@ -35,6 +35,7 @@ add_executable(dungeon_tests
     game/test_audio_settings.cpp
     game/test_skill_bar_hit.cpp
     game/test_quickbar.cpp
+    game/test_build_score.cpp        # Auto Loot & Equip scorer: family gate, row posture, hysteresis
     game/test_champion.cpp
     game/test_floor_event.cpp
     engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
