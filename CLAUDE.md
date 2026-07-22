@@ -273,7 +273,9 @@ build scores as an upgrade. The build is one cell of a **3x3 grid** in the inven
 Tanky/Moderate/Glass Cannon, cols Magic/Melee/Ranged; `InventoryUI::buildGridLayout` single-sources
 draw + hit-test; controller reaches it as `INV_PANEL_BUILD` in the shoulder cycle — STASH moved to
 panel id 5). Scoring is the pure, tested `game/build_score.h`: stat-derived (base stats + rolled
-affixes — no authored tags), hard weapon-family gate per column, 1:3 / 1.5:1.5 / 3:1
+affixes — no authored tags), **weapons scored on DPS** (baseDamage/baseCooldown with the item's own
+damage + attack-speed rolls folded in multiplicatively; per-hit ranked a Heavy Crossbow 3.5x a Rusty
+Dagger whose real DPS is higher), hard weapon-family gate per column, 1:3 / 1.5:1.5 / 3:1
 offense:defense row weights, 5% upgrade hysteresis, rarity tiebreak. Selecting a cell re-gears the
 whole bag on the spot (`autoEquipBackpack`); every auto-equip goes through `sendInventorySync` (the
 v16 couch lesson) and announces itself in chat (silent gear changes read as items vanishing). The inventory reasons over **all nine builds**, not just the active one:

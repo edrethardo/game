@@ -183,3 +183,32 @@ TEST_CASE("Multi-build: pickup filter, dominance prune, and the better-build sig
         CHECK(BuildScore::maxCellScore(wand, defs[3]) > 0.0f);   // 0 under Melee, >0 under Magic
     }
 }
+
+TEST_CASE("Weapons are scored on DPS, not damage per hit") {
+    // Real-roster numbers: Rusty Dagger 14 dmg @ 0.2 s = 70 DPS; Heavy Crossbow 50 dmg @ 0.78 s =
+    // 64 DPS. Per-hit scoring ranked the crossbow 3.5x the dagger and would have purged every fast
+    // weapon from every build; by DPS the dagger must WIN within its family comparison.
+    ItemDef dagger{};
+    dagger.slot = ItemSlot::WEAPON; dagger.weaponSubtype = WeaponSubtype::DAGGER;
+    dagger.baseDamage = 14.0f; dagger.baseCooldown = 0.2f;
+    ItemDef claymore{};
+    claymore.slot = ItemSlot::WEAPON; claymore.weaponSubtype = WeaponSubtype::CLAYMORE;
+    claymore.baseDamage = 30.0f; claymore.baseCooldown = 1.2f;   // 25 DPS — half the dagger's
+
+    ItemInstance it = instance();
+    const f32 dScore = BuildScore::score(it, dagger,   MOD_MELEE);
+    const f32 cScore = BuildScore::score(it, claymore, MOD_MELEE);
+    CHECK(dScore > cScore);                     // 70 DPS beats 25 DPS despite 14 < 30 per hit
+
+    // An attack-speed roll on a WEAPON multiplies its DPS — worth more than the same value as a
+    // generic utility contribution ever was.
+    ItemInstance fast = instance(1);
+    fast.affixes[0] = {AffixType::ATTACK_SPEED_PCT, 20.0f};
+    CHECK(BuildScore::score(fast, dagger, MOD_MELEE) > dScore * 1.15f);
+
+    // A weapon with no cooldown data hits the 0.2 s floor rather than dividing by zero.
+    ItemDef weird{};
+    weird.slot = ItemSlot::WEAPON; weird.weaponSubtype = WeaponSubtype::SWORD;
+    weird.baseDamage = 10.0f; weird.baseCooldown = 0.0f;
+    CHECK(BuildScore::score(it, weird, MOD_MELEE) > 0.0f);
+}

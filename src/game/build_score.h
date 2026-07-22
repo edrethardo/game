@@ -117,11 +117,39 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
     // armor/rings/offhands serve any archetype.
     if (def.slot == ItemSlot::WEAPON && !weaponInFamily(def.weaponSubtype, col)) return 0.0f;
 
-    f32 off = def.baseDamage;            // weapons bring offense…
-    f32 def_ = def.baseHealth * 0.5f;    // …armor brings defense (flat HP numbers run large)
+    f32 off  = 0.0f;
+    f32 def_ = def.baseHealth * 0.5f;    // armor brings defense (flat HP numbers run large)
 
-    for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++)
-        affixContribution(item.affixes[i], col, off, def_);
+    if (def.slot == ItemSlot::WEAPON) {
+        // Weapons are scored on DPS, not damage per hit. Per-hit ranked a Heavy Crossbow (50 dmg,
+        // 0.78 s) 3.5x a Rusty Dagger (14 dmg, 0.2 s) when their real output is nearly equal
+        // (64 vs 70 DPS) — per-hit scoring would systematically purge fast weapons from every
+        // build. The item's own damage and attack-speed rolls fold in MULTIPLICATIVELY, because
+        // that is what they do to DPS in play; REF_SWING (0.5 s, a mid-roster cooldown) scales the
+        // result back into the same range as the old per-hit numbers so armor/affix contributions
+        // keep their relative weight.
+        f32 flatDmg = 0.0f, pctDmg = 0.0f, atkSpd = 0.0f;
+        for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++) {
+            switch (item.affixes[i].type) {
+                case AffixType::DAMAGE_FLAT:      flatDmg += item.affixes[i].value; break;
+                case AffixType::DAMAGE_PCT:       pctDmg  += item.affixes[i].value; break;
+                case AffixType::ATTACK_SPEED_PCT: atkSpd  += item.affixes[i].value; break;
+                default: affixContribution(item.affixes[i], col, off, def_); break;
+            }
+        }
+        static constexpr f32 REF_SWING = 0.5f;
+        const f32 cd  = (def.baseCooldown > 0.2f) ? def.baseCooldown : 0.2f;   // floor: no div-blowups
+        const f32 dps = (def.baseDamage + flatDmg) * (1.0f + pctDmg * 0.01f)
+                        * (1.0f + atkSpd * 0.01f) / cd;
+        off += dps * REF_SWING;
+    } else {
+        // Non-weapons keep the additive model — there is no swing rate to fold into, and a glove's
+        // attack-speed roll speeds up the WEAPON, a cross-slot effect a per-item score cannot see
+        // (it stays a generic offense contribution in affixContribution).
+        off += def.baseDamage;
+        for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++)
+            affixContribution(item.affixes[i], col, off, def_);
+    }
 
     f32 offW, defW;
     rowWeights(row, offW, defW);
