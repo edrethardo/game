@@ -551,8 +551,19 @@ void updateHostileStates(Entity& e, u32 i,
                     f32 timeToHit = dist / projSpeed;
                     Vec3 predictedPos = targetPos + targetVel * timeToHit;
                     Vec3 atkDir = normalize(predictedPos - atkOrigin);
-                    ProjectileSystem::spawn(projectiles, atkOrigin,
+                    u16 pIdx = ProjectileSystem::spawn(projectiles, atkOrigin,
                         atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
+                    // Carry the shooter's authored on-hit status onto the shot so RANGED enemies
+                    // apply it too (the melee branch below already does — a ranged Web Spinner's
+                    // web should still slow). Poison/slow/burn use the authored duration; ranged
+                    // FREEZE is capped hard at 0.15 s (applyCCToPlayer then reduces it further by
+                    // the player's Toughness/CC-Resist) so ranged casters can't chain-lock the
+                    // player. onHitEffect 0 leaves the projectile's existing default mild slow.
+                    if (pIdx != 0xFFFF && e.onHitEffect != 0) {
+                        Projectile& pr   = projectiles.projectiles[pIdx];
+                        pr.onHitEffect   = e.onHitEffect;
+                        pr.onHitDuration = (e.onHitEffect == 4) ? 0.15f : e.onHitDuration;
+                    }
                 } else if (targetIsNPC && e.targetEntityIdx < MAX_ENTITIES) {
                     Entity& npcTarget = pool.entities[e.targetEntityIdx];
                     if (!(npcTarget.flags & ENT_DEAD)) {
