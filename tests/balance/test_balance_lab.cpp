@@ -8,7 +8,9 @@
 #include "game/boss_loader.h"
 #include "game/game_constants.h"
 #include "game/free_play.h"     // DIFFICULTY_COUNT — the real difficulty-tier bound
+#include "game/build_score.h"   // the REAL Auto-Loot scorer the gear Monte Carlo selects with
 #include <algorithm>
+#include <cstring>
 
 // Shared fixture: the real shipped tables, loaded once (doctest runs cases in one process).
 static const EnemyDefTable& enemyTable() {
@@ -103,4 +105,50 @@ TEST_CASE("boss curve exists on every authored boss floor and scales like the sp
     // entry would otherwise pass the suite while shipping the wrong fight.
     for (u8 f = 5; f <= 50; f = static_cast<u8>(f + 5))
         CHECK(BalanceLab::bossAt(bt, f, 0).present);
+}
+
+static void loadGearTables(ItemDef* items, u32& itemCount, AffixDef* affixes, u32& affixCount) {
+    REQUIRE(ItemLoader::loadItemDefs (DUNGEON_REPO_ROOT "/assets/config/items.json",   items,   itemCount));
+    REQUIRE(ItemLoader::loadAffixDefs(DUNGEON_REPO_ROOT "/assets/config/affixes.json", affixes, affixCount));
+}
+
+TEST_CASE("typical gear: same (floor,difficulty,trial) is bit-identical every run") {
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 ic = 0, ac = 0; loadGearTables(items, ic, affixes, ac);
+
+    BalanceLab::DropSet a, b;
+    BalanceLab::rollWindowDrops(25, 1, 7, items, ic, affixes, ac, a);
+    BalanceLab::rollWindowDrops(25, 1, 7, items, ic, affixes, ac, b);
+    REQUIRE(a.count == b.count);
+    REQUIRE(a.count == BalanceLab::MAX_WINDOW_DROPS);
+    CHECK(std::memcmp(a.items, b.items, sizeof(ItemInstance) * a.count) == 0);
+
+    // A different trial must produce a different stream (or the Monte Carlo is a no-op).
+    BalanceLab::DropSet c;
+    BalanceLab::rollWindowDrops(25, 1, 8, items, ic, affixes, ac, c);
+    CHECK(std::memcmp(a.items, c.items, sizeof(ItemInstance) * a.count) != 0);
+}
+
+TEST_CASE("typical gear: every build cell fields a weapon from mid-game windows") {
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 ic = 0, ac = 0; loadGearTables(items, ic, affixes, ac);
+
+    const u8 floors[] = {10, 25, 50};
+    for (u8 f : floors)
+        for (u8 d = 0; d < 3; d += 2)                    // Normal + Hell
+            for (u32 trial = 0; trial < 5; trial++) {
+                BalanceLab::DropSet drops;
+                BalanceLab::rollWindowDrops(f, d, trial, items, ic, affixes, ac, drops);
+                for (u8 cell = 0; cell < 9; cell++) {
+                    PlayerInventory inv;
+                    BalanceLab::selectLoadout(drops, cell, items, ic, inv);
+                    const ItemInstance& w = inv.equipped[static_cast<u32>(ItemSlot::WEAPON)];
+                    // CAPTUREs so a starved column names its exact (floor,diff,trial,cell).
+                    CAPTURE(static_cast<u32>(f)); CAPTURE(static_cast<u32>(d));
+                    CAPTURE(trial); CAPTURE(static_cast<u32>(cell));
+                    REQUIRE(w.defId != 0xFFFF);          // family gate starved a column = balance bug
+                    CHECK(BuildScore::weaponInFamily(items[w.defId].weaponSubtype,
+                                                     BuildScore::buildCol(cell)));
+                }
+            }
 }

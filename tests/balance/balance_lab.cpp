@@ -1,7 +1,9 @@
-// tests/balance/balance_lab.cpp — see balance_lab.h. Enemy/boss curves in this task;
-// typical-gear Monte Carlo and player power land in later tasks.
+// tests/balance/balance_lab.cpp — see balance_lab.h. Enemy/boss curves plus the typical-gear
+// Monte Carlo (real ItemGen drops selected with the real Auto-Loot scorer); player power
+// lands in a later task.
 #include "balance/balance_lab.h"
 #include "game/game_constants.h"
+#include "game/build_score.h"
 #include <algorithm>
 
 namespace BalanceLab {
@@ -55,6 +57,48 @@ BossCurve bossAt(const BossDefTable& table, u8 rawFloor, u8 difficulty) {
               * GameConst::difficultyDamageBump(difficulty);
     c.dps     = (bd->atkCooldown > 0.0f) ? c.hit / bd->atkCooldown : c.hit;
     return c;
+}
+
+// FNV-1a over the trial coordinates: stable, order-independent seeding. ItemGen's LCG maps
+// seed->stream 1:1, so distinct trial coords give distinct (if correlated-looking) streams.
+static u32 trialSeed(u8 rawFloor, u8 difficulty, u32 trial) {
+    u32 h = 2166136261u;
+    const u32 parts[3] = {rawFloor, difficulty, trial};
+    for (u32 p : parts) { h ^= p; h *= 16777619u; }
+    return h ? h : 1u;   // LCG seed 0 is legal but keep it nonzero for hygiene
+}
+
+void rollWindowDrops(u8 rawFloor, u8 difficulty, u32 trial,
+                     const ItemDef* defs, u32 defCount,
+                     const AffixDef* affixDefs, u32 affixDefCount, DropSet& out) {
+    out.count = 0;
+    ItemGen::init(trialSeed(rawFloor, difficulty, trial));
+    const u8 first = (rawFloor > WINDOW_FLOORS - 1)
+                   ? static_cast<u8>(rawFloor - (WINDOW_FLOORS - 1)) : 1;
+    for (u8 f = first; f <= rawFloor; f++) {
+        const u8 lvl = static_cast<u8>(effectiveFloor(f, difficulty));   // max 150, fits u8
+        for (u32 k = 0; k < DROPS_PER_FLOOR && out.count < MAX_WINDOW_DROPS; k++)
+            out.items[out.count++] = ItemGen::rollItem(lvl, defs, defCount,
+                                                       affixDefs, affixDefCount);
+    }
+}
+
+void selectLoadout(const DropSet& drops, u8 cell,
+                   const ItemDef* defs, u32 defCount, PlayerInventory& outInv) {
+    outInv = PlayerInventory{};
+    for (u32 sl = 0; sl < static_cast<u32>(ItemSlot::COUNT); sl++) {
+        s32 bestIdx = -1; f32 bestScore = 0.0f;
+        for (u32 i = 0; i < drops.count; i++) {
+            const ItemInstance& it = drops.items[i];
+            if (it.defId == 0xFFFF || it.defId >= defCount) continue;
+            if (static_cast<u32>(defs[it.defId].slot) != sl) continue;
+            const f32 s = BuildScore::score(it, defs[it.defId], cell);
+            if (s > bestScore) { bestScore = s; bestIdx = static_cast<s32>(i); }
+        }
+        if (bestIdx < 0) continue;                      // window dropped nothing for this slot
+        const s8 bp = Inventory::addToBackpack(outInv, drops.items[bestIdx]);
+        if (bp >= 0) Inventory::equip(outInv, static_cast<u8>(bp), defs);
+    }
 }
 
 } // namespace BalanceLab

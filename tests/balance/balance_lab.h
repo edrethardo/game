@@ -39,4 +39,21 @@ struct BossCurve {
 };
 BossCurve bossAt(const BossDefTable& table, u8 rawFloor, u8 difficulty);
 
+// --- typical-equipment Monte Carlo -----------------------------------------------------------
+struct DropSet { ItemInstance items[MAX_WINDOW_DROPS]; u32 count = 0; };
+
+// The drops a floor-F player saw: DROPS_PER_FLOOR real ItemGen rolls per window floor, each
+// at that floor's own effective level. Reseeds ItemGen from (floor,difficulty,trial) so a
+// trial is deterministic and independent of sweep order — and the SAME drops are then shown
+// to all nine build cells (the same loot fell; each build just wears it differently).
+void rollWindowDrops(u8 rawFloor, u8 difficulty, u32 trial,
+                     const ItemDef* defs, u32 defCount,
+                     const AffixDef* affixDefs, u32 affixDefCount,
+                     DropSet& out);
+
+// Best-of-window per slot under BuildScore for `cell`, equipped into a real PlayerInventory
+// via Inventory::equip (so recalculateStats runs and the stat caches are engine-true).
+void selectLoadout(const DropSet& drops, u8 cell,
+                   const ItemDef* defs, u32 defCount, PlayerInventory& outInv);
+
 } // namespace BalanceLab
