@@ -416,6 +416,68 @@ void HUD::drawLootNotification(u32 sw, u32 sh, Vec3 color, f32 alpha) {
     flushHUD();
 }
 
+void HUD::drawBuildGrid(u32 sw, u32 sh, u8 autoMode, u8 buildCell, s32 mouseX, s32 mouseY) {
+    const InventoryUI::BuildGridRects r = InventoryUI::buildGridLayout(sw, sh);
+    const f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    const InventoryUI::SlotHit hover = InventoryUI::hitTestBuildGrid(sw, sh, mouseX, mouseY);
+
+    // Toggle row: reads as a switch, not a button — label + state, hover-brightened.
+    {
+        const bool hov = (hover.panel == InventoryUI::SlotHit::BUILD_TOGGLE);
+        const Vec3 bg = autoMode ? Vec3{0.15f, 0.30f, 0.15f} : Vec3{0.18f, 0.16f, 0.12f};
+        const Vec3 line = hov ? Vec3{bg.x + 0.12f, bg.y + 0.12f, bg.z + 0.12f} : bg;
+        for (f32 fy = r.toggleY; fy < r.toggleY + r.toggleH; fy += 1.0f)
+            pushLine(r.toggleX, fy, r.toggleX + r.toggleW, fy, line);
+        flushHUD();
+        const char* label = autoMode ? "Auto Loot & Equip: ON" : "Auto Loot & Equip: OFF";
+        const f32 tw = FontSystem::textWidth(label, 1);
+        FontSystem::drawText(sw, sh, r.toggleX + (r.toggleW - tw) * 0.5f,
+                             r.toggleY + 8.0f * uiScale, label,
+                             autoMode ? Vec3{0.7f, 1.0f, 0.7f} : Vec3{0.7f, 0.65f, 0.55f}, 1);
+    }
+
+    // Column headers above, row labels beside — labels OUTSIDE the cells, so 54px cells stay clean.
+    static const char* colNames[3] = {"Magic", "Melee", "Ranged"};
+    static const char* rowNames[3] = {"Tanky", "Modrt", "Glass"};
+    for (u8 col = 0; col < 3; col++) {
+        const f32 x = r.gridX + col * (r.cell + r.gap);
+        const f32 tw = FontSystem::textWidth(colNames[col], 1);
+        FontSystem::drawText(sw, sh, x + (r.cell - tw) * 0.5f,
+                             r.gridY + 3.0f * (r.cell + r.gap) - r.gap + 2.0f * uiScale,
+                             colNames[col], {0.6f, 0.6f, 0.65f}, 1);
+    }
+    for (u8 row = 0; row < 3; row++) {
+        const f32 y = r.gridY + (2 - row) * (r.cell + r.gap);
+        const f32 tw = FontSystem::textWidth(rowNames[row], 1);
+        FontSystem::drawText(sw, sh, r.gridX - tw - 8.0f * uiScale,
+                             y + r.cell * 0.5f - 4.0f * uiScale, rowNames[row], {0.6f, 0.6f, 0.65f}, 1);
+    }
+
+    // The nine cells. In classic mode everything is dimmed and the selection ring is hidden — the
+    // grid is a preview, not a control (clicks are refused with the back sound).
+    for (u8 row = 0; row < 3; row++)
+        for (u8 col = 0; col < 3; col++) {
+            const u8 cell = static_cast<u8>(row * 3 + col);
+            const f32 x = r.gridX + col * (r.cell + r.gap);
+            const f32 y = r.gridY + (2 - row) * (r.cell + r.gap);
+            const bool sel = autoMode && (cell == buildCell);
+            const bool hov = autoMode && hover.panel == InventoryUI::SlotHit::BUILD_CELL &&
+                             hover.index == cell;
+            Vec3 bg = sel ? Vec3{0.35f, 0.28f, 0.10f}
+                          : hov ? Vec3{0.22f, 0.20f, 0.16f} : Vec3{0.13f, 0.12f, 0.11f};
+            if (!autoMode) bg = {0.09f, 0.09f, 0.09f};
+            for (f32 fy = y; fy < y + r.cell; fy += 1.0f)
+                pushLine(x, fy, x + r.cell, fy, bg);
+        }
+    flushHUD();
+    if (!autoMode) {
+        const char* hint = "OFF - toggle above";
+        const f32 tw = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, r.gridX + (3.0f * (r.cell + r.gap) - r.gap - tw) * 0.5f,
+                             r.gridY - 16.0f * uiScale, hint, {0.45f, 0.42f, 0.4f}, 1);
+    }
+}
+
 void HUD::drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
                          const ItemDef* itemDefs, s32 mouseX, s32 mouseY)
 {

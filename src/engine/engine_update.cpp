@@ -2207,6 +2207,10 @@ void Engine::updatePlayerPickup(f32 dt) {
     m_creditsRequested = false;   // ...and updateExitPortal after that
     m_townPortalRequested = false; // ...and updateTownPortal last
 
+    // Auto Loot & Equip: the vacuum runs BEFORE manual resolution so an auto lane's loot never
+    // waits on a keypress. Classic lanes return immediately inside (one branch).
+    updateAutoLoot(dt);
+
     InteractState& st = m_interact[m_localPlayerIndex];
     resolveInteractTargets(st);
 

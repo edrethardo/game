@@ -94,6 +94,20 @@ void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
     // Stash grid (controller/keyboard nav while the stash is open). Handled FIRST because its panel
     // value is > CLASS_SKILL and would otherwise fall into the skill-bar branch below. Maps to the
     // selected stash slot's centre so drawStashPanel's hover highlight + hint line follow the cursor.
+    if (m_invCursorPanel == INV_PANEL_BUILD) {
+        // Park on the selected grid cell (or the toggle row), so hover highlight follows the pad.
+        const InventoryUI::BuildGridRects r = InventoryUI::buildGridLayout(sw, sh);
+        if (m_invCursorBuild >= 9) {
+            mx = static_cast<s32>(r.toggleX + r.toggleW * 0.5f);
+            my = static_cast<s32>(r.toggleY + r.toggleH * 0.5f);
+        } else {
+            const u8 row = m_invCursorBuild / 3, col = m_invCursorBuild % 3;
+            mx = static_cast<s32>(r.gridX + col * (r.cell + r.gap) + r.cell * 0.5f);
+            my = static_cast<s32>(r.gridY + (2 - row) * (r.cell + r.gap) + r.cell * 0.5f);
+        }
+        return;
+    }
+
     if (m_invCursorPanel == INV_PANEL_STASH) {
         const InventoryUI::StashRects r = InventoryUI::stashLayout(sw, sh);
         const u32 col = m_invCursorIndex % InventoryUI::STASH_COLS;
@@ -395,6 +409,39 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
             m_invCursorIndex = 0;
         }
+        // Build panel: D-pad walks the 3x3 (up from the top row reaches the mode toggle); A/E on
+        // the toggle flips Auto Loot & Equip, on a cell selects the build. Selecting either way
+        // re-gears the whole bag on the spot (autoEquipBackpack), so the change is visible NOW.
+        if (m_invCursorPanel == INV_PANEL_BUILD) {
+            if (navU) {
+                if (m_invCursorBuild < 3)      m_invCursorBuild = 9;                 // top row -> toggle
+                else if (m_invCursorBuild < 9) m_invCursorBuild -= 3;
+            }
+            if (navD) {
+                if (m_invCursorBuild >= 9)     m_invCursorBuild = 1;                 // toggle -> top mid
+                else if (m_invCursorBuild < 6) m_invCursorBuild += 3;
+            }
+            if (navL  && m_invCursorBuild < 9 && (m_invCursorBuild % 3) > 0) m_invCursorBuild--;
+            if (navR && m_invCursorBuild < 9 && (m_invCursorBuild % 3) < 2) m_invCursorBuild++;
+            if (equipPressed) {
+                PlayerInventory& binv = m_inventories[m_localPlayerIndex];
+                if (m_invCursorBuild >= 9) {
+                    binv.autoMode = binv.autoMode ? 0 : 1;
+                    AudioSystem::play(SfxId::UI_CONFIRM);
+                    if (binv.autoMode) autoEquipBackpack(m_localPlayerIndex);
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot());
+                } else if (binv.autoMode) {
+                    binv.buildCell = m_invCursorBuild;
+                    AudioSystem::play(SfxId::UI_CONFIRM);
+                    autoEquipBackpack(m_localPlayerIndex);
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot());
+                } else {
+                    AudioSystem::play(SfxId::UI_BACK);   // grid is inert in classic — audible refusal
+                }
+            }
+            return;   // the generic slot handling below is for item panels
+        }
+
         // A / E = equip (backpack → equipment) or unequip (equipment → backpack)
         if (equipPressed) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
@@ -509,6 +556,31 @@ void Engine::updateInventoryInteraction(f32 dt) {
 
         // Left mouse pressed: detect double-click or begin potential drag
         if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+            // Build grid first (it overlaps no item panel, so order is cosmetic — but checking it
+            // here keeps a grid click from also starting a phantom drag below).
+            {
+                const InventoryUI::SlotHit bg = InventoryUI::hitTestBuildGrid(sw, sh, mx, my);
+                if (bg.panel == InventoryUI::SlotHit::BUILD_TOGGLE) {
+                    PlayerInventory& binv = m_inventories[m_localPlayerIndex];
+                    binv.autoMode = binv.autoMode ? 0 : 1;
+                    AudioSystem::play(SfxId::UI_CONFIRM);
+                    if (binv.autoMode) autoEquipBackpack(m_localPlayerIndex);
+                    sendInventorySync(m_localPlayerIndex, activeNetSlot());
+                    return;
+                }
+                if (bg.panel == InventoryUI::SlotHit::BUILD_CELL) {
+                    PlayerInventory& binv = m_inventories[m_localPlayerIndex];
+                    if (binv.autoMode) {
+                        binv.buildCell = bg.index;
+                        AudioSystem::play(SfxId::UI_CONFIRM);
+                        autoEquipBackpack(m_localPlayerIndex);   // a build switch re-gears NOW
+                        sendInventorySync(m_localPlayerIndex, activeNetSlot());
+                    } else {
+                        AudioSystem::play(SfxId::UI_BACK);       // inert in classic — audible refusal
+                    }
+                    return;
+                }
+            }
             InventoryUI::SlotHit hit = InventoryUI::hitTest(sw, sh, mx, my);
 
             if (hit.panel == InventoryUI::SlotHit::BACKPACK &&

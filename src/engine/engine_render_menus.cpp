@@ -818,6 +818,41 @@ void Engine::renderMenu() {
         f32 hintW2 = FontSystem::textWidth(slotHint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW2) * 0.5f, sh * 0.04f,
                              slotHint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 23 || m_menu.subState == 24) {
+        // Play-style choosers: 23 = Player 1 (gold theme), 24 = Player 2 (blue theme, both pads).
+        // Two rows in the standard chooser layout (mouse hit-testing shares it via case 23/24 in
+        // menuMouseForState). The description under the boxes says what each mode MEANS — a player
+        // seeing this screen for the first time must not need the manual.
+        const bool p2 = (m_menu.subState == 24);
+        const char* subTitle = p2 ? "Player 2: How do you want to play?"
+                                  : "How do you want to play?";
+        const Vec3 theme = p2 ? Vec3{0.3f, 0.7f, 1.0f} : Vec3{0.9f, 0.75f, 0.3f};
+        f32 stW = FontSystem::textWidth(subTitle, 2);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, theme, 2);
+
+        static const char* modeLabels[] = {"Classic", "Auto Loot & Equip"};
+        for (u32 i = 0; i < 2; i++) {
+            f32 y = sh * 0.38f + (1 - i) * 50.0f * uiScale;
+            bool sel = (i == m_menu.subSelection);
+            Vec3 col = sel ? (p2 ? Vec3{0.3f, 0.6f, 1.0f} : Vec3{0.8f, 0.6f, 0.2f})
+                           : (p2 ? Vec3{0.15f, 0.25f, 0.45f} : Vec3{0.3f, 0.25f, 0.15f});
+            HUD::drawMenuOption(sw, sh, y, 250.0f * uiScale, 35.0f * uiScale, col, sel);
+            Vec3 tc = sel ? Vec3{1,1,1} : Vec3{0.6f,0.6f,0.6f};
+            f32 tw = FontSystem::textWidth(modeLabels[i], 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, y + 10.0f * uiScale, modeLabels[i], tc, 2);
+        }
+
+        // One line on what the highlighted mode does.
+        const char* desc = (m_menu.subSelection == 1)
+            ? "Loot is picked up and worn automatically for a build you choose in the Inventory"
+            : "You pick up and equip everything yourself";
+        f32 dW = FontSystem::textWidth(desc, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - dW) * 0.5f, sh * 0.28f, desc, {0.6f, 0.6f, 0.65f}, 1);
+
+        const char* hint = p2 ? "Player 2 pad: D-pad, A to confirm, B to go back"
+                              : "Up/Down, Enter to confirm, ESC to go back";
+        f32 hintW = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 11) {
         // Player 2 New/Continue chooser — blue P2 theme, mirrors the subState-1 chooser.
         const char* subTitle = "Player 2: New or Continue";

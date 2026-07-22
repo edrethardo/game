@@ -74,6 +74,10 @@ namespace HUD {
     // Account stash panel — drawn OVER the equipment area while the stash is open. Geometry
     // comes from InventoryUI::stashLayout (shared with hitTestStash). `items` is the full
     // 240-slot array; `page` selects the visible 48. Hover shows name + a withdraw hint.
+    // Auto Loot & Equip build grid (right column of the inventory screen): the mode-toggle row +
+    // the 3x3 Tanky/Moderate/Glass x Magic/Melee/Ranged cells. Geometry from
+    // InventoryUI::buildGridLayout (single-sourced with the hit-test). mouseX/Y drive hover.
+    void drawBuildGrid(u32 sw, u32 sh, u8 autoMode, u8 buildCell, s32 mouseX, s32 mouseY);
     void drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
                         const ItemDef* itemDefs, s32 mouseX, s32 mouseY);
 

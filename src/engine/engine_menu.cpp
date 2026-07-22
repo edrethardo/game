@@ -35,7 +35,8 @@
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
 #include "game/free_play.h"
-#include "engine/menu_osk.h"   // controller on-screen keyboard for the Host-IP screen (subState 9)
+#include "engine/menu_osk.h"
+#include "game/build_score.h"   // DEFAULT_BUILD_CELL for the play-style choosers   // controller on-screen keyboard for the Host-IP screen (subState 9)
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -167,6 +168,8 @@ static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCo
     // through their confirm branches, but had no case here, so the hit-test always returned -1 and
     // the mouse silently did nothing. Layouts below MUST mirror renderMenu() in
     // engine_render_menus.cpp exactly (same baseY / spacing / box size / ordering).
+    case 23: // Play-style choosers (P1 and P2): 2 rows, identical layout to subState 1
+    case 24:
     case 11: // P2 New/Continue chooser: 2 items, Y = sh*0.38 + (1-i)*50*uiScale (mirrors subState 1)
         return menuMouseHit(sw, sh, sh * 0.38f, 50.0f * uiScale, 2,
                             250.0f * uiScale, 35.0f * uiScale, false);
@@ -775,7 +778,37 @@ void Engine::updateMenu(f32 dt) {
             // Shared with the CLI launch path (engine_launch.cpp) — one source of truth.
             applyClassToLane0(static_cast<PlayerClass>(m_menu.subSelection));
 
-            // Go to difficulty selection (subState 7) before co-op/network start
+            // Ask HOW they want to play before anything starts: Classic, or Auto Loot & Equip.
+            // The routing that used to live here (couch lobby / host start) moved to subState 23's
+            // confirm — the chooser sits between class select and the start paths.
+            m_menu.subState = 23;
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
+    // Play-style chooser (subState 23): Classic / Auto Loot & Equip. The answer lands on lane 0's
+    // inventory (autoMode), which every NEW_GAME wipe deliberately preserves. Back returns to class
+    // select. Confirm continues into the exact routing class-select used to do. (21/22 were taken:
+    // lobby-code entry and the Arena chooser — the first cut collided with both.)
+    if (m_menu.subState == 23) {
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
+            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 2;
+            m_menu.subSelection = 0;
+            return;
+        }
+        if (menuConfirmPressed() || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            m_inventories[0].autoMode  = (m_menu.subSelection == 1) ? 1 : 0;
+            m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
+
             if (m_netRole == NetRole::CLIENT) {
                 // Joining a remote game: P1's class is chosen and stored in lane 0. Route through the
                 // couch lobby (subState 4) so a 2nd local player can also join online (the gap the
@@ -1032,9 +1065,49 @@ void Engine::updateMenu(f32 dt) {
                 m_classSkillStatesPerPlayer[1][s].energy = cls2.baseEnergy;
             }
 
-            // Fresh P2 lane: init inventory + grant the class loadout (class base stats were set
-            // just above; equipFreshLane re-applies them harmlessly). Both players are ready.
+            // P2 gets the same play-style question P1 got, on their own pad (subState 24).
+            // equipFreshLane + the start routing moved into 24's confirm.
+            m_menu.subState = 24;
+            m_menu.subSelection = 0;
+        }
+        return;
+    }
+
+    // P2 play-style chooser (subState 24): Classic / Auto Loot & Equip, both pads navigable like
+    // every other P2 screen. The answer lands on lane 1 AFTER equipFreshLane (which wipes) — the
+    // preserve in equipFreshLane also covers it, but setting after is belt and braces.
+    if (m_menu.subState == 24) {
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+            Input::isMenuStickPressed(Input::StickNav::Up, 0) ||
+            Input::isMenuStickPressed(Input::StickNav::Up, 1) ||
+            Input::isKeyPressed(SDL_SCANCODE_W) || Input::isKeyPressed(SDL_SCANCODE_UP)) {
+            if (m_menu.subSelection > 0) { m_menu.subSelection--; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+            Input::isMenuStickPressed(Input::StickNav::Down, 0) ||
+            Input::isMenuStickPressed(Input::StickNav::Down, 1) ||
+            Input::isKeyPressed(SDL_SCANCODE_S) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) {
+            if (m_menu.subSelection < 1) { m_menu.subSelection++; AudioSystem::play(SfxId::MENU_HOVER); }
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_B)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 5;
+            m_menu.subSelection = 0;
+            return;
+        }
+        if (Input::isButtonPressed(0, SDL_CONTROLLER_BUTTON_A) ||
+            Input::isButtonPressed(1, SDL_CONTROLLER_BUTTON_A) ||
+            Input::isKeyPressed(SDL_SCANCODE_RETURN) || Input::isKeyPressed(SDL_SCANCODE_SPACE)
+            || mouseConfirm) {
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            const u8 wantAuto = (m_menu.subSelection == 1) ? 1 : 0;
+            // Fresh P2 lane: init inventory + grant the class loadout. Both players are ready.
             equipFreshLane(1);
+            m_inventories[1].autoMode  = wantAuto;
+            m_inventories[1].buildCell = BuildScore::DEFAULT_BUILD_CELL;
             if (m_netRole == NetRole::CLIENT) {
                 beginCouchJoin();          // Join-Game flow: connect both locals to the host now
             } else {

@@ -260,6 +260,27 @@ rewarded); a held block stops damage but the CC lands. Class CC (baseline-up fai
 Tinkerer Detonate EMP stun, Wanderer Deflect stagger — each with a `Combat::pvp*` twin. `PROTOCOL_VERSION`
 21. (Internals: `engine-reference`; the pitfalls: `engine-how-to`.)
 
+**Auto Loot & Equip (the second play style).** Chosen at character creation — after class select
+BOTH players get a "How do you want to play?" chooser (P1 subState 23, couch P2 24 on their own pad;
+21/22 were taken by lobby-code entry and the Arena chooser) — and toggleable any time from the
+inventory screen. **Classic** is the game as it was. **Auto** vacuums nearby loot (2.5 m, the
+interact vertical bound so it never pulls through a floor; sentinels keep their own flows; CLIENT
+lanes ride the server-validated `CL_PICKUP_ITEM`, so no wire change) and wears anything the selected
+build scores as an upgrade. The build is one cell of a **3x3 grid** in the inventory (rows
+Tanky/Moderate/Glass Cannon, cols Magic/Melee/Ranged; `InventoryUI::buildGridLayout` single-sources
+draw + hit-test; controller reaches it as `INV_PANEL_BUILD` in the shoulder cycle — STASH moved to
+panel id 5). Scoring is the pure, tested `game/build_score.h`: stat-derived (base stats + rolled
+affixes — no authored tags), hard weapon-family gate per column, 1:3 / 1.5:1.5 / 3:1
+offense:defense row weights, 5% upgrade hysteresis, rarity tiebreak. Selecting a cell re-gears the
+whole bag on the spot (`autoEquipBackpack`); every auto-equip goes through `sendInventorySync` (the
+v16 couch lesson) and announces itself in chat (silent gear changes read as items vanishing). A full
+bag **evicts its lowest-scoring item** (Aaron's call — never pauses; pets + quickbar-assigned gear
+exempt, like "drop all"). Persisted as `PlayerInventory.autoMode`/`buildCell` — **SAVE_VERSION 4**
+(v3 readable via mirror; pre-v4 characters load as classic). EVERY `Inventory::init` on a lane that
+already chose (NEW_GAME wipe, `equipFreshLane`, the client-join wipe) explicitly preserves the two
+fields — the chooser runs BEFORE the wipes, which would otherwise silently undo it. `--autoloot` is
+the dev door. Inert in the arena. Spec: `docs/superpowers/specs/2026-07-22-auto-loot-equip-design.md`.
+
 **Persistence is per-character.** Each save file (`save_NN.dat`) holds exactly ONE character (`playerCount=1`); the per-lane destination is `m_playerSaveSlot[lane]` and `saveAllCharacters()` writes each active lane to its own slot. In couch co-op both players pick their own slot (New or Continue) in the menu lobby and the shared dungeon runs on **Player 1's floor**; mixed New/Continue lanes work because the menu prepares each lane and calls `startGame(mode, lanesPrepared=true)` (skipping the NEW_GAME wipe). Legacy `playerCount=2` bundle saves still load (and migrate to per-character on the next save). The on-disk layout is **versioned** (`SAVE_VERSION`, currently 3 = GLOVES slot + attack-speed cache in `PlayerInventory`): readers accept the previous version via a `Legacy*V<n>` mirror struct in `engine_persist.cpp`, and `static_assert`s pin the serialized struct sizes — any layout change MUST bump the version and extend the legacy readers. (Save format, menu flow, no-downgrade guard: `engine-reference`.)
 
 **User-data location (desktop) + Steam Cloud.** Saves, `difficulty_unlock.dat`, `menagerie.dat` (pet-collection progress), and the `controls.json`/`audio.json`/`video.cfg` prefs are written into the per-user dir `SDL_GetPrefPath("EdRethardo","DungeonEngine")` via `Platform::userDataPath()` (`src/platform/user_paths.{h,cpp}`), NOT the install/working dir — so Steam **Auto-Cloud** can sync them (config: `docs/steam_cloud.md`). On `__SWITCH__` `userDataDir()` is `""` (CWD = app storage), so Switch is unchanged. A one-time `migrateLegacyUserData()` (in `Engine::init`) copies pre-relocation files from the CWD/exe dir into the pref dir **only when the destination is absent** (never destructive). `saveCharacter` writes **atomically** (temp + `Platform::atomicReplace`) so an interrupted save can't corrupt an existing slot. `ORG`/`APP` are frozen — changing them orphans saves.

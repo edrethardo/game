@@ -354,7 +354,14 @@ void Engine::equipFreshLane(u8 lane) {
     // overwritten character's old progress). See m_laneLoadedFromSave.
     m_laneLoadedFromSave[lane] = false;
     m_totalKills[lane] = 0;   // fresh character starts its lifetime "Enemies deleted" at zero
+    // Auto Loot & Equip is a META choice like class, not loot: the New Game chooser sets it BEFORE
+    // this wipe runs, so the wipe must carry it across or the chooser is silently undone. (Same
+    // pattern at every Inventory::init on a lane that already made the choice.)
+    const u8 keepAutoMode = m_inventories[lane].autoMode;
+    const u8 keepBuild    = m_inventories[lane].buildCell;
     Inventory::init(m_inventories[lane]);
+    m_inventories[lane].autoMode  = keepAutoMode;
+    m_inventories[lane].buildCell = keepBuild;
     m_skillStates[lane] = SkillState{};
     Quickbar::init(m_quickbars[lane], m_inventories[lane]);
     equipStartingLoadout(lane);
@@ -933,8 +940,14 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     if (mode == GameStart::NEW_GAME && !lanesPrepared) {
         // Clear every slot (including inactive ones) so no stale gear leaks in, then fully equip
         // each active local lane (loadout + class base stats + per-lane energy via equipFreshLane).
+        // The Auto Loot & Equip choice survives the wipe: the New Game chooser set it BEFORE this
+        // runs (and equipFreshLane's own preserve can't help — this loop is what it would find).
         for (u32 i = 0; i < MAX_PLAYERS; i++) {
+            const u8 keepAutoMode = m_inventories[i].autoMode;
+            const u8 keepBuild    = m_inventories[i].buildCell;
             Inventory::init(m_inventories[i]);
+            m_inventories[i].autoMode  = keepAutoMode;
+            m_inventories[i].buildCell = keepBuild;
             m_skillStates[i] = SkillState{};
             Quickbar::init(m_quickbars[i], m_inventories[i]);
         }
@@ -1134,7 +1147,11 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         //     updateLobby will push them to the host via CL_INVENTORY_SYNC. Wiping here
         //     would discard the saved gear before we even finish joining.
         if (mode != GameStart::DESCEND && !m_clientLoadedFromSave) {
+            const u8 keepAutoMode = m_inventories[m_localPlayerIndex].autoMode;
+            const u8 keepBuild    = m_inventories[m_localPlayerIndex].buildCell;
             Inventory::init(m_inventories[m_localPlayerIndex]);
+            m_inventories[m_localPlayerIndex].autoMode  = keepAutoMode;
+            m_inventories[m_localPlayerIndex].buildCell = keepBuild;
             m_skillStates[m_localPlayerIndex] = SkillState{};
             Quickbar::init(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
             m_playerClasses[m_localPlayerIndex] = m_playerClass; // ensure loadout uses chosen class

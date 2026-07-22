@@ -1211,15 +1211,22 @@ private:
     static constexpr u8 INV_PANEL_EQUIPMENT   = 1;
     static constexpr u8 INV_PANEL_CLASS_SKILL = 2;
     static constexpr u8 INV_PANEL_EQUIP_SKILL = 3;
-    static constexpr u8 INV_PANEL_COUNT       = 4;   // main-inventory cycle length
+    // Auto Loot & Equip build grid — IN the main cycle (shoulder-cycled like the rest), so a
+    // controller reaches it with no dedicated chord. Skipped by the cycle while the mode is off?
+    // No: reachable always, so the mode TOGGLE itself is controller-reachable.
+    static constexpr u8 INV_PANEL_BUILD       = 4;
+    static constexpr u8 INV_PANEL_COUNT       = 5;   // main-inventory cycle length
     // Stash-mode cursor panel — NOT part of the cycle above. While the stash is open the cursor lives
     // on either the stash grid (this) or the backpack (INV_PANEL_BACKPACK), so a controller/Switch can
     // navigate + transfer without a mouse. Value > CLASS_SKILL, so inventoryCursorToMouse handles it
     // BEFORE its skill-bar branch.
-    static constexpr u8 INV_PANEL_STASH       = 4;
+    static constexpr u8 INV_PANEL_STASH       = 5;
 
     // Park the synthetic cursor on the D-pad-selected slot, so the gamepad drives the SAME hover
     // path the mouse does (items and skills alike) instead of needing its own.
+    // Build-grid cursor position while m_invCursorPanel == INV_PANEL_BUILD: 0-8 = grid cells
+    // (row*3+col), 9 = the mode-toggle row above the grid.
+    u8 m_invCursorBuild = 0;
     void inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const;
     // True when the inventory highlight + tooltip should follow the cursor (WASD/E or D-pad) rather
     // than the physical mouse. Split-screen P2 (gamepad-only) is always cursor; player 0 follows the
@@ -1606,6 +1613,14 @@ private:
     // Client: pick the aimed world item and request its pickup from the server
     // (CL_PICKUP_ITEM, server-authoritative pickups — N5).
     void sendPickupRequest(s32 worldIdx);
+
+    // Auto Loot & Equip (engine_autoloot.cpp; spec 2026-07-22-auto-loot-equip-design.md). All run
+    // inside the per-player swap window. updateAutoLoot is the per-tick vacuum for the CURRENT
+    // lane; autoEquipBackpack re-gears a lane after a build-cell change or the mode toggling on.
+    void updateAutoLoot(f32 dt);
+    void autoEquipBackpack(u8 lane);
+    bool autoEquipIfUpgrade(u8 lane, u8 bpIdx);
+    bool autoEvictWorst(u8 lane);
     void sendPickupPacket(u32 uid);
     // Server: validate and apply a client's CL_PICKUP_ITEM request (proximity + ownership),
     // moving the item into that player's inventory and freeing the world slot.

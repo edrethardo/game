@@ -8,6 +8,7 @@
 // confirm handler, so the menu and the CLI configure a fresh hero identically.
 
 #include "engine/engine.h"
+#include "game/build_score.h"   // DEFAULT_BUILD_CELL for the --autoloot dev door
 #include "engine/launch_options.h"
 #include "game/game_constants.h"   // GameConst::kDemoBuild — gate --host/--join in the demo
 #include "game/player.h"           // PlayerController::setBotWalk — the --bot-walk probe
@@ -79,6 +80,14 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Dev door (--lava): force the molten Hellforge theme on any floor in the 31-40 range, so the
     // tier's few lava floors are reachable on demand instead of by seed roll.
     m_forceLava = opt.lava;
+
+    // Dev door (--autoloot): lane 0 plays Auto Loot & Equip from the first frame — the menu chooser
+    // is unreachable from a CLI launch. Set BEFORE the game-jump below; every NEW_GAME wipe
+    // preserves the two fields, so ordering is not load-bearing (belt and braces).
+    if (opt.autoLoot) {
+        m_inventories[0].autoMode  = 1;
+        m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
+    }
     if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
         LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
                  (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);

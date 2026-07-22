@@ -30,7 +30,7 @@ namespace InventoryUI {
     static constexpr f32 QB_GAP  = 4.0f;
 
     struct SlotHit {
-        enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB };
+        enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB, BUILD_CELL, BUILD_TOGGLE };
         Panel panel = NONE;
         u8    index = 0;
     };
@@ -49,6 +49,19 @@ namespace InventoryUI {
         f32 tabW = 0.0f, tabH = 0.0f, tabGap = 0.0f;
     };
     StashRects stashLayout(u32 sw, u32 sh);
+
+    // ---- Auto Loot & Equip build grid (drawn in the inventory's right column) ----
+    // The 3x3 build cells (rows Tanky/Moderate/Glass Cannon, cols Magic/Melee/Ranged) plus the
+    // mode-toggle row above them. Single-sourced like every panel here: draw AND hit-test derive
+    // from buildGridLayout, or the click rects drift off the drawn thing (the quickbar lesson).
+    struct BuildGridRects {
+        f32 toggleX = 0.0f, toggleY = 0.0f, toggleW = 0.0f, toggleH = 0.0f;   // mode on/off row
+        f32 gridX = 0.0f, gridY = 0.0f;    // cell (row 0, col 0)'s left/bottom — row 0 drawn TOP
+        f32 cell = 0.0f, gap = 0.0f;       // scaled cell size / spacing
+    };
+    BuildGridRects buildGridLayout(u32 sw, u32 sh);
+    // Hit-test the build grid: SlotHit::BUILD_CELL with index = row*3+col, or BUILD_TOGGLE.
+    SlotHit hitTestBuildGrid(u32 sw, u32 sh, s32 mx, s32 my);
     // Hit-test ONLY the stash panel (slots + tabs). The caller checks this before the regular
     // hitTest while the stash is open — the panel overlaps the (hidden) equipment area.
     SlotHit hitTestStash(u32 sw, u32 sh, s32 mx, s32 my);

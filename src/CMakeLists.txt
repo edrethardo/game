@@ -15,6 +15,7 @@ add_executable(DungeonEngine
     engine/engine_death.cpp
     engine/engine_town.cpp
     engine/engine_arena.cpp
+    engine/engine_autoloot.cpp
     engine/engine_persist.cpp
     engine/engine_startgame.cpp
     engine/engine_launch.cpp

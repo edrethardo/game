@@ -143,6 +143,11 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
                               selSlot, selEquip, invMX, invMY,
                               /*drawEquipment=*/!m_stashOpen);
 
+    // Auto Loot & Equip build grid rides the equipment column; the stash panel would overlap it.
+    if (!m_stashOpen)
+        HUD::drawBuildGrid(sw, sh, m_inventories[m_localPlayerIndex].autoMode,
+                           m_inventories[m_localPlayerIndex].buildCell, invMX, invMY);
+
     // Stash mode: the gold panel paints OVER the equipment side (its interactions are gated off
     // in updateInventoryInteraction while the stash is open) — backpack stays live for deposits.
     if (m_stashOpen) {

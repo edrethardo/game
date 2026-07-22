@@ -15,6 +15,45 @@ InventoryUI::StashRects InventoryUI::stashLayout(u32 sw, u32 sh) {
     return r;
 }
 
+InventoryUI::BuildGridRects InventoryUI::buildGridLayout(u32 sw, u32 sh) {
+    // Right column, below the equipment paper-doll area: 3 cells across fits comfortably where
+    // tooltips do not reach. Row 0 (Tanky) is drawn at the TOP, so cell (row,col) sits at
+    // y = gridY + (2 - row) * (cell + gap) — hit-test and draw both use this via the rects.
+    BuildGridRects r;
+    const f32 uiScale = static_cast<f32>(sh) / 720.0f;
+    r.cell    = 54.0f * uiScale;
+    r.gap     = 8.0f  * uiScale;
+    r.gridX   = static_cast<f32>(sw) * 0.72f;
+    r.gridY   = static_cast<f32>(sh) * 0.5f - 200.0f * uiScale;
+    r.toggleW = 3.0f * r.cell + 2.0f * r.gap;
+    r.toggleH = 26.0f * uiScale;
+    r.toggleX = r.gridX;
+    r.toggleY = r.gridY + 3.0f * (r.cell + r.gap) + 6.0f * uiScale;
+    return r;
+}
+
+InventoryUI::SlotHit InventoryUI::hitTestBuildGrid(u32 sw, u32 sh, s32 mx, s32 my) {
+    SlotHit result;
+    const BuildGridRects r = buildGridLayout(sw, sh);
+    const f32 fmx = static_cast<f32>(mx), fmy = static_cast<f32>(my);
+    if (fmx >= r.toggleX && fmx <= r.toggleX + r.toggleW &&
+        fmy >= r.toggleY && fmy <= r.toggleY + r.toggleH) {
+        result.panel = SlotHit::BUILD_TOGGLE;
+        return result;
+    }
+    for (u8 row = 0; row < 3; row++)
+        for (u8 col = 0; col < 3; col++) {
+            const f32 x = r.gridX + col * (r.cell + r.gap);
+            const f32 y = r.gridY + (2 - row) * (r.cell + r.gap);
+            if (fmx >= x && fmx <= x + r.cell && fmy >= y && fmy <= y + r.cell) {
+                result.panel = SlotHit::BUILD_CELL;
+                result.index = static_cast<u8>(row * 3 + col);
+                return result;
+            }
+        }
+    return result;
+}
+
 InventoryUI::SlotHit InventoryUI::hitTestStash(u32 sw, u32 sh, s32 mx, s32 my) {
     SlotHit result;
     const StashRects r = stashLayout(sw, sh);
