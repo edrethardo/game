@@ -178,6 +178,19 @@ namespace GameConst {
         }
     }
 
+    // --- Corpse / resurrection ------------------------------------------------------------------
+    // A killed enemy squashes into the ground over ENEMY_DEATH_DURATION: Combat::killEntity stamps
+    // deathTimer with it, EntitySystem::tickTimers counts it DOWN, and the slot is freed at 0. So a
+    // corpse's age is (ENEMY_DEATH_DURATION - deathTimer), not deathTimer itself.
+    static constexpr f32 ENEMY_DEATH_DURATION = 1.0f;
+
+    // A necromancer/shaman may not raise a corpse until it has been dead this long. Without the
+    // window a kill could be undone on the same frame it landed, which reads as the kill simply not
+    // having counted; the delay guarantees the death animation is legible as a death first.
+    // NOTE: this is HALF the corpse's whole lifetime, so it also halves the raise window (a corpse
+    // is now raisable only during its final 0.5 s, not for its full second on the ground).
+    static constexpr f32 REVIVE_LOCKOUT = 0.5f;
+
     // --- Enemy opening strike -----------------------------------------------------------------
     // How long after an enemy ENTERS attack range its first swing lands. This is NOT the attack
     // cooldown: an arriving enemy has always skipped straight to a short opening window rather than

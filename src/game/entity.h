@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "game/weapon.h"
+#include "game/game_constants.h"   // corpse-age / revive-lockout tuning for canBeRaised
 #include "renderer/frustum.h"
 
 // The entity pool. This is a WIRE constant as much as a memory one: WorldSnapshot carries
