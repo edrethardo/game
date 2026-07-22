@@ -355,6 +355,13 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
     // so the player never spawns next to monsters. adjacentRooms is now true corridor
     // connectivity (see LevelGen::generate), so this reliably covers the next room.
     // Rooms 2 hops out get a reduced count.
+    //
+    // VERTICAL_HALL opts OUT of the neighbour shield: its nine 16-18 m band-areas all touch by the
+    // bbox heuristic (a corner spawn marks 3+ areas adjacent, a balcony spawn 4+), so the generic
+    // rule hollowed out most of the floor — the measured result was ~15 enemies on a 52-grid
+    // two-story loop. The areas are 4-10x a BSP room and now walled off behind doorways, so
+    // distance + doors are shield enough; only the spawn area itself stays clean.
+    const bool stackedLoop = (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL);
     const DungeonRoom& spawnRm = dungeon.rooms[dungeon.spawnRoomIdx];
     for (u32 r = 0; r < dungeon.roomCount; r++) {
         if (r == dungeon.spawnRoomIdx) continue;
@@ -363,7 +370,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
         for (u8 a = 0; a < spawnRm.adjacentCount; a++) {
             if (spawnRm.adjacentRooms[a] == r) { adjacentToSpawn = true; break; }
         }
-        if (adjacentToSpawn) continue;
+        if (adjacentToSpawn && !stackedLoop) continue;
 
         // Check if this room is 2 hops from spawn (adjacent to spawn's neighbor)
         bool twoHopsFromSpawn = false;
@@ -381,16 +388,21 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
         u32 area = room.w * room.d;
         u32 enemyCount;
+        // Stacked-Loop areas are 200-320 cells (vs 30-80 for a BSP room), so the generic caps read
+        // as empty there — raise them for the style. 8 live areas x 8 = 64 ground enemies worst
+        // case, comfortably inside MAX_ENTITIES-FLOOR_ENEMY_RESERVE alongside the balcony packs.
         if (m_level.currentFloor <= 10) {
             enemyCount = 1 + (area / 25);
-            if (enemyCount > 3) enemyCount = 3;
+            const u32 cap = stackedLoop ? 5u : 3u;
+            if (enemyCount > cap) enemyCount = cap;
         } else {
             enemyCount = 1 + (area / 15);
-            if (enemyCount > 5) enemyCount = 5;
+            const u32 cap = stackedLoop ? 8u : 5u;
+            if (enemyCount > cap) enemyCount = cap;
         }
 
-        // Halve enemy count in rooms 2 hops from spawn
-        if (twoHopsFromSpawn && enemyCount > 1) enemyCount = (enemyCount + 1) / 2;
+        // Halve enemy count in rooms 2 hops from spawn (not on the Stacked Loop — see above)
+        if (twoHopsFromSpawn && !stackedLoop && enemyCount > 1) enemyCount = (enemyCount + 1) / 2;
 
         // Hard pool reserve, every style: floor enemies must never consume the slots the rest of the
         // floor still needs — decorations, friendly NPCs, boss adds, pets, summons and breeders all
@@ -1442,43 +1454,109 @@ void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
             if (tierDefs[i]->attackRange > 5.0f) ranged[rangedCount++] = tierDefs[i];
     if (rangedCount == 0) return;   // no ranged enemies this tier → no nests
 
+    // Melee "balcony guards" accompany the snipers: the upper ring used to hold 4-8 snipers TOTAL
+    // and nothing else, so the second story was a shooting gallery, not a fight. Guards hold the
+    // ramp-top chokes and chase — across the catwalks (vaulting the broken one's gap) and down the
+    // ramps, or straight off the balcony edge when the target is below.
+    const EnemyDef* melee[MAX_ENEMY_DEFS];
+    u32 meleeCount = 0;
+    for (u32 i = 0; i < tierCount; i++)
+        if (tierDefs[i]->attackRange <= 5.0f && !tierDefs[i]->flying) melee[meleeCount++] = tierDefs[i];
+
     const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
     const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
     const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
                         * GameConst::difficultyDamageBump(m_difficulty);
 
+    // Seats are SEARCHED, not offset: the ramp top sits on its band's edge column, so the old blind
+    // "+1.5*k along +X" spread could land off the slab and silently dump the spawn to the ground
+    // story. Ring-search outward from the top for cells whose surface at the balcony story is intact
+    // (same pattern as the Descent's hole-sniper seats); nth spreads multiple spawns apart.
+    auto seatNear = [&](const Vec3& top, u32 nth, Vec3& out) -> bool {
+        u32 tx, tz;
+        if (!LevelGridSystem::worldToGrid(m_level.grid, top, tx, tz)) return false;
+        u32 found = 0;
+        for (s32 rad = 1; rad <= 5; rad++)
+            for (s32 dz = -rad; dz <= rad; dz++)
+                for (s32 dx = -rad; dx <= rad; dx++) {
+                    if (dx > -rad && dx < rad && dz > -rad && dz < rad) continue;   // ring only
+                    const s32 cx = (s32)tx + dx, cz = (s32)tz + dz;
+                    if (cx < 1 || cz < 1 || !LevelGridSystem::isInBounds(m_level.grid, (u32)cx, (u32)cz)) continue;
+                    if (LevelGridSystem::isSolid(m_level.grid, (u32)cx, (u32)cz)) continue;
+                    const f32 h = LevelGridSystem::effectiveFloorHeight(m_level.grid, (u32)cx, (u32)cz, top.y);
+                    if (std::fabs(h - top.y) >= PLATFORM_STEP_TOLERANCE) continue;   // slab not intact here
+                    if (found++ < nth) continue;
+                    out = { ((f32)cx + 0.5f) * m_level.grid.cellSize, top.y,
+                            ((f32)cz + 0.5f) * m_level.grid.cellSize };
+                    return true;
+                }
+        return false;
+    };
+
+    // Spawn + stat-stamp one balcony enemy (shared by snipers and guards — keep the two identical).
+    auto seatEnemy = [&](const EnemyDef& def, const Vec3& seat) -> bool {
+        Vec3 pos = { seat.x, seat.y + def.halfExtents.y, seat.z };
+        EntityHandle h = EntitySystem::spawn(m_entities, pos, def.halfExtents, def.flying,
+            def.health, def.moveSpeed, def.detectionRange, def.attackRange, def.attackCooldown, def.damage);
+        Entity* ent = handleGet(m_entities, h);
+        if (!ent) return false;
+        ent->meshId       = def.meshId;
+        ent->materialId   = def.materialId;
+        ent->enemyType    = def.enemyType;
+        ent->enemyRole    = def.role;
+        ent->aiPreference = def.aiPreference;
+        const ptrdiff_t slot = &def - m_enemyDefs.defs;
+        ent->enemyDefIdx = (slot >= 0 && slot < static_cast<ptrdiff_t>(m_enemyDefs.count))
+                         ? static_cast<u8>(slot) : 0xFF;
+        ent->baseMoveSpeed      = ent->moveSpeed;
+        ent->baseAttackCooldown = ent->attackCooldown;
+        ent->level = static_cast<u16>(effectiveFloor);
+        ent->health   *= hpMult;
+        ent->maxHealth = ent->health;
+        ent->damage   *= dmgMult;
+        ent->onHitEffect   = def.onHitEffect;
+        ent->onHitDuration = def.onHitDuration;
+        ent->onHitDps      = def.onHitDps * dmgMult;
+        // Deliberately NO ensureNotInWall / ground snap here — that would pull the spawn down to the
+        // ground story. The balcony Y is authoritative; the story-aware snap keeps it on the slab.
+        return true;
+    };
+
+    // The spawn-clean contract, upper-story edition: the room spawner keeps the spawn AREA empty,
+    // but a pack seated at the spawn balcony's own ramp top is 8 m away with clear LOS — measured
+    // live as 150→46 HP in the first seconds. Skip the one portal nearest the spawn endpoint
+    // (nearest by either end: descend-spawns sit near a TOP, ascend-spawns own their ramp's FOOT).
+    s32 skipIdx = -1;
+    {
+        f32 bestD2 = 1e30f;
+        for (u8 p = 0; p < dungeon.portalCount; p++) {
+            const Vec3 dTop  = dungeon.portals[p].highPos - dungeon.spawnBalconyPos;
+            const Vec3 dFoot = dungeon.portals[p].lowPos  - dungeon.spawnBalconyPos;
+            const f32 d2 = fminf(dTop.x * dTop.x + dTop.z * dTop.z,
+                                 dFoot.x * dFoot.x + dFoot.z * dFoot.z);
+            if (d2 < bestD2) { bestD2 = d2; skipIdx = p; }
+        }
+    }
+
     for (u8 pIdx = 0; pIdx < dungeon.portalCount; pIdx++) {
+        if (pIdx == skipIdx) continue;                     // the spawn-side balcony stays clean
         if (m_entities.activeCount >= MAX_ENTITIES - 4) break;
         const Vec3 balc = dungeon.portals[pIdx].highPos;   // ramp top = a balcony spot
-        const u32 nest = 1 + (static_cast<u32>(std::rand()) & 1u);   // 1-2 snipers per balcony
+        const u32 nest = 2 + (static_cast<u32>(std::rand()) & 1u);   // 2-3 snipers per balcony
+        u32 seatIdx = 0;   // shared seat counter so guards take the NEXT ring cells after the snipers
         for (u32 k = 0; k < nest; k++) {
             if (m_entities.activeCount >= MAX_ENTITIES - 2) break;
             const EnemyDef& def = *ranged[static_cast<u32>(std::rand()) % rangedCount];
-            // Spread along the balcony (+X) and a touch into it (+Z), at the balcony story Y.
-            Vec3 pos = balc + Vec3{ 1.5f * static_cast<f32>(k), def.halfExtents.y, 0.8f };
-            EntityHandle h = EntitySystem::spawn(m_entities, pos, def.halfExtents, def.flying,
-                def.health, def.moveSpeed, def.detectionRange, def.attackRange, def.attackCooldown, def.damage);
-            Entity* ent = handleGet(m_entities, h);
-            if (!ent) break;
-            ent->meshId       = def.meshId;
-            ent->materialId   = def.materialId;
-            ent->enemyType    = def.enemyType;
-            ent->enemyRole    = def.role;
-            ent->aiPreference = def.aiPreference;
-            const ptrdiff_t slot = &def - m_enemyDefs.defs;
-            ent->enemyDefIdx = (slot >= 0 && slot < static_cast<ptrdiff_t>(m_enemyDefs.count))
-                             ? static_cast<u8>(slot) : 0xFF;
-            ent->baseMoveSpeed      = ent->moveSpeed;
-            ent->baseAttackCooldown = ent->attackCooldown;
-            ent->level = static_cast<u16>(effectiveFloor);
-            ent->health   *= hpMult;
-            ent->maxHealth = ent->health;
-            ent->damage   *= dmgMult;
-            ent->onHitEffect   = def.onHitEffect;
-            ent->onHitDuration = def.onHitDuration;
-            ent->onHitDps      = def.onHitDps * dmgMult;
-            // Deliberately NO ensureNotInWall / ground snap here — that would pull the sniper down to
-            // the ground story. The balcony Y is authoritative; the story-aware snap keeps it on the slab.
+            Vec3 seat;
+            if (!seatNear(balc, seatIdx++, seat)) break;   // balcony full of holes? skip the rest
+            if (!seatEnemy(def, seat)) break;
+        }
+        for (u32 g = 0; g < 2 && meleeCount > 0; g++) {    // + 2 guards per balcony
+            if (m_entities.activeCount >= MAX_ENTITIES - 2) break;
+            const EnemyDef& def = *melee[static_cast<u32>(std::rand()) % meleeCount];
+            Vec3 seat;
+            if (!seatNear(balc, seatIdx++, seat)) break;
+            if (!seatEnemy(def, seat)) break;
         }
     }
 }

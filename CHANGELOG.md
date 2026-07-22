@@ -31,6 +31,15 @@ Levels grow a third dimension: floors that stack, drop and burn.
   void every balcony overlooks and drops into. Ramps climb, catwalks cross (one intact, one with a
   jump gap), jump pads fling you back up. Spawn and exit sit on opposite sides *and* opposite
   stories, so every floor forces a full traversal. Appears on floor-6+ non-boss floors.
+  - **Interior walls close the sightlines.** The ground story is no longer an open hall: each
+    corner room is entered through a doorway (or under a ramp archway), and free-standing cover
+    walls break up the corners and the central void. The balconies above are untouched — the
+    overlook into the void is still the point.
+  - **Both stories fight back.** Each balcony is held by a pack of snipers *and* melee guards
+    (the spawn-side balcony stays clean), and the ground story carries full-density packs in
+    every area instead of a handful — roughly four times the enemies overall.
+  - Fixed: on the current larger layout, all four ramps ended just short of their balcony — a
+    dead-end in the air. Every ramp now lands on its balcony.
 - **Hellforge lava floors.** A few floors in the 31–40 tier now *melt*: every interior wall becomes
   molten rock, leaving islands of stone in a lava sea with nowhere to hide. Lava deals heavy damage
   **and sets you on fire**, so the burn keeps ticking after you scramble out — but monsters wade

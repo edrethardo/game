@@ -821,7 +821,11 @@ static void carveHub(LevelGrid& grid, GenRNG& rng, DungeonResult& result)
 // ---------------------------------------------------------------------------
 static constexpr u8  VH_SLAB_Q = 12;   // balcony floor: 12 qu = 3.0 m (2.5 m underside clears a body)
 static constexpr f32 VH_CEIL   = 8.0f; // tall hall: generous headroom above the 3 m balconies
-static constexpr u32 VH_RAMP   = 12;   // ramp length (cells): climbs 0→3 m at 0.25 m/step (walkable by bodies)
+// (No fixed ramp-length constant any more: each ramp runs to its band's edge so the top always abuts
+// the balcony. The old VH_RAMP=12 was sized for the 44-grid's 14-cell bands; when startGame moved the
+// style to 52 the bands grew to 16-18 cells and every ramp ended 2-4 cells short of its balcony — a
+// 3 m dead-end in the air. The climb still tops out at VH_SLAB_Q (0.25 m/step); the extra band width
+// becomes flat 3 m walkway.)
 
 static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                               s32& forcedSpawn, s32& forcedExit) {
@@ -866,10 +870,10 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     // 3) PINWHEEL RAMPS: each climbs from a corner floor up to the adjacent balcony edge (top cell abuts
     //    the balcony @ h12; foot @ h1 abuts the corner floor). 2-wide, recorded as StoryPortals (the
     //    cross-story chase + the sniper seats). The four together rotate the same way → an asymmetric spin.
-    auto ramp = [&](s32 xf, s32 zf, s32 dx, s32 dz, s32 px, s32 pz) {
+    auto ramp = [&](s32 xf, s32 zf, s32 dx, s32 dz, s32 px, s32 pz, u32 len) {
         s32 tx = xf, tz = zf;
-        for (u32 i = 0; i < VH_RAMP; i++) {
-            u8 h = (u8)(i + 1); if (h > VH_SLAB_Q) h = VH_SLAB_Q;
+        for (u32 i = 0; i < len; i++) {
+            u8 h = (u8)(i + 1); if (h > VH_SLAB_Q) h = VH_SLAB_Q;   // clamp: past the climb = flat 3 m walkway
             tx = xf + dx * (s32)i; tz = zf + dz * (s32)i;
             slab(tx, tz, h); slab(tx + px, tz + pz, h);   // 2-wide across the climb
         }
@@ -877,10 +881,12 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
         Vec3 top  = { (tx + 0.5f) * cs, VH_SLAB_Q * 0.25f, (tz + 0.5f) * cs };
         if (result.portalCount < MAX_STORY_PORTALS) result.portals[result.portalCount++] = { foot, top };
     };
-    ramp((s32)wX0 + 2, (s32)nZ0 + 6, +1,  0, 0, 1);   // NW corner → N balcony (climb east)
-    ramp((s32)eX1 - 6, (s32)nZ0 + 2,  0, +1, 1, 0);   // NE corner → E balcony (climb south)
-    ramp((s32)eX1 - 2, (s32)sZ1 - 6, -1,  0, 0, 1);   // SE corner → S balcony (climb west)
-    ramp((s32)wX0 + 5, (s32)sZ1 - 2,  0, -1, 1, 0);   // SW corner → W balcony (climb north)
+    // len runs each ramp from its foot to the LAST cell of its corner band, so the top always abuts
+    // the balcony whatever the band width (14 @ 44-grid, 16-18 @ 52 — see the VH_RAMP note above).
+    ramp((s32)wX0 + 2, (s32)nZ0 + 6, +1,  0, 0, 1, wX1 - (wX0 + 2) + 1);   // NW corner → N balcony (climb east)
+    ramp((s32)eX1 - 6, (s32)nZ0 + 2,  0, +1, 1, 0, nZ1 - (nZ0 + 2) + 1);   // NE corner → E balcony (climb south)
+    ramp((s32)eX1 - 2, (s32)sZ1 - 6, -1,  0, 0, 1, (eX1 - 2) - eX0 + 1);   // SE corner → S balcony (climb west)
+    ramp((s32)wX0 + 5, (s32)sZ1 - 2,  0, -1, 1, 0, (sZ1 - 2) - sZ0 + 1);   // SW corner → W balcony (climb north)
 
     // 4) CATWALKS across the void @ 3 m linking OPPOSITE balconies, so the upper story is its own loop.
     //    N↔S is INTACT (the reliable high road); W↔E is BROKEN with a 2-cell JUMP gap (miss → fall to the
@@ -908,6 +914,58 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     pillars(eX0 + 1, eX1 - 2, sZ0 + 1, sZ1 - 2, 2);   // SE room
     pillars(wX0 + 1, wX1 - 2, sZ0 + 1, sZ1 - 2, 2);   // SW room
     pillars(cX0 + 2, cX1 - 3, cZ0 + 2, cZ1 - 3, 3);   // the void
+
+    // 5b) INTERIOR WALLS — with only the sparse pillars the nine areas read as one open parking lot:
+    //     every ground sightline ran wall-to-wall and the "rooms" were just paint on the map. Two
+    //     layers, both ground-story and both slab-GUARDED like the pillars (a wall never rises through
+    //     a balcony/ramp/catwalk cell — where a run crosses under a ramp tail the skipped cells become
+    //     natural 3 m archways, a second way through):
+    //       * DOORWAY walls along the 8 corner↔arcade seams, each with a rolled 3-wide door, so an
+    //         area is entered through a door (or under its ramp arch) instead of across an open band.
+    //         The arcade↔void seams stay OPEN — the overlook/drop into the void is the floor's core,
+    //         and the arcades themselves can't take walls at all (every arcade cell carries the
+    //         balcony slab, so the guard rejects them by construction).
+    //       * COVER runs — short free-standing wall segments inside the corners and the void, real
+    //         fight cover where a lone 2×2 pillar was cosmetic. Inset ≥2 from the seams so a run can
+    //         never fuse with a doorway wall into a sealed pocket.
+    //     Ground connectivity (endpoint → all 9 areas + all 4 ramp feet) and the void staying open are
+    //     pinned by tests/world/test_vertical_hall.cpp across both grid sizes.
+    auto wallCell = [&](s32 x, s32 z) {
+        if (x < 1 || z < 1 || !LevelGridSystem::isInBounds(grid, (u32)x, (u32)z)) return;
+        GridCell& c = LevelGridSystem::getCell(grid, (u32)x, (u32)z);
+        if (!(c.flags & CELL_PLATFORM)) c.flags = CELL_SOLID;
+    };
+    auto doorwayWall = [&](u32 fixed, u32 lo, u32 hi, bool fixIsX) {
+        const u32 span = hi - lo + 1;                       // bands are 14-18 cells, so span-6 is safe
+        const u32 door = lo + 2 + rng.range(0, span - 6);   // 3-wide door, never flush with either end
+        for (u32 v = lo; v <= hi; v++) {
+            if (v >= door && v < door + 3) continue;
+            wallCell(fixIsX ? (s32)fixed : (s32)v, fixIsX ? (s32)v : (s32)fixed);
+        }
+    };
+    doorwayWall(wX1, nZ0, nZ1, true );   // NW | N-arcade  (ramp tail crosses → archway)
+    doorwayWall(nZ1, wX0, wX1, false);   // NW | W-arcade
+    doorwayWall(eX0, nZ0, nZ1, true );   // NE | N-arcade
+    doorwayWall(nZ1, eX0, eX1, false);   // NE | E-arcade  (ramp tail crosses → archway)
+    doorwayWall(eX0, sZ0, sZ1, true );   // SE | S-arcade  (ramp tail crosses → archway)
+    doorwayWall(sZ0, eX0, eX1, false);   // SE | E-arcade
+    doorwayWall(wX1, sZ0, sZ1, true );   // SW | S-arcade
+    doorwayWall(sZ0, wX0, wX1, false);   // SW | W-arcade  (ramp tail crosses → archway)
+    auto coverRuns = [&](u32 rx0, u32 rx1, u32 rz0, u32 rz1, u32 n) {
+        for (u32 k = 0; k < n; k++) {
+            const bool horiz = rng.range(0, 2) == 0;
+            const u32 len = 4 + rng.range(0, 3);            // 4-6 cells: a wall you flank, not a divider
+            const u32 px = rng.range(rx0, (horiz ? rx1 - len : rx1) + 1);
+            const u32 pz = rng.range(rz0, (horiz ? rz1 : rz1 - len) + 1);
+            for (u32 i = 0; i < len; i++)
+                wallCell((s32)(px + (horiz ? i : 0u)), (s32)(pz + (horiz ? 0u : i)));
+        }
+    };
+    coverRuns(wX0 + 2, wX1 - 2, nZ0 + 2, nZ1 - 2, 2);   // NW room
+    coverRuns(eX0 + 2, eX1 - 2, nZ0 + 2, nZ1 - 2, 2);   // NE room
+    coverRuns(eX0 + 2, eX1 - 2, sZ0 + 2, sZ1 - 2, 2);   // SE room
+    coverRuns(wX0 + 2, wX1 - 2, sZ0 + 2, sZ1 - 2, 2);   // SW room
+    coverRuns(cX0 + 2, cX1 - 2, cZ0 + 2, cZ1 - 2, 3);   // the void (catwalk cells slab-guarded → arches)
 
     // 6) ONE player jump-pad in the void, on the SPAWN side (placed after the endpoints are chosen,
     //    below). Two pads under the catwalk crossing were the floor's biggest shortcut: pad →
@@ -996,20 +1054,25 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     clearPad(result.spawnBalconyPos);
     clearPad(result.exitBalconyPos);
 
-    // A room's CENTRE cell must never be solid: consumers place lights, the exit portal and loot
-    // there, and the generic reachability contract floods to it. The cover pillars above are scattered
-    // by RNG inside the room rects, so one can land exactly on a centre — clear any that did. (One
-    // pillar out of two per room; the cover pattern is unaffected.)
+    // A room's CENTRE must never be solid OR sealed: consumers place lights, the exit portal and loot
+    // there, and the generic reachability contract floods to it. The pillars and cover runs above are
+    // scattered by RNG inside the room rects, so they can land on a centre — and clearing only the
+    // single centre cell is NOT enough: an overlapping run + pillar once left the centre open but
+    // walled in on all four sides (a 1-cell pocket, caught by the connectivity test). Clearing the
+    // full 3×3 dissolves any 1-thick enclosure touching the centre.
     for (u32 i = 0; i < result.roomCount; i++) {
         const DungeonRoom& r = result.rooms[i];
         const u32 cx = r.x + r.w / 2, cz = r.z + r.d / 2;
-        if (!LevelGridSystem::isInBounds(grid, cx, cz)) continue;
-        GridCell& c = LevelGridSystem::getCell(grid, cx, cz);
-        if (!(c.flags & CELL_SOLID)) continue;
-        c.flags           = CELL_FLOOR | CELL_CEILING;
-        c.floorHeight     = (u8)(r.floorHeight / 0.25f);
-        c.ceilingHeight   = (u8)(VH_CEIL / 0.25f);
-        c.floorMaterialId = floorMat;
+        for (s32 dz = -1; dz <= 1; dz++) for (s32 dx = -1; dx <= 1; dx++) {
+            const s32 x = (s32)cx + dx, z = (s32)cz + dz;
+            if (x < 1 || z < 1 || !LevelGridSystem::isInBounds(grid, (u32)x, (u32)z)) continue;
+            GridCell& c = LevelGridSystem::getCell(grid, (u32)x, (u32)z);
+            if (!(c.flags & CELL_SOLID)) continue;
+            c.flags           = CELL_FLOOR | CELL_CEILING;
+            c.floorHeight     = (u8)(r.floorHeight / 0.25f);
+            c.ceilingHeight   = (u8)(VH_CEIL / 0.25f);
+            c.floorMaterialId = floorMat;
+        }
     }
 }
 

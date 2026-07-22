@@ -124,13 +124,25 @@ floor 97 while `m_level.inArena` so the lobby row reads "Arena" — `enterArena`
 
 **Two-story PvE floors (`VERTICAL_HALL` — "The Stacked Loop").** A 5th structural layout style
 (`world/level_gen.cpp` `carveVerticalHall`, weighted-rolled on **floor-6+ non-boss** floors, forced to a
-44-grid; `--vhall` dev door). NOT a single arena — a Quake **location-based** topology: a **LOOP of nine
+**52-grid** by `startGame`; `--vhall` dev door). NOT a single arena — a Quake **location-based** topology: a **LOOP of nine
 distinct areas** laid out 3×3 and stacked across two stories, circled by a route that spirals up and down.
-The **four CORNERS** are ground rooms (floor 0, cover **PILLARS**); the **four MID-SIDES** are **BALCONIES**
+The **four CORNERS** are ground rooms (floor 0); the **four MID-SIDES** are **BALCONIES**
 (`CELL_PLATFORM` slabs @ 3 m — walk ON top, walk UNDER the arcade beneath); the **CENTRE** is an open
 **VOID** (ground, no balcony) that every balcony overlooks and drops into (the Quake sightline + a
-cross-level shortcut). A **PINWHEEL of four RAMPS** climbs each corner up to the next balcony (graduated
-slab; the enemies' chase-up route and yours after a drop). The exit balcony is always served by the
+cross-level shortcut). The ground story carries **INTERIOR WALLS** (all slab-guarded, so a wall can
+never rise through a balcony/ramp/catwalk cell — where a run crosses under a ramp tail the skipped
+cells become 3 m **archways**): **DOORWAY walls** with a rolled 3-wide door on the 8 corner↔arcade
+seams turn the open bands into rooms you enter through doors, and short free-standing **COVER runs**
+(plus the original pillars) break the corner/void sightlines — the arcade↔void seams stay open (the
+overlook IS the floor), and the arcades can't take walls by construction (every arcade cell carries
+the balcony slab). Sealing is impossible-by-test, not by hope: the room-CENTRE clear opens a full
+**3×3** (a single-cell clear once left a centre open but walled in — a 1-cell pocket), and
+`test_vertical_hall.cpp` BFS-floods endpoint→all 9 centres + all 4 ramp feet across 64 seeds × both
+grid sizes. A **PINWHEEL of four RAMPS** climbs each corner up to the next balcony (graduated
+slab; the enemies' chase-up route and yours after a drop). **Each ramp runs to its band's edge**
+(no fixed length — the old `VH_RAMP=12` was sized for the 44-grid's 14-cell bands, so after the
+44→52 bump every ramp top hung 2-4 cells short of its balcony: a 3 m dead-end in the air, caught by
+the ramp-top flood test). The exit balcony is always served by the
 ramp at the **DIAGONAL corner** (`mSel = (cSel+2)%4` — the old either-far-mid roll could put the
 serving ramp one band from spawn, collapsing the loop to a 5-second walk); two **CATWALKS** cross the void @ 3 m linking
 opposite balconies — one **INTACT** (the high road), one **BROKEN** with a 2-cell **jump** gap — so the
@@ -141,14 +153,20 @@ taxi that skipped the loop; the single pad is recovery near the START, the ring 
 traversal and a level change (a coin-flip picks ascend vs descend). The **lower story is one fully-connected
 floor** (corners + void + arcades → reachability guaranteed); the upper story hangs off it via the ramps +
 catwalks. `spawnBalconyPos`/`exitBalconyPos` are explicit positions applied in `startGame` (upper = y 3 m,
-ground = y 0; a `clearPad` opens any pillar that rolled onto a ground endpoint). Ranged "sniper nests" hold
-the balconies and plunge-fire into the void (`spawnFloorNests` at the **four** ramp tops); regular enemies
-spawn on the ground story (corners + void + arcades) and chase UP the ramps.
+ground = y 0; a `clearPad` opens any wall/pillar that rolled onto a ground endpoint). **Both stories are
+densely held**: `spawnFloorNests` seats 2-3 ranged snipers PLUS 2 melee guards per balcony on
+slab-VERIFIED ring-searched seats (blind offsets could land off the band-edge ramp top and dump the
+spawn to the ground story), skipping the one portal nearest the spawn endpoint (a pack seated at the
+spawn balcony's own ramp top face-camped the spawn — measured 150→46 HP in seconds); ground enemies
+spawn via `spawnFloorEnemies` with the style opted OUT of the spawn-neighbour shield + raised per-area
+caps (the nine 16-18 m areas are all bbox-adjacent, so the generic skip-neighbours/halve-2-hops rule
+hollowed the floor to ~15 enemies; now ~85 total, doors + distance are the shield) and chase UP the ramps.
 Enemies traverse both stories via story-aware `snapEntityToFloor` (`effectiveFloorHeight` not raw
 `getFloorHeight`) + the ramp **`StoryPortal`** CHASE routing (`world/story_nav.h`, `DungeonResult.portals`;
 `nullptr`/portal-count-0 inert elsewhere). Slab/ramp/collision primitives pinned by
-`tests/world/test_platform.cpp`, the layout invariants by `tests/world/test_vertical_hall.cpp`; seed-built
-+ server-authoritative → **no wire/save change**. (Earlier "Stacked Hall" split-pit design lives in
+`tests/world/test_platform.cpp`, the layout invariants by `tests/world/test_vertical_hall.cpp` (44 AND
+52); seed-built + server-authoritative → **no wire/save change**. Walls put worst-case draw calls at
+~455-480 on the 52-grid (was ~320-345) — inside the 500 budget, but the Switch number is unmeasured. (Earlier "Stacked Hall" split-pit design lives in
 `scratchpad/stacked_hall_geometry.cpp` for a possible 2nd PvP arena.) Design/plan:
 `docs/superpowers/plans/2026-07-20-two-story-vertical-hall-pve.md`.
 
