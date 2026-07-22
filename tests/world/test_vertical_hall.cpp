@@ -38,6 +38,28 @@ TEST_CASE("VERTICAL_HALL generates a valid two-story floor across many seeds") {
         u32 slabCells = countFlag(g, CELL_PLATFORM), floorCells = countFlag(g, CELL_FLOOR);
         CHECK(floorCells > slabCells);               // the pit + the arcade under the balcony dominate
 
+        // ONE jump-pad, spawn-side. Two pads under the catwalk crossing were the floor's biggest
+        // shortcut (pad → catwalk → exit balcony in seconds); the single pad is recovery, not a taxi.
+        CHECK(countFlag(g, CELL_JUMPPAD) == 1);
+
+        // The DIAGONAL-service rule — the fix for "it's a 5 second walk". The exit-side balcony must
+        // be served by the ramp whose FOOT is the far corner: the portal nearest the balcony endpoint
+        // (its top) must have its foot on the OPPOSITE side of the floor from the ground endpoint, in
+        // BOTH axes. A same-side ramp foot is the one-band shortcut this rule forbids.
+        {
+            const Vec3 up   = (r.spawnBalconyPos.y > 1.0f) ? r.spawnBalconyPos : r.exitBalconyPos;
+            const Vec3 down = (r.spawnBalconyPos.y > 1.0f) ? r.exitBalconyPos  : r.spawnBalconyPos;
+            f32 bestD2 = 1e30f; Vec3 foot{};
+            for (u8 p = 0; p < r.portalCount; p++) {
+                const f32 dx = r.portals[p].highPos.x - up.x, dz = r.portals[p].highPos.z - up.z;
+                const f32 d2 = dx * dx + dz * dz;
+                if (d2 < bestD2) { bestD2 = d2; foot = r.portals[p].lowPos; }
+            }
+            const f32 mid = 44.0f * 0.5f;   // grid centre in world units (cellSize 1)
+            CHECK(((down.x < mid) != (foot.x < mid)));   // foot across the centre in X…
+            CHECK(((down.z < mid) != (foot.z < mid)));   // …and in Z: the diagonal corner
+        }
+
         LevelGridSystem::shutdown(g);
     }
 }

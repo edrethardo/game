@@ -204,10 +204,15 @@ void LevelGridSystem::buildFlowField(LevelGrid& grid, Vec3 exitWorldPos) {
     }
 
     // BFS from the exit cell outward — each visited cell stores the direction
-    // that points TOWARD the exit (reverse of the expansion direction).
-    // Use a simple queue backed by a stack-allocated array (grid is small: 48x48 = 2304).
-    static constexpr u32 MAX_QUEUE = 48 * 48;
-    u32 queue[MAX_QUEUE];
+    // that points TOWARD the exit (reverse of the expansion direction). The queue is heap-scratch
+    // sized from the GRID, exactly like buildClearanceField's: it used to be a stack array hard-
+    // sized to 48x48, and the first 52-grid floor (VERTICAL_HALL) overflowed it — every walkable
+    // cell is enqueued exactly once, so 52x52's ~2500 walkable cells marched straight past 2304 and
+    // through the stack canary (the "vhall boot abort"). A fixed local buffer sized to "the biggest
+    // grid we currently ship" is a time bomb with a fuse the NEXT grid bump lights.
+    const u32 queueCap = totalCells;
+    u32* queue = static_cast<u32*>(std::malloc(sizeof(u32) * queueCap));
+    if (!queue) return;
     u32 qHead = 0, qTail = 0;
 
     // Seed the exit cell
@@ -246,6 +251,8 @@ void LevelGridSystem::buildFlowField(LevelGrid& grid, Vec3 exitWorldPos) {
     }
     LOG_INFO("Flow field built: %u/%u cells reachable from exit (%u,%u)",
              reachable, totalCells, exitX, exitZ);
+
+    std::free(queue);
 }
 
 u8 LevelGridSystem::clearanceAt(const LevelGrid& grid, u32 x, u32 z) {

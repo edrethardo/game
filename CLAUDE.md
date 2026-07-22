@@ -130,10 +130,13 @@ The **four CORNERS** are ground rooms (floor 0, cover **PILLARS**); the **four M
 (`CELL_PLATFORM` slabs @ 3 m — walk ON top, walk UNDER the arcade beneath); the **CENTRE** is an open
 **VOID** (ground, no balcony) that every balcony overlooks and drops into (the Quake sightline + a
 cross-level shortcut). A **PINWHEEL of four RAMPS** climbs each corner up to the next balcony (graduated
-slab; the enemies' chase-up route and yours after a drop); two **CATWALKS** cross the void @ 3 m linking
+slab; the enemies' chase-up route and yours after a drop). The exit balcony is always served by the
+ramp at the **DIAGONAL corner** (`mSel = (cSel+2)%4` — the old either-far-mid roll could put the
+serving ramp one band from spawn, collapsing the loop to a 5-second walk); two **CATWALKS** cross the void @ 3 m linking
 opposite balconies — one **INTACT** (the high road), one **BROKEN** with a 2-cell **jump** gap — so the
-UPPER story is its own connected loop that crosses at the centre; **JUMP-PADS** in the void fling you back
-up (player-only). Circle the ring and you continuously **ASCEND** (corner→ramp→balcony) and **DESCEND**
+UPPER story is its own connected loop that crosses at the centre; **ONE spawn-side JUMP-PAD** in the
+void flings you back up (player-only — two pads under the catwalk crossing were a pad→catwalk→exit
+taxi that skipped the loop; the single pad is recovery near the START, the ring still gets walked). Circle the ring and you continuously **ASCEND** (corner→ramp→balcony) and **DESCEND**
 (balcony→drop→void); the exit sits on the FAR side AND the opposite STORY, so every floor forces a full
 traversal and a level change (a coin-flip picks ascend vs descend). The **lower story is one fully-connected
 floor** (corners + void + arcades → reachability guaranteed); the upper story hangs off it via the ramps +

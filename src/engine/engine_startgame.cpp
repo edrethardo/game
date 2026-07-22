@@ -627,9 +627,12 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
                  LevelGen::styleName(layoutStyle));
         layoutStyle = LevelGen::LayoutStyle::BSP_ROOMS;
     }
-    // A two-story hall needs room for two pits + wide walk-under galleries + long ramps either side
-    // of the divider — force a large grid regardless of floor so the upper floor is a real floor.
-    if (usesBalconyEndpoints(layoutStyle) && gridSize < 44) gridSize = 44;
+    // Stacked-slab styles need a large grid so the upper stories are real floors, not a strip.
+    // VERTICAL_HALL gets 52 (was 44): with the diagonal-exit rule the traversal IS the floor's
+    // point, and at 44 the full diagonal was still only ~7 s of running. FOUR_STORY keeps 44 — its
+    // maze corridors already make distance, and four stories of 52 would strain the Switch budget.
+    if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL && gridSize < 52) gridSize = 52;
+    else if (usesBalconyEndpoints(layoutStyle) && gridSize < 44) gridSize = 44;
 
     // Generate the level once — spawn/exit room selection always succeeds
     // by falling back to the best available rooms.

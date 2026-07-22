@@ -909,17 +909,11 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     pillars(wX0 + 1, wX1 - 2, sZ0 + 1, sZ1 - 2, 2);   // SW room
     pillars(cX0 + 2, cX1 - 3, cZ0 + 2, cZ1 - 3, 3);   // the void
 
-    // 6) Player-only JUMP-PADS in the void — fling you from the ground back up onto a balcony (air-steer
-    //    to the nearest edge). Enemies never jump, so this is YOUR fast route up, off the ramps.
-    {
-        auto jpad = [&](u32 x, u32 z) {
-            if (!LevelGridSystem::isInBounds(grid, x, z)) return;
-            GridCell& c = LevelGridSystem::getCell(grid, x, z);
-            if (!(c.flags & (CELL_PLATFORM | CELL_LEDGE | CELL_SOLID))) c.flags |= CELL_JUMPPAD;
-        };
-        jpad(cX0 + 2, cZ0 + 2);   // NW of void → up to the N/W balcony
-        jpad(cX1 - 2, cZ1 - 2);   // SE of void → up to the S/E balcony
-    }
+    // 6) ONE player jump-pad in the void, on the SPAWN side (placed after the endpoints are chosen,
+    //    below). Two pads under the catwalk crossing were the floor's biggest shortcut: pad →
+    //    air-steer onto a catwalk → exit balcony in seconds, skipping the loop entirely. A single
+    //    spawn-side pad keeps the recovery role — it puts you ON the upper ring near the start —
+    //    while the ring itself (balcony → catwalk → balcony) still has to be walked.
 
     // 7) Rooms for enemy/loot placement — the nine areas, all at floor 0 (enemies seed on the ground
     //    story; snipers get lifted onto the balconies by spawnFloorNests via the ramp portals).
@@ -948,10 +942,36 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
         { (wX0 + ax * 0.5f) * cs, VH_SLAB_Q * 0.25f, (cZ0 + az * 0.5f) * cs } };
     const u32 cornerRoom[4] = { rNW, rNE, rSE, rSW };
     const u32 midRoom[4]    = { rMN, rME, rMS, rMW };
-    const u32 farMidOf[4][2] = { {1, 2}, {2, 3}, {0, 3}, {0, 1} };   // mids the corner does NOT touch
     const u32 cSel   = rng.range(0, 4);
-    const u32 mSel   = farMidOf[cSel][rng.range(0, 2)];
+    // The pinwheel serves balcony i from corner i (NW→N, NE→E, SE→S, SW→W), so the mid must be the
+    // one served by the corner DIAGONAL to the endpoint corner: (cSel+2)%4. The old "either far mid"
+    // roll could pick a balcony whose ramp foot was ONE band from spawn — run a band, ramp up, done:
+    // Aaron's "5 second walk". Diagonal service forces the route the design promised — cross the
+    // whole floor (through the pillared void, under the sniper balconies) to the far corner, THEN
+    // climb; or take the spawn-side pad up and walk the upper ring with its catwalk jump. Both are
+    // the loop. (The mid (cSel+2)%4 never touches corner cSel, so opposite-side is preserved.)
+    const u32 mSel   = (cSel + 2) % 4;
     const bool exitUp = rng.f01() < 0.5f;                            // true → ascend to the exit
+
+    // The single pad: void quadrant nearest the GROUND start of the journey (ascend: the spawn
+    // corner; descend: the drop zone under the spawn balcony = the diagonal corner's quadrant).
+    {
+        const u32 padCorner = exitUp ? cSel : (cSel + 2) % 4;
+        const u32 pqx = (padCorner == 1 || padCorner == 2) ? cX1 - 2 : cX0 + 2;
+        const u32 pqz = (padCorner >= 2)                   ? cZ1 - 2 : cZ0 + 2;
+        // Deterministic 3x3 scan: the ideal cell can hold a void pillar, and a silently-skipped pad
+        // would strand a fallen player with only the ramps. First open cell wins.
+        for (s32 dz = 0; dz < 3; dz++) {
+            for (s32 dx = 0; dx < 3; dx++) {
+                const u32 x = pqx + (u32)dx, z = pqz + (u32)dz;
+                if (!LevelGridSystem::isInBounds(grid, x, z)) continue;
+                GridCell& c = LevelGridSystem::getCell(grid, x, z);
+                if (c.flags & (CELL_PLATFORM | CELL_LEDGE | CELL_SOLID)) continue;
+                c.flags |= CELL_JUMPPAD;
+                dz = 3; break;                             // placed — stop both loops
+            }
+        }
+    }
     result.spawnBalconyPos = exitUp ? cornerPos[cSel] : midPos[mSel];
     result.exitBalconyPos  = exitUp ? midPos[mSel]    : cornerPos[cSel];
     result.spawnOnUpper    = !exitUp;
