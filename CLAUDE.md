@@ -307,7 +307,11 @@ total (`bestBuildCell`/`gearScoreForCell`) beats the active build by >10% the pl
 chat nudge ("Better gear for Tanky Ranged…"), cooldown-limited and re-armed only when the suggestion
 changes. **Row weights all sum to 4** — this is load-bearing for the nudge, which compares totals
 ACROSS cells; Moderate at 1.5/1.5 (sum 3) made the middle row lose by construction (measured 2x
-artifact on the starting loadout). A genuinely full bag **evicts its lowest max-over-all-cells item**
+artifact on the starting loadout). **Minipets bypass the scorer entirely**: a `petSummon` def is
+always `worthPickingUp`, always a keeper, and **scores 0 as gear** — the last part matters, because
+its LEGENDARY rarity otherwise leaked a phantom tiebreak score into the RING column (a bag pet was
+"the best fieldable ring" for a fresh character, suppressing real ring pickups). A genuinely full
+bag **evicts its lowest max-over-all-cells item**
 (Aaron's call — never pauses; pets + quickbar-assigned gear exempt, like "drop all"). Persisted as `PlayerInventory.autoMode`/`buildCell` — **SAVE_VERSION 4**
 (v3 readable via mirror; pre-v4 characters load as classic). EVERY `Inventory::init` on a lane that
 already chose (NEW_GAME wipe, `equipFreshLane`, the client-join wipe) explicitly preserves the two

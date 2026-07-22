@@ -89,6 +89,11 @@ inline void rowWeights(u8 row, f32& offW, f32& defW) {
 
 inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
     if (item.defId == 0xFFFF) return 0.0f;                       // empty scores nothing
+    // A minipet is not gear: it claims the ring slot only to satisfy the loader, and its high
+    // rarity would otherwise leak a phantom tiebreak score into the RING column — a bag pet was
+    // "the best fieldable ring" for a fresh character, suppressing real ring pickups. Pets are
+    // handled by name in worthPickingUp/isKeeper; as GEAR they are worth exactly nothing.
+    if (def.petSummon) return 0.0f;
     const u8 row = buildRow(cell), col = buildCol(cell);
 
     // The family gate: a weapon outside the build's archetype is worth exactly 0, so auto-equip can
@@ -248,8 +253,13 @@ inline f32 bestSlotScore(const PlayerInventory& inv, const ItemDef* defs, u32 de
 // PICKUP filter: grab a ground item only if it would be a real upgrade over everything we can
 // already field, for at least ONE build cell (hysteresis included, so near-duplicates of gear we
 // own stay on the ground — this is the "do not pick up worse gear" half).
+// MINIPETS are unconditionally worth grabbing: a petSummon consumable has no gear stats (score 0
+// in every cell — they claim the ring slot only to satisfy the loader), so the stat filter would
+// walk past what is some of the rarest loot in the game. The gear-side never sees them anyway:
+// auto-equip refuses petSummon and the prune/evict passes exempt them.
 inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
                            const PlayerInventory& inv, const ItemDef* defs, u32 defCount) {
+    if (def.petSummon) return true;
     for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
         const f32 s = score(cand, def, cell);
         if (s <= 0.0f) continue;
@@ -262,10 +272,14 @@ inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
 // PRUNE test: a bag item is a KEEPER if, for at least one build cell, nothing else we own beats it
 // (>= against the best-without-me — deliberately weaker than the pickup filter, so an item we
 // decided to keep is not dropped by the very next pass: asymmetry is what prevents churn).
+// MINIPETS are always keepers — engine callers already skip petSummon before asking, but the pure
+// answer must agree with the pickup filter or a future caller could discard what the vacuum just
+// declared unconditionally worth grabbing.
 inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 backpackIdx) {
     const ItemInstance& it = inv.backpack[backpackIdx];
     if (it.defId == 0xFFFF || it.defId >= defCount) return false;
     const ItemDef& def = defs[it.defId];
+    if (def.petSummon) return true;
     for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
         const f32 s = score(it, def, cell);
         if (s <= 0.0f) continue;

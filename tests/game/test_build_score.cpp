@@ -307,3 +307,44 @@ TEST_CASE("BuildScore: sustained DPS — CDR speeds weapons, reload taxes guns, 
               doctest::Approx(BuildScore::score(plain, carbine, MOD_RANGED)));
     }
 }
+
+TEST_CASE("BuildScore: minipets are always picked up and always kept, never scored as gear") {
+    // A petSummon consumable claims the RING slot only to satisfy the loader — it has zero gear
+    // stats, so the stat filter would leave the rarest loot in the game lying on the ground.
+    // Contract: the vacuum grabs it unconditionally, the prune never discards it, and the gear
+    // side stays blind to it (score 0 in every cell, so it can never displace a real ring).
+    ItemDef defs[2] = {};
+    defs[0].slot = ItemSlot::RING;                 // a genuinely good ring def
+    defs[1].slot = ItemSlot::RING;                 // the minipet (Mini Loot Goblin shape)
+    defs[1].petSummon = true;
+
+    ItemInstance pet{};
+    pet.defId = 1;
+    pet.rarity = Rarity::LEGENDARY;                // pets drop high-rarity — must not matter
+
+    // The pet never competes as gear: zero in every cell despite the rarity.
+    for (u8 cell = 0; cell < 9; cell++)
+        CHECK(BuildScore::score(pet, defs[1], cell) == 0.0f);
+
+    // Worth picking up even when the worn ring is excellent (a stat filter would say no).
+    PlayerInventory inv{};
+    for (auto& e : inv.equipped) e.defId = 0xFFFF;
+    for (auto& b : inv.backpack) b.defId = 0xFFFF;
+    ItemInstance ring{};
+    ring.defId = 0;
+    ring.affixCount = 2;
+    ring.affixes[0] = {AffixType::DAMAGE_PCT, 20.0f};
+    ring.affixes[1] = {AffixType::HEALTH_FLAT, 40.0f};
+    inv.equipped[static_cast<u32>(ItemSlot::RING)] = ring;
+    CHECK(BuildScore::worthPickingUp(pet, defs[1], inv, defs, 2));
+
+    // And once in the bag it is a keeper for every pass, even beside that ring.
+    inv.backpack[0] = pet;
+    CHECK(BuildScore::isKeeper(inv, defs, 2, 0));
+    // Control: a second stat-less NON-pet ring in the bag is dominated (the guard is petSummon,
+    // not "rings are safe") — without this the pet check could pass vacuously.
+    ItemInstance blank{};
+    blank.defId = 0;
+    inv.backpack[1] = blank;
+    CHECK(!BuildScore::isKeeper(inv, defs, 2, 1));
+}

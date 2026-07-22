@@ -45,6 +45,14 @@ Levels grow a third dimension: floors that stack, drop and burn.
   **and sets you on fire**, so the burn keeps ticking after you scramble out — but monsters wade
   through it untouched and use it to flank you. Narrow veins can be jumped; wide lakes can't.
   Stepping-stone causeways cross the sea as optional shortcuts, and the minimap marks lava in orange.
+- **Auto Loot & Equip — a second way to play.** Chosen at character creation (and toggleable any
+  time in the inventory): the game plays your inventory for you. Nearby loot is vacuumed up, and a
+  3×3 build grid (Tanky/Moderate/Glass Cannon × Magic/Melee/Ranged) decides what gets worn — pick a
+  cell and the whole bag re-gears on the spot. The bag keeps best-in-slot gear for *all nine*
+  builds, leaves worse loot on the ground, quietly discards dominated pieces (announced in chat),
+  nudges you when another build could field better gear, and a full bag drops its least useful item
+  instead of stopping. **Minipets are always grabbed and never discarded** — the auto-looter treats
+  them as treasure, not gear. Classic mode is the game exactly as it was.
 
 ### Changed
 
