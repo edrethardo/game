@@ -9,5 +9,6 @@ TEST_CASE("armorMitigation: diminishing returns, 100 armor = 50%, hard cap 80%")
     CHECK(Combat::armorMitigation(0.0f)     == doctest::Approx(0.0f));
     CHECK(Combat::armorMitigation(100.0f)   == doctest::Approx(0.5f));
     CHECK(Combat::armorMitigation(300.0f)   == doctest::Approx(0.75f));
+    CHECK(Combat::armorMitigation(400.0f)   == doctest::Approx(0.80f));   // knee: raw curve meets the cap
     CHECK(Combat::armorMitigation(10000.0f) == doctest::Approx(0.80f));   // cap
 }
