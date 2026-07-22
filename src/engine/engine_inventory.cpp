@@ -453,6 +453,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
         if (dropAllPressed) {
             Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.5f + Vec3{0, 0.5f, 0};
             for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+                // Spare quickbar-assigned gear from the bulk drop — "drop all" is "shed my loot",
+                // not "wipe my configured weapon-swap bar". (Peek before dropFromBackpack removes it.)
+                if (Quickbar::holdsBackpackItem(m_quickbars[m_localPlayerIndex],
+                                                m_inventories[m_localPlayerIndex].backpack[bi].uid)) continue;
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], bi);
                 if (!isItemEmpty(dropped)) {
                     f32 scatter = (bi % 5) * 0.3f - 0.6f;
@@ -622,6 +626,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     const u16 dId = m_inventories[m_localPlayerIndex].backpack[si].defId;
                     if (dId < m_itemDefCount && m_itemDefs[dId].petSummon) continue;
                 }
+                // Quickbar-assigned items sit out the bulk drop too — clearing your bag shouldn't
+                // strip the weapon-swap bar you deliberately configured.
+                if (Quickbar::holdsBackpackItem(m_quickbars[m_localPlayerIndex],
+                                                m_inventories[m_localPlayerIndex].backpack[si].uid)) continue;
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], si);
                 if (!isItemEmpty(dropped)) {
                     f32 angle = si * 0.4f;

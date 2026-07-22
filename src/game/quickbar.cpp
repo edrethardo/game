@@ -40,6 +40,14 @@ void Quickbar::removeItem(QuickbarState& qb, u8 slotIdx) {
     qb.slots[slotIdx] = QuickbarSlot{};
 }
 
+bool Quickbar::holdsBackpackItem(const QuickbarState& qb, u32 itemUid) {
+    if (itemUid == 0) return false;   // 0 = no/empty uid — never a real reference
+    for (u8 s = 0; s < QUICKBAR_SLOTS; s++)
+        if (qb.slots[s].type == QuickbarSlot::BACKPACK_REF && qb.slots[s].itemUid == itemUid)
+            return true;
+    return false;
+}
+
 void Quickbar::syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv) {
     // Fix stale EQUIPPED_REFs: if an item was unequipped (swapped to backpack),
     // convert its quickbar ref from EQUIPPED_REF to BACKPACK_REF so it stays valid

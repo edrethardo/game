@@ -178,6 +178,18 @@ TEST_CASE("Quickbar: swapSlots round-trips") {
     CHECK(qb.slots[1].itemUid == 22);
 }
 
+TEST_CASE("Quickbar::holdsBackpackItem spares quickbar-assigned backpack items from drop-all") {
+    PlayerInventory inv{};
+    QuickbarState   qb{};
+    inv.backpack[0] = makeItem(101);
+    inv.backpack[1] = makeItem(202);
+    Quickbar::assignItem(qb, inv, 0);   // put backpack[0] (uid 101) on the bar
+
+    CHECK(Quickbar::holdsBackpackItem(qb, 101) == true);    // assigned → spared
+    CHECK(Quickbar::holdsBackpackItem(qb, 202) == false);   // not on the bar → dropped
+    CHECK(Quickbar::holdsBackpackItem(qb, 0)   == false);   // empty uid never matches
+}
+
 TEST_CASE("Quickbar: out-of-range slot indices are rejected, not written") {
     PlayerInventory inv{};
     QuickbarState   qb{};

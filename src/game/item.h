@@ -768,6 +768,10 @@ namespace Quickbar {
     void assignItem(QuickbarState& qb, const PlayerInventory& inv, u8 backpackIdx);
     // Remove item from a slot
     void removeItem(QuickbarState& qb, u8 slotIdx);
+    // True if any slot holds a BACKPACK_REF to the item with this uid — i.e. the backpack item is
+    // quickbar-assigned. "Drop all" uses it to SPARE quickbarred gear (as it already spares pets),
+    // so a reflexive bag-clear can't strip your configured weapon-swap bar.
+    bool holdsBackpackItem(const QuickbarState& qb, u32 itemUid);
     // Point a slot at the equipped weapon (the first FREE slot, not necessarily slot 0), repair
     // stale EQUIPPED_REFs, and reclaim BACKPACK_REFs whose item is gone.
     void syncWeaponSlot(QuickbarState& qb, const PlayerInventory& inv);
