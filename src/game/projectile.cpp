@@ -125,7 +125,11 @@ static PlayerHitResult tryHitPlayer(Projectile& p, const AABB& projBox, Player& 
     // and before the damage callback (a fully-negated, returned hit is not damage feedback).
     if (outcome == Combat::BlockOutcome::PERFECT &&
         player.offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY)) {
-        ProjectileSystem::reflectAsParry(p, player.netSlot);
+        // Fire the parried shot where the blocker is LOOKING (aim from yaw/pitch — same convention
+        // as weapon fire), not straight back, so a Mirror Aegis becomes an aimed counter.
+        f32 cp = cosf(player.pitch);
+        Vec3 aimDir = { -sinf(player.yaw) * cp, sinf(player.pitch), -cosf(player.yaw) * cp };
+        ProjectileSystem::reflectAsParry(p, player.netSlot, aimDir);
         return PlayerHitResult::REFLECTED;
     }
     // M10.3: notify the server so it can send SV_DAMAGE_TO_ME to the victim client.
@@ -177,10 +181,13 @@ static PvpProjResult tryHitPvpTargets(Projectile& p, const AABB& projBox) {
         }
         if (out.block == Combat::BlockOutcome::PERFECT &&
             v->offhandSkill == static_cast<u8>(SkillId::PROJECTILE_PARRY)) {
-            // Mirror Aegis: the shot flies back under the blocker's ownership — in PvP that
-            // means it can kill the original shooter. Registry slot, not v->netSlot: the slot
+            // Mirror Aegis: the shot flies out under the blocker's ownership — in PvP that means
+            // it can kill the original shooter. Aimed where the blocker is LOOKING (yaw/pitch), so
+            // it's a counter-shot, not just a bounce-back. Registry slot, not v->netSlot: the slot
             // is authoritative for remote views and couch lanes alike.
-            ProjectileSystem::reflectAsParry(p, ts[i].slot);
+            f32 cp = cosf(v->pitch);
+            Vec3 aimDir = { -sinf(v->yaw) * cp, sinf(v->pitch), -cosf(v->yaw) * cp };
+            ProjectileSystem::reflectAsParry(p, ts[i].slot, aimDir);
             return PvpProjResult::REFLECTED;
         }
         return PvpProjResult::CONSUMED;

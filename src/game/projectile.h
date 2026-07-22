@@ -107,12 +107,20 @@ struct ProjectilePool {
 struct Player;
 
 namespace ProjectileSystem {
-    // Mirror Aegis perfect-block parry: flip the projectile to the blocker and send it back the
-    // way it came at double damage. fromPlayer=true also removes it from every player AABB pass,
-    // so a reflected shot can never re-hit the blocker or a teammate; the enemy's on-hit rider
-    // (poison/slow/...) dies with the parry. Pure — pinned by test_projectile_parry.cpp.
-    inline void reflectAsParry(Projectile& p, u8 newOwnerSlot) {
-        p.velocity      = p.velocity * -1.0f;
+    // Mirror Aegis perfect-block parry: seize the projectile and fire it along `aimDir` — WHERE THE
+    // BLOCKER IS AIMING (their look direction), not just straight back the way it came — at double
+    // damage, keeping the incoming speed. `aimDir` need not be normalized; a (near-)zero aimDir or a
+    // stationary incoming shot falls back to a simple reverse. fromPlayer=true also removes it from
+    // every player AABB pass, so a reflected shot can never re-hit the blocker or a teammate; the
+    // enemy's on-hit rider (poison/slow/...) dies with the parry. Pure — pinned by
+    // test_projectile_parry.cpp.
+    inline void reflectAsParry(Projectile& p, u8 newOwnerSlot, Vec3 aimDir) {
+        f32 speed = length(p.velocity);
+        if (speed < 0.001f) speed = 10.0f;               // guard a (near-)stationary incoming shot
+        f32 aimLen = length(aimDir);
+        Vec3 dir = (aimLen > 1e-4f) ? aimDir * (1.0f / aimLen)   // aim where the blocker looks
+                                    : p.velocity * (-1.0f / speed); // degenerate aim → reverse
+        p.velocity      = dir * speed;
         p.fromPlayer    = true;
         p.ownerSlot     = newOwnerSlot;
         p.damage       *= 2.0f;

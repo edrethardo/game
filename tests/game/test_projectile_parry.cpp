@@ -1,14 +1,15 @@
 // test_projectile_parry.cpp — Mirror Aegis reflect: a perfectly-blocked projectile survives,
-// flips sides, reverses course, doubles its damage, and sheds the enemy's on-hit rider.
-// fromPlayer=true is the load-bearing bit: player-owned projectiles are never AABB-tested
-// against players, so a reflected shot can never re-hit the blocker or a teammate.
+// flips sides, flies WHERE THE BLOCKER AIMS (at the incoming speed), doubles its damage, and sheds
+// the enemy's on-hit rider. fromPlayer=true is the load-bearing bit: player-owned projectiles are
+// never AABB-tested against players, so a reflected shot can never re-hit the blocker or a teammate.
 
 #include <doctest/doctest.h>
 #include "game/projectile.h"
+#include <cmath>
 
-TEST_CASE("reflectAsParry: flips owner/side, reverses velocity, doubles damage") {
+TEST_CASE("reflectAsParry: flips owner/side, aims along aimDir at incoming speed, doubles damage") {
     Projectile p{};
-    p.velocity      = {10.0f, 2.0f, -4.0f};
+    p.velocity      = {10.0f, 2.0f, -4.0f};   // incoming speed = sqrt(120) ≈ 10.9545
     p.damage        = 25.0f;
     p.fromPlayer    = false;
     p.ownerSlot     = 0xFF;
@@ -16,17 +17,28 @@ TEST_CASE("reflectAsParry: flips owner/side, reverses velocity, doubles damage")
     p.onHitEffect   = 1;                   // enemy poison rider
     p.onHitDuration = 3.0f;
 
-    ProjectileSystem::reflectAsParry(p, /*newOwnerSlot=*/2);
+    const f32 speed = std::sqrt(120.0f);
+    // Aim straight along -Z; the reflected shot must fly there at the preserved speed.
+    ProjectileSystem::reflectAsParry(p, /*newOwnerSlot=*/2, /*aimDir=*/Vec3{0.0f, 0.0f, -1.0f});
 
-    CHECK(p.velocity.x == doctest::Approx(-10.0f));
-    CHECK(p.velocity.y == doctest::Approx(-2.0f));
-    CHECK(p.velocity.z == doctest::Approx(4.0f));
+    CHECK(p.velocity.x == doctest::Approx(0.0f));
+    CHECK(p.velocity.y == doctest::Approx(0.0f));
+    CHECK(p.velocity.z == doctest::Approx(-speed));
     CHECK(p.fromPlayer);                    // never re-tested vs players
     CHECK(p.ownerSlot == 2);                // kills credit the blocker
     CHECK(p.damage == doctest::Approx(50.0f));
-    CHECK(p.lifetime == doctest::Approx(3.0f));  // fresh flight window for the return trip
+    CHECK(p.lifetime == doctest::Approx(3.0f));  // fresh flight window for the aimed counter
     CHECK(p.onHitEffect == 0);              // the rider dies with the parry
     CHECK(p.onHitDuration == 0.0f);
+}
+
+TEST_CASE("reflectAsParry: a (near-)zero aimDir falls back to a straight reverse") {
+    Projectile p{};
+    p.velocity = {10.0f, 2.0f, -4.0f};
+    ProjectileSystem::reflectAsParry(p, /*newOwnerSlot=*/1, /*aimDir=*/Vec3{0.0f, 0.0f, 0.0f});
+    CHECK(p.velocity.x == doctest::Approx(-10.0f));
+    CHECK(p.velocity.y == doctest::Approx(-2.0f));
+    CHECK(p.velocity.z == doctest::Approx(4.0f));
 }
 
 // sweepSampleCount — the tunneling fix: a projectile that outruns its own hitbox in one tick
