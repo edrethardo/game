@@ -96,7 +96,10 @@ TEST_CASE("isLavaFloor: only a FEW Hellforge floors melt, and never one outside 
         for (u32 f = 1; f <= 60; f++) {
             const bool lava = LevelGen::isLavaFloor(seed, f);
             CAPTURE(seed); CAPTURE(f);
-            if (lava) { CHECK(f >= 31); CHECK(f <= 40); }          // never outside Hellforge
+            if (lava) {
+                CHECK(f >= 31); CHECK(f <= 40);                     // never outside Hellforge
+                CHECK(f % 5 != 0);                                  // and NEVER a boss floor
+            }
             CHECK(lava == LevelGen::isLavaFloor(seed, f));          // deterministic
         }
     }
@@ -110,5 +113,10 @@ TEST_CASE("isLavaFloor: only a FEW Hellforge floors melt, and never one outside 
             total++;
         }
     CHECK(lavaCount > total / 10);       // > 10% — the feature actually appears
+    // 35 and 40 are boss floors, so 8 of the tier's 10 are eligible at all.
+    for (u32 s = 0; s < 400; s++) {
+        CHECK_FALSE(LevelGen::isLavaFloor(s * 2654435761u, 35));
+        CHECK_FALSE(LevelGen::isLavaFloor(s * 2654435761u, 40));
+    }
     CHECK(lavaCount < total / 2);        // < 50% — still the exception, not the tier
 }

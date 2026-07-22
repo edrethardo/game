@@ -197,7 +197,7 @@ Physics is universal (any enemy on any pad with upward intent), routing is opt-i
 recorded pads — the Stacked Loop deliberately records none, keeping its void pads the player's
 shortcut off the ramps.
 
-**Hellforge LAVA floors (a FEW of 31-40).** `LevelGen::isLavaFloor(levelSeed, floor)` picks ~3 of the tier's 10 floors (seed-derived, integer-only, so host and client agree — it changes GEOMETRY); the rest stay stone. `--lava` forces it on any 31-40 floor, and because the theme skips stacked styles it also forces a flat style so the door can't silently no-op. On a molten floor the walls MELT. `applyLavaTheme` (engine_startgame.cpp,
+**Hellforge LAVA floors (a FEW of 31-40).** `LevelGen::isLavaFloor(levelSeed, floor)` picks a few of the tier's floors (seed-derived, integer-only, so host and client agree — it changes GEOMETRY); the rest stay stone. **Never a BOSS floor** (35 and 40): `spawnFloorBoss` expands a room into an arena and rebuilds the mesh *after* the theme pass poured the lava, so the two would fight over the same cells, and a milestone fight staged in a lava sea is not the encounter that was designed. x9 floors are Descent mazes and stacked styles are excluded too, so in practice the eligible floors are 31-34 and 36-38. `--lava` forces it on any 31-40 floor, and because the theme skips stacked styles it also forces a flat style so the door can't silently no-op. On a molten floor the walls MELT. `applyLavaTheme` (engine_startgame.cpp,
 run in the theme block after the carve) turns every INTERIOR `CELL_SOLID` cell into a **walkable**
 `CELL_LAVA` surface, so a Hellforge floor reads as islands of stone in a molten sea with **no
 sightline blockers left** — a deliberate trade of readable cover for drama. The outer ring stays

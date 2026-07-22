@@ -712,7 +712,14 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
         // Only a FEW floors in the tier melt (LevelGen::isLavaFloor, ~3 of 10, seed-derived so host
         // and client agree) — ten straight lava floors stops being an event and becomes the norm.
         // --lava forces it on any Hellforge-range floor for testing.
-        const bool molten = (m_forceLava && m_level.currentFloor >= 31 && m_level.currentFloor <= 40)
+        // The dev door honours the same boss exclusion as the seed roll — forcing lava onto a boss
+        // floor would test a floor that can never ship, and would collide with the arena expansion.
+        const bool bossFloor = (m_level.currentFloor % 5 == 0);
+        if (m_forceLava && bossFloor && m_level.currentFloor >= 31 && m_level.currentFloor <= 40)
+            LOG_INFO("Launch: --lava declined on floor %u — boss floors are never molten",
+                     m_level.currentFloor);
+        const bool molten = (m_forceLava && !bossFloor &&
+                             m_level.currentFloor >= 31 && m_level.currentFloor <= 40)
                           || LevelGen::isLavaFloor(m_level.levelSeed, m_level.currentFloor);
         if (molten && usesBalconyEndpoints(layoutStyle))
             LOG_INFO("Hellforge: floor %u rolled molten but style '%s' is stacked — kept solid",

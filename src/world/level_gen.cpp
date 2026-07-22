@@ -1325,6 +1325,12 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
 
 bool LevelGen::isLavaFloor(u32 levelSeed, u32 floor) {
     if (floor < 31 || floor > 40) return false;
+    // Never a BOSS floor (every 5th — so 35 and 40 in this tier). spawnFloorBoss expands a room into
+    // an arena and rebuilds the level mesh AFTER the theme pass has already poured lava, so the two
+    // would fight over the same cells; and a milestone fight staged in a lava sea is a different
+    // encounter from the one that was designed. The single source of truth for "is this floor
+    // molten", so the exclusion holds for the dev door too.
+    if (floor % 5 == 0) return false;
     // Integer avalanche only (no float, no libm) — same rule as the carve: host and client must
     // agree bit-for-bit or one of them melts a floor the other does not.
     u32 h = levelSeed ^ (floor * 2654435761u);
