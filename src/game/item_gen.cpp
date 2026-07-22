@@ -50,15 +50,22 @@ Rarity ItemGen::rollRarity(u8 enemyLevel) {
     f32 rarePct      = 10.0f;
     f32 legendaryPct =  2.0f;
 
-    // Per level above 1: common drops faster, legendary rises faster so deep
-    // floors feel rewarding.  At floor 10 legendary is ~11%, floor 25 ~26%.
+    // Per level above 1: common drops faster, legendary rises (+0.5%/level). The legendary
+    // CEILING scales with DIFFICULTY — Normal 3%, Nightmare 4.5%, Hell 6% — derived from
+    // enemyLevel, which is the EFFECTIVE floor (floor + difficulty*50), so the tier is
+    // (level-1)/50. The ramp still applies UNDER the ceiling: Normal climbs to 3% over its
+    // first few floors then holds; Nightmare/Hell start well past their ceilings and sit flat
+    // at 4.5% / 6%. (Down from the old flat 50% cap that poured legendaries out.)
     f32 levelsAbove1 = static_cast<f32>(enemyLevel > 1 ? enemyLevel - 1 : 0);
     commonPct    -= levelsAbove1 * 1.5f;
-    legendaryPct += levelsAbove1 * 1.0f;
+    legendaryPct += levelsAbove1 * 0.5f;
 
     // Clamp to sane ranges
-    if (commonPct    < 0.0f)   commonPct    = 0.0f;
-    if (legendaryPct > 50.0f)  legendaryPct = 50.0f;
+    if (commonPct < 0.0f) commonPct = 0.0f;
+    u32 diffTier = (enemyLevel > 1) ? (enemyLevel - 1) / 50u : 0u;   // 0=Normal, 1=Nightmare, 2=Hell
+    if (diffTier > 2) diffTier = 2;                                  // Hell caps the ceiling
+    f32 legendaryCap = 3.0f + 1.5f * static_cast<f32>(diffTier);     // 3% / 4.5% / 6%
+    if (legendaryPct > legendaryCap) legendaryPct = legendaryCap;
 
     // Remaining budget split evenly between magic and rare to keep sum = 100
     f32 remaining = 100.0f - commonPct - legendaryPct;
