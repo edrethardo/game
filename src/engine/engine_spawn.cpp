@@ -1699,7 +1699,13 @@ void Engine::spawnFloorShrines(const DungeonResult& dungeon)
     if (m_netRole == NetRole::CLIENT) return;   // world state is the server's to author
 
     u8 placed = 0;
-    for (u32 r = 1; r < dungeon.roomCount && placed < Shrine::MAX_PER_FLOOR; r++) {
+    for (u32 r = 0; r < dungeon.roomCount && placed < Shrine::MAX_PER_FLOOR; r++) {
+        // Never in the SPAWN room: a shrine sits at its room's centre, and spawnPos IS the spawn
+        // room's centre — so a roll landing there put the shrine literally at the player's feet.
+        // (The old loop started at r=1, assuming room 0 was the spawn room; finalizeDungeon picks
+        // spawnRoomIdx freely — dead-end heuristic or a style's forced pick — so that guard was
+        // wrong on most floors AND silently banned room 0 from ever holding a shrine.)
+        if (r == dungeon.spawnRoomIdx) continue;
         if (static_cast<f32>(std::rand()) / static_cast<f32>(RAND_MAX) >= Shrine::ROOM_CHANCE)
             continue;
 
