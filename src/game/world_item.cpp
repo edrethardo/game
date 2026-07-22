@@ -66,6 +66,19 @@ bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 
     if (grid) {
         Vec3 itemHalf = {0.15f, 0.15f, 0.15f}; // small AABB for item
         Collision::ensureNotInWall(position, itemHalf, *grid);
+
+        // Rest the STORED position on the supporting surface under the spawn point (story-aware:
+        // a balcony kill's loot stays on the balcony, a mid-air death's drop lands on whatever is
+        // below). This is the same effectiveFloorHeight read the renderer resolves, and that
+        // agreement is the bug-fix: an enemy killed AIRBORNE (a flying bat at 1.5-3 m, a
+        // pad-launched or vaulting chaser mid-arc) used to store its drop at death height — the
+        // model DREW on the floor at your feet, but interact/pickup measured against the stored
+        // mid-air Y and refused anything past INTERACT_VERTICAL_REACH: visible loot that no mode
+        // could ever grab, with nothing on screen to say why.
+        u32 gx, gz;
+        if (LevelGridSystem::worldToGrid(*grid, position, gx, gz) &&
+            !LevelGridSystem::isSolid(*grid, gx, gz))
+            position.y = LevelGridSystem::effectiveFloorHeight(*grid, gx, gz, position.y);
     }
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {

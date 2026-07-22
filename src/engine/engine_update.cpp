@@ -2214,6 +2214,7 @@ void Engine::updatePlayerPickup(f32 dt) {
     InteractState& st = m_interact[m_localPlayerIndex];
     resolveInteractTargets(st);
 
+
     // The button rule itself is pure and lives in game/interact.h (and is unit-tested there): an
     // item always wins a tap; a hold reaches past it to the shrine, then the exit.
     // The exit and The Source portal are one priority class: both are "leave the floor", both are
@@ -2540,7 +2541,7 @@ void Engine::handleDropRequest(u8 playerSlot, u8 slotKind, u8 slotIndex,
     // Spawn the world item carrying the client's rolled stats. The snapshot's
     // SnapWorldItem (R8/D8) propagates damage/affixes/etc. to all clients including
     // the requester so the dropped item is pickable again.
-    WorldItemSystem::spawn(m_worldItems, it, dropPos);
+    WorldItemSystem::spawn(m_worldItems, it, dropPos, &m_level.grid);
 }
 
 // CLIENT: request respawn after death. A header-only reliable CL_RESPAWN packet — NOT routed

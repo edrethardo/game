@@ -742,7 +742,7 @@ void Engine::handleNormalLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
             globe.defId = GLOBE_HEALTH_ID; // single globe type
             globe.uid   = m_worldItems.nextUid++;
             WorldItemSystem::spawn(m_worldItems, globe,
-                                   pos + Vec3{0.2f, 0.5f, 0.0f});
+                                   pos + Vec3{0.2f, 0.5f, 0.0f}, &m_level.grid);
         }
     }
 

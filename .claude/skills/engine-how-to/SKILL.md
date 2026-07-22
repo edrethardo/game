@@ -111,6 +111,19 @@ debug keys) lives in the `engine-reference` skill.
   add verticality, audit EVERY 2-D overlap/query for the same assumption.
 - **Enemy density is per-STORY, not per-floor.** A stacked floor has ~4× the walkable area, so
   matching a flat floor's *total* count makes each story feel empty.
+- **Making ONE consumer story-aware while others read the same RAW state is the inverse story-blind
+  bug.** The world-item render fix resolved a drop's DRAWN position through `effectiveFloorHeight`
+  (so balcony loot stopped rendering under the slab) — but the STORED `WorldItem.position` kept the
+  raw death Y, and interact/pickup/auto-loot all measure that stored Y against
+  `INTERACT_VERTICAL_REACH` (2 m). An enemy killed AIRBORNE (a flying bat at 1.5-3 m, a
+  pad-launched or vaulting chaser mid-arc) produced loot whose model drew ON the floor at your feet
+  while every grab path refused it — "I can see the item models but not the pickup tooltip", with
+  auto mode masking it by silently skipping the same items. The fix: `WorldItemSystem::spawn` snaps
+  the STORED position onto its supporting surface (same `effectiveFloorHeight` read the renderer
+  uses), so all consumers agree by construction — and every drop call site must pass the grid
+  (a `nullptr` grid stores the raw Y verbatim). Pinned by the spawn-snap case in
+  `tests/game/test_pet_item.cpp`. When you make a read path story-aware, fix the DATA it reads,
+  not just that one reader.
 
 - **`snapEntityToFloor` is STORY-AWARE now (uses `effectiveFloorHeight`, not raw `getFloorHeight`) — gated by `CELL_PLATFORM`, not by layout.** It was made two-story-aware for `VERTICAL_HALL` so enemies climb ramps, stand under balconies, and drop off edges. On a cell with no slab it's identical to before (zero regression), so single-story floors are untouched. **But the gate is "does this cell have a platform", not "is this a vertical hall":** if you stamp `CELL_PLATFORM` onto ANY floor (a new style, a boss arena, a prop), enemies there instantly become story-aware too — they'll try to stand on / walk under it. That's usually what you want, but the **cross-story CHASE** (climbing after the player) only fires when `DungeonResult.portals` is non-empty (only `carveVerticalHall` fills it), so a platform without a recorded ramp portal is a place enemies can be ON but won't route UP to — a one-way-up dead end for AI, like a pad/ledge. Record a `StoryPortal` for every ramp you want enemies to climb. Two functions changed in lockstep (`enemy_ai.cpp` `snapEntityToFloor(Entity&)` and the `Collision::snapEntityToFloor(Vec3&,…)` twin `ensureNotInWall` calls) — keep them identical.
 - **Player gravity is integrated in EXACTLY ONE place — `Collision::moveAndSlide`.** For a long time it was ALSO applied inside `applyMovement` (`player.cpp`, `velocity.y -= 20*dt` every airborne tick), and since `PlayerController::update`/`updateNetPlayerFromInput` run `applyMovement` and THEN `moveAndSlide` every tick, gravity landed twice → the felt gravity was **-40 while the `GRAVITY` constant said -20**, so the jump reached ~0.8 m / 0.4 s instead of the 1.6 m / 0.8 s the `JUMP_SPEED`/`GRAVITY` pair described. It never surfaced as a co-op mismatch because *all four* paths (SP, client prediction, server drain, reconcile replay) double-count identically — a bug that's invisible precisely because it's consistent. The fix removed the `applyMovement` copy and set `GRAVITY = -40` (single-applied) to keep the same arc. **If you touch jump/fall feel, change `JUMP_SPEED`/`GRAVITY` in `world/collision.h` — never re-add a gravity term to `applyMovement`.** The arc is pinned by `tests/game/test_jump.cpp` (`apex = v²/2|g|`, `airTime = 2v/|g|`).

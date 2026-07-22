@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "game/item.h"
+#include "world/level_grid.h"
 
 #include <json/nlohmann/json.hpp>
 #include <cstring>
@@ -126,4 +127,52 @@ TEST_CASE("WorldItemSystem: a petSummon drop outlives the 60 s trash timer") {
 
     CHECK(pool.items[0].active);            // the pet is still there
     CHECK(!pool.items[1].active);           // the control expired on schedule
+}
+
+// 5. A spawned drop's STORED position rests on its supporting surface (story-aware). This is the
+//    guard against the airborne-death bug: a flying bat (or a pad-launched/vaulting chaser) dies at
+//    1.5-3 m, and the raw death Y used to be stored verbatim — the renderer snapped the MODEL to
+//    the floor while interact/pickup measured the stored mid-air Y against INTERACT_VERTICAL_REACH
+//    (2 m), leaving visible loot that no mode could grab and no tooltip to say why. Spawn now snaps
+//    the stored Y through the same effectiveFloorHeight read the renderer uses, so the two agree.
+TEST_CASE("WorldItemSystem: spawn rests the stored position on the story surface under it") {
+    LevelGrid g;
+    LevelGridSystem::init(g, 8, 8, 1.0f);
+    for (u32 z = 0; z < 8; z++)
+        for (u32 x = 0; x < 8; x++) {
+            GridCell& c = LevelGridSystem::getCell(g, x, z);
+            c.flags = CELL_FLOOR | CELL_CEILING;
+            c.floorHeight = 0;
+            c.ceilingHeight = 32;   // 8 m — clears the balcony slab below
+        }
+    // Cell (5,5) carries a 3 m balcony slab (the vhall arcade shape).
+    LevelGridSystem::setPlatform(LevelGridSystem::getCell(g, 5, 5), 12, 1);
+
+    WorldItemPool pool;
+    WorldItemSystem::init(pool);
+    ItemInstance it;
+    it.defId = 0; it.rarity = Rarity::COMMON;
+
+    // A bat's death at 2.5 m over open floor: the drop lands on the ground.
+    it.uid = pool.nextUid++;
+    REQUIRE(WorldItemSystem::spawn(pool, it, {2.5f, 2.5f, 2.5f}, &g));
+    CHECK(pool.items[0].position.y == doctest::Approx(0.0f));
+
+    // A kill ON the balcony (feet 3 m, death pos ~3.4): the loot STAYS on the balcony slab.
+    it.uid = pool.nextUid++;
+    REQUIRE(WorldItemSystem::spawn(pool, it, {5.5f, 3.4f, 5.5f}, &g));
+    CHECK(pool.items[1].position.y == doctest::Approx(3.0f));
+
+    // An airborne death UNDER the balcony (walk-under arcade, 1.5 m): lands on the ground, not
+    // teleported up onto the slab above.
+    it.uid = pool.nextUid++;
+    REQUIRE(WorldItemSystem::spawn(pool, it, {5.5f, 1.5f, 5.5f}, &g));
+    CHECK(pool.items[2].position.y == doctest::Approx(0.0f));
+
+    // No grid (legacy/net-mirror callers): the position is stored verbatim.
+    it.uid = pool.nextUid++;
+    REQUIRE(WorldItemSystem::spawn(pool, it, {3.5f, 2.5f, 3.5f}, nullptr));
+    CHECK(pool.items[3].position.y == doctest::Approx(2.5f));
+
+    LevelGridSystem::shutdown(g);
 }

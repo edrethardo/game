@@ -480,7 +480,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 u8 idx = m_invCursorIndex;
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], idx);
                 if (!isItemEmpty(dropped)) {
-                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
                     AudioSystem::play(SfxId::ITEM_DROP);
                     if (m_netRole == NetRole::CLIENT) sendDropRequest(0, idx, dropped, dropPos); // R11
                 }
@@ -489,7 +489,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                     static_cast<ItemSlot>(eqIdx));
                 if (!isItemEmpty(dropped)) {
-                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
                     AudioSystem::play(SfxId::ITEM_DROP);
                     if (m_netRole == NetRole::CLIENT) sendDropRequest(1, eqIdx, dropped, dropPos); // R11
                 }
@@ -508,7 +508,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 if (!isItemEmpty(dropped)) {
                     f32 scatter = (bi % 5) * 0.3f - 0.6f;
                     Vec3 spawnPos = dropPos + Vec3{scatter, 0, (bi / 5) * 0.3f};
-                    WorldItemSystem::spawn(m_worldItems, dropped, spawnPos);
+                    WorldItemSystem::spawn(m_worldItems, dropped, spawnPos, &m_level.grid);
                     if (m_netRole == NetRole::CLIENT) sendDropRequest(0, bi, dropped, spawnPos); // R11
                 }
             }
@@ -664,7 +664,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 u8 idx = hit.index;
                 ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], idx);
                 if (!isItemEmpty(dropped)) {
-                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
                     AudioSystem::play(SfxId::ITEM_DROP);
                     if (m_netRole == NetRole::CLIENT) sendDropRequest(0, idx, dropped, dropPos); // R11
                 }
@@ -675,7 +675,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                     static_cast<ItemSlot>(eqIdx));
                 if (!isItemEmpty(dropped)) {
-                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                    WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
                     Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                     AudioSystem::play(SfxId::ITEM_DROP);
                     if (m_netRole == NetRole::CLIENT) sendDropRequest(1, eqIdx, dropped, dropPos); // R11
@@ -707,7 +707,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     f32 angle = si * 0.4f;
                     Vec3 offset = {sinf(angle) * 0.5f, 0, cosf(angle) * 0.5f};
                     Vec3 spawnPos = dropBase + offset;
-                    WorldItemSystem::spawn(m_worldItems, dropped, spawnPos);
+                    WorldItemSystem::spawn(m_worldItems, dropped, spawnPos, &m_level.grid);
                     if (m_netRole == NetRole::CLIENT) sendDropRequest(0, si, dropped, spawnPos); // R11
                 }
             }
@@ -780,7 +780,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                 if (m_dragState.source == DragSource::BACKPACK) {
                     ItemInstance dropped = Inventory::dropFromBackpack(m_inventories[m_localPlayerIndex], m_dragState.sourceIndex);
                     if (!isItemEmpty(dropped)) {
-                        WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                        WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
                         AudioSystem::play(SfxId::ITEM_DROP);
                         // R11 — this drag-out path was the ONE drop route that never told the
                         // server: on a CLIENT the predicted ground item was wiped by the next
@@ -792,7 +792,7 @@ void Engine::updateInventoryInteraction(f32 dt) {
                     ItemInstance dropped = Inventory::dropFromEquipment(m_inventories[m_localPlayerIndex],
                         static_cast<ItemSlot>(m_dragState.sourceIndex));
                     if (!isItemEmpty(dropped)) {
-                        WorldItemSystem::spawn(m_worldItems, dropped, dropPos);
+                        WorldItemSystem::spawn(m_worldItems, dropped, dropPos, &m_level.grid);
                         Quickbar::syncWeaponSlot(m_quickbars[m_localPlayerIndex], m_inventories[m_localPlayerIndex]);
                         AudioSystem::play(SfxId::ITEM_DROP);
                         // R11 — same fix as the backpack branch above (equipment flavor).
