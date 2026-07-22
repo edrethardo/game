@@ -30,9 +30,14 @@ EnemyCurve enemyTrashAt(const EnemyDefTable& table, u8 rawFloor, u8 difficulty) 
         hit[i] = defs[i]->damage * dmMul;
         dps[i] = (defs[i]->attackCooldown > 0.0f) ? hit[i] / defs[i]->attackCooldown : hit[i];
     }
+    // Min/max by scan BEFORE any medianOf call — medianOf sorts in place, and leaning on
+    // that side-effect made correctness depend on statement order (a reorder trap).
+    c.hpMin = c.hpMax = hp[0];
+    for (u32 i = 1; i < n; i++) {
+        if (hp[i] < c.hpMin) c.hpMin = hp[i];
+        if (hp[i] > c.hpMax) c.hpMax = hp[i];
+    }
     c.hpMedian  = medianOf(hp, n);
-    c.hpMin     = hp[0];              // medianOf sorted the array in place
-    c.hpMax     = hp[n - 1];
     c.hitMedian = medianOf(hit, n);
     c.dpsMedian = medianOf(dps, n);
     return c;
