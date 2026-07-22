@@ -115,3 +115,16 @@ TEST_CASE("BuildScore: cell encoding round-trips and the default is Moderate/Mel
     CHECK(BuildScore::buildRow(BuildScore::DEFAULT_BUILD_CELL) == 1);
     CHECK(BuildScore::buildCol(BuildScore::DEFAULT_BUILD_CELL) == 1);
 }
+
+TEST_CASE("PlayerInventory v4 tail: classic by default, deterministic bytes") {
+    // Every pre-v4 save loads through a mirror into PlayerInventory{} — so these defaults ARE the
+    // migration: old characters must come up in classic mode with the default build. The reserved
+    // bytes must be zero because the struct is serialized as a raw dump (padding would be
+    // indeterminate; explicit bytes are not).
+    PlayerInventory inv{};
+    CHECK(inv.autoMode == 0);
+    CHECK(inv.buildCell == BuildScore::DEFAULT_BUILD_CELL);
+    CHECK(inv.reservedAuto0 == 0);
+    CHECK(inv.reservedAuto1 == 0);
+    CHECK(sizeof(PlayerInventory) == 1680);   // v4 size — also pinned by engine_persist static_asserts
+}

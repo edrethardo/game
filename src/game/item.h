@@ -557,6 +557,17 @@ struct PlayerInventory {
     f32 bonusReloadSpeedPct     = 0.0f;
     f32 bonusEnergyFlat         = 0.0f;
     f32 bonusAttackSpeedPct     = 0.0f;  // v3 field (gloves) — appended last, see WARNING above
+
+    // --- v4 fields: Auto Loot & Equip (docs/superpowers/specs/2026-07-22-auto-loot-equip-design.md).
+    // autoMode 0 = classic (every pre-v4 save loads as this), 1 = auto loot & equip. buildCell is
+    // the 3x3 grid selection, row*3+col (BuildScore::DEFAULT_BUILD_CELL = Moderate/Melee). The two
+    // reserved bytes make the appended block exactly one f32-alignment quantum, so sizeof grows by
+    // a deterministic 4 with NO compiler padding inside it — padding bytes are not covered by
+    // member initializers, and this struct is serialized as a raw byte dump.
+    u8 autoMode      = 0;
+    u8 buildCell     = 4;                // BuildScore::DEFAULT_BUILD_CELL (item.h can't include it)
+    u8 reservedAuto0 = 0;
+    u8 reservedAuto1 = 0;
 };
 
 // ---- World item (dropped loot on the ground) ----

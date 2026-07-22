@@ -62,17 +62,21 @@ extern bool s_firstKillDropGiven;
 extern u16  s_sourceShards;   // secret superboss key — session-only set of collected shards
 extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
+// Version 4 = Auto Loot & Equip: autoMode + buildCell (+2 reserved) appended to
+//             PlayerInventory. Aaron explicitly granted this bump (2026-07-22).
+//             Pre-v4 characters load as classic mode with the default build.
 // Version 3 = GLOVES equipment slot (PlayerInventory.equipped grows 6→7) + the
-//             bonusAttackSpeedPct cache field. Header layout is UNCHANGED.
+//             bonusAttackSpeedPct cache field. Still READABLE via LegacyPlayerInventoryV3.
 // Version 2 = adds m_difficulty byte to header. Still READABLE (see LegacyPlayerInventoryV2
-//             below) — loaded v2 characters migrate to v3 on their next save.
+//             below) — loaded legacy characters migrate to v4 on their next save.
 // Version 1 saves are incompatible.
-static constexpr u32 SAVE_VERSION           = 3;
+static constexpr u32 SAVE_VERSION           = 4;
+static constexpr u32 SAVE_VERSION_LEGACY_V3 = 3;
 static constexpr u32 SAVE_VERSION_LEGACY_V2 = 2;
 
 // True for any version this build can read (the current one or a supported legacy one).
 static bool saveVersionReadable(u32 ver) {
-    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V2;
+    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V3 || ver == SAVE_VERSION_LEGACY_V2;
 }
 
 // --- Legacy v2 on-disk mirror of PlayerInventory -----------------------------------------
@@ -89,12 +93,27 @@ struct LegacyPlayerInventoryV2 {
         bonusRange, bonusDamageToFlying, bonusClipSizePct, bonusReloadSpeedPct, bonusEnergyFlat;
 };
 
+// --- Legacy v3 on-disk mirror of PlayerInventory -----------------------------------------
+// v3 saves dumped the pre-Auto-Loot PlayerInventory: 7 equipped slots and 15 bonus f32s, no
+// autoMode/buildCell tail. Same member types ⇒ same compiler layout, so a v3 blob freads in
+// one piece and maps into the v4 struct (the new tail keeps its defaults: classic mode).
+struct LegacyPlayerInventoryV3 {
+    ItemInstance equipped[static_cast<u32>(ItemSlot::COUNT)] = {};
+    ItemInstance backpack[MAX_INVENTORY_ITEMS] = {};
+    u8           backpackCount = 0;
+    f32 bonusDamageFlat, bonusDamagePct, bonusHealthFlat, bonusHealthPct, bonusMoveSpeed,
+        bonusCooldownReduction, bonusLifeOnHit, bonusProjectileSpeedPct, bonusConeAngle,
+        bonusRange, bonusDamageToFlying, bonusClipSizePct, bonusReloadSpeedPct, bonusEnergyFlat,
+        bonusAttackSpeedPct;
+};
+
 // Size guards: if any of these fire, the on-disk layout drifted — bump SAVE_VERSION, add a
 // new Legacy*V<n> mirror for the previous layout, and extend the readers. NEVER ship a layout
 // change under an unchanged version (that's what silently corrupted pre-v3 saves' class byte).
 static_assert(sizeof(ItemInstance)            == 52,   "ItemInstance layout drifted — see comment above");
 static_assert(sizeof(LegacyPlayerInventoryV2) == 1620, "v2 mirror must match the historical v2 blob size");
-static_assert(sizeof(PlayerInventory)         == 1676, "PlayerInventory layout drifted — see comment above");
+static_assert(sizeof(LegacyPlayerInventoryV3) == 1676, "v3 mirror must match the historical v3 blob size");
+static_assert(sizeof(PlayerInventory)         == 1680, "PlayerInventory layout drifted — see comment above");
 static_assert(sizeof(QuickbarState)           == 36,   "QuickbarState layout drifted — see comment above");
 
 // Read one PlayerInventory blob at the given save version. v3 reads the struct directly;
@@ -103,6 +122,17 @@ static_assert(sizeof(QuickbarState)           == 36,   "QuickbarState layout dri
 static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
     if (ver == SAVE_VERSION)
         return std::fread(&out, sizeof(PlayerInventory), 1, f) == 1;
+    if (ver == SAVE_VERSION_LEGACY_V3) {
+        // v3: identical up to the v4 tail — items copy 1:1, autoMode/buildCell keep their
+        // defaults (classic, Moderate/Melee), bonus caches are rebuilt by recalculateStats.
+        LegacyPlayerInventoryV3 legacy;
+        if (std::fread(&legacy, sizeof(LegacyPlayerInventoryV3), 1, f) != 1) return false;
+        out = PlayerInventory{};
+        for (u32 s = 0; s < static_cast<u32>(ItemSlot::COUNT); s++) out.equipped[s] = legacy.equipped[s];
+        for (u32 b = 0; b < MAX_INVENTORY_ITEMS; b++) out.backpack[b] = legacy.backpack[b];
+        out.backpackCount = legacy.backpackCount;
+        return true;
+    }
     LegacyPlayerInventoryV2 legacy;
     if (std::fread(&legacy, sizeof(LegacyPlayerInventoryV2), 1, f) != 1) return false;
     out = PlayerInventory{};
