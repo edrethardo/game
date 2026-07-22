@@ -17,6 +17,12 @@ TEST_CASE("instant reload collapses to the no-clip formula") {
           == doctest::Approx(WeaponDps::sustained(12.0f, 0.35f, 0.0f, 0.0f)));
 }
 
+TEST_CASE("shots below 1 mean no magazine: reload is ignored") {
+    // The sentinel boundary — the one behavioral divergence from the raw cycle formula.
+    CHECK(WeaponDps::sustained(12.0f, 0.35f, 0.5f, 1.2f)
+          == doctest::Approx(WeaponDps::sustained(12.0f, 0.35f, 0.0f, 0.0f)));
+}
+
 TEST_CASE("expected crit multiplier") {
     CHECK(WeaponDps::expectedCritMult(0.05f, 2.0f) == doctest::Approx(1.05f));   // baseline
     CHECK(WeaponDps::expectedCritMult(0.20f, 2.5f) == doctest::Approx(1.30f));   // dagger

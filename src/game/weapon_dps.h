@@ -7,7 +7,8 @@
 // drifted once already (the 2026-07-22 loot-scoring fixes).
 //
 // Caller contract: effCooldown > 0 (the engine floors it at 0.05 in buildWeaponDef; the
-// scorer's reconstruction bottoms out at 0.2/1.5). Reload flooring (0.2 s when the base
+// scorer's effective cooldown is strictly positive by construction). Reload flooring
+// (0.2 s when the base
 // reload is nonzero) also stays with the callers — the engine applies it in
 // buildWeaponDef, the scorer mirrors it pre-call — because it needs the BASE reload to
 // decide, which this pure cycle formula deliberately doesn't see.
@@ -24,7 +25,7 @@ inline f32 sustained(f32 perHit, f32 effCooldown, f32 shots, f32 reloadSeconds) 
 
 // Expected-value damage multiplier from crits: 1 + chance*(mult-1). The scorer ignores
 // crit (near-constant across weapons); the lab includes it because daggers' 20%/2.5x is
-// a real +25% sustained output over the 5%/2.0x baseline.
+// a real ~+24% sustained output over the 5%/2.0x baseline (1.30 vs 1.05).
 inline f32 expectedCritMult(f32 critChance, f32 critMult) {
     return 1.0f + critChance * (critMult - 1.0f);
 }
