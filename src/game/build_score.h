@@ -53,42 +53,21 @@ inline bool weaponInFamily(WeaponSubtype st, u8 col) {
     }
 }
 
-// --- affix classification ------------------------------------------------------------------------
-// Split every rolled affix into an offense or defense contribution (utility affixes count weakly as
-// offense — clip/reload/move-speed make you kill faster in practice, but they must not outweigh a
-// real damage roll). Values are already comparable magnitudes in affixes.json; the per-type factor
-// levels the flat-vs-percent scale differences (a 10% damage roll ≈ a 10-point flat roll in play).
-inline void affixContribution(const Affix& a, u8 col, f32& off, f32& def) {
-    switch (a.type) {
-        // offense
-        case AffixType::DAMAGE_FLAT:       off += a.value;          break;
-        case AffixType::DAMAGE_PCT:        off += a.value;          break;
-        case AffixType::ATTACK_SPEED_PCT:  off += a.value * ((col != 0) ? 1.5f : 1.0f); break;
-        case AffixType::SPELL_DAMAGE_FLAT: off += a.value * ((col == 0) ? 2.0f : 1.0f); break;
-        case AffixType::SPELL_DAMAGE_PCT:  off += a.value * ((col == 0) ? 2.0f : 1.0f); break;
-        case AffixType::DAMAGE_TO_FLYING:  off += a.value * 0.5f;   break;   // situational
-        case AffixType::LIFESTEAL_PCT:     off += a.value;          break;   // scales with damage dealt
-        case AffixType::LIFE_ON_HIT:       off += a.value * 0.5f;   break;
-        // defense
-        case AffixType::HEALTH_FLAT:       def += a.value * 0.5f;   break;   // flat HP rolls run large
-        case AffixType::HEALTH_PCT:        def += a.value;          break;
-        case AffixType::ARMOR:             def += a.value;          break;
-        case AffixType::HEALTH_REGEN:      def += a.value * 2.0f;   break;   // per-second — small numbers
-        case AffixType::THORNS_PCT:        def += a.value;          break;
-        case AffixType::CC_RESIST:         def += a.value;          break;
-        // utility — weak offense (they speed the fight up, but never beat a real damage roll)
-        case AffixType::MOVE_SPEED_FLAT:
-        case AffixType::COOLDOWN_REDUCTION:
-        case AffixType::CLIP_SIZE_PCT:
-        case AffixType::RELOAD_SPEED_PCT:
-        case AffixType::ENERGY_FLAT:
-        case AffixType::MANASTEAL_PCT:
-        case AffixType::MANA_ON_KILL:
-        case AffixType::PROJECTILE_SPEED:
-        case AffixType::CONE_ANGLE:        off += a.value * 0.25f;  break;
-        default: break;   // deprecated/unknown types contribute nothing
-    }
-}
+// --- reference constants: what a roll is actually WORTH in play ------------------------------
+// The DPS fix taught the lesson: score the EFFECT, not the raw number. These references convert
+// rolls into comparable units. Calibrated against the shipped tables (affixes.json ranges, class
+// base HP 90-150, weapon DPS 60-70) — change them only with the numbers in hand.
+static constexpr f32 REF_HP        = 150.0f; // a mid-game health pool: converts % HP and armor to HP
+static constexpr f32 REF_FIGHT     = 10.0f;  // seconds a hard fight lasts: converts HP/s to HP
+static constexpr f32 REF_HIT_RATE  = 2.0f;   // hits/s: converts life-on-hit to HP/s
+static constexpr f32 REF_DPS       = 60.0f;  // your damage output: converts lifesteal% to HP/s
+static constexpr f32 REF_SWING     = 0.5f;   // the weapon scale anchor (also used by the DPS term)
+static constexpr f32 DEF_SCALE     = 0.5f;   // effective-HP -> score units (keeps off/def parity)
+
+// Skill ("spell") DPS baseline per COLUMN: a Magic build's skills ARE its output, a blade or gun
+// build casts on the side. Spell-damage and cooldown rolls multiply THIS, which is what makes them
+// worth real score on a caster and modest score elsewhere.
+inline f32 refCastDps(u8 col) { return (col == 0) ? 70.0f : 15.0f; }
 
 // --- the scorer ----------------------------------------------------------------------------------
 // Row weights: what "Tanky / Moderate / Glass Cannon" MEAN, numerically. The 3:1 spread is strong
@@ -117,39 +96,82 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
     // armor/rings/offhands serve any archetype.
     if (def.slot == ItemSlot::WEAPON && !weaponInFamily(def.weaponSubtype, col)) return 0.0f;
 
-    f32 off  = 0.0f;
-    f32 def_ = def.baseHealth * 0.5f;    // armor brings defense (flat HP numbers run large)
+    // One pass: gather every roll into the component it actually changes.
+    f32 dmgFlat = 0, dmgPct = 0, atkSpd = 0;                 // weapon DPS terms
+    f32 spellFlat = 0, spellPct = 0, cdr = 0;                // skill DPS terms
+    f32 hpFlat = 0, hpPct = 0, armor = 0;                    // effective-HP terms
+    f32 regen = 0, loh = 0, lifesteal = 0, thorns = 0;       // sustain (defense) terms
+    f32 utility = 0;
+    for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++) {
+        const Affix& a = item.affixes[i];
+        switch (a.type) {
+            case AffixType::DAMAGE_FLAT:        dmgFlat  += a.value; break;
+            case AffixType::DAMAGE_PCT:         dmgPct   += a.value; break;
+            case AffixType::ATTACK_SPEED_PCT:   atkSpd   += a.value; break;
+            case AffixType::SPELL_DAMAGE_FLAT:  spellFlat+= a.value; break;
+            case AffixType::SPELL_DAMAGE_PCT:   spellPct += a.value; break;
+            case AffixType::COOLDOWN_REDUCTION: cdr      += a.value; break;
+            case AffixType::HEALTH_FLAT:        hpFlat   += a.value; break;
+            case AffixType::HEALTH_PCT:         hpPct    += a.value; break;
+            case AffixType::ARMOR:              armor    += a.value; break;
+            case AffixType::HEALTH_REGEN:       regen    += a.value; break;
+            case AffixType::LIFE_ON_HIT:        loh      += a.value; break;
+            case AffixType::LIFESTEAL_PCT:      lifesteal+= a.value; break;
+            case AffixType::THORNS_PCT:         thorns   += a.value; break;
+            case AffixType::DAMAGE_TO_FLYING:   utility  += a.value * 2.0f; break; // situational dmg
+            case AffixType::MOVE_SPEED_FLAT:
+            case AffixType::CLIP_SIZE_PCT:
+            case AffixType::RELOAD_SPEED_PCT:
+            case AffixType::ENERGY_FLAT:
+            case AffixType::MANASTEAL_PCT:
+            case AffixType::MANA_ON_KILL:
+            case AffixType::PROJECTILE_SPEED:
+            case AffixType::CONE_ANGLE:         utility  += a.value; break;
+            default: break;   // deprecated/unknown types contribute nothing
+        }
+    }
+
+    // --- OFFENSE -----------------------------------------------------------------------------
+    f32 off = utility * 0.25f;   // utility speeds fights up, but never beats a real damage roll
 
     if (def.slot == ItemSlot::WEAPON) {
-        // Weapons are scored on DPS, not damage per hit. Per-hit ranked a Heavy Crossbow (50 dmg,
-        // 0.78 s) 3.5x a Rusty Dagger (14 dmg, 0.2 s) when their real output is nearly equal
-        // (64 vs 70 DPS) — per-hit scoring would systematically purge fast weapons from every
-        // build. The item's own damage and attack-speed rolls fold in MULTIPLICATIVELY, because
-        // that is what they do to DPS in play; REF_SWING (0.5 s, a mid-roster cooldown) scales the
-        // result back into the same range as the old per-hit numbers so armor/affix contributions
-        // keep their relative weight.
-        f32 flatDmg = 0.0f, pctDmg = 0.0f, atkSpd = 0.0f;
-        for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++) {
-            switch (item.affixes[i].type) {
-                case AffixType::DAMAGE_FLAT:      flatDmg += item.affixes[i].value; break;
-                case AffixType::DAMAGE_PCT:       pctDmg  += item.affixes[i].value; break;
-                case AffixType::ATTACK_SPEED_PCT: atkSpd  += item.affixes[i].value; break;
-                default: affixContribution(item.affixes[i], col, off, def_); break;
-            }
-        }
-        static constexpr f32 REF_SWING = 0.5f;
-        const f32 cd  = (def.baseCooldown > 0.2f) ? def.baseCooldown : 0.2f;   // floor: no div-blowups
-        const f32 dps = (def.baseDamage + flatDmg) * (1.0f + pctDmg * 0.01f)
+        // Weapons are scored on DPS, not damage per hit (per-hit ranked a Heavy Crossbow 3.5x a
+        // Rusty Dagger whose real DPS is HIGHER). The item's own rolls fold in multiplicatively —
+        // that is what they do to DPS in play; REF_SWING scales back to the shared range.
+        const f32 cd  = (def.baseCooldown > 0.2f) ? def.baseCooldown : 0.2f;
+        const f32 dps = (def.baseDamage + dmgFlat) * (1.0f + dmgPct * 0.01f)
                         * (1.0f + atkSpd * 0.01f) / cd;
         off += dps * REF_SWING;
     } else {
-        // Non-weapons keep the additive model — there is no swing rate to fold into, and a glove's
-        // attack-speed roll speeds up the WEAPON, a cross-slot effect a per-item score cannot see
-        // (it stays a generic offense contribution in affixContribution).
+        // A non-weapon's damage rolls accelerate the WEAPON: convert via the reference weapon DPS
+        // (a +10% ring is worth 10% of ~60 DPS, not a flat "10"), attack speed likewise.
         off += def.baseDamage;
-        for (u8 i = 0; i < item.affixCount && i < MAX_AFFIXES_PER_ITEM; i++)
-            affixContribution(item.affixes[i], col, off, def_);
+        off += dmgFlat * 0.5f;
+        off += REF_DPS * (dmgPct + atkSpd) * 0.01f * REF_SWING;
     }
+
+    // Skill ("spell") output, the same way: spell damage multiplies the column's cast DPS, and
+    // cooldown reduction multiplies the CAST RATE (1/(1-cdr)) — Aaron's ask: CDR and spell damage
+    // must be modeled as the multipliers they are, not utility dribble. Contribution is the DELTA
+    // over the no-roll baseline, so an item with no spell rolls adds exactly 0 here.
+    {
+        const f32 base   = refCastDps(col);
+        const f32 cdrEff = (cdr > 50.0f) ? 50.0f : cdr;                 // engine caps CDR anyway
+        const f32 out    = (base + spellFlat * 0.5f) * (1.0f + spellPct * 0.01f)
+                           / (1.0f - cdrEff * 0.01f);
+        off += (out - base) * REF_SWING;
+    }
+
+    // --- DEFENSE: everything converts to EFFECTIVE HP ------------------------------------------
+    // armorMitigation is armor/(armor+100) capped 80%, so the effective-HP multiplier is exactly
+    // 1 + armor/100: armor A = +A% of the pool. %HP likewise. Sustain (regen / life-on-hit /
+    // lifesteal) is healing over a reference fight — Aaron's call: lifesteal is TANKINESS, not
+    // offense, and it now lives here (it used to count as damage, which no tank build ever felt).
+    f32 eHp = def.baseHealth + hpFlat
+            + REF_HP * (hpPct + armor) * 0.01f
+            + REF_FIGHT * (regen + loh * REF_HIT_RATE + lifesteal * 0.01f * REF_DPS)
+            + thorns;                                  // raw: reflected damage, modest by range
+    f32 def_ = eHp * DEF_SCALE;
 
     f32 offW, defW;
     rowWeights(row, offW, defW);

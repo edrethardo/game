@@ -70,7 +70,11 @@ TEST_CASE("BuildScore: row posture decides whether a defense roll beats a damage
     CHECK(BuildScore::score(dmgRoll,  def, GLASS_MELEE) > BuildScore::score(armorRoll, def, GLASS_MELEE));
 }
 
-TEST_CASE("BuildScore: Magic builds double spell damage; empty items score zero") {
+TEST_CASE("BuildScore: spell rolls are worth a caster's cast DPS, not a raw number") {
+    // The honest model: +spell% multiplies the COLUMN's skill output (70 cast-DPS on Magic, 15 on
+    // Melee/Ranged, where skills are a sidearm), so a spell roll beats a generic damage roll on a
+    // caster and genuinely loses to it on a blade build. The old test asserted they were EQUAL on
+    // Melee — an artifact of counting raw affix values instead of effects.
     ItemDef ring{};
     ring.slot = ItemSlot::RING;
     ItemInstance spell = instance(1);
@@ -78,12 +82,50 @@ TEST_CASE("BuildScore: Magic builds double spell damage; empty items score zero"
     ItemInstance plain = instance(1);
     plain.affixes[0] = {AffixType::DAMAGE_PCT, 10.0f};
 
-    // Under Magic the spell roll wins; under Melee they tie back (spell keeps base value).
     CHECK(BuildScore::score(spell, ring, MOD_MAGIC) > BuildScore::score(plain, ring, MOD_MAGIC));
-    CHECK(BuildScore::score(spell, ring, MOD_MELEE) == doctest::Approx(BuildScore::score(plain, ring, MOD_MELEE)));
+    CHECK(BuildScore::score(plain, ring, MOD_MELEE) > BuildScore::score(spell, ring, MOD_MELEE));
 
     ItemInstance empty{};   // defId 0xFFFF
     CHECK(BuildScore::score(empty, ring, MOD_MELEE) == 0.0f);
+}
+
+TEST_CASE("BuildScore: sustain IS tankiness — lifesteal/regen/life-on-hit feed the defense bucket") {
+    // Aaron's call: lifesteal is survivability, not damage. A Tanky build must now prefer a max
+    // lifesteal roll (1% of ~60 DPS over a 10 s fight = 6 effective HP) or a regen roll over a
+    // plain damage roll — under the old scorer lifesteal counted as OFFENSE and no tank wanted it.
+    ItemDef ring{};
+    ring.slot = ItemSlot::RING;
+    ItemInstance steal = instance(1);
+    steal.affixes[0] = {AffixType::LIFESTEAL_PCT, 1.0f};       // max shipped roll
+    ItemInstance rgn = instance(1);
+    rgn.affixes[0] = {AffixType::HEALTH_REGEN, 3.0f};          // max shipped roll -> 30 eHP
+    ItemInstance dmg = instance(1);
+    dmg.affixes[0] = {AffixType::DAMAGE_PCT, 5.0f};
+
+    CHECK(BuildScore::score(rgn,   ring, TANKY_MELEE) > BuildScore::score(dmg, ring, TANKY_MELEE));
+    CHECK(BuildScore::score(steal, ring, TANKY_MELEE) > BuildScore::score(steal, ring, GLASS_MELEE));
+
+    // And the armor formula linearizes correctly: armor A = +A% effective HP, so a 30-armor roll
+    // equals a 45-flat-HP roll on the 150 reference pool (30% of 150), scored identically.
+    ItemInstance arm = instance(1);
+    arm.affixes[0] = {AffixType::ARMOR, 30.0f};
+    ItemInstance hp = instance(1);
+    hp.affixes[0] = {AffixType::HEALTH_FLAT, 45.0f};
+    CHECK(BuildScore::score(arm, ring, TANKY_MELEE) == doctest::Approx(BuildScore::score(hp, ring, TANKY_MELEE)));
+}
+
+TEST_CASE("BuildScore: cooldown reduction multiplies a caster's cast rate") {
+    // CDR c% means 1/(1-c) more casts per second — on a Magic build that is real DPS, on a Melee
+    // build it is modest (skills are a sidearm). It used to be flat utility dribble on both.
+    ItemDef ring{};
+    ring.slot = ItemSlot::RING;
+    ItemInstance cdrRoll = instance(1);
+    cdrRoll.affixes[0] = {AffixType::COOLDOWN_REDUCTION, 15.0f};   // max shipped roll
+    ItemInstance util = instance(1);
+    util.affixes[0] = {AffixType::MOVE_SPEED_FLAT, 15.0f};
+
+    CHECK(BuildScore::score(cdrRoll, ring, MOD_MAGIC) > BuildScore::score(cdrRoll, ring, MOD_MELEE));
+    CHECK(BuildScore::score(cdrRoll, ring, MOD_MAGIC) > BuildScore::score(util, ring, MOD_MAGIC));
 }
 
 TEST_CASE("BuildScore: hysteresis stops near-tie churn; empty slot is always an upgrade") {
