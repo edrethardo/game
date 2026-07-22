@@ -39,6 +39,10 @@ Levels grow a third dimension: floors that stack, drop and burn.
 
 ### Changed
 
+- **Monsters hit harder and last longer: +50% base health and damage across the entire roster**
+  (all 38 enemy types, every tier's fallback spawns, and mimics). Floor and difficulty scaling
+  stack on top as before, so the whole curve shifts up. Bosses are unchanged.
+
 - **More enemies on screen.** The entity budget rose from 128 to 192, so the four-story floors can be
   populated at full density on every level instead of crowding out decorations, NPCs and summons.
 - **Jump pads are brighter and can be stronger.** Pads now glow vividly enough to spot across a dark

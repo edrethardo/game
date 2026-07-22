@@ -104,59 +104,59 @@ static const EnemyTemplate kTier1[] = {
 };
 // Tier 2 (floors 11-20): Catacombs — poison + ghoul (D2) + bone mage (Barony)
 static const EnemyTemplate kTier2[] = {
-    {60, 3.0f, 22, 3.5f, 1.0f, 12, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
-    {35, 6.5f, 22, 3.5f, 0.8f,  8, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
-    {48, 4.2f, 20, 3.0f, 0.8f, 11, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
+    {90, 3.0f, 22, 3.5f, 1.0f, 18, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "catacomb_skeleton", 1, 3.0f, 4.0f},
+    {52, 6.5f, 22, 3.5f, 0.8f, 12, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "catacomb_bat",      1, 2.0f, 3.0f},
+    {72, 4.2f, 20, 3.0f, 0.8f, 16, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "catacomb_spider",   1, 3.0f, 5.0f},
     // Ghoul (D2) — fast melee, high damage, lower HP
-    {40, 4.5f, 22, 3.0f, 0.6f, 16, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
+    {60, 4.5f, 22, 3.0f, 0.6f, 24, {0.4f,0.85f,0.4f}, false, 3, EnemyType::SKELETON, "ghoul_skin",       1, 2.0f, 3.0f},
     // Bone Mage (Barony) — ranged skeleton caster
-    {35, 2.5f, 24, 11.f, 1.2f, 14, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
+    {52, 2.5f, 24, 11.f, 1.2f, 21, {0.4f,0.9f,0.4f},  false, 0, EnemyType::SKELETON, "bone_mage_skin",   1, 3.0f, 4.0f},
     // Necromancer — ranged caster, resurrects dead enemies
-    {30, 2.0f, 20, 11.0f, 1.5f, 10, {0.4f,1.0f,0.4f}, false, 5, EnemyType::SKELETON, "necromancer_skin", 1, 2.0f, 3.0f},
+    {45, 2.0f, 20, 11.0f, 1.5f, 15, {0.4f,1.0f,0.4f}, false, 5, EnemyType::SKELETON, "necromancer_skin", 1, 2.0f, 3.0f},
 };
 // Tier 3 (floors 21-30): Caverns — slow + broodmother (Barony) + stalker (HGL)
 static const EnemyTemplate kTier3[] = {
-    {65, 3.2f, 24, 3.5f, 0.9f, 13, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
-    {38, 7.0f, 24, 3.5f, 0.7f,  9, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
-    {52, 4.8f, 22, 3.0f, 0.7f, 12, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
+    {98, 3.2f, 24, 3.5f, 0.9f, 20, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "cavern_skeleton", 2, 2.0f, 0},
+    {57, 7.0f, 24, 3.5f, 0.7f, 14, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "cavern_bat",      2, 1.5f, 0},
+    {78, 4.8f, 22, 3.0f, 0.7f, 18, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "cavern_spider",   2, 2.5f, 0},
     // Broodmother (Barony) — large slow spider, extra tanky
-    {90, 2.5f, 20, 3.5f, 1.0f, 14, {0.91f,0.52f,0.91f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
+    {135, 2.5f, 20, 3.5f, 1.0f, 21, {0.91f,0.52f,0.91f}, false, 2, EnemyType::SPIDER,   "broodmother_skin", 2, 3.0f, 0},
     // Stalker (HGL) — fast, stealthy humanoid
-    {45, 5.0f, 26, 3.0f, 0.5f, 11, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
+    {68, 5.0f, 26, 3.0f, 0.5f, 16, {0.35f,0.85f,0.35f}, false, 3, EnemyType::SKELETON, "stalker_skin", 2, 2.0f, 0},
     // Sniper Imp — flying ranged, long range, slow fire, fast small projectiles
-    {25, 4.0f, 30, 16.f, 2.0f, 18, {0.3f,0.3f,0.3f}, true, 1, EnemyType::BAT, "sniper_imp_skin", 2, 2.0f, 0},
+    {38, 4.0f, 30, 16.f, 2.0f, 27, {0.3f,0.3f,0.3f}, true, 1, EnemyType::BAT, "sniper_imp_skin", 2, 2.0f, 0},
     // Cavern Shaman — healer, heals injured allies
-    {35, 2.5f, 18, 10.0f, 1.2f, 8, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "cavern_shaman_skin", 2, 2.0f, 0},
+    {52, 2.5f, 18, 10.0f, 1.2f, 12, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "cavern_shaman_skin", 2, 2.0f, 0},
     // Cavern Herald — aura buff, +10% speed/attack for nearby enemies
-    {45, 3.0f, 18, 3.5f, 0.9f, 12, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "cavern_herald_skin", 2, 2.5f, 0},
+    {68, 3.0f, 18, 3.5f, 0.9f, 18, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "cavern_herald_skin", 2, 2.5f, 0},
 };
 // Tier 4 (floors 31-40): Hellforge — burn + hellhound (D2) + demon (HGL)
 static const EnemyTemplate kTier4[] = {
-    {70, 3.5f, 24, 3.5f, 0.8f, 15, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
-    {40, 7.5f, 24, 3.5f, 0.6f, 10, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
-    {58, 5.0f, 22, 3.0f, 0.6f, 14, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
+    {105, 3.5f, 24, 3.5f, 0.8f, 22, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "hellforge_skeleton", 3, 2.5f, 6.0f},
+    {60, 7.5f, 24, 3.5f, 0.6f, 15, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "hellforge_bat",      3, 2.0f, 5.0f},
+    {87, 5.0f, 22, 3.0f, 0.6f, 21, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "hellforge_spider",   3, 2.5f, 7.0f},
     // Hellhound (D2) — fast charging beast, spider rig
-    {50, 6.0f, 24, 3.5f, 0.5f, 16, {0.65f,0.455f,0.65f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
+    {75, 6.0f, 24, 3.5f, 0.5f, 24, {0.65f,0.455f,0.65f}, false, 2, EnemyType::SPIDER,   "hellhound_skin",    3, 2.0f, 8.0f},
     // Demon (HGL) — ranged fire caster, humanoid
-    {55, 3.0f, 26, 13.f, 1.0f, 18, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
+    {82, 3.0f, 26, 13.f, 1.0f, 27, {0.45f,1.0f,0.45f}, false, 3, EnemyType::SKELETON, "demon_skin",        3, 3.0f, 6.0f},
     // Infernal Herald — burn aura, area denial
-    {55, 3.0f, 20, 3.5f, 0.9f, 14, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "infernal_herald_skin", 3, 2.5f, 6.0f},
+    {82, 3.0f, 20, 3.5f, 0.9f, 21, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "infernal_herald_skin", 3, 2.5f, 6.0f},
 };
 // Tier 5 (floors 41-50): Void — freeze + shade (Barony) + void demon (HGL)
 static const EnemyTemplate kTier5[] = {
-    {80, 3.8f, 26, 3.5f, 0.7f, 16, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
-    {45, 8.0f, 26, 3.5f, 0.5f, 11, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
-    {65, 5.5f, 24, 3.0f, 0.5f, 15, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
+    {120, 3.8f, 26, 3.5f, 0.7f, 24, {0.4f,0.9f,0.4f}, false, 0, EnemyType::SKELETON, "void_skeleton", 4, 1.5f, 0},
+    {68, 8.0f, 26, 3.5f, 0.5f, 16, {0.5f,0.4f,0.4f}, true,  1, EnemyType::BAT,      "void_bat",      4, 1.0f, 0},
+    {98, 5.5f, 24, 3.0f, 0.5f, 22, {0.65f,0.39f,0.65f}, false, 2, EnemyType::SPIDER,   "void_spider",   4, 1.5f, 0},
     // Shade (Barony) — fast phasing humanoid, semi-transparent
-    {40, 5.5f, 28, 3.0f, 0.4f, 14, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
+    {60, 5.5f, 28, 3.0f, 0.4f, 21, {0.35f,0.9f,0.35f}, false, 3, EnemyType::SKELETON, "shade_skin",      4, 2.0f, 0},
     // Void Demon (HGL) — heavy tanky skeleton, high damage
-    {100, 2.5f, 24, 4.0f, 0.8f, 20, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
+    {150, 2.5f, 24, 4.0f, 0.8f, 30, {0.5f,1.0f,0.5f}, false, 0, EnemyType::SKELETON, "void_demon_skin", 4, 2.0f, 0},
     // Void Necromancer — resurrects dead, freeze
-    {40, 2.2f, 22, 12.0f, 1.2f, 12, {0.4f,1.0f,0.4f}, false, 5, EnemyType::SKELETON, "void_necromancer_skin", 4, 1.5f, 0},
+    {60, 2.2f, 22, 12.0f, 1.2f, 18, {0.4f,1.0f,0.4f}, false, 5, EnemyType::SKELETON, "void_necromancer_skin", 4, 1.5f, 0},
     // Void Shaman — heals allies, freeze
-    {45, 2.5f, 20, 11.0f, 1.0f, 10, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "void_shaman_skin", 4, 1.5f, 0},
+    {68, 2.5f, 20, 11.0f, 1.0f, 15, {0.45f,0.9f,0.45f}, false, 6, EnemyType::SKELETON, "void_shaman_skin", 4, 1.5f, 0},
     // Void Herald — freeze aura
-    {65, 2.8f, 22, 3.5f, 0.8f, 16, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "void_herald_skin", 4, 2.0f, 0},
+    {98, 2.8f, 22, 3.5f, 0.8f, 24, {0.4f,1.0f,0.4f}, false, 7, EnemyType::SKELETON, "void_herald_skin", 4, 2.0f, 0},
 };
 
 // Boss template table — promoted from a static local in startGame.

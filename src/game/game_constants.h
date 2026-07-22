@@ -38,23 +38,23 @@ namespace GameConst {
     static constexpr u8 ARENA_SENTINEL_FLOOR  = 97u;
 
     // Enemy base stats (before floor scaling) — all HP includes +20% buff
-    static constexpr f32 SKELETON_HEALTH     = 55.0f;   // was 40, buffed (+20% + stronger)
+    static constexpr f32 SKELETON_HEALTH     = 83.0f;   // 2026-07-22 global monster buff: all HP/damage x1.5 (was 55)
     static constexpr f32 SKELETON_SPEED      = 2.8f;
-    static constexpr f32 SKELETON_DAMAGE     = 11.0f;   // was 8, stronger
+    static constexpr f32 SKELETON_DAMAGE     = 17.0f;   // was 8, stronger
     static constexpr f32 SKELETON_DET_RANGE  = 22.0f;   // long aggro range
     static constexpr f32 SKELETON_ATK_RANGE  = 3.5f;
     static constexpr f32 SKELETON_ATK_COOL   = 1.0f;    // was 1.2, attacks faster
 
-    static constexpr f32 BAT_HEALTH          = 30.0f;   // was 25 (+20%)
+    static constexpr f32 BAT_HEALTH          = 45.0f;   // was 25 (+20%)
     static constexpr f32 BAT_SPEED           = 6.0f;
-    static constexpr f32 BAT_DAMAGE          = 7.0f;    // was 6 (+20%)
+    static constexpr f32 BAT_DAMAGE          = 11.0f;    // was 6 (+20%)
     static constexpr f32 BAT_DET_RANGE       = 22.0f;   // long aggro range
     static constexpr f32 BAT_ATK_RANGE       = 3.5f;
     static constexpr f32 BAT_ATK_COOL        = 0.8f;    // was 1.0, faster attacks
 
-    static constexpr f32 SPIDER_HEALTH       = 42.0f;   // was 35 (+20%)
+    static constexpr f32 SPIDER_HEALTH       = 63.0f;   // was 35 (+20%)
     static constexpr f32 SPIDER_SPEED        = 4.0f;
-    static constexpr f32 SPIDER_DAMAGE       = 10.0f;   // was 8 (+20%)
+    static constexpr f32 SPIDER_DAMAGE       = 15.0f;   // was 8 (+20%)
     static constexpr f32 SPIDER_DET_RANGE    = 20.0f;   // long aggro range
     static constexpr f32 SPIDER_ATK_RANGE    = 3.0f;
     static constexpr f32 SPIDER_ATK_COOL     = 0.8f;    // was 1.0, faster attacks
@@ -307,8 +307,8 @@ namespace GameConst {
     // Burrower eruption radius (Burrowing Widow). Proximity-only — no weeping-angel watch
     // rule, because there is nothing to see: the trap fires under the victim's feet.
     static constexpr f32 BURROW_TRIGGER_DIST = 3.0f;
-    static constexpr f32 MIMIC_HEALTH        = 60.0f;
-    static constexpr f32 MIMIC_DAMAGE        = 20.0f;
+    static constexpr f32 MIMIC_HEALTH        = 90.0f;
+    static constexpr f32 MIMIC_DAMAGE        = 30.0f;
 
     // Inventory UI
     static constexpr f32 DBLCLICK_TIME       = 0.3f;
