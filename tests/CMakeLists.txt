@@ -29,6 +29,7 @@ add_executable(dungeon_tests
     engine/test_lag_comp_ring.cpp
     game/test_cooldown_gate.cpp
     game/test_armor_tier.cpp
+    game/test_armor_mitigation.cpp
     game/test_difficulty_scaling.cpp
     game/test_free_play.cpp
     game/test_engine_shield.cpp

@@ -80,7 +80,13 @@ namespace Combat {
     // returns curve `armor / (armor + 100)` hard-capped at 0.80. Pure function (no engine state),
     // exposed for unit testing. 100 armor = 50% reduction; the cap stops stacked armor reaching
     // invulnerability. Negative/zero armor yields 0.
-    f32 armorMitigation(f32 armor);
+    // Header-inline so tests-only code (the balance lab's EHP conversion) links the real curve
+    // without dragging combat.cpp's entity/projectile world into the test binary.
+    inline f32 armorMitigation(f32 armor) {
+        if (armor <= 0.0f) return 0.0f;
+        f32 mit = armor / (armor + 100.0f); // diminishing returns: 100 armor = 50%
+        return (mit > 0.80f) ? 0.80f : mit;  // hard cap so a stacked build can't become invulnerable
+    }
 
     // The three crowd-control kinds the CC-Resistance stat governs (poison/burn/curse are damage,
     // not CC, and keep their direct timer writes).

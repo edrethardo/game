@@ -330,12 +330,6 @@ void Combat::killEntity(EntityPool& pool, EntityHandle target) {
     }
 }
 
-f32 Combat::armorMitigation(f32 armor) {
-    if (armor <= 0.0f) return 0.0f;
-    f32 mit = armor / (armor + 100.0f); // diminishing returns: 100 armor = 50%
-    return (mit > 0.80f) ? 0.80f : mit;  // hard cap so a stacked build can't become invulnerable
-}
-
 // The single choke for player crowd control — thin wrapper over the pure CrowdControl::resolveCC
 // (immunity/dodge negate → tenacity → PvP stun DR). Reads the victim's defensive state off the
 // Player and raises the chosen timer (fmaxf so a longer CC never gets shortened by a weaker one).
