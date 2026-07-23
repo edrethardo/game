@@ -88,6 +88,13 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         m_inventories[0].autoMode  = 1;
         m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
     }
+    // Dev door (--autoplay): arm the lane-0 bot so the run plays itself. Implies --autoloot (the
+    // gear brain) above. The per-tick driver reads m_autoplayActive; forceBot() starts in bot control.
+    if (opt.autoplay) {
+        m_autoplayActive = true;
+        m_autoplayControl.forceBot();
+        Input::setBotOverlayActive(true);
+    }
     if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
         LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
                  (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);

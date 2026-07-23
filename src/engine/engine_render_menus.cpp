@@ -1151,11 +1151,12 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.15f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else {
         // Main menu options. The demo build (kDemoBuild, constexpr) hides the online
-        // Host/Join/Arena entries — it ships singleplayer + local couch only — leaving a
-        // 4-item menu; the full build keeps all 7 with the demo branch dead-stripped.
-        static const char* fullLabels[] = {"Single Player", "Host Game", "Join Game", "Arena Mode", "Options", "Credits", "Exit Game"};
+        // Host/Join/Arena entries AND Autoplay — it ships singleplayer + local couch only — leaving a
+        // 4-item menu; the full build keeps all 8 with the demo branch dead-stripped.
+        static const char* fullLabels[] = {"Single Player", "Autoplay", "Host Game", "Join Game", "Arena Mode", "Options", "Credits", "Exit Game"};
         static const Vec3 fullColors[] = {
             {0.2f, 0.9f, 0.2f},
+            {0.4f, 0.85f, 0.95f}, // cyan for Autoplay (bot-driven run)
             {0.2f, 0.5f, 1.0f},
             {1.0f, 0.7f, 0.2f},
             {0.9f, 0.25f, 0.4f},  // crimson for Arena (PvP)
@@ -1169,7 +1170,7 @@ void Engine::renderMenu() {
         };
         const char* const* labels = GameConst::kDemoBuild ? demoLabels : fullLabels;
         const Vec3*        colors = GameConst::kDemoBuild ? demoColors : fullColors;
-        const u32          count  = GameConst::kDemoBuild ? 4u : 7u;
+        const u32          count  = GameConst::kDemoBuild ? 4u : 8u;
 
         for (u32 i = 0; i < count; i++) {
             // Bottom-anchored column, nudged up from 0.2 to 0.26 so it sits better between the raised

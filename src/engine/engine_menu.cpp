@@ -126,10 +126,10 @@ static s32 menuMouseHit(u32 sw, u32 sh,
 // Layouts must match renderMenu() in engine_hud.cpp exactly.
 static s32 menuMouseForState(u32 sw, u32 sh, f32 uiScale, u8 subState, u8 itemCount) {
     switch (subState) {
-    case 0: { // Main menu: 7 items (4 in the demo, which hides Host/Join/Arena), Y = sh*0.26 + (count-1-i)*50.
+    case 0: { // Main menu: 8 items (4 in the demo, which hides Autoplay/Host/Join/Arena), Y = sh*0.26 + (count-1-i)*50.
               // Must use the same count AND baseY as renderMenu() or hover misaligns AND can return an
               // index past the demo's 4-entry action map (out-of-bounds). kDemoBuild is constexpr.
-        const u8 mainCount = GameConst::kDemoBuild ? 4 : 7;
+        const u8 mainCount = GameConst::kDemoBuild ? 4 : 8;
         return menuMouseHit(sw, sh, sh * 0.26f, 50.0f * uiScale, mainCount,
                             250.0f * uiScale, 35.0f * uiScale, false);
     }
@@ -778,6 +778,17 @@ void Engine::updateMenu(f32 dt) {
             // Shared with the CLI launch path (engine_launch.cpp) — one source of truth.
             applyClassToLane0(static_cast<PlayerClass>(m_menu.subSelection));
 
+            if (m_menu.autoplay) {
+                // Autoplay forces Auto Loot & Equip (the bot's gear brain) and skips the Classic/Auto
+                // chooser — go straight to the solo-start lobby. Keep the character's persisted build.
+                m_inventories[0].autoMode  = 1;
+                if (m_inventories[0].buildCell >= 9) m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
+                m_difficulty = 0;
+                m_menu.subState = 4;      // couch-lobby solo-start (NONE branch)
+                m_menu.subSelection = 0;
+                return;
+            }
+
             // Ask HOW they want to play before anything starts: Classic, or Auto Loot & Equip.
             // The routing that used to live here (couch lobby / host start) moved to subState 23's
             // confirm — the chooser sits between class select and the start paths.
@@ -903,6 +914,13 @@ void Engine::updateMenu(f32 dt) {
                     // the loadout + floor-1 state; enterTown just swaps the world under them,
                     // so their first portal descent is the same floor 1 they'd have started on.
                     if (!m_menu.p1Continue && m_townUnlocked) enterTown();
+                    if (m_menu.autoplay) {
+                        // Arm the lane-0 bot: the driver (next task) reads m_autoplayActive and drives
+                        // through the BotInput overlay. forceBot() starts in bot control from frame one.
+                        m_autoplayActive = true;
+                        m_autoplayControl.forceBot();
+                        Input::setBotOverlayActive(true);
+                    }
                 }
             }
             return;
@@ -1798,8 +1816,8 @@ void Engine::updateMenu(f32 dt) {
         if (m_menu.selection > 0) { m_menu.selection--; AudioSystem::play(SfxId::MENU_HOVER); }
     }
     if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S)) {
-        // Demo's main menu has 4 items (max index 3); full game has 7 (max index 6).
-        const u8 maxSel = GameConst::kDemoBuild ? 3 : 6;
+        // Demo's main menu has 4 items (max index 3); full game has 8 (max index 7).
+        const u8 maxSel = GameConst::kDemoBuild ? 3 : 7;
         if (m_menu.selection < maxSel) { m_menu.selection++; AudioSystem::play(SfxId::MENU_HOVER); }
     }
     if (menuConfirmPressed()
@@ -1817,12 +1835,15 @@ void Engine::updateMenu(f32 dt) {
         m_menu.couchJoin    = false;
         m_netCouch          = false;   // clear any online-couch flag from a prior session
         m_menu.arena        = false;   // PvP intent is re-chosen each time (subState 22 sets it)
-        // The demo menu drops Host (1), Join (2) and Arena (3), so its 4 visible rows map to
-        // actions {Single Player, Options, Credits, Exit} = full-menu cases {0, 4, 5, 6}.
+        m_menu.autoplay     = false;   // Autoplay intent is re-chosen each time (the Autoplay row sets it)
+        m_autoplayActive    = false;   // and a normal (non-autoplay) run must not inherit a stale armed bot
+        Input::setBotOverlayActive(false);
+        // The demo menu drops Autoplay (1), Host (2), Join (3) and Arena (4), so its 4 visible rows map
+        // to actions {Single Player, Options, Credits, Exit} = full-menu cases {0, 5, 6, 7}.
         // Remap the demo selection to the full action index so the switch below stays intact.
         u32 menuAction = m_menu.selection;
         if (GameConst::kDemoBuild) {
-            static const u8 demoActionMap[4] = {0, 4, 5, 6};
+            static const u8 demoActionMap[4] = {0, 5, 6, 7};
             menuAction = demoActionMap[m_menu.selection];
         }
         switch (menuAction) {
@@ -1831,7 +1852,13 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 1;
             m_menu.subSelection = 0;
             break;
-        case 1: // Host — first pick LAN vs Online (subState 10), then fall into the
+        case 1: // Autoplay — same New/Continue -> slot -> class flow as Single Player, bot armed at start
+            m_menu.autoplay = true;
+            scanSaveSlots();
+            m_menu.subState = 1;
+            m_menu.subSelection = 0;
+            break;
+        case 2: // Host — first pick LAN vs Online (subState 10), then fall into the
                 // shared New/Continue → class selection flow (same as singleplayer).
             m_netRole = NetRole::SERVER;
             m_localPlayerIndex = 0;
@@ -1839,7 +1866,7 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subState = 10;
             m_menu.subSelection = 0;     // default highlight: LAN
             break;
-        case 2: // Join — prompt for host IP first, then New/Continue → save slot → class
+        case 3: // Join — prompt for host IP first, then New/Continue → save slot → class
             m_netRole = NetRole::CLIENT;
             m_steamJoinHost = 0;   // explicit IP-join path — clear any stale Steam target so the connect step uses the typed IP
             // Lane stays 0 on a client (networking forces split count 1). The server-assigned
@@ -1881,11 +1908,11 @@ void Engine::updateMenu(f32 dt) {
             }
 #endif
             break;
-        case 3: // Arena Mode (PvP) — Host Arena vs Local Versus chooser
+        case 4: // Arena Mode (PvP) — Host Arena vs Local Versus chooser
             m_menu.subState = 22;
             m_menu.subSelection = 0;
             break;
-        case 4: // Options — controls rebinding
+        case 5: // Options — controls rebinding
             // Opened from the MAIN menu: BACK must go to the title screen, never try to resume a
             // game that isn't running. Cleared explicitly so a stale flag can't strand the player.
             m_menu.optionsFromPause = false;
@@ -1893,11 +1920,11 @@ void Engine::updateMenu(f32 dt) {
             m_menu.subSelection = 0;
             m_menu.bindCapture = false;
             break;
-        case 5: // Credits
+        case 6: // Credits
             m_menu.subState = 7;
             m_menu.creditsScroll = 0.0f;
             break;
-        case 6: // Exit
+        case 7: // Exit
             m_running = false;
             break;
         }

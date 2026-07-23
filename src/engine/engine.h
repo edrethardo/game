@@ -23,6 +23,7 @@
 #include "game/arena.h"   // PvP deathmatch rules (Arena mode, floor 97)
 #include "game/combat.h"  // Combat::PvpHit/PvpHitOutcome — the arena's atomic hit apply
 #include "game/interact.h"   // tap/hold interact rule (pure)
+#include "game/autoplay_control.h"   // AutoplayControl — bot/human takeover latch (Autoplay mode)
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
@@ -159,6 +160,8 @@ private:
         // (class-select host start, couch-lobby solo start, startCouchGame) to route into
         // enterArena() instead of the dungeon/town. Reset by the main-menu confirm.
         bool arena = false;
+        bool autoplay = false;   // Autoplay mode intent (main-menu row); armed at solo-start, cleared
+                                 // by the main-menu confirm reset. Mirrors `arena`.
         u8   overwriteLane = 0;        // which local lane (0=P1, 1=P2) the subState-8 overwrite is for
         bool couchHost = false;        // true when the host-mode chooser (10) was reached from the
                                        // couch lobby to host an ONLINE couch game (both locals + remotes)
@@ -234,6 +237,13 @@ private:
     // couch-online session out of that guard so two local players can share one connection.
     bool m_netCouch = false;
 
+    // Autoplay: this run is a bot-driven singleplayer session (lane 0). m_autoplayControl is the
+    // takeover/resume latch — the bot yields to real human gameplay input and resumes after an idle
+    // window (game/autoplay_control.h). Armed at solo-start / --autoplay; the per-tick driver lands
+    // in the next task, so until then the bot is armed-but-idle.
+    bool             m_autoplayActive = false;
+    AutoplayControl  m_autoplayControl;
+
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];
     Camera         m_cameras[MAX_LOCAL_PLAYERS];
@@ -300,6 +310,13 @@ private:
     bool gameplayInputFrozen() const {
         return m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit
             || m_menu.optionsFromPause || m_menagerieOpen;
+    }
+
+    // The bot may act (drive movement/fire/skills) when it holds control and only the inventory is
+    // open — NOT while a hard-freeze UI (pause / character inspect / options / menagerie) is up.
+    bool botMayAct() const {
+        if (!m_autoplayActive || !m_autoplayControl.botInControl()) return false;
+        return !(m_characterScreenOpen || m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen);
     }
 
     // Networking

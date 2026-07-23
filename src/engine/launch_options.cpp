@@ -157,6 +157,10 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
         } else if (ieq(a, "--autoloot")) {
             opt.autoLoot = true;       // modifier on normal play (needs --new/--load)
             opt.active   = true;
+        } else if (ieq(a, "--autoplay")) {
+            opt.autoplay = true;
+            opt.autoLoot = true;       // autoplay needs Auto Loot as the gear brain
+            opt.active   = true;
         } else if (ieq(a, "--lan")) {
             opt.upnp = false;
         } else if (ieq(a, "--fullscreen")) {

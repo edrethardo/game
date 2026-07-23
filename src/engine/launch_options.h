@@ -54,6 +54,7 @@ struct LaunchOptions {
     bool fourStory   = false;                  // --fourstory: force the four-story FOUR_STORY "Descent" layout on non-boss floors (dev)
     bool lava        = false;                  // --lava: force the molten Hellforge theme on any floor 31-40 (dev)
     bool autoLoot    = false;                  // --autoloot: start lane 0 in Auto Loot & Equip mode (dev)
+    bool autoplay = false;  // --autoplay: bot plays the run (dev door; implies autoloot; needs --new/--load)
     bool fullscreen = false;                   // --fullscreen: external-widescreen fullscreen
     u32  shotInterval = 0;                     // --screenshot-interval seconds (0 = off)
 
