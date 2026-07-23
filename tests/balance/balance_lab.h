@@ -16,7 +16,7 @@ namespace BalanceLab {
 // --- model parameters: assumptions about a TYPICAL PLAYER, not engine truth ------------------
 // A player at floor F wears the best of the drops they saw over the last few floors.
 static constexpr u32 DROPS_PER_FLOOR  = 12;   // ~25-35 kills x LOOT_DROP_CHANCE (40%+1%/lvl)
-static constexpr u32 WINDOW_FLOORS    = 4;    // gear comes from floors F-3..F
+static constexpr u32 WINDOW_FLOORS    = 4;    // gear comes from EFFECTIVE floors eff-3..eff
 static constexpr u32 TRIALS           = 200;  // Monte-Carlo trials per (difficulty, floor)
 static constexpr u32 MAX_WINDOW_DROPS = DROPS_PER_FLOOR * WINDOW_FLOORS;
 
@@ -43,10 +43,15 @@ BossCurve bossAt(const BossDefTable& table, u8 rawFloor, u8 difficulty);
 // --- typical-equipment Monte Carlo -----------------------------------------------------------
 struct DropSet { ItemInstance items[MAX_WINDOW_DROPS]; u32 count = 0; };
 
-// The drops a floor-F player saw: DROPS_PER_FLOOR real ItemGen rolls per window floor, each
-// at that floor's own effective level. Reseeds ItemGen from (floor,difficulty,trial) so a
-// trial is deterministic and independent of sweep order — and the SAME drops are then shown
-// to all nine build cells (the same loot fell; each build just wears it differently).
+// The drops a floor-F player saw: DROPS_PER_FLOOR real ItemGen rolls per window floor, the
+// window being continuous in EFFECTIVE floor (eff-3..eff, each floor rolled at its own
+// effective level). Continuity is the point: a difficulty-entry floor (NM/Hell 1-3) inherits
+// the previous difficulty's tail — a player enters Nightmare wearing Normal-50 gear, and a
+// raw-floor window modeled those floors with a thin fresh bag, overstating the entry cliffs.
+// Normal 1-3 stay short by reality (a fresh character genuinely has seen little loot).
+// Reseeds ItemGen from (floor,difficulty,trial) so a trial is deterministic and independent
+// of sweep order — and the SAME drops are then shown to all nine build cells (the same loot
+// fell; each build just wears it differently).
 void rollWindowDrops(u8 rawFloor, u8 difficulty, u32 trial,
                      const ItemDef* defs, u32 defCount,
                      const AffixDef* affixDefs, u32 affixDefCount,

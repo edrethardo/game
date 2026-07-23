@@ -156,6 +156,29 @@ TEST_CASE("typical gear: every build cell fields a weapon from mid-game windows"
             }
 }
 
+TEST_CASE("typical gear: difficulty-entry windows inherit the previous difficulty's tail") {
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 ic = 0, ac = 0; loadGearTables(items, ic, affixes, ac);
+
+    // NM floor 1 (effective 51): the window must span effective levels 48..51 — a full
+    // 48-drop bag, not a thin 12-drop one. Before the fix this held only level-51 items.
+    BalanceLab::DropSet nm1;
+    BalanceLab::rollWindowDrops(1, 1, 0, items, ic, affixes, ac, nm1);
+    REQUIRE(nm1.count == BalanceLab::MAX_WINDOW_DROPS);
+    u8 lvlMin = 255, lvlMax = 0;
+    for (u32 i = 0; i < nm1.count; i++) {
+        lvlMin = (nm1.items[i].itemLevel < lvlMin) ? nm1.items[i].itemLevel : lvlMin;
+        lvlMax = (nm1.items[i].itemLevel > lvlMax) ? nm1.items[i].itemLevel : lvlMax;
+    }
+    CHECK(lvlMin == 48);
+    CHECK(lvlMax == 51);
+
+    // Normal floor 1 has no previous difficulty: still a genuine fresh-start 12-drop window.
+    BalanceLab::DropSet n1;
+    BalanceLab::rollWindowDrops(1, 0, 0, items, ic, affixes, ac, n1);
+    CHECK(n1.count == BalanceLab::DROPS_PER_FLOOR);
+}
+
 TEST_CASE("player power: bare crafted sword gives exactly the hand-computable numbers") {
     // Two synthetic defs — index 0 a plain sword, index 1 unused. No affixes anywhere, so
     // every engine conversion (effective weapon, max health, armor) runs on knowns.

@@ -81,10 +81,14 @@ void rollWindowDrops(u8 rawFloor, u8 difficulty, u32 trial,
     // DropSets, so uninitialized padding must not leak previous-call garbage into the compare.
     std::memset(&out, 0, sizeof out);
     ItemGen::init(trialSeed(rawFloor, difficulty, trial));
-    const u8 first = (rawFloor > WINDOW_FLOORS - 1)
-                   ? static_cast<u8>(rawFloor - (WINDOW_FLOORS - 1)) : 1;
-    for (u8 f = first; f <= rawFloor; f++) {
-        const u8 lvl = static_cast<u8>(effectiveFloor(f, difficulty));   // max 150, fits u8
+    // The window is continuous in EFFECTIVE floor: Normal 50 = eff 50, NM 1 = eff 51, so a
+    // difficulty-entry floor reaches back into the previous difficulty's tail — exactly what
+    // a real player wears at NM/Hell entry. For F >= 4 this is identical to a raw-floor
+    // window; Normal 1-3 still clamp at 1 (nothing exists before floor 1).
+    const u32 eff      = effectiveFloor(rawFloor, difficulty);
+    const u32 firstEff = (eff > WINDOW_FLOORS - 1) ? eff - (WINDOW_FLOORS - 1) : 1u;
+    for (u32 e = firstEff; e <= eff; e++) {
+        const u8 lvl = static_cast<u8>(e);                        // max 150, fits u8
         for (u32 k = 0; k < DROPS_PER_FLOOR && out.count < MAX_WINDOW_DROPS; k++)
             out.items[out.count++] = ItemGen::rollItem(lvl, defs, defCount,
                                                        affixDefs, affixDefCount);
