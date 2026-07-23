@@ -54,6 +54,20 @@ debug keys) lives in the `engine-reference` skill.
 
 - **Adding a HUD status effect (buff/debuff icon).** Two halves that MUST stay in lockstep, because the icon is keyed by ROW INDEX, not by the effect: (1) append a `HUD::StatusEffect` row to the `statuses[]` array in `engine_hud.cpp` (label, colour, timer — a timer of 0 hides it), and (2) append its 8x8 glyph in the SAME position to the `icons[]` table in `hud_status.cpp`. Get the order wrong and the HUD shows the wrong icon for the effect — a silent, purely visual lie that nothing catches. A `static_assert` pins the table against `STATUS_ICON_COUNT`. **The art is generated, never hand-written:** author it as ASCII in `tools/gen_status_icons.py` (`.` = transparent, `1`-`4` = palette shades, row 0 = top) and re-run it (or `tools/build_assets.py`, which invokes it). The script emits `src/renderer/status_icons_data.h` — icons AND palettes together, so art and colour cannot drift apart — and validates the art (wrong row count, wrong width, bad pixel char, or an entirely empty icon all fail loudly rather than shipping a blank box). Unlike `assets/meshes/*.obj`, this header IS committed, so it can't vanish on CI.
 
+## Run a Balance Report
+
+The balance lab (`tests/balance/`, spec: `docs/superpowers/specs/2026-07-22-balance-lab-design.md`) models typical-equipment player power against the enemy/boss curves by driving the REAL engine code — `ItemGen` drops, `BuildScore` scoring, `Inventory` equipping, the `GameConst` spawn multipliers — per (difficulty, floor, build cell). Its always-on sanity pins run with the normal test suite; the full sweep is env-gated:
+
+```bash
+BALANCE_REPORT=out.csv ./build/tests/dungeon_tests -tc="*balance report*"
+python3 tools/balance_chart.py out.csv -o out.html   # CSV → one-page HTML curve report
+```
+
+- **Model parameters live in `tests/balance/balance_lab.h`** — `DROPS_PER_FLOOR` (12), `WINDOW_FLOORS` (4), `TRIALS` (200), and `columnClass` (the representative class per damage column: SORCERER magic / WARRIOR melee / MARKSMAN ranged). They are declared **model assumptions, not engine truth** — the header documents the reasoning behind each; tune them there (with the why) if the model drifts from real play, never by patching engine constants to make a chart look right.
+- **Four single-source extractions exist FOR the lab** — the sustained-DPS cycle (`game/weapon_dps.h`, shared with `build_score.h`), `Combat::armorMitigation` (inline in `combat.h`), `kClassDefs` (`game/class_defs.cpp`), and `enemyTierForFloor` (`enemy_def.h`, shared with the spawner). **Never re-inline any of them** into a single caller — a private copy is exactly the scorer-drift bug the 2026-07-22 loot fixes cleaned up: the lab and the engine silently computing different numbers from the "same" formula.
+- **Phase 2 (pending):** once target bands are chosen, they become `REQUIRE`s in `tests/balance/test_balance_lab.cpp` — one why-comment per number, the `game_constants.h` discipline — so CI fails when a content or constant change knocks a floor out of band.
+- **Pitfall:** a new weapon family or any drop-band change should be sanity-checked against the lab's weapon pin (`"typical gear: every build cell fields a weapon from mid-game windows"`). That pin FAILING is the feature working, not test noise — the lab's first run caught levels 39-50 shipping no non-legendary wand (fixed by adding the Void Scepter). Run the pins before shipping the content, and fix the content gap, not the pin.
+
 ## Pitfalls / Gotchas
 
 - **A multi-story cell has N slabs — a scalar read of it is a phantom.** Anything that inspects

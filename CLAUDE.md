@@ -71,6 +71,21 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 
 **CI runs the suite** (`ctest`) on the native Linux + macOS jobs. It did not until 2026-07-14 — the tests were built and thrown away, so a red test could not stop a release. The Windows job cross-compiles and cannot execute its own binary, so it still only builds.
 
+**Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
+`docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
+(Monte-Carlo through the real `ItemGen`/`BuildScore`/`Inventory` code) vs enemy/boss curves
+(the real `GameConst` spawn multipliers) per (difficulty, floor, build cell). Always-on sanity
+pins run with the suite; the full CSV report is env-gated:
+`BALANCE_REPORT=out.csv ./build/tests/dungeon_tests -tc="*balance report*"`, then
+`python3 tools/balance_chart.py out.csv -o out.html` for the chart page. Four single-source
+extractions exist FOR the lab — the sustained-DPS cycle (`game/weapon_dps.h`, shared with
+`build_score.h`), `Combat::armorMitigation` (inline in `combat.h`), `kClassDefs`
+(`game/class_defs.cpp`), and `enemyTierForFloor` (`enemy_def.h`, shared with the spawner) —
+re-inlining any of them re-creates the scorer-drift bug the 2026-07-22 loot fixes cleaned up.
+Its first run caught a real gap (no non-legendary wand at levels 39-50 → Void Scepter).
+Phase 2 (pending): chosen target bands become REQUIREs in `test_balance_lab.cpp` so CI fails
+when a content/constant change knocks a floor out of band.
+
 **Assets are GENERATED, not committed** (`assets/meshes/*.obj` is gitignored). The mesh table is `src/engine/asset_manifest.h`; `tools/build_assets.py` **hard-fails** if the engine names a mesh it doesn't generate, so a mesh added to one and not the other can no longer ship as an invisible fallback cube. Adding a mesh means editing **both**. (Full trap: `engine-how-to` → Pitfalls.)
 
 ## Architecture
