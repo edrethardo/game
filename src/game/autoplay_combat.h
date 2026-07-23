@@ -43,6 +43,9 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     Vec3 aimPt = t.pos;
     if (v.weaponProjSpeed > 0.1f) {
         f32 tHit;
+        // interceptTime's MAX_LEAD_SEC (1.5 s) cap is inherited from the throwing-knife tuning, so a
+        // slow projectile at long range silently drops its lead and aims at centre — a heads-up for
+        // whoever tunes bot accuracy.
         if (LeadAssist::interceptTime(t.pos - eye, t.vel, v.weaponProjSpeed, tHit))
             aimPt = t.pos + t.vel * tHit;
     }
@@ -59,8 +62,11 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // Fire when in band with LOS (melee: also require facing, which the aim above provides).
     out.fire = inBand && t.hasLOS && !v.stunned && !v.rolling;
 
-    // Defense posture from the row.
-    if (d.dodgesProactively && v.dodgeCooldown <= 0.0f && t.dist < lo * 0.6f && !v.stunned)
+    // Defense posture from the row. Melee columns have engageMin=0 (no kite floor), so lo is ~0 and
+    // a lo-based dodge threshold would be `dist < 0` — dead. Fall back to the weapon's (short) reach
+    // there so the "never get touched" hit-and-run posture actually fires for Glass Cannon Melee.
+    const f32 dodgeRef = (lo > 0.1f) ? lo : (d.engageMax * v.weaponRange);
+    if (d.dodgesProactively && v.dodgeCooldown <= 0.0f && t.dist < dodgeRef * 0.6f && !v.stunned)
         out.dodge = true;                         // glass cannon rolls away from a closer
     if (d.blocks && !out.fire && t.dist <= v.weaponRange && !v.stunned)
         out.block = true;                          // tank blocks between swings

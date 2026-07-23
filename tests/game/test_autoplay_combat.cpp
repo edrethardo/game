@@ -66,6 +66,30 @@ TEST_CASE("leads a crossing target: aim yaw is offset ahead of its position") {
     CHECK(out.aimYaw < 0.0f);     // lead point is +X of the target => aim rotates toward +X (yaw<0)
 }
 
+TEST_CASE("glass-cannon melee dodges a closer despite a zero kite-floor") {
+    // Cell 7 = Glass/Melee: dodgesProactively AND engageMin=0. lo=0 would make a lo-based dodge
+    // threshold `dist<0` (dead), so the reach-based fallback dodgeRef = engageMax*range must fire it.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*2+1;                          // Glass Cannon / Melee
+    v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true; v.dodgeCooldown = 0.0f;
+    // dodgeRef = 0.60*2.0 = 1.2; trigger = dodgeRef*0.6 = 0.72 m. 0.5 m is inside.
+    BotTarget t{}; t.pos = {0, 1.7f, -0.5f}; t.dist = 0.5f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.dodge);
+}
+
+TEST_CASE("glass-cannon melee holds the dodge when the closer is past the reach reference") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*2+1;                          // Glass Cannon / Melee
+    v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true; v.dodgeCooldown = 0.0f;
+    // 1.9 m is well outside the 0.72 m dodge trigger.
+    BotTarget t{}; t.pos = {0, 1.7f, -1.9f}; t.dist = 1.9f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(out.dodge);
+}
+
 TEST_CASE("picks the nearest LOS target when several exist") {
     BotView v = selfAt({0,0,0});
     BotTarget ts[2];
