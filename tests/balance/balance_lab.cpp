@@ -5,6 +5,7 @@
 #include "game/game_constants.h"
 #include "game/build_score.h"
 #include <algorithm>
+#include <cstring>
 
 namespace BalanceLab {
 
@@ -59,8 +60,10 @@ BossCurve bossAt(const BossDefTable& table, u8 rawFloor, u8 difficulty) {
     return c;
 }
 
-// FNV-1a over the trial coordinates: stable, order-independent seeding. ItemGen's LCG maps
-// seed->stream 1:1, so distinct trial coords give distinct (if correlated-looking) streams.
+// FNV-1a over the trial coordinates: stable, order-independent seeding. Within one
+// (floor,difficulty) cell the final (h ^ trial) * prime step is a bijection over trial, so
+// distinct trials are guaranteed distinct streams; ACROSS cells FNV can collide, which is
+// harmless (different effective levels make the drops differ anyway).
 static u32 trialSeed(u8 rawFloor, u8 difficulty, u32 trial) {
     u32 h = 2166136261u;
     const u32 parts[3] = {rawFloor, difficulty, trial};
@@ -71,7 +74,9 @@ static u32 trialSeed(u8 rawFloor, u8 difficulty, u32 trial) {
 void rollWindowDrops(u8 rawFloor, u8 difficulty, u32 trial,
                      const ItemDef* defs, u32 defCount,
                      const AffixDef* affixDefs, u32 affixDefCount, DropSet& out) {
-    out.count = 0;
+    // Zero the WHOLE output (padding bytes included): the determinism test memcmps entire
+    // DropSets, so uninitialized padding must not leak previous-call garbage into the compare.
+    std::memset(&out, 0, sizeof out);
     ItemGen::init(trialSeed(rawFloor, difficulty, trial));
     const u8 first = (rawFloor > WINDOW_FLOORS - 1)
                    ? static_cast<u8>(rawFloor - (WINDOW_FLOORS - 1)) : 1;

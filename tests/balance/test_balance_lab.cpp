@@ -135,7 +135,7 @@ TEST_CASE("typical gear: every build cell fields a weapon from mid-game windows"
 
     const u8 floors[] = {10, 25, 50};
     for (u8 f : floors)
-        for (u8 d = 0; d < 3; d += 2)                    // Normal + Hell
+        for (u8 d = 0; d < FreePlay::DIFFICULTY_COUNT; d += 2)   // Normal + Hell
             for (u32 trial = 0; trial < 5; trial++) {
                 BalanceLab::DropSet drops;
                 BalanceLab::rollWindowDrops(f, d, trial, items, ic, affixes, ac, drops);
