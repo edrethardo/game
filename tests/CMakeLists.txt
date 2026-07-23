@@ -52,6 +52,7 @@ add_executable(dungeon_tests
     game/test_bot_input.cpp          # synthetic-action overlay: held/pressed edge semantics (header-only)
     game/test_autoplay_control.cpp   # takeover/resume latch (header-only)
     game/test_autoplay_doctrine.cpp  # build-cell -> combat doctrine table (header-only)
+    game/test_autoplay_combat.cpp    # pure combat policy: target/aim/fire/kite (header-only)
     game/test_shared_loot.cpp        # ground drops are FFA instantly; exclusivity only if re-armed
     game/test_legendary_pool.cpp     # legendary tier = named uniques only; rarityFloor guarantees
     game/test_ai_preference.cpp      # authored combat openers: pure map + enemies.json stat-fit lint
