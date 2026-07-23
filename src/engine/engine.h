@@ -126,8 +126,8 @@ private:
 
     // Difficulty — 0=Normal, 1=Nightmare, 2=Hell. Each tier adds +50 "effective floors"
     // to every enemy (incl. bosses). Enemy HP compounds off the effective floor while
-    // damage stays linear + a flat per-tier bump (x1.5 NM / x2 Hell). See GameConst::
-    // floorHealthMult / floorDamageMult / difficultyDamageBump.
+    // damage stays linear + a flat per-tier bump (the table lives in GameConst::
+    // difficultyDamageBump; see also floorHealthMult / floorDamageMult).
     u8 m_difficulty        = 0;
     // Highest difficulty unlocked globally (persisted in difficulty_unlock.dat)
     u8 m_highestUnlocked   = 0;

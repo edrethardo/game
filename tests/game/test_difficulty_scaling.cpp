@@ -8,8 +8,8 @@
 // far slower than the enemy's effective-floor count).
 //
 // floorHealthMult is clamped to max(linear, compounding) so the change can only ever make
-// enemies tougher, never weaker — the Normal tier must come out EXACTLY equal to the old
-// linear curve. These tests pin that clamp, monotonic growth, the headline tier multipliers
+// enemies tougher, never weaker — the Normal tier must come out EXACTLY equal to the linear
+// curve. These tests pin that clamp, monotonic growth, the headline tier multipliers
 // we balanced around, and the exact damage-bump table.
 
 #include "doctest/doctest.h"
@@ -36,32 +36,26 @@ TEST_CASE("floorHealthMult: floor 1 is the 1.0x baseline (and 0 is guarded)") {
     CHECK(floorDamageMult(0) == doctest::Approx(1.0f));
 }
 
-TEST_CASE("floorHealthMult: Normal floors 1-45 are byte-for-byte the legacy linear curve") {
-    // This test USED to assert all of Normal (1..50) was untouched. That promise is gone, on purpose.
+TEST_CASE("floorHealthMult: ALL of Normal (1-50) is byte-for-byte the linear curve") {
+    // The crossover (where compounding overtakes the linear curve) has moved twice:
+    //   * raising the compounding rate to 4.41% pulled it from effective floor 52 down to 46,
+    //     so for a while Normal 46-50 picked up a small compounding tail;
+    //   * the 2026-07-23 balance-lab pass steepened the linear HP slope 0.10 -> 0.12, which
+    //     outgrows compounding until effective floor 53 — so the tail is gone again and ALL of
+    //     Normal (raw floors 1-50 = effective 1-50) rides the linear slope.
     //
-    // Tripling Hell's HP needed the compounding rate at 4.41%, and compounding cannot be aimed at one
-    // tier: raising it moved the crossover (where compounding overtakes the legacy linear curve) from
-    // effective floor 52 down to 46. So the last few floors of Normal DO get tougher now. That is the
-    // "normal only gets a wee bit harder" that was asked for.
-    //
-    // The honest guarantee is what is pinned here: everything up to floor 45 is still EXACTLY the old
-    // curve, so the early and middle game is bit-for-bit what it always was. Do not widen this back to
-    // 50 — it would not pass, and the point of the test is to state where the line actually is.
-    for (u32 eff = 1; eff <= 45; ++eff) {
+    // Note what this pins: Normal's HP curve now lives entirely in FLOOR_STAT_MULT. Normal DID
+    // get tougher in that pass — via the slope itself (that was the point), not via compounding.
+    for (u32 eff = 1; eff <= 50; ++eff) {
         CHECK(floorHealthMult(eff) == doctest::Approx(legacyLinear(eff)));
     }
 }
 
-TEST_CASE("floorHealthMult: the tail of Normal gets tougher, but only a wee bit") {
-    // The other side of the same coin. Floors 36-50 now ride the compounding curve. It must be a
-    // nudge, not a re-tune: if Normal 50 ever more than doubled, the base game would have been
-    // re-balanced as a side effect of a Hell change, which is exactly what nobody asked for.
-    CHECK(floorHealthMult(46) > legacyLinear(46));           // crossover has happened by here
-    CHECK(floorHealthMult(45) == doctest::Approx(legacyLinear(45)));  // ...but not before it
-
-    const f32 normal50 = floorHealthMult(50) / legacyLinear(50);
-    CHECK(normal50 > 1.0f);
-    CHECK(normal50 < 1.20f);                                 // ~+10%: a whisker
+TEST_CASE("floorHealthMult: compounding overtakes the linear slope at effective floor 53") {
+    // The crossover, pinned exactly so a future slope/rate tweak states its consequences here.
+    // Effective floor 53 = Nightmare floor 3: compounding governs from early Nightmare onward.
+    CHECK(floorHealthMult(52) == doctest::Approx(legacyLinear(52)));  // linear still wins...
+    CHECK(floorHealthMult(53) > legacyLinear(53));                    // ...compounding from here
 }
 
 TEST_CASE("floorHealthMult: never below linear anywhere (change only ever adds difficulty)") {
@@ -72,14 +66,14 @@ TEST_CASE("floorHealthMult: never below linear anywhere (change only ever adds d
 
 TEST_CASE("floorHealthMult: compounding overtakes and ramps in Nightmare/Hell") {
     // Headline numbers (effFloor = floor + difficulty*50):
-    //   Nightmare floor 50 = eff 100 (~18.7x), Hell floor 50 = eff 150 (~81.8x).
+    //   Nightmare floor 50 = eff 100 (~44.1x), Hell floor 50 = eff 150 (~299x).
     CHECK(floorHealthMult(100) ==
           doctest::Approx(std::pow(1.0 + DIFFICULTY_HP_COMPOUND_RATE, 99)).epsilon(0.01));
     CHECK(floorHealthMult(150) ==
           doctest::Approx(std::pow(1.0 + DIFFICULTY_HP_COMPOUND_RATE, 149)).epsilon(0.01));
-    // Strictly tougher than the old linear values at these depths.
-    CHECK(floorHealthMult(100) > legacyLinear(100));  // ~18.7 > 10.9
-    CHECK(floorHealthMult(150) > legacyLinear(150));  // ~81.8 > 15.9
+    // Strictly tougher than the linear values at these depths.
+    CHECK(floorHealthMult(100) > legacyLinear(100));  // ~44.1 > 12.9
+    CHECK(floorHealthMult(150) > legacyLinear(150));  // ~299 > 18.9
     // Hell floor 50 should be a big jump over today's Hell floor 50.
     CHECK(floorHealthMult(150) > 4.0f * legacyLinear(150));
 }
@@ -104,11 +98,13 @@ TEST_CASE("floorDamageMult: stays LINEAR (it must never compound)") {
 }
 
 TEST_CASE("floorDamageMult: the damage slope is STEEPER than the health slope") {
-    // 0.10 -> 0.13 -> 0.16 -> 0.18 -> 0.17. This slope feeds EVERY difficulty, which is why it only ever moves
-    // in small steps — it is the one lever that cannot be aimed at Hell alone.
+    // 0.10 -> 0.13 -> 0.16 -> 0.18 -> 0.17 -> 0.20. This slope feeds EVERY difficulty, which is why it
+    // only ever moves in small steps — it is the one lever that cannot be aimed at Hell alone.
+    // (0.20 is the 2026-07-23 balance-lab pass: the depth-weighted Normal/NM lever, with the Hell
+    // bump re-solved down in the same change so Hell stood still.)
     CHECK(FLOOR_DAMAGE_MULT > FLOOR_STAT_MULT);
-    CHECK(FLOOR_DAMAGE_MULT == doctest::Approx(0.17f));
-    CHECK(floorDamageMult(150) == doctest::Approx(1.0f + 149.0f * 0.17f));   // 26.3x at Hell 50
+    CHECK(FLOOR_DAMAGE_MULT == doctest::Approx(0.20f));
+    CHECK(floorDamageMult(150) == doctest::Approx(1.0f + 149.0f * 0.20f));   // 30.8x at Hell 50
 }
 
 TEST_CASE("The damage slope is a NORMAL dial, not a Hell one") {
@@ -135,12 +131,14 @@ TEST_CASE("The damage slope is a NORMAL dial, not a Hell one") {
     CHECK(norm50_B > norm50_A * 1.05f);
 }
 
-TEST_CASE("difficultyDamageBump: Normal x1.25, Nightmare x2.30, Hell x11.20") {
-    CHECK(difficultyDamageBump(0) == doctest::Approx(1.25f));
-    CHECK(difficultyDamageBump(1) == doctest::Approx(2.30f));
-    CHECK(difficultyDamageBump(2) == doctest::Approx(11.20f));
+TEST_CASE("difficultyDamageBump: Normal x1.40, Nightmare x2.80, Hell x9.58") {
+    // 2026-07-23 balance-lab pass: Normal 1.25 -> 1.40 and NM 2.30 -> 2.80 are deliberate raises;
+    // Hell 11.20 -> 9.58 is the RE-SOLVE against the steeper 0.20 slope (total ~295x stands still).
+    CHECK(difficultyDamageBump(0) == doctest::Approx(1.40f));
+    CHECK(difficultyDamageBump(1) == doctest::Approx(2.80f));
+    CHECK(difficultyDamageBump(2) == doctest::Approx(9.58f));
     // Unexpected values fall back to Normal rather than misbehaving.
-    CHECK(difficultyDamageBump(99) == doctest::Approx(1.25f));
+    CHECK(difficultyDamageBump(99) == doctest::Approx(1.40f));
     // Ordering is the invariant that actually matters: deeper tier => strictly more damage.
     CHECK(difficultyDamageBump(0) < difficultyDamageBump(1));
     CHECK(difficultyDamageBump(1) < difficultyDamageBump(2));
@@ -150,10 +148,14 @@ TEST_CASE("Hell floor 50 damage is AT LEAST double what it was — the stated ha
     // The one damage requirement that was stated as a floor rather than a target, so it is pinned as a
     // floor. A 3x pass was tried and pulled back (it one-shot a fully geared paladin); 2x is what
     // survived. If a later re-tune drops under this, it broke a promise.
-    const f32 prevHell50 = (1.0f + 149.0f * 0.16f) * 5.90f;    // the previous curve: 146.6x
+    //
+    // The 2026-07-23 slope raise re-solved the Hell bump so this total STOOD STILL: 30.80 x 9.58 =
+    // 295.1x vs the old 26.33 x 11.20 = 294.9x (+0.06%). Note the margin over the 2x floor is now
+    // razor thin (295.1 vs 293.1) — a Hell bump below 9.52 breaks the promise.
+    const f32 prevHell50 = (1.0f + 149.0f * 0.16f) * 5.90f;    // the pre-rework curve: 146.6x
     const f32 newHell50  = floorDamageMult(150) * difficultyDamageBump(2);
     CHECK(newHell50 >= 2.0f * prevHell50);
-    CHECK(newHell50 == doctest::Approx(294.9f).epsilon(0.01));
+    CHECK(newHell50 == doctest::Approx(295.1f).epsilon(0.01));
 }
 
 TEST_CASE("Hell floor 50 HP went up, but nowhere near enough to out-tank the damage cap") {
@@ -165,8 +167,10 @@ TEST_CASE("Hell floor 50 HP went up, but nowhere near enough to out-tank the dam
 }
 
 TEST_CASE("The Hell bump is BOXED IN by the 2x floor and the HP>damage invariant") {
-    // The two requirements bracket the Hell bump from both sides, and at a 3.9% HP rate the gap
-    // between them is only [11.14, 11.36] — 11.20 sits inside it with almost no room.
+    // The two requirements bracket the Hell bump from both sides, and at the 3.9% HP rate and 0.20
+    // damage slope the gap between them is only [9.52, 9.71] — 9.58 sits inside it with almost no
+    // room. (At the old 0.17 slope the same box was [11.14, 11.36] around 11.20; the 2026-07-23
+    // re-solve moved the number, not the squeeze.)
     //
     // This is the test that matters most in this file. It says: you cannot raise Hell's damage any
     // further WITHOUT first buying HP headroom by raising DIFFICULTY_HP_COMPOUND_RATE. Someone who
@@ -183,43 +187,54 @@ TEST_CASE("The Hell bump is BOXED IN by the 2x floor and the HP>damage invariant
     CHECK(hellHp / hellDmg < 1.05f);
 }
 
-TEST_CASE("Nightmare is neither a bullet sponge nor a glass cannon") {
-    // The trap, as an assertion — and it has teeth in BOTH directions, which is why it stays.
-    //
+TEST_CASE("Nightmare runs deliberately hotter than its HP-parity solve") {
     // Compounding cannot be aimed at one tier, so DIFFICULTY_HP_COMPOUND_RATE sets Nightmare's HP
-    // whether anyone meant it to or not (now x1.28). Nightmare's DAMAGE comes from a separate per-tier
-    // bump. Let those drift apart and Nightmare breaks one of two ways:
-    //   * bump too LOW  -> tanky enemies that barely hit harder: a sponge. (At 4.41%/1.90 it was
-    //                      heading for x2.07 HP against x1.18 damage.)
-    //   * bump too HIGH -> a glass cannon. (Pulling the rate back to 3.9% while leaving the bump at
-    //                      3.53 would have given x1.97 damage against x1.28 HP.)
+    // whether anyone meant it to or not (x1.28 vs the pre-rework curve). Nightmare's DAMAGE comes
+    // from a separate per-tier bump, and 2.30 used to be SOLVED so its damage growth tracked that
+    // x1.28 HP growth exactly — this test used to assert dmgX == hpX.
     //
-    // So the bump is SOLVED to make Nightmare's damage growth track its own HP growth. Any future edit
-    // to the HP rate must re-solve it, and this is what catches a forgetful one.
+    // That parity was DELIBERATELY broken on 2026-07-23: the balance lab's first report measured NM
+    // at 12-19 hits-to-die mid-late tier (closer to Normal's safety than Hell's threat), and Aaron's
+    // call was "a bit harder". With the bump at 2.80 and the slope at 0.20, NM-50 damage grows x1.82
+    // vs the pre-rework baseline against x1.28 HP growth — hot ON PURPOSE, and pinned exactly so the
+    // heat stays a decision rather than drift. The sponge direction still has teeth: damage growth
+    // must never fall BELOW HP growth again (that is the bullet-sponge failure the old solve fixed).
+    //
+    // If the HP rate ever moves, re-derive the parity bump first and re-apply the deliberate heat on
+    // top — do not treat 2.80 as a parity number (see difficultyDamageBump's comment).
     const f32 prevHp  = std::pow(1.0364f, 99.0f);
     const f32 prevDmg = (1.0f + 99.0f * 0.16f) * 1.90f;
     const f32 hpX     = floorHealthMult(100) / prevHp;
     const f32 dmgX    = (floorDamageMult(100) * difficultyDamageBump(1)) / prevDmg;
     CHECK(hpX  == doctest::Approx(1.28f).epsilon(0.03));
-    CHECK(dmgX == doctest::Approx(hpX).epsilon(0.05));   // damage tracks tankiness, neither way
+    CHECK(dmgX >  hpX);                                  // never a sponge again
+    CHECK(dmgX == doctest::Approx(1.82f).epsilon(0.03)); // the deliberate heat, pinned
 }
 
-TEST_CASE("The shared slope keeps Normal's collateral small") {
-    // The slope feeds every tier, so raising it taxes Normal too — and since it buys nothing in Hell
-    // (see the NORMAL-dial test above), that tax is the ONLY thing it does. Keep it a nudge.
-    const f32 prevNormal5  = (1.0f + 4.0f * 0.16f) * 1.25f;
+TEST_CASE("Normal's damage raise is deliberate, depth-weighted, and pinned") {
+    // This test used to assert Normal's collateral from the slope stayed a whisker (<+6%). That
+    // promise was RETIRED on purpose on 2026-07-23: the balance lab measured deep Normal as the
+    // safest place in the game (~30 hits-to-die at floor 40, TTK falling with depth), so Normal was
+    // made harder ON PURPOSE — bump 1.25 -> 1.40 (+12% flat) plus slope 0.17 -> 0.20 (depth-
+    // weighted). The pins below state the size of that decision vs the immediately-previous curve
+    // (0.17 slope, 1.25 bump) so any future drift has to be re-stated here as a number.
+    const f32 prevNormal5  = (1.0f + 4.0f * 0.17f) * 1.25f;
     const f32 newNormal5   = floorDamageMult(5) * difficultyDamageBump(0);
-    CHECK(newNormal5 / prevNormal5 < 1.05f);      // ~+2%
+    CHECK(newNormal5 / prevNormal5 == doctest::Approx(1.20f).epsilon(0.01));   // +20% at floor 5
 
-    const f32 prevNormal50 = (1.0f + 49.0f * 0.16f) * 1.25f;
+    const f32 prevNormal50 = (1.0f + 49.0f * 0.17f) * 1.25f;
     const f32 newNormal50  = floorDamageMult(50) * difficultyDamageBump(0);
-    CHECK(newNormal50 / prevNormal50 < 1.10f);    // ~+6%: a whisker, not a re-tune
+    CHECK(newNormal50 / prevNormal50 == doctest::Approx(1.30f).epsilon(0.01)); // +30% at floor 50
+
+    // Depth-weighting is the point: the raise must bite harder where the lab found the game
+    // softest (deep Normal), not just shift the whole tier by a flat factor.
+    CHECK(newNormal50 / prevNormal50 > newNormal5 / prevNormal5);
 }
 
 TEST_CASE("Combined enemy damage = linear floor curve x per-tier bump") {
-    // What the spawn sites actually compute. A Hell floor-50 enemy: (1 + 149*0.17) * 11.20 = 294.9x.
+    // What the spawn sites actually compute. A Hell floor-50 enemy: (1 + 149*0.20) * 9.58 = 295.1x.
     const f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
-    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.17f) * 11.20f).epsilon(0.001));
+    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.20f) * 9.58f).epsilon(0.001));
 
     // HP must still outscale damage. Damage is linear while HP compounds, and this ordering is what
     // keeps deep enemies from becoming glass cannons that delete the player before they can be hit
