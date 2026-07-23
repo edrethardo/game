@@ -16,7 +16,7 @@ struct Doctrine {
     f32  engageMin = 0.0f;   // hold no closer than this * attackRange (kite floor; 0 = commit)
     f32  engageMax = 1.0f;   // close to at least this * attackRange to fire
     f32  potionHpFrac = 0.5f;// drink when hp/maxHp drops below this
-    u8   disengageCount = 3; // this many enemies inside melee arc => break off (Moderate/Melee)
+    u8   disengageCount = 3; // this many enemies inside melee arc => break off (per-cell; default 3 = Moderate)
     bool blocks = false;             // hold-block between actions / during reloads
     bool dodgesProactively = false;  // roll away from closing enemies before they hit
     bool usesCover = false;          // reload / recast from findCoverCell, break LOS on cooldown
@@ -45,8 +45,14 @@ inline Doctrine doctrineFor(u8 cell) {
             d.usesCover = false; d.disengageCount = 6; break;
         case 2: // Glass Cannon
             d.potionHpFrac = 0.60f; d.blocks = false; d.dodgesProactively = true;
+            // usesCover is intentional even for Glass/Melee, whose hug band (engageMax 0.60) keeps
+            // it close: there it means retreat-to-cover BETWEEN strikes (hit-and-run), not stand
+            // off. For Glass/Ranged & Glass/Magic it is the usual break-LOS-while-recasting.
             d.usesCover = true;  d.disengageCount = 2;
             d.engageMax = (col == 1) ? d.engageMax : 1.00f;      // ranged/magic go max-range
+            // Only Glass/Ranged seeks high ground — a deliberate asymmetry: ranged gains the most
+            // from open sightlines, while melee wants to close and magic fights mid, so neither
+            // pays the traversal cost to climb.
             d.preferHighGround = (col == 2); break;
         default: // Moderate
             d.potionHpFrac = 0.50f; d.blocks = (col != 2); d.dodgesProactively = (col == 2);
