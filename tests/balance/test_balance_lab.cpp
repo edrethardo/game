@@ -1,7 +1,6 @@
 // tests/balance/test_balance_lab.cpp — the balance lab: typical-gear player power vs
 // enemy curves per floor (spec: docs/superpowers/specs/2026-07-22-balance-lab-design.md).
-// This file holds the always-on sanity pins; the BALANCE_REPORT CSV dump case is added
-// in a later task.
+// This file holds the always-on sanity pins plus the env-gated BALANCE_REPORT CSV dump.
 #include "doctest/doctest.h"
 #include "balance/balance_lab.h"
 #include "game/enemy_loader.h"
@@ -12,6 +11,8 @@
 #include "game/weapon_dps.h"    // the shared sustained-DPS cycle powerOf runs weapons through
 #include "game/combat.h"        // armorMitigation — the real armor curve behind EHP
 #include <algorithm>
+#include <cstdio>               // the CSV writers take FILE*
+#include <cstdlib>              // getenv — the BALANCE_REPORT gate
 #include <cstring>
 
 // Shared fixture: the real shipped tables, loaded once (doctest runs cases in one process).
@@ -233,4 +234,109 @@ TEST_CASE("player power: cast DPS uses the class skill list, unlock gating and C
     // the same skill is already live — a raw-floor gate would wrongly report 0 here.
     const BalanceLab::PlayerPower nm = BalanceLab::powerOf(inv, cell, 1, 1, defs, sd, 1);
     CHECK(nm.castDps == doctest::Approx(expected));
+}
+
+static void loadAllTables(ItemDef* items, u32& ic, AffixDef* affixes, u32& ac,
+                          SkillDef* skills, u32& sc) {
+    loadGearTables(items, ic, affixes, ac);
+    REQUIRE(ItemLoader::loadSkillDefs(DUNGEON_REPO_ROOT "/assets/config/skills.json", skills, sc));
+}
+
+TEST_CASE("sweep row: percentiles ordered, TTK metrics consistent with their inputs") {
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    static SkillDef skills[MAX_SKILL_DEFS];
+    u32 ic = 0, ac = 0, sc = 0; loadAllTables(items, ic, affixes, ac, skills, sc);
+
+    BalanceLab::MetricsRow r;
+    BalanceLab::computeRow(0, 25, 4, /*trials=*/40, items, ic, affixes, ac, skills, sc,
+                           enemyTable(), bossTable(), r);
+    CHECK(r.tDps[0] <= r.tDps[1]);            // p10 <= p50
+    CHECK(r.tDps[1] <= r.tDps[2]);            // p50 <= p90
+    CHECK(r.ehp[0]  <= r.ehp[1]);
+    CHECK(r.ttkTrash     == doctest::Approx(r.enemy.hpMedian / r.tDps[1]));
+    CHECK(r.hitsToDie    == doctest::Approx(r.ehp[1] / r.enemy.hitMedian));
+    CHECK(r.secondsToDie == doctest::Approx(r.ehp[1] / r.enemy.dpsMedian));
+}
+
+TEST_CASE("sanity pin: p50 gear power rises up the floor ladder for every cell") {
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    static SkillDef skills[MAX_SKILL_DEFS];
+    u32 ic = 0, ac = 0, sc = 0; loadAllTables(items, ic, affixes, ac, skills, sc);
+
+    const u8 ladder[] = {10, 25, 40, 50};
+    for (u8 d = 0; d < FreePlay::DIFFICULTY_COUNT; d += 2)   // Normal + Hell
+        for (u8 cell = 0; cell < 9; cell += 4) {             // one cell per row/col diagonal
+            f32 prevDps = 0, prevEhp = 0;
+            for (u8 f : ladder) {
+                BalanceLab::MetricsRow r;
+                // Full TRIALS, not a cut-down count: Hell's affix levelScale (~10x at eff
+                // 137-150) makes the DPS distribution heavy-tailed (p90 ~ 5x p50), where a
+                // median-of-40 swings ~40% between adjacent floors and fails this pin on
+                // pure sampling noise. 200 trials is deterministic (seeded by coordinates)
+                // and still ~0.2 s for the whole ladder.
+                BalanceLab::computeRow(d, f, cell, BalanceLab::TRIALS,
+                                       items, ic, affixes, ac, skills, sc,
+                                       enemyTable(), bossTable(), r);
+                CAPTURE(static_cast<u32>(d)); CAPTURE(static_cast<u32>(cell));
+                CAPTURE(static_cast<u32>(f));
+                // 0.98: even p50-of-200 keeps a little between-floor wobble; a real
+                // regression drops far more.
+                CHECK(r.tDps[1] >= prevDps * 0.98f);
+                CHECK(r.ehp[1]  >= prevEhp * 0.98f);
+                prevDps = r.tDps[1]; prevEhp = r.ehp[1];
+            }
+        }
+}
+
+TEST_CASE("CSV smoke: header + one row per cell, parseable") {
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    static SkillDef skills[MAX_SKILL_DEFS];
+    u32 ic = 0, ac = 0, sc = 0; loadAllTables(items, ic, affixes, ac, skills, sc);
+
+    const char* path = "balance_smoke.csv";              // build dir cwd
+    FILE* fp = std::fopen(path, "w");
+    REQUIRE(fp);
+    BalanceLab::writeCsvHeader(fp);
+    for (u8 cell = 0; cell < 9; cell++) {
+        BalanceLab::MetricsRow r;
+        BalanceLab::computeRow(0, 10, cell, 10, items, ic, affixes, ac, skills, sc,
+                               enemyTable(), bossTable(), r);
+        BalanceLab::writeCsvRow(fp, r);
+    }
+    std::fclose(fp);
+
+    fp = std::fopen(path, "r");
+    REQUIRE(fp);
+    char line[1024]; u32 lines = 0;
+    while (std::fgets(line, sizeof line, fp)) lines++;
+    std::fclose(fp);
+    std::remove(path);
+    CHECK(lines == 10);                                  // header + 9 cells
+}
+
+// The report dump. NOT a test: env-gated so normal CI runs skip the ~minutes-long full sweep.
+//   BALANCE_REPORT=/tmp/balance.csv ./build/tests/dungeon_tests -tc="*balance report*"
+TEST_CASE("balance report: full sweep CSV when BALANCE_REPORT is set") {
+    const char* path = std::getenv("BALANCE_REPORT");
+    if (!path) return;
+
+    static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    static SkillDef skills[MAX_SKILL_DEFS];
+    u32 ic = 0, ac = 0, sc = 0; loadAllTables(items, ic, affixes, ac, skills, sc);
+
+    FILE* fp = std::fopen(path, "w");
+    // doctest::String: a raw const char* stringifies as a pointer address, not the path.
+    REQUIRE_MESSAGE(fp, "BALANCE_REPORT path not writable: ", doctest::String(path));
+    BalanceLab::writeCsvHeader(fp);
+    for (u8 d = 0; d < FreePlay::DIFFICULTY_COUNT; d++)
+        for (u8 f = 1; f <= 50; f++)
+            for (u8 cell = 0; cell < 9; cell++) {
+                BalanceLab::MetricsRow r;
+                BalanceLab::computeRow(d, f, cell, BalanceLab::TRIALS,
+                                       items, ic, affixes, ac, skills, sc,
+                                       enemyTable(), bossTable(), r);
+                BalanceLab::writeCsvRow(fp, r);
+            }
+    std::fclose(fp);
+    MESSAGE("balance report written: ", doctest::String(path), " (1350 rows + header)");
 }

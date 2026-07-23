@@ -9,6 +9,7 @@
 #include "game/item.h"
 #include "game/enemy_def.h"
 #include "game/boss_def.h"
+#include <cstdio>   // writeCsvHeader/writeCsvRow take FILE*
 
 namespace BalanceLab {
 
@@ -79,5 +80,28 @@ inline PlayerClass columnClass(u8 col) {
 PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor, u8 difficulty,
                     const ItemDef* itemDefs,
                     const SkillDef* skillDefs, u32 skillDefCount);
+
+// --- the sweep -------------------------------------------------------------------------------
+struct MetricsRow {
+    u8 difficulty = 0, rawFloor = 0, cell = 0;
+    // Player power percentiles [p10, p50, p90] over the trial set.
+    f32 wDps[3] = {}, cDps[3] = {}, tDps[3] = {}, ehp[3] = {}, sus[3] = {};
+    EnemyCurve enemy;
+    BossCurve  boss;
+    // Derived from the p50s (the typical player) vs the median enemy.
+    f32 ttkTrash = 0, ttkBoss = 0, hitsToDie = 0, secondsToDie = 0;
+};
+
+// One report row: `trials` Monte-Carlo trials (same drop stream for every cell — seeding is
+// by (difficulty, floor, trial) only), percentiles, enemy/boss curves, derived metrics.
+void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
+                const ItemDef* items, u32 itemCount,
+                const AffixDef* affixes, u32 affixCount,
+                const SkillDef* skills, u32 skillCount,
+                const EnemyDefTable& enemies, const BossDefTable& bosses,
+                MetricsRow& out);
+
+void writeCsvHeader(FILE* fp);
+void writeCsvRow(FILE* fp, const MetricsRow& r);
 
 } // namespace BalanceLab

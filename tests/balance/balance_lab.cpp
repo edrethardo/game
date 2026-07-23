@@ -1,12 +1,13 @@
-// tests/balance/balance_lab.cpp — see balance_lab.h. Enemy/boss curves plus the typical-gear
-// Monte Carlo (real ItemGen drops selected with the real Auto-Loot scorer); player power
-// lands in a later task.
+// tests/balance/balance_lab.cpp — see balance_lab.h. Enemy/boss curves, the typical-gear
+// Monte Carlo (real ItemGen drops selected with the real Auto-Loot scorer), player power
+// off real engine math, and the sweep (percentile rows + CSV writers).
 #include "balance/balance_lab.h"
 #include "game/game_constants.h"
 #include "game/build_score.h"
 #include "game/weapon_dps.h"
 #include "game/combat.h"
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace BalanceLab {
@@ -158,6 +159,90 @@ PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor, u8 difficu
               + inv.bonusLifeOnHit * hitRate
               + Inventory::lifestealPct(inv) * 0.01f * p.weaponDps;
     return p;
+}
+
+// q in [0,1]; nearest-rank on a sorted copy. n is TRIALS-sized (<=200): stack array is fine.
+static f32 percentileOf(const f32* v, u32 n, f32 q) {
+    if (n == 0) return 0.0f;
+    f32 tmp[TRIALS];
+    for (u32 i = 0; i < n; i++) tmp[i] = v[i];
+    std::sort(tmp, tmp + n);
+    u32 idx = static_cast<u32>(q * static_cast<f32>(n - 1) + 0.5f);
+    if (idx >= n) idx = n - 1;
+    return tmp[idx];
+}
+
+void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
+                const ItemDef* items, u32 itemCount,
+                const AffixDef* affixes, u32 affixCount,
+                const SkillDef* skills, u32 skillCount,
+                const EnemyDefTable& enemies, const BossDefTable& bosses,
+                MetricsRow& out) {
+    out = MetricsRow{};
+    out.difficulty = difficulty; out.rawFloor = rawFloor; out.cell = cell;
+    if (trials > TRIALS) trials = TRIALS;
+
+    // static: TRIALS-sized scratch would be ~4 KB of stack per array; the lab is
+    // single-threaded test code, so file-scope-lifetime scratch is safe and free.
+    static f32 wv[TRIALS], cv[TRIALS], tv[TRIALS], ev[TRIALS], sv[TRIALS];
+    for (u32 t = 0; t < trials; t++) {
+        DropSet drops;
+        rollWindowDrops(rawFloor, difficulty, t, items, itemCount, affixes, affixCount, drops);
+        PlayerInventory inv;
+        selectLoadout(drops, cell, items, itemCount, inv);
+        const PlayerPower p = powerOf(inv, cell, rawFloor, difficulty, items, skills, skillCount);
+        wv[t] = p.weaponDps; cv[t] = p.castDps; tv[t] = p.totalDps;
+        ev[t] = p.ehp;       sv[t] = p.sustain;
+    }
+    const f32 qs[3] = {0.10f, 0.50f, 0.90f};
+    for (u32 i = 0; i < 3; i++) {
+        out.wDps[i] = percentileOf(wv, trials, qs[i]);
+        out.cDps[i] = percentileOf(cv, trials, qs[i]);
+        out.tDps[i] = percentileOf(tv, trials, qs[i]);
+        out.ehp[i]  = percentileOf(ev, trials, qs[i]);
+        out.sus[i]  = percentileOf(sv, trials, qs[i]);
+    }
+
+    out.enemy = enemyTrashAt(enemies, rawFloor, difficulty);
+    out.boss  = bossAt(bosses, rawFloor, difficulty);
+    // Derived metrics divide by the p50s/medians — guard each so a degenerate row (empty
+    // roster, starved loadout) reports 0 rather than inf/NaN in the CSV.
+    if (out.tDps[1] > 0.0f) {
+        out.ttkTrash = out.enemy.hpMedian / out.tDps[1];
+        if (out.boss.present) out.ttkBoss = out.boss.hp / out.tDps[1];
+    }
+    if (out.enemy.hitMedian > 0.0f) out.hitsToDie    = out.ehp[1] / out.enemy.hitMedian;
+    if (out.enemy.dpsMedian > 0.0f) out.secondsToDie = out.ehp[1] / out.enemy.dpsMedian;
+}
+
+void writeCsvHeader(FILE* fp) {
+    std::fprintf(fp,
+        "difficulty,floor,effFloor,cell,row,col,"
+        "wDps10,wDps50,wDps90,cDps10,cDps50,cDps90,tDps10,tDps50,tDps90,"
+        "ehp10,ehp50,ehp90,sus10,sus50,sus90,"
+        "enHpMed,enHpMin,enHpMax,enHit,enDps,"
+        "bossName,bossHp,bossHit,"
+        "ttkTrash,ttkBoss,hitsToDie,secondsToDie\n");
+}
+
+void writeCsvRow(FILE* fp, const MetricsRow& r) {
+    std::fprintf(fp,
+        "%u,%u,%u,%u,%u,%u,"
+        "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
+        "%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,"
+        "%.1f,%.1f,%.1f,%.2f,%.2f,"
+        "%s,%.1f,%.2f,"
+        "%.3f,%.3f,%.3f,%.3f\n",
+        static_cast<u32>(r.difficulty), static_cast<u32>(r.rawFloor),
+        effectiveFloor(r.rawFloor, r.difficulty), static_cast<u32>(r.cell),
+        static_cast<u32>(BuildScore::buildRow(r.cell)),
+        static_cast<u32>(BuildScore::buildCol(r.cell)),
+        r.wDps[0], r.wDps[1], r.wDps[2], r.cDps[0], r.cDps[1], r.cDps[2],
+        r.tDps[0], r.tDps[1], r.tDps[2],
+        r.ehp[0], r.ehp[1], r.ehp[2], r.sus[0], r.sus[1], r.sus[2],
+        r.enemy.hpMedian, r.enemy.hpMin, r.enemy.hpMax, r.enemy.hitMedian, r.enemy.dpsMedian,
+        r.boss.present ? r.boss.name : "", r.boss.hp, r.boss.hit,
+        r.ttkTrash, r.ttkBoss, r.hitsToDie, r.secondsToDie);
 }
 
 } // namespace BalanceLab
