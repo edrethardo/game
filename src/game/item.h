@@ -230,7 +230,7 @@ struct ClassDef {
     const char* materialName;      // e.g. "player_warrior_skin"
 };
 
-// Global class definition table (defined in engine.cpp)
+// Global class definition table (defined in game/class_defs.cpp)
 extern const ClassDef kClassDefs[static_cast<u32>(PlayerClass::CLASS_COUNT)];
 
 // ---- Affix instance (a single rolled modifier on an item) ----

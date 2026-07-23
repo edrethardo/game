@@ -73,8 +73,10 @@ inline PlayerClass columnClass(u8 col) {
 // gated by unlock floor with gear spell rolls + real CDR; getEffectiveMaxHealth through
 // armorMitigation for EHP; regen/life-on-hit/lifesteal as a separate sustain column.
 // Deliberately NOT modeled (documented in the spec): skill energy costs, weapon range,
-// enemy armor, player skill-aim. rawFloor gates skill unlocks only.
-PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor,
+// enemy armor, player skill-aim. EFFECTIVE floor (raw + difficulty*50) gates skill unlocks,
+// matching the engine's handleClassSkillActivation — on Nightmare/Hell everything is live
+// from raw floor 1, which is exactly what the cross-difficulty comparison must reflect.
+PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor, u8 difficulty,
                     const ItemDef* itemDefs,
                     const SkillDef* skillDefs, u32 skillDefCount);
 

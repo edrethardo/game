@@ -176,7 +176,7 @@ TEST_CASE("player power: bare crafted sword gives exactly the hand-computable nu
 
     static SkillDef noSkills[1] = {};
     const u8 cell = 4;   // Moderate / Melee -> representative class WARRIOR
-    const BalanceLab::PlayerPower p = BalanceLab::powerOf(inv, cell, 1, defs, noSkills, 0);
+    const BalanceLab::PlayerPower p = BalanceLab::powerOf(inv, cell, 1, 0, defs, noSkills, 0);
 
     // sustained(30, 0.5, no clip) = 60; baseline crit 5% x2.0 -> x1.05 = 63.
     CHECK(p.weaponDps == doctest::Approx(63.0f));
@@ -204,21 +204,33 @@ TEST_CASE("player power: cast DPS uses the class skill list, unlock gating and C
     REQUIRE(bp >= 0);
     Inventory::equip(inv, static_cast<u8>(bp), defs);
 
-    // A synthetic skill def bound to the SORCERER's first skill id: 100 dmg / 2 s cooldown.
+    // A synthetic skill def bound to the SORCERER's SECOND skill (slot 1 unlocks at floor 10
+    // for every class, so the below-unlock branch really runs at Normal): 100 dmg / 2 s cd.
     const ClassDef& sorc = kClassDefs[static_cast<u32>(PlayerClass::SORCERER)];
     static SkillDef sd[1] = {};
-    sd[0].id = sorc.skills[0];
+    sd[0].id = sorc.skills[1];
     sd[0].damage = 100.0f;
     sd[0].cooldown = 2.0f;
 
+    // Stamp the cached CDR AFTER equip (recalculateStats runs inside equip and would reset
+    // it) — 25% CDR means 1/0.75x casts, so the formula's CDR term is genuinely exercised.
+    inv.bonusCooldownReduction = 0.25f;
+
     const u8 cell = 0;   // Tanky / Magic -> SORCERER
-    // Below the unlock floor: no cast output. At/after it: damage/cooldown = 50 dps.
-    const u8 unlock = sorc.skillUnlockFloor[0];
-    if (unlock > 1) {
-        const BalanceLab::PlayerPower locked =
-            BalanceLab::powerOf(inv, cell, static_cast<u8>(unlock - 1), defs, sd, 1);
-        CHECK(locked.castDps == doctest::Approx(0.0f));
-    }
-    const BalanceLab::PlayerPower p = BalanceLab::powerOf(inv, cell, unlock, defs, sd, 1);
-    CHECK(p.castDps == doctest::Approx(50.0f));
+    const u8 unlock = sorc.skillUnlockFloor[1];         // floor 10 in the shipped table
+    const f32 expected = 100.0f / (2.0f * 0.75f);       // dmg / (cd * (1 - CDR)) ~= 66.667
+
+    // Below the unlock floor on Normal: no cast output (slot 0 has no def to resolve).
+    const BalanceLab::PlayerPower locked =
+        BalanceLab::powerOf(inv, cell, static_cast<u8>(unlock - 1), 0, defs, sd, 1);
+    CHECK(locked.castDps == doctest::Approx(0.0f));
+
+    // At the unlock floor on Normal: the CDR-scaled cast rate.
+    const BalanceLab::PlayerPower p = BalanceLab::powerOf(inv, cell, unlock, 0, defs, sd, 1);
+    CHECK(p.castDps == doctest::Approx(expected));
+
+    // Nightmare raw floor 1 = effective floor 51: the engine unlocks on EFFECTIVE floor, so
+    // the same skill is already live — a raw-floor gate would wrongly report 0 here.
+    const BalanceLab::PlayerPower nm = BalanceLab::powerOf(inv, cell, 1, 1, defs, sd, 1);
+    CHECK(nm.castDps == doctest::Approx(expected));
 }

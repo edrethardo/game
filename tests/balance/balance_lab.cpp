@@ -108,7 +108,7 @@ void selectLoadout(const DropSet& drops, u8 cell,
     }
 }
 
-PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor,
+PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor, u8 difficulty,
                     const ItemDef* itemDefs,
                     const SkillDef* skillDefs, u32 skillDefCount) {
     PlayerPower p;
@@ -119,9 +119,14 @@ PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor,
     // buildWeaponDef), the shared cycle formula, expected-value crit.
     const WeaponDef unarmed{};   // fallback only; loadouts always fill the weapon slot
     const WeaponDef w = Inventory::getEffectiveWeapon(inv, itemDefs, unarmed);
-    p.weaponDps = WeaponDps::sustained(w.damage, w.cooldown,
-                                       static_cast<f32>(w.clipSize), w.reloadTime)
-                * WeaponDps::expectedCritMult(w.critChance, w.critMult);
+    // An empty weapon slot returns `unarmed` UNCHANGED (the 0.05 cooldown floor lives in
+    // buildWeaponDef, which the empty path skips), so cooldown 0 would make sustained()
+    // divide 0/0 — guard so no weapon reads as zero output, not as NaN poisoning
+    // totalDps/sustain and every percentile sort downstream.
+    if (w.cooldown > 0.0f)
+        p.weaponDps = WeaponDps::sustained(w.damage, w.cooldown,
+                                           static_cast<f32>(w.clipSize), w.reloadTime)
+                    * WeaponDps::expectedCritMult(w.critChance, w.critMult);
 
     // Cast DPS: the class's unlocked damage skills. Formula per spec:
     // (damage + spellFlat) * (1 + spellPct/100) / (cooldown * (1 - CDR)).
@@ -130,7 +135,9 @@ PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor,
     const f32 cdr       = inv.bonusCooldownReduction;      // recalculateStats caps at 0.5
     for (u32 s = 0; s < 4; s++) {
         if (cls.skills[s] == SkillId::NONE) continue;
-        if (cls.skillUnlockFloor[s] > rawFloor) continue;
+        // The engine unlocks on EFFECTIVE floor (handleClassSkillActivation), so Nightmare/
+        // Hell have every skill live from raw floor 1 — a raw-floor gate understated them.
+        if (cls.skillUnlockFloor[s] > effectiveFloor(rawFloor, difficulty)) continue;
         const SkillDef* sd = nullptr;
         for (u32 i = 0; i < skillDefCount; i++)
             if (skillDefs[i].id == cls.skills[s]) { sd = &skillDefs[i]; break; }
