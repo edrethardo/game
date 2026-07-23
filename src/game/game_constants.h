@@ -80,25 +80,28 @@ namespace GameConst {
     // a Hell-50 paladin went from ~1,195 to ~3,722 HP. Gear health grows with ITEM LEVEL, i.e. with
     // depth, so the compensation has to grow with depth too.
     //
-    // 0.10 -> 0.13 -> 0.16 -> 0.18 -> 0.17 -> 0.20. This slope feeds EVERY difficulty, which is exactly
-    // why it moves in small steps: it is the one lever that cannot be aimed at Hell alone. See
+    // 0.10 -> 0.13 -> 0.16 -> 0.18 -> 0.17 -> 0.20 -> 0.24. This slope feeds EVERY difficulty, which is
+    // exactly why it moves in small steps: it is the one lever that cannot be aimed at Hell alone. See
     // difficultyDamageBump below, which is per-tier and carries the heavy end of the Hell increase.
-    // The 2026-07-23 step to 0.20 is the balance lab's first tuning pass: its report measured deep
+    // The two 2026-07-23 steps are the balance lab's first tuning session: its report measured deep
     // Normal as the safest place in the game (~30 hits-to-die at floor 40, trash TTK falling
     // 0.77s -> 0.21s with depth — inverted), and this slope is the depth-weighted lever that fixes
-    // exactly that; the Hell bump was re-solved down in the same change, so Hell is untouched.
+    // exactly that. 0.20 was pass 1; 0.24 is Aaron's second Normal push from the same session
+    // (Normal's bump rose 1.40 -> 1.55 with it, and the NM + Hell bumps were RE-SOLVED
+    // 2.80 -> 2.35 and 9.58 -> 8.03 so both tiers stand still at their pass-1 totals).
     //
     // WORTH KNOWING BEFORE YOU TOUCH THIS: raising the slope does essentially NOTHING to Hell. Hell
     // sits at effective floors 101-150, where (1 + slope*149) is dominated by the slope term and the
     // "+1" is noise — so steepening the slope and solving the Hell bump back down to hit the same
     // target cancels almost exactly (measured: Hell 1/25/50 land within 0.5% of each other whether the
     // slope is 0.18, 0.19 or 0.20). The slope is therefore a NORMAL-difficulty dial, not a Hell one.
-    // The 0.17 -> 0.20 move is the worked example of exploiting that cancellation ON PURPOSE: slope
-    // up for Normal/Nightmare, Hell bump re-solved down (11.20 -> 9.58), and Hell's total damage
-    // moved by under 0.5% across its whole tier while Normal's slope-side damage rose +7% at floor 5
-    // and +16% at floor 50 (+20%/+30% total with its 1.25 -> 1.40 bump). Do not reach for this to
-    // make the endgame hurt — reach for the bump.
-    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.20f;
+    // The 2026-07-23 session is the worked example of exploiting that cancellation ON PURPOSE, twice:
+    // slope 0.17 -> 0.20 -> 0.24 for Normal (and the meat of NM's ramp), Hell's bump re-solved down
+    // each time (11.20 -> 9.58 -> 8.03), and Hell's total damage moved by under 0.5% across its whole
+    // tier while Normal's slope-side damage rose +17% at floor 5 and +37% at floor 50 (+45%/+70%
+    // total with its 1.25 -> 1.55 bump). Do not reach for this to make the endgame hurt — reach for
+    // the bump.
+    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.24f;
 
     // --- Difficulty / floor enemy scaling ----------------------------------------
     // Every enemy scales by its "effective floor" = raw floor + difficulty*50
@@ -166,16 +169,17 @@ namespace GameConst {
         // effective floors the slope and the bump cancel, so steepening the slope moves Hell by <1%
         // and only taxes Normal).
         //
-        // HELL'S 9.58 IS A RE-SOLVE, NOT A NERF (2026-07-23). The shared slope rose 0.17 -> 0.20
-        // for Normal/Nightmare, which lifted Hell-50's slope factor 26.33 -> 30.80 — so holding
-        // Hell's total damage where it was (~295x base) required 294.9 / 30.80 ~= 9.58. Measured:
-        // Hell's total damage moves by under 0.5% across the whole tier (101-150).
+        // HELL'S 8.03 IS A RE-SOLVE, NOT A NERF (2026-07-23, twice in one session). The shared
+        // slope rose 0.17 -> 0.20 -> 0.24 for Normal/Nightmare, lifting Hell-50's slope factor
+        // 26.33 -> 30.80 -> 36.76 — so holding Hell's total damage where it was (~295x base)
+        // required 295.1 / 36.76 ~= 8.03. Measured: Hell's total damage moves by under 0.5% across
+        // the whole tier (101-150) vs BOTH the pre-session curve and pass 1.
         //
-        // 9.58 is also BOXED IN, not chosen by taste. Two hard requirements bracket it, and at the
-        // 3.9% HP rate and 0.20 slope the window between them is only [9.52, 9.71]:
+        // 8.03 is also BOXED IN, not chosen by taste. Two hard requirements bracket it, and at the
+        // 3.9% HP rate and 0.24 slope the window between them is only [7.98, 8.13]:
         //
-        //   * damage must be >= 2x the pre-rework Hell-50 damage (146.6x)  =>  bump >= 9.52
-        //   * enemy HP must still OUTSCALE enemy damage (299x HP)          =>  bump <  9.71
+        //   * damage must be >= 2x the pre-rework Hell-50 damage (146.6x)  =>  bump >= 7.98
+        //   * enemy HP must still OUTSCALE enemy damage (299x HP)          =>  bump <  8.13
         //
         // The second is the invariant that stops deep enemies becoming glass cannons that delete the
         // player before they can be hit back. An earlier pass (bump 15.80 against the then-0.17
@@ -184,26 +188,28 @@ namespace GameConst {
         // headroom, or knowingly inverting the invariant.
         //
         // Result: a Hell-50 trash mob hits a 3,722 HP geared paladin for ~2,187 — it kills him in 1.7
-        // hits and takes ~11 to put down. Lethal, but not a one-shot. (Still true after the
-        // re-solve: 30.80 x 9.58 = 295.1x vs the old 26.33 x 11.20 = 294.9x, a +0.06% drift.)
+        // hits and takes ~11 to put down. Lethal, but not a one-shot. (Still true after both
+        // re-solves: 36.76 x 8.03 = 295.2x vs the original 26.33 x 11.20 = 294.9x, a +0.1% drift.)
         //
-        // NIGHTMARE at 2.80 is a DELIBERATE parity break — Aaron's 2026-07-23 call off the balance
-        // lab's first report (NM read 12-19 hits-to-die mid-late tier; the verdict was "a bit
-        // harder"). The old 2.30 was SOLVED so damage growth tracked NM's x1.28 HP growth (the
-        // compounding rate sets NM's HP whether anyone means it to or not); 2.80 intentionally runs
-        // hotter than that HP parity — with the 0.20 slope, NM-50 damage lands +42% over the old
-        // solve (58.2x vs 41.0x base). The parity solve is still the REFERENCE POINT: if the HP
-        // rate ever moves again, re-derive parity first and re-apply the deliberate heat on top —
-        // do not treat 2.80 itself as a parity number. Drift still breaks NM both ways: too high is
+        // NIGHTMARE runs DELIBERATELY hotter than HP parity — Aaron's 2026-07-23 call off the
+        // balance lab's first report (NM read 12-19 hits-to-die mid-late tier; the verdict was "a
+        // bit harder"). The pre-session 2.30 was SOLVED so damage growth tracked NM's x1.28 HP
+        // growth (the compounding rate sets NM's HP whether anyone means it to or not); pass 1 set
+        // the deliberate heat at NM-50 = 58.2x base — x1.82 damage growth vs x1.28 HP — and 2.35 is
+        // that SAME heat re-solved against the 0.24 slope (58.24 / 24.76 ~= 2.35; the steeper slope
+        // now carries more of NM's ramp, so the bump gives some back, and NM's totals drift under
+        // 1% across the tier vs pass 1). The x1.28 parity solve is still the REFERENCE POINT: if
+        // the HP rate ever moves, re-derive parity first and re-apply the deliberate heat on top —
+        // do not treat 2.35 itself as a parity number. Drift still breaks NM both ways: too high is
         // a glass cannon, too low a bullet sponge.
         //
         // Consequence worth knowing: the bump is flat across a tier, so Hell FLOOR 1 is also ~2x, not
         // just floor 50. That is unavoidable — the slope cannot carry a tier's ramp (see
         // FLOOR_DAMAGE_MULT: at Hell's effective floors the slope and bump cancel).
         switch (difficulty) {
-            case 1:  return 2.80f;  // Nightmare (was 2.30, the x1.28 HP-parity solve) — deliberately hotter
-            case 2:  return 9.58f;  // Hell      (was 11.20) — re-solved vs the 0.20 slope: ~295x stands still
-            default: return 1.40f;  // Normal    (was 1.25) — +12% flat on top of the steeper slope
+            case 1:  return 2.35f;  // Nightmare — pass-1's deliberate heat (NM-50 58.2x) re-solved vs the 0.24 slope
+            case 2:  return 8.03f;  // Hell      — re-solved vs the 0.24 slope: ~295x stands still
+            default: return 1.55f;  // Normal    (was 1.25 -> 1.40) — flat raise on top of the steeper slope
         }
     }
 
