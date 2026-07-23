@@ -77,6 +77,7 @@ add_executable(dungeon_tests
     world/test_lava.cpp              # Hellforge lava: walkable, burns on the surface, jumpable vein
     world/test_multislab.cpp         # multi-slab GridCell authorers/getters (FOUR_STORY foundation)
     world/test_mesh_scratch.cpp      # mesher scratch headroom: fully-slabbed same-material section fits
+    world/test_autoplay_nav.cpp      # Autoplay nav policy: hazard veto + descend gate
     balance/test_balance_lab.cpp     # balance lab: enemy/boss curves + typical-gear sanity pins
     balance/balance_lab.cpp          # the lab itself (tests-only; NEVER linked into the game)
     renderer/test_hud_cooldown.cpp
