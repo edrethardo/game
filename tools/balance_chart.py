@@ -53,7 +53,11 @@ def load(path):
     needed = _metric_keys() | {"difficulty", "floor", "effFloor", "cell",
                                "row", "col", "bossName", "bossHp", "bossHit"}
     rows = []
-    with open(path, newline="", encoding="utf-8") as f:
+    try:
+        f = open(path, newline="", encoding="utf-8")
+    except OSError as e:
+        sys.exit(f"balance_chart: cannot open {path}: {e.strerror or e}")
+    with f:
         rd = csv.DictReader(f)
         missing = needed - set(rd.fieldnames or [])
         if missing:
@@ -72,6 +76,8 @@ def load(path):
                     x = 0.0
                 row[k] = x
             rows.append(row)
+    if not rows:  # header-only CSV would otherwise render a silently blank page
+        sys.exit(f"balance_chart: no data rows in {path}")
     return rows
 
 
