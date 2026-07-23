@@ -12,10 +12,16 @@ struct AutoplayControl {
     static constexpr f32 RESUME_SECONDS = 2.0f;   // idle time before the bot resumes
 
     bool botInControl() const { return m_botControl; }
-    f32  resumeCountdown() const { return m_resumeTimer; }   // for the HUD "MANUAL · Ns" readout
+    f32  resumeCountdown() const { return m_resumeTimer; }   // for the HUD "MANUAL · Ns" readout;
+                                                             // reads 0 while the bot drives, so the
+                                                             // HUD must gate the readout on !botInControl()
 
     void tick(bool humanActive, bool uiOpen, f32 dt) {
-        if (uiOpen) return;                       // UI navigation is never a gameplay takeover
+        // UI navigation is never a gameplay takeover. Freezing BOTH m_botControl AND m_resumeTimer
+        // is deliberate: if a human took over and THEN opened a menu, a player sitting in a menu is
+        // not "idle", so we preserve their remaining manual window rather than count down (and hand
+        // control back the instant they close the menu).
+        if (uiOpen) return;
         if (humanActive) { m_botControl = false; m_resumeTimer = RESUME_SECONDS; return; }
         if (!m_botControl) {
             m_resumeTimer -= dt;
