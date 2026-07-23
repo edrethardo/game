@@ -56,4 +56,26 @@ void rollWindowDrops(u8 rawFloor, u8 difficulty, u32 trial,
 void selectLoadout(const DropSet& drops, u8 cell,
                    const ItemDef* defs, u32 defCount, PlayerInventory& outInv);
 
+// --- player power off a loadout --------------------------------------------------------------
+struct PlayerPower { f32 weaponDps = 0, castDps = 0, totalDps = 0, ehp = 0, sustain = 0; };
+
+// Representative class per damage COLUMN — a declared model assumption (spec): the class
+// whose base HP and skill list stand in for everyone playing that archetype.
+inline PlayerClass columnClass(u8 col) {
+    switch (col) {
+        case 0:  return PlayerClass::SORCERER;   // Magic
+        case 2:  return PlayerClass::MARKSMAN;   // Ranged
+        default: return PlayerClass::WARRIOR;    // Melee
+    }
+}
+
+// All real engine functions: getEffectiveWeapon -> WeaponDps cycle x EV crit; class skills
+// gated by unlock floor with gear spell rolls + real CDR; getEffectiveMaxHealth through
+// armorMitigation for EHP; regen/life-on-hit/lifesteal as a separate sustain column.
+// Deliberately NOT modeled (documented in the spec): skill energy costs, weapon range,
+// enemy armor, player skill-aim. rawFloor gates skill unlocks only.
+PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor,
+                    const ItemDef* itemDefs,
+                    const SkillDef* skillDefs, u32 skillDefCount);
+
 } // namespace BalanceLab

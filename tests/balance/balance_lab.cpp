@@ -4,6 +4,8 @@
 #include "balance/balance_lab.h"
 #include "game/game_constants.h"
 #include "game/build_score.h"
+#include "game/weapon_dps.h"
+#include "game/combat.h"
 #include <algorithm>
 #include <cstring>
 
@@ -104,6 +106,51 @@ void selectLoadout(const DropSet& drops, u8 cell,
         const s8 bp = Inventory::addToBackpack(outInv, drops.items[bestIdx]);
         if (bp >= 0) Inventory::equip(outInv, static_cast<u8>(bp), defs);
     }
+}
+
+PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor,
+                    const ItemDef* itemDefs,
+                    const SkillDef* skillDefs, u32 skillDefCount) {
+    PlayerPower p;
+    const u8 col = BuildScore::buildCol(cell);
+    const ClassDef& cls = kClassDefs[static_cast<u32>(columnClass(col))];
+
+    // Weapon DPS: the real effective weapon (attack speed, CDR, clip already applied by
+    // buildWeaponDef), the shared cycle formula, expected-value crit.
+    const WeaponDef unarmed{};   // fallback only; loadouts always fill the weapon slot
+    const WeaponDef w = Inventory::getEffectiveWeapon(inv, itemDefs, unarmed);
+    p.weaponDps = WeaponDps::sustained(w.damage, w.cooldown,
+                                       static_cast<f32>(w.clipSize), w.reloadTime)
+                * WeaponDps::expectedCritMult(w.critChance, w.critMult);
+
+    // Cast DPS: the class's unlocked damage skills. Formula per spec:
+    // (damage + spellFlat) * (1 + spellPct/100) / (cooldown * (1 - CDR)).
+    const f32 spellFlat = Inventory::spellDamageFlat(inv);
+    const f32 spellPct  = Inventory::spellDamagePct(inv);
+    const f32 cdr       = inv.bonusCooldownReduction;      // recalculateStats caps at 0.5
+    for (u32 s = 0; s < 4; s++) {
+        if (cls.skills[s] == SkillId::NONE) continue;
+        if (cls.skillUnlockFloor[s] > rawFloor) continue;
+        const SkillDef* sd = nullptr;
+        for (u32 i = 0; i < skillDefCount; i++)
+            if (skillDefs[i].id == cls.skills[s]) { sd = &skillDefs[i]; break; }
+        if (!sd || sd->damage <= 0.0f || sd->cooldown <= 0.0f) continue;
+        p.castDps += (sd->damage + spellFlat) * (1.0f + spellPct * 0.01f)
+                   / (sd->cooldown * (1.0f - cdr));
+    }
+    p.totalDps = p.weaponDps + p.castDps;
+
+    // EHP: real max health divided through the real armor curve — same units as enemy damage.
+    const f32 maxHp = Inventory::getEffectiveMaxHealth(inv, cls.baseHealth);
+    p.ehp = maxHp / (1.0f - Combat::armorMitigation(Inventory::armorRating(inv)));
+
+    // Sustain (HP/s), reported beside EHP rather than folded in (spec: folding needs a
+    // fight-length assumption). Life-on-hit converts via the weapon's real swing rate.
+    const f32 hitRate = (w.cooldown > 0.0f) ? 1.0f / w.cooldown : 0.0f;
+    p.sustain = Inventory::healthRegenRate(inv)
+              + inv.bonusLifeOnHit * hitRate
+              + Inventory::lifestealPct(inv) * 0.01f * p.weaponDps;
+    return p;
 }
 
 } // namespace BalanceLab

@@ -107,6 +107,7 @@ add_executable(dungeon_tests
     ${CMAKE_SOURCE_DIR}/src/world/combat_query.cpp  # ray/cone targeting geometry
     ${CMAKE_SOURCE_DIR}/src/game/enemy_loader.cpp   # balance lab reads the real roster
     ${CMAKE_SOURCE_DIR}/src/game/boss_loader.cpp    # balance lab reads the real bosses
+    ${CMAKE_SOURCE_DIR}/src/game/class_defs.cpp     # balance lab reads the real class table
 )
 
 target_include_directories(dungeon_tests PRIVATE

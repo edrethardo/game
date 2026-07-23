@@ -9,6 +9,8 @@
 #include "game/game_constants.h"
 #include "game/free_play.h"     // DIFFICULTY_COUNT — the real difficulty-tier bound
 #include "game/build_score.h"   // the REAL Auto-Loot scorer the gear Monte Carlo selects with
+#include "game/weapon_dps.h"    // the shared sustained-DPS cycle powerOf runs weapons through
+#include "game/combat.h"        // armorMitigation — the real armor curve behind EHP
 #include <algorithm>
 #include <cstring>
 
@@ -151,4 +153,72 @@ TEST_CASE("typical gear: every build cell fields a weapon from mid-game windows"
                                                      BuildScore::buildCol(cell)));
                 }
             }
+}
+
+TEST_CASE("player power: bare crafted sword gives exactly the hand-computable numbers") {
+    // Two synthetic defs — index 0 a plain sword, index 1 unused. No affixes anywhere, so
+    // every engine conversion (effective weapon, max health, armor) runs on knowns.
+    static ItemDef defs[2] = {};
+    std::strcpy(defs[0].name, "Lab Sword");
+    defs[0].slot = ItemSlot::WEAPON;
+    defs[0].weaponType = WeaponType::MELEE;
+    defs[0].weaponSubtype = WeaponSubtype::SWORD;
+    defs[0].baseDamage = 30.0f;
+    defs[0].baseCooldown = 0.5f;
+
+    ItemInstance sword{};
+    sword.defId = 0; sword.damage = 30.0f; sword.rarity = Rarity::COMMON;
+
+    PlayerInventory inv{};
+    const s8 bp = Inventory::addToBackpack(inv, sword);
+    REQUIRE(bp >= 0);
+    Inventory::equip(inv, static_cast<u8>(bp), defs);
+
+    static SkillDef noSkills[1] = {};
+    const u8 cell = 4;   // Moderate / Melee -> representative class WARRIOR
+    const BalanceLab::PlayerPower p = BalanceLab::powerOf(inv, cell, 1, defs, noSkills, 0);
+
+    // sustained(30, 0.5, no clip) = 60; baseline crit 5% x2.0 -> x1.05 = 63.
+    CHECK(p.weaponDps == doctest::Approx(63.0f));
+    CHECK(p.castDps   == doctest::Approx(0.0f));        // no skill defs passed
+    CHECK(p.totalDps  == doctest::Approx(63.0f));
+    // No gear health, no armor: EHP == the representative class's base pool.
+    const f32 warriorBase = kClassDefs[static_cast<u32>(PlayerClass::WARRIOR)].baseHealth;
+    CHECK(p.ehp     == doctest::Approx(warriorBase));
+    CHECK(p.sustain == doctest::Approx(0.0f));
+}
+
+TEST_CASE("player power: cast DPS uses the class skill list, unlock gating and CDR") {
+    static ItemDef defs[1] = {};
+    std::strcpy(defs[0].name, "Lab Wand");
+    defs[0].slot = ItemSlot::WEAPON;
+    defs[0].weaponType = WeaponType::PROJECTILE;
+    defs[0].weaponSubtype = WeaponSubtype::WAND;
+    defs[0].baseDamage = 10.0f;
+    defs[0].baseCooldown = 0.5f;
+
+    ItemInstance wand{};
+    wand.defId = 0; wand.damage = 10.0f; wand.rarity = Rarity::COMMON;
+    PlayerInventory inv{};
+    const s8 bp = Inventory::addToBackpack(inv, wand);
+    REQUIRE(bp >= 0);
+    Inventory::equip(inv, static_cast<u8>(bp), defs);
+
+    // A synthetic skill def bound to the SORCERER's first skill id: 100 dmg / 2 s cooldown.
+    const ClassDef& sorc = kClassDefs[static_cast<u32>(PlayerClass::SORCERER)];
+    static SkillDef sd[1] = {};
+    sd[0].id = sorc.skills[0];
+    sd[0].damage = 100.0f;
+    sd[0].cooldown = 2.0f;
+
+    const u8 cell = 0;   // Tanky / Magic -> SORCERER
+    // Below the unlock floor: no cast output. At/after it: damage/cooldown = 50 dps.
+    const u8 unlock = sorc.skillUnlockFloor[0];
+    if (unlock > 1) {
+        const BalanceLab::PlayerPower locked =
+            BalanceLab::powerOf(inv, cell, static_cast<u8>(unlock - 1), defs, sd, 1);
+        CHECK(locked.castDps == doctest::Approx(0.0f));
+    }
+    const BalanceLab::PlayerPower p = BalanceLab::powerOf(inv, cell, unlock, defs, sd, 1);
+    CHECK(p.castDps == doctest::Approx(50.0f));
 }

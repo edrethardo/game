@@ -63,6 +63,7 @@ add_executable(DungeonEngine
     world/raycast.cpp
     world/combat_query.cpp
     world/pathfinder.cpp
+    game/class_defs.cpp
     game/player.cpp
     game/entity.cpp
     game/combat.cpp
