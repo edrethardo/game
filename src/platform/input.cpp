@@ -5,6 +5,7 @@
 #include "platform/user_paths.h"
 #include "core/log.h"
 #include "core/imu_filter.h"
+#include "game/bot_input.h"   // Autoplay synthetic-action overlay (header-only)
 
 #include <cstring>
 #include <cstdio>
@@ -38,6 +39,11 @@ static f32  s_mouseSensitivity = Input::MOUSE_SENS_DEFAULT; // multiplier on bas
 // launch default. Thresholds are deliberately above the movement deadzones so a resting/drifting
 // stick or tiny mouse jitter never flips the on-screen glyphs.
 static Input::InputDevice s_activeDevice = Input::InputDevice::KeyboardMouse; // fixed up in init()
+// Autoplay: the bot's held/pressed overlay + its arm switch, and the per-frame human-activity flag
+// update() latches (the takeover trigger). All default off, so nothing changes until the bot arms.
+static BotInput s_botInput;
+static bool     s_botOverlayActive = false;
+static bool     s_humanActiveThisFrame = false;
 static constexpr s32 DEVICE_MOUSE_MOVE_PX     = 6;    // Manhattan px/frame to count as mouse use
 static constexpr f32 DEVICE_STICK_DEADZONE    = 0.5f; // normalized stick magnitude for "pad in use"
 static constexpr f32 DEVICE_TRIGGER_THRESHOLD = 0.5f;
@@ -557,6 +563,21 @@ void Input::update(f32 dt) {
 #ifdef __SWITCH__
     s_activeDevice = InputDevice::Gamepad;   // console: no KBM, and the pad path is libnx (above)
     s_laneDevice[0] = s_laneDevice[1] = InputDevice::Gamepad;   // both couch lanes are JoyCon
+    // Autoplay takeover trigger: no keyboard/mouse on console, so "a human touched a device this
+    // frame" is any pad button held or a stick pushed past the gameplay deadzone (both couch pads
+    // count). ZL/ZR triggers are buttons in padGetButtons, so they're already covered here.
+    bool padActive = false;
+    for (s32 p = 0; s_padsInitialized && p < 2 && !padActive; ++p) {
+        if (padGetButtons(&s_pads[p]) != 0) { padActive = true; break; }
+        HidAnalogStickState ls = padGetStickPos(&s_pads[p], 0);
+        HidAnalogStickState rs = padGetStickPos(&s_pads[p], 1);
+        if (fabsf(static_cast<f32>(ls.x) / 32767.0f) >= DEVICE_STICK_DEADZONE ||
+            fabsf(static_cast<f32>(ls.y) / 32767.0f) >= DEVICE_STICK_DEADZONE ||
+            fabsf(static_cast<f32>(rs.x) / 32767.0f) >= DEVICE_STICK_DEADZONE ||
+            fabsf(static_cast<f32>(rs.y) / 32767.0f) >= DEVICE_STICK_DEADZONE)
+            padActive = true;
+    }
+    s_humanActiveThisFrame = padActive;
 #else
     bool kbmActive = false;
     for (s32 i = 0; i < NUM_KEYS && !kbmActive; ++i) if (s_currentKeys[i]) kbmActive = true;
@@ -589,6 +610,10 @@ void Input::update(f32 dt) {
 
     if (kbmActive != padActive)   // exactly one device active → adopt it (else keep the last one)
         s_activeDevice = kbmActive ? InputDevice::KeyboardMouse : InputDevice::Gamepad;
+
+    // Autoplay takeover trigger: latch whether a human touched any gameplay device this frame,
+    // reusing the threshold-filtered activity already computed above (no second scan).
+    s_humanActiveThisFrame = kbmActive || padActive;
 
     // Per-lane device for split-screen glyphs. Each lane resolves independently so one player's
     // device can never flip the other's on-screen prompts:
@@ -634,6 +659,7 @@ void Input::consumePressedState() {
     // away all the motion from any frame that ran no tick.
     s_mouseDX = 0;
     s_mouseDY = 0;
+    s_botInput.rollEdges();   // bot pressed-edges are once-per-render-frame, like device edges
 #ifdef __SWITCH__
     // Also consume libnx pad edges — isButtonPressed on Switch reads
     // s_padPrevButtons (libnx), not the SDL s_previousPadButtons arrays.
@@ -1283,6 +1309,13 @@ static bool chordClaimsButton(s32 padIdx, s32 button) {
 static bool checkActionRaw(GameAction action, bool pressed) {
     u32 idx = static_cast<u32>(action);
     if (idx >= static_cast<u32>(GameAction::COUNT)) return false;
+    // Autoplay overlay: a bot-held action reports down/pressed exactly like a human's, so every
+    // downstream consumer (movement, fire, skills, dodge, interact) is driven with zero call-site
+    // changes. OR with the real device so a human can always override on the same frame.
+    if (s_botOverlayActive) {
+        if (pressed ? s_botInput.pressed(action) : s_botInput.down(action)) return true;
+        // fall through to the real-device read (human override wins instantly)
+    }
     const InputBinding& b = s_bindings[idx];
     s32 padIdx = static_cast<s32>(s_activePlayer); // which controller to read
 
@@ -1346,6 +1379,13 @@ bool Input::isActionDown(GameAction action) {
 bool Input::isActionPressed(GameAction action) {
     return checkActionRaw(action, true);
 }
+
+// --- Autoplay synthetic-input overlay accessors (see input.h) ---
+void Input::setBotOverlayActive(bool on) { s_botOverlayActive = on; if (!on) s_botInput.clear(); }
+bool Input::botOverlayActive() { return s_botOverlayActive; }
+void Input::setBotHeld(GameAction action, bool on) { s_botInput.setHeld(action, on); }
+void Input::clearBotHeld() { s_botInput.clear(); }
+bool Input::humanActivityThisFrame() { return s_humanActiveThisFrame; }
 
 // ---------------------------------------------------------------------------
 // Binding management

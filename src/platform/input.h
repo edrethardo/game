@@ -84,6 +84,17 @@ namespace Input {
     bool isActionDown(GameAction action);     // true while held
     bool isActionPressed(GameAction action);  // true only first frame
 
+    // --- Autoplay synthetic-input overlay ---------------------------------------------------
+    // The bot's held/pressed action state, OR'd into isActionDown/isActionPressed below the
+    // real-device read so a bot press is indistinguishable from a human one. Off unless armed.
+    void setBotOverlayActive(bool on);
+    bool botOverlayActive();
+    void setBotHeld(GameAction action, bool on);   // bot arms/clears one action for this tick
+    void clearBotHeld();                            // drop all bot-held actions
+    // True if a human touched any gameplay device THIS render frame (the kbmActive/padActive
+    // computation already done in update(), threshold-filtered). Autoplay's takeover trigger.
+    bool humanActivityThisFrame();
+
     // --- Raw keyboard (still available for debug keys) ---
     bool isKeyDown(s32 scancode);
     bool isKeyPressed(s32 scancode);

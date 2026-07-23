@@ -49,6 +49,7 @@ add_executable(dungeon_tests
     game/test_opening_strike.cpp     # arriving enemies must never open SLOWER
     game/test_pet_item.cpp           # mini-goblin consumable: unrollable + unequippable
     game/test_lead_assist.cpp        # throwing-knife intercept math — header-only, no .cpp to link
+    game/test_bot_input.cpp          # synthetic-action overlay: held/pressed edge semantics (header-only)
     game/test_shared_loot.cpp        # ground drops are FFA instantly; exclusivity only if re-armed
     game/test_legendary_pool.cpp     # legendary tier = named uniques only; rarityFloor guarantees
     game/test_ai_preference.cpp      # authored combat openers: pure map + enemies.json stat-fit lint
