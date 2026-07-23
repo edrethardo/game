@@ -161,7 +161,8 @@ PlayerPower powerOf(const PlayerInventory& inv, u8 cell, u8 rawFloor, u8 difficu
     return p;
 }
 
-// q in [0,1]; nearest-rank on a sorted copy. n is TRIALS-sized (<=200): stack array is fine.
+// q in [0,1]; round-half-up on the interpolation index round(q*(n-1)), taken from a sorted
+// copy (no interpolation between ranks). n is TRIALS-sized (<=200): stack array is fine.
 static f32 percentileOf(const f32* v, u32 n, f32 q) {
     if (n == 0) return 0.0f;
     f32 tmp[TRIALS];
@@ -182,8 +183,8 @@ void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
     out.difficulty = difficulty; out.rawFloor = rawFloor; out.cell = cell;
     if (trials > TRIALS) trials = TRIALS;
 
-    // static: TRIALS-sized scratch would be ~4 KB of stack per array; the lab is
-    // single-threaded test code, so file-scope-lifetime scratch is safe and free.
+    // static: TRIALS-sized scratch is 800 B per array (~3.9 KB across the five); the lab is
+    // single-threaded test code, so static-lifetime scratch is safe and keeps it off the stack.
     static f32 wv[TRIALS], cv[TRIALS], tv[TRIALS], ev[TRIALS], sv[TRIALS];
     for (u32 t = 0; t < trials; t++) {
         DropSet drops;
@@ -215,6 +216,22 @@ void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
     if (out.enemy.dpsMedian > 0.0f) out.secondsToDie = out.ehp[1] / out.enemy.dpsMedian;
 }
 
+// RFC-4180 field escape: always double-quote, doubling any embedded quote. Needed because
+// boss names contain commas ("Ygara, the Broodqueen") which would otherwise split the row
+// into 34 fields and break any strict CSV parser. BossDef::name is char[48], so the worst
+// case (47 chars, all quotes) is 2 + 47*2 + 1 = 97 bytes — the fixed buffer always fits.
+static const char* csvQuote(const char* s, char (&buf)[100]) {
+    u32 o = 0;
+    buf[o++] = '"';
+    for (const char* p = s; *p && o < sizeof buf - 3; p++) {   // -3: closing quote + nul + room to double
+        if (*p == '"') buf[o++] = '"';
+        buf[o++] = *p;
+    }
+    buf[o++] = '"';
+    buf[o] = '\0';
+    return buf;
+}
+
 void writeCsvHeader(FILE* fp) {
     std::fprintf(fp,
         "difficulty,floor,effFloor,cell,row,col,"
@@ -226,6 +243,7 @@ void writeCsvHeader(FILE* fp) {
 }
 
 void writeCsvRow(FILE* fp, const MetricsRow& r) {
+    char nameBuf[100];
     std::fprintf(fp,
         "%u,%u,%u,%u,%u,%u,"
         "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
@@ -241,7 +259,7 @@ void writeCsvRow(FILE* fp, const MetricsRow& r) {
         r.tDps[0], r.tDps[1], r.tDps[2],
         r.ehp[0], r.ehp[1], r.ehp[2], r.sus[0], r.sus[1], r.sus[2],
         r.enemy.hpMedian, r.enemy.hpMin, r.enemy.hpMax, r.enemy.hitMedian, r.enemy.dpsMedian,
-        r.boss.present ? r.boss.name : "", r.boss.hp, r.boss.hit,
+        csvQuote(r.boss.present ? r.boss.name : "", nameBuf), r.boss.hp, r.boss.hit,
         r.ttkTrash, r.ttkBoss, r.hitsToDie, r.secondsToDie);
 }
 

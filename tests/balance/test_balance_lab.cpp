@@ -279,8 +279,12 @@ TEST_CASE("sanity pin: p50 gear power rises up the floor ladder for every cell")
                                        enemyTable(), bossTable(), r);
                 CAPTURE(static_cast<u32>(d)); CAPTURE(static_cast<u32>(cell));
                 CAPTURE(static_cast<u32>(f));
-                // 0.98: even p50-of-200 keeps a little between-floor wobble; a real
-                // regression drops far more.
+                // 0.98: even p50-of-200 keeps a little between-floor wobble. Be honest
+                // about the detection threshold: growth between rungs is 1.05x-3.95x, so
+                // this catches order-scale collapses, starved loadouts and formula
+                // inversions — a mere ~10% shift passes at most rungs. That is deliberate:
+                // absolute magnitudes are pinned by the hand-computed powerOf cases, and
+                // tuning-scale shifts are the BALANCE_REPORT CSV's job to surface.
                 CHECK(r.tDps[1] >= prevDps * 0.98f);
                 CHECK(r.ehp[1]  >= prevEhp * 0.98f);
                 prevDps = r.tDps[1]; prevEhp = r.ehp[1];
@@ -288,17 +292,34 @@ TEST_CASE("sanity pin: p50 gear power rises up the floor ladder for every cell")
         }
 }
 
-TEST_CASE("CSV smoke: header + one row per cell, parseable") {
+// Comma-split field count that honors RFC-4180 double-quoted regions (a comma inside
+// quotes is data, not a separator; "" inside a quoted field is an escaped quote).
+static u32 csvFieldCount(const char* line) {
+    u32 fields = 1;
+    bool inQuotes = false;
+    for (const char* p = line; *p && *p != '\n'; p++) {
+        if (*p == '"') inQuotes = !inQuotes;             // "" toggles twice = net unchanged
+        else if (*p == ',' && !inQuotes) fields++;
+    }
+    return fields;
+}
+
+TEST_CASE("CSV smoke: header + one row per cell, parseable, 33 fields per line") {
     static ItemDef items[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
     static SkillDef skills[MAX_SKILL_DEFS];
     u32 ic = 0, ac = 0, sc = 0; loadAllTables(items, ic, affixes, ac, skills, sc);
 
-    const char* path = "balance_smoke.csv";              // build dir cwd
+    // cwd-relative: the test writes into whatever dir the binary runs from (the build dir
+    // under the normal invocations). Clear any stale file from an earlier aborted run first.
+    const char* path = "balance_smoke.csv";
+    std::remove(path);
     FILE* fp = std::fopen(path, "w");
     REQUIRE(fp);
     BalanceLab::writeCsvHeader(fp);
     for (u8 cell = 0; cell < 9; cell++) {
         BalanceLab::MetricsRow r;
+        // Floor 10 is deliberate: its boss is "Ygara, the Broodqueen" — a comma'd name —
+        // so the field-count pin below actually exercises the RFC-4180 quoting.
         BalanceLab::computeRow(0, 10, cell, 10, items, ic, affixes, ac, skills, sc,
                                enemyTable(), bossTable(), r);
         BalanceLab::writeCsvRow(fp, r);
@@ -308,7 +329,13 @@ TEST_CASE("CSV smoke: header + one row per cell, parseable") {
     fp = std::fopen(path, "r");
     REQUIRE(fp);
     char line[1024]; u32 lines = 0;
-    while (std::fgets(line, sizeof line, fp)) lines++;
+    while (std::fgets(line, sizeof line, fp)) {
+        lines++;
+        CAPTURE(lines);
+        // 33 = the header's column count; a comma'd boss name that escapes quoting would
+        // read as 34 and crash a strict parser downstream.
+        CHECK(csvFieldCount(line) == 33);
+    }
     std::fclose(fp);
     std::remove(path);
     CHECK(lines == 10);                                  // header + 9 cells
