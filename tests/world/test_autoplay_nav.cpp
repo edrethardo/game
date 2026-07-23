@@ -1,6 +1,7 @@
-// test_autoplay_nav.cpp — pure Autoplay navigation policy: the hazard veto (never steer into lava
-// / off a ledge / into a solid wall / off the map edge) and descend eligibility (never while the
-// boss lives; only inside the door radius). Built on synthetic LevelGrids so it needs no engine —
+// test_autoplay_nav.cpp — pure Autoplay navigation policy: the hazard veto (never steer into lava,
+// a solid wall, or off the map — balcony-edge drops are intentional traversal the veto does NOT
+// cover) and descend eligibility (never while the boss lives; only inside the door radius). Built
+// on synthetic LevelGrids so it needs no engine —
 // the same construction pattern as test_lava.cpp / test_platform.cpp (LevelGridSystem::init/shutdown,
 // cells indexed z*width+x, floor height in quarter-units).
 

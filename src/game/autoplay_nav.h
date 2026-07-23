@@ -19,6 +19,17 @@ namespace Autoplay {
 // "the burn tick and any future lava consumer share one rule"), so the bot vetoes exactly the cells
 // that would burn it and NOT the ones it can clear airborne. `lavaFloor` short-circuits the lava
 // test entirely on non-Hellforge floors (no lava cells exist there, so the query is pure waste).
+//
+// SCOPE — this is a POINT sample of the ONE cell normalize(dir)*cellSize ahead, NOT a swept body
+// AABB: a diagonal heading probes only the diagonal cell and skips the two orthogonally-adjacent
+// cells the body actually clips at the shared corner. It therefore assumes sub-cell per-tick steps
+// (fine for the ~0.17 m/tick driver at 6 m/s over 60 Hz); a dash/teleport that crosses a whole cell
+// in one tick is the driver's responsibility to gate, not this veto's.
+//
+// It also does NOT cover stepping off an interior CELL_PLATFORM balcony edge into a drop — those
+// falls are INTENTIONAL traversal on VERTICAL_HALL / FOUR_STORY (a balcony overlook, a drop-hole
+// descent), decided by the driver's story-navigation layer, not a hazard. The veto covers only the
+// three things that are never wanted: off-map, a solid wall, and grounded-in-lava.
 inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool lavaFloor) {
     Vec3 flat{dir.x, 0.0f, dir.z};
     if (lengthSq(flat) < 1e-6f) return true;                 // no heading: nothing to veto
@@ -40,8 +51,9 @@ struct DescendCtx {
     bool bossAlive  = false;   // floorBossAlive()
 };
 // Mirror of updateFloorDoor's gate: within 2 m of an active door (the real code tests squared
-// distance < 4.0) and not blocked by a live floor boss. The Source portal is a SEPARATE trigger
-// the brain simply never requests, so it needs no branch here.
+// distance < 4.0 — the strict-vs-inclusive boundary at exactly 2.0 m is unreachable in practice)
+// and not blocked by a live floor boss. The Source portal is a SEPARATE trigger the brain simply
+// never requests, so it needs no branch here.
 inline bool mayDescend(const DescendCtx& c) {
     if (!c.doorActive) return false;
     if (c.distToDoor > 2.0f) return false;
