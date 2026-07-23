@@ -1291,6 +1291,12 @@ private:
     // Shared class-stat setup for lane 0 (HP/move/energy, class skills, mirror arrays). Called by
     // the menu's class-select confirm and by applyLaunchOptions(Save::NEW) — one source of truth.
     void applyClassToLane0(PlayerClass cls);
+    // Arm the lane-0 Autoplay bot AND force Auto Loot (its gear brain). One source of truth for the
+    // scattered start paths (menu New / Continue / cleared-Continue-to-town, and the --autoplay CLI).
+    // MUST be called AFTER the world/inventory is up (post startGame/loadGame): forcing autoMode=1
+    // here — not only at class-select — is what makes CONTINUE (which SKIPS class-select, and whose
+    // load stamps the saved autoMode) still get Auto Loot.
+    void enterAutoplayRun();
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);

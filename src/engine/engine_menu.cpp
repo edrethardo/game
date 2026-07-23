@@ -342,6 +342,21 @@ bool Engine::updateMenuMouseActive() {
     return m_menuMouseActive;
 }
 
+// Arm the lane-0 Autoplay bot and force Auto Loot & Equip (its gear brain). Called AFTER the world
+// is up on every autoplay start path (menu New / Continue / cleared-Continue-to-town, --autoplay CLI).
+// Forcing autoMode HERE — not only at class-select — is the fix for two gaps: a CONTINUE skips
+// class-select entirely, and its load stamps the saved autoMode (0 for a Classic-saved hero); only a
+// post-load force turns the gear brain back on. Running after startGame(CONTINUE) (which preserves the
+// loaded inventory) is what makes the write stick to the next descent autosave.
+void Engine::enterAutoplayRun() {
+    m_inventories[0].autoMode = 1;                                    // Auto Loot is the bot's gear brain
+    if (m_inventories[0].buildCell >= 9)                             // keep the persisted build; only
+        m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;  // repair an out-of-range cell
+    m_autoplayActive = true;
+    m_autoplayControl.forceBot();          // start in bot control from frame one
+    Input::setBotOverlayActive(true);
+}
+
 // ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
@@ -779,10 +794,9 @@ void Engine::updateMenu(f32 dt) {
             applyClassToLane0(static_cast<PlayerClass>(m_menu.subSelection));
 
             if (m_menu.autoplay) {
-                // Autoplay forces Auto Loot & Equip (the bot's gear brain) and skips the Classic/Auto
-                // chooser — go straight to the solo-start lobby. Keep the character's persisted build.
-                m_inventories[0].autoMode  = 1;
-                if (m_inventories[0].buildCell >= 9) m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
+                // Autoplay skips the Classic/Auto chooser — go straight to the solo-start lobby. The
+                // Auto Loot force + bot arm happen there via enterAutoplayRun(), centralized so the
+                // Continue path (which never reaches this class-select state) gets them too.
                 m_difficulty = 0;
                 m_menu.subState = 4;      // couch-lobby solo-start (NONE branch)
                 m_menu.subSelection = 0;
@@ -907,6 +921,7 @@ void Engine::updateMenu(f32 dt) {
                     // A CLEARED hero comes home: Continue lands in the TOWN hub (stash, NPCs,
                     // and the portal that opens the Free-Play select — which used to open here).
                     enterTown();
+                    if (m_menu.autoplay) enterAutoplayRun();  // cleared-Continue path must arm too
                 } else {
                     startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
                     // Account with an Engine kill: NEW heroes begin at the town gate (stash
@@ -914,13 +929,9 @@ void Engine::updateMenu(f32 dt) {
                     // the loadout + floor-1 state; enterTown just swaps the world under them,
                     // so their first portal descent is the same floor 1 they'd have started on.
                     if (!m_menu.p1Continue && m_townUnlocked) enterTown();
-                    if (m_menu.autoplay) {
-                        // Arm the lane-0 bot: the driver (next task) reads m_autoplayActive and drives
-                        // through the BotInput overlay. forceBot() starts in bot control from frame one.
-                        m_autoplayActive = true;
-                        m_autoplayControl.forceBot();
-                        Input::setBotOverlayActive(true);
-                    }
+                    // Arm + force Auto Loot AFTER the world is up (post startGame) so a Continue —
+                    // which skips class-select — still gets the gear brain (see enterAutoplayRun).
+                    if (m_menu.autoplay) enterAutoplayRun();
                 }
             }
             return;

@@ -88,13 +88,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         m_inventories[0].autoMode  = 1;
         m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
     }
-    // Dev door (--autoplay): arm the lane-0 bot so the run plays itself. Implies --autoloot (the
-    // gear brain) above. The per-tick driver reads m_autoplayActive; forceBot() starts in bot control.
-    if (opt.autoplay) {
-        m_autoplayActive = true;
-        m_autoplayControl.forceBot();
-        Input::setBotOverlayActive(true);
-    }
+    // --autoplay (arm the lane-0 bot) is deferred until AFTER the world is up (enterAutoplayRun below,
+    // post startGame/enterTown) — a pre-load force would be overwritten by loadGame stamping the saved
+    // autoMode, so a --autoplay --load of a Classic save would arm with the gear brain OFF.
     if (opt.netLossPct > 0 || opt.netLatencyMs > 0 || opt.netJitterMs > 0)
         LOG_INFO("Launch: NET ADVERSITY ON — %u%% loss, +%ums one-way latency, +/-%ums jitter (net-graph: F9)",
                  (u32)opt.netLossPct, opt.netLatencyMs, opt.netJitterMs);
@@ -147,6 +143,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
             }
             m_splitPlayerCount = 1;
             enterTown();
+            if (opt.autoplay) enterAutoplayRun();  // cleared-save Continue must arm + force Auto Loot too
             LOG_INFO("Launch: cleared save -> entered the TOWN hub");
             return;
         }
@@ -223,6 +220,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         return;
     }
     startGame(mode);
+    // Arm the bot + force Auto Loot AFTER startGame so it sticks even for a CONTINUE (whose load
+    // stamps the saved autoMode); no-op unless --autoplay. See enterAutoplayRun().
+    if (opt.autoplay) enterAutoplayRun();
     LOG_INFO("Launch: entered game (%s, %s)",
              opt.role == LaunchOptions::Role::HOST ? "host" : "single-player",
              mode == GameStart::CONTINUE ? "continue" : "new");
