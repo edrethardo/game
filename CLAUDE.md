@@ -481,7 +481,33 @@ Live: mean seconds on one target Marksman 2.8 → 3.4, Warrior 1.7 → 2.3 (a me
 floored by its own kill rate — a dead target forces a re-pick — so stickiness has little headroom there).
 (4) **NO DIAGONAL CORNER-CUTTING** in the hazard veto — see the veto-scope paragraph below.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
-(`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
+(`StoryNav` ramps for VERTICAL_HALL, `Autoplay::pickDropHole` for FOUR_STORY, lava rides the lava-aware veto).
+**The Descent (FOUR_STORY) needed two rules of its own**, both from a measured 150 s trace in which neither a
+marksman nor a warrior ever left floor 1 (marksman: closest approach to the L0 exit 13.9 m, 8 unplanned
+climbs back up; warrior: never reached L0 at all — so "melee manages" was not what the numbers said).
+(a) **RETURN-LIFT PADS.** About one drop hole in three has a `CELL_JUMPPAD` on the surface a story below it
+(`PAD_HOLE_ONE_IN` in `level_gen.cpp`), deliberately, as a way back up. A pad fires the INSTANT you are
+grounded, so dropping through such a hole is undone before the bot can decide anything — and from back up
+there, the nearest hole is that same one. A closed loop the bot could neither see nor escape.
+`Autoplay::pickDropHole` (pure, tested) skips them, reading the flag straight off the GRID at the hole's own
+XZ (a pad cell carries the flag for its whole column, and `DungeonResult::jumpPads[]` is capped at
+`MAX_JUMP_PADS` while a floor can hold more), and falls back to a padded hole only when nothing clean exists
+on the story — on the deepest story holes are 7% dense, and a bounce still beats standing still.
+Among the survivors it takes the **NEAREST**, and that is a measured decision: a first version scored holes
+by "walk to it PLUS the walk from it to the exit" to stop the descent wandering in XZ, and it was strictly
+worse (it chose holes 15-22 m off, and since the travel heading is a straight line with a ±45/±90 fan and
+NOT a path, the bot beelined into a maze wall and never left L3). Only a LOCAL goal is steerable on a
+labyrinth; the landing XZ needs no managing, because once the bot is on L0 the ordinary flat exit flow field
+routes it to the door. Live after: L0 occupancy 3.5% → 43% of samples, upward bounces 8 → 2, exit distance
+51 → 11.5 m.
+(b) **CROSS-STORY TARGETS DO NOT HOLD FIGHT.** On a stacked floor a hostile can have clear LOS through a
+drop hole or off a balcony rim and still be somewhere the bot cannot walk — and a ranged build's engagement
+ceiling is its full weapon reach (measured 30-35 m for a revolver), so such a target kept FIGHT alive from
+right across the floor while FIGHT never routes. `Autoplay::sameStory` gates `pickTarget` (both the scan
+and the sticky release, which must agree) on `|target feet − bot feet| ≤ STORY_GAP` — but ONLY when
+`BotView.stackedFloor`, so no flat floor changes behaviour, and never for a FLYER, since bats and drones
+hover 1.5-2.5 m above their target by design and a hovering enemy is not an unreachable ledge sniper.
+2.6 m rather than the 3 m story pitch, to clear a ranged flyer's ~2.1 m feet.
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in
 `buildBotView` to `flowDir` — the TRAVEL heading — **and to nothing else**. `applyBotIntent` vetoes
 nothing, so the FIGHT branch's own kite/close/strafe movement is unvetoed by design (short, reactive,

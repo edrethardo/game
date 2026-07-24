@@ -246,3 +246,71 @@ TEST_CASE("town portal: standing exactly on it yields no heading but still press
     CHECK_FALSE(p.walk);
     CHECK(p.take);
 }
+
+// --- FOUR_STORY "Descent": drop-hole choice ------------------------------------------------------
+// The measured floor-1 livelock (marksman: 150 s, never descended, 8 unplanned climbs back up) came
+// down to the old "nearest same-story hole" rule walking straight into the return-lift pads.
+
+namespace {
+// A hole record on the given story at a grid cell. surfaceY is the pierced slab's TOP — the height
+// the bot's feet are at when it can enter, which is exactly what pickDropHole matches on.
+DropHole holeAt(f32 x, f32 z, f32 surfaceY) { DropHole h; h.pos = {x, surfaceY, z}; h.surfaceY = surfaceY; return h; }
+void setPad(LevelGrid& g, u32 x, u32 z) { g.cells[z * g.width + x].flags |= CELL_JUMPPAD; }
+} // namespace
+
+TEST_CASE("descent: a hole on ANOTHER story is never chosen") {
+    LevelGrid g = makeFlatGrid(40, 40);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(5.5f, 5.5f, 6.0f);    // one story below us
+    d.dropHoles[d.dropHoleCount++] = holeAt(20.5f, 20.5f, 9.0f);  // ours, but far
+    const s32 i = Autoplay::pickDropHole(g, d, Vec3{6.0f, 9.0f, 6.0f});
+    CHECK(i == 1);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent: no hole on this story => -1 (fall back to the flat exit flow, e.g. on L0)") {
+    LevelGrid g = makeFlatGrid(40, 40);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(5.5f, 5.5f, 9.0f);
+    CHECK(Autoplay::pickDropHole(g, d, Vec3{6.0f, 0.0f, 6.0f}) == -1);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent: a RETURN-LIFT hole is refused in favour of a clean one") {
+    // The bug: a pad one story under the hole fires the instant the bot lands, throwing it back up
+    // through the hole it just took — and from up there that same hole is again the nearest. The
+    // grid flag is the ground truth (jumpPads[] is capped; the flag is not), so it is what we read.
+    LevelGrid g = makeFlatGrid(40, 40);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(6.5f, 6.5f, 9.0f);    // RIGHT NEXT to us — but padded
+    d.dropHoles[d.dropHoleCount++] = holeAt(14.5f, 14.5f, 9.0f);  // farther, clean
+    setPad(g, 6, 6);
+    const s32 i = Autoplay::pickDropHole(g, d, Vec3{6.0f, 9.0f, 6.0f});
+    CHECK(i == 1);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent: a padded hole is still taken when it is the ONLY way down") {
+    // Hole density thins to 7% on the deepest story, so "no clean hole" is a real state. A bounce
+    // at least relocates the bot; standing still on a floor whose exit is downstairs never ends.
+    LevelGrid g = makeFlatGrid(40, 40);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(6.5f, 6.5f, 9.0f);
+    setPad(g, 6, 6);
+    CHECK(Autoplay::pickDropHole(g, d, Vec3{6.0f, 9.0f, 6.0f}) == 0);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent: among clean holes the NEAREST wins — the goal must stay steerable") {
+    // Deliberately not "the hole that also advances toward the exit". That variant was built, shipped
+    // to a live run and measured: it chose holes 15-22 m off, and since the travel heading is a
+    // straight line with a small detour fan (not a path), the bot beelined into a maze wall and never
+    // left the top story. A LOCAL goal is the only kind this steering can reach on a labyrinth.
+    LevelGrid g = makeFlatGrid(40, 40);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(4.5f,  4.5f,  9.0f);  // 5 m away
+    d.dropHoles[d.dropHoleCount++] = holeAt(14.5f, 14.5f, 9.0f);  // 9 m away, nearer the far exit
+    const s32 i = Autoplay::pickDropHole(g, d, Vec3{8.0f, 9.0f, 8.0f});
+    CHECK(i == 0);
+    LevelGridSystem::shutdown(g);
+}

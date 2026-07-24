@@ -193,6 +193,25 @@ inline f32 engageCeiling(const BotView& v, const Doctrine& d) {
     return (band > THREAT_RADIUS) ? band : THREAT_RADIUS;
 }
 
+// --- CROSS-STORY TARGETS ------------------------------------------------------------------------
+// On a STACKED floor (VERTICAL_HALL balconies, the four-story Descent) a hostile can have clear
+// line of sight through a drop hole or off a balcony rim and still be somewhere the bot cannot walk
+// to. A ranged build's ceiling is its full weapon reach (measured: 30-35 m for a revolver), so such
+// a target keeps the FIGHT branch alive from right across the floor — and FIGHT never routes, so
+// the bot stops descending. It is not blocking the route either: it is on a different floor of the
+// building. So: on stacked floors only, a target more than a story-ish away vertically is not
+// engaged. Everything else about it is untouched — it still counts as a hostile, and the block and
+// dodge scans (which walk ALL targets) still see it.
+//
+// 2.6 m, not the 3 m story pitch: it must sit clear of a RANGED FLYER's 2.5 m hover (whose feet
+// land ~2.1 m up) while still catching a genuine story change. Flyers are exempt outright anyway.
+constexpr f32 STORY_GAP = 2.6f;
+inline bool sameStory(const BotView& v, const BotTarget& t) {
+    if (!v.stackedFloor || t.isFlying) return true;   // flat floor / hovering: no storys to compare
+    const f32 dy = t.feetY - v.pos.y;
+    return (dy < 0.0f ? -dy : dy) <= STORY_GAP;
+}
+
 // --- TARGET STICKINESS ---------------------------------------------------------------------------
 // pickTarget used to return the nearest LOS target EVERY tick with no memory, so two hostiles at
 // similar range made the bot flip between them tick to tick — and with the eased aim (stepAngle)
@@ -217,12 +236,14 @@ inline s32 pickTarget(const BotView& v, const Doctrine& d) {
     s32 best = -1; f32 bestD = 1e9f;
     for (u32 i = 0; i < v.targetCount; i++) {
         if (!v.targets[i].hasLOS) continue;
+        if (!sameStory(v, v.targets[i])) continue;   // another floor of the building: not ours
         if (v.targets[i].dist < bestD) { bestD = v.targets[i].dist; best = (s32)i; }
     }
     const s32 cur = v.currentTargetIdx;
     if (cur < 0 || static_cast<u32>(cur) >= v.targetCount) return best;   // no memory / it is gone
     const BotTarget& c = v.targets[static_cast<u32>(cur)];
     if (!c.hasLOS)                     return best;   // blind: release now, the dwell must not pin us
+    if (!sameStory(v, c))             return best;   // it (or we) changed story: release, don't chase
     if (c.dist > engageCeiling(v, d))  return best;   // walked out of the reach the brain engages at
     if (best < 0 || best == cur)       return cur;    // it IS the nearest (or nothing else is visible)
     // REACHABLE BEATS UNREACHABLE, no dwell. A target outside our own weapon reach loses to one

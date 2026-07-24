@@ -685,3 +685,57 @@ TEST_CASE("a glass-cannon doctrine never blocks — it dodges") {
     v.buildCell = 3*2+1;                                  // Glass / Melee: d.blocks = false
     CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
 }
+
+// --- CROSS-STORY TARGETS (stacked floors) -------------------------------------------------------
+// Measured on a four-story Descent floor: a ranged bot's engagement ceiling is its full weapon
+// reach (30-35 m for a revolver), so a hostile sniping up through a drop hole kept FIGHT alive from
+// across the map — and FIGHT never routes, so the bot stopped descending.
+
+TEST_CASE("stacked floor: a target a STORY up is not engaged") {
+    BotView v = selfAt({0,0,0});
+    v.stackedFloor = true;
+    BotTarget t{}; t.pos = {0, 4.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.feetY = 3.0f;                       // one 3 m story above our feet at y=0
+    v.targets = &t; v.targetCount = 1;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == -1);
+}
+
+TEST_CASE("stacked floor: a target on OUR story is engaged normally") {
+    BotView v = selfAt({0,0,0});
+    v.stackedFloor = true;
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true; t.feetY = 0.0f;
+    v.targets = &t; v.targetCount = 1;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("FLAT floor: height never gates a target (a raised room floor is not a story)") {
+    BotView v = selfAt({0,0,0});                       // stackedFloor stays false
+    BotTarget t{}; t.pos = {0, 4.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true; t.feetY = 3.0f;
+    v.targets = &t; v.targetCount = 1;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("stacked floor: a FLYER overhead is still engaged (it hovers, it is not on a ledge)") {
+    // Ranged flyers hover 2.5 m above their target by design, which is most of a story. Gating them
+    // out would make the bot ignore every bat and drone on a stacked floor.
+    BotView v = selfAt({0,0,0});
+    v.stackedFloor = true;
+    BotTarget t{}; t.pos = {0, 3.0f, -10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    t.feetY = 3.4f; t.isFlying = true;
+    v.targets = &t; v.targetCount = 1;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("stacked floor: a STICKY target that changed story is released immediately") {
+    // The dwell must never pin the bot to something it can no longer reach — the same rule the
+    // blind/out-of-reach releases already follow.
+    BotView v = selfAt({0,0,0});
+    v.stackedFloor = true;
+    BotTarget ts[2]{};
+    ts[0].pos = {0, 1.7f, -8.0f};  ts[0].dist = 8.0f;  ts[0].hasLOS = true; ts[0].feetY = 0.0f;
+    ts[1].pos = {3, 4.7f, -8.0f};  ts[1].dist = 8.5f;  ts[1].hasLOS = true; ts[1].feetY = 3.0f;
+    v.targets = ts; v.targetCount = 2;
+    v.currentTargetIdx = 1; v.targetSwitchAllowed = false;   // engaged, dwell NOT yet elapsed
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);     // released anyway: it is upstairs
+}
+

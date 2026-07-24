@@ -30,6 +30,15 @@ struct BotTarget {
     // <= 0 (enemy_ai_states.cpp), so SMALL = imminent. Defaulted huge so a target the driver never
     // filled reads as "not about to swing" rather than as a permanent block trigger.
     f32  attackTimer = 1e9f;
+    // FEET height of this hostile (entity centre minus its half-height), so the policy can compare
+    // STORIES on the stacked layouts. Defaulted 0 so a hand-built view reads "same story as a bot
+    // standing on the ground", which is the flat-floor case every existing test describes.
+    f32  feetY = 0.0f;
+    // ENT_FLYING. A flyer is exempt from the cross-story gate below: bats and drones hover 1.5-2.5 m
+    // ABOVE their target by design (enemy_ai_states.cpp), which is most of a 3 m story, and a
+    // hovering enemy is shootable from anywhere — it is not the unreachable ledge sniper the gate
+    // exists to ignore.
+    bool isFlying = false;
 };
 
 // Effective ENGAGEMENT range for the doctrine band, from a weapon's authored range + projectile
@@ -82,6 +91,11 @@ struct BotView {
     u8   buildCell;
     // world
     bool  onNormalFloor;  // false in town/arena/source chamber => bot idles
+    // STACKED layout (VERTICAL_HALL / FOUR_STORY): the floor has walk-on slab stories, so a hostile
+    // 3 m above or below is on ANOTHER STORY — a different room the bot cannot walk to and which
+    // is not on its route. Off by default so every flat floor (and every hand-built test view)
+    // keeps the plain "anything with LOS is engageable" rule.
+    bool  stackedFloor = false;
     // nav
     Vec3  flowDir;        // unit XZ toward exit, or {0,0,0}
     bool  flowValid;      // false when the flow byte is 0xFF (unreachable) — disambiguates zero

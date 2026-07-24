@@ -656,6 +656,10 @@ Autoplay::BotView Engine::buildBotView() {
 
     // --- world gate: idle in town / arena / the Source, and only travel while an ordinary exit exists ---
     v.onNormalFloor = !(m_level.inTown || m_level.inArena || m_level.inSourceChamber) && m_level.floorDoorActive;
+    // Stacked styles carry walk-on slab storys, so "3 m above me" means "another floor of the
+    // building" rather than "up a step" — the policy's cross-story target gate keys off this.
+    v.stackedFloor  = (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) ||
+                      (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY);
 
     // --- nav: flow field toward the exit ---
     // flowDirection returns {0,0,0} both at the exit AND on an unreachable cell; the raw flow byte
@@ -721,20 +725,15 @@ Autoplay::BotView Engine::buildBotView() {
                 if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
             }
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
-            // The Descent: the exit is always DOWN. Steer to the nearest drop-hole whose pierced slab
-            // TOP (surfaceY) matches the story the bot's feet are on — a hole it can actually enter.
-            // Stepping onto it drops a story (gravity does the rest). No same-story hole → keep the
-            // flat heading and reposition along the maze.
-            f32  bestD2 = 1e30f;
-            Vec3 goal{0, 0, 0};
-            for (u8 i = 0; i < dg.dropHoleCount; i++) {
-                if (fabsf(dg.dropHoles[i].surfaceY - pos.y) > PLATFORM_STEP_TOLERANCE) continue;
-                const f32 dx = dg.dropHoles[i].pos.x - pos.x, dz = dg.dropHoles[i].pos.z - pos.z;
-                const f32 d2 = dx * dx + dz * dz;
-                if (d2 < bestD2) { bestD2 = d2; goal = dg.dropHoles[i].pos; }
-            }
-            if (bestD2 < 1e29f) {
-                const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
+            // The Descent: the exit is always DOWN. Steer to the nearest same-story drop hole that
+            // is NOT a return lift — Autoplay::pickDropHole owns that rule (a pad one story under a
+            // hole flings the bot straight back up through it, which is the loop that kept the bot
+            // on floor 1 forever). Stepping onto it drops a story; gravity does the rest. No
+            // same-story hole → keep the flat heading, which on L0 is exactly the walk to the door.
+            const s32 hi = Autoplay::pickDropHole(m_level.grid, dg, pos);
+            if (hi >= 0) {
+                const Vec3 g = dg.dropHoles[(u8)hi].pos;
+                const Vec3 to{g.x - pos.x, 0.0f, g.z - pos.z};
                 if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
             }
         }
@@ -812,6 +811,10 @@ Autoplay::BotView Engine::buildBotView() {
         t.isRanged    = e.attackRange > 5.0f;
         t.attackRange = e.attackRange;
         t.attackTimer = e.attackTimer;
+        // FEET, not the AABB centre: the story comparison below (and the policy's cross-story gate)
+        // wants the surface the body is standing on, the same quantity snapEntityToFloor writes.
+        t.feetY       = e.position.y - e.halfExtents.y;
+        t.isFlying    = (e.flags & ENT_FLYING) != 0;   // hovers by design: exempt from the story gate
 
         // Insert nearest-first into the fixed cap (simple insertion — the pool is small).
         u32 pos = n;

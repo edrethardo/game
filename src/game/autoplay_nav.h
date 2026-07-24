@@ -10,6 +10,7 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "world/level_grid.h"
+#include "world/level_gen.h"    // DungeonResult::dropHoles — the Descent's ways down
 
 namespace Autoplay {
 
@@ -68,6 +69,53 @@ inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool
     if (!cellPassable(g, Vec3{to.x,   feetY, from.z}, feetY, lavaFloor)) return false;
     if (!cellPassable(g, Vec3{from.x, feetY, to.z},   feetY, lavaFloor)) return false;
     return true;
+}
+
+// --- FOUR_STORY "Descent": which drop hole to take ----------------------------------------------
+// The exit is always DOWN, so the bot's whole travel plan on a Descent floor is "find a hole in my
+// own story's slab and walk into it". The first version simply took the NEAREST same-story hole,
+// and MEASURED live that never gets off floor 1 in 150 s (marksman: closest approach to the L0 exit
+// 13.9 m, 8 unplanned climbs back up; warrior: never reached L0 at all).
+//
+// The cause is RETURN-LIFT PADS. About one hole in three has a CELL_JUMPPAD on the surface one story
+// below it (level_gen.cpp `PAD_HOLE_ONE_IN`), deliberately, so a player can climb back up the way
+// they came. A pad fires the INSTANT you are grounded, so dropping through such a hole is undone
+// before the bot can decide anything — and, standing back on the story it started on, its nearest
+// hole is that same one. That is a closed loop the bot can neither see nor escape, and it is exactly
+// what the live trace shows it doing. So they are SKIPPED, reading the pad flag straight off the
+// GRID at the hole's own XZ (a pad cell is a pad on every story it carries, and the recorded
+// jumpPads[] array is capped at MAX_JUMP_PADS while a floor can hold more), which makes the test
+// exact rather than approximate.
+//
+// The choice among the survivors stays NEAREST, and that is a measured decision rather than
+// laziness: the first fix also scored holes by "walk to it PLUS the walk from it to the exit", to
+// stop the descent wandering in XZ. It made things strictly worse (live: the bot picked holes 15-22 m
+// away, beelined into a maze wall and never left L3 at all in 150 s). The travel heading here is a
+// straight line with a ±45/±90 detour fan, NOT a path — on a labyrinth only a LOCAL goal is
+// steerable. Landing XZ does not need managing anyway: once the bot is on L0 the ordinary flat exit
+// flow field routes it to the door properly, walls and all.
+//
+// Returns an index into d.dropHoles, or -1 when this story has none (the flat exit flow field is
+// then the right heading — that IS the case on L0, where the bot simply walks to the door).
+inline s32 pickDropHole(const LevelGrid& g, const DungeonResult& d, Vec3 pos) {
+    s32 best = -1, bestPadded = -1;
+    f32 bestD2 = 1e30f, bestPaddedD2 = 1e30f;
+    for (u8 i = 0; i < d.dropHoleCount; i++) {
+        const DropHole& h = d.dropHoles[i];
+        if (fabsf(h.surfaceY - pos.y) > PLATFORM_STEP_TOLERANCE) continue;   // not our story
+        const f32 dx = h.pos.x - pos.x, dz = h.pos.z - pos.z;
+        const f32 d2 = dx * dx + dz * dz;
+        // Padded? The pad lives one story DOWN at the same XZ, but a pad cell carries the flag for
+        // the whole column, so the flag at the hole's own cell answers the question.
+        u32 gx, gz;
+        const bool padded = LevelGridSystem::worldToGrid(g, h.pos, gx, gz) &&
+                            (LevelGridSystem::getCell(g, gx, gz).flags & CELL_JUMPPAD) != 0;
+        if (padded) { if (d2 < bestPaddedD2) { bestPaddedD2 = d2; bestPadded = (s32)i; } }
+        else        { if (d2 < bestD2)       { bestD2       = d2; best       = (s32)i; } }
+    }
+    // A padded hole is still better than standing still: on the deepest story holes are rare (7%
+    // density) and a bounce at least relocates the bot. Only taken when nothing clean exists.
+    return (best >= 0) ? best : bestPadded;
 }
 
 // combatStalled — the combat-standoff break-off test (engine_autoplay.cpp). The FIGHT branch fires at
