@@ -408,7 +408,16 @@ by mirroring the real activation gates one for one (slot holds a skill / unlocke
 energy pool covers the cost — health for `BLOOD_NOVA` / `GameConst::cooldownReady` on the slot's tick
 watermark), and `decideCombat` presses the lowest castable slot whenever it is engaging, so a Magic build
 plays its build instead of poking with a wand. Availability is mirrored rather than guessed precisely
-because a press that no-ops is worse than no press.
+because a press that no-ops is worse than no press. The **EQUIPMENT legendary rails ride the same
+contract**: `BotView.bootCastable` / `helmetCastable` mirror `handleEquipmentSkillActivation`'s gates
+(the slot is BOUND to a skill — i.e. a LEGENDARY is equipped there — the shared pool covers the cost, the
+tick cooldown has elapsed; the helmet is stun-gated and the boots deliberately are NOT, because
+`BOOT_SKILL` is the Break Free rail and escaping a stun is its purpose), and `decideCombat` presses both
+whenever it is engaging. `BotIntent` carried these two flags and the driver had them wired to
+`GameAction::BOOT_SKILL`/`HELMET_SKILL` from day one, but **nothing ever set them** — the bot wore its
+legendaries and never once cast them. The bind is written later in the same tick, so the view reads last
+tick's value: one tick of lag on the frame a legendary is equipped, which can only ever cast late, never
+wrongly.
 **Combat FEEL** rests on three rules that keep the bot from reading as a machine. (1) **Aim is EASED and
 RATE-LIMITED, never snapped.** `decideCombat` still emits the DESIRED lead-corrected aim; `applyBotIntent`
 eases the player onto it with `Autoplay::stepAngle` (pure/tested — shortest arc across the ±π seam, and

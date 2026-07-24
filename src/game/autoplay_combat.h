@@ -305,6 +305,15 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     if (out.fire) {
         for (u8 s = 0; s < 4; s++)
             if (v.castableSkill[s]) { out.classSkillSlot = (s8)s; break; }
+        // EQUIPMENT legendary skills (boots F / helmet G) ride the same rule and for the same
+        // reason: the driver's castable flags already mirror the engine's energy + cooldown gates,
+        // so those gates ARE the cadence and "press whenever it would fire" is simply "use the
+        // ability the moment it comes up". Left unpressed, a legendary's whole reason to be equipped
+        // never happens — the bot was wearing them and never once casting. Both rails are
+        // independent of the class slot (different buttons, different cooldowns), so all three can
+        // land on the same tick.
+        out.bootSkill   = v.bootCastable;
+        out.helmetSkill = v.helmetCastable;
     }
 
     // DEFENSIVE ROLL — purposeful, never panicked. Two gates on top of the engine's own dodge

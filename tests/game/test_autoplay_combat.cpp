@@ -739,3 +739,40 @@ TEST_CASE("stacked floor: a STICKY target that changed story is released immedia
     CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);     // released anyway: it is upstairs
 }
 
+// --- EQUIPMENT LEGENDARY SKILLS (boots F / helmet G) ---------------------------------------------
+// BotIntent carried bootSkill/helmetSkill and the driver wired them to the real buttons, but nothing
+// ever SET them: a bot in legendary boots never once used what it was wearing.
+
+TEST_CASE("casts the boot and helmet legendaries while engaging") {
+    BotView v = selfAt({0,0,0});
+    v.bootCastable = true; v.helmetCastable = true;
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    REQUIRE(out.fire);
+    CHECK(out.bootSkill);
+    CHECK(out.helmetSkill);
+}
+
+TEST_CASE("never presses an equipment skill that would no-op") {
+    // Same contract as the class slots: the driver's flags mirror the engine's bind/energy/cooldown
+    // gates, so a false here means the press does nothing — and a wasted press reads as a broken build.
+    BotView v = selfAt({0,0,0});                       // both castable flags default false
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    REQUIRE(out.fire);
+    CHECK_FALSE(out.bootSkill);
+    CHECK_FALSE(out.helmetSkill);
+}
+
+TEST_CASE("does not burn equipment skills at nothing: no LOS target => no cast") {
+    BotView v = selfAt({0,0,0});
+    v.bootCastable = true; v.helmetCastable = true;
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = false;   // blind
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(out.bootSkill);
+    CHECK_FALSE(out.helmetSkill);
+}
+

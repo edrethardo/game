@@ -644,6 +644,32 @@ Autoplay::BotView Engine::buildBotView() {
         }
     }
 
+    // --- equipment legendary skills (boots F / helmet G): "would the press actually cast?" ---
+    // MIRRORS handleEquipmentSkillActivation (engine_update_skills.cpp) gate for gate: the slot is
+    // BOUND to a skill (that binding is derived there from a LEGENDARY item in the boots/helmet
+    // slot, so reading the bound state single-sources it rather than re-deriving the rarity rule),
+    // the shared energy pool covers the cost, and the tick cooldown has elapsed. The helmet is
+    // additionally stun-gated; the boots deliberately are NOT, because BOOT_SKILL is the Break Free
+    // rail and escaping a stun is the whole point of it.
+    //
+    // The binding is written by that handler LATER in the same tick, so this reads last tick's
+    // value — one tick of lag on the frame a legendary is equipped, which no player can perceive
+    // and which can only ever make the bot cast one tick late, never wrongly.
+    {
+        const f32 cdr  = m_inventories[m_localPlayerIndex].bonusCooldownReduction;
+        const f32 pool = m_skillStates[m_localPlayerIndex].energy;
+        auto castable = [&](const SkillState& ss) {
+            if (ss.activeSkill == SkillId::NONE) return false;
+            const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, ss.activeSkill);
+            if (!def) return false;
+            if (pool < def->energyCost) return false;
+            return GameConst::cooldownReady(currentLocalTick(), ss.lastActivationTick,
+                                            SkillSystem::computeCooldownTicks(def->cooldown, cdr));
+        };
+        v.bootCastable   = castable(m_bootSkillStates[m_localPlayerIndex]);
+        v.helmetCastable = !v.stunned && castable(m_helmetSkillStates[m_localPlayerIndex]);
+    }
+
     // --- weapon (effective, incl. affixes) ---
     // Mirror getEffectiveWeapon; MELEE/HITSCAN carry no projectile lead (projSpeed 0), only PROJECTILE.
     const WeaponDef w = Inventory::getEffectiveWeapon(m_inventories[0], m_itemDefs, m_weaponDefs[0]);

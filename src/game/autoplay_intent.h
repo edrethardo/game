@@ -110,6 +110,13 @@ struct BotView {
     // castableSkill[i] means "pressing SKILL_i+1 + CLASS_SKILL right now actually casts". The policy
     // must never press a slot that would no-op: a wasted press reads as a bot that ignores its build.
     bool castableSkill[4] = {};
+    // EQUIPMENT legendary skills (boots = F, helmet = G), same contract as castableSkill: the driver
+    // mirrors handleEquipmentSkillActivation's real gates (the slot is bound to a skill at all,
+    // the shared energy pool covers the cost, the tick cooldown has elapsed) so a true here means
+    // the press really casts. The helmet is additionally stun-gated and the boots deliberately are
+    // NOT — Break Free is the escape FROM a stun.
+    bool bootCastable   = false;
+    bool helmetCastable = false;
     // targets (nearest-first, driver-capped)
     const BotTarget* targets;
     u32   targetCount;
