@@ -21,6 +21,46 @@ inline void dirToAim(Vec3 dir, f32& yaw, f32& pitch) {
     pitch = asinf(d.y);
 }
 
+// --- aim smoothing (driver-side, but pure + tested here) ---------------------------------------
+// The driver used to write the lead-corrected yaw STRAIGHT onto the player every tick, so the bot's
+// head teleported onto a target the instant it appeared — the single most aimbot-looking thing it
+// did. These two helpers turn that snap into a bounded turn.
+
+// Shortest signed delta from `current` to `desired`, folded into [-pi, pi]. The fmodf first is not
+// decoration: the engine never re-wraps Player::yaw (applyMovement just subtracts the look delta),
+// so after a few minutes of spinning it sits several turns outside +/-pi and a bare subtraction
+// would report a multi-revolution error.
+inline f32 angleDelta(f32 current, f32 desired) {
+    constexpr f32 kPi = 3.14159265358979f, kTwoPi = 6.28318530717959f;
+    f32 d = fmodf(desired - current, kTwoPi);
+    if (d >  kPi) d -= kTwoPi;
+    if (d < -kPi) d += kTwoPi;
+    return d;
+}
+
+// Rotate `current` toward `desired` by at most maxRadPerSec*dt, ALWAYS along the short arc. Landing
+// exactly on `desired` inside one step is what stops a fast turn rate from jittering around the
+// target. Safe for pitch too (|delta| there can never exceed pi, so the wrap never bites).
+inline f32 stepAngle(f32 current, f32 desired, f32 maxRadPerSec, f32 dt) {
+    const f32 step = maxRadPerSec * dt;
+    if (step <= 0.0f) return current;              // paused / zero rate: hold the aim
+    const f32 d = angleDelta(current, desired);
+    if (d >  step) return current + step;
+    if (d < -step) return current - step;
+    return desired;
+}
+
+// Sub-degree aim WOBBLE, so shots are not pixel-perfect. Two slow incommensurate sinusoids off the
+// sim tick — deterministic by construction (rand() would desync a replay/snapshot and make a live
+// bug unreproducible), and the mismatched periods keep it from reading as a clean oscillation.
+// Amplitude is deliberately tiny: ~0.6 deg is ~15 cm of drift at 15 m, well inside an enemy body.
+inline void aimWobble(u32 tick, f32& yawOff, f32& pitchOff) {
+    constexpr f32 kAmp = 0.011f;                   // rad (~0.63 deg) peak yaw wobble
+    const f32 t = static_cast<f32>(tick) * (1.0f / 60.0f);
+    yawOff   = kAmp * (0.62f * sinf(t * 1.70f) + 0.38f * sinf(t * 0.53f + 1.3f));
+    pitchOff = kAmp * 0.5f * (0.62f * sinf(t * 1.31f + 0.7f) + 0.38f * sinf(t * 0.61f));
+}
+
 // Returns the index of the nearest target with LOS, or -1 if none has LOS.
 inline s32 pickTarget(const BotView& v) {
     s32 best = -1; f32 bestD = 1e9f;

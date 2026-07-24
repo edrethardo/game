@@ -179,3 +179,74 @@ TEST_CASE("picks the nearest LOS target when several exist") {
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
     CHECK(out.fire);              // the 14 m one is in band
 }
+
+// ---------------------------------------------------------------------------------------------
+// (A) SMOOTH AIM — stepAngle / angleDelta. The driver used to write the lead-corrected yaw straight
+// onto the player (an instant snap = the aimbot look); it now eases there at a bounded turn rate.
+// The ±π seam is the whole risk: a naive `desired - current` sends the bot the LONG way round
+// (a 340° sweep for a 20° correction), which reads far worse than the snap it replaces.
+// ---------------------------------------------------------------------------------------------
+static constexpr f32 kPi = 3.14159265358979f;
+
+TEST_CASE("angleDelta takes the shortest signed path across the seam") {
+    CHECK(angleDelta(0.0f, 1.0f)   == doctest::Approx(1.0f));
+    CHECK(angleDelta(1.0f, 0.0f)   == doctest::Approx(-1.0f));
+    // 3.0 -> -3.0 is +0.283 the short way (through π), NOT -6.0.
+    CHECK(angleDelta(3.0f, -3.0f)  == doctest::Approx(2.0f * kPi - 6.0f));
+    CHECK(angleDelta(-3.0f, 3.0f)  == doctest::Approx(6.0f - 2.0f * kPi));
+    // The engine never re-wraps player yaw, so after a long run it can sit many turns out of range.
+    CHECK(angleDelta(0.0f, 4.0f * kPi + 0.5f) == doctest::Approx(0.5f).epsilon(0.001));
+    CHECK(angleDelta(6.0f * kPi, -0.5f)       == doctest::Approx(-0.5f).epsilon(0.001));
+}
+
+TEST_CASE("stepAngle moves by exactly rate*dt when the target is far") {
+    // 8 rad/s over one 60 Hz tick = 0.1333 rad; a π/2 error is many steps away.
+    const f32 got = stepAngle(0.0f, kPi * 0.5f, 8.0f, 1.0f / 60.0f);
+    CHECK(got == doctest::Approx(8.0f / 60.0f));
+}
+
+TEST_CASE("stepAngle snaps exactly when the target is within one step") {
+    CHECK(stepAngle(0.0f, 0.05f, 8.0f, 1.0f / 60.0f) == doctest::Approx(0.05f));
+    CHECK(stepAngle(0.0f, -0.05f, 8.0f, 1.0f / 60.0f) == doctest::Approx(-0.05f));
+    // Across the seam: 0.283 rad apart, one big step covers it, so it lands ON desired.
+    CHECK(stepAngle(3.0f, -3.0f, 100.0f, 1.0f / 60.0f) == doctest::Approx(-3.0f));
+}
+
+TEST_CASE("stepAngle crosses the seam the SHORT way, not backwards") {
+    // +3.0 -> -3.0: the short way is INCREASING through π. A sign slip here sweeps ~5.7 rad the
+    // wrong way — the single worst-looking failure mode of the whole feature.
+    const f32 up = stepAngle(3.0f, -3.0f, 8.0f, 1.0f / 60.0f);
+    CHECK(up > 3.0f);
+    CHECK(up == doctest::Approx(3.0f + 8.0f / 60.0f));
+    // ...and the mirror case goes the other way.
+    const f32 down = stepAngle(-3.0f, 3.0f, 8.0f, 1.0f / 60.0f);
+    CHECK(down < -3.0f);
+}
+
+TEST_CASE("stepAngle is a no-op on zero dt and on an already-equal angle") {
+    CHECK(stepAngle(1.234f, -2.0f, 8.0f, 0.0f) == doctest::Approx(1.234f));
+    CHECK(stepAngle(1.234f, 1.234f, 8.0f, 1.0f / 60.0f) == doctest::Approx(1.234f));
+    CHECK(stepAngle(1.234f, -2.0f, 0.0f, 1.0f / 60.0f) == doctest::Approx(1.234f));
+}
+
+TEST_CASE("stepAngle converges on the target without overshooting") {
+    f32 a = 0.0f;
+    for (u32 i = 0; i < 200; i++) a = stepAngle(a, 2.5f, 8.0f, 1.0f / 60.0f);
+    CHECK(a == doctest::Approx(2.5f));
+}
+
+TEST_CASE("aim wobble is small, deterministic and actually moves") {
+    f32 y0, p0, y1, p1;
+    aimWobble(1000, y0, p0);
+    aimWobble(1000, y1, p1);
+    CHECK(y0 == doctest::Approx(y1));            // deterministic: no rand()
+    CHECK(p0 == doctest::Approx(p1));
+    for (u32 tick = 0; tick < 4000; tick += 7) { // bounded: never enough to miss a body
+        f32 y, p; aimWobble(tick, y, p);
+        CHECK(fabsf(y) < 0.02f);                 // < ~1.2 deg
+        CHECK(fabsf(p) < 0.02f);
+    }
+    f32 ya, pa, yb, pb;                          // ...but it is not a constant
+    aimWobble(0, ya, pa); aimWobble(120, yb, pb);
+    CHECK(fabsf(ya - yb) > 1e-4f);
+}

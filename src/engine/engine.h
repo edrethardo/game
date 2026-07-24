@@ -1351,8 +1351,9 @@ private:
     Autoplay::BotView buildBotView();
     // uiOpen suppresses the bot's movement/jump/pickup synthetic actions (so they can't drive the
     // inventory cursor, which reads the same MOVE_* actions) while keeping the combat actions live —
-    // the bot fights in place under an open inventory.
-    void applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen);
+    // the bot fights in place under an open inventory. `dt` drives the aim RATE LIMIT: the intent's
+    // yaw/pitch are the DESIRED aim and the player is eased toward it, never snapped.
+    void applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt);
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);

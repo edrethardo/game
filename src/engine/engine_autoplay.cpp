@@ -469,7 +469,7 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayDescendPulse = 0.0f;
     }
 
-    applyBotIntent(in, uiOpen);
+    applyBotIntent(in, uiOpen, dt);
 }
 
 // Fill the read-only decision snapshot from live engine state (lane 0 — the only Autoplay lane).
@@ -703,13 +703,37 @@ Autoplay::BotView Engine::buildBotView() {
 // Translate one BotIntent into a yaw/pitch write + synthetic held GameActions. Clears last tick's
 // held set first (so a no-longer-wanted action releases), then arms exactly this tick's actions.
 // When uiOpen, the movement/nav actions are SUPPRESSED (see below) but combat is kept.
-void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen) {
+void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt) {
     Input::clearBotHeld();
 
-    m_localPlayer.yaw   = in.aimYaw;
-    // Clamp pitch to the same ±89° applyMovement enforces (a straight-down/up aim would gimbal look).
+    // --- AIM: rate-limited, not snapped -----------------------------------------------------------
+    // The intent carries the DESIRED aim (lead-corrected, exactly as the pure policy computed it).
+    // Writing it straight onto the player made the bot's head teleport onto every new target — the
+    // aimbot tell. Instead we turn toward it at a bounded rate, with a sub-degree deterministic
+    // wobble laid on top so shots are human-imperfect rather than mathematically centred.
+    //
+    // TURN RATE is a two-point profile, because one constant cannot serve both jobs: fine tracking
+    // wants to be slow enough to SEE, while acquiring a target that just walked in behind you wants
+    // a flick — a human does both, and a single 7 rad/s rate takes ~0.45 s to turn 180°, long enough
+    // for the bot to eat a free hit every time something spawns at its back.
+    constexpr f32 kAimTurnFine  = 7.0f;    // rad/s (~400 deg/s): tracking something already in view
+    constexpr f32 kAimTurnFlick = 14.0f;   // rad/s (~800 deg/s): full-speed acquisition
+    constexpr f32 kFlickError   = 1.0f;    // rad (~57 deg): error at/above which the flick rate applies
+
+    f32 wobbleYaw, wobblePitch;
+    Autoplay::aimWobble(currentLocalTick(), wobbleYaw, wobblePitch);
+    const f32 desiredYaw   = in.aimYaw   + wobbleYaw;
+    const f32 desiredPitch = in.aimPitch + wobblePitch;
+
+    const f32 err  = fabsf(Autoplay::angleDelta(m_localPlayer.yaw, desiredYaw));
+    const f32 lerp = (err >= kFlickError) ? 1.0f : (err / kFlickError);
+    const f32 rate = kAimTurnFine + (kAimTurnFlick - kAimTurnFine) * lerp;
+
+    m_localPlayer.yaw = Autoplay::stepAngle(m_localPlayer.yaw, desiredYaw, rate, dt);
+    // Pitch rides the same rate limit (no wrapping needed — stepAngle's fold is a no-op inside ±89°).
+    f32 pitch = Autoplay::stepAngle(m_localPlayer.pitch, desiredPitch, rate, dt);
+    // Clamp to the same ±89° applyMovement enforces (a straight-down/up aim would gimbal look).
     constexpr f32 kMaxPitch = 89.0f * 3.14159265f / 180.0f;
-    f32 pitch = in.aimPitch;
     if (pitch >  kMaxPitch) pitch =  kMaxPitch;
     if (pitch < -kMaxPitch) pitch = -kMaxPitch;
     m_localPlayer.pitch = pitch;
