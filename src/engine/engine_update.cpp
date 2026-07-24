@@ -149,8 +149,10 @@ void Engine::update(f32 dt) {
         // Autoplay AFK auto-revive: count the timer armed on death down and, when it elapses, execute
         // the same entrance-respawn the option-0 handler below does, then drop straight back to
         // IN_GAME so an unattended run keeps going. A human pressing a revive key first (the manual
-        // handlers still run below) simply beats the countdown — either way we land in IN_GAME.
-        if (m_autoplayActive) {
+        // handlers still run below) simply beats the countdown — either way we land in IN_GAME. Gated
+        // on botInControl() to match the arm site: a human-driven death never armed the timer, and
+        // running the countdown anyway would decrement its 0 straight negative → an instant revive.
+        if (m_autoplayActive && m_autoplayControl.botInControl()) {
             m_autoplayRespawnTimer -= dt;
             if (m_autoplayRespawnTimer <= 0.0f) {
                 m_autoplayRespawnTimer = 0.0f;
@@ -1714,8 +1716,12 @@ void Engine::gameUpdate(f32 dt) {
         m_gameState = GameState::GAME_OVER;
         // Autoplay: no human is watching the death screen, so arm the AFK auto-revive countdown (the
         // GAME_OVER dispatch ticks it and re-enters IN_GAME) and drop any stale synthetic held actions
-        // so the death screen's manual handlers see only real device input.
-        if (m_autoplayActive) { m_autoplayRespawnTimer = 1.5f; Input::clearBotHeld(); }
+        // so the death screen's manual handlers see only real device input. Gated on botInControl():
+        // if a HUMAN took over this autoplay run and then died, they get the normal untimed death
+        // screen — no force-revive out from under a confirmQuit dialog they may be reading.
+        if (m_autoplayActive && m_autoplayControl.botInControl()) {
+            m_autoplayRespawnTimer = 1.5f; Input::clearBotHeld();
+        }
         // Free the cursor so the death-screen options are clickable (the screen is a full-screen
         // takeover; re-captured on respawn/reload). Mirrors the menu's setRelativeMouseMode(false).
         Input::setRelativeMouseMode(false);

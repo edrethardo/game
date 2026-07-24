@@ -585,7 +585,7 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
             } else {
                 char autoStr[24];
                 std::snprintf(autoStr, sizeof(autoStr), "MANUAL %.0fs",
-                              m_autoplayControl.resumeCountdown() + 0.99f);   // ceil to whole seconds
+                              ceilf(m_autoplayControl.resumeCountdown()));   // ceil (not %.0f rounding) to whole seconds
                 FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 40.0f * hs,
                                      autoStr, {1.0f, 0.75f, 0.3f}, 1);
             }

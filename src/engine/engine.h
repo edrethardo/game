@@ -1312,7 +1312,10 @@ private:
     // resulting intent as a yaw/pitch write + synthetic held GameActions the existing consumers read.
     void updateAutoplay(f32 dt);
     Autoplay::BotView buildBotView();
-    void applyBotIntent(const Autoplay::BotIntent& in);
+    // uiOpen suppresses the bot's movement/jump/pickup synthetic actions (so they can't drive the
+    // inventory cursor, which reads the same MOVE_* actions) while keeping the combat actions live —
+    // the bot fights in place under an open inventory.
+    void applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen);
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);

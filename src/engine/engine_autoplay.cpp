@@ -43,8 +43,20 @@ void Engine::updateAutoplay(f32 dt) {
     // Takeover latch. Activity while a blocking UI is open must NOT grab control (browsing the build
     // in the inventory is the whole point of "keep fighting while I re-gear"), so uiOpen mirrors
     // gameplayInputFrozen()'s screen set and is passed to the latch, which freezes on it.
+    //
+    // CRUCIALLY it ALSO includes the UI-toggle press EDGES this frame. updateAutoplay runs BEFORE the
+    // inventory-toggle handler flips m_inventoryOpen later in the same gameUpdate, so on the frame a
+    // human taps Tab: m_inventoryOpen is still false but humanActivityThisFrame() is true (Tab down).
+    // Without the edge terms the latch would read {open=false, active=true} and hand control to the
+    // human — then the inventory opens and freezes the latch there, so control never returns and the
+    // "fight while I re-gear" carve-out could never engage. Counting the toggle key AS the UI (the bot
+    // never presses these in 8a, so the reads reflect the human) keeps the bot in control across the
+    // open/close, and the latch stays frozen (bot-controlled) while the screen is up.
     const bool uiOpen = m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit
-                     || m_menu.optionsFromPause || m_menagerieOpen;
+                     || m_menu.optionsFromPause || m_menagerieOpen
+                     || Input::isActionPressed(GameAction::INVENTORY)
+                     || Input::isActionPressed(GameAction::CHARACTER_SCREEN)
+                     || Input::isActionPressed(GameAction::PAUSE);
     m_autoplayControl.tick(Input::humanActivityThisFrame(), uiOpen, dt);
 
     // Human is driving (or resuming window still counting down): drop any synthetic held actions so
@@ -56,7 +68,7 @@ void Engine::updateAutoplay(f32 dt) {
 
     Autoplay::BotView v = buildBotView();
     Autoplay::BotIntent in = Autoplay::decide(v);
-    applyBotIntent(in);
+    applyBotIntent(in, uiOpen);
 }
 
 // Fill the read-only decision snapshot from live engine state (lane 0 — the only Autoplay lane).
@@ -178,7 +190,8 @@ Autoplay::BotView Engine::buildBotView() {
 
 // Translate one BotIntent into a yaw/pitch write + synthetic held GameActions. Clears last tick's
 // held set first (so a no-longer-wanted action releases), then arms exactly this tick's actions.
-void Engine::applyBotIntent(const Autoplay::BotIntent& in) {
+// When uiOpen, the movement/nav actions are SUPPRESSED (see below) but combat is kept.
+void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen) {
     Input::clearBotHeld();
 
     m_localPlayer.yaw   = in.aimYaw;
@@ -189,11 +202,16 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in) {
     if (pitch < -kMaxPitch) pitch = -kMaxPitch;
     m_localPlayer.pitch = pitch;
 
-    Input::setBotHeld(GameAction::MOVE_FORWARD,  in.moveFwd);
-    Input::setBotHeld(GameAction::MOVE_BACKWARD, in.moveBack);
-    Input::setBotHeld(GameAction::MOVE_LEFT,     in.moveLeft);
-    Input::setBotHeld(GameAction::MOVE_RIGHT,    in.moveRight);
-    Input::setBotHeld(GameAction::JUMP,   in.jump);
+    // Movement / jump / interact are SUPPRESSED while a UI screen is open. The inventory cursor nav
+    // (engine_inventory.cpp) reads the very same MOVE_* actions via isActionPressed, which merges the
+    // bot overlay — so a moving bot would jitter the cursor the human is trying to use. Keeping combat
+    // live below means the bot fights IN PLACE under an open inventory ("keep fighting while I re-gear")
+    // with no cursor interference.
+    Input::setBotHeld(GameAction::MOVE_FORWARD,  in.moveFwd  && !uiOpen);
+    Input::setBotHeld(GameAction::MOVE_BACKWARD, in.moveBack && !uiOpen);
+    Input::setBotHeld(GameAction::MOVE_LEFT,     in.moveLeft && !uiOpen);
+    Input::setBotHeld(GameAction::MOVE_RIGHT,    in.moveRight && !uiOpen);
+    Input::setBotHeld(GameAction::JUMP,   in.jump && !uiOpen);
     Input::setBotHeld(GameAction::FIRE,   in.fire);
     Input::setBotHeld(GameAction::BLOCK,  in.block);
     Input::setBotHeld(GameAction::DODGE,  in.dodge);
@@ -216,7 +234,8 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in) {
     // so the flag has to come through that button. The exit is a HOLD target (loot wins a tap), and the
     // brain holds in.descend every tick at the door, so after INTERACT_HOLD_SEC the hold fires and
     // updateFloorDoor descends. (in.interact — globe/chest taps — is an 8b concern; unused here.)
-    Input::setBotHeld(GameAction::PICKUP, in.descend);
+    // Also suppressed while a UI is open (a nav/interact action, like movement above).
+    Input::setBotHeld(GameAction::PICKUP, in.descend && !uiOpen);
 }
 
 // Disarm the bot when a run ends to the menu — immediate so the synthetic-input overlay is not left
