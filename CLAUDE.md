@@ -443,6 +443,15 @@ REACH you, but an archer shoots across the retreat, so the same backpedal surren
 bot's own aim off target, and changes nothing about the incoming fire. Against a ranged target inside the
 band the bot HOLDS and shoots (live: 20% of all ticks were backpedal-from-ranged → **0**, and Marksman
 kills/2 min went 9.3 → 19.5 because it was finally standing still long enough to hit things).
+(2) **DODGE ON AN INCOMING SWING, NOT ON PROXIMITY, AND ON A REAL LEASH.** The proactive roll used to
+fire whenever an enemy was inside 0.6× the kite floor — for a ranged doctrine that is most of every fight.
+`Autoplay::swingIsIncoming` now shapes it like the block tap (a MELEE attacker inside its own reach with
+`attackTimer` under `DODGE_LEAD` 0.30 s — a longer lead than the block's 0.15 s because a roll is slower
+to commit), it scans ALL targets like the block does, and the DRIVER holds a multi-second leash on top
+(`Doctrine::dodgeCooldownSec` — 4 s, Glass Cannon 2.5 s — since the engine's own 1 s dodge cooldown is a
+balance number, not a behaviour one). The OFFENSIVE gap-closer charge rides its own longer
+`GAP_CLOSE_COOLDOWN` (6 s) so it reads as a rush, not a stutter of hops; `BotIntent::dodgeIsGapClose`
+tells the driver which leash to charge. Live: Marksman **23.1 → 3.3** rolls/min, Warrior 8.4 → 4.9.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in

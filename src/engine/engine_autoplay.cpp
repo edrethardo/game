@@ -40,6 +40,11 @@
 // Plus a loot-settle dwell (hold briefly after a fight so the auto-loot vacuum collects) and low-hp
 // health-globe detours. An anti-stall move must never holster the guns while an enemy is in reach — that
 // is how the bot once froze for 60 s against two body-blocking enemies it silently refused to shoot.
+//
+// The driver also owns the bot-side DODGE LEASHES (m_autoplayDodgeCd / m_autoplayGapCloseCd): the
+// engine's 1 s dodge cooldown is a balance number, and a bot that rolls whenever it is legal reads as
+// panic, so the policy is only told whether it may ask. Keeping the timers here is what keeps the brain
+// engine-free.
 #include "engine/engine.h"
 #include "platform/input.h"
 #include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
@@ -170,8 +175,22 @@ void Engine::updateAutoplay(f32 dt) {
     // and the bot must not act. botMayAct() already excludes those but still allows the inventory.
     if (!botMayAct()) { Input::clearBotHeld(); return; }
 
+    // Tick the bot-side DODGE LEASHES before building the view — the policy only ever sees
+    // "allowed / not allowed", so the timers themselves stay entirely on this side.
+    if (m_autoplayDodgeCd    > 0.0f) m_autoplayDodgeCd    -= dt;
+    if (m_autoplayGapCloseCd > 0.0f) m_autoplayGapCloseCd -= dt;
+
     Autoplay::BotView v = buildBotView();
     Autoplay::BotIntent in = Autoplay::decide(v);
+
+    // CHARGE the leash on the REQUEST, not on the roll actually starting. The policy already
+    // requires the engine's own dodge to be ready, so a request essentially always becomes a roll;
+    // and on the rare tick it doesn't (mid-air, a state change later in the frame) charging anyway
+    // is the conservative direction — it delays the next ask rather than letting it re-fire.
+    if (in.dodge) {
+        if (in.dodgeIsGapClose) m_autoplayGapCloseCd = Autoplay::GAP_CLOSE_COOLDOWN;
+        else                    m_autoplayDodgeCd    = Autoplay::doctrineFor(v.buildCell).dodgeCooldownSec;
+    }
 
     // --- 8b driver backstops applied on top of the pure decision -----------------------------------
     // (1) LOOT-SETTLE dwell. When a fight just ended (hostile count fell to zero), hold position for a
@@ -490,6 +509,10 @@ Autoplay::BotView Engine::buildBotView() {
     v.rolling   = m_localPlayer.dodgeState.rolling;
     v.onGround  = m_localPlayer.onGround;
     v.dodgeCooldown = m_localPlayer.dodgeState.cooldownTimer;
+    // The bot's OWN leashes on top of the engine cooldown (see m_autoplayDodgeCd) — the policy asks
+    // for a roll only when the matching one has expired.
+    v.dodgeAllowed    = m_autoplayDodgeCd    <= 0.0f;
+    v.gapCloseAllowed = m_autoplayGapCloseCd <= 0.0f;
     // blockTimer is only meaningful WHILE blocking — it is zeroed on the raise edge and simply left
     // stale on release (engine_update.cpp), so report 0 when the shield is down or the policy would
     // read a months-old hold and refuse to ever raise again.

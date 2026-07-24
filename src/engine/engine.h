@@ -284,6 +284,13 @@ private:
     f32              m_autoplayDoorCheckDist  = 0.0f;     // distToDoor at the window's start (rolling checkpoint)
     f32              m_autoplayExitStallTimer = 0.0f;     // seconds elapsed in the current no-kill window
     u32              m_autoplayLastFloor      = 0;        // detects a floor change to re-anchor the window
+    // BOT-SIDE DODGE LEASHES. The engine's own dodge cooldown is 1 s — a balance number, not a
+    // behaviour one: a bot that rolls every time it is legal reads as constant panicked twitching.
+    // The driver holds a multi-second timer per roll KIND (defensive proactive vs offensive
+    // gap-closer charge) and reports "may I even ask?" to the pure policy through BotView, so the
+    // two are rate-limited independently and neither can chain.
+    f32              m_autoplayDodgeCd     = 0.0f;    // s until the next DEFENSIVE roll (doctrine dodgeCooldownSec)
+    f32              m_autoplayGapCloseCd  = 0.0f;    // s until the next gap-closer charge (Autoplay::GAP_CLOSE_COOLDOWN)
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];

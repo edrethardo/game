@@ -58,7 +58,14 @@ struct BotView {
     f32  hp, maxHp;
     f32  energy, maxEnergy;
     bool stunned, rolling, onGround;
-    f32  dodgeCooldown;   // 0 = dodge ready
+    f32  dodgeCooldown;   // 0 = the ENGINE's dodge is ready (1 s)
+    // BOT-SIDE dodge leashes, owned by the driver. The engine's 1 s cooldown is a balance number,
+    // not a behaviour one: a bot allowed to roll every 1 s reads as constant panicked twitching
+    // ("make autoplay dodgeroll less often and less panicky"). The driver holds a multi-second
+    // timer per roll KIND and reports whether the policy may even ask. Defaulted TRUE so a
+    // hand-built view (tests) behaves like a bot with both leashes clear.
+    bool dodgeAllowed    = true;   // the DEFENSIVE proactive roll (doctrine dodgeCooldownSec)
+    bool gapCloseAllowed = true;   // the OFFENSIVE gap-closer charge (GAP_CLOSE_COOLDOWN)
     // Seconds the block has been HELD (Player::blockTimer, 0 when not blocking). The engine's
     // perfect-block tier expires at 0.2 s (Combat::classifyBlock), so the policy uses this to let a
     // stale hold GO and re-tap, which re-opens a fresh perfect window on the next raise edge.
@@ -97,6 +104,10 @@ struct BotIntent {
     f32  aimYaw = 0.0f, aimPitch = 0.0f;      // desired absolute aim (driver writes to player)
     bool moveFwd = false, moveBack = false, moveLeft = false, moveRight = false;  // WASD (rides yaw + forward)
     bool jump = false, fire = false, block = false, dodge = false;
+    // Which leash the driver charges when `dodge` fired: the DEFENSIVE proactive roll (false) and
+    // the OFFENSIVE gap-closer charge (true) are deliberately rate-limited apart — a bot that just
+    // ate its defensive roll must still be able to charge, and vice versa.
+    bool dodgeIsGapClose = false;
     bool potion = false, reload = false, descend = false, interact = false;
     s8   classSkillSlot = -1;                 // 0..3 => select SKILL_n + press CLASS_SKILL; -1 none
     bool bootSkill = false, helmetSkill = false;

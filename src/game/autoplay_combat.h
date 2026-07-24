@@ -149,6 +149,33 @@ inline bool swingIsLanding(const BotTarget& t) {
     return t.dist <= t.attackRange * BLOCK_REACH_SLACK;
 }
 
+// --- proactive dodge timing -----------------------------------------------------------------
+// A roll must be spent ON SOMETHING. The first version triggered on mere PROXIMITY (an enemy inside
+// 0.6 x the kite floor), which for a RANGED doctrine is true for most of every fight — so the bot
+// rolled almost continuously ("ranged is dodge rolling too often", "less panicky"). The trigger is
+// now the same shape as the perfect-block tap: a real MELEE swing about to land on us.
+//
+// Two knobs differ from the block's, both because a ROLL is slower to commit than a shield raise:
+// it starts a fixed-duration animation and travels, so it must begin earlier (a longer lead) and
+// the attacker has more time to close before impact (a slightly wider reach slack). Overshooting
+// the lead is cheap — the i-frames outlast a swing — while undershooting eats the hit.
+constexpr f32 DODGE_LEAD         = 0.30f;   // s before impact to commit the roll (block uses 0.15)
+constexpr f32 DODGE_REACH_SLACK  = 1.35f;   // x the attacker's own reach (block uses 1.25)
+// The OFFENSIVE gap-closer charge rides its own, longer leash. Its job is to look like a deliberate
+// rush across a firing lane, and one roll covers ~4 m — repeating it every second turns a charge
+// into a stutter of little hops.
+constexpr f32 GAP_CLOSE_COOLDOWN = 6.0f;    // s between gap-closer rolls (driver-enforced)
+
+// True if this enemy's MELEE swing is close enough to land that rolling now buys the i-frames.
+// Mirrors swingIsLanding's two engine facts (ranged timers say when the SHOT LEAVES, not when it
+// lands; a negative timer is the stale behind-cover drift, not "about to swing"), at the roll's
+// wider timing.
+inline bool swingIsIncoming(const BotTarget& t) {
+    if (t.isRanged) return false;
+    if (t.attackTimer <= 0.0f || t.attackTimer > DODGE_LEAD) return false;
+    return t.dist <= t.attackRange * DODGE_REACH_SLACK;
+}
+
 // Returns the index of the nearest target with LOS, or -1 if none has LOS.
 inline s32 pickTarget(const BotView& v) {
     s32 best = -1; f32 bestD = 1e9f;
@@ -210,25 +237,27 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             if (v.castableSkill[s]) { out.classSkillSlot = (s8)s; break; }
     }
 
-    // Defense posture from the row. Melee columns have engageMin=0 (no kite floor), so lo is ~0 and
-    // a lo-based dodge threshold would be `dist < 0` — dead. Fall back to the weapon's (short) reach
-    // there so the "never get touched" hit-and-run posture actually fires for Glass Cannon Melee.
-    const f32 dodgeRef = (lo > 0.1f) ? lo : (d.engageMax * v.weaponRange);
+    // DEFENSIVE ROLL — purposeful, never panicked. Two gates on top of the engine's own dodge
+    // cooldown: an actual incoming melee swing (swingIsIncoming, NOT proximity — see the constants)
+    // and the driver's multi-second leash (v.dodgeAllowed). Scans ALL targets like the block tap
+    // does: the thing about to hit you is usually not the thing you are shooting.
     const bool dodgeReady = v.dodgeCooldown <= 0.0f && !v.stunned && !v.rolling;
-    if (d.dodgesProactively && dodgeReady && t.dist < dodgeRef * 0.6f) {
-        out.dodge = true;                         // glass cannon rolls away from a closer
-    } else if (t.isRanged && out.moveFwd && dodgeReady &&
-               fabsf(angleDelta(v.yaw, out.aimYaw)) < 0.5f) {
+    if (d.dodgesProactively && dodgeReady && v.dodgeAllowed) {
+        for (u32 i = 0; i < v.targetCount; i++)
+            if (swingIsIncoming(v.targets[i])) { out.dodge = true; break; }
+    }
+    if (!out.dodge && t.isRanged && out.moveFwd && dodgeReady && v.gapCloseAllowed &&
+        fabsf(angleDelta(v.yaw, out.aimYaw)) < 0.5f) {
         // OFFENSIVE gap-closer: a RANGED enemy we are trying to walk up to is charged with a roll
         // instead — 0.5 s at 8 m/s covers ~4 m with 0.3 s of i-frames, so we cross its firing lane
         // faster AND eat one volley for free. Only for ranged: a melee enemy is already closing the
         // gap for us, and spending the roll on it just burns the i-frames we'd rather have when it
         // arrives. Gated on already FACING the target (the roll direction is the CURRENT yaw via
         // computeRollDirection, and the aim is rate-limited now, so rolling mid-turn would launch
-        // us sideways into a wall). The two dodges cannot both want to fire — the defensive one
-        // needs dist < 0.6*dodgeRef <= 0.6*hi and this one needs dist > hi — but the else-if pins
-        // the defensive roll as the winner regardless of future tuning.
+        // us sideways into a wall). The `!out.dodge` guard pins the DEFENSIVE roll as the winner
+        // when both want the same button: eating a swing you can see coming beats closing ground.
         out.dodge = true;
+        out.dodgeIsGapClose = true;   // the driver charges the (longer) offensive leash
         out.moveFwd = true;   // explicit: the roll direction is the WASD held on the SAME tick
     }
 

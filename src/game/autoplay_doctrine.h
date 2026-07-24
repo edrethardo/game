@@ -56,7 +56,11 @@ struct Doctrine {
     f32  potionHpFrac = 0.5f;// drink when hp/maxHp drops below this
     u8   disengageCount = 3; // this many enemies inside melee arc => break off (per-cell; default 3 = Moderate)
     bool blocks = false;             // hold-block between actions / during reloads
-    bool dodgesProactively = false;  // roll away from closing enemies before they hit
+    bool dodgesProactively = false;  // roll out of an INCOMING melee swing (Autoplay::swingIsIncoming)
+    // Minimum seconds between two proactive rolls, enforced by the DRIVER (the engine's own dodge
+    // cooldown is 1 s, which as a behaviour rate reads as constant panicked twitching). Glass Cannon
+    // keeps the shortest leash — "never get touched" is its identity — but is still bounded.
+    f32  dodgeCooldownSec = 4.0f;
     bool usesCover = false;          // reload / recast from findCoverCell, break LOS on cooldown
     bool preferHighGround = false;    // seek balconies/ramps on stacked floors
 };
@@ -86,7 +90,7 @@ inline Doctrine doctrineFor(u8 cell) {
             // usesCover is intentional even for Glass/Melee, whose hug band (engageMax 0.60) keeps
             // it close: there it means retreat-to-cover BETWEEN strikes (hit-and-run), not stand
             // off. For Glass/Ranged & Glass/Magic it is the usual break-LOS-while-recasting.
-            d.usesCover = true;  d.disengageCount = 2;
+            d.usesCover = true;  d.disengageCount = 2; d.dodgeCooldownSec = 2.5f;
             d.engageMax = (col == 1) ? d.engageMax : 1.00f;      // ranged/magic go max-range
             // Only Glass/Ranged seeks high ground — a deliberate asymmetry: ranged gains the most
             // from open sightlines, while melee wants to close and magic fights mid, so neither

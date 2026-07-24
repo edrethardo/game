@@ -115,28 +115,94 @@ TEST_CASE("leads a crossing target: aim yaw is offset ahead of its position") {
     CHECK(out.aimYaw < 0.0f);     // lead point is +X of the target => aim rotates toward +X (yaw<0)
 }
 
-TEST_CASE("glass-cannon melee dodges a closer despite a zero kite-floor") {
-    // Cell 7 = Glass/Melee: dodgesProactively AND engageMin=0. lo=0 would make a lo-based dodge
-    // threshold `dist<0` (dead), so the reach-based fallback dodgeRef = engageMax*range must fire it.
+// ---------------------------------------------------------------------------------------------
+// PROACTIVE DODGE — spent on an INCOMING SWING, never on proximity, and on a real bot-side leash.
+// The first version rolled whenever an enemy was inside 0.6 x the kite floor, which for a ranged
+// doctrine is most of every fight: Aaron watching it — "ranged is dodge rolling too often", "less
+// panicky". The trigger is now shaped like the perfect-block tap (a melee swing about to land) and
+// the driver holds a multi-second leash on top so it can never chain-roll.
+// ---------------------------------------------------------------------------------------------
+static BotView glassMeleeVs(f32 dist, f32 enemyAttackTimer, BotTarget& t) {
     BotView v = selfAt({0,0,0});
-    v.buildCell = 3*2+1;                          // Glass Cannon / Melee
+    v.buildCell = 3*2+1;                          // Glass Cannon / Melee: dodgesProactively
     v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true; v.dodgeCooldown = 0.0f;
-    // dodgeRef = 0.60*2.0 = 1.2; trigger = dodgeRef*0.6 = 0.72 m. 0.5 m is inside.
-    BotTarget t{}; t.pos = {0, 1.7f, -0.5f}; t.dist = 0.5f; t.hasLOS = true;
+    t = BotTarget{};
+    t.pos = {0, 1.7f, -dist}; t.dist = dist; t.hasLOS = true;
+    t.attackRange = 2.0f; t.attackTimer = enemyAttackTimer;
     v.targets = &t; v.targetCount = 1;
-    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
-    CHECK(out.dodge);
+    return v;
 }
 
-TEST_CASE("glass-cannon melee holds the dodge when the closer is past the reach reference") {
-    BotView v = selfAt({0,0,0});
-    v.buildCell = 3*2+1;                          // Glass Cannon / Melee
-    v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true; v.dodgeCooldown = 0.0f;
-    // 1.9 m is well outside the 0.72 m dodge trigger.
-    BotTarget t{}; t.pos = {0, 1.7f, -1.9f}; t.dist = 1.9f; t.hasLOS = true;
-    v.targets = &t; v.targetCount = 1;
+TEST_CASE("proactive dodge does NOT fire on proximity alone") {
+    // Point-blank, but the enemy is nowhere near swinging (a full cooldown away). Rolling here is
+    // the panic-roll: it spends the i-frames long before the hit they were meant to eat.
+    BotTarget t; BotView v = glassMeleeVs(0.5f, /*attackTimer=*/1.4f, t);
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+}
+
+TEST_CASE("proactive dodge fires when a melee swing is actually imminent") {
+    BotTarget t; BotView v = glassMeleeVs(0.5f, /*attackTimer=*/0.12f, t);
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
-    CHECK_FALSE(out.dodge);
+    CHECK(out.dodge);
+    CHECK_FALSE(out.dodgeIsGapClose);             // the DEFENSIVE roll: charges the doctrine leash
+}
+
+TEST_CASE("proactive dodge is suppressed while the bot-side leash is cooling") {
+    BotTarget t; BotView v = glassMeleeVs(0.5f, 0.12f, t);
+    v.dodgeAllowed = false;                       // driver: < dodgeCooldownSec since the last roll
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+}
+
+TEST_CASE("proactive dodge ignores a swing that cannot reach us, and a stale negative timer") {
+    {   // 6 m away from a 2 m reach: it is not swinging at US
+        BotTarget t; BotView v = glassMeleeVs(6.0f, 0.12f, t);
+        CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+    }
+    {   // the ranged-enemy-behind-cover drift that made the block flap 213 times in a live run
+        BotTarget t; BotView v = glassMeleeVs(0.5f, -3.4f, t);
+        CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+    }
+}
+
+TEST_CASE("proactive dodge never fires for a RANGED attacker") {
+    // Its attackTimer says when the SHOT LEAVES, not when it lands — the projectile then flies for
+    // dist/speed seconds, so the i-frames would be long spent by impact. Same reason the block tap
+    // refuses ranged attackers.
+    // Kept INSIDE the melee band (1.0 m < 0.60 x 2 m) so the offensive gap-closer isn't what's under
+    // test here — only `isRanged` may suppress this roll.
+    BotTarget t; BotView v = glassMeleeVs(1.0f, 0.12f, t);
+    t.isRanged = true; t.attackRange = 12.0f;
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+}
+
+TEST_CASE("proactive dodge scans ALL targets, not just the aim target") {
+    // Same lesson as the block tap: the thing about to hit you is usually not the thing you shoot.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*2+1; v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true;
+    BotTarget ts[2];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-1.0f}; ts[0].dist = 1.0f; ts[0].hasLOS = true;
+    ts[0].attackRange = 2.0f; ts[0].attackTimer = 2.0f;          // aim target, not swinging
+    ts[1] = {}; ts[1].pos = {1.2f,1.7f,0}; ts[1].dist = 1.2f; ts[1].hasLOS = true;
+    ts[1].attackRange = 2.0f; ts[1].attackTimer = 0.05f;         // flanker, about to land
+    v.targets = ts; v.targetCount = 2;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+}
+
+TEST_CASE("a Moderate/Ranged bot still dodges a genuine incoming swing") {
+    // The fix must calm the roll, not delete it: a marksman with something in its face swinging
+    // should still get out of the way (it has no block — `blocks` is false for the ranged column).
+    BotView v = selfAt({0,0,0});                  // Moderate/Ranged
+    v.dodgeCooldown = 0.0f;
+    BotTarget t{}; t.pos = {0,1.7f,-1.5f}; t.dist = 1.5f; t.hasLOS = true;
+    t.attackRange = 2.0f; t.attackTimer = 0.1f;
+    v.targets = &t; v.targetCount = 1;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+}
+
+TEST_CASE("Glass Cannon keeps the shortest dodge leash — its doctrine identity") {
+    CHECK(doctrineFor(3*2+2).dodgeCooldownSec < doctrineFor(3*1+2).dodgeCooldownSec);
+    CHECK(doctrineFor(3*1+2).dodgeCooldownSec >= 4.0f);   // everyone else: a genuinely long leash
+    CHECK(GAP_CLOSE_COOLDOWN > doctrineFor(3*2+2).dodgeCooldownSec);  // the charge is rarer still
 }
 
 TEST_CASE("casts a castable class skill while engaging (a Magic build plays its build)") {
@@ -410,6 +476,17 @@ TEST_CASE("rolls INTO a ranged enemy it is trying to close on") {
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
     CHECK(out.moveFwd);      // must be held on the SAME tick: the roll direction comes from WASD
     CHECK(out.dodge);
+    CHECK(out.dodgeIsGapClose);   // charges the OFFENSIVE leash, not the defensive one
+}
+
+TEST_CASE("does not gap-close roll while the charge leash is cooling") {
+    // The charge rides its own, longer leash so it reads as a deliberate rush rather than a stutter
+    // of little hops every time the bot is out of band.
+    BotTarget t; BotView v = meleeBotVs(9.0f, true, t);
+    v.gapCloseAllowed = false;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveFwd);      // still walks in
+    CHECK_FALSE(out.dodge);
 }
 
 TEST_CASE("does not gap-close roll when the dodge is on cooldown or mid-roll") {
