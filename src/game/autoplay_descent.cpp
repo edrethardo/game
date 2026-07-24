@@ -110,21 +110,81 @@ bool ensureDescentField(DescentField& f, const LevelGrid& g, const DungeonResult
     return true;
 }
 
+// Can a body of `radius` walk the straight line a->b without any part of it entering a wall or a
+// jump pad? Samples the segment and tests the four AABB corners plus the centre at each sample —
+// the same shape as Pathfinder's segmentTraversable, reimplemented here because that one is file-
+// static and this file deliberately links against nothing but the grid.
+static bool clearRun(const LevelGrid& g, Vec3 a, Vec3 b, f32 radius) {
+    const f32 dx = b.x - a.x, dz = b.z - a.z;
+    const f32 dist = std::sqrt(dx * dx + dz * dz);
+    if (dist < 1e-4f) return true;
+    const f32 step = g.cellSize * 0.25f;                  // fine enough never to tunnel a 1-cell wall
+    const s32 n = static_cast<s32>(dist / step) + 1;
+    const f32 inv = 1.0f / static_cast<f32>(n);
+    const f32 ox[5] = { 0,  radius,  radius, -radius, -radius };
+    const f32 oz[5] = { 0,  radius, -radius,  radius, -radius };
+    for (s32 i = 0; i <= n; i++) {
+        const f32 t  = static_cast<f32>(i) * inv;
+        const f32 px = a.x + dx * t, pz = a.z + dz * t;
+        for (u8 k = 0; k < 5; k++) {
+            u32 cx, cz;
+            if (!LevelGridSystem::worldToGrid(g, Vec3{px + ox[k], 0.0f, pz + oz[k]}, cx, cz)) return false;
+            if (!routable(g, cx, cz)) return false;       // wall, or a pad the field is avoiding
+        }
+    }
+    return true;
+}
+
 Vec3 descentDirection(const DescentField& f, const LevelGrid& g, Vec3 pos) {
     if (!f.valid || !f.dir) return {0, 0, 0};
     u32 gx, gz;
     if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return {0, 0, 0};
     if (gx >= f.width || gz >= f.depth) return {0, 0, 0};
-    const u8 dir = f.dir[gz * f.width + gx];
-    if (dir >= 8) return {0, 0, 0};                            // 0xFE at a hole / 0xFF unreachable
+    if (f.dir[gz * f.width + gx] >= 8) return {0, 0, 0};        // 0xFE at a hole / 0xFF unreachable
 
-    // Steer at the NEXT CELL'S CENTRE, not just along the axis. This is the anti-wall-hug rule
-    // inherited from the exit field: aiming at the centre pulls a body that has drifted toward a
-    // corridor wall back into the middle of the corridor as it advances, instead of letting it
-    // track along the wall it is already touching.
-    const f32 tx = (static_cast<f32>(static_cast<s32>(gx) + kDx[dir]) + 0.5f) * g.cellSize;
-    const f32 tz = (static_cast<f32>(static_cast<s32>(gz) + kDz[dir]) + 0.5f) * g.cellSize;
-    const f32 dx = tx - pos.x, dz = tz - pos.z;
+    // STRING-PULLED LOOKAHEAD, not "steer at the next cell".
+    //
+    // The field expands 4-CONNECTED (diagonals would clip corners a body cannot fit through), so its
+    // route across open floor is a STAIRCASE: north, east, north, east. Steering at the immediately
+    // next cell centre therefore swings the desired heading ~90 degrees every time the bot crosses a
+    // cell boundary — which is both symptoms the bot was showing on a Descent floor at once. It is
+    // the jitter ("the aim jittering seems to happen when on 4 story floors searching for the hole"):
+    // measured, the field emitted 111-degree single-tick heading steps, ~50x the ~2 degrees the
+    // combat aim contributes, every time the travel-heading commit released. And it is the
+    // wall-hugging, because each leg of a staircase aims diagonally INTO the inside corner that the
+    // next leg is about to turn around.
+    //
+    // So walk the field forward a few cells and steer at the FARTHEST waypoint still reachable in a
+    // clear straight run — ordinary string-pulling, and the straight line through a staircase is the
+    // diagonal the 4-connected expansion was not allowed to emit. The run is width-tested, so the
+    // shortcut can never cut a corner the body would clip: this REMOVES corner contact rather than
+    // trading jitter for it. Falling back to the next-cell centre keeps the old behaviour whenever
+    // nothing further is reachable (a genuine tight corner), which is exactly when the staircase is
+    // the correct path anyway.
+    constexpr u8  kLookahead   = 8;      // cells; ~8 m of corridor, well past a single turn
+    constexpr f32 kBodyRadius  = 0.35f;  // the bot's ~0.3 m half-width plus a little margin
+    Vec3 wp[kLookahead];
+    u8   n = 0;
+    {   // Follow the field forward, collecting cell centres, stopping at a hole or a dead code.
+        u32 cx = gx, cz = gz;
+        for (u8 i = 0; i < kLookahead; i++) {
+            const u8 d = f.dir[cz * f.width + cx];
+            if (d >= 8) break;                          // reached a hole (0xFE) — nothing further
+            const s32 nx = static_cast<s32>(cx) + kDx[d];
+            const s32 nz = static_cast<s32>(cz) + kDz[d];
+            if (nx < 0 || nz < 0 ||
+                static_cast<u32>(nx) >= f.width || static_cast<u32>(nz) >= f.depth) break;
+            cx = static_cast<u32>(nx); cz = static_cast<u32>(nz);
+            wp[n++] = Vec3{(cx + 0.5f) * g.cellSize, pos.y, (cz + 0.5f) * g.cellSize};
+        }
+    }
+    if (n == 0) return {0, 0, 0};
+
+    Vec3 goal = wp[0];                                   // the old behaviour, as the floor
+    for (u8 i = n; i-- > 1; ) {                          // farthest first
+        if (clearRun(g, pos, wp[i], kBodyRadius)) { goal = wp[i]; break; }
+    }
+    const f32 dx = goal.x - pos.x, dz = goal.z - pos.z;
     const f32 len = std::sqrt(dx * dx + dz * dz);
     if (len < 0.01f) return {0, 0, 0};
     return {dx / len, 0.0f, dz / len};

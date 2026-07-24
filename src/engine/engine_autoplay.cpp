@@ -361,6 +361,7 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayExitBull       = false;
         m_autoplayFloorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
         m_autoplayFloorStallTimer = 0.0f;
+        m_autoplayVhPortal        = -1;   // ramps belong to the old floor's DungeonResult
     }
     if (v.doorActive && !bossGate) {
         if (combatProgress) {   // a kill/damage this tick = a real fight worth finishing: restart the window
@@ -971,15 +972,33 @@ Autoplay::BotView Engine::buildBotView() {
         const DungeonResult& dg  = m_level.dungeon;
         const Vec3           pos = m_localPlayer.position;
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
-            // The exit is a balcony door on the OPPOSITE story. On the wrong story, walk to the nearest
-            // ramp END on our own story (nearestPortalGoal → the diagonal-corner ramp; plain walking
-            // climbs the graduated slab). On the SAME story, keep the flat heading to the door.
-            const bool botUpper  = StoryNav::onUpperStory(m_level.grid, pos, pos.y);
-            const bool exitUpper = m_level.floorDoorPos.y > 1.5f;
-            if (botUpper != exitUpper) {
-                const Vec3 goal = StoryNav::nearestPortalGoal(dg, pos, botUpper, exitUpper);
-                const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
-                if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+            // The exit is a balcony door on the OPPOSITE story, reached by a ramp. The crossing is
+            // COMMITTED: one ramp is chosen and then walked end to end.
+            //
+            // Both halves of that matter. "Am I done?" is a FEET-HEIGHT test, not
+            // StoryNav::onUpperStory, because a ramp is a graduated slab and the per-cell slab test
+            // reports "upper" from the first riser — the old code stopped routing the instant the
+            // climb began, handed the heading to the flat GROUND flow field, and got the bot pulled
+            // straight back off the ramp, to land, re-read "lower", and try again forever (the
+            // "climbing stairs is difficult" stall). And the ramp is remembered rather than re-picked
+            // per tick, because "nearest end" flips between two ramps as the bot moves and swings the
+            // heading with it (the known VH story-routing oscillation).
+            const f32  exitY       = m_level.floorDoorPos.y;
+            const bool onExitStory = StoryNav::feetOnStory(pos.y, exitY);
+            if (!onExitStory) {
+                const bool climbing = exitY > pos.y;
+                // Re-pick only when we have no ramp committed; the commit is dropped the moment the
+                // crossing completes (below) or the floor changes (m_autoplayVhPortal is reset there).
+                if (m_autoplayVhPortal < 0 || m_autoplayVhPortal >= (s32)dg.portalCount)
+                    m_autoplayVhPortal = StoryNav::nearestPortalIdx(dg, pos, !climbing);
+                if (m_autoplayVhPortal >= 0) {
+                    const Vec3 goal = StoryNav::portalRouteGoal(dg.portals[m_autoplayVhPortal],
+                                                                pos, climbing);
+                    const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
+                    if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+                }
+            } else {
+                m_autoplayVhPortal = -1;   // arrived: release the ramp, the flat field takes over
             }
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
             // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's

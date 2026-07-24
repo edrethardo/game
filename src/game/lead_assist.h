@@ -19,6 +19,20 @@
 
 namespace LeadAssist {
 
+// --- ENEMY shot aim: a coin flip between leading and firing at the target's feet ----------------
+// Ranged enemies used to lead EVERY shot with a perfect intercept solve, which makes them read as
+// hitscan snipers rather than monsters: a player moving at constant velocity is hit every time, and
+// the only counter is to change direction on their exact fire cadence. Flipping a coin per shot
+// gives half the volley an honest lead and half a shot at where you actually are, so strafing beats
+// some shots and standing still beats others, and no single movement pattern is a perfect answer.
+//
+// The choice is split from the maths so the arithmetic stays pure and testable, and so all three
+// enemy fire sites (CHASE, retreat re-engage, strafe-fire in enemy_ai_states.cpp) share ONE rule
+// rather than three copies of a lead formula that could drift apart.
+inline Vec3 enemyAimPoint(Vec3 targetPos, Vec3 targetVel, f32 timeToHit, bool lead) {
+    return lead ? targetPos + targetVel * timeToHit : targetPos;
+}
+
 inline constexpr f32 MAX_CORRECT_RAD = 0.2094395f;  // 12° — max the assist may bend the throw
 inline constexpr f32 ACQUIRE_COS     = 0.9925462f;  // cos 7° — crosshair must already be this close
 inline constexpr f32 ACQUIRE_RANGE   = 30.0f;       // beyond this, no assist (also the knife's reach)

@@ -138,3 +138,62 @@ TEST_CASE("planVault: a chasing mob vaults a jumpable gap and refuses a lake") {
     }
     LevelGridSystem::shutdown(g);
 }
+
+// --- COMMITTED ramp routing (the Autoplay stair climb) ------------------------------------------
+// A VERTICAL_HALL ramp is a GRADUATED SLAB, which is what made climbing one fail: onUpperStory tests
+// the feet against the slab top of the cell underfoot, so a body one riser up already reads "upper".
+// A caller routing on `botUpper != exitUpper` therefore stopped routing the instant the climb began
+// and fell back to the flat ground field, which pulled the bot off the ramp — land, re-read "lower",
+// walk back to the foot, repeat. These pin the two pieces that replaced it.
+
+TEST_CASE("story nav: feetOnStory judges by height, not by the slab underfoot") {
+    // The whole point: mid-ramp the body is metres below the balcony even though the cell it stands
+    // on reports a slab. Height is the only honest test, and 1.5 m cleanly halves the 3 m pitch.
+    CHECK(StoryNav::feetOnStory(0.0f, 0.0f));      // on the ground, ground exit
+    CHECK(StoryNav::feetOnStory(3.0f, 3.0f));      // on the balcony, balcony exit
+    CHECK_FALSE(StoryNav::feetOnStory(0.0f, 3.0f));// on the ground, balcony exit: not there yet
+    CHECK_FALSE(StoryNav::feetOnStory(1.4f, 3.0f));// HALFWAY UP THE RAMP: still not there
+    CHECK(StoryNav::feetOnStory(2.9f, 3.0f));      // last riser: close enough to count as arrived
+}
+
+TEST_CASE("story nav: portalRouteGoal aims at the far end once the near end is reached") {
+    // Phase 1 walks the bot to the foot; phase 2 walks it UP. Without phase 2 the goal is the foot,
+    // so arriving there collapses the heading and the climb never starts.
+    StoryPortal p{};
+    p.lowPos  = Vec3{10.0f, 0.0f, 10.0f};
+    p.highPos = Vec3{16.0f, 3.0f, 10.0f};
+
+    // Far from the foot: aim at the foot.
+    const Vec3 g1 = StoryNav::portalRouteGoal(p, Vec3{2.0f, 0.0f, 10.0f}, /*climbing=*/true);
+    CHECK(g1.x == doctest::Approx(p.lowPos.x));
+
+    // Standing at the foot: aim at the top, which is what walks the slab.
+    const Vec3 g2 = StoryNav::portalRouteGoal(p, Vec3{10.0f, 0.0f, 10.0f}, /*climbing=*/true);
+    CHECK(g2.x == doctest::Approx(p.highPos.x));
+
+    // Partway up, still committed to the top rather than turning back to the foot.
+    const Vec3 g3 = StoryNav::portalRouteGoal(p, Vec3{13.0f, 1.5f, 10.0f}, /*climbing=*/true);
+    CHECK(g3.x == doctest::Approx(p.highPos.x));
+
+    // Descending mirrors it: the top is the near end, the foot the far one.
+    const Vec3 g4 = StoryNav::portalRouteGoal(p, Vec3{16.0f, 3.0f, 10.0f}, /*climbing=*/false);
+    CHECK(g4.x == doctest::Approx(p.lowPos.x));
+}
+
+TEST_CASE("story nav: nearestPortalIdx picks by the end on the body's OWN story") {
+    DungeonResult d{};
+    d.portals[d.portalCount].lowPos  = Vec3{ 5.0f, 0.0f, 5.0f};
+    d.portals[d.portalCount].highPos = Vec3{30.0f, 3.0f, 30.0f};
+    d.portalCount++;
+    d.portals[d.portalCount].lowPos  = Vec3{40.0f, 0.0f, 40.0f};
+    d.portals[d.portalCount].highPos = Vec3{ 8.0f, 3.0f, 8.0f};
+    d.portalCount++;
+
+    // On the GROUND, ramp 0's foot is closest.
+    CHECK(StoryNav::nearestPortalIdx(d, Vec3{6.0f, 0.0f, 6.0f}, /*fromUpper=*/false) == 0);
+    // On the BALCONY at the same XZ, ramp 1's TOP is closest — the near end is the other one.
+    CHECK(StoryNav::nearestPortalIdx(d, Vec3{6.0f, 3.0f, 6.0f}, /*fromUpper=*/true) == 1);
+    // No ramps at all: -1, so the caller keeps its flat heading.
+    DungeonResult empty{};
+    CHECK(StoryNav::nearestPortalIdx(empty, Vec3{0, 0, 0}, false) == -1);
+}

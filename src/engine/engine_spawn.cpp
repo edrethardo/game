@@ -502,7 +502,8 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     // HP compounds with the effective floor (Nightmare/Hell ramp
                     // exponentially); damage stays on the linear floor curve plus a flat
                     // per-difficulty bump — compounding damage would one-shot the player.
-                    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+                    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
+                                  * GameConst::difficultyHealthBump(m_difficulty);
                     f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
                                   * GameConst::difficultyDamageBump(m_difficulty);
                     ent->health    *= hpMult;
@@ -592,7 +593,8 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
                     ent->level = static_cast<u16>(effectiveFloor);
                     // HP compounds; damage linear + per-difficulty bump (see other spawn path).
-                    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+                    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
+                                  * GameConst::difficultyHealthBump(m_difficulty);
                     f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
                                   * GameConst::difficultyDamageBump(m_difficulty);
                     ent->health    *= hpMult;
@@ -819,7 +821,8 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
         // HP compounds, damage is linear + the per-tier bump. (bossEffFloor is reused below
         // for boss->level / ability keying.)
         u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
-        f32 bossHpMult   = GameConst::floorHealthMult(bossEffFloor);
+        f32 bossHpMult   = GameConst::floorHealthMult(bossEffFloor)
+                           * GameConst::difficultyHealthBump(m_difficulty);
         f32 bossDmgMult  = GameConst::floorDamageMult(bossEffFloor)
                            * GameConst::difficultyDamageBump(m_difficulty);
 
@@ -912,7 +915,8 @@ u16 Engine::spawnSourceBoss(Vec3 center)
     const BossDef& def = m_bossDefs.defs[idx];
 
     u32 effFloor = 50u + static_cast<u32>(m_difficulty) * 50u;       // currentFloor is 50 in The Source
-    f32 hpMult   = GameConst::floorHealthMult(effFloor);
+    f32 hpMult   = GameConst::floorHealthMult(effFloor)
+                   * GameConst::difficultyHealthBump(m_difficulty);
     f32 dmgMult  = GameConst::floorDamageMult(effFloor) * GameConst::difficultyDamageBump(m_difficulty);
 
     EntityHandle h = EntitySystem::spawn(m_entities,
@@ -1424,7 +1428,8 @@ void Engine::spawnBredEnemy(u8 defIdx, Vec3 nearPos) {
     // Floor scaling — identical to spawnFloorEnemies, so a bred spider matches a placed one.
     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
     ent->level = static_cast<u16>(effectiveFloor);
-    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
+                                  * GameConst::difficultyHealthBump(m_difficulty);
     f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
                   * GameConst::difficultyDamageBump(m_difficulty);
     ent->health   *= hpMult;
@@ -1464,7 +1469,8 @@ void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
         if (tierDefs[i]->attackRange <= 5.0f && !tierDefs[i]->flying) melee[meleeCount++] = tierDefs[i];
 
     const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-    const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
+                                  * GameConst::difficultyHealthBump(m_difficulty);
     const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
                         * GameConst::difficultyDamageBump(m_difficulty);
 
@@ -1584,7 +1590,8 @@ void Engine::spawnFloorHoleSnipers(const DungeonResult& dungeon, u8 tier) {
     if (rangedCount == 0) return;   // no ranged enemies this tier → no hole snipers
 
     const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-    const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor);
+    const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
+                                  * GameConst::difficultyHealthBump(m_difficulty);
     const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
                         * GameConst::difficultyDamageBump(m_difficulty);
 

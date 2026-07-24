@@ -321,6 +321,10 @@ private:
     // autoplay_nav.h dropHoleCandidates), so the route is A*-planned and then followed waypoint by
     // waypoint. Re-planned on a throttle rather than per tick: A* is a 256-cell search and the goal
     // does not move. {0,0,0} goal = no route (no hole on this story, or none reachable).
+    // VERTICAL_HALL committed ramp: index into DungeonResult::portals, -1 = none chosen. Held for
+    // the whole story crossing so the goal cannot flip between two ramps mid-climb; released when
+    // the bot's feet reach the exit's story, and re-anchored on a floor change.
+    s32              m_autoplayVhPortal = -1;
     // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.

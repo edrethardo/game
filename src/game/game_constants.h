@@ -207,9 +207,36 @@ namespace GameConst {
         // just floor 50. That is unavoidable — the slope cannot carry a tier's ramp (see
         // FLOOR_DAMAGE_MULT: at Hell's effective floors the slope and bump cancel).
         switch (difficulty) {
-            case 1:  return 2.35f;  // Nightmare — pass-1's deliberate heat (NM-50 58.2x) re-solved vs the 0.24 slope
+            // Nightmare: 2 x the 2.35 solved above — Aaron's 2026-07-24 call to double Nightmare
+            // outright. Paired with difficultyHealthBump's matching 2.0 so HP and damage move
+            // TOGETHER; doubling damage alone would have inverted the "HP must outscale damage"
+            // invariant that keeps deep enemies from becoming glass cannons.
+            case 1:  return 4.70f;  // Nightmare — 2 x the solved 2.35 (see difficultyHealthBump)
             case 2:  return 8.03f;  // Hell      — re-solved vs the 0.24 slope: ~295x stands still
             default: return 1.55f;  // Normal    (was 1.25 -> 1.40) — flat raise on top of the steeper slope
+        }
+    }
+
+    // Flat per-difficulty HEALTH multiplier, the twin of difficultyDamageBump above.
+    //
+    // It exists because there was no per-tier HP lever at all: enemy health came only from
+    // floorHealthMult compounding over the effective floor (raw floor + difficulty*50), so a tier's
+    // HP was whatever the compounding rate happened to produce and could not be moved without
+    // dragging every other tier with it. "Double Nightmare's HP" is not expressible any other way.
+    //
+    // Applied at every site that applies floorHealthMult (engine_spawn.cpp: trash, nests, boss,
+    // summons) so a tier's HP is uniform — a bump applied to only some spawners would make the same
+    // monster tougher depending on which system placed it.
+    //
+    // KEEP THIS IN STEP WITH difficultyDamageBump. The load-bearing invariant across the whole
+    // curve is that enemy HP outscales enemy damage (see the Hell note above): scaling both by the
+    // same factor preserves that ratio exactly, which is why Nightmare doubling both is safe where
+    // doubling damage alone would not have been.
+    inline f32 difficultyHealthBump(u8 difficulty) {
+        switch (difficulty) {
+            case 1:  return 2.0f;   // Nightmare — doubled with its damage (2026-07-24)
+            case 2:  return 1.0f;   // Hell      — unchanged; its curve is solved via the damage bump
+            default: return 1.0f;   // Normal    — unchanged
         }
     }
 

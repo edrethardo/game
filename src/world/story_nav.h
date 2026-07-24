@@ -38,6 +38,72 @@ inline Vec3 nearestPortalGoal(const DungeonResult& d, Vec3 from, bool fromUpper,
     return best;
 }
 
+// --- COMMITTED ramp routing (the Autoplay bot's stair climb) ------------------------------------
+//
+// nearestPortalGoal above answers "which ramp END is nearest" and is re-asked every tick, which is
+// wrong for a body that is actually CLIMBING, for two compounding reasons:
+//
+//  1. A VERTICAL_HALL ramp is a GRADUATED SLAB — a run of cells whose platform tops rise from the
+//     ground to the balcony. onUpperStory tests the feet against THIS CELL'S slab top, so a body one
+//     riser up the ramp already reports "upper". A caller that routes on `botUpper != exitUpper`
+//     therefore stops routing the moment the climb BEGINS, drops back to the flat ground flow field,
+//     and gets pulled off the ramp it just stepped onto — then lands, reads "lower" again, walks back
+//     to the foot, and repeats. That is a climb that never completes, and it is what the bot did
+//     ("climbing stairs is also somehow difficult for the auto play bot").
+//  2. Re-picking the nearest end each tick lets the goal flip between two ramps as the body moves,
+//     swinging the heading (the documented "VH balcony story-routing oscillates on some seeds").
+//
+// So: pick a ramp ONCE (nearestPortalIdx), and steer with portalRouteGoal, which aims at the near
+// end until the body has arrived at it and at the FAR end thereafter — walking the graduated slab
+// end to end instead of treating arrival at the foot as arrival at the story. The caller decides
+// when the crossing is done, and must do so by comparing FEET HEIGHT to the destination story rather
+// than by asking onUpperStory, for reason (1) above.
+
+// Index of the ramp whose end on the body's own story is nearest, or -1 when the floor has none.
+inline s32 nearestPortalIdx(const DungeonResult& d, Vec3 from, bool fromUpper) {
+    s32 best = -1;
+    f32 bestD2 = 1e30f;
+    for (u8 i = 0; i < d.portalCount; i++) {
+        const Vec3 nearEnd = fromUpper ? d.portals[i].highPos : d.portals[i].lowPos;
+        const f32 dx = nearEnd.x - from.x, dz = nearEnd.z - from.z;
+        const f32 d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = (s32)i; }
+    }
+    return best;
+}
+
+// Where to walk next to cross this ramp. `climbing` = heading from the ground to the balcony.
+// Two phases: MOUNT (aim at the near end, so the body arrives at the foot/top squarely rather than
+// at the ramp's side, which the graduated slab would refuse to step up) and TRAVERSE (aim at the far
+// end, which walks the slab).
+//
+// The phase is decided by HEIGHT PROGRESS along the ramp, not by distance to the near end. Distance
+// is the obvious choice and it is wrong in the one place it matters: partway up, the body is FAR
+// from the foot again, so a proximity rule re-selects the foot and marches it back down — the very
+// flip-flop this function exists to remove. Once the feet have left the near end's height the body
+// is committed to the run, however far along it is.
+inline Vec3 portalRouteGoal(const StoryPortal& p, Vec3 from, bool climbing) {
+    constexpr f32 kMount  = 2.0f;   // metres from the near end that count as "on the approach"
+    constexpr f32 kOnRamp = 0.5f;   // metres of height gained/lost that count as "already on it"
+    const Vec3 nearEnd = climbing ? p.lowPos  : p.highPos;
+    const Vec3 farEnd  = climbing ? p.highPos : p.lowPos;
+    // How far the feet have travelled vertically away from the near end (positive once on the slab).
+    const f32 progressed = climbing ? (from.y - p.lowPos.y) : (p.highPos.y - from.y);
+    if (progressed > kOnRamp) return farEnd;                      // mid-run: never turn back
+    const f32 dx = nearEnd.x - from.x, dz = nearEnd.z - from.z;
+    return (dx * dx + dz * dz > kMount * kMount) ? nearEnd : farEnd;
+}
+
+// True when a body's FEET are on the story that `targetY` belongs to. Deliberately a height
+// comparison and NOT onUpperStory: mid-ramp the per-cell slab test reports the upper story while the
+// body is still metres below it (see the note above). The two stories of a VERTICAL_HALL are 3 m
+// apart, so half that separates them cleanly whatever the ramp gradient is doing underfoot.
+inline bool feetOnStory(f32 feetY, f32 targetY) {
+    constexpr f32 kHalfStory = 1.5f;
+    const f32 d = feetY - targetY;
+    return (d < 0.0f ? -d : d) < kHalfStory;
+}
+
 // The XZ goal for a body that wants to get UP but has no ramp: the nearest recorded JUMP PAD.
 // Four-story Descent floors have portalCount==0 — no ramps, no stairs — so a pad is the only way up
 // and without this an enemy simply cannot follow a player who dropped a level. Returns `from`

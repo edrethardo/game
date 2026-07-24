@@ -11,6 +11,7 @@
 #include "game/floor_event.h"   // Goblin:: tunables (the FLEE serpentine)
 #include <cmath>
 #include <cstdlib>
+#include "game/lead_assist.h"   // LeadAssist::enemyAimPoint — the 50/50 lead-vs-current rule
 
 // ---------------------------------------------------------------------------
 // Phase-2 tactics helpers (encircle / archetype-distinct motion)
@@ -559,7 +560,9 @@ void updateHostileStates(Entity& e, u32 i,
                     f32 projRadius = 0.08f;
                     if (e.flags & ENT_FLYING) { projSpeed = 11.5f; projRadius = 0.06f; }
                     f32 timeToHit = dist / projSpeed;
-                    Vec3 predictedPos = targetPos + targetVel * timeToHit;
+                    // 50/50: lead the shot, or fire at where the target stands right now.
+                    Vec3 predictedPos = LeadAssist::enemyAimPoint(targetPos, targetVel, timeToHit,
+                                                                  (std::rand() & 1) != 0);
                     Vec3 atkDir = normalize(predictedPos - atkOrigin);
                     u16 pIdx = ProjectileSystem::spawn(projectiles, atkOrigin,
                         atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
@@ -761,7 +764,9 @@ void updateHostileStates(Entity& e, u32 i,
                 f32 projSpeed = (e.flags & ENT_FLYING) ? 11.5f : 16.1f;
                 f32 projRadius = (e.flags & ENT_FLYING) ? 0.06f : 0.08f;
                 f32 timeToHit = dist / projSpeed;
-                Vec3 predictedPos = tPos + targetVel * timeToHit; // lead the actual target
+                // 50/50: lead the shot, or fire at where the target stands right now.
+                Vec3 predictedPos = LeadAssist::enemyAimPoint(tPos, targetVel, timeToHit,
+                                                              (std::rand() & 1) != 0);
                 Vec3 atkDir = normalize(predictedPos - atkOrigin);
                 ProjectileSystem::spawn(projectiles, atkOrigin,
                     atkDir, projSpeed, e.damage, projRadius, 3.0f, false);
@@ -876,7 +881,9 @@ void updateHostileStates(Entity& e, u32 i,
             Vec3 atkOrigin = e.position + Vec3{0, e.halfExtents.y, 0};
             f32 projSpeed = 14.0f;
             f32 timeToHit = dist / projSpeed;
-            Vec3 predictedPos = targetPos + targetVel * timeToHit;
+            // 50/50: lead the shot, or fire at where the target stands right now.
+            Vec3 predictedPos = LeadAssist::enemyAimPoint(targetPos, targetVel, timeToHit,
+                                                          (std::rand() & 1) != 0);
             Vec3 atkDir = normalize(predictedPos - atkOrigin);
             ProjectileSystem::spawn(projectiles, atkOrigin,
                 atkDir, projSpeed, e.damage, 0.08f, 3.0f, false);

@@ -19,6 +19,7 @@
 using GameConst::floorHealthMult;
 using GameConst::floorDamageMult;
 using GameConst::difficultyDamageBump;
+using GameConst::difficultyHealthBump;
 using GameConst::FLOOR_STAT_MULT;
 using GameConst::FLOOR_DAMAGE_MULT;
 using GameConst::DIFFICULTY_HP_COMPOUND_RATE;
@@ -131,12 +132,14 @@ TEST_CASE("The damage slope is a NORMAL dial, not a Hell one") {
     CHECK(norm50_B > norm50_A * 1.05f);
 }
 
-TEST_CASE("difficultyDamageBump: Normal x1.55, Nightmare x2.35, Hell x8.03") {
+TEST_CASE("difficultyDamageBump: Normal x1.55, Nightmare x4.70, Hell x8.03") {
     // 2026-07-23 balance-lab session, pass 2: Normal 1.25 -> 1.40 -> 1.55 are deliberate raises;
-    // NM 2.80 -> 2.35 and Hell 9.58 -> 8.03 are RE-SOLVES against the steeper 0.24 slope (NM-50
-    // holds pass-1's 58.2x, Hell-50 holds ~295x — both tiers stand still).
+    // NM 2.80 -> 2.35 and Hell 9.58 -> 8.03 were RE-SOLVES against the steeper 0.24 slope.
+    // 2026-07-24: Nightmare DOUBLED outright (2.35 -> 4.70) on Aaron's call, paired with an equal
+    // doubling of its HP via difficultyHealthBump — see the ratio test below for why they move
+    // together rather than damage alone.
     CHECK(difficultyDamageBump(0) == doctest::Approx(1.55f));
-    CHECK(difficultyDamageBump(1) == doctest::Approx(2.35f));
+    CHECK(difficultyDamageBump(1) == doctest::Approx(4.70f));
     CHECK(difficultyDamageBump(2) == doctest::Approx(8.03f));
     // Unexpected values fall back to Normal rather than misbehaving.
     CHECK(difficultyDamageBump(99) == doctest::Approx(1.55f));
@@ -207,11 +210,35 @@ TEST_CASE("Nightmare runs deliberately hotter than its HP-parity solve") {
     // top — do not treat 2.35 as a parity number (see difficultyDamageBump's comment).
     const f32 prevHp  = std::pow(1.0364f, 99.0f);
     const f32 prevDmg = (1.0f + 99.0f * 0.16f) * 1.90f;
-    const f32 hpX     = floorHealthMult(100) / prevHp;
+    //
+    // 2026-07-24: Nightmare was DOUBLED on both axes, so both growth figures double (1.28 -> 2.56
+    // HP, 1.82 -> 3.64 damage) and the RATIO between them — the thing this test actually guards —
+    // is untouched. hpX must include difficultyHealthBump or it reports the pre-doubling curve.
+    const f32 hpX     = (floorHealthMult(100) * difficultyHealthBump(1)) / prevHp;
     const f32 dmgX    = (floorDamageMult(100) * difficultyDamageBump(1)) / prevDmg;
-    CHECK(hpX  == doctest::Approx(1.28f).epsilon(0.03));
+    CHECK(hpX  == doctest::Approx(2.56f).epsilon(0.03));
     CHECK(dmgX >  hpX);                                  // never a sponge again
-    CHECK(dmgX == doctest::Approx(1.82f).epsilon(0.03)); // the deliberate heat, pinned
+    CHECK(dmgX == doctest::Approx(3.64f).epsilon(0.03)); // the deliberate heat, doubled and pinned
+}
+
+TEST_CASE("difficultyHealthBump doubles Nightmare and leaves the other tiers alone") {
+    // The per-tier HP lever exists only because compounding cannot be aimed at one difficulty, so
+    // "double Nightmare's HP" had no other expression. Normal and Hell must read exactly 1.0 — a
+    // stray multiplier here would silently re-solve Hell's curve, which is boxed in by two hard
+    // requirements (see difficultyDamageBump's comment).
+    CHECK(difficultyHealthBump(0) == doctest::Approx(1.0f));
+    CHECK(difficultyHealthBump(1) == doctest::Approx(2.0f));
+    CHECK(difficultyHealthBump(2) == doctest::Approx(1.0f));
+    CHECK(difficultyHealthBump(99) == doctest::Approx(1.0f));   // unknown tier: no scaling
+}
+
+TEST_CASE("Nightmare's doubling keeps HP and damage in step") {
+    // The invariant that matters across the whole curve is that enemy HP outscales enemy damage —
+    // it is what stops deep enemies becoming glass cannons that delete the player before they can
+    // be hit back. Doubling BOTH preserves the ratio exactly; doubling damage alone would have
+    // moved Nightmare toward that failure. This pins the pairing, not the individual numbers.
+    CHECK(difficultyHealthBump(1) == doctest::Approx(2.0f));
+    CHECK(difficultyDamageBump(1) / 2.35f == doctest::Approx(difficultyHealthBump(1)).epsilon(0.01));
 }
 
 TEST_CASE("Normal's damage raise is deliberate, depth-weighted, and pinned") {

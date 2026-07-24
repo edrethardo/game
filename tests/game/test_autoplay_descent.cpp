@@ -68,6 +68,56 @@ TEST_CASE("descent field: routes around a wall instead of pointing through it") 
     LevelGridSystem::shutdown(g);
 }
 
+TEST_CASE("descent field: the heading is stable as the bot walks it, not per-cell flip-flop") {
+    // What the aim actually feels is how much the heading CHANGES tick to tick. The field expands
+    // 4-connected, so a naive "steer at the very next cell centre" readout swings up to 90 deg every
+    // time the bot crosses a cell boundary; the lookahead is there to keep consecutive samples
+    // pointing the same way. Note the BFS may legitimately route an L rather than a staircase
+    // (equal-cost routes are resolved by expansion order), so this asserts the property that
+    // matters — smoothness along the walk — not any particular shape of route.
+    LevelGrid g = makeStoryGrid(20, 20);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(15.5f, 15.5f, 9.0f);
+    Autoplay::DescentField f;
+    REQUIRE(Autoplay::ensureDescentField(f, g, d, 9.0f, 1));
+
+    // Walk the field for real — step along whatever heading it gives, the way the bot does — and
+    // require consecutive headings to agree. A per-cell flip-flop shows up here as a dot near 0.
+    Vec3 p{3.5f, 9.0f, 3.5f};
+    Vec3 prev = Autoplay::descentDirection(f, g, p);
+    REQUIRE(lengthSq(prev) > 1e-6f);
+    for (u32 i = 0; i < 40 && !Autoplay::atDescentGoal(f, g, p); i++) {
+        const Vec3 h = Autoplay::descentDirection(f, g, p);
+        if (lengthSq(h) < 1e-6f) break;
+        CHECK(dot(h, prev) > 0.7f);        // < ~45 deg between consecutive steps
+        prev = h;
+        p = p + h * 0.5f;                  // half a cell per step, ~ the bot's per-tick travel
+        p.y = 9.0f;
+    }
+    Autoplay::freeDescentField(f);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent field: the lookahead never shortcuts through a wall") {
+    // String-pulling is only safe because the straight run is WIDTH-tested. Put a barrier between
+    // the bot and its goal and the heading must still route around it, not point through it.
+    LevelGrid g = makeStoryGrid(20, 20);
+    for (u32 z = 0; z < 16; z++) setSolid(g, 10, z);      // wall with a gap at the +z end
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(15.5f, 3.5f, 9.0f);   // straight through the wall
+    Autoplay::DescentField f;
+    REQUIRE(Autoplay::ensureDescentField(f, g, d, 9.0f, 1));
+    const Vec3 start{3.5f, 9.0f, 3.5f};
+    const Vec3 dir = Autoplay::descentDirection(f, g, start);
+    REQUIRE(lengthSq(dir) > 1e-6f);
+    // The goal bears due +X; the only way there is around the far end, so the heading must carry a
+    // real +z component rather than aiming at the barrier.
+    CHECK(dir.z > 0.2f);
+    CHECK(fieldReachesAHole(f, g, start, 300));
+    Autoplay::freeDescentField(f);
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("descent field: every reachable cell has a heading (no stand-and-stare)") {
     LevelGrid g = makeStoryGrid(12, 12);
     DungeonResult d{};
