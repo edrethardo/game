@@ -19,14 +19,18 @@
 // diagonal-corner ramp to the opposite-story exit balcony, a FOUR_STORY "Descent" bot steers to the
 // nearest same-story drop-hole and falls toward L0, and lava floors lean on the (lava-aware) veto to
 // hug the stone causeways. Three driver backstops ride on top: an anti-livelock stuck-override (force
-// the descend when wedged at a contested door; a lateral nudge when wedged on geometry), a loot-settle
-// dwell (hold briefly after a fight so the auto-loot vacuum collects), and low-hp health-globe detours.
+// the descend when wedged at a contested door; else an ESCALATING escape when wedged on geometry —
+// lateral nudge → full 8-direction safe-step search away from the wedge → a short A* leg toward the
+// exit — so an AFK bot is never permanently idle even when the flow field yields no heading), a
+// loot-settle dwell (hold briefly after a fight so the auto-loot vacuum collects), and low-hp
+// health-globe detours.
 #include "engine/engine.h"
 #include "platform/input.h"
 #include "world/combat_query.h"
 #include "world/level_grid.h"
 #include "world/story_nav.h"      // StoryNav::onUpperStory / nearestPortalGoal — per-style vertical routing
-#include "game/autoplay_nav.h"    // Autoplay::stepAllowed — the travel hazard veto
+#include "world/pathfinder.h"     // Pathfinder::findPath — Stage-3 escape's short A* leg toward the exit
+#include "game/autoplay_nav.h"    // Autoplay::stepAllowed / escapeHeading — the travel hazard veto + 8-dir escape
 #include "game/autoplay_combat.h" // Autoplay::dirToAim / doctrineFor — nudge heading + in-band fight test
 #include "game/item.h"            // GLOBE_HEALTH_ID / m_worldItems — low-hp globe detours
 #include "game/game_constants.h"
@@ -102,7 +106,12 @@ void Engine::updateAutoplay(f32 dt) {
             if (t.hasLOS && t.dist >= doc.engageMin * v.weaponRange &&
                             t.dist <= doc.engageMax * v.weaponRange) { inBandFight = true; break; }
         }
-        if (progressed) { m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f; }
+        if (progressed) {
+            // Real progress resumed (moved > 0.5 m from the wedge anchor): re-anchor and DROP the whole
+            // escape ladder so the bot returns to plain flow-field travel (requirement: reset on progress).
+            m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f;
+            m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
+        }
         else if (!inBandFight && m_autoplayLootDwell <= 0.0f) m_autoplayNoProgressTimer += dt;
     }
     const bool stuck = m_autoplayNoProgressTimer > 4.0f;
@@ -115,9 +124,29 @@ void Engine::updateAutoplay(f32 dt) {
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
         in.descend = true;
-    } else if (stuck || m_autoplayNudgeTimer > 0.0f) {
-        // Remedy B — wedged on geometry elsewhere: nudge laterally for ~0.5 s, then re-evaluate.
-        if (stuck && m_autoplayNudgeTimer <= 0.0f) m_autoplayNudgeTimer = 0.5f;
+    } else if (stuck || m_autoplayNudgeTimer > 0.0f || m_autoplayEscapeTimer > 0.0f) {
+        // Remedy B — wedged on geometry: an ESCALATING escape so an AFK bot is NEVER found permanently
+        // idle. The longer the bot makes no XZ progress (m_autoplayNoProgressTimer keeps climbing while
+        // wedged), the more aggressive the escape:
+        //   STAGE 1 (stuck, <6 s): a lateral ±90/180 nudge off the current heading (the original remedy).
+        //   STAGE 2 (nudge found no safe step, or >6 s): a full 8-direction safe-step search that walks
+        //           AWAY from the wedge anchor (autoplay_nav.h escapeHeading) — the flow field can be
+        //           {0,0,0} here (off-field on a stacked floor, boxed in a lava corner) so we can't lean
+        //           on it, but the geometry still has an opening unless the cell is fully walled.
+        //   STAGE 3 (>8 s): a short A* leg toward the exit door — the escape hatch for when the flow
+        //           field ITSELF gives no heading; falls back to STAGE 2 if the door is out of A*'s
+        //           256-cell reach or its first step isn't safe.
+        // The Stage 2/3 heading is committed for a ~0.5 s window (traverse a cell before re-deciding;
+        // also throttles A* to once per window). While stuck the bot is NEVER left with a zero heading
+        // unless the cell is fully walled — which the level geometry guarantees can't persist.
+        const f32  feetY  = m_localPlayer.position.y;
+        const Vec3 anchor = m_autoplayLastPos;   // last progress point = where the bot wedged
+        Vec3 esc{0, 0, 0};
+
+        // STAGE 1: lateral nudge. Arms at the 4 s stuck onset and only up to 6 s (past that, escalate).
+        if (stuck && m_autoplayNudgeTimer <= 0.0f && m_autoplayEscapeTimer <= 0.0f &&
+            m_autoplayNoProgressTimer < 6.0f)
+            m_autoplayNudgeTimer = 0.5f;
         if (m_autoplayNudgeTimer > 0.0f) {
             m_autoplayNudgeTimer -= dt;
             // Base heading: the travel heading if we have one, else the bot's facing. Rotate to a
@@ -125,20 +154,64 @@ void Engine::updateAutoplay(f32 dt) {
             Vec3 base = v.flowDir;
             if (lengthSq(base) < 1e-6f)
                 base = Vec3{-sinf(m_localPlayer.yaw), 0.0f, -cosf(m_localPlayer.yaw)};
-            const f32 feetY = m_localPlayer.position.y;
             const f32 kAngles[3] = {1.5707963f, -1.5707963f, 3.14159265f};   // +90°, -90°, 180°
-            Vec3 esc{0, 0, 0};
             for (u32 i = 0; i < 3; i++) {
                 const Vec3 cand = rotateY_XZ(base, kAngles[i]);
                 if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, cand, m_level.lavaFloor)) {
                     esc = cand; break;
                 }
             }
-            if (lengthSq(esc) > 1e-6f) {
-                f32 yaw, pitch; Autoplay::dirToAim(esc, yaw, pitch);
-                in = Autoplay::BotIntent{};
-                in.aimYaw = yaw; in.aimPitch = 0.0f; in.moveFwd = true;
+            if (lengthSq(esc) < 1e-6f) m_autoplayNudgeTimer = 0.0f;   // no lateral step: abandon, escalate now
+        }
+
+        // STAGE 2 / 3: committed 8-dir (or A*) escape, engaged whenever the lateral nudge isn't driving.
+        if (lengthSq(esc) < 1e-6f) {
+            if (m_autoplayEscapeTimer <= 0.0f) {
+                Vec3 h{0, 0, 0};
+                // STAGE 3 first (deepest escalation): a short A* leg toward the exit for when the flow
+                // field itself yields no heading. bodyRadius ~ the player half-width; findPath returns
+                // world-space waypoints (outPath[0] = the first corner toward the goal), 0 if the door is
+                // unreachable within its 256-cell cap.
+                if (m_autoplayNoProgressTimer > 8.0f && m_level.floorDoorActive) {
+                    Vec3 wp[MAX_PATH_WAYPOINTS];
+                    const u8 n = Pathfinder::findPath(m_level.grid, m_localPlayer.position,
+                                                      m_level.floorDoorPos, wp, MAX_PATH_WAYPOINTS, 0.3f);
+                    if (n > 0) {
+                        const Vec3 to{wp[0].x - m_localPlayer.position.x, 0.0f,
+                                      wp[0].z - m_localPlayer.position.z};
+                        if (lengthSq(to) > 1e-6f) {
+                            const Vec3 cand = normalize(to);
+                            // Only trust the A* heading if its own first cell is hazard-safe (A* is
+                            // 2D / story-blind, so re-veto its immediate step here).
+                            if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, cand,
+                                                      m_level.lavaFloor))
+                                h = cand;
+                        }
+                    }
+                }
+                // STAGE 2 (and the STAGE-3 fallback when A* gave nothing usable): 8-dir search away from
+                // the wedge. Returns a safe heading unless the cell is fully walled.
+                if (lengthSq(h) < 1e-6f)
+                    h = Autoplay::escapeHeading(m_level.grid, m_localPlayer.position, feetY, anchor,
+                                                m_level.lavaFloor);
+                m_autoplayEscapeDir   = h;
+                m_autoplayEscapeTimer = 0.5f;   // commit for ~0.5 s (traverse a cell; throttle the A* leg)
             }
+            m_autoplayEscapeTimer -= dt;
+            // Re-validate the committed heading each tick (cheap insurance); drop the commit early if it
+            // is no longer safe so the next tick recomputes rather than driving into a hazard.
+            if (lengthSq(m_autoplayEscapeDir) > 1e-6f &&
+                Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, m_autoplayEscapeDir,
+                                      m_level.lavaFloor))
+                esc = m_autoplayEscapeDir;
+            else
+                m_autoplayEscapeTimer = 0.0f;
+        }
+
+        if (lengthSq(esc) > 1e-6f) {
+            f32 yaw, pitch; Autoplay::dirToAim(esc, yaw, pitch);
+            in = Autoplay::BotIntent{};
+            in.aimYaw = yaw; in.aimPitch = 0.0f; in.moveFwd = true;
         }
     }
 

@@ -62,6 +62,49 @@ TEST_CASE("hazard veto: stepping off the map edge is rejected") {
     LevelGridSystem::shutdown(g);
 }
 
+TEST_CASE("escapeHeading: a cell boxed on all sides but one returns that one opening") {
+    // (4,4) is walled on all 8 neighbours except the +X (east) cell (5,4). The 8-dir search must
+    // find that single opening whatever the anchor is.
+    LevelGrid g = makeFlatGrid(8, 8);
+    setSolid(g, 4, 5); setSolid(g, 4, 3);                       // N, S
+    setSolid(g, 5, 5); setSolid(g, 5, 3);                       // NE, SE
+    setSolid(g, 3, 5); setSolid(g, 3, 3);                       // NW, SW
+    setSolid(g, 3, 4);                                          // W  (leaves only E = (5,4) open)
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    // Anchor sits on the bot itself (curD2 == 0): any safe step counts as "away".
+    const Vec3 esc = Autoplay::escapeHeading(g, from, /*feetY=*/0.0f, from, /*lavaFloor=*/false);
+    CHECK(lengthSq(esc) > 1e-6f);      // found an escape
+    CHECK(esc.x > 0.5f);               // it is the +X opening
+    CHECK(esc.z == doctest::Approx(0.0f));
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("escapeHeading: a fully-walled cell returns zero (nothing is safe)") {
+    LevelGrid g = makeFlatGrid(8, 8);
+    setSolid(g, 5, 4); setSolid(g, 3, 4); setSolid(g, 4, 5); setSolid(g, 4, 3);   // E W N S
+    setSolid(g, 5, 5); setSolid(g, 5, 3); setSolid(g, 3, 5); setSolid(g, 3, 3);   // diagonals
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    const Vec3 esc = Autoplay::escapeHeading(g, from, 0.0f, from, false);
+    CHECK(lengthSq(esc) < 1e-6f);      // boxed in: no heading
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("escapeHeading: with two openings it prefers the one AWAY from the wedge anchor") {
+    // (4,4) is open only E (5,4) and W (3,4); the anchor is far to the +X (east) side, so a +X step
+    // moves TOWARD it and a -X step moves AWAY. Even though E is scanned before W, the search must
+    // skip the toward-opening and return the away-opening.
+    LevelGrid g = makeFlatGrid(8, 8);
+    setSolid(g, 4, 5); setSolid(g, 4, 3);                       // N, S
+    setSolid(g, 5, 5); setSolid(g, 5, 3);                       // NE, SE
+    setSolid(g, 3, 5); setSolid(g, 3, 3);                       // NW, SW  (E and W stay open)
+    const Vec3 from   = LevelGridSystem::gridToWorld(g, 4, 4);
+    const Vec3 anchor = LevelGridSystem::gridToWorld(g, 6, 4);  // wedge point off to the east (+X)
+    const Vec3 esc = Autoplay::escapeHeading(g, from, 0.0f, anchor, false);
+    CHECK(lengthSq(esc) > 1e-6f);
+    CHECK(esc.x < -0.5f);              // walked WEST, away from the eastern anchor
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("descend eligibility: never while a boss is alive") {
     Autoplay::DescendCtx ctx;
     ctx.doorActive = true; ctx.distToDoor = 1.0f; ctx.hasBoss = true; ctx.bossAlive = true;

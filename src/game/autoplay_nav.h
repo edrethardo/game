@@ -43,6 +43,37 @@ inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool
     return true;
 }
 
+// escapeHeading — the escalating stuck-override's Stage-2 fallback (engine_autoplay.cpp). When the
+// flow field yields no usable heading and the lateral ±90/180 nudge finds nothing, scan all 8 compass
+// headings and return the FIRST hazard-safe one (stepAllowed) that ALSO moves the bot away from
+// `awayFrom` — the position where it wedged — so it walks OUT of the pocket rather than back into it.
+// Cardinals (N/S/E/W) are tried before diagonals: a cardinal step aligns with the grid and with
+// stepAllowed's single-cell point sample, so it's the more reliable escape. If no safe heading
+// increases the XZ distance from the wedge (the bot is standing on the anchor, or every opening faces
+// it) it falls back to the FIRST hazard-safe heading so the bot still MOVES; only a fully-walled cell
+// (all 8 vetoed) returns {0,0,0}. Pure — no engine state — so it unit-tests on a synthetic LevelGrid.
+inline Vec3 escapeHeading(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 awayFrom, bool lavaFloor) {
+    constexpr f32 kD = 0.70710678f;   // 1/sqrt(2): the unit component of a 45° diagonal heading
+    const Vec3 dirs[8] = {
+        { 0, 0,  1}, { 0, 0, -1}, {  1, 0,  0}, { -1, 0,  0},         // N, S, E, W (cardinals first)
+        { kD, 0, kD}, { kD, 0, -kD}, { -kD, 0, kD}, { -kD, 0, -kD},   // NE, SE, NW, SW (last resort)
+    };
+    // XZ distance² from the wedge anchor at the CURRENT cell — a candidate step must beat this to
+    // count as "moving away".
+    const f32 ax = from.x - awayFrom.x, az = from.z - awayFrom.z;
+    const f32 curD2 = ax * ax + az * az;
+    Vec3 firstSafe{0, 0, 0};
+    bool haveFirstSafe = false;
+    for (u32 i = 0; i < 8; i++) {
+        if (!stepAllowed(g, from, feetY, dirs[i], lavaFloor)) continue;      // hazard: never step here
+        if (!haveFirstSafe) { firstSafe = dirs[i]; haveFirstSafe = true; }   // remembered for fallback
+        const Vec3 to = from + dirs[i] * g.cellSize;                         // dirs are already unit
+        const f32 tx = to.x - awayFrom.x, tz = to.z - awayFrom.z;
+        if (tx * tx + tz * tz > curD2 + 1e-4f) return dirs[i];              // safe AND away: take it
+    }
+    return firstSafe;   // {0,0,0} only when every one of the 8 neighbour cells is a hazard (boxed in)
+}
+
 // Inputs the descend gate reasons over, gathered by the engine driver from m_level + boss state.
 struct DescendCtx {
     bool doorActive = false;   // m_level.floorDoorActive (false in town / arena / The Source)

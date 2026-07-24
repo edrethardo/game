@@ -253,9 +253,15 @@ private:
     // 8b navigation backstops (engine_autoplay.cpp). The flow field expresses travel on FLAT floors;
     // the anti-livelock state below catches the two cases it can't: a wedged bot that stops making
     // XZ progress, and the tail of a fight where loot is still being vacuumed.
-    Vec3             m_autoplayLastPos = {0, 0, 0};      // XZ progress anchor for the stuck detector
-    f32              m_autoplayNoProgressTimer = 0.0f;   // seconds the bot has sat within 0.5 m of the anchor while travelling
-    f32              m_autoplayNudgeTimer = 0.0f;        // >0 = currently steering a lateral unstick nudge
+    Vec3             m_autoplayLastPos = {0, 0, 0};      // XZ progress anchor for the stuck detector (also the escalating escape's "wedge anchor")
+    f32              m_autoplayNoProgressTimer = 0.0f;   // seconds the bot has sat within 0.5 m of the anchor while travelling; also keys the escape ESCALATION (nudge <6 s, 8-dir >6 s, A* leg >8 s)
+    f32              m_autoplayNudgeTimer = 0.0f;        // >0 = Stage 1 of the escape: steering a lateral ±90/180 unstick nudge
+    // Escape Stages 2/3 (engine_autoplay.cpp): when the lateral nudge finds nothing / the bot stays
+    // wedged, a committed 8-direction (or short A*) escape heading drives it AWAY from the wedge so an
+    // AFK bot can never be found permanently idle. The heading is held for a ~0.5 s window (traverse a
+    // cell before re-deciding; also throttles the A* leg to once per window).
+    f32              m_autoplayEscapeTimer = 0.0f;       // >0 = driving the committed escape heading below
+    Vec3             m_autoplayEscapeDir   = {0, 0, 0};  // committed unit XZ escape heading (Stage 2/3)
     f32              m_autoplayLootDwell = 0.0f;         // >0 = holding position so the loot vacuum can settle
     u32              m_autoplayLastTargetCount = 0;      // last tick's hostile count (a >0->0 edge arms the loot dwell)
     f32              m_autoplayDescendPulse = 0.0f;      // seconds continuously wanting to descend; drives the PICKUP release/re-hold pulse (autoplay_nav.h descendPulseHeld)
