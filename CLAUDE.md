@@ -388,6 +388,26 @@ energy pool covers the cost — health for `BLOOD_NOVA` / `GameConst::cooldownRe
 watermark), and `decideCombat` presses the lowest castable slot whenever it is engaging, so a Magic build
 plays its build instead of poking with a wand. Availability is mirrored rather than guessed precisely
 because a press that no-ops is worse than no press.
+**Combat FEEL** rests on three rules that keep the bot from reading as a machine. (1) **Aim is
+RATE-LIMITED, never snapped.** `decideCombat` still emits the DESIRED lead-corrected aim; `applyBotIntent`
+eases the player onto it with `Autoplay::stepAngle` (pure/tested — shortest arc across the ±π seam, and
+`fmodf`-folded because the engine never re-wraps `Player::yaw`), at 7 rad/s for fine tracking blending to
+14 rad/s for a >1 rad acquisition flick, plus a sub-degree deterministic `aimWobble` (tick-driven
+sinusoids, never `rand()`). Measured live: peak yaw delta 1.13 rad/tick before, 0.23 after, with kills
+unchanged. (2) **A ranged enemy it is closing on gets CHARGED with a roll** — ~4 m of travel plus 0.3 s of
+i-frames crosses the firing lane better than walking. `out.moveFwd` is forced on the same tick because
+`computeRollDirection` reads the WASD held THAT tick, and the roll is gated on already facing the target
+(the roll uses the CURRENT yaw, which now lags). Melee enemies are excluded — they close the gap for you,
+so spending the roll wastes the i-frames you want when they arrive. (3) **Block is a TAP timed into the
+perfect window, never a hold.** `Combat::classifyBlock` grades by hold time, so a held block only ever
+earns BLOCKED (0.5×) while paying 0.4× move speed; `Autoplay::swingIsLanding` raises it only when a
+**melee** attacker's `attackTimer` (which counts DOWN to the swing) is inside `PERFECT_BLOCK_LEAD` 0.15 s
+and it is in its own reach, and `BotView.blockHeld` forces a release past 0.2 s so the next raise re-opens
+a fresh window. Two engine facts make it narrower than it looks: a ranged enemy's timer says when the SHOT
+LEAVES, not when it lands (the flight time blows the window), and the STRAFE-state ranged fire only resets
+that timer when it HAS LOS, so an enemy holding a shot behind cover drifts it unboundedly negative and
+reads as forever-about-to-swing — that was 213 of 275 raises before the `attackTimer > 0` gate. Live after:
+21 raises, 8 hits landed on the shield, 8 PERFECT / 0 blocked.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in
