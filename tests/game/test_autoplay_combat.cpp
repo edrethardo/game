@@ -310,3 +310,74 @@ TEST_CASE("does not gap-close roll at a ranged enemy already inside the band") {
     CHECK_FALSE(out.moveFwd);
     CHECK_FALSE(out.dodge);
 }
+
+// ---------------------------------------------------------------------------------------------
+// (C) TIMED PERFECT BLOCK — a HELD block only ever earns BLOCKED (0.5x); PERFECT (full negation)
+// needs the RAISE to be inside the 0.2 s window before the hit (Combat::classifyBlock).
+// ---------------------------------------------------------------------------------------------
+static BotView tankBotVs(f32 dist, f32 enemyAttackTimer, BotTarget& t) {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*0+1;                  // Tanky / Melee: d.blocks = true
+    v.weaponRange = 3.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true;
+    t = BotTarget{};
+    t.pos = {0, 1.7f, -dist}; t.dist = dist; t.hasLOS = true;
+    t.attackRange = 2.0f; t.attackTimer = enemyAttackTimer;
+    v.targets = &t; v.targetCount = 1;
+    return v;
+}
+
+TEST_CASE("raises the block only when a swing is actually imminent") {
+    BotTarget t; BotView v = tankBotVs(1.8f, 0.08f, t);   // in its reach, 0.08 s from swinging
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("does not turtle: a distant swing timer means no block") {
+    BotTarget t; BotView v = tankBotVs(1.8f, 1.2f, t);
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);   // holding wastes the window + 0.4x speed
+}
+
+TEST_CASE("does not block a swing that cannot reach us") {
+    BotTarget t; BotView v = tankBotVs(9.0f, 0.05f, t);   // 9 m away, 2 m reach: it is not swinging at US
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("blocks for a target it is NOT aiming at") {
+    // The thing about to hit you is often not the thing you are shooting.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*0+1; v.weaponRange = 3.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true;
+    BotTarget ts[2];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-1.5f}; ts[0].dist = 1.5f; ts[0].hasLOS = true;
+    ts[0].attackRange = 2.0f; ts[0].attackTimer = 2.0f;          // the aim target, not swinging
+    ts[1] = {}; ts[1].pos = {1.5f,1.7f,0}; ts[1].dist = 1.5f; ts[1].hasLOS = true;
+    ts[1].attackRange = 2.0f; ts[1].attackTimer = 0.05f;         // flanker, about to hit
+    v.targets = ts; v.targetCount = 2;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("ignores a STALE negative attack timer") {
+    // The STRAFE-state ranged fire only resets attackTimer when it has LOS, so an enemy holding a
+    // shot behind cover drifts it arbitrarily negative and reads as "forever about to swing". Live,
+    // that was 213 of 275 block raises — constant flapping at 0.4x move speed for nothing.
+    BotTarget t; BotView v = tankBotVs(1.8f, -3.4f, t);
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("does not time a block against a RANGED attacker") {
+    // attackTimer says when the SHOT LEAVES, not when it lands; the bolt then flies for dist/16 s,
+    // so raising now would expire the perfect window long before impact.
+    BotTarget t; BotView v = tankBotVs(1.8f, 0.08f, t);
+    t.isRanged = true; t.attackRange = 12.0f;
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("lets a stale block GO so the next raise re-opens the perfect window") {
+    BotTarget t; BotView v = tankBotVs(1.8f, 0.08f, t);
+    v.blockHeld = 0.25f;                                  // already past the 0.2 s PERFECT tier
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("a glass-cannon doctrine never blocks — it dodges") {
+    BotTarget t; BotView v = tankBotVs(1.8f, 0.05f, t);
+    v.buildCell = 3*2+1;                                  // Glass / Melee: d.blocks = false
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}

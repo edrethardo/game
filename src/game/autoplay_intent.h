@@ -18,9 +18,13 @@ struct BotTarget {
     f32  hp;
     bool isBoss;
     bool hasLOS;      // width-aware LOS from the bot's eye already computed by the driver
-    // --- threat shape (the gap-closer roll) ---
+    // --- threat timing (the gap-closer roll + the perfect-block tap) ---
     bool isRanged = false;       // Entity::attackRange > 5 — the same test the enemy AI itself uses
     f32  attackRange = 0.0f;     // this enemy's own reach, i.e. how close it must be to hit US
+    // Seconds until this enemy's NEXT attack. Entity::attackTimer counts DOWN and the swing fires at
+    // <= 0 (enemy_ai_states.cpp), so SMALL = imminent. Defaulted huge so a target the driver never
+    // filled reads as "not about to swing" rather than as a permanent block trigger.
+    f32  attackTimer = 1e9f;
 };
 
 // Effective ENGAGEMENT range for the doctrine band, from a weapon's authored range + projectile
@@ -55,6 +59,10 @@ struct BotView {
     f32  energy, maxEnergy;
     bool stunned, rolling, onGround;
     f32  dodgeCooldown;   // 0 = dodge ready
+    // Seconds the block has been HELD (Player::blockTimer, 0 when not blocking). The engine's
+    // perfect-block tier expires at 0.2 s (Combat::classifyBlock), so the policy uses this to let a
+    // stale hold GO and re-tap, which re-opens a fresh perfect window on the next raise edge.
+    f32  blockHeld = 0.0f;
     bool potionReady;
     f32  weaponRange;     // effective weapon attackRange (melee small, ranged large)
     f32  weaponProjSpeed; // 0 for hitscan/melee (no lead)

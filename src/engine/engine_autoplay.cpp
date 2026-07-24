@@ -469,6 +469,7 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayDescendPulse = 0.0f;
     }
 
+
     applyBotIntent(in, uiOpen, dt);
 }
 
@@ -489,6 +490,10 @@ Autoplay::BotView Engine::buildBotView() {
     v.rolling   = m_localPlayer.dodgeState.rolling;
     v.onGround  = m_localPlayer.onGround;
     v.dodgeCooldown = m_localPlayer.dodgeState.cooldownTimer;
+    // blockTimer is only meaningful WHILE blocking — it is zeroed on the raise edge and simply left
+    // stale on release (engine_update.cpp), so report 0 when the shield is down or the policy would
+    // read a months-old hold and refuse to ever raise again.
+    v.blockHeld = m_localPlayer.blocking ? m_localPlayer.blockTimer : 0.0f;
 
     // potionReady — replicate the tick-based gate the potion heal itself uses (engine_update.cpp) so
     // the bot only asks to drink when the press would actually fire.
@@ -674,10 +679,12 @@ Autoplay::BotView Engine::buildBotView() {
         t.dist   = length(e.position - eye);
         t.hp     = e.health;
         t.isBoss = e.isBoss;
-        // `attackRange > 5` is the enemy AI's OWN ranged test (enemy_ai_states.cpp), reused verbatim
-        // so the bot's idea of "that one shoots at me" can't drift from the AI's.
+        // Threat timing. `attackRange > 5` is the enemy AI's OWN ranged test (enemy_ai_states.cpp),
+        // reused verbatim so the bot's idea of "that one shoots at me" can't drift from the AI's.
+        // attackTimer counts DOWN to the next swing, so it is handed over as-is.
         t.isRanged    = e.attackRange > 5.0f;
         t.attackRange = e.attackRange;
+        t.attackTimer = e.attackTimer;
         // LOS: a WORLD hit before the target's centre blocks it (the DDA is slab-aware, so a balcony
         // floor occludes an enemy above). An entity/floor hit at/after the centre does not.
         const Vec3 toT = e.position - eye;

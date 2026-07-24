@@ -61,6 +61,37 @@ inline void aimWobble(u32 tick, f32& yawOff, f32& pitchOff) {
     pitchOff = kAmp * 0.5f * (0.62f * sinf(t * 1.31f + 0.7f) + 0.38f * sinf(t * 0.61f));
 }
 
+// --- perfect-block timing ------------------------------------------------------------------------
+// Combat::classifyBlock grades a block by how long it has been HELD: < 0.2 s = PERFECT (all damage
+// negated), else BLOCKED (half). A bot that just holds the button therefore only ever earns the weak
+// tier AND pays the 0.4x move slow for it. So we RAISE the block only when a swing is about to land.
+constexpr f32 PERFECT_BLOCK_WINDOW = 0.2f;   // mirrors Combat::classifyBlock
+// How early to raise. Entity::attackTimer counts down and the swing resolves at <= 0, so raising at
+// `attackTimer <= LEAD` puts the hit at blockTimer ~= attackTimer < the window. Kept under the 0.2 s
+// window with margin for the AI/player update order (the bot's view is one tick stale).
+constexpr f32 PERFECT_BLOCK_LEAD = 0.15f;
+// Slack on the attacker's own reach: it swings when we are within attackRange*1.1 (enemy_ai_states)
+// and it is still closing while the timer runs out.
+constexpr f32 BLOCK_REACH_SLACK = 1.25f;
+
+// True if this enemy's swing is about to LAND — the raise trigger.
+//
+// Two engine facts make this narrower than "attackTimer is small":
+//  * MELEE ONLY. A melee swing resolves the instant the timer crosses 0, so the timer IS the time to
+//    impact. A ranged enemy's timer only says when the SHOT LEAVES; the projectile then flies for
+//    dist/16 s, so blocking on its fire would open the window far too early (measured: an 8 m bolt
+//    lands ~0.5 s later, i.e. at the BLOCKED tier). Timing a projectile needs shot-arrival data the
+//    view does not carry, so ranged attackers simply do not trigger the tap.
+//  * attackTimer MUST BE POSITIVE. The STRAFE-state ranged fire (enemy_ai_states.cpp) only resets the
+//    timer when it actually has LOS, so a ranged enemy holding a shot behind cover drifts it
+//    unboundedly negative — it reads as "permanently 1 frame from swinging". Live, that was 213 of
+//    275 block raises: pure flapping, and each one cost 0.4x move speed.
+inline bool swingIsLanding(const BotTarget& t) {
+    if (t.isRanged) return false;
+    if (t.attackTimer <= 0.0f || t.attackTimer > PERFECT_BLOCK_LEAD) return false;
+    return t.dist <= t.attackRange * BLOCK_REACH_SLACK;
+}
+
 // Returns the index of the nearest target with LOS, or -1 if none has LOS.
 inline s32 pickTarget(const BotView& v) {
     s32 best = -1; f32 bestD = 1e9f;
@@ -137,8 +168,15 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         out.dodge = true;
         out.moveFwd = true;   // explicit: the roll direction is the WASD held on the SAME tick
     }
-    if (d.blocks && !out.fire && t.dist <= v.weaponRange && !v.stunned)
-        out.block = true;                          // tank blocks between swings
+
+    // BLOCK — a TAP timed into the perfect window, never a hold (see PERFECT_BLOCK_* above). Scans
+    // ALL targets, not just the aim target: the thing about to hit you is usually not the thing you
+    // are shooting. Dropped the old `!out.fire` gate — blocking does not gate the swing (it only
+    // costs 0.4x move speed for the ~0.15 s the tap lasts), so a tank can keep attacking through it.
+    if (d.blocks && !v.stunned && !v.rolling && v.blockHeld < PERFECT_BLOCK_WINDOW) {
+        for (u32 i = 0; i < v.targetCount; i++)
+            if (swingIsLanding(v.targets[i])) { out.block = true; break; }
+    }
 
     return out;
 }
