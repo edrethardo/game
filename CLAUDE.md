@@ -466,6 +466,7 @@ it (measured −23% kills; with it, −12%). `engageCeiling`/`THREAT_RADIUS` are
 holds a target the brain refuses to engage and falls through to TRAVEL with a live enemy on top of it.
 Live: mean seconds on one target Marksman 2.8 → 3.4, Warrior 1.7 → 2.3 (a melee bot's switch rate is
 floored by its own kill rate — a dead target forces a re-pick — so stickiness has little headroom there).
+(4) **NO DIAGONAL CORNER-CUTTING** in the hazard veto — see the veto-scope paragraph below.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in
@@ -473,6 +474,17 @@ Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in
 nothing, so the FIGHT branch's own kite/close/strafe movement is unvetoed by design (short, reactive,
 enemy-derived); the escape backstop calls `stepAllowed` itself. A NEW nav source must either fold into
 `flowDir` upstream of that check or call `stepAllowed` on its own heading.
+The veto enforces **NO CORNER CUTTING**: a step that crosses BOTH grid axes needs the diagonal cell AND
+both orthogonal component cells, the same rule `Pathfinder::findPath` applies to its 8-connected expansion.
+The original point-sampled only the destination, so it happily approved squeezing through a wall's shared
+corner that the bot's ~0.3 m body cannot fit through — the bot pressing itself into corners and wedging
+("it tries to cut corners too often and gets stuck in the corner"). Because of that rule the `buildBotView`
+detour fan had to widen from ±45° to **±45° then ±90°**: when a CARDINAL heading is blocked by a wall dead
+ahead, both ±45° candidates are diagonals whose orthogonal component IS that wall cell, so a ±45°-only
+ladder would hand every wall-ahead to the 4 s stuck-override. ±90° is the square sidestep that rounds the
+corner along the grid. Note the flow field itself is CARDINAL-only (`buildFlowField` expands 4-connected
+for exactly this reason), so on flat floors the rule fires rarely — it earns its keep on `escapeHeading`'s
+explicit diagonals and the unstick strafe.
 The driver's other **backstops** ride on top, so an AFK bot is never found permanently idle: a loot-settle dwell,
 low-HP health-globe detours, a **combat break-off** (an in-band fight that lands no damage arms a 1.5 s
 relocation leg — walk the flow heading with fire OFF to de-fixate, or, when there is no heading at all

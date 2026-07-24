@@ -62,6 +62,56 @@ TEST_CASE("hazard veto: stepping off the map edge is rejected") {
     LevelGridSystem::shutdown(g);
 }
 
+// --- CORNER-CUT PREVENTION -------------------------------------------------------------------
+// The veto used to point-sample ONLY the destination cell, so a DIAGONAL heading squeezed past a
+// wall corner the bot's ~0.3 m body actually clips — it pressed into the corner and wedged ("it
+// tries to cut corners too often and gets stuck in the corner"). A diagonal step now needs the
+// diagonal cell AND both orthogonal component cells, exactly like Pathfinder's own rule.
+TEST_CASE("hazard veto: a diagonal step past a wall CORNER is rejected") {
+    // From (4,4) heading NE toward (5,5). The diagonal cell itself is open, but the +X orthogonal
+    // (5,4) is solid — that is the corner the body scrapes. This is the wedge regression.
+    LevelGrid g = makeFlatGrid(8, 8);
+    setSolid(g, 5, 4);
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    CHECK_FALSE(Autoplay::stepAllowed(g, from, 0.0f, Vec3{1, 0, 1}, false));
+    // ...and symmetrically when it is the +Z orthogonal (4,5) that is solid.
+    LevelGridSystem::shutdown(g);
+    LevelGrid g2 = makeFlatGrid(8, 8);
+    setSolid(g2, 4, 5);
+    const Vec3 f2 = LevelGridSystem::gridToWorld(g2, 4, 4);
+    CHECK_FALSE(Autoplay::stepAllowed(g2, f2, 0.0f, Vec3{1, 0, 1}, false));
+    LevelGridSystem::shutdown(g2);
+}
+
+TEST_CASE("hazard veto: a diagonal step with all three cells open is allowed") {
+    LevelGrid g = makeFlatGrid(8, 8);
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    CHECK(Autoplay::stepAllowed(g, from, 0.0f, Vec3{1, 0, 1}, false));    // NE, open field
+    CHECK(Autoplay::stepAllowed(g, from, 0.0f, Vec3{-1, 0, -1}, false));  // SW
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("hazard veto: the corner rule never fires on a CARDINAL step") {
+    // A cardinal crosses ONE grid axis, so there is no shared corner to clip — walls flanking the
+    // corridor must not veto walking down it (that would freeze the bot in every hallway).
+    LevelGrid g = makeFlatGrid(8, 8);
+    setSolid(g, 5, 5); setSolid(g, 5, 3);              // both diagonal neighbours of the +X step
+    setSolid(g, 4, 5); setSolid(g, 4, 3);              // and both walls flanking the bot itself
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    CHECK(Autoplay::stepAllowed(g, from, 0.0f, Vec3{1, 0, 0}, false));
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("hazard veto: a diagonal past a LAVA corner is rejected too") {
+    // Same body-clip geometry, molten: the orthogonal cell burns even though the destination is dry.
+    LevelGrid g = makeFlatGrid(8, 8);
+    setLava(g, 5, 4);
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    CHECK_FALSE(Autoplay::stepAllowed(g, from, /*feetY=*/0.0f, Vec3{1, 0, 1}, /*lavaFloor=*/true));
+    CHECK(Autoplay::stepAllowed(g, from, /*feetY=*/1.2f, Vec3{1, 0, 1}, true));   // airborne: free
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("escapeHeading: a cell boxed on all sides but one returns that one opening") {
     // (4,4) is walled on all 8 neighbours except the +X (east) cell (5,4). The 8-dir search must
     // find that single opening whatever the anchor is.

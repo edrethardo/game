@@ -677,16 +677,27 @@ Autoplay::BotView Engine::buildBotView() {
     }
 
     // Hazard veto on the (possibly story/globe-steered) TRAVEL heading: never let it step the bot into
-    // a wall, off the map, or grounded into lava. Try the heading first, then ±45°, else stop (the
-    // driver's stuck-override in updateAutoplay recovers a boxed-in bot).
+    // a wall, off the map, or grounded into lava. Try the heading first, then a widening fan of
+    // detours, else stop (the driver's stuck-override in updateAutoplay recovers a boxed-in bot).
+    //
+    // The fan goes out to ±90°, not just ±45°, BECAUSE of the veto's corner-cut rule: when a CARDINAL
+    // heading is blocked by a wall dead ahead, both ±45° detours are diagonals whose orthogonal
+    // component includes that very wall cell — so they are (correctly) refused too, and a ±45°-only
+    // ladder would leave the bot with no heading at all and hand every wall-ahead to the 4-second
+    // stuck-override. ±90° is the square sidestep: it rounds the corner along the grid instead of
+    // scraping through it, which is the whole point of the corner rule.
     if (lengthSq(v.flowDir) > 1e-6f) {
         const f32 feetY = m_localPlayer.position.y;
         if (!Autoplay::stepAllowed(m_level.grid, v.pos, feetY, v.flowDir, m_level.lavaFloor)) {
-            const Vec3 left  = rotateY_XZ(v.flowDir,  0.7853981634f);   // +45°
-            const Vec3 right = rotateY_XZ(v.flowDir, -0.7853981634f);   // -45°
-            if      (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, left,  m_level.lavaFloor)) v.flowDir = left;
-            else if (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, right, m_level.lavaFloor)) v.flowDir = right;
-            else v.flowDir = Vec3{0, 0, 0};   // boxed in: stop (stuck-override recovers)
+            constexpr f32 kFan[4] = { 0.7853981634f, -0.7853981634f,     // ±45°: the gentle detour
+                                      1.5707963268f, -1.5707963268f };   // ±90°: the square sidestep
+            Vec3 pick{0, 0, 0};
+            for (u32 i = 0; i < 4; i++) {
+                const Vec3 cand = rotateY_XZ(v.flowDir, kFan[i]);
+                if (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, cand, m_level.lavaFloor)) { pick = cand; break; }
+            }
+            if (lengthSq(pick) > 1e-6f) v.flowDir = pick;
+            else                        v.flowDir = Vec3{0, 0, 0};   // boxed in: stop (stuck-override recovers)
         }
     }
 

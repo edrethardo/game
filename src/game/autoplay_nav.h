@@ -13,33 +13,60 @@
 
 namespace Autoplay {
 
+// One cell's worth of the veto, at a WORLD POINT (so the caller controls the feet height the lava
+// test reads). In-bounds, not solid, and not lava-at-feet-height. The lava test reuses
+// LevelGridSystem::feetInLava — the SINGLE-SOURCE rule the burn tick uses (level_grid.h: "the burn
+// tick and any future lava consumer share one rule"), so the bot vetoes exactly the cells that would
+// burn it and NOT the ones it can clear airborne. `lavaFloor` short-circuits the lava test entirely
+// on non-Hellforge floors (no lava cells exist there, so the query is pure waste).
+inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor) {
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, at, gx, gz)) return false;   // off the map edge
+    if (LevelGridSystem::isSolid(g, gx, gz))          return false;   // into a wall
+    if (lavaFloor && LevelGridSystem::feetInLava(g, Vec3{at.x, feetY, at.z})) return false;
+    return true;
+}
+
 // True if stepping one cell along `dir` (XZ heading, need not be unit) from `from` at feet height
-// `feetY` is safe: the destination cell is in-bounds, not solid, and not lava-at-feet-height. The
-// lava test reuses LevelGridSystem::feetInLava — the SINGLE-SOURCE rule the burn tick uses (level_grid.h:
-// "the burn tick and any future lava consumer share one rule"), so the bot vetoes exactly the cells
-// that would burn it and NOT the ones it can clear airborne. `lavaFloor` short-circuits the lava
-// test entirely on non-Hellforge floors (no lava cells exist there, so the query is pure waste).
+// `feetY` is safe.
 //
-// SCOPE — this is a POINT sample of the ONE cell normalize(dir)*cellSize ahead, NOT a swept body
-// AABB: a diagonal heading probes only the diagonal cell and skips the two orthogonally-adjacent
-// cells the body actually clips at the shared corner. It therefore assumes sub-cell per-tick steps
-// (fine for the ~0.17 m/tick driver at 6 m/s over 60 Hz); a dash/teleport that crosses a whole cell
-// in one tick is the driver's responsibility to gate, not this veto's.
+// NO CORNER CUTTING. A DIAGONAL step requires the destination cell AND both orthogonal component
+// cells — the same rule Pathfinder::findPath enforces on its 8-connected expansion (pathfinder.cpp:
+// "a diagonal step is only legal if BOTH shared orthogonal cells are also walkable"). The original
+// version point-sampled ONLY the destination, so on a diagonal heading it happily approved squeezing
+// through the shared corner of a wall — which the bot's ~0.3 m body cannot fit through. Live, that
+// is the bot pressing itself into wall corners and wedging there ("it tries to cut corners too often
+// and gets stuck in the corner"). Cardinal steps cross one grid axis and have no shared corner, so
+// they are unchanged (a corridor's flanking walls must never veto walking down it). When a diagonal
+// is refused the callers already rotate to +-45 degrees, which lands exactly on the two cardinals
+// bracketing it — so the practical effect is that the bot rounds a corner squarely instead of
+// clipping it.
 //
-// It also does NOT cover stepping off an interior CELL_PLATFORM balcony edge into a drop — those
-// falls are INTENTIONAL traversal on VERTICAL_HALL / FOUR_STORY (a balcony overlook, a drop-hole
-// descent), decided by the driver's story-navigation layer, not a hazard. The veto covers only the
-// three things that are never wanted: off-map, a solid wall, and grounded-in-lava.
+// It does NOT cover stepping off an interior CELL_PLATFORM balcony edge into a drop — those falls
+// are INTENTIONAL traversal on VERTICAL_HALL / FOUR_STORY (a balcony overlook, a drop-hole descent),
+// decided by the driver's story-navigation layer, not a hazard. The veto covers only the three
+// things that are never wanted: off-map, a solid wall, and grounded-in-lava.
+//
+// Still a per-cell test rather than a swept body AABB, so it assumes sub-cell per-tick steps (fine
+// for the ~0.17 m/tick driver at 6 m/s over 60 Hz); a dash/teleport that crosses a whole cell in one
+// tick is the driver's responsibility to gate, not this veto's.
 inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool lavaFloor) {
     Vec3 flat{dir.x, 0.0f, dir.z};
     if (lengthSq(flat) < 1e-6f) return true;                 // no heading: nothing to veto
-    Vec3 to = from + normalize(flat) * g.cellSize;           // one cell ahead along the heading
-    u32 gx, gz;
-    if (!LevelGridSystem::worldToGrid(g, to, gx, gz)) return false;   // off the map edge
-    if (LevelGridSystem::isSolid(g, gx, gz)) return false;           // into a wall
-    // Airborne over lava is free (feet above the molten surface) — exactly what makes a 1-cell
-    // vein jumpable — so probe feetInLava at the DESTINATION with the bot's own feet height.
-    if (lavaFloor && LevelGridSystem::feetInLava(g, Vec3{to.x, feetY, to.z})) return false;
+    const Vec3 to = from + normalize(flat) * g.cellSize;     // one cell ahead along the heading
+    if (!cellPassable(g, to, feetY, lavaFloor)) return false;
+
+    // Diagonal? Compare the grid cells rather than the heading angle — what matters is whether the
+    // step actually crosses BOTH grid axes (a shallow heading from near a cell edge can, a 45-degree
+    // one from mid-cell might not), which is exactly when a shared corner exists to clip.
+    u32 fx, fz, tx, tz;
+    if (!LevelGridSystem::worldToGrid(g, from, fx, fz)) return true;   // off-grid origin: nothing to compare
+    if (!LevelGridSystem::worldToGrid(g, to,   tx, tz)) return false;  // (already covered, kept explicit)
+    if (fx == tx || fz == tz) return true;                             // cardinal (or same cell): done
+    // Both orthogonal component cells must be passable too. Built as world points on the SAME axes
+    // as `to`, so they resolve to (tx,fz) and (fx,tz) without a grid->world round trip.
+    if (!cellPassable(g, Vec3{to.x,   feetY, from.z}, feetY, lavaFloor)) return false;
+    if (!cellPassable(g, Vec3{from.x, feetY, to.z},   feetY, lavaFloor)) return false;
     return true;
 }
 
