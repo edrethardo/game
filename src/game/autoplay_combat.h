@@ -51,16 +51,19 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     }
     dirToAim(aimPt - eye, out.aimYaw, out.aimPitch);
 
-    // Engagement band (x weaponRange).
+    // Engagement band (x weaponRange). engageMin is a MOVEMENT rule only — it says how much spacing
+    // the build wants, not when it may shoot.
     const f32 lo = d.engageMin * v.weaponRange;
     const f32 hi = d.engageMax * v.weaponRange;
-    const bool inBand = t.dist >= lo && t.dist <= hi;
 
     if (t.dist < lo)      out.moveBack = true;    // too close: kite out (ranged/magic)
     else if (t.dist > hi) out.moveFwd  = true;    // too far: close in
 
-    // Fire when in band with LOS (melee: also require facing, which the aim above provides).
-    out.fire = inBand && t.hasLOS && !v.stunned && !v.rolling;
+    // Fire whenever the target has LOS and is within weapon reach — INCLUDING inside the kite floor.
+    // Shooting while retreating is what kiting IS; gating fire on the full band meant a swarm that got
+    // inside engageMin was never shot at, so a ranged/caster bot backpedalled forever and killed
+    // nothing (live: sorcerers permanently stuck on floor 1).
+    out.fire = t.dist <= hi && t.hasLOS && !v.stunned && !v.rolling;
 
     // Defense posture from the row. Melee columns have engageMin=0 (no kite floor), so lo is ~0 and
     // a lo-based dodge threshold would be `dist < 0` — dead. Fall back to the weapon's (short) reach

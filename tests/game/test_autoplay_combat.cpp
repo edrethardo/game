@@ -48,6 +48,39 @@ TEST_CASE("kites: backs off when the target is inside engageMin") {
     CHECK(out.moveBack);          // Ranged kite floor: retreat
 }
 
+TEST_CASE("engagement range: projectile weapons carry no authored range and must not read as 0") {
+    // items.json authors baseRange ONLY for melee/hitscan; every wand/bow/staff/crossbow has none.
+    // A 0 here multiplies the whole doctrine band to 0, so the bot can never fire — the second half
+    // of the sorcerer bug.
+    CHECK(botWeaponRange(4.2f, 0.0f)  == doctest::Approx(4.2f));    // sword: authored, verbatim
+    CHECK(botWeaponRange(50.0f, 0.0f) == doctest::Approx(50.0f));   // pistol: authored, verbatim
+    CHECK(botWeaponRange(0.0f, 18.4f) > 12.0f);                     // wand: derived from flight
+    CHECK(botWeaponRange(0.0f, 28.8f) == doctest::Approx(24.0f));   // fast bolt: capped, not 86 m
+    CHECK(botWeaponRange(0.0f, 0.0f)  > 0.0f);                      // data hole must never mute fire
+}
+
+TEST_CASE("fires WHILE kiting: a target inside engageMin is still shot at") {
+    // The kite floor is a MOVEMENT rule (back up to restore spacing), not a fire rule — you always
+    // shoot the thing in your face while retreating. Gating fire on the band made a swarmed
+    // ranged/caster bot backpedal forever without ever shooting (sorcerers stuck on floor 1).
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < the 11 m floor
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveBack);          // still kites out
+    CHECK(out.fire);              // ...and shoots on the way
+}
+
+TEST_CASE("magic build fires while backing out of its own kite floor") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+0;          // Moderate / Magic: band 0.30-0.75 x 20 = 6..15 m
+    BotTarget t{}; t.pos = {0, 1.7f, -3.0f}; t.dist = 3.0f; t.hasLOS = true;  // inside the 6 m floor
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveBack);
+    CHECK(out.fire);
+}
+
 TEST_CASE("does not fire without line of sight") {
     BotView v = selfAt({0,0,0});
     BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = false;

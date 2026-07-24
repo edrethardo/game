@@ -198,15 +198,16 @@ void Engine::updateAutoplay(f32 dt) {
         const f32  dx = p.x - m_autoplayLastPos.x, dz = p.z - m_autoplayLastPos.z;
         const bool progressed = (dx * dx + dz * dz) > 0.25f;   // > 0.5 m from the anchor
 
-        // In-band fight = an LOS target inside the doctrine's FIRE band (matches decideCombat's fire
-        // gate) — i.e. FIGHT is active and the bot is shooting in place, the state a standoff wedges in.
+        // In-band fight = an LOS target the bot is SHOOTING AT, so this must track decideCombat's fire
+        // gate exactly: within engageMax x range, no engageMin term (the kite floor moves the bot, it
+        // never holds fire). Keeping the old floor here would blind the standoff detector to precisely
+        // the case the fire fix created — a swarm inside the kite floor being shot at point-blank.
         const Autoplay::Doctrine doc = Autoplay::doctrineFor(v.buildCell);
         f32 enemyHp = 0.0f;
         for (u32 i = 0; i < v.targetCount; i++) {
             const Autoplay::BotTarget& t = v.targets[i];
             enemyHp += t.hp;                                   // combat-progress signal: total nearby HP
-            if (t.hasLOS && t.dist >= doc.engageMin * v.weaponRange &&
-                            t.dist <= doc.engageMax * v.weaponRange) inBandFight = true;
+            if (t.hasLOS && t.dist <= doc.engageMax * v.weaponRange) inBandFight = true;
         }
         // Combat progress = we dealt damage (summed HP fell past a small epsilon) OR scored a kill
         // (fewer hostiles gathered than last tick). Comparing against the previous tick's snapshot; a
@@ -499,7 +500,9 @@ Autoplay::BotView Engine::buildBotView() {
     // --- weapon (effective, incl. affixes) ---
     // Mirror getEffectiveWeapon; MELEE/HITSCAN carry no projectile lead (projSpeed 0), only PROJECTILE.
     const WeaponDef w = Inventory::getEffectiveWeapon(m_inventories[0], m_itemDefs, m_weaponDefs[0]);
-    v.weaponRange     = w.range;
+    // NOT w.range directly: projectile weapons author no range at all (see botWeaponRange), and a
+    // 0 there zeroes the doctrine's whole engagement band, so the bot would never fire a wand/bow.
+    v.weaponRange     = Autoplay::botWeaponRange(w.range, w.projectileSpeed);
     v.weaponProjSpeed = (w.type == WeaponType::PROJECTILE) ? w.projectileSpeed : 0.0f;
     v.weaponIsMelee   = (w.type == WeaponType::MELEE);
     v.buildCell       = m_inventories[0].buildCell;

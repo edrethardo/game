@@ -20,6 +20,29 @@ struct BotTarget {
     bool hasLOS;      // width-aware LOS from the bot's eye already computed by the driver
 };
 
+// Effective ENGAGEMENT range for the doctrine band, from a weapon's authored range + projectile
+// speed. Melee/hitscan weapons author a real range (4 m sword, 50 m pistol) and use it verbatim.
+// PROJECTILE weapons author NONE — items.json gives them a projectile SPEED instead (the shot flies
+// until it hits or its 3 s spawn lifetime expires; the tooltip prints "Proj Speed", not "Range"), so
+// ItemDef::baseRange is 0 for every wand/bow/staff/crossbow in the game. Feeding that 0 into the
+// doctrine collapses the whole band to zero and the bot NEVER fires from the FIGHT branch — the
+// second half of the "sorcerers stuck on floor 1" bug (the first was gating fire on engageMin).
+// So derive it from the projectile's real reach and CAP it: an uncapped 29 m/s bolt reaches 86 m,
+// which would demand a 47 m kite floor inside a 15 m room. The cap is twice the brain's 12 m
+// THREAT_RADIUS — past that the bot doesn't consider a target worth engaging anyway.
+inline f32 botWeaponRange(f32 defRange, f32 projSpeed) {
+    if (defRange > 0.01f) return defRange;
+    constexpr f32 kProjLifetime = 3.0f;    // Combat::fireProjectile's spawn lifetime
+    constexpr f32 kMaxEngage    = 24.0f;   // 2 x THREAT_RADIUS (autoplay_brain.cpp)
+    const f32 reach = projSpeed * kProjLifetime;
+    if (reach > kMaxEngage) return kMaxEngage;
+    // A weapon with neither an authored range nor a projectile speed is a data hole; fall back to
+    // the threat radius rather than 0, because a 0 here silently MUTES the bot (this whole comment
+    // is that bug) and a bot that shoots at nothing is far cheaper than one that never shoots.
+    if (reach < 1.0f) return 12.0f;
+    return reach;
+}
+
 struct BotView {
     // self
     Vec3 pos;             // feet
