@@ -49,6 +49,7 @@
 #include "game/autoplay_nav.h"    // Autoplay::stepAllowed / escapeHeading — the travel hazard veto + 8-dir escape
 #include "game/autoplay_combat.h" // Autoplay::dirToAim / doctrineFor — nudge heading + in-band fight test
 #include "game/item.h"            // GLOBE_HEALTH_ID / m_worldItems — low-hp globe detours
+#include "game/skill.h"           // findSkillDef / computeCooldownTicks — mirror the real cast gates
 #include "game/game_constants.h"
 #include <cmath>
 
@@ -495,6 +496,37 @@ Autoplay::BotView Engine::buildBotView() {
         const f32 cdr    = m_inventories[m_localPlayerIndex].bonusCooldownReduction * 0.1f;
         const u32 cdTk   = static_cast<u32>(GameConst::POTION_COOLDOWN * (1.0f - cdr) * 60.0f + 0.5f);
         v.potionReady    = GameConst::cooldownReady(currentLocalTick(), m_potionLastActivationTick, cdTk);
+    }
+
+    // --- class skills: per-slot "would this press actually cast?" ---
+    // MIRRORS handleClassSkillActivation + SkillSystem::tryActivate gate for gate, in the same order:
+    // the slot holds a real skill, the EFFECTIVE floor (difficulty adds 50/floor tier) has unlocked
+    // it, a def exists, the shared energy pool covers its cost, and its tick cooldown has elapsed.
+    // A bot pressing a skill that no-ops is worse than not pressing — it burns the slot selection and
+    // makes the build look broken — so anything we can't verify here reads as NOT castable.
+    {
+        const ClassDef& cls  = kClassDefs[static_cast<u32>(m_playerClass)];
+        const u32 effFloor   = m_level.currentFloor + m_difficulty * 50;
+        const f32 cdr        = m_inventories[m_localPlayerIndex].bonusCooldownReduction;
+        const f32 pool       = m_skillStates[m_localPlayerIndex].energy;
+        for (u8 s = 0; s < 4; s++) {
+            const SkillId id = cls.skills[s];
+            if (id == SkillId::NONE) continue;
+            if (effFloor < cls.skillUnlockFloor[s]) continue;          // still locked on this floor
+            const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, id);
+            if (!def) continue;
+            // BLOOD_NOVA pays HEALTH, not energy (tryActivate refuses to suicide); everything else
+            // draws the shared pool. Mirroring the split keeps the bot off a skill it can't afford.
+            if (id == SkillId::BLOOD_NOVA) {
+                if (m_localPlayer.health <= m_localPlayer.health * def->healthCostPct + 1.0f) continue;
+            } else if (pool < def->energyCost) {
+                continue;
+            }
+            if (!GameConst::cooldownReady(currentLocalTick(), m_classSkillStates[s].lastActivationTick,
+                                          SkillSystem::computeCooldownTicks(def->cooldown, cdr)))
+                continue;                                              // still on cooldown
+            v.castableSkill[s] = true;
+        }
     }
 
     // --- weapon (effective, incl. affixes) ---

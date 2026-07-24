@@ -123,6 +123,53 @@ TEST_CASE("glass-cannon melee holds the dodge when the closer is past the reach 
     CHECK_FALSE(out.dodge);
 }
 
+TEST_CASE("casts a castable class skill while engaging (a Magic build plays its build)") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+0;                          // Moderate / Magic — its skills ARE its damage
+    BotTarget t{}; t.pos = {0, 1.7f, -10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.castableSkill[0] = true;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot == 0);
+}
+
+TEST_CASE("never presses a skill that would no-op: nothing castable => no cast") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+0;
+    BotTarget t{}; t.pos = {0, 1.7f, -10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;             // castableSkill all false (locked/no energy/on CD)
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot == -1);
+}
+
+TEST_CASE("does not cast at nothing: no LOS target => no cast") {
+    BotView v = selfAt({0,0,0});
+    v.castableSkill[0] = v.castableSkill[1] = true;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));   // targetCount 0
+    CHECK(out.classSkillSlot == -1);
+}
+
+TEST_CASE("prefers the lowest castable slot") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.castableSkill[2] = v.castableSkill[3] = true;   // 0/1 unavailable this tick
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot == 2);
+}
+
+TEST_CASE("casts while kiting a target inside the engage floor") {
+    // Same rationale as the fire fix: a swarm in your face is exactly when a caster wants its nova.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+0;                          // Magic: 6 m kite floor
+    BotTarget t{}; t.pos = {0, 1.7f, -2.0f}; t.dist = 2.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.castableSkill[0] = true;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveBack);
+    CHECK(out.classSkillSlot == 0);
+}
+
 TEST_CASE("picks the nearest LOS target when several exist") {
     BotView v = selfAt({0,0,0});
     BotTarget ts[2];

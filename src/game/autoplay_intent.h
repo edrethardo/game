@@ -68,6 +68,11 @@ struct BotView {
     f32   distToDoor;
     bool  hasBoss;
     bool  bossAlive;
+    // class skills — availability MIRRORED from the real activation gates by the driver (slot has a
+    // skill at all / unlocked at the EFFECTIVE floor / energy affordable / off cooldown), so
+    // castableSkill[i] means "pressing SKILL_i+1 + CLASS_SKILL right now actually casts". The policy
+    // must never press a slot that would no-op: a wasted press reads as a bot that ignores its build.
+    bool castableSkill[4] = {};
     // targets (nearest-first, driver-capped)
     const BotTarget* targets;
     u32   targetCount;

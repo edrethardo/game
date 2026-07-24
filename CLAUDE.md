@@ -364,6 +364,21 @@ descends — a plain continuous hold wedged the bot next to a used shrine foreve
 The FIGHT branch only engages within an **engagement ceiling** `max(engageMax×weaponRange, THREAT_RADIUS=12 m)`
 — a target beyond it falls through to DESCEND/TRAVEL so a distant straggler can't drag the bot off the
 exit route (this was the dense-`VERTICAL_HALL`-floor stall: an unbounded FIGHT chased 16-21 m foes forever).
+**`engageMin` governs MOVEMENT ONLY, never fire**: the bot shoots anything with LOS inside
+`engageMax×weaponRange` *including* what is inside its kite floor, and backs away at the same time —
+that is what kiting IS. Gating fire on the full band made a swarmed caster/ranged bot backpedal forever
+without shooting. That fix needs a real range to work at all, so `buildBotView` runs the weapon through
+**`Autoplay::botWeaponRange`**: melee/hitscan use their authored `baseRange`, but **every PROJECTILE
+weapon in items.json authors NO range** (it carries a projectile SPEED instead — the shot flies until it
+hits or its 3 s lifetime expires), so the raw 0 multiplied the whole doctrine band to zero and NO wand or
+bow could ever fire — the other half of the "sorcerers stuck on floor 1" bug. Projectile range is derived
+as `speed × 3 s`, capped at 24 m (2× THREAT_RADIUS; an uncapped 29 m/s bolt would demand a 47 m kite floor
+in a 15 m room). The bot also **CASTS ITS CLASS SKILLS**: `buildBotView` fills `BotView.castableSkill[4]`
+by mirroring the real activation gates one for one (slot holds a skill / unlocked at the EFFECTIVE floor /
+energy pool covers the cost — health for `BLOOD_NOVA` / `GameConst::cooldownReady` on the slot's tick
+watermark), and `decideCombat` presses the lowest castable slot whenever it is engaging, so a Magic build
+plays its build instead of poking with a wand. Availability is mirrored rather than guessed precisely
+because a press that no-ops is worse than no press.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto);
 three driver backstops ride on top — a stuck-override (force-descend when wedged at a contested door; lateral

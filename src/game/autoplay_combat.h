@@ -65,6 +65,17 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // nothing (live: sorcerers permanently stuck on floor 1).
     out.fire = t.dist <= hi && t.hasLOS && !v.stunned && !v.rolling;
 
+    // CLASS SKILL. Cast whenever we are actually engaging (same gate as fire: LOS + within reach,
+    // not stunned/rolling) and the driver reports a slot that would really fire. No cadence of our
+    // own: the engine's energy + cooldown gates ARE the rate limit, and castableSkill mirrors them,
+    // so pressing every eligible tick just means "cast the moment it comes up" — which is how a
+    // Magic build is meant to fight (its skills are its damage, the wand is the filler). Lowest
+    // castable slot wins: slot 0 is the always-unlocked basic, so an early character still casts.
+    if (out.fire) {
+        for (u8 s = 0; s < 4; s++)
+            if (v.castableSkill[s]) { out.classSkillSlot = (s8)s; break; }
+    }
+
     // Defense posture from the row. Melee columns have engageMin=0 (no kite floor), so lo is ~0 and
     // a lo-based dodge threshold would be `dist < 0` — dead. Fall back to the weapon's (short) reach
     // there so the "never get touched" hit-and-run posture actually fires for Glass Cannon Melee.

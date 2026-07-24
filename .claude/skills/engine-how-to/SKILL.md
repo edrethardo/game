@@ -80,6 +80,21 @@ just `setBotHeld`-ing it in `applyBotIntent` — it flows through the human cons
   reaches a **shrine sharing the exit's interact range** before the exit, so the driver must PULSE PICKUP
   (`Autoplay::descendPulseHeld`) — one cycle spends the shrine, the next descends. A plain hold wedges the
   bot beside a used shrine forever (it never releases, so the latch never clears).
+- **`WeaponDef::range` is 0 for EVERY projectile weapon.** `items.json` authors `baseRange` only for
+  melee and hitscan; wands/bows/staves/crossbows carry a projectile SPEED instead (the shot flies until it
+  hits or its 3 s lifetime expires — the tooltip even prints "Proj Speed", not "Range"). The bot's whole
+  doctrine is `×weaponRange`, so feeding the raw 0 in collapses the engagement band to zero and the bot
+  can NEVER fire a caster/archer weapon — it just backpedals and dies (the "sorcerer stuck on floor 1"
+  bug). Always fill `BotView.weaponRange` through `Autoplay::botWeaponRange(range, projSpeed)`.
+- **`engageMin` is a movement rule, not a fire rule.** Fire needs only LOS + `dist <= engageMax×range`;
+  a target inside the kite floor is shot at WHILE the bot backs off. Re-adding a `dist >= engageMin`
+  term to the fire gate re-creates the swarmed-caster livelock. The driver's `inBandFight` stall signal
+  must track the same gate or the standoff detector goes blind to point-blank fights.
+- **Never press a class skill the engine would refuse.** `BotView.castableSkill[]` mirrors the REAL gates
+  (`handleClassSkillActivation` + `SkillSystem::tryActivate`): slot has a skill, unlocked at the
+  EFFECTIVE floor (`currentFloor + difficulty*50`), energy pool ≥ `energyCost` (BLOOD_NOVA pays HEALTH),
+  and `GameConst::cooldownReady` against `m_classSkillStates[slot].lastActivationTick`. Add a gate to the
+  real path and this mirror must follow, or the bot burns its slot selection on a no-op.
 - **The flow byte is ambiguous at zero.** `flowDirection` returns `{0,0,0}` BOTH at the exit (byte `0xFE`)
   and on an unreachable cell (`0xFF`); read the raw byte (`atExit`/`flowValid` in `BotView`) to tell
   "arrived" from "stuck" — a zero heading alone can't.
