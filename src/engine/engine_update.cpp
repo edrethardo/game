@@ -3163,6 +3163,14 @@ bool Engine::updateTownPortal() {
     m_menu.subSelection       = 0;
     m_gameState = GameState::MENU;
     Input::setRelativeMouseMode(false);
+    // AUTOPLAY: arm the select's auto-confirm (engine_menu.cpp, subState 14). The bot's driver only
+    // ticks IN_GAME, so without this an AFK run would end here, one screen short of the next dungeon.
+    // Armed on ENTRY (rather than latched in the menu) so a second visit re-arms cleanly, and the
+    // delay gives a watching human a beat to grab the screen. Also drop any synthetic actions the bot
+    // was holding when it took the portal — the overlay is OR'd into every isActionPressed, and a
+    // stale held bit has no business reaching menu navigation.
+    m_autoplayFreePlayTimer = m_autoplayActive ? 0.75f : -1.0f;
+    if (m_autoplayActive) Input::clearBotHeld();
     return true;
 }
 

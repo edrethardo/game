@@ -206,8 +206,12 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     if (opt.town) {
         // Dev door (--town): land ANY hero in the town hub — no clear required. startGame is
         // skipped entirely; enterTown builds the world and places the player.
-        (void)mode;
         enterTown();
+        // Arm the bot here too. This branch returns before the startGame() path's enterAutoplayRun
+        // below, so `--autoplay --town` used to land an UNARMED hero in the hub — the one dev door
+        // for the town's autoplay behaviour was the one place the bot was never switched on.
+        // NEW_GAME = a fresh hero (seed its build cell from the class); a --load keeps its own.
+        if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         LOG_INFO("Launch: entered the TOWN hub (--town)");
         return;
     }

@@ -387,6 +387,7 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplayLastEnemyHp     = 0.0f;   // combat-progress signal (a leftover value could false-arm break-off)
     m_autoplayLastEnemyCount  = 0;
     m_autoplayBreakoffTimer   = 0.0f;
+    m_autoplayFreePlayTimer   = -1.0f;  // Free-Play auto-confirm: armed only by updateTownPortal
     m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
     m_autoplayDoorCheckDist   = 0.0f;
     m_autoplayExitStallTimer  = 0.0f;
@@ -1057,8 +1058,37 @@ void Engine::updateMenu(f32 dt) {
             }
         }
 
+        // --- AUTOPLAY auto-confirm: close the loop back into a dungeon -------------------------
+        // A cleared hero's town portal lands HERE, and the Autoplay driver only ticks in IN_GAME —
+        // so an unattended run would sit on this screen forever, one keypress short of the next
+        // floor. After a short armed delay (set by updateTownPortal on entry) we fall into the very
+        // same confirm body below rather than synthesizing MENU_CONFIRM through the input overlay:
+        // a synthetic press has to survive this frame's menu edge/repeat state and can be silently
+        // swallowed, while calling the path cannot. The PICK is whatever the screen is already
+        // showing (updateTownPortal seeds the hero's own difficulty capped at Hell, floor 1) — the
+        // bot never chooses something a watching player wouldn't see on screen.
+        //
+        // It disarms the moment the screen stops being the bot's: the human took gameplay control
+        // before the portal, or they are touching THIS screen (a row move, a value step, a click).
+        // Then the choice is theirs and the bot must not yank it out from under them.
+        bool autoConfirm = false;
+        if (m_autoplayFreePlayTimer >= 0.0f) {
+            const bool humanTouched = up || down || left || right || mouseBack ||
+                                      Input::isActionPressed(GameAction::MENU_BACK) ||
+                                      (mouseActive && Input::isMouseButtonPressed(MOUSE_LEFT));
+            if (!m_autoplayActive || !m_autoplayControl.botInControl() || humanTouched) {
+                m_autoplayFreePlayTimer = -1.0f;
+            } else {
+                m_autoplayFreePlayTimer -= dt;
+                if (m_autoplayFreePlayTimer <= 0.0f) {
+                    m_autoplayFreePlayTimer = -1.0f;   // one-shot: never a second fire
+                    autoConfirm = true;
+                }
+            }
+        }
+
         // --- confirm (Descend): apply the pick and start ---
-        if (menuConfirmPressed() || mouseDescend) {
+        if (menuConfirmPressed() || mouseDescend || autoConfirm) {
             AudioSystem::play(SfxId::UI_CONFIRM);
             m_difficulty         = m_menu.freePlayDifficulty;      // override the loaded save's difficulty
             m_level.currentFloor = m_menu.freePlayFloor;           // startGame(CONTINUE) generates this floor

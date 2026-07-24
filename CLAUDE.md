@@ -358,7 +358,20 @@ cursor. **Descend seam:** the bot HOLDS `GameAction::PICKUP` through the real in
 is consumed ONCE (`Interact::poll` latches `consumed`) and a HOLD reaches a **shrine sharing the exit's
 interact range** BEFORE the exit, the driver **PULSES** PICKUP (`Autoplay::descendPulseHeld`, `autoplay_nav.h`:
 hold >0.35 s to fire, release a beat to clear the latch, repeat) so one cycle spends the shrine and the next
-descends — a plain continuous hold wedged the bot next to a used shrine forever. The **build doctrine**
+descends — a plain continuous hold wedged the bot next to a used shrine forever. **TOWN portal:** the hub is
+the one world the brain cannot express — no floor door (so `onNormalFloor` is false and `decide` returns an
+empty intent) and a flow field aimed at the PLAZA CENTRE, not the portal — so an AFK run used to park there
+forever. The DRIVER owns it (`autoplayTownStep`, gated on `m_level.inTown`; the ARENA and the SOURCE CHAMBER
+still idle): a pure `Autoplay::planTownPortal` (`autoplay_nav.h`, tested) beelines XZ at `townPortalPos`
+through the same hazard veto + ±45°/±90° fan, STOPS at 1.5 m (inside the 2 m trigger — the portal is a HOLD
+target, and walking onto its centre at 6 m/s blows through the window exactly as the floor door did), and
+takes it with the SAME `descendPulseHeld` pulse for the same reason (a held PICKUP fires once and the plaza's
+stash chest can eat it). A **CLEARED** hero's portal opens the Free-Play select and leaves `IN_GAME` — where
+the driver does not tick — so `updateTownPortal` arms a one-shot `m_autoplayFreePlayTimer` (0.75 s) that
+makes the subState-14 handler run its OWN confirm body (calling the path, not synthesizing MENU_CONFIRM,
+which a menu edge/repeat could swallow) on whatever the screen already shows; it disarms the instant a human
+holds control or touches the screen. A mid-run hero's portal needs none of that — it goes straight to
+`startGame(CONTINUE)`. Measured live: ~0.55 s from town arrival to portal taken, both branches. The **build doctrine**
 (`doctrineFor`) turns the Auto-Loot 3×3 build cell into a playstyle: the column sets the engagement band
 (×weaponRange) and the row sets risk posture (potion threshold, block vs proactive-dodge, cover, high-ground).
 A FRESH Autoplay hero **seeds that cell's column from its CLASS** (`Autoplay::defaultCellForClass`,

@@ -298,6 +298,12 @@ private:
     // boolean, so it stays engine-free and testable.
     u32              m_autoplayTargetId    = 0;       // BotTarget::id of the hostile being fought (0 = none)
     f32              m_autoplayTargetDwell = 0.0f;    // s on that target; a switch needs Autoplay::TARGET_MIN_DWELL
+    // Free-Play auto-confirm. Taking the town portal as a CLEARED hero opens the level select and
+    // moves the game to GameState::MENU — where the Autoplay driver does not tick at all — so an
+    // unattended run would end its life on that screen. This counts DOWN while the select is up and
+    // then fires the screen's own confirm once. -1 = disarmed (fired already, a human is driving, or
+    // a human touched the screen — the pick is theirs then).
+    f32              m_autoplayFreePlayTimer = -1.0f;
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];
@@ -1362,6 +1368,10 @@ private:
     // control) builds a read-only view of live state, runs the pure Autoplay::decide, and applies the
     // resulting intent as a yaw/pitch write + synthetic held GameActions the existing consumers read.
     void updateAutoplay(f32 dt);
+    // TOWN branch of the driver: the hub has no floor door and its flow field targets the plaza, so
+    // the view/brain chain has nothing to say there. This beelines to the to-dungeon portal and
+    // pulses the interact instead of idling (the arena / Source chamber keep idling).
+    void autoplayTownStep(f32 dt, bool uiOpen);
     Autoplay::BotView buildBotView();
     // uiOpen suppresses the bot's movement/jump/pickup synthetic actions (so they can't drive the
     // inventory cursor, which reads the same MOVE_* actions) while keeping the combat actions live —

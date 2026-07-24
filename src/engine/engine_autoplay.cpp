@@ -181,6 +181,14 @@ void Engine::updateAutoplay(f32 dt) {
     if (m_autoplayDodgeCd    > 0.0f) m_autoplayDodgeCd    -= dt;
     if (m_autoplayGapCloseCd > 0.0f) m_autoplayGapCloseCd -= dt;
 
+    // TOWN: its own tiny policy, entirely on this side. The pure brain idles OFF a normal floor
+    // (`onNormalFloor` covers town + arena + Source chamber) and the town's flow field points at the
+    // plaza centre rather than the portal, so an armed run parked at the hub forever. Only the TOWN
+    // is claimed here: the ARENA (a progression firewall — no XP, no loot, no saves) and the SOURCE
+    // CHAMBER (the secret boss you opt into) still idle exactly as before, and the brain itself stays
+    // flat-floor pure — no town concept ever reaches it.
+    if (m_level.inTown) { autoplayTownStep(dt, uiOpen); return; }
+
     Autoplay::BotView v = buildBotView();
     Autoplay::BotIntent in = Autoplay::decide(v);
 
@@ -502,6 +510,73 @@ void Engine::updateAutoplay(f32 dt) {
 
 
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
+}
+
+// One tick of the TOWN policy: beeline to the to-dungeon portal and take it. Called instead of the
+// whole view/brain/backstop chain while m_level.inTown — the hub has no hostiles, no exit flow and
+// no floor door, so none of that machinery has anything to say here.
+//
+// The mid-run visitor and the cleared hero take the SAME portal; what differs is what
+// Engine::updateTownPortal does on the other side (startGame(CONTINUE) straight back into the run,
+// or the Free-Play select — see the auto-confirm in engine_menu.cpp for that half).
+void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
+    Autoplay::BotIntent in{};
+    in.aimYaw   = m_localPlayer.yaw;
+    in.aimPitch = 0.0f;
+
+    // The stuck/escape ladder never runs in town, so hold its state at "just made progress" instead
+    // of leaving it frozen: a no-progress timer parked at 3.9 s from the last dungeon floor would
+    // otherwise fire a spurious escape nudge on the first frame after the portal drops us back in.
+    m_autoplayLastPos         = m_localPlayer.position;
+    m_autoplayNoProgressTimer = 0.0f;
+    m_autoplayNudgeTimer      = 0.0f;
+    m_autoplayEscapeTimer     = 0.0f;
+
+    const Autoplay::TownPortalPlan plan =
+        Autoplay::planTownPortal(m_localPlayer.position, m_level.townPortalPos);
+
+    if (lengthSq(plan.heading) > 1e-6f) {
+        // Same hazard veto + widening detour fan the travel heading rides in buildBotView. The
+        // beeline crosses an open plaza on the default approach, but the hub carries hut footprints
+        // and a perimeter wall, and a bot pushed off-line (a knockback in, an odd arrival) must round
+        // them rather than press into a plank wall. `lavaFloor=false`: the town is never molten.
+        Vec3      heading = plan.heading;
+        const f32 feetY   = m_localPlayer.position.y;
+        if (!Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, heading, false)) {
+            constexpr f32 kFan[4] = { 0.7853981634f, -0.7853981634f,     // ±45°: the gentle detour
+                                      1.5707963268f, -1.5707963268f };   // ±90°: the square sidestep
+            Vec3 pick{0, 0, 0};
+            for (u32 i = 0; i < 4; i++) {
+                const Vec3 cand = rotateY_XZ(heading, kFan[i]);
+                if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, cand, false)) {
+                    pick = cand; break;
+                }
+            }
+            heading = pick;   // {0,0,0} = fully boxed: face the portal anyway and just press
+        }
+        if (lengthSq(heading) > 1e-6f) {
+            f32 yaw, pitch;
+            Autoplay::dirToAim(heading, yaw, pitch);
+            in.aimYaw   = yaw;
+            in.aimPitch = 0.0f;
+            in.moveFwd  = plan.walk;
+        }
+    }
+
+    // Taking the portal rides the SAME pulsed interact the floor exit uses, for the same reason: the
+    // portal is an EXIT-class HOLD target, and a continuously-held PICKUP makes Interact::poll fire
+    // exactly ONCE — spent on whatever else is in reach (an item, the plaza's stash chest) and then
+    // latched `consumed` forever. Pulsing releases the latch so the next hold reaches the portal.
+    // m_townPortalRequested is set by that very same updatePlayerPickup arbitration, so the BUTTON is
+    // the correct driver here — a direct flag write would be reset before updateTownPortal reads it.
+    if (plan.take) {
+        m_autoplayDescendPulse += dt;
+        in.descend = Autoplay::descendPulseHeld(m_autoplayDescendPulse);
+    } else {
+        m_autoplayDescendPulse = 0.0f;
+    }
+
+    applyBotIntent(in, uiOpen, dt, /*melee=*/false);
 }
 
 // Fill the read-only decision snapshot from live engine state (lane 0 — the only Autoplay lane).

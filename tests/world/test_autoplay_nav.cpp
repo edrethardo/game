@@ -200,3 +200,49 @@ TEST_CASE("combat break-off: fires only past the threshold, with an in-band targ
     // No in-band target = a plain travel wedge, not a combat standoff (the escape ladder handles it).
     CHECK_FALSE(Autoplay::combatStalled(10.0f, /*inBandTarget=*/false, false));
 }
+
+TEST_CASE("town portal: beeline heading points at the portal on XZ, ignoring height") {
+    // The town's flow field targets the plaza CENTRE, so the driver steers at the portal directly.
+    // Height must not tilt the heading — it is fed to a flat MOVE_FORWARD, not to an aim.
+    const Autoplay::TownPortalPlan p =
+        Autoplay::planTownPortal(Vec3{22.0f, 0.0f, 36.0f},        // the south-gate arrival spot
+                                 Vec3{22.0f, 3.0f, 32.0f});       // portal, deliberately 3 m higher
+    CHECK(p.heading.y == doctest::Approx(0.0f));
+    CHECK(p.heading.z == doctest::Approx(-1.0f));                 // straight up the plaza (-Z)
+    CHECK(p.heading.x == doctest::Approx(0.0f));
+    CHECK(p.walk);                                                // 4 m out: keep walking
+}
+
+TEST_CASE("town portal: stops short of the centre but inside the trigger, so the hold can land") {
+    // The portal is an EXIT-class HOLD target: the bot has to STAND inside the 2 m trigger for
+    // INTERACT_HOLD_SEC. Walking to the exact centre would carry it straight back out the far side
+    // at 6 m/s — the floor-door bug the exit bull was written to fix.
+    const Vec3 portal{10.0f, 0.0f, 10.0f};
+
+    const Autoplay::TownPortalPlan far = Autoplay::planTownPortal(Vec3{10.0f, 0.0f, 18.0f}, portal);
+    CHECK(far.walk);
+    CHECK_FALSE(far.take);                                        // 8 m: nothing to press yet
+
+    // The stop band and the trigger band OVERLAP on purpose: from 2.0 m in, the bot is already
+    // pressing WHILE it closes the last half-metre, so the hold is mid-cycle by the time it halts.
+    // A stop distance at or beyond the trigger would instead park it outside the radius pressing a
+    // button that can never fire.
+    CHECK(Autoplay::TOWN_PORTAL_STOP < Autoplay::TOWN_PORTAL_RADIUS);
+    const Autoplay::TownPortalPlan closing = Autoplay::planTownPortal(Vec3{10.0f, 0.0f, 11.8f}, portal);
+    CHECK(closing.walk);                                          // 1.8 m: still closing to the stop
+    CHECK(closing.take);                                          // ...but already inside the trigger
+
+    const Autoplay::TownPortalPlan parked = Autoplay::planTownPortal(Vec3{10.0f, 0.0f, 11.4f}, portal);
+    CHECK_FALSE(parked.walk);                                     // 1.4 m: inside the stop, hold still
+    CHECK(parked.take);
+}
+
+TEST_CASE("town portal: standing exactly on it yields no heading but still presses") {
+    // Degenerate case: a zero heading must not produce a NaN direction, and the press must survive
+    // it (the bot may well be shoved onto the portal's own cell).
+    const Autoplay::TownPortalPlan p =
+        Autoplay::planTownPortal(Vec3{10.0f, 0.0f, 10.0f}, Vec3{10.0f, 0.0f, 10.0f});
+    CHECK(lengthSq(p.heading) == doctest::Approx(0.0f));
+    CHECK_FALSE(p.walk);
+    CHECK(p.take);
+}

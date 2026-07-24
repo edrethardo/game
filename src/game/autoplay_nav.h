@@ -150,4 +150,44 @@ inline bool descendPulseHeld(f32 phase) {
     return t < kHoldOn;
 }
 
+// --- TOWN PORTAL -------------------------------------------------------------------------------
+// The town is the one world the exit-flow travel policy cannot express at all: it has NO floor door
+// (`floorDoorActive` false, so `onNormalFloor` is false and the brain returns an empty intent) and
+// its flow field is built toward the PLAZA CENTRE, not toward the to-dungeon portal — so an armed
+// AFK run used to park at the hub forever. The whole town policy is below: beeline at the portal on
+// XZ, stop just inside its trigger, press interact. It lives here rather than in the driver so the
+// two radii are pinned by a test against the engine's own numbers instead of drifting silently.
+
+// The portal's trigger radius — mirrors resolveInteractTargets' `lengthSq(townPortalPos - pos) < 4.0f`.
+inline constexpr f32 TOWN_PORTAL_RADIUS = 2.0f;
+// Stop SHORT of the portal's centre instead of walking onto it. The portal is a HOLD target
+// (Interact::choose: the exit class is only reachable by holding), so the bot has to STAND inside the
+// trigger for INTERACT_HOLD_SEC — the same lesson the exit bull learned when it blasted straight
+// through the floor door's 2 m window at 6-16 m/s and never descended.
+inline constexpr f32 TOWN_PORTAL_STOP = 1.5f;
+
+// What the bot should do about the town portal from where it is standing.
+struct TownPortalPlan {
+    Vec3 heading{0.0f, 0.0f, 0.0f};   // unit XZ direction to the portal ({0,0,0} = standing on it)
+    bool walk = false;                // hold MOVE_FORWARD along `heading`
+    bool take = false;                // inside the trigger: press (pulse) the interact button
+};
+
+// Pure: positions in, plan out. `walk` and `take` overlap on purpose — between STOP and RADIUS the
+// bot is already close enough to trigger, so it stops moving and starts pressing in the same tick.
+inline TownPortalPlan planTownPortal(Vec3 pos, Vec3 portal) {
+    TownPortalPlan p{};
+    const Vec3 to{portal.x - pos.x, 0.0f, portal.z - pos.z};
+    const f32  d2 = lengthSq(to);
+    if (d2 > 1e-6f) {
+        p.heading = normalize(to);
+        p.walk    = d2 > TOWN_PORTAL_STOP * TOWN_PORTAL_STOP;
+    }
+    // The engine's own proximity test is 3D. The town is flat, so this is the same number today —
+    // mirroring it rather than assuming keeps the bot's idea of "in range" from drifting from the
+    // arbitration's if the hub ever gains a step.
+    p.take = lengthSq(portal - pos) < TOWN_PORTAL_RADIUS * TOWN_PORTAL_RADIUS;
+    return p;
+}
+
 } // namespace Autoplay
