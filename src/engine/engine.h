@@ -250,6 +250,15 @@ private:
     // unattended run keeps going (engine_autoplay.cpp / engine_update.cpp).
     f32              m_autoplayRespawnTimer = 0.0f;
 
+    // 8b navigation backstops (engine_autoplay.cpp). The flow field expresses travel on FLAT floors;
+    // the anti-livelock state below catches the two cases it can't: a wedged bot that stops making
+    // XZ progress, and the tail of a fight where loot is still being vacuumed.
+    Vec3             m_autoplayLastPos = {0, 0, 0};      // XZ progress anchor for the stuck detector
+    f32              m_autoplayNoProgressTimer = 0.0f;   // seconds the bot has sat within 0.5 m of the anchor while travelling
+    f32              m_autoplayNudgeTimer = 0.0f;        // >0 = currently steering a lateral unstick nudge
+    f32              m_autoplayLootDwell = 0.0f;         // >0 = holding position so the loot vacuum can settle
+    u32              m_autoplayLastTargetCount = 0;      // last tick's hostile count (a >0->0 edge arms the loot dwell)
+
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];
     Camera         m_cameras[MAX_LOCAL_PLAYERS];

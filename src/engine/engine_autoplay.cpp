@@ -14,14 +14,21 @@
 // drive (PlayerController movement + jump assist, handleWeaponFire, the skill/potion/block gates,
 // updateFloorDoor's descend), every existing system works unchanged — no bot-specific combat code.
 //
-// SCOPE (Task 8a): flat BSP/cavern/hub floors. The flow field IS the travel goal here; per-style
-// vertical routing (ramps / drop-holes / catwalks / lava causeways) and low-hp globe detours are the
-// follow-up (8b) — until then flowDir is the raw flow-field heading and the globe list stays empty.
+// SCOPE (Task 8b): flat floors ride the raw flow field (8a); on STACKED styles buildBotView folds the
+// per-style vertical goal into flowDir BEFORE the hazard veto — a VERTICAL_HALL bot climbs the
+// diagonal-corner ramp to the opposite-story exit balcony, a FOUR_STORY "Descent" bot steers to the
+// nearest same-story drop-hole and falls toward L0, and lava floors lean on the (lava-aware) veto to
+// hug the stone causeways. Three driver backstops ride on top: an anti-livelock stuck-override (force
+// the descend when wedged at a contested door; a lateral nudge when wedged on geometry), a loot-settle
+// dwell (hold briefly after a fight so the auto-loot vacuum collects), and low-hp health-globe detours.
 #include "engine/engine.h"
 #include "platform/input.h"
 #include "world/combat_query.h"
 #include "world/level_grid.h"
-#include "game/autoplay_nav.h"   // Autoplay::stepAllowed — the travel hazard veto
+#include "world/story_nav.h"      // StoryNav::onUpperStory / nearestPortalGoal — per-style vertical routing
+#include "game/autoplay_nav.h"    // Autoplay::stepAllowed — the travel hazard veto
+#include "game/autoplay_combat.h" // Autoplay::dirToAim / doctrineFor — nudge heading + in-band fight test
+#include "game/item.h"            // GLOBE_HEALTH_ID / m_worldItems — low-hp globe detours
 #include "game/game_constants.h"
 #include <cmath>
 
@@ -68,6 +75,73 @@ void Engine::updateAutoplay(f32 dt) {
 
     Autoplay::BotView v = buildBotView();
     Autoplay::BotIntent in = Autoplay::decide(v);
+
+    // --- 8b driver backstops applied on top of the pure decision -----------------------------------
+    // (1) LOOT-SETTLE dwell. When a fight just ended (hostile count fell to zero), hold position for a
+    // beat so the auto-loot vacuum can sweep the drops before the bot walks off them. We only gate the
+    // forward move; the vacuum/equip/prune are existing systems. Armed on the >0->0 edge, capped ~3 s.
+    if (v.targetCount == 0 && m_autoplayLastTargetCount > 0)
+        m_autoplayLootDwell = fminf(m_autoplayLootDwell + 1.5f, 3.0f);
+    if (m_autoplayLootDwell > 0.0f) m_autoplayLootDwell -= dt;
+    m_autoplayLastTargetCount = v.targetCount;
+    if (m_autoplayLootDwell > 0.0f && v.targetCount == 0)
+        in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;   // dwell: let loot settle
+
+    // (2) STUCK detection (anti-livelock backstop; should almost never fire in normal play). Progress
+    // is XZ distance from a re-anchored point. It only accrues while the bot is NOT locked in an
+    // in-band fight (a bot dancing around an in-range target is working, not wedged) and not dwelling —
+    // so an unreachable OUT-of-band straggler at the exit still lets the timer climb (the livelock).
+    {
+        const Vec3 p  = m_localPlayer.position;
+        const f32  dx = p.x - m_autoplayLastPos.x, dz = p.z - m_autoplayLastPos.z;
+        const bool progressed = (dx * dx + dz * dz) > 0.25f;   // > 0.5 m from the anchor
+        const Autoplay::Doctrine doc = Autoplay::doctrineFor(v.buildCell);
+        bool inBandFight = false;
+        for (u32 i = 0; i < v.targetCount; i++) {
+            const Autoplay::BotTarget& t = v.targets[i];
+            if (t.hasLOS && t.dist >= doc.engageMin * v.weaponRange &&
+                            t.dist <= doc.engageMax * v.weaponRange) { inBandFight = true; break; }
+        }
+        if (progressed) { m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f; }
+        else if (!inBandFight && m_autoplayLootDwell <= 0.0f) m_autoplayNoProgressTimer += dt;
+    }
+    const bool stuck = m_autoplayNoProgressTimer > 4.0f;
+
+    // Remedy A (priority) — exit-loiter livelock: wedged near a contested door with the boss dead. An
+    // unreachable LOS straggler keeps FIGHT active but the bot can't close, so force the descend (hold
+    // PICKUP, drop fire/move) — the interact-hold completes over the next few ticks and we leave.
+    const bool bossGate = v.hasBoss && v.bossAlive;
+    if (stuck && v.doorActive && v.distToDoor < 2.5f && !bossGate) {
+        in = Autoplay::BotIntent{};
+        in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
+        in.descend = true;
+    } else if (stuck || m_autoplayNudgeTimer > 0.0f) {
+        // Remedy B — wedged on geometry elsewhere: nudge laterally for ~0.5 s, then re-evaluate.
+        if (stuck && m_autoplayNudgeTimer <= 0.0f) m_autoplayNudgeTimer = 0.5f;
+        if (m_autoplayNudgeTimer > 0.0f) {
+            m_autoplayNudgeTimer -= dt;
+            // Base heading: the travel heading if we have one, else the bot's facing. Rotate to a
+            // lateral/back direction and take the first whose one-cell step is hazard-safe.
+            Vec3 base = v.flowDir;
+            if (lengthSq(base) < 1e-6f)
+                base = Vec3{-sinf(m_localPlayer.yaw), 0.0f, -cosf(m_localPlayer.yaw)};
+            const f32 feetY = m_localPlayer.position.y;
+            const f32 kAngles[3] = {1.5707963f, -1.5707963f, 3.14159265f};   // +90°, -90°, 180°
+            Vec3 esc{0, 0, 0};
+            for (u32 i = 0; i < 3; i++) {
+                const Vec3 cand = rotateY_XZ(base, kAngles[i]);
+                if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, cand, m_level.lavaFloor)) {
+                    esc = cand; break;
+                }
+            }
+            if (lengthSq(esc) > 1e-6f) {
+                f32 yaw, pitch; Autoplay::dirToAim(esc, yaw, pitch);
+                in = Autoplay::BotIntent{};
+                in.aimYaw = yaw; in.aimPitch = 0.0f; in.moveFwd = true;
+            }
+        }
+    }
+
     applyBotIntent(in, uiOpen);
 }
 
@@ -123,8 +197,88 @@ Autoplay::BotView Engine::buildBotView() {
             v.flowValid = (byte != 0xFF);
         }
     }
-    // Hazard veto on the TRAVEL heading (8a flat-floor safety): never let the flow step the bot into a
-    // wall, off the map, or grounded into lava. Try the flow heading first, then ±45°, else stop.
+
+    // --- 8b: low-HP HEALTH-globe detour list (nearest-first) ---
+    // When hurt and the potion is on cooldown, list nearby health globes so we can steer over one
+    // (3 m walk-over pickup, no action). Only health globes (energy globes don't heal); collected here
+    // (before the story/globe steer below) so the steer can consult them. When the potion is ready the
+    // brain drinks (SURVIVE beats TRAVEL), so the list is empty and no steer happens.
+    static Vec3 s_globes[8];
+    static f32  s_globeD2[8];
+    u32 gc = 0;
+    if (v.hp < v.maxHp * 0.5f && !v.potionReady) {
+        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+            const WorldItem& wi = m_worldItems.items[i];
+            if (!wi.active || wi.item.defId != GLOBE_HEALTH_ID) continue;
+            const Vec3 to = wi.position - m_localPlayer.position;
+            const f32  d2 = lengthSq(to);
+            if (d2 > 8.0f * 8.0f) continue;                    // out of detour range
+            u32 slot = gc;                                     // nearest-first insertion into the cap
+            if (gc < 8) gc++;
+            else if (d2 >= s_globeD2[7]) continue;
+            else slot = 7;
+            while (slot > 0 && s_globeD2[slot - 1] > d2) {
+                s_globeD2[slot] = s_globeD2[slot - 1]; s_globes[slot] = s_globes[slot - 1]; slot--;
+            }
+            s_globeD2[slot] = d2; s_globes[slot] = wi.position;
+        }
+    }
+    v.globes     = (gc > 0) ? s_globes : nullptr;
+    v.globeCount = gc;
+
+    // --- 8b: per-style VERTICAL routing folded into flowDir BEFORE the hazard veto ---
+    // Flat styles (BSP/CAVERN/GAUNTLET/HUB, non-lava) fall straight through — the flat flow field IS
+    // the travel goal and this block is a no-op. Stacked styles can't express "climb that ramp" /
+    // "drop through that hole" in a 2D flow byte, so steer the heading toward the right vertical
+    // landmark; the veto below still guards the resulting one-cell step.
+    {
+        const DungeonResult& dg  = m_level.dungeon;
+        const Vec3           pos = m_localPlayer.position;
+        if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
+            // The exit is a balcony door on the OPPOSITE story. On the wrong story, walk to the nearest
+            // ramp END on our own story (nearestPortalGoal → the diagonal-corner ramp; plain walking
+            // climbs the graduated slab). On the SAME story, keep the flat heading to the door.
+            const bool botUpper  = StoryNav::onUpperStory(m_level.grid, pos, pos.y);
+            const bool exitUpper = m_level.floorDoorPos.y > 1.5f;
+            if (botUpper != exitUpper) {
+                const Vec3 goal = StoryNav::nearestPortalGoal(dg, pos, botUpper, exitUpper);
+                const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
+                if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+            }
+        } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
+            // The Descent: the exit is always DOWN. Steer to the nearest drop-hole whose pierced slab
+            // TOP (surfaceY) matches the story the bot's feet are on — a hole it can actually enter.
+            // Stepping onto it drops a story (gravity does the rest). No same-story hole → keep the
+            // flat heading and reposition along the maze.
+            f32  bestD2 = 1e30f;
+            Vec3 goal{0, 0, 0};
+            for (u8 i = 0; i < dg.dropHoleCount; i++) {
+                if (fabsf(dg.dropHoles[i].surfaceY - pos.y) > PLATFORM_STEP_TOLERANCE) continue;
+                const f32 dx = dg.dropHoles[i].pos.x - pos.x, dz = dg.dropHoles[i].pos.z - pos.z;
+                const f32 d2 = dx * dx + dz * dz;
+                if (d2 < bestD2) { bestD2 = d2; goal = dg.dropHoles[i].pos; }
+            }
+            if (bestD2 < 1e29f) {
+                const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
+                if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+            }
+        }
+        // Lava floors get no vertical goal — the veto below (lava-aware) keeps the bot off the lakes
+        // and rides the stone causeways the flat flow field already routes along.
+
+        // Survival first: when low-hp with a globe in reach, override the travel/story heading toward
+        // the nearest globe. The brain only consults flowDir in its TRAVEL branch (FIGHT/DESCEND ignore
+        // it), so an LOS enemy still takes priority — this only bites when the bot would otherwise just
+        // be walking to the exit.
+        if (gc > 0) {
+            const Vec3 to{s_globes[0].x - pos.x, 0.0f, s_globes[0].z - pos.z};
+            if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+        }
+    }
+
+    // Hazard veto on the (possibly story/globe-steered) TRAVEL heading: never let it step the bot into
+    // a wall, off the map, or grounded into lava. Try the heading first, then ±45°, else stop (the
+    // driver's stuck-override in updateAutoplay recovers a boxed-in bot).
     if (lengthSq(v.flowDir) > 1e-6f) {
         const f32 feetY = m_localPlayer.position.y;
         if (!Autoplay::stepAllowed(m_level.grid, v.pos, feetY, v.flowDir, m_level.lavaFloor)) {
@@ -132,7 +286,7 @@ Autoplay::BotView Engine::buildBotView() {
             const Vec3 right = rotateY_XZ(v.flowDir, -0.7853981634f);   // -45°
             if      (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, left,  m_level.lavaFloor)) v.flowDir = left;
             else if (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, right, m_level.lavaFloor)) v.flowDir = right;
-            else v.flowDir = Vec3{0, 0, 0};   // boxed in: stop (8b adds smarter recovery)
+            else v.flowDir = Vec3{0, 0, 0};   // boxed in: stop (stuck-override recovers)
         }
     }
 
@@ -182,9 +336,7 @@ Autoplay::BotView Engine::buildBotView() {
     v.targets     = s_targets;
     v.targetCount = n;
 
-    // --- globes/pickups: 8b (low-hp detours). Empty for 8a. ---
-    v.globes     = nullptr;
-    v.globeCount = 0;
+    // (globes were collected above, before the nav steer that consumes them.)
     return v;
 }
 
