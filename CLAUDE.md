@@ -452,6 +452,20 @@ to commit), it scans ALL targets like the block does, and the DRIVER holds a mul
 balance number, not a behaviour one). The OFFENSIVE gap-closer charge rides its own longer
 `GAP_CLOSE_COOLDOWN` (6 s) so it reads as a rush, not a stutter of hops; `BotIntent::dodgeIsGapClose`
 tells the driver which leash to charge. Live: Marksman **23.1 → 3.3** rolls/min, Warrior 8.4 → 4.9.
+(3) **STICKY TARGETS.** `pickTarget` used to return the nearest LOS target every tick with no memory, so
+similar-range hostiles made the crosshair flip forever (and with the eased aim it never settles —
+"make it so ranged doesn't try to rapidly switch between enemies"). The driver remembers the engaged
+enemy by IDENTITY (`BotTarget::id` = the packed entity handle — the array is re-sorted by distance every
+tick, so an index is not an identity), and the policy keeps it unless it is gone / blind / past
+`engageCeiling` / **unreachable while a rival is inside `weaponRange`**, or a rival is ≥30% closer
+(`TARGET_SWITCH_GAIN`) AND `TARGET_MIN_DWELL` (1.5 s) has elapsed. The first four release IMMEDIATELY —
+the dwell must never pin the bot to something it cannot shoot. The reachability release is load-bearing
+for MELEE: without it a warrior commutes across the room to a held far target while three enemies chew on
+it (measured −23% kills; with it, −12%). `engageCeiling`/`THREAT_RADIUS` are single-sourced in
+`autoplay_combat.h` because the brain's FIGHT gate and this release MUST agree — if they disagree the bot
+holds a target the brain refuses to engage and falls through to TRAVEL with a live enemy on top of it.
+Live: mean seconds on one target Marksman 2.8 → 3.4, Warrior 1.7 → 2.3 (a melee bot's switch rate is
+floored by its own kill rate — a dead target forces a re-pick — so stickiness has little headroom there).
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in

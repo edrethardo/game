@@ -12,6 +12,11 @@ namespace Autoplay {
 // One hostile the driver has already resolved from the entity pool (dead/friendly/prop/burrowed
 // pre-filtered, matching CombatQuery). Positions are world-space; vel is XZ for lead.
 struct BotTarget {
+    // Driver-assigned STABLE identity for this hostile (the entity handle packed as
+    // generation<<16 | index+1; 0 = unset). The target array is rebuilt and re-sorted every tick, so
+    // an ARRAY INDEX is not an identity — this is what lets the driver recognise "the same enemy" a
+    // tick later and keep the aim locked to it (target stickiness).
+    u32  id = 0;
     Vec3 pos;         // AABB centre (aim point)
     Vec3 vel;         // for projectile lead
     f32  dist;        // to the bot's eye
@@ -94,6 +99,12 @@ struct BotView {
     // targets (nearest-first, driver-capped)
     const BotTarget* targets;
     u32   targetCount;
+    // TARGET STICKINESS (see Autoplay::pickTarget). The driver remembers the hostile the bot is
+    // already fighting by BotTarget::id and resolves it back to a slot here each tick (-1 = none /
+    // it died / it left the capped set); targetSwitchAllowed is its TARGET_MIN_DWELL timer. Both
+    // defaulted to "no memory, switching free" so a hand-built view (tests) gets plain nearest-LOS.
+    s32   currentTargetIdx    = -1;
+    bool  targetSwitchAllowed = true;
     // globes/pickups the driver found in reach (low-hp detour goals), nearest first
     const Vec3* globes;
     u32   globeCount;

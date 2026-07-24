@@ -291,6 +291,13 @@ private:
     // two are rate-limited independently and neither can chain.
     f32              m_autoplayDodgeCd     = 0.0f;    // s until the next DEFENSIVE roll (doctrine dodgeCooldownSec)
     f32              m_autoplayGapCloseCd  = 0.0f;    // s until the next gap-closer charge (Autoplay::GAP_CLOSE_COOLDOWN)
+    // TARGET STICKINESS (Autoplay::pickTarget). The bot used to re-pick the nearest LOS hostile every
+    // tick, so similar-range enemies made it flip focus constantly and — with the eased aim — never
+    // settle its crosshair. The driver owns the MEMORY: the entity identity currently engaged, and
+    // how long it has been engaged (the switch dwell). The pure policy only sees a slot index + a
+    // boolean, so it stays engine-free and testable.
+    u32              m_autoplayTargetId    = 0;       // BotTarget::id of the hostile being fought (0 = none)
+    f32              m_autoplayTargetDwell = 0.0f;    // s on that target; a switch needs Autoplay::TARGET_MIN_DWELL
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];

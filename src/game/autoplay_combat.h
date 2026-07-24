@@ -176,20 +176,69 @@ inline bool swingIsIncoming(const BotTarget& t) {
     return t.dist <= t.attackRange * DODGE_REACH_SLACK;
 }
 
-// Returns the index of the nearest target with LOS, or -1 if none has LOS.
-inline s32 pickTarget(const BotView& v) {
+// --- engagement ceiling ------------------------------------------------------------------------
+// The distance past which the bot stops treating a hostile as its business and goes back to walking
+// the floor. The wider of the doctrine's own fire band (so a long-range build commits at its true
+// reach) and a flat radius (so a short-reach build still handles anything genuinely close). Walking
+// the flow field naturally brings in-band enemies into range, so the bot never has to backtrack for
+// a distant straggler; without the cap the FIGHT branch engaged ANY line-of-sight target and, on the
+// 50+-enemy stacked floors, targets 16-21 m off the exit route preempted travel indefinitely.
+//
+// SINGLE-SOURCED on purpose: the brain gates FIGHT on it AND pickTarget releases a sticky target
+// that drifts past it. If those two ever disagree, the bot can hold a target the brain refuses to
+// engage — it would fall through to TRAVEL with a live enemy on top of it.
+constexpr f32 THREAT_RADIUS = 12.0f;   // ~ the width of a couple of rooms
+inline f32 engageCeiling(const BotView& v, const Doctrine& d) {
+    const f32 band = d.engageMax * v.weaponRange;
+    return (band > THREAT_RADIUS) ? band : THREAT_RADIUS;
+}
+
+// --- TARGET STICKINESS ---------------------------------------------------------------------------
+// pickTarget used to return the nearest LOS target EVERY tick with no memory, so two hostiles at
+// similar range made the bot flip between them tick to tick — and with the eased aim (stepAngle)
+// that means the crosshair is permanently in transit and never settles on anything. Aaron watching
+// it: "make it so ranged doesn't try to rapidly switch between enemies".
+//
+// So the driver remembers the current target by ENTITY IDENTITY (BotTarget::id — the array is
+// re-sorted every tick, so an index is not an identity), hands its slot back as
+// BotView::currentTargetIdx, and this keeps it unless:
+//   * it is GONE  — despawned/died (the driver finds no slot: currentTargetIdx < 0), or
+//   * it is BLIND — lost line of sight, or
+//   * it is OUT OF REACH — drifted past the engagement ceiling, or
+//   * a rival is SUBSTANTIALLY better AND the minimum dwell has elapsed.
+// The first three release IMMEDIATELY (the dwell must never pin the bot to something it cannot
+// shoot); only the last is rate-limited.
+constexpr f32 TARGET_SWITCH_GAIN = 0.70f;  // a rival must be <= 70% of the current's distance (>=30% closer)
+constexpr f32 TARGET_MIN_DWELL   = 1.5f;   // s on one target before a switch may even be considered (driver-timed)
+
+// Returns the index of the target to engage — the sticky current where it still holds, else the
+// nearest with LOS — or -1 if nothing has LOS.
+inline s32 pickTarget(const BotView& v, const Doctrine& d) {
     s32 best = -1; f32 bestD = 1e9f;
     for (u32 i = 0; i < v.targetCount; i++) {
         if (!v.targets[i].hasLOS) continue;
         if (v.targets[i].dist < bestD) { bestD = v.targets[i].dist; best = (s32)i; }
     }
+    const s32 cur = v.currentTargetIdx;
+    if (cur < 0 || static_cast<u32>(cur) >= v.targetCount) return best;   // no memory / it is gone
+    const BotTarget& c = v.targets[static_cast<u32>(cur)];
+    if (!c.hasLOS)                     return best;   // blind: release now, the dwell must not pin us
+    if (c.dist > engageCeiling(v, d))  return best;   // walked out of the reach the brain engages at
+    if (best < 0 || best == cur)       return cur;    // it IS the nearest (or nothing else is visible)
+    // REACHABLE BEATS UNREACHABLE, no dwell. A target outside our own weapon reach loses to one
+    // inside it: for a melee bot in a scrum this is the difference between swinging at the thing on
+    // top of it and walking across the room at whatever it happened to lock onto first. Measured —
+    // without this the warrior's kill rate fell ~23% while it commuted to a held far target.
+    if (c.dist > v.weaponRange && bestD <= v.weaponRange) return best;
+    if (!v.targetSwitchAllowed)        return cur;    // still inside the minimum dwell
+    if (bestD > c.dist * TARGET_SWITCH_GAIN) return cur;   // the rival is not substantially better
     return best;
 }
 
 inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     BotIntent out{};
     out.aimYaw = v.yaw; out.aimPitch = v.pitch;
-    const s32 ti = pickTarget(v);
+    const s32 ti = pickTarget(v, d);
     if (ti < 0) return out;                       // no LOS target: caller falls through to TRAVEL
     const BotTarget& t = v.targets[(u32)ti];
     const Vec3 eye = v.pos + Vec3{0, v.eyeHeight, 0};

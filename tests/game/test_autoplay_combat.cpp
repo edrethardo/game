@@ -263,6 +263,95 @@ TEST_CASE("picks the nearest LOS target when several exist") {
 }
 
 // ---------------------------------------------------------------------------------------------
+// TARGET STICKINESS. pickTarget used to return the nearest LOS target every single tick, so two
+// hostiles at similar range made the bot flip between them tick to tick — and with the eased aim
+// that means the crosshair never settles on anything ("make it so ranged doesn't try to rapidly
+// switch between enemies"). The current target is now KEPT unless it becomes invalid or a rival is
+// SUBSTANTIALLY better, and only after a minimum dwell the driver times.
+// ---------------------------------------------------------------------------------------------
+static BotView twoTargets(f32 curDist, f32 rivalDist, BotTarget* ts) {
+    BotView v = selfAt({0,0,0});
+    ts[0] = {}; ts[0].pos = {0,1.7f,-curDist};   ts[0].dist = curDist;   ts[0].hasLOS = true;
+    ts[1] = {}; ts[1].pos = {1,1.7f,-rivalDist}; ts[1].dist = rivalDist; ts[1].hasLOS = true;
+    v.targets = ts; v.targetCount = 2;
+    v.currentTargetIdx = 0;         // slot 0 is the one we are already fighting
+    return v;
+}
+
+TEST_CASE("sticky target: a marginally closer rival does NOT steal focus") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 8.5f, ts);   // rival is 15% closer: not enough
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("sticky target: a SUBSTANTIALLY closer rival takes over once the dwell allows") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 4.0f, ts);   // rival is 60% closer
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);
+}
+
+TEST_CASE("sticky target: even a much closer rival waits out the minimum dwell") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 4.0f, ts);
+    v.targetSwitchAllowed = false;      // driver: < TARGET_MIN_DWELL since the last switch
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("sticky target: losing line of sight releases it immediately (no dwell)") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 11.0f, ts);
+    ts[0].hasLOS = false;               // ducked behind a wall
+    v.targetSwitchAllowed = false;      // ...and the dwell must NOT hold us on a target we can't see
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);
+}
+
+TEST_CASE("sticky target: one that walked out of engagement reach is released") {
+    // Ranged band 1.0 x 20 m; THREAT_RADIUS floor 12 m. A current at 25 m is past the ceiling the
+    // brain would engage at, so holding it would make the bot fall through to TRAVEL with a live
+    // enemy at its feet.
+    BotTarget ts[2]; BotView v = twoTargets(25.0f, 6.0f, ts);
+    v.targetSwitchAllowed = false;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);
+}
+
+TEST_CASE("sticky target: a target we can actually REACH beats a held one we cannot") {
+    // The melee case. A 3 m sword holding a target 8 m away while something is swinging at 1.5 m is
+    // a bot commuting instead of fighting — measured as a ~23% kill-rate drop before this release.
+    BotView v = selfAt({0,0,0});
+    v.weaponRange = 3.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true;
+    v.buildCell = 3*1+1;                              // Moderate / Melee
+    BotTarget ts[2];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-8.0f};   ts[0].dist = 8.0f; ts[0].hasLOS = true;   // held, unreachable
+    ts[1] = {}; ts[1].pos = {0,1.7f,-1.5f};   ts[1].dist = 1.5f; ts[1].hasLOS = true;   // in the face
+    v.targets = ts; v.targetCount = 2;
+    v.currentTargetIdx = 0; v.targetSwitchAllowed = false;   // even inside the dwell
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);
+    // ...but when BOTH are out of reach the stickiness still holds (no thrash between far targets).
+    ts[1].pos = {0,1.7f,-6.0f}; ts[1].dist = 6.0f;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("sticky target: a dead/despawned current (index gone) falls back to nearest") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 11.0f, ts);
+    v.currentTargetIdx = -1;            // the driver found no slot carrying the remembered id
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);   // plain nearest-LOS
+    v.currentTargetIdx = 7;             // stale index past the end: must not read out of bounds
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+}
+
+TEST_CASE("sticky target: with no valid target at all, pickTarget still returns -1") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 11.0f, ts);
+    ts[0].hasLOS = ts[1].hasLOS = false;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == -1);
+}
+
+TEST_CASE("engagement ceiling is single-sourced between the brain gate and the sticky release") {
+    // If these two ever disagree, a held target can sit outside the brain's ceiling and the bot
+    // silently stops fighting (falls through to TRAVEL) while an enemy chews on it.
+    BotView v = selfAt({0,0,0});
+    v.weaponRange = 3.0f;                                // short reach: the THREAT_RADIUS floor wins
+    CHECK(engageCeiling(v, doctrineFor(3*1+1)) == doctest::Approx(THREAT_RADIUS));
+    v.weaponRange = 40.0f;                               // long reach: the doctrine band wins
+    CHECK(engageCeiling(v, doctrineFor(3*1+2)) == doctest::Approx(40.0f));
+}
+
+// ---------------------------------------------------------------------------------------------
 // (A) SMOOTH AIM — stepAngle / angleDelta. The driver used to write the lead-corrected yaw straight
 // onto the player (an instant snap = the aimbot look); it now eases there at a bounded turn rate.
 // The ±π seam is the whole risk: a naive `desired - current` sends the bot the LONG way round

@@ -41,10 +41,11 @@
 // health-globe detours. An anti-stall move must never holster the guns while an enemy is in reach — that
 // is how the bot once froze for 60 s against two body-blocking enemies it silently refused to shoot.
 //
-// The driver also owns the bot-side DODGE LEASHES (m_autoplayDodgeCd / m_autoplayGapCloseCd): the
-// engine's 1 s dodge cooldown is a balance number, and a bot that rolls whenever it is legal reads as
-// panic, so the policy is only told whether it may ask. Keeping the timers here is what keeps the brain
-// engine-free.
+// The driver also owns two pieces of COMBAT MEMORY the pure policy deliberately does not: the bot-side
+// DODGE LEASHES (m_autoplayDodgeCd / m_autoplayGapCloseCd — the engine's 1 s dodge cooldown is a balance
+// number, and a bot that rolls whenever it is legal reads as panic) and the STICKY TARGET (the engaged
+// enemy's identity + how long it has been engaged, so the crosshair stops flipping between similar-range
+// hostiles). Both reach the policy as plain booleans/indices on BotView, keeping the brain engine-free.
 #include "engine/engine.h"
 #include "platform/input.h"
 #include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
@@ -182,6 +183,17 @@ void Engine::updateAutoplay(f32 dt) {
 
     Autoplay::BotView v = buildBotView();
     Autoplay::BotIntent in = Autoplay::decide(v);
+
+    // TARGET STICKINESS bookkeeping. Re-run the (pure, cheap — a scan of <= 16 slots) pick with the
+    // same view the brain just used, so the driver learns WHICH hostile was engaged and can carry
+    // that identity into the next tick. Same target => the dwell accumulates and eventually unlocks
+    // a switch; a different one (or none) => reset, so the next switch has to earn its dwell again.
+    {
+        const s32 chosen = Autoplay::pickTarget(v, Autoplay::doctrineFor(v.buildCell));
+        const u32 chosenId = (chosen >= 0) ? v.targets[(u32)chosen].id : 0u;
+        if (chosenId != m_autoplayTargetId) { m_autoplayTargetId = chosenId; m_autoplayTargetDwell = 0.0f; }
+        else                                 m_autoplayTargetDwell += dt;
+    }
 
     // CHARGE the leash on the REQUEST, not on the roll actually starting. The policy already
     // requires the engine's own dodge to be ready, so a request essentially always becomes a roll;
@@ -700,6 +712,9 @@ Autoplay::BotView Engine::buildBotView() {
         if (e.flags & ENT_BURROWED) continue;
 
         Autoplay::BotTarget t{};
+        // Stable identity across ticks (the array is re-sorted every tick, so the index is not one).
+        // +1 on the index so a valid handle can never pack to 0 (= "unset").
+        t.id     = (static_cast<u32>(e.generation) << 16) | (m_entities.activeList[a] + 1u);
         t.pos    = e.position;               // AABB centre (aim point)
         t.vel    = Vec3{e.velocity.x, 0.0f, e.velocity.z};   // XZ only, for projectile lead
         t.dist   = length(e.position - eye);
@@ -738,6 +753,17 @@ Autoplay::BotView Engine::buildBotView() {
     }
     v.targets     = s_targets;
     v.targetCount = n;
+
+    // TARGET STICKINESS: resolve the remembered entity identity back to a slot in THIS tick's array
+    // (it is re-sorted by distance every tick, so the index from last tick means nothing). Not found
+    // = the enemy died, despawned, or fell out of the nearest-kMaxTargets cap — either way the memory
+    // is stale and pickTarget falls back to plain nearest-LOS.
+    v.currentTargetIdx = -1;
+    if (m_autoplayTargetId != 0) {
+        for (u32 i = 0; i < n; i++)
+            if (s_targets[i].id == m_autoplayTargetId) { v.currentTargetIdx = (s32)i; break; }
+    }
+    v.targetSwitchAllowed = m_autoplayTargetDwell >= Autoplay::TARGET_MIN_DWELL;
 
     // (globes were collected above, before the nav steer that consumes them.)
     return v;

@@ -13,14 +13,8 @@
 
 namespace Autoplay {
 
-// Engagement ceiling floor: an enemy within this radius is a real, immediate threat worth handling
-// even for a short-reach build; BEYOND it the bot keeps pushing to the exit instead of chasing.
-// Walking the flow field naturally brings in-band enemies into range, so the bot never has to
-// backtrack for a distant straggler. Without this cap the FIGHT branch fired for ANY line-of-sight
-// target regardless of distance, and on the dense 50+-enemy VERTICAL_HALL floors that let far
-// targets (measured 16-21 m off the exit route) preempt travel indefinitely — the bot oscillated
-// toward the swarm and never crossed. 12 m ~= the width of a couple of rooms.
-static constexpr f32 THREAT_RADIUS = 12.0f;
+// (The engagement ceiling — THREAT_RADIUS / engageCeiling — now lives in autoplay_combat.h so this
+// gate and pickTarget's sticky-target release read the SAME number; see the comment there.)
 
 static void faceAndGo(const BotView& v, BotIntent& out) {
     if (lengthSq(v.flowDir) < 0.0001f) return;    // at exit or unreachable: no heading
@@ -51,11 +45,8 @@ BotIntent decide(const BotView& v) {
     // its true reach) and THREAT_RADIUS (so even a short-reach build handles anything genuinely
     // close). A target beyond the ceiling falls through to DESCEND/TRAVEL: the bot keeps heading for
     // the exit rather than being dragged across the floor toward a distant straggler.
-    const s32 ti = pickTarget(v);
-    if (ti >= 0) {
-        const f32 ceil = fmaxf(d.engageMax * v.weaponRange, THREAT_RADIUS);
-        if (v.targets[(u32)ti].dist <= ceil) return decideCombat(v, d);
-    }
+    const s32 ti = pickTarget(v, d);
+    if (ti >= 0 && v.targets[(u32)ti].dist <= engageCeiling(v, d)) return decideCombat(v, d);
 
     // DESCEND: at an eligible door, ask to descend.
     DescendCtx dc; dc.doorActive = v.doorActive; dc.distToDoor = v.distToDoor;
