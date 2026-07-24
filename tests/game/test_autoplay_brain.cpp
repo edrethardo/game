@@ -2,6 +2,7 @@
 // travel/descend into one BotIntent per tick. Pure: BotView in, BotIntent out.
 #include "doctest/doctest.h"
 #include "game/autoplay_brain.h"
+#include <cmath>   // fabsf
 
 using namespace Autoplay;
 
@@ -23,6 +24,23 @@ TEST_CASE("FIGHT over TRAVEL: an in-band LOS target => fire, not walk to exit") 
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decide(v);
     CHECK(out.fire);
+}
+
+TEST_CASE("FIGHT skips a distant out-of-band target: travel toward the EXIT, not the straggler") {
+    // A far LOS enemy must NOT preempt travel. Melee build (weaponRange 2, engageMax 0.60 =>
+    // engage ceiling max(1.2, THREAT_RADIUS=12) = 12 m); the target at 40 m is well beyond it, so
+    // the brain ignores the straggler and pushes along the flow field. The exit (flow) is toward +Z
+    // while the straggler sits toward -Z — so the discriminator is the HEADING: an unbounded FIGHT
+    // branch would face/walk toward the target (yaw ~0), the fixed brain faces the exit (yaw ~pi).
+    // This is the VERTICAL_HALL dense-floor failure mode: far targets pulling the bot off-route.
+    BotView v = baseView(); v.buildCell = 3*1 + 1;   // Moderate Melee
+    v.weaponRange = 2.0f; v.flowDir = Vec3{0,0,1};   // exit is +Z
+    BotTarget t{}; t.pos = {0,1.7f,-40}; t.dist = 40; t.hasLOS = true;   // straggler is -Z
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decide(v);
+    CHECK_FALSE(out.fire);
+    CHECK(out.moveFwd);
+    CHECK(fabsf(out.aimYaw) == doctest::Approx(3.14159f).epsilon(0.03)); // faces +Z (exit, yaw ~+-pi), not -Z (~0)
 }
 
 TEST_CASE("TRAVEL when no targets: face the flow direction and walk forward") {
