@@ -199,40 +199,102 @@ TEST_CASE("angleDelta takes the shortest signed path across the seam") {
     CHECK(angleDelta(6.0f * kPi, -0.5f)       == doctest::Approx(-0.5f).epsilon(0.001));
 }
 
-TEST_CASE("stepAngle moves by exactly rate*dt when the target is far") {
-    // 8 rad/s over one 60 Hz tick = 0.1333 rad; a π/2 error is many steps away.
-    const f32 got = stepAngle(0.0f, kPi * 0.5f, 8.0f, 1.0f / 60.0f);
-    CHECK(got == doctest::Approx(8.0f / 60.0f));
+// The rate cap alone (v1) swept at constant speed and stopped dead on arrival — still a machine.
+// stepAngle is now PROPORTIONAL (speed ∝ remaining error) *and* rate-capped, so these cases pin
+// both regimes: the cap governs a big error, the gain governs the last stretch.
+static constexpr f32 kDt = 1.0f / 60.0f;
+
+TEST_CASE("stepAngle is rate-capped when the error is large") {
+    // gain 6 on a π/2 error would want 6*1.571 = 9.4 rad/s; the 3 rad/s cap must win, exactly.
+    const f32 got = stepAngle(0.0f, kPi * 0.5f, 6.0f, 3.0f, kDt);
+    CHECK(got == doctest::Approx(3.0f * kDt));
+    // A cap high enough to never bind hands the step back to the gain: one tick consumes
+    // 1-exp(-gain*dt) of the error, NOT all of it and not a fixed rate*dt.
+    const f32 eased = stepAngle(0.0f, kPi * 0.5f, 6.0f, 1000.0f, kDt);
+    CHECK(eased == doctest::Approx(kPi * 0.5f * (1.0f - expf(-6.0f * kDt))));
+    // ...and at THIS error the gain wants to move FASTER than the cap allows — which is the whole
+    // reason the far-field cap exists. (Gain alone would start a 180° turn at ~19 rad/s.)
+    CHECK(eased > 3.0f * kDt);
 }
 
-TEST_CASE("stepAngle snaps exactly when the target is within one step") {
-    CHECK(stepAngle(0.0f, 0.05f, 8.0f, 1.0f / 60.0f) == doctest::Approx(0.05f));
-    CHECK(stepAngle(0.0f, -0.05f, 8.0f, 1.0f / 60.0f) == doctest::Approx(-0.05f));
-    // Across the seam: 0.283 rad apart, one big step covers it, so it lands ON desired.
-    CHECK(stepAngle(3.0f, -3.0f, 100.0f, 1.0f / 60.0f) == doctest::Approx(-3.0f));
+TEST_CASE("stepAngle eases out: each step is a bounded fraction of the remaining error") {
+    // The signature of the new model — the step SHRINKS as the crosshair converges, where the old
+    // constant-rate version made the same-size step every tick until it stopped dead.
+    const f32 gain = 6.0f, cap = 1000.0f;        // cap lifted so the gain is what's under test
+    f32 a = 0.0f; const f32 target = 0.6f;
+    f32 prevStep = 1e9f;
+    for (u32 i = 0; i < 80; i++) {
+        const f32 before = a;
+        a = stepAngle(a, target, gain, cap, kDt);
+        const f32 step = a - before;
+        CHECK(step > 0.0f);                      // always makes progress
+        CHECK(step < (target - before));         // ...but never all of it: no snap
+        CHECK(step < prevStep);                  // strictly decelerating = the ease-out
+        prevStep = step;
+    }
+    CHECK(a == doctest::Approx(target).epsilon(0.01));   // and it does arrive
+}
+
+TEST_CASE("stepAngle lands exactly instead of asymptoting forever") {
+    // An exponential approach never actually ARRIVES, so a hair-width residual would sit there
+    // being chased every tick. Inside kSnapEps it lands.
+    CHECK(stepAngle(0.0f, 5e-5f, 6.0f, 3.0f, kDt) == doctest::Approx(5e-5f));
+    // ...and a degenerate gain that would consume the whole error lands too, never overshoots.
+    CHECK(stepAngle(0.0f, 0.05f, 5000.0f, 1e6f, kDt) == doctest::Approx(0.05f));
+    CHECK(stepAngle(0.0f, -0.05f, 5000.0f, 1e6f, kDt) == doctest::Approx(-0.05f));
+    // Across the seam: 0.283 rad apart, one huge step covers it, so it lands ON desired.
+    CHECK(stepAngle(3.0f, -3.0f, 5000.0f, 1e6f, kDt) == doctest::Approx(-3.0f));
 }
 
 TEST_CASE("stepAngle crosses the seam the SHORT way, not backwards") {
     // +3.0 -> -3.0: the short way is INCREASING through π. A sign slip here sweeps ~5.7 rad the
     // wrong way — the single worst-looking failure mode of the whole feature.
-    const f32 up = stepAngle(3.0f, -3.0f, 8.0f, 1.0f / 60.0f);
+    const f32 up = stepAngle(3.0f, -3.0f, 6.0f, 3.0f, kDt);
     CHECK(up > 3.0f);
-    CHECK(up == doctest::Approx(3.0f + 8.0f / 60.0f));
+    // 0.283 rad of error is inside the cap's reach, so the GAIN governs the size of the step.
+    const f32 d = angleDelta(3.0f, -3.0f);
+    CHECK(up == doctest::Approx(3.0f + d * (1.0f - expf(-6.0f * kDt))));
     // ...and the mirror case goes the other way.
-    const f32 down = stepAngle(-3.0f, 3.0f, 8.0f, 1.0f / 60.0f);
+    const f32 down = stepAngle(-3.0f, 3.0f, 6.0f, 3.0f, kDt);
     CHECK(down < -3.0f);
 }
 
 TEST_CASE("stepAngle is a no-op on zero dt and on an already-equal angle") {
-    CHECK(stepAngle(1.234f, -2.0f, 8.0f, 0.0f) == doctest::Approx(1.234f));
-    CHECK(stepAngle(1.234f, 1.234f, 8.0f, 1.0f / 60.0f) == doctest::Approx(1.234f));
-    CHECK(stepAngle(1.234f, -2.0f, 0.0f, 1.0f / 60.0f) == doctest::Approx(1.234f));
+    CHECK(stepAngle(1.234f, -2.0f, 6.0f, 3.0f, 0.0f) == doctest::Approx(1.234f));
+    CHECK(stepAngle(1.234f, 1.234f, 6.0f, 3.0f, kDt) == doctest::Approx(1.234f));
+    CHECK(stepAngle(1.234f, -2.0f, 0.0f, 0.0f, kDt) == doctest::Approx(1.234f));  // no gain, no rate
 }
 
 TEST_CASE("stepAngle converges on the target without overshooting") {
     f32 a = 0.0f;
-    for (u32 i = 0; i < 200; i++) a = stepAngle(a, 2.5f, 8.0f, 1.0f / 60.0f);
+    for (u32 i = 0; i < 200; i++) a = stepAngle(a, 2.5f, 6.0f, 3.0f, kDt);
     CHECK(a == doctest::Approx(2.5f));
+    // ...and from the far side, so a sign error in the ease can't hide.
+    f32 b = 5.0f;
+    for (u32 i = 0; i < 200; i++) b = stepAngle(b, 2.5f, 6.0f, 3.0f, kDt);
+    CHECK(b == doctest::Approx(2.5f));
+}
+
+TEST_CASE("stepAngle is tick-rate independent: same angle at the same wall-clock time") {
+    // The exponential form is integrated exactly, so halving dt and doubling the step count must
+    // land in the same place. A naive gain*err*dt would drift apart here — and the engine really
+    // does double-step (Engine::run catches up to 4 sim steps in one frame).
+    const f32 gain = 6.0f, cap = 1000.0f, target = 1.2f;
+    f32 slow = 0.0f;  for (u32 i = 0; i < 30; i++)  slow = stepAngle(slow, target, gain, cap, kDt);
+    f32 fast = 0.0f;  for (u32 i = 0; i < 60; i++)  fast = stepAngle(fast, target, gain, cap, kDt * 0.5f);
+    CHECK(fast == doctest::Approx(slow).epsilon(0.001));
+}
+
+TEST_CASE("stepAngle at the shipped tune is far slower than the v1 constant-rate sweep") {
+    // Aaron's feel note in numbers. v1 moved 7 rad/s (0.1167 rad/tick) for ANY error, however
+    // small; the shipped gain/cap pair is bounded well under that and collapses as it converges.
+    const f32 gain = 6.0f, fine = 2.8f;
+    const f32 v1FineStep = 7.0f * kDt;                                              // 0.1167 rad
+    CHECK(stepAngle(0.0f, 3.0f,  gain, fine, kDt) == doctest::Approx(fine * kDt));  // worst case
+    CHECK(fine * kDt < v1FineStep * 0.45f);                     // even saturated, well under v1
+    // A 10° correction — the common tracking case — now moves a fifth of what v1 moved.
+    const f32 tenDeg = 10.0f * kPi / 180.0f;
+    CHECK(stepAngle(0.0f, tenDeg, gain, fine, kDt) < v1FineStep * 0.2f);
 }
 
 TEST_CASE("aim wobble is small, deterministic and actually moves") {

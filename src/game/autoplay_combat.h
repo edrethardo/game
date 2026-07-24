@@ -38,27 +38,52 @@ inline f32 angleDelta(f32 current, f32 desired) {
     return d;
 }
 
-// Rotate `current` toward `desired` by at most maxRadPerSec*dt, ALWAYS along the short arc. Landing
-// exactly on `desired` inside one step is what stops a fast turn rate from jittering around the
-// target. Safe for pitch too (|delta| there can never exceed pi, so the wrap never bites).
-inline f32 stepAngle(f32 current, f32 desired, f32 maxRadPerSec, f32 dt) {
-    const f32 step = maxRadPerSec * dt;
-    if (step <= 0.0f) return current;              // paused / zero rate: hold the aim
-    const f32 d = angleDelta(current, desired);
-    if (d >  step) return current + step;
-    if (d < -step) return current - step;
-    return desired;
+// Rotate `current` toward `desired` along the SHORT arc, with TWO limits stacked:
+//
+//   1. PROPORTIONAL EASE-OUT (`gain`, 1/s). The turn speed is proportional to the remaining error,
+//      so the crosshair DECELERATES as it converges. This is the half that reads as human. The
+//      first version was a hard rate cap alone: it swept at exactly full speed and then stopped
+//      dead the frame it arrived — a constant-velocity sweep with an abrupt stop is a machine
+//      signature no matter how slow you make it. Integrated exactly (`1 - exp(-gain*dt)` is the
+//      closed-form solution of err' = -gain*err) rather than as `gain*err*dt`, so the curve is
+//      identical at any tick rate — a 30 Hz and a 60 Hz sim reach the same angle at the same
+//      wall-clock time, and a double-stepped catch-up frame can't overshoot into instability.
+//   2. RATE CAP (`maxRadPerSec`). Governs the far field, where `gain*err` would still be a
+//      teleport: a 180° error under gain alone would start at ~19 rad/s.
+//
+// Landing exactly on `desired` when one step would reach it is what stops the tail from jittering
+// (and, with a large gain, from ringing). Safe for pitch too (|delta| there can never exceed pi,
+// so the wrap never bites).
+inline f32 stepAngle(f32 current, f32 desired, f32 gain, f32 maxRadPerSec, f32 dt) {
+    // Below this the aim is ON target. An exponential approach only ever ASYMPTOTES, so without a
+    // floor a hair-width residual would sit there being chased forever; 1e-4 rad is 0.006 deg,
+    // three orders under the wobble that rides on top of it.
+    constexpr f32 kSnapEps = 1e-4f;
+    if (dt <= 0.0f) return current;                // paused: hold the aim
+    const f32 d  = angleDelta(current, desired);
+    const f32 ad = (d < 0.0f) ? -d : d;
+    if (ad <= kSnapEps) return desired;            // already there: land exactly
+    // Exponential approach: the fraction of the remaining error consumed this step.
+    f32 step = ad * (1.0f - expf(-gain * dt));
+    const f32 cap = maxRadPerSec * dt;             // far-field speed limit
+    if (cap < step) step = cap;
+    if (step <= 0.0f) return current;              // zero gain AND zero rate: hold
+    if (step >= ad)   return desired;              // degenerate huge gain: land, never overshoot
+    return (d > 0.0f) ? current + step : current - step;
 }
 
 // Sub-degree aim WOBBLE, so shots are not pixel-perfect. Two slow incommensurate sinusoids off the
 // sim tick — deterministic by construction (rand() would desync a replay/snapshot and make a live
 // bug unreproducible), and the mismatched periods keep it from reading as a clean oscillation.
 // Amplitude is deliberately tiny: ~0.6 deg is ~15 cm of drift at 15 m, well inside an enemy body.
+// FREQUENCIES are ~35% slower than the first pass (yaw 1.70/0.53 -> 1.10/0.36 rad/s, i.e. periods
+// 5.7 s and 17 s): at the old speed the drift read as JITTER laid over the aim, which is the very
+// thing this tune is removing. Slow and wide reads as breathing.
 inline void aimWobble(u32 tick, f32& yawOff, f32& pitchOff) {
     constexpr f32 kAmp = 0.011f;                   // rad (~0.63 deg) peak yaw wobble
     const f32 t = static_cast<f32>(tick) * (1.0f / 60.0f);
-    yawOff   = kAmp * (0.62f * sinf(t * 1.70f) + 0.38f * sinf(t * 0.53f + 1.3f));
-    pitchOff = kAmp * 0.5f * (0.62f * sinf(t * 1.31f + 0.7f) + 0.38f * sinf(t * 0.61f));
+    yawOff   = kAmp * (0.62f * sinf(t * 1.10f) + 0.38f * sinf(t * 0.36f + 1.3f));
+    pitchOff = kAmp * 0.5f * (0.62f * sinf(t * 0.85f + 0.7f) + 0.38f * sinf(t * 0.41f));
 }
 
 // --- perfect-block timing ------------------------------------------------------------------------

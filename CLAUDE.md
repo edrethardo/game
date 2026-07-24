@@ -388,13 +388,23 @@ energy pool covers the cost — health for `BLOOD_NOVA` / `GameConst::cooldownRe
 watermark), and `decideCombat` presses the lowest castable slot whenever it is engaging, so a Magic build
 plays its build instead of poking with a wand. Availability is mirrored rather than guessed precisely
 because a press that no-ops is worse than no press.
-**Combat FEEL** rests on three rules that keep the bot from reading as a machine. (1) **Aim is
+**Combat FEEL** rests on three rules that keep the bot from reading as a machine. (1) **Aim is EASED and
 RATE-LIMITED, never snapped.** `decideCombat` still emits the DESIRED lead-corrected aim; `applyBotIntent`
 eases the player onto it with `Autoplay::stepAngle` (pure/tested — shortest arc across the ±π seam, and
-`fmodf`-folded because the engine never re-wraps `Player::yaw`), at 7 rad/s for fine tracking blending to
-14 rad/s for a >1 rad acquisition flick, plus a sub-degree deterministic `aimWobble` (tick-driven
-sinusoids, never `rand()`). Measured live: peak yaw delta 1.13 rad/tick before, 0.23 after, with kills
-unchanged. (2) **A ranged enemy it is closing on gets CHARGED with a roll** — ~4 m of travel plus 0.3 s of
+`fmodf`-folded because the engine never re-wraps `Player::yaw`), plus a sub-degree deterministic
+`aimWobble` (tick-driven sinusoids, never `rand()`). Two limits stack, and BOTH halves matter: an
+error-**PROPORTIONAL** approach (gain 6/s, integrated as `1-exp(-gain*dt)` so the curve is identical at
+any tick rate) makes the crosshair DECELERATE as it converges, under a two-point **RATE CAP** (2.8 rad/s
+fine tracking / 5.6 rad/s for a >1 rad acquisition flick) that governs the far field. The first pass was
+a hard cap alone at 7/14 rad/s and still read as an aimbot — a constant-velocity sweep that stops dead on
+arrival is a machine signature no matter how slow you make it, which is why the ease is not optional.
+The gain also sets the steady-state **tracking lag** (lag = target's angular rate / gain) — that is what
+the smoothness costs. Measured live (3 seeds × 120 s, fixed level seed): peak yaw delta 1.13 rad/tick
+snapped → 0.233 rate-capped → **0.093** eased; a 10° correction now takes ~0.4 s of shrinking steps
+instead of one 0.093 rad step and a stop. The honest trade: vs the 7/14 pass, Marksman kills 31.7→23.0
+and Warrior 71.0→57.0 per 2 min, floors reached 4.3→4.0 and 8.3→7.3 — ~20-27% fewer kills and ~1 floor,
+deliberately accepted for the look. Raising the gain to 9 does NOT buy it back (measured: a wash), so the
+cost lives in the caps, not the ease. (2) **A ranged enemy it is closing on gets CHARGED with a roll** — ~4 m of travel plus 0.3 s of
 i-frames crosses the firing lane better than walking. `out.moveFwd` is forced on the same tick because
 `computeRollDirection` reads the WASD held THAT tick, and the roll is gated on already facing the target
 (the roll uses the CURRENT yaw, which now lags). Melee enemies are excluded — they close the gap for you,
