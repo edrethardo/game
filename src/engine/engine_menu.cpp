@@ -368,6 +368,7 @@ void Engine::enterAutoplayRun() {
     m_autoplayNudgeTimer      = 0.0f;
     m_autoplayLootDwell       = 0.0f;
     m_autoplayLastTargetCount = 0;
+    m_autoplayDescendPulse    = 0.0f;
 }
 
 // ---------------------------------------------------------------------------

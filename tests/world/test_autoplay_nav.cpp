@@ -77,3 +77,16 @@ TEST_CASE("descend eligibility: only inside the 2 m door radius, only when activ
     ctx.distToDoor = 1.5f; CHECK(Autoplay::mayDescend(ctx));
     ctx.doorActive = false; CHECK_FALSE(Autoplay::mayDescend(ctx));  // no door (town/arena)
 }
+
+TEST_CASE("descend pulse: holds then releases so the hold can re-fire past a shrine") {
+    // The button must be HELD past the 0.35 s hold threshold (so the hold fires at all) and then
+    // RELEASED within one cycle (so Interact::poll's `consumed` latch clears and the NEXT hold can
+    // reach the exit past a just-spent shrine). A continuous hold would fire exactly once.
+    CHECK(Autoplay::descendPulseHeld(0.00f));   // press edge: held
+    CHECK(Autoplay::descendPulseHeld(0.35f));   // still held AT the hold threshold -> the hold fires
+    CHECK(Autoplay::descendPulseHeld(0.49f));   // still held just before release
+    CHECK_FALSE(Autoplay::descendPulseHeld(0.55f));   // release window: clears `consumed`
+    CHECK_FALSE(Autoplay::descendPulseHeld(0.64f));   // still releasing
+    CHECK(Autoplay::descendPulseHeld(0.66f));   // next cycle: held again -> re-fires (now the exit)
+    CHECK(Autoplay::descendPulseHeld(0.66f + 0.35f));  // and re-fires past the 0.35 s threshold
+}

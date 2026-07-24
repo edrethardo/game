@@ -258,6 +258,7 @@ private:
     f32              m_autoplayNudgeTimer = 0.0f;        // >0 = currently steering a lateral unstick nudge
     f32              m_autoplayLootDwell = 0.0f;         // >0 = holding position so the loot vacuum can settle
     u32              m_autoplayLastTargetCount = 0;      // last tick's hostile count (a >0->0 edge arms the loot dwell)
+    f32              m_autoplayDescendPulse = 0.0f;      // seconds continuously wanting to descend; drives the PICKUP release/re-hold pulse (autoplay_nav.h descendPulseHeld)
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];

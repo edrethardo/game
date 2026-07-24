@@ -142,6 +142,18 @@ void Engine::updateAutoplay(f32 dt) {
         }
     }
 
+    // (3) DESCEND PICKUP PULSE. The exit is a HOLD target, but a HOLD reaches a SHRINE sharing the
+    // exit's interact range FIRST; the bot holds PICKUP continuously, so Interact::poll fires once
+    // (spending the shrine), latches `consumed`, and never re-fires to reach the exit — a permanent
+    // wedge. So we release + re-hold in a pulse (autoplay_nav.h descendPulseHeld): one cycle spends
+    // the shrine, the next descends. Only bites the descend intent; combat/movement are untouched.
+    if (in.descend) {
+        m_autoplayDescendPulse += dt;
+        if (!Autoplay::descendPulseHeld(m_autoplayDescendPulse)) in.descend = false;   // release beat
+    } else {
+        m_autoplayDescendPulse = 0.0f;
+    }
+
     applyBotIntent(in, uiOpen);
 }
 

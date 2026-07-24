@@ -61,4 +61,21 @@ inline bool mayDescend(const DescendCtx& c) {
     return true;
 }
 
+// PULSE the descend interact-hold rather than holding it continuously. The floor exit is taken by
+// HOLDING the interact button (Interact::poll / interact.h) — but a HOLD reaches the SHRINE first
+// when one shares the exit's interact range (choose(): shrine outranks exit on a hold). A human
+// activates the shrine, RELEASES, then holds again to descend. The bot holds forever, so poll fires
+// its one hold (on the shrine), latches `consumed`, and — never releasing — can never re-fire to
+// reach the exit: a permanent wedge next to an already-used shrine (observed live on flat floors
+// whenever a shrine rolled onto the exit). So the driver pulses the button: hold long enough to fire
+// (> INTERACT_HOLD_SEC = 0.35 s), then release a beat to clear `consumed`, and repeat — one cycle
+// spends the shrine, the next reaches the exit. `phase` is the seconds the bot has continuously
+// WANTED to descend (reset to 0 when it stops). Returns whether PICKUP should be held THIS tick.
+inline bool descendPulseHeld(f32 phase) {
+    constexpr f32 kHoldOn = 0.50f;   // hold window — comfortably past the 0.35 s hold threshold
+    constexpr f32 kCycle  = 0.65f;   // + a 0.15 s release window that clears poll's `consumed` latch
+    const f32 t = phase - kCycle * floorf(phase / kCycle);   // phase mod kCycle (no <cmath> fmodf dep)
+    return t < kHoldOn;
+}
+
 } // namespace Autoplay
