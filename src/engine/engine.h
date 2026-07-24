@@ -307,6 +307,13 @@ private:
     // window expires.
     Vec3             m_autoplayTravelDir  = {0, 0, 0}; // committed unit XZ travel heading ({0,0,0} = none)
     f32              m_autoplayTravelHold = 0.0f;      // s left on the commit
+    // LOOK BEHIND (autoplay_nav.h LOOK_BEHIND_*). A wedged bot turns around once per stuck episode to
+    // un-watch whatever it is facing, which is the only thing that can spring a dormant gargoyle
+    // (weeping-angel wake rule) — and a dormant gargoyle is an unkillable solid body, so staring at
+    // one is a permanent wedge. One-shot: the latch re-arms only after real progress.
+    f32              m_autoplayLookBehindTimer = 0.0f; // >0 = mid look-behind, holding the reversed aim
+    f32              m_autoplayLookBehindYaw   = 0.0f; // the reversed yaw captured when the turn armed
+    bool             m_autoplayLookBehindDone  = false;// this stuck episode has already spent its turn
     // Free-Play auto-confirm. Taking the town portal as a CLEARED hero opens the level select and
     // moves the game to GameState::MENU — where the Autoplay driver does not tick at all — so an
     // unattended run would end its life on that screen. This counts DOWN while the select is up and

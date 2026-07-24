@@ -185,6 +185,38 @@ TEST_CASE("a remedy may only STAND STILL where the descend can actually fire") {
     CHECK_FALSE(Autoplay::mayDescend(ctx));      // ...and the old 2.5 m trigger band never could
 }
 
+// LOOK BEHIND — the dormant-ambusher trigger. enemy_ai_states.cpp springs a DORMANT AMBUSH enemy
+// only when a player is in range AND `!watched`, and Combat::applyDamage returns early on one, so a
+// gargoyle the bot is staring at is an unkillable solid body that can never wake. Turning around is
+// the only move that clears that wedge.
+TEST_CASE("look behind: due once the stuck timer passes the threshold, and only once") {
+    CHECK_FALSE(Autoplay::lookBehindDue(Autoplay::LOOK_BEHIND_AT - 0.1f, false));  // not stuck long enough
+    CHECK(Autoplay::lookBehindDue(Autoplay::LOOK_BEHIND_AT, false));               // armed
+    CHECK_FALSE(Autoplay::lookBehindDue(Autoplay::LOOK_BEHIND_AT + 5.0f, true));   // already spent: no spinning
+    // It fires BEFORE the 4 s geometry ladder — looking is cheaper than walking, and a woken
+    // gargoyle usually unblocks the very cell the escape would have been searching around.
+    CHECK(Autoplay::LOOK_BEHIND_AT < 4.0f);
+    // The turn must outlast the aim smoother's own half-turn (~0.9 s) or the bot never actually
+    // faces away and the wake condition is never met.
+    CHECK(Autoplay::LOOK_BEHIND_HOLD > 0.9f);
+}
+
+TEST_CASE("look behind: the reversed yaw is a real 180 deg, folded to the short arc") {
+    constexpr f32 kPi = 3.14159265358979f;
+    auto opposite = [](f32 a, f32 b) {   // |shortest arc| between them must be pi
+        f32 d = a - b;
+        while (d >  kPi) d -= 2.0f * kPi;
+        while (d < -kPi) d += 2.0f * kPi;
+        return (d < 0.0f ? -d : d);
+    };
+    for (f32 y = -9.0f; y < 9.0f; y += 0.37f) {
+        const f32 b = Autoplay::lookBehindYaw(y);
+        CHECK(opposite(b, y) == doctest::Approx(kPi).epsilon(0.001));
+        CHECK(b <=  kPi + 0.001f);       // folded: the engine never re-wraps Player::yaw, and an
+        CHECK(b >= -kPi - 0.001f);       // unfolded target would make the smoother turn the long way
+    }
+}
+
 TEST_CASE("descend pulse: holds then releases so the hold can re-fire past a shrine") {
     // The button must be HELD past the 0.35 s hold threshold (so the hold fires at all) and then
     // RELEASED within one cycle (so Interact::poll's `consumed` latch clears and the NEXT hold can

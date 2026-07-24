@@ -193,6 +193,43 @@ inline bool mayDescend(const DescendCtx& c) {
     return true;
 }
 
+// --- LOOK BEHIND (dormant-ambusher trigger) -----------------------------------------------------
+// The dungeon's stone gargoyles (EnemyRole::AMBUSH) sit in AIState::DORMANT posing as statues under
+// a WEEPING-ANGEL rule: enemy_ai_states.cpp wakes one only when a player is inside its detection
+// range AND **nobody is watching it** (`provoked && !watched`), and Combat::applyDamage returns
+// early on a dormant AMBUSH enemy, so a statue cannot be shot awake either.
+//
+// That is a perfect trap for the bot. A gargoyle is a solid body, so one standing in a doorway
+// blocks the way; it is also an ordinary hostile in the target list, so the bot AIMS AT IT — which
+// is precisely what pins it asleep — and then fires at it forever for zero damage. Staring is the
+// one thing that guarantees the wedge never clears.
+//
+// So when the bot has made no progress for LOOK_BEHIND_AT seconds it deliberately TURNS AROUND for
+// LOOK_BEHIND_HOLD seconds. Turning 180 deg un-watches whatever it was facing, which is exactly the
+// condition a dormant ambusher needs to spring — and once awake it moves, becomes damageable, and
+// stops being a wall. (It also reveals anything that crept up behind, which is the same wake rule
+// running in the bot's favour.) ONE-SHOT per stuck episode: a bot that keeps spinning is neither
+// useful nor watchable, so the latch only re-arms after real progress.
+inline constexpr f32 LOOK_BEHIND_AT   = 3.0f;   // s of no progress before the look-behind (Aaron's number)
+// Long enough for the aim smoother to actually complete the half-turn (a 180 deg sweep takes ~0.9 s
+// at the shipped flick rate + ease-out) and still face away for a few ticks — the wake test runs
+// every tick, so a few is plenty.
+inline constexpr f32 LOOK_BEHIND_HOLD = 1.2f;   // s spent turned around
+
+// True when a stuck episode has run long enough to spend its one look-behind.
+inline bool lookBehindDue(f32 noProgressTimer, bool alreadySpent) {
+    return !alreadySpent && noProgressTimer >= LOOK_BEHIND_AT;
+}
+// The yaw directly behind `yaw`, folded into [-pi, pi] so the aim smoother turns the SHORT way
+// (either way is 180 deg, but an unfolded value could sit revolutions out — the engine never
+// re-wraps Player::yaw).
+inline f32 lookBehindYaw(f32 yaw) {
+    constexpr f32 kPi = 3.14159265358979f, kTwoPi = 6.28318530717959f;
+    f32 y = yaw + kPi;
+    y = y - kTwoPi * floorf((y + kPi) / kTwoPi);
+    return y;
+}
+
 // PULSE the descend interact-hold rather than holding it continuously. The floor exit is taken by
 // HOLDING the interact button (Interact::poll / interact.h) — but a HOLD reaches the SHRINE first
 // when one shares the exit's interact range (choose(): shrine outranks exit on a hold). A human

@@ -26,6 +26,10 @@
 // exempted any in-band fight outright, so a bot firing at a target it could never kill (cover/doorway/
 // elevation blocks the shots even though the LOS raycast to the centre reads clear) suppressed its own
 // stuck timer and stood there forever. The ladder:
+//   LOOK-BEHIND (3 s, before everything) -> turn 180 deg once per stuck episode. A dormant gargoyle
+//                                     wakes ONLY while unobserved and cannot be shot awake, so the bot
+//                                     staring at one is a wedge that can never clear (autoplay_nav.h
+//                                     LOOK_BEHIND_*). Looking is cheaper than walking, so it goes first.
 //   A  wedged AT the exit          -> stand still and force the descend hold INSIDE the real 2 m
 //                                     descend radius; between that and 2.5 m, walk the last metre in
 //                                     (standing still out there held a button that could never fire).
@@ -314,11 +318,13 @@ void Engine::updateAutoplay(f32 dt) {
             // whole escape ladder so the bot returns to plain flow-field travel (reset on progress).
             m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f;
             m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
+            m_autoplayLookBehindDone = false;   // new episode gets a fresh look-behind
         } else if (combatProgress) {
             // Dealing damage in place is progress too (a real fight, not a wedge): hold the timer + escape
             // ladder at zero WITHOUT moving the anchor (the bot hasn't travelled, it's killing things).
             m_autoplayNoProgressTimer = 0.0f;
             m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
+            m_autoplayLookBehindDone = false;
         } else if (m_autoplayLootDwell <= 0.0f) {
             m_autoplayNoProgressTimer += dt;                  // no move, no damage, not dwelling: wedged
         }
@@ -380,6 +386,19 @@ void Engine::updateAutoplay(f32 dt) {
         // NB: no flowDir requirement — the break-off STRAFES around the target (unstickCombatMove), which
         // needs no exit heading, so it works even when the bot is boxed and flowDir is vetoed to zero
         // (exactly the pocket the bot froze in: firing at an unhittable target with no flow to walk).
+
+    // (2d) LOOK BEHIND — the dormant-ambusher trigger, and the FIRST thing tried when the bot stops
+    // making progress (3 s, before the 4 s geometry ladder). A stone gargoyle is an unkillable solid
+    // body that wakes ONLY while unobserved (autoplay_nav.h LOOK_BEHIND_* has the full rule), so a bot
+    // that walks into one and — being an ordinary hostile in its target list — stares at it while
+    // firing has built a wedge that can never clear itself. Turning around un-watches it. One-shot per
+    // stuck episode; the latch is re-armed by the progress branches above.
+    if (m_autoplayLookBehindTimer > 0.0f) m_autoplayLookBehindTimer -= dt;
+    if (Autoplay::lookBehindDue(m_autoplayNoProgressTimer, m_autoplayLookBehindDone)) {
+        m_autoplayLookBehindDone  = true;
+        m_autoplayLookBehindTimer = Autoplay::LOOK_BEHIND_HOLD;
+        m_autoplayLookBehindYaw   = Autoplay::lookBehindYaw(m_localPlayer.yaw);
+    }
 
     // Remedy A (priority) — WEDGED right at the exit with the boss dead: an unreachable LOS straggler keeps
     // FIGHT active but the bot can't close, so stand still and force the descend (hold PICKUP, drop
@@ -574,6 +593,18 @@ void Engine::updateAutoplay(f32 dt) {
         }
     }
 
+    // (2e) LOOK-BEHIND OVERRIDE. Applied AFTER the whole remedy chain because it has to beat every
+    // one of them — and, crucially, the FIGHT branch: the gargoyle that wedged us is an ordinary
+    // hostile in the target list, so decideCombat would aim straight back at it and pin it asleep
+    // again. Movement and fire are dropped for the turn (a deliberate look-behind, not a fighting
+    // retreat); `descend` is left alone so a door hold already in progress is not thrown away. The
+    // aim smoother turns at its own rate, so this reads as a look over the shoulder, never a snap.
+    if (m_autoplayLookBehindTimer > 0.0f) {
+        in.aimYaw = m_autoplayLookBehindYaw; in.aimPitch = 0.0f;
+        in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;
+        in.fire = false; in.jump = false;
+    }
+
     // (3) DESCEND PICKUP PULSE. The exit is a HOLD target, but a HOLD reaches a SHRINE sharing the
     // exit's interact range FIRST; the bot holds PICKUP continuously, so Interact::poll fires once
     // (spending the shrine), latches `consumed`, and never re-fires to reach the exit — a permanent
@@ -637,6 +668,8 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
     m_autoplayNoProgressTimer = 0.0f;
     m_autoplayNudgeTimer      = 0.0f;
     m_autoplayEscapeTimer     = 0.0f;
+    m_autoplayLookBehindTimer = 0.0f;
+    m_autoplayLookBehindDone  = false;
 
     const Autoplay::TownPortalPlan plan =
         Autoplay::planTownPortal(m_localPlayer.position, m_level.townPortalPos);

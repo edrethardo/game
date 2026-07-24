@@ -601,7 +601,18 @@ that could never fire — and standing still IS "no progress", so the remedy re-
 (1.9 m) single-source that, with a `static_assert` + test pinning stop < radius; outside the radius the
 remedy WALKS THE LAST METRE IN (interact still held) instead of parking, bounded by the no-progress timer so
 it can never shadow the geometry escape.
-**Auto-respawn**
+And **LOOK BEHIND at 3 s** — the first rung, before the 4 s geometry ladder. The dungeon's stone gargoyles
+(`EnemyRole::AMBUSH`) sit in `AIState::DORMANT` under a **weeping-angel** rule: `enemy_ai_states.cpp` wakes
+one only when a player is in range AND **nobody is watching it**, and `Combat::applyDamage` returns early on
+a dormant AMBUSH enemy so it cannot be shot awake either. A gargoyle is an ordinary hostile in
+`buildBotView`'s target list, so the bot AIMS AT IT — which is exactly what pins it asleep — and then fires
+at it forever for zero damage: a standoff that by construction can never clear itself. So the driver turns
+the aim 180° (`Autoplay::lookBehindYaw`, through the normal smoother so it reads as a look over the
+shoulder) for `LOOK_BEHIND_HOLD` (1.2 s — longer than the smoother's own ~0.9 s half-turn, or the bot never
+actually faces away), movement and fire dropped, **one-shot per stuck episode** (the latch re-arms only on
+real progress, so it can never spin). It cannot fire during a real fight: the no-progress timer is held at
+zero while the bot deals damage or moves >0.5 m. Live: 1-4 look-behinds per 2-minute run, and runs where it
+fired often never needed the escape ladder at all. **Auto-respawn**
 re-enters the run ~1.5 s after a solo death (entrance spawn); the **difficulty ladder** is the existing
 floor-50→next-difficulty flow. **No save-format change** — `m_autoplayActive` and the backstop timers are
 all transient. This bot is the **empirical playtest rig the balance-lab spec deferred** — it runs the real

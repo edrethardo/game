@@ -109,6 +109,13 @@ on a flat floor for the regression and on `--vhall`/`--fourstory`/`--lava` for t
   re-creates the shake. Do NOT "fix" it by low-passing the desired aim — a second lag stage in series with
   `stepAngle` pushes the steady-state tracking error past `FIRE_ALIGN_RAD` and MUTES fire on any crossing
   target, and it does nothing about how OFTEN the source changes.
+- **A dormant gargoyle is an unkillable solid the bot will happily stare at forever.** `AIState::DORMANT`
+  + `EnemyRole::AMBUSH` wakes ONLY when a player is in range and **nobody is watching**, and
+  `Combat::applyDamage` returns early on one so it cannot be shot awake. It is NOT filtered out of
+  `buildBotView`'s target list, so the bot aims at it (pinning it asleep) and fires for zero damage —
+  a standoff that by construction cannot clear. The driver's 3 s **look-behind** (turn 180°, one-shot per
+  stuck episode) is what breaks it; anything that suppresses the look-behind, or that keeps the bot facing
+  a stalled target, brings the wedge back.
 - **A remedy may only STAND STILL where the descend can actually fire.** `updateFloorDoor` descends inside
   **2 m** (`Autoplay::DESCEND_RADIUS`); the exit-wedge remedy used to plant the bot at 2.5 m holding
   PICKUP, and since standing still is itself "no progress" the remedy re-armed forever (73 s frozen beside
