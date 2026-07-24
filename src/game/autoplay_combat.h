@@ -72,6 +72,38 @@ inline f32 stepAngle(f32 current, f32 desired, f32 gain, f32 maxRadPerSec, f32 d
     return (d > 0.0f) ? current + step : current - step;
 }
 
+// --- FIRE ALIGNMENT GATE -------------------------------------------------------------------
+// decideCombat decides `fire` from the DESIRED aim, but the driver only EASES the real crosshair
+// toward it (stepAngle above), so for the whole turn the two disagree — sometimes by 90°+ when a
+// new target appears off to the side. Pulling the trigger on the intent alone therefore sprays
+// every wall the crosshair sweeps ACROSS on its way to the target (measured: 32% of the bot's
+// shots had world geometry between the muzzle and the target). Before the smoothing landed the aim
+// snapped, so fire was always aligned and this could not happen. The driver re-checks the ACTUAL
+// aim after stepping it and holds fire until the crosshair has arrived.
+//
+// The tolerance cannot be arbitrarily tight. The ease is a first-order lag, so a MOVING target
+// leaves a permanent steady-state error of (its angular rate / gain): at the shipped gain of 6, a
+// target crossing at 0.4 rad/s sits ~0.067 rad off centre forever. A tolerance under that would
+// MUTE the bot against anything that moves — the failure mode to watch for when re-tuning.
+constexpr f32 FIRE_ALIGN_RAD = 0.09f;        // ~5.2°: clears the tracking lag, ~0.9 m (a body) at 10 m
+// MELEE swings a 70° cone (weapons.json) that queryConeSorted evaluates HORIZONTALLY — the
+// `horizontalCone` flag drops the vertical component entirely, because a point-blank enemy's centre
+// sits below the eye. So a melee bot must NOT wait for pinpoint alignment (it would stand there not
+// swinging at something already well inside its arc) and must not gate on pitch at all. Half the
+// cone is 0.61 rad; this keeps the swing inside the arc with margin.
+constexpr f32 FIRE_ALIGN_MELEE_RAD = 0.45f;  // ~26°, vs the ±35° half-cone
+
+// True when the ACTUAL aim has converged onto the desired aim closely enough to shoot. Melee uses
+// the wide tolerance and ignores pitch (see above); everything else must line up on both axes.
+inline bool aimOnTarget(f32 actualYaw, f32 actualPitch,
+                        f32 desiredYaw, f32 desiredPitch, bool melee) {
+    const f32 tol = melee ? FIRE_ALIGN_MELEE_RAD : FIRE_ALIGN_RAD;
+    if (fabsf(angleDelta(actualYaw, desiredYaw)) > tol) return false;
+    if (melee) return true;                                  // horizontal cone: pitch never gates it
+    // Pitch needs no wrap fold — both are clamped to ±89°, so a plain difference is the short arc.
+    return fabsf(actualPitch - desiredPitch) <= tol;
+}
+
 // Sub-degree aim WOBBLE, so shots are not pixel-perfect. Two slow incommensurate sinusoids off the
 // sim tick — deterministic by construction (rand() would desync a replay/snapshot and make a live
 // bug unreproducible), and the mismatched periods keep it from reading as a clean oscillation.

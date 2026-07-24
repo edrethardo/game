@@ -404,7 +404,18 @@ snapped → 0.233 rate-capped → **0.093** eased; a 10° correction now takes ~
 instead of one 0.093 rad step and a stop. The honest trade: vs the 7/14 pass, Marksman kills 31.7→23.0
 and Warrior 71.0→57.0 per 2 min, floors reached 4.3→4.0 and 8.3→7.3 — ~20-27% fewer kills and ~1 floor,
 deliberately accepted for the look. Raising the gain to 9 does NOT buy it back (measured: a wash), so the
-cost lives in the caps, not the ease. (2) **A ranged enemy it is closing on gets CHARGED with a roll** — ~4 m of travel plus 0.3 s of
+cost lives in the caps, not the ease. **The ease forces a FIRE GATE**, and it is not optional either:
+`decideCombat` decides `fire` from the DESIRED aim, so with a lagging crosshair the bot pulled the trigger
+mid-turn and sprayed every wall it was sweeping across ("ranged is shooting through walls" — 22% of its
+shots had geometry between muzzle and target, at a mean yaw error of **0.47 rad / 27°**). `applyBotIntent`
+therefore re-checks the ACTUAL (post-step) aim against the intent with `Autoplay::aimOnTarget` and holds
+FIRE until the crosshair has arrived — measured 22% → **4.7%**, with shots at an OCCLUDED target going to
+exactly **0** and kills/floors unchanged. The tolerance has a floor and a ceiling and both are load-bearing:
+it must exceed the ease's steady-state tracking lag plus the wobble (0.4 rad/s ÷ gain 6 + 0.011 ≈ 0.078)
+or a strafing enemy MUTES the bot, hence `FIRE_ALIGN_RAD` 0.09; and **melee needs its own, looser one**
+(`FIRE_ALIGN_MELEE_RAD` 0.45, pitch ignored) because a swing is a 70° cone judged HORIZONTALLY
+(`queryConeSorted`'s `horizontalCone`), so a melee bot waiting for pinpoint alignment would stand there
+not swinging (live: 97.5% of wanted swings still fire). (2) **A ranged enemy it is closing on gets CHARGED with a roll** — ~4 m of travel plus 0.3 s of
 i-frames crosses the firing lane better than walking. `out.moveFwd` is forced on the same tick because
 `computeRollDirection` reads the WASD held THAT tick, and the roll is gated on already facing the target
 (the roll uses the CURRENT yaw, which now lags). Melee enemies are excluded — they close the gap for you,

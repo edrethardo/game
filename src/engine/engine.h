@@ -1352,8 +1352,11 @@ private:
     // uiOpen suppresses the bot's movement/jump/pickup synthetic actions (so they can't drive the
     // inventory cursor, which reads the same MOVE_* actions) while keeping the combat actions live —
     // the bot fights in place under an open inventory. `dt` drives the aim RATE LIMIT: the intent's
-    // yaw/pitch are the DESIRED aim and the player is eased toward it, never snapped.
-    void applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt);
+    // yaw/pitch are the DESIRED aim and the player is eased toward it, never snapped — which is why
+    // `melee` is passed too: FIRE is held until the eased crosshair actually reaches the desired aim
+    // (Autoplay::aimOnTarget), and a melee swing's wide horizontal cone gets a looser tolerance than
+    // a projectile/hitscan shot.
+    void applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt, bool melee);
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);

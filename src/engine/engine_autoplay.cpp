@@ -470,7 +470,7 @@ void Engine::updateAutoplay(f32 dt) {
     }
 
 
-    applyBotIntent(in, uiOpen, dt);
+    applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
 }
 
 // Fill the read-only decision snapshot from live engine state (lane 0 — the only Autoplay lane).
@@ -714,7 +714,7 @@ Autoplay::BotView Engine::buildBotView() {
 // Translate one BotIntent into a yaw/pitch write + synthetic held GameActions. Clears last tick's
 // held set first (so a no-longer-wanted action releases), then arms exactly this tick's actions.
 // When uiOpen, the movement/nav actions are SUPPRESSED (see below) but combat is kept.
-void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt) {
+void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt, bool melee) {
     Input::clearBotHeld();
 
     // --- AIM: EASED and rate-limited, not snapped -------------------------------------------------
@@ -775,7 +775,15 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt) 
     Input::setBotHeld(GameAction::MOVE_LEFT,     in.moveLeft && !uiOpen);
     Input::setBotHeld(GameAction::MOVE_RIGHT,    in.moveRight && !uiOpen);
     Input::setBotHeld(GameAction::JUMP,   in.jump && !uiOpen);
-    Input::setBotHeld(GameAction::FIRE,   in.fire);
+    // FIRE is gated on the crosshair having ACTUALLY ARRIVED (Autoplay::aimOnTarget). The policy
+    // decides `fire` from the DESIRED aim, but the ease above means the real crosshair is still
+    // sweeping toward it — and everything it sweeps across is what the bot was shooting. Compared
+    // against `in.aim*` (the true target direction) rather than the wobbled desired: the wobble is
+    // deliberate imprecision we ACCEPT, not an error to converge on. Melee relaxes the tolerance and
+    // drops the pitch term — its swing is a wide horizontal cone (see the constants).
+    const bool onTarget = Autoplay::aimOnTarget(m_localPlayer.yaw, m_localPlayer.pitch,
+                                                in.aimYaw, in.aimPitch, melee);
+    Input::setBotHeld(GameAction::FIRE,   in.fire && onTarget);
     Input::setBotHeld(GameAction::BLOCK,  in.block);
     Input::setBotHeld(GameAction::DODGE,  in.dodge);
     Input::setBotHeld(GameAction::POTION, in.potion);

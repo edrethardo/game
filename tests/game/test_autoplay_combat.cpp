@@ -297,6 +297,66 @@ TEST_CASE("stepAngle at the shipped tune is far slower than the v1 constant-rate
     CHECK(stepAngle(0.0f, tenDeg, gain, fine, kDt) < v1FineStep * 0.2f);
 }
 
+// ---------------------------------------------------------------------------------------------
+// FIRE ALIGNMENT GATE. decideCombat decides `fire` from the DESIRED aim, but the driver only EASES
+// the real crosshair toward it (stepAngle above) — so the bot used to pull the trigger mid-turn and
+// spray every wall the crosshair swept across (measured live: 22% of its shots had geometry between
+// muzzle and target, at a mean yaw error of 0.47 rad / 27°). aimOnTarget is the gate.
+// ---------------------------------------------------------------------------------------------
+TEST_CASE("aimOnTarget: holds fire while the crosshair is still sweeping onto the target") {
+    // 27° off — the measured mean error of a pre-fix wall shot. Nothing may fire there.
+    CHECK_FALSE(aimOnTarget(0.0f, 0.0f, 0.471f, 0.0f, /*melee=*/false));
+    CHECK(aimOnTarget(0.0f, 0.0f, 0.0f, 0.0f, false));            // arrived
+    CHECK(aimOnTarget(0.0f, 0.0f, FIRE_ALIGN_RAD * 0.9f, 0.0f, false));
+    CHECK_FALSE(aimOnTarget(0.0f, 0.0f, FIRE_ALIGN_RAD * 1.1f, 0.0f, false));
+}
+
+TEST_CASE("aimOnTarget: PITCH must converge too for a ranged shot, but never for melee") {
+    // A balcony/pit fight is a pitch problem, not a yaw one — a converged yaw with the crosshair
+    // still pointing at the floor is exactly the shot that eats the ledge.
+    CHECK_FALSE(aimOnTarget(0.0f, 0.0f, 0.0f, 0.5f, /*melee=*/false));
+    CHECK(aimOnTarget(0.0f, 0.0f, 0.0f, 0.5f, /*melee=*/true));   // horizontal cone ignores pitch
+}
+
+TEST_CASE("aimOnTarget: melee keeps swinging inside its wide cone") {
+    // weapons.json gives the sword a 70° cone judged HORIZONTALLY, so ±35° (0.61 rad) all connects.
+    // A melee bot that waited for pinpoint alignment would stand there not swinging.
+    CHECK(aimOnTarget(0.0f, 0.0f, 0.35f, 0.0f, /*melee=*/true));   // 20°: well inside the arc
+    CHECK_FALSE(aimOnTarget(0.0f, 0.0f, 0.35f, 0.0f, /*melee=*/false));  // same angle, ranged: no
+    CHECK(FIRE_ALIGN_MELEE_RAD < 0.61f);        // must stay inside the real half-cone
+    CHECK(FIRE_ALIGN_MELEE_RAD > FIRE_ALIGN_RAD);
+}
+
+TEST_CASE("aimOnTarget: the tolerance clears the ease's steady-state tracking lag") {
+    // The ease is a first-order lag, so a MOVING target leaves a PERMANENT error of
+    // (its angular rate / gain). At the shipped gain of 6 a target crossing at 0.4 rad/s sits
+    // 0.067 rad off centre forever — a tolerance under that would MUTE the bot against anything
+    // that moves, which is the failure mode to watch for when re-tuning.
+    constexpr f32 kGain = 6.0f, kCrossRate = 0.4f, kWobbleAmp = 0.011f;
+    CHECK(FIRE_ALIGN_RAD > kCrossRate / kGain + kWobbleAmp);   // lag + the wobble laid on top of it
+    // Drive it for real, exactly as the driver does: the aim eases toward (desired + wobble) while
+    // the gate compares it against the un-wobbled `desired` (the wobble is imprecision we ACCEPT).
+    // A strafing enemy must not silence the bot.
+    f32 aim = 0.0f, desired = 0.0f;
+    bool firedLate = false;
+    for (u32 i = 0; i < 600; i++) {             // 10 s
+        desired += kCrossRate * kDt;
+        f32 wy, wp; aimWobble(i, wy, wp);
+        aim = stepAngle(aim, desired + wy, kGain, 2.8f, kDt);
+        if (i > 120) firedLate = aimOnTarget(aim, 0.0f, desired, 0.0f, false);
+        if (i > 120 && !firedLate) break;       // a single dry tick after settling fails the case
+    }
+    CHECK(firedLate);
+}
+
+TEST_CASE("aimOnTarget: folds the ±π seam like angleDelta (a spinning bot still shoots)") {
+    // Player::yaw is never re-wrapped by the engine, so after a few minutes it sits several turns
+    // outside ±π. A bare subtraction would report a multi-revolution error and mute the bot forever.
+    CHECK(aimOnTarget(6.0f * kPi, 0.0f, 0.0f, 0.0f, false));
+    CHECK(aimOnTarget(0.0f, 0.0f, 4.0f * kPi + 0.02f, 0.0f, false));
+    CHECK_FALSE(aimOnTarget(0.0f, 0.0f, 4.0f * kPi + 0.5f, 0.0f, false));
+}
+
 TEST_CASE("aim wobble is small, deterministic and actually moves") {
     f32 y0, p0, y1, p1;
     aimWobble(1000, y0, p0);

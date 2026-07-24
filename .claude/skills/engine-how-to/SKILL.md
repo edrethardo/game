@@ -92,6 +92,13 @@ on a flat floor for the regression and on `--vhall`/`--fourstory`/`--lava` for t
   doctrine is `×weaponRange`, so feeding the raw 0 in collapses the engagement band to zero and the bot
   can NEVER fire a caster/archer weapon — it just backpedals and dies (the "sorcerer stuck on floor 1"
   bug). Always fill `BotView.weaponRange` through `Autoplay::botWeaponRange(range, projSpeed)`.
+- **The bot's decision to FIRE is made from the DESIRED aim, but the crosshair only EASES there.** Any
+  new fire path in `applyBotIntent` must gate on `Autoplay::aimOnTarget(actualYaw, actualPitch, in.aimYaw,
+  in.aimPitch, melee)` — the actual (post-`stepAngle`) aim vs the intent. Arming FIRE straight off
+  `in.fire` sprays every wall the crosshair is still sweeping across ("ranged is shooting through walls":
+  22% of shots blocked by geometry, mean yaw error 27°). The tolerance is squeezed from both sides — it
+  must exceed the ease's steady-state tracking lag + wobble (~0.078 rad) or a strafing enemy MUTES the
+  bot, and MELEE needs the separate wide/pitch-free tolerance because its swing is a 70° HORIZONTAL cone.
 - **`engageMin` is a movement rule, not a fire rule.** Fire needs only LOS + `dist <= engageMax×range`;
   a target inside the kite floor is shot at WHILE the bot backs off. Re-adding a `dist >= engageMin`
   term to the fire gate re-creates the swarmed-caster livelock. The driver's `inBandFight` stall signal
