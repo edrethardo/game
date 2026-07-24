@@ -40,21 +40,43 @@ TEST_CASE("holds fire and advances when the target is beyond engageMax") {
     CHECK(out.moveFwd);           // close the distance
 }
 
-TEST_CASE("kites: backs off when a MELEE target is inside engageMin") {
+TEST_CASE("kites: backs off when a MELEE target is inside engageMin AND genuinely close") {
     BotView v = selfAt({0,0,0});
-    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < 11 m floor
+    // 2.5 m: inside the 11 m fractional floor AND inside the absolute 4 m hold-ground floor.
+    BotTarget t{}; t.pos = {0, 1.7f, -2.5f}; t.dist = 2.5f; t.hasLOS = true;
     t.isRanged = false; t.attackRange = 2.0f;
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
-    CHECK(out.moveBack);          // Ranged kite floor vs a closer: retreat is real spacing
+    CHECK(out.moveBack);          // Ranged kite floor vs a closer in its face: retreat is real spacing
+}
+
+TEST_CASE("ranged HOLDS GROUND once it has 4 m, whatever the fractional band says") {
+    // Aaron: "make it so ranged won't run away when it has at least 4m distance". engageMin is a
+    // FRACTION of weapon reach, so a ranged build's floor lands near 11-13 m — which meant the bot
+    // backpedalled from a melee enemy three rooms away. KITE_HOLD_GROUND_M is the absolute floor
+    // underneath the fraction.
+    BotView v = selfAt({0,0,0});                                  // Moderate/Ranged: floor 0.55 x 20 = 11 m
+    BotTarget t{}; t.pos = {0, 1.7f, -6.0f}; t.dist = 6.0f; t.hasLOS = true;   // inside 11 m, outside 4 m
+    t.isRanged = false; t.attackRange = 2.0f;                     // a MELEE closer: the kiting case
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(out.moveBack);    // six metres of space is enough: stand and shoot
+    CHECK(out.fire);
+    // ...and the moment it closes inside 4 m the ordinary melee kite is back in charge.
+    t.pos = {0, 1.7f, -2.5f}; t.dist = 2.5f;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).moveBack);
+    // The boundary itself belongs to "hold ground" (>= 4 m never retreats).
+    t.pos = {0, 1.7f, -KITE_HOLD_GROUND_M}; t.dist = KITE_HOLD_GROUND_M;
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).moveBack);
 }
 
 TEST_CASE("does NOT kite away from a RANGED enemy inside engageMin") {
     // Aaron, watching the bot: "it runs away from ranged enemies". Backing off only buys spacing
     // from something that must CLOSE to hurt you; an archer/caster shoots you the whole way, so the
     // retreat gives up ground, breaks the bot's own aim, and changes nothing about the incoming fire.
+    // At 2.5 m the 4 m hold-ground floor is NOT what's holding it — this isolates the isRanged rule.
     BotView v = selfAt({0,0,0});
-    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < the 11 m floor
+    BotTarget t{}; t.pos = {0, 1.7f, -2.5f}; t.dist = 2.5f; t.hasLOS = true;  // well inside the 11 m floor
     t.isRanged = true; t.attackRange = 12.0f;
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
@@ -79,7 +101,7 @@ TEST_CASE("fires WHILE kiting: a target inside engageMin is still shot at") {
     // shoot the thing in your face while retreating. Gating fire on the band made a swarmed
     // ranged/caster bot backpedal forever without ever shooting (sorcerers stuck on floor 1).
     BotView v = selfAt({0,0,0});
-    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < the 11 m floor
+    BotTarget t{}; t.pos = {0, 1.7f, -2.5f}; t.dist = 2.5f; t.hasLOS = true;  // inside BOTH kite floors
     t.attackRange = 2.0f;                                                     // a MELEE closer
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
@@ -902,7 +924,8 @@ TEST_CASE("no kiting jump while closing, airborne, or rolling") {
 
 TEST_CASE("a kiting MELEE retreat also hops") {
     BotView v = selfAt({0,0,0});
-    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;   // inside the kite floor
+    // 2.5 m: inside BOTH kite floors (the fractional 11 m and the absolute 4 m hold-ground one).
+    BotTarget t{}; t.pos = {0, 1.7f, -2.5f}; t.dist = 2.5f; t.hasLOS = true;
     t.isRanged = false; t.attackRange = 2.0f;
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));

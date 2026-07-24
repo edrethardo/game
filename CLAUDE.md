@@ -482,12 +482,16 @@ second lag stage in series with the ease would push the steady-state tracking er
 and mute fire on crossing targets. Measured, paired 2-min live runs (same binary, fix on/off): mean
 |Δdesired yaw| **5.0 → 1.9°/tick** and applied-yaw reversals **4.5 → 1.2/s** (Marksman), **2.8 → 2.2** and
 **1.6 → 0.9/s** (Warrior); floors reached identical, damage taken −16%/−33%, kills within run-to-run noise.
-**Combat POLICY rules from watching the bot play.** (1) **KITE ONLY FROM MELEE.** The
+**Combat POLICY rules from watching the bot play.** (1) **KITE ONLY FROM MELEE, AND ONLY INSIDE 4 m.** The
 `dist < engageMin` back-off is gated on `!t.isRanged`: backing away buys spacing from something that must
 REACH you, but an archer shoots across the retreat, so the same backpedal surrenders ground, drags the
 bot's own aim off target, and changes nothing about the incoming fire. Against a ranged target inside the
 band the bot HOLDS and shoots (live: 20% of all ticks were backpedal-from-ranged → **0**, and Marksman
-kills/2 min went 9.3 → 19.5 because it was finally standing still long enough to hit things).
+kills/2 min went 9.3 → 19.5 because it was finally standing still long enough to hit things). It is
+additionally floored in METRES by `KITE_HOLD_GROUND_M` (4 m, Aaron's number: "make it so ranged won't run
+away when it has at least 4m distance") — `engageMin` is a FRACTION of weapon reach, which for a ranged
+build works out near 11-13 m, so "inside the kite floor" meant the bot retreated from melee enemies it had
+already outranged several times over. Below 4 m the fractional rule is back in charge.
 (2) **DODGE ON AN INCOMING SWING, NOT ON PROXIMITY, AND ON A REAL LEASH.** The proactive roll used to
 fire whenever an enemy was inside 0.6× the kite floor — for a ranged doctrine that is most of every fight.
 `Autoplay::swingIsIncoming` now shapes it like the block tap (a MELEE attacker inside its own reach with

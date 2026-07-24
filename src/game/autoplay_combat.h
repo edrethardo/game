@@ -215,6 +215,15 @@ inline bool swingIsIncoming(const BotTarget& t) {
     return t.dist <= t.attackRange * DODGE_REACH_SLACK;
 }
 
+// --- KITE FLOOR, IN METRES ----------------------------------------------------------------------
+// The doctrine's kite floor is FRACTIONAL (engageMin x weaponRange) because the same table has to
+// serve a 2 m sword and a 24 m wand. That scaling is right for "how much spacing does this build
+// want" and wrong for "am I actually in danger": at a ranged build's derived reach the fraction
+// works out near 13 m, so the bot backed away from melee enemies three rooms distant. This is the
+// absolute floor underneath it — Aaron's number: with FOUR METRES of space the bot holds ground and
+// shoots, whatever the fraction says.
+constexpr f32 KITE_HOLD_GROUND_M = 4.0f;
+
 // --- engagement ceiling ------------------------------------------------------------------------
 // The distance past which the bot stops treating a hostile as its business and goes back to walking
 // the floor. The wider of the doctrine's own fire band (so a long-range build commits at its true
@@ -341,13 +350,20 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     const f32 lo = d.engageMin * v.weaponRange;
     const f32 hi = d.engageMax * v.weaponRange;
 
-    // KITE ONLY FROM A MELEE THREAT. Backing off buys spacing from something that must physically
-    // REACH you; a ranged enemy shoots across the retreat, so the same backpedal just surrenders
-    // ground while still eating the volley — and, because the bot walks backwards, it drags its own
-    // aim off the target too. Observed live and reported ("the bot runs away from ranged enemies").
-    // Inside the band against a ranged target the right answer is to HOLD and shoot; the gap-closer
-    // roll below still handles the case where it is OUTSIDE the band and wants to charge.
-    if (t.dist < lo)      out.moveBack = !t.isRanged;
+    // KITE ONLY FROM A MELEE THREAT, AND ONLY WHEN IT IS ACTUALLY CLOSE. Two independent gates:
+    //
+    //  * MELEE ONLY. Backing off buys spacing from something that must physically REACH you; a
+    //    ranged enemy shoots across the retreat, so the same backpedal just surrenders ground while
+    //    still eating the volley — and, because the bot walks backwards, it drags its own aim off
+    //    the target too. Observed live and reported ("the bot runs away from ranged enemies").
+    //  * ABSOLUTE 4 m FLOOR (KITE_HOLD_GROUND_M). engageMin is a FRACTION of weapon reach, and a
+    //    ranged build's derived reach is ~13 m — so "inside the kite floor" meant "anything closer
+    //    than 13 m" and the bot retreated from a melee enemy it had already outranged several times
+    //    over. Aaron's tuning call: once it has four metres of space it stops giving ground and just
+    //    shoots. Below 4 m the fractional rule is back in charge and a melee threat is still kited.
+    //
+    // The gap-closer roll below still handles the case where the target is OUTSIDE the band.
+    if (t.dist < lo)      out.moveBack = !t.isRanged && t.dist < KITE_HOLD_GROUND_M;
     else if (t.dist > hi) out.moveFwd  = true;    // too far: close in
 
     // STRAFE against a shooter. Only while HOLDING GROUND (neither closing nor kiting) — a strafe
