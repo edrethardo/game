@@ -134,6 +134,13 @@ struct BotView {
     // defaulted to "no memory, switching free" so a hand-built view (tests) gets plain nearest-LOS.
     s32   currentTargetIdx    = -1;
     bool  targetSwitchAllowed = true;
+    // LOS GRACE. The driver times how long the sticky target has been BLIND and reports whether that
+    // is still inside Autoplay::TARGET_LOS_GRACE. A single LOS raycast to a target's centre flickers
+    // constantly (measured: on 45-57 of every 60 ticks in a corridor fight), and releasing on each
+    // flicker dropped the brain out of FIGHT and swung the aim across the room ~25 times a second —
+    // the camera shake. Defaulted FALSE so a hand-built view (tests) keeps the plain "blind releases
+    // immediately" rule and only the driver, which owns the timer, ever asks for the grace.
+    bool  targetBlindGrace    = false;
     // globes/pickups the driver found in reach (low-hp detour goals), nearest first
     const Vec3* globes;
     u32   globeCount;

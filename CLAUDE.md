@@ -459,6 +459,29 @@ LEAVES, not when it lands (the flight time blows the window), and the STRAFE-sta
 that timer when it HAS LOS, so an enemy holding a shot behind cover drifts it unboundedly negative and
 reads as forever-about-to-swing — that was 213 of 275 raises before the `attackTimer > 0` gate. Live after:
 21 raises, 8 hits landed on the shield, 8 PERFECT / 0 blocked.
+**AIM STEADINESS — the camera is the player's camera.** The eased aim above is only half the problem: the
+bot's camera IS the player camera, so a DESIRED aim that jumps is a screen that shakes ("the aim is still
+sometimes super shaky, that needs to go"). Instrumenting the desired vs applied yaw per tick, tagged by
+which branch produced it, found the shake is **never jitter in any one signal — it is the aim's SOURCE
+changing**: in the worst windows the nearest hostile's LOS raycast toggled on **45-57 of every 60 ticks**,
+dropping the brain out of FIGHT into TRAVEL **23-28 times a second** with a ~55° swing each time, while the
+raw target BEARING moved <2°/tick. Lead-point jitter, target thrash and the wobble measured as
+non-contributors (0.0-1.9°/tick, ~0 switches/s, 0.5°/s respectively). Three fixes, in order of effect:
+(a) **TARGET LOS GRACE** — `pickTarget` holds a BLIND sticky target for `TARGET_LOS_GRACE` (0.4 s, driver-timed
+into `BotView::targetBlindGrace`), but only while NOTHING ELSE is visible; a real rival still steals focus
+instantly, and firing is untouched because `decideCombat` already gates the trigger on `t.hasLOS` (held blind
+targets are TRACKED, never SHOT AT). (b) **TRAVEL-HEADING COMMIT** — the driver commits the post-veto
+`flowDir` for 0.4 s, released early only when the committed step stops being `stepAllowed`, when the fresh
+heading is >120° away (a real route change; a 45/90° disagreement IS the boundary toggle being damped), or
+when there is no heading at all. Both the flow byte and the ±45/±90 detour fan flip as the bot drifts over a
+cell boundary, which was 8-16 large heading changes/s. (c) **AIM DEADZONE** — `AIM_DEADZONE_RAD` (0.016 rad
+≈ 0.9°, pinned by test to stay under `FIRE_ALIGN_RAD` or it would mute the bot): inside it the aim HOLDS.
+Direction REVERSALS, not magnitude, are what read as shaky. A low-pass on the desired aim was deliberately
+NOT added — it smears a discrete 60° branch step over ~5 ticks without reducing how often it happens, and a
+second lag stage in series with the ease would push the steady-state tracking error past `FIRE_ALIGN_RAD`
+and mute fire on crossing targets. Measured, paired 2-min live runs (same binary, fix on/off): mean
+|Δdesired yaw| **5.0 → 1.9°/tick** and applied-yaw reversals **4.5 → 1.2/s** (Marksman), **2.8 → 2.2** and
+**1.6 → 0.9/s** (Warrior); floors reached identical, damage taken −16%/−33%, kills within run-to-run noise.
 **Combat POLICY rules from watching the bot play.** (1) **KITE ONLY FROM MELEE.** The
 `dist < engageMin` back-off is gated on `!t.isRanged`: backing away buys spacing from something that must
 REACH you, but an archer shoots across the retreat, so the same backpedal surrenders ground, drags the

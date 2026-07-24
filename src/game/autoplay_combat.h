@@ -104,6 +104,23 @@ inline bool aimOnTarget(f32 actualYaw, f32 actualPitch,
     return fabsf(actualPitch - desiredPitch) <= tol;
 }
 
+// --- AIM DEADZONE -------------------------------------------------------------------------------
+// Below this much error the aim simply HOLDS instead of easing. stepAngle is an exponential
+// approach, so without a deadzone it chases every hair-width change in the desired heading forever:
+// a target's own bearing drifts ~0.1-2 deg per tick with a RANDOM sign (its AI rewrites velocity
+// every frame), and an aim that answers each of those is an aim that reverses direction several
+// times a second. Direction REVERSALS are what read as "shaky" — the magnitude is irrelevant — so
+// holding still inside a body-width of slop is the single cheapest way to make the camera look calm.
+//
+// Sized well under FIRE_ALIGN_RAD (0.09 rad) so it can never park the crosshair outside the fire
+// gate, and just over the aim wobble's per-tick step so the wobble reads as slow breathing rather
+// than as a tremor the ease keeps answering.
+constexpr f32 AIM_DEADZONE_RAD = 0.016f;   // ~0.9 deg: ~16 cm at 10 m, well inside a body
+inline bool aimWithinDeadzone(f32 current, f32 desired) {
+    const f32 d = angleDelta(current, desired);
+    return ((d < 0.0f) ? -d : d) <= AIM_DEADZONE_RAD;
+}
+
 // Sub-degree aim WOBBLE, so shots are not pixel-perfect. Two slow incommensurate sinusoids off the
 // sim tick — deterministic by construction (rand() would desync a replay/snapshot and make a live
 // bug unreproducible), and the mismatched periods keep it from reading as a clean oscillation.
@@ -251,6 +268,11 @@ inline bool sameStory(const BotView& v, const BotTarget& t) {
 // shoot); only the last is rate-limited.
 constexpr f32 TARGET_SWITCH_GAIN = 0.70f;  // a rival must be <= 70% of the current's distance (>=30% closer)
 constexpr f32 TARGET_MIN_DWELL   = 1.5f;   // s on one target before a switch may even be considered (driver-timed)
+// LOS GRACE — how long a BLIND current target is still held (driver-timed, reported as
+// BotView::targetBlindGrace). See the release rule in pickTarget for the measurement behind it.
+// Long enough to ride out a flicker (a flicker is 1-3 ticks), short enough that a hostile that
+// genuinely ducked behind a wall is released before the bot could have walked anywhere.
+constexpr f32 TARGET_LOS_GRACE   = 0.40f;  // s
 
 // Returns the index of the target to engage — the sticky current where it still holds, else the
 // nearest with LOS — or -1 if nothing has LOS.
@@ -264,7 +286,23 @@ inline s32 pickTarget(const BotView& v, const Doctrine& d) {
     const s32 cur = v.currentTargetIdx;
     if (cur < 0 || static_cast<u32>(cur) >= v.targetCount) return best;   // no memory / it is gone
     const BotTarget& c = v.targets[static_cast<u32>(cur)];
-    if (!c.hasLOS)                     return best;   // blind: release now, the dwell must not pin us
+    if (!c.hasLOS) {
+        // BLIND — but not necessarily gone. LOS is ONE raycast to the target's CENTRE from a MOVING
+        // eye, so it FLICKERS: measured live in a corridor fight, the nearest hostile's LOS toggled
+        // on 45-57 of every 60 ticks, and each toggle dropped the brain out of FIGHT into TRAVEL and
+        // swung the desired aim ~55 deg — 23-28 times per second. That was the dominant cause of the
+        // "super shaky" camera (the raw target BEARING moved <2 deg/tick the whole time; nothing was
+        // actually jittering except this branch flip).
+        //
+        // So a blind current is HELD for a brief grace, with two hard limits that keep the original
+        // "the dwell must never pin us to something we cannot shoot" guarantee intact:
+        //   * only when NOTHING ELSE is visible (a real rival still steals focus this instant), and
+        //   * only inside TARGET_LOS_GRACE (the driver's timer) — past that it is released for good.
+        // Firing is untouched: decideCombat gates the trigger on t.hasLOS, so a held blind target is
+        // tracked, never shot at.
+        if (best >= 0 || !v.targetBlindGrace) return best;
+        return cur;
+    }
     if (!sameStory(v, c))             return best;   // it (or we) changed story: release, don't chase
     if (c.dist > engageCeiling(v, d))  return best;   // walked out of the reach the brain engages at
     if (best < 0 || best == cur)       return cur;    // it IS the nearest (or nothing else is visible)

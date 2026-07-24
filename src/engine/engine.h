@@ -298,6 +298,15 @@ private:
     // boolean, so it stays engine-free and testable.
     u32              m_autoplayTargetId    = 0;       // BotTarget::id of the hostile being fought (0 = none)
     f32              m_autoplayTargetDwell = 0.0f;    // s on that target; a switch needs Autoplay::TARGET_MIN_DWELL
+    f32              m_autoplayTargetBlind = 0.0f;    // s the engaged target has had NO line of sight; under Autoplay::TARGET_LOS_GRACE it is still held (LOS flicker, not a lost target)
+    // TRAVEL-HEADING COMMIT (aim steadiness). buildBotView re-derives the walk heading from scratch
+    // every tick — the flow-field byte plus the ±45/±90 hazard-detour fan — and BOTH halves toggle as
+    // the bot drifts across a cell boundary, so merely WALKING swung the desired aim 45-90° several
+    // times a second (measured: 8-16 such flips/s). The chosen heading is therefore COMMITTED for a
+    // short window and only re-decided when it stops being safe, the route genuinely reverses, or the
+    // window expires.
+    Vec3             m_autoplayTravelDir  = {0, 0, 0}; // committed unit XZ travel heading ({0,0,0} = none)
+    f32              m_autoplayTravelHold = 0.0f;      // s left on the commit
     // Free-Play auto-confirm. Taking the town portal as a CLEARED hero opens the level select and
     // moves the game to GameState::MENU — where the Autoplay driver does not tick at all — so an
     // unattended run would end its life on that screen. This counts DOWN while the select is up and

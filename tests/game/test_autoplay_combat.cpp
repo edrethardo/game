@@ -298,7 +298,49 @@ TEST_CASE("sticky target: losing line of sight releases it immediately (no dwell
     BotTarget ts[2]; BotView v = twoTargets(10.0f, 11.0f, ts);
     ts[0].hasLOS = false;               // ducked behind a wall
     v.targetSwitchAllowed = false;      // ...and the dwell must NOT hold us on a target we can't see
+    v.targetBlindGrace = true;          // even INSIDE the LOS grace: a visible rival always wins
     CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);
+}
+
+// LOS GRACE. A single raycast to a target's centre from a moving eye flickers (measured: 45-57 of
+// every 60 ticks in a corridor fight), and releasing on each flicker dropped the brain out of FIGHT
+// into TRAVEL and swung the desired aim ~55 deg some 25 times a second — the "super shaky" camera.
+TEST_CASE("sticky target: a one-tick LOS flicker does NOT release it when nothing else is visible") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 11.0f, ts);
+    ts[0].hasLOS = false; ts[1].hasLOS = false;   // the flicker: nothing has LOS this tick
+    v.targetBlindGrace = true;                    // driver: still inside TARGET_LOS_GRACE
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);   // held — the aim does not fly off to TRAVEL
+}
+
+TEST_CASE("sticky target: once the LOS grace expires a blind target is released for good") {
+    BotTarget ts[2]; BotView v = twoTargets(10.0f, 11.0f, ts);
+    ts[0].hasLOS = false; ts[1].hasLOS = false;
+    v.targetBlindGrace = false;                   // driver: blind for longer than TARGET_LOS_GRACE
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == -1);
+}
+
+TEST_CASE("a target held through the LOS grace is TRACKED but never SHOT AT") {
+    // The grace exists to keep the crosshair still, not to let the bot fire blind. decideCombat's
+    // trigger already gates on t.hasLOS, so this pins the two halves together.
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -10.0f}; t.dist = 10.0f; t.hasLOS = false;
+    v.targets = &t; v.targetCount = 1; v.currentTargetIdx = 0; v.targetBlindGrace = true;
+    REQUIRE(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.aimYaw == doctest::Approx(0.0f).epsilon(0.01));   // still facing where it went
+    CHECK_FALSE(out.fire);                                      // ...but the trigger stays up
+}
+
+// AIM DEADZONE — the second half of the shake fix. Direction REVERSALS are what read as shaky, so
+// the aim holds still inside a body-width of slop instead of answering every hair-width change.
+TEST_CASE("aim deadzone: micro-error holds, real error moves, and it never mutes the fire gate") {
+    CHECK(aimWithinDeadzone(0.0f, AIM_DEADZONE_RAD * 0.5f));    // inside: hold
+    CHECK_FALSE(aimWithinDeadzone(0.0f, AIM_DEADZONE_RAD * 2.0f));
+    // Wraps like every other angle helper here (the engine never re-wraps Player::yaw).
+    CHECK(aimWithinDeadzone(3.14159f, -3.14159f));
+    // Load-bearing: a deadzone at or above FIRE_ALIGN_RAD could park the crosshair permanently
+    // outside the fire gate and silently mute the bot.
+    CHECK(AIM_DEADZONE_RAD < FIRE_ALIGN_RAD);
 }
 
 TEST_CASE("sticky target: one that walked out of engagement reach is released") {

@@ -46,6 +46,16 @@
 // number, and a bot that rolls whenever it is legal reads as panic) and the STICKY TARGET (the engaged
 // enemy's identity + how long it has been engaged, so the crosshair stops flipping between similar-range
 // hostiles). Both reach the policy as plain booleans/indices on BotView, keeping the brain engine-free.
+//
+// AIM STEADINESS is a driver concern for the same reason — it is all MEMORY. The bot's camera IS the
+// player camera, so a desired aim that jumps is a screen that shakes, and the measurement said the jumps
+// were never "jitter" in any single signal: they were the aim's SOURCE changing. Three pieces of state
+// answer that, and all three live here: the TARGET LOS GRACE (m_autoplayTargetBlind — a target's LOS
+// raycast flickers, and releasing on the flicker threw the brain between FIGHT and TRAVEL ~25 times a
+// second), the TRAVEL-HEADING COMMIT (m_autoplayTravelDir/Hold — the flow byte and the detour fan both
+// toggle across a cell boundary), and the aim DEADZONE in applyBotIntent. Measured on paired 2-minute
+// live runs: mean |per-tick change of the desired yaw| 5.0 deg -> 1.9, applied-yaw direction reversals
+// 4.5/s -> 1.2 (marksman); 2.8 -> 2.2 and 1.6/s -> 0.9 (warrior).
 #include "engine/engine.h"
 #include "platform/input.h"
 #include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
@@ -190,6 +200,46 @@ void Engine::updateAutoplay(f32 dt) {
     if (m_level.inTown) { autoplayTownStep(dt, uiOpen); return; }
 
     Autoplay::BotView v = buildBotView();
+
+    // TARGET LOS GRACE (aim steadiness). buildBotView has just resolved the sticky target's slot;
+    // time how long it has been BLIND so the pure pickTarget can ride out a flicker instead of
+    // releasing on it. A single raycast to a target's centre from a moving eye toggles constantly
+    // (measured: 45-57 of every 60 ticks in a corridor fight) and each release dropped the brain out
+    // of FIGHT into TRAVEL, swinging the desired aim ~55° some 25 times a second — the camera shake.
+    if (v.currentTargetIdx >= 0 && !v.targets[(u32)v.currentTargetIdx].hasLOS)
+        m_autoplayTargetBlind += dt;
+    else
+        m_autoplayTargetBlind = 0.0f;
+    v.targetBlindGrace = m_autoplayTargetBlind <= Autoplay::TARGET_LOS_GRACE;
+
+    // TRAVEL-HEADING COMMIT (aim steadiness, the other half). Hold whichever heading we committed to
+    // rather than re-deciding the flow byte + detour fan every tick. Three release conditions, all of
+    // them safety- rather than time-driven:
+    //   * the committed step stopped being hazard-safe (re-vetoed every tick — the commit can never
+    //     drive the bot into a wall or lava it would otherwise have refused),
+    //   * the fresh heading points more than ~120° away (a genuine route change, e.g. the exit is now
+    //     behind us) — a 45/90° disagreement is exactly the boundary toggle we are damping, so that
+    //     one deliberately does NOT release,
+    //   * the window expired, or there is no heading at all (at the exit / off-field).
+    {
+        constexpr f32 kTravelCommitSec = 0.40f;   // ~2.4 m at walking speed: a cell or two
+        constexpr f32 kRouteReversed   = -0.5f;   // dot < this = more than 120° apart
+        if (m_autoplayTravelHold > 0.0f) m_autoplayTravelHold -= dt;
+        const bool haveFresh = lengthSq(v.flowDir) > 1e-6f;
+        const bool haveHeld  = lengthSq(m_autoplayTravelDir) > 1e-6f;
+        if (!haveFresh) {                                     // at the exit / boxed in: drop the commit
+            m_autoplayTravelDir = Vec3{0, 0, 0}; m_autoplayTravelHold = 0.0f;
+        } else if (m_autoplayTravelHold > 0.0f && haveHeld &&
+                   dot(m_autoplayTravelDir, v.flowDir) > kRouteReversed &&
+                   Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, m_localPlayer.position.y,
+                                         m_autoplayTravelDir, m_level.lavaFloor)) {
+            v.flowDir = m_autoplayTravelDir;                  // keep walking the committed heading
+        } else {
+            m_autoplayTravelDir  = v.flowDir;                 // re-commit to this tick's choice
+            m_autoplayTravelHold = kTravelCommitSec;
+        }
+    }
+
     Autoplay::BotIntent in = Autoplay::decide(v);
 
     // TARGET STICKINESS bookkeeping. Re-run the (pure, cheap — a scan of <= 16 slots) pick with the
@@ -992,9 +1042,15 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt, 
     const f32 lerp = (err >= kFlickError) ? 1.0f : (err / kFlickError);
     const f32 rate = kAimTurnFine + (kAimTurnFlick - kAimTurnFine) * lerp;
 
-    m_localPlayer.yaw = Autoplay::stepAngle(m_localPlayer.yaw, desiredYaw, kAimGain, rate, dt);
+    // DEADZONE FIRST. Inside AIM_DEADZONE_RAD the aim simply HOLDS — see the constant for why
+    // reversals, not magnitude, are what read as "shaky". Yaw and pitch are gated independently so a
+    // settled yaw doesn't freeze a pitch that still has real work to do (and vice versa).
+    if (!Autoplay::aimWithinDeadzone(m_localPlayer.yaw, desiredYaw))
+        m_localPlayer.yaw = Autoplay::stepAngle(m_localPlayer.yaw, desiredYaw, kAimGain, rate, dt);
     // Pitch rides the same ease + cap (no wrapping needed — stepAngle's fold is a no-op inside ±89°).
-    f32 pitch = Autoplay::stepAngle(m_localPlayer.pitch, desiredPitch, kAimGain, rate, dt);
+    f32 pitch = m_localPlayer.pitch;
+    if (!Autoplay::aimWithinDeadzone(pitch, desiredPitch))
+        pitch = Autoplay::stepAngle(pitch, desiredPitch, kAimGain, rate, dt);
     // Clamp to the same ±89° applyMovement enforces (a straight-down/up aim would gimbal look).
     constexpr f32 kMaxPitch = 89.0f * 3.14159265f / 180.0f;
     if (pitch >  kMaxPitch) pitch =  kMaxPitch;
