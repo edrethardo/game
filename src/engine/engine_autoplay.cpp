@@ -430,6 +430,12 @@ void Engine::updateAutoplay(f32 dt) {
             Autoplay::BotIntent u = unstickCombatMove(v, esc, m_level.grid, feetY, m_level.lavaFloor,
                                                       anchor, m_localPlayer.position, m_localPlayer.yaw);
             if (intentActs(u)) in = u;
+            // JUMP as part of the escape. The ladder above only ever tried new HEADINGS, and a body
+            // caught on a lip, a step edge or the inside of a corner does not need a new heading —
+            // it needs to leave the ground, because move-and-slide will keep refusing the same
+            // blocked axis at the same height forever. Pulsed on the kiting cadence rather than held
+            // so the bot hops out rather than pogoing (a held JUMP re-fires every landing frame).
+            in.jump = Autoplay::kitingJumpTick(v.tick);
         }
     } else if (m_autoplayExitBull && v.doorActive && !bossGate) {
         // Remedy B2 — EXIT BULL (the exit-progress watchdog latched): the bot is MOVING but getting
@@ -533,6 +539,9 @@ void Engine::updateAutoplay(f32 dt) {
             in.moveRight = otherOk && !wasRight;
         }
     }
+    // JUMP only from the ground (the engine ignores it otherwise, but asking for what cannot happen
+    // muddies the telemetry) and never while a roll owns the body.
+    if (in.jump && (!m_localPlayer.onGround || m_localPlayer.dodgeState.rolling)) in.jump = false;
 
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
 }

@@ -489,14 +489,19 @@ holds a target the brain refuses to engage and falls through to TRAVEL with a li
 Live: mean seconds on one target Marksman 2.8 → 3.4, Warrior 1.7 → 2.3 (a melee bot's switch rate is
 floored by its own kill rate — a dead target forces a re-pick — so stickiness has little headroom there).
 (4) **NO DIAGONAL CORNER-CUTTING** in the hazard veto — see the veto-scope paragraph below.
-(6) **STRAFE.** `BotIntent::moveLeft`/`moveRight` were plumbed all the way to the input overlay and
-**never set by anything** — the bot only ever moved fore/aft, so it stood still inside its band and ate
+(6) **STRAFE AND JUMP.** `BotIntent::moveLeft`/`moveRight`/`jump` were plumbed all the way to the
+input overlay and **never set by anything** — the bot only ever moved fore/aft, so it stood still inside its band and ate
 every arrow. Against a RANGED target it is holding ground for (not closing, not kiting), the policy
 now side-steps, flipping sides every `STRAFE_FLIP_TICKS` (66 ≈ 1.1 s; a constant slide walks out of the band
 and a straight line is what a leading shooter wants). It rides the CURRENT yaw, so unlike the backpedal it
 does not drag the crosshair off target. The **driver owns the safety check** and is authoritative for every
 strafe producer (policy and unstick alike): it re-derives the world direction from the player's actual yaw,
-runs `stepAllowed`, and REVERSES to the other side before giving up.
+runs `stepAllowed`, and REVERSES to the other side before giving up. A JUMP is pulsed on
+`kitingJumpTick` (~2.2 s period, 5-tick pulse) while kiting or strafing — it breaks a shooter's vertical
+lead and clears a 1-cell gap or lava vein — never while CLOSING (an airborne bot cannot steer). The same
+pulse is now also part of the **escape ladder**: that ladder only ever tried new HEADINGS, and a body caught
+on a lip or the inside of a corner needs to leave the ground, because move-and-slide keeps refusing the same
+blocked axis at the same height forever.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, `Autoplay::pickDropHole` for FOUR_STORY, lava rides the lava-aware veto).
 **The Descent (FOUR_STORY) needed two rules of its own**, both from a measured 150 s trace in which neither a

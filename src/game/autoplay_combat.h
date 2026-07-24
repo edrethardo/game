@@ -179,6 +179,16 @@ constexpr f32 GAP_CLOSE_COOLDOWN = 6.0f;    // s between gap-closer rolls (drive
 // leading shooter wants.
 constexpr u32 STRAFE_FLIP_TICKS = 66;    // 1.1 s at 60 Hz — inside the 0.8-1.5 s feel window
 
+// KITING JUMP. A jump breaks a shooter's vertical lead and, at the ~2.4 m of reach the base move
+// speed gives, clears a 1-cell lava vein or gap while retreating. On a LONG leash on purpose:
+// bunny-hopping is both silly to watch and slower than walking, and the airborne frames are frames
+// the bot cannot change direction in.
+constexpr u32 JUMP_PERIOD_TICKS = 132;   // ~2.2 s between kiting hops
+constexpr u32 JUMP_HOLD_TICKS   = 5;     // held a few ticks so the jump edge can't be missed
+
+// True on the ticks the kiting/strafing hop should be requested.
+inline bool kitingJumpTick(u32 tick) { return (tick % JUMP_PERIOD_TICKS) < JUMP_HOLD_TICKS; }
+
 // True if this enemy's MELEE swing is close enough to land that rolling now buys the i-frames.
 // Mirrors swingIsLanding's two engine facts (ranged timers say when the SHOT LEAVES, not when it
 // lands; a negative timer is the stale behind-cover drift, not "about to swing"), at the roll's
@@ -312,6 +322,14 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         else                                   out.moveLeft  = true;
     }
 
+    // KITING JUMP. While retreating from a melee threat or side-stepping a shooter, hop on a long
+    // period: it breaks a leading shooter's vertical solution and clears a 1-cell gap or lava vein
+    // mid-retreat. Never while closing (out.moveFwd) — an airborne bot cannot steer, and losing
+    // steering on the approach is how it ends up hugging a wall instead of its target.
+    if ((out.moveBack || out.moveLeft || out.moveRight) && v.onGround && !v.stunned && !v.rolling &&
+        kitingJumpTick(v.tick))
+        out.jump = true;
+
     // Fire whenever the target has LOS and is within weapon reach — INCLUDING inside the kite floor.
     // Shooting while retreating is what kiting IS; gating fire on the full band meant a swarm that got
     // inside engageMin was never shot at, so a ranged/caster bot backpedalled forever and killed
@@ -370,6 +388,12 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         for (u32 i = 0; i < v.targetCount; i++)
             if (swingIsLanding(v.targets[i])) { out.block = true; break; }
     }
+
+    // A ROLL BEATS A HOP on the tick both want to happen. The roll is decided above on a real
+    // trigger (an incoming swing, or a charge across a firing lane) and carries i-frames; the hop is
+    // a cadence with no trigger at all. They also fight over the same body: the roll direction reads
+    // the WASD held THIS tick, and leaving the ground first would spend the roll mid-air.
+    if (out.dodge) out.jump = false;
 
     return out;
 }

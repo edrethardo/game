@@ -829,3 +829,67 @@ TEST_CASE("no strafe while CLOSING on a shooter — ground first, dodging second
     CHECK_FALSE(out.moveRight);
 }
 
+// --- KITING JUMP ---------------------------------------------------------------------------------
+
+TEST_CASE("the kiting jump respects its period") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;                 // => strafing, so the hop is eligible
+    v.targets = &t; v.targetCount = 1;
+    const Doctrine d = doctrineFor(v.buildCell);
+
+    v.tick = 0;                       CHECK(decideCombat(v, d).jump);
+    v.tick = JUMP_HOLD_TICKS - 1;     CHECK(decideCombat(v, d).jump);
+    v.tick = JUMP_HOLD_TICKS;         CHECK_FALSE(decideCombat(v, d).jump);
+    v.tick = JUMP_PERIOD_TICKS / 2;   CHECK_FALSE(decideCombat(v, d).jump);
+    v.tick = JUMP_PERIOD_TICKS;       CHECK(decideCombat(v, d).jump);
+}
+
+TEST_CASE("no kiting jump while closing, airborne, or rolling") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -30.0f}; t.dist = 30.0f; t.hasLOS = true;   // too far: closing
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    const Doctrine d = doctrineFor(v.buildCell);
+    CHECK_FALSE(decideCombat(v, d).jump);          // closing: an airborne bot cannot steer
+
+    t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f;     // in band => strafing
+    v.onGround = false;  CHECK_FALSE(decideCombat(v, d).jump);
+    v.onGround = true; v.rolling = true; CHECK_FALSE(decideCombat(v, d).jump);
+}
+
+TEST_CASE("a kiting MELEE retreat also hops") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;   // inside the kite floor
+    t.isRanged = false; t.attackRange = 2.0f;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    REQUIRE(out.moveBack);
+    CHECK(out.jump);
+}
+
+TEST_CASE("the jump cadence is shared with the driver's escape ladder") {
+    // The stuck-escape pulses JUMP on this same helper (a body caught on a lip needs to leave the
+    // ground, not a new heading) — a HELD jump would re-fire on every landing frame and pogo.
+    u32 on = 0;
+    for (u32 t = 0; t < JUMP_PERIOD_TICKS; t++) if (kitingJumpTick(t)) on++;
+    CHECK(on == JUMP_HOLD_TICKS);              // a short pulse per period, not a hold
+    CHECK(kitingJumpTick(0));
+    CHECK(kitingJumpTick(JUMP_PERIOD_TICKS));  // and it repeats
+}
+
+TEST_CASE("a roll beats the kiting hop when both want the same tick") {
+    // The roll has a real trigger and i-frames; the hop is a bare cadence. They also fight over the
+    // body — computeRollDirection reads the WASD held THIS tick, and leaving the ground first would
+    // spend the roll in mid-air.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3 * 2 + 2;                                  // Glass/Ranged: dodgesProactively
+    BotTarget t{}; t.pos = {0, 1.7f, -2.0f}; t.dist = 2.0f; t.hasLOS = true;
+    t.isRanged = false; t.attackRange = 2.0f; t.attackTimer = 0.1f;   // a swing is landing
+    v.targets = &t; v.targetCount = 1;
+    v.tick = 0;                                               // ...on a hop tick
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    REQUIRE(out.moveBack);                                    // kiting the melee threat
+    REQUIRE(out.dodge);
+    CHECK_FALSE(out.jump);
+}
