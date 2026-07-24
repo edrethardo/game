@@ -171,6 +171,20 @@ TEST_CASE("descend eligibility: only inside the 2 m door radius, only when activ
     ctx.doorActive = false; CHECK_FALSE(Autoplay::mayDescend(ctx));  // no door (town/arena)
 }
 
+TEST_CASE("a remedy may only STAND STILL where the descend can actually fire") {
+    // The exit-wedge remedy engaged at 2.5 m while updateFloorDoor descends at 2.0 m, so between the
+    // two the bot stood perfectly still holding a button that could never fire — and standing still
+    // IS "no progress", so the remedy re-armed itself forever (73 consecutive seconds frozen beside
+    // an open exit, measured live). The stop distance must therefore sit strictly INSIDE the radius.
+    CHECK(Autoplay::DESCEND_STOP_M < Autoplay::DESCEND_RADIUS);
+    Autoplay::DescendCtx ctx;
+    ctx.doorActive = true; ctx.hasBoss = false; ctx.bossAlive = false;
+    ctx.distToDoor = Autoplay::DESCEND_STOP_M;
+    CHECK(Autoplay::mayDescend(ctx));            // parked at the stop distance, the hold really fires
+    ctx.distToDoor = 2.4f;
+    CHECK_FALSE(Autoplay::mayDescend(ctx));      // ...and the old 2.5 m trigger band never could
+}
+
 TEST_CASE("descend pulse: holds then releases so the hold can re-fire past a shrine") {
     // The button must be HELD past the 0.35 s hold threshold (so the hold fires at all) and then
     // RELEASED within one cycle (so Interact::poll's `consumed` latch clears and the NEXT hold can

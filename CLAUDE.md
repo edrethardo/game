@@ -589,7 +589,15 @@ because the bot is BOXED, strafe around the target while FIRING, which is the on
 exit": A*-routed first leg, fire through anything on the path, stop inside 1.5 m so the interact hold can
 land), and an **escalating escape** for a geometry wedge (>4 s without XZ progress: lateral ±90/180 nudge →
 8-direction safe-step search away from the wedge anchor → a short A* leg toward the door, each heading
-re-checked against `stepAllowed`). **Auto-respawn**
+re-checked against `stepAllowed`).
+**A remedy may only STAND STILL where the descend can actually fire.** The exit-wedge remedy engaged at
+2.5 m while `updateFloorDoor` descends at **2.0 m**, so between the two it planted the bot holding a button
+that could never fire — and standing still IS "no progress", so the remedy re-armed itself forever
+(measured: 73 consecutive seconds frozen beside an open exit). `Autoplay::DESCEND_RADIUS` / `DESCEND_STOP_M`
+(1.9 m) single-source that, with a `static_assert` + test pinning stop < radius; outside the radius the
+remedy WALKS THE LAST METRE IN (interact still held) instead of parking, bounded by the no-progress timer so
+it can never shadow the geometry escape.
+**Auto-respawn**
 re-enters the run ~1.5 s after a solo death (entrance spawn); the **difficulty ladder** is the existing
 floor-50→next-difficulty flow. **No save-format change** — `m_autoplayActive` and the backstop timers are
 all transient. This bot is the **empirical playtest rig the balance-lab spec deferred** — it runs the real

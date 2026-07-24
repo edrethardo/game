@@ -170,13 +170,25 @@ struct DescendCtx {
     bool hasBoss    = false;   // m_level.floorHasBoss (exit is sealed on boss floors)
     bool bossAlive  = false;   // floorBossAlive()
 };
-// Mirror of updateFloorDoor's gate: within 2 m of an active door (the real code tests squared
-// distance < 4.0 — the strict-vs-inclusive boundary at exactly 2.0 m is unreachable in practice)
-// and not blocked by a live floor boss. The Source portal is a SEPARATE trigger the brain simply
-// never requests, so it needs no branch here.
+// The radius updateFloorDoor actually descends in (engine_update.cpp tests squared distance < 4.0 —
+// the strict-vs-inclusive boundary at exactly 2.0 m is unreachable in practice). SINGLE-SOURCED,
+// because every anti-wedge remedy that decides to STAND STILL and hold the interact button has to
+// be sure the hold can really fire from where it stopped.
+inline constexpr f32 DESCEND_RADIUS = 2.0f;
+// Where a remedy may plant the bot and hold interact. Strictly INSIDE DESCEND_RADIUS: the exit-wedge
+// remedy used to engage at 2.5 m, so between 2.0 and 2.5 m it stood the bot perfectly still holding
+// a button that could never fire — and standing still is itself "no progress", so the remedy re-armed
+// forever (measured live: 73 consecutive seconds frozen beside an open exit). Outside this the bot
+// must keep WALKING IN, never park.
+inline constexpr f32 DESCEND_STOP_M = 1.9f;
+static_assert(DESCEND_STOP_M < DESCEND_RADIUS, "a remedy must only stand still where the descend can fire");
+
+// Mirror of updateFloorDoor's gate: within DESCEND_RADIUS of an active door and not blocked by a
+// live floor boss. The Source portal is a SEPARATE trigger the brain simply never requests, so it
+// needs no branch here.
 inline bool mayDescend(const DescendCtx& c) {
     if (!c.doorActive) return false;
-    if (c.distToDoor > 2.0f) return false;
+    if (c.distToDoor > DESCEND_RADIUS) return false;
     if (c.hasBoss && c.bossAlive) return false;
     return true;
 }

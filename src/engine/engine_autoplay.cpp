@@ -26,7 +26,9 @@
 // exempted any in-band fight outright, so a bot firing at a target it could never kill (cover/doorway/
 // elevation blocks the shots even though the LOS raycast to the centre reads clear) suppressed its own
 // stuck timer and stood there forever. The ladder:
-//   A  wedged AT the exit          -> stand still and force the descend hold.
+//   A  wedged AT the exit          -> stand still and force the descend hold INSIDE the real 2 m
+//                                     descend radius; between that and 2.5 m, walk the last metre in
+//                                     (standing still out there held a button that could never fire).
 //   B  wedged on geometry          -> ESCALATING escape (lateral nudge -> 8-direction safe-step search
 //                                     away from the wedge -> a short A* leg toward the exit).
 //   B2 EXIT BULL                   -> the exit-progress watchdog: the bot is MOVING but never arriving
@@ -382,9 +384,29 @@ void Engine::updateAutoplay(f32 dt) {
     // Remedy A (priority) — WEDGED right at the exit with the boss dead: an unreachable LOS straggler keeps
     // FIGHT active but the bot can't close, so stand still and force the descend (hold PICKUP, drop
     // fire/move) — the interact-hold completes over the next few ticks and we leave.
-    if (stuck && v.doorActive && v.distToDoor < 2.5f && !bossGate) {
+    //
+    // The stand-still is gated on DESCEND_STOP_M, strictly INSIDE the 2 m radius updateFloorDoor
+    // actually descends in. It used to engage at 2.5 m, which meant that between 2.0 and 2.5 m the bot
+    // stood perfectly still holding a button that could never fire — and standing still IS "no
+    // progress", so the remedy re-armed itself forever (measured live: 73 consecutive seconds frozen
+    // beside an open exit). Outside the radius it now WALKS THE LAST METRE IN instead, still holding
+    // the interact so the descend fires the instant it arrives. That walk-in is bounded by the
+    // no-progress timer: if pressing at the door isn't working after 8 s the bot is wedged on real
+    // geometry, and the escape ladder below — which the walk-in must never shadow — takes over.
+    const bool atDoor = stuck && v.doorActive && !bossGate;
+    if (atDoor && v.distToDoor < Autoplay::DESCEND_STOP_M) {
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
+        in.descend = true;
+    } else if (atDoor && v.distToDoor < 2.5f && m_autoplayNoProgressTimer < 8.0f) {
+        in = Autoplay::BotIntent{};
+        in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
+        const Vec3 h{m_level.floorDoorPos.x - m_localPlayer.position.x, 0.0f,
+                     m_level.floorDoorPos.z - m_localPlayer.position.z};
+        if (lengthSq(h) > 1e-6f) {
+            f32 y, p; Autoplay::dirToAim(h, y, p);
+            in.aimYaw = y; in.aimPitch = 0.0f; in.moveFwd = true;   // close the last metre
+        }
         in.descend = true;
     } else if (stuck || m_autoplayNudgeTimer > 0.0f || m_autoplayEscapeTimer > 0.0f) {
         // Remedy B — wedged on geometry: an ESCALATING escape so an AFK bot is NEVER found permanently

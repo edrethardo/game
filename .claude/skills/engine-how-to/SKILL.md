@@ -109,6 +109,11 @@ on a flat floor for the regression and on `--vhall`/`--fourstory`/`--lava` for t
   re-creates the shake. Do NOT "fix" it by low-passing the desired aim — a second lag stage in series with
   `stepAngle` pushes the steady-state tracking error past `FIRE_ALIGN_RAD` and MUTES fire on any crossing
   target, and it does nothing about how OFTEN the source changes.
+- **A remedy may only STAND STILL where the descend can actually fire.** `updateFloorDoor` descends inside
+  **2 m** (`Autoplay::DESCEND_RADIUS`); the exit-wedge remedy used to plant the bot at 2.5 m holding
+  PICKUP, and since standing still is itself "no progress" the remedy re-armed forever (73 s frozen beside
+  an open exit). Any new "stop and hold interact" backstop must gate on `Autoplay::DESCEND_STOP_M` (1.9 m)
+  or keep WALKING IN — never park outside the radius.
 - **Target LOS must be the WORLD-ONLY `Raycast::cast`, never `CombatQuery::raycast`.** The combat raycast
   sweeps world AND entities and reports only the NEAREST hit, so an enemy standing in front of a wall
   makes the nearest hit an ENTITY and the wall stops counting as an occluder — the bot sees and shoots
