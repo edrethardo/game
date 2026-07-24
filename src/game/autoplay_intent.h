@@ -117,6 +117,10 @@ struct BotView {
     // NOT — Break Free is the escape FROM a stun.
     bool bootCastable   = false;
     bool helmetCastable = false;
+    // Sim tick, for the DETERMINISTIC cadences below (strafe side flips, the kiting jump). rand()
+    // would desync a replay and make a live bug unreproducible; a tick counter is reproducible and
+    // free. Defaulted 0, which puts a hand-built test view at the start of every cadence.
+    u32  tick = 0;
     // targets (nearest-first, driver-capped)
     const BotTarget* targets;
     u32   targetCount;

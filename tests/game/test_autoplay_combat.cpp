@@ -776,3 +776,56 @@ TEST_CASE("does not burn equipment skills at nothing: no LOS target => no cast")
     CHECK_FALSE(out.helmetSkill);
 }
 
+// --- STRAFE vs RANGED ENEMIES --------------------------------------------------------------------
+
+TEST_CASE("strafes against a RANGED enemy: exactly one side, never both") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;   // inside the band
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveLeft != out.moveRight);      // one of them, exclusively
+    CHECK_FALSE(out.moveFwd);
+    CHECK_FALSE(out.moveBack);
+}
+
+TEST_CASE("the strafe side FLIPS on its period, so the line is never predictable") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    const Doctrine d = doctrineFor(v.buildCell);
+
+    v.tick = 0;                          BotIntent a = decideCombat(v, d);
+    v.tick = STRAFE_FLIP_TICKS - 1;      BotIntent b = decideCombat(v, d);
+    v.tick = STRAFE_FLIP_TICKS;          BotIntent c = decideCombat(v, d);
+    v.tick = STRAFE_FLIP_TICKS * 2;      BotIntent e = decideCombat(v, d);
+
+    CHECK(a.moveLeft == b.moveLeft);     // same half-period: same side
+    CHECK(a.moveLeft != c.moveLeft);     // period boundary: flipped
+    CHECK(a.moveLeft == e.moveLeft);     // two periods on: back again
+}
+
+TEST_CASE("no ranged strafe against a MELEE target") {
+    // A melee enemy is closing; the answer to that is the kite/hug band and the dodge, not a
+    // side-step that keeps the bot inside its reach.
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = false; t.attackRange = 2.0f;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(out.moveLeft);
+    CHECK_FALSE(out.moveRight);
+}
+
+TEST_CASE("no strafe while CLOSING on a shooter — ground first, dodging second") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -30.0f}; t.dist = 30.0f; t.hasLOS = true;  // beyond engageMax
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    REQUIRE(out.moveFwd);
+    CHECK_FALSE(out.moveLeft);
+    CHECK_FALSE(out.moveRight);
+}
+

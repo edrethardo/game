@@ -166,6 +166,19 @@ constexpr f32 DODGE_REACH_SLACK  = 1.35f;   // x the attacker's own reach (block
 // into a stutter of little hops.
 constexpr f32 GAP_CLOSE_COOLDOWN = 6.0f;    // s between gap-closer rolls (driver-enforced)
 
+// --- STRAFE + KITING JUMP CADENCES -------------------------------------------------------------
+// Both are driven off the sim tick, never rand(): a random cadence desyncs a replay and makes a
+// live bug unreproducible, and these have to be reasonable to watch, not unpredictable.
+//
+// STRAFE. Against a RANGED enemy the bot used to stand perfectly still inside its band and eat
+// every shot — moveLeft/moveRight existed on BotIntent and were literally never set anywhere. A
+// side-step is what makes an archer's lead miss, and because the strafe rides the CURRENT yaw the
+// crosshair stays on the target while the body slides (unlike the backpedal, which drags the aim).
+// The side FLIPS on a period rather than holding: a constant slide walks the bot out of its own
+// engagement band and eventually into a wall, and a predictable straight line is exactly what a
+// leading shooter wants.
+constexpr u32 STRAFE_FLIP_TICKS = 66;    // 1.1 s at 60 Hz — inside the 0.8-1.5 s feel window
+
 // True if this enemy's MELEE swing is close enough to land that rolling now buys the i-frames.
 // Mirrors swingIsLanding's two engine facts (ranged timers say when the SHOT LEAVES, not when it
 // lands; a negative timer is the stale behind-cover drift, not "about to swing"), at the roll's
@@ -289,6 +302,15 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // roll below still handles the case where it is OUTSIDE the band and wants to charge.
     if (t.dist < lo)      out.moveBack = !t.isRanged;
     else if (t.dist > hi) out.moveFwd  = true;    // too far: close in
+
+    // STRAFE against a shooter. Only while HOLDING GROUND (neither closing nor kiting) — a strafe
+    // stacked on a forward/back walk is a diagonal that leaves the band on both axes, and closing
+    // ground is worth more than dodging while out of range. The driver re-checks the chosen side
+    // against the hazard veto and flips or drops it, so this never walks the bot into a wall.
+    if (t.isRanged && !out.moveFwd && !out.moveBack) {
+        if ((v.tick / STRAFE_FLIP_TICKS) & 1u) out.moveRight = true;
+        else                                   out.moveLeft  = true;
+    }
 
     // Fire whenever the target has LOS and is within weapon reach — INCLUDING inside the kite floor.
     // Shooting while retreating is what kiting IS; gating fire on the full band meant a swarm that got

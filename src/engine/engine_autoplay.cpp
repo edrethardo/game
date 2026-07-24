@@ -509,6 +509,31 @@ void Engine::updateAutoplay(f32 dt) {
     }
 
 
+    // (4) HAZARD-VETO the lateral strafe, and gate the jump. The pure policy asks for a side-step
+    // without knowing the geometry (that is the whole point of keeping it engine-free), so the one
+    // authoritative check lives here — and here it is authoritative for EVERY producer of a strafe,
+    // the combat policy and the unstick helper alike.
+    //
+    // MOVE_RIGHT's world direction is {cos(yaw), 0, -sin(yaw)} (player.cpp: right = cross(flatForward,
+    // up)); MOVE_LEFT is its negation. The basis is the player's CURRENT yaw rather than the intent's
+    // desired yaw, because that is the yaw the movement code will actually read this tick — the aim
+    // is only EASED toward the desired one.
+    if (in.moveLeft || in.moveRight) {
+        const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+        const Vec3 want = in.moveRight ? Vec3{cy, 0.0f, -sy} : Vec3{-cy, 0.0f, sy};
+        const f32  feetY = m_localPlayer.position.y;
+        if (!Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, want, m_level.lavaFloor)) {
+            // Blocked that way: try the other side before giving up, so a bot strafing along a wall
+            // simply reverses instead of standing still until the cadence flips it back.
+            const Vec3 other = want * -1.0f;
+            const bool otherOk = Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY,
+                                                       other, m_level.lavaFloor);
+            const bool wasRight = in.moveRight;
+            in.moveLeft = otherOk && wasRight;
+            in.moveRight = otherOk && !wasRight;
+        }
+    }
+
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
 }
 
@@ -669,6 +694,9 @@ Autoplay::BotView Engine::buildBotView() {
         v.bootCastable   = castable(m_bootSkillStates[m_localPlayerIndex]);
         v.helmetCastable = !v.stunned && castable(m_helmetSkillStates[m_localPlayerIndex]);
     }
+
+    // Deterministic cadence clock for the strafe flip + the kiting jump (never rand()).
+    v.tick = currentLocalTick();
 
     // --- weapon (effective, incl. affixes) ---
     // Mirror getEffectiveWeapon; MELEE/HITSCAN carry no projectile lead (projSpeed 0), only PROJECTILE.

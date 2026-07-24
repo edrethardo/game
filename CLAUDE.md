@@ -489,6 +489,14 @@ holds a target the brain refuses to engage and falls through to TRAVEL with a li
 Live: mean seconds on one target Marksman 2.8 → 3.4, Warrior 1.7 → 2.3 (a melee bot's switch rate is
 floored by its own kill rate — a dead target forces a re-pick — so stickiness has little headroom there).
 (4) **NO DIAGONAL CORNER-CUTTING** in the hazard veto — see the veto-scope paragraph below.
+(6) **STRAFE.** `BotIntent::moveLeft`/`moveRight` were plumbed all the way to the input overlay and
+**never set by anything** — the bot only ever moved fore/aft, so it stood still inside its band and ate
+every arrow. Against a RANGED target it is holding ground for (not closing, not kiting), the policy
+now side-steps, flipping sides every `STRAFE_FLIP_TICKS` (66 ≈ 1.1 s; a constant slide walks out of the band
+and a straight line is what a leading shooter wants). It rides the CURRENT yaw, so unlike the backpedal it
+does not drag the crosshair off target. The **driver owns the safety check** and is authoritative for every
+strafe producer (policy and unstick alike): it re-derives the world direction from the player's actual yaw,
+runs `stepAllowed`, and REVERSES to the other side before giving up.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, `Autoplay::pickDropHole` for FOUR_STORY, lava rides the lava-aware veto).
 **The Descent (FOUR_STORY) needed two rules of its own**, both from a measured 150 s trace in which neither a
@@ -518,10 +526,11 @@ and the sticky release, which must agree) on `|target feet − bot feet| ≤ STO
 hover 1.5-2.5 m above their target by design and a hovering enemy is not an unreachable ledge sniper.
 2.6 m rather than the 3 m story pitch, to clear a ranged flyer's ~2.1 m feet.
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in
-`buildBotView` to `flowDir` — the TRAVEL heading — **and to nothing else**. `applyBotIntent` vetoes
-nothing, so the FIGHT branch's own kite/close/strafe movement is unvetoed by design (short, reactive,
-enemy-derived); the escape backstop calls `stepAllowed` itself. A NEW nav source must either fold into
-`flowDir` upstream of that check or call `stepAllowed` on its own heading.
+`buildBotView` to `flowDir` — the TRAVEL heading — plus, at the very end of `updateAutoplay`, to the
+LATERAL strafe (whoever produced it: the combat policy or the unstick helper). `applyBotIntent` itself
+vetoes nothing, so the FIGHT branch's fore/aft kite/close movement stays unvetoed by design (short,
+reactive, enemy-derived); the escape backstop calls `stepAllowed` on its own headings. A NEW nav source
+must either fold into `flowDir` upstream of that check or call `stepAllowed` on its own heading.
 The veto enforces **NO CORNER CUTTING**: a step that crosses BOTH grid axes needs the diagonal cell AND
 both orthogonal component cells, the same rule `Pathfinder::findPath` applies to its 8-connected expansion.
 The original point-sampled only the destination, so it happily approved squeezing through a wall's shared
