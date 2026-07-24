@@ -100,6 +100,16 @@ inline Doctrine doctrineFor(u8 cell) {
             d.potionHpFrac = 0.50f; d.blocks = (col != 2); d.dodgesProactively = (col == 2);
             d.usesCover = false; d.disengageCount = 3; break;
     }
+
+    // RANGED BUILDS BLOCK TOO. The row table used to leave the shield off for Moderate/Ranged and
+    // Glass/Ranged on the theory that a bow user has no business behind a shield. Two engine facts
+    // say otherwise: a PERFECT block negates ALL damage and is a pure timing feat the game always
+    // rewards, and blocking does NOT gate firing — the only cost is 0.4x move speed for the ~0.15 s
+    // the tap lasts. So the shield is free damage prevention for any build that can time it, and
+    // the bot taps rather than holds (see PERFECT_BLOCK_* in autoplay_combat.h). Applied AFTER the
+    // row switch so it wins over the row's default; the dodge/cover posture the row sets is
+    // untouched, because a tap and a roll are different buttons and can both fire in a fight.
+    if (col == 2) d.blocks = true;
     return d;
 }
 

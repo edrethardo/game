@@ -707,6 +707,32 @@ Autoplay::BotView Engine::buildBotView() {
     // Deterministic cadence clock for the strafe flip + the kiting jump (never rand()).
     v.tick = currentLocalTick();
 
+    // --- inbound HOSTILE projectile: seconds to impact, soonest first -------------------------
+    // What makes a shield raise land in the PERFECT window against an archer. Only `!fromPlayer`
+    // shots are considered — reacting to our own would have the bot blocking its own bow — and only
+    // ones actually CLOSING: the time of closest approach along the shot's own velocity must be in
+    // the future, and the miss distance at that moment must be inside the player's body. That miss
+    // test is what keeps the bot from turtling every time a stray bolt crosses the room.
+    {
+        v.incomingProjectileEta = 1e9f;
+        const Vec3 centre = m_localPlayer.position + Vec3{0.0f, PLAYER_HEIGHT * 0.5f, 0.0f};
+        // Body half-width plus a little: a projectile has its own radius, and the aim is to raise
+        // slightly too often rather than miss a hit that was going to land.
+        constexpr f32 kHitR = PLAYER_HALF_WIDTH + 0.35f;
+        for (u32 a = 0; a < m_projectiles.activeCount; a++) {
+            const Projectile& p = m_projectiles.projectiles[m_projectiles.activeList[a]];
+            if (!p.active || p.fromPlayer) continue;          // ours, or a reaped slot
+            const f32 v2 = lengthSq(p.velocity);
+            if (v2 < 1.0f) continue;                          // effectively parked: no impact clock
+            const Vec3 rel = centre - p.position;
+            const f32  tca = dot(rel, p.velocity) / v2;       // time of closest approach
+            if (tca <= 0.0f) continue;                        // already past us / moving away
+            const Vec3 miss = rel - p.velocity * tca;         // offset at closest approach
+            if (lengthSq(miss) > kHitR * kHitR) continue;     // it misses: nothing to block
+            if (tca < v.incomingProjectileEta) v.incomingProjectileEta = tca;
+        }
+    }
+
     // --- weapon (effective, incl. affixes) ---
     // Mirror getEffectiveWeapon; MELEE/HITSCAN carry no projectile lead (projSpeed 0), only PROJECTILE.
     const WeaponDef w = Inventory::getEffectiveWeapon(m_inventories[0], m_itemDefs, m_weaponDefs[0]);

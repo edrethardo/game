@@ -121,6 +121,10 @@ struct BotView {
     // would desync a replay and make a live bug unreproducible; a tick counter is reproducible and
     // free. Defaulted 0, which puts a hand-built test view at the start of every cadence.
     u32  tick = 0;
+    // Seconds until the soonest HOSTILE projectile currently closing on the bot would reach it
+    // (1e9 = nothing inbound). A ranged enemy's own attackTimer only says when the shot LEAVES, so
+    // this is the only thing that can time a shield raise into the perfect window against an archer.
+    f32  incomingProjectileEta = 1e9f;
     // targets (nearest-first, driver-capped)
     const BotTarget* targets;
     u32   targetCount;

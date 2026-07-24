@@ -489,9 +489,20 @@ holds a target the brain refuses to engage and falls through to TRAVEL with a li
 Live: mean seconds on one target Marksman 2.8 → 3.4, Warrior 1.7 → 2.3 (a melee bot's switch rate is
 floored by its own kill rate — a dead target forces a re-pick — so stickiness has little headroom there).
 (4) **NO DIAGONAL CORNER-CUTTING** in the hazard veto — see the veto-scope paragraph below.
-(6) **STRAFE AND JUMP.** `BotIntent::moveLeft`/`moveRight`/`jump` were plumbed all the way to the
-input overlay and **never set by anything** — the bot only ever moved fore/aft, so it stood still inside its band and ate
-every arrow. Against a RANGED target it is holding ground for (not closing, not kiting), the policy
+(5) **RANGED BUILDS BLOCK, AND THE SHIELD TIMES INBOUND SHOTS.** `doctrineFor` now forces `blocks` on for
+the whole **Ranged column** (it was off for Moderate/Ranged and Glass/Ranged): a PERFECT block negates ALL
+damage, it is a pure timing feat the game always rewards, and blocking does NOT gate firing — the only
+cost is 0.4× move speed for the ~0.15 s the tap lasts, so there is no build it is wrong for. That is only
+useful against archers if the raise can be TIMED, and `swingIsLanding` refuses ranged attackers by design
+(their `attackTimer` marks the LAUNCH, not the impact — the flight time blows the window). So the driver
+scans the live projectile pool for **hostile** shots (`!fromPlayer`) that are genuinely closing — the time
+of closest approach along the shot's own velocity must be in the future AND the miss distance at that
+moment inside the player's body, which is what stops a stray bolt crossing the room from causing a turtle —
+and reports the soonest as `BotView.incomingProjectileEta`; `decideCombat` raises inside
+`PERFECT_BLOCK_LEAD`. That ETA is a real impact clock, so it can be timed exactly like a melee swing.
+(6) **STRAFE AND JUMP.** `BotIntent::moveLeft`/`moveRight`/`jump` were plumbed all the way to the input
+overlay and **never set by anything** — the bot only ever moved fore/aft, so it stood still inside its band
+and ate every arrow. Against a RANGED target it is holding ground for (not closing, not kiting), the policy
 now side-steps, flipping sides every `STRAFE_FLIP_TICKS` (66 ≈ 1.1 s; a constant slide walks out of the band
 and a straight line is what a leading shooter wants). It rides the CURRENT yaw, so unlike the backpedal it
 does not drag the crosshair off target. The **driver owns the safety check** and is authoritative for every

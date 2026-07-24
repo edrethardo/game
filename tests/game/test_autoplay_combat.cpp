@@ -868,6 +868,69 @@ TEST_CASE("a kiting MELEE retreat also hops") {
     CHECK(out.jump);
 }
 
+// --- RANGED BLOCKS, AND THE SHIELD TIMES INBOUND SHOTS -------------------------------------------
+
+TEST_CASE("a Moderate/RANGED build blocks at all (a perfect block is free damage prevention)") {
+    // It costs 0.4x move speed for the ~0.15 s of the tap and does NOT gate firing, so there is no
+    // build this is wrong for.
+    CHECK(doctrineFor(3 * 1 + 2).blocks);   // Moderate / Ranged
+    CHECK(doctrineFor(3 * 2 + 2).blocks);   // Glass    / Ranged
+    CHECK(doctrineFor(3 * 0 + 2).blocks);   // Tanky    / Ranged (already did)
+}
+
+TEST_CASE("raises the shield for an inbound shot inside the perfect-block lead") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    v.incomingProjectileEta = PERFECT_BLOCK_LEAD * 0.5f;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("does NOT turtle for a shot that is still far out") {
+    // A held block is the weak BLOCKED tier AND a permanent 0.4x move slow — the exact failure the
+    // tap timing exists to avoid.
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    v.incomingProjectileEta = 0.9f;                    // ~14 m of flight still to go
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("a projectile moving AWAY never raises the shield") {
+    // The driver reports 1e9 for anything not closing (it only measures shots whose time of closest
+    // approach is in the future AND whose miss distance is inside the body). The policy must treat
+    // that sentinel as silence rather than as a very distant hit.
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    CHECK(v.incomingProjectileEta > 1.0f);             // the default IS "nothing inbound"
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("a stale (already-arrived) shot does not re-raise the shield") {
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    v.incomingProjectileEta = 0.0f;
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
+TEST_CASE("a stale HELD block is not re-raised — it must expire and re-tap") {
+    // The perfect tier expires at 0.2 s of hold, so raising again on top of a hold that is already
+    // past the window would only ever earn the weak tier.
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
+    t.isRanged = true; t.attackRange = 14.0f;
+    v.targets = &t; v.targetCount = 1;
+    v.incomingProjectileEta = PERFECT_BLOCK_LEAD * 0.5f;
+    v.blockHeld = PERFECT_BLOCK_WINDOW + 0.05f;
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).block);
+}
+
 TEST_CASE("the jump cadence is shared with the driver's escape ladder") {
     // The stuck-escape pulses JUMP on this same helper (a body caught on a lip needs to leave the
     // ground, not a new heading) — a HELD jump would re-fire on every landing frame and pogo.

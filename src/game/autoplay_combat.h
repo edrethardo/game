@@ -178,7 +178,6 @@ constexpr f32 GAP_CLOSE_COOLDOWN = 6.0f;    // s between gap-closer rolls (drive
 // engagement band and eventually into a wall, and a predictable straight line is exactly what a
 // leading shooter wants.
 constexpr u32 STRAFE_FLIP_TICKS = 66;    // 1.1 s at 60 Hz — inside the 0.8-1.5 s feel window
-
 // KITING JUMP. A jump breaks a shooter's vertical lead and, at the ~2.4 m of reach the base move
 // speed gives, clears a 1-cell lava vein or gap while retreating. On a LONG leash on purpose:
 // bunny-hopping is both silly to watch and slower than walking, and the airborne frames are frames
@@ -387,6 +386,15 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     if (d.blocks && !v.stunned && !v.rolling && v.blockHeld < PERFECT_BLOCK_WINDOW) {
         for (u32 i = 0; i < v.targetCount; i++)
             if (swingIsLanding(v.targets[i])) { out.block = true; break; }
+        // INBOUND SHOT. The melee trigger above cannot see an arrow: a ranged enemy's attackTimer
+        // marks the LAUNCH, and the bolt then flies for dist/speed seconds — raising on its timer
+        // opens the window half a second early and lands on the weak BLOCKED tier (that is why
+        // swingIsLanding refuses ranged attackers outright). The driver watches the live projectile
+        // pool instead and reports the soonest hostile shot's real time to impact, which is a
+        // genuine impact clock and can be timed exactly like a swing. The > 0 guard keeps a shot
+        // that already arrived from re-raising the shield on a stale ETA.
+        if (v.incomingProjectileEta > 0.0f && v.incomingProjectileEta <= PERFECT_BLOCK_LEAD)
+            out.block = true;
     }
 
     // A ROLL BEATS A HOP on the tick both want to happen. The roll is decided above on a real
