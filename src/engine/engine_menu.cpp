@@ -355,6 +355,19 @@ void Engine::enterAutoplayRun() {
     m_autoplayActive = true;
     m_autoplayControl.forceBot();          // start in bot control from frame one
     Input::setBotOverlayActive(true);
+
+    // Reset the 8b nav/backstop timers so a SECOND in-process Autoplay run (menu -> run -> quit ->
+    // Autoplay again) never inherits stale state: a leftover m_autoplayNoProgressTimer > 4 s would
+    // fire a spurious stuck/nudge on frame one, and a leftover m_autoplayLastTargetCount > 0 would
+    // false-arm the loot dwell. The zero m_autoplayLastPos is a sentinel — the world may not be
+    // positioned yet here, so the first updateAutoplay tick re-anchors it (a large delta reads as
+    // "progressed", not a stuck accrual, and the zeroed no-progress timer needs a full 4 s to arm
+    // regardless), keeping frame one clean.
+    m_autoplayLastPos         = Vec3{0, 0, 0};
+    m_autoplayNoProgressTimer = 0.0f;
+    m_autoplayNudgeTimer      = 0.0f;
+    m_autoplayLootDwell       = 0.0f;
+    m_autoplayLastTargetCount = 0;
 }
 
 // ---------------------------------------------------------------------------
