@@ -190,6 +190,15 @@ struct Entity {
     // recycled slot can't inherit a strafer's opener). See preferredCombatState() below.
     u8 aiPreference = 1;     // = AIState::CHASE ordinal (enum declared above this struct)
     u8  resurrectCount = 0;  // necromancer: how many dead enemies have been raised (no cap; stat only)
+    // How many times THIS entity has been raised from the dead. Distinct from resurrectCount above,
+    // which counts raises PERFORMED by a necromancer — this counts raises SUFFERED, and it is what
+    // RESURRECT_MAX caps. Without a per-corpse limit a necromancer standing over one body raises it
+    // every 3 s forever: the pair is unkillable while the raiser lives, gives no ground, and drips
+    // XP/loot on every cycle. Reset in EntitySystem::spawn like the other identity fields, so a
+    // recycled slot does not inherit a spent corpse's tally. Host-side only — resurrection is
+    // server-authoritative and clients just see the entity alive again, so this never reaches
+    // SnapEntity and costs no PROTOCOL bump.
+    u8  timesRevived = 0;
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
     const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)
@@ -307,8 +316,36 @@ struct Entity {
 
 // Pins the entity layout. The champion fields fit in what was tail padding (504), and lifeTimer
 // then grew it by one aligned float. If this fires, check whether new fields are still landing in
-// padding before assuming they are free.
+// padding before assuming they are free. (Entity::timesRevived landed in existing padding beside
+// resurrectCount and did NOT move this number.)
 static_assert(sizeof(Entity) == 520, "Entity layout changed — re-check field packing");
+
+// How many times one corpse may be raised before it is spent for good (Entity::timesRevived).
+// A necromancer that outlives its escort otherwise re-raises the same body indefinitely, which
+// reads as a bug rather than a threat: the fight cannot be won by killing what is in front of you,
+// only by finding the raiser. Ten is generous enough that the mechanic still feels relentless in a
+// normal fight — you will rarely see a corpse hit the cap unless the raiser is being ignored — while
+// guaranteeing the loop terminates. Corpses at the cap are skipped by the SUMMONER's and the
+// HEALER's corpse search, so the raiser moves on to another body instead of stalling on this one.
+constexpr u8 RESURRECT_MAX = 10;
+
+// Can this corpse be raised? The SUMMONER role and the HEALER role's no-one-to-heal fallback both
+// scan the pool for a body, and they applied the SAME four guards in two places — so the cap made
+// it five, and a rule duplicated five ways in two functions is one edit away from disagreeing.
+// Single-sourced here, and unit-tested, because every guard is load-bearing:
+//   * DEAD + deathTimer > 0 — the corpse must still exist; at 0 the slot is about to be freed and
+//     raising it would resurrect something the pool has already promised to someone else.
+//   * not FRIENDLY — necromancers raise their own side, not your pets.
+//   * not a boss — a boss carries guaranteed loot and an exit lock, so re-raising one would let a
+//     necromancer re-close a floor the player already beat.
+//   * under RESURRECT_MAX — see the constant above.
+inline bool corpseRaisable(const Entity& e) {
+    if (!(e.flags & ENT_DEAD))     return false;
+    if (e.flags & ENT_FRIENDLY)    return false;
+    if (e.deathTimer <= 0.0f)      return false;
+    if (e.isBoss)                  return false;
+    return e.timesRevived < RESURRECT_MAX;
+}
 
 // Combat opener for a freshly-aggroed (or damage-woken) enemy: the authored aiPreference mapped
 // onto a SAFE entry state. Pure map — no pathfinding — so damage-wake sites without a grid can

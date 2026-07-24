@@ -640,17 +640,70 @@ re-enters the run ~1.5 s after a solo death (entrance spawn); the **difficulty l
 floor-50→next-difficulty flow. **No save-format change** — `m_autoplayActive` and the backstop timers are
 all transient. This bot is the **empirical playtest rig the balance-lab spec deferred** — it runs the real
 combat/loot/nav loop end to end; a natural follow-up is emitting per-floor metrics from the driver.
+**Descent (FOUR_STORY) routing — the maze needs a FIELD, not a bearing.** The bot's travel goal on a
+Descent floor is a hole in its own story's slab, and the first two attempts at steering to one both
+failed the same way: they produced headings that pointed at walls, and the bot scraped along them
+("the time goes right now looking and hugging the walls and corners"). A straight-line bearing at the
+nearest hole is hopeless on a braided maze (measured over 150 s: the distance to the chosen hole GREW
+on 61 samples and shrank on 53 — a random walk). Plain 2D **A\* is exact** here in principle, since all
+four stories share one full-height wall skeleton — but `Pathfinder::findPath` gives up after
+`MAX_ASTAR_SEARCH` (256) closed cells, which on 3-wide corridors is barely a dozen cells of travel, so a
+hole across the floor returned nothing and the code fell back to the wall-pointing bearing. So routing is
+a **BFS flow field seeded from this story's clean drop holes** (`game/autoplay_descent.{h,cpp}`,
+`Autoplay::DescentField`), rebuilt only when the bot changes story or floor (~2k cells, three times a
+floor). It mirrors `LevelGridSystem::buildFlowField` — same encoding, 4-connected expansion, and the
+**steer-at-the-next-cell-CENTRE** readout, which is the anti-wall-hug rule — and differs in two things:
+it is seeded from holes, and it **excludes `CELL_JUMPPAD` cells entirely**. Three further rules make it
+work, each from a measured failure:
+- **The story reference is the SLAB UNDERFOOT, not raw feet-Y** (`Autoplay::botStoryY`, via
+  `effectiveFloorHeight` with the step tolerance subtracted back off so a jump can't report the storey
+  above). The bot jumps constantly, and matching holes on `|surfaceY - pos.y| <= 0.4` rejected every hole
+  on its own storey for the whole flight — 21-27% of all ticks had no hole pick at all, 100% of them
+  airborne, and the router silently went dark.
+- **Jump pads are a HAZARD on this floor and only this floor** (`stepAllowed(..., avoidPads)` for travel,
+  `Autoplay::padAhead` for combat movement). A pad lifts ~two stories and fires the instant you are
+  grounded, so one kiting step onto one throws away a descent: a run that had reached L0 and closed to
+  21 m of the exit ended up spending 61% of its time back on L2. Carve-outs: the veto stands down while
+  the bot is ALREADY on a pad (else a 3x3 pad node boxes it in) and on a `paddedOnly` storey, where every
+  way down is a return lift and refusing them would leave the bot circling a hole it may not enter.
+- **A kill-agnostic FLOOR-STALL watchdog.** The existing exit watchdog restarts on every point of damage
+  dealt; on a floor carrying four stories of enemies the bot deals damage continuously, so it **latched 0%
+  of the time** across three measured runs while the bot fired on 50%+ of ticks and never left floor 1.
+  The long window asks only "have you got closer to the way out in the last 6 s" (`distToDoor` is 3D, so
+  descending a storey counts outright) and arms the existing combat break-off leg — not the exit bull,
+  which A\*-routes in XZ and above L0 would march the bot to a spot three stories over the exit.
+
+**TRAVEL movement is a WASD decomposition, not "hold W"** (`autoplay_brain.cpp` `faceAndGo`). The aim is
+deliberately EASED, so the facing lags the heading for a few tenths of a second after every turn; holding
+W through that lag walks the bot wherever it happened to be pointing, which in a 3-wide corridor is the
+wall. The heading is projected onto the CURRENT forward/right basis (matching `player.cpp` exactly) so the
+bot steps sideways out of the corner immediately and straightens as the turn completes. This affects
+**every** layout, and flat floors measured slightly better after it, not worse.
+
 **Where v1 actually stands (measured, 2026-07-24).** On **flat** floors (`rooms` / `cavern` / `gauntlet` /
-`hub`) the bot plays unattended for all three archetypes — in ~2-minute `--autoplay --new` runs a Sorcerer
-and a Warrior each reached floor 5 and a Marksman floor 4, casting class skills, auto-equipping and
-descending, with zero deaths and no permanent stall. The **known v1 limits are the hard floors, and they
-are limits, not solid ground**: on the stacked styles (`VERTICAL_HALL`, `FOUR_STORY`) and the lava floors
-the routing is CORRECT and the bot is never permanently wedged (the escape ladder guarantees that), but
-their enemy density and vertical topology mean it can be **slow and may not complete such a floor
-quickly** — a 100 s `--vhall` and a 100 s `--lava` spot check had it fighting (51 / 42 skill casts) and
-looting throughout, and descending neither. Specifically, VH **balcony story-routing oscillates on some
-seeds** (the ramp goal flips as the bot crosses the band edge). Treat "descends every floor type promptly"
-as unproven — flat-floor progress is the claim the runs support.
+`hub`) the bot plays unattended for all three archetypes — in ~2-minute `--autoplay --new` runs a Warrior
+and a Sorcerer each reached floor 6 and a Marksman floor 4, casting class skills, auto-equipping and
+descending, with zero deaths and no permanent stall. On **FOUR_STORY** the routing above turned a floor the
+bot never finished into one it descends: across three fixed seeds it now reaches L0 and spends 33-42% of its
+time there (was 0-3%), closing to 2-4 m of the exit, and one seed cleared two floors in 130 s — but it does
+**not yet reliably finish a Descent floor inside ~2 minutes**, and the remaining cost is COMBAT, not
+routing (the bot fires on 45-50% of ticks on a floor holding four stories of enemies). `VERTICAL_HALL` and
+lava are unchanged and still slow, and VH **balcony story-routing oscillates on some seeds** (the ramp goal
+flips as the bot crosses the band edge). Treat "descends every floor type promptly" as unproven.
+
+**Where the residual shake and wall-scraping come from (measured by source, 2026-07-24).** Instrumenting
+every producer of the desired aim and tagging each tick by which one wrote it settles a question that had
+been guessed at twice: **the FIGHT branch (`decideCombat`) is both**. It owns 45-50% of all ticks and turns
+in **7.0 direction REVERSALS per second on stacked floors** (1.6-2.1/s on flat) at only ~2.6 deg a tick —
+which is exactly the reported symptom, "a fast moving but low movement jitter"; magnitude is not the
+problem, sign changes are. It is also the top wall-scraper: on **17-18% of its ticks the bot holds a
+movement key and moves less than 2 cm**, because FIGHT's kite/close/strafe movement is deliberately NOT
+hazard-vetoed (see the veto-scope paragraph). By contrast the raw flow fields produce enormous SINGLE
+steps — `flowDirection` 151 deg and the descent field 111 deg per tick, both being 4-connected cardinal
+fields — but reach the aim on only 1.5-2.5% of ticks, because the travel-heading commit absorbs them; the
+commit itself runs at 2.05 deg and 2.5 reversals/s. So: aim jitter is a COMBAT-aim problem (lead-corrected
+aim over targets whose AI rewrites velocity every frame), not a navigation one, and it should be attacked
+in `decideCombat` / the aim smoother rather than in the routing.
 
 **Persistence is per-character.** Each save file (`save_NN.dat`) holds exactly ONE character (`playerCount=1`); the per-lane destination is `m_playerSaveSlot[lane]` and `saveAllCharacters()` writes each active lane to its own slot. In couch co-op both players pick their own slot (New or Continue) in the menu lobby and the shared dungeon runs on **Player 1's floor**; mixed New/Continue lanes work because the menu prepares each lane and calls `startGame(mode, lanesPrepared=true)` (skipping the NEW_GAME wipe). Legacy `playerCount=2` bundle saves still load (and migrate to per-character on the next save). The on-disk layout is **versioned** (`SAVE_VERSION`, currently 3 = GLOVES slot + attack-speed cache in `PlayerInventory`): readers accept the previous version via a `Legacy*V<n>` mirror struct in `engine_persist.cpp`, and `static_assert`s pin the serialized struct sizes — any layout change MUST bump the version and extend the legacy readers. (Save format, menu flow, no-downgrade guard: `engine-reference`.)
 

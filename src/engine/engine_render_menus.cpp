@@ -422,14 +422,19 @@ void Engine::renderMenu() {
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.10f, hint, {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 1) {
-        // New/Continue chooser — SHARED by the Single Player, Host and Join flows, which have
-        // already stamped m_netRole (menu cases 0/1/2) by the time this screen shows. Title by
-        // role, so a joining player isn't told they're starting a single-player game.
+        // New/Continue chooser — SHARED by the Single Player, Autoplay, Host and Join flows, which
+        // have already stamped m_netRole / m_menu.autoplay (menu cases 0/1/2/3) by the time this
+        // screen shows. Title by mode, so a player isn't told they're starting a plain
+        // single-player game when they picked something else off the main menu.
+        //
+        // Autoplay is checked before the role tests rather than after: it rides the singleplayer
+        // flow, so its NetRole is NONE and it would otherwise fall through to "Single Player".
         const char* subTitle = m_menu.arena ? ((m_netRole == NetRole::SERVER) ? "Arena - Host"
                                                                              : "Arena - Local Versus")
-                             : (m_netRole == NetRole::CLIENT) ? "Join Game"
-                             : (m_netRole == NetRole::SERVER) ? "Host Game"
-                                                              : "Single Player";
+                             : m_menu.autoplay                 ? "Autoplay"
+                             : (m_netRole == NetRole::CLIENT)  ? "Join Game"
+                             : (m_netRole == NetRole::SERVER)  ? "Host Game"
+                                                               : "Single Player";
         f32 stW = FontSystem::textWidth(subTitle, 2);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - stW) * 0.5f, sh * 0.55f, subTitle, {0.2f, 0.9f, 0.2f}, 2);
 

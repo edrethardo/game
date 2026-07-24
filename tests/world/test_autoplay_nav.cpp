@@ -302,10 +302,62 @@ namespace {
 // the bot's feet are at when it can enter, which is exactly what pickDropHole matches on.
 DropHole holeAt(f32 x, f32 z, f32 surfaceY) { DropHole h; h.pos = {x, surfaceY, z}; h.surfaceY = surfaceY; return h; }
 void setPad(LevelGrid& g, u32 x, u32 z) { g.cells[z * g.width + x].flags |= CELL_JUMPPAD; }
+
+// A Descent-shaped grid: the flat ground plus the three stacked slabs carveFourStory lays at
+// 3/6/9 m over every open cell. The slabs are not decoration here — botStoryY identifies the bot's
+// story by asking effectiveFloorHeight which SURFACE it is standing on, so a grid without them puts
+// every body on the ground floor no matter what its feet say, and no L3 hole would ever match.
+LevelGrid makeDescentGrid(u32 w, u32 d) {
+    LevelGrid g = makeFlatGrid(w, d);
+    for (u32 z = 0; z < d; z++)
+        for (u32 x = 0; x < w; x++) {
+            GridCell& c = g.cells[z * w + x];
+            LevelGridSystem::addPlatform(c, 12, 0);   // L1 @ 3 m  (quarter-units)
+            LevelGridSystem::addPlatform(c, 24, 0);   // L2 @ 6 m
+            LevelGridSystem::addPlatform(c, 36, 0);   // L3 @ 9 m
+        }
+    return g;
+}
 } // namespace
 
+TEST_CASE("descent: the story reference is the slab underfoot, not the raw feet height") {
+    // The bot JUMPS constantly (the kite/strafe pulse, the unstick ladder), and a jump carries the
+    // feet 2.4 m over a storey pitch of 3 m for well over a second. Matching holes on raw feet-Y
+    // rejected every hole on the bot's own storey for the whole flight — measured at 21-27% of all
+    // ticks, 100% of them airborne — so the router went dark and the bot fell back to a heading
+    // aimed three floors below. The slab underfoot does not move while you are above it.
+    LevelGrid g = makeDescentGrid(20, 20);
+    const Vec3 at{6.0f, 9.0f, 6.0f};
+    CHECK(Autoplay::botStoryY(g, at) == doctest::Approx(9.0f));            // standing on L3
+    CHECK(Autoplay::botStoryY(g, Vec3{6.0f, 11.4f, 6.0f}) == doctest::Approx(9.0f)); // mid-jump off L3
+    CHECK(Autoplay::botStoryY(g, Vec3{6.0f,  0.0f, 6.0f}) == doctest::Approx(0.0f));  // on the ground
+    // The one that the old PLATFORM_STEP_TOLERANCE window got wrong: a jump from L0 that comes
+    // within 0.4 m of the L1 slab must still read as L0 — it is passing under it, not standing on it.
+    CHECK(Autoplay::botStoryY(g, Vec3{6.0f, 2.7f, 6.0f}) == doctest::Approx(0.0f));
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent: candidates are nearest-first with every clean hole ahead of any padded one") {
+    // The driver walks this order handing each hole to its router, so the ORDER is the contract:
+    // padded holes (return lifts) must sort behind every clean one however close they are.
+    LevelGrid g = makeDescentGrid(40, 40);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(7.5f,  7.5f,  9.0f);   // nearest, but padded
+    d.dropHoles[d.dropHoleCount++] = holeAt(20.5f, 20.5f, 9.0f);   // farthest clean
+    d.dropHoles[d.dropHoleCount++] = holeAt(12.5f, 12.5f, 9.0f);   // middle clean
+    d.dropHoles[d.dropHoleCount++] = holeAt(5.5f,  5.5f,  6.0f);   // wrong storey: never listed
+    setPad(g, 7, 7);
+    s32 out[4];
+    const u8 n = Autoplay::dropHoleCandidates(g, d, Vec3{6.0f, 9.0f, 6.0f}, out, 4);
+    REQUIRE(n == 3);
+    CHECK(out[0] == 2);   // clean, nearer
+    CHECK(out[1] == 1);   // clean, farther
+    CHECK(out[2] == 0);   // padded last, despite being closest of all
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("descent: a hole on ANOTHER story is never chosen") {
-    LevelGrid g = makeFlatGrid(40, 40);
+    LevelGrid g = makeDescentGrid(40, 40);
     DungeonResult d{};
     d.dropHoles[d.dropHoleCount++] = holeAt(5.5f, 5.5f, 6.0f);    // one story below us
     d.dropHoles[d.dropHoleCount++] = holeAt(20.5f, 20.5f, 9.0f);  // ours, but far
@@ -315,7 +367,7 @@ TEST_CASE("descent: a hole on ANOTHER story is never chosen") {
 }
 
 TEST_CASE("descent: no hole on this story => -1 (fall back to the flat exit flow, e.g. on L0)") {
-    LevelGrid g = makeFlatGrid(40, 40);
+    LevelGrid g = makeDescentGrid(40, 40);
     DungeonResult d{};
     d.dropHoles[d.dropHoleCount++] = holeAt(5.5f, 5.5f, 9.0f);
     CHECK(Autoplay::pickDropHole(g, d, Vec3{6.0f, 0.0f, 6.0f}) == -1);
@@ -326,7 +378,7 @@ TEST_CASE("descent: a RETURN-LIFT hole is refused in favour of a clean one") {
     // The bug: a pad one story under the hole fires the instant the bot lands, throwing it back up
     // through the hole it just took — and from up there that same hole is again the nearest. The
     // grid flag is the ground truth (jumpPads[] is capped; the flag is not), so it is what we read.
-    LevelGrid g = makeFlatGrid(40, 40);
+    LevelGrid g = makeDescentGrid(40, 40);
     DungeonResult d{};
     d.dropHoles[d.dropHoleCount++] = holeAt(6.5f, 6.5f, 9.0f);    // RIGHT NEXT to us — but padded
     d.dropHoles[d.dropHoleCount++] = holeAt(14.5f, 14.5f, 9.0f);  // farther, clean
@@ -339,7 +391,7 @@ TEST_CASE("descent: a RETURN-LIFT hole is refused in favour of a clean one") {
 TEST_CASE("descent: a padded hole is still taken when it is the ONLY way down") {
     // Hole density thins to 7% on the deepest story, so "no clean hole" is a real state. A bounce
     // at least relocates the bot; standing still on a floor whose exit is downstairs never ends.
-    LevelGrid g = makeFlatGrid(40, 40);
+    LevelGrid g = makeDescentGrid(40, 40);
     DungeonResult d{};
     d.dropHoles[d.dropHoleCount++] = holeAt(6.5f, 6.5f, 9.0f);
     setPad(g, 6, 6);
@@ -352,7 +404,7 @@ TEST_CASE("descent: among clean holes the NEAREST wins — the goal must stay st
     // to a live run and measured: it chose holes 15-22 m off, and since the travel heading is a
     // straight line with a small detour fan (not a path), the bot beelined into a maze wall and never
     // left the top story. A LOCAL goal is the only kind this steering can reach on a labyrinth.
-    LevelGrid g = makeFlatGrid(40, 40);
+    LevelGrid g = makeDescentGrid(40, 40);
     DungeonResult d{};
     d.dropHoles[d.dropHoleCount++] = holeAt(4.5f,  4.5f,  9.0f);  // 5 m away
     d.dropHoles[d.dropHoleCount++] = holeAt(14.5f, 14.5f, 9.0f);  // 9 m away, nearer the far exit

@@ -39,6 +39,7 @@ add_executable(dungeon_tests
     game/test_build_score.cpp        # Auto Loot & Equip scorer: family gate, row posture, hysteresis
     game/test_weapon_dps.cpp         # single-source sustained-DPS cycle (scorer + balance lab)
     game/test_champion.cpp
+    game/test_resurrect_cap.cpp      # necromancer raise cap: a corpse is spent after RESURRECT_MAX
     game/test_floor_event.cpp
     engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
     game/test_interact.cpp           # interact button: item > shrine > exit, tap vs hold
@@ -54,6 +55,8 @@ add_executable(dungeon_tests
     game/test_autoplay_doctrine.cpp  # build-cell -> combat doctrine table (header-only)
     game/test_autoplay_combat.cpp    # pure combat policy: target/aim/fire/kite (header-only)
     game/test_autoplay_brain.cpp     # the state machine: survive/fight/travel/descend priority
+    game/test_autoplay_descent.cpp   # FOUR_STORY drop-hole flow field (maze routing)
+    ${CMAKE_SOURCE_DIR}/src/game/autoplay_descent.cpp
     ${CMAKE_SOURCE_DIR}/src/game/autoplay_brain.cpp
     game/test_shared_loot.cpp        # ground drops are FFA instantly; exclusivity only if re-armed
     game/test_legendary_pool.cpp     # legendary tier = named uniques only; rarityFloor guarantees

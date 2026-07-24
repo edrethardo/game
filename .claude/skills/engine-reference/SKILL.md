@@ -34,6 +34,7 @@ skill.
 Important caps (search the header for the constant if you need to grow it):
 `MAX_PLAYERS=4`, `MAX_ENTITIES=192` (raised from 128 at PROTOCOL 24 — it is WIRE layout: `SnapEntity[MAX_ENTITIES]` + a derived `ENTITY_MASK_BYTES` delta bitmask), `MAX_PROJECTILES=1024` (512 on Switch), `MAX_ITEM_DEFS=224`,
 `MAX_AFFIX_DEFS=32`, `MAX_AFFIXES_PER_ITEM=4`, `MAX_INVENTORY_ITEMS=24`,
+`RESURRECT_MAX=10` (`game/entity.h`) — how many times ONE corpse may be raised before it is spent for good. It caps `Entity::timesRevived` (raises SUFFERED), which is a different field from `Entity::resurrectCount` (raises PERFORMED by a necromancer — uncapped, and reused elsewhere as a scratch counter for goblin bleed pockets and the Engine's wave index). Enforced through the shared `corpseRaisable()` predicate used by both the `SUMMONER` role and the `HEALER` no-one-to-heal fallback; host-side only, so it is NOT on the wire.
 `MAX_SKILL_DEFS=64`, `MAX_ENEMY_DEFS=64`, `MAX_WORLD_ITEMS=32`, `MAX_WEAPON_DEFS=16`, `MAX_MATERIALS=160`,
 `MAX_MESH_DEFS=112` (= `MESH_DEF_CAPACITY` in `engine/asset_manifest.h`, which `static_assert`s that the mesh table fits — an overflow makes the load loop `break`, silently dropping the TAIL of the table), `MAX_LEVEL_SECTIONS=64`, `MAX_DUNGEON_ROOMS=32`,
 `SECTION_SIZE=16` cells, `NET_TICK_RATE=60`, `SNAPSHOT_RATE=60`, `INPUT_BUFFER_SIZE=64`.

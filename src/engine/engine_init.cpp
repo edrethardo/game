@@ -220,6 +220,8 @@ void Engine::shutdown() {
 
     saveStash();   // no-op unless dirty — last-chance flush for the shared account stash
 
+    Autoplay::freeDescentField(m_autoplayDescent);   // Descent drop-hole flow field (heap scratch)
+
     AudioSystem::shutdown();
     Net::shutdown();
     Steam::shutdown();

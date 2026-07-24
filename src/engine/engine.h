@@ -26,6 +26,7 @@
 #include "game/autoplay_control.h"   // AutoplayControl — bot/human takeover latch (Autoplay mode)
 #include "game/autoplay_intent.h"    // Autoplay::BotView / BotIntent — driver<->brain interface
 #include "game/autoplay_brain.h"     // Autoplay::decide — pure per-tick decision core
+#include "game/autoplay_descent.h"   // Autoplay::DescentField — FOUR_STORY drop-hole flow field
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
@@ -284,6 +285,14 @@ private:
     f32              m_autoplayDoorCheckDist  = 0.0f;     // distToDoor at the window's start (rolling checkpoint)
     f32              m_autoplayExitStallTimer = 0.0f;     // seconds elapsed in the current no-kill window
     u32              m_autoplayLastFloor      = 0;        // detects a floor change to re-anchor the window
+    // FLOOR-STALL watchdog — the long, KILL-AGNOSTIC twin of the window above. That one restarts
+    // whenever the bot deals damage, on the reasonable theory that a live fight is worth finishing;
+    // on a four-story Descent (~190 entities across four stacked stories) the bot deals damage almost
+    // continuously and so it never fired at all. Measured: 50% of ticks firing, 22% walking, the exit
+    // watchdog latched 0% of the time, and the bot never left floor 1. This one asks only "have you
+    // got closer to the way out lately", and arms a disengage leg when the answer is no.
+    f32              m_autoplayFloorCheckDist = 1e9f;     // distToDoor at the long window's start
+    f32              m_autoplayFloorStallTimer = 0.0f;    // seconds elapsed in the current long window
     // BOT-SIDE DODGE LEASHES. The engine's own dodge cooldown is 1 s — a balance number, not a
     // behaviour one: a bot that rolls every time it is legal reads as constant panicked twitching.
     // The driver holds a multi-second timer per roll KIND (defensive proactive vs offensive
@@ -307,6 +316,15 @@ private:
     // window expires.
     Vec3             m_autoplayTravelDir  = {0, 0, 0}; // committed unit XZ travel heading ({0,0,0} = none)
     f32              m_autoplayTravelHold = 0.0f;      // s left on the commit
+    // FOUR_STORY "Descent" DROP-HOLE ROUTE. The way down is a specific hole in this story's slab,
+    // usually several maze corridors away — a straight-line heading at it just scrapes walls (see
+    // autoplay_nav.h dropHoleCandidates), so the route is A*-planned and then followed waypoint by
+    // waypoint. Re-planned on a throttle rather than per tick: A* is a 256-cell search and the goal
+    // does not move. {0,0,0} goal = no route (no hole on this story, or none reachable).
+    // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).
+    // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
+    // floor. Freed in Engine::shutdown.
+    Autoplay::DescentField m_autoplayDescent;
     // LOOK BEHIND (autoplay_nav.h LOOK_BEHIND_*). A wedged bot turns around once per stuck episode to
     // un-watch whatever it is facing, which is the only thing that can spring a dormant gargoyle
     // (weeping-angel wake rule) — and a dormant gargoyle is an unkillable solid body, so staring at

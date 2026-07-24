@@ -40,10 +40,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                 u32 bestIdx = 0xFFFF;
                 for (u32 di = 0; di < MAX_ENTITIES; di++) {
                     Entity& dead = pool.entities[di];
-                    if (!(dead.flags & ENT_DEAD)) continue;
-                    if (dead.flags & ENT_FRIENDLY) continue;
-                    if (dead.deathTimer <= 0.0f) continue; // slot about to be freed
-                    if (dead.isBoss) continue; // never raise a boss — it has guaranteed loot + an exit lock
+                    if (!corpseRaisable(dead)) continue;   // dead, hostile, not a boss, under the raise cap
                     Vec3 diff = dead.position - e.position;
                     f32 d2 = diff.x * diff.x + diff.z * diff.z;
                     if (d2 < bestDist2) {
@@ -73,6 +70,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                 // Ensure revived enemy isn't inside a wall
                 Collision::ensureNotInWall(revivedEnt.position, revivedEnt.halfExtents, grid);
                 if (!wasFlying) snapEntityToFloor(revivedEnt, grid);
+                revivedEnt.timesRevived++;   // per-corpse tally: RESURRECT_MAX raises and it is done
                 e.resurrectCount++;
                 revived++;
             }
@@ -147,10 +145,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                 u32 bestIdx = 0xFFFF;
                 for (u32 di = 0; di < MAX_ENTITIES; di++) {
                     Entity& dead = pool.entities[di];
-                    if (!(dead.flags & ENT_DEAD)) continue;
-                    if (dead.flags & ENT_FRIENDLY) continue;
-                    if (dead.deathTimer <= 0.0f) continue;
-                    if (dead.isBoss) continue; // never raise a boss (see SUMMONER note)
+                    if (!corpseRaisable(dead)) continue;   // same rule as the SUMMONER path above
                     Vec3 diff = dead.position - e.position;
                     f32 d2 = diff.x * diff.x + diff.z * diff.z;
                     if (d2 < bestDist2) {
@@ -166,6 +161,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                     revived.velocity = {0, 0, 0};
                     revived.deathTimer = 0.0f;
                     revived.flashTimer = 0.3f;
+                    revived.timesRevived++;   // per-corpse tally (same cap as the SUMMONER path)
                     e.resurrectCount++;
                     e.speechText = "RISE!";
                     e.speechTimer = 2.0f;

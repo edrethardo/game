@@ -76,6 +76,10 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     // and be mis-counted as some boss's living minion. Callers that summon set these AFTER spawn.
     e.isEngine     = false;
     e.spawnerIdx   = 0xFFFF;
+    // A recycled slot must not inherit the previous occupant's resurrection tally, or a fresh enemy
+    // spawning onto a corpse that had already been raised RESURRECT_MAX times would be born unable
+    // to ever be raised.
+    e.timesRevived = 0;
     // Status effects must not carry over to a recycled slot: a freed enemy can still have a live
     // DoT/CC timer when its slot is reused (e.g. a 3s bleed outlasting the 1s death timer), which
     // would phantom-damage/freeze the fresh spawn and — for DoT — mis-credit its kill via

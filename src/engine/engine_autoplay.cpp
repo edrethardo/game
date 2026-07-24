@@ -359,6 +359,8 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayDoorCheckDist  = v.distToDoor;
         m_autoplayExitStallTimer = 0.0f;
         m_autoplayExitBull       = false;
+        m_autoplayFloorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
+        m_autoplayFloorStallTimer = 0.0f;
     }
     if (v.doorActive && !bossGate) {
         if (combatProgress) {   // a kill/damage this tick = a real fight worth finishing: restart the window
@@ -377,6 +379,44 @@ void Engine::updateAutoplay(f32 dt) {
     } else {
         m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
         m_autoplayExitBull      = false;   // no eligible exit (boss alive / town): idle the watchdog
+    }
+
+    // (2c-ii) FLOOR-STALL WATCHDOG — the same question over a much longer window, and DELIBERATELY
+    // blind to combat. The window above hands a live fight the benefit of the doubt by restarting on
+    // every point of damage dealt; that is right on a normal floor and useless on a dense stacked one,
+    // where there is always something else to shoot and the bot can spend a whole run "winning" fights
+    // in one corner of a maze. It never once latched across three measured Descent runs.
+    //
+    // distToDoor is a 3D distance, which is what makes one rule work on every story: descending a
+    // story closes 3 m of it outright, and crossing the maze closes the rest — so any genuine
+    // progress, vertical or horizontal, satisfies the window comfortably. Only a bot that is neither
+    // descending nor travelling fails it.
+    //
+    // The remedy is the existing combat BREAK-OFF leg, not the exit bull: the bull A*-routes to the
+    // door in XZ, which above L0 would march the bot to a spot three stories over the exit and park
+    // it. The break-off just drops fire and walks the current travel heading — and that heading is
+    // already the right one on every story (the descent field upstairs, the exit flow field on L0).
+    // The window and the leg together set the travel duty cycle the bot is GUARANTEED on a floor it
+    // would otherwise spend entirely in combat, and that is how they were chosen. At the first values
+    // tried (10 s window, 2.5 s leg) the disengage fired — 12-14% of ticks — but only bought a 20%
+    // duty cycle, and two of three measured seeds still shot for 56-63% of the run without finishing
+    // floor 1. 6 s and 3 s puts a floor of ~33% travel under the bot, which is what a maze this size
+    // needs, without making it walk away from a fight it is actually in danger of losing (SURVIVE
+    // still outranks everything, and the leg is short enough that anything genuinely chasing is still
+    // there at the end of it).
+    constexpr f32 kFloorWindow      = 6.0f;   // how long the bot may go without getting closer to the way out
+    constexpr f32 kFloorApproachMin = 2.0f;   // metres of closure required in that window
+    constexpr f32 kFloorPushLeg     = 3.0f;   // disengage-and-travel leg when it fails (> the 1.5 s de-fixate)
+    if (v.doorActive && !bossGate) {
+        m_autoplayFloorStallTimer += dt;
+        if (m_autoplayFloorStallTimer >= kFloorWindow) {
+            if ((m_autoplayFloorCheckDist - v.distToDoor) < kFloorApproachMin)
+                m_autoplayBreakoffTimer = kFloorPushLeg;   // stop fighting, walk the route
+            m_autoplayFloorCheckDist  = v.distToDoor;
+            m_autoplayFloorStallTimer = 0.0f;
+        }
+    } else {
+        m_autoplayFloorCheckDist = v.distToDoor; m_autoplayFloorStallTimer = 0.0f;
     }
     // Suppress the combat break-off while bulling for the exit or standing on it — leaving the floor wins
     // over re-angling a fight we've already given up on.
@@ -641,6 +681,29 @@ void Engine::updateAutoplay(f32 dt) {
             in.moveLeft = otherOk && wasRight;
             in.moveRight = otherOk && !wasRight;
         }
+    }
+    // DESCENT FLOORS: no bot movement of ANY kind steps onto a jump pad. The travel heading is
+    // already pad-vetoed upstream in buildBotView, but the FIGHT branch's kite/close movement is
+    // deliberately unvetoed (short, reactive, enemy-derived) — and on a Descent floor that is the
+    // hole in the fence. A pad launches the bot about two stories, so one kiting step onto one
+    // throws away a descent it may have spent a minute on: measured, a run that had reached L0 and
+    // closed to 21 m of the exit ended up spending 61% of its time back on L2. Combat is where the
+    // bot spends most of a Descent floor (43-65% of ticks firing), so leaving this producer
+    // unguarded left the floor unfinishable no matter how good the routing got.
+    //
+    // Only the pad rule is applied here, NOT the full hazard veto — walls and edges remain the
+    // FIGHT branch's own business, exactly as before. Dropping the offending component (rather than
+    // reversing it) keeps the kite honest: the bot simply does not take that step.
+    if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
+        !Autoplay::onJumpPad(m_level.grid, m_localPlayer.position) &&
+        !m_autoplayDescent.paddedOnly) {   // same carve-out as the travel veto: lifts-only storey
+        const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+        const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+        const Vec3 p = m_localPlayer.position;
+        if (in.moveFwd   && Autoplay::padAhead(m_level.grid, p, fwd))            in.moveFwd   = false;
+        if (in.moveBack  && Autoplay::padAhead(m_level.grid, p, fwd   * -1.0f))  in.moveBack  = false;
+        if (in.moveRight && Autoplay::padAhead(m_level.grid, p, right))          in.moveRight = false;
+        if (in.moveLeft  && Autoplay::padAhead(m_level.grid, p, right * -1.0f))  in.moveLeft  = false;
     }
     // JUMP only from the ground (the engine ignores it otherwise, but asking for what cannot happen
     // muddies the telemetry) and never while a roll owns the body.
@@ -919,16 +982,22 @@ Autoplay::BotView Engine::buildBotView() {
                 if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
             }
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
-            // The Descent: the exit is always DOWN. Steer to the nearest same-story drop hole that
-            // is NOT a return lift — Autoplay::pickDropHole owns that rule (a pad one story under a
-            // hole flings the bot straight back up through it, which is the loop that kept the bot
-            // on floor 1 forever). Stepping onto it drops a story; gravity does the rest. No
-            // same-story hole → keep the flat heading, which on L0 is exactly the walk to the door.
-            const s32 hi = Autoplay::pickDropHole(m_level.grid, dg, pos);
-            if (hi >= 0) {
-                const Vec3 g = dg.dropHoles[(u8)hi].pos;
-                const Vec3 to{g.x - pos.x, 0.0f, g.z - pos.z};
-                if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+            // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's
+            // slab — and getting to one is a MAZE routing problem, not a bearing.
+            //
+            // The route is a BFS FLOW FIELD seeded from this story's drop holes (autoplay_descent.h),
+            // rebuilt only when the story or floor changes. A field rather than a bearing or an A*
+            // leg because the direction it returns is always derived from a route that exists: it
+            // can never point into a wall, it is defined on every reachable cell (so there is no
+            // "no plan" tick where the bot stands and stares at a corner), and it steers at the next
+            // cell's CENTRE, which pulls the body off the corridor walls instead of tracking along
+            // them. On L0 there are no holes, the field reports invalid, and the heading stays the
+            // ordinary exit flow field — which is exactly the walk to the door.
+            const f32 storyY = Autoplay::botStoryY(m_level.grid, pos);
+            if (Autoplay::ensureDescentField(m_autoplayDescent, m_level.grid, dg, storyY,
+                                             m_level.currentFloor)) {
+                const Vec3 dd = Autoplay::descentDirection(m_autoplayDescent, m_level.grid, pos);
+                if (lengthSq(dd) > 1e-6f) v.flowDir = dd;
             }
         }
         // Lava floors get no vertical goal — the veto below (lava-aware) keeps the bot off the lakes
@@ -956,13 +1025,29 @@ Autoplay::BotView Engine::buildBotView() {
     // scraping through it, which is the whole point of the corner rule.
     if (lengthSq(v.flowDir) > 1e-6f) {
         const f32 feetY = m_localPlayer.position.y;
-        if (!Autoplay::stepAllowed(m_level.grid, v.pos, feetY, v.flowDir, m_level.lavaFloor)) {
+        // JUMP PADS ARE A HAZARD ON A DESCENT FLOOR, and only there. The objective is to get DOWN;
+        // a pad is the one piece of terrain that reverses that, and the maze is seeded with them
+        // (every dead-end node, plus a return lift under ~1 in 3 drop holes). They fire the instant
+        // the bot is grounded and lift about two stories, so walking over one throws away the whole
+        // descent — measured, 25-27 unplanned climbs per 150 s run before this, with the bot pinned
+        // at 63% of its time on a single story. The carve-out matters as much as the rule: the veto
+        // tests the DESTINATION cell, so a bot that has landed inside a 3x3 pad node would find
+        // every neighbour refused and box itself in, and the stuck ladder would be left to dig it
+        // out of a trampoline. While it is standing on one, the veto stands down so it can leave.
+        // ...and it stands down on a storey whose ONLY ways down are return lifts (paddedOnly), or
+        // the veto would refuse the last step into the single hole available and leave the bot
+        // circling something it is not allowed to enter. Hole density thins to 7% on the deepest
+        // storey, so that state is rare but real.
+        const bool avoidPads = (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) &&
+                               !Autoplay::onJumpPad(m_level.grid, v.pos) &&
+                               !m_autoplayDescent.paddedOnly;
+        if (!Autoplay::stepAllowed(m_level.grid, v.pos, feetY, v.flowDir, m_level.lavaFloor, avoidPads)) {
             constexpr f32 kFan[4] = { 0.7853981634f, -0.7853981634f,     // ±45°: the gentle detour
                                       1.5707963268f, -1.5707963268f };   // ±90°: the square sidestep
             Vec3 pick{0, 0, 0};
             for (u32 i = 0; i < 4; i++) {
                 const Vec3 cand = rotateY_XZ(v.flowDir, kFan[i]);
-                if (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, cand, m_level.lavaFloor)) { pick = cand; break; }
+                if (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, cand, m_level.lavaFloor, avoidPads)) { pick = cand; break; }
             }
             if (lengthSq(pick) > 1e-6f) v.flowDir = pick;
             else                        v.flowDir = Vec3{0, 0, 0};   // boxed in: stop (stuck-override recovers)

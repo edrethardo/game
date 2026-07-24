@@ -100,6 +100,7 @@ add_executable(DungeonEngine
     game/skill_tinkerer.cpp
     game/squad.cpp
     game/autoplay_brain.cpp
+    game/autoplay_descent.cpp
     net/net.cpp
     net/clock_sync.cpp
     net/snapshot.cpp

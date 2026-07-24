@@ -16,11 +16,42 @@ namespace Autoplay {
 // (The engagement ceiling — THREAT_RADIUS / engageCeiling — now lives in autoplay_combat.h so this
 // gate and pickTarget's sticky-target release read the SAME number; see the comment there.)
 
+// TRAVEL movement. The aim is pointed at the heading, but the WALK is resolved against the yaw the
+// bot has RIGHT NOW rather than the one it is turning toward — which is why this is a full WASD
+// decomposition and not just "hold W".
+//
+// applyBotIntent deliberately EASES the aim (gain 6/s under a 2.8 rad/s cap, for the camera's sake),
+// so the facing lags the desired heading by a few tenths of a second after any turn. Movement rides
+// the facing: hold W through that lag and the bot walks wherever it happened to be pointing, which
+// on an open floor is a harmless wide arc but in a corridor is a wall. On the Descent's braided maze
+// — 3-wide corridors, 90-degree turns every few metres — that is most corners, and move-and-slide
+// then scrapes the bot along the wall for the rest of the turn. Observed directly ("the time goes
+// right now looking and hugging the walls and corners") and visible in the trace as a bot walking
+// forward 92% of the time while getting FARTHER from its goal three times as often as closer.
+//
+// Projecting the heading onto the current forward/right basis fixes it without touching the aim: the
+// bot steps sideways out of the corner immediately and straightens up as the eased turn catches up,
+// which is also what a player does. The basis matches player.cpp's movement exactly (forward
+// {-sin,0,-cos}, right = cross(forward, up)) — it has to, or the decomposition steers into the wall
+// it is trying to avoid.
 static void faceAndGo(const BotView& v, BotIntent& out) {
     if (lengthSq(v.flowDir) < 0.0001f) return;    // at exit or unreachable: no heading
-    f32 yaw, pitch; dirToAim(Vec3{v.flowDir.x, 0.0f, v.flowDir.z}, yaw, pitch);
+    const Vec3 dir = normalize(Vec3{v.flowDir.x, 0.0f, v.flowDir.z});
+    f32 yaw, pitch; dirToAim(dir, yaw, pitch);
     out.aimYaw = yaw; out.aimPitch = 0.0f;
-    out.moveFwd = true;                            // flowDir was already hazard-vetoed by the driver
+
+    const f32  cosY = cosf(v.yaw), sinY = sinf(v.yaw);
+    const Vec3 fwd  { -sinY, 0.0f, -cosY };
+    const Vec3 right{  cosY, 0.0f, -sinY };
+    const f32  f = dot(dir, fwd), r = dot(dir, right);
+    // ~20°: engage an axis as soon as the heading leans that way. Both components are always
+    // available because dir is unit and the basis orthonormal (f² + r² == 1), so the larger of the
+    // two is at least 0.707 and the bot can never end up holding nothing.
+    constexpr f32 kAxis = 0.35f;
+    out.moveFwd   = f >  kAxis;
+    out.moveBack  = f < -kAxis;
+    out.moveRight = r >  kAxis;
+    out.moveLeft  = r < -kAxis;
 }
 
 BotIntent decide(const BotView& v) {

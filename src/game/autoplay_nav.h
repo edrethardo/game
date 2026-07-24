@@ -20,11 +20,22 @@ namespace Autoplay {
 // tick and any future lava consumer share one rule"), so the bot vetoes exactly the cells that would
 // burn it and NOT the ones it can clear airborne. `lavaFloor` short-circuits the lava test entirely
 // on non-Hellforge floors (no lava cells exist there, so the query is pure waste).
-inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor) {
+// `avoidPads` additionally refuses CELL_JUMPPAD cells. Off by default because a pad is normally a
+// GIFT — free height, a shortcut off the Stacked Loop's ramps, the recovery lift after a bad fall.
+// It is switched on for TRAVEL on a FOUR_STORY "Descent" floor, where the whole objective is to get
+// DOWN and a pad is the one piece of terrain that undoes the floor: the maze seeds them in every
+// dead-end node (a full 3x3 glowing slab) plus under a third of the drop holes as return lifts, they
+// fire the instant you are grounded, and they lift ~two stories. A bot wandering over one loses its
+// entire descent. Measured on a 150 s marksman trace before this: 25-27 unplanned climbs per run,
+// clustering at single XZ spots where it bounced repeatedly, with the bot spending 63% of its time
+// on ONE story instead of descending. See the driver's `avoidPads` for the standing-on-one carve-out.
+inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor,
+                         bool avoidPads = false) {
     u32 gx, gz;
     if (!LevelGridSystem::worldToGrid(g, at, gx, gz)) return false;   // off the map edge
     if (LevelGridSystem::isSolid(g, gx, gz))          return false;   // into a wall
     if (lavaFloor && LevelGridSystem::feetInLava(g, Vec3{at.x, feetY, at.z})) return false;
+    if (avoidPads && (LevelGridSystem::getCell(g, gx, gz).flags & CELL_JUMPPAD)) return false;
     return true;
 }
 
@@ -51,11 +62,12 @@ inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor)
 // Still a per-cell test rather than a swept body AABB, so it assumes sub-cell per-tick steps (fine
 // for the ~0.17 m/tick driver at 6 m/s over 60 Hz); a dash/teleport that crosses a whole cell in one
 // tick is the driver's responsibility to gate, not this veto's.
-inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool lavaFloor) {
+inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool lavaFloor,
+                        bool avoidPads = false) {
     Vec3 flat{dir.x, 0.0f, dir.z};
     if (lengthSq(flat) < 1e-6f) return true;                 // no heading: nothing to veto
     const Vec3 to = from + normalize(flat) * g.cellSize;     // one cell ahead along the heading
-    if (!cellPassable(g, to, feetY, lavaFloor)) return false;
+    if (!cellPassable(g, to, feetY, lavaFloor, avoidPads)) return false;
 
     // Diagonal? Compare the grid cells rather than the heading angle — what matters is whether the
     // step actually crosses BOTH grid axes (a shallow heading from near a cell edge can, a 45-degree
@@ -66,12 +78,65 @@ inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool
     if (fx == tx || fz == tz) return true;                             // cardinal (or same cell): done
     // Both orthogonal component cells must be passable too. Built as world points on the SAME axes
     // as `to`, so they resolve to (tx,fz) and (fx,tz) without a grid->world round trip.
-    if (!cellPassable(g, Vec3{to.x,   feetY, from.z}, feetY, lavaFloor)) return false;
-    if (!cellPassable(g, Vec3{from.x, feetY, to.z},   feetY, lavaFloor)) return false;
+    if (!cellPassable(g, Vec3{to.x,   feetY, from.z}, feetY, lavaFloor, avoidPads)) return false;
+    if (!cellPassable(g, Vec3{from.x, feetY, to.z},   feetY, lavaFloor, avoidPads)) return false;
     return true;
 }
 
-// --- FOUR_STORY "Descent": which drop hole to take ----------------------------------------------
+// True when the body's own cell is a jump pad. The `avoidPads` veto tests the DESTINATION cell, so a
+// bot that has already landed in the middle of a 3x3 pad node would find every neighbour refused and
+// box itself in; the driver therefore drops the veto while standing on one, so it can walk out.
+inline bool onJumpPad(const LevelGrid& g, Vec3 pos) {
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return false;
+    return (LevelGridSystem::getCell(g, gx, gz).flags & CELL_JUMPPAD) != 0;
+}
+
+// Just the pad clause of the veto: is the cell one step along `dir` a jump pad? Split out because
+// the driver applies pad-avoidance to COMBAT movement on a Descent floor, where borrowing the whole
+// of stepAllowed would also cancel a kite step at a wall — a much wider behaviour change than
+// intended, and one the FIGHT branch is deliberately exempt from.
+inline bool padAhead(const LevelGrid& g, Vec3 from, Vec3 dir) {
+    Vec3 flat{dir.x, 0.0f, dir.z};
+    if (lengthSq(flat) < 1e-6f) return false;
+    return onJumpPad(g, from + normalize(flat) * g.cellSize);
+}
+
+// --- FOUR_STORY "Descent": which story am I on, and which drop hole do I take? -------------------
+
+// The bot's STORY REFERENCE: the surface it is standing on, or — while airborne — the one it took
+// off from and will land back on. This is `effectiveFloorHeight`, the same story selector collision
+// uses, NOT the raw feet height.
+//
+// The distinction is the whole ballgame on a Descent floor, because the bot JUMPS constantly: the
+// kite/strafe pulse fires one every ~2.2 s and the unstick ladder adds more, and a jump carries the
+// feet 2.4 m over the slab for well over a second. Filtering holes on raw feet-Y (`|surfaceY - pos.y|
+// <= PLATFORM_STEP_TOLERANCE`, a 0.4 m window) therefore rejects EVERY hole on the bot's own story
+// for the entire flight — the drop-hole router silently goes dark and the heading falls back to the
+// flat exit flow field, which on the wrong story points at a spot three floors below. Measured on a
+// 150 s marksman trace: 21-27% of all ticks had no hole pick at all, and 100% of those were airborne
+// (log line "holesRaw=0 holesEff=18" — eighteen holes on the story, none visible to the filter).
+// Reading the slab instead makes the story stable across a jump, and it is exactly right while
+// FALLING too: over a punched hole there is no slab at the old height, so the effective floor
+// immediately resolves to the surface one story down and the bot is already routing on the story it
+// is committed to landing on.
+// The feet offset is what makes this the story BELOW rather than the story being jumped toward.
+// effectiveFloorHeight accepts any slab whose top is within PLATFORM_STEP_TOLERANCE (0.4 m) ABOVE
+// the feet — right for a body stepping up onto a stair, wrong for identifying which storey a body
+// belongs to, because a jump that passes within 0.4 m of the next slab would report that slab. The
+// Descent's storeys are 3 m apart and the base jump reaches ~2.4-2.7 m, so a plain jump comes close
+// enough to flip the answer near its apex. Subtracting the tolerance back off cancels it exactly:
+// the selector then returns the highest slab at or BELOW the feet, which is the one the bot took
+// off from and will land back on. kSettle is a hair of slack so a body resting on a slab at
+// 8.99999 m still reads as being on the 9 m storey rather than flickering to the one beneath.
+inline f32 botStoryY(const LevelGrid& g, Vec3 pos) {
+    constexpr f32 kSettle = 0.05f;
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return pos.y;   // off-grid: nothing better
+    return LevelGridSystem::effectiveFloorHeight(g, gx, gz,
+                                                 pos.y - PLATFORM_STEP_TOLERANCE + kSettle);
+}
+
 // The exit is always DOWN, so the bot's whole travel plan on a Descent floor is "find a hole in my
 // own story's slab and walk into it". The first version simply took the NEAREST same-story hole,
 // and MEASURED live that never gets off floor 1 in 150 s (marksman: closest approach to the L0 exit
@@ -87,35 +152,57 @@ inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool
 // jumpPads[] array is capped at MAX_JUMP_PADS while a floor can hold more), which makes the test
 // exact rather than approximate.
 //
-// The choice among the survivors stays NEAREST, and that is a measured decision rather than
-// laziness: the first fix also scored holes by "walk to it PLUS the walk from it to the exit", to
-// stop the descent wandering in XZ. It made things strictly worse (live: the bot picked holes 15-22 m
-// away, beelined into a maze wall and never left L3 at all in 150 s). The travel heading here is a
-// straight line with a ±45/±90 detour fan, NOT a path — on a labyrinth only a LOCAL goal is
-// steerable. Landing XZ does not need managing anyway: once the bot is on L0 the ordinary flat exit
-// flow field routes it to the door properly, walls and all.
+// The ORDER among the survivors is nearest-first, and the driver walks that order handing each
+// candidate to A* until one is actually routable — which is why this returns a LIST rather than a
+// single pick. Euclidean distance alone is a poor guide on a labyrinth: the nearest hole by metres
+// is regularly on the far side of a wall and reachable only by a long way round, and the bot used to
+// beeline at it with a ±45/±90 detour fan and simply scrape along the wall (measured: over a 150 s
+// trace the distance to the chosen hole GREW on 61 samples and shrank on 53 — a random walk, not an
+// approach). An earlier attempt to fix that by SCORING holes on "walk to it plus its walk to the
+// exit" made things worse still, because it chose holes 15-22 m off and a straight-line heading
+// cannot deliver the bot to a goal that far away through a maze. The answer is not a cleverer score
+// but a real route: keep the goal local and nearest-first, and let the driver's A* decide which of
+// them it can genuinely get to. Landing XZ needs no managing — once the bot is on L0 the ordinary
+// flat exit flow field routes it to the door properly, walls and all.
 //
-// Returns an index into d.dropHoles, or -1 when this story has none (the flat exit flow field is
+// Writes at most `maxOut` indices into `out`, nearest-first, all CLEAN holes before any padded one
+// (the padded ones are the return lifts described above — a last resort, never a first choice).
+// Returns how many were written; 0 means this story has no way down (the flat exit flow field is
 // then the right heading — that IS the case on L0, where the bot simply walks to the door).
-inline s32 pickDropHole(const LevelGrid& g, const DungeonResult& d, Vec3 pos) {
-    s32 best = -1, bestPadded = -1;
-    f32 bestD2 = 1e30f, bestPaddedD2 = 1e30f;
+inline u8 dropHoleCandidates(const LevelGrid& g, const DungeonResult& d, Vec3 pos,
+                             s32* out, u8 maxOut) {
+    if (maxOut == 0) return 0;
+    const f32 storyY = botStoryY(g, pos);
+    // Sort key: distance², with padded holes pushed behind every clean one by a constant so large no
+    // real squared distance can cross it (a 64-cell map's diagonal² is ~8k m²).
+    constexpr f32 kPadPenalty = 1e9f;
+    f32 key[16];
+    u8  n = 0;
+    if (maxOut > 16) maxOut = 16;   // the scratch bound; callers want 1-4
     for (u8 i = 0; i < d.dropHoleCount; i++) {
         const DropHole& h = d.dropHoles[i];
-        if (fabsf(h.surfaceY - pos.y) > PLATFORM_STEP_TOLERANCE) continue;   // not our story
+        if (fabsf(h.surfaceY - storyY) > PLATFORM_STEP_TOLERANCE) continue;   // not our story
         const f32 dx = h.pos.x - pos.x, dz = h.pos.z - pos.z;
-        const f32 d2 = dx * dx + dz * dz;
         // Padded? The pad lives one story DOWN at the same XZ, but a pad cell carries the flag for
         // the whole column, so the flag at the hole's own cell answers the question.
         u32 gx, gz;
         const bool padded = LevelGridSystem::worldToGrid(g, h.pos, gx, gz) &&
                             (LevelGridSystem::getCell(g, gx, gz).flags & CELL_JUMPPAD) != 0;
-        if (padded) { if (d2 < bestPaddedD2) { bestPaddedD2 = d2; bestPadded = (s32)i; } }
-        else        { if (d2 < bestD2)       { bestD2       = d2; best       = (s32)i; } }
+        const f32 k = dx * dx + dz * dz + (padded ? kPadPenalty : 0.0f);
+        if (n == maxOut && k >= key[n - 1]) continue;      // worse than everything we're keeping
+        u8 slot = (n < maxOut) ? n : (u8)(maxOut - 1);
+        if (n < maxOut) n++;
+        while (slot > 0 && key[slot - 1] > k) { key[slot] = key[slot - 1]; out[slot] = out[slot - 1]; slot--; }
+        key[slot] = k; out[slot] = (s32)i;
     }
-    // A padded hole is still better than standing still: on the deepest story holes are rare (7%
-    // density) and a bounce at least relocates the bot. Only taken when nothing clean exists.
-    return (best >= 0) ? best : bestPadded;
+    return n;
+}
+
+// Single best candidate, or -1 when this story has no way down. Thin wrapper over the list above so
+// both share one story/pad rule.
+inline s32 pickDropHole(const LevelGrid& g, const DungeonResult& d, Vec3 pos) {
+    s32 one[1];
+    return dropHoleCandidates(g, d, pos, one, 1) ? one[0] : -1;
 }
 
 // combatStalled — the combat-standoff break-off test (engine_autoplay.cpp). The FIGHT branch fires at

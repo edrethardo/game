@@ -39,15 +39,49 @@ TEST_CASE("FIGHT skips a distant out-of-band target: travel toward the EXIT, not
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decide(v);
     CHECK_FALSE(out.fire);
-    CHECK(out.moveFwd);
+    // Travelling toward +Z while still facing -Z (yaw 0): the WALK is resolved against the CURRENT
+    // facing, so the correct first step is backward, and the aim turns to catch up.
+    CHECK(out.moveBack);
     CHECK(fabsf(out.aimYaw) == doctest::Approx(3.14159f).epsilon(0.03)); // faces +Z (exit, yaw ~+-pi), not -Z (~0)
 }
 
-TEST_CASE("TRAVEL when no targets: face the flow direction and walk forward") {
-    BotView v = baseView(); v.flowDir = Vec3{1,0,0};   // exit is +X
+// --- TRAVEL movement is a WASD decomposition, not "hold W" ---------------------------------------
+// applyBotIntent EASES the aim, so the facing lags the heading for a few tenths of a second after
+// every turn. Holding W through that lag walks the bot wherever it happens to be pointing, which in
+// the Descent's 3-wide corridors is the wall — the observed "looking at walls and hugging corners".
+// Resolving the heading against the CURRENT facing means the bot travels the right way immediately
+// and straightens up as the turn completes.
+TEST_CASE("TRAVEL: heading dead ahead of the current facing is plain forward") {
+    BotView v = baseView(); v.yaw = 0.0f; v.flowDir = Vec3{0,0,-1};   // yaw 0 faces -Z
     BotIntent out = decide(v);
     CHECK(out.moveFwd);
+    CHECK_FALSE(out.moveBack); CHECK_FALSE(out.moveLeft); CHECK_FALSE(out.moveRight);
+    CHECK(out.aimYaw == doctest::Approx(0.0f).epsilon(0.03));
+}
+
+TEST_CASE("TRAVEL: a heading 90 degrees off the facing STRAFES instead of walking into the wall") {
+    BotView v = baseView(); v.yaw = 0.0f; v.flowDir = Vec3{1,0,0};   // exit is +X; bot still faces -Z
+    BotIntent out = decide(v);
+    CHECK(out.moveRight);                       // +X is dead right of a -Z facing
+    CHECK_FALSE(out.moveFwd); CHECK_FALSE(out.moveBack);
     CHECK(out.aimYaw == doctest::Approx(-1.5708f).epsilon(0.03));  // yaw facing +X (atan2f(-1,-0))
+}
+
+TEST_CASE("TRAVEL: a diagonal heading engages both axes") {
+    BotView v = baseView(); v.yaw = 0.0f; v.flowDir = normalize(Vec3{1,0,-1});  // forward-right
+    BotIntent out = decide(v);
+    CHECK(out.moveFwd);
+    CHECK(out.moveRight);
+    CHECK_FALSE(out.moveBack); CHECK_FALSE(out.moveLeft);
+}
+
+TEST_CASE("TRAVEL: once the eased aim has caught up the strafe decays to plain forward") {
+    // Same exit as the strafe case, but the bot has finished turning. The lateral component is gone
+    // — so the sidestep is a transient of the turn, not a permanent crab-walk.
+    BotView v = baseView(); v.yaw = -1.5708f; v.flowDir = Vec3{1,0,0};
+    BotIntent out = decide(v);
+    CHECK(out.moveFwd);
+    CHECK_FALSE(out.moveLeft); CHECK_FALSE(out.moveRight);
 }
 
 TEST_CASE("DESCEND: at the door with the boss dead => request descent") {
