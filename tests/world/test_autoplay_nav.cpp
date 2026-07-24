@@ -133,3 +133,20 @@ TEST_CASE("descend pulse: holds then releases so the hold can re-fire past a shr
     CHECK(Autoplay::descendPulseHeld(0.66f));   // next cycle: held again -> re-fires (now the exit)
     CHECK(Autoplay::descendPulseHeld(0.66f + 0.35f));  // and re-fires past the 0.35 s threshold
 }
+
+TEST_CASE("combat break-off: fires only past the threshold, with an in-band target, and no damage") {
+    // The unified stuck detector holds noProgressTimer at zero while the bot MOVES or DEALS DAMAGE;
+    // combatStalled is the break-off trigger for the remaining case — the timer has climbed (no move,
+    // no damage) WHILE an in-band target is present (FIGHT is active, firing in place at cover/angle).
+    // Below threshold: not yet a standoff.
+    CHECK_FALSE(Autoplay::combatStalled(/*timer=*/1.0f, /*inBandTarget=*/true,  /*combatProgress=*/false));
+    CHECK_FALSE(Autoplay::combatStalled(2.9f, true, false));
+    // Past threshold, in-band, no damage: the livelock — break off.
+    CHECK(Autoplay::combatStalled(3.1f, true, false));
+    CHECK(Autoplay::combatStalled(10.0f, true, false));
+    // Dealing damage right now is a real fight, never a standoff (the driver also zeroes the timer, but
+    // the helper is honest on its own).
+    CHECK_FALSE(Autoplay::combatStalled(10.0f, true, /*combatProgress=*/true));
+    // No in-band target = a plain travel wedge, not a combat standoff (the escape ladder handles it).
+    CHECK_FALSE(Autoplay::combatStalled(10.0f, /*inBandTarget=*/false, false));
+}

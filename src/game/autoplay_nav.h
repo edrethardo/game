@@ -43,6 +43,20 @@ inline bool stepAllowed(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir, bool
     return true;
 }
 
+// combatStalled — the combat-standoff break-off test (engine_autoplay.cpp). The FIGHT branch fires at
+// any in-band LOS target, but LOS is a raycast to the target's CENTRE: cover, a doorway, or an
+// elevation edge can make every shot miss or be blocked while the ray still reads clear, so the bot
+// fires forever, kills nothing, and — firing in place is zero XZ movement — never trips the plain
+// travel stuck-detector. The unified detector (driver) holds `noProgressTimer` at zero while the bot
+// either MOVES (>0.5 m) or deals damage (`combatProgressThisTick` — a nearby hostile's HP fell or one
+// died); so a timer that has climbed past the break-off threshold WITH an in-band target present means
+// the bot is locked in a fight it is making no progress on. That is the livelock: break it by forcing a
+// travel leg (change position + firing angle). Pure so the rule unit-tests without the Engine.
+inline bool combatStalled(f32 noProgressTimer, bool inBandTarget, bool combatProgressThisTick) {
+    constexpr f32 kBreakoffSec = 3.0f;   // fire-in-place with no damage this long = a standoff to break
+    return noProgressTimer > kBreakoffSec && inBandTarget && !combatProgressThisTick;
+}
+
 // escapeHeading — the escalating stuck-override's Stage-2 fallback (engine_autoplay.cpp). When the
 // flow field yields no usable heading and the lateral ±90/180 nudge finds nothing, scan all 8 compass
 // headings and return the FIRST hazard-safe one (stepAllowed) that ALSO moves the bot away from

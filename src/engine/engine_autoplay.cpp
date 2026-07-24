@@ -18,12 +18,28 @@
 // per-style vertical goal into flowDir BEFORE the hazard veto — a VERTICAL_HALL bot climbs the
 // diagonal-corner ramp to the opposite-story exit balcony, a FOUR_STORY "Descent" bot steers to the
 // nearest same-story drop-hole and falls toward L0, and lava floors lean on the (lava-aware) veto to
-// hug the stone causeways. Three driver backstops ride on top: an anti-livelock stuck-override (force
-// the descend when wedged at a contested door; else an ESCALATING escape when wedged on geometry —
-// lateral nudge → full 8-direction safe-step search away from the wedge → a short A* leg toward the
-// exit — so an AFK bot is never permanently idle even when the flow field yields no heading), a
-// loot-settle dwell (hold briefly after a fight so the auto-loot vacuum collects), and low-hp
-// health-globe detours.
+// hug the stone causeways.
+//
+// ANTI-LIVELOCK BACKSTOPS ride on top, in strict priority order, so an unattended bot ALWAYS finishes a
+// floor. Progress is defined UNIFORMLY across travel and combat: the bot is making progress if it MOVED
+// (> 0.5 m) OR it DEALT DAMAGE. That definition is the whole fix for the shipping bug — the old detector
+// exempted any in-band fight outright, so a bot firing at a target it could never kill (cover/doorway/
+// elevation blocks the shots even though the LOS raycast to the centre reads clear) suppressed its own
+// stuck timer and stood there forever. The ladder:
+//   A  wedged AT the exit          -> stand still and force the descend hold.
+//   B  wedged on geometry          -> ESCALATING escape (lateral nudge -> 8-direction safe-step search
+//                                     away from the wedge -> a short A* leg toward the exit).
+//   B2 EXIT BULL                   -> the exit-progress watchdog: the bot is MOVING but never arriving
+//                                     (orbiting/spiralling, or kited off the door by a swarm it refuses
+//                                     to shoot). Bull to the door A*-routed, firing through bodies, and
+//                                     STOP inside the descend radius so the interact-hold can land.
+//                                     Ranked below B on purpose — when physically wedged, walking at the
+//                                     door only presses into the wall and B never gets to run.
+//   C  combat BREAK-OFF            -> a stalled (no-damage) in-band fight: walk past toward the exit when
+//                                     a flow heading exists, else strafe around the target while FIRING.
+// Plus a loot-settle dwell (hold briefly after a fight so the auto-loot vacuum collects) and low-hp
+// health-globe detours. An anti-stall move must never holster the guns while an enemy is in reach — that
+// is how the bot once froze for 60 s against two body-blocking enemies it silently refused to shoot.
 #include "engine/engine.h"
 #include "platform/input.h"
 #include "world/combat_query.h"
@@ -44,6 +60,82 @@ static constexpr u32 kMaxTargets = 16;
 static Vec3 rotateY_XZ(Vec3 v, f32 a) {
     const f32 c = cosf(a), s = sinf(a);
     return Vec3{v.x * c - v.z * s, 0.0f, v.x * s + v.z * c};
+}
+
+// Anti-stall COMBAT relocation, shared by the break-off (Remedy C) and the geometry escape (Remedy B).
+// The bot is stalled — usually with a shootable target it isn't killing (shots blocked by cover/angle,
+// or one/two enemies body-blocking it against a wall). Break the stall WITHOUT ever holstering the
+// guns: aim + fire at the nearest LOS target and STRAFE around it, biased toward `hint` (the exit flow,
+// or — when there is no flow — away from the wedge anchor) so the bot simultaneously (a) keeps damaging
+// whatever pins it, (b) changes its firing angle so a blocked shot can connect, and (c) drifts past the
+// enemy toward the exit. Falls back to a plain forward walk along `hint` when nothing is shootable.
+//
+// This is the fix for the observed 60 s freeze: the OLD break-off/escape CLEARED fire and tried to walk
+// straight to the exit, so two body-blocking enemies it refused to shoot pinned it forever while it
+// silently pressed into them and its HP regenerated. Returns an intent whose move/fire flags are empty
+// only when there is genuinely nothing to do (no target AND no heading) — the caller then keeps its
+// current intent rather than forcing a no-op.
+static Autoplay::BotIntent unstickCombatMove(const Autoplay::BotView& v, Vec3 hint,
+                                             const LevelGrid& grid, f32 feetY, bool lavaFloor,
+                                             Vec3 anchor, Vec3 selfPos, f32 selfYaw) {
+    Autoplay::BotIntent out{};
+    out.aimYaw = selfYaw; out.aimPitch = 0.0f;
+
+    // Nearest LOS target within engage reach (the doctrine's fire band, or the 12 m threat radius so a
+    // short-reach build still shoots a genuine body-blocker).
+    const Autoplay::Doctrine doc = Autoplay::doctrineFor(v.buildCell);
+    const f32 reach = fmaxf(doc.engageMax * v.weaponRange, 12.0f);
+    s32 ti = -1; f32 bestD = 1e9f;
+    for (u32 i = 0; i < v.targetCount; i++) {
+        if (!v.targets[i].hasLOS || v.targets[i].dist > reach) continue;
+        if (v.targets[i].dist < bestD) { bestD = v.targets[i].dist; ti = (s32)i; }
+    }
+
+    // Preferred net-progress direction: the exit flow if we have one, else straight away from the wedge
+    // anchor. Used both to bias the strafe side and as the plain-walk fallback heading.
+    Vec3 pref = hint;
+    if (lengthSq(pref) < 1e-6f) pref = Vec3{selfPos.x - anchor.x, 0.0f, selfPos.z - anchor.z};
+    const bool havePref = lengthSq(pref) > 1e-6f;
+    if (havePref) pref = normalize(pref);
+
+    if (ti >= 0) {
+        // Aim + fire at the target (lead projectile weapons, mirroring decideCombat). KEEPING the guns on
+        // is what kills a body-blocker and unwedges the bot.
+        const Autoplay::BotTarget& t = v.targets[(u32)ti];
+        const Vec3 eye = selfPos + Vec3{0, v.eyeHeight, 0};
+        Vec3 aimPt = t.pos;
+        if (v.weaponProjSpeed > 0.1f) {
+            f32 tHit;
+            if (LeadAssist::interceptTime(t.pos - eye, t.vel, v.weaponProjSpeed, tHit))
+                aimPt = t.pos + t.vel * tHit;
+        }
+        Autoplay::dirToAim(aimPt - eye, out.aimYaw, out.aimPitch);
+        out.fire = !v.stunned && !v.rolling;
+
+        // Strafe perpendicular to the aim. MOVE_RIGHT world dir = {cos(yaw),0,-sin(yaw)} (player.cpp:84-89,
+        // right = cross(flatForward, up)); MOVE_LEFT is its negation. Take the hazard-safe side, preferring
+        // the one that best follows `pref` so the circling motion also drifts toward the exit.
+        const f32 cy = cosf(out.aimYaw), sy = sinf(out.aimYaw);
+        const Vec3 rightW{cy, 0.0f, -sy}, leftW{-cy, 0.0f, sy};
+        const bool rOk = Autoplay::stepAllowed(grid, selfPos, feetY, rightW, lavaFloor);
+        const bool lOk = Autoplay::stepAllowed(grid, selfPos, feetY, leftW, lavaFloor);
+        const f32 rScore = havePref ? dot(rightW, pref) : 0.0f;
+        const f32 lScore = havePref ? dot(leftW,  pref) : 0.0f;
+        if      (rOk && (!lOk || rScore >= lScore)) out.moveRight = true;   // strafe the exit-ward safe side
+        else if (lOk)                               out.moveLeft  = true;
+        // Neither lateral safe: fire in place. Damage is still progress — the target dies and unwedges us.
+        return out;
+    }
+
+    // Nothing to shoot: relocate along the preferred heading (the classic break-off / escape walk).
+    if (havePref) { Autoplay::dirToAim(pref, out.aimYaw, out.aimPitch); out.aimPitch = 0.0f; out.moveFwd = true; }
+    return out;
+}
+
+// True if `in` carries an actionable command (any move or fire) the anti-stall helper produced — used
+// so a "nothing to do" result leaves the caller's existing intent untouched instead of forcing a no-op.
+static bool intentActs(const Autoplay::BotIntent& in) {
+    return in.moveFwd || in.moveBack || in.moveLeft || in.moveRight || in.fire;
 }
 
 // One tick of the Autoplay driver. Called from gameUpdate BEFORE the input-consuming blocks so the
@@ -92,34 +184,113 @@ void Engine::updateAutoplay(f32 dt) {
         in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;   // dwell: let loot settle
 
     // (2) STUCK detection (anti-livelock backstop; should almost never fire in normal play). Progress
-    // is XZ distance from a re-anchored point. It only accrues while the bot is NOT locked in an
-    // in-band fight (a bot dancing around an in-range target is working, not wedged) and not dwelling —
-    // so an unreachable OUT-of-band straggler at the exit still lets the timer climb (the livelock).
+    // is UNIFIED across travel AND combat: the bot is making progress this tick if it MOVED (>0.5 m
+    // from the anchor) OR it dealt combat damage (a nearby hostile's HP fell / one died). Only when it
+    // did NEITHER does the no-progress timer climb. The old code exempted any in-band fight outright —
+    // which SUPPRESSED the timer forever whenever the bot fired at an in-band LOS target it could not
+    // actually kill (cover/doorway/elevation blocks the shots though LOS-to-centre reads clear), the
+    // ship-blocking combat livelock. Now such a standoff (fire in place, zero damage) lets the timer
+    // climb like any wedge, so the break-off (3) and the escape ladder below can break it.
+    bool inBandFight = false;
+    bool combatProgress = false;
     {
         const Vec3 p  = m_localPlayer.position;
         const f32  dx = p.x - m_autoplayLastPos.x, dz = p.z - m_autoplayLastPos.z;
         const bool progressed = (dx * dx + dz * dz) > 0.25f;   // > 0.5 m from the anchor
+
+        // In-band fight = an LOS target inside the doctrine's FIRE band (matches decideCombat's fire
+        // gate) — i.e. FIGHT is active and the bot is shooting in place, the state a standoff wedges in.
         const Autoplay::Doctrine doc = Autoplay::doctrineFor(v.buildCell);
-        bool inBandFight = false;
+        f32 enemyHp = 0.0f;
         for (u32 i = 0; i < v.targetCount; i++) {
             const Autoplay::BotTarget& t = v.targets[i];
+            enemyHp += t.hp;                                   // combat-progress signal: total nearby HP
             if (t.hasLOS && t.dist >= doc.engageMin * v.weaponRange &&
-                            t.dist <= doc.engageMax * v.weaponRange) { inBandFight = true; break; }
+                            t.dist <= doc.engageMax * v.weaponRange) inBandFight = true;
         }
+        // Combat progress = we dealt damage (summed HP fell past a small epsilon) OR scored a kill
+        // (fewer hostiles gathered than last tick). Comparing against the previous tick's snapshot; a
+        // RISE (a new enemy walked into range) is not progress, so we only test for a drop.
+        combatProgress = (v.targetCount < m_autoplayLastEnemyCount) ||
+                         (enemyHp < m_autoplayLastEnemyHp - 0.5f);
+        m_autoplayLastEnemyHp    = enemyHp;
+        m_autoplayLastEnemyCount = v.targetCount;
+
         if (progressed) {
-            // Real progress resumed (moved > 0.5 m from the wedge anchor): re-anchor and DROP the whole
-            // escape ladder so the bot returns to plain flow-field travel (requirement: reset on progress).
+            // Real XZ progress resumed (moved > 0.5 m from the wedge anchor): re-anchor and DROP the
+            // whole escape ladder so the bot returns to plain flow-field travel (reset on progress).
             m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f;
             m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
+        } else if (combatProgress) {
+            // Dealing damage in place is progress too (a real fight, not a wedge): hold the timer + escape
+            // ladder at zero WITHOUT moving the anchor (the bot hasn't travelled, it's killing things).
+            m_autoplayNoProgressTimer = 0.0f;
+            m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
+        } else if (m_autoplayLootDwell <= 0.0f) {
+            m_autoplayNoProgressTimer += dt;                  // no move, no damage, not dwelling: wedged
         }
-        else if (!inBandFight && m_autoplayLootDwell <= 0.0f) m_autoplayNoProgressTimer += dt;
     }
     const bool stuck = m_autoplayNoProgressTimer > 4.0f;
 
-    // Remedy A (priority) — exit-loiter livelock: wedged near a contested door with the boss dead. An
-    // unreachable LOS straggler keeps FIGHT active but the bot can't close, so force the descend (hold
-    // PICKUP, drop fire/move) — the interact-hold completes over the next few ticks and we leave.
-    const bool bossGate = v.hasBoss && v.bossAlive;
+    // (2b) BREAK OFF a stalled fight — the fix for the combat livelock. When the bot has been firing in
+    // place at an in-band target for ~3 s but dealt no damage (combatStalled), suppress FIGHT and force
+    // a short TRAVEL leg toward the exit so it physically relocates and its firing angle changes: from
+    // the new spot the target is either killable (clear line) or off the route (bot has moved on). We
+    // commit the leg for ~1.5 s so it clears the standoff instead of resuming fire the instant it moves
+    // 0.5 m and re-stalling in place. Gated off when parked at an eligible door (Remedy A descends
+    // instead of walking away) and when there is no travel heading to follow. The forced move re-zeros
+    // the no-progress timer each tick, so a PURE combat standoff never reaches the 4 s geometry ladder;
+    // only a bot that is ALSO physically wedged (travel forced but walls block the step) climbs to 4 s
+    // and escalates to Remedy B — exactly the intended split.
+    if (m_autoplayBreakoffTimer > 0.0f) m_autoplayBreakoffTimer -= dt;
+    const bool bossGate     = v.hasBoss && v.bossAlive;
+
+    // (2c) EXIT-PROGRESS WATCHDOG. The stuck timer above keys off XZ displacement, so a bot that keeps
+    // MOVING but never gets anywhere useful slips right past it: a kiting sorcerer swarmed inside its own
+    // engage floor NEVER fires and just circles / spirals near the exit at a crawl, never closing the last
+    // few metres and never descending. The watchdog asks a blunt question on a rolling window: over the
+    // last few seconds did the bot get MEANINGFULLY closer to the exit OR deal combat damage? If NEITHER,
+    // it is livelocked on this floor — bull to the exit (Remedy A) and leave. A RATE check (approach > 1 m
+    // per window), not a best-distance one, so a slow inward spiral that never actually arrives still
+    // trips it (a best-distance test kept resetting on the crawl and never fired).
+    constexpr f32 kDoorCheckWindow = 4.0f;   // evaluate exit progress every 4 s
+    constexpr f32 kDoorApproachMin = 1.0f;   // must close at least 1 m toward the door per window
+    if (m_level.currentFloor != m_autoplayLastFloor) {   // new floor: re-anchor the window, drop the latch
+        m_autoplayLastFloor      = m_level.currentFloor;
+        m_autoplayDoorCheckDist  = v.distToDoor;
+        m_autoplayExitStallTimer = 0.0f;
+        m_autoplayExitBull       = false;
+    }
+    if (v.doorActive && !bossGate) {
+        if (combatProgress) {   // a kill/damage this tick = a real fight worth finishing: restart the window
+            m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
+            m_autoplayExitBull      = false;
+        } else {
+            m_autoplayExitStallTimer += dt;
+            if (m_autoplayExitStallTimer >= kDoorCheckWindow) {
+                // Window elapsed with no kills: did we close > 1 m toward the exit in it? The latch LATCHES
+                // (rather than firing for a tick) so the bull runs continuously until the next window shows
+                // real progress — a one-shot commit left duty-cycle gaps the kite immediately undid.
+                m_autoplayExitBull      = (m_autoplayDoorCheckDist - v.distToDoor) < kDoorApproachMin;
+                m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;   // next window
+            }
+        }
+    } else {
+        m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
+        m_autoplayExitBull      = false;   // no eligible exit (boss alive / town): idle the watchdog
+    }
+    // Suppress the combat break-off while bulling for the exit or standing on it — leaving the floor wins
+    // over re-angling a fight we've already given up on.
+    if (Autoplay::combatStalled(m_autoplayNoProgressTimer, inBandFight, combatProgress) &&
+        !m_autoplayExitBull && !v.atExit && m_autoplayBreakoffTimer <= 0.0f)
+        m_autoplayBreakoffTimer = 1.5f;   // arm a relocation leg (re-armed only after the timer expires)
+        // NB: no flowDir requirement — the break-off STRAFES around the target (unstickCombatMove), which
+        // needs no exit heading, so it works even when the bot is boxed and flowDir is vetoed to zero
+        // (exactly the pocket the bot froze in: firing at an unhittable target with no flow to walk).
+
+    // Remedy A (priority) — WEDGED right at the exit with the boss dead: an unreachable LOS straggler keeps
+    // FIGHT active but the bot can't close, so stand still and force the descend (hold PICKUP, drop
+    // fire/move) — the interact-hold completes over the next few ticks and we leave.
     if (stuck && v.doorActive && v.distToDoor < 2.5f && !bossGate) {
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
@@ -208,10 +379,79 @@ void Engine::updateAutoplay(f32 dt) {
                 m_autoplayEscapeTimer = 0.0f;
         }
 
-        if (lengthSq(esc) > 1e-6f) {
-            f32 yaw, pitch; Autoplay::dirToAim(esc, yaw, pitch);
+        // Apply the escape heading through unstickCombatMove: if a hostile is in reach it STRAFES around
+        // it while FIRING (kills a body-blocker, changes the angle) biased toward `esc`; otherwise it just
+        // walks `esc` (identical to the old forward step for a pure geometry wedge with nothing to shoot).
+        // Only override when it produced an actionable move — a fully-boxed no-target result leaves the
+        // bot's current intent alone. This is what stops the >4 s escape zone from silently holstering the
+        // guns and freezing next to enemies it could have killed.
+        {
+            Autoplay::BotIntent u = unstickCombatMove(v, esc, m_level.grid, feetY, m_level.lavaFloor,
+                                                      anchor, m_localPlayer.position, m_localPlayer.yaw);
+            if (intentActs(u)) in = u;
+        }
+    } else if (m_autoplayExitBull && v.doorActive && !bossGate) {
+        // Remedy B2 — EXIT BULL (the exit-progress watchdog latched): the bot is MOVING but getting
+        // nowhere useful — orbiting/spiralling the floor, or kited off the exit by a swarm it refuses to
+        // shoot — so stop playing and just leave. Ranked BELOW the geometry escape on purpose: when the
+        // bot is physically wedged, walking at the door only presses it into the wall and the escape
+        // ladder never gets to run (measured: 35 s frozen with the bull latched and moveFwd held). The
+        // two are naturally exclusive — `stuck` means not moving, the bull means moving-but-not-arriving.
+        const Vec3 pos = m_localPlayer.position;
+        Vec3 heading{m_level.floorDoorPos.x - pos.x, 0.0f, m_level.floorDoorPos.z - pos.z};
+        if (v.distToDoor > 3.0f) {   // far: prefer a wall-avoiding A* first leg over the straight line
+            Vec3 wp[MAX_PATH_WAYPOINTS];
+            const u8 n = Pathfinder::findPath(m_level.grid, pos, m_level.floorDoorPos, wp,
+                                              MAX_PATH_WAYPOINTS, 0.3f);
+            if (n > 0) {
+                const Vec3 toWp{wp[0].x - pos.x, 0.0f, wp[0].z - pos.z};
+                if (lengthSq(toWp) > 1e-6f) heading = toWp;
+            }
+        }
+        in = Autoplay::BotIntent{};
+        in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
+        if (lengthSq(heading) > 1e-6f) {
+            f32 y, p; Autoplay::dirToAim(heading, y, p);
+            in.aimYaw = y; in.aimPitch = 0.0f;
+            // STOP once inside the descend radius. The exit is taken by HOLDING interact for
+            // INTERACT_HOLD_SEC (0.35 s), so a bot that keeps walking blasts straight through the 2 m
+            // window (measured: reached 0.1 m from the door at 6-16 m/s, repeatedly, and never descended
+            // because it was never inside the radius long enough for one hold to complete). Standing still
+            // is what lets the hold land.
+            if (v.distToDoor > 1.5f) in.moveFwd = true;
+        }
+        in.descend = true;   // held so it fires the moment the bot is inside the 2 m descend radius
+        // FIRE through anything blocking the run to the exit. The shot travels along the door heading, so a
+        // body ON the path is hit — this is what clears the swarm a squishy kiting build can't (its
+        // doctrine kite-floor makes it REFUSE point-blank enemies, so a swarm on the exit chips it to death
+        // and knocks it back forever; measured a sorcerer bouncing 5->13 m off the door at 17 HP). Bypasses
+        // the band here because leaving the floor, not perfect target selection, is the goal.
+        for (u32 i = 0; i < v.targetCount; i++) {
+            if (v.targets[i].hasLOS && v.targets[i].dist <= v.weaponRange && !v.stunned && !v.rolling) {
+                in.fire = true; break;
+            }
+        }
+    } else if (m_autoplayBreakoffTimer > 0.0f) {
+        // Remedy C — break off a stalled fight (armed in (2b)): firing at an in-band target the shots
+        // can't kill (cover/angle), or an enemy body-blocking the bot. The response depends on whether an
+        // exit heading exists:
+        //   flowDir != 0  → WALK toward the exit with fire OFF. This DE-FIXATES from the unkillable cover
+        //                   target and leapfrogs past it (move-and-slide slides around any body); moving
+        //                   > 0.5 m resets the stuck timer, so the bot advances a little each cycle and
+        //                   eventually reaches the exit. (Strafing-in-place here just oscillated forever
+        //                   next to a cover enemy while the exit sat open — no forward progress.)
+        //   flowDir == 0  → BOXED, no exit to walk to: STRAFE around the target while FIRING to kill
+        //                   whatever pins us (the only way out). See unstickCombatMove — this is the fix
+        //                   for the 60 s freeze where the bot refused to shoot two body-blocking enemies.
+        const f32 feetY = m_localPlayer.position.y;
+        if (lengthSq(v.flowDir) > 1e-6f) {
+            f32 yaw, pitch; Autoplay::dirToAim(v.flowDir, yaw, pitch);
             in = Autoplay::BotIntent{};
             in.aimYaw = yaw; in.aimPitch = 0.0f; in.moveFwd = true;
+        } else {
+            Autoplay::BotIntent u = unstickCombatMove(v, Vec3{0, 0, 0}, m_level.grid, feetY, m_level.lavaFloor,
+                                                      m_autoplayLastPos, m_localPlayer.position, m_localPlayer.yaw);
+            if (intentActs(u)) in = u;
         }
     }
 

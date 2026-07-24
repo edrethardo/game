@@ -366,9 +366,17 @@ void Engine::enterAutoplayRun() {
     m_autoplayLastPos         = Vec3{0, 0, 0};
     m_autoplayNoProgressTimer = 0.0f;
     m_autoplayNudgeTimer      = 0.0f;
+    m_autoplayEscapeTimer     = 0.0f;
     m_autoplayLootDwell       = 0.0f;
     m_autoplayLastTargetCount = 0;
     m_autoplayDescendPulse    = 0.0f;
+    m_autoplayLastEnemyHp     = 0.0f;   // combat-progress signal (a leftover value could false-arm break-off)
+    m_autoplayLastEnemyCount  = 0;
+    m_autoplayBreakoffTimer   = 0.0f;
+    m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
+    m_autoplayDoorCheckDist   = 0.0f;
+    m_autoplayExitStallTimer  = 0.0f;
+    m_autoplayLastFloor       = 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -265,6 +265,25 @@ private:
     f32              m_autoplayLootDwell = 0.0f;         // >0 = holding position so the loot vacuum can settle
     u32              m_autoplayLastTargetCount = 0;      // last tick's hostile count (a >0->0 edge arms the loot dwell)
     f32              m_autoplayDescendPulse = 0.0f;      // seconds continuously wanting to descend; drives the PICKUP release/re-hold pulse (autoplay_nav.h descendPulseHeld)
+    // Combat-progress signal for the UNIFIED stuck detector: a fight only counts as progress if the bot
+    // is actually dealing damage, so a standoff (firing at an unhittable cover/angle/elevation target,
+    // which LOS-to-centre reads as a valid fight) lets the no-progress timer climb instead of suppressing
+    // it. Each tick the driver sums the nearby-hostile HP the view already gathered and counts them; a
+    // DROP in either (damage dealt / a kill) is combat progress and re-zeros the timer.
+    f32              m_autoplayLastEnemyHp    = 0.0f;     // last tick's summed nearby-hostile HP
+    u32              m_autoplayLastEnemyCount = 0;        // last tick's nearby-hostile count (a drop = a kill)
+    f32              m_autoplayBreakoffTimer  = 0.0f;     // >0 = forcing a TRAVEL leg to break a stalled (no-damage) in-band fight, so the bot relocates and changes its firing angle
+    // Exit-progress watchdog — the definitive "always complete the floor" backstop. Independent of the
+    // XZ stuck detector (a bot ORBITING the floor moves > 0.5 m/tick, so it never trips "stuck", yet it
+    // never approaches the exit either — e.g. a kiting sorcerer swarmed inside its own engage floor that
+    // NEVER fires, circling/spiralling at a crawl near the door forever). Evaluated on a rolling ~4 s
+    // window: if the bot neither closed > 1 m toward the exit NOR dealt combat damage in the window it is
+    // livelocked — the m_autoplayExitBull latch turns on and Remedy A bulls it to the door (A*-routed,
+    // firing through the swarm) and descends. The latch clears the moment it makes progress / descends.
+    bool             m_autoplayExitBull       = false;    // latched: bull to the exit (livelocked on this floor)
+    f32              m_autoplayDoorCheckDist  = 0.0f;     // distToDoor at the window's start (rolling checkpoint)
+    f32              m_autoplayExitStallTimer = 0.0f;     // seconds elapsed in the current no-kill window
+    u32              m_autoplayLastFloor      = 0;        // detects a floor change to re-anchor the window
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];
