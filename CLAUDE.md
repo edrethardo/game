@@ -361,6 +361,15 @@ hold >0.35 s to fire, release a beat to clear the latch, repeat) so one cycle sp
 descends — a plain continuous hold wedged the bot next to a used shrine forever. The **build doctrine**
 (`doctrineFor`) turns the Auto-Loot 3×3 build cell into a playstyle: the column sets the engagement band
 (×weaponRange) and the row sets risk posture (potion threshold, block vs proactive-dodge, cover, high-ground).
+A FRESH Autoplay hero **seeds that cell's column from its CLASS** (`Autoplay::defaultCellForClass`,
+`autoplay_doctrine.h`: Magic / Melee / Ranged, Moderate row) — `PlayerInventory`'s untouched default is
+Moderate/**Melee** for everyone, so Auto-Equip used to put a sword on a Sorcerer and the bot played melee
+with a caster. The table is explicit, not derived from `ClassDef::preferredWeapon` (which cannot separate
+Magic from Ranged — Sorcerer and Ranger are both `PROJECTILE`); each entry matches the family
+`BuildScore::weaponInFamily` puts that class's STARTING weapon in, so the first auto-equip pass keeps the
+weapon the class was born with. Only a **fresh** character is seeded (`enterAutoplayRun(freshCharacter)`,
+threaded from `GameStart::NEW_GAME` / `!m_menu.p1Continue`) — a Continue keeps the cell its player chose in
+the inventory grid, and a re-seed there would silently re-gear their hero.
 The FIGHT branch only engages within an **engagement ceiling** `max(engageMax×weaponRange, THREAT_RADIUS=12 m)`
 — a target beyond it falls through to DESCEND/TRAVEL so a distant straggler can't drag the bot off the
 exit route (this was the dense-`VERTICAL_HALL`-floor stall: an unbounded FIGHT chased 16-21 m foes forever).
@@ -380,14 +389,36 @@ watermark), and `decideCombat` presses the lowest castable slot whenever it is e
 plays its build instead of poking with a wand. Availability is mirrored rather than guessed precisely
 because a press that no-ops is worse than no press.
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
-(`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto);
-three driver backstops ride on top — a stuck-override (force-descend when wedged at a contested door; lateral
-nudge on geometry), a loot-settle dwell, and low-HP health-globe detours. **Auto-respawn** re-enters the run
-~1.5 s after a solo death (entrance spawn); the **difficulty ladder** is the existing floor-50→next-difficulty
-flow. **No save-format change** — `m_autoplayActive` and the backstop timers are all transient. This bot is
-the **empirical playtest rig the balance-lab spec deferred** — it runs the real combat/loot/nav loop end to
-end; a natural follow-up is emitting per-floor metrics from the driver. Story/lava routing and the dense-floor
-survivability of a melee bot on `VERTICAL_HALL` are the known-weak cases (dense floors are slow-but-progressing).
+(`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
+Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in
+`buildBotView` to `flowDir` — the TRAVEL heading — **and to nothing else**. `applyBotIntent` vetoes
+nothing, so the FIGHT branch's own kite/close/strafe movement is unvetoed by design (short, reactive,
+enemy-derived); the escape backstop calls `stepAllowed` itself. A NEW nav source must either fold into
+`flowDir` upstream of that check or call `stepAllowed` on its own heading.
+The driver's other **backstops** ride on top, so an AFK bot is never found permanently idle: a loot-settle dwell,
+low-HP health-globe detours, a **combat break-off** (an in-band fight that lands no damage arms a 1.5 s
+relocation leg — walk the flow heading with fire OFF to de-fixate, or, when there is no heading at all
+because the bot is BOXED, strafe around the target while FIRING, which is the only way out), an
+**exit-progress watchdog** (a 4 s window with no kills AND <1 m closed on the door latches "bull to the
+exit": A*-routed first leg, fire through anything on the path, stop inside 1.5 m so the interact hold can
+land), and an **escalating escape** for a geometry wedge (>4 s without XZ progress: lateral ±90/180 nudge →
+8-direction safe-step search away from the wedge anchor → a short A* leg toward the door, each heading
+re-checked against `stepAllowed`). **Auto-respawn**
+re-enters the run ~1.5 s after a solo death (entrance spawn); the **difficulty ladder** is the existing
+floor-50→next-difficulty flow. **No save-format change** — `m_autoplayActive` and the backstop timers are
+all transient. This bot is the **empirical playtest rig the balance-lab spec deferred** — it runs the real
+combat/loot/nav loop end to end; a natural follow-up is emitting per-floor metrics from the driver.
+**Where v1 actually stands (measured, 2026-07-24).** On **flat** floors (`rooms` / `cavern` / `gauntlet` /
+`hub`) the bot plays unattended for all three archetypes — in ~2-minute `--autoplay --new` runs a Sorcerer
+and a Warrior each reached floor 5 and a Marksman floor 4, casting class skills, auto-equipping and
+descending, with zero deaths and no permanent stall. The **known v1 limits are the hard floors, and they
+are limits, not solid ground**: on the stacked styles (`VERTICAL_HALL`, `FOUR_STORY`) and the lava floors
+the routing is CORRECT and the bot is never permanently wedged (the escape ladder guarantees that), but
+their enemy density and vertical topology mean it can be **slow and may not complete such a floor
+quickly** — a 100 s `--vhall` and a 100 s `--lava` spot check had it fighting (51 / 42 skill casts) and
+looting throughout, and descending neither. Specifically, VH **balcony story-routing oscillates on some
+seeds** (the ramp goal flips as the bot crosses the band edge). Treat "descends every floor type promptly"
+as unproven — flat-floor progress is the claim the runs support.
 
 **Persistence is per-character.** Each save file (`save_NN.dat`) holds exactly ONE character (`playerCount=1`); the per-lane destination is `m_playerSaveSlot[lane]` and `saveAllCharacters()` writes each active lane to its own slot. In couch co-op both players pick their own slot (New or Continue) in the menu lobby and the shared dungeon runs on **Player 1's floor**; mixed New/Continue lanes work because the menu prepares each lane and calls `startGame(mode, lanesPrepared=true)` (skipping the NEW_GAME wipe). Legacy `playerCount=2` bundle saves still load (and migrate to per-character on the next save). The on-disk layout is **versioned** (`SAVE_VERSION`, currently 3 = GLOVES slot + attack-speed cache in `PlayerInventory`): readers accept the previous version via a `Legacy*V<n>` mirror struct in `engine_persist.cpp`, and `static_assert`s pin the serialized struct sizes — any layout change MUST bump the version and extend the legacy readers. (Save format, menu flow, no-downgrade guard: `engine-reference`.)
 

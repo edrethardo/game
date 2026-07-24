@@ -63,12 +63,18 @@ runs the takeover/resume latch; (2) if the bot is in control and `botMayAct()`, 
 snapshots live state into a pure `Autoplay::BotView` (self / effective weapon / nav flow-field +
 per-style vertical goal / nearest hostiles with width-aware LOS); (3) `Autoplay::decide(view)` (the pure
 `brain`, composing `doctrine`+`combat`+`nav`) returns a `BotIntent`; (4) driver backstops adjust it
-(loot-dwell, stuck-override, descend pulse); (5) `applyBotIntent` writes yaw/pitch and arms the held
+(loot-settle dwell, low-HP globe detour, descend pulse, a stalled-fight break-off, the exit-progress
+watchdog, and the escalating geometry escape: nudge → 8-dir search → A* leg); (5) `applyBotIntent` writes yaw/pitch and arms the held
 `GameAction`s via `Input::setBotHeld`. To CHANGE bot behavior, edit the pure core (`src/game/autoplay_*`)
 and add a `TEST_CASE` on a hand-built `BotView` (they're engine-free) — `tests/game/test_autoplay_*.cpp`
 + `tests/world/test_autoplay_nav.cpp`. The doctrine (how a build cell fights) is the `doctrineFor` table;
 the priority order is in `brain.cpp` (survive > fight > descend > travel). Add a new synthetic action by
 just `setBotHeld`-ing it in `applyBotIntent` — it flows through the human consumer automatically.
+**v1 scope, honestly:** flat floors (`rooms`/`cavern`/`gauntlet`/`hub`) run unattended for every
+archetype. The stacked (`VERTICAL_HALL`/`FOUR_STORY`) and lava floors route correctly and never leave
+the bot permanently wedged, but they are dense and vertical — traversal there can be slow and a hard
+floor may not complete quickly (VH balcony story-routing oscillates on some seeds). Bench a bot change
+on a flat floor for the regression and on `--vhall`/`--fourstory`/`--lava` for the limits.
 
 **Autoplay pitfalls:**
 - **`--bot-walk` is a NETCODE probe, not this bot.** It injects deterministic movement on the WIRE
@@ -99,12 +105,26 @@ just `setBotHeld`-ing it in `applyBotIntent` — it flows through the human cons
   and on an unreachable cell (`0xFF`); read the raw byte (`atExit`/`flowValid` in `BotView`) to tell
   "arrived" from "stuck" — a zero heading alone can't.
 - **Lava and jump-gaps are INVISIBLE to the flow field.** The BFS flow routes over cells the bot can't
-  actually cross grounded, so `applyBotIntent`'s heading MUST pass `Autoplay::stepAllowed` (the hazard veto:
-  off-map / wall / grounded-in-lava) — the veto is mandatory, not optional. (Balcony-edge drops are
-  intentional traversal the veto deliberately does NOT cover; those are the driver's story-routing job.)
+  actually cross grounded, so `buildBotView` runs `BotView.flowDir` through `Autoplay::stepAllowed`
+  (the hazard veto: off-map / wall / grounded-in-lava) before the brain ever sees it — heading first,
+  then ±45°, else zero (boxed in; the stuck-override recovers). Know its **scope**: it covers the
+  TRAVEL heading ONLY. `applyBotIntent` vetoes nothing — the FIGHT branch's kite/close/strafe movement
+  and the driver's escape/nudge headings are separate (the escape backstop calls `stepAllowed` itself;
+  FIGHT deliberately does not). So a *new* nav source (a detour, a waypoint) must either fold into
+  `flowDir` before that veto or call `stepAllowed` itself. (Balcony-edge drops are intentional traversal
+  the veto deliberately does NOT cover; those are the driver's story-routing job.)
 - **The −Z = yaw-0 aim convention.** Forward at yaw 0 is `(0,0,-1)` (player.cpp), so `dirToAim` inverts as
   `yaw = atan2f(-dir.x, -dir.z)` (matches `engine_arena.cpp`). Aiming with a naive `atan2(z,x)` points the
   bot 90°/180° off.
+- **A fresh Autoplay hero's build cell is seeded from its CLASS, a Continue's never is.**
+  `PlayerInventory`'s untouched default is Moderate/**Melee** for every class, so before the seed
+  Auto-Equip handed a Sorcerer a sword. `enterAutoplayRun(freshCharacter)` writes
+  `Autoplay::defaultCellForClass(m_playerClass)` only when the run started a NEW hero (threaded from
+  `GameStart::NEW_GAME` / `!m_menu.p1Continue`) — re-seeding a Continue would silently re-gear a build
+  its player deliberately picked in the inventory grid. The class→column table is EXPLICIT on purpose:
+  `ClassDef::preferredWeapon` can't separate Magic from Ranged (Sorcerer and Ranger are both
+  `PROJECTILE`). **Adding a player class means adding its row** — the `default:` arm falls back to
+  Melee, which is silent and wrong for a caster.
 - **The menu "Autoplay" row is a FIVE-SITE mirror + a case-renumber trap.** Adding a menu entry means the
   same edit in the draw list, the hit-test, the up/down clamp, the activation switch, and the count — miss
   one and rows silently misalign; and inserting an entry renumbers the `subState`/`case` ids downstream

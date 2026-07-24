@@ -575,9 +575,12 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
         else                      std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
         FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 22.0f * hs,
                              floorStr, {0.7f, 0.7f, 0.7f}, 2);
-        // Autoplay strap under the floor label: "AUTO" while the bot drives, "MANUAL · Ns" once a
-        // human grabbed control (with the resume countdown). It lives here in the normal HUD branch so
-        // the F10-hide / pause-hide gating that wraps this whole pass applies to it for free.
+        // Autoplay strap under the floor label: "AUTO" while the bot drives, "MANUAL Ns" once a
+        // human grabbed control (with the resume countdown). Plain ASCII on purpose — FontSystem's
+        // 5x7 atlas only covers codepoints 32..126, so a prettier "MANUAL · 2s" separator would
+        // render as two garbage boxes (its UTF-8 bytes fall outside the glyph range).
+        // It lives here in the normal HUD branch so the F10-hide / pause-hide gating that wraps
+        // this whole pass applies to it for free.
         if (m_autoplayActive) {
             if (m_autoplayControl.botInControl()) {
                 FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 40.0f * hs,

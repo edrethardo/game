@@ -1,7 +1,9 @@
 // autoplay_brain.cpp — see autoplay_brain.h. Priority state machine; each branch returns a full
 // BotIntent. TRAVEL faces the flow direction and walks; the per-style vertical goal (ramp/hole/
 // pad) is folded into flowDir by the engine driver before the view is built, so the brain stays
-// 2D here and the driver owns story routing (it has StoryNav + DungeonResult).
+// 2D here and the driver owns story routing (it has StoryNav + DungeonResult). The driver's hazard
+// veto is applied to that flowDir (in buildBotView, before this runs) and covers ONLY it — the
+// FIGHT branch's own kite/close headings are NOT vetoed. See autoplay_brain.h for why.
 #include "game/autoplay_brain.h"
 #include "game/autoplay_doctrine.h"
 #include "game/autoplay_combat.h"
@@ -24,7 +26,7 @@ static void faceAndGo(const BotView& v, BotIntent& out) {
     if (lengthSq(v.flowDir) < 0.0001f) return;    // at exit or unreachable: no heading
     f32 yaw, pitch; dirToAim(Vec3{v.flowDir.x, 0.0f, v.flowDir.z}, yaw, pitch);
     out.aimYaw = yaw; out.aimPitch = 0.0f;
-    out.moveFwd = true;                            // driver vetoes the actual step if unsafe
+    out.moveFwd = true;                            // flowDir was already hazard-vetoed by the driver
 }
 
 BotIntent decide(const BotView& v) {

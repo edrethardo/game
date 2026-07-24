@@ -12,7 +12,7 @@ struct AutoplayControl {
     static constexpr f32 RESUME_SECONDS = 2.0f;   // idle time before the bot resumes
 
     bool botInControl() const { return m_botControl; }
-    f32  resumeCountdown() const { return m_resumeTimer; }   // for the HUD "MANUAL · Ns" readout;
+    f32  resumeCountdown() const { return m_resumeTimer; }   // for the HUD "MANUAL Ns" readout;
                                                              // reads 0 while the bot drives, so the
                                                              // HUD must gate the readout on !botInControl()
 
