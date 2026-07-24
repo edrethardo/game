@@ -2,6 +2,7 @@
 #include <SDL.h>
 
 #include "platform/input.h"
+#include "platform/input_focus.h"   // pure focus-gate rules (unfocused => no device input)
 #include "platform/user_paths.h"
 #include "core/log.h"
 #include "core/imu_filter.h"
@@ -47,6 +48,13 @@ static bool     s_humanActiveThisFrame = false;
 static constexpr s32 DEVICE_MOUSE_MOVE_PX     = 6;    // Manhattan px/frame to count as mouse use
 static constexpr f32 DEVICE_STICK_DEADZONE    = 0.5f; // normalized stick magnitude for "pad in use"
 static constexpr f32 DEVICE_TRIGGER_THRESHOLD = 0.5f;
+
+// Window-focus gate (rules in platform/input_focus.h). s_windowFocused is the EFFECTIVE state the
+// whole file reads; s_everFocused is the fail-open latch that keeps a never-focused window (no
+// window manager) fully playable. Both default to "playable" so nothing changes before the first
+// Window::pollEvents() push.
+static bool s_windowFocused = true;
+static bool s_everFocused   = false;
 
 // Trailing "settings" rows appended to controls.json — sentinel indices ABOVE GameAction::COUNT
 // so older readers (which guard `idx < COUNT`) skip them, and so a controls.json written before
@@ -417,11 +425,20 @@ void Input::update(f32 dt) {
     // the read, so getMouseWheelDelta() always returned 0 and the wheel never worked at all.
     // The reset now lives in consumePressedState() — see the comment there for why.
 
+    // THE focus gate for real devices (rules + rationale: platform/input_focus.h). Everything the
+    // game reads about the keyboard and mouse is derived from the four snapshots below, so forcing
+    // them to "nothing pressed" while the window is unfocused gates isActionDown/isActionPressed,
+    // isKey*/isMouseButton*, the mouse delta AND the human-activity latch in one place. The Autoplay
+    // overlay is untouched (checkActionRaw ORs it in ahead of the device read), so the bot keeps
+    // playing while the player works in another app.
+    const bool focused = InputFocus::devicesReadable(s_windowFocused);
+
     // Snapshot keyboard
     int numKeys = 0;
     const u8* state = SDL_GetKeyboardState(&numKeys);
     s32 copyCount = (numKeys < NUM_KEYS) ? numKeys : NUM_KEYS;
-    memcpy(s_currentKeys, state, copyCount);
+    if (focused) memcpy(s_currentKeys, state, copyCount);
+    else         memset(s_currentKeys, 0, sizeof(s_currentKeys));
 
     // Mouse. The relative delta ACCUMULATES across render frames and is cleared in
     // consumePressedState(), for the same reason as the wheel and the press edges above:
@@ -431,13 +448,26 @@ void Input::update(f32 dt) {
     // weak and steppy on exactly the machines that should have felt best. At 60 Hz (one tick per
     // frame) accumulate-then-clear is bit-for-bit identical to the old overwrite, so nothing changes
     // for anyone already running vsync-locked.
+    // Read unconditionally even while unfocused: SDL DRAINS its own relative accumulator on read, so
+    // skipping the call would bank every delta made in another app and dump the lot into the aim on
+    // the first focused frame. Read it, then throw it away.
     s32 frameDX = 0, frameDY = 0;
     u32 mouseState = SDL_GetRelativeMouseState(&frameDX, &frameDY);
-    s_mouseDX += frameDX;
-    s_mouseDY += frameDY;
-    SDL_GetMouseState(&s_mouseX, &s_mouseY);
-    for (s32 i = 0; i < NUM_MOUSE_BUTTONS; ++i) {
-        s_currentMouseButtons[i] = (mouseState & SDL_BUTTON(i + 1)) ? 1 : 0;
+    if (focused) {
+        s_mouseDX += frameDX;
+        s_mouseDY += frameDY;
+        SDL_GetMouseState(&s_mouseX, &s_mouseY);
+        for (s32 i = 0; i < NUM_MOUSE_BUTTONS; ++i) {
+            s_currentMouseButtons[i] = (mouseState & SDL_BUTTON(i + 1)) ? 1 : 0;
+        }
+    } else {
+        s_mouseDX = 0;
+        s_mouseDY = 0;
+        // s_mouseX/Y are deliberately FROZEN at their last in-window value rather than tracked, so
+        // menu hover/hit-tests can't follow a cursor that is somewhere else entirely.
+        memset(s_currentMouseButtons, 0, sizeof(s_currentMouseButtons));
+        // Window::pollEvents() accumulates the wheel BEFORE this runs, so drop it here too.
+        s_mouseWheelY = 0;
     }
 
     // Gamepad button state snapshot — used on PC for frame-edge press detection
@@ -612,9 +642,12 @@ void Input::update(f32 dt) {
         s_activeDevice = kbmActive ? InputDevice::KeyboardMouse : InputDevice::Gamepad;
 
     // Autoplay takeover trigger: latch whether a human touched any gameplay device this frame,
-    // reusing the threshold-filtered activity already computed above (no second scan).
-    s_humanActiveThisFrame = kbmActive || padActive;
-
+    // reusing the threshold-filtered activity already computed above (no second scan). The focus
+    // term is belt-and-braces — kbmActive is already computed from state this function zeroed while
+    // unfocused — but it states the rule at the point the bot depends on it: typing in ANOTHER
+    // window must never read as a takeover, or the bot hands the game to a human who isn't there
+    // and the game just stands still. Gamepads stay live (see InputFocus::humanActivity).
+    s_humanActiveThisFrame = InputFocus::humanActivity(kbmActive, padActive, s_windowFocused);
     // Per-lane device for split-screen glyphs. Each lane resolves independently so one player's
     // device can never flip the other's on-screen prompts:
     //   - a lane with no assigned pad (single-controller couch P1) is keyboard/mouse, always;
@@ -707,24 +740,72 @@ bool Input::isMouseButtonReleased(u8 button) {
 // OFF. We track the state so we can (a) latch the ON→OFF edge — "gameplay just handed off to a
 // cursor screen" — for the menu input-mode gate, and (b) re-show the cursor as a baseline on every
 // transition so a menu that hid it can't strand it hidden on the next screen.
+//
+// s_relativeMode / s_cursorVisible are what the GAME wants. What SDL is actually told is those
+// filtered through the focus gate (input_focus.h) — an unfocused window must never hold relative
+// mode (SDL's XInput2 raw-motion path has no focus check of its own, so it would keep swallowing
+// desktop-wide pointer motion and keep the cursor hidden everywhere) and must never hide the
+// cursor. Keeping "wanted" and "applied" separate is what lets focus come back to exactly the mode
+// the current screen asked for, with no call-site changes anywhere in the engine.
 static bool s_relativeMode     = false;
 static bool s_relativeReleased = false;  // latched ON->OFF edge, consumed by consumeRelativeReleased()
-static bool s_cursorVisible    = true;    // our SDL_ShowCursor state (edge-tracked)
+static bool s_cursorVisible    = true;    // cursor visibility the GAME wants
+static bool s_cursorShown      = true;    // what we last pushed to SDL_ShowCursor (edge-tracked)
+
+// Push the focus-filtered mouse state to SDL. Idempotent — SDL no-ops an unchanged relative mode,
+// and the cursor call is edge-tracked — so it is safe to call every frame or on any state change.
+static void applyMouseMode() {
+    SDL_SetRelativeMouseMode(InputFocus::effectiveRelative(s_relativeMode, s_windowFocused)
+                             ? SDL_TRUE : SDL_FALSE);
+    const bool show = InputFocus::cursorShouldShow(s_cursorVisible, s_windowFocused);
+    if (show != s_cursorShown) {
+        s_cursorShown = show;
+        SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
+    }
+}
 
 void Input::setRelativeMouseMode(bool enabled) {
     if (s_relativeMode && !enabled) s_relativeReleased = true;  // gameplay -> cursor screen edge
     s_relativeMode = enabled;
-    SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
     // Baseline: any mode transition restores a visible cursor (relative mode hides the real cursor
     // while active anyway). The menu gate is the only thing that hides it, via setCursorVisible.
-    if (!s_cursorVisible) { SDL_ShowCursor(SDL_ENABLE); s_cursorVisible = true; }
+    s_cursorVisible = true;
+    applyMouseMode();
 }
 
 void Input::setCursorVisible(bool visible) {
     if (visible == s_cursorVisible) return;   // only hit SDL on a transition
     s_cursorVisible = visible;
-    SDL_ShowCursor(visible ? SDL_ENABLE : SDL_DISABLE);
+    applyMouseMode();
 }
+
+// Window focus changed (pushed once per frame by Window::pollEvents). This is the ONE edge handler:
+// it releases/restores the mouse and drops the pending delta. Device READS are gated separately, in
+// update(), because they must be dead for every frame we spend unfocused — not just the edge.
+void Input::setWindowFocused(bool focused) {
+    if (focused) s_everFocused = true;
+    const bool eff = InputFocus::effectiveFocused(focused, s_everFocused);
+    if (eff == s_windowFocused) return;          // no edge — nothing to do
+    const bool was = s_windowFocused;
+    s_windowFocused = eff;
+    applyMouseMode();   // release the cursor on the way out, re-grab it on the way back in
+    if (InputFocus::shouldDiscardDelta(was, eff)) {
+        // Drain SDL's own accumulator and clear ours. On focus LOSS this drops the motion made on
+        // the way out of the window; on focus GAIN it drops everything the pointer did while the
+        // player was in another app — without it, tabbing back in snaps the aim by however far the
+        // cursor travelled. (SDL_SetRelativeMouseMode flushes queued MOUSEMOTION *events*, not the
+        // accumulated delta, so this is not redundant.)
+        s32 dx = 0, dy = 0;
+        SDL_GetRelativeMouseState(&dx, &dy);
+        s_mouseDX = 0;
+        s_mouseDY = 0;
+        s_mouseWheelY = 0;
+    }
+    LOG_INFO("Input: window %s (relative mouse %s)", eff ? "focused" : "unfocused",
+             InputFocus::effectiveRelative(s_relativeMode, eff) ? "on" : "off");
+}
+
+bool Input::windowFocused() { return s_windowFocused; }
 
 bool Input::consumeRelativeReleased() {
     bool v = s_relativeReleased;

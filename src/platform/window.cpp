@@ -289,6 +289,18 @@ void Window::pollEvents() {
                 break;
         }
     }
+
+    // Push the window's focus state into the input layer once per frame, AFTER the queue is drained
+    // so it reflects any FOCUS_GAINED/FOCUS_LOST just processed. Read from the live window flag
+    // rather than latched off the two events: the flag is self-correcting (a missed or never-sent
+    // focus event can't strand the gate) and it needs no seeding at startup for a window that was
+    // created behind another app. Input::setWindowFocused() is a no-op unless the state changed.
+    //
+    // The engine deliberately does NOT pause or throttle here — an unfocused window keeps
+    // simulating and rendering so Autoplay can play on a second screen. Only INPUT goes dead
+    // (platform/input_focus.h).
+    if (s_window)
+        Input::setWindowFocused((SDL_GetWindowFlags(s_window) & SDL_WINDOW_INPUT_FOCUS) != 0);
 }
 
 bool Window::shouldClose() {

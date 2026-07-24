@@ -83,6 +83,7 @@ add_executable(dungeon_tests
     world/test_autoplay_nav.cpp      # Autoplay nav policy: hazard veto + descend gate
     balance/test_balance_lab.cpp     # balance lab: enemy/boss curves + typical-gear sanity pins
     balance/balance_lab.cpp          # the lab itself (tests-only; NEVER linked into the game)
+    platform/test_input_focus.cpp    # unfocused window: no device input, mouse released (header-only)
     renderer/test_hud_cooldown.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp

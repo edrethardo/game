@@ -333,6 +333,29 @@ already chose (NEW_GAME wipe, `equipFreshLane`, the client-join wipe) explicitly
 fields — the chooser runs BEFORE the wipes, which would otherwise silently undo it. `--autoloot` is
 the dev door. Inert in the arena. Spec: `docs/superpowers/specs/2026-07-22-auto-loot-equip-design.md`.
 
+**Unfocused = no input, but the game keeps running.** The window can sit on a second screen playing
+itself while the player works in another app. `Window::pollEvents()` pushes SDL's
+`SDL_WINDOW_INPUT_FOCUS` flag into `Input::setWindowFocused()` once per frame (polled, not latched off
+FOCUS_GAINED/LOST — a missed event then can't strand the gate, and nothing needs seeding at startup);
+the rules themselves are pure + unit-tested in `platform/input_focus.h`. While unfocused,
+`Input::update` zeroes the keyboard/mouse-button snapshots and the mouse delta, which is the ONE choke
+that kills `isActionDown`/`isActionPressed`, `isKey*`, `isMouseButton*`, `getMouseDelta` **and** the
+`humanActivityThisFrame` latch together — and relative mouse mode is released so the cursor belongs to
+the desktop again. That last part is the actual bug, not a nicety: SDL's X11 `XI_RawMotion` handler
+gates only on `mouse->relative_mode` and **never on focus**, so an unfocused game kept eating raw
+pointer motion from the whole desktop, which fed the aim AND tripped Autoplay's takeover latch — the
+bot handed control to a "human" who was typing somewhere else and the game stood still (measured: 482
+benched ticks in an 8 s tab-out). `setRelativeMouseMode`/`setCursorVisible` now record what the GAME
+wants and `applyMouseMode()` pushes `want && focused` to SDL, so focusing again restores exactly the
+mode the current screen asked for (gameplay yes, menu no). Pending delta is dropped on BOTH edges so
+a cursor journey made in another app can't snap the aim on the way back in. **Not gated:** the
+Autoplay bot overlay (it is OR'd in ahead of the device read — the bot must keep playing), the frame
+loop (no focus pause/throttle: 60 FPS unfocused, verified), and **gamepads** (SDL reads pads as
+background devices and picking one up is unambiguous intent to play). Fails OPEN until focus has been
+seen once, so a headless/no-WM X server can't leave the game input-dead. Watch it beside other apps in
+**Windowed** or **Borderless** (Options → Display); exclusive **Fullscreen** is the one mode that isn't
+meant for this.
+
 **Autoplay mode (AFK bot).** A main-menu "Autoplay" row and the `--autoplay` dev door start a
 **singleplayer, lane-0-only** run (v1) where a bot plays a full character: navigate, fight per the
 build doctrine, loot (it force-enables **Auto Loot & Equip** as its gear brain), descend, auto-respawn,

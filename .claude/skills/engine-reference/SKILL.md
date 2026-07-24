@@ -100,6 +100,23 @@ mirroring the device previous←current roll). The takeover/resume latch is `Aut
 freezes the latch). The rest of the pure decision core lives in `game/autoplay_*` (see CLAUDE.md
 "Autoplay mode"); the engine driver is `engine_autoplay.cpp`.
 
+**Window-focus input gate** (`platform/input_focus.h` — pure rules, `tests/platform/test_input_focus.cpp`).
+`Window::pollEvents()` pushes `SDL_GetWindowFlags() & SDL_WINDOW_INPUT_FOCUS` into
+`Input::setWindowFocused()` once per frame (polled, not latched off FOCUS_GAINED/LOST, so a missed
+event can't strand the gate and nothing needs seeding at startup). Effects, all in `input.cpp`:
+`Input::update()` zeroes `s_currentKeys` / `s_currentMouseButtons` / the mouse delta while unfocused
+(one choke — it gates `isActionDown`/`isActionPressed`, `isKey*`, `isMouseButton*`, `getMouseDelta`
+AND the `humanActivityThisFrame` latch at once), `s_mouseX/Y` FREEZE at their last in-window value,
+and `SDL_GetRelativeMouseState` is still CALLED and discarded (SDL drains its accumulator on read —
+skipping it would bank out-of-window motion and dump it into the aim on the first focused frame).
+`setRelativeMouseMode`/`setCursorVisible` now record what the GAME wants; `applyMouseMode()` pushes
+`want && focused` / `want || !focused` to SDL, so an unfocused window never holds relative mode
+(SDL's X11 XI_RawMotion handler gates only on `mouse->relative_mode`, never on focus — that is the
+actual "it captures my mouse" bug) and never hides the cursor. Both focus edges drop the pending
+delta. **The bot overlay is NOT gated** and the frame loop does NOT pause: unfocused, Autoplay keeps
+playing at 60 FPS on a second screen. **Gamepads are NOT gated** (background devices by design).
+`s_everFocused` fails the gate OPEN until focus is seen once (headless X / no WM).
+
 ## Architecture deep-dive: split-screen & shared systems
 
 (Full mechanics behind the condensed Split-screen principle in `CLAUDE.md`.)

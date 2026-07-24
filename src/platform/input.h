@@ -93,7 +93,20 @@ namespace Input {
     void clearBotHeld();                            // drop all bot-held actions
     // True if a human touched any gameplay device THIS render frame (the kbmActive/padActive
     // computation already done in update(), threshold-filtered). Autoplay's takeover trigger.
+    // Keyboard/mouse only counts while the window is FOCUSED — see windowFocused() below.
     bool humanActivityThisFrame();
+
+    // --- Window focus gate ------------------------------------------------------------------
+    // While the window is UNFOCUSED the engine keeps simulating and rendering (so Autoplay can
+    // play on a second screen), but every real keyboard/mouse read reports "nothing pressed",
+    // the mouse delta is discarded, relative mouse mode is released (cursor freed for whatever
+    // app the player is actually using) and the Autoplay takeover latch ignores the keyboard and
+    // mouse. Focusing again restores the mode the current screen wants, with no aim snap. The
+    // rules themselves are pure and unit-tested in platform/input_focus.h.
+    // Window::pollEvents() pushes SDL's SDL_WINDOW_INPUT_FOCUS state in here once per frame;
+    // nothing else should call the setter. Gamepads stay live while unfocused by design.
+    void setWindowFocused(bool focused);
+    bool windowFocused();
 
     // --- Raw keyboard (still available for debug keys) ---
     bool isKeyDown(s32 scancode);
