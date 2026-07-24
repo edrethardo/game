@@ -40,12 +40,27 @@ TEST_CASE("holds fire and advances when the target is beyond engageMax") {
     CHECK(out.moveFwd);           // close the distance
 }
 
-TEST_CASE("kites: backs off when the target is inside engageMin") {
+TEST_CASE("kites: backs off when a MELEE target is inside engageMin") {
     BotView v = selfAt({0,0,0});
     BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < 11 m floor
+    t.isRanged = false; t.attackRange = 2.0f;
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
-    CHECK(out.moveBack);          // Ranged kite floor: retreat
+    CHECK(out.moveBack);          // Ranged kite floor vs a closer: retreat is real spacing
+}
+
+TEST_CASE("does NOT kite away from a RANGED enemy inside engageMin") {
+    // Aaron, watching the bot: "it runs away from ranged enemies". Backing off only buys spacing
+    // from something that must CLOSE to hurt you; an archer/caster shoots you the whole way, so the
+    // retreat gives up ground, breaks the bot's own aim, and changes nothing about the incoming fire.
+    BotView v = selfAt({0,0,0});
+    BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < the 11 m floor
+    t.isRanged = true; t.attackRange = 12.0f;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(out.moveBack);    // HOLD the ground
+    CHECK_FALSE(out.moveFwd);     // ...and don't charge either: we're already inside the band
+    CHECK(out.fire);              // but keep shooting it
 }
 
 TEST_CASE("engagement range: projectile weapons carry no authored range and must not read as 0") {
@@ -65,6 +80,7 @@ TEST_CASE("fires WHILE kiting: a target inside engageMin is still shot at") {
     // ranged/caster bot backpedal forever without ever shooting (sorcerers stuck on floor 1).
     BotView v = selfAt({0,0,0});
     BotTarget t{}; t.pos = {0, 1.7f, -5.0f}; t.dist = 5.0f; t.hasLOS = true;  // 5 m < the 11 m floor
+    t.attackRange = 2.0f;                                                     // a MELEE closer
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
     CHECK(out.moveBack);          // still kites out

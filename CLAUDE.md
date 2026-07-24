@@ -437,6 +437,12 @@ LEAVES, not when it lands (the flight time blows the window), and the STRAFE-sta
 that timer when it HAS LOS, so an enemy holding a shot behind cover drifts it unboundedly negative and
 reads as forever-about-to-swing — that was 213 of 275 raises before the `attackTimer > 0` gate. Live after:
 21 raises, 8 hits landed on the shield, 8 PERFECT / 0 blocked.
+**Combat POLICY rules from watching the bot play.** (1) **KITE ONLY FROM MELEE.** The
+`dist < engageMin` back-off is gated on `!t.isRanged`: backing away buys spacing from something that must
+REACH you, but an archer shoots across the retreat, so the same backpedal surrenders ground, drags the
+bot's own aim off target, and changes nothing about the incoming fire. Against a ranged target inside the
+band the bot HOLDS and shoots (live: 20% of all ticks were backpedal-from-ranged → **0**, and Marksman
+kills/2 min went 9.3 → 19.5 because it was finally standing still long enough to hit things).
 **Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
 (`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto).
 Know the **veto's scope**: `Autoplay::stepAllowed` (off-map / wall / grounded-in-lava) is applied in

@@ -184,7 +184,13 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     const f32 lo = d.engageMin * v.weaponRange;
     const f32 hi = d.engageMax * v.weaponRange;
 
-    if (t.dist < lo)      out.moveBack = true;    // too close: kite out (ranged/magic)
+    // KITE ONLY FROM A MELEE THREAT. Backing off buys spacing from something that must physically
+    // REACH you; a ranged enemy shoots across the retreat, so the same backpedal just surrenders
+    // ground while still eating the volley — and, because the bot walks backwards, it drags its own
+    // aim off the target too. Observed live and reported ("the bot runs away from ranged enemies").
+    // Inside the band against a ranged target the right answer is to HOLD and shoot; the gap-closer
+    // roll below still handles the case where it is OUTSIDE the band and wants to charge.
+    if (t.dist < lo)      out.moveBack = !t.isRanged;
     else if (t.dist > hi) out.moveFwd  = true;    // too far: close in
 
     // Fire whenever the target has LOS and is within weapon reach — INCLUDING inside the kite floor.
