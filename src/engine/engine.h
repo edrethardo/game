@@ -24,6 +24,8 @@
 #include "game/combat.h"  // Combat::PvpHit/PvpHitOutcome — the arena's atomic hit apply
 #include "game/interact.h"   // tap/hold interact rule (pure)
 #include "game/autoplay_control.h"   // AutoplayControl — bot/human takeover latch (Autoplay mode)
+#include "game/autoplay_intent.h"    // Autoplay::BotView / BotIntent — driver<->brain interface
+#include "game/autoplay_brain.h"     // Autoplay::decide — pure per-tick decision core
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
@@ -243,6 +245,10 @@ private:
     // in the next task, so until then the bot is armed-but-idle.
     bool             m_autoplayActive = false;
     AutoplayControl  m_autoplayControl;
+    // AFK auto-revive countdown for an Autoplay run: armed to ~1.5 s when a solo death enters
+    // GAME_OVER, ticked down in the GAME_OVER dispatch, then the entrance-respawn body runs so an
+    // unattended run keeps going (engine_autoplay.cpp / engine_update.cpp).
+    f32              m_autoplayRespawnTimer = 0.0f;
 
     // Per-local-player state (swapped into m_localPlayer/m_camera before gameUpdate)
     Player         m_localPlayers[MAX_LOCAL_PLAYERS];
@@ -1297,6 +1303,16 @@ private:
     // here — not only at class-select — is what makes CONTINUE (which SKIPS class-select, and whose
     // load stamps the saved autoMode) still get Auto Loot.
     void enterAutoplayRun();
+    // Disarm the Autoplay bot when a run ends to the menu (immediate, so the synthetic-input overlay
+    // isn't left armed under the menu). Mirrors enterAutoplayRun's arm step. Defined in engine_autoplay.cpp.
+    void exitAutoplayRun();
+    // Autoplay driver (engine_autoplay.cpp). updateAutoplay runs once per sim tick from gameUpdate,
+    // BEFORE the input-consuming blocks: it maintains the takeover latch, then (when the bot holds
+    // control) builds a read-only view of live state, runs the pure Autoplay::decide, and applies the
+    // resulting intent as a yaw/pitch write + synthetic held GameActions the existing consumers read.
+    void updateAutoplay(f32 dt);
+    Autoplay::BotView buildBotView();
+    void applyBotIntent(const Autoplay::BotIntent& in);
     // Equip the class starting weapon for one local player (centralizes what used
     // to be copy-pasted across the menu start paths). Called only on NEW_GAME.
     void equipStartingLoadout(u8 playerIdx);

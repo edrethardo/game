@@ -16,6 +16,7 @@ add_executable(DungeonEngine
     engine/engine_town.cpp
     engine/engine_arena.cpp
     engine/engine_autoloot.cpp
+    engine/engine_autoplay.cpp
     engine/engine_persist.cpp
     engine/engine_startgame.cpp
     engine/engine_launch.cpp
@@ -98,6 +99,7 @@ add_executable(DungeonEngine
     game/skill_marksman.cpp
     game/skill_tinkerer.cpp
     game/squad.cpp
+    game/autoplay_brain.cpp
     net/net.cpp
     net/clock_sync.cpp
     net/snapshot.cpp

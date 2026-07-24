@@ -146,6 +146,30 @@ void Engine::update(f32 dt) {
 
     // Death screen input — handle before the generic ESC check so ESC goes to menu
     if (m_gameState == GameState::GAME_OVER) {
+        // Autoplay AFK auto-revive: count the timer armed on death down and, when it elapses, execute
+        // the same entrance-respawn the option-0 handler below does, then drop straight back to
+        // IN_GAME so an unattended run keeps going. A human pressing a revive key first (the manual
+        // handlers still run below) simply beats the countdown — either way we land in IN_GAME.
+        if (m_autoplayActive) {
+            m_autoplayRespawnTimer -= dt;
+            if (m_autoplayRespawnTimer <= 0.0f) {
+                m_autoplayRespawnTimer = 0.0f;
+                m_localPlayer.health   = m_localPlayer.maxHealth;
+                m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // entrance spawn
+                m_localPlayer.velocity = {0, 0, 0};
+                m_localPlayer.invulnTimer = 1.5f;
+                m_inventoryOpen = false;
+                m_localPlayers[m_localPlayerIndex] = m_localPlayer; // sync so swapInPlayer keeps it
+                snapCameraToPlayer();                               // no interp smear on the teleport
+                m_deathHover = -1;
+                Input::setRelativeMouseMode(true);                 // back to gameplay
+                m_gameState = GameState::IN_GAME;
+                addChatMessage("", "Autoplay: revived at the entrance", Vec3{0.6f, 0.85f, 1.0f});
+                return;
+            }
+            // still counting down — fall through so the world keeps ticking (enemies walk home) and a
+            // human can still take a manual revive option below.
+        }
         // Mouse control: the cursor was freed on death entry. Hover highlights an option
         // (m_deathHover, read by the renderer) and a left-click activates it, alongside the
         // keyboard/gamepad bindings. The hit-test layout mirrors engine_render.cpp.
@@ -164,6 +188,7 @@ void Engine::update(f32 dt) {
                 || (dclick && ch == 0)) {
                 m_menu.confirmQuit = false;
                 m_deathHover = -1;
+                exitAutoplayRun();   // leaving the run: disarm the bot so the overlay isn't left armed
                 m_gameState = GameState::MENU;
                 AudioSystem::stopMusic();
                 Input::setRelativeMouseMode(false);
@@ -417,6 +442,7 @@ void Engine::update(f32 dt) {
                 // Save and Quit (always the last row)
                 m_menu.confirmQuit = false;
                 m_menu.optionsFromPause = false;   // leaving the game: never resume into it later
+                exitAutoplayRun();   // disarm the Autoplay bot on the way out to the menu
                 saveAllCharacters();  // per-character: each local lane to its own slot
                 if (m_netRole != NetRole::NONE) {
                     Net::disconnect();
@@ -780,6 +806,7 @@ void Engine::update(f32 dt) {
                 enterTown();
                 break;
             }
+            exitAutoplayRun();   // the ending returns to the menu: disarm the bot
             m_gameState = GameState::MENU;
             AudioSystem::stopMusic();
             Input::setRelativeMouseMode(false);
@@ -1685,6 +1712,10 @@ void Engine::gameUpdate(f32 dt) {
         // True singleplayer: full game over screen — send enemies home immediately
         resetEnemiesToRooms();
         m_gameState = GameState::GAME_OVER;
+        // Autoplay: no human is watching the death screen, so arm the AFK auto-revive countdown (the
+        // GAME_OVER dispatch ticks it and re-enters IN_GAME) and drop any stale synthetic held actions
+        // so the death screen's manual handlers see only real device input.
+        if (m_autoplayActive) { m_autoplayRespawnTimer = 1.5f; Input::clearBotHeld(); }
         // Free the cursor so the death-screen options are clickable (the screen is a full-screen
         // takeover; re-captured on respawn/reload). Mirrors the menu's setRelativeMouseMode(false).
         Input::setRelativeMouseMode(false);
@@ -1728,6 +1759,12 @@ void Engine::gameUpdate(f32 dt) {
         break;  // one slot per frame — a chord can't legitimately claim two directions at once
     }
 
+    // Autoplay driver: build the bot's view and apply its intent (yaw/pitch + synthetic held
+    // GameActions) BEFORE the input-consuming blocks below (potion / movement / fire / skills /
+    // block), so every one of those reads the bot's press exactly as it would a human's. No-op
+    // unless this is an armed Autoplay run with the bot in control. Lane 0 only (SP autoplay).
+    updateAutoplay(dt);
+
     // Healing potion (Q key) — restores 60% HP + 30% energy
     // R17 — tick-based gate using m_potionLastActivationTick. Both client and server
     // evaluate `(currentTick - lastActivationTick) >= cooldownTicks` with currentTick
@@ -1740,8 +1777,9 @@ void Engine::gameUpdate(f32 dt) {
     // nudged m_potionLastActivationTick forward by a tick — feel over exactness.
     const bool potionReady  = GameConst::cooldownReady(nowTickPotion, m_potionLastActivationTick, potionCdTicks);
     // Gated on !gameplayInputFrozen() so a potion never fires while the inventory (or pause) is open
-    // — matches the wire strip in clientNetPre, keeping predict and send in parity.
-    if (Input::isActionPressed(GameAction::POTION) && potionReady && !gameplayInputFrozen()) {
+    // — matches the wire strip in clientNetPre, keeping predict and send in parity. botMayAct() is the
+    // Autoplay carve-out: the bot must be able to heal while its own inventory is open (world runs in SP).
+    if (Input::isActionPressed(GameAction::POTION) && potionReady && (!gameplayInputFrozen() || botMayAct())) {
         f32 healAmount = m_localPlayer.maxHealth * GameConst::POTION_HEAL_PCT;
         m_localPlayer.health += healAmount;
         if (m_localPlayer.health > m_localPlayer.maxHealth)
@@ -1765,8 +1803,9 @@ void Engine::gameUpdate(f32 dt) {
     // Player movement/aiming — disabled while a blocking UI is open (inventory or, in MP, the
     // pause menu). gameplayInputFrozen() generalizes the old !m_inventoryOpen so a paused MP
     // player stands still like an inventory-open one (dodge activation lives in
-    // PlayerController::update below, so it's frozen too).
-    if (!gameplayInputFrozen()) {
+    // PlayerController::update below, so it's frozen too). botMayAct() is the Autoplay carve-out:
+    // the bot keeps moving/dodging with its own inventory open (which never freezes the SP world).
+    if (!gameplayInputFrozen() || botMayAct()) {
         // Speed modifiers: blocking slows, buffs speed up
         f32 savedSpeed = m_localPlayer.moveSpeed;
         if (m_localPlayer.blocking) m_localPlayer.moveSpeed *= 0.4f;
@@ -1818,7 +1857,8 @@ void Engine::gameUpdate(f32 dt) {
     syncLocalPlayerToNetPlayer();
 
     // Target lock and weapon fire — disabled while a blocking UI is open (inventory / pause menu).
-    if (!gameplayInputFrozen()) {
+    // botMayAct() carve-out: the Autoplay bot fights on with its own inventory open (SP world runs).
+    if (!gameplayInputFrozen() || botMayAct()) {
         updateTargetLock(dt);
         handleWeaponFire(dt);
     }
@@ -1902,7 +1942,7 @@ void Engine::gameUpdate(f32 dt) {
     {
         // Stunned players can't block (action-lock). No perfect-block cooldown: a perfect block is a
         // timing feat and is ALWAYS rewarded — the only PvP throttle is the energy drain below.
-        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && !gameplayInputFrozen()
+        bool wantsBlock = Input::isActionDown(GameAction::BLOCK) && (!gameplayInputFrozen() || botMayAct())
                           && m_localPlayer.stunTimer <= 0.0f;
         if (wantsBlock && !m_localPlayer.blocking) {
             m_localPlayer.blocking = true;

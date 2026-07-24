@@ -197,7 +197,8 @@ void Engine::tickPassiveEquipment() {
 // ---------------------------------------------------------------------------
 void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
     // --- Class skill selection (keys 1-4) ---
-    if (!gameplayInputFrozen()) {
+    // botMayAct() carve-out: the Autoplay bot selects its class-skill slot with its own inventory open.
+    if (!gameplayInputFrozen() || botMayAct()) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         for (u8 s = 0; s < 4; s++) {
             if (Input::isActionPressed(static_cast<GameAction>(static_cast<u8>(GameAction::SKILL_1) + s))) {
@@ -213,7 +214,7 @@ void Engine::handleClassSkillActivation(f32 dt, Vec3 eyePos) {
     // --- Class skill activation (right-click) ---
     // Stunned players can't cast (action-lock). BOOT_SKILL (Break Free) is deliberately NOT gated
     // this way below — pressing F is how you escape the stun.
-    if (Input::isActionPressed(GameAction::CLASS_SKILL) && !gameplayInputFrozen()
+    if (Input::isActionPressed(GameAction::CLASS_SKILL) && (!gameplayInputFrozen() || botMayAct())
         && m_localPlayer.stunTimer <= 0.0f) {
         const ClassDef& cls = kClassDefs[static_cast<u32>(m_playerClass)];
         u8 slot = m_activeClassSkill;
@@ -303,7 +304,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     // Equipment legendary skills DO cost energy — they draw from the shared pool like class
     // skills (see below), so the clientNetPre wire-mask must also strip the boot/helm ext bits
     // when the pool can't afford them (the server casts with energy=999 and won't re-check).
-    if (Input::isActionPressed(GameAction::BOOT_SKILL) && !gameplayInputFrozen() &&
+    if (Input::isActionPressed(GameAction::BOOT_SKILL) && (!gameplayInputFrozen() || botMayAct()) &&
         m_bootSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class
         // skills): copy the pool in, let tryActivate spend energyCost, copy back on success.
@@ -329,7 +330,7 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     }
 
     // --- Helmet skill activation (G key) ---
-    if (Input::isActionPressed(GameAction::HELMET_SKILL) && !gameplayInputFrozen() &&
+    if (Input::isActionPressed(GameAction::HELMET_SKILL) && (!gameplayInputFrozen() || botMayAct()) &&
         m_localPlayer.stunTimer <= 0.0f &&    // stunned: no helmet cast (BOOT_SKILL/Break Free is exempt)
         m_helmetSkillStates[m_localPlayerIndex].activeSkill != SkillId::NONE) {
         // Item skills draw from the player's shared energy pool (cost mana like class skills).
