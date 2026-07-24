@@ -1337,7 +1337,9 @@ private:
     // MUST be called AFTER the world/inventory is up (post startGame/loadGame): forcing autoMode=1
     // here — not only at class-select — is what makes CONTINUE (which SKIPS class-select, and whose
     // load stamps the saved autoMode) still get Auto Loot.
-    void enterAutoplayRun();
+    // freshCharacter = this run started a NEW hero (no persisted build choice exists), which is the
+    // ONLY case allowed to overwrite the build cell — see the seed comment in enterAutoplayRun.
+    void enterAutoplayRun(bool freshCharacter);
     // Disarm the Autoplay bot when a run ends to the menu (immediate, so the synthetic-input overlay
     // isn't left armed under the menu). Mirrors enterAutoplayRun's arm step. Defined in engine_autoplay.cpp.
     void exitAutoplayRun();

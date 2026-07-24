@@ -143,7 +143,8 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
             }
             m_splitPlayerCount = 1;
             enterTown();
-            if (opt.autoplay) enterAutoplayRun();  // cleared-save Continue must arm + force Auto Loot too
+            // Cleared-save Continue: an existing hero, so never re-seed its build cell.
+            if (opt.autoplay) enterAutoplayRun(/*freshCharacter=*/false);
             LOG_INFO("Launch: cleared save -> entered the TOWN hub");
             return;
         }
@@ -222,7 +223,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     startGame(mode);
     // Arm the bot + force Auto Loot AFTER startGame so it sticks even for a CONTINUE (whose load
     // stamps the saved autoMode); no-op unless --autoplay. See enterAutoplayRun().
-    if (opt.autoplay) enterAutoplayRun();
+    // NEW_GAME = a fresh hero, so its build cell is seeded from the class; a CONTINUE keeps the
+    // cell it saved (which may be a build the player deliberately picked).
+    if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
     LOG_INFO("Launch: entered game (%s, %s)",
              opt.role == LaunchOptions::Role::HOST ? "host" : "single-player",
              mode == GameStart::CONTINUE ? "continue" : "new");

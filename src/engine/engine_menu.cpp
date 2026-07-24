@@ -37,6 +37,7 @@
 #include "game/free_play.h"
 #include "engine/menu_osk.h"
 #include "game/build_score.h"   // DEFAULT_BUILD_CELL for the play-style choosers   // controller on-screen keyboard for the Host-IP screen (subState 9)
+#include "game/autoplay_doctrine.h"  // Autoplay::defaultCellForClass — the fresh-hero build seed
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -348,10 +349,21 @@ bool Engine::updateMenuMouseActive() {
 // class-select entirely, and its load stamps the saved autoMode (0 for a Classic-saved hero); only a
 // post-load force turns the gear brain back on. Running after startGame(CONTINUE) (which preserves the
 // loaded inventory) is what makes the write stick to the next descent autosave.
-void Engine::enterAutoplayRun() {
+void Engine::enterAutoplayRun(bool freshCharacter) {
     m_inventories[0].autoMode = 1;                                    // Auto Loot is the bot's gear brain
-    if (m_inventories[0].buildCell >= 9)                             // keep the persisted build; only
-        m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;  // repair an out-of-range cell
+
+    // Build cell. A FRESH hero has no persisted choice at all — and PlayerInventory's untouched
+    // default is Moderate/MELEE for every class, so Auto-Equip used to hand a Sorcerer a sword and
+    // the bot played melee with a caster. Seed the column from the class (Magic/Melee/Ranged, keep
+    // the Moderate row) so the mode's "play the build" promise holds from frame one.
+    // A CONTINUE is never touched: that cell may be a deliberate choice the player made in the
+    // inventory grid on a previous session, and silently rewriting it would re-gear their hero.
+    // Out of range is still repaired in both cases (a corrupt/blank byte would index the doctrine
+    // and score tables out of bounds).
+    if (freshCharacter)
+        m_inventories[0].buildCell = Autoplay::defaultCellForClass(m_playerClass);
+    else if (m_inventories[0].buildCell >= BuildScore::BUILD_ROWS * BuildScore::BUILD_COLS)
+        m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
     m_autoplayActive = true;
     m_autoplayControl.forceBot();          // start in bot control from frame one
     Input::setBotOverlayActive(true);
@@ -367,6 +379,8 @@ void Engine::enterAutoplayRun() {
     m_autoplayNoProgressTimer = 0.0f;
     m_autoplayNudgeTimer      = 0.0f;
     m_autoplayEscapeTimer     = 0.0f;
+    m_autoplayEscapeDir       = Vec3{0, 0, 0};   // pairs with the timer: a stale committed heading
+                                                 // would otherwise steer the first frames of run #2
     m_autoplayLootDwell       = 0.0f;
     m_autoplayLastTargetCount = 0;
     m_autoplayDescendPulse    = 0.0f;
@@ -377,6 +391,16 @@ void Engine::enterAutoplayRun() {
     m_autoplayDoorCheckDist   = 0.0f;
     m_autoplayExitStallTimer  = 0.0f;
     m_autoplayLastFloor       = 0;
+
+    // One line per run: an AFK session is read back from the log, and "which build is it playing?"
+    // is the first question of any autoplay bug report (the class/build mismatch above was found
+    // exactly this way — a Sorcerer swinging a sword).
+    LOG_INFO("Autoplay: armed (%s hero, class %s) -> build %s %s (cell %u)",
+             freshCharacter ? "new" : "continued",
+             kClassDefs[static_cast<u32>(m_playerClass)].name,
+             BuildScore::rowName(m_inventories[0].buildCell),
+             BuildScore::colName(m_inventories[0].buildCell),
+             static_cast<u32>(m_inventories[0].buildCell));
 }
 
 // ---------------------------------------------------------------------------
@@ -943,7 +967,8 @@ void Engine::updateMenu(f32 dt) {
                     // A CLEARED hero comes home: Continue lands in the TOWN hub (stash, NPCs,
                     // and the portal that opens the Free-Play select — which used to open here).
                     enterTown();
-                    if (m_menu.autoplay) enterAutoplayRun();  // cleared-Continue path must arm too
+                    // Cleared-Continue: an existing hero — arm, but keep its persisted build cell.
+                    if (m_menu.autoplay) enterAutoplayRun(/*freshCharacter=*/false);
                 } else {
                     startGame(m_menu.p1Continue ? GameStart::CONTINUE : GameStart::NEW_GAME);
                     // Account with an Engine kill: NEW heroes begin at the town gate (stash
@@ -953,7 +978,8 @@ void Engine::updateMenu(f32 dt) {
                     if (!m_menu.p1Continue && m_townUnlocked) enterTown();
                     // Arm + force Auto Loot AFTER the world is up (post startGame) so a Continue —
                     // which skips class-select — still gets the gear brain (see enterAutoplayRun).
-                    if (m_menu.autoplay) enterAutoplayRun();
+                    // !p1Continue = a NEW hero, the only case that seeds the build cell from class.
+                    if (m_menu.autoplay) enterAutoplayRun(!m_menu.p1Continue);
                 }
             }
             return;
