@@ -88,6 +88,18 @@ ranged snipers hold the balcony (their keep-away branch has no cross-story routi
 `VERTICAL_HALL` (no platform cells) this is inert — enemies stay ground-only, and pads/ledges stay
 PvP-only. No wire/save change (the grid is seed-built, not serialized).
 
+**Autoplay bot input overlay** (`platform/input.{h,cpp}`, `game/bot_input.h`). Synthetic-input seam
+for Autoplay: `Input::setBotOverlayActive(bool)` arms the overlay (and clears held bits on disarm),
+`Input::setBotHeld(GameAction,bool)` / `Input::clearBotHeld()` set/drop the bot's per-action held
+bits, and `checkActionRaw` OR's them into `isActionDown`/`isActionPressed` ABOVE the real-device read
+(so the bot drives every existing consumer and a human keypress still wins the same frame).
+`Input::humanActivityThisFrame()` reports real gameplay-device activity this frame — the takeover
+trigger. Pressed-edges roll once per render frame (`s_botInput.rollEdges()` in `consumePressedState`,
+mirroring the device previous←current roll). The takeover/resume latch is `AutoplayControl`
+(`game/autoplay_control.h`), `RESUME_SECONDS = 2.0f` (idle time before the bot resumes; UI-open
+freezes the latch). The rest of the pure decision core lives in `game/autoplay_*` (see CLAUDE.md
+"Autoplay mode"); the engine driver is `engine_autoplay.cpp`.
+
 ## Architecture deep-dive: split-screen & shared systems
 
 (Full mechanics behind the condensed Split-screen principle in `CLAUDE.md`.)
@@ -424,6 +436,9 @@ No flags / `--help` / any invalid value → a warning + usage and a normal menu 
 | `--town` | dev door: land the hero in the TOWN hub (skips `startGame`) |
 | `--arena` | dev door: straight into the PvP ARENA (with `--host`: hosts it; joiners follow the sentinel seed) |
 | `--arena-couch` | local-versus arena: two fresh lanes of `--new`'s class, split-screen |
+| `--vhall` / `--fourstory` / `--lava` | force the next floor's layout (VERTICAL_HALL / FOUR_STORY / Hellforge lava) — modifiers on `--new`/`--load`, not standalone |
+| `--autoloot` | force Auto Loot & Equip on lane 0 |
+| `--autoplay` | arm the lane-0 Autoplay bot (implies `--autoloot`); a singleplayer AFK run (see CLAUDE.md "Autoplay mode") |
 
 Examples: `DungeonEngine --host --load 1` · `--host --new sorcerer --floor 5 --lan` ·
 `--join 192.168.1.5 --load 2` · `--load 3` · `--arena --host --lan --new warrior`. JOIN ends in

@@ -54,6 +54,47 @@ debug keys) lives in the `engine-reference` skill.
 
 - **Adding a HUD status effect (buff/debuff icon).** Two halves that MUST stay in lockstep, because the icon is keyed by ROW INDEX, not by the effect: (1) append a `HUD::StatusEffect` row to the `statuses[]` array in `engine_hud.cpp` (label, colour, timer — a timer of 0 hides it), and (2) append its 8x8 glyph in the SAME position to the `icons[]` table in `hud_status.cpp`. Get the order wrong and the HUD shows the wrong icon for the effect — a silent, purely visual lie that nothing catches. A `static_assert` pins the table against `STATUS_ICON_COUNT`. **The art is generated, never hand-written:** author it as ASCII in `tools/gen_status_icons.py` (`.` = transparent, `1`-`4` = palette shades, row 0 = top) and re-run it (or `tools/build_assets.py`, which invokes it). The script emits `src/renderer/status_icons_data.h` — icons AND palettes together, so art and colour cannot drift apart — and validates the art (wrong row count, wrong width, bad pixel char, or an entirely empty icon all fail loudly rather than shipping a blank box). Unlike `assets/meshes/*.obj`, this header IS committed, so it can't vanish on CI.
 
+## How autoplay drives the player
+
+The Autoplay bot (`--autoplay`, or the main-menu row) plays a lane-0 singleplayer run by injecting
+synthetic input at the ACTION layer, not the wire. The flow, per sim tick, all in
+`engine_autoplay.cpp`: `Engine::updateAutoplay(dt)` → (1) `m_autoplayControl.tick(humanActivity, uiOpen, dt)`
+runs the takeover/resume latch; (2) if the bot is in control and `botMayAct()`, `buildBotView()`
+snapshots live state into a pure `Autoplay::BotView` (self / effective weapon / nav flow-field +
+per-style vertical goal / nearest hostiles with width-aware LOS); (3) `Autoplay::decide(view)` (the pure
+`brain`, composing `doctrine`+`combat`+`nav`) returns a `BotIntent`; (4) driver backstops adjust it
+(loot-dwell, stuck-override, descend pulse); (5) `applyBotIntent` writes yaw/pitch and arms the held
+`GameAction`s via `Input::setBotHeld`. To CHANGE bot behavior, edit the pure core (`src/game/autoplay_*`)
+and add a `TEST_CASE` on a hand-built `BotView` (they're engine-free) — `tests/game/test_autoplay_*.cpp`
++ `tests/world/test_autoplay_nav.cpp`. The doctrine (how a build cell fights) is the `doctrineFor` table;
+the priority order is in `brain.cpp` (survive > fight > descend > travel). Add a new synthetic action by
+just `setBotHeld`-ing it in `applyBotIntent` — it flows through the human consumer automatically.
+
+**Autoplay pitfalls:**
+- **`--bot-walk` is a NETCODE probe, not this bot.** It injects deterministic movement on the WIRE
+  (`NetInput`) for divergence testing and is DEAD in singleplayer. Autoplay injects at the ACTION layer
+  (`Input::setBotHeld` → `checkActionRaw`) so it drives the real human code paths in SP. Don't confuse them.
+- **Descend by HOLDING `GameAction::PICKUP`, never by writing `m_descendRequested`.** `updatePlayerPickup`
+  resets that flag every tick and re-derives it from the button's tap/hold arbitration — a direct write is
+  erased. And a CONTINUOUS hold fires `Interact::poll` exactly once (it latches `consumed`) and a HOLD
+  reaches a **shrine sharing the exit's interact range** before the exit, so the driver must PULSE PICKUP
+  (`Autoplay::descendPulseHeld`) — one cycle spends the shrine, the next descends. A plain hold wedges the
+  bot beside a used shrine forever (it never releases, so the latch never clears).
+- **The flow byte is ambiguous at zero.** `flowDirection` returns `{0,0,0}` BOTH at the exit (byte `0xFE`)
+  and on an unreachable cell (`0xFF`); read the raw byte (`atExit`/`flowValid` in `BotView`) to tell
+  "arrived" from "stuck" — a zero heading alone can't.
+- **Lava and jump-gaps are INVISIBLE to the flow field.** The BFS flow routes over cells the bot can't
+  actually cross grounded, so `applyBotIntent`'s heading MUST pass `Autoplay::stepAllowed` (the hazard veto:
+  off-map / wall / grounded-in-lava) — the veto is mandatory, not optional. (Balcony-edge drops are
+  intentional traversal the veto deliberately does NOT cover; those are the driver's story-routing job.)
+- **The −Z = yaw-0 aim convention.** Forward at yaw 0 is `(0,0,-1)` (player.cpp), so `dirToAim` inverts as
+  `yaw = atan2f(-dir.x, -dir.z)` (matches `engine_arena.cpp`). Aiming with a naive `atan2(z,x)` points the
+  bot 90°/180° off.
+- **The menu "Autoplay" row is a FIVE-SITE mirror + a case-renumber trap.** Adding a menu entry means the
+  same edit in the draw list, the hit-test, the up/down clamp, the activation switch, and the count — miss
+  one and rows silently misalign; and inserting an entry renumbers the `subState`/`case` ids downstream
+  (the play-style chooser sits at subState 23/24 precisely because 21/22 were already taken).
+
 ## Run a Balance Report
 
 The balance lab (`tests/balance/`, spec: `docs/superpowers/specs/2026-07-22-balance-lab-design.md`) models typical-equipment player power against the enemy/boss curves by driving the REAL engine code — `ItemGen` drops, `BuildScore` scoring, `Inventory` equipping, the `GameConst` spawn multipliers — per (difficulty, floor, build cell). Its always-on sanity pins run with the normal test suite; the full sweep is env-gated:

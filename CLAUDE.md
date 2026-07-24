@@ -333,6 +333,47 @@ already chose (NEW_GAME wipe, `equipFreshLane`, the client-join wipe) explicitly
 fields — the chooser runs BEFORE the wipes, which would otherwise silently undo it. `--autoloot` is
 the dev door. Inert in the arena. Spec: `docs/superpowers/specs/2026-07-22-auto-loot-equip-design.md`.
 
+**Autoplay mode (AFK bot).** A main-menu "Autoplay" row and the `--autoplay` dev door start a
+**singleplayer, lane-0-only** run (v1) where a bot plays a full character: navigate, fight per the
+build doctrine, loot (it force-enables **Auto Loot & Equip** as its gear brain), descend, auto-respawn,
+and ladder difficulty — all through the **exact human input path**. The seam is a synthetic-input
+overlay: `Input::setBotHeld(action,on)` arms a per-`GameAction` bit that `checkActionRaw` OR's into
+`isActionDown`/`isActionPressed` (input.cpp) ABOVE the real-device read, so every consumer (movement,
+fire, skills, potion, block, dodge, interact) is driven with zero call-site changes and a real keypress
+overrides on the same frame. `Input::humanActivityThisFrame()` is the takeover trigger — real gameplay
+activity hands control to the human instantly and the bot resumes after `AutoplayControl::RESUME_SECONDS`
+(2 s) idle (UI navigation never counts). The **decision core is pure and unit-tested** (`src/game/autoplay_*`:
+`bot_input` overlay bitset, `control` takeover latch, `doctrine` build-cell→playstyle table, `nav` hazard
+veto + descend gate, `combat` target/aim/fire/kite, `intent` BotView/BotIntent structs, `brain` the
+survive>fight>descend>travel priority machine) — engine-free so it tests on hand-built `BotView`s. The
+**engine driver** (`engine_autoplay.cpp`) is the only place it touches live state: once per tick
+`updateAutoplay` runs the takeover latch, then `buildBotView` snapshots player/weapon/nav-flow/hostiles,
+then `Autoplay::decide` returns a `BotIntent` that `applyBotIntent` maps back onto held `GameAction`s + a
+yaw/pitch write. **Freeze carve-out** (`botMayAct()`): the bot keeps FIGHTING under an open inventory (so
+you can re-gear mid-fight — the whole point), but pause / character-inspect / options / menagerie freeze
+it; movement + interact are suppressed while ANY UI is open so a moving bot can't jitter the inventory
+cursor. **Descend seam:** the bot HOLDS `GameAction::PICKUP` through the real interact arbitration
+(`updatePlayerPickup` → `updateFloorDoor`) — a direct `m_descendRequested` write is erased because
+`updatePlayerPickup` re-derives that flag from the button's tap/hold each tick. Because a continuous hold
+is consumed ONCE (`Interact::poll` latches `consumed`) and a HOLD reaches a **shrine sharing the exit's
+interact range** BEFORE the exit, the driver **PULSES** PICKUP (`Autoplay::descendPulseHeld`, `autoplay_nav.h`:
+hold >0.35 s to fire, release a beat to clear the latch, repeat) so one cycle spends the shrine and the next
+descends — a plain continuous hold wedged the bot next to a used shrine forever. The **build doctrine**
+(`doctrineFor`) turns the Auto-Loot 3×3 build cell into a playstyle: the column sets the engagement band
+(×weaponRange) and the row sets risk posture (potion threshold, block vs proactive-dodge, cover, high-ground).
+The FIGHT branch only engages within an **engagement ceiling** `max(engageMax×weaponRange, THREAT_RADIUS=12 m)`
+— a target beyond it falls through to DESCEND/TRAVEL so a distant straggler can't drag the bot off the
+exit route (this was the dense-`VERTICAL_HALL`-floor stall: an unbounded FIGHT chased 16-21 m foes forever).
+**Story routing** for stacked/lava floors is folded into `flowDir` in `buildBotView` BEFORE the hazard veto
+(`StoryNav` ramps for VERTICAL_HALL, same-story drop-holes for FOUR_STORY, lava rides the lava-aware veto);
+three driver backstops ride on top — a stuck-override (force-descend when wedged at a contested door; lateral
+nudge on geometry), a loot-settle dwell, and low-HP health-globe detours. **Auto-respawn** re-enters the run
+~1.5 s after a solo death (entrance spawn); the **difficulty ladder** is the existing floor-50→next-difficulty
+flow. **No save-format change** — `m_autoplayActive` and the backstop timers are all transient. This bot is
+the **empirical playtest rig the balance-lab spec deferred** — it runs the real combat/loot/nav loop end to
+end; a natural follow-up is emitting per-floor metrics from the driver. Story/lava routing and the dense-floor
+survivability of a melee bot on `VERTICAL_HALL` are the known-weak cases (dense floors are slow-but-progressing).
+
 **Persistence is per-character.** Each save file (`save_NN.dat`) holds exactly ONE character (`playerCount=1`); the per-lane destination is `m_playerSaveSlot[lane]` and `saveAllCharacters()` writes each active lane to its own slot. In couch co-op both players pick their own slot (New or Continue) in the menu lobby and the shared dungeon runs on **Player 1's floor**; mixed New/Continue lanes work because the menu prepares each lane and calls `startGame(mode, lanesPrepared=true)` (skipping the NEW_GAME wipe). Legacy `playerCount=2` bundle saves still load (and migrate to per-character on the next save). The on-disk layout is **versioned** (`SAVE_VERSION`, currently 3 = GLOVES slot + attack-speed cache in `PlayerInventory`): readers accept the previous version via a `Legacy*V<n>` mirror struct in `engine_persist.cpp`, and `static_assert`s pin the serialized struct sizes — any layout change MUST bump the version and extend the legacy readers. (Save format, menu flow, no-downgrade guard: `engine-reference`.)
 
 **User-data location (desktop) + Steam Cloud.** Saves, `difficulty_unlock.dat`, `menagerie.dat` (pet-collection progress), and the `controls.json`/`audio.json`/`video.cfg` prefs are written into the per-user dir `SDL_GetPrefPath("EdRethardo","DungeonEngine")` via `Platform::userDataPath()` (`src/platform/user_paths.{h,cpp}`), NOT the install/working dir — so Steam **Auto-Cloud** can sync them (config: `docs/steam_cloud.md`). On `__SWITCH__` `userDataDir()` is `""` (CWD = app storage), so Switch is unchanged. A one-time `migrateLegacyUserData()` (in `Engine::init`) copies pre-relocation files from the CWD/exe dir into the pref dir **only when the destination is absent** (never destructive). `saveCharacter` writes **atomically** (temp + `Platform::atomicReplace`) so an interrupted save can't corrupt an existing slot. `ORG`/`APP` are frozen — changing them orphans saves.
