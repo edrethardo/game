@@ -42,7 +42,7 @@
 // is how the bot once froze for 60 s against two body-blocking enemies it silently refused to shoot.
 #include "engine/engine.h"
 #include "platform/input.h"
-#include "world/combat_query.h"
+#include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
 #include "world/level_grid.h"
 #include "world/story_nav.h"      // StoryNav::onUpperStory / nearestPortalGoal — per-style vertical routing
 #include "world/pathfinder.h"     // Pathfinder::findPath — Stage-3 escape's short A* leg toward the exit
@@ -661,7 +661,10 @@ Autoplay::BotView Engine::buildBotView() {
     v.hasBoss     = m_level.floorHasBoss;
     v.bossAlive   = floorBossAlive();
 
-    // --- targets: nearest-first hostiles with width-aware LOS from the bot's eye ---
+    // --- targets: nearest-first hostiles, then a WORLD-ONLY LOS test from the bot's eye ---
+    // TWO PASSES on purpose. Pass 1 gathers the nearest kMaxTargets hostiles; pass 2 raycasts only
+    // those survivors, so a floor holding 90 enemies (the Stacked Loop) pays 16 casts instead of 90 —
+    // the LOS used to be computed for every candidate and then thrown away by the cap.
     static Autoplay::BotTarget s_targets[kMaxTargets];
     const Vec3 eye = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
     u32 n = 0;
@@ -685,16 +688,6 @@ Autoplay::BotView Engine::buildBotView() {
         t.isRanged    = e.attackRange > 5.0f;
         t.attackRange = e.attackRange;
         t.attackTimer = e.attackTimer;
-        // LOS: a WORLD hit before the target's centre blocks it (the DDA is slab-aware, so a balcony
-        // floor occludes an enemy above). An entity/floor hit at/after the centre does not.
-        const Vec3 toT = e.position - eye;
-        const f32  d   = length(toT);
-        if (d < 1e-4f) {
-            t.hasLOS = true;   // on top of it
-        } else {
-            CombatHit hit = CombatQuery::raycast(m_level.grid, m_entities, eye, normalize(toT), d);
-            t.hasLOS = !(hit.hit && hit.type == CombatHit::WORLD);
-        }
 
         // Insert nearest-first into the fixed cap (simple insertion — the pool is small).
         u32 pos = n;
@@ -703,6 +696,22 @@ Autoplay::BotView Engine::buildBotView() {
         else pos = kMaxTargets - 1;
         while (pos > 0 && s_targets[pos - 1].dist > t.dist) { s_targets[pos] = s_targets[pos - 1]; pos--; }
         s_targets[pos] = t;
+    }
+    // LOS pass — WORLD GEOMETRY ONLY. This used to call CombatQuery::raycast (which sweeps the world
+    // AND every entity AABB) and read "the nearest hit was not WORLD" as clear line. That is wrong the
+    // moment ANOTHER ENEMY stands between the bot and an occluding wall: the nearest hit becomes an
+    // ENTITY, the wall behind it stops counting as an occluder, and the bot "sees" — and shoots —
+    // straight through the wall. Raycast::cast is the bare slab-aware grid DDA (the same primitive the
+    // melee cone's LOS gate and the enemy AI's hasLOSToPoint use), so only real geometry can block and
+    // a body in the way can never hide one. (Whether an intervening enemy should block the SHOT is a
+    // separate question — the projectile hits it, which is fine; the bug was the vanishing wall.)
+    // The 0.1 m slack mirrors hasLOSToPoint: a hit at/after the target's own centre is not an occluder.
+    for (u32 i = 0; i < n; i++) {
+        const Vec3 toT = s_targets[i].pos - eye;
+        const f32  d   = length(toT);
+        if (d < 1e-4f) { s_targets[i].hasLOS = true; continue; }   // on top of it
+        const RayHit hit = Raycast::cast(m_level.grid, eye, toT * (1.0f / d), d);
+        s_targets[i].hasLOS = (!hit.hit || hit.distance >= d - 0.1f);
     }
     v.targets     = s_targets;
     v.targetCount = n;

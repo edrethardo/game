@@ -370,6 +370,14 @@ Magic from Ranged — Sorcerer and Ranger are both `PROJECTILE`); each entry mat
 weapon the class was born with. Only a **fresh** character is seeded (`enterAutoplayRun(freshCharacter)`,
 threaded from `GameStart::NEW_GAME` / `!m_menu.p1Continue`) — a Continue keeps the cell its player chose in
 the inventory grid, and a re-seed there would silently re-gear their hero.
+**Target LOS is WORLD-ONLY** (`Raycast::cast`, the slab-aware grid DDA the melee cone's LOS gate and the
+enemy AI's `hasLOSToPoint` already use) — NOT `CombatQuery::raycast`, which sweeps world AND entities and
+returns the NEAREST hit. Reading "the nearest hit wasn't WORLD" as a clear line is wrong the moment another
+enemy stands between the bot and an occluding wall: the nearest hit becomes an ENTITY, the wall stops
+counting as an occluder, and the bot "sees" — and shoots — straight through it (measured ~1600 target-ticks
+of that per 2-minute run). Bodies must never make geometry disappear; whether an intervening enemy should
+block the SHOT is a separate question, and the answer is no (the projectile just hits it). The cast also
+runs in a SECOND pass over the nearest-16 survivors, so a 90-enemy floor pays 16 casts, not 90.
 The FIGHT branch only engages within an **engagement ceiling** `max(engageMax×weaponRange, THREAT_RADIUS=12 m)`
 — a target beyond it falls through to DESCEND/TRAVEL so a distant straggler can't drag the bot off the
 exit route (this was the dense-`VERTICAL_HALL`-floor stall: an unbounded FIGHT chased 16-21 m foes forever).

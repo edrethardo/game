@@ -61,7 +61,7 @@ synthetic input at the ACTION layer, not the wire. The flow, per sim tick, all i
 `engine_autoplay.cpp`: `Engine::updateAutoplay(dt)` → (1) `m_autoplayControl.tick(humanActivity, uiOpen, dt)`
 runs the takeover/resume latch; (2) if the bot is in control and `botMayAct()`, `buildBotView()`
 snapshots live state into a pure `Autoplay::BotView` (self / effective weapon / nav flow-field +
-per-style vertical goal / nearest hostiles with width-aware LOS); (3) `Autoplay::decide(view)` (the pure
+per-style vertical goal / nearest hostiles with WORLD-ONLY LOS); (3) `Autoplay::decide(view)` (the pure
 `brain`, composing `doctrine`+`combat`+`nav`) returns a `BotIntent`; (4) driver backstops adjust it
 (loot-settle dwell, low-HP globe detour, descend pulse, a stalled-fight break-off, the exit-progress
 watchdog, and the escalating geometry escape: nudge → 8-dir search → A* leg); (5) `applyBotIntent` writes yaw/pitch and arms the held
@@ -99,6 +99,10 @@ on a flat floor for the regression and on `--vhall`/`--fourstory`/`--lava` for t
   22% of shots blocked by geometry, mean yaw error 27°). The tolerance is squeezed from both sides — it
   must exceed the ease's steady-state tracking lag + wobble (~0.078 rad) or a strafing enemy MUTES the
   bot, and MELEE needs the separate wide/pitch-free tolerance because its swing is a 70° HORIZONTAL cone.
+- **Target LOS must be the WORLD-ONLY `Raycast::cast`, never `CombatQuery::raycast`.** The combat raycast
+  sweeps world AND entities and reports only the NEAREST hit, so an enemy standing in front of a wall
+  makes the nearest hit an ENTITY and the wall stops counting as an occluder — the bot sees and shoots
+  through solid geometry. Same trap in any new "can the bot see X" test: bodies must not hide walls.
 - **`engageMin` is a movement rule, not a fire rule.** Fire needs only LOS + `dist <= engageMax×range`;
   a target inside the kite floor is shot at WHILE the bot backs off. Re-adding a `dist >= engageMin`
   term to the fire gate re-creates the swarmed-caster livelock. The driver's `inBandFight` stall signal
