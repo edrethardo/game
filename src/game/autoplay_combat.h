@@ -120,8 +120,23 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // a lo-based dodge threshold would be `dist < 0` — dead. Fall back to the weapon's (short) reach
     // there so the "never get touched" hit-and-run posture actually fires for Glass Cannon Melee.
     const f32 dodgeRef = (lo > 0.1f) ? lo : (d.engageMax * v.weaponRange);
-    if (d.dodgesProactively && v.dodgeCooldown <= 0.0f && t.dist < dodgeRef * 0.6f && !v.stunned)
+    const bool dodgeReady = v.dodgeCooldown <= 0.0f && !v.stunned && !v.rolling;
+    if (d.dodgesProactively && dodgeReady && t.dist < dodgeRef * 0.6f) {
         out.dodge = true;                         // glass cannon rolls away from a closer
+    } else if (t.isRanged && out.moveFwd && dodgeReady &&
+               fabsf(angleDelta(v.yaw, out.aimYaw)) < 0.5f) {
+        // OFFENSIVE gap-closer: a RANGED enemy we are trying to walk up to is charged with a roll
+        // instead — 0.5 s at 8 m/s covers ~4 m with 0.3 s of i-frames, so we cross its firing lane
+        // faster AND eat one volley for free. Only for ranged: a melee enemy is already closing the
+        // gap for us, and spending the roll on it just burns the i-frames we'd rather have when it
+        // arrives. Gated on already FACING the target (the roll direction is the CURRENT yaw via
+        // computeRollDirection, and the aim is rate-limited now, so rolling mid-turn would launch
+        // us sideways into a wall). The two dodges cannot both want to fire — the defensive one
+        // needs dist < 0.6*dodgeRef <= 0.6*hi and this one needs dist > hi — but the else-if pins
+        // the defensive roll as the winner regardless of future tuning.
+        out.dodge = true;
+        out.moveFwd = true;   // explicit: the roll direction is the WASD held on the SAME tick
+    }
     if (d.blocks && !out.fire && t.dist <= v.weaponRange && !v.stunned)
         out.block = true;                          // tank blocks between swings
 

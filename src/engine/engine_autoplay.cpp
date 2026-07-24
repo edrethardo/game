@@ -674,6 +674,10 @@ Autoplay::BotView Engine::buildBotView() {
         t.dist   = length(e.position - eye);
         t.hp     = e.health;
         t.isBoss = e.isBoss;
+        // `attackRange > 5` is the enemy AI's OWN ranged test (enemy_ai_states.cpp), reused verbatim
+        // so the bot's idea of "that one shoots at me" can't drift from the AI's.
+        t.isRanged    = e.attackRange > 5.0f;
+        t.attackRange = e.attackRange;
         // LOS: a WORLD hit before the target's centre blocks it (the DDA is slab-aware, so a balcony
         // floor occludes an enemy above). An entity/floor hit at/after the centre does not.
         const Vec3 toT = e.position - eye;

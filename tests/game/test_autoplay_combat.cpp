@@ -250,3 +250,63 @@ TEST_CASE("aim wobble is small, deterministic and actually moves") {
     aimWobble(0, ya, pa); aimWobble(120, yb, pb);
     CHECK(fabsf(ya - yb) > 1e-4f);
 }
+
+// ---------------------------------------------------------------------------------------------
+// (B) GAP-CLOSER ROLL — a ranged enemy plinking from outside our band is charged with a dodge
+// (4 m of travel + 0.3 s of i-frames beats walking into its fire).
+// ---------------------------------------------------------------------------------------------
+static BotView meleeBotVs(f32 dist, bool targetRanged, BotTarget& t) {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+1;                  // Moderate / Melee: band 0 .. 0.60 x range
+    v.weaponRange = 3.0f; v.weaponProjSpeed = 0.0f; v.weaponIsMelee = true;
+    v.dodgeCooldown = 0.0f;
+    t = BotTarget{};
+    t.pos = {0, 1.7f, -dist}; t.dist = dist; t.hasLOS = true;
+    t.isRanged = targetRanged; t.attackRange = targetRanged ? 12.0f : 2.0f;
+    v.targets = &t; v.targetCount = 1;
+    return v;
+}
+
+TEST_CASE("rolls INTO a ranged enemy it is trying to close on") {
+    BotTarget t; BotView v = meleeBotVs(9.0f, true, t);   // 9 m >> the 1.8 m melee band
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveFwd);      // must be held on the SAME tick: the roll direction comes from WASD
+    CHECK(out.dodge);
+}
+
+TEST_CASE("does not gap-close roll when the dodge is on cooldown or mid-roll") {
+    {
+        BotTarget t; BotView v = meleeBotVs(9.0f, true, t);
+        v.dodgeCooldown = 0.4f;
+        BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+        CHECK(out.moveFwd);
+        CHECK_FALSE(out.dodge);
+    }
+    {
+        BotTarget t; BotView v = meleeBotVs(9.0f, true, t);
+        v.rolling = true;
+        CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+    }
+}
+
+TEST_CASE("does not gap-close roll at a MELEE enemy — it is walking into us anyway") {
+    BotTarget t; BotView v = meleeBotVs(9.0f, false, t);
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveFwd);
+    CHECK_FALSE(out.dodge);   // burning the roll on a closer that closes itself wastes the i-frames
+}
+
+TEST_CASE("does not gap-close roll while still turning onto the target") {
+    // The roll direction is the CURRENT yaw (PlayerController::computeRollDirection), and the aim is
+    // now rate-limited, so rolling before the turn lands would launch the bot sideways into geometry.
+    BotTarget t; BotView v = meleeBotVs(9.0f, true, t);
+    v.yaw = kPi;                                  // facing 180° away from the target at -Z
+    CHECK_FALSE(decideCombat(v, doctrineFor(v.buildCell)).dodge);
+}
+
+TEST_CASE("does not gap-close roll at a ranged enemy already inside the band") {
+    BotTarget t; BotView v = meleeBotVs(1.0f, true, t);   // inside 0.60 x 3 m: no closing wanted
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(out.moveFwd);
+    CHECK_FALSE(out.dodge);
+}

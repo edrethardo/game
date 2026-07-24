@@ -18,6 +18,9 @@ struct BotTarget {
     f32  hp;
     bool isBoss;
     bool hasLOS;      // width-aware LOS from the bot's eye already computed by the driver
+    // --- threat shape (the gap-closer roll) ---
+    bool isRanged = false;       // Entity::attackRange > 5 — the same test the enemy AI itself uses
+    f32  attackRange = 0.0f;     // this enemy's own reach, i.e. how close it must be to hit US
 };
 
 // Effective ENGAGEMENT range for the doctrine band, from a weapon's authored range + projectile
