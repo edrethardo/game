@@ -388,6 +388,9 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplayLastEnemyCount  = 0;
     m_autoplayBreakoffTimer   = 0.0f;
     m_autoplayFreePlayTimer   = -1.0f;  // Free-Play auto-confirm: armed only by updateTownPortal
+    m_autoplaySidearmActive   = false;  // a fresh run never inherits a mid-fight sidearm swap
+    m_autoplaySidearmDwell    = 0.0f;
+    m_autoplaySidearmCooldown = 0.0f;
     m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
     m_autoplayDoorCheckDist   = 0.0f;
     m_autoplayExitStallTimer  = 0.0f;

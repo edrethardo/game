@@ -71,6 +71,7 @@
 #include "game/autoplay_nav.h"    // Autoplay::stepAllowed / escapeHeading — the travel hazard veto + 8-dir escape
 #include "game/autoplay_combat.h" // Autoplay::dirToAim / doctrineFor — nudge heading + in-band fight test
 #include "game/item.h"            // GLOBE_HEALTH_ID / m_worldItems — low-hp globe detours
+#include "game/build_score.h"     // BuildScore::bestRangedBackpackIdx — the melee build's sidearm pick
 #include "game/skill.h"           // findSkillDef / computeCooldownTicks — mirror the real cast gates
 #include "game/game_constants.h"
 #include <cmath>
@@ -751,6 +752,7 @@ void Engine::updateAutoplay(f32 dt) {
     if (in.jump && (!m_localPlayer.onGround || m_localPlayer.dodgeState.rolling)) in.jump = false;
 
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
+    updateSidearm(v, dt);   // equip/stow the melee build's ranged sidearm (takes effect next tick)
 }
 
 // One tick of the TOWN policy: beeline to the to-dungeon portal and take it. Called instead of the
@@ -823,6 +825,71 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
 }
 
 // Fill the read-only decision snapshot from live engine state (lane 0 — the only Autoplay lane).
+// One tick of the melee ranged-sidearm decision. Owns the WEAPON slot while active. Requirements:
+// a MELEE build, on a VERTICAL_HALL floor whose exit is UPPER, with a hostile it WANTS to hit but
+// cannot reach by walking — out of melee reach AND the step toward it would fall off the balcony.
+// Then a ranged weapon from the bag is the only way to engage it without leaving the story, which is
+// exactly what the player asked the bot NOT to do. When the trigger clears (target gone / now
+// meleeable / no longer fighting), it switches back. Hysteresis (dwell + cooldown) stops it
+// chattering when a target flickers in and out of the condition.
+void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
+    constexpr f32 kMinDwell = 3.0f;   // once switched, hold the sidearm at least this long
+    constexpr f32 kCooldown = 5.0f;   // and wait this long between switches
+    if (m_autoplaySidearmCooldown > 0.0f) m_autoplaySidearmCooldown -= dt;
+    if (m_autoplaySidearmActive)          m_autoplaySidearmDwell    += dt;
+
+    PlayerInventory& inv = m_inventories[0];
+
+    // Is there a target a melee build could only reach by falling? Scan this tick's LOS targets.
+    // "Wants it" = LOS + within the engagement ceiling (the same gate the brain fights on). "Can't
+    // reach" = beyond melee swing AND the step straight toward it would fall off the balcony. Only on
+    // a VHALL upper-exit climb — the one place the "don't fall to reach an enemy" rule bites.
+    bool trigger = false;
+    if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL && m_level.floorDoorPos.y > 1.5f) {
+        const Autoplay::Doctrine doc = Autoplay::doctrineFor(v.buildCell);
+        const f32 ceil = Autoplay::engageCeiling(v, doc);
+        for (u32 i = 0; i < v.targetCount; i++) {
+            const Autoplay::BotTarget& t = v.targets[i];
+            if (!t.hasLOS || t.dist > ceil) continue;
+            if (t.dist <= v.weaponRange * 1.2f) continue;          // already in / near melee reach
+            const Vec3 toT{t.pos.x - v.pos.x, 0.0f, t.pos.z - v.pos.z};
+            if (lengthSq(toT) < 1e-6f) continue;
+            if (Autoplay::wouldFall(m_level.grid, v.pos, v.pos.y, toT)) { trigger = true; break; }
+        }
+    }
+
+    if (!m_autoplaySidearmActive) {
+        // --- Consider switching TO the sidearm. ---
+        if (trigger && m_autoplaySidearmCooldown <= 0.0f && v.weaponIsMelee) {
+            const s32 idx = BuildScore::bestRangedBackpackIdx(inv, m_itemDefs, m_itemDefCount);
+            if (idx >= 0) {
+                m_autoplaySidearmMeleeUid = inv.equipped[(u32)ItemSlot::WEAPON].uid;  // stash BEFORE equip
+                Inventory::equip(inv, (u8)idx, m_itemDefs);   // ranged weapon -> WEAPON slot; melee -> bag
+                m_autoplaySidearmActive = true;
+                m_autoplaySidearmDwell  = 0.0f;
+                addChatMessage("", "Autoplay: drew a ranged sidearm", Vec3{0.6f, 0.85f, 1.0f});
+            }
+        }
+        return;
+    }
+
+    // --- Active: consider switching BACK to melee. ---
+    // Keep it while the trigger holds OR the min dwell has not elapsed. Otherwise put the melee
+    // weapon back by finding the stashed uid in the bag (its slot can move as loot comes and goes).
+    if (trigger || m_autoplaySidearmDwell < kMinDwell) return;
+
+    s32 meleeIdx = -1;
+    for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++)
+        if (inv.backpack[i].defId != 0xFFFF && inv.backpack[i].uid == m_autoplaySidearmMeleeUid) { meleeIdx = i; break; }
+    if (meleeIdx >= 0) Inventory::equip(inv, (u8)meleeIdx, m_itemDefs);   // melee -> WEAPON slot
+    // If the stashed weapon vanished (should not happen — nothing discards the equipped-then-bagged
+    // melee weapon while the sidearm guard blocks auto-equip), fall through: clearing the flag lets
+    // the next autoEquipBackpack re-gear the melee build normally.
+    m_autoplaySidearmActive   = false;
+    m_autoplaySidearmCooldown = kCooldown;
+    addChatMessage("", "Autoplay: back to melee", Vec3{0.6f, 0.85f, 1.0f});
+}
+
 Autoplay::BotView Engine::buildBotView() {
     Autoplay::BotView v{};
 
@@ -951,6 +1018,12 @@ Autoplay::BotView Engine::buildBotView() {
     v.weaponProjSpeed = (w.type == WeaponType::PROJECTILE) ? w.projectileSpeed : 0.0f;
     v.weaponIsMelee   = (w.type == WeaponType::MELEE);
     v.buildCell       = m_inventories[0].buildCell;
+    // While the ranged SIDEARM is worn, present a RANGED doctrine cell to the brain (same risk row,
+    // Ranged column) so it holds ground and shoots instead of trying to walk a gun into melee reach.
+    // The equipped weapon is already ranged (getEffectiveWeapon above set weaponRange/isMelee), so
+    // only the doctrine column needs the swap. The PERSISTED buildCell (m_inventories[0].buildCell)
+    // is untouched — this is a per-tick view override.
+    if (m_autoplaySidearmActive) v.buildCell = Autoplay::rangedCellFor(v.buildCell);
 
     // --- world gate: idle in town / arena / the Source, and only travel while an ordinary exit exists ---
     v.onNormalFloor = !(m_level.inTown || m_level.inArena || m_level.inSourceChamber) && m_level.floorDoorActive;

@@ -1445,6 +1445,9 @@ private:
     // pulses the interact instead of idling (the arena / Source chamber keep idling).
     void autoplayTownStep(f32 dt, bool uiOpen);
     Autoplay::BotView buildBotView();
+    // Runs the melee ranged-sidearm state machine (equip a ranged weapon from the bag when a melee
+    // build can only reach a target by falling off its VHALL balcony; switch back when it clears).
+    void updateSidearm(const Autoplay::BotView& v, f32 dt);
     // uiOpen suppresses the bot's movement/jump/pickup synthetic actions (so they can't drive the
     // inventory cursor, which reads the same MOVE_* actions) while keeping the combat actions live —
     // the bot fights in place under an open inventory. `dt` drives the aim RATE LIMIT: the intent's
