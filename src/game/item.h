@@ -283,6 +283,15 @@ struct ItemDef {
 
     // Legendary skill
     SkillId legendarySkillId = SkillId::NONE;
+    // Precomputed VALUE of that granted skill for the Auto Loot & Equip scorer, in the same units
+    // BuildScore uses (offense in weapon-DPS-score units, defense in effective-HP-score units).
+    // Stamped once after skills load (engine_init_assets.cpp) from the real SkillDef via
+    // BuildScore::skillOffense / skillDefense, so the pure scorer never needs the skill table. 0 for
+    // an item with no granted skill (the default) — the scorer only reads it at LEGENDARY rarity,
+    // where the skill actually activates. ItemDef is JSON-loaded, never serialized, so this is
+    // save-safe (no SAVE_VERSION bump).
+    f32 legendarySkillOffense = 0.0f;
+    f32 legendarySkillDefense = 0.0f;
 
     // Drop level range
     u8 minLevel = 1;

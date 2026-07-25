@@ -387,3 +387,88 @@ TEST_CASE("BuildScore: bestRangedBackpackIdx ignores a pet in the bag") {
     inv.backpack[0].defId = 1; inv.backpack[1].defId = 2; inv.backpackCount = 2;
     CHECK(BuildScore::bestRangedBackpackIdx(inv, defs, 3) == 0);   // the bow, not the flagged carbine
 }
+
+TEST_CASE("BuildScore: Glass Cannon leans harder into damage than Moderate does") {
+    // The sharpened 3.5/0.5 row weights (from 3.0/1.0) must keep every row summing to 4 (the nudge
+    // relies on it) AND make Glass reliably pick the damage piece over a much tankier one.
+    using namespace BuildScore;
+    f32 tO, tD, mO, mD, gO, gD;
+    rowWeights(0, tO, tD); rowWeights(1, mO, mD); rowWeights(2, gO, gD);
+    CHECK(tO + tD == doctest::Approx(4.0f));
+    CHECK(mO + mD == doctest::Approx(4.0f));
+    CHECK(gO + gD == doctest::Approx(4.0f));
+    CHECK(gO > 3.0f);                          // sharpened past the old 3.0
+    CHECK(gD < 1.0f);                          // defense barely counts for glass
+
+    // A damage ring vs a max-roll ARMOR ring (30, the shipped ceiling — 45 effective HP, genuinely
+    // tanky): Glass takes the damage one, Tanky takes the armor one. The sharpened weight is what
+    // makes Glass pick damage over a real defensive roll rather than only over a token one.
+    ItemDef ring{}; ring.slot = ItemSlot::RING;
+    ItemInstance dmg = instance(1);  dmg.affixes[0]  = {AffixType::DAMAGE_PCT, 20.0f};
+    ItemInstance tank = instance(1); tank.affixes[0] = {AffixType::ARMOR, 30.0f};   // max shipped roll
+    CHECK(score(dmg, ring, GLASS_MELEE) > score(tank, ring, GLASS_MELEE));
+    CHECK(score(tank, ring, TANKY_MELEE) > score(dmg, ring, TANKY_MELEE));   // Tanky still flips it
+}
+
+TEST_CASE("BuildScore: comparable-DPS ranged weapons rank by per-hit (weapon-damage skill scaling)") {
+    // Marksman/Ranger skills scale off the weapon's per-hit damage, so between two RANGED weapons of
+    // the SAME sustained DPS the harder hit wins — a tiebreak, not an override. Two bows at 60 DPS:
+    // one 30 dmg @ 0.5 s, one 60 dmg @ 1.0 s.
+    ItemDef fastBow{}; fastBow.slot = ItemSlot::WEAPON; fastBow.weaponSubtype = WeaponSubtype::BOW;
+    fastBow.baseDamage = 30.0f; fastBow.baseCooldown = 0.5f;   // 60 DPS, small hit
+    ItemDef bigBow{};  bigBow.slot  = ItemSlot::WEAPON; bigBow.weaponSubtype  = WeaponSubtype::BOW;
+    bigBow.baseDamage  = 60.0f; bigBow.baseCooldown  = 1.0f;   // 60 DPS, big hit
+    ItemInstance it = instance();
+    CHECK(BuildScore::score(it, bigBow, MOD_RANGED) > BuildScore::score(it, fastBow, MOD_RANGED));
+    // Melee gets no such bonus (melee-class skills don't read weapon damage): equal DPS => equal.
+    ItemDef fastBlade = fastBow; fastBlade.weaponSubtype = WeaponSubtype::DAGGER;
+    ItemDef bigBlade  = bigBow;  bigBlade.weaponSubtype  = WeaponSubtype::SWORD;
+    CHECK(BuildScore::score(it, bigBlade, MOD_MELEE) ==
+          doctest::Approx(BuildScore::score(it, fastBlade, MOD_MELEE)));
+    // And the tiebreak never overturns a real DPS gap: a 40% higher-DPS small-hit bow still wins.
+    ItemDef strongFast = fastBow; strongFast.baseCooldown = 0.357f;   // ~84 DPS, still 30/hit
+    CHECK(BuildScore::score(it, strongFast, MOD_RANGED) > BuildScore::score(it, bigBow, MOD_RANGED));
+}
+
+TEST_CASE("BuildScore: a CDR helmet beats a defensive helmet for Glass Cannon (CDR speeds the weapon)") {
+    // CDR on a non-weapon speeds the WEAPON (getEffectiveWeapon divides cooldown by 1-CDR), which the
+    // scorer's non-weapon branch used to drop. A Glass Cannon must now prefer a CDR helmet over an
+    // equal-tier armor helmet — Aaron: "helmets that provide good CDR over good defense as glass".
+    ItemDef helm{}; helm.slot = ItemSlot::HELMET; helm.baseHealth = 20.0f;
+    ItemInstance cdr = instance(1);  cdr.affixes[0]  = {AffixType::COOLDOWN_REDUCTION, 15.0f};
+    ItemInstance def = instance(1);  def.affixes[0]  = {AffixType::ARMOR, 30.0f};
+    CHECK(BuildScore::score(cdr, helm, GLASS_MELEE) > BuildScore::score(def, helm, GLASS_MELEE));
+    // For a Tanky build the armor helmet still wins — the CDR credit is real but defense-weighted out.
+    CHECK(BuildScore::score(def, helm, TANKY_MELEE) > BuildScore::score(cdr, helm, TANKY_MELEE));
+    // CDR is now credited as weapon acceleration even outside the Magic column (was skill-only before).
+    ItemInstance plain = instance();
+    CHECK(BuildScore::score(cdr, helm, MOD_MELEE) > BuildScore::score(plain, helm, MOD_MELEE));
+}
+
+TEST_CASE("BuildScore: a legendary granted skill is worth its DPS-equivalent, and only at legendary") {
+    using namespace BuildScore;
+    // A SkillDef with a real damage/cooldown (Chain-Lightning-shaped) yields positive offense; a
+    // stat-less reactive skill (no damage) yields none from the pure helper. skillOffense/Defense are
+    // what the engine stamps onto ItemDef::legendarySkillOffense/Defense at load.
+    SkillDef nuke{}; nuke.damage = 35.0f; nuke.cooldown = 0.3f; nuke.bounces = 3; nuke.damageFalloff = 0.8f;
+    CHECK(skillOffense(nuke) > 0.0f);
+    SkillDef reactive{}; reactive.damage = 0.0f;
+    CHECK(skillOffense(reactive) == 0.0f);
+    SkillDef guard{}; guard.invulnDuration = 1.0f;
+    CHECK(skillDefense(guard) > 0.0f);
+
+    // A skill-granting offhand (offense stamped) must beat a plain higher-defense offhand for Glass
+    // Cannon, and only while LEGENDARY (a downgraded copy loses the skill's value).
+    ItemDef shockShield{}; shockShield.slot = ItemSlot::OFFHAND; shockShield.baseHealth = 46.0f;
+    shockShield.legendarySkillOffense = skillOffense(nuke);   // as the loader would stamp it
+    ItemDef wallShield{};  wallShield.slot  = ItemSlot::OFFHAND; wallShield.baseHealth = 70.0f;   // pure defense, tankier
+
+    ItemInstance leg{}; leg.defId = 1; leg.rarity = Rarity::LEGENDARY;
+    CHECK(score(leg, shockShield, GLASS_MELEE) > score(leg, wallShield, GLASS_MELEE));
+    // Rarity gate: a below-legendary copy loses the skill value entirely — the same shield def scored
+    // at RARE is worth strictly less (only the base HP + a lower rarity bonus remain), and no longer
+    // beats the pure-defense shield.
+    ItemInstance rare{}; rare.defId = 1; rare.rarity = Rarity::RARE;
+    CHECK(score(rare, shockShield, GLASS_MELEE) < score(leg, shockShield, GLASS_MELEE));
+    CHECK(score(rare, shockShield, GLASS_MELEE) < score(leg, wallShield, GLASS_MELEE));
+}

@@ -34,6 +34,7 @@
 #include "game/projectile.h"
 #include "game/item.h"
 #include "game/skill.h"
+#include "game/build_score.h"   // BuildScore::skillOffense/skillDefense — stamp legendary skill value
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
 #include "game/boss_def.h"
@@ -261,6 +262,33 @@ void Engine::initAssets() {
         m_skillDefCount = 0;
     }
     SkillSystem::init();
+
+    // Precompute each legendary item's GRANTED-SKILL value for the Auto Loot & Equip scorer, now that
+    // both the item and skill tables are loaded. The pure scorer (build_score.h) can't reach the skill
+    // table, so it reads these scalars off the ItemDef instead — offense as the skill's sustained
+    // DPS-equivalent, defense as an effective-HP credit. Done ONCE at load; ItemDef isn't serialized.
+    for (u32 i = 0; i < m_itemDefCount; i++) {
+        ItemDef& d = m_itemDefs[i];
+        if (d.legendarySkillId == SkillId::NONE) continue;
+        const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, d.legendarySkillId);
+        if (sd) {
+            d.legendarySkillOffense = BuildScore::skillOffense(*sd);
+            d.legendarySkillDefense = BuildScore::skillDefense(*sd);
+        } else if (d.legendarySkillId == SkillId::PROJECTILE_PARRY) {
+            // Mirror Aegis's projectile parry has NO SkillDef and NO damage stat to derive from — it
+            // reflects a perfect-blocked projectile straight back at 2x. Hand-valued (the only
+            // stat-less reactive legendary skill, so there is genuinely nothing to compute from):
+            // Aaron's call — "the mirror shield reflects projectiles, which is super strong". On the
+            // ranged-heavy late floors a reflect is both a big OFFENSE source (2x damage returned) and
+            // a shot fully NEGATED (defense). Sized so its offense is comparable to Thunderwall's Chain
+            // Lightning (~23.8) while its far higher base HP carries it AHEAD — so for a Glass Cannon
+            // the mirror shield outscores the shock shield, and both clear a plain high-defense shield.
+            d.legendarySkillOffense = 22.0f;
+            d.legendarySkillDefense = 20.0f;
+        }
+        // Any other skill with no def (should not happen for shipped content) stays 0 — a skill we
+        // can't value is better ignored than guessed.
+    }
 
     // Boss definitions — loaded after skills so skill names resolve to IDs
     if (!BossLoader::load(ASSET_PATH("assets/config/bosses.json"), m_bossDefs)) {

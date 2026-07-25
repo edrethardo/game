@@ -70,6 +70,59 @@ static constexpr f32 DEF_SCALE     = 0.5f;   // effective-HP -> score units (kee
 // worth real score on a caster and modest score elsewhere.
 inline f32 refCastDps(u8 col) { return (col == 0) ? 70.0f : 15.0f; }
 
+// --- weapon-damage skill scaling (the Marksman/Ranger case) ---------------------------------------
+// Ranged-class skills scale off the weapon's PER-HIT damage — skill_marksman.cpp / skill_ranger.cpp
+// cast `s_weaponDamage * 1.2 .. 2.5`, where s_weaponDamage is the equipped weapon's per-hit number.
+// So between two RANGED weapons of comparable sustained DPS, the harder-hitting one is strictly
+// better because it also amplifies those skills. This credits a slice of per-hit ON TOP of the DPS
+// term for the Ranged column only — sized as a TIEBREAK: enough to decide a DPS tie toward the
+// bigger hitter, never enough to overturn a genuine DPS gap (a ~20% DPS lead still wins outright).
+// The scorer is per-CELL, not per-class, so the Ranged column is the proxy for "a class whose
+// skills scale off weapon damage"; it also happens to be a mild positive for plain ranged fire
+// (fewer, bigger hits waste less on overkill), so the approximation never hurts.
+inline f32 weaponSkillScaleBonus(u8 col, f32 perHit) {
+    return (col == 2) ? perHit * REF_SWING * 0.15f : 0.0f;
+}
+
+// --- granted-skill value (the legendary-shield / -helmet case) -------------------------------------
+// A legendary item can grant an ACTIVE skill its base stats and affixes don't reflect at all
+// (Thunderwall -> Chain Lightning, Aegis of Blood -> Blood Nova, a legendary helmet -> its G-rail
+// skill). These two helpers reduce a SkillDef to the same currency the rest of the scorer speaks so
+// the engine can precompute a per-item scalar (ItemDef::legendarySkillOffense/Defense) once at load.
+//
+// OFFENSE is the skill's sustained DPS-equivalent under the "30 s on a stationary dummy" lens the
+// weapons already use: damage per cast times a small multi-target credit, over an effective cast
+// interval floored well ABOVE the raw cooldown. The floor stands in for the energy + positioning
+// gate a real fight imposes — a 0.3 s-cooldown, 25-energy Chain Lightning cannot actually fire three
+// times a second for 30 s straight — without the scorer needing the energy-regen model. Discounted
+// vs a weapon of the same raw DPS because a granted skill is a BONUS on top of the weapon, not the
+// primary output. A skill with no damage stat (a reactive/defensive one) returns 0 here and is
+// valued on the defense side instead.
+inline f32 skillOffense(const SkillDef& s) {
+    if (s.damage <= 0.0f) return 0.0f;                  // reactive/defensive: see skillDefense
+    constexpr f32 kIntervalFloor = 1.5f;                // energy/positioning gate (the 30 s lens)
+    constexpr f32 kSkillDiscount = 0.60f;               // a granted skill is a sidearm, not the weapon
+    const f32 interval = (s.cooldown > kIntervalFloor) ? s.cooldown : kIntervalFloor;
+    f32 targets = 1.0f;
+    if (s.bounces > 0)  targets += static_cast<f32>(s.bounces) * (s.damageFalloff > 0.0f ? s.damageFalloff : 0.7f);
+    if (s.radius > 3.0f) targets += 1.0f;               // an AoE clips a small cluster
+    const f32 dps = s.damage * targets / interval;
+    return dps * REF_SWING * kSkillDiscount;
+}
+
+// DEFENSE credit for a granted skill: an effective-HP-flavoured value for skills that protect rather
+// than (or as well as) deal damage. Derived from the SkillDef where the fields exist — an invuln
+// window (Phase Dash), an ally/self heal (Holy Nova), a parry stun window (Deflect). A stat-less
+// reactive skill with NO SkillDef at all (Mirror Aegis's projectile parry) can't be derived here and
+// is hand-valued by the engine resolver instead (there is nothing to read).
+inline f32 skillDefense(const SkillDef& s) {
+    f32 v = 0.0f;
+    v += s.invulnDuration * REF_HP * 0.5f;              // i-frames ~ a fraction of the pool per cast
+    v += s.allyHealPct    * REF_HP;                     // a heal is direct effective HP
+    v += s.activeWindow   * 20.0f;                      // a parry window is defensive uptime
+    return v;
+}
+
 // --- the scorer ----------------------------------------------------------------------------------
 // Row weights: what "Tanky / Moderate / Glass Cannon" MEAN, numerically. The 3:1 spread is strong
 // enough that a defense roll beats a damage roll on a Tanky build, without making offense worthless
@@ -84,7 +137,12 @@ inline void rowWeights(u8 row, f32& offW, f32& defW) {
     switch (row) {
         case 0:  offW = 1.0f; defW = 3.0f; break;   // Tanky
         default: offW = 2.0f; defW = 2.0f; break;   // Moderate
-        case 2:  offW = 3.0f; defW = 1.0f; break;   // Glass Cannon
+        // Glass Cannon: damage above almost all else. Sharpened from 3.0/1.0 so it RELIABLY picks the
+        // highest-damage option — a defense roll now barely moves its score, so between two pieces the
+        // bigger-damage one wins even when the other is much tankier (Aaron: "glass cannon reliably
+        // chooses the builds with the highest damage"). Still 0.5, not 0, so a pure tie breaks toward
+        // not-dying. The 3.5+0.5 sum stays 4 — load-bearing for the cross-cell better-build nudge.
+        case 2:  offW = 3.5f; defW = 0.5f; break;   // Glass Cannon
     }
 }
 
@@ -166,12 +224,25 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
         if (def.baseProjectileSpeed > 0.0f)
             dps *= 1.0f + projSpd * 0.004f;              // +40% roll => +16% effective DPS
         off += dps * REF_SWING;
+        // Ranged-column weapons carry an extra tiebreak for PER-HIT damage, because Marksman/Ranger
+        // skills scale off it (weaponSkillScaleBonus): comparable-DPS ranged weapons rank by the
+        // harder hit. Melee/Magic skills don't read weapon damage, so their columns get nothing here.
+        off += weaponSkillScaleBonus(col, perHit);
     } else {
         // A non-weapon's damage rolls accelerate the WEAPON: convert via the reference weapon DPS
         // (a +10% ring is worth 10% of ~60 DPS, not a flat "10"), attack speed likewise.
         off += def.baseDamage;
         off += dmgFlat * 0.5f;
         off += REF_DPS * (dmgPct + atkSpd) * 0.01f * REF_SWING;
+        // CDR on a NON-weapon (a helmet, a ring) speeds the WEAPON too, not only skills:
+        // getEffectiveWeapon divides the weapon cooldown by (1 - CDR) for EVERY class (inventory.cpp).
+        // The weapon branch above already folds this into its own DPS; here the else branch used to
+        // drop it, so a helmet full of CDR scored only the skill-cast-rate half below and read as
+        // weak defense-adjacent utility. Crediting the weapon half as real DPS is what lets a Glass
+        // Cannon prefer a CDR helmet over a defensive one (Aaron: "helmets that provide good CDR over
+        // good defense as glass cannon"). Same 50% engine cap the weapon branch uses.
+        const f32 cdrEffNW = (cdr > 50.0f) ? 50.0f : cdr;
+        off += REF_DPS * (1.0f / (1.0f - cdrEffNW * 0.01f) - 1.0f) * REF_SWING;
         // Clip/reload/projectile rolls on a non-weapon accelerate the WEAPON (cross-slot, which a
         // per-item score cannot see exactly) — modest reference credit rather than zero.
         off += REF_DPS * (clipPct + reloadPct + projSpd) * 0.01f * REF_SWING * 0.3f;
@@ -199,6 +270,18 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
             + REF_FIGHT * (regen + loh * REF_HIT_RATE + lifesteal * 0.01f * REF_DPS)
             + thorns;                                  // raw: reflected damage, modest by range
     f32 def_ = eHp * DEF_SCALE;
+
+    // LEGENDARY GRANTED SKILL. A legendary item's active skill (precomputed onto the def at load, see
+    // ItemDef::legendarySkillOffense/Defense) is worth its DPS-equivalent / effective-HP that the base
+    // stats never showed. Only at LEGENDARY rarity, where the skill actually activates
+    // (hud_inventory.cpp). Folded into the SAME off/def buckets so the row weights decide it: a Glass
+    // Cannon's heavy offense weight makes a skill-granting shield beat a plain high-defense one
+    // (Aaron: skill shields "as glass cannon better than higher defense"), while a Tanky build still
+    // values the piece for its base armor + any defensive grant.
+    if (item.rarity == Rarity::LEGENDARY) {
+        off  += def.legendarySkillOffense;
+        def_ += def.legendarySkillDefense;
+    }
 
     f32 offW, defW;
     rowWeights(row, offW, defW);
