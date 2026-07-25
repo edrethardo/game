@@ -719,6 +719,31 @@ by tracing:
   A hop carries it up over the risers. The flag is defaulted false every tick (only the VH climb branch
   re-arms it) so a following flat floor can't inherit it and jump spuriously.
 
+**Autoplay stays on its story and draws a sidearm — VHALL upper-exit only (2026-07-25).** Two coordinated
+rules keep the bot from wandering off to shoot ranged enemies, and above all from falling, during a
+VERTICAL_HALL climb. Both are scoped to **VHALL floors whose exit is UPPER** (`floorDoorPos.y > 1.5f`):
+FOUR_STORY descends BY falling through drop holes and is untouched, and a ground-exit VHALL wants the bot to
+drop OFF its balcony to descend, so the fall protection there would only get in the way. (1) **FALL VETO** —
+the FIGHT branch's kite/close/strafe movement, which is deliberately un-hazard-vetoed (see the veto-scope
+paragraph), is checked against `Autoplay::wouldFall` (`autoplay_nav.h`: the destination cell's
+`effectiveFloorHeight` sits more than a step below the feet) per WASD component, so a fight can never carry
+the bot off the balcony rim it just climbed to. It is gated on `BotIntent::engaging` (set only by
+`decideCombat`) so it only ever touches FIGHT movement, never a TRAVEL/descent step — walking into a drop
+hole to descend is a fall the bot WANTS. (2) **MELEE RANGED SIDEARM** — a melee build on that climb that
+meets a hostile it can only reach by falling (out of melee reach AND the step toward it would fall) equips
+the best ranged weapon already in its backpack (`BuildScore::bestRangedBackpackIdx` — a melee build keeps
+ranged weapons because `worthPickingUp` reasons over all nine build cells) via `Inventory::equip`, fires from
+where it stands, and switches back to melee when the trigger clears (min 3 s dwell, 5 s between switches).
+While the sidearm is worn: `getEffectiveWeapon` already makes the weapon view ranged, `buildBotView`
+overrides the doctrine cell to the Ranged column (`Autoplay::rangedCellFor`) so the brain holds ground
+instead of walking a gun into melee, and `autoEquipBackpack` is hard-suppressed (`m_autoplaySidearmActive`)
+so a pickup can't re-gear the melee weapon back. The switch is **opportunistic** — if the bag holds no ranged
+weapon the sidearm simply never triggers and the fall veto alone keeps the bot safe (it holds and shoots
+melee at air until the combat break-off watchdog relocates it). All transient — SP lane 0, no save/PROTOCOL
+change. Verified live: on a VHALL upper-exit warrior the trigger fires on cross-gap balcony enemies, and with
+a ranged weapon in the bag the full draw→fire-ranged→stow cycle runs (weapon view flips to ranged on 10/10
+active samples).
+
 **Where the residual shake and wall-scraping come from (measured by source, 2026-07-24).** Instrumenting
 every producer of the desired aim and tagging each tick by which one wrote it settles a question that had
 been guessed at twice: **the FIGHT branch (`decideCombat`) is both**. It owns 45-50% of all ticks and turns
