@@ -412,3 +412,32 @@ TEST_CASE("descent: among clean holes the NEAREST wins — the goal must stay st
     CHECK(i == 0);
     LevelGridSystem::shutdown(g);
 }
+
+// --- wouldFall: the off-a-ledge test (Autoplay anti-fall on a VHALL climb) -----------------------
+TEST_CASE("wouldFall: stepping off a balcony edge onto the ground is a fall") {
+    // Cells (4,4) and (5,4) carry a 3 m slab (a balcony); (6,4) does not (open ground below).
+    // A body standing on the balcony (feetY = 3) that steps +X from (5,4) to (6,4) drops 3 m.
+    LevelGrid g = makeFlatGrid(10, 10);
+    for (u32 x = 4; x <= 5; x++) LevelGridSystem::addPlatform(g.cells[4 * g.width + x], 12, 0); // 12 q = 3 m
+    const Vec3 onBalcony = LevelGridSystem::gridToWorld(g, 5, 4);   // XZ of (5,4)
+    CHECK(Autoplay::wouldFall(g, onBalcony, /*feetY=*/3.0f, Vec3{ 1, 0, 0}));  // +X onto bare ground (6,4)
+    CHECK_FALSE(Autoplay::wouldFall(g, onBalcony, 3.0f, Vec3{-1, 0, 0}));      // -X onto the slab (4,4)
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("wouldFall: no drop on flat ground, and a zero heading never falls") {
+    LevelGrid g = makeFlatGrid(10, 10);
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    CHECK_FALSE(Autoplay::wouldFall(g, from, /*feetY=*/0.0f, Vec3{1, 0, 0}));  // flat: not a fall
+    CHECK_FALSE(Autoplay::wouldFall(g, from, 0.0f, Vec3{0, 0, 0}));            // no heading: never a fall
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("wouldFall: a small step-up ledge (<= tolerance) is NOT a fall") {
+    // A body on the ground next to a 0.25 m slab is not "falling" onto it — that is a walkable stair.
+    LevelGrid g = makeFlatGrid(10, 10);
+    LevelGridSystem::addPlatform(g.cells[4 * g.width + 5], 1, 0);   // 1 q = 0.25 m, under the 0.4 tolerance
+    const Vec3 from = LevelGridSystem::gridToWorld(g, 4, 4);
+    CHECK_FALSE(Autoplay::wouldFall(g, from, 0.0f, Vec3{1, 0, 0}));
+    LevelGridSystem::shutdown(g);
+}

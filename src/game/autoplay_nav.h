@@ -102,6 +102,29 @@ inline bool padAhead(const LevelGrid& g, Vec3 from, Vec3 dir) {
     return onJumpPad(g, from + normalize(flat) * g.cellSize);
 }
 
+// True when a one-cell XZ step in `dir` from `from` (feet at `feetY`) drops the body more than a
+// step below its current footing — i.e. off a LEDGE (a balcony rim).
+//
+// This is the "prefer not to fall down" test, and it is DISTINCT from stepAllowed's hazard veto,
+// which deliberately does NOT cover balcony-edge drops (those are intentional traversal for the
+// TRAVEL/descent layer). Here we want the opposite: the FIGHT branch's kite/close/strafe movement
+// must never carry the bot off an edge chasing an enemy. The caller is responsible for applying it
+// ONLY to combat movement (see BotIntent::engaging) so it can never veto an intended descent step.
+//
+// `effectiveFloorHeight` picks the surface the body would stand on in the destination cell for its
+// current height; if that surface sits more than PLATFORM_STEP_TOLERANCE below the feet, stepping
+// there is a fall rather than a walkable step-down. Off-map is left to stepAllowed (returns false
+// here so this test alone never blocks a step the caller didn't ask it to).
+inline bool wouldFall(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir) {
+    Vec3 flat{dir.x, 0.0f, dir.z};
+    if (lengthSq(flat) < 1e-6f) return false;                 // no heading: nothing to fall off
+    const Vec3 to = from + normalize(flat) * g.cellSize;      // one cell ahead
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, to, gx, gz)) return false;   // off-map: stepAllowed's job
+    const f32 dest = LevelGridSystem::effectiveFloorHeight(g, gx, gz, feetY);
+    return dest < feetY - PLATFORM_STEP_TOLERANCE;
+}
+
 // --- FOUR_STORY "Descent": which story am I on, and which drop hole do I take? -------------------
 
 // The bot's STORY REFERENCE: the surface it is standing on, or — while airborne — the one it took
