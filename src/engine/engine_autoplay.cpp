@@ -186,19 +186,27 @@ void Engine::updateAutoplay(f32 dt) {
                      || Input::isActionPressed(GameAction::INVENTORY)
                      || Input::isActionPressed(GameAction::CHARACTER_SCREEN)
                      || Input::isActionPressed(GameAction::PAUSE);
-    m_autoplayControl.tick(Input::humanActivityThisFrame(), uiOpen, dt);
+    // While the H-handoff grace is live, human input is NOT allowed to take control back: the takeover
+    // latch hands to the human on the first input it sees, so without this the bot handed straight back
+    // the instant the player moved the mouse toward another window — the reported "handover doesn't
+    // work". The grace holds the bot through the switch-away; once the player clicks off, the game is
+    // unfocused and humanActivity is gated false anyway, so nothing more is needed.
+    if (m_autoplayHandoffGrace > 0.0f) m_autoplayHandoffGrace -= dt;
+    const bool humanAct = Input::humanActivityThisFrame() && m_autoplayHandoffGrace <= 0.0f;
+    m_autoplayControl.tick(humanAct, uiOpen, dt);
 
-    // H = instant HANDOFF. Hand control to the bot NOW (skip the 2 s resume window) and FREE THE
-    // CURSOR that relative-mouse mode has locked to the window centre, so the player can immediately
-    // click or alt-tab to another window WITHOUT the window being minimised/hidden — they wanted to
-    // keep watching it play, not lose it. The window stays visible and keeps simulating + rendering;
-    // when the player clicks away it loses OS focus for real and the "unfocused = no input, game keeps
+    // H = instant HANDOFF, window STAYS VISIBLE. Hand control to the bot NOW (skip the 2 s resume
+    // window), ARM the grace above so the bot keeps control while the player reaches for another window,
+    // and FREE THE CURSOR that relative-mouse mode locks to the window centre so the player can click or
+    // alt-tab away WITHOUT the window being minimised/hidden — they wanted to keep watching it play.
+    // When they click off, the game loses OS focus for real and the "unfocused = no input, game keeps
     // running" gate keeps the bot driving. forceBot() runs AFTER the latch tick above on purpose: the
     // H keystroke registers as human activity, which the tick would read as a takeover, so forcing bot
     // control here wins over it. releaseCursorOnce() leaves the WANTED mouse mode intact, so the aim
     // still works if the player tabs back and reclaims control. isKeyPressed is edge-triggered (one tap).
     if (!uiOpen && Input::isKeyPressed(SDL_SCANCODE_H)) {
         m_autoplayControl.forceBot();
+        m_autoplayHandoffGrace = 4.0f;   // ~4 s: long enough to move the mouse and click/alt-tab away
         Input::releaseCursorOnce();
     }
 
@@ -1351,7 +1359,7 @@ Autoplay::BotView Engine::buildBotView() {
             // standing on a new one, so a lip flicker is ignored and a real fall commits on landing.
             m_autoplayDescentStory = Autoplay::commitBotStory(m_level.grid, pos, m_autoplayDescentStory);
             if (Autoplay::ensureDescentField(m_autoplayDescent, m_level.grid, dg,
-                                             m_autoplayDescentStory, floorStamp)) {
+                                             m_autoplayDescentStory, floorStamp, m_level.floorDoorPos)) {
                 const Vec3 dd = Autoplay::descentDirection(m_autoplayDescent, m_level.grid, pos);
                 if (lengthSq(dd) > 1e-6f) v.flowDir = dd;
             }

@@ -53,11 +53,15 @@ struct DescentField {
 };
 
 // Rebuild the field if it is stale for (storyY, stamp, grid size); a no-op when it is already
-// current, so this is safe to call every tick. Returns `valid`: false means this story has no drop
-// holes at all, which on the Descent means we are on L0 and the ordinary exit flow field is the
-// right heading.
+// current, so this is safe to call every tick. Returns `valid`.
+//
+// exitPos: the floor's exit door. When a story has NO drop holes — which on the Descent means we are
+// on L0, the bottom — the field is seeded from the exit cell instead, so L0 routing is a PAD-AVOIDING
+// path to the door rather than the shared flat exit flow field (which does not dodge pads and bounced
+// the bot back UP a return lift the moment it reached L0 — the last-metre-of-the-descent stall). Leave
+// it at the default (Y far away) to get the old behaviour: no exit seed, L0 returns valid=false.
 bool ensureDescentField(DescentField& f, const LevelGrid& g, const DungeonResult& d,
-                        f32 storyY, u32 stamp);
+                        f32 storyY, u32 stamp, Vec3 exitPos = Vec3{0.0f, 1e9f, 0.0f});
 
 // Unit XZ heading toward the nearest way down, or {0,0,0} when the field is invalid, the position is
 // off-grid, or this cell could not be reached from any hole (a sealed pocket, or a jump-pad cell —

@@ -248,6 +248,13 @@ private:
     // in the next task, so until then the bot is armed-but-idle.
     bool             m_autoplayActive = false;
     AutoplayControl  m_autoplayControl;
+    // H-key handoff grace: while >0, human input can't wrest control back from the bot. The takeover
+    // latch hands control to the human on ANY input the instant it sees it, so without this the bot
+    // handed straight back the moment the player moved the mouse to click/alt-tab away — "handover with
+    // H doesn't work". Armed to a few seconds on H so the bot stays in control through the switch-away;
+    // once the player clicks another window the game is unfocused and input is gated anyway, so the bot
+    // keeps playing with no further help. Transient (SP lane 0), no save/PROTOCOL impact.
+    f32              m_autoplayHandoffGrace = 0.0f;
     // AFK auto-revive countdown for an Autoplay run: armed to ~1.5 s when a solo death enters
     // GAME_OVER, ticked down in the GAME_OVER dispatch, then the entrance-respawn body runs so an
     // unattended run keeps going (engine_autoplay.cpp / engine_update.cpp).

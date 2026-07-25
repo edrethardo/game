@@ -29,6 +29,22 @@ void setLava(LevelGrid& g, u32 x, u32 z)  { g.cells[z * g.width + x].flags = CEL
 void setSolid(LevelGrid& g, u32 x, u32 z) { g.cells[z * g.width + x].flags = CELL_SOLID; }
 } // namespace
 
+TEST_CASE("hazard veto: avoidPads refuses a step whose BODY clips an adjacent pad, not just its centre") {
+    // The launch (Collision::jumpPadSpeed) fires when the body's ~0.35 m halfWidth footprint overlaps
+    // ANY CELL_JUMPPAD — not only when the centre sits on one — so a centre-cell-only veto let the bot
+    // clip a return lift with its side and get flung a storey up (the FOUR_STORY descent bounce). The
+    // veto tests the footprint corners to match the launch.
+    LevelGrid g = makeFlatGrid(10, 10);              // cellSize 1.0
+    g.cells[5 * g.width + 5].flags |= CELL_JUMPPAD;  // a pad at (5,5)
+    // Step +X to a destination whose CENTRE lands on the safe cell (4,5) but whose body overlaps (5,5).
+    const Vec3 from{3.65f, 0.0f, 5.5f};              // to = (4.65,5.5): centre cell (4,5), body reaches x>=5
+    CHECK_FALSE(Autoplay::stepAllowed(g, from, 0.0f, Vec3{1, 0, 0}, false, /*avoidPads=*/true));
+    CHECK      (Autoplay::stepAllowed(g, from, 0.0f, Vec3{1, 0, 0}, false, /*avoidPads=*/false));
+    // A step nowhere near the pad is still fine with avoidPads on (the footprint must not over-reject).
+    CHECK(Autoplay::stepAllowed(g, Vec3{1.5f, 0.0f, 1.5f}, 0.0f, Vec3{1, 0, 0}, false, /*avoidPads=*/true));
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("hazard veto: a heading into a lava cell one step ahead is rejected") {
     LevelGrid g = makeFlatGrid(8, 8);
     setLava(g, 5, 4);

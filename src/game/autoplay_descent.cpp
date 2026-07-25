@@ -33,7 +33,7 @@ static inline bool routable(const LevelGrid& g, u32 x, u32 z) {
 }
 
 bool ensureDescentField(DescentField& f, const LevelGrid& g, const DungeonResult& d,
-                        f32 storyY, u32 stamp) {
+                        f32 storyY, u32 stamp, Vec3 exitPos) {
     const u32 total = g.width * g.depth;
     if (total == 0) { f.valid = false; return false; }
 
@@ -80,30 +80,61 @@ bool ensureDescentField(DescentField& f, const LevelGrid& g, const DungeonResult
             queue[tail++] = idx;
         }
     }
-    if (tail == 0) {                                          // no way down from here (this is L0)
+    // No holes on this story == we are on L0 (the bottom). Seed from the EXIT DOOR instead, so L0
+    // routing is a pad-avoiding path to the door — the shared flat exit field does not dodge pads and
+    // launched the bot back up a return lift the instant it reached L0. Only when the exit is actually
+    // on this story (it always is — L0) and its cell is walkable; otherwise fall back to invalid (the
+    // driver then uses the flat field, the old behaviour).
+    if (tail == 0 && std::fabs(exitPos.y - storyY) <= PLATFORM_STEP_TOLERANCE) {
+        u32 ex, ez;
+        if (LevelGridSystem::worldToGrid(g, exitPos, ex, ez) && !LevelGridSystem::isSolid(g, ex, ez)) {
+            f.dir[ez * g.width + ex] = 0xFE;                  // the way OUT, treated like a way down
+            queue[tail++] = ez * g.width + ex;
+        }
+    }
+    if (tail == 0) {                                          // genuinely no way out from here
         std::free(queue);
         f.valid = false; f.paddedOnly = false;
         return false;
     }
 
-    // --- BFS outward. Each cell stores the direction pointing back toward the hole it was found from.
-    while (head < tail) {
-        const u32 idx = queue[head++];
-        const u32 cx = idx % g.width, cz = idx / g.width;
-        for (u8 dir = 0; dir < 8; dir += 2) {                 // cardinals only (see header)
-            const s32 nx = static_cast<s32>(cx) + kDx[dir];
-            const s32 nz = static_cast<s32>(cz) + kDz[dir];
-            if (nx < 0 || nz < 0 ||
-                static_cast<u32>(nx) >= g.width || static_cast<u32>(nz) >= g.depth) continue;
-            const u32 nIdx = static_cast<u32>(nz) * g.width + static_cast<u32>(nx);
-            if (f.dir[nIdx] != 0xFF) continue;                // already has a route
-            if (!routable(g, static_cast<u32>(nx), static_cast<u32>(nz))) continue;
-            // We expanded neighbour -> current, so the neighbour's route direction is the REVERSE of
-            // the step we took (dir+4 mod 8 — the same trick the exit field uses).
-            f.dir[nIdx] = static_cast<u8>((dir + 4) & 7);
-            queue[tail++] = nIdx;
+    // --- BFS outward, in TWO TIERS. Each cell stores the direction pointing back toward the hole it
+    // was found from (the REVERSE of the step we took: dir+4 mod 8 — the same trick the exit field
+    // uses). The single-pass version left the router blind wherever the pad-exclusion severed the maze.
+    //
+    // TIER 1 (clean): expand over non-pad cells only, so the route it hands back never steps onto a
+    // return-lift / dead-end pad — the ordinary, preferred descent.
+    // TIER 2 (recovery): re-expand from the WHOLE tier-1 network, this time ALLOWING pad cells, to fill
+    // any pocket the pads carved off from the holes. Without it a bot that wanders (or is dropped) into
+    // a pad-walled pocket read 0xFF forever, got no descent heading, fell back to the flat exit field —
+    // which on an upper storey routes toward ABOVE the L0 door, not a hole — and froze next to a pad it
+    // was "afraid" to use (measured: Sorcerer stuck 12 min on floor 9, deaths flatlined, HP full). A
+    // recovery cell routes back toward the clean network across the pad; the driver's veto lets the bot
+    // take that one step once pad-avoiding routing is boxed in, so the bounce breaks the pocket. Tier 2
+    // only ever touches cells tier 1 left unreachable, so a floor with no severed pockets is untouched.
+    auto flood = [&](bool allowPads) {
+        while (head < tail) {
+            const u32 idx = queue[head++];
+            const u32 cx = idx % g.width, cz = idx / g.width;
+            for (u8 dir = 0; dir < 8; dir += 2) {             // cardinals only (see header)
+                const s32 nx = static_cast<s32>(cx) + kDx[dir];
+                const s32 nz = static_cast<s32>(cz) + kDz[dir];
+                if (nx < 0 || nz < 0 ||
+                    static_cast<u32>(nx) >= g.width || static_cast<u32>(nz) >= g.depth) continue;
+                const u32 nIdx = static_cast<u32>(nz) * g.width + static_cast<u32>(nx);
+                if (f.dir[nIdx] != 0xFF) continue;            // already has a route (or is a hole/seed)
+                if (LevelGridSystem::isSolid(g, static_cast<u32>(nx), static_cast<u32>(nz))) continue;
+                if (!allowPads &&
+                    (LevelGridSystem::getCell(g, static_cast<u32>(nx), static_cast<u32>(nz)).flags
+                     & CELL_JUMPPAD)) continue;               // tier 1: no pads
+                f.dir[nIdx] = static_cast<u8>((dir + 4) & 7);
+                queue[tail++] = nIdx;
+            }
         }
-    }
+    };
+    flood(false);        // tier 1: clean descent
+    head = 0;            // re-read the whole tier-1 queue (still in [0,tail)) as tier-2 seeds
+    flood(true);        // tier 2: recovery flood through pads into any severed pocket
 
     std::free(queue);
     f.valid = true;

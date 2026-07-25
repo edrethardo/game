@@ -36,7 +36,22 @@ inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor,
     if (!LevelGridSystem::worldToGrid(g, at, gx, gz)) return false;   // off the map edge
     if (LevelGridSystem::isSolid(g, gx, gz))          return false;   // into a wall
     if (lavaFloor && LevelGridSystem::feetInLava(g, Vec3{at.x, feetY, at.z})) return false;
-    if (avoidPads && (LevelGridSystem::getCell(g, gx, gz).flags & CELL_JUMPPAD)) return false;
+    if (avoidPads) {
+        // BODY-AWARE pad check. The launch (Collision::jumpPadSpeed) fires when the body's ~0.35 m
+        // halfWidth footprint overlaps ANY CELL_JUMPPAD — not just when the centre sits on one — so a
+        // centre-cell-only veto let the bot clip a return lift with its side and get flung a storey up
+        // while its centre was on a "safe" cell (the FOUR_STORY bounce that reset the descent). Test the
+        // footprint corners too, so the veto refuses a step that would bring any part of the body onto a
+        // pad. kFoot is a hair over the real halfWidth for margin.
+        constexpr f32 kFoot = 0.4f;
+        const f32 fx[5] = { at.x, at.x + kFoot, at.x - kFoot, at.x + kFoot, at.x - kFoot };
+        const f32 fz[5] = { at.z, at.z + kFoot, at.z + kFoot, at.z - kFoot, at.z - kFoot };
+        for (u8 k = 0; k < 5; k++) {
+            u32 px, pz;
+            if (LevelGridSystem::worldToGrid(g, Vec3{fx[k], feetY, fz[k]}, px, pz) &&
+                (LevelGridSystem::getCell(g, px, pz).flags & CELL_JUMPPAD)) return false;
+        }
+    }
     return true;
 }
 

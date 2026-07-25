@@ -167,6 +167,42 @@ TEST_CASE("descent field: a storey with no holes reports invalid (L0 keeps the e
     LevelGridSystem::shutdown(g);
 }
 
+TEST_CASE("descent field: L0 (no holes) seeds from the EXIT so the bottom is a pad-avoiding walk") {
+    // On L0 there are no drop holes, and the shared flat exit field does not dodge pads — the bot
+    // reached the bottom and bounced straight back UP a return lift the instant it landed (the
+    // last-metre-of-the-descent stall). Given the exit door, the field seeds from IT instead, so L0
+    // routing is a pad-avoiding path to the door. Without an exit passed, L0 stays invalid (old way).
+    LevelGrid g = makeStoryGrid(12, 12);          // the L3 slab stands in for the storey being routed
+    DungeonResult d{};                             // no holes anywhere
+    const Vec3 exit{9.5f, 9.0f, 9.5f};
+    Autoplay::DescentField f;
+    REQUIRE(Autoplay::ensureDescentField(f, g, d, 9.0f, 1, exit));   // now VALID via the exit seed
+    CHECK(fieldReachesAHole(f, g, Vec3{1.5f, 9.0f, 1.5f}, 200));     // and the route arrives at the door
+    Autoplay::DescentField f2;
+    CHECK_FALSE(Autoplay::ensureDescentField(f2, g, d, 9.0f, 1));    // default (no exit): unchanged, invalid
+    Autoplay::freeDescentField(f);
+    Autoplay::freeDescentField(f2);
+    LevelGridSystem::shutdown(g);
+}
+
+TEST_CASE("descent field: a pocket severed from the hole by a PAD wall still gets a recovery heading") {
+    // Excluding pads from the primary flood can leave a cell with NO clean route to any hole — it read
+    // 0xFF forever, got no descent heading, and the bot froze next to a pad it would not use (measured:
+    // a build stuck ~12 min on floor 9). The recovery tier re-floods THROUGH pads so every reachable
+    // cell still gets a heading toward the network, and the driver's veto lets it take that one step.
+    LevelGrid g = makeStoryGrid(9, 9);
+    for (u32 z = 0; z < 9; z++) setPad(g, 4, z);   // a full pad wall: the only link between halves is a pad
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(7.5f, 4.5f, 9.0f);      // the hole is on the RIGHT half
+    Autoplay::DescentField f;
+    REQUIRE(Autoplay::ensureDescentField(f, g, d, 9.0f, 1));
+    // A LEFT-half cell is cut off from the hole by the pad wall — tier 1 leaves it 0xFF. The recovery
+    // tier must hand it a heading rather than {0,0,0} ("no plan"), which is what froze the bot.
+    CHECK(lengthSq(Autoplay::descentDirection(f, g, Vec3{1.5f, 9.0f, 4.5f})) > 1e-6f);
+    Autoplay::freeDescentField(f);
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("descent field: a padded hole is used only when it is the ONLY way down") {
     // Hole density thins to 7% on the deepest storey, so "every hole here is a return lift" is a
     // real state. A bounce still beats having no descent plan at all.

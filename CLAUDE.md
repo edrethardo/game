@@ -401,14 +401,17 @@ nearest active one within an 8 m detour (folded into `flowDir` like the globe/bo
 LOS enemy still preempts it), and `updateAutoplay` holds interact (the same `descendPulseHeld` pulse — a hold
 routes to the shrine over the exit, one hold consumes it) once in reach, stopping inside the 1.2 m grab
 radius. Live: 2-4 shrines used per short run. **H = instant handoff, window STAYS VISIBLE:** pressing `H` in an
-autoplay run calls `m_autoplayControl.forceBot()` (skip the 2 s resume window) and `Input::releaseCursorOnce()`
-— `forceBot` runs AFTER the takeover latch tick so the H keystroke's own "human activity" can't undo it, and
-the cursor-release frees the pointer that relative-mouse mode locks to the window centre so the player can
-click/alt-tab to another window WITHOUT the game being minimised (the earlier `Window::minimize()` HID the
-window; the player wanted to keep watching it play). Clicking away then drops OS focus for real and the
-"unfocused = no input, game keeps running" path keeps the bot playing on-screen. `releaseCursorOnce` is a
-one-shot that leaves the WANTED mouse mode (`s_relativeMode`) intact, so the aim still works if the player
-tabs back and reclaims control — unlike `setRelativeMouseMode(false)`, which would leave it dead on return.
+autoplay run calls `m_autoplayControl.forceBot()` (skip the 2 s resume window), arms a ~4 s
+`m_autoplayHandoffGrace`, and calls `Input::releaseCursorOnce()`. The **grace is load-bearing**: the takeover
+latch hands control to the human on the FIRST input it sees, so without it the bot handed straight back the
+instant the player moved the mouse toward another window — "handover with H doesn't work". While the grace is
+live, `humanActivityThisFrame()` is forced false into the latch, so the bot keeps control through the
+switch-away; once the player clicks off, the game is unfocused and input is gated anyway. `forceBot` runs
+AFTER the latch tick so the H keystroke's own activity can't undo it. `releaseCursorOnce` frees the pointer
+that relative-mouse mode locks to the window centre so the player can click/alt-tab to another window WITHOUT
+the game being minimised (the earlier `Window::minimize()` HID the window; the player wanted to keep watching
+it play) — a one-shot that leaves the WANTED mouse mode (`s_relativeMode`) intact, so the aim still works if
+the player tabs back and reclaims control, unlike `setRelativeMouseMode(false)` which would leave it dead.
 **TOWN portal:** the hub is
 the one world the brain cannot express — no floor door (so `onNormalFloor` is false and `decide` returns an
 empty intent) and a flow field aimed at the PLAZA CENTRE, not the portal — so an AFK run used to park there
@@ -743,15 +746,31 @@ work, each from a measured failure:
   the melee Warrior stumbled into holes by closing distance and got through). `commitBotStory` only moves
   the committed storey once the bot is SOLIDLY standing on a different one (feet within `kOnStoryBand`
   0.6 m of that storey's slab), so a lip flicker is ignored and a genuine fall commits only on landing —
-  which is exactly the descent. Fixed the freeze; the residual is that an intermediate storey whose
-  clean-hole cells are severed from the landing pocket by return-lift pads routes via the flat exit-field
-  fallback (slower, but it still descends — never a permanent stall).
+  which is exactly the descent.
+- **The field is seeded EVERYWHERE the bot can be — three seeding rules, each a measured un-freeze.**
+  The single-pass, holes-only field left the router BLIND in three spots, and in each the bot fell back to
+  the shared flat exit field, which does not dodge pads and on an upper storey routes toward ABOVE the L0
+  door — so the bot froze or bounced instead of descending (measured on the committed hysteresis-only
+  binary: Sorcerer 51 min on floor 9, Warrior 42 min on floor 19). (a) **TWO TIERS.** Tier 1 floods from
+  clean holes over non-pad cells (the preferred descent); tier 2 re-floods from the whole tier-1 network
+  ALLOWING pads, filling any pocket the pad-exclusion severed from the holes (a severed cell read 0xFF
+  forever → no heading → froze next to a pad). Tier 2 only touches cells tier 1 left unreachable, so an
+  unsevered floor is untouched. (b) **L0 SEEDS FROM THE EXIT.** A storey with no holes is L0 (the bottom);
+  seed the field from the exit DOOR instead of returning invalid, so L0 routing is a pad-avoiding walk to
+  the door — the shared flat field launched the bot back UP a return lift the instant it reached L0 (the
+  last-metre stall). (c) These make the field VALID on every storey, so the bot always has a pad-avoiding
+  descent heading. Residual: in HEAVY combat a fragile build's un-vetoed FIGHT movement can still push it
+  onto a pad and bounce it up — slower, but it descends; the geared (combat-trivial) bot now descends
+  Descent floors cleanly where it used to stall forever.
 - **Jump pads are a HAZARD on this floor and only this floor** (`stepAllowed(..., avoidPads)` for travel,
   `Autoplay::padAhead` for combat movement). A pad lifts ~two stories and fires the instant you are
   grounded, so one kiting step onto one throws away a descent: a run that had reached L0 and closed to
-  21 m of the exit ended up spending 61% of its time back on L2. Carve-outs: the veto stands down while
-  the bot is ALREADY on a pad (else a 3x3 pad node boxes it in) and on a `paddedOnly` storey, where every
-  way down is a return lift and refusing them would leave the bot circling a hole it may not enter.
+  21 m of the exit ended up spending 61% of its time back on L2. The pad veto is **BODY-AWARE**: the launch
+  (`Collision::jumpPadSpeed`) fires when the ~0.35 m halfWidth FOOTPRINT overlaps any pad, not just when
+  the centre does, so a centre-cell-only veto let the bot clip a return lift with its SIDE and get flung up
+  — `cellPassable` now tests the footprint corners to match. Carve-outs: the veto stands down while the bot
+  is ALREADY on a pad (else a 3x3 pad node boxes it in) and on a `paddedOnly` storey, where every way down
+  is a return lift and refusing them would leave the bot circling a hole it may not enter.
 - **A kill-agnostic FLOOR-STALL watchdog.** The existing exit watchdog restarts on every point of damage
   dealt; on a floor carrying four stories of enemies the bot deals damage continuously, so it **latched 0%
   of the time** across three measured runs while the bot fired on 50%+ of ticks and never left floor 1.
