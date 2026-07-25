@@ -779,6 +779,21 @@ void Input::setCursorVisible(bool visible) {
     applyMouseMode();
 }
 
+// See input.h. Free the pointer for THIS moment only, leaving s_relativeMode (what gameplay wants)
+// alone so the next applyMouseMode re-grabs correctly. We poke SDL directly rather than through
+// applyMouseMode precisely because we do NOT want to record a new wanted state. s_relativeReleased is
+// raised so the discarded delta doesn't snap the aim, and s_cursorShown is synced so a later real
+// transition still edges cleanly.
+void Input::releaseCursorOnce() {
+    SDL_SetRelativeMouseMode(SDL_FALSE);
+    if (!s_cursorShown) { s_cursorShown = true; }
+    SDL_ShowCursor(SDL_ENABLE);
+    s_relativeReleased = true;
+    // Drop whatever the pointer accumulated so freeing it can't jerk the crosshair.
+    s32 dx = 0, dy = 0; SDL_GetRelativeMouseState(&dx, &dy);
+    s_mouseDX = 0; s_mouseDY = 0; s_mouseWheelY = 0;
+}
+
 // Window focus changed (pushed once per frame by Window::pollEvents). This is the ONE edge handler:
 // it releases/restores the mouse and drops the pending delta. Device READS are gated separately, in
 // update(), because they must be dead for every frame we spend unfocused — not just the edge.

@@ -400,6 +400,8 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplayFloorStartDeaths = 0;
     m_autoplayFloorStartKills  = 0;
     m_autoplayHbTimer         = 0.0f;
+    m_autoplayPadFloor        = 0xFFFFFFFFu;   // rescan jump pads on the first floor of the run
+    m_autoplayDescentStory    = 1e9f;          // re-adopt the spawn storey on the first Descent floor
     // (m_autoplayBossRoute needs no reset — its staleness stamp is the floor's seed identity, which a
     // new run/floor can never match, exactly like the Descent/VHall fields.)
     m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick

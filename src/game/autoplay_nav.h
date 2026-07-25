@@ -11,6 +11,7 @@
 #include "core/math.h"
 #include "world/level_grid.h"
 #include "world/level_gen.h"    // DungeonResult::dropHoles — the Descent's ways down
+#include <cmath>                // std::fabs — commitBotStory hysteresis band
 
 namespace Autoplay {
 
@@ -159,6 +160,25 @@ inline f32 botStoryY(const LevelGrid& g, Vec3 pos) {
     if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return pos.y;   // off-grid: nothing better
     return LevelGridSystem::effectiveFloorHeight(g, gx, gz,
                                                  pos.y - PLATFORM_STEP_TOLERANCE + kSettle);
+}
+
+// A HYSTERESIS filter over botStoryY, for the Descent's per-storey flow field. botStoryY reads the
+// slab under the bot's exact cell, which is a knife-edge near a drop hole: a few cm of XZ drift onto
+// the hole cell, or a 0.2 m dip in feet-Y at the lip, both make the raw reading fall a full storey to
+// the ground below (the hole cell / the low feet exclude the storey's own slab from the tolerance
+// window). The descent field reseeds per storey and the two seedings point OPPOSITE ways, so the raw
+// reading alone leaves the bot oscillating at the very hole it should drop into (measured: three
+// builds each frozen ~19 min on a FOUR_STORY floor). The remedy is memory: keep the COMMITTED storey
+// and only move it when the bot is SOLIDLY on a different one — feet within kOnStoryBand of that
+// storey's slab. A transient flip while the bot straddles the lip fails that test and is ignored; a
+// genuine fall passes it only once the bot has landed a storey down, which is exactly the descent.
+// `committed` is 1e9f on the first call of a floor (the driver resets it per floor) — seed it raw.
+inline f32 commitBotStory(const LevelGrid& g, Vec3 pos, f32 committed) {
+    constexpr f32 kOnStoryBand = 0.6f;   // < half the 3 m pitch, > the resting-low dip and feet jitter
+    const f32 raw = botStoryY(g, pos);
+    if (committed > 1e8f) return raw;                        // uninitialised: adopt the current storey
+    if (std::fabs(pos.y - raw) < kOnStoryBand) return raw;   // genuinely standing on `raw` — commit to it
+    return committed;                                        // straddling a lip / mid-fall: hold the last
 }
 
 // The exit is always DOWN, so the bot's whole travel plan on a Descent floor is "find a hole in my

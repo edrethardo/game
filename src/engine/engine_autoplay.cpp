@@ -64,7 +64,6 @@
 // 4.5/s -> 1.2 (marksman); 2.8 -> 2.2 and 1.6/s -> 0.9 (warrior).
 #include "engine/engine.h"
 #include "platform/input.h"
-#include "platform/window.h"     // Window::minimize — the H-key handoff unfocuses the window
 #include <SDL_scancode.h>        // SDL_SCANCODE_H
 #include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
 #include "world/level_grid.h"
@@ -189,15 +188,18 @@ void Engine::updateAutoplay(f32 dt) {
                      || Input::isActionPressed(GameAction::PAUSE);
     m_autoplayControl.tick(Input::humanActivityThisFrame(), uiOpen, dt);
 
-    // H = instant HANDOFF + UNFOCUS. Hand control to the bot NOW (skip the 2 s resume window) and
-    // minimize the window so the player can switch to another app — the "unfocused = no input, game
-    // keeps running" path then keeps the bot playing on the other screen. forceBot() runs AFTER the
-    // latch tick above on purpose: the H keystroke itself registers as human activity, which the tick
-    // would read as a takeover, so forcing bot control here wins over it; the minimize then drops focus
-    // so every following frame stays bot-driven with no input. isKeyPressed is edge-triggered (one tap).
+    // H = instant HANDOFF. Hand control to the bot NOW (skip the 2 s resume window) and FREE THE
+    // CURSOR that relative-mouse mode has locked to the window centre, so the player can immediately
+    // click or alt-tab to another window WITHOUT the window being minimised/hidden — they wanted to
+    // keep watching it play, not lose it. The window stays visible and keeps simulating + rendering;
+    // when the player clicks away it loses OS focus for real and the "unfocused = no input, game keeps
+    // running" gate keeps the bot driving. forceBot() runs AFTER the latch tick above on purpose: the
+    // H keystroke registers as human activity, which the tick would read as a takeover, so forcing bot
+    // control here wins over it. releaseCursorOnce() leaves the WANTED mouse mode intact, so the aim
+    // still works if the player tabs back and reclaims control. isKeyPressed is edge-triggered (one tap).
     if (!uiOpen && Input::isKeyPressed(SDL_SCANCODE_H)) {
         m_autoplayControl.forceBot();
-        Window::minimize();
+        Input::releaseCursorOnce();
     }
 
     // Human is driving (or resuming window still counting down): drop any synthetic held actions so
@@ -1260,25 +1262,74 @@ Autoplay::BotView Engine::buildBotView() {
         // Default the climb-assist flag OFF every tick; only the VERTICAL_HALL climb branch re-arms
         // it. Set inside that branch alone, it would otherwise stay stale on the next (flat) floor
         // and pulse spurious jumps.
+        // A WORLD-only horizontal ray (eye height) to a goal's XZ: true when no wall blocks a STRAIGHT
+        // bearing there. The pad-climb, shrine detour and boss-seek all gate on it — a straight bearing
+        // at a target behind a wall just jams the bot into the wall (the hazard veto's ±45/±90 fan
+        // cannot route around a wall), so steer straight ONLY with a clear line and route around else.
+        auto clearLineTo = [&](Vec3 goal) -> bool {
+            const Vec3 eye = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+            const Vec3 to{goal.x - eye.x, 0.0f, goal.z - eye.z};
+            const f32  len = length(to);
+            if (len < 1e-3f) return true;
+            const RayHit hit = Raycast::cast(m_level.grid, eye, to * (1.0f / len), len);
+            return !hit.hit || hit.distance >= len - 0.5f;
+        };
+
         m_autoplayVhClimbing = false;
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
-            // The exit is a balcony door on the OPPOSITE story, reached by a graduated-slab ramp.
-            // Routing is a BFS FLOW FIELD over (cell, STORY) nodes seeded from the door
-            // (autoplay_vhall.h), rebuilt per floor. It replaces the entire flat-field-plus-heuristics
-            // approach that could not represent two stories: the field routes the whole journey —
-            // ground -> ramp foot -> up the ramp -> across the balcony -> door — and because a balcony
-            // node (3 m) is never height-continuous with the ground beside it, it can NEVER steer the
-            // bot off a balcony edge, which is what made every prior version "drop afterward".
-            if (Autoplay::ensureVHallField(m_autoplayVHall, m_level.grid, m_level.floorDoorPos,
-                                           floorStamp)) {
+            // Cache the floor's JUMP-PAD cells once (VHALL doesn't record them in jumpPads[], so a
+            // grid scan is the only way to see them). Cluster-deduped so a 3x3 pad node is ONE goal.
+            if (m_autoplayPadFloor != m_level.currentFloor) {
+                m_autoplayPadFloor = m_level.currentFloor;
+                m_autoplayPadCount = 0;
+                for (u32 z = 0; z < m_level.grid.depth && m_autoplayPadCount < 8; z++)
+                    for (u32 x = 0; x < m_level.grid.width && m_autoplayPadCount < 8; x++) {
+                        if (!(LevelGridSystem::getCell(m_level.grid, x, z).flags & CELL_JUMPPAD)) continue;
+                        const Vec3 c{(x + 0.5f) * m_level.grid.cellSize, 0.0f, (z + 0.5f) * m_level.grid.cellSize};
+                        bool dup = false;   // fold a pad cluster's cells into one goal
+                        for (u8 k = 0; k < m_autoplayPadCount; k++) {
+                            const f32 dx = c.x - m_autoplayPadCells[k].x, dz = c.z - m_autoplayPadCells[k].z;
+                            if (dx * dx + dz * dz < 9.0f) { dup = true; break; }   // within ~3 m => same pad
+                        }
+                        if (!dup) m_autoplayPadCells[m_autoplayPadCount++] = c;
+                    }
+            }
+
+            // BELOW an UPPER exit: USE A JUMP PAD to climb. The void pad flings the bot up a story
+            // reliably — that is what it is FOR — instead of fighting up the narrow 2-wide ramp (the
+            // hard, flaky part of a VHALL climb). Route to the nearest reachable pad with a clear line;
+            // the collision launch does the vertical. Once up (feet near the exit height) this stops
+            // triggering and the VHallField takes over to cross the upper story to the door. Falls back
+            // to the ramp route when no pad is in reach.
+            bool climbingViaPad = false;
+            if (m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 1.5f) {
+                constexpr f32 kPadReach = 18.0f;
+                f32 bestD2 = kPadReach * kPadReach; s32 best = -1;
+                for (u8 k = 0; k < m_autoplayPadCount; k++) {
+                    const f32 dx = m_autoplayPadCells[k].x - pos.x, dz = m_autoplayPadCells[k].z - pos.z;
+                    const f32 d2 = dx * dx + dz * dz;
+                    if (d2 < bestD2 && clearLineTo(m_autoplayPadCells[k])) { bestD2 = d2; best = k; }
+                }
+                if (best >= 0) {
+                    const Vec3 to{m_autoplayPadCells[best].x - pos.x, 0.0f, m_autoplayPadCells[best].z - pos.z};
+                    if (lengthSq(to) > 1e-6f) { v.flowDir = normalize(to); climbingViaPad = true; }
+                }
+            }
+
+            // The exit is a balcony door on the OPPOSITE story. Routing is a BFS FLOW FIELD over
+            // (cell, STORY) nodes seeded from the door (autoplay_vhall.h) — it routes the whole journey
+            // ground -> ramp foot -> up the ramp -> across the balcony -> door, and can never steer the
+            // bot off a balcony edge. Used as the ramp route whenever we're not riding a pad up.
+            if (!climbingViaPad &&
+                Autoplay::ensureVHallField(m_autoplayVHall, m_level.grid, m_level.floorDoorPos, floorStamp)) {
                 const Vec3 vd = Autoplay::vhallDirection(m_autoplayVHall, m_level.grid, pos);
                 if (lengthSq(vd) > 1e-6f) v.flowDir = vd;
             }
             // Climb-assist jump: the ramp is a narrow 2-wide graduated slab, and even with correct
             // steering the eased-aim walk can stall against the risers. Pulse a hop while the bot is
-            // BELOW the exit height and the exit is UP — i.e. still climbing. (m_autoplayVhClimbing
-            // was defaulted false above; the driver reads it to fire the jump.)
-            if (m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.5f)
+            // BELOW the exit height and the exit is UP — i.e. still climbing the RAMP (not while riding a
+            // pad, which does its own launch). (m_autoplayVhClimbing was defaulted false above.)
+            if (!climbingViaPad && m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.5f)
                 m_autoplayVhClimbing = true;
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
             // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's
@@ -1292,9 +1343,15 @@ Autoplay::BotView Engine::buildBotView() {
             // cell's CENTRE, which pulls the body off the corridor walls instead of tracking along
             // them. On L0 there are no holes, the field reports invalid, and the heading stays the
             // ordinary exit flow field — which is exactly the walk to the door.
-            const f32 storyY = Autoplay::botStoryY(m_level.grid, pos);
-            if (Autoplay::ensureDescentField(m_autoplayDescent, m_level.grid, dg, storyY,
-                                             floorStamp)) {
+            // The storey the field routes on is HELD with hysteresis, not read raw each tick: raw
+            // botStoryY is a knife-edge at a drop-hole lip (a few cm of XZ drift, or a 0.2 m feet-Y
+            // dip, flips it a full storey to the ground below), and the field reseeds per storey with
+            // the two seedings pointing opposite ways — which froze the bot oscillating at the very
+            // hole it should drop into. commitBotStory only moves the storey once the bot is solidly
+            // standing on a new one, so a lip flicker is ignored and a real fall commits on landing.
+            m_autoplayDescentStory = Autoplay::commitBotStory(m_level.grid, pos, m_autoplayDescentStory);
+            if (Autoplay::ensureDescentField(m_autoplayDescent, m_level.grid, dg,
+                                             m_autoplayDescentStory, floorStamp)) {
                 const Vec3 dd = Autoplay::descentDirection(m_autoplayDescent, m_level.grid, pos);
                 if (lengthSq(dd) > 1e-6f) v.flowDir = dd;
             }
@@ -1309,19 +1366,6 @@ Autoplay::BotView Engine::buildBotView() {
         // takes priority (FIGHT ignores flowDir). FLAT non-lava floors only: on stacked/lava floors the
         // story/causeway routing above owns the heading, and the boss-seek below still overrides this
         // (kill the boss first), the globe steady after it (survival first).
-        // A WORLD-only horizontal ray (eye height) to a goal's XZ: true when no wall blocks a STRAIGHT
-        // bearing there. Both the shrine detour and the boss-seek gate on it — a straight bearing at a
-        // target behind a wall just jams the bot into the wall (the hazard veto's ±45/±90 fan cannot
-        // route around a wall), so steer straight ONLY with a clear line and route around otherwise.
-        auto clearLineTo = [&](Vec3 goal) -> bool {
-            const Vec3 eye = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-            const Vec3 to{goal.x - eye.x, 0.0f, goal.z - eye.z};
-            const f32  len = length(to);
-            if (len < 1e-3f) return true;
-            const RayHit hit = Raycast::cast(m_level.grid, eye, to * (1.0f / len), len);
-            return !hit.hit || hit.distance >= len - 0.5f;
-        };
-
         m_autoplayShrineTarget = false;
         if (!v.stackedFloor && !m_level.lavaFloor) {
             constexpr f32 kShrineDetour = 8.0f;   // metres: a minor detour, not a cross-floor trek

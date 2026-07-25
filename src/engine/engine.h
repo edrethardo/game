@@ -384,10 +384,22 @@ private:
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.
     Autoplay::DescentField m_autoplayDescent;
+    // The COMMITTED storey the descent field is built for, held with hysteresis (Autoplay::commitBotStory)
+    // so a knife-edge storey flicker at a drop-hole lip can't thrash the field and freeze the bot. 1e9f
+    // = "no storey yet", reset per floor in enterAutoplayRun so a new floor re-adopts its spawn storey.
+    f32 m_autoplayDescentStory = 1e9f;
     // VERTICAL_HALL two-story travel field: a BFS over (cell, story) nodes from the exit door
     // (autoplay_vhall.h). Replaces the old flat-field-plus-ramp-heuristics — the bot follows this
     // field ground->ramp->balcony->door and can never be routed off an edge. Rebuilt per floor.
     Autoplay::VHallField m_autoplayVHall;
+    // JUMP-PAD cells cached per floor. VHALL's void pads are CELL_JUMPPAD geometry but are deliberately
+    // NOT recorded in DungeonResult::jumpPads[] (so enemies use ramps), which left them invisible to the
+    // bot — it only ever climbed the ramp and never used the pad. Cached (cluster centres, deduped) so
+    // the bot can route to one to CLIMB to an upper exit: a pad flings it up a story reliably, which is
+    // exactly what the pad is for, instead of fighting the narrow ramp. Rescanned on a floor change.
+    Vec3             m_autoplayPadCells[8];
+    u8               m_autoplayPadCount = 0;
+    u32              m_autoplayPadFloor = 0xFFFFFFFFu;
     // LOOK BEHIND (autoplay_nav.h LOOK_BEHIND_*). A wedged bot turns around once per stuck episode to
     // un-watch whatever it is facing, which is the only thing that can spring a dormant gargoyle
     // (weeping-angel wake rule) — and a dormant gargoyle is an unkillable solid body, so staring at

@@ -125,6 +125,14 @@ namespace Input {
     // a baseline whenever it runs, so a menu that hid the cursor can never leave it stuck hidden
     // after any state transition (which all go through setRelativeMouseMode).
     void setCursorVisible(bool visible);
+    // One-shot cursor release: free the OS pointer NOW without changing what gameplay WANTS
+    // (s_relativeMode is untouched), so the very next applyMouseMode — a focus change or any state
+    // transition — restores the wanted mode and the mouse-aim still works when the player tabs back.
+    // Used by the Autoplay H handoff: it frees the cursor trapped by relative-mouse mode so the player
+    // can click/alt-tab to another window (the natural unfocus then keeps the bot playing on-screen),
+    // WITHOUT minimising the window. Distinct from setRelativeMouseMode(false), which permanently
+    // changes the wanted mode and would leave the aim dead on return.
+    void releaseCursorOnce();
     // True exactly once after relative-mouse mode goes ON→OFF — i.e. gameplay handed control to a
     // cursor screen (menu/pause/death). Menus consume this to re-arm their "last input device" gate
     // (start with the pointer disabled + discard the bogus first mouse delta the mode switch emits).

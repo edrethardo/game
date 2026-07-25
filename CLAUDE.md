@@ -400,11 +400,16 @@ is a free timed buff sitting in the level, so on FLAT non-lava floors `buildBotV
 nearest active one within an 8 m detour (folded into `flowDir` like the globe/boss detours — TRAVEL-only, an
 LOS enemy still preempts it), and `updateAutoplay` holds interact (the same `descendPulseHeld` pulse — a hold
 routes to the shrine over the exit, one hold consumes it) once in reach, stopping inside the 1.2 m grab
-radius. Live: 2-4 shrines used per short run. **H = instant handoff + unfocus:** pressing `H` in an autoplay
-run calls `m_autoplayControl.forceBot()` (skip the 2 s resume window) and `Window::minimize()` — `forceBot`
-runs AFTER the takeover latch tick so the H keystroke's own "human activity" can't undo it, and the minimize
-drops OS focus so the "unfocused = no input, game keeps running" path keeps the bot playing on another
-screen. **TOWN portal:** the hub is
+radius. Live: 2-4 shrines used per short run. **H = instant handoff, window STAYS VISIBLE:** pressing `H` in an
+autoplay run calls `m_autoplayControl.forceBot()` (skip the 2 s resume window) and `Input::releaseCursorOnce()`
+— `forceBot` runs AFTER the takeover latch tick so the H keystroke's own "human activity" can't undo it, and
+the cursor-release frees the pointer that relative-mouse mode locks to the window centre so the player can
+click/alt-tab to another window WITHOUT the game being minimised (the earlier `Window::minimize()` HID the
+window; the player wanted to keep watching it play). Clicking away then drops OS focus for real and the
+"unfocused = no input, game keeps running" path keeps the bot playing on-screen. `releaseCursorOnce` is a
+one-shot that leaves the WANTED mouse mode (`s_relativeMode`) intact, so the aim still works if the player
+tabs back and reclaims control — unlike `setRelativeMouseMode(false)`, which would leave it dead on return.
+**TOWN portal:** the hub is
 the one world the brain cannot express — no floor door (so `onNormalFloor` is false and `decide` returns an
 empty intent) and a flow field aimed at the PLAZA CENTRE, not the portal — so an AFK run used to park there
 forever. The DRIVER owns it (`autoplayTownStep`, gated on `m_level.inTown`; the ARENA and the SOURCE CHAMBER
@@ -728,6 +733,19 @@ work, each from a measured failure:
   above). The bot jumps constantly, and matching holes on `|surfaceY - pos.y| <= 0.4` rejected every hole
   on its own storey for the whole flight — 21-27% of all ticks had no hole pick at all, 100% of them
   airborne, and the router silently went dark.
+- **…and that reference is HELD with hysteresis** (`Autoplay::commitBotStory`, driver state
+  `m_autoplayDescentStory`, reset per floor). Even reading the slab underfoot, `botStoryY` is a knife-edge
+  at a drop-hole LIP: a 0.2 m dip in feet-Y (or a few cm of XZ drift onto the hole cell) drops the raw
+  reading a full storey, because the storey's own slab then sits just outside `effectiveFloorHeight`'s
+  tolerance window. The field reseeds per storey and the two seedings point OPPOSITE ways, so the raw
+  reading alone left the bot **oscillating at the very hole it should drop into** — measured live as
+  **three builds each frozen 19-37 min on a FOUR_STORY floor** (Sorcerer floor 19, Marksman floor 29;
+  the melee Warrior stumbled into holes by closing distance and got through). `commitBotStory` only moves
+  the committed storey once the bot is SOLIDLY standing on a different one (feet within `kOnStoryBand`
+  0.6 m of that storey's slab), so a lip flicker is ignored and a genuine fall commits only on landing —
+  which is exactly the descent. Fixed the freeze; the residual is that an intermediate storey whose
+  clean-hole cells are severed from the landing pocket by return-lift pads routes via the flat exit-field
+  fallback (slower, but it still descends — never a permanent stall).
 - **Jump pads are a HAZARD on this floor and only this floor** (`stepAllowed(..., avoidPads)` for travel,
   `Autoplay::padAhead` for combat movement). A pad lifts ~two stories and fires the instant you are
   grounded, so one kiting step onto one throws away a descent: a run that had reached L0 and closed to

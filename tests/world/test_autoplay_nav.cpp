@@ -337,6 +337,31 @@ TEST_CASE("descent: the story reference is the slab underfoot, not the raw feet 
     LevelGridSystem::shutdown(g);
 }
 
+TEST_CASE("descent: the committed story holds through a hole-lip flicker, moves only on a real landing") {
+    // At a drop hole's LIP the raw storey reference is a knife-edge: a 0.2 m dip in feet-Y (or a few cm
+    // of XZ drift onto the hole cell) makes botStoryY fall a full storey to the ground below, because
+    // the storey's own slab then sits just outside effectiveFloorHeight's tolerance window. The descent
+    // field reseeds per storey and the two seedings point OPPOSITE ways, so the raw reading alone froze
+    // the bot oscillating at the very hole it should drop into (measured: three builds each stuck
+    // 19-37 min on a FOUR_STORY floor). commitBotStory is the hysteresis that fixes it: it only moves
+    // the storey once the bot is SOLIDLY standing on a different one.
+    LevelGrid g = makeDescentGrid(20, 20);
+    const f32 x = 6.0f, z = 6.0f;
+    // First call of a floor (committed == the 1e9 sentinel): adopt whatever storey the bot is on.
+    CHECK(Autoplay::commitBotStory(g, Vec3{x, 6.0f, z}, 1e9f) == doctest::Approx(6.0f));
+    // Solidly on L2 (feet at the 6 m slab): commit to it.
+    CHECK(Autoplay::commitBotStory(g, Vec3{x, 6.0f, z}, 6.0f) == doctest::Approx(6.0f));
+    // THE FLICKER: feet dip to 5.8 m at the lip, so raw botStoryY reads the 3 m slab below — but the
+    // feet are nowhere near 3 m, so the commit must HOLD L2 rather than reseed the field to L1.
+    REQUIRE(Autoplay::botStoryY(g, Vec3{x, 5.8f, z}) == doctest::Approx(3.0f));   // raw really does flip
+    CHECK(Autoplay::commitBotStory(g, Vec3{x, 5.8f, z}, 6.0f) == doctest::Approx(6.0f)); // …but commit holds
+    // Mid-fall (feet at 4.5 m, between storeys): still not landed, still hold L2.
+    CHECK(Autoplay::commitBotStory(g, Vec3{x, 4.5f, z}, 6.0f) == doctest::Approx(6.0f));
+    // Landed on L1 (feet at the 3 m slab): NOW the bot is solidly a storey down — commit to it.
+    CHECK(Autoplay::commitBotStory(g, Vec3{x, 3.1f, z}, 6.0f) == doctest::Approx(3.0f));
+    LevelGridSystem::shutdown(g);
+}
+
 TEST_CASE("descent: candidates are nearest-first with every clean hole ahead of any padded one") {
     // The driver walks this order handing each hole to its router, so the ORDER is the contract:
     // padded holes (return lifts) must sort behind every clean one however close they are.
