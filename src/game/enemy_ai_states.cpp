@@ -895,8 +895,21 @@ void updateHostileStates(Entity& e, u32 i,
     } break;
 
     case AIState::SURROUND: {
-        // Move toward a spread position around the target based on entity pool slot.
-        // When close enough, switch to ATTACK. Used by squad leaders to position members.
+        // Move toward a spread position around the target based on entity pool slot, so a pack fans
+        // out and encircles. The ONLY user of this state is the Heralds.
+        //
+        // AGGRESSION: attack the moment the player is within reach — do NOT keep orbiting a slot the
+        // player has already stepped into. The old code only switched to ATTACK once the enemy
+        // reached its exact encircle slot (a MOVING 2 m orbit point), so against a kiting player the
+        // Heralds circled forever and almost never committed to a swing ("passive with attacking").
+        // Being already in melee range is reason enough to strike; the encircle is just how they
+        // CLOSE, not a precondition for attacking.
+        if (targetDist <= e.attackRange) {
+            e.aiState = AIState::ATTACK;
+            e.attackTimer = fminf(e.attackTimer, GameConst::OPEN_STRIKE_SURROUND);
+            e.velocity = {0, 0, 0};
+            break;
+        }
         Vec3 goalPos = LevelGridQuery::getSurroundPosition(
             targetPos, static_cast<u8>(i % 6), 4, e.attackRange * 0.8f);
         Vec3 toGoal = goalPos - e.position;
