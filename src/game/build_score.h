@@ -290,6 +290,26 @@ inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCou
     return false;
 }
 
+// The backpack slot holding the strongest RANGED-family weapon, or -1 if the bag has none. Used by
+// the Autoplay melee sidearm (engine_autoplay.cpp): a melee build keeps ranged weapons in its bag
+// because worthPickingUp reasons over all nine build cells, so the sidearm it needs is usually
+// already there. Scored against a Moderate-Ranged reference cell — the family gate makes every
+// non-ranged weapon (and armor/rings/pets) score 0, so only ranged weapons can win.
+inline s32 bestRangedBackpackIdx(const PlayerInventory& inv, const ItemDef* defs, u32 defCount) {
+    constexpr u8 kRangedRefCell = 1 * BUILD_COLS + 2;   // Moderate / Ranged
+    s32 best = -1;
+    f32 bestScore = 0.0f;
+    for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++) {
+        const ItemInstance& it = inv.backpack[i];
+        if (it.defId == 0xFFFF || it.defId >= defCount) continue;
+        const ItemDef& def = defs[it.defId];
+        if (def.slot != ItemSlot::WEAPON) continue;
+        const f32 s = score(it, def, kRangedRefCell);   // 0 for non-ranged (family gate) and pets
+        if (s > bestScore) { bestScore = s; best = (s32)i; }
+    }
+    return best;
+}
+
 // Total gear score a build cell could field right now (sum of best-in-slot over every slot).
 inline f32 gearScoreForCell(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 cell) {
     f32 total = 0.0f;

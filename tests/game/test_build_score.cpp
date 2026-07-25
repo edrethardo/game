@@ -348,3 +348,42 @@ TEST_CASE("BuildScore: minipets are always picked up and always kept, never scor
     inv.backpack[1] = blank;
     CHECK(!BuildScore::isKeeper(inv, defs, 2, 1));
 }
+
+TEST_CASE("BuildScore: bestRangedBackpackIdx finds the best ranged weapon in the bag") {
+    // A defs table indexed by ItemInstance.defId. defId 1 = a bow, 2 = a stronger carbine,
+    // 3 = a sword (melee — must be ignored), 4 = armor (not a weapon — must be ignored).
+    ItemDef defs[5]{};
+    defs[1] = weaponDef(WeaponSubtype::BOW,     20.0f);
+    defs[2] = weaponDef(WeaponSubtype::CARBINE, 60.0f);   // higher base damage => higher ranged score
+    defs[3] = weaponDef(WeaponSubtype::SWORD,   90.0f);
+    defs[4] = armorDef(50.0f);
+
+    PlayerInventory inv{};
+    auto put = [&](u8 slot, u8 defId){ inv.backpack[slot].defId = defId; inv.backpack[slot].affixCount = 0; };
+    put(0, 1); put(1, 3); put(2, 2); put(3, 4);
+    inv.backpackCount = 4;
+
+    // Ranged candidates are scored against the RANGED column, so the carbine (slot 2) wins over the
+    // bow (slot 0); the sword and armor score 0 and are ignored.
+    const s32 idx = BuildScore::bestRangedBackpackIdx(inv, defs, 5);
+    CHECK(idx == 2);
+}
+
+TEST_CASE("BuildScore: bestRangedBackpackIdx returns -1 when the bag has no ranged weapon") {
+    ItemDef defs[3]{};
+    defs[1] = weaponDef(WeaponSubtype::SWORD, 50.0f);
+    defs[2] = armorDef(20.0f);
+    PlayerInventory inv{};
+    inv.backpack[0].defId = 1; inv.backpack[1].defId = 2; inv.backpackCount = 2;
+    CHECK(BuildScore::bestRangedBackpackIdx(inv, defs, 3) == -1);
+}
+
+TEST_CASE("BuildScore: bestRangedBackpackIdx ignores a pet in the bag") {
+    // A pet-summon def claims a slot but is never a weapon; it must never be chosen as a sidearm.
+    ItemDef defs[3]{};
+    defs[1] = weaponDef(WeaponSubtype::BOW, 20.0f);
+    defs[2] = weaponDef(WeaponSubtype::CARBINE, 60.0f); defs[2].petSummon = true;  // (contrived) pet flag
+    PlayerInventory inv{};
+    inv.backpack[0].defId = 1; inv.backpack[1].defId = 2; inv.backpackCount = 2;
+    CHECK(BuildScore::bestRangedBackpackIdx(inv, defs, 3) == 0);   // the bow, not the flagged carbine
+}
