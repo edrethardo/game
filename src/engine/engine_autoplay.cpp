@@ -723,6 +723,29 @@ void Engine::updateAutoplay(f32 dt) {
         if (in.moveRight && Autoplay::padAhead(m_level.grid, p, right))          in.moveRight = false;
         if (in.moveLeft  && Autoplay::padAhead(m_level.grid, p, right * -1.0f))  in.moveLeft  = false;
     }
+
+    // FALL VETO — VERTICAL_HALL with an UPPER exit ONLY. The FIGHT branch's kite/close/strafe
+    // movement is otherwise un-hazard-vetoed (short, reactive, enemy-derived — see the veto-scope
+    // note in CLAUDE.md), which is exactly how a kiting bot backs off a balcony rim while chasing an
+    // enemy across a gap. Scoped tightly on purpose:
+    //   * VHALL only — FOUR_STORY descends BY falling through drop holes (the pad block above + the
+    //     descent router) and must stay untouched.
+    //   * EXIT UPPER only (floorDoorPos.y > 1.5 m) — when the exit is on the GROUND the bot spawned
+    //     on a balcony and must get DOWN, and dropping off the rim is a valid way down; a fall veto
+    //     there would only hinder the descent. The protection is for the CLIMB, where a fall undoes it.
+    //   * in.engaging — only FIGHT movement, never a TRAVEL/descent step.
+    // Applied per WASD component so the bot slides along the safe axes instead of freezing.
+    if (in.engaging && m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
+        m_level.floorDoorPos.y > 1.5f) {
+        const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+        const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+        const Vec3 p     = m_localPlayer.position;
+        const f32  feetY = p.y;
+        if (in.moveFwd   && Autoplay::wouldFall(m_level.grid, p, feetY, fwd))            in.moveFwd   = false;
+        if (in.moveBack  && Autoplay::wouldFall(m_level.grid, p, feetY, fwd   * -1.0f))  in.moveBack  = false;
+        if (in.moveRight && Autoplay::wouldFall(m_level.grid, p, feetY, right))          in.moveRight = false;
+        if (in.moveLeft  && Autoplay::wouldFall(m_level.grid, p, feetY, right * -1.0f))  in.moveLeft  = false;
+    }
     // JUMP only from the ground (the engine ignores it otherwise, but asking for what cannot happen
     // muddies the telemetry) and never while a roll owns the body.
     if (in.jump && (!m_localPlayer.onGround || m_localPlayer.dodgeState.rolling)) in.jump = false;
