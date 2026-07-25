@@ -236,6 +236,13 @@ constexpr f32 KITE_HOLD_GROUND_M = 4.0f;
 // that drifts past it. If those two ever disagree, the bot can hold a target the brain refuses to
 // engage — it would fall through to TRAVEL with a live enemy on top of it.
 constexpr f32 THREAT_RADIUS = 12.0f;   // ~ the width of a couple of rooms
+
+// --- skill selection: use the pool, and clear groups ---------------------------------------------
+// A GROUP is several hostiles clustered around the aim target — what an area skill would catch in one
+// cast. Sized to a Frozen Orb / Meteor's spread: 3+ enemies within ~6 m of the target is a pack worth
+// an AoE (the "Frozen Orb is awesome to kill large groups" case).
+constexpr f32 GROUP_RADIUS = 6.0f;
+constexpr u32 GROUP_MIN    = 3;        // the aim target + 2 more inside GROUP_RADIUS
 inline f32 engageCeiling(const BotView& v, const Doctrine& d) {
     const f32 band = d.engageMax * v.weaponRange;
     return (band > THREAT_RADIUS) ? band : THREAT_RADIUS;
@@ -286,15 +293,27 @@ constexpr f32 TARGET_LOS_GRACE   = 0.40f;  // s
 // Returns the index of the target to engage — the sticky current where it still holds, else the
 // nearest with LOS — or -1 if nothing has LOS.
 inline s32 pickTarget(const BotView& v, const Doctrine& d) {
+    // LOOT GOBLIN — rush it above all else. It flees with a hoard, never attacks, and despawns when
+    // its escape clock runs out, so the moment one is in sight it is THE target (bypasses stickiness
+    // and the ceiling): the nearest visible loot goblin wins outright.
+    { s32 g = -1; f32 gd = 1e9f;
+      for (u32 i = 0; i < v.targetCount; i++)
+          if (v.targets[i].isLootGoblin && v.targets[i].hasLOS && v.targets[i].dist < gd) {
+              gd = v.targets[i].dist; g = static_cast<s32>(i);
+          }
+      if (g >= 0) return g; }
+
     s32 best = -1; f32 bestD = 1e9f;
     for (u32 i = 0; i < v.targetCount; i++) {
         if (!v.targets[i].hasLOS) continue;
+        if (v.targets[i].invulnerable) continue;     // damage-immune: never the shot target (wasted / keeps a gargoyle asleep)
         if (!sameStory(v, v.targets[i])) continue;   // another floor of the building: not ours
         if (v.targets[i].dist < bestD) { bestD = v.targets[i].dist; best = (s32)i; }
     }
     const s32 cur = v.currentTargetIdx;
     if (cur < 0 || static_cast<u32>(cur) >= v.targetCount) return best;   // no memory / it is gone
     const BotTarget& c = v.targets[static_cast<u32>(cur)];
+    if (c.invulnerable) return best;   // it just became damage-immune (a boss entombed, etc.): drop it
     if (!c.hasLOS) {
         // BLIND — but not necessarily gone. LOS is ONE raycast to the target's CENTRE from a MOVING
         // eye, so it FLICKERS: measured live in a corridor fight, the nearest hostile's LOS toggled
@@ -313,7 +332,11 @@ inline s32 pickTarget(const BotView& v, const Doctrine& d) {
         return cur;
     }
     if (!sameStory(v, c))             return best;   // it (or we) changed story: release, don't chase
-    if (c.dist > engageCeiling(v, d))  return best;   // walked out of the reach the brain engages at
+    // A live BOSS is never released for RANGE: the exit is sealed until it dies, so it stays the
+    // engaged target from anywhere on the floor (the brain's FIGHT gate exempts it the same way — the
+    // two MUST agree, or the bot would hold a target the brain refuses to engage). Everything else is
+    // dropped once it drifts past the engagement ceiling.
+    if (!c.isBoss && c.dist > engageCeiling(v, d)) return best;
     if (best < 0 || best == cur)       return cur;    // it IS the nearest (or nothing else is visible)
     // REACHABLE BEATS UNREACHABLE, no dwell. A target outside our own weapon reach loses to one
     // inside it: for a melee bot in a scrum this is the difference between swinging at the thing on
@@ -375,6 +398,14 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         else                                   out.moveLeft  = true;
     }
 
+    // LOOT GOBLIN — RUSH it. It flees and never attacks, and its escape clock is running, so there is
+    // no reason to kite, strafe or hold the band: chase flat out until you are almost on top of it and
+    // let the fire gate + gap-close skills do the rest. Overrides all the band movement above.
+    if (t.isLootGoblin) {
+        out.moveBack = out.moveLeft = out.moveRight = false;
+        out.moveFwd  = t.dist > 2.0f;
+    }
+
     // KITING JUMP. While retreating from a melee threat or side-stepping a shooter, hop on a long
     // period: it breaks a leading shooter's vertical solution and clears a 1-cell gap or lava vein
     // mid-retreat. Never while closing (out.moveFwd) — an airborne bot cannot steer, and losing
@@ -389,6 +420,24 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // nothing (live: sorcerers permanently stuck on floor 1).
     out.fire = t.dist <= hi && t.hasLOS && !v.stunned && !v.rolling;
 
+    // GAP-CLOSE SKILL. A teleport/dash (Holy Smite, Shadow Step/Strike, Phase Dash — SkillDef.distance
+    // > 0) is the way to CLOSE the gap to a target BEYOND reach: it blinks the player toward its
+    // facing, dealing damage on arrival. So cast one when we are trying to walk UP to the target
+    // (out.moveFwd, set above when t.dist > hi) and are already roughly facing it — the blink follows
+    // the facing and the aim is rate-limited, so casting mid-turn would teleport sideways into a wall.
+    // Fires OUT of range, complementary to the in-range damage skills below (moveFwd and fire are
+    // mutually exclusive). The engine's per-skill cooldown gates the rate. A gap-close EQUIPMENT skill
+    // (Phase Dash on the boots) is cast here too and, crucially, is withheld from the in-range block
+    // below — blinking 6 m while already on top of an enemy overshoots past it.
+    bool gapCloseFired = false;
+    if (out.moveFwd && !v.stunned && !v.rolling &&
+        fabsf(angleDelta(v.yaw, out.aimYaw)) < 0.5f) {
+        for (u8 s = 0; s < 4; s++)
+            if (v.castableSkill[s] && v.skillIsGapClose[s]) { out.classSkillSlot = (s8)s; gapCloseFired = true; break; }
+        if (v.bootCastable   && v.bootIsGapClose)   { out.bootSkill   = true; gapCloseFired = true; }
+        if (v.helmetCastable && v.helmetIsGapClose) { out.helmetSkill = true; gapCloseFired = true; }
+    }
+
     // CLASS SKILL. Cast whenever we are actually engaging (same gate as fire: LOS + within reach,
     // not stunned/rolling) and the driver reports a slot that would really fire. No cadence of our
     // own: the engine's energy + cooldown gates ARE the rate limit, and castableSkill mirrors them,
@@ -396,8 +445,36 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // Magic build is meant to fight (its skills are its damage, the wand is the filler). Lowest
     // castable slot wins: slot 0 is the always-unlocked basic, so an early character still casts.
     if (out.fire) {
-        for (u8 s = 0; s < 4; s++)
-            if (v.castableSkill[s]) { out.classSkillSlot = (s8)s; break; }
+        // WHICH skill. The old rule was "lowest castable slot", which for a Sorcerer means Fireball
+        // every tick — so its deep mana pool sat unused and Frozen Orb / Chain Lightning / Meteor
+        // never fired. Now:
+        //   * A GROUP (GROUP_MIN+ hostiles clustered around the target) => the BIGGEST castable AoE,
+        //     any class — Frozen Orb's shards, Meteor, Chain Lightning clear the pack in one cast.
+        //   * else a MAGIC build (col 0) => the biggest castable skill (highest unlocked slot off
+        //     cooldown): a caster's skills ARE its damage and its pool is deep, so it should spend it
+        //     on the largest nuke available, not poke with the cheap filler.
+        //   * else (martial) => the cheap always-on slot 0 first (their high slots are often
+        //     defensive/situational — a blade build casts on the side).
+        // castableSkill already encodes energy + cooldown, so "biggest available" self-limits: when
+        // Meteor is on cooldown it falls to Chain, then Frozen Orb, then Fireball, draining the pool.
+        const u8 col = BuildScore::buildCol(v.buildCell);
+        u32 cluster = 0;
+        for (u32 i = 0; i < v.targetCount; i++) {
+            const f32 gx = v.targets[i].pos.x - t.pos.x, gz = v.targets[i].pos.z - t.pos.z;
+            if (gx * gx + gz * gz <= GROUP_RADIUS * GROUP_RADIUS) cluster++;
+        }
+        s8 slot = -1;
+        if (cluster >= GROUP_MIN) {
+            for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsAoe[s]) { slot = s; break; }
+        }
+        if (slot < 0) {
+            if (col == 0) {   // caster: the biggest nuke it can afford (highest slot off cooldown)
+                for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s]) { slot = s; break; }
+            } else {          // martial: the cheap always-on filler (high slots are often defensive)
+                for (s8 s = 0; s <  4; s++) if (v.castableSkill[s]) { slot = s; break; }
+            }
+        }
+        out.classSkillSlot = slot;
         // EQUIPMENT legendary skills (boots F / helmet G) ride the same rule and for the same
         // reason: the driver's castable flags already mirror the engine's energy + cooldown gates,
         // so those gates ARE the cadence and "press whenever it would fire" is simply "use the
@@ -405,8 +482,11 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         // never happens — the bot was wearing them and never once casting. Both rails are
         // independent of the class slot (different buttons, different cooldowns), so all three can
         // land on the same tick.
-        out.bootSkill   = v.bootCastable;
-        out.helmetSkill = v.helmetCastable;
+        // A gap-close equipment skill (Phase Dash on the boots) is withheld here — it fires only in the
+        // gap-close block above, when CLOSING; blinking 6 m while already in the enemy's face overshoots
+        // past it. A non-gap-close legendary (Break Free, etc.) fires in range as before.
+        out.bootSkill   = v.bootCastable   && !v.bootIsGapClose;
+        out.helmetSkill = v.helmetCastable && !v.helmetIsGapClose;
     }
 
     // DEFENSIVE ROLL — purposeful, never panicked. Two gates on top of the engine's own dodge

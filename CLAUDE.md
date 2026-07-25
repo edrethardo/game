@@ -335,6 +335,17 @@ bag **evicts its lowest max-over-all-cells item**
 already chose (NEW_GAME wipe, `equipFreshLane`, the client-join wipe) explicitly preserves the two
 fields — the chooser runs BEFORE the wipes, which would otherwise silently undo it. `--autoloot` is
 the dev door. Inert in the arena. Spec: `docs/superpowers/specs/2026-07-22-auto-loot-equip-design.md`.
+**The definitive-best override:** the legendary **Phase Dash boots** (Swift Boots — slot BOOTS,
+`legendarySkill phase_dash`) are an absolute — a blink with i-frames trumps any stat roll — so
+`BuildScore::isDefinitiveBest` makes the auto-looter wear them over any NON-Phase-Dash boots and never be
+displaced by one (`autoEquipIfUpgrade`). The protection is for the **BEST pair only**, not every copy: a
+better-rolled Phase Dash boots DISPLACES a worse one (two definitive boots fall through to the normal
+hysteresis compare), and a worse DUPLICATE is treated as ordinary gear — `worthPickingUp` grabs a Phase
+Dash boots only when we field none or a strictly better one, `isKeeper` keeps only the best fielded pair,
+and `autoEvictWorst` may evict a worse duplicate (all three via `bestFieldedDefinitiveScore`). Deliberately
+a SLOT-level override, NOT a giant `score()` bonus: inflating `score()` would swamp the cross-cell
+better-build nudge (it sums whole-build totals and would go blind if one shared slot carried a huge
+constant), so `score()` stays honest and the "always" lives in the per-slot pick.
 
 **Unfocused = no input, but the game keeps running.** The window can sit on a second screen playing
 itself while the player works in another app. `Window::pollEvents()` pushes SDL's
@@ -384,7 +395,16 @@ cursor. **Descend seam:** the bot HOLDS `GameAction::PICKUP` through the real in
 is consumed ONCE (`Interact::poll` latches `consumed`) and a HOLD reaches a **shrine sharing the exit's
 interact range** BEFORE the exit, the driver **PULSES** PICKUP (`Autoplay::descendPulseHeld`, `autoplay_nav.h`:
 hold >0.35 s to fire, release a beat to clear the latch, repeat) so one cycle spends the shrine and the next
-descends — a plain continuous hold wedged the bot next to a used shrine forever. **TOWN portal:** the hub is
+descends — a plain continuous hold wedged the bot next to a used shrine forever. **SHRINE detour:** a shrine
+is a free timed buff sitting in the level, so on FLAT non-lava floors `buildBotView` steers travel onto the
+nearest active one within an 8 m detour (folded into `flowDir` like the globe/boss detours — TRAVEL-only, an
+LOS enemy still preempts it), and `updateAutoplay` holds interact (the same `descendPulseHeld` pulse — a hold
+routes to the shrine over the exit, one hold consumes it) once in reach, stopping inside the 1.2 m grab
+radius. Live: 2-4 shrines used per short run. **H = instant handoff + unfocus:** pressing `H` in an autoplay
+run calls `m_autoplayControl.forceBot()` (skip the 2 s resume window) and `Window::minimize()` — `forceBot`
+runs AFTER the takeover latch tick so the H keystroke's own "human activity" can't undo it, and the minimize
+drops OS focus so the "unfocused = no input, game keeps running" path keeps the bot playing on another
+screen. **TOWN portal:** the hub is
 the one world the brain cannot express — no floor door (so `onNormalFloor` is false and `decide` returns an
 empty intent) and a flow field aimed at the PLAZA CENTRE, not the portal — so an AFK run used to park there
 forever. The DRIVER owns it (`autoplayTownStep`, gated on `m_level.inTown`; the ARENA and the SOURCE CHAMBER
@@ -420,6 +440,26 @@ runs in a SECOND pass over the nearest-16 survivors, so a 90-enemy floor pays 16
 The FIGHT branch only engages within an **engagement ceiling** `max(engageMax×weaponRange, THREAT_RADIUS=12 m)`
 — a target beyond it falls through to DESCEND/TRAVEL so a distant straggler can't drag the bot off the
 exit route (this was the dense-`VERTICAL_HALL`-floor stall: an unbounded FIGHT chased 16-21 m foes forever).
+**A live milestone BOSS is the one exception** — the exit is SEALED until it dies (`mayDescend` refuses,
+and every exit-seeking watchdog is gated OFF while a boss lives), so a boss with LOS is engaged and closed
+on from ANY range rather than ignored for being across its arena. Both the FIGHT gate and `pickTarget`'s
+sticky-range release exempt `BotTarget::isBoss` (they MUST agree). And because the exit portal sits at the
+boss room's CENTRE (where the boss spawns) but a major boss's arena is 4× its room, the bot used to reach
+the sealed door and idle with the boss beyond the ceiling; so **`buildBotView` STEERS travel toward the
+boss** (a cheap one-boss scan, gated on `floorHasBoss`) — but ONLY with a **CLEAR LINE** to it (a world-only
+raycast): the exit flow field is a wall-aware BFS that routes all the way into the arena, and the only gap
+it leaves is the last open stretch to a boss offset from the exit cell, so the straight bearing does just
+that. Through a WALL the flow field is kept — a straight bearing there jams the bot into the wall and the
+veto zeroes the heading (measured: frozen 8 m from the boss against the wall between them — "it wants to
+navigate to the boss even behind a wall"). Live: killed The Butcher (floor 5) and Ygara (floor 10, 20×24
+arena) and descended past each. **A fleeing LOOT GOBLIN is rushed the same way and harder** —
+`BotTarget::isLootGoblin` wins `pickTarget` outright (nearest visible one, bypassing stickiness/ceiling),
+is engaged from any range, and `decideCombat` chases it flat out (`moveFwd`, never kite/strafe) since it
+never attacks and its escape clock is running. **INVULNERABLE enemies are never the shot target** —
+`pickTarget` skips any `BotTarget::invulnerable` (a dormant AMBUSH gargoyle, an entombed boss, the shielded
+Engine — mirrored from `Combat::applyDamage`'s early returns; `minionShield` is only 75% reduction so it
+stays a target), which stops the bot wasting shots and, for a gargoyle, stops the stare that keeps it
+asleep. They stay in the list for the block/dodge scans (they can still attack).
 **`engageMin` governs MOVEMENT ONLY, never fire**: the bot shoots anything with LOS inside
 `engageMax×weaponRange` *including* what is inside its kite floor, and backs away at the same time —
 that is what kiting IS. Gating fire on the full band made a swarmed caster/ranged bot backpedal forever
@@ -432,9 +472,27 @@ as `speed × 3 s`, capped at 24 m (2× THREAT_RADIUS; an uncapped 29 m/s bolt wo
 in a 15 m room). The bot also **CASTS ITS CLASS SKILLS**: `buildBotView` fills `BotView.castableSkill[4]`
 by mirroring the real activation gates one for one (slot holds a skill / unlocked at the EFFECTIVE floor /
 energy pool covers the cost — health for `BLOOD_NOVA` / `GameConst::cooldownReady` on the slot's tick
-watermark), and `decideCombat` presses the lowest castable slot whenever it is engaging, so a Magic build
-plays its build instead of poking with a wand. Availability is mirrored rather than guessed precisely
-because a press that no-ops is worse than no press. The **EQUIPMENT legendary rails ride the same
+watermark), plus `BotView.skillIsAoe[4]` from the `SkillDef` (shards / bounces / multi-projectile / a ≥3 m
+blast). **Skill SELECTION** (`decideCombat`) is no longer "lowest castable slot" — that left a Sorcerer
+spamming Fireball while its deep pool and Frozen Orb / Chain / Meteor went unused. Now: a **GROUP**
+(`GROUP_MIN`=3 hostiles within `GROUP_RADIUS`=6 m of the aim target) fires the **biggest castable AoE**, any
+class; else a **MAGIC** build casts its **biggest castable skill** (highest unlocked slot off cooldown — a
+caster's skills ARE its damage and its pool is deep, so it spends it on the largest nuke); else a martial
+build keeps the cheap slot-0 filler (its high slots are often defensive). Verified live: a floor-12 Sorcerer
+selects Frozen Orb (slot 1) ~89% of casts. **The class-skill press is PULSED, not held** (`applyBotIntent`,
+even ticks only): activation is edge-triggered (`isActionPressed`), and because *some* skill (cheap Fireball)
+is almost always castable the button would stay held every engaging tick and the edge would fire **once per
+fight** — the "not aggressive enough for a Sorcerer" bug. Pulsing makes every other tick a fresh press edge
+(30/s, far above any cooldown), so the engine's own per-skill cooldown becomes the true cast rate (live:
+energy drained 150→32 under sustained casting, vs staying full before). BOOT/HELMET skills need no pulse —
+each is a single slot that self-releases the instant it goes on cooldown. Availability is mirrored rather
+than guessed precisely because a press that no-ops is worse than no press. **GAP-CLOSE skills** (a teleport/
+dash — Holy Smite, Shadow Step/Strike, Phase Dash: `SkillDef.distance > 0`, flagged `skillIsGapClose[]` /
+`bootIsGapClose`) are cast to CLOSE the gap to a target BEYOND reach: `decideCombat` fires one when it is
+walking up to the target (`moveFwd`) and already roughly facing it (the blink follows the facing), which
+is OUT of range and so complementary to the in-range damage skills. A gap-close EQUIPMENT skill (Phase Dash
+on the always-worn Swift Boots) is withheld from the in-range block — blinking 6 m while already on top of
+an enemy overshoots past it. The **EQUIPMENT legendary rails ride the same
 contract**: `BotView.bootCastable` / `helmetCastable` mirror `handleEquipmentSkillActivation`'s gates
 (the slot is BOUND to a skill — i.e. a LEGENDARY is equipped there — the shared pool covers the cost, the
 tick cooldown has elapsed; the helmet is stun-gated and the boots deliberately are NOT, because
@@ -627,7 +685,9 @@ that could never fire — and standing still IS "no progress", so the remedy re-
 (1.9 m) single-source that, with a `static_assert` + test pinning stop < radius; outside the radius the
 remedy WALKS THE LAST METRE IN (interact still held) instead of parking, bounded by the no-progress timer so
 it can never shadow the geometry escape.
-And **LOOK BEHIND at 3 s** — the first rung, before the 4 s geometry ladder. The dungeon's stone gargoyles
+And **LOOK BEHIND at 3 s — floors 1-10 ONLY** (its whole job is the early-floor gargoyle standoff, and off
+those floors the spin-around reads as odd; the escape ladder handles other wedges). The first rung, before
+the 4 s geometry ladder. The dungeon's stone gargoyles
 (`EnemyRole::AMBUSH`) sit in `AIState::DORMANT` under a **weeping-angel** rule: `enemy_ai_states.cpp` wakes
 one only when a player is in range AND **nobody is watching it**, and `Combat::applyDamage` returns early on
 a dormant AMBUSH enemy so it cannot be shot awake either. A gargoyle is an ordinary hostile in
@@ -677,9 +737,12 @@ work, each from a measured failure:
 - **A kill-agnostic FLOOR-STALL watchdog.** The existing exit watchdog restarts on every point of damage
   dealt; on a floor carrying four stories of enemies the bot deals damage continuously, so it **latched 0%
   of the time** across three measured runs while the bot fired on 50%+ of ticks and never left floor 1.
-  The long window asks only "have you got closer to the way out in the last 6 s" (`distToDoor` is 3D, so
+  The long window asks only "have you got closer to the way out in the last **20 s**" (`distToDoor` is 3D, so
   descending a storey counts outright) and arms the existing combat break-off leg — not the exit bull,
-  which A\*-routes in XZ and above L0 would march the bot to a spot three stories over the exit.
+  which A\*-routes in XZ and above L0 would march the bot to a spot three stories over the exit. The window
+  is **20 s** (was 6 s): because it is kill-agnostic, a 6 s window fired mid-fight against a STRONGER enemy
+  (a champion/elite legitimately takes many seconds to kill) and made the bot "randomly disengage" from
+  exactly those fights; 20 s lets any real fight resolve first so it fires only on a true livelock.
 
 **TRAVEL movement is a WASD decomposition, not "hold W"** (`autoplay_brain.cpp` `faceAndGo`). The aim is
 deliberately EASED, so the facing lags the heading for a few tenths of a second after every turn; holding

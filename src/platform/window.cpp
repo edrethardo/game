@@ -311,6 +311,10 @@ SDL_Window* Window::getHandle() {
     return s_window;
 }
 
+void Window::minimize() {
+    if (s_window) SDL_MinimizeWindow(s_window);
+}
+
 s32 Window::getWidth() {
     return s_width;
 }

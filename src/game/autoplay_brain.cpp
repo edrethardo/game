@@ -76,8 +76,16 @@ BotIntent decide(const BotView& v) {
     // its true reach) and THREAT_RADIUS (so even a short-reach build handles anything genuinely
     // close). A target beyond the ceiling falls through to DESCEND/TRAVEL: the bot keeps heading for
     // the exit rather than being dragged across the floor toward a distant straggler.
+    //
+    // A live BOSS is the exception: the exit is SEALED until it dies, so a boss with LOS is engaged
+    // (and closed on) from ANY distance rather than ignored for being across its large arena — the
+    // "search for the boss and kill it" objective. pickTarget keeps a boss sticky for the same reason
+    // (the two must agree). The driver additionally STEERS travel toward the boss when it has no LOS
+    // yet (buildBotView), so the bot walks into the arena instead of idling at the sealed door.
     const s32 ti = pickTarget(v, d);
-    if (ti >= 0 && v.targets[(u32)ti].dist <= engageCeiling(v, d)) return decideCombat(v, d);
+    if (ti >= 0 && (v.targets[(u32)ti].isBoss || v.targets[(u32)ti].isLootGoblin ||
+                    v.targets[(u32)ti].dist <= engageCeiling(v, d)))
+        return decideCombat(v, d);   // boss + fleeing loot goblin are engaged from ANY range
 
     // DESCEND: at an eligible door, ask to descend.
     DescendCtx dc; dc.doorActive = v.doorActive; dc.distToDoor = v.distToDoor;

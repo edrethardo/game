@@ -340,6 +340,12 @@ private:
     // periodic hop while climbing carries it up over the risers and back onto the slab. Reset false
     // whenever not actively climbing (crossed, descending, or off VERTICAL_HALL).
     bool             m_autoplayVhClimbing = false;
+    // SHRINE detour (Autoplay). A shrine is a free buff sitting in the level; the bot grabs it on the
+    // way. buildBotView finds the nearest active shrine within a small detour radius and steers travel
+    // onto it; updateAutoplay stops and holds interact to activate it. Recomputed every tick, so no
+    // stale state. Flat non-boss floors only (stacked/lava/boss routing is special).
+    Vec3             m_autoplayShrinePos{};
+    bool             m_autoplayShrineTarget = false;   // a shrine is the current travel detour
     // MELEE RANGED SIDEARM (Autoplay, VERTICAL_HALL upper-exit only). A melee build cannot hit an
     // enemy that is only reachable by falling off its balcony, so it temporarily equips the best
     // ranged weapon from its backpack (BuildScore::bestRangedBackpackIdx) and fires from where it

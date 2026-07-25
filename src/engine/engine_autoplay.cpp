@@ -64,12 +64,15 @@
 // 4.5/s -> 1.2 (marksman); 2.8 -> 2.2 and 1.6/s -> 0.9 (warrior).
 #include "engine/engine.h"
 #include "platform/input.h"
+#include "platform/window.h"     // Window::minimize — the H-key handoff unfocuses the window
+#include <SDL_scancode.h>        // SDL_SCANCODE_H
 #include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
 #include "world/level_grid.h"
 #include "world/story_nav.h"      // StoryNav::onUpperStory / nearestPortalGoal — per-style vertical routing
 #include "world/pathfinder.h"     // Pathfinder::findPath — Stage-3 escape's short A* leg toward the exit
 #include "game/autoplay_nav.h"    // Autoplay::stepAllowed / escapeHeading — the travel hazard veto + 8-dir escape
 #include "game/autoplay_combat.h" // Autoplay::dirToAim / doctrineFor — nudge heading + in-band fight test
+#include "game/combat.h"          // Combat::engineShieldActive — mirror the damage-immune (invulnerable) checks
 #include "game/item.h"            // GLOBE_HEALTH_ID / m_worldItems — low-hp globe detours
 #include "game/build_score.h"     // BuildScore::bestRangedBackpackIdx — the melee build's sidearm pick
 #include "game/skill.h"           // findSkillDef / computeCooldownTicks — mirror the real cast gates
@@ -185,6 +188,17 @@ void Engine::updateAutoplay(f32 dt) {
                      || Input::isActionPressed(GameAction::CHARACTER_SCREEN)
                      || Input::isActionPressed(GameAction::PAUSE);
     m_autoplayControl.tick(Input::humanActivityThisFrame(), uiOpen, dt);
+
+    // H = instant HANDOFF + UNFOCUS. Hand control to the bot NOW (skip the 2 s resume window) and
+    // minimize the window so the player can switch to another app — the "unfocused = no input, game
+    // keeps running" path then keeps the bot playing on the other screen. forceBot() runs AFTER the
+    // latch tick above on purpose: the H keystroke itself registers as human activity, which the tick
+    // would read as a takeover, so forcing bot control here wins over it; the minimize then drops focus
+    // so every following frame stays bot-driven with no input. isKeyPressed is edge-triggered (one tap).
+    if (!uiOpen && Input::isKeyPressed(SDL_SCANCODE_H)) {
+        m_autoplayControl.forceBot();
+        Window::minimize();
+    }
 
     // Human is driving (or resuming window still counting down): drop any synthetic held actions so
     // the real device is the only input, and get out of the way.
@@ -444,7 +458,12 @@ void Engine::updateAutoplay(f32 dt) {
     // needs, without making it walk away from a fight it is actually in danger of losing (SURVIVE
     // still outranks everything, and the leg is short enough that anything genuinely chasing is still
     // there at the end of it).
-    constexpr f32 kFloorWindow      = 6.0f;   // how long the bot may go without getting closer to the way out
+    // 20 s window (was 6 s): a STRONGER enemy — a champion, an elite — legitimately takes many seconds
+    // to kill, and because this watchdog is kill-agnostic a 6 s window fired mid-fight and made the bot
+    // "randomly disengage" from exactly those fights (the fight wasn't ALSO carrying it toward the exit).
+    // 20 s is long enough that any real fight resolves first, so the watchdog only fires on a genuine
+    // livelock (circling a floor, never approaching the exit), which is what it is for.
+    constexpr f32 kFloorWindow      = 20.0f;  // how long the bot may go without getting closer to the way out
     constexpr f32 kFloorApproachMin = 2.0f;   // metres of closure required in that window
     constexpr f32 kFloorPushLeg     = 3.0f;   // disengage-and-travel leg when it fails (> the 1.5 s de-fixate)
     if (v.doorActive && !bossGate) {
@@ -474,7 +493,12 @@ void Engine::updateAutoplay(f32 dt) {
     // firing has built a wedge that can never clear itself. Turning around un-watches it. One-shot per
     // stuck episode; the latch is re-armed by the progress branches above.
     if (m_autoplayLookBehindTimer > 0.0f) m_autoplayLookBehindTimer -= dt;
-    if (Autoplay::lookBehindDue(m_autoplayNoProgressTimer, m_autoplayLookBehindDone)) {
+    // Scoped to floors 1-10 (Aaron): the look-behind exists for the dormant STONE GARGOYLE standoff —
+    // an unkillable statue the bot pins asleep by staring at it — and those appear on the early floors.
+    // Off the early floors the spin-around reads as odd and the escape ladder handles other wedges, so
+    // the one watchdog whose whole job is "shooting an untriggered gargoyle forever" is early-floor only.
+    if (m_level.currentFloor <= 10 &&
+        Autoplay::lookBehindDue(m_autoplayNoProgressTimer, m_autoplayLookBehindDone)) {
         m_autoplayLookBehindDone  = true;
         m_autoplayLookBehindTimer = Autoplay::LOOK_BEHIND_HOLD;
         m_autoplayLookBehindYaw   = Autoplay::lookBehindYaw(m_localPlayer.yaw);
@@ -701,6 +725,27 @@ void Engine::updateAutoplay(f32 dt) {
         in.aimYaw = m_autoplayLookBehindYaw; in.aimPitch = 0.0f;
         in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;
         in.fire = false; in.jump = false;
+    }
+
+    // (2f) SHRINE USE — grab a shrine on the way. When a shrine is the current travel detour
+    // (buildBotView steered onto it) and the bot has reached interact reach, and it is neither
+    // fighting nor surviving nor wedged nor already holding for the exit, HOLD interact (PICKUP) to
+    // activate it — the interact arbitration routes a hold to the shrine over the exit, and one hold
+    // consumes it (grantShrineBuff + deactivate). Reuses the descend hold + its pulse (block 3): the
+    // pulse spends the shrine on the first cycle exactly as it does a shrine sharing the exit. The bot
+    // approached facing the shrine (the flowDir steer aims faceAndGo at it), so the interact aim cone
+    // is satisfied; within the 1.2 m grab radius facing stops mattering, so it stops there to let the
+    // hold land. Flat-floor detour only (m_autoplayShrineTarget is set only there).
+    if (m_autoplayShrineTarget && !in.fire && !in.potion && !in.descend && !stuck &&
+        !m_autoplayExitBull && !v.stunned && !v.rolling) {
+        const Vec3 to{m_autoplayShrinePos.x - m_localPlayer.position.x, 0.0f,
+                      m_autoplayShrinePos.z - m_localPlayer.position.z};
+        const f32 d = length(to);
+        if (d < GameConst::INTERACT_RANGE) {
+            if (lengthSq(to) > 1e-6f) { f32 y, p; Autoplay::dirToAim(to, y, p); in.aimYaw = y; in.aimPitch = 0.0f; }
+            in.descend = true;                                             // hold PICKUP -> shrine (pulsed below)
+            if (d < 1.5f) in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;   // stop in grab range
+        }
     }
 
     // (3) DESCEND PICKUP PULSE. The exit is a HOLD target, but a HOLD reaches a SHRINE sharing the
@@ -1001,6 +1046,16 @@ Autoplay::BotView Engine::buildBotView() {
             if (effFloor < cls.skillUnlockFloor[s]) continue;          // still locked on this floor
             const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, id);
             if (!def) continue;
+            // AoE nature is a property of the skill (independent of whether it is castable THIS tick):
+            // it hits a cluster if it throws shards, bounces between targets, fires multiple
+            // projectiles, or has a real blast radius. The 3 m radius floor keeps a small self-blast
+            // (Fireball, r2.5) classed as single-target filler so the group branch reaches for a real
+            // pack-clearer (Frozen Orb r-shards, Meteor r5, Chain bounces).
+            v.skillIsAoe[s] = (def->shardCount > 0) || (def->bounces > 0) ||
+                              (def->projectileCount > 1) || (def->radius >= 3.0f);
+            // A teleport/gap-close skill authors a dash `distance` (Holy Smite 3 m, Shadow Step 15 m);
+            // damage skills leave it 0. That is the exact set the bot should use to close on a target.
+            v.skillIsGapClose[s] = def->distance > 0.0f;
             // BLOOD_NOVA pays HEALTH, not energy (tryActivate refuses to suicide); everything else
             // draws the shared pool. Mirroring the split keeps the bot off a skill it can't afford.
             if (id == SkillId::BLOOD_NOVA) {
@@ -1039,6 +1094,16 @@ Autoplay::BotView Engine::buildBotView() {
         };
         v.bootCastable   = castable(m_bootSkillStates[m_localPlayerIndex]);
         v.helmetCastable = !v.stunned && castable(m_helmetSkillStates[m_localPlayerIndex]);
+        // Is the bound legendary a teleport/gap-close (Phase Dash on the Swift Boots)? Read its dash
+        // distance the same way the class-skill loop does, so the policy can cast it to CLOSE rather
+        // than blink it past a target it is already on top of.
+        auto isGapClose = [&](const SkillState& ss) {
+            if (ss.activeSkill == SkillId::NONE) return false;
+            const SkillDef* def = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, ss.activeSkill);
+            return def && def->distance > 0.0f;
+        };
+        v.bootIsGapClose   = isGapClose(m_bootSkillStates[m_localPlayerIndex]);
+        v.helmetIsGapClose = isGapClose(m_helmetSkillStates[m_localPlayerIndex]);
     }
 
     // Deterministic cadence clock for the strafe flip + the kiting jump (never rand()).
@@ -1201,6 +1266,70 @@ Autoplay::BotView Engine::buildBotView() {
         // Lava floors get no vertical goal — the veto below (lava-aware) keeps the bot off the lakes
         // and rides the stone causeways the flat flow field already routes along.
 
+        // SHRINE DETOUR — grab a shrine on the way. A shrine is a free timed buff (power / speed /
+        // vitality / spell) sitting in the level; steer travel onto the nearest active one within a
+        // small detour radius so the bot picks it up in passing (activation is in updateAutoplay).
+        // Folded into flowDir like the globe detour, so it only bites in TRAVEL — an LOS enemy still
+        // takes priority (FIGHT ignores flowDir). FLAT non-lava floors only: on stacked/lava floors the
+        // story/causeway routing above owns the heading, and the boss-seek below still overrides this
+        // (kill the boss first), the globe steady after it (survival first).
+        m_autoplayShrineTarget = false;
+        if (!v.stackedFloor && !m_level.lavaFloor) {
+            constexpr f32 kShrineDetour = 8.0f;   // metres: a minor detour, not a cross-floor trek
+            f32 bestD2 = kShrineDetour * kShrineDetour;
+            for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+                const WorldItem& w = m_worldItems.items[i];
+                if (!w.active || !isShrine(w.item)) continue;
+                const f32 dx = w.position.x - pos.x, dz = w.position.z - pos.z;
+                const f32 d2 = dx * dx + dz * dz;
+                if (d2 < bestD2) { bestD2 = d2; m_autoplayShrinePos = w.position; m_autoplayShrineTarget = true; }
+            }
+            if (m_autoplayShrineTarget) {
+                const Vec3 to{m_autoplayShrinePos.x - pos.x, 0.0f, m_autoplayShrinePos.z - pos.z};
+                if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+            }
+        }
+
+        // BOSS SEEK. On a boss floor the exit is SEALED until the milestone boss dies, and the exit
+        // portal sits at the boss room's CENTRE — where the boss itself spawns. So the exit flow field
+        // (a wall-aware BFS) routes the bot all the way INTO the arena; the only gap it leaves is the
+        // last stretch across the open arena to a boss offset from the exit cell. So the boss-seek only
+        // does that last stretch: it steers STRAIGHT at the boss ONLY when there is a CLEAR LINE to it
+        // (i.e. we're inside the open arena). Through a WALL the straight bearing just jams the bot into
+        // it — the exit flow field routes AROUND walls and must be kept until the boss is actually in
+        // sight. This is the "it wants to navigate to the boss even behind a wall" freeze (measured:
+        // frozen 8 m from the boss with flow vetoed to zero against the wall between them).
+        // (This scan runs only on boss floors, and breaks on the one boss, so it is nearly free.)
+        if (m_level.floorHasBoss) {
+            Vec3 bossPos{}; bool haveBoss = false;
+            for (u32 a = 0; a < m_entities.activeCount; a++) {
+                const Entity& e = m_entities.entities[m_entities.activeList[a]];
+                if (e.isBoss && !(e.flags & ENT_DEAD)) { bossPos = e.position; haveBoss = true; break; }
+            }
+            if (haveBoss) {
+                const Vec3 toBoss{bossPos.x - pos.x, 0.0f, bossPos.z - pos.z};
+                const f32  dBoss = length(toBoss);
+                // Clear line to the boss? A WORLD-ONLY raycast (walls only — it can't hit the boss's own
+                // body) from eye to boss. No wall in the way => we're in the open arena and a straight
+                // bearing is safe; a wall in the way => keep the wall-aware exit flow field.
+                bool clearLine = false;
+                if (dBoss > 1e-3f) {
+                    const Vec3 eye  = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+                    const Vec3 d3   = (bossPos + Vec3{0, m_localPlayer.eyeHeight, 0}) - eye;
+                    const f32  len3 = length(d3);
+                    const RayHit hit = Raycast::cast(m_level.grid, eye, d3 * (1.0f / len3), len3);
+                    clearLine = (!hit.hit || hit.distance >= len3 - 0.5f);
+                }
+                constexpr f32 kBossSeekRadius = 25.0f;   // covers a major boss's expanded arena
+                const bool flowIdle = lengthSq(v.flowDir) < 1e-6f;
+                const bool wantSeek = (dBoss < kBossSeekRadius || v.atExit || flowIdle);
+                // Seek straight ONLY with a clear line and reason to; if the exit flow field has run out
+                // entirely (flowIdle) fall back to the bearing as a last resort so we never freeze.
+                if (wantSeek && (clearLine || flowIdle) && lengthSq(toBoss) > 1e-6f)
+                    v.flowDir = normalize(toBoss);
+            }
+        }
+
         // Survival first: when low-hp with a globe in reach, override the travel/story heading toward
         // the nearest globe. The brain only consults flowDir in its TRAVEL branch (FIGHT/DESCEND ignore
         // it), so an LOS enemy still takes priority — this only bites when the bot would otherwise just
@@ -1292,6 +1421,14 @@ Autoplay::BotView Engine::buildBotView() {
         // wants the surface the body is standing on, the same quantity snapEntityToFloor writes.
         t.feetY       = e.position.y - e.halfExtents.y;
         t.isFlying    = (e.flags & ENT_FLYING) != 0;   // hovers by design: exempt from the story gate
+        t.isLootGoblin = (e.flags & ENT_LOOT_GOBLIN) != 0;   // flees with loot: rush it above all else
+        // Currently DAMAGE-IMMUNE — mirror Combat::applyDamage's early returns so the bot never wastes
+        // shots (or, for a gargoyle, keeps it asleep by staring). A dormant AMBUSH gargoyle, an entombed
+        // boss (Malachar's channel), the Engine while its wave adds live. minionShield is NOT here: it
+        // is only 75% reduction, not immunity, so a shielded boss is still worth shooting.
+        t.invulnerable = (e.aiState == AIState::DORMANT && (e.enemyRole & EnemyRole::AMBUSH)) ||
+                         (e.bossPhase == BossPhase::ENTOMBING) ||
+                         (e.isEngine && Combat::engineShieldActive(m_entities, m_entities.activeList[a]));
 
         // Insert nearest-first into the fixed cap (simple insertion — the pool is small).
         u32 pos = n;
@@ -1450,9 +1587,19 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt, 
     Input::setBotHeld(GameAction::DODGE,  in.dodge);
     Input::setBotHeld(GameAction::POTION, in.potion);
     Input::setBotHeld(GameAction::RELOAD, in.reload);
-    // Class skill: select the slot (SKILL_n) AND press CLASS_SKILL on the same tick — the selection
-    // loop runs before the activation in handleClassSkillActivation, so both land in one call.
-    if (in.classSkillSlot >= 0) {
+    // Class skill: select the slot (SKILL_n) AND press CLASS_SKILL — the selection loop runs before
+    // the activation in handleClassSkillActivation, so both land in one frame.
+    //
+    // PULSED, not held. Activation is EDGE-triggered (isActionPressed), so a continuously-HELD button
+    // casts exactly once and then does nothing until released. And the bot WOULD hold it forever:
+    // some class skill (cheap, low-cooldown Fireball) is almost always castable, so classSkillSlot
+    // stays >= 0 every engaging tick and the button never releases — which is why the Sorcerer cast
+    // once per fight and read as "not aggressive enough". Pressing only on even ticks (clearBotHeld
+    // releases it on the odd ones) makes every other tick a fresh press edge — 30 edges/s, far above
+    // any skill's cooldown — so the engine's own per-skill cooldown becomes the true cast rate and a
+    // caster fires Frozen Orb / its nukes as fast as they come up. (BOOT/HELMET skills need no pulse:
+    // each is ONE slot that self-releases the instant it goes on cooldown.)
+    if (in.classSkillSlot >= 0 && (currentLocalTick() & 1u) == 0u) {
         const GameAction slot = static_cast<GameAction>(
             static_cast<u8>(GameAction::SKILL_1) + static_cast<u8>(in.classSkillSlot));
         Input::setBotHeld(slot, true);

@@ -257,12 +257,106 @@ TEST_CASE("does not cast at nothing: no LOS target => no cast") {
 }
 
 TEST_CASE("prefers the lowest castable slot") {
+    // A MARTIAL build (selfAt is Moderate/Ranged): its skills are a sidearm, so the cheap-first pick
+    // stands — the lowest castable slot.
     BotView v = selfAt({0,0,0});
     BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
     v.targets = &t; v.targetCount = 1;
     v.castableSkill[2] = v.castableSkill[3] = true;   // 0/1 unavailable this tick
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
     CHECK(out.classSkillSlot == 2);
+}
+
+TEST_CASE("a MAGIC build casts its BIGGEST skill, not the cheap filler (uses the mana pool)") {
+    // A Sorcerer's skills ARE its damage and its pool is deep — so it must spend it on the largest
+    // available nuke (highest unlocked slot off cooldown), not spam slot-0 Fireball forever.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+0;                              // Moderate / Magic
+    BotTarget t{}; t.pos = {0,1.7f,-10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;               // single target: no group
+    v.castableSkill[0] = true;                       // Fireball (the cheap filler)
+    v.castableSkill[3] = true;                       // Meteor (the big nuke)
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot == 3);                  // biggest available, NOT slot 0
+}
+
+TEST_CASE("fires the biggest castable AoE at a GROUP (Frozen Orb clears packs)") {
+    // Three hostiles clustered within GROUP_RADIUS of the aim target => an area skill, any class.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1+0;                             // Magic
+    BotTarget ts[3];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-10.0f};  ts[0].dist = 10.0f; ts[0].hasLOS = true;   // aim (nearest)
+    ts[1] = {}; ts[1].pos = {2,1.7f,-10.0f};  ts[1].dist = 10.2f; ts[1].hasLOS = true;   // ~2 m away
+    ts[2] = {}; ts[2].pos = {-2,1.7f,-11.0f}; ts[2].dist = 11.2f; ts[2].hasLOS = true;   // ~2.2 m away
+    v.targets = ts; v.targetCount = 3;
+    v.castableSkill[0] = true;                       // Fireball — castable but NOT flagged AoE
+    v.castableSkill[1] = true; v.skillIsAoe[1] = true;   // Frozen Orb — the castable AoE
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot == 1);                  // the AoE, not the cheap single-target filler
+    // A lone target (no cluster) with the same skills falls back to the biggest nuke, not the AoE rule.
+    v.targets = ts; v.targetCount = 1;               // just the one now
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 1);   // only 0/1 castable, magic => highest = 1
+}
+
+TEST_CASE("a MARTIAL build still casts cheap-first on a lone target, AoE on a group") {
+    BotView v = selfAt({0,0,0});                     // Moderate / Ranged (martial)
+    BotTarget ts[3];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-10.0f};  ts[0].dist = 10.0f; ts[0].hasLOS = true;
+    ts[1] = {}; ts[1].pos = {2,1.7f,-10.0f};  ts[1].dist = 10.2f; ts[1].hasLOS = true;
+    ts[2] = {}; ts[2].pos = {-2,1.7f,-11.0f}; ts[2].dist = 11.2f; ts[2].hasLOS = true;
+    v.castableSkill[0] = true;                       // cheap filler
+    v.castableSkill[2] = true; v.skillIsAoe[2] = true;  // an AoE up top
+    v.targets = ts; v.targetCount = 1;               // lone target: cheap-first
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 0);
+    v.targetCount = 3;                               // a pack: the AoE fires
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 2);
+}
+
+TEST_CASE("loot goblin is rushed above all else — targeted over a nearer enemy, chased, never kited") {
+    BotView v = selfAt({0,0,0});                     // Moderate / Ranged
+    BotTarget ts[2];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-3.0f};  ts[0].dist = 3.0f;  ts[0].hasLOS = true;   // near ordinary enemy
+    ts[1] = {}; ts[1].pos = {0,1.7f,-18.0f}; ts[1].dist = 18.0f; ts[1].hasLOS = true;   // far loot goblin
+    ts[1].isLootGoblin = true;
+    v.targets = ts; v.targetCount = 2;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);   // the goblin wins despite being farther
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveFwd);                               // rush it
+    CHECK_FALSE(out.moveBack);                        // never kite the harmless fleeing goblin
+}
+
+TEST_CASE("invulnerable enemies are never the shot target") {
+    BotView v = selfAt({0,0,0});
+    BotTarget ts[2];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-3.0f};  ts[0].dist = 3.0f;  ts[0].hasLOS = true;   // near but immune
+    ts[0].invulnerable = true;
+    ts[1] = {}; ts[1].pos = {0,1.7f,-10.0f}; ts[1].dist = 10.0f; ts[1].hasLOS = true;   // farther, vulnerable
+    v.targets = ts; v.targetCount = 2;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);   // skips the near invulnerable one
+    ts[1].invulnerable = true;                             // now ALL are immune
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == -1);  // nothing to shoot => fall through to travel
+    // A sticky current that becomes invulnerable is released.
+    ts[1].invulnerable = false; v.currentTargetIdx = 1; ts[1].invulnerable = true;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == -1);
+}
+
+TEST_CASE("a gap-close skill fires when CLOSING on a far target, not when in range") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1 + 1;                            // Melee: small band, so a 10 m target is 'too far'
+    v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f;
+    BotTarget t{}; t.pos = {0,1.7f,-10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.castableSkill[2] = true; v.skillIsGapClose[2] = true;   // a gap-close in slot 2
+    BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.moveFwd);                               // closing on the far target
+    CHECK(out.classSkillSlot == 2);                  // teleport in with the gap-closer
+    // A gap-close EQUIPMENT skill likewise only fires while closing, never in range.
+    v.bootCastable = true; v.bootIsGapClose = true;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).bootSkill);      // closing => boot gap-close fires
+    t.dist = 1.0f; t.pos = {0,1.7f,-1.0f};           // now in melee range
+    BotIntent inRange = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(inRange.moveFwd);                    // not closing
+    CHECK_FALSE(inRange.bootSkill);                  // the gap-close boot is withheld in range
 }
 
 TEST_CASE("casts while kiting a target inside the engage floor") {
@@ -375,6 +469,23 @@ TEST_CASE("sticky target: one that walked out of engagement reach is released") 
     BotTarget ts[2]; BotView v = twoTargets(25.0f, 6.0f, ts);
     v.targetSwitchAllowed = false;
     CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);
+}
+
+TEST_CASE("sticky target: a BOSS is NEVER released for RANGE (the exit is sealed until it dies)") {
+    // The held target is the milestone boss at 25 m — past the ceiling — with the only rival also out
+    // of weapon reach (23 m), so the "reachable beats unreachable" rule can't fire and the CEILING
+    // release is the sole thing in play. A boss is exempt from it (the brain's FIGHT gate exempts it
+    // too, and the two must agree); an ordinary target in the same spot IS released. Ranged weapon
+    // 20 m, so both are unreachable and the discriminator is purely isBoss.
+    BotTarget ts[2]; BotView v = twoTargets(25.0f, 23.0f, ts);
+    v.targetSwitchAllowed = true;       // dwell elapsed: only the release rules decide
+    SUBCASE("boss held") {
+        ts[0].isBoss = true;
+        CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);   // never released for range
+    }
+    SUBCASE("ordinary target released") {
+        CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);   // ceiling drops it to the nearer LOS one
+    }
 }
 
 TEST_CASE("sticky target: a target we can actually REACH beats a held one we cannot") {

@@ -14,6 +14,11 @@ namespace Window {
     s32 getWidth();
     s32 getHeight();
 
+    // Minimize the window — which also drops OS input focus, so the "unfocused = no input, game keeps
+    // running" path takes over. Used by the Autoplay H-key handoff so the player can hand the game to
+    // the bot and switch to another app in one press.
+    void minimize();
+
     // Move the window to fullscreen-desktop on the preferred EXTERNAL WIDESCREEN display — skips the
     // laptop eDP panel and any portrait monitors. Used by the --fullscreen launch flag so capture
     // runs at the monitor's native resolution (1080p). Updates getWidth()/getHeight().

@@ -45,6 +45,26 @@ TEST_CASE("FIGHT skips a distant out-of-band target: travel toward the EXIT, not
     CHECK(fabsf(out.aimYaw) == doctest::Approx(3.14159f).epsilon(0.03)); // faces +Z (exit, yaw ~+-pi), not -Z (~0)
 }
 
+TEST_CASE("FIGHT keeps a distant BOSS: seek and engage it, never idle at the sealed exit") {
+    // The exit is SEALED until the boss dies, so a boss with LOS is engaged from ANY range — unlike
+    // the ordinary straggler above, which is ignored past the ceiling. Melee build (ceiling 12 m),
+    // boss 40 m toward -Z, exit flow toward +Z: the brain must FIGHT (close on and face the boss),
+    // not travel to the exit. This is the "search for the boss and kill it" objective.
+    BotView v = baseView(); v.buildCell = 3*1 + 1;    // Moderate Melee
+    v.weaponRange = 2.0f; v.weaponProjSpeed = 0.0f; v.flowDir = Vec3{0,0,1};   // exit is +Z
+    BotTarget t{}; t.pos = {0,1.7f,-40}; t.dist = 40; t.hasLOS = true; t.isBoss = true;
+    v.targets = &t; v.targetCount = 1;
+    BotIntent out = decide(v);
+    CHECK(out.moveFwd);                               // closing on the boss (past its fire band)
+    CHECK(fabsf(out.aimYaw) < 0.03f);                 // faces the boss (-Z, yaw ~0), not the exit (+Z)
+    // Control: the SAME target that is NOT a boss falls through to travel (faces the exit).
+    BotTarget straggler = t; straggler.isBoss = false;
+    v.targets = &straggler;
+    BotIntent out2 = decide(v);
+    CHECK_FALSE(out2.moveFwd);
+    CHECK(fabsf(out2.aimYaw) == doctest::Approx(3.14159f).epsilon(0.03));   // faces the exit
+}
+
 // --- TRAVEL movement is a WASD decomposition, not "hold W" ---------------------------------------
 // applyBotIntent EASES the aim, so the facing lags the heading for a few tenths of a second after
 // every turn. Holding W through that lag walks the bot wherever it happens to be pointing, which in

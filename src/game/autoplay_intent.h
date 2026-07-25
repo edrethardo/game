@@ -39,6 +39,15 @@ struct BotTarget {
     // hovering enemy is shootable from anywhere — it is not the unreachable ledge sniper the gate
     // exists to ignore.
     bool isFlying = false;
+    // ENT_LOOT_GOBLIN. It flees with a hoard and never attacks, and it despawns when its escape timer
+    // runs out — so the bot RUSHES it above everything else: nearest one wins the target outright and
+    // is engaged/chased from any range, and the movement is a flat-out close (never a kite).
+    bool isLootGoblin = false;
+    // Currently DAMAGE-IMMUNE (Combat::applyDamage returns early): a dormant gargoyle, an entombed
+    // boss, the shielded Engine. Firing at one is wasted — worse, aiming at a dormant gargoyle is what
+    // keeps it asleep — so pickTarget never chooses an invulnerable enemy as the shot target (they
+    // stay in the list for the block/dodge scans, which still react to anything that attacks).
+    bool invulnerable = false;
 };
 
 // Effective ENGAGEMENT range for the doctrine band, from a weapon's authored range + projectile
@@ -110,6 +119,15 @@ struct BotView {
     // castableSkill[i] means "pressing SKILL_i+1 + CLASS_SKILL right now actually casts". The policy
     // must never press a slot that would no-op: a wasted press reads as a bot that ignores its build.
     bool castableSkill[4] = {};
+    // Per-slot: is this skill an AREA skill (hits a cluster — shards / bounces / multi-projectile / a
+    // real blast radius)? The driver fills it from the SkillDef whenever the slot holds an unlocked
+    // skill. The policy fires the biggest castable AoE at a GROUP (Frozen Orb / Meteor / Chain), which
+    // is what makes a caster clear packs instead of poking one target with the cheap slot-0 filler.
+    bool skillIsAoe[4] = {};
+    // Per-slot: is this a TELEPORT / GAP-CLOSE skill (SkillDef.distance > 0 — Holy Smite, Shadow Step/
+    // Strike, Phase Dash)? The policy casts one to CLOSE the gap to a target beyond reach (it blinks
+    // toward the facing), so a melee build teleports onto a far enemy instead of only walking.
+    bool skillIsGapClose[4] = {};
     // EQUIPMENT legendary skills (boots = F, helmet = G), same contract as castableSkill: the driver
     // mirrors handleEquipmentSkillActivation's real gates (the slot is bound to a skill at all,
     // the shared energy pool covers the cost, the tick cooldown has elapsed) so a true here means
@@ -117,6 +135,11 @@ struct BotView {
     // NOT — Break Free is the escape FROM a stun.
     bool bootCastable   = false;
     bool helmetCastable = false;
+    // The equipment legendary on that rail is itself a TELEPORT/GAP-CLOSE skill (Phase Dash on the
+    // Swift Boots). When it is, the policy casts it to CLOSE distance (not in-range, where it would
+    // blink PAST the target), exactly like the class-slot gap-closers.
+    bool bootIsGapClose   = false;
+    bool helmetIsGapClose = false;
     // Sim tick, for the DETERMINISTIC cadences below (strafe side flips, the kiting jump). rand()
     // would desync a replay and make a live bug unreproducible; a tick counter is reproducible and
     // free. Defaulted 0, which puts a hand-built test view at the start of every cadence.
