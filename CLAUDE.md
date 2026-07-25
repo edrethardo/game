@@ -687,9 +687,37 @@ descending, with zero deaths and no permanent stall. On **FOUR_STORY** the routi
 bot never finished into one it descends: across three fixed seeds it now reaches L0 and spends 33-42% of its
 time there (was 0-3%), closing to 2-4 m of the exit, and one seed cleared two floors in 130 s — but it does
 **not yet reliably finish a Descent floor inside ~2 minutes**, and the remaining cost is COMBAT, not
-routing (the bot fires on 45-50% of ticks on a floor holding four stories of enemies). `VERTICAL_HALL` and
-lava are unchanged and still slow, and VH **balcony story-routing oscillates on some seeds** (the ramp goal
-flips as the bot crosses the band edge). Treat "descends every floor type promptly" as unproven.
+routing (the bot fires on 45-50% of ticks on a floor holding four stories of enemies). On
+**VERTICAL_HALL** the bot now CLIMBS (see the ramp note below) — it reliably mounts the ramp, crests onto
+the exit balcony, and closes toward the door — where before it could not get up an exit-upstairs floor at
+all; but like FOUR_STORY it does not reliably FINISH one, and for the same reason (the balcony snipers pull
+it into a fight before it reaches the door). Lava is unchanged and still slow. Treat "descends every floor
+type promptly" as unproven — the shared unsolved problem is combat density on a floor the bot must TRAVERSE,
+not the routing.
+
+**VERTICAL_HALL stair climbing — a committed ramp crossing with a jump assist (measured 2026-07-24).** An
+exit-upstairs VH floor was unfinishable: the bot could not get up the ramp. Four distinct bugs, each found
+by tracing:
+- **The crossing must be COMMITTED to one ramp, not re-picked per tick** (`m_autoplayVhPortal`), and "am I
+  done" is a FEET-HEIGHT test (`StoryNav::feetOnStory`), NOT `onUpperStory` — a ramp is a graduated slab, so
+  the per-cell slab test reports "upper" from the first riser, and the old code stopped routing the instant
+  the climb began, fell back to the flat ground field, and got pulled back off. This also killed the
+  documented per-tick goal oscillation.
+- **`climbing` is fixed by the exit story (`exitUpper`), NOT `exitY > feetY`.** The height test flips false
+  the exact tick the bot crests at 3 m, which made the far end read as the FOOT (so the arrival latch never
+  fired) and made `portalRouteGoal` aim back DOWN the ramp. In VH spawn and exit are always opposite
+  stories, so "exit is upper" == "this is a climb" for the whole crossing.
+- **The release tolerance is TIGHT (0.5 m) and gated on reaching the ramp TOP cell** (`m_autoplayVhCrossed`
+  latches only when on the exit story AND within 2.5 m of `highPos` XZ). The 2D flat flow field cannot
+  represent two stories (a balcony cell and the ground beneath it are ONE node), so releasing while still on
+  the ramp — or on the balcony trusting that field — walks the bot off the open inner edge back down.
+  Once crossed, on the upper story the bot BEELINES to the door (a mid-balcony is a convex slab, so the
+  straight line from ramp top to door centre stays on it) rather than using the flat field.
+- **A climb-assist JUMP** (`m_autoplayVhClimbing`, pulsed ~1.2 s while climbing and below 1.5 m, gated on
+  grounded + not fighting): the ramps are narrow 2-wide graduated slabs and the eased-aim walk drifts the
+  bot off the strip and slides it back before it crests — on some seeds it never passed ~1 m of a 3 m climb.
+  A hop carries it up over the risers. The flag is defaulted false every tick (only the VH climb branch
+  re-arms it) so a following flat floor can't inherit it and jump spuriously.
 
 **Where the residual shake and wall-scraping come from (measured by source, 2026-07-24).** Instrumenting
 every producer of the desired aim and tagging each tick by which one wrote it settles a question that had
@@ -701,9 +729,28 @@ movement key and moves less than 2 cm**, because FIGHT's kite/close/strafe movem
 hazard-vetoed (see the veto-scope paragraph). By contrast the raw flow fields produce enormous SINGLE
 steps — `flowDirection` 151 deg and the descent field 111 deg per tick, both being 4-connected cardinal
 fields — but reach the aim on only 1.5-2.5% of ticks, because the travel-heading commit absorbs them; the
-commit itself runs at 2.05 deg and 2.5 reversals/s. So: aim jitter is a COMBAT-aim problem (lead-corrected
-aim over targets whose AI rewrites velocity every frame), not a navigation one, and it should be attacked
-in `decideCombat` / the aim smoother rather than in the routing.
+commit itself runs at 2.05 deg and 2.5 reversals/s. So: aim jitter is a COMBAT-aim problem, and it was
+then narrowed to a single term (below), not a navigation one.
+
+**The ranged shake is the PROJECTILE-LEAD term, and it is fixed by smoothing the target's VELOCITY, not
+the aim (measured 2026-07-24).** Splitting a projectile-weapon shot's desired yaw into "with lead" vs
+"aim at centre" showed the lead is the amplifier: `decideCombat` aims a projectile weapon at
+`t.pos + t.vel*timeToHit`, an enemy FSM rewrites `velocity` every frame, and at ranged distances
+`timeToHit` is 0.5-1.5 s, so it multiplies that per-frame noise into a lead point metres wide — the desired
+yaw moved **23.8 deg/tick WITH lead against 2.4 without** in the worst window (a 10x amplification), at
+11-22 reversals/s, which is exactly "ultra high frequency low amplitude". It is ranged-ONLY because melee
+and hitscan aim straight at `t.pos`. The fix is a per-target exponential average of the velocity
+(`m_autoplayVelId[]`/`m_autoplayVelEma[]` in `buildBotView`, tau 0.15 s, matched by entity id, rebuilt
+each tick so a target that leaves drops its history) BEFORE the brain leads with it. This is explicitly NOT
+a low-pass on the desired aim — that was tried and rejected earlier because a second lag stage in series
+with the ease pushes the steady-state tracking error past `FIRE_ALIGN_RAD` and mutes fire on crossing
+targets. The target's BEARING stays instantaneous; only the velocity ESTIMATE is filtered, and a short
+average is a strictly BETTER estimate of sustained motion than one frame's sample, so the lead gets more
+accurate, not laggier. Measured after: the with-lead yaw tracks the no-lead yaw within a fraction of a
+degree everywhere (worst 23.8 -> ~2), the applied camera yaw sits at 0.6-2.4 reversals/s, and kills/floors
+are unchanged. The residual reversals still visible in the RAW desired signal (up to 22/s on some sorcerer
+windows) are absorbed by the pre-existing `AIM_DEADZONE_RAD` and never reach the camera — which is what the
+deadzone is for.
 
 **Persistence is per-character.** Each save file (`save_NN.dat`) holds exactly ONE character (`playerCount=1`); the per-lane destination is `m_playerSaveSlot[lane]` and `saveAllCharacters()` writes each active lane to its own slot. In couch co-op both players pick their own slot (New or Continue) in the menu lobby and the shared dungeon runs on **Player 1's floor**; mixed New/Continue lanes work because the menu prepares each lane and calls `startGame(mode, lanesPrepared=true)` (skipping the NEW_GAME wipe). Legacy `playerCount=2` bundle saves still load (and migrate to per-character on the next save). The on-disk layout is **versioned** (`SAVE_VERSION`, currently 3 = GLOVES slot + attack-speed cache in `PlayerInventory`): readers accept the previous version via a `Legacy*V<n>` mirror struct in `engine_persist.cpp`, and `static_assert`s pin the serialized struct sizes — any layout change MUST bump the version and extend the legacy readers. (Save format, menu flow, no-downgrade guard: `engine-reference`.)
 

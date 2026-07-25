@@ -94,14 +94,23 @@ inline Vec3 portalRouteGoal(const StoryPortal& p, Vec3 from, bool climbing) {
     return (dx * dx + dz * dz > kMount * kMount) ? nearEnd : farEnd;
 }
 
-// True when a body's FEET are on the story that `targetY` belongs to. Deliberately a height
-// comparison and NOT onUpperStory: mid-ramp the per-cell slab test reports the upper story while the
-// body is still metres below it (see the note above). The two stories of a VERTICAL_HALL are 3 m
-// apart, so half that separates them cleanly whatever the ramp gradient is doing underfoot.
-inline bool feetOnStory(f32 feetY, f32 targetY) {
-    constexpr f32 kHalfStory = 1.5f;
+// True when a body's FEET are on the story that `targetY` belongs to, within `tol`. Deliberately a
+// height comparison and NOT onUpperStory: mid-ramp the per-cell slab test reports the upper story
+// while the body is still metres below it (see the note above).
+//
+// `tol` is the caller's to choose because the two questions it answers want different values:
+//   * "which story is this body ASSOCIATED with" wants half the 3 m pitch (the default) — a body
+//     anywhere on the upper half belongs to the upper story.
+//   * "has a CLIMB finished, so the ramp commit can be dropped" wants a TIGHT tolerance, because the
+//     flat exit flow field that takes over is 2D and cannot represent two stories — a balcony cell
+//     and the ground beneath it are ONE node — so releasing while still on the ramp hands the bot to
+//     a field that points back down the way it came and yanks it off the climb. Measured: with the
+//     half-story default the Autoplay bot released at 2.0 m of a 3.0 m climb every time, got pulled
+//     back to the ground, re-mounted, and never finished an exit-upstairs VERTICAL_HALL. The climb
+//     must stay committed until the feet are essentially AT the destination height.
+inline bool feetOnStory(f32 feetY, f32 targetY, f32 tol = 1.5f) {
     const f32 d = feetY - targetY;
-    return (d < 0.0f ? -d : d) < kHalfStory;
+    return (d < 0.0f ? -d : d) < tol;
 }
 
 // The XZ goal for a body that wants to get UP but has no ramp: the nearest recorded JUMP PAD.

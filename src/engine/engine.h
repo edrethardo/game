@@ -321,10 +321,35 @@ private:
     // autoplay_nav.h dropHoleCandidates), so the route is A*-planned and then followed waypoint by
     // waypoint. Re-planned on a throttle rather than per tick: A* is a 256-cell search and the goal
     // does not move. {0,0,0} goal = no route (no hole on this story, or none reachable).
+    // PROJECTILE-LEAD velocity smoothing. decideCombat aims a projectile weapon at
+    // `t.pos + t.vel * timeToHit`, and an enemy's velocity is rewritten by its FSM every single
+    // frame (strafe, kite, flank, repath), so the raw value is mostly noise with a signal in it. At
+    // ranged distances timeToHit is 0.5-1.5 s, which MULTIPLIES that noise into a lead point metres
+    // wide — measured against a live target, the desired yaw moved 23.8 deg per tick WITH lead
+    // against 2.4 deg without, a 10x amplification, at ~11-22 direction reversals per second. That
+    // is the "ultra high frequency low amplitude" shake, and it is ranged-only because melee and
+    // hitscan aim straight at t.pos. One EMA per tracked target, matched by entity id.
+    static constexpr u32 AIM_VEL_SLOTS = 16;   // == the bot's target-list cap
+    u32              m_autoplayVelId[AIM_VEL_SLOTS]  = {};   // 0 = free slot
+    Vec3             m_autoplayVelEma[AIM_VEL_SLOTS] = {};
     // VERTICAL_HALL committed ramp: index into DungeonResult::portals, -1 = none chosen. Held for
     // the whole story crossing so the goal cannot flip between two ramps mid-climb; released when
     // the bot's feet reach the exit's story, and re-anchored on a floor change.
     s32              m_autoplayVhPortal = -1;
+    // Latched true once the bot has CROSSED its committed ramp onto the exit story (reached the far
+    // end AND is at that story's height). Needed because "am I on the exit story" alone flips true at
+    // ~2.8 m of a 3 m climb — still on the ramp gradient — and steering anywhere but straight up there
+    // steps the bot off the narrow 2-wide ramp. The latch keeps it climbing until it physically
+    // reaches the top CELL, then hands over to the across-the-balcony door beeline. Reset on a floor
+    // change and dropped if the bot falls back off the story.
+    bool             m_autoplayVhCrossed = false;
+    // Set each tick buildBotView routes an UNFINISHED climb (committed up-ramp, not yet crossed).
+    // updateAutoplay reads it to pulse a climb-assist JUMP: the VERTICAL_HALL ramps are narrow 2-wide
+    // graduated slabs, and the eased-aim + WASD walk drifts the bot off the strip and slides it back
+    // down before it can crest — measured, on some seeds it never got past ~1 m of a 3 m climb. A
+    // periodic hop while climbing carries it up over the risers and back onto the slab. Reset false
+    // whenever not actively climbing (crossed, descending, or off VERTICAL_HALL).
+    bool             m_autoplayVhClimbing = false;
     // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.

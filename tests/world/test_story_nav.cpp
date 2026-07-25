@@ -175,6 +175,13 @@ TEST_CASE("story nav: portalRouteGoal aims at the far end once the near end is r
     const Vec3 g3 = StoryNav::portalRouteGoal(p, Vec3{13.0f, 1.5f, 10.0f}, /*climbing=*/true);
     CHECK(g3.x == doctest::Approx(p.highPos.x));
 
+    // AT THE TOP, the goal must STILL be the top — not flip back to the foot. The driver keeps
+    // `climbing` fixed to the exit story exactly so it does not invert here at the crest: passing
+    // climbing=true at the top height must still return highPos. (Passing climbing based on
+    // `exitY > feetY` would go false here and send the bot back down — the bug this pins against.)
+    const Vec3 g3b = StoryNav::portalRouteGoal(p, Vec3{16.0f, 3.0f, 10.0f}, /*climbing=*/true);
+    CHECK(g3b.x == doctest::Approx(p.highPos.x));
+
     // Descending mirrors it: the top is the near end, the foot the far one.
     const Vec3 g4 = StoryNav::portalRouteGoal(p, Vec3{16.0f, 3.0f, 10.0f}, /*climbing=*/false);
     CHECK(g4.x == doctest::Approx(p.lowPos.x));

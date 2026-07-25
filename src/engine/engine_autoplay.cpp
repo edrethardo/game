@@ -248,6 +248,22 @@ void Engine::updateAutoplay(f32 dt) {
 
     Autoplay::BotIntent in = Autoplay::decide(v);
 
+    // CLIMB-ASSIST JUMP (VERTICAL_HALL up-ramps). buildBotView flags an unfinished climb; the ramps
+    // are narrow 2-wide graduated slabs and the eased-aim walk drifts the bot off the strip and
+    // slides it back before it crests (measured: on some seeds it never passed ~1 m of a 3 m climb).
+    // A steady hop carries it up over the risers. Only pulse while the brain is actually TRAVELLING
+    // (a fight or a potion this tick owns the body — never fight the player's own re-gear), and let
+    // applyBotIntent gate the jump on being grounded. The cadence is a deterministic tick window
+    // (~1.2 s period, a 4-tick pulse) — no rand, so it stays replay-safe like the rest of the bot.
+    // Only pulse in the LOWER part of the climb — the mount is where the risers defeat a plain walk;
+    // higher up the bot has the slab under it and a jump there is as likely to bounce it off the
+    // narrow strip as help. `m_localPlayer.position.y < 1.5` is roughly the lower half of a 3 m ramp.
+    if (m_autoplayVhClimbing && m_localPlayer.position.y < 1.5f &&
+        !in.fire && !in.potion && !in.descend) {
+        const u32 phase = currentLocalTick() % 72;
+        if (phase < 4) in.jump = true;
+    }
+
     // TARGET STICKINESS bookkeeping. Re-run the (pure, cheap — a scan of <= 16 slots) pick with the
     // same view the brain just used, so the driver learns WHICH hostile was engaged and can carry
     // that identity into the next tick. Same target => the dwell accumulates and eventually unlocks
@@ -362,6 +378,7 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayFloorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
         m_autoplayFloorStallTimer = 0.0f;
         m_autoplayVhPortal        = -1;   // ramps belong to the old floor's DungeonResult
+        m_autoplayVhCrossed       = false;
     }
     if (v.doorActive && !bossGate) {
         if (combatProgress) {   // a kill/damage this tick = a real fight worth finishing: restart the window
@@ -971,6 +988,10 @@ Autoplay::BotView Engine::buildBotView() {
     {
         const DungeonResult& dg  = m_level.dungeon;
         const Vec3           pos = m_localPlayer.position;
+        // Default the climb-assist flag OFF every tick; only the VERTICAL_HALL climb branch re-arms
+        // it. Set inside that branch alone, it would otherwise stay stale on the next (flat) floor
+        // and pulse spurious jumps.
+        m_autoplayVhClimbing = false;
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
             // The exit is a balcony door on the OPPOSITE story, reached by a ramp. The crossing is
             // COMMITTED: one ramp is chosen and then walked end to end.
@@ -983,22 +1004,63 @@ Autoplay::BotView Engine::buildBotView() {
             // "climbing stairs is difficult" stall). And the ramp is remembered rather than re-picked
             // per tick, because "nearest end" flips between two ramps as the bot moves and swings the
             // heading with it (the known VH story-routing oscillation).
-            const f32  exitY       = m_level.floorDoorPos.y;
-            const bool onExitStory = StoryNav::feetOnStory(pos.y, exitY);
-            if (!onExitStory) {
-                const bool climbing = exitY > pos.y;
-                // Re-pick only when we have no ramp committed; the commit is dropped the moment the
-                // crossing completes (below) or the floor changes (m_autoplayVhPortal is reset there).
+            const f32  exitY     = m_level.floorDoorPos.y;
+            const bool exitUpper = exitY > 1.5f;
+            // TIGHT height tolerance (0.5 m, ~ a step's worth): "on the exit story" must mean all but
+            // AT the destination height, because the flat 2D flow field that takes over cannot
+            // represent two stories (a balcony cell and the ground beneath it are ONE node), so any
+            // early release hands the bot to a field that walks it back off the climb.
+            const bool onExitStory = StoryNav::feetOnStory(pos.y, exitY, 0.5f);
+            // (m_autoplayVhClimbing was defaulted false above; the climb branch re-arms it.)
+
+            if (!m_autoplayVhCrossed) {
+                // --- Still getting to / across the ramp. ---
+                // `climbing` is fixed by the EXIT STORY, not the instantaneous height. Testing
+                // `exitY > pos.y` flips it to false the exact tick the bot crests at 3 m — which made
+                // the far end read as the FOOT (so the crossed-latch below never fired) and made
+                // portalRouteGoal aim back DOWN the ramp. In VERTICAL_HALL spawn and exit are always
+                // opposite stories, so "exit is upper" == "this crossing is a climb" for its whole
+                // duration, and it stays correct even if the bot falls and must climb again.
+                const bool climbing = exitUpper;
                 if (m_autoplayVhPortal < 0 || m_autoplayVhPortal >= (s32)dg.portalCount)
                     m_autoplayVhPortal = StoryNav::nearestPortalIdx(dg, pos, !climbing);
                 if (m_autoplayVhPortal >= 0) {
-                    const Vec3 goal = StoryNav::portalRouteGoal(dg.portals[m_autoplayVhPortal],
-                                                                pos, climbing);
-                    const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
+                    const StoryPortal& pp  = dg.portals[m_autoplayVhPortal];
+                    const Vec3         far = climbing ? pp.highPos : pp.lowPos;
+                    const f32 fdx = far.x - pos.x, fdz = far.z - pos.z;
+                    // CROSSED only when the bot has reached the ramp's far end IN XZ *and* is at the
+                    // exit story's height — i.e. it is physically on the top CELL, not merely at the
+                    // top height one cell short of it. Latching earlier (on height alone) let the door
+                    // beeline below steer the bot sideways off the narrow 2-wide ramp — measured, it
+                    // reached 3.0 m then fell straight back to the ground, every attempt.
+                    if (onExitStory && (fdx * fdx + fdz * fdz) < 2.5f * 2.5f) {
+                        m_autoplayVhCrossed = true;
+                        m_autoplayVhPortal  = -1;
+                    } else {
+                        // Keep walking the ramp end to end (portalRouteGoal aims foot then top).
+                        const Vec3 goal = StoryNav::portalRouteGoal(pp, pos, climbing);
+                        const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
+                        if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+                        // Climb-assist jump target: a committed UP-ramp we haven't crested. (Descend
+                        // needs no help — gravity does it.) The driver pulses the actual jump.
+                        if (climbing) m_autoplayVhClimbing = true;
+                    }
+                }
+            }
+            if (m_autoplayVhCrossed) {
+                // --- On the exit story. ---
+                if (!onExitStory) {
+                    m_autoplayVhCrossed = false;   // fell back off — re-route to a ramp next tick
+                } else if (exitUpper) {
+                    // DO NOT TRUST THE FLAT FIELD on the upper story (it is 2D — see above — and
+                    // routes off the balcony's open inner edge back to the ground). The exit door
+                    // sits on THIS balcony (the diagonal ramp lands on the very slab it is on), and a
+                    // mid-balcony is a convex slab region, so a straight line from the ramp top to the
+                    // door centre stays on it. Steer at the door directly. (A GROUND exit is a single
+                    // connected story, so its flat field is correct — left untouched, hence exitUpper.)
+                    const Vec3 to{m_level.floorDoorPos.x - pos.x, 0.0f, m_level.floorDoorPos.z - pos.z};
                     if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
                 }
-            } else {
-                m_autoplayVhPortal = -1;   // arrived: release the ramp, the flat field takes over
             }
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
             // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's
@@ -1138,6 +1200,38 @@ Autoplay::BotView Engine::buildBotView() {
         const RayHit hit = Raycast::cast(m_level.grid, eye, toT * (1.0f / d), d);
         s_targets[i].hasLOS = (!hit.hit || hit.distance >= d - 0.1f);
     }
+    // PROJECTILE-LEAD VELOCITY SMOOTHING. Replace each target's raw per-frame velocity with an
+    // exponential average of it before the brain leads a shot with it. See engine.h for the measured
+    // reason: an enemy FSM rewrites velocity every frame, and the lead multiplies that noise by
+    // timeToHit (0.5-1.5 s at ranged distances), so the raw value shakes the crosshair by an order
+    // of magnitude more than the target's actual bearing moves.
+    //
+    // This is NOT the low-pass on the desired aim that was deliberately rejected earlier (which
+    // would add a second lag stage in series with the ease and push the steady-state tracking error
+    // past FIRE_ALIGN_RAD, muting fire on crossing targets). The target's BEARING stays instantaneous
+    // — only the velocity ESTIMATE is filtered, and a short average is a strictly better estimate of
+    // sustained motion than a single frame's sample, so the lead gets more accurate, not laggier.
+    {
+        constexpr f32 kTau = 0.15f;   // s; ~0.1 s to track a genuine direction change, kills 60 Hz noise
+        const f32 alpha = 1.0f - expf(-(f32)FIXED_DT / kTau);   // frame-rate correct, like the aim ease
+        u32  freshId[AIM_VEL_SLOTS]  = {};
+        Vec3 freshVel[AIM_VEL_SLOTS] = {};
+        for (u32 i = 0; i < n && i < AIM_VEL_SLOTS; i++) {
+            const Vec3 raw = s_targets[i].vel;
+            Vec3 sm = raw;                                   // unseen target: seed with its raw value
+            for (u32 j = 0; j < AIM_VEL_SLOTS; j++) {
+                if (m_autoplayVelId[j] != s_targets[i].id || m_autoplayVelId[j] == 0) continue;
+                sm = m_autoplayVelEma[j] + (raw - m_autoplayVelEma[j]) * alpha;
+                break;
+            }
+            freshId[i] = s_targets[i].id; freshVel[i] = sm;
+            s_targets[i].vel = sm;
+        }
+        // Rebuilt wholesale each tick, so a target that left the list simply drops its history —
+        // which is what we want: re-acquiring it later should not lead on a stale velocity.
+        for (u32 j = 0; j < AIM_VEL_SLOTS; j++) { m_autoplayVelId[j] = freshId[j]; m_autoplayVelEma[j] = freshVel[j]; }
+    }
+
     v.targets     = s_targets;
     v.targetCount = n;
 
