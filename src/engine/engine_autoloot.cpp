@@ -67,6 +67,11 @@ bool Engine::autoEquipIfUpgrade(u8 lane, u8 bpIdx) {
 void Engine::autoEquipBackpack(u8 lane) {
     if (lane >= MAX_LOCAL_PLAYERS) return;
     if (!m_inventories[lane].autoMode) return;
+    // Never re-gear while the Autoplay sidearm is worn: the swap deliberately holds a ranged weapon
+    // in a melee build's WEAPON slot, and auto-equip (which runs on every pickup + a housekeeping
+    // pass) would immediately put the melee weapon back and undo it. The sidearm state machine
+    // (engine_autoplay.cpp) owns the weapon slot for the duration. Lane 0 only ever runs Autoplay.
+    if (m_autoplaySidearmActive && lane == 0) return;
     bool changed = true;
     u32 guard = 0;
     while (changed && guard++ < 64) {                      // 64 >> slots; loops only on real swaps

@@ -350,6 +350,15 @@ private:
     // periodic hop while climbing carries it up over the risers and back onto the slab. Reset false
     // whenever not actively climbing (crossed, descending, or off VERTICAL_HALL).
     bool             m_autoplayVhClimbing = false;
+    // MELEE RANGED SIDEARM (Autoplay, VERTICAL_HALL upper-exit only). A melee build cannot hit an
+    // enemy that is only reachable by falling off its balcony, so it temporarily equips the best
+    // ranged weapon from its backpack (BuildScore::bestRangedBackpackIdx) and fires from where it
+    // stands, switching back to melee when the situation clears. All transient — no save/PROTOCOL
+    // change. See Engine::updateSidearm.
+    bool             m_autoplaySidearmActive   = false;  // a ranged weapon is worn IN PLACE of the melee one
+    u32              m_autoplaySidearmMeleeUid  = 0;      // uid of the stashed melee weapon, to find it for the switch-back
+    f32              m_autoplaySidearmDwell     = 0.0f;   // seconds the sidearm has been worn (min-hold, anti-chatter)
+    f32              m_autoplaySidearmCooldown  = 0.0f;   // seconds until another switch is allowed (anti-chatter)
     // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.
