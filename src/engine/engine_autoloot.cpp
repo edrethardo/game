@@ -71,7 +71,10 @@ void Engine::autoEquipBackpack(u8 lane) {
     // in a melee build's WEAPON slot, and auto-equip (which runs on every pickup + a housekeeping
     // pass) would immediately put the melee weapon back and undo it. The sidearm state machine
     // (engine_autoplay.cpp) owns the weapon slot for the duration. Lane 0 only ever runs Autoplay.
-    if (m_autoplaySidearmActive && lane == 0) return;
+    // Gated on m_autoplayActive too: the flag alone once suppressed re-gearing in a NORMAL game
+    // after an autoplay run ended mid-swap (exitAutoplayRun now restores the melee weapon and
+    // clears the flag — this is the belt-and-braces half).
+    if (m_autoplayActive && m_autoplaySidearmActive && lane == 0) return;
     bool changed = true;
     u32 guard = 0;
     while (changed && guard++ < 64) {                      // 64 >> slots; loops only on real swaps

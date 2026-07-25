@@ -391,10 +391,32 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplaySidearmActive   = false;  // a fresh run never inherits a mid-fight sidearm swap
     m_autoplaySidearmDwell    = 0.0f;
     m_autoplaySidearmCooldown = 0.0f;
+    m_autoplaySidearmMeleeUid   = 0;
+    m_autoplaySidearmMeleeRange = 0.0f;
     m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
     m_autoplayDoorCheckDist   = 0.0f;
     m_autoplayExitStallTimer  = 0.0f;
     m_autoplayLastFloor       = 0;
+    m_autoplayFloorCheckDist  = 1e9f;   // long (kill-agnostic) floor-stall window, same re-anchor
+    m_autoplayFloorStallTimer = 0.0f;
+    // Combat memory. The sticky-target identity is the sharp one: entity pool generations RESET on
+    // a run start and slots allocate in the same order, so a stale id from run 1 can COLLIDE with an
+    // unrelated hostile in run 2 and start the new run locked onto it with a full switch dwell.
+    m_autoplayTargetId    = 0;
+    m_autoplayTargetDwell = 0.0f;
+    m_autoplayTargetBlind = 0.0f;
+    for (u32 i = 0; i < AIM_VEL_SLOTS; i++) { m_autoplayVelId[i] = 0; m_autoplayVelEma[i] = Vec3{0, 0, 0}; }
+    // Travel/aim steadiness + the behaviour leashes: a committed heading from run 1 would steer run
+    // 2's first ticks, and half-charged dodge leashes would refuse its first rolls for no reason.
+    m_autoplayTravelDir   = Vec3{0, 0, 0};
+    m_autoplayTravelHold  = 0.0f;
+    m_autoplayDodgeCd     = 0.0f;
+    m_autoplayGapCloseCd  = 0.0f;
+    m_autoplayLookBehindTimer = 0.0f;
+    m_autoplayLookBehindDone  = false;
+    m_autoplayVhClimbing  = false;
+    // The two story flow fields need no reset here: their staleness stamp is the floor's seed
+    // identity (levelSeed + floor + difficulty, see buildBotView), which a new run can never match.
 
     // One line per run: an AFK session is read back from the log, and "which build is it playing?"
     // is the first question of any autoplay bug report (the class/build mismatch above was found

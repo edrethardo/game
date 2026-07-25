@@ -347,6 +347,11 @@ private:
     // change. See Engine::updateSidearm.
     bool             m_autoplaySidearmActive   = false;  // a ranged weapon is worn IN PLACE of the melee one
     u32              m_autoplaySidearmMeleeUid  = 0;      // uid of the stashed melee weapon, to find it for the switch-back
+    // The stashed melee weapon's engagement reach, captured at draw time. While the sidearm is worn
+    // the view reports the RANGED weapon's numbers (that is the point of the override), so the
+    // trigger has to keep judging "could melee reach this?" with THESE numbers or it clears itself
+    // the instant the sidearm is drawn (see updateSidearm).
+    f32              m_autoplaySidearmMeleeRange = 0.0f;
     f32              m_autoplaySidearmDwell     = 0.0f;   // seconds the sidearm has been worn (min-hold, anti-chatter)
     f32              m_autoplaySidearmCooldown  = 0.0f;   // seconds until another switch is allowed (anti-chatter)
     // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).

@@ -28,8 +28,7 @@ TEST_CASE("row sets risk: tanky drinks late & blocks, glass drinks early & dodge
     CHECK(tankyMelee.blocks);
     CHECK(glassMelee.dodgesProactively);
     CHECK_FALSE(tankyMelee.dodgesProactively);
-    CHECK(glassMelee.usesCover);                                 // glass breaks LOS
-    CHECK_FALSE(tankyMelee.usesCover);
+    CHECK(glassMelee.dodgeCooldownSec < tankyMelee.dodgeCooldownSec);   // glass rolls on the shortest leash
 }
 
 TEST_CASE("engagement band is expressed as a fraction of the weapon's attackRange") {
@@ -37,7 +36,6 @@ TEST_CASE("engagement band is expressed as a fraction of the weapon's attackRang
     const Doctrine d = doctrineFor(BuildScore::DEFAULT_BUILD_CELL);  // Moderate/Melee
     CHECK(d.engageMin >= 0.0f);
     CHECK(d.engageMax <= 2.0f);            // never more than 2x attackRange
-    CHECK(d.disengageCount >= 3);          // "surrounded" threshold, in enemies
 }
 
 TEST_CASE("every cell 0..8 yields a valid doctrine (no gaps)") {

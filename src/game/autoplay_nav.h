@@ -107,9 +107,10 @@ inline bool padAhead(const LevelGrid& g, Vec3 from, Vec3 dir) {
 //
 // This is the "prefer not to fall down" test, and it is DISTINCT from stepAllowed's hazard veto,
 // which deliberately does NOT cover balcony-edge drops (those are intentional traversal for the
-// TRAVEL/descent layer). Here we want the opposite: the FIGHT branch's kite/close/strafe movement
-// must never carry the bot off an edge chasing an enemy. The caller is responsible for applying it
-// ONLY to combat movement (see BotIntent::engaging) so it can never veto an intended descent step.
+// TRAVEL/descent layer). The caller is responsible for SCOPING it to floors where no movement
+// wants a fall: the driver applies it to ALL movement producers, but only on a VHALL upper-exit
+// climb — never on FOUR_STORY, where walking into a drop hole IS the descent, and never on a
+// ground-exit VHALL, where dropping off the spawn balcony is the way down.
 //
 // `effectiveFloorHeight` picks the surface the body would stand on in the destination cell for its
 // current height; if that surface sits more than PLATFORM_STEP_TOLERANCE below the feet, stepping

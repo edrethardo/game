@@ -651,7 +651,12 @@ four stories share one full-height wall skeleton — but `Pathfinder::findPath` 
 hole across the floor returned nothing and the code fell back to the wall-pointing bearing. So routing is
 a **BFS flow field seeded from this story's clean drop holes** (`game/autoplay_descent.{h,cpp}`,
 `Autoplay::DescentField`), rebuilt only when the bot changes story or floor (~2k cells, three times a
-floor). It mirrors `LevelGridSystem::buildFlowField` — same encoding, 4-connected expansion, and the
+floor). The staleness stamp for both story fields (this one and the VHALL field) is the floor's **seed
+identity** (`levelSeed + floor*7919 + difficulty*104729`, the same fold `startGame` builds the dungeon
+from), NOT the bare floor number: floor numbers repeat across runs and difficulty tiers while the forced
+grid sizes and fixed 3 m story pitches also match, so a floor-number stamp resurrected the PREVIOUS
+maze's field and routed the bot on geometry that no longer existed. It mirrors
+`LevelGridSystem::buildFlowField` — same encoding, 4-connected expansion, and the
 **steer-at-the-next-cell-CENTRE** readout, which is the anti-wall-hug rule — and differs in two things:
 it is seeded from holes, and it **excludes `CELL_JUMPPAD` cells entirely**. Three further rules make it
 work, each from a measured failure:
@@ -724,16 +729,27 @@ rules keep the bot from wandering off to shoot ranged enemies, and above all fro
 VERTICAL_HALL climb. Both are scoped to **VHALL floors whose exit is UPPER** (`floorDoorPos.y > 1.5f`):
 FOUR_STORY descends BY falling through drop holes and is untouched, and a ground-exit VHALL wants the bot to
 drop OFF its balcony to descend, so the fall protection there would only get in the way. (1) **FALL VETO** —
-the FIGHT branch's kite/close/strafe movement, which is deliberately un-hazard-vetoed (see the veto-scope
-paragraph), is checked against `Autoplay::wouldFall` (`autoplay_nav.h`: the destination cell's
-`effectiveFloorHeight` sits more than a step below the feet) per WASD component, so a fight can never carry
-the bot off the balcony rim it just climbed to. It is gated on `BotIntent::engaging` (set only by
-`decideCombat`) so it only ever touches FIGHT movement, never a TRAVEL/descent step — walking into a drop
-hole to descend is a fall the bot WANTS. (2) **MELEE RANGED SIDEARM** — a melee build on that climb that
+EVERY movement producer is checked against `Autoplay::wouldFall` (`autoplay_nav.h`: the destination cell's
+`effectiveFloorHeight` sits more than a step below the feet) per WASD component. On this floor type no
+movement ever WANTS a fall — the two-story field only emits height-continuous steps — so the veto covers
+FIGHT's kite/close/strafe, TRAVEL, and the escape ladder alike. It was originally gated on a FIGHT-only
+`BotIntent::engaging` flag, which the 2026-07-25 adversarial review found left two holes (the escape ladder
+could walk a wedged bot off the balcony it had just climbed, and a stale committed travel heading crossed
+the rim unchecked); the gate was dropped and the now-consumerless flag removed. The **travel-heading
+commit** carries its own matching release: on a VHALL upper-exit floor a committed heading that `wouldFall`
+is dropped immediately — the field can't point off an edge, but the commit replays a heading up to 0.4 s
+old, and a mid-ramp heading held through the crest ran straight across the 2-cell rim (the residual "climbs
+then drops"). (2) **MELEE RANGED SIDEARM** — a melee build on that climb that
 meets a hostile it can only reach by falling (out of melee reach AND the step toward it would fall) equips
 the best ranged weapon already in its backpack (`BuildScore::bestRangedBackpackIdx` — a melee build keeps
 ranged weapons because `worthPickingUp` reasons over all nine build cells) via `Inventory::equip`, fires from
 where it stands, and switches back to melee when the trigger clears (min 3 s dwell, 5 s between switches).
+The trigger is judged with the **stashed MELEE weapon's reach + the persisted build cell** even while the
+sidearm is worn (`m_autoplaySidearmMeleeRange`) — judging it with the live view's numbers (a pistol's reach)
+cleared it the instant the sidearm was drawn, collapsing "keep it while the trigger holds" into a blind
+3 s-on/5 s-off duty cycle. `exitAutoplayRun` restores the melee weapon and clears the flag (and the
+auto-equip suppression is additionally gated on `m_autoplayActive`), so a run that ends mid-swap can no
+longer leave a NORMAL game's lane-0 re-gearing suppressed.
 While the sidearm is worn: `getEffectiveWeapon` already makes the weapon view ranged, `buildBotView`
 overrides the doctrine cell to the Ranged column (`Autoplay::rangedCellFor`) so the brain holds ground
 instead of walking a gun into melee, and `autoEquipBackpack` is hard-suppressed (`m_autoplaySidearmActive`)

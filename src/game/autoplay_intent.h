@@ -155,10 +155,6 @@ struct BotIntent {
     // the OFFENSIVE gap-closer charge (true) are deliberately rate-limited apart — a bot that just
     // ate its defensive roll must still be able to charge, and vice versa.
     bool dodgeIsGapClose = false;
-    // True on a tick the FIGHT branch produced this intent (decideCombat). The driver applies the
-    // off-a-ledge veto (Autoplay::wouldFall) to combat movement ONLY, so it can never cancel an
-    // intended TRAVEL/descent step (walking into a drop hole to descend is a fall the bot WANTS).
-    bool engaging = false;
     bool potion = false, reload = false, descend = false, interact = false;
     s8   classSkillSlot = -1;                 // 0..3 => select SKILL_n + press CLASS_SKILL; -1 none
     bool bootSkill = false, helmetSkill = false;

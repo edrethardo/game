@@ -119,24 +119,3 @@ TEST_CASE("stunned: emits no move/fire/dodge (CC correctness even in the brain)"
     CHECK_FALSE(out.dodge);
 }
 
-TEST_CASE("engaging flag: set on a FIGHT tick, clear on TRAVEL and DESCEND") {
-    // FIGHT: an in-band LOS target => decideCombat => engaging true.
-    {
-        BotView v = baseView(); v.buildCell = 3*1 + 1;   // Moderate Melee
-        v.weaponRange = 2.0f;
-        BotTarget t{}; t.pos = {0,1.7f,2}; t.dist = 2.0f; t.hasLOS = true;
-        v.targets = &t; v.targetCount = 1;
-        CHECK(decide(v).engaging);
-    }
-    // TRAVEL: no targets, just a flow heading => not engaging.
-    {
-        BotView v = baseView(); v.flowDir = Vec3{1,0,0};
-        CHECK_FALSE(decide(v).engaging);
-    }
-    // DESCEND: at the door, boss dead => not engaging.
-    {
-        BotView v = baseView(); v.atExit = true; v.flowDir = Vec3{0,0,0};
-        v.doorActive = true; v.distToDoor = 1.0f; v.hasBoss = false; v.bossAlive = false;
-        CHECK_FALSE(decide(v).engaging);
-    }
-}

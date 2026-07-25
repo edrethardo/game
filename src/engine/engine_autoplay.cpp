@@ -219,11 +219,26 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayTargetBlind = 0.0f;
     v.targetBlindGrace = m_autoplayTargetBlind <= Autoplay::TARGET_LOS_GRACE;
 
+    // Floor-type facts shared by several blocks below. VHALL-UPPER-EXIT is the "protect the climb"
+    // scope (the fall veto + the commit's edge release); the pad carve-outs mirror the travel veto
+    // in buildBotView so a COMMITTED heading is re-judged by the same rules the fresh one passed.
+    const bool vhallUpperExit = m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
+                                m_level.floorDoorPos.y > 1.5f;
+    const bool commitAvoidPads = m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
+                                 !Autoplay::onJumpPad(m_level.grid, m_localPlayer.position) &&
+                                 !m_autoplayDescent.paddedOnly;
+
     // TRAVEL-HEADING COMMIT (aim steadiness, the other half). Hold whichever heading we committed to
-    // rather than re-deciding the flow byte + detour fan every tick. Three release conditions, all of
+    // rather than re-deciding the flow byte + detour fan every tick. Four release conditions, all of
     // them safety- rather than time-driven:
-    //   * the committed step stopped being hazard-safe (re-vetoed every tick — the commit can never
-    //     drive the bot into a wall or lava it would otherwise have refused),
+    //   * the committed step stopped being hazard-safe — re-vetoed every tick BY THE SAME RULES the
+    //     fresh heading passed in buildBotView (jump pads count on a Descent floor), so the commit
+    //     can never drive the bot somewhere the fresh heading would have refused,
+    //   * on a VHALL upper-exit climb, the committed step WOULD FALL (Autoplay::wouldFall). The
+    //     two-story field can never point off an edge, but the commit replays a heading up to
+    //     0.4 s old: crest the ramp and the fresh heading turns ~90° along the balcony — under the
+    //     120° release below — while the held mid-ramp heading runs straight across the 2-cell rim
+    //     (2.4 m at walk speed). That stale replay was the residual "climbs then drops".
     //   * the fresh heading points more than ~120° away (a genuine route change, e.g. the exit is now
     //     behind us) — a 45/90° disagreement is exactly the boundary toggle we are damping, so that
     //     one deliberately does NOT release,
@@ -239,7 +254,10 @@ void Engine::updateAutoplay(f32 dt) {
         } else if (m_autoplayTravelHold > 0.0f && haveHeld &&
                    dot(m_autoplayTravelDir, v.flowDir) > kRouteReversed &&
                    Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, m_localPlayer.position.y,
-                                         m_autoplayTravelDir, m_level.lavaFloor)) {
+                                         m_autoplayTravelDir, m_level.lavaFloor, commitAvoidPads) &&
+                   !(vhallUpperExit &&
+                     Autoplay::wouldFall(m_level.grid, m_localPlayer.position,
+                                         m_localPlayer.position.y, m_autoplayTravelDir))) {
             v.flowDir = m_autoplayTravelDir;                  // keep walking the committed heading
         } else {
             m_autoplayTravelDir  = v.flowDir;                 // re-commit to this tick's choice
@@ -756,19 +774,21 @@ void Engine::updateAutoplay(f32 dt) {
         if (in.moveLeft  && blocked(right * -1.0f))  in.moveLeft  = false;
     }
 
-    // FALL VETO — VERTICAL_HALL with an UPPER exit ONLY. The FIGHT branch's kite/close/strafe
-    // movement is otherwise un-hazard-vetoed (short, reactive, enemy-derived — see the veto-scope
-    // note in CLAUDE.md), which is exactly how a kiting bot backs off a balcony rim while chasing an
-    // enemy across a gap. Scoped tightly on purpose:
+    // FALL VETO — VERTICAL_HALL with an UPPER exit ONLY, and for EVERY movement producer. On this
+    // floor type no movement ever WANTS a fall: the two-story field only emits height-continuous
+    // steps, FIGHT's kite/close/strafe is enemy-derived and blind to edges, and the escape ladder /
+    // unstick strafes only want to MOVE, not to descend. So the veto covers them all. It was
+    // originally gated on BotIntent::engaging (FIGHT movement only), which left two holes: the
+    // escape ladder could walk a wedged bot clean off the balcony it had just climbed (escapeHeading
+    // knows walls/lava, not edges), and a stale committed travel heading crossed the rim unchecked.
+    // Scope stays tight on purpose:
     //   * VHALL only — FOUR_STORY descends BY falling through drop holes (the pad block above + the
     //     descent router) and must stay untouched.
     //   * EXIT UPPER only (floorDoorPos.y > 1.5 m) — when the exit is on the GROUND the bot spawned
     //     on a balcony and must get DOWN, and dropping off the rim is a valid way down; a fall veto
     //     there would only hinder the descent. The protection is for the CLIMB, where a fall undoes it.
-    //   * in.engaging — only FIGHT movement, never a TRAVEL/descent step.
     // Applied per WASD component so the bot slides along the safe axes instead of freezing.
-    if (in.engaging && m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&
-        m_level.floorDoorPos.y > 1.5f) {
+    if (vhallUpperExit) {
         const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
         const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
         const Vec3 p     = m_localPlayer.position;
@@ -877,12 +897,21 @@ void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
     // a VHALL upper-exit climb — the one place the "don't fall to reach an enemy" rule bites.
     bool trigger = false;
     if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL && m_level.floorDoorPos.y > 1.5f) {
-        const Autoplay::Doctrine doc = Autoplay::doctrineFor(v.buildCell);
-        const f32 ceil = Autoplay::engageCeiling(v, doc);
+        // Judge the trigger with the MELEE build's numbers even while the sidearm is worn. The view
+        // is the RANGED one then (buildBotView overrides weaponRange + buildCell for the brain's
+        // sake), and judging "already in / near melee reach" with a pistol's reach skipped every
+        // enemy on the floor — the trigger cleared the instant the sidearm was drawn, the "keep it
+        // while the trigger holds" rule never held, and the state machine collapsed to a 3 s dwell
+        // on / 5 s cooldown off duty cycle while the cross-gap enemy stood there the whole time.
+        const f32 meleeReach = m_autoplaySidearmActive ? m_autoplaySidearmMeleeRange : v.weaponRange;
+        const u8  meleeCell  = m_autoplaySidearmActive ? inv.buildCell : v.buildCell;
+        const Autoplay::Doctrine doc = Autoplay::doctrineFor(meleeCell);
+        // engageCeiling's own formula, on the melee numbers (v.weaponRange is the sidearm's).
+        const f32 ceil = fmaxf(doc.engageMax * meleeReach, Autoplay::THREAT_RADIUS);
         for (u32 i = 0; i < v.targetCount; i++) {
             const Autoplay::BotTarget& t = v.targets[i];
             if (!t.hasLOS || t.dist > ceil) continue;
-            if (t.dist <= v.weaponRange * 1.2f) continue;          // already in / near melee reach
+            if (t.dist <= meleeReach * 1.2f) continue;             // already in / near melee reach
             const Vec3 toT{t.pos.x - v.pos.x, 0.0f, t.pos.z - v.pos.z};
             if (lengthSq(toT) < 1e-6f) continue;
             if (Autoplay::wouldFall(m_level.grid, v.pos, v.pos.y, toT)) { trigger = true; break; }
@@ -894,7 +923,8 @@ void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
         if (trigger && m_autoplaySidearmCooldown <= 0.0f && v.weaponIsMelee) {
             const s32 idx = BuildScore::bestRangedBackpackIdx(inv, m_itemDefs, m_itemDefCount);
             if (idx >= 0) {
-                m_autoplaySidearmMeleeUid = inv.equipped[(u32)ItemSlot::WEAPON].uid;  // stash BEFORE equip
+                m_autoplaySidearmMeleeUid   = inv.equipped[(u32)ItemSlot::WEAPON].uid;  // stash BEFORE equip
+                m_autoplaySidearmMeleeRange = v.weaponRange;   // the melee reach the trigger keeps judging by
                 Inventory::equip(inv, (u8)idx, m_itemDefs);   // ranged weapon -> WEAPON slot; melee -> bag
                 m_autoplaySidearmActive = true;
                 m_autoplaySidearmDwell  = 0.0f;
@@ -1115,6 +1145,17 @@ Autoplay::BotView Engine::buildBotView() {
     {
         const DungeonResult& dg  = m_level.dungeon;
         const Vec3           pos = m_localPlayer.position;
+        // The story fields' staleness stamp must be the floor's IDENTITY, not its NUMBER. Floor
+        // numbers repeat — a new run's floor 9 is a different maze, and the difficulty ladder walks
+        // the same numbers again on the next tier — while everything else the ensure* early-outs
+        // compare matches in exactly those cases (stacked grids are FORCED sizes, storys sit on
+        // fixed 3 m pitches, a VHALL door is upper half the time). A bare floor number therefore
+        // resurrected the PREVIOUS maze's field and routed the bot on geometry that no longer
+        // exists. This is the same seed fold startGame builds the dungeon from (levelSeed + floor +
+        // difficulty), so it changes exactly when the geometry does and never otherwise.
+        const u32 floorStamp = m_level.levelSeed
+                             + m_level.currentFloor * 7919u
+                             + static_cast<u32>(m_difficulty) * 104729u;
         // Default the climb-assist flag OFF every tick; only the VERTICAL_HALL climb branch re-arms
         // it. Set inside that branch alone, it would otherwise stay stale on the next (flat) floor
         // and pulse spurious jumps.
@@ -1128,7 +1169,7 @@ Autoplay::BotView Engine::buildBotView() {
             // node (3 m) is never height-continuous with the ground beside it, it can NEVER steer the
             // bot off a balcony edge, which is what made every prior version "drop afterward".
             if (Autoplay::ensureVHallField(m_autoplayVHall, m_level.grid, m_level.floorDoorPos,
-                                           m_level.currentFloor)) {
+                                           floorStamp)) {
                 const Vec3 vd = Autoplay::vhallDirection(m_autoplayVHall, m_level.grid, pos);
                 if (lengthSq(vd) > 1e-6f) v.flowDir = vd;
             }
@@ -1152,7 +1193,7 @@ Autoplay::BotView Engine::buildBotView() {
             // ordinary exit flow field — which is exactly the walk to the door.
             const f32 storyY = Autoplay::botStoryY(m_level.grid, pos);
             if (Autoplay::ensureDescentField(m_autoplayDescent, m_level.grid, dg, storyY,
-                                             m_level.currentFloor)) {
+                                             floorStamp)) {
                 const Vec3 dd = Autoplay::descentDirection(m_autoplayDescent, m_level.grid, pos);
                 if (lengthSq(dd) > 1e-6f) v.flowDir = dd;
             }
@@ -1434,6 +1475,21 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt, 
 // armed under the menu (a stale held action could otherwise leak into menu navigation). The main-menu
 // confirm reset also clears m_autoplayActive; this covers the in-game quit / death-quit / victory exits.
 void Engine::exitAutoplayRun() {
+    // The sidearm state machine only ticks inside the bot loop, so a run that ends while the
+    // sidearm is drawn would otherwise leak it past the exit: the flag stayed set, the melee weapon
+    // stayed in the bag, and — because the auto-equip suppression keyed on the flag alone — every
+    // later NORMAL Auto-Loot game in the same process had lane-0 re-gearing silently dead. Put the
+    // melee weapon back (same uid search as the stow path; slots move as loot comes and goes) and
+    // clear the state with the rest of the disarm.
+    if (m_autoplaySidearmActive) {
+        PlayerInventory& inv = m_inventories[0];
+        for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++)
+            if (inv.backpack[i].defId != 0xFFFF && inv.backpack[i].uid == m_autoplaySidearmMeleeUid) {
+                Inventory::equip(inv, i, m_itemDefs);
+                break;
+            }
+        m_autoplaySidearmActive = false;
+    }
     m_autoplayActive = false;
     Input::setBotOverlayActive(false);   // also clears any held synthetic actions (input.cpp)
     m_autoplayRespawnTimer = 0.0f;

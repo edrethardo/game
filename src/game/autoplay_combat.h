@@ -327,7 +327,6 @@ inline s32 pickTarget(const BotView& v, const Doctrine& d) {
 
 inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     BotIntent out{};
-    out.engaging = true;   // this intent came from FIGHT — the driver may fall-veto its movement
     out.aimYaw = v.yaw; out.aimPitch = v.pitch;
     const s32 ti = pickTarget(v, d);
     if (ti < 0) return out;                       // no LOS target: caller falls through to TRAVEL

@@ -42,7 +42,9 @@ struct DescentField {
     u32 cap    = 0;          // allocated cell count (grown, never shrunk)
     u32 width  = 0, depth = 0;
     f32 storyY = 1e9f;       // the story this field routes on
-    u32 stamp  = 0xFFFFFFFFu;// floor identity, so a new floor can never reuse a stale field
+    u32 stamp  = 0xFFFFFFFFu;// floor identity — must be the floor's SEED fold, not its NUMBER: floor
+                             // numbers repeat across runs/difficulty tiers while grid size and story
+                             // heights also match, which is exactly the early-out comparison below
     bool valid = false;      // false when the story has no way down (L0) — caller keeps the exit field
     // True when this story offered ONLY return-lift holes, so the field had to seed padded ones.
     // The driver reads it to stand its pad-avoidance veto down: otherwise it would refuse the last

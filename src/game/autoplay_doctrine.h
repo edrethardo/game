@@ -4,7 +4,7 @@
 // table decides how it FIGHTS with that gear: the column (0 Magic / 1 Melee / 2 Ranged) sets the
 // engagement band as a fraction of the weapon's attackRange; the row (0 Tanky / 1 Moderate /
 // 2 Glass Cannon) sets risk posture (when to drink, whether to hold-block or proactively dodge,
-// whether to fight from cover). Pure — engagement is unitless (x attackRange) so the same table
+// how short the roll leash runs). Pure — engagement is unitless (x attackRange) so the same table
 // serves a 2 m sword and a 40 m wand. Consumed by autoplay_combat.h / autoplay_brain.
 #pragma once
 #include "core/types.h"
@@ -58,19 +58,21 @@ inline u8 rangedCellFor(u8 cell) {
     return static_cast<u8>(BuildScore::buildRow(cell) * BuildScore::BUILD_COLS + 2);
 }
 
+// NB: every field here is CONSUMED somewhere (the brain, decideCombat, or the driver's leashes).
+// Three planned knobs — cover use, high-ground seeking, and a surrounded-disengage count — were
+// removed after shipping with no consumer at all: a knob nothing reads is a trap for whoever tunes
+// it (flipping it changes nothing and the doctrine table lies about what the bot does). Reintroduce
+// one only together with the code that reads it.
 struct Doctrine {
     f32  engageMin = 0.0f;   // hold no closer than this * attackRange (kite floor; 0 = commit)
     f32  engageMax = 1.0f;   // close to at least this * attackRange to fire
     f32  potionHpFrac = 0.5f;// drink when hp/maxHp drops below this
-    u8   disengageCount = 3; // this many enemies inside melee arc => break off (per-cell; default 3 = Moderate)
     bool blocks = false;             // hold-block between actions / during reloads
     bool dodgesProactively = false;  // roll out of an INCOMING melee swing (Autoplay::swingIsIncoming)
     // Minimum seconds between two proactive rolls, enforced by the DRIVER (the engine's own dodge
     // cooldown is 1 s, which as a behaviour rate reads as constant panicked twitching). Glass Cannon
     // keeps the shortest leash — "never get touched" is its identity — but is still bounded.
     f32  dodgeCooldownSec = 4.0f;
-    bool usesCover = false;          // reload / recast from findCoverCell, break LOS on cooldown
-    bool preferHighGround = false;    // seek balconies/ramps on stacked floors
 };
 
 inline Doctrine doctrineFor(u8 cell) {
@@ -97,13 +99,10 @@ inline Doctrine doctrineFor(u8 cell) {
     switch (row) {
         case 0: // Tanky
             d.potionHpFrac = 0.35f; d.blocks = true;  d.dodgesProactively = false;
-            d.usesCover = false; d.disengageCount = 6; break;
+            break;
         case 2: // Glass Cannon
             d.potionHpFrac = 0.60f; d.blocks = false; d.dodgesProactively = true;
-            // usesCover is intentional even for Glass/Melee, whose hug band (engageMax 0.60) keeps
-            // it close: there it means retreat-to-cover BETWEEN strikes (hit-and-run), not stand
-            // off. For Glass/Ranged & Glass/Magic it is the usual break-LOS-while-recasting.
-            d.usesCover = true;  d.disengageCount = 2; d.dodgeCooldownSec = 2.5f;
+            d.dodgeCooldownSec = 2.5f;
             d.engageMax = (col == 1) ? d.engageMax : 1.00f;      // ranged/magic go max-range
             // MAXIMUM DAMAGE OUTPUT: hold ground and DPS instead of kiting. Kiting trades firing
             // uptime for spacing, and a Glass Cannon's whole identity is output, not positioning — it
@@ -112,13 +111,10 @@ inline Doctrine doctrineFor(u8 cell) {
             // KITE_HOLD_GROUND_M floor still lets them keep a melee threat at arm's length) so almost
             // every tick is spent on target. ("glass cannon builds focus on maximum damage output".)
             d.engageMin = (col == 1) ? 0.00f : 0.15f;
-            // Only Glass/Ranged seeks high ground — a deliberate asymmetry: ranged gains the most
-            // from open sightlines, while melee wants to close and magic fights mid, so neither
-            // pays the traversal cost to climb.
-            d.preferHighGround = (col == 2); break;
+            break;
         default: // Moderate
             d.potionHpFrac = 0.50f; d.blocks = (col != 2); d.dodgesProactively = (col == 2);
-            d.usesCover = false; d.disengageCount = 3; break;
+            break;
     }
 
     // RANGED BUILDS BLOCK TOO. The row table used to leave the shield off for Moderate/Ranged and

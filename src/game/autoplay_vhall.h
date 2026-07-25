@@ -44,7 +44,9 @@ struct VHallField {
     u8* dir    = nullptr;    // 2*width*depth, or null before the first build
     u32 cap    = 0;          // allocated entry count (grown, never shrunk)
     u32 width  = 0, depth = 0;
-    u32 stamp  = 0xFFFFFFFFu; // floor identity, so a new floor can never reuse a stale field
+    u32 stamp  = 0xFFFFFFFFu; // floor identity — must be the floor's SEED fold, not its NUMBER: floor
+                              // numbers repeat across runs/difficulty tiers while the forced 52-grid and
+                              // a coin-flip doorY also match, which is the whole early-out comparison
     f32 doorY  = 0.0f;       // the door story this field was seeded for (rebuild if it changes)
     bool valid = false;
 };
