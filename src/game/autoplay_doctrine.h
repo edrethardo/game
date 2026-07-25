@@ -85,7 +85,12 @@ inline Doctrine doctrineFor(u8 cell) {
     switch (col) {
         case 1: d.engageMin = 0.00f; d.engageMax = 0.60f; break;  // Melee: hug
         case 2: d.engageMin = 0.55f; d.engageMax = 1.00f; break;  // Ranged: kite band
-        default: d.engageMin = 0.30f; d.engageMax = 0.75f; break;  // Magic: mid
+        // Magic: mid-range, but AGGRESSIVE with the wand. engageMax is the fire gate (out.fire fires
+        // anything within engageMax x weaponRange, and the same gate drives skill-casting), so 0.90
+        // makes a caster poke with its wand and cast across most of its reach instead of holding fire
+        // until mid-range; the low engageMin keeps it holding ground and shooting rather than kiting.
+        // (Was 0.30/0.75 — "make magic autoplay shoot the weapon more aggressively".)
+        default: d.engageMin = 0.15f; d.engageMax = 0.90f; break;  // Magic: mid, shoots aggressively
     }
 
     // Row: risk posture.
@@ -100,6 +105,13 @@ inline Doctrine doctrineFor(u8 cell) {
             // off. For Glass/Ranged & Glass/Magic it is the usual break-LOS-while-recasting.
             d.usesCover = true;  d.disengageCount = 2; d.dodgeCooldownSec = 2.5f;
             d.engageMax = (col == 1) ? d.engageMax : 1.00f;      // ranged/magic go max-range
+            // MAXIMUM DAMAGE OUTPUT: hold ground and DPS instead of kiting. Kiting trades firing
+            // uptime for spacing, and a Glass Cannon's whole identity is output, not positioning — it
+            // survives on its proactive dodge (i-frames) and its early potion (60%), not on distance.
+            // Melee already hugs (engageMin 0); ranged/magic stop giving ground early (the 4 m
+            // KITE_HOLD_GROUND_M floor still lets them keep a melee threat at arm's length) so almost
+            // every tick is spent on target. ("glass cannon builds focus on maximum damage output".)
+            d.engageMin = (col == 1) ? 0.00f : 0.15f;
             // Only Glass/Ranged seeks high ground — a deliberate asymmetry: ranged gains the most
             // from open sightlines, while melee wants to close and magic fights mid, so neither
             // pays the traversal cost to climb.

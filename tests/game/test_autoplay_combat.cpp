@@ -110,9 +110,12 @@ TEST_CASE("fires WHILE kiting: a target inside engageMin is still shot at") {
 }
 
 TEST_CASE("magic build fires while backing out of its own kite floor") {
+    // Magic is deliberately aggressive now (band 0.15-0.90 x 20 = 3..18 m — "shoot the weapon more
+    // aggressively"), so its kite FLOOR is only 3 m. A melee threat inside that floor (and inside the
+    // 4 m KITE_HOLD_GROUND_M) still gets kited, and the bot still fires on the way out.
     BotView v = selfAt({0,0,0});
-    v.buildCell = 3*1+0;          // Moderate / Magic: band 0.30-0.75 x 20 = 6..15 m
-    BotTarget t{}; t.pos = {0, 1.7f, -3.0f}; t.dist = 3.0f; t.hasLOS = true;  // inside the 6 m floor
+    v.buildCell = 3*1+0;          // Moderate / Magic
+    BotTarget t{}; t.pos = {0, 1.7f, -2.0f}; t.dist = 2.0f; t.hasLOS = true;  // inside the 3 m floor
     v.targets = &t; v.targetCount = 1;
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
     CHECK(out.moveBack);
