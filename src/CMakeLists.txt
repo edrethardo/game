@@ -101,6 +101,7 @@ add_executable(DungeonEngine
     game/squad.cpp
     game/autoplay_brain.cpp
     game/autoplay_descent.cpp
+    game/autoplay_vhall.cpp
     net/net.cpp
     net/clock_sync.cpp
     net/snapshot.cpp

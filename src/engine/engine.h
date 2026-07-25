@@ -27,6 +27,7 @@
 #include "game/autoplay_intent.h"    // Autoplay::BotView / BotIntent — driver<->brain interface
 #include "game/autoplay_brain.h"     // Autoplay::decide — pure per-tick decision core
 #include "game/autoplay_descent.h"   // Autoplay::DescentField — FOUR_STORY drop-hole flow field
+#include "game/autoplay_vhall.h"     // Autoplay::VHallField — VERTICAL_HALL two-story flow field
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
@@ -332,18 +333,7 @@ private:
     static constexpr u32 AIM_VEL_SLOTS = 16;   // == the bot's target-list cap
     u32              m_autoplayVelId[AIM_VEL_SLOTS]  = {};   // 0 = free slot
     Vec3             m_autoplayVelEma[AIM_VEL_SLOTS] = {};
-    // VERTICAL_HALL committed ramp: index into DungeonResult::portals, -1 = none chosen. Held for
-    // the whole story crossing so the goal cannot flip between two ramps mid-climb; released when
-    // the bot's feet reach the exit's story, and re-anchored on a floor change.
-    s32              m_autoplayVhPortal = -1;
-    // Latched true once the bot has CROSSED its committed ramp onto the exit story (reached the far
-    // end AND is at that story's height). Needed because "am I on the exit story" alone flips true at
-    // ~2.8 m of a 3 m climb — still on the ramp gradient — and steering anywhere but straight up there
-    // steps the bot off the narrow 2-wide ramp. The latch keeps it climbing until it physically
-    // reaches the top CELL, then hands over to the across-the-balcony door beeline. Reset on a floor
-    // change and dropped if the bot falls back off the story.
-    bool             m_autoplayVhCrossed = false;
-    // Set each tick buildBotView routes an UNFINISHED climb (committed up-ramp, not yet crossed).
+    // Set each tick buildBotView routes an UNFINISHED climb (the exit is up and the bot is below it).
     // updateAutoplay reads it to pulse a climb-assist JUMP: the VERTICAL_HALL ramps are narrow 2-wide
     // graduated slabs, and the eased-aim + WASD walk drifts the bot off the strip and slides it back
     // down before it can crest — measured, on some seeds it never got past ~1 m of a 3 m climb. A
@@ -363,6 +353,10 @@ private:
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.
     Autoplay::DescentField m_autoplayDescent;
+    // VERTICAL_HALL two-story travel field: a BFS over (cell, story) nodes from the exit door
+    // (autoplay_vhall.h). Replaces the old flat-field-plus-ramp-heuristics — the bot follows this
+    // field ground->ramp->balcony->door and can never be routed off an edge. Rebuilt per floor.
+    Autoplay::VHallField m_autoplayVHall;
     // LOOK BEHIND (autoplay_nav.h LOOK_BEHIND_*). A wedged bot turns around once per stuck episode to
     // un-watch whatever it is facing, which is the only thing that can spring a dormant gargoyle
     // (weeping-angel wake rule) — and a dormant gargoyle is an unkillable solid body, so staring at

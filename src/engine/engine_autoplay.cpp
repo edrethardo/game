@@ -309,7 +309,12 @@ void Engine::updateAutoplay(f32 dt) {
     {
         const Vec3 p  = m_localPlayer.position;
         const f32  dx = p.x - m_autoplayLastPos.x, dz = p.z - m_autoplayLastPos.z;
-        const bool progressed = (dx * dx + dz * dz) > 0.25f;   // > 0.5 m from the anchor
+        const f32  dy = p.y - m_autoplayLastPos.y;
+        // 3D displacement, so CLIMBING counts as progress. The old XZ-only test read a bot walking up
+        // a ramp (much of whose motion is vertical) as "stuck", tripped the escape ladder, and the
+        // escape headings walked it off the ramp — climb, stall, get shoved off, repeat. Vertical
+        // progress is real progress on a stacked floor.
+        const bool progressed = (dx * dx + dz * dz + dy * dy) > 0.25f;   // > 0.5 m from the anchor
 
         // In-band fight = an LOS target the bot is SHOOTING AT, so this must track decideCombat's fire
         // gate exactly: within engageMax x range, no engageMin term (the kite floor moves the bot, it
@@ -378,8 +383,6 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayExitBull       = false;
         m_autoplayFloorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
         m_autoplayFloorStallTimer = 0.0f;
-        m_autoplayVhPortal        = -1;   // ramps belong to the old floor's DungeonResult
-        m_autoplayVhCrossed       = false;
     }
     if (v.doorActive && !bossGate) {
         if (combatProgress) {   // a kill/damage this tick = a real fight worth finishing: restart the window
@@ -535,19 +538,27 @@ void Engine::updateAutoplay(f32 dt) {
                 // world-space waypoints (outPath[0] = the first corner toward the goal), 0 if the door is
                 // unreachable within its 256-cell cap.
                 if (m_autoplayNoProgressTimer > 8.0f && m_level.floorDoorActive) {
-                    Vec3 wp[MAX_PATH_WAYPOINTS];
-                    const u8 n = Pathfinder::findPath(m_level.grid, m_localPlayer.position,
-                                                      m_level.floorDoorPos, wp, MAX_PATH_WAYPOINTS, 0.3f);
-                    if (n > 0) {
-                        const Vec3 to{wp[0].x - m_localPlayer.position.x, 0.0f,
-                                      wp[0].z - m_localPlayer.position.z};
-                        if (lengthSq(to) > 1e-6f) {
-                            const Vec3 cand = normalize(to);
-                            // Only trust the A* heading if its own first cell is hazard-safe (A* is
-                            // 2D / story-blind, so re-veto its immediate step here).
-                            if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, cand,
-                                                      m_level.lavaFloor))
-                                h = cand;
+                    // On a STACKED floor the flat A* below is story-blind and routes to the door's XZ
+                    // under a balcony / away from a hole — use the story-aware field heading instead.
+                    const bool stackedExit = m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL ||
+                                             m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY;
+                    if (stackedExit && lengthSq(v.flowDir) > 1e-6f) {
+                        h = normalize(Vec3{v.flowDir.x, 0.0f, v.flowDir.z});
+                    } else {
+                        Vec3 wp[MAX_PATH_WAYPOINTS];
+                        const u8 n = Pathfinder::findPath(m_level.grid, m_localPlayer.position,
+                                                          m_level.floorDoorPos, wp, MAX_PATH_WAYPOINTS, 0.3f);
+                        if (n > 0) {
+                            const Vec3 to{wp[0].x - m_localPlayer.position.x, 0.0f,
+                                          wp[0].z - m_localPlayer.position.z};
+                            if (lengthSq(to) > 1e-6f) {
+                                const Vec3 cand = normalize(to);
+                                // Only trust the A* heading if its own first cell is hazard-safe (A* is
+                                // 2D / story-blind, so re-veto its immediate step here).
+                                if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, cand,
+                                                          m_level.lavaFloor))
+                                    h = cand;
+                            }
                         }
                     }
                 }
@@ -596,7 +607,17 @@ void Engine::updateAutoplay(f32 dt) {
         // two are naturally exclusive — `stuck` means not moving, the bull means moving-but-not-arriving.
         const Vec3 pos = m_localPlayer.position;
         Vec3 heading{m_level.floorDoorPos.x - pos.x, 0.0f, m_level.floorDoorPos.z - pos.z};
-        if (v.distToDoor > 3.0f) {   // far: prefer a wall-avoiding A* first leg over the straight line
+        // On a STACKED floor the door is on ANOTHER STORY (a VHALL balcony, an FS drop below), so a
+        // flat A* to its XZ walks the bot UNDER the balcony / away from the hole and wedges it there —
+        // measured, the bull dragged the geared paladin to directly beneath the upstairs door and it
+        // sat at ground level, never climbing. The STORY-AWARE field (v.flowDir, already the two-story
+        // VHALL field / the Descent field this tick) is the only correct heading; the bull just walks
+        // it with fire off. Flat A* stays for FLAT floors, where the door really is at that XZ.
+        const bool stackedExit = m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL ||
+                                 m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY;
+        if (stackedExit) {
+            if (lengthSq(v.flowDir) > 1e-6f) heading = Vec3{v.flowDir.x, 0.0f, v.flowDir.z};
+        } else if (v.distToDoor > 3.0f) {   // flat floor, far: wall-avoiding A* first leg
             Vec3 wp[MAX_PATH_WAYPOINTS];
             const u8 n = Pathfinder::findPath(m_level.grid, pos, m_level.floorDoorPos, wp,
                                               MAX_PATH_WAYPOINTS, 0.3f);
@@ -1089,75 +1110,24 @@ Autoplay::BotView Engine::buildBotView() {
         // and pulse spurious jumps.
         m_autoplayVhClimbing = false;
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
-            // The exit is a balcony door on the OPPOSITE story, reached by a ramp. The crossing is
-            // COMMITTED: one ramp is chosen and then walked end to end.
-            //
-            // Both halves of that matter. "Am I done?" is a FEET-HEIGHT test, not
-            // StoryNav::onUpperStory, because a ramp is a graduated slab and the per-cell slab test
-            // reports "upper" from the first riser — the old code stopped routing the instant the
-            // climb began, handed the heading to the flat GROUND flow field, and got the bot pulled
-            // straight back off the ramp, to land, re-read "lower", and try again forever (the
-            // "climbing stairs is difficult" stall). And the ramp is remembered rather than re-picked
-            // per tick, because "nearest end" flips between two ramps as the bot moves and swings the
-            // heading with it (the known VH story-routing oscillation).
-            const f32  exitY     = m_level.floorDoorPos.y;
-            const bool exitUpper = exitY > 1.5f;
-            // TIGHT height tolerance (0.5 m, ~ a step's worth): "on the exit story" must mean all but
-            // AT the destination height, because the flat 2D flow field that takes over cannot
-            // represent two stories (a balcony cell and the ground beneath it are ONE node), so any
-            // early release hands the bot to a field that walks it back off the climb.
-            const bool onExitStory = StoryNav::feetOnStory(pos.y, exitY, 0.5f);
-            // (m_autoplayVhClimbing was defaulted false above; the climb branch re-arms it.)
-
-            if (!m_autoplayVhCrossed) {
-                // --- Still getting to / across the ramp. ---
-                // `climbing` is fixed by the EXIT STORY, not the instantaneous height. Testing
-                // `exitY > pos.y` flips it to false the exact tick the bot crests at 3 m — which made
-                // the far end read as the FOOT (so the crossed-latch below never fired) and made
-                // portalRouteGoal aim back DOWN the ramp. In VERTICAL_HALL spawn and exit are always
-                // opposite stories, so "exit is upper" == "this crossing is a climb" for its whole
-                // duration, and it stays correct even if the bot falls and must climb again.
-                const bool climbing = exitUpper;
-                if (m_autoplayVhPortal < 0 || m_autoplayVhPortal >= (s32)dg.portalCount)
-                    m_autoplayVhPortal = StoryNav::nearestPortalIdx(dg, pos, !climbing);
-                if (m_autoplayVhPortal >= 0) {
-                    const StoryPortal& pp  = dg.portals[m_autoplayVhPortal];
-                    const Vec3         far = climbing ? pp.highPos : pp.lowPos;
-                    const f32 fdx = far.x - pos.x, fdz = far.z - pos.z;
-                    // CROSSED only when the bot has reached the ramp's far end IN XZ *and* is at the
-                    // exit story's height — i.e. it is physically on the top CELL, not merely at the
-                    // top height one cell short of it. Latching earlier (on height alone) let the door
-                    // beeline below steer the bot sideways off the narrow 2-wide ramp — measured, it
-                    // reached 3.0 m then fell straight back to the ground, every attempt.
-                    if (onExitStory && (fdx * fdx + fdz * fdz) < 2.5f * 2.5f) {
-                        m_autoplayVhCrossed = true;
-                        m_autoplayVhPortal  = -1;
-                    } else {
-                        // Keep walking the ramp end to end (portalRouteGoal aims foot then top).
-                        const Vec3 goal = StoryNav::portalRouteGoal(pp, pos, climbing);
-                        const Vec3 to{goal.x - pos.x, 0.0f, goal.z - pos.z};
-                        if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
-                        // Climb-assist jump target: a committed UP-ramp we haven't crested. (Descend
-                        // needs no help — gravity does it.) The driver pulses the actual jump.
-                        if (climbing) m_autoplayVhClimbing = true;
-                    }
-                }
+            // The exit is a balcony door on the OPPOSITE story, reached by a graduated-slab ramp.
+            // Routing is a BFS FLOW FIELD over (cell, STORY) nodes seeded from the door
+            // (autoplay_vhall.h), rebuilt per floor. It replaces the entire flat-field-plus-heuristics
+            // approach that could not represent two stories: the field routes the whole journey —
+            // ground -> ramp foot -> up the ramp -> across the balcony -> door — and because a balcony
+            // node (3 m) is never height-continuous with the ground beside it, it can NEVER steer the
+            // bot off a balcony edge, which is what made every prior version "drop afterward".
+            if (Autoplay::ensureVHallField(m_autoplayVHall, m_level.grid, m_level.floorDoorPos,
+                                           m_level.currentFloor)) {
+                const Vec3 vd = Autoplay::vhallDirection(m_autoplayVHall, m_level.grid, pos);
+                if (lengthSq(vd) > 1e-6f) v.flowDir = vd;
             }
-            if (m_autoplayVhCrossed) {
-                // --- On the exit story. ---
-                if (!onExitStory) {
-                    m_autoplayVhCrossed = false;   // fell back off — re-route to a ramp next tick
-                } else if (exitUpper) {
-                    // DO NOT TRUST THE FLAT FIELD on the upper story (it is 2D — see above — and
-                    // routes off the balcony's open inner edge back to the ground). The exit door
-                    // sits on THIS balcony (the diagonal ramp lands on the very slab it is on), and a
-                    // mid-balcony is a convex slab region, so a straight line from the ramp top to the
-                    // door centre stays on it. Steer at the door directly. (A GROUND exit is a single
-                    // connected story, so its flat field is correct — left untouched, hence exitUpper.)
-                    const Vec3 to{m_level.floorDoorPos.x - pos.x, 0.0f, m_level.floorDoorPos.z - pos.z};
-                    if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
-                }
-            }
+            // Climb-assist jump: the ramp is a narrow 2-wide graduated slab, and even with correct
+            // steering the eased-aim walk can stall against the risers. Pulse a hop while the bot is
+            // BELOW the exit height and the exit is UP — i.e. still climbing. (m_autoplayVhClimbing
+            // was defaulted false above; the driver reads it to fire the jump.)
+            if (m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.5f)
+                m_autoplayVhClimbing = true;
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
             // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's
             // slab — and getting to one is a MAZE routing problem, not a bearing.

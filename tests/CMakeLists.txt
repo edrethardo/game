@@ -57,6 +57,8 @@ add_executable(dungeon_tests
     game/test_autoplay_brain.cpp     # the state machine: survive/fight/travel/descend priority
     game/test_autoplay_descent.cpp   # FOUR_STORY drop-hole flow field (maze routing)
     ${CMAKE_SOURCE_DIR}/src/game/autoplay_descent.cpp
+    game/test_autoplay_vhall.cpp     # VERTICAL_HALL two-story flow field
+    ${CMAKE_SOURCE_DIR}/src/game/autoplay_vhall.cpp
     ${CMAKE_SOURCE_DIR}/src/game/autoplay_brain.cpp
     game/test_shared_loot.cpp        # ground drops are FFA instantly; exclusivity only if re-armed
     game/test_legendary_pool.cpp     # legendary tier = named uniques only; rarityFloor guarantees
