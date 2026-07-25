@@ -731,19 +731,29 @@ void Engine::updateAutoplay(f32 dt) {
     // bot spends most of a Descent floor (43-65% of ticks firing), so leaving this producer
     // unguarded left the floor unfinishable no matter how good the routing got.
     //
-    // Only the pad rule is applied here, NOT the full hazard veto — walls and edges remain the
-    // FIGHT branch's own business, exactly as before. Dropping the offending component (rather than
-    // reversing it) keeps the kite honest: the bot simply does not take that step.
-    if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
-        !Autoplay::onJumpPad(m_level.grid, m_localPlayer.position) &&
-        !m_autoplayDescent.paddedOnly) {   // same carve-out as the travel veto: lifts-only storey
+    // WALLS too, on the Descent maze. The FIGHT branch's kite/close/strafe movement was originally
+    // left to press into walls ("walls remain the FIGHT branch's own business") — but on FOUR_STORY's
+    // 3-wide braided corridors that IS the wall-hugging the player sees: with the geared paladin
+    // (combat isolated) wall-scraping ran 0-6% while travelling and jumped to 24-45% exactly when the
+    // bot was firing, i.e. the FIGHT movement grinding a corridor wall. stepAllowed covers walls +
+    // off-map + the corner-cut rule + (avoidPads) pads in one call, so a kiting bot now SLIDES along
+    // the open axis instead of pinning itself to a wall. Per-component (drop the blocked axis, keep
+    // the others) so it never freezes when only one direction is walled.
+    if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
         const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
         const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
-        const Vec3 p = m_localPlayer.position;
-        if (in.moveFwd   && Autoplay::padAhead(m_level.grid, p, fwd))            in.moveFwd   = false;
-        if (in.moveBack  && Autoplay::padAhead(m_level.grid, p, fwd   * -1.0f))  in.moveBack  = false;
-        if (in.moveRight && Autoplay::padAhead(m_level.grid, p, right))          in.moveRight = false;
-        if (in.moveLeft  && Autoplay::padAhead(m_level.grid, p, right * -1.0f))  in.moveLeft  = false;
+        const Vec3 p     = m_localPlayer.position;
+        const f32  feetY = p.y;
+        // Pads are vetoed unless the bot is standing on one (a 3x3 pad node would box it in) or the
+        // storey's only ways down are lifts (paddedOnly) — same carve-outs as the travel veto.
+        const bool avoidPads = !Autoplay::onJumpPad(m_level.grid, p) && !m_autoplayDescent.paddedOnly;
+        auto blocked = [&](Vec3 d) {
+            return !Autoplay::stepAllowed(m_level.grid, p, feetY, d, /*lavaFloor=*/false, avoidPads);
+        };
+        if (in.moveFwd   && blocked(fwd))            in.moveFwd   = false;
+        if (in.moveBack  && blocked(fwd   * -1.0f))  in.moveBack  = false;
+        if (in.moveRight && blocked(right))          in.moveRight = false;
+        if (in.moveLeft  && blocked(right * -1.0f))  in.moveLeft  = false;
     }
 
     // FALL VETO — VERTICAL_HALL with an UPPER exit ONLY. The FIGHT branch's kite/close/strafe
@@ -773,7 +783,7 @@ void Engine::updateAutoplay(f32 dt) {
     if (in.jump && (!m_localPlayer.onGround || m_localPlayer.dodgeState.rolling)) in.jump = false;
 
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
-    updateSidearm(v, dt);   // equip/stow the melee build's ranged sidearm (takes effect next tick)
+    updateSidearm(v, dt);
 }
 
 // One tick of the TOWN policy: beeline to the to-dungeon portal and take it. Called instead of the
