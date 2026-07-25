@@ -80,6 +80,7 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     // spawning onto a corpse that had already been raised RESURRECT_MAX times would be born unable
     // to ever be raised.
     e.timesRevived = 0;
+    e.healCdTimer  = 0.0f;   // nor a stale per-target heal cooldown
     // Status effects must not carry over to a recycled slot: a freed enemy can still have a live
     // DoT/CC timer when its slot is reused (e.g. a 3s bleed outlasting the 1s death timer), which
     // would phantom-damage/freeze the fresh spawn and — for DoT — mis-credit its kill via
@@ -137,6 +138,7 @@ void EntitySystem::tickTimers(EntityPool& pool, f32 dt) {
         }
 
         if (e.flashTimer > 0.0f) e.flashTimer -= dt;
+        if (e.healCdTimer > 0.0f) e.healCdTimer -= dt;   // per-target heal cooldown (HEAL_COOLDOWN)
 
         // Generic despawn countdown (the loot goblin's escape). Expiry is deliberately NOT routed
         // through Combat::killEntity — that always fires the death/loot callback, and a goblin that

@@ -199,6 +199,13 @@ struct Entity {
     // server-authoritative and clients just see the entity alive again, so this never reaches
     // SnapEntity and costs no PROTOCOL bump.
     u8  timesRevived = 0;
+    // Per-target HEAL cooldown (seconds). A HEALER (Shaman) tops up its lowest-HP ally, but with a
+    // pack of healers one target could be healed by every one of them each frame — an enemy that
+    // cannot be out-damaged. This caps any single enemy to one heal per HEAL_COOLDOWN; a healer whose
+    // best target is still cooling down heals the next-lowest instead (or no one). Ticked down in
+    // EntitySystem::tickTimers, reset in spawn, host-side only (heals are server-authoritative, so it
+    // never touches SnapEntity or PROTOCOL).
+    f32 healCdTimer = 0.0f;
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
     const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)
@@ -318,7 +325,7 @@ struct Entity {
 // then grew it by one aligned float. If this fires, check whether new fields are still landing in
 // padding before assuming they are free. (Entity::timesRevived landed in existing padding beside
 // resurrectCount and did NOT move this number.)
-static_assert(sizeof(Entity) == 520, "Entity layout changed — re-check field packing");
+static_assert(sizeof(Entity) == 528, "Entity layout changed — re-check field packing");
 
 // How many times one corpse may be raised before it is spent for good (Entity::timesRevived).
 // A necromancer that outlives its escort otherwise re-raises the same body indefinitely, which
@@ -328,6 +335,11 @@ static_assert(sizeof(Entity) == 520, "Entity layout changed — re-check field p
 // guaranteeing the loop terminates. Corpses at the cap are skipped by the SUMMONER's and the
 // HEALER's corpse search, so the raiser moves on to another body instead of stalling on this one.
 constexpr u8 RESURRECT_MAX = 10;
+
+// Minimum seconds between heals RECEIVED by any one enemy (Entity::healCdTimer). Without it, a pack
+// of HEALER shamans all top up the same lowest-HP ally every frame and it cannot be out-damaged; the
+// cap makes each shaman heal a DIFFERENT ally (or none) rather than stacking on one target.
+constexpr f32 HEAL_COOLDOWN = 0.3f;
 
 // Can this corpse be raised? The SUMMONER role and the HEALER role's no-one-to-heal fallback both
 // scan the pool for a body, and they applied the SAME four guards in two places — so the cap made

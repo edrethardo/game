@@ -123,6 +123,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
                 if (hi == i) continue; // don't heal self
                 if (!(ally.flags & ENT_ACTIVE) || (ally.flags & ENT_DEAD)) continue;
                 if (ally.flags & ENT_FRIENDLY) continue;
+                if (ally.healCdTimer > 0.0f) continue;   // healed too recently — skip to the next ally
                 Vec3 diff = ally.position - e.position;
                 f32 d2 = diff.x * diff.x + diff.z * diff.z;
                 if (d2 > 8.0f * 8.0f) continue;
@@ -135,6 +136,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
             if (healIdx != 0xFFFF) {
                 Entity& target = pool.entities[healIdx];
                 target.health = fminf(target.health + target.maxHealth * 0.3f, target.maxHealth);
+                target.healCdTimer = HEAL_COOLDOWN;   // this target can't be re-healed for 0.3 s
                 target.flashTimer = 0.2f; // visual feedback
                 e.speechText = "HEAL!";
                 e.speechTimer = 1.5f;
