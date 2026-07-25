@@ -325,6 +325,33 @@ TEST_CASE("loot goblin is rushed above all else — targeted over a nearer enemy
     CHECK_FALSE(out.moveBack);                        // never kite the harmless fleeing goblin
 }
 
+TEST_CASE("a shielded boss is deprioritized — kill the adds first, but fight it if it's alone") {
+    BotView v = selfAt({0,0,0});
+    BotTarget ts[2];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-5.0f};  ts[0].dist = 5.0f;  ts[0].hasLOS = true;   // NEAR shielded boss
+    ts[0].isBoss = true; ts[0].bossShielded = true;
+    ts[1] = {}; ts[1].pos = {0,1.7f,-12.0f}; ts[1].dist = 12.0f; ts[1].hasLOS = true;   // farther add
+    v.targets = ts; v.targetCount = 2;
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);   // the add, though the boss is closer (drop the shield)
+    v.targetCount = 1;                                     // boss alone: fought anyway (never idle)
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 0);
+    v.targetCount = 2; v.currentTargetIdx = 0; v.targetSwitchAllowed = false;  // stuck on the boss...
+    CHECK(pickTarget(v, doctrineFor(v.buildCell)) == 1);   // ...an add appears -> switch to it immediately
+}
+
+TEST_CASE("the bot rushes a fleeing (kiter) boss, but not one charging in") {
+    BotView v = selfAt({0,0,0});          // Ranged: lo = 0.55*20 = 11, hi = 20
+    BotTarget t{}; t.pos = {0,1.7f,-15.0f}; t.dist = 15.0f; t.hasLOS = true; t.isBoss = true;
+    v.targets = &t; v.targetCount = 1;
+    t.vel = {0,0,-3.0f};                  // moving -Z = AWAY from the bot at 3 m/s (kiting)
+    BotIntent fleeing = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(fleeing.moveFwd);               // close in to catch it (dist 15 > lo 11)
+    CHECK_FALSE(fleeing.moveBack);
+    t.vel = {0,0,3.0f};                   // now charging IN (+Z toward the bot)
+    BotIntent charging = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK_FALSE(charging.moveFwd);        // in-band and not fleeing => hold, don't force a rush
+}
+
 TEST_CASE("invulnerable enemies are never the shot target") {
     BotView v = selfAt({0,0,0});
     BotTarget ts[2];

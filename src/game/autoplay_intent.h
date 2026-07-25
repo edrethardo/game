@@ -48,6 +48,11 @@ struct BotTarget {
     // keeps it asleep — so pickTarget never chooses an invulnerable enemy as the shot target (they
     // stay in the list for the block/dodge scans, which still react to anything that attacks).
     bool invulnerable = false;
+    // A boss with its MINION SHIELD up (Entity::minionShield — 75% damage reduction while its summoned
+    // brood is alive, e.g. Ygara). Not invulnerable, but chipping it at 25% while it re-summons is a
+    // stall; the bot should kill the adds first to drop the shield, so pickTarget DEPRIORITIZES a
+    // shielded boss (prefers any other target) — falling back to it only when nothing else is visible.
+    bool bossShielded = false;
 };
 
 // Effective ENGAGEMENT range for the doctrine band, from a weapon's authored range + projectile

@@ -221,6 +221,7 @@ void Engine::shutdown() {
     saveStash();   // no-op unless dirty — last-chance flush for the shared account stash
 
     Autoplay::freeDescentField(m_autoplayDescent);   // Descent drop-hole flow field (heap scratch)
+    Autoplay::freeRouteField(m_autoplayBossRoute);   // boss goal flow field (heap scratch)
     Autoplay::freeVHallField(m_autoplayVHall);       // VERTICAL_HALL two-story flow field (heap scratch)
 
     AudioSystem::shutdown();

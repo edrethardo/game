@@ -304,16 +304,27 @@ inline s32 pickTarget(const BotView& v, const Doctrine& d) {
       if (g >= 0) return g; }
 
     s32 best = -1; f32 bestD = 1e9f;
+    s32 shieldedFb = -1; f32 shieldedFbD = 1e9f;   // shielded-boss fallback (prefer the adds; see below)
     for (u32 i = 0; i < v.targetCount; i++) {
         if (!v.targets[i].hasLOS) continue;
         if (v.targets[i].invulnerable) continue;     // damage-immune: never the shot target (wasted / keeps a gargoyle asleep)
         if (!sameStory(v, v.targets[i])) continue;   // another floor of the building: not ours
+        // A SHIELDED boss is deprioritized: it takes only 25% while its brood lives, so kill the adds
+        // first. Kept as a fallback so a lone shielded boss (adds elsewhere) is still fought, not idled.
+        if (v.targets[i].bossShielded) {
+            if (v.targets[i].dist < shieldedFbD) { shieldedFbD = v.targets[i].dist; shieldedFb = (s32)i; }
+            continue;
+        }
         if (v.targets[i].dist < bestD) { bestD = v.targets[i].dist; best = (s32)i; }
     }
+    if (best < 0) { best = shieldedFb; bestD = shieldedFbD; }   // nothing but the shielded boss: fight it anyway
     const s32 cur = v.currentTargetIdx;
     if (cur < 0 || static_cast<u32>(cur) >= v.targetCount) return best;   // no memory / it is gone
     const BotTarget& c = v.targets[static_cast<u32>(cur)];
     if (c.invulnerable) return best;   // it just became damage-immune (a boss entombed, etc.): drop it
+    // Currently locked onto a SHIELDED boss but an add is now visible: switch to the add to drop the
+    // shield (best excludes shielded bosses, so best>=0 here is a real add / other target).
+    if (c.bossShielded && best >= 0 && !v.targets[static_cast<u32>(best)].bossShielded) return best;
     if (!c.hasLOS) {
         // BLIND — but not necessarily gone. LOS is ONE raycast to the target's CENTRE from a MOVING
         // eye, so it FLICKERS: measured live in a corridor fight, the nearest hostile's LOS toggled
@@ -404,6 +415,21 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     if (t.isLootGoblin) {
         out.moveBack = out.moveLeft = out.moveRight = false;
         out.moveFwd  = t.dist > 2.0f;
+    }
+
+    // RUSH A FLEEING BOSS. A "kiter" boss (Sethrak) RUNS from the player; a ranged bot kites back, and
+    // on a boss floor — exit sealed until the boss dies, every anti-stall watchdog off while it lives —
+    // that mutual retreat is a permanent stall. The bot moves 6 m/s vs a boss's ~2.8, so committing to
+    // CLOSE catches it. Triggered only while the boss is actually moving AWAY (its smoothed velocity
+    // has an outward component), so a melee boss charging IN is untouched and ordinary enemies still get
+    // the normal kite: stop kiting and close to the fire floor while still shooting the whole way in.
+    if (t.isBoss) {
+        const Vec3 away{t.pos.x - v.pos.x, 0.0f, t.pos.z - v.pos.z};
+        if (lengthSq(away) > 1e-4f &&
+            dot(Vec3{t.vel.x, 0.0f, t.vel.z}, normalize(away)) > 0.5f) {   // boss retreating > 0.5 m/s
+            out.moveBack = false;
+            if (t.dist > lo) out.moveFwd = true;
+        }
     }
 
     // KITING JUMP. While retreating from a melee threat or side-stepping a shooter, hop on a long

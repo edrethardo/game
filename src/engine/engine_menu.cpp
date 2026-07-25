@@ -393,6 +393,15 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplaySidearmCooldown = 0.0f;
     m_autoplaySidearmMeleeUid   = 0;
     m_autoplaySidearmMeleeRange = 0.0f;
+    m_autoplayDeaths          = 0;      // soak death tally starts fresh each run
+    m_autoplayRunTime         = 0.0f;   // balance telemetry accumulators
+    m_autoplayFloorTime       = 0.0f;
+    m_autoplayTelemFloor      = 0;
+    m_autoplayFloorStartDeaths = 0;
+    m_autoplayFloorStartKills  = 0;
+    m_autoplayHbTimer         = 0.0f;
+    // (m_autoplayBossRoute needs no reset — its staleness stamp is the floor's seed identity, which a
+    // new run/floor can never match, exactly like the Descent/VHall fields.)
     m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
     m_autoplayDoorCheckDist   = 0.0f;
     m_autoplayExitStallTimer  = 0.0f;

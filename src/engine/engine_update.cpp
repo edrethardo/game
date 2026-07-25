@@ -1721,6 +1721,10 @@ void Engine::gameUpdate(f32 dt) {
         // screen — no force-revive out from under a confirmQuit dialog they may be reading.
         if (m_autoplayActive && m_autoplayControl.botInControl()) {
             m_autoplayRespawnTimer = 1.5f; Input::clearBotHeld();
+            // Record the death — the revive itself is a silent HUD chat line, so without this a soak
+            // run left no trace of how often / where the bot died. Floor + running count is the metric.
+            LOG_INFO("Autoplay: DEATH #%u on floor %u (%s)", ++m_autoplayDeaths, m_level.currentFloor,
+                     kClassDefs[static_cast<u32>(m_playerClass)].name);
         }
         // Free the cursor so the death-screen options are clickable (the screen is a full-screen
         // takeover; re-captured on respawn/reload). Mirrors the menu's setRelativeMouseMode(false).

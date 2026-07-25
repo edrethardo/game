@@ -220,6 +220,42 @@ void Engine::updateAutoplay(f32 dt) {
     // flat-floor pure — no town concept ever reaches it.
     if (m_level.inTown) { autoplayTownStep(dt, uiOpen); return; }
 
+    // --- BALANCE TELEMETRY (playtest rig). One `[TELEM]` line per floor completed + a 30 s heartbeat,
+    // so a soak is a balance dataset: how long each floor took, deaths/kills on it, and the player's
+    // power (HP / sustained weapon DPS / gear score) against the effective floor (raw + difficulty*50).
+    {
+        m_autoplayRunTime += dt; m_autoplayFloorTime += dt; m_autoplayHbTimer += dt;
+        const char* cls = kClassDefs[static_cast<u32>(m_playerClass)].name;
+        auto weaponDps = [&]() -> f32 {
+            const WeaponDef w = Inventory::getEffectiveWeapon(m_inventories[0], m_itemDefs, m_weaponDefs[0]);
+            const f32 cd = (w.cooldown > 0.01f) ? w.cooldown : 0.2f;
+            return (w.clipSize > 0) ? WeaponDps::sustained(w.damage, cd, w.clipSize, w.reloadTime)
+                                    : WeaponDps::sustained(w.damage, cd, 0.0f, 0.0f);
+        };
+        if (m_level.currentFloor != m_autoplayTelemFloor) {   // completed a floor: emit the one we left
+            if (m_autoplayTelemFloor != 0)
+                LOG_INFO("[TELEM] cls=%s fl=%u eff=%u secs=%.1f deaths=%u kills=%u hp=%.0f/%.0f wdps=%.0f gear=%.0f boss=%d",
+                         cls, m_autoplayTelemFloor, m_autoplayTelemFloor + m_difficulty * 50u,
+                         m_autoplayFloorTime, m_autoplayDeaths - m_autoplayFloorStartDeaths,
+                         m_totalKills[0] - m_autoplayFloorStartKills, m_localPlayer.health,
+                         m_localPlayer.maxHealth, weaponDps(),
+                         BuildScore::gearScoreForCell(m_inventories[0], m_itemDefs, m_itemDefCount,
+                                                      m_inventories[0].buildCell),
+                         static_cast<int>(m_level.floorHasBoss));
+            m_autoplayTelemFloor       = m_level.currentFloor;
+            m_autoplayFloorTime        = 0.0f;
+            m_autoplayFloorStartDeaths = m_autoplayDeaths;
+            m_autoplayFloorStartKills  = m_totalKills[0];
+        }
+        if (m_autoplayHbTimer >= 30.0f) {   // heartbeat: progression rate + visibility into a long/stuck floor
+            m_autoplayHbTimer = 0.0f;
+            LOG_INFO("[TELEM-HB] cls=%s fl=%u eff=%u elapsed=%.0f secs_fl=%.0f deaths=%u kills=%u hp=%.0f/%.0f wdps=%.0f",
+                     cls, m_level.currentFloor, m_level.currentFloor + m_difficulty * 50u, m_autoplayRunTime,
+                     m_autoplayFloorTime, m_autoplayDeaths, m_totalKills[0], m_localPlayer.health,
+                     m_localPlayer.maxHealth, weaponDps());
+        }
+    }
+
     Autoplay::BotView v = buildBotView();
 
     // TARGET LOS GRACE (aim steadiness). buildBotView has just resolved the sticky target's slot;
@@ -1273,6 +1309,19 @@ Autoplay::BotView Engine::buildBotView() {
         // takes priority (FIGHT ignores flowDir). FLAT non-lava floors only: on stacked/lava floors the
         // story/causeway routing above owns the heading, and the boss-seek below still overrides this
         // (kill the boss first), the globe steady after it (survival first).
+        // A WORLD-only horizontal ray (eye height) to a goal's XZ: true when no wall blocks a STRAIGHT
+        // bearing there. Both the shrine detour and the boss-seek gate on it — a straight bearing at a
+        // target behind a wall just jams the bot into the wall (the hazard veto's ±45/±90 fan cannot
+        // route around a wall), so steer straight ONLY with a clear line and route around otherwise.
+        auto clearLineTo = [&](Vec3 goal) -> bool {
+            const Vec3 eye = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+            const Vec3 to{goal.x - eye.x, 0.0f, goal.z - eye.z};
+            const f32  len = length(to);
+            if (len < 1e-3f) return true;
+            const RayHit hit = Raycast::cast(m_level.grid, eye, to * (1.0f / len), len);
+            return !hit.hit || hit.distance >= len - 0.5f;
+        };
+
         m_autoplayShrineTarget = false;
         if (!v.stackedFloor && !m_level.lavaFloor) {
             constexpr f32 kShrineDetour = 8.0f;   // metres: a minor detour, not a cross-floor trek
@@ -1286,7 +1335,10 @@ Autoplay::BotView Engine::buildBotView() {
             }
             if (m_autoplayShrineTarget) {
                 const Vec3 to{m_autoplayShrinePos.x - pos.x, 0.0f, m_autoplayShrinePos.z - pos.z};
-                if (lengthSq(to) > 1e-6f) v.flowDir = normalize(to);
+                // Steer to the shrine ONLY with a clear line; a shrine is optional, never worth
+                // wall-hugging toward one behind a wall. The flag stays set so the activation still
+                // fires if the ordinary exit route happens to bring the bot into range.
+                if (lengthSq(to) > 1e-6f && clearLineTo(m_autoplayShrinePos)) v.flowDir = normalize(to);
             }
         }
 
@@ -1309,24 +1361,29 @@ Autoplay::BotView Engine::buildBotView() {
             if (haveBoss) {
                 const Vec3 toBoss{bossPos.x - pos.x, 0.0f, bossPos.z - pos.z};
                 const f32  dBoss = length(toBoss);
-                // Clear line to the boss? A WORLD-ONLY raycast (walls only — it can't hit the boss's own
-                // body) from eye to boss. No wall in the way => we're in the open arena and a straight
-                // bearing is safe; a wall in the way => keep the wall-aware exit flow field.
-                bool clearLine = false;
-                if (dBoss > 1e-3f) {
-                    const Vec3 eye  = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
-                    const Vec3 d3   = (bossPos + Vec3{0, m_localPlayer.eyeHeight, 0}) - eye;
-                    const f32  len3 = length(d3);
-                    const RayHit hit = Raycast::cast(m_level.grid, eye, d3 * (1.0f / len3), len3);
-                    clearLine = (!hit.hit || hit.distance >= len3 - 0.5f);
-                }
                 constexpr f32 kBossSeekRadius = 25.0f;   // covers a major boss's expanded arena
                 const bool flowIdle = lengthSq(v.flowDir) < 1e-6f;
-                const bool wantSeek = (dBoss < kBossSeekRadius || v.atExit || flowIdle);
-                // Seek straight ONLY with a clear line and reason to; if the exit flow field has run out
-                // entirely (flowIdle) fall back to the bearing as a last resort so we never freeze.
-                if (wantSeek && (clearLine || flowIdle) && lengthSq(toBoss) > 1e-6f)
-                    v.flowDir = normalize(toBoss);
+                const bool wantSeek = (dBoss < kBossSeekRadius || v.atExit || flowIdle) && dBoss > 1e-3f;
+                if (wantSeek) {
+                    if (clearLineTo(bossPos)) {
+                        // Open arena, no wall between us: a straight bearing is the snappiest way to
+                        // close on (and catch a kiting) boss.
+                        v.flowDir = normalize(toBoss);
+                    } else {
+                        // A WALL is in the way. A straight bearing here jams into it (the reported
+                        // "trying to get to the boss through a wall", every build). Route via a WALL-
+                        // AWARE BFS flow field seeded from the boss (autoplay_route.h) — the same proven
+                        // primitive the exit / Descent / VHall fields use: it routes the whole way around
+                        // walls, is defined on every reachable cell (no straight-line dead ends), steers
+                        // at cell centres (no wall-hug), has no A* cell cap (a boss across the floor still
+                        // routes), and rebuilds only when the boss changes cell (a moving target). Falls
+                        // back to the exit field only if the boss is genuinely unreachable.
+                        if (Autoplay::ensureRouteField(m_autoplayBossRoute, m_level.grid, bossPos, floorStamp)) {
+                            const Vec3 rd = Autoplay::routeDirection(m_autoplayBossRoute, m_level.grid, pos);
+                            if (lengthSq(rd) > 1e-6f) v.flowDir = rd;
+                        }
+                    }
+                }
             }
         }
 
@@ -1429,6 +1486,7 @@ Autoplay::BotView Engine::buildBotView() {
         t.invulnerable = (e.aiState == AIState::DORMANT && (e.enemyRole & EnemyRole::AMBUSH)) ||
                          (e.bossPhase == BossPhase::ENTOMBING) ||
                          (e.isEngine && Combat::engineShieldActive(m_entities, m_entities.activeList[a]));
+        t.bossShielded = e.isBoss && e.minionShield;   // 75% DR while its brood lives: kill the adds first
 
         // Insert nearest-first into the fixed cap (simple insertion — the pool is small).
         u32 pos = n;

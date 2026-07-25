@@ -102,6 +102,7 @@ add_executable(DungeonEngine
     game/autoplay_brain.cpp
     game/autoplay_descent.cpp
     game/autoplay_vhall.cpp
+    game/autoplay_route.cpp
     net/net.cpp
     net/clock_sync.cpp
     net/snapshot.cpp

@@ -28,6 +28,7 @@
 #include "game/autoplay_brain.h"     // Autoplay::decide — pure per-tick decision core
 #include "game/autoplay_descent.h"   // Autoplay::DescentField — FOUR_STORY drop-hole flow field
 #include "game/autoplay_vhall.h"     // Autoplay::VHallField — VERTICAL_HALL two-story flow field
+#include "game/autoplay_route.h"     // Autoplay::RouteField — general wall-aware flow field to a goal (the boss)
 #include "game/inventory_ui.h"   // SkillBarRects — shared skill-bar geometry (HUD + inventory screen)
 #include "renderer/hud.h"        // HUD::EquipSkillSlot — built by buildEquipSkillSlots
 #include "game/boss_def.h"
@@ -251,6 +252,19 @@ private:
     // GAME_OVER, ticked down in the GAME_OVER dispatch, then the entrance-respawn body runs so an
     // unattended run keeps going (engine_autoplay.cpp / engine_update.cpp).
     f32              m_autoplayRespawnTimer = 0.0f;
+    // Soak/playtest telemetry: bot deaths this run. The revive is silent (a HUD chat line, not a log),
+    // so a long unattended run left no record of how often it died or where — the metric that matters
+    // most for tuning. Logged at the death site with the floor, and reset per run.
+    u32              m_autoplayDeaths = 0;
+    // BALANCE TELEMETRY (the driver is the playtest rig — emit per-floor + heartbeat records, greppable
+    // `[TELEM]`, so a soak run is a balance dataset: time/deaths/kills per floor and player power
+    // (HP / sustained weapon DPS / gear score) against the effective floor, plus boss floors flagged).
+    f32              m_autoplayRunTime = 0.0f;          // total elapsed this run
+    f32              m_autoplayFloorTime = 0.0f;        // seconds on the current floor
+    u32              m_autoplayTelemFloor = 0;          // floor the per-floor accumulators track (detects change)
+    u32              m_autoplayFloorStartDeaths = 0;    // m_autoplayDeaths at floor entry (per-floor delta)
+    u32              m_autoplayFloorStartKills  = 0;    // m_totalKills[0] at floor entry (per-floor delta)
+    f32              m_autoplayHbTimer = 0.0f;          // heartbeat cadence
 
     // 8b navigation backstops (engine_autoplay.cpp). The flow field expresses travel on FLAT floors;
     // the anti-livelock state below catches the two cases it can't: a wedged bot that stops making
@@ -346,6 +360,12 @@ private:
     // stale state. Flat non-boss floors only (stacked/lava/boss routing is special).
     Vec3             m_autoplayShrinePos{};
     bool             m_autoplayShrineTarget = false;   // a shrine is the current travel detour
+    // BOSS ROUTE (Autoplay). A general wall-aware BFS flow field seeded from the boss (autoplay_route.h)
+    // — the conceptual fix for "the bot walks into a wall trying to reach the boss": a straight bearing
+    // can't route around a wall, this field routes the whole way, unbounded and cell-centre-steered. It
+    // rebuilds when the boss changes cell (a moving target), like the exit/descent/vhall fields. Freed
+    // in Engine::shutdown.
+    Autoplay::RouteField m_autoplayBossRoute;
     // MELEE RANGED SIDEARM (Autoplay, VERTICAL_HALL upper-exit only). A melee build cannot hit an
     // enemy that is only reachable by falling off its balcony, so it temporarily equips the best
     // ranged weapon from its backpack (BuildScore::bestRangedBackpackIdx) and fires from where it
