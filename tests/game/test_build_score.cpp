@@ -378,6 +378,74 @@ TEST_CASE("BuildScore: bestRangedBackpackIdx returns -1 when the bag has no rang
     CHECK(BuildScore::bestRangedBackpackIdx(inv, defs, 3) == -1);
 }
 
+TEST_CASE("BuildScore: the Phase Dash boots are the definitive best — always kept, always worn") {
+    using namespace BuildScore;
+    // Swift Boots: slot BOOTS, legendarySkill phase_dash, at LEGENDARY rarity.
+    ItemDef swift{}; swift.slot = ItemSlot::BOOTS; swift.baseHealth = 15.0f;
+    swift.legendarySkillId = SkillId::PHASE_DASH;
+
+    // The predicate is exact: only legendary phase_dash BOOTS qualify.
+    CHECK(isDefinitiveBest(swift, Rarity::LEGENDARY));
+    CHECK_FALSE(isDefinitiveBest(swift, Rarity::RARE));              // must be legendary to grant the skill
+    ItemDef phaseSaber{}; phaseSaber.slot = ItemSlot::WEAPON;        // phase_dash on a WEAPON is not it
+    phaseSaber.weaponSubtype = WeaponSubtype::SWORD; phaseSaber.legendarySkillId = SkillId::PHASE_DASH;
+    CHECK_FALSE(isDefinitiveBest(phaseSaber, Rarity::LEGENDARY));
+    ItemDef plainBoots{}; plainBoots.slot = ItemSlot::BOOTS; plainBoots.baseHealth = 80.0f;  // no skill
+    CHECK_FALSE(isDefinitiveBest(plainBoots, Rarity::LEGENDARY));
+
+    // A hugely better ORDINARY boots is worn; the Phase Dash boots score far LESS on stats, yet the
+    // auto-looter must still grab them and keep them.
+    ItemDef defs[4]{};
+    defs[1] = plainBoots;   // 80 base HP: outscores Swift Boots' 15 by a mile
+    defs[2] = swift;
+    defs[3] = ItemDef{}; defs[3].slot = ItemSlot::BOOTS; defs[3].baseHealth = 10.0f;  // a weak boots (dominated)
+    PlayerInventory inv{};
+    for (auto& e : inv.equipped) e.defId = 0xFFFF;
+    for (auto& b : inv.backpack) b.defId = 0xFFFF;
+    inv.equipped[static_cast<u32>(ItemSlot::BOOTS)] = {}; inv.equipped[static_cast<u32>(ItemSlot::BOOTS)].defId = 1;
+
+    ItemInstance swiftInst{}; swiftInst.defId = 2; swiftInst.rarity = Rarity::LEGENDARY;
+    // Sanity: on raw stats the worn boots really is higher — so only the override makes this pickup.
+    CHECK(score(inv.equipped[static_cast<u32>(ItemSlot::BOOTS)], defs[1], DEFAULT_BUILD_CELL) >
+          score(swiftInst, defs[2], DEFAULT_BUILD_CELL));
+    CHECK(worthPickingUp(swiftInst, defs[2], inv, defs, 4));         // grabbed despite scoring lower
+
+    // In the bag beside that better boots, it is a keeper (never discarded), unlike a strictly weaker boots.
+    inv.backpack[0] = swiftInst;
+    CHECK(isKeeper(inv, defs, 4, 0));
+    inv.backpack[1] = {}; inv.backpack[1].defId = 3;  // a weaker plain boots, dominated by the worn 80-HP one
+    CHECK_FALSE(isKeeper(inv, defs, 4, 1));
+}
+
+TEST_CASE("BuildScore: a BETTER Phase Dash boots displaces a worse one; a worse duplicate is not hoarded") {
+    using namespace BuildScore;
+    ItemDef defs[3]{};
+    defs[1] = ItemDef{}; defs[1].slot = ItemSlot::BOOTS; defs[1].baseHealth = 15.0f;   // Swift Boots
+    defs[1].legendarySkillId = SkillId::PHASE_DASH;
+    // Two instances of the SAME Swift Boots def, one rolled better (an armor affix) than the other.
+    ItemInstance worse{}; worse.defId = 1; worse.rarity = Rarity::LEGENDARY;
+    ItemInstance better{}; better.defId = 1; better.rarity = Rarity::LEGENDARY;
+    better.affixCount = 1; better.affixes[0] = {AffixType::ARMOR, 25.0f};
+    CHECK(score(better, defs[1], DEFAULT_BUILD_CELL) > score(worse, defs[1], DEFAULT_BUILD_CELL));
+
+    PlayerInventory inv{};
+    for (auto& e : inv.equipped) e.defId = 0xFFFF;
+    for (auto& b : inv.backpack) b.defId = 0xFFFF;
+
+    // Wearing the WORSE pair: the BETTER pair is worth grabbing (it will displace on equip).
+    inv.equipped[static_cast<u32>(ItemSlot::BOOTS)] = worse;
+    CHECK(worthPickingUp(better, defs[1], inv, defs, 3));
+    // Wearing the BETTER pair: a WORSE duplicate is NOT worth grabbing, and NOT a keeper if in the bag.
+    inv.equipped[static_cast<u32>(ItemSlot::BOOTS)] = better;
+    CHECK_FALSE(worthPickingUp(worse, defs[1], inv, defs, 3));
+    inv.backpack[0] = worse;
+    CHECK_FALSE(isKeeper(inv, defs, 3, 0));           // the worse duplicate gives way
+    // The BETTER pair in the bag beside a worse worn one is kept (and would be equipped).
+    inv.equipped[static_cast<u32>(ItemSlot::BOOTS)] = worse;
+    inv.backpack[0] = better;
+    CHECK(isKeeper(inv, defs, 3, 0));
+}
+
 TEST_CASE("BuildScore: bestRangedBackpackIdx ignores a pet in the bag") {
     // A pet-summon def claims a slot but is never a weapon; it must never be chosen as a sidearm.
     ItemDef defs[3]{};

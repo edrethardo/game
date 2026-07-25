@@ -48,10 +48,23 @@ bool Engine::autoEquipIfUpgrade(u8 lane, u8 bpIdx) {
     const ItemDef& def = m_itemDefs[cand.defId];
     if (def.petSummon) return false;                       // consumables are used, never worn
 
+    // The definitive-best boots (legendary Phase Dash / Swift Boots) win their slot ABSOLUTELY: worn
+    // over any other boots regardless of score, and never displaced by one. Handled here rather than
+    // in score() so the cross-cell nudge (which sums whole-build totals) isn't swamped by a giant
+    // constant in one slot — see BuildScore::isDefinitiveBest.
+    const ItemInstance& wornItem = inv.equipped[static_cast<u32>(def.slot)];
+    const bool candDef = BuildScore::isDefinitiveBest(def, cand.rarity);
+    const bool wornDef = wornItem.defId != 0xFFFF && wornItem.defId < m_itemDefCount &&
+                         BuildScore::isDefinitiveBest(m_itemDefs[wornItem.defId], wornItem.rarity);
+
     const f32 candScore = BuildScore::score(cand, def, inv.buildCell);
-    if (candScore <= 0.0f) return false;                   // wrong weapon family, or worthless
     const f32 worn = wornScore(inv, def.slot, m_itemDefs, m_itemDefCount, inv.buildCell);
-    if (!BuildScore::isUpgrade(candScore, worn)) return false;
+    bool upgrade;
+    if      (candDef && !wornDef) upgrade = true;          // the definitive boots always go on
+    else if (wornDef && !candDef) upgrade = false;         // nothing displaces the definitive boots
+    else if (candScore <= 0.0f)   upgrade = false;         // wrong weapon family, or worthless
+    else                          upgrade = BuildScore::isUpgrade(candScore, worn);
+    if (!upgrade) return false;
 
     Inventory::equip(inv, bpIdx, m_itemDefs);
     sendInventorySync(lane, activeNetSlot());              // no-op unless CLIENT
@@ -95,6 +108,11 @@ bool Engine::autoEvictWorst(u8 lane) {
         const ItemInstance& it = inv.backpack[bi];
         if (it.defId == 0xFFFF || it.defId >= m_itemDefCount) continue;
         if (m_itemDefs[it.defId].petSummon) continue;
+        if (BuildScore::isDefinitiveBest(m_itemDefs[it.defId], it.rarity)) {
+            // Never evict the BEST Phase Dash boots; a worse duplicate is ordinary and may be evicted.
+            const f32 other = BuildScore::bestFieldedDefinitiveScore(inv, m_itemDefs, m_itemDefCount, bi);
+            if (BuildScore::score(it, m_itemDefs[it.defId], BuildScore::DEFAULT_BUILD_CELL) >= other) continue;
+        }
         if (Quickbar::holdsBackpackItem(m_quickbars[lane], it.uid)) continue;
         // Max over all nine cells: the bag deliberately holds gear for OTHER builds now, so "worst"
         // means "least useful to any build", not "worst for the one I'm wearing".

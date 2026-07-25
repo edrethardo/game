@@ -293,6 +293,21 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
     return off * offW + def_ * defW + rarityBonus;
 }
 
+// --- the definitive-best item override ----------------------------------------------------------
+// The legendary Phase Dash boots (Swift Boots — slot BOOTS, legendarySkill phase_dash) are, by
+// Aaron's call, the definitive best item in the game: a blink with i-frames trumps any stat roll. So
+// the auto-looter treats them as an ABSOLUTE: always worth picking up, always a keeper, always worn
+// over any other boots, never evicted — regardless of the numeric score. This is deliberately a
+// slot-level override (worthPickingUp / isKeeper / the engine's auto-equip + eviction), NOT a giant
+// score() bonus: inflating score() would swamp the cross-cell better-build nudge, which compares
+// whole-build totals and would go blind if one shared slot carried a huge constant. score() stays
+// honest (Swift Boots is worth its real base HP + phase_dash legendary-skill value); the "always"
+// lives in the decisions that pick one item over another within a slot.
+inline bool isDefinitiveBest(const ItemDef& def, Rarity rarity) {
+    return rarity == Rarity::LEGENDARY && def.slot == ItemSlot::BOOTS &&
+           def.legendarySkillId == SkillId::PHASE_DASH;
+}
+
 // True when `candidate` should replace `worn` under this build — the hysteresis rule. An empty worn
 // slot is always an upgrade (score 0 * factor is 0, but make the intent explicit).
 inline bool isUpgrade(f32 candidateScore, f32 wornScore) {
@@ -334,6 +349,30 @@ inline f32 bestSlotScore(const PlayerInventory& inv, const ItemDef* defs, u32 de
     return best;
 }
 
+// The highest score among the Phase Dash boots (definitive-best) this inventory can field — worn or
+// in the bag — at a fixed reference cell, or -1 if it fields none. This is what lets the "always
+// keep/grab" override protect only the BEST pair: a better Phase Dash boots still beats a worse one
+// (grab it, wear it), and a worse DUPLICATE is treated as ordinary gear (don't hoard it). The
+// reference cell is arbitrary but fixed — a boots' roll-quality ranking is the same in every cell, so
+// any consistent cell orders two Swift Boots identically. excludeBackpackIdx is the self-exclusion
+// isKeeper needs ("is there a better one OTHER than me?").
+inline f32 bestFieldedDefinitiveScore(const PlayerInventory& inv, const ItemDef* defs, u32 defCount,
+                                      s32 excludeBackpackIdx = -1) {
+    f32 best = -1.0f;
+    const ItemInstance& worn = inv.equipped[static_cast<u32>(ItemSlot::BOOTS)];
+    if (worn.defId != 0xFFFF && worn.defId < defCount && isDefinitiveBest(defs[worn.defId], worn.rarity))
+        best = score(worn, defs[worn.defId], DEFAULT_BUILD_CELL);
+    for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
+        if (static_cast<s32>(bi) == excludeBackpackIdx) continue;
+        const ItemInstance& it = inv.backpack[bi];
+        if (it.defId == 0xFFFF || it.defId >= defCount) continue;
+        if (!isDefinitiveBest(defs[it.defId], it.rarity)) continue;
+        const f32 s = score(it, defs[it.defId], DEFAULT_BUILD_CELL);
+        if (s > best) best = s;
+    }
+    return best;
+}
+
 // PICKUP filter: grab a ground item only if it would be a real upgrade over everything we can
 // already field, for at least ONE build cell (hysteresis included, so near-duplicates of gear we
 // own stay on the ground — this is the "do not pick up worse gear" half).
@@ -344,6 +383,12 @@ inline f32 bestSlotScore(const PlayerInventory& inv, const ItemDef* defs, u32 de
 inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
                            const PlayerInventory& inv, const ItemDef* defs, u32 defCount) {
     if (def.petSummon) return true;
+    if (isDefinitiveBest(def, cand.rarity)) {
+        // The Phase Dash boots: grab them over any non-Phase-Dash boots (whatever the score), but only
+        // a STRICTLY BETTER pair when we already field one — a worse duplicate is not worth hoarding.
+        const f32 have = bestFieldedDefinitiveScore(inv, defs, defCount);
+        return have < 0.0f || score(cand, def, DEFAULT_BUILD_CELL) > have;
+    }
     for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
         const f32 s = score(cand, def, cell);
         if (s <= 0.0f) continue;
@@ -364,6 +409,12 @@ inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCou
     if (it.defId == 0xFFFF || it.defId >= defCount) return false;
     const ItemDef& def = defs[it.defId];
     if (def.petSummon) return true;
+    if (isDefinitiveBest(def, it.rarity)) {
+        // The Phase Dash boots: keep them unless a strictly BETTER pair is fielded elsewhere (a worse
+        // duplicate is ordinary gear the prune may drop). '>=' so the sole/best pair always stays.
+        const f32 other = bestFieldedDefinitiveScore(inv, defs, defCount, static_cast<s32>(backpackIdx));
+        return score(it, def, DEFAULT_BUILD_CELL) >= other;
+    }
     for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
         const f32 s = score(it, def, cell);
         if (s <= 0.0f) continue;
