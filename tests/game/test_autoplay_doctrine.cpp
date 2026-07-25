@@ -121,3 +121,12 @@ TEST_CASE("a seeded cell still drives a sane doctrine (the two tables compose)")
     CHECK(mark.engageMin >  sorc.engageMin);          // the sniper holds the widest gap
     CHECK(mark.engageMax >  sorc.engageMax);
 }
+
+TEST_CASE("rangedCellFor: keeps the row, forces the Ranged column") {
+    using namespace Autoplay;
+    // cell = row*3 + col. Ranged column is 2.
+    CHECK(rangedCellFor(0*3 + 1) == 0*3 + 2);   // Tanky Melee   -> Tanky Ranged
+    CHECK(rangedCellFor(1*3 + 1) == 1*3 + 2);   // Moderate Melee-> Moderate Ranged
+    CHECK(rangedCellFor(2*3 + 0) == 2*3 + 2);   // Glass Magic   -> Glass Ranged
+    CHECK(rangedCellFor(1*3 + 2) == 1*3 + 2);   // already Ranged: unchanged
+}

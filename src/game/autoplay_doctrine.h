@@ -50,6 +50,14 @@ inline u8 defaultCellForClass(PlayerClass c) {
     return static_cast<u8>(1 * BuildScore::BUILD_COLS + buildColForClass(c));
 }
 
+// The same build cell with its column forced to Ranged (2), keeping the risk ROW. Used when a melee
+// build equips a temporary ranged sidearm (engine_autoplay.cpp): the doctrine must then be a ranged
+// one — hold ground and shoot — not the melee "close the distance" band, or the bot would try to
+// walk a gun into melee reach. The row (potion threshold, dodge/block posture) is preserved.
+inline u8 rangedCellFor(u8 cell) {
+    return static_cast<u8>(BuildScore::buildRow(cell) * BuildScore::BUILD_COLS + 2);
+}
+
 struct Doctrine {
     f32  engageMin = 0.0f;   // hold no closer than this * attackRange (kite floor; 0 = commit)
     f32  engageMax = 1.0f;   // close to at least this * attackRange to fire
