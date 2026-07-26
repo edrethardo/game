@@ -433,4 +433,42 @@ inline TownPortalPlan planTownPortal(Vec3 pos, Vec3 portal) {
     return p;
 }
 
+// VHALL ramp APPROACH steering. A VERTICAL_HALL up-ramp is a narrow ~2-wide graduated slab: a bot that
+// hits it from the flank or off-centre slides straight back off, so a bot fighting a balcony swarm
+// bounces at the foot forever (measured: 94% airborne, never crests). The reliable climb is to reach
+// the ramp CENTRELINE and go straight up it. Given the ramp foot (`low`) and top (`high`) — from the
+// serving StoryPortal — and the bot's position, this returns the XZ heading that (a) walks the bot onto
+// the centreline while it is below/beside the foot and (b) ascends the centreline once on it, always
+// keeping some UP component so it makes progress while it corrects. `rampNear` reports whether the bot
+// is close enough to the ramp segment for this fine steering to be trusted (else the caller keeps the
+// wall-aware VHallField for the coarse approach — a straight bearing from across the floor would clip a
+// wall). Pure so it unit-tests without the engine.
+inline f32 rampSegDistXZ(Vec3 low, Vec3 high, Vec3 p) {
+    const f32 ax = high.x - low.x, az = high.z - low.z;
+    const f32 L2 = ax * ax + az * az;
+    if (L2 < 1e-6f) { const f32 dx = p.x - low.x, dz = p.z - low.z; return std::sqrt(dx * dx + dz * dz); }
+    f32 t = ((p.x - low.x) * ax + (p.z - low.z) * az) / L2;   // projection param, unclamped
+    if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;      // nearest point ON the segment
+    const f32 cx = low.x + ax * t, cz = low.z + az * t;
+    const f32 dx = p.x - cx, dz = p.z - cz;
+    return std::sqrt(dx * dx + dz * dz);
+}
+inline Vec3 rampApproachDir(Vec3 low, Vec3 high, Vec3 p) {
+    const f32 ax = high.x - low.x, az = high.z - low.z;
+    const f32 L  = std::sqrt(ax * ax + az * az);
+    if (L < 0.1f) return {0.0f, 0.0f, 0.0f};
+    const Vec3 axis{ax / L, 0.0f, az / L};                    // unit up-ramp direction (XZ)
+    const f32  along = (p.x - low.x) * axis.x + (p.z - low.z) * axis.z;   // 0 at foot, L at top
+    if (along > L + 1.0f) return {0.0f, 0.0f, 0.0f};          // past the top — caller crosses to the door
+    // Lateral offset from the centreline, clamped so a far-off bot still gets a real UP component
+    // rather than steering purely sideways (it converges to the strip as it climbs).
+    Vec3 lat{(p.x - low.x) - axis.x * along, 0.0f, (p.z - low.z) - axis.z * along};
+    const f32 lmag = std::sqrt(lat.x * lat.x + lat.z * lat.z);
+    constexpr f32 kMaxLat = 1.5f, kCorrect = 1.2f;
+    if (lmag > kMaxLat) { lat.x *= kMaxLat / lmag; lat.z *= kMaxLat / lmag; }
+    Vec3 h{axis.x - lat.x * kCorrect, 0.0f, axis.z - lat.z * kCorrect};   // up-ramp, pulled to centreline
+    const f32 hm = std::sqrt(h.x * h.x + h.z * h.z);
+    return hm > 1e-6f ? Vec3{h.x / hm, 0.0f, h.z / hm} : axis;
+}
+
 } // namespace Autoplay

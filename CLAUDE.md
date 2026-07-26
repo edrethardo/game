@@ -898,6 +898,34 @@ change. Verified live: on a VHALL upper-exit warrior the trigger fires on cross-
 a ranged weapon in the bag the full draw→fire-ranged→stow cycle runs (weapon view flips to ranged on 10/10
 active samples).
 
+**VHALL climb pass — climb reliably, fight your way out, don't freeze (measured 2026-07-26).** Four
+driver fixes, all gated to VHALL **upper-exit** floors (`floorDoorPos.y > 1.5`) so nothing else regresses;
+driver-only, no wire/save change. (1) **Airborne fall-veto carve-out** — the per-component fall veto is now
+gated on `m_localPlayer.onGround`: `wouldFall` reads `feetY` at the jump apex, so while AIRBORNE every
+neighbour resolves far below the feet and all four directions veto at once, freezing the bot mid-air — the
+commit's jump pulse became a POGO in place (measured stuck at d2d≈40 m, `on=0`, `fwd=0`). The veto only ever
+needed to stop a GROUNDED step off a ledge; in the air the "drop" is illusory and freezing just stops the bot
+steering to a landing (an airborne drift off an edge is fine — dying is, freezing isn't). (2) **Ramp-proximity
+hop gate** (`m_autoplayVhOnRamp`) — the climb hop was gated only on `pos.y < 1.5` (true across the whole flat
+void), so the bot bunny-hopped the entire approach ("bunnyhopping while approaching the pad doesn't work");
+now it fires only on a ramp slab, so the bot WALKS grounded to the ramp / onto a void pad and only pogos up
+the risers. (3) **Fight-while-committing** — the `m_autoplayVhCommit` body no longer clobbers the intent to a
+bare walk+fire (the bot "just [ran] for the exit without a care" and died); it KEEPS the brain's aim / fire /
+dodge / block / class-skill / potion and only OVERRIDES the WASD feet toward the exit (faceAndGo
+decomposition), so it fights its way out — measured **deaths 0**, combat active on **52-70%** of commit ticks.
+(4) **On-slab centreline anti-drift** (`Autoplay::rampApproachDir` / `rampSegDistXZ`, `autoplay_nav.h`,
+unit-tested) — the story-aware VHallField mounts the ramp but the eased-aim walk drifts off the narrow 2-wide
+slab and slides back ("94% airborne, never crests"); `rampApproachDir` centres the bot on the nearest ramp
+ONLY once it is confirmed on a slab (`pos.y > 0.5`), which makes it climb onto a balcony on **every** run
+(`max_pos.y` ~3.0, was 0). Using a centreline/RouteField to ROUTE to the ramp instead of just anti-drift
+regressed every time (trapped under the slab, or stalled the mount). **Measured (geared paladin, combat
+removed as a factor):** climbs every run, fights back, never freezes/dies, **descends ~25-33%**. **Still
+open:** the upper-story CROSSING — the VHallField often mounts a NON-exit ramp, and reaching the exit balcony
+then needs a catwalk cross (one is BROKEN with a 2-cell gap the fall veto won't jump), so the bot falls to the
+ground under the door and re-climbs; it finishes when it happens to climb the exit-serving ramp (top on the
+exit balcony, no catwalk). Fix needs a design step — vault the broken catwalk (reuse enemy `StoryNav::planVault`)
+or bias the mount onto the exit ramp — tracked in `docs/superpowers/specs/2026-07-26-stacked-floor-routing-concept.md` §9.
+
 **Where the residual shake and wall-scraping come from (measured by source, 2026-07-24).** Instrumenting
 every producer of the desired aim and tagging each tick by which one wrote it settles a question that had
 been guessed at twice: **the FIGHT branch (`decideCombat`) is both**. It owns 45-50% of all ticks and turns

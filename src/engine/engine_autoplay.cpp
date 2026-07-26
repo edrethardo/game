@@ -342,8 +342,17 @@ void Engine::updateAutoplay(f32 dt) {
     // Only pulse in the LOWER part of the climb — the mount is where the risers defeat a plain walk;
     // higher up the bot has the slab under it and a jump there is as likely to bounce it off the
     // narrow strip as help. `m_localPlayer.position.y < 1.5` is roughly the lower half of a 3 m ramp.
-    if (m_autoplayVhClimbing && m_localPlayer.position.y < 1.5f &&
-        !in.fire && !in.potion && !in.descend) {
+    // The !in.fire gate was WRONG for the swarm case it most needs to handle: on a VHALL upper-exit
+    // floor a balcony/ramp-foot swarm makes the bot FIRE every tick, which suppressed the climb hop
+    // entirely — so a fighting bot could never crest the ramp and roamed the floor forever (measured: 5
+    // of 6 deep-floor stalls in a 9-seed benchmark). Allow the hop while firing on VHALL upper-exit; the
+    // ~1.2 s cadence keeps it from being a constant bounce, and applyBotIntent still gates it on grounded.
+    // AND require the bot to be at the ramp (m_autoplayVhOnRamp): the pos.y gate alone is true across the
+    // whole flat void (ground pos.y≈0 < 1.5), so without this the bot bunny-hops the entire approach.
+    const bool vhClimbHop = m_autoplayVhClimbing && m_autoplayVhOnRamp && m_localPlayer.position.y < 1.5f &&
+                            !in.potion && !in.descend &&
+                            (vhallUpperExit || !in.fire);
+    if (vhClimbHop) {
         const u32 phase = currentLocalTick() % 72;
         if (phase < 4) in.jump = true;
     }
@@ -497,6 +506,7 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplaySlowAnchor      = m_localPlayer.position;   // net-progress anchor: don't carry a stale
         m_autoplaySlowAnchorT     = 0.0f;                     // net-stuck flag across the descent teleport
         m_autoplaySlowNetStuck    = false;
+        m_autoplayVhCommit        = false;                    // the climb is done once we've descended
     }
     if (v.doorActive && !bossGate) {
         if (m_autoplayExitBull) {
@@ -566,8 +576,13 @@ void Engine::updateAutoplay(f32 dt) {
     if (v.doorActive && !bossGate) {
         m_autoplayFloorStallTimer += dt;
         if (m_autoplayFloorStallTimer >= kFloorWindow) {
-            if ((m_autoplayFloorCheckDist - v.distToDoor) < kFloorApproachMin)
-                m_autoplayBreakoffTimer = kFloorPushLeg;   // stop fighting, walk the route
+            if ((m_autoplayFloorCheckDist - v.distToDoor) < kFloorApproachMin) {
+                // On a VHALL UPPER-EXIT floor the break-off's 3 s leg is too short — it walks a bit then
+                // resumes fighting in place, and the bot never crosses the balcony. Latch the PERSISTENT
+                // VHALL commit instead (it holds until descent). Elsewhere, the short de-fixate leg.
+                if (vhallUpperExit) m_autoplayVhCommit = true;
+                else                m_autoplayBreakoffTimer = kFloorPushLeg;   // stop fighting, walk the route
+            }
             m_autoplayFloorCheckDist  = v.distToDoor;
             m_autoplayFloorStallTimer = 0.0f;
         }
@@ -614,7 +629,43 @@ void Engine::updateAutoplay(f32 dt) {
     // no-progress timer: if pressing at the door isn't working after 8 s the bot is wedged on real
     // geometry, and the escape ladder below — which the walk-in must never shadow — takes over.
     const bool atDoor = stuck && v.doorActive && !bossGate;
-    if (atDoor && v.distToDoor < Autoplay::DESCEND_STOP_M) {
+    if (m_autoplayVhCommit && vhallUpperExit) {
+        // VHALL COMMIT (armed by the floor-stall watchdog; see engine.h). The bot climbed to the balcony
+        // story but kept FIGHTING the swarm in place — kite/strafe, never walking to the door — and fell
+        // back off the rim (measured: pos.y cycling 3<->0, d2d never closing).
+        //
+        // The FIX is to commit only the FEET to the exit, NOT to stop fighting. An earlier version
+        // clobbered the whole intent to a bare walk+fire; the bot then "just [ran] for the exit without a
+        // care" and died to the swarm (user: "when pushing for the exit fight back properly"). So KEEP the
+        // brain's combat decisions this tick — aim, fire, dodge, block, class skills, potion — and only
+        // OVERRIDE the locomotion: decompose the exit heading onto the CURRENT facing basis (faceAndGo's
+        // exact convention) so the bot MOVES toward the door while still facing / shooting / dodging /
+        // blocking the enemy it is aimed at. The feet can never kite away (they always resolve toward the
+        // exit), so there is no fight-in-place, but every defensive reflex still fires — it fights its way
+        // out. The per-component FALL VETO below keeps each step edge-safe. Force descend + the ramp hop;
+        // stop the feet inside 1.5 m so the descend hold can land. The floor-change reset clears the latch.
+        if (lengthSq(v.flowDir) > 1e-6f) {
+            const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+            const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+            const Vec3 dir = normalize(Vec3{v.flowDir.x, 0.0f, v.flowDir.z});
+            const f32  df = dot(dir, fwd), dr = dot(dir, right);
+            constexpr f32 kAxis = 0.35f;                     // ~20°, matches faceAndGo
+            const bool stop = v.distToDoor <= 1.5f;          // at the door: hold still for the descend
+            in.moveFwd   = !stop && df >  kAxis;             // (aim / fire / dodge / block / skill / potion
+            in.moveBack  = !stop && df < -kAxis;             //  all stay as the brain decided them — only
+            in.moveRight = !stop && dr >  kAxis;             //  the WASD feet are overridden toward the exit)
+            in.moveLeft  = !stop && dr < -kAxis;
+            in.descend   = true;
+            // FAST jump pulse while climbing (edge every ~8 ticks): the bot spends most of a failed ramp
+            // mount AIRBORNE (bouncing off a riser), grounded for only a tick at a time, so a slow ~1.2 s
+            // pulse almost never lands on a grounded frame. A fast pulse catches those frames — one jump
+            // from the base clears the ~0.7 m riser. applyBotIntent gates it on grounded, so it can't
+            // double-jump. Gated on m_autoplayVhOnRamp so the commit WALKS the flat approach (and settles
+            // onto a void pad to be launched) instead of bunny-hopping across it.
+            const bool climbing = m_localPlayer.position.y < m_level.floorDoorPos.y - 0.5f;
+            if (climbing && m_autoplayVhOnRamp && (currentLocalTick() % 8u) < 4u) in.jump = true;
+        }
+    } else if (atDoor && v.distToDoor < Autoplay::DESCEND_STOP_M) {
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
         in.descend = true;
@@ -952,8 +1003,18 @@ void Engine::updateAutoplay(f32 dt) {
     //   * EXIT UPPER only (floorDoorPos.y > 1.5 m) — when the exit is on the GROUND the bot spawned
     //     on a balcony and must get DOWN, and dropping off the rim is a valid way down; a fall veto
     //     there would only hinder the descent. The protection is for the CLIMB, where a fall undoes it.
+    //   * GROUNDED only — the veto's job is to stop a bot from STEPPING off a ledge, which only a
+    //     grounded bot can do. While AIRBORNE (a climb-assist hop, a void-pad launch), wouldFall reads
+    //     feetY at the elevated apex, so EVERY neighbour cell's floor resolves far below it and all four
+    //     directions veto at once — the bot freezes horizontally in mid-air. That turned the commit's
+    //     fast jump pulse into a POGO: jump → airborne → forward vetoed → land → jump, never advancing
+    //     (measured: committed bot stuck at d2d≈40 m, on=0, fwd=0, never reaching the exit ramp). An
+    //     airborne bot is already on a ballistic arc — freezing its steering can't UNDO a fall, it only
+    //     stops it steering toward a safe landing (the ramp riser it hopped for, the balcony it was
+    //     flung at). So we lift the veto in the air and let it steer; an airborne drift off an edge is
+    //     acceptable (dying is fine, freezing is not), while the grounded rim protection is untouched.
     // Applied per WASD component so the bot slides along the safe axes instead of freezing.
-    if (vhallUpperExit) {
+    if (vhallUpperExit && m_localPlayer.onGround) {
         const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
         const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
         const Vec3 p     = m_localPlayer.position;
@@ -1359,6 +1420,7 @@ Autoplay::BotView Engine::buildBotView() {
         };
 
         m_autoplayVhClimbing = false;
+        m_autoplayVhOnRamp   = false;   // set true below only when within hop range of the exit ramp
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
             // Cache the floor's JUMP-PAD cells once (VHALL doesn't record them in jumpPads[], so a
             // grid scan is the only way to see them). Cluster-deduped so a 3x3 pad node is ONE goal.
@@ -1384,8 +1446,43 @@ Autoplay::BotView Engine::buildBotView() {
             // the collision launch does the vertical. Once up (feet near the exit height) this stops
             // triggering and the VHallField takes over to cross the upper story to the door. Falls back
             // to the ramp route when no pad is in reach.
+            const bool belowExit = m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.5f;
+
+            // RAMP CLIMB — an anti-drift assist on top of the VHallField (the user's call: "pathfind to
+            // the ramp, approach it the right way"). See the block below for why it is scoped to "already
+            // on a slab" rather than used to route TO the ramp.
+            bool climbingViaRamp = false;
+            if (belowExit && dg.portalCount > 0) {
+                // Let the story-aware VHallField route EVERYTHING — the ground approach, which ramp to
+                // climb (it routes ground -> foot -> up the slab -> balcony -> door as one shortest
+                // path), and the balcony cross. The ONE thing it can't do is keep the eased-aim walk from
+                // drifting off the narrow 2-wide graduated slab and sliding back (the original "94%
+                // airborne, never crests" stall). So we ADD the centreline steer only as an anti-drift
+                // assist, and ONLY once the bot is confirmed ON a slab (elevated, pos.y > 0.5) — never as
+                // a router. Every attempt to route TO a ramp with it (by segment distance to a chosen
+                // ramp, or to the ramp FOOT via a 2-D RouteField) regressed: it either trapped the bot on
+                // the ground UNDER the slab, or delivered it to the foot XZ where the 2-D field has no
+                // "step up" and it never mounted (measured: max_pos.y stuck at 0). Keying purely on "am I
+                // already on a slab" and centring on the NEAREST ramp is the only version that mounts on
+                // EVERY run. (The residual — it can climb a non-exit ramp and then must cross a catwalk it
+                // falls off — is the open upper-story-crossing problem, tracked in the concept doc.)
+                if (pos.y > 0.5f) {
+                    s32 nr = -1; f32 brs = 1e18f;
+                    for (u8 k = 0; k < dg.portalCount; k++) {
+                        const f32 rs = Autoplay::rampSegDistXZ(dg.portals[k].lowPos, dg.portals[k].highPos, pos);
+                        if (rs < brs) { brs = rs; nr = k; }
+                    }
+                    if (nr >= 0 && brs < 5.0f) {
+                        const Vec3 rd = Autoplay::rampApproachDir(dg.portals[nr].lowPos, dg.portals[nr].highPos, pos);
+                        if (lengthSq(rd) > 1e-6f) { v.flowDir = rd; climbingViaRamp = true; m_autoplayVhOnRamp = true; }
+                    }
+                }
+            }
+
+            // JUMP PAD fallback (only when NOT already on the ramp approach). The void pad flings the bot
+            // up a story in one launch — used when it is reachable and the ramp is not close.
             bool climbingViaPad = false;
-            if (m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 1.5f) {
+            if (!climbingViaRamp && m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 1.5f) {
                 constexpr f32 kPadReach = 18.0f;
                 f32 bestD2 = kPadReach * kPadReach; s32 best = -1;
                 for (u8 k = 0; k < m_autoplayPadCount; k++) {
@@ -1402,8 +1499,9 @@ Autoplay::BotView Engine::buildBotView() {
             // The exit is a balcony door on the OPPOSITE story. Routing is a BFS FLOW FIELD over
             // (cell, STORY) nodes seeded from the door (autoplay_vhall.h) — it routes the whole journey
             // ground -> ramp foot -> up the ramp -> across the balcony -> door, and can never steer the
-            // bot off a balcony edge. Used as the ramp route whenever we're not riding a pad up.
-            if (!climbingViaPad &&
+            // bot off a balcony edge. It does the COARSE approach to the ramp foot (before the centreline
+            // steer takes over) and the cross to the door up top — used whenever not on the ramp/pad.
+            if (!climbingViaPad && !climbingViaRamp &&
                 Autoplay::ensureVHallField(m_autoplayVHall, m_level.grid, m_level.floorDoorPos, floorStamp)) {
                 const Vec3 vd = Autoplay::vhallDirection(m_autoplayVHall, m_level.grid, pos);
                 if (lengthSq(vd) > 1e-6f) v.flowDir = vd;

@@ -482,3 +482,42 @@ TEST_CASE("wouldFall: a small step-up ledge (<= tolerance) is NOT a fall") {
     CHECK_FALSE(Autoplay::wouldFall(g, from, 0.0f, Vec3{1, 0, 0}));
     LevelGridSystem::shutdown(g);
 }
+
+// ── VHALL ramp APPROACH steering (rampSegDistXZ / rampApproachDir) ─────────────────────────────
+// Pure XZ geometry (Y ignored — the ramp is a graduated slab, we only steer the ground plane). Ramp
+// foot `low` at the origin, top `high` 10 m along +X and 3 m up. These pin the centreline-approach that
+// replaced the old "bounce at the ramp foot forever" climb.
+
+TEST_CASE("rampSegDistXZ: distance to the ramp segment, projected onto XZ") {
+    const Vec3 low{0, 0, 0}, high{10, 3, 0};                // axis is +X in XZ
+    CHECK(Autoplay::rampSegDistXZ(low, high, Vec3{5, 1.5f, 0}) == doctest::Approx(0.0f));  // ON the segment
+    CHECK(Autoplay::rampSegDistXZ(low, high, Vec3{5, 9,   2}) == doctest::Approx(2.0f));   // 2 m lateral (Y ignored)
+    CHECK(Autoplay::rampSegDistXZ(low, high, Vec3{13, 3,  0}) == doctest::Approx(3.0f));   // 3 m past the TOP (t clamps to 1)
+    CHECK(Autoplay::rampSegDistXZ(low, high, Vec3{-2, 0,  0}) == doctest::Approx(2.0f));   // 2 m before the FOOT (t clamps to 0)
+}
+
+TEST_CASE("rampApproachDir: on the centreline below the top, steer straight UP the ramp") {
+    const Vec3 low{0, 0, 0}, high{10, 3, 0};
+    const Vec3 d = Autoplay::rampApproachDir(low, high, Vec3{2, 0, 0});   // on centreline, 2 m up
+    CHECK(d.x == doctest::Approx(1.0f));                                  // pure +X (up-ramp), unit length
+    CHECK(d.z == doctest::Approx(0.0f));
+}
+
+TEST_CASE("rampApproachDir: laterally offset, keep an UP component AND correct toward the centreline") {
+    const Vec3 low{0, 0, 0}, high{10, 3, 0};
+    const Vec3 d = Autoplay::rampApproachDir(low, high, Vec3{2, 0, 2});   // 2 m off the centreline (+Z)
+    CHECK(d.x > 0.0f);                                                    // still climbing (never steers purely sideways)
+    CHECK(d.z < 0.0f);                                                    // pulled back toward the centreline (−Z, opposite the +Z offset)
+    CHECK(std::sqrt(d.x * d.x + d.z * d.z) == doctest::Approx(1.0f));     // normalized
+}
+
+TEST_CASE("rampApproachDir: past the top returns zero (caller crosses to the door)") {
+    const Vec3 low{0, 0, 0}, high{10, 3, 0};
+    const Vec3 d = Autoplay::rampApproachDir(low, high, Vec3{12, 3, 0});  // 2 m beyond the top (> L + 1)
+    CHECK(lengthSq(d) == doctest::Approx(0.0f));
+}
+
+TEST_CASE("rampApproachDir: a degenerate (zero-length) ramp returns zero") {
+    const Vec3 p{0, 0, 0};                                                // low == high — nothing to climb
+    CHECK(lengthSq(Autoplay::rampApproachDir(p, p, Vec3{1, 0, 1})) == doctest::Approx(0.0f));
+}

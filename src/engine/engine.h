@@ -376,6 +376,22 @@ private:
     // periodic hop while climbing carries it up over the risers and back onto the slab. Reset false
     // whenever not actively climbing (crossed, descending, or off VERTICAL_HALL).
     bool             m_autoplayVhClimbing = false;
+    // The bot is close enough to the EXIT RAMP segment that the climb-assist hop should fire (set in
+    // buildBotView from rampSegDistXZ). The hop must NOT fire during the flat approach: pulsing a jump
+    // while walking the void ground bunny-hops the bot across it (airborne half the time), which under
+    // the airborne fall-veto carve-out means it never settles onto a void pad to be launched and crawls
+    // to the ramp foot ("bunnyhopping while approaching the pad doesn't work"). Gated to ~3.5 m of the
+    // ramp, the bot WALKS grounded to the foot / onto the pad and only pogos up the narrow riser slab.
+    bool             m_autoplayVhOnRamp = false;
+    // VHALL COMMIT latch. On a VERTICAL_HALL upper-exit floor the bot climbs to the balcony story but
+    // then FIGHTS the balcony swarm in place (kite/strafe, never walking to the door) and falls back off
+    // the rim — the "climb-roam" that dominated the deep-floor stalls (measured: 5 of 6 genuine stalls in
+    // a 9-seed benchmark were VHALL). The exit bull never engages here because the bot IS dealing damage,
+    // so the 16 s no-damage window keeps resetting. This latch is armed instead by the KILL-AGNOSTIC
+    // floor-stall watchdog (20 s of no exit approach) and, once set, commits the bot to the VHallField
+    // route to the door — aim + walk it, fire on the way, force the climb-assist jump, fall-vetoed —
+    // until it descends (the floor-change reset clears it).
+    bool             m_autoplayVhCommit = false;
     // SHRINE detour (Autoplay). A shrine is a free buff sitting in the level; the bot grabs it on the
     // way. buildBotView finds the nearest active shrine within a small detour radius and steers travel
     // onto it; updateAutoplay stops and holds interact to activate it. Recomputed every tick, so no
