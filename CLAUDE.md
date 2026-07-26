@@ -704,6 +704,23 @@ stationary real fight still counts), lets the no-progress timer climb so the esc
 (`decidedPotion`), so the now-longer committed shove can never march the bot to its death holding an undrunk
 potion. (The FOUR_STORY return-lift STORY-BOUNCE — a ranged build cycling stories 9→6→3→0→9 on a Descent
 floor — is a SEPARATE, still-open descent-geometry problem, not this flat-floor livelock.)
+**The bull is a LAST RESORT, not a run-to-the-exit default — the bot must FIGHT its way through floors.**
+Three tunings enforce that. (a) The exit-progress window is **16 s, not 4 s**: 4 s of no-progress is not
+"can't get past", it is "this enemy is not a pushover" (an armored foe, a kiting build repositioning, an
+add), and a short window bailed the bot straight out of winnable-but-slow fights. The window RESETS on any
+damage dealt, so a real fight never accumulates it; only a bot that deals no damage AND makes no exit
+approach for 16 straight seconds — a genuine unkillable-swarm livelock — trips it. (b) Once latched the
+bull **releases on a KILL** (`killedThisTick` = `targetCount` fell): a kill means combat is viable again, so
+control hands back to the FIGHT branch — it stays committed only while chipping something that will not die.
+(c) A **flat-floor PUNCH-THROUGH**: while the bull walks a FLAT floor, a body-blocking swarm can shove a
+fragile build in circles (moving 15 m of churn, never CLOSING on the door — the netStuck slow anchor misses
+it because it IS moving), so the bull DODGES toward the exit (i-frames + a ~4 m lunge slide past the bodies,
+pulsed at the engine dodge CD, overriding the balance leash). Dying mid-punch is fine — routing OUT is the
+goal. Stacked floors are excluded (a horizontal roll could carry the bot off a balcony/ramp edge; VHALL
+climb-roam and FOUR_STORY bounce are separate up-routing problems). Measured, paired 10-min runs: raising
+4 s→16 s dropped bull-active from **7-10% of ticks to 0%** across Marksman/Warrior/Sorcerer while kills held
+(136-304) and floors reached held/improved — the bot fights the whole time and the shove only fires on a
+true livelock.
 **A remedy may only STAND STILL where the descend can actually fire.** The exit-wedge remedy engaged at
 2.5 m while `updateFloorDoor` descends at **2.0 m**, so between the two it planted the bot holding a button
 that could never fire — and standing still IS "no progress", so the remedy re-armed itself forever

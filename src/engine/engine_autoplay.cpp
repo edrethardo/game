@@ -389,6 +389,8 @@ void Engine::updateAutoplay(f32 dt) {
     // climb like any wedge, so the break-off (3) and the escape ladder below can break it.
     bool inBandFight = false;
     bool combatProgress = false;
+    bool killedThisTick = false;   // a hostile DIED this tick (targetCount fell) — real fight progress,
+                                   // distinct from mere chip damage; releases the exit bull back to combat
     {
         const Vec3 p  = m_localPlayer.position;
         const f32  dx = p.x - m_autoplayLastPos.x, dz = p.z - m_autoplayLastPos.z;
@@ -428,8 +430,8 @@ void Engine::updateAutoplay(f32 dt) {
         // Combat progress = we dealt damage (summed HP fell past a small epsilon) OR scored a kill
         // (fewer hostiles gathered than last tick). Comparing against the previous tick's snapshot; a
         // RISE (a new enemy walked into range) is not progress, so we only test for a drop.
-        combatProgress = (v.targetCount < m_autoplayLastEnemyCount) ||
-                         (enemyHp < m_autoplayLastEnemyHp - 0.5f);
+        killedThisTick = (v.targetCount < m_autoplayLastEnemyCount);
+        combatProgress = killedThisTick || (enemyHp < m_autoplayLastEnemyHp - 0.5f);
         m_autoplayLastEnemyHp    = enemyHp;
         m_autoplayLastEnemyCount = v.targetCount;
 
@@ -470,11 +472,20 @@ void Engine::updateAutoplay(f32 dt) {
     // MOVING but never gets anywhere useful slips right past it: a kiting sorcerer swarmed inside its own
     // engage floor NEVER fires and just circles / spirals near the exit at a crawl, never closing the last
     // few metres and never descending. The watchdog asks a blunt question on a rolling window: over the
-    // last few seconds did the bot get MEANINGFULLY closer to the exit OR deal combat damage? If NEITHER,
+    // last N seconds did the bot get MEANINGFULLY closer to the exit OR deal combat damage? If NEITHER,
     // it is livelocked on this floor — bull to the exit (Remedy A) and leave. A RATE check (approach > 1 m
     // per window), not a best-distance one, so a slow inward spiral that never actually arrives still
     // trips it (a best-distance test kept resetting on the crawl and never fired).
-    constexpr f32 kDoorCheckWindow = 4.0f;   // evaluate exit progress every 4 s
+    //
+    // The window is DELIBERATELY LONG. 4 s of no-progress is not "can't get past" — it is "this enemy is
+    // not a pushover": a tougher fight (an armored enemy, a kiting build repositioning, an add that takes a
+    // while) legitimately spends stretches dealing no damage AND not closing on the exit, and a short
+    // window bailed the bot straight out of exactly those fights instead of letting it WIN them. The bot
+    // must fight its way through floors — the bull is a LAST RESORT for a genuine livelock (an unkillable
+    // swarm it can neither hurt nor escape), which only shows itself over MANY seconds. So the window is
+    // 16 s: any real fight resolves well inside it (the window resets on any damage dealt), and only a bot
+    // that has done nothing useful for that long — no chip, no approach — is treated as stuck.
+    constexpr f32 kDoorCheckWindow = 16.0f;  // "can't get past" ~ no damage AND no approach for this long
     constexpr f32 kDoorApproachMin = 1.0f;   // must close at least 1 m toward the door per window
     if (m_level.currentFloor != m_autoplayLastFloor) {   // new floor: re-anchor the window, drop the latch
         m_autoplayLastFloor      = m_level.currentFloor;
@@ -490,14 +501,20 @@ void Engine::updateAutoplay(f32 dt) {
     if (v.doorActive && !bossGate) {
         if (m_autoplayExitBull) {
             // ALREADY LATCHED — a COMMITTED shove to the door, held until the bot reaches it and the
-            // descend fires (the floor-change reset above clears the latch). Deliberately NOT released by
-            // combatProgress: the swarm-kite livelock this exists to catch always deals a little CHIP
-            // damage, and the old code dropped the bull on any such hit — so the instant the bot fired,
-            // the kiting bounced it straight back off the door it was 4 m from, over and over (measured:
-            // d2d oscillating 4<->26 m for minutes, a "stuck" run that was really moving the whole time).
-            // Once we've decided the bot is livelocked it LEAVES; a stray hit no longer talks it back into
-            // the swarm. The bull remedy itself fires through anything on the path, so it still clears the
-            // way out — it just no longer treats clearing the way out as a reason to stop leaving.
+            // descend fires (the floor-change reset above clears the latch). The bull is a LAST RESORT,
+            // not a run-to-the-exit default: the bot must still FIGHT its way through floors. So it is
+            // released the moment combat becomes VIABLE again — a KILL (targetCount fell) means the bot
+            // can make real progress fighting, so hand control back to the FIGHT branch. What it is
+            // deliberately NOT released by is mere CHIP damage: the swarm-kite livelock this exists to
+            // catch always deals a little (an enemy's HP ticking down while it heals / more arrive), and
+            // dropping the bull on that let the kiting bounce the bot straight back off the door it was
+            // 4 m from, over and over. Kill = fight on; chip-without-kill = keep leaving. (A bot that CAN
+            // kill never latched the bull in the first place — the pre-latch window resets on any damage —
+            // so this only re-opens a fight the bot regained the ability to win.)
+            if (killedThisTick) {
+                m_autoplayExitBull = false;
+                m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
+            }
         } else if (combatProgress) {   // PRE-LATCH ONLY: a fight that IS closing on the exit shouldn't arm it
             m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
         } else {
@@ -768,7 +785,21 @@ void Engine::updateAutoplay(f32 dt) {
             // because it was never inside the radius long enough for one hold to complete). Standing still
             // is what lets the hold land.
             if (v.distToDoor > 1.5f) in.moveFwd = true;
+            // PUNCH THROUGH. The committed walk gets a fragile build shoved in circles by a body-blocking
+            // swarm — moving 15 m of churn but never CLOSING (measured Marksman, flat floor). So while the
+            // bull is walking, DODGE toward the exit: the roll's i-frames + ~4 m lunge slide past the
+            // bodies along the door heading (moveFwd is set, so the roll goes that way). Pulsed — the
+            // engine's own ~1 s dodge cooldown paces the real rolls — overriding the balance leash (this
+            // is escape, not a combat dodge). Dying mid-punch is fine; converging on the exit is the goal.
+            // FLAT floors ONLY: a horizontal roll on a stacked floor could carry the bot off a balcony /
+            // ramp edge (VHALL/FOUR_STORY route UP or via drops — a different fix), and moveFwd already
+            // cuts out inside 1.5 m so the punch never overshoots the descend radius.
+            const bool flatFloor = m_level.layoutStyle != LevelGen::LayoutStyle::VERTICAL_HALL &&
+                                   m_level.layoutStyle != LevelGen::LayoutStyle::FOUR_STORY;
+            if (flatFloor && in.moveFwd && (m_autoplayBullDodgeTick % 45u == 0u))
+                in.dodge = true;
         }
+        m_autoplayBullDodgeTick++;
         in.descend = true;   // held so it fires the moment the bot is inside the 2 m descend radius
         // FIRE through anything blocking the run to the exit. The shot travels along the door heading, so a
         // body ON the path is hit — this is what clears the swarm a squishy kiting build can't (its

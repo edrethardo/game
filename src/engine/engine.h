@@ -316,6 +316,12 @@ private:
     Vec3             m_autoplaySlowAnchor{};              // position at the window start
     f32              m_autoplaySlowAnchorT    = 0.0f;     // seconds into the current net-progress window
     bool             m_autoplaySlowNetStuck   = false;    // last window showed < ~2.5 m of NET travel
+    // BULL punch-through. When the committed exit bull is walking a FLAT floor, a swarm can body-block a
+    // fragile build and shove it in circles — moving 15 m of churn but never arriving (measured Marksman,
+    // distToDoor pinned at 15-27 m). While it walks, the remedy DODGES toward the exit on this pulse
+    // counter: i-frames + a ~4 m lunge slide past the bodies. Dying mid-punch is fine (routing OUT is the
+    // goal); the engine's own ~1 s dodge cooldown paces the real rolls.
+    u32              m_autoplayBullDodgeTick  = 0;        // pulses the punch-through dodge past the CD
     // FLOOR-STALL watchdog — the long, KILL-AGNOSTIC twin of the window above. That one restarts
     // whenever the bot deals damage, on the reasonable theory that a live fight is worth finishing;
     // on a four-story Descent (~190 entities across four stacked stories) the bot deals damage almost
