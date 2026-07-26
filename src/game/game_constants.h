@@ -72,6 +72,14 @@ namespace GameConst {
     // DIFFICULTY_HP_COMPOUND_RATE), so mid-Nightmare and Hell don't notice.
     static constexpr f32 FLOOR_STAT_MULT     = 0.12f;
 
+    // Floor-10+ enemy toughness pass (2026-07-26, Aaron: "mobs in tier 10+ have 50% more HP").
+    // Folded into floorHealthMult (below) — the ONE source every spawn site, the boss AI, and the
+    // balance lab share — so the boost can never drift between them. Gated on the EFFECTIVE floor
+    // (raw floor + difficulty*50), so it is exactly "floor 10 and up" on Normal and covers all of
+    // Nightmare/Hell (their effective floors are all >= 51). A deliberate step at the tier boundary.
+    static constexpr u32 TIER10_HP_BOOST_FLOOR = 10;    // effective floor at/above which the boost applies
+    static constexpr f32 TIER10_HP_BOOST       = 1.5f;  // +50% HP
+
     // Enemy DAMAGE has its own, steeper slope.
     //
     // It was raised to pay for a real bug fix, not a feel tweak: item health used to reach the
@@ -150,7 +158,10 @@ namespace GameConst {
         // <cmath> and is exact enough; effectiveFloor <= ~150 so the loop is trivial.
         f32 comp = 1.0f;
         for (u32 i = 1; i < effectiveFloor; ++i) comp *= (1.0f + DIFFICULTY_HP_COMPOUND_RATE);
-        return comp > linear ? comp : linear;
+        f32 mult = comp > linear ? comp : linear;
+        // Floor-10+ toughness pass (see TIER10_HP_BOOST above): +50% HP from floor 10 upward.
+        if (effectiveFloor >= TIER10_HP_BOOST_FLOOR) mult *= TIER10_HP_BOOST;
+        return mult;
     }
 
     // Linear DAMAGE multiplier for an effective floor — the linear per-floor curve at slope

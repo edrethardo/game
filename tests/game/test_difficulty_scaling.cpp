@@ -23,10 +23,20 @@ using GameConst::difficultyHealthBump;
 using GameConst::FLOOR_STAT_MULT;
 using GameConst::FLOOR_DAMAGE_MULT;
 using GameConst::DIFFICULTY_HP_COMPOUND_RATE;
+using GameConst::TIER10_HP_BOOST;
+using GameConst::TIER10_HP_BOOST_FLOOR;
 
 // The legacy linear curve every spawn site used before the compounding change.
 static f32 legacyLinear(u32 effFloor) {
     return 1.0f + static_cast<f32>(effFloor - 1) * FLOOR_STAT_MULT;
+}
+
+// The floor-10 toughness boost (2026-07-26): +50% HP from effective floor 10 up, folded into
+// floorHealthMult. Applied to Normal floors 10-50 and ALL of Nightmare/Hell (their effective floors
+// are all >= 51). Multiplies the whole max(linear, compounding) curve, so it scales values without
+// moving the linear/compounding crossover.
+static f32 tier10(u32 effFloor) {
+    return effFloor >= TIER10_HP_BOOST_FLOOR ? TIER10_HP_BOOST : 1.0f;
 }
 
 TEST_CASE("floorHealthMult: floor 1 is the 1.0x baseline (and 0 is guarded)") {
@@ -37,26 +47,27 @@ TEST_CASE("floorHealthMult: floor 1 is the 1.0x baseline (and 0 is guarded)") {
     CHECK(floorDamageMult(0) == doctest::Approx(1.0f));
 }
 
-TEST_CASE("floorHealthMult: ALL of Normal (1-50) is byte-for-byte the linear curve") {
-    // The crossover (where compounding overtakes the linear curve) has moved twice:
-    //   * raising the compounding rate to 4.41% pulled it from effective floor 52 down to 46,
-    //     so for a while Normal 46-50 picked up a small compounding tail;
-    //   * the 2026-07-23 balance-lab pass steepened the linear HP slope 0.10 -> 0.12, which
-    //     outgrows compounding until effective floor 53 — so the tail is gone again and ALL of
-    //     Normal (raw floors 1-50 = effective 1-50) rides the linear slope.
-    //
-    // Note what this pins: Normal's HP curve now lives entirely in FLOOR_STAT_MULT. Normal DID
-    // get tougher in that pass — via the slope itself (that was the point), not via compounding.
-    for (u32 eff = 1; eff <= 50; ++eff) {
-        CHECK(floorHealthMult(eff) == doctest::Approx(legacyLinear(eff)));
+TEST_CASE("floorHealthMult: Normal 1-9 is the linear curve; 10-50 carries the +50% floor-10 boost") {
+    // Normal's HP curve lives entirely in FLOOR_STAT_MULT (the 2026-07-23 pass steepened the linear
+    // slope 0.10 -> 0.12, which outgrows compounding until effective floor 53, so no compounding tail
+    // in Normal). On top of that, the 2026-07-26 floor-10 boost adds +50% from effective floor 10 up:
+    //   * floors 1-9 ride the plain linear slope,
+    //   * floors 10-50 are that same linear slope x 1.5 (the tier-10 toughness pass).
+    for (u32 eff = 1; eff <= 9; ++eff) {
+        CHECK(floorHealthMult(eff) == doctest::Approx(legacyLinear(eff)));                    // below the boost
+    }
+    for (u32 eff = 10; eff <= 50; ++eff) {
+        CHECK(floorHealthMult(eff) == doctest::Approx(legacyLinear(eff) * TIER10_HP_BOOST));  // +50% from floor 10
     }
 }
 
 TEST_CASE("floorHealthMult: compounding overtakes the linear slope at effective floor 53") {
     // The crossover, pinned exactly so a future slope/rate tweak states its consequences here.
     // Effective floor 53 = Nightmare floor 3: compounding governs from early Nightmare onward.
-    CHECK(floorHealthMult(52) == doctest::Approx(legacyLinear(52)));  // linear still wins...
-    CHECK(floorHealthMult(53) > legacyLinear(53));                    // ...compounding from here
+    // The floor-10 boost multiplies BOTH curves equally (it is applied after the max), so it scales
+    // the values without moving where compounding overtakes linear — hence the x tier10() on both.
+    CHECK(floorHealthMult(52) == doctest::Approx(legacyLinear(52) * tier10(52)));  // linear still wins...
+    CHECK(floorHealthMult(53) > legacyLinear(53) * tier10(53));                    // ...compounding from here
 }
 
 TEST_CASE("floorHealthMult: never below linear anywhere (change only ever adds difficulty)") {
@@ -66,16 +77,18 @@ TEST_CASE("floorHealthMult: never below linear anywhere (change only ever adds d
 }
 
 TEST_CASE("floorHealthMult: compounding overtakes and ramps in Nightmare/Hell") {
-    // Headline numbers (effFloor = floor + difficulty*50):
-    //   Nightmare floor 50 = eff 100 (~44.1x), Hell floor 50 = eff 150 (~299x).
+    // Headline numbers (effFloor = floor + difficulty*50), now carrying the floor-10 boost (x1.5,
+    // since every Nightmare/Hell effective floor is >= 51 >= 10):
+    //   Nightmare floor 50 = eff 100 (~44.1x compound x1.5 = ~66.2x),
+    //   Hell floor 50      = eff 150 (~299x  compound x1.5 = ~448.5x).
     CHECK(floorHealthMult(100) ==
-          doctest::Approx(std::pow(1.0 + DIFFICULTY_HP_COMPOUND_RATE, 99)).epsilon(0.01));
+          doctest::Approx(std::pow(1.0 + DIFFICULTY_HP_COMPOUND_RATE, 99) * TIER10_HP_BOOST).epsilon(0.01));
     CHECK(floorHealthMult(150) ==
-          doctest::Approx(std::pow(1.0 + DIFFICULTY_HP_COMPOUND_RATE, 149)).epsilon(0.01));
+          doctest::Approx(std::pow(1.0 + DIFFICULTY_HP_COMPOUND_RATE, 149) * TIER10_HP_BOOST).epsilon(0.01));
     // Strictly tougher than the linear values at these depths.
-    CHECK(floorHealthMult(100) > legacyLinear(100));  // ~44.1 > 12.9
-    CHECK(floorHealthMult(150) > legacyLinear(150));  // ~299 > 18.9
-    // Hell floor 50 should be a big jump over today's Hell floor 50.
+    CHECK(floorHealthMult(100) > legacyLinear(100));  // ~66 > 12.9
+    CHECK(floorHealthMult(150) > legacyLinear(150));  // ~448 > 18.9
+    // Hell floor 50 is a big jump over the plain linear curve.
     CHECK(floorHealthMult(150) > 4.0f * legacyLinear(150));
 }
 
@@ -162,63 +175,59 @@ TEST_CASE("Hell floor 50 damage is AT LEAST double what it was — the stated ha
     CHECK(newHell50 == doctest::Approx(295.2f).epsilon(0.01));
 }
 
-TEST_CASE("Hell floor 50 HP went up, but nowhere near enough to out-tank the damage cap") {
-    // The HP rate was pulled back 4.41% -> 3.9% because tripling HP turned a Hell-50 trash mob into a
-    // 23-swing slog. It still rises (1.45x the 3.64% curve), just not absurdly.
-    const f32 prevHell50 = std::pow(1.0364f, 149.0f);          // the previous curve: ~205.9x
-    CHECK(floorHealthMult(150) / prevHell50 == doctest::Approx(1.45f).epsilon(0.03));
-    CHECK(floorHealthMult(150) == doctest::Approx(299.0f).epsilon(0.02));
+TEST_CASE("Hell floor 50 HP = the compounding curve x the floor-10 boost") {
+    // History: the compounding rework put Hell-50 at ~299x (1.45x the old 3.64% curve of ~205.9x);
+    // the 2026-07-26 floor-10 toughness pass adds a further +50% on top => ~448.5x. This is a
+    // DELIBERATE endgame rebalance (Aaron: "mobs in tier 10+ have 50% more HP", all difficulties) —
+    // the old "nowhere near enough to out-tank the damage" framing is retired; see the BOXED IN test.
+    const f32 prevHell50 = std::pow(1.0364f, 149.0f);          // the pre-rework curve: ~205.9x
+    CHECK(floorHealthMult(150) == doctest::Approx(299.0f * TIER10_HP_BOOST).epsilon(0.02));            // ~448.5x
+    CHECK(floorHealthMult(150) / prevHell50 == doctest::Approx(1.45f * TIER10_HP_BOOST).epsilon(0.03)); // ~2.18x
 }
 
-TEST_CASE("The Hell bump is BOXED IN by the 2x floor and the HP>damage invariant") {
-    // The two requirements bracket the Hell bump from both sides, and at the 3.9% HP rate and 0.24
-    // damage slope the gap between them is only [7.98, 8.13] — 8.03 sits inside it with almost no
-    // room. (The box travels with the slope: [11.14, 11.36] at 0.17, [9.52, 9.71] at 0.20; the
-    // 2026-07-23 re-solves moved the number, not the squeeze.)
+TEST_CASE("Hell: the glass-cannon guard holds, with headroom opened by the floor-10 boost") {
+    // The glass-cannon guard — enemy HP must outscale enemy damage, so a deep enemy can never delete
+    // the player before it can be hit back — is the invariant that matters most in this file, and it
+    // STILL HOLDS. (It already inverted once, at damage bump 15.80: 416x damage against 299x HP.)
     //
-    // This is the test that matters most in this file. It says: you cannot raise Hell's damage any
-    // further WITHOUT first buying HP headroom by raising DIFFICULTY_HP_COMPOUND_RATE. Someone who
-    // just nudges the bump up to "make Hell hurt" will invert the glass-cannon invariant, and this is
-    // what tells them. (It already happened once, at bump 15.80: 416x damage against 299x HP.)
-    const f32 hellDmg  = floorDamageMult(150) * difficultyDamageBump(2);
-    const f32 hellHp   = floorHealthMult(150);
+    // What CHANGED (2026-07-26): the floor-10 boost adds +50% HP on top, so the box that used to be a
+    // <5% knife-edge (HP barely above damage) is now open to ~52%. That is deliberate — Aaron asked
+    // for tankier tier-10+ mobs on all difficulties. The consequence to KNOW: Hell now has real HP
+    // headroom, so a future damage-bump raise no longer instantly inverts the guard the way it did at
+    // the old knife-edge — but the guard below is still the thing that catches an over-raise.
+    const f32 hellDmg  = floorDamageMult(150) * difficultyDamageBump(2);   // ~295.2x
+    const f32 hellHp   = floorHealthMult(150);                             // ~448.5x (299 x 1.5)
     const f32 prevDmg  = (1.0f + 149.0f * 0.16f) * 5.90f;
 
-    CHECK(hellDmg >= 2.0f * prevDmg);   // lower bound: the stated damage floor
-    CHECK(hellHp  >  hellDmg);          // upper bound: HP must still outscale damage
+    CHECK(hellDmg >= 2.0f * prevDmg);   // the stated damage floor (unchanged)
+    CHECK(hellHp  >  hellDmg);          // glass-cannon guard: HP must outscale damage — STILL HOLDS
 
-    // And the window really is that tight — the headroom is under 5%.
-    CHECK(hellHp / hellDmg < 1.05f);
+    // The headroom the floor-10 boost opened (was < 1.05; now ~1.52).
+    CHECK(hellHp / hellDmg == doctest::Approx(1.52f).epsilon(0.03));
 }
 
-TEST_CASE("Nightmare runs deliberately hotter than its HP-parity solve") {
-    // Compounding cannot be aimed at one tier, so DIFFICULTY_HP_COMPOUND_RATE sets Nightmare's HP
-    // whether anyone meant it to or not (x1.28 vs the pre-rework curve). Nightmare's DAMAGE comes
-    // from a separate per-tier bump, and 2.30 used to be SOLVED so its damage growth tracked that
-    // x1.28 HP growth exactly — this test used to assert dmgX == hpX.
+TEST_CASE("Nightmare: hot damage, plus the floor-10 HP tilt, still absolutely HP>damage") {
+    // History: NM damage was deliberately run "hot" (damage growth > HP growth) from 2026-07-23, and
+    // both axes were doubled 2026-07-24 (HP growth 1.28 -> 2.56, damage growth 1.82 -> 3.64 vs the
+    // pre-rework baseline). The 2026-07-26 floor-10 boost then adds +50% HP on top (NM's effective
+    // floors are all >= 51 >= 10), lifting HP growth to 3.84 — just PAST the 3.64 damage growth.
     //
-    // That parity was DELIBERATELY broken on 2026-07-23: the balance lab's first report measured NM
-    // at 12-19 hits-to-die mid-late tier (closer to Normal's safety than Hell's threat), and Aaron's
-    // call was "a bit harder". Pass 1 (bump 2.80 @ slope 0.20) set NM-50 damage growth at x1.82 vs
-    // the pre-rework baseline against x1.28 HP growth; pass 2's 2.35 @ slope 0.24 is that SAME heat
-    // re-solved (58.24/24.76 ~= 2.35 — NM-50 stays 58.2x, totals drift under 1% across the tier).
-    // Hot ON PURPOSE, and pinned exactly so the heat stays a decision rather than drift. The sponge
-    // direction still has teeth: damage growth must never fall BELOW HP growth again (that is the
-    // bullet-sponge failure the old solve fixed).
-    //
-    // If the HP rate ever moves, re-derive the parity bump first and re-apply the deliberate heat on
-    // top — do not treat 2.35 as a parity number (see difficultyDamageBump's comment).
+    // So the old relative "damage growth must exceed HP growth (never a sponge)" no longer holds — by
+    // design; Aaron asked for +50% HP on tier-10+ across all difficulties. The guard that actually
+    // matters is ABSOLUTE: enemy HP must still outscale enemy damage so NM can't glass-cannon the
+    // player. That holds with room (NM-50: ~132.5x HP vs ~116.4x damage). Pinned below.
     const f32 prevHp  = std::pow(1.0364f, 99.0f);
     const f32 prevDmg = (1.0f + 99.0f * 0.16f) * 1.90f;
-    //
-    // 2026-07-24: Nightmare was DOUBLED on both axes, so both growth figures double (1.28 -> 2.56
-    // HP, 1.82 -> 3.64 damage) and the RATIO between them — the thing this test actually guards —
-    // is untouched. hpX must include difficultyHealthBump or it reports the pre-doubling curve.
-    const f32 hpX     = (floorHealthMult(100) * difficultyHealthBump(1)) / prevHp;
+    const f32 hpX     = (floorHealthMult(100) * difficultyHealthBump(1)) / prevHp;   // 2.56 x 1.5
     const f32 dmgX    = (floorDamageMult(100) * difficultyDamageBump(1)) / prevDmg;
-    CHECK(hpX  == doctest::Approx(2.56f).epsilon(0.03));
-    CHECK(dmgX >  hpX);                                  // never a sponge again
-    CHECK(dmgX == doctest::Approx(3.64f).epsilon(0.03)); // the deliberate heat, doubled and pinned
+    CHECK(hpX  == doctest::Approx(2.56f * TIER10_HP_BOOST).epsilon(0.03));  // 3.84 — the +50% floor-10 tilt
+    CHECK(dmgX == doctest::Approx(3.64f).epsilon(0.03));                    // damage growth unchanged
+    CHECK(hpX  >  dmgX);                                                    // HP now edges past damage growth
+
+    // The invariant with teeth: absolute NM-50 HP outscales absolute NM-50 damage (glass-cannon guard).
+    const f32 nm50Hp  = floorHealthMult(100) * difficultyHealthBump(1);
+    const f32 nm50Dmg = floorDamageMult(100) * difficultyDamageBump(1);
+    CHECK(nm50Hp > nm50Dmg);
 }
 
 TEST_CASE("difficultyHealthBump doubles Nightmare and leaves the other tiers alone") {
