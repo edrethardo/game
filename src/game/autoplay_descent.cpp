@@ -86,6 +86,13 @@ bool ensureDescentField(DescentField& f, const LevelGrid& g, const DungeonResult
     // on this story (it always is — L0) and its cell is walkable; otherwise fall back to invalid (the
     // driver then uses the flat field, the old behaviour).
     if (tail == 0 && std::fabs(exitPos.y - storyY) <= PLATFORM_STEP_TOLERANCE) {
+        // The exit route is PAD-AVOIDING, never "padded only" — clear the flag pass 1 may have set.
+        // Bug it fixes: pass 1 sets paddedOnly=true BEFORE it knows it will seed anything, and on L0
+        // (no slab below, so no holes at all) it seeds nothing, then we fall through to here. Leaving
+        // paddedOnly stuck true stood the driver's pad veto DOWN on L0, so the bot walked straight onto
+        // the return-lift pads under the L1 holes and got flung back up above the exit ("jumped above
+        // the exit and too dumb to drop again"). L0 must AVOID pads to reach the door.
+        f.paddedOnly = false;
         u32 ex, ez;
         if (LevelGridSystem::worldToGrid(g, exitPos, ex, ez) && !LevelGridSystem::isSolid(g, ex, ez)) {
             f.dir[ez * g.width + ex] = 0xFE;                  // the way OUT, treated like a way down
@@ -227,6 +234,21 @@ bool atDescentGoal(const DescentField& f, const LevelGrid& g, Vec3 pos) {
     if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return false;
     if (gx >= f.width || gz >= f.depth) return false;
     return f.dir[gz * f.width + gx] == 0xFE;
+}
+
+bool descentNextIsPad(const DescentField& f, const LevelGrid& g, Vec3 pos) {
+    if (!f.valid || !f.dir) return false;
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return false;
+    if (gx >= f.width || gz >= f.depth) return false;
+    const u8 d = f.dir[gz * f.width + gx];
+    if (d >= 8) return false;                             // at a hole/goal (0xFE) or unreachable (0xFF)
+    const s32 nx = static_cast<s32>(gx) + kDx[d];
+    const s32 nz = static_cast<s32>(gz) + kDz[d];
+    if (nx < 0 || nz < 0 ||
+        static_cast<u32>(nx) >= f.width || static_cast<u32>(nz) >= f.depth) return false;
+    return (LevelGridSystem::getCell(g, static_cast<u32>(nx), static_cast<u32>(nz)).flags
+            & CELL_JUMPPAD) != 0;
 }
 
 void freeDescentField(DescentField& f) {

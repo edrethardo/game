@@ -392,6 +392,15 @@ private:
     // route to the door — aim + walk it, fire on the way, force the climb-assist jump, fall-vetoed —
     // until it descends (the floor-change reset clears it).
     bool             m_autoplayVhCommit = false;
+    // FOUR_STORY DESCENT COMMIT latch — the Descent twin of the VHALL commit. On a dense Descent floor
+    // the bot stands in the swarm and FIGHTS instead of walking to a drop hole (measured: geared paladin
+    // with 16 targets in range, all four WASD zero, never descending — "too dumb to drop again" after a
+    // bounce). The 3 s break-off is too short (it walks a bit, then FIGHT re-owns the feet in place), so
+    // the floor-stall watchdog latches this instead. Once set it commits the bot to the descent field
+    // heading — KEEP the brain's combat (aim/fire/dodge/block/skill), only override the WASD feet toward
+    // the next hole (the door on L0), so it FIGHTS ITS WAY DOWN — until it leaves the floor (the
+    // floor-change reset clears it). Layout-exclusive with m_autoplayVhCommit.
+    bool             m_autoplayDescentCommit = false;
     // SHRINE detour (Autoplay). A shrine is a free buff sitting in the level; the bot grabs it on the
     // way. buildBotView finds the nearest active shrine within a small detour radius and steers travel
     // onto it; updateAutoplay stops and holds interact to activate it. Recomputed every tick, so no

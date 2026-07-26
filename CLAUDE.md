@@ -816,6 +816,27 @@ work, each from a measured failure:
   (a champion/elite legitimately takes many seconds to kill) and made the bot "randomly disengage" from
   exactly those fights; 20 s lets any real fight resolve first so it fires only on a true livelock.
 
+**Descent finish pass — pad recovery + fight-your-way-DOWN (measured 2026-07-26).** A Descent floor the
+geared paladin never finished (bounced above the exit, then stood in the swarm) now completes ~3/6 in
+140 s, via four driver/field fixes (FOUR_STORY-scoped; no wire/save change). (1) **paddedOnly-on-L0 bug**
+(`autoplay_descent.cpp`): pass 1 of the seed loop sets `paddedOnly=true` BEFORE it knows it will seed
+anything, and on L0 (no slab below → no holes) it seeds nothing and falls through to exit-seeding with
+`paddedOnly` stuck true — which stood the driver's pad veto DOWN on L0, so the bot walked straight onto the
+return-lift pads under the L1 holes and got flung back up ("jumped above the exit and too dumb to drop
+again"). The exit-seed block now clears the flag. (2) **`descentNextIsPad`** (`autoplay_descent.h`): when
+the field's NEXT routed step IS a pad — a return lift severing a pocket, or a pad blocking the exit corridor
+(the "jump pad not perfectly placed" case) — the two pad-avoidance vetoes stand down for that one crossing,
+so the bot takes the bounce and re-routes instead of freezing next to the pad it must cross. (3) **FOUR_STORY
+DESCEND COMMIT** (`m_autoplayDescentCommit`, the Descent twin of the VHALL climb commit): on a dense floor
+the bot stood in a 16-target swarm with every WASD zero, fighting instead of descending (the real "too dumb
+to drop"). The floor-stall watchdog now latches a persistent commit instead of the too-short 3 s break-off —
+KEEP the brain's combat (aim/fire/dodge/block/skill/potion), only OVERRIDE the WASD feet toward the descent
+field heading (faceAndGo decomposition), so it FIGHTS ITS WAY DOWN to the next hole; held until it leaves the
+floor. (4) **Descend-at-door**: that commit branch SHADOWS the normal `atDoor` descend, so it must fire the
+interact itself — without it the bot reached the L0 door (0.7 m, field flow=0) and stood there fighting the
+swarm forever, never pressing descend. All measured on the geared paladin save (combat isolated); the
+non-finishers all reach L0 and are only slowed by combat density, not stalled.
+
 **TRAVEL movement is a WASD decomposition, not "hold W"** (`autoplay_brain.cpp` `faceAndGo`). The aim is
 deliberately EASED, so the facing lags the heading for a few tenths of a second after every turn; holding
 W through that lag walks the bot wherever it happened to be pointing, which in a 3-wide corridor is the

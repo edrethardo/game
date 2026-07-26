@@ -507,6 +507,7 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplaySlowAnchorT     = 0.0f;                     // net-stuck flag across the descent teleport
         m_autoplaySlowNetStuck    = false;
         m_autoplayVhCommit        = false;                    // the climb is done once we've descended
+        m_autoplayDescentCommit   = false;                    // ...and so is the Descent push
     }
     if (v.doorActive && !bossGate) {
         if (m_autoplayExitBull) {
@@ -577,11 +578,14 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayFloorStallTimer += dt;
         if (m_autoplayFloorStallTimer >= kFloorWindow) {
             if ((m_autoplayFloorCheckDist - v.distToDoor) < kFloorApproachMin) {
-                // On a VHALL UPPER-EXIT floor the break-off's 3 s leg is too short — it walks a bit then
-                // resumes fighting in place, and the bot never crosses the balcony. Latch the PERSISTENT
-                // VHALL commit instead (it holds until descent). Elsewhere, the short de-fixate leg.
-                if (vhallUpperExit) m_autoplayVhCommit = true;
-                else                m_autoplayBreakoffTimer = kFloorPushLeg;   // stop fighting, walk the route
+                // The break-off's 3 s leg is too short on a dense STACKED floor — it walks a bit then
+                // FIGHT re-owns the feet in place, and the bot never descends/crosses. Latch a PERSISTENT
+                // commit instead (holds until the bot leaves the floor): the VHALL climb commit upstairs,
+                // the FOUR_STORY descend commit on a Descent maze (fight your way DOWN to the next hole).
+                // Everywhere else (flat/lava), the short de-fixate leg is right.
+                if (vhallUpperExit)                                            m_autoplayVhCommit      = true;
+                else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) m_autoplayDescentCommit = true;
+                else                                                           m_autoplayBreakoffTimer = kFloorPushLeg;
             }
             m_autoplayFloorCheckDist  = v.distToDoor;
             m_autoplayFloorStallTimer = 0.0f;
@@ -664,6 +668,33 @@ void Engine::updateAutoplay(f32 dt) {
             // onto a void pad to be launched) instead of bunny-hopping across it.
             const bool climbing = m_localPlayer.position.y < m_level.floorDoorPos.y - 0.5f;
             if (climbing && m_autoplayVhOnRamp && (currentLocalTick() % 8u) < 4u) in.jump = true;
+        }
+    } else if (m_autoplayDescentCommit && m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
+        // FOUR_STORY DESCEND COMMIT (armed by the floor-stall watchdog; see engine.h). The bot was
+        // standing in the swarm firing instead of descending. Same shape as the VHALL commit: KEEP the
+        // brain's combat this tick (aim / fire / dodge / block / class skills / potion) and only OVERRIDE
+        // the WASD feet toward the descent field heading (v.flowDir routes to the next drop hole upstairs,
+        // to the door on L0), decomposed onto the CURRENT facing basis — so the bot walks/strafes to the
+        // hole while still fighting the swarm, and falls through it. At a hole the field returns {0,0,0}
+        // and this leaves the feet alone, so the drop itself is never fought. The pad-avoidance veto below
+        // still applies to these feet (it runs after), so the commit can't march the bot onto a return
+        // lift. Held until the bot leaves the floor (the floor-change reset clears the latch).
+        if (v.distToDoor < Autoplay::DESCEND_STOP_M) {
+            // Reached the L0 exit door under the commit. This branch SHADOWS the normal atDoor descend
+            // below, so it must fire the interact ITSELF — otherwise the bot arrives at the door (0.7 m,
+            // field flow=0) and stands there fighting the swarm forever, never pressing descend (measured:
+            // runs reaching the door and never taking it). Hold descend, feet still, like the atDoor case.
+            in = Autoplay::BotIntent{};
+            in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
+            in.descend = true;
+        } else if (lengthSq(v.flowDir) > 1e-6f) {
+            const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+            const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+            const Vec3 dir = normalize(Vec3{v.flowDir.x, 0.0f, v.flowDir.z});
+            const f32  df = dot(dir, fwd), dr = dot(dir, right);
+            constexpr f32 kAxis = 0.35f;                     // ~20 degrees, matches faceAndGo
+            in.moveFwd = df > kAxis; in.moveBack = df < -kAxis;
+            in.moveRight = dr > kAxis; in.moveLeft = dr < -kAxis;
         }
     } else if (atDoor && v.distToDoor < Autoplay::DESCEND_STOP_M) {
         in = Autoplay::BotIntent{};
@@ -978,9 +1009,11 @@ void Engine::updateAutoplay(f32 dt) {
         const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
         const Vec3 p     = m_localPlayer.position;
         const f32  feetY = p.y;
-        // Pads are vetoed unless the bot is standing on one (a 3x3 pad node would box it in) or the
-        // storey's only ways down are lifts (paddedOnly) — same carve-outs as the travel veto.
-        const bool avoidPads = !Autoplay::onJumpPad(m_level.grid, p) && !m_autoplayDescent.paddedOnly;
+        // Pads are vetoed unless the bot is standing on one (a 3x3 pad node would box it in), the
+        // storey's only ways down are lifts (paddedOnly), or the field's next routed step IS a pad
+        // (a pad blocking the route — cross it) — same carve-outs as the travel veto.
+        const bool avoidPads = !Autoplay::onJumpPad(m_level.grid, p) && !m_autoplayDescent.paddedOnly &&
+                               !Autoplay::descentNextIsPad(m_autoplayDescent, m_level.grid, p);
         auto blocked = [&](Vec3 d) {
             return !Autoplay::stepAllowed(m_level.grid, p, feetY, d, /*lavaFloor=*/false, avoidPads);
         };
@@ -1647,9 +1680,14 @@ Autoplay::BotView Engine::buildBotView() {
         // the veto would refuse the last step into the single hole available and leave the bot
         // circling something it is not allowed to enter. Hole density thins to 7% on the deepest
         // storey, so that state is rare but real.
+        // ...and when the field's NEXT routed step IS a pad (descentNextIsPad): the tier-2 recovery
+        // routes THROUGH a pad only when a pad severs the pocket / blocks the exit corridor, and there
+        // the veto would freeze the bot at the pad it must cross. Standing down lets it take the bounce
+        // and re-route, instead of standing still (the "can't find the exit when a pad is in the way").
         const bool avoidPads = (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) &&
                                !Autoplay::onJumpPad(m_level.grid, v.pos) &&
-                               !m_autoplayDescent.paddedOnly;
+                               !m_autoplayDescent.paddedOnly &&
+                               !Autoplay::descentNextIsPad(m_autoplayDescent, m_level.grid, v.pos);
         if (!Autoplay::stepAllowed(m_level.grid, v.pos, feetY, v.flowDir, m_level.lavaFloor, avoidPads)) {
             constexpr f32 kFan[4] = { 0.7853981634f, -0.7853981634f,     // ±45°: the gentle detour
                                       1.5707963268f, -1.5707963268f };   // ±90°: the square sidestep

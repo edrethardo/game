@@ -72,6 +72,15 @@ Vec3 descentDirection(const DescentField& f, const LevelGrid& g, Vec3 pos);
 // and the driver can stop steering.
 bool atDescentGoal(const DescentField& f, const LevelGrid& g, Vec3 pos);
 
+// True when the field's NEXT routed step from `pos` lands on a jump pad — i.e. the only way onward
+// crosses a pad. The tier-2 recovery flood routes THROUGH pads for exactly this (a return lift that
+// severs a pocket, or a pad blocking the exit corridor on L0), but the driver's pad-avoidance veto
+// would refuse that step and freeze the bot next to the pad it must cross (measured: geared paladin
+// frozen on L0 ~20 m from the door, valid heading, every WASD vetoed). The driver calls this to stand
+// the pad veto down for that one crossing — the bot takes the bounce, then re-routes from where it
+// lands. It is false on the ordinary pad-free route, so a floor with no pad severance is untouched.
+bool descentNextIsPad(const DescentField& f, const LevelGrid& g, Vec3 pos);
+
 void freeDescentField(DescentField& f);
 
 } // namespace Autoplay
