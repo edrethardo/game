@@ -502,10 +502,13 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     // HP compounds with the effective floor (Nightmare/Hell ramp
                     // exponentially); damage stays on the linear floor curve plus a flat
                     // per-difficulty bump — compounding damage would one-shot the player.
+                    // ...plus the Hellforge surcharge (+50% HP / +30% damage on a lava floor; 1.0 else).
                     f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
-                                  * GameConst::difficultyHealthBump(m_difficulty);
+                                  * GameConst::difficultyHealthBump(m_difficulty)
+                                  * GameConst::hellforgeHpMult(m_level.lavaFloor);
                     f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
-                                  * GameConst::difficultyDamageBump(m_difficulty);
+                                  * GameConst::difficultyDamageBump(m_difficulty)
+                                  * GameConst::hellforgeDamageMult(m_level.lavaFloor);
                     ent->health    *= hpMult;
                     ent->maxHealth  = ent->health;
                     ent->damage    *= dmgMult;
@@ -592,11 +595,14 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
                     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
                     ent->level = static_cast<u16>(effectiveFloor);
-                    // HP compounds; damage linear + per-difficulty bump (see other spawn path).
+                    // HP compounds; damage linear + per-difficulty bump (see other spawn path);
+                    // plus the Hellforge lava-floor surcharge (+50% HP / +30% damage, else 1.0).
                     f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
-                                  * GameConst::difficultyHealthBump(m_difficulty);
+                                  * GameConst::difficultyHealthBump(m_difficulty)
+                                  * GameConst::hellforgeHpMult(m_level.lavaFloor);
                     f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
-                                  * GameConst::difficultyDamageBump(m_difficulty);
+                                  * GameConst::difficultyDamageBump(m_difficulty)
+                                  * GameConst::hellforgeDamageMult(m_level.lavaFloor);
                     ent->health    *= hpMult;
                     ent->maxHealth  = ent->health;
                     ent->damage    *= dmgMult;
@@ -986,9 +992,13 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
             // like every other enemy (HP compounds, damage linear + per-tier bump) so a
             // late-Hell mimic isn't a trivial 60 HP. effectiveFloor also drives loot/DoT credit.
             u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
-            f32 mimicHp  = GameConst::MIMIC_HEALTH * GameConst::floorHealthMult(effectiveFloor);
+            // ...plus the Hellforge lava-floor surcharge (+50% HP / +30% damage, else 1.0) — a mimic is
+            // a hostile enemy, so it wades the molten tier like the rest.
+            f32 mimicHp  = GameConst::MIMIC_HEALTH * GameConst::floorHealthMult(effectiveFloor)
+                           * GameConst::hellforgeHpMult(m_level.lavaFloor);
             f32 mimicDmg = GameConst::MIMIC_DAMAGE * GameConst::floorDamageMult(effectiveFloor)
-                           * GameConst::difficultyDamageBump(m_difficulty);
+                           * GameConst::difficultyDamageBump(m_difficulty)
+                           * GameConst::hellforgeDamageMult(m_level.lavaFloor);
             EntityHandle h = EntitySystem::spawn(m_entities,
                 Vec3{cx, cy + 0.4f, cz}, {0.45f, 0.4f, 0.45f}, false,
                 mimicHp, 4.0f, GameConst::MIMIC_TRIGGER_DIST,
@@ -1425,13 +1435,16 @@ void Engine::spawnBredEnemy(u8 defIdx, Vec3 nearPos) {
     ent->baseMoveSpeed      = ent->moveSpeed;
     ent->baseAttackCooldown = ent->attackCooldown;
 
-    // Floor scaling — identical to spawnFloorEnemies, so a bred spider matches a placed one.
+    // Floor scaling — identical to spawnFloorEnemies, so a bred spider matches a placed one
+    // (including the Hellforge lava-floor surcharge: +50% HP / +30% damage, else 1.0).
     u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
     ent->level = static_cast<u16>(effectiveFloor);
     f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
-                                  * GameConst::difficultyHealthBump(m_difficulty);
+                                  * GameConst::difficultyHealthBump(m_difficulty)
+                                  * GameConst::hellforgeHpMult(m_level.lavaFloor);
     f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
-                  * GameConst::difficultyDamageBump(m_difficulty);
+                  * GameConst::difficultyDamageBump(m_difficulty)
+                  * GameConst::hellforgeDamageMult(m_level.lavaFloor);
     ent->health   *= hpMult;
     ent->maxHealth = ent->health;
     ent->damage   *= dmgMult;
@@ -1470,9 +1483,11 @@ void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
 
     const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
     const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
-                                  * GameConst::difficultyHealthBump(m_difficulty);
+                                  * GameConst::difficultyHealthBump(m_difficulty)
+                                  * GameConst::hellforgeHpMult(m_level.lavaFloor);      // +50% on lava
     const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
-                        * GameConst::difficultyDamageBump(m_difficulty);
+                        * GameConst::difficultyDamageBump(m_difficulty)
+                        * GameConst::hellforgeDamageMult(m_level.lavaFloor);            // +30% on lava
 
     // Seats are SEARCHED, not offset: the ramp top sits on its band's edge column, so the old blind
     // "+1.5*k along +X" spread could land off the slab and silently dump the spawn to the ground

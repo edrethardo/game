@@ -251,6 +251,18 @@ namespace GameConst {
         }
     }
 
+    // Hellforge (lava-floor) enemy surcharge (2026-07-26, Aaron: "give every enemy in hellforge 50%
+    // more hp and 30% more damage output"). A lava floor (LevelGen::isLavaFloor — a few of 31-40, never
+    // a boss or stacked floor) is a deliberate asymmetry: the molten sea burns only the PLAYER while the
+    // monsters wade through it to flank, so the tier pays for that with tougher, harder-hitting enemies.
+    // Applied as a FACTOR on top of the floor/difficulty mults at every spawn site that seeds a lava
+    // floor (spawnFloorEnemies, spawnFloorNests, spawnBredEnemy, mimics). A pure multiplier so it is 1.0
+    // — a no-op — on every non-lava floor, and one source for the two numbers so they can't drift.
+    static constexpr f32 HELLFORGE_HP_BOOST     = 1.5f;   // +50% HP
+    static constexpr f32 HELLFORGE_DAMAGE_BOOST = 1.3f;   // +30% damage
+    inline f32 hellforgeHpMult(bool lavaFloor)     { return lavaFloor ? HELLFORGE_HP_BOOST     : 1.0f; }
+    inline f32 hellforgeDamageMult(bool lavaFloor) { return lavaFloor ? HELLFORGE_DAMAGE_BOOST : 1.0f; }
+
     // --- Corpse / resurrection ------------------------------------------------------------------
     // A killed enemy squashes into the ground over ENEMY_DEATH_DURATION: Combat::killEntity stamps
     // deathTimer with it, EntitySystem::tickTimers counts it DOWN, and the slot is freed at 0. So a
