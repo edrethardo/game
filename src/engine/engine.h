@@ -307,6 +307,15 @@ private:
     f32              m_autoplayDoorCheckDist  = 0.0f;     // distToDoor at the window's start (rolling checkpoint)
     f32              m_autoplayExitStallTimer = 0.0f;     // seconds elapsed in the current no-kill window
     u32              m_autoplayLastFloor      = 0;        // detects a floor change to re-anchor the window
+    // SLOW anchor — an oscillation-proof net-progress check for the stuck detector. The per-tick
+    // `progressed` test re-anchors on any 0.5 m move, so a bot SLIDING along a wall or ORBITING a spot
+    // (>0.5 m every tick, zero NET progress) reads as "progressing" forever and the escape ladder never
+    // engages (measured: a swarmed sorcerer pinned at a wall, z sliding 41<->46 m, 39 m from the door,
+    // for minutes). Every ~2.5 s we ask whether the bot actually got anywhere; if not — and it is not
+    // dealing damage, so a stationary real fight is exempt — the no-progress timer is allowed to climb.
+    Vec3             m_autoplaySlowAnchor{};              // position at the window start
+    f32              m_autoplaySlowAnchorT    = 0.0f;     // seconds into the current net-progress window
+    bool             m_autoplaySlowNetStuck   = false;    // last window showed < ~2.5 m of NET travel
     // FLOOR-STALL watchdog — the long, KILL-AGNOSTIC twin of the window above. That one restarts
     // whenever the bot deals damage, on the reasonable theory that a live fight is worth finishing;
     // on a four-story Descent (~190 entities across four stacked stories) the bot deals damage almost

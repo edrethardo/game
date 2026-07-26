@@ -326,6 +326,11 @@ void Engine::updateAutoplay(f32 dt) {
     }
 
     Autoplay::BotIntent in = Autoplay::decide(v);
+    // SURVIVE is sacred: the remedy chain below rewrites `in` wholesale (the exit bull, the escape
+    // ladder, look-behind), which would drop a potion the brain wanted at low HP. Capture the desire
+    // here and re-assert it after the remedies so a COMMITTED shove to the door (which now persists
+    // through a swarm) can never march the bot to its death holding a potion it never drank.
+    const bool decidedPotion = in.potion;
 
     // CLIMB-ASSIST JUMP (VERTICAL_HALL up-ramps). buildBotView flags an unfinished climb; the ramps
     // are narrow 2-wide graduated slabs and the eased-aim walk drifts the bot off the strip and
@@ -392,7 +397,22 @@ void Engine::updateAutoplay(f32 dt) {
         // a ramp (much of whose motion is vertical) as "stuck", tripped the escape ladder, and the
         // escape headings walked it off the ramp — climb, stall, get shoved off, repeat. Vertical
         // progress is real progress on a stacked floor.
-        const bool progressed = (dx * dx + dz * dz + dy * dy) > 0.25f;   // > 0.5 m from the anchor
+        const bool progressed = (dx * dx + dz * dz + dy * dy) > 0.25f;   // > 0.5 m from the fast anchor
+
+        // NET progress over a slow window (engine.h m_autoplaySlow*): the fast `progressed` above is
+        // fooled by an in-place OSCILLATION — a bot sliding along a wall or orbiting a pin moves > 0.5 m
+        // every tick, re-anchoring forever, so the stuck timer never climbs and the escape ladder never
+        // fires. Every kSlowWin s we check real NET travel; a window with < kSlowMin of it means the bot
+        // is livelocked in place however much it churns. XZ only (a stacked climb is handled by `dy`
+        // above and rarely oscillates).
+        constexpr f32 kSlowWin = 2.5f, kSlowMin = 2.5f;
+        m_autoplaySlowAnchorT += dt;
+        if (m_autoplaySlowAnchorT >= kSlowWin) {
+            const f32 sdx = p.x - m_autoplaySlowAnchor.x, sdz = p.z - m_autoplaySlowAnchor.z;
+            m_autoplaySlowNetStuck = (sdx * sdx + sdz * sdz) < kSlowMin * kSlowMin;
+            m_autoplaySlowAnchor = p; m_autoplaySlowAnchorT = 0.0f;
+        }
+        const bool netStuck = m_autoplaySlowNetStuck;
 
         // In-band fight = an LOS target the bot is SHOOTING AT, so this must track decideCombat's fire
         // gate exactly: within engageMax x range, no engageMin term (the kite floor moves the bot, it
@@ -413,9 +433,11 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayLastEnemyHp    = enemyHp;
         m_autoplayLastEnemyCount = v.targetCount;
 
-        if (progressed) {
-            // Real XZ progress resumed (moved > 0.5 m from the wedge anchor): re-anchor and DROP the
-            // whole escape ladder so the bot returns to plain flow-field travel (reset on progress).
+        if (progressed && !netStuck) {
+            // Real progress resumed (moved > 0.5 m from the wedge anchor AND actually getting somewhere
+            // NET): re-anchor and DROP the whole escape ladder so the bot returns to plain flow-field
+            // travel. The !netStuck gate is what stops an in-place slide/orbit from masquerading as
+            // progress and starving the escape ladder — the wall-pinned-swarm livelock.
             m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f;
             m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
             m_autoplayLookBehindDone = false;   // new episode gets a fresh look-behind
@@ -461,17 +483,29 @@ void Engine::updateAutoplay(f32 dt) {
         m_autoplayExitBull       = false;
         m_autoplayFloorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
         m_autoplayFloorStallTimer = 0.0f;
+        m_autoplaySlowAnchor      = m_localPlayer.position;   // net-progress anchor: don't carry a stale
+        m_autoplaySlowAnchorT     = 0.0f;                     // net-stuck flag across the descent teleport
+        m_autoplaySlowNetStuck    = false;
     }
     if (v.doorActive && !bossGate) {
-        if (combatProgress) {   // a kill/damage this tick = a real fight worth finishing: restart the window
+        if (m_autoplayExitBull) {
+            // ALREADY LATCHED — a COMMITTED shove to the door, held until the bot reaches it and the
+            // descend fires (the floor-change reset above clears the latch). Deliberately NOT released by
+            // combatProgress: the swarm-kite livelock this exists to catch always deals a little CHIP
+            // damage, and the old code dropped the bull on any such hit — so the instant the bot fired,
+            // the kiting bounced it straight back off the door it was 4 m from, over and over (measured:
+            // d2d oscillating 4<->26 m for minutes, a "stuck" run that was really moving the whole time).
+            // Once we've decided the bot is livelocked it LEAVES; a stray hit no longer talks it back into
+            // the swarm. The bull remedy itself fires through anything on the path, so it still clears the
+            // way out — it just no longer treats clearing the way out as a reason to stop leaving.
+        } else if (combatProgress) {   // PRE-LATCH ONLY: a fight that IS closing on the exit shouldn't arm it
             m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
-            m_autoplayExitBull      = false;
         } else {
             m_autoplayExitStallTimer += dt;
             if (m_autoplayExitStallTimer >= kDoorCheckWindow) {
-                // Window elapsed with no kills: did we close > 1 m toward the exit in it? The latch LATCHES
-                // (rather than firing for a tick) so the bull runs continuously until the next window shows
-                // real progress — a one-shot commit left duty-cycle gaps the kite immediately undid.
+                // Window elapsed with no exit-approach: did we close > 1 m toward the door in it? If not,
+                // latch the bull (which now PERSISTS, per the branch above, until the bot descends). A
+                // RATE check, not a best-distance one, so a slow inward spiral that never arrives still trips.
                 m_autoplayExitBull      = (m_autoplayDoorCheckDist - v.distToDoor) < kDoorApproachMin;
                 m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;   // next window
             }
@@ -705,14 +739,23 @@ void Engine::updateAutoplay(f32 dt) {
                                  m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY;
         if (stackedExit) {
             if (lengthSq(v.flowDir) > 1e-6f) heading = Vec3{v.flowDir.x, 0.0f, v.flowDir.z};
-        } else if (v.distToDoor > 3.0f) {   // flat floor, far: wall-avoiding A* first leg
+        } else if (v.distToDoor > 3.0f) {   // flat floor, far: a WALL-AWARE route, never the straight line
+            bool routed = false;
             Vec3 wp[MAX_PATH_WAYPOINTS];
             const u8 n = Pathfinder::findPath(m_level.grid, pos, m_level.floorDoorPos, wp,
                                               MAX_PATH_WAYPOINTS, 0.3f);
             if (n > 0) {
                 const Vec3 toWp{wp[0].x - pos.x, 0.0f, wp[0].z - pos.z};
-                if (lengthSq(toWp) > 1e-6f) heading = toWp;
+                if (lengthSq(toWp) > 1e-6f) { heading = toWp; routed = true; }
             }
+            // A* gives up after MAX_ASTAR_SEARCH (256) closed cells, and on a maze a door past that
+            // returns NOTHING — the old code then drove the STRAIGHT LINE (heading's default) into a
+            // wall and the persistent bull wedged there for good (measured: a swarmed sorcerer pinned at
+            // a wall 14 m from the door, x stuck, sliding in z forever). The exit FLOW FIELD is a full,
+            // UNCAPPED BFS to the same door, valid on every cell the bot can stand on, so fall back to it
+            // rather than the wall-seeking bee-line. This is what makes the bull's "just leave" reliable
+            // on a large flat maze, not only near the door.
+            if (!routed && lengthSq(v.flowDir) > 1e-6f) heading = Vec3{v.flowDir.x, 0.0f, v.flowDir.z};
         }
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
@@ -892,6 +935,7 @@ void Engine::updateAutoplay(f32 dt) {
     // JUMP only from the ground (the engine ignores it otherwise, but asking for what cannot happen
     // muddies the telemetry) and never while a roll owns the body.
     if (in.jump && (!m_localPlayer.onGround || m_localPlayer.dodgeState.rolling)) in.jump = false;
+    in.potion = in.potion || decidedPotion;   // SURVIVE re-asserted (see decide() above): never skip a needed heal
 
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
     updateSidearm(v, dt);

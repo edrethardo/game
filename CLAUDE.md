@@ -686,6 +686,24 @@ exit": A*-routed first leg, fire through anything on the path, stop inside 1.5 m
 land), and an **escalating escape** for a geometry wedge (>4 s without XZ progress: lateral ±90/180 nudge →
 8-direction safe-step search away from the wedge anchor → a short A* leg toward the door, each heading
 re-checked against `stepAllowed`).
+**The FLAT-FLOOR FREEZE was a three-defect chain in that machinery, each hiding the next (found by tracing a
+frozen bot; verified fresh Sorcerer floor 4→13).** A "freeze" is really a **swarm-kite LIVELOCK**: the bot
+kites a swarm of FLYING enemies it can't close on, which drags it off the exit; `kills` flatline while it
+churns, so it read as dead-stuck. (1) **The exit bull released on any `combatProgress`** — the swarm always
+takes a little chip damage, so the bull dropped the instant the bot fired and the kiting bounced it back off
+the door it was 4 m from (measured: `distToDoor` oscillating 4↔26 m for minutes). Now the bull is a
+**committed latch**: once it engages (only after 4 s of proven no-approach) it holds until the bot descends;
+chip damage no longer talks it back into the swarm. (2) **The bull then drove into a WALL** — on a maze its
+A* first-leg gives up after `MAX_ASTAR_SEARCH` (256) cells and fell back to a straight BEE-LINE to the door,
+into geometry; now it falls back to the **uncapped, wall-aware exit FLOW FIELD** instead. (3) **The
+stuck-detector was fooled by OSCILLATION** — sliding along a wall / orbiting a pin moves >0.5 m every tick,
+so `progressed` re-anchored forever and the escape ladder never engaged; a **SLOW anchor**
+(`m_autoplaySlow*`) now checks NET travel over ~2.5 s and, only when the bot is also dealing no damage (a
+stationary real fight still counts), lets the no-progress timer climb so the escape ladder fires. Plus
+**SURVIVE is now sacred** — a low-HP potion the brain wanted is re-asserted AFTER the whole remedy chain
+(`decidedPotion`), so the now-longer committed shove can never march the bot to its death holding an undrunk
+potion. (The FOUR_STORY return-lift STORY-BOUNCE — a ranged build cycling stories 9→6→3→0→9 on a Descent
+floor — is a SEPARATE, still-open descent-geometry problem, not this flat-floor livelock.)
 **A remedy may only STAND STILL where the descend can actually fire.** The exit-wedge remedy engaged at
 2.5 m while `updateFloorDoor` descends at **2.0 m**, so between the two it planted the bot holding a button
 that could never fire — and standing still IS "no progress", so the remedy re-armed itself forever
