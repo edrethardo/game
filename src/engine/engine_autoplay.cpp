@@ -63,6 +63,8 @@
 // live runs: mean |per-tick change of the desired yaw| 5.0 deg -> 1.9, applied-yaw direction reversals
 // 4.5/s -> 1.2 (marksman); 2.8 -> 2.2 and 1.6/s -> 0.9 (warrior).
 #include "engine/engine.h"
+#include "core/log.h"            // LOG_INFO — the [TELEM] metrics; included explicitly, not via a
+                                 // transitive header (that only compiled locally; CI's chain lacks it)
 #include "platform/input.h"
 #include <SDL_scancode.h>        // SDL_SCANCODE_H
 #include "world/raycast.h"        // Raycast::cast — the WORLD-ONLY (slab-aware) DDA behind the target LOS test
