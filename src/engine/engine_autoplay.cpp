@@ -1064,6 +1064,36 @@ void Engine::updateAutoplay(f32 dt) {
     if (in.jump && (!m_localPlayer.onGround || m_localPlayer.dodgeState.rolling)) in.jump = false;
     in.potion = in.potion || decidedPotion;   // SURVIVE re-asserted (see decide() above): never skip a needed heal
 
+    // PERFECT-BLOCK PACING (state + constants: engine.h / autoplay_combat.h). decideCombat wants to
+    // perfect-block every incoming swing; left alone the bot never mistimes, which reads as a machine.
+    // So: land a STREAK of perfect blocks, then take an "unreliable" LAPSE where most swings mistime,
+    // then be sharp again. One decision PER SWING — a block want spans ~9 ticks, so we act on the
+    // rising edge and latch the outcome for the swing. Deterministic (tick-hashed), replay-safe.
+    if (m_autoplayBlockUnreliableT > 0.0f) m_autoplayBlockUnreliableT -= dt;
+    {
+        const bool wantNow = in.block;                        // what decideCombat asked for, pre-pacing
+        if (wantNow && !m_autoplayBlockWantPrev) {            // fresh swing to react to
+            if (m_autoplayBlockUnreliableT > 0.0f) {
+                // LAPSE: the perfect tap lands only sometimes; the rest are mistimed (eaten).
+                const u32 h = currentLocalTick() * 2654435761u;
+                m_autoplayBlockSuppress = ((h >> 25) % 100u) >= Autoplay::BLOCK_UNRELIABLE_PCT;
+            } else {
+                // SHARP: land the perfect block and build the streak; at the cap, fall into a lapse.
+                m_autoplayBlockSuppress = false;
+                if (++m_autoplayBlockStreak >= m_autoplayBlockStreakCap) {
+                    m_autoplayBlockUnreliableT = Autoplay::BLOCK_UNRELIABLE_SEC;
+                    m_autoplayBlockStreak      = 0;
+                    const u32 h = currentLocalTick() * 40503u;   // next run: 2 or 3 in a row
+                    m_autoplayBlockStreakCap   = Autoplay::BLOCK_STREAK_MIN +
+                        (u8)((h >> 20) % (u32)(Autoplay::BLOCK_STREAK_MAX - Autoplay::BLOCK_STREAK_MIN + 1u));
+                }
+            }
+        }
+        if (!wantNow) m_autoplayBlockSuppress = false;        // swing over: clear the per-swing latch
+        if (m_autoplayBlockSuppress) in.block = false;        // a mistimed swing: no perfect block
+        m_autoplayBlockWantPrev = wantNow;
+    }
+
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
     updateSidearm(v, dt);
 }

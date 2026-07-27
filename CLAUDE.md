@@ -551,6 +551,15 @@ LEAVES, not when it lands (the flight time blows the window), and the STRAFE-sta
 that timer when it HAS LOS, so an enemy holding a shot behind cover drifts it unboundedly negative and
 reads as forever-about-to-swing — that was 213 of 275 raises before the `attackTimer > 0` gate. Live after:
 21 raises, 8 hits landed on the shield, 8 PERFECT / 0 blocked.
+**PERFECT-BLOCK PACING (feel — the driver, not the pure tap).** Perfect-blocking EVERY swing reads as a
+machine ("the bot is too good at perfect blocking"). The driver now paces it: the bot lands a STREAK of
+perfect blocks (`BLOCK_STREAK_MIN..MAX` = 2-3 in a row, re-rolled each cycle), then takes a human LAPSE — an
+"unreliable" window (`BLOCK_UNRELIABLE_SEC` 2.5 s) where only `BLOCK_UNRELIABLE_PCT` (40%) of swings still
+land a perfect block and the rest are mistimed (the block is dropped, so the hit is eaten) — then it is
+sharp again. Applied in `updateAutoplay` right before `applyBotIntent`, per SWING (a raise want spans ~9
+ticks, so it acts on the rising edge and latches the outcome via `m_autoplayBlockSuppress`); deterministic
+(tick-hashed, no rand, replay-safe). Measured (fresh warrior): perfect-block rate ~100% → **76%**, the
+streak→lapse cycle plainly visible. Constants in `autoplay_combat.h`, state in `engine.h`.
 **AIM STEADINESS — the camera is the player's camera.** The eased aim above is only half the problem: the
 bot's camera IS the player camera, so a DESIRED aim that jumps is a screen that shakes ("the aim is still
 sometimes super shaky, that needs to go"). Instrumenting the desired vs applied yaw per tick, tagged by

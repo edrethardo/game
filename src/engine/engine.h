@@ -401,6 +401,17 @@ private:
     // the next hole (the door on L0), so it FIGHTS ITS WAY DOWN — until it leaves the floor (the
     // floor-change reset clears it). Layout-exclusive with m_autoplayVhCommit.
     bool             m_autoplayDescentCommit = false;
+    // PERFECT-BLOCK PACING (constants in autoplay_combat.h). The bot perfect-blocked EVERY swing, which
+    // reads as a machine ("too good at perfect blocking"). It now lands a STREAK of perfect blocks (up
+    // to m_autoplayBlockStreakCap, rolled 2-3), then falls into an "unreliable" LAPSE for
+    // BLOCK_UNRELIABLE_SEC where only BLOCK_UNRELIABLE_PCT of swings land (the rest mistimed/eaten),
+    // then is sharp again — so it plays WELL without being superhuman. The suppress latch holds one
+    // decision per swing (a raise want spans ~9 ticks); wantPrev detects the fresh-swing edge.
+    u8               m_autoplayBlockStreak      = 0;      // perfect blocks landed this streak
+    u8               m_autoplayBlockStreakCap   = 3;      // this streak's cap (2 or 3), re-rolled per lapse
+    f32              m_autoplayBlockUnreliableT = 0.0f;   // remaining lapse time (>0 = unreliable now)
+    bool             m_autoplayBlockSuppress    = false;  // this swing's block is being dropped (a mistime)
+    bool             m_autoplayBlockWantPrev    = false;  // decideCombat wanted a block last tick (edge detect)
     // SHRINE detour (Autoplay). A shrine is a free buff sitting in the level; the bot grabs it on the
     // way. buildBotView finds the nearest active shrine within a small detour radius and steers travel
     // onto it; updateAutoplay stops and holds interact to activate it. Recomputed every tick, so no

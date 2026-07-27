@@ -148,6 +148,17 @@ constexpr f32 PERFECT_BLOCK_LEAD = 0.15f;
 // and it is still closing while the timer runs out.
 constexpr f32 BLOCK_REACH_SLACK = 1.25f;
 
+// PERFECT-BLOCK PACING (the DRIVER applies these; state + logic in engine_autoplay.cpp, gated per
+// swing). Landing a perfect block on EVERY incoming swing reads as a machine — the user's note was
+// "the bot is too good at perfect blocking." So it shows SKILL as a short STREAK of perfect blocks
+// (BLOCK_STREAK_MIN..MAX in a row), then takes a human LAPSE — an "unreliable" window of
+// BLOCK_UNRELIABLE_SEC where only BLOCK_UNRELIABLE_PCT of swings are still perfect-blocked and the
+// rest are mistimed (eaten) — before it is sharp again. Deterministic (tick-hashed), no rand.
+constexpr u8  BLOCK_STREAK_MIN     = 2u;     // perfect blocks in a row before a lapse can start...
+constexpr u8  BLOCK_STREAK_MAX     = 3u;     // ...up to this many ("a maximum of 3 times in a row")
+constexpr f32 BLOCK_UNRELIABLE_SEC = 2.5f;   // how long a lapse lasts
+constexpr u32 BLOCK_UNRELIABLE_PCT = 40u;    // % of swings still perfect-blocked DURING a lapse
+
 // True if this enemy's swing is about to LAND — the raise trigger.
 //
 // Two engine facts make this narrower than "attackTimer is small":
