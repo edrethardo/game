@@ -466,8 +466,15 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
     // mutually exclusive). The engine's per-skill cooldown gates the rate. A gap-close EQUIPMENT skill
     // (Phase Dash on the boots) is cast here too and, crucially, is withheld from the in-range block
     // below — blinking 6 m while already on top of an enemy overshoots past it.
+    // NEVER GAP-CLOSE AT A TARGET WE COULD ONLY REACH BY FALLING. The fall veto stops the bot
+    // WALKING off a balcony to reach a cross-gap enemy — but a teleport/dash bypasses the veto
+    // entirely, so the bot would blink across the very gap the veto (and the melee sidearm) exist to
+    // keep it on this side of. Live, that is a Paladin blinking into the stairs with Holy Smite, and
+    // the incoherent "charges, then holds off, then charges again" the sidearm's doctrine flip
+    // produces. Withholding the blink leaves the sidearm as the answer to such a target, which is
+    // exactly what it is for.
     bool gapCloseFired = false;
-    if (out.moveFwd && !v.stunned && !v.rolling &&
+    if (out.moveFwd && !v.stunned && !v.rolling && !t.onlyReachableByFall &&
         fabsf(angleDelta(v.yaw, out.aimYaw)) < 0.5f) {
         for (u8 s = 0; s < 4; s++)
             if (v.castableSkill[s] && v.skillIsGapClose[s]) { out.classSkillSlot = (s8)s; gapCloseFired = true; break; }
@@ -501,7 +508,15 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             if (gx * gx + gz * gz <= GROUP_RADIUS * GROUP_RADIUS) cluster++;
         }
         s8 slot = -1;
-        if (cluster >= GROUP_MIN) {
+        // SUMMONS FIRST — whenever one is off cooldown. A drone / turret / queen is the one skill
+        // family whose worth does not depend on this target or this moment: it persists and keeps
+        // fighting on its own, so every cast that is merely POSSIBLE is a cast that should happen, and
+        // a summoner that hoards them is simply playing at a fraction of its strength. Highest slot
+        // first so Swarm Queen (an auto-spawner) outranks a single Swarm Deploy. This sits above the
+        // group/AoE branch on purpose — the engine's own per-skill cooldown is the rate limit, and the
+        // damage branches below still get every tick the summons are cooling down.
+        for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsSummon[s]) { slot = s; break; }
+        if (slot < 0 && cluster >= GROUP_MIN) {
             for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsAoe[s]) { slot = s; break; }
         }
         if (slot < 0) {
@@ -536,6 +551,7 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             if (swingIsIncoming(v.targets[i])) { out.dodge = true; break; }
     }
     if (!out.dodge && t.isRanged && out.moveFwd && dodgeReady && v.gapCloseAllowed &&
+        !t.onlyReachableByFall &&   // ...and a charging ROLL is a gap-close too: same rule
         fabsf(angleDelta(v.yaw, out.aimYaw)) < 0.5f) {
         // OFFENSIVE gap-closer: a RANGED enemy we are trying to walk up to is charged with a roll
         // instead — 0.5 s at 8 m/s covers ~4 m with 0.3 s of i-frames, so we cross its firing lane

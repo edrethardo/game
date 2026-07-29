@@ -490,6 +490,17 @@ static void buildSection(const LevelGrid& grid, u32 seed,
 u32 LevelMeshSystem::buildAll(const LevelGrid& grid, u32 seed,
                                LevelSection* outSections, u32 maxSects)
 {
+    // FREE THE PREVIOUS BUILD FIRST. buildAll runs on every floor build and on each in-place rebuild
+    // (exit pad, boss arena, lava theme) — six call sites — while destroyAll only ever ran at engine
+    // shutdown. buildSection resets submeshCount and overwrites each SectionSubmesh with a fresh
+    // MeshSystem::create, so every rebuild silently ORPHANED a whole floor's worth of VAO/VBO/IBO.
+    // Measured on an autoplay soak: +8.6 MB of RSS per floor transition, ~360 MB live after 43 floors
+    // — a slow bleed on desktop and fatal on Switch. Sweeping the FULL array rather than just this
+    // build's section count also reclaims the tail when a smaller grid follows a larger one (grids
+    // vary 44/48/52); sections never built are value-initialized with submeshCount 0, so they cost
+    // nothing and destroyAll's vao guard makes the sweep idempotent.
+    destroyAll(outSections, maxSects);
+
     // Allocate scratch buckets on heap (3.6MB — too large for BSS on Switch)
     if (!s_buckets) s_buckets = new MaterialBucket[MAX_SUBMESHES_PER_SECTION];
 

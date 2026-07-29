@@ -27,6 +27,7 @@
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/lead_assist.h"   // throwing-knife intercept math (pure, unit-tested)
+#include "game/weapon_throw.h"  // melee short-click throw: tunables + tap/hold arbiter (pure)
 #include "game/enemy_ai.h"
 #include "game/squad.h"
 #include "game/limb_system.h"
@@ -259,6 +260,35 @@ static bool sampleHistoryAt(u32 entIdx, f32 targetTickF, Vec3& outPos, Vec3& out
 
 
 // ---------------------------------------------------------------------------
+// Melee weapon throw (short-click). Spawns one projectile carrying the weapon's damage + mesh and
+// a brief slow-on-hit (Projectile::freezeDuration, tenacity-scaled at impact). Shared by the local/
+// host/SP fire path and the server-authoritative remote path so both stamp identical fields. Mirrors
+// the THROWAWAY legendary (throwWeaponOnReload) but single-target (no splash) with the throw tunables.
+// ---------------------------------------------------------------------------
+void Engine::spawnWeaponThrow(u8 ownerSlot, Vec3 eyePos, Vec3 forward, const WeaponDef& wpn,
+                              u16 weaponDefId, bool predictedGhost, u32 clientTick) {
+    Vec3 right    = normalize(Vec3{-forward.z, 0, forward.x});
+    Vec3 spawnPos = eyePos + forward * 0.5f + right * 0.3f + Vec3{0, -0.15f, 0};
+    // One crit roll, like Combat::fireProjectile — direct hits can crit; the throw carries no splash.
+    bool crit = ((std::rand() % 10000) * 0.0001f) < wpn.critChance;
+    f32  dmg  = crit ? wpn.damage * wpn.critMult : wpn.damage;
+    u16 idx = ProjectileSystem::spawn(m_projectiles, spawnPos, forward,
+                                      WeaponThrow::SPEED, dmg, WeaponThrow::RADIUS,
+                                      WeaponThrow::LIFETIME, /*fromPlayer=*/true, /*extraFlags=*/0);
+    if (idx == 0xFFFF) return;
+    Projectile& p    = m_projectiles.projectiles[idx];
+    p.meshId         = m_itemDefs[weaponDefId].meshId;   // the weapon's own mesh (spins via non-arrow path)
+    p.ownerSlot      = ownerSlot;
+    p.isCrit         = crit;
+    p.freezeDuration = WeaponThrow::SLOW_SEC;             // 0.2 s slow on hit (freezeTimer, tenacity-scaled)
+    // CLIENT: a predicted ghost so the weapon leaves the hand at click-time; it deals no damage
+    // (Combat::applyDamage is gated off on CLIENT) and is match-despawned against the authoritative
+    // copy by ownerSlot + clientTick. Host/SP spawn the live one and just stamp the tick (0).
+    if (predictedGhost) p.predicted = true;
+    p.clientTick = clientTick;
+}
+
+// ---------------------------------------------------------------------------
 // Weapon fire (singleplayer — unchanged from Phase 3)
 // ---------------------------------------------------------------------------
 void Engine::handleWeaponFire(f32 dt) {
@@ -269,6 +299,13 @@ void Engine::handleWeaponFire(f32 dt) {
     WeaponState& ws = m_players[activeNetSlot()].weaponState;   // local player's net slot
     ws.cooldownTimer -= dt;
     if (ws.cooldownTimer < 0.0f) ws.cooldownTimer = 0.0f;
+
+    // Melee throw cooldown — a plain float timer, CDR-immune by construction (never divided by any
+    // CDR term). Drives both the local/host/SP throw and the CLIENT's prediction; the server keeps
+    // its own authoritative tick watermark for remotes. Decremented every frame like the swing timer.
+    const u8 throwLane = (m_localPlayerIndex < MAX_LOCAL_PLAYERS) ? m_localPlayerIndex : 0;
+    m_weaponThrowCd[throwLane] -= dt;
+    if (m_weaponThrowCd[throwLane] < 0.0f) m_weaponThrowCd[throwLane] = 0.0f;
 
     // Build effective weapon stats from equipped item
     const ItemInstance& eqWpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
@@ -354,6 +391,55 @@ void Engine::handleWeaponFire(f32 dt) {
     // Can't fire while stunned (PvP action-lock) — the local/host firing path (the client's fire is
     // already suppressed on the wire by captureLocalInput).
     if (m_localPlayer.stunTimer > 0.0f) return;
+
+    // --- Melee weapon throw: a short TAP of Fire hurls the weapon; a HOLD does the normal swing. ---
+    // The tap/hold arbitration lives entirely on the acting player (host/SP or the client's local
+    // player) — the server never re-derives it (swings/throws reach it as explicit requests/edges).
+    // Ranged/hitscan weapons skip all of this and keep instant hold-to-fire below.
+    {
+        const bool fireDn = Input::isActionDown(GameAction::FIRE);
+        const bool isMelee = (wpn.type == WeaponType::MELEE) && !isItemEmpty(eqWpn);
+        if (isMelee) {
+            const bool throwReady = (m_weaponThrowCd[throwLane] <= 0.0f);
+            WeaponThrow::Decision d = WeaponThrow::decide(fireDn, m_fireWasDown[throwLane],
+                                                          m_fireHeldTime[throwLane], dt, throwReady);
+            m_fireHeldTime[throwLane] = d.newHeld;
+            m_fireWasDown[throwLane]  = fireDn;
+            if (d.doThrow) {
+                Vec3 eyePos = m_localPlayer.position + Vec3{0, m_localPlayer.eyeHeight, 0};
+                Vec3 fwd    = m_localPlayer.forward;
+                if (m_netRole == NetRole::CLIENT) {
+                    spawnWeaponThrow(activeNetSlot(), eyePos, fwd, wpn, eqWpn.defId,
+                                     /*predictedGhost=*/true, m_clientTick);
+                    m_pendingThrowEdge = true;          // clientNetPre stamps INPUT_EX_THROW this tick
+                } else {
+                    spawnWeaponThrow(activeNetSlot(), eyePos, fwd, wpn, eqWpn.defId,
+                                     /*predictedGhost=*/false, 0);
+                }
+                // Thrown-blade whoosh — played on the LOCAL fire path only (like the swing sounds
+                // below), so a client hears its own predicted throw instantly and remotes stay quiet
+                // (the server twin spawns their throw without a sound, matching melee swings).
+                // MELEE_THROW is its OWN slot (heavier, pitched-down swish) — distinct from
+                // WEAPON_THROW which stays the lighter thrown-knife/chakram/molotov sound.
+                AudioSystem::play(SfxId::MELEE_THROW, 0.5f);
+                m_weaponThrowCd[throwLane] = WeaponThrow::COOLDOWN_SEC;   // fixed 1.5 s, CDR-immune
+                // The THROW's own animation — NOT attackAnimT. Borrowing the swing timer made the
+                // viewmodel play the weapon's full per-subtype swing for an attack that never
+                // connects (on a claymore, its whole horizontal sweep), which is what "the throw
+                // broke the claymore animation" was. Clear the swing timer too, so a swing that was
+                // mid-arc when the tap resolved cannot fight the throw for the same weapon.
+                m_viewmodelState.attackAnimT = 0.0f;
+                m_viewmodelState.throwAnimT  = THROW_ANIM_SEC;
+                m_spawnCalmTimer = 0.0f;                 // a committed attack ends the floor-start calm
+                return;                                  // a tap throws — never also swing this press
+            }
+            if (!d.doSwing) return;                      // throw ready, press still short: disambiguating
+        } else {
+            // Non-melee: keep the tap/hold state coherent so a later switch back to melee starts clean.
+            m_fireWasDown[throwLane]  = fireDn;
+            m_fireHeldTime[throwLane] = fireDn ? m_fireHeldTime[throwLane] : 0.0f;
+        }
+    }
 
     if (!Input::isActionDown(GameAction::FIRE)) return;
     if (ws.cooldownTimer > 0.0f) return;

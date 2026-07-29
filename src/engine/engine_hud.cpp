@@ -36,6 +36,7 @@
 #include "game/skill.h"
 #include "game/inventory_ui.h"
 #include "game/game_constants.h"
+#include "game/weapon_throw.h"   // melee throw cooldown length for the HUD recharge bar
 #include "net/net.h"
 #include "net/server.h"
 #include "net/client.h"
@@ -830,6 +831,32 @@ void Engine::renderHUD(u32 sw, u32 sh) {
                 f32 bx = cx - barW * 0.5f;
                 f32 by = cy - 18.0f * hs;
                 HUD::drawFilledBar(sw, sh, bx, by, barW, barH, pct, barBg, barFg);
+            }
+        }
+
+        // --- Melee weapon-throw cooldown bar (only while a melee weapon is equipped) ---
+        // Mirrors the dodge bar directly below the crosshair, but amber (a thrown blade) and offset
+        // BELOW center so both read at once: it fills as the fixed 1.5 s (CDR-immune) throw recharges,
+        // then vanishes the instant the throw is ready again — a clear "tap Fire to throw" affordance.
+        {
+            const u8 tl = (m_localPlayerIndex < MAX_LOCAL_PLAYERS) ? m_localPlayerIndex : 0;
+            const ItemInstance& tw =
+                m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+            const bool meleeEquipped =
+                !isItemEmpty(tw) && m_itemDefs[tw.defId].weaponType == WeaponType::MELEE;
+            if (meleeEquipped && m_weaponThrowCd[tl] > 0.0f) {
+                f32 hs = static_cast<f32>(sh) / 720.0f;
+                f32 cx = static_cast<f32>(sw) * 0.5f;
+                f32 cy = static_cast<f32>(sh) * 0.5f;
+                f32 pct = 1.0f - m_weaponThrowCd[tl] / WeaponThrow::COOLDOWN_SEC;
+                if (pct < 0.0f) pct = 0.0f;
+                if (pct > 1.0f) pct = 1.0f;
+                f32 barW = 34.0f * hs;
+                f32 barH = 4.0f * hs;
+                f32 bx = cx - barW * 0.5f;
+                f32 by = cy + 20.0f * hs;    // below the crosshair, clear of the dodge bar above it
+                HUD::drawFilledBar(sw, sh, bx, by, barW, barH, pct,
+                                   {0.18f, 0.10f, 0.02f}, {1.0f, 0.62f, 0.10f}); // amber recharge
             }
         }
 

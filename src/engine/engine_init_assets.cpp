@@ -243,6 +243,15 @@ void Engine::initAssets() {
     m_meshIdBolt       = findMeshByName("bolt");
     m_meshIdShard      = findMeshByName("shard");  // source-shard pickup (secret superboss key)
     SkillSystem::setArrowMeshIds(m_meshIdArrow, m_meshIdBolt);
+    // Mark every mesh that a MELEE weapon uses (see engine.h) — the projectile renderer draws those
+    // at weapon scale when they are thrown. Runs after the item defs have had their mesh names
+    // resolved to ids, so meshId is final here.
+    for (u32 i = 0; i < m_itemDefCount; i++) {
+        const ItemDef& d = m_itemDefs[i];
+        if (d.slot == ItemSlot::WEAPON && d.weaponType == WeaponType::MELEE &&
+            d.meshId > 0 && d.meshId < MAX_MESH_DEFS)
+            m_meshIsMeleeWeapon[d.meshId] = true;
+    }
     m_matIdBatWing     = MaterialSystem::getIdByName("bat_wing");
 
     // Weapons

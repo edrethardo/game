@@ -60,7 +60,8 @@ void ProjectileRenderer::shutdown() {
 
 void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
                                  const MeshDef* meshDefs, u32 meshDefCount,
-                                 u8 arrowMeshId, u8 boltMeshId)
+                                 u8 arrowMeshId, u8 boltMeshId,
+                                 const bool* meleeMeshFlags)
 {
     if (!s_shader.program || !s_instanceVBO) return;
 
@@ -138,8 +139,15 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
         f32 maxDim = fmaxf(fmaxf(mb.max.x - mb.min.x, mb.max.y - mb.min.y),
                            mb.max.z - mb.min.z);
         bool isArrow = (mid == arrowMeshId || mid == boltMeshId);
-        f32 projScale = isArrow ? (1.2f / fmaxf(maxDim, 0.001f))
-                                : (0.4f / fmaxf(maxDim, 0.001f));
+        // A THROWN MELEE WEAPON keeps close to its real size. Every non-arrow projectile used to be
+        // normalised to 0.4 m, which turns a hurled claymore into a dart and is why the throw did not
+        // read as throwing your weapon. Arrows keep their own 1.2 m normalisation; knives, chakrams
+        // and molotovs keep the 0.4 m one.
+        const bool isThrownWeapon = !isArrow && meleeMeshFlags && mid < meshDefCount &&
+                                    meleeMeshFlags[mid];
+        f32 projScale = isArrow         ? (1.2f / fmaxf(maxDim, 0.001f))
+                      : isThrownWeapon  ? (1.0f / fmaxf(maxDim, 0.001f))
+                                        : (0.4f / fmaxf(maxDim, 0.001f));
 
         // Compute rotation from velocity (yaw + pitch for arrows, spin for thrown)
         f32 spd = length(p.velocity);
@@ -148,7 +156,8 @@ void ProjectileRenderer::render(const ProjectilePool& pool, const Mat4& vp,
         if (isArrow) {
             rotX = (spd > 0.01f) ? -asinf(p.velocity.y / spd) : 0.0f;
         } else {
-            rotX = p.lifetime * 15.0f; // spinning throw
+            // Heavier tumble for a thrown weapon than for a light knife/disc.
+            rotX = p.lifetime * (isThrownWeapon ? 22.0f : 15.0f);
         }
 
         // Build model = translate * rotateY(flyYaw) * rotateX(rotX) * scale

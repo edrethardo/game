@@ -144,3 +144,44 @@ TEST_CASE("TeleportDest: a blink to a balcony target lands ON the balcony story"
     CHECK(dest.y == doctest::Approx(3.0f));
     LevelGridSystem::shutdown(g);
 }
+
+// A dash must never land the caster INSIDE the low end of a VERTICAL_HALL ramp. Reported live:
+// "the paladin can get stuck in the stairs with holy smite". A dash direction is flattened to XZ, so
+// `desired.y` is the caster's own feet height; the story selector then resolves the ramp cell to the
+// GROUND story beneath the slab, and footprintClear — which only asks whether cells are SOLID — was
+// happy to put the body there. Pinned under a slab, the axis-separated moveAndSlide has nowhere to
+// push it out to, which is the same permanent wedge this resolver exists to prevent.
+TEST_CASE("Teleport::resolveDest refuses a landing pinned under a low ramp slab") {
+    LevelGrid g = openGrid(12, 5);
+    EntityPool pool{};
+
+    // A ramp's low end across x = 5..7: slab TOP 1.25 m => underside 0.75 m. Too high to step onto
+    // (PLATFORM_STEP_TOLERANCE 0.4 m), too low to stand under (BODY_CLEARANCE 0.8 m).
+    for (u32 x = 5; x <= 7; x++)
+        for (u32 z = 0; z < g.depth; z++) {
+            GridCell& c = LevelGridSystem::getCell(g, x, z);
+            c.flags |= CELL_PLATFORM;
+            c.platCount = 1;
+            c.platHeight[0] = 5;
+        }
+
+    const Vec3 start{2.5f, 0.0f, 2.5f};
+    const Vec3 desired{7.5f, 0.0f, 2.5f};            // straight into the pinch
+    const Vec3 got = Teleport::resolveDest(g, pool, start, desired);
+
+    // It must stop SHORT of the ramp rather than land beneath it...
+    CHECK(got.x < 5.0f);
+    // ...and wherever it lands, the body must not be pinned.
+    u32 gx, gz;
+    REQUIRE(LevelGridSystem::worldToGrid(g, got, gx, gz));
+    CHECK_FALSE(LevelGridSystem::bodyPinnedUnderSlab(g, gx, gz, got.y));
+
+    // Sanity: without the pinch the same dash reaches its full distance, so the guard is what moved
+    // the landing and not some unrelated rejection.
+    LevelGrid open = openGrid(12, 5);
+    const Vec3 far = Teleport::resolveDest(open, pool, start, desired);
+    CHECK(far.x == doctest::Approx(7.5f));
+    LevelGridSystem::shutdown(open);
+
+    LevelGridSystem::shutdown(g);
+}

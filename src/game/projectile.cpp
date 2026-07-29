@@ -2,6 +2,7 @@
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/item.h"      // SkillId::PROJECTILE_PARRY (Mirror Aegis reflect check)
+#include "game/crowd_control.h" // tenacity: scale freeze/slow duration by the target's ccResist
 #include "renderer/particles.h"
 #include "world/combat_query.h"
 #include "world/raycast.h"
@@ -402,7 +403,15 @@ void ProjectileSystem::update(ProjectilePool& pool,
                         // Splash hits below are intentionally NON-crit (AoE doesn't crit).
                         Combat::applyDamage(entities, h, p.damage, &p.position, p.isCrit);
                         if (p.freezeDuration > 0.0f) {
-                            ent.freezeTimer = p.freezeDuration;
+                            // Tenacity: a tenacious target shrugs part of the freeze/slow off. ccResist
+                            // is 0 for every enemy today, so the SCALE is a no-op for all existing
+                            // freeze projectiles (frost, etc.); it only bites once enemy CC-resist is
+                            // populated. fmaxf (matching the sibling stun/poison lines just below)
+                            // replaces the old direct assignment so the throw's brief 0.2 s slow can
+                            // never cut a longer active freeze (e.g. a Frozen Orb) short.
+                            f32 dur = CrowdControl::scaleDuration(p.freezeDuration,
+                                                                 CrowdControl::capResist(ent.ccResist));
+                            ent.freezeTimer = fmaxf(ent.freezeTimer, dur);
                             if (p.projFlags & PROJ_SPARK) ent.stunTimer = fmaxf(ent.stunTimer, 0.1f);
                         }
                         // Stun (Stun Grenade). fmaxf so a weaker stun can't cut a stronger one short.

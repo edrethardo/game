@@ -540,3 +540,77 @@ TEST_CASE("BuildScore: a legendary granted skill is worth its DPS-equivalent, an
     CHECK(score(rare, shockShield, GLASS_MELEE) < score(leg, shockShield, GLASS_MELEE));
     CHECK(score(rare, shockShield, GLASS_MELEE) < score(leg, wallShield, GLASS_MELEE));
 }
+
+// --- class preferred-weapon bonus ---------------------------------------------------------------
+// Every class deals +20% with its ClassDef::preferredWeapon TYPE. The build COLUMN can't express it:
+// the Ranged column holds BOTH gun (HITSCAN) and bow/thrown (PROJECTILE) families, so a Combat
+// Engineer (HITSCAN) and a Ranger (PROJECTILE) share a column while only one gets the bonus on any
+// given weapon. Without the class term the scorer ranks them on raw stats and can hand the engineer
+// a bow, silently dropping 20% of its damage.
+TEST_CASE("BuildScore: the class preferred-weapon bonus decides between same-column families") {
+    ItemDef bow = weaponDef(WeaponSubtype::BOW, 10.0f);
+    bow.weaponType = WeaponType::PROJECTILE;
+    ItemDef pistol = weaponDef(WeaponSubtype::PISTOL, 10.0f);
+    pistol.weaponType = WeaponType::HITSCAN;
+    const ItemInstance it = instance();
+
+    // Same column, identical base damage: with no class known they tie.
+    CHECK(BuildScore::score(it, bow, MOD_RANGED) == doctest::Approx(BuildScore::score(it, pistol, MOD_RANGED)));
+
+    // A HITSCAN class (Combat Engineer / Marksman) must prefer the pistol...
+    const f32 pistolHit = BuildScore::score(it, pistol, MOD_RANGED, WeaponType::HITSCAN);
+    const f32 bowHit    = BuildScore::score(it, bow,    MOD_RANGED, WeaponType::HITSCAN);
+    CHECK(pistolHit > bowHit);
+    // ...and a PROJECTILE class (Ranger) the bow. Same items, opposite answer — that IS the bug.
+    CHECK(BuildScore::score(it, bow, MOD_RANGED, WeaponType::PROJECTILE) >
+          BuildScore::score(it, pistol, MOD_RANGED, WeaponType::PROJECTILE));
+
+    // The bonus is the engine's +20% on damage, so it must not be a mere tiebreak: it has to be able
+    // to carry a slightly WORSE weapon of the right type over a better one of the wrong type.
+    ItemDef betterBow = weaponDef(WeaponSubtype::BOW, 11.0f);   // +10% raw damage
+    betterBow.weaponType = WeaponType::PROJECTILE;
+    CHECK(BuildScore::score(it, betterBow, MOD_RANGED, WeaponType::HITSCAN) < pistolHit);
+
+    // A non-matching type is never PENALISED — it scores exactly as it would with no class at all.
+    CHECK(BuildScore::score(it, bow, MOD_RANGED, WeaponType::HITSCAN) ==
+          doctest::Approx(BuildScore::score(it, bow, MOD_RANGED)));
+
+    // The gate still wins: a bonus can never smuggle a weapon into the wrong COLUMN.
+    CHECK(BuildScore::score(it, pistol, MOD_MELEE, WeaponType::HITSCAN) == doctest::Approx(0.0f));
+}
+
+// The Autoplay melee SIDEARM depends on a melee build keeping ranged weapons in its BAG (it draws
+// one when a VHALL balcony enemy is only reachable by falling). The class-preferred weapon bonus
+// multiplies a class's own family by 1.2, so the obvious worry is that a melee class now rates every
+// ranged weapon as junk, empties its bag of them, and silently disables the sidearm. It must not:
+// the per-column family gate zeroes a melee weapon in the Ranged column, so the two never compete.
+TEST_CASE("BuildScore: a melee class still keeps RANGED weapons for the sidearm") {
+    using namespace BuildScore;
+    ItemDef defs[3]{};
+    defs[1] = weaponDef(WeaponSubtype::SWORD,  12.0f);   // the paladin's own family (gets the 1.2x)
+    defs[2] = weaponDef(WeaponSubtype::PISTOL, 10.0f);   // a ranged weapon: the sidearm candidate
+
+    PlayerInventory inv{};
+    for (auto& e : inv.equipped) e.defId = 0xFFFF;
+    for (auto& b : inv.backpack) b.defId = 0xFFFF;
+    inv.equipped[static_cast<u32>(ItemSlot::WEAPON)] = {};
+    inv.equipped[static_cast<u32>(ItemSlot::WEAPON)].defId = 1;      // wielding the sword
+
+    ItemInstance pistol{}; pistol.defId = 2;
+
+    // Judged AS A MELEE CLASS (WeaponType::MELEE preferred, i.e. a Paladin/Warrior).
+    CHECK(worthPickingUp(pistol, defs[2], inv, defs, 3, WeaponType::MELEE));
+    inv.backpack[0] = pistol;
+    CHECK(isKeeper(inv, defs, 3, 0, WeaponType::MELEE));
+
+    // ...and the sidearm helper can actually find it in the bag.
+    CHECK(bestRangedBackpackIdx(inv, defs, 3) == 0);
+
+    // The class bonus really is active on the melee side (guards against this test passing because
+    // the bonus silently does nothing at all).
+    ItemInstance sword{}; sword.defId = 1;
+    CHECK(score(sword, defs[1], MOD_MELEE, WeaponType::MELEE) >
+          score(sword, defs[1], MOD_MELEE, WeaponType::COUNT));
+    // ...and does NOT leak into the Ranged column, where the family gate rules.
+    CHECK(score(sword, defs[1], MOD_RANGED, WeaponType::MELEE) == doctest::Approx(0.0f));
+}

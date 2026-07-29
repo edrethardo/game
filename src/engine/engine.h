@@ -258,6 +258,11 @@ private:
     // AFK auto-revive countdown for an Autoplay run: armed to ~1.5 s when a solo death enters
     // GAME_OVER, ticked down in the GAME_OVER dispatch, then the entrance-respawn body runs so an
     // unattended run keeps going (engine_autoplay.cpp / engine_update.cpp).
+    // Latched at the arm site when the BOT (not a human) died, and the only thing the AFK revive
+    // countdown keys off. The death screen frees the mouse cursor, so a stray pointer motion flips the
+    // takeover latch to "human" and a live botInControl() read there stops the countdown dead — which
+    // stranded unattended runs on the death screen (measured 79-83 s, until the process was killed).
+    bool             m_autoplayBotDeath = false;
     f32              m_autoplayRespawnTimer = 0.0f;
     // Soak/playtest telemetry: bot deaths this run. The revive is silent (a HUD chat line, not a log),
     // so a long unattended run left no record of how often it died or where — the metric that matters
@@ -316,6 +321,24 @@ private:
     Vec3             m_autoplaySlowAnchor{};              // position at the window start
     f32              m_autoplaySlowAnchorT    = 0.0f;     // seconds into the current net-progress window
     bool             m_autoplaySlowNetStuck   = false;    // last window showed < ~2.5 m of NET travel
+    // WEDGE ESCAPE (Autoplay::wedge* in autoplay_nav.h). Deliberately independent of BOTH signals
+    // above: `progressed` re-anchors on movement the bot never made, and the whole no-progress ladder
+    // is zeroed by combat progress — which on a Descent floor (four stories of enemies, target list
+    // pinned at its cap) is every second, so a physically stuck bot chips away forever and no rescue
+    // ever arms. This asks the one question none of the others do: is the bot COMMANDING movement and
+    // failing to move? Measured parks had a valid heading, no veto, no pad, Y pinned to the centimetre
+    // and 0.0-0.1 m of travel per 5 s. A wedge is positional, so it is detected positionally.
+    Vec3             m_autoplayWedgeAnchor{};             // position at the observation window start
+    f32              m_autoplayWedgeWinT      = 0.0f;     // seconds into the current window
+    f32              m_autoplayWedgeCmdT      = 0.0f;     // ...of which, seconds with movement commanded
+    f32              m_autoplayWedgeEscT      = 0.0f;     // > 0 while an escape burst overrides the intent
+    u8               m_autoplayWedgeTry       = 0;        // consecutive wedges — escalates the escape angle
+    u32              m_autoplayWedgeCount     = 0;        // escapes fired this floor (telemetry only)
+    // BOXED-IN, the same failure with the symptom inverted: the router hands back a real heading and
+    // the hazard veto refuses it AND every fan detour, so flowDir is zeroed and the brain commands no
+    // movement — which the wedge window above, asking for commanded movement, can never see.
+    bool             m_autoplayFlowVetoed     = false;    // this tick: a real heading was vetoed to zero
+    f32              m_autoplayWedgeVetoT     = 0.0f;     // seconds of that within the current window
     // BULL punch-through. When the committed exit bull is walking a FLAT floor, a swarm can body-block a
     // fragile build and shove it in circles — moving 15 m of churn but never arriving (measured Marksman,
     // distToDoor pinned at 15-27 m). While it walks, the remedy DODGES toward the exit on this pulse
@@ -438,6 +461,7 @@ private:
     f32              m_autoplaySidearmMeleeRange = 0.0f;
     f32              m_autoplaySidearmDwell     = 0.0f;   // seconds the sidearm has been worn (min-hold, anti-chatter)
     f32              m_autoplaySidearmCooldown  = 0.0f;   // seconds until another switch is allowed (anti-chatter)
+    u8               m_autoplaySidearmNoWeaponLog = 0;    // rate-limits the "wanted a sidearm, bag had none" line
     // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.
@@ -492,6 +516,26 @@ private:
     // R17: tick at which each local player last activated a potion. Authoritative for
     // gate. 0 = never (gate passes). m_potionCooldowns above is HUD-derived from this.
     u32            m_potionLastActivationTicks[MAX_LOCAL_PLAYERS] = {};
+
+    // Melee weapon throw — per LOCAL lane state, driven in handleWeaponFire. The throw fires on a
+    // short TAP of Fire; a hold does the normal swing. The cooldown is a plain float timer (CDR
+    // never touches it — the value is just WeaponThrow::COOLDOWN_SEC) so the local/host/SP path and
+    // the client's prediction share one dead-simple gate; the server re-validates a remote's throw
+    // with a tick watermark (NetPlayer::weaponThrowLastActivationTick). m_pendingThrowEdge latches a
+    // CLIENT throw for this tick so clientNetPre can stamp INPUT_EX_THROW onto the outgoing input.
+    f32            m_weaponThrowCd[MAX_LOCAL_PLAYERS]   = {};  // seconds until the throw is ready again
+    // Autoplay: the bot throws its melee weapon at RANGED enemies now and then, and (with a THROWAWAY
+    // legendary) hurls the gun on a reload at clip-1 for the near-max-damage version. Both are driven
+    // through the REAL buttons — the throw needs a synthetic short TAP of Fire (m_autoplayThrowSeq is
+    // that tap's phase timer, <0 = idle), the reload throw a one-tick RELOAD pulse. The two leashes
+    // keep both "occasional" so they read as flourishes, not spam.
+    f32            m_autoplayThrowSeq      = -1.0f;  // >=0: running the synthetic Fire tap
+    f32            m_autoplayThrowLeash    = 0.0f;   // s until the bot may throw again
+    f32            m_autoplayReloadThrow   = 0.0f;   // s until the next THROWAWAY reload throw
+    bool           m_autoplayReloadPulse   = false;  // one-tick RELOAD press for the reload throw
+    f32            m_fireHeldTime[MAX_LOCAL_PLAYERS]    = {};  // seconds Fire held this press (tap vs hold)
+    bool           m_fireWasDown[MAX_LOCAL_PLAYERS]     = {};  // Fire held last tick, per lane
+    bool           m_pendingThrowEdge                   = false; // CLIENT: throw committed this tick
 
     // Active-player aliases (gameUpdate reads/writes these, swapped per player)
     PlayerClass m_playerClass = PlayerClass::WARRIOR;
@@ -1117,6 +1161,12 @@ private:
     u8& m_meshIdIronMaiden    = m_meshIds[MESH_IRON_MAIDEN];
 
     // Cached IDs for render-loop lookups (avoid per-frame string searches)
+    // Which mesh ids belong to a MELEE weapon. Built once after item defs resolve, and handed to the
+    // projectile renderer so a THROWN weapon can be drawn at a readable size and spin instead of
+    // being normalised down to the same 0.4 m as a throwing knife or a molotov — a hurled claymore
+    // that renders dart-sized is the main reason the throw read weak. Client-side only: derived from
+    // meshId, which the snapshot already replicates, so no wire change.
+    bool m_meshIsMeleeWeapon[MAX_MESH_DEFS] = {};
     u8 m_meshIdArrow    = 0;
     u8 m_meshIdBolt     = 0;
     u8 m_meshIdShard    = 0;  // source-shard world-item pickup (secret superboss key)
@@ -1935,6 +1985,14 @@ private:
     // produce a "fires along aim from seconds ago" stale shot. M10.1: moved from
     // unreliable+manual-retransmit to ENet reliable; resendPendingFire() is deleted.
     void sendFireWeapon(Vec3 origin, f32 yaw, f32 pitch);
+    // Spawn one thrown-weapon projectile (the melee short-click throw). Shared by the local/host/SP
+    // path (handleWeaponFire) and the server-authoritative remote path (processRemoteActivation) so
+    // both stamp identical fields. Damage = effective weapon damage with one crit roll; the brief
+    // slow rides Projectile::freezeDuration (tenacity-scaled at hit). predictedGhost + clientTick
+    // drive the CLIENT's smooth local ghost / the authoritative-copy reconciliation, exactly as the
+    // THROWAWAY legendary does.
+    void spawnWeaponThrow(u8 ownerSlot, Vec3 eyePos, Vec3 forward, const WeaponDef& wpn,
+                          u16 weaponDefId, bool predictedGhost, u32 clientTick);
     // Server: clear the CL_FIRE_WEAPON dedup ring for a single slot — called from
     // onPlayerJoin so a recycled slot doesn't carry the prior occupant's tick history.
     void resetFireDedup(u8 slot);

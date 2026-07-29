@@ -236,6 +236,58 @@ bool atDescentGoal(const DescentField& f, const LevelGrid& g, Vec3 pos) {
     return f.dir[gz * f.width + gx] == 0xFE;
 }
 
+f32 nearestDropHole(const DescentField& f, const LevelGrid& g, Vec3 pos, Vec3& out) {
+    if (!f.valid || !f.dir) return 1e9f;
+    f32 best = 1e9f;
+    // Linear scan of the field. It is only ~2k cells and the driver calls this once a tick on Descent
+    // floors only, which is the same budget the field's own rebuild already pays a few times a floor.
+    for (u32 z = 0; z < f.depth; z++) {
+        for (u32 x = 0; x < f.width; x++) {
+            if (f.dir[z * f.width + x] != 0xFE) continue;      // 0xFE = a way down (or the L0 exit)
+            const f32 wx = (static_cast<f32>(x) + 0.5f) * g.cellSize;
+            const f32 wz = (static_cast<f32>(z) + 0.5f) * g.cellSize;
+            const f32 dx = wx - pos.x, dz = wz - pos.z;
+            const f32 d  = std::sqrt(dx * dx + dz * dz);
+            if (d < best) { best = d; out = Vec3{wx, pos.y, wz}; }
+        }
+    }
+    return best;
+}
+
+Vec3 padEscapeDirection(const DescentField& f, const LevelGrid& g, Vec3 pos) {
+    if (!f.valid || !f.dir) return {0, 0, 0};
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return {0, 0, 0};
+    if (gx >= f.width || gz >= f.depth) return {0, 0, 0};
+    // Expanding ring search: the FIRST cell that is routable (a real field code, so the descent
+    // network can carry the bot onward from there) and is NOT itself a pad. 6 cells is far enough to
+    // clear a 3x3 pad node plus its neighbours and stays a trivial scan.
+    constexpr s32 kMaxRing = 6;
+    for (s32 ring = 1; ring <= kMaxRing; ring++) {
+        for (s32 dz = -ring; dz <= ring; dz++) {
+            for (s32 dx = -ring; dx <= ring; dx++) {
+                // Perimeter of this ring only — the interior was covered by a previous, closer ring.
+                if (dx > -ring && dx < ring && dz > -ring && dz < ring) continue;
+                const s32 cx = static_cast<s32>(gx) + dx, cz = static_cast<s32>(gz) + dz;
+                if (cx < 0 || cz < 0 || cx >= static_cast<s32>(f.width) || cz >= static_cast<s32>(f.depth))
+                    continue;
+                const u32 idx = static_cast<u32>(cz) * f.width + static_cast<u32>(cx);
+                if (f.dir[idx] >= 8) continue;                                  // unreachable / a hole
+                if (LevelGridSystem::isSolid(g, static_cast<u32>(cx), static_cast<u32>(cz))) continue;
+                if (LevelGridSystem::getCell(g, static_cast<u32>(cx), static_cast<u32>(cz)).flags
+                        & CELL_JUMPPAD) continue;                               // another lift: no
+                const f32 wx = (static_cast<f32>(cx) + 0.5f) * g.cellSize;
+                const f32 wz = (static_cast<f32>(cz) + 0.5f) * g.cellSize;
+                Vec3 d{wx - pos.x, 0.0f, wz - pos.z};
+                const f32 len = std::sqrt(d.x * d.x + d.z * d.z);
+                if (len < 0.01f) continue;
+                return Vec3{d.x / len, 0.0f, d.z / len};
+            }
+        }
+    }
+    return {0, 0, 0};
+}
+
 bool descentNextIsPad(const DescentField& f, const LevelGrid& g, Vec3 pos) {
     if (!f.valid || !f.dir) return false;
     u32 gx, gz;

@@ -19,7 +19,11 @@ namespace ProjectileRenderer {
     // Render all active projectiles in the pool. Groups by meshId, uploads
     // instance data, and issues one instanced draw per mesh type.
     // meshDefs/meshDefCount: the engine's mesh registry for VAO/index lookup.
+    // meleeMeshFlags: optional meshDefCount-sized table marking meshes that belong to a MELEE
+    // weapon. A thrown weapon is drawn at a readable size and given a heavier spin instead of being
+    // normalised to the same 0.4 m as a knife or a molotov. Pass nullptr to keep the old behaviour.
     void render(const ProjectilePool& pool, const Mat4& vp,
                 const MeshDef* meshDefs, u32 meshDefCount,
-                u8 arrowMeshId, u8 boltMeshId);
+                u8 arrowMeshId, u8 boltMeshId,
+                const bool* meleeMeshFlags = nullptr);
 }

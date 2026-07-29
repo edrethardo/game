@@ -12,6 +12,17 @@
       },
       "source": "oga_rpg-sound-pack/RPG Sound Pack/inventory/coin.wav"
     },
+    "sfx_melee_throw": {
+      "params": {
+        "gain": 0.0,
+        "lowpass": null,
+        "pitch": 0.79,
+        "reverb": 0.0,
+        "stretch": 1.0,
+        "trim": false
+      },
+      "source": "oga_swishes/swishes/swish-9.wav"
+    },
     "sfx_monster_cry_1": {
       "params": {
         "gain": 0.0,

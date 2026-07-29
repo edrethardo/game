@@ -25,14 +25,28 @@
 // through a floor — the exact story-blind bug the manual path had and fixed.
 static constexpr f32 AUTO_LOOT_RADIUS = 2.5f;
 
+// --- class weapon preference --------------------------------------------------------------------
+// Every class deals +20% with its ClassDef::preferredWeapon TYPE (engine_combat.cpp: `wpn.damage
+// *= 1.2f`). The build COLUMN cannot express that — the Ranged column holds BOTH gun (HITSCAN) and
+// bow/thrown (PROJECTILE) families, so a Combat Engineer and a Ranger share a column while only one
+// of them gets the bonus on any given weapon. Without this the scorer would rank a bow and a pistol
+// on raw stats alone and could hand the engineer the bow, silently costing it 20% of its damage.
+// Passed into every BuildScore entry point so the equip decision, the pickup filter and the prune
+// all speak the same numbers (a filter that disagrees with the equip rule causes pick-up/drop churn).
+static WeaponType lanePreferredWeapon(PlayerClass cls) {
+    const u32 ci = static_cast<u32>(cls);
+    if (ci >= static_cast<u32>(PlayerClass::CLASS_COUNT)) return WeaponType::COUNT;   // no bonus
+    return kClassDefs[ci].preferredWeapon;
+}
+
 // --- worn-slot lookup ---------------------------------------------------------------------------
 // Score the item currently worn in `slot` under `cell` (0 when empty — an empty slot is always an
 // upgrade target).
 static f32 wornScore(const PlayerInventory& inv, ItemSlot slot, const ItemDef* defs, u32 defCount,
-                     u8 cell) {
+                     u8 cell, WeaponType pref = WeaponType::COUNT) {
     const ItemInstance& worn = inv.equipped[static_cast<u32>(slot)];
     if (worn.defId == 0xFFFF || worn.defId >= defCount) return 0.0f;
-    return BuildScore::score(worn, defs[worn.defId], cell);
+    return BuildScore::score(worn, defs[worn.defId], cell, pref);
 }
 
 // --- auto-equip ---------------------------------------------------------------------------------
@@ -57,8 +71,9 @@ bool Engine::autoEquipIfUpgrade(u8 lane, u8 bpIdx) {
     const bool wornDef = wornItem.defId != 0xFFFF && wornItem.defId < m_itemDefCount &&
                          BuildScore::isDefinitiveBest(m_itemDefs[wornItem.defId], wornItem.rarity);
 
-    const f32 candScore = BuildScore::score(cand, def, inv.buildCell);
-    const f32 worn = wornScore(inv, def.slot, m_itemDefs, m_itemDefCount, inv.buildCell);
+    const WeaponType pref = lanePreferredWeapon(m_playerClasses[lane]);
+    const f32 candScore = BuildScore::score(cand, def, inv.buildCell, pref);
+    const f32 worn = wornScore(inv, def.slot, m_itemDefs, m_itemDefCount, inv.buildCell, pref);
     bool upgrade;
     if      (candDef && !wornDef) upgrade = true;          // the definitive boots always go on
     else if (wornDef && !candDef) upgrade = false;         // nothing displaces the definitive boots
@@ -111,7 +126,8 @@ bool Engine::autoEvictWorst(u8 lane) {
         if (BuildScore::isDefinitiveBest(m_itemDefs[it.defId], it.rarity)) {
             // Never evict the BEST Phase Dash boots; a worse duplicate is ordinary and may be evicted.
             const f32 other = BuildScore::bestFieldedDefinitiveScore(inv, m_itemDefs, m_itemDefCount, bi);
-            if (BuildScore::score(it, m_itemDefs[it.defId], BuildScore::DEFAULT_BUILD_CELL) >= other) continue;
+            if (BuildScore::score(it, m_itemDefs[it.defId], BuildScore::DEFAULT_BUILD_CELL,
+                                  lanePreferredWeapon(m_playerClasses[lane])) >= other) continue;
         }
         if (Quickbar::holdsBackpackItem(m_quickbars[lane], it.uid)) continue;
         // Max over all nine cells: the bag deliberately holds gear for OTHER builds now, so "worst"
@@ -151,7 +167,8 @@ void Engine::autoLootHousekeeping(u8 lane) {
         if (it.defId == 0xFFFF || it.defId >= m_itemDefCount) continue;
         if (m_itemDefs[it.defId].petSummon) continue;
         if (Quickbar::holdsBackpackItem(m_quickbars[lane], it.uid)) continue;
-        if (BuildScore::isKeeper(inv, m_itemDefs, m_itemDefCount, bi)) continue;
+        if (BuildScore::isKeeper(inv, m_itemDefs, m_itemDefCount, bi,
+                                 lanePreferredWeapon(m_playerClasses[lane]))) continue;
         ItemInstance dropped = Inventory::dropFromBackpack(inv, bi);
         if (isItemEmpty(dropped)) break;
         const Vec3 dropPos = m_localPlayer.position + m_localPlayer.forward * 1.2f + Vec3{0, 0.5f, 0};
@@ -171,7 +188,9 @@ void Engine::autoLootHousekeeping(u8 lane) {
     f32 bestScore = 0.0f;
     const u8 best = BuildScore::bestBuildCell(inv, m_itemDefs, m_itemDefCount, bestScore);
     if (best == inv.buildCell || best == m_lastSuggestedBuild[lane]) return;
-    const f32 current = BuildScore::gearScoreForCell(inv, m_itemDefs, m_itemDefCount, inv.buildCell);
+    const WeaponType nudgePref = lanePreferredWeapon(m_playerClasses[lane]);
+    const f32 current = BuildScore::gearScoreForCell(inv, m_itemDefs, m_itemDefCount,
+                                                    inv.buildCell, nudgePref);
     if (bestScore <= current * BuildScore::BUILD_SUGGEST_FACTOR) return;
     char msg[96];
     std::snprintf(msg, sizeof(msg), "Better gear for %s %s — switch builds in the Inventory",
@@ -218,7 +237,8 @@ void Engine::updateAutoLoot(f32 dt) {
         // Best-in-slot filter: only grab what would improve SOME build's best-fieldable gear.
         // Worse and near-duplicate loot stays on the ground — Aaron's "do not pick up worse gear".
         if (!BuildScore::worthPickingUp(wi.item, m_itemDefs[wi.item.defId], inv,
-                                        m_itemDefs, m_itemDefCount)) continue;
+                                        m_itemDefs, m_itemDefCount,
+                                        lanePreferredWeapon(m_playerClasses[lane]))) continue;
         bestD2 = d2; best = static_cast<s32>(i);
     }
     if (best < 0) return;

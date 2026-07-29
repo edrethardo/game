@@ -149,10 +149,20 @@ void Engine::update(f32 dt) {
         // Autoplay AFK auto-revive: count the timer armed on death down and, when it elapses, execute
         // the same entrance-respawn the option-0 handler below does, then drop straight back to
         // IN_GAME so an unattended run keeps going. A human pressing a revive key first (the manual
-        // handlers still run below) simply beats the countdown — either way we land in IN_GAME. Gated
-        // on botInControl() to match the arm site: a human-driven death never armed the timer, and
-        // running the countdown anyway would decrement its 0 straight negative → an instant revive.
-        if (m_autoplayActive && m_autoplayControl.botInControl()) {
+        // handlers still run below) simply beats the countdown — either way we land in IN_GAME.
+        //
+        // The countdown keys off m_autoplayBotDeath — LATCHED at the arm site, where botInControl()
+        // was already checked — and NOT off the live botInControl(). That live read is what stranded
+        // AFK runs: entering the death screen FREES THE MOUSE CURSOR (the options are clickable), so
+        // the very next pointer motion trips the human-takeover latch, botInControl() goes false, and
+        // with the countdown gated on it the timer simply stopped — measured on four instrumented runs
+        // as `botInControl=0 respawnTimer=0.00` held for 79-83 s, i.e. until the process was killed.
+        // That is the "four-story runs get stuck" report: the bot was never stuck in the LEVEL, it was
+        // dead on an un-dismissed death screen. The latch keeps the original intent (a human who took
+        // over BEFORE dying never armed it, so they still get an untimed screen) without letting a
+        // stray mouse event strand an unattended run. It is also why the timer can't go straight
+        // negative into an instant revive: an unarmed death leaves the latch false.
+        if (m_autoplayActive && m_autoplayBotDeath) {
             m_autoplayRespawnTimer -= dt;
             if (m_autoplayRespawnTimer <= 0.0f) {
                 m_autoplayRespawnTimer = 0.0f;
@@ -164,9 +174,17 @@ void Engine::update(f32 dt) {
                 m_localPlayers[m_localPlayerIndex] = m_localPlayer; // sync so swapInPlayer keeps it
                 snapCameraToPlayer();                               // no interp smear on the teleport
                 m_deathHover = -1;
+                m_autoplayBotDeath = false;                        // consumed
                 Input::setRelativeMouseMode(true);                 // back to gameplay
+                // Hand control back to the BOT. The death screen freed the cursor, so the takeover
+                // latch has very likely flipped to "human" on a stray pointer motion; without this the
+                // revived run would stand at the entrance doing nothing until the latch idled out (and
+                // any further motion would re-arm it). A real human simply moves the mouse to take it
+                // back, exactly as during normal play.
+                m_autoplayControl.forceBot();
                 m_gameState = GameState::IN_GAME;
                 addChatMessage("", "Autoplay: revived at the entrance", Vec3{0.6f, 0.85f, 1.0f});
+                LOG_INFO("Autoplay: REVIVED at the entrance on floor %u", m_level.currentFloor);
                 return;
             }
             // still counting down — fall through so the world keeps ticking (enemies walk home) and a
@@ -1714,17 +1732,32 @@ void Engine::gameUpdate(f32 dt) {
         // True singleplayer: full game over screen — send enemies home immediately
         resetEnemiesToRooms();
         m_gameState = GameState::GAME_OVER;
-        // Autoplay: no human is watching the death screen, so arm the AFK auto-revive countdown (the
-        // GAME_OVER dispatch ticks it and re-enters IN_GAME) and drop any stale synthetic held actions
-        // so the death screen's manual handlers see only real device input. Gated on botInControl():
-        // if a HUMAN took over this autoplay run and then died, they get the normal untimed death
-        // screen — no force-revive out from under a confirmQuit dialog they may be reading.
-        if (m_autoplayActive && m_autoplayControl.botInControl()) {
-            m_autoplayRespawnTimer = 1.5f; Input::clearBotHeld();
-            // Record the death — the revive itself is a silent HUD chat line, so without this a soak
-            // run left no trace of how often / where the bot died. Floor + running count is the metric.
-            LOG_INFO("Autoplay: DEATH #%u on floor %u (%s)", ++m_autoplayDeaths, m_level.currentFloor,
-                     kClassDefs[static_cast<u32>(m_playerClass)].name);
+        // Autoplay: arm the AFK auto-revive countdown (the GAME_OVER dispatch ticks it and re-enters
+        // IN_GAME) and drop any stale synthetic held actions so the death screen's manual handlers see
+        // only real device input.
+        //
+        // ARMED ON EVERY AUTOPLAY DEATH — deliberately NOT gated on botInControl(). That gate was the
+        // second half of the stranding bug: the takeover latch flips on ANY stray input (a pointer
+        // motion over a focused window is enough), so a run whose latch had already flipped before it
+        // died armed nothing, logged nothing, and sat on the death screen forever. Measured in a 1 h
+        // 9-run soak: two runs traced HP 1087->825->439->155 and then went silent for the remaining
+        // 15 minutes, with NO death line — because both the arm and the log lived inside that gate.
+        // An unattended run must always recover, so the countdown is now unconditional and the human
+        // intent is preserved by its LENGTH instead: a bot death revives in 1.5 s, while a death that
+        // happened while control read as human waits HUMAN_REVIVE_SEC, which is far longer than it
+        // takes a real player to click an option but still bounded, so an AFK run can never strand.
+        if (m_autoplayActive) {
+            constexpr f32 HUMAN_REVIVE_SEC = 15.0f;
+            const bool botDeath = m_autoplayControl.botInControl();
+            m_autoplayBotDeath     = true;   // latched: the countdown must not re-read botInControl()
+            m_autoplayRespawnTimer = botDeath ? 1.5f : HUMAN_REVIVE_SEC;
+            Input::clearBotHeld();
+            // Logged for EVERY autoplay death, outside the old gate — otherwise the deaths that strand
+            // a run are exactly the ones invisible in the logs, which is what hid this for a full soak.
+            // deaths == revives is now a meaningful invariant to assert on.
+            LOG_INFO("Autoplay: DEATH #%u on floor %u (%s)%s", ++m_autoplayDeaths, m_level.currentFloor,
+                     kClassDefs[static_cast<u32>(m_playerClass)].name,
+                     botDeath ? "" : " [control read as human — long revive]");
         }
         // Free the cursor so the death-screen options are clickable (the screen is a full-screen
         // takeover; re-captured on respawn/reload). Mirrors the menu's setRelativeMouseMode(false).
@@ -1918,6 +1951,7 @@ void Engine::gameUpdate(f32 dt) {
         if (m_viewmodelState.recoilKick < 0.001f) m_viewmodelState.recoilKick = 0.0f;
         // Count down melee swing animation
         if (m_viewmodelState.attackAnimT > 0.0f) m_viewmodelState.attackAnimT -= dt;
+        if (m_viewmodelState.throwAnimT  > 0.0f) m_viewmodelState.throwAnimT  -= dt;
         // Count down ranged fire shake
         if (m_viewmodelState.fireShakeTimer > 0.0f) m_viewmodelState.fireShakeTimer -= dt;
 

@@ -1162,3 +1162,45 @@ TEST_CASE("a roll beats the kiting hop when both want the same tick") {
     REQUIRE(out.dodge);
     CHECK_FALSE(out.jump);
 }
+
+// A gap-close (Holy Smite / Shadow Step / Phase Dash) must NOT fire at a target the bot could only
+// reach by falling. The fall veto stops it WALKING off a balcony to reach a cross-gap enemy, but a
+// teleport bypasses the veto entirely — so the blink crosses the very gap the veto exists to hold it
+// back from, landing it in the stairs or off the edge. The melee sidearm is the answer to such a
+// target instead. Reported live: "the paladin can get stuck in the stairs with holy smite".
+TEST_CASE("Autoplay: no gap-close at a target only reachable by falling") {
+    // Moderate/MELEE: engageMax 0.60 x 4 m reach = 2.4 m, so a 10 m target is "close in" (moveFwd),
+    // which is the gate the gap-close rides on.
+    auto view = [](bool unreachable, BotTarget& t) {
+        BotView v = selfAt({0, 0, 0});
+        v.weaponRange   = 4.0f;
+        v.weaponIsMelee = true;
+        v.buildCell     = 3 * 1 + 1;          // Moderate / Melee
+        t = BotTarget{};
+        t.id = 1; t.hp = 10.0f; t.hasLOS = true;
+        t.pos  = {0, 1.7f, -10.0f};           // straight ahead (-Z), well beyond the band
+        t.dist = 10.0f;
+        t.onlyReachableByFall = unreachable;
+        v.targets = &t; v.targetCount = 1;
+        v.castableSkill[0]   = true;          // a gap-close skill sits ready in slot 0
+        v.skillIsGapClose[0] = true;
+        v.gapCloseAllowed    = true;
+        return v;
+    };
+
+    // Reachable: closes in AND spends the gap-closer — the existing behaviour, unchanged.
+    BotTarget t1{};
+    BotView v1 = view(false, t1);
+    BotIntent ok = decideCombat(v1, doctrineFor(v1.buildCell));
+    CHECK(ok.moveFwd);
+    CHECK(ok.classSkillSlot == 0);
+
+    // Across a gap: it still closes and fights, but the blink is withheld — a teleport would bypass
+    // the fall veto and cross the gap the veto exists to hold it back from.
+    BotTarget t2{};
+    BotView v2 = view(true, t2);
+    BotIntent gap = decideCombat(v2, doctrineFor(v2.buildCell));
+    CHECK(gap.moveFwd);                   // movement stays the fall veto's job, not this rule's
+    CHECK(gap.classSkillSlot != 0);       // ...but no teleport across the gap
+    CHECK_FALSE(gap.dodgeIsGapClose);     // and no charging roll either
+}

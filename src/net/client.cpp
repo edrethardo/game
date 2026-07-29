@@ -206,7 +206,7 @@ void Client::init(u8 localPlayerIndex) {
 
 void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
                                  u8 skillSlot, u8 extFlagsClearMask, bool freezeMovement,
-                                 u8 laneId, u8 targetSlot) {
+                                 u8 laneId, u8 targetSlot, u8 extFlagsSetMask) {
     if (laneId >= MAX_LOCAL) laneId = 0;
     NetInput& latest = s_latestInput[laneId];
     latest = PlayerController::captureLocalInput(player, clientTick, weaponId);
@@ -222,6 +222,11 @@ void Client::captureAndSendInput(const Player& player, u32 clientTick, u8 weapon
     // Server still gates persistently as a backstop, but this is the "snappy" path —
     // suppress spam at source.
     latest.extFlags &= static_cast<u8>(~extFlagsClearMask);
+    // Engine-driven edges that aren't a plain Input:: press — the melee throw's INPUT_EX_THROW is
+    // decided by the tap/hold arbiter in handleWeaponFire. OR'd in AFTER the clear so it always wins,
+    // and it rides the redundant send window like any other edge (loss-tolerant; the server's
+    // cooldownReady watermark blocks a redundant re-drain from double-throwing).
+    latest.extFlags |= extFlagsSetMask;
     // Tell the server which interp delay we used THIS tick. Our local moveAndSlide collided
     // against m_renderInterp.entities sampled at (now - s_interpDelaySec), and s_interpDelaySec
     // widens with jitter — so the server can only reproduce our collision result if it rewinds

@@ -88,7 +88,12 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // clean SV_JOIN_REJECT beats a silently broken deathmatch.
 // v22: INPUT_WINDOW_SIZE 8->15 (input redundancy spans the full 250 ms coast; widens the valid
 // windowCount range, so v21 peers would silently reject v22 input packets — hence the bump).
-static constexpr u32 PROTOCOL_VERSION  = 24; // v24: MAX_ENTITIES 128 -> 192 for the four-story
+// v25: INPUT_EX_THROW (extFlags bit 6) — a short TAP of Fire on a melee weapon throws it as a
+// projectile (weapon damage, fixed 1.5 s CDR-immune cooldown, brief tenacity-scaled slow on hit).
+// Additive on the wire (reuses a free bit + the existing projectile snapshot), but a v24 peer
+// wouldn't send/handle the throw edge, so gate it apart with a clean reject.
+static constexpr u32 PROTOCOL_VERSION  = 25; // v25: melee weapon throw (INPUT_EX_THROW edge).
+                                             // v24: MAX_ENTITIES 128 -> 192 for the four-story
                                              // FOUR_STORY "Descent" floor. WorldSnapshot carries
                                              // SnapEntity[MAX_ENTITIES] and the per-slot unchanged
                                              // bitmask is now ENTITY_MASK_BYTES (24 B, derived from

@@ -268,6 +268,10 @@ struct Entity {
     u8   burnSrcSlot    = 0xFF;  // net slot of the player who applied burn — same DoT-kill credit.
     f32  freezeTimer    = 0.0f;  // halves movement speed
     f32  stunTimer      = 0.0f;  // fully immobilized, no AI, no attacks
+    // Tenacity hook: reduces the duration of incoming freeze/slow (CrowdControl::scaleDuration).
+    // 0.0 for every enemy today (no enemy CC-resist stat exists yet) — the throw's slow reads it so
+    // "affected by tenacity" is live and future-proof; populating it later needs no change here.
+    f32  ccResist       = 0.0f;
     f32  overclockTimer = 0.0f;  // Tinkerer overclock buff: 2× dmg, 1.5× speed
     f32  queenLifeTimer = 0.0f;  // Swarm Queen despawn countdown
     f32  queenSpawnTimer = 0.0f; // Swarm Queen auto-spawn interval
@@ -324,8 +328,9 @@ struct Entity {
 // Pins the entity layout. The champion fields fit in what was tail padding (504), and lifeTimer
 // then grew it by one aligned float. If this fires, check whether new fields are still landing in
 // padding before assuming they are free. (Entity::timesRevived landed in existing padding beside
-// resurrectCount and did NOT move this number.)
-static_assert(sizeof(Entity) == 528, "Entity layout changed — re-check field packing");
+// resurrectCount and did NOT move this number.) The tenacity hook (ccResist) landed in the status
+// block with no spare padding, so it grew the struct by one 8-byte-aligned slot: 528 -> 536.
+static_assert(sizeof(Entity) == 536, "Entity layout changed — re-check field packing");
 
 // How many times one corpse may be raised before it is spent for good (Entity::timesRevived).
 // A necromancer that outlives its escort otherwise re-raises the same body indefinitely, which

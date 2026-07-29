@@ -521,3 +521,98 @@ TEST_CASE("rampApproachDir: a degenerate (zero-length) ramp returns zero") {
     const Vec3 p{0, 0, 0};                                                // low == high — nothing to climb
     CHECK(lengthSq(Autoplay::rampApproachDir(p, p, Vec3{1, 0, 1})) == doctest::Approx(0.0f));
 }
+
+// --- UNDER-RAMP PINCH --------------------------------------------------------------------------
+// A VERTICAL_HALL ramp is a graduated slab whose low end descends to head height and below. The
+// ground under it is a trap, and VHallField has always excluded it — but the travel VETO did not, so
+// every producer that steers by stepAllowed instead of by the field (the escape ladder's 8-direction
+// search, the detour fan, the pad beeline) could still walk the bot under a ramp. Aaron, watching a
+// run: "trying to walk under the stairs is bad."
+TEST_CASE("Autoplay veto: refuses ground under a low slab, allows it on top and under a high one") {
+    LevelGrid g{};
+    LevelGridSystem::init(g, 8, 8, 1.0f);
+    for (u32 z = 0; z < 8; z++)
+        for (u32 x = 0; x < 8; x++) {
+            GridCell& c = g.cells[z * 8 + x];
+            c.flags = (x == 0 || z == 0 || x == 7 || z == 7) ? CELL_SOLID : (CELL_FLOOR | CELL_CEILING);
+            c.floorHeight = 0; c.ceilingHeight = 20;
+        }
+
+    // A ramp's LOW end at cell (4,4): a slab whose underside is well below body height.
+    GridCell& low = g.cells[4 * 8 + 4];
+    low.flags |= CELL_PLATFORM;
+    // Slab TOP 1.25 m => underside 0.75 m (PLATFORM_THICKNESS_Q = 2 => 0.5 m). That is the real
+    // ramp-low-end profile: too HIGH to step onto (PLATFORM_STEP_TOLERANCE = 0.4 m) and too LOW to
+    // fit under (BODY_CLEARANCE = 0.8 m). A 0.5 m slab would simply be stepped ON, which is correct
+    // behaviour and not the trap being tested.
+    low.platCount = 1;
+    low.platHeight[0] = 5;
+
+    // A BALCONY arcade at (2,4): slab at 3 m, plenty of headroom — must stay walkable.
+    GridCell& high = g.cells[4 * 8 + 2];
+    high.flags |= CELL_PLATFORM;
+    high.platCount = 1;
+    high.platHeight[0] = 12;   // 3.0 m
+
+    const Vec3 underLow { 4.5f, 0.0f, 4.5f };
+    const Vec3 underHigh{ 2.5f, 0.0f, 4.5f };
+
+    // Walking UNDER the ramp's low end: refused.
+    CHECK_FALSE(Autoplay::cellPassable(g, underLow, /*feetY=*/0.0f, /*lavaFloor=*/false));
+    // Standing ON that same slab: allowed — the rule is story-aware, not a blanket cell ban.
+    CHECK(Autoplay::cellPassable(g, underLow, /*feetY=*/1.25f, false));
+    // The balcony arcade is fine to walk under; only a LOW slab pinches.
+    CHECK(Autoplay::cellPassable(g, underHigh, 0.0f, false));
+    // Plain open floor is unaffected.
+    CHECK(Autoplay::cellPassable(g, Vec3{5.5f, 0.0f, 5.5f}, 0.0f, false));
+
+    LevelGridSystem::shutdown(g);
+}
+
+// A body that is ALREADY pinned under a ramp needs a way OUT. The veto only prevents ENTERING the
+// trap, and it cannot help here — from underneath, every direction is equally refused. This is the
+// counterpart, and it is needed because the trap is genuinely reachable: the FIGHT branch's
+// close/kite movement is deliberately unvetoed, so a melee build chasing a hostile can walk itself
+// under the stairs. Reported twice live: "paladin is stuck again under the stairs".
+TEST_CASE("Autoplay: unpinDirection walks a trapped body out from under a low slab") {
+    LevelGrid g{};
+    LevelGridSystem::init(g, 12, 12, 1.0f);
+    for (u32 z = 0; z < 12; z++)
+        for (u32 x = 0; x < 12; x++) {
+            GridCell& c = g.cells[z * 12 + x];
+            c.flags = (x == 0 || z == 0 || x == 11 || z == 11) ? CELL_SOLID : (CELL_FLOOR | CELL_CEILING);
+            c.floorHeight = 0; c.ceilingHeight = 20;
+        }
+    // A ramp's low end covering x = 4..6 (top 1.25 m => underside 0.75 m: the pinch profile).
+    for (u32 x = 4; x <= 6; x++)
+        for (u32 z = 1; z <= 10; z++) {
+            GridCell& c = g.cells[z * 12 + x];
+            c.flags |= CELL_PLATFORM; c.platCount = 1; c.platHeight[0] = 5;
+        }
+
+    const Vec3 under{5.5f, 0.0f, 5.5f};                 // squarely beneath the slab
+    const Vec3 out = Autoplay::unpinDirection(g, under, 0.0f);
+    REQUIRE(lengthSq(out) > 1e-6f);                     // it must produce a heading at all
+
+    // Following the heading must actually LEAVE the band. It cannot escape in a single cell — the
+    // band is 3 wide and the body starts in the middle — so walk it and require an exit within the
+    // band's own width, which is what "the shortest way out" means here.
+    bool escaped = false;
+    for (u32 step = 1; step <= 3 && !escaped; step++) {
+        const Vec3 at{under.x + out.x * g.cellSize * (f32)step, 0.0f,
+                      under.z + out.z * g.cellSize * (f32)step};
+        u32 sx, sz;
+        if (LevelGridSystem::worldToGrid(g, at, sx, sz))
+            escaped = !LevelGridSystem::bodyPinnedUnderSlab(g, sx, sz, 0.0f);
+    }
+    CHECK(escaped);
+    // ...and it leaves ACROSS the band (which runs in Z), not along its diagonal — the shorter exit.
+    CHECK(fabsf(out.x) > fabsf(out.z));
+
+    // A body NOT pinned gets no heading — this must never perturb ordinary movement.
+    CHECK(lengthSq(Autoplay::unpinDirection(g, Vec3{2.5f, 0.0f, 5.5f}, 0.0f)) == doctest::Approx(0.0f));
+    // ...nor one standing ON the slab.
+    CHECK(lengthSq(Autoplay::unpinDirection(g, under, 1.25f)) == doctest::Approx(0.0f));
+
+    LevelGridSystem::shutdown(g);
+}

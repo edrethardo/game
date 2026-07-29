@@ -3,6 +3,7 @@
 // The BFS mirrors DescentField/buildFlowField (same direction encoding, 4-connected expansion,
 // steer-to-cell-centre readout) and adds the second story layer plus the ramp-foot vertical bridge.
 #include "game/autoplay_vhall.h"
+#include "game/autoplay_nav.h"   // VH_BODY_CLEARANCE — shared with the travel veto
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
@@ -28,7 +29,8 @@ static inline f32 nodeHeight(const LevelGrid& g, u32 x, u32 z, u8 story) {
 // toward slabs it can never climb, then wedges (measured, repeatedly, on the geared paladin). So the
 // ground story is the OPEN floor plus the balcony arcades only; the ramp is mounted from the open
 // ground beside its FOOT (a cross-story step), never from underneath.
-static constexpr f32 kBodyClearance = 0.8f;   // a slab hanging lower than this can't be walked under
+// The clearance rule itself now lives in LevelGridSystem::bodyPinnedUnderSlab — shared with the
+// Autoplay travel veto and the teleport landing resolver, so all three cannot drift apart.
 
 // Is node (cell, story) somewhere a body can stand? Upper: a cell that carries a slab (balcony /
 // ramp / catwalk), stood ON. Ground: any non-wall cell, EXCEPT one roofed by a slab too low to fit
@@ -36,8 +38,8 @@ static constexpr f32 kBodyClearance = 0.8f;   // a slab hanging lower than this 
 static inline bool nodeWalkable(const LevelGrid& g, u32 x, u32 z, u8 story) {
     if (LevelGridSystem::isSolid(g, x, z)) return false;
     if (story == 1) return LevelGridSystem::hasPlatform(g, x, z);
-    if (LevelGridSystem::hasPlatform(g, x, z) &&
-        LevelGridSystem::getPlatformUnderside(g, x, z) < kBodyClearance) return false;
+    if (LevelGridSystem::bodyPinnedUnderSlab(g, x, z, LevelGridSystem::getFloorHeight(g, x, z)))
+        return false;
     return true;
 }
 

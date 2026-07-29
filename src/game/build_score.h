@@ -146,7 +146,16 @@ inline void rowWeights(u8 row, f32& offW, f32& defW) {
     }
 }
 
-inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
+// Every class deals +20% with its ClassDef::preferredWeapon TYPE (engine_combat.cpp applies
+// `wpn.damage *= 1.2f` on every swing whose WeaponType matches). The build COLUMN cannot express
+// this: the Ranged column holds BOTH families, so a Combat Engineer (HITSCAN) and a Ranger
+// (PROJECTILE) share a column while only one of them gets the bonus on any given weapon — the
+// scorer would happily hand the engineer a bow and silently drop 20% of its damage. Callers that
+// know the class pass its preferredWeapon; the default means "no class known, no bonus".
+constexpr f32 CLASS_PREFERRED_MULT = 1.2f;
+
+inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell,
+                 WeaponType classPreferred = WeaponType::COUNT) {
     if (item.defId == 0xFFFF) return 0.0f;                       // empty scores nothing
     // A minipet is not gear: it claims the ring slot only to satisfy the loader, and its high
     // rarity would otherwise leak a phantom tiebreak score into the RING column — a bag pet was
@@ -211,7 +220,12 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell) {
         const f32 cdBase = (def.baseCooldown > 0.05f) ? def.baseCooldown : 0.2f;
         const f32 cdrEffW = (cdr > 50.0f) ? 50.0f : cdr;
         const f32 effCd  = cdBase * (1.0f - cdrEffW * 0.01f) / (1.0f + atkSpd * 0.01f);
-        const f32 perHit = (def.baseDamage + dmgFlat) * (1.0f + dmgPct * 0.01f);
+        // The class's preferred-TYPE bonus multiplies the weapon's DAMAGE, so it is folded into
+        // perHit — which then flows into BOTH the sustained-DPS term and the ranged skill-scale
+        // tiebreak below. That mirrors the engine exactly: `wpn.damage *= 1.2f` lands before the
+        // swing resolves and before Marksman/Ranger skills read the weapon's per-hit damage.
+        const f32 classMult = (def.weaponType == classPreferred) ? CLASS_PREFERRED_MULT : 1.0f;
+        const f32 perHit = (def.baseDamage + dmgFlat) * (1.0f + dmgPct * 0.01f) * classMult;
         f32 dps;
         if (def.baseClipSize > 0) {
             const f32 shots  = static_cast<f32>(def.baseClipSize) * (1.0f + clipPct * 0.01f);
@@ -333,17 +347,18 @@ inline const char* colName(u8 cell) {
 // item of that slot. excludeBackpackIdx lets a bag item ask "what is the best WITHOUT me?" — the
 // self-exclusion the dominance test needs.
 inline f32 bestSlotScore(const PlayerInventory& inv, const ItemDef* defs, u32 defCount,
-                         ItemSlot slot, u8 cell, s32 excludeBackpackIdx = -1) {
+                         ItemSlot slot, u8 cell, s32 excludeBackpackIdx = -1,
+                         WeaponType classPreferred = WeaponType::COUNT) {
     f32 best = 0.0f;
     const ItemInstance& worn = inv.equipped[static_cast<u32>(slot)];
     if (worn.defId != 0xFFFF && worn.defId < defCount)
-        best = score(worn, defs[worn.defId], cell);
+        best = score(worn, defs[worn.defId], cell, classPreferred);
     for (u8 bi = 0; bi < MAX_INVENTORY_ITEMS; bi++) {
         if (static_cast<s32>(bi) == excludeBackpackIdx) continue;
         const ItemInstance& it = inv.backpack[bi];
         if (it.defId == 0xFFFF || it.defId >= defCount) continue;
         if (defs[it.defId].slot != slot) continue;
-        const f32 s = score(it, defs[it.defId], cell);
+        const f32 s = score(it, defs[it.defId], cell, classPreferred);
         if (s > best) best = s;
     }
     return best;
@@ -381,18 +396,20 @@ inline f32 bestFieldedDefinitiveScore(const PlayerInventory& inv, const ItemDef*
 // walk past what is some of the rarest loot in the game. The gear-side never sees them anyway:
 // auto-equip refuses petSummon and the prune/evict passes exempt them.
 inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
-                           const PlayerInventory& inv, const ItemDef* defs, u32 defCount) {
+                           const PlayerInventory& inv, const ItemDef* defs, u32 defCount,
+                           WeaponType classPreferred = WeaponType::COUNT) {
     if (def.petSummon) return true;
     if (isDefinitiveBest(def, cand.rarity)) {
         // The Phase Dash boots: grab them over any non-Phase-Dash boots (whatever the score), but only
         // a STRICTLY BETTER pair when we already field one — a worse duplicate is not worth hoarding.
         const f32 have = bestFieldedDefinitiveScore(inv, defs, defCount);
-        return have < 0.0f || score(cand, def, DEFAULT_BUILD_CELL) > have;
+        return have < 0.0f || score(cand, def, DEFAULT_BUILD_CELL, classPreferred) > have;
     }
     for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
-        const f32 s = score(cand, def, cell);
+        const f32 s = score(cand, def, cell, classPreferred);
         if (s <= 0.0f) continue;
-        if (isUpgrade(s, bestSlotScore(inv, defs, defCount, def.slot, cell)))
+        if (isUpgrade(s, bestSlotScore(inv, defs, defCount, def.slot, cell,
+                                       /*excludeBackpackIdx=*/-1, classPreferred)))
             return true;
     }
     return false;
@@ -404,7 +421,8 @@ inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
 // MINIPETS are always keepers — engine callers already skip petSummon before asking, but the pure
 // answer must agree with the pickup filter or a future caller could discard what the vacuum just
 // declared unconditionally worth grabbing.
-inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 backpackIdx) {
+inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 backpackIdx,
+                     WeaponType classPreferred = WeaponType::COUNT) {
     const ItemInstance& it = inv.backpack[backpackIdx];
     if (it.defId == 0xFFFF || it.defId >= defCount) return false;
     const ItemDef& def = defs[it.defId];
@@ -413,12 +431,13 @@ inline bool isKeeper(const PlayerInventory& inv, const ItemDef* defs, u32 defCou
         // The Phase Dash boots: keep them unless a strictly BETTER pair is fielded elsewhere (a worse
         // duplicate is ordinary gear the prune may drop). '>=' so the sole/best pair always stays.
         const f32 other = bestFieldedDefinitiveScore(inv, defs, defCount, static_cast<s32>(backpackIdx));
-        return score(it, def, DEFAULT_BUILD_CELL) >= other;
+        return score(it, def, DEFAULT_BUILD_CELL, classPreferred) >= other;
     }
     for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
-        const f32 s = score(it, def, cell);
+        const f32 s = score(it, def, cell, classPreferred);
         if (s <= 0.0f) continue;
-        if (s >= bestSlotScore(inv, defs, defCount, def.slot, cell, static_cast<s32>(backpackIdx)))
+        if (s >= bestSlotScore(inv, defs, defCount, def.slot, cell, static_cast<s32>(backpackIdx),
+                               classPreferred))
             return true;
     }
     return false;
@@ -445,10 +464,12 @@ inline s32 bestRangedBackpackIdx(const PlayerInventory& inv, const ItemDef* defs
 }
 
 // Total gear score a build cell could field right now (sum of best-in-slot over every slot).
-inline f32 gearScoreForCell(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 cell) {
+inline f32 gearScoreForCell(const PlayerInventory& inv, const ItemDef* defs, u32 defCount, u8 cell,
+                            WeaponType classPreferred = WeaponType::COUNT) {
     f32 total = 0.0f;
     for (u32 sl = 0; sl < static_cast<u32>(ItemSlot::COUNT); sl++)
-        total += bestSlotScore(inv, defs, defCount, static_cast<ItemSlot>(sl), cell);
+        total += bestSlotScore(inv, defs, defCount, static_cast<ItemSlot>(sl), cell,
+                               /*excludeBackpackIdx=*/-1, classPreferred);
     return total;
 }
 

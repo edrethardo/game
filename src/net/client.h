@@ -62,10 +62,14 @@ namespace Client {
     // (yaw/pitch) is left intact so the body facing doesn't snap.
     // laneId selects which local player's input stream this is (online couch co-op); targetSlot is
     // the absolute net slot the server should route it to (stamped into the CL_INPUT window header).
+    // extFlagsSetMask ORs engine-driven edge bits that captureLocalInput can't derive from Input::
+    // (e.g. INPUT_EX_THROW — the melee throw's tap/hold decision is made in handleWeaponFire). It is
+    // applied AFTER the clear mask, so a set bit always wins.
     void captureAndSendInput(const Player& player, u32 clientTick, u8 weaponId,
                              u8 skillSlot, u8 extFlagsClearMask = 0,
                              bool freezeMovement = false,
-                             u8 laneId = 0, u8 targetSlot = 0);
+                             u8 laneId = 0, u8 targetSlot = 0,
+                             u8 extFlagsSetMask = 0);
 
     // Get the latest captured input for a local lane (for local prediction in engine)
     const NetInput* getLatestInput(u8 laneId = 0);

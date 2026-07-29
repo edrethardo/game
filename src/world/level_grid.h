@@ -104,6 +104,10 @@ struct LevelGrid {
 };
 
 namespace LevelGridSystem {
+
+// Head clearance a standing body needs to walk beneath a slab (metres).
+constexpr f32 BODY_CLEARANCE = 0.8f;
+
     void init(LevelGrid& grid, u32 width, u32 depth, f32 cellSize = 1.0f);
     void shutdown(LevelGrid& grid);
 
@@ -136,6 +140,21 @@ namespace LevelGridSystem {
     u8   platformCount(const LevelGrid& grid, u32 x, u32 z);              // slab count; multi-slab loop bound
     f32  getPlatformTop(const LevelGrid& grid, u32 x, u32 z, u8 i);       // indexed slab top
     f32  getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z, u8 i); // indexed slab underside
+    // HEAD CLEARANCE. True when a body standing in this cell (feet resolved by the story selector
+    // below) has a slab overhead too low to fit under — i.e. it is pinned inside/beneath geometry.
+    //
+    // The canonical case is the LOW end of a VERTICAL_HALL ramp: a graduated slab descends to head
+    // height and below, so the ground beneath it is a trap. Three separate consumers each need this
+    // and used to disagree — the VHALL router excluded such cells, the Autoplay travel veto did not
+    // (so the escape ladder and detour fan walked the bot under the stairs), and the teleport landing
+    // resolver did not (so a Paladin's Holy Smite dash could land INSIDE the stairs — a human-facing
+    // bug, not just a bot one). It lives here because it is a fact about the geometry, not about any
+    // one consumer.
+    //
+    // Multi-slab aware: the relevant ceiling is the LOWEST slab whose underside is above our feet, so
+    // a FOUR_STORY body standing on the 6 m slab is measured against the 9 m one, not the 3 m one.
+    bool bodyPinnedUnderSlab(const LevelGrid& grid, u32 x, u32 z, f32 feetY);
+
     // THE story selector: the walkable floor a body with feet at feetY interacts with in this
     // cell. Slab cells return the slab top for feet within PLATFORM_STEP_TOLERANCE below it
     // (walking the balcony, stepping up a slab stair), else the base floor (walking the arcade

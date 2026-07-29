@@ -57,8 +57,11 @@ static constexpr u8 INPUT_EX_SKILL      = 1 << 2;  // right-click class skill
 static constexpr u8 INPUT_EX_BOOT_SKILL = 1 << 3;
 static constexpr u8 INPUT_EX_HELM_SKILL = 1 << 4;
 static constexpr u8 INPUT_EX_INVENTORY  = 1 << 5;  // Tab toggle
-// bit 6 free (respawn moved to the reliable CL_RESPAWN packet; the pet-consumable edge that
-// briefly lived here moved to CL_USE_PET — with one pet per enemy it needs a defId payload).
+// Melee weapon throw edge (v25). A short TAP of Fire on a melee weapon hurls it as a projectile;
+// the client owns the tap/hold arbitration and stamps this one-tick edge, the server validates the
+// fixed 1.5 s (CDR-immune) cooldown against in.clientTick and spawns the authoritative throw. Was
+// the free bit (respawn -> CL_RESPAWN, pet edge -> CL_USE_PET).
+static constexpr u8 INPUT_EX_THROW     = 1 << 6;
 static constexpr u8 INPUT_EX_DODGE     = 1 << 7;  // Wanderer dodge roll
 
 // Networked player state — the authoritative state the server maintains.
@@ -126,6 +129,11 @@ struct NetPlayer {
     // server: set to input->clientTick on successful gate. potionCooldown above is
     // HUD-derived.
     u32  potionLastActivationTick = 0;
+    // v25: tick at which this slot last threw its melee weapon. Server-authoritative gate for a
+    // remote's INPUT_EX_THROW edge (GameConst::cooldownReady vs WeaponThrow::cooldownTicks(), which
+    // is CDR-immune). 0 = never. Transient — not serialized, not on the wire. The host/SP/client
+    // LOCAL path predicts with a plain float timer (Engine::m_weaponThrowCd) instead.
+    u32  weaponThrowLastActivationTick = 0;
     // Near-death lifesaver i-frame (TA-1): server-side mirror of Player.lifesaverArmed so the
     // one-shot below-20%-HP invuln stays one-shot across frames for remotes (consumed on use,
     // re-earned only at >=40% HP). NOT serialized — server-only state, never on the wire.

@@ -233,3 +233,100 @@ TEST_CASE("descent field: a new floor invalidates a stale field") {
     Autoplay::freeDescentField(f);
     LevelGridSystem::shutdown(g);
 }
+
+// --- getting off a return lift -------------------------------------------------------------------
+// A jump pad under a drop hole is a RETURN LIFT: fall through, land on it, get flung back up. Pads are
+// excluded from the field on purpose, so descentDirection says nothing while standing on one — and a
+// bot with no heading just waits there to be relaunched. Traced live as the Descent floor PARK: 12
+// minutes with distance-to-exit oscillating between two fixed values, 47% of ticks airborne, 32% with
+// no heading at all. padEscapeDirection is the one case the field cannot express: "leave where you are".
+TEST_CASE("descent field: a bot standing on a jump pad is given a way OFF it") {
+    LevelGrid g = makeStoryGrid(16, 16);
+    // A 3x3 pad node — the real generator builds whole nodes, and a single-cell escape must clear it.
+    for (u32 z = 6; z <= 8; z++)
+        for (u32 x = 6; x <= 8; x++) setPad(g, x, z);
+    DungeonResult d{};
+    d.dropHoles[d.dropHoleCount++] = holeAt(13.5f, 13.5f, 9.0f);
+
+    Autoplay::DescentField f;
+    REQUIRE(Autoplay::ensureDescentField(f, g, d, 9.0f, 1));
+
+    const Vec3 onPad{7.5f, 9.0f, 7.5f};                       // dead centre of the pad node
+    // NOTE: the ordinary router may or may not have a heading here — the tier-2 recovery flood routes
+    // THROUGH pads, so a pad cell can carry a code. What padEscapeDirection guarantees is different
+    // and unconditional: a heading that leads OFF the pad rather than along the descent route, which
+    // is what a bot being relaunched needs and what the field alone will never express.
+    const Vec3 esc = Autoplay::padEscapeDirection(f, g, onPad);
+    CHECK(lengthSq(esc) > 1e-6f);
+
+    // It must lead somewhere that is genuinely OFF the pad, not deeper into it: step along the escape
+    // until we leave the node, then confirm the normal router takes over again.
+    Vec3 p = onPad;
+    bool leftPad = false;
+    for (u32 i = 0; i < 12 && !leftPad; i++) {
+        p = p + esc * g.cellSize; p.y = onPad.y;
+        u32 cx, cz;
+        if (!LevelGridSystem::worldToGrid(g, p, cx, cz)) break;
+        if (!(LevelGridSystem::getCell(g, cx, cz).flags & CELL_JUMPPAD)) leftPad = true;
+    }
+    CHECK(leftPad);
+    CHECK(lengthSq(Autoplay::descentDirection(f, g, p)) > 1e-6f);   // routing resumes off the pad
+    CHECK(fieldReachesAHole(f, g, p, 200));                          // and still reaches a way down
+
+    // Not on a pad => no escape needed; the ordinary router owns the heading.
+    CHECK(lengthSq(Autoplay::padEscapeDirection(f, g, Vec3{2.5f, 9.0f, 2.5f})) >= 0.0f);
+    Autoplay::freeDescentField(f);
+    LevelGridSystem::shutdown(g);
+}
+
+// --- WEDGE DETECTION -------------------------------------------------------------------------
+// The residual FOUR_STORY floor park: the bot has a valid heading and is commanding movement, and
+// the body does not move. These pin the rule that separates that from the states it must NOT fire
+// on — a bot standing still on purpose, and a bot that is genuinely travelling.
+TEST_CASE("Autoplay wedge: commanding movement with no travel is a wedge") {
+    using namespace Autoplay;
+    // The measured park: a full window, movement commanded throughout, ~0 m of travel.
+    CHECK(wedgeDetected(WEDGE_WIN_SEC, WEDGE_WIN_SEC, 0.05f));
+
+    // NOT a wedge: the window has not closed yet.
+    CHECK_FALSE(wedgeDetected(WEDGE_WIN_SEC * 0.5f, WEDGE_WIN_SEC * 0.5f, 0.0f));
+
+    // NOT a wedge: standing still ON PURPOSE (no movement commanded). A bot holding position in a
+    // fight, or parked at the exit waiting on the descend hold, must never be shoved sideways.
+    CHECK_FALSE(wedgeDetected(WEDGE_WIN_SEC, 0.0f, 0.0f));
+    CHECK_FALSE(wedgeDetected(WEDGE_WIN_SEC, WEDGE_WIN_SEC * 0.5f, 0.0f));   // under the 70% floor
+
+    // NOT a wedge: actually getting somewhere.
+    CHECK_FALSE(wedgeDetected(WEDGE_WIN_SEC, WEDGE_WIN_SEC, WEDGE_NET_M + 0.1f));
+}
+
+TEST_CASE("Autoplay wedge: escape angle escalates sideways first, then reverses") {
+    using namespace Autoplay;
+    // A lip/corner wedge is a body refused on ONE axis, so the square sidestep must come first —
+    // reversing immediately would walk the bot back down the route it just travelled.
+    CHECK(wedgeEscapeAngle(0) == doctest::Approx(1.5707963268f));    // +90
+    CHECK(wedgeEscapeAngle(1) == doctest::Approx(-1.5707963268f));   // -90
+    CHECK(wedgeEscapeAngle(2) == doctest::Approx(3.1415926536f));    // 180, only after both sides
+    // Wraps rather than running off the table, however long a bot stays stuck.
+    CHECK(wedgeEscapeAngle(5) == doctest::Approx(wedgeEscapeAngle(0)));
+    CHECK(wedgeEscapeAngle(251) == doctest::Approx(wedgeEscapeAngle(1)));
+}
+
+TEST_CASE("Autoplay boxed-in: a real heading vetoed to nothing is the second park symptom") {
+    using namespace Autoplay;
+    // Measured tinkerer park: the veto zeroed a real heading on 100% of ticks for the whole run.
+    CHECK(boxedDetected(WEDGE_WIN_SEC, WEDGE_WIN_SEC));
+
+    // The window must close first.
+    CHECK_FALSE(boxedDetected(WEDGE_WIN_SEC * 0.5f, WEDGE_WIN_SEC * 0.5f));
+
+    // A brief veto is ORDINARY — the fan rounds corners constantly on a maze — so a bot that is
+    // mostly routing fine must not be shoved sideways for the occasional blocked step.
+    CHECK_FALSE(boxedDetected(WEDGE_WIN_SEC, WEDGE_WIN_SEC * 0.5f));
+
+    // The two detectors are INDEPENDENT: the boxed bot commands no movement (so wedgeDetected is
+    // blind to it) and the wedged bot has a heading that is never vetoed (so boxedDetected is blind
+    // to that). Neither alone covers the park; that is why both exist.
+    CHECK_FALSE(wedgeDetected(WEDGE_WIN_SEC, /*cmdT=*/0.0f, /*net=*/0.0f));   // the boxed bot
+    CHECK_FALSE(boxedDetected(WEDGE_WIN_SEC, /*vetoT=*/0.0f));               // the wedged bot
+}

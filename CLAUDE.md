@@ -92,6 +92,30 @@ when a content/constant change knocks a floor out of band.
 
 **Data-driven hybrid.** JSON in `assets/config/` defines content (items, affixes, skills, enemies, weapons, materials). C++ systems load defs at startup into fixed-size arrays and consume them at runtime. Asset name strings are resolved to integer IDs (mesh IDs, material IDs) once after init — runtime code never touches strings.
 
+**Level meshes MUST be freed before a rebuild.** `LevelMeshSystem::buildAll` is called from SIX sites —
+every floor build plus the in-place rebuilds (exit pad, boss arena, lava theme) — and `buildSection`
+resets `submeshCount` and overwrites each `SectionSubmesh` with a fresh `MeshSystem::create`. For most
+of the project's life `destroyAll` was called from exactly ONE place (`engine_init.cpp`, at shutdown),
+so every rebuild ORPHANED a whole floor's worth of VAO/VBO/IBO. Measured by sampling `VmRSS` against
+floors cleared: **+2.85 MB/floor, monotonic, never plateauing** (120 -> 149 MB over 10 floors; an
+autoplay soak reached ~360 MB). `buildAll` now calls `destroyAll(outSections, maxSects)` on entry —
+the full array, not just this build's section count, so the tail is reclaimed when a smaller grid
+follows a larger one (grids vary 44/48/52). After: RSS **PLATEAUS** — over a 28-floor / 5-boss run it
+rose 118 -> 138 MB in exactly FOUR discrete steps (+6.3/+2.8/+6.3/+4.0) and then sat at 138.4 MB for
+the last TEN floors, +0.0 MB each, two boss spawns included. Those steps are lazy first-use loading
+(depth-tier themes/assets, a larger grid), NOT per-floor cost: they do not align with boss floors, and
+the marginal cost of a floor at steady state is zero. Read a per-floor AVERAGE with suspicion here —
+"+0.74 MB/floor" is just those four warm-up steps amortized over 27 floors and describes nothing real.
+A new call site needs no extra care; adding a rebuild path that bypasses `buildAll` does.
+
+**`AllocationTracker`'s "bytes still live at shutdown" is NOT a leak measurement** — do not chase it.
+`operator new`/`new[]` always add to `s_liveBytes`, but the UNSIZED `operator delete`/`delete[]` free
+without subtracting (only the sized overloads do), which its own comment admits ("the byte count will
+drift"). The number therefore grows with allocation CHURN, so it correlates with floors cleared whether
+or not anything leaks — it pointed at a real leak once, by luck, and would have pointed at one anyway.
+Ground truth for a leak is process **RSS sampled against a progress counter**; C-side `malloc`/`calloc`
+(e.g. all of `level_grid.cpp`) is invisible to the tracker entirely.
+
 **Pool allocation, no heap in hot paths.** Entities, projectiles, world items, materials, meshes all live in static arrays sized by `MAX_*` constants in their headers. No `new`/`delete` per frame. A 1 MB `FrameAllocator` (`src/core/frame_allocator.h`) is reset each frame for transient scratch.
 
 **Namespace + struct.** Systems are namespaces of free functions (`Combat`, `EntitySystem`, `ItemGen`, `Net`, `Renderer`, ...). State lives in plain structs that callers pass in. No singletons except a couple of file-scope globals (logger, profiler, frame allocator, MaterialSystem table).
@@ -296,6 +320,38 @@ rewarded); a held block stops damage but the CC lands. Class CC (baseline-up fai
 Tinkerer Detonate EMP stun, Wanderer Deflect stagger — each with a `Combat::pvp*` twin. `PROTOCOL_VERSION`
 21. (Internals: `engine-reference`; the pitfalls: `engine-how-to`.)
 
+**Melee weapon throw (short-click).** A quick TAP of Fire on an equipped MELEE weapon hurls it as a
+projectile (`Engine::spawnWeaponThrow`) — HOLDING Fire does the normal swing. It deals the effective
+weapon damage with one crit roll, flies as the weapon's own mesh, and applies a brief slow on hit
+(rides `Projectile::freezeDuration` → `Entity.freezeTimer`, tenacity-scaled). Cooldown is a FIXED
+1.5 s that CDR never touches — a plain float timer (`m_weaponThrowCd[lane]`) for the local/host/SP +
+client-prediction path, a tick watermark (`NetPlayer::weaponThrowLastActivationTick` +
+`GameConst::cooldownReady`) for server-authoritative remotes. **The client owns the tap-vs-hold
+arbitration** (pure, tested `game/weapon_throw.h` — decide()/cooldownTicks()/slowDuration()); the
+server never re-derives it because swings/throws reach it as explicit requests/edges (`CL_FIRE_WEAPON`
+/ `INPUT_EX_THROW`), so a tap sends the throw edge and a hold sends the fire request — never both. To
+keep melee responsive, the ~0.2 s tap-disambiguation window only applies while the throw is OFF
+cooldown; on cooldown a press swings instantly. Full co-op: the throw is client-predicted (a ghost, as
+the THROWAWAY legendary does) and reconciled via ownerSlot+clientTick; `INPUT_EX_THROW` (extFlags bit
+6) drives it — **`PROTOCOL_VERSION` 25**, no snapshot layout change (reuses the projectile wire).
+**Tenacity is a live-but-zero hook**: `Entity.ccResist` defaults 0 for every enemy, so the slow is
+scaled by `CrowdControl::scaleDuration` to the full 0.2 s today; populating enemy resist later needs
+no code change. A **visible amber recharge bar** sits below the crosshair (mirrors the dodge-roll
+cooldown bar), shown only while a melee weapon is equipped and the throw is cooling.
+**The Autoplay bot throws too.** It drives the same buttons a human does, and `applyBotIntent` HOLDS
+Fire — which the arbiter reads as a swing — so throwing means emitting a synthetic short **TAP**:
+release (to zero `decide`'s hold accumulator, since an auto-firing bot is far past `TAP_SEC`), a brief
+press, then release (the release is what throws). That sequencer is `WeaponThrow::botTap*` +
+`m_autoplayThrowSeq`, and while it runs it OWNS the Fire button, or the ordinary auto-fire hold would
+leak through and turn the throw back into a swing. Policy is the pure `WeaponThrow::botShouldThrow`:
+a **RANGED** enemy with LOS, beyond swing reach (`BOT_THROW_MIN_MUL`× weapon range) and inside
+`BOT_THROW_MAX_M` — a melee attacker is excluded because it closes the gap for you, so the weapon is
+better kept in hand. Leashed (`BOT_THROW_LEASH` 6 s) so it reads as an occasional flourish; measured
+live at ~1 throw/13 s. The **THROWAWAY legendary** gets the same treatment on its own 8 s leash: that
+gun toss fires whenever a reload TRIGGERS and its damage scales with the rounds left, while a manual
+reload is only legal below a full clip — so the bot pulses RELOAD at exactly **clipSize-1**, the
+highest-damage toss the rules allow.
+
 **Auto Loot & Equip (the second play style).** Chosen at character creation — after class select
 BOTH players get a "How do you want to play?" chooser (P1 subState 23, couch P2 24 on their own pad;
 21/22 were taken by lobby-code entry and the Arena chooser) — and toggleable any time from the
@@ -313,7 +369,14 @@ under its burst; projectile weapons credit projectile-speed rolls as hit reliabi
 ranked a Heavy Crossbow 3.5x a Rusty Dagger whose real DPS is higher; **Ranged-column weapons carry a
 per-hit TIEBREAK** — `weaponSkillScaleBonus`, because Marksman/Ranger skills scale off the weapon's
 per-hit damage (`s_weaponDamage` in `skill_marksman/ranger.cpp`), so between two comparable-DPS ranged
-weapons the harder hitter wins, without ever overturning a real DPS gap), hard weapon-family gate per column, **defense in EFFECTIVE-HP terms** (the engine's armor formula linearizes to +armor% of a 150-HP reference pool; %HP likewise; regen/life-on-hit/**lifesteal count as TANKINESS** — healing over a 10 s reference fight — not offense), **spell rolls + cooldown reduction multiply a per-column reference cast-DPS** (70 for Magic, 15 elsewhere — CDR is 1/(1-c) casts, real DPS on a caster; **CDR on a NON-weapon — a helmet, a ring — is ALSO credited as weapon-cooldown acceleration**, since `getEffectiveWeapon` divides the weapon cooldown by 1-CDR for every class, which is what lets a Glass Cannon prefer a CDR helmet over a defensive one), **legendary GRANTED SKILLS scored by their real DPS-equivalent** (`skillOffense`/`skillDefense` reduce the actual `SkillDef` — damage/cooldown/bounces — to the weapon-DPS currency under a "30 s on a dummy" lens, precomputed onto `ItemDef::legendarySkillOffense/Defense` at load in `engine_init_assets.cpp` so the pure scorer never needs the skill table; only counts at LEGENDARY rarity; a stat-less reactive skill with no `SkillDef` — Mirror Aegis's projectile parry, "super strong" per Aaron — is hand-valued in the resolver, the one exception to stat-derivation because there is nothing to read), **3.5:0.5 Glass / 2:2 Moderate / 1:3 Tanky**
+weapons the harder hitter wins, without ever overturning a real DPS gap), hard weapon-family gate per column, **a CLASS preferred-weapon term the COLUMN cannot express** (the
+Ranged column holds BOTH the gun/HITSCAN and bow-thrown/PROJECTILE families, so a Combat Engineer and
+a Ranger share a column while only one of them earns the +20% on any given weapon — without it the
+scorer ranked a bow and a pistol on raw stats and could hand the engineer the bow, silently costing
+20% damage; `WeaponType::COUNT` is the "no class known" default, and every entry point —
+`score`/`bestSlotScore`/`gearScoreForCell`/`worthPickingUp`/`isKeeper` — takes it so the equip rule,
+the pickup filter and the prune can't disagree and churn), **defense in EFFECTIVE-HP terms** (the engine's armor formula linearizes to +armor% of a 150-HP reference pool; %HP likewise; regen/life-on-hit/**lifesteal count as TANKINESS** — healing over a 10 s reference fight — not offense), **spell rolls + cooldown reduction multiply a per-column reference cast-DPS** (70 for Magic, 15 elsewhere — CDR is 1/(1-c) casts, real DPS on a caster; **CDR on a NON-weapon — a helmet, a ring — is ALSO credited as weapon-cooldown acceleration**, since `getEffectiveWeapon` divides the weapon cooldown by 1-CDR for every class, which is what lets a Glass Cannon prefer a CDR helmet over a defensive one), **legendary GRANTED SKILLS scored by their real DPS-equivalent** (`skillOffense`/`skillDefense` reduce the actual `SkillDef` — damage/cooldown/bounces — to the weapon-DPS currency under a "30 s on a dummy" lens, precomputed onto `ItemDef::legendarySkillOffense/Defense` at load in `engine_init_assets.cpp` so the pure scorer never needs the skill table; only counts at LEGENDARY rarity; a stat-less reactive skill with no `SkillDef` — Mirror Aegis's projectile parry, "super strong" per Aaron — is hand-valued in the resolver, the one exception to stat-derivation because there is nothing to read), **the CLASS's preferred-weapon +20%** (`BuildScore::CLASS_PREFERRED_MULT`, folded into `perHit` so it
+reaches both the DPS term and the ranged skill-scale tiebreak, mirroring `wpn.damage *= 1.2f`), **3.5:0.5 Glass / 2:2 Moderate / 1:3 Tanky**
 offense:defense row weights (Glass sharpened from 3:1 so it RELIABLY picks the damage piece over a max-roll defensive one), 5% upgrade hysteresis, rarity tiebreak. Selecting a cell re-gears the
 whole bag on the spot (`autoEquipBackpack`); every auto-equip goes through `sendInventorySync` (the
 v16 couch lesson) and announces itself in chat (silent gear changes read as items vanishing). The inventory reasons over **all nine builds**, not just the active one:
@@ -825,6 +888,205 @@ work, each from a measured failure:
   (a champion/elite legitimately takes many seconds to kill) and made the bot "randomly disengage" from
   exactly those fights; 20 s lets any real fight resolve first so it fires only on a true livelock.
 
+**A resting body reported AIRBORNE every other tick (`onGround`), and it gated more than it looked
+(measured 2026-07-29).** Found while tracing a VERTICAL_HALL stall: a bot standing perfectly still on
+flat ground — `position.y` pinned, `velocity.y` never positive — was grounded on exactly **150 of every
+300 ticks**. `Collision::moveAndSlide` applied gravity only when `!onGround`, so a grounded body had
+`velocity.y == 0` -> `delta.y == 0` -> the swept Y position equalled the current one and did not overlap
+the grid, so the landing branch that re-sets `onGround` never ran and the unconditional
+`onGround = false` at the top of the Y axis stood; the next tick applied gravity, overlapped, landed,
+set it, and it alternated forever. Gravity is now integrated **unconditionally** — the landing snap
+re-zeroes it, so a resting body neither sinks nor drifts and still reads `velocity.y == 0` after the
+call. Player overloads ONLY: the entity path deliberately treats `velocity.y != 0` as the airborne
+state, and always-on gravity there would break enemy floor-snapping. It matters because `onGround`
+**gates** the jump (a request is dropped unless grounded), the Autoplay VHALL fall veto (off on the odd
+ticks, so a "protected" bot could still step off a balcony), and the grounded-only navigation rolls —
+each ran at half rate or worse — and it is snapshotted for co-op. Pinned by
+`tests/world/test_grounded.cpp` (the failing case was exactly 30/60). A paired A/B on two frozen
+binaries (6 classes x 30 min, same GPU load) measured **63 floors vs 59** — a wash, so it costs nothing
+in traversal. An earlier single-arm comparison suggested a 34% regression; that was seed noise, and the
+per-class swings (3 vs 14, 7 vs 16) show why a controlled arm was needed.
+
+**You cannot walk under the low end of a ramp — one rule, three consumers
+(`LevelGridSystem::bodyPinnedUnderSlab`, 2026-07-29).** A VERTICAL_HALL ramp is a graduated slab that
+descends to head height and below, so the ground beneath its low end is a trap. `VHallField` had always
+excluded those cells; **nothing else had the rule**, and each gap was a live bug. (a) The Autoplay
+travel veto (`cellPassable`) did not, so every producer that steers by `stepAllowed` rather than by the
+field — the escape ladder's 8-direction search, the +-45/+-90 detour fan, the jump-pad beeline — walked
+the bot under the stairs. (b) The teleport landing resolver did not: `footprintClear` only asks whether
+cells are SOLID, and a dash is flattened to XZ, so `desired.y` is the caster's own feet height, the
+story selector resolves to the ground story UNDER the slab, and the caster is teleported inside the
+stairs — a **human-facing** bug (Paladin Holy Smite; Shadow Step/Strike share the resolver), fixed by
+rejecting such candidates and marching further back. (c) The FIGHT branch's close/kite movement is
+deliberately UNVETOED, so a melee build chasing a hostile walked itself in anyway — so the pinch check
+is also applied per-component to the FINAL intent, whichever producer wrote it (this is geometry that
+swallows the body, not a tactical hazard to weigh), plus `Autoplay::unpinDirection` to walk a body that
+is ALREADY under one back out (from underneath every direction reads as refused, so vetoing alone would
+pin it for good; it ring-searches and takes the CLOSEST free cell per ring, because scan order returns a
+corner diagonal when a straight step across the band is nearer and leaves sooner). The rule is
+multi-slab aware (the ceiling that matters is the lowest slab underside ABOVE the feet, so a FOUR_STORY
+body on the 6 m slab is measured against the 9 m one) and story-aware (fine when standing ON the slab),
+and it is naturally inert wherever slabs sit at 3 m+. `BODY_CLEARANCE` = 0.8 m, single-sourced.
+
+**A gap-close must not fire at a target only reachable by FALLING.** The fall veto stops the bot
+WALKING off a balcony to reach a cross-gap enemy, but a teleport/dash bypasses the veto entirely — so
+Holy Smite / Shadow Step / Phase Dash blinked across the very gap the veto (and the melee sidearm)
+exist to hold it back from. `BotTarget::onlyReachableByFall` is computed ONCE in `buildBotView` and read
+by BOTH consumers, so the sidearm (which draws a gun FOR such targets) and the gap-close suppression
+(which withholds the blink AT them) can never disagree. Movement is untouched — it still closes, aims
+and fires; only the teleport and the charging roll are withheld. VHALL-upper-exit only. This also
+explains the "runs away from ranged enemies but also gap-closes" report: the sidearm flips the whole
+doctrine (Melee `engageMin` 0.00 / `engageMax` 0.60 on a ~4.3 m reach -> everything past ~2.6 m is
+"close in"; Ranged 0.55/1.00 on a ~24 m derived reach -> a 13-24 m hold-and-strafe band), so the bot
+alternates charge/hold on the sidearm's 3 s dwell + 5 s cooldown. A melee build never actually
+backpedals (`engageMin` 0.00); what reads as retreating is the STRAFE, made one-sided by the fall veto.
+
+**The melee throw has its OWN viewmodel animation.** It used to set `attackAnimT` — the SWING timer —
+so the viewmodel played the weapon's full per-subtype swing for an attack that never connects; on a
+claymore that is its entire right-to-left horizontal sweep, which reads as the animation being broken.
+`ViewmodelState::throwAnimT` now drives a wind-up -> whip -> release, and the hand goes EMPTY at
+`THROW_ANIM_RELEASE` (the same trick the THROWAWAY legendary uses) so the weapon in the air is the one
+that just left it. The trigger clears `attackAnimT` so a mid-arc swing cannot fight it. In flight, a
+thrown MELEE weapon is drawn near its real size with a heavier tumble instead of being normalised to
+the same 0.4 m as a knife or molotov (a hurled claymore rendered dart-sized); derived from the
+already-replicated `meshId` via a mask built once at asset-resolve time, so it is client-side with **no
+wire change**.
+
+**The AFK revive could STRAND a run on the death screen — the real "autoplay gets stuck" (measured
+2026-07-28).** An 8-run back-to-back Descent stress test had **6 of 8 runs go completely silent for
+128-271 s** — no FPS line, no bot telemetry — which reads exactly like a frozen bot. It was not a
+freeze and not a nav bug: `logStats()` and `updateAutoplay` BOTH only run in `IN_GAME`, so a run
+parked on the GAME_OVER screen produces precisely that silence. The bot had died and never revived.
+Cause: entering the death screen **frees the mouse cursor** (the options are clickable), so the very
+next pointer motion trips the human-takeover latch; the AFK revive countdown was gated on a LIVE
+`m_autoplayControl.botInControl()`, so it simply stopped — instrumented as
+`botInControl=0 respawnTimer=0.00` held until the process was killed. The countdown now keys off
+`m_autoplayBotDeath`, **latched at the arm site**, and the revive calls `forceBot()` on its way back
+into `IN_GAME` (the cursor-freed latch would otherwise leave the revived bot standing at the
+entrance). Measured on the same 8-run test: **dead-stall runs 6/8 -> 0/8, revives 0/19 deaths ->
+60/60, floors cleared 9 -> 24, kills 287 -> 829.**
+
+**...and the ARM had the same hole — found only by a 1-hour soak.** Latching at the arm site fixed the
+latch flipping AT/AFTER death, but the arm was ITSELF gated on `botInControl()`, so a run whose latch
+had already flipped BEFORE it died armed nothing, logged nothing, and stranded exactly as before. In a
+1 h / 9-run soak two runs traced **HP 1087 -> 825 -> 439 -> 155 -> silence for the remaining 15 min,
+with NO death line at all** — the stranding deaths were precisely the ones invisible in the logs,
+which is what hid this. The arm is now **unconditional for any autoplay death**, and the human intent
+is preserved by the countdown's LENGTH instead of by a gate: a bot death revives in 1.5 s, a death
+while control reads as human waits `HUMAN_REVIVE_SEC` (15 s) — far longer than a real player needs to
+click, still bounded, so an unattended run can never strand. The death is logged unconditionally too,
+which makes **deaths == revives a meaningful invariant** to assert in soaks. Verified: a 15-min 9-run
+soak gave **156/156 revives, 0 silences, 0 crashes**, and the 15 s branch (which the soak never
+triggered naturally) was force-exercised to **13/13 revives at exactly 15 s**.
+This bug dominated every "it gets stuck" report; the nav fixes below are what got the bot DOWN once it
+stopped dying permanently.
+**Soak-rig gotchas:** a log-age/mtime "stall" check is USELESS against a game whose stdout is a FILE —
+libc block-buffers it, so a busy process can look frozen for 15 min (use `stdbuf -oL`, or judge gaps
+from TIMESTAMPS inside a flushed log). And `logStats()`/`updateAutoplay` only run in `IN_GAME`, so a
+run parked on ANY non-gameplay screen goes totally silent while still burning CPU — silence is not a
+hang, and a hang is not the only thing that produces silence.
+
+**Descent hole-commit — walk it in, and ROLL if walking isn't doing it (measured 2026-07-28).**
+Instrumenting four runs against the drop holes showed two opposite failures: ranged builds spent
+**79-86% of their ticks within a METRE of a hole and 82% of them airborne** and still did not go down
+(hovering at the lip, where the body's own half-width catches the slab edge while the field codes the
+cell `0xFE` — "at the goal" — and stops steering), while melee builds had only **2%** of their ticks
+within a metre of a hole at all. So within `kHoleSteer` (6 m) of the nearest way down
+(`Autoplay::nearestDropHole`, pure) the driver aims the FEET at the hole centre — which also drags the
+melee builds the last few metres in — and inside `kHoleRoll` (2.5 m) spends a **dodge ROLL** at it, a
+committed ~4 m lunge that carries the body clear of the lip. The roll direction comes from the WASD
+held THAT tick (`computeRollDirection`), so the movement keys are set on the same tick, exactly as the
+gap-closer roll does; combat is untouched, grounded-only, and it is rate-limited by the engine's own
+~1 s dodge cooldown rather than the doctrine leash (this is navigation, not defence).
+
+**Descent FLOOR PARK — get off the return lift (measured 2026-07-28).** Runs still parked on a single
+Descent floor for 6-13 minutes: alive, healthy, killing, never descending. Tracing every bot that had
+been on one floor for 3+ minutes (260 samples) says what it is: **all 260 on FOUR_STORY**, target list
+pinned at its 16 cap in **260/260**, the descend commit latched in **260/260**, **47% of ticks
+AIRBORNE** and **32% with no heading** — and the worst trace shows distance-to-exit oscillating
+between two fixed values (15.2 m / 37.6 m) with `grounded` flipping for **740 s**. That is the
+**RETURN-LIFT STORY BOUNCE**: drop through a hole, land on the pad beneath it, get flung back up,
+repeat. Pads are excluded from the descent flood on purpose, so a bot on one can be left with no
+route, and a bot with no route just waits there to be relaunched. `Autoplay::padEscapeDirection`
+(ring-searches for the nearest routable NON-pad cell) is the fallback when a padded bot has no
+heading — the one case the field cannot express, "leave where you are". Measured A/B (9 runs × 25 min,
+same class matrix): **floors 132 -> 152, max floor 19 -> 25, park samples 260 -> 142 (-45%), worst
+single floor 760 s -> 382 s (-50%)**. **Reduced, NOT eliminated** — 142 park samples remain, so a
+second mechanism is still in play. Note for whoever picks that up: `descentDirection` does NOT always
+return zero on a pad cell (the tier-2 recovery flood routes THROUGH pads, so a pad cell can carry a
+code) — a unit test caught that assumption. (The residual was then traced and fixed — see the WEDGE
+paragraph below. The guess recorded here, "the hazard veto zeroing `flowDir`", turned out to be HALF
+right and is a good illustration of why the tracer went in before the fix: it is one of the two
+mechanisms, and the OTHER one is its exact opposite.)
+
+**The residual Descent park is a GEOMETRY WEDGE, and every rescue was disarmed by COMBAT (measured
+2026-07-29).** Tracing the parks directly (a per-tick classifier over 9 runs, then a paired 4-class
+A/B) killed all three standing hypotheses at once: on a parked bot the descent heading was **valid on
+100% of ticks**, the bot was **not on a pad**, and `launches` was **frozen** — so it is neither a
+routing failure nor the return-lift bounce. What the traces show instead is **two symptoms of one
+failure**, and they are exact opposites, which is why no single detector had ever caught both:
+- **WEDGED** (warrior/ranger): a valid heading, the veto never firing, the descend commit latched,
+  movement commanded on 269-789 of 300-900 ticks — and **0.0-0.1 m of travel per 5 s window**, with
+  Y pinned to the centimetre. (It also read **50% of ticks AIRBORNE**, which looked like a body
+  balanced on a slab LIP — that turned out to be an ARTEFACT of the grounded bug below, present on
+  ANY resting body. The wedge and its A/B stand; the lip reading does not.)
+- **BOXED IN** (tinkerer): the router hands back a real heading (`raw` non-zero every tick) and the
+  hazard veto refuses it **and all four fan detours**, so `flowDir` is zeroed and the brain commands
+  **no movement at all** — `distToDoor` frozen at **9.6 m** for a whole 25-minute run. A dead-end node
+  whose only way out crosses a jump pad does exactly this.
+
+**Why nothing rescued either:** the escape ladder needs `m_autoplayNoProgressTimer > 4 s`, and the
+`combatProgress` branch **zeroes that timer on any chip damage**. A Descent floor holds four stories
+of enemies and keeps the target list pinned at its 16 cap, so the bot chips something every second and
+the timer never climbs (measured 0.0-3.2 s, never reaching 4). The 20 s floor-stall watchdog does not
+help either: it arms `m_autoplayDescentCommit`, which is already latched and is itself the thing being
+ignored. **A wedge is POSITIONAL, so it must be detected positionally** — the fix is deliberately
+independent of every combat signal. `Autoplay::wedgeDetected` (commanding movement + <0.6 m of **3D**
+travel over a 2 s window — 3D so a fall or a pad ride counts as progress and is never called a wedge)
+and `Autoplay::boxedDetected` (a real heading vetoed to nothing for ≥90% of the window) are pure and
+unit-tested, including that **each is blind to the other's case**, which is the whole reason both
+exist. Either one fires an escape burst that overrides EVERY movement producer above it (commit,
+movement fill, hole commit, FIGHT): a **JUMP** (the half that actually clears a lip — a body refused on
+one axis has to leave the ground, and on a Descent floor falling is the objective anyway) plus an
+**escalating sideways heading** (`wedgeEscapeAngle`: +90°, -90°, 180°, ±45° — sidestep FIRST, since
+reversing immediately walks the bot back down the route it just travelled). "Vetoed to nothing" is a
+much sharper trigger than "isn't moving": a bot holding position in a fight has no heading to veto,
+and a bot at the exit is already excluded by the descend hold, so neither can be mistaken for a park.
+Measured, paired A/B (4 classes × {on, off}, 25 min each, same binary): **park windows 185 -> 51
+(-72%)**, **max floor 59 -> 71 total with every class improving** (marksman 12->17, tinkerer 14->19,
+warrior 20->21, sorcerer 13->14), **worst single floor 607 s -> 173 s (-71%)**, and **deaths 170 -> 146
+despite reaching deeper floors**; `deaths == revives` held 8/8. Round 1 (wedge only) fixed
+warrior/sorcerer and left the tinkerer at 232 vs 230 park windows — that null result is what exposed
+the second symptom, so **do not read a partial A/B win as done**. FOUR_STORY-scoped (where it was
+measured; the mechanism is style-agnostic but VERTICAL_HALL has its own fall veto a blind sidestep
+would fight). Driver + pure nav only — **no wire/save change**. The per-floor escape count now rides
+the `[TELEM-HB]` heartbeat as `wedges=`: a long `secs_fl` with a climbing count is a bot fighting
+GEOMETRY, with zero it is fighting ENEMIES — the one distinction that cost several instrumented runs
+to establish, so it is worth a field in the log rather than a rebuild with a tracer.
+
+**Descent stall pass — never stand still with a route (measured 2026-07-28).** Descent floors still
+stalled intermittently. Instrumenting six runs found it is NOT a routing failure: the bot held **NO
+movement key on 57% of ticks, and in 267 of 267 of those a VALID descent heading existed** — it always
+knew the way down and simply did not walk. A Descent floor carries four storeys of enemies, so the
+target scan is pinned at its cap (16 visible, permanently) and the FIGHT branch owns the intent; that
+branch emits movement only when kiting/closing/strafing, so an in-band target it is neither closing on
+nor kiting from yields zero WASD. **Both rescues are disarmed by the same conditions**: the escape
+ladder needs `m_autoplayNoProgressTimer > 4 s` but the combat-progress branch pins it at 0 while the
+bot chips the swarm (measured max 0.5-0.6 s), and the 20 s floor-stall window that arms
+`m_autoplayDescentCommit` resets whenever the bot drifts 2 m doorward mid-fight. Two driver fixes,
+FOUR_STORY-scoped: (1) **movement fill** — whenever the intent carries no movement at all and a
+descent heading exists, walk it (the commit's own faceAndGo decomposition; combat untouched — only the
+FEET are filled in). Runs BEFORE the descend pulse, since that pulse drops `in.descend` on its release
+beat and reading the flag after it would walk the bot off the door it is opening; skipped at
+`atDescentGoal` (standing on the hole — it is about to fall). (2) **a latched commit must not SHADOW
+the escape ladder** — the commit sits above the ladder in the else-if chain and is held for the rest of
+the floor, so once latched it swallowed even the ticks where it had no heading AND was not at the door,
+i.e. exactly when the bot was wedged (measured: a **22 s dead stop** with `flow=0`, `cmt=1`, the
+no-progress timer climbing past 9 s and the ladder never firing). It is now entered only when it can
+act. Measured, controlled A/B (same binary, env-gated, 3 fresh-warrior runs/arm, ~470 s of
+descent-floor time each): **floors descended 0 -> 6**, **frozen >=6 s 7.5% -> 0%**, not-moving
+33% -> 10%, time on the bottom storey 9.7% -> 30.4%. Driver-only; no wire/save change.
+
 **Descent finish pass — pad recovery + fight-your-way-DOWN (measured 2026-07-26).** A Descent floor the
 geared paladin never finished (bounced above the exit, then stood in the swarm) now completes ~3/6 in
 140 s, via four driver/field fixes (FOUR_STORY-scoped; no wire/save change). (1) **paddedOnly-on-L0 bug**
@@ -997,7 +1259,7 @@ deadzone is for.
 
 **Authoritative server.** Listen-server model: host runs the full simulation in `serverUpdate` and is also player slot 0. Clients send `NetInput` packets at 60 Hz, server broadcasts `WorldSnapshot` at 60 Hz (every tick). Clients run prediction + reconciliation on the local player (`Client::reconcile`) and interpolate remote players/entities/projectiles with a 33 ms delay. Singleplayer (`NetRole::NONE`) is just the same loop without packets. (Tick/snapshot/wire details: `engine-reference`.)
 
-**Netplay stack (rewrite COMPLETE — M0–M14 + the 2026-07 hardening pass).** Server-authoritative + client prediction with **rollback-replay reconciliation**: on a mispredict the client rewinds to the server's acked state and re-applies every stored input through the same per-input step the server drain runs (`updateNetPlayerFromInput` movementOnly + `moveAndSlide`), committing to BOTH player mirrors (`m_localPlayer` alias AND `m_players[slot]` — an alias-only write is erased next tick by `syncNetPlayerToLocalPlayer`). Under input starvation the server **coasts** a remote on its last input for ≤250 ms and CLAIMS the ticks (advances `lastProcessedInputTick`) so snapshots stay time-consistent; a separate `m_lastActivationTick` watermark fires late-arriving activation edges exactly once. Delta compression is **ack-driven with a named baseline**: every delta names the snapshot tick it's encoded against (client acks via `NetInput.ackedSnapshotTick`, server deltas against its 64-deep global history ring, client decodes from its 64-deep ring) — never assume "baseline = last sent". `PROTOCOL_VERSION` 24 (v19: the dead lock-on input bit became `INPUT_BLOCK` — the server simulates blocking for remotes: damage negation, perfect-block window, 0.4× move slow; `SnapPlayer.flags` bits 5–7 carry Static Charge stacks; v20: Arena PvP — sentinel floor 97 + the ARENA_KILL/ARENA_SCORES/ARENA_OVER events; v21: player-facing CC — `SnapPlayer.flags` bit2 = stunned + `stunTimerQ` on the reused `reserved0` byte; v22: `INPUT_WINDOW_SIZE` 8→15 so input redundancy spans the full 250 ms coast; **v23: arena/PvP authority fixes** — remote PvP projectile/chakram/AoE hits now PERSIST (they were erased by the shared-remote-view write-back race: `applyRemotePlayerViews` wrote a pre-pass-seeded view back over the health `pvpApplyHit` committed mid-pass; fixed by composing the PvP hit onto the same shared view via `m_sharedRemoteView[]`) — and, chakram-specific, a **bounce frame no longer drops its hit**: the ricochet is DEFERRED to the loop tail so the disc's pre-bounce segment is still swept for a player/entity (`pendingBounce` in `ProjectileSystem::update`; the old code `continue`d at the bounce and skipped that frame's collision). A Continue host now seats its OWN arena NetPlayer slot; behavior-only, no wire struct change, but old peers still carry the bugs so the version gate rejects them; **v24: `MAX_ENTITIES` 128→192** for the four-story Descent floor — `WorldSnapshot` carries `SnapEntity[MAX_ENTITIES]` and the per-slot unchanged bitmask is now `ENTITY_MASK_BYTES` (24 B, **derived** from `MAX_ENTITIES` so the two can't drift — a mask narrower than the pool silently resends its high slots forever, which is exactly the bug the old 64-bit-over-128 mask had), so both the full and delta layouts changed; idle cost is the 8 extra mask bytes, ~0.47 KB/s). Verification rig: `--net-loss <0-90> --net-latency <ms> --net-jitter <ms> --bot-walk` + the F9 net-graph (`[NET-GRAPH]` 1 Hz log: rtt/div/idelay/KB/s/snap-Hz/baseline-age). Measured envelope: 15% loss + 100 ms RTT → 0 hard snaps, deltas engaged (~9 KB/s vs 39 full). 2026-07 audit hardening: the **64-tick** snapshot history (both sides) keeps deltas alive past 300+ ms RTT (was a measured 12–25% full-snapshot fallback at 32), fire lag-comp rewinds honestly to **24 ticks**, **PvP victims are now lag-compensated like entities via a per-slot player-pose ring** (arena hit-reg), and outbound is `Net::flush()`ed every frame (~33 ms of hidden RTT recovered). For long-haul links (e.g. Germany↔New Zealand, ~150 ms one-way + jitter) the adaptive interp buffer and the server lag-comp rewind share `LagComp::MAX_INTERP_DELAY_MS` (250 ms) as the wire/rewind TRUST ceiling — but the jitter estimator's own 3× outage clamp caps its realistic *steady* delay near ~116 ms, so idelay rides spikes there, NOT up toward 250; `--net-jitter` reproduces the condition locally (constant `--net-latency` alone never engages the adaptive buffer). (Wire/tick details: `engine-reference`.)
+**Netplay stack (rewrite COMPLETE — M0–M14 + the 2026-07 hardening pass).** Server-authoritative + client prediction with **rollback-replay reconciliation**: on a mispredict the client rewinds to the server's acked state and re-applies every stored input through the same per-input step the server drain runs (`updateNetPlayerFromInput` movementOnly + `moveAndSlide`), committing to BOTH player mirrors (`m_localPlayer` alias AND `m_players[slot]` — an alias-only write is erased next tick by `syncNetPlayerToLocalPlayer`). Under input starvation the server **coasts** a remote on its last input for ≤250 ms and CLAIMS the ticks (advances `lastProcessedInputTick`) so snapshots stay time-consistent; a separate `m_lastActivationTick` watermark fires late-arriving activation edges exactly once. Delta compression is **ack-driven with a named baseline**: every delta names the snapshot tick it's encoded against (client acks via `NetInput.ackedSnapshotTick`, server deltas against its 64-deep global history ring, client decodes from its 64-deep ring) — never assume "baseline = last sent". `PROTOCOL_VERSION` 25 (v19: the dead lock-on input bit became `INPUT_BLOCK` — the server simulates blocking for remotes: damage negation, perfect-block window, 0.4× move slow; `SnapPlayer.flags` bits 5–7 carry Static Charge stacks; v20: Arena PvP — sentinel floor 97 + the ARENA_KILL/ARENA_SCORES/ARENA_OVER events; v21: player-facing CC — `SnapPlayer.flags` bit2 = stunned + `stunTimerQ` on the reused `reserved0` byte; v22: `INPUT_WINDOW_SIZE` 8→15 so input redundancy spans the full 250 ms coast; **v23: arena/PvP authority fixes** — remote PvP projectile/chakram/AoE hits now PERSIST (they were erased by the shared-remote-view write-back race: `applyRemotePlayerViews` wrote a pre-pass-seeded view back over the health `pvpApplyHit` committed mid-pass; fixed by composing the PvP hit onto the same shared view via `m_sharedRemoteView[]`) — and, chakram-specific, a **bounce frame no longer drops its hit**: the ricochet is DEFERRED to the loop tail so the disc's pre-bounce segment is still swept for a player/entity (`pendingBounce` in `ProjectileSystem::update`; the old code `continue`d at the bounce and skipped that frame's collision). A Continue host now seats its OWN arena NetPlayer slot; behavior-only, no wire struct change, but old peers still carry the bugs so the version gate rejects them; **v24: `MAX_ENTITIES` 128→192** for the four-story Descent floor — `WorldSnapshot` carries `SnapEntity[MAX_ENTITIES]` and the per-slot unchanged bitmask is now `ENTITY_MASK_BYTES` (24 B, **derived** from `MAX_ENTITIES` so the two can't drift — a mask narrower than the pool silently resends its high slots forever, which is exactly the bug the old 64-bit-over-128 mask had), so both the full and delta layouts changed; idle cost is the 8 extra mask bytes, ~0.47 KB/s; **v25: `INPUT_EX_THROW`** (extFlags bit 6) — the melee weapon-throw edge, reusing the free bit + the existing projectile snapshot, so no struct grew but a v24 peer can't send/handle it). Verification rig: `--net-loss <0-90> --net-latency <ms> --net-jitter <ms> --bot-walk` + the F9 net-graph (`[NET-GRAPH]` 1 Hz log: rtt/div/idelay/KB/s/snap-Hz/baseline-age). Measured envelope: 15% loss + 100 ms RTT → 0 hard snaps, deltas engaged (~9 KB/s vs 39 full). 2026-07 audit hardening: the **64-tick** snapshot history (both sides) keeps deltas alive past 300+ ms RTT (was a measured 12–25% full-snapshot fallback at 32), fire lag-comp rewinds honestly to **24 ticks**, **PvP victims are now lag-compensated like entities via a per-slot player-pose ring** (arena hit-reg), and outbound is `Net::flush()`ed every frame (~33 ms of hidden RTT recovered). For long-haul links (e.g. Germany↔New Zealand, ~150 ms one-way + jitter) the adaptive interp buffer and the server lag-comp rewind share `LagComp::MAX_INTERP_DELAY_MS` (250 ms) as the wire/rewind TRUST ceiling — but the jitter estimator's own 3× outage clamp caps its realistic *steady* delay near ~116 ms, so idelay rides spikes there, NOT up toward 250; `--net-jitter` reproduces the condition locally (constant `--net-latency` alone never engages the adaptive buffer). (Wire/tick details: `engine-reference`.)
 
 ## Directory Map
 

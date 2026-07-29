@@ -36,6 +36,18 @@ inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor,
     if (!LevelGridSystem::worldToGrid(g, at, gx, gz)) return false;   // off the map edge
     if (LevelGridSystem::isSolid(g, gx, gz))          return false;   // into a wall
     if (lavaFloor && LevelGridSystem::feetInLava(g, Vec3{at.x, feetY, at.z})) return false;
+    // UNDER-RAMP PINCH. A VERTICAL_HALL ramp is a graduated slab that descends to head height and
+    // below, so the ground beneath its low end is a trap: the body cannot fit, and where it can fit it
+    // leads under slabs that can never be climbed from there ("trying to walk under the stairs is
+    // bad"). VHallField has always excluded these cells, but the veto did NOT — so every producer that
+    // steers by stepAllowed rather than by the field (the escape ladder's 8-direction search, the
+    // +-45/+-90 detour fan, the jump-pad beeline) could still walk the bot under a ramp. Same rule,
+    // now at the shared choke so the two cannot disagree.
+    //
+    // Naturally inert off VHALL: it fires only where a slab hangs lower than a body, and FOUR_STORY /
+    // Arena slabs sit at 3 m+. Story-aware — passable when we are ON the slab, refused only when our
+    // feet would resolve to the ground UNDER it.
+    if (LevelGridSystem::bodyPinnedUnderSlab(g, gx, gz, feetY)) return false;
     if (avoidPads) {
         // BODY-AWARE pad check. The launch (Collision::jumpPadSpeed) fires when the body's ~0.35 m
         // halfWidth footprint overlaps ANY CELL_JUMPPAD — not just when the centre sits on one — so a
@@ -53,6 +65,43 @@ inline bool cellPassable(const LevelGrid& g, Vec3 at, f32 feetY, bool lavaFloor,
         }
     }
     return true;
+}
+
+// GET OUT FROM UNDER. Heading toward the nearest cell where the body is NOT pinned beneath a slab,
+// or {0,0,0} if none is near. Distinct from the veto below, which prevents ENTERING the trap: a bot
+// that is already under the low end of a ramp needs a way OUT, and every direction looks equally
+// refused from in there. Searched in rings so it leaves by the shortest route.
+//
+// The trap is real and reachable: the veto only guards steps made through stepAllowed, while the
+// FIGHT branch's close/kite movement is deliberately unvetoed (short, reactive, enemy-derived), so a
+// melee build chasing a hostile can still walk itself under the stairs. Reported twice live on a
+// Paladin.
+inline Vec3 unpinDirection(const LevelGrid& g, Vec3 pos, f32 feetY) {
+    u32 gx, gz;
+    if (!LevelGridSystem::worldToGrid(g, pos, gx, gz)) return {0.0f, 0.0f, 0.0f};
+    if (!LevelGridSystem::bodyPinnedUnderSlab(g, gx, gz, feetY)) return {0.0f, 0.0f, 0.0f};
+    // Rings outward, but within a ring take the CLOSEST free cell rather than the first one scanned.
+    // Scan order alone returns a corner diagonal when a straight sideways step at the same ring is
+    // both nearer and leaves the slab band sooner — the band runs in one axis, so the short way out
+    // is across it, not along its diagonal.
+    for (s32 r = 1; r <= 6; r++) {
+        Vec3 best{0.0f, 0.0f, 0.0f};
+        f32  bestD2 = 1e18f;
+        for (s32 dz = -r; dz <= r; dz++)
+            for (s32 dx = -r; dx <= r; dx++) {
+                if (dx > -r && dx < r && dz > -r && dz < r) continue;   // this ring's perimeter only
+                const s32 nx = (s32)gx + dx, nz = (s32)gz + dz;
+                if (nx < 0 || nz < 0 || nx >= (s32)g.width || nz >= (s32)g.depth) continue;
+                if (LevelGridSystem::isSolid(g, (u32)nx, (u32)nz)) continue;
+                if (LevelGridSystem::bodyPinnedUnderSlab(g, (u32)nx, (u32)nz, feetY)) continue;
+                const Vec3 to{((f32)nx + 0.5f) * g.cellSize - pos.x, 0.0f,
+                              ((f32)nz + 0.5f) * g.cellSize - pos.z};
+                const f32 d2 = lengthSq(to);
+                if (d2 > 1e-6f && d2 < bestD2) { bestD2 = d2; best = to; }
+            }
+        if (bestD2 < 1e17f) return normalize(best);
+    }
+    return {0.0f, 0.0f, 0.0f};
 }
 
 // True if stepping one cell along `dir` (XZ heading, need not be unit) from `from` at feet height
@@ -469,6 +518,61 @@ inline Vec3 rampApproachDir(Vec3 low, Vec3 high, Vec3 p) {
     Vec3 h{axis.x - lat.x * kCorrect, 0.0f, axis.z - lat.z * kCorrect};   // up-ramp, pulled to centreline
     const f32 hm = std::sqrt(h.x * h.x + h.z * h.z);
     return hm > 1e-6f ? Vec3{h.x / hm, 0.0f, h.z / hm} : axis;
+}
+
+// --- WEDGE DETECTION -------------------------------------------------------------------------
+// A GEOMETRY WEDGE is the bot telling the body to walk while the body does not move. It is a
+// POSITIONAL fact, and that is the whole point of having it separate from the existing no-progress
+// ladder: that ladder is zeroed by any COMBAT progress (engine_autoplay.cpp, the `combatProgress`
+// branch), and on a four-story Descent floor — four stories of enemies, the target list permanently
+// pinned at its cap — the bot chips something every second, so the timer never climbs and every
+// rescue stays disarmed while the body is stuck fast.
+//
+// Measured (9-run FOUR_STORY trace, the residual floor park): the parked bots had a VALID descent
+// heading on 100% of ticks, the hazard veto never fired, they were not on a jump pad and were not
+// bouncing (Y pinned to the centimetre) — and travelled 0.0-0.1 m per 5 s window with the descent
+// commit latched, i.e. actively commanding movement into geometry that would not yield. The
+// telltale looked like 50% of ticks reading AIRBORNE at a constant Y. NOTE: that reading was an
+// ARTEFACT — Collision::moveAndSlide used to gate gravity on !onGround, so ANY resting body reported
+// airborne every other tick (see tests/world/test_grounded.cpp). It is fixed, and the 50% is gone;
+// the wedge itself is real and the A/B below still stands, but do not read "half airborne" as
+// evidence of a lip.
+constexpr f32 WEDGE_WIN_SEC   = 2.0f;   // observation window
+constexpr f32 WEDGE_CMD_FRAC  = 0.7f;   // ...must be mostly spent COMMANDING movement to count
+constexpr f32 WEDGE_NET_M     = 0.6f;   // ...with less than this much 3D travel to show for it
+constexpr f32 WEDGE_BURST_SEC = 0.8f;   // how long one escape burst overrides the intent
+
+// True when the window closed on a wedge. 3D net travel, so a bot making vertical progress (falling
+// through a hole, riding a pad) is never called wedged.
+inline bool wedgeDetected(f32 winT, f32 cmdT, f32 net3d) {
+    return winT >= WEDGE_WIN_SEC && cmdT >= WEDGE_WIN_SEC * WEDGE_CMD_FRAC && net3d < WEDGE_NET_M;
+}
+
+// The OTHER half of the same failure, and it needs its own test because the symptom inverts. Here
+// the router DOES produce a heading and the hazard veto refuses it AND all four fan detours, so
+// flowDir is zeroed and the brain commands no movement at all — wedgeDetected above can never fire,
+// since it asks for commanded movement. Measured (tinkerer, both A/B arms): veto0 on 100% of ticks
+// with raw0 = 0 (a real pre-veto heading every tick), mv = 0, and distance-to-door frozen at 9.6 m
+// for the whole run. A dead-end node whose only way out crosses a jump pad does exactly this.
+//
+// "Vetoed to nothing" is a much sharper signal than "not moving": a bot holding position in a fight
+// has no heading to veto, and a bot at the exit is excluded upstream by the descend hold. So this
+// cannot be confused with standing still on purpose.
+constexpr f32 BOXED_FRAC = 0.9f;   // fraction of the window spent with a real heading vetoed away
+inline bool boxedDetected(f32 winT, f32 vetoT) {
+    return winT >= WEDGE_WIN_SEC && vetoT >= WEDGE_WIN_SEC * BOXED_FRAC;
+}
+
+// Escalating escape heading: how far to rotate the travel heading on the Nth consecutive wedge.
+// Sideways FIRST — a body caught on a lip or the inside of a corner is being refused on one axis,
+// so the square sidestep is the move that frees it; reversing comes only after both sides failed.
+inline f32 wedgeEscapeAngle(u8 tryIdx) {
+    constexpr f32 kA[5] = { 1.5707963268f,    // +90°  square sidestep
+                           -1.5707963268f,    // -90°  ...the other way
+                            3.1415926536f,    // 180°  back out the way we came
+                            0.7853981634f,    // +45°
+                           -0.7853981634f };  // -45°
+    return kA[tryIdx % 5u];
 }
 
 } // namespace Autoplay

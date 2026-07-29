@@ -41,6 +41,10 @@ enum struct SfxId : u8 {
     // chase can be followed by ear (goblin-breadcrumb pass, engine_update.cpp). Positional.
     // Hand-picked via tools/pick_sfx.py (procedural gen_audio fallback until then).
     GOBLIN_JINGLE,
+    // Melee weapon throw (short-click). Distinct from WEAPON_THROW (thrown knives/chakram/molotov)
+    // so the hurled-blade whoosh can be tuned separately — hand-picked via tools/pick_sfx.py.
+    // Appended at the tail so no existing SfxId ordinal shifts.
+    MELEE_THROW,
     // Count sentinel
     SFX_COUNT
 };

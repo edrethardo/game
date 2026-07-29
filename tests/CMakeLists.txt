@@ -43,6 +43,7 @@ add_executable(dungeon_tests
     game/test_floor_event.cpp
     engine/test_asset_manifest.cpp   # mesh table vs. the (gitignored, generated) .obj files
     game/test_interact.cpp           # interact button: item > shrine > exit, tap vs hold
+    game/test_weapon_throw.cpp       # melee throw: CDR-immune cooldown, tenacity slow, tap-vs-hold (header-only)
     game/test_source_shard.cpp       # secret superboss key must survive to be picked up
     game/test_chest.cpp              # real chests: never despawn, sentinel-gated, high-half uids
     game/test_shrine_buff.cpp        # VITALITY must never leak permanent max HP
@@ -80,6 +81,7 @@ add_executable(dungeon_tests
     world/test_raycast.cpp
     world/test_tile_noise.cpp
     world/test_collision_push.cpp    # a push may crowd the player, never shove them into a wall
+    world/test_grounded.cpp          # a resting body must report onGround EVERY tick, not alternate
     world/test_platform.cpp          # CELL_PLATFORM slab: story selection, walk-under collision, ray planes
     world/test_vertical_hall.cpp     # VERTICAL_HALL: room-count, balconies, ramp portals, spawn/exit
     world/test_story_nav.cpp         # pure cross-story chase helpers (onUpperStory / nearestPortalGoal)

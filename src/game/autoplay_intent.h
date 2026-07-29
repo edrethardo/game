@@ -48,6 +48,18 @@ struct BotTarget {
     // keeps it asleep — so pickTarget never chooses an invulnerable enemy as the shot target (they
     // stay in the list for the block/dodge scans, which still react to anything that attacks).
     bool invulnerable = false;
+    // UNREACHABLE WITHOUT FALLING: the step straight toward this hostile would drop the bot off the
+    // slab it stands on (Autoplay::wouldFall). Only ever set on a VERTICAL_HALL upper-exit climb —
+    // the one place "don't fall to reach an enemy" is a rule — and false everywhere else, so no flat
+    // floor changes behaviour.
+    //
+    // It exists because two consumers must agree about it. The melee SIDEARM draws a ranged weapon
+    // precisely for these targets, and the GAP-CLOSE (Holy Smite / Shadow Step / Phase Dash) must NOT
+    // fire at them: a teleport ignores the fall veto that stops the bot WALKING there, so the bot
+    // would blink across the very gap the sidearm exists to avoid crossing — landing it in the stairs
+    // or off the balcony. Reported live: "the paladin can get stuck in the stairs with holy smite",
+    // and "why is the paladin running away from ranged enemies but also gap closing".
+    bool onlyReachableByFall = false;
     // A boss with its MINION SHIELD up (Entity::minionShield — 75% damage reduction while its summoned
     // brood is alive, e.g. Ygara). Not invulnerable, but chipping it at 25% while it re-summons is a
     // stall; the bot should kill the adds first to drop the shield, so pickTarget DEPRIORITIZES a
@@ -129,6 +141,12 @@ struct BotView {
     // skill. The policy fires the biggest castable AoE at a GROUP (Frozen Orb / Meteor / Chain), which
     // is what makes a caster clear packs instead of poking one target with the cheap slot-0 filler.
     bool skillIsAoe[4] = {};
+    // Per-slot: does this skill SUMMON or DEPLOY a persistent ally (Tinkerer Swarm Deploy / Swarm
+    // Queen, Combat Engineer Deploy Turret / Tesla Coil)? Summons are the one skill family whose value
+    // does NOT depend on the current target: a drone or turret keeps fighting for its whole lifetime,
+    // so the right policy is simply "whenever it is off cooldown", not "when a good target exists".
+    // The driver fills it from the slot's SkillId (SkillDef carries no summon flag).
+    bool skillIsSummon[4] = {};
     // Per-slot: is this a TELEPORT / GAP-CLOSE skill (SkillDef.distance > 0 — Holy Smite, Shadow Step/
     // Strike, Phase Dash)? The policy casts one to CLOSE the gap to a target beyond reach (it blinks
     // toward the facing), so a melee build teleports onto a far enemy instead of only walking.

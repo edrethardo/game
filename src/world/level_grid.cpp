@@ -183,6 +183,23 @@ f32 LevelGridSystem::getPlatformUnderside(const LevelGrid& grid, u32 x, u32 z, u
     return (underQ > floorQ ? underQ : floorQ) * 0.25f;
 }
 
+bool LevelGridSystem::bodyPinnedUnderSlab(const LevelGrid& grid, u32 x, u32 z, f32 feetY) {
+    const u8 n = platformCount(grid, x, z);
+    if (n == 0) return false;                       // no slab overhead is possible
+    // The surface this body actually stands on in this cell (slab top if it is stepping onto one,
+    // else the base floor beneath).
+    const f32 surf = effectiveFloorHeight(grid, x, z, feetY);
+    // The ceiling that matters is the LOWEST slab underside ABOVE that surface. Slabs at or below it
+    // are what we are standing on (or under-floor geometry) and cannot pin us.
+    f32 ceil = 1e9f;
+    for (u8 i = 0; i < n; i++) {
+        const f32 u = getPlatformUnderside(grid, x, z, i);
+        if (u > surf + 0.01f && u < ceil) ceil = u;
+    }
+    if (ceil > 1e8f) return false;                  // nothing overhead: open to the sky/real ceiling
+    return (ceil - surf) < BODY_CLEARANCE;
+}
+
 // 8-directional neighbor offsets: 0=+X, 1=+X+Z, 2=+Z, 3=-X+Z, 4=-X, 5=-X-Z, 6=-Z, 7=+X-Z
 static constexpr s32 kDirDx[] = { 1, 1, 0,-1,-1,-1, 0, 1};
 static constexpr s32 kDirDz[] = { 0, 1, 1, 1, 0,-1,-1,-1};

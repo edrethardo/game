@@ -11,6 +11,9 @@ enum struct WeaponType : u8 {
     MELEE,
     HITSCAN,
     PROJECTILE,
+    // Sentinel — "no weapon type". Used as the default for BuildScore::score's class-preference
+    // argument, i.e. "score this item with no class bonus". Never authored in JSON, never on the wire.
+    COUNT,
 };
 
 // Weapon subtype determines visual identity and stat profile within each WeaponType.
@@ -69,7 +72,19 @@ struct ViewmodelState {
     f32 recoilKick  = 0.0f;  // decays after fire
     f32 attackAnimT = 0.0f;  // melee swing countdown
     f32 fireShakeTimer = 0.0f; // ranged weapon vibration countdown
+    // Melee weapon THROW countdown — deliberately its OWN timer, not attackAnimT. The throw used to
+    // borrow the swing timer, which made the viewmodel play the weapon's full per-subtype SWING for
+    // an attack that never connects; on a claymore that is a big right-to-left horizontal sweep, and
+    // it reads as the animation being broken ("melee weapon throw broke the claymore animation").
+    // A throw is a different motion and now gets one: wind up, hurl, empty hand while it flies.
+    f32 throwAnimT = 0.0f;
 };
+
+// Total length of the throw animation (seconds), and the point within it where the weapon actually
+// leaves the hand. Shared by the trigger (engine_combat.cpp) and the viewmodel (engine_render_
+// viewmodel.cpp) so the release beat and the hand going empty cannot drift apart.
+static constexpr f32 THROW_ANIM_SEC     = 0.42f;
+static constexpr f32 THROW_ANIM_RELEASE = 0.62f;   // fraction elapsed when the weapon is let go
 
 static constexpr u32 MAX_WEAPON_DEFS = 16;
 

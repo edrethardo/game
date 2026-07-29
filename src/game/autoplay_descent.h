@@ -81,6 +81,26 @@ bool atDescentGoal(const DescentField& f, const LevelGrid& g, Vec3 pos);
 // lands. It is false on the ordinary pad-free route, so a floor with no pad severance is untouched.
 bool descentNextIsPad(const DescentField& f, const LevelGrid& g, Vec3 pos);
 
+// Nearest way DOWN (a field cell coded 0xFE) to `pos`, as a world XZ centre. Returns the distance in
+// metres, or a huge value when the field holds none (and leaves `out` untouched).
+//
+// The driver uses this to COMMIT the drop. Measured on 4 instrumented runs: ranged builds spend
+// 79-86% of their ticks within a metre of a hole and 82% of them airborne, yet do not descend — they
+// hover at the lip, where the body's own half-width keeps catching the slab edge, and the field then
+// reports "at the goal" and stops steering. Walking is evidently not enough to fall in, so the driver
+// aims a dodge ROLL (a committed ~4 m lunge) at this point instead.
+f32 nearestDropHole(const DescentField& f, const LevelGrid& g, Vec3 pos, Vec3& out);
+
+// GET OFF THE PAD. Heading toward the nearest cell that the field can actually route from and that is
+// NOT a jump pad, or {0,0,0} if none is near. `descentDirection` returns nothing on a pad/unreachable
+// cell (pads are excluded from the flood on purpose), which leaves a bot standing ON a return lift
+// with no reason to move — it is simply relaunched, drops, lands on the pad again, forever. That loop
+// is the FOUR_STORY floor PARK: traced over 260 samples of bots stuck 3+ min on a floor, 47% of the
+// time airborne, 32% with no heading, distance-to-exit oscillating between two fixed values for 12
+// minutes. This gives the one case the field cannot express — "you are on the thing you must leave" —
+// an explicit way out. Searched in rings so the bot leaves by the shortest route.
+Vec3 padEscapeDirection(const DescentField& f, const LevelGrid& g, Vec3 pos);
+
 void freeDescentField(DescentField& f);
 
 } // namespace Autoplay

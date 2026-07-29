@@ -78,6 +78,7 @@ static const char* s_sfxFiles[static_cast<u32>(SfxId::SFX_COUNT)] = {
     "sfx_monster_cry_2.wav",
     "sfx_monster_cry_3.wav",
     "sfx_goblin_jingle.wav",
+    "sfx_melee_throw.wav",   // MELEE_THROW — melee weapon short-click throw (tail-appended)
 };
 
 // Compile-time guard: this positional table must stay index-aligned with SfxId. If it fires, an

@@ -238,6 +238,47 @@ void Engine::renderViewmodel() {
         }
     }
 
+    // MELEE WEAPON THROW — its own motion, deliberately not the swing's.
+    //
+    // Reusing attackAnimT made the viewmodel play the weapon's full per-subtype SWING for an attack
+    // that never connects; on a claymore that is its entire right-to-left horizontal sweep, which
+    // reads as the animation being broken. A throw is a different action, so it gets a different
+    // shape: WIND UP over the shoulder, WHIP forward, and let go — after which the hand is EMPTY
+    // while the weapon is genuinely in flight (the same trick the THROWAWAY legendary already uses
+    // below). The empty beat is what sells it: the weapon you are watching fly is the one that just
+    // left your hand, not a copy of one still held.
+    //
+    // Applied to the same attack* accumulators as the swing, so it composes with bob/sway/dodge
+    // exactly as every other animation does. The two are mutually exclusive in practice — the throw
+    // trigger clears attackAnimT — but the throw is written last so it wins if they ever overlap.
+    if (m_viewmodelState.throwAnimT > 0.0f && def.weaponType == WeaponType::MELEE) {
+        const f32 p = 1.0f - (m_viewmodelState.throwAnimT / THROW_ANIM_SEC);   // 0 -> 1 over the anim
+        if (p >= THROW_ANIM_RELEASE) return;   // released: the hand is empty, the weapon is in flight
+
+        const f32 w = p / THROW_ANIM_RELEASE;  // 0 -> 1 across the held part of the throw
+        constexpr f32 kCock = 0.68f;           // fraction of the held part spent winding up
+        if (w < kCock) {
+            // WIND UP — cock it back over the shoulder, blade tipping up and rolling outward. Eased
+            // (sin to the quarter turn) so it loads quickly and then hangs a beat at full draw.
+            const f32 a = sinf((w / kCock) * 1.5707963f);
+            attackZ     =  0.30f * a;    // +Z is back toward the shoulder (-Z is the stab direction)
+            attackY     =  0.16f * a;    // raise it
+            attackPitch =  1.05f * a;    // tip back — the opposite of the axe's overhead chop
+            attackRoll  =  0.30f * a;
+            bobX       +=  0.10f * a;    // drifts across the body as it loads
+        } else {
+            // WHIP — snap through from full draw to full extension in the last third. Quadratic so
+            // it accelerates into the release instead of sliding out at constant speed.
+            const f32 u = (w - kCock) / (1.0f - kCock);
+            const f32 a = u * u;
+            attackZ     =  0.30f - 0.85f * a;   // hurls forward past the neutral pose
+            attackY     =  0.16f - 0.26f * a;
+            attackPitch =  1.05f - 1.75f * a;   // rotates over the top and points where it is thrown
+            attackRoll  =  0.30f - 0.45f * a;
+            bobX       +=  0.10f - 0.14f * a;
+        }
+    }
+
     // Throwaway legendary: weapon is gone during reload (it was thrown)
     WeaponState& vmWs = m_players[activeNetSlot()].weaponState; // local player's net slot
     if (hasWeapon && m_itemDefs[equipped.defId].legendarySkillId == SkillId::THROWAWAY && vmWs.reloading) {

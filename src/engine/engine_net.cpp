@@ -34,6 +34,7 @@
 #include "game/static_charge.h"   // Capacitor Mail stacks for REMOTE lanes (serverNetPost)
 #include "game/skill.h"
 #include "game/inventory_ui.h"
+#include "game/weapon_throw.h"   // melee short-click throw: CDR-immune cooldown ticks (server gate)
 #include "game/game_constants.h"
 #include "audio/audio.h" // AudioSystem::stopMusic on host-left save-and-return-to-menu
 #include "net/net.h"
@@ -329,6 +330,29 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
 
     // (Pet-consumable use no longer rides the input stream: with one pet per enemy the edge
     // must name WHICH def, so it moved to the reliable CL_USE_PET packet — Engine::onUsePet.)
+
+    // Melee weapon throw (v25) — a remote's INPUT_EX_THROW edge. Server-authoritative: require a real
+    // MELEE weapon and gate the fixed 1.5 s CDR-immune cooldown against this input's clientTick (the
+    // same tick the client predicted with). Spawn the authoritative throw from the player's eye/aim
+    // (np.yaw/pitch already reflect this input — the drain ran first, same as skills). The firing
+    // client's predicted ghost reconciles via ownerSlot + clientTick, exactly like a normal fire; and
+    // the cooldownReady self-block makes a redundant re-drain of the same edge a no-op (no dedup ring).
+    if (in.extFlags & INPUT_EX_THROW) {
+        const ItemInstance& eqWpn = m_inventories[i].equipped[static_cast<u32>(ItemSlot::WEAPON)];
+        if (!isItemEmpty(eqWpn) && m_itemDefs[eqWpn.defId].weaponType == WeaponType::MELEE &&
+            GameConst::cooldownReady(in.clientTick, m_players[i].weaponThrowLastActivationTick,
+                                     WeaponThrow::cooldownTicks())) {
+            WeaponDef wpn = Inventory::getWeaponFromItem(m_inventories[i], m_itemDefs, eqWpn);
+            Vec3 eyePos = m_players[i].eyePos();
+            Vec3 fwd = normalize(Vec3{ -sinf(m_players[i].yaw) * cosf(m_players[i].pitch),
+                                        sinf(m_players[i].pitch),
+                                       -cosf(m_players[i].yaw) * cosf(m_players[i].pitch) });
+            Combat::setAttackingPlayer(i);   // credit a thrown-weapon kill to this player
+            spawnWeaponThrow(static_cast<u8>(i), eyePos, fwd, wpn, eqWpn.defId,
+                             /*predictedGhost=*/false, in.clientTick);
+            m_players[i].weaponThrowLastActivationTick = (in.clientTick == 0) ? 1u : in.clientTick;
+        }
+    }
 
     // Equipment skills (F = boots, G = helmet)
     if (in.extFlags & INPUT_EX_BOOT_SKILL) {
@@ -1219,9 +1243,14 @@ void Engine::clientNetPre(f32 dt) {
     }
     // freezeMovement: while frozen the local sim skips PlayerController::update, so zero the
     // wire movement too or the server walks the player from held keys (rubber-band on close).
+    // Melee throw edge: handleWeaponFire (run earlier this tick in gameUpdate) latched a throw for
+    // this local lane; stamp INPUT_EX_THROW onto the outgoing input, then consume the latch.
+    const u8 throwSetMask = m_pendingThrowEdge ? INPUT_EX_THROW : 0;
+    m_pendingThrowEdge = false;
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon,
                                 m_activeClassSkill, skillClearMask, /*freezeMovement=*/frozen,
-                                /*laneId=*/sp, /*targetSlot=*/activeNetSlot());
+                                /*laneId=*/sp, /*targetSlot=*/activeNetSlot(),
+                                /*extFlagsSetMask=*/throwSetMask);
 
     // M10.1: resendPendingFire() removed — CL_FIRE_WEAPON is now reliable.
 

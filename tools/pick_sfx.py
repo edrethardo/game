@@ -81,6 +81,7 @@ SLOTS = [
     "sfx_weapon_pistol", "sfx_weapon_smg", "sfx_weapon_carbine", "sfx_weapon_revolver",
     "sfx_weapon_bow", "sfx_weapon_crossbow", "sfx_weapon_throw", "sfx_weapon_molotov",
     "sfx_weapon_chakram",
+    "sfx_melee_throw",  # melee weapon short-click throw — its OWN slot vs sfx_weapon_throw (knives)
     "sfx_weapon_wand", "sfx_weapon_staff", "sfx_reload",
     "sfx_ricochet",  # chakram/bounce-projectile wall reflect
     "sfx_shrine_activate",  # walk-up buff shrine (press E)
@@ -103,6 +104,7 @@ SLOT_CLASS = {
     "sfx_weapon_carbine": "gun", "sfx_weapon_revolver": "gun",
     "sfx_weapon_bow": "bow", "sfx_weapon_crossbow": "bow",
     "sfx_weapon_throw": "throw", "sfx_weapon_molotov": "throw", "sfx_weapon_chakram": "throw",
+    "sfx_melee_throw": "throw",
     "sfx_weapon_wand": "magic", "sfx_weapon_staff": "magic",
     "sfx_reload": "reload",
     "sfx_ricochet": "ricochet",

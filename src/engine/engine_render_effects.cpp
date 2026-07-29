@@ -68,7 +68,7 @@ void Engine::renderProjectilesAndEffects(u32 sw, u32 sh) {
 
     // Instanced render: batch mesh-based projectiles (arrows, bolts, thrown weapons)
     ProjectileRenderer::render(projPool, m_camera.viewProjection, m_meshDefs, m_meshDefCount,
-                               m_meshIdArrow, m_meshIdBolt);
+                               m_meshIdArrow, m_meshIdBolt, m_meshIsMeleeWeapon);
 
     // Per-projectile special effects (orbs, sparks, generic cubes)
     u32 pxSeen = 0;

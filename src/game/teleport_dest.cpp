@@ -75,8 +75,18 @@ Vec3 Teleport::resolveDest(const LevelGrid& grid, EntityPool& entities, Vec3 sta
         // so a blink to a balcony player lands ON the balcony beside them, never on the ground
         // story underneath. Platform-free cells behave exactly as before.
         u32 gx, gz;
-        if (LevelGridSystem::worldToGrid(grid, p, gx, gz))
+        if (LevelGridSystem::worldToGrid(grid, p, gx, gz)) {
+            // HEAD CLEARANCE. footprintClear only asks whether the cells are SOLID, which says
+            // nothing about what hangs overhead — so a landing spot under the low end of a
+            // VERTICAL_HALL ramp passed, and the caster was teleported inside the stairs. A dash is
+            // flattened to XZ, so `desired.y` is the caster's own feet height; on a ramp the story
+            // selector then resolves to the ground story UNDER the slab and the body ends up pinned
+            // there with no way out. Reject and keep marching back toward the caster — the resolver's
+            // whole design is that a blocked ideal spot degrades into a nearer one.
+            // (Reported live on a Paladin's Holy Smite; Shadow Step/Strike share this resolver.)
+            if (LevelGridSystem::bodyPinnedUnderSlab(grid, gx, gz, desired.y)) continue;
             p.y = LevelGridSystem::effectiveFloorHeight(grid, gx, gz, desired.y);
+        }
         return p;
     }
     return start;   // the entire line is blocked — refuse the movement rather than guess

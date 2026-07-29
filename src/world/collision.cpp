@@ -185,10 +185,23 @@ static bool overlapsWorld(const Vec3& feetPos, const LevelGrid& grid,
 // Axis-separated sweep collision
 // ---------------------------------------------------------------------------
 void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
-    // Apply gravity
-    if (!player.onGround) {
-        player.velocity.y += GRAVITY * dt;
-    }
+    // Apply gravity — UNCONDITIONALLY, including while grounded.
+    //
+    // Gating this on !onGround made a RESTING body report airborne every other tick: grounded means
+    // velocity.y == 0, so delta.y == 0, so the swept Y position equals the current one and does not
+    // overlap the grid — the landing branch that re-sets onGround never runs, and the unconditional
+    // `onGround = false` below stands. The next tick sees !onGround, applies gravity, overlaps, lands,
+    // sets onGround, and it alternates forever (measured on a bot standing perfectly still: grounded
+    // on exactly 150 of every 300 ticks, position.y pinned, velocity.y never positive).
+    //
+    // That is not cosmetic: onGround GATES the jump (a request is dropped unless grounded), the
+    // Autoplay VHALL fall veto (off on the odd ticks, so a protected bot could still step off a
+    // balcony), and the grounded-only navigation rolls — each of them ran at half rate or worse. It is
+    // also snapshotted for co-op. Always integrating costs one add: the tiny downward delta overlaps,
+    // the landing branch snaps the feet back to the exact floor height and re-zeroes velocity.y, so a
+    // resting body neither sinks nor drifts and still reads velocity.y == 0 after the call.
+    // Pinned by tests/world/test_grounded.cpp.
+    player.velocity.y += GRAVITY * dt;
 
     Vec3 delta = player.velocity * dt;
 
@@ -333,10 +346,23 @@ void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt) {
 // ---------------------------------------------------------------------------
 void Collision::moveAndSlide(Player& player, const LevelGrid& grid, f32 dt,
                              const CollisionObstacle* obstacles, u32 obstacleCount) {
-    // Apply gravity
-    if (!player.onGround) {
-        player.velocity.y += GRAVITY * dt;
-    }
+    // Apply gravity — UNCONDITIONALLY, including while grounded.
+    //
+    // Gating this on !onGround made a RESTING body report airborne every other tick: grounded means
+    // velocity.y == 0, so delta.y == 0, so the swept Y position equals the current one and does not
+    // overlap the grid — the landing branch that re-sets onGround never runs, and the unconditional
+    // `onGround = false` below stands. The next tick sees !onGround, applies gravity, overlaps, lands,
+    // sets onGround, and it alternates forever (measured on a bot standing perfectly still: grounded
+    // on exactly 150 of every 300 ticks, position.y pinned, velocity.y never positive).
+    //
+    // That is not cosmetic: onGround GATES the jump (a request is dropped unless grounded), the
+    // Autoplay VHALL fall veto (off on the odd ticks, so a protected bot could still step off a
+    // balcony), and the grounded-only navigation rolls — each of them ran at half rate or worse. It is
+    // also snapshotted for co-op. Always integrating costs one add: the tiny downward delta overlaps,
+    // the landing branch snaps the feet back to the exact floor height and re-zeroes velocity.y, so a
+    // resting body neither sinks nor drifts and still reads velocity.y == 0 after the call.
+    // Pinned by tests/world/test_grounded.cpp.
+    player.velocity.y += GRAVITY * dt;
 
     Vec3 delta = player.velocity * dt;
 
